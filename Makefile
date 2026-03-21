@@ -77,8 +77,10 @@ build: check build-frontend build-backend
 build-frontend:
 	cd frontend && npm run build
 
+LDFLAGS := -X main.version=$(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+
 build-backend:
-	go build -o bin/panemux .
+	go build -ldflags "$(LDFLAGS)" -o bin/panemux .
 
 # ── Release packaging ─────────────────────────────────────────────────────────
 
