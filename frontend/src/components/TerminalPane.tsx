@@ -51,8 +51,10 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
         pane={pane}
         connected={connected}
         displayConfig={displayConfig}
+        isMaximized={ctx?.maximizedPaneId === pane.id}
         onSplit={(direction) => ctx?.onSplit(pane.id, direction)}
         onClose={() => ctx?.onClose(pane.id)}
+        onMaximize={() => ctx?.onMaximize(ctx.maximizedPaneId === pane.id ? null : pane.id)}
       />
       <div
         ref={setRef}

@@ -94,6 +94,21 @@ function removeFromChildren(
 }
 
 /**
+ * Finds and returns the PaneConfig with the given id in the layout tree.
+ * Returns null if not found.
+ */
+export function findPaneById(layout: LayoutNode, paneId: string): PaneConfig | null {
+  for (const child of layout.children) {
+    if (child.pane?.id === paneId) return child.pane
+    if (child.children?.length) {
+      const found = findPaneById({ ...layout, children: child.children }, paneId)
+      if (found) return found
+    }
+  }
+  return null
+}
+
+/**
  * Generates a unique pane ID.
  */
 export function generatePaneId(): string {

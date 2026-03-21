@@ -6,6 +6,8 @@ import { TerminalPane } from './TerminalPane'
 export interface LayoutActionsContextValue {
   onSplit: (paneId: string, direction: 'horizontal' | 'vertical') => void
   onClose: (paneId: string) => void
+  onMaximize: (paneId: string | null) => void
+  maximizedPaneId: string | null
   displayConfig: DisplayConfig
 }
 
