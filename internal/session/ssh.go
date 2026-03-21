@@ -1,0 +1,181 @@
+package session
+
+import (
+	"fmt"
+	"io"
+	"net"
+	"os"
+	"sync"
+
+	"golang.org/x/crypto/ssh"
+)
+
+// SSHSession manages an SSH connection with a PTY.
+type SSHSession struct {
+	mu      sync.RWMutex
+	id      string
+	title   string
+	state   State
+	client  *ssh.Client
+	session *ssh.Session
+	stdin   io.WriteCloser
+	stdout  io.Reader
+	// combined reader for stdout+stderr
+	reader io.Reader
+}
+
+// SSHConfig holds parameters for establishing an SSH connection.
+type SSHConfig struct {
+	Host     string
+	Port     int
+	User     string
+	KeyFile  string
+	Password string
+}
+
+// NewSSH creates and starts a new SSH terminal session.
+func NewSSH(id, title string, cfg SSHConfig) (*SSHSession, error) {
+	authMethods, err := buildAuthMethods(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	sshCfg := &ssh.ClientConfig{
+		User:            cfg.User,
+		Auth:            authMethods,
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // TODO: use known_hosts in production
+	}
+
+	port := cfg.Port
+	if port == 0 {
+		port = 22
+	}
+	addr := net.JoinHostPort(cfg.Host, fmt.Sprintf("%d", port))
+
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		return nil, fmt.Errorf("tcp dial %s: %w", addr, err)
+	}
+
+	sshConn, chans, reqs, err := ssh.NewClientConn(conn, addr, sshCfg)
+	if err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("ssh handshake: %w", err)
+	}
+
+	client := ssh.NewClient(sshConn, chans, reqs)
+
+	sess, err := client.NewSession()
+	if err != nil {
+		client.Close()
+		return nil, fmt.Errorf("new ssh session: %w", err)
+	}
+
+	// Request PTY
+	modes := ssh.TerminalModes{
+		ssh.ECHO:          1,
+		ssh.TTY_OP_ISPEED: 14400,
+		ssh.TTY_OP_OSPEED: 14400,
+	}
+	if err := sess.RequestPty("xterm-256color", 24, 80, modes); err != nil {
+		sess.Close()
+		client.Close()
+		return nil, fmt.Errorf("request pty: %w", err)
+	}
+
+	stdin, err := sess.StdinPipe()
+	if err != nil {
+		sess.Close()
+		client.Close()
+		return nil, fmt.Errorf("stdin pipe: %w", err)
+	}
+
+	pr, pw := io.Pipe()
+	sess.Stdout = pw
+	sess.Stderr = pw
+
+	if err := sess.Shell(); err != nil {
+		sess.Close()
+		client.Close()
+		return nil, fmt.Errorf("start shell: %w", err)
+	}
+
+	s := &SSHSession{
+		id:      id,
+		title:   title,
+		state:   StateConnected,
+		client:  client,
+		session: sess,
+		stdin:   stdin,
+		reader:  pr,
+	}
+
+	// Monitor session exit
+	go func() {
+		sess.Wait()
+		pw.Close()
+		s.mu.Lock()
+		s.state = StateExited
+		s.mu.Unlock()
+	}()
+
+	return s, nil
+}
+
+func buildAuthMethods(cfg SSHConfig) ([]ssh.AuthMethod, error) {
+	var methods []ssh.AuthMethod
+
+	if cfg.KeyFile != "" {
+		keyData, err := os.ReadFile(cfg.KeyFile)
+		if err != nil {
+			return nil, fmt.Errorf("reading key file %s: %w", cfg.KeyFile, err)
+		}
+		signer, err := ssh.ParsePrivateKey(keyData)
+		if err != nil {
+			return nil, fmt.Errorf("parsing private key: %w", err)
+		}
+		methods = append(methods, ssh.PublicKeys(signer))
+	}
+
+	if cfg.Password != "" {
+		methods = append(methods, ssh.Password(cfg.Password))
+	}
+
+	if len(methods) == 0 {
+		return nil, fmt.Errorf("no auth methods configured for SSH connection")
+	}
+
+	return methods, nil
+}
+
+func (s *SSHSession) ID() string    { return s.id }
+func (s *SSHSession) Type() Type    { return TypeSSH }
+func (s *SSHSession) Title() string { return s.title }
+
+func (s *SSHSession) State() State {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.state
+}
+
+func (s *SSHSession) Read(p []byte) (int, error) {
+	return s.reader.Read(p)
+}
+
+func (s *SSHSession) Write(p []byte) (int, error) {
+	return s.stdin.Write(p)
+}
+
+func (s *SSHSession) Resize(cols, rows uint16) error {
+	return s.session.WindowChange(int(rows), int(cols))
+}
+
+func (s *SSHSession) Close() error {
+	s.mu.Lock()
+	s.state = StateExited
+	s.mu.Unlock()
+
+	s.stdin.Close()
+	s.session.Close()
+	return s.client.Close()
+}

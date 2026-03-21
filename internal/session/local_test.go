@@ -1,0 +1,100 @@
+package session
+
+import (
+	"os"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestNewLocal_Default(t *testing.T) {
+	sess, err := NewLocal("test-id", "", "", "Test Title")
+	require.NoError(t, err)
+	defer sess.Close()
+
+	assert.Equal(t, "test-id", sess.ID())
+	assert.Equal(t, TypeLocal, sess.Type())
+	assert.Equal(t, "Test Title", sess.Title())
+	assert.Equal(t, StateConnected, sess.State())
+}
+
+func TestNewLocal_ExplicitShell(t *testing.T) {
+	sess, err := NewLocal("test-id", "/bin/sh", "", "shell test")
+	require.NoError(t, err)
+	defer sess.Close()
+
+	assert.Equal(t, StateConnected, sess.State())
+}
+
+func TestNewLocal_InvalidShell_Error(t *testing.T) {
+	_, err := NewLocal("test-id", "/nonexistent/shell/xyz", "", "bad shell")
+	assert.Error(t, err)
+}
+
+func TestNewLocal_State(t *testing.T) {
+	sess, err := NewLocal("state-test", "/bin/sh", "", "state")
+	require.NoError(t, err)
+	defer sess.Close()
+
+	assert.Equal(t, StateConnected, sess.State())
+}
+
+func TestNewLocal_Write_Read(t *testing.T) {
+	sess, err := NewLocal("rw-test", "/bin/sh", "", "rw")
+	require.NoError(t, err)
+	defer sess.Close()
+
+	_, err = sess.Write([]byte("echo hi\n"))
+	require.NoError(t, err)
+
+	type result struct {
+		n   int
+		err error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		buf := make([]byte, 1024)
+		n, err := sess.Read(buf)
+		ch <- result{n, err}
+	}()
+
+	select {
+	case r := <-ch:
+		assert.NoError(t, r.err)
+		assert.Greater(t, r.n, 0)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for session read")
+	}
+}
+
+func TestNewLocal_Resize(t *testing.T) {
+	sess, err := NewLocal("resize-test", "/bin/sh", "", "resize")
+	require.NoError(t, err)
+	defer sess.Close()
+
+	err = sess.Resize(120, 40)
+	assert.NoError(t, err)
+}
+
+func TestNewLocal_Close(t *testing.T) {
+	sess, err := NewLocal("close-test", "/bin/sh", "", "close")
+	require.NoError(t, err)
+
+	err = sess.Close()
+	assert.NoError(t, err)
+
+	// Allow background goroutine to update state
+	time.Sleep(50 * time.Millisecond)
+	assert.Equal(t, StateExited, sess.State())
+}
+
+func TestNewLocal_WithCwd(t *testing.T) {
+	tmpDir := os.TempDir()
+	sess, err := NewLocal("cwd-test", "/bin/sh", tmpDir, "cwd")
+	require.NoError(t, err)
+	defer sess.Close()
+
+	assert.Equal(t, StateConnected, sess.State())
+}

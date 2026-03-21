@@ -1,0 +1,125 @@
+package config
+
+import (
+	"errors"
+	"fmt"
+	"strings"
+)
+
+// Validate checks the configuration for correctness.
+// It collects all errors and returns them as a single combined error.
+func (c *Config) Validate() error {
+	var errs []string
+
+	if c.Server.Port < 1 || c.Server.Port > 65535 {
+		errs = append(errs, fmt.Sprintf("server.port %d is out of range (1-65535)", c.Server.Port))
+	}
+
+	sshConns := c.SSHConnections
+	if sshConns == nil {
+		sshConns = make(map[string]SSHConnection)
+	}
+	errs = append(errs, validateLayoutNode(c.Layout, sshConns)...)
+
+	seen := make(map[string]bool)
+	for _, pane := range c.AllPanes() {
+		if seen[pane.ID] {
+			errs = append(errs, fmt.Sprintf("duplicate pane id: %q", pane.ID))
+		}
+		seen[pane.ID] = true
+	}
+
+	if len(errs) > 0 {
+		return errors.New(strings.Join(errs, "; "))
+	}
+	return nil
+}
+
+// ValidatePane validates a standalone PaneConfig without ssh_connections context.
+func ValidatePane(p *PaneConfig) error {
+	errs := validatePane(p, nil)
+	if len(errs) > 0 {
+		return errors.New(strings.Join(errs, "; "))
+	}
+	return nil
+}
+
+// ValidateLayout validates a standalone LayoutNode without ssh_connections context.
+func ValidateLayout(node LayoutNode) error {
+	errs := validateLayoutNode(node, nil)
+	if len(errs) > 0 {
+		return errors.New(strings.Join(errs, "; "))
+	}
+	return nil
+}
+
+func validateLayoutNode(node LayoutNode, sshConns map[string]SSHConnection) []string {
+	var errs []string
+	if node.Direction != "" && node.Direction != "horizontal" && node.Direction != "vertical" {
+		errs = append(errs, fmt.Sprintf("invalid direction %q: must be horizontal or vertical", node.Direction))
+	}
+	errs = append(errs, validateChildren(node.Children, sshConns)...)
+	return errs
+}
+
+func validateChildren(children []LayoutChild, sshConns map[string]SSHConnection) []string {
+	var errs []string
+	if len(children) == 0 {
+		return errs
+	}
+
+	var total float64
+	for i, child := range children {
+		if child.Size <= 0 {
+			errs = append(errs, fmt.Sprintf("child[%d] size %.2f must be positive", i, child.Size))
+		}
+		total += child.Size
+	}
+	if total < 99.9 || total > 100.1 {
+		errs = append(errs, fmt.Sprintf("child sizes sum to %.2f, must be 100 (±0.1)", total))
+	}
+
+	for i, child := range children {
+		if child.Direction != "" && child.Direction != "horizontal" && child.Direction != "vertical" {
+			errs = append(errs, fmt.Sprintf("child[%d] invalid direction %q: must be horizontal or vertical", i, child.Direction))
+		}
+		if child.Pane != nil {
+			errs = append(errs, validatePane(child.Pane, sshConns)...)
+		}
+		errs = append(errs, validateChildren(child.Children, sshConns)...)
+	}
+	return errs
+}
+
+func validatePane(p *PaneConfig, sshConns map[string]SSHConnection) []string {
+	var errs []string
+
+	if p.ID == "" {
+		errs = append(errs, "pane id must not be empty")
+	}
+
+	switch p.Type {
+	case "local", "ssh", "tmux", "ssh_tmux":
+		// valid
+	default:
+		errs = append(errs, fmt.Sprintf("pane %q has invalid type %q: must be local, ssh, tmux, or ssh_tmux", p.ID, p.Type))
+	}
+
+	if p.Type == "ssh" || p.Type == "ssh_tmux" {
+		if p.Connection == "" {
+			errs = append(errs, fmt.Sprintf("pane %q: ssh connection name must not be empty", p.ID))
+		} else if sshConns != nil {
+			if _, ok := sshConns[p.Connection]; !ok {
+				errs = append(errs, fmt.Sprintf("pane %q: connection %q not defined in ssh_connections", p.ID, p.Connection))
+			}
+		}
+	}
+
+	if p.Type == "tmux" || p.Type == "ssh_tmux" {
+		if p.TmuxSession == "" {
+			errs = append(errs, fmt.Sprintf("pane %q: tmux_session must not be empty", p.ID))
+		}
+	}
+
+	return errs
+}

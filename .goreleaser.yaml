@@ -1,0 +1,54 @@
+version: 2
+
+project_name: panemux
+
+before:
+  hooks:
+    - make check build-frontend
+
+builds:
+  - id: panemux
+    main: .
+    binary: panemux
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: default
+    ids:
+      - panemux
+    formats:
+      - tar.gz
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    files:
+      - src: config.example.yaml
+        dst: config.example.yaml
+      - src: docs/overview.md
+        dst: docs/overview.md
+      - src: docs/behavior.md
+        dst: docs/behavior.md
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+
+release:
+  github:
+    owner: "{{ .Env.GITHUB_REPOSITORY_OWNER }}"
+    name: "{{ .Env.GITHUB_REPOSITORY_NAME }}"

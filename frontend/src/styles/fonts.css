@@ -1,0 +1,19 @@
+@font-face {
+  font-family: 'Terminal Powerline';
+  src:
+    local('Meslo LG M DZ Regular for Powerline'),
+    local('Meslo LG M Regular for Powerline'),
+    local('Source Code Pro for Powerline');
+  font-style: normal;
+  font-weight: 400;
+}
+
+@font-face {
+  font-family: 'Terminal Powerline';
+  src:
+    local('Meslo LG M DZ Bold for Powerline'),
+    local('Meslo LG M Bold for Powerline'),
+    local('Source Code Pro Semibold for Powerline');
+  font-style: normal;
+  font-weight: 700;
+}

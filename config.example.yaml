@@ -1,0 +1,45 @@
+server:
+  port: 8080
+  host: "127.0.0.1"
+
+# SSH connection definitions (reference by name in layout panes)
+ssh_connections:
+  prod-web:
+    host: "192.168.1.10"
+    port: 22
+    user: "deploy"
+    key_file: "~/.ssh/id_ed25519"
+  # Password authentication example:
+  # staging:
+  #   host: "10.0.0.5"
+  #   port: 22
+  #   user: "ubuntu"
+  #   password: "secret"
+
+# Layout tree: direction + children (each with size 0-100, summing to 100)
+layout:
+  direction: horizontal
+  children:
+    - size: 50
+      pane:
+        id: "local-main"
+        type: local        # local | ssh | tmux | ssh_tmux
+        shell: "/bin/zsh"
+        cwd: "~/development"
+        title: "Dev Shell"
+    - size: 50
+      # Nested vertical split on the right half
+      direction: vertical
+      children:
+        - size: 60
+          pane:
+            id: "ssh-prod"
+            type: ssh
+            connection: prod-web   # references ssh_connections key
+            title: "Prod Web"
+        - size: 40
+          pane:
+            id: "tmux-local"
+            type: tmux
+            tmux_session: "work"   # tmux session name
+            title: "Tmux Work"
