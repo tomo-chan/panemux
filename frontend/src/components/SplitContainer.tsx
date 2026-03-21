@@ -101,7 +101,7 @@ export const LayoutRenderer: React.FC<LayoutRendererProps> = ({ direction, child
                 }}
               />
             </div>
-            {!isLast && (
+            {!isLast && !layoutCtx?.maximizedPaneId && (
               <SplitDivider direction={direction} onDrag={(d) => handleDrag(index, d)} />
             )}
           </React.Fragment>

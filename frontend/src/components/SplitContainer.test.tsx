@@ -37,6 +37,26 @@ function getWrapperDivs(container: HTMLElement): HTMLElement[] {
   ) as HTMLElement[]
 }
 
+describe('LayoutRenderer divider visibility', () => {
+  it('hides the divider when a pane is maximized', () => {
+    const { container } = render(
+      <LayoutActionsContext.Provider value={makeCtx('p1')}>
+        <LayoutRenderer direction="horizontal" children={children} onChildrenChange={vi.fn()} />
+      </LayoutActionsContext.Provider>,
+    )
+    expect(container.querySelector('[data-divider]')).toBeNull()
+  })
+
+  it('shows the divider when no pane is maximized', () => {
+    const { container } = render(
+      <LayoutActionsContext.Provider value={makeCtx(null)}>
+        <LayoutRenderer direction="horizontal" children={children} onChildrenChange={vi.fn()} />
+      </LayoutActionsContext.Provider>,
+    )
+    expect(container.querySelector('[data-divider]')).not.toBeNull()
+  })
+})
+
 describe('LayoutRenderer maximize CSS', () => {
   it('applies absolute positioning to the maximized child wrapper only', () => {
     const { container } = render(
