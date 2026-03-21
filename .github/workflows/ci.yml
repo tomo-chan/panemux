@@ -28,7 +28,6 @@ concurrency:
 
 permissions:
   contents: read
-  checks: write   # required by dorny/test-reporter to create Check runs
 
 jobs:
   ci:
@@ -71,24 +70,6 @@ jobs:
 
       - name: Test (Frontend)
         run: cd frontend && npm run test:ci
-
-      - name: Report Go test results
-        uses: dorny/test-reporter@3d76b34a4535afbd0600d347b09a6ee5deb3ed7f
-        if: always()
-        with:
-          name: Go Tests
-          path: test-results/go-junit.xml
-          reporter: jest-junit
-          fail-on-error: false
-
-      - name: Report Frontend test results
-        uses: dorny/test-reporter@3d76b34a4535afbd0600d347b09a6ee5deb3ed7f
-        if: always()
-        with:
-          name: Frontend Tests
-          path: test-results/vitest.xml
-          reporter: jest-junit
-          fail-on-error: false
 
       - name: Coverage (Go)
         run: make coverage-go
