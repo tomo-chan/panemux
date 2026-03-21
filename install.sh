@@ -20,9 +20,9 @@ Environment variables:
   PANEMUX_INSTALL_DIR  Directory to install the binary into
 
 Examples:
-  ./install.sh --repo owner/panemux
-  curl -fsSL https://raw.githubusercontent.com/owner/panemux/main/install.sh | sh -s -- --repo owner/panemux
-  PANEMUX_REPO=owner/panemux PANEMUX_VERSION=v1.0.0 ./install.sh
+  ./install.sh --repo tomo-chan/panemux
+  curl -fsSL https://raw.githubusercontent.com/tomo-chan/panemux/main/install.sh | sh -s -- --repo tomo-chan/panemux
+  PANEMUX_REPO=tomo-chan/panemux PANEMUX_VERSION=v1.0.0 ./install.sh
 EOF
 }
 
