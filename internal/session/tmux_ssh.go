@@ -4,10 +4,13 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"regexp"
 	"sync"
 
 	"golang.org/x/crypto/ssh"
 )
+
+var validTmuxSessionName = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`)
 
 // TmuxSSHSession attaches to a tmux session on a remote host via SSH.
 type TmuxSSHSession struct {
@@ -27,8 +30,16 @@ func NewTmuxSSH(id, title, tmuxSession string, cfg SSHConfig) (*TmuxSSHSession, 
 	if tmuxSession == "" {
 		tmuxSession = "0"
 	}
+	if !validTmuxSessionName.MatchString(tmuxSession) {
+		return nil, fmt.Errorf("invalid tmux session name %q: must match ^[a-zA-Z0-9_.-]+$", tmuxSession)
+	}
 
 	authMethods, err := buildAuthMethods(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	hkCallback, err := buildHostKeyCallback(cfg.KnownHostsFile)
 	if err != nil {
 		return nil, err
 	}
@@ -36,7 +47,7 @@ func NewTmuxSSH(id, title, tmuxSession string, cfg SSHConfig) (*TmuxSSHSession, 
 	sshCfg := &ssh.ClientConfig{
 		User:            cfg.User,
 		Auth:            authMethods,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		HostKeyCallback: hkCallback,
 	}
 
 	port := cfg.Port
@@ -86,8 +97,8 @@ func NewTmuxSSH(id, title, tmuxSession string, cfg SSHConfig) (*TmuxSSHSession, 
 	sess.Stdout = pw
 	sess.Stderr = pw
 
-	// Attach to existing tmux session
-	if err := sess.Start(fmt.Sprintf("tmux attach-session -t %s", tmuxSession)); err != nil {
+	// Attach to existing tmux session (tmuxSession is validated as [a-zA-Z0-9_.-]+ by config)
+	if err := sess.Start(fmt.Sprintf("tmux attach-session -t '%s'", tmuxSession)); err != nil {
 		sess.Close()
 		client.Close()
 		return nil, fmt.Errorf("starting tmux attach: %w", err)

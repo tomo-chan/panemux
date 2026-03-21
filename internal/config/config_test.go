@@ -305,6 +305,36 @@ layout:
 	assert.False(t, strings.HasPrefix(cfg.Layout.Children[0].Pane.Cwd, "~/"))
 }
 
+func TestValidate_LocalPaneShellRelativePath_Error(t *testing.T) {
+	cfg := validConfig()
+	cfg.Layout.Children[0].Pane.Shell = "bash" // relative, not absolute
+	err := cfg.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "absolute path")
+}
+
+func TestValidate_LocalPaneShellAbsolutePath_NoError(t *testing.T) {
+	cfg := validConfig()
+	cfg.Layout.Children[0].Pane.Shell = "/bin/bash"
+	assert.NoError(t, cfg.Validate())
+}
+
+func TestValidate_TmuxSessionInvalidChars_Error(t *testing.T) {
+	cfg := validConfig()
+	cfg.Layout.Children[0].Pane.Type = "tmux"
+	cfg.Layout.Children[0].Pane.TmuxSession = "foo;bar"
+	err := cfg.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid characters")
+}
+
+func TestValidate_TmuxSessionValidChars_NoError(t *testing.T) {
+	cfg := validConfig()
+	cfg.Layout.Children[0].Pane.Type = "tmux"
+	cfg.Layout.Children[0].Pane.TmuxSession = "my-session.1"
+	assert.NoError(t, cfg.Validate())
+}
+
 // helpers
 
 func validConfig() *Config {

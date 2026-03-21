@@ -18,11 +18,12 @@ func CreateFromConfig(pane *config.PaneConfig, sshConns map[string]config.SSHCon
 			return nil, fmt.Errorf("ssh connection %q not found", pane.Connection)
 		}
 		return NewSSH(pane.ID, pane.Title, SSHConfig{
-			Host:     conn.Host,
-			Port:     conn.Port,
-			User:     conn.User,
-			KeyFile:  conn.KeyFile,
-			Password: conn.Password,
+			Host:           conn.Host,
+			Port:           conn.Port,
+			User:           conn.User,
+			KeyFile:        conn.KeyFile,
+			Password:       conn.Password,
+			KnownHostsFile: conn.KnownHostsFile,
 		})
 
 	case TypeTmux:
@@ -34,11 +35,12 @@ func CreateFromConfig(pane *config.PaneConfig, sshConns map[string]config.SSHCon
 			return nil, fmt.Errorf("ssh connection %q not found", pane.Connection)
 		}
 		return NewTmuxSSH(pane.ID, pane.Title, pane.TmuxSession, SSHConfig{
-			Host:     conn.Host,
-			Port:     conn.Port,
-			User:     conn.User,
-			KeyFile:  conn.KeyFile,
-			Password: conn.Password,
+			Host:           conn.Host,
+			Port:           conn.Port,
+			User:           conn.User,
+			KeyFile:        conn.KeyFile,
+			Password:       conn.Password,
+			KnownHostsFile: conn.KnownHostsFile,
 		})
 
 	default:

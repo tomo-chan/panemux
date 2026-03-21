@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sync"
 	"syscall"
 
@@ -27,6 +28,13 @@ func NewLocal(id, shell, cwd, title string) (*LocalSession, error) {
 		if shell == "" {
 			shell = "/bin/sh"
 		}
+	}
+
+	if !filepath.IsAbs(shell) {
+		return nil, fmt.Errorf("shell must be an absolute path: %q", shell)
+	}
+	if _, err := exec.LookPath(shell); err != nil {
+		return nil, fmt.Errorf("shell not found: %w", err)
 	}
 
 	cmd := exec.Command(shell)

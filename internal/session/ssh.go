@@ -5,9 +5,11 @@ import (
 	"io"
 	"net"
 	"os"
+	"path/filepath"
 	"sync"
 
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
 )
 
 // SSHSession manages an SSH connection with a PTY.
@@ -26,11 +28,12 @@ type SSHSession struct {
 
 // SSHConfig holds parameters for establishing an SSH connection.
 type SSHConfig struct {
-	Host     string
-	Port     int
-	User     string
-	KeyFile  string
-	Password string
+	Host           string
+	Port           int
+	User           string
+	KeyFile        string
+	Password       string
+	KnownHostsFile string
 }
 
 // NewSSH creates and starts a new SSH terminal session.
@@ -40,10 +43,15 @@ func NewSSH(id, title string, cfg SSHConfig) (*SSHSession, error) {
 		return nil, err
 	}
 
+	hkCallback, err := buildHostKeyCallback(cfg.KnownHostsFile)
+	if err != nil {
+		return nil, err
+	}
+
 	sshCfg := &ssh.ClientConfig{
 		User:            cfg.User,
 		Auth:            authMethods,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // TODO: use known_hosts in production
+		HostKeyCallback: hkCallback,
 	}
 
 	port := cfg.Port
@@ -120,6 +128,21 @@ func NewSSH(id, title string, cfg SSHConfig) (*SSHSession, error) {
 	}()
 
 	return s, nil
+}
+
+func buildHostKeyCallback(knownHostsFile string) (ssh.HostKeyCallback, error) {
+	if knownHostsFile == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, fmt.Errorf("getting home dir: %w", err)
+		}
+		knownHostsFile = filepath.Join(home, ".ssh", "known_hosts")
+	}
+	cb, err := knownhosts.New(knownHostsFile)
+	if err != nil {
+		return nil, fmt.Errorf("loading known_hosts %s: %w", knownHostsFile, err)
+	}
+	return cb, nil
 }
 
 func buildAuthMethods(cfg SSHConfig) ([]ssh.AuthMethod, error) {
