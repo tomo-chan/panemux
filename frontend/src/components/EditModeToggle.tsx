@@ -13,7 +13,7 @@ export const EditModeToggle: React.FC<EditModeToggleProps> = ({ editMode, onTogg
       data-testid="edit-mode-toggle"
       style={{
         position: 'fixed',
-        top: '8px',
+        bottom: '8px',
         right: '8px',
         zIndex: 1000,
         background: editMode ? '#2d4a2d' : '#2d2d2d',
@@ -25,6 +25,8 @@ export const EditModeToggle: React.FC<EditModeToggleProps> = ({ editMode, onTogg
         padding: '4px 8px',
         fontFamily: 'monospace',
         lineHeight: 1,
+        opacity: editMode ? 1 : 0.4,
+        transition: 'opacity 0.2s',
       }}
     >
       {editMode ? '🔓' : '🔒'}
