@@ -13,23 +13,30 @@ export const EditModeToggle: React.FC<EditModeToggleProps> = ({ editMode, onTogg
       data-testid="edit-mode-toggle"
       style={{
         position: 'fixed',
-        bottom: '8px',
-        right: '8px',
+        bottom: '12px',
+        right: '12px',
         zIndex: 1000,
-        background: editMode ? '#2d4a2d' : '#2d2d2d',
-        border: `1px solid ${editMode ? '#4a8a4a' : '#555'}`,
+        background: editMode ? '#1a3040' : '#3f3f46',
+        border: `1px solid ${editMode ? '#569cd6' : '#52525b'}`,
         borderRadius: '4px',
-        color: editMode ? '#7ec87e' : '#aaa',
+        color: editMode ? '#569cd6' : '#888',
         cursor: 'pointer',
-        fontSize: '14px',
-        padding: '4px 8px',
+        fontSize: '12px',
+        padding: '5px 10px',
         fontFamily: 'monospace',
         lineHeight: 1,
-        opacity: editMode ? 1 : 0.4,
-        transition: 'opacity 0.2s',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '5px',
+        opacity: editMode ? 1 : 0.65,
+        boxShadow: editMode
+          ? '0 0 0 1px #569cd6, 0 2px 8px rgba(0,0,0,0.6)'
+          : '0 2px 8px rgba(0,0,0,0.5)',
+        transition: 'opacity 0.2s, box-shadow 0.2s, border-color 0.2s, color 0.2s',
       }}
     >
-      {editMode ? '🔓' : '🔒'}
+      <span>{editMode ? '🔓' : '🔒'}</span>
+      <span>{editMode ? 'EDIT' : 'EDIT'}</span>
     </button>
   )
 }
