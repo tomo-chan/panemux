@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:ci": "vitest run --reporter=default --reporter=junit --outputFile=../test-results/vitest.xml",
     "coverage": "vitest run --coverage"
   },
   "dependencies": {
