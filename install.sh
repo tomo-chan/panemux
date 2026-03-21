@@ -169,7 +169,8 @@ main() {
   [ -n "$release_json" ] || die "empty response from GitHub API — verify '${REPO}' has a published release"
   tag="$(printf '%s' "$release_json" | parse_release_value tag_name)" || die "failed to resolve release tag — verify '${REPO}' has a published release"
 
-  archive_name="${PROJECT_NAME}_${tag}_${os}_${arch}.tar.gz"
+  version="${tag#v}"
+  archive_name="${PROJECT_NAME}_${version}_${os}_${arch}.tar.gz"
   checksums_name="checksums.txt"
   archive_url="$(printf '%s' "$release_json" | find_asset_url "$archive_name")" || die "release asset not found: $archive_name"
   checksums_url="$(printf '%s' "$release_json" | find_asset_url "$checksums_name")" || die "checksums.txt not found in release"
