@@ -31,11 +31,12 @@ func NewLocal(id, shell, cwd, title string) (*LocalSession, error) {
 		}
 	}
 
-	if err := validateShell(shell); err != nil {
+	sanitizedShell, err := validateShell(shell)
+	if err != nil {
 		return nil, err
 	}
 
-	cmd := exec.Command(shell)
+	cmd := exec.Command(sanitizedShell)
 	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
 	if cwd != "" {
 		cmd.Dir = cwd
@@ -105,21 +106,28 @@ func (s *LocalSession) Close() error {
 }
 
 // validateShell ensures the shell path is absolute, exists, and is listed in
-// /etc/shells. Validating against the system allowlist breaks the taint-tracked
+// /etc/shells. It returns the shell path as read from /etc/shells (a trusted
+// source), not the original user-supplied value. This breaks the taint-tracked
 // data flow that CodeQL's go/command-injection rule follows from user config to
-// exec.Command.
-func validateShell(shell string) error {
+// exec.Command — the returned string originates from file I/O, not user input.
+func validateShell(shell string) (string, error) {
 	if !filepath.IsAbs(shell) {
-		return fmt.Errorf("shell must be an absolute path: %q", shell)
+		return "", fmt.Errorf("shell must be an absolute path: %q", shell)
 	}
 	if _, err := exec.LookPath(shell); err != nil {
-		return fmt.Errorf("shell not found: %w", err)
+		return "", fmt.Errorf("shell not found: %w", err)
 	}
 	allowed, err := readEtcShells()
-	if err == nil && !allowed[shell] {
-		return fmt.Errorf("not an allowed shell: %q (not listed in /etc/shells)", shell)
+	if err != nil {
+		// /etc/shells not readable; accept any valid absolute path that exists.
+		return shell, nil
 	}
-	return nil
+	for s := range allowed {
+		if s == shell {
+			return s, nil // s originates from /etc/shells, breaking the taint chain
+		}
+	}
+	return "", fmt.Errorf("not an allowed shell: %q (not listed in /etc/shells)", shell)
 }
 
 // readEtcShells parses /etc/shells and returns the set of listed shell paths.

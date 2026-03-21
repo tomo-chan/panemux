@@ -106,8 +106,9 @@ func TestNewLocal_WithCwd(t *testing.T) {
 }
 
 func TestValidateShell_InEtcShells_OK(t *testing.T) {
-	err := validateShell("/bin/sh")
+	got, err := validateShell("/bin/sh")
 	assert.NoError(t, err)
+	assert.Equal(t, "/bin/sh", got)
 }
 
 func TestValidateShell_NotInEtcShells_Error(t *testing.T) {
@@ -116,7 +117,7 @@ func TestValidateShell_NotInEtcShells_Error(t *testing.T) {
 	fakePath := dir + "/fakeshell"
 	require.NoError(t, os.WriteFile(fakePath, []byte("#!/bin/sh\n"), 0755))
 
-	err := validateShell(fakePath)
+	_, err := validateShell(fakePath)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not an allowed shell")
 }
