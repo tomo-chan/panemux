@@ -105,7 +105,10 @@ import json
 import sys
 
 key = sys.argv[1]
-data = json.load(sys.stdin)
+try:
+    data = json.load(sys.stdin)
+except ValueError:
+    sys.exit(1)
 value = data.get(key)
 if value is None:
     sys.exit(1)
@@ -120,7 +123,10 @@ import json
 import sys
 
 target = sys.argv[1]
-data = json.load(sys.stdin)
+try:
+    data = json.load(sys.stdin)
+except ValueError:
+    sys.exit(1)
 for asset in data.get("assets", []):
     if asset.get("name") == target:
         print(asset["browser_download_url"])
@@ -166,8 +172,9 @@ main() {
   os="$(detect_os)"
   arch="$(detect_arch)"
 
-  release_json="$(fetch_release_json)"
-  tag="$(printf '%s' "$release_json" | parse_release_value tag_name)" || die "failed to resolve release tag"
+  release_json="$(fetch_release_json)" || die "failed to fetch release from GitHub — verify '${REPO}' exists and has a published release"
+  [ -n "$release_json" ] || die "empty response from GitHub API — verify '${REPO}' has a published release"
+  tag="$(printf '%s' "$release_json" | parse_release_value tag_name)" || die "failed to resolve release tag — verify '${REPO}' has a published release"
 
   archive_name="${PROJECT_NAME}_${tag}_${os}_${arch}.tar.gz"
   checksums_name="checksums.txt"
