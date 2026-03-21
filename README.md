@@ -14,9 +14,11 @@
 - **Four pane types** — `local` (shell), `ssh` (remote), `tmux` (local session attach), `ssh_tmux` (SSH → tmux)
 - **Recursive split layout** — nest horizontal and vertical splits to any depth
 - **Drag-to-resize** — drag dividers in the browser to adjust pane sizes
+- **Edit mode** — lock/unlock toggle controls whether layout changes are saved to disk; edits are always applied in-memory
+- **Session resilience** — tmux sessions are auto-created when absent; exited panes show a Restart button to reconnect without reloading
 - **xterm.js rendering** — full-featured terminal emulation with Unicode and colour support
 - **Single binary** — Go backend embeds the compiled frontend; no separate web server needed
-- **YAML config** — declare your entire layout and SSH connections in one file
+- **YAML config** — declare your entire layout and SSH connections in one file; defaults to `~/.config/panemux/config.yaml`
 
 ---
 
@@ -50,10 +52,10 @@ make build          # outputs bin/panemux
 ## Quick start
 
 ```sh
-# Run with a single local shell (default)
+# Run with defaults (loads ~/.config/panemux/config.yaml if it exists, otherwise a single local shell)
 ./bin/panemux
 
-# Load a layout from a config file
+# Load a specific config file
 ./bin/panemux --config config.yaml
 
 # Override port and open Chrome automatically
@@ -66,7 +68,7 @@ Then open [http://localhost:8080](http://localhost:8080) in your browser.
 
 ## Configuration
 
-Copy `config.example.yaml` as a starting point:
+The default config path is `~/.config/panemux/config.yaml` (created automatically on first save). Copy `config.example.yaml` as a starting point:
 
 ```yaml
 server:
@@ -115,8 +117,12 @@ layout:
 |------|-------------|
 | `local` | Local shell process (`shell`, `cwd` optional) |
 | `ssh` | SSH connection defined in `ssh_connections` |
-| `tmux` | Attach to a local tmux session (`tmux_session`) |
-| `ssh_tmux` | SSH to a host, then attach to a tmux session |
+| `tmux` | Attach to a local tmux session (`tmux_session`); created automatically if absent |
+| `ssh_tmux` | SSH to a host, then attach to a tmux session; created automatically if absent |
+
+### Edit mode
+
+By default, layout changes (drag-resize, close) are applied in-memory only. Click the lock icon in the bottom-right corner to enable **edit mode**, which persists changes back to the config file. Disable edit mode to explore layouts without touching the file.
 
 ---
 
