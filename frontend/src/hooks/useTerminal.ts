@@ -37,8 +37,10 @@ export function useTerminal({ sessionId, container }: UseTerminalOptions) {
       try {
         const msg = JSON.parse(data as string)
         if (msg.type === 'status') {
-          // Could show status overlay; for now just log
           console.log(`Session ${sessionId} status:`, msg.state)
+          if (msg.state === 'exited') {
+            termRef.current.write('\r\n\x1b[2m[Session ended]\x1b[0m\r\n')
+          }
         } else if (msg.type === 'error') {
           termRef.current.write(`\r\n\x1b[31mError: ${msg.message}\x1b[0m\r\n`)
         }

@@ -232,6 +232,22 @@ describe('useTerminal', () => {
     )
   })
 
+  it('writes session ended message to terminal on exited status', () => {
+    const container = makeContainer()
+    renderHook(() => useTerminal({ sessionId: 's1', container }))
+    act(() => MockWebSocket.instances[0].simulateOpen())
+
+    mockWrite.mockClear()
+    act(() =>
+      MockWebSocket.instances[0].simulateMessage(
+        JSON.stringify({ type: 'status', state: 'exited' })
+      )
+    )
+    expect(mockWrite).toHaveBeenCalledWith(
+      expect.stringContaining('[Session ended]')
+    )
+  })
+
   it('does not write to terminal on status control frame', () => {
     const container = makeContainer()
     renderHook(() => useTerminal({ sessionId: 's1', container }))
