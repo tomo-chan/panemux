@@ -27,6 +27,7 @@ export function useTerminal({ sessionId, container }: UseTerminalOptions) {
   const sendRef = useRef<((data: string | ArrayBuffer | Uint8Array) => void) | null>(null)
   const entryRef = useRef<TerminalEntry | null>(null)
   const [dims, setDims] = useState<{ cols: number; rows: number } | null>(null)
+  const [sessionExited, setSessionExited] = useState(false)
 
   const handleMessage = useCallback((data: ArrayBuffer | string, isBinary: boolean) => {
     if (!termRef.current) return
@@ -37,8 +38,11 @@ export function useTerminal({ sessionId, container }: UseTerminalOptions) {
       try {
         const msg = JSON.parse(data as string)
         if (msg.type === 'status') {
-          // Could show status overlay; for now just log
           console.log(`Session ${sessionId} status:`, msg.state)
+          if (msg.state === 'exited') {
+            setSessionExited(true)
+            termRef.current.write('\r\n\x1b[2m[Session ended]\x1b[0m\r\n')
+          }
         } else if (msg.type === 'error') {
           termRef.current.write(`\r\n\x1b[31mError: ${msg.message}\x1b[0m\r\n`)
         }
@@ -50,9 +54,10 @@ export function useTerminal({ sessionId, container }: UseTerminalOptions) {
   }, [sessionId])
 
   const wsUrl = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws/${sessionId}`
-  const { send, connected } = useWebSocket(wsUrl, {
+  const { send, connected, reconnect } = useWebSocket(wsUrl, {
     onMessage: handleMessage,
     onOpen: () => {
+      setSessionExited(false)
       if (fitAddonRef.current && termRef.current) {
         fitAddonRef.current.fit()
         const { cols, rows } = termRef.current
@@ -108,6 +113,13 @@ export function useTerminal({ sessionId, container }: UseTerminalOptions) {
     }
   }, [container, sessionId])
 
+  const restartSession = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}/restart`, { method: 'POST' })
+      if (res.ok) reconnect()
+    } catch { /* ignore network errors */ }
+  }, [sessionId, reconnect])
+
   // Handle resize
   const handleResize = useCallback(() => {
     const entry = entryRef.current
@@ -122,7 +134,7 @@ export function useTerminal({ sessionId, container }: UseTerminalOptions) {
     }
   }, [send, connected])
 
-  return { handleResize, connected, dims }
+  return { handleResize, connected, dims, sessionExited, restartSession }
 }
 
 function getOrCreateTerminalEntry(sessionId: string): TerminalEntry {

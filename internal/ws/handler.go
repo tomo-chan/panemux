@@ -93,7 +93,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		switch msgType {
 		case websocket.BinaryMessage:
-			// Raw terminal input
+			// Raw terminal input — discard silently if the session is already gone.
+			if sess.State() == session.StateExited {
+				continue
+			}
 			if _, err := sess.Write(data); err != nil {
 				log.Printf("session %s write error: %v", sessionID, err)
 			}

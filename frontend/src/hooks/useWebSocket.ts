@@ -85,5 +85,20 @@ export function useWebSocket(url: string, options: UseWebSocketOptions) {
     }
   }, [])
 
-  return { send, connected }
+  // Imperatively reconnect: detach the current socket (without triggering the
+  // onclose reconnect loop), reset the attempt counter, then connect fresh.
+  const reconnect = useCallback(() => {
+    const ws = wsRef.current
+    if (ws) {
+      ws.onclose = null
+      ws.onerror = null
+      ws.close()
+      wsRef.current = null
+      setConnected(false)
+    }
+    attemptsRef.current = 0
+    connect()
+  }, [connect])
+
+  return { send, connected, reconnect }
 }

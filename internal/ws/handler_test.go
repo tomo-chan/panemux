@@ -20,6 +20,7 @@ import (
 // wsMockSession implements session.Session for WebSocket handler tests.
 type wsMockSession struct {
 	id      string
+	state   session.State // configurable; defaults to StateConnected
 	out     chan []byte   // data sent to WS client (session output)
 	in      chan []byte   // data received from WS client (session input)
 	resizes chan [2]uint16
@@ -29,6 +30,7 @@ type wsMockSession struct {
 func newWsMock(id string) *wsMockSession {
 	return &wsMockSession{
 		id:      id,
+		state:   session.StateConnected,
 		out:     make(chan []byte, 64),
 		in:      make(chan []byte, 64),
 		resizes: make(chan [2]uint16, 8),
@@ -38,7 +40,7 @@ func newWsMock(id string) *wsMockSession {
 func (m *wsMockSession) ID() string           { return m.id }
 func (m *wsMockSession) Type() session.Type   { return session.TypeLocal }
 func (m *wsMockSession) Title() string        { return m.id }
-func (m *wsMockSession) State() session.State { return session.StateConnected }
+func (m *wsMockSession) State() session.State { return m.state }
 
 func (m *wsMockSession) Read(p []byte) (int, error) {
 	data, ok := <-m.out
@@ -225,6 +227,36 @@ func TestWS_ResizeWithZeroCols_Ignored(t *testing.T) {
 		t.Fatalf("unexpected resize received: %v", size)
 	case <-time.After(100 * time.Millisecond):
 		// expected: no resize was sent
+	}
+}
+
+func TestWS_Write_ToExitedSession_Silent(t *testing.T) {
+	mgr := session.NewManager()
+	sess := newWsMock("s1")
+	sess.state = session.StateExited
+	mgr.Add(sess)
+
+	srv := setupWSServer(mgr)
+	defer srv.Close()
+
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL(srv, "s1"), nil)
+	require.NoError(t, err)
+	defer conn.Close()
+	defer sess.Close()
+
+	// Drain the initial status message
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	conn.ReadMessage()
+
+	// Send a binary frame to an exited session
+	require.NoError(t, conn.WriteMessage(websocket.BinaryMessage, []byte("hello")))
+
+	// The session must NOT receive the write
+	select {
+	case got := <-sess.in:
+		t.Fatalf("unexpected write to exited session: %v", got)
+	case <-time.After(100 * time.Millisecond):
+		// expected: input was silently discarded
 	}
 }
 

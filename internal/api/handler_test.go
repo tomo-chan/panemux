@@ -44,6 +44,7 @@ func setupRouter(cfg *config.Config, mgr *session.Manager) *chi.Mux {
 	r.Get("/api/sessions", h.GetSessions)
 	r.Post("/api/sessions", h.PostSession)
 	r.Delete("/api/sessions/{id}", h.DeleteSession)
+	r.Post("/api/sessions/{id}/restart", h.RestartSession)
 	r.Get("/api/display", h.GetDisplay)
 	return r
 }
@@ -193,6 +194,38 @@ func TestPostSession_DuplicateID_409(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(rec, req)
 	assert.Equal(t, http.StatusConflict, rec.Code)
+}
+
+func TestRestartSession_Found_200(t *testing.T) {
+	cfg := &config.Config{
+		Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1"},
+		Layout: config.LayoutNode{
+			Direction: "horizontal",
+			Children: []config.LayoutChild{
+				{Size: 100, Pane: &config.PaneConfig{ID: "main", Type: "local"}},
+			},
+		},
+	}
+	mgr := session.NewManager()
+	mgr.Add(newMockSession("main")) // pre-existing (exited) session
+	r := setupRouter(cfg, mgr)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/main/restart", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	// New session must be in the manager
+	_, ok := mgr.Get("main")
+	assert.True(t, ok)
+}
+
+func TestRestartSession_NotFound_404(t *testing.T) {
+	r := setupRouter(defaultTestConfig(), session.NewManager())
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/nonexistent/restart", nil)
+	r.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
 func TestGetDisplay_ReturnsJSON(t *testing.T) {

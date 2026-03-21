@@ -97,8 +97,9 @@ func NewTmuxSSH(id, title, tmuxSession string, cfg SSHConfig) (*TmuxSSHSession, 
 	sess.Stdout = pw
 	sess.Stderr = pw
 
-	// Attach to existing tmux session (tmuxSession is validated as [a-zA-Z0-9_.-]+ by config)
-	if err := sess.Start(fmt.Sprintf("tmux attach-session -t '%s'", tmuxSession)); err != nil {
+	// Attach to existing tmux session or create it if absent.
+	// (tmuxSession is validated as [a-zA-Z0-9_.-]+ by config)
+	if err := sess.Start(fmt.Sprintf("tmux new-session -As '%s'", tmuxSession)); err != nil {
 		sess.Close()
 		client.Close()
 		return nil, fmt.Errorf("starting tmux attach: %w", err)

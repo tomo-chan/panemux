@@ -113,6 +113,33 @@ func (h *Handler) DeleteSession(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// RestartSession recreates a session from its original config.
+func (h *Handler) RestartSession(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+
+	var found *config.PaneConfig
+	for _, p := range h.cfg.AllPanes() {
+		if p.ID == id {
+			found = p
+			break
+		}
+	}
+	if found == nil {
+		http.Error(w, "session config not found", http.StatusNotFound)
+		return
+	}
+
+	h.manager.Remove(id) //nolint:errcheck -- ok if already gone
+
+	sess, err := session.CreateFromConfig(found, h.cfg.SSHConnections)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	h.manager.Add(sess)
+	w.WriteHeader(http.StatusOK)
+}
+
 // GetDisplay returns the display configuration.
 func (h *Handler) GetDisplay(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, h.cfg.Display)
