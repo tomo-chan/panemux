@@ -31,9 +31,15 @@ const buttonStyle: React.CSSProperties = {
   border: 'none',
   color: '#888',
   cursor: 'pointer',
-  fontSize: '11px',
-  padding: '0 3px',
+  fontSize: '16px',
+  padding: '3px 5px',
   lineHeight: '1',
+  borderRadius: '3px',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  minWidth: '22px',
+  minHeight: '22px',
 }
 
 export const PaneHeader: React.FC<PaneHeaderProps> = ({
@@ -80,7 +86,7 @@ export const PaneHeader: React.FC<PaneHeaderProps> = ({
       <span style={{ color, fontWeight: 600 }}>{label}</span>
       {pane.title && <span style={{ color: '#aaa' }}>{pane.title}</span>}
       {!connected && <span style={{ color: '#555' }}>reconnecting…</span>}
-      <div style={{ marginLeft: 'auto', display: 'flex', gap: '2px' }}>
+      <div style={{ marginLeft: 'auto', display: 'flex', gap: '4px' }}>
         <button
           title={isMaximized ? 'Restore' : 'Maximize'}
           onClick={onMaximize}
