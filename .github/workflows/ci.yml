@@ -93,5 +93,46 @@ jobs:
       - name: Coverage (Go)
         run: make coverage-go
 
+      - name: Coverage report (Go)
+        if: always()
+        run: |
+          total=$(go tool cover -func=coverage.out | awk '/^total:/{print $3}')
+          {
+            echo "### Go Coverage: ${total}"
+            echo ""
+            echo "<details><summary>Per-function breakdown</summary>"
+            echo ""
+            echo "| File | Function | Coverage |"
+            echo "| --- | --- | ---: |"
+            go tool cover -func=coverage.out | grep -v '^total:' | awk '{
+              split($1, a, ":")
+              printf "| `%s:%s` | `%s` | %s |\n", a[1], a[2], $2, $3
+            }'
+            echo ""
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Coverage (Frontend)
         run: make coverage-frontend
+
+      - name: Coverage report (Frontend)
+        if: always()
+        run: |
+          {
+            echo "### Frontend Coverage"
+            echo ""
+            echo "| File | Lines | Branches | Functions | Statements |"
+            echo "| --- | ---: | ---: | ---: | ---: |"
+            jq -r '
+              to_entries
+              | sort_by(.key == "total")
+              | .[]
+              | if .key == "total" then
+                  "| **Total** | **\(.value.lines.pct)%** | **\(.value.branches.pct)%** | **\(.value.functions.pct)%** | **\(.value.statements.pct)%** |"
+                elif (.key | test("\\.test\\.ts$")) then
+                  empty
+                else
+                  "| `\(.key | split("src/") | last)` | \(.value.lines.pct)% | \(.value.branches.pct)% | \(.value.functions.pct)% | \(.value.statements.pct)% |"
+                end
+            ' frontend/coverage/coverage-summary.json
+          } >> "$GITHUB_STEP_SUMMARY"
