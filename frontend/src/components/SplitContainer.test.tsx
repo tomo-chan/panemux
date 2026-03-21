@@ -25,6 +25,7 @@ function makeCtx(maximizedPaneId: string | null): LayoutActionsContextValue {
     onMaximize: vi.fn(),
     maximizedPaneId,
     displayConfig: { show_header: false, show_status_bar: false },
+    editMode: false,
   }
 }
 

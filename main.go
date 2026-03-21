@@ -45,7 +45,11 @@ func main() {
 			log.Fatalf("Failed to load config: %v", err)
 		}
 	} else {
-		cfg = config.Default()
+		var err error
+		cfg, err = config.LoadOrDefault()
+		if err != nil {
+			log.Fatalf("Failed to load config: %v", err)
+		}
 	}
 
 	if *port != 0 {

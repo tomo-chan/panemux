@@ -335,6 +335,67 @@ func TestValidate_TmuxSessionValidChars_NoError(t *testing.T) {
 	assert.NoError(t, cfg.Validate())
 }
 
+func TestDefaultConfigPath_ContainsExpectedSuffix(t *testing.T) {
+	path, err := DefaultConfigPath()
+	require.NoError(t, err)
+	assert.True(t, strings.HasSuffix(path, filepath.Join(".config", "panemux", "config.yaml")),
+		"expected path to end with .config/panemux/config.yaml, got %s", path)
+}
+
+func TestLoadOrDefault_FileNotExist_ReturnsDefaultWithPath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nonexistent", "config.yaml")
+	cfg, err := loadOrDefaultAt(path)
+	require.NoError(t, err)
+	assert.Equal(t, 8080, cfg.Server.Port)
+	assert.Equal(t, path, cfg.filePath)
+}
+
+func TestLoadOrDefault_FileExists_LoadsIt(t *testing.T) {
+	content := `
+server:
+  port: 9999
+  host: "127.0.0.1"
+layout:
+  direction: horizontal
+  children:
+    - size: 100
+      pane:
+        id: main
+        type: local
+`
+	f := writeTempFile(t, content)
+	cfg, err := loadOrDefaultAt(f)
+	require.NoError(t, err)
+	assert.Equal(t, 9999, cfg.Server.Port)
+	assert.Equal(t, f, cfg.filePath)
+}
+
+func TestLoadOrDefault_FileExistsButInvalid_ReturnsError(t *testing.T) {
+	f := writeTempFile(t, "::invalid yaml::")
+	_, err := loadOrDefaultAt(f)
+	assert.Error(t, err)
+}
+
+func TestSaveLayout_CreatesParentDirectory(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "nested", "dirs")
+	path := filepath.Join(dir, "config.yaml")
+	cfg := Default()
+	cfg.filePath = path
+	err := cfg.SaveLayout(cfg.Layout)
+	require.NoError(t, err)
+	_, statErr := os.Stat(path)
+	assert.NoError(t, statErr, "config file should have been created")
+}
+
+func TestUpdateLayout_UpdatesMemoryOnly(t *testing.T) {
+	cfg := &Config{}
+	newLayout := LayoutNode{Direction: "horizontal", Children: []LayoutChild{{Size: 100}}}
+	cfg.UpdateLayout(newLayout)
+	if cfg.Layout.Direction != "horizontal" {
+		t.Errorf("expected horizontal, got %s", cfg.Layout.Direction)
+	}
+}
+
 // helpers
 
 func validConfig() *Config {

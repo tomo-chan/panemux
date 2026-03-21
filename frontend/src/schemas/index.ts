@@ -68,3 +68,9 @@ export const WSControlMessageSchema = z.discriminatedUnion('type', [
 ])
 
 export type WSControlMessage = z.infer<typeof WSControlMessageSchema>
+
+export const EditModeResponseSchema = z.object({
+  editMode: z.boolean(),
+})
+
+export type EditModeResponse = z.infer<typeof EditModeResponseSchema>

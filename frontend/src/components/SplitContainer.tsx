@@ -9,6 +9,7 @@ export interface LayoutActionsContextValue {
   onMaximize: (paneId: string | null) => void
   maximizedPaneId: string | null
   displayConfig: DisplayConfig
+  editMode: boolean
 }
 
 export const LayoutActionsContext = React.createContext<LayoutActionsContextValue | null>(null)

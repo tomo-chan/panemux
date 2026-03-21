@@ -46,6 +46,8 @@ func setupRouter(cfg *config.Config, mgr *session.Manager) *chi.Mux {
 	r.Delete("/api/sessions/{id}", h.DeleteSession)
 	r.Post("/api/sessions/{id}/restart", h.RestartSession)
 	r.Get("/api/display", h.GetDisplay)
+	r.Get("/api/edit-mode", h.GetEditMode)
+	r.Put("/api/edit-mode", h.PutEditMode)
 	return r
 }
 
@@ -226,6 +228,158 @@ func TestRestartSession_NotFound_404(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/sessions/nonexistent/restart", nil)
 	r.ServeHTTP(rec, req)
 	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+func TestGetEditMode_DefaultFalse(t *testing.T) {
+	r := setupRouter(defaultTestConfig(), session.NewManager())
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/edit-mode", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var resp editModeResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.False(t, resp.EditMode)
+}
+
+func TestPutEditMode_TurnOn(t *testing.T) {
+	r := setupRouter(defaultTestConfig(), session.NewManager())
+	body, _ := json.Marshal(editModeResponse{EditMode: true})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/edit-mode", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var resp editModeResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.True(t, resp.EditMode)
+
+	// Subsequent GET should also return true
+	rec2 := httptest.NewRecorder()
+	req2 := httptest.NewRequest(http.MethodGet, "/api/edit-mode", nil)
+	r.ServeHTTP(rec2, req2)
+	var resp2 editModeResponse
+	require.NoError(t, json.NewDecoder(rec2.Body).Decode(&resp2))
+	assert.True(t, resp2.EditMode)
+}
+
+func TestPutEditMode_TurnOff(t *testing.T) {
+	r := setupRouter(defaultTestConfig(), session.NewManager())
+
+	// Turn on first
+	body, _ := json.Marshal(editModeResponse{EditMode: true})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/edit-mode", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	// Now turn off
+	body2, _ := json.Marshal(editModeResponse{EditMode: false})
+	rec2 := httptest.NewRecorder()
+	req2 := httptest.NewRequest(http.MethodPut, "/api/edit-mode", bytes.NewReader(body2))
+	req2.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(rec2, req2)
+
+	assert.Equal(t, http.StatusOK, rec2.Code)
+	var resp editModeResponse
+	require.NoError(t, json.NewDecoder(rec2.Body).Decode(&resp))
+	assert.False(t, resp.EditMode)
+}
+
+func TestPutEditMode_InvalidBody_400(t *testing.T) {
+	r := setupRouter(defaultTestConfig(), session.NewManager())
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/edit-mode", bytes.NewBufferString("not json"))
+	r.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestPutLayout_EditModeOff_DoesNotPersist(t *testing.T) {
+	cfg := defaultTestConfig()
+	r := setupRouter(cfg, session.NewManager())
+
+	// editMode is false by default
+	layout := config.LayoutNode{
+		Direction: "vertical",
+		Children:  []config.LayoutChild{{Size: 100, Pane: &config.PaneConfig{ID: "main", Type: "local"}}},
+	}
+	body, _ := json.Marshal(layout)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/layout", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	// In-memory layout should be updated
+	assert.Equal(t, "vertical", cfg.Layout.Direction)
+}
+
+func TestPutLayout_EditModeOn_Persists(t *testing.T) {
+	cfg := defaultTestConfig()
+	r := setupRouter(cfg, session.NewManager())
+
+	// Turn on edit mode
+	body, _ := json.Marshal(editModeResponse{EditMode: true})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/edit-mode", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	layout := config.LayoutNode{
+		Direction: "vertical",
+		Children:  []config.LayoutChild{{Size: 100, Pane: &config.PaneConfig{ID: "main", Type: "local"}}},
+	}
+	body2, _ := json.Marshal(layout)
+	rec2 := httptest.NewRecorder()
+	req2 := httptest.NewRequest(http.MethodPut, "/api/layout", bytes.NewReader(body2))
+	req2.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(rec2, req2)
+
+	assert.Equal(t, http.StatusOK, rec2.Code)
+	assert.Equal(t, "vertical", cfg.Layout.Direction)
+}
+
+func TestDeleteSession_EditModeOff_DoesNotSave(t *testing.T) {
+	mgr := session.NewManager()
+	mgr.Add(newMockSession("s1"))
+	cfg := defaultTestConfig()
+	r := setupRouter(cfg, mgr)
+
+	// editMode is false by default
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/sessions/s1", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+	// session removed
+	_, ok := mgr.Get("s1")
+	assert.False(t, ok)
+}
+
+func TestDeleteSession_EditModeOn_Saves(t *testing.T) {
+	mgr := session.NewManager()
+	mgr.Add(newMockSession("s1"))
+	cfg := defaultTestConfig()
+	r := setupRouter(cfg, mgr)
+
+	// Turn on edit mode
+	body, _ := json.Marshal(editModeResponse{EditMode: true})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/edit-mode", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	rec2 := httptest.NewRecorder()
+	req2 := httptest.NewRequest(http.MethodDelete, "/api/sessions/s1", nil)
+	r.ServeHTTP(rec2, req2)
+
+	assert.Equal(t, http.StatusNoContent, rec2.Code)
+	_, ok := mgr.Get("s1")
+	assert.False(t, ok)
 }
 
 func TestGetDisplay_ReturnsJSON(t *testing.T) {

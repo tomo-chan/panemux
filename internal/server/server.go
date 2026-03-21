@@ -43,6 +43,8 @@ func New(cfg *config.Config, manager *session.Manager, frontendFS embed.FS) *Ser
 		r.Delete("/sessions/{id}", apiHandler.DeleteSession)
 		r.Post("/sessions/{id}/restart", apiHandler.RestartSession)
 		r.Get("/display", apiHandler.GetDisplay)
+		r.Get("/edit-mode", apiHandler.GetEditMode)
+		r.Put("/edit-mode", apiHandler.PutEditMode)
 	})
 
 	// WebSocket

@@ -142,6 +142,35 @@ func expandPanesCwd(children []LayoutChild) {
 	}
 }
 
+// DefaultConfigPath returns the default config file path: ~/.config/panemux/config.yaml.
+func DefaultConfigPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("getting home directory: %w", err)
+	}
+	return filepath.Join(home, ".config", "panemux", "config.yaml"), nil
+}
+
+// LoadOrDefault loads from the default config path if the file exists,
+// otherwise returns a Default config with filePath set to the default path
+// so that future saves go there.
+func LoadOrDefault() (*Config, error) {
+	path, err := DefaultConfigPath()
+	if err != nil {
+		return Default(), nil
+	}
+	return loadOrDefaultAt(path)
+}
+
+func loadOrDefaultAt(path string) (*Config, error) {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		cfg := Default()
+		cfg.filePath = path
+		return cfg, nil
+	}
+	return Load(path)
+}
+
 // SaveLayout updates the layout section and writes back to file, preserving comments.
 func (c *Config) SaveLayout(layout LayoutNode) error {
 	c.Layout = layout
@@ -149,11 +178,20 @@ func (c *Config) SaveLayout(layout LayoutNode) error {
 		return nil // no file to save to
 	}
 
+	if err := os.MkdirAll(filepath.Dir(c.filePath), 0750); err != nil {
+		return fmt.Errorf("creating config directory: %w", err)
+	}
+
 	data, err := yaml.Marshal(c)
 	if err != nil {
 		return fmt.Errorf("marshaling config: %w", err)
 	}
 	return os.WriteFile(c.filePath, data, 0644)
+}
+
+// UpdateLayout updates the in-memory layout without persisting to disk.
+func (c *Config) UpdateLayout(layout LayoutNode) {
+	c.Layout = layout
 }
 
 // AllPanes returns a flat list of all pane configs.

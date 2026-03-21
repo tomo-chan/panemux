@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"embed"
 	"net/http"
 	"net/http/httptest"
@@ -69,18 +70,32 @@ func TestCorsMiddleware_OptionsReturns204(t *testing.T) {
 	assert.Equal(t, http.StatusNoContent, rr.Code)
 }
 
+func TestServer_EditModeRoutesWired(t *testing.T) {
+	cfg := testConfig()
+	mgr := session.NewManager()
+	srv := New(cfg, mgr, emptyFS)
+	require.NotNil(t, srv)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/edit-mode", nil)
+	srv.httpSrv.Handler.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	rec2 := httptest.NewRecorder()
+	req2 := httptest.NewRequest(http.MethodPut, "/api/edit-mode", bytes.NewBufferString(`{"editMode":true}`))
+	req2.Header.Set("Content-Type", "application/json")
+	srv.httpSrv.Handler.ServeHTTP(rec2, req2)
+	assert.Equal(t, http.StatusOK, rec2.Code)
+}
+
 func TestServer_APIRoutesWired(t *testing.T) {
 	cfg := testConfig()
 	mgr := session.NewManager()
 	srv := New(cfg, mgr, emptyFS)
 	require.NotNil(t, srv)
 
-	// Use the internal httpSrv handler to make requests without binding a port
-	ts := httptest.NewServer(srv.httpSrv.Handler)
-	defer ts.Close()
-
-	resp, err := http.Get(ts.URL + "/api/layout")
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/layout", nil)
+	srv.httpSrv.Handler.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusOK, rec.Code)
 }

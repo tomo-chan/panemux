@@ -3,7 +3,7 @@
 ## Startup Sequence
 
 1. Parse `--config`, `--open`, and `--port`.
-2. Load the specified YAML config, or create the built-in default config.
+2. Load config: if `--config` is given, load that file; otherwise try `~/.config/panemux/config.yaml`; if that file does not exist, use the built-in default config with `~/.config/panemux/config.yaml` as the save path.
 3. Override the configured port if `--port` is set.
 4. Create the in-memory session manager.
 5. Traverse the configured layout and create each pane session.
@@ -36,7 +36,8 @@ Path behavior:
 Persistence behavior:
 
 - `PUT /api/layout` updates in-memory layout always
-- file persistence happens only when the config came from a real file path
+- file persistence happens only when edit mode is ON (`PUT /api/edit-mode {"editMode":true}`)
+- when no `--config` is given, the default save path is `~/.config/panemux/config.yaml`; the directory is created automatically on first save
 
 ## REST API
 
