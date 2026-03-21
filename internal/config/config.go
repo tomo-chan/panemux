@@ -156,6 +156,11 @@ func (c *Config) SaveLayout(layout LayoutNode) error {
 	return os.WriteFile(c.filePath, data, 0644)
 }
 
+// UpdateLayout updates the in-memory layout without persisting to disk.
+func (c *Config) UpdateLayout(layout LayoutNode) {
+	c.Layout = layout
+}
+
 // AllPanes returns a flat list of all pane configs.
 func (c *Config) AllPanes() []*PaneConfig {
 	var panes []*PaneConfig

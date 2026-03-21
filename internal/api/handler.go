@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"sync/atomic"
 
 	"github.com/go-chi/chi/v5"
 
@@ -12,8 +13,13 @@ import (
 
 // Handler provides REST API endpoints.
 type Handler struct {
-	cfg     *config.Config
-	manager *session.Manager
+	cfg      *config.Config
+	manager  *session.Manager
+	editMode atomic.Bool
+}
+
+type editModeResponse struct {
+	EditMode bool `json:"editMode"`
 }
 
 // NewHandler creates a new API handler.
@@ -41,9 +47,13 @@ func (h *Handler) PutLayout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.cfg.SaveLayout(layout); err != nil {
-		http.Error(w, "failed to save layout", http.StatusInternalServerError)
-		return
+	if h.editMode.Load() {
+		if err := h.cfg.SaveLayout(layout); err != nil {
+			http.Error(w, "failed to save layout", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		h.cfg.UpdateLayout(layout)
 	}
 
 	writeJSON(w, layout)
@@ -109,7 +119,9 @@ func (h *Handler) DeleteSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.cfg.RemovePaneFromLayout(id)
-	h.cfg.SaveLayout(h.cfg.Layout) //nolint:errcheck
+	if h.editMode.Load() {
+		h.cfg.SaveLayout(h.cfg.Layout) //nolint:errcheck
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -143,6 +155,28 @@ func (h *Handler) RestartSession(w http.ResponseWriter, r *http.Request) {
 // GetDisplay returns the display configuration.
 func (h *Handler) GetDisplay(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, h.cfg.Display)
+}
+
+// GetEditMode returns the current edit mode state.
+func (h *Handler) GetEditMode(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, editModeResponse{EditMode: h.editMode.Load()})
+}
+
+// PutEditMode sets the edit mode state.
+func (h *Handler) PutEditMode(w http.ResponseWriter, r *http.Request) {
+	var req editModeResponse
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	h.editMode.Store(req.EditMode)
+	if req.EditMode {
+		if err := h.cfg.SaveLayout(h.cfg.Layout); err != nil {
+			http.Error(w, "failed to save layout", http.StatusInternalServerError)
+			return
+		}
+	}
+	writeJSON(w, editModeResponse{EditMode: h.editMode.Load()})
 }
 
 type sessionInfo struct {

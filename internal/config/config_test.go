@@ -335,6 +335,15 @@ func TestValidate_TmuxSessionValidChars_NoError(t *testing.T) {
 	assert.NoError(t, cfg.Validate())
 }
 
+func TestUpdateLayout_UpdatesMemoryOnly(t *testing.T) {
+	cfg := &Config{}
+	newLayout := LayoutNode{Direction: "horizontal", Children: []LayoutChild{{Size: 100}}}
+	cfg.UpdateLayout(newLayout)
+	if cfg.Layout.Direction != "horizontal" {
+		t.Errorf("expected horizontal, got %s", cfg.Layout.Direction)
+	}
+}
+
 // helpers
 
 func validConfig() *Config {

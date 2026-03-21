@@ -1,6 +1,8 @@
 import React, { useState } from 'react'
 import { SplitContainer, LayoutActionsContext } from './components/SplitContainer'
+import { EditModeToggle } from './components/EditModeToggle'
 import { useLayout } from './hooks/useLayout'
+import { useEditMode } from './hooks/useEditMode'
 import { DisplayConfig } from './types'
 import { TERMINAL_FONT_FAMILY } from './utils/fonts'
 
@@ -8,6 +10,7 @@ const DEFAULT_DISPLAY: DisplayConfig = { show_header: true, show_status_bar: fal
 
 export const App: React.FC = () => {
   const { layout, displayConfig, error, updateSizes, splitPane, closePane } = useLayout()
+  const { editMode, toggleEditMode } = useEditMode()
   const [maximizedPaneId, setMaximizedPaneId] = useState<string | null>(null)
 
   if (error) {
@@ -49,9 +52,11 @@ export const App: React.FC = () => {
       onMaximize: setMaximizedPaneId,
       maximizedPaneId,
       displayConfig: displayConfig ?? DEFAULT_DISPLAY,
+      editMode,
     }}>
       <div style={{ position: 'relative', width: '100%', height: '100%' }}>
         <SplitContainer layout={layout} onLayoutChange={updateSizes} />
+        <EditModeToggle editMode={editMode} onToggle={toggleEditMode} />
       </div>
     </LayoutActionsContext.Provider>
   )
