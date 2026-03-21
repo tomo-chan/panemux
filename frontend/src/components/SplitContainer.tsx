@@ -1,4 +1,4 @@
-import React, { useCallback, useRef } from 'react'
+import React, { useCallback, useContext, useRef } from 'react'
 import { DisplayConfig, LayoutChild, LayoutNode } from '../types'
 import { SplitDivider } from './SplitDivider'
 import { TerminalPane } from './TerminalPane'
@@ -34,9 +34,10 @@ interface LayoutRendererProps {
   onChildrenChange: (children: LayoutChild[]) => void
 }
 
-const LayoutRenderer: React.FC<LayoutRendererProps> = ({ direction, children, onChildrenChange }) => {
+export const LayoutRenderer: React.FC<LayoutRendererProps> = ({ direction, children, onChildrenChange }) => {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const isHorizontal = direction === 'horizontal'
+  const layoutCtx = useContext(LayoutActionsContext)
 
   const handleDrag = useCallback((index: number, delta: number) => {
     if (!containerRef.current) return
@@ -73,6 +74,7 @@ const LayoutRenderer: React.FC<LayoutRendererProps> = ({ direction, children, on
       {children.map((child, index) => {
         const key = child.pane?.id ?? `split-${direction}-${index}`
         const isLast = index === children.length - 1
+        const isMaximized = child.pane?.id !== undefined && child.pane.id === layoutCtx?.maximizedPaneId
         return (
           <React.Fragment key={key}>
             <div
@@ -82,6 +84,12 @@ const LayoutRenderer: React.FC<LayoutRendererProps> = ({ direction, children, on
                 flexGrow: 0,
                 overflow: 'hidden',
                 ...(isHorizontal ? { minWidth: 50 } : { minHeight: 50 }),
+                ...(isMaximized ? {
+                  position: 'absolute',
+                  inset: 0,
+                  zIndex: 10,
+                  backgroundColor: '#1a1b1e',
+                } : {}),
               }}
             >
               <ChildRenderer

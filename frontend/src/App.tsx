@@ -1,10 +1,8 @@
 import React, { useState } from 'react'
 import { SplitContainer, LayoutActionsContext } from './components/SplitContainer'
-import { TerminalPane } from './components/TerminalPane'
 import { useLayout } from './hooks/useLayout'
 import { DisplayConfig } from './types'
 import { TERMINAL_FONT_FAMILY } from './utils/fonts'
-import { findPaneById } from './utils/layoutTree'
 
 const DEFAULT_DISPLAY: DisplayConfig = { show_header: true, show_status_bar: false }
 
@@ -44,8 +42,6 @@ export const App: React.FC = () => {
     )
   }
 
-  const maximizedPane = maximizedPaneId ? findPaneById(layout, maximizedPaneId) : null
-
   return (
     <LayoutActionsContext.Provider value={{
       onSplit: splitPane,
@@ -56,11 +52,6 @@ export const App: React.FC = () => {
     }}>
       <div style={{ position: 'relative', width: '100%', height: '100%' }}>
         <SplitContainer layout={layout} onLayoutChange={updateSizes} />
-        {maximizedPane && (
-          <div style={{ position: 'absolute', inset: 0, zIndex: 10, backgroundColor: '#1a1b1e' }}>
-            <TerminalPane pane={maximizedPane} />
-          </div>
-        )}
       </div>
     </LayoutActionsContext.Provider>
   )
