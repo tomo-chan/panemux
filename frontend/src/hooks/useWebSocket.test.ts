@@ -178,6 +178,33 @@ describe('useWebSocket', () => {
     expect(MockWebSocket.instances[0].sent).toHaveLength(0)
   })
 
+  it('reconnect creates a new WebSocket connection', () => {
+    const onMessage = vi.fn()
+    const { result } = renderHook(() =>
+      useWebSocket('ws://localhost/ws/s1', { onMessage })
+    )
+    act(() => MockWebSocket.instances[0].simulateOpen())
+
+    const countBefore = MockWebSocket.instances.length
+    act(() => result.current.reconnect())
+
+    expect(MockWebSocket.instances.length).toBeGreaterThan(countBefore)
+  })
+
+  it('reconnect works even after max attempts are exhausted', () => {
+    const onMessage = vi.fn()
+    const { result } = renderHook(() =>
+      useWebSocket('ws://localhost/ws/s1', { onMessage, reconnectDelay: 100, maxReconnectAttempts: 1 })
+    )
+    // Exhaust reconnect attempts
+    act(() => MockWebSocket.instances[0].simulateClose())
+    act(() => vi.advanceTimersByTime(200))
+    expect(MockWebSocket.instances).toHaveLength(1) // stopped reconnecting
+
+    act(() => result.current.reconnect())
+    expect(MockWebSocket.instances).toHaveLength(2)
+  })
+
   it('passes binary messages through without validation', () => {
     const onMessage = vi.fn()
     renderHook(() => useWebSocket('ws://localhost/ws/s1', { onMessage }))

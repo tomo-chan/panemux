@@ -30,7 +30,7 @@ func NewTmuxLocal(id, title, tmuxSession string) (*TmuxLocalSession, error) {
 		tmuxSession = "0"
 	}
 
-	cmd := exec.Command("tmux", "attach-session", "-t", tmuxSession)
+	cmd := exec.Command("tmux", "new-session", "-A", "-s", tmuxSession)
 	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 

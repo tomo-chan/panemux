@@ -20,7 +20,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
     setContainerEl(el)
   }, [])
 
-  const { handleResize, connected, dims } = useTerminal({
+  const { handleResize, connected, dims, sessionExited, restartSession } = useTerminal({
     sessionId: pane.id,
     container: containerEl,
   })
@@ -62,8 +62,36 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
           flex: 1,
           overflow: 'hidden',
           padding: '4px',
+          position: 'relative',
         }}
-      />
+      >
+        {sessionExited && (
+          <div style={{
+            position: 'absolute',
+            inset: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: 'rgba(0, 0, 0, 0.6)',
+            zIndex: 10,
+          }}>
+            <button
+              onClick={restartSession}
+              style={{
+                padding: '6px 18px',
+                backgroundColor: '#3f3f46',
+                color: '#d4d4d4',
+                border: '1px solid #52525b',
+                borderRadius: '4px',
+                fontSize: '13px',
+                cursor: 'pointer',
+              }}
+            >
+              Restart Session
+            </button>
+          </div>
+        )}
+      </div>
       <PaneStatusBar
         pane={pane}
         displayConfig={displayConfig}

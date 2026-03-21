@@ -353,6 +353,57 @@ describe('useTerminal', () => {
     expect(document.execCommand).toHaveBeenCalledWith('copy')
   })
 
+  it('sessionExited is false initially', () => {
+    const container = makeContainer()
+    const { result } = renderHook(() => useTerminal({ sessionId: 's1', container }))
+    expect(result.current.sessionExited).toBe(false)
+  })
+
+  it('sessionExited is true after exited status frame', () => {
+    const container = makeContainer()
+    const { result } = renderHook(() => useTerminal({ sessionId: 's1', container }))
+    act(() => MockWebSocket.instances[0].simulateOpen())
+
+    act(() =>
+      MockWebSocket.instances[0].simulateMessage(
+        JSON.stringify({ type: 'status', state: 'exited' })
+      )
+    )
+    expect(result.current.sessionExited).toBe(true)
+  })
+
+  it('sessionExited resets to false when WebSocket reconnects', () => {
+    const container = makeContainer()
+    const { result } = renderHook(() => useTerminal({ sessionId: 's1', container }))
+    act(() => MockWebSocket.instances[0].simulateOpen())
+
+    act(() =>
+      MockWebSocket.instances[0].simulateMessage(
+        JSON.stringify({ type: 'status', state: 'exited' })
+      )
+    )
+    expect(result.current.sessionExited).toBe(true)
+
+    // Simulate WebSocket reconnecting
+    act(() => MockWebSocket.instances[0].simulateOpen())
+    expect(result.current.sessionExited).toBe(false)
+  })
+
+  it('restartSession calls restart API then reconnects', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const container = makeContainer()
+    const { result } = renderHook(() => useTerminal({ sessionId: 'pane1', container }))
+    act(() => MockWebSocket.instances[0].simulateOpen())
+
+    const countBefore = MockWebSocket.instances.length
+    await act(async () => { await result.current.restartSession() })
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/pane1/restart', { method: 'POST' })
+    expect(MockWebSocket.instances.length).toBeGreaterThan(countBefore)
+  })
+
   it('reuses the same terminal instance across remounts for the same session', () => {
     const firstContainer = makeContainer()
     const secondContainer = makeContainer()

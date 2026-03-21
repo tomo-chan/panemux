@@ -41,6 +41,7 @@ func New(cfg *config.Config, manager *session.Manager, frontendFS embed.FS) *Ser
 		r.Get("/sessions", apiHandler.GetSessions)
 		r.Post("/sessions", apiHandler.PostSession)
 		r.Delete("/sessions/{id}", apiHandler.DeleteSession)
+		r.Post("/sessions/{id}/restart", apiHandler.RestartSession)
 		r.Get("/display", apiHandler.GetDisplay)
 	})
 
