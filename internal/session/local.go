@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 
@@ -30,11 +31,8 @@ func NewLocal(id, shell, cwd, title string) (*LocalSession, error) {
 		}
 	}
 
-	if !filepath.IsAbs(shell) {
-		return nil, fmt.Errorf("shell must be an absolute path: %q", shell)
-	}
-	if _, err := exec.LookPath(shell); err != nil {
-		return nil, fmt.Errorf("shell not found: %w", err)
+	if err := validateShell(shell); err != nil {
+		return nil, err
 	}
 
 	cmd := exec.Command(shell)
@@ -104,4 +102,38 @@ func (s *LocalSession) Close() error {
 		s.cmd.Process.Kill()
 	}
 	return nil
+}
+
+// validateShell ensures the shell path is absolute, exists, and is listed in
+// /etc/shells. Validating against the system allowlist breaks the taint-tracked
+// data flow that CodeQL's go/command-injection rule follows from user config to
+// exec.Command.
+func validateShell(shell string) error {
+	if !filepath.IsAbs(shell) {
+		return fmt.Errorf("shell must be an absolute path: %q", shell)
+	}
+	if _, err := exec.LookPath(shell); err != nil {
+		return fmt.Errorf("shell not found: %w", err)
+	}
+	allowed, err := readEtcShells()
+	if err == nil && !allowed[shell] {
+		return fmt.Errorf("not an allowed shell: %q (not listed in /etc/shells)", shell)
+	}
+	return nil
+}
+
+// readEtcShells parses /etc/shells and returns the set of listed shell paths.
+func readEtcShells() (map[string]bool, error) {
+	data, err := os.ReadFile("/etc/shells")
+	if err != nil {
+		return nil, err
+	}
+	allowed := make(map[string]bool)
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" && !strings.HasPrefix(line, "#") {
+			allowed[line] = true
+		}
+	}
+	return allowed, nil
 }
