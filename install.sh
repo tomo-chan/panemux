@@ -175,9 +175,9 @@ main() {
   archive_url="$(printf '%s' "$release_json" | find_asset_url "$archive_name")" || die "release asset not found: $archive_name"
   checksums_url="$(printf '%s' "$release_json" | find_asset_url "$checksums_name")" || die "checksums.txt not found in release"
 
-  local tmpdir archive_path checksums_path
   tmpdir="$(mktemp -d)"
   trap 'rm -rf "$tmpdir"' EXIT
+  local archive_path checksums_path
   archive_path="${tmpdir}/${archive_name}"
   checksums_path="${tmpdir}/${checksums_name}"
 
