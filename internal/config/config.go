@@ -15,11 +15,12 @@ type ServerConfig struct {
 }
 
 type SSHConnection struct {
-	Host    string `yaml:"host"`
-	Port    int    `yaml:"port"`
-	User    string `yaml:"user"`
-	KeyFile string `yaml:"key_file"`
-	Password string `yaml:"password,omitempty"`
+	Host           string `yaml:"host"`
+	Port           int    `yaml:"port"`
+	User           string `yaml:"user"`
+	KeyFile        string `yaml:"key_file"`
+	Password       string `yaml:"password,omitempty"`
+	KnownHostsFile string `yaml:"known_hosts_file,omitempty" json:"known_hosts_file,omitempty"`
 }
 
 type DisplayConfig struct {
@@ -119,11 +120,14 @@ func Default() *Config {
 
 func (c *Config) expandPaths() {
 	for key, conn := range c.SSHConnections {
+		home, _ := os.UserHomeDir()
 		if strings.HasPrefix(conn.KeyFile, "~/") {
-			home, _ := os.UserHomeDir()
 			conn.KeyFile = filepath.Join(home, conn.KeyFile[2:])
-			c.SSHConnections[key] = conn
 		}
+		if strings.HasPrefix(conn.KnownHostsFile, "~/") {
+			conn.KnownHostsFile = filepath.Join(home, conn.KnownHostsFile[2:])
+		}
+		c.SSHConnections[key] = conn
 	}
 	expandPanesCwd(c.Layout.Children)
 }

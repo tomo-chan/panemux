@@ -90,6 +90,12 @@ func TestNewLocal_Close(t *testing.T) {
 	assert.Equal(t, StateExited, sess.State())
 }
 
+func TestNewLocal_RelativeShell_Error(t *testing.T) {
+	_, err := NewLocal("test-id", "sh", "", "relative shell")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "absolute path")
+}
+
 func TestNewLocal_WithCwd(t *testing.T) {
 	tmpDir := os.TempDir()
 	sess, err := NewLocal("cwd-test", "/bin/sh", tmpDir, "cwd")

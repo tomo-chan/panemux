@@ -3,8 +3,11 @@ package config
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 )
+
+var tmuxSessionNameRe = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`)
 
 // Validate checks the configuration for correctness.
 // It collects all errors and returns them as a single combined error.
@@ -115,9 +118,15 @@ func validatePane(p *PaneConfig, sshConns map[string]SSHConnection) []string {
 		}
 	}
 
+	if p.Type == "local" && p.Shell != "" && !strings.HasPrefix(p.Shell, "/") {
+		errs = append(errs, fmt.Sprintf("pane %q: shell must be an absolute path, got %q", p.ID, p.Shell))
+	}
+
 	if p.Type == "tmux" || p.Type == "ssh_tmux" {
 		if p.TmuxSession == "" {
 			errs = append(errs, fmt.Sprintf("pane %q: tmux_session must not be empty", p.ID))
+		} else if !tmuxSessionNameRe.MatchString(p.TmuxSession) {
+			errs = append(errs, fmt.Sprintf("pane %q: tmux_session %q contains invalid characters (allowed: a-z A-Z 0-9 - _ .)", p.ID, p.TmuxSession))
 		}
 	}
 

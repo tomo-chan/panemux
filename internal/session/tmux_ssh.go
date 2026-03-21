@@ -33,10 +33,15 @@ func NewTmuxSSH(id, title, tmuxSession string, cfg SSHConfig) (*TmuxSSHSession, 
 		return nil, err
 	}
 
+	hkCallback, err := buildHostKeyCallback(cfg.KnownHostsFile)
+	if err != nil {
+		return nil, err
+	}
+
 	sshCfg := &ssh.ClientConfig{
 		User:            cfg.User,
 		Auth:            authMethods,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		HostKeyCallback: hkCallback,
 	}
 
 	port := cfg.Port
@@ -86,8 +91,8 @@ func NewTmuxSSH(id, title, tmuxSession string, cfg SSHConfig) (*TmuxSSHSession, 
 	sess.Stdout = pw
 	sess.Stderr = pw
 
-	// Attach to existing tmux session
-	if err := sess.Start(fmt.Sprintf("tmux attach-session -t %s", tmuxSession)); err != nil {
+	// Attach to existing tmux session (tmuxSession is validated as [a-zA-Z0-9_.-]+ by config)
+	if err := sess.Start(fmt.Sprintf("tmux attach-session -t '%s'", tmuxSession)); err != nil {
 		sess.Close()
 		client.Close()
 		return nil, fmt.Errorf("starting tmux attach: %w", err)
