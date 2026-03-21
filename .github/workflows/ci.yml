@@ -2,8 +2,29 @@ name: ci
 
 on:
   push:
-    branches: ['**']
+    branches:
+      - main
+    paths:
+      - '**/*.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'frontend/**'
+      - 'Makefile'
+      - '.github/workflows/ci.yml'
   pull_request:
+    branches:
+      - main
+    paths:
+      - '**/*.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'frontend/**'
+      - 'Makefile'
+      - '.github/workflows/ci.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -31,11 +52,14 @@ jobs:
       - name: Install dependencies
         run: make install-deps-ci
 
+      - name: Build frontend
+        run: make build-frontend
+
       - name: Lint
         run: make lint
 
-      - name: Build frontend
-        run: make build-frontend
+      - name: Install go-junit-report
+        run: go install github.com/jstemmer/go-junit-report/v2@latest
 
       - name: Create test-results directory
         run: mkdir -p test-results
@@ -43,7 +67,7 @@ jobs:
       - name: Test (Go)
         run: |
           set -o pipefail
-          go test -json ./... -race 2>&1 | tee test-results/go-test.json
+          go test -v ./... -race 2>&1 | go-junit-report -set-exit-code > test-results/go-junit.xml
 
       - name: Test (Frontend)
         run: cd frontend && npm run test:ci
@@ -53,8 +77,8 @@ jobs:
         if: always()
         with:
           name: Go Tests
-          path: test-results/go-test.json
-          reporter: go-test
+          path: test-results/go-junit.xml
+          reporter: jest-junit
           fail-on-error: false
 
       - name: Report Frontend test results
