@@ -4,10 +4,13 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"regexp"
 	"sync"
 
 	"golang.org/x/crypto/ssh"
 )
+
+var validTmuxSessionName = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`)
 
 // TmuxSSHSession attaches to a tmux session on a remote host via SSH.
 type TmuxSSHSession struct {
@@ -26,6 +29,9 @@ type TmuxSSHSession struct {
 func NewTmuxSSH(id, title, tmuxSession string, cfg SSHConfig) (*TmuxSSHSession, error) {
 	if tmuxSession == "" {
 		tmuxSession = "0"
+	}
+	if !validTmuxSessionName.MatchString(tmuxSession) {
+		return nil, fmt.Errorf("invalid tmux session name %q: must match ^[a-zA-Z0-9_.-]+$", tmuxSession)
 	}
 
 	authMethods, err := buildAuthMethods(cfg)

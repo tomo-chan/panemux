@@ -23,3 +23,15 @@ func TestBuildHostKeyCallback_ValidFile_NoError(t *testing.T) {
 	_, err := buildHostKeyCallback(knownHostsPath)
 	assert.NoError(t, err)
 }
+
+func TestNewTmuxSSH_InvalidSessionName_Error(t *testing.T) {
+	cfg := SSHConfig{
+		Host:     "127.0.0.1",
+		Port:     22,
+		User:     "user",
+		Password: "pass",
+	}
+	_, err := NewTmuxSSH("id", "title", "foo;bar$(evil)", cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid tmux session name")
+}
