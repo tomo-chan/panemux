@@ -5,12 +5,18 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"syscall"
 
 	"github.com/creack/pty"
 )
+
+// validShellPath matches a valid absolute shell path.
+// Only alphanumeric characters, dots, underscores, hyphens, and slashes are permitted.
+// This character allowlist is the sanitizer CodeQL requires for go/command-injection.
+var validShellPath = regexp.MustCompile(`^(/[a-zA-Z0-9._\-/]+)$`)
 
 // LocalSession is a local PTY-based terminal session.
 type LocalSession struct {
@@ -105,29 +111,29 @@ func (s *LocalSession) Close() error {
 	return nil
 }
 
-// validateShell ensures the shell path is absolute, exists, and is listed in
-// /etc/shells. It returns the shell path as read from /etc/shells (a trusted
-// source), not the original user-supplied value. This breaks the taint-tracked
-// data flow that CodeQL's go/command-injection rule follows from user config to
-// exec.Command — the returned string originates from file I/O, not user input.
+// validateShell ensures the shell path is safe to execute.
+// It validates the path against a character allowlist regex (per CodeQL's
+// go/command-injection recommendation), verifies the binary exists, and
+// cross-checks against /etc/shells. Returns the regex-sanitized path m[1],
+// whose value is constructed by the regex engine rather than copied from
+// user input, which satisfies CodeQL's taint-flow analysis.
 func validateShell(shell string) (string, error) {
 	if !filepath.IsAbs(shell) {
 		return "", fmt.Errorf("shell must be an absolute path: %q", shell)
 	}
-	if _, err := exec.LookPath(shell); err != nil {
+	m := validShellPath.FindStringSubmatch(shell)
+	if m == nil {
+		return "", fmt.Errorf("shell path contains invalid characters: %q (must match %s)", shell, validShellPath)
+	}
+	sanitized := m[1] // value constructed by regex engine from the safe character class
+	if _, err := exec.LookPath(sanitized); err != nil {
 		return "", fmt.Errorf("shell not found: %w", err)
 	}
 	allowed, err := readEtcShells()
-	if err != nil {
-		// /etc/shells not readable; accept any valid absolute path that exists.
-		return shell, nil
+	if err == nil && !allowed[sanitized] {
+		return "", fmt.Errorf("not an allowed shell: %q (not listed in /etc/shells)", sanitized)
 	}
-	for s := range allowed {
-		if s == shell {
-			return s, nil // s originates from /etc/shells, breaking the taint chain
-		}
-	}
-	return "", fmt.Errorf("not an allowed shell: %q (not listed in /etc/shells)", shell)
+	return sanitized, nil
 }
 
 // readEtcShells parses /etc/shells and returns the set of listed shell paths.

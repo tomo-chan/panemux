@@ -121,3 +121,9 @@ func TestValidateShell_NotInEtcShells_Error(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not an allowed shell")
 }
+
+func TestValidateShell_InvalidChars_Error(t *testing.T) {
+	_, err := validateShell("/bin/sh; rm -rf /")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid characters")
+}
