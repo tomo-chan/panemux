@@ -93,46 +93,122 @@ jobs:
       - name: Coverage (Go)
         run: make coverage-go
 
-      - name: Coverage report (Go)
-        if: always()
-        run: |
-          total=$(go tool cover -func=coverage.out | awk '/^total:/{print $3}')
-          {
-            echo "### Go Coverage: ${total}"
-            echo ""
-            echo "<details><summary>Per-function breakdown</summary>"
-            echo ""
-            echo "| File | Function | Coverage |"
-            echo "| --- | --- | ---: |"
-            go tool cover -func=coverage.out | grep -v '^total:' | awk '{
-              split($1, a, ":")
-              printf "| `%s:%s` | `%s` | %s |\n", a[1], a[2], $2, $3
-            }'
-            echo ""
-            echo "</details>"
-          } >> "$GITHUB_STEP_SUMMARY"
-
       - name: Coverage (Frontend)
         run: make coverage-frontend
 
-      - name: Coverage report (Frontend)
+      - name: Generate summary
         if: always()
         run: |
-          {
-            echo "### Frontend Coverage"
-            echo ""
-            echo "| File | Lines | Branches | Functions | Statements |"
-            echo "| --- | ---: | ---: | ---: | ---: |"
-            jq -r '
-              to_entries
-              | sort_by(.key == "total")
-              | .[]
-              | if .key == "total" then
-                  "| **Total** | **\(.value.lines.pct)%** | **\(.value.branches.pct)%** | **\(.value.functions.pct)%** | **\(.value.statements.pct)%** |"
-                elif (.key | test("\\.test\\.ts$")) then
-                  empty
-                else
-                  "| `\(.key | split("src/") | last)` | \(.value.lines.pct)% | \(.value.branches.pct)% | \(.value.functions.pct)% | \(.value.statements.pct)% |"
-                end
-            ' frontend/coverage/coverage-summary.json
-          } >> "$GITHUB_STEP_SUMMARY"
+          python3 - << 'PYEOF'
+          import xml.etree.ElementTree as ET
+          import json, subprocess, os
+
+          out = os.environ.get('GITHUB_STEP_SUMMARY', '/dev/stdout')
+
+          def parse_junit(path):
+              if not os.path.exists(path):
+                  return 0, 0, 0, []
+              root = ET.parse(path).getroot()
+              suite_elems = root.findall('testsuite') if root.tag == 'testsuites' else [root]
+              total = passed = failed = 0
+              suites = []
+              for s in suite_elems:
+                  t = int(s.get('tests', 0))
+                  f = int(s.get('failures', 0)) + int(s.get('errors', 0))
+                  total += t; failed += f; passed += t - f
+                  cases = [(c.get('name',''),
+                            '❌' if (c.find('failure') is not None or c.find('error') is not None) else '✅',
+                            float(c.get('time', 0)))
+                           for c in s.findall('testcase')]
+                  if cases:
+                      suites.append((s.get('name',''), cases))
+              return total, passed, failed, suites
+
+          def go_coverage():
+              if not os.path.exists('coverage.out'):
+                  return 'N/A', []
+              r = subprocess.run(['go', 'tool', 'cover', '-func=coverage.out'],
+                                 capture_output=True, text=True)
+              if r.returncode != 0:
+                  return 'N/A', []
+              lines, total = [], 'N/A'
+              for line in r.stdout.strip().splitlines():
+                  parts = line.split()
+                  if not parts:
+                      continue
+                  if parts[0] == 'total:':
+                      total = parts[2]
+                  else:
+                      lines.append((parts[0].rstrip(':'), parts[1], parts[2]))
+              return total, lines
+
+          def frontend_coverage():
+              path = 'frontend/coverage/coverage-summary.json'
+              if not os.path.exists(path):
+                  return 'N/A', {}, []
+              data = json.load(open(path))
+              total_d = data.get('total', {})
+              rows = [(k.split('src/')[-1] if 'src/' in k else k,
+                       f"{v['lines']['pct']}%", f"{v['branches']['pct']}%",
+                       f"{v['functions']['pct']}%", f"{v['statements']['pct']}%")
+                      for k, v in sorted(data.items())
+                      if k != 'total' and not k.endswith('.test.ts')]
+              return f"{total_d.get('lines',{}).get('pct',0)}%", total_d, rows
+
+          go_total, go_passed, go_failed, go_suites = parse_junit('test-results/go-junit.xml')
+          go_cov, go_cov_lines                      = go_coverage()
+          fe_total, fe_passed, fe_failed, fe_suites = parse_junit('test-results/vitest.xml')
+          fe_cov, fe_cov_data, fe_cov_rows          = frontend_coverage()
+
+          with open(out, 'a') as f:
+              def section(icon, label, passed, failed, cov, cov_unit,
+                          suites, cov_header, cov_rows, cov_footer=''):
+                  f.write(f"## {icon} {label}\n\n")
+                  fail_txt = f", **{failed} failed**" if failed else ""
+                  f.write(f"Tests: **{passed} passed**{fail_txt}"
+                          f" &nbsp;·&nbsp; Coverage: **{cov}**{cov_unit}\n\n")
+
+                  f.write("<details><summary>Test details</summary>\n\n")
+                  f.write("| Suite | Test | | Duration |\n"
+                          "| --- | --- | :---: | ---: |\n")
+                  for suite, cases in suites:
+                      for name, status, dur in cases:
+                          f.write(f"| `{suite}` | {name} | {status} | {dur:.3f}s |\n")
+                  f.write("\n</details>\n\n")
+
+                  f.write("<details><summary>Coverage breakdown</summary>\n\n")
+                  f.write(cov_header)
+                  for row in cov_rows:
+                      f.write(row)
+                  if cov_footer:
+                      f.write(cov_footer)
+                  f.write("\n</details>\n\n")
+
+              go_cov_header = "| File | Function | Coverage |\n| --- | --- | ---: |\n"
+              go_cov_row_lines = [f"| `{fl}` | `{fn}` | {pct} |\n"
+                                  for fl, fn, pct in go_cov_lines]
+              go_suites_short = [(s.replace('panemux/', ''), cases)
+                                 for s, cases in go_suites]
+
+              section('✅' if go_failed == 0 else '❌', 'Backend (Go)',
+                      go_passed, go_failed, go_cov, '',
+                      go_suites_short, go_cov_header, go_cov_row_lines)
+
+              f.write("---\n\n")
+
+              fe_cov_header = ("| File | Lines | Branches | Functions | Statements |\n"
+                               "| --- | ---: | ---: | ---: | ---: |\n")
+              fe_cov_row_lines = [f"| `{r[0]}` | {r[1]} | {r[2]} | {r[3]} | {r[4]} |\n"
+                                  for r in fe_cov_rows]
+              d = fe_cov_data
+              fe_cov_footer = (f"| **Total** | **{d.get('lines',{}).get('pct',0)}%** |"
+                               f" **{d.get('branches',{}).get('pct',0)}%** |"
+                               f" **{d.get('functions',{}).get('pct',0)}%** |"
+                               f" **{d.get('statements',{}).get('pct',0)}%** |\n")
+              fe_suites_short = [(s.split('src/')[-1] if 'src/' in s else s, cases)
+                                 for s, cases in fe_suites]
+
+              section('✅' if fe_failed == 0 else '❌', 'Frontend',
+                      fe_passed, fe_failed, fe_cov, ' lines',
+                      fe_suites_short, fe_cov_header, fe_cov_row_lines, fe_cov_footer)
+          PYEOF
