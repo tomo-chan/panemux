@@ -178,4 +178,4 @@ Please keep pull requests focused. One logical change per PR makes review faster
 
 ## License
 
-[MIT](LICENSE) — Copyright (c) 2024-present panemux contributors
+[MIT](LICENSE) — Copyright (c) 2026 tomo-chan
