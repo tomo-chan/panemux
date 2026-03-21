@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { splitPaneInTree, removePaneFromTree, generatePaneId } from './layoutTree'
+import { splitPaneInTree, removePaneFromTree, generatePaneId, findPaneById } from './layoutTree'
 import type { LayoutNode } from '../schemas'
 
 const simpleLayout: LayoutNode = {
@@ -120,6 +120,42 @@ describe('removePaneFromTree', () => {
   it('returns unchanged layout when pane not found', () => {
     const result = removePaneFromTree(twoChildLayout, 'nonexistent')
     expect(result!.children).toHaveLength(2)
+  })
+})
+
+describe('findPaneById', () => {
+  it('finds a top-level pane', () => {
+    const result = findPaneById(simpleLayout, 'main')
+    expect(result?.id).toBe('main')
+  })
+
+  it('finds a pane among siblings', () => {
+    const result = findPaneById(twoChildLayout, 'right')
+    expect(result?.id).toBe('right')
+  })
+
+  it('finds a deeply nested pane', () => {
+    const nested: LayoutNode = {
+      direction: 'horizontal',
+      children: [
+        { size: 50, pane: { id: 'left', type: 'local' } },
+        {
+          size: 50,
+          direction: 'vertical',
+          children: [
+            { size: 50, pane: { id: 'top-right', type: 'local' } },
+            { size: 50, pane: { id: 'bottom-right', type: 'local' } },
+          ],
+        },
+      ],
+    }
+    const result = findPaneById(nested, 'bottom-right')
+    expect(result?.id).toBe('bottom-right')
+  })
+
+  it('returns null when pane not found', () => {
+    const result = findPaneById(simpleLayout, 'nonexistent')
+    expect(result).toBeNull()
   })
 })
 
