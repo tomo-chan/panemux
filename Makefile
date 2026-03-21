@@ -67,12 +67,12 @@ lint-frontend:
 
 # ── Quality gate (lint + test + coverage) ─────────────────────────────────────
 
-check: lint test coverage
+check: build-frontend lint test coverage
 
 # ── Build ─────────────────────────────────────────────────────────────────────
 
-# build requires check (lint + test + coverage) to pass first.
-build: check build-frontend build-backend
+# build requires check (build-frontend + lint + test + coverage) to pass first.
+build: check build-backend
 
 build-frontend:
 	cd frontend && npm run build
