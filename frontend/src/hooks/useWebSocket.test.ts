@@ -136,6 +136,48 @@ describe('useWebSocket', () => {
     expect(onMessage).not.toHaveBeenCalled()
   })
 
+  it('closes connection when onerror fires', () => {
+    const onMessage = vi.fn()
+    renderHook(() => useWebSocket('ws://localhost/ws/s1', { onMessage }))
+    act(() => MockWebSocket.instances[0].simulateOpen())
+    act(() => MockWebSocket.instances[0].onerror?.())
+    expect(MockWebSocket.instances[0].readyState).toBe(MockWebSocket.CLOSED)
+  })
+
+  it('stops reconnecting after max attempts', () => {
+    const onMessage = vi.fn()
+    renderHook(() =>
+      useWebSocket('ws://localhost/ws/s1', { onMessage, reconnectDelay: 100, maxReconnectAttempts: 1 })
+    )
+    act(() => MockWebSocket.instances[0].simulateClose())
+    act(() => vi.advanceTimersByTime(200))
+    // connect() was called but attemptsRef >= maxReconnectAttempts → no new instance
+    expect(MockWebSocket.instances).toHaveLength(1)
+  })
+
+  it('does not reconnect if component unmounts before reconnect delay fires', () => {
+    const onMessage = vi.fn()
+    const { unmount } = renderHook(() =>
+      useWebSocket('ws://localhost/ws/s1', { onMessage, reconnectDelay: 500 })
+    )
+    // Disconnect queues a reconnect timer
+    act(() => MockWebSocket.instances[0].simulateOpen())
+    act(() => MockWebSocket.instances[0].simulateClose())
+    // Unmount before the timer fires: sets mountedRef.current = false
+    unmount()
+    // Timer fires: connect() sees !mountedRef.current and returns early
+    act(() => vi.advanceTimersByTime(1000))
+    expect(MockWebSocket.instances).toHaveLength(1)
+  })
+
+  it('does not send data when WebSocket is not open', () => {
+    const onMessage = vi.fn()
+    const { result } = renderHook(() => useWebSocket('ws://localhost/ws/s1', { onMessage }))
+    MockWebSocket.instances[0].readyState = MockWebSocket.CLOSED
+    act(() => result.current.send('hello'))
+    expect(MockWebSocket.instances[0].sent).toHaveLength(0)
+  })
+
   it('passes binary messages through without validation', () => {
     const onMessage = vi.fn()
     renderHook(() => useWebSocket('ws://localhost/ws/s1', { onMessage }))
