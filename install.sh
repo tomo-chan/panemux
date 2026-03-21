@@ -1,5 +1,5 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/sh
+set -eu
 
 PROJECT_NAME="panemux"
 DEFAULT_INSTALL_DIR="${HOME}/.local/bin"
@@ -20,9 +20,9 @@ Environment variables:
   PANEMUX_INSTALL_DIR  Directory to install the binary into
 
 Examples:
-  ./install.sh --repo owner/panemux
-  curl -fsSL https://raw.githubusercontent.com/owner/panemux/main/install.sh | bash -s -- --repo owner/panemux
-  PANEMUX_REPO=owner/panemux PANEMUX_VERSION=v1.0.0 ./install.sh
+  ./install.sh --repo tomo-chan/panemux
+  curl -fsSL https://raw.githubusercontent.com/tomo-chan/panemux/main/install.sh | sh -s -- --repo tomo-chan/panemux
+  PANEMUX_REPO=tomo-chan/panemux PANEMUX_VERSION=v1.0.0 ./install.sh
 EOF
 }
 
@@ -40,20 +40,20 @@ need_cmd() {
 }
 
 parse_args() {
-  while [[ $# -gt 0 ]]; do
+  while [ $# -gt 0 ]; do
     case "$1" in
       --repo)
-        [[ $# -ge 2 ]] || die "--repo requires a value"
+        [ $# -ge 2 ] || die "--repo requires a value"
         REPO="$2"
         shift 2
         ;;
       --version)
-        [[ $# -ge 2 ]] || die "--version requires a value"
+        [ $# -ge 2 ] || die "--version requires a value"
         VERSION="$2"
         shift 2
         ;;
       --install-dir)
-        [[ $# -ge 2 ]] || die "--install-dir requires a value"
+        [ $# -ge 2 ] || die "--install-dir requires a value"
         INSTALL_DIR="$2"
         shift 2
         ;;
@@ -90,7 +90,7 @@ detect_arch() {
 
 fetch_release_json() {
   local url
-  if [[ "$VERSION" == "latest" ]]; then
+  if [ "$VERSION" = "latest" ]; then
     url="https://api.github.com/repos/${REPO}/releases/latest"
   else
     url="https://api.github.com/repos/${REPO}/releases/tags/${VERSION}"
@@ -99,34 +99,33 @@ fetch_release_json() {
 }
 
 parse_release_value() {
-  local key="$1"
-  python3 - "$key" <<'PY'
-import json
-import sys
-
-key = sys.argv[1]
-data = json.load(sys.stdin)
-value = data.get(key)
+  python3 -c '
+import json, sys
+try:
+    data = json.load(sys.stdin)
+except ValueError:
+    sys.exit(1)
+value = data.get(sys.argv[1])
 if value is None:
     sys.exit(1)
 print(value)
-PY
+' "$1"
 }
 
 find_asset_url() {
-  local asset_name="$1"
-  python3 - "$asset_name" <<'PY'
-import json
-import sys
-
+  python3 -c '
+import json, sys
+try:
+    data = json.load(sys.stdin)
+except ValueError:
+    sys.exit(1)
 target = sys.argv[1]
-data = json.load(sys.stdin)
 for asset in data.get("assets", []):
     if asset.get("name") == target:
         print(asset["browser_download_url"])
-        raise SystemExit(0)
-raise SystemExit(1)
-PY
+        sys.exit(0)
+sys.exit(1)
+' "$1"
 }
 
 verify_checksum() {
@@ -136,12 +135,18 @@ verify_checksum() {
   if command -v shasum >/dev/null 2>&1; then
     (
       cd "$(dirname "$checksums_path")"
-      shasum -a 256 -c <(grep " ${archive_name}\$" "$checksums_path")
+      filtered="$(mktemp)"
+      grep " ${archive_name}\$" "$checksums_path" > "$filtered"
+      shasum -a 256 -c "$filtered"
+      rm -f "$filtered"
     )
   elif command -v sha256sum >/dev/null 2>&1; then
     (
       cd "$(dirname "$checksums_path")"
-      sha256sum -c <(grep " ${archive_name}\$" "$checksums_path")
+      filtered="$(mktemp)"
+      grep " ${archive_name}\$" "$checksums_path" > "$filtered"
+      sha256sum -c "$filtered"
+      rm -f "$filtered"
     )
   else
     log "Skipping checksum verification: no shasum or sha256sum available"
@@ -154,23 +159,25 @@ main() {
   need_cmd tar
   need_cmd python3
 
-  [[ -n "$REPO" ]] || die "GitHub repo is required. Pass --repo owner/name or set PANEMUX_REPO."
+  [ -n "$REPO" ] || die "GitHub repo is required. Pass --repo owner/name or set PANEMUX_REPO."
 
   local os arch release_json tag archive_name archive_url checksums_url
   os="$(detect_os)"
   arch="$(detect_arch)"
 
-  release_json="$(fetch_release_json)"
-  tag="$(printf '%s' "$release_json" | parse_release_value tag_name)" || die "failed to resolve release tag"
+  release_json="$(fetch_release_json)" || die "failed to fetch release from GitHub — verify '${REPO}' exists and has a published release"
+  [ -n "$release_json" ] || die "empty response from GitHub API — verify '${REPO}' has a published release"
+  tag="$(printf '%s' "$release_json" | parse_release_value tag_name)" || die "failed to resolve release tag — verify '${REPO}' has a published release"
 
-  archive_name="${PROJECT_NAME}_${tag}_${os}_${arch}.tar.gz"
+  version="${tag#v}"
+  archive_name="${PROJECT_NAME}_${version}_${os}_${arch}.tar.gz"
   checksums_name="checksums.txt"
   archive_url="$(printf '%s' "$release_json" | find_asset_url "$archive_name")" || die "release asset not found: $archive_name"
   checksums_url="$(printf '%s' "$release_json" | find_asset_url "$checksums_name")" || die "checksums.txt not found in release"
 
-  local tmpdir archive_path checksums_path
   tmpdir="$(mktemp -d)"
   trap 'rm -rf "$tmpdir"' EXIT
+  local archive_path checksums_path
   archive_path="${tmpdir}/${archive_name}"
   checksums_path="${tmpdir}/${checksums_name}"
 
