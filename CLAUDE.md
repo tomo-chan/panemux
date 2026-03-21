@@ -116,3 +116,20 @@ Sessions are started at server startup from the YAML config (`main.go: startSess
 ### Ignore generated resources
 - When adding new generated artifacts, caches, release outputs, or other non-source resources, update `.gitignore` in the same change.
 - Do not leave new build or release byproducts such as `dist/` as recurring untracked files.
+
+### CodeQL compliance (`go/command-injection`)
+
+When writing code that passes user-supplied values to `exec.Command`:
+
+- **The first argument (command) must never be user input.** Use a hardcoded literal or a value read from a trusted system source (`/etc/shells`, `/etc/passwd`, etc.).
+- **Avoid `os.Getenv` for values that flow to exec.** Environment variables are CodeQL taint sources. Use hardcoded defaults instead.
+- **Returning `m[1]` from `FindStringSubmatch(userInput)` does not break taint.** The submatch is still derived from user input in CodeQL's data-flow model.
+- **Returning a key `s` from `for s := range trustedMap` breaks taint**, provided no other code path in the same function returns the user-supplied value directly (including fallbacks).
+- **Regex `MatchString` as a guard is the CodeQL-recommended sanitization pattern** for subsequent arguments; for the command itself, a system-registry lookup (returning the registry's own value) is required.
+
+See `docs/architecture.md` → *Security Design* for the full rationale and the `/etc/shells` pattern used in this codebase.
+
+### Pull request test plan
+- After creating a PR, run every item in the test plan locally and verify it passes.
+- Update the PR description with all checkboxes checked (`- [x]`) before considering the task complete.
+- Do not leave test plan items unchecked — the description must reflect actual verified results.
