@@ -3,9 +3,9 @@ set -euo pipefail
 
 PROJECT_NAME="panemux"
 DEFAULT_INSTALL_DIR="${HOME}/.local/bin"
-REPO="${MST_REPO:-}"
-VERSION="${MST_VERSION:-latest}"
-INSTALL_DIR="${MST_INSTALL_DIR:-$DEFAULT_INSTALL_DIR}"
+REPO="${PANEMUX_REPO:-}"
+VERSION="${PANEMUX_VERSION:-latest}"
+INSTALL_DIR="${PANEMUX_INSTALL_DIR:-$DEFAULT_INSTALL_DIR}"
 
 usage() {
   cat <<'EOF'
@@ -15,14 +15,14 @@ Usage:
   install.sh [--repo owner/name] [--version v1.2.3|latest] [--install-dir /path]
 
 Environment variables:
-  MST_REPO         GitHub repository in owner/name form
-  MST_VERSION      Release tag or "latest"
-  MST_INSTALL_DIR  Directory to install the binary into
+  PANEMUX_REPO         GitHub repository in owner/name form
+  PANEMUX_VERSION      Release tag or "latest"
+  PANEMUX_INSTALL_DIR  Directory to install the binary into
 
 Examples:
   ./install.sh --repo owner/panemux
   curl -fsSL https://raw.githubusercontent.com/owner/panemux/main/install.sh | bash -s -- --repo owner/panemux
-  MST_REPO=owner/panemux MST_VERSION=v1.0.0 ./install.sh
+  PANEMUX_REPO=owner/panemux PANEMUX_VERSION=v1.0.0 ./install.sh
 EOF
 }
 
@@ -154,7 +154,7 @@ main() {
   need_cmd tar
   need_cmd python3
 
-  [[ -n "$REPO" ]] || die "GitHub repo is required. Pass --repo owner/name or set MST_REPO."
+  [[ -n "$REPO" ]] || die "GitHub repo is required. Pass --repo owner/name or set PANEMUX_REPO."
 
   local os arch release_json tag archive_name archive_url checksums_url
   os="$(detect_os)"

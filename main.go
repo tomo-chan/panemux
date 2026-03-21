@@ -17,16 +17,24 @@ import (
 	"panemux/internal/session"
 )
 
+var version = "dev"
+
 //go:embed frontend/dist
 var frontendFS embed.FS
 
 func main() {
 	var (
-		configPath = flag.String("config", "", "Path to YAML config file")
+		configPath  = flag.String("config", "", "Path to YAML config file")
 		openBrowser = flag.Bool("open", false, "Open Chrome automatically")
-		port       = flag.Int("port", 0, "Override server port")
+		port        = flag.Int("port", 0, "Override server port")
+		showVersion = flag.Bool("version", false, "Print version and exit")
 	)
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println(version)
+		os.Exit(0)
+	}
 
 	// Load config
 	var cfg *config.Config
