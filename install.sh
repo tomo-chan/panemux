@@ -1,5 +1,5 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/sh
+set -eu
 
 PROJECT_NAME="panemux"
 DEFAULT_INSTALL_DIR="${HOME}/.local/bin"
@@ -21,7 +21,7 @@ Environment variables:
 
 Examples:
   ./install.sh --repo owner/panemux
-  curl -fsSL https://raw.githubusercontent.com/owner/panemux/main/install.sh | bash -s -- --repo owner/panemux
+  curl -fsSL https://raw.githubusercontent.com/owner/panemux/main/install.sh | sh -s -- --repo owner/panemux
   PANEMUX_REPO=owner/panemux PANEMUX_VERSION=v1.0.0 ./install.sh
 EOF
 }
@@ -40,20 +40,20 @@ need_cmd() {
 }
 
 parse_args() {
-  while [[ $# -gt 0 ]]; do
+  while [ $# -gt 0 ]; do
     case "$1" in
       --repo)
-        [[ $# -ge 2 ]] || die "--repo requires a value"
+        [ $# -ge 2 ] || die "--repo requires a value"
         REPO="$2"
         shift 2
         ;;
       --version)
-        [[ $# -ge 2 ]] || die "--version requires a value"
+        [ $# -ge 2 ] || die "--version requires a value"
         VERSION="$2"
         shift 2
         ;;
       --install-dir)
-        [[ $# -ge 2 ]] || die "--install-dir requires a value"
+        [ $# -ge 2 ] || die "--install-dir requires a value"
         INSTALL_DIR="$2"
         shift 2
         ;;
@@ -90,7 +90,7 @@ detect_arch() {
 
 fetch_release_json() {
   local url
-  if [[ "$VERSION" == "latest" ]]; then
+  if [ "$VERSION" = "latest" ]; then
     url="https://api.github.com/repos/${REPO}/releases/latest"
   else
     url="https://api.github.com/repos/${REPO}/releases/tags/${VERSION}"
@@ -136,12 +136,18 @@ verify_checksum() {
   if command -v shasum >/dev/null 2>&1; then
     (
       cd "$(dirname "$checksums_path")"
-      shasum -a 256 -c <(grep " ${archive_name}\$" "$checksums_path")
+      filtered="$(mktemp)"
+      grep " ${archive_name}\$" "$checksums_path" > "$filtered"
+      shasum -a 256 -c "$filtered"
+      rm -f "$filtered"
     )
   elif command -v sha256sum >/dev/null 2>&1; then
     (
       cd "$(dirname "$checksums_path")"
-      sha256sum -c <(grep " ${archive_name}\$" "$checksums_path")
+      filtered="$(mktemp)"
+      grep " ${archive_name}\$" "$checksums_path" > "$filtered"
+      sha256sum -c "$filtered"
+      rm -f "$filtered"
     )
   else
     log "Skipping checksum verification: no shasum or sha256sum available"
@@ -154,7 +160,7 @@ main() {
   need_cmd tar
   need_cmd python3
 
-  [[ -n "$REPO" ]] || die "GitHub repo is required. Pass --repo owner/name or set PANEMUX_REPO."
+  [ -n "$REPO" ] || die "GitHub repo is required. Pass --repo owner/name or set PANEMUX_REPO."
 
   local os arch release_json tag archive_name archive_url checksums_url
   os="$(detect_os)"
