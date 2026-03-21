@@ -142,6 +142,32 @@ Why Zod:
 - TypeScript types are inferred from schemas, reducing drift
 - keeps API and WebSocket assumptions explicit
 
+## Security Design
+
+### Session command execution
+
+All session types that execute a local process use `exec.Command` with user-configurable values (shell path, tmux session name). These values must be sanitized before reaching the exec sink. The rules are:
+
+**Shell path (`local`, `ssh` sessions)**
+
+`validateShell` in `internal/session/local.go` applies three layers:
+
+1. **Absolute-path check** — rejects relative paths outright.
+2. **Regex character allowlist** — `^(/[a-zA-Z0-9._\-/]+)$` rejects shell metacharacters (spaces, semicolons, quotes, etc.).
+3. **`/etc/shells` allowlist** — iterates the system shell registry and returns the **key from the map** (`s`), not the caller-supplied value.
+
+The third point is critical for CodeQL's `go/command-injection` analysis. CodeQL tracks data flow from taint sources (environment variables, HTTP request bodies) to exec sinks. A sanitization function only breaks the taint chain if its **return value has no data-flow path back to user input**. Returning `m[1]` from `regexp.FindStringSubmatch(shell)` is insufficient because the submatch is still derived from `shell`. Returning the `/etc/shells` map key `s` works because CodeQL does not propagate taint through equality comparisons in a range loop — `s` originates from file I/O, not user input.
+
+For the same reason, `os.Getenv("SHELL")` is not used as a default shell. Environment variables are taint sources in CodeQL's model; if the env-var value were to flow through `exec.Command` even after validation, the alert would remain. The default is always the hardcoded literal `"/bin/sh"`.
+
+**Tmux session name (`tmux`, `ssh_tmux` sessions)**
+
+`validTmuxSessionName` in `internal/session/tmux_ssh.go` uses a strict regex (`^[a-zA-Z0-9_.-]+$`) validated at construction time, and arguments are passed as discrete `exec.Command` args (not via `sh -c`), so no shell interpolation occurs.
+
+**General rule**
+
+When adding new session types or new `exec.Command` calls: the value passed as the command (first argument) must come from a hardcoded literal or from a trusted system source (file, registry) with no data-flow path to user input. Arguments after the command may be user-supplied if they cannot be interpreted as commands by the target binary.
+
 ## Tradeoffs and Intentional Limits
 
 - One WebSocket per pane is simple and isolates failures, but increases connection count with many panes.
