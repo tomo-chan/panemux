@@ -22,13 +22,13 @@ const { mockWrite, mockTerm, mockFitAddon, mockTerminalCtor } = vi.hoisted(() =>
     write: mockWrite,
   }
   const mockFitAddon = { fit: vi.fn() }
-  const mockTerminalCtor = vi.fn(() => mockTerm)
+  const mockTerminalCtor = vi.fn(function () { return mockTerm })
   return { mockWrite, mockTerm, mockFitAddon, mockTerminalCtor }
 })
 
 vi.mock('@xterm/xterm', () => ({ Terminal: mockTerminalCtor }))
-vi.mock('@xterm/addon-fit', () => ({ FitAddon: vi.fn(() => mockFitAddon) }))
-vi.mock('@xterm/addon-web-links', () => ({ WebLinksAddon: vi.fn(() => ({})) }))
+vi.mock('@xterm/addon-fit', () => ({ FitAddon: vi.fn(function () { return mockFitAddon }) }))
+vi.mock('@xterm/addon-web-links', () => ({ WebLinksAddon: vi.fn(function () { return {} }) }))
 
 // ── WebSocket mock ────────────────────────────────────────────────────────────
 class MockWebSocket {
@@ -293,6 +293,48 @@ describe('useTerminal', () => {
     // Before open, connected should be false initially
     act(() => MockWebSocket.instances[0].simulateOpen())
     expect(result.current.connected).toBe(true)
+  })
+
+  it('onData callback encodes user input and sends via WebSocket', () => {
+    const container = makeContainer()
+    renderHook(() => useTerminal({ sessionId: 's1', container }))
+    act(() => MockWebSocket.instances[0].simulateOpen())
+
+    const ws = MockWebSocket.instances[0]
+    const sentBefore = ws.sent.length
+    const onDataCallback = mockTerm.onData.mock.calls[0][0] as (data: string) => void
+    act(() => onDataCallback('hello'))
+    expect(ws.sent.length).toBeGreaterThan(sentBefore)
+  })
+
+  it('onBinary callback encodes binary string and sends via WebSocket', () => {
+    const container = makeContainer()
+    renderHook(() => useTerminal({ sessionId: 's1', container }))
+    act(() => MockWebSocket.instances[0].simulateOpen())
+
+    const onBinaryCallback = mockTerm.onBinary.mock.calls[0][0] as (data: string) => void
+    act(() => onBinaryCallback('ABC'))
+
+    const sent = MockWebSocket.instances[0].sent
+    const binaryFrames = sent.filter((d) => d instanceof Uint8Array)
+    expect(binaryFrames.length).toBeGreaterThan(0)
+    const frame = binaryFrames[binaryFrames.length - 1] as Uint8Array
+    expect(frame[0]).toBe(0x41) // 'A'
+    expect(frame[1]).toBe(0x42) // 'B'
+    expect(frame[2]).toBe(0x43) // 'C'
+  })
+
+  it('copies selected text via fallbackCopy when clipboard API is unavailable', () => {
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined })
+    const container = makeContainer()
+    mockTerm.hasSelection.mockReturnValue(true)
+    mockTerm.getSelection.mockReturnValue('fallback text')
+    renderHook(() => useTerminal({ sessionId: 's1', container }))
+
+    const handler = mockTerm.attachCustomKeyEventHandler.mock.calls[0][0] as (event: KeyboardEvent) => boolean
+    handler({ key: 'c', ctrlKey: true, metaKey: false, preventDefault: vi.fn() } as unknown as KeyboardEvent)
+
+    expect(document.execCommand).toHaveBeenCalledWith('copy')
   })
 
   it('reuses the same terminal instance across remounts for the same session', () => {
