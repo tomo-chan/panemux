@@ -99,40 +99,33 @@ fetch_release_json() {
 }
 
 parse_release_value() {
-  local key="$1"
-  python3 - "$key" <<'PY'
-import json
-import sys
-
-key = sys.argv[1]
+  python3 -c '
+import json, sys
 try:
     data = json.load(sys.stdin)
 except ValueError:
     sys.exit(1)
-value = data.get(key)
+value = data.get(sys.argv[1])
 if value is None:
     sys.exit(1)
 print(value)
-PY
+' "$1"
 }
 
 find_asset_url() {
-  local asset_name="$1"
-  python3 - "$asset_name" <<'PY'
-import json
-import sys
-
-target = sys.argv[1]
+  python3 -c '
+import json, sys
 try:
     data = json.load(sys.stdin)
 except ValueError:
     sys.exit(1)
+target = sys.argv[1]
 for asset in data.get("assets", []):
     if asset.get("name") == target:
         print(asset["browser_download_url"])
-        raise SystemExit(0)
-raise SystemExit(1)
-PY
+        sys.exit(0)
+sys.exit(1)
+' "$1"
 }
 
 verify_checksum() {
