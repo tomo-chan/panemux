@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.3.0](https://github.com/tomo-chan/panemux/compare/v0.2.0...v0.3.0) (2026-03-21)
+
+
+### Features
+
+* add edit mode toggle to gate config file persistence ([#22](https://github.com/tomo-chan/panemux/issues/22)) ([d414aaf](https://github.com/tomo-chan/panemux/commit/d414aaff6cda4ad5e1bb134570da48f0d619bf40))
+* default REPO to tomo-chan/panemux ([#24](https://github.com/tomo-chan/panemux/issues/24)) ([7b92ecb](https://github.com/tomo-chan/panemux/commit/7b92ecb60ad8cb4db775e91b7a9c569d0245c639))
+
+
+### Bug Fixes
+
+* make install.sh POSIX sh compatible ([#23](https://github.com/tomo-chan/panemux/issues/23)) ([4cafd59](https://github.com/tomo-chan/panemux/commit/4cafd5939717d843fad475b740b636301ece8f58))
+* show error message and suppress write spam when tmux session exits ([#20](https://github.com/tomo-chan/panemux/issues/20)) ([5bfff9a](https://github.com/tomo-chan/panemux/commit/5bfff9a2d9303d3d41e7fc1b6744c43276962523))
+* trigger release workflow on release published event ([#17](https://github.com/tomo-chan/panemux/issues/17)) ([ceef281](https://github.com/tomo-chan/panemux/commit/ceef2819e5a7a5d85b82f3a4c10f858bc526169c))
+
 ## [0.2.0](https://github.com/tomo-chan/panemux/compare/v0.1.0...v0.2.0) (2026-03-21)
 
 
