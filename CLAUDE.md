@@ -116,3 +116,8 @@ Sessions are started at server startup from the YAML config (`main.go: startSess
 ### Ignore generated resources
 - When adding new generated artifacts, caches, release outputs, or other non-source resources, update `.gitignore` in the same change.
 - Do not leave new build or release byproducts such as `dist/` as recurring untracked files.
+
+### Pull request test plan
+- After creating a PR, run every item in the test plan locally and verify it passes.
+- Update the PR description with all checkboxes checked (`- [x]`) before considering the task complete.
+- Do not leave test plan items unchecked — the description must reflect actual verified results.
