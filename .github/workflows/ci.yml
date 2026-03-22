@@ -21,6 +21,8 @@ on:
       - 'frontend/**'
       - 'Makefile'
       - '.github/workflows/ci.yml'
+      - 'docs/**'
+      - 'README.md'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
