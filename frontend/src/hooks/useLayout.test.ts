@@ -171,4 +171,53 @@ describe('useLayout', () => {
       expect(result.current.layout).toBeNull()
     })
   })
+
+  describe('swapPanes', () => {
+    it('swaps two panes and PUTs updated layout', async () => {
+      const twoChildLayout: LayoutNode = {
+        direction: 'horizontal',
+        children: [
+          { size: 50, pane: { id: 'left', type: 'local' } },
+          { size: 50, pane: { id: 'right', type: 'ssh' } },
+        ],
+      }
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(twoChildLayout) } as Response) // GET /api/layout
+        .mockResolvedValueOnce({ ok: false } as Response) // GET /api/display
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) } as Response) // PUT /api/layout
+      window.fetch = fetchMock
+
+      const { result } = renderHook(() => useLayout())
+      await waitFor(() => expect(result.current.layout).not.toBeNull())
+
+      await act(async () => {
+        await result.current.swapPanes('left', 'right')
+      })
+
+      expect(result.current.layout?.children[0].pane?.id).toBe('right')
+      expect(result.current.layout?.children[1].pane?.id).toBe('left')
+      const putCall = fetchMock.mock.calls.find(
+        (c) => c[0] === '/api/layout' && (c[1] as RequestInit)?.method === 'PUT',
+      )
+      expect(putCall).toBeDefined()
+    })
+
+    it('does nothing when layout is null', async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce({ ok: false, status: 500 } as Response) // GET /api/layout fails
+        .mockResolvedValueOnce({ ok: false } as Response) // GET /api/display
+      window.fetch = fetchMock
+
+      const { result } = renderHook(() => useLayout())
+      await waitFor(() => expect(result.current.error).not.toBeNull())
+
+      const callsBefore = fetchMock.mock.calls.length
+      await act(async () => {
+        await result.current.swapPanes('a', 'b')
+      })
+      expect(fetchMock).toHaveBeenCalledTimes(callsBefore)
+    })
+  })
 })

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { splitPaneInTree, removePaneFromTree, generatePaneId, findPaneById, replacePaneInTree } from './layoutTree'
+import { splitPaneInTree, removePaneFromTree, generatePaneId, findPaneById, replacePaneInTree, swapPanesInTree } from './layoutTree'
 import type { LayoutNode } from '../schemas'
 
 const simpleLayout: LayoutNode = {
@@ -191,6 +191,61 @@ describe('replacePaneInTree', () => {
     const result = replacePaneInTree(simpleLayout, { id: 'nonexistent', type: 'ssh' })
     expect(result.children[0].pane?.id).toBe('main')
     expect(result.children[0].pane?.type).toBe('local')
+  })
+})
+
+describe('swapPanesInTree', () => {
+  it('swaps two sibling panes at root level', () => {
+    const result = swapPanesInTree(twoChildLayout, 'left', 'right')
+    expect(result.children[0].pane?.id).toBe('right')
+    expect(result.children[1].pane?.id).toBe('left')
+  })
+
+  it('preserves sizes when swapping', () => {
+    const uneven: LayoutNode = {
+      direction: 'horizontal',
+      children: [
+        { size: 30, pane: { id: 'a', type: 'local' } },
+        { size: 70, pane: { id: 'b', type: 'local' } },
+      ],
+    }
+    const result = swapPanesInTree(uneven, 'a', 'b')
+    expect(result.children[0].size).toBe(30)
+    expect(result.children[1].size).toBe(70)
+    expect(result.children[0].pane?.id).toBe('b')
+    expect(result.children[1].pane?.id).toBe('a')
+  })
+
+  it('swaps a root pane with a nested pane', () => {
+    const nested: LayoutNode = {
+      direction: 'horizontal',
+      children: [
+        { size: 50, pane: { id: 'left', type: 'local' } },
+        {
+          size: 50,
+          direction: 'vertical',
+          children: [
+            { size: 50, pane: { id: 'top-right', type: 'ssh' } },
+            { size: 50, pane: { id: 'bottom-right', type: 'tmux' } },
+          ],
+        },
+      ],
+    }
+    const result = swapPanesInTree(nested, 'left', 'top-right')
+    expect(result.children[0].pane?.id).toBe('top-right')
+    expect(result.children[0].pane?.type).toBe('ssh')
+    expect(result.children[1].children![0].pane?.id).toBe('left')
+    expect(result.children[1].children![0].pane?.type).toBe('local')
+  })
+
+  it('returns unchanged layout when same id given', () => {
+    const result = swapPanesInTree(twoChildLayout, 'left', 'left')
+    expect(result).toBe(twoChildLayout)
+  })
+
+  it('returns unchanged layout when a pane id is not found', () => {
+    const result = swapPanesInTree(twoChildLayout, 'left', 'nonexistent')
+    expect(result).toBe(twoChildLayout)
   })
 })
 
