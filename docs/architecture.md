@@ -164,6 +164,14 @@ For the same reason, `os.Getenv("SHELL")` is not used as a default shell. Enviro
 
 `validTmuxSessionName` in `internal/session/tmux_ssh.go` uses a strict regex (`^[a-zA-Z0-9_.-]+$`) validated at construction time, and arguments are passed as discrete `exec.Command` args (not via `sh -c`), so no shell interpolation occurs.
 
+**Remote path arguments (SSH working directory)**
+
+When an SSH or SSH+tmux pane has `cwd` set, the path is passed as part of a remote shell command (`cd <cwd> && exec $SHELL`). User-supplied paths that flow into `sess.Start()` must be validated with `validRemotePath` (defined in `internal/session/ssh.go`) before use.
+
+`validRemotePath` is a regex guard (`^(/[^;|&$\`'"<>()\[\]{}!\\\x00-\x1f\x7f]*)+$`) that accepts only absolute Unix paths and rejects shell metacharacters and control characters. This is the CodeQL-recommended sanitization pattern for shell arguments.
+
+After validation, the path is wrapped with `shellQuotePath`, which single-quotes the value and escapes any interior single quotes. This ensures paths containing spaces or unusual (but allowed) characters are safe to embed in a shell string.
+
 **General rule**
 
 When adding new session types or new `exec.Command` calls: the value passed as the command (first argument) must come from a hardcoded literal or from a trusted system source (file, registry) with no data-flow path to user input. Arguments after the command may be user-supplied if they cannot be interpreted as commands by the target binary.
