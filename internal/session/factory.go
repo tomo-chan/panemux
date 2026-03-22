@@ -2,6 +2,9 @@ package session
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"panemux/internal/config"
 	"panemux/internal/sshconfig"
@@ -68,11 +71,16 @@ func resolveSSHConfig(name string, sshConns map[string]config.SSHConnection, ssh
 			if port == 0 {
 				port = 22
 			}
+			keyFile := h.IdentityFile
+			if strings.HasPrefix(keyFile, "~/") {
+				home, _ := os.UserHomeDir()
+				keyFile = filepath.Join(home, keyFile[2:])
+			}
 			return SSHConfig{
 				Host:    h.Hostname,
 				Port:    port,
 				User:    h.User,
-				KeyFile: h.IdentityFile,
+				KeyFile: keyFile,
 			}, nil
 		}
 	}

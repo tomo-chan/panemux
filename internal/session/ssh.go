@@ -164,6 +164,23 @@ func buildAuthMethods(cfg SSHConfig) ([]ssh.AuthMethod, error) {
 		methods = append(methods, ssh.Password(cfg.Password))
 	}
 
+	// If no explicit auth method, try common default key files (mirrors OpenSSH behaviour).
+	if len(methods) == 0 {
+		home, _ := os.UserHomeDir()
+		for _, name := range []string{"id_ed25519", "id_rsa", "id_ecdsa"} {
+			keyData, err := os.ReadFile(filepath.Join(home, ".ssh", name))
+			if err != nil {
+				continue
+			}
+			signer, err := ssh.ParsePrivateKey(keyData)
+			if err != nil {
+				continue
+			}
+			methods = append(methods, ssh.PublicKeys(signer))
+			break
+		}
+	}
+
 	if len(methods) == 0 {
 		return nil, fmt.Errorf("no auth methods configured for SSH connection")
 	}
