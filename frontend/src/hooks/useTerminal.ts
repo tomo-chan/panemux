@@ -229,7 +229,11 @@ function attachTerminal(entry: TerminalEntry, container: HTMLElement) {
   }
 
   if (entry.term.element.parentElement !== container) {
-    container.replaceChildren()
+    // Use appendChild (not replaceChildren) so that React-managed siblings
+    // (edit-mode overlay, session-exited overlay) are preserved.  replaceChildren()
+    // would remove those React-owned DOM nodes, causing React to crash when it
+    // next tries to reconcile them (e.g. removeChild on a detached node when
+    // edit mode is toggled off).
     container.appendChild(entry.term.element)
   }
 }
