@@ -23,6 +23,7 @@ function makeCtx(maximizedPaneId: string | null): LayoutActionsContextValue {
     onSplit: vi.fn(),
     onClose: vi.fn(),
     onMaximize: vi.fn(),
+    onSettings: vi.fn(),
     maximizedPaneId,
     displayConfig: { show_header: false, show_status_bar: false },
     editMode: false,

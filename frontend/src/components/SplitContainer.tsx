@@ -7,6 +7,7 @@ export interface LayoutActionsContextValue {
   onSplit: (paneId: string, direction: 'horizontal' | 'vertical') => void
   onClose: (paneId: string) => void
   onMaximize: (paneId: string | null) => void
+  onSettings: (paneId: string) => void
   maximizedPaneId: string | null
   displayConfig: DisplayConfig
   editMode: boolean

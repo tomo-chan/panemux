@@ -134,12 +134,25 @@ func (c *Config) expandPaths() {
 
 func expandPanesCwd(children []LayoutChild) {
 	for i := range children {
-		if children[i].Pane != nil && strings.HasPrefix(children[i].Pane.Cwd, "~/") {
-			home, _ := os.UserHomeDir()
-			children[i].Pane.Cwd = filepath.Join(home, children[i].Pane.Cwd[2:])
+		if children[i].Pane != nil {
+			ExpandPanePaths(children[i].Pane)
 		}
 		expandPanesCwd(children[i].Children)
 	}
+}
+
+// ExpandPanePaths expands ~/  in the pane's CWD to an absolute path.
+func ExpandPanePaths(pane *PaneConfig) {
+	if strings.HasPrefix(pane.Cwd, "~/") {
+		home, _ := os.UserHomeDir()
+		pane.Cwd = filepath.Join(home, pane.Cwd[2:])
+	}
+}
+
+// ExpandLayoutPaths expands ~/  in all pane CWDs within layout, mirroring
+// the expansion done at config load time via Load().
+func ExpandLayoutPaths(layout *LayoutNode) {
+	expandPanesCwd(layout.Children)
 }
 
 // DefaultConfigPath returns the default config file path: ~/.config/panemux/config.yaml.

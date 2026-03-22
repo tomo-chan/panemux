@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"sort"
 	"sync/atomic"
 
 	"github.com/go-chi/chi/v5"
@@ -22,6 +23,10 @@ type editModeResponse struct {
 	EditMode bool `json:"editMode"`
 }
 
+type sshConnectionsResponse struct {
+	Names []string `json:"names"`
+}
+
 // NewHandler creates a new API handler.
 func NewHandler(cfg *config.Config, manager *session.Manager) *Handler {
 	return &Handler{cfg: cfg, manager: manager}
@@ -39,6 +44,8 @@ func (h *Handler) PutLayout(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
+
+	config.ExpandLayoutPaths(&layout)
 
 	if err := config.ValidateLayout(layout); err != nil {
 		w.Header().Set("Content-Type", "application/json")
@@ -81,6 +88,8 @@ func (h *Handler) PostSession(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
+
+	config.ExpandPanePaths(&pane)
 
 	if err := config.ValidatePane(&pane); err != nil {
 		w.Header().Set("Content-Type", "application/json")
@@ -184,6 +193,16 @@ type sessionInfo struct {
 	Type  string `json:"type"`
 	Title string `json:"title"`
 	State string `json:"state"`
+}
+
+// GetSSHConnections returns the sorted names of configured SSH connections.
+func (h *Handler) GetSSHConnections(w http.ResponseWriter, r *http.Request) {
+	names := make([]string, 0, len(h.cfg.SSHConnections))
+	for k := range h.cfg.SSHConnections {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	writeJSON(w, sshConnectionsResponse{Names: names})
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
