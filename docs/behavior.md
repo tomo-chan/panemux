@@ -256,6 +256,26 @@ User types in xterm.js
 - Dragging split dividers updates layout percentages in memory.
 - Layout persistence is debounced by 500 ms before `PUT /api/layout`.
 
+### Edit mode and pane reordering
+
+Edit mode is toggled by the fixed button in the bottom-right corner. When edit mode is ON:
+
+- The entire pane body becomes a drag surface; the user can drag any pane onto any other pane to swap their positions in the layout tree.
+- Terminal keyboard input is blocked — `onData` and `onBinary` handlers do not forward bytes to the session while edit mode is active.
+- A semi-transparent overlay covers each terminal area and intercepts pointer events, preventing the terminal from gaining focus.
+- Layout changes (including drag-resize) are persisted to the config file via `PUT /api/layout`.
+
+When edit mode is OFF, terminal input is fully restored and layout changes are applied in-memory only.
+
+Drag-and-drop pane reordering:
+
+1. User starts dragging a pane — `dragstart` fires on the outer pane div; `dragSourcePaneId` is set in context.
+2. User hovers over a target pane — `dragover` fires; the target receives a visual drop indicator.
+3. User releases — `drop` fires; the two panes' `PaneConfig` objects are swapped in the layout tree, and `PUT /api/layout` is called immediately (no debounce).
+4. `dragSourcePaneId` is cleared in context; both panes return to normal edit-mode appearance.
+
+When a pane moves to a different parent node during a swap (cross-row reorder), the component is remounted by React. xterm.js terminal instances survive remounting via a module-level `TerminalEntry` map keyed by session ID; the existing canvas is reattached to the new container with `appendChild` rather than `replaceChildren`, preserving React-managed sibling nodes (overlays) in the container.
+
 ### Split and close semantics
 
 - Splitting a pane creates a new local pane, creates a backend session through `POST /api/sessions`, then rewrites the layout tree so the original and new panes each receive `50%` under a new split node.
