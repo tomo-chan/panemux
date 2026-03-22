@@ -90,6 +90,23 @@ Sessions are started at server startup from the YAML config (`main.go: startSess
 - Go: all tests must pass (`go test ./... -v -race`) before moving on.
 - Frontend: all tests must pass (`cd frontend && npm test`) before moving on.
 
+### Test granularity
+
+**Test at the smallest unit that exercises the logic, not at the outermost entry point.**
+
+The following anti-patterns caused bugs to slip through:
+
+| Anti-pattern | Problem | Correct approach |
+|---|---|---|
+| Testing a function that makes real network calls to verify config-resolution logic | Network errors hide config errors; any error is accepted as "expected" | Extract pure config-resolution into a separate function (e.g., `resolveSSHConfig`) and test it directly, asserting exact return values |
+| `if err != nil { assert.NotContains(t, err.Error(), "not found") }` | Accepts *any* error except "not found" — masks setup errors like "no auth methods" or "reading key file ~/..." | Assert the specific happy path: `require.NoError(t, err)` and check returned values. For expected-failure paths, assert the exact error string |
+| Test data that never exercises the real-world variant | e.g., test SSH config with absolute `IdentityFile` paths, never `~/` — the tilde-expansion bug is invisible | Add test cases that cover the exact formats users produce: `~/`-prefixed paths, omitted optional fields |
+| Testing only the error case of a new validation rule, not the passing case | The positive path (new feature works correctly) is never confirmed to pass | For every new validation rule, write *both* a failure test *and* a success test |
+
+**Testability rule:** if production code calls `os.UserHomeDir()`, `DefaultPath()`, or any other global singleton directly, add an injectable override (unexported struct field, function parameter, or interface) so tests can substitute a controlled value without touching the real filesystem or home directory.
+
+Example: `Config.sshConfigPath` (empty = use `sshconfig.DefaultPath()`, non-empty = use in tests).
+
 ### Schema-first
 - **Go**: when changing data structures, update the validation rules and tests in `internal/config/validate.go` first.
 - **Frontend**: when changing types, update the Zod schemas in `frontend/src/schemas/index.ts` first. TypeScript types are derived via `z.infer<>` — do not edit `types/index.ts` manually.
@@ -128,6 +145,8 @@ When writing code that passes user-supplied values to `exec.Command`:
 - **Regex `MatchString` as a guard is the CodeQL-recommended sanitization pattern** for subsequent arguments; for the command itself, a system-registry lookup (returning the registry's own value) is required.
 
 See `docs/architecture.md` → *Security Design* for the full rationale and the `/etc/shells` pattern used in this codebase.
+
+**Remote path arguments (SSH working directory):** user-supplied paths that flow into `sess.Start()` shell commands must be validated with `validRemotePath` (defined in `internal/session/ssh.go`) before use. This regex guard is the CodeQL-recommended sanitization pattern for shell arguments, and it rejects shell metacharacters (`;|&$\`'"<>(){}[]!\`) and control characters while allowing valid Unix path characters including spaces and Unicode.
 
 ### Pull request test plan
 - After creating a PR, run every item in the test plan locally and verify it passes.

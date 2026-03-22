@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { SSHConnectionsResponseSchema } from '../schemas'
-import type { LayoutNode, PaneConfig } from '../schemas'
+import type { LayoutNode, PaneConfig, SSHConfigHost } from '../schemas'
 import { replacePaneInTree } from '../utils/layoutTree'
 
 export function usePaneSettings(
@@ -63,5 +63,21 @@ export function usePaneSettings(
     [layout, onLayoutChange],
   )
 
-  return { isOpen, currentPane, sshConnectionNames, saveError, isSaving, openSettings, closeSettings, saveSettings }
+  const addSSHConfigHost = useCallback(async (host: SSHConfigHost): Promise<string> => {
+    const r = await fetch('/api/ssh-config/hosts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(host),
+    })
+    if (!r.ok) {
+      const body = await r.json().catch(() => ({}))
+      throw new Error((body as { error?: string }).error ?? `HTTP ${r.status}`)
+    }
+    // Refresh the ssh connection names list
+    const data = await fetch('/api/ssh-connections').then((res) => res.json())
+    setSshConnectionNames(SSHConnectionsResponseSchema.parse(data).names)
+    return host.name
+  }, [])
+
+  return { isOpen, currentPane, sshConnectionNames, saveError, isSaving, openSettings, closeSettings, saveSettings, addSSHConfigHost }
 }

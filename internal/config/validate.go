@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"panemux/internal/sshconfig"
 )
 
 var tmuxSessionNameRe = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`)
@@ -21,6 +23,20 @@ func (c *Config) Validate() error {
 	sshConns := c.SSHConnections
 	if sshConns == nil {
 		sshConns = make(map[string]SSHConnection)
+	}
+	// Also accept hosts from ~/.ssh/config as valid connections.
+	// This allows panes to reference ssh config host aliases without
+	// duplicating connection details in ssh_connections.
+	sshCfgPath := c.sshConfigPath
+	if sshCfgPath == "" {
+		sshCfgPath = sshconfig.DefaultPath()
+	}
+	if hosts, err := sshconfig.ParseHosts(sshCfgPath); err == nil {
+		for _, h := range hosts {
+			if _, exists := sshConns[h.Name]; !exists {
+				sshConns[h.Name] = SSHConnection{Host: h.Hostname}
+			}
+		}
 	}
 	errs = append(errs, validateLayoutNode(c.Layout, sshConns)...)
 

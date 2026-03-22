@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"regexp"
 	"sort"
 	"sync/atomic"
 
@@ -10,13 +11,15 @@ import (
 
 	"panemux/internal/config"
 	"panemux/internal/session"
+	"panemux/internal/sshconfig"
 )
 
 // Handler provides REST API endpoints.
 type Handler struct {
-	cfg      *config.Config
-	manager  *session.Manager
-	editMode atomic.Bool
+	cfg           *config.Config
+	manager       *session.Manager
+	editMode      atomic.Bool
+	sshConfigPath string
 }
 
 type editModeResponse struct {
@@ -27,9 +30,31 @@ type sshConnectionsResponse struct {
 	Names []string `json:"names"`
 }
 
+type sshConfigHostsResponse struct {
+	Hosts []sshConfigHostInfo `json:"hosts"`
+}
+
+type sshConfigHostInfo struct {
+	Name         string `json:"name"`
+	Hostname     string `json:"hostname"`
+	User         string `json:"user"`
+	Port         int    `json:"port,omitempty"`
+	IdentityFile string `json:"identity_file,omitempty"`
+}
+
+type sshConfigHostRequest struct {
+	Name         string `json:"name"`
+	Hostname     string `json:"hostname"`
+	User         string `json:"user"`
+	Port         int    `json:"port,omitempty"`
+	IdentityFile string `json:"identity_file,omitempty"`
+}
+
+var validHostName = regexp.MustCompile(`^[a-zA-Z0-9_.\-]+$`)
+
 // NewHandler creates a new API handler.
 func NewHandler(cfg *config.Config, manager *session.Manager) *Handler {
-	return &Handler{cfg: cfg, manager: manager}
+	return &Handler{cfg: cfg, manager: manager, sshConfigPath: sshconfig.DefaultPath()}
 }
 
 // GetLayout returns the current layout configuration.
@@ -195,14 +220,115 @@ type sessionInfo struct {
 	State string `json:"state"`
 }
 
-// GetSSHConnections returns the sorted names of configured SSH connections.
+// GetSSHConnections returns the sorted names of configured SSH connections,
+// merging both yaml ssh_connections and ~/.ssh/config hosts (yaml takes precedence on conflict).
 func (h *Handler) GetSSHConnections(w http.ResponseWriter, r *http.Request) {
-	names := make([]string, 0, len(h.cfg.SSHConnections))
+	seen := make(map[string]struct{})
+	names := make([]string, 0)
+
+	// First add yaml-configured connections
 	for k := range h.cfg.SSHConnections {
+		seen[k] = struct{}{}
 		names = append(names, k)
 	}
+
+	// Then add SSH config hosts not already in the yaml map
+	hosts, _ := sshconfig.ParseHosts(h.sshConfigPath)
+	for _, host := range hosts {
+		if _, exists := seen[host.Name]; !exists {
+			names = append(names, host.Name)
+		}
+	}
+
 	sort.Strings(names)
 	writeJSON(w, sshConnectionsResponse{Names: names})
+}
+
+// GetSSHConfigHosts returns all hosts from ~/.ssh/config with full details.
+func (h *Handler) GetSSHConfigHosts(w http.ResponseWriter, r *http.Request) {
+	hosts, err := sshconfig.ParseHosts(h.sshConfigPath)
+	if err != nil {
+		http.Error(w, "failed to read ssh config", http.StatusInternalServerError)
+		return
+	}
+
+	infos := make([]sshConfigHostInfo, 0, len(hosts))
+	for _, host := range hosts {
+		infos = append(infos, sshConfigHostInfo{
+			Name:         host.Name,
+			Hostname:     host.Hostname,
+			User:         host.User,
+			Port:         host.Port,
+			IdentityFile: host.IdentityFile,
+		})
+	}
+	writeJSON(w, sshConfigHostsResponse{Hosts: infos})
+}
+
+// PostSSHConfigHost adds a new host to ~/.ssh/config.
+func (h *Handler) PostSSHConfigHost(w http.ResponseWriter, r *http.Request) {
+	var req sshConfigHostRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate
+	if req.Name == "" {
+		writeValidationError(w, "name is required")
+		return
+	}
+	if !validHostName.MatchString(req.Name) {
+		writeValidationError(w, "name must contain only alphanumeric characters, hyphens, underscores, or dots")
+		return
+	}
+	if req.Hostname == "" {
+		writeValidationError(w, "hostname is required")
+		return
+	}
+	if req.User == "" {
+		writeValidationError(w, "user is required")
+		return
+	}
+	if req.Port < 0 || req.Port > 65535 {
+		writeValidationError(w, "port must be between 0 and 65535")
+		return
+	}
+
+	// Check for duplicate
+	hosts, err := sshconfig.ParseHosts(h.sshConfigPath)
+	if err != nil {
+		http.Error(w, "failed to read ssh config", http.StatusInternalServerError)
+		return
+	}
+	for _, host := range hosts {
+		if host.Name == req.Name {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			json.NewEncoder(w).Encode(map[string]string{"error": "host already exists"})
+			return
+		}
+	}
+
+	// Append the new host
+	if err := sshconfig.AppendHost(h.sshConfigPath, sshconfig.Host{
+		Name:         req.Name,
+		Hostname:     req.Hostname,
+		User:         req.User,
+		Port:         req.Port,
+		IdentityFile: req.IdentityFile,
+	}); err != nil {
+		http.Error(w, "failed to write ssh config", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+}
+
+func writeValidationError(w http.ResponseWriter, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusUnprocessableEntity)
+	json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

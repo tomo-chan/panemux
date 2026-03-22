@@ -40,6 +40,12 @@ func (m *mockSession) Close() error                { return nil }
 
 func setupRouter(cfg *config.Config, mgr *session.Manager) *chi.Mux {
 	h := NewHandler(cfg, mgr)
+	// Use a temp empty SSH config to avoid real ~/.ssh/config leaking into tests
+	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
+	return setupRouterWithHandler(h)
+}
+
+func setupRouterWithHandler(h *Handler) *chi.Mux {
 	r := chi.NewRouter()
 	r.Get("/api/layout", h.GetLayout)
 	r.Put("/api/layout", h.PutLayout)
@@ -51,6 +57,8 @@ func setupRouter(cfg *config.Config, mgr *session.Manager) *chi.Mux {
 	r.Get("/api/edit-mode", h.GetEditMode)
 	r.Put("/api/edit-mode", h.PutEditMode)
 	r.Get("/api/ssh-connections", h.GetSSHConnections)
+	r.Get("/api/ssh-config/hosts", h.GetSSHConfigHosts)
+	r.Post("/api/ssh-config/hosts", h.PostSSHConfigHost)
 	return r
 }
 
@@ -502,4 +510,224 @@ func TestGetSSHConnections_NilMap(t *testing.T) {
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
 	assert.NotNil(t, resp.Names)
 	assert.Empty(t, resp.Names)
+}
+
+// writeTempSSHConfigForAPI writes a minimal SSH config file with given content and returns its path.
+func writeTempSSHConfigForAPI(t *testing.T, content string) string {
+	t.Helper()
+	dir := t.TempDir()
+	f := filepath.Join(dir, "config")
+	require.NoError(t, os.WriteFile(f, []byte(content), 0600))
+	return f
+}
+
+func TestGetSSHConnections_MergesSSHConfigHosts(t *testing.T) {
+	sshConfigPath := writeTempSSHConfigForAPI(t, "Host ssh-host\n    HostName ssh.example.com\n    User alice\n")
+
+	cfg := defaultTestConfig()
+	cfg.SSHConnections = map[string]config.SSHConnection{
+		"yaml-conn": {Host: "yaml.example.com", Port: 22, User: "bob"},
+	}
+
+	h := NewHandler(cfg, session.NewManager())
+	h.sshConfigPath = sshConfigPath
+	r := setupRouterWithHandler(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/ssh-connections", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var resp sshConnectionsResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.ElementsMatch(t, []string{"yaml-conn", "ssh-host"}, resp.Names)
+	// Must be sorted
+	assert.Equal(t, []string{"ssh-host", "yaml-conn"}, resp.Names)
+}
+
+func TestGetSSHConnections_SSHConfigTakesPrecedenceOnConflict(t *testing.T) {
+	// When both yaml and ssh config have same name, yaml takes precedence (name appears once)
+	sshConfigPath := writeTempSSHConfigForAPI(t, "Host shared\n    HostName ssh.example.com\n    User alice\n")
+
+	cfg := defaultTestConfig()
+	cfg.SSHConnections = map[string]config.SSHConnection{
+		"shared": {Host: "yaml.example.com", Port: 22, User: "bob"},
+	}
+
+	h := NewHandler(cfg, session.NewManager())
+	h.sshConfigPath = sshConfigPath
+	r := setupRouterWithHandler(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/ssh-connections", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var resp sshConnectionsResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	// Deduplication: "shared" should appear only once
+	assert.Equal(t, []string{"shared"}, resp.Names)
+}
+
+func TestGetSSHConfigHosts_ReturnsHosts(t *testing.T) {
+	sshConfigPath := writeTempSSHConfigForAPI(t, "Host myhost\n    HostName myhost.example.com\n    User ubuntu\n    Port 2222\n")
+
+	h := NewHandler(defaultTestConfig(), session.NewManager())
+	h.sshConfigPath = sshConfigPath
+	r := setupRouterWithHandler(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/ssh-config/hosts", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var resp sshConfigHostsResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	require.Len(t, resp.Hosts, 1)
+	assert.Equal(t, "myhost", resp.Hosts[0].Name)
+	assert.Equal(t, "myhost.example.com", resp.Hosts[0].Hostname)
+	assert.Equal(t, "ubuntu", resp.Hosts[0].User)
+	assert.Equal(t, 2222, resp.Hosts[0].Port)
+}
+
+func TestGetSSHConfigHosts_Empty(t *testing.T) {
+	sshConfigPath := writeTempSSHConfigForAPI(t, "")
+
+	h := NewHandler(defaultTestConfig(), session.NewManager())
+	h.sshConfigPath = sshConfigPath
+	r := setupRouterWithHandler(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/ssh-config/hosts", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var resp sshConfigHostsResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.Empty(t, resp.Hosts)
+}
+
+func TestPostSSHConfigHost_ValidHost_201(t *testing.T) {
+	dir := t.TempDir()
+	sshConfigPath := filepath.Join(dir, "config")
+
+	h := NewHandler(defaultTestConfig(), session.NewManager())
+	h.sshConfigPath = sshConfigPath
+	r := setupRouterWithHandler(h)
+
+	body, _ := json.Marshal(sshConfigHostRequest{
+		Name:     "new-host",
+		Hostname: "new.example.com",
+		User:     "deploy",
+		Port:     22,
+	})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/ssh-config/hosts", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusCreated, rec.Code)
+
+	// Verify it was written to the file
+	data, err := os.ReadFile(sshConfigPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "Host new-host")
+}
+
+func TestPostSSHConfigHost_MissingName_422(t *testing.T) {
+	h := NewHandler(defaultTestConfig(), session.NewManager())
+	h.sshConfigPath = filepath.Join(t.TempDir(), "config")
+	r := setupRouterWithHandler(h)
+
+	body, _ := json.Marshal(sshConfigHostRequest{Hostname: "host.example.com", User: "ubuntu"})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/ssh-config/hosts", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
+}
+
+func TestPostSSHConfigHost_InvalidNameChars_422(t *testing.T) {
+	h := NewHandler(defaultTestConfig(), session.NewManager())
+	h.sshConfigPath = filepath.Join(t.TempDir(), "config")
+	r := setupRouterWithHandler(h)
+
+	body, _ := json.Marshal(sshConfigHostRequest{Name: "bad name!", Hostname: "h.example.com", User: "u"})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/ssh-config/hosts", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
+}
+
+func TestPostSSHConfigHost_MissingHostname_422(t *testing.T) {
+	h := NewHandler(defaultTestConfig(), session.NewManager())
+	h.sshConfigPath = filepath.Join(t.TempDir(), "config")
+	r := setupRouterWithHandler(h)
+
+	body, _ := json.Marshal(sshConfigHostRequest{Name: "myhost", User: "ubuntu"})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/ssh-config/hosts", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
+}
+
+func TestPostSSHConfigHost_MissingUser_422(t *testing.T) {
+	h := NewHandler(defaultTestConfig(), session.NewManager())
+	h.sshConfigPath = filepath.Join(t.TempDir(), "config")
+	r := setupRouterWithHandler(h)
+
+	body, _ := json.Marshal(sshConfigHostRequest{Name: "myhost", Hostname: "myhost.example.com"})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/ssh-config/hosts", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
+}
+
+func TestPostSSHConfigHost_PortOutOfRange_422(t *testing.T) {
+	h := NewHandler(defaultTestConfig(), session.NewManager())
+	h.sshConfigPath = filepath.Join(t.TempDir(), "config")
+	r := setupRouterWithHandler(h)
+
+	body, _ := json.Marshal(sshConfigHostRequest{Name: "myhost", Hostname: "myhost.example.com", User: "ubuntu", Port: 70000})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/ssh-config/hosts", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
+}
+
+func TestPostSSHConfigHost_DuplicateName_409(t *testing.T) {
+	sshConfigPath := writeTempSSHConfigForAPI(t, "Host existing\n    HostName existing.example.com\n    User ubuntu\n")
+
+	h := NewHandler(defaultTestConfig(), session.NewManager())
+	h.sshConfigPath = sshConfigPath
+	r := setupRouterWithHandler(h)
+
+	body, _ := json.Marshal(sshConfigHostRequest{Name: "existing", Hostname: "new.example.com", User: "ubuntu"})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/ssh-config/hosts", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusConflict, rec.Code)
+}
+
+func TestPostSSHConfigHost_InvalidBody_400(t *testing.T) {
+	h := NewHandler(defaultTestConfig(), session.NewManager())
+	h.sshConfigPath = filepath.Join(t.TempDir(), "config")
+	r := setupRouterWithHandler(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/ssh-config/hosts", bytes.NewBufferString("not json"))
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }

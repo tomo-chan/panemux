@@ -6,11 +6,20 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"sync"
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
 )
+
+// validRemotePath is the CodeQL-recommended regex guard for shell arguments.
+// It matches absolute paths that contain no shell metacharacters, making the
+// value safe to embed in a remote shell command via shellQuotePath.
+// Allowed: any character except shell metacharacters (;|&$`'"<>(){}[]!\)
+// and control characters (newlines, null bytes, etc.).
+var validRemotePath = regexp.MustCompile(`^(/[^;|&$` + "`" + `'"<>()\[\]{}!\\\x00-\x1f\x7f]*)+$`)
 
 // SSHSession manages an SSH connection with a PTY.
 type SSHSession struct {
@@ -34,6 +43,13 @@ type SSHConfig struct {
 	KeyFile        string
 	Password       string
 	KnownHostsFile string
+	Cwd            string // initial working directory on the remote host
+}
+
+// shellQuotePath wraps path in single quotes and escapes any single quotes
+// within the path, making it safe to embed in a POSIX shell command.
+func shellQuotePath(path string) string {
+	return "'" + strings.ReplaceAll(path, "'", `'\''`) + "'"
 }
 
 // NewSSH creates and starts a new SSH terminal session.
@@ -102,10 +118,25 @@ func NewSSH(id, title string, cfg SSHConfig) (*SSHSession, error) {
 	sess.Stdout = pw
 	sess.Stderr = pw
 
-	if err := sess.Shell(); err != nil {
+	// Start the shell. If a working directory is configured, validate it with
+	// the regex guard (CodeQL go/command-injection recommended pattern for
+	// arguments) before embedding it in the remote shell command.
+	// sess.Shell() and sess.Start() are mutually exclusive in the SSH protocol.
+	var startErr error
+	if cfg.Cwd != "" {
+		if !validRemotePath.MatchString(cfg.Cwd) {
+			sess.Close()
+			client.Close()
+			return nil, fmt.Errorf("invalid working directory %q: must be an absolute path with no shell metacharacters", cfg.Cwd)
+		}
+		startErr = sess.Start(fmt.Sprintf("cd %s && exec $SHELL", shellQuotePath(cfg.Cwd)))
+	} else {
+		startErr = sess.Shell()
+	}
+	if startErr != nil {
 		sess.Close()
 		client.Close()
-		return nil, fmt.Errorf("start shell: %w", err)
+		return nil, fmt.Errorf("start shell: %w", startErr)
 	}
 
 	s := &SSHSession{
@@ -162,6 +193,23 @@ func buildAuthMethods(cfg SSHConfig) ([]ssh.AuthMethod, error) {
 
 	if cfg.Password != "" {
 		methods = append(methods, ssh.Password(cfg.Password))
+	}
+
+	// If no explicit auth method, try common default key files (mirrors OpenSSH behaviour).
+	if len(methods) == 0 {
+		home, _ := os.UserHomeDir()
+		for _, name := range []string{"id_ed25519", "id_rsa", "id_ecdsa"} {
+			keyData, err := os.ReadFile(filepath.Join(home, ".ssh", name))
+			if err != nil {
+				continue
+			}
+			signer, err := ssh.ParsePrivateKey(keyData)
+			if err != nil {
+				continue
+			}
+			methods = append(methods, ssh.PublicKeys(signer))
+			break
+		}
 	}
 
 	if len(methods) == 0 {

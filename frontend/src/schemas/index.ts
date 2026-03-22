@@ -80,3 +80,19 @@ export const SSHConnectionsResponseSchema = z.object({
 })
 
 export type SSHConnectionsResponse = z.infer<typeof SSHConnectionsResponseSchema>
+
+export const SSHConfigHostSchema = z.object({
+  name: z.string().min(1),
+  hostname: z.string().min(1),
+  user: z.string().min(1),
+  port: z.number().int().min(0).max(65535).optional(),
+  identity_file: z.string().optional(),
+})
+
+export type SSHConfigHost = z.infer<typeof SSHConfigHostSchema>
+
+export const SSHConfigHostsResponseSchema = z.object({
+  hosts: z.array(SSHConfigHostSchema),
+})
+
+export type SSHConfigHostsResponse = z.infer<typeof SSHConfigHostsResponseSchema>

@@ -60,8 +60,9 @@ type Config struct {
 	Display        DisplayConfig            `yaml:"display,omitempty" json:"display"`
 
 	// internal: raw yaml node for comment-preserving writes
-	rawNode  *yaml.Node
-	filePath string
+	rawNode       *yaml.Node
+	filePath      string
+	sshConfigPath string // overridable for tests; empty = use sshconfig.DefaultPath()
 }
 
 func Load(path string) (*Config, error) {

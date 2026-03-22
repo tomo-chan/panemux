@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, act, waitFor } from '@testing-library/react'
 import { usePaneSettings } from './usePaneSettings'
-import type { LayoutNode, PaneConfig } from '../schemas'
+import type { LayoutNode, PaneConfig, SSHConfigHost } from '../schemas'
 
 const mockLayout: LayoutNode = {
   direction: 'horizontal',
@@ -148,5 +148,70 @@ describe('usePaneSettings', () => {
 
     // Dialog should still close even if restart fails
     expect(result.current.isOpen).toBe(false)
+  })
+
+  describe('addSSHConfigHost', () => {
+    const mockHost: SSHConfigHost = {
+      name: 'new-host',
+      hostname: 'new.example.com',
+      user: 'ubuntu',
+    }
+
+    it('posts to /api/ssh-config/hosts and refreshes ssh connection names', async () => {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ names: [] }) }) // initial GET ssh-connections
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) })            // POST ssh-config/hosts
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ names: ['new-host'] }) }) // GET ssh-connections refresh
+
+      vi.stubGlobal('fetch', fetchMock)
+      const { result } = renderHook(() => usePaneSettings(mockLayout, vi.fn()))
+      await waitFor(() => expect(result.current.sshConnectionNames).toEqual([]))
+
+      await act(async () => {
+        const name = await result.current.addSSHConfigHost(mockHost)
+        expect(name).toBe('new-host')
+      })
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/ssh-config/hosts',
+        expect.objectContaining({ method: 'POST' }),
+      )
+      await waitFor(() => expect(result.current.sshConnectionNames).toEqual(['new-host']))
+    })
+
+    it('throws on POST failure', async () => {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ names: [] }) })
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 409,
+          json: () => Promise.resolve({ error: 'host already exists' }),
+        })
+
+      vi.stubGlobal('fetch', fetchMock)
+      const { result } = renderHook(() => usePaneSettings(mockLayout, vi.fn()))
+
+      await expect(
+        act(async () => {
+          await result.current.addSSHConfigHost(mockHost)
+        }),
+      ).rejects.toThrow('host already exists')
+    })
+
+    it('returns host name on success', async () => {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ names: [] }) })
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) })
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ names: ['new-host'] }) })
+
+      vi.stubGlobal('fetch', fetchMock)
+      const { result } = renderHook(() => usePaneSettings(mockLayout, vi.fn()))
+
+      let returnedName = ''
+      await act(async () => {
+        returnedName = await result.current.addSSHConfigHost(mockHost)
+      })
+      expect(returnedName).toBe('new-host')
+    })
   })
 })

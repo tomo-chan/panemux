@@ -10,6 +10,7 @@ interface PaneSettingsDialogProps {
   isSaving: boolean
   onSave: (updated: PaneConfig) => Promise<void>
   onClose: () => void
+  onAddSSHHost: () => void
 }
 
 const PANE_TYPES: Array<{ value: PaneConfig['type']; label: string }> = [
@@ -51,6 +52,7 @@ export const PaneSettingsDialog: React.FC<PaneSettingsDialogProps> = ({
   isSaving,
   onSave,
   onClose,
+  onAddSSHHost,
 }) => {
   const [type, setType] = useState<PaneConfig['type']>('local')
   const [shell, setShell] = useState('')
@@ -166,22 +168,37 @@ export const PaneSettingsDialog: React.FC<PaneSettingsDialogProps> = ({
         {needsConnection && (
           <div style={fieldStyle}>
             <label style={labelStyle}>Connection</label>
-            {sshConnectionNames.length === 0 ? (
-              <div style={{ fontSize: '12px', color: '#666', fontStyle: 'italic' }}>
-                No SSH connections configured in config.yaml
-              </div>
-            ) : (
+            <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
               <select
                 value={connection}
                 onChange={(e) => { setConnection(e.target.value); setValidationError(null) }}
-                style={inputStyle}
+                style={{ ...inputStyle, flex: 1 }}
               >
                 <option value="">— select connection —</option>
                 {sshConnectionNames.map((name) => (
                   <option key={name} value={name}>{name}</option>
                 ))}
               </select>
-            )}
+              <button
+                onClick={onAddSSHHost}
+                style={{
+                  padding: '5px 10px',
+                  backgroundColor: 'transparent',
+                  color: '#888',
+                  border: '1px solid #555',
+                  borderRadius: '3px',
+                  fontFamily: TERMINAL_FONT_FAMILY,
+                  fontSize: '13px',
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                + Add
+              </button>
+            </div>
+            <div style={{ fontSize: '11px', color: '#555', marginTop: '4px' }}>
+              Edit connections in ~/.ssh/config
+            </div>
           </div>
         )}
 
@@ -245,7 +262,7 @@ export const PaneSettingsDialog: React.FC<PaneSettingsDialogProps> = ({
           </button>
           <button
             onClick={handleSave}
-            disabled={isSaving || (needsConnection && sshConnectionNames.length === 0)}
+            disabled={isSaving || (needsConnection && !connection)}
             style={{
               padding: '5px 14px',
               backgroundColor: '#0e639c',
