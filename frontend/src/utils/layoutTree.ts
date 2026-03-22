@@ -125,6 +125,35 @@ function replaceInChildren(children: LayoutChild[], updated: PaneConfig): Layout
 }
 
 /**
+ * Swaps the pane configs at the two given pane IDs in the layout tree.
+ * Tree structure (sizes, split directions) is preserved; only the pane
+ * configs at each position are exchanged.
+ * Returns the original layout unchanged if either ID is not found or both IDs are the same.
+ */
+export function swapPanesInTree(layout: LayoutNode, paneIdA: string, paneIdB: string): LayoutNode {
+  if (paneIdA === paneIdB) return layout
+  const paneA = findPaneById(layout, paneIdA)
+  const paneB = findPaneById(layout, paneIdB)
+  if (!paneA || !paneB) return layout
+  return { ...layout, children: swapInChildren(layout.children, paneIdA, paneB, paneIdB, paneA) }
+}
+
+function swapInChildren(
+  children: LayoutChild[],
+  idA: string,
+  paneB: PaneConfig,
+  idB: string,
+  paneA: PaneConfig,
+): LayoutChild[] {
+  return children.map((child) => {
+    if (child.pane?.id === idA) return { ...child, pane: paneB }
+    if (child.pane?.id === idB) return { ...child, pane: paneA }
+    if (child.children?.length) return { ...child, children: swapInChildren(child.children, idA, paneB, idB, paneA) }
+    return child
+  })
+}
+
+/**
  * Generates a unique pane ID.
  */
 export function generatePaneId(): string {

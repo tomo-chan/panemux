@@ -8,7 +8,10 @@ export interface LayoutActionsContextValue {
   onClose: (paneId: string) => void
   onMaximize: (paneId: string | null) => void
   onSettings: (paneId: string) => void
+  onSwapPanes: (paneIdA: string, paneIdB: string) => void
   maximizedPaneId: string | null
+  dragSourcePaneId: string | null
+  setDragSourcePaneId: (id: string | null) => void
   displayConfig: DisplayConfig
   editMode: boolean
 }

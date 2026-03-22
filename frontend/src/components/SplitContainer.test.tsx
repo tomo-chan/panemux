@@ -24,7 +24,10 @@ function makeCtx(maximizedPaneId: string | null): LayoutActionsContextValue {
     onClose: vi.fn(),
     onMaximize: vi.fn(),
     onSettings: vi.fn(),
+    onSwapPanes: vi.fn(),
     maximizedPaneId,
+    dragSourcePaneId: null,
+    setDragSourcePaneId: vi.fn(),
     displayConfig: { show_header: false, show_status_bar: false },
     editMode: false,
   }

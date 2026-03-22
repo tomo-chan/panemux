@@ -12,9 +12,10 @@ import { findPaneById } from './utils/layoutTree'
 const DEFAULT_DISPLAY: DisplayConfig = { show_header: true, show_status_bar: false }
 
 export const App: React.FC = () => {
-  const { layout, displayConfig, error, updateSizes, splitPane, closePane } = useLayout()
+  const { layout, displayConfig, error, updateSizes, splitPane, closePane, swapPanes } = useLayout()
   const { editMode, toggleEditMode } = useEditMode()
   const [maximizedPaneId, setMaximizedPaneId] = useState<string | null>(null)
+  const [dragSourcePaneId, setDragSourcePaneId] = useState<string | null>(null)
   const { isOpen, currentPane, sshConnectionNames, saveError, isSaving, openSettings, closeSettings, saveSettings } =
     usePaneSettings(layout, updateSizes)
 
@@ -59,7 +60,10 @@ export const App: React.FC = () => {
         const pane = findPaneById(layout, paneId)
         if (pane) openSettings(pane)
       },
+      onSwapPanes: swapPanes,
       maximizedPaneId,
+      dragSourcePaneId,
+      setDragSourcePaneId,
       displayConfig: displayConfig ?? DEFAULT_DISPLAY,
       editMode,
     }}>

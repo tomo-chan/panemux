@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { DisplayConfig, DisplayConfigSchema, LayoutNode, LayoutNodeSchema, PaneConfig } from '../schemas'
-import { generatePaneId, removePaneFromTree, splitPaneInTree } from '../utils/layoutTree'
+import { generatePaneId, removePaneFromTree, splitPaneInTree, swapPanesInTree } from '../utils/layoutTree'
 
 export function useLayout() {
   const [layout, setLayout] = useState<LayoutNode | null>(null)
@@ -87,5 +87,19 @@ export function useLayout() {
     [layout],
   )
 
-  return { layout, displayConfig, error, updateSizes, splitPane, closePane }
+  const swapPanes = useCallback(
+    async (paneIdA: string, paneIdB: string) => {
+      if (!layout) return
+      const newLayout = swapPanesInTree(layout, paneIdA, paneIdB)
+      setLayout(newLayout)
+      await fetch('/api/layout', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newLayout),
+      }).catch(console.error)
+    },
+    [layout],
+  )
+
+  return { layout, displayConfig, error, updateSizes, splitPane, closePane, swapPanes }
 }

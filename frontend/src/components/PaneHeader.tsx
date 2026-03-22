@@ -1,6 +1,7 @@
-import React from 'react'
+import React, { useContext, useState } from 'react'
 import { DisplayConfig, PaneConfig } from '../types'
 import { TERMINAL_FONT_FAMILY } from '../utils/fonts'
+import { LayoutActionsContext } from './SplitContainer'
 
 interface PaneHeaderProps {
   pane: PaneConfig
@@ -56,13 +57,52 @@ export const PaneHeader: React.FC<PaneHeaderProps> = ({
   onSettings,
 }) => {
   const showHeader = pane.show_header ?? displayConfig.show_header
+  const layoutCtx = useContext(LayoutActionsContext)
+  const [isDragOver, setIsDragOver] = useState(false)
+
   if (!showHeader) return null
 
   const color = TYPE_COLORS[pane.type] ?? '#888'
   const label = TYPE_LABELS[pane.type] ?? pane.type.toUpperCase()
 
+  const handleDragStart = (e: React.DragEvent) => {
+    e.dataTransfer.effectAllowed = 'move'
+    layoutCtx?.setDragSourcePaneId(pane.id)
+  }
+
+  const handleDragEnd = () => {
+    layoutCtx?.setDragSourcePaneId(null)
+    setIsDragOver(false)
+  }
+
+  const handleDragOver = (e: React.DragEvent) => {
+    if (!layoutCtx?.dragSourcePaneId || layoutCtx.dragSourcePaneId === pane.id) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    setIsDragOver(true)
+  }
+
+  const handleDragLeave = () => {
+    setIsDragOver(false)
+  }
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragOver(false)
+    const sourceId = layoutCtx?.dragSourcePaneId
+    if (!sourceId || sourceId === pane.id) return
+    layoutCtx?.onSwapPanes(sourceId, pane.id)
+    layoutCtx?.setDragSourcePaneId(null)
+  }
+
   return (
     <div
+      draggable={editMode}
+      onDragStart={editMode ? handleDragStart : undefined}
+      onDragEnd={editMode ? handleDragEnd : undefined}
+      onDragOver={editMode ? handleDragOver : undefined}
+      onDragLeave={editMode ? handleDragLeave : undefined}
+      onDrop={editMode ? handleDrop : undefined}
       style={{
         display: 'flex',
         alignItems: 'center',
@@ -75,8 +115,19 @@ export const PaneHeader: React.FC<PaneHeaderProps> = ({
         borderBottom: '1px solid #333',
         userSelect: 'none',
         flexShrink: 0,
+        cursor: editMode ? 'grab' : 'default',
+        outline: isDragOver ? '2px solid #569cd6' : 'none',
+        outlineOffset: '-2px',
       }}
     >
+      {editMode && (
+        <span
+          title="Drag to move pane"
+          style={{ color: '#555', fontSize: '13px', lineHeight: '1', flexShrink: 0 }}
+        >
+          ⠿
+        </span>
+      )}
       <span
         style={{
           display: 'inline-block',
