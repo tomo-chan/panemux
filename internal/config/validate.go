@@ -27,7 +27,11 @@ func (c *Config) Validate() error {
 	// Also accept hosts from ~/.ssh/config as valid connections.
 	// This allows panes to reference ssh config host aliases without
 	// duplicating connection details in ssh_connections.
-	if hosts, err := sshconfig.ParseHosts(sshconfig.DefaultPath()); err == nil {
+	sshCfgPath := c.sshConfigPath
+	if sshCfgPath == "" {
+		sshCfgPath = sshconfig.DefaultPath()
+	}
+	if hosts, err := sshconfig.ParseHosts(sshCfgPath); err == nil {
 		for _, h := range hosts {
 			if _, exists := sshConns[h.Name]; !exists {
 				sshConns[h.Name] = SSHConnection{Host: h.Hostname}

@@ -73,9 +73,26 @@ func TestValidate_SSHPaneConnectionNotDefined_Error(t *testing.T) {
 	cfg := validConfig()
 	cfg.Layout.Children[0].Pane.Type = "ssh"
 	cfg.Layout.Children[0].Pane.Connection = "nonexistent"
+	// Point at an empty temp dir so ~/.ssh/config is not read
+	cfg.sshConfigPath = filepath.Join(t.TempDir(), "config")
 	err := cfg.Validate()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "connection")
+}
+
+// TestValidate_SSHPaneInSSHConfig_NoError verifies that a pane whose connection
+// name is defined in ~/.ssh/config (not in yaml ssh_connections) passes validation.
+// This is the positive counterpart of TestValidate_SSHPaneConnectionNotDefined_Error.
+func TestValidate_SSHPaneInSSHConfig_NoError(t *testing.T) {
+	sshCfg := filepath.Join(t.TempDir(), "config")
+	require.NoError(t, os.WriteFile(sshCfg, []byte("Host myserver\n    HostName 192.168.1.1\n    User deploy\n"), 0600))
+
+	cfg := validConfig()
+	cfg.Layout.Children[0].Pane.Type = "ssh"
+	cfg.Layout.Children[0].Pane.Connection = "myserver"
+	cfg.sshConfigPath = sshCfg
+
+	assert.NoError(t, cfg.Validate())
 }
 
 func TestValidate_ServerPortOutOfRange_Error(t *testing.T) {

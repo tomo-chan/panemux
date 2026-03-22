@@ -1,6 +1,7 @@
 package session
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -63,7 +64,61 @@ func writeTempSSHConfig(t *testing.T, name, hostname, user string, port int) str
 }
 
 func itoa(i int) string {
-	return string(rune('0'+i%10)) // simple, only used for port ≤9 in tests
+	return fmt.Sprintf("%d", i)
+}
+
+// TestResolveSSHConfig_FromSSHConfigMap verifies that resolveSSHConfig returns
+// the correct values when the connection is found in the yaml sshConns map.
+func TestResolveSSHConfig_FromSSHConfigMap(t *testing.T) {
+	conns := map[string]config.SSHConnection{
+		"prod": {Host: "prod.example.com", Port: 2222, User: "deploy", KeyFile: "/home/user/.ssh/id_rsa"},
+	}
+	cfg, err := resolveSSHConfig("prod", conns, filepath.Join(t.TempDir(), "no-config"))
+	require.NoError(t, err)
+	assert.Equal(t, "prod.example.com", cfg.Host)
+	assert.Equal(t, 2222, cfg.Port)
+	assert.Equal(t, "deploy", cfg.User)
+	assert.Equal(t, "/home/user/.ssh/id_rsa", cfg.KeyFile)
+}
+
+// TestResolveSSHConfig_FallbackToSSHConfig verifies the ~/.ssh/config fallback path:
+// host is resolved, port defaults to 22, and IdentityFile with ~/ is expanded.
+func TestResolveSSHConfig_FallbackToSSHConfig(t *testing.T) {
+	home := t.TempDir()
+	sshDir := filepath.Join(home, ".ssh")
+	require.NoError(t, os.MkdirAll(sshDir, 0700))
+
+	sshCfgPath := filepath.Join(sshDir, "config")
+	content := "Host myserver\n    HostName 10.0.0.1\n    User admin\n    IdentityFile ~/.ssh/id_ed25519\n"
+	require.NoError(t, os.WriteFile(sshCfgPath, []byte(content), 0600))
+
+	// Temporarily override HOME so ~/ expansion uses our temp dir
+	t.Setenv("HOME", home)
+
+	cfg, err := resolveSSHConfig("myserver", nil, sshCfgPath)
+	require.NoError(t, err)
+	assert.Equal(t, "10.0.0.1", cfg.Host)
+	assert.Equal(t, 22, cfg.Port) // default when not set
+	assert.Equal(t, "admin", cfg.User)
+	// IdentityFile should have ~/ expanded to home
+	assert.Equal(t, filepath.Join(home, ".ssh", "id_ed25519"), cfg.KeyFile)
+}
+
+// TestResolveSSHConfig_PortFromSSHConfig verifies that an explicit Port in the
+// ssh config file is used as-is.
+func TestResolveSSHConfig_PortFromSSHConfig(t *testing.T) {
+	sshCfgPath := writeTempSSHConfig(t, "myhost", "myhost.example.com", "myuser", 2222)
+	cfg, err := resolveSSHConfig("myhost", nil, sshCfgPath)
+	require.NoError(t, err)
+	assert.Equal(t, 2222, cfg.Port)
+}
+
+// TestResolveSSHConfig_NotFound verifies that a missing connection returns an error.
+func TestResolveSSHConfig_NotFound(t *testing.T) {
+	sshCfgPath := writeTempSSHConfig(t, "other", "other.example.com", "user", 0)
+	_, err := resolveSSHConfig("does-not-exist", nil, sshCfgPath)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
 }
 
 func TestCreateSession_SSHFallbackToSSHConfig(t *testing.T) {
