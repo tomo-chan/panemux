@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -396,6 +398,62 @@ func TestGetDisplay_ReturnsJSON(t *testing.T) {
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&display))
 	assert.True(t, display.ShowHeader)
 	assert.False(t, display.ShowStatusBar)
+}
+
+func TestPutLayout_ExpandsTildeCwd(t *testing.T) {
+	cfg := defaultTestConfig()
+	r := setupRouter(cfg, session.NewManager())
+
+	home, err := os.UserHomeDir()
+	require.NoError(t, err)
+
+	layout := config.LayoutNode{
+		Direction: "horizontal",
+		Children: []config.LayoutChild{
+			{Size: 100, Pane: &config.PaneConfig{ID: "main", Type: "local", Cwd: "~/mydir"}},
+		},
+	}
+	body, _ := json.Marshal(layout)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/layout", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, filepath.Join(home, "mydir"), cfg.Layout.Children[0].Pane.Cwd)
+}
+
+func TestPutLayout_NestedTildeCwd_Expanded(t *testing.T) {
+	cfg := defaultTestConfig()
+	r := setupRouter(cfg, session.NewManager())
+
+	home, err := os.UserHomeDir()
+	require.NoError(t, err)
+
+	layout := config.LayoutNode{
+		Direction: "horizontal",
+		Children: []config.LayoutChild{
+			{
+				Size:      50,
+				Direction: "vertical",
+				Children: []config.LayoutChild{
+					{Size: 50, Pane: &config.PaneConfig{ID: "pane-a", Type: "local", Cwd: "~/projects/a"}},
+					{Size: 50, Pane: &config.PaneConfig{ID: "pane-b", Type: "local", Cwd: "~/projects/b"}},
+				},
+			},
+			{Size: 50, Pane: &config.PaneConfig{ID: "pane-c", Type: "local"}},
+		},
+	}
+	body, _ := json.Marshal(layout)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/layout", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, filepath.Join(home, "projects/a"), cfg.Layout.Children[0].Children[0].Pane.Cwd)
+	assert.Equal(t, filepath.Join(home, "projects/b"), cfg.Layout.Children[0].Children[1].Pane.Cwd)
+	assert.Empty(t, cfg.Layout.Children[1].Pane.Cwd) // no cwd, unchanged
 }
 
 func TestGetSSHConnections_Empty(t *testing.T) {

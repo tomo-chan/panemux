@@ -45,6 +45,8 @@ func (h *Handler) PutLayout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	config.ExpandLayoutPaths(&layout)
+
 	if err := config.ValidateLayout(layout); err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnprocessableEntity)
@@ -86,6 +88,8 @@ func (h *Handler) PostSession(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
+
+	config.ExpandPanePaths(&pane)
 
 	if err := config.ValidatePane(&pane); err != nil {
 		w.Header().Set("Content-Type", "application/json")
