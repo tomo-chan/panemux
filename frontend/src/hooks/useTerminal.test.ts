@@ -417,4 +417,28 @@ describe('useTerminal', () => {
     expect(mockTerm.dispose).not.toHaveBeenCalled()
     expect(secondContainer.contains(mockTerm.element as HTMLElement)).toBe(true)
   })
+
+  it('editMode blocks terminal input', () => {
+    const container = makeContainer()
+    renderHook(() => useTerminal({ sessionId: 's1', container, editMode: true }))
+    act(() => MockWebSocket.instances[0].simulateOpen())
+
+    const ws = MockWebSocket.instances[0]
+    const sentBefore = ws.sent.length
+    const onDataCallback = mockTerm.onData.mock.calls[0][0] as (data: string) => void
+    act(() => onDataCallback('hello'))
+    expect(ws.sent.length).toBe(sentBefore)
+  })
+
+  it('normal mode passes terminal input', () => {
+    const container = makeContainer()
+    renderHook(() => useTerminal({ sessionId: 's1', container, editMode: false }))
+    act(() => MockWebSocket.instances[0].simulateOpen())
+
+    const ws = MockWebSocket.instances[0]
+    const sentBefore = ws.sent.length
+    const onDataCallback = mockTerm.onData.mock.calls[0][0] as (data: string) => void
+    act(() => onDataCallback('hello'))
+    expect(ws.sent.length).toBeGreaterThan(sentBefore)
+  })
 })
