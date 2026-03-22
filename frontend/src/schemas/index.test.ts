@@ -6,6 +6,8 @@ import {
   LayoutChildSchema,
   SessionInfoSchema,
   WSControlMessageSchema,
+  SSHConfigHostSchema,
+  SSHConfigHostsResponseSchema,
 } from './index'
 
 describe('DisplayConfigSchema', () => {
@@ -157,6 +159,100 @@ describe('WSControlMessageSchema', () => {
 
   it('rejects unknown type', () => {
     const result = WSControlMessageSchema.safeParse({ type: 'unknown' })
+    expect(result.success).toBe(false)
+  })
+})
+
+describe('SSHConfigHostSchema', () => {
+  it('accepts valid host with all fields', () => {
+    const result = SSHConfigHostSchema.safeParse({
+      name: 'myhost',
+      hostname: 'myhost.example.com',
+      user: 'ubuntu',
+      port: 22,
+      identity_file: '~/.ssh/id_rsa',
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('accepts valid host without optional fields', () => {
+    const result = SSHConfigHostSchema.safeParse({
+      name: 'myhost',
+      hostname: 'myhost.example.com',
+      user: 'ubuntu',
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects missing name', () => {
+    const result = SSHConfigHostSchema.safeParse({
+      hostname: 'myhost.example.com',
+      user: 'ubuntu',
+    })
+    expect(result.success).toBe(false)
+  })
+
+  it('rejects empty name', () => {
+    const result = SSHConfigHostSchema.safeParse({
+      name: '',
+      hostname: 'myhost.example.com',
+      user: 'ubuntu',
+    })
+    expect(result.success).toBe(false)
+  })
+
+  it('rejects missing hostname', () => {
+    const result = SSHConfigHostSchema.safeParse({
+      name: 'myhost',
+      user: 'ubuntu',
+    })
+    expect(result.success).toBe(false)
+  })
+
+  it('rejects missing user', () => {
+    const result = SSHConfigHostSchema.safeParse({
+      name: 'myhost',
+      hostname: 'myhost.example.com',
+    })
+    expect(result.success).toBe(false)
+  })
+
+  it('rejects port above 65535', () => {
+    const result = SSHConfigHostSchema.safeParse({
+      name: 'myhost',
+      hostname: 'myhost.example.com',
+      user: 'ubuntu',
+      port: 70000,
+    })
+    expect(result.success).toBe(false)
+  })
+
+  it('rejects negative port', () => {
+    const result = SSHConfigHostSchema.safeParse({
+      name: 'myhost',
+      hostname: 'myhost.example.com',
+      user: 'ubuntu',
+      port: -1,
+    })
+    expect(result.success).toBe(false)
+  })
+})
+
+describe('SSHConfigHostsResponseSchema', () => {
+  it('accepts valid response with hosts', () => {
+    const result = SSHConfigHostsResponseSchema.safeParse({
+      hosts: [{ name: 'myhost', hostname: 'myhost.example.com', user: 'ubuntu' }],
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('accepts empty hosts array', () => {
+    const result = SSHConfigHostsResponseSchema.safeParse({ hosts: [] })
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects missing hosts field', () => {
+    const result = SSHConfigHostsResponseSchema.safeParse({})
     expect(result.success).toBe(false)
   })
 })

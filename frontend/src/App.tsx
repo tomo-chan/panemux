@@ -1,13 +1,15 @@
-import React, { useState } from 'react'
+import React, { useState, useCallback } from 'react'
 import { SplitContainer, LayoutActionsContext } from './components/SplitContainer'
 import { EditModeToggle } from './components/EditModeToggle'
 import { PaneSettingsDialog } from './components/PaneSettingsDialog'
+import { AddSSHHostDialog } from './components/AddSSHHostDialog'
 import { useLayout } from './hooks/useLayout'
 import { useEditMode } from './hooks/useEditMode'
 import { usePaneSettings } from './hooks/usePaneSettings'
 import { DisplayConfig } from './types'
 import { TERMINAL_FONT_FAMILY } from './utils/fonts'
 import { findPaneById } from './utils/layoutTree'
+import type { SSHConfigHost } from './schemas'
 
 const DEFAULT_DISPLAY: DisplayConfig = { show_header: true, show_status_bar: false }
 
@@ -16,8 +18,25 @@ export const App: React.FC = () => {
   const { editMode, toggleEditMode } = useEditMode()
   const [maximizedPaneId, setMaximizedPaneId] = useState<string | null>(null)
   const [dragSourcePaneId, setDragSourcePaneId] = useState<string | null>(null)
-  const { isOpen, currentPane, sshConnectionNames, saveError, isSaving, openSettings, closeSettings, saveSettings } =
+  const { isOpen, currentPane, sshConnectionNames, saveError, isSaving, openSettings, closeSettings, saveSettings, addSSHConfigHost } =
     usePaneSettings(layout, updateSizes)
+
+  const [isAddSSHHostOpen, setIsAddSSHHostOpen] = useState(false)
+  const [addSSHHostError, setAddSSHHostError] = useState<string | null>(null)
+  const [isAddSSHHostSaving, setIsAddSSHHostSaving] = useState(false)
+
+  const handleAddSSHHost = useCallback(async (host: SSHConfigHost) => {
+    setIsAddSSHHostSaving(true)
+    setAddSSHHostError(null)
+    try {
+      await addSSHConfigHost(host)
+      setIsAddSSHHostOpen(false)
+    } catch (err) {
+      setAddSSHHostError(err instanceof Error ? err.message : 'Failed to add host')
+    } finally {
+      setIsAddSSHHostSaving(false)
+    }
+  }, [addSSHConfigHost])
 
   if (error) {
     return (
@@ -78,6 +97,14 @@ export const App: React.FC = () => {
           isSaving={isSaving}
           onSave={saveSettings}
           onClose={closeSettings}
+          onAddSSHHost={() => setIsAddSSHHostOpen(true)}
+        />
+        <AddSSHHostDialog
+          isOpen={isAddSSHHostOpen}
+          isSaving={isAddSSHHostSaving}
+          saveError={addSSHHostError}
+          onSave={handleAddSSHHost}
+          onClose={() => setIsAddSSHHostOpen(false)}
         />
       </div>
     </LayoutActionsContext.Provider>
