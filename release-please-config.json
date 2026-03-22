@@ -13,5 +13,6 @@
       ]
     }
   },
-  "tag-prefix": "v"
+  "tag-prefix": "v",
+  "draft": true
 }
