@@ -72,17 +72,19 @@ export const PaneHeader: React.FC<PaneHeaderProps> = ({
         fontSize: '11px',
         fontFamily: TERMINAL_FONT_FAMILY,
         color: '#888',
-        backgroundColor: '#252526',
-        borderBottom: '1px solid #333',
+        // Shift header toward a blue-gray tint in edit mode for clear mode indication
+        backgroundColor: editMode ? '#1d2b3a' : '#252526',
+        borderBottom: editMode ? '1px solid #2a3f55' : '1px solid #333',
         userSelect: 'none',
         flexShrink: 0,
         cursor: editMode ? 'grab' : 'default',
+        transition: 'background-color 0.2s ease, border-color 0.2s ease',
       }}
     >
       {editMode && (
         <span
           title="Drag to move pane"
-          style={{ color: '#555', fontSize: '13px', lineHeight: '1', flexShrink: 0 }}
+          style={{ color: '#4a7ea5', fontSize: '13px', lineHeight: '1', flexShrink: 0 }}
         >
           ⠿
         </span>

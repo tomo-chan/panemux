@@ -15,6 +15,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const [containerEl, setContainerEl] = React.useState<HTMLElement | null>(null)
   const [isDragOver, setIsDragOver] = useState(false)
+  const [isDragging, setIsDragging] = useState(false)
 
   const setRef = useCallback((el: HTMLDivElement | null) => {
     containerRef.current = el
@@ -44,11 +45,13 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
   const handleDragStart = (e: React.DragEvent) => {
     e.dataTransfer.effectAllowed = 'move'
     ctx?.setDragSourcePaneId(pane.id)
+    setIsDragging(true)
   }
 
   const handleDragEnd = () => {
     ctx?.setDragSourcePaneId(null)
     setIsDragOver(false)
+    setIsDragging(false)
   }
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -84,8 +87,20 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
         height: '100%',
         overflow: 'hidden',
         backgroundColor: '#1a1b1e',
-        outline: isDragOver ? '2px solid #569cd6' : 'none',
+        // Outline priority: drop-target > drag-source > none
+        outline: isDragOver
+          ? '2px solid #569cd6'
+          : isDragging
+          ? '2px dashed rgba(86, 156, 214, 0.7)'
+          : 'none',
         outlineOffset: '-2px',
+        // Subtle inset frame to mark pane as "in edit zone"
+        boxShadow: editMode && !isDragOver
+          ? 'inset 0 0 0 1px rgba(86, 156, 214, 0.18)'
+          : 'none',
+        // "Lifted" appearance when this pane is the drag source
+        opacity: isDragging ? 0.35 : 1,
+        transition: 'opacity 0.15s ease, box-shadow 0.2s ease',
       }}
     >
       <PaneHeader
@@ -113,8 +128,9 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
             position: 'absolute',
             inset: 0,
             zIndex: 5,
-            cursor: 'grab',
-            backgroundColor: 'rgba(0, 0, 0, 0.25)',
+            cursor: isDragging ? 'grabbing' : 'grab',
+            // Blue-tinted dark overlay — clearly dims terminal content
+            backgroundColor: 'rgba(10, 20, 38, 0.54)',
           }} />
         )}
         {sessionExited && (
