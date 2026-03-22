@@ -146,6 +146,8 @@ When writing code that passes user-supplied values to `exec.Command`:
 
 See `docs/architecture.md` → *Security Design* for the full rationale and the `/etc/shells` pattern used in this codebase.
 
+**Remote path arguments (SSH working directory):** user-supplied paths that flow into `sess.Start()` shell commands must be validated with `validRemotePath` (defined in `internal/session/ssh.go`) before use. This regex guard is the CodeQL-recommended sanitization pattern for shell arguments, and it rejects shell metacharacters (`;|&$\`'"<>(){}[]!\`) and control characters while allowing valid Unix path characters including spaces and Unicode.
+
 ### Pull request test plan
 - After creating a PR, run every item in the test plan locally and verify it passes.
 - Update the PR description with all checkboxes checked (`- [x]`) before considering the task complete.

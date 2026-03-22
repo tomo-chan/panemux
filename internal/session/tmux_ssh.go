@@ -103,6 +103,13 @@ func NewTmuxSSH(id, title, tmuxSession string, cfg SSHConfig) (*TmuxSSHSession, 
 	// (tmuxSession is validated as [a-zA-Z0-9_.-]+ by config)
 	tmuxCmd := fmt.Sprintf("tmux new-session -As '%s'", tmuxSession)
 	if cfg.Cwd != "" {
+		// Validate cwd with the regex guard before embedding in the shell command
+		// (CodeQL go/command-injection recommended pattern for arguments).
+		if !validRemotePath.MatchString(cfg.Cwd) {
+			sess.Close()
+			client.Close()
+			return nil, fmt.Errorf("invalid working directory %q: must be an absolute path with no shell metacharacters", cfg.Cwd)
+		}
 		tmuxCmd += fmt.Sprintf(" -c %s", shellQuotePath(cfg.Cwd))
 	}
 	if err := sess.Start(tmuxCmd); err != nil {

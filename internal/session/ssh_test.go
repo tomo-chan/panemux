@@ -68,6 +68,39 @@ func TestBuildAuthMethods_NoKeyNoPassword_DefaultKeyFound(t *testing.T) {
 	assert.Len(t, methods, 1)
 }
 
+// TestValidRemotePath_* cover the regex guard that prevents command injection
+// via the working directory field (CodeQL go/command-injection pattern).
+
+func TestValidRemotePath_AbsoluteOK(t *testing.T) {
+	for _, p := range []string{
+		"/home/user/projects",
+		"/tmp",
+		"/var/log/my app",     // space is allowed
+		"/データ/プロジェクト", // unicode allowed
+		"/home/user_name/file-name.txt",
+	} {
+		assert.True(t, validRemotePath.MatchString(p), "expected %q to be valid", p)
+	}
+}
+
+func TestValidRemotePath_Rejected(t *testing.T) {
+	for _, p := range []string{
+		"relative/path",             // not absolute
+		"",                          // empty
+		"/tmp/$(evil)",              // command substitution $()
+		"/tmp/`evil`",               // backtick substitution
+		"/tmp/'; rm -rf /; echo '",  // single-quote injection
+		"/tmp/\"; rm -rf /; echo \"", // double-quote injection
+		"/tmp/a;b",                  // semicolon
+		"/tmp/a|b",                  // pipe
+		"/tmp/a&b",                  // background
+		"/tmp/a\x00b",               // null byte
+		"/tmp/a\nb",                 // newline
+	} {
+		assert.False(t, validRemotePath.MatchString(p), "expected %q to be rejected", p)
+	}
+}
+
 func TestShellQuotePath_Simple(t *testing.T) {
 	assert.Equal(t, "'/home/user/projects'", shellQuotePath("/home/user/projects"))
 }
