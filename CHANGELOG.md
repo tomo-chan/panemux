@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.0](https://github.com/tomo-chan/panemux/compare/v0.3.0...v0.4.0) (2026-03-22)
+
+
+### Features
+
+* add pane settings dialog for UI-based connection configuration ([#25](https://github.com/tomo-chan/panemux/issues/25)) ([45406a8](https://github.com/tomo-chan/panemux/commit/45406a8cef9587492e1df8c9608d55dc782b5041))
+* drag & drop pane reordering in edit mode ([#27](https://github.com/tomo-chan/panemux/issues/27)) ([4b4ddac](https://github.com/tomo-chan/panemux/commit/4b4ddacbab22995fddec3301e21f6ed969bef8a7))
+
 ## [0.3.0](https://github.com/tomo-chan/panemux/compare/v0.2.0...v0.3.0) (2026-03-21)
 
 
