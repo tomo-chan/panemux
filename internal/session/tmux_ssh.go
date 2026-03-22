@@ -98,8 +98,14 @@ func NewTmuxSSH(id, title, tmuxSession string, cfg SSHConfig) (*TmuxSSHSession, 
 	sess.Stderr = pw
 
 	// Attach to existing tmux session or create it if absent.
+	// -c sets the working directory for newly created sessions; it has no
+	// effect when attaching to an existing session.
 	// (tmuxSession is validated as [a-zA-Z0-9_.-]+ by config)
-	if err := sess.Start(fmt.Sprintf("tmux new-session -As '%s'", tmuxSession)); err != nil {
+	tmuxCmd := fmt.Sprintf("tmux new-session -As '%s'", tmuxSession)
+	if cfg.Cwd != "" {
+		tmuxCmd += fmt.Sprintf(" -c %s", shellQuotePath(cfg.Cwd))
+	}
+	if err := sess.Start(tmuxCmd); err != nil {
 		sess.Close()
 		client.Close()
 		return nil, fmt.Errorf("starting tmux attach: %w", err)

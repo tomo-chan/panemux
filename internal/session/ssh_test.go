@@ -68,6 +68,23 @@ func TestBuildAuthMethods_NoKeyNoPassword_DefaultKeyFound(t *testing.T) {
 	assert.Len(t, methods, 1)
 }
 
+func TestShellQuotePath_Simple(t *testing.T) {
+	assert.Equal(t, "'/home/user/projects'", shellQuotePath("/home/user/projects"))
+}
+
+func TestShellQuotePath_WithSpaces(t *testing.T) {
+	assert.Equal(t, "'/home/user/my project'", shellQuotePath("/home/user/my project"))
+}
+
+func TestShellQuotePath_WithSingleQuote(t *testing.T) {
+	// /home/user/it's → '/home/user/it'\''s'
+	assert.Equal(t, `'/home/user/it'\''s'`, shellQuotePath("/home/user/it's"))
+}
+
+func TestShellQuotePath_Empty(t *testing.T) {
+	assert.Equal(t, "''", shellQuotePath(""))
+}
+
 func TestBuildHostKeyCallback_NonexistentFile_Error(t *testing.T) {
 	_, err := buildHostKeyCallback("/nonexistent/path/known_hosts")
 	require.Error(t, err)

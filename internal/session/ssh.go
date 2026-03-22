@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"golang.org/x/crypto/ssh"
@@ -34,6 +35,13 @@ type SSHConfig struct {
 	KeyFile        string
 	Password       string
 	KnownHostsFile string
+	Cwd            string // initial working directory on the remote host
+}
+
+// shellQuotePath wraps path in single quotes and escapes any single quotes
+// within the path, making it safe to embed in a POSIX shell command.
+func shellQuotePath(path string) string {
+	return "'" + strings.ReplaceAll(path, "'", `'\''`) + "'"
 }
 
 // NewSSH creates and starts a new SSH terminal session.
@@ -102,10 +110,19 @@ func NewSSH(id, title string, cfg SSHConfig) (*SSHSession, error) {
 	sess.Stdout = pw
 	sess.Stderr = pw
 
-	if err := sess.Shell(); err != nil {
+	// Start the shell. If a working directory is configured, use sess.Start()
+	// with an explicit cd so the shell opens in the requested directory.
+	// sess.Shell() and sess.Start() are mutually exclusive in the SSH protocol.
+	var startErr error
+	if cfg.Cwd != "" {
+		startErr = sess.Start(fmt.Sprintf("cd %s && exec $SHELL", shellQuotePath(cfg.Cwd)))
+	} else {
+		startErr = sess.Shell()
+	}
+	if startErr != nil {
 		sess.Close()
 		client.Close()
-		return nil, fmt.Errorf("start shell: %w", err)
+		return nil, fmt.Errorf("start shell: %w", startErr)
 	}
 
 	s := &SSHSession{

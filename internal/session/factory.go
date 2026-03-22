@@ -28,6 +28,7 @@ func createSession(pane *config.PaneConfig, sshConns map[string]config.SSHConnec
 		if err != nil {
 			return nil, err
 		}
+		cfg.Cwd = pane.Cwd
 		return NewSSH(pane.ID, pane.Title, cfg)
 
 	case TypeTmux:
@@ -38,6 +39,7 @@ func createSession(pane *config.PaneConfig, sshConns map[string]config.SSHConnec
 		if err != nil {
 			return nil, err
 		}
+		cfg.Cwd = pane.Cwd
 		return NewTmuxSSH(pane.ID, pane.Title, pane.TmuxSession, cfg)
 
 	default:
