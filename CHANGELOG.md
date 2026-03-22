@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.0](https://github.com/tomo-chan/panemux/compare/v0.4.0...v0.5.0) (2026-03-22)
+
+
+### Features
+
+* full-window drag in edit mode; lock terminal input during edit ([#31](https://github.com/tomo-chan/panemux/issues/31)) ([87ec740](https://github.com/tomo-chan/panemux/commit/87ec74058cba1895a4aa85dca19c938031f7c0ae))
+* SSH connection management via ~/.ssh/config (VSCode-style) ([#29](https://github.com/tomo-chan/panemux/issues/29)) ([2056411](https://github.com/tomo-chan/panemux/commit/2056411b6ee5c9262618c4895fd59b80c54c811c))
+
 ## [0.4.0](https://github.com/tomo-chan/panemux/compare/v0.3.0...v0.4.0) (2026-03-22)
 
 
