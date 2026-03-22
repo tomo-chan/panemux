@@ -8,6 +8,7 @@ import { TERMINAL_FONT_FAMILY } from '../utils/fonts'
 interface UseTerminalOptions {
   sessionId: string
   container: HTMLElement | null
+  editMode?: boolean
 }
 
 interface TerminalEntry {
@@ -16,11 +17,12 @@ interface TerminalEntry {
   attachedContainer: HTMLElement | null
   disposeTimer: ReturnType<typeof setTimeout> | null
   send: ((data: string | ArrayBuffer | Uint8Array) => void) | null
+  editMode: boolean
 }
 
 const terminalEntries = new Map<string, TerminalEntry>()
 
-export function useTerminal({ sessionId, container }: UseTerminalOptions) {
+export function useTerminal({ sessionId, container, editMode = false }: UseTerminalOptions) {
   const termRef = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
   const initializedRef = useRef(false)
@@ -74,6 +76,11 @@ export function useTerminal({ sessionId, container }: UseTerminalOptions) {
     }
   }, [send])
 
+  // Sync editMode into the entry so onData/onBinary handlers can read it
+  useLayoutEffect(() => {
+    if (entryRef.current) entryRef.current.editMode = editMode
+  }, [editMode])
+
   // Initialize terminal
   useEffect(() => {
     if (!container || initializedRef.current) return
@@ -87,6 +94,7 @@ export function useTerminal({ sessionId, container }: UseTerminalOptions) {
 
     entry.attachedContainer = container
     entry.send = sendRef.current
+    entry.editMode = editMode
     entryRef.current = entry
     termRef.current = entry.term
     fitAddonRef.current = entry.fitAddon
@@ -180,6 +188,7 @@ function getOrCreateTerminalEntry(sessionId: string): TerminalEntry {
     attachedContainer: null,
     disposeTimer: null,
     send: null,
+    editMode: false,
   }
 
   term.loadAddon(fitAddon)
@@ -196,15 +205,17 @@ function getOrCreateTerminalEntry(sessionId: string): TerminalEntry {
 
   // Use the entry send ref so the same terminal instance can survive pane remounts.
   term.onData((data) => {
-    entry.send?.(new TextEncoder().encode(data))
+    if (!entry.editMode) entry.send?.(new TextEncoder().encode(data))
   })
 
   term.onBinary((data) => {
-    const bytes = new Uint8Array(data.length)
-    for (let i = 0; i < data.length; i++) {
-      bytes[i] = data.charCodeAt(i) & 0xff
+    if (!entry.editMode) {
+      const bytes = new Uint8Array(data.length)
+      for (let i = 0; i < data.length; i++) {
+        bytes[i] = data.charCodeAt(i) & 0xff
+      }
+      entry.send?.(bytes)
     }
-    entry.send?.(bytes)
   })
 
   terminalEntries.set(sessionId, entry)
@@ -218,7 +229,11 @@ function attachTerminal(entry: TerminalEntry, container: HTMLElement) {
   }
 
   if (entry.term.element.parentElement !== container) {
-    container.replaceChildren()
+    // Use appendChild (not replaceChildren) so that React-managed siblings
+    // (edit-mode overlay, session-exited overlay) are preserved.  replaceChildren()
+    // would remove those React-owned DOM nodes, causing React to crash when it
+    // next tries to reconcile them (e.g. removeChild on a detached node when
+    // edit mode is toggled off).
     container.appendChild(entry.term.element)
   }
 }
