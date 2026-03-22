@@ -7,9 +7,11 @@ interface PaneHeaderProps {
   connected: boolean
   displayConfig: DisplayConfig
   isMaximized: boolean
+  editMode: boolean
   onSplit: (direction: 'horizontal' | 'vertical') => void
   onClose: () => void
   onMaximize: () => void
+  onSettings: () => void
 }
 
 const TYPE_COLORS: Record<string, string> = {
@@ -47,9 +49,11 @@ export const PaneHeader: React.FC<PaneHeaderProps> = ({
   connected,
   displayConfig,
   isMaximized,
+  editMode,
   onSplit,
   onClose,
   onMaximize,
+  onSettings,
 }) => {
   const showHeader = pane.show_header ?? displayConfig.show_header
   if (!showHeader) return null
@@ -87,6 +91,15 @@ export const PaneHeader: React.FC<PaneHeaderProps> = ({
       {pane.title && <span style={{ color: '#aaa' }}>{pane.title}</span>}
       {!connected && <span style={{ color: '#555' }}>reconnecting…</span>}
       <div style={{ marginLeft: 'auto', display: 'flex', gap: '4px' }}>
+        {editMode && (
+          <button
+            title="Pane settings"
+            onClick={onSettings}
+            style={buttonStyle}
+          >
+            ⚙
+          </button>
+        )}
         <button
           title={isMaximized ? 'Restore' : 'Maximize'}
           onClick={onMaximize}

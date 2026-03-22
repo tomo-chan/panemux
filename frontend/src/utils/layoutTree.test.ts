@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { splitPaneInTree, removePaneFromTree, generatePaneId, findPaneById } from './layoutTree'
+import { splitPaneInTree, removePaneFromTree, generatePaneId, findPaneById, replacePaneInTree } from './layoutTree'
 import type { LayoutNode } from '../schemas'
 
 const simpleLayout: LayoutNode = {
@@ -156,6 +156,41 @@ describe('findPaneById', () => {
   it('returns null when pane not found', () => {
     const result = findPaneById(simpleLayout, 'nonexistent')
     expect(result).toBeNull()
+  })
+})
+
+describe('replacePaneInTree', () => {
+  it('replaces a matching pane at root level', () => {
+    const result = replacePaneInTree(simpleLayout, { id: 'main', type: 'ssh', connection: 'prod' })
+    expect(result.children[0].pane?.type).toBe('ssh')
+    expect(result.children[0].pane?.connection).toBe('prod')
+  })
+
+  it('replaces a matching pane nested inside a split', () => {
+    const nested: LayoutNode = {
+      direction: 'horizontal',
+      children: [
+        { size: 50, pane: { id: 'left', type: 'local' } },
+        {
+          size: 50,
+          direction: 'vertical',
+          children: [
+            { size: 50, pane: { id: 'top-right', type: 'local' } },
+            { size: 50, pane: { id: 'bottom-right', type: 'local' } },
+          ],
+        },
+      ],
+    }
+    const result = replacePaneInTree(nested, { id: 'bottom-right', type: 'tmux', tmux_session: 'mysess' })
+    const bottomRight = result.children[1].children![1]
+    expect(bottomRight.pane?.type).toBe('tmux')
+    expect(bottomRight.pane?.tmux_session).toBe('mysess')
+  })
+
+  it('returns tree unchanged when id not found', () => {
+    const result = replacePaneInTree(simpleLayout, { id: 'nonexistent', type: 'ssh' })
+    expect(result.children[0].pane?.id).toBe('main')
+    expect(result.children[0].pane?.type).toBe('local')
   })
 })
 

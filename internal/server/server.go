@@ -45,6 +45,7 @@ func New(cfg *config.Config, manager *session.Manager, frontendFS embed.FS) *Ser
 		r.Get("/display", apiHandler.GetDisplay)
 		r.Get("/edit-mode", apiHandler.GetEditMode)
 		r.Put("/edit-mode", apiHandler.PutEditMode)
+		r.Get("/ssh-connections", apiHandler.GetSSHConnections)
 	})
 
 	// WebSocket

@@ -74,3 +74,9 @@ export const EditModeResponseSchema = z.object({
 })
 
 export type EditModeResponse = z.infer<typeof EditModeResponseSchema>
+
+export const SSHConnectionsResponseSchema = z.object({
+  names: z.array(z.string()),
+})
+
+export type SSHConnectionsResponse = z.infer<typeof SSHConnectionsResponseSchema>

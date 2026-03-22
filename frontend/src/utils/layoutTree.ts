@@ -109,6 +109,22 @@ export function findPaneById(layout: LayoutNode, paneId: string): PaneConfig | n
 }
 
 /**
+ * Replaces the pane matching `updated.id` in the layout tree with `updated`.
+ * Returns the tree unchanged if the id is not found.
+ */
+export function replacePaneInTree(layout: LayoutNode, updated: PaneConfig): LayoutNode {
+  return { ...layout, children: replaceInChildren(layout.children, updated) }
+}
+
+function replaceInChildren(children: LayoutChild[], updated: PaneConfig): LayoutChild[] {
+  return children.map((child) => {
+    if (child.pane?.id === updated.id) return { ...child, pane: updated }
+    if (child.children?.length) return { ...child, children: replaceInChildren(child.children, updated) }
+    return child
+  })
+}
+
+/**
  * Generates a unique pane ID.
  */
 export function generatePaneId(): string {

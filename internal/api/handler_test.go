@@ -48,6 +48,7 @@ func setupRouter(cfg *config.Config, mgr *session.Manager) *chi.Mux {
 	r.Get("/api/display", h.GetDisplay)
 	r.Get("/api/edit-mode", h.GetEditMode)
 	r.Put("/api/edit-mode", h.PutEditMode)
+	r.Get("/api/ssh-connections", h.GetSSHConnections)
 	return r
 }
 
@@ -395,4 +396,52 @@ func TestGetDisplay_ReturnsJSON(t *testing.T) {
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&display))
 	assert.True(t, display.ShowHeader)
 	assert.False(t, display.ShowStatusBar)
+}
+
+func TestGetSSHConnections_Empty(t *testing.T) {
+	cfg := defaultTestConfig()
+	r := setupRouter(cfg, session.NewManager())
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/ssh-connections", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var resp sshConnectionsResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.NotNil(t, resp.Names)
+	assert.Empty(t, resp.Names)
+}
+
+func TestGetSSHConnections_WithConnections(t *testing.T) {
+	cfg := defaultTestConfig()
+	cfg.SSHConnections = map[string]config.SSHConnection{
+		"prod": {Host: "prod.example.com", Port: 22, User: "admin"},
+		"dev":  {Host: "dev.example.com", Port: 22, User: "dev"},
+	}
+	r := setupRouter(cfg, session.NewManager())
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/ssh-connections", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var resp sshConnectionsResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.ElementsMatch(t, []string{"prod", "dev"}, resp.Names)
+	// Must be sorted
+	assert.Equal(t, []string{"dev", "prod"}, resp.Names)
+}
+
+func TestGetSSHConnections_NilMap(t *testing.T) {
+	cfg := defaultTestConfig()
+	cfg.SSHConnections = nil
+	r := setupRouter(cfg, session.NewManager())
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/ssh-connections", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var resp sshConnectionsResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.NotNil(t, resp.Names)
+	assert.Empty(t, resp.Names)
 }

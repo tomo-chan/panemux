@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"sort"
 	"sync/atomic"
 
 	"github.com/go-chi/chi/v5"
@@ -20,6 +21,10 @@ type Handler struct {
 
 type editModeResponse struct {
 	EditMode bool `json:"editMode"`
+}
+
+type sshConnectionsResponse struct {
+	Names []string `json:"names"`
 }
 
 // NewHandler creates a new API handler.
@@ -184,6 +189,16 @@ type sessionInfo struct {
 	Type  string `json:"type"`
 	Title string `json:"title"`
 	State string `json:"state"`
+}
+
+// GetSSHConnections returns the sorted names of configured SSH connections.
+func (h *Handler) GetSSHConnections(w http.ResponseWriter, r *http.Request) {
+	names := make([]string, 0, len(h.cfg.SSHConnections))
+	for k := range h.cfg.SSHConnections {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	writeJSON(w, sshConnectionsResponse{Names: names})
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

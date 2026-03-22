@@ -7,4 +7,5 @@ export type {
   LayoutNode,
   SessionInfo,
   WSControlMessage,
+  SSHConnectionsResponse,
 } from '../schemas'
