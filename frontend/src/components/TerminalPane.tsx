@@ -15,7 +15,6 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const [containerEl, setContainerEl] = React.useState<HTMLElement | null>(null)
   const [isDragOver, setIsDragOver] = useState(false)
-  const [isDragging, setIsDragging] = useState(false)
 
   const setRef = useCallback((el: HTMLDivElement | null) => {
     containerRef.current = el
@@ -25,6 +24,11 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
   const ctx = useContext(LayoutActionsContext)
   const displayConfig = ctx?.displayConfig ?? DEFAULT_DISPLAY
   const editMode = ctx?.editMode ?? false
+  // Derive from context rather than local state: when the DOM element is moved
+  // by React during a swap, the browser may not fire dragend on the source pane,
+  // leaving local isDragging=true permanently. Using the global dragSourcePaneId
+  // (cleared by handleDrop before dragend would fire) avoids this.
+  const isDragging = ctx?.dragSourcePaneId === pane.id
 
   const { handleResize, connected, dims, sessionExited, restartSession } = useTerminal({
     sessionId: pane.id,
@@ -45,13 +49,11 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
   const handleDragStart = (e: React.DragEvent) => {
     e.dataTransfer.effectAllowed = 'move'
     ctx?.setDragSourcePaneId(pane.id)
-    setIsDragging(true)
   }
 
   const handleDragEnd = () => {
     ctx?.setDragSourcePaneId(null)
     setIsDragOver(false)
-    setIsDragging(false)
   }
 
   const handleDragOver = (e: React.DragEvent) => {
