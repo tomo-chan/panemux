@@ -14,7 +14,9 @@
 - **Four pane types** — `local` (shell), `ssh` (remote), `tmux` (local session attach), `ssh_tmux` (SSH → tmux)
 - **Recursive split layout** — nest horizontal and vertical splits to any depth
 - **Drag-to-resize** — drag dividers in the browser to adjust pane sizes
-- **Edit mode** — lock/unlock toggle controls whether layout changes are saved to disk; edits are always applied in-memory
+- **Drag-to-reorder** — in edit mode, drag any pane by its body to swap positions
+- **Edit mode** — enables layout reordering and persists changes to disk; terminal input is blocked while active so keystrokes can't reach the shell accidentally
+- **`~/.ssh/config` integration** — reference any host alias from `~/.ssh/config` directly as a `connection` without duplicating entries in YAML
 - **Session resilience** — tmux sessions are auto-created when absent; exited panes show a Restart button to reconnect without reloading
 - **xterm.js rendering** — full-featured terminal emulation with Unicode and colour support
 - **Single binary** — Go backend embeds the compiled frontend; no separate web server needed
@@ -75,7 +77,7 @@ server:
   port: 8080
   host: "127.0.0.1"
 
-# Named SSH connections referenced by layout panes
+# Named SSH connections (optional — hosts from ~/.ssh/config are also usable directly)
 ssh_connections:
   prod-web:
     host: "192.168.1.10"
@@ -116,13 +118,28 @@ layout:
 | Type | Description |
 |------|-------------|
 | `local` | Local shell process (`shell`, `cwd` optional) |
-| `ssh` | SSH connection defined in `ssh_connections` |
+| `ssh` | SSH connection — name from `ssh_connections` or a `~/.ssh/config` host alias |
 | `tmux` | Attach to a local tmux session (`tmux_session`); created automatically if absent |
 | `ssh_tmux` | SSH to a host, then attach to a tmux session; created automatically if absent |
 
+### SSH connections
+
+Connections can be defined in two ways:
+
+**In the YAML config** under `ssh_connections` — supports `host`, `user`, `port`, `key_file`, `password`, and `known_hosts_file`.
+
+**Via `~/.ssh/config`** — any non-wildcard `Host` entry is automatically available as a `connection` name. `HostName`, `User`, `Port`, and `IdentityFile` are read from the file. This lets you reuse your existing SSH config without duplicating it in YAML.
+
+When the same name appears in both, `ssh_connections` takes precedence.
+
+Authentication is attempted in order: configured `key_file` → configured `password` → default key files (`~/.ssh/id_ed25519`, `~/.ssh/id_rsa`, `~/.ssh/id_ecdsa`).
+
 ### Edit mode
 
-By default, layout changes (drag-resize, close) are applied in-memory only. Click the lock icon in the bottom-right corner to enable **edit mode**, which persists changes back to the config file. Disable edit mode to explore layouts without touching the file.
+Click the lock icon in the bottom-right corner to toggle **edit mode**.
+
+- **ON** — layout changes are persisted to the config file; terminal input is blocked and a visual overlay shows which panes are locked; drag any pane by its body (not just the header) to reorder it
+- **OFF** — terminal is fully interactive; drag-resize and close are applied in-memory only
 
 ---
 
