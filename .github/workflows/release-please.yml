@@ -15,7 +15,6 @@ jobs:
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
-      sha: ${{ steps.release.outputs.sha }}
     steps:
       - uses: googleapis/release-please-action@16a9c90856f42705d54a6fda1823352bdc62cf38  # v4
         id: release
@@ -34,12 +33,6 @@ jobs:
         with:
           fetch-depth: 0
           fetch-tags: true
-
-      - name: Create local tag for GoReleaser
-        run: |
-          TAG="${{ needs.release-please.outputs.tag_name }}"
-          SHA="${{ needs.release-please.outputs.sha }}"
-          git rev-parse "$TAG" 2>/dev/null || git tag "$TAG" "$SHA"
 
       - name: Set up Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
@@ -60,7 +53,7 @@ jobs:
         uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a
         with:
           version: latest
-          args: release --clean
+          args: release --clean --current-tag=${{ needs.release-please.outputs.tag_name }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
