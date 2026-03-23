@@ -122,13 +122,22 @@ func (s *LocalSession) GetCWD() (string, error) {
 	case "linux":
 		return os.Readlink("/proc/" + strconv.Itoa(s.pid) + "/cwd")
 	case "darwin":
-		out, err := exec.Command("lsof", "-p", strconv.Itoa(s.pid), "-d", "cwd", "-Fn").Output()
+		// -a ANDs the -p and -d conditions; without -a they are OR'd, which
+		// causes -d cwd to dump the cwd of every process on the system.
+		out, err := exec.Command("lsof", "-a", "-p", strconv.Itoa(s.pid), "-d", "cwd", "-Fn").Output()
 		if err != nil {
 			return "", fmt.Errorf("lsof: %w", err)
 		}
-		for _, line := range strings.Split(string(out), "\n") {
-			if strings.HasPrefix(line, "n") {
-				return strings.TrimPrefix(line, "n"), nil
+		// Output format (one entry per line):
+		//   p<pid>
+		//   fcwd
+		//   n<path>
+		// Find the n-line that immediately follows fcwd to be safe.
+		lines := strings.Split(string(out), "\n")
+		for i, line := range lines {
+			if strings.TrimSpace(line) == "fcwd" && i+1 < len(lines) {
+				p := strings.TrimPrefix(lines[i+1], "n")
+				return strings.TrimSpace(p), nil
 			}
 		}
 		return "", fmt.Errorf("cwd not found in lsof output")
