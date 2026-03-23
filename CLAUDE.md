@@ -87,8 +87,8 @@ Sessions are started at server startup from the YAML config (`main.go: startSess
 
 ### TDD
 - Always **write tests first**, confirm they fail, then implement.
-- Go: all tests must pass (`go test ./... -v -race`) before moving on.
-- Frontend: all tests must pass (`cd frontend && npm test`) before moving on.
+- Go: all tests must pass (`make test-go`) before moving on.
+- Frontend: all tests must pass (`make test-frontend`) before moving on.
 
 ### Test granularity
 
@@ -118,9 +118,9 @@ Example: `Config.sshConfigPath` (empty = use `sshconfig.DefaultPath()`, non-empt
 
 ### Quality gate
 - `make check` (lint + test + coverage) must pass before `make build`.
-- Test commands: `go test ./... -v -race` / `cd frontend && npm test`
-- Coverage commands: `make coverage-go` / `cd frontend && npm run coverage`
-- Lint commands: `go vet ./...` / `cd frontend && npx tsc --noEmit`
+- Test commands: `make test-go` / `make test-frontend` / `make test`
+- Coverage commands: `make coverage-go` / `make coverage-frontend`
+- Lint commands: `make lint-go` / `make lint-frontend` / `make lint`
 
 ### Documentation updates
 - When a behavior, operational assumption, browser requirement, rendering constraint, or user-visible rule becomes confirmed, update the relevant files in `docs/` in the same change.
@@ -147,6 +147,19 @@ When writing code that passes user-supplied values to `exec.Command`:
 See `docs/architecture.md` → *Security Design* for the full rationale and the `/etc/shells` pattern used in this codebase.
 
 **Remote path arguments (SSH working directory):** user-supplied paths that flow into `sess.Start()` shell commands must be validated with `validRemotePath` (defined in `internal/session/ssh.go`) before use. This regex guard is the CodeQL-recommended sanitization pattern for shell arguments, and it rejects shell metacharacters (`;|&$\`'"<>(){}[]!\`) and control characters while allowing valid Unix path characters including spaces and Unicode.
+
+### Branch workflow
+- **Never commit directly to `main`.** All changes — including documentation and `CLAUDE.md` — must go through a feature branch and PR.
+- Create a worktree and branch before making any edits:
+  ```sh
+  git worktree add ../<repo>-<feature> -b feature/<name>
+  ```
+- Do all editing, testing, and committing inside the worktree.
+- Push and open a PR, then merge with `--squash --delete-branch`.
+- Remove the worktree after merging:
+  ```sh
+  git worktree remove ../<repo>-<feature>
+  ```
 
 ### Pull request test plan
 - After creating a PR, run every item in the test plan locally and verify it passes.
