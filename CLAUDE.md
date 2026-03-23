@@ -87,8 +87,8 @@ Sessions are started at server startup from the YAML config (`main.go: startSess
 
 ### TDD
 - Always **write tests first**, confirm they fail, then implement.
-- Go: all tests must pass (`go test ./... -v -race`) before moving on.
-- Frontend: all tests must pass (`cd frontend && npm test`) before moving on.
+- Go: all tests must pass (`make test-go`) before moving on.
+- Frontend: all tests must pass (`make test-frontend`) before moving on.
 
 ### Test granularity
 
@@ -118,9 +118,9 @@ Example: `Config.sshConfigPath` (empty = use `sshconfig.DefaultPath()`, non-empt
 
 ### Quality gate
 - `make check` (lint + test + coverage) must pass before `make build`.
-- Test commands: `go test ./... -v -race` / `cd frontend && npm test`
-- Coverage commands: `make coverage-go` / `cd frontend && npm run coverage`
-- Lint commands: `go vet ./...` / `cd frontend && npx tsc --noEmit`
+- Test commands: `make test-go` / `make test-frontend` / `make test`
+- Coverage commands: `make coverage-go` / `make coverage-frontend`
+- Lint commands: `make lint-go` / `make lint-frontend` / `make lint`
 
 ### Documentation updates
 - When a behavior, operational assumption, browser requirement, rendering constraint, or user-visible rule becomes confirmed, update the relevant files in `docs/` in the same change.
