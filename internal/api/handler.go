@@ -20,6 +20,7 @@ type Handler struct {
 	manager       *session.Manager
 	editMode      atomic.Bool
 	sshConfigPath string
+	createSession func(*config.PaneConfig, map[string]config.SSHConnection) (session.Session, error)
 }
 
 type editModeResponse struct {
@@ -54,7 +55,9 @@ var validHostName = regexp.MustCompile(`^[a-zA-Z0-9_.\-]+$`)
 
 // NewHandler creates a new API handler.
 func NewHandler(cfg *config.Config, manager *session.Manager) *Handler {
-	return &Handler{cfg: cfg, manager: manager, sshConfigPath: sshconfig.DefaultPath()}
+	h := &Handler{cfg: cfg, manager: manager, sshConfigPath: sshconfig.DefaultPath()}
+	h.createSession = session.CreateFromConfig
+	return h
 }
 
 // GetLayout returns the current layout configuration.
@@ -128,7 +131,7 @@ func (h *Handler) PostSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sess, err := session.CreateFromConfig(&pane, h.cfg.SSHConnections)
+	sess, err := h.createSession(&pane, h.cfg.SSHConnections)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -177,7 +180,7 @@ func (h *Handler) RestartSession(w http.ResponseWriter, r *http.Request) {
 
 	h.manager.Remove(id) //nolint:errcheck -- ok if already gone
 
-	sess, err := session.CreateFromConfig(found, h.cfg.SSHConnections)
+	sess, err := h.createSession(found, h.cfg.SSHConnections)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

@@ -174,7 +174,12 @@ func TestDeleteSession_NotFound_404(t *testing.T) {
 }
 
 func TestPostSession_ValidLocal_201(t *testing.T) {
-	r := setupRouter(defaultTestConfig(), session.NewManager())
+	h := NewHandler(defaultTestConfig(), session.NewManager())
+	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
+	h.createSession = func(pane *config.PaneConfig, _ map[string]config.SSHConnection) (session.Session, error) {
+		return newMockSession(pane.ID), nil
+	}
+	r := setupRouterWithHandler(h)
 	body, _ := json.Marshal(config.PaneConfig{ID: "new-pane", Type: "local"})
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/sessions", bytes.NewReader(body))
@@ -221,7 +226,12 @@ func TestRestartSession_Found_200(t *testing.T) {
 	}
 	mgr := session.NewManager()
 	mgr.Add(newMockSession("main")) // pre-existing (exited) session
-	r := setupRouter(cfg, mgr)
+	h := NewHandler(cfg, mgr)
+	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
+	h.createSession = func(pane *config.PaneConfig, _ map[string]config.SSHConnection) (session.Session, error) {
+		return newMockSession(pane.ID), nil
+	}
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/sessions/main/restart", nil)
