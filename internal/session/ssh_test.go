@@ -141,6 +141,11 @@ func TestSSHSessionConnectionName(t *testing.T) {
 	assert.Equal(t, "my-server", s.ConnectionName())
 }
 
+func TestTmuxSSHSessionConnectionName(t *testing.T) {
+	s := &TmuxSSHSession{connectionName: "remote-box"}
+	assert.Equal(t, "remote-box", s.ConnectionName())
+}
+
 func TestNewTmuxSSH_InvalidSessionName_Error(t *testing.T) {
 	cfg := SSHConfig{
 		Host:     "127.0.0.1",

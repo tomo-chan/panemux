@@ -849,3 +849,44 @@ func TestPostOpenVSCode_SSH_InvalidConnName_422(t *testing.T) {
 
 	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
 }
+
+func TestPostOpenVSCode_Tmux_200(t *testing.T) {
+	mgr := session.NewManager()
+	mgr.Add(&mockCWDSession{
+		mockSession: mockSession{id: "tmux1", typ: session.TypeTmux},
+		cwd:         "/home/user/work",
+	})
+	h := NewHandler(defaultTestConfig(), mgr)
+	h.codeBinaryPath = "/bin/echo"
+	r := setupRouterWithVSCode(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/tmux1/open-vscode", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var resp openVSCodeResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.Equal(t, "/home/user/work", resp.Cwd)
+}
+
+func TestPostOpenVSCode_SSHTmux_200(t *testing.T) {
+	mgr := session.NewManager()
+	mgr.Add(&mockSSHCWDSession{
+		mockSession: mockSession{id: "sshtmux1", typ: session.TypeSSHTmux},
+		cwd:         "/home/user/remote",
+		connName:    "remote-box",
+	})
+	h := NewHandler(defaultTestConfig(), mgr)
+	h.codeBinaryPath = "/bin/echo"
+	r := setupRouterWithVSCode(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/sshtmux1/open-vscode", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var resp openVSCodeResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.Equal(t, "/home/user/remote", resp.Cwd)
+}
