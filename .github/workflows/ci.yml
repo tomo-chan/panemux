@@ -25,6 +25,7 @@ on:
       - '.goreleaser.yaml'
       - 'docs/**'
       - 'README.md'
+      - 'CLAUDE.md'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
