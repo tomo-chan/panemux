@@ -148,6 +148,19 @@ See `docs/architecture.md` → *Security Design* for the full rationale and the 
 
 **Remote path arguments (SSH working directory):** user-supplied paths that flow into `sess.Start()` shell commands must be validated with `validRemotePath` (defined in `internal/session/ssh.go`) before use. This regex guard is the CodeQL-recommended sanitization pattern for shell arguments, and it rejects shell metacharacters (`;|&$\`'"<>(){}[]!\`) and control characters while allowing valid Unix path characters including spaces and Unicode.
 
+### Branch workflow
+- **Never commit directly to `main`.** All changes — including documentation and `CLAUDE.md` — must go through a feature branch and PR.
+- Create a worktree and branch before making any edits:
+  ```sh
+  git worktree add ../<repo>-<feature> -b feature/<name>
+  ```
+- Do all editing, testing, and committing inside the worktree.
+- Push and open a PR, then merge with `--squash --delete-branch`.
+- Remove the worktree after merging:
+  ```sh
+  git worktree remove ../<repo>-<feature>
+  ```
+
 ### Pull request test plan
 - After creating a PR, run every item in the test plan locally and verify it passes.
 - Update the PR description with all checkboxes checked (`- [x]`) before considering the task complete.
