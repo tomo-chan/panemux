@@ -51,7 +51,7 @@ changelog:
       - "^test:"
 
 release:
-  replace_existing_draft: true
+  use_existing_draft: true
   mode: keep-existing
   github:
     owner: "{{ .Env.GITHUB_REPOSITORY_OWNER }}"
