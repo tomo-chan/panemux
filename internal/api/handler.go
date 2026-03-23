@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"os/exec"
 	"regexp"
 	"runtime"
@@ -357,6 +358,18 @@ func (h *Handler) PostOpenVSCode(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, fmt.Sprintf("failed to get working directory: %v", err), http.StatusInternalServerError)
 		return
+	}
+
+	// For local sessions, verify the directory still exists in the filesystem.
+	// A shell can remain in a directory after it has been deleted (the inode is
+	// kept alive by the open CWD reference), and passing a deleted path to
+	// `code` causes VSCode to open files in an unsaved/detached state.
+	switch sess.Type() {
+	case session.TypeLocal, session.TypeTmux:
+		if _, err := os.Stat(cwd); err != nil {
+			writeValidationError(w, fmt.Sprintf("working directory no longer exists: %s", cwd))
+			return
+		}
 	}
 
 	codePath, err := h.findVSCode()

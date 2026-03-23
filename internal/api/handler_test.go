@@ -792,10 +792,11 @@ func TestPostOpenVSCode_NoCWDGetter_422(t *testing.T) {
 }
 
 func TestPostOpenVSCode_Local_200(t *testing.T) {
+	dir := t.TempDir()
 	mgr := session.NewManager()
 	mgr.Add(&mockCWDSession{
 		mockSession: mockSession{id: "local1", typ: session.TypeLocal},
-		cwd:         "/tmp/myproject",
+		cwd:         dir,
 	})
 	h := NewHandler(defaultTestConfig(), mgr)
 	h.codeBinaryPath = "/bin/echo" // stub: echo instead of opening VSCode
@@ -808,7 +809,26 @@ func TestPostOpenVSCode_Local_200(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 	var resp openVSCodeResponse
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
-	assert.Equal(t, "/tmp/myproject", resp.Cwd)
+	assert.Equal(t, dir, resp.Cwd)
+}
+
+func TestPostOpenVSCode_Local_DeletedDir_422(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.Remove(dir)) // delete it so Stat fails
+	mgr := session.NewManager()
+	mgr.Add(&mockCWDSession{
+		mockSession: mockSession{id: "local-del", typ: session.TypeLocal},
+		cwd:         dir,
+	})
+	h := NewHandler(defaultTestConfig(), mgr)
+	h.codeBinaryPath = "/bin/echo"
+	r := setupRouterWithVSCode(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/local-del/open-vscode", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
 }
 
 func TestPostOpenVSCode_SSH_200(t *testing.T) {
@@ -851,10 +871,11 @@ func TestPostOpenVSCode_SSH_InvalidConnName_422(t *testing.T) {
 }
 
 func TestPostOpenVSCode_Tmux_200(t *testing.T) {
+	dir := t.TempDir()
 	mgr := session.NewManager()
 	mgr.Add(&mockCWDSession{
 		mockSession: mockSession{id: "tmux1", typ: session.TypeTmux},
-		cwd:         "/home/user/work",
+		cwd:         dir,
 	})
 	h := NewHandler(defaultTestConfig(), mgr)
 	h.codeBinaryPath = "/bin/echo"
@@ -867,7 +888,7 @@ func TestPostOpenVSCode_Tmux_200(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 	var resp openVSCodeResponse
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
-	assert.Equal(t, "/home/user/work", resp.Cwd)
+	assert.Equal(t, dir, resp.Cwd)
 }
 
 func TestPostOpenVSCode_SSHTmux_200(t *testing.T) {
