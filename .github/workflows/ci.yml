@@ -21,6 +21,8 @@ on:
       - 'frontend/**'
       - 'Makefile'
       - '.github/workflows/ci.yml'
+      - '.github/workflows/**'
+      - '.goreleaser.yaml'
       - 'docs/**'
       - 'README.md'
 
