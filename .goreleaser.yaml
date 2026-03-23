@@ -52,6 +52,8 @@ changelog:
 
 release:
   replace_existing_draft: true
+  use_existing_draft: true
+  target_commitish: "{{ .Commit }}"
   mode: keep-existing
   github:
     owner: "{{ .Env.GITHUB_REPOSITORY_OWNER }}"
