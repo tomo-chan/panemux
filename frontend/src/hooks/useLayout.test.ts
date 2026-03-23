@@ -66,12 +66,15 @@ describe('useLayout', () => {
         ok: true,
         json: () => Promise.resolve(validLayout),
       } as Response)
-      .mockResolvedValue({ ok: true, json: () => Promise.resolve(validLayout) } as Response)
+      .mockResolvedValue({ ok: true, json: () => Promise.resolve(validDisplay) } as Response)
     window.fetch = fetchMock
 
     const { result } = renderHook(() => useLayout())
     // Wait for initial fetches (layout + display) without fake timers
-    await waitFor(() => expect(result.current.layout).not.toBeNull())
+    await waitFor(() => {
+      expect(result.current.layout).not.toBeNull()
+      expect(result.current.displayConfig).not.toBeNull()
+    })
 
     // Count calls so far (layout + display = 2)
     const callsAfterInit = fetchMock.mock.calls.length
@@ -80,9 +83,11 @@ describe('useLayout', () => {
     vi.useFakeTimers()
     try {
       const updated: LayoutNode = { ...validLayout, direction: 'vertical' }
-      result.current.updateSizes(updated)
-      result.current.updateSizes(updated)
-      result.current.updateSizes(updated)
+      act(() => {
+        result.current.updateSizes(updated)
+        result.current.updateSizes(updated)
+        result.current.updateSizes(updated)
+      })
 
       // Debounce not yet fired
       expect(fetchMock).toHaveBeenCalledTimes(callsAfterInit)

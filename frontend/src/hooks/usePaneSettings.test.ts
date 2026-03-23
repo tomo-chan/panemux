@@ -42,17 +42,19 @@ describe('usePaneSettings', () => {
     await waitFor(() => expect(result.current.sshConnectionNames).toEqual([]))
   })
 
-  it('openSettings sets isOpen true with the given pane', () => {
+  it('openSettings sets isOpen true with the given pane', async () => {
     vi.stubGlobal('fetch', makeFetchOk({ names: [] }))
     const { result } = renderHook(() => usePaneSettings(mockLayout, vi.fn()))
+    await waitFor(() => expect(result.current.sshConnectionNames).toEqual([]))
     act(() => result.current.openSettings(mockPane))
     expect(result.current.isOpen).toBe(true)
     expect(result.current.currentPane).toEqual(mockPane)
   })
 
-  it('closeSettings sets isOpen false', () => {
+  it('closeSettings sets isOpen false', async () => {
     vi.stubGlobal('fetch', makeFetchOk({ names: [] }))
     const { result } = renderHook(() => usePaneSettings(mockLayout, vi.fn()))
+    await waitFor(() => expect(result.current.sshConnectionNames).toEqual([]))
     act(() => result.current.openSettings(mockPane))
     act(() => result.current.closeSettings())
     expect(result.current.isOpen).toBe(false)
