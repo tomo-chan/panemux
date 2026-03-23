@@ -133,6 +133,14 @@ func TestBuildHostKeyCallback_ValidFile_NoError(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestSSHSessionConnectionName(t *testing.T) {
+	// SSHSession.connectionName is set from SSHConfig.ConnectionName.
+	// We test the getter directly via an unexported struct field since
+	// NewSSH requires a live server — construct the struct manually.
+	s := &SSHSession{connectionName: "my-server"}
+	assert.Equal(t, "my-server", s.ConnectionName())
+}
+
 func TestNewTmuxSSH_InvalidSessionName_Error(t *testing.T) {
 	cfg := SSHConfig{
 		Host:     "127.0.0.1",

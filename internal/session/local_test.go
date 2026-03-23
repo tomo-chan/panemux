@@ -105,6 +105,17 @@ func TestNewLocal_WithCwd(t *testing.T) {
 	assert.Equal(t, StateConnected, sess.State())
 }
 
+func TestLocalSessionGetCWD(t *testing.T) {
+	tmpDir := os.TempDir()
+	sess, err := NewLocal("cwd-live-test", "/bin/sh", tmpDir, "cwd-live")
+	require.NoError(t, err)
+	defer sess.Close()
+
+	cwd, err := sess.GetCWD()
+	require.NoError(t, err)
+	assert.NotEmpty(t, cwd)
+}
+
 func TestValidateShell_InEtcShells_OK(t *testing.T) {
 	got, err := validateShell("/bin/sh")
 	assert.NoError(t, err)

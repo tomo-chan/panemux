@@ -23,16 +23,17 @@ var validRemotePath = regexp.MustCompile(`^(/[^;|&$` + "`" + `'"<>()\[\]{}!\\\x0
 
 // SSHSession manages an SSH connection with a PTY.
 type SSHSession struct {
-	mu      sync.RWMutex
-	id      string
-	title   string
-	state   State
-	client  *ssh.Client
-	session *ssh.Session
-	stdin   io.WriteCloser
-	stdout  io.Reader
+	mu             sync.RWMutex
+	id             string
+	title          string
+	state          State
+	client         *ssh.Client
+	session        *ssh.Session
+	stdin          io.WriteCloser
+	stdout         io.Reader
 	// combined reader for stdout+stderr
-	reader io.Reader
+	reader         io.Reader
+	connectionName string
 }
 
 // SSHConfig holds parameters for establishing an SSH connection.
@@ -44,6 +45,7 @@ type SSHConfig struct {
 	Password       string
 	KnownHostsFile string
 	Cwd            string // initial working directory on the remote host
+	ConnectionName string // alias used in panemux (for VSCode Remote SSH)
 }
 
 // shellQuotePath wraps path in single quotes and escapes any single quotes
@@ -140,13 +142,14 @@ func NewSSH(id, title string, cfg SSHConfig) (*SSHSession, error) {
 	}
 
 	s := &SSHSession{
-		id:      id,
-		title:   title,
-		state:   StateConnected,
-		client:  client,
-		session: sess,
-		stdin:   stdin,
-		reader:  pr,
+		id:             id,
+		title:          title,
+		state:          StateConnected,
+		client:         client,
+		session:        sess,
+		stdin:          stdin,
+		reader:         pr,
+		connectionName: cfg.ConnectionName,
 	}
 
 	// Monitor session exit
@@ -249,4 +252,21 @@ func (s *SSHSession) Close() error {
 	s.stdin.Close()
 	s.session.Close()
 	return s.client.Close()
+}
+
+// ConnectionName returns the panemux connection alias for this SSH session.
+func (s *SSHSession) ConnectionName() string { return s.connectionName }
+
+// GetCWD runs `pwd` on a new exec channel over the existing SSH connection.
+func (s *SSHSession) GetCWD() (string, error) {
+	sess, err := s.client.NewSession()
+	if err != nil {
+		return "", fmt.Errorf("new ssh session for pwd: %w", err)
+	}
+	defer sess.Close()
+	out, err := sess.Output("pwd")
+	if err != nil {
+		return "", fmt.Errorf("pwd over ssh: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
 }

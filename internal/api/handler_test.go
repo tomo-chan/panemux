@@ -741,3 +741,111 @@ func TestPostSSHConfigHost_InvalidBody_400(t *testing.T) {
 
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
+
+// mockCWDSession is a mockSession that also implements session.CWDGetter.
+type mockCWDSession struct {
+	mockSession
+	cwd    string
+	cwdErr error
+}
+
+func (m *mockCWDSession) GetCWD() (string, error) { return m.cwd, m.cwdErr }
+
+// mockSSHCWDSession is a mockSession that implements both CWDGetter and SSHConnNamer.
+type mockSSHCWDSession struct {
+	mockSession
+	cwd        string
+	connName   string
+}
+
+func (m *mockSSHCWDSession) GetCWD() (string, error) { return m.cwd, nil }
+func (m *mockSSHCWDSession) ConnectionName() string   { return m.connName }
+
+func setupRouterWithVSCode(h *Handler) *chi.Mux {
+	r := setupRouterWithHandler(h)
+	r.Post("/api/sessions/{id}/open-vscode", h.PostOpenVSCode)
+	return r
+}
+
+func TestPostOpenVSCode_NotFound_404(t *testing.T) {
+	h := NewHandler(defaultTestConfig(), session.NewManager())
+	r := setupRouterWithVSCode(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/missing/open-vscode", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+func TestPostOpenVSCode_NoCWDGetter_422(t *testing.T) {
+	mgr := session.NewManager()
+	mgr.Add(newMockSession("s1"))
+	h := NewHandler(defaultTestConfig(), mgr)
+	r := setupRouterWithVSCode(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/s1/open-vscode", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
+}
+
+func TestPostOpenVSCode_Local_200(t *testing.T) {
+	mgr := session.NewManager()
+	mgr.Add(&mockCWDSession{
+		mockSession: mockSession{id: "local1", typ: session.TypeLocal},
+		cwd:         "/tmp/myproject",
+	})
+	h := NewHandler(defaultTestConfig(), mgr)
+	h.codeBinaryPath = "/bin/echo" // stub: echo instead of opening VSCode
+	r := setupRouterWithVSCode(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/local1/open-vscode", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var resp openVSCodeResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.Equal(t, "/tmp/myproject", resp.Cwd)
+}
+
+func TestPostOpenVSCode_SSH_200(t *testing.T) {
+	mgr := session.NewManager()
+	mgr.Add(&mockSSHCWDSession{
+		mockSession: mockSession{id: "ssh1", typ: session.TypeSSH},
+		cwd:         "/home/user/code",
+		connName:    "myserver",
+	})
+	h := NewHandler(defaultTestConfig(), mgr)
+	h.codeBinaryPath = "/bin/echo"
+	r := setupRouterWithVSCode(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/ssh1/open-vscode", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var resp openVSCodeResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.Equal(t, "/home/user/code", resp.Cwd)
+}
+
+func TestPostOpenVSCode_SSH_InvalidConnName_422(t *testing.T) {
+	mgr := session.NewManager()
+	mgr.Add(&mockSSHCWDSession{
+		mockSession: mockSession{id: "ssh-bad", typ: session.TypeSSH},
+		cwd:         "/home/user",
+		connName:    "bad name; rm -rf /",
+	})
+	h := NewHandler(defaultTestConfig(), mgr)
+	h.codeBinaryPath = "/bin/echo"
+	r := setupRouterWithVSCode(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/ssh-bad/open-vscode", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
+}

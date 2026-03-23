@@ -51,3 +51,13 @@ type Session interface {
 
 // ensure Session embeds io.ReadWriter
 var _ io.ReadWriter = (Session)(nil)
+
+// CWDGetter is implemented by sessions that can report their live working directory.
+type CWDGetter interface {
+	GetCWD() (string, error)
+}
+
+// SSHConnNamer is implemented by sessions that have an SSH connection name.
+type SSHConnNamer interface {
+	ConnectionName() string
+}
