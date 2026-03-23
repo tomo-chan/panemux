@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/tomo-chan/panemux/compare/v0.5.0...v0.5.1) (2026-03-23)
+
+
+### Bug Fixes
+
+* resolve test failures and act() warnings ([#37](https://github.com/tomo-chan/panemux/issues/37)) ([ce69acc](https://github.com/tomo-chan/panemux/commit/ce69acc8a16a11ea3e0c2ce7c3ac216789370999))
+
 ## [0.5.0](https://github.com/tomo-chan/panemux/compare/v0.4.0...v0.5.0) (2026-03-22)
 
 
