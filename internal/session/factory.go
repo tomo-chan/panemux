@@ -80,12 +80,20 @@ func resolveSSHConfig(name string, sshConns map[string]config.SSHConnection, ssh
 				home, _ := os.UserHomeDir()
 				keyFile = filepath.Join(home, keyFile[2:])
 			}
-			return SSHConfig{
+			cfg := SSHConfig{
 				Host:    h.Hostname,
 				Port:    port,
 				User:    h.User,
 				KeyFile: keyFile,
-			}, nil
+			}
+			if h.ProxyJump != "" {
+				jumpCfg, err := resolveSSHConfig(h.ProxyJump, sshConns, sshConfigPath)
+				if err != nil {
+					return SSHConfig{}, fmt.Errorf("resolving proxy jump %q: %w", h.ProxyJump, err)
+				}
+				cfg.JumpHost = &jumpCfg
+			}
+			return cfg, nil
 		}
 	}
 

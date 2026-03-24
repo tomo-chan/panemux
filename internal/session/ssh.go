@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
@@ -34,6 +35,7 @@ type SSHSession struct {
 	// combined reader for stdout+stderr
 	reader         io.Reader
 	connectionName string
+	jumpClient     *ssh.Client // non-nil when connected via ProxyJump; closed after client
 }
 
 // SSHConfig holds parameters for establishing an SSH connection.
@@ -44,8 +46,9 @@ type SSHConfig struct {
 	KeyFile        string
 	Password       string
 	KnownHostsFile string
-	Cwd            string // initial working directory on the remote host
-	ConnectionName string // alias used in panemux (for VSCode Remote SSH)
+	Cwd            string     // initial working directory on the remote host
+	ConnectionName string     // alias used in panemux (for VSCode Remote SSH)
+	JumpHost       *SSHConfig // non-nil when ProxyJump is configured
 }
 
 // shellQuotePath wraps path in single quotes and escapes any single quotes
@@ -54,22 +57,25 @@ func shellQuotePath(path string) string {
 	return "'" + strings.ReplaceAll(path, "'", `'\''`) + "'"
 }
 
-// NewSSH creates and starts a new SSH terminal session.
-func NewSSH(id, title string, cfg SSHConfig) (*SSHSession, error) {
+// dialSSHClient establishes an SSH client connection, transparently handling ProxyJump.
+// Returns (client, jumpClient, error). jumpClient is non-nil only when a ProxyJump is
+// used; the caller must close jumpClient after closing client.
+func dialSSHClient(cfg SSHConfig) (*ssh.Client, *ssh.Client, error) {
 	authMethods, err := buildAuthMethods(cfg)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	hkCallback, err := buildHostKeyCallback(cfg.KnownHostsFile)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	sshCfg := &ssh.ClientConfig{
 		User:            cfg.User,
 		Auth:            authMethods,
 		HostKeyCallback: hkCallback,
+		Timeout:         30 * time.Second,
 	}
 
 	port := cfg.Port
@@ -78,22 +84,71 @@ func NewSSH(id, title string, cfg SSHConfig) (*SSHSession, error) {
 	}
 	addr := net.JoinHostPort(cfg.Host, fmt.Sprintf("%d", port))
 
-	conn, err := net.Dial("tcp", addr)
+	var conn net.Conn
+	var jumpClient *ssh.Client
+
+	if cfg.JumpHost != nil {
+		conn, jumpClient, err = dialThroughJump(*cfg.JumpHost, addr)
+	} else {
+		conn, err = net.DialTimeout("tcp", addr, 30*time.Second)
+	}
 	if err != nil {
-		return nil, fmt.Errorf("tcp dial %s: %w", addr, err)
+		return nil, nil, err
 	}
 
 	sshConn, chans, reqs, err := ssh.NewClientConn(conn, addr, sshCfg)
 	if err != nil {
 		conn.Close()
-		return nil, fmt.Errorf("ssh handshake: %w", err)
+		if jumpClient != nil {
+			jumpClient.Close()
+		}
+		return nil, nil, fmt.Errorf("ssh handshake: %w", err)
 	}
 
-	client := ssh.NewClient(sshConn, chans, reqs)
+	return ssh.NewClient(sshConn, chans, reqs), jumpClient, nil
+}
+
+// dialThroughJump connects to targetAddr by tunneling through a ProxyJump host.
+// Returns (conn to target, jumpClient, error). The jumpClient must be kept open
+// as long as conn is in use and closed when the target session ends.
+func dialThroughJump(jumpCfg SSHConfig, targetAddr string) (net.Conn, *ssh.Client, error) {
+	jumpClient, nestedJump, err := dialSSHClient(jumpCfg)
+	if err != nil {
+		return nil, nil, fmt.Errorf("dial jump host: %w", err)
+	}
+	// nestedJump would be non-nil for multi-hop chains; close it when jumpClient closes.
+	// ssh.Client.Close() closes the underlying connection, which closes nestedJump's channel.
+	// Still, hold a reference so we can close it explicitly on error.
+	if nestedJump != nil {
+		defer func() {
+			if err != nil {
+				nestedJump.Close()
+			}
+		}()
+	}
+
+	conn, err := jumpClient.Dial("tcp", targetAddr)
+	if err != nil {
+		jumpClient.Close()
+		return nil, nil, fmt.Errorf("dial target through jump host: %w", err)
+	}
+
+	return conn, jumpClient, nil
+}
+
+// NewSSH creates and starts a new SSH terminal session.
+func NewSSH(id, title string, cfg SSHConfig) (*SSHSession, error) {
+	client, jumpClient, err := dialSSHClient(cfg)
+	if err != nil {
+		return nil, err
+	}
 
 	sess, err := client.NewSession()
 	if err != nil {
 		client.Close()
+		if jumpClient != nil {
+			jumpClient.Close()
+		}
 		return nil, fmt.Errorf("new ssh session: %w", err)
 	}
 
@@ -106,6 +161,9 @@ func NewSSH(id, title string, cfg SSHConfig) (*SSHSession, error) {
 	if err := sess.RequestPty("xterm-256color", 24, 80, modes); err != nil {
 		sess.Close()
 		client.Close()
+		if jumpClient != nil {
+			jumpClient.Close()
+		}
 		return nil, fmt.Errorf("request pty: %w", err)
 	}
 
@@ -113,6 +171,9 @@ func NewSSH(id, title string, cfg SSHConfig) (*SSHSession, error) {
 	if err != nil {
 		sess.Close()
 		client.Close()
+		if jumpClient != nil {
+			jumpClient.Close()
+		}
 		return nil, fmt.Errorf("stdin pipe: %w", err)
 	}
 
@@ -129,6 +190,9 @@ func NewSSH(id, title string, cfg SSHConfig) (*SSHSession, error) {
 		if !validRemotePath.MatchString(cfg.Cwd) {
 			sess.Close()
 			client.Close()
+			if jumpClient != nil {
+				jumpClient.Close()
+			}
 			return nil, fmt.Errorf("invalid working directory %q: must be an absolute path with no shell metacharacters", cfg.Cwd)
 		}
 		startErr = sess.Start(fmt.Sprintf("cd %s && exec $SHELL", shellQuotePath(cfg.Cwd)))
@@ -138,6 +202,9 @@ func NewSSH(id, title string, cfg SSHConfig) (*SSHSession, error) {
 	if startErr != nil {
 		sess.Close()
 		client.Close()
+		if jumpClient != nil {
+			jumpClient.Close()
+		}
 		return nil, fmt.Errorf("start shell: %w", startErr)
 	}
 
@@ -150,6 +217,7 @@ func NewSSH(id, title string, cfg SSHConfig) (*SSHSession, error) {
 		stdin:          stdin,
 		reader:         pr,
 		connectionName: cfg.ConnectionName,
+		jumpClient:     jumpClient,
 	}
 
 	// Monitor session exit
@@ -251,7 +319,11 @@ func (s *SSHSession) Close() error {
 
 	s.stdin.Close()
 	s.session.Close()
-	return s.client.Close()
+	err := s.client.Close()
+	if s.jumpClient != nil {
+		s.jumpClient.Close()
+	}
+	return err
 }
 
 // ConnectionName returns the panemux connection alias for this SSH session.

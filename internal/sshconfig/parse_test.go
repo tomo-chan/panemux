@@ -181,6 +181,40 @@ func TestParseHosts_AfterAppend(t *testing.T) {
 	assert.Equal(t, 22, hosts[0].Port)
 }
 
+func TestParseHosts_ProxyJump(t *testing.T) {
+	content := `Host jump
+    HostName jump.example.com
+    User jumpuser
+
+Host target
+    HostName target.internal
+    User admin
+    ProxyJump jump
+`
+	f := writeTempSSHConfig(t, content)
+	hosts, err := ParseHosts(f)
+	require.NoError(t, err)
+	require.Len(t, hosts, 2)
+
+	assert.Equal(t, "jump", hosts[0].Name)
+	assert.Equal(t, "", hosts[0].ProxyJump)
+
+	assert.Equal(t, "target", hosts[1].Name)
+	assert.Equal(t, "jump", hosts[1].ProxyJump)
+}
+
+func TestParseHosts_NoProxyJump_Empty(t *testing.T) {
+	content := `Host myserver
+    HostName myserver.example.com
+    User ubuntu
+`
+	f := writeTempSSHConfig(t, content)
+	hosts, err := ParseHosts(f)
+	require.NoError(t, err)
+	require.Len(t, hosts, 1)
+	assert.Equal(t, "", hosts[0].ProxyJump)
+}
+
 // writeTempSSHConfig creates a temp file with the given content and returns the path.
 func writeTempSSHConfig(t *testing.T, content string) string {
 	t.Helper()
