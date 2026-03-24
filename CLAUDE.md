@@ -148,6 +148,17 @@ See `docs/architecture.md` → *Security Design* for the full rationale and the 
 
 **Remote path arguments (SSH working directory):** user-supplied paths that flow into `sess.Start()` shell commands must be validated with `validRemotePath` (defined in `internal/session/ssh.go`) before use. This regex guard is the CodeQL-recommended sanitization pattern for shell arguments, and it rejects shell metacharacters (`;|&$\`'"<>(){}[]!\`) and control characters while allowing valid Unix path characters including spaces and Unicode.
 
+### Release workflow
+- **Never manually close a release-please PR.** Doing so leaves the `release-please--branches--main` internal tracking branch in a stale state. On the next push to `main`, release-please re-creates the release PR from that stale state, producing incorrect release notes that include all historical commits.
+- If you need to override the version release-please proposes (e.g., cut a patch instead of a minor):
+  - Add the `release-as: x.y.z` label to the existing release PR **before** merging it, or
+  - Include `Release-As: x.y.z` in the footer of a commit message on `main`.
+- If the internal branch does become stale (e.g., after an incident), reset it:
+  ```sh
+  gh pr close <release-pr-number>   # close the incorrect PR first
+  git push origin origin/main:refs/heads/release-please--branches--main --force
+  ```
+
 ### Branch workflow
 - **Never commit directly to `main`.** All changes — including documentation and `CLAUDE.md` — must go through a feature branch and PR.
 - Create a worktree and branch before making any edits:
