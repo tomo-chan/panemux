@@ -14,7 +14,7 @@ type Host struct {
 	Name         string // Host alias (e.g. "prod-web")
 	Hostname     string // HostName directive (defaults to Name if not set)
 	User         string
-	Port         int    // 0 = not set (caller uses default 22)
+	Port         int // 0 = not set (caller uses default 22)
 	IdentityFile string
 }
 
