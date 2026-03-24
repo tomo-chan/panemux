@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"regexp"
+	"strings"
 	"sync"
 
 	"golang.org/x/crypto/ssh"
@@ -14,15 +15,16 @@ var validTmuxSessionName = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`)
 
 // TmuxSSHSession attaches to a tmux session on a remote host via SSH.
 type TmuxSSHSession struct {
-	mu          sync.RWMutex
-	id          string
-	title       string
-	tmuxSession string
-	state       State
-	client      *ssh.Client
-	session     *ssh.Session
-	stdin       io.WriteCloser
-	reader      io.Reader
+	mu             sync.RWMutex
+	id             string
+	title          string
+	tmuxSession    string
+	state          State
+	client         *ssh.Client
+	session        *ssh.Session
+	stdin          io.WriteCloser
+	reader         io.Reader
+	connectionName string
 }
 
 // NewTmuxSSH creates a session that attaches to a remote tmux session.
@@ -119,14 +121,15 @@ func NewTmuxSSH(id, title, tmuxSession string, cfg SSHConfig) (*TmuxSSHSession, 
 	}
 
 	s := &TmuxSSHSession{
-		id:          id,
-		title:       title,
-		tmuxSession: tmuxSession,
-		state:       StateConnected,
-		client:      client,
-		session:     sess,
-		stdin:       stdin,
-		reader:      pr,
+		id:             id,
+		title:          title,
+		tmuxSession:    tmuxSession,
+		state:          StateConnected,
+		client:         client,
+		session:        sess,
+		stdin:          stdin,
+		reader:         pr,
+		connectionName: cfg.ConnectionName,
 	}
 
 	go func() {
@@ -160,6 +163,23 @@ func (s *TmuxSSHSession) Write(p []byte) (int, error) {
 
 func (s *TmuxSSHSession) Resize(cols, rows uint16) error {
 	return s.session.WindowChange(int(rows), int(cols))
+}
+
+// ConnectionName returns the panemux connection alias for this SSH session.
+func (s *TmuxSSHSession) ConnectionName() string { return s.connectionName }
+
+// GetCWD runs `tmux display-message` over a new SSH exec channel to get the active pane's CWD.
+func (s *TmuxSSHSession) GetCWD() (string, error) {
+	sess, err := s.client.NewSession()
+	if err != nil {
+		return "", fmt.Errorf("new ssh session for tmux cwd: %w", err)
+	}
+	defer sess.Close()
+	out, err := sess.Output(fmt.Sprintf("tmux display-message -p -t '%s' '#{pane_current_path}'", s.tmuxSession))
+	if err != nil {
+		return "", fmt.Errorf("tmux display-message over ssh: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 func (s *TmuxSSHSession) Close() error {

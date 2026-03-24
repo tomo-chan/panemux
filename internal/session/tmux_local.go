@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"syscall"
 
@@ -97,6 +98,15 @@ func (s *TmuxLocalSession) Resize(cols, rows uint16) error {
 		Cols: cols,
 		Rows: rows,
 	})
+}
+
+// GetCWD returns the current working directory of the active tmux pane.
+func (s *TmuxLocalSession) GetCWD() (string, error) {
+	out, err := exec.Command("tmux", "display-message", "-p", "-t", s.tmuxSession, "#{pane_current_path}").Output()
+	if err != nil {
+		return "", fmt.Errorf("tmux display-message: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 func (s *TmuxLocalSession) Close() error {

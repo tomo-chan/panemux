@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -26,6 +28,7 @@ type LocalSession struct {
 	state State
 	cmd   *exec.Cmd
 	ptmx  *os.File
+	pid   int
 }
 
 // NewLocal creates and starts a new local PTY session.
@@ -58,6 +61,7 @@ func NewLocal(id, shell, cwd, title string) (*LocalSession, error) {
 		state: StateConnected,
 		cmd:   cmd,
 		ptmx:  ptmx,
+		pid:   cmd.Process.Pid,
 	}
 
 	// Monitor process exit in background
@@ -106,6 +110,40 @@ func (s *LocalSession) Close() error {
 		s.cmd.Process.Kill()
 	}
 	return nil
+}
+
+// GetCWD returns the current working directory of the shell process.
+// On Linux it reads /proc/<pid>/cwd; on macOS it runs lsof.
+func (s *LocalSession) GetCWD() (string, error) {
+	if s.pid == 0 {
+		return "", fmt.Errorf("session has no PID")
+	}
+	switch runtime.GOOS {
+	case "linux":
+		return os.Readlink("/proc/" + strconv.Itoa(s.pid) + "/cwd")
+	case "darwin":
+		// -a ANDs the -p and -d conditions; without -a they are OR'd, which
+		// causes -d cwd to dump the cwd of every process on the system.
+		out, err := exec.Command("lsof", "-a", "-p", strconv.Itoa(s.pid), "-d", "cwd", "-Fn").Output()
+		if err != nil {
+			return "", fmt.Errorf("lsof: %w", err)
+		}
+		// Output format (one entry per line):
+		//   p<pid>
+		//   fcwd
+		//   n<path>
+		// Find the n-line that immediately follows fcwd to be safe.
+		lines := strings.Split(string(out), "\n")
+		for i, line := range lines {
+			if strings.TrimSpace(line) == "fcwd" && i+1 < len(lines) {
+				p := strings.TrimPrefix(lines[i+1], "n")
+				return strings.TrimSpace(p), nil
+			}
+		}
+		return "", fmt.Errorf("cwd not found in lsof output")
+	default:
+		return "", fmt.Errorf("GetCWD not supported on %s", runtime.GOOS)
+	}
 }
 
 // validateShell ensures the shell path is safe to execute.

@@ -65,6 +65,11 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
 
   const handleDragLeave = () => setIsDragOver(false)
 
+  const handleOpenVSCode = useCallback(() => {
+    fetch(`/api/sessions/${pane.id}/open-vscode`, { method: 'POST' })
+      .catch((err) => console.error('open-vscode failed:', err))
+  }, [pane.id])
+
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault()
     setIsDragOver(false)
@@ -115,6 +120,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
         onClose={() => ctx?.onClose(pane.id)}
         onMaximize={() => ctx?.onMaximize(ctx.maximizedPaneId === pane.id ? null : pane.id)}
         onSettings={() => ctx?.onSettings(pane.id)}
+        onOpenVSCode={handleOpenVSCode}
       />
       <div
         ref={setRef}

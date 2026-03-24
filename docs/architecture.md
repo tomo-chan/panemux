@@ -49,9 +49,16 @@ Why an interface-first session layer:
 - WebSocket and API layers stay backend-agnostic
 - new session types can be added without reshaping frontend protocols
 
+Optional capability interfaces extend the base `Session` contract without breaking existing types:
+
+- `CWDGetter` — implemented by `LocalSession` and `SSHSession`; returns the live working directory of the running shell. `LocalSession` reads it via `lsof` (macOS) or `/proc/<pid>/cwd` (Linux). `SSHSession` runs `pwd` over a new exec channel on the existing SSH connection.
+- `SSHConnNamer` — implemented by `SSHSession`; returns the panemux connection alias used when building the `code --remote ssh-remote+<host>` command.
+
 ### `internal/api`
 
-REST endpoints expose layout, display settings, and session lifecycle operations.
+REST endpoints expose layout, display settings, session lifecycle operations, and editor integrations.
+
+`POST /api/sessions/{id}/open-vscode` launches VSCode pointed at the session's live working directory. For local sessions it runs `code <cwd>`; for SSH sessions it runs `code --remote ssh-remote+<connection> <cwd>`. The binary is located via `exec.LookPath("code")` with a macOS app-bundle fallback.
 
 Why REST here:
 

@@ -42,6 +42,7 @@ func New(cfg *config.Config, manager *session.Manager, frontendFS embed.FS) *Ser
 		r.Post("/sessions", apiHandler.PostSession)
 		r.Delete("/sessions/{id}", apiHandler.DeleteSession)
 		r.Post("/sessions/{id}/restart", apiHandler.RestartSession)
+		r.Post("/sessions/{id}/open-vscode", apiHandler.PostOpenVSCode)
 		r.Get("/display", apiHandler.GetDisplay)
 		r.Get("/edit-mode", apiHandler.GetEditMode)
 		r.Put("/edit-mode", apiHandler.PutEditMode)

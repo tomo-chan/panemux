@@ -12,6 +12,7 @@ interface PaneHeaderProps {
   onClose: () => void
   onMaximize: () => void
   onSettings: () => void
+  onOpenVSCode?: () => void
 }
 
 const TYPE_COLORS: Record<string, string> = {
@@ -54,6 +55,7 @@ export const PaneHeader: React.FC<PaneHeaderProps> = ({
   onClose,
   onMaximize,
   onSettings,
+  onOpenVSCode,
 }) => {
   const showHeader = pane.show_header ?? displayConfig.show_header
 
@@ -110,6 +112,15 @@ export const PaneHeader: React.FC<PaneHeaderProps> = ({
             style={buttonStyle}
           >
             ⚙
+          </button>
+        )}
+        {connected && onOpenVSCode && (
+          <button
+            title="Open in VSCode"
+            onClick={onOpenVSCode}
+            style={buttonStyle}
+          >
+            {'</>'}
           </button>
         )}
         <button

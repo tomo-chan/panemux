@@ -2,8 +2,12 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"os"
+	"os/exec"
 	"regexp"
+	"runtime"
 	"sort"
 	"sync/atomic"
 
@@ -16,11 +20,12 @@ import (
 
 // Handler provides REST API endpoints.
 type Handler struct {
-	cfg           *config.Config
-	manager       *session.Manager
-	editMode      atomic.Bool
-	sshConfigPath string
-	createSession func(*config.PaneConfig, map[string]config.SSHConnection) (session.Session, error)
+	cfg            *config.Config
+	manager        *session.Manager
+	editMode       atomic.Bool
+	sshConfigPath  string
+	codeBinaryPath string // empty = auto-detect; overridden in tests
+	createSession  func(*config.PaneConfig, map[string]config.SSHConnection) (session.Session, error)
 }
 
 type editModeResponse struct {
@@ -326,6 +331,99 @@ func (h *Handler) PostSSHConfigHost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusCreated)
+}
+
+type openVSCodeResponse struct {
+	Cwd string `json:"cwd"`
+}
+
+// PostOpenVSCode opens VSCode pointed at the session's current working directory.
+// For local sessions it runs: code <cwd>
+// For SSH sessions it runs: code --remote ssh-remote+<connection> <cwd>
+func (h *Handler) PostOpenVSCode(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	sess, ok := h.manager.Get(id)
+	if !ok {
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
+
+	cwdGetter, ok := sess.(session.CWDGetter)
+	if !ok {
+		writeValidationError(w, "this session type does not support CWD detection")
+		return
+	}
+
+	cwd, err := cwdGetter.GetCWD()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to get working directory: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// For local sessions, verify the directory still exists in the filesystem.
+	// A shell can remain in a directory after it has been deleted (the inode is
+	// kept alive by the open CWD reference), and passing a deleted path to
+	// `code` causes VSCode to open files in an unsaved/detached state.
+	switch sess.Type() {
+	case session.TypeLocal, session.TypeTmux:
+		if _, err := os.Stat(cwd); err != nil {
+			writeValidationError(w, fmt.Sprintf("working directory no longer exists: %s", cwd))
+			return
+		}
+	}
+
+	codePath, err := h.findVSCode()
+	if err != nil {
+		http.Error(w, "VSCode (code) not found: install VSCode and run 'Install code command in PATH'", http.StatusInternalServerError)
+		return
+	}
+
+	var args []string
+	switch sess.Type() {
+	case session.TypeSSH, session.TypeSSHTmux:
+		namer, ok := sess.(session.SSHConnNamer)
+		if !ok {
+			writeValidationError(w, "SSH session missing connection name")
+			return
+		}
+		connName := namer.ConnectionName()
+		if !validHostName.MatchString(connName) {
+			writeValidationError(w, "SSH connection name contains invalid characters")
+			return
+		}
+		args = []string{"--remote", "ssh-remote+" + connName, cwd}
+	default:
+		args = []string{cwd}
+	}
+
+	// Launch VSCode asynchronously — we do not wait for it to exit.
+	cmd := exec.Command(codePath, args...) //nolint:gosec -- codePath is from trusted lookup, not user input
+	if err := cmd.Start(); err != nil {
+		http.Error(w, fmt.Sprintf("failed to launch VSCode: %v", err), http.StatusInternalServerError)
+		return
+	}
+	// Detach: let VSCode run independently.
+	go cmd.Wait() //nolint:errcheck
+
+	writeJSON(w, openVSCodeResponse{Cwd: cwd})
+}
+
+// findVSCode returns the path to the VSCode CLI binary.
+func (h *Handler) findVSCode() (string, error) {
+	if h.codeBinaryPath != "" {
+		return h.codeBinaryPath, nil
+	}
+	if p, err := exec.LookPath("code"); err == nil {
+		return p, nil
+	}
+	// macOS fallback: bundled binary inside the .app
+	if runtime.GOOS == "darwin" {
+		const appBin = "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code"
+		if p, err := exec.LookPath(appBin); err == nil {
+			return p, nil
+		}
+	}
+	return "", fmt.Errorf("code binary not found")
 }
 
 func writeValidationError(w http.ResponseWriter, msg string) {
