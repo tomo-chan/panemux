@@ -754,12 +754,12 @@ func (m *mockCWDSession) GetCWD() (string, error) { return m.cwd, m.cwdErr }
 // mockSSHCWDSession is a mockSession that implements both CWDGetter and SSHConnNamer.
 type mockSSHCWDSession struct {
 	mockSession
-	cwd        string
-	connName   string
+	cwd      string
+	connName string
 }
 
 func (m *mockSSHCWDSession) GetCWD() (string, error) { return m.cwd, nil }
-func (m *mockSSHCWDSession) ConnectionName() string   { return m.connName }
+func (m *mockSSHCWDSession) ConnectionName() string  { return m.connName }
 
 func setupRouterWithVSCode(h *Handler) *chi.Mux {
 	r := setupRouterWithHandler(h)
