@@ -31,9 +31,14 @@ make dev-frontend   # Vite dev server on :5173
 make dev-backend    # backend must be running separately
 ```
 
+**Format**:
+```sh
+make fmt        # apply go fmt -s to all Go files
+```
+
 **Checks**:
 ```sh
-make lint
+make lint       # includes go fmt check; fails if any Go file is unformatted
 make test
 make check
 ```

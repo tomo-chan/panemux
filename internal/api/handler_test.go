@@ -29,11 +29,11 @@ type mockSession struct {
 func newMockSession(id string) *mockSession {
 	return &mockSession{id: id, typ: session.TypeLocal, title: id, state: session.StateConnected}
 }
-func (m *mockSession) ID() string              { return m.id }
-func (m *mockSession) Type() session.Type      { return m.typ }
-func (m *mockSession) Title() string           { return m.title }
-func (m *mockSession) State() session.State    { return m.state }
-func (m *mockSession) Read(p []byte) (int, error) { return 0, io.EOF }
+func (m *mockSession) ID() string                  { return m.id }
+func (m *mockSession) Type() session.Type          { return m.typ }
+func (m *mockSession) Title() string               { return m.title }
+func (m *mockSession) State() session.State        { return m.state }
+func (m *mockSession) Read(p []byte) (int, error)  { return 0, io.EOF }
 func (m *mockSession) Write(p []byte) (int, error) { return len(p), nil }
 func (m *mockSession) Resize(c, r uint16) error    { return nil }
 func (m *mockSession) Close() error                { return nil }
