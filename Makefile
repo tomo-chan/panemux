@@ -1,5 +1,6 @@
 .PHONY: all build build-frontend build-backend dev clean run install-deps install-deps-ci \
         test test-go test-frontend \
+        fmt fmt-go fmt-check-go \
         lint lint-go lint-frontend \
         coverage coverage-go coverage-frontend \
         check release-snapshot package
@@ -55,11 +56,26 @@ coverage-go:
 coverage-frontend:
 	cd frontend && npm run coverage
 
+# ── Format ────────────────────────────────────────────────────────────────────
+
+fmt: fmt-go
+
+fmt-go:
+	gofmt -s -w .
+
+fmt-check-go:
+	@files=$$(gofmt -s -l .); \
+	if [ -n "$$files" ]; then \
+	  echo "Unformatted Go files (run 'make fmt'):"; \
+	  echo "$$files"; \
+	  exit 1; \
+	fi
+
 # ── Lint ──────────────────────────────────────────────────────────────────────
 
 lint: lint-go lint-frontend
 
-lint-go:
+lint-go: fmt-check-go
 	go vet ./...
 
 lint-frontend:

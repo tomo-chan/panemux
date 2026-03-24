@@ -23,14 +23,14 @@ var validRemotePath = regexp.MustCompile(`^(/[^;|&$` + "`" + `'"<>()\[\]{}!\\\x0
 
 // SSHSession manages an SSH connection with a PTY.
 type SSHSession struct {
-	mu             sync.RWMutex
-	id             string
-	title          string
-	state          State
-	client         *ssh.Client
-	session        *ssh.Session
-	stdin          io.WriteCloser
-	stdout         io.Reader
+	mu      sync.RWMutex
+	id      string
+	title   string
+	state   State
+	client  *ssh.Client
+	session *ssh.Session
+	stdin   io.WriteCloser
+	stdout  io.Reader
 	// combined reader for stdout+stderr
 	reader         io.Reader
 	connectionName string
