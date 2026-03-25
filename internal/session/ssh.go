@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -53,6 +54,7 @@ type SSHConfig struct {
 	Cwd            string     // initial working directory on the remote host
 	ConnectionName string     // alias used in panemux (for VSCode Remote SSH)
 	JumpHost       *SSHConfig // non-nil when ProxyJump is configured
+	ProxyCommand   string     // shell command used as stdin/stdout pipe (ProxyCommand directive)
 }
 
 // shellQuotePath wraps path in single quotes and escapes any single quotes
@@ -192,9 +194,12 @@ func dialSSHClient(cfg SSHConfig) (*ssh.Client, *ssh.Client, error) {
 	var conn net.Conn
 	var jumpClient *ssh.Client
 
-	if cfg.JumpHost != nil {
+	switch {
+	case cfg.JumpHost != nil:
 		conn, jumpClient, err = dialThroughJump(*cfg.JumpHost, addr)
-	} else {
+	case cfg.ProxyCommand != "":
+		conn, err = dialViaProxyCommand(cfg.ProxyCommand, cfg.Host, port)
+	default:
 		conn, err = net.DialTimeout("tcp", addr, 30*time.Second)
 	}
 	if err != nil {
@@ -239,6 +244,71 @@ func dialThroughJump(jumpCfg SSHConfig, targetAddr string) (net.Conn, *ssh.Clien
 	}
 
 	return conn, jumpClient, nil
+}
+
+// proxyCommandConn wraps an exec.Cmd's stdin/stdout as a net.Conn, mirroring
+// OpenSSH's ProxyCommand behaviour where a subprocess acts as a transparent
+// bidirectional pipe to the remote host.
+type proxyCommandConn struct {
+	cmd    *exec.Cmd
+	stdin  io.WriteCloser
+	stdout io.ReadCloser
+}
+
+func (c *proxyCommandConn) Read(p []byte) (int, error)  { return c.stdout.Read(p) }
+func (c *proxyCommandConn) Write(p []byte) (int, error) { return c.stdin.Write(p) }
+func (c *proxyCommandConn) Close() error {
+	c.stdin.Close()
+	c.stdout.Close()
+	if c.cmd.Process != nil {
+		c.cmd.Process.Kill() //nolint:errcheck
+	}
+	return c.cmd.Wait()
+}
+func (c *proxyCommandConn) LocalAddr() net.Addr                { return proxyAddr("proxy-local") }
+func (c *proxyCommandConn) RemoteAddr() net.Addr               { return proxyAddr("proxy-remote") }
+func (c *proxyCommandConn) SetDeadline(_ time.Time) error      { return nil }
+func (c *proxyCommandConn) SetReadDeadline(_ time.Time) error  { return nil }
+func (c *proxyCommandConn) SetWriteDeadline(_ time.Time) error { return nil }
+
+// proxyAddr is a minimal net.Addr used by proxyCommandConn.
+type proxyAddr string
+
+func (a proxyAddr) Network() string { return "proxy" }
+func (a proxyAddr) String() string  { return string(a) }
+
+// substituteProxyCommand replaces %h (hostname), %p (port), and %% (literal %)
+// in a ProxyCommand string, matching OpenSSH token substitution.
+func substituteProxyCommand(cmd, host string, port int) string {
+	// Temporarily replace %% to avoid double-substitution
+	result := strings.ReplaceAll(cmd, "%%", "\x00")
+	result = strings.ReplaceAll(result, "%h", host)
+	result = strings.ReplaceAll(result, "%p", fmt.Sprintf("%d", port))
+	return strings.ReplaceAll(result, "\x00", "%")
+}
+
+// dialViaProxyCommand runs the ProxyCommand and returns a net.Conn backed by the
+// subprocess stdin/stdout, mirroring how OpenSSH handles ProxyCommand.
+// The command is passed to /bin/sh -c so shell quoting and features work as expected.
+func dialViaProxyCommand(proxyCmd, host string, port int) (net.Conn, error) {
+	cmd := substituteProxyCommand(proxyCmd, host, port)
+	// Pass to /bin/sh -c so the command is interpreted by a shell, matching
+	// OpenSSH behaviour. /bin/sh is a hardcoded trusted binary.
+	c := exec.Command("/bin/sh", "-c", cmd) //nolint:gosec -- cmd is from trusted ~/.ssh/config
+	c.Stderr = os.Stderr
+
+	stdin, err := c.StdinPipe()
+	if err != nil {
+		return nil, fmt.Errorf("proxy command stdin: %w", err)
+	}
+	stdout, err := c.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("proxy command stdout: %w", err)
+	}
+	if err := c.Start(); err != nil {
+		return nil, fmt.Errorf("starting proxy command: %w", err)
+	}
+	return &proxyCommandConn{cmd: c, stdin: stdin, stdout: stdout}, nil
 }
 
 // NewSSH creates and starts a new SSH terminal session.

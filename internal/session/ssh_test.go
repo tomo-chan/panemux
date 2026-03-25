@@ -119,6 +119,23 @@ func TestShellQuotePath_Empty(t *testing.T) {
 	assert.Equal(t, "''", shellQuotePath(""))
 }
 
+func TestSubstituteProxyCommand_Substitutions(t *testing.T) {
+	cmd := "gcloud compute start-iap-tunnel %h %p --listen-on-stdin"
+	got := substituteProxyCommand(cmd, "myhost.example.com", 22)
+	assert.Equal(t, "gcloud compute start-iap-tunnel myhost.example.com 22 --listen-on-stdin", got)
+}
+
+func TestSubstituteProxyCommand_PercentEscape(t *testing.T) {
+	got := substituteProxyCommand("echo %%h is not %h", "host", 22)
+	assert.Equal(t, "echo %h is not host", got)
+}
+
+func TestSubstituteProxyCommand_NoTokens(t *testing.T) {
+	cmd := "nc -q0 bastion 22"
+	got := substituteProxyCommand(cmd, "unused", 0)
+	assert.Equal(t, cmd, got)
+}
+
 func TestKnownHostsAlgorithms_PlaintextEntry(t *testing.T) {
 	_, priv, err := ed25519.GenerateKey(rand.Reader)
 	require.NoError(t, err)

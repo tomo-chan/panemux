@@ -17,6 +17,7 @@ type Host struct {
 	Port         int // 0 = not set (caller uses default 22)
 	IdentityFile string
 	ProxyJump    string // ProxyJump directive (alias or user@host)
+	ProxyCommand string // ProxyCommand directive (shell command acting as stdin/stdout pipe)
 }
 
 // DefaultPath returns the default SSH config path (~/.ssh/config).
@@ -94,6 +95,8 @@ func ParseHosts(path string) ([]Host, error) {
 			current.IdentityFile = val
 		case "proxyjump":
 			current.ProxyJump = val
+		case "proxycommand":
+			current.ProxyCommand = val
 		}
 	}
 

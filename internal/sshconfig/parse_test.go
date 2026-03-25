@@ -203,6 +203,20 @@ Host target
 	assert.Equal(t, "jump", hosts[1].ProxyJump)
 }
 
+func TestParseHosts_ProxyCommand(t *testing.T) {
+	content := `Host bastion
+    HostName bastion.example.com
+    User admin
+    ProxyCommand gcloud compute start-iap-tunnel bastion %p --listen-on-stdin --project=my-project --zone=us-central1-a
+`
+	f := writeTempSSHConfig(t, content)
+	hosts, err := ParseHosts(f)
+	require.NoError(t, err)
+	require.Len(t, hosts, 1)
+	assert.Equal(t, "gcloud compute start-iap-tunnel bastion %p --listen-on-stdin --project=my-project --zone=us-central1-a", hosts[0].ProxyCommand)
+	assert.Equal(t, "", hosts[0].ProxyJump)
+}
+
 func TestParseHosts_NoProxyJump_Empty(t *testing.T) {
 	content := `Host myserver
     HostName myserver.example.com

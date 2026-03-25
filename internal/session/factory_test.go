@@ -103,6 +103,45 @@ func TestResolveSSHConfig_ProxyJump_JumpHostNotFound(t *testing.T) {
 	assert.Contains(t, err.Error(), "resolving proxy jump")
 }
 
+// TestResolveSSHConfig_ProxyCommand verifies that a ProxyCommand directive in
+// ~/.ssh/config causes the returned SSHConfig.ProxyCommand to be populated.
+func TestResolveSSHConfig_ProxyCommand(t *testing.T) {
+	dir := t.TempDir()
+	sshCfgPath := filepath.Join(dir, "config")
+	content := `Host bastion
+    HostName bastion.example.com
+    User admin
+    ProxyCommand gcloud compute start-iap-tunnel bastion %p --listen-on-stdin --project=my-proj
+`
+	require.NoError(t, os.WriteFile(sshCfgPath, []byte(content), 0600))
+
+	cfg, err := resolveSSHConfig("bastion", nil, sshCfgPath)
+	require.NoError(t, err)
+	assert.Equal(t, "bastion.example.com", cfg.Host)
+	assert.Equal(t, "gcloud compute start-iap-tunnel bastion %p --listen-on-stdin --project=my-proj", cfg.ProxyCommand)
+	assert.Nil(t, cfg.JumpHost)
+}
+
+// TestResolveSSHConfig_RelativeIdentityFile verifies that a relative IdentityFile path
+// (e.g. ".ssh/id_ed25519" without "~/") is expanded relative to HOME.
+func TestResolveSSHConfig_RelativeIdentityFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	dir := t.TempDir()
+	sshCfgPath := filepath.Join(dir, "config")
+	content := `Host myhost
+    HostName myhost.example.com
+    User admin
+    IdentityFile .ssh/id_ed25519
+`
+	require.NoError(t, os.WriteFile(sshCfgPath, []byte(content), 0600))
+
+	cfg, err := resolveSSHConfig("myhost", nil, sshCfgPath)
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(home, ".ssh", "id_ed25519"), cfg.KeyFile)
+}
+
 // writeTempSSHConfig writes a minimal SSH config file with a Host block and returns the path.
 func writeTempSSHConfig(t *testing.T, name, hostname, user string, port int) string {
 	t.Helper()
