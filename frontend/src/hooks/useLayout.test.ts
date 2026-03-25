@@ -8,7 +8,7 @@ const validLayout: LayoutNode = {
   children: [{ size: 100, pane: { id: 'main', type: 'local' } }],
 }
 
-const validDisplay = { show_header: true, show_status_bar: false }
+const validDisplay = { show_header: true, show_status_bar: true }
 
 describe('useLayout', () => {
   afterEach(() => {
@@ -34,7 +34,7 @@ describe('useLayout', () => {
     const { result } = renderHook(() => useLayout())
     await waitFor(() => expect(result.current.displayConfig).not.toBeNull())
     expect(result.current.displayConfig?.show_header).toBe(true)
-    expect(result.current.displayConfig?.show_status_bar).toBe(false)
+    expect(result.current.displayConfig?.show_status_bar).toBe(true)
   })
 
   it('sets error on fetch failure', async () => {

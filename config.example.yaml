@@ -11,7 +11,7 @@ server:
 # Global defaults for all panes. Individual panes can override these values.
 display:
   show_header: true      # show pane header with title and controls (default: true)
-  show_status_bar: false # show terminal dimensions bar at the bottom (default: false)
+  show_status_bar: true  # show terminal dimensions bar at the bottom (default: true)
 
 # ── SSH connections ────────────────────────────────────────────────────────────
 # Define named SSH connections here; reference them in panes with `connection:`.
@@ -71,7 +71,7 @@ layout:
         title: "Dev Shell"      # optional; shown in the pane header
         # Per-pane display overrides (uncomment to override global display settings):
         # show_header: false
-        show_status_bar: true   # show dimensions bar for this pane only
+        show_status_bar: false  # hide dimensions bar for this pane only
 
     # ── right half: vertical split ──────────────────────────────────────────
     - size: 50

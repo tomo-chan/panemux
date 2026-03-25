@@ -100,7 +100,7 @@ func Default() *Config {
 		},
 		Display: DisplayConfig{
 			ShowHeader:    true,
-			ShowStatusBar: false,
+			ShowStatusBar: true,
 		},
 		Layout: LayoutNode{
 			Direction: "horizontal",
