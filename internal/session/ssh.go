@@ -160,6 +160,7 @@ type proxyCommandConn struct {
 	cmd    *exec.Cmd
 	stdin  io.WriteCloser
 	stdout io.ReadCloser
+	raddr  net.Addr // host:port of the remote end, used for knownhosts verification
 }
 
 func (c *proxyCommandConn) Read(p []byte) (int, error)  { return c.stdout.Read(p) }
@@ -172,8 +173,8 @@ func (c *proxyCommandConn) Close() error {
 	}
 	return c.cmd.Wait()
 }
-func (c *proxyCommandConn) LocalAddr() net.Addr                { return proxyAddr("proxy-local") }
-func (c *proxyCommandConn) RemoteAddr() net.Addr               { return proxyAddr("proxy-remote") }
+func (c *proxyCommandConn) LocalAddr() net.Addr                { return proxyAddr("127.0.0.1:0") }
+func (c *proxyCommandConn) RemoteAddr() net.Addr               { return c.raddr }
 func (c *proxyCommandConn) SetDeadline(_ time.Time) error      { return nil }
 func (c *proxyCommandConn) SetReadDeadline(_ time.Time) error  { return nil }
 func (c *proxyCommandConn) SetWriteDeadline(_ time.Time) error { return nil }
@@ -215,7 +216,12 @@ func dialViaProxyCommand(proxyCmd, host string, port int) (net.Conn, error) {
 	if err := c.Start(); err != nil {
 		return nil, fmt.Errorf("starting proxy command: %w", err)
 	}
-	return &proxyCommandConn{cmd: c, stdin: stdin, stdout: stdout}, nil
+	return &proxyCommandConn{
+		cmd:   c,
+		stdin: stdin,
+		stdout: stdout,
+		raddr: proxyAddr(net.JoinHostPort(host, fmt.Sprintf("%d", port))),
+	}, nil
 }
 
 // NewSSH creates and starts a new SSH terminal session.
