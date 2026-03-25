@@ -405,7 +405,7 @@ func TestDeleteSession_EditModeOn_Saves(t *testing.T) {
 
 func TestGetDisplay_ReturnsJSON(t *testing.T) {
 	cfg := defaultTestConfig()
-	cfg.Display = config.DisplayConfig{ShowHeader: true, ShowStatusBar: false}
+	cfg.Display = config.DisplayConfig{ShowHeader: true, ShowStatusBar: true}
 	r := setupRouter(cfg, session.NewManager())
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/display", nil)
@@ -415,7 +415,7 @@ func TestGetDisplay_ReturnsJSON(t *testing.T) {
 	var display config.DisplayConfig
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&display))
 	assert.True(t, display.ShowHeader)
-	assert.False(t, display.ShowStatusBar)
+	assert.True(t, display.ShowStatusBar)
 }
 
 func TestPutLayout_ExpandsTildeCwd(t *testing.T) {

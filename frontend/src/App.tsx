@@ -11,7 +11,7 @@ import { TERMINAL_FONT_FAMILY } from './utils/fonts'
 import { findPaneById } from './utils/layoutTree'
 import type { SSHConfigHost } from './schemas'
 
-const DEFAULT_DISPLAY: DisplayConfig = { show_header: true, show_status_bar: false }
+const DEFAULT_DISPLAY: DisplayConfig = { show_header: true, show_status_bar: true }
 
 export const App: React.FC = () => {
   const { layout, displayConfig, error, updateSizes, splitPane, closePane, swapPanes } = useLayout()
