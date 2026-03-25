@@ -3,7 +3,6 @@ package session
 import (
 	"fmt"
 	"io"
-	"net"
 	"regexp"
 	"strings"
 	"sync"
@@ -25,6 +24,7 @@ type TmuxSSHSession struct {
 	stdin          io.WriteCloser
 	reader         io.Reader
 	connectionName string
+	jumpClient     *ssh.Client // non-nil when connected via ProxyJump; closed after client
 }
 
 // NewTmuxSSH creates a session that attaches to a remote tmux session.
@@ -36,44 +36,17 @@ func NewTmuxSSH(id, title, tmuxSession string, cfg SSHConfig) (*TmuxSSHSession, 
 		return nil, fmt.Errorf("invalid tmux session name %q: must match ^[a-zA-Z0-9_.-]+$", tmuxSession)
 	}
 
-	authMethods, err := buildAuthMethods(cfg)
+	client, jumpClient, err := dialSSHClient(cfg)
 	if err != nil {
 		return nil, err
 	}
-
-	hkCallback, err := buildHostKeyCallback(cfg.KnownHostsFile)
-	if err != nil {
-		return nil, err
-	}
-
-	sshCfg := &ssh.ClientConfig{
-		User:            cfg.User,
-		Auth:            authMethods,
-		HostKeyCallback: hkCallback,
-	}
-
-	port := cfg.Port
-	if port == 0 {
-		port = 22
-	}
-	addr := net.JoinHostPort(cfg.Host, fmt.Sprintf("%d", port))
-
-	conn, err := net.Dial("tcp", addr)
-	if err != nil {
-		return nil, fmt.Errorf("tcp dial %s: %w", addr, err)
-	}
-
-	sshConn, chans, reqs, err := ssh.NewClientConn(conn, addr, sshCfg)
-	if err != nil {
-		conn.Close()
-		return nil, fmt.Errorf("ssh handshake: %w", err)
-	}
-
-	client := ssh.NewClient(sshConn, chans, reqs)
 
 	sess, err := client.NewSession()
 	if err != nil {
 		client.Close()
+		if jumpClient != nil {
+			jumpClient.Close()
+		}
 		return nil, fmt.Errorf("new ssh session: %w", err)
 	}
 
@@ -85,6 +58,9 @@ func NewTmuxSSH(id, title, tmuxSession string, cfg SSHConfig) (*TmuxSSHSession, 
 	if err := sess.RequestPty("xterm-256color", 24, 80, modes); err != nil {
 		sess.Close()
 		client.Close()
+		if jumpClient != nil {
+			jumpClient.Close()
+		}
 		return nil, fmt.Errorf("request pty: %w", err)
 	}
 
@@ -92,6 +68,9 @@ func NewTmuxSSH(id, title, tmuxSession string, cfg SSHConfig) (*TmuxSSHSession, 
 	if err != nil {
 		sess.Close()
 		client.Close()
+		if jumpClient != nil {
+			jumpClient.Close()
+		}
 		return nil, fmt.Errorf("stdin pipe: %w", err)
 	}
 
@@ -110,6 +89,9 @@ func NewTmuxSSH(id, title, tmuxSession string, cfg SSHConfig) (*TmuxSSHSession, 
 		if !validRemotePath.MatchString(cfg.Cwd) {
 			sess.Close()
 			client.Close()
+			if jumpClient != nil {
+				jumpClient.Close()
+			}
 			return nil, fmt.Errorf("invalid working directory %q: must be an absolute path with no shell metacharacters", cfg.Cwd)
 		}
 		tmuxCmd += fmt.Sprintf(" -c %s", shellQuotePath(cfg.Cwd))
@@ -117,6 +99,9 @@ func NewTmuxSSH(id, title, tmuxSession string, cfg SSHConfig) (*TmuxSSHSession, 
 	if err := sess.Start(tmuxCmd); err != nil {
 		sess.Close()
 		client.Close()
+		if jumpClient != nil {
+			jumpClient.Close()
+		}
 		return nil, fmt.Errorf("starting tmux attach: %w", err)
 	}
 
@@ -130,6 +115,7 @@ func NewTmuxSSH(id, title, tmuxSession string, cfg SSHConfig) (*TmuxSSHSession, 
 		stdin:          stdin,
 		reader:         pr,
 		connectionName: cfg.ConnectionName,
+		jumpClient:     jumpClient,
 	}
 
 	go func() {
@@ -189,5 +175,9 @@ func (s *TmuxSSHSession) Close() error {
 
 	s.stdin.Close()
 	s.session.Close()
-	return s.client.Close()
+	err := s.client.Close()
+	if s.jumpClient != nil {
+		s.jumpClient.Close()
+	}
+	return err
 }

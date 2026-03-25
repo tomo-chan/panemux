@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	gossh "golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
 )
 
 // generateTestKeyFile creates a real ed25519 private key file at the given path
@@ -118,8 +119,25 @@ func TestShellQuotePath_Empty(t *testing.T) {
 	assert.Equal(t, "''", shellQuotePath(""))
 }
 
+func TestSubstituteProxyCommand_Substitutions(t *testing.T) {
+	cmd := "gcloud compute start-iap-tunnel %h %p --listen-on-stdin"
+	got := substituteProxyCommand(cmd, "myhost.example.com", 22)
+	assert.Equal(t, "gcloud compute start-iap-tunnel myhost.example.com 22 --listen-on-stdin", got)
+}
+
+func TestSubstituteProxyCommand_PercentEscape(t *testing.T) {
+	got := substituteProxyCommand("echo %%h is not %h", "host", 22)
+	assert.Equal(t, "echo %h is not host", got)
+}
+
+func TestSubstituteProxyCommand_NoTokens(t *testing.T) {
+	cmd := "nc -q0 bastion 22"
+	got := substituteProxyCommand(cmd, "unused", 0)
+	assert.Equal(t, cmd, got)
+}
+
 func TestBuildHostKeyCallback_NonexistentFile_Error(t *testing.T) {
-	_, err := buildHostKeyCallback("/nonexistent/path/known_hosts")
+	_, _, err := buildHostKeyCallback("/nonexistent/path/known_hosts")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "known_hosts")
 }
@@ -129,7 +147,7 @@ func TestBuildHostKeyCallback_ValidFile_NoError(t *testing.T) {
 	knownHostsPath := filepath.Join(dir, "known_hosts")
 	require.NoError(t, os.WriteFile(knownHostsPath, []byte(""), 0600))
 
-	_, err := buildHostKeyCallback(knownHostsPath)
+	_, _, err := buildHostKeyCallback(knownHostsPath)
 	assert.NoError(t, err)
 }
 
@@ -156,4 +174,55 @@ func TestNewTmuxSSH_InvalidSessionName_Error(t *testing.T) {
 	_, err := NewTmuxSSH("id", "title", "foo;bar$(evil)", cfg)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid tmux session name")
+}
+
+func TestKnownHostsAlgorithms_PlaintextEntry(t *testing.T) {
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	pub, err := gossh.NewPublicKey(priv.Public())
+	require.NoError(t, err)
+
+	dir := t.TempDir()
+	knownHostsPath := filepath.Join(dir, "known_hosts")
+	content := knownhosts.Line([]string{"myhost"}, pub) + "\n"
+	require.NoError(t, os.WriteFile(knownHostsPath, []byte(content), 0600))
+
+	algos := knownHostsAlgorithms(knownHostsPath, "myhost:22")
+	assert.Equal(t, []string{pub.Type()}, algos)
+}
+
+func TestKnownHostsAlgorithms_HashedEntry(t *testing.T) {
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	pub, err := gossh.NewPublicKey(priv.Public())
+	require.NoError(t, err)
+
+	dir := t.TempDir()
+	knownHostsPath := filepath.Join(dir, "known_hosts")
+	hashed := knownhosts.HashHostname("hashhost")
+	content := knownhosts.Line([]string{hashed}, pub) + "\n"
+	require.NoError(t, os.WriteFile(knownHostsPath, []byte(content), 0600))
+
+	algos := knownHostsAlgorithms(knownHostsPath, "hashhost:22")
+	assert.Equal(t, []string{pub.Type()}, algos)
+}
+
+func TestKnownHostsAlgorithms_NoMatch_ReturnsEmpty(t *testing.T) {
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	pub, err := gossh.NewPublicKey(priv.Public())
+	require.NoError(t, err)
+
+	dir := t.TempDir()
+	knownHostsPath := filepath.Join(dir, "known_hosts")
+	content := knownhosts.Line([]string{"otherhost"}, pub) + "\n"
+	require.NoError(t, os.WriteFile(knownHostsPath, []byte(content), 0600))
+
+	algos := knownHostsAlgorithms(knownHostsPath, "myhost:22")
+	assert.Empty(t, algos)
+}
+
+func TestKnownHostsAlgorithms_FileNotFound_ReturnsEmpty(t *testing.T) {
+	algos := knownHostsAlgorithms("/nonexistent/known_hosts", "myhost:22")
+	assert.Empty(t, algos)
 }

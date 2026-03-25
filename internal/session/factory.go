@@ -76,16 +76,31 @@ func resolveSSHConfig(name string, sshConns map[string]config.SSHConnection, ssh
 				port = 22
 			}
 			keyFile := h.IdentityFile
-			if strings.HasPrefix(keyFile, "~/") {
+			if keyFile != "" {
 				home, _ := os.UserHomeDir()
-				keyFile = filepath.Join(home, keyFile[2:])
+				if strings.HasPrefix(keyFile, "~/") {
+					keyFile = filepath.Join(home, keyFile[2:])
+				} else if !filepath.IsAbs(keyFile) {
+					// Relative paths (e.g. ".ssh/id_ed25519") are relative to HOME,
+					// matching OpenSSH behaviour.
+					keyFile = filepath.Join(home, keyFile)
+				}
 			}
-			return SSHConfig{
-				Host:    h.Hostname,
-				Port:    port,
-				User:    h.User,
-				KeyFile: keyFile,
-			}, nil
+			cfg := SSHConfig{
+				Host:         h.Hostname,
+				Port:         port,
+				User:         h.User,
+				KeyFile:      keyFile,
+				ProxyCommand: h.ProxyCommand,
+			}
+			if h.ProxyJump != "" {
+				jumpCfg, err := resolveSSHConfig(h.ProxyJump, sshConns, sshConfigPath)
+				if err != nil {
+					return SSHConfig{}, fmt.Errorf("resolving proxy jump %q: %w", h.ProxyJump, err)
+				}
+				cfg.JumpHost = &jumpCfg
+			}
+			return cfg, nil
 		}
 	}
 

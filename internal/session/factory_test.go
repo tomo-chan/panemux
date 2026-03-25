@@ -48,6 +48,100 @@ func TestCreateFromConfig_SSHMissing(t *testing.T) {
 	assert.Contains(t, err.Error(), "not found")
 }
 
+// TestResolveSSHConfig_ProxyJump verifies that a ProxyJump directive in ~/.ssh/config
+// causes the returned SSHConfig to have JumpHost populated with the jump host's details.
+func TestResolveSSHConfig_ProxyJump(t *testing.T) {
+	dir := t.TempDir()
+	sshCfgPath := filepath.Join(dir, "config")
+	content := `Host jump-host
+    HostName jump.example.com
+    User jumpuser
+    Port 22
+
+Host target-host
+    HostName target.internal
+    User admin
+    ProxyJump jump-host
+`
+	require.NoError(t, os.WriteFile(sshCfgPath, []byte(content), 0600))
+
+	cfg, err := resolveSSHConfig("target-host", nil, sshCfgPath)
+	require.NoError(t, err)
+
+	assert.Equal(t, "target.internal", cfg.Host)
+	assert.Equal(t, "admin", cfg.User)
+	require.NotNil(t, cfg.JumpHost, "JumpHost should be populated when ProxyJump is set")
+	assert.Equal(t, "jump.example.com", cfg.JumpHost.Host)
+	assert.Equal(t, "jumpuser", cfg.JumpHost.User)
+	assert.Equal(t, 22, cfg.JumpHost.Port)
+	assert.Nil(t, cfg.JumpHost.JumpHost, "jump host itself should have no further jump")
+}
+
+// TestResolveSSHConfig_NoProxyJump_JumpHostNil verifies that hosts without ProxyJump
+// return SSHConfig.JumpHost == nil.
+func TestResolveSSHConfig_NoProxyJump_JumpHostNil(t *testing.T) {
+	sshCfgPath := writeTempSSHConfig(t, "direct-host", "direct.example.com", "user", 22)
+	cfg, err := resolveSSHConfig("direct-host", nil, sshCfgPath)
+	require.NoError(t, err)
+	assert.Nil(t, cfg.JumpHost)
+}
+
+// TestResolveSSHConfig_ProxyJump_JumpHostNotFound verifies that an error is returned
+// when the ProxyJump alias cannot be resolved.
+func TestResolveSSHConfig_ProxyJump_JumpHostNotFound(t *testing.T) {
+	dir := t.TempDir()
+	sshCfgPath := filepath.Join(dir, "config")
+	content := `Host target-host
+    HostName target.internal
+    User admin
+    ProxyJump nonexistent-jump
+`
+	require.NoError(t, os.WriteFile(sshCfgPath, []byte(content), 0600))
+
+	_, err := resolveSSHConfig("target-host", nil, sshCfgPath)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "resolving proxy jump")
+}
+
+// TestResolveSSHConfig_ProxyCommand verifies that a ProxyCommand directive in
+// ~/.ssh/config causes the returned SSHConfig.ProxyCommand to be populated.
+func TestResolveSSHConfig_ProxyCommand(t *testing.T) {
+	dir := t.TempDir()
+	sshCfgPath := filepath.Join(dir, "config")
+	content := `Host bastion
+    HostName bastion.example.com
+    User admin
+    ProxyCommand gcloud compute start-iap-tunnel bastion %p --listen-on-stdin --project=my-proj
+`
+	require.NoError(t, os.WriteFile(sshCfgPath, []byte(content), 0600))
+
+	cfg, err := resolveSSHConfig("bastion", nil, sshCfgPath)
+	require.NoError(t, err)
+	assert.Equal(t, "bastion.example.com", cfg.Host)
+	assert.Equal(t, "gcloud compute start-iap-tunnel bastion %p --listen-on-stdin --project=my-proj", cfg.ProxyCommand)
+	assert.Nil(t, cfg.JumpHost)
+}
+
+// TestResolveSSHConfig_RelativeIdentityFile verifies that a relative IdentityFile path
+// (e.g. ".ssh/id_ed25519" without "~/") is expanded relative to HOME.
+func TestResolveSSHConfig_RelativeIdentityFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	dir := t.TempDir()
+	sshCfgPath := filepath.Join(dir, "config")
+	content := `Host myhost
+    HostName myhost.example.com
+    User admin
+    IdentityFile .ssh/id_ed25519
+`
+	require.NoError(t, os.WriteFile(sshCfgPath, []byte(content), 0600))
+
+	cfg, err := resolveSSHConfig("myhost", nil, sshCfgPath)
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(home, ".ssh", "id_ed25519"), cfg.KeyFile)
+}
+
 // writeTempSSHConfig writes a minimal SSH config file with a Host block and returns the path.
 func writeTempSSHConfig(t *testing.T, name, hostname, user string, port int) string {
 	t.Helper()
