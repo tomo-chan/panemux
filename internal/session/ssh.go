@@ -1,10 +1,6 @@
 package session
 
 import (
-	"bufio"
-	"crypto/hmac"
-	"crypto/sha1"
-	"encoding/base64"
 	"fmt"
 	"io"
 	"net"
@@ -75,101 +71,18 @@ func resolveKnownHostsFile(knownHostsFile string) (string, error) {
 	return filepath.Join(home, ".ssh", "known_hosts"), nil
 }
 
-// knownHostsAlgorithms returns the host key algorithms stored in knownHostsFile
-// for the given address. It supports both plaintext and hashed (|1|...) hostname entries.
-// This populates ssh.ClientConfig.HostKeyAlgorithms so Go's SSH library negotiates
-// the same algorithm that is stored in known_hosts, preventing false "key mismatch" errors
-// that occur when the server offers a different algorithm than the one recorded.
-func knownHostsAlgorithms(knownHostsFile, address string) []string {
-	f, err := os.Open(knownHostsFile)
-	if err != nil {
-		return nil
-	}
-	defer f.Close()
-
-	normalized := knownhosts.Normalize(address)
-
-	seen := make(map[string]bool)
-	var algos []string
-
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "@") {
-			continue
-		}
-		fields := strings.Fields(line)
-		if len(fields) < 3 {
-			continue
-		}
-		hostsField := fields[0]
-		keyType := fields[1]
-		if knownHostsFieldMatchesAddr(hostsField, normalized) && !seen[keyType] {
-			seen[keyType] = true
-			algos = append(algos, keyType)
-		}
-	}
-
-	return algos
-}
-
-// knownHostsFieldMatchesAddr checks whether any pattern in a known_hosts hosts field
-// (comma-separated) matches the given normalized address.
-func knownHostsFieldMatchesAddr(hostsField, normalizedAddr string) bool {
-	for _, pattern := range strings.Split(hostsField, ",") {
-		pattern = strings.TrimSpace(pattern)
-		if pattern == "" || strings.HasPrefix(pattern, "!") {
-			continue
-		}
-		if strings.HasPrefix(pattern, "|1|") {
-			if knownHostsHashedEntryMatches(pattern, normalizedAddr) {
-				return true
-			}
-		} else {
-			if knownhosts.Normalize(pattern) == normalizedAddr {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// knownHostsHashedEntryMatches checks whether the hashed known_hosts entry
-// (|1|salt|hash format) matches the normalized address.
-func knownHostsHashedEntryMatches(entry, normalizedAddr string) bool {
-	parts := strings.Split(entry, "|")
-	if len(parts) != 4 || parts[1] != "1" {
-		return false
-	}
-	salt, err := base64.StdEncoding.DecodeString(parts[2])
-	if err != nil {
-		return false
-	}
-	expected, err := base64.StdEncoding.DecodeString(parts[3])
-	if err != nil {
-		return false
-	}
-	mac := hmac.New(sha1.New, salt)
-	mac.Write([]byte(normalizedAddr))
-	return hmac.Equal(mac.Sum(nil), expected)
-}
-
-// dialSSHClient establishes an SSH client connection, transparently handling ProxyJump.
-// Returns (client, jumpClient, error). jumpClient is non-nil only when a ProxyJump is
-// used; the caller must close jumpClient after closing client.
+// dialSSHClient establishes an SSH client connection, transparently handling ProxyJump
+// and ProxyCommand. Returns (client, jumpClient, error). jumpClient is non-nil only when
+// a ProxyJump is used; the caller must close jumpClient after closing client.
 func dialSSHClient(cfg SSHConfig) (*ssh.Client, *ssh.Client, error) {
 	authMethods, err := buildAuthMethods(cfg)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	khFile, err := resolveKnownHostsFile(cfg.KnownHostsFile)
+	hkCallback, err := buildHostKeyCallback(cfg.KnownHostsFile)
 	if err != nil {
 		return nil, nil, err
-	}
-	hkCallback, err := knownhosts.New(khFile)
-	if err != nil {
-		return nil, nil, fmt.Errorf("loading known_hosts %s: %w", khFile, err)
 	}
 
 	port := cfg.Port
@@ -183,12 +96,6 @@ func dialSSHClient(cfg SSHConfig) (*ssh.Client, *ssh.Client, error) {
 		Auth:            authMethods,
 		HostKeyCallback: hkCallback,
 		Timeout:         30 * time.Second,
-	}
-	// Advertise only the algorithms present in known_hosts for this host.
-	// Without this, Go's SSH library may negotiate a different algorithm than
-	// what is stored, causing a "key mismatch" error even though the key is valid.
-	if algos := knownHostsAlgorithms(khFile, addr); len(algos) > 0 {
-		sshCfg.HostKeyAlgorithms = algos
 	}
 
 	var conn net.Conn

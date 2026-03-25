@@ -11,7 +11,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	gossh "golang.org/x/crypto/ssh"
-	"golang.org/x/crypto/ssh/knownhosts"
 )
 
 // generateTestKeyFile creates a real ed25519 private key file at the given path
@@ -134,59 +133,6 @@ func TestSubstituteProxyCommand_NoTokens(t *testing.T) {
 	cmd := "nc -q0 bastion 22"
 	got := substituteProxyCommand(cmd, "unused", 0)
 	assert.Equal(t, cmd, got)
-}
-
-func TestKnownHostsAlgorithms_PlaintextEntry(t *testing.T) {
-	_, priv, err := ed25519.GenerateKey(rand.Reader)
-	require.NoError(t, err)
-	pub, err := gossh.NewPublicKey(priv.Public())
-	require.NoError(t, err)
-
-	dir := t.TempDir()
-	knownHostsPath := filepath.Join(dir, "known_hosts")
-	// Use knownhosts.Line to generate a properly formatted entry
-	content := knownhosts.Line([]string{"myhost"}, pub) + "\n"
-	require.NoError(t, os.WriteFile(knownHostsPath, []byte(content), 0600))
-
-	algos := knownHostsAlgorithms(knownHostsPath, "myhost:22")
-	assert.Equal(t, []string{pub.Type()}, algos)
-}
-
-func TestKnownHostsAlgorithms_HashedEntry(t *testing.T) {
-	_, priv, err := ed25519.GenerateKey(rand.Reader)
-	require.NoError(t, err)
-	pub, err := gossh.NewPublicKey(priv.Public())
-	require.NoError(t, err)
-
-	dir := t.TempDir()
-	knownHostsPath := filepath.Join(dir, "known_hosts")
-	// Use hashed hostname format
-	hashed := knownhosts.HashHostname("hashhost")
-	content := knownhosts.Line([]string{hashed}, pub) + "\n"
-	require.NoError(t, os.WriteFile(knownHostsPath, []byte(content), 0600))
-
-	algos := knownHostsAlgorithms(knownHostsPath, "hashhost:22")
-	assert.Equal(t, []string{pub.Type()}, algos)
-}
-
-func TestKnownHostsAlgorithms_NoMatch_ReturnsEmpty(t *testing.T) {
-	_, priv, err := ed25519.GenerateKey(rand.Reader)
-	require.NoError(t, err)
-	pub, err := gossh.NewPublicKey(priv.Public())
-	require.NoError(t, err)
-
-	dir := t.TempDir()
-	knownHostsPath := filepath.Join(dir, "known_hosts")
-	content := knownhosts.Line([]string{"otherhost"}, pub) + "\n"
-	require.NoError(t, os.WriteFile(knownHostsPath, []byte(content), 0600))
-
-	algos := knownHostsAlgorithms(knownHostsPath, "myhost:22")
-	assert.Empty(t, algos)
-}
-
-func TestKnownHostsAlgorithms_FileNotFound_ReturnsEmpty(t *testing.T) {
-	algos := knownHostsAlgorithms("/nonexistent/known_hosts", "myhost:22")
-	assert.Empty(t, algos)
 }
 
 func TestBuildHostKeyCallback_NonexistentFile_Error(t *testing.T) {
