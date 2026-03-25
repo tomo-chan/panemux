@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.0](https://github.com/tomo-chan/panemux/compare/v0.6.0...v0.7.0) (2026-03-25)
+
+
+### Features
+
+* show status bar by default ([#46](https://github.com/tomo-chan/panemux/issues/46)) ([5a9bb64](https://github.com/tomo-chan/panemux/commit/5a9bb644d33b86c7de453a32b6b021e6b413af39))
+* support ProxyJump for SSH sessions ([#45](https://github.com/tomo-chan/panemux/issues/45)) ([a3831c6](https://github.com/tomo-chan/panemux/commit/a3831c60529dcb2692f17b16f91f9b7d18135ba2))
+
 ## [0.6.0](https://github.com/tomo-chan/panemux/compare/v0.5.1...v0.6.0) (2026-03-24)
 
 
