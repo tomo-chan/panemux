@@ -217,10 +217,10 @@ func dialViaProxyCommand(proxyCmd, host string, port int) (net.Conn, error) {
 		return nil, fmt.Errorf("starting proxy command: %w", err)
 	}
 	return &proxyCommandConn{
-		cmd:   c,
-		stdin: stdin,
+		cmd:    c,
+		stdin:  stdin,
 		stdout: stdout,
-		raddr: proxyAddr(net.JoinHostPort(host, fmt.Sprintf("%d", port))),
+		raddr:  proxyAddr(net.JoinHostPort(host, fmt.Sprintf("%d", port))),
 	}, nil
 }
 
