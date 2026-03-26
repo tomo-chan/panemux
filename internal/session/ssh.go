@@ -493,16 +493,36 @@ func (s *SSHSession) Close() error {
 // ConnectionName returns the panemux connection alias for this SSH session.
 func (s *SSHSession) ConnectionName() string { return s.connectionName }
 
-// GetCWD runs `pwd` on a new exec channel over the existing SSH connection.
+// sshGetCWDCmd is the shell command used by SSHSession.GetCWD to detect the
+// current working directory of the interactive shell.
+//
+// A new exec channel always starts in the user's home directory, so running
+// plain `pwd` would always return home regardless of where the user has
+// navigated. Instead, we use the SSH connection's process tree:
+//
+//  1. $PPID inside the exec channel is the sshd process that handles this
+//     connection — the same parent process as the interactive shell.
+//  2. `pgrep -P $PPID -o` returns the oldest child of that sshd, which is
+//     the interactive shell (started before any exec-channel children).
+//  3. We read the CWD of that PID via /proc (Linux) or lsof (macOS).
+//  4. If neither technique is available, we fall back to `pwd` (home dir),
+//     which is the previous behaviour.
+const sshGetCWDCmd = `PID=$(pgrep -P $PPID -o 2>/dev/null) && [ -n "$PID" ] && ` +
+	`{ readlink /proc/$PID/cwd 2>/dev/null || ` +
+	`lsof -a -p $PID -d cwd -Fn 2>/dev/null | awk '/^n/{print substr($0,2)}'; } || ` +
+	`pwd`
+
+// GetCWD returns the current working directory of the interactive shell by
+// inspecting the sshd process tree. See sshGetCWDCmd for the full rationale.
 func (s *SSHSession) GetCWD() (string, error) {
 	sess, err := s.client.NewSession()
 	if err != nil {
-		return "", fmt.Errorf("new ssh session for pwd: %w", err)
+		return "", fmt.Errorf("new ssh session for cwd: %w", err)
 	}
 	defer sess.Close()
-	out, err := sess.Output("pwd")
+	out, err := sess.Output(sshGetCWDCmd)
 	if err != nil {
-		return "", fmt.Errorf("pwd over ssh: %w", err)
+		return "", fmt.Errorf("cwd over ssh: %w", err)
 	}
 	return strings.TrimSpace(string(out)), nil
 }
