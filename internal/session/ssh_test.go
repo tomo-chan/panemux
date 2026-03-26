@@ -151,6 +151,26 @@ func TestBuildHostKeyCallback_ValidFile_NoError(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+// TestSSHGetCWDCmd_* verify that the CWD-detection shell command embeds the
+// correct techniques so reviewers can confirm the logic without running a
+// live SSH server.
+
+func TestSSHGetCWDCmd_UsesPgrep(t *testing.T) {
+	assert.Contains(t, sshGetCWDCmd, "pgrep -P $PPID -o")
+}
+
+func TestSSHGetCWDCmd_ReadsProc(t *testing.T) {
+	assert.Contains(t, sshGetCWDCmd, "readlink /proc/$PID/cwd")
+}
+
+func TestSSHGetCWDCmd_ReadsLsof(t *testing.T) {
+	assert.Contains(t, sshGetCWDCmd, "lsof -a -p $PID -d cwd -Fn")
+}
+
+func TestSSHGetCWDCmd_FallsBackToPwd(t *testing.T) {
+	assert.Contains(t, sshGetCWDCmd, "|| pwd")
+}
+
 func TestSSHSessionConnectionName(t *testing.T) {
 	// SSHSession.connectionName is set from SSHConfig.ConnectionName.
 	// We test the getter directly via an unexported struct field since
