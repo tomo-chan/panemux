@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1](https://github.com/tomo-chan/panemux/compare/v0.7.0...v0.7.1) (2026-03-26)
+
+
+### Bug Fixes
+
+* detect interactive shell CWD for SSH sessions ([#49](https://github.com/tomo-chan/panemux/issues/49)) ([449477b](https://github.com/tomo-chan/panemux/commit/449477b5f24b0aafed65b5e6a4e6caa24951d9a3))
+
 ## [0.7.0](https://github.com/tomo-chan/panemux/compare/v0.6.0...v0.7.0) (2026-03-25)
 
 
