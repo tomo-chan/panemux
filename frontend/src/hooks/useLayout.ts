@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { DisplayConfig, DisplayConfigSchema, LayoutNode, LayoutNodeSchema, PaneConfig } from '../schemas'
-import { generatePaneId, removePaneFromTree, splitPaneInTree, swapPanesInTree } from '../utils/layoutTree'
+import { findPaneById, generatePaneId, generateTmuxSessionName, removePaneFromTree, splitPaneInTree, swapPanesInTree } from '../utils/layoutTree'
 
 export function useLayout() {
   const [layout, setLayout] = useState<LayoutNode | null>(null)
@@ -47,7 +47,19 @@ export function useLayout() {
   const splitPane = useCallback(
     async (targetPaneId: string, direction: 'horizontal' | 'vertical') => {
       if (!layout) return
-      const newPane: PaneConfig = { id: generatePaneId(), type: 'local' }
+      const sourcePane = findPaneById(layout, targetPaneId)
+      const newPane: PaneConfig = {
+        ...(sourcePane ? {
+          type: sourcePane.type,
+          ...(sourcePane.shell !== undefined && { shell: sourcePane.shell }),
+          ...(sourcePane.cwd !== undefined && { cwd: sourcePane.cwd }),
+          ...(sourcePane.connection !== undefined && { connection: sourcePane.connection }),
+          ...((sourcePane.type === 'tmux' || sourcePane.type === 'ssh_tmux') && { tmux_session: generateTmuxSessionName(sourcePane.tmux_session ?? 'session') }),
+          ...(sourcePane.show_header !== undefined && { show_header: sourcePane.show_header }),
+          ...(sourcePane.show_status_bar !== undefined && { show_status_bar: sourcePane.show_status_bar }),
+        } : { type: 'local' }),
+        id: generatePaneId(),
+      }
 
       await fetch('/api/sessions', {
         method: 'POST',
