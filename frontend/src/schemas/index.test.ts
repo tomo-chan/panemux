@@ -8,6 +8,7 @@ import {
   WSControlMessageSchema,
   SSHConfigHostSchema,
   SSHConfigHostsResponseSchema,
+  DetectShellResponseSchema,
 } from './index'
 
 describe('DisplayConfigSchema', () => {
@@ -253,6 +254,23 @@ describe('SSHConfigHostsResponseSchema', () => {
 
   it('rejects missing hosts field', () => {
     const result = SSHConfigHostsResponseSchema.safeParse({})
+    expect(result.success).toBe(false)
+  })
+})
+
+describe('DetectShellResponseSchema', () => {
+  it('accepts valid response', () => {
+    const result = DetectShellResponseSchema.safeParse({ shell: '/usr/bin/zsh' })
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects missing shell field', () => {
+    const result = DetectShellResponseSchema.safeParse({})
+    expect(result.success).toBe(false)
+  })
+
+  it('rejects non-string shell', () => {
+    const result = DetectShellResponseSchema.safeParse({ shell: 42 })
     expect(result.success).toBe(false)
   })
 })

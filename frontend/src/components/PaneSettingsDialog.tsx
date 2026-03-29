@@ -11,6 +11,7 @@ interface PaneSettingsDialogProps {
   onSave: (updated: PaneConfig) => Promise<void>
   onClose: () => void
   onAddSSHHost: () => void
+  onDetectShell: (type: PaneConfig['type'], connection?: string) => Promise<string>
 }
 
 const PANE_TYPES: Array<{ value: PaneConfig['type']; label: string }> = [
@@ -53,6 +54,7 @@ export const PaneSettingsDialog: React.FC<PaneSettingsDialogProps> = ({
   onSave,
   onClose,
   onAddSSHHost,
+  onDetectShell,
 }) => {
   const [type, setType] = useState<PaneConfig['type']>('local')
   const [shell, setShell] = useState('')
@@ -61,24 +63,42 @@ export const PaneSettingsDialog: React.FC<PaneSettingsDialogProps> = ({
   const [cwd, setCwd] = useState('')
   const [title, setTitle] = useState('')
   const [validationError, setValidationError] = useState<string | null>(null)
+  const [isDetecting, setIsDetecting] = useState(false)
 
   useEffect(() => {
     if (pane) {
       setType(pane.type)
-      setShell(pane.shell ?? '')
+      const existingShell = pane.shell ?? ''
+      setShell(existingShell)
       setConnection(pane.connection ?? '')
       setTmuxSession(pane.tmux_session ?? '')
       setCwd(pane.cwd ?? '')
       setTitle(pane.title ?? '')
       setValidationError(null)
+      // Auto-detect shell for local panes when shell is not set
+      if (pane.type === 'local' && !existingShell) {
+        onDetectShell('local').then(setShell).catch(() => {})
+      }
     }
-  }, [pane])
+  }, [pane, onDetectShell])
 
   if (!isOpen || !pane) return null
 
   const needsConnection = type === 'ssh' || type === 'ssh_tmux'
   const needsTmux = type === 'tmux' || type === 'ssh_tmux'
-  const needsShell = type === 'local'
+  const needsShell = type === 'local' || type === 'ssh' || type === 'ssh_tmux'
+
+  const handleDetectShell = async () => {
+    setIsDetecting(true)
+    try {
+      const detected = await onDetectShell(type, connection || undefined)
+      setShell(detected)
+    } catch {
+      // ignore: user can type manually
+    } finally {
+      setIsDetecting(false)
+    }
+  }
 
   const handleSave = async () => {
     setValidationError(null)
@@ -102,6 +122,7 @@ export const PaneSettingsDialog: React.FC<PaneSettingsDialogProps> = ({
       ...(needsConnection ? { connection } : {}),
       ...(needsTmux ? { tmux_session: tmuxSession } : {}),
     }
+
     await onSave(updated)
   }
 
@@ -143,7 +164,14 @@ export const PaneSettingsDialog: React.FC<PaneSettingsDialogProps> = ({
           <label style={labelStyle}>Type</label>
           <select
             value={type}
-            onChange={(e) => { setType(e.target.value as PaneConfig['type']); setValidationError(null) }}
+            onChange={(e) => {
+              const newType = e.target.value as PaneConfig['type']
+              setType(newType)
+              setValidationError(null)
+              if (newType === 'local' && !shell) {
+                onDetectShell(newType).then(setShell).catch(() => {})
+              }
+            }}
             style={inputStyle}
           >
             {PANE_TYPES.map((t) => (
@@ -155,13 +183,33 @@ export const PaneSettingsDialog: React.FC<PaneSettingsDialogProps> = ({
         {needsShell && (
           <div style={fieldStyle}>
             <label style={labelStyle}>Shell</label>
-            <input
-              type="text"
-              value={shell}
-              onChange={(e) => setShell(e.target.value)}
-              placeholder="/bin/zsh"
-              style={inputStyle}
-            />
+            <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+              <input
+                type="text"
+                value={shell}
+                onChange={(e) => setShell(e.target.value)}
+                placeholder="/bin/bash"
+                style={{ ...inputStyle, flex: 1 }}
+              />
+              <button
+                onClick={handleDetectShell}
+                disabled={isDetecting || (needsConnection && !connection)}
+                style={{
+                  padding: '5px 10px',
+                  backgroundColor: 'transparent',
+                  color: '#888',
+                  border: '1px solid #555',
+                  borderRadius: '3px',
+                  fontFamily: TERMINAL_FONT_FAMILY,
+                  fontSize: '13px',
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                  opacity: (isDetecting || (needsConnection && !connection)) ? 0.5 : 1,
+                }}
+              >
+                {isDetecting ? '…' : 'Detect'}
+              </button>
+            </div>
           </div>
         )}
 

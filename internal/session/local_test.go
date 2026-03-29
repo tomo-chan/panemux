@@ -151,8 +151,14 @@ func TestDetectLocalShellFrom_MatchesCurrentUID(t *testing.T) {
 	currentUser, err := user.Current()
 	require.NoError(t, err)
 
-	content := "root:x:0:0:root:/root:/bin/false\n" +
-		currentUser.Username + ":x:" + currentUser.Uid + ":1000::/home/user:/usr/bin/bash\n"
+	// Build content with the current user's entry mapping to /usr/bin/bash.
+	// Only prepend a separate root entry if we are NOT root, to avoid having
+	// two lines with the same UID (which would cause the first one to win).
+	var content string
+	if currentUser.Uid != "0" {
+		content = "root:x:0:0:root:/root:/bin/false\n"
+	}
+	content += currentUser.Username + ":x:" + currentUser.Uid + ":1000::/home/user:/usr/bin/bash\n"
 	tmpFile := filepath.Join(t.TempDir(), "passwd")
 	require.NoError(t, os.WriteFile(tmpFile, []byte(content), 0644))
 

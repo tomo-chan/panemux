@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { SSHConnectionsResponseSchema } from '../schemas'
+import { SSHConnectionsResponseSchema, DetectShellResponseSchema } from '../schemas'
 import type { LayoutNode, PaneConfig, SSHConfigHost } from '../schemas'
 import { replacePaneInTree } from '../utils/layoutTree'
 
@@ -79,5 +79,21 @@ export function usePaneSettings(
     return host.name
   }, [])
 
-  return { isOpen, currentPane, sshConnectionNames, saveError, isSaving, openSettings, closeSettings, saveSettings, addSSHConfigHost }
+  const detectShell = useCallback(
+    async (type: PaneConfig['type'], connection?: string): Promise<string> => {
+      const url = type === 'local' || !connection
+        ? '/api/detect-shell'
+        : `/api/detect-shell?connection=${encodeURIComponent(connection)}`
+      const r = await fetch(url)
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}))
+        throw new Error((body as { error?: string }).error ?? `HTTP ${r.status}`)
+      }
+      const data = await r.json()
+      return DetectShellResponseSchema.parse(data).shell
+    },
+    [],
+  )
+
+  return { isOpen, currentPane, sshConnectionNames, saveError, isSaving, openSettings, closeSettings, saveSettings, addSSHConfigHost, detectShell }
 }

@@ -53,6 +53,7 @@ type SSHConfig struct {
 	Password       string
 	KnownHostsFile string
 	Cwd            string     // initial working directory on the remote host
+	Shell          string     // override login shell (empty = use remote login shell)
 	ConnectionName string     // alias used in panemux (for VSCode Remote SSH)
 	JumpHost       *SSHConfig // non-nil when ProxyJump is configured
 	ProxyCommand   string     // shell command used as stdin/stdout pipe (ProxyCommand directive)
@@ -280,7 +281,30 @@ func NewSSH(id, title string, cfg SSHConfig) (*SSHSession, error) {
 	// arguments) before embedding it in the remote shell command.
 	// sess.Shell() and sess.Start() are mutually exclusive in the SSH protocol.
 	var startErr error
-	if cfg.Cwd != "" {
+	if cfg.Shell != "" {
+		// Shell override: validate path before embedding in remote command.
+		if !validRemotePath.MatchString(cfg.Shell) {
+			sess.Close()
+			client.Close()
+			if jumpClient != nil {
+				jumpClient.Close()
+			}
+			return nil, fmt.Errorf("invalid shell %q: must be an absolute path with no shell metacharacters", cfg.Shell)
+		}
+		if cfg.Cwd != "" {
+			if !validRemotePath.MatchString(cfg.Cwd) {
+				sess.Close()
+				client.Close()
+				if jumpClient != nil {
+					jumpClient.Close()
+				}
+				return nil, fmt.Errorf("invalid working directory %q: must be an absolute path with no shell metacharacters", cfg.Cwd)
+			}
+			startErr = sess.Start(fmt.Sprintf("cd %s && exec %s", shellQuotePath(cfg.Cwd), shellQuotePath(cfg.Shell)))
+		} else {
+			startErr = sess.Start("exec " + shellQuotePath(cfg.Shell))
+		}
+	} else if cfg.Cwd != "" {
 		if !validRemotePath.MatchString(cfg.Cwd) {
 			sess.Close()
 			client.Close()
@@ -324,6 +348,35 @@ func NewSSH(id, title string, cfg SSHConfig) (*SSHSession, error) {
 	}()
 
 	return s, nil
+}
+
+// DetectRemoteShell connects to the remote host via SSH and returns the value of $SHELL.
+func DetectRemoteShell(cfg SSHConfig) (string, error) {
+	client, jumpClient, err := dialSSHClient(cfg)
+	if err != nil {
+		return "", fmt.Errorf("connecting to remote host: %w", err)
+	}
+	defer client.Close()
+	if jumpClient != nil {
+		defer jumpClient.Close()
+	}
+
+	sess, err := client.NewSession()
+	if err != nil {
+		return "", fmt.Errorf("creating session: %w", err)
+	}
+	defer sess.Close()
+
+	out, err := sess.Output("echo $SHELL")
+	if err != nil {
+		return "", fmt.Errorf("detecting remote shell: %w", err)
+	}
+
+	shell := strings.TrimSpace(string(out))
+	if shell == "" {
+		return "", fmt.Errorf("remote $SHELL is not set")
+	}
+	return shell, nil
 }
 
 // buildHostKeyCallback resolves the known_hosts file path and returns a

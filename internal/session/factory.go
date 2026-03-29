@@ -29,6 +29,7 @@ func createSession(pane *config.PaneConfig, sshConns map[string]config.SSHConnec
 			return nil, err
 		}
 		cfg.Cwd = pane.Cwd
+		cfg.Shell = pane.Shell
 		cfg.ConnectionName = pane.Connection
 		return NewSSH(pane.ID, pane.Title, cfg)
 
@@ -41,12 +42,18 @@ func createSession(pane *config.PaneConfig, sshConns map[string]config.SSHConnec
 			return nil, err
 		}
 		cfg.Cwd = pane.Cwd
+		cfg.Shell = pane.Shell
 		cfg.ConnectionName = pane.Connection
 		return NewTmuxSSH(pane.ID, pane.Title, pane.TmuxSession, cfg)
 
 	default:
 		return nil, fmt.Errorf("unknown session type: %s", pane.Type)
 	}
+}
+
+// ResolveSSHConfig is the exported version of resolveSSHConfig for use by the API handler.
+func ResolveSSHConfig(name string, sshConns map[string]config.SSHConnection, sshConfigPath string) (SSHConfig, error) {
+	return resolveSSHConfig(name, sshConns, sshConfigPath)
 }
 
 // resolveSSHConfig looks up the SSH connection by name, first in the sshConns map,
