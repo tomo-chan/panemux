@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -175,6 +176,41 @@ func validateShell(shell string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("not an allowed shell: %q (not listed in /etc/shells)", shell)
+}
+
+// DetectLocalShell returns the login shell for the current user by reading /etc/passwd.
+func DetectLocalShell() (string, error) {
+	return detectLocalShellFrom("/etc/passwd")
+}
+
+// detectLocalShellFrom is the testable version that accepts a custom passwd file path.
+func detectLocalShellFrom(passwdPath string) (string, error) {
+	currentUser, err := user.Current()
+	if err != nil {
+		return "", fmt.Errorf("getting current user: %w", err)
+	}
+	data, err := os.ReadFile(passwdPath)
+	if err != nil {
+		return "", fmt.Errorf("reading %s: %w", passwdPath, err)
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		parts := strings.Split(line, ":")
+		if len(parts) < 7 {
+			continue
+		}
+		// Match by UID (more reliable than username)
+		if parts[2] == currentUser.Uid {
+			shell := strings.TrimSpace(parts[6])
+			if shell != "" {
+				return shell, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("shell not found for user %q (uid %s) in %s", currentUser.Username, currentUser.Uid, passwdPath)
 }
 
 // readEtcShells parses /etc/shells and returns the set of listed shell paths.

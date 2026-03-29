@@ -49,6 +49,7 @@ func New(cfg *config.Config, manager *session.Manager, frontendFS embed.FS) *Ser
 		r.Get("/ssh-connections", apiHandler.GetSSHConnections)
 		r.Get("/ssh-config/hosts", apiHandler.GetSSHConfigHosts)
 		r.Post("/ssh-config/hosts", apiHandler.PostSSHConfigHost)
+		r.Get("/detect-shell", apiHandler.GetDetectShell)
 	})
 
 	// WebSocket

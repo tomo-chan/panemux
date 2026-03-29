@@ -216,4 +216,58 @@ describe('usePaneSettings', () => {
       expect(returnedName).toBe('new-host')
     })
   })
+
+  describe('detectShell', () => {
+    it('calls /api/detect-shell for local type', async () => {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ names: [] }) })
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ shell: '/usr/bin/zsh' }) })
+
+      vi.stubGlobal('fetch', fetchMock)
+      const { result } = renderHook(() => usePaneSettings(mockLayout, vi.fn()))
+      await waitFor(() => expect(result.current.sshConnectionNames).toEqual([]))
+
+      let detected = ''
+      await act(async () => {
+        detected = await result.current.detectShell('local')
+      })
+
+      expect(detected).toBe('/usr/bin/zsh')
+      expect(fetchMock).toHaveBeenCalledWith('/api/detect-shell')
+    })
+
+    it('calls /api/detect-shell?connection=name for ssh type', async () => {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ names: [] }) })
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ shell: '/bin/bash' }) })
+
+      vi.stubGlobal('fetch', fetchMock)
+      const { result } = renderHook(() => usePaneSettings(mockLayout, vi.fn()))
+      await waitFor(() => expect(result.current.sshConnectionNames).toEqual([]))
+
+      let detected = ''
+      await act(async () => {
+        detected = await result.current.detectShell('ssh', 'myserver')
+      })
+
+      expect(detected).toBe('/bin/bash')
+      expect(fetchMock).toHaveBeenCalledWith('/api/detect-shell?connection=myserver')
+    })
+
+    it('throws on detect failure', async () => {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ names: [] }) })
+        .mockResolvedValueOnce({ ok: false, status: 500, json: () => Promise.resolve({ error: 'cannot detect' }) })
+
+      vi.stubGlobal('fetch', fetchMock)
+      const { result } = renderHook(() => usePaneSettings(mockLayout, vi.fn()))
+      await waitFor(() => expect(result.current.sshConnectionNames).toEqual([]))
+
+      await expect(
+        act(async () => {
+          await result.current.detectShell('local')
+        })
+      ).rejects.toThrow('cannot detect')
+    })
+  })
 })

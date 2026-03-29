@@ -20,12 +20,14 @@ import (
 
 // Handler provides REST API endpoints.
 type Handler struct {
-	cfg            *config.Config
-	manager        *session.Manager
-	editMode       atomic.Bool
-	sshConfigPath  string
-	codeBinaryPath string // empty = auto-detect; overridden in tests
-	createSession  func(*config.PaneConfig, map[string]config.SSHConnection) (session.Session, error)
+	cfg                 *config.Config
+	manager             *session.Manager
+	editMode            atomic.Bool
+	sshConfigPath       string
+	codeBinaryPath      string // empty = auto-detect; overridden in tests
+	createSession       func(*config.PaneConfig, map[string]config.SSHConnection) (session.Session, error)
+	detectLocalShellFn  func() (string, error)
+	detectRemoteShellFn func(cfg session.SSHConfig) (string, error)
 }
 
 type editModeResponse struct {
@@ -62,6 +64,8 @@ var validHostName = regexp.MustCompile(`^[a-zA-Z0-9_.\-]+$`)
 func NewHandler(cfg *config.Config, manager *session.Manager) *Handler {
 	h := &Handler{cfg: cfg, manager: manager, sshConfigPath: sshconfig.DefaultPath()}
 	h.createSession = session.CreateFromConfig
+	h.detectLocalShellFn = session.DetectLocalShell
+	h.detectRemoteShellFn = session.DetectRemoteShell
 	return h
 }
 
@@ -424,6 +428,38 @@ func (h *Handler) findVSCode() (string, error) {
 		}
 	}
 	return "", fmt.Errorf("code binary not found")
+}
+
+type detectShellResponse struct {
+	Shell string `json:"shell"`
+}
+
+// GetDetectShell detects the default shell for a local or SSH connection.
+// Without query params: detects the local user's login shell.
+// With ?connection=name: SSHs to the named connection and reads $SHELL.
+func (h *Handler) GetDetectShell(w http.ResponseWriter, r *http.Request) {
+	connection := r.URL.Query().Get("connection")
+
+	var shell string
+	var err error
+
+	if connection == "" {
+		shell, err = h.detectLocalShellFn()
+	} else {
+		cfg, cfgErr := session.ResolveSSHConfig(connection, h.cfg.SSHConnections, h.sshConfigPath)
+		if cfgErr != nil {
+			http.Error(w, cfgErr.Error(), http.StatusNotFound)
+			return
+		}
+		shell, err = h.detectRemoteShellFn(cfg)
+	}
+
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, detectShellResponse{Shell: shell})
 }
 
 func writeValidationError(w http.ResponseWriter, msg string) {
