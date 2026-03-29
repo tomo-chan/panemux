@@ -54,7 +54,6 @@ export function useLayout() {
           ...(sourcePane.shell !== undefined && { shell: sourcePane.shell }),
           ...(sourcePane.cwd !== undefined && { cwd: sourcePane.cwd }),
           ...(sourcePane.connection !== undefined && { connection: sourcePane.connection }),
-          ...(sourcePane.tmux_session !== undefined && { tmux_session: sourcePane.tmux_session }),
           ...(sourcePane.show_header !== undefined && { show_header: sourcePane.show_header }),
           ...(sourcePane.show_status_bar !== undefined && { show_status_bar: sourcePane.show_status_bar }),
         } : { type: 'local' }),

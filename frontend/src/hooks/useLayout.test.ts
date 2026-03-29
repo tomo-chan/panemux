@@ -219,6 +219,45 @@ describe('useLayout', () => {
       expect(newPane?.shell).toBe('/bin/zsh')
       expect(newPane?.cwd).toBe('/projects/myapp')
     })
+
+    it('does not inherit tmux_session when splitting a tmux pane', async () => {
+      const tmuxLayout: LayoutNode = {
+        direction: 'horizontal',
+        children: [
+          {
+            size: 100,
+            pane: { id: 'tmux-pane', type: 'tmux', tmux_session: 'main' },
+          },
+        ],
+      }
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(tmuxLayout) } as Response)
+        .mockResolvedValueOnce({ ok: false } as Response)
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ id: 'new-pane', type: 'tmux', title: '', state: 'connecting' }),
+        } as Response)
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) } as Response)
+      window.fetch = fetchMock
+
+      const { result } = renderHook(() => useLayout())
+      await waitFor(() => expect(result.current.layout).not.toBeNull())
+
+      await act(async () => {
+        await result.current.splitPane('tmux-pane', 'vertical')
+      })
+
+      const newPane = result.current.layout?.children[0].children?.[1].pane
+      expect(newPane?.type).toBe('tmux')
+      expect(newPane?.tmux_session).toBeUndefined()
+
+      const postCall = fetchMock.mock.calls.find(
+        (c) => c[0] === '/api/sessions' && (c[1] as RequestInit)?.method === 'POST',
+      )
+      const body = JSON.parse((postCall![1] as RequestInit).body as string)
+      expect(body.tmux_session).toBeUndefined()
+    })
   })
 
   describe('closePane', () => {
