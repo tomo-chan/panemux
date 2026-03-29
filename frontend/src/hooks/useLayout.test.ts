@@ -128,6 +128,97 @@ describe('useLayout', () => {
       expect(child?.children).toHaveLength(2)
       expect(child?.children?.[0].pane?.id).toBe('main')
     })
+
+    it('inherits source pane settings when splitting', async () => {
+      const sshLayout: LayoutNode = {
+        direction: 'horizontal',
+        children: [
+          {
+            size: 100,
+            pane: {
+              id: 'ssh-pane',
+              type: 'ssh',
+              connection: 'prod',
+              cwd: '/home/user',
+              show_header: false,
+              show_status_bar: false,
+            },
+          },
+        ],
+      }
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(sshLayout) } as Response) // GET /api/layout
+        .mockResolvedValueOnce({ ok: false } as Response) // GET /api/display (non-fatal)
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ id: 'new-pane', type: 'ssh', title: '', state: 'connecting' }),
+        } as Response) // POST /api/sessions
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) } as Response) // PUT /api/layout
+      window.fetch = fetchMock
+
+      const { result } = renderHook(() => useLayout())
+      await waitFor(() => expect(result.current.layout).not.toBeNull())
+
+      await act(async () => {
+        await result.current.splitPane('ssh-pane', 'vertical')
+      })
+
+      const newPane = result.current.layout?.children[0].children?.[1].pane
+      expect(newPane?.id).not.toBe('ssh-pane')
+      expect(newPane?.type).toBe('ssh')
+      expect(newPane?.connection).toBe('prod')
+      expect(newPane?.cwd).toBe('/home/user')
+      expect(newPane?.show_header).toBe(false)
+      expect(newPane?.show_status_bar).toBe(false)
+      // title is not inherited
+      expect(newPane?.title).toBeUndefined()
+
+      // Verify POST body carries the inherited settings
+      const postCall = fetchMock.mock.calls.find(
+        (c) => c[0] === '/api/sessions' && (c[1] as RequestInit)?.method === 'POST',
+      )
+      const body = JSON.parse((postCall![1] as RequestInit).body as string)
+      expect(body.type).toBe('ssh')
+      expect(body.connection).toBe('prod')
+      expect(body.cwd).toBe('/home/user')
+      expect(body.show_header).toBe(false)
+      expect(body.show_status_bar).toBe(false)
+    })
+
+    it('inherits shell and cwd from local pane when splitting', async () => {
+      const localLayout: LayoutNode = {
+        direction: 'horizontal',
+        children: [
+          {
+            size: 100,
+            pane: { id: 'local-pane', type: 'local', shell: '/bin/zsh', cwd: '/projects/myapp' },
+          },
+        ],
+      }
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(localLayout) } as Response)
+        .mockResolvedValueOnce({ ok: false } as Response)
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ id: 'new-pane', type: 'local', title: '', state: 'connecting' }),
+        } as Response)
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) } as Response)
+      window.fetch = fetchMock
+
+      const { result } = renderHook(() => useLayout())
+      await waitFor(() => expect(result.current.layout).not.toBeNull())
+
+      await act(async () => {
+        await result.current.splitPane('local-pane', 'horizontal')
+      })
+
+      const newPane = result.current.layout?.children[0].children?.[1].pane
+      expect(newPane?.type).toBe('local')
+      expect(newPane?.shell).toBe('/bin/zsh')
+      expect(newPane?.cwd).toBe('/projects/myapp')
+    })
   })
 
   describe('closePane', () => {
