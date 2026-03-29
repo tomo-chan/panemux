@@ -106,8 +106,12 @@ export const PaneHeader: React.FC<PaneHeaderProps> = ({
       />
       <span style={{ color, fontWeight: 600 }}>{label}</span>
       {pane.title && <span style={{ color: '#aaa' }}>{pane.title}</span>}
-      {gitInfo?.is_git && gitInfo.branch && (
-        <span style={{ color: '#6e8a6e', fontSize: '11px' }}>⎇ {gitInfo.branch}</span>
+      {gitInfo?.is_git && (gitInfo.repo || gitInfo.branch) && (
+        <span style={{ color: '#6e8a6e', fontSize: '11px' }}>
+          {gitInfo.repo && <span>{gitInfo.repo}</span>}
+          {gitInfo.repo && gitInfo.branch && <span style={{ color: '#4a6a4a' }}>{' '}⎇{' '}</span>}
+          {gitInfo.branch && <span>{gitInfo.branch}</span>}
+        </span>
       )}
       {!connected && <span style={{ color: '#555' }}>reconnecting…</span>}
       <div style={{ marginLeft: 'auto', display: 'flex', gap: '4px' }}>
