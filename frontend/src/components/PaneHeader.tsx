@@ -1,5 +1,6 @@
 import React from 'react'
 import { DisplayConfig, PaneConfig } from '../types'
+import { GitInfo } from '../schemas'
 import { TERMINAL_FONT_FAMILY } from '../utils/fonts'
 
 interface PaneHeaderProps {
@@ -8,6 +9,7 @@ interface PaneHeaderProps {
   displayConfig: DisplayConfig
   isMaximized: boolean
   editMode: boolean
+  gitInfo?: GitInfo
   onSplit: (direction: 'horizontal' | 'vertical') => void
   onClose: () => void
   onMaximize: () => void
@@ -51,6 +53,7 @@ export const PaneHeader: React.FC<PaneHeaderProps> = ({
   displayConfig,
   isMaximized,
   editMode,
+  gitInfo,
   onSplit,
   onClose,
   onMaximize,
@@ -103,6 +106,9 @@ export const PaneHeader: React.FC<PaneHeaderProps> = ({
       />
       <span style={{ color, fontWeight: 600 }}>{label}</span>
       {pane.title && <span style={{ color: '#aaa' }}>{pane.title}</span>}
+      {gitInfo?.is_git && gitInfo.branch && (
+        <span style={{ color: '#6e8a6e', fontSize: '11px' }}>⎇ {gitInfo.branch}</span>
+      )}
       {!connected && <span style={{ color: '#555' }}>reconnecting…</span>}
       <div style={{ marginLeft: 'auto', display: 'flex', gap: '4px' }}>
         {editMode && (

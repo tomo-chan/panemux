@@ -1,6 +1,7 @@
 import React, { useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { DisplayConfig, PaneConfig } from '../types'
 import { useTerminal } from '../hooks/useTerminal'
+import { useGitInfo } from '../hooks/useGitInfo'
 import { PaneHeader } from './PaneHeader'
 import { PaneStatusBar } from './PaneStatusBar'
 import { LayoutActionsContext } from './SplitContainer'
@@ -35,6 +36,8 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
     container: containerEl,
     editMode,
   })
+
+  const gitInfo = useGitInfo(pane.id)
 
   // Observe resize events for this pane
   useEffect(() => {
@@ -116,6 +119,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
         displayConfig={displayConfig}
         isMaximized={ctx?.maximizedPaneId === pane.id}
         editMode={editMode}
+        gitInfo={gitInfo}
         onSplit={(direction) => ctx?.onSplit(pane.id, direction)}
         onClose={() => ctx?.onClose(pane.id)}
         onMaximize={() => ctx?.onMaximize(ctx.maximizedPaneId === pane.id ? null : pane.id)}
