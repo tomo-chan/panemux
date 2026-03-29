@@ -220,7 +220,7 @@ describe('useLayout', () => {
       expect(newPane?.cwd).toBe('/projects/myapp')
     })
 
-    it('does not inherit tmux_session when splitting a tmux pane', async () => {
+    it('generates a new tmux_session name when splitting a tmux pane', async () => {
       const tmuxLayout: LayoutNode = {
         direction: 'horizontal',
         children: [
@@ -250,13 +250,18 @@ describe('useLayout', () => {
 
       const newPane = result.current.layout?.children[0].children?.[1].pane
       expect(newPane?.type).toBe('tmux')
-      expect(newPane?.tmux_session).toBeUndefined()
+      // A new unique session name must be generated (not the original, not empty)
+      expect(newPane?.tmux_session).toBeDefined()
+      expect(newPane?.tmux_session).not.toBe('main')
+      expect(newPane?.tmux_session).toMatch(/^[a-zA-Z0-9_.-]+$/)
 
       const postCall = fetchMock.mock.calls.find(
         (c) => c[0] === '/api/sessions' && (c[1] as RequestInit)?.method === 'POST',
       )
       const body = JSON.parse((postCall![1] as RequestInit).body as string)
-      expect(body.tmux_session).toBeUndefined()
+      expect(body.tmux_session).toBeDefined()
+      expect(body.tmux_session).not.toBe('main')
+      expect(body.tmux_session).toMatch(/^[a-zA-Z0-9_.-]+$/)
     })
   })
 

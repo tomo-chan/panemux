@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { DisplayConfig, DisplayConfigSchema, LayoutNode, LayoutNodeSchema, PaneConfig } from '../schemas'
-import { findPaneById, generatePaneId, removePaneFromTree, splitPaneInTree, swapPanesInTree } from '../utils/layoutTree'
+import { findPaneById, generatePaneId, generateTmuxSessionName, removePaneFromTree, splitPaneInTree, swapPanesInTree } from '../utils/layoutTree'
 
 export function useLayout() {
   const [layout, setLayout] = useState<LayoutNode | null>(null)
@@ -54,6 +54,7 @@ export function useLayout() {
           ...(sourcePane.shell !== undefined && { shell: sourcePane.shell }),
           ...(sourcePane.cwd !== undefined && { cwd: sourcePane.cwd }),
           ...(sourcePane.connection !== undefined && { connection: sourcePane.connection }),
+          ...((sourcePane.type === 'tmux' || sourcePane.type === 'ssh_tmux') && { tmux_session: generateTmuxSessionName() }),
           ...(sourcePane.show_header !== undefined && { show_header: sourcePane.show_header }),
           ...(sourcePane.show_status_bar !== undefined && { show_status_bar: sourcePane.show_status_bar }),
         } : { type: 'local' }),

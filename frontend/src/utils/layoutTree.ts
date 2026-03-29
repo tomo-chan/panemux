@@ -159,3 +159,10 @@ function swapInChildren(
 export function generatePaneId(): string {
   return `pane-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
 }
+
+/**
+ * Generates a unique tmux session name (matches ^[a-zA-Z0-9_.-]+$).
+ */
+export function generateTmuxSessionName(): string {
+  return `session-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+}
