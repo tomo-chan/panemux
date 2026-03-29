@@ -250,10 +250,10 @@ describe('useLayout', () => {
 
       const newPane = result.current.layout?.children[0].children?.[1].pane
       expect(newPane?.type).toBe('tmux')
-      // A new unique session name must be generated (not the original, not empty)
+      // A new unique session name must be generated based on the original name
       expect(newPane?.tmux_session).toBeDefined()
       expect(newPane?.tmux_session).not.toBe('main')
-      expect(newPane?.tmux_session).toMatch(/^[a-zA-Z0-9_.-]+$/)
+      expect(newPane?.tmux_session).toMatch(/^main-[a-zA-Z0-9]+$/)
 
       const postCall = fetchMock.mock.calls.find(
         (c) => c[0] === '/api/sessions' && (c[1] as RequestInit)?.method === 'POST',
@@ -261,7 +261,7 @@ describe('useLayout', () => {
       const body = JSON.parse((postCall![1] as RequestInit).body as string)
       expect(body.tmux_session).toBeDefined()
       expect(body.tmux_session).not.toBe('main')
-      expect(body.tmux_session).toMatch(/^[a-zA-Z0-9_.-]+$/)
+      expect(body.tmux_session).toMatch(/^main-[a-zA-Z0-9]+$/)
     })
   })
 
