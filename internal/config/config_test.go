@@ -413,6 +413,27 @@ func TestUpdateLayout_UpdatesMemoryOnly(t *testing.T) {
 	}
 }
 
+func TestValidatePane_ShellOnSSH_AbsolutePathOK(t *testing.T) {
+	p := &PaneConfig{ID: "p1", Type: "ssh", Connection: "host1", Shell: "/usr/bin/zsh"}
+	errs := validatePane(p, map[string]SSHConnection{"host1": {Host: "host1.example.com"}})
+	// Should not have a shell-related error
+	for _, e := range errs {
+		assert.NotContains(t, e, "shell must be an absolute path")
+	}
+}
+
+func TestValidatePane_ShellOnSSH_RelativePath_Error(t *testing.T) {
+	p := &PaneConfig{ID: "p1", Type: "ssh", Connection: "host1", Shell: "zsh"}
+	errs := validatePane(p, map[string]SSHConnection{"host1": {Host: "host1.example.com"}})
+	hasShellError := false
+	for _, e := range errs {
+		if strings.Contains(e, "shell must be an absolute path") {
+			hasShellError = true
+		}
+	}
+	assert.True(t, hasShellError)
+}
+
 // helpers
 
 func validConfig() *Config {

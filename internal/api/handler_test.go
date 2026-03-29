@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -59,6 +60,7 @@ func setupRouterWithHandler(h *Handler) *chi.Mux {
 	r.Get("/api/ssh-connections", h.GetSSHConnections)
 	r.Get("/api/ssh-config/hosts", h.GetSSHConfigHosts)
 	r.Post("/api/ssh-config/hosts", h.PostSSHConfigHost)
+	r.Get("/api/detect-shell", h.GetDetectShell)
 	return r
 }
 
@@ -910,4 +912,72 @@ func TestPostOpenVSCode_SSHTmux_200(t *testing.T) {
 	var resp openVSCodeResponse
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
 	assert.Equal(t, "/home/user/remote", resp.Cwd)
+}
+
+func TestGetDetectShell_Local_Success(t *testing.T) {
+	h := NewHandler(defaultTestConfig(), session.NewManager())
+	h.sshConfigPath = filepath.Join(os.TempDir(), "nonexistent")
+	h.detectLocalShellFn = func() (string, error) { return "/usr/bin/zsh", nil }
+	h.detectRemoteShellFn = func(cfg session.SSHConfig) (string, error) {
+		return "", fmt.Errorf("should not be called")
+	}
+	r := setupRouterWithHandler(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/detect-shell", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var resp struct {
+		Shell string `json:"shell"`
+	}
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.Equal(t, "/usr/bin/zsh", resp.Shell)
+}
+
+func TestGetDetectShell_SSH_Success(t *testing.T) {
+	cfg := defaultTestConfig()
+	cfg.SSHConnections = map[string]config.SSHConnection{
+		"myhost": {Host: "myhost.example.com", User: "admin"},
+	}
+	h := NewHandler(cfg, session.NewManager())
+	h.detectRemoteShellFn = func(sshCfg session.SSHConfig) (string, error) {
+		return "/bin/bash", nil
+	}
+	r := setupRouterWithHandler(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/detect-shell?connection=myhost", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var resp struct {
+		Shell string `json:"shell"`
+	}
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.Equal(t, "/bin/bash", resp.Shell)
+}
+
+func TestGetDetectShell_SSH_ConnectionNotFound(t *testing.T) {
+	h := NewHandler(defaultTestConfig(), session.NewManager())
+	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-empty-ssh-cfg")
+	r := setupRouterWithHandler(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/detect-shell?connection=nonexistent", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+func TestGetDetectShell_DetectFails(t *testing.T) {
+	h := NewHandler(defaultTestConfig(), session.NewManager())
+	h.detectLocalShellFn = func() (string, error) { return "", fmt.Errorf("cannot detect") }
+	r := setupRouterWithHandler(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/detect-shell", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }

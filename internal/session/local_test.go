@@ -2,6 +2,8 @@ package session
 
 import (
 	"os"
+	"os/user"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -137,4 +139,34 @@ func TestValidateShell_InvalidChars_Error(t *testing.T) {
 	_, err := validateShell("/bin/sh; rm -rf /")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid characters")
+}
+
+func TestDetectLocalShell_ReturnsAbsolutePath(t *testing.T) {
+	shell, err := DetectLocalShell()
+	require.NoError(t, err)
+	assert.True(t, filepath.IsAbs(shell), "expected absolute shell path, got %q", shell)
+}
+
+func TestDetectLocalShellFrom_MatchesCurrentUID(t *testing.T) {
+	currentUser, err := user.Current()
+	require.NoError(t, err)
+
+	content := "root:x:0:0:root:/root:/bin/false\n" +
+		currentUser.Username + ":x:" + currentUser.Uid + ":1000::/home/user:/usr/bin/bash\n"
+	tmpFile := filepath.Join(t.TempDir(), "passwd")
+	require.NoError(t, os.WriteFile(tmpFile, []byte(content), 0644))
+
+	shell, err := detectLocalShellFrom(tmpFile)
+	require.NoError(t, err)
+	assert.Equal(t, "/usr/bin/bash", shell)
+}
+
+func TestDetectLocalShellFrom_UserNotFound_Error(t *testing.T) {
+	content := "nobody:x:99999:99999::/nonexistent:/bin/false\n"
+	tmpFile := filepath.Join(t.TempDir(), "passwd")
+	require.NoError(t, os.WriteFile(tmpFile, []byte(content), 0644))
+
+	_, err := detectLocalShellFrom(tmpFile)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "shell not found")
 }
