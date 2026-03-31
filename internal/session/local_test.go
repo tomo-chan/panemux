@@ -176,3 +176,21 @@ func TestDetectLocalShellFrom_UserNotFound_Error(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "shell not found")
 }
+
+func TestDetectLocalShellDscl_ParsesOutput(t *testing.T) {
+	runner := func(username string) ([]byte, error) {
+		return []byte("UserShell: /bin/zsh\n"), nil
+	}
+	shell, err := detectLocalShellDscl("tomo", runner)
+	require.NoError(t, err)
+	assert.Equal(t, "/bin/zsh", shell)
+}
+
+func TestDetectLocalShellDscl_NoUserShellLine_Error(t *testing.T) {
+	runner := func(username string) ([]byte, error) {
+		return []byte("No such key: UserShell\n"), nil
+	}
+	_, err := detectLocalShellDscl("tomo", runner)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "UserShell not found")
+}
