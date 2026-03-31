@@ -69,6 +69,14 @@ export const WSControlMessageSchema = z.discriminatedUnion('type', [
 
 export type WSControlMessage = z.infer<typeof WSControlMessageSchema>
 
+export const GitInfoSchema = z.object({
+  is_git: z.boolean(),
+  branch: z.string().optional(),
+  repo: z.string().optional(),
+})
+
+export type GitInfo = z.infer<typeof GitInfoSchema>
+
 export const EditModeResponseSchema = z.object({
   editMode: z.boolean(),
 })
