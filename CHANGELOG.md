@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/tomo-chan/panemux/compare/v0.8.0...v0.9.0) (2026-04-01)
+
+
+### Features
+
+* auto-detect default shell per connection in pane settings ([#53](https://github.com/tomo-chan/panemux/issues/53)) ([9daf8d8](https://github.com/tomo-chan/panemux/commit/9daf8d88333b492c550abdbac91fc0686fbb18c0))
+
 ## [0.8.0](https://github.com/tomo-chan/panemux/compare/v0.7.1...v0.8.0) (2026-03-31)
 
 
