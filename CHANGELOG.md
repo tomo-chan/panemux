@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.8.0](https://github.com/tomo-chan/panemux/compare/v0.7.1...v0.8.0) (2026-03-31)
+
+
+### Features
+
+* inherit source pane settings when splitting a panel ([#54](https://github.com/tomo-chan/panemux/issues/54)) ([a78edf6](https://github.com/tomo-chan/panemux/commit/a78edf66323e4f012bc2be5738849f58c91b8178))
+* show git repository info in pane header ([#52](https://github.com/tomo-chan/panemux/issues/52)) ([64bb894](https://github.com/tomo-chan/panemux/commit/64bb8941dc2ce92f6f1df12e2faef78420c56d66))
+
 ## [0.7.1](https://github.com/tomo-chan/panemux/compare/v0.7.0...v0.7.1) (2026-03-26)
 
 
