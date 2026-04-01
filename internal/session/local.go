@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -175,6 +176,73 @@ func validateShell(shell string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("not an allowed shell: %q (not listed in /etc/shells)", shell)
+}
+
+// DetectLocalShell returns the login shell for the current user.
+// It first checks /etc/passwd (Linux). On macOS, where regular users are not
+// listed in /etc/passwd, it falls back to querying Directory Services via dscl.
+func DetectLocalShell() (string, error) {
+	currentUser, err := user.Current()
+	if err != nil {
+		return "", fmt.Errorf("getting current user: %w", err)
+	}
+	shell, err := detectLocalShellFrom("/etc/passwd")
+	if err == nil {
+		return shell, nil
+	}
+	// /etc/passwd lookup failed (expected on macOS) — try dscl.
+	return detectLocalShellDscl(currentUser.Username, func(username string) ([]byte, error) {
+		return exec.Command("/usr/bin/dscl", ".", "-read", "/Users/"+username, "UserShell").Output()
+	})
+}
+
+// detectLocalShellDscl queries macOS Directory Services for the user's login shell.
+// The runner parameter exists for testability.
+func detectLocalShellDscl(username string, runner func(string) ([]byte, error)) (string, error) {
+	out, err := runner(username)
+	if err != nil {
+		return "", fmt.Errorf("dscl: %w", err)
+	}
+	// Output format: "UserShell: /bin/zsh\n"
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.HasPrefix(line, "UserShell:") {
+			shell := strings.TrimSpace(strings.TrimPrefix(line, "UserShell:"))
+			if shell != "" {
+				return shell, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("UserShell not found in dscl output for user %q", username)
+}
+
+// detectLocalShellFrom is the testable version that accepts a custom passwd file path.
+func detectLocalShellFrom(passwdPath string) (string, error) {
+	currentUser, err := user.Current()
+	if err != nil {
+		return "", fmt.Errorf("getting current user: %w", err)
+	}
+	data, err := os.ReadFile(passwdPath)
+	if err != nil {
+		return "", fmt.Errorf("reading %s: %w", passwdPath, err)
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		parts := strings.Split(line, ":")
+		if len(parts) < 7 {
+			continue
+		}
+		// Match by UID (more reliable than username)
+		if parts[2] == currentUser.Uid {
+			shell := strings.TrimSpace(parts[6])
+			if shell != "" {
+				return shell, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("shell not found for user %q (uid %s) in %s", currentUser.Username, currentUser.Uid, passwdPath)
 }
 
 // readEtcShells parses /etc/shells and returns the set of listed shell paths.

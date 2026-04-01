@@ -2,6 +2,8 @@ package session
 
 import (
 	"os"
+	"os/user"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -137,4 +139,58 @@ func TestValidateShell_InvalidChars_Error(t *testing.T) {
 	_, err := validateShell("/bin/sh; rm -rf /")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid characters")
+}
+
+func TestDetectLocalShell_ReturnsAbsolutePath(t *testing.T) {
+	shell, err := DetectLocalShell()
+	require.NoError(t, err)
+	assert.True(t, filepath.IsAbs(shell), "expected absolute shell path, got %q", shell)
+}
+
+func TestDetectLocalShellFrom_MatchesCurrentUID(t *testing.T) {
+	currentUser, err := user.Current()
+	require.NoError(t, err)
+
+	// Build content with the current user's entry mapping to /usr/bin/bash.
+	// Only prepend a separate root entry if we are NOT root, to avoid having
+	// two lines with the same UID (which would cause the first one to win).
+	var content string
+	if currentUser.Uid != "0" {
+		content = "root:x:0:0:root:/root:/bin/false\n"
+	}
+	content += currentUser.Username + ":x:" + currentUser.Uid + ":1000::/home/user:/usr/bin/bash\n"
+	tmpFile := filepath.Join(t.TempDir(), "passwd")
+	require.NoError(t, os.WriteFile(tmpFile, []byte(content), 0644))
+
+	shell, err := detectLocalShellFrom(tmpFile)
+	require.NoError(t, err)
+	assert.Equal(t, "/usr/bin/bash", shell)
+}
+
+func TestDetectLocalShellFrom_UserNotFound_Error(t *testing.T) {
+	content := "nobody:x:99999:99999::/nonexistent:/bin/false\n"
+	tmpFile := filepath.Join(t.TempDir(), "passwd")
+	require.NoError(t, os.WriteFile(tmpFile, []byte(content), 0644))
+
+	_, err := detectLocalShellFrom(tmpFile)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "shell not found")
+}
+
+func TestDetectLocalShellDscl_ParsesOutput(t *testing.T) {
+	runner := func(username string) ([]byte, error) {
+		return []byte("UserShell: /bin/zsh\n"), nil
+	}
+	shell, err := detectLocalShellDscl("tomo", runner)
+	require.NoError(t, err)
+	assert.Equal(t, "/bin/zsh", shell)
+}
+
+func TestDetectLocalShellDscl_NoUserShellLine_Error(t *testing.T) {
+	runner := func(username string) ([]byte, error) {
+		return []byte("No such key: UserShell\n"), nil
+	}
+	_, err := detectLocalShellDscl("tomo", runner)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "UserShell not found")
 }

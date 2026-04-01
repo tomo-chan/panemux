@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { DisplayConfig, DisplayConfigSchema, LayoutNode, LayoutNodeSchema, PaneConfig } from '../schemas'
+import { DetectShellResponseSchema, DisplayConfig, DisplayConfigSchema, LayoutNode, LayoutNodeSchema, PaneConfig } from '../schemas'
 import { findPaneById, generatePaneId, generateTmuxSessionName, removePaneFromTree, splitPaneInTree, swapPanesInTree } from '../utils/layoutTree'
 
 export function useLayout() {
@@ -59,6 +59,17 @@ export function useLayout() {
           ...(sourcePane.show_status_bar !== undefined && { show_status_bar: sourcePane.show_status_bar }),
         } : { type: 'local' }),
         id: generatePaneId(),
+      }
+
+      if (newPane.type === 'local' && newPane.shell === undefined) {
+        try {
+          const r = await fetch('/api/detect-shell')
+          if (r.ok) {
+            newPane.shell = DetectShellResponseSchema.parse(await r.json()).shell
+          }
+        } catch {
+          // non-fatal: backend will use its own default
+        }
       }
 
       await fetch('/api/sessions', {

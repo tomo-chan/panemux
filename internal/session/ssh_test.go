@@ -171,6 +171,15 @@ func TestSSHGetCWDCmd_FallsBackToPwd(t *testing.T) {
 	assert.Contains(t, sshGetCWDCmd, "|| pwd")
 }
 
+// TestSSHConfig_ShellField verifies the Shell field exists on SSHConfig.
+func TestSSHConfig_ShellField(t *testing.T) {
+	cfg := SSHConfig{
+		Host:  "example.com",
+		Shell: "/usr/bin/zsh",
+	}
+	assert.Equal(t, "/usr/bin/zsh", cfg.Shell)
+}
+
 func TestSSHSessionConnectionName(t *testing.T) {
 	// SSHSession.connectionName is set from SSHConfig.ConnectionName.
 	// We test the getter directly via an unexported struct field since

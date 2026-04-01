@@ -134,7 +134,7 @@ func validatePane(p *PaneConfig, sshConns map[string]SSHConnection) []string {
 		}
 	}
 
-	if p.Type == "local" && p.Shell != "" && !strings.HasPrefix(p.Shell, "/") {
+	if p.Shell != "" && !strings.HasPrefix(p.Shell, "/") {
 		errs = append(errs, fmt.Sprintf("pane %q: shell must be an absolute path, got %q", p.ID, p.Shell))
 	}
 

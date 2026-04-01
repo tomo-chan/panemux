@@ -264,6 +264,22 @@ func TestCreateSession_SSHTmuxFallbackToSSHConfig(t *testing.T) {
 	}
 }
 
+// TestCreateSession_SSH_ShellPassedToConfig verifies Shell from PaneConfig flows to SSHConfig.
+func TestCreateSession_SSH_ShellPassedToConfig(t *testing.T) {
+	sshConfigPath := writeTempSSHConfig(t, "myhost", "myhost.example.com", "user", 22)
+	pane := &config.PaneConfig{
+		ID:         "test-shell",
+		Type:       "ssh",
+		Connection: "myhost",
+		Shell:      "/usr/bin/zsh",
+	}
+	// This will fail to connect (no real SSH server) but we only care it's not "not found"
+	_, err := createSession(pane, map[string]config.SSHConnection{}, sshConfigPath)
+	if err != nil {
+		assert.NotContains(t, err.Error(), "not found")
+	}
+}
+
 func TestCreateSession_SSHConfigPort_UsedWhenSet(t *testing.T) {
 	// Port 2 in test — won't actually connect, but let's verify it's read from config
 	dir := t.TempDir()

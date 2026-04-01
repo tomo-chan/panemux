@@ -108,6 +108,7 @@ describe('useLayout', () => {
         .fn()
         .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validLayout) } as Response) // GET /api/layout
         .mockResolvedValueOnce({ ok: false } as Response) // GET /api/display (non-fatal)
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ shell: '/bin/zsh' }) } as Response) // GET /api/detect-shell
         .mockResolvedValueOnce({
           ok: true,
           json: () => Promise.resolve({ id: 'new-pane', type: 'local', title: '', state: 'connecting' }),
@@ -129,6 +130,27 @@ describe('useLayout', () => {
       expect(child?.children?.[0].pane?.id).toBe('main')
     })
 
+    it('sets detected shell on the new pane when splitting', async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validLayout) } as Response)
+        .mockResolvedValueOnce({ ok: false } as Response)
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ shell: '/bin/zsh' }) } as Response)
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) } as Response)
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) } as Response)
+      window.fetch = fetchMock
+
+      const { result } = renderHook(() => useLayout())
+      await waitFor(() => expect(result.current.layout).not.toBeNull())
+
+      await act(async () => {
+        await result.current.splitPane('main', 'horizontal')
+      })
+
+      const newPane = result.current.layout?.children[0].children?.[1].pane
+      expect(newPane?.shell).toBe('/bin/zsh')
+    })
+
     it('inherits source pane settings when splitting', async () => {
       const sshLayout: LayoutNode = {
         direction: 'horizontal',
@@ -148,13 +170,13 @@ describe('useLayout', () => {
       }
       const fetchMock = vi
         .fn()
-        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(sshLayout) } as Response) // GET /api/layout
-        .mockResolvedValueOnce({ ok: false } as Response) // GET /api/display (non-fatal)
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(sshLayout) } as Response)
+        .mockResolvedValueOnce({ ok: false } as Response)
         .mockResolvedValueOnce({
           ok: true,
           json: () => Promise.resolve({ id: 'new-pane', type: 'ssh', title: '', state: 'connecting' }),
-        } as Response) // POST /api/sessions
-        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) } as Response) // PUT /api/layout
+        } as Response)
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) } as Response)
       window.fetch = fetchMock
 
       const { result } = renderHook(() => useLayout())
@@ -171,10 +193,8 @@ describe('useLayout', () => {
       expect(newPane?.cwd).toBe('/home/user')
       expect(newPane?.show_header).toBe(false)
       expect(newPane?.show_status_bar).toBe(false)
-      // title is not inherited
       expect(newPane?.title).toBeUndefined()
 
-      // Verify POST body carries the inherited settings
       const postCall = fetchMock.mock.calls.find(
         (c) => c[0] === '/api/sessions' && (c[1] as RequestInit)?.method === 'POST',
       )
@@ -186,7 +206,7 @@ describe('useLayout', () => {
       expect(body.show_status_bar).toBe(false)
     })
 
-    it('inherits shell and cwd from local pane when splitting', async () => {
+    it('inherits shell and cwd from local pane when splitting without detecting shell again', async () => {
       const localLayout: LayoutNode = {
         direction: 'horizontal',
         children: [
@@ -218,6 +238,32 @@ describe('useLayout', () => {
       expect(newPane?.type).toBe('local')
       expect(newPane?.shell).toBe('/bin/zsh')
       expect(newPane?.cwd).toBe('/projects/myapp')
+      expect(fetchMock).not.toHaveBeenCalledWith('/api/detect-shell')
+    })
+
+    it('splits successfully even when detect-shell fails', async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validLayout) } as Response)
+        .mockResolvedValueOnce({ ok: false } as Response)
+        .mockResolvedValueOnce({ ok: false, status: 500 } as Response)
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ id: 'new-pane', type: 'local', title: '', state: 'connecting' }),
+        } as Response)
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) } as Response)
+      window.fetch = fetchMock
+
+      const { result } = renderHook(() => useLayout())
+      await waitFor(() => expect(result.current.layout).not.toBeNull())
+
+      await act(async () => {
+        await result.current.splitPane('main', 'horizontal')
+      })
+
+      const child = result.current.layout?.children[0]
+      expect(child?.children).toHaveLength(2)
+      expect(child?.children?.[1].pane?.shell).toBeUndefined()
     })
 
     it('generates a new tmux_session name when splitting a tmux pane', async () => {

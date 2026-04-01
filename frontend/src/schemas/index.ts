@@ -104,3 +104,9 @@ export const SSHConfigHostsResponseSchema = z.object({
 })
 
 export type SSHConfigHostsResponse = z.infer<typeof SSHConfigHostsResponseSchema>
+
+export const DetectShellResponseSchema = z.object({
+  shell: z.string(),
+})
+
+export type DetectShellResponse = z.infer<typeof DetectShellResponseSchema>
