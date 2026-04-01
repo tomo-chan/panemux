@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { splitPaneInTree, removePaneFromTree, generatePaneId, findPaneById, replacePaneInTree, swapPanesInTree } from './layoutTree'
+import { splitPaneInTree, removePaneFromTree, generatePaneId, generateTmuxSessionName, findPaneById, replacePaneInTree, swapPanesInTree } from './layoutTree'
 import type { LayoutNode } from '../schemas'
 
 const simpleLayout: LayoutNode = {
@@ -259,5 +259,22 @@ describe('generatePaneId', () => {
   it('returns unique ids on successive calls', () => {
     const ids = new Set(Array.from({ length: 10 }, () => generatePaneId()))
     expect(ids.size).toBe(10)
+  })
+})
+
+describe('generateTmuxSessionName', () => {
+  it('starts with the base name followed by a hyphen', () => {
+    const name = generateTmuxSessionName('mysession')
+    expect(name).toMatch(/^mysession-/)
+  })
+
+  it('result matches allowed tmux session name characters', () => {
+    const name = generateTmuxSessionName('base')
+    expect(name).toMatch(/^[a-zA-Z0-9_.-]+$/)
+  })
+
+  it('returns unique names on successive calls', () => {
+    const names = new Set(Array.from({ length: 10 }, () => generateTmuxSessionName('s')))
+    expect(names.size).toBe(10)
   })
 })

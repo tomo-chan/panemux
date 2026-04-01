@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -54,6 +55,7 @@ func setupRouterWithHandler(h *Handler) *chi.Mux {
 	r.Post("/api/sessions", h.PostSession)
 	r.Delete("/api/sessions/{id}", h.DeleteSession)
 	r.Post("/api/sessions/{id}/restart", h.RestartSession)
+	r.Get("/api/sessions/{id}/git-info", h.GetGitInfo)
 	r.Get("/api/display", h.GetDisplay)
 	r.Get("/api/edit-mode", h.GetEditMode)
 	r.Put("/api/edit-mode", h.PutEditMode)
@@ -980,4 +982,143 @@ func TestGetDetectShell_DetectFails(t *testing.T) {
 	r.ServeHTTP(rec, req)
 
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+}
+
+// initTempGitRepo creates a temporary directory with an initialised git repo
+// on a branch named "main" and returns the directory path.
+func initTempGitRepo(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	cmds := [][]string{
+		{"git", "init", "-b", "main", dir},
+		{"git", "-C", dir, "config", "user.email", "test@example.com"},
+		{"git", "-C", dir, "config", "user.name", "Test"},
+		{"git", "-C", dir, "config", "commit.gpgsign", "false"},
+		{"git", "-C", dir, "commit", "--allow-empty", "-m", "init"},
+	}
+	for _, args := range cmds {
+		out, err := exec.Command(args[0], args[1:]...).CombinedOutput() //nolint:gosec -- trusted test args
+		require.NoError(t, err, "git init step failed: %s", string(out))
+	}
+	return dir
+}
+
+func setupRouterWithGitInfo(h *Handler) *chi.Mux {
+	r := setupRouterWithHandler(h)
+	r.Get("/api/sessions/{id}/git-info", h.GetGitInfo)
+	return r
+}
+
+func TestGetGitInfo_NotFound_404(t *testing.T) {
+	h := NewHandler(defaultTestConfig(), session.NewManager())
+	r := setupRouterWithGitInfo(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/missing/git-info", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+func TestGetGitInfo_NoCWDGetter_IsGitFalse(t *testing.T) {
+	mgr := session.NewManager()
+	mgr.Add(newMockSession("s1"))
+	h := NewHandler(defaultTestConfig(), mgr)
+	r := setupRouterWithGitInfo(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/s1/git-info", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var resp gitInfoResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.False(t, resp.IsGit)
+}
+
+func TestGetGitInfo_NotAGitRepo_IsGitFalse(t *testing.T) {
+	dir := t.TempDir() // plain directory, no git
+	mgr := session.NewManager()
+	mgr.Add(&mockCWDSession{
+		mockSession: mockSession{id: "local1", typ: session.TypeLocal},
+		cwd:         dir,
+	})
+	h := NewHandler(defaultTestConfig(), mgr)
+	r := setupRouterWithGitInfo(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/local1/git-info", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var resp gitInfoResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.False(t, resp.IsGit)
+}
+
+func TestGetGitInfo_IsGitRepo_ReturnsBranchAndRepo(t *testing.T) {
+	dir := initTempGitRepo(t)
+	mgr := session.NewManager()
+	mgr.Add(&mockCWDSession{
+		mockSession: mockSession{id: "local2", typ: session.TypeLocal},
+		cwd:         dir,
+	})
+	h := NewHandler(defaultTestConfig(), mgr)
+	r := setupRouterWithGitInfo(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/local2/git-info", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var resp gitInfoResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.True(t, resp.IsGit)
+	assert.Equal(t, "main", resp.Branch)
+	assert.NotEmpty(t, resp.Repo)
+}
+
+func TestGetGitInfo_SubdirOfGitRepo_ReturnsBranchAndRepo(t *testing.T) {
+	dir := initTempGitRepo(t)
+	subdir := filepath.Join(dir, "src")
+	require.NoError(t, os.MkdirAll(subdir, 0755))
+
+	mgr := session.NewManager()
+	mgr.Add(&mockCWDSession{
+		mockSession: mockSession{id: "sub1", typ: session.TypeLocal},
+		cwd:         subdir,
+	})
+	h := NewHandler(defaultTestConfig(), mgr)
+	r := setupRouterWithGitInfo(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/sub1/git-info", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var resp gitInfoResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.True(t, resp.IsGit)
+	assert.Equal(t, "main", resp.Branch)
+}
+
+func TestGetGitInfo_GitNotFound_IsGitFalse(t *testing.T) {
+	dir := initTempGitRepo(t)
+	mgr := session.NewManager()
+	mgr.Add(&mockCWDSession{
+		mockSession: mockSession{id: "local3", typ: session.TypeLocal},
+		cwd:         dir,
+	})
+	h := NewHandler(defaultTestConfig(), mgr)
+	h.gitBinaryPath = "/nonexistent/git" // simulate git not found
+	r := setupRouterWithGitInfo(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/local3/git-info", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var resp gitInfoResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.False(t, resp.IsGit)
 }

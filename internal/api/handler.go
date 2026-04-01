@@ -6,9 +6,11 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"sort"
+	"strings"
 	"sync/atomic"
 
 	"github.com/go-chi/chi/v5"
@@ -25,6 +27,7 @@ type Handler struct {
 	editMode            atomic.Bool
 	sshConfigPath       string
 	codeBinaryPath      string // empty = auto-detect; overridden in tests
+	gitBinaryPath       string // empty = auto-detect; overridden in tests
 	createSession       func(*config.PaneConfig, map[string]config.SSHConnection) (session.Session, error)
 	detectLocalShellFn  func() (string, error)
 	detectRemoteShellFn func(cfg session.SSHConfig) (string, error)
@@ -460,6 +463,66 @@ func (h *Handler) GetDetectShell(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, detectShellResponse{Shell: shell})
+}
+
+type gitInfoResponse struct {
+	IsGit  bool   `json:"is_git"`
+	Branch string `json:"branch,omitempty"`
+	Repo   string `json:"repo,omitempty"`
+}
+
+// GetGitInfo returns git repository information for the session's current working directory.
+func (h *Handler) GetGitInfo(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	sess, ok := h.manager.Get(id)
+	if !ok {
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
+
+	cwdGetter, ok := sess.(session.CWDGetter)
+	if !ok {
+		writeJSON(w, gitInfoResponse{IsGit: false})
+		return
+	}
+
+	cwd, err := cwdGetter.GetCWD()
+	if err != nil {
+		writeJSON(w, gitInfoResponse{IsGit: false})
+		return
+	}
+
+	gitPath, err := h.findGit()
+	if err != nil {
+		writeJSON(w, gitInfoResponse{IsGit: false})
+		return
+	}
+
+	// Determine the git repo top-level directory.
+	toplevelOut, err := exec.Command(gitPath, "-C", cwd, "rev-parse", "--show-toplevel").Output() //nolint:gosec -- gitPath from trusted lookup, cwd from OS
+	if err != nil {
+		writeJSON(w, gitInfoResponse{IsGit: false})
+		return
+	}
+	repo := filepath.Base(strings.TrimSpace(string(toplevelOut)))
+
+	// Get the current branch name.
+	branchOut, err := exec.Command(gitPath, "-C", cwd, "branch", "--show-current").Output() //nolint:gosec -- gitPath from trusted lookup, cwd from OS
+	if err != nil {
+		writeJSON(w, gitInfoResponse{IsGit: true, Repo: repo})
+		return
+	}
+	branch := strings.TrimSpace(string(branchOut))
+
+	writeJSON(w, gitInfoResponse{IsGit: true, Branch: branch, Repo: repo})
+}
+
+// findGit returns the path to the git binary.
+func (h *Handler) findGit() (string, error) {
+	if h.gitBinaryPath != "" {
+		return h.gitBinaryPath, nil
+	}
+	return exec.LookPath("git")
 }
 
 func writeValidationError(w http.ResponseWriter, msg string) {
