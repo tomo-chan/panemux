@@ -108,6 +108,7 @@ describe('useLayout', () => {
         .fn()
         .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validLayout) } as Response) // GET /api/layout
         .mockResolvedValueOnce({ ok: false } as Response) // GET /api/display (non-fatal)
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ shell: '/bin/zsh' }) } as Response) // GET /api/detect-shell
         .mockResolvedValueOnce({
           ok: true,
           json: () => Promise.resolve({ id: 'new-pane', type: 'local', title: '', state: 'connecting' }),
@@ -127,6 +128,49 @@ describe('useLayout', () => {
       expect(child?.direction).toBe('horizontal')
       expect(child?.children).toHaveLength(2)
       expect(child?.children?.[0].pane?.id).toBe('main')
+    })
+
+    it('sets detected shell on the new pane when splitting', async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validLayout) } as Response) // GET /api/layout
+        .mockResolvedValueOnce({ ok: false } as Response) // GET /api/display (non-fatal)
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ shell: '/bin/zsh' }) } as Response) // GET /api/detect-shell
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) } as Response) // POST /api/sessions
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) } as Response) // PUT /api/layout
+      window.fetch = fetchMock
+
+      const { result } = renderHook(() => useLayout())
+      await waitFor(() => expect(result.current.layout).not.toBeNull())
+
+      await act(async () => {
+        await result.current.splitPane('main', 'horizontal')
+      })
+
+      const newPane = result.current.layout?.children[0].children?.[1].pane
+      expect(newPane?.shell).toBe('/bin/zsh')
+    })
+
+    it('splits successfully even when detect-shell fails', async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validLayout) } as Response) // GET /api/layout
+        .mockResolvedValueOnce({ ok: false } as Response) // GET /api/display (non-fatal)
+        .mockResolvedValueOnce({ ok: false, status: 500 } as Response) // GET /api/detect-shell fails
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) } as Response) // POST /api/sessions
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) } as Response) // PUT /api/layout
+      window.fetch = fetchMock
+
+      const { result } = renderHook(() => useLayout())
+      await waitFor(() => expect(result.current.layout).not.toBeNull())
+
+      await act(async () => {
+        await result.current.splitPane('main', 'horizontal')
+      })
+
+      const child = result.current.layout?.children[0]
+      expect(child?.children).toHaveLength(2)
+      expect(child?.children?.[1].pane?.shell).toBeUndefined()
     })
   })
 

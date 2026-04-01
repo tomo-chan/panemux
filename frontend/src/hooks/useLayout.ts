@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { DisplayConfig, DisplayConfigSchema, LayoutNode, LayoutNodeSchema, PaneConfig } from '../schemas'
+import { DetectShellResponseSchema, DisplayConfig, DisplayConfigSchema, LayoutNode, LayoutNodeSchema, PaneConfig } from '../schemas'
 import { generatePaneId, removePaneFromTree, splitPaneInTree, swapPanesInTree } from '../utils/layoutTree'
 
 export function useLayout() {
@@ -47,7 +47,19 @@ export function useLayout() {
   const splitPane = useCallback(
     async (targetPaneId: string, direction: 'horizontal' | 'vertical') => {
       if (!layout) return
-      const newPane: PaneConfig = { id: generatePaneId(), type: 'local' }
+
+      // Detect login shell for the new pane; silently ignore errors
+      let shell: string | undefined
+      try {
+        const r = await fetch('/api/detect-shell')
+        if (r.ok) {
+          shell = DetectShellResponseSchema.parse(await r.json()).shell
+        }
+      } catch {
+        // non-fatal: backend will use its own default
+      }
+
+      const newPane: PaneConfig = { id: generatePaneId(), type: 'local', ...(shell ? { shell } : {}) }
 
       await fetch('/api/sessions', {
         method: 'POST',
