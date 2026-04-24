@@ -37,7 +37,6 @@ type SSHSession struct {
 	client  *ssh.Client
 	session *ssh.Session
 	stdin   io.WriteCloser
-	stdout  io.Reader
 	// combined reader for stdout+stderr
 	reader         io.Reader
 	connectionName string
@@ -209,7 +208,7 @@ func dialViaProxyCommand(proxyCmd, host string, port int) (net.Conn, error) {
 	cmd := substituteProxyCommand(proxyCmd, host, port)
 	// Pass to /bin/sh -c so the command is interpreted by a shell, matching
 	// OpenSSH behaviour. /bin/sh is a hardcoded trusted binary.
-	c := exec.Command("/bin/sh", "-c", cmd) //nolint:gosec -- cmd is from trusted ~/.ssh/config
+	c := exec.Command("/bin/sh", "-c", cmd) //nolint:gosec // cmd is from trusted ~/.ssh/config
 	c.Stderr = os.Stderr
 
 	stdin, err := c.StdinPipe()

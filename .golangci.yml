@@ -1,0 +1,32 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: standard
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+  settings:
+    staticcheck:
+      checks: ["all"]
+  exclusions:
+    rules:
+      # Session package manages OS processes and SSH connections; Close/Wait/Kill
+      # errors in teardown paths are not actionable.
+      - path: internal/session/
+        linters:
+          - errcheck
+      # Test cleanup (defer conn.Close(), SetReadDeadline, ReadMessage) does not
+      # require error handling — test failures surface through assertions.
+      - path: _test\.go
+        linters:
+          - errcheck
+
+formatters:
+  enable:
+    - gofmt

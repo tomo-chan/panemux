@@ -1,3 +1,4 @@
+// Package session manages terminal sessions (local PTY, SSH, tmux).
 package session
 
 import (

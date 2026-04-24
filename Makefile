@@ -1,17 +1,19 @@
 .PHONY: all build build-frontend build-backend dev clean run install-deps install-deps-ci \
         test test-go test-frontend \
         fmt fmt-go fmt-check-go \
-        lint lint-go lint-frontend \
+        lint lint-go lint-go-deps lint-frontend \
         coverage coverage-go coverage-frontend \
         check release-snapshot package
 
+GOLANGCI_LINT_VERSION := v2.11.4
+
 # ── Dependencies ──────────────────────────────────────────────────────────────
 
-install-deps:
+install-deps: lint-go-deps
 	cd frontend && npm install
 	go mod download
 
-install-deps-ci:
+install-deps-ci: lint-go-deps
 	cd frontend && npm ci
 	go mod download
 
@@ -75,8 +77,13 @@ fmt-check-go:
 
 lint: lint-go lint-frontend
 
-lint-go: fmt-check-go
+lint-go-deps:
+	@command -v golangci-lint >/dev/null 2>&1 || \
+	  go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+
+lint-go: fmt-check-go lint-go-deps
 	go vet ./...
+	golangci-lint run ./...
 
 lint-frontend:
 	cd frontend && npx tsc --noEmit

@@ -1,3 +1,4 @@
+// Package server wires together the chi router, API handlers, and embedded frontend.
 package server
 
 import (

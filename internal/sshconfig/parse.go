@@ -1,3 +1,4 @@
+// Package sshconfig parses SSH config files and provides host enumeration.
 package sshconfig
 
 import (
@@ -39,7 +40,7 @@ func ParseHosts(path string) ([]Host, error) {
 		}
 		return nil, fmt.Errorf("open ssh config: %w", err)
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 
 	var hosts []Host
 	var current *Host
@@ -127,7 +128,7 @@ func AppendHost(path string, h Host) error {
 	if err != nil {
 		return fmt.Errorf("open ssh config for append: %w", err)
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 
 	var sb strings.Builder
 	sb.WriteString("\nHost ")
@@ -140,7 +141,7 @@ func AppendHost(path string, h Host) error {
 	sb.WriteString(h.User)
 	sb.WriteString("\n")
 	if h.Port != 0 {
-		sb.WriteString(fmt.Sprintf("    Port %d\n", h.Port))
+		fmt.Fprintf(&sb, "    Port %d\n", h.Port)
 	}
 	if h.IdentityFile != "" {
 		sb.WriteString("    IdentityFile ")
