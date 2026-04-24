@@ -179,6 +179,11 @@ See `docs/architecture.md` → *Security Design* for the full rationale and the 
   git worktree remove ../<repo>-<feature>
   ```
 
+### Pull request title
+- PR titles must follow Conventional Commits format: `<type>: <description>`.
+- Allowed types are defined in `.github/workflows/pr-title.yml`: `feat`, `fix`, `chore`, `docs`, `refactor`, `test`, `build`, and `ci`.
+- Use `.github/labeler.yml` as the guide for choosing the type when the change maps cleanly to one label: `docs:` for Markdown/docs-only changes, `ci:` for `.github`/workflow/build configuration changes, and the best matching product type for frontend/backend code changes.
+
 ### Pull request test plan
 - After creating a PR, run every item in the test plan locally and verify it passes.
 - Update the PR description with all checkboxes checked (`- [x]`) before considering the task complete.
