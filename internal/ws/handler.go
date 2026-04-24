@@ -1,3 +1,4 @@
+// Package ws provides the WebSocket handler that bridges terminal sessions to the browser.
 package ws
 
 import (
@@ -55,7 +56,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		log.Printf("ws upgrade error for session %s: %v", sessionID, err)
 		return
 	}
-	defer conn.Close()
+	defer conn.Close() //nolint:errcheck
 
 	// Send initial connected status
 	h.sendStatus(conn, "connected")
@@ -133,5 +134,5 @@ func (h *Handler) handleControl(conn *websocket.Conn, sess session.Session, msg 
 func (h *Handler) sendStatus(conn *websocket.Conn, state string) {
 	msg := ControlMessage{Type: "status", State: state}
 	data, _ := json.Marshal(msg)
-	conn.WriteMessage(websocket.TextMessage, data)
+	_ = conn.WriteMessage(websocket.TextMessage, data)
 }

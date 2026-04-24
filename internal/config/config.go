@@ -1,3 +1,4 @@
+// Package config loads and manages panemux YAML configuration.
 package config
 
 import (

@@ -1,3 +1,4 @@
+// Package api provides HTTP REST API handlers for panemux.
 package api
 
 import (
@@ -90,7 +91,7 @@ func (h *Handler) PutLayout(w http.ResponseWriter, r *http.Request) {
 	if err := config.ValidateLayout(layout); err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnprocessableEntity)
-		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
 
@@ -134,7 +135,7 @@ func (h *Handler) PostSession(w http.ResponseWriter, r *http.Request) {
 	if err := config.ValidatePane(&pane); err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnprocessableEntity)
-		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
 
@@ -152,7 +153,7 @@ func (h *Handler) PostSession(w http.ResponseWriter, r *http.Request) {
 	h.manager.Add(sess)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(sessionInfo{
+	_ = json.NewEncoder(w).Encode(sessionInfo{
 		ID:    sess.ID(),
 		Type:  string(sess.Type()),
 		Title: sess.Title(),
@@ -190,7 +191,7 @@ func (h *Handler) RestartSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.manager.Remove(id) //nolint:errcheck -- ok if already gone
+	h.manager.Remove(id) //nolint:errcheck // ok if already gone
 
 	sess, err := h.createSession(found, h.cfg.SSHConnections)
 	if err != nil {
@@ -320,7 +321,7 @@ func (h *Handler) PostSSHConfigHost(w http.ResponseWriter, r *http.Request) {
 		if host.Name == req.Name {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusConflict)
-			json.NewEncoder(w).Encode(map[string]string{"error": "host already exists"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "host already exists"})
 			return
 		}
 	}
@@ -404,7 +405,7 @@ func (h *Handler) PostOpenVSCode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Launch VSCode asynchronously — we do not wait for it to exit.
-	cmd := exec.Command(codePath, args...) //nolint:gosec -- codePath is from trusted lookup, not user input
+	cmd := exec.Command(codePath, args...) //nolint:gosec // codePath is from trusted lookup
 	if err := cmd.Start(); err != nil {
 		http.Error(w, fmt.Sprintf("failed to launch VSCode: %v", err), http.StatusInternalServerError)
 		return
@@ -499,7 +500,7 @@ func (h *Handler) GetGitInfo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Determine the git repo top-level directory.
-	toplevelOut, err := exec.Command(gitPath, "-C", cwd, "rev-parse", "--show-toplevel").Output() //nolint:gosec -- gitPath from trusted lookup, cwd from OS
+	toplevelOut, err := exec.Command(gitPath, "-C", cwd, "rev-parse", "--show-toplevel").Output() //nolint:gosec // gitPath is from trusted lookup
 	if err != nil {
 		writeJSON(w, gitInfoResponse{IsGit: false})
 		return
@@ -507,7 +508,7 @@ func (h *Handler) GetGitInfo(w http.ResponseWriter, r *http.Request) {
 	repo := filepath.Base(strings.TrimSpace(string(toplevelOut)))
 
 	// Get the current branch name.
-	branchOut, err := exec.Command(gitPath, "-C", cwd, "branch", "--show-current").Output() //nolint:gosec -- gitPath from trusted lookup, cwd from OS
+	branchOut, err := exec.Command(gitPath, "-C", cwd, "branch", "--show-current").Output() //nolint:gosec // gitPath is from trusted lookup
 	if err != nil {
 		writeJSON(w, gitInfoResponse{IsGit: true, Repo: repo})
 		return
@@ -528,10 +529,10 @@ func (h *Handler) findGit() (string, error) {
 func writeValidationError(w http.ResponseWriter, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusUnprocessableEntity)
-	json.NewEncoder(w).Encode(map[string]string{"error": msg})
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(v)
+	_ = json.NewEncoder(w).Encode(v)
 }

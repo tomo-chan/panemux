@@ -89,7 +89,9 @@ func main() {
 		log.Println("Shutting down...")
 		ctx, cancel := context.WithTimeout(context.Background(), 5000000000) // 5s
 		defer cancel()
-		srv.Shutdown(ctx)
+		if err := srv.Shutdown(ctx); err != nil {
+			log.Printf("Shutdown error: %v", err)
+		}
 		manager.CloseAll()
 	}
 }

@@ -57,7 +57,7 @@ func NewTmuxLocal(id, title, tmuxSession string) (*TmuxLocalSession, error) {
 	// inject an error message when tmux exited with a non-zero status so that
 	// the WebSocket reader always delivers the exit reason to the browser.
 	go func() {
-		io.Copy(pw, ptmx) //nolint:errcheck -- EIO is expected when slave closes
+		io.Copy(pw, ptmx) //nolint:errcheck // EIO is expected when slave closes
 		exitErr := cmd.Wait()
 		s.mu.Lock()
 		s.state = StateExited
@@ -67,7 +67,7 @@ func NewTmuxLocal(id, title, tmuxSession string) (*TmuxLocalSession, error) {
 				"\r\n\x1b[31m[panemux] tmux session %q exited: %v\x1b[0m\r\n",
 				tmuxSession, exitErr,
 			)
-			pw.Write([]byte(msg)) //nolint:errcheck -- pw may be closed if Close() was called first
+			pw.Write([]byte(msg)) //nolint:errcheck // pw may be closed if Close() was called first
 		}
 		pw.Close()
 	}()
