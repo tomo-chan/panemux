@@ -49,71 +49,78 @@ func ParseHosts(path string) ([]Host, error) {
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 
-		// Skip empty lines and comments
-		if line == "" || strings.HasPrefix(line, "#") {
+		key, val, ok := parseDirective(line)
+		if !ok {
 			continue
 		}
-
-		parts := strings.SplitN(line, " ", 2)
-		if len(parts) < 2 {
-			continue
-		}
-		key := strings.ToLower(strings.TrimSpace(parts[0]))
-		val := strings.TrimSpace(parts[1])
 
 		if key == "host" {
-			// Save previous host if non-wildcard
-			if current != nil {
-				if current.Hostname == "" {
-					current.Hostname = current.Name
-				}
-				hosts = append(hosts, *current)
-			}
-			// Start new host block, skip wildcards
-			if strings.ContainsAny(val, "*?") {
-				current = nil
-			} else {
-				current = &Host{Name: val}
-			}
+			hosts = appendHost(hosts, current)
+			current = newHostBlock(val)
 			continue
 		}
 
 		if current == nil {
 			continue
 		}
-
-		switch key {
-		case "hostname":
-			current.Hostname = val
-		case "user":
-			current.User = val
-		case "port":
-			p, err := strconv.Atoi(val)
-			if err == nil {
-				current.Port = p
-			}
-		case "identityfile":
-			current.IdentityFile = val
-		case "proxyjump":
-			current.ProxyJump = val
-		case "proxycommand":
-			current.ProxyCommand = val
-		}
+		applyHostDirective(current, key, val)
 	}
 
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("scan ssh config: %w", err)
 	}
 
-	// Save last block
-	if current != nil {
-		if current.Hostname == "" {
-			current.Hostname = current.Name
-		}
-		hosts = append(hosts, *current)
-	}
+	return appendHost(hosts, current), nil
+}
 
-	return hosts, nil
+func parseDirective(line string) (string, string, bool) {
+	if line == "" || strings.HasPrefix(line, "#") {
+		return "", "", false
+	}
+	parts := strings.SplitN(line, " ", 2)
+	if len(parts) < 2 {
+		return "", "", false
+	}
+	return strings.ToLower(strings.TrimSpace(parts[0])),
+		strings.TrimSpace(parts[1]),
+		true
+}
+
+func newHostBlock(name string) *Host {
+	if strings.ContainsAny(name, "*?") {
+		return nil
+	}
+	return &Host{Name: name}
+}
+
+func appendHost(hosts []Host, host *Host) []Host {
+	if host == nil {
+		return hosts
+	}
+	if host.Hostname == "" {
+		host.Hostname = host.Name
+	}
+	return append(hosts, *host)
+}
+
+func applyHostDirective(host *Host, key, val string) {
+	switch key {
+	case "hostname":
+		host.Hostname = val
+	case "user":
+		host.User = val
+	case "port":
+		p, err := strconv.Atoi(val)
+		if err == nil {
+			host.Port = p
+		}
+	case "identityfile":
+		host.IdentityFile = val
+	case "proxyjump":
+		host.ProxyJump = val
+	case "proxycommand":
+		host.ProxyCommand = val
+	}
 }
 
 // AppendHost appends a new Host block to the SSH config file at path.

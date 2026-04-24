@@ -19,7 +19,11 @@ func CreateFromConfig(pane *config.PaneConfig, sshConns map[string]config.SSHCon
 
 // createSession is the internal, testable version of CreateFromConfig that accepts
 // an explicit SSH config path instead of always using the default.
-func createSession(pane *config.PaneConfig, sshConns map[string]config.SSHConnection, sshConfigPath string) (Session, error) {
+func createSession(
+	pane *config.PaneConfig,
+	sshConns map[string]config.SSHConnection,
+	sshConfigPath string,
+) (Session, error) {
 	switch Type(pane.Type) {
 	case TypeLocal:
 		return NewLocal(pane.ID, pane.Shell, pane.Cwd, pane.Title)

@@ -100,7 +100,14 @@ func validateChildren(children []LayoutChild, sshConns map[string]SSHConnection)
 
 	for i, child := range children {
 		if child.Direction != "" && child.Direction != "horizontal" && child.Direction != "vertical" {
-			errs = append(errs, fmt.Sprintf("child[%d] invalid direction %q: must be horizontal or vertical", i, child.Direction))
+			errs = append(
+				errs,
+				fmt.Sprintf(
+					"child[%d] invalid direction %q: must be horizontal or vertical",
+					i,
+					child.Direction,
+				),
+			)
 		}
 		if child.Pane != nil {
 			errs = append(errs, validatePane(child.Pane, sshConns)...)
@@ -121,7 +128,14 @@ func validatePane(p *PaneConfig, sshConns map[string]SSHConnection) []string {
 	case "local", "ssh", "tmux", "ssh_tmux":
 		// valid
 	default:
-		errs = append(errs, fmt.Sprintf("pane %q has invalid type %q: must be local, ssh, tmux, or ssh_tmux", p.ID, p.Type))
+		errs = append(
+			errs,
+			fmt.Sprintf(
+				"pane %q has invalid type %q: must be local, ssh, tmux, or ssh_tmux",
+				p.ID,
+				p.Type,
+			),
+		)
 	}
 
 	if p.Type == "ssh" || p.Type == "ssh_tmux" {
@@ -142,7 +156,15 @@ func validatePane(p *PaneConfig, sshConns map[string]SSHConnection) []string {
 		if p.TmuxSession == "" {
 			errs = append(errs, fmt.Sprintf("pane %q: tmux_session must not be empty", p.ID))
 		} else if !tmuxSessionNameRe.MatchString(p.TmuxSession) {
-			errs = append(errs, fmt.Sprintf("pane %q: tmux_session %q contains invalid characters (allowed: a-z A-Z 0-9 - _ .)", p.ID, p.TmuxSession))
+			errs = append(
+				errs,
+				fmt.Sprintf(
+					"pane %q: tmux_session %q contains invalid characters "+
+						"(allowed: a-z A-Z 0-9 - _ .)",
+					p.ID,
+					p.TmuxSession,
+				),
+			)
 		}
 	}
 

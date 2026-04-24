@@ -45,9 +45,8 @@ func NewHandler(manager *session.Manager) *Handler {
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "sessionID")
 
-	sess, ok := h.manager.Get(sessionID)
-	if !ok {
-		http.Error(w, "session not found", http.StatusNotFound)
+	sess := h.sessionForRequest(w, sessionID)
+	if sess == nil {
 		return
 	}
 
@@ -58,62 +57,99 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close() //nolint:errcheck
 
-	// Send initial connected status
 	h.sendStatus(conn, "connected")
+	done := h.pipeTerminalToWebSocket(conn, sess, sessionID)
+	h.pipeWebSocketToTerminal(conn, sess, sessionID)
+	waitForTerminalPipe(done)
+}
 
-	// Monitor session state changes
+func (h *Handler) sessionForRequest(w http.ResponseWriter, sessionID string) session.Session {
+	sess, ok := h.manager.Get(sessionID)
+	if !ok {
+		http.Error(w, "session not found", http.StatusNotFound)
+		return nil
+	}
+	return sess
+}
+
+func (h *Handler) pipeTerminalToWebSocket(
+	conn *websocket.Conn,
+	sess session.Session,
+	sessionID string,
+) <-chan struct{} {
 	done := make(chan struct{})
-
-	// terminal → WebSocket (binary frames)
 	go func() {
 		defer close(done)
-		buf := make([]byte, 4096)
-		for {
-			n, err := sess.Read(buf)
-			if n > 0 {
-				if writeErr := conn.WriteMessage(websocket.BinaryMessage, buf[:n]); writeErr != nil {
-					return
-				}
-			}
-			if err != nil {
-				if err != io.EOF {
-					log.Printf("session %s read error: %v", sessionID, err)
-				}
-				h.sendStatus(conn, "exited")
+		h.forwardTerminalOutput(conn, sess, sessionID)
+	}()
+	return done
+}
+
+func (h *Handler) forwardTerminalOutput(
+	conn *websocket.Conn,
+	sess session.Session,
+	sessionID string,
+) {
+	buf := make([]byte, 4096)
+	for {
+		n, err := sess.Read(buf)
+		if n > 0 {
+			if writeErr := conn.WriteMessage(websocket.BinaryMessage, buf[:n]); writeErr != nil {
 				return
 			}
 		}
-	}()
+		if err != nil {
+			if err != io.EOF {
+				log.Printf("session %s read error: %v", sessionID, err)
+			}
+			h.sendStatus(conn, "exited")
+			return
+		}
+	}
+}
 
-	// WebSocket → terminal
+func (h *Handler) pipeWebSocketToTerminal(
+	conn *websocket.Conn,
+	sess session.Session,
+	sessionID string,
+) {
 	for {
 		msgType, data, err := conn.ReadMessage()
 		if err != nil {
-			break
+			return
 		}
-
-		switch msgType {
-		case websocket.BinaryMessage:
-			// Raw terminal input — discard silently if the session is already gone.
-			if sess.State() == session.StateExited {
-				continue
-			}
-			if _, err := sess.Write(data); err != nil {
-				log.Printf("session %s write error: %v", sessionID, err)
-			}
-
-		case websocket.TextMessage:
-			// JSON control message
-			var msg ControlMessage
-			if err := json.Unmarshal(data, &msg); err != nil {
-				log.Printf("invalid control message: %v", err)
-				continue
-			}
-			h.handleControl(conn, sess, msg)
-		}
+		h.handleWebSocketMessage(conn, sess, sessionID, msgType, data)
 	}
+}
 
-	// Wait for the terminal reader goroutine to finish
+func (h *Handler) handleWebSocketMessage(
+	conn *websocket.Conn,
+	sess session.Session,
+	sessionID string,
+	msgType int,
+	data []byte,
+) {
+	switch msgType {
+	case websocket.BinaryMessage:
+		// Discard silently if the session is already gone.
+		if sess.State() == session.StateExited {
+			return
+		}
+		if _, err := sess.Write(data); err != nil {
+			log.Printf("session %s write error: %v", sessionID, err)
+		}
+
+	case websocket.TextMessage:
+		var msg ControlMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			log.Printf("invalid control message: %v", err)
+			return
+		}
+		h.handleControl(conn, sess, msg)
+	}
+}
+
+func waitForTerminalPipe(done <-chan struct{}) {
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
