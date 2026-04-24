@@ -584,7 +584,10 @@ func TestGetSSHConnections_SSHConfigTakesPrecedenceOnConflict(t *testing.T) {
 }
 
 func TestGetSSHConfigHosts_ReturnsHosts(t *testing.T) {
-	sshConfigPath := writeTempSSHConfigForAPI(t, "Host myhost\n    HostName myhost.example.com\n    User ubuntu\n    Port 2222\n")
+	sshConfigPath := writeTempSSHConfigForAPI(
+		t,
+		"Host myhost\n    HostName myhost.example.com\n    User ubuntu\n    Port 2222\n",
+	)
 
 	h := NewHandler(defaultTestConfig(), session.NewManager())
 	h.sshConfigPath = sshConfigPath
@@ -709,7 +712,12 @@ func TestPostSSHConfigHost_PortOutOfRange_422(t *testing.T) {
 	h.sshConfigPath = filepath.Join(t.TempDir(), "config")
 	r := setupRouterWithHandler(h)
 
-	body, _ := json.Marshal(sshConfigHostRequest{Name: "myhost", Hostname: "myhost.example.com", User: "ubuntu", Port: 70000})
+	body, _ := json.Marshal(sshConfigHostRequest{
+		Name:     "myhost",
+		Hostname: "myhost.example.com",
+		User:     "ubuntu",
+		Port:     70000,
+	})
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/ssh-config/hosts", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")

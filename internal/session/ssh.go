@@ -28,6 +28,8 @@ import (
 // and control characters (newlines, null bytes, etc.).
 var validRemotePath = regexp.MustCompile(`^(/[^;|&$` + "`" + `'"<>()\[\]{}!\\\x00-\x1f\x7f]*)+$`)
 
+const invalidRemotePathMsg = "must be an absolute path with no shell metacharacters"
+
 // SSHSession manages an SSH connection with a PTY.
 type SSHSession struct {
 	mu      sync.RWMutex
@@ -239,90 +241,19 @@ func NewSSH(id, title string, cfg SSHConfig) (*SSHSession, error) {
 
 	sess, err := client.NewSession()
 	if err != nil {
-		client.Close()
-		if jumpClient != nil {
-			jumpClient.Close()
-		}
+		closeSSHResources(nil, client, jumpClient)
 		return nil, fmt.Errorf("new ssh session: %w", err)
 	}
 
-	// Request PTY
-	modes := ssh.TerminalModes{
-		ssh.ECHO:          1,
-		ssh.TTY_OP_ISPEED: 14400,
-		ssh.TTY_OP_OSPEED: 14400,
-	}
-	if err := sess.RequestPty("xterm-256color", 24, 80, modes); err != nil {
-		sess.Close()
-		client.Close()
-		if jumpClient != nil {
-			jumpClient.Close()
-		}
-		return nil, fmt.Errorf("request pty: %w", err)
-	}
-
-	stdin, err := sess.StdinPipe()
+	stdin, pr, pw, err := setupSSHPTY(sess)
 	if err != nil {
-		sess.Close()
-		client.Close()
-		if jumpClient != nil {
-			jumpClient.Close()
-		}
-		return nil, fmt.Errorf("stdin pipe: %w", err)
+		closeSSHResources(sess, client, jumpClient)
+		return nil, err
 	}
 
-	pr, pw := io.Pipe()
-	sess.Stdout = pw
-	sess.Stderr = pw
-
-	// Start the shell. If a working directory is configured, validate it with
-	// the regex guard (CodeQL go/command-injection recommended pattern for
-	// arguments) before embedding it in the remote shell command.
-	// sess.Shell() and sess.Start() are mutually exclusive in the SSH protocol.
-	var startErr error
-	if cfg.Shell != "" {
-		// Shell override: validate path before embedding in remote command.
-		if !validRemotePath.MatchString(cfg.Shell) {
-			sess.Close()
-			client.Close()
-			if jumpClient != nil {
-				jumpClient.Close()
-			}
-			return nil, fmt.Errorf("invalid shell %q: must be an absolute path with no shell metacharacters", cfg.Shell)
-		}
-		if cfg.Cwd != "" {
-			if !validRemotePath.MatchString(cfg.Cwd) {
-				sess.Close()
-				client.Close()
-				if jumpClient != nil {
-					jumpClient.Close()
-				}
-				return nil, fmt.Errorf("invalid working directory %q: must be an absolute path with no shell metacharacters", cfg.Cwd)
-			}
-			startErr = sess.Start(fmt.Sprintf("cd %s && exec %s", shellQuotePath(cfg.Cwd), shellQuotePath(cfg.Shell)))
-		} else {
-			startErr = sess.Start("exec " + shellQuotePath(cfg.Shell))
-		}
-	} else if cfg.Cwd != "" {
-		if !validRemotePath.MatchString(cfg.Cwd) {
-			sess.Close()
-			client.Close()
-			if jumpClient != nil {
-				jumpClient.Close()
-			}
-			return nil, fmt.Errorf("invalid working directory %q: must be an absolute path with no shell metacharacters", cfg.Cwd)
-		}
-		startErr = sess.Start(fmt.Sprintf("cd %s && exec $SHELL", shellQuotePath(cfg.Cwd)))
-	} else {
-		startErr = sess.Shell()
-	}
-	if startErr != nil {
-		sess.Close()
-		client.Close()
-		if jumpClient != nil {
-			jumpClient.Close()
-		}
-		return nil, fmt.Errorf("start shell: %w", startErr)
+	if err := startSSHShell(sess, cfg); err != nil {
+		closeSSHResources(sess, client, jumpClient)
+		return nil, err
 	}
 
 	s := &SSHSession{
@@ -337,16 +268,97 @@ func NewSSH(id, title string, cfg SSHConfig) (*SSHSession, error) {
 		jumpClient:     jumpClient,
 	}
 
-	// Monitor session exit
+	monitorSSHSession(sess, pw, func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.state = StateExited
+	})
+
+	return s, nil
+}
+
+func setupSSHPTY(sess *ssh.Session) (io.WriteCloser, *io.PipeReader, *io.PipeWriter, error) {
+	modes := ssh.TerminalModes{
+		ssh.ECHO:          1,
+		ssh.TTY_OP_ISPEED: 14400,
+		ssh.TTY_OP_OSPEED: 14400,
+	}
+	if err := sess.RequestPty("xterm-256color", 24, 80, modes); err != nil {
+		return nil, nil, nil, fmt.Errorf("request pty: %w", err)
+	}
+	stdin, err := sess.StdinPipe()
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("stdin pipe: %w", err)
+	}
+	pr, pw := io.Pipe()
+	sess.Stdout = pw
+	sess.Stderr = pw
+	return stdin, pr, pw, nil
+}
+
+func startSSHShell(sess *ssh.Session, cfg SSHConfig) error {
+	cmd, err := sshShellCommand(cfg)
+	if err != nil {
+		return err
+	}
+	if cmd == "" {
+		return sess.Shell()
+	}
+	if err := sess.Start(cmd); err != nil {
+		return fmt.Errorf("start shell: %w", err)
+	}
+	return nil
+}
+
+func sshShellCommand(cfg SSHConfig) (string, error) {
+	if cfg.Shell != "" {
+		if err := validateRemotePath("shell", cfg.Shell); err != nil {
+			return "", err
+		}
+		if cfg.Cwd == "" {
+			return "exec " + shellQuotePath(cfg.Shell), nil
+		}
+		if err := validateRemotePath("working directory", cfg.Cwd); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf(
+			"cd %s && exec %s",
+			shellQuotePath(cfg.Cwd),
+			shellQuotePath(cfg.Shell),
+		), nil
+	}
+	if cfg.Cwd == "" {
+		return "", nil
+	}
+	if err := validateRemotePath("working directory", cfg.Cwd); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("cd %s && exec $SHELL", shellQuotePath(cfg.Cwd)), nil
+}
+
+func validateRemotePath(label, path string) error {
+	if validRemotePath.MatchString(path) {
+		return nil
+	}
+	return fmt.Errorf("invalid %s %q: %s", label, path, invalidRemotePathMsg)
+}
+
+func closeSSHResources(sess *ssh.Session, client, jumpClient *ssh.Client) {
+	if sess != nil {
+		sess.Close()
+	}
+	client.Close()
+	if jumpClient != nil {
+		jumpClient.Close()
+	}
+}
+
+func monitorSSHSession(sess *ssh.Session, pw *io.PipeWriter, markExited func()) {
 	go func() {
 		sess.Wait()
 		pw.Close()
-		s.mu.Lock()
-		s.state = StateExited
-		s.mu.Unlock()
+		markExited()
 	}()
-
-	return s, nil
 }
 
 // DetectRemoteShell connects to the remote host via SSH and returns the value of $SHELL.

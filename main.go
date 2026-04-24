@@ -19,59 +19,75 @@ import (
 
 var version = "dev"
 
+type cliOptions struct {
+	configPath  string
+	openBrowser bool
+	port        int
+	showVersion bool
+}
+
 //go:embed frontend/dist
 var frontendFS embed.FS
 
 func main() {
-	var (
-		configPath  = flag.String("config", "", "Path to YAML config file")
-		openBrowser = flag.Bool("open", false, "Open Chrome automatically")
-		port        = flag.Int("port", 0, "Override server port")
-		showVersion = flag.Bool("version", false, "Print version and exit")
-	)
-	flag.Parse()
+	opts := parseOptions()
 
-	if *showVersion {
+	if opts.showVersion {
 		fmt.Println(version)
 		os.Exit(0)
 	}
 
-	// Load config
-	var cfg *config.Config
-	if *configPath != "" {
-		var err error
-		cfg, err = config.Load(*configPath)
-		if err != nil {
-			log.Fatalf("Failed to load config: %v", err)
-		}
-	} else {
-		var err error
-		cfg, err = config.LoadOrDefault()
-		if err != nil {
-			log.Fatalf("Failed to load config: %v", err)
-		}
+	cfg, err := loadConfig(opts)
+	if err != nil {
+		log.Fatalf("Failed to load config: %v", err)
 	}
 
-	if *port != 0 {
-		cfg.Server.Port = *port
-	}
-
-	// Create session manager and start all sessions defined in config
 	manager := session.NewManager()
 	if err := startSessionsFromConfig(cfg, manager); err != nil {
 		log.Fatalf("Failed to start sessions: %v", err)
 	}
 
-	// Start HTTP server
 	srv := server.New(cfg, manager, frontendFS)
 	addr := fmt.Sprintf("http://%s", srv.Addr())
 	log.Printf("Listening on %s", addr)
 
-	if *openBrowser {
+	if opts.openBrowser {
 		go openChrome(addr)
 	}
 
-	// Wait for interrupt signal
+	runServer(srv, manager)
+}
+
+func parseOptions() cliOptions {
+	var opts cliOptions
+	flag.StringVar(&opts.configPath, "config", "", "Path to YAML config file")
+	flag.BoolVar(&opts.openBrowser, "open", false, "Open Chrome automatically")
+	flag.IntVar(&opts.port, "port", 0, "Override server port")
+	flag.BoolVar(&opts.showVersion, "version", false, "Print version and exit")
+	flag.Parse()
+	return opts
+}
+
+func loadConfig(opts cliOptions) (*config.Config, error) {
+	var (
+		cfg *config.Config
+		err error
+	)
+	if opts.configPath != "" {
+		cfg, err = config.Load(opts.configPath)
+	} else {
+		cfg, err = config.LoadOrDefault()
+	}
+	if err != nil {
+		return nil, err
+	}
+	if opts.port != 0 {
+		cfg.Server.Port = opts.port
+	}
+	return cfg, nil
+}
+
+func runServer(srv *server.Server, manager *session.Manager) {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
@@ -87,7 +103,7 @@ func main() {
 		}
 	case <-sigCh:
 		log.Println("Shutting down...")
-		ctx, cancel := context.WithTimeout(context.Background(), 5000000000) // 5s
+		ctx, cancel := context.WithTimeout(context.Background(), 5_000_000_000)
 		defer cancel()
 		if err := srv.Shutdown(ctx); err != nil {
 			log.Printf("Shutdown error: %v", err)

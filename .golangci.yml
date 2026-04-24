@@ -9,6 +9,8 @@ linters:
     - errcheck
     - govet
     - ineffassign
+    - funlen
+    - lll
     - staticcheck
     - unused
   settings:

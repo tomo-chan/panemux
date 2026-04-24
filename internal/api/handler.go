@@ -368,52 +368,71 @@ func (h *Handler) PostOpenVSCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// For local sessions, verify the directory still exists in the filesystem.
-	// A shell can remain in a directory after it has been deleted (the inode is
-	// kept alive by the open CWD reference), and passing a deleted path to
-	// `code` causes VSCode to open files in an unsaved/detached state.
-	switch sess.Type() {
-	case session.TypeLocal, session.TypeTmux:
-		if _, err := os.Stat(cwd); err != nil {
-			writeValidationError(w, fmt.Sprintf("working directory no longer exists: %s", cwd))
-			return
-		}
+	if !h.validateVSCodeCWD(w, sess, cwd) {
+		return
 	}
 
 	codePath, err := h.findVSCode()
 	if err != nil {
-		http.Error(w, "VSCode (code) not found: install VSCode and run 'Install code command in PATH'", http.StatusInternalServerError)
+		http.Error(
+			w,
+			"VSCode (code) not found: install VSCode and run 'Install code command in PATH'",
+			http.StatusInternalServerError,
+		)
 		return
 	}
 
-	var args []string
-	switch sess.Type() {
-	case session.TypeSSH, session.TypeSSHTmux:
-		namer, ok := sess.(session.SSHConnNamer)
-		if !ok {
-			writeValidationError(w, "SSH session missing connection name")
-			return
-		}
-		connName := namer.ConnectionName()
-		if !validHostName.MatchString(connName) {
-			writeValidationError(w, "SSH connection name contains invalid characters")
-			return
-		}
-		args = []string{"--remote", "ssh-remote+" + connName, cwd}
-	default:
-		args = []string{cwd}
+	args, ok := vscodeArgs(w, sess, cwd)
+	if !ok {
+		return
 	}
 
-	// Launch VSCode asynchronously — we do not wait for it to exit.
 	cmd := exec.Command(codePath, args...) //nolint:gosec // codePath is from trusted lookup
 	if err := cmd.Start(); err != nil {
 		http.Error(w, fmt.Sprintf("failed to launch VSCode: %v", err), http.StatusInternalServerError)
 		return
 	}
-	// Detach: let VSCode run independently.
 	go cmd.Wait() //nolint:errcheck
 
 	writeJSON(w, openVSCodeResponse{Cwd: cwd})
+}
+
+func (h *Handler) validateVSCodeCWD(
+	w http.ResponseWriter,
+	sess session.Session,
+	cwd string,
+) bool {
+	switch sess.Type() {
+	case session.TypeLocal, session.TypeTmux:
+		if _, err := os.Stat(cwd); err != nil {
+			writeValidationError(w, fmt.Sprintf("working directory no longer exists: %s", cwd))
+			return false
+		}
+	}
+	return true
+}
+
+func vscodeArgs(
+	w http.ResponseWriter,
+	sess session.Session,
+	cwd string,
+) ([]string, bool) {
+	switch sess.Type() {
+	case session.TypeSSH, session.TypeSSHTmux:
+		namer, ok := sess.(session.SSHConnNamer)
+		if !ok {
+			writeValidationError(w, "SSH session missing connection name")
+			return nil, false
+		}
+		connName := namer.ConnectionName()
+		if !validHostName.MatchString(connName) {
+			writeValidationError(w, "SSH connection name contains invalid characters")
+			return nil, false
+		}
+		return []string{"--remote", "ssh-remote+" + connName, cwd}, true
+	default:
+		return []string{cwd}, true
+	}
 }
 
 // findVSCode returns the path to the VSCode CLI binary.
@@ -499,16 +518,26 @@ func (h *Handler) GetGitInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Determine the git repo top-level directory.
-	toplevelOut, err := exec.Command(gitPath, "-C", cwd, "rev-parse", "--show-toplevel").Output() //nolint:gosec // gitPath is from trusted lookup
+	toplevelOut, err := exec.Command( //nolint:gosec // gitPath is from trusted lookup
+		gitPath,
+		"-C",
+		cwd,
+		"rev-parse",
+		"--show-toplevel",
+	).Output()
 	if err != nil {
 		writeJSON(w, gitInfoResponse{IsGit: false})
 		return
 	}
 	repo := filepath.Base(strings.TrimSpace(string(toplevelOut)))
 
-	// Get the current branch name.
-	branchOut, err := exec.Command(gitPath, "-C", cwd, "branch", "--show-current").Output() //nolint:gosec // gitPath is from trusted lookup
+	branchOut, err := exec.Command( //nolint:gosec // gitPath is from trusted lookup
+		gitPath,
+		"-C",
+		cwd,
+		"branch",
+		"--show-current",
+	).Output()
 	if err != nil {
 		writeJSON(w, gitInfoResponse{IsGit: true, Repo: repo})
 		return

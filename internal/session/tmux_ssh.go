@@ -33,7 +33,10 @@ func NewTmuxSSH(id, title, tmuxSession string, cfg SSHConfig) (*TmuxSSHSession, 
 		tmuxSession = "0"
 	}
 	if !validTmuxSessionName.MatchString(tmuxSession) {
-		return nil, fmt.Errorf("invalid tmux session name %q: must match ^[a-zA-Z0-9_.-]+$", tmuxSession)
+		return nil, fmt.Errorf(
+			"invalid tmux session name %q: must match ^[a-zA-Z0-9_.-]+$",
+			tmuxSession,
+		)
 	}
 
 	client, jumpClient, err := dialSSHClient(cfg)
@@ -43,65 +46,24 @@ func NewTmuxSSH(id, title, tmuxSession string, cfg SSHConfig) (*TmuxSSHSession, 
 
 	sess, err := client.NewSession()
 	if err != nil {
-		client.Close()
-		if jumpClient != nil {
-			jumpClient.Close()
-		}
+		closeSSHResources(nil, client, jumpClient)
 		return nil, fmt.Errorf("new ssh session: %w", err)
 	}
 
-	modes := ssh.TerminalModes{
-		ssh.ECHO:          1,
-		ssh.TTY_OP_ISPEED: 14400,
-		ssh.TTY_OP_OSPEED: 14400,
-	}
-	if err := sess.RequestPty("xterm-256color", 24, 80, modes); err != nil {
-		sess.Close()
-		client.Close()
-		if jumpClient != nil {
-			jumpClient.Close()
-		}
-		return nil, fmt.Errorf("request pty: %w", err)
-	}
-
-	stdin, err := sess.StdinPipe()
+	stdin, pr, pw, err := setupSSHPTY(sess)
 	if err != nil {
-		sess.Close()
-		client.Close()
-		if jumpClient != nil {
-			jumpClient.Close()
-		}
-		return nil, fmt.Errorf("stdin pipe: %w", err)
+		closeSSHResources(sess, client, jumpClient)
+		return nil, err
 	}
 
-	pr, pw := io.Pipe()
-	sess.Stdout = pw
-	sess.Stderr = pw
-
-	// Attach to existing tmux session or create it if absent.
-	// -c sets the working directory for newly created sessions; it has no
-	// effect when attaching to an existing session.
-	// (tmuxSession is validated as [a-zA-Z0-9_.-]+ by config)
-	tmuxCmd := fmt.Sprintf("tmux new-session -As '%s'", tmuxSession)
-	if cfg.Cwd != "" {
-		// Validate cwd with the regex guard before embedding in the shell command
-		// (CodeQL go/command-injection recommended pattern for arguments).
-		if !validRemotePath.MatchString(cfg.Cwd) {
-			sess.Close()
-			client.Close()
-			if jumpClient != nil {
-				jumpClient.Close()
-			}
-			return nil, fmt.Errorf("invalid working directory %q: must be an absolute path with no shell metacharacters", cfg.Cwd)
-		}
-		tmuxCmd += fmt.Sprintf(" -c %s", shellQuotePath(cfg.Cwd))
+	tmuxCmd, err := tmuxSSHCommand(tmuxSession, cfg)
+	if err != nil {
+		closeSSHResources(sess, client, jumpClient)
+		return nil, err
 	}
+
 	if err := sess.Start(tmuxCmd); err != nil {
-		sess.Close()
-		client.Close()
-		if jumpClient != nil {
-			jumpClient.Close()
-		}
+		closeSSHResources(sess, client, jumpClient)
 		return nil, fmt.Errorf("starting tmux attach: %w", err)
 	}
 
@@ -118,15 +80,24 @@ func NewTmuxSSH(id, title, tmuxSession string, cfg SSHConfig) (*TmuxSSHSession, 
 		jumpClient:     jumpClient,
 	}
 
-	go func() {
-		sess.Wait()
-		pw.Close()
+	monitorSSHSession(sess, pw, func() {
 		s.mu.Lock()
+		defer s.mu.Unlock()
 		s.state = StateExited
-		s.mu.Unlock()
-	}()
+	})
 
 	return s, nil
+}
+
+func tmuxSSHCommand(tmuxSession string, cfg SSHConfig) (string, error) {
+	cmd := fmt.Sprintf("tmux new-session -As '%s'", tmuxSession)
+	if cfg.Cwd == "" {
+		return cmd, nil
+	}
+	if err := validateRemotePath("working directory", cfg.Cwd); err != nil {
+		return "", err
+	}
+	return cmd + fmt.Sprintf(" -c %s", shellQuotePath(cfg.Cwd)), nil
 }
 
 func (s *TmuxSSHSession) ID() string    { return s.id }
