@@ -89,6 +89,10 @@ func NewTmuxSSH(id, title, tmuxSession string, cfg SSHConfig) (*TmuxSSHSession, 
 	return s, nil
 }
 
+// tmuxSSHCommand builds the remote tmux command.
+// -As attaches to an existing session or creates one if absent.
+// -c sets the working directory for newly created sessions only; it has no
+// effect when attaching to an existing session.
 func tmuxSSHCommand(tmuxSession string, cfg SSHConfig) (string, error) {
 	cmd := fmt.Sprintf("tmux new-session -As '%s'", tmuxSession)
 	if cfg.Cwd == "" {

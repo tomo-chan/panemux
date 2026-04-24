@@ -310,6 +310,10 @@ func startSSHShell(sess *ssh.Session, cfg SSHConfig) error {
 	return nil
 }
 
+// sshShellCommand returns the remote command to pass to sess.Start, or "" to use
+// sess.Shell. Paths are validated with the regex guard (CodeQL go/command-injection
+// recommended pattern) before being embedded in the shell command.
+// sess.Shell() and sess.Start() are mutually exclusive in the SSH protocol.
 func sshShellCommand(cfg SSHConfig) (string, error) {
 	if cfg.Shell != "" {
 		if err := validateRemotePath("shell", cfg.Shell); err != nil {

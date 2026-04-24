@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"runtime"
 	"syscall"
+	"time"
 
 	"panemux/internal/config"
 	"panemux/internal/server"
@@ -103,7 +104,7 @@ func runServer(srv *server.Server, manager *session.Manager) {
 		}
 	case <-sigCh:
 		log.Println("Shutting down...")
-		ctx, cancel := context.WithTimeout(context.Background(), 5_000_000_000)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := srv.Shutdown(ctx); err != nil {
 			log.Printf("Shutdown error: %v", err)

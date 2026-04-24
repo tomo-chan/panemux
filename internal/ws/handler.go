@@ -131,6 +131,7 @@ func (h *Handler) handleWebSocketMessage(
 ) {
 	switch msgType {
 	case websocket.BinaryMessage:
+		// Discard silently if the session is already gone.
 		if sess.State() == session.StateExited {
 			return
 		}

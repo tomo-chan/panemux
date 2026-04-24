@@ -382,11 +382,13 @@ func (h *Handler) PostOpenVSCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	args, ok := vscodeArgs(w, sess, cwd)
-	if !ok {
+	args, err := vscodeArgs(sess, cwd)
+	if err != nil {
+		writeValidationError(w, err.Error())
 		return
 	}
 
+	// Launch VSCode detached — we do not wait for it to exit.
 	cmd := exec.Command(codePath, args...) //nolint:gosec // codePath is from trusted lookup
 	if err := cmd.Start(); err != nil {
 		http.Error(w, fmt.Sprintf("failed to launch VSCode: %v", err), http.StatusInternalServerError)
@@ -397,6 +399,10 @@ func (h *Handler) PostOpenVSCode(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, openVSCodeResponse{Cwd: cwd})
 }
 
+// validateVSCodeCWD checks that the CWD is still accessible for local/tmux sessions.
+// A shell can remain in a directory after it has been deleted (the inode is kept alive
+// by the open CWD reference); passing a deleted path to `code` causes VSCode to open
+// files in an unsaved/detached state.
 func (h *Handler) validateVSCodeCWD(
 	w http.ResponseWriter,
 	sess session.Session,
@@ -412,26 +418,20 @@ func (h *Handler) validateVSCodeCWD(
 	return true
 }
 
-func vscodeArgs(
-	w http.ResponseWriter,
-	sess session.Session,
-	cwd string,
-) ([]string, bool) {
+func vscodeArgs(sess session.Session, cwd string) ([]string, error) {
 	switch sess.Type() {
 	case session.TypeSSH, session.TypeSSHTmux:
 		namer, ok := sess.(session.SSHConnNamer)
 		if !ok {
-			writeValidationError(w, "SSH session missing connection name")
-			return nil, false
+			return nil, fmt.Errorf("SSH session missing connection name")
 		}
 		connName := namer.ConnectionName()
 		if !validHostName.MatchString(connName) {
-			writeValidationError(w, "SSH connection name contains invalid characters")
-			return nil, false
+			return nil, fmt.Errorf("SSH connection name contains invalid characters")
 		}
-		return []string{"--remote", "ssh-remote+" + connName, cwd}, true
+		return []string{"--remote", "ssh-remote+" + connName, cwd}, nil
 	default:
-		return []string{cwd}, true
+		return []string{cwd}, nil
 	}
 }
 
