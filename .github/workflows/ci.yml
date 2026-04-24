@@ -46,13 +46,6 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Set up golangci-lint
-        uses: golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20
-        with:
-          version: v2.11.4
-          install-mode: binary
-          args: --version
-
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
