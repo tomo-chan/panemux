@@ -133,7 +133,7 @@ func openChrome(url string) {
 	case "darwin":
 		cmd = exec.Command("open", "-a", "Google Chrome", url)
 	case "linux":
-		cmd = exec.Command("google-chrome", "--app="+url) //nolint:gosec // url is constructed from local server host and port
+		cmd = exec.Command("google-chrome", "--app="+url) //nolint:gosec // G204: URL is local server host/port
 	case "windows":
 		cmd = exec.Command("cmd", "/c", "start", "chrome", url)
 	default:

@@ -970,7 +970,7 @@ func initTempGitRepo(t *testing.T) string {
 		{"git", "-C", dir, "commit", "--allow-empty", "-m", "init"},
 	}
 	for _, args := range cmds {
-		out, err := exec.Command(args[0], args[1:]...).CombinedOutput() //nolint:gosec // trusted test args
+		out, err := exec.Command(args[0], args[1:]...).CombinedOutput() //nolint:gosec // G204: trusted test args
 		require.NoError(t, err, "git init step failed: %s", string(out))
 	}
 	return dir

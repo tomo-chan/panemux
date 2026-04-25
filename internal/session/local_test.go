@@ -128,7 +128,7 @@ func TestValidateShell_NotInEtcShells_Error(t *testing.T) {
 	// Create a real executable that is not listed in /etc/shells.
 	dir := t.TempDir()
 	fakePath := dir + "/fakeshell"
-	require.NoError(t, os.WriteFile(fakePath, []byte("#!/bin/sh\n"), 0755)) //nolint:gosec // executable fixture
+	require.NoError(t, os.WriteFile(fakePath, []byte("#!/bin/sh\n"), 0755)) //nolint:gosec // G306: executable fixture
 
 	_, err := validateShell(fakePath)
 	require.Error(t, err)

@@ -390,7 +390,7 @@ func (h *Handler) PostOpenVSCode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Launch VSCode detached — we do not wait for it to exit.
-	cmd := exec.Command(codePath, args...) //nolint:gosec // codePath is from trusted lookup
+	cmd := exec.Command(codePath, args...) //nolint:gosec // G204: codePath is from trusted lookup
 	if err := cmd.Start(); err != nil {
 		http.Error(w, fmt.Sprintf("failed to launch VSCode: %v", err), http.StatusInternalServerError)
 		return
@@ -411,7 +411,7 @@ func (h *Handler) validateVSCodeCWD(
 ) bool {
 	switch sess.Type() {
 	case session.TypeLocal, session.TypeTmux:
-		if _, err := os.Stat(cwd); err != nil { //nolint:gosec // cwd is reported by the local session process
+		if _, err := os.Stat(cwd); err != nil { //nolint:gosec // G703: cwd is from local session process
 			writeValidationError(w, "working directory no longer exists: "+cwd)
 			return false
 		}
@@ -519,7 +519,7 @@ func (h *Handler) GetGitInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	toplevelOut, err := exec.Command( //nolint:gosec // gitPath is from trusted lookup
+	toplevelOut, err := exec.Command( //nolint:gosec // G204: gitPath is from trusted lookup
 		gitPath,
 		"-C",
 		cwd,
@@ -532,7 +532,7 @@ func (h *Handler) GetGitInfo(w http.ResponseWriter, r *http.Request) {
 	}
 	repo := filepath.Base(strings.TrimSpace(string(toplevelOut)))
 
-	branchOut, err := exec.Command( //nolint:gosec // gitPath is from trusted lookup
+	branchOut, err := exec.Command( //nolint:gosec // G204: gitPath is from trusted lookup
 		gitPath,
 		"-C",
 		cwd,

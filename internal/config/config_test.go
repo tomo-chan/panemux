@@ -166,7 +166,7 @@ layout:
         type: local
 `
 	f := writeTempFile(t, content)
-	require.NoError(t, os.Chmod(f, 0644)) //nolint:gosec // legacy config permission under test
+	require.NoError(t, os.Chmod(f, 0644)) //nolint:gosec // G302: legacy config permission under test
 
 	_, err := Load(f)
 	require.NoError(t, err)
@@ -190,7 +190,7 @@ layout:
         type: local
 `
 	f := writeTempFile(t, content)
-	require.NoError(t, os.Chmod(f, 0644)) //nolint:gosec // legacy config permission under test
+	require.NoError(t, os.Chmod(f, 0644)) //nolint:gosec // G302: legacy config permission under test
 
 	oldChmod := chmodConfigFile
 	chmodConfigFile = func(string, os.FileMode) error {

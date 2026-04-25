@@ -90,7 +90,7 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 	if err := tightenConfigFilePermissions(path); err != nil {
-		//nolint:gosec // local filesystem warning
+		//nolint:gosec // G706: local filesystem warning
 		log.Printf("Warning: failed to tighten config file permissions to 0600: %v", err)
 	}
 
