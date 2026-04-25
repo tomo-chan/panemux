@@ -7,27 +7,55 @@ linters:
   default: standard
   enable:
     - errcheck
+    - errname
+    - goconst
     - govet
     - ineffassign
     - funlen
     - lll
+    - makezero
+    - misspell
+    - nilerr
+    - perfsprint
+    - revive
     - staticcheck
     - unused
+    - whitespace
+    - wrapcheck
   settings:
+    misspell:
+      locale: US
+    revive:
+      enable-default-rules: true
+      rules:
+        - name: exported
+          disabled: true
+        - name: package-comments
+          disabled: true
+        - name: unused-parameter
+          disabled: true
     staticcheck:
       checks: ["all"]
+    whitespace:
+      multi-if: true
   exclusions:
+    presets:
+      - common-false-positives
+      - legacy
+      - std-error-handling
     rules:
       # Session package manages OS processes and SSH connections; Close/Wait/Kill
       # errors in teardown paths are not actionable.
       - path: internal/session/
         linters:
           - errcheck
+          - wrapcheck
       # Test cleanup (defer conn.Close(), SetReadDeadline, ReadMessage) does not
       # require error handling — test failures surface through assertions.
       - path: _test\.go
         linters:
           - errcheck
+          - goconst
 
 formatters:
   enable:

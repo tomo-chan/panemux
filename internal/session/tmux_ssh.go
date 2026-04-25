@@ -101,7 +101,7 @@ func tmuxSSHCommand(tmuxSession string, cfg SSHConfig) (string, error) {
 	if err := validateRemotePath("working directory", cfg.Cwd); err != nil {
 		return "", err
 	}
-	return cmd + fmt.Sprintf(" -c %s", shellQuotePath(cfg.Cwd)), nil
+	return cmd + " -c " + shellQuotePath(cfg.Cwd), nil
 }
 
 func (s *TmuxSSHSession) ID() string    { return s.id }

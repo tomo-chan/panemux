@@ -172,7 +172,7 @@ func DefaultConfigPath() (string, error) {
 func LoadOrDefault() (*Config, error) {
 	path, err := DefaultConfigPath()
 	if err != nil {
-		return Default(), nil
+		return nil, fmt.Errorf("default config path: %w", err)
 	}
 	return loadOrDefaultAt(path)
 }
@@ -201,7 +201,10 @@ func (c *Config) SaveLayout(layout LayoutNode) error {
 	if err != nil {
 		return fmt.Errorf("marshaling config: %w", err)
 	}
-	return os.WriteFile(c.filePath, data, 0644)
+	if err := os.WriteFile(c.filePath, data, 0644); err != nil {
+		return fmt.Errorf("writing config: %w", err)
+	}
+	return nil
 }
 
 // UpdateLayout updates the in-memory layout without persisting to disk.

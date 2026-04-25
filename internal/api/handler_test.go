@@ -3,7 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -929,7 +929,7 @@ func TestGetDetectShell_Local_Success(t *testing.T) {
 	h.sshConfigPath = filepath.Join(os.TempDir(), "nonexistent")
 	h.detectLocalShellFn = func() (string, error) { return "/usr/bin/zsh", nil }
 	h.detectRemoteShellFn = func(cfg session.SSHConfig) (string, error) {
-		return "", fmt.Errorf("should not be called")
+		return "", errors.New("should not be called")
 	}
 	r := setupRouterWithHandler(h)
 
@@ -982,7 +982,7 @@ func TestGetDetectShell_SSH_ConnectionNotFound(t *testing.T) {
 
 func TestGetDetectShell_DetectFails(t *testing.T) {
 	h := NewHandler(defaultTestConfig(), session.NewManager())
-	h.detectLocalShellFn = func() (string, error) { return "", fmt.Errorf("cannot detect") }
+	h.detectLocalShellFn = func() (string, error) { return "", errors.New("cannot detect") }
 	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
@@ -992,7 +992,7 @@ func TestGetDetectShell_DetectFails(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
-// initTempGitRepo creates a temporary directory with an initialised git repo
+// initTempGitRepo creates a temporary directory with an initialized git repo
 // on a branch named "main" and returns the directory path.
 func initTempGitRepo(t *testing.T) string {
 	t.Helper()
