@@ -404,6 +404,23 @@ func TestSaveLayout_CreatesParentDirectory(t *testing.T) {
 	assert.NoError(t, statErr, "config file should have been created")
 }
 
+func TestSaveLayout_NewFilePreservesYAMLKeyOrder(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	cfg := Default()
+	cfg.filePath = path
+
+	require.NoError(t, cfg.SaveLayout(cfg.Layout))
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	content := string(data)
+	serverIndex := strings.Index(content, "server:")
+	layoutIndex := strings.Index(content, "layout:")
+	require.NotEqual(t, -1, serverIndex)
+	require.NotEqual(t, -1, layoutIndex)
+	assert.Less(t, serverIndex, layoutIndex)
+}
+
 func TestUpdateLayout_UpdatesMemoryOnly(t *testing.T) {
 	cfg := &Config{}
 	newLayout := LayoutNode{Direction: "horizontal", Children: []LayoutChild{{Size: 100}}}

@@ -54,17 +54,19 @@ type LayoutChild struct {
 	Size      float64       `yaml:"size"               json:"size"`
 }
 
-type Config struct {
+// Config field order controls YAML serialization order for newly written
+// config files, so it intentionally prioritizes user-facing output over
+// fieldalignment.
+type Config struct { //nolint:govet
+	Server         ServerConfig             `yaml:"server"`
 	SSHConnections map[string]SSHConnection `yaml:"ssh_connections,omitempty"`
+	Layout         LayoutNode               `yaml:"layout"`
+	Display        DisplayConfig            `yaml:"display,omitempty" json:"display"`
 
 	// internal: raw yaml node for comment-preserving writes
 	rawNode       *yaml.Node
 	filePath      string
 	sshConfigPath string // overridable for tests; empty = use sshconfig.DefaultPath()
-
-	Layout  LayoutNode    `yaml:"layout"`
-	Server  ServerConfig  `yaml:"server"`
-	Display DisplayConfig `yaml:"display,omitempty" json:"display"`
 }
 
 func Load(path string) (*Config, error) {
