@@ -52,7 +52,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("ws upgrade error for session %s: %v", sessionID, err) //nolint:gosec // config ID
+		//nolint:gosec // sessionID is a config-defined identifier
+		log.Printf("ws upgrade error for session %s: %v", sessionID, err)
 		return
 	}
 	defer conn.Close() //nolint:errcheck
