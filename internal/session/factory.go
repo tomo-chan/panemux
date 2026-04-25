@@ -94,7 +94,7 @@ func resolveSSHConfig(name string, sshConns map[string]config.SSHConnection, ssh
 					keyFile = filepath.Join(home, keyFile[2:])
 				} else if !filepath.IsAbs(keyFile) {
 					// Relative paths (e.g. ".ssh/id_ed25519") are relative to HOME,
-					// matching OpenSSH behaviour.
+					// matching OpenSSH behavior.
 					keyFile = filepath.Join(home, keyFile)
 				}
 			}

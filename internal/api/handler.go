@@ -3,6 +3,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -411,7 +412,7 @@ func (h *Handler) validateVSCodeCWD(
 	switch sess.Type() {
 	case session.TypeLocal, session.TypeTmux:
 		if _, err := os.Stat(cwd); err != nil {
-			writeValidationError(w, fmt.Sprintf("working directory no longer exists: %s", cwd))
+			writeValidationError(w, "working directory no longer exists: "+cwd)
 			return false
 		}
 	}
@@ -423,11 +424,11 @@ func vscodeArgs(sess session.Session, cwd string) ([]string, error) {
 	case session.TypeSSH, session.TypeSSHTmux:
 		namer, ok := sess.(session.SSHConnNamer)
 		if !ok {
-			return nil, fmt.Errorf("SSH session missing connection name")
+			return nil, errors.New("SSH session missing connection name")
 		}
 		connName := namer.ConnectionName()
 		if !validHostName.MatchString(connName) {
-			return nil, fmt.Errorf("SSH connection name contains invalid characters")
+			return nil, errors.New("SSH connection name contains invalid characters")
 		}
 		return []string{"--remote", "ssh-remote+" + connName, cwd}, nil
 	default:
@@ -450,7 +451,7 @@ func (h *Handler) findVSCode() (string, error) {
 			return p, nil
 		}
 	}
-	return "", fmt.Errorf("code binary not found")
+	return "", errors.New("code binary not found")
 }
 
 type detectShellResponse struct {
@@ -552,7 +553,11 @@ func (h *Handler) findGit() (string, error) {
 	if h.gitBinaryPath != "" {
 		return h.gitBinaryPath, nil
 	}
-	return exec.LookPath("git")
+	path, err := exec.LookPath("git")
+	if err != nil {
+		return "", fmt.Errorf("finding git binary: %w", err)
+	}
+	return path, nil
 }
 
 func writeValidationError(w http.ResponseWriter, msg string) {

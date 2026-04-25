@@ -49,7 +49,7 @@ func main() {
 	}
 
 	srv := server.New(cfg, manager, frontendFS)
-	addr := fmt.Sprintf("http://%s", srv.Addr())
+	addr := "http://" + srv.Addr()
 	log.Printf("Listening on %s", addr)
 
 	if opts.openBrowser {
@@ -80,7 +80,7 @@ func loadConfig(opts cliOptions) (*config.Config, error) {
 		cfg, err = config.LoadOrDefault()
 	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("loading config: %w", err)
 	}
 	if opts.port != 0 {
 		cfg.Server.Port = opts.port

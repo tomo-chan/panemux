@@ -6,6 +6,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha1"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -13,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -96,7 +98,7 @@ func dialSSHClient(cfg SSHConfig) (*ssh.Client, *ssh.Client, error) {
 	if port == 0 {
 		port = 22
 	}
-	addr := net.JoinHostPort(cfg.Host, fmt.Sprintf("%d", port))
+	addr := net.JoinHostPort(cfg.Host, strconv.Itoa(port))
 
 	sshCfg := &ssh.ClientConfig{
 		User:              cfg.User,
@@ -162,7 +164,7 @@ func dialThroughJump(jumpCfg SSHConfig, targetAddr string) (net.Conn, *ssh.Clien
 }
 
 // proxyCommandConn wraps an exec.Cmd's stdin/stdout as a net.Conn, mirroring
-// OpenSSH's ProxyCommand behaviour where a subprocess acts as a transparent
+// OpenSSH's ProxyCommand behavior where a subprocess acts as a transparent
 // bidirectional pipe to the remote host.
 type proxyCommandConn struct {
 	cmd    *exec.Cmd
@@ -199,7 +201,7 @@ func substituteProxyCommand(cmd, host string, port int) string {
 	// Temporarily replace %% to avoid double-substitution
 	result := strings.ReplaceAll(cmd, "%%", "\x00")
 	result = strings.ReplaceAll(result, "%h", host)
-	result = strings.ReplaceAll(result, "%p", fmt.Sprintf("%d", port))
+	result = strings.ReplaceAll(result, "%p", strconv.Itoa(port))
 	return strings.ReplaceAll(result, "\x00", "%")
 }
 
@@ -209,7 +211,7 @@ func substituteProxyCommand(cmd, host string, port int) string {
 func dialViaProxyCommand(proxyCmd, host string, port int) (net.Conn, error) {
 	cmd := substituteProxyCommand(proxyCmd, host, port)
 	// Pass to /bin/sh -c so the command is interpreted by a shell, matching
-	// OpenSSH behaviour. /bin/sh is a hardcoded trusted binary.
+	// OpenSSH behavior. /bin/sh is a hardcoded trusted binary.
 	c := exec.Command("/bin/sh", "-c", cmd) //nolint:gosec // cmd is from trusted ~/.ssh/config
 	c.Stderr = os.Stderr
 
@@ -228,7 +230,7 @@ func dialViaProxyCommand(proxyCmd, host string, port int) (net.Conn, error) {
 		cmd:    c,
 		stdin:  stdin,
 		stdout: stdout,
-		raddr:  proxyAddr(net.JoinHostPort(host, fmt.Sprintf("%d", port))),
+		raddr:  proxyAddr(net.JoinHostPort(host, strconv.Itoa(port))),
 	}, nil
 }
 
@@ -389,7 +391,7 @@ func DetectRemoteShell(cfg SSHConfig) (string, error) {
 
 	shell := strings.TrimSpace(string(out))
 	if shell == "" {
-		return "", fmt.Errorf("remote $SHELL is not set")
+		return "", errors.New("remote $SHELL is not set")
 	}
 	return shell, nil
 }
@@ -498,7 +500,7 @@ func buildAuthMethods(cfg SSHConfig) ([]ssh.AuthMethod, error) {
 		methods = append(methods, ssh.Password(cfg.Password))
 	}
 
-	// If no explicit auth method, try common default key files (mirrors OpenSSH behaviour).
+	// If no explicit auth method, try common default key files (mirrors OpenSSH behavior).
 	if len(methods) == 0 {
 		home, _ := os.UserHomeDir()
 		for _, name := range []string{"id_ed25519", "id_rsa", "id_ecdsa"} {
@@ -516,7 +518,7 @@ func buildAuthMethods(cfg SSHConfig) ([]ssh.AuthMethod, error) {
 	}
 
 	if len(methods) == 0 {
-		return nil, fmt.Errorf("no auth methods configured for SSH connection")
+		return nil, errors.New("no auth methods configured for SSH connection")
 	}
 
 	return methods, nil
@@ -574,7 +576,7 @@ func (s *SSHSession) ConnectionName() string { return s.connectionName }
 //     the interactive shell (started before any exec-channel children).
 //  3. We read the CWD of that PID via /proc (Linux) or lsof (macOS).
 //  4. If neither technique is available, we fall back to `pwd` (home dir),
-//     which is the previous behaviour.
+//     which is the previous behavior.
 const sshGetCWDCmd = `PID=$(pgrep -P $PPID -o 2>/dev/null) && [ -n "$PID" ] && ` +
 	`{ readlink /proc/$PID/cwd 2>/dev/null || ` +
 	`lsof -a -p $PID -d cwd -Fn 2>/dev/null | awk '/^n/{print substr($0,2)}'; } || ` +

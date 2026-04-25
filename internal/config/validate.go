@@ -11,6 +11,8 @@ import (
 
 var tmuxSessionNameRe = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`)
 
+const paneTypeSSHTmux = "ssh_tmux"
+
 // Validate checks the configuration for correctness.
 // It collects all errors and returns them as a single combined error.
 func (c *Config) Validate() error {
@@ -125,7 +127,7 @@ func validatePane(p *PaneConfig, sshConns map[string]SSHConnection) []string {
 	}
 
 	switch p.Type {
-	case "local", "ssh", "tmux", "ssh_tmux":
+	case "local", "ssh", "tmux", paneTypeSSHTmux:
 		// valid
 	default:
 		errs = append(
@@ -138,7 +140,7 @@ func validatePane(p *PaneConfig, sshConns map[string]SSHConnection) []string {
 		)
 	}
 
-	if p.Type == "ssh" || p.Type == "ssh_tmux" {
+	if p.Type == "ssh" || p.Type == paneTypeSSHTmux {
 		if p.Connection == "" {
 			errs = append(errs, fmt.Sprintf("pane %q: ssh connection name must not be empty", p.ID))
 		} else if sshConns != nil {
@@ -152,7 +154,7 @@ func validatePane(p *PaneConfig, sshConns map[string]SSHConnection) []string {
 		errs = append(errs, fmt.Sprintf("pane %q: shell must be an absolute path, got %q", p.ID, p.Shell))
 	}
 
-	if p.Type == "tmux" || p.Type == "ssh_tmux" {
+	if p.Type == "tmux" || p.Type == paneTypeSSHTmux {
 		if p.TmuxSession == "" {
 			errs = append(errs, fmt.Sprintf("pane %q: tmux_session must not be empty", p.ID))
 		} else if !tmuxSessionNameRe.MatchString(p.TmuxSession) {

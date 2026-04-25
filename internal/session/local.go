@@ -1,6 +1,7 @@
 package session
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -117,7 +118,7 @@ func (s *LocalSession) Close() error {
 // On Linux it reads /proc/<pid>/cwd; on macOS it runs lsof.
 func (s *LocalSession) GetCWD() (string, error) {
 	if s.pid == 0 {
-		return "", fmt.Errorf("session has no PID")
+		return "", errors.New("session has no PID")
 	}
 	switch runtime.GOOS {
 	case "linux":
@@ -141,7 +142,7 @@ func (s *LocalSession) GetCWD() (string, error) {
 				return strings.TrimSpace(p), nil
 			}
 		}
-		return "", fmt.Errorf("cwd not found in lsof output")
+		return "", errors.New("cwd not found in lsof output")
 	default:
 		return "", fmt.Errorf("GetCWD not supported on %s", runtime.GOOS)
 	}

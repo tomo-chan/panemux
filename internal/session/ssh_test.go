@@ -53,7 +53,7 @@ func TestBuildAuthMethods_NoKeyNoPassword_NoDefaultKeys_Error(t *testing.T) {
 
 // TestBuildAuthMethods_NoKeyNoPassword_DefaultKeyFound verifies that when no
 // explicit KeyFile is set but a default key exists at ~/.ssh/id_ed25519,
-// it is used automatically (mirrors OpenSSH behaviour).
+// it is used automatically (mirrors OpenSSH behavior).
 // This tests the fix for the case where ~/.ssh/config entries omit IdentityFile.
 func TestBuildAuthMethods_NoKeyNoPassword_DefaultKeyFound(t *testing.T) {
 	home := t.TempDir()

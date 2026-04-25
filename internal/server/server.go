@@ -4,6 +4,7 @@ package server
 import (
 	"context"
 	"embed"
+	"errors"
 	"fmt"
 	"io/fs"
 	"net/http"
@@ -93,12 +94,21 @@ func (s *Server) Addr() string {
 
 // Start begins listening and serving.
 func (s *Server) Start() error {
-	return s.httpSrv.ListenAndServe()
+	if err := s.httpSrv.ListenAndServe(); err != nil {
+		if errors.Is(err, http.ErrServerClosed) {
+			return http.ErrServerClosed
+		}
+		return fmt.Errorf("starting HTTP server: %w", err)
+	}
+	return nil
 }
 
 // Shutdown gracefully stops the server.
 func (s *Server) Shutdown(ctx context.Context) error {
-	return s.httpSrv.Shutdown(ctx)
+	if err := s.httpSrv.Shutdown(ctx); err != nil {
+		return fmt.Errorf("shutting down HTTP server: %w", err)
+	}
+	return nil
 }
 
 func corsMiddleware(next http.Handler) http.Handler {

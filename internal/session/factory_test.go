@@ -1,9 +1,9 @@
 package session
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -158,7 +158,7 @@ func writeTempSSHConfig(t *testing.T, name, hostname, user string, port int) str
 }
 
 func itoa(i int) string {
-	return fmt.Sprintf("%d", i)
+	return strconv.Itoa(i)
 }
 
 // TestResolveSSHConfig_FromSSHConfigMap verifies that resolveSSHConfig returns
