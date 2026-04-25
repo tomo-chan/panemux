@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/hmac"
-	"crypto/sha1"
+	"crypto/sha1" //nolint:gosec // G505: OpenSSH hashed known_hosts entries use HMAC-SHA1
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -212,7 +212,7 @@ func dialViaProxyCommand(proxyCmd, host string, port int) (net.Conn, error) {
 	cmd := substituteProxyCommand(proxyCmd, host, port)
 	// Pass to /bin/sh -c so the command is interpreted by a shell, matching
 	// OpenSSH behavior. /bin/sh is a hardcoded trusted binary.
-	c := exec.Command("/bin/sh", "-c", cmd) //nolint:gosec // cmd is from trusted ~/.ssh/config
+	c := exec.Command("/bin/sh", "-c", cmd) //nolint:gosec // G204: ProxyCommand is trusted SSH config
 	c.Stderr = os.Stderr
 
 	stdin, err := c.StdinPipe()

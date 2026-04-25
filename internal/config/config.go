@@ -3,12 +3,17 @@ package config
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 )
+
+const configFileMode os.FileMode = 0600
+
+var chmodConfigFile = os.Chmod
 
 type ServerConfig struct {
 	Host string `yaml:"host"`
@@ -83,6 +88,10 @@ func Load(path string) (*Config, error) {
 
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
+	}
+	if err := tightenConfigFilePermissions(path); err != nil {
+		//nolint:gosec // G706: local filesystem warning
+		log.Printf("Warning: failed to tighten config file permissions to 0600: %v", err)
 	}
 
 	return &cfg, nil
@@ -202,8 +211,22 @@ func (c *Config) SaveLayout(layout LayoutNode) error {
 	if err != nil {
 		return fmt.Errorf("marshaling config: %w", err)
 	}
-	if err := os.WriteFile(c.filePath, data, 0644); err != nil {
+	if err := os.WriteFile(c.filePath, data, configFileMode); err != nil {
 		return fmt.Errorf("writing config: %w", err)
+	}
+	return nil
+}
+
+func tightenConfigFilePermissions(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("checking config permissions: %w", err)
+	}
+	if info.Mode().Perm() == configFileMode {
+		return nil
+	}
+	if err := chmodConfigFile(path, configFileMode); err != nil {
+		return fmt.Errorf("tightening config permissions: %w", err)
 	}
 	return nil
 }

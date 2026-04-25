@@ -1,6 +1,9 @@
 package config
 
 import (
+	"bytes"
+	"errors"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -147,6 +150,63 @@ layout:
 	require.NoError(t, err)
 	assert.Equal(t, 8080, cfg.Server.Port)
 	assert.Equal(t, "horizontal", cfg.Layout.Direction)
+}
+
+func TestLoad_TightensExistingFilePermissions(t *testing.T) {
+	content := `
+server:
+  port: 8080
+  host: "127.0.0.1"
+layout:
+  direction: horizontal
+  children:
+    - size: 100
+      pane:
+        id: main
+        type: local
+`
+	f := writeTempFile(t, content)
+	require.NoError(t, os.Chmod(f, 0644)) //nolint:gosec // G302: legacy config permission under test
+
+	_, err := Load(f)
+	require.NoError(t, err)
+
+	info, err := os.Stat(f)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0600), info.Mode().Perm())
+}
+
+func TestLoad_ChmodFailureWarnsAndContinues(t *testing.T) {
+	content := `
+server:
+  port: 8080
+  host: "127.0.0.1"
+layout:
+  direction: horizontal
+  children:
+    - size: 100
+      pane:
+        id: main
+        type: local
+`
+	f := writeTempFile(t, content)
+	require.NoError(t, os.Chmod(f, 0644)) //nolint:gosec // G302: legacy config permission under test
+
+	oldChmod := chmodConfigFile
+	chmodConfigFile = func(string, os.FileMode) error {
+		return errors.New("read-only filesystem")
+	}
+	t.Cleanup(func() { chmodConfigFile = oldChmod })
+
+	var logs bytes.Buffer
+	oldOutput := log.Writer()
+	log.SetOutput(&logs)
+	t.Cleanup(func() { log.SetOutput(oldOutput) })
+
+	cfg, err := Load(f)
+	require.NoError(t, err)
+	assert.Equal(t, 8080, cfg.Server.Port)
+	assert.Contains(t, logs.String(), "Warning: failed to tighten config file permissions")
 }
 
 func TestLoad_InvalidYAML(t *testing.T) {
@@ -400,8 +460,9 @@ func TestSaveLayout_CreatesParentDirectory(t *testing.T) {
 	cfg.filePath = path
 	err := cfg.SaveLayout(cfg.Layout)
 	require.NoError(t, err)
-	_, statErr := os.Stat(path)
-	assert.NoError(t, statErr, "config file should have been created")
+	info, statErr := os.Stat(path)
+	require.NoError(t, statErr, "config file should have been created")
+	assert.Equal(t, os.FileMode(0600), info.Mode().Perm())
 }
 
 func TestSaveLayout_NewFilePreservesYAMLKeyOrder(t *testing.T) {
@@ -469,6 +530,6 @@ func writeTempFile(t *testing.T, content string) string {
 	t.Helper()
 	dir := t.TempDir()
 	f := filepath.Join(dir, "config.yaml")
-	require.NoError(t, os.WriteFile(f, []byte(content), 0644))
+	require.NoError(t, os.WriteFile(f, []byte(content), 0600))
 	return f
 }

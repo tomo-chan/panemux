@@ -126,7 +126,15 @@ func (s *LocalSession) GetCWD() (string, error) {
 	case "darwin":
 		// -a ANDs the -p and -d conditions; without -a they are OR'd, which
 		// causes -d cwd to dump the cwd of every process on the system.
-		out, err := exec.Command("lsof", "-a", "-p", strconv.Itoa(s.pid), "-d", "cwd", "-Fn").Output()
+		out, err := exec.Command( //nolint:gosec // G204: lsof is trusted and pid is an internal process ID
+			"lsof",
+			"-a",
+			"-p",
+			strconv.Itoa(s.pid),
+			"-d",
+			"cwd",
+			"-Fn",
+		).Output()
 		if err != nil {
 			return "", fmt.Errorf("lsof: %w", err)
 		}
@@ -193,7 +201,13 @@ func DetectLocalShell() (string, error) {
 	}
 	// /etc/passwd lookup failed (expected on macOS) — try dscl.
 	return detectLocalShellDscl(currentUser.Username, func(username string) ([]byte, error) {
-		return exec.Command("/usr/bin/dscl", ".", "-read", "/Users/"+username, "UserShell").Output()
+		return exec.Command( //nolint:gosec // G204: username comes from os/user.Current for the local account
+			"/usr/bin/dscl",
+			".",
+			"-read",
+			"/Users/"+username,
+			"UserShell",
+		).Output()
 	})
 }
 
