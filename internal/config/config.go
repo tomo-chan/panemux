@@ -10,6 +10,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const configFileMode os.FileMode = 0600
+
 type ServerConfig struct {
 	Host string `yaml:"host"`
 	Port int    `yaml:"port"`
@@ -83,6 +85,9 @@ func Load(path string) (*Config, error) {
 
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
+	}
+	if err := tightenConfigFilePermissions(path); err != nil {
+		return nil, err
 	}
 
 	return &cfg, nil
@@ -202,8 +207,22 @@ func (c *Config) SaveLayout(layout LayoutNode) error {
 	if err != nil {
 		return fmt.Errorf("marshaling config: %w", err)
 	}
-	if err := os.WriteFile(c.filePath, data, 0600); err != nil {
+	if err := os.WriteFile(c.filePath, data, configFileMode); err != nil {
 		return fmt.Errorf("writing config: %w", err)
+	}
+	return nil
+}
+
+func tightenConfigFilePermissions(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("checking config permissions: %w", err)
+	}
+	if info.Mode().Perm() == configFileMode {
+		return nil
+	}
+	if err := os.Chmod(path, configFileMode); err != nil {
+		return fmt.Errorf("tightening config permissions: %w", err)
 	}
 	return nil
 }

@@ -149,6 +149,30 @@ layout:
 	assert.Equal(t, "horizontal", cfg.Layout.Direction)
 }
 
+func TestLoad_TightensExistingFilePermissions(t *testing.T) {
+	content := `
+server:
+  port: 8080
+  host: "127.0.0.1"
+layout:
+  direction: horizontal
+  children:
+    - size: 100
+      pane:
+        id: main
+        type: local
+`
+	f := writeTempFile(t, content)
+	require.NoError(t, os.Chmod(f, 0644)) //nolint:gosec // legacy config permission under test
+
+	_, err := Load(f)
+	require.NoError(t, err)
+
+	info, err := os.Stat(f)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0600), info.Mode().Perm())
+}
+
 func TestLoad_InvalidYAML(t *testing.T) {
 	f := writeTempFile(t, "::invalid yaml::")
 	_, err := Load(f)
