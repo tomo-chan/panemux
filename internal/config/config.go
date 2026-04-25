@@ -63,8 +63,6 @@ type Config struct { //nolint:govet
 	Layout         LayoutNode               `yaml:"layout"`
 	Display        DisplayConfig            `yaml:"display,omitempty" json:"display"`
 
-	// internal: raw yaml node for comment-preserving writes
-	rawNode       *yaml.Node
 	filePath      string
 	sshConfigPath string // overridable for tests; empty = use sshconfig.DefaultPath()
 }
@@ -75,17 +73,11 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("reading config: %w", err)
 	}
 
-	var rawNode yaml.Node
-	if err := yaml.Unmarshal(data, &rawNode); err != nil {
+	var cfg Config
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parsing config: %w", err)
 	}
 
-	var cfg Config
-	if err := rawNode.Decode(&cfg); err != nil {
-		return nil, fmt.Errorf("decoding config: %w", err)
-	}
-
-	cfg.rawNode = &rawNode
 	cfg.filePath = path
 	cfg.expandPaths()
 
@@ -195,7 +187,7 @@ func loadOrDefaultAt(path string) (*Config, error) {
 	return Load(path)
 }
 
-// SaveLayout updates the layout section and writes back to file, preserving comments.
+// SaveLayout updates the layout section and writes the config file.
 func (c *Config) SaveLayout(layout LayoutNode) error {
 	c.Layout = layout
 	if c.filePath == "" {
