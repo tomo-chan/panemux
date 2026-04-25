@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.10.0](https://github.com/tomo-chan/panemux/compare/v0.9.0...v0.10.0) (2026-04-25)
+
+
+### Features
+
+* add golangci-lint v2 to lint pipeline and CI ([#58](https://github.com/tomo-chan/panemux/issues/58)) ([7082159](https://github.com/tomo-chan/panemux/commit/708215972cc8278476c880cad6af4e9d172e3886))
+
+
+### Bug Fixes
+
+* tighten config permissions with gosec lint ([#67](https://github.com/tomo-chan/panemux/issues/67)) ([40c54b5](https://github.com/tomo-chan/panemux/commit/40c54b510f77c623bf5baabcfc87b8c9de76a92e))
+
 ## [0.9.0](https://github.com/tomo-chan/panemux/compare/v0.8.0...v0.9.0) (2026-04-01)
 
 
