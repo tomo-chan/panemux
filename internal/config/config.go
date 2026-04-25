@@ -202,7 +202,7 @@ func (c *Config) SaveLayout(layout LayoutNode) error {
 	if err != nil {
 		return fmt.Errorf("marshaling config: %w", err)
 	}
-	if err := os.WriteFile(c.filePath, data, 0644); err != nil {
+	if err := os.WriteFile(c.filePath, data, 0600); err != nil {
 		return fmt.Errorf("writing config: %w", err)
 	}
 	return nil

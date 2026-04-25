@@ -52,7 +52,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("ws upgrade error for session %s: %v", sessionID, err)
+		log.Printf("ws upgrade error for session %s: %v", sessionID, err) //nolint:gosec // config ID
 		return
 	}
 	defer conn.Close() //nolint:errcheck
@@ -100,7 +100,7 @@ func (h *Handler) forwardTerminalOutput(
 		}
 		if err != nil {
 			if err != io.EOF {
-				log.Printf("session %s read error: %v", sessionID, err)
+				log.Printf("session %s read error: %v", sessionID, err) //nolint:gosec // sessionID is a config-defined identifier
 			}
 			h.sendStatus(conn, "exited")
 			return
@@ -136,7 +136,7 @@ func (h *Handler) handleWebSocketMessage(
 			return
 		}
 		if _, err := sess.Write(data); err != nil {
-			log.Printf("session %s write error: %v", sessionID, err)
+			log.Printf("session %s write error: %v", sessionID, err) //nolint:gosec // sessionID is a config-defined identifier
 		}
 
 	case websocket.TextMessage:

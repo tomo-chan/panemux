@@ -400,8 +400,9 @@ func TestSaveLayout_CreatesParentDirectory(t *testing.T) {
 	cfg.filePath = path
 	err := cfg.SaveLayout(cfg.Layout)
 	require.NoError(t, err)
-	_, statErr := os.Stat(path)
-	assert.NoError(t, statErr, "config file should have been created")
+	info, statErr := os.Stat(path)
+	require.NoError(t, statErr, "config file should have been created")
+	assert.Equal(t, os.FileMode(0600), info.Mode().Perm())
 }
 
 func TestSaveLayout_NewFilePreservesYAMLKeyOrder(t *testing.T) {
@@ -469,6 +470,6 @@ func writeTempFile(t *testing.T, content string) string {
 	t.Helper()
 	dir := t.TempDir()
 	f := filepath.Join(dir, "config.yaml")
-	require.NoError(t, os.WriteFile(f, []byte(content), 0644))
+	require.NoError(t, os.WriteFile(f, []byte(content), 0600))
 	return f
 }

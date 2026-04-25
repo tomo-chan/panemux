@@ -128,7 +128,7 @@ func TestValidateShell_NotInEtcShells_Error(t *testing.T) {
 	// Create a real executable that is not listed in /etc/shells.
 	dir := t.TempDir()
 	fakePath := dir + "/fakeshell"
-	require.NoError(t, os.WriteFile(fakePath, []byte("#!/bin/sh\n"), 0755))
+	require.NoError(t, os.WriteFile(fakePath, []byte("#!/bin/sh\n"), 0755)) //nolint:gosec // executable fixture
 
 	_, err := validateShell(fakePath)
 	require.Error(t, err)
@@ -160,7 +160,7 @@ func TestDetectLocalShellFrom_MatchesCurrentUID(t *testing.T) {
 	}
 	content += currentUser.Username + ":x:" + currentUser.Uid + ":1000::/home/user:/usr/bin/bash\n"
 	tmpFile := filepath.Join(t.TempDir(), "passwd")
-	require.NoError(t, os.WriteFile(tmpFile, []byte(content), 0644))
+	require.NoError(t, os.WriteFile(tmpFile, []byte(content), 0600))
 
 	shell, err := detectLocalShellFrom(tmpFile)
 	require.NoError(t, err)
@@ -170,7 +170,7 @@ func TestDetectLocalShellFrom_MatchesCurrentUID(t *testing.T) {
 func TestDetectLocalShellFrom_UserNotFound_Error(t *testing.T) {
 	content := "nobody:x:99999:99999::/nonexistent:/bin/false\n"
 	tmpFile := filepath.Join(t.TempDir(), "passwd")
-	require.NoError(t, os.WriteFile(tmpFile, []byte(content), 0644))
+	require.NoError(t, os.WriteFile(tmpFile, []byte(content), 0600))
 
 	_, err := detectLocalShellFrom(tmpFile)
 	require.Error(t, err)

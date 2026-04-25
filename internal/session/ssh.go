@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/hmac"
-	"crypto/sha1"
+	"crypto/sha1" //nolint:gosec // OpenSSH hashed known_hosts entries use HMAC-SHA1
 	"encoding/base64"
 	"errors"
 	"fmt"

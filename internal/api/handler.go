@@ -411,7 +411,7 @@ func (h *Handler) validateVSCodeCWD(
 ) bool {
 	switch sess.Type() {
 	case session.TypeLocal, session.TypeTmux:
-		if _, err := os.Stat(cwd); err != nil {
+		if _, err := os.Stat(cwd); err != nil { //nolint:gosec // cwd is reported by the local session process
 			writeValidationError(w, "working directory no longer exists: "+cwd)
 			return false
 		}
