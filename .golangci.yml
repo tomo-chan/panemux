@@ -6,6 +6,7 @@ run:
 linters:
   default: standard
   enable:
+    - dupl
     - errcheck
     - errname
     - goconst
@@ -18,11 +19,18 @@ linters:
     - nilerr
     - perfsprint
     - revive
+    - sloglint
     - staticcheck
     - unused
     - whitespace
     - wrapcheck
   settings:
+    dupl:
+      threshold: 100
+    govet:
+      enable:
+        - fieldalignment
+        - shadow
     misspell:
       locale: US
     revive:

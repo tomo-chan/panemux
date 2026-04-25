@@ -94,6 +94,15 @@ func TestGetLayout_ReturnsJSON(t *testing.T) {
 func TestPutLayout_ValidBody_Updates(t *testing.T) {
 	cfg := defaultTestConfig()
 	r := setupRouter(cfg, session.NewManager())
+	rec := putVerticalLayout(t, r)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "vertical", cfg.Layout.Direction)
+}
+
+func putVerticalLayout(t *testing.T, r http.Handler) *httptest.ResponseRecorder {
+	t.Helper()
+
 	layout := config.LayoutNode{
 		Direction: "vertical",
 		Children:  []config.LayoutChild{{Size: 100, Pane: &config.PaneConfig{ID: "main", Type: "local"}}},
@@ -103,9 +112,7 @@ func TestPutLayout_ValidBody_Updates(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPut, "/api/layout", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, "vertical", cfg.Layout.Direction)
+	return rec
 }
 
 func TestPutLayout_InvalidJSON_Returns400(t *testing.T) {
@@ -326,15 +333,7 @@ func TestPutLayout_EditModeOff_DoesNotPersist(t *testing.T) {
 	r := setupRouter(cfg, session.NewManager())
 
 	// editMode is false by default
-	layout := config.LayoutNode{
-		Direction: "vertical",
-		Children:  []config.LayoutChild{{Size: 100, Pane: &config.PaneConfig{ID: "main", Type: "local"}}},
-	}
-	body, _ := json.Marshal(layout)
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPut, "/api/layout", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(rec, req)
+	rec := putVerticalLayout(t, r)
 
 	assert.Equal(t, http.StatusOK, rec.Code)
 	// In-memory layout should be updated
@@ -652,17 +651,24 @@ func TestPostSSHConfigHost_ValidHost_201(t *testing.T) {
 }
 
 func TestPostSSHConfigHost_MissingName_422(t *testing.T) {
+	rec := postSSHConfigHost(t, sshConfigHostRequest{Hostname: "host.example.com", User: "ubuntu"})
+
+	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
+}
+
+func postSSHConfigHost(t *testing.T, body sshConfigHostRequest) *httptest.ResponseRecorder {
+	t.Helper()
+
 	h := NewHandler(defaultTestConfig(), session.NewManager())
 	h.sshConfigPath = filepath.Join(t.TempDir(), "config")
 	r := setupRouterWithHandler(h)
 
-	body, _ := json.Marshal(sshConfigHostRequest{Hostname: "host.example.com", User: "ubuntu"})
+	payload, _ := json.Marshal(body)
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/ssh-config/hosts", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/ssh-config/hosts", bytes.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
+	return rec
 }
 
 func TestPostSSHConfigHost_InvalidNameChars_422(t *testing.T) {
@@ -680,29 +686,13 @@ func TestPostSSHConfigHost_InvalidNameChars_422(t *testing.T) {
 }
 
 func TestPostSSHConfigHost_MissingHostname_422(t *testing.T) {
-	h := NewHandler(defaultTestConfig(), session.NewManager())
-	h.sshConfigPath = filepath.Join(t.TempDir(), "config")
-	r := setupRouterWithHandler(h)
-
-	body, _ := json.Marshal(sshConfigHostRequest{Name: "myhost", User: "ubuntu"})
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/ssh-config/hosts", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(rec, req)
+	rec := postSSHConfigHost(t, sshConfigHostRequest{Name: "myhost", User: "ubuntu"})
 
 	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
 }
 
 func TestPostSSHConfigHost_MissingUser_422(t *testing.T) {
-	h := NewHandler(defaultTestConfig(), session.NewManager())
-	h.sshConfigPath = filepath.Join(t.TempDir(), "config")
-	r := setupRouterWithHandler(h)
-
-	body, _ := json.Marshal(sshConfigHostRequest{Name: "myhost", Hostname: "myhost.example.com"})
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/ssh-config/hosts", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(rec, req)
+	rec := postSSHConfigHost(t, sshConfigHostRequest{Name: "myhost", Hostname: "myhost.example.com"})
 
 	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
 }
@@ -757,8 +747,8 @@ func TestPostSSHConfigHost_InvalidBody_400(t *testing.T) {
 // mockCWDSession is a mockSession that also implements session.CWDGetter.
 type mockCWDSession struct {
 	mockSession
-	cwd    string
 	cwdErr error
+	cwd    string
 }
 
 func (m *mockCWDSession) GetCWD() (string, error) { return m.cwd, m.cwdErr }
@@ -805,23 +795,31 @@ func TestPostOpenVSCode_NoCWDGetter_422(t *testing.T) {
 
 func TestPostOpenVSCode_Local_200(t *testing.T) {
 	dir := t.TempDir()
-	mgr := session.NewManager()
-	mgr.Add(&mockCWDSession{
+	resp := postOpenVSCodeOK(t, "local1", &mockCWDSession{
 		mockSession: mockSession{id: "local1", typ: session.TypeLocal},
 		cwd:         dir,
 	})
+
+	assert.Equal(t, dir, resp.Cwd)
+}
+
+func postOpenVSCodeOK(t *testing.T, id string, sess session.Session) openVSCodeResponse {
+	t.Helper()
+
+	mgr := session.NewManager()
+	mgr.Add(sess)
 	h := NewHandler(defaultTestConfig(), mgr)
-	h.codeBinaryPath = "/bin/echo" // stub: echo instead of opening VSCode
+	h.codeBinaryPath = "/bin/echo"
 	r := setupRouterWithVSCode(h)
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/sessions/local1/open-vscode", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+id+"/open-vscode", nil)
 	r.ServeHTTP(rec, req)
 
 	assert.Equal(t, http.StatusOK, rec.Code)
 	var resp openVSCodeResponse
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
-	assert.Equal(t, dir, resp.Cwd)
+	return resp
 }
 
 func TestPostOpenVSCode_Local_DeletedDir_422(t *testing.T) {
@@ -844,23 +842,12 @@ func TestPostOpenVSCode_Local_DeletedDir_422(t *testing.T) {
 }
 
 func TestPostOpenVSCode_SSH_200(t *testing.T) {
-	mgr := session.NewManager()
-	mgr.Add(&mockSSHCWDSession{
+	resp := postOpenVSCodeOK(t, "ssh1", &mockSSHCWDSession{
 		mockSession: mockSession{id: "ssh1", typ: session.TypeSSH},
 		cwd:         "/home/user/code",
 		connName:    "myserver",
 	})
-	h := NewHandler(defaultTestConfig(), mgr)
-	h.codeBinaryPath = "/bin/echo"
-	r := setupRouterWithVSCode(h)
 
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/sessions/ssh1/open-vscode", nil)
-	r.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-	var resp openVSCodeResponse
-	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
 	assert.Equal(t, "/home/user/code", resp.Cwd)
 }
 
@@ -884,43 +871,21 @@ func TestPostOpenVSCode_SSH_InvalidConnName_422(t *testing.T) {
 
 func TestPostOpenVSCode_Tmux_200(t *testing.T) {
 	dir := t.TempDir()
-	mgr := session.NewManager()
-	mgr.Add(&mockCWDSession{
+	resp := postOpenVSCodeOK(t, "tmux1", &mockCWDSession{
 		mockSession: mockSession{id: "tmux1", typ: session.TypeTmux},
 		cwd:         dir,
 	})
-	h := NewHandler(defaultTestConfig(), mgr)
-	h.codeBinaryPath = "/bin/echo"
-	r := setupRouterWithVSCode(h)
 
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/sessions/tmux1/open-vscode", nil)
-	r.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-	var resp openVSCodeResponse
-	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
 	assert.Equal(t, dir, resp.Cwd)
 }
 
 func TestPostOpenVSCode_SSHTmux_200(t *testing.T) {
-	mgr := session.NewManager()
-	mgr.Add(&mockSSHCWDSession{
+	resp := postOpenVSCodeOK(t, "sshtmux1", &mockSSHCWDSession{
 		mockSession: mockSession{id: "sshtmux1", typ: session.TypeSSHTmux},
 		cwd:         "/home/user/remote",
 		connName:    "remote-box",
 	})
-	h := NewHandler(defaultTestConfig(), mgr)
-	h.codeBinaryPath = "/bin/echo"
-	r := setupRouterWithVSCode(h)
 
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/sessions/sshtmux1/open-vscode", nil)
-	r.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-	var resp openVSCodeResponse
-	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
 	assert.Equal(t, "/home/user/remote", resp.Cwd)
 }
 

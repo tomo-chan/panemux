@@ -20,10 +20,10 @@ import (
 // wsMockSession implements session.Session for WebSocket handler tests.
 type wsMockSession struct {
 	id      string
-	state   session.State // configurable; defaults to StateConnected
-	out     chan []byte   // data sent to WS client (session output)
-	in      chan []byte   // data received from WS client (session input)
+	out     chan []byte // data sent to WS client (session output)
+	in      chan []byte // data received from WS client (session input)
 	resizes chan [2]uint16
+	state   session.State // configurable; defaults to StateConnected
 	closed  bool
 }
 

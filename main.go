@@ -23,8 +23,8 @@ var version = "dev"
 type cliOptions struct {
 	configPath  string
 	openBrowser bool
-	port        int
 	showVersion bool
+	port        int
 }
 
 //go:embed frontend/dist

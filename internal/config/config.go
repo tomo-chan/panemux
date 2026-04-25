@@ -11,17 +11,17 @@ import (
 )
 
 type ServerConfig struct {
-	Port int    `yaml:"port"`
 	Host string `yaml:"host"`
+	Port int    `yaml:"port"`
 }
 
 type SSHConnection struct {
 	Host           string `yaml:"host"`
-	Port           int    `yaml:"port"`
 	User           string `yaml:"user"`
 	KeyFile        string `yaml:"key_file"`
 	Password       string `yaml:"password,omitempty"`
 	KnownHostsFile string `yaml:"known_hosts_file,omitempty" json:"known_hosts_file,omitempty"`
+	Port           int    `yaml:"port"`
 }
 
 type DisplayConfig struct {
@@ -30,6 +30,8 @@ type DisplayConfig struct {
 }
 
 type PaneConfig struct {
+	ShowHeader    *bool  `yaml:"show_header,omitempty"    json:"show_header,omitempty"`
+	ShowStatusBar *bool  `yaml:"show_status_bar,omitempty" json:"show_status_bar,omitempty"`
 	ID            string `yaml:"id"           json:"id"`
 	Type          string `yaml:"type"         json:"type"` // local | ssh | tmux | ssh_tmux
 	Shell         string `yaml:"shell,omitempty"        json:"shell,omitempty"`
@@ -37,33 +39,32 @@ type PaneConfig struct {
 	Title         string `yaml:"title,omitempty"        json:"title,omitempty"`
 	Connection    string `yaml:"connection,omitempty"   json:"connection,omitempty"` // ssh_connections key
 	TmuxSession   string `yaml:"tmux_session,omitempty" json:"tmux_session,omitempty"`
-	ShowHeader    *bool  `yaml:"show_header,omitempty"    json:"show_header,omitempty"`
-	ShowStatusBar *bool  `yaml:"show_status_bar,omitempty" json:"show_status_bar,omitempty"`
 }
 
 type LayoutNode struct {
+	Pane      *PaneConfig   `yaml:"pane,omitempty"      json:"pane,omitempty"`
 	Direction string        `yaml:"direction,omitempty" json:"direction,omitempty"` // horizontal | vertical
 	Children  []LayoutChild `yaml:"children,omitempty"  json:"children,omitempty"`
-	Pane      *PaneConfig   `yaml:"pane,omitempty"      json:"pane,omitempty"`
 }
 
 type LayoutChild struct {
-	Size      float64       `yaml:"size"               json:"size"`
 	Pane      *PaneConfig   `yaml:"pane,omitempty"     json:"pane,omitempty"`
 	Direction string        `yaml:"direction,omitempty" json:"direction,omitempty"`
 	Children  []LayoutChild `yaml:"children,omitempty"  json:"children,omitempty"`
+	Size      float64       `yaml:"size"               json:"size"`
 }
 
 type Config struct {
-	Server         ServerConfig             `yaml:"server"`
 	SSHConnections map[string]SSHConnection `yaml:"ssh_connections,omitempty"`
-	Layout         LayoutNode               `yaml:"layout"`
-	Display        DisplayConfig            `yaml:"display,omitempty" json:"display"`
 
 	// internal: raw yaml node for comment-preserving writes
 	rawNode       *yaml.Node
 	filePath      string
 	sshConfigPath string // overridable for tests; empty = use sshconfig.DefaultPath()
+
+	Layout  LayoutNode    `yaml:"layout"`
+	Server  ServerConfig  `yaml:"server"`
+	Display DisplayConfig `yaml:"display,omitempty" json:"display"`
 }
 
 func Load(path string) (*Config, error) {

@@ -5,9 +5,9 @@ import "io"
 type mockSession struct {
 	id     string
 	title  string
+	buf    chan []byte
 	typ    Type
 	state  State
-	buf    chan []byte
 	closed bool
 }
 

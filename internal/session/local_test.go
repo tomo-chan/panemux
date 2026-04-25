@@ -52,14 +52,14 @@ func TestNewLocal_Write_Read(t *testing.T) {
 	require.NoError(t, err)
 
 	type result struct {
-		n   int
 		err error
+		n   int
 	}
 	ch := make(chan result, 1)
 	go func() {
 		buf := make([]byte, 1024)
 		n, err := sess.Read(buf)
-		ch <- result{n, err}
+		ch <- result{err: err, n: n}
 	}()
 
 	select {
