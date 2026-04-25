@@ -15,10 +15,10 @@ type Host struct {
 	Name         string // Host alias (e.g. "prod-web")
 	Hostname     string // HostName directive (defaults to Name if not set)
 	User         string
-	Port         int // 0 = not set (caller uses default 22)
 	IdentityFile string
 	ProxyJump    string // ProxyJump directive (alias or user@host)
 	ProxyCommand string // ProxyCommand directive (shell command acting as stdin/stdout pipe)
+	Port         int    // 0 = not set (caller uses default 22)
 }
 
 // DefaultPath returns the default SSH config path (~/.ssh/config).

@@ -24,12 +24,12 @@ var validShellPath = regexp.MustCompile(`^(/[a-zA-Z0-9._\-/]+)$`)
 
 // LocalSession is a local PTY-based terminal session.
 type LocalSession struct {
-	mu    sync.RWMutex
+	cmd   *exec.Cmd
+	ptmx  *os.File
 	id    string
 	title string
 	state State
-	cmd   *exec.Cmd
-	ptmx  *os.File
+	mu    sync.RWMutex
 	pid   int
 }
 

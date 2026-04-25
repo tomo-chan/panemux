@@ -14,15 +14,15 @@ import (
 
 // TmuxLocalSession attaches to an existing local tmux session via PTY.
 type TmuxLocalSession struct {
-	mu          sync.RWMutex
-	id          string
-	title       string
-	tmuxSession string
-	state       State
 	cmd         *exec.Cmd
 	ptmx        *os.File
 	pr          *io.PipeReader // Read() reads from here
 	pw          *io.PipeWriter // background goroutine writes output then closes
+	id          string
+	title       string
+	tmuxSession string
+	state       State
+	mu          sync.RWMutex
 }
 
 // NewTmuxLocal creates a new session that attaches to a local tmux session.

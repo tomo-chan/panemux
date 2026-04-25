@@ -34,32 +34,32 @@ const invalidRemotePathMsg = "must be an absolute path with no shell metacharact
 
 // SSHSession manages an SSH connection with a PTY.
 type SSHSession struct {
-	mu      sync.RWMutex
-	id      string
-	title   string
-	state   State
-	client  *ssh.Client
-	session *ssh.Session
-	stdin   io.WriteCloser
+	client     *ssh.Client
+	session    *ssh.Session
+	jumpClient *ssh.Client // non-nil when connected via ProxyJump; closed after client
+	stdin      io.WriteCloser
 	// combined reader for stdout+stderr
 	reader         io.Reader
+	id             string
+	title          string
 	connectionName string
-	jumpClient     *ssh.Client // non-nil when connected via ProxyJump; closed after client
+	state          State
+	mu             sync.RWMutex
 }
 
 // SSHConfig holds parameters for establishing an SSH connection.
 type SSHConfig struct {
+	JumpHost       *SSHConfig // non-nil when ProxyJump is configured
 	Host           string
-	Port           int
 	User           string
 	KeyFile        string
 	Password       string
 	KnownHostsFile string
-	Cwd            string     // initial working directory on the remote host
-	Shell          string     // override login shell (empty = use remote login shell)
-	ConnectionName string     // alias used in panemux (for VSCode Remote SSH)
-	JumpHost       *SSHConfig // non-nil when ProxyJump is configured
-	ProxyCommand   string     // shell command used as stdin/stdout pipe (ProxyCommand directive)
+	Cwd            string // initial working directory on the remote host
+	Shell          string // override login shell (empty = use remote login shell)
+	ConnectionName string // alias used in panemux (for VSCode Remote SSH)
+	ProxyCommand   string // shell command used as stdin/stdout pipe (ProxyCommand directive)
+	Port           int
 }
 
 // shellQuotePath wraps path in single quotes and escapes any single quotes

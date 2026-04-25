@@ -7,8 +7,8 @@ import (
 
 // Manager manages the lifecycle of all terminal sessions.
 type Manager struct {
-	mu       sync.RWMutex
 	sessions map[string]Session
+	mu       sync.RWMutex
 }
 
 // NewManager creates a new session manager.

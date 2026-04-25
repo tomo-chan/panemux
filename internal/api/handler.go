@@ -26,13 +26,13 @@ import (
 type Handler struct {
 	cfg                 *config.Config
 	manager             *session.Manager
-	editMode            atomic.Bool
-	sshConfigPath       string
-	codeBinaryPath      string // empty = auto-detect; overridden in tests
-	gitBinaryPath       string // empty = auto-detect; overridden in tests
 	createSession       func(*config.PaneConfig, map[string]config.SSHConnection) (session.Session, error)
 	detectLocalShellFn  func() (string, error)
 	detectRemoteShellFn func(cfg session.SSHConfig) (string, error)
+	sshConfigPath       string
+	codeBinaryPath      string // empty = auto-detect; overridden in tests
+	gitBinaryPath       string // empty = auto-detect; overridden in tests
+	editMode            atomic.Bool
 }
 
 type editModeResponse struct {
@@ -51,16 +51,16 @@ type sshConfigHostInfo struct {
 	Name         string `json:"name"`
 	Hostname     string `json:"hostname"`
 	User         string `json:"user"`
-	Port         int    `json:"port,omitempty"`
 	IdentityFile string `json:"identity_file,omitempty"`
+	Port         int    `json:"port,omitempty"`
 }
 
 type sshConfigHostRequest struct {
 	Name         string `json:"name"`
 	Hostname     string `json:"hostname"`
 	User         string `json:"user"`
-	Port         int    `json:"port,omitempty"`
 	IdentityFile string `json:"identity_file,omitempty"`
+	Port         int    `json:"port,omitempty"`
 }
 
 var validHostName = regexp.MustCompile(`^[a-zA-Z0-9_.\-]+$`)
@@ -487,9 +487,9 @@ func (h *Handler) GetDetectShell(w http.ResponseWriter, r *http.Request) {
 }
 
 type gitInfoResponse struct {
-	IsGit  bool   `json:"is_git"`
 	Branch string `json:"branch,omitempty"`
 	Repo   string `json:"repo,omitempty"`
+	IsGit  bool   `json:"is_git"`
 }
 
 // GetGitInfo returns git repository information for the session's current working directory.

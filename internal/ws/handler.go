@@ -25,10 +25,10 @@ var upgrader = websocket.Upgrader{
 // ControlMessage is a JSON control frame exchanged over WebSocket.
 type ControlMessage struct {
 	Type    string `json:"type"`
-	Cols    uint16 `json:"cols,omitempty"`
-	Rows    uint16 `json:"rows,omitempty"`
 	State   string `json:"state,omitempty"`
 	Message string `json:"message,omitempty"`
+	Cols    uint16 `json:"cols,omitempty"`
+	Rows    uint16 `json:"rows,omitempty"`
 }
 
 // Handler handles WebSocket connections for terminal sessions.

@@ -14,17 +14,17 @@ var validTmuxSessionName = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`)
 
 // TmuxSSHSession attaches to a tmux session on a remote host via SSH.
 type TmuxSSHSession struct {
-	mu             sync.RWMutex
+	client         *ssh.Client
+	session        *ssh.Session
+	jumpClient     *ssh.Client // non-nil when connected via ProxyJump; closed after client
+	stdin          io.WriteCloser
+	reader         io.Reader
 	id             string
 	title          string
 	tmuxSession    string
-	state          State
-	client         *ssh.Client
-	session        *ssh.Session
-	stdin          io.WriteCloser
-	reader         io.Reader
 	connectionName string
-	jumpClient     *ssh.Client // non-nil when connected via ProxyJump; closed after client
+	state          State
+	mu             sync.RWMutex
 }
 
 // NewTmuxSSH creates a session that attaches to a remote tmux session.
