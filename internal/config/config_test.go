@@ -1,6 +1,9 @@
 package config
 
 import (
+	"bytes"
+	"errors"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -171,6 +174,39 @@ layout:
 	info, err := os.Stat(f)
 	require.NoError(t, err)
 	assert.Equal(t, os.FileMode(0600), info.Mode().Perm())
+}
+
+func TestLoad_ChmodFailureWarnsAndContinues(t *testing.T) {
+	content := `
+server:
+  port: 8080
+  host: "127.0.0.1"
+layout:
+  direction: horizontal
+  children:
+    - size: 100
+      pane:
+        id: main
+        type: local
+`
+	f := writeTempFile(t, content)
+	require.NoError(t, os.Chmod(f, 0644)) //nolint:gosec // legacy config permission under test
+
+	oldChmod := chmodConfigFile
+	chmodConfigFile = func(string, os.FileMode) error {
+		return errors.New("read-only filesystem")
+	}
+	t.Cleanup(func() { chmodConfigFile = oldChmod })
+
+	var logs bytes.Buffer
+	oldOutput := log.Writer()
+	log.SetOutput(&logs)
+	t.Cleanup(func() { log.SetOutput(oldOutput) })
+
+	cfg, err := Load(f)
+	require.NoError(t, err)
+	assert.Equal(t, 8080, cfg.Server.Port)
+	assert.Contains(t, logs.String(), "Warning: failed to tighten config file permissions")
 }
 
 func TestLoad_InvalidYAML(t *testing.T) {

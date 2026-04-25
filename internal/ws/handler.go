@@ -101,7 +101,8 @@ func (h *Handler) forwardTerminalOutput(
 		}
 		if err != nil {
 			if err != io.EOF {
-				log.Printf("session %s read error: %v", sessionID, err) //nolint:gosec // sessionID is a config-defined identifier
+				//nolint:gosec // sessionID is a config-defined identifier
+				log.Printf("session %s read error: %v", sessionID, err)
 			}
 			h.sendStatus(conn, "exited")
 			return
@@ -137,7 +138,8 @@ func (h *Handler) handleWebSocketMessage(
 			return
 		}
 		if _, err := sess.Write(data); err != nil {
-			log.Printf("session %s write error: %v", sessionID, err) //nolint:gosec // sessionID is a config-defined identifier
+			//nolint:gosec // sessionID is a config-defined identifier
+			log.Printf("session %s write error: %v", sessionID, err)
 		}
 
 	case websocket.TextMessage:

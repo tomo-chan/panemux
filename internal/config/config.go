@@ -3,6 +3,7 @@ package config
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,8 @@ import (
 )
 
 const configFileMode os.FileMode = 0600
+
+var chmodConfigFile = os.Chmod
 
 type ServerConfig struct {
 	Host string `yaml:"host"`
@@ -87,7 +90,8 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 	if err := tightenConfigFilePermissions(path); err != nil {
-		return nil, err
+		//nolint:gosec // local filesystem warning
+		log.Printf("Warning: failed to tighten config file permissions to 0600: %v", err)
 	}
 
 	return &cfg, nil
@@ -221,7 +225,7 @@ func tightenConfigFilePermissions(path string) error {
 	if info.Mode().Perm() == configFileMode {
 		return nil
 	}
-	if err := os.Chmod(path, configFileMode); err != nil {
+	if err := chmodConfigFile(path, configFileMode); err != nil {
 		return fmt.Errorf("tightening config permissions: %w", err)
 	}
 	return nil
