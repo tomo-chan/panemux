@@ -40,6 +40,8 @@ linters:
       multi-if: true
   exclusions:
     presets:
+      # Keep standard-library edge cases from drowning out project-specific
+      # errcheck/wrapcheck findings.
       - common-false-positives
       - legacy
       - std-error-handling

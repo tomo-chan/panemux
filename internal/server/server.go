@@ -4,6 +4,7 @@ package server
 import (
 	"context"
 	"embed"
+	"errors"
 	"fmt"
 	"io/fs"
 	"net/http"
@@ -94,6 +95,9 @@ func (s *Server) Addr() string {
 // Start begins listening and serving.
 func (s *Server) Start() error {
 	if err := s.httpSrv.ListenAndServe(); err != nil {
+		if errors.Is(err, http.ErrServerClosed) {
+			return http.ErrServerClosed
+		}
 		return fmt.Errorf("starting HTTP server: %w", err)
 	}
 	return nil

@@ -172,9 +172,15 @@ func DefaultConfigPath() (string, error) {
 func LoadOrDefault() (*Config, error) {
 	path, err := DefaultConfigPath()
 	if err != nil {
-		return nil, fmt.Errorf("default config path: %w", err)
+		return defaultAfterConfigPathError()
 	}
 	return loadOrDefaultAt(path)
+}
+
+func defaultAfterConfigPathError() (*Config, error) {
+	// Preserve the historical startup fallback when the user's home directory
+	// cannot be resolved.
+	return Default(), nil
 }
 
 func loadOrDefaultAt(path string) (*Config, error) {
