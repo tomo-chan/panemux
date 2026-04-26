@@ -99,6 +99,20 @@ Sessions are started at server startup from the YAML config (`main.go: startSess
 
 **Test at the smallest unit that exercises the logic, not at the outermost entry point.**
 
+**Test-case design rule:** before implementing or declaring a feature covered, enumerate the feature's behavioral factors and cover their meaningful combinations in tests. Do not stop at one happy path plus one error path.
+
+For every new feature or behavior change, explicitly consider:
+
+- **Input shape variants:** legacy and new schemas, omitted optional fields, defaulted fields, invalid enum values, empty lists, duplicate IDs, unknown references, malformed request bodies.
+- **State variants:** active vs inactive items, empty vs populated state, existing vs missing resources, edit mode on vs off, persisted config vs memory-only config.
+- **Operation variants:** read, create, update, delete, switch, save, reload, restart, and no-op cases where applicable.
+- **Boundary variants:** minimum/maximum values, zero/negative values, size sums, single item vs multiple items, nested structures, and paths with `~/` when paths are involved.
+- **Compatibility and migration:** old config/API shape, new config/API shape, precedence when both exist, migration-on-save behavior, and post-reload behavior after migration.
+- **Persistence and side effects:** in-memory updates, disk writes, unchanged unrelated siblings/items, session manager changes, restart behavior, and API response status/body.
+- **Frontend runtime validation:** Zod acceptance/rejection, API fallback behavior, active UI state, invalid selection no-ops, and all visible mode/position variants.
+
+Use table-driven tests when factors form a matrix. For large matrices, test all high-risk cross-products and pairwise combinations for the rest, but document the factors through test names and fixtures so omissions are intentional and reviewable.
+
 The following anti-patterns caused bugs to slip through:
 
 | Anti-pattern | Problem | Correct approach |
