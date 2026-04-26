@@ -67,12 +67,17 @@ export function useLayout() {
   }, [workspaces])
 
   const addWorkspace = useCallback(async () => {
-    const response = await fetch('/api/workspaces', { method: 'POST' })
-    if (!response.ok) throw new Error(`HTTP ${response.status}`)
-    const parsed = WorkspacesResponseSchema.parse(await response.json())
-    setWorkspaces(parsed)
-    const active = parsed.items.find((workspace) => workspace.id === parsed.active) ?? parsed.items[0]
-    setLayout(active.layout)
+    try {
+      setError(null)
+      const response = await fetch('/api/workspaces', { method: 'POST' })
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      const parsed = WorkspacesResponseSchema.parse(await response.json())
+      setWorkspaces(parsed)
+      const active = parsed.items.find((workspace) => workspace.id === parsed.active) ?? parsed.items[0]
+      setLayout(active.layout)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to add workspace')
+    }
   }, [])
 
   const splitPane = useCallback(

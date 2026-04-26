@@ -131,6 +131,24 @@ describe('useLayout', () => {
     expect(result.current.layout?.children[0].pane?.id).toBe('workspace-3-main')
   })
 
+  it('sets error when adding a workspace fails', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validWorkspaces) } as Response)
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validDisplay) } as Response)
+      .mockResolvedValueOnce({ ok: false, status: 403 } as Response)
+    window.fetch = fetchMock
+
+    const { result } = renderHook(() => useLayout())
+    await waitFor(() => expect(result.current.workspaces).not.toBeNull())
+
+    await act(async () => {
+      await result.current.addWorkspace()
+    })
+
+    expect(result.current.error).toContain('403')
+    expect(result.current.workspaces?.active).toBe('dev')
+  })
+
   it('fetches display config on mount', async () => {
     window.fetch = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validWorkspaces) } as Response)
