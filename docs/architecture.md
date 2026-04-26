@@ -35,6 +35,7 @@ Workspace model:
 - `workspaces.active` selects the layout shown by the UI. If it is empty, the first workspace becomes active.
 - `workspaces.tab_position` controls the tab rail position: `top`, `bottom`, `left`, or `right`.
 - Legacy top-level `layout` configs are accepted at load time and normalized into a single `default` workspace. The next save writes only `workspaces`, so old configs migrate automatically.
+- Read helpers return a normalized workspace view without mutating the in-memory config; migration is written only through save/update paths.
 - Pane IDs are validated as globally unique across all workspaces because sessions and WebSockets are keyed by pane ID.
 
 Notable design choices:
@@ -69,7 +70,8 @@ REST endpoints expose workspaces, layout compatibility, display settings, sessio
 Workspace-related endpoints:
 
 - `GET /api/workspaces` returns the workspace list, active workspace ID, tab position, and each workspace layout.
-- `PUT /api/workspaces/active` switches the active workspace.
+- `POST /api/workspaces` adds a single-local-pane workspace while edit mode is enabled and makes it active.
+- `PUT /api/workspaces/active` switches the active workspace and persists the selection.
 - `PUT /api/workspaces/{id}/layout` updates a specific workspace layout.
 - `GET/PUT /api/layout` remain as compatibility endpoints for the active workspace layout.
 
@@ -126,7 +128,7 @@ Why Vite:
 
 ### `useLayout`
 
-Fetches `/api/workspaces` and `/api/display`, applies runtime validation, tracks the active workspace layout, and persists layout changes back to the active workspace.
+Fetches `/api/workspaces` and `/api/display`, applies runtime validation, tracks the active workspace layout, and persists layout changes back to the active workspace. The tab bar is hidden when only one workspace exists during normal use; edit mode exposes the workspace add control.
 
 Why this hook:
 

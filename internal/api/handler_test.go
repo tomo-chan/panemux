@@ -52,6 +52,7 @@ func setupRouterWithHandler(h *Handler) *chi.Mux {
 	r.Get("/api/layout", h.GetLayout)
 	r.Put("/api/layout", h.PutLayout)
 	r.Get("/api/workspaces", h.GetWorkspaces)
+	r.Post("/api/workspaces", h.PostWorkspace)
 	r.Put("/api/workspaces/active", h.PutActiveWorkspace)
 	r.Put("/api/workspaces/{id}/layout", h.PutWorkspaceLayout)
 	r.Get("/api/sessions", h.GetSessions)
@@ -203,6 +204,21 @@ func TestPutActiveWorkspace_UpdatesActiveLayout(t *testing.T) {
 	assert.Equal(t, "vertical", cfg.ActiveLayout().Direction)
 }
 
+func TestPutActiveWorkspace_PersistsWithoutEditMode(t *testing.T) {
+	cfg, path := loadWorkspaceTestConfigFromFile(t)
+	r := setupRouter(cfg, session.NewManager())
+	body, _ := json.Marshal(activeWorkspaceRequest{ID: "two"})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/active", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	loaded, err := config.Load(path)
+	require.NoError(t, err)
+	assert.Equal(t, "two", loaded.Workspaces.Active)
+}
+
 func TestPutActiveWorkspace_InvalidBody_Returns400(t *testing.T) {
 	r := setupRouter(workspaceTestConfig(), session.NewManager())
 	rec := httptest.NewRecorder()
@@ -223,6 +239,53 @@ func TestPutActiveWorkspace_NotFound_Returns404AndKeepsActive(t *testing.T) {
 
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 	assert.Equal(t, "one", cfg.Workspaces.Active)
+}
+
+func TestPostWorkspace_EditModeOff_Returns403(t *testing.T) {
+	r := setupRouter(workspaceTestConfig(), session.NewManager())
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+}
+
+func TestPostWorkspace_EditModeOn_AddsDefaultLocalWorkspaceAndPersists(t *testing.T) {
+	cfg, path := loadWorkspaceTestConfigFromFile(t)
+	mgr := session.NewManager()
+	h := NewHandler(cfg, mgr)
+	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
+	h.editMode.Store(true)
+	h.createSession = func(pane *config.PaneConfig, _ map[string]config.SSHConnection) (session.Session, error) {
+		return newMockSession(pane.ID), nil
+	}
+	r := setupRouterWithHandler(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", nil)
+	r.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusCreated, rec.Code)
+	var workspaces config.WorkspacesConfig
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&workspaces))
+	require.Len(t, workspaces.Items, 3)
+	added := workspaces.Items[2]
+	assert.Equal(t, "workspace-3", added.ID)
+	assert.Equal(t, "Workspace 3", added.Title)
+	assert.Equal(t, "workspace-3", workspaces.Active)
+	require.Len(t, added.Layout.Children, 1)
+	assert.Equal(t, "workspace-3-main", added.Layout.Children[0].Pane.ID)
+	assert.Equal(t, "local", added.Layout.Children[0].Pane.Type)
+	_, ok := mgr.Get("workspace-3-main")
+	assert.True(t, ok)
+
+	loaded, err := config.Load(path)
+	require.NoError(t, err)
+	assert.Equal(t, "workspace-3", loaded.Workspaces.Active)
+	require.Len(t, loaded.Workspaces.Items, 3)
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.NotContains(t, string(data), "\nlayout:")
 }
 
 func TestPutWorkspaceLayout_UpdatesOnlyTargetWorkspace(t *testing.T) {

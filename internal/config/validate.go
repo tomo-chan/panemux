@@ -16,7 +16,6 @@ const paneTypeSSHTmux = "ssh_tmux"
 // Validate checks the configuration for correctness.
 // It collects all errors and returns them as a single combined error.
 func (c *Config) Validate() error {
-	c.normalizeWorkspaces()
 	var errs []string
 
 	if c.Server.Port < 1 || c.Server.Port > 65535 {
@@ -41,7 +40,7 @@ func (c *Config) Validate() error {
 			}
 		}
 	}
-	errs = append(errs, validateWorkspaces(c.Workspaces, sshConns)...)
+	errs = append(errs, validateWorkspaces(c.normalizedWorkspaces(), sshConns)...)
 
 	seen := make(map[string]bool)
 	for _, pane := range c.AllPanes() {

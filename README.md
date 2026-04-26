@@ -123,6 +123,8 @@ workspaces:
 
 Older config files with a top-level `layout:` are still accepted. When the config is next saved, panemux migrates that layout into a `default` workspace and writes the `workspaces:` format.
 
+If there is only one workspace, the workspace tab bar is hidden during normal use. Enable edit mode to show the workspace add control; newly added workspaces start with a single local terminal pane, become active immediately, and are saved to the config. Switching the active workspace is also persisted so the same workspace is restored after restart.
+
 ### Pane types
 
 | Type | Description |

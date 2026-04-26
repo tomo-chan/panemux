@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { DetectShellResponseSchema, DisplayConfig, DisplayConfigSchema, LayoutNode, LayoutNodeSchema, PaneConfig, WorkspacesResponse, WorkspacesResponseSchema } from '../schemas'
+import { DetectShellResponseSchema, DisplayConfig, DisplayConfigSchema, LayoutNode, PaneConfig, WorkspacesResponse, WorkspacesResponseSchema } from '../schemas'
 import { findPaneById, generatePaneId, generateTmuxSessionName, removePaneFromTree, splitPaneInTree, swapPanesInTree } from '../utils/layoutTree'
 
 export function useLayout() {
@@ -16,15 +16,10 @@ export function useLayout() {
         return r.json()
       })
       .then((data) => {
-        const workspaceResult = WorkspacesResponseSchema.safeParse(data)
-        if (workspaceResult.success) {
-          const parsed = workspaceResult.data
-          setWorkspaces(parsed)
-          const active = parsed.items.find((workspace) => workspace.id === parsed.active) ?? parsed.items[0]
-          setLayout(active.layout)
-          return
-        }
-        setLayout(LayoutNodeSchema.parse(data))
+        const parsed = WorkspacesResponseSchema.parse(data)
+        setWorkspaces(parsed)
+        const active = parsed.items.find((workspace) => workspace.id === parsed.active) ?? parsed.items[0]
+        setLayout(active.layout)
       })
       .catch((e) => setError(e.message))
   }, [])
@@ -70,6 +65,15 @@ export function useLayout() {
       body: JSON.stringify({ id: workspaceID }),
     }).catch(console.error)
   }, [workspaces])
+
+  const addWorkspace = useCallback(async () => {
+    const response = await fetch('/api/workspaces', { method: 'POST' })
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    const parsed = WorkspacesResponseSchema.parse(await response.json())
+    setWorkspaces(parsed)
+    const active = parsed.items.find((workspace) => workspace.id === parsed.active) ?? parsed.items[0]
+    setLayout(active.layout)
+  }, [])
 
   const splitPane = useCallback(
     async (targetPaneId: string, direction: 'horizontal' | 'vertical') => {
@@ -154,7 +158,7 @@ export function useLayout() {
     [layout, workspaces?.active],
   )
 
-  return { layout, workspaces, displayConfig, error, updateSizes, splitPane, closePane, swapPanes, setActiveWorkspace }
+  return { layout, workspaces, displayConfig, error, updateSizes, splitPane, closePane, swapPanes, setActiveWorkspace, addWorkspace }
 }
 
 function replaceActiveWorkspaceLayout(workspaces: WorkspacesResponse, layout: LayoutNode): WorkspacesResponse {

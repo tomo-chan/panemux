@@ -48,6 +48,10 @@ ssh_connections:
 # save, panemux migrates them to a single `default` workspace and writes only the
 # `workspaces:` format.
 #
+# The tab bar is hidden during normal use when only one workspace exists. Turn on
+# edit mode to add a workspace; new workspaces start with one local terminal pane
+# and the active workspace selection is saved.
+#
 # Split node  — has `direction` and `children` (no `pane`)
 # Leaf node   — has `pane` (no `direction` / `children`)
 #

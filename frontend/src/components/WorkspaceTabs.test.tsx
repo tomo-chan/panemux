@@ -26,6 +26,33 @@ describe('WorkspaceTabs', () => {
     expect(onSelect).toHaveBeenCalledWith('ops')
   })
 
+  it('hides workspace tabs for a single workspace while keeping add available', () => {
+    const onAdd = vi.fn()
+    render(
+      <WorkspaceTabs
+        workspaces={[workspaces[0]]}
+        activeWorkspaceId="dev"
+        tabPosition="top"
+        onSelect={() => {}}
+        onAdd={onAdd}
+      />,
+    )
+
+    expect(screen.queryByRole('tab', { name: 'Dev' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('tablist')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Add workspace' }))
+    expect(onAdd).toHaveBeenCalled()
+  })
+
+  it('renders add control with multiple workspace tabs', () => {
+    const onAdd = vi.fn()
+    render(<WorkspaceTabs workspaces={workspaces} activeWorkspaceId="dev" tabPosition="top" onSelect={() => {}} onAdd={onAdd} />)
+
+    expect(screen.getByRole('tab', { name: 'Dev' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Add workspace' }))
+    expect(onAdd).toHaveBeenCalled()
+  })
+
   it('uses vertical orientation for left and right positions', () => {
     for (const tabPosition of ['left', 'right'] as const) {
       const { unmount } = render(

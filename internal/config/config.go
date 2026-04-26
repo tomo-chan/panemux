@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -154,8 +155,16 @@ func defaultLayout() LayoutNode {
 }
 
 func (c *Config) normalizeWorkspaces() {
-	if len(c.Workspaces.Items) == 0 {
-		c.Workspaces = WorkspacesConfig{
+	c.Workspaces = c.normalizedWorkspaces()
+	if active, ok := c.ActiveWorkspace(); ok {
+		c.Layout = active.Layout
+	}
+}
+
+func (c *Config) normalizedWorkspaces() WorkspacesConfig {
+	workspaces := c.Workspaces
+	if len(workspaces.Items) == 0 {
+		workspaces = WorkspacesConfig{
 			Active:      "default",
 			TabPosition: "top",
 			Items: []WorkspaceConfig{
@@ -167,15 +176,13 @@ func (c *Config) normalizeWorkspaces() {
 			},
 		}
 	}
-	if c.Workspaces.TabPosition == "" {
-		c.Workspaces.TabPosition = "top"
+	if workspaces.TabPosition == "" {
+		workspaces.TabPosition = "top"
 	}
-	if c.Workspaces.Active == "" && len(c.Workspaces.Items) > 0 {
-		c.Workspaces.Active = c.Workspaces.Items[0].ID
+	if workspaces.Active == "" && len(workspaces.Items) > 0 {
+		workspaces.Active = workspaces.Items[0].ID
 	}
-	if active, ok := c.ActiveWorkspace(); ok {
-		c.Layout = active.Layout
-	}
+	return workspaces
 }
 
 func (c *Config) ActiveWorkspace() (WorkspaceConfig, bool) {
@@ -232,13 +239,73 @@ func (c *Config) ActiveWorkspaceID() string {
 }
 
 func (c *Config) WorkspacesView() WorkspacesConfig {
-	c.normalizeWorkspaces()
-	return c.Workspaces
+	return c.normalizedWorkspaces()
 }
 
 func (c *Config) SaveWorkspaces() error {
 	c.normalizeWorkspaces()
 	return c.write()
+}
+
+func (c *Config) AddDefaultWorkspace() WorkspaceConfig {
+	c.normalizeWorkspaces()
+	n := len(c.Workspaces.Items) + 1
+	id := c.nextWorkspaceID(n)
+	workspace := WorkspaceConfig{
+		ID:     id,
+		Title:  "Workspace " + strconv.Itoa(n),
+		Layout: singleLocalPaneLayout(c.nextPaneID(id + "-main")),
+	}
+	c.Workspaces.Items = append(c.Workspaces.Items, workspace)
+	c.Workspaces.Active = workspace.ID
+	c.Layout = workspace.Layout
+	return workspace
+}
+
+func (c *Config) nextWorkspaceID(start int) string {
+	seen := make(map[string]bool, len(c.Workspaces.Items))
+	for _, workspace := range c.Workspaces.Items {
+		seen[workspace.ID] = true
+	}
+	for n := start; ; n++ {
+		id := "workspace-" + strconv.Itoa(n)
+		if !seen[id] {
+			return id
+		}
+	}
+}
+
+func (c *Config) nextPaneID(base string) string {
+	seen := make(map[string]bool)
+	for _, pane := range c.AllPanes() {
+		seen[pane.ID] = true
+	}
+	if !seen[base] {
+		return base
+	}
+	for n := 2; ; n++ {
+		id := base + "-" + strconv.Itoa(n)
+		if !seen[id] {
+			return id
+		}
+	}
+}
+
+func singleLocalPaneLayout(paneID string) LayoutNode {
+	return LayoutNode{
+		Direction: "horizontal",
+		Children: []LayoutChild{
+			{
+				Size: 100.0,
+				Pane: &PaneConfig{
+					ID:    paneID,
+					Type:  "local",
+					Shell: os.Getenv("SHELL"),
+					Title: "Terminal",
+				},
+			},
+		},
+	}
 }
 
 func (c *Config) write() error {
@@ -380,8 +447,8 @@ func (c *Config) UpdateLayout(layout LayoutNode) {
 // AllPanes returns a flat list of all pane configs.
 func (c *Config) AllPanes() []*PaneConfig {
 	var panes []*PaneConfig
-	c.normalizeWorkspaces()
-	for _, workspace := range c.Workspaces.Items {
+	workspaces := c.normalizedWorkspaces()
+	for _, workspace := range workspaces.Items {
 		collectPanes(workspace.Layout.Children, &panes)
 	}
 	return panes

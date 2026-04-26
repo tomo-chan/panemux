@@ -486,6 +486,47 @@ func TestAllPanes_Empty(t *testing.T) {
 	assert.Empty(t, panes)
 }
 
+func TestReadMethods_DoNotNormalizeConfigInPlace(t *testing.T) {
+	cfg := validConfig()
+	require.Empty(t, cfg.Workspaces.Items)
+
+	view := cfg.WorkspacesView()
+	require.Len(t, view.Items, 1)
+	assert.Equal(t, "default", view.Active)
+	assert.Empty(t, cfg.Workspaces.Items)
+	assert.Empty(t, cfg.Workspaces.Active)
+
+	panes := cfg.AllPanes()
+	require.Len(t, panes, 1)
+	assert.Equal(t, "main", panes[0].ID)
+	assert.Empty(t, cfg.Workspaces.Items)
+
+	require.NoError(t, cfg.Validate())
+	assert.Empty(t, cfg.Workspaces.Items)
+}
+
+func TestAddDefaultWorkspace_CreatesUniqueLocalWorkspace(t *testing.T) {
+	cfg := &Config{
+		Workspaces: WorkspacesConfig{
+			Active:      "default",
+			TabPosition: "top",
+			Items: []WorkspaceConfig{
+				{ID: "default", Title: "Default", Layout: singlePaneLayout("local-main")},
+				{ID: "workspace-2", Title: "Existing", Layout: singlePaneLayout("workspace-2-main")},
+			},
+		},
+	}
+
+	workspace := cfg.AddDefaultWorkspace()
+
+	assert.Equal(t, "workspace-3", workspace.ID)
+	assert.Equal(t, "Workspace 3", workspace.Title)
+	assert.Equal(t, "workspace-3", cfg.Workspaces.Active)
+	require.Len(t, workspace.Layout.Children, 1)
+	assert.Equal(t, "workspace-3-main", workspace.Layout.Children[0].Pane.ID)
+	assert.Equal(t, "local", workspace.Layout.Children[0].Pane.Type)
+}
+
 func TestSaveLayout_WithFile(t *testing.T) {
 	content := `
 server:
