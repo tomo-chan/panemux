@@ -43,6 +43,7 @@ func New(cfg *config.Config, manager *session.Manager, frontendFS embed.FS) *Ser
 		r.Get("/workspaces", apiHandler.GetWorkspaces)
 		r.Post("/workspaces", apiHandler.PostWorkspace)
 		r.Put("/workspaces/active", apiHandler.PutActiveWorkspace)
+		r.Delete("/workspaces/{id}", apiHandler.DeleteWorkspace)
 		r.Put("/workspaces/{id}/layout", apiHandler.PutWorkspaceLayout)
 		r.Get("/sessions", apiHandler.GetSessions)
 		r.Post("/sessions", apiHandler.PostSession)

@@ -149,6 +149,49 @@ describe('useLayout', () => {
     expect(result.current.workspaces?.active).toBe('dev')
   })
 
+  it('deletes a workspace and switches to the returned active workspace', async () => {
+    const remainingWorkspaces = {
+      active: 'ops',
+      tab_position: 'top',
+      items: [validWorkspaces.items[1]],
+    }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validWorkspaces) } as Response)
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validDisplay) } as Response)
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(remainingWorkspaces) } as Response)
+    window.fetch = fetchMock
+
+    const { result } = renderHook(() => useLayout())
+    await waitFor(() => expect(result.current.workspaces).not.toBeNull())
+
+    await act(async () => {
+      await result.current.deleteWorkspace('dev')
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/workspaces/dev', { method: 'DELETE' })
+    expect(result.current.workspaces?.items).toHaveLength(1)
+    expect(result.current.workspaces?.active).toBe('ops')
+    expect(result.current.layout?.children[0].pane?.id).toBe('ops-main')
+  })
+
+  it('sets error when deleting a workspace fails', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validWorkspaces) } as Response)
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validDisplay) } as Response)
+      .mockResolvedValueOnce({ ok: false, status: 409 } as Response)
+    window.fetch = fetchMock
+
+    const { result } = renderHook(() => useLayout())
+    await waitFor(() => expect(result.current.workspaces).not.toBeNull())
+
+    await act(async () => {
+      await result.current.deleteWorkspace('dev')
+    })
+
+    expect(result.current.error).toContain('409')
+    expect(result.current.workspaces?.items).toHaveLength(2)
+  })
+
   it('fetches display config on mount', async () => {
     window.fetch = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validWorkspaces) } as Response)

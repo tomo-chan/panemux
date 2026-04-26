@@ -8,6 +8,7 @@ interface WorkspaceTabsProps {
   tabPosition: TabPosition
   onSelect: (workspaceId: string) => void
   onAdd?: () => void
+  onDelete?: (workspaceId: string) => void
 }
 
 export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
@@ -16,6 +17,7 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
   tabPosition,
   onSelect,
   onAdd,
+  onDelete,
 }) => {
   const vertical = tabPosition === 'left' || tabPosition === 'right'
   const showTabs = workspaces.length > 1
@@ -55,34 +57,69 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
           {workspaces.map((workspace) => {
             const active = workspace.id === activeWorkspaceId
             return (
-              <button
+              <div
                 key={workspace.id}
-                role="tab"
-                aria-selected={active}
-                onClick={() => onSelect(workspace.id)}
-                title={workspace.title}
                 style={{
-                  appearance: 'none',
-                  border: 'none',
                   borderRight: !vertical ? '1px solid #333842' : undefined,
                   borderBottom: vertical ? '1px solid #333842' : undefined,
                   backgroundColor: active ? '#2f3540' : 'transparent',
-                  color: active ? '#ffffff' : '#b8beca',
-                  cursor: active ? 'default' : 'pointer',
-                  fontFamily: TERMINAL_FONT_FAMILY,
-                  fontSize: 13,
+                  display: 'flex',
+                  alignItems: 'center',
                   height: vertical ? 38 : 34,
                   minWidth: vertical ? '100%' : 96,
                   maxWidth: vertical ? '100%' : 180,
-                  padding: '0 12px',
-                  textAlign: 'left',
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
                 }}
               >
-                {workspace.title}
-              </button>
+                <button
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => onSelect(workspace.id)}
+                  title={workspace.title}
+                  style={{
+                    appearance: 'none',
+                    border: 'none',
+                    backgroundColor: 'transparent',
+                    color: active ? '#ffffff' : '#b8beca',
+                    cursor: active ? 'default' : 'pointer',
+                    flex: 1,
+                    fontFamily: TERMINAL_FONT_FAMILY,
+                    fontSize: 13,
+                    height: '100%',
+                    minWidth: 0,
+                    padding: onDelete ? '0 6px 0 12px' : '0 12px',
+                    textAlign: 'left',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }}
+                >
+                  {workspace.title}
+                </button>
+                {onDelete && (
+                  <button
+                    type="button"
+                    aria-label={`Delete ${workspace.title} workspace`}
+                    title="Delete workspace"
+                    onClick={() => onDelete(workspace.id)}
+                    style={{
+                      appearance: 'none',
+                      border: 'none',
+                      backgroundColor: 'transparent',
+                      color: active ? '#d7dce5' : '#8f96a3',
+                      cursor: 'pointer',
+                      flex: '0 0 28px',
+                      fontFamily: TERMINAL_FONT_FAMILY,
+                      fontSize: 16,
+                      height: '100%',
+                      lineHeight: vertical ? '38px' : '34px',
+                      padding: 0,
+                      textAlign: 'center',
+                    }}
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
             )
           })}
         </div>

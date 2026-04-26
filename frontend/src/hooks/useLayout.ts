@@ -80,6 +80,20 @@ export function useLayout() {
     }
   }, [])
 
+  const deleteWorkspace = useCallback(async (workspaceID: string) => {
+    try {
+      setError(null)
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceID)}`, { method: 'DELETE' })
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      const parsed = WorkspacesResponseSchema.parse(await response.json())
+      setWorkspaces(parsed)
+      const active = parsed.items.find((workspace) => workspace.id === parsed.active) ?? parsed.items[0]
+      setLayout(active.layout)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete workspace')
+    }
+  }, [])
+
   const splitPane = useCallback(
     async (targetPaneId: string, direction: 'horizontal' | 'vertical') => {
       if (!layout) return
@@ -163,7 +177,7 @@ export function useLayout() {
     [layout, workspaces?.active],
   )
 
-  return { layout, workspaces, displayConfig, error, updateSizes, splitPane, closePane, swapPanes, setActiveWorkspace, addWorkspace }
+  return { layout, workspaces, displayConfig, error, updateSizes, splitPane, closePane, swapPanes, setActiveWorkspace, addWorkspace, deleteWorkspace }
 }
 
 function replaceActiveWorkspaceLayout(workspaces: WorkspacesResponse, layout: LayoutNode): WorkspacesResponse {

@@ -53,6 +53,20 @@ describe('WorkspaceTabs', () => {
     expect(onAdd).toHaveBeenCalled()
   })
 
+  it('renders delete controls when delete handler is provided', () => {
+    const onDelete = vi.fn()
+    render(<WorkspaceTabs workspaces={workspaces} activeWorkspaceId="dev" tabPosition="top" onSelect={() => {}} onDelete={onDelete} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Dev workspace' }))
+    expect(onDelete).toHaveBeenCalledWith('dev')
+  })
+
+  it('hides delete controls when delete handler is omitted', () => {
+    render(<WorkspaceTabs workspaces={workspaces} activeWorkspaceId="dev" tabPosition="top" onSelect={() => {}} />)
+
+    expect(screen.queryByRole('button', { name: 'Delete Dev workspace' })).not.toBeInTheDocument()
+  })
+
   it('uses vertical orientation for left and right positions', () => {
     for (const tabPosition of ['left', 'right'] as const) {
       const { unmount } = render(

@@ -159,6 +159,44 @@ func (h *Handler) PostWorkspace(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(h.cfg.WorkspacesView())
 }
 
+// DeleteWorkspace removes a workspace while edit mode is enabled.
+func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
+	if !h.editMode.Load() {
+		http.Error(w, "edit mode required", http.StatusForbidden)
+		return
+	}
+	id := chi.URLParam(r, "id")
+	view := h.cfg.WorkspacesView()
+	found := false
+	for _, workspace := range view.Items {
+		if workspace.ID == id {
+			found = true
+			break
+		}
+	}
+	if !found {
+		http.Error(w, "workspace not found", http.StatusNotFound)
+		return
+	}
+	if len(view.Items) <= 1 {
+		http.Error(w, "cannot delete the last workspace", http.StatusConflict)
+		return
+	}
+	workspace, ok := h.cfg.RemoveWorkspace(id)
+	if !ok {
+		http.Error(w, "workspace not found", http.StatusNotFound)
+		return
+	}
+	if err := h.cfg.SaveWorkspaces(); err != nil {
+		http.Error(w, "failed to save workspaces", http.StatusInternalServerError)
+		return
+	}
+	for _, pane := range panesInLayout(workspace.Layout) {
+		_ = h.manager.Remove(pane.ID)
+	}
+	writeJSON(w, h.cfg.WorkspacesView())
+}
+
 // PutWorkspaceLayout updates a specific workspace layout.
 func (h *Handler) PutWorkspaceLayout(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")

@@ -527,6 +527,57 @@ func TestAddDefaultWorkspace_CreatesUniqueLocalWorkspace(t *testing.T) {
 	assert.Equal(t, "local", workspace.Layout.Children[0].Pane.Type)
 }
 
+func TestRemoveWorkspace_RemovesTargetAndSelectsNextActive(t *testing.T) {
+	cfg := &Config{
+		Workspaces: WorkspacesConfig{
+			Active:      "two",
+			TabPosition: "top",
+			Items: []WorkspaceConfig{
+				{ID: "one", Title: "One", Layout: singlePaneLayout("one-main")},
+				{ID: "two", Title: "Two", Layout: singlePaneLayout("two-main")},
+				{ID: "three", Title: "Three", Layout: singlePaneLayout("three-main")},
+			},
+		},
+	}
+
+	removed, ok := cfg.RemoveWorkspace("two")
+
+	require.True(t, ok)
+	assert.Equal(t, "two", removed.ID)
+	assert.Equal(t, "three", cfg.Workspaces.Active)
+	assert.Equal(t, "three-main", cfg.Layout.Children[0].Pane.ID)
+	require.Len(t, cfg.Workspaces.Items, 2)
+	assert.Equal(t, "one", cfg.Workspaces.Items[0].ID)
+	assert.Equal(t, "three", cfg.Workspaces.Items[1].ID)
+}
+
+func TestRemoveWorkspace_InactiveKeepsActive(t *testing.T) {
+	cfg := &Config{
+		Workspaces: WorkspacesConfig{
+			Active:      "one",
+			TabPosition: "top",
+			Items: []WorkspaceConfig{
+				{ID: "one", Title: "One", Layout: singlePaneLayout("one-main")},
+				{ID: "two", Title: "Two", Layout: singlePaneLayout("two-main")},
+			},
+		},
+	}
+
+	_, ok := cfg.RemoveWorkspace("two")
+
+	require.True(t, ok)
+	assert.Equal(t, "one", cfg.Workspaces.Active)
+	assert.Equal(t, "one-main", cfg.Layout.Children[0].Pane.ID)
+	require.Len(t, cfg.Workspaces.Items, 1)
+	assert.Equal(t, "one", cfg.Workspaces.Items[0].ID)
+}
+
+func TestRemoveWorkspace_NotFound(t *testing.T) {
+	cfg := validConfig()
+	_, ok := cfg.RemoveWorkspace("missing")
+	assert.False(t, ok)
+}
+
 func TestSaveLayout_WithFile(t *testing.T) {
 	content := `
 server:

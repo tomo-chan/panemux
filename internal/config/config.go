@@ -262,6 +262,26 @@ func (c *Config) AddDefaultWorkspace() WorkspaceConfig {
 	return workspace
 }
 
+func (c *Config) RemoveWorkspace(id string) (WorkspaceConfig, bool) {
+	c.normalizeWorkspaces()
+	for i, workspace := range c.Workspaces.Items {
+		if workspace.ID != id {
+			continue
+		}
+		c.Workspaces.Items = append(c.Workspaces.Items[:i], c.Workspaces.Items[i+1:]...)
+		if c.Workspaces.Active == id && len(c.Workspaces.Items) > 0 {
+			next := i
+			if next >= len(c.Workspaces.Items) {
+				next = len(c.Workspaces.Items) - 1
+			}
+			c.Workspaces.Active = c.Workspaces.Items[next].ID
+			c.Layout = c.Workspaces.Items[next].Layout
+		}
+		return workspace, true
+	}
+	return WorkspaceConfig{}, false
+}
+
 func (c *Config) nextWorkspaceID(start int) string {
 	seen := make(map[string]bool, len(c.Workspaces.Items))
 	for _, workspace := range c.Workspaces.Items {
