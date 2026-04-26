@@ -27,12 +27,22 @@ describe('WorkspaceTabs', () => {
   })
 
   it('uses vertical orientation for left and right positions', () => {
-    const { rerender } = render(
-      <WorkspaceTabs workspaces={workspaces} activeWorkspaceId="dev" tabPosition="left" onSelect={() => {}} />,
-    )
-    expect(screen.getByRole('tablist')).toHaveAttribute('aria-orientation', 'vertical')
+    for (const tabPosition of ['left', 'right'] as const) {
+      const { unmount } = render(
+        <WorkspaceTabs workspaces={workspaces} activeWorkspaceId="dev" tabPosition={tabPosition} onSelect={() => {}} />,
+      )
+      expect(screen.getByRole('tablist')).toHaveAttribute('aria-orientation', 'vertical')
+      unmount()
+    }
+  })
 
-    rerender(<WorkspaceTabs workspaces={workspaces} activeWorkspaceId="dev" tabPosition="bottom" onSelect={() => {}} />)
-    expect(screen.getByRole('tablist')).toHaveAttribute('aria-orientation', 'horizontal')
+  it('uses horizontal orientation for top and bottom positions', () => {
+    for (const tabPosition of ['top', 'bottom'] as const) {
+      const { unmount } = render(
+        <WorkspaceTabs workspaces={workspaces} activeWorkspaceId="dev" tabPosition={tabPosition} onSelect={() => {}} />,
+      )
+      expect(screen.getByRole('tablist')).toHaveAttribute('aria-orientation', 'horizontal')
+      unmount()
+    }
   })
 })

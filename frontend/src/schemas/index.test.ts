@@ -143,6 +143,46 @@ describe('WorkspacesResponseSchema', () => {
     })
     expect(result.success).toBe(false)
   })
+
+  it('accepts every tab position', () => {
+    for (const tabPosition of ['top', 'bottom', 'left', 'right']) {
+      const result = WorkspacesResponseSchema.safeParse({
+        active: 'dev',
+        tab_position: tabPosition,
+        items: [
+          {
+            id: 'dev',
+            title: 'Dev',
+            layout: {
+              direction: 'horizontal',
+              children: [{ size: 100, pane: { id: 'main', type: 'local' } }],
+            },
+          },
+        ],
+      })
+      expect(result.success).toBe(true)
+    }
+  })
+
+  it('rejects empty workspace list and blank identifiers', () => {
+    expect(WorkspacesResponseSchema.safeParse({
+      active: 'dev',
+      tab_position: 'top',
+      items: [],
+    }).success).toBe(false)
+
+    expect(WorkspacesResponseSchema.safeParse({
+      active: '',
+      tab_position: 'top',
+      items: [
+        {
+          id: '',
+          title: '',
+          layout: { direction: 'horizontal', children: [] },
+        },
+      ],
+    }).success).toBe(false)
+  })
 })
 
 describe('SessionInfoSchema', () => {

@@ -109,6 +109,42 @@ func workspaceTestConfig() *config.Config {
 	}
 }
 
+func loadWorkspaceTestConfigFromFile(t *testing.T) (*config.Config, string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	content := `
+server:
+  port: 8080
+  host: "127.0.0.1"
+workspaces:
+  active: one
+  tab_position: top
+  items:
+    - id: one
+      title: One
+      layout:
+        direction: horizontal
+        children:
+          - size: 100
+            pane:
+              id: one-main
+              type: local
+    - id: two
+      title: Two
+      layout:
+        direction: vertical
+        children:
+          - size: 100
+            pane:
+              id: two-main
+              type: local
+`
+	require.NoError(t, os.WriteFile(path, []byte(content), 0600))
+	cfg, err := config.Load(path)
+	require.NoError(t, err)
+	return cfg, path
+}
+
 func TestGetLayout_ReturnsJSON(t *testing.T) {
 	r := setupRouter(defaultTestConfig(), session.NewManager())
 	rec := httptest.NewRecorder()
@@ -120,6 +156,21 @@ func TestGetLayout_ReturnsJSON(t *testing.T) {
 	var layout config.LayoutNode
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&layout))
 	assert.Equal(t, "horizontal", layout.Direction)
+}
+
+func TestGetLayout_ReturnsActiveWorkspaceLayout(t *testing.T) {
+	cfg := workspaceTestConfig()
+	require.True(t, cfg.SetActiveWorkspace("two"))
+	r := setupRouter(cfg, session.NewManager())
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/layout", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var layout config.LayoutNode
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&layout))
+	assert.Equal(t, "vertical", layout.Direction)
+	assert.Equal(t, "two-main", layout.Children[0].Pane.ID)
 }
 
 func TestGetWorkspaces_ReturnsJSON(t *testing.T) {
@@ -152,6 +203,28 @@ func TestPutActiveWorkspace_UpdatesActiveLayout(t *testing.T) {
 	assert.Equal(t, "vertical", cfg.ActiveLayout().Direction)
 }
 
+func TestPutActiveWorkspace_InvalidBody_Returns400(t *testing.T) {
+	r := setupRouter(workspaceTestConfig(), session.NewManager())
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/active", bytes.NewBufferString("not json"))
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestPutActiveWorkspace_NotFound_Returns404AndKeepsActive(t *testing.T) {
+	cfg := workspaceTestConfig()
+	r := setupRouter(cfg, session.NewManager())
+	body, _ := json.Marshal(activeWorkspaceRequest{ID: "missing"})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/active", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assert.Equal(t, "one", cfg.Workspaces.Active)
+}
+
 func TestPutWorkspaceLayout_UpdatesOnlyTargetWorkspace(t *testing.T) {
 	cfg := workspaceTestConfig()
 	r := setupRouter(cfg, session.NewManager())
@@ -170,6 +243,78 @@ func TestPutWorkspaceLayout_UpdatesOnlyTargetWorkspace(t *testing.T) {
 	assert.Equal(t, "horizontal", cfg.Workspaces.Items[0].Layout.Direction)
 }
 
+func TestPutWorkspaceLayout_ActiveWorkspaceAlsoUpdatesCompatibilityLayout(t *testing.T) {
+	cfg := workspaceTestConfig()
+	r := setupRouter(cfg, session.NewManager())
+	layout := config.LayoutNode{
+		Direction: "vertical",
+		Children:  []config.LayoutChild{{Size: 100, Pane: &config.PaneConfig{ID: "one-main", Type: "local"}}},
+	}
+	body, _ := json.Marshal(layout)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/one/layout", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "vertical", cfg.Workspaces.Items[0].Layout.Direction)
+	assert.Equal(t, "vertical", cfg.Layout.Direction)
+}
+
+func TestPutWorkspaceLayout_InvalidBody_Returns400(t *testing.T) {
+	r := setupRouter(workspaceTestConfig(), session.NewManager())
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/one/layout", bytes.NewBufferString("not json"))
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestPutWorkspaceLayout_InvalidLayout_Returns422(t *testing.T) {
+	r := setupRouter(workspaceTestConfig(), session.NewManager())
+	layout := config.LayoutNode{
+		Direction: "diagonal",
+		Children:  []config.LayoutChild{{Size: 100, Pane: &config.PaneConfig{ID: "one-main", Type: "local"}}},
+	}
+	rec := putLayout(t, r, "/api/workspaces/one/layout", layout)
+	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
+}
+
+func TestPutWorkspaceLayout_NotFound_Returns404(t *testing.T) {
+	r := setupRouter(workspaceTestConfig(), session.NewManager())
+	layout := config.LayoutNode{
+		Direction: "horizontal",
+		Children:  []config.LayoutChild{{Size: 100, Pane: &config.PaneConfig{ID: "missing-main", Type: "local"}}},
+	}
+	rec := putLayout(t, r, "/api/workspaces/missing/layout", layout)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+func TestPutWorkspaceLayout_EditModeOn_PersistsWorkspaces(t *testing.T) {
+	cfg, path := loadWorkspaceTestConfigFromFile(t)
+	r := setupRouter(cfg, session.NewManager())
+
+	body, _ := json.Marshal(editModeResponse{EditMode: true})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/edit-mode", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	layout := config.LayoutNode{
+		Direction: "vertical",
+		Children:  []config.LayoutChild{{Size: 100, Pane: &config.PaneConfig{ID: "one-main", Type: "local"}}},
+	}
+	rec2 := putLayout(t, r, "/api/workspaces/one/layout", layout)
+	require.Equal(t, http.StatusOK, rec2.Code)
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "workspaces:")
+	assert.Contains(t, string(data), "one-main")
+	assert.NotContains(t, string(data), "\nlayout:")
+}
+
 func TestPutLayout_ValidBody_Updates(t *testing.T) {
 	cfg := defaultTestConfig()
 	r := setupRouter(cfg, session.NewManager())
@@ -179,6 +324,26 @@ func TestPutLayout_ValidBody_Updates(t *testing.T) {
 	assert.Equal(t, "vertical", cfg.Layout.Direction)
 }
 
+func TestPutLayout_UpdatesActiveWorkspaceOnly(t *testing.T) {
+	cfg := workspaceTestConfig()
+	require.True(t, cfg.SetActiveWorkspace("two"))
+	r := setupRouter(cfg, session.NewManager())
+	layout := config.LayoutNode{
+		Direction: "horizontal",
+		Children:  []config.LayoutChild{{Size: 100, Pane: &config.PaneConfig{ID: "two-main", Type: "local"}}},
+	}
+	body, _ := json.Marshal(layout)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/layout", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "horizontal", cfg.Workspaces.Items[1].Layout.Direction)
+	assert.Equal(t, "horizontal", cfg.Layout.Direction)
+	assert.Equal(t, "horizontal", cfg.Workspaces.Items[0].Layout.Direction)
+}
+
 func putVerticalLayout(t *testing.T, r http.Handler) *httptest.ResponseRecorder {
 	t.Helper()
 
@@ -186,9 +351,15 @@ func putVerticalLayout(t *testing.T, r http.Handler) *httptest.ResponseRecorder 
 		Direction: "vertical",
 		Children:  []config.LayoutChild{{Size: 100, Pane: &config.PaneConfig{ID: "main", Type: "local"}}},
 	}
+	return putLayout(t, r, "/api/layout", layout)
+}
+
+func putLayout(t *testing.T, r http.Handler, path string, layout config.LayoutNode) *httptest.ResponseRecorder {
+	t.Helper()
+
 	body, _ := json.Marshal(layout)
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPut, "/api/layout", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPut, path, bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(rec, req)
 	return rec
@@ -208,11 +379,7 @@ func TestPutLayout_InvalidLayout_Returns422(t *testing.T) {
 		Direction: "diagonal",
 		Children:  []config.LayoutChild{{Size: 100, Pane: &config.PaneConfig{ID: "main", Type: "local"}}},
 	}
-	body, _ := json.Marshal(layout)
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPut, "/api/layout", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(rec, req)
+	rec := putLayout(t, r, "/api/layout", layout)
 	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
 }
 
