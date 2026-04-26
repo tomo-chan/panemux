@@ -40,7 +40,7 @@ func (c *Config) Validate() error {
 			}
 		}
 	}
-	errs = append(errs, validateLayoutNode(c.Layout, sshConns)...)
+	errs = append(errs, validateWorkspaces(c.normalizedWorkspaces(), sshConns)...)
 
 	seen := make(map[string]bool)
 	for _, pane := range c.AllPanes() {
@@ -54,6 +54,45 @@ func (c *Config) Validate() error {
 		return errors.New(strings.Join(errs, "; "))
 	}
 	return nil
+}
+
+func validateWorkspaces(workspaces WorkspacesConfig, sshConns map[string]SSHConnection) []string {
+	var errs []string
+	if workspaces.TabPosition != "" &&
+		workspaces.TabPosition != "top" &&
+		workspaces.TabPosition != "bottom" &&
+		workspaces.TabPosition != "left" &&
+		workspaces.TabPosition != "right" {
+
+		errs = append(
+			errs,
+			fmt.Sprintf("invalid tab_position %q: must be top, bottom, left, or right", workspaces.TabPosition),
+		)
+	}
+	if len(workspaces.Items) == 0 {
+		errs = append(errs, "workspaces.items must not be empty")
+		return errs
+	}
+
+	seenIDs := make(map[string]bool)
+	activeFound := workspaces.Active == ""
+	for i, workspace := range workspaces.Items {
+		if workspace.ID == "" {
+			errs = append(errs, fmt.Sprintf("workspace[%d] id must not be empty", i))
+		}
+		if seenIDs[workspace.ID] {
+			errs = append(errs, fmt.Sprintf("duplicate workspace id: %q", workspace.ID))
+		}
+		seenIDs[workspace.ID] = true
+		if workspace.ID == workspaces.Active {
+			activeFound = true
+		}
+		errs = append(errs, validateLayoutNode(workspace.Layout, sshConns)...)
+	}
+	if !activeFound {
+		errs = append(errs, fmt.Sprintf("active workspace %q is not defined", workspaces.Active))
+	}
+	return errs
 }
 
 // ValidatePane validates a standalone PaneConfig without ssh_connections context.

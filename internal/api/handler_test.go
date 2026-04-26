@@ -51,6 +51,11 @@ func setupRouterWithHandler(h *Handler) *chi.Mux {
 	r := chi.NewRouter()
 	r.Get("/api/layout", h.GetLayout)
 	r.Put("/api/layout", h.PutLayout)
+	r.Get("/api/workspaces", h.GetWorkspaces)
+	r.Post("/api/workspaces", h.PostWorkspace)
+	r.Put("/api/workspaces/active", h.PutActiveWorkspace)
+	r.Delete("/api/workspaces/{id}", h.DeleteWorkspace)
+	r.Put("/api/workspaces/{id}/layout", h.PutWorkspaceLayout)
 	r.Get("/api/sessions", h.GetSessions)
 	r.Post("/api/sessions", h.PostSession)
 	r.Delete("/api/sessions/{id}", h.DeleteSession)
@@ -78,6 +83,70 @@ func defaultTestConfig() *config.Config {
 	}
 }
 
+func workspaceTestConfig() *config.Config {
+	return &config.Config{
+		Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1"},
+		Workspaces: config.WorkspacesConfig{
+			Active:      "one",
+			TabPosition: "top",
+			Items: []config.WorkspaceConfig{
+				{
+					ID:    "one",
+					Title: "One",
+					Layout: config.LayoutNode{
+						Direction: "horizontal",
+						Children:  []config.LayoutChild{{Size: 100, Pane: &config.PaneConfig{ID: "one-main", Type: "local"}}},
+					},
+				},
+				{
+					ID:    "two",
+					Title: "Two",
+					Layout: config.LayoutNode{
+						Direction: "vertical",
+						Children:  []config.LayoutChild{{Size: 100, Pane: &config.PaneConfig{ID: "two-main", Type: "local"}}},
+					},
+				},
+			},
+		},
+	}
+}
+
+func loadWorkspaceTestConfigFromFile(t *testing.T) (*config.Config, string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	content := `
+server:
+  port: 8080
+  host: "127.0.0.1"
+workspaces:
+  active: one
+  tab_position: top
+  items:
+    - id: one
+      title: One
+      layout:
+        direction: horizontal
+        children:
+          - size: 100
+            pane:
+              id: one-main
+              type: local
+    - id: two
+      title: Two
+      layout:
+        direction: vertical
+        children:
+          - size: 100
+            pane:
+              id: two-main
+              type: local
+`
+	require.NoError(t, os.WriteFile(path, []byte(content), 0600))
+	cfg, err := config.Load(path)
+	require.NoError(t, err)
+	return cfg, path
+}
+
 func TestGetLayout_ReturnsJSON(t *testing.T) {
 	r := setupRouter(defaultTestConfig(), session.NewManager())
 	rec := httptest.NewRecorder()
@@ -91,6 +160,294 @@ func TestGetLayout_ReturnsJSON(t *testing.T) {
 	assert.Equal(t, "horizontal", layout.Direction)
 }
 
+func TestGetLayout_ReturnsActiveWorkspaceLayout(t *testing.T) {
+	cfg := workspaceTestConfig()
+	require.True(t, cfg.SetActiveWorkspace("two"))
+	r := setupRouter(cfg, session.NewManager())
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/layout", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var layout config.LayoutNode
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&layout))
+	assert.Equal(t, "vertical", layout.Direction)
+	assert.Equal(t, "two-main", layout.Children[0].Pane.ID)
+}
+
+func TestGetWorkspaces_ReturnsJSON(t *testing.T) {
+	cfg := defaultTestConfig()
+	r := setupRouter(cfg, session.NewManager())
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var workspaces config.WorkspacesConfig
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&workspaces))
+	assert.Equal(t, "default", workspaces.Active)
+	assert.Equal(t, "top", workspaces.TabPosition)
+	require.Len(t, workspaces.Items, 1)
+	assert.Equal(t, "Default", workspaces.Items[0].Title)
+}
+
+func TestPutActiveWorkspace_UpdatesActiveLayout(t *testing.T) {
+	cfg := workspaceTestConfig()
+	r := setupRouter(cfg, session.NewManager())
+	body, _ := json.Marshal(activeWorkspaceRequest{ID: "two"})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/active", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "two", cfg.Workspaces.Active)
+	assert.Equal(t, "vertical", cfg.ActiveLayout().Direction)
+}
+
+func TestPutActiveWorkspace_PersistsWithoutEditMode(t *testing.T) {
+	cfg, path := loadWorkspaceTestConfigFromFile(t)
+	r := setupRouter(cfg, session.NewManager())
+	body, _ := json.Marshal(activeWorkspaceRequest{ID: "two"})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/active", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	loaded, err := config.Load(path)
+	require.NoError(t, err)
+	assert.Equal(t, "two", loaded.Workspaces.Active)
+}
+
+func TestPutActiveWorkspace_InvalidBody_Returns400(t *testing.T) {
+	r := setupRouter(workspaceTestConfig(), session.NewManager())
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/active", bytes.NewBufferString("not json"))
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestPutActiveWorkspace_NotFound_Returns404AndKeepsActive(t *testing.T) {
+	cfg := workspaceTestConfig()
+	r := setupRouter(cfg, session.NewManager())
+	body, _ := json.Marshal(activeWorkspaceRequest{ID: "missing"})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/active", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assert.Equal(t, "one", cfg.Workspaces.Active)
+}
+
+func TestPostWorkspace_EditModeOff_Returns403(t *testing.T) {
+	r := setupRouter(workspaceTestConfig(), session.NewManager())
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+}
+
+func TestPostWorkspace_EditModeOn_AddsDefaultLocalWorkspaceAndPersists(t *testing.T) {
+	cfg, path := loadWorkspaceTestConfigFromFile(t)
+	mgr := session.NewManager()
+	h := NewHandler(cfg, mgr)
+	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
+	h.editMode.Store(true)
+	h.createSession = func(pane *config.PaneConfig, _ map[string]config.SSHConnection) (session.Session, error) {
+		return newMockSession(pane.ID), nil
+	}
+	r := setupRouterWithHandler(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", nil)
+	r.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusCreated, rec.Code)
+	var workspaces config.WorkspacesConfig
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&workspaces))
+	require.Len(t, workspaces.Items, 3)
+	added := workspaces.Items[2]
+	assert.Equal(t, "workspace-3", added.ID)
+	assert.Equal(t, "Workspace 3", added.Title)
+	assert.Equal(t, "workspace-3", workspaces.Active)
+	require.Len(t, added.Layout.Children, 1)
+	assert.Equal(t, "workspace-3-main", added.Layout.Children[0].Pane.ID)
+	assert.Equal(t, "local", added.Layout.Children[0].Pane.Type)
+	_, ok := mgr.Get("workspace-3-main")
+	assert.True(t, ok)
+
+	loaded, err := config.Load(path)
+	require.NoError(t, err)
+	assert.Equal(t, "workspace-3", loaded.Workspaces.Active)
+	require.Len(t, loaded.Workspaces.Items, 3)
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.NotContains(t, string(data), "\nlayout:")
+}
+
+func TestDeleteWorkspace_EditModeOff_Returns403(t *testing.T) {
+	r := setupRouter(workspaceTestConfig(), session.NewManager())
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/workspaces/two", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+}
+
+func TestDeleteWorkspace_NotFound_Returns404(t *testing.T) {
+	cfg := workspaceTestConfig()
+	h := NewHandler(cfg, session.NewManager())
+	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
+	h.editMode.Store(true)
+	r := setupRouterWithHandler(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/workspaces/missing", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+func TestDeleteWorkspace_LastWorkspace_Returns409(t *testing.T) {
+	cfg := defaultTestConfig()
+	h := NewHandler(cfg, session.NewManager())
+	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
+	h.editMode.Store(true)
+	r := setupRouterWithHandler(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/workspaces/default", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusConflict, rec.Code)
+}
+
+func TestDeleteWorkspace_EditModeOn_RemovesWorkspaceSessionsAndPersists(t *testing.T) {
+	cfg, path := loadWorkspaceTestConfigFromFile(t)
+	require.True(t, cfg.SetActiveWorkspace("two"))
+	mgr := session.NewManager()
+	mgr.Add(newMockSession("one-main"))
+	mgr.Add(newMockSession("two-main"))
+	h := NewHandler(cfg, mgr)
+	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
+	h.editMode.Store(true)
+	r := setupRouterWithHandler(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/workspaces/two", nil)
+	r.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var workspaces config.WorkspacesConfig
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&workspaces))
+	assert.Equal(t, "one", workspaces.Active)
+	require.Len(t, workspaces.Items, 1)
+	assert.Equal(t, "one", workspaces.Items[0].ID)
+	_, ok := mgr.Get("two-main")
+	assert.False(t, ok)
+	_, ok = mgr.Get("one-main")
+	assert.True(t, ok)
+
+	loaded, err := config.Load(path)
+	require.NoError(t, err)
+	assert.Equal(t, "one", loaded.Workspaces.Active)
+	require.Len(t, loaded.Workspaces.Items, 1)
+}
+
+func TestPutWorkspaceLayout_UpdatesOnlyTargetWorkspace(t *testing.T) {
+	cfg := workspaceTestConfig()
+	r := setupRouter(cfg, session.NewManager())
+	layout := config.LayoutNode{
+		Direction: "horizontal",
+		Children:  []config.LayoutChild{{Size: 100, Pane: &config.PaneConfig{ID: "two-main", Type: "local"}}},
+	}
+	body, _ := json.Marshal(layout)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/two/layout", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "horizontal", cfg.Workspaces.Items[1].Layout.Direction)
+	assert.Equal(t, "horizontal", cfg.Workspaces.Items[0].Layout.Direction)
+}
+
+func TestPutWorkspaceLayout_ActiveWorkspaceAlsoUpdatesCompatibilityLayout(t *testing.T) {
+	cfg := workspaceTestConfig()
+	r := setupRouter(cfg, session.NewManager())
+	layout := config.LayoutNode{
+		Direction: "vertical",
+		Children:  []config.LayoutChild{{Size: 100, Pane: &config.PaneConfig{ID: "one-main", Type: "local"}}},
+	}
+	body, _ := json.Marshal(layout)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/one/layout", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "vertical", cfg.Workspaces.Items[0].Layout.Direction)
+	assert.Equal(t, "vertical", cfg.Layout.Direction)
+}
+
+func TestPutWorkspaceLayout_InvalidBody_Returns400(t *testing.T) {
+	r := setupRouter(workspaceTestConfig(), session.NewManager())
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/one/layout", bytes.NewBufferString("not json"))
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestPutWorkspaceLayout_InvalidLayout_Returns422(t *testing.T) {
+	r := setupRouter(workspaceTestConfig(), session.NewManager())
+	layout := config.LayoutNode{
+		Direction: "diagonal",
+		Children:  []config.LayoutChild{{Size: 100, Pane: &config.PaneConfig{ID: "one-main", Type: "local"}}},
+	}
+	rec := putLayout(t, r, "/api/workspaces/one/layout", layout)
+	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
+}
+
+func TestPutWorkspaceLayout_NotFound_Returns404(t *testing.T) {
+	r := setupRouter(workspaceTestConfig(), session.NewManager())
+	layout := config.LayoutNode{
+		Direction: "horizontal",
+		Children:  []config.LayoutChild{{Size: 100, Pane: &config.PaneConfig{ID: "missing-main", Type: "local"}}},
+	}
+	rec := putLayout(t, r, "/api/workspaces/missing/layout", layout)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+func TestPutWorkspaceLayout_EditModeOn_PersistsWorkspaces(t *testing.T) {
+	cfg, path := loadWorkspaceTestConfigFromFile(t)
+	r := setupRouter(cfg, session.NewManager())
+
+	body, _ := json.Marshal(editModeResponse{EditMode: true})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/edit-mode", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	layout := config.LayoutNode{
+		Direction: "vertical",
+		Children:  []config.LayoutChild{{Size: 100, Pane: &config.PaneConfig{ID: "one-main", Type: "local"}}},
+	}
+	rec2 := putLayout(t, r, "/api/workspaces/one/layout", layout)
+	require.Equal(t, http.StatusOK, rec2.Code)
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "workspaces:")
+	assert.Contains(t, string(data), "one-main")
+	assert.NotContains(t, string(data), "\nlayout:")
+}
+
 func TestPutLayout_ValidBody_Updates(t *testing.T) {
 	cfg := defaultTestConfig()
 	r := setupRouter(cfg, session.NewManager())
@@ -100,6 +457,26 @@ func TestPutLayout_ValidBody_Updates(t *testing.T) {
 	assert.Equal(t, "vertical", cfg.Layout.Direction)
 }
 
+func TestPutLayout_UpdatesActiveWorkspaceOnly(t *testing.T) {
+	cfg := workspaceTestConfig()
+	require.True(t, cfg.SetActiveWorkspace("two"))
+	r := setupRouter(cfg, session.NewManager())
+	layout := config.LayoutNode{
+		Direction: "horizontal",
+		Children:  []config.LayoutChild{{Size: 100, Pane: &config.PaneConfig{ID: "two-main", Type: "local"}}},
+	}
+	body, _ := json.Marshal(layout)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/layout", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "horizontal", cfg.Workspaces.Items[1].Layout.Direction)
+	assert.Equal(t, "horizontal", cfg.Layout.Direction)
+	assert.Equal(t, "horizontal", cfg.Workspaces.Items[0].Layout.Direction)
+}
+
 func putVerticalLayout(t *testing.T, r http.Handler) *httptest.ResponseRecorder {
 	t.Helper()
 
@@ -107,9 +484,15 @@ func putVerticalLayout(t *testing.T, r http.Handler) *httptest.ResponseRecorder 
 		Direction: "vertical",
 		Children:  []config.LayoutChild{{Size: 100, Pane: &config.PaneConfig{ID: "main", Type: "local"}}},
 	}
+	return putLayout(t, r, "/api/layout", layout)
+}
+
+func putLayout(t *testing.T, r http.Handler, path string, layout config.LayoutNode) *httptest.ResponseRecorder {
+	t.Helper()
+
 	body, _ := json.Marshal(layout)
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPut, "/api/layout", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPut, path, bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(rec, req)
 	return rec
@@ -129,11 +512,7 @@ func TestPutLayout_InvalidLayout_Returns422(t *testing.T) {
 		Direction: "diagonal",
 		Children:  []config.LayoutChild{{Size: 100, Pane: &config.PaneConfig{ID: "main", Type: "local"}}},
 	}
-	body, _ := json.Marshal(layout)
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPut, "/api/layout", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(rec, req)
+	rec := putLayout(t, r, "/api/layout", layout)
 	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
 }
 

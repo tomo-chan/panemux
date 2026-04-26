@@ -63,6 +63,10 @@ type sshConfigHostRequest struct {
 	Port         int    `json:"port,omitempty"`
 }
 
+type activeWorkspaceRequest struct {
+	ID string `json:"id"`
+}
+
 var validHostName = regexp.MustCompile(`^[a-zA-Z0-9_.\-]+$`)
 
 // NewHandler creates a new API handler.
@@ -76,7 +80,7 @@ func NewHandler(cfg *config.Config, manager *session.Manager) *Handler {
 
 // GetLayout returns the current layout configuration.
 func (h *Handler) GetLayout(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, h.cfg.Layout)
+	writeJSON(w, h.cfg.ActiveLayout())
 }
 
 // PutLayout updates the layout configuration and persists it.
@@ -106,6 +110,137 @@ func (h *Handler) PutLayout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, layout)
+}
+
+// GetWorkspaces returns the configured workspaces and active workspace.
+func (h *Handler) GetWorkspaces(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, h.cfg.WorkspacesView())
+}
+
+// PutActiveWorkspace switches the active workspace.
+func (h *Handler) PutActiveWorkspace(w http.ResponseWriter, r *http.Request) {
+	var req activeWorkspaceRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if !h.cfg.SetActiveWorkspace(req.ID) {
+		http.Error(w, "workspace not found", http.StatusNotFound)
+		return
+	}
+	if err := h.cfg.SaveWorkspaces(); err != nil {
+		http.Error(w, "failed to save workspaces", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, h.cfg.WorkspacesView())
+}
+
+// PostWorkspace adds a new default local workspace and makes it active.
+func (h *Handler) PostWorkspace(w http.ResponseWriter, r *http.Request) {
+	if !h.editMode.Load() {
+		http.Error(w, "edit mode required", http.StatusForbidden)
+		return
+	}
+	workspace := h.cfg.AddDefaultWorkspace()
+	for _, pane := range panesInLayout(workspace.Layout) {
+		sess, err := h.createSession(pane, h.cfg.SSHConnections)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("failed to create session: %v", err), http.StatusInternalServerError)
+			return
+		}
+		h.manager.Add(sess)
+	}
+	if err := h.cfg.SaveWorkspaces(); err != nil {
+		http.Error(w, "failed to save workspaces", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(h.cfg.WorkspacesView())
+}
+
+// DeleteWorkspace removes a workspace while edit mode is enabled.
+func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
+	if !h.editMode.Load() {
+		http.Error(w, "edit mode required", http.StatusForbidden)
+		return
+	}
+	id := chi.URLParam(r, "id")
+	view := h.cfg.WorkspacesView()
+	found := false
+	for _, workspace := range view.Items {
+		if workspace.ID == id {
+			found = true
+			break
+		}
+	}
+	if !found {
+		http.Error(w, "workspace not found", http.StatusNotFound)
+		return
+	}
+	if len(view.Items) <= 1 {
+		http.Error(w, "cannot delete the last workspace", http.StatusConflict)
+		return
+	}
+	workspace, ok := h.cfg.RemoveWorkspace(id)
+	if !ok {
+		http.Error(w, "workspace not found", http.StatusNotFound)
+		return
+	}
+	if err := h.cfg.SaveWorkspaces(); err != nil {
+		http.Error(w, "failed to save workspaces", http.StatusInternalServerError)
+		return
+	}
+	for _, pane := range panesInLayout(workspace.Layout) {
+		_ = h.manager.Remove(pane.ID)
+	}
+	writeJSON(w, h.cfg.WorkspacesView())
+}
+
+// PutWorkspaceLayout updates a specific workspace layout.
+func (h *Handler) PutWorkspaceLayout(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var layout config.LayoutNode
+	if err := json.NewDecoder(r.Body).Decode(&layout); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	config.ExpandLayoutPaths(&layout)
+
+	if err := config.ValidateLayout(layout); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	if !h.cfg.UpdateWorkspaceLayout(id, layout) {
+		http.Error(w, "workspace not found", http.StatusNotFound)
+		return
+	}
+	if h.editMode.Load() {
+		if err := h.cfg.SaveWorkspaces(); err != nil {
+			http.Error(w, "failed to save workspaces", http.StatusInternalServerError)
+			return
+		}
+	}
+	writeJSON(w, layout)
+}
+
+func panesInLayout(layout config.LayoutNode) []*config.PaneConfig {
+	var panes []*config.PaneConfig
+	var walk func([]config.LayoutChild)
+	walk = func(children []config.LayoutChild) {
+		for i := range children {
+			if children[i].Pane != nil {
+				panes = append(panes, children[i].Pane)
+			}
+			walk(children[i].Children)
+		}
+	}
+	walk(layout.Children)
+	return panes
 }
 
 // GetSessions lists all active sessions.

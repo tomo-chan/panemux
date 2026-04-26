@@ -9,6 +9,7 @@ import {
   SSHConfigHostSchema,
   SSHConfigHostsResponseSchema,
   DetectShellResponseSchema,
+  WorkspacesResponseSchema,
 } from './index'
 
 describe('DisplayConfigSchema', () => {
@@ -106,6 +107,81 @@ describe('LayoutChildSchema', () => {
       pane: { id: 'main', type: 'local' },
     })
     expect(result.success).toBe(false)
+  })
+})
+
+describe('WorkspacesResponseSchema', () => {
+  it('accepts valid workspaces response', () => {
+    const result = WorkspacesResponseSchema.safeParse({
+      active: 'dev',
+      tab_position: 'left',
+      items: [
+        {
+          id: 'dev',
+          title: 'Dev',
+          layout: {
+            direction: 'horizontal',
+            children: [{ size: 100, pane: { id: 'main', type: 'local' } }],
+          },
+        },
+      ],
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects invalid tab position', () => {
+    const result = WorkspacesResponseSchema.safeParse({
+      active: 'dev',
+      tab_position: 'diagonal',
+      items: [
+        {
+          id: 'dev',
+          title: 'Dev',
+          layout: { direction: 'horizontal', children: [] },
+        },
+      ],
+    })
+    expect(result.success).toBe(false)
+  })
+
+  it('accepts every tab position', () => {
+    for (const tabPosition of ['top', 'bottom', 'left', 'right']) {
+      const result = WorkspacesResponseSchema.safeParse({
+        active: 'dev',
+        tab_position: tabPosition,
+        items: [
+          {
+            id: 'dev',
+            title: 'Dev',
+            layout: {
+              direction: 'horizontal',
+              children: [{ size: 100, pane: { id: 'main', type: 'local' } }],
+            },
+          },
+        ],
+      })
+      expect(result.success).toBe(true)
+    }
+  })
+
+  it('rejects empty workspace list and blank identifiers', () => {
+    expect(WorkspacesResponseSchema.safeParse({
+      active: 'dev',
+      tab_position: 'top',
+      items: [],
+    }).success).toBe(false)
+
+    expect(WorkspacesResponseSchema.safeParse({
+      active: '',
+      tab_position: 'top',
+      items: [
+        {
+          id: '',
+          title: '',
+          layout: { direction: 'horizontal', children: [] },
+        },
+      ],
+    }).success).toBe(false)
   })
 })
 
