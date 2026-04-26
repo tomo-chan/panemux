@@ -10,6 +10,22 @@ const validLayout: LayoutNode = {
 
 const validDisplay = { show_header: true, show_status_bar: true }
 
+const validWorkspaces = {
+  active: 'dev',
+  tab_position: 'top',
+  items: [
+    { id: 'dev', title: 'Dev', layout: validLayout },
+    {
+      id: 'ops',
+      title: 'Ops',
+      layout: {
+        direction: 'vertical',
+        children: [{ size: 100, pane: { id: 'ops-main', type: 'local' } }],
+      },
+    },
+  ],
+}
+
 describe('useLayout', () => {
   afterEach(() => {
     vi.restoreAllMocks()
@@ -24,6 +40,26 @@ describe('useLayout', () => {
     await waitFor(() => expect(result.current.layout).not.toBeNull())
     expect(result.current.layout?.direction).toBe('horizontal')
     expect(result.current.error).toBeNull()
+  })
+
+  it('fetches workspaces and switches active workspace', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validWorkspaces) } as Response)
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validDisplay) } as Response)
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validWorkspaces) } as Response)
+    window.fetch = fetchMock
+
+    const { result } = renderHook(() => useLayout())
+    await waitFor(() => expect(result.current.workspaces).not.toBeNull())
+    expect(result.current.layout?.children[0].pane?.id).toBe('main')
+
+    await act(async () => {
+      await result.current.setActiveWorkspace('ops')
+    })
+
+    expect(result.current.workspaces?.active).toBe('ops')
+    expect(result.current.layout?.direction).toBe('vertical')
+    expect(fetchMock).toHaveBeenCalledWith('/api/workspaces/active', expect.objectContaining({ method: 'PUT' }))
   })
 
   it('fetches display config on mount', async () => {
@@ -97,6 +133,37 @@ describe('useLayout', () => {
 
       // Exactly one debounced PUT on top of init calls
       expect(fetchMock).toHaveBeenCalledTimes(callsAfterInit + 1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('saves size updates to the active workspace endpoint', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(validWorkspaces),
+      } as Response)
+      .mockResolvedValue({ ok: true, json: () => Promise.resolve(validDisplay) } as Response)
+    window.fetch = fetchMock
+
+    const { result } = renderHook(() => useLayout())
+    await waitFor(() => expect(result.current.workspaces).not.toBeNull())
+
+    vi.useFakeTimers()
+    try {
+      const updated: LayoutNode = { ...validLayout, direction: 'vertical' }
+      act(() => {
+        result.current.updateSizes(updated)
+      })
+      await vi.runAllTimersAsync()
+
+      expect(result.current.workspaces?.items[0].layout.direction).toBe('vertical')
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/workspaces/dev/layout',
+        expect.objectContaining({ method: 'PUT' }),
+      )
     } finally {
       vi.useRealTimers()
     }

@@ -40,6 +40,9 @@ func New(cfg *config.Config, manager *session.Manager, frontendFS embed.FS) *Ser
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/layout", apiHandler.GetLayout)
 		r.Put("/layout", apiHandler.PutLayout)
+		r.Get("/workspaces", apiHandler.GetWorkspaces)
+		r.Put("/workspaces/active", apiHandler.PutActiveWorkspace)
+		r.Put("/workspaces/{id}/layout", apiHandler.PutWorkspaceLayout)
 		r.Get("/sessions", apiHandler.GetSessions)
 		r.Post("/sessions", apiHandler.PostSession)
 		r.Delete("/sessions/{id}", apiHandler.DeleteSession)

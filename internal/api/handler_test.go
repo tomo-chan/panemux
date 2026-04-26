@@ -51,6 +51,9 @@ func setupRouterWithHandler(h *Handler) *chi.Mux {
 	r := chi.NewRouter()
 	r.Get("/api/layout", h.GetLayout)
 	r.Put("/api/layout", h.PutLayout)
+	r.Get("/api/workspaces", h.GetWorkspaces)
+	r.Put("/api/workspaces/active", h.PutActiveWorkspace)
+	r.Put("/api/workspaces/{id}/layout", h.PutWorkspaceLayout)
 	r.Get("/api/sessions", h.GetSessions)
 	r.Post("/api/sessions", h.PostSession)
 	r.Delete("/api/sessions/{id}", h.DeleteSession)
@@ -78,6 +81,34 @@ func defaultTestConfig() *config.Config {
 	}
 }
 
+func workspaceTestConfig() *config.Config {
+	return &config.Config{
+		Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1"},
+		Workspaces: config.WorkspacesConfig{
+			Active:      "one",
+			TabPosition: "top",
+			Items: []config.WorkspaceConfig{
+				{
+					ID:    "one",
+					Title: "One",
+					Layout: config.LayoutNode{
+						Direction: "horizontal",
+						Children:  []config.LayoutChild{{Size: 100, Pane: &config.PaneConfig{ID: "one-main", Type: "local"}}},
+					},
+				},
+				{
+					ID:    "two",
+					Title: "Two",
+					Layout: config.LayoutNode{
+						Direction: "vertical",
+						Children:  []config.LayoutChild{{Size: 100, Pane: &config.PaneConfig{ID: "two-main", Type: "local"}}},
+					},
+				},
+			},
+		},
+	}
+}
+
 func TestGetLayout_ReturnsJSON(t *testing.T) {
 	r := setupRouter(defaultTestConfig(), session.NewManager())
 	rec := httptest.NewRecorder()
@@ -89,6 +120,54 @@ func TestGetLayout_ReturnsJSON(t *testing.T) {
 	var layout config.LayoutNode
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&layout))
 	assert.Equal(t, "horizontal", layout.Direction)
+}
+
+func TestGetWorkspaces_ReturnsJSON(t *testing.T) {
+	cfg := defaultTestConfig()
+	r := setupRouter(cfg, session.NewManager())
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var workspaces config.WorkspacesConfig
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&workspaces))
+	assert.Equal(t, "default", workspaces.Active)
+	assert.Equal(t, "top", workspaces.TabPosition)
+	require.Len(t, workspaces.Items, 1)
+	assert.Equal(t, "Default", workspaces.Items[0].Title)
+}
+
+func TestPutActiveWorkspace_UpdatesActiveLayout(t *testing.T) {
+	cfg := workspaceTestConfig()
+	r := setupRouter(cfg, session.NewManager())
+	body, _ := json.Marshal(activeWorkspaceRequest{ID: "two"})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/active", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "two", cfg.Workspaces.Active)
+	assert.Equal(t, "vertical", cfg.ActiveLayout().Direction)
+}
+
+func TestPutWorkspaceLayout_UpdatesOnlyTargetWorkspace(t *testing.T) {
+	cfg := workspaceTestConfig()
+	r := setupRouter(cfg, session.NewManager())
+	layout := config.LayoutNode{
+		Direction: "horizontal",
+		Children:  []config.LayoutChild{{Size: 100, Pane: &config.PaneConfig{ID: "two-main", Type: "local"}}},
+	}
+	body, _ := json.Marshal(layout)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/two/layout", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "horizontal", cfg.Workspaces.Items[1].Layout.Direction)
+	assert.Equal(t, "horizontal", cfg.Workspaces.Items[0].Layout.Direction)
 }
 
 func TestPutLayout_ValidBody_Updates(t *testing.T) {

@@ -56,6 +56,53 @@ func TestValidate_DuplicatePaneIDs_Error(t *testing.T) {
 	assert.Contains(t, err.Error(), "duplicate")
 }
 
+func TestValidate_DuplicatePaneIDsAcrossWorkspaces_Error(t *testing.T) {
+	cfg := validConfig()
+	cfg.Workspaces = WorkspacesConfig{
+		Active:      "one",
+		TabPosition: "top",
+		Items: []WorkspaceConfig{
+			{
+				ID:    "one",
+				Title: "One",
+				Layout: LayoutNode{
+					Direction: "horizontal",
+					Children:  []LayoutChild{{Size: 100, Pane: &PaneConfig{ID: "dup", Type: "local"}}},
+				},
+			},
+			{
+				ID:    "two",
+				Title: "Two",
+				Layout: LayoutNode{
+					Direction: "horizontal",
+					Children:  []LayoutChild{{Size: 100, Pane: &PaneConfig{ID: "dup", Type: "local"}}},
+				},
+			},
+		},
+	}
+	err := cfg.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "duplicate pane id")
+}
+
+func TestValidate_InvalidWorkspaceTabPosition_Error(t *testing.T) {
+	cfg := validConfig()
+	cfg.normalizeWorkspaces()
+	cfg.Workspaces.TabPosition = "diagonal"
+	err := cfg.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "tab_position")
+}
+
+func TestValidate_ActiveWorkspaceMissing_Error(t *testing.T) {
+	cfg := validConfig()
+	cfg.normalizeWorkspaces()
+	cfg.Workspaces.Active = "missing"
+	err := cfg.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "active workspace")
+}
+
 func TestValidate_PaneEmptyID_Error(t *testing.T) {
 	cfg := validConfig()
 	cfg.Layout.Children[0].Pane.ID = ""
@@ -150,6 +197,46 @@ layout:
 	require.NoError(t, err)
 	assert.Equal(t, 8080, cfg.Server.Port)
 	assert.Equal(t, "horizontal", cfg.Layout.Direction)
+	assert.Equal(t, "default", cfg.Workspaces.Active)
+	assert.Equal(t, "top", cfg.Workspaces.TabPosition)
+	require.Len(t, cfg.Workspaces.Items, 1)
+	assert.Equal(t, "Default", cfg.Workspaces.Items[0].Title)
+}
+
+func TestLoad_WorkspacesFile(t *testing.T) {
+	content := `
+server:
+  port: 8080
+  host: "127.0.0.1"
+workspaces:
+  active: ops
+  tab_position: left
+  items:
+    - id: dev
+      title: Dev
+      layout:
+        direction: horizontal
+        children:
+          - size: 100
+            pane:
+              id: dev-main
+              type: local
+    - id: ops
+      title: Ops
+      layout:
+        direction: vertical
+        children:
+          - size: 100
+            pane:
+              id: ops-main
+              type: local
+`
+	f := writeTempFile(t, content)
+	cfg, err := Load(f)
+	require.NoError(t, err)
+	assert.Equal(t, "ops", cfg.Workspaces.Active)
+	assert.Equal(t, "left", cfg.Workspaces.TabPosition)
+	assert.Equal(t, "vertical", cfg.ActiveLayout().Direction)
 }
 
 func TestLoad_TightensExistingFilePermissions(t *testing.T) {
@@ -241,6 +328,37 @@ func TestAllPanes_FlatList(t *testing.T) {
 	assert.Len(t, panes, 3)
 }
 
+func TestAllPanes_IncludesAllWorkspaces(t *testing.T) {
+	cfg := &Config{
+		Workspaces: WorkspacesConfig{
+			Active:      "one",
+			TabPosition: "top",
+			Items: []WorkspaceConfig{
+				{
+					ID:    "one",
+					Title: "One",
+					Layout: LayoutNode{
+						Direction: "horizontal",
+						Children:  []LayoutChild{{Size: 100, Pane: &PaneConfig{ID: "one-main", Type: "local"}}},
+					},
+				},
+				{
+					ID:    "two",
+					Title: "Two",
+					Layout: LayoutNode{
+						Direction: "horizontal",
+						Children:  []LayoutChild{{Size: 100, Pane: &PaneConfig{ID: "two-main", Type: "local"}}},
+					},
+				},
+			},
+		},
+	}
+	panes := cfg.AllPanes()
+	require.Len(t, panes, 2)
+	assert.Equal(t, "one-main", panes[0].ID)
+	assert.Equal(t, "two-main", panes[1].ID)
+}
+
 func TestAllPanes_Empty(t *testing.T) {
 	cfg := &Config{Layout: LayoutNode{Direction: "horizontal"}}
 	panes := cfg.AllPanes()
@@ -275,6 +393,8 @@ layout:
 	data, err := os.ReadFile(f)
 	require.NoError(t, err)
 	assert.Contains(t, string(data), "vertical")
+	assert.Contains(t, string(data), "workspaces:")
+	assert.NotContains(t, string(data), "\nlayout:")
 }
 
 func TestSaveLayout_NoFile_MemoryOnly(t *testing.T) {
@@ -489,6 +609,8 @@ func TestUpdateLayout_UpdatesMemoryOnly(t *testing.T) {
 	if cfg.Layout.Direction != "horizontal" {
 		t.Errorf("expected horizontal, got %s", cfg.Layout.Direction)
 	}
+	require.Len(t, cfg.Workspaces.Items, 1)
+	assert.Equal(t, "horizontal", cfg.Workspaces.Items[0].Layout.Direction)
 }
 
 func TestValidatePane_ShellOnSSH_AbsolutePathOK(t *testing.T) {

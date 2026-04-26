@@ -13,6 +13,7 @@
 
 - **Four pane types** — `local` (shell), `ssh` (remote), `tmux` (local session attach), `ssh_tmux` (SSH → tmux)
 - **Recursive split layout** — nest horizontal and vertical splits to any depth
+- **Workspace tabs** — define multiple layouts and switch between them with tabs on any edge
 - **Drag-to-resize** — drag dividers in the browser to adjust pane sizes
 - **Drag-to-reorder** — in edit mode, drag any pane by its body to swap positions
 - **Edit mode** — enables layout reordering and persists changes to disk; terminal input is blocked while active so keystrokes can't reach the shell accidentally
@@ -85,33 +86,42 @@ ssh_connections:
     user: "deploy"
     key_file: "~/.ssh/id_ed25519"
 
-# Recursive layout tree
-layout:
-  direction: horizontal       # horizontal | vertical
-  children:
-    - size: 50                # percentage (siblings must sum to 100)
-      pane:
-        id: "local-main"
-        type: local           # local | ssh | tmux | ssh_tmux
-        shell: "/bin/zsh"
-        cwd: "~/development"
-        title: "Dev Shell"
-    - size: 50
-      direction: vertical     # nested split
-      children:
-        - size: 60
-          pane:
-            id: "ssh-prod"
-            type: ssh
-            connection: prod-web   # key from ssh_connections
-            title: "Prod Web"
-        - size: 40
-          pane:
-            id: "tmux-local"
-            type: tmux
-            tmux_session: "work"   # existing tmux session name
-            title: "Tmux Work"
+# Workspace tabs, each with its own recursive layout tree
+workspaces:
+  active: dev
+  tab_position: top           # top | bottom | left | right
+  items:
+    - id: dev
+      title: "Development"
+      layout:
+        direction: horizontal # horizontal | vertical
+        children:
+          - size: 50          # percentage (siblings must sum to 100)
+            pane:
+              id: "local-main"
+              type: local     # local | ssh | tmux | ssh_tmux
+              shell: "/bin/zsh"
+              cwd: "~/development"
+              title: "Dev Shell"
+          - size: 50
+            pane:
+              id: "ssh-prod"
+              type: ssh
+              connection: prod-web
+              title: "Prod Web"
+    - id: ops
+      title: "Operations"
+      layout:
+        direction: horizontal
+        children:
+          - size: 100
+            pane:
+              id: "ops-shell"
+              type: local
+              title: "Ops Shell"
 ```
+
+Older config files with a top-level `layout:` are still accepted. When the config is next saved, panemux migrates that layout into a `default` workspace and writes the `workspaces:` format.
 
 ### Pane types
 

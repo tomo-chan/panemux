@@ -21,13 +21,21 @@ Why this design: startup orchestration is centralized, so session boot, config l
 
 ### `internal/config`
 
-This package loads and validates YAML configuration, expands `~/` paths, exposes flattened pane traversal, and persists layout updates.
+This package loads and validates YAML configuration, expands `~/` paths, exposes flattened pane traversal, and persists workspace/layout updates.
 
 Why it exists as a separate package:
 
 - keeps config rules out of handlers
 - gives one source of truth for layout validation
 - makes config behavior easy to test without network/session dependencies
+
+Workspace model:
+
+- `workspaces` is the standard config shape. Each item has an `id`, `title`, and recursive `layout`.
+- `workspaces.active` selects the layout shown by the UI. If it is empty, the first workspace becomes active.
+- `workspaces.tab_position` controls the tab rail position: `top`, `bottom`, `left`, or `right`.
+- Legacy top-level `layout` configs are accepted at load time and normalized into a single `default` workspace. The next save writes only `workspaces`, so old configs migrate automatically.
+- Pane IDs are validated as globally unique across all workspaces because sessions and WebSockets are keyed by pane ID.
 
 Notable design choices:
 
@@ -56,7 +64,14 @@ Optional capability interfaces extend the base `Session` contract without breaki
 
 ### `internal/api`
 
-REST endpoints expose layout, display settings, session lifecycle operations, and editor integrations.
+REST endpoints expose workspaces, layout compatibility, display settings, session lifecycle operations, and editor integrations.
+
+Workspace-related endpoints:
+
+- `GET /api/workspaces` returns the workspace list, active workspace ID, tab position, and each workspace layout.
+- `PUT /api/workspaces/active` switches the active workspace.
+- `PUT /api/workspaces/{id}/layout` updates a specific workspace layout.
+- `GET/PUT /api/layout` remain as compatibility endpoints for the active workspace layout.
 
 `POST /api/sessions/{id}/open-vscode` launches VSCode pointed at the session's live working directory. For local sessions it runs `code <cwd>`; for SSH sessions it runs `code --remote ssh-remote+<connection> <cwd>`. The binary is located via `exec.LookPath("code")` with a macOS app-bundle fallback.
 
@@ -111,7 +126,7 @@ Why Vite:
 
 ### `useLayout`
 
-Fetches `/api/layout` and `/api/display`, applies runtime validation, updates local state, and persists layout changes.
+Fetches `/api/workspaces` and `/api/display`, applies runtime validation, tracks the active workspace layout, and persists layout changes back to the active workspace.
 
 Why this hook:
 
@@ -187,4 +202,5 @@ When adding new session types or new `exec.Command` calls: the value passed as t
 
 - One WebSocket per pane is simple and isolates failures, but increases connection count with many panes.
 - Open CORS and permissive WebSocket origin checks reduce friction for local use, but are not suitable as-is for an untrusted deployment.
+- All workspace panes are started at backend startup, including panes in inactive workspaces. This keeps tab switching fast and preserves terminal state, at the cost of using resources for hidden workspaces.
 - Dynamic session creation exists, but current UI behavior mainly creates new local panes; this is not yet a full remote session orchestration product.

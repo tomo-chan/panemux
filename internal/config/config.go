@@ -59,13 +59,26 @@ type LayoutChild struct {
 	Size      float64       `yaml:"size"               json:"size"`
 }
 
+type WorkspaceConfig struct {
+	ID     string     `yaml:"id"     json:"id"`
+	Title  string     `yaml:"title"  json:"title"`
+	Layout LayoutNode `yaml:"layout" json:"layout"`
+}
+
+type WorkspacesConfig struct {
+	Active      string            `yaml:"active,omitempty"       json:"active"`
+	TabPosition string            `yaml:"tab_position,omitempty" json:"tab_position"`
+	Items       []WorkspaceConfig `yaml:"items,omitempty"       json:"items"`
+}
+
 // Config field order controls YAML serialization order for newly written
 // config files, so it intentionally prioritizes user-facing output over
 // fieldalignment.
 type Config struct { //nolint:govet
 	Server         ServerConfig             `yaml:"server"`
 	SSHConnections map[string]SSHConnection `yaml:"ssh_connections,omitempty"`
-	Layout         LayoutNode               `yaml:"layout"`
+	Workspaces     WorkspacesConfig         `yaml:"workspaces,omitempty" json:"workspaces"`
+	Layout         LayoutNode               `yaml:"layout,omitempty"`
 	Display        DisplayConfig            `yaml:"display,omitempty" json:"display"`
 
 	filePath      string
@@ -84,6 +97,7 @@ func Load(path string) (*Config, error) {
 	}
 
 	cfg.filePath = path
+	cfg.normalizeWorkspaces()
 	cfg.expandPaths()
 
 	if err := cfg.Validate(); err != nil {
@@ -107,21 +121,154 @@ func Default() *Config {
 			ShowHeader:    true,
 			ShowStatusBar: true,
 		},
-		Layout: LayoutNode{
-			Direction: "horizontal",
-			Children: []LayoutChild{
+		Layout: defaultLayout(),
+		Workspaces: WorkspacesConfig{
+			Active:      "default",
+			TabPosition: "top",
+			Items: []WorkspaceConfig{
 				{
-					Size: 100.0,
-					Pane: &PaneConfig{
-						ID:    "local-main",
-						Type:  "local",
-						Shell: os.Getenv("SHELL"),
-						Title: "Terminal",
-					},
+					ID:     "default",
+					Title:  "Default",
+					Layout: defaultLayout(),
 				},
 			},
 		},
 	}
+}
+
+func defaultLayout() LayoutNode {
+	return LayoutNode{
+		Direction: "horizontal",
+		Children: []LayoutChild{
+			{
+				Size: 100.0,
+				Pane: &PaneConfig{
+					ID:    "local-main",
+					Type:  "local",
+					Shell: os.Getenv("SHELL"),
+					Title: "Terminal",
+				},
+			},
+		},
+	}
+}
+
+func (c *Config) normalizeWorkspaces() {
+	if len(c.Workspaces.Items) == 0 {
+		c.Workspaces = WorkspacesConfig{
+			Active:      "default",
+			TabPosition: "top",
+			Items: []WorkspaceConfig{
+				{
+					ID:     "default",
+					Title:  "Default",
+					Layout: c.Layout,
+				},
+			},
+		}
+	}
+	if c.Workspaces.TabPosition == "" {
+		c.Workspaces.TabPosition = "top"
+	}
+	if c.Workspaces.Active == "" && len(c.Workspaces.Items) > 0 {
+		c.Workspaces.Active = c.Workspaces.Items[0].ID
+	}
+	if active, ok := c.ActiveWorkspace(); ok {
+		c.Layout = active.Layout
+	}
+}
+
+func (c *Config) ActiveWorkspace() (WorkspaceConfig, bool) {
+	if len(c.Workspaces.Items) == 0 {
+		return WorkspaceConfig{}, false
+	}
+	for _, workspace := range c.Workspaces.Items {
+		if workspace.ID == c.Workspaces.Active {
+			return workspace, true
+		}
+	}
+	return WorkspaceConfig{}, false
+}
+
+func (c *Config) ActiveLayout() LayoutNode {
+	if workspace, ok := c.ActiveWorkspace(); ok {
+		return workspace.Layout
+	}
+	return c.Layout
+}
+
+func (c *Config) SetActiveWorkspace(id string) bool {
+	for _, workspace := range c.Workspaces.Items {
+		if workspace.ID == id {
+			c.Workspaces.Active = id
+			c.Layout = workspace.Layout
+			return true
+		}
+	}
+	return false
+}
+
+func (c *Config) UpdateWorkspaceLayout(id string, layout LayoutNode) bool {
+	for i := range c.Workspaces.Items {
+		if c.Workspaces.Items[i].ID == id {
+			c.Workspaces.Items[i].Layout = layout
+			if c.Workspaces.Active == id {
+				c.Layout = layout
+			}
+			return true
+		}
+	}
+	return false
+}
+
+func (c *Config) ActiveWorkspaceID() string {
+	if c.Workspaces.Active != "" {
+		return c.Workspaces.Active
+	}
+	if len(c.Workspaces.Items) > 0 {
+		return c.Workspaces.Items[0].ID
+	}
+	return "default"
+}
+
+func (c *Config) WorkspacesView() WorkspacesConfig {
+	c.normalizeWorkspaces()
+	return c.Workspaces
+}
+
+func (c *Config) SaveWorkspaces() error {
+	c.normalizeWorkspaces()
+	return c.write()
+}
+
+func (c *Config) write() error {
+	if c.filePath == "" {
+		return nil
+	}
+
+	if err := os.MkdirAll(filepath.Dir(c.filePath), 0750); err != nil {
+		return fmt.Errorf("creating config directory: %w", err)
+	}
+
+	type configFile struct { //nolint:govet
+		Server         ServerConfig             `yaml:"server"`
+		SSHConnections map[string]SSHConnection `yaml:"ssh_connections,omitempty"`
+		Workspaces     WorkspacesConfig         `yaml:"workspaces,omitempty"`
+		Display        DisplayConfig            `yaml:"display,omitempty"`
+	}
+	data, err := yaml.Marshal(configFile{
+		Server:         c.Server,
+		SSHConnections: c.SSHConnections,
+		Workspaces:     c.Workspaces,
+		Display:        c.Display,
+	})
+	if err != nil {
+		return fmt.Errorf("marshaling config: %w", err)
+	}
+	if err := os.WriteFile(c.filePath, data, configFileMode); err != nil {
+		return fmt.Errorf("writing config: %w", err)
+	}
+	return nil
 }
 
 func (c *Config) expandPaths() {
@@ -135,7 +282,12 @@ func (c *Config) expandPaths() {
 		}
 		c.SSHConnections[key] = conn
 	}
-	expandPanesCwd(c.Layout.Children)
+	for i := range c.Workspaces.Items {
+		expandPanesCwd(c.Workspaces.Items[i].Layout.Children)
+	}
+	if active, ok := c.ActiveWorkspace(); ok {
+		c.Layout = active.Layout
+	}
 }
 
 func expandPanesCwd(children []LayoutChild) {
@@ -198,23 +350,9 @@ func loadOrDefaultAt(path string) (*Config, error) {
 
 // SaveLayout updates the layout section and writes the config file.
 func (c *Config) SaveLayout(layout LayoutNode) error {
-	c.Layout = layout
-	if c.filePath == "" {
-		return nil // no file to save to
-	}
-
-	if err := os.MkdirAll(filepath.Dir(c.filePath), 0750); err != nil {
-		return fmt.Errorf("creating config directory: %w", err)
-	}
-
-	data, err := yaml.Marshal(c)
-	if err != nil {
-		return fmt.Errorf("marshaling config: %w", err)
-	}
-	if err := os.WriteFile(c.filePath, data, configFileMode); err != nil {
-		return fmt.Errorf("writing config: %w", err)
-	}
-	return nil
+	c.normalizeWorkspaces()
+	c.UpdateLayout(layout)
+	return c.write()
 }
 
 func tightenConfigFilePermissions(path string) error {
@@ -233,13 +371,19 @@ func tightenConfigFilePermissions(path string) error {
 
 // UpdateLayout updates the in-memory layout without persisting to disk.
 func (c *Config) UpdateLayout(layout LayoutNode) {
-	c.Layout = layout
+	c.normalizeWorkspaces()
+	if !c.UpdateWorkspaceLayout(c.ActiveWorkspaceID(), layout) {
+		c.Layout = layout
+	}
 }
 
 // AllPanes returns a flat list of all pane configs.
 func (c *Config) AllPanes() []*PaneConfig {
 	var panes []*PaneConfig
-	collectPanes(c.Layout.Children, &panes)
+	c.normalizeWorkspaces()
+	for _, workspace := range c.Workspaces.Items {
+		collectPanes(workspace.Layout.Children, &panes)
+	}
 	return panes
 }
 
@@ -255,7 +399,13 @@ func collectPanes(children []LayoutChild, panes *[]*PaneConfig) {
 // RemovePaneFromLayout removes the pane with the given ID from the layout tree
 // and normalizes sibling sizes so they still sum to 100.
 func (c *Config) RemovePaneFromLayout(paneID string) {
-	c.Layout.Children = removePaneChildren(c.Layout.Children, paneID)
+	c.normalizeWorkspaces()
+	for i := range c.Workspaces.Items {
+		c.Workspaces.Items[i].Layout.Children = removePaneChildren(c.Workspaces.Items[i].Layout.Children, paneID)
+	}
+	if active, ok := c.ActiveWorkspace(); ok {
+		c.Layout = active.Layout
+	}
 }
 
 func removePaneChildren(children []LayoutChild, paneID string) []LayoutChild {

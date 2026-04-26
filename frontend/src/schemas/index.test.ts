@@ -9,6 +9,7 @@ import {
   SSHConfigHostSchema,
   SSHConfigHostsResponseSchema,
   DetectShellResponseSchema,
+  WorkspacesResponseSchema,
 } from './index'
 
 describe('DisplayConfigSchema', () => {
@@ -104,6 +105,41 @@ describe('LayoutChildSchema', () => {
     const result = LayoutChildSchema.safeParse({
       size: 0,
       pane: { id: 'main', type: 'local' },
+    })
+    expect(result.success).toBe(false)
+  })
+})
+
+describe('WorkspacesResponseSchema', () => {
+  it('accepts valid workspaces response', () => {
+    const result = WorkspacesResponseSchema.safeParse({
+      active: 'dev',
+      tab_position: 'left',
+      items: [
+        {
+          id: 'dev',
+          title: 'Dev',
+          layout: {
+            direction: 'horizontal',
+            children: [{ size: 100, pane: { id: 'main', type: 'local' } }],
+          },
+        },
+      ],
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects invalid tab position', () => {
+    const result = WorkspacesResponseSchema.safeParse({
+      active: 'dev',
+      tab_position: 'diagonal',
+      items: [
+        {
+          id: 'dev',
+          title: 'Dev',
+          layout: { direction: 'horizontal', children: [] },
+        },
+      ],
     })
     expect(result.success).toBe(false)
   })

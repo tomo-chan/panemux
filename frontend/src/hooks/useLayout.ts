@@ -1,20 +1,31 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { DetectShellResponseSchema, DisplayConfig, DisplayConfigSchema, LayoutNode, LayoutNodeSchema, PaneConfig } from '../schemas'
+import { DetectShellResponseSchema, DisplayConfig, DisplayConfigSchema, LayoutNode, LayoutNodeSchema, PaneConfig, WorkspacesResponse, WorkspacesResponseSchema } from '../schemas'
 import { findPaneById, generatePaneId, generateTmuxSessionName, removePaneFromTree, splitPaneInTree, swapPanesInTree } from '../utils/layoutTree'
 
 export function useLayout() {
   const [layout, setLayout] = useState<LayoutNode | null>(null)
+  const [workspaces, setWorkspaces] = useState<WorkspacesResponse | null>(null)
   const [displayConfig, setDisplayConfig] = useState<DisplayConfig | null>(null)
   const [error, setError] = useState<string | null>(null)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
-    fetch('/api/layout')
+    fetch('/api/workspaces')
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`)
         return r.json()
       })
-      .then((data) => setLayout(LayoutNodeSchema.parse(data)))
+      .then((data) => {
+        const workspaceResult = WorkspacesResponseSchema.safeParse(data)
+        if (workspaceResult.success) {
+          const parsed = workspaceResult.data
+          setWorkspaces(parsed)
+          const active = parsed.items.find((workspace) => workspace.id === parsed.active) ?? parsed.items[0]
+          setLayout(active.layout)
+          return
+        }
+        setLayout(LayoutNodeSchema.parse(data))
+      })
       .catch((e) => setError(e.message))
   }, [])
 
@@ -32,17 +43,33 @@ export function useLayout() {
 
   const updateSizes = useCallback((updatedLayout: LayoutNode) => {
     setLayout(updatedLayout)
+    setWorkspaces((current) => current ? replaceActiveWorkspaceLayout(current, updatedLayout) : current)
 
     // Debounce save to server
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
     saveTimerRef.current = setTimeout(() => {
-      fetch('/api/layout', {
+      const workspaceID = workspaces?.active
+      fetch(workspaceID ? `/api/workspaces/${encodeURIComponent(workspaceID)}/layout` : '/api/layout', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updatedLayout),
       }).catch(console.error)
     }, 500)
-  }, [])
+  }, [workspaces?.active])
+
+  const setActiveWorkspace = useCallback(async (workspaceID: string) => {
+    if (!workspaces || workspaceID === workspaces.active) return
+    const target = workspaces.items.find((workspace) => workspace.id === workspaceID)
+    if (!target) return
+
+    setWorkspaces({ ...workspaces, active: workspaceID })
+    setLayout(target.layout)
+    await fetch('/api/workspaces/active', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: workspaceID }),
+    }).catch(console.error)
+  }, [workspaces])
 
   const splitPane = useCallback(
     async (targetPaneId: string, direction: 'horizontal' | 'vertical') => {
@@ -80,14 +107,15 @@ export function useLayout() {
 
       const newLayout = splitPaneInTree(layout, targetPaneId, direction, newPane)
       setLayout(newLayout)
+      setWorkspaces((current) => current ? replaceActiveWorkspaceLayout(current, newLayout) : current)
 
-      await fetch('/api/layout', {
+      await fetch(workspaces?.active ? `/api/workspaces/${encodeURIComponent(workspaces.active)}/layout` : '/api/layout', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newLayout),
       }).catch(console.error)
     },
-    [layout],
+    [layout, workspaces?.active],
   )
 
   const closePane = useCallback(
@@ -98,16 +126,17 @@ export function useLayout() {
 
       const newLayout = removePaneFromTree(layout, targetPaneId)
       setLayout(newLayout)
+      if (newLayout) setWorkspaces((current) => current ? replaceActiveWorkspaceLayout(current, newLayout) : current)
 
       if (newLayout) {
-        await fetch('/api/layout', {
+        await fetch(workspaces?.active ? `/api/workspaces/${encodeURIComponent(workspaces.active)}/layout` : '/api/layout', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(newLayout),
         }).catch(console.error)
       }
     },
-    [layout],
+    [layout, workspaces?.active],
   )
 
   const swapPanes = useCallback(
@@ -115,14 +144,24 @@ export function useLayout() {
       if (!layout) return
       const newLayout = swapPanesInTree(layout, paneIdA, paneIdB)
       setLayout(newLayout)
-      await fetch('/api/layout', {
+      setWorkspaces((current) => current ? replaceActiveWorkspaceLayout(current, newLayout) : current)
+      await fetch(workspaces?.active ? `/api/workspaces/${encodeURIComponent(workspaces.active)}/layout` : '/api/layout', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newLayout),
       }).catch(console.error)
     },
-    [layout],
+    [layout, workspaces?.active],
   )
 
-  return { layout, displayConfig, error, updateSizes, splitPane, closePane, swapPanes }
+  return { layout, workspaces, displayConfig, error, updateSizes, splitPane, closePane, swapPanes, setActiveWorkspace }
+}
+
+function replaceActiveWorkspaceLayout(workspaces: WorkspacesResponse, layout: LayoutNode): WorkspacesResponse {
+  return {
+    ...workspaces,
+    items: workspaces.items.map((workspace) =>
+      workspace.id === workspaces.active ? { ...workspace, layout } : workspace,
+    ),
+  }
 }
