@@ -54,6 +54,7 @@ func setupRouterWithHandler(h *Handler) *chi.Mux {
 	r.Get("/api/workspaces", h.GetWorkspaces)
 	r.Post("/api/workspaces", h.PostWorkspace)
 	r.Put("/api/workspaces/active", h.PutActiveWorkspace)
+	r.Put("/api/workspaces/{id}", h.PutWorkspace)
 	r.Delete("/api/workspaces/{id}", h.DeleteWorkspace)
 	r.Put("/api/workspaces/{id}/layout", h.PutWorkspaceLayout)
 	r.Get("/api/sessions", h.GetSessions)
@@ -356,6 +357,86 @@ func TestDeleteWorkspace_EditModeOn_RemovesWorkspaceSessionsAndPersists(t *testi
 	require.NoError(t, err)
 	assert.Equal(t, "one", loaded.Workspaces.Active)
 	require.Len(t, loaded.Workspaces.Items, 1)
+}
+
+func TestPutWorkspace_EditModeOff_Returns403(t *testing.T) {
+	r := setupRouter(workspaceTestConfig(), session.NewManager())
+	body := bytes.NewBufferString(`{"title":"Renamed"}`)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/one", body)
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+}
+
+func TestPutWorkspace_EditModeOn_RenamesWorkspaceAndPersists(t *testing.T) {
+	cfg, path := loadWorkspaceTestConfigFromFile(t)
+	h := NewHandler(cfg, session.NewManager())
+	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
+	h.editMode.Store(true)
+	r := setupRouterWithHandler(h)
+
+	body := bytes.NewBufferString(`{"title":"Renamed Workspace"}`)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/one", body)
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var workspaces config.WorkspacesConfig
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&workspaces))
+	assert.Equal(t, "Renamed Workspace", workspaces.Items[0].Title)
+	assert.Equal(t, "Two", workspaces.Items[1].Title)
+	assert.Equal(t, "one", workspaces.Active)
+	assert.Equal(t, "horizontal", cfg.ActiveLayout().Direction)
+
+	loaded, err := config.Load(path)
+	require.NoError(t, err)
+	assert.Equal(t, "Renamed Workspace", loaded.Workspaces.Items[0].Title)
+}
+
+func TestPutWorkspace_InvalidBody_Returns400(t *testing.T) {
+	h := NewHandler(workspaceTestConfig(), session.NewManager())
+	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
+	h.editMode.Store(true)
+	r := setupRouterWithHandler(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/one", bytes.NewBufferString("not json"))
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestPutWorkspace_BlankTitle_Returns422(t *testing.T) {
+	h := NewHandler(workspaceTestConfig(), session.NewManager())
+	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
+	h.editMode.Store(true)
+	r := setupRouterWithHandler(h)
+
+	body := bytes.NewBufferString(`{"title":"   "}`)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/one", body)
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
+}
+
+func TestPutWorkspace_NotFound_Returns404(t *testing.T) {
+	h := NewHandler(workspaceTestConfig(), session.NewManager())
+	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
+	h.editMode.Store(true)
+	r := setupRouterWithHandler(h)
+
+	body := bytes.NewBufferString(`{"title":"Missing"}`)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/missing", body)
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
 func TestPutWorkspaceLayout_UpdatesOnlyTargetWorkspace(t *testing.T) {

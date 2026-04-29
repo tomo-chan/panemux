@@ -282,6 +282,17 @@ func (c *Config) RemoveWorkspace(id string) (WorkspaceConfig, bool) {
 	return WorkspaceConfig{}, false
 }
 
+func (c *Config) RenameWorkspace(id string, title string) bool {
+	c.normalizeWorkspaces()
+	for i := range c.Workspaces.Items {
+		if c.Workspaces.Items[i].ID == id {
+			c.Workspaces.Items[i].Title = title
+			return true
+		}
+	}
+	return false
+}
+
 func (c *Config) nextWorkspaceID(start int) string {
 	seen := make(map[string]bool, len(c.Workspaces.Items))
 	for _, workspace := range c.Workspaces.Items {

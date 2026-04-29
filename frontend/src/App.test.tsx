@@ -26,6 +26,7 @@ const workspaces: WorkspacesResponse = {
 }
 
 const mockDeleteWorkspace = vi.fn()
+const mockRenameWorkspace = vi.fn()
 
 vi.mock('./hooks/useLayout', () => ({
   useLayout: () => ({
@@ -40,6 +41,7 @@ vi.mock('./hooks/useLayout', () => ({
     setActiveWorkspace: vi.fn(),
     addWorkspace: vi.fn(),
     deleteWorkspace: mockDeleteWorkspace,
+    renameWorkspace: mockRenameWorkspace,
   }),
 }))
 
@@ -65,6 +67,7 @@ vi.mock('./hooks/usePaneSettings', () => ({
 describe('App workspace deletion', () => {
   afterEach(() => {
     mockDeleteWorkspace.mockClear()
+    mockRenameWorkspace.mockClear()
     vi.restoreAllMocks()
   })
 
@@ -85,5 +88,15 @@ describe('App workspace deletion', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Delete Dev workspace' }))
 
     expect(mockDeleteWorkspace).not.toHaveBeenCalled()
+  })
+
+  it('passes workspace rename from edit-mode tabs', () => {
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Rename Dev workspace' }))
+    const input = screen.getByLabelText('Workspace name')
+    fireEvent.change(input, { target: { value: 'Development' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(mockRenameWorkspace).toHaveBeenCalledWith('dev', 'Development')
   })
 })

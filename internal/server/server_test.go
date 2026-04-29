@@ -23,6 +23,22 @@ func testConfig() *config.Config {
 			Port: 8080,
 			Host: "127.0.0.1",
 		},
+		Workspaces: config.WorkspacesConfig{
+			Active:      "default",
+			TabPosition: "top",
+			Items: []config.WorkspaceConfig{
+				{
+					ID:    "default",
+					Title: "Default",
+					Layout: config.LayoutNode{
+						Direction: "horizontal",
+						Children: []config.LayoutChild{
+							{Size: 100, Pane: &config.PaneConfig{ID: "main", Type: "local"}},
+						},
+					},
+				},
+			},
+		},
 	}
 }
 
@@ -98,4 +114,25 @@ func TestServer_APIRoutesWired(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/layout", nil)
 	srv.httpSrv.Handler.ServeHTTP(rec, req)
 	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
+func TestServer_WorkspaceRenameRouteWired(t *testing.T) {
+	cfg := testConfig()
+	mgr := session.NewManager()
+	srv := New(cfg, mgr, emptyFS)
+	require.NotNil(t, srv)
+
+	editRec := httptest.NewRecorder()
+	editReq := httptest.NewRequest(http.MethodPut, "/api/edit-mode", bytes.NewBufferString(`{"editMode":true}`))
+	editReq.Header.Set("Content-Type", "application/json")
+	srv.httpSrv.Handler.ServeHTTP(editRec, editReq)
+	require.Equal(t, http.StatusOK, editRec.Code)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/default", bytes.NewBufferString(`{"title":"Renamed"}`))
+	req.Header.Set("Content-Type", "application/json")
+	srv.httpSrv.Handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "Renamed", cfg.Workspaces.Items[0].Title)
 }

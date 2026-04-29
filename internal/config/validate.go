@@ -87,6 +87,9 @@ func validateWorkspaces(workspaces WorkspacesConfig, sshConns map[string]SSHConn
 		if workspace.ID == "" {
 			errs = append(errs, fmt.Sprintf("workspace[%d] id must not be empty", i))
 		}
+		if strings.TrimSpace(workspace.Title) == "" {
+			errs = append(errs, fmt.Sprintf("workspace[%d] title must not be empty", i))
+		}
 		if seenIDs[workspace.ID] {
 			errs = append(errs, fmt.Sprintf("duplicate workspace id: %q", workspace.ID))
 		}
