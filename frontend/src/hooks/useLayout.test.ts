@@ -192,6 +192,53 @@ describe('useLayout', () => {
     expect(result.current.workspaces?.items).toHaveLength(2)
   })
 
+  it('renames a workspace and keeps the current layout', async () => {
+    const renamedWorkspaces = {
+      ...validWorkspaces,
+      items: [
+        { ...validWorkspaces.items[0], title: 'Development' },
+        validWorkspaces.items[1],
+      ],
+    }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validWorkspaces) } as Response)
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validDisplay) } as Response)
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(renamedWorkspaces) } as Response)
+    window.fetch = fetchMock
+
+    const { result } = renderHook(() => useLayout())
+    await waitFor(() => expect(result.current.workspaces).not.toBeNull())
+
+    await act(async () => {
+      await result.current.renameWorkspace('dev', 'Development')
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/workspaces/dev', expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify({ title: 'Development' }),
+    }))
+    expect(result.current.workspaces?.items[0].title).toBe('Development')
+    expect(result.current.layout?.children[0].pane?.id).toBe('main')
+  })
+
+  it('sets error when renaming a workspace fails', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validWorkspaces) } as Response)
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validDisplay) } as Response)
+      .mockResolvedValueOnce({ ok: false, status: 422 } as Response)
+    window.fetch = fetchMock
+
+    const { result } = renderHook(() => useLayout())
+    await waitFor(() => expect(result.current.workspaces).not.toBeNull())
+
+    await act(async () => {
+      await result.current.renameWorkspace('dev', '   ')
+    })
+
+    expect(result.current.error).toContain('422')
+    expect(result.current.workspaces?.items[0].title).toBe('Dev')
+  })
+
   it('fetches display config on mount', async () => {
     window.fetch = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validWorkspaces) } as Response)

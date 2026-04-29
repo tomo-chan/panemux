@@ -133,6 +133,17 @@ func TestValidate_WorkspaceIdentityErrors(t *testing.T) {
 			want: "id must not be empty",
 		},
 		{
+			name: "blank workspace title",
+			workspaces: WorkspacesConfig{
+				Active:      "one",
+				TabPosition: "top",
+				Items: []WorkspaceConfig{
+					{ID: "one", Title: "   ", Layout: singlePaneLayout("one-main")},
+				},
+			},
+			want: "title must not be empty",
+		},
+		{
 			name: "duplicate workspace id",
 			workspaces: WorkspacesConfig{
 				Active:      "dup",
@@ -162,6 +173,33 @@ func TestValidate_WorkspaceIdentityErrors(t *testing.T) {
 			assert.Contains(t, strings.Join(errs, "; "), tt.want)
 		})
 	}
+}
+
+func TestRenameWorkspace_UpdatesOnlyTitle(t *testing.T) {
+	cfg := validConfig()
+	cfg.Workspaces = WorkspacesConfig{
+		Active:      "one",
+		TabPosition: "top",
+		Items: []WorkspaceConfig{
+			{ID: "one", Title: "One", Layout: singlePaneLayout("one-main")},
+			{ID: "two", Title: "Two", Layout: singlePaneLayout("two-main")},
+		},
+	}
+	require.True(t, cfg.SetActiveWorkspace("one"))
+
+	require.True(t, cfg.RenameWorkspace("two", "Renamed"))
+
+	assert.Equal(t, "One", cfg.Workspaces.Items[0].Title)
+	assert.Equal(t, "Renamed", cfg.Workspaces.Items[1].Title)
+	assert.Equal(t, "one", cfg.Workspaces.Active)
+	assert.Equal(t, "one-main", cfg.ActiveLayout().Children[0].Pane.ID)
+}
+
+func TestRenameWorkspace_NotFound_ReturnsFalse(t *testing.T) {
+	cfg := validConfig()
+	cfg.normalizeWorkspaces()
+
+	assert.False(t, cfg.RenameWorkspace("missing", "Missing"))
 }
 
 func TestValidate_PaneEmptyID_Error(t *testing.T) {

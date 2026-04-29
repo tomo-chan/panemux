@@ -67,6 +67,10 @@ type activeWorkspaceRequest struct {
 	ID string `json:"id"`
 }
 
+type workspaceRequest struct {
+	Title string `json:"title"`
+}
+
 var validHostName = regexp.MustCompile(`^[a-zA-Z0-9_.\-]+$`)
 
 // NewHandler creates a new API handler.
@@ -182,6 +186,36 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, pane := range panesInLayout(workspace.Layout) {
 		_ = h.manager.Remove(pane.ID)
+	}
+	writeJSON(w, h.cfg.WorkspacesView())
+}
+
+// PutWorkspace updates workspace metadata while edit mode is enabled.
+func (h *Handler) PutWorkspace(w http.ResponseWriter, r *http.Request) {
+	if !h.editMode.Load() {
+		http.Error(w, "edit mode required", http.StatusForbidden)
+		return
+	}
+	id := chi.URLParam(r, "id")
+	var req workspaceRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	title := strings.TrimSpace(req.Title)
+	if title == "" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "workspace title must not be empty"})
+		return
+	}
+	if !h.cfg.RenameWorkspace(id, title) {
+		http.Error(w, "workspace not found", http.StatusNotFound)
+		return
+	}
+	if err := h.cfg.SaveWorkspaces(); err != nil {
+		http.Error(w, "failed to save workspaces", http.StatusInternalServerError)
+		return
 	}
 	writeJSON(w, h.cfg.WorkspacesView())
 }

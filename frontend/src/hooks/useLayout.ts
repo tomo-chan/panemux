@@ -94,6 +94,24 @@ export function useLayout() {
     }
   }, [])
 
+  const renameWorkspace = useCallback(async (workspaceID: string, title: string) => {
+    try {
+      setError(null)
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceID)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title }),
+      })
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      const parsed = WorkspacesResponseSchema.parse(await response.json())
+      setWorkspaces(parsed)
+      const active = parsed.items.find((workspace) => workspace.id === parsed.active) ?? parsed.items[0]
+      setLayout(active.layout)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to rename workspace')
+    }
+  }, [])
+
   const splitPane = useCallback(
     async (targetPaneId: string, direction: 'horizontal' | 'vertical') => {
       if (!layout) return
@@ -177,7 +195,7 @@ export function useLayout() {
     [layout, workspaces?.active],
   )
 
-  return { layout, workspaces, displayConfig, error, updateSizes, splitPane, closePane, swapPanes, setActiveWorkspace, addWorkspace, deleteWorkspace }
+  return { layout, workspaces, displayConfig, error, updateSizes, splitPane, closePane, swapPanes, setActiveWorkspace, addWorkspace, deleteWorkspace, renameWorkspace }
 }
 
 function replaceActiveWorkspaceLayout(workspaces: WorkspacesResponse, layout: LayoutNode): WorkspacesResponse {

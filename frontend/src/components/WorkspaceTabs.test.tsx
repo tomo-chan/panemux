@@ -67,6 +67,44 @@ describe('WorkspaceTabs', () => {
     expect(screen.queryByRole('button', { name: 'Delete Dev workspace' })).not.toBeInTheDocument()
   })
 
+  it('renames a workspace inline with Enter', () => {
+    const onRename = vi.fn()
+    render(<WorkspaceTabs workspaces={workspaces} activeWorkspaceId="dev" tabPosition="top" onSelect={() => {}} onRename={onRename} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Rename Dev workspace' }))
+    const input = screen.getByLabelText('Workspace name')
+    fireEvent.change(input, { target: { value: 'Development' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(onRename).toHaveBeenCalledWith('dev', 'Development')
+  })
+
+  it('cancels inline rename with Escape', () => {
+    const onRename = vi.fn()
+    render(<WorkspaceTabs workspaces={workspaces} activeWorkspaceId="dev" tabPosition="top" onSelect={() => {}} onRename={onRename} />)
+
+    fireEvent.doubleClick(screen.getByRole('tab', { name: 'Dev' }))
+    const input = screen.getByLabelText('Workspace name')
+    fireEvent.change(input, { target: { value: 'Development' } })
+    fireEvent.keyDown(input, { key: 'Escape' })
+
+    expect(onRename).not.toHaveBeenCalled()
+    expect(screen.getByRole('tab', { name: 'Dev' })).toBeInTheDocument()
+  })
+
+  it('does not save a blank inline rename', () => {
+    const onRename = vi.fn()
+    render(<WorkspaceTabs workspaces={workspaces} activeWorkspaceId="dev" tabPosition="top" onSelect={() => {}} onRename={onRename} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Rename Dev workspace' }))
+    const input = screen.getByLabelText('Workspace name')
+    fireEvent.change(input, { target: { value: '   ' } })
+    fireEvent.blur(input)
+
+    expect(onRename).not.toHaveBeenCalled()
+    expect(screen.getByRole('tab', { name: 'Dev' })).toBeInTheDocument()
+  })
+
   it('uses vertical orientation for left and right positions', () => {
     for (const tabPosition of ['left', 'right'] as const) {
       const { unmount } = render(
