@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/tomo-chan/panemux/compare/v0.10.0...v0.11.0) (2026-04-29)
+
+
+### Features
+
+* add workspace tabs ([#69](https://github.com/tomo-chan/panemux/issues/69)) ([d720a17](https://github.com/tomo-chan/panemux/commit/d720a170d893061e7f377dfb924e1adf1faf5378))
+
 ## [0.10.0](https://github.com/tomo-chan/panemux/compare/v0.9.0...v0.10.0) (2026-04-25)
 
 
