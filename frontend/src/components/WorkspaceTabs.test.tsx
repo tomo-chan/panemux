@@ -79,6 +79,33 @@ describe('WorkspaceTabs', () => {
     expect(onRename).toHaveBeenCalledWith('dev', 'Development')
   })
 
+  it('saves a valid inline rename on blur', () => {
+    const onRename = vi.fn()
+    render(<WorkspaceTabs workspaces={workspaces} activeWorkspaceId="dev" tabPosition="top" onSelect={() => {}} onRename={onRename} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Rename Dev workspace' }))
+    const input = screen.getByLabelText('Workspace name')
+    fireEvent.change(input, { target: { value: 'Development' } })
+    fireEvent.blur(input)
+
+    expect(onRename).toHaveBeenCalledTimes(1)
+    expect(onRename).toHaveBeenCalledWith('dev', 'Development')
+  })
+
+  it('does not save twice when Enter is followed by blur', () => {
+    const onRename = vi.fn()
+    render(<WorkspaceTabs workspaces={workspaces} activeWorkspaceId="dev" tabPosition="top" onSelect={() => {}} onRename={onRename} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Rename Dev workspace' }))
+    const input = screen.getByLabelText('Workspace name')
+    fireEvent.change(input, { target: { value: 'Development' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    fireEvent.blur(input)
+
+    expect(onRename).toHaveBeenCalledTimes(1)
+    expect(onRename).toHaveBeenCalledWith('dev', 'Development')
+  })
+
   it('cancels inline rename with Escape', () => {
     const onRename = vi.fn()
     render(<WorkspaceTabs workspaces={workspaces} activeWorkspaceId="dev" tabPosition="top" onSelect={() => {}} onRename={onRename} />)
@@ -87,6 +114,20 @@ describe('WorkspaceTabs', () => {
     const input = screen.getByLabelText('Workspace name')
     fireEvent.change(input, { target: { value: 'Development' } })
     fireEvent.keyDown(input, { key: 'Escape' })
+
+    expect(onRename).not.toHaveBeenCalled()
+    expect(screen.getByRole('tab', { name: 'Dev' })).toBeInTheDocument()
+  })
+
+  it('does not save when Escape is followed by blur', () => {
+    const onRename = vi.fn()
+    render(<WorkspaceTabs workspaces={workspaces} activeWorkspaceId="dev" tabPosition="top" onSelect={() => {}} onRename={onRename} />)
+
+    fireEvent.doubleClick(screen.getByRole('tab', { name: 'Dev' }))
+    const input = screen.getByLabelText('Workspace name')
+    fireEvent.change(input, { target: { value: 'Development' } })
+    fireEvent.keyDown(input, { key: 'Escape' })
+    fireEvent.blur(input)
 
     expect(onRename).not.toHaveBeenCalled()
     expect(screen.getByRole('tab', { name: 'Dev' })).toBeInTheDocument()

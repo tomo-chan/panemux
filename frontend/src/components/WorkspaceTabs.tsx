@@ -26,6 +26,7 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
   const [editingWorkspaceId, setEditingWorkspaceId] = useState<string | null>(null)
   const [draftTitle, setDraftTitle] = useState('')
   const inputRef = useRef<HTMLInputElement | null>(null)
+  const renameFinalizedRef = useRef(false)
 
   useEffect(() => {
     if (editingWorkspaceId) {
@@ -36,12 +37,15 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
 
   const startRename = (workspace: Workspace) => {
     if (!onRename) return
+    renameFinalizedRef.current = false
     setEditingWorkspaceId(workspace.id)
     setDraftTitle(workspace.title)
   }
 
   const commitRename = (workspace: Workspace) => {
+    if (renameFinalizedRef.current) return
     if (editingWorkspaceId !== workspace.id) return
+    renameFinalizedRef.current = true
     const title = draftTitle.trim()
     setEditingWorkspaceId(null)
     if (title && title !== workspace.title) {
@@ -50,6 +54,7 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
   }
 
   const cancelRename = () => {
+    renameFinalizedRef.current = true
     setEditingWorkspaceId(null)
   }
 
@@ -102,7 +107,7 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
                   minWidth: vertical ? '100%' : 96,
                   maxWidth: vertical ? '100%' : 180,
                 }}
-                >
+              >
                 {editing ? (
                   <input
                     ref={inputRef}
