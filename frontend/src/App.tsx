@@ -3,6 +3,7 @@ import { SplitContainer, LayoutActionsContext } from './components/SplitContaine
 import { EditModeToggle } from './components/EditModeToggle'
 import { PaneSettingsDialog } from './components/PaneSettingsDialog'
 import { AddSSHHostDialog } from './components/AddSSHHostDialog'
+import { WorkspaceTabs } from './components/WorkspaceTabs'
 import { useLayout } from './hooks/useLayout'
 import { useEditMode } from './hooks/useEditMode'
 import { usePaneSettings } from './hooks/usePaneSettings'
@@ -14,7 +15,7 @@ import type { SSHConfigHost } from './schemas'
 const DEFAULT_DISPLAY: DisplayConfig = { show_header: true, show_status_bar: true }
 
 export const App: React.FC = () => {
-  const { layout, displayConfig, error, updateSizes, splitPane, closePane, swapPanes } = useLayout()
+  const { layout, workspaces, displayConfig, error, updateSizes, splitPane, closePane, swapPanes, setActiveWorkspace, addWorkspace, deleteWorkspace } = useLayout()
   const { editMode, toggleEditMode } = useEditMode()
   const [maximizedPaneId, setMaximizedPaneId] = useState<string | null>(null)
   const [dragSourcePaneId, setDragSourcePaneId] = useState<string | null>(null)
@@ -86,8 +87,41 @@ export const App: React.FC = () => {
       displayConfig: displayConfig ?? DEFAULT_DISPLAY,
       editMode,
     }}>
-      <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-        <SplitContainer layout={layout} onLayoutChange={updateSizes} />
+      <div
+        style={{
+          position: 'relative',
+          width: '100%',
+          height: '100%',
+          display: 'flex',
+          flexDirection: workspaces?.tab_position === 'bottom'
+            ? 'column-reverse'
+            : workspaces?.tab_position === 'left'
+              ? 'row'
+              : workspaces?.tab_position === 'right'
+                ? 'row-reverse'
+                : 'column',
+          backgroundColor: '#1a1b1e',
+        }}
+      >
+        {workspaces && (workspaces.items.length > 1 || editMode) && (
+          <WorkspaceTabs
+            workspaces={workspaces.items}
+            activeWorkspaceId={workspaces.active}
+            tabPosition={workspaces.tab_position}
+            onSelect={setActiveWorkspace}
+            onAdd={editMode ? addWorkspace : undefined}
+            onDelete={editMode ? (workspaceId) => {
+              const workspace = workspaces.items.find((item) => item.id === workspaceId)
+              if (!workspace) return
+              if (window.confirm(`Delete workspace "${workspace.title}"?`)) {
+                void deleteWorkspace(workspaceId)
+              }
+            } : undefined}
+          />
+        )}
+        <div style={{ position: 'relative', flex: 1, minWidth: 0, minHeight: 0 }}>
+          <SplitContainer layout={layout} onLayoutChange={updateSizes} />
+        </div>
         <EditModeToggle editMode={editMode} onToggle={toggleEditMode} />
         <PaneSettingsDialog
           isOpen={isOpen}

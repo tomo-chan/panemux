@@ -56,6 +56,114 @@ func TestValidate_DuplicatePaneIDs_Error(t *testing.T) {
 	assert.Contains(t, err.Error(), "duplicate")
 }
 
+func TestValidate_DuplicatePaneIDsAcrossWorkspaces_Error(t *testing.T) {
+	cfg := validConfig()
+	cfg.Workspaces = WorkspacesConfig{
+		Active:      "one",
+		TabPosition: "top",
+		Items: []WorkspaceConfig{
+			{
+				ID:    "one",
+				Title: "One",
+				Layout: LayoutNode{
+					Direction: "horizontal",
+					Children:  []LayoutChild{{Size: 100, Pane: &PaneConfig{ID: "dup", Type: "local"}}},
+				},
+			},
+			{
+				ID:    "two",
+				Title: "Two",
+				Layout: LayoutNode{
+					Direction: "horizontal",
+					Children:  []LayoutChild{{Size: 100, Pane: &PaneConfig{ID: "dup", Type: "local"}}},
+				},
+			},
+		},
+	}
+	err := cfg.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "duplicate pane id")
+}
+
+func TestValidate_InvalidWorkspaceTabPosition_Error(t *testing.T) {
+	cfg := validConfig()
+	cfg.normalizeWorkspaces()
+	cfg.Workspaces.TabPosition = "diagonal"
+	err := cfg.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "tab_position")
+}
+
+func TestValidate_ActiveWorkspaceMissing_Error(t *testing.T) {
+	cfg := validConfig()
+	cfg.normalizeWorkspaces()
+	cfg.Workspaces.Active = "missing"
+	err := cfg.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "active workspace")
+}
+
+func TestValidate_WorkspaceTabPositions_AllValid(t *testing.T) {
+	for _, position := range []string{"top", "bottom", "left", "right"} {
+		t.Run(position, func(t *testing.T) {
+			cfg := validConfig()
+			cfg.normalizeWorkspaces()
+			cfg.Workspaces.TabPosition = position
+			require.NoError(t, cfg.Validate())
+		})
+	}
+}
+
+func TestValidate_WorkspaceIdentityErrors(t *testing.T) {
+	tests := []struct {
+		name       string
+		want       string
+		workspaces WorkspacesConfig
+	}{
+		{
+			name: "empty workspace id",
+			workspaces: WorkspacesConfig{
+				Active:      "one",
+				TabPosition: "top",
+				Items: []WorkspaceConfig{
+					{ID: "", Title: "Blank", Layout: singlePaneLayout("blank")},
+					{ID: "one", Title: "One", Layout: singlePaneLayout("one-main")},
+				},
+			},
+			want: "id must not be empty",
+		},
+		{
+			name: "duplicate workspace id",
+			workspaces: WorkspacesConfig{
+				Active:      "dup",
+				TabPosition: "top",
+				Items: []WorkspaceConfig{
+					{ID: "dup", Title: "One", Layout: singlePaneLayout("one-main")},
+					{ID: "dup", Title: "Two", Layout: singlePaneLayout("two-main")},
+				},
+			},
+			want: "duplicate workspace id",
+		},
+		{
+			name: "empty items",
+			workspaces: WorkspacesConfig{
+				Active:      "missing",
+				TabPosition: "top",
+				Items:       []WorkspaceConfig{},
+			},
+			want: "workspaces.items must not be empty",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			errs := validateWorkspaces(tt.workspaces, nil)
+			require.NotEmpty(t, errs)
+			assert.Contains(t, strings.Join(errs, "; "), tt.want)
+		})
+	}
+}
+
 func TestValidate_PaneEmptyID_Error(t *testing.T) {
 	cfg := validConfig()
 	cfg.Layout.Children[0].Pane.ID = ""
@@ -150,6 +258,106 @@ layout:
 	require.NoError(t, err)
 	assert.Equal(t, 8080, cfg.Server.Port)
 	assert.Equal(t, "horizontal", cfg.Layout.Direction)
+	assert.Equal(t, "default", cfg.Workspaces.Active)
+	assert.Equal(t, "top", cfg.Workspaces.TabPosition)
+	require.Len(t, cfg.Workspaces.Items, 1)
+	assert.Equal(t, "Default", cfg.Workspaces.Items[0].Title)
+}
+
+func TestLoad_WorkspacesFile(t *testing.T) {
+	content := `
+server:
+  port: 8080
+  host: "127.0.0.1"
+workspaces:
+  active: ops
+  tab_position: left
+  items:
+    - id: dev
+      title: Dev
+      layout:
+        direction: horizontal
+        children:
+          - size: 100
+            pane:
+              id: dev-main
+              type: local
+    - id: ops
+      title: Ops
+      layout:
+        direction: vertical
+        children:
+          - size: 100
+            pane:
+              id: ops-main
+              type: local
+`
+	f := writeTempFile(t, content)
+	cfg, err := Load(f)
+	require.NoError(t, err)
+	assert.Equal(t, "ops", cfg.Workspaces.Active)
+	assert.Equal(t, "left", cfg.Workspaces.TabPosition)
+	assert.Equal(t, "vertical", cfg.ActiveLayout().Direction)
+}
+
+func TestLoad_WorkspacesTakePrecedenceOverLegacyLayout(t *testing.T) {
+	content := `
+server:
+  port: 8080
+  host: "127.0.0.1"
+layout:
+  direction: vertical
+  children:
+    - size: 100
+      pane:
+        id: legacy-main
+        type: local
+workspaces:
+  active: dev
+  tab_position: bottom
+  items:
+    - id: dev
+      title: Dev
+      layout:
+        direction: horizontal
+        children:
+          - size: 100
+            pane:
+              id: dev-main
+              type: local
+`
+	f := writeTempFile(t, content)
+	cfg, err := Load(f)
+	require.NoError(t, err)
+	assert.Equal(t, "bottom", cfg.Workspaces.TabPosition)
+	assert.Equal(t, "horizontal", cfg.Layout.Direction)
+	require.Len(t, cfg.AllPanes(), 1)
+	assert.Equal(t, "dev-main", cfg.AllPanes()[0].ID)
+}
+
+func TestLoad_WorkspacesDefaultsActiveAndTabPosition(t *testing.T) {
+	content := `
+server:
+  port: 8080
+  host: "127.0.0.1"
+workspaces:
+  items:
+    - id: first
+      title: First
+      layout:
+        direction: vertical
+        children:
+          - size: 100
+            pane:
+              id: first-main
+              type: local
+`
+	f := writeTempFile(t, content)
+	cfg, err := Load(f)
+	require.NoError(t, err)
+	assert.Equal(t, "first", cfg.Workspaces.Active)
+	assert.Equal(t, "top", cfg.Workspaces.TabPosition)
+	assert.Equal(t, "vertical", cfg.ActiveLayout().Direction)
 }
 
 func TestLoad_TightensExistingFilePermissions(t *testing.T) {
@@ -241,10 +449,133 @@ func TestAllPanes_FlatList(t *testing.T) {
 	assert.Len(t, panes, 3)
 }
 
+func TestAllPanes_IncludesAllWorkspaces(t *testing.T) {
+	cfg := &Config{
+		Workspaces: WorkspacesConfig{
+			Active:      "one",
+			TabPosition: "top",
+			Items: []WorkspaceConfig{
+				{
+					ID:    "one",
+					Title: "One",
+					Layout: LayoutNode{
+						Direction: "horizontal",
+						Children:  []LayoutChild{{Size: 100, Pane: &PaneConfig{ID: "one-main", Type: "local"}}},
+					},
+				},
+				{
+					ID:    "two",
+					Title: "Two",
+					Layout: LayoutNode{
+						Direction: "horizontal",
+						Children:  []LayoutChild{{Size: 100, Pane: &PaneConfig{ID: "two-main", Type: "local"}}},
+					},
+				},
+			},
+		},
+	}
+	panes := cfg.AllPanes()
+	require.Len(t, panes, 2)
+	assert.Equal(t, "one-main", panes[0].ID)
+	assert.Equal(t, "two-main", panes[1].ID)
+}
+
 func TestAllPanes_Empty(t *testing.T) {
 	cfg := &Config{Layout: LayoutNode{Direction: "horizontal"}}
 	panes := cfg.AllPanes()
 	assert.Empty(t, panes)
+}
+
+func TestReadMethods_DoNotNormalizeConfigInPlace(t *testing.T) {
+	cfg := validConfig()
+	require.Empty(t, cfg.Workspaces.Items)
+
+	view := cfg.WorkspacesView()
+	require.Len(t, view.Items, 1)
+	assert.Equal(t, "default", view.Active)
+	assert.Empty(t, cfg.Workspaces.Items)
+	assert.Empty(t, cfg.Workspaces.Active)
+
+	panes := cfg.AllPanes()
+	require.Len(t, panes, 1)
+	assert.Equal(t, "main", panes[0].ID)
+	assert.Empty(t, cfg.Workspaces.Items)
+
+	require.NoError(t, cfg.Validate())
+	assert.Empty(t, cfg.Workspaces.Items)
+}
+
+func TestAddDefaultWorkspace_CreatesUniqueLocalWorkspace(t *testing.T) {
+	cfg := &Config{
+		Workspaces: WorkspacesConfig{
+			Active:      "default",
+			TabPosition: "top",
+			Items: []WorkspaceConfig{
+				{ID: "default", Title: "Default", Layout: singlePaneLayout("local-main")},
+				{ID: "workspace-2", Title: "Existing", Layout: singlePaneLayout("workspace-2-main")},
+			},
+		},
+	}
+
+	workspace := cfg.AddDefaultWorkspace()
+
+	assert.Equal(t, "workspace-3", workspace.ID)
+	assert.Equal(t, "Workspace 3", workspace.Title)
+	assert.Equal(t, "workspace-3", cfg.Workspaces.Active)
+	require.Len(t, workspace.Layout.Children, 1)
+	assert.Equal(t, "workspace-3-main", workspace.Layout.Children[0].Pane.ID)
+	assert.Equal(t, "local", workspace.Layout.Children[0].Pane.Type)
+}
+
+func TestRemoveWorkspace_RemovesTargetAndSelectsNextActive(t *testing.T) {
+	cfg := &Config{
+		Workspaces: WorkspacesConfig{
+			Active:      "two",
+			TabPosition: "top",
+			Items: []WorkspaceConfig{
+				{ID: "one", Title: "One", Layout: singlePaneLayout("one-main")},
+				{ID: "two", Title: "Two", Layout: singlePaneLayout("two-main")},
+				{ID: "three", Title: "Three", Layout: singlePaneLayout("three-main")},
+			},
+		},
+	}
+
+	removed, ok := cfg.RemoveWorkspace("two")
+
+	require.True(t, ok)
+	assert.Equal(t, "two", removed.ID)
+	assert.Equal(t, "three", cfg.Workspaces.Active)
+	assert.Equal(t, "three-main", cfg.Layout.Children[0].Pane.ID)
+	require.Len(t, cfg.Workspaces.Items, 2)
+	assert.Equal(t, "one", cfg.Workspaces.Items[0].ID)
+	assert.Equal(t, "three", cfg.Workspaces.Items[1].ID)
+}
+
+func TestRemoveWorkspace_InactiveKeepsActive(t *testing.T) {
+	cfg := &Config{
+		Workspaces: WorkspacesConfig{
+			Active:      "one",
+			TabPosition: "top",
+			Items: []WorkspaceConfig{
+				{ID: "one", Title: "One", Layout: singlePaneLayout("one-main")},
+				{ID: "two", Title: "Two", Layout: singlePaneLayout("two-main")},
+			},
+		},
+	}
+
+	_, ok := cfg.RemoveWorkspace("two")
+
+	require.True(t, ok)
+	assert.Equal(t, "one", cfg.Workspaces.Active)
+	assert.Equal(t, "one-main", cfg.Layout.Children[0].Pane.ID)
+	require.Len(t, cfg.Workspaces.Items, 1)
+	assert.Equal(t, "one", cfg.Workspaces.Items[0].ID)
+}
+
+func TestRemoveWorkspace_NotFound(t *testing.T) {
+	cfg := validConfig()
+	_, ok := cfg.RemoveWorkspace("missing")
+	assert.False(t, ok)
 }
 
 func TestSaveLayout_WithFile(t *testing.T) {
@@ -275,6 +606,40 @@ layout:
 	data, err := os.ReadFile(f)
 	require.NoError(t, err)
 	assert.Contains(t, string(data), "vertical")
+	assert.Contains(t, string(data), "workspaces:")
+	assert.NotContains(t, string(data), "\nlayout:")
+}
+
+func TestSaveLayout_UpdatesOnlyActiveWorkspace(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	cfg := &Config{
+		Server: ServerConfig{Port: 8080, Host: "127.0.0.1"},
+		Workspaces: WorkspacesConfig{
+			Active:      "two",
+			TabPosition: "right",
+			Items: []WorkspaceConfig{
+				{ID: "one", Title: "One", Layout: singlePaneLayout("one-main")},
+				{ID: "two", Title: "Two", Layout: singlePaneLayout("two-main")},
+			},
+		},
+		filePath: path,
+	}
+
+	newLayout := LayoutNode{
+		Direction: "vertical",
+		Children:  []LayoutChild{{Size: 100, Pane: &PaneConfig{ID: "two-main", Type: "local"}}},
+	}
+	require.NoError(t, cfg.SaveLayout(newLayout))
+
+	assert.Equal(t, "horizontal", cfg.Workspaces.Items[0].Layout.Direction)
+	assert.Equal(t, "vertical", cfg.Workspaces.Items[1].Layout.Direction)
+
+	loaded, err := Load(path)
+	require.NoError(t, err)
+	assert.Equal(t, "two", loaded.Workspaces.Active)
+	assert.Equal(t, "right", loaded.Workspaces.TabPosition)
+	assert.Equal(t, "horizontal", loaded.Workspaces.Items[0].Layout.Direction)
+	assert.Equal(t, "vertical", loaded.Workspaces.Items[1].Layout.Direction)
 }
 
 func TestSaveLayout_NoFile_MemoryOnly(t *testing.T) {
@@ -380,6 +745,46 @@ layout:
 	require.NotNil(t, cfg.Layout.Children[0].Pane)
 	assert.Equal(t, filepath.Join(home, "mydir"), cfg.Layout.Children[0].Pane.Cwd)
 	assert.False(t, strings.HasPrefix(cfg.Layout.Children[0].Pane.Cwd, "~/"))
+}
+
+func TestExpandPanesCwd_AllWorkspaces(t *testing.T) {
+	home, err := os.UserHomeDir()
+	require.NoError(t, err)
+
+	content := `
+server:
+  port: 8080
+  host: "127.0.0.1"
+workspaces:
+  active: one
+  items:
+    - id: one
+      title: One
+      layout:
+        direction: horizontal
+        children:
+          - size: 100
+            pane:
+              id: one-main
+              type: local
+              cwd: ~/one
+    - id: two
+      title: Two
+      layout:
+        direction: horizontal
+        children:
+          - size: 100
+            pane:
+              id: two-main
+              type: local
+              cwd: ~/two
+`
+	f := writeTempFile(t, content)
+	cfg, err := Load(f)
+	require.NoError(t, err)
+
+	assert.Equal(t, filepath.Join(home, "one"), cfg.Workspaces.Items[0].Layout.Children[0].Pane.Cwd)
+	assert.Equal(t, filepath.Join(home, "two"), cfg.Workspaces.Items[1].Layout.Children[0].Pane.Cwd)
 }
 
 func TestValidate_LocalPaneShellRelativePath_Error(t *testing.T) {
@@ -489,6 +894,80 @@ func TestUpdateLayout_UpdatesMemoryOnly(t *testing.T) {
 	if cfg.Layout.Direction != "horizontal" {
 		t.Errorf("expected horizontal, got %s", cfg.Layout.Direction)
 	}
+	require.Len(t, cfg.Workspaces.Items, 1)
+	assert.Equal(t, "horizontal", cfg.Workspaces.Items[0].Layout.Direction)
+}
+
+func TestWorkspaceLayoutMutationHelpers(t *testing.T) {
+	cfg := &Config{
+		Workspaces: WorkspacesConfig{
+			Active:      "one",
+			TabPosition: "top",
+			Items: []WorkspaceConfig{
+				{ID: "one", Title: "One", Layout: singlePaneLayout("one-main")},
+				{ID: "two", Title: "Two", Layout: singlePaneLayout("two-main")},
+			},
+		},
+	}
+	cfg.normalizeWorkspaces()
+
+	inactiveLayout := LayoutNode{
+		Direction: "vertical",
+		Children:  []LayoutChild{{Size: 100, Pane: &PaneConfig{ID: "two-main", Type: "local"}}},
+	}
+	assert.True(t, cfg.UpdateWorkspaceLayout("two", inactiveLayout))
+	assert.Equal(t, "horizontal", cfg.Layout.Direction)
+	assert.Equal(t, "vertical", cfg.Workspaces.Items[1].Layout.Direction)
+
+	assert.True(t, cfg.SetActiveWorkspace("two"))
+	assert.Equal(t, "two", cfg.ActiveWorkspaceID())
+	assert.Equal(t, "vertical", cfg.Layout.Direction)
+
+	assert.False(t, cfg.SetActiveWorkspace("missing"))
+	assert.Equal(t, "two", cfg.ActiveWorkspaceID())
+	assert.False(t, cfg.UpdateWorkspaceLayout("missing", singlePaneLayout("missing-main")))
+}
+
+func TestRemovePaneFromLayout_AllWorkspaces(t *testing.T) {
+	cfg := &Config{
+		Workspaces: WorkspacesConfig{
+			Active:      "two",
+			TabPosition: "top",
+			Items: []WorkspaceConfig{
+				{
+					ID:    "one",
+					Title: "One",
+					Layout: LayoutNode{
+						Direction: "horizontal",
+						Children: []LayoutChild{
+							{Size: 50, Pane: &PaneConfig{ID: "remove-one", Type: "local"}},
+							{Size: 50, Pane: &PaneConfig{ID: "keep-one", Type: "local"}},
+						},
+					},
+				},
+				{
+					ID:    "two",
+					Title: "Two",
+					Layout: LayoutNode{
+						Direction: "horizontal",
+						Children: []LayoutChild{
+							{Size: 50, Pane: &PaneConfig{ID: "remove-two", Type: "local"}},
+							{Size: 50, Pane: &PaneConfig{ID: "keep-two", Type: "local"}},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	cfg.RemovePaneFromLayout("remove-one")
+	cfg.RemovePaneFromLayout("remove-two")
+
+	require.Len(t, cfg.Workspaces.Items[0].Layout.Children, 1)
+	assert.Equal(t, "keep-one", cfg.Workspaces.Items[0].Layout.Children[0].Pane.ID)
+	require.Len(t, cfg.Workspaces.Items[1].Layout.Children, 1)
+	assert.Equal(t, "keep-two", cfg.Workspaces.Items[1].Layout.Children[0].Pane.ID)
+	assert.Equal(t, "keep-two", cfg.Layout.Children[0].Pane.ID)
 }
 
 func TestValidatePane_ShellOnSSH_AbsolutePathOK(t *testing.T) {
@@ -523,6 +1002,13 @@ func validConfig() *Config {
 				{Size: 100.0, Pane: &PaneConfig{ID: "main", Type: "local"}},
 			},
 		},
+	}
+}
+
+func singlePaneLayout(id string) LayoutNode {
+	return LayoutNode{
+		Direction: "horizontal",
+		Children:  []LayoutChild{{Size: 100, Pane: &PaneConfig{ID: id, Type: "local"}}},
 	}
 }
 

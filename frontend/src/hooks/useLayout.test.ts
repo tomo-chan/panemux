@@ -10,14 +10,38 @@ const validLayout: LayoutNode = {
 
 const validDisplay = { show_header: true, show_status_bar: true }
 
+const validWorkspaces = {
+  active: 'dev',
+  tab_position: 'top',
+  items: [
+    { id: 'dev', title: 'Dev', layout: validLayout },
+    {
+      id: 'ops',
+      title: 'Ops',
+      layout: {
+        direction: 'vertical',
+        children: [{ size: 100, pane: { id: 'ops-main', type: 'local' } }],
+      },
+    },
+  ],
+}
+
+function workspacesForLayout(layout: LayoutNode) {
+  return {
+    active: 'dev',
+    tab_position: 'top',
+    items: [{ id: 'dev', title: 'Dev', layout }],
+  }
+}
+
 describe('useLayout', () => {
   afterEach(() => {
     vi.restoreAllMocks()
   })
 
-  it('fetches and parses layout on mount', async () => {
+  it('fetches and parses workspaces on mount', async () => {
     window.fetch = vi.fn()
-      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validLayout) } as Response)
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validWorkspaces) } as Response)
       .mockResolvedValue({ ok: true, json: () => Promise.resolve(validDisplay) } as Response)
 
     const { result } = renderHook(() => useLayout())
@@ -26,9 +50,151 @@ describe('useLayout', () => {
     expect(result.current.error).toBeNull()
   })
 
+  it('fetches workspaces and switches active workspace', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validWorkspaces) } as Response)
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validDisplay) } as Response)
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validWorkspaces) } as Response)
+    window.fetch = fetchMock
+
+    const { result } = renderHook(() => useLayout())
+    await waitFor(() => expect(result.current.workspaces).not.toBeNull())
+    expect(result.current.layout?.children[0].pane?.id).toBe('main')
+
+    await act(async () => {
+      await result.current.setActiveWorkspace('ops')
+    })
+
+    expect(result.current.workspaces?.active).toBe('ops')
+    expect(result.current.layout?.direction).toBe('vertical')
+    expect(fetchMock).toHaveBeenCalledWith('/api/workspaces/active', expect.objectContaining({ method: 'PUT' }))
+  })
+
+  it('falls back to first workspace when active id is not in the response', async () => {
+    const workspaces = { ...validWorkspaces, active: 'missing' }
+    window.fetch = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(workspaces) } as Response)
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validDisplay) } as Response)
+
+    const { result } = renderHook(() => useLayout())
+    await waitFor(() => expect(result.current.workspaces).not.toBeNull())
+    expect(result.current.layout?.children[0].pane?.id).toBe('main')
+  })
+
+  it('does not call active workspace API for same or missing workspace selections', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validWorkspaces) } as Response)
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validDisplay) } as Response)
+    window.fetch = fetchMock
+
+    const { result } = renderHook(() => useLayout())
+    await waitFor(() => expect(result.current.workspaces).not.toBeNull())
+    const callsAfterInit = fetchMock.mock.calls.length
+
+    await act(async () => {
+      await result.current.setActiveWorkspace('dev')
+      await result.current.setActiveWorkspace('missing')
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(callsAfterInit)
+    expect(result.current.workspaces?.active).toBe('dev')
+  })
+
+  it('adds a workspace and switches to the returned active workspace', async () => {
+    const addedLayout: LayoutNode = {
+      direction: 'horizontal',
+      children: [{ size: 100, pane: { id: 'workspace-3-main', type: 'local' } }],
+    }
+    const addedWorkspaces = {
+      ...validWorkspaces,
+      active: 'workspace-3',
+      items: [
+        ...validWorkspaces.items,
+        { id: 'workspace-3', title: 'Workspace 3', layout: addedLayout },
+      ],
+    }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validWorkspaces) } as Response)
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validDisplay) } as Response)
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(addedWorkspaces) } as Response)
+    window.fetch = fetchMock
+
+    const { result } = renderHook(() => useLayout())
+    await waitFor(() => expect(result.current.workspaces).not.toBeNull())
+
+    await act(async () => {
+      await result.current.addWorkspace()
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/workspaces', { method: 'POST' })
+    expect(result.current.workspaces?.active).toBe('workspace-3')
+    expect(result.current.layout?.children[0].pane?.id).toBe('workspace-3-main')
+  })
+
+  it('sets error when adding a workspace fails', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validWorkspaces) } as Response)
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validDisplay) } as Response)
+      .mockResolvedValueOnce({ ok: false, status: 403 } as Response)
+    window.fetch = fetchMock
+
+    const { result } = renderHook(() => useLayout())
+    await waitFor(() => expect(result.current.workspaces).not.toBeNull())
+
+    await act(async () => {
+      await result.current.addWorkspace()
+    })
+
+    expect(result.current.error).toContain('403')
+    expect(result.current.workspaces?.active).toBe('dev')
+  })
+
+  it('deletes a workspace and switches to the returned active workspace', async () => {
+    const remainingWorkspaces = {
+      active: 'ops',
+      tab_position: 'top',
+      items: [validWorkspaces.items[1]],
+    }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validWorkspaces) } as Response)
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validDisplay) } as Response)
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(remainingWorkspaces) } as Response)
+    window.fetch = fetchMock
+
+    const { result } = renderHook(() => useLayout())
+    await waitFor(() => expect(result.current.workspaces).not.toBeNull())
+
+    await act(async () => {
+      await result.current.deleteWorkspace('dev')
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/workspaces/dev', { method: 'DELETE' })
+    expect(result.current.workspaces?.items).toHaveLength(1)
+    expect(result.current.workspaces?.active).toBe('ops')
+    expect(result.current.layout?.children[0].pane?.id).toBe('ops-main')
+  })
+
+  it('sets error when deleting a workspace fails', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validWorkspaces) } as Response)
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validDisplay) } as Response)
+      .mockResolvedValueOnce({ ok: false, status: 409 } as Response)
+    window.fetch = fetchMock
+
+    const { result } = renderHook(() => useLayout())
+    await waitFor(() => expect(result.current.workspaces).not.toBeNull())
+
+    await act(async () => {
+      await result.current.deleteWorkspace('dev')
+    })
+
+    expect(result.current.error).toContain('409')
+    expect(result.current.workspaces?.items).toHaveLength(2)
+  })
+
   it('fetches display config on mount', async () => {
     window.fetch = vi.fn()
-      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validLayout) } as Response)
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validWorkspaces) } as Response)
       .mockResolvedValue({ ok: true, json: () => Promise.resolve(validDisplay) } as Response)
 
     const { result } = renderHook(() => useLayout())
@@ -64,7 +230,7 @@ describe('useLayout', () => {
       .fn()
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(validLayout),
+        json: () => Promise.resolve(validWorkspaces),
       } as Response)
       .mockResolvedValue({ ok: true, json: () => Promise.resolve(validDisplay) } as Response)
     window.fetch = fetchMock
@@ -102,11 +268,42 @@ describe('useLayout', () => {
     }
   })
 
+  it('saves size updates to the active workspace endpoint', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(validWorkspaces),
+      } as Response)
+      .mockResolvedValue({ ok: true, json: () => Promise.resolve(validDisplay) } as Response)
+    window.fetch = fetchMock
+
+    const { result } = renderHook(() => useLayout())
+    await waitFor(() => expect(result.current.workspaces).not.toBeNull())
+
+    vi.useFakeTimers()
+    try {
+      const updated: LayoutNode = { ...validLayout, direction: 'vertical' }
+      act(() => {
+        result.current.updateSizes(updated)
+      })
+      await vi.runAllTimersAsync()
+
+      expect(result.current.workspaces?.items[0].layout.direction).toBe('vertical')
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/workspaces/dev/layout',
+        expect.objectContaining({ method: 'PUT' }),
+      )
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   describe('splitPane', () => {
     it('creates a session and updates layout', async () => {
       const fetchMock = vi
         .fn()
-        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validLayout) } as Response) // GET /api/layout
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validWorkspaces) } as Response) // GET /api/workspaces
         .mockResolvedValueOnce({ ok: false } as Response) // GET /api/display (non-fatal)
         .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ shell: '/bin/zsh' }) } as Response) // GET /api/detect-shell
         .mockResolvedValueOnce({
@@ -130,10 +327,35 @@ describe('useLayout', () => {
       expect(child?.children?.[0].pane?.id).toBe('main')
     })
 
+    it('saves split changes to the active workspace endpoint', async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validWorkspaces) } as Response)
+        .mockResolvedValueOnce({ ok: false } as Response)
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ shell: '/bin/zsh' }) } as Response)
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) } as Response)
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) } as Response)
+      window.fetch = fetchMock
+
+      const { result } = renderHook(() => useLayout())
+      await waitFor(() => expect(result.current.workspaces).not.toBeNull())
+
+      await act(async () => {
+        await result.current.splitPane('main', 'horizontal')
+      })
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/workspaces/dev/layout',
+        expect.objectContaining({ method: 'PUT' }),
+      )
+      expect(result.current.workspaces?.items[0].layout.children[0].children).toHaveLength(2)
+      expect(result.current.workspaces?.items[1].layout.direction).toBe('vertical')
+    })
+
     it('sets detected shell on the new pane when splitting', async () => {
       const fetchMock = vi
         .fn()
-        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validLayout) } as Response)
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validWorkspaces) } as Response)
         .mockResolvedValueOnce({ ok: false } as Response)
         .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ shell: '/bin/zsh' }) } as Response)
         .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) } as Response)
@@ -170,7 +392,7 @@ describe('useLayout', () => {
       }
       const fetchMock = vi
         .fn()
-        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(sshLayout) } as Response)
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(workspacesForLayout(sshLayout)) } as Response)
         .mockResolvedValueOnce({ ok: false } as Response)
         .mockResolvedValueOnce({
           ok: true,
@@ -218,7 +440,7 @@ describe('useLayout', () => {
       }
       const fetchMock = vi
         .fn()
-        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(localLayout) } as Response)
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(workspacesForLayout(localLayout)) } as Response)
         .mockResolvedValueOnce({ ok: false } as Response)
         .mockResolvedValueOnce({
           ok: true,
@@ -244,7 +466,7 @@ describe('useLayout', () => {
     it('splits successfully even when detect-shell fails', async () => {
       const fetchMock = vi
         .fn()
-        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validLayout) } as Response)
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validWorkspaces) } as Response)
         .mockResolvedValueOnce({ ok: false } as Response)
         .mockResolvedValueOnce({ ok: false, status: 500 } as Response)
         .mockResolvedValueOnce({
@@ -278,7 +500,7 @@ describe('useLayout', () => {
       }
       const fetchMock = vi
         .fn()
-        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(tmuxLayout) } as Response)
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(workspacesForLayout(tmuxLayout)) } as Response)
         .mockResolvedValueOnce({ ok: false } as Response)
         .mockResolvedValueOnce({
           ok: true,
@@ -322,7 +544,7 @@ describe('useLayout', () => {
       }
       const fetchMock = vi
         .fn()
-        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(twoChildLayout) } as Response) // GET /api/layout
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(workspacesForLayout(twoChildLayout)) } as Response) // GET /api/workspaces
         .mockResolvedValueOnce({ ok: false } as Response) // GET /api/display (non-fatal)
         .mockResolvedValueOnce({ ok: true } as Response) // DELETE /api/sessions/main
         .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) } as Response) // PUT /api/layout
@@ -339,10 +561,47 @@ describe('useLayout', () => {
       expect(result.current.layout?.children[0].pane?.id).toBe('other')
     })
 
+    it('saves close changes to the active workspace endpoint', async () => {
+      const workspaceLayout: LayoutNode = {
+        direction: 'horizontal',
+        children: [
+          { size: 50, pane: { id: 'main', type: 'local' } },
+          { size: 50, pane: { id: 'other', type: 'local' } },
+        ],
+      }
+      const workspaces = {
+        ...validWorkspaces,
+        items: [
+          { id: 'dev', title: 'Dev', layout: workspaceLayout },
+          validWorkspaces.items[1],
+        ],
+      }
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(workspaces) } as Response)
+        .mockResolvedValueOnce({ ok: false } as Response)
+        .mockResolvedValueOnce({ ok: true } as Response)
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) } as Response)
+      window.fetch = fetchMock
+
+      const { result } = renderHook(() => useLayout())
+      await waitFor(() => expect(result.current.workspaces).not.toBeNull())
+
+      await act(async () => {
+        await result.current.closePane('main')
+      })
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/workspaces/dev/layout',
+        expect.objectContaining({ method: 'PUT' }),
+      )
+      expect(result.current.workspaces?.items[0].layout.children[0].pane?.id).toBe('other')
+    })
+
     it('sets layout to null when last pane is closed', async () => {
       const fetchMock = vi
         .fn()
-        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validLayout) } as Response)
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validWorkspaces) } as Response)
         .mockResolvedValueOnce({ ok: false } as Response) // display (non-fatal)
         .mockResolvedValueOnce({ ok: true } as Response) // DELETE
       window.fetch = fetchMock
@@ -369,7 +628,7 @@ describe('useLayout', () => {
       }
       const fetchMock = vi
         .fn()
-        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(twoChildLayout) } as Response) // GET /api/layout
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(workspacesForLayout(twoChildLayout)) } as Response) // GET /api/workspaces
         .mockResolvedValueOnce({ ok: false } as Response) // GET /api/display
         .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) } as Response) // PUT /api/layout
       window.fetch = fetchMock
@@ -384,9 +643,45 @@ describe('useLayout', () => {
       expect(result.current.layout?.children[0].pane?.id).toBe('right')
       expect(result.current.layout?.children[1].pane?.id).toBe('left')
       const putCall = fetchMock.mock.calls.find(
-        (c) => c[0] === '/api/layout' && (c[1] as RequestInit)?.method === 'PUT',
+        (c) => c[0] === '/api/workspaces/dev/layout' && (c[1] as RequestInit)?.method === 'PUT',
       )
       expect(putCall).toBeDefined()
+    })
+
+    it('saves swapped panes to the active workspace endpoint', async () => {
+      const workspaceLayout: LayoutNode = {
+        direction: 'horizontal',
+        children: [
+          { size: 50, pane: { id: 'left', type: 'local' } },
+          { size: 50, pane: { id: 'right', type: 'ssh' } },
+        ],
+      }
+      const workspaces = {
+        ...validWorkspaces,
+        items: [
+          { id: 'dev', title: 'Dev', layout: workspaceLayout },
+          validWorkspaces.items[1],
+        ],
+      }
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(workspaces) } as Response)
+        .mockResolvedValueOnce({ ok: false } as Response)
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) } as Response)
+      window.fetch = fetchMock
+
+      const { result } = renderHook(() => useLayout())
+      await waitFor(() => expect(result.current.workspaces).not.toBeNull())
+
+      await act(async () => {
+        await result.current.swapPanes('left', 'right')
+      })
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/workspaces/dev/layout',
+        expect.objectContaining({ method: 'PUT' }),
+      )
+      expect(result.current.workspaces?.items[0].layout.children[0].pane?.id).toBe('right')
     })
 
     it('does nothing when layout is null', async () => {

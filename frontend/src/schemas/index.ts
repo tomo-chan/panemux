@@ -48,6 +48,26 @@ export const LayoutNodeSchema = z.object({
 
 export type LayoutNode = z.infer<typeof LayoutNodeSchema>
 
+export const TabPositionSchema = z.enum(['top', 'bottom', 'left', 'right'])
+
+export type TabPosition = z.infer<typeof TabPositionSchema>
+
+export const WorkspaceSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1),
+  layout: LayoutNodeSchema,
+})
+
+export type Workspace = z.infer<typeof WorkspaceSchema>
+
+export const WorkspacesResponseSchema = z.object({
+  active: z.string().min(1),
+  tab_position: TabPositionSchema,
+  items: z.array(WorkspaceSchema).min(1),
+})
+
+export type WorkspacesResponse = z.infer<typeof WorkspacesResponseSchema>
+
 export const SessionInfoSchema = z.object({
   id: z.string(),
   type: z.string(),

@@ -39,8 +39,19 @@ ssh_connections:
     user: "ubuntu"
     password: "secret"
 
-# ── Layout ────────────────────────────────────────────────────────────────────
-# Recursive tree of splits and panes.
+# ── Workspaces ────────────────────────────────────────────────────────────────
+# Workspaces are tabbed layouts. Each workspace owns one recursive tree of
+# splits and panes. `tab_position` controls where the workspace tabs are shown:
+# top | bottom | left | right.
+#
+# Older config files with a top-level `layout:` are still accepted. On the next
+# save, panemux migrates them to a single `default` workspace and writes only the
+# `workspaces:` format.
+#
+# The tab bar is hidden during normal use when only one workspace exists. Turn on
+# edit mode to add or delete workspaces. New workspaces start with one local
+# terminal pane. Deleting a workspace asks for confirmation, and the last
+# remaining workspace cannot be deleted. The active workspace selection is saved.
 #
 # Split node  — has `direction` and `children` (no `pane`)
 # Leaf node   — has `pane` (no `direction` / `children`)
@@ -56,61 +67,79 @@ ssh_connections:
 # │                     │  tmux                │  ssh_tmux             │
 # └─────────────────────┴──────────────────────┴───────────────────────┘
 
-layout:
-  direction: horizontal
-  children:
+workspaces:
+  active: dev
+  tab_position: top
+  items:
+    - id: dev
+      title: "Development"
+      layout:
+        direction: horizontal
+        children:
 
-    # ── local pane ──────────────────────────────────────────────────────────
-    # Spawns a local shell process via PTY.
-    - size: 50
-      pane:
-        id: "local-main"
-        type: local
-        shell: "/bin/zsh"       # optional; must be an absolute path
-        cwd: "~/development"    # optional; ~/ is expanded
-        title: "Dev Shell"      # optional; shown in the pane header
-        # Per-pane display overrides (uncomment to override global display settings):
-        # show_header: false
-        show_status_bar: false  # hide dimensions bar for this pane only
+          # ── local pane ────────────────────────────────────────────────────
+          # Spawns a local shell process via PTY.
+          - size: 50
+            pane:
+              id: "local-main"
+              type: local
+              shell: "/bin/zsh"       # optional; must be an absolute path
+              cwd: "~/development"    # optional; ~/ is expanded
+              title: "Dev Shell"      # optional; shown in the pane header
+              # Per-pane display overrides (uncomment to override global display settings):
+              # show_header: false
+              show_status_bar: false  # hide dimensions bar for this pane only
 
-    # ── right half: vertical split ──────────────────────────────────────────
-    - size: 50
-      direction: vertical
-      children:
+          # ── right half: vertical split ────────────────────────────────────
+          - size: 50
+            direction: vertical
+            children:
 
-        # ── ssh pane ─────────────────────────────────────────────────────────
-        # Opens a remote shell via SSH. `connection` must match a key under
-        # ssh_connections above.
-        - size: 40
-          pane:
-            id: "ssh-prod"
-            type: ssh
-            connection: prod-web  # references ssh_connections key
-            cwd: "/var/www"       # optional; remote working directory
-            title: "Prod Web"
+              # ── ssh pane ─────────────────────────────────────────────────
+              # Opens a remote shell via SSH. `connection` must match a key under
+              # ssh_connections above.
+              - size: 40
+                pane:
+                  id: "ssh-prod"
+                  type: ssh
+                  connection: prod-web  # references ssh_connections key
+                  cwd: "/var/www"       # optional; remote working directory
+                  title: "Prod Web"
 
-        # ── bottom half: horizontal split ─────────────────────────────────
-        - size: 60
-          direction: horizontal
-          children:
+              # ── bottom half: horizontal split ────────────────────────────
+              - size: 60
+                direction: horizontal
+                children:
 
-            # ── tmux pane ──────────────────────────────────────────────────
-            # Attaches to a local tmux session (creates it if it doesn't exist).
-            - size: 50
-              pane:
-                id: "tmux-local"
-                type: tmux
-                tmux_session: "work"  # tmux session name; created if absent
-                title: "Tmux Work"
+                  # ── tmux pane ────────────────────────────────────────────
+                  # Attaches to a local tmux session (creates it if it doesn't exist).
+                  - size: 50
+                    pane:
+                      id: "tmux-local"
+                      type: tmux
+                      tmux_session: "work"  # tmux session name; created if absent
+                      title: "Tmux Work"
 
-            # ── ssh_tmux pane ──────────────────────────────────────────────
-            # SSHs to a remote host, then attaches to a tmux session there
-            # (creates the session if it doesn't exist).
-            - size: 50
-              pane:
-                id: "ssh-tmux-bastion"
-                type: ssh_tmux
-                connection: bastion       # references ssh_connections key
-                tmux_session: "monitor"   # remote tmux session name
-                title: "Bastion Monitor"
-                show_header: false        # hide header for this pane only
+                  # ── ssh_tmux pane ────────────────────────────────────────
+                  # SSHs to a remote host, then attaches to a tmux session there
+                  # (creates the session if it doesn't exist).
+                  - size: 50
+                    pane:
+                      id: "ssh-tmux-bastion"
+                      type: ssh_tmux
+                      connection: bastion       # references ssh_connections key
+                      tmux_session: "monitor"   # remote tmux session name
+                      title: "Bastion Monitor"
+                      show_header: false        # hide header for this pane only
+
+    - id: ops
+      title: "Operations"
+      layout:
+        direction: horizontal
+        children:
+          - size: 100
+            pane:
+              id: "ops-shell"
+              type: local
+              shell: "/bin/zsh"
+              title: "Ops Shell"
