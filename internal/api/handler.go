@@ -167,17 +167,6 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 	id := chi.URLParam(r, "id")
 	view := h.cfg.WorkspacesView()
-	found := false
-	for _, workspace := range view.Items {
-		if workspace.ID == id {
-			found = true
-			break
-		}
-	}
-	if !found {
-		http.Error(w, "workspace not found", http.StatusNotFound)
-		return
-	}
 	if len(view.Items) <= 1 {
 		http.Error(w, "cannot delete the last workspace", http.StatusConflict)
 		return
