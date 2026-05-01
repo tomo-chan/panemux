@@ -7,7 +7,7 @@ import { WorkspaceTabs } from './components/WorkspaceTabs'
 import { useLayout } from './hooks/useLayout'
 import { useEditMode } from './hooks/useEditMode'
 import { usePaneSettings } from './hooks/usePaneSettings'
-import { DisplayConfig } from './types'
+import { DisplayConfig, LayoutNode } from './types'
 import { TERMINAL_FONT_FAMILY } from './utils/fonts'
 import { findPaneById } from './utils/layoutTree'
 import type { SSHConfigHost } from './schemas'
@@ -25,6 +25,32 @@ export const App: React.FC = () => {
   const [isAddSSHHostOpen, setIsAddSSHHostOpen] = useState(false)
   const [addSSHHostError, setAddSSHHostError] = useState<string | null>(null)
   const [isAddSSHHostSaving, setIsAddSSHHostSaving] = useState(false)
+  const [pendingAgentConfirmationPaneIds, setPendingAgentConfirmationPaneIds] = useState<Set<string>>(() => new Set())
+  const notifiedPaneIdsRef = React.useRef<Set<string>>(new Set())
+
+  const handleAgentConfirmation = useCallback((paneId: string) => {
+    setPendingAgentConfirmationPaneIds((current) => {
+      if (current.has(paneId)) return current
+      const next = new Set(current)
+      next.add(paneId)
+      return next
+    })
+
+    if (!notifiedPaneIdsRef.current.has(paneId)) {
+      notifiedPaneIdsRef.current.add(paneId)
+      void notifyAgentConfirmation(paneId)
+    }
+  }, [])
+
+  const clearAgentConfirmation = useCallback((paneId: string) => {
+    notifiedPaneIdsRef.current.delete(paneId)
+    setPendingAgentConfirmationPaneIds((current) => {
+      if (!current.has(paneId)) return current
+      const next = new Set(current)
+      next.delete(paneId)
+      return next
+    })
+  }, [])
 
   const handleAddSSHHost = useCallback(async (host: SSHConfigHost) => {
     setIsAddSSHHostSaving(true)
@@ -71,6 +97,12 @@ export const App: React.FC = () => {
     )
   }
 
+  const notifyingWorkspaceIds = workspaces
+    ? new Set(workspaces.items
+      .filter((workspace) => workspaceContainsPendingPane(workspace.layout, pendingAgentConfirmationPaneIds))
+      .map((workspace) => workspace.id))
+    : new Set<string>()
+
   return (
     <LayoutActionsContext.Provider value={{
       onSplit: splitPane,
@@ -86,6 +118,9 @@ export const App: React.FC = () => {
       setDragSourcePaneId,
       displayConfig: displayConfig ?? DEFAULT_DISPLAY,
       editMode,
+      pendingAgentConfirmationPaneIds,
+      onAgentConfirmation: handleAgentConfirmation,
+      onAgentConfirmationClear: clearAgentConfirmation,
     }}>
       <div
         style={{
@@ -109,6 +144,7 @@ export const App: React.FC = () => {
             activeWorkspaceId={workspaces.active}
             tabPosition={workspaces.tab_position}
             onSelect={setActiveWorkspace}
+            notifyingWorkspaceIds={notifyingWorkspaceIds}
             onAdd={editMode ? addWorkspace : undefined}
             onRename={editMode ? renameWorkspace : undefined}
             onTabPositionChange={editMode ? setWorkspaceTabPosition : undefined}
@@ -146,4 +182,30 @@ export const App: React.FC = () => {
       </div>
     </LayoutActionsContext.Provider>
   )
+}
+
+function workspaceContainsPendingPane(layout: LayoutNode, pendingPaneIds: Set<string>): boolean {
+  for (const child of layout.children) {
+    if (child.pane && pendingPaneIds.has(child.pane.id)) return true
+    if (child.direction && child.children?.length) {
+      const nested: LayoutNode = { direction: child.direction, children: child.children }
+      if (workspaceContainsPendingPane(nested, pendingPaneIds)) return true
+    }
+  }
+  return false
+}
+
+async function notifyAgentConfirmation(paneId: string) {
+  if (!('Notification' in window)) return
+
+  let permission = Notification.permission
+  if (permission === 'default') {
+    permission = await Notification.requestPermission()
+  }
+  if (permission !== 'granted') return
+
+  new Notification('Panemux', {
+    body: `Agent is waiting for confirmation in ${paneId}.`,
+    tag: `panemux-agent-confirmation-${paneId}`,
+  })
 }

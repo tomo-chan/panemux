@@ -4,11 +4,14 @@ import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { useWebSocket } from './useWebSocket'
 import { TERMINAL_FONT_FAMILY } from '../utils/fonts'
+import { containsAgentConfirmationPrompt } from '../utils/agentConfirmation'
 
 interface UseTerminalOptions {
   sessionId: string
   container: HTMLElement | null
   editMode?: boolean
+  onAgentConfirmation?: (paneId: string) => void
+  onAgentConfirmationClear?: (paneId: string) => void
 }
 
 interface TerminalEntry {
@@ -18,24 +21,54 @@ interface TerminalEntry {
   disposeTimer: ReturnType<typeof setTimeout> | null
   send: ((data: string | ArrayBuffer | Uint8Array) => void) | null
   editMode: boolean
+  outputTail: string
+  confirmationActive: boolean
+  onAgentConfirmation: ((paneId: string) => void) | null
+  onAgentConfirmationClear: ((paneId: string) => void) | null
 }
 
 const terminalEntries = new Map<string, TerminalEntry>()
+const MAX_OUTPUT_TAIL = 4000
+const decoder = new TextDecoder()
 
-export function useTerminal({ sessionId, container, editMode = false }: UseTerminalOptions) {
+export function useTerminal({
+  sessionId,
+  container,
+  editMode = false,
+  onAgentConfirmation,
+  onAgentConfirmationClear,
+}: UseTerminalOptions) {
   const termRef = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
   const initializedRef = useRef(false)
   const sendRef = useRef<((data: string | ArrayBuffer | Uint8Array) => void) | null>(null)
   const entryRef = useRef<TerminalEntry | null>(null)
+  const onAgentConfirmationRef = useRef<((paneId: string) => void) | null>(null)
+  const onAgentConfirmationClearRef = useRef<((paneId: string) => void) | null>(null)
   const [dims, setDims] = useState<{ cols: number; rows: number } | null>(null)
   const [sessionExited, setSessionExited] = useState(false)
+
+  const recordTerminalOutput = useCallback((text: string) => {
+    const entry = entryRef.current
+    if (!entry || !text) return
+
+    entry.outputTail = `${entry.outputTail}${text}`.slice(-MAX_OUTPUT_TAIL)
+    const hasConfirmation = containsAgentConfirmationPrompt(entry.outputTail)
+    if (hasConfirmation && !entry.confirmationActive) {
+      entry.confirmationActive = true
+      onAgentConfirmationRef.current?.(sessionId)
+    } else if (!hasConfirmation) {
+      entry.confirmationActive = false
+    }
+  }, [sessionId])
 
   const handleMessage = useCallback((data: ArrayBuffer | string, isBinary: boolean) => {
     if (!termRef.current) return
 
     if (isBinary) {
-      termRef.current.write(new Uint8Array(data as ArrayBuffer))
+      const bytes = new Uint8Array(data as ArrayBuffer)
+      termRef.current.write(bytes)
+      recordTerminalOutput(decoder.decode(bytes))
     } else {
       try {
         const msg = JSON.parse(data as string)
@@ -51,9 +84,10 @@ export function useTerminal({ sessionId, container, editMode = false }: UseTermi
       } catch {
         // Not JSON, treat as text
         termRef.current.write(data as string)
+        recordTerminalOutput(data as string)
       }
     }
-  }, [sessionId])
+  }, [recordTerminalOutput, sessionId])
 
   const wsUrl = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws/${sessionId}`
   const { send, connected, reconnect } = useWebSocket(wsUrl, {
@@ -81,6 +115,14 @@ export function useTerminal({ sessionId, container, editMode = false }: UseTermi
     if (entryRef.current) entryRef.current.editMode = editMode
   }, [editMode])
 
+  useLayoutEffect(() => {
+    onAgentConfirmationRef.current = onAgentConfirmation ?? null
+    onAgentConfirmationClearRef.current = onAgentConfirmationClear ?? null
+    if (!entryRef.current) return
+    entryRef.current.onAgentConfirmation = onAgentConfirmation ?? null
+    entryRef.current.onAgentConfirmationClear = onAgentConfirmationClear ?? null
+  }, [onAgentConfirmation, onAgentConfirmationClear])
+
   // Initialize terminal
   useEffect(() => {
     if (!container || initializedRef.current) return
@@ -95,6 +137,8 @@ export function useTerminal({ sessionId, container, editMode = false }: UseTermi
     entry.attachedContainer = container
     entry.send = sendRef.current
     entry.editMode = editMode
+    entry.onAgentConfirmation = onAgentConfirmationRef.current
+    entry.onAgentConfirmationClear = onAgentConfirmationClearRef.current
     entryRef.current = entry
     termRef.current = entry.term
     fitAddonRef.current = entry.fitAddon
@@ -189,6 +233,10 @@ function getOrCreateTerminalEntry(sessionId: string): TerminalEntry {
     disposeTimer: null,
     send: null,
     editMode: false,
+    outputTail: '',
+    confirmationActive: false,
+    onAgentConfirmation: null,
+    onAgentConfirmationClear: null,
   }
 
   term.loadAddon(fitAddon)
@@ -205,11 +253,15 @@ function getOrCreateTerminalEntry(sessionId: string): TerminalEntry {
 
   // Use the entry send ref so the same terminal instance can survive pane remounts.
   term.onData((data) => {
-    if (!entry.editMode) entry.send?.(new TextEncoder().encode(data))
+    if (!entry.editMode) {
+      clearAgentConfirmationState(entry, sessionId)
+      entry.send?.(new TextEncoder().encode(data))
+    }
   })
 
   term.onBinary((data) => {
     if (!entry.editMode) {
+      clearAgentConfirmationState(entry, sessionId)
       const bytes = new Uint8Array(data.length)
       for (let i = 0; i < data.length; i++) {
         bytes[i] = data.charCodeAt(i) & 0xff
@@ -220,6 +272,12 @@ function getOrCreateTerminalEntry(sessionId: string): TerminalEntry {
 
   terminalEntries.set(sessionId, entry)
   return entry
+}
+
+function clearAgentConfirmationState(entry: TerminalEntry, sessionId: string) {
+  entry.confirmationActive = false
+  entry.outputTail = ''
+  entry.onAgentConfirmationClear?.(sessionId)
 }
 
 function attachTerminal(entry: TerminalEntry, container: HTMLElement) {

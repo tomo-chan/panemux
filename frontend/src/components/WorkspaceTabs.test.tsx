@@ -26,6 +26,21 @@ describe('WorkspaceTabs', () => {
     expect(onSelect).toHaveBeenCalledWith('ops')
   })
 
+  it('marks workspaces that contain pending agent confirmations', () => {
+    render(
+      <WorkspaceTabs
+        workspaces={workspaces}
+        activeWorkspaceId="dev"
+        tabPosition="top"
+        notifyingWorkspaceIds={new Set(['ops'])}
+        onSelect={() => {}}
+      />,
+    )
+
+    expect(screen.getByRole('tab', { name: 'Ops' })).toHaveAttribute('data-agent-confirmation', 'true')
+    expect(screen.getByRole('tab', { name: 'Dev' })).not.toHaveAttribute('data-agent-confirmation')
+  })
+
   it('hides workspace tabs for a single workspace while keeping add available', () => {
     const onAdd = vi.fn()
     render(

@@ -62,6 +62,13 @@ function makeContainer() {
   return document.createElement('div')
 }
 
+function encodeOutput(output: string): ArrayBuffer {
+  const bytes = new TextEncoder().encode(output)
+  const buffer = new ArrayBuffer(bytes.byteLength)
+  new Uint8Array(buffer).set(bytes)
+  return buffer
+}
+
 // ── tests ─────────────────────────────────────────────────────────────────────
 describe('useTerminal', () => {
   let originalWebSocket: typeof WebSocket
@@ -215,6 +222,88 @@ describe('useTerminal', () => {
     const buf = new ArrayBuffer(4)
     act(() => MockWebSocket.instances[0].simulateMessage(buf))
     expect(mockWrite).toHaveBeenCalledWith(expect.any(Uint8Array))
+  })
+
+  it('notifies when terminal output contains an agent confirmation prompt', () => {
+    const onAgentConfirmation = vi.fn()
+    const container = makeContainer()
+    renderHook(() => useTerminal({ sessionId: 's1', container, onAgentConfirmation }))
+    act(() => MockWebSocket.instances[0].simulateOpen())
+
+    act(() => MockWebSocket.instances[0].simulateMessage(encodeOutput('Do you want to run this command?')))
+
+    expect(onAgentConfirmation).toHaveBeenCalledWith('s1')
+  })
+
+  it('does not notify repeatedly for the same visible confirmation prompt', () => {
+    const onAgentConfirmation = vi.fn()
+    const container = makeContainer()
+    renderHook(() => useTerminal({ sessionId: 's1', container, onAgentConfirmation }))
+    act(() => MockWebSocket.instances[0].simulateOpen())
+
+    act(() => MockWebSocket.instances[0].simulateMessage(encodeOutput('Do you want to run this command?')))
+    act(() => MockWebSocket.instances[0].simulateMessage(encodeOutput('\n')))
+
+    expect(onAgentConfirmation).toHaveBeenCalledTimes(1)
+  })
+
+  it('clears confirmation state when terminal input is sent', () => {
+    const onAgentConfirmation = vi.fn()
+    const onAgentConfirmationClear = vi.fn()
+    const container = makeContainer()
+    renderHook(() => useTerminal({
+      sessionId: 's1',
+      container,
+      onAgentConfirmation,
+      onAgentConfirmationClear,
+    }))
+    act(() => MockWebSocket.instances[0].simulateOpen())
+
+    act(() => MockWebSocket.instances[0].simulateMessage(encodeOutput('Continue?')))
+    const onDataCallback = mockTerm.onData.mock.calls[0][0] as (data: string) => void
+    act(() => onDataCallback('y\r'))
+
+    expect(onAgentConfirmation).toHaveBeenCalledWith('s1')
+    expect(onAgentConfirmationClear).toHaveBeenCalledWith('s1')
+  })
+
+  it('uses the latest confirmation callback after rerender', () => {
+    const initialConfirmation = vi.fn()
+    const latestConfirmation = vi.fn()
+    const container = makeContainer()
+    const { rerender } = renderHook(
+      ({ onAgentConfirmation }: { onAgentConfirmation: (paneId: string) => void }) =>
+        useTerminal({ sessionId: 's1', container, onAgentConfirmation }),
+      { initialProps: { onAgentConfirmation: initialConfirmation } },
+    )
+    act(() => MockWebSocket.instances[0].simulateOpen())
+
+    rerender({ onAgentConfirmation: latestConfirmation })
+    act(() => MockWebSocket.instances[0].simulateMessage(encodeOutput('Proceed?')))
+
+    expect(initialConfirmation).not.toHaveBeenCalled()
+    expect(latestConfirmation).toHaveBeenCalledWith('s1')
+  })
+
+  it('can notify again after input clears a previous confirmation', () => {
+    const onAgentConfirmation = vi.fn()
+    const onAgentConfirmationClear = vi.fn()
+    const container = makeContainer()
+    renderHook(() => useTerminal({
+      sessionId: 's1',
+      container,
+      onAgentConfirmation,
+      onAgentConfirmationClear,
+    }))
+    act(() => MockWebSocket.instances[0].simulateOpen())
+
+    act(() => MockWebSocket.instances[0].simulateMessage(encodeOutput('Continue?')))
+    const onDataCallback = mockTerm.onData.mock.calls[0][0] as (data: string) => void
+    act(() => onDataCallback('y\r'))
+    act(() => MockWebSocket.instances[0].simulateMessage(encodeOutput('Approve?')))
+
+    expect(onAgentConfirmation).toHaveBeenCalledTimes(2)
+    expect(onAgentConfirmationClear).toHaveBeenCalledWith('s1')
   })
 
   it('writes error message to terminal on error control frame', () => {

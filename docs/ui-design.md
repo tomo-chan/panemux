@@ -27,6 +27,7 @@ Three core principles guide the interactive UI:
 | Drag handle icon | `#4a7ea5` | ⠿ icon in edit mode header |
 | Pane frame (edit mode) | `rgba(86, 156, 214, 0.18)` | inset box-shadow border |
 | Drag source outline | `rgba(86, 156, 214, 0.7)` | dashed outline on pane being dragged |
+| Agent confirmation accent | `#f0b94d` | pending confirmation pane outline and workspace tab indicator |
 
 ---
 
@@ -56,6 +57,14 @@ The terminal overlay is a `position: absolute` layer over the xterm.js canvas. I
 The inset `box-shadow` border marks every pane as part of an "edit zone" without affecting layout geometry. Using `box-shadow` rather than `border` or `outline` keeps the frame cosmetic and avoids shifting sibling sizes.
 
 Workspace tab position controls are also shown only in edit mode. They use four compact directional buttons for top, bottom, left, and right placement, with `aria-pressed` marking the current position. This keeps persistent layout-level changes grouped with the rest of the editing surface while avoiding extra text in the tab bar.
+
+---
+
+## Agent Confirmation Notifications
+
+When terminal output indicates that an agent is waiting for confirmation, the pane receives an amber pulsing frame and the containing workspace tab receives a matching pulse. The accent uses amber (`#f0b94d`) rather than edit-mode blue so it reads as "attention required" without being confused with layout editing or drag-and-drop states.
+
+The pending state clears when the user interacts with the pane or sends terminal input. Browser OS notifications are requested through the standard Notification API; if the browser or OS blocks permission, the in-app pane and workspace indicators remain the source of truth.
 
 ---
 

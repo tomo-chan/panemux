@@ -14,6 +14,9 @@ export interface LayoutActionsContextValue {
   setDragSourcePaneId: (id: string | null) => void
   displayConfig: DisplayConfig
   editMode: boolean
+  pendingAgentConfirmationPaneIds: Set<string>
+  onAgentConfirmation: (paneId: string) => void
+  onAgentConfirmationClear: (paneId: string) => void
 }
 
 export const LayoutActionsContext = React.createContext<LayoutActionsContextValue | null>(null)

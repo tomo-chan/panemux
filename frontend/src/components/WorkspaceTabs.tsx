@@ -11,6 +11,7 @@ interface WorkspaceTabsProps {
   onDelete?: (workspaceId: string) => void
   onRename?: (workspaceId: string, title: string) => void
   onTabPositionChange?: (position: TabPosition) => void
+  notifyingWorkspaceIds?: Set<string>
 }
 
 export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
@@ -22,6 +23,7 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
   onDelete,
   onRename,
   onTabPositionChange,
+  notifyingWorkspaceIds = new Set(),
 }) => {
   const vertical = tabPosition === 'left' || tabPosition === 'right'
   const showTabs = workspaces.length > 1
@@ -147,6 +149,7 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
           {workspaces.map((workspace) => {
             const active = workspace.id === activeWorkspaceId
             const editing = editingWorkspaceId === workspace.id
+            const notifying = notifyingWorkspaceIds.has(workspace.id)
             return (
               <div
                 key={workspace.id}
@@ -154,6 +157,7 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
                   borderRight: !vertical ? '1px solid #333842' : undefined,
                   borderBottom: vertical ? '1px solid #333842' : undefined,
                   backgroundColor: active ? '#2f3540' : 'transparent',
+                  boxShadow: notifying ? 'inset 0 -2px 0 #f0b94d' : undefined,
                   display: 'flex',
                   alignItems: 'center',
                   height: vertical ? 38 : 34,
@@ -194,6 +198,7 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
                   <button
                     role="tab"
                     aria-selected={active}
+                    data-agent-confirmation={notifying ? 'true' : undefined}
                     onClick={() => onSelect(workspace.id)}
                     onDoubleClick={() => startRename(workspace)}
                     title={workspace.title}
@@ -202,6 +207,7 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
                       border: 'none',
                       backgroundColor: 'transparent',
                       color: active ? '#ffffff' : '#b8beca',
+                      animation: notifying ? 'panemux-agent-confirmation-tab-pulse 1s ease-in-out infinite' : undefined,
                       cursor: active ? 'default' : 'pointer',
                       flex: 1,
                       fontFamily: TERMINAL_FONT_FAMILY,

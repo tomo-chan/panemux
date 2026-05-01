@@ -30,11 +30,14 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
   // leaving local isDragging=true permanently. Using the global dragSourcePaneId
   // (cleared by handleDrop before dragend would fire) avoids this.
   const isDragging = ctx?.dragSourcePaneId === pane.id
+  const hasPendingAgentConfirmation = ctx?.pendingAgentConfirmationPaneIds.has(pane.id) ?? false
 
   const { handleResize, connected, dims, sessionExited, restartSession } = useTerminal({
     sessionId: pane.id,
     container: containerEl,
     editMode,
+    onAgentConfirmation: ctx?.onAgentConfirmation,
+    onAgentConfirmationClear: ctx?.onAgentConfirmationClear,
   })
 
   const gitInfo = useGitInfo(pane.id)
@@ -90,6 +93,8 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
       onDragOver={editMode ? handleDragOver : undefined}
       onDragLeave={editMode ? handleDragLeave : undefined}
       onDrop={editMode ? handleDrop : undefined}
+      onPointerDown={() => ctx?.onAgentConfirmationClear(pane.id)}
+      data-agent-confirmation={hasPendingAgentConfirmation ? 'true' : undefined}
       style={{
         display: 'flex',
         flexDirection: 'column',
@@ -102,14 +107,19 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
           ? '2px solid #569cd6'
           : isDragging
           ? '2px dashed rgba(86, 156, 214, 0.7)'
+          : hasPendingAgentConfirmation
+            ? '2px solid #f0b94d'
           : 'none',
         outlineOffset: '-2px',
         // Subtle inset frame to mark pane as "in edit zone"
         boxShadow: editMode && !isDragOver
           ? 'inset 0 0 0 1px rgba(86, 156, 214, 0.18)'
+          : hasPendingAgentConfirmation
+            ? 'inset 0 0 0 1px rgba(240, 185, 77, 0.9), 0 0 0 1px rgba(240, 185, 77, 0.35)'
           : 'none',
         // "Lifted" appearance when this pane is the drag source
         opacity: isDragging ? 0.35 : 1,
+        animation: hasPendingAgentConfirmation ? 'panemux-agent-confirmation-pulse 1s ease-in-out infinite' : undefined,
         transition: 'opacity 0.15s ease, box-shadow 0.2s ease',
       }}
     >

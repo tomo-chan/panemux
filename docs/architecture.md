@@ -151,13 +151,19 @@ Why this hook:
 
 ### `useTerminal`
 
-Owns xterm.js setup, fit behavior, byte forwarding, and resize reporting.
+Owns xterm.js setup, fit behavior, byte forwarding, resize reporting, and agent confirmation prompt detection. Terminal output is scanned on the client for recent confirmation-style prompts such as "Do you want to..." or "Proceed?". When one is detected, `App` records the pane ID as pending so the pane frame, containing workspace tab, and browser OS notification can reflect that the agent is waiting for input.
 
 Why xterm.js:
 
 - mature browser terminal emulator
 - supports raw byte streams and common terminal behavior
 - avoids implementing terminal emulation from scratch
+
+Why confirmation detection is client-side:
+
+- the browser already receives the rendered terminal stream for every pane
+- the backend session protocol can remain raw PTY bytes plus existing control messages
+- notification state is UI-only and can clear when the user focuses or types into the pane
 
 ### Zod schemas
 

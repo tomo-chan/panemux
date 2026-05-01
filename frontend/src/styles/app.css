@@ -1,0 +1,19 @@
+@keyframes panemux-agent-confirmation-pulse {
+  0%, 100% {
+    box-shadow: inset 0 0 0 1px rgba(240, 185, 77, 0.9), 0 0 0 1px rgba(240, 185, 77, 0.25);
+  }
+
+  50% {
+    box-shadow: inset 0 0 0 1px rgba(255, 215, 120, 1), 0 0 0 3px rgba(240, 185, 77, 0.45);
+  }
+}
+
+@keyframes panemux-agent-confirmation-tab-pulse {
+  0%, 100% {
+    background-color: transparent;
+  }
+
+  50% {
+    background-color: rgba(240, 185, 77, 0.18);
+  }
+}

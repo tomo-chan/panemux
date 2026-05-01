@@ -30,6 +30,9 @@ function makeCtx(maximizedPaneId: string | null): LayoutActionsContextValue {
     setDragSourcePaneId: vi.fn(),
     displayConfig: { show_header: false, show_status_bar: false },
     editMode: false,
+    pendingAgentConfirmationPaneIds: new Set(),
+    onAgentConfirmation: vi.fn(),
+    onAgentConfirmationClear: vi.fn(),
   }
 }
 
