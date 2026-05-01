@@ -25,6 +25,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
   const ctx = useContext(LayoutActionsContext)
   const displayConfig = ctx?.displayConfig ?? DEFAULT_DISPLAY
   const editMode = ctx?.editMode ?? false
+  const hasAttention = ctx?.hasPaneAttention(pane.id) ?? false
   // Derive from context rather than local state: when the DOM element is moved
   // by React during a swap, the browser may not fire dragend on the source pane,
   // leaving local isDragging=true permanently. Using the global dragSourcePaneId
@@ -35,6 +36,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
     sessionId: pane.id,
     container: containerEl,
     editMode,
+    onAttention: ctx?.onPaneAttention,
   })
 
   const gitInfo = useGitInfo(pane.id)
@@ -84,12 +86,16 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
 
   return (
     <div
+      className={hasAttention ? 'panemux-pane-attention' : undefined}
       draggable={editMode}
+      data-attention={hasAttention ? 'true' : undefined}
       onDragStart={editMode ? handleDragStart : undefined}
       onDragEnd={editMode ? handleDragEnd : undefined}
       onDragOver={editMode ? handleDragOver : undefined}
       onDragLeave={editMode ? handleDragLeave : undefined}
       onDrop={editMode ? handleDrop : undefined}
+      onMouseDown={() => ctx?.clearPaneAttention(pane.id)}
+      onFocusCapture={() => ctx?.clearPaneAttention(pane.id)}
       style={{
         display: 'flex',
         flexDirection: 'column',
@@ -102,10 +108,12 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
           ? '2px solid #569cd6'
           : isDragging
           ? '2px dashed rgba(86, 156, 214, 0.7)'
+          : hasAttention
+          ? '2px solid rgba(244, 191, 79, 0.95)'
           : 'none',
         outlineOffset: '-2px',
         // Subtle inset frame to mark pane as "in edit zone"
-        boxShadow: editMode && !isDragOver
+        boxShadow: editMode && !isDragOver && !hasAttention
           ? 'inset 0 0 0 1px rgba(86, 156, 214, 0.18)'
           : 'none',
         // "Lifted" appearance when this pane is the drag source

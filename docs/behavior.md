@@ -105,6 +105,22 @@ Persistence behavior:
 - layout file persistence happens only when edit mode is ON (`PUT /api/edit-mode {"editMode":true}`)
 - when no `--config` is given, the default save path is `~/.config/panemux/config.yaml`; the directory is created automatically on first save
 
+## Agent Attention Notifications
+
+The frontend watches terminal output for conservative agent confirmation prompts such as approval,
+permission, or proceed requests. Detection runs on the rendered terminal connection so the bytes used
+for detection are also written to the terminal buffer. When a prompt is detected:
+
+- the pane frame flashes until the pane receives focus or a click
+- the containing workspace tab flashes when that workspace is not active, and clears when selected
+- the browser Notification API is used when available; if permission has not been decided, the
+  browser may prompt before showing OS-level notifications
+
+Attention detection is frontend-only and only runs while the pane is rendered in the browser app.
+Inactive workspace panes are not watched by a separate background reader, because each WebSocket
+connection consumes directly from the session stream. It does not persist missed prompts across
+workspace switches, browser reloads, or closed browser windows.
+
 ## REST API
 
 ### `GET /api/layout`

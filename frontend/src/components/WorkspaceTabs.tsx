@@ -11,6 +11,8 @@ interface WorkspaceTabsProps {
   onDelete?: (workspaceId: string) => void
   onRename?: (workspaceId: string, title: string) => void
   onTabPositionChange?: (position: TabPosition) => void
+  attentionWorkspaceIds?: ReadonlySet<string>
+  onClearAttention?: (workspaceId: string) => void
 }
 
 export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
@@ -22,6 +24,8 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
   onDelete,
   onRename,
   onTabPositionChange,
+  attentionWorkspaceIds,
+  onClearAttention,
 }) => {
   const vertical = tabPosition === 'left' || tabPosition === 'right'
   const showTabs = workspaces.length > 1
@@ -147,9 +151,11 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
           {workspaces.map((workspace) => {
             const active = workspace.id === activeWorkspaceId
             const editing = editingWorkspaceId === workspace.id
+            const hasAttention = !active && (attentionWorkspaceIds?.has(workspace.id) ?? false)
             return (
               <div
                 key={workspace.id}
+                className={hasAttention ? 'panemux-workspace-tab-attention' : undefined}
                 style={{
                   borderRight: !vertical ? '1px solid #333842' : undefined,
                   borderBottom: vertical ? '1px solid #333842' : undefined,
@@ -194,7 +200,11 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
                   <button
                     role="tab"
                     aria-selected={active}
-                    onClick={() => onSelect(workspace.id)}
+                    data-attention={hasAttention ? 'true' : undefined}
+                    onClick={() => {
+                      onClearAttention?.(workspace.id)
+                      onSelect(workspace.id)
+                    }}
                     onDoubleClick={() => startRename(workspace)}
                     title={workspace.title}
                     style={{

@@ -1,14 +1,19 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import type { MutableRefObject } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { useWebSocket } from './useWebSocket'
 import { TERMINAL_FONT_FAMILY } from '../utils/fonts'
+import { createAgentAttentionDetector } from '../utils/agentAttention'
+
+const ATTENTION_NOTIFY_INTERVAL_MS = 10_000
 
 interface UseTerminalOptions {
   sessionId: string
   container: HTMLElement | null
   editMode?: boolean
+  onAttention?: (sessionId: string) => void
 }
 
 interface TerminalEntry {
@@ -22,12 +27,15 @@ interface TerminalEntry {
 
 const terminalEntries = new Map<string, TerminalEntry>()
 
-export function useTerminal({ sessionId, container, editMode = false }: UseTerminalOptions) {
+export function useTerminal({ sessionId, container, editMode = false, onAttention }: UseTerminalOptions) {
   const termRef = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
   const initializedRef = useRef(false)
   const sendRef = useRef<((data: string | ArrayBuffer | Uint8Array) => void) | null>(null)
   const entryRef = useRef<TerminalEntry | null>(null)
+  const attentionDetectorRef = useRef(createAgentAttentionDetector())
+  const outputDecoderRef = useRef(new TextDecoder())
+  const lastAttentionAtRef = useRef<number | null>(null)
   const [dims, setDims] = useState<{ cols: number; rows: number } | null>(null)
   const [sessionExited, setSessionExited] = useState(false)
 
@@ -35,7 +43,12 @@ export function useTerminal({ sessionId, container, editMode = false }: UseTermi
     if (!termRef.current) return
 
     if (isBinary) {
-      termRef.current.write(new Uint8Array(data as ArrayBuffer))
+      const bytes = new Uint8Array(data as ArrayBuffer)
+      termRef.current.write(bytes)
+      const text = outputDecoderRef.current.decode(bytes, { stream: true })
+      if (shouldNotifyAttention(attentionDetectorRef.current.feed(text), lastAttentionAtRef)) {
+        onAttention?.(sessionId)
+      }
     } else {
       try {
         const msg = JSON.parse(data as string)
@@ -50,15 +63,22 @@ export function useTerminal({ sessionId, container, editMode = false }: UseTermi
         }
       } catch {
         // Not JSON, treat as text
-        termRef.current.write(data as string)
+        const text = data as string
+        termRef.current.write(text)
+        if (shouldNotifyAttention(attentionDetectorRef.current.feed(text), lastAttentionAtRef)) {
+          onAttention?.(sessionId)
+        }
       }
     }
-  }, [sessionId])
+  }, [onAttention, sessionId])
 
   const wsUrl = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws/${sessionId}`
   const { send, connected, reconnect } = useWebSocket(wsUrl, {
     onMessage: handleMessage,
     onOpen: () => {
+      lastAttentionAtRef.current = null
+      attentionDetectorRef.current.reset()
+      outputDecoderRef.current = new TextDecoder()
       setSessionExited(false)
       if (fitAddonRef.current && termRef.current) {
         fitAddonRef.current.fit()
@@ -286,4 +306,19 @@ function fallbackCopy(text: string) {
   textarea.select()
   document.execCommand('copy')
   document.body.removeChild(textarea)
+}
+
+function shouldNotifyAttention(detected: boolean, lastAttentionAtRef: MutableRefObject<number | null>): boolean {
+  if (!detected) return false
+
+  const now = Date.now()
+  if (
+    lastAttentionAtRef.current !== null &&
+    now - lastAttentionAtRef.current < ATTENTION_NOTIFY_INTERVAL_MS
+  ) {
+    return false
+  }
+
+  lastAttentionAtRef.current = now
+  return true
 }

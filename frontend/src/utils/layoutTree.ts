@@ -108,6 +108,23 @@ export function findPaneById(layout: LayoutNode, paneId: string): PaneConfig | n
   return null
 }
 
+export function layoutContainsPane(layout: LayoutNode, paneId: string): boolean {
+  return findPaneById(layout, paneId) !== null
+}
+
+export function listPaneIds(layout: LayoutNode): string[] {
+  const paneIds: string[] = []
+  collectPaneIds(layout.children, paneIds)
+  return paneIds
+}
+
+function collectPaneIds(children: LayoutChild[], paneIds: string[]) {
+  for (const child of children) {
+    if (child.pane) paneIds.push(child.pane.id)
+    if (child.children?.length) collectPaneIds(child.children, paneIds)
+  }
+}
+
 /**
  * Replaces the pane matching `updated.id` in the layout tree with `updated`.
  * Returns the tree unchanged if the id is not found.

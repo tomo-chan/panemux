@@ -14,6 +14,9 @@ export interface LayoutActionsContextValue {
   setDragSourcePaneId: (id: string | null) => void
   displayConfig: DisplayConfig
   editMode: boolean
+  onPaneAttention: (paneId: string) => void
+  clearPaneAttention: (paneId: string) => void
+  hasPaneAttention: (paneId: string) => boolean
 }
 
 export const LayoutActionsContext = React.createContext<LayoutActionsContextValue | null>(null)
