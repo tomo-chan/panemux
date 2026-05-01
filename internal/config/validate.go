@@ -18,6 +18,10 @@ const (
 	paneTypeSSH         = "ssh"
 	paneTypeTmux        = "tmux"
 	paneTypeSSHTmux     = "ssh_tmux"
+	tabPositionTop      = "top"
+	tabPositionBottom   = "bottom"
+	tabPositionLeft     = "left"
+	tabPositionRight    = "right"
 )
 
 // Validate checks the configuration for correctness.
@@ -65,16 +69,10 @@ func (c *Config) Validate() error {
 
 func validateWorkspaces(workspaces WorkspacesConfig, sshConns map[string]SSHConnection) []string {
 	var errs []string
-	if workspaces.TabPosition != "" &&
-		workspaces.TabPosition != "top" &&
-		workspaces.TabPosition != "bottom" &&
-		workspaces.TabPosition != "left" &&
-		workspaces.TabPosition != "right" {
-
-		errs = append(
-			errs,
-			fmt.Sprintf("invalid tab_position %q: must be top, bottom, left, or right", workspaces.TabPosition),
-		)
+	if workspaces.TabPosition != "" {
+		if err := ValidateWorkspaceTabPosition(workspaces.TabPosition); err != nil {
+			errs = append(errs, err.Error())
+		}
 	}
 	if len(workspaces.Items) == 0 {
 		errs = append(errs, "workspaces.items must not be empty")
@@ -103,6 +101,16 @@ func validateWorkspaces(workspaces WorkspacesConfig, sshConns map[string]SSHConn
 		errs = append(errs, fmt.Sprintf("active workspace %q is not defined", workspaces.Active))
 	}
 	return errs
+}
+
+// ValidateWorkspaceTabPosition validates the workspace tab bar placement.
+func ValidateWorkspaceTabPosition(position string) error {
+	switch position {
+	case tabPositionTop, tabPositionBottom, tabPositionLeft, tabPositionRight:
+		return nil
+	default:
+		return fmt.Errorf("invalid tab_position %q: must be top, bottom, left, or right", position)
+	}
 }
 
 // ValidatePane validates a standalone PaneConfig without ssh_connections context.

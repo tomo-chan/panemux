@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { DetectShellResponseSchema, DisplayConfig, DisplayConfigSchema, LayoutNode, PaneConfig, WorkspacesResponse, WorkspacesResponseSchema } from '../schemas'
+import { DetectShellResponseSchema, DisplayConfig, DisplayConfigSchema, LayoutNode, PaneConfig, TabPosition, WorkspacesResponse, WorkspacesResponseSchema, WorkspaceTabPositionRequestSchema } from '../schemas'
 import { findPaneById, generatePaneId, generateTmuxSessionName, removePaneFromTree, splitPaneInTree, swapPanesInTree } from '../utils/layoutTree'
 
 export function useLayout() {
@@ -112,6 +112,23 @@ export function useLayout() {
     }
   }, [])
 
+  const setWorkspaceTabPosition = useCallback(async (position: TabPosition) => {
+    try {
+      setError(null)
+      const request = WorkspaceTabPositionRequestSchema.parse({ tab_position: position })
+      const response = await fetch('/api/workspaces/tab-position', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+      })
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      const parsed = WorkspacesResponseSchema.parse(await response.json())
+      setWorkspaces((current) => current ? { ...current, tab_position: parsed.tab_position } : parsed)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update workspace tab position')
+    }
+  }, [])
+
   const splitPane = useCallback(
     async (targetPaneId: string, direction: 'horizontal' | 'vertical') => {
       if (!layout) return
@@ -195,7 +212,7 @@ export function useLayout() {
     [layout, workspaces?.active],
   )
 
-  return { layout, workspaces, displayConfig, error, updateSizes, splitPane, closePane, swapPanes, setActiveWorkspace, addWorkspace, deleteWorkspace, renameWorkspace }
+  return { layout, workspaces, displayConfig, error, updateSizes, splitPane, closePane, swapPanes, setActiveWorkspace, addWorkspace, deleteWorkspace, renameWorkspace, setWorkspaceTabPosition }
 }
 
 function replaceActiveWorkspaceLayout(workspaces: WorkspacesResponse, layout: LayoutNode): WorkspacesResponse {

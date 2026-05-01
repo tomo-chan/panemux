@@ -123,7 +123,7 @@ workspaces:
 
 Older config files with a top-level `layout:` are still accepted. When the config is next saved, panemux migrates that layout into a `default` workspace and writes the `workspaces:` format.
 
-If there is only one workspace, the workspace tab bar is hidden during normal use. Enable edit mode to show the workspace add control; newly added workspaces start with a single local terminal pane, become active immediately, and are saved to the config. In edit mode, each visible workspace tab can be renamed inline and has a delete button that asks for confirmation before removing the workspace. The last remaining workspace cannot be deleted. Switching the active workspace is persisted so the same workspace is restored after restart.
+If there is only one workspace, the workspace tab bar is hidden during normal use. Enable edit mode to show the workspace add and tab-position controls; newly added workspaces start with a single local terminal pane, become active immediately, and are saved to the config. In edit mode, each visible workspace tab can be renamed inline and has a delete button that asks for confirmation before removing the workspace. The last remaining workspace cannot be deleted. Switching the active workspace and changing `tab_position` are persisted so the same workspace and tab placement are restored after restart.
 
 ### Pane types
 
@@ -150,7 +150,7 @@ Authentication is attempted in order: configured `key_file` → configured `pass
 
 Click the lock icon in the bottom-right corner to toggle **edit mode**.
 
-- **ON** — layout changes are persisted to the config file; terminal input is blocked and a visual overlay shows which panes are locked; drag any pane by its body (not just the header) to reorder it
+- **ON** — layout changes and workspace tab placement are persisted to the config file; terminal input is blocked and a visual overlay shows which panes are locked; drag any pane by its body (not just the header) to reorder it
 - **OFF** — terminal is fully interactive; drag-resize and close are applied in-memory only
 
 ---

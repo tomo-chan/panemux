@@ -202,6 +202,28 @@ func TestRenameWorkspace_NotFound_ReturnsFalse(t *testing.T) {
 	assert.False(t, cfg.RenameWorkspace("missing", "Missing"))
 }
 
+func TestSetWorkspaceTabPosition_AllValidPositions(t *testing.T) {
+	for _, position := range []string{"top", "bottom", "left", "right"} {
+		t.Run(position, func(t *testing.T) {
+			cfg := validConfig()
+			require.NoError(t, cfg.SetWorkspaceTabPosition(position))
+
+			assert.Equal(t, position, cfg.Workspaces.TabPosition)
+		})
+	}
+}
+
+func TestSetWorkspaceTabPosition_InvalidPositionKeepsExistingValue(t *testing.T) {
+	cfg := validConfig()
+	require.NoError(t, cfg.SetWorkspaceTabPosition("left"))
+
+	err := cfg.SetWorkspaceTabPosition("diagonal")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid tab_position")
+	assert.Equal(t, "left", cfg.Workspaces.TabPosition)
+}
+
 func TestValidate_PaneEmptyID_Error(t *testing.T) {
 	cfg := validConfig()
 	cfg.Layout.Children[0].Pane.ID = ""

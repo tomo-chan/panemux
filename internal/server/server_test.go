@@ -136,3 +136,29 @@ func TestServer_WorkspaceRenameRouteWired(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, "Renamed", cfg.Workspaces.Items[0].Title)
 }
+
+func TestServer_WorkspaceTabPositionRouteWiredBeforeWorkspaceIDRoute(t *testing.T) {
+	cfg := testConfig()
+	mgr := session.NewManager()
+	srv := New(cfg, mgr, emptyFS)
+	require.NotNil(t, srv)
+
+	editRec := httptest.NewRecorder()
+	editReq := httptest.NewRequest(http.MethodPut, "/api/edit-mode", bytes.NewBufferString(`{"editMode":true}`))
+	editReq.Header.Set("Content-Type", "application/json")
+	srv.httpSrv.Handler.ServeHTTP(editRec, editReq)
+	require.Equal(t, http.StatusOK, editRec.Code)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(
+		http.MethodPut,
+		"/api/workspaces/tab-position",
+		bytes.NewBufferString(`{"tab_position":"right"}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	srv.httpSrv.Handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "right", cfg.Workspaces.TabPosition)
+	assert.Equal(t, "Default", cfg.Workspaces.Items[0].Title)
+}

@@ -71,6 +71,10 @@ type workspaceRequest struct {
 	Title string `json:"title"`
 }
 
+type workspaceTabPositionRequest struct {
+	TabPosition string `json:"tab_position"`
+}
+
 var validHostName = regexp.MustCompile(`^[a-zA-Z0-9_.\-]+$`)
 
 // NewHandler creates a new API handler.
@@ -130,6 +134,30 @@ func (h *Handler) PutActiveWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 	if !h.cfg.SetActiveWorkspace(req.ID) {
 		http.Error(w, "workspace not found", http.StatusNotFound)
+		return
+	}
+	if err := h.cfg.SaveWorkspaces(); err != nil {
+		http.Error(w, "failed to save workspaces", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, h.cfg.WorkspacesView())
+}
+
+// PutWorkspaceTabPosition updates workspace tab placement while edit mode is enabled.
+func (h *Handler) PutWorkspaceTabPosition(w http.ResponseWriter, r *http.Request) {
+	if !h.editMode.Load() {
+		http.Error(w, "edit mode required", http.StatusForbidden)
+		return
+	}
+	var req workspaceTabPositionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if err := h.cfg.SetWorkspaceTabPosition(req.TabPosition); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
 	if err := h.cfg.SaveWorkspaces(); err != nil {

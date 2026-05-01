@@ -15,7 +15,7 @@ import type { SSHConfigHost } from './schemas'
 const DEFAULT_DISPLAY: DisplayConfig = { show_header: true, show_status_bar: true }
 
 export const App: React.FC = () => {
-  const { layout, workspaces, displayConfig, error, updateSizes, splitPane, closePane, swapPanes, setActiveWorkspace, addWorkspace, deleteWorkspace, renameWorkspace } = useLayout()
+  const { layout, workspaces, displayConfig, error, updateSizes, splitPane, closePane, swapPanes, setActiveWorkspace, addWorkspace, deleteWorkspace, renameWorkspace, setWorkspaceTabPosition } = useLayout()
   const { editMode, toggleEditMode } = useEditMode()
   const [maximizedPaneId, setMaximizedPaneId] = useState<string | null>(null)
   const [dragSourcePaneId, setDragSourcePaneId] = useState<string | null>(null)
@@ -111,6 +111,7 @@ export const App: React.FC = () => {
             onSelect={setActiveWorkspace}
             onAdd={editMode ? addWorkspace : undefined}
             onRename={editMode ? renameWorkspace : undefined}
+            onTabPositionChange={editMode ? setWorkspaceTabPosition : undefined}
             onDelete={editMode ? (workspaceId) => {
               const workspace = workspaces.items.find((item) => item.id === workspaceId)
               if (!workspace) return

@@ -54,6 +54,7 @@ func setupRouterWithHandler(h *Handler) *chi.Mux {
 	r.Get("/api/workspaces", h.GetWorkspaces)
 	r.Post("/api/workspaces", h.PostWorkspace)
 	r.Put("/api/workspaces/active", h.PutActiveWorkspace)
+	r.Put("/api/workspaces/tab-position", h.PutWorkspaceTabPosition)
 	r.Put("/api/workspaces/{id}", h.PutWorkspace)
 	r.Delete("/api/workspaces/{id}", h.DeleteWorkspace)
 	r.Put("/api/workspaces/{id}/layout", h.PutWorkspaceLayout)
@@ -241,6 +242,82 @@ func TestPutActiveWorkspace_NotFound_Returns404AndKeepsActive(t *testing.T) {
 
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 	assert.Equal(t, "one", cfg.Workspaces.Active)
+}
+
+func TestPutWorkspaceTabPosition_EditModeOff_Returns403(t *testing.T) {
+	cfg := workspaceTestConfig()
+	r := setupRouter(cfg, session.NewManager())
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(
+		http.MethodPut,
+		"/api/workspaces/tab-position",
+		bytes.NewBufferString(`{"tab_position":"left"}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+	assert.Equal(t, "top", cfg.Workspaces.TabPosition)
+}
+
+func TestPutWorkspaceTabPosition_EditModeOn_UpdatesEveryValidPositionAndPersists(t *testing.T) {
+	for _, position := range []string{"top", "bottom", "left", "right"} {
+		t.Run(position, func(t *testing.T) {
+			cfg, path := loadWorkspaceTestConfigFromFile(t)
+			h := NewHandler(cfg, session.NewManager())
+			h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
+			h.editMode.Store(true)
+			r := setupRouterWithHandler(h)
+
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(
+				http.MethodPut,
+				"/api/workspaces/tab-position",
+				bytes.NewBufferString(`{"tab_position":"`+position+`"}`),
+			)
+			req.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(rec, req)
+
+			require.Equal(t, http.StatusOK, rec.Code)
+			var workspaces config.WorkspacesConfig
+			require.NoError(t, json.NewDecoder(rec.Body).Decode(&workspaces))
+			assert.Equal(t, position, workspaces.TabPosition)
+
+			loaded, err := config.Load(path)
+			require.NoError(t, err)
+			assert.Equal(t, position, loaded.Workspaces.TabPosition)
+		})
+	}
+}
+
+func TestPutWorkspaceTabPosition_InvalidBody_Returns400(t *testing.T) {
+	h := NewHandler(workspaceTestConfig(), session.NewManager())
+	h.editMode.Store(true)
+	r := setupRouterWithHandler(h)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/tab-position", bytes.NewBufferString("not json"))
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestPutWorkspaceTabPosition_InvalidPosition_Returns422AndKeepsExistingValue(t *testing.T) {
+	cfg := workspaceTestConfig()
+	h := NewHandler(cfg, session.NewManager())
+	h.editMode.Store(true)
+	r := setupRouterWithHandler(h)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(
+		http.MethodPut,
+		"/api/workspaces/tab-position",
+		bytes.NewBufferString(`{"tab_position":"diagonal"}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
+	assert.Equal(t, "top", cfg.Workspaces.TabPosition)
+	assert.Contains(t, rec.Body.String(), "invalid tab_position")
 }
 
 func TestPostWorkspace_EditModeOff_Returns403(t *testing.T) {
