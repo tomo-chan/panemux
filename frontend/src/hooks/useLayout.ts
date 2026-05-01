@@ -123,7 +123,7 @@ export function useLayout() {
       })
       if (!response.ok) throw new Error(`HTTP ${response.status}`)
       const parsed = WorkspacesResponseSchema.parse(await response.json())
-      setWorkspaces((current) => current ? { ...current, tab_position: parsed.tab_position } : parsed)
+      setWorkspaces((current) => current ? { ...parsed, items: current.items } : parsed)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update workspace tab position')
     }

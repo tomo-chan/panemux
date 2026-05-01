@@ -262,6 +262,33 @@ describe('useLayout', () => {
     expect(result.current.layout?.children[0].pane?.id).toBe('main')
   })
 
+  it('adopts server top-level workspace fields while preserving current items when updating tab position', async () => {
+    const updatedWorkspaces = {
+      ...validWorkspaces,
+      active: 'ops',
+      tab_position: 'right' as const,
+      items: validWorkspaces.items.map((workspace) => (
+        workspace.id === 'dev' ? { ...workspace, title: 'Server Dev' } : workspace
+      )),
+    }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validWorkspaces) } as Response)
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validDisplay) } as Response)
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(updatedWorkspaces) } as Response)
+    window.fetch = fetchMock
+
+    const { result } = renderHook(() => useLayout())
+    await waitFor(() => expect(result.current.workspaces).not.toBeNull())
+
+    await act(async () => {
+      await result.current.setWorkspaceTabPosition('right')
+    })
+
+    expect(result.current.workspaces?.active).toBe('ops')
+    expect(result.current.workspaces?.tab_position).toBe('right')
+    expect(result.current.workspaces?.items[0].title).toBe('Dev')
+  })
+
   it('preserves a pending local layout change when updating workspace tab position', async () => {
     const pendingLayout: LayoutNode = {
       direction: 'vertical',
