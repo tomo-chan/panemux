@@ -293,6 +293,15 @@ func (c *Config) RenameWorkspace(id string, title string) bool {
 	return false
 }
 
+func (c *Config) SetWorkspaceTabPosition(position string) error {
+	if err := ValidateWorkspaceTabPosition(position); err != nil {
+		return err
+	}
+	c.normalizeWorkspaces()
+	c.Workspaces.TabPosition = position
+	return nil
+}
+
 func (c *Config) nextWorkspaceID(start int) string {
 	seen := make(map[string]bool, len(c.Workspaces.Items))
 	for _, workspace := range c.Workspaces.Items {

@@ -101,7 +101,8 @@ Host-key verification uses `known_hosts_file` if configured, or `~/.ssh/known_ho
 Persistence behavior:
 
 - `PUT /api/layout` updates in-memory layout always
-- file persistence happens only when edit mode is ON (`PUT /api/edit-mode {"editMode":true}`)
+- workspace tab placement changes require edit mode and are persisted immediately
+- layout file persistence happens only when edit mode is ON (`PUT /api/edit-mode {"editMode":true}`)
 - when no `--config` is given, the default save path is `~/.config/panemux/config.yaml`; the directory is created automatically on first save
 
 ## REST API
@@ -117,6 +118,20 @@ Accepts a layout JSON document, validates it, updates in-memory state, and persi
 - `400`: invalid JSON
 - `422`: structurally invalid layout
 - `200`: accepted and returned
+
+### `GET /api/workspaces`
+
+Returns the active workspace ID, `tab_position`, and all workspace layouts.
+
+### `PUT /api/workspaces/tab-position`
+
+Accepts `{ "tab_position": "top" | "bottom" | "left" | "right" }`, validates it, persists the workspace config, and returns the updated workspace response. Edit mode must be enabled.
+
+- `400`: invalid JSON
+- `403`: edit mode is off
+- `422`: invalid tab position
+- `500`: unable to save the config
+- `200`: updated and returned
 
 ### `GET /api/sessions`
 
@@ -263,6 +278,7 @@ Edit mode is toggled by the fixed button in the bottom-right corner. When edit m
 - The entire pane body becomes a drag surface; the user can drag any pane onto any other pane to swap their positions in the layout tree.
 - Terminal keyboard input is blocked — `onData` and `onBinary` handlers do not forward bytes to the session while edit mode is active.
 - A semi-transparent overlay covers each terminal area and intercepts pointer events, preventing the terminal from gaining focus.
+- Workspace controls can add, rename, delete, and move the tab bar to the top, bottom, left, or right.
 - Layout changes (including drag-resize) are persisted to the config file via `PUT /api/layout`.
 
 When edit mode is OFF, terminal input is fully restored and layout changes are applied in-memory only.

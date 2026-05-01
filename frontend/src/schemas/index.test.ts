@@ -9,6 +9,7 @@ import {
   SSHConfigHostSchema,
   SSHConfigHostsResponseSchema,
   DetectShellResponseSchema,
+  WorkspaceTabPositionRequestSchema,
   WorkspacesResponseSchema,
 } from './index'
 
@@ -182,6 +183,20 @@ describe('WorkspacesResponseSchema', () => {
         },
       ],
     }).success).toBe(false)
+  })
+})
+
+describe('WorkspaceTabPositionRequestSchema', () => {
+  it('accepts every tab position', () => {
+    for (const tabPosition of ['top', 'bottom', 'left', 'right']) {
+      const result = WorkspaceTabPositionRequestSchema.safeParse({ tab_position: tabPosition })
+      expect(result.success).toBe(true)
+    }
+  })
+
+  it('rejects invalid or missing tab position', () => {
+    expect(WorkspaceTabPositionRequestSchema.safeParse({ tab_position: 'diagonal' }).success).toBe(false)
+    expect(WorkspaceTabPositionRequestSchema.safeParse({}).success).toBe(false)
   })
 })
 

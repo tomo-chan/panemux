@@ -52,6 +52,12 @@ export const TabPositionSchema = z.enum(['top', 'bottom', 'left', 'right'])
 
 export type TabPosition = z.infer<typeof TabPositionSchema>
 
+export const WorkspaceTabPositionRequestSchema = z.object({
+  tab_position: TabPositionSchema,
+})
+
+export type WorkspaceTabPositionRequest = z.infer<typeof WorkspaceTabPositionRequestSchema>
+
 export const WorkspaceSchema = z.object({
   id: z.string().min(1),
   title: z.string().min(1),

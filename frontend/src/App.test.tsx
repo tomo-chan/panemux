@@ -27,6 +27,7 @@ const workspaces: WorkspacesResponse = {
 
 const mockDeleteWorkspace = vi.fn()
 const mockRenameWorkspace = vi.fn()
+const mockSetWorkspaceTabPosition = vi.fn()
 
 vi.mock('./hooks/useLayout', () => ({
   useLayout: () => ({
@@ -42,6 +43,7 @@ vi.mock('./hooks/useLayout', () => ({
     addWorkspace: vi.fn(),
     deleteWorkspace: mockDeleteWorkspace,
     renameWorkspace: mockRenameWorkspace,
+    setWorkspaceTabPosition: mockSetWorkspaceTabPosition,
   }),
 }))
 
@@ -68,6 +70,7 @@ describe('App workspace deletion', () => {
   afterEach(() => {
     mockDeleteWorkspace.mockClear()
     mockRenameWorkspace.mockClear()
+    mockSetWorkspaceTabPosition.mockClear()
     vi.restoreAllMocks()
   })
 
@@ -98,5 +101,12 @@ describe('App workspace deletion', () => {
     fireEvent.keyDown(input, { key: 'Enter' })
 
     expect(mockRenameWorkspace).toHaveBeenCalledWith('dev', 'Development')
+  })
+
+  it('passes workspace tab position changes from edit-mode tabs', () => {
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Place workspace tabs on right' }))
+
+    expect(mockSetWorkspaceTabPosition).toHaveBeenCalledWith('right')
   })
 })

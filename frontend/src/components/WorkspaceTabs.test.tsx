@@ -53,6 +53,30 @@ describe('WorkspaceTabs', () => {
     expect(onAdd).toHaveBeenCalled()
   })
 
+  it('renders tab position controls when a position change handler is provided', () => {
+    const onTabPositionChange = vi.fn()
+    render(
+      <WorkspaceTabs
+        workspaces={workspaces}
+        activeWorkspaceId="dev"
+        tabPosition="top"
+        onSelect={() => {}}
+        onTabPositionChange={onTabPositionChange}
+      />,
+    )
+
+    expect(screen.getByRole('group', { name: 'Workspace tab position' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Place workspace tabs at top' })).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(screen.getByRole('button', { name: 'Place workspace tabs on left' }))
+    expect(onTabPositionChange).toHaveBeenCalledWith('left')
+  })
+
+  it('hides tab position controls when the position change handler is omitted', () => {
+    render(<WorkspaceTabs workspaces={workspaces} activeWorkspaceId="dev" tabPosition="top" onSelect={() => {}} />)
+
+    expect(screen.queryByRole('group', { name: 'Workspace tab position' })).not.toBeInTheDocument()
+  })
+
   it('renders delete controls when delete handler is provided', () => {
     const onDelete = vi.fn()
     render(<WorkspaceTabs workspaces={workspaces} activeWorkspaceId="dev" tabPosition="top" onSelect={() => {}} onDelete={onDelete} />)

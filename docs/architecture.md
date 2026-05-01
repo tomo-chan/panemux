@@ -71,6 +71,7 @@ Workspace-related endpoints:
 
 - `GET /api/workspaces` returns the workspace list, active workspace ID, tab position, and each workspace layout.
 - `POST /api/workspaces` adds a single-local-pane workspace while edit mode is enabled and makes it active.
+- `PUT /api/workspaces/tab-position` changes `workspaces.tab_position` while edit mode is enabled and persists it.
 - `PUT /api/workspaces/{id}` renames a workspace while edit mode is enabled.
 - `DELETE /api/workspaces/{id}` removes a workspace while edit mode is enabled, closes that workspace's sessions after persistence succeeds, and refuses to delete the last workspace.
 - `PUT /api/workspaces/active` switches the active workspace and persists the selection.
@@ -130,7 +131,7 @@ Why Vite:
 
 ### `useLayout`
 
-Fetches `/api/workspaces` and `/api/display`, applies runtime validation, tracks the active workspace layout, and persists layout changes back to the active workspace. The tab bar is hidden when only one workspace exists during normal use; edit mode exposes workspace add, inline rename, and delete controls. Delete uses a confirmation dialog before calling the workspace delete API.
+Fetches `/api/workspaces` and `/api/display`, applies runtime validation, tracks the active workspace layout, and persists layout changes back to the active workspace. The tab bar is hidden when only one workspace exists during normal use; edit mode exposes workspace add, inline rename, delete, and tab-position controls. Delete uses a confirmation dialog before calling the workspace delete API.
 
 Why this hook:
 

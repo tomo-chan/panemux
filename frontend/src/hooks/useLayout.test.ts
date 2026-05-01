@@ -239,6 +239,138 @@ describe('useLayout', () => {
     expect(result.current.workspaces?.items[0].title).toBe('Dev')
   })
 
+  it('updates workspace tab position from the returned response', async () => {
+    const updatedWorkspaces = { ...validWorkspaces, tab_position: 'left' as const }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validWorkspaces) } as Response)
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validDisplay) } as Response)
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(updatedWorkspaces) } as Response)
+    window.fetch = fetchMock
+
+    const { result } = renderHook(() => useLayout())
+    await waitFor(() => expect(result.current.workspaces).not.toBeNull())
+
+    await act(async () => {
+      await result.current.setWorkspaceTabPosition('left')
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/workspaces/tab-position', expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify({ tab_position: 'left' }),
+    }))
+    expect(result.current.workspaces?.tab_position).toBe('left')
+    expect(result.current.layout?.children[0].pane?.id).toBe('main')
+  })
+
+  it('adopts server top-level workspace fields while preserving current items when updating tab position', async () => {
+    const updatedWorkspaces = {
+      ...validWorkspaces,
+      active: 'ops',
+      tab_position: 'right' as const,
+      items: validWorkspaces.items.map((workspace) => (
+        workspace.id === 'dev' ? { ...workspace, title: 'Server Dev' } : workspace
+      )),
+    }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validWorkspaces) } as Response)
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validDisplay) } as Response)
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(updatedWorkspaces) } as Response)
+    window.fetch = fetchMock
+
+    const { result } = renderHook(() => useLayout())
+    await waitFor(() => expect(result.current.workspaces).not.toBeNull())
+
+    await act(async () => {
+      await result.current.setWorkspaceTabPosition('right')
+    })
+
+    expect(result.current.workspaces?.active).toBe('ops')
+    expect(result.current.workspaces?.tab_position).toBe('right')
+    expect(result.current.workspaces?.items[0].title).toBe('Dev')
+  })
+
+  it('preserves a pending local layout change when updating workspace tab position', async () => {
+    const pendingLayout: LayoutNode = {
+      direction: 'vertical',
+      children: [{ size: 100, pane: { id: 'pending-main', type: 'local' } }],
+    }
+    const staleServerWorkspaces = { ...validWorkspaces, tab_position: 'left' as const }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validWorkspaces) } as Response)
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validDisplay) } as Response)
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(staleServerWorkspaces) } as Response)
+      .mockResolvedValue({ ok: true, json: () => Promise.resolve(validDisplay) } as Response)
+    window.fetch = fetchMock
+
+    const { result } = renderHook(() => useLayout())
+    await waitFor(() => expect(result.current.workspaces).not.toBeNull())
+
+    vi.useFakeTimers()
+    try {
+      act(() => {
+        result.current.updateSizes(pendingLayout)
+      })
+
+      expect(result.current.layout?.children[0].pane?.id).toBe('pending-main')
+
+      await act(async () => {
+        await result.current.setWorkspaceTabPosition('left')
+      })
+
+      expect(result.current.workspaces?.tab_position).toBe('left')
+      expect(result.current.layout?.children[0].pane?.id).toBe('pending-main')
+      expect(result.current.workspaces?.items[0].layout.children[0].pane?.id).toBe('pending-main')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('accepts a tab position response before workspace state has loaded', async () => {
+    const updatedWorkspaces = { ...validWorkspaces, tab_position: 'left' as const }
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url === '/api/workspaces' && init?.method === undefined) {
+        return new Promise<Response>(() => {})
+      }
+      if (url === '/api/display') {
+        return Promise.resolve({ ok: false } as Response)
+      }
+      if (url === '/api/workspaces/tab-position') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(updatedWorkspaces) } as Response)
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`))
+    })
+    window.fetch = fetchMock
+
+    const { result } = renderHook(() => useLayout())
+    expect(result.current.workspaces).toBeNull()
+
+    await act(async () => {
+      await result.current.setWorkspaceTabPosition('left')
+    })
+
+    expect(result.current.workspaces?.tab_position).toBe('left')
+    expect(result.current.layout).toBeNull()
+  })
+
+  it('sets error when updating workspace tab position fails', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validWorkspaces) } as Response)
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validDisplay) } as Response)
+      .mockResolvedValueOnce({ ok: false, status: 422 } as Response)
+    window.fetch = fetchMock
+
+    const { result } = renderHook(() => useLayout())
+    await waitFor(() => expect(result.current.workspaces).not.toBeNull())
+
+    await act(async () => {
+      await result.current.setWorkspaceTabPosition('left')
+    })
+
+    expect(result.current.error).toContain('422')
+    expect(result.current.workspaces?.tab_position).toBe('top')
+  })
+
   it('fetches display config on mount', async () => {
     window.fetch = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validWorkspaces) } as Response)

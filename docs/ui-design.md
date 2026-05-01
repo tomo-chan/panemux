@@ -55,6 +55,8 @@ The terminal overlay is a `position: absolute` layer over the xterm.js canvas. I
 
 The inset `box-shadow` border marks every pane as part of an "edit zone" without affecting layout geometry. Using `box-shadow` rather than `border` or `outline` keeps the frame cosmetic and avoids shifting sibling sizes.
 
+Workspace tab position controls are also shown only in edit mode. They use four compact directional buttons for top, bottom, left, and right placement, with `aria-pressed` marking the current position. This keeps persistent layout-level changes grouped with the rest of the editing surface while avoiding extra text in the tab bar.
+
 ---
 
 ## Drag and Drop
