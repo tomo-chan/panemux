@@ -486,6 +486,95 @@ describe('useTerminal', () => {
     expect(secondContainer.contains(mockTerm.element as HTMLElement)).toBe(true)
   })
 
+  it('repaints a reused terminal again after remount timing settles', () => {
+    vi.useFakeTimers()
+    window.requestAnimationFrame = ((cb: FrameRequestCallback) => {
+      cb(0)
+      return 0
+    }) as typeof window.requestAnimationFrame
+    const firstContainer = makeContainer()
+    const secondContainer = makeContainer()
+
+    const first = renderHook(() => useTerminal({ sessionId: 's1', container: firstContainer }))
+    first.unmount()
+    mockFitAddon.fit.mockClear()
+    mockTerm.refresh.mockClear()
+
+    renderHook(() => useTerminal({ sessionId: 's1', container: secondContainer }))
+
+    expect(mockFitAddon.fit).toHaveBeenCalledTimes(1)
+    expect(mockTerm.refresh).toHaveBeenCalledTimes(1)
+
+    act(() => vi.advanceTimersByTime(50))
+
+    expect(mockFitAddon.fit).toHaveBeenCalledTimes(2)
+    expect(mockTerm.refresh).toHaveBeenCalledTimes(2)
+    vi.useRealTimers()
+  })
+
+  it('repaints the attached terminal when the window regains focus', () => {
+    vi.useFakeTimers()
+    window.requestAnimationFrame = ((cb: FrameRequestCallback) => {
+      cb(0)
+      return 0
+    }) as typeof window.requestAnimationFrame
+    const container = makeContainer()
+
+    renderHook(() => useTerminal({ sessionId: 's1', container }))
+    mockFitAddon.fit.mockClear()
+    mockTerm.refresh.mockClear()
+
+    act(() => window.dispatchEvent(new Event('focus')))
+
+    expect(mockFitAddon.fit).toHaveBeenCalledTimes(1)
+    expect(mockTerm.refresh).toHaveBeenCalledTimes(1)
+
+    act(() => vi.advanceTimersByTime(50))
+
+    expect(mockFitAddon.fit).toHaveBeenCalledTimes(2)
+    expect(mockTerm.refresh).toHaveBeenCalledTimes(2)
+    vi.useRealTimers()
+  })
+
+  it('repaints the attached terminal when the document becomes visible', () => {
+    vi.useFakeTimers()
+    window.requestAnimationFrame = ((cb: FrameRequestCallback) => {
+      cb(0)
+      return 0
+    }) as typeof window.requestAnimationFrame
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
+    const container = makeContainer()
+
+    renderHook(() => useTerminal({ sessionId: 's1', container }))
+    mockFitAddon.fit.mockClear()
+    mockTerm.refresh.mockClear()
+
+    act(() => document.dispatchEvent(new Event('visibilitychange')))
+
+    expect(mockFitAddon.fit).toHaveBeenCalledTimes(1)
+    expect(mockTerm.refresh).toHaveBeenCalledTimes(1)
+
+    act(() => vi.advanceTimersByTime(50))
+
+    expect(mockFitAddon.fit).toHaveBeenCalledTimes(2)
+    expect(mockTerm.refresh).toHaveBeenCalledTimes(2)
+    vi.useRealTimers()
+  })
+
+  it('does not repaint the attached terminal when the document becomes hidden', () => {
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
+    const container = makeContainer()
+
+    renderHook(() => useTerminal({ sessionId: 's1', container }))
+    mockFitAddon.fit.mockClear()
+    mockTerm.refresh.mockClear()
+
+    act(() => document.dispatchEvent(new Event('visibilitychange')))
+
+    expect(mockFitAddon.fit).not.toHaveBeenCalled()
+    expect(mockTerm.refresh).not.toHaveBeenCalled()
+  })
+
   it('editMode blocks terminal input', () => {
     const container = makeContainer()
     renderHook(() => useTerminal({ sessionId: 's1', container, editMode: true }))
