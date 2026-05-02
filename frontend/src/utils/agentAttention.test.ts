@@ -23,6 +23,22 @@ describe('createAgentAttentionDetector', () => {
     ).toBe(true)
   })
 
+  it('detects Codex edit approval menus with a do-not-ask-again option', () => {
+    const detector = createAgentAttentionDetector()
+
+    expect(
+      detector.feed(
+        [
+          'Would you like to make the following edits?',
+          '',
+          '› 1. Yes, proceed (y)',
+          "  2. Yes, and don't ask again for these files (a)",
+          '  3. No, and tell Codex what to do differently (esc)',
+        ].join('\n'),
+      ),
+    ).toBe(true)
+  })
+
   it('does not match ordinary terminal output', () => {
     const detector = createAgentAttentionDetector()
 
