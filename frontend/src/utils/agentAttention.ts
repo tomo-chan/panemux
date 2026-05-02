@@ -2,7 +2,6 @@ const MAX_TAIL_LENGTH = 1200
 
 const ATTENTION_PATTERNS = [
   /\b(codex|claude|agent)\b.{0,160}\b(confirm|confirmation|approve|approval|permission|allow|proceed)\b/i,
-  /\b(confirm|approve|allow|proceed)\b.{0,120}\?/i,
   /(確認|承認|許可).{0,120}(必要|してください|しますか|待ち)/,
 ]
 

@@ -104,5 +104,6 @@ export function useWebSocket(url: string, options: UseWebSocketOptions) {
 }
 
 function isArrayBuffer(value: unknown): value is ArrayBuffer {
+  // Vitest can deliver ArrayBuffer values from a different JS realm.
   return value instanceof ArrayBuffer || Object.prototype.toString.call(value) === '[object ArrayBuffer]'
 }
