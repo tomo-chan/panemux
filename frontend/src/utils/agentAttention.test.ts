@@ -15,6 +15,14 @@ describe('createAgentAttentionDetector', () => {
     expect(detector.feed('irmation\x1b[0m: proceed?')).toBe(true)
   })
 
+  it('detects Codex approval menus with yes and no options', () => {
+    const detector = createAgentAttentionDetector()
+
+    expect(
+      detector.feed(' 1. Yes, proceed (y)\n 2. No, and tell Codex what to do differently (esc)'),
+    ).toBe(true)
+  })
+
   it('does not match ordinary terminal output', () => {
     const detector = createAgentAttentionDetector()
 

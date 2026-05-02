@@ -2,6 +2,7 @@ const MAX_TAIL_LENGTH = 1200
 
 const ATTENTION_PATTERNS = [
   /\b(codex|claude|agent)\b.{0,160}\b(confirm|confirmation|approve|approval|permission|allow|proceed)\b/i,
+  /\bYes,\s*proceed\s*\(y\)[\s\S]{0,160}\bNo,\s*and\s*tell\s+Codex\s+what\s+to\s+do\s+differently\s*\(esc\)/i,
   /(確認|承認|許可).{0,120}(必要|してください|しますか|待ち)/,
 ]
 
