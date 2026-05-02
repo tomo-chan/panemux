@@ -15,11 +15,31 @@ describe('createAgentAttentionDetector', () => {
     expect(detector.feed('irmation\x1b[0m: proceed?')).toBe(true)
   })
 
+  it('detects agent confirmation prompts split across terminal lines', () => {
+    const detector = createAgentAttentionDetector()
+
+    expect(detector.feed('Codex is waiting for your\napproval before it can proceed.')).toBe(true)
+  })
+
+  it('detects Japanese approval prompts split across terminal lines', () => {
+    const detector = createAgentAttentionDetector()
+
+    expect(detector.feed('操作の承認\nが必要です')).toBe(true)
+  })
+
   it('detects Codex approval menus with yes and no options', () => {
     const detector = createAgentAttentionDetector()
 
     expect(
       detector.feed(' 1. Yes, proceed (y)\n 2. No, and tell Codex what to do differently (esc)'),
+    ).toBe(true)
+  })
+
+  it('detects Claude approval menus with yes and no options', () => {
+    const detector = createAgentAttentionDetector()
+
+    expect(
+      detector.feed(' 1. Yes, proceed (y)\n 2. No, and tell Claude what to do differently (esc)'),
     ).toBe(true)
   })
 
@@ -54,6 +74,31 @@ describe('createAgentAttentionDetector', () => {
           '› 1. Yes, proceed (y)',
           "  2. Yes, and don't ask again for commands that start with `gh pr comment` (p)",
           '  3. No, and tell Codex what to do differently (esc)',
+        ].join('\n'),
+      ),
+    ).toBe(true)
+  })
+
+  it('detects Claude bash command approval menus', () => {
+    const detector = createAgentAttentionDetector()
+
+    expect(
+      detector.feed(
+        [
+          'Bash command',
+          '',
+          '  gh api repos/tomo-chan/panemux/pulls/74/reviews \\',
+          '    --method POST \\',
+          '    --field event="COMMENT"',
+          '  Post follow-up review for PR #74 at new head SHA',
+          '',
+          'Brace expansion',
+          '',
+          'Do you want to proceed?',
+          '❯ 1. Yes',
+          '  2. No',
+          '',
+          'Esc to cancel · Tab to amend · ctrl+e to explain',
         ].join('\n'),
       ),
     ).toBe(true)
