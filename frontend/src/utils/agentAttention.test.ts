@@ -39,6 +39,26 @@ describe('createAgentAttentionDetector', () => {
     ).toBe(true)
   })
 
+  it('detects Codex command approval menus with scoped do-not-ask-again options', () => {
+    const detector = createAgentAttentionDetector()
+
+    expect(
+      detector.feed(
+        [
+          'Would you like to run the following command?',
+          '',
+          '  Reason: PR #74 にフォローアップコメントを投稿するため、GitHub API へのネットワークアクセス付きで gh pr comment を再実行してよいですか？',
+          '',
+          '  $ gh pr comment 74 --body-file /tmp/pr74-comment-8f80598.md',
+          '',
+          '› 1. Yes, proceed (y)',
+          "  2. Yes, and don't ask again for commands that start with `gh pr comment` (p)",
+          '  3. No, and tell Codex what to do differently (esc)',
+        ].join('\n'),
+      ),
+    ).toBe(true)
+  })
+
   it('does not match ordinary terminal output', () => {
     const detector = createAgentAttentionDetector()
 
