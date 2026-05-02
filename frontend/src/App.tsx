@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react'
+import React, { useState, useCallback, useMemo } from 'react'
 import { SplitContainer, LayoutActionsContext } from './components/SplitContainer'
 import { EditModeToggle } from './components/EditModeToggle'
 import { PaneSettingsDialog } from './components/PaneSettingsDialog'
@@ -9,7 +9,7 @@ import { useEditMode } from './hooks/useEditMode'
 import { usePaneSettings } from './hooks/usePaneSettings'
 import { DisplayConfig } from './types'
 import { TERMINAL_FONT_FAMILY } from './utils/fonts'
-import { findPaneById } from './utils/layoutTree'
+import { findPaneById, layoutContainsPane } from './utils/layoutTree'
 import type { SSHConfigHost } from './schemas'
 
 const DEFAULT_DISPLAY: DisplayConfig = { show_header: true, show_status_bar: true }
@@ -19,12 +19,69 @@ export const App: React.FC = () => {
   const { editMode, toggleEditMode } = useEditMode()
   const [maximizedPaneId, setMaximizedPaneId] = useState<string | null>(null)
   const [dragSourcePaneId, setDragSourcePaneId] = useState<string | null>(null)
+  const [attentionPaneIds, setAttentionPaneIds] = useState<Set<string>>(() => new Set())
   const { isOpen, currentPane, sshConnectionNames, saveError, isSaving, openSettings, closeSettings, saveSettings, addSSHConfigHost, detectShell } =
     usePaneSettings(layout, updateSizes)
 
   const [isAddSSHHostOpen, setIsAddSSHHostOpen] = useState(false)
   const [addSSHHostError, setAddSSHHostError] = useState<string | null>(null)
   const [isAddSSHHostSaving, setIsAddSSHHostSaving] = useState(false)
+
+  const findWorkspaceForPane = useCallback((paneId: string) => {
+    return workspaces?.items.find((workspace) => layoutContainsPane(workspace.layout, paneId)) ?? null
+  }, [workspaces])
+
+  const attentionWorkspaceIds = useMemo(() => {
+    const workspaceIds = new Set<string>()
+    if (!workspaces) return workspaceIds
+
+    for (const paneId of attentionPaneIds) {
+      const workspace = workspaces.items.find((item) => layoutContainsPane(item.layout, paneId))
+      if (workspace) workspaceIds.add(workspace.id)
+    }
+
+    return workspaceIds
+  }, [attentionPaneIds, workspaces])
+
+  const clearWorkspaceAttention = useCallback((workspaceId: string) => {
+    const workspace = workspaces?.items.find((item) => item.id === workspaceId)
+    if (!workspace) return
+
+    setAttentionPaneIds((current) => {
+      const next = new Set<string>()
+      let removed = false
+      for (const paneId of current) {
+        if (layoutContainsPane(workspace.layout, paneId)) {
+          removed = true
+        } else {
+          next.add(paneId)
+        }
+      }
+      return removed ? next : current
+    })
+  }, [workspaces])
+
+  const clearPaneAttention = useCallback((paneId: string) => {
+    setAttentionPaneIds((current) => {
+      if (!current.has(paneId)) return current
+      const next = new Set(current)
+      next.delete(paneId)
+      return next
+    })
+  }, [])
+
+  const notifyAttention = useCallback((paneId: string) => {
+    const workspace = findWorkspaceForPane(paneId)
+    const pane = workspace ? findPaneById(workspace.layout, paneId) : layout ? findPaneById(layout, paneId) : null
+    const paneTitle = pane?.title ?? paneId
+    const workspaceTitle = workspace?.title
+
+    setAttentionPaneIds((current) => new Set(current).add(paneId))
+    showBrowserNotification(
+      'Agent confirmation requested',
+      workspaceTitle ? `${paneTitle} in ${workspaceTitle}` : paneTitle,
+    )
+  }, [findWorkspaceForPane, layout])
 
   const handleAddSSHHost = useCallback(async (host: SSHConfigHost) => {
     setIsAddSSHHostSaving(true)
@@ -86,6 +143,9 @@ export const App: React.FC = () => {
       setDragSourcePaneId,
       displayConfig: displayConfig ?? DEFAULT_DISPLAY,
       editMode,
+      onPaneAttention: notifyAttention,
+      clearPaneAttention,
+      hasPaneAttention: (paneId: string) => attentionPaneIds.has(paneId),
     }}>
       <div
         style={{
@@ -109,6 +169,8 @@ export const App: React.FC = () => {
             activeWorkspaceId={workspaces.active}
             tabPosition={workspaces.tab_position}
             onSelect={setActiveWorkspace}
+            attentionWorkspaceIds={attentionWorkspaceIds}
+            onClearAttention={clearWorkspaceAttention}
             onAdd={editMode ? addWorkspace : undefined}
             onRename={editMode ? renameWorkspace : undefined}
             onTabPositionChange={editMode ? setWorkspaceTabPosition : undefined}
@@ -146,4 +208,21 @@ export const App: React.FC = () => {
       </div>
     </LayoutActionsContext.Provider>
   )
+}
+
+function showBrowserNotification(title: string, body: string) {
+  if (!('Notification' in window)) return
+
+  if (Notification.permission === 'granted') {
+    new Notification(title, { body })
+    return
+  }
+
+  if (Notification.permission === 'default') {
+    void Notification.requestPermission().then((permission) => {
+      if (permission === 'granted') {
+        new Notification(title, { body })
+      }
+    })
+  }
 }

@@ -217,6 +217,74 @@ describe('useTerminal', () => {
     expect(mockWrite).toHaveBeenCalledWith(expect.any(Uint8Array))
   })
 
+  it('notifies when terminal output asks for agent confirmation', () => {
+    const container = makeContainer()
+    const onAttention = vi.fn()
+    renderHook(() => useTerminal({ sessionId: 's1', container, onAttention }))
+    act(() => MockWebSocket.instances[0].simulateOpen())
+
+    act(() =>
+      MockWebSocket.instances[0].simulateMessage(
+        new TextEncoder().encode('Codex needs confirmation before continuing. Approve?').buffer,
+      )
+    )
+
+    expect(onAttention).toHaveBeenCalledWith('s1')
+  })
+
+  it('streams binary decoding so split Japanese confirmation prompts are detected', () => {
+    const container = makeContainer()
+    const onAttention = vi.fn()
+    renderHook(() => useTerminal({ sessionId: 's1', container, onAttention }))
+    act(() => MockWebSocket.instances[0].simulateOpen())
+
+    const bytes = new TextEncoder().encode('Codex: 確認が必要です。承認してください')
+    const split = 'Codex: '.length + 1
+    act(() => MockWebSocket.instances[0].simulateMessage(bytes.slice(0, split).buffer))
+
+    expect(onAttention).not.toHaveBeenCalled()
+
+    act(() => MockWebSocket.instances[0].simulateMessage(bytes.slice(split).buffer))
+
+    expect(onAttention).toHaveBeenCalledWith('s1')
+  })
+
+  it('deduplicates repeated agent confirmation redraws', () => {
+    const container = makeContainer()
+    const onAttention = vi.fn()
+    renderHook(() => useTerminal({ sessionId: 's1', container, onAttention }))
+    act(() => MockWebSocket.instances[0].simulateOpen())
+
+    const prompt = new TextEncoder().encode('Agent is waiting for confirmation: proceed?').buffer
+    act(() => MockWebSocket.instances[0].simulateMessage(prompt))
+    act(() => MockWebSocket.instances[0].simulateMessage(prompt))
+
+    expect(onAttention).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not notify for unrelated output after an old confirmation prompt ages past the throttle', () => {
+    vi.useFakeTimers()
+    const container = makeContainer()
+    const onAttention = vi.fn()
+    renderHook(() => useTerminal({ sessionId: 's1', container, onAttention }))
+    act(() => MockWebSocket.instances[0].simulateOpen())
+
+    act(() =>
+      MockWebSocket.instances[0].simulateMessage(
+        new TextEncoder().encode('Codex needs confirmation before continuing. Approve?').buffer,
+      )
+    )
+    act(() => vi.advanceTimersByTime(11_000))
+    act(() =>
+      MockWebSocket.instances[0].simulateMessage(
+        new TextEncoder().encode('\nmake test passed').buffer,
+      )
+    )
+
+    expect(onAttention).toHaveBeenCalledTimes(1)
+    vi.useRealTimers()
+  })
+
   it('writes error message to terminal on error control frame', () => {
     const container = makeContainer()
     renderHook(() => useTerminal({ sessionId: 's1', container }))

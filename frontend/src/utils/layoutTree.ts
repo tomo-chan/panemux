@@ -108,6 +108,10 @@ export function findPaneById(layout: LayoutNode, paneId: string): PaneConfig | n
   return null
 }
 
+export function layoutContainsPane(layout: LayoutNode, paneId: string): boolean {
+  return findPaneById(layout, paneId) !== null
+}
+
 /**
  * Replaces the pane matching `updated.id` in the layout tree with `updated`.
  * Returns the tree unchanged if the id is not found.

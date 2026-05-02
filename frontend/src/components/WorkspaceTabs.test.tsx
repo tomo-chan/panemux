@@ -26,6 +26,41 @@ describe('WorkspaceTabs', () => {
     expect(onSelect).toHaveBeenCalledWith('ops')
   })
 
+  it('marks inactive workspaces that need attention', () => {
+    render(
+      <WorkspaceTabs
+        workspaces={workspaces}
+        activeWorkspaceId="dev"
+        tabPosition="top"
+        attentionWorkspaceIds={new Set(['ops'])}
+        onSelect={() => {}}
+      />,
+    )
+
+    expect(screen.getByRole('tab', { name: 'Ops' })).toHaveAttribute('data-attention', 'true')
+    expect(screen.getByRole('tab', { name: 'Dev' })).not.toHaveAttribute('data-attention')
+  })
+
+  it('clears workspace attention before selecting the tab', () => {
+    const onSelect = vi.fn()
+    const onClearAttention = vi.fn()
+    render(
+      <WorkspaceTabs
+        workspaces={workspaces}
+        activeWorkspaceId="dev"
+        tabPosition="top"
+        attentionWorkspaceIds={new Set(['ops'])}
+        onSelect={onSelect}
+        onClearAttention={onClearAttention}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Ops' }))
+
+    expect(onClearAttention).toHaveBeenCalledWith('ops')
+    expect(onSelect).toHaveBeenCalledWith('ops')
+  })
+
   it('hides workspace tabs for a single workspace while keeping add available', () => {
     const onAdd = vi.fn()
     render(

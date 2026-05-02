@@ -43,7 +43,7 @@ export function useWebSocket(url: string, options: UseWebSocketOptions) {
     }
 
     ws.onmessage = (event) => {
-      const isBinary = event.data instanceof ArrayBuffer
+      const isBinary = isArrayBuffer(event.data)
       if (!isBinary) {
         // Validate text frames before passing to handler
         try {
@@ -101,4 +101,9 @@ export function useWebSocket(url: string, options: UseWebSocketOptions) {
   }, [connect])
 
   return { send, connected, reconnect }
+}
+
+function isArrayBuffer(value: unknown): value is ArrayBuffer {
+  // Vitest can deliver ArrayBuffer values from a different JS realm.
+  return value instanceof ArrayBuffer || Object.prototype.toString.call(value) === '[object ArrayBuffer]'
 }
