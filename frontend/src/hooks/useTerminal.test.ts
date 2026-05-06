@@ -509,6 +509,11 @@ describe('useTerminal', () => {
 
     expect(mockFitAddon.fit).toHaveBeenCalledTimes(2)
     expect(mockTerm.refresh).toHaveBeenCalledTimes(2)
+
+    act(() => vi.advanceTimersByTime(200))
+
+    expect(mockFitAddon.fit).toHaveBeenCalledTimes(3)
+    expect(mockTerm.refresh).toHaveBeenCalledTimes(3)
     vi.useRealTimers()
   })
 
@@ -533,6 +538,11 @@ describe('useTerminal', () => {
 
     expect(mockFitAddon.fit).toHaveBeenCalledTimes(2)
     expect(mockTerm.refresh).toHaveBeenCalledTimes(2)
+
+    act(() => vi.advanceTimersByTime(200))
+
+    expect(mockFitAddon.fit).toHaveBeenCalledTimes(3)
+    expect(mockTerm.refresh).toHaveBeenCalledTimes(3)
     vi.useRealTimers()
   })
 
@@ -558,6 +568,11 @@ describe('useTerminal', () => {
 
     expect(mockFitAddon.fit).toHaveBeenCalledTimes(2)
     expect(mockTerm.refresh).toHaveBeenCalledTimes(2)
+
+    act(() => vi.advanceTimersByTime(200))
+
+    expect(mockFitAddon.fit).toHaveBeenCalledTimes(3)
+    expect(mockTerm.refresh).toHaveBeenCalledTimes(3)
     vi.useRealTimers()
   })
 

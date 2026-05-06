@@ -8,7 +8,7 @@ import { TERMINAL_FONT_FAMILY } from '../utils/fonts'
 import { createAgentAttentionDetector } from '../utils/agentAttention'
 
 const ATTENTION_NOTIFY_INTERVAL_MS = 10_000
-const REMOUNT_REPAINT_DELAYS_MS = [50, 250]
+const REPAINT_SETTLE_DELAYS_MS = [50, 250]
 
 interface UseTerminalOptions {
   sessionId: string
@@ -104,6 +104,8 @@ export function useTerminal({ sessionId, container, editMode = false, onAttentio
   }, [editMode])
 
   useEffect(() => {
+    // Browser focus and tab visibility changes can affect every attached pane's layout,
+    // so each mounted terminal repaints its own attached instance when the page returns.
     const repaintCurrentTerminal = () => {
       const entry = entryRef.current
       if (entry) refreshTerminal(entry, setDims)
@@ -289,7 +291,7 @@ function refreshTerminal(
   clearScheduledRepaints(entry)
   requestAnimationFrame(() => repaintTerminal(entry, setDims))
 
-  for (const delay of REMOUNT_REPAINT_DELAYS_MS) {
+  for (const delay of REPAINT_SETTLE_DELAYS_MS) {
     const timer = setTimeout(() => {
       entry.repaintTimers.delete(timer)
       requestAnimationFrame(() => repaintTerminal(entry, setDims))
