@@ -8,6 +8,7 @@ import { TERMINAL_FONT_FAMILY } from '../utils/fonts'
 import { createAgentAttentionDetector } from '../utils/agentAttention'
 
 const ATTENTION_NOTIFY_INTERVAL_MS = 10_000
+const REPAINT_SETTLE_DELAYS_MS = [50, 250]
 
 interface UseTerminalOptions {
   sessionId: string
@@ -21,6 +22,7 @@ interface TerminalEntry {
   fitAddon: FitAddon
   attachedContainer: HTMLElement | null
   disposeTimer: ReturnType<typeof setTimeout> | null
+  repaintTimers: Set<ReturnType<typeof setTimeout>>
   send: ((data: string | ArrayBuffer | Uint8Array) => void) | null
   editMode: boolean
 }
@@ -101,6 +103,29 @@ export function useTerminal({ sessionId, container, editMode = false, onAttentio
     if (entryRef.current) entryRef.current.editMode = editMode
   }, [editMode])
 
+  useEffect(() => {
+    // Browser focus and tab visibility changes can affect every attached pane's layout,
+    // so each mounted terminal repaints its own attached instance when the page returns.
+    const repaintCurrentTerminal = () => {
+      const entry = entryRef.current
+      if (entry) refreshTerminal(entry, setDims)
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        repaintCurrentTerminal()
+      }
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    window.addEventListener('focus', repaintCurrentTerminal)
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      window.removeEventListener('focus', repaintCurrentTerminal)
+    }
+  }, [])
+
   // Initialize terminal
   useEffect(() => {
     if (!container || initializedRef.current) return
@@ -126,10 +151,12 @@ export function useTerminal({ sessionId, container, editMode = false, onAttentio
       const currentEntry = entryRef.current
       if (!currentEntry) return
 
+      clearScheduledRepaints(currentEntry)
       currentEntry.attachedContainer = null
       currentEntry.send = null
       currentEntry.disposeTimer = setTimeout(() => {
         if (currentEntry.attachedContainer) return
+        clearScheduledRepaints(currentEntry)
         currentEntry.term.dispose()
         terminalEntries.delete(sessionId)
       }, 0)
@@ -153,10 +180,8 @@ export function useTerminal({ sessionId, container, editMode = false, onAttentio
     const entry = entryRef.current
     if (!entry) return
 
-    entry.fitAddon.fit()
-    entry.term.refresh(0, entry.term.rows - 1)
+    repaintTerminal(entry, setDims)
     const { cols, rows } = entry.term
-    setDims({ cols, rows })
     if (connected) {
       send(JSON.stringify({ type: 'resize', cols, rows }))
     }
@@ -207,6 +232,7 @@ function getOrCreateTerminalEntry(sessionId: string): TerminalEntry {
     fitAddon,
     attachedContainer: null,
     disposeTimer: null,
+    repaintTimers: new Set(),
     send: null,
     editMode: false,
   }
@@ -262,17 +288,43 @@ function refreshTerminal(
   entry: TerminalEntry,
   setDims: (dims: { cols: number; rows: number }) => void,
 ) {
-  requestAnimationFrame(() => {
-    entry.fitAddon.fit()
+  clearScheduledRepaints(entry)
+  requestAnimationFrame(() => repaintTerminal(entry, setDims))
+
+  for (const delay of REPAINT_SETTLE_DELAYS_MS) {
+    const timer = setTimeout(() => {
+      entry.repaintTimers.delete(timer)
+      requestAnimationFrame(() => repaintTerminal(entry, setDims))
+    }, delay)
+    entry.repaintTimers.add(timer)
+  }
+}
+
+function repaintTerminal(
+  entry: TerminalEntry,
+  setDims: (dims: { cols: number; rows: number }) => void,
+) {
+  if (!entry.attachedContainer) return
+
+  entry.fitAddon.fit()
+  if (entry.term.rows > 0) {
     entry.term.refresh(0, entry.term.rows - 1)
-    const { cols, rows } = entry.term
-    setDims({ cols, rows })
-  })
+  }
+  const { cols, rows } = entry.term
+  setDims({ cols, rows })
+}
+
+function clearScheduledRepaints(entry: TerminalEntry) {
+  for (const timer of entry.repaintTimers) {
+    clearTimeout(timer)
+  }
+  entry.repaintTimers.clear()
 }
 
 export function __resetTerminalEntriesForTests() {
   for (const entry of terminalEntries.values()) {
     if (entry.disposeTimer) clearTimeout(entry.disposeTimer)
+    clearScheduledRepaints(entry)
     entry.term.dispose()
   }
   terminalEntries.clear()
