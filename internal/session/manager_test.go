@@ -147,3 +147,34 @@ func TestManager_Subscribe_ClosedSessionReturnsSnapshotAndClosedStream(t *testin
 		}
 	}, time.Second, 10*time.Millisecond)
 }
+
+func TestManagedSession_SubscribeStillWorksWhilePublishWaitsOnSlowSubscriber(t *testing.T) {
+	slowSubscriber := make(chan []byte, 1)
+	slowSubscriber <- []byte("already full")
+
+	entry := &managedSession{
+		subscribers: map[int]chan []byte{
+			0: slowSubscriber,
+		},
+	}
+
+	go entry.publish([]byte("next chunk"))
+
+	done := make(chan struct{})
+	go func() {
+		_, updates, unsubscribe := entry.subscribe()
+		unsubscribe()
+		select {
+		case _, ok := <-updates:
+			require.False(t, ok)
+		default:
+		}
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("subscribe blocked behind a slow subscriber")
+	}
+}

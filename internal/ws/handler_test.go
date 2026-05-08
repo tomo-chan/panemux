@@ -18,13 +18,16 @@ import (
 )
 
 // wsMockSession implements session.Session for WebSocket handler tests.
+//
+//nolint:govet // fieldalignment: test-only mock fields are grouped for readability.
 type wsMockSession struct {
 	id      string
+	state   session.State // configurable; defaults to StateConnected
+	closed  bool
 	out     chan []byte // data sent to WS client (session output)
 	in      chan []byte // data received from WS client (session input)
 	resizes chan [2]uint16
-	state   session.State // configurable; defaults to StateConnected
-	closed  bool
+	readErr error
 }
 
 func newWsMock(id string) *wsMockSession {
@@ -45,6 +48,9 @@ func (m *wsMockSession) State() session.State { return m.state }
 func (m *wsMockSession) Read(p []byte) (int, error) {
 	data, ok := <-m.out
 	if !ok {
+		if m.readErr != nil {
+			return 0, m.readErr
+		}
 		return 0, io.EOF
 	}
 	n := copy(p, data)
@@ -195,6 +201,41 @@ func TestWS_ReplaysBufferedOutputOnFirstConnect(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, websocket.BinaryMessage, msgType)
 	assert.Equal(t, []byte("buffered prompt"), data)
+}
+
+func TestWS_SendsExitedStatusWhenSessionStreamEndsWithReadError(t *testing.T) {
+	mgr := session.NewManager()
+	sess := newWsMock("s1")
+	sess.state = session.StateDisconnected
+	sess.readErr = io.ErrUnexpectedEOF
+	mgr.Add(sess)
+	close(sess.out)
+	time.Sleep(50 * time.Millisecond)
+
+	srv := setupWSServer(mgr)
+	defer srv.Close()
+
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL(srv, "s1"), nil)
+	require.NoError(t, err)
+	defer conn.Close()
+
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	msgType, data, err := conn.ReadMessage()
+	require.NoError(t, err)
+	assert.Equal(t, websocket.TextMessage, msgType)
+
+	var connected ControlMessage
+	require.NoError(t, json.Unmarshal(data, &connected))
+	assert.Equal(t, "connected", connected.State)
+
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	msgType, data, err = conn.ReadMessage()
+	require.NoError(t, err)
+	assert.Equal(t, websocket.TextMessage, msgType)
+
+	var exited ControlMessage
+	require.NoError(t, json.Unmarshal(data, &exited))
+	assert.Equal(t, "exited", exited.State)
 }
 
 func TestWS_ResizeMessage_ResizesSession(t *testing.T) {

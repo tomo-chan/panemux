@@ -3,6 +3,7 @@ package session
 import (
 	"fmt"
 	"io"
+	"log"
 	"sync"
 )
 
@@ -134,6 +135,7 @@ func (m *managedSession) pump() {
 				m.closeSubscribers()
 				return
 			}
+			log.Printf("session %s read error: %v", m.session.ID(), err)
 			m.closeSubscribers()
 			return
 		}
@@ -142,16 +144,20 @@ func (m *managedSession) pump() {
 
 func (m *managedSession) publish(chunk []byte) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	m.history = append(m.history, chunk...)
 	if len(m.history) > sessionReplayLimitBytes {
 		m.history = append([]byte(nil), m.history[len(m.history)-sessionReplayLimitBytes:]...)
 	}
 
 	for _, subscriber := range m.subscribers {
-		subscriber <- append([]byte(nil), chunk...)
+		select {
+		case subscriber <- append([]byte(nil), chunk...):
+		default:
+			// A slow client must not block session pumping or subscription cleanup.
+			// The recent replay buffer remains the source of truth for reconnects.
+		}
 	}
+	m.mu.Unlock()
 }
 
 func (m *managedSession) subscribe() ([]byte, <-chan []byte, func()) {

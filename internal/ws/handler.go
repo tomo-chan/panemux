@@ -119,15 +119,12 @@ func (h *Handler) forwardTerminalOutput(
 		}
 	}
 
-	if sess.State() == session.StateExited {
-		h.sendStatus(conn, "exited")
-		return
-	}
-
 	if sess.State() != session.StateConnected {
 		//nolint:gosec // G706: sessionID is a config-defined identifier
 		log.Printf("session %s stream closed in state %s", sessionID, sess.State())
 	}
+
+	h.sendStatus(conn, "exited")
 }
 
 func (h *Handler) pipeWebSocketToTerminal(
