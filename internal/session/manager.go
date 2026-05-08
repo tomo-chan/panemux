@@ -35,6 +35,11 @@ func NewManager() *Manager {
 }
 
 // Add registers a session with the manager and starts buffering its output.
+//
+// The replay buffer exists because workspace switches unmount hidden panes in the
+// browser, which closes their WebSocket readers while the PTY keeps producing
+// bytes. Without a backend-side buffer, a pane that reconnects later only sees
+// fresh output and appears blank until the shell redraws.
 func (m *Manager) Add(s Session) {
 	entry := &managedSession{
 		session:     s,
@@ -60,6 +65,9 @@ func (m *Manager) Get(id string) (Session, bool) {
 }
 
 // Subscribe returns buffered output plus a live stream for the session.
+//
+// Callers are expected to send the snapshot before consuming the live stream so a
+// reconnected terminal reconstructs its recent screen contents immediately.
 func (m *Manager) Subscribe(id string) ([]byte, <-chan []byte, func(), bool) {
 	m.mu.RLock()
 	entry, ok := m.sessions[id]

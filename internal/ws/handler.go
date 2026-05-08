@@ -101,6 +101,9 @@ func (h *Handler) forwardTerminalOutput(
 	updates <-chan []byte,
 	sessionID string,
 ) {
+	// Replay the buffered bytes before streaming new output. This is what keeps a
+	// workspace switch from showing a blank xterm when the PTY already emitted the
+	// prompt while the pane was unmounted.
 	if len(snapshot) > 0 {
 		if err := conn.WriteMessage(websocket.BinaryMessage, snapshot); err != nil {
 			return

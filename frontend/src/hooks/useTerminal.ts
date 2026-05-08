@@ -84,6 +84,9 @@ export function useTerminal({ sessionId, container, editMode = false, onAttentio
 
   const handleMessage = useCallback((data: ArrayBuffer | string, isBinary: boolean) => {
     if (!canApplyMessage(entryRef.current, termRef.current)) {
+      // A pane can reconnect before React has reattached the reused xterm DOM node
+      // during a workspace switch. Keep those bytes so the initial prompt is not
+      // lost between the WebSocket open and the eventual attach.
       pendingMessagesRef.current.push({ data, isBinary })
       return
     }
@@ -142,6 +145,9 @@ export function useTerminal({ sessionId, container, editMode = false, onAttentio
     const entry = entryRef.current
     if (!connected || !entry) return
 
+    // On reconnect the container may still be measuring as 0x0. Delay the
+    // initial resize until xterm reports non-zero cols/rows, otherwise the
+    // backend drops the resize and some shells never redraw their prompt.
     scheduleConnectedResize(entry, setDims, send)
   }, [connected, send, sessionId])
 
@@ -164,6 +170,8 @@ export function useTerminal({ sessionId, container, editMode = false, onAttentio
     fitAddonRef.current = entry.fitAddon
 
     attachTerminal(entry, container)
+    // Flush anything buffered while the pane was logically mounted but the xterm
+    // element had not yet been attached back into this container.
     flushPendingMessages(pendingMessagesRef.current, applyMessageToTerminal)
     refreshTerminal(entry, setDims)
 
