@@ -186,6 +186,7 @@ Individual commands:
 ```sh
 go test ./... -v -race           # Go tests
 cd frontend && npm test          # Frontend tests
+make test-e2e                    # Playwright E2E for browser-only rendering regressions
 make coverage-go                 # Go coverage (≥ 80 % required)
 cd frontend && npm run coverage  # Frontend coverage (≥ 80 % required)
 go vet ./...                     # Go lint

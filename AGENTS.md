@@ -40,6 +40,7 @@ make fmt        # apply go fmt -s to all Go files
 ```sh
 make lint       # includes go fmt check; fails if any Go file is unformatted
 make test
+make test-e2e   # Playwright browser regression checks for real renderer issues
 make check
 ```
 
@@ -137,7 +138,7 @@ Example: `Config.sshConfigPath` (empty = use `sshconfig.DefaultPath()`, non-empt
 
 ### Quality gate
 - `make check` (lint + test + coverage) must pass before `make build`.
-- Test commands: `make test-go` / `make test-frontend` / `make test`
+- Test commands: `make test-go` / `make test-frontend` / `make test-e2e` / `make test`
 - Coverage commands: `make coverage-go` / `make coverage-frontend`
 - Lint commands: `make lint-go` / `make lint-frontend` / `make lint`
 - **Go lint includes `gofmt`, `go vet`, and `golangci-lint run ./...`** (v2, config in `.golangci.yml`). The lint binary auto-installs via `make install-deps` / `make install-deps-ci`.
