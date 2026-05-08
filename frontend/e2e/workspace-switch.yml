@@ -2,7 +2,7 @@ server:
     host: 127.0.0.1
     port: 4173
 workspaces:
-    active: workspace-2
+    active: default
     tab_position: top
     items:
         - id: default
