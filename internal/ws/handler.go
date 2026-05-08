@@ -3,7 +3,6 @@ package ws
 
 import (
 	"encoding/json"
-	"io"
 	"log"
 	"net/http"
 	"time"
@@ -50,6 +49,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	snapshot, updates, unsubscribe, ok := h.manager.Subscribe(sessionID)
+	if !ok {
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
+	defer unsubscribe()
+
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		//nolint:gosec // G706: sessionID is a config-defined identifier
@@ -59,7 +65,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer conn.Close() //nolint:errcheck
 
 	h.sendStatus(conn, "connected")
-	done := h.pipeTerminalToWebSocket(conn, sess, sessionID)
+	done := h.pipeTerminalToWebSocket(conn, sess, snapshot, updates, sessionID)
 	h.pipeWebSocketToTerminal(conn, sess, sessionID)
 	waitForTerminalPipe(done)
 }
@@ -76,12 +82,14 @@ func (h *Handler) sessionForRequest(w http.ResponseWriter, sessionID string) ses
 func (h *Handler) pipeTerminalToWebSocket(
 	conn *websocket.Conn,
 	sess session.Session,
+	snapshot []byte,
+	updates <-chan []byte,
 	sessionID string,
 ) <-chan struct{} {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		h.forwardTerminalOutput(conn, sess, sessionID)
+		h.forwardTerminalOutput(conn, sess, snapshot, updates, sessionID)
 	}()
 	return done
 }
@@ -89,24 +97,33 @@ func (h *Handler) pipeTerminalToWebSocket(
 func (h *Handler) forwardTerminalOutput(
 	conn *websocket.Conn,
 	sess session.Session,
+	snapshot []byte,
+	updates <-chan []byte,
 	sessionID string,
 ) {
-	buf := make([]byte, 4096)
-	for {
-		n, err := sess.Read(buf)
-		if n > 0 {
-			if writeErr := conn.WriteMessage(websocket.BinaryMessage, buf[:n]); writeErr != nil {
-				return
-			}
-		}
-		if err != nil {
-			if err != io.EOF {
-				//nolint:gosec // G706: sessionID is a config-defined identifier
-				log.Printf("session %s read error: %v", sessionID, err)
-			}
-			h.sendStatus(conn, "exited")
+	if len(snapshot) > 0 {
+		if err := conn.WriteMessage(websocket.BinaryMessage, snapshot); err != nil {
 			return
 		}
+	}
+
+	for chunk := range updates {
+		if len(chunk) == 0 {
+			continue
+		}
+		if writeErr := conn.WriteMessage(websocket.BinaryMessage, chunk); writeErr != nil {
+			return
+		}
+	}
+
+	if sess.State() == session.StateExited {
+		h.sendStatus(conn, "exited")
+		return
+	}
+
+	if sess.State() != session.StateConnected {
+		//nolint:gosec // G706: sessionID is a config-defined identifier
+		log.Printf("session %s stream closed in state %s", sessionID, sess.State())
 	}
 }
 

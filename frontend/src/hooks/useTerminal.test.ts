@@ -207,6 +207,44 @@ describe('useTerminal', () => {
     expect(sentResizes.length).toBeGreaterThan(0)
   })
 
+  it('waits for a non-zero terminal size before sending the initial resize', () => {
+    vi.useFakeTimers()
+    window.requestAnimationFrame = ((cb: FrameRequestCallback) => {
+      cb(0)
+      return 0
+    }) as typeof window.requestAnimationFrame
+    const container = makeContainer()
+    let fitCalls = 0
+    mockTerm.cols = 0
+    mockTerm.rows = 0
+    mockFitAddon.fit.mockImplementation(() => {
+      fitCalls++
+      if (fitCalls >= 3) {
+        mockTerm.cols = 80
+        mockTerm.rows = 24
+      }
+    })
+
+    renderHook(() => useTerminal({ sessionId: 's1', container }))
+
+    act(() => MockWebSocket.instances[0].simulateOpen())
+
+    const initialResizeFrames = MockWebSocket.instances[0].sent.filter(
+      (d) => typeof d === 'string' && (d as string).includes('"type":"resize"')
+    )
+    expect(initialResizeFrames).toHaveLength(0)
+
+    act(() => vi.advanceTimersByTime(50))
+
+    const resizeFrames = MockWebSocket.instances[0].sent.filter(
+      (d) => typeof d === 'string' && (d as string).includes('"type":"resize"')
+    )
+    expect(resizeFrames).toHaveLength(1)
+    expect(resizeFrames[0]).toContain('"cols":80')
+    expect(resizeFrames[0]).toContain('"rows":24')
+    vi.useRealTimers()
+  })
+
   it('writes binary data directly to terminal', () => {
     const container = makeContainer()
     renderHook(() => useTerminal({ sessionId: 's1', container }))
@@ -214,6 +252,25 @@ describe('useTerminal', () => {
 
     const buf = new ArrayBuffer(4)
     act(() => MockWebSocket.instances[0].simulateMessage(buf))
+    expect(mockWrite).toHaveBeenCalledWith(expect.any(Uint8Array))
+  })
+
+  it('buffers terminal output that arrives before the container is attached', () => {
+    const buf = new TextEncoder().encode('prompt before attach').buffer
+    const container = makeContainer()
+    const { rerender } = renderHook(
+      ({ currentContainer }: { currentContainer: HTMLDivElement | null }) =>
+        useTerminal({ sessionId: 's1', container: currentContainer }),
+      { initialProps: { currentContainer: null as HTMLDivElement | null } },
+    )
+
+    act(() => MockWebSocket.instances[0].simulateOpen())
+    act(() => MockWebSocket.instances[0].simulateMessage(buf))
+
+    expect(mockWrite).not.toHaveBeenCalledWith(expect.any(Uint8Array))
+
+    rerender({ currentContainer: container })
+
     expect(mockWrite).toHaveBeenCalledWith(expect.any(Uint8Array))
   })
 

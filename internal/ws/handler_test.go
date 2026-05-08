@@ -170,6 +170,33 @@ func TestWS_SessionOutput_ReceivedAsBinary(t *testing.T) {
 	assert.Equal(t, []byte("terminal output"), data)
 }
 
+func TestWS_ReplaysBufferedOutputOnFirstConnect(t *testing.T) {
+	mgr := session.NewManager()
+	sess := newWsMock("s1")
+	mgr.Add(sess)
+	sess.out <- []byte("buffered prompt")
+	time.Sleep(50 * time.Millisecond)
+
+	srv := setupWSServer(mgr)
+	defer srv.Close()
+
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL(srv, "s1"), nil)
+	require.NoError(t, err)
+	defer conn.Close()
+	defer sess.Close()
+
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	msgType, _, err := conn.ReadMessage()
+	require.NoError(t, err)
+	assert.Equal(t, websocket.TextMessage, msgType)
+
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	msgType, data, err := conn.ReadMessage()
+	require.NoError(t, err)
+	assert.Equal(t, websocket.BinaryMessage, msgType)
+	assert.Equal(t, []byte("buffered prompt"), data)
+}
+
 func TestWS_ResizeMessage_ResizesSession(t *testing.T) {
 	mgr := session.NewManager()
 	sess := newWsMock("s1")
