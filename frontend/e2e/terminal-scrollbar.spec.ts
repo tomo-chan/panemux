@@ -1,17 +1,13 @@
 import { expect, test } from '@playwright/test'
 
-test.use({
-  launchOptions: {
-    args: ['--show-scrollbars'],
-  },
-})
-
 test('styles the xterm viewport scrollbar to match the terminal chrome', async ({ page }) => {
   await page.goto('/')
 
   const viewport = page.locator('.xterm-viewport').first()
   await expect(viewport).toBeVisible()
 
+  // This comes from xterm itself, so keep it as a sanity check that the terminal
+  // viewport is initialized before asserting the theme rules added by this change.
   const overflowY = await viewport.evaluate((el) => {
     const element = el as HTMLElement
     const style = window.getComputedStyle(element)
@@ -83,4 +79,7 @@ test('styles the xterm viewport scrollbar to match the terminal chrome', async (
       }),
     ]),
   )
+
+  // Pseudo-element hover state is not asserted here because Playwright cannot
+  // reliably force hover on the scrollbar thumb across engines.
 })
