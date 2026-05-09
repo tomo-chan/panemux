@@ -94,8 +94,12 @@ export const App: React.FC = () => {
     showBrowserNotification(
       'Agent confirmation requested',
       workspaceTitle ? `${paneTitle} in ${workspaceTitle}` : paneTitle,
+      workspace ? () => {
+        window.focus()
+        setActiveWorkspace(workspace.id).catch(console.error)
+      } : undefined,
     )
-  }, [findWorkspaceForPane, layout, paneMetadataByID, workspaces])
+  }, [findWorkspaceForPane, layout, paneMetadataByID, setActiveWorkspace, workspaces])
 
   useWorkspaceAttentionMonitor({ workspaces, onAttention: notifyAttention })
   useBrowserNotificationPermission()
@@ -227,12 +231,18 @@ export const App: React.FC = () => {
   )
 }
 
-function showBrowserNotification(title: string, body: string) {
+function showBrowserNotification(title: string, body: string, onClick?: () => void) {
   if (!('Notification' in window)) return
 
   if (Notification.permission !== 'granted') return
 
-  new Notification(title, { body })
+  const notification = new Notification(title, { body })
+  if (onClick) {
+    notification.onclick = () => {
+      onClick()
+      notification.close()
+    }
+  }
 }
 
 function collectPaneMetadata(

@@ -4,6 +4,7 @@ const ATTENTION_PATTERNS = [
   /\b(codex|claude|agent)\b[\s\S]{0,160}\b(confirm|confirmation|approve|approval|permission|allow|proceed)\b/i,
   /\bYes,\s*proceed\s*\(y\)[\s\S]{0,160}\bNo,\s*and\s*tell\s+(Codex|Claude|agent)\s+what\s+to\s+do\s+differently\s*\(esc\)/i,
   /Do you want to proceed\?[\s\S]{0,120}\b1\.\s*Yes\b[\s\S]{0,80}\b2\.\s*No\b[\s\S]{0,160}Esc to cancel\s*·\s*Tab to amend\s*·\s*ctrl\+e to explain/i,
+  /Allow [^\n]+\?[\s\S]{0,240}\b1\.\s*Allow\b[\s\S]{0,160}\b2\.\s*Allow for this session\b[\s\S]{0,160}\b3\.\s*Always allow\b[\s\S]{0,160}\b4\.\s*Cancel\b[\s\S]{0,120}enter to submit\s*\|\s*esc to cancel/i,
   /(確認|承認|許可)[\s\S]{0,120}(必要|してください|しますか|待ち)/,
 ]
 

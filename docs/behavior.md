@@ -108,13 +108,15 @@ Persistence behavior:
 ## Agent Attention Notifications
 
 The frontend watches terminal output for conservative agent confirmation prompts such as approval,
-permission, or proceed requests. Detection runs in the frontend and keeps a lightweight background
-WebSocket subscription for every pane across every workspace, so hidden workspaces are still watched
-even while their xterm instances are unmounted. When a prompt is detected:
+permission, proceed requests, and Codex MCP allow menus. Detection runs in the frontend and keeps a
+lightweight background WebSocket subscription for every pane across every workspace, so hidden
+workspaces are still watched even while their xterm instances are unmounted. When a prompt is
+detected:
 
 - the pane frame flashes until the pane receives focus or a click
 - the containing workspace tab flashes when that workspace is not active, and clears when selected
 - the browser Notification API is used when permission has already been granted
+- clicking a browser notification focuses the app window and switches to the matching workspace
 - if notification permission is undecided, the browser is asked on the first pointer or key
   interaction instead of waiting for the first prompt event
 
