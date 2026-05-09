@@ -114,9 +114,10 @@ Use edit mode when you want to:
 ### Notifications and attention prompts
 
 - panemux watches terminal output for agent confirmation prompts such as approval or proceed requests.
+- Codex permission menus such as MCP tool allow prompts are detected too.
 - When one is detected, the pane frame is highlighted.
 - If the pane belongs to an inactive workspace, that workspace tab is highlighted too.
-- Browser notifications are also shown after notification permission has been granted.
+- Browser notifications are also shown after notification permission has been granted, and clicking one switches to the matching workspace.
 - Notification permission is requested on the first browser interaction, instead of waiting for the first prompt.
 
 ### Choosing pane types
@@ -188,7 +189,7 @@ workspaces:
 
 Older config files with a top-level `layout:` are still accepted. When the config is next saved, panemux migrates that layout into a `default` workspace and writes the `workspaces:` format.
 
-If there is only one workspace, the workspace tab bar is hidden during normal use. Enable edit mode to show the workspace add and tab-position controls; newly added workspaces start with a single local terminal pane, become active immediately, and are saved to the config. In edit mode, each visible workspace tab can be renamed inline and has a delete button that asks for confirmation before removing the workspace. The last remaining workspace cannot be deleted. Switching the active workspace and changing `tab_position` are persisted so the same workspace and tab placement are restored after restart. Agent confirmation prompts can mark inactive workspace tabs and trigger browser notifications after notification permission has been granted.
+If there is only one workspace, the workspace tab bar is hidden during normal use. Enable edit mode to show the workspace add and tab-position controls; newly added workspaces start with a single local terminal pane, become active immediately, and are saved to the config. In edit mode, each visible workspace tab can be renamed inline and has a delete button that asks for confirmation before removing the workspace. The last remaining workspace cannot be deleted. Switching the active workspace and changing `tab_position` are persisted so the same workspace and tab placement are restored after restart. Agent confirmation prompts, including Codex MCP allow menus, can mark inactive workspace tabs and trigger browser notifications after notification permission has been granted. Clicking the notification switches to the relevant workspace.
 
 ### Pane types
 

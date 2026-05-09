@@ -37,6 +37,7 @@ let currentWorkspaces = workspaces
 const mockDeleteWorkspace = vi.fn()
 const mockRenameWorkspace = vi.fn()
 const mockSetWorkspaceTabPosition = vi.fn()
+const mockSetActiveWorkspace = vi.fn()
 const mockUseWorkspaceAttentionMonitor = vi.hoisted(() => vi.fn())
 const mockUseBrowserNotificationPermission = vi.hoisted(() => vi.fn())
 
@@ -50,7 +51,7 @@ vi.mock('./hooks/useLayout', () => ({
     splitPane: vi.fn(),
     closePane: vi.fn(),
     swapPanes: vi.fn(),
-    setActiveWorkspace: vi.fn(),
+    setActiveWorkspace: mockSetActiveWorkspace,
     addWorkspace: vi.fn(),
     deleteWorkspace: mockDeleteWorkspace,
     renameWorkspace: mockRenameWorkspace,
@@ -87,12 +88,20 @@ vi.mock('./hooks/usePaneSettings', () => ({
 
 describe('App workspace deletion', () => {
   let originalNotification: typeof Notification | undefined
+  let notificationInstance: { onclick: (() => void) | null; close: ReturnType<typeof vi.fn> } | null
 
   beforeEach(() => {
     originalNotification = window.Notification
     mockUseWorkspaceAttentionMonitor.mockImplementation(() => {})
     mockUseBrowserNotificationPermission.mockImplementation(() => {})
-    vi.stubGlobal('Notification', vi.fn() as unknown as typeof Notification)
+    notificationInstance = null
+    vi.stubGlobal('Notification', vi.fn(function MockNotification(this: Notification) {
+      notificationInstance = {
+        onclick: null,
+        close: vi.fn(),
+      }
+      return notificationInstance as unknown as Notification
+    }) as unknown as typeof Notification)
     Object.defineProperty(window.Notification, 'permission', {
       configurable: true,
       value: 'granted',
@@ -107,6 +116,7 @@ describe('App workspace deletion', () => {
     mockDeleteWorkspace.mockClear()
     mockRenameWorkspace.mockClear()
     mockSetWorkspaceTabPosition.mockClear()
+    mockSetActiveWorkspace.mockClear()
     mockTerminalPane.mockClear()
     mockUseWorkspaceAttentionMonitor.mockReset()
     mockUseBrowserNotificationPermission.mockReset()
@@ -228,6 +238,24 @@ describe('App workspace deletion', () => {
     expect(window.Notification).toHaveBeenCalledWith('Agent confirmation requested', {
       body: 'main in Dev',
     })
+  })
+
+  it('switches to the relevant workspace when the browser notification is clicked', () => {
+    currentWorkspaces = { ...workspaces, active: 'ops' }
+    const focusSpy = vi.spyOn(window, 'focus').mockImplementation(() => {})
+
+    mockUseWorkspaceAttentionMonitor.mockImplementation(({ onAttention }: { onAttention: (paneId: string) => void }) => {
+      useEffect(() => {
+        onAttention('main')
+      }, [onAttention])
+    })
+
+    render(<App />)
+    notificationInstance?.onclick?.()
+
+    expect(focusSpy).toHaveBeenCalled()
+    expect(mockSetActiveWorkspace).toHaveBeenCalledWith('dev')
+    expect(notificationInstance?.close).toHaveBeenCalled()
   })
 
   it('does not mark the active workspace tab when attention comes from the active workspace', () => {

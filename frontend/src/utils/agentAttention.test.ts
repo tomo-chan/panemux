@@ -104,6 +104,69 @@ describe('createAgentAttentionDetector', () => {
     ).toBe(true)
   })
 
+  it('detects Codex MCP approval menus with allow options', () => {
+    const detector = createAgentAttentionDetector()
+
+    expect(
+      detector.feed(
+        [
+          'Field 1/1',
+          'Allow the maestro MCP server to run tool "query_docs"?',
+          '',
+          'question: Ignore this if not relevant.',
+          '',
+          '› 1. Allow                   Run the tool and continue.',
+          '  2. Allow for this session  Run the tool and remember this choice for this session.',
+          '  3. Always allow            Run the tool and remember this choice for future tool calls.',
+          '  4. Cancel                  Cancel this tool call',
+          'enter to submit | esc to cancel',
+        ].join('\n'),
+      ),
+    ).toBe(true)
+  })
+
+  it('detects Codex MCP approval menus for other servers and tools', () => {
+    const detector = createAgentAttentionDetector()
+
+    expect(
+      detector.feed(
+        [
+          'Field 1/1',
+          'Allow the github MCP server to run tool "list_pull_requests"?',
+          '',
+          'question: Ignore this if not relevant.',
+          '',
+          '› 1. Allow                   Run the tool and continue.',
+          '  2. Allow for this session  Run the tool and remember this choice for this session.',
+          '  3. Always allow            Run the tool and remember this choice for future tool calls.',
+          '  4. Cancel                  Cancel this tool call',
+          'enter to submit | esc to cancel',
+        ].join('\n'),
+      ),
+    ).toBe(true)
+  })
+
+  it('detects non-MCP allow menus with the same Codex approval structure', () => {
+    const detector = createAgentAttentionDetector()
+
+    expect(
+      detector.feed(
+        [
+          'Field 1/1',
+          'Allow access to workspace "production"?',
+          '',
+          'question: Ignore this if not relevant.',
+          '',
+          '› 1. Allow                   Run the tool and continue.',
+          '  2. Allow for this session  Run the tool and remember this choice for this session.',
+          '  3. Always allow            Run the tool and remember this choice for future tool calls.',
+          '  4. Cancel                  Cancel this tool call',
+          'enter to submit | esc to cancel',
+        ].join('\n'),
+      ),
+    ).toBe(true)
+  })
+
   it('does not match ordinary terminal output', () => {
     const detector = createAgentAttentionDetector()
 
