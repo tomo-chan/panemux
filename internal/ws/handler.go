@@ -4,6 +4,7 @@ package ws
 import (
 	"encoding/json"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"time"
@@ -22,9 +23,16 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin:     checkOrigin,
 }
 
-// checkOrigin validates that WebSocket upgrade requests originate from the same host,
-// preventing cross-site WebSocket hijacking (CSWSH). Non-browser clients that omit
-// the Origin header are allowed through.
+// checkOrigin validates WebSocket upgrade requests to prevent cross-site WebSocket
+// hijacking (CSWSH).
+//
+// Loopback origins (localhost / 127.0.0.1 / ::1) are permitted regardless of port so
+// that the Vite dev server on :5173 can proxy WebSocket traffic to the backend on
+// :8080 without requiring changeOrigin in the proxy config.
+//
+// Requests without an Origin header are allowed; browsers always include Origin on
+// cross-origin requests, so the absence of the header indicates a non-browser client
+// (e.g. curl) that is not subject to the same-origin policy.
 func checkOrigin(r *http.Request) bool {
 	origin := r.Header.Get("Origin")
 	if origin == "" {
@@ -34,7 +42,20 @@ func checkOrigin(r *http.Request) bool {
 	if err != nil {
 		return false
 	}
+	if isLoopbackHost(u.Host) {
+		return true
+	}
 	return u.Host == r.Host
+}
+
+// isLoopbackHost returns true when the host part of an authority string
+// (host or host:port) is a loopback address.
+func isLoopbackHost(authority string) bool {
+	host, _, err := net.SplitHostPort(authority)
+	if err != nil {
+		host = authority
+	}
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
 }
 
 // ControlMessage is a JSON control frame exchanged over WebSocket.

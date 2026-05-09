@@ -632,7 +632,7 @@ describe('useTerminal', () => {
     expect(ws.sent.length).toBeGreaterThan(sentBefore)
   })
 
-  it('strips ESC characters from error messages before writing to terminal', () => {
+  it('strips complete ANSI sequences from error messages before writing to terminal', () => {
     const container = makeContainer()
     renderHook(() => useTerminal({ sessionId: 's1', container }))
     act(() => MockWebSocket.instances[0].simulateOpen())
@@ -640,17 +640,20 @@ describe('useTerminal', () => {
     mockWrite.mockClear()
     act(() =>
       MockWebSocket.instances[0].simulateMessage(
-        JSON.stringify({ type: 'error', message: '\x1b[1mInjected bold\x1b[0m' })
+        JSON.stringify({ type: 'error', message: '\x1b[1mInjected bold\x1b[0m plain text' })
       )
     )
 
     expect(mockWrite).toHaveBeenCalledTimes(1)
     const written = mockWrite.mock.calls[0][0] as string
-    // ESC bytes from the message payload must be stripped
+    // Full CSI sequences from the message payload must be stripped — no remnant brackets
     expect(written).not.toContain('\x1b[1m')
-    // The safe message text must still appear
+    expect(written).not.toContain('[1m')
+    // Plain text from the message must still appear
     expect(written).toContain('Injected bold')
+    expect(written).toContain('plain text')
     // The surrounding ANSI red/reset from the template are intentional and expected
     expect(written).toContain('\x1b[31m')
+    expect(written).toContain('\x1b[0m')
   })
 })
