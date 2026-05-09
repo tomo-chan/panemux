@@ -1,0 +1,34 @@
+server:
+    host: 127.0.0.1
+    port: 4173
+workspaces:
+    active: default
+    tab_position: top
+    items:
+        - id: default
+          title: Default
+          layout:
+            direction: horizontal
+            children:
+                - pane:
+                    id: default-main
+                    type: local
+                    shell: /bin/bash
+                    cwd: /tmp
+                    title: Default Shell
+                  size: 100
+        - id: workspace-2
+          title: Workspace 2
+          layout:
+            direction: horizontal
+            children:
+                - pane:
+                    id: workspace-2-main
+                    type: local
+                    shell: /bin/bash
+                    cwd: /tmp
+                    title: Workspace 2 Shell
+                  size: 100
+display:
+    show_header: true
+    show_status_bar: true

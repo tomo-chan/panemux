@@ -1,5 +1,5 @@
 .PHONY: all build build-frontend build-backend dev clean run install-deps install-deps-ci \
-        test test-go test-frontend \
+        test test-go test-frontend test-e2e \
         fmt fmt-go fmt-check-go \
         lint lint-go lint-go-deps lint-frontend \
         coverage coverage-go coverage-frontend \
@@ -26,6 +26,9 @@ test-go:
 
 test-frontend:
 	cd frontend && npm test
+
+test-e2e:
+	cd frontend && npm run test:e2e
 
 # ── Coverage (≥ 80 %) ─────────────────────────────────────────────────────────
 #

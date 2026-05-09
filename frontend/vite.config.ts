@@ -20,6 +20,8 @@ export default defineConfig({
     globals: true,
     environment: 'jsdom',
     setupFiles: './src/test/setup.ts',
+    include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
+    exclude: ['e2e/**'],
     coverage: {
       provider: 'v8',
       // Measure only hooks and schemas — UI components and entry points

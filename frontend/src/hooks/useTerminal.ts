@@ -23,8 +23,14 @@ interface TerminalEntry {
   attachedContainer: HTMLElement | null
   disposeTimer: ReturnType<typeof setTimeout> | null
   repaintTimers: Set<ReturnType<typeof setTimeout>>
+  resizeTimers: Set<ReturnType<typeof setTimeout>>
   send: ((data: string | ArrayBuffer | Uint8Array) => void) | null
   editMode: boolean
+}
+
+interface PendingTerminalMessage {
+  data: ArrayBuffer | string
+  isBinary: boolean
 }
 
 const terminalEntries = new Map<string, TerminalEntry>()
@@ -38,15 +44,17 @@ export function useTerminal({ sessionId, container, editMode = false, onAttentio
   const attentionDetectorRef = useRef(createAgentAttentionDetector())
   const outputDecoderRef = useRef(new TextDecoder())
   const lastAttentionAtRef = useRef<number | null>(null)
+  const pendingMessagesRef = useRef<PendingTerminalMessage[]>([])
   const [dims, setDims] = useState<{ cols: number; rows: number } | null>(null)
   const [sessionExited, setSessionExited] = useState(false)
 
-  const handleMessage = useCallback((data: ArrayBuffer | string, isBinary: boolean) => {
-    if (!termRef.current) return
+  const applyMessageToTerminal = useCallback((data: ArrayBuffer | string, isBinary: boolean) => {
+    const term = termRef.current
+    if (!term) return
 
     if (isBinary) {
       const bytes = new Uint8Array(data as ArrayBuffer)
-      termRef.current.write(bytes)
+      term.write(bytes)
       const text = outputDecoderRef.current.decode(bytes, { stream: true })
       if (shouldNotifyAttention(attentionDetectorRef.current.feed(text), lastAttentionAtRef)) {
         onAttention?.(sessionId)
@@ -58,21 +66,33 @@ export function useTerminal({ sessionId, container, editMode = false, onAttentio
           console.log(`Session ${sessionId} status:`, msg.state)
           if (msg.state === 'exited') {
             setSessionExited(true)
-            termRef.current.write('\r\n\x1b[2m[Session ended]\x1b[0m\r\n')
+            term.write('\r\n\x1b[2m[Session ended]\x1b[0m\r\n')
           }
         } else if (msg.type === 'error') {
-          termRef.current.write(`\r\n\x1b[31mError: ${msg.message}\x1b[0m\r\n`)
+          term.write(`\r\n\x1b[31mError: ${msg.message}\x1b[0m\r\n`)
         }
       } catch {
         // Not JSON, treat as text
         const text = data as string
-        termRef.current.write(text)
+        term.write(text)
         if (shouldNotifyAttention(attentionDetectorRef.current.feed(text), lastAttentionAtRef)) {
           onAttention?.(sessionId)
         }
       }
     }
   }, [onAttention, sessionId])
+
+  const handleMessage = useCallback((data: ArrayBuffer | string, isBinary: boolean) => {
+    if (!canApplyMessage(entryRef.current, termRef.current)) {
+      // A pane can reconnect before React has reattached the reused xterm DOM node
+      // during a workspace switch. Keep those bytes so the initial prompt is not
+      // lost between the WebSocket open and the eventual attach.
+      pendingMessagesRef.current.push({ data, isBinary })
+      return
+    }
+
+    applyMessageToTerminal(data, isBinary)
+  }, [applyMessageToTerminal])
 
   const wsUrl = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws/${sessionId}`
   const { send, connected, reconnect } = useWebSocket(wsUrl, {
@@ -82,11 +102,6 @@ export function useTerminal({ sessionId, container, editMode = false, onAttentio
       attentionDetectorRef.current.reset()
       outputDecoderRef.current = new TextDecoder()
       setSessionExited(false)
-      if (fitAddonRef.current && termRef.current) {
-        fitAddonRef.current.fit()
-        const { cols, rows } = termRef.current
-        sendRef.current?.(JSON.stringify({ type: 'resize', cols, rows }))
-      }
     },
   })
 
@@ -126,6 +141,16 @@ export function useTerminal({ sessionId, container, editMode = false, onAttentio
     }
   }, [])
 
+  useEffect(() => {
+    const entry = entryRef.current
+    if (!connected || !entry) return
+
+    // On reconnect the container may still be measuring as 0x0. Delay the
+    // initial resize until xterm reports non-zero cols/rows, otherwise the
+    // backend drops the resize and some shells never redraw their prompt.
+    scheduleConnectedResize(entry, setDims, send)
+  }, [connected, send, sessionId])
+
   // Initialize terminal
   useEffect(() => {
     if (!container || initializedRef.current) return
@@ -145,6 +170,9 @@ export function useTerminal({ sessionId, container, editMode = false, onAttentio
     fitAddonRef.current = entry.fitAddon
 
     attachTerminal(entry, container)
+    // Flush anything buffered while the pane was logically mounted but the xterm
+    // element had not yet been attached back into this container.
+    flushPendingMessages(pendingMessagesRef.current, applyMessageToTerminal)
     refreshTerminal(entry, setDims)
 
     return () => {
@@ -152,11 +180,13 @@ export function useTerminal({ sessionId, container, editMode = false, onAttentio
       if (!currentEntry) return
 
       clearScheduledRepaints(currentEntry)
+      clearScheduledResizes(currentEntry)
       currentEntry.attachedContainer = null
       currentEntry.send = null
       currentEntry.disposeTimer = setTimeout(() => {
         if (currentEntry.attachedContainer) return
         clearScheduledRepaints(currentEntry)
+        clearScheduledResizes(currentEntry)
         currentEntry.term.dispose()
         terminalEntries.delete(sessionId)
       }, 0)
@@ -182,12 +212,28 @@ export function useTerminal({ sessionId, container, editMode = false, onAttentio
 
     repaintTerminal(entry, setDims)
     const { cols, rows } = entry.term
-    if (connected) {
+    if (connected && cols > 0 && rows > 0) {
       send(JSON.stringify({ type: 'resize', cols, rows }))
     }
   }, [send, connected])
 
   return { handleResize, connected, dims, sessionExited, restartSession }
+}
+
+function flushPendingMessages(
+  pendingMessages: PendingTerminalMessage[],
+  applyMessageToTerminal: (data: ArrayBuffer | string, isBinary: boolean) => void,
+) {
+  if (pendingMessages.length === 0) return
+
+  for (const { data, isBinary } of pendingMessages) {
+    applyMessageToTerminal(data, isBinary)
+  }
+  pendingMessages.length = 0
+}
+
+function canApplyMessage(entry: TerminalEntry | null, term: Terminal | null): boolean {
+  return Boolean(entry?.attachedContainer && term?.element)
 }
 
 function getOrCreateTerminalEntry(sessionId: string): TerminalEntry {
@@ -233,6 +279,7 @@ function getOrCreateTerminalEntry(sessionId: string): TerminalEntry {
     attachedContainer: null,
     disposeTimer: null,
     repaintTimers: new Set(),
+    resizeTimers: new Set(),
     send: null,
     editMode: false,
   }
@@ -314,6 +361,35 @@ function repaintTerminal(
   setDims({ cols, rows })
 }
 
+function scheduleConnectedResize(
+  entry: TerminalEntry,
+  setDims: (dims: { cols: number; rows: number }) => void,
+  send: (data: string | ArrayBuffer | Uint8Array) => void,
+) {
+  clearScheduledResizes(entry)
+
+  const attemptResize = () => {
+    if (!entry.attachedContainer) return
+
+    repaintTerminal(entry, setDims)
+    const { cols, rows } = entry.term
+    if (cols > 0 && rows > 0) {
+      clearScheduledResizes(entry)
+      send(JSON.stringify({ type: 'resize', cols, rows }))
+    }
+  }
+
+  requestAnimationFrame(attemptResize)
+
+  for (const delay of REPAINT_SETTLE_DELAYS_MS) {
+    const timer = setTimeout(() => {
+      entry.resizeTimers.delete(timer)
+      requestAnimationFrame(attemptResize)
+    }, delay)
+    entry.resizeTimers.add(timer)
+  }
+}
+
 function clearScheduledRepaints(entry: TerminalEntry) {
   for (const timer of entry.repaintTimers) {
     clearTimeout(timer)
@@ -321,10 +397,18 @@ function clearScheduledRepaints(entry: TerminalEntry) {
   entry.repaintTimers.clear()
 }
 
+function clearScheduledResizes(entry: TerminalEntry) {
+  for (const timer of entry.resizeTimers) {
+    clearTimeout(timer)
+  }
+  entry.resizeTimers.clear()
+}
+
 export function __resetTerminalEntriesForTests() {
   for (const entry of terminalEntries.values()) {
     if (entry.disposeTimer) clearTimeout(entry.disposeTimer)
     clearScheduledRepaints(entry)
+    clearScheduledResizes(entry)
     entry.term.dispose()
   }
   terminalEntries.clear()

@@ -76,6 +76,12 @@ jobs:
       - name: Test (Frontend)
         run: cd frontend && npm run test:ci
 
+      - name: Install Playwright browsers
+        run: cd frontend && npx playwright install --with-deps chromium
+
+      - name: Test (E2E)
+        run: make test-e2e
+
       - name: Coverage (Go)
         run: make coverage-go
 

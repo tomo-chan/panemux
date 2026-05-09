@@ -117,9 +117,11 @@ for detection are also written to the terminal buffer. When a prompt is detected
   browser may prompt before showing OS-level notifications
 
 Attention detection is frontend-only and only runs while the pane is rendered in the browser app.
-Inactive workspace panes are not watched by a separate background reader, because each WebSocket
-connection consumes directly from the session stream. It does not persist missed prompts across
-workspace switches, browser reloads, or closed browser windows.
+Inactive workspace panes are not watched by a separate background reader. Instead, the backend
+buffers recent terminal output per session and replays that snapshot when a pane reconnects after a
+workspace switch or browser reload. Attention detection itself still does not run while the pane is
+hidden, so prompts that appear and disappear entirely while a workspace is inactive are not
+retrospectively notified.
 
 ## REST API
 
@@ -227,6 +229,8 @@ Connection behavior:
 
 - `404` if the session ID does not exist
 - initial text frame is a JSON status message with `type: "status"` and `state: "connected"`
+- after the connected status, the backend replays up to the recent per-session output buffer before
+  streaming live output
 
 Frame behavior:
 
