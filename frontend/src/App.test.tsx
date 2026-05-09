@@ -230,6 +230,20 @@ describe('App workspace deletion', () => {
     })
   })
 
+  it('does not mark the active workspace tab when attention comes from the active workspace', () => {
+    currentWorkspaces = { ...workspaces, active: 'dev' }
+    mockUseWorkspaceAttentionMonitor.mockImplementation(({ onAttention }: { onAttention: (paneId: string) => void }) => {
+      useEffect(() => {
+        onAttention('main')
+      }, [onAttention])
+    })
+
+    render(<App />)
+
+    expect(screen.getByRole('tab', { name: 'Dev' })).not.toHaveAttribute('data-attention')
+    expect(screen.getByRole('tab', { name: 'Ops' })).not.toHaveAttribute('data-attention')
+  })
+
   it('does not request browser notification permission when attention is reported', () => {
     Object.defineProperty(window.Notification, 'permission', {
       configurable: true,
