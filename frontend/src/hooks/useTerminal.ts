@@ -58,7 +58,8 @@ export function useTerminal({ sessionId, container, editMode = false }: UseTermi
             term.write('\r\n\x1b[2m[Session ended]\x1b[0m\r\n')
           }
         } else if (msg.type === 'error') {
-          term.write(`\r\n\x1b[31mError: ${msg.message}\x1b[0m\r\n`)
+          const safeMsg = msg.message.replace(/\x1b/g, '')
+          term.write(`\r\n\x1b[31mError: ${safeMsg}\x1b[0m\r\n`)
         }
       } catch {
         // Not JSON, treat as text

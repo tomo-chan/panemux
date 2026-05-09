@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -32,11 +34,28 @@ func New(cfg *config.Config, manager *session.Manager, frontendFS embed.FS) *Ser
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(corsMiddleware)
+	r.Use(securityHeadersMiddleware)
 
 	apiHandler := api.NewHandler(cfg, manager)
 	wsHandler := ws.NewHandler(manager)
+	registerRoutes(r, apiHandler, wsHandler, frontendFS)
 
-	// REST API
+	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
+	return &Server{
+		cfg:     cfg,
+		manager: manager,
+		httpSrv: &http.Server{
+			Addr:           addr,
+			Handler:        r,
+			ReadTimeout:    30 * time.Second,
+			WriteTimeout:   0, // no timeout for WebSocket connections
+			IdleTimeout:    120 * time.Second,
+			MaxHeaderBytes: 1 << 20,
+		},
+	}
+}
+
+func registerRoutes(r chi.Router, apiHandler *api.Handler, wsHandler *ws.Handler, frontendFS embed.FS) {
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/layout", apiHandler.GetLayout)
 		r.Put("/layout", apiHandler.PutLayout)
@@ -61,37 +80,24 @@ func New(cfg *config.Config, manager *session.Manager, frontendFS embed.FS) *Ser
 		r.Post("/ssh-config/hosts", apiHandler.PostSSHConfigHost)
 		r.Get("/detect-shell", apiHandler.GetDetectShell)
 	})
-
-	// WebSocket
 	r.Get("/ws/{sessionID}", wsHandler.ServeHTTP)
+	registerFrontend(r, frontendFS)
+}
 
-	// Static frontend files
+func registerFrontend(r chi.Router, frontendFS embed.FS) {
 	distFS, err := fs.Sub(frontendFS, "frontend/dist")
 	if err != nil {
-		// Fall back to serving from filesystem if embed fails
 		r.Get("/*", http.FileServer(http.Dir("frontend/dist")).ServeHTTP)
-	} else {
-		fileServer := http.FileServer(http.FS(distFS))
-		r.Get("/*", func(w http.ResponseWriter, req *http.Request) {
-			// SPA fallback: serve index.html for non-asset routes
-			if _, err := distFS.Open(req.URL.Path[1:]); err != nil {
-				req.URL.Path = "/"
-			}
-			fileServer.ServeHTTP(w, req)
-		})
+		return
 	}
-
-	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
-	return &Server{
-		cfg:     cfg,
-		manager: manager,
-		httpSrv: &http.Server{
-			Addr:         addr,
-			Handler:      r,
-			ReadTimeout:  30 * time.Second,
-			WriteTimeout: 0, // no timeout for WebSocket connections
-		},
-	}
+	fileServer := http.FileServer(http.FS(distFS))
+	r.Get("/*", func(w http.ResponseWriter, req *http.Request) {
+		// SPA fallback: serve index.html for non-asset routes
+		if _, err := distFS.Open(req.URL.Path[1:]); err != nil {
+			req.URL.Path = "/"
+		}
+		fileServer.ServeHTTP(w, req)
+	})
 }
 
 // Addr returns the server address.
@@ -120,13 +126,40 @@ func (s *Server) Shutdown(ctx context.Context) error {
 
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		origin := r.Header.Get("Origin")
+		if origin != "" && isLocalhostOrigin(origin) {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Vary", "Origin")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		}
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// isLocalhostOrigin returns true when the given origin URL's host is a loopback address,
+// allowing cross-port requests from the Vite dev server while blocking external sites.
+func isLocalhostOrigin(origin string) bool {
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	host, _, err := net.SplitHostPort(u.Host)
+	if err != nil {
+		host = u.Host
+	}
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
+}
+
+func securityHeadersMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
 		next.ServeHTTP(w, r)
 	})
 }

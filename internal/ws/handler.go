@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -13,12 +14,27 @@ import (
 	"panemux/internal/session"
 )
 
+const wsReadLimitBytes = 1 << 20 // 1 MB
+
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  4096,
 	WriteBufferSize: 4096,
-	CheckOrigin: func(r *http.Request) bool {
-		return true // allow all origins for local use
-	},
+	CheckOrigin:     checkOrigin,
+}
+
+// checkOrigin validates that WebSocket upgrade requests originate from the same host,
+// preventing cross-site WebSocket hijacking (CSWSH). Non-browser clients that omit
+// the Origin header are allowed through.
+func checkOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	return u.Host == r.Host
 }
 
 // ControlMessage is a JSON control frame exchanged over WebSocket.
@@ -63,6 +79,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer conn.Close() //nolint:errcheck
+	conn.SetReadLimit(wsReadLimitBytes)
 
 	h.sendStatus(conn, "connected")
 	done := h.pipeTerminalToWebSocket(conn, sess, snapshot, updates, sessionID)

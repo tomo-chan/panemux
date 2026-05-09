@@ -631,4 +631,26 @@ describe('useTerminal', () => {
     act(() => onDataCallback('hello after unlock'))
     expect(ws.sent.length).toBeGreaterThan(sentBefore)
   })
+
+  it('strips ESC characters from error messages before writing to terminal', () => {
+    const container = makeContainer()
+    renderHook(() => useTerminal({ sessionId: 's1', container }))
+    act(() => MockWebSocket.instances[0].simulateOpen())
+
+    mockWrite.mockClear()
+    act(() =>
+      MockWebSocket.instances[0].simulateMessage(
+        JSON.stringify({ type: 'error', message: '\x1b[1mInjected bold\x1b[0m' })
+      )
+    )
+
+    expect(mockWrite).toHaveBeenCalledTimes(1)
+    const written = mockWrite.mock.calls[0][0] as string
+    // ESC bytes from the message payload must be stripped
+    expect(written).not.toContain('\x1b[1m')
+    // The safe message text must still appear
+    expect(written).toContain('Injected bold')
+    // The surrounding ANSI red/reset from the template are intentional and expected
+    expect(written).toContain('\x1b[31m')
+  })
 })

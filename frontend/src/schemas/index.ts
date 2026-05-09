@@ -10,11 +10,11 @@ export type DisplayConfig = z.infer<typeof DisplayConfigSchema>
 export const PaneConfigSchema = z.object({
   id: z.string().min(1),
   type: z.enum(['local', 'ssh', 'tmux', 'ssh_tmux']),
-  shell: z.string().optional(),
-  cwd: z.string().optional(),
-  title: z.string().optional(),
-  connection: z.string().optional(),
-  tmux_session: z.string().optional(),
+  shell: z.string().max(512).optional(),
+  cwd: z.string().max(4096).optional(),
+  title: z.string().max(256).optional(),
+  connection: z.string().max(256).optional(),
+  tmux_session: z.string().max(256).optional(),
   show_header: z.boolean().optional(),
   show_status_bar: z.boolean().optional(),
 })
@@ -36,7 +36,7 @@ export const LayoutChildSchema: z.ZodType<LayoutChild> = z.lazy(() =>
     size: z.number().positive().max(100),
     pane: PaneConfigSchema.optional(),
     direction: z.enum(['horizontal', 'vertical']).optional(),
-    children: z.array(LayoutChildSchema).optional(),
+    children: z.array(LayoutChildSchema).max(50).optional(),
   })
 )
 
@@ -90,7 +90,7 @@ export const WSControlMessageSchema = z.discriminatedUnion('type', [
     rows: z.number().positive(),
   }),
   z.object({ type: z.literal('status'), state: z.string() }),
-  z.object({ type: z.literal('error'), message: z.string() }),
+  z.object({ type: z.literal('error'), message: z.string().max(2000) }),
 ])
 
 export type WSControlMessage = z.infer<typeof WSControlMessageSchema>

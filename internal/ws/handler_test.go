@@ -360,3 +360,60 @@ func TestWS_InvalidJSON_Ignored(t *testing.T) {
 		t.Fatal("timeout waiting for resize after invalid JSON")
 	}
 }
+
+func TestCheckOrigin(t *testing.T) {
+	tests := []struct {
+		name   string
+		origin string
+		host   string
+		want   bool
+	}{
+		{
+			name:   "same host allowed",
+			origin: "http://localhost:8080",
+			host:   "localhost:8080",
+			want:   true,
+		},
+		{
+			name:   "different external host rejected",
+			origin: "http://evil.com",
+			host:   "localhost:8080",
+			want:   false,
+		},
+		{
+			name:   "no origin header allowed (non-browser client)",
+			origin: "",
+			host:   "localhost:8080",
+			want:   true,
+		},
+		{
+			name:   "invalid origin URL rejected",
+			origin: "://not-a-url",
+			host:   "localhost:8080",
+			want:   false,
+		},
+		{
+			name:   "same ip host allowed",
+			origin: "http://127.0.0.1:8080",
+			host:   "127.0.0.1:8080",
+			want:   true,
+		},
+		{
+			name:   "cross-port same domain rejected",
+			origin: "http://localhost:5173",
+			host:   "localhost:8080",
+			want:   false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/ws/test", nil)
+			if tc.origin != "" {
+				req.Header.Set("Origin", tc.origin)
+			}
+			req.Host = tc.host
+			assert.Equal(t, tc.want, checkOrigin(req))
+		})
+	}
+}
