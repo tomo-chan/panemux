@@ -243,6 +243,7 @@ describe('App workspace deletion', () => {
   it('switches to the relevant workspace when the browser notification is clicked', () => {
     currentWorkspaces = { ...workspaces, active: 'ops' }
     const focusSpy = vi.spyOn(window, 'focus').mockImplementation(() => {})
+    mockSetActiveWorkspace.mockResolvedValue(undefined)
 
     mockUseWorkspaceAttentionMonitor.mockImplementation(({ onAttention }: { onAttention: (paneId: string) => void }) => {
       useEffect(() => {
@@ -256,6 +257,26 @@ describe('App workspace deletion', () => {
     expect(focusSpy).toHaveBeenCalled()
     expect(mockSetActiveWorkspace).toHaveBeenCalledWith('dev')
     expect(notificationInstance?.close).toHaveBeenCalled()
+  })
+
+  it('logs workspace switch failures from notification clicks', async () => {
+    currentWorkspaces = { ...workspaces, active: 'ops' }
+    const switchError = new Error('switch failed')
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.spyOn(window, 'focus').mockImplementation(() => {})
+    mockSetActiveWorkspace.mockRejectedValueOnce(switchError)
+
+    mockUseWorkspaceAttentionMonitor.mockImplementation(({ onAttention }: { onAttention: (paneId: string) => void }) => {
+      useEffect(() => {
+        onAttention('main')
+      }, [onAttention])
+    })
+
+    render(<App />)
+    notificationInstance?.onclick?.()
+    await Promise.resolve()
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith(switchError)
   })
 
   it('does not mark the active workspace tab when attention comes from the active workspace', () => {

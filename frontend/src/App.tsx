@@ -96,7 +96,7 @@ export const App: React.FC = () => {
       workspaceTitle ? `${paneTitle} in ${workspaceTitle}` : paneTitle,
       workspace ? () => {
         window.focus()
-        void setActiveWorkspace(workspace.id)
+        setActiveWorkspace(workspace.id).catch(console.error)
       } : undefined,
     )
   }, [findWorkspaceForPane, layout, paneMetadataByID, setActiveWorkspace, workspaces])
