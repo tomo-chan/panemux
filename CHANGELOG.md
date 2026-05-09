@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.13.0](https://github.com/tomo-chan/panemux/compare/v0.12.0...v0.13.0) (2026-05-09)
+
+
+### Features
+
+* expand approval prompt notifications ([#82](https://github.com/tomo-chan/panemux/issues/82)) ([2139616](https://github.com/tomo-chan/panemux/commit/2139616040636b2d26ce3c7a29f54c66fe537eca))
+
+
+### Bug Fixes
+
+* harden WebSocket, CORS, security headers, and input validation ([#81](https://github.com/tomo-chan/panemux/issues/81)) ([3e56f0c](https://github.com/tomo-chan/panemux/commit/3e56f0cfec1a6c05aeccc498f797c726d41bec44))
+
 ## [0.12.0](https://github.com/tomo-chan/panemux/compare/v0.11.0...v0.12.0) (2026-05-09)
 
 
