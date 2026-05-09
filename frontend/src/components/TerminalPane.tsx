@@ -36,7 +36,6 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
     sessionId: pane.id,
     container: containerEl,
     editMode,
-    onAttention: ctx?.onPaneAttention,
   })
 
   const gitInfo = useGitInfo(pane.id)

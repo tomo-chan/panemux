@@ -139,6 +139,23 @@ Why this hook:
 - isolates debounce/persistence logic from view components
 - makes split/close behavior easier to reason about and test
 
+### `useWorkspaceAttentionMonitor`
+
+Opens lightweight background WebSocket subscriptions for every pane ID across all workspaces and
+feeds terminal output through the agent-attention detector, even when a workspace is not active and
+its xterm panes are unmounted.
+
+Why this hook:
+
+- decouples prompt notifications from visible xterm mounts
+- keeps inactive workspace attention behavior consistent with active panes
+- centralizes per-pane throttle and stream decoding logic
+
+### `useBrowserNotificationPermission`
+
+Requests Notification API permission on the first user interaction when the browser permission state
+is still `default`, so the first detected prompt does not need to race a permission prompt.
+
 ### `useWebSocket`
 
 Owns a single socket connection, reconnect behavior, and validated text-frame handling.
