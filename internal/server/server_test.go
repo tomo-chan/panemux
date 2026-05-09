@@ -56,7 +56,40 @@ func TestAddr_ReturnsConfiguredAddress(t *testing.T) {
 	assert.Equal(t, "127.0.0.1:8080", srv.Addr())
 }
 
-func TestCorsMiddleware_SetsHeaders(t *testing.T) {
+func TestCorsMiddleware_LocalhostOrigin_ReflectsOrigin(t *testing.T) {
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	handler := corsMiddleware(inner)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Origin", "http://localhost:5173")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.Equal(t, "http://localhost:5173", rr.Header().Get("Access-Control-Allow-Origin"))
+	assert.NotEmpty(t, rr.Header().Get("Access-Control-Allow-Methods"))
+	assert.NotEmpty(t, rr.Header().Get("Access-Control-Allow-Headers"))
+	assert.Equal(t, "Origin", rr.Header().Get("Vary"))
+}
+
+func TestCorsMiddleware_NonLocalhostOrigin_NoHeader(t *testing.T) {
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	handler := corsMiddleware(inner)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Origin", "http://evil.com")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.Empty(t, rr.Header().Get("Access-Control-Allow-Origin"))
+}
+
+func TestCorsMiddleware_NoOrigin_NoHeader(t *testing.T) {
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
@@ -67,9 +100,7 @@ func TestCorsMiddleware_SetsHeaders(t *testing.T) {
 	handler.ServeHTTP(rr, req)
 
 	assert.Equal(t, http.StatusOK, rr.Code)
-	assert.Equal(t, "*", rr.Header().Get("Access-Control-Allow-Origin"))
-	assert.NotEmpty(t, rr.Header().Get("Access-Control-Allow-Methods"))
-	assert.NotEmpty(t, rr.Header().Get("Access-Control-Allow-Headers"))
+	assert.Empty(t, rr.Header().Get("Access-Control-Allow-Origin"))
 }
 
 func TestCorsMiddleware_OptionsReturns204(t *testing.T) {
@@ -84,6 +115,39 @@ func TestCorsMiddleware_OptionsReturns204(t *testing.T) {
 	handler.ServeHTTP(rr, req)
 
 	assert.Equal(t, http.StatusNoContent, rr.Code)
+}
+
+func TestSecurityHeadersMiddleware_SetsHeaders(t *testing.T) {
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	handler := securityHeadersMiddleware(inner)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	assert.Equal(t, "nosniff", rr.Header().Get("X-Content-Type-Options"))
+	assert.Equal(t, "DENY", rr.Header().Get("X-Frame-Options"))
+	assert.Equal(t, "strict-origin-when-cross-origin", rr.Header().Get("Referrer-Policy"))
+}
+
+func TestIsLocalhostOrigin(t *testing.T) {
+	tests := []struct {
+		origin string
+		want   bool
+	}{
+		{"http://localhost:8080", true},
+		{"http://localhost:5173", true},
+		{"http://127.0.0.1:8080", true},
+		{"http://[::1]:8080", true},
+		{"http://evil.com", false},
+		{"http://notlocalhost.com", false},
+		{"://invalid", false},
+	}
+	for _, tc := range tests {
+		assert.Equal(t, tc.want, isLocalhostOrigin(tc.origin), "origin: %s", tc.origin)
+	}
 }
 
 func TestServer_EditModeRoutesWired(t *testing.T) {

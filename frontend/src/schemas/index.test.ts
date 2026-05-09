@@ -365,3 +365,62 @@ describe('DetectShellResponseSchema', () => {
     expect(result.success).toBe(false)
   })
 })
+
+describe('PaneConfigSchema field length limits', () => {
+  it('rejects shell longer than 512 characters', () => {
+    const result = PaneConfigSchema.safeParse({ id: 'p1', type: 'local', shell: 'a'.repeat(513) })
+    expect(result.success).toBe(false)
+  })
+
+  it('accepts shell at the 512 character limit', () => {
+    const result = PaneConfigSchema.safeParse({ id: 'p1', type: 'local', shell: 'a'.repeat(512) })
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects cwd longer than 4096 characters', () => {
+    const result = PaneConfigSchema.safeParse({ id: 'p1', type: 'local', cwd: '/'.repeat(4097) })
+    expect(result.success).toBe(false)
+  })
+
+  it('accepts cwd at the 4096 character limit', () => {
+    const result = PaneConfigSchema.safeParse({ id: 'p1', type: 'local', cwd: '/'.repeat(4096) })
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects title longer than 256 characters', () => {
+    const result = PaneConfigSchema.safeParse({ id: 'p1', type: 'local', title: 'x'.repeat(257) })
+    expect(result.success).toBe(false)
+  })
+})
+
+describe('LayoutChildSchema children depth limit', () => {
+  it('rejects children array with more than 50 elements', () => {
+    const children = Array.from({ length: 51 }, (_, i) => ({
+      size: 2,
+      pane: { id: `p${i}`, type: 'local' },
+    }))
+    const result = LayoutChildSchema.safeParse({ size: 50, children })
+    expect(result.success).toBe(false)
+  })
+
+  it('accepts children array with exactly 50 elements', () => {
+    const children = Array.from({ length: 50 }, (_, i) => ({
+      size: 2,
+      pane: { id: `p${i}`, type: 'local' },
+    }))
+    const result = LayoutChildSchema.safeParse({ size: 50, children })
+    expect(result.success).toBe(true)
+  })
+})
+
+describe('WSControlMessageSchema error message length limit', () => {
+  it('rejects error message longer than 2000 characters', () => {
+    const result = WSControlMessageSchema.safeParse({ type: 'error', message: 'x'.repeat(2001) })
+    expect(result.success).toBe(false)
+  })
+
+  it('accepts error message at the 2000 character limit', () => {
+    const result = WSControlMessageSchema.safeParse({ type: 'error', message: 'x'.repeat(2000) })
+    expect(result.success).toBe(true)
+  })
+})

@@ -4,7 +4,9 @@ package ws
 import (
 	"encoding/json"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -13,12 +15,47 @@ import (
 	"panemux/internal/session"
 )
 
+const wsReadLimitBytes = 1 << 20 // 1 MB
+
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  4096,
 	WriteBufferSize: 4096,
-	CheckOrigin: func(r *http.Request) bool {
-		return true // allow all origins for local use
-	},
+	CheckOrigin:     checkOrigin,
+}
+
+// checkOrigin validates WebSocket upgrade requests to prevent cross-site WebSocket
+// hijacking (CSWSH).
+//
+// Loopback origins (localhost / 127.0.0.1 / ::1) are permitted regardless of port so
+// that the Vite dev server on :5173 can proxy WebSocket traffic to the backend on
+// :8080 without requiring changeOrigin in the proxy config.
+//
+// Requests without an Origin header are allowed; browsers always include Origin on
+// cross-origin requests, so the absence of the header indicates a non-browser client
+// (e.g. curl) that is not subject to the same-origin policy.
+func checkOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	if isLoopbackHost(u.Host) {
+		return true
+	}
+	return u.Host == r.Host
+}
+
+// isLoopbackHost returns true when the host part of an authority string
+// (host or host:port) is a loopback address.
+func isLoopbackHost(authority string) bool {
+	host, _, err := net.SplitHostPort(authority)
+	if err != nil {
+		host = authority
+	}
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
 }
 
 // ControlMessage is a JSON control frame exchanged over WebSocket.
@@ -63,6 +100,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer conn.Close() //nolint:errcheck
+	conn.SetReadLimit(wsReadLimitBytes)
 
 	h.sendStatus(conn, "connected")
 	done := h.pipeTerminalToWebSocket(conn, sess, snapshot, updates, sessionID)

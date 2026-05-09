@@ -631,4 +631,51 @@ describe('useTerminal', () => {
     act(() => onDataCallback('hello after unlock'))
     expect(ws.sent.length).toBeGreaterThan(sentBefore)
   })
+
+  it('strips complete ANSI sequences from error messages before writing to terminal', () => {
+    const container = makeContainer()
+    renderHook(() => useTerminal({ sessionId: 's1', container }))
+    act(() => MockWebSocket.instances[0].simulateOpen())
+
+    mockWrite.mockClear()
+    act(() =>
+      MockWebSocket.instances[0].simulateMessage(
+        JSON.stringify({ type: 'error', message: '\x1b[1mInjected bold\x1b[0m plain text' })
+      )
+    )
+
+    expect(mockWrite).toHaveBeenCalledTimes(1)
+    const written = mockWrite.mock.calls[0][0] as string
+    // Full CSI sequences from the message payload must be stripped — no remnant brackets
+    expect(written).not.toContain('\x1b[1m')
+    expect(written).not.toContain('[1m')
+    // Plain text from the message must still appear
+    expect(written).toContain('Injected bold')
+    expect(written).toContain('plain text')
+    // The surrounding ANSI red/reset from the template are intentional and expected
+    expect(written).toContain('\x1b[31m')
+    expect(written).toContain('\x1b[0m')
+  })
+
+  it('strips private-use CSI sequences (DEC private markers) from error messages', () => {
+    const container = makeContainer()
+    renderHook(() => useTerminal({ sessionId: 's1', container }))
+    act(() => MockWebSocket.instances[0].simulateOpen())
+
+    mockWrite.mockClear()
+    // \x1b[?25l (hide cursor) and \x1b[>1h (DEC private) are private-use CSI sequences
+    act(() =>
+      MockWebSocket.instances[0].simulateMessage(
+        JSON.stringify({ type: 'error', message: '\x1b[?25lhidden cursor\x1b[>1htext' })
+      )
+    )
+
+    expect(mockWrite).toHaveBeenCalledTimes(1)
+    const written = mockWrite.mock.calls[0][0] as string
+    expect(written).not.toContain('\x1b[?25l')
+    expect(written).not.toContain('[?25l')
+    expect(written).not.toContain('\x1b[>1h')
+    expect(written).toContain('hidden cursor')
+    expect(written).toContain('text')
+  })
 })
