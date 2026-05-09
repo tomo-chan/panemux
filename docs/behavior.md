@@ -108,20 +108,20 @@ Persistence behavior:
 ## Agent Attention Notifications
 
 The frontend watches terminal output for conservative agent confirmation prompts such as approval,
-permission, or proceed requests. Detection runs on the rendered terminal connection so the bytes used
-for detection are also written to the terminal buffer. When a prompt is detected:
+permission, or proceed requests. Detection runs in the frontend and keeps a lightweight background
+WebSocket subscription for every pane across every workspace, so hidden workspaces are still watched
+even while their xterm instances are unmounted. When a prompt is detected:
 
 - the pane frame flashes until the pane receives focus or a click
 - the containing workspace tab flashes when that workspace is not active, and clears when selected
-- the browser Notification API is used when available; if permission has not been decided, the
-  browser may prompt before showing OS-level notifications
+- the browser Notification API is used when permission has already been granted
+- if notification permission is undecided, the browser is asked on the first pointer or key
+  interaction instead of waiting for the first prompt event
 
-Attention detection is frontend-only and only runs while the pane is rendered in the browser app.
-Inactive workspace panes are not watched by a separate background reader. Instead, the backend
-buffers recent terminal output per session and replays that snapshot when a pane reconnects after a
-workspace switch or browser reload. Attention detection itself still does not run while the pane is
-hidden, so prompts that appear and disappear entirely while a workspace is inactive are not
-retrospectively notified.
+Attention detection remains frontend-only. The backend still buffers recent terminal output per
+session and replays that snapshot when a pane reconnects after a workspace switch or browser reload,
+but prompt notifications no longer depend on the pane being visibly mounted at the time the output
+arrives.
 
 ## REST API
 

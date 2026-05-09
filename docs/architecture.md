@@ -88,7 +88,9 @@ Why REST here:
 
 ### `internal/ws`
 
-The WebSocket handler bridges one browser pane to one session.
+The WebSocket handler bridges browser clients to sessions. The interactive terminal uses one primary
+socket per visible pane, and the frontend attention monitor may open additional read-only
+subscribers for the same session ID while a workspace is hidden.
 
 Protocol split:
 
@@ -100,6 +102,8 @@ Why this split:
 - avoids encoding terminal traffic into JSON
 - keeps control messages explicit and versionable
 - matches the low-latency needs of terminal streaming
+- works with the backend session manager's fan-out model, where one session can have multiple
+  concurrent subscribers receiving the same output stream
 
 ### `internal/server`
 
@@ -138,6 +142,23 @@ Why this hook:
 - keeps server synchronization in one place
 - isolates debounce/persistence logic from view components
 - makes split/close behavior easier to reason about and test
+
+### `useWorkspaceAttentionMonitor`
+
+Opens lightweight background WebSocket subscriptions for every pane ID across all workspaces and
+feeds terminal output through the agent-attention detector, even when a workspace is not active and
+its xterm panes are unmounted.
+
+Why this hook:
+
+- decouples prompt notifications from visible xterm mounts
+- keeps inactive workspace attention behavior consistent with active panes
+- centralizes per-pane throttle and stream decoding logic
+
+### `useBrowserNotificationPermission`
+
+Requests Notification API permission on the first user interaction when the browser permission state
+is still `default`, so the first detected prompt does not need to race a permission prompt.
 
 ### `useWebSocket`
 

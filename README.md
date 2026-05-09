@@ -69,6 +69,71 @@ Then open [http://localhost:8080](http://localhost:8080) in your browser.
 
 ---
 
+## Using panemux
+
+### Daily workflow
+
+1. Start `panemux` and open it in your browser.
+2. Click a workspace tab to switch between layouts such as development, operations, or production.
+3. Work inside each terminal pane exactly like a normal shell, SSH session, or tmux attach session.
+4. Turn on edit mode only when you want to rearrange the layout or change workspace settings.
+
+### Workspace tabs
+
+- Each workspace has its own independent layout tree and set of panes.
+- Click a tab to switch workspaces without restarting the underlying sessions.
+- If a hidden workspace needs attention, its tab flashes until you open it.
+- In edit mode you can add a workspace, rename it inline, delete it, or move the tab bar to the top, bottom, left, or right.
+
+Common uses:
+
+- Keep local development shells in one workspace and production SSH panes in another.
+- Put a dedicated tmux-based workspace on one tab and short-lived local shells on another.
+
+### Pane interactions
+
+- **Resize panes** by dragging the split divider between siblings.
+- **Split a pane** from its header controls to create a new local pane beside it.
+- **Close a pane** from its header controls; the layout collapses automatically.
+- **Restart a pane** with the on-screen button if the underlying session exits.
+- **Open VS Code** from supported panes using the pane header action.
+
+### Edit mode
+
+Click the lock icon in the bottom-right corner to toggle **edit mode**.
+
+- **ON** — layout changes and workspace tab placement are persisted to the config file; terminal input is blocked and a visual overlay shows which panes are locked; drag any pane by its body (not just the header) to reorder it
+- **OFF** — terminal is fully interactive; drag-resize and close are applied in-memory only
+
+Use edit mode when you want to:
+
+- reorder panes by dragging one pane onto another
+- create a layout and keep it across restarts
+- manage workspace tabs and their position
+
+### Notifications and attention prompts
+
+- panemux watches terminal output for agent confirmation prompts such as approval or proceed requests.
+- When one is detected, the pane frame is highlighted.
+- If the pane belongs to an inactive workspace, that workspace tab is highlighted too.
+- Browser notifications are also shown after notification permission has been granted.
+- Notification permission is requested on the first browser interaction, instead of waiting for the first prompt.
+
+### Choosing pane types
+
+- Use `local` for ordinary shells on the same machine as the panemux server.
+- Use `ssh` when you want one remote shell per pane.
+- Use `tmux` when you want a pane to reattach to a persistent local tmux session.
+- Use `ssh_tmux` when you want a persistent tmux session on a remote host.
+
+### SSH and tmux usage
+
+- A pane with `connection: my-host` can use either a named `ssh_connections` entry or a `Host my-host` entry from `~/.ssh/config`.
+- `tmux` and `ssh_tmux` panes automatically create the target tmux session if it does not already exist.
+- Set `cwd` on `local`, `ssh`, or `ssh_tmux` panes when you want the shell to start in a specific directory.
+
+---
+
 ## Configuration
 
 The default config path is `~/.config/panemux/config.yaml` (created automatically on first save). Copy `config.example.yaml` as a starting point:
@@ -123,7 +188,7 @@ workspaces:
 
 Older config files with a top-level `layout:` are still accepted. When the config is next saved, panemux migrates that layout into a `default` workspace and writes the `workspaces:` format.
 
-If there is only one workspace, the workspace tab bar is hidden during normal use. Enable edit mode to show the workspace add and tab-position controls; newly added workspaces start with a single local terminal pane, become active immediately, and are saved to the config. In edit mode, each visible workspace tab can be renamed inline and has a delete button that asks for confirmation before removing the workspace. The last remaining workspace cannot be deleted. Switching the active workspace and changing `tab_position` are persisted so the same workspace and tab placement are restored after restart.
+If there is only one workspace, the workspace tab bar is hidden during normal use. Enable edit mode to show the workspace add and tab-position controls; newly added workspaces start with a single local terminal pane, become active immediately, and are saved to the config. In edit mode, each visible workspace tab can be renamed inline and has a delete button that asks for confirmation before removing the workspace. The last remaining workspace cannot be deleted. Switching the active workspace and changing `tab_position` are persisted so the same workspace and tab placement are restored after restart. Agent confirmation prompts can mark inactive workspace tabs and trigger browser notifications after notification permission has been granted.
 
 ### Pane types
 
@@ -145,13 +210,6 @@ Connections can be defined in two ways:
 When the same name appears in both, `ssh_connections` takes precedence.
 
 Authentication is attempted in order: configured `key_file` → configured `password` → default key files (`~/.ssh/id_ed25519`, `~/.ssh/id_rsa`, `~/.ssh/id_ecdsa`).
-
-### Edit mode
-
-Click the lock icon in the bottom-right corner to toggle **edit mode**.
-
-- **ON** — layout changes and workspace tab placement are persisted to the config file; terminal input is blocked and a visual overlay shows which panes are locked; drag any pane by its body (not just the header) to reorder it
-- **OFF** — terminal is fully interactive; drag-resize and close are applied in-memory only
 
 ---
 

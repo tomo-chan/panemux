@@ -1,6 +1,6 @@
-import { useContext } from 'react'
+import { useContext, useEffect } from 'react'
 import { fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
 import { LayoutActionsContext } from './components/SplitContainer'
 import type { LayoutNode, WorkspacesResponse } from './schemas'
@@ -37,6 +37,8 @@ let currentWorkspaces = workspaces
 const mockDeleteWorkspace = vi.fn()
 const mockRenameWorkspace = vi.fn()
 const mockSetWorkspaceTabPosition = vi.fn()
+const mockUseWorkspaceAttentionMonitor = vi.hoisted(() => vi.fn())
+const mockUseBrowserNotificationPermission = vi.hoisted(() => vi.fn())
 
 vi.mock('./hooks/useLayout', () => ({
   useLayout: () => ({
@@ -54,6 +56,14 @@ vi.mock('./hooks/useLayout', () => ({
     renameWorkspace: mockRenameWorkspace,
     setWorkspaceTabPosition: mockSetWorkspaceTabPosition,
   }),
+}))
+
+vi.mock('./hooks/useWorkspaceAttentionMonitor', () => ({
+  useWorkspaceAttentionMonitor: mockUseWorkspaceAttentionMonitor,
+}))
+
+vi.mock('./hooks/useBrowserNotificationPermission', () => ({
+  useBrowserNotificationPermission: mockUseBrowserNotificationPermission,
 }))
 
 vi.mock('./hooks/useEditMode', () => ({
@@ -76,13 +86,38 @@ vi.mock('./hooks/usePaneSettings', () => ({
 }))
 
 describe('App workspace deletion', () => {
+  let originalNotification: typeof Notification | undefined
+
+  beforeEach(() => {
+    originalNotification = window.Notification
+    mockUseWorkspaceAttentionMonitor.mockImplementation(() => {})
+    mockUseBrowserNotificationPermission.mockImplementation(() => {})
+    vi.stubGlobal('Notification', vi.fn() as unknown as typeof Notification)
+    Object.defineProperty(window.Notification, 'permission', {
+      configurable: true,
+      value: 'granted',
+    })
+    Object.defineProperty(window.Notification, 'requestPermission', {
+      configurable: true,
+      value: vi.fn().mockResolvedValue('granted'),
+    })
+  })
+
   afterEach(() => {
     mockDeleteWorkspace.mockClear()
     mockRenameWorkspace.mockClear()
     mockSetWorkspaceTabPosition.mockClear()
     mockTerminalPane.mockClear()
+    mockUseWorkspaceAttentionMonitor.mockReset()
+    mockUseBrowserNotificationPermission.mockReset()
     currentWorkspaces = workspaces
     vi.restoreAllMocks()
+    if (originalNotification === undefined) {
+      // @ts-expect-error test cleanup
+      delete window.Notification
+    } else {
+      window.Notification = originalNotification
+    }
   })
 
 
@@ -164,5 +199,65 @@ describe('App workspace deletion', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Place workspace tabs on right' }))
 
     expect(mockSetWorkspaceTabPosition).toHaveBeenCalledWith('right')
+  })
+
+  it('marks an inactive workspace when the attention monitor reports one of its panes', () => {
+    currentWorkspaces = { ...workspaces, active: 'ops' }
+    mockUseWorkspaceAttentionMonitor.mockImplementation(({ onAttention }: { onAttention: (paneId: string) => void }) => {
+      useEffect(() => {
+        onAttention('main')
+      }, [onAttention])
+    })
+
+    render(<App />)
+
+    expect(screen.getByRole('tab', { name: 'Dev' })).toHaveAttribute('data-attention', 'true')
+    expect(screen.getByRole('tab', { name: 'Ops' })).not.toHaveAttribute('data-attention')
+  })
+
+  it('shows a browser notification with pane and workspace titles for inactive workspace attention', () => {
+    currentWorkspaces = { ...workspaces, active: 'ops' }
+    mockUseWorkspaceAttentionMonitor.mockImplementation(({ onAttention }: { onAttention: (paneId: string) => void }) => {
+      useEffect(() => {
+        onAttention('main')
+      }, [onAttention])
+    })
+
+    render(<App />)
+
+    expect(window.Notification).toHaveBeenCalledWith('Agent confirmation requested', {
+      body: 'main in Dev',
+    })
+  })
+
+  it('does not mark the active workspace tab when attention comes from the active workspace', () => {
+    currentWorkspaces = { ...workspaces, active: 'dev' }
+    mockUseWorkspaceAttentionMonitor.mockImplementation(({ onAttention }: { onAttention: (paneId: string) => void }) => {
+      useEffect(() => {
+        onAttention('main')
+      }, [onAttention])
+    })
+
+    render(<App />)
+
+    expect(screen.getByRole('tab', { name: 'Dev' })).not.toHaveAttribute('data-attention')
+    expect(screen.getByRole('tab', { name: 'Ops' })).not.toHaveAttribute('data-attention')
+  })
+
+  it('does not request browser notification permission when attention is reported', () => {
+    Object.defineProperty(window.Notification, 'permission', {
+      configurable: true,
+      value: 'default',
+    })
+    mockUseWorkspaceAttentionMonitor.mockImplementation(({ onAttention }: { onAttention: (paneId: string) => void }) => {
+      useEffect(() => {
+        onAttention('main')
+      }, [onAttention])
+    })
+
+    render(<App />)
+
+    expect(window.Notification.requestPermission).not.toHaveBeenCalled()
+    expect(window.Notification).not.toHaveBeenCalled()
   })
 })

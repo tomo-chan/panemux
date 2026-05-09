@@ -7,10 +7,12 @@ import { WorkspaceTabs } from './components/WorkspaceTabs'
 import { useLayout } from './hooks/useLayout'
 import { useEditMode } from './hooks/useEditMode'
 import { usePaneSettings } from './hooks/usePaneSettings'
+import { useWorkspaceAttentionMonitor } from './hooks/useWorkspaceAttentionMonitor'
+import { useBrowserNotificationPermission } from './hooks/useBrowserNotificationPermission'
 import { DisplayConfig } from './types'
 import { TERMINAL_FONT_FAMILY } from './utils/fonts'
 import { findPaneById, layoutContainsPane } from './utils/layoutTree'
-import type { SSHConfigHost } from './schemas'
+import type { LayoutChild, LayoutNode, SSHConfigHost } from './schemas'
 
 const DEFAULT_DISPLAY: DisplayConfig = { show_header: true, show_status_bar: true }
 
@@ -26,6 +28,17 @@ export const App: React.FC = () => {
   const [isAddSSHHostOpen, setIsAddSSHHostOpen] = useState(false)
   const [addSSHHostError, setAddSSHHostError] = useState<string | null>(null)
   const [isAddSSHHostSaving, setIsAddSSHHostSaving] = useState(false)
+
+  const paneMetadataByID = useMemo(() => {
+    const metadata = new Map<string, { paneTitle: string; workspaceId: string; workspaceTitle: string }>()
+    if (!workspaces) return metadata
+
+    for (const workspace of workspaces.items) {
+      collectPaneMetadata(workspace.layout, workspace.id, workspace.title, metadata)
+    }
+
+    return metadata
+  }, [workspaces])
 
   const findWorkspaceForPane = useCallback((paneId: string) => {
     return workspaces?.items.find((workspace) => layoutContainsPane(workspace.layout, paneId)) ?? null
@@ -71,17 +84,21 @@ export const App: React.FC = () => {
   }, [])
 
   const notifyAttention = useCallback((paneId: string) => {
-    const workspace = findWorkspaceForPane(paneId)
+    const paneMetadata = paneMetadataByID.get(paneId)
+    const workspace = paneMetadata ? workspaces?.items.find((item) => item.id === paneMetadata.workspaceId) ?? null : findWorkspaceForPane(paneId)
     const pane = workspace ? findPaneById(workspace.layout, paneId) : layout ? findPaneById(layout, paneId) : null
-    const paneTitle = pane?.title ?? paneId
-    const workspaceTitle = workspace?.title
+    const paneTitle = paneMetadata?.paneTitle ?? pane?.title ?? paneId
+    const workspaceTitle = paneMetadata?.workspaceTitle ?? workspace?.title
 
     setAttentionPaneIds((current) => new Set(current).add(paneId))
     showBrowserNotification(
       'Agent confirmation requested',
       workspaceTitle ? `${paneTitle} in ${workspaceTitle}` : paneTitle,
     )
-  }, [findWorkspaceForPane, layout])
+  }, [findWorkspaceForPane, layout, paneMetadataByID, workspaces])
+
+  useWorkspaceAttentionMonitor({ workspaces, onAttention: notifyAttention })
+  useBrowserNotificationPermission()
 
   const handleAddSSHHost = useCallback(async (host: SSHConfigHost) => {
     setIsAddSSHHostSaving(true)
@@ -213,16 +230,40 @@ export const App: React.FC = () => {
 function showBrowserNotification(title: string, body: string) {
   if (!('Notification' in window)) return
 
-  if (Notification.permission === 'granted') {
-    new Notification(title, { body })
+  if (Notification.permission !== 'granted') return
+
+  new Notification(title, { body })
+}
+
+function collectPaneMetadata(
+  layout: LayoutNode,
+  workspaceId: string,
+  workspaceTitle: string,
+  metadata: Map<string, { paneTitle: string; workspaceId: string; workspaceTitle: string }>,
+) {
+  for (const child of layout.children) {
+    collectChildPaneMetadata(child, workspaceId, workspaceTitle, metadata)
+  }
+}
+
+function collectChildPaneMetadata(
+  child: LayoutChild,
+  workspaceId: string,
+  workspaceTitle: string,
+  metadata: Map<string, { paneTitle: string; workspaceId: string; workspaceTitle: string }>,
+) {
+  if (child.pane && (!child.children || child.children.length === 0)) {
+    metadata.set(child.pane.id, {
+      paneTitle: child.pane.title ?? child.pane.id,
+      workspaceId,
+      workspaceTitle,
+    })
     return
   }
 
-  if (Notification.permission === 'default') {
-    void Notification.requestPermission().then((permission) => {
-      if (permission === 'granted') {
-        new Notification(title, { body })
-      }
-    })
+  if (!child.children?.length) return
+
+  for (const nestedChild of child.children) {
+    collectChildPaneMetadata(nestedChild, workspaceId, workspaceTitle, metadata)
   }
 }
