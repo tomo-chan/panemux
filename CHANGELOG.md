@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.12.0](https://github.com/tomo-chan/panemux/compare/v0.11.0...v0.12.0) (2026-05-09)
+
+
+### Features
+
+* add agent attention notifications ([#74](https://github.com/tomo-chan/panemux/issues/74)) ([8b51f8f](https://github.com/tomo-chan/panemux/commit/8b51f8f92562ad60fd95384f80056214ea983a53))
+* add workspace rename ([#72](https://github.com/tomo-chan/panemux/issues/72)) ([d9d3e77](https://github.com/tomo-chan/panemux/commit/d9d3e77e3b41e2d4806f1275518c4bef74c5d649))
+* allow workspace tab position changes ([#73](https://github.com/tomo-chan/panemux/issues/73)) ([a7826ae](https://github.com/tomo-chan/panemux/commit/a7826ae133c2af7ade751b89cb81ac7b9424a7e3))
+
+
+### Bug Fixes
+
+* repaint terminal after workspace switches ([#75](https://github.com/tomo-chan/panemux/issues/75)) ([22b76be](https://github.com/tomo-chan/panemux/commit/22b76be96be2ab422a216a1e033ab20405203469))
+* replay terminal output after workspace switches ([#76](https://github.com/tomo-chan/panemux/issues/76)) ([ad3a9f8](https://github.com/tomo-chan/panemux/commit/ad3a9f838d2ab7d4bee7b91e7c9a6b8a35a4a9ca))
+* restore hidden workspace attention notifications ([#77](https://github.com/tomo-chan/panemux/issues/77)) ([9586746](https://github.com/tomo-chan/panemux/commit/95867464d1fa7379ccd0d0b07a61575e713bc328))
+
 ## [0.11.0](https://github.com/tomo-chan/panemux/compare/v0.10.0...v0.11.0) (2026-04-29)
 
 
