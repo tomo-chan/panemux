@@ -115,10 +115,25 @@ detected:
 
 - the pane frame flashes until the pane receives focus or a click
 - the containing workspace tab flashes when that workspace is not active, and clears when selected
-- the browser Notification API is used when permission has already been granted
+- the browser Notification API is used when permission has already been granted and the prompt is not currently visible to the user
 - clicking a browser notification focuses the app window and switches to the matching workspace
 - if notification permission is undecided, the browser is asked on the first pointer or key
   interaction instead of waiting for the first prompt event
+
+Browser notification eligibility is determined by the current UI state:
+
+| Browser state | Pane state | Browser notification |
+|---|---|---|
+| active | visible in the active workspace | no |
+| active | hidden in another workspace | yes |
+| active | hidden by maximize in the active workspace | yes |
+| inactive | any pane | yes |
+
+To suppress redraw noise, panemux stores the last browser-notified prompt signature per pane in
+browser storage. If the same pane replays the same prompt after a refresh, reconnect, or layout
+change, the pane and workspace attention indicators can still reappear, but the browser
+notification is not shown again. When the same pane later emits a different prompt, the stored
+signature is replaced and the new prompt can notify again.
 
 Attention detection remains frontend-only. The backend still buffers recent terminal output per
 session and replays that snapshot when a pane reconnects after a workspace switch or browser reload,

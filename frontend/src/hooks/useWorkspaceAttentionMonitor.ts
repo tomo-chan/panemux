@@ -1,30 +1,47 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { createAgentAttentionDetector } from '../utils/agentAttention'
+import { getLastNotifiedAttentionSignature, setLastNotifiedAttentionSignature } from '../utils/attentionNotificationState'
 import type { LayoutNode, WorkspacesResponse } from '../schemas'
-
-const ATTENTION_NOTIFY_INTERVAL_MS = 10_000
 
 interface UseWorkspaceAttentionMonitorOptions {
   workspaces: WorkspacesResponse | null
-  onAttention: (paneId: string) => void
+  maximizedPaneId: string | null
+  onAttention: (paneId: string, showBrowserNotification?: boolean) => void
 }
 
 interface PaneMonitorState {
   detector: ReturnType<typeof createAgentAttentionDetector>
   decoder: TextDecoder
-  lastAttentionAt: number | null
 }
 
-export function useWorkspaceAttentionMonitor({ workspaces, onAttention }: UseWorkspaceAttentionMonitorOptions) {
+export function useWorkspaceAttentionMonitor({ workspaces, maximizedPaneId, onAttention }: UseWorkspaceAttentionMonitorOptions) {
   const monitorStatesRef = useRef<Map<string, PaneMonitorState>>(new Map())
-
-  const paneIds = useMemo(() => {
-    if (!workspaces) return []
-
-    return workspaces.items.flatMap((workspace) => collectPaneIDs(workspace.layout))
-  }, [workspaces])
+  const activeWorkspaceIdRef = useRef<string | null>(workspaces?.active ?? null)
+  const maximizedPaneIdRef = useRef<string | null>(maximizedPaneId)
 
   useEffect(() => {
+    activeWorkspaceIdRef.current = workspaces?.active ?? null
+  }, [workspaces?.active])
+
+  useEffect(() => {
+    maximizedPaneIdRef.current = maximizedPaneId
+  }, [maximizedPaneId])
+
+  const paneMetadataById = useMemo(() => {
+    const metadata = new Map<string, { workspaceId: string }>()
+    if (!workspaces) return metadata
+
+    for (const workspace of workspaces.items) {
+      for (const paneId of collectPaneIDs(workspace.layout)) {
+        metadata.set(paneId, { workspaceId: workspace.id })
+      }
+    }
+
+    return metadata
+  }, [workspaces?.items])
+
+  useEffect(() => {
+    const paneIds = [...paneMetadataById.keys()]
     if (paneIds.length === 0) return
 
     const sockets = paneIds.map((paneId) => {
@@ -33,7 +50,6 @@ export function useWorkspaceAttentionMonitor({ workspaces, onAttention }: UseWor
       ws.binaryType = 'arraybuffer'
 
       ws.onopen = () => {
-        state.lastAttentionAt = null
         state.detector.reset()
         state.decoder = new TextDecoder()
       }
@@ -41,9 +57,22 @@ export function useWorkspaceAttentionMonitor({ workspaces, onAttention }: UseWor
       ws.onmessage = (event) => {
         if (typeof event.data === 'string') return
         const text = state.decoder.decode(new Uint8Array(event.data as ArrayBuffer), { stream: true })
-        if (shouldNotifyAttention(state, text)) {
-          onAttention(paneId)
+        const attentionMatch = state.detector.feed(text)
+        if (!attentionMatch) return
+
+        const shouldNotifyBrowser = shouldNotifyBrowserAttention({
+          paneId,
+          paneWorkspaceId: paneMetadataById.get(paneId)?.workspaceId ?? null,
+          activeWorkspaceId: activeWorkspaceIdRef.current,
+          maximizedPaneId: maximizedPaneIdRef.current,
+          browserIsActive: isBrowserActive(),
+          signature: attentionMatch.signature,
+        })
+
+        if (shouldNotifyBrowser) {
+          setLastNotifiedAttentionSignature(paneId, attentionMatch.signature)
         }
+        onAttention(paneId, shouldNotifyBrowser)
       }
 
       ws.onerror = () => {
@@ -60,7 +89,7 @@ export function useWorkspaceAttentionMonitor({ workspaces, onAttention }: UseWor
         socket.close()
       }
     }
-  }, [onAttention, paneIds])
+  }, [onAttention, paneMetadataById])
 }
 
 function buildWebSocketURL(paneId: string): string {
@@ -91,20 +120,34 @@ function getOrCreatePaneMonitorState(states: Map<string, PaneMonitorState>, pane
   const created: PaneMonitorState = {
     detector: createAgentAttentionDetector(),
     decoder: new TextDecoder(),
-    lastAttentionAt: null,
   }
   states.set(paneId, created)
   return created
 }
 
-function shouldNotifyAttention(state: PaneMonitorState, text: string): boolean {
-  if (!state.detector.feed(text)) return false
+function shouldNotifyBrowserAttention({
+  paneId,
+  paneWorkspaceId,
+  activeWorkspaceId,
+  maximizedPaneId,
+  browserIsActive,
+  signature,
+}: {
+  paneId: string
+  paneWorkspaceId: string | null
+  activeWorkspaceId: string | null
+  maximizedPaneId: string | null
+  browserIsActive: boolean
+  signature: string
+}): boolean {
+  if (getLastNotifiedAttentionSignature(paneId) === signature) return false
+  if (!browserIsActive) return true
+  if (!paneWorkspaceId || paneWorkspaceId !== activeWorkspaceId) return true
+  if (!maximizedPaneId) return false
 
-  const now = Date.now()
-  if (state.lastAttentionAt !== null && now - state.lastAttentionAt < ATTENTION_NOTIFY_INTERVAL_MS) {
-    return false
-  }
+  return paneId !== maximizedPaneId
+}
 
-  state.lastAttentionAt = now
-  return true
+function isBrowserActive(): boolean {
+  return document.visibilityState === 'visible' && document.hasFocus()
 }
