@@ -51,7 +51,7 @@ function normalizeAttentionText(value: string): string {
   return stripAnsi(value)
     .replace(/\s+/g, ' ')
     .trim()
-    .toLocaleLowerCase()
+    .toLowerCase()
 }
 
 function stripAnsi(value: string): string {

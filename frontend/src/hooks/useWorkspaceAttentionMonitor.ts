@@ -16,6 +16,16 @@ interface PaneMonitorState {
 
 export function useWorkspaceAttentionMonitor({ workspaces, maximizedPaneId, onAttention }: UseWorkspaceAttentionMonitorOptions) {
   const monitorStatesRef = useRef<Map<string, PaneMonitorState>>(new Map())
+  const activeWorkspaceIdRef = useRef<string | null>(workspaces?.active ?? null)
+  const maximizedPaneIdRef = useRef<string | null>(maximizedPaneId)
+
+  useEffect(() => {
+    activeWorkspaceIdRef.current = workspaces?.active ?? null
+  }, [workspaces?.active])
+
+  useEffect(() => {
+    maximizedPaneIdRef.current = maximizedPaneId
+  }, [maximizedPaneId])
 
   const paneMetadataById = useMemo(() => {
     const metadata = new Map<string, { workspaceId: string }>()
@@ -28,7 +38,7 @@ export function useWorkspaceAttentionMonitor({ workspaces, maximizedPaneId, onAt
     }
 
     return metadata
-  }, [workspaces])
+  }, [workspaces?.items])
 
   useEffect(() => {
     const paneIds = [...paneMetadataById.keys()]
@@ -53,8 +63,8 @@ export function useWorkspaceAttentionMonitor({ workspaces, maximizedPaneId, onAt
         const shouldNotifyBrowser = shouldNotifyBrowserAttention({
           paneId,
           paneWorkspaceId: paneMetadataById.get(paneId)?.workspaceId ?? null,
-          activeWorkspaceId: workspaces?.active ?? null,
-          maximizedPaneId,
+          activeWorkspaceId: activeWorkspaceIdRef.current,
+          maximizedPaneId: maximizedPaneIdRef.current,
           browserIsActive: isBrowserActive(),
           signature: attentionMatch.signature,
         })
@@ -79,7 +89,7 @@ export function useWorkspaceAttentionMonitor({ workspaces, maximizedPaneId, onAt
         socket.close()
       }
     }
-  }, [maximizedPaneId, onAttention, paneMetadataById, workspaces])
+  }, [onAttention, paneMetadataById])
 }
 
 function buildWebSocketURL(paneId: string): string {

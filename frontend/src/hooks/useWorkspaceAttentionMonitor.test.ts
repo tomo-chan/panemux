@@ -126,6 +126,37 @@ describe('useWorkspaceAttentionMonitor', () => {
     )
   })
 
+  it('does not reconnect monitor sockets when only active workspace or maximize state changes', () => {
+    const onAttention = vi.fn()
+    const { rerender } = renderHook(
+      ({ currentWorkspaces, currentMaximizedPaneId }) =>
+        useWorkspaceAttentionMonitor({
+          workspaces: currentWorkspaces,
+          maximizedPaneId: currentMaximizedPaneId,
+          onAttention,
+        }),
+      {
+        initialProps: {
+          currentWorkspaces: workspaces,
+          currentMaximizedPaneId: null as string | null,
+        },
+      },
+    )
+
+    expect(MockWebSocket.instances).toHaveLength(3)
+
+    rerender({
+      currentWorkspaces: { ...workspaces, active: 'ops' },
+      currentMaximizedPaneId: null,
+    })
+    rerender({
+      currentWorkspaces: { ...workspaces, active: 'ops' },
+      currentMaximizedPaneId: 'ops-main',
+    })
+
+    expect(MockWebSocket.instances).toHaveLength(3)
+  })
+
   it('notifies when an inactive workspace pane emits a confirmation prompt', () => {
     const onAttention = vi.fn()
     renderHook(() => useWorkspaceAttentionMonitor({ workspaces, maximizedPaneId: null, onAttention }))
