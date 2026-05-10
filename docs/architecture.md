@@ -153,7 +153,17 @@ Why this hook:
 
 - decouples prompt notifications from visible xterm mounts
 - keeps inactive workspace attention behavior consistent with active panes
-- centralizes per-pane throttle and stream decoding logic
+- centralizes per-pane stream decoding, visibility gating, and last-notified dedupe
+
+The hook derives browser-notification eligibility from:
+
+- active workspace id
+- maximized pane id
+- browser activity via `document.visibilityState` and `document.hasFocus()`
+
+Each detected prompt is normalized into a stable signature. The last signature that produced a
+browser notification is persisted per pane in browser storage, so terminal replay after a refresh or
+WebSocket reconnect does not re-notify the same prompt.
 
 ### `useBrowserNotificationPermission`
 

@@ -8,8 +8,12 @@ const ATTENTION_PATTERNS = [
   /(確認|承認|許可)[\s\S]{0,120}(必要|してください|しますか|待ち)/,
 ]
 
+export interface AgentAttentionMatch {
+  signature: string
+}
+
 export interface AgentAttentionDetector {
-  feed: (chunk: string) => boolean
+  feed: (chunk: string) => AgentAttentionMatch | null
   reset: () => void
 }
 
@@ -19,16 +23,35 @@ export function createAgentAttentionDetector(): AgentAttentionDetector {
   return {
     feed(chunk: string) {
       tail = (tail + stripAnsi(chunk)).slice(-MAX_TAIL_LENGTH)
-      const matched = ATTENTION_PATTERNS.some((pattern) => pattern.test(tail))
-      if (matched) {
+      const match = findAttentionMatch(tail)
+      if (match) {
         tail = ''
+        return {
+          signature: normalizeAttentionText(match),
+        }
       }
-      return matched
+      return null
     },
     reset() {
       tail = ''
     },
   }
+}
+
+function findAttentionMatch(value: string): string | null {
+  for (const pattern of ATTENTION_PATTERNS) {
+    const match = value.match(pattern)
+    if (match) return match[0]
+  }
+
+  return null
+}
+
+function normalizeAttentionText(value: string): string {
+  return stripAnsi(value)
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLocaleLowerCase()
 }
 
 function stripAnsi(value: string): string {

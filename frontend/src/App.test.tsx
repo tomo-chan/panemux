@@ -309,4 +309,17 @@ describe('App workspace deletion', () => {
     expect(window.Notification.requestPermission).not.toHaveBeenCalled()
     expect(window.Notification).not.toHaveBeenCalled()
   })
+
+  it('does not show a browser notification when attention is already visible', () => {
+    currentWorkspaces = { ...workspaces, active: 'dev' }
+    mockUseWorkspaceAttentionMonitor.mockImplementation(({ onAttention }: { onAttention: (paneId: string, showBrowserNotification?: boolean) => void }) => {
+      useEffect(() => {
+        onAttention('main', false)
+      }, [onAttention])
+    })
+
+    render(<App />)
+
+    expect(window.Notification).not.toHaveBeenCalled()
+  })
 })

@@ -117,7 +117,8 @@ Use edit mode when you want to:
 - Codex permission menus such as MCP tool allow prompts are detected too.
 - When one is detected, the pane frame is highlighted.
 - If the pane belongs to an inactive workspace, that workspace tab is highlighted too.
-- Browser notifications are also shown after notification permission has been granted, and clicking one switches to the matching workspace.
+- Browser notifications are shown after notification permission has been granted only when the prompt is not currently visible to the user, and clicking one switches to the matching workspace.
+- panemux remembers the last browser-notified prompt per pane, so refreshes, reconnects, and maximize toggles do not re-notify the same prompt replay.
 - Notification permission is requested on the first browser interaction, instead of waiting for the first prompt.
 
 ### Choosing pane types

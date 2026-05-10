@@ -83,7 +83,7 @@ export const App: React.FC = () => {
     })
   }, [])
 
-  const notifyAttention = useCallback((paneId: string) => {
+  const notifyAttention = useCallback((paneId: string, showNotification = true) => {
     const paneMetadata = paneMetadataByID.get(paneId)
     const workspace = paneMetadata ? workspaces?.items.find((item) => item.id === paneMetadata.workspaceId) ?? null : findWorkspaceForPane(paneId)
     const pane = workspace ? findPaneById(workspace.layout, paneId) : layout ? findPaneById(layout, paneId) : null
@@ -91,6 +91,8 @@ export const App: React.FC = () => {
     const workspaceTitle = paneMetadata?.workspaceTitle ?? workspace?.title
 
     setAttentionPaneIds((current) => new Set(current).add(paneId))
+    if (!showNotification) return
+
     showBrowserNotification(
       'Agent confirmation requested',
       workspaceTitle ? `${paneTitle} in ${workspaceTitle}` : paneTitle,
@@ -101,7 +103,7 @@ export const App: React.FC = () => {
     )
   }, [findWorkspaceForPane, layout, paneMetadataByID, setActiveWorkspace, workspaces])
 
-  useWorkspaceAttentionMonitor({ workspaces, onAttention: notifyAttention })
+  useWorkspaceAttentionMonitor({ workspaces, maximizedPaneId, onAttention: notifyAttention })
   useBrowserNotificationPermission()
 
   const handleAddSSHHost = useCallback(async (host: SSHConfigHost) => {
