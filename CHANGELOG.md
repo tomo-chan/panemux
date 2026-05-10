@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.13.1](https://github.com/tomo-chan/panemux/compare/v0.13.0...v0.13.1) (2026-05-10)
+
+
+### Bug Fixes
+
+* reduce duplicate attention notifications ([#85](https://github.com/tomo-chan/panemux/issues/85)) ([c763c63](https://github.com/tomo-chan/panemux/commit/c763c635187059bc6cfd35271ad868df4437c0ff))
+* tone down terminal scrollbar chrome ([#84](https://github.com/tomo-chan/panemux/issues/84)) ([68b989d](https://github.com/tomo-chan/panemux/commit/68b989da16e69081afd7f4f633a08ecb6cb8be79))
+
 ## [0.13.0](https://github.com/tomo-chan/panemux/compare/v0.12.0...v0.13.0) (2026-05-09)
 
 
