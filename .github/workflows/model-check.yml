@@ -52,7 +52,7 @@ jobs:
             out_dir="$(mktemp -d)"
             log_file="$(mktemp)"
             receipt_file="$out_dir/receipt.json"
-            java -jar /tmp/alloy/org.alloytools.alloy.dist.jar exec -t none -o "$out_dir" -f "$model" | tee "$log_file"
+            java -jar /tmp/alloy/org.alloytools.alloy.dist.jar exec -t none -o "$out_dir" -f "$model" 2>&1 | tee "$log_file"
             python3 - "$model" "$log_file" "$receipt_file" <<'PY'
           import re
           import json
