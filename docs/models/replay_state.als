@@ -6,7 +6,7 @@ abstract sig ReplayState {}
 one sig Live, ReplayPendingEnd, ReplayDraining extends ReplayState {}
 
 abstract sig Event {}
-one sig ReplayStart, ReplayBinary, ReplayEnd, WriteComplete, Reconnect extends Event {}
+one sig ReplayStart, ReplayBinary, ReplayEnd, WriteComplete, SocketClose, ReplayEndWriteFail, Reconnect extends Event {}
 
 abstract sig Flag {}
 one sig Enabled, Disabled extends Flag {}
@@ -103,6 +103,23 @@ pred transition[cur, next: Step] {
     next.state = Live
     next.replayWriteDepth = 0
   }
+
+  next.event = SocketClose implies {
+    next.state = cur.state
+    next.replayActive = cur.replayActive
+    next.replayEnded = cur.replayEnded
+    next.disableStdin = cur.disableStdin
+    next.replayWriteDepth = cur.replayWriteDepth
+  }
+
+  next.event = ReplayEndWriteFail implies {
+    cur.state = ReplayPendingEnd
+    next.state = ReplayPendingEnd
+    next.replayActive = Enabled
+    next.replayEnded = Disabled
+    next.disableStdin = Enabled
+    next.replayWriteDepth = cur.replayWriteDepth
+  }
 }
 
 fact Trace {
@@ -141,8 +158,28 @@ assert NoStaleSuppressionInLive {
     }
 }
 
+assert ReplayEndWriteFailureLeavesReplayPendingUntilReconnect {
+  all s: Step - first |
+    s.event = ReplayEndWriteFail implies {
+      s.state = ReplayPendingEnd
+      s.replayActive = Enabled
+      s.replayEnded = Disabled
+      s.disableStdin = Enabled
+    }
+}
+
+assert SocketCloseDoesNotFalselyRestoreLive {
+  all s: Step - first |
+    s.event = SocketClose and prev[s].state in ReplayPendingEnd + ReplayDraining implies {
+      s.state = prev[s].state
+      s.disableStdin = Enabled
+    }
+}
+
 check LiveAlwaysEnablesInput for 8 Step, 8 Int
 check ReplayStatesAlwaysSuppressInput for 8 Step, 8 Int
 check DrainingRequiresQueuedWrites for 8 Step, 8 Int
 check ReconnectAlwaysResetsToLive for 8 Step, 8 Int
 check NoStaleSuppressionInLive for 8 Step, 8 Int
+check ReplayEndWriteFailureLeavesReplayPendingUntilReconnect for 8 Step, 8 Int
+check SocketCloseDoesNotFalselyRestoreLive for 8 Step, 8 Int

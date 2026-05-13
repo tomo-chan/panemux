@@ -115,6 +115,8 @@ Replay lifecycle contract:
   be draining already-scheduled xterm writes
 - if a replay control frame write fails, the handler stops forwarding on that connection instead of
   risking live output after an incomplete replay transition
+- if the connection dies after `replay:start` but before the frontend observes a matching `replay:end`,
+  the frontend may temporarily retain replay suppression state until the next socket open resets it
 
 ### `internal/server`
 
@@ -219,8 +221,9 @@ connection cannot suppress stdin for the new connection.
 
 This lifecycle is also captured as an Alloy model in
 [replay_state.als](/tmp/panemux-replay-input-fix/docs/models/replay_state.als), which treats
-reconnect, replay frame delivery, and replay write completion as explicit transition events and
-checks the stale-suppression invariants over bounded traces.
+reconnect, replay frame delivery, replay-control write failure, socket close, and replay write
+completion as explicit transition events and checks the stale-suppression invariants over bounded
+traces.
 
 Why xterm.js:
 

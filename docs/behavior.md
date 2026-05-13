@@ -278,7 +278,7 @@ Replay state machine:
 | State | Entry condition | Allowed events | Exit condition | Frontend effect |
 |---|---|---|---|---|
 | `live` | initial steady state, or replay has fully completed | live binary output, `replay:start`, socket close, socket reconnect | `replay:start` or socket teardown | `disableStdin = false`; terminal input and xterm-generated replies may flow normally |
-| `replay_pending_end` | `replay:start` received | replay binary output, `replay:end`, socket close, socket reconnect | `replay:end` or socket teardown | `disableStdin = true`; replay bytes may still be arriving |
+| `replay_pending_end` | `replay:start` received | replay binary output, `replay:end`, `replay:end` write failure, socket close, socket reconnect | `replay:end` or socket teardown | `disableStdin = true`; replay bytes may still be arriving |
 | `replay_draining` | `replay:end` received while one or more replay writes are still in flight | replay write callback completion, socket close, socket reconnect | last replay write callback completes | `disableStdin = true`; no new replay bytes are expected, but already-scheduled writes may still cause xterm side effects |
 
 State transition rules:
@@ -288,7 +288,8 @@ State transition rules:
 3. Each replay binary frame is written while stdin remains suppressed.
 4. `replay:end` moves the terminal to `replay_draining` if replay writes are still in flight, otherwise directly back to `live`.
 5. The final replay write callback restores `live`.
-6. Any WebSocket reconnect force-resets replay state back to `live` before new frames are processed, so a partial replay cannot leave stale suppression behind.
+6. A socket close or replay-control write failure can leave the frontend in a stale replay state until the next connection opens.
+7. Any WebSocket reconnect force-resets replay state back to `live` before new frames are processed, so a partial replay cannot leave stale suppression behind.
 
 Frontend replay state diagram:
 
@@ -299,7 +300,10 @@ stateDiagram-v2
     replay_pending_end --> replay_pending_end: replay binary frame
     replay_pending_end --> replay_draining: replay:end\nand replayWriteDepth > 0
     replay_pending_end --> live: replay:end\nand replayWriteDepth == 0
+    replay_pending_end --> replay_pending_end: replay:end write failure
+    replay_pending_end --> replay_pending_end: socket close
     replay_draining --> replay_draining: replay write callback\nand replayWriteDepth > 0
+    replay_draining --> replay_draining: socket close
     replay_draining --> live: final replay write callback
     replay_pending_end --> live: socket reconnect/reset
     replay_draining --> live: socket reconnect/reset
@@ -332,6 +336,8 @@ Alloy model:
   - `Live` never leaves `disableStdin` enabled
   - replay states always keep `disableStdin` enabled
   - `ReplayDraining` is only reachable while replay writes remain queued
+  - `ReplayEndWriteFail` leaves the model in `ReplayPendingEnd` until reconnect
+  - `SocketClose` does not falsely restore `Live` while replay is incomplete
   - `Reconnect` always resets the model to a clean `Live` state
   - stale replay suppression cannot survive in `Live`
 - To inspect counterexamples locally, open the model in Alloy and run the bundled `check` commands.
