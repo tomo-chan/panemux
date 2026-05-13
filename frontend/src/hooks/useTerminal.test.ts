@@ -356,6 +356,31 @@ describe('useTerminal', () => {
     expect(writesDisableState).toEqual([true, false])
   })
 
+  it('resets stale replay suppression when the socket reconnects', () => {
+    const container = makeContainer()
+    renderHook(() => useTerminal({ sessionId: 's1', container }))
+    act(() => MockWebSocket.instances[0].simulateOpen())
+
+    const replayBuf = new TextEncoder().encode('replayed prompt').buffer
+    act(() =>
+      MockWebSocket.instances[0].simulateMessage(
+        JSON.stringify({ type: 'replay', state: 'start' })
+      )
+    )
+    act(() => MockWebSocket.instances[0].simulateMessage(replayBuf))
+    expect(mockTerm.options.disableStdin).toBe(true)
+
+    act(() => MockWebSocket.instances[0].simulateOpen())
+    expect(mockTerm.options.disableStdin).toBe(false)
+
+    mockWrite.mockClear()
+    const liveBuf = new TextEncoder().encode('live output').buffer
+    act(() => MockWebSocket.instances[0].simulateMessage(liveBuf))
+
+    expect(mockWrite).toHaveBeenCalledWith(expect.any(Uint8Array))
+    expect(mockTerm.options.disableStdin).toBe(false)
+  })
+
   it('buffers terminal output that arrives before the container is attached', () => {
     const buf = new TextEncoder().encode('prompt before attach').buffer
     const container = makeContainer()

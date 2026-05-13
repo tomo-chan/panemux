@@ -99,6 +99,8 @@ export function useTerminal({ sessionId, container, editMode = false }: UseTermi
     onMessage: handleMessage,
     onOpen: () => {
       setSessionExited(false)
+      const entry = entryRef.current
+      if (entry) resetReplayState(entry)
     },
   })
 
@@ -426,6 +428,13 @@ function writeTerminalBytes(entry: TerminalEntry, bytes: Uint8Array) {
     entry.replayWriteDepth--
     maybeRestoreTerminalInput(entry)
   })
+}
+
+function resetReplayState(entry: TerminalEntry) {
+  entry.replayActive = false
+  entry.replayWriteDepth = 0
+  entry.replayEnded = true
+  setTerminalInputSuppressed(entry, false)
 }
 
 function setTerminalInputSuppressed(entry: TerminalEntry, suppressed: boolean) {
