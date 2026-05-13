@@ -8,44 +8,47 @@ one sig Live, ReplayPendingEnd, ReplayDraining extends ReplayState {}
 abstract sig Event {}
 one sig ReplayStart, ReplayBinary, ReplayEnd, WriteComplete, Reconnect extends Event {}
 
+abstract sig Flag {}
+one sig Enabled, Disabled extends Flag {}
+
 sig Step {
   state: one ReplayState,
   event: lone Event,
-  replayActive: one Bool,
-  replayEnded: one Bool,
-  disableStdin: one Bool,
+  replayActive: one Flag,
+  replayEnded: one Flag,
+  disableStdin: one Flag,
   replayWriteDepth: one Int
 }
 
 fact InitialState {
   first.state = Live
   no first.event
-  first.replayActive = False
-  first.replayEnded = True
-  first.disableStdin = False
+  first.replayActive = Disabled
+  first.replayEnded = Enabled
+  first.disableStdin = Disabled
   first.replayWriteDepth = 0
 }
 
 fact StateEncoding {
   all s: Step | {
     s.state = Live implies {
-      s.replayActive = False
-      s.replayEnded = True
-      s.disableStdin = False
+      s.replayActive = Disabled
+      s.replayEnded = Enabled
+      s.disableStdin = Disabled
       s.replayWriteDepth = 0
     }
 
     s.state = ReplayPendingEnd implies {
-      s.replayActive = True
-      s.replayEnded = False
-      s.disableStdin = True
+      s.replayActive = Enabled
+      s.replayEnded = Disabled
+      s.disableStdin = Enabled
       s.replayWriteDepth >= 0
     }
 
     s.state = ReplayDraining implies {
-      s.replayActive = False
-      s.replayEnded = True
-      s.disableStdin = True
+      s.replayActive = Disabled
+      s.replayEnded = Enabled
+      s.disableStdin = Enabled
       s.replayWriteDepth > 0
     }
   }
@@ -107,11 +110,11 @@ fact Trace {
 }
 
 assert LiveAlwaysEnablesInput {
-  all s: Step | s.state = Live implies s.disableStdin = False
+  all s: Step | s.state = Live implies s.disableStdin = Disabled
 }
 
 assert ReplayStatesAlwaysSuppressInput {
-  all s: Step | s.state in ReplayPendingEnd + ReplayDraining implies s.disableStdin = True
+  all s: Step | s.state in ReplayPendingEnd + ReplayDraining implies s.disableStdin = Enabled
 }
 
 assert DrainingRequiresQueuedWrites {
@@ -122,9 +125,9 @@ assert ReconnectAlwaysResetsToLive {
   all s: Step - first |
     s.event = Reconnect implies {
       s.state = Live
-      s.replayActive = False
-      s.replayEnded = True
-      s.disableStdin = False
+      s.replayActive = Disabled
+      s.replayEnded = Enabled
+      s.disableStdin = Disabled
       s.replayWriteDepth = 0
     }
 }
@@ -132,8 +135,8 @@ assert ReconnectAlwaysResetsToLive {
 assert NoStaleSuppressionInLive {
   all s: Step |
     s.state = Live implies {
-      s.replayActive = False
-      s.disableStdin = False
+      s.replayActive = Disabled
+      s.disableStdin = Disabled
       s.replayWriteDepth = 0
     }
 }
@@ -143,4 +146,3 @@ check ReplayStatesAlwaysSuppressInput for 8 Step, 8 Int
 check DrainingRequiresQueuedWrites for 8 Step, 8 Int
 check ReconnectAlwaysResetsToLive for 8 Step, 8 Int
 check NoStaleSuppressionInLive for 8 Step, 8 Int
-
