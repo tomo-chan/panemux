@@ -331,6 +331,7 @@ sequenceDiagram
 Alloy model:
 
 - The replay state machine above is mirrored in [replay_state.als](/tmp/panemux-replay-input-fix/docs/models/replay_state.als).
+- The replay state machine above is mirrored in [replay_state.als](models/replay_state.als).
 - The model abstracts the frontend into three states: `Live`, `ReplayPendingEnd`, and `ReplayDraining`.
 - It checks these invariants:
   - `Live` never leaves `disableStdin` enabled

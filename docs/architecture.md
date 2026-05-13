@@ -220,7 +220,7 @@ The hook resets all replay fields on each WebSocket open so an interrupted repla
 connection cannot suppress stdin for the new connection.
 
 This lifecycle is also captured as an Alloy model in
-[replay_state.als](/tmp/panemux-replay-input-fix/docs/models/replay_state.als), which treats
+[replay_state.als](models/replay_state.als), which treats
 reconnect, replay frame delivery, replay-control write failure, socket close, and replay write
 completion as explicit transition events and checks the stale-suppression invariants over bounded
 traces.
