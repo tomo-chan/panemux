@@ -15,7 +15,7 @@ sig Step {
   state: one ReplayState,
   event: lone Event,
   replayActive: one Flag,
-  replayEnded: one Flag,
+  awaitingReplayEnd: one Flag,
   disableStdin: one Flag,
   replayWriteDepth: one Int
 }
@@ -24,7 +24,7 @@ fact InitialState {
   first.state = Live
   no first.event
   first.replayActive = Disabled
-  first.replayEnded = Enabled
+  first.awaitingReplayEnd = Disabled
   first.disableStdin = Disabled
   first.replayWriteDepth = 0
 }
@@ -33,21 +33,21 @@ fact StateEncoding {
   all s: Step | {
     s.state = Live implies {
       s.replayActive = Disabled
-      s.replayEnded = Enabled
+      s.awaitingReplayEnd = Disabled
       s.disableStdin = Disabled
       s.replayWriteDepth = 0
     }
 
     s.state = ReplayPendingEnd implies {
       s.replayActive = Enabled
-      s.replayEnded = Disabled
+      s.awaitingReplayEnd = Enabled
       s.disableStdin = Enabled
       s.replayWriteDepth >= 0
     }
 
     s.state = ReplayDraining implies {
       s.replayActive = Disabled
-      s.replayEnded = Enabled
+      s.awaitingReplayEnd = Disabled
       s.disableStdin = Enabled
       s.replayWriteDepth > 0
     }
@@ -107,7 +107,7 @@ pred transition[cur, next: Step] {
   next.event = SocketClose implies {
     next.state = cur.state
     next.replayActive = cur.replayActive
-    next.replayEnded = cur.replayEnded
+    next.awaitingReplayEnd = cur.awaitingReplayEnd
     next.disableStdin = cur.disableStdin
     next.replayWriteDepth = cur.replayWriteDepth
   }
@@ -116,7 +116,7 @@ pred transition[cur, next: Step] {
     cur.state = ReplayPendingEnd
     next.state = ReplayPendingEnd
     next.replayActive = Enabled
-    next.replayEnded = Disabled
+    next.awaitingReplayEnd = Enabled
     next.disableStdin = Enabled
     next.replayWriteDepth = cur.replayWriteDepth
   }
@@ -143,7 +143,7 @@ assert ReconnectAlwaysResetsToLive {
     s.event = Reconnect implies {
       s.state = Live
       s.replayActive = Disabled
-      s.replayEnded = Enabled
+      s.awaitingReplayEnd = Disabled
       s.disableStdin = Disabled
       s.replayWriteDepth = 0
     }
@@ -163,7 +163,7 @@ assert ReplayEndWriteFailureLeavesReplayPendingUntilReconnect {
     s.event = ReplayEndWriteFail implies {
       s.state = ReplayPendingEnd
       s.replayActive = Enabled
-      s.replayEnded = Disabled
+      s.awaitingReplayEnd = Enabled
       s.disableStdin = Enabled
     }
 }

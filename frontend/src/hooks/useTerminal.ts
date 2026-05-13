@@ -24,7 +24,7 @@ interface TerminalEntry {
   editMode: boolean
   replayActive: boolean
   replayWriteDepth: number
-  replayEnded: boolean
+  awaitingReplayEnd: boolean
 }
 
 interface PendingTerminalMessage {
@@ -64,11 +64,11 @@ export function useTerminal({ sessionId, container, editMode = false }: UseTermi
         } else if (msg.type === 'replay') {
           if (msg.state === 'start') {
             entry.replayActive = true
-            entry.replayEnded = false
+            entry.awaitingReplayEnd = true
             setTerminalInputSuppressed(entry, true)
           } else {
             entry.replayActive = false
-            entry.replayEnded = true
+            entry.awaitingReplayEnd = false
             maybeRestoreTerminalInput(entry)
           }
         } else if (msg.type === 'error') {
@@ -283,7 +283,7 @@ function getOrCreateTerminalEntry(sessionId: string): TerminalEntry {
     editMode: false,
     replayActive: false,
     replayWriteDepth: 0,
-    replayEnded: true,
+    awaitingReplayEnd: false,
   }
 
   term.loadAddon(fitAddon)
@@ -433,7 +433,7 @@ function writeTerminalBytes(entry: TerminalEntry, bytes: Uint8Array) {
 function resetReplayState(entry: TerminalEntry) {
   entry.replayActive = false
   entry.replayWriteDepth = 0
-  entry.replayEnded = true
+  entry.awaitingReplayEnd = false
   setTerminalInputSuppressed(entry, false)
 }
 
@@ -442,7 +442,7 @@ function setTerminalInputSuppressed(entry: TerminalEntry, suppressed: boolean) {
 }
 
 function maybeRestoreTerminalInput(entry: TerminalEntry) {
-  if (!entry.replayEnded || entry.replayWriteDepth > 0) return
+  if (entry.awaitingReplayEnd || entry.replayWriteDepth > 0) return
   setTerminalInputSuppressed(entry, false)
 }
 

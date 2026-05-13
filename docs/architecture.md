@@ -206,7 +206,7 @@ Replay state ownership in this hook:
 
 - `replayActive`: true between `replay:start` and `replay:end`
 - `replayWriteDepth`: count of replay `term.write(...)` calls whose callbacks have not fired yet
-- `replayEnded`: true once `replay:end` has been received for the current connection
+- `awaitingReplayEnd`: true after `replay:start` and false once `replay:end` has been received for the current connection
 - `disableStdin`: derived safety switch; forced on whenever replay is active or draining, forced off
   on reconnect reset and after the final replay write callback
 
