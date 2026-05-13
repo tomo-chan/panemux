@@ -176,7 +176,7 @@ func TestWS_SessionOutput_ReceivedAsBinary(t *testing.T) {
 	assert.Equal(t, []byte("terminal output"), data)
 }
 
-func TestWS_ReplaysBufferedOutputOnFirstConnect(t *testing.T) {
+func TestWS_ReplayFramesWrapBufferedOutput(t *testing.T) {
 	mgr := session.NewManager()
 	sess := newWsMock("s1")
 	mgr.Add(sess)
@@ -192,15 +192,72 @@ func TestWS_ReplaysBufferedOutputOnFirstConnect(t *testing.T) {
 	defer sess.Close()
 
 	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	msgType, _, err := conn.ReadMessage()
+	msgType, data, err := conn.ReadMessage()
 	require.NoError(t, err)
 	assert.Equal(t, websocket.TextMessage, msgType)
+
+	var connected ControlMessage
+	require.NoError(t, json.Unmarshal(data, &connected))
+	assert.Equal(t, "status", connected.Type)
+	assert.Equal(t, "connected", connected.State)
+
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	msgType, data, err = conn.ReadMessage()
+	require.NoError(t, err)
+	assert.Equal(t, websocket.TextMessage, msgType)
+
+	var replayStart ControlMessage
+	require.NoError(t, json.Unmarshal(data, &replayStart))
+	assert.Equal(t, "replay", replayStart.Type)
+	assert.Equal(t, "start", replayStart.State)
+
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	msgType, data, err = conn.ReadMessage()
+	require.NoError(t, err)
+	assert.Equal(t, websocket.BinaryMessage, msgType)
+	assert.Equal(t, []byte("buffered prompt"), data)
+
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	msgType, data, err = conn.ReadMessage()
+	require.NoError(t, err)
+	assert.Equal(t, websocket.TextMessage, msgType)
+
+	var replayEnd ControlMessage
+	require.NoError(t, json.Unmarshal(data, &replayEnd))
+	assert.Equal(t, "replay", replayEnd.Type)
+	assert.Equal(t, "end", replayEnd.State)
+}
+
+func TestWS_SkipsReplayFramesWhenSnapshotEmpty(t *testing.T) {
+	mgr := session.NewManager()
+	sess := newWsMock("s1")
+	mgr.Add(sess)
+
+	srv := setupWSServer(mgr)
+	defer srv.Close()
+
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL(srv, "s1"), nil)
+	require.NoError(t, err)
+	defer conn.Close()
+	defer sess.Close()
 
 	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 	msgType, data, err := conn.ReadMessage()
 	require.NoError(t, err)
+	assert.Equal(t, websocket.TextMessage, msgType)
+
+	var connected ControlMessage
+	require.NoError(t, json.Unmarshal(data, &connected))
+	assert.Equal(t, "status", connected.Type)
+	assert.Equal(t, "connected", connected.State)
+
+	sess.out <- []byte("live output")
+
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	msgType, data, err = conn.ReadMessage()
+	require.NoError(t, err)
 	assert.Equal(t, websocket.BinaryMessage, msgType)
-	assert.Equal(t, []byte("buffered prompt"), data)
+	assert.Equal(t, []byte("live output"), data)
 }
 
 func TestWS_SendsExitedStatusWhenSessionStreamEndsWithReadError(t *testing.T) {

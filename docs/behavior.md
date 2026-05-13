@@ -246,8 +246,10 @@ Connection behavior:
 
 - `404` if the session ID does not exist
 - initial text frame is a JSON status message with `type: "status"` and `state: "connected"`
-- after the connected status, the backend replays up to the recent per-session output buffer before
-  streaming live output
+- if a reconnect has buffered output, the backend sends `{"type":"replay","state":"start"}`,
+  replays up to the recent per-session output buffer as a binary frame, then sends
+  `{"type":"replay","state":"end"}` before streaming live output
+- if there is no buffered output, live output starts immediately after the connected status
 
 Frame behavior:
 
@@ -259,6 +261,14 @@ Supported control messages:
 
 ```json
 { "type": "resize", "cols": 120, "rows": 40 }
+```
+
+```json
+{ "type": "replay", "state": "start" }
+```
+
+```json
+{ "type": "replay", "state": "end" }
 ```
 
 Resize messages with zero dimensions are ignored. Invalid JSON control frames are ignored rather than terminating the session.
@@ -293,6 +303,10 @@ User types in xterm.js
   -> backend sends binary WebSocket frame
   -> xterm.js writes bytes to the terminal
 ```
+
+During replayed reconnect output, xterm stdin is suppressed until the replay end marker is fully
+applied, so terminal query responses embedded in old output are not regenerated as fresh shell
+input.
 
 ### Selection and copy behavior
 

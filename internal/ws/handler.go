@@ -143,9 +143,11 @@ func (h *Handler) forwardTerminalOutput(
 	// workspace switch from showing a blank xterm when the PTY already emitted the
 	// prompt while the pane was unmounted.
 	if len(snapshot) > 0 {
+		h.sendReplay(conn, "start")
 		if err := conn.WriteMessage(websocket.BinaryMessage, snapshot); err != nil {
 			return
 		}
+		h.sendReplay(conn, "end")
 	}
 
 	for chunk := range updates {
@@ -227,6 +229,12 @@ func (h *Handler) handleControl(conn *websocket.Conn, sess session.Session, msg 
 
 func (h *Handler) sendStatus(conn *websocket.Conn, state string) {
 	msg := ControlMessage{Type: "status", State: state}
+	data, _ := json.Marshal(msg)
+	_ = conn.WriteMessage(websocket.TextMessage, data)
+}
+
+func (h *Handler) sendReplay(conn *websocket.Conn, state string) {
+	msg := ControlMessage{Type: "replay", State: state}
 	data, _ := json.Marshal(msg)
 	_ = conn.WriteMessage(websocket.TextMessage, data)
 }

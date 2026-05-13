@@ -95,7 +95,7 @@ subscribers for the same session ID while a workspace is hidden.
 Protocol split:
 
 - binary frames: raw terminal input/output
-- text frames: JSON control messages such as `resize` and `status`
+- text frames: JSON control messages such as `resize`, `status`, and replay lifecycle markers
 
 Why this split:
 
@@ -104,6 +104,8 @@ Why this split:
 - matches the low-latency needs of terminal streaming
 - works with the backend session manager's fan-out model, where one session can have multiple
   concurrent subscribers receiving the same output stream
+- lets the frontend suppress xterm stdin only while replayed snapshot bytes are being re-applied,
+  which prevents replayed terminal queries from generating fresh replies back into the PTY
 
 ### `internal/server`
 
@@ -183,6 +185,11 @@ Why this hook:
 ### `useTerminal`
 
 Owns xterm.js setup, fit behavior, byte forwarding, and resize reporting.
+
+When the backend labels buffered reconnect output with replay control frames, this hook temporarily
+sets `xterm.options.disableStdin = true` while those replay bytes are written. That keeps xterm's
+auto-generated terminal replies from being forwarded as accidental shell input during browser
+refreshes or workspace remounts.
 
 Why xterm.js:
 
