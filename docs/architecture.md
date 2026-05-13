@@ -107,6 +107,15 @@ Why this split:
 - lets the frontend suppress xterm stdin only while replayed snapshot bytes are being re-applied,
   which prevents replayed terminal queries from generating fresh replies back into the PTY
 
+Replay lifecycle contract:
+
+- the backend emits replay lifecycle only around buffered snapshot delivery, never around live output
+- `replay:start` means "all following binary frames are replay bytes until `replay:end`"
+- `replay:end` means "no more replay bytes will be sent on this connection"; the frontend may still
+  be draining already-scheduled xterm writes
+- if a replay control frame write fails, the handler stops forwarding on that connection instead of
+  risking live output after an incomplete replay transition
+
 ### `internal/server`
 
 This package wires chi routes, middleware, REST handlers, WebSocket handlers, and static file serving.
@@ -190,6 +199,23 @@ When the backend labels buffered reconnect output with replay control frames, th
 sets `xterm.options.disableStdin = true` while those replay bytes are written. That keeps xterm's
 auto-generated terminal replies from being forwarded as accidental shell input during browser
 refreshes or workspace remounts.
+
+Replay state ownership in this hook:
+
+- `replayActive`: true between `replay:start` and `replay:end`
+- `replayWriteDepth`: count of replay `term.write(...)` calls whose callbacks have not fired yet
+- `replayEnded`: true once `replay:end` has been received for the current connection
+- `disableStdin`: derived safety switch; forced on whenever replay is active or draining, forced off
+  on reconnect reset and after the final replay write callback
+
+This gives the hook a three-phase replay lifecycle:
+
+1. `live`: no replay pending, stdin enabled
+2. `replay pending end`: replay frames still arriving, stdin disabled
+3. `replay draining`: end marker received, but queued xterm writes still draining, stdin disabled
+
+The hook resets all replay fields on each WebSocket open so an interrupted replay from a previous
+connection cannot suppress stdin for the new connection.
 
 Why xterm.js:
 
