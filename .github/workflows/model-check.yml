@@ -1,0 +1,76 @@
+name: model-check
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'docs/models/**'
+      - '.github/workflows/model-check.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'docs/models/**'
+      - '.github/workflows/model-check.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  alloy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Download Alloy
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/alloy
+          curl -fsSL \
+            -o /tmp/alloy/org.alloytools.alloy.dist.jar \
+            https://github.com/AlloyTools/org.alloytools.alloy/releases/download/v6.2.0/org.alloytools.alloy.dist.jar
+
+      - name: Validate Alloy models
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          models=(docs/models/*.als)
+          if [ "${#models[@]}" -eq 0 ]; then
+            echo "No Alloy models found under docs/models"
+            exit 1
+          fi
+
+          for model in "${models[@]}"; do
+            echo "::group::${model}"
+            java -jar /tmp/alloy/org.alloytools.alloy.dist.jar commands "$model"
+            out_dir="$(mktemp -d)"
+            log_file="$(mktemp)"
+            java -jar /tmp/alloy/org.alloytools.alloy.dist.jar exec -t none -o "$out_dir" -f "$model" | tee "$log_file"
+            python3 - "$model" "$log_file" <<'PY'
+          import re
+          import sys
+          from pathlib import Path
+
+          model = sys.argv[1]
+          log_path = Path(sys.argv[2])
+          result_lines = []
+          for line in log_path.read_text().splitlines():
+              if re.match(r"^\d+\.\s+check\b", line):
+                  result_lines.append(line)
+
+          if not result_lines:
+              raise SystemExit(f"{model}: no Alloy check results found")
+
+          failures = [line for line in result_lines if "UNSAT" not in line]
+          if failures:
+              joined = "\n".join(failures)
+              raise SystemExit(f"{model}: expected all checks to be UNSAT, got:\n{joined}")
+          PY
+            echo "::endgroup::"
+          done

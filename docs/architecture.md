@@ -225,6 +225,15 @@ reconnect, replay frame delivery, replay-control write failure, socket close, an
 completion as explicit transition events and checks the stale-suppression invariants over bounded
 traces.
 
+State-transition verification rule:
+
+- Code that introduces or changes externally observable state transitions should have a matching
+  Alloy model under `docs/models/`.
+- Changes to transition logic should update that model in the same PR so the checked state machine
+  remains aligned with the implementation.
+- GitHub Actions runs Alloy checks only when the model files change, so model maintenance is the
+  mechanism that keeps transition verification on the critical path.
+
 Why xterm.js:
 
 - mature browser terminal emulator

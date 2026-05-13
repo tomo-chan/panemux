@@ -330,7 +330,6 @@ sequenceDiagram
 
 Alloy model:
 
-- The replay state machine above is mirrored in [replay_state.als](/tmp/panemux-replay-input-fix/docs/models/replay_state.als).
 - The replay state machine above is mirrored in [replay_state.als](models/replay_state.als).
 - The model abstracts the frontend into three states: `Live`, `ReplayPendingEnd`, and `ReplayDraining`.
 - It checks these invariants:
@@ -341,7 +340,12 @@ Alloy model:
   - `SocketClose` does not falsely restore `Live` while replay is incomplete
   - `Reconnect` always resets the model to a clean `Live` state
   - stale replay suppression cannot survive in `Live`
+- Any implementation that introduces or changes observable state transitions should ship with an
+  Alloy model in `docs/models/` that captures those transitions.
+- When state-transition behavior changes, update the corresponding Alloy model in the same change.
 - To inspect counterexamples locally, open the model in Alloy and run the bundled `check` commands.
+- CI runs Alloy model checks only when files under `docs/models/` change, so transition-changing
+  code changes are expected to update the model if they need model-check coverage.
 
 When the backend session reaches EOF, the handler emits:
 
