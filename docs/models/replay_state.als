@@ -80,6 +80,8 @@ pred transition[cur, next: Step] {
   }
 
   next.event = WriteComplete implies {
+    cur.state in ReplayPendingEnd + ReplayDraining
+
     cur.state = ReplayPendingEnd implies {
       cur.replayWriteDepth > 0
       next.state = ReplayPendingEnd

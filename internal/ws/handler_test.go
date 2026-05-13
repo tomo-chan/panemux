@@ -285,7 +285,7 @@ func TestWS_SkipsReplayFramesWhenSnapshotEmpty(t *testing.T) {
 	assert.Equal(t, []byte("live output"), data)
 }
 
-func TestWS_ReplayStartWriteFailureStopsBeforeReplayBody(t *testing.T) {
+func TestWS_ReplayEndWriteFailureDetected(t *testing.T) {
 	recorder := newRecordingConn()
 	recorder.failAtWrite = 2
 
