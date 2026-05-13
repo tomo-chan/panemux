@@ -324,6 +324,18 @@ sequenceDiagram
     W->>B: binary live frame(s)
 ```
 
+Alloy model:
+
+- The replay state machine above is mirrored in [replay_state.als](/tmp/panemux-replay-input-fix/docs/models/replay_state.als).
+- The model abstracts the frontend into three states: `Live`, `ReplayPendingEnd`, and `ReplayDraining`.
+- It checks these invariants:
+  - `Live` never leaves `disableStdin` enabled
+  - replay states always keep `disableStdin` enabled
+  - `ReplayDraining` is only reachable while replay writes remain queued
+  - `Reconnect` always resets the model to a clean `Live` state
+  - stale replay suppression cannot survive in `Live`
+- To inspect counterexamples locally, open the model in Alloy and run the bundled `check` commands.
+
 When the backend session reaches EOF, the handler emits:
 
 ```json

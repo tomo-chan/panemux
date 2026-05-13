@@ -217,6 +217,11 @@ This gives the hook a three-phase replay lifecycle:
 The hook resets all replay fields on each WebSocket open so an interrupted replay from a previous
 connection cannot suppress stdin for the new connection.
 
+This lifecycle is also captured as an Alloy model in
+[replay_state.als](/tmp/panemux-replay-input-fix/docs/models/replay_state.als), which treats
+reconnect, replay frame delivery, and replay write completion as explicit transition events and
+checks the stale-suppression invariants over bounded traces.
+
 Why xterm.js:
 
 - mature browser terminal emulator
