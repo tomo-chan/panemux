@@ -1,0 +1,103 @@
+name: model-check
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'docs/models/**'
+      - '.github/workflows/model-check.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'docs/models/**'
+      - '.github/workflows/model-check.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  alloy:
+    runs-on: ubuntu-latest
+    env:
+      ALLOY_JAR_SHA256: 6b8c1cb5bc93bedfc7c61435c4e1ab6e688a242dc702a394628d9a9801edb78d
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Download Alloy
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/alloy
+          curl -fsSL \
+            -o /tmp/alloy/org.alloytools.alloy.dist.jar \
+            https://github.com/AlloyTools/org.alloytools.alloy/releases/download/v6.2.0/org.alloytools.alloy.dist.jar
+          echo "${ALLOY_JAR_SHA256}  /tmp/alloy/org.alloytools.alloy.dist.jar" | shasum -a 256 -c -
+
+      - name: Validate Alloy models
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          models=(docs/models/*.als)
+          if [ "${#models[@]}" -eq 0 ]; then
+            echo "No Alloy models found under docs/models"
+            exit 1
+          fi
+
+          for model in "${models[@]}"; do
+            echo "::group::${model}"
+            java -jar /tmp/alloy/org.alloytools.alloy.dist.jar commands "$model"
+            out_dir="$(mktemp -d)"
+            log_file="$(mktemp)"
+            receipt_file="$out_dir/receipt.json"
+            java -jar /tmp/alloy/org.alloytools.alloy.dist.jar exec -t none -o "$out_dir" -f "$model" 2>&1 | tee "$log_file"
+            python3 - "$model" "$log_file" "$receipt_file" <<'PY'
+          import re
+          import json
+          import sys
+          from pathlib import Path
+
+          model = sys.argv[1]
+          log_path = Path(sys.argv[2])
+          receipt_path = Path(sys.argv[3])
+          receipt = json.loads(receipt_path.read_text())
+          expected_checks = sum(
+              1 for command in receipt.get("commands", {}).values()
+              if command.get("type") == "check"
+          )
+          if expected_checks == 0:
+              raise SystemExit(f"{model}: no Alloy check commands found in receipt")
+
+          ansi_pattern = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+          control_pattern = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
+          verdict_pattern = re.compile(r"\b(UNSAT|SAT|UNKNOWN)\b")
+
+          unsat_lines = []
+          bad_lines = []
+          for raw_line in log_path.read_text().splitlines():
+              normalized = control_pattern.sub("", ansi_pattern.sub("", raw_line))
+              verdict = verdict_pattern.search(normalized)
+              if verdict is None:
+                  continue
+              if verdict.group(1) == "UNSAT":
+                  unsat_lines.append(normalized)
+              else:
+                  bad_lines.append(normalized)
+
+          if bad_lines:
+              joined = "\n".join(bad_lines)
+              raise SystemExit(f"{model}: expected all checks to be UNSAT, got:\n{joined}")
+
+          if len(unsat_lines) != expected_checks:
+              joined = "\n".join(unsat_lines)
+              raise SystemExit(
+                  f"{model}: expected {expected_checks} UNSAT results, got {len(unsat_lines)}\n{joined}"
+              )
+          PY
+            echo "::endgroup::"
+          done

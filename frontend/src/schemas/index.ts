@@ -90,6 +90,7 @@ export const WSControlMessageSchema = z.discriminatedUnion('type', [
     rows: z.number().positive(),
   }),
   z.object({ type: z.literal('status'), state: z.string() }),
+  z.object({ type: z.literal('replay'), state: z.enum(['start', 'end']) }),
   z.object({ type: z.literal('error'), message: z.string().max(2000) }),
 ])
 

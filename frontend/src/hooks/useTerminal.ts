@@ -22,6 +22,9 @@ interface TerminalEntry {
   resizeTimers: Set<ReturnType<typeof setTimeout>>
   send: ((data: string | ArrayBuffer | Uint8Array) => void) | null
   editMode: boolean
+  replayActive: boolean
+  replayWriteDepth: number
+  awaitingReplayEnd: boolean
 }
 
 interface PendingTerminalMessage {
@@ -43,11 +46,12 @@ export function useTerminal({ sessionId, container, editMode = false }: UseTermi
 
   const applyMessageToTerminal = useCallback((data: ArrayBuffer | string, isBinary: boolean) => {
     const term = termRef.current
-    if (!term) return
+    const entry = entryRef.current
+    if (!term || !entry) return
 
     if (isBinary) {
       const bytes = new Uint8Array(data as ArrayBuffer)
-      term.write(bytes)
+      writeTerminalBytes(entry, bytes)
     } else {
       try {
         const msg = JSON.parse(data as string)
@@ -56,6 +60,16 @@ export function useTerminal({ sessionId, container, editMode = false }: UseTermi
           if (msg.state === 'exited') {
             setSessionExited(true)
             term.write('\r\n\x1b[2m[Session ended]\x1b[0m\r\n')
+          }
+        } else if (msg.type === 'replay') {
+          if (msg.state === 'start') {
+            entry.replayActive = true
+            entry.awaitingReplayEnd = true
+            setTerminalInputSuppressed(entry, true)
+          } else {
+            entry.replayActive = false
+            entry.awaitingReplayEnd = false
+            maybeRestoreTerminalInput(entry)
           }
         } else if (msg.type === 'error') {
           const safeMsg = msg.message.replace(/\x1b\[[0-9;?<>!]*[A-Za-z]/g, '')
@@ -85,6 +99,8 @@ export function useTerminal({ sessionId, container, editMode = false }: UseTermi
     onMessage: handleMessage,
     onOpen: () => {
       setSessionExited(false)
+      const entry = entryRef.current
+      if (entry) resetReplayState(entry)
     },
   })
 
@@ -265,6 +281,9 @@ function getOrCreateTerminalEntry(sessionId: string): TerminalEntry {
     resizeTimers: new Set(),
     send: null,
     editMode: false,
+    replayActive: false,
+    replayWriteDepth: 0,
+    awaitingReplayEnd: false,
   }
 
   term.loadAddon(fitAddon)
@@ -395,6 +414,36 @@ export function __resetTerminalEntriesForTests() {
     entry.term.dispose()
   }
   terminalEntries.clear()
+}
+
+function writeTerminalBytes(entry: TerminalEntry, bytes: Uint8Array) {
+  const replayWrite = entry.replayActive
+  if (replayWrite) {
+    entry.replayWriteDepth++
+    setTerminalInputSuppressed(entry, true)
+  }
+
+  entry.term.write(bytes, () => {
+    if (!replayWrite) return
+    entry.replayWriteDepth--
+    maybeRestoreTerminalInput(entry)
+  })
+}
+
+function resetReplayState(entry: TerminalEntry) {
+  entry.replayActive = false
+  entry.replayWriteDepth = 0
+  entry.awaitingReplayEnd = false
+  setTerminalInputSuppressed(entry, false)
+}
+
+function setTerminalInputSuppressed(entry: TerminalEntry, suppressed: boolean) {
+  entry.term.options.disableStdin = suppressed
+}
+
+function maybeRestoreTerminalInput(entry: TerminalEntry) {
+  if (entry.awaitingReplayEnd || entry.replayWriteDepth > 0) return
+  setTerminalInputSuppressed(entry, false)
 }
 
 function isCopyShortcut(event: KeyboardEvent): boolean {

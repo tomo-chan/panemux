@@ -246,8 +246,10 @@ Connection behavior:
 
 - `404` if the session ID does not exist
 - initial text frame is a JSON status message with `type: "status"` and `state: "connected"`
-- after the connected status, the backend replays up to the recent per-session output buffer before
-  streaming live output
+- if a reconnect has buffered output, the backend sends `{"type":"replay","state":"start"}`,
+  replays up to the recent per-session output buffer as a binary frame, then sends
+  `{"type":"replay","state":"end"}` before streaming live output
+- if there is no buffered output, live output starts immediately after the connected status
 
 Frame behavior:
 
@@ -261,7 +263,89 @@ Supported control messages:
 { "type": "resize", "cols": 120, "rows": 40 }
 ```
 
+```json
+{ "type": "replay", "state": "start" }
+```
+
+```json
+{ "type": "replay", "state": "end" }
+```
+
 Resize messages with zero dimensions are ignored. Invalid JSON control frames are ignored rather than terminating the session.
+
+Replay state machine:
+
+| State | Entry condition | Allowed events | Exit condition | Frontend effect |
+|---|---|---|---|---|
+| `live` | initial steady state, or replay has fully completed | live binary output, `replay:start`, socket close, socket reconnect | `replay:start` or socket teardown | `disableStdin = false`; terminal input and xterm-generated replies may flow normally |
+| `replay_pending_end` | `replay:start` received | replay binary output, `replay:end`, `replay:end` write failure, socket close, socket reconnect | `replay:end` or socket teardown | `disableStdin = true`; replay bytes may still be arriving |
+| `replay_draining` | `replay:end` received while one or more replay writes are still in flight | replay write callback completion, socket close, socket reconnect | last replay write callback completes | `disableStdin = true`; no new replay bytes are expected, but already-scheduled writes may still cause xterm side effects |
+
+State transition rules:
+
+1. New connections start in `live`.
+2. `replay:start` moves the terminal to `replay_pending_end` and suppresses stdin immediately.
+3. Each replay binary frame is written while stdin remains suppressed.
+4. `replay:end` moves the terminal to `replay_draining` if replay writes are still in flight, otherwise directly back to `live`.
+5. The final replay write callback restores `live`.
+6. A socket close or replay-control write failure can leave the frontend in a stale replay state until the next connection opens.
+7. Any WebSocket reconnect force-resets replay state back to `live` before new frames are processed, so a partial replay cannot leave stale suppression behind.
+
+Frontend replay state diagram:
+
+```mermaid
+stateDiagram-v2
+    [*] --> live
+    live --> replay_pending_end: replay:start
+    replay_pending_end --> replay_pending_end: replay binary frame
+    replay_pending_end --> replay_draining: replay:end\nand replayWriteDepth > 0
+    replay_pending_end --> live: replay:end\nand replayWriteDepth == 0
+    replay_pending_end --> replay_pending_end: replay:end write failure
+    replay_pending_end --> replay_pending_end: socket close
+    replay_draining --> replay_draining: replay write callback\nand replayWriteDepth > 0
+    replay_draining --> replay_draining: socket close
+    replay_draining --> live: final replay write callback
+    replay_pending_end --> live: socket reconnect/reset
+    replay_draining --> live: socket reconnect/reset
+```
+
+Backend replay emission order:
+
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant W as WebSocket handler
+    participant S as Session replay buffer
+
+    W->>B: {"type":"status","state":"connected"}
+    alt snapshot exists
+        W->>B: {"type":"replay","state":"start"}
+        S-->>W: buffered snapshot bytes
+        W->>B: binary snapshot frame
+        W->>B: {"type":"replay","state":"end"}
+    end
+    S-->>W: live output bytes
+    W->>B: binary live frame(s)
+```
+
+Alloy model:
+
+- The replay state machine above is mirrored in [replay_state.als](models/replay_state.als).
+- The model abstracts the frontend into three states: `Live`, `ReplayPendingEnd`, and `ReplayDraining`.
+- It checks these invariants:
+  - `Live` never leaves `disableStdin` enabled
+  - replay states always keep `disableStdin` enabled
+  - `ReplayDraining` is only reachable while replay writes remain queued
+  - `ReplayEndWriteFail` leaves the model in `ReplayPendingEnd` until reconnect
+  - `SocketClose` does not falsely restore `Live` while replay is incomplete
+  - `Reconnect` always resets the model to a clean `Live` state
+  - stale replay suppression cannot survive in `Live`
+- Any implementation that introduces or changes observable state transitions should ship with an
+  Alloy model in `docs/models/` that captures those transitions.
+- When state-transition behavior changes, update the corresponding Alloy model in the same change.
+- To inspect counterexamples locally, open the model in Alloy and run the bundled `check` commands.
+- CI runs Alloy model checks only when files under `docs/models/` change, so transition-changing
+  code changes are expected to update the model if they need model-check coverage.
 
 When the backend session reaches EOF, the handler emits:
 
@@ -293,6 +377,10 @@ User types in xterm.js
   -> backend sends binary WebSocket frame
   -> xterm.js writes bytes to the terminal
 ```
+
+During replayed reconnect output, xterm stdin is suppressed until the replay end marker is fully
+applied, so terminal query responses embedded in old output are not regenerated as fresh shell
+input.
 
 ### Selection and copy behavior
 

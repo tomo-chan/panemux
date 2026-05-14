@@ -67,6 +67,10 @@ type ControlMessage struct {
 	Rows    uint16 `json:"rows,omitempty"`
 }
 
+type messageWriter interface {
+	WriteMessage(messageType int, data []byte) error
+}
+
 // Handler handles WebSocket connections for terminal sessions.
 type Handler struct {
 	manager *session.Manager
@@ -143,7 +147,13 @@ func (h *Handler) forwardTerminalOutput(
 	// workspace switch from showing a blank xterm when the PTY already emitted the
 	// prompt while the pane was unmounted.
 	if len(snapshot) > 0 {
+		if !h.sendReplay(conn, "start") {
+			return
+		}
 		if err := conn.WriteMessage(websocket.BinaryMessage, snapshot); err != nil {
+			return
+		}
+		if !h.sendReplay(conn, "end") {
 			return
 		}
 	}
@@ -226,7 +236,14 @@ func (h *Handler) handleControl(conn *websocket.Conn, sess session.Session, msg 
 }
 
 func (h *Handler) sendStatus(conn *websocket.Conn, state string) {
-	msg := ControlMessage{Type: "status", State: state}
+	_ = writeControlMessage(conn, ControlMessage{Type: "status", State: state})
+}
+
+func (h *Handler) sendReplay(conn *websocket.Conn, state string) bool {
+	return writeControlMessage(conn, ControlMessage{Type: "replay", State: state})
+}
+
+func writeControlMessage(conn messageWriter, msg ControlMessage) bool {
 	data, _ := json.Marshal(msg)
-	_ = conn.WriteMessage(websocket.TextMessage, data)
+	return conn.WriteMessage(websocket.TextMessage, data) == nil
 }

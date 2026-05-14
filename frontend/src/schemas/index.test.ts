@@ -249,6 +249,18 @@ describe('WSControlMessageSchema', () => {
     expect(result.success).toBe(true)
   })
 
+  it('accepts replay lifecycle messages', () => {
+    expect(WSControlMessageSchema.safeParse({
+      type: 'replay',
+      state: 'start',
+    }).success).toBe(true)
+
+    expect(WSControlMessageSchema.safeParse({
+      type: 'replay',
+      state: 'end',
+    }).success).toBe(true)
+  })
+
   it('rejects unknown type', () => {
     const result = WSControlMessageSchema.safeParse({ type: 'unknown' })
     expect(result.success).toBe(false)

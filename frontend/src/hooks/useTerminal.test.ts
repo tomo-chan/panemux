@@ -7,6 +7,7 @@ import { TERMINAL_FONT_FAMILY } from '../utils/fonts'
 const { mockWrite, mockTerm, mockFitAddon, mockTerminalCtor } = vi.hoisted(() => {
   const mockWrite = vi.fn()
   const mockTerm = {
+    options: { disableStdin: false },
     attachCustomKeyEventHandler: vi.fn(),
     element: undefined as HTMLElement | undefined,
     hasSelection: vi.fn(() => false),
@@ -19,7 +20,10 @@ const { mockWrite, mockTerm, mockFitAddon, mockTerminalCtor } = vi.hoisted(() =>
     cols: 80,
     rows: 24,
     refresh: vi.fn(),
-    write: mockWrite,
+    write: vi.fn((data: string | Uint8Array, callback?: () => void) => {
+      mockWrite(data)
+      callback?.()
+    }),
   }
   const mockFitAddon = { fit: vi.fn() }
   const mockTerminalCtor = vi.fn(function () { return mockTerm })
@@ -81,6 +85,7 @@ describe('useTerminal', () => {
       return 0
     }) as typeof window.requestAnimationFrame
     mockTerm.element = undefined
+    mockTerm.options.disableStdin = false
     mockTerm.open.mockImplementation((container: HTMLElement) => {
       const el = document.createElement('div')
       mockTerm.element = el
@@ -253,6 +258,127 @@ describe('useTerminal', () => {
     const buf = new ArrayBuffer(4)
     act(() => MockWebSocket.instances[0].simulateMessage(buf))
     expect(mockWrite).toHaveBeenCalledWith(expect.any(Uint8Array))
+  })
+
+  it('suppresses stdin while replayed output is being applied', () => {
+    const container = makeContainer()
+    const writesDisableState: boolean[] = []
+    mockTerm.write.mockImplementation((data: string | Uint8Array, callback?: () => void) => {
+      writesDisableState.push(mockTerm.options.disableStdin)
+      mockWrite(data)
+      callback?.()
+    })
+
+    renderHook(() => useTerminal({ sessionId: 's1', container }))
+    act(() => MockWebSocket.instances[0].simulateOpen())
+
+    const replayBuf = new TextEncoder().encode('\u001b[>0;276;0c').buffer
+    act(() =>
+      MockWebSocket.instances[0].simulateMessage(
+        JSON.stringify({ type: 'replay', state: 'start' })
+      )
+    )
+    expect(mockTerm.options.disableStdin).toBe(true)
+
+    act(() => MockWebSocket.instances[0].simulateMessage(replayBuf))
+    expect(writesDisableState).toEqual([true])
+
+    act(() =>
+      MockWebSocket.instances[0].simulateMessage(
+        JSON.stringify({ type: 'replay', state: 'end' })
+      )
+    )
+    expect(mockTerm.options.disableStdin).toBe(false)
+  })
+
+  it('keeps replay stdin suppression across buffered remount flushes', () => {
+    const replayBuf = new TextEncoder().encode('\u001b[>0;276;0c').buffer
+    const container = makeContainer()
+    const writesDisableState: boolean[] = []
+    mockTerm.write.mockImplementation((data: string | Uint8Array, callback?: () => void) => {
+      writesDisableState.push(mockTerm.options.disableStdin)
+      mockWrite(data)
+      callback?.()
+    })
+    const { rerender } = renderHook(
+      ({ currentContainer }: { currentContainer: HTMLDivElement | null }) =>
+        useTerminal({ sessionId: 's1', container: currentContainer }),
+      { initialProps: { currentContainer: null as HTMLDivElement | null } },
+    )
+
+    act(() => MockWebSocket.instances[0].simulateOpen())
+    act(() =>
+      MockWebSocket.instances[0].simulateMessage(
+        JSON.stringify({ type: 'replay', state: 'start' })
+      )
+    )
+    act(() => MockWebSocket.instances[0].simulateMessage(replayBuf))
+    act(() =>
+      MockWebSocket.instances[0].simulateMessage(
+        JSON.stringify({ type: 'replay', state: 'end' })
+      )
+    )
+
+    rerender({ currentContainer: container })
+
+    expect(writesDisableState).toEqual([true])
+    expect(mockTerm.options.disableStdin).toBe(false)
+  })
+
+  it('restores stdin before applying live output after replay ends', () => {
+    const container = makeContainer()
+    const writesDisableState: boolean[] = []
+    mockTerm.write.mockImplementation((data: string | Uint8Array, callback?: () => void) => {
+      writesDisableState.push(mockTerm.options.disableStdin)
+      mockWrite(data)
+      callback?.()
+    })
+
+    renderHook(() => useTerminal({ sessionId: 's1', container }))
+    act(() => MockWebSocket.instances[0].simulateOpen())
+
+    const replayBuf = new TextEncoder().encode('replayed prompt').buffer
+    const liveBuf = new TextEncoder().encode('live output').buffer
+
+    act(() =>
+      MockWebSocket.instances[0].simulateMessage(
+        JSON.stringify({ type: 'replay', state: 'start' })
+      )
+    )
+    act(() => MockWebSocket.instances[0].simulateMessage(replayBuf))
+    act(() =>
+      MockWebSocket.instances[0].simulateMessage(
+        JSON.stringify({ type: 'replay', state: 'end' })
+      )
+    )
+    act(() => MockWebSocket.instances[0].simulateMessage(liveBuf))
+
+    expect(writesDisableState).toEqual([true, false])
+  })
+
+  it('resets stale replay suppression when the socket reconnects', () => {
+    const container = makeContainer()
+    renderHook(() => useTerminal({ sessionId: 's1', container }))
+    act(() => MockWebSocket.instances[0].simulateOpen())
+
+    const replayBuf = new TextEncoder().encode('replayed prompt').buffer
+    act(() =>
+      MockWebSocket.instances[0].simulateMessage(
+        JSON.stringify({ type: 'replay', state: 'start' })
+      )
+    )
+    act(() => MockWebSocket.instances[0].simulateMessage(replayBuf))
+    expect(mockTerm.options.disableStdin).toBe(true)
+
+    act(() => MockWebSocket.instances[0].simulateOpen())
+    expect(mockTerm.options.disableStdin).toBe(false)
+
+    mockWrite.mockClear()
+    const liveBuf = new TextEncoder().encode('live output').buffer
+    act(() => MockWebSocket.instances[0].simulateMessage(liveBuf))
+
+    expect(mockWrite).toHaveBeenCalledWith(expect.any(Uint8Array))
+    expect(mockTerm.options.disableStdin).toBe(false)
   })
 
   it('buffers terminal output that arrives before the container is attached', () => {
