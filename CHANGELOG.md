@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.2](https://github.com/tomo-chan/panemux/compare/v0.13.1...v0.13.2) (2026-05-14)
+
+
+### Bug Fixes
+
+* suppress replay-generated terminal input ([#87](https://github.com/tomo-chan/panemux/issues/87)) ([edfec67](https://github.com/tomo-chan/panemux/commit/edfec6788adb3837e0e9086e3397e177c54ccc71))
+
 ## [0.13.1](https://github.com/tomo-chan/panemux/compare/v0.13.0...v0.13.1) (2026-05-10)
 
 
