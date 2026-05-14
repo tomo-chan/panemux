@@ -71,7 +71,7 @@ jobs:
       - name: Test (Go)
         run: |
           set -o pipefail
-          go test -v ./... -race 2>&1 | go-junit-report -set-exit-code > test-results/go-junit.xml
+          go test -v ./... -race 2>&1 | go-junit-report -iocopy -out test-results/go-junit.xml -set-exit-code
 
       - name: Test (Frontend)
         run: cd frontend && npm run test:ci

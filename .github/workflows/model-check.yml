@@ -24,6 +24,8 @@ permissions:
 jobs:
   alloy:
     runs-on: ubuntu-latest
+    env:
+      ALLOY_JAR_SHA256: 6b8c1cb5bc93bedfc7c61435c4e1ab6e688a242dc702a394628d9a9801edb78d
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
@@ -35,6 +37,7 @@ jobs:
           curl -fsSL \
             -o /tmp/alloy/org.alloytools.alloy.dist.jar \
             https://github.com/AlloyTools/org.alloytools.alloy/releases/download/v6.2.0/org.alloytools.alloy.dist.jar
+          echo "${ALLOY_JAR_SHA256}  /tmp/alloy/org.alloytools.alloy.dist.jar" | shasum -a 256 -c -
 
       - name: Validate Alloy models
         run: |
