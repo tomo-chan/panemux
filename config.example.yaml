@@ -48,11 +48,12 @@ ssh_connections:
 # save, panemux migrates them to a single `default` workspace and writes only the
 # `workspaces:` format.
 #
-# The tab bar is hidden during normal use when only one workspace exists. Turn on
-# edit mode to add, rename, delete, or move workspace tabs. New workspaces start
-# with one local terminal pane. Deleting a workspace asks for confirmation, and
-# the last remaining workspace cannot be deleted. The active workspace selection
-# and tab_position are saved.
+# The workspace bar remains available for workspace actions even when only one
+# workspace exists. Use it to add terminals, add workspaces, rename/delete
+# workspaces, or move workspace tabs. New workspaces start with one local
+# terminal pane. Deleting a workspace asks for confirmation, and the last
+# remaining workspace cannot be deleted. The active workspace selection and
+# tab_position are saved.
 #
 # Split node  — has `direction` and `children` (no `pane`)
 # Leaf node   — has `pane` (no `direction` / `children`)

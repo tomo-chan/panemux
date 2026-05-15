@@ -100,9 +100,8 @@ Host-key verification uses `known_hosts_file` if configured, or `~/.ssh/known_ho
 
 Persistence behavior:
 
-- `PUT /api/layout` updates in-memory layout always
-- workspace tab placement changes require edit mode and are persisted immediately
-- layout file persistence happens only when edit mode is ON (`PUT /api/edit-mode {"editMode":true}`)
+- layout and workspace changes are persisted immediately when a save path is available
+- pane resize, split, close, move, add-terminal, workspace add/delete/rename, active-workspace changes, and `tab_position` changes all follow the same immediate-save path
 - when no `--config` is given, the default save path is `~/.config/panemux/config.yaml`; the directory is created automatically on first save
 
 ## Agent Attention Notifications
@@ -160,10 +159,9 @@ Returns the active workspace ID, `tab_position`, and all workspace layouts.
 
 ### `PUT /api/workspaces/tab-position`
 
-Accepts `{ "tab_position": "top" | "bottom" | "left" | "right" }`, validates it, persists the workspace config, and returns the updated workspace response. Edit mode must be enabled.
+Accepts `{ "tab_position": "top" | "bottom" | "left" | "right" }`, validates it, persists the workspace config, and returns the updated workspace response.
 
 - `400`: invalid JSON
-- `403`: edit mode is off
 - `422`: invalid tab position
 - `500`: unable to save the config
 - `200`: updated and returned
@@ -181,7 +179,7 @@ Creates a session from a `PaneConfig` payload, provided the pane ID does not alr
 - `422`: invalid pane config
 - `201`: session created
 
-Current product use: the frontend uses this endpoint when the user splits a pane and needs a new local session. It should be treated as a narrow lifecycle API, not a general provisioning layer.
+Current product use: the frontend uses this endpoint when the user splits a pane or adds a terminal from the workspace bar. It remains a narrow pane-lifecycle API, not a general provisioning layer.
 
 ### `DELETE /api/sessions/{id}`
 

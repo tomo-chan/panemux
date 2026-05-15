@@ -15,8 +15,8 @@
 - **Recursive split layout** — nest horizontal and vertical splits to any depth
 - **Workspace tabs** — define multiple layouts and switch between them with tabs on any edge
 - **Drag-to-resize** — drag dividers in the browser to adjust pane sizes
-- **Drag-to-reorder** — in edit mode, drag any pane by its body to swap positions
-- **Edit mode** — enables layout reordering and persists changes to disk; terminal input is blocked while active so keystrokes can't reach the shell accidentally
+- **Drag-to-move** — drag a pane by its header handle to move it to a workspace edge, another pane edge, or a divider target
+- **In-browser layout editing** — split, close, resize, add terminals, move panes, and manage workspaces directly from the main UI with immediate persistence
 - **`~/.ssh/config` integration** — reference any host alias from `~/.ssh/config` directly as a `connection` without duplicating entries in YAML
 - **Session resilience** — tmux sessions are auto-created when absent; exited panes show a Restart button to reconnect without reloading
 - **xterm.js rendering** — full-featured terminal emulation with Unicode and colour support
@@ -76,14 +76,14 @@ Then open [http://localhost:8080](http://localhost:8080) in your browser.
 1. Start `panemux` and open it in your browser.
 2. Click a workspace tab to switch between layouts such as development, operations, or production.
 3. Work inside each terminal pane exactly like a normal shell, SSH session, or tmux attach session.
-4. Turn on edit mode only when you want to rearrange the layout or change workspace settings.
+4. Rearrange panes or add terminals directly from the main UI when you need to evolve the layout.
 
 ### Workspace tabs
 
 - Each workspace has its own independent layout tree and set of panes.
 - Click a tab to switch workspaces without restarting the underlying sessions.
 - If a hidden workspace needs attention, its tab flashes until you open it.
-- In edit mode you can add a workspace, rename it inline, delete it, or move the tab bar to the top, bottom, left, or right.
+- You can add a workspace, rename it inline, delete it, or move the tab bar to the top, bottom, left, or right directly from the workspace bar.
 
 Common uses:
 
@@ -94,22 +94,11 @@ Common uses:
 
 - **Resize panes** by dragging the split divider between siblings.
 - **Split a pane** from its header controls to create a new local pane beside it.
+- **Add a terminal** from the workspace bar to create a blank local pane or clone an existing pane's settings before choosing where it should be inserted.
+- **Move a pane** by dragging the handle in its header; drop it on a workspace edge to create a new outer split, or on another pane edge / divider to insert it there.
 - **Close a pane** from its header controls; the layout collapses automatically.
 - **Restart a pane** with the on-screen button if the underlying session exits.
 - **Open VS Code** from supported panes using the pane header action.
-
-### Edit mode
-
-Click the lock icon in the bottom-right corner to toggle **edit mode**.
-
-- **ON** — layout changes and workspace tab placement are persisted to the config file; terminal input is blocked and a visual overlay shows which panes are locked; drag any pane by its body (not just the header) to reorder it
-- **OFF** — terminal is fully interactive; drag-resize and close are applied in-memory only
-
-Use edit mode when you want to:
-
-- reorder panes by dragging one pane onto another
-- create a layout and keep it across restarts
-- manage workspace tabs and their position
 
 ### Notifications and attention prompts
 
@@ -190,7 +179,7 @@ workspaces:
 
 Older config files with a top-level `layout:` are still accepted. When the config is next saved, panemux migrates that layout into a `default` workspace and writes the `workspaces:` format.
 
-If there is only one workspace, the workspace tab bar is hidden during normal use. Enable edit mode to show the workspace add and tab-position controls; newly added workspaces start with a single local terminal pane, become active immediately, and are saved to the config. In edit mode, each visible workspace tab can be renamed inline and has a delete button that asks for confirmation before removing the workspace. The last remaining workspace cannot be deleted. Switching the active workspace and changing `tab_position` are persisted so the same workspace and tab placement are restored after restart. Agent confirmation prompts, including Codex MCP allow menus, can mark inactive workspace tabs and trigger browser notifications after notification permission has been granted. Clicking the notification switches to the relevant workspace.
+The workspace bar is always available for workspace actions. Newly added workspaces start with a single local terminal pane, become active immediately, and are saved to the config. The same bar also exposes `+ Terminal`, inline workspace rename, workspace delete with confirmation, and tab-position controls. Switching the active workspace and changing `tab_position` are persisted so the same workspace and tab placement are restored after restart. Agent confirmation prompts, including Codex MCP allow menus, can mark inactive workspace tabs and trigger browser notifications after notification permission has been granted. Clicking the notification switches to the relevant workspace.
 
 ### Pane types
 
