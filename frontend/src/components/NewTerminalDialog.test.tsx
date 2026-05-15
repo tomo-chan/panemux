@@ -38,6 +38,15 @@ describe('NewTerminalDialog', () => {
     expect(onClose).not.toHaveBeenCalled()
   })
 
+  it('closes on backdrop click when not saving', () => {
+    const onClose = vi.fn()
+    render(<NewTerminalDialog {...defaultProps} onClose={onClose} />)
+
+    fireEvent.click(screen.getByRole('dialog'))
+
+    expect(onClose).toHaveBeenCalled()
+  })
+
   it('does not close on backdrop click while saving', () => {
     const onClose = vi.fn()
     render(<NewTerminalDialog {...defaultProps} isSaving={true} onClose={onClose} />)

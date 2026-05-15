@@ -20,11 +20,34 @@ describe('PaneSettingsDialog', () => {
     expect(screen.queryByRole('dialog')).toBeNull()
   })
 
+  it('does not render when pane is missing', () => {
+    render(<PaneSettingsDialog {...defaultProps} pane={null} />)
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
   it('closes on Escape when not saving', () => {
     const onClose = vi.fn()
     render(<PaneSettingsDialog {...defaultProps} onClose={onClose} />)
 
     fireEvent.keyDown(window, { key: 'Escape' })
+
+    expect(onClose).toHaveBeenCalled()
+  })
+
+  it('does not close on Escape while saving', () => {
+    const onClose = vi.fn()
+    render(<PaneSettingsDialog {...defaultProps} isSaving={true} onClose={onClose} />)
+
+    fireEvent.keyDown(window, { key: 'Escape' })
+
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('closes on backdrop click when not saving', () => {
+    const onClose = vi.fn()
+    render(<PaneSettingsDialog {...defaultProps} onClose={onClose} />)
+
+    fireEvent.click(screen.getByRole('dialog'))
 
     expect(onClose).toHaveBeenCalled()
   })
