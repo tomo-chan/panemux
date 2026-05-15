@@ -38,6 +38,13 @@ const mockDeleteWorkspace = vi.fn()
 const mockRenameWorkspace = vi.fn()
 const mockSetWorkspaceTabPosition = vi.fn()
 const mockSetActiveWorkspace = vi.fn()
+const mockUpdateSizes = vi.fn()
+const mockSplitPane = vi.fn()
+const mockClosePane = vi.fn()
+const mockSwapPanes = vi.fn()
+const mockCreatePane = vi.fn()
+const mockMovePane = vi.fn()
+const mockAddWorkspace = vi.fn()
 const mockUseWorkspaceAttentionMonitor = vi.hoisted(() => vi.fn())
 const mockUseBrowserNotificationPermission = vi.hoisted(() => vi.fn())
 
@@ -47,14 +54,14 @@ vi.mock('./hooks/useLayout', () => ({
     workspaces: currentWorkspaces,
     displayConfig: { show_header: false, show_status_bar: false },
     error: null,
-    updateSizes: vi.fn(),
-    splitPane: vi.fn(),
-    closePane: vi.fn(),
-    swapPanes: vi.fn(),
-    createPane: vi.fn(),
-    movePane: vi.fn(),
+    updateSizes: mockUpdateSizes,
+    splitPane: mockSplitPane,
+    closePane: mockClosePane,
+    swapPanes: mockSwapPanes,
+    createPane: mockCreatePane,
+    movePane: mockMovePane,
     setActiveWorkspace: mockSetActiveWorkspace,
-    addWorkspace: vi.fn(),
+    addWorkspace: mockAddWorkspace,
     deleteWorkspace: mockDeleteWorkspace,
     renameWorkspace: mockRenameWorkspace,
     setWorkspaceTabPosition: mockSetWorkspaceTabPosition,
@@ -115,6 +122,13 @@ describe('App workspace deletion', () => {
     mockRenameWorkspace.mockClear()
     mockSetWorkspaceTabPosition.mockClear()
     mockSetActiveWorkspace.mockClear()
+    mockUpdateSizes.mockClear()
+    mockSplitPane.mockClear()
+    mockClosePane.mockClear()
+    mockSwapPanes.mockClear()
+    mockCreatePane.mockClear()
+    mockMovePane.mockClear()
+    mockAddWorkspace.mockClear()
     mockTerminalPane.mockClear()
     mockUseWorkspaceAttentionMonitor.mockReset()
     mockUseBrowserNotificationPermission.mockReset()
@@ -207,6 +221,20 @@ describe('App workspace deletion', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Place workspace tabs on right' }))
 
     expect(mockSetWorkspaceTabPosition).toHaveBeenCalledWith('right')
+  })
+
+  it('shows a user-visible error when moving a pane fails to persist', async () => {
+    mockMovePane.mockRejectedValueOnce(new Error('HTTP 500'))
+    mockTerminalPane.mockImplementation(({ pane }: { pane: { id: string } }) => {
+      const ctx = useContext(LayoutActionsContext)
+      return <button onClick={() => ctx?.onMovePaneToWorkspaceEdge(pane.id, 'left')}>Move {pane.id}</button>
+    })
+
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Move main' }))
+
+    expect(mockMovePane).toHaveBeenCalledWith('main', { type: 'workspace-edge', edge: 'left' })
+    expect(await screen.findByText('Failed to move terminal: HTTP 500')).toBeInTheDocument()
   })
 
   it('marks an inactive workspace when the attention monitor reports one of its panes', () => {

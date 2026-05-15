@@ -1005,5 +1005,21 @@ describe('useLayout', () => {
         await expect(result.current.movePane('main', { type: 'workspace-edge', edge: 'left' })).rejects.toThrow('HTTP 500')
       })
     })
+
+    it('throws when persisting a moved pane hits a network failure', async () => {
+      const networkError = new Error('network down')
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validWorkspaces) } as Response)
+        .mockResolvedValueOnce({ ok: false } as Response)
+        .mockRejectedValueOnce(networkError)
+      window.fetch = fetchMock
+
+      const { result } = renderHook(() => useLayout())
+      await waitFor(() => expect(result.current.layout).not.toBeNull())
+
+      await act(async () => {
+        await expect(result.current.movePane('main', { type: 'workspace-edge', edge: 'left' })).rejects.toThrow('network down')
+      })
+    })
   })
 })

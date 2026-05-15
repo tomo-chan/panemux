@@ -30,6 +30,7 @@ export const App: React.FC = () => {
   const [isNewTerminalOpen, setIsNewTerminalOpen] = useState(false)
   const [newTerminalError, setNewTerminalError] = useState<string | null>(null)
   const [isNewTerminalSaving, setIsNewTerminalSaving] = useState(false)
+  const [movePaneError, setMovePaneError] = useState<string | null>(null)
 
   const paneMetadataByID = useMemo(() => {
     const metadata = new Map<string, { paneTitle: string; workspaceId: string; workspaceTitle: string }>()
@@ -134,6 +135,13 @@ export const App: React.FC = () => {
     }
   }, [createPane])
 
+  const handleMovePane = useCallback((sourcePaneId: string, placement: PanePlacement) => {
+    setMovePaneError(null)
+    void movePane(sourcePaneId, placement).catch((err) => {
+      setMovePaneError(err instanceof Error ? err.message : 'Failed to move terminal')
+    })
+  }, [movePane])
+
   if (error) {
     return (
       <div style={{
@@ -177,10 +185,10 @@ export const App: React.FC = () => {
       },
       onSwapPanes: swapPanes,
       onMovePaneToWorkspaceEdge: (sourcePaneId, edge) => {
-        void movePane(sourcePaneId, { type: 'workspace-edge', edge })
+        handleMovePane(sourcePaneId, { type: 'workspace-edge', edge })
       },
       onMovePaneBeside: (sourcePaneId, targetPaneId, edge) => {
-        void movePane(sourcePaneId, { type: 'pane-edge', targetPaneId, edge })
+        handleMovePane(sourcePaneId, { type: 'pane-edge', targetPaneId, edge })
       },
       maximizedPaneId,
       dragSourcePaneId,
@@ -229,6 +237,28 @@ export const App: React.FC = () => {
         )}
         <div style={{ position: 'relative', flex: 1, minWidth: 0, minHeight: 0 }}>
           <SplitContainer layout={layout} onLayoutChange={updateSizes} />
+          {movePaneError && (
+            <div
+              role="alert"
+              style={{
+                position: 'absolute',
+                top: 12,
+                right: 12,
+                zIndex: 30,
+                maxWidth: 320,
+                padding: '8px 12px',
+                border: '1px solid #7f1d1d',
+                borderRadius: 6,
+                backgroundColor: '#2f1313',
+                color: '#fca5a5',
+                fontFamily: TERMINAL_FONT_FAMILY,
+                fontSize: '12px',
+                boxShadow: '0 8px 20px rgba(0, 0, 0, 0.35)',
+              }}
+            >
+              Failed to move terminal: {movePaneError}
+            </div>
+          )}
         </div>
         <PaneSettingsDialog
           isOpen={isOpen}

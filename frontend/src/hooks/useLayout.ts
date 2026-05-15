@@ -42,12 +42,19 @@ export function useLayout() {
 
   const saveLayout = useCallback(async (updatedLayout: LayoutNode, throwOnError = false) => {
     const workspaceID = workspaces?.active
-    const response = await fetch(workspaceID ? `/api/workspaces/${encodeURIComponent(workspaceID)}/layout` : '/api/layout', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updatedLayout),
-    }).catch(console.error)
-    if (throwOnError && response && !response.ok) {
+    let response: Response
+    try {
+      response = await fetch(workspaceID ? `/api/workspaces/${encodeURIComponent(workspaceID)}/layout` : '/api/layout', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedLayout),
+      })
+    } catch (err) {
+      console.error(err)
+      if (throwOnError) throw err
+      return
+    }
+    if (throwOnError && !response.ok) {
       throw new Error(`HTTP ${response.status}`)
     }
   }, [workspaces?.active])
