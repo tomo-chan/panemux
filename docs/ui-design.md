@@ -1,16 +1,16 @@
 # UI Design
 
-This document describes the visual design decisions for the PaneMux frontend, covering edit mode, drag-and-drop, and the principles behind them.
+This document describes the visual design decisions for the PaneMux frontend, covering always-available layout editing, drag-and-drop, the workspace bar, and modal dialogs.
 
 ## Design Principles
 
 Three core principles guide the interactive UI:
 
-**State Visibility** — the user must always know what mode the application is in and what action is in progress. When edit mode is active, every pane should look different from the normal operating state without requiring the user to look at a toggle button. When a drag is in flight, the source and destination must be unambiguous.
+**State Visibility** — the user must always know what action is available and what action is in progress. Pane movement, pane insertion, transient errors, and modal editing should all be visible without requiring hidden modes.
 
-**Affordances** — visual cues should match physical intuition. Grab cursors indicate draggable elements. Faded, translucent panes feel "lifted away" from the surface. Bright outlines show where something can land.
+**Affordances** — visual cues should match physical intuition. Grab cursors indicate draggable elements. Edge highlights and divider overlays show where a pane can land. Buttons that create or mutate layout should stay grouped with the structure they affect.
 
-**Feedback** — transitions between states are animated (0.15–0.2 s) to prevent abrupt jumps and to make cause-and-effect legible. Immediate opacity changes on drag start give instant confirmation that the drag has begun.
+**Feedback** — transitions between states are animated (0.15–0.2 s) to prevent abrupt jumps and to make cause-and-effect legible. Immediate opacity changes on drag start and visible alerts on failed persistence keep the UI honest when optimistic updates are used.
 
 ---
 
@@ -18,90 +18,182 @@ Three core principles guide the interactive UI:
 
 | Role | Value | Usage |
 |---|---|---|
-| Interactive blue | `#569cd6` | drop-target outline, drag handle, toggle border |
-| Edit mode blue-tint dark | `rgba(10, 20, 38, 0.54)` | terminal overlay in edit mode |
-| Edit header background | `#1d2b3a` | pane header in edit mode |
-| Edit header border | `#2a3f55` | header bottom border in edit mode |
-| Normal header background | `#252526` | pane header in normal mode |
-| Normal header border | `#333` | header bottom border in normal mode |
-| Drag handle icon | `#4a7ea5` | ⠿ icon in edit mode header |
-| Pane frame (edit mode) | `rgba(86, 156, 214, 0.18)` | inset box-shadow border |
-| Drag source outline | `rgba(86, 156, 214, 0.7)` | dashed outline on pane being dragged |
+| Interactive blue | `#569cd6` | drop-target highlight, selected workspace-position control |
+| Drag handle blue | `#4a7ea5` | header move handle `⠿` |
+| Normal header background | `#252526` | pane header background |
+| Normal header border | `#333` | pane header bottom border |
+| Workspace bar background | `#202124` | workspace bar surface |
+| Active workspace tab | `#2f3540` | active workspace tab background |
+| Position-control selected | `#3a4350` | selected top/bottom/left/right tab-position button |
+| Dialog background | `#252526` | modal dialog surface |
+| Dialog border | `#444` | modal dialog outline |
+| Error banner background | `#2f1313` | move-persistence failure alert |
+| Error banner border | `#7f1d1d` | move-persistence failure alert border |
+| Error banner text | `#fca5a5` | move-persistence failure alert text |
 
 ---
 
-## Edit Mode
+## Workspace Bar
 
-Edit mode is toggled by the fixed button in the bottom-right corner. When active, the application switches from a "use terminals" context to a "rearrange layout" context. Terminal input is blocked for the duration.
+The workspace bar is always available, even when there is only one workspace. This avoids hiding structure-management actions behind a special mode and keeps workspace-level actions in one place.
 
-### Why block terminal input
+### Contents
 
-Allowing simultaneous terminal interaction and layout editing creates two problems: accidental keystrokes sent to a shell while trying to drag, and ambiguous gesture ownership (is the user clicking to focus, or clicking to start a drag?). Blocking input during edit mode eliminates both.
+The bar can contain:
 
-### Visual changes per pane
+- workspace tabs
+- `+ Terminal`
+- `+ WS`
+- workspace tab-position controls
+- inline rename and delete controls on each tab
 
-| Element | Normal | Edit mode |
-|---|---|---|
-| Header background | `#252526` | `#1d2b3a` (blue-gray) |
-| Header border | `#333` | `#2a3f55` |
-| Drag handle `⠿` | hidden | visible, color `#4a7ea5` |
-| Header cursor | `default` | `grab` |
-| Pane frame | none | `inset 0 0 0 1px rgba(86,156,214,0.18)` |
-| Terminal overlay | none | `rgba(10,20,38,0.54)` blocking layer |
+### Why keep the bar visible with one workspace
 
-The header shifts toward a blue-gray tone (`#1d2b3a`) to signal the different mode without disrupting readability. A 0.2 s transition on `background-color` and `border-color` makes the switch feel intentional rather than abrupt.
+The new terminal flow starts from the workspace bar, so hiding the entire bar for single-workspace setups would make the primary expansion path disappear exactly when a user is most likely to need it. A persistent bar gives the UI a stable control area and avoids layout shifts when more workspaces are added later.
 
-The terminal overlay is a `position: absolute` layer over the xterm.js canvas. It serves two purposes: it intercepts all pointer events (preventing the terminal from gaining focus) and it visually dims the terminal content so users understand the pane is locked. The blue-tinted dark color (`rgba(10,20,38,0.54)`) is distinct from the session-ended overlay (`rgba(0,0,0,0.6)`) so the two states are not confused.
+### Tab position controls
 
-The inset `box-shadow` border marks every pane as part of an "edit zone" without affecting layout geometry. Using `box-shadow` rather than `border` or `outline` keeps the frame cosmetic and avoids shifting sibling sizes.
+The top/bottom/left/right controls use compact directional buttons with `aria-pressed` on the active position. They are deliberately terse because they are structural controls, not primary content.
 
-Workspace tab position controls are also shown only in edit mode. They use four compact directional buttons for top, bottom, left, and right placement, with `aria-pressed` marking the current position. This keeps persistent layout-level changes grouped with the rest of the editing surface while avoiding extra text in the tab bar.
+`+ Terminal` uses explicit text because it is a primary creation action. `+ WS` is intentionally more compact to keep the bar from becoming overly wide, but it should still be visually subordinate to terminal creation.
+
+---
+
+## Pane Header
+
+The pane header remains the compact command strip for each pane.
+
+### Layout
+
+From left to right, the header contains:
+
+- drag handle `⠿`
+- connection status dot
+- pane type label
+- optional pane title
+- optional git information
+- reconnecting status text
+- action buttons aligned to the right
+
+The header background stays `#252526` with a `#333` bottom border so the new controls inherit the established terminal chrome instead of introducing a second visual language.
+
+### Drag handle
+
+Pane movement starts only from the `⠿` handle in the header. This preserves uninterrupted terminal interaction inside the pane body while still making re-layout possible.
+
+The handle uses `#4a7ea5` and a `grab` cursor. It is small enough not to crowd the header but distinct enough from the status dot and type badge to read as an affordance instead of decoration.
+
+### Why header-only drag
+
+The terminal body must stay available for text selection, focus, mouse reporting, and shell input. Restricting drag initiation to the header avoids gesture conflicts that would otherwise make terminal interaction unreliable.
 
 ---
 
 ## Drag and Drop
 
-Drag-and-drop pane reordering is active only in edit mode. The entire pane is the drag surface — not just the header — making it easy to initiate a drag on any visible part of the pane.
+Drag-and-drop is always available from the pane header handle. There is no separate edit mode.
 
 ### States
 
-**Normal (edit mode, not dragging)**
+**Normal**
 
-Panes show the edit-mode frame and overlay. The grab cursor is visible on the header.
+- pane opacity is `1`
+- no move target highlight is visible
 
-**Drag source** (`isDragging: true` on the pane being dragged)
+**Drag source**
 
-- `opacity: 0.35` — the pane becomes translucent, evoking a "picked up from the surface" metaphor
-- `outline: 2px dashed rgba(86,156,214,0.7)` — a dashed border reinforces that this slot is now empty/occupied
-- The browser generates a ghost image from the element for the pointer to carry; the ghost and the faded source together communicate "this pane is moving"
-- 0.15 s `opacity` transition ensures the fade starts immediately on drag initiation
+- `opacity: 0.5`
+- 0.15 s opacity transition confirms the drag immediately
 
-**Drop target** (`isDragOver: true` on the hovered pane)
+**Pane-edge drop target**
 
-- `outline: 2px solid #569cd6` — solid bright blue contrasts clearly with the dashed source outline
-- Outline uses `outlineOffset: -2px` to render inside the element boundary, keeping the box model unchanged
+- a 12 px edge overlay appears on the hovered edge
+- active target uses `rgba(86, 156, 214, 0.35)`
 
-**After drop / drag cancel**
+**Divider drop target**
 
-Both states reset: `isDragging` and `isDragOver` return to `false`, opacity returns to 1, and outlines clear. The drag source and target revert to normal edit-mode appearance within one animation frame.
+- the divider keeps its resize role normally
+- during drag, a blue overlay appears on the divider drop zone to show that insertion is possible there
 
-### Why entire-pane drag instead of header-only
+**Workspace-edge drop target**
 
-A header spanning 22–24 px at 11 px font size is a narrow target, especially on high-density layouts with many small panes. Making the full pane draggable removes precision requirements and matches the grab-cursor affordance visible on the header. The edit-mode overlay already covers the terminal area and intercepts pointer events, so making it the drag initiator adds no new event conflicts.
+- the workspace edges become drop zones during drag
+- dropping there creates a new outer split around the current layout
 
-### Drag handle icon
+### Interaction model
 
-The `⠿` (braille pattern) icon in the header is a drag handle affordance adopted from editors such as VSCode and Notion. It communicates "this element can be moved" without consuming much space. In edit mode it is rendered in `#4a7ea5`, which is visible against the `#1d2b3a` header background while staying subdued enough not to compete with the session type label.
+- dropping on a workspace edge creates a new outer layout and moves the pane there
+- dropping on a pane edge inserts the dragged pane beside the target pane
+- dropping on a divider inserts relative to the adjacent subtree boundary
+
+This model deliberately favors spatial predictability over hidden container selection widgets.
 
 ---
 
-## Edit Mode Toggle
+## Modal Dialogs
 
-The toggle button (`EditModeToggle`) lives at `position: fixed; bottom: 12px; right: 12px; z-index: 1000`.
+The frontend now uses modal dialogs for higher-friction configuration tasks, rather than trying to compress all editing into inline chrome.
 
-| State | Background | Border | Color | Opacity | Shadow |
-|---|---|---|---|---|---|
-| OFF | `#3f3f46` | `#52525b` | `#888` | 0.65 | `0 2px 8px rgba(0,0,0,0.5)` |
-| ON | `#1a3040` | `#569cd6` | `#569cd6` | 1.0 | `0 0 0 1px #569cd6, 0 2px 8px rgba(0,0,0,0.6)` |
+### New Terminal Dialog
 
-The reduced opacity (0.65) in OFF state pushes the button into the background so it does not compete with terminal content. The full opacity, blue border, and blue glow in ON state make the active edit context unmistakable from the corner of the eye. Transitions on `opacity`, `box-shadow`, `border-color`, and `color` run at 0.2 s.
+The `Add Terminal` dialog is the main structured creation flow for new panes.
+
+It lets the user choose:
+
+- base settings: blank local or clone existing
+- placement: workspace edge or beside pane
+- pane type
+- shell
+- SSH connection
+- tmux session
+- working directory
+- title
+
+### Visual treatment
+
+- full-screen dark scrim: `rgba(0, 0, 0, 0.6)`
+- dialog surface: `#252526`
+- border: `1px solid #444`
+- rounded corners: `6px`
+- monospace typography to match the rest of the app
+
+The dialog uses a conventional centered modal layout because it asks the user to fill multiple related fields before committing a structural change. This is a better fit than an inline popover or tab-bar dropdown, which would feel cramped and error-prone.
+
+### Error handling
+
+Validation and save errors are shown inline inside the dialog so the user can correct the current form without losing context.
+
+---
+
+## Transient Error Banner
+
+Pane moves are optimistic in the UI and then persisted. If persistence fails, the user needs immediate feedback because the visible layout can temporarily diverge from saved config.
+
+The move error banner:
+
+- appears in the top-right of the workspace content area
+- uses a destructive but subdued palette (`#2f1313`, `#7f1d1d`, `#fca5a5`)
+- includes an explicit dismiss button
+- remains separate from modal dialog errors because it belongs to an in-place interaction, not a form
+
+### Error state lifecycle
+
+The banner state is:
+
+- hidden by default
+- visible when a move persistence request rejects
+- hidden again when dismissed or when the next move attempt starts
+
+This keeps the error noticeable without forcing it into a blocking dialog.
+
+---
+
+## Attention Indicators
+
+Agent-attention highlighting remains visually distinct from layout-editing affordances.
+
+- pane attention uses an animated gold frame
+- workspace attention uses an animated gold tab background
+- move targets use blue overlays instead of gold
+
+Using separate colors avoids mixing "this needs your attention" with "you can drop here".
