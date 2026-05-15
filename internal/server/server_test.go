@@ -150,24 +150,6 @@ func TestIsLocalhostOrigin(t *testing.T) {
 	}
 }
 
-func TestServer_EditModeRoutesWired(t *testing.T) {
-	cfg := testConfig()
-	mgr := session.NewManager()
-	srv := New(cfg, mgr, emptyFS)
-	require.NotNil(t, srv)
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/edit-mode", nil)
-	srv.httpSrv.Handler.ServeHTTP(rec, req)
-	assert.Equal(t, http.StatusOK, rec.Code)
-
-	rec2 := httptest.NewRecorder()
-	req2 := httptest.NewRequest(http.MethodPut, "/api/edit-mode", bytes.NewBufferString(`{"editMode":true}`))
-	req2.Header.Set("Content-Type", "application/json")
-	srv.httpSrv.Handler.ServeHTTP(rec2, req2)
-	assert.Equal(t, http.StatusOK, rec2.Code)
-}
-
 func TestServer_APIRoutesWired(t *testing.T) {
 	cfg := testConfig()
 	mgr := session.NewManager()
@@ -186,12 +168,6 @@ func TestServer_WorkspaceRenameRouteWired(t *testing.T) {
 	srv := New(cfg, mgr, emptyFS)
 	require.NotNil(t, srv)
 
-	editRec := httptest.NewRecorder()
-	editReq := httptest.NewRequest(http.MethodPut, "/api/edit-mode", bytes.NewBufferString(`{"editMode":true}`))
-	editReq.Header.Set("Content-Type", "application/json")
-	srv.httpSrv.Handler.ServeHTTP(editRec, editReq)
-	require.Equal(t, http.StatusOK, editRec.Code)
-
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/default", bytes.NewBufferString(`{"title":"Renamed"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -206,12 +182,6 @@ func TestServer_WorkspaceTabPositionRouteWiredBeforeWorkspaceIDRoute(t *testing.
 	mgr := session.NewManager()
 	srv := New(cfg, mgr, emptyFS)
 	require.NotNil(t, srv)
-
-	editRec := httptest.NewRecorder()
-	editReq := httptest.NewRequest(http.MethodPut, "/api/edit-mode", bytes.NewBufferString(`{"editMode":true}`))
-	editReq.Header.Set("Content-Type", "application/json")
-	srv.httpSrv.Handler.ServeHTTP(editRec, editReq)
-	require.Equal(t, http.StatusOK, editRec.Code)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(

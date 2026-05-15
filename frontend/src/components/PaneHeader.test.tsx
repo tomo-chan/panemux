@@ -13,7 +13,6 @@ const defaultProps = {
   connected: true,
   displayConfig: defaultDisplay,
   isMaximized: false,
-  editMode: false,
   onSplit: vi.fn(),
   onClose: vi.fn(),
   onMaximize: vi.fn(),

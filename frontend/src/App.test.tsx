@@ -51,6 +51,8 @@ vi.mock('./hooks/useLayout', () => ({
     splitPane: vi.fn(),
     closePane: vi.fn(),
     swapPanes: vi.fn(),
+    createPane: vi.fn(),
+    movePane: vi.fn(),
     setActiveWorkspace: mockSetActiveWorkspace,
     addWorkspace: vi.fn(),
     deleteWorkspace: mockDeleteWorkspace,
@@ -65,10 +67,6 @@ vi.mock('./hooks/useWorkspaceAttentionMonitor', () => ({
 
 vi.mock('./hooks/useBrowserNotificationPermission', () => ({
   useBrowserNotificationPermission: mockUseBrowserNotificationPermission,
-}))
-
-vi.mock('./hooks/useEditMode', () => ({
-  useEditMode: () => ({ editMode: true, toggleEditMode: vi.fn() }),
 }))
 
 vi.mock('./hooks/usePaneSettings', () => ({

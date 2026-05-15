@@ -1,24 +1,23 @@
 import React, { useState, useCallback, useMemo } from 'react'
 import { SplitContainer, LayoutActionsContext } from './components/SplitContainer'
-import { EditModeToggle } from './components/EditModeToggle'
 import { PaneSettingsDialog } from './components/PaneSettingsDialog'
 import { AddSSHHostDialog } from './components/AddSSHHostDialog'
+import { NewTerminalDialog } from './components/NewTerminalDialog'
 import { WorkspaceTabs } from './components/WorkspaceTabs'
 import { useLayout } from './hooks/useLayout'
-import { useEditMode } from './hooks/useEditMode'
 import { usePaneSettings } from './hooks/usePaneSettings'
 import { useWorkspaceAttentionMonitor } from './hooks/useWorkspaceAttentionMonitor'
 import { useBrowserNotificationPermission } from './hooks/useBrowserNotificationPermission'
 import { DisplayConfig } from './types'
 import { TERMINAL_FONT_FAMILY } from './utils/fonts'
-import { findPaneById, layoutContainsPane } from './utils/layoutTree'
-import type { LayoutChild, LayoutNode, SSHConfigHost } from './schemas'
+import { collectPanes, findPaneById, generatePaneId, layoutContainsPane } from './utils/layoutTree'
+import type { PanePlacement } from './hooks/useLayout'
+import type { LayoutChild, LayoutNode, PaneConfig, SSHConfigHost } from './schemas'
 
 const DEFAULT_DISPLAY: DisplayConfig = { show_header: true, show_status_bar: true }
 
 export const App: React.FC = () => {
-  const { layout, workspaces, displayConfig, error, updateSizes, splitPane, closePane, swapPanes, setActiveWorkspace, addWorkspace, deleteWorkspace, renameWorkspace, setWorkspaceTabPosition } = useLayout()
-  const { editMode, toggleEditMode } = useEditMode()
+  const { layout, workspaces, displayConfig, error, updateSizes, splitPane, closePane, swapPanes, createPane, movePane, setActiveWorkspace, addWorkspace, deleteWorkspace, renameWorkspace, setWorkspaceTabPosition } = useLayout()
   const [maximizedPaneId, setMaximizedPaneId] = useState<string | null>(null)
   const [dragSourcePaneId, setDragSourcePaneId] = useState<string | null>(null)
   const [attentionPaneIds, setAttentionPaneIds] = useState<Set<string>>(() => new Set())
@@ -28,6 +27,9 @@ export const App: React.FC = () => {
   const [isAddSSHHostOpen, setIsAddSSHHostOpen] = useState(false)
   const [addSSHHostError, setAddSSHHostError] = useState<string | null>(null)
   const [isAddSSHHostSaving, setIsAddSSHHostSaving] = useState(false)
+  const [isNewTerminalOpen, setIsNewTerminalOpen] = useState(false)
+  const [newTerminalError, setNewTerminalError] = useState<string | null>(null)
+  const [isNewTerminalSaving, setIsNewTerminalSaving] = useState(false)
 
   const paneMetadataByID = useMemo(() => {
     const metadata = new Map<string, { paneTitle: string; workspaceId: string; workspaceTitle: string }>()
@@ -119,6 +121,19 @@ export const App: React.FC = () => {
     }
   }, [addSSHConfigHost])
 
+  const handleCreatePane = useCallback(async (pane: Omit<PaneConfig, 'id'>, placement: PanePlacement) => {
+    setIsNewTerminalSaving(true)
+    setNewTerminalError(null)
+    try {
+      await createPane({ ...pane, id: generatePaneId() }, placement)
+      setIsNewTerminalOpen(false)
+    } catch (err) {
+      setNewTerminalError(err instanceof Error ? err.message : 'Failed to create terminal')
+    } finally {
+      setIsNewTerminalSaving(false)
+    }
+  }, [createPane])
+
   if (error) {
     return (
       <div style={{
@@ -161,11 +176,16 @@ export const App: React.FC = () => {
         if (pane) openSettings(pane)
       },
       onSwapPanes: swapPanes,
+      onMovePaneToWorkspaceEdge: (sourcePaneId, edge) => {
+        void movePane(sourcePaneId, { type: 'workspace-edge', edge })
+      },
+      onMovePaneBeside: (sourcePaneId, targetPaneId, edge) => {
+        void movePane(sourcePaneId, { type: 'pane-edge', targetPaneId, edge })
+      },
       maximizedPaneId,
       dragSourcePaneId,
       setDragSourcePaneId,
       displayConfig: displayConfig ?? DEFAULT_DISPLAY,
-      editMode,
       onPaneAttention: notifyAttention,
       clearPaneAttention,
       hasPaneAttention: (paneId: string) => attentionPaneIds.has(paneId),
@@ -186,30 +206,30 @@ export const App: React.FC = () => {
           backgroundColor: '#1a1b1e',
         }}
       >
-        {workspaces && (workspaces.items.length > 1 || editMode) && (
+        {workspaces && (
           <WorkspaceTabs
             workspaces={workspaces.items}
             activeWorkspaceId={workspaces.active}
             tabPosition={workspaces.tab_position}
             onSelect={setActiveWorkspace}
+            onAddTerminal={() => setIsNewTerminalOpen(true)}
             attentionWorkspaceIds={attentionWorkspaceIds}
             onClearAttention={clearWorkspaceAttention}
-            onAdd={editMode ? addWorkspace : undefined}
-            onRename={editMode ? renameWorkspace : undefined}
-            onTabPositionChange={editMode ? setWorkspaceTabPosition : undefined}
-            onDelete={editMode ? (workspaceId) => {
+            onAdd={addWorkspace}
+            onRename={renameWorkspace}
+            onTabPositionChange={setWorkspaceTabPosition}
+            onDelete={(workspaceId) => {
               const workspace = workspaces.items.find((item) => item.id === workspaceId)
               if (!workspace) return
               if (window.confirm(`Delete workspace "${workspace.title}"?`)) {
                 void deleteWorkspace(workspaceId)
               }
-            } : undefined}
+            }}
           />
         )}
         <div style={{ position: 'relative', flex: 1, minWidth: 0, minHeight: 0 }}>
           <SplitContainer layout={layout} onLayoutChange={updateSizes} />
         </div>
-        <EditModeToggle editMode={editMode} onToggle={toggleEditMode} />
         <PaneSettingsDialog
           isOpen={isOpen}
           pane={currentPane}
@@ -227,6 +247,17 @@ export const App: React.FC = () => {
           saveError={addSSHHostError}
           onSave={handleAddSSHHost}
           onClose={() => setIsAddSSHHostOpen(false)}
+        />
+        <NewTerminalDialog
+          isOpen={isNewTerminalOpen}
+          panes={collectPanes(layout)}
+          sshConnectionNames={sshConnectionNames}
+          saveError={newTerminalError}
+          isSaving={isNewTerminalSaving}
+          onSave={handleCreatePane}
+          onClose={() => setIsNewTerminalOpen(false)}
+          onAddSSHHost={() => setIsAddSSHHostOpen(true)}
+          onDetectShell={detectShell}
         />
       </div>
     </LayoutActionsContext.Provider>

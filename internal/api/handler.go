@@ -13,7 +13,6 @@ import (
 	"runtime"
 	"sort"
 	"strings"
-	"sync/atomic"
 
 	"github.com/go-chi/chi/v5"
 
@@ -32,11 +31,6 @@ type Handler struct {
 	sshConfigPath       string
 	codeBinaryPath      string // empty = auto-detect; overridden in tests
 	gitBinaryPath       string // empty = auto-detect; overridden in tests
-	editMode            atomic.Bool
-}
-
-type editModeResponse struct {
-	EditMode bool `json:"editMode"`
 }
 
 type sshConnectionsResponse struct {
@@ -108,13 +102,9 @@ func (h *Handler) PutLayout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.editMode.Load() {
-		if err := h.cfg.SaveLayout(layout); err != nil {
-			http.Error(w, "failed to save layout", http.StatusInternalServerError)
-			return
-		}
-	} else {
-		h.cfg.UpdateLayout(layout)
+	if err := h.cfg.SaveLayout(layout); err != nil {
+		http.Error(w, "failed to save layout", http.StatusInternalServerError)
+		return
 	}
 
 	writeJSON(w, layout)
@@ -143,12 +133,8 @@ func (h *Handler) PutActiveWorkspace(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, h.cfg.WorkspacesView())
 }
 
-// PutWorkspaceTabPosition updates workspace tab placement while edit mode is enabled.
+// PutWorkspaceTabPosition updates workspace tab placement.
 func (h *Handler) PutWorkspaceTabPosition(w http.ResponseWriter, r *http.Request) {
-	if !h.editMode.Load() {
-		http.Error(w, "edit mode required", http.StatusForbidden)
-		return
-	}
 	var req workspaceTabPositionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -169,10 +155,6 @@ func (h *Handler) PutWorkspaceTabPosition(w http.ResponseWriter, r *http.Request
 
 // PostWorkspace adds a new default local workspace and makes it active.
 func (h *Handler) PostWorkspace(w http.ResponseWriter, r *http.Request) {
-	if !h.editMode.Load() {
-		http.Error(w, "edit mode required", http.StatusForbidden)
-		return
-	}
 	workspace := h.cfg.AddDefaultWorkspace()
 	for _, pane := range panesInLayout(workspace.Layout) {
 		sess, err := h.createSession(pane, h.cfg.SSHConnections)
@@ -191,12 +173,8 @@ func (h *Handler) PostWorkspace(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(h.cfg.WorkspacesView())
 }
 
-// DeleteWorkspace removes a workspace while edit mode is enabled.
+// DeleteWorkspace removes a workspace.
 func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
-	if !h.editMode.Load() {
-		http.Error(w, "edit mode required", http.StatusForbidden)
-		return
-	}
 	id := chi.URLParam(r, "id")
 	view := h.cfg.WorkspacesView()
 	if len(view.Items) <= 1 {
@@ -218,12 +196,8 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, h.cfg.WorkspacesView())
 }
 
-// PutWorkspace updates workspace metadata while edit mode is enabled.
+// PutWorkspace updates workspace metadata.
 func (h *Handler) PutWorkspace(w http.ResponseWriter, r *http.Request) {
-	if !h.editMode.Load() {
-		http.Error(w, "edit mode required", http.StatusForbidden)
-		return
-	}
 	id := chi.URLParam(r, "id")
 	var req workspaceRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -270,11 +244,9 @@ func (h *Handler) PutWorkspaceLayout(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "workspace not found", http.StatusNotFound)
 		return
 	}
-	if h.editMode.Load() {
-		if err := h.cfg.SaveWorkspaces(); err != nil {
-			http.Error(w, "failed to save workspaces", http.StatusInternalServerError)
-			return
-		}
+	if err := h.cfg.SaveWorkspaces(); err != nil {
+		http.Error(w, "failed to save workspaces", http.StatusInternalServerError)
+		return
 	}
 	writeJSON(w, layout)
 }
@@ -356,8 +328,9 @@ func (h *Handler) DeleteSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.cfg.RemovePaneFromLayout(id)
-	if h.editMode.Load() {
-		h.cfg.SaveLayout(h.cfg.Layout) //nolint:errcheck
+	if err := h.cfg.SaveWorkspaces(); err != nil {
+		http.Error(w, "failed to save layout", http.StatusInternalServerError)
+		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -392,28 +365,6 @@ func (h *Handler) RestartSession(w http.ResponseWriter, r *http.Request) {
 // GetDisplay returns the display configuration.
 func (h *Handler) GetDisplay(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, h.cfg.Display)
-}
-
-// GetEditMode returns the current edit mode state.
-func (h *Handler) GetEditMode(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, editModeResponse{EditMode: h.editMode.Load()})
-}
-
-// PutEditMode sets the edit mode state.
-func (h *Handler) PutEditMode(w http.ResponseWriter, r *http.Request) {
-	var req editModeResponse
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
-		return
-	}
-	h.editMode.Store(req.EditMode)
-	if req.EditMode {
-		if err := h.cfg.SaveLayout(h.cfg.Layout); err != nil {
-			http.Error(w, "failed to save layout", http.StatusInternalServerError)
-			return
-		}
-	}
-	writeJSON(w, editModeResponse{EditMode: h.editMode.Load()})
 }
 
 type sessionInfo struct {

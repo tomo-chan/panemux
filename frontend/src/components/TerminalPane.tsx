@@ -2,6 +2,7 @@ import React, { useCallback, useContext, useEffect, useRef, useState } from 'rea
 import { DisplayConfig, PaneConfig } from '../types'
 import { useTerminal } from '../hooks/useTerminal'
 import { useGitInfo } from '../hooks/useGitInfo'
+import type { PaneEdge } from '../utils/layoutTree'
 import { PaneHeader } from './PaneHeader'
 import { PaneStatusBar } from './PaneStatusBar'
 import { LayoutActionsContext } from './SplitContainer'
@@ -15,7 +16,7 @@ interface TerminalPaneProps {
 export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const [containerEl, setContainerEl] = React.useState<HTMLElement | null>(null)
-  const [isDragOver, setIsDragOver] = useState(false)
+  const [hoverEdge, setHoverEdge] = useState<PaneEdge | null>(null)
 
   const setRef = useCallback((el: HTMLDivElement | null) => {
     containerRef.current = el
@@ -24,18 +25,13 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
 
   const ctx = useContext(LayoutActionsContext)
   const displayConfig = ctx?.displayConfig ?? DEFAULT_DISPLAY
-  const editMode = ctx?.editMode ?? false
   const hasAttention = ctx?.hasPaneAttention(pane.id) ?? false
-  // Derive from context rather than local state: when the DOM element is moved
-  // by React during a swap, the browser may not fire dragend on the source pane,
-  // leaving local isDragging=true permanently. Using the global dragSourcePaneId
-  // (cleared by handleDrop before dragend would fire) avoids this.
-  const isDragging = ctx?.dragSourcePaneId === pane.id
+  const isDragSource = ctx?.dragSourcePaneId === pane.id
+  const dragActive = Boolean(ctx?.dragSourcePaneId)
 
   const { handleResize, connected, dims, sessionExited, restartSession } = useTerminal({
     sessionId: pane.id,
     container: containerEl,
-    editMode,
   })
 
   const gitInfo = useGitInfo(pane.id)
@@ -50,49 +46,33 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
     return () => observer.disconnect()
   }, [containerEl, handleResize])
 
-  const handleDragStart = (e: React.DragEvent) => {
-    e.dataTransfer.effectAllowed = 'move'
-    ctx?.setDragSourcePaneId(pane.id)
-  }
-
-  const handleDragEnd = () => {
-    ctx?.setDragSourcePaneId(null)
-    setIsDragOver(false)
-  }
-
-  const handleDragOver = (e: React.DragEvent) => {
-    if (!ctx?.dragSourcePaneId || ctx.dragSourcePaneId === pane.id) return
-    e.preventDefault()
-    e.dataTransfer.dropEffect = 'move'
-    setIsDragOver(true)
-  }
-
-  const handleDragLeave = () => setIsDragOver(false)
-
   const handleOpenVSCode = useCallback(() => {
     fetch(`/api/sessions/${pane.id}/open-vscode`, { method: 'POST' })
       .catch((err) => console.error('open-vscode failed:', err))
   }, [pane.id])
 
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault()
-    setIsDragOver(false)
+  const handleDragStart = useCallback((e: React.DragEvent) => {
+    e.dataTransfer.effectAllowed = 'move'
+    ctx?.setDragSourcePaneId(pane.id)
+  }, [ctx, pane.id])
+
+  const handleDragEnd = useCallback(() => {
+    ctx?.setDragSourcePaneId(null)
+    setHoverEdge(null)
+  }, [ctx])
+
+  const handleEdgeDrop = useCallback((edge: PaneEdge) => {
     const sourceId = ctx?.dragSourcePaneId
     if (!sourceId || sourceId === pane.id) return
-    ctx?.onSwapPanes(sourceId, pane.id)
+    ctx?.onMovePaneBeside(sourceId, pane.id, edge)
     ctx?.setDragSourcePaneId(null)
-  }
+    setHoverEdge(null)
+  }, [ctx, pane.id])
 
   return (
     <div
       className={hasAttention ? 'panemux-pane-attention' : undefined}
-      draggable={editMode}
       data-attention={hasAttention ? 'true' : undefined}
-      onDragStart={editMode ? handleDragStart : undefined}
-      onDragEnd={editMode ? handleDragEnd : undefined}
-      onDragOver={editMode ? handleDragOver : undefined}
-      onDragLeave={editMode ? handleDragLeave : undefined}
-      onDrop={editMode ? handleDrop : undefined}
       onMouseDown={() => ctx?.clearPaneAttention(pane.id)}
       onFocusCapture={() => ctx?.clearPaneAttention(pane.id)}
       style={{
@@ -102,22 +82,12 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
         height: '100%',
         overflow: 'hidden',
         backgroundColor: '#1a1b1e',
-        // Outline priority: drop-target > drag-source > none
-        outline: isDragOver
-          ? '2px solid #569cd6'
-          : isDragging
-          ? '2px dashed rgba(86, 156, 214, 0.7)'
-          : hasAttention
+        outline: hasAttention
           ? '2px solid rgba(244, 191, 79, 0.95)'
           : 'none',
         outlineOffset: '-2px',
-        // Subtle inset frame to mark pane as "in edit zone"
-        boxShadow: editMode && !isDragOver && !hasAttention
-          ? 'inset 0 0 0 1px rgba(86, 156, 214, 0.18)'
-          : 'none',
-        // "Lifted" appearance when this pane is the drag source
-        opacity: isDragging ? 0.35 : 1,
-        transition: 'opacity 0.15s ease, box-shadow 0.2s ease',
+        opacity: isDragSource ? 0.5 : 1,
+        transition: 'opacity 0.15s ease',
       }}
     >
       <PaneHeader
@@ -125,13 +95,13 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
         connected={connected}
         displayConfig={displayConfig}
         isMaximized={ctx?.maximizedPaneId === pane.id}
-        editMode={editMode}
         gitInfo={gitInfo}
         onSplit={(direction) => ctx?.onSplit(pane.id, direction)}
         onClose={() => ctx?.onClose(pane.id)}
         onMaximize={() => ctx?.onMaximize(ctx.maximizedPaneId === pane.id ? null : pane.id)}
         onSettings={() => ctx?.onSettings(pane.id)}
         onOpenVSCode={handleOpenVSCode}
+        moveHandleProps={{ onDragStart: handleDragStart, onDragEnd: handleDragEnd }}
       />
       <div
         ref={setRef}
@@ -142,15 +112,26 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
           position: 'relative',
         }}
       >
-        {editMode && (
-          <div style={{
-            position: 'absolute',
-            inset: 0,
-            zIndex: 5,
-            cursor: isDragging ? 'grabbing' : 'grab',
-            // Blue-tinted dark overlay — clearly dims terminal content
-            backgroundColor: 'rgba(10, 20, 38, 0.54)',
-          }} />
+        {dragActive && !isDragSource && (
+          <>
+            {(['top', 'bottom', 'left', 'right'] as PaneEdge[]).map((edge) => (
+              <div
+                key={edge}
+                onDragOver={(e) => {
+                  if (!ctx?.dragSourcePaneId || ctx.dragSourcePaneId === pane.id) return
+                  e.preventDefault()
+                  e.dataTransfer.dropEffect = 'move'
+                  setHoverEdge(edge)
+                }}
+                onDragLeave={() => setHoverEdge((current) => (current === edge ? null : current))}
+                onDrop={(e) => {
+                  e.preventDefault()
+                  handleEdgeDrop(edge)
+                }}
+                style={dropZoneStyle(edge, hoverEdge === edge)}
+              />
+            ))}
+          </>
         )}
         {sessionExited && (
           <div style={{
@@ -187,4 +168,24 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
       />
     </div>
   )
+}
+
+function dropZoneStyle(edge: PaneEdge, active: boolean): React.CSSProperties {
+  const common: React.CSSProperties = {
+    position: 'absolute',
+    zIndex: 8,
+    backgroundColor: active ? 'rgba(86, 156, 214, 0.35)' : 'transparent',
+    transition: 'background-color 0.15s ease',
+  }
+
+  switch (edge) {
+    case 'top':
+      return { ...common, top: 0, left: 0, right: 0, height: 12, cursor: 'row-resize' }
+    case 'bottom':
+      return { ...common, bottom: 0, left: 0, right: 0, height: 12, cursor: 'row-resize' }
+    case 'left':
+      return { ...common, top: 0, bottom: 0, left: 0, width: 12, cursor: 'col-resize' }
+    case 'right':
+      return { ...common, top: 0, bottom: 0, right: 0, width: 12, cursor: 'col-resize' }
+  }
 }

@@ -73,8 +73,6 @@ func registerRoutes(r chi.Router, apiHandler *api.Handler, wsHandler *ws.Handler
 		r.Post("/sessions/{id}/open-vscode", apiHandler.PostOpenVSCode)
 		r.Get("/sessions/{id}/git-info", apiHandler.GetGitInfo)
 		r.Get("/display", apiHandler.GetDisplay)
-		r.Get("/edit-mode", apiHandler.GetEditMode)
-		r.Put("/edit-mode", apiHandler.PutEditMode)
 		r.Get("/ssh-connections", apiHandler.GetSSHConnections)
 		r.Get("/ssh-config/hosts", apiHandler.GetSSHConfigHosts)
 		r.Post("/ssh-config/hosts", apiHandler.PostSSHConfigHost)

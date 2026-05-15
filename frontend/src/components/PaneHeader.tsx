@@ -8,13 +8,13 @@ interface PaneHeaderProps {
   connected: boolean
   displayConfig: DisplayConfig
   isMaximized: boolean
-  editMode: boolean
   gitInfo?: GitInfo
   onSplit: (direction: 'horizontal' | 'vertical') => void
   onClose: () => void
   onMaximize: () => void
   onSettings: () => void
   onOpenVSCode?: () => void
+  moveHandleProps?: Pick<React.HTMLAttributes<HTMLSpanElement>, 'onDragStart' | 'onDragEnd'>
 }
 
 const TYPE_COLORS: Record<string, string> = {
@@ -52,13 +52,13 @@ export const PaneHeader: React.FC<PaneHeaderProps> = ({
   connected,
   displayConfig,
   isMaximized,
-  editMode,
   gitInfo,
   onSplit,
   onClose,
   onMaximize,
   onSettings,
   onOpenVSCode,
+  moveHandleProps,
 }) => {
   const showHeader = pane.show_header ?? displayConfig.show_header
 
@@ -77,23 +77,29 @@ export const PaneHeader: React.FC<PaneHeaderProps> = ({
         fontSize: '11px',
         fontFamily: TERMINAL_FONT_FAMILY,
         color: '#888',
-        // Shift header toward a blue-gray tint in edit mode for clear mode indication
-        backgroundColor: editMode ? '#1d2b3a' : '#252526',
-        borderBottom: editMode ? '1px solid #2a3f55' : '1px solid #333',
+        backgroundColor: '#252526',
+        borderBottom: '1px solid #333',
         userSelect: 'none',
         flexShrink: 0,
-        cursor: editMode ? 'grab' : 'default',
-        transition: 'background-color 0.2s ease, border-color 0.2s ease',
+        cursor: 'default',
       }}
     >
-      {editMode && (
-        <span
-          title="Drag to move pane"
-          style={{ color: '#4a7ea5', fontSize: '13px', lineHeight: '1', flexShrink: 0 }}
-        >
-          ⠿
-        </span>
-      )}
+      <span
+        title="Drag to move pane"
+        draggable={Boolean(moveHandleProps)}
+        onDragStart={moveHandleProps?.onDragStart}
+        onDragEnd={moveHandleProps?.onDragEnd}
+        style={{
+          color: '#4a7ea5',
+          fontSize: '13px',
+          lineHeight: '1',
+          flexShrink: 0,
+          cursor: moveHandleProps ? 'grab' : 'default',
+          userSelect: 'none',
+        }}
+      >
+        ⠿
+      </span>
       <span
         style={{
           display: 'inline-block',
@@ -115,15 +121,13 @@ export const PaneHeader: React.FC<PaneHeaderProps> = ({
       )}
       {!connected && <span style={{ color: '#555' }}>reconnecting…</span>}
       <div style={{ marginLeft: 'auto', display: 'flex', gap: '4px' }}>
-        {editMode && (
-          <button
-            title="Pane settings"
-            onClick={onSettings}
-            style={buttonStyle}
-          >
-            ⚙
-          </button>
-        )}
+        <button
+          title="Pane settings"
+          onClick={onSettings}
+          style={buttonStyle}
+        >
+          ⚙
+        </button>
         {connected && onOpenVSCode && (
           <button
             title="Open in VSCode"

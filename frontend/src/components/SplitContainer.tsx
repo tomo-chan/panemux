@@ -1,5 +1,6 @@
 import React, { useCallback, useContext, useRef } from 'react'
 import { DisplayConfig, LayoutChild, LayoutNode } from '../types'
+import type { PaneEdge } from '../utils/layoutTree'
 import { SplitDivider } from './SplitDivider'
 import { TerminalPane } from './TerminalPane'
 
@@ -9,11 +10,12 @@ export interface LayoutActionsContextValue {
   onMaximize: (paneId: string | null) => void
   onSettings: (paneId: string) => void
   onSwapPanes: (paneIdA: string, paneIdB: string) => void
+  onMovePaneToWorkspaceEdge: (sourcePaneId: string, edge: PaneEdge) => void
+  onMovePaneBeside: (sourcePaneId: string, targetPaneId: string, edge: PaneEdge) => void
   maximizedPaneId: string | null
   dragSourcePaneId: string | null
   setDragSourcePaneId: (id: string | null) => void
   displayConfig: DisplayConfig
-  editMode: boolean
   onPaneAttention: (paneId: string) => void
   clearPaneAttention: (paneId: string) => void
   hasPaneAttention: (paneId: string) => boolean
@@ -27,12 +29,34 @@ interface SplitContainerProps {
 }
 
 export const SplitContainer: React.FC<SplitContainerProps> = ({ layout, onLayoutChange }) => {
+  const layoutCtx = useContext(LayoutActionsContext)
   return (
-    <LayoutRenderer
-      direction={layout.direction}
-      children={layout.children}
-      onChildrenChange={(children) => onLayoutChange({ ...layout, children })}
-    />
+    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+      <LayoutRenderer
+        direction={layout.direction}
+        children={layout.children}
+        onChildrenChange={(children) => onLayoutChange({ ...layout, children })}
+      />
+      {layoutCtx?.dragSourcePaneId && (
+        <>
+          {(['top', 'bottom', 'left', 'right'] as PaneEdge[]).map((edge) => (
+            <div
+              key={edge}
+              onDragOver={(e) => {
+                e.preventDefault()
+                e.dataTransfer.dropEffect = 'move'
+              }}
+              onDrop={(e) => {
+                e.preventDefault()
+                layoutCtx.onMovePaneToWorkspaceEdge(layoutCtx.dragSourcePaneId!, edge)
+                layoutCtx.setDragSourcePaneId(null)
+              }}
+              style={workspaceDropZoneStyle(edge)}
+            />
+          ))}
+        </>
+      )}
+    </div>
   )
 }
 
@@ -110,7 +134,12 @@ export const LayoutRenderer: React.FC<LayoutRendererProps> = ({ direction, child
               />
             </div>
             {!isLast && !layoutCtx?.maximizedPaneId && (
-              <SplitDivider direction={direction} onDrag={(d) => handleDrag(index, d)} />
+              <DividerDropZone
+                direction={direction}
+                beforeChild={child}
+                afterChild={children[index + 1]}
+                onResize={(d) => handleDrag(index, d)}
+              />
             )}
           </React.Fragment>
         )
@@ -142,4 +171,94 @@ const ChildRenderer: React.FC<ChildRendererProps> = ({ child, onChildChange }) =
   }
 
   return null
+}
+
+interface DividerDropZoneProps {
+  direction: 'horizontal' | 'vertical'
+  beforeChild: LayoutChild
+  afterChild: LayoutChild
+  onResize: (delta: number) => void
+}
+
+const DividerDropZone: React.FC<DividerDropZoneProps> = ({ direction, beforeChild, afterChild, onResize }) => {
+  const ctx = useContext(LayoutActionsContext)
+  const [hovered, setHovered] = React.useState(false)
+  const edge: PaneEdge = direction === 'horizontal' ? 'right' : 'bottom'
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    const sourceId = ctx?.dragSourcePaneId
+    if (!sourceId) return
+    const targetPaneId = findBoundaryPaneId(beforeChild, 'end') ?? findBoundaryPaneId(afterChild, 'start')
+    if (!targetPaneId) return
+    ctx?.onMovePaneBeside(sourceId, targetPaneId, edge)
+    ctx?.setDragSourcePaneId(null)
+    setHovered(false)
+  }
+
+  return (
+    <div
+      onDragOver={(e) => {
+        if (!ctx?.dragSourcePaneId) return
+        e.preventDefault()
+        e.dataTransfer.dropEffect = 'move'
+        setHovered(true)
+      }}
+      onDragLeave={() => setHovered(false)}
+      onDrop={handleDrop}
+      style={{ position: 'relative', flexShrink: 0 }}
+    >
+      <SplitDivider direction={direction} onDrag={onResize} />
+      {ctx?.dragSourcePaneId && (
+        <div
+          style={dividerOverlayStyle(direction, hovered)}
+        />
+      )}
+    </div>
+  )
+}
+
+function findBoundaryPaneId(child: LayoutChild, side: 'start' | 'end'): string | null {
+  if (child.pane?.id) return child.pane.id
+  if (!child.children?.length) return null
+  const next = side === 'start' ? child.children[0] : child.children[child.children.length - 1]
+  return findBoundaryPaneId(next, side)
+}
+
+function workspaceDropZoneStyle(edge: PaneEdge): React.CSSProperties {
+  const common: React.CSSProperties = {
+    position: 'absolute',
+    zIndex: 20,
+    backgroundColor: 'transparent',
+  }
+  switch (edge) {
+    case 'top':
+      return { ...common, top: 0, left: 0, right: 0, height: 10 }
+    case 'bottom':
+      return { ...common, bottom: 0, left: 0, right: 0, height: 10 }
+    case 'left':
+      return { ...common, top: 0, bottom: 0, left: 0, width: 10 }
+    case 'right':
+      return { ...common, top: 0, bottom: 0, right: 0, width: 10 }
+  }
+}
+
+function dividerOverlayStyle(direction: 'horizontal' | 'vertical', active: boolean): React.CSSProperties {
+  return direction === 'horizontal'
+    ? {
+        position: 'absolute',
+        inset: 0,
+        width: 12,
+        marginLeft: -4,
+        backgroundColor: active ? 'rgba(86, 156, 214, 0.35)' : 'transparent',
+        pointerEvents: 'none',
+      }
+    : {
+        position: 'absolute',
+        inset: 0,
+        height: 12,
+        marginTop: -4,
+        backgroundColor: active ? 'rgba(86, 156, 214, 0.35)' : 'transparent',
+        pointerEvents: 'none',
+      }
 }

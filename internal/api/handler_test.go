@@ -64,8 +64,6 @@ func setupRouterWithHandler(h *Handler) *chi.Mux {
 	r.Post("/api/sessions/{id}/restart", h.RestartSession)
 	r.Get("/api/sessions/{id}/git-info", h.GetGitInfo)
 	r.Get("/api/display", h.GetDisplay)
-	r.Get("/api/edit-mode", h.GetEditMode)
-	r.Put("/api/edit-mode", h.PutEditMode)
 	r.Get("/api/ssh-connections", h.GetSSHConnections)
 	r.Get("/api/ssh-config/hosts", h.GetSSHConfigHosts)
 	r.Post("/api/ssh-config/hosts", h.PostSSHConfigHost)
@@ -244,29 +242,12 @@ func TestPutActiveWorkspace_NotFound_Returns404AndKeepsActive(t *testing.T) {
 	assert.Equal(t, "one", cfg.Workspaces.Active)
 }
 
-func TestPutWorkspaceTabPosition_EditModeOff_Returns403(t *testing.T) {
-	cfg := workspaceTestConfig()
-	r := setupRouter(cfg, session.NewManager())
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(
-		http.MethodPut,
-		"/api/workspaces/tab-position",
-		bytes.NewBufferString(`{"tab_position":"left"}`),
-	)
-	req.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusForbidden, rec.Code)
-	assert.Equal(t, "top", cfg.Workspaces.TabPosition)
-}
-
-func TestPutWorkspaceTabPosition_EditModeOn_UpdatesEveryValidPositionAndPersists(t *testing.T) {
+func TestPutWorkspaceTabPosition_UpdatesEveryValidPositionAndPersists(t *testing.T) {
 	for _, position := range []string{"top", "bottom", "left", "right"} {
 		t.Run(position, func(t *testing.T) {
 			cfg, path := loadWorkspaceTestConfigFromFile(t)
 			h := NewHandler(cfg, session.NewManager())
 			h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
-			h.editMode.Store(true)
 			r := setupRouterWithHandler(h)
 
 			rec := httptest.NewRecorder()
@@ -292,7 +273,6 @@ func TestPutWorkspaceTabPosition_EditModeOn_UpdatesEveryValidPositionAndPersists
 
 func TestPutWorkspaceTabPosition_InvalidBody_Returns400(t *testing.T) {
 	h := NewHandler(workspaceTestConfig(), session.NewManager())
-	h.editMode.Store(true)
 	r := setupRouterWithHandler(h)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/tab-position", bytes.NewBufferString("not json"))
@@ -304,7 +284,6 @@ func TestPutWorkspaceTabPosition_InvalidBody_Returns400(t *testing.T) {
 func TestPutWorkspaceTabPosition_InvalidPosition_Returns422AndKeepsExistingValue(t *testing.T) {
 	cfg := workspaceTestConfig()
 	h := NewHandler(cfg, session.NewManager())
-	h.editMode.Store(true)
 	r := setupRouterWithHandler(h)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(
@@ -320,21 +299,11 @@ func TestPutWorkspaceTabPosition_InvalidPosition_Returns422AndKeepsExistingValue
 	assert.Contains(t, rec.Body.String(), "invalid tab_position")
 }
 
-func TestPostWorkspace_EditModeOff_Returns403(t *testing.T) {
-	r := setupRouter(workspaceTestConfig(), session.NewManager())
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", nil)
-	r.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusForbidden, rec.Code)
-}
-
-func TestPostWorkspace_EditModeOn_AddsDefaultLocalWorkspaceAndPersists(t *testing.T) {
+func TestPostWorkspace_AddsDefaultLocalWorkspaceAndPersists(t *testing.T) {
 	cfg, path := loadWorkspaceTestConfigFromFile(t)
 	mgr := session.NewManager()
 	h := NewHandler(cfg, mgr)
 	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
-	h.editMode.Store(true)
 	h.createSession = func(pane *config.PaneConfig, _ map[string]config.SSHConnection) (session.Session, error) {
 		return newMockSession(pane.ID), nil
 	}
@@ -367,20 +336,10 @@ func TestPostWorkspace_EditModeOn_AddsDefaultLocalWorkspaceAndPersists(t *testin
 	assert.NotContains(t, string(data), "\nlayout:")
 }
 
-func TestDeleteWorkspace_EditModeOff_Returns403(t *testing.T) {
-	r := setupRouter(workspaceTestConfig(), session.NewManager())
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodDelete, "/api/workspaces/two", nil)
-	r.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusForbidden, rec.Code)
-}
-
 func TestDeleteWorkspace_NotFound_Returns404(t *testing.T) {
 	cfg := workspaceTestConfig()
 	h := NewHandler(cfg, session.NewManager())
 	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
-	h.editMode.Store(true)
 	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
@@ -394,7 +353,6 @@ func TestDeleteWorkspace_LastWorkspace_Returns409(t *testing.T) {
 	cfg := defaultTestConfig()
 	h := NewHandler(cfg, session.NewManager())
 	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
-	h.editMode.Store(true)
 	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
@@ -404,7 +362,7 @@ func TestDeleteWorkspace_LastWorkspace_Returns409(t *testing.T) {
 	assert.Equal(t, http.StatusConflict, rec.Code)
 }
 
-func TestDeleteWorkspace_EditModeOn_RemovesWorkspaceSessionsAndPersists(t *testing.T) {
+func TestDeleteWorkspace_RemovesWorkspaceSessionsAndPersists(t *testing.T) {
 	cfg, path := loadWorkspaceTestConfigFromFile(t)
 	require.True(t, cfg.SetActiveWorkspace("two"))
 	mgr := session.NewManager()
@@ -412,7 +370,6 @@ func TestDeleteWorkspace_EditModeOn_RemovesWorkspaceSessionsAndPersists(t *testi
 	mgr.Add(newMockSession("two-main"))
 	h := NewHandler(cfg, mgr)
 	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
-	h.editMode.Store(true)
 	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
@@ -436,22 +393,10 @@ func TestDeleteWorkspace_EditModeOn_RemovesWorkspaceSessionsAndPersists(t *testi
 	require.Len(t, loaded.Workspaces.Items, 1)
 }
 
-func TestPutWorkspace_EditModeOff_Returns403(t *testing.T) {
-	r := setupRouter(workspaceTestConfig(), session.NewManager())
-	body := bytes.NewBufferString(`{"title":"Renamed"}`)
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/one", body)
-	req.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusForbidden, rec.Code)
-}
-
-func TestPutWorkspace_EditModeOn_RenamesWorkspaceAndPersists(t *testing.T) {
+func TestPutWorkspace_RenamesWorkspaceAndPersists(t *testing.T) {
 	cfg, path := loadWorkspaceTestConfigFromFile(t)
 	h := NewHandler(cfg, session.NewManager())
 	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
-	h.editMode.Store(true)
 	r := setupRouterWithHandler(h)
 
 	body := bytes.NewBufferString(`{"title":"Renamed Workspace"}`)
@@ -476,7 +421,6 @@ func TestPutWorkspace_EditModeOn_RenamesWorkspaceAndPersists(t *testing.T) {
 func TestPutWorkspace_InvalidBody_Returns400(t *testing.T) {
 	h := NewHandler(workspaceTestConfig(), session.NewManager())
 	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
-	h.editMode.Store(true)
 	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
@@ -489,7 +433,6 @@ func TestPutWorkspace_InvalidBody_Returns400(t *testing.T) {
 func TestPutWorkspace_BlankTitle_Returns422(t *testing.T) {
 	h := NewHandler(workspaceTestConfig(), session.NewManager())
 	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
-	h.editMode.Store(true)
 	r := setupRouterWithHandler(h)
 
 	body := bytes.NewBufferString(`{"title":"   "}`)
@@ -504,7 +447,6 @@ func TestPutWorkspace_BlankTitle_Returns422(t *testing.T) {
 func TestPutWorkspace_NotFound_Returns404(t *testing.T) {
 	h := NewHandler(workspaceTestConfig(), session.NewManager())
 	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
-	h.editMode.Store(true)
 	r := setupRouterWithHandler(h)
 
 	body := bytes.NewBufferString(`{"title":"Missing"}`)
@@ -581,16 +523,9 @@ func TestPutWorkspaceLayout_NotFound_Returns404(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
-func TestPutWorkspaceLayout_EditModeOn_PersistsWorkspaces(t *testing.T) {
+func TestPutWorkspaceLayout_PersistsWorkspaces(t *testing.T) {
 	cfg, path := loadWorkspaceTestConfigFromFile(t)
 	r := setupRouter(cfg, session.NewManager())
-
-	body, _ := json.Marshal(editModeResponse{EditMode: true})
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPut, "/api/edit-mode", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(rec, req)
-	require.Equal(t, http.StatusOK, rec.Code)
 
 	layout := config.LayoutNode{
 		Direction: "vertical",
@@ -799,146 +734,25 @@ func TestRestartSession_NotFound_404(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
-func TestGetEditMode_DefaultFalse(t *testing.T) {
-	r := setupRouter(defaultTestConfig(), session.NewManager())
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/edit-mode", nil)
-	r.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-	var resp editModeResponse
-	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
-	assert.False(t, resp.EditMode)
-}
-
-func TestPutEditMode_TurnOn(t *testing.T) {
-	r := setupRouter(defaultTestConfig(), session.NewManager())
-	body, _ := json.Marshal(editModeResponse{EditMode: true})
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPut, "/api/edit-mode", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-	var resp editModeResponse
-	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
-	assert.True(t, resp.EditMode)
-
-	// Subsequent GET should also return true
-	rec2 := httptest.NewRecorder()
-	req2 := httptest.NewRequest(http.MethodGet, "/api/edit-mode", nil)
-	r.ServeHTTP(rec2, req2)
-	var resp2 editModeResponse
-	require.NoError(t, json.NewDecoder(rec2.Body).Decode(&resp2))
-	assert.True(t, resp2.EditMode)
-}
-
-func TestPutEditMode_TurnOff(t *testing.T) {
-	r := setupRouter(defaultTestConfig(), session.NewManager())
-
-	// Turn on first
-	body, _ := json.Marshal(editModeResponse{EditMode: true})
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPut, "/api/edit-mode", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(rec, req)
-	require.Equal(t, http.StatusOK, rec.Code)
-
-	// Now turn off
-	body2, _ := json.Marshal(editModeResponse{EditMode: false})
-	rec2 := httptest.NewRecorder()
-	req2 := httptest.NewRequest(http.MethodPut, "/api/edit-mode", bytes.NewReader(body2))
-	req2.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(rec2, req2)
-
-	assert.Equal(t, http.StatusOK, rec2.Code)
-	var resp editModeResponse
-	require.NoError(t, json.NewDecoder(rec2.Body).Decode(&resp))
-	assert.False(t, resp.EditMode)
-}
-
-func TestPutEditMode_InvalidBody_400(t *testing.T) {
-	r := setupRouter(defaultTestConfig(), session.NewManager())
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPut, "/api/edit-mode", bytes.NewBufferString("not json"))
-	r.ServeHTTP(rec, req)
-	assert.Equal(t, http.StatusBadRequest, rec.Code)
-}
-
-func TestPutLayout_EditModeOff_DoesNotPersist(t *testing.T) {
+func TestPutLayout_PersistsImmediately(t *testing.T) {
 	cfg := defaultTestConfig()
 	r := setupRouter(cfg, session.NewManager())
-
-	// editMode is false by default
 	rec := putVerticalLayout(t, r)
 
 	assert.Equal(t, http.StatusOK, rec.Code)
-	// In-memory layout should be updated
 	assert.Equal(t, "vertical", cfg.Layout.Direction)
 }
 
-func TestPutLayout_EditModeOn_Persists(t *testing.T) {
-	cfg := defaultTestConfig()
-	r := setupRouter(cfg, session.NewManager())
-
-	// Turn on edit mode
-	body, _ := json.Marshal(editModeResponse{EditMode: true})
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPut, "/api/edit-mode", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(rec, req)
-	require.Equal(t, http.StatusOK, rec.Code)
-
-	layout := config.LayoutNode{
-		Direction: "vertical",
-		Children:  []config.LayoutChild{{Size: 100, Pane: &config.PaneConfig{ID: "main", Type: "local"}}},
-	}
-	body2, _ := json.Marshal(layout)
-	rec2 := httptest.NewRecorder()
-	req2 := httptest.NewRequest(http.MethodPut, "/api/layout", bytes.NewReader(body2))
-	req2.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(rec2, req2)
-
-	assert.Equal(t, http.StatusOK, rec2.Code)
-	assert.Equal(t, "vertical", cfg.Layout.Direction)
-}
-
-func TestDeleteSession_EditModeOff_DoesNotSave(t *testing.T) {
+func TestDeleteSession_RemovesSessionAndSaves(t *testing.T) {
 	mgr := session.NewManager()
 	mgr.Add(newMockSession("s1"))
 	cfg := defaultTestConfig()
 	r := setupRouter(cfg, mgr)
-
-	// editMode is false by default
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodDelete, "/api/sessions/s1", nil)
 	r.ServeHTTP(rec, req)
 
 	assert.Equal(t, http.StatusNoContent, rec.Code)
-	// session removed
-	_, ok := mgr.Get("s1")
-	assert.False(t, ok)
-}
-
-func TestDeleteSession_EditModeOn_Saves(t *testing.T) {
-	mgr := session.NewManager()
-	mgr.Add(newMockSession("s1"))
-	cfg := defaultTestConfig()
-	r := setupRouter(cfg, mgr)
-
-	// Turn on edit mode
-	body, _ := json.Marshal(editModeResponse{EditMode: true})
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPut, "/api/edit-mode", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(rec, req)
-	require.Equal(t, http.StatusOK, rec.Code)
-
-	rec2 := httptest.NewRecorder()
-	req2 := httptest.NewRequest(http.MethodDelete, "/api/sessions/s1", nil)
-	r.ServeHTTP(rec2, req2)
-
-	assert.Equal(t, http.StatusNoContent, rec2.Code)
 	_, ok := mgr.Get("s1")
 	assert.False(t, ok)
 }

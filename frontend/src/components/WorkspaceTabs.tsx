@@ -7,6 +7,7 @@ interface WorkspaceTabsProps {
   activeWorkspaceId: string
   tabPosition: TabPosition
   onSelect: (workspaceId: string) => void
+  onAddTerminal?: () => void
   onAdd?: () => void
   onDelete?: (workspaceId: string) => void
   onRename?: (workspaceId: string, title: string) => void
@@ -20,6 +21,7 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
   activeWorkspaceId,
   tabPosition,
   onSelect,
+  onAddTerminal,
   onAdd,
   onDelete,
   onRename,
@@ -29,6 +31,7 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
 }) => {
   const vertical = tabPosition === 'left' || tabPosition === 'right'
   const showTabs = workspaces.length > 1
+  const showBar = showTabs || Boolean(onAddTerminal || onAdd || onDelete || onRename || onTabPositionChange)
   const [editingWorkspaceId, setEditingWorkspaceId] = useState<string | null>(null)
   const [draftTitle, setDraftTitle] = useState('')
   const inputRef = useRef<HTMLInputElement | null>(null)
@@ -114,6 +117,8 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
       })}
     </div>
   ) : null
+
+  if (!showBar) return null
 
   return (
     <div
@@ -281,33 +286,60 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
           })}
         </div>
       )}
-      {onAdd && (
-        <button
-          type="button"
-          aria-label="Add workspace"
-          title="Add workspace"
-          onClick={onAdd}
+      {(onAddTerminal || onAdd) && (
+        <div
           style={{
-            appearance: 'none',
-            border: 'none',
-            borderRight: !vertical ? '1px solid #333842' : undefined,
-            borderBottom: vertical ? '1px solid #333842' : undefined,
-            backgroundColor: 'transparent',
-            color: '#b8beca',
-            cursor: 'pointer',
-            fontFamily: TERMINAL_FONT_FAMILY,
-            fontSize: 18,
-            height: vertical ? 38 : 34,
-            minWidth: vertical ? '100%' : 40,
-            padding: 0,
-            textAlign: 'center',
-            lineHeight: vertical ? '38px' : '34px',
+            display: 'flex',
+            flexDirection: vertical ? 'column' : 'row',
+            borderLeft: !vertical ? '1px solid #333842' : undefined,
+            borderTop: vertical ? '1px solid #333842' : undefined,
+            flexShrink: 0,
           }}
         >
-          +
-        </button>
+          {onAddTerminal && (
+            <button
+              type="button"
+              aria-label="Add terminal"
+              title="Add terminal"
+              onClick={onAddTerminal}
+              style={actionButtonStyle(vertical)}
+            >
+              + Terminal
+            </button>
+          )}
+          {onAdd && (
+            <button
+              type="button"
+              aria-label="Add workspace"
+              title="Add workspace"
+              onClick={onAdd}
+              style={actionButtonStyle(vertical)}
+            >
+              + WS
+            </button>
+          )}
+        </div>
       )}
       {positionControls}
     </div>
   )
+}
+
+function actionButtonStyle(vertical: boolean): React.CSSProperties {
+  return {
+    appearance: 'none',
+    border: 'none',
+    borderRight: !vertical ? '1px solid #333842' : undefined,
+    borderBottom: vertical ? '1px solid #333842' : undefined,
+    backgroundColor: 'transparent',
+    color: '#b8beca',
+    cursor: 'pointer',
+    fontFamily: TERMINAL_FONT_FAMILY,
+    fontSize: 12,
+    minWidth: vertical ? '100%' : 80,
+    height: vertical ? 30 : 34,
+    padding: vertical ? '0 10px' : '0 12px',
+    textAlign: 'center',
+    whiteSpace: 'nowrap',
+  }
 }
