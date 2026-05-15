@@ -237,6 +237,35 @@ describe('App workspace deletion', () => {
     expect(await screen.findByText('Failed to move terminal: HTTP 500')).toBeInTheDocument()
   })
 
+  it('dismisses the move error banner when requested', async () => {
+    mockMovePane.mockRejectedValueOnce(new Error('HTTP 500'))
+    mockTerminalPane.mockImplementation(({ pane }: { pane: { id: string } }) => {
+      const ctx = useContext(LayoutActionsContext)
+      return <button onClick={() => ctx?.onMovePaneToWorkspaceEdge(pane.id, 'left')}>Move {pane.id}</button>
+    })
+
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Move main' }))
+
+    expect(await screen.findByRole('alert')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss move error' }))
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('shows a generic move error when the rejection is not an Error instance', async () => {
+    mockMovePane.mockRejectedValueOnce('boom')
+    mockTerminalPane.mockImplementation(({ pane }: { pane: { id: string } }) => {
+      const ctx = useContext(LayoutActionsContext)
+      return <button onClick={() => ctx?.onMovePaneToWorkspaceEdge(pane.id, 'left')}>Move {pane.id}</button>
+    })
+
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Move main' }))
+
+    expect(await screen.findByText('Failed to move terminal: Something went wrong')).toBeInTheDocument()
+  })
+
   it('marks an inactive workspace when the attention monitor reports one of its panes', () => {
     currentWorkspaces = { ...workspaces, active: 'ops' }
     mockUseWorkspaceAttentionMonitor.mockImplementation(({ onAttention }: { onAttention: (paneId: string) => void }) => {

@@ -138,7 +138,7 @@ export const App: React.FC = () => {
   const handleMovePane = useCallback((sourcePaneId: string, placement: PanePlacement) => {
     setMovePaneError(null)
     void movePane(sourcePaneId, placement).catch((err) => {
-      setMovePaneError(err instanceof Error ? err.message : 'Failed to move terminal')
+      setMovePaneError(err instanceof Error ? err.message : 'Something went wrong')
     })
   }, [movePane])
 
@@ -256,7 +256,33 @@ export const App: React.FC = () => {
                 boxShadow: '0 8px 20px rgba(0, 0, 0, 0.35)',
               }}
             >
-              Failed to move terminal: {movePaneError}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: 12,
+                }}
+              >
+                <span style={{ flex: 1 }}>Failed to move terminal: {movePaneError}</span>
+                <button
+                  type="button"
+                  aria-label="Dismiss move error"
+                  onClick={() => setMovePaneError(null)}
+                  style={{
+                    appearance: 'none',
+                    border: 'none',
+                    background: 'transparent',
+                    color: '#fca5a5',
+                    cursor: 'pointer',
+                    fontFamily: TERMINAL_FONT_FAMILY,
+                    fontSize: '12px',
+                    lineHeight: 1,
+                    padding: 0,
+                  }}
+                >
+                  ×
+                </button>
+              </div>
             </div>
           )}
         </div>
