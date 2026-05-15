@@ -156,12 +156,21 @@ It lets the user choose:
 - border: `1px solid #444`
 - rounded corners: `6px`
 - monospace typography to match the rest of the app
+- viewport-constrained surface with internal scrolling for smaller windows
 
 The dialog uses a conventional centered modal layout because it asks the user to fill multiple related fields before committing a structural change. This is a better fit than an inline popover or tab-bar dropdown, which would feel cramped and error-prone.
 
 ### Error handling
 
 Validation and save errors are shown inline inside the dialog so the user can correct the current form without losing context.
+
+### Dismissal rules
+
+- `Escape` closes the dialog when no save is in flight
+- clicking the backdrop closes the dialog when no save is in flight
+- while saving, footer buttons, `Escape`, and backdrop-dismiss are all suppressed consistently
+
+This avoids losing context during in-flight operations that can create sessions or mutate saved layout.
 
 ---
 

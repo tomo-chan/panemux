@@ -130,6 +130,42 @@ describe('AddSSHHostDialog', () => {
     expect(onClose).toHaveBeenCalled()
   })
 
+  it('closes on Escape when not saving', () => {
+    const onClose = vi.fn()
+    render(<AddSSHHostDialog {...defaultProps} onClose={onClose} />)
+
+    fireEvent.keyDown(window, { key: 'Escape' })
+
+    expect(onClose).toHaveBeenCalled()
+  })
+
+  it('does not close on Escape while saving', () => {
+    const onClose = vi.fn()
+    render(<AddSSHHostDialog {...defaultProps} isSaving={true} onClose={onClose} />)
+
+    fireEvent.keyDown(window, { key: 'Escape' })
+
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('closes on backdrop click when not saving', () => {
+    const onClose = vi.fn()
+    render(<AddSSHHostDialog {...defaultProps} onClose={onClose} />)
+
+    fireEvent.click(screen.getByRole('dialog'))
+
+    expect(onClose).toHaveBeenCalled()
+  })
+
+  it('does not close on backdrop click while saving', () => {
+    const onClose = vi.fn()
+    render(<AddSSHHostDialog {...defaultProps} isSaving={true} onClose={onClose} />)
+
+    fireEvent.click(screen.getByRole('dialog'))
+
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
   it('resets form to empty on each open', () => {
     const { rerender } = render(<AddSSHHostDialog {...defaultProps} isOpen={false} />)
 
@@ -150,5 +186,16 @@ describe('AddSSHHostDialog', () => {
     const saveBtn = screen.getByRole('button', { name: /saving/i })
     expect(saveBtn).toBeDefined()
     expect((saveBtn as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('keeps the dialog surface within the viewport and scrollable', () => {
+    render(<AddSSHHostDialog {...defaultProps} />)
+
+    const surface = screen.getByText('Add SSH Host').parentElement
+    expect(surface).toHaveStyle({
+      maxWidth: 'calc(100vw - 32px)',
+      maxHeight: 'calc(100vh - 32px)',
+      overflowY: 'auto',
+    })
   })
 })

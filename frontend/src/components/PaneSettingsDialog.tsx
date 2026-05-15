@@ -82,6 +82,15 @@ export const PaneSettingsDialog: React.FC<PaneSettingsDialogProps> = ({
     }
   }, [pane, onDetectShell])
 
+  useEffect(() => {
+    if (!isOpen || !pane || isSaving) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isOpen, isSaving, onClose, pane])
+
   if (!isOpen || !pane) return null
 
   const needsConnection = type === 'ssh' || type === 'ssh_tmux'
@@ -142,7 +151,9 @@ export const PaneSettingsDialog: React.FC<PaneSettingsDialogProps> = ({
         justifyContent: 'center',
         zIndex: 1000,
       }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget && !isSaving) onClose()
+      }}
     >
       <div
         style={{
@@ -151,6 +162,10 @@ export const PaneSettingsDialog: React.FC<PaneSettingsDialogProps> = ({
           borderRadius: '6px',
           padding: '20px 24px',
           width: '360px',
+          maxWidth: 'calc(100vw - 32px)',
+          maxHeight: 'calc(100vh - 32px)',
+          overflowY: 'auto',
+          boxSizing: 'border-box',
           fontFamily: TERMINAL_FONT_FAMILY,
           color: '#d4d4d4',
         }}

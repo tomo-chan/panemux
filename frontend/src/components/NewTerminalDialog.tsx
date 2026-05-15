@@ -104,6 +104,15 @@ export const NewTerminalDialog: React.FC<NewTerminalDialogProps> = ({
   }, [defaultBasePaneId, isOpen])
 
   useEffect(() => {
+    if (!isOpen || isSaving) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isOpen, isSaving, onClose])
+
+  useEffect(() => {
     if (!isOpen) return
     if (baseMode === 'blank') {
       setType('local')
@@ -192,7 +201,9 @@ export const NewTerminalDialog: React.FC<NewTerminalDialogProps> = ({
         justifyContent: 'center',
         zIndex: 1200,
       }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget && !isSaving) onClose()
+      }}
     >
       <div
         style={{
@@ -201,6 +212,10 @@ export const NewTerminalDialog: React.FC<NewTerminalDialogProps> = ({
           borderRadius: '6px',
           padding: '20px 24px',
           width: '420px',
+          maxWidth: 'calc(100vw - 32px)',
+          maxHeight: 'calc(100vh - 32px)',
+          overflowY: 'auto',
+          boxSizing: 'border-box',
           fontFamily: TERMINAL_FONT_FAMILY,
           color: '#d4d4d4',
         }}
