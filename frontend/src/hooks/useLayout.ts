@@ -40,13 +40,16 @@ export function useLayout() {
       .catch(() => { /* non-fatal */ })
   }, [])
 
-  const saveLayout = useCallback(async (updatedLayout: LayoutNode) => {
+  const saveLayout = useCallback(async (updatedLayout: LayoutNode, throwOnError = false) => {
     const workspaceID = workspaces?.active
-    await fetch(workspaceID ? `/api/workspaces/${encodeURIComponent(workspaceID)}/layout` : '/api/layout', {
+    const response = await fetch(workspaceID ? `/api/workspaces/${encodeURIComponent(workspaceID)}/layout` : '/api/layout', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(updatedLayout),
     }).catch(console.error)
+    if (throwOnError && response && !response.ok) {
+      throw new Error(`HTTP ${response.status}`)
+    }
   }, [workspaces?.active])
 
   const detectDefaultLocalShell = useCallback(async () => {
@@ -243,7 +246,7 @@ export function useLayout() {
       : insertPaneBesideTargetPane(layout, placement.targetPaneId, placement.edge, paneWithDefaults)
     setLayout(newLayout)
     setWorkspaces((current) => current ? replaceActiveWorkspaceLayout(current, newLayout) : current)
-    await saveLayout(newLayout)
+    await saveLayout(newLayout, true)
   }, [ensurePaneDefaults, layout, saveLayout])
 
   const movePane = useCallback(async (sourcePaneId: string, placement: PanePlacement) => {
@@ -254,7 +257,7 @@ export function useLayout() {
       : movePaneBesideTargetPane(layout, sourcePaneId, placement.targetPaneId, placement.edge)
     setLayout(newLayout)
     setWorkspaces((current) => current ? replaceActiveWorkspaceLayout(current, newLayout) : current)
-    await saveLayout(newLayout)
+    await saveLayout(newLayout, true)
   }, [layout, saveLayout])
 
   return { layout, workspaces, displayConfig, error, updateSizes, splitPane, closePane, swapPanes, createPane, movePane, setActiveWorkspace, addWorkspace, deleteWorkspace, renameWorkspace, setWorkspaceTabPosition }

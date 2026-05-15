@@ -880,4 +880,130 @@ describe('useLayout', () => {
       expect(fetchMock).toHaveBeenCalledTimes(callsBefore)
     })
   })
+
+  describe('createPane', () => {
+    it('creates a pane on the workspace edge and persists the layout', async () => {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validWorkspaces) } as Response)
+        .mockResolvedValueOnce({ ok: false } as Response)
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ shell: '/bin/zsh' }) } as Response)
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ id: 'created', type: 'local', state: 'connected' }) } as Response)
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) } as Response)
+      window.fetch = fetchMock
+
+      const { result } = renderHook(() => useLayout())
+      await waitFor(() => expect(result.current.layout).not.toBeNull())
+
+      await act(async () => {
+        await result.current.createPane({ id: 'created', type: 'local' }, { type: 'workspace-edge', edge: 'right' })
+      })
+
+      expect(fetchMock).toHaveBeenCalledWith('/api/sessions', expect.objectContaining({ method: 'POST' }))
+      expect(fetchMock).toHaveBeenCalledWith('/api/workspaces/dev/layout', expect.objectContaining({ method: 'PUT' }))
+      expect(result.current.layout?.children.some((child) => child.pane?.id === 'created')).toBe(true)
+    })
+
+    it('creates a pane beside an existing target pane', async () => {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validWorkspaces) } as Response)
+        .mockResolvedValueOnce({ ok: false } as Response)
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ id: 'created', type: 'ssh', state: 'connected' }) } as Response)
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) } as Response)
+      window.fetch = fetchMock
+
+      const { result } = renderHook(() => useLayout())
+      await waitFor(() => expect(result.current.layout).not.toBeNull())
+
+      await act(async () => {
+        await result.current.createPane(
+          { id: 'created', type: 'ssh', connection: 'prod' },
+          { type: 'pane-edge', targetPaneId: 'main', edge: 'bottom' },
+        )
+      })
+
+      expect(result.current.layout?.children[0].direction).toBe('vertical')
+      expect(fetchMock).toHaveBeenCalledWith('/api/workspaces/dev/layout', expect.objectContaining({ method: 'PUT' }))
+    })
+
+    it('throws when session creation fails', async () => {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validWorkspaces) } as Response)
+        .mockResolvedValueOnce({ ok: false } as Response)
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ shell: '/bin/zsh' }) } as Response)
+        .mockResolvedValueOnce({ ok: false, status: 500 } as Response)
+      window.fetch = fetchMock
+
+      const { result } = renderHook(() => useLayout())
+      await waitFor(() => expect(result.current.layout).not.toBeNull())
+
+      await act(async () => {
+        await expect(result.current.createPane(
+          { id: 'created', type: 'local' },
+          { type: 'workspace-edge', edge: 'left' },
+        )).rejects.toThrow('HTTP 500')
+      })
+    })
+  })
+
+  describe('movePane', () => {
+    it('moves a pane to the workspace edge without creating a new session', async () => {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validWorkspaces) } as Response)
+        .mockResolvedValueOnce({ ok: false } as Response)
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) } as Response)
+      window.fetch = fetchMock
+
+      const { result } = renderHook(() => useLayout())
+      await waitFor(() => expect(result.current.layout).not.toBeNull())
+
+      await act(async () => {
+        await result.current.movePane('main', { type: 'workspace-edge', edge: 'right' })
+      })
+
+      const sessionPosts = fetchMock.mock.calls.filter((call) => call[0] === '/api/sessions')
+      expect(sessionPosts).toHaveLength(0)
+      expect(fetchMock).toHaveBeenCalledWith('/api/workspaces/dev/layout', expect.objectContaining({ method: 'PUT' }))
+      expect(result.current.layout?.children[result.current.layout.children.length - 1].pane?.id).toBe('main')
+    })
+
+    it('moves a pane beside another target pane', async () => {
+      const nestedLayout: LayoutNode = {
+        direction: 'horizontal',
+        children: [
+          { size: 50, pane: { id: 'left', type: 'local' } },
+          { size: 50, pane: { id: 'right', type: 'local' } },
+        ],
+      }
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(workspacesForLayout(nestedLayout)) } as Response)
+        .mockResolvedValueOnce({ ok: false } as Response)
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) } as Response)
+      window.fetch = fetchMock
+
+      const { result } = renderHook(() => useLayout())
+      await waitFor(() => expect(result.current.layout).not.toBeNull())
+
+      await act(async () => {
+        await result.current.movePane('right', { type: 'pane-edge', targetPaneId: 'left', edge: 'bottom' })
+      })
+
+      expect(result.current.layout?.children[0].direction).toBe('vertical')
+      expect(fetchMock).toHaveBeenCalledWith('/api/workspaces/dev/layout', expect.objectContaining({ method: 'PUT' }))
+    })
+
+    it('throws when persisting a moved pane fails', async () => {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validWorkspaces) } as Response)
+        .mockResolvedValueOnce({ ok: false } as Response)
+        .mockResolvedValueOnce({ ok: false, status: 500 } as Response)
+      window.fetch = fetchMock
+
+      const { result } = renderHook(() => useLayout())
+      await waitFor(() => expect(result.current.layout).not.toBeNull())
+
+      await act(async () => {
+        await expect(result.current.movePane('main', { type: 'workspace-edge', edge: 'left' })).rejects.toThrow('HTTP 500')
+      })
+    })
+  })
 })

@@ -328,7 +328,7 @@ func (h *Handler) DeleteSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.cfg.RemovePaneFromLayout(id)
-	if err := h.cfg.SaveWorkspaces(); err != nil {
+	if err := h.cfg.SaveLayout(h.cfg.Layout); err != nil {
 		http.Error(w, "failed to save layout", http.StatusInternalServerError)
 		return
 	}
