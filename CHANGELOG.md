@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/tomo-chan/panemux/compare/v0.14.0...v0.15.0) (2026-05-16)
+
+
+### Features
+
+* add directory browser for pane working directories ([#91](https://github.com/tomo-chan/panemux/issues/91)) ([399a909](https://github.com/tomo-chan/panemux/commit/399a9092666ee0035316c28743af16700aa6e67b))
+
 ## [0.14.0](https://github.com/tomo-chan/panemux/compare/v0.13.2...v0.14.0) (2026-05-16)
 
 
