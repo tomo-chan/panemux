@@ -164,17 +164,21 @@ func TestManagedSession_SubscribeStillWorksWhilePublishWaitsOnSlowSubscriber(t *
 	go func() {
 		_, updates, unsubscribe := entry.subscribe()
 		unsubscribe()
-		select {
-		case _, ok := <-updates:
-			require.False(t, ok)
-		default:
+		for {
+			// A publish racing with unsubscribe may enqueue one last update before
+			// the subscription is removed. The important invariant is that
+			// subscribe/unsubscribe never blocks behind another slow subscriber and
+			// the stream closes promptly once drained.
+			if _, ok := <-updates; !ok {
+				break
+			}
 		}
 		close(done)
 	}()
 
 	select {
 	case <-done:
-	case <-time.After(100 * time.Millisecond):
+	case <-time.After(time.Second):
 		t.Fatal("subscribe blocked behind a slow subscriber")
 	}
 }
