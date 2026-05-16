@@ -1,0 +1,61 @@
+import { expect, test, type Locator, type Page } from '@playwright/test'
+
+test('starts pane move mode from the header handle and moves a pane to the workspace edge', async ({ page }) => {
+  await page.goto('/')
+
+  const initialPaneCount = await page.locator('[data-pane-id]').count()
+  await page.getByTitle('Split horizontal').first().click()
+  await expect(page.locator('[data-pane-id]')).toHaveCount(initialPaneCount + 1)
+
+  const dragHandle = page.getByTitle('Drag to move pane').first()
+  const topDropZone = page.locator('[data-workspace-drop-edge="top"]')
+
+  await dragHandleToTarget(page, dragHandle, topDropZone)
+
+  await expect(topDropZone).toBeHidden()
+  await expect.poll(async () => page.locator('[data-pane-id]').evaluateAll((nodes) =>
+    nodes.map((node) => node.getAttribute('data-pane-id')),
+  )).toHaveLength(initialPaneCount + 1)
+
+  const paneIds = await page.locator('[data-pane-id]').evaluateAll((nodes) =>
+    nodes.map((node) => node.getAttribute('data-pane-id')),
+  )
+  expect(new Set(paneIds).size).toBe(initialPaneCount + 1)
+})
+
+test('starts pane move mode from the header handle and moves a pane beside another pane', async ({ page }) => {
+  await page.goto('/')
+
+  const initialPaneCount = await page.locator('[data-pane-id]').count()
+  await page.getByTitle('Split horizontal').first().click()
+  await expect(page.locator('[data-pane-id]')).toHaveCount(initialPaneCount + 1)
+
+  const dragHandle = page.getByTitle('Drag to move pane').first()
+  const targetDropZone = page.locator('[data-pane-id]').nth(1).locator('[data-pane-drop-edge="left"]')
+
+  await dragHandleToTarget(page, dragHandle, targetDropZone)
+
+  await expect(targetDropZone).toBeHidden()
+  await expect(page.locator('[data-pane-id]')).toHaveCount(initialPaneCount + 1)
+})
+
+async function dragHandleToTarget(page: Page, handle: Locator, target: Locator) {
+  const handleBox = await handle.boundingBox()
+  if (!handleBox) throw new Error('drag handle did not have a bounding box')
+
+  await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(handleBox.x + handleBox.width / 2 + 24, handleBox.y + handleBox.height / 2 + 6, {
+    steps: 8,
+  })
+
+  await expect(target).toBeVisible()
+
+  const targetBox = await target.boundingBox()
+  if (!targetBox) throw new Error('drop target did not have a bounding box')
+
+  await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height / 2, {
+    steps: 12,
+  })
+  await page.mouse.up()
+}

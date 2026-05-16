@@ -14,7 +14,7 @@ interface PaneHeaderProps {
   onMaximize: () => void
   onSettings: () => void
   onOpenVSCode?: () => void
-  moveHandleProps?: Pick<React.HTMLAttributes<HTMLSpanElement>, 'onDragStart' | 'onDragEnd'>
+  moveHandleProps?: Pick<React.HTMLAttributes<HTMLSpanElement>, 'onDragStart' | 'onDragEnd' | 'onMouseDown'>
 }
 
 const TYPE_COLORS: Record<string, string> = {
@@ -89,6 +89,7 @@ export const PaneHeader: React.FC<PaneHeaderProps> = ({
         draggable={Boolean(moveHandleProps)}
         onDragStart={moveHandleProps?.onDragStart}
         onDragEnd={moveHandleProps?.onDragEnd}
+        onMouseDown={moveHandleProps?.onMouseDown}
         style={{
           color: '#4a7ea5',
           fontSize: '13px',

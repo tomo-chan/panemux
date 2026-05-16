@@ -34,6 +34,7 @@ interface SplitContainerProps {
 
 export const SplitContainer: React.FC<SplitContainerProps> = ({ layout, onLayoutChange }) => {
   const layoutCtx = useContext(LayoutActionsContext)
+  const [hoveredWorkspaceEdge, setHoveredWorkspaceEdge] = React.useState<PaneEdge | null>(null)
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
       <LayoutRenderer
@@ -56,7 +57,18 @@ export const SplitContainer: React.FC<SplitContainerProps> = ({ layout, onLayout
                 layoutCtx.onMovePaneToWorkspaceEdge(layoutCtx.dragSourcePaneId!, edge)
                 layoutCtx.setDragSourcePaneId(null)
               }}
-              style={workspaceDropZoneStyle(edge)}
+              onMouseEnter={() => {
+                if (!layoutCtx?.dragSourcePaneId) return
+                setHoveredWorkspaceEdge(edge)
+              }}
+              onMouseLeave={() => setHoveredWorkspaceEdge((current) => (current === edge ? null : current))}
+              onMouseUp={() => {
+                if (!layoutCtx?.dragSourcePaneId) return
+                layoutCtx.onMovePaneToWorkspaceEdge(layoutCtx.dragSourcePaneId, edge)
+                layoutCtx.setDragSourcePaneId(null)
+                setHoveredWorkspaceEdge(null)
+              }}
+              style={workspaceDropZoneStyle(edge, hoveredWorkspaceEdge === edge)}
             />
           ))}
         </>
@@ -215,6 +227,20 @@ const DividerDropZone: React.FC<DividerDropZoneProps> = ({ direction, beforeChil
         }}
         onDragLeave={() => setHovered(false)}
         onDrop={handleDrop}
+        onMouseEnter={() => {
+          if (!ctx?.dragSourcePaneId) return
+          setHovered(true)
+        }}
+        onMouseLeave={() => setHovered(false)}
+        onMouseUp={() => {
+          if (!ctx?.dragSourcePaneId) return
+          const sourceId = ctx.dragSourcePaneId
+          const targetPaneId = findBoundaryPaneId(beforeChild, 'end') ?? findBoundaryPaneId(afterChild, 'start')
+          if (!targetPaneId) return
+          ctx.onMovePaneBeside(sourceId, targetPaneId, edge)
+          ctx.setDragSourcePaneId(null)
+          setHovered(false)
+        }}
         style={dividerHitAreaStyle(direction, Boolean(ctx?.dragSourcePaneId))}
       />
       <SplitDivider direction={direction} onDrag={onResize} />
@@ -234,11 +260,12 @@ function findBoundaryPaneId(child: LayoutChild, side: 'start' | 'end'): string |
   return findBoundaryPaneId(next, side)
 }
 
-export function workspaceDropZoneStyle(edge: PaneEdge): React.CSSProperties {
+export function workspaceDropZoneStyle(edge: PaneEdge, active = false): React.CSSProperties {
   const common: React.CSSProperties = {
     position: 'absolute',
     zIndex: 20,
-    backgroundColor: 'transparent',
+    backgroundColor: active ? 'rgba(86, 156, 214, 0.2)' : 'transparent',
+    transition: 'background-color 0.15s ease',
   }
   switch (edge) {
     case 'top':

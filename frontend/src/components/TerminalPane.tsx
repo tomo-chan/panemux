@@ -63,6 +63,24 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
     setHoverEdge(null)
   }, [ctx])
 
+  const handleMoveHandleMouseDown = useCallback((e: React.MouseEvent) => {
+    if (e.button !== 0) return
+    e.preventDefault()
+    ctx?.setDragSourcePaneId(pane.id)
+  }, [ctx, pane.id])
+
+  useEffect(() => {
+    if (!isDragSource) return
+
+    const handleMouseUp = () => {
+      ctx?.setDragSourcePaneId(null)
+      setHoverEdge(null)
+    }
+
+    window.addEventListener('mouseup', handleMouseUp)
+    return () => window.removeEventListener('mouseup', handleMouseUp)
+  }, [ctx, isDragSource])
+
   const handleEdgeDrop = useCallback((edge: PaneEdge) => {
     const sourceId = ctx?.dragSourcePaneId
     if (!sourceId || sourceId === pane.id) return
@@ -73,6 +91,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
 
   return (
     <div
+      data-pane-id={pane.id}
       className={hasAttention ? 'panemux-pane-attention' : undefined}
       data-attention={hasAttention ? 'true' : undefined}
       onMouseDown={() => ctx?.clearPaneAttention(pane.id)}
@@ -103,7 +122,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
         onMaximize={() => ctx?.onMaximize(ctx.maximizedPaneId === pane.id ? null : pane.id)}
         onSettings={() => ctx?.onSettings(pane.id)}
         onOpenVSCode={handleOpenVSCode}
-        moveHandleProps={{ onDragStart: handleDragStart, onDragEnd: handleDragEnd }}
+        moveHandleProps={{ onDragStart: handleDragStart, onDragEnd: handleDragEnd, onMouseDown: handleMoveHandleMouseDown }}
       />
       <div
         ref={setRef}
@@ -131,6 +150,12 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
                   e.preventDefault()
                   handleEdgeDrop(edge)
                 }}
+                onMouseEnter={() => {
+                  if (!ctx?.dragSourcePaneId || ctx.dragSourcePaneId === pane.id) return
+                  setHoverEdge(edge)
+                }}
+                onMouseLeave={() => setHoverEdge((current) => (current === edge ? null : current))}
+                onMouseUp={() => handleEdgeDrop(edge)}
                 style={dropZoneStyle(edge, hoverEdge === edge)}
               />
             ))}
