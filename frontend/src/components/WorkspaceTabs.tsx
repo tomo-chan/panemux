@@ -65,6 +65,23 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
     setEditingWorkspaceId(null)
   }
 
+  const surfaceButtonStyle = (base: React.CSSProperties, options?: { selected?: boolean; danger?: boolean }): React.CSSProperties => {
+    const selected = options?.selected ?? false
+    const danger = options?.danger ?? false
+    const baseColor = (base.color as string | undefined) ?? '#b8beca'
+    const selectedBackground = selected ? '#2f3540' : 'transparent'
+    return {
+      ...base,
+      appearance: 'none',
+      border: 'none',
+      transition: 'background-color 0.12s ease, box-shadow 0.12s ease, color 0.12s ease, transform 0.12s ease',
+      backgroundColor: selectedBackground,
+      color: danger ? '#f08b8b' : baseColor,
+      ['--pmx-base-color' as string]: danger ? '#f08b8b' : baseColor,
+      ['--pmx-selected-background' as string]: selectedBackground,
+    }
+  }
+
   const positionControls = onTabPositionChange ? (
     <div
       role="group"
@@ -104,11 +121,17 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
               aria-pressed={selected}
               title={ariaLabel}
               onClick={() => onTabPositionChange(position)}
-              style={{
-                appearance: 'none',
+              onMouseEnter={(event) => applyInteractiveButtonState(event.currentTarget, 'hover', selected)}
+              onMouseLeave={(event) => applyInteractiveButtonState(event.currentTarget, 'rest', selected)}
+              onMouseDown={(event) => {
+                if (event.button !== 0) return
+                applyInteractiveButtonState(event.currentTarget, 'pressed', selected)
+              }}
+              onMouseUp={(event) => applyInteractiveButtonState(event.currentTarget, 'hover', selected)}
+              onBlur={(event) => applyInteractiveButtonState(event.currentTarget, 'rest', selected)}
+              style={surfaceButtonStyle({
                 border: 'none',
                 borderRight: !isLast ? '1px solid #333842' : undefined,
-                backgroundColor: selected ? '#3a4350' : 'transparent',
                 color: selected ? '#ffffff' : '#b8beca',
                 cursor: selected ? 'default' : 'pointer',
                 fontFamily: TERMINAL_FONT_FAMILY,
@@ -119,7 +142,7 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
                 flex: '0 0 34px',
                 padding: 0,
                 textAlign: 'center',
-              }}
+              }, { selected })}
             >
               {label}
             </button>
@@ -223,10 +246,16 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
                     }}
                     onDoubleClick={() => startRename(workspace)}
                     title={workspace.title}
-                    style={{
-                      appearance: 'none',
+                    onMouseEnter={(event) => applyInteractiveButtonState(event.currentTarget, 'hover', active)}
+                    onMouseLeave={(event) => applyInteractiveButtonState(event.currentTarget, 'rest', active)}
+                    onMouseDown={(event) => {
+                      if (event.button !== 0) return
+                      applyInteractiveButtonState(event.currentTarget, 'pressed', active)
+                    }}
+                    onMouseUp={(event) => applyInteractiveButtonState(event.currentTarget, 'hover', active)}
+                    onBlur={(event) => applyInteractiveButtonState(event.currentTarget, 'rest', active)}
+                    style={surfaceButtonStyle({
                       border: 'none',
-                      backgroundColor: 'transparent',
                       color: active ? '#ffffff' : '#b8beca',
                       cursor: active ? 'default' : 'pointer',
                       flex: 1,
@@ -239,7 +268,7 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
                       whiteSpace: 'nowrap',
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
-                    }}
+                    }, { selected: active })}
                   >
                     {workspace.title}
                   </button>
@@ -250,10 +279,16 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
                     aria-label={`Rename ${workspace.title} workspace`}
                     title="Rename workspace"
                     onClick={() => startRename(workspace)}
-                    style={{
-                      appearance: 'none',
+                    onMouseEnter={(event) => applyInteractiveButtonState(event.currentTarget, 'hover', false)}
+                    onMouseLeave={(event) => applyInteractiveButtonState(event.currentTarget, 'rest', false)}
+                    onMouseDown={(event) => {
+                      if (event.button !== 0) return
+                      applyInteractiveButtonState(event.currentTarget, 'pressed', false)
+                    }}
+                    onMouseUp={(event) => applyInteractiveButtonState(event.currentTarget, 'hover', false)}
+                    onBlur={(event) => applyInteractiveButtonState(event.currentTarget, 'rest', false)}
+                    style={surfaceButtonStyle({
                       border: 'none',
-                      backgroundColor: 'transparent',
                       color: active ? '#d7dce5' : '#8f96a3',
                       cursor: 'pointer',
                       flex: '0 0 28px',
@@ -263,7 +298,7 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
                       lineHeight: vertical ? '38px' : '34px',
                       padding: 0,
                       textAlign: 'center',
-                    }}
+                    })}
                   >
                     ✎
                   </button>
@@ -274,10 +309,16 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
                     aria-label={`Delete ${workspace.title} workspace`}
                     title="Delete workspace"
                     onClick={() => onDelete(workspace.id)}
-                    style={{
-                      appearance: 'none',
+                    onMouseEnter={(event) => applyInteractiveButtonState(event.currentTarget, 'hover', false)}
+                    onMouseLeave={(event) => applyInteractiveButtonState(event.currentTarget, 'rest', false)}
+                    onMouseDown={(event) => {
+                      if (event.button !== 0) return
+                      applyInteractiveButtonState(event.currentTarget, 'pressed', false)
+                    }}
+                    onMouseUp={(event) => applyInteractiveButtonState(event.currentTarget, 'hover', false)}
+                    onBlur={(event) => applyInteractiveButtonState(event.currentTarget, 'rest', false)}
+                    style={surfaceButtonStyle({
                       border: 'none',
-                      backgroundColor: 'transparent',
                       color: active ? '#d7dce5' : '#8f96a3',
                       cursor: 'pointer',
                       flex: '0 0 28px',
@@ -287,7 +328,7 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
                       lineHeight: vertical ? '38px' : '34px',
                       padding: 0,
                       textAlign: 'center',
-                    }}
+                    }, { danger: true })}
                   >
                     ×
                   </button>
@@ -316,7 +357,15 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
             aria-label="Add workspace"
             title="Add workspace"
             onClick={onAdd}
-            style={actionButtonStyle(vertical)}
+            onMouseEnter={(event) => applyInteractiveButtonState(event.currentTarget, 'hover', false)}
+            onMouseLeave={(event) => applyInteractiveButtonState(event.currentTarget, 'rest', false)}
+            onMouseDown={(event) => {
+              if (event.button !== 0) return
+              applyInteractiveButtonState(event.currentTarget, 'pressed', false)
+            }}
+            onMouseUp={(event) => applyInteractiveButtonState(event.currentTarget, 'hover', false)}
+            onBlur={(event) => applyInteractiveButtonState(event.currentTarget, 'rest', false)}
+            style={surfaceButtonStyle(actionButtonStyle(vertical))}
           >
             +
           </button>
@@ -343,4 +392,32 @@ function actionButtonStyle(vertical: boolean): React.CSSProperties {
     textAlign: 'center',
     whiteSpace: 'nowrap',
   }
+}
+
+type InteractiveState = 'rest' | 'hover' | 'pressed'
+
+function applyInteractiveButtonState(button: HTMLButtonElement, state: InteractiveState, selected: boolean) {
+  const selectedBackground = selected ? '#2f3540' : 'transparent'
+  const baseColor = button.style.getPropertyValue('--pmx-base-color') || '#b8beca'
+
+  if (state === 'pressed') {
+    button.style.backgroundColor = selected ? '#39414f' : 'rgba(255, 255, 255, 0.12)'
+    button.style.boxShadow = 'inset 0 1px 2px rgba(0, 0, 0, 0.45)'
+    button.style.color = '#ffffff'
+    button.style.transform = 'translateY(1px)'
+    return
+  }
+
+  if (state === 'hover') {
+    button.style.backgroundColor = selected ? '#353d4a' : 'rgba(255, 255, 255, 0.07)'
+    button.style.boxShadow = 'inset 0 0 0 1px rgba(255, 255, 255, 0.06)'
+    button.style.color = selected ? '#ffffff' : '#d7dce5'
+    button.style.transform = 'translateY(0)'
+    return
+  }
+
+  button.style.backgroundColor = selectedBackground
+  button.style.boxShadow = 'none'
+  button.style.color = selected ? '#ffffff' : baseColor
+  button.style.transform = 'translateY(0)'
 }

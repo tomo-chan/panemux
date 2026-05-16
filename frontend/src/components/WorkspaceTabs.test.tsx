@@ -26,6 +26,31 @@ describe('WorkspaceTabs', () => {
     expect(onSelect).toHaveBeenCalledWith('ops')
   })
 
+  it('shows hover affordance on workspace tabs', () => {
+    render(<WorkspaceTabs workspaces={workspaces} activeWorkspaceId="dev" tabPosition="top" onSelect={() => {}} />)
+
+    const tab = screen.getByRole('tab', { name: 'Ops' })
+    fireEvent.mouseEnter(tab)
+
+    expect(tab).toHaveStyle({
+      backgroundColor: 'rgba(255, 255, 255, 0.07)',
+      boxShadow: 'inset 0 0 0 1px rgba(255, 255, 255, 0.06)',
+    })
+  })
+
+  it('shows a pressed state on workspace add button while held down', () => {
+    render(<WorkspaceTabs workspaces={workspaces} activeWorkspaceId="dev" tabPosition="top" onSelect={() => {}} onAdd={() => {}} />)
+
+    const button = screen.getByRole('button', { name: 'Add workspace' })
+    fireEvent.mouseDown(button, { button: 0 })
+
+    expect(button).toHaveStyle({
+      backgroundColor: 'rgba(255, 255, 255, 0.12)',
+      boxShadow: 'inset 0 1px 2px rgba(0, 0, 0, 0.45)',
+      transform: 'translateY(1px)',
+    })
+  })
+
   it('marks inactive workspaces that need attention', () => {
     render(
       <WorkspaceTabs
