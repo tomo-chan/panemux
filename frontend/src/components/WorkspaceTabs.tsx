@@ -300,10 +300,14 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
       {onAdd && (
         <div
           style={{
+            borderRight: !vertical ? '1px solid #333842' : undefined,
+            borderBottom: vertical ? '1px solid #333842' : undefined,
+            backgroundColor: 'transparent',
             display: 'flex',
-            flexDirection: vertical ? 'column' : 'row',
-            borderLeft: !vertical ? '1px solid #333842' : undefined,
-            borderTop: vertical ? '1px solid #333842' : undefined,
+            alignItems: 'center',
+            height: vertical ? 38 : 34,
+            minWidth: vertical ? '100%' : 40,
+            maxWidth: vertical ? '100%' : 40,
             flexShrink: 0,
           }}
         >
@@ -327,16 +331,15 @@ function actionButtonStyle(vertical: boolean): React.CSSProperties {
   return {
     appearance: 'none',
     border: 'none',
-    borderRight: !vertical ? '1px solid #333842' : undefined,
-    borderBottom: vertical ? '1px solid #333842' : undefined,
     backgroundColor: 'transparent',
     color: '#b8beca',
     cursor: 'pointer',
     fontFamily: TERMINAL_FONT_FAMILY,
-    fontSize: 12,
-    minWidth: vertical ? '100%' : 80,
-    height: vertical ? 30 : 34,
-    padding: vertical ? '0 10px' : '0 12px',
+    fontSize: 16,
+    minWidth: vertical ? '100%' : 40,
+    height: '100%',
+    padding: 0,
+    flex: 1,
     textAlign: 'center',
     whiteSpace: 'nowrap',
   }

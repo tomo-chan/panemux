@@ -88,6 +88,12 @@ describe('WorkspaceTabs', () => {
     expect(onAdd).toHaveBeenCalled()
   })
 
+  it('renders the add workspace control with the same tab height', () => {
+    render(<WorkspaceTabs workspaces={workspaces} activeWorkspaceId="dev" tabPosition="top" onSelect={() => {}} onAdd={() => {}} />)
+
+    expect(screen.getByRole('button', { name: 'Add workspace' }).parentElement).toHaveStyle({ height: '34px' })
+  })
+
   it('does not render a workspace-bar add terminal button', () => {
     render(<WorkspaceTabs workspaces={workspaces} activeWorkspaceId="dev" tabPosition="top" onSelect={() => {}} onAdd={() => {}} />)
 
