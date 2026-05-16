@@ -23,8 +23,6 @@ import (
 	"panemux/internal/sshconfig"
 )
 
-var readDir = os.ReadDir
-
 // Handler provides REST API endpoints.
 type Handler struct {
 	cfg                     *config.Config
@@ -34,6 +32,7 @@ type Handler struct {
 	detectRemoteShellFn     func(cfg session.SSHConfig) (string, error)
 	listLocalDirectoriesFn  func(path string, showHidden bool) (directoryBrowserResponse, error)
 	listRemoteDirectoriesFn func(cfg session.SSHConfig, path string, showHidden bool) (directoryBrowserResponse, error)
+	readDirFn               func(name string) ([]os.DirEntry, error)
 	sshConfigPath           string
 	codeBinaryPath          string // empty = auto-detect; overridden in tests
 	gitBinaryPath           string // empty = auto-detect; overridden in tests
@@ -94,7 +93,8 @@ func NewHandler(cfg *config.Config, manager *session.Manager) *Handler {
 	h.createSession = session.CreateFromConfig
 	h.detectLocalShellFn = session.DetectLocalShell
 	h.detectRemoteShellFn = session.DetectRemoteShell
-	h.listLocalDirectoriesFn = listLocalDirectories
+	h.readDirFn = os.ReadDir
+	h.listLocalDirectoriesFn = h.listLocalDirectories
 	h.listRemoteDirectoriesFn = listRemoteDirectories
 	return h
 }
@@ -765,13 +765,13 @@ func writeJSON(w http.ResponseWriter, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-func listLocalDirectories(path string, showHidden bool) (directoryBrowserResponse, error) {
+func (h *Handler) listLocalDirectories(path string, showHidden bool) (directoryBrowserResponse, error) {
 	resolvedPath, err := resolveLocalDirectoryBrowsePath(path)
 	if err != nil {
 		return directoryBrowserResponse{}, err
 	}
 
-	entries, err := readDir(resolvedPath)
+	entries, err := h.readDirFn(resolvedPath)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return directoryBrowserResponse{}, errors.New("directory path does not exist")
@@ -783,6 +783,7 @@ func listLocalDirectories(path string, showHidden bool) (directoryBrowserRespons
 		if errors.As(err, &pathErr) && errors.Is(pathErr.Err, fs.ErrInvalid) {
 			return directoryBrowserResponse{}, errors.New("path is not a directory")
 		}
+		// readDir on a plain file commonly reports a PathError with Op "readdir".
 		if errors.As(err, &pathErr) && pathErr.Op == "readdir" {
 			return directoryBrowserResponse{}, errors.New("path is not a directory")
 		}
@@ -801,7 +802,7 @@ func listLocalDirectories(path string, showHidden bool) (directoryBrowserRespons
 			continue
 		}
 		childPath := filepath.Join(resolvedPath, entry.Name())
-		hasChildren, childErr := localDirectoryHasChildren(childPath)
+		hasChildren, childErr := h.localDirectoryHasChildren(childPath)
 		if childErr != nil {
 			if errors.Is(childErr, fs.ErrPermission) {
 				continue
@@ -867,8 +868,8 @@ func resolveLocalDirectoryBrowsePath(path string) (string, error) {
 	return filepath.Clean(absPath), nil
 }
 
-func localDirectoryHasChildren(path string) (bool, error) {
-	entries, err := readDir(path)
+func (h *Handler) localDirectoryHasChildren(path string) (bool, error) {
+	entries, err := h.readDirFn(path)
 	if err != nil {
 		return false, fmt.Errorf("read dir %s: %w", path, err)
 	}

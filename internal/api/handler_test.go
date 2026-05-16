@@ -1556,18 +1556,18 @@ func TestGetDirectories_SkipsUnreadableChildDirectories(t *testing.T) {
 	require.NoError(t, os.Mkdir(filepath.Join(readableDir, "nested"), 0755))
 	require.NoError(t, os.Mkdir(unreadableDir, 0755))
 
-	originalReadDir := readDir
-	readDir = func(name string) ([]os.DirEntry, error) {
+	h := NewHandler(defaultTestConfig(), session.NewManager())
+	originalReadDir := h.readDirFn
+	h.readDirFn = func(name string) ([]os.DirEntry, error) {
 		if name == unreadableDir {
 			return nil, &fs.PathError{Op: "readdir", Path: name, Err: fs.ErrPermission}
 		}
 		return originalReadDir(name)
 	}
 	t.Cleanup(func() {
-		readDir = originalReadDir
+		h.readDirFn = originalReadDir
 	})
 
-	h := NewHandler(defaultTestConfig(), session.NewManager())
 	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()

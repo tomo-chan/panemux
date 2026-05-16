@@ -91,6 +91,18 @@ export const PaneSettingsDialog: React.FC<PaneSettingsDialogProps> = ({
   const [isBrowsingDirectories, setIsBrowsingDirectories] = useState(false)
   const [showHiddenDirectories, setShowHiddenDirectories] = useState(false)
 
+  function resetDirectoryBrowser() {
+    setShowDirectoryBrowser(false)
+    setDirectoryResponses({})
+    setExpandedDirectories({})
+    setBrowserPath('')
+    setBrowserInputPath('')
+    setBrowserSelection('')
+    setBrowseError(null)
+    setIsBrowsingDirectories(false)
+    setShowHiddenDirectories(false)
+  }
+
   useEffect(() => {
     if (pane) {
       setType(pane.type)
@@ -129,18 +141,6 @@ export const PaneSettingsDialog: React.FC<PaneSettingsDialogProps> = ({
   const needsTmux = type === 'tmux' || type === 'ssh_tmux'
   const needsShell = type === 'local' || type === 'ssh' || type === 'ssh_tmux'
   const canBrowseDirectories = !needsConnection || connection !== ''
-
-  function resetDirectoryBrowser() {
-    setShowDirectoryBrowser(false)
-    setDirectoryResponses({})
-    setExpandedDirectories({})
-    setBrowserPath('')
-    setBrowserInputPath('')
-    setBrowserSelection('')
-    setBrowseError(null)
-    setIsBrowsingDirectories(false)
-    setShowHiddenDirectories(false)
-  }
 
   const handleDetectShell = async () => {
     setIsDetecting(true)
