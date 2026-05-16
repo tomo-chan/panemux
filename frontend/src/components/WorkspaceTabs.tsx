@@ -346,7 +346,6 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
                     danger
                     style={{
                       border: 'none',
-                      color: active ? '#d7dce5' : '#8f96a3',
                       cursor: 'pointer',
                       flex: '0 0 28px',
                       fontFamily: TERMINAL_FONT_FAMILY,
