@@ -91,6 +91,11 @@ Sessions are started at server startup from the YAML config (`main.go: startSess
 
 ## Development Rules
 
+### Path sanitization
+- Do not record real local or remote directory paths from a developer machine or environment in tests, fixtures, docs, screenshots, PR bodies, review replies, or commit history.
+- Replace environment-specific paths with clearly fake placeholders such as `/workspace/user/project`, `/tmp/sample-project`, or `/remote/home/demo`.
+- If a real path is used temporarily for investigation, remove it before committing and rewrite the branch history if that path already landed in a published commit on the PR branch.
+
 ### TDD
 - Always **write tests first**, confirm they fail, then implement.
 - Go: all tests must pass (`make test-go`) before moving on.
