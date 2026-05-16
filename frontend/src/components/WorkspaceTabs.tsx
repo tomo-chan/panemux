@@ -15,6 +15,79 @@ interface WorkspaceTabsProps {
   onClearAttention?: (workspaceId: string) => void
 }
 
+interface InteractiveSurfaceButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+  selected?: boolean
+  danger?: boolean
+}
+
+const InteractiveSurfaceButton = React.forwardRef<HTMLButtonElement, InteractiveSurfaceButtonProps>(function InteractiveSurfaceButton(
+  { selected = false, danger = false, style, children, onMouseEnter, onMouseLeave, onMouseDown, onMouseUp, onBlur, ...props },
+  ref,
+) {
+  const [hovered, setHovered] = useState(false)
+  const [pressed, setPressed] = useState(false)
+  const mergedStyle = style ?? {}
+  const baseColor = (mergedStyle.color as string | undefined) ?? '#b8beca'
+
+  let backgroundColor = selected ? '#2f3540' : 'transparent'
+  let boxShadow = 'none'
+  let color = danger ? '#f08b8b' : baseColor
+  let transform = 'translateY(0)'
+
+  if (hovered) {
+    backgroundColor = selected ? '#353d4a' : 'rgba(255, 255, 255, 0.07)'
+    boxShadow = 'inset 0 0 0 1px rgba(255, 255, 255, 0.06)'
+    color = selected ? '#ffffff' : '#d7dce5'
+  }
+
+  if (pressed) {
+    backgroundColor = selected ? '#39414f' : 'rgba(255, 255, 255, 0.12)'
+    boxShadow = 'inset 0 1px 2px rgba(0, 0, 0, 0.45)'
+    color = '#ffffff'
+    transform = 'translateY(1px)'
+  }
+
+  return (
+    <button
+      {...props}
+      ref={ref}
+      onMouseEnter={(event) => {
+        setHovered(true)
+        onMouseEnter?.(event)
+      }}
+      onMouseLeave={(event) => {
+        setHovered(false)
+        setPressed(false)
+        onMouseLeave?.(event)
+      }}
+      onMouseDown={(event) => {
+        if (event.button === 0) setPressed(true)
+        onMouseDown?.(event)
+      }}
+      onMouseUp={(event) => {
+        setPressed(false)
+        onMouseUp?.(event)
+      }}
+      onBlur={(event) => {
+        setPressed(false)
+        onBlur?.(event)
+      }}
+      style={{
+        ...mergedStyle,
+        appearance: 'none',
+        border: 'none',
+        transition: 'background-color 0.12s ease, box-shadow 0.12s ease, color 0.12s ease, transform 0.12s ease',
+        backgroundColor,
+        boxShadow,
+        color,
+        transform,
+      }}
+    >
+      {children}
+    </button>
+  )
+})
+
 export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
   workspaces,
   activeWorkspaceId,
@@ -65,23 +138,6 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
     setEditingWorkspaceId(null)
   }
 
-  const surfaceButtonStyle = (base: React.CSSProperties, options?: { selected?: boolean; danger?: boolean }): React.CSSProperties => {
-    const selected = options?.selected ?? false
-    const danger = options?.danger ?? false
-    const baseColor = (base.color as string | undefined) ?? '#b8beca'
-    const selectedBackground = selected ? '#2f3540' : 'transparent'
-    return {
-      ...base,
-      appearance: 'none',
-      border: 'none',
-      transition: 'background-color 0.12s ease, box-shadow 0.12s ease, color 0.12s ease, transform 0.12s ease',
-      backgroundColor: selectedBackground,
-      color: danger ? '#f08b8b' : baseColor,
-      ['--pmx-base-color' as string]: danger ? '#f08b8b' : baseColor,
-      ['--pmx-selected-background' as string]: selectedBackground,
-    }
-  }
-
   const positionControls = onTabPositionChange ? (
     <div
       role="group"
@@ -114,22 +170,15 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
           const selected = tabPosition === position
           const isLast = index === 3
           return (
-            <button
+            <InteractiveSurfaceButton
               key={position}
               type="button"
               aria-label={ariaLabel}
               aria-pressed={selected}
               title={ariaLabel}
               onClick={() => onTabPositionChange(position)}
-              onMouseEnter={(event) => applyInteractiveButtonState(event.currentTarget, 'hover', selected)}
-              onMouseLeave={(event) => applyInteractiveButtonState(event.currentTarget, 'rest', selected)}
-              onMouseDown={(event) => {
-                if (event.button !== 0) return
-                applyInteractiveButtonState(event.currentTarget, 'pressed', selected)
-              }}
-              onMouseUp={(event) => applyInteractiveButtonState(event.currentTarget, 'hover', selected)}
-              onBlur={(event) => applyInteractiveButtonState(event.currentTarget, 'rest', selected)}
-              style={surfaceButtonStyle({
+              selected={selected}
+              style={{
                 border: 'none',
                 borderRight: !isLast ? '1px solid #333842' : undefined,
                 color: selected ? '#ffffff' : '#b8beca',
@@ -142,10 +191,10 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
                 flex: '0 0 34px',
                 padding: 0,
                 textAlign: 'center',
-              }, { selected })}
+              }}
             >
               {label}
-            </button>
+            </InteractiveSurfaceButton>
           )
         })}
       </div>
@@ -236,7 +285,7 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
                     }}
                   />
                 ) : (
-                  <button
+                  <InteractiveSurfaceButton
                     role="tab"
                     aria-selected={active}
                     data-attention={hasAttention ? 'true' : undefined}
@@ -246,15 +295,8 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
                     }}
                     onDoubleClick={() => startRename(workspace)}
                     title={workspace.title}
-                    onMouseEnter={(event) => applyInteractiveButtonState(event.currentTarget, 'hover', active)}
-                    onMouseLeave={(event) => applyInteractiveButtonState(event.currentTarget, 'rest', active)}
-                    onMouseDown={(event) => {
-                      if (event.button !== 0) return
-                      applyInteractiveButtonState(event.currentTarget, 'pressed', active)
-                    }}
-                    onMouseUp={(event) => applyInteractiveButtonState(event.currentTarget, 'hover', active)}
-                    onBlur={(event) => applyInteractiveButtonState(event.currentTarget, 'rest', active)}
-                    style={surfaceButtonStyle({
+                    selected={active}
+                    style={{
                       border: 'none',
                       color: active ? '#ffffff' : '#b8beca',
                       cursor: active ? 'default' : 'pointer',
@@ -268,26 +310,18 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
                       whiteSpace: 'nowrap',
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
-                    }, { selected: active })}
+                    }}
                   >
                     {workspace.title}
-                  </button>
+                  </InteractiveSurfaceButton>
                 )}
                 {onRename && !editing && (
-                  <button
+                  <InteractiveSurfaceButton
                     type="button"
                     aria-label={`Rename ${workspace.title} workspace`}
                     title="Rename workspace"
                     onClick={() => startRename(workspace)}
-                    onMouseEnter={(event) => applyInteractiveButtonState(event.currentTarget, 'hover', false)}
-                    onMouseLeave={(event) => applyInteractiveButtonState(event.currentTarget, 'rest', false)}
-                    onMouseDown={(event) => {
-                      if (event.button !== 0) return
-                      applyInteractiveButtonState(event.currentTarget, 'pressed', false)
-                    }}
-                    onMouseUp={(event) => applyInteractiveButtonState(event.currentTarget, 'hover', false)}
-                    onBlur={(event) => applyInteractiveButtonState(event.currentTarget, 'rest', false)}
-                    style={surfaceButtonStyle({
+                    style={{
                       border: 'none',
                       color: active ? '#d7dce5' : '#8f96a3',
                       cursor: 'pointer',
@@ -298,26 +332,19 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
                       lineHeight: vertical ? '38px' : '34px',
                       padding: 0,
                       textAlign: 'center',
-                    })}
+                    }}
                   >
                     ✎
-                  </button>
+                  </InteractiveSurfaceButton>
                 )}
                 {onDelete && (
-                  <button
+                  <InteractiveSurfaceButton
                     type="button"
                     aria-label={`Delete ${workspace.title} workspace`}
                     title="Delete workspace"
                     onClick={() => onDelete(workspace.id)}
-                    onMouseEnter={(event) => applyInteractiveButtonState(event.currentTarget, 'hover', false)}
-                    onMouseLeave={(event) => applyInteractiveButtonState(event.currentTarget, 'rest', false)}
-                    onMouseDown={(event) => {
-                      if (event.button !== 0) return
-                      applyInteractiveButtonState(event.currentTarget, 'pressed', false)
-                    }}
-                    onMouseUp={(event) => applyInteractiveButtonState(event.currentTarget, 'hover', false)}
-                    onBlur={(event) => applyInteractiveButtonState(event.currentTarget, 'rest', false)}
-                    style={surfaceButtonStyle({
+                    danger
+                    style={{
                       border: 'none',
                       color: active ? '#d7dce5' : '#8f96a3',
                       cursor: 'pointer',
@@ -328,10 +355,10 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
                       lineHeight: vertical ? '38px' : '34px',
                       padding: 0,
                       textAlign: 'center',
-                    }, { danger: true })}
+                    }}
                   >
                     ×
-                  </button>
+                  </InteractiveSurfaceButton>
                 )}
               </div>
             )
@@ -352,23 +379,15 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
             flexShrink: 0,
           }}
         >
-          <button
+          <InteractiveSurfaceButton
             type="button"
             aria-label="Add workspace"
             title="Add workspace"
             onClick={onAdd}
-            onMouseEnter={(event) => applyInteractiveButtonState(event.currentTarget, 'hover', false)}
-            onMouseLeave={(event) => applyInteractiveButtonState(event.currentTarget, 'rest', false)}
-            onMouseDown={(event) => {
-              if (event.button !== 0) return
-              applyInteractiveButtonState(event.currentTarget, 'pressed', false)
-            }}
-            onMouseUp={(event) => applyInteractiveButtonState(event.currentTarget, 'hover', false)}
-            onBlur={(event) => applyInteractiveButtonState(event.currentTarget, 'rest', false)}
-            style={surfaceButtonStyle(actionButtonStyle(vertical))}
+            style={actionButtonStyle(vertical)}
           >
             +
-          </button>
+          </InteractiveSurfaceButton>
         </div>
       )}
       {positionControls}
@@ -392,32 +411,4 @@ function actionButtonStyle(vertical: boolean): React.CSSProperties {
     textAlign: 'center',
     whiteSpace: 'nowrap',
   }
-}
-
-type InteractiveState = 'rest' | 'hover' | 'pressed'
-
-function applyInteractiveButtonState(button: HTMLButtonElement, state: InteractiveState, selected: boolean) {
-  const selectedBackground = selected ? '#2f3540' : 'transparent'
-  const baseColor = button.style.getPropertyValue('--pmx-base-color') || '#b8beca'
-
-  if (state === 'pressed') {
-    button.style.backgroundColor = selected ? '#39414f' : 'rgba(255, 255, 255, 0.12)'
-    button.style.boxShadow = 'inset 0 1px 2px rgba(0, 0, 0, 0.45)'
-    button.style.color = '#ffffff'
-    button.style.transform = 'translateY(1px)'
-    return
-  }
-
-  if (state === 'hover') {
-    button.style.backgroundColor = selected ? '#353d4a' : 'rgba(255, 255, 255, 0.07)'
-    button.style.boxShadow = 'inset 0 0 0 1px rgba(255, 255, 255, 0.06)'
-    button.style.color = selected ? '#ffffff' : '#d7dce5'
-    button.style.transform = 'translateY(0)'
-    return
-  }
-
-  button.style.backgroundColor = selectedBackground
-  button.style.boxShadow = 'none'
-  button.style.color = selected ? '#ffffff' : baseColor
-  button.style.transform = 'translateY(0)'
 }

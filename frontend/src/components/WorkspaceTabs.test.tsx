@@ -38,6 +38,19 @@ describe('WorkspaceTabs', () => {
     })
   })
 
+  it('keeps hover affordance after a component re-render', () => {
+    render(<WorkspaceTabs workspaces={workspaces} activeWorkspaceId="dev" tabPosition="top" onSelect={() => {}} onRename={() => {}} />)
+
+    const tab = screen.getByRole('tab', { name: 'Ops' })
+    fireEvent.mouseEnter(tab)
+    fireEvent.click(screen.getByRole('button', { name: 'Rename Dev workspace' }))
+
+    expect(tab).toHaveStyle({
+      backgroundColor: 'rgba(255, 255, 255, 0.07)',
+      boxShadow: 'inset 0 0 0 1px rgba(255, 255, 255, 0.06)',
+    })
+  })
+
   it('shows a pressed state on workspace add button while held down', () => {
     render(<WorkspaceTabs workspaces={workspaces} activeWorkspaceId="dev" tabPosition="top" onSelect={() => {}} onAdd={() => {}} />)
 
