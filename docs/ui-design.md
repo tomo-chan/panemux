@@ -10,7 +10,7 @@ Three core principles guide the interactive UI:
 
 **Affordances** — visual cues should match physical intuition. Grab cursors indicate draggable elements. Edge highlights and divider overlays show where a pane can land. Buttons that create or mutate layout should stay grouped with the structure they affect.
 
-**Feedback** — transitions between states are animated (0.15–0.2 s) to prevent abrupt jumps and to make cause-and-effect legible. Immediate opacity changes on drag start and visible alerts on failed persistence keep the UI honest when optimistic updates are used.
+**Feedback** — transitions between states are animated (0.15–0.2 s) to prevent abrupt jumps and to make cause-and-effect legible. A ghosted drag source, grabbing cursors, and visible alerts on failed persistence keep the UI honest when optimistic updates are used.
 
 ---
 
@@ -81,7 +81,7 @@ The header background stays `#252526` with a `#333` bottom border so the new con
 
 Pane movement starts only from the `⠿` handle in the header. This preserves uninterrupted terminal interaction inside the pane body while still making re-layout possible.
 
-The handle uses `#4a7ea5` and a `grab` cursor. It is small enough not to crowd the header but distinct enough from the status dot and type badge to read as an affordance instead of decoration.
+The handle uses `#4a7ea5` and a `grab` cursor. While dragging it switches to `grabbing`, matching editor chrome that treats pane movement as a direct manipulation gesture. It is small enough not to crowd the header but distinct enough from the status dot and type badge to read as an affordance instead of decoration.
 
 ### Why header-only drag
 
@@ -102,13 +102,15 @@ Drag-and-drop is always available from the pane header handle. There is no separ
 
 **Drag source**
 
-- `opacity: 0.5`
-- 0.15 s opacity transition confirms the drag immediately
+- the source pane fades and slightly scales down, approximating a light drag ghost without detaching the live terminal canvas
+- the global cursor switches to `grabbing`
+- the 0.15 s transition confirms the drag immediately
 
 **Pane-edge drop target**
 
-- a 12 px edge overlay appears on the hovered edge
-- active target uses `rgba(86, 156, 214, 0.35)`
+- the hovered half of the target pane becomes the drop region
+- a translucent blue half-pane preview appears on the chosen side
+- edge selection is resolved from pointer proximity to the nearest pane edge, so users do not have to hit a thin strip precisely
 
 **Divider drop target**
 

@@ -21,18 +21,27 @@ vi.mock('../hooks/useTerminal', () => ({
 vi.mock('../hooks/useGitInfo', () => ({
   useGitInfo: () => ({ is_git: false }),
 }))
-import { dropZoneStyle, PANE_DROP_ZONE_THICKNESS, TerminalPane } from './TerminalPane'
+import { dropZoneStyle, PANE_DROP_ZONE_RATIO, resolvePaneDropEdge, TerminalPane } from './TerminalPane'
 import { LayoutActionsContext, type LayoutActionsContextValue } from './SplitContainer'
 
 describe('TerminalPane drop zones', () => {
-  it('uses the expanded thickness for horizontal edge drop zones', () => {
-    expect(dropZoneStyle('top', false)).toMatchObject({ height: PANE_DROP_ZONE_THICKNESS })
-    expect(dropZoneStyle('bottom', true)).toMatchObject({ height: PANE_DROP_ZONE_THICKNESS })
+  it('uses a top or bottom half-pane preview for horizontal edge drop zones', () => {
+    expect(dropZoneStyle('top', false)).toMatchObject({ height: `${PANE_DROP_ZONE_RATIO * 100}%` })
+    expect(dropZoneStyle('bottom', true)).toMatchObject({ height: `${PANE_DROP_ZONE_RATIO * 100}%` })
   })
 
-  it('uses the expanded thickness for vertical edge drop zones', () => {
-    expect(dropZoneStyle('left', false)).toMatchObject({ width: PANE_DROP_ZONE_THICKNESS })
-    expect(dropZoneStyle('right', true)).toMatchObject({ width: PANE_DROP_ZONE_THICKNESS })
+  it('uses a left or right half-pane preview for vertical edge drop zones', () => {
+    expect(dropZoneStyle('left', false)).toMatchObject({ width: `${PANE_DROP_ZONE_RATIO * 100}%` })
+    expect(dropZoneStyle('right', true)).toMatchObject({ width: `${PANE_DROP_ZONE_RATIO * 100}%` })
+  })
+
+  it('resolves the nearest pane edge from the pointer position', () => {
+    const rect = { left: 100, top: 200, width: 400, height: 200 }
+
+    expect(resolvePaneDropEdge(rect, 120, 240)).toBe('left')
+    expect(resolvePaneDropEdge(rect, 460, 240)).toBe('right')
+    expect(resolvePaneDropEdge(rect, 280, 210)).toBe('top')
+    expect(resolvePaneDropEdge(rect, 280, 390)).toBe('bottom')
   })
 
   it('starts pane drag with transferable pane data', () => {
@@ -57,19 +66,28 @@ describe('TerminalPane drop zones', () => {
 
   it('moves a dragged pane beside the target pane on edge drop', () => {
     const ctx = makeCtx({ dragSourcePaneId: 'pane-source' })
-    const dataTransfer = { dropEffect: 'none' }
-
     const { container } = render(
       <LayoutActionsContext.Provider value={ctx}>
         <TerminalPane pane={{ id: 'pane-target', type: 'local', title: 'Pane 1' }} />
       </LayoutActionsContext.Provider>,
     )
 
-    const dropZone = container.querySelector('[data-pane-drop-edge="left"]')
+    const dropZone = container.querySelector('[data-pane-id="pane-target"] > div:nth-child(2)')
     expect(dropZone).not.toBeNull()
+    vi.spyOn(dropZone as HTMLDivElement, 'getBoundingClientRect').mockReturnValue({
+      left: 0,
+      top: 0,
+      width: 200,
+      height: 100,
+      right: 200,
+      bottom: 100,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    })
 
-    fireEvent.dragOver(dropZone!, { dataTransfer })
-    fireEvent.drop(dropZone!, { dataTransfer })
+    fireEvent.mouseMove(dropZone!, { buttons: 1, clientX: 5, clientY: 50 })
+    fireEvent.mouseUp(dropZone!, { clientX: 5, clientY: 50 })
 
     expect(ctx.onMovePaneBeside).toHaveBeenCalledWith('pane-source', 'pane-target', 'left')
     expect(ctx.setDragSourcePaneId).toHaveBeenCalledWith(null)

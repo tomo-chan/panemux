@@ -129,6 +129,7 @@ describe('SplitContainer drop zones', () => {
     expect(workspaceDropZoneStyle('bottom')).toMatchObject({ height: WORKSPACE_DROP_ZONE_THICKNESS })
     expect(workspaceDropZoneStyle('left')).toMatchObject({ width: WORKSPACE_DROP_ZONE_THICKNESS })
     expect(workspaceDropZoneStyle('right')).toMatchObject({ width: WORKSPACE_DROP_ZONE_THICKNESS })
+    expect(workspaceDropZoneStyle('top', true)).toMatchObject({ backgroundColor: 'rgba(86, 156, 214, 0.2)' })
   })
 
   it('uses the expanded thickness for divider drop overlays', () => {

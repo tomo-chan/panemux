@@ -9,6 +9,7 @@ import { LayoutActionsContext } from './SplitContainer'
 
 const DEFAULT_DISPLAY: DisplayConfig = { show_header: true, show_status_bar: true }
 export const PANE_DROP_ZONE_THICKNESS = 24
+export const PANE_DROP_ZONE_RATIO = 0.5
 
 interface TerminalPaneProps {
   pane: PaneConfig
@@ -72,13 +73,19 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
   useEffect(() => {
     if (!isDragSource) return
 
+    const previousCursor = document.body.style.cursor
+    document.body.style.cursor = 'grabbing'
+
     const handleMouseUp = () => {
       ctx?.setDragSourcePaneId(null)
       setHoverEdge(null)
     }
 
     window.addEventListener('mouseup', handleMouseUp)
-    return () => window.removeEventListener('mouseup', handleMouseUp)
+    return () => {
+      document.body.style.cursor = previousCursor
+      window.removeEventListener('mouseup', handleMouseUp)
+    }
   }, [ctx, isDragSource])
 
   const handleEdgeDrop = useCallback((edge: PaneEdge) => {
@@ -88,6 +95,12 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
     ctx?.setDragSourcePaneId(null)
     setHoverEdge(null)
   }, [ctx, pane.id])
+
+  const updateHoverEdge = useCallback((clientX: number, clientY: number) => {
+    if (!containerRef.current || !ctx?.dragSourcePaneId || ctx.dragSourcePaneId === pane.id) return
+    const rect = containerRef.current.getBoundingClientRect()
+    setHoverEdge(resolvePaneDropEdge(rect, clientX, clientY))
+  }, [ctx?.dragSourcePaneId, pane.id])
 
   return (
     <div
@@ -107,8 +120,10 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
           ? '2px solid rgba(244, 191, 79, 0.95)'
           : 'none',
         outlineOffset: '-2px',
-        opacity: isDragSource ? 0.5 : 1,
-        transition: 'opacity 0.15s ease',
+        opacity: isDragSource ? 0.38 : 1,
+        transform: isDragSource ? 'scale(0.985)' : 'scale(1)',
+        boxShadow: isDragSource ? '0 14px 36px rgba(0, 0, 0, 0.32)' : 'none',
+        transition: 'opacity 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease',
       }}
     >
       <PaneHeader
@@ -116,6 +131,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
         connected={connected}
         displayConfig={displayConfig}
         isMaximized={ctx?.maximizedPaneId === pane.id}
+        isDragging={isDragSource}
         gitInfo={gitInfo}
         onSplit={(direction) => ctx?.onSplit(pane.id, direction)}
         onClose={() => ctx?.onClose(pane.id)}
@@ -132,34 +148,35 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
           padding: '4px',
           position: 'relative',
         }}
+        onDragOver={(e) => {
+          if (!ctx?.dragSourcePaneId || ctx.dragSourcePaneId === pane.id) return
+          e.preventDefault()
+          e.dataTransfer.dropEffect = 'move'
+          updateHoverEdge(e.clientX, e.clientY)
+        }}
+        onDragLeave={() => setHoverEdge(null)}
+        onDrop={(e) => {
+          e.preventDefault()
+          const rect = containerRef.current?.getBoundingClientRect()
+          const edge = rect ? resolvePaneDropEdge(rect, e.clientX, e.clientY) : hoverEdge
+          if (edge) handleEdgeDrop(edge)
+        }}
+        onMouseMove={(e) => {
+          if (!ctx?.dragSourcePaneId || ctx.dragSourcePaneId === pane.id || (e.buttons & 1) !== 1) return
+          updateHoverEdge(e.clientX, e.clientY)
+        }}
+        onMouseLeave={() => setHoverEdge(null)}
+        onMouseUp={(e) => {
+          if (!ctx?.dragSourcePaneId || ctx.dragSourcePaneId === pane.id) return
+          const edge = resolvePaneDropEdge(e.currentTarget.getBoundingClientRect(), e.clientX, e.clientY)
+          handleEdgeDrop(edge)
+        }}
       >
-        {dragActive && !isDragSource && (
-          <>
-            {(['top', 'bottom', 'left', 'right'] as PaneEdge[]).map((edge) => (
-              <div
-                key={edge}
-                data-pane-drop-edge={edge}
-                onDragOver={(e) => {
-                  if (!ctx?.dragSourcePaneId || ctx.dragSourcePaneId === pane.id) return
-                  e.preventDefault()
-                  e.dataTransfer.dropEffect = 'move'
-                  setHoverEdge(edge)
-                }}
-                onDragLeave={() => setHoverEdge((current) => (current === edge ? null : current))}
-                onDrop={(e) => {
-                  e.preventDefault()
-                  handleEdgeDrop(edge)
-                }}
-                onMouseEnter={() => {
-                  if (!ctx?.dragSourcePaneId || ctx.dragSourcePaneId === pane.id) return
-                  setHoverEdge(edge)
-                }}
-                onMouseLeave={() => setHoverEdge((current) => (current === edge ? null : current))}
-                onMouseUp={() => handleEdgeDrop(edge)}
-                style={dropZoneStyle(edge, hoverEdge === edge)}
-              />
-            ))}
-          </>
+        {dragActive && !isDragSource && hoverEdge && (
+          <div
+            data-pane-drop-preview={hoverEdge}
+            style={dropZoneStyle(hoverEdge, true)}
+          />
         )}
         {sessionExited && (
           <div style={{
@@ -202,18 +219,35 @@ export function dropZoneStyle(edge: PaneEdge, active: boolean): React.CSSPropert
   const common: React.CSSProperties = {
     position: 'absolute',
     zIndex: 8,
-    backgroundColor: active ? 'rgba(86, 156, 214, 0.35)' : 'transparent',
-    transition: 'background-color 0.15s ease',
+    backgroundColor: active ? 'rgba(86, 156, 214, 0.24)' : 'transparent',
+    boxShadow: active ? 'inset 0 0 0 1px rgba(137, 196, 244, 0.45)' : 'none',
+    transition: 'background-color 0.15s ease, box-shadow 0.15s ease',
+    pointerEvents: 'none',
   }
 
   switch (edge) {
     case 'top':
-      return { ...common, top: 0, left: 0, right: 0, height: PANE_DROP_ZONE_THICKNESS, cursor: 'row-resize' }
+      return { ...common, top: 0, left: 0, right: 0, height: `${PANE_DROP_ZONE_RATIO * 100}%` }
     case 'bottom':
-      return { ...common, bottom: 0, left: 0, right: 0, height: PANE_DROP_ZONE_THICKNESS, cursor: 'row-resize' }
+      return { ...common, bottom: 0, left: 0, right: 0, height: `${PANE_DROP_ZONE_RATIO * 100}%` }
     case 'left':
-      return { ...common, top: 0, bottom: 0, left: 0, width: PANE_DROP_ZONE_THICKNESS, cursor: 'col-resize' }
+      return { ...common, top: 0, bottom: 0, left: 0, width: `${PANE_DROP_ZONE_RATIO * 100}%` }
     case 'right':
-      return { ...common, top: 0, bottom: 0, right: 0, width: PANE_DROP_ZONE_THICKNESS, cursor: 'col-resize' }
+      return { ...common, top: 0, bottom: 0, right: 0, width: `${PANE_DROP_ZONE_RATIO * 100}%` }
   }
+}
+
+export function resolvePaneDropEdge(rect: DOMRect | Pick<DOMRect, 'left' | 'top' | 'width' | 'height'>, clientX: number, clientY: number): PaneEdge {
+  const relativeX = (clientX - rect.left) / rect.width
+  const relativeY = (clientY - rect.top) / rect.height
+  const distanceLeft = relativeX
+  const distanceRight = 1 - relativeX
+  const distanceTop = relativeY
+  const distanceBottom = 1 - relativeY
+  const shortestDistance = Math.min(distanceLeft, distanceRight, distanceTop, distanceBottom)
+
+  if (shortestDistance === distanceTop) return 'top'
+  if (shortestDistance === distanceBottom) return 'bottom'
+  if (shortestDistance === distanceLeft) return 'left'
+  return 'right'
 }

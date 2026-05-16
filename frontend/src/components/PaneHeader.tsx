@@ -8,6 +8,7 @@ interface PaneHeaderProps {
   connected: boolean
   displayConfig: DisplayConfig
   isMaximized: boolean
+  isDragging?: boolean
   gitInfo?: GitInfo
   onSplit: (direction: 'horizontal' | 'vertical') => void
   onClose: () => void
@@ -52,6 +53,7 @@ export const PaneHeader: React.FC<PaneHeaderProps> = ({
   connected,
   displayConfig,
   isMaximized,
+  isDragging = false,
   gitInfo,
   onSplit,
   onClose,
@@ -95,8 +97,9 @@ export const PaneHeader: React.FC<PaneHeaderProps> = ({
           fontSize: '13px',
           lineHeight: '1',
           flexShrink: 0,
-          cursor: moveHandleProps ? 'grab' : 'default',
+          cursor: moveHandleProps ? (isDragging ? 'grabbing' : 'grab') : 'default',
           userSelect: 'none',
+          opacity: isDragging ? 0.85 : 1,
         }}
       >
         ⠿

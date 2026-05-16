@@ -47,4 +47,9 @@ describe('PaneHeader VSCode button', () => {
     render(<PaneHeader {...defaultProps} displayConfig={{ show_header: false, show_status_bar: false }} />)
     expect(screen.queryByTitle('Open in VSCode')).toBeNull()
   })
+
+  it('shows a grabbing cursor while the pane is being dragged', () => {
+    render(<PaneHeader {...defaultProps} isDragging moveHandleProps={{ onMouseDown: vi.fn() }} />)
+    expect(screen.getByTitle('Drag to move pane')).toHaveStyle({ cursor: 'grabbing' })
+  })
 })
