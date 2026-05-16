@@ -97,7 +97,7 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
           ['right', '▶', 'Place workspace tabs on right'],
         ] as const).map(([position, label, ariaLabel], index, positions) => {
           const selected = tabPosition === position
-          const isLast = index === positions.length - 1
+          const isFirst = index === 0
           return (
             <button
               key={position}
@@ -109,7 +109,7 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
               style={{
                 appearance: 'none',
                 border: 'none',
-                borderRight: !isLast ? '1px solid #333842' : undefined,
+                borderLeft: !isFirst ? '1px solid #333842' : undefined,
                 backgroundColor: selected ? '#3a4350' : 'transparent',
                 color: selected ? '#ffffff' : '#b8beca',
                 cursor: selected ? 'default' : 'pointer',
@@ -315,7 +315,7 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
               aria-label="Add terminal"
               title="Add terminal"
               onClick={onAddTerminal}
-              style={actionButtonStyle(vertical, !onAdd)}
+              style={actionButtonStyle(vertical, false)}
             >
               + Terminal
             </button>
@@ -326,7 +326,7 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
               aria-label="Add workspace"
               title="Add workspace"
               onClick={onAdd}
-              style={actionButtonStyle(vertical, true)}
+              style={actionButtonStyle(vertical, Boolean(onAddTerminal))}
             >
               + WS
             </button>
@@ -338,12 +338,12 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
   )
 }
 
-function actionButtonStyle(vertical: boolean, isLast: boolean): React.CSSProperties {
+function actionButtonStyle(vertical: boolean, hasLeadingSibling: boolean): React.CSSProperties {
   return {
     appearance: 'none',
     border: 'none',
-    borderRight: !vertical && !isLast ? '1px solid #333842' : undefined,
-    borderBottom: vertical && !isLast ? '1px solid #333842' : undefined,
+    borderLeft: !vertical && hasLeadingSibling ? '1px solid #333842' : undefined,
+    borderTop: vertical && hasLeadingSibling ? '1px solid #333842' : undefined,
     backgroundColor: 'transparent',
     color: '#b8beca',
     cursor: 'pointer',
