@@ -87,6 +87,9 @@ type directoryBrowserResponse struct {
 }
 
 var validHostName = regexp.MustCompile(`^[a-zA-Z0-9_.\-]+$`)
+var absolutePathPattern = regexp.MustCompile(`/[A-Za-z0-9._\-/]+`)
+var worktreeHintPattern = regexp.MustCompile(`(?i)\b(worktree|working directory|workdir|cwd)\b`)
+var ansiPattern = regexp.MustCompile(`\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\))`)
 
 // NewHandler creates a new API handler.
 func NewHandler(cfg *config.Config, manager *session.Manager) *Handler {
@@ -689,6 +692,13 @@ type gitInfoResponse struct {
 	IsGit    bool   `json:"is_git"`
 }
 
+type gitContext struct {
+	branch    string
+	commonDir string
+	repo      string
+	root      string
+}
+
 // GetGitInfo returns git repository information for the session's current working directory.
 func (h *Handler) GetGitInfo(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
@@ -716,6 +726,48 @@ func (h *Handler) GetGitInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	targetCWD := h.resolveGitInfoCWD(id, gitPath, cwd)
+	ctx, err := h.inspectGitContext(gitPath, targetCWD)
+	if err != nil {
+		writeJSON(w, gitInfoResponse{IsGit: false})
+		return
+	}
+	prURL, prNumber := h.lookupPRInfo(targetCWD, ctx.branch)
+
+	writeJSON(w, gitInfoResponse{
+		IsGit:    true,
+		Branch:   ctx.branch,
+		Repo:     ctx.repo,
+		PRURL:    prURL,
+		PRNumber: prNumber,
+	})
+}
+
+func (h *Handler) resolveGitInfoCWD(sessionID, gitPath, cwd string) string {
+	baseCtx, err := h.inspectGitContext(gitPath, cwd)
+	if err != nil {
+		return cwd
+	}
+
+	snapshot, ok := h.manager.Snapshot(sessionID)
+	if !ok || len(snapshot) == 0 {
+		return cwd
+	}
+
+	for _, candidate := range worktreePathCandidates(snapshot) {
+		ctx, err := h.inspectGitContext(gitPath, candidate)
+		if err != nil {
+			continue
+		}
+		if ctx.commonDir == baseCtx.commonDir && ctx.root != baseCtx.root {
+			return candidate
+		}
+	}
+
+	return cwd
+}
+
+func (h *Handler) inspectGitContext(gitPath, cwd string) (gitContext, error) {
 	toplevelOut, err := exec.Command( //nolint:gosec // G204: gitPath is from trusted lookup
 		gitPath,
 		"-C",
@@ -724,10 +776,20 @@ func (h *Handler) GetGitInfo(w http.ResponseWriter, r *http.Request) {
 		"--show-toplevel",
 	).Output()
 	if err != nil {
-		writeJSON(w, gitInfoResponse{IsGit: false})
-		return
+		return gitContext{}, fmt.Errorf("git show toplevel for %q: %w", cwd, err)
 	}
-	repo := filepath.Base(strings.TrimSpace(string(toplevelOut)))
+
+	commonDirOut, err := exec.Command( //nolint:gosec // G204: gitPath is from trusted lookup
+		gitPath,
+		"-C",
+		cwd,
+		"rev-parse",
+		"--path-format=absolute",
+		"--git-common-dir",
+	).Output()
+	if err != nil {
+		return gitContext{}, fmt.Errorf("git show common dir for %q: %w", cwd, err)
+	}
 
 	branchOut, err := exec.Command( //nolint:gosec // G204: gitPath is from trusted lookup
 		gitPath,
@@ -737,20 +799,44 @@ func (h *Handler) GetGitInfo(w http.ResponseWriter, r *http.Request) {
 		"--show-current",
 	).Output()
 	if err != nil {
-		writeJSON(w, gitInfoResponse{IsGit: true, Repo: repo})
-		return
+		return gitContext{}, fmt.Errorf("git show branch for %q: %w", cwd, err)
 	}
-	branch := strings.TrimSpace(string(branchOut))
 
-	prURL, prNumber := h.lookupPRInfo(cwd, branch)
+	root := strings.TrimSpace(string(toplevelOut))
+	return gitContext{
+		branch:    strings.TrimSpace(string(branchOut)),
+		commonDir: strings.TrimSpace(string(commonDirOut)),
+		repo:      filepath.Base(root),
+		root:      root,
+	}, nil
+}
 
-	writeJSON(w, gitInfoResponse{
-		IsGit:    true,
-		Branch:   branch,
-		Repo:     repo,
-		PRURL:    prURL,
-		PRNumber: prNumber,
-	})
+func worktreePathCandidates(snapshot []byte) []string {
+	lines := strings.Split(stripANSI(string(snapshot)), "\n")
+	candidates := make([]string, 0, 8)
+	seen := make(map[string]struct{})
+
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := lines[i]
+		if !worktreeHintPattern.MatchString(line) {
+			continue
+		}
+		matches := absolutePathPattern.FindAllString(line, -1)
+		for j := len(matches) - 1; j >= 0; j-- {
+			candidate := filepath.Clean(matches[j])
+			if _, ok := seen[candidate]; ok {
+				continue
+			}
+			seen[candidate] = struct{}{}
+			candidates = append(candidates, candidate)
+		}
+	}
+
+	return candidates
+}
+
+func stripANSI(value string) string {
+	return ansiPattern.ReplaceAllString(value, "")
 }
 
 // findGit returns the path to the git binary.

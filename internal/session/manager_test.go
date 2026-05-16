@@ -148,6 +148,20 @@ func TestManager_Subscribe_ClosedSessionReturnsSnapshotAndClosedStream(t *testin
 	}, time.Second, 10*time.Millisecond)
 }
 
+func TestManager_Snapshot_ReturnsBufferedOutput(t *testing.T) {
+	m := NewManager()
+	s := newMock("sess1")
+	m.Add(s)
+
+	_, err := s.Write([]byte("buffered output"))
+	require.NoError(t, err)
+
+	require.Eventually(t, func() bool {
+		snapshot, ok := m.Snapshot("sess1")
+		return ok && string(snapshot) == "buffered output"
+	}, time.Second, 10*time.Millisecond)
+}
+
 func TestManagedSession_SubscribeStillWorksWhilePublishWaitsOnSlowSubscriber(t *testing.T) {
 	slowSubscriber := make(chan []byte, 1)
 	slowSubscriber <- []byte("already full")
