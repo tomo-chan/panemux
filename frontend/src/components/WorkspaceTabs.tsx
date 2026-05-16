@@ -73,24 +73,28 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
       aria-label="Workspace tab position"
       style={{
         display: 'flex',
-        flexDirection: vertical ? 'column' : 'row',
-        alignItems: 'stretch',
         borderLeft: !vertical ? '1px solid #333842' : undefined,
         borderTop: vertical ? '1px solid #333842' : undefined,
         flexShrink: 0,
         marginLeft: !vertical ? 'auto' : undefined,
         marginTop: vertical ? 'auto' : undefined,
-        minWidth: vertical ? '100%' : undefined,
+        padding: vertical ? 8 : 0,
+        alignItems: 'center',
+        justifyContent: 'center',
       }}
     >
       <div
         data-testid="workspace-tab-position-cluster"
         style={{
-          display: 'flex',
-          flexDirection: vertical ? 'column' : 'row',
-          alignItems: 'stretch',
-          minWidth: vertical ? '100%' : undefined,
+          display: 'grid',
+          gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+          gridTemplateRows: 'repeat(2, minmax(0, 1fr))',
+          width: vertical ? 56 : 72,
+          height: vertical ? 56 : 34,
           backgroundColor: '#262a31',
+          borderRadius: 4,
+          overflow: 'hidden',
+          boxShadow: 'inset 0 0 0 1px #333842',
         }}
       >
         {([
@@ -100,7 +104,8 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
           ['right', '▶', 'Place workspace tabs on right'],
         ] as const).map(([position, label, ariaLabel], index, positions) => {
           const selected = tabPosition === position
-          const isLast = index === positions.length - 1
+          const isRightColumn = index % 2 === 1
+          const isBottomRow = index >= positions.length - 2
           return (
             <button
               key={position}
@@ -112,16 +117,16 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
               style={{
                 appearance: 'none',
                 border: 'none',
-                borderRight: !vertical && !isLast ? '1px solid #333842' : undefined,
-                borderBottom: vertical && !isLast ? '1px solid #333842' : undefined,
+                borderRight: !isRightColumn ? '1px solid #333842' : undefined,
+                borderBottom: !isBottomRow ? '1px solid #333842' : undefined,
                 backgroundColor: selected ? '#3a4350' : 'transparent',
                 color: selected ? '#ffffff' : '#b8beca',
                 cursor: selected ? 'default' : 'pointer',
                 fontFamily: TERMINAL_FONT_FAMILY,
                 fontSize: 12,
-                height: vertical ? 30 : 34,
-                lineHeight: vertical ? '30px' : '34px',
-                minWidth: vertical ? '100%' : 34,
+                width: '100%',
+                height: '100%',
+                lineHeight: '1',
                 padding: 0,
                 textAlign: 'center',
               }}
