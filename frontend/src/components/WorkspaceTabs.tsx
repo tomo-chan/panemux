@@ -95,7 +95,7 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
           ['bottom', '▼', 'Place workspace tabs at bottom'],
           ['left', '◀', 'Place workspace tabs on left'],
           ['right', '▶', 'Place workspace tabs on right'],
-        ] as const).map(([position, label, ariaLabel], index, positions) => {
+        ] as const).map(([position, label, ariaLabel], index) => {
           const selected = tabPosition === position
           const isFirst = index === 0
           return (
