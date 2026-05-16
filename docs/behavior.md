@@ -179,7 +179,7 @@ Creates a session from a `PaneConfig` payload, provided the pane ID does not alr
 - `422`: invalid pane config
 - `201`: session created
 
-Current product use: the frontend uses this endpoint when the user splits a pane, uses the pane-header quick-add buttons to create a default local pane to the right or below, or opens the structured add-terminal dialog from the workspace bar. It remains a narrow pane-lifecycle API, not a general provisioning layer.
+Current product use: the frontend uses this endpoint when the user splits a pane or uses the pane-header quick-add buttons to create a default local pane to the right or below. It remains a narrow pane-lifecycle API, not a general provisioning layer.
 
 ### `DELETE /api/sessions/{id}`
 
@@ -433,7 +433,6 @@ When a pane moves to a different parent node, the component may be remounted by 
 ### New terminal creation
 
 - The pane header exposes one-click `Add new pane to the right` and `Add new pane below` actions that immediately create a default `local` pane beside the current pane.
-- `+ Terminal` still opens a modal dialog from the workspace bar for structured creation when the user needs to choose a base pane or customize settings before creation.
 - The dialog supports two bases:
   - blank `local`
   - clone an existing pane's settings

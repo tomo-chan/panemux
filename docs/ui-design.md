@@ -42,14 +42,13 @@ The workspace bar is always available, even when there is only one workspace. Th
 The bar can contain:
 
 - workspace tabs
-- `+ Terminal`
-- `+ WS`
+- `+`
 - workspace tab-position controls
 - inline rename and delete controls on each tab
 
 ### Why keep the bar visible with one workspace
 
-The new terminal flow starts from the workspace bar, so hiding the entire bar for single-workspace setups would make the primary expansion path disappear exactly when a user is most likely to need it. A persistent bar gives the UI a stable control area and avoids layout shifts when more workspaces are added later.
+Workspace management still lives in the bar even when pane creation moved to the pane header. Keeping the bar visible preserves a stable location for workspace add and bar-position controls, and it avoids layout shifts when more workspaces are added later.
 
 ### Tab position controls
 
@@ -64,7 +63,7 @@ The position cluster sits on the opposite end of the workspace tabs:
 
 This separation keeps workspace navigation and workspace-bar relocation visually distinct.
 
-`+ Terminal` uses explicit text because it is a primary creation action. `+ WS` is intentionally more compact to keep the bar from becoming overly wide, but it should still be visually subordinate to terminal creation.
+Workspace creation uses a single `+` control because it is now the only creation action in the bar and does not need extra wording to distinguish it from terminal creation.
 
 ---
 
@@ -155,44 +154,6 @@ This model deliberately favors spatial predictability over hidden container sele
 ## Modal Dialogs
 
 The frontend now uses modal dialogs for higher-friction configuration tasks, rather than trying to compress all editing into inline chrome.
-
-### New Terminal Dialog
-
-The `Add Terminal` dialog is the structured creation flow for new panes when the user needs more than the quick-add path.
-
-It lets the user choose:
-
-- base settings: blank local or clone existing
-- placement: workspace edge or beside pane
-- pane type
-- shell
-- SSH connection
-- tmux session
-- working directory
-- title
-
-### Visual treatment
-
-- full-screen dark scrim: `rgba(0, 0, 0, 0.6)`
-- dialog surface: `#252526`
-- border: `1px solid #444`
-- rounded corners: `6px`
-- monospace typography to match the rest of the app
-- viewport-constrained surface with internal scrolling for smaller windows
-
-The dialog uses a conventional centered modal layout because it asks the user to fill multiple related fields before committing a structural change. This is a better fit than an inline popover or tab-bar dropdown, which would feel cramped and error-prone.
-
-### Error handling
-
-Validation and save errors are shown inline inside the dialog so the user can correct the current form without losing context.
-
-### Dismissal rules
-
-- `Escape` closes the dialog when no save is in flight
-- clicking the backdrop closes the dialog when no save is in flight
-- while saving, footer buttons, `Escape`, and backdrop-dismiss are all suppressed consistently
-
-This avoids losing context during in-flight operations that can create sessions or mutate saved layout.
 
 ---
 

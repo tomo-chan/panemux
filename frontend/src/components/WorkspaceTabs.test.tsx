@@ -88,6 +88,12 @@ describe('WorkspaceTabs', () => {
     expect(onAdd).toHaveBeenCalled()
   })
 
+  it('does not render a workspace-bar add terminal button', () => {
+    render(<WorkspaceTabs workspaces={workspaces} activeWorkspaceId="dev" tabPosition="top" onSelect={() => {}} onAdd={() => {}} />)
+
+    expect(screen.queryByRole('button', { name: 'Add terminal' })).not.toBeInTheDocument()
+  })
+
   it('renders tab position controls when a position change handler is provided', () => {
     const onTabPositionChange = vi.fn()
     render(
@@ -122,7 +128,7 @@ describe('WorkspaceTabs', () => {
 
     const bar = container.firstElementChild
     expect(bar?.children.item(0)).toHaveAttribute('role', 'tablist')
-    expect(bar?.children.item(1)?.textContent).toContain('+ WS')
+    expect(bar?.children.item(1)?.textContent).toContain('+')
     expect(bar?.children.item(2)).toHaveAttribute('role', 'group')
   })
 

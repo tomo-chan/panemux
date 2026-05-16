@@ -148,7 +148,7 @@ Why Vite:
 
 ### `useLayout`
 
-Fetches `/api/workspaces` and `/api/display`, applies runtime validation, tracks the active workspace layout, and persists layout changes back to the active workspace. The workspace bar remains visible even with a single workspace so that workspace add, inline rename, delete, tab-position controls, and the structured `+ Terminal` flow remain available. Fast default-pane creation is exposed separately from the pane header so the common right/down add path does not require a dialog. Delete uses a confirmation dialog before calling the workspace delete API.
+Fetches `/api/workspaces` and `/api/display`, applies runtime validation, tracks the active workspace layout, and persists layout changes back to the active workspace. The workspace bar remains visible even with a single workspace so that workspace add, inline rename, delete, and tab-position controls remain available. Fast default-pane creation is exposed from the pane header so the common right/down add path does not require a dialog. Delete uses a confirmation dialog before calling the workspace delete API.
 
 Why this hook:
 

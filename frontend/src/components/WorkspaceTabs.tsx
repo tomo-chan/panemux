@@ -7,7 +7,6 @@ interface WorkspaceTabsProps {
   activeWorkspaceId: string
   tabPosition: TabPosition
   onSelect: (workspaceId: string) => void
-  onAddTerminal?: () => void
   onAdd?: () => void
   onDelete?: (workspaceId: string) => void
   onRename?: (workspaceId: string, title: string) => void
@@ -21,7 +20,6 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
   activeWorkspaceId,
   tabPosition,
   onSelect,
-  onAddTerminal,
   onAdd,
   onDelete,
   onRename,
@@ -31,7 +29,7 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
 }) => {
   const vertical = tabPosition === 'left' || tabPosition === 'right'
   const showTabs = workspaces.length > 1
-  const showBar = showTabs || Boolean(onAddTerminal || onAdd || onDelete || onRename || onTabPositionChange)
+  const showBar = showTabs || Boolean(onAdd || onDelete || onRename || onTabPositionChange)
   const [editingWorkspaceId, setEditingWorkspaceId] = useState<string | null>(null)
   const [draftTitle, setDraftTitle] = useState('')
   const inputRef = useRef<HTMLInputElement | null>(null)
@@ -299,7 +297,7 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
           })}
         </div>
       )}
-      {(onAddTerminal || onAdd) && (
+      {onAdd && (
         <div
           style={{
             display: 'flex',
@@ -309,28 +307,15 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
             flexShrink: 0,
           }}
         >
-          {onAddTerminal && (
-            <button
-              type="button"
-              aria-label="Add terminal"
-              title="Add terminal"
-              onClick={onAddTerminal}
-              style={actionButtonStyle(vertical)}
-            >
-              + Terminal
-            </button>
-          )}
-          {onAdd && (
-            <button
-              type="button"
-              aria-label="Add workspace"
-              title="Add workspace"
-              onClick={onAdd}
-              style={actionButtonStyle(vertical)}
-            >
-              + WS
-            </button>
-          )}
+          <button
+            type="button"
+            aria-label="Add workspace"
+            title="Add workspace"
+            onClick={onAdd}
+            style={actionButtonStyle(vertical)}
+          >
+            +
+          </button>
         </div>
       )}
       {positionControls}

@@ -2,7 +2,6 @@ import React, { useState, useCallback, useMemo } from 'react'
 import { SplitContainer, LayoutActionsContext } from './components/SplitContainer'
 import { PaneSettingsDialog } from './components/PaneSettingsDialog'
 import { AddSSHHostDialog } from './components/AddSSHHostDialog'
-import { NewTerminalDialog } from './components/NewTerminalDialog'
 import { WorkspaceTabs } from './components/WorkspaceTabs'
 import { useLayout } from './hooks/useLayout'
 import { usePaneSettings } from './hooks/usePaneSettings'
@@ -10,9 +9,9 @@ import { useWorkspaceAttentionMonitor } from './hooks/useWorkspaceAttentionMonit
 import { useBrowserNotificationPermission } from './hooks/useBrowserNotificationPermission'
 import { DisplayConfig } from './types'
 import { TERMINAL_FONT_FAMILY } from './utils/fonts'
-import { collectPanes, findPaneById, generatePaneId, layoutContainsPane } from './utils/layoutTree'
+import { findPaneById, generatePaneId, layoutContainsPane } from './utils/layoutTree'
 import type { PanePlacement } from './hooks/useLayout'
-import type { LayoutChild, LayoutNode, PaneConfig, SSHConfigHost } from './schemas'
+import type { LayoutChild, LayoutNode, SSHConfigHost } from './schemas'
 
 const DEFAULT_DISPLAY: DisplayConfig = { show_header: true, show_status_bar: true }
 
@@ -27,9 +26,7 @@ export const App: React.FC = () => {
   const [isAddSSHHostOpen, setIsAddSSHHostOpen] = useState(false)
   const [addSSHHostError, setAddSSHHostError] = useState<string | null>(null)
   const [isAddSSHHostSaving, setIsAddSSHHostSaving] = useState(false)
-  const [isNewTerminalOpen, setIsNewTerminalOpen] = useState(false)
-  const [newTerminalError, setNewTerminalError] = useState<string | null>(null)
-  const [isNewTerminalSaving, setIsNewTerminalSaving] = useState(false)
+  const [createPaneError, setCreatePaneError] = useState<string | null>(null)
   const [movePaneError, setMovePaneError] = useState<string | null>(null)
 
   const paneMetadataByID = useMemo(() => {
@@ -122,29 +119,13 @@ export const App: React.FC = () => {
     }
   }, [addSSHConfigHost])
 
-  const handleCreatePane = useCallback(async (pane: Omit<PaneConfig, 'id'>, placement: PanePlacement) => {
-    setIsNewTerminalSaving(true)
-    setNewTerminalError(null)
-    try {
-      await createPane({ ...pane, id: generatePaneId() }, placement)
-      setIsNewTerminalOpen(false)
-    } catch (err) {
-      setNewTerminalError(err instanceof Error ? err.message : 'Failed to create terminal')
-    } finally {
-      setIsNewTerminalSaving(false)
-    }
-  }, [createPane])
-
   const handleCreateDefaultPane = useCallback((targetPaneId: string, edge: 'right' | 'bottom') => {
-    setNewTerminalError(null)
-    setIsNewTerminalSaving(true)
+    setCreatePaneError(null)
     void createPane(
       { id: generatePaneId(), type: 'local' },
       { type: 'pane-edge', targetPaneId, edge },
     ).catch((err) => {
-      setNewTerminalError(err instanceof Error ? err.message : 'Failed to create terminal')
-    }).finally(() => {
-      setIsNewTerminalSaving(false)
+      setCreatePaneError(err instanceof Error ? err.message : 'Failed to create terminal')
     })
   }, [createPane])
 
@@ -234,7 +215,6 @@ export const App: React.FC = () => {
             activeWorkspaceId={workspaces.active}
             tabPosition={workspaces.tab_position}
             onSelect={setActiveWorkspace}
-            onAddTerminal={() => setIsNewTerminalOpen(true)}
             attentionWorkspaceIds={attentionWorkspaceIds}
             onClearAttention={clearWorkspaceAttention}
             onAdd={addWorkspace}
@@ -251,6 +231,54 @@ export const App: React.FC = () => {
         )}
         <div style={{ position: 'relative', flex: 1, minWidth: 0, minHeight: 0 }}>
           <SplitContainer layout={layout} onLayoutChange={updateSizes} />
+          {createPaneError && (
+            <div
+              role="alert"
+              style={{
+                position: 'absolute',
+                top: 12,
+                right: 12,
+                zIndex: 30,
+                maxWidth: 320,
+                padding: '8px 12px',
+                border: '1px solid #7f1d1d',
+                borderRadius: 6,
+                backgroundColor: '#2f1313',
+                color: '#fca5a5',
+                fontFamily: TERMINAL_FONT_FAMILY,
+                fontSize: '12px',
+                boxShadow: '0 8px 20px rgba(0, 0, 0, 0.35)',
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: 12,
+                }}
+              >
+                <span style={{ flex: 1 }}>Failed to create terminal: {createPaneError}</span>
+                <button
+                  type="button"
+                  aria-label="Dismiss create terminal error"
+                  onClick={() => setCreatePaneError(null)}
+                  style={{
+                    appearance: 'none',
+                    border: 'none',
+                    background: 'transparent',
+                    color: '#fca5a5',
+                    cursor: 'pointer',
+                    fontFamily: TERMINAL_FONT_FAMILY,
+                    fontSize: '12px',
+                    lineHeight: 1,
+                    padding: 0,
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+          )}
           {movePaneError && (
             <div
               role="alert"
@@ -317,17 +345,6 @@ export const App: React.FC = () => {
           saveError={addSSHHostError}
           onSave={handleAddSSHHost}
           onClose={() => setIsAddSSHHostOpen(false)}
-        />
-        <NewTerminalDialog
-          isOpen={isNewTerminalOpen}
-          panes={collectPanes(layout)}
-          sshConnectionNames={sshConnectionNames}
-          saveError={newTerminalError}
-          isSaving={isNewTerminalSaving}
-          onSave={handleCreatePane}
-          onClose={() => setIsNewTerminalOpen(false)}
-          onAddSSHHost={() => setIsAddSSHHostOpen(true)}
-          onDetectShell={detectShell}
         />
       </div>
     </LayoutActionsContext.Provider>
