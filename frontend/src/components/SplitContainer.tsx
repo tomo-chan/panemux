@@ -14,8 +14,6 @@ export interface LayoutActionsContextValue {
   onMaximize: (paneId: string | null) => void
   onSettings: (paneId: string) => void
   onSwapPanes: (paneIdA: string, paneIdB: string) => void
-  onCreatePaneAtWorkspaceEdge: (edge: PaneEdge) => void
-  onCreatePaneBeside: (targetPaneId: string, edge: PaneEdge) => void
   onMovePaneToWorkspaceEdge: (sourcePaneId: string, edge: PaneEdge) => void
   onMovePaneBeside: (sourcePaneId: string, targetPaneId: string, edge: PaneEdge) => void
   maximizedPaneId: string | null
@@ -37,37 +35,13 @@ interface SplitContainerProps {
 export const SplitContainer: React.FC<SplitContainerProps> = ({ layout, onLayoutChange }) => {
   const layoutCtx = useContext(LayoutActionsContext)
   const [hoveredWorkspaceEdge, setHoveredWorkspaceEdge] = React.useState<PaneEdge | null>(null)
-  const [workspaceInsertEdge, setWorkspaceInsertEdge] = React.useState<PaneEdge | null>(null)
   return (
-    <div
-      onMouseLeave={() => setWorkspaceInsertEdge(null)}
-      onMouseMove={(e) => {
-        if (layoutCtx?.dragSourcePaneId || layoutCtx?.maximizedPaneId) {
-          setWorkspaceInsertEdge(null)
-          return
-        }
-        const rect = e.currentTarget.getBoundingClientRect()
-        const edge = resolveWorkspaceInsertEdge(rect, e.clientX, e.clientY)
-        setWorkspaceInsertEdge(edge)
-      }}
-      style={{ position: 'relative', width: '100%', height: '100%' }}
-    >
+    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
       <LayoutRenderer
         direction={layout.direction}
         children={layout.children}
         onChildrenChange={(children) => onLayoutChange({ ...layout, children })}
       />
-      {!layoutCtx?.dragSourcePaneId && !layoutCtx?.maximizedPaneId && workspaceInsertEdge && (
-        <button
-          type="button"
-          aria-label={`Add pane on workspace ${workspaceInsertEdge}`}
-          title="Add pane"
-          onClick={() => layoutCtx?.onCreatePaneAtWorkspaceEdge(workspaceInsertEdge)}
-          style={workspaceInsertButtonStyle(workspaceInsertEdge)}
-        >
-          +
-        </button>
-      )}
       {layoutCtx?.dragSourcePaneId && (
         <>
           {(['top', 'bottom', 'left', 'right'] as PaneEdge[]).map((edge) => (
@@ -226,14 +200,13 @@ interface DividerDropZoneProps {
 const DividerDropZone: React.FC<DividerDropZoneProps> = ({ direction, beforeChild, afterChild, onResize }) => {
   const ctx = useContext(LayoutActionsContext)
   const [hovered, setHovered] = React.useState(false)
-  const [showInsertButton, setShowInsertButton] = React.useState(false)
   const edge: PaneEdge = direction === 'horizontal' ? 'right' : 'bottom'
-  const targetPaneId = findBoundaryPaneId(beforeChild, 'end') ?? findBoundaryPaneId(afterChild, 'start')
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault()
     const sourceId = ctx?.dragSourcePaneId
     if (!sourceId) return
+    const targetPaneId = findBoundaryPaneId(beforeChild, 'end') ?? findBoundaryPaneId(afterChild, 'start')
     if (!targetPaneId) return
     ctx?.onMovePaneBeside(sourceId, targetPaneId, edge)
     ctx?.setDragSourcePaneId(null)
@@ -242,24 +215,8 @@ const DividerDropZone: React.FC<DividerDropZoneProps> = ({ direction, beforeChil
 
   return (
     <div
-      onMouseEnter={() => {
-        if (ctx?.dragSourcePaneId || ctx?.maximizedPaneId || !targetPaneId) return
-        setShowInsertButton(true)
-      }}
-      onMouseLeave={() => setShowInsertButton(false)}
       style={{ position: 'relative', flexShrink: 0 }}
     >
-      {!ctx?.dragSourcePaneId && !ctx?.maximizedPaneId && showInsertButton && targetPaneId && (
-        <button
-          type="button"
-          aria-label={`Add pane ${edge} of divider`}
-          title="Add pane"
-          onClick={() => ctx?.onCreatePaneBeside(targetPaneId, edge)}
-          style={dividerInsertButtonStyle(direction)}
-        >
-          +
-        </button>
-      )}
       <div
         data-divider-drop-zone={direction}
         onDragOver={(e) => {
@@ -367,71 +324,4 @@ export function dividerHitAreaStyle(direction: 'horizontal' | 'vertical', active
         top: offset,
         height: DIVIDER_DROP_ZONE_THICKNESS,
       }
-}
-
-function workspaceInsertButtonStyle(edge: PaneEdge): React.CSSProperties {
-  const common: React.CSSProperties = {
-    position: 'absolute',
-    zIndex: 12,
-    width: 20,
-    height: 20,
-    border: '1px solid #4e5968',
-    borderRadius: 4,
-    backgroundColor: '#2f3540',
-    color: '#d7dce5',
-    cursor: 'pointer',
-    padding: 0,
-    lineHeight: '18px',
-    textAlign: 'center',
-    fontSize: 14,
-    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.25)',
-  }
-  switch (edge) {
-    case 'top':
-      return { ...common, top: 4, left: '50%', transform: 'translateX(-50%)' }
-    case 'bottom':
-      return { ...common, bottom: 4, left: '50%', transform: 'translateX(-50%)' }
-    case 'left':
-      return { ...common, left: 4, top: '50%', transform: 'translateY(-50%)' }
-    case 'right':
-      return { ...common, right: 4, top: '50%', transform: 'translateY(-50%)' }
-  }
-}
-
-function resolveWorkspaceInsertEdge(
-  rect: DOMRect | Pick<DOMRect, 'left' | 'top' | 'right' | 'bottom' | 'width' | 'height'>,
-  clientX: number,
-  clientY: number,
-): PaneEdge | null {
-  const edgeThreshold = 18
-  const withinHorizontalBand = clientX >= rect.left + rect.width * 0.25 && clientX <= rect.right - rect.width * 0.25
-  const withinVerticalBand = clientY >= rect.top + rect.height * 0.25 && clientY <= rect.bottom - rect.height * 0.25
-
-  if (clientY <= rect.top + edgeThreshold && withinHorizontalBand) return 'top'
-  if (clientY >= rect.bottom - edgeThreshold && withinHorizontalBand) return 'bottom'
-  if (clientX <= rect.left + edgeThreshold && withinVerticalBand) return 'left'
-  if (clientX >= rect.right - edgeThreshold && withinVerticalBand) return 'right'
-  return null
-}
-
-function dividerInsertButtonStyle(direction: 'horizontal' | 'vertical'): React.CSSProperties {
-  return {
-    position: 'absolute',
-    zIndex: 16,
-    width: 20,
-    height: 20,
-    border: '1px solid #4e5968',
-    borderRadius: 4,
-    backgroundColor: '#2f3540',
-    color: '#d7dce5',
-    cursor: 'pointer',
-    padding: 0,
-    lineHeight: '18px',
-    textAlign: 'center',
-    fontSize: 14,
-    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.25)',
-    top: direction === 'horizontal' ? '50%' : 'calc(50% - 10px)',
-    left: direction === 'horizontal' ? 'calc(50% - 10px)' : '50%',
-    transform: 'translate(-50%, -50%)',
-  }
 }
