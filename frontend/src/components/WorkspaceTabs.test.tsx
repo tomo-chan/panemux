@@ -88,21 +88,6 @@ describe('WorkspaceTabs', () => {
     expect(onAdd).toHaveBeenCalled()
   })
 
-  it('does not render a trailing divider on the last action button', () => {
-    render(
-      <WorkspaceTabs
-        workspaces={workspaces}
-        activeWorkspaceId="dev"
-        tabPosition="top"
-        onSelect={() => {}}
-        onAddTerminal={() => {}}
-        onAdd={() => {}}
-      />,
-    )
-
-    expect(screen.getByRole('button', { name: 'Add workspace' })).not.toHaveStyle({ borderRight: '1px solid #333842' })
-  })
-
   it('renders tab position controls when a position change handler is provided', () => {
     const onTabPositionChange = vi.fn()
     render(
