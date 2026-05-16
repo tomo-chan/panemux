@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
 	"os/exec"
@@ -12,6 +13,7 @@ import (
 	"regexp"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -23,14 +25,17 @@ import (
 
 // Handler provides REST API endpoints.
 type Handler struct {
-	cfg                 *config.Config
-	manager             *session.Manager
-	createSession       func(*config.PaneConfig, map[string]config.SSHConnection) (session.Session, error)
-	detectLocalShellFn  func() (string, error)
-	detectRemoteShellFn func(cfg session.SSHConfig) (string, error)
-	sshConfigPath       string
-	codeBinaryPath      string // empty = auto-detect; overridden in tests
-	gitBinaryPath       string // empty = auto-detect; overridden in tests
+	cfg                     *config.Config
+	manager                 *session.Manager
+	createSession           func(*config.PaneConfig, map[string]config.SSHConnection) (session.Session, error)
+	detectLocalShellFn      func() (string, error)
+	detectRemoteShellFn     func(cfg session.SSHConfig) (string, error)
+	listLocalDirectoriesFn  func(path string, showHidden bool) (directoryBrowserResponse, error)
+	listRemoteDirectoriesFn func(cfg session.SSHConfig, path string, showHidden bool) (directoryBrowserResponse, error)
+	readDirFn               func(name string) ([]os.DirEntry, error)
+	sshConfigPath           string
+	codeBinaryPath          string // empty = auto-detect; overridden in tests
+	gitBinaryPath           string // empty = auto-detect; overridden in tests
 }
 
 type sshConnectionsResponse struct {
@@ -69,6 +74,17 @@ type workspaceTabPositionRequest struct {
 	TabPosition string `json:"tab_position"`
 }
 
+type directoryEntryResponse struct {
+	Name        string `json:"name"`
+	Path        string `json:"path"`
+	HasChildren bool   `json:"has_children"`
+}
+
+type directoryBrowserResponse struct {
+	Path    string                   `json:"path"`
+	Entries []directoryEntryResponse `json:"entries"`
+}
+
 var validHostName = regexp.MustCompile(`^[a-zA-Z0-9_.\-]+$`)
 
 // NewHandler creates a new API handler.
@@ -77,6 +93,9 @@ func NewHandler(cfg *config.Config, manager *session.Manager) *Handler {
 	h.createSession = session.CreateFromConfig
 	h.detectLocalShellFn = session.DetectLocalShell
 	h.detectRemoteShellFn = session.DetectRemoteShell
+	h.readDirFn = os.ReadDir
+	h.listLocalDirectoriesFn = h.listLocalDirectories
+	h.listRemoteDirectoriesFn = listRemoteDirectories
 	return h
 }
 
@@ -623,6 +642,44 @@ func (h *Handler) GetDetectShell(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, detectShellResponse{Shell: shell})
 }
 
+// GetDirectories returns a directory listing for the local or remote filesystem.
+func (h *Handler) GetDirectories(w http.ResponseWriter, r *http.Request) {
+	showHidden := false
+	showHiddenParam := r.URL.Query().Get("show_hidden")
+	if showHiddenParam != "" {
+		parsed, err := strconv.ParseBool(showHiddenParam)
+		if err != nil {
+			http.Error(w, "invalid show_hidden value", http.StatusBadRequest)
+			return
+		}
+		showHidden = parsed
+	}
+
+	path := r.URL.Query().Get("path")
+	connection := r.URL.Query().Get("connection")
+
+	var (
+		resp directoryBrowserResponse
+		err  error
+	)
+	if connection == "" {
+		resp, err = h.listLocalDirectoriesFn(path, showHidden)
+	} else {
+		cfg, cfgErr := session.ResolveSSHConfig(connection, h.cfg.SSHConnections, h.sshConfigPath)
+		if cfgErr != nil {
+			http.Error(w, cfgErr.Error(), http.StatusNotFound)
+			return
+		}
+		resp, err = h.listRemoteDirectoriesFn(cfg, path, showHidden)
+	}
+	if err != nil {
+		writeValidationError(w, err.Error())
+		return
+	}
+
+	writeJSON(w, resp)
+}
+
 type gitInfoResponse struct {
 	Branch string `json:"branch,omitempty"`
 	Repo   string `json:"repo,omitempty"`
@@ -706,4 +763,120 @@ func writeValidationError(w http.ResponseWriter, msg string) {
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+func (h *Handler) listLocalDirectories(path string, showHidden bool) (directoryBrowserResponse, error) {
+	resolvedPath, err := resolveLocalDirectoryBrowsePath(path)
+	if err != nil {
+		return directoryBrowserResponse{}, err
+	}
+
+	entries, err := h.readDirFn(resolvedPath)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return directoryBrowserResponse{}, errors.New("directory path does not exist")
+		}
+		if errors.Is(err, fs.ErrPermission) {
+			return directoryBrowserResponse{}, fmt.Errorf("reading directory: %w", err)
+		}
+		var pathErr *fs.PathError
+		if errors.As(err, &pathErr) && errors.Is(pathErr.Err, fs.ErrInvalid) {
+			return directoryBrowserResponse{}, errors.New("path is not a directory")
+		}
+		// readDir on a plain file commonly reports a PathError with Op "readdir".
+		if errors.As(err, &pathErr) && pathErr.Op == "readdir" {
+			return directoryBrowserResponse{}, errors.New("path is not a directory")
+		}
+		return directoryBrowserResponse{}, fmt.Errorf("reading directory: %w", err)
+	}
+
+	resp := directoryBrowserResponse{
+		Path:    resolvedPath,
+		Entries: []directoryEntryResponse{},
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		if !showHidden && strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		childPath := filepath.Join(resolvedPath, entry.Name())
+		hasChildren, childErr := h.localDirectoryHasChildren(childPath)
+		if childErr != nil {
+			if errors.Is(childErr, fs.ErrPermission) {
+				continue
+			}
+			return directoryBrowserResponse{}, fmt.Errorf("reading directory: %w", childErr)
+		}
+		resp.Entries = append(resp.Entries, directoryEntryResponse{
+			Name:        entry.Name(),
+			Path:        childPath,
+			HasChildren: hasChildren,
+		})
+	}
+	sort.Slice(resp.Entries, func(i, j int) bool {
+		return strings.ToLower(resp.Entries[i].Name) < strings.ToLower(resp.Entries[j].Name)
+	})
+	return resp, nil
+}
+
+func listRemoteDirectories(cfg session.SSHConfig, path string, showHidden bool) (directoryBrowserResponse, error) {
+	entries, resolvedPath, err := session.ListRemoteDirectories(cfg, path, showHidden)
+	if err != nil {
+		return directoryBrowserResponse{}, fmt.Errorf("listing remote directories: %w", err)
+	}
+	resp := directoryBrowserResponse{
+		Path:    resolvedPath,
+		Entries: make([]directoryEntryResponse, 0, len(entries)),
+	}
+	for _, entry := range entries {
+		resp.Entries = append(resp.Entries, directoryEntryResponse{
+			Name:        entry.Name,
+			Path:        entry.Path,
+			HasChildren: entry.HasChildren,
+		})
+	}
+	return resp, nil
+}
+
+func resolveLocalDirectoryBrowsePath(path string) (string, error) {
+	if path == "" || path == "~" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("getting home directory: %w", err)
+		}
+		return filepath.Clean(home), nil
+	}
+
+	if strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("getting home directory: %w", err)
+		}
+		return filepath.Clean(filepath.Join(home, path[2:])), nil
+	}
+
+	if filepath.IsAbs(path) {
+		return filepath.Clean(path), nil
+	}
+
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("resolving absolute path: %w", err)
+	}
+	return filepath.Clean(absPath), nil
+}
+
+func (h *Handler) localDirectoryHasChildren(path string) (bool, error) {
+	entries, err := h.readDirFn(path)
+	if err != nil {
+		return false, fmt.Errorf("read dir %s: %w", path, err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			return true, nil
+		}
+	}
+	return false, nil
 }

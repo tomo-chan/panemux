@@ -11,6 +11,8 @@ import {
   DetectShellResponseSchema,
   WorkspaceTabPositionRequestSchema,
   WorkspacesResponseSchema,
+  DirectoryEntrySchema,
+  DirectoryBrowserResponseSchema,
 } from './index'
 
 describe('DisplayConfigSchema', () => {
@@ -219,6 +221,50 @@ describe('SessionInfoSchema', () => {
       state: 'unknown',
     })
     expect(result.success).toBe(false)
+  })
+})
+
+describe('DirectoryEntrySchema', () => {
+  it('accepts a valid directory entry', () => {
+    const result = DirectoryEntrySchema.safeParse({
+      name: 'src',
+      path: '/workspace/user/src',
+      has_children: true,
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects empty names and missing flags', () => {
+    expect(DirectoryEntrySchema.safeParse({
+      name: '',
+      path: '/tmp',
+      has_children: true,
+    }).success).toBe(false)
+    expect(DirectoryEntrySchema.safeParse({
+      name: 'tmp',
+      path: '/tmp',
+    }).success).toBe(false)
+  })
+})
+
+describe('DirectoryBrowserResponseSchema', () => {
+  it('accepts a directory browser response', () => {
+    const result = DirectoryBrowserResponseSchema.safeParse({
+      path: '/workspace/user',
+      entries: [
+        { name: 'projects', path: '/workspace/user/projects', has_children: true },
+      ],
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects invalid entries', () => {
+    expect(DirectoryBrowserResponseSchema.safeParse({
+      path: '/workspace/user',
+      entries: [
+        { name: '', path: '/workspace/user/projects', has_children: true },
+      ],
+    }).success).toBe(false)
   })
 })
 

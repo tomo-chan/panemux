@@ -61,3 +61,10 @@ type CWDGetter interface {
 type SSHConnNamer interface {
 	ConnectionName() string
 }
+
+// DirectoryEntry represents a browsable directory in a filesystem tree.
+type DirectoryEntry struct {
+	Name        string
+	Path        string
+	HasChildren bool
+}

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, act, waitFor } from '@testing-library/react'
 import { usePaneSettings } from './usePaneSettings'
-import type { LayoutNode, PaneConfig, SSHConfigHost } from '../schemas'
+import type { DirectoryBrowserResponse, LayoutNode, PaneConfig, SSHConfigHost } from '../schemas'
 
 const mockLayout: LayoutNode = {
   direction: 'horizontal',
@@ -268,6 +268,74 @@ describe('usePaneSettings', () => {
           await result.current.detectShell('local')
         })
       ).rejects.toThrow('cannot detect')
+    })
+  })
+
+  describe('browseDirectories', () => {
+    it('calls local directory API without a connection', async () => {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ names: [] }) })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({
+            path: '/workspace/user',
+            entries: [{ name: 'projects', path: '/workspace/user/projects', has_children: true }],
+          }),
+        })
+
+      vi.stubGlobal('fetch', fetchMock)
+      const { result } = renderHook(() => usePaneSettings(mockLayout, vi.fn()))
+      await waitFor(() => expect(result.current.sshConnectionNames).toEqual([]))
+
+      let browserResponse: DirectoryBrowserResponse | undefined
+      await act(async () => {
+        browserResponse = await result.current.browseDirectories('local', undefined, '/workspace/user', false)
+      })
+
+      expect(browserResponse?.path).toBe('/workspace/user')
+      expect(fetchMock).toHaveBeenCalledWith('/api/directories?path=%2Fworkspace%2Fuser&show_hidden=false')
+    })
+
+    it('calls remote directory API with the selected connection', async () => {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ names: [] }) })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({
+            path: '/home/ubuntu',
+            entries: [{ name: 'app', path: '/home/ubuntu/app', has_children: false }],
+          }),
+        })
+
+      vi.stubGlobal('fetch', fetchMock)
+      const { result } = renderHook(() => usePaneSettings(mockLayout, vi.fn()))
+      await waitFor(() => expect(result.current.sshConnectionNames).toEqual([]))
+
+      await act(async () => {
+        await result.current.browseDirectories('ssh', 'prod', '/home/ubuntu', true)
+      })
+
+      expect(fetchMock).toHaveBeenCalledWith('/api/directories?path=%2Fhome%2Fubuntu&show_hidden=true&connection=prod')
+    })
+
+    it('throws when directory browsing fails', async () => {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ names: [] }) })
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 422,
+          json: () => Promise.resolve({ error: 'invalid path' }),
+        })
+
+      vi.stubGlobal('fetch', fetchMock)
+      const { result } = renderHook(() => usePaneSettings(mockLayout, vi.fn()))
+      await waitFor(() => expect(result.current.sshConnectionNames).toEqual([]))
+
+      await expect(
+        act(async () => {
+          await result.current.browseDirectories('local', undefined, '/missing', false)
+        }),
+      ).rejects.toThrow('invalid path')
     })
   })
 })

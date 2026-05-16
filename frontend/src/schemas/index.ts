@@ -131,3 +131,18 @@ export const DetectShellResponseSchema = z.object({
 })
 
 export type DetectShellResponse = z.infer<typeof DetectShellResponseSchema>
+
+export const DirectoryEntrySchema = z.object({
+  name: z.string().min(1),
+  path: z.string().min(1),
+  has_children: z.boolean(),
+})
+
+export type DirectoryEntry = z.infer<typeof DirectoryEntrySchema>
+
+export const DirectoryBrowserResponseSchema = z.object({
+  path: z.string().min(1),
+  entries: z.array(DirectoryEntrySchema),
+})
+
+export type DirectoryBrowserResponse = z.infer<typeof DirectoryBrowserResponseSchema>

@@ -77,6 +77,7 @@ func registerRoutes(r chi.Router, apiHandler *api.Handler, wsHandler *ws.Handler
 		r.Get("/ssh-config/hosts", apiHandler.GetSSHConfigHosts)
 		r.Post("/ssh-config/hosts", apiHandler.PostSSHConfigHost)
 		r.Get("/detect-shell", apiHandler.GetDetectShell)
+		r.Get("/directories", apiHandler.GetDirectories)
 	})
 	r.Get("/ws/{sessionID}", wsHandler.ServeHTTP)
 	registerFrontend(r, frontendFS)

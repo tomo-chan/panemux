@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { SSHConnectionsResponseSchema, DetectShellResponseSchema } from '../schemas'
+import { SSHConnectionsResponseSchema, DetectShellResponseSchema, DirectoryBrowserResponseSchema } from '../schemas'
 import type { LayoutNode, PaneConfig, SSHConfigHost } from '../schemas'
 import { replacePaneInTree } from '../utils/layoutTree'
 
@@ -95,5 +95,28 @@ export function usePaneSettings(
     [],
   )
 
-  return { isOpen, currentPane, sshConnectionNames, saveError, isSaving, openSettings, closeSettings, saveSettings, addSSHConfigHost, detectShell }
+  const browseDirectories = useCallback(
+    async (
+      type: PaneConfig['type'],
+      connection?: string,
+      path = '',
+      showHidden = false,
+    ) => {
+      const params = new URLSearchParams()
+      if (path) params.set('path', path)
+      params.set('show_hidden', String(showHidden))
+      if ((type === 'ssh' || type === 'ssh_tmux') && connection) {
+        params.set('connection', connection)
+      }
+      const r = await fetch(`/api/directories?${params.toString()}`)
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}))
+        throw new Error((body as { error?: string }).error ?? `HTTP ${r.status}`)
+      }
+      return DirectoryBrowserResponseSchema.parse(await r.json())
+    },
+    [],
+  )
+
+  return { isOpen, currentPane, sshConnectionNames, saveError, isSaving, openSettings, closeSettings, saveSettings, addSSHConfigHost, detectShell, browseDirectories }
 }

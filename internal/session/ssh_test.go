@@ -171,6 +171,25 @@ func TestSSHGetCWDCmd_FallsBackToPwd(t *testing.T) {
 	assert.Contains(t, sshGetCWDCmd, "|| pwd")
 }
 
+func TestRemoteDirectoryListCommand_DoesNotUseShellGlobs(t *testing.T) {
+	cmd := remoteDirectoryListCommand("/home/user/project", false)
+	assert.NotContains(t, cmd, "./*")
+	assert.Contains(t, cmd, "find . -mindepth 1 -maxdepth 1 -type d -print")
+	assert.NotContains(t, cmd, "do;")
+}
+
+func TestRemoteDirectoryListCommand_FiltersHiddenDirectoriesWithoutGlobs(t *testing.T) {
+	cmd := remoteDirectoryListCommand("/home/user/project", false)
+	assert.Contains(t, cmd, `[ "${name#*.}" != "$name" ]`)
+}
+
+func TestParseRemoteDirectoryListOutput_EmptyDirectory(t *testing.T) {
+	resolvedPath, entries, err := parseRemoteDirectoryListOutput([]byte("/home/user/project\n"))
+	require.NoError(t, err)
+	assert.Equal(t, "/home/user/project", resolvedPath)
+	assert.Empty(t, entries)
+}
+
 // TestSSHConfig_ShellField verifies the Shell field exists on SSHConfig.
 func TestSSHConfig_ShellField(t *testing.T) {
 	cfg := SSHConfig{

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -68,6 +69,7 @@ func setupRouterWithHandler(h *Handler) *chi.Mux {
 	r.Get("/api/ssh-config/hosts", h.GetSSHConfigHosts)
 	r.Post("/api/ssh-config/hosts", h.PostSSHConfigHost)
 	r.Get("/api/detect-shell", h.GetDetectShell)
+	r.Get("/api/directories", h.GetDirectories)
 	return r
 }
 
@@ -1445,4 +1447,137 @@ func TestGetGitInfo_GitNotFound_IsGitFalse(t *testing.T) {
 	var resp gitInfoResponse
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
 	assert.False(t, resp.IsGit)
+}
+
+func TestGetDirectories_LocalPathReturnsDirectories(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(dir, "visible"), 0755))
+	require.NoError(t, os.Mkdir(filepath.Join(dir, ".hidden"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "file.txt"), []byte("x"), 0600))
+
+	h := NewHandler(defaultTestConfig(), session.NewManager())
+	r := setupRouterWithHandler(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/directories?path="+dir+"&show_hidden=false", nil)
+	r.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var resp directoryBrowserResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	require.Len(t, resp.Entries, 1)
+	assert.Equal(t, "visible", resp.Entries[0].Name)
+	assert.Equal(t, filepath.Join(dir, "visible"), resp.Entries[0].Path)
+}
+
+func TestGetDirectories_ShowHiddenIncludesHiddenDirectories(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(dir, ".hidden"), 0755))
+
+	h := NewHandler(defaultTestConfig(), session.NewManager())
+	r := setupRouterWithHandler(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/directories?path="+dir+"&show_hidden=true", nil)
+	r.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var resp directoryBrowserResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	require.Len(t, resp.Entries, 1)
+	assert.Equal(t, ".hidden", resp.Entries[0].Name)
+}
+
+func TestGetDirectories_NoVisibleChildDirectoriesReturnsEmptyArray(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(dir, ".hidden"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"), []byte("x"), 0600))
+
+	h := NewHandler(defaultTestConfig(), session.NewManager())
+	r := setupRouterWithHandler(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/directories?path="+dir+"&show_hidden=false", nil)
+	r.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.JSONEq(t, `{"path":"`+dir+`","entries":[]}`, rec.Body.String())
+}
+
+func TestGetDirectories_UsesRemoteConnectionWhenProvided(t *testing.T) {
+	h := NewHandler(defaultTestConfig(), session.NewManager())
+	h.listRemoteDirectoriesFn = func(
+		cfg session.SSHConfig,
+		path string,
+		showHidden bool,
+	) (directoryBrowserResponse, error) {
+		assert.Equal(t, "remote.example.com", cfg.Host)
+		assert.Equal(t, "/home/ubuntu", path)
+		assert.True(t, showHidden)
+		return directoryBrowserResponse{
+			Path: "/home/ubuntu",
+			Entries: []directoryEntryResponse{
+				{Name: "app", Path: "/home/ubuntu/app", HasChildren: true},
+			},
+		}, nil
+	}
+	h.cfg.SSHConnections = map[string]config.SSHConnection{
+		"prod": {Host: "remote.example.com", User: "ubuntu", Port: 22},
+	}
+	r := setupRouterWithHandler(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/directories?connection=prod&path=/home/ubuntu&show_hidden=true", nil)
+	r.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var resp directoryBrowserResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	require.Len(t, resp.Entries, 1)
+	assert.Equal(t, "app", resp.Entries[0].Name)
+}
+
+func TestGetDirectories_InvalidLocalPathReturns422(t *testing.T) {
+	h := NewHandler(defaultTestConfig(), session.NewManager())
+	r := setupRouterWithHandler(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/directories?path=/definitely/missing/path", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
+}
+
+func TestGetDirectories_SkipsUnreadableChildDirectories(t *testing.T) {
+	dir := t.TempDir()
+	readableDir := filepath.Join(dir, "readable")
+	unreadableDir := filepath.Join(dir, "restricted")
+	require.NoError(t, os.Mkdir(readableDir, 0755))
+	require.NoError(t, os.Mkdir(filepath.Join(readableDir, "nested"), 0755))
+	require.NoError(t, os.Mkdir(unreadableDir, 0755))
+
+	h := NewHandler(defaultTestConfig(), session.NewManager())
+	originalReadDir := h.readDirFn
+	h.readDirFn = func(name string) ([]os.DirEntry, error) {
+		if name == unreadableDir {
+			return nil, &fs.PathError{Op: "readdir", Path: name, Err: fs.ErrPermission}
+		}
+		return originalReadDir(name)
+	}
+	t.Cleanup(func() {
+		h.readDirFn = originalReadDir
+	})
+
+	r := setupRouterWithHandler(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/directories?path="+dir+"&show_hidden=false", nil)
+	r.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var resp directoryBrowserResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	require.Len(t, resp.Entries, 1)
+	assert.Equal(t, "readable", resp.Entries[0].Name)
+	assert.True(t, resp.Entries[0].HasChildren)
 }
