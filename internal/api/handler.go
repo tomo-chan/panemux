@@ -36,6 +36,7 @@ type Handler struct {
 	sshConfigPath           string
 	codeBinaryPath          string // empty = auto-detect; overridden in tests
 	gitBinaryPath           string // empty = auto-detect; overridden in tests
+	ghBinaryPath            string // empty = auto-detect; overridden in tests
 }
 
 type sshConnectionsResponse struct {
@@ -682,6 +683,7 @@ func (h *Handler) GetDirectories(w http.ResponseWriter, r *http.Request) {
 
 type gitInfoResponse struct {
 	Branch string `json:"branch,omitempty"`
+	PRURL  string `json:"pr_url,omitempty"`
 	Repo   string `json:"repo,omitempty"`
 	IsGit  bool   `json:"is_git"`
 }
@@ -739,7 +741,12 @@ func (h *Handler) GetGitInfo(w http.ResponseWriter, r *http.Request) {
 	}
 	branch := strings.TrimSpace(string(branchOut))
 
-	writeJSON(w, gitInfoResponse{IsGit: true, Branch: branch, Repo: repo})
+	writeJSON(w, gitInfoResponse{
+		IsGit:  true,
+		Branch: branch,
+		Repo:   repo,
+		PRURL:  h.lookupPRURL(cwd, branch),
+	})
 }
 
 // findGit returns the path to the git binary.
@@ -752,6 +759,50 @@ func (h *Handler) findGit() (string, error) {
 		return "", fmt.Errorf("finding git binary: %w", err)
 	}
 	return path, nil
+}
+
+func (h *Handler) findGH() (string, error) {
+	if h.ghBinaryPath != "" {
+		return h.ghBinaryPath, nil
+	}
+	path, err := exec.LookPath("gh")
+	if err != nil {
+		return "", fmt.Errorf("finding gh binary: %w", err)
+	}
+	return path, nil
+}
+
+func (h *Handler) lookupPRURL(cwd, branch string) string {
+	if branch == "" {
+		return ""
+	}
+
+	ghPath, err := h.findGH()
+	if err != nil {
+		return ""
+	}
+
+	cmd := exec.Command( //nolint:gosec // G204: ghPath is from trusted lookup
+		ghPath,
+		"pr",
+		"view",
+		branch,
+		"--json",
+		"url",
+	)
+	cmd.Dir = cwd
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+
+	var resp struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(out, &resp); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(resp.URL)
 }
 
 func writeValidationError(w http.ResponseWriter, msg string) {

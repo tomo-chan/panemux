@@ -1329,6 +1329,15 @@ func initTempGitRepo(t *testing.T) string {
 	return dir
 }
 
+func writeFakeGHBinary(t *testing.T, body string) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "gh")
+	require.NoError(t, os.WriteFile(path, []byte(body), 0600))
+	require.NoError(t, os.Chmod(path, 0755))
+	return path
+}
+
 func setupRouterWithGitInfo(h *Handler) *chi.Mux {
 	r := setupRouterWithHandler(h)
 	r.Get("/api/sessions/{id}/git-info", h.GetGitInfo)
@@ -1404,6 +1413,39 @@ func TestGetGitInfo_IsGitRepo_ReturnsBranchAndRepo(t *testing.T) {
 	assert.NotEmpty(t, resp.Repo)
 }
 
+func TestGetGitInfo_IsGitRepo_WithLinkedPR_ReturnsPRURL(t *testing.T) {
+	dir := initTempGitRepo(t)
+	out, err := exec.Command( //nolint:gosec // G204: trusted test args
+		"git",
+		"-C",
+		dir,
+		"checkout",
+		"-b",
+		"feature/pane-pr-link",
+	).CombinedOutput()
+	require.NoError(t, err, "git checkout failed: %s", string(out))
+
+	mgr := session.NewManager()
+	mgr.Add(&mockCWDSession{
+		mockSession: mockSession{id: "local-pr", typ: session.TypeLocal},
+		cwd:         dir,
+	})
+	h := NewHandler(defaultTestConfig(), mgr)
+	h.ghBinaryPath = writeFakeGHBinary(t, "#!/bin/sh\necho '{\"url\":\"https://github.com/example/panemux/pull/123\"}'\n")
+	r := setupRouterWithGitInfo(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/local-pr/git-info", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var resp gitInfoResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.True(t, resp.IsGit)
+	assert.Equal(t, "feature/pane-pr-link", resp.Branch)
+	assert.Equal(t, "https://github.com/example/panemux/pull/123", resp.PRURL)
+}
+
 func TestGetGitInfo_SubdirOfGitRepo_ReturnsBranchAndRepo(t *testing.T) {
 	dir := initTempGitRepo(t)
 	subdir := filepath.Join(dir, "src")
@@ -1426,6 +1468,29 @@ func TestGetGitInfo_SubdirOfGitRepo_ReturnsBranchAndRepo(t *testing.T) {
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
 	assert.True(t, resp.IsGit)
 	assert.Equal(t, "main", resp.Branch)
+}
+
+func TestGetGitInfo_PRLookupFails_StillReturnsGitInfo(t *testing.T) {
+	dir := initTempGitRepo(t)
+	mgr := session.NewManager()
+	mgr.Add(&mockCWDSession{
+		mockSession: mockSession{id: "local-pr-miss", typ: session.TypeLocal},
+		cwd:         dir,
+	})
+	h := NewHandler(defaultTestConfig(), mgr)
+	h.ghBinaryPath = writeFakeGHBinary(t, "#!/bin/sh\nexit 1\n")
+	r := setupRouterWithGitInfo(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/local-pr-miss/git-info", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var resp gitInfoResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.True(t, resp.IsGit)
+	assert.Equal(t, "main", resp.Branch)
+	assert.Empty(t, resp.PRURL)
 }
 
 func TestGetGitInfo_GitNotFound_IsGitFalse(t *testing.T) {

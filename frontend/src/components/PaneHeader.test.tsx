@@ -99,4 +99,23 @@ describe('PaneHeader VSCode button', () => {
 
     expect(onCreateDefaultPane).toHaveBeenCalledWith('bottom')
   })
+
+  it('renders a PR link when git info includes a PR URL', () => {
+    render(
+      <PaneHeader
+        {...defaultProps}
+        gitInfo={{
+          is_git: true,
+          repo: 'panemux',
+          branch: 'feature/pane-pr-link',
+          pr_url: 'https://github.com/example/panemux/pull/123',
+        }}
+      />
+    )
+
+    const link = screen.getByRole('link', { name: 'PR' })
+    expect(link).toHaveAttribute('href', 'https://github.com/example/panemux/pull/123')
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+  })
 })

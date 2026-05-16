@@ -79,7 +79,7 @@ From left to right, the header contains:
 - connection status dot
 - pane type label
 - optional pane title
-- optional git information
+- optional git information and linked PR shortcut when the current branch has a GitHub pull request
 - reconnecting status text
 - action buttons aligned to the right
 

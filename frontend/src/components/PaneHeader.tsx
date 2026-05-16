@@ -180,10 +180,29 @@ export const PaneHeader: React.FC<PaneHeaderProps> = ({
       <span style={{ color, fontWeight: 600 }}>{label}</span>
       {pane.title && <span style={{ color: '#aaa' }}>{pane.title}</span>}
       {gitInfo?.is_git && (gitInfo.repo || gitInfo.branch) && (
-        <span style={{ color: '#6e8a6e', fontSize: '11px' }}>
+        <span style={{ color: '#6e8a6e', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
           {gitInfo.repo && <span>{gitInfo.repo}</span>}
           {gitInfo.repo && gitInfo.branch && <span style={{ color: '#4a6a4a' }}>{' '}⎇{' '}</span>}
           {gitInfo.branch && <span>{gitInfo.branch}</span>}
+          {gitInfo.pr_url && (
+            <a
+              href={gitInfo.pr_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="PR"
+              title="Open pull request"
+              style={{
+                color: '#8fb7ff',
+                textDecoration: 'none',
+                border: '1px solid rgba(143, 183, 255, 0.35)',
+                borderRadius: '999px',
+                padding: '0 6px',
+                lineHeight: '16px',
+              }}
+            >
+              PR
+            </a>
+          )}
         </span>
       )}
       {!connected && <span style={{ color: '#555' }}>reconnecting…</span>}
