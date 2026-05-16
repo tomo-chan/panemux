@@ -86,6 +86,15 @@ From left to right, the header contains:
 
 The header background stays `#252526` with a `#333` bottom border so the new controls inherit the established terminal chrome instead of introducing a second visual language.
 
+### Split vs quick-add
+
+The header now carries two distinct expansion actions:
+
+- split buttons, which inherit the current pane configuration and divide the current work context
+- quick-add buttons, which create a default `local` pane immediately to the right or below
+
+The quick-add buttons are intentionally colocated with split because they act on the current pane boundary, but they must remain visually distinct so users can tell apart "duplicate/split this context" from "add a fresh default pane here".
+
 ### Drag handle
 
 Pane movement starts only from the `⠿` handle in the header. This preserves uninterrupted terminal interaction inside the pane body while still making re-layout possible.
@@ -147,7 +156,7 @@ The frontend now uses modal dialogs for higher-friction configuration tasks, rat
 
 ### New Terminal Dialog
 
-The `Add Terminal` dialog is the main structured creation flow for new panes.
+The `Add Terminal` dialog is the structured creation flow for new panes when the user needs more than the quick-add path.
 
 It lets the user choose:
 

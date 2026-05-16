@@ -179,7 +179,7 @@ Creates a session from a `PaneConfig` payload, provided the pane ID does not alr
 - `422`: invalid pane config
 - `201`: session created
 
-Current product use: the frontend uses this endpoint when the user splits a pane or adds a terminal from the workspace bar. It remains a narrow pane-lifecycle API, not a general provisioning layer.
+Current product use: the frontend uses this endpoint when the user splits a pane, uses the pane-header quick-add buttons to create a default local pane to the right or below, or opens the structured add-terminal dialog from the workspace bar. It remains a narrow pane-lifecycle API, not a general provisioning layer.
 
 ### `DELETE /api/sessions/{id}`
 
@@ -392,34 +392,60 @@ input.
 - `ResizeObserver` triggers terminal fit logic when pane size changes.
 - The browser sends a `resize` control message with current cols/rows.
 - Dragging split dividers updates layout percentages in memory.
-- Layout persistence is debounced by 500 ms before `PUT /api/layout`.
+- Divider resize remains available during normal terminal use.
+- Layout persistence for resize is debounced by 500 ms before `PUT /api/workspaces/{active}/layout`.
 
-### Edit mode and pane reordering
+### Layout editing and pane movement
 
-Edit mode is toggled by the fixed button in the bottom-right corner. When edit mode is ON:
+There is no separate edit mode. Layout editing is part of the normal interface.
 
-- The entire pane body becomes a drag surface; the user can drag any pane onto any other pane to swap their positions in the layout tree.
-- Terminal keyboard input is blocked — `onData` and `onBinary` handlers do not forward bytes to the session while edit mode is active.
-- A semi-transparent overlay covers each terminal area and intercepts pointer events, preventing the terminal from gaining focus.
-- Workspace controls can add, rename, delete, and move the tab bar to the top, bottom, left, or right.
-- Layout changes (including drag-resize) are persisted to the config file via `PUT /api/layout`.
+- Pane split, close, maximize, settings, new terminal creation, workspace add/rename/delete, and pane move are all available from the standard UI.
+- Terminal keyboard input remains active during normal use because drag initiation is restricted to the pane header handle.
+- Layout and workspace mutations are persisted immediately to the active workspace config.
+- The workspace bar is always visible, even when only one workspace exists, so workspace actions remain discoverable.
 
-When edit mode is OFF, terminal input is fully restored and layout changes are applied in-memory only.
+Drag-and-drop pane movement works like this:
 
-Drag-and-drop pane reordering:
+1. User presses or drags the `⠿` handle in the pane header.
+2. The source pane enters a drag state: it fades, scales down slightly, and the cursor switches to `grabbing`.
+3. Workspace edges, pane targets, and divider targets become active drop targets.
+4. If the pointer is over another pane, the nearest pane edge is resolved from pointer position and the corresponding half-pane preview is shown.
+5. Releasing on a workspace edge moves the pane there and creates a new outer split.
+6. Releasing on a pane edge inserts the dragged pane beside that target pane.
+7. Releasing on a divider inserts the dragged pane relative to the adjacent subtree boundary.
+8. `dragSourcePaneId` is cleared and the updated layout is persisted.
 
-1. User starts dragging a pane — `dragstart` fires on the outer pane div; `dragSourcePaneId` is set in context.
-2. User hovers over a target pane — `dragover` fires; the target receives a visual drop indicator.
-3. User releases — `drop` fires; the two panes' `PaneConfig` objects are swapped in the layout tree, and `PUT /api/layout` is called immediately (no debounce).
-4. `dragSourcePaneId` is cleared in context; both panes return to normal edit-mode appearance.
+Pane movement is a re-layout operation, not a session recreation:
 
-When a pane moves to a different parent node during a swap (cross-row reorder), the component is remounted by React. xterm.js terminal instances survive remounting via a module-level `TerminalEntry` map keyed by session ID; the existing canvas is reattached to the new container with `appendChild` rather than `replaceChildren`, preserving React-managed sibling nodes (overlays) in the container.
+- moving a pane does not create a new backend session
+- moving a pane does not restart the session
+- only the pane's position in the layout tree changes
+
+When a pane moves to a different parent node, the component may be remounted by React. xterm.js terminal instances survive remounting via a module-level `TerminalEntry` map keyed by session ID; the existing canvas is reattached to the new container with `appendChild` rather than `replaceChildren`, preserving React-managed sibling nodes such as overlays and restart controls.
 
 ### Split and close semantics
 
 - Splitting a pane creates a new local pane, creates a backend session through `POST /api/sessions`, then rewrites the layout tree so the original and new panes each receive `50%` under a new split node.
 - The original pane keeps its current visible terminal contents when split; it must not go blank or reset to a fresh prompt while the new sibling pane is created.
 - Closing a pane calls `DELETE /api/sessions/{id}`, removes the pane from the tree, collapses parents with a single child, and renormalizes sizes to total `100`.
+- Moving a pane calls the workspace layout save path only; it does not call session create or delete APIs.
+
+### New terminal creation
+
+- The pane header exposes one-click `Add new pane to the right` and `Add new pane below` actions that immediately create a default `local` pane beside the current pane.
+- `+ Terminal` still opens a modal dialog from the workspace bar for structured creation when the user needs to choose a base pane or customize settings before creation.
+- The dialog supports two bases:
+  - blank `local`
+  - clone an existing pane's settings
+- Before creation, the user can choose placement:
+  - workspace `top`, `bottom`, `left`, or `right`
+  - beside an existing pane on `top`, `bottom`, `left`, or `right`
+- Creation flow:
+  1. frontend builds the new `PaneConfig`
+  2. frontend calls `POST /api/sessions`
+  3. frontend inserts the pane into the active workspace layout
+  4. frontend persists with `PUT /api/workspaces/{active}/layout`
+- For cloned `tmux` and `ssh_tmux` panes, `tmux_session` is regenerated to avoid collisions.
 
 ## Operational Assumptions
 

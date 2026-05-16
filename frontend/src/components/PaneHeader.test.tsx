@@ -14,6 +14,7 @@ const defaultProps = {
   displayConfig: defaultDisplay,
   isMaximized: false,
   onSplit: vi.fn(),
+  onCreateDefaultPane: vi.fn(),
   onClose: vi.fn(),
   onMaximize: vi.fn(),
   onSettings: vi.fn(),
@@ -51,5 +52,23 @@ describe('PaneHeader VSCode button', () => {
   it('shows a grabbing cursor while the pane is being dragged', () => {
     render(<PaneHeader {...defaultProps} isDragging moveHandleProps={{ onMouseDown: vi.fn() }} />)
     expect(screen.getByTitle('Drag to move pane')).toHaveStyle({ cursor: 'grabbing' })
+  })
+
+  it('calls onCreateDefaultPane for the right-side button', () => {
+    const onCreateDefaultPane = vi.fn()
+    render(<PaneHeader {...defaultProps} onCreateDefaultPane={onCreateDefaultPane} />)
+
+    fireEvent.click(screen.getByTitle('Add new pane to the right'))
+
+    expect(onCreateDefaultPane).toHaveBeenCalledWith('right')
+  })
+
+  it('calls onCreateDefaultPane for the bottom-side button', () => {
+    const onCreateDefaultPane = vi.fn()
+    render(<PaneHeader {...defaultProps} onCreateDefaultPane={onCreateDefaultPane} />)
+
+    fireEvent.click(screen.getByTitle('Add new pane below'))
+
+    expect(onCreateDefaultPane).toHaveBeenCalledWith('bottom')
   })
 })

@@ -97,6 +97,7 @@ describe('TerminalPane drop zones', () => {
 function makeCtx(overrides: Partial<LayoutActionsContextValue> = {}): LayoutActionsContextValue {
   return {
     onSplit: vi.fn(),
+    onCreatePaneBeside: vi.fn(),
     onClose: vi.fn(),
     onMaximize: vi.fn(),
     onSettings: vi.fn(),

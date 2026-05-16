@@ -21,6 +21,7 @@ const children = [pane1, pane2]
 function makeCtx(maximizedPaneId: string | null): LayoutActionsContextValue {
   return {
     onSplit: vi.fn(),
+    onCreatePaneBeside: vi.fn(),
     onClose: vi.fn(),
     onMaximize: vi.fn(),
     onSettings: vi.fn(),

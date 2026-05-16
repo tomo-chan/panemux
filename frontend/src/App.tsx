@@ -135,6 +135,19 @@ export const App: React.FC = () => {
     }
   }, [createPane])
 
+  const handleCreateDefaultPane = useCallback((targetPaneId: string, edge: 'right' | 'bottom') => {
+    setNewTerminalError(null)
+    setIsNewTerminalSaving(true)
+    void createPane(
+      { id: generatePaneId(), type: 'local' },
+      { type: 'pane-edge', targetPaneId, edge },
+    ).catch((err) => {
+      setNewTerminalError(err instanceof Error ? err.message : 'Failed to create terminal')
+    }).finally(() => {
+      setIsNewTerminalSaving(false)
+    })
+  }, [createPane])
+
   const handleMovePane = useCallback((sourcePaneId: string, placement: PanePlacement) => {
     setMovePaneError(null)
     void movePane(sourcePaneId, placement).catch((err) => {
@@ -177,6 +190,7 @@ export const App: React.FC = () => {
   return (
     <LayoutActionsContext.Provider value={{
       onSplit: splitPane,
+      onCreatePaneBeside: handleCreateDefaultPane,
       onClose: closePane,
       onMaximize: setMaximizedPaneId,
       onSettings: (paneId: string) => {

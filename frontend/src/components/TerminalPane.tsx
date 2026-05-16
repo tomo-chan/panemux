@@ -134,6 +134,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
         isDragging={isDragSource}
         gitInfo={gitInfo}
         onSplit={(direction) => ctx?.onSplit(pane.id, direction)}
+        onCreateDefaultPane={(edge) => ctx?.onCreatePaneBeside(pane.id, edge)}
         onClose={() => ctx?.onClose(pane.id)}
         onMaximize={() => ctx?.onMaximize(ctx.maximizedPaneId === pane.id ? null : pane.id)}
         onSettings={() => ctx?.onSettings(pane.id)}

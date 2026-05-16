@@ -10,6 +10,7 @@ export const DIVIDER_DROP_ZONE_THICKNESS = 24
 
 export interface LayoutActionsContextValue {
   onSplit: (paneId: string, direction: 'horizontal' | 'vertical') => void
+  onCreatePaneBeside: (targetPaneId: string, edge: Extract<PaneEdge, 'right' | 'bottom'>) => void
   onClose: (paneId: string) => void
   onMaximize: (paneId: string | null) => void
   onSettings: (paneId: string) => void

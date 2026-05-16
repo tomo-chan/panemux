@@ -42,7 +42,7 @@ const mockUpdateSizes = vi.fn()
 const mockSplitPane = vi.fn()
 const mockClosePane = vi.fn()
 const mockSwapPanes = vi.fn()
-const mockCreatePane = vi.fn()
+const mockCreatePane = vi.fn().mockResolvedValue(undefined)
 const mockMovePane = vi.fn()
 const mockAddWorkspace = vi.fn()
 const mockUseWorkspaceAttentionMonitor = vi.hoisted(() => vi.fn())
@@ -204,6 +204,25 @@ describe('App workspace deletion', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Delete Dev workspace' }))
 
     expect(mockDeleteWorkspace).not.toHaveBeenCalled()
+  })
+
+  it('creates a default local pane to the right of the current pane', async () => {
+    mockTerminalPane.mockImplementation(({ pane }: { pane: { id: string } }) => {
+      const ctx = useContext(LayoutActionsContext)
+      return (
+        <div data-pane-id={pane.id}>
+          <button onClick={() => ctx?.onCreatePaneBeside(pane.id, 'right')}>Add right of {pane.id}</button>
+        </div>
+      )
+    })
+
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Add right of main' }))
+
+    expect(mockCreatePane).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'local', id: expect.any(String) }),
+      { type: 'pane-edge', targetPaneId: 'main', edge: 'right' },
+    )
   })
 
   it('passes workspace rename from edit-mode tabs', () => {

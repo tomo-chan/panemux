@@ -11,6 +11,7 @@ interface PaneHeaderProps {
   isDragging?: boolean
   gitInfo?: GitInfo
   onSplit: (direction: 'horizontal' | 'vertical') => void
+  onCreateDefaultPane: (edge: 'right' | 'bottom') => void
   onClose: () => void
   onMaximize: () => void
   onSettings: () => void
@@ -56,6 +57,7 @@ export const PaneHeader: React.FC<PaneHeaderProps> = ({
   isDragging = false,
   gitInfo,
   onSplit,
+  onCreateDefaultPane,
   onClose,
   onMaximize,
   onSettings,
@@ -161,6 +163,20 @@ export const PaneHeader: React.FC<PaneHeaderProps> = ({
           style={buttonStyle}
         >
           ⇕
+        </button>
+        <button
+          title="Add new pane to the right"
+          onClick={() => onCreateDefaultPane('right')}
+          style={buttonStyle}
+        >
+          +→
+        </button>
+        <button
+          title="Add new pane below"
+          onClick={() => onCreateDefaultPane('bottom')}
+          style={buttonStyle}
+        >
+          +↓
         </button>
         <button
           title="Close pane"
