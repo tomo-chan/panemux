@@ -771,17 +771,21 @@ func listLocalDirectories(path string, showHidden bool) (directoryBrowserRespons
 		return directoryBrowserResponse{}, err
 	}
 
-	//nolint:gosec // G703: resolvedPath is validated and normalized for local browsing only
-	info, err := os.Stat(resolvedPath)
-	if err != nil {
-		return directoryBrowserResponse{}, errors.New("directory path does not exist")
-	}
-	if !info.IsDir() {
-		return directoryBrowserResponse{}, errors.New("path is not a directory")
-	}
-
 	entries, err := readDir(resolvedPath)
 	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return directoryBrowserResponse{}, errors.New("directory path does not exist")
+		}
+		if errors.Is(err, fs.ErrPermission) {
+			return directoryBrowserResponse{}, fmt.Errorf("reading directory: %w", err)
+		}
+		var pathErr *fs.PathError
+		if errors.As(err, &pathErr) && errors.Is(pathErr.Err, fs.ErrInvalid) {
+			return directoryBrowserResponse{}, errors.New("path is not a directory")
+		}
+		if errors.As(err, &pathErr) && pathErr.Op == "readdir" {
+			return directoryBrowserResponse{}, errors.New("path is not a directory")
+		}
 		return directoryBrowserResponse{}, fmt.Errorf("reading directory: %w", err)
 	}
 
