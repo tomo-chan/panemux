@@ -86,11 +86,10 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
       <div
         data-testid="workspace-tab-position-cluster"
         style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-          gridTemplateRows: 'repeat(2, minmax(0, 1fr))',
-          width: vertical ? 56 : 72,
-          height: vertical ? 56 : 34,
+          display: 'flex',
+          flexDirection: 'row',
+          width: vertical ? 112 : 136,
+          height: 34,
           backgroundColor: '#262a31',
           borderRadius: 4,
           overflow: 'hidden',
@@ -104,8 +103,7 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
           ['right', '▶', 'Place workspace tabs on right'],
         ] as const).map(([position, label, ariaLabel], index, positions) => {
           const selected = tabPosition === position
-          const isRightColumn = index % 2 === 1
-          const isBottomRow = index >= positions.length - 2
+          const isLast = index === positions.length - 1
           return (
             <button
               key={position}
@@ -117,16 +115,16 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
               style={{
                 appearance: 'none',
                 border: 'none',
-                borderRight: !isRightColumn ? '1px solid #333842' : undefined,
-                borderBottom: !isBottomRow ? '1px solid #333842' : undefined,
+                borderRight: !isLast ? '1px solid #333842' : undefined,
                 backgroundColor: selected ? '#3a4350' : 'transparent',
                 color: selected ? '#ffffff' : '#b8beca',
                 cursor: selected ? 'default' : 'pointer',
                 fontFamily: TERMINAL_FONT_FAMILY,
                 fontSize: 12,
-                width: '100%',
+                width: 34,
                 height: '100%',
-                lineHeight: '1',
+                lineHeight: '34px',
+                flex: '0 0 34px',
                 padding: 0,
                 textAlign: 'center',
               }}

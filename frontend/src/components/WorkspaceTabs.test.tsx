@@ -102,7 +102,7 @@ describe('WorkspaceTabs', () => {
 
     expect(screen.getByRole('group', { name: 'Workspace tab position' })).toBeInTheDocument()
     expect(screen.getByTestId('workspace-tab-position-cluster').children).toHaveLength(4)
-    expect(screen.getByTestId('workspace-tab-position-cluster')).toHaveStyle({ display: 'grid' })
+    expect(screen.getByTestId('workspace-tab-position-cluster')).toHaveStyle({ display: 'flex', flexDirection: 'row' })
     expect(screen.getByRole('button', { name: 'Place workspace tabs at top' })).toHaveAttribute('aria-pressed', 'true')
     fireEvent.click(screen.getByRole('button', { name: 'Place workspace tabs on left' }))
     expect(onTabPositionChange).toHaveBeenCalledWith('left')
