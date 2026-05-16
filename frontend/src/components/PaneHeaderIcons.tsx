@@ -51,10 +51,40 @@ export function SettingsIcon() {
 
 export function CodeIcon() {
   return (
-    <BaseIcon>
-      <path d="M6 4.2 3 8l3 3.8" />
-      <path d="M10 4.2 13 8l-3 3.8" />
-    </BaseIcon>
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      width={14}
+      height={14}
+      style={iconStyle}
+    >
+      <path
+        d="M11.8 1.8 6.4 4.4 3.9 6.9v2.2l2.5 2.5 5.4 2.6 1.3-.7V2.5z"
+        fill="currentColor"
+        opacity="0.95"
+      />
+      <path
+        d="M6.4 4.4 9.4 6v4L6.4 11.6 4.8 10V6z"
+        fill="#252526"
+        opacity="0.95"
+      />
+      <path
+        d="M7.2 6.2 5.9 8l1.3 1.8"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M8.8 6.2 10.1 8l-1.3 1.8"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   )
 }
 

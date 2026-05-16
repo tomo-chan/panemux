@@ -60,6 +60,11 @@ const buttonStyle: React.CSSProperties = {
   minHeight: '22px',
 }
 
+const vscodeButtonStyle: React.CSSProperties = {
+  ...buttonStyle,
+  color: '#007acc',
+}
+
 export const PaneHeader: React.FC<PaneHeaderProps> = ({
   pane,
   connected,
@@ -149,7 +154,7 @@ export const PaneHeader: React.FC<PaneHeaderProps> = ({
           <button
             title="Open in VSCode"
             onClick={onOpenVSCode}
-            style={buttonStyle}
+            style={vscodeButtonStyle}
           >
             <CodeIcon />
           </button>
