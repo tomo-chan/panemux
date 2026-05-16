@@ -4,6 +4,10 @@ import type { PaneEdge } from '../utils/layoutTree'
 import { SplitDivider } from './SplitDivider'
 import { TerminalPane } from './TerminalPane'
 
+const SPLIT_DIVIDER_THICKNESS = 4
+export const WORKSPACE_DROP_ZONE_THICKNESS = 20
+export const DIVIDER_DROP_ZONE_THICKNESS = 24
+
 export interface LayoutActionsContextValue {
   onSplit: (paneId: string, direction: 'horizontal' | 'vertical') => void
   onClose: (paneId: string) => void
@@ -77,7 +81,7 @@ export const LayoutRenderer: React.FC<LayoutRendererProps> = ({ direction, child
     const containerSize = isHorizontal
       ? containerRef.current.offsetWidth
       : containerRef.current.offsetHeight
-    const dividerPx = 4 * (children.length - 1)
+    const dividerPx = SPLIT_DIVIDER_THICKNESS * (children.length - 1)
     const usableSize = containerSize - dividerPx
     if (usableSize <= 0) return
 
@@ -225,7 +229,7 @@ function findBoundaryPaneId(child: LayoutChild, side: 'start' | 'end'): string |
   return findBoundaryPaneId(next, side)
 }
 
-function workspaceDropZoneStyle(edge: PaneEdge): React.CSSProperties {
+export function workspaceDropZoneStyle(edge: PaneEdge): React.CSSProperties {
   const common: React.CSSProperties = {
     position: 'absolute',
     zIndex: 20,
@@ -233,31 +237,32 @@ function workspaceDropZoneStyle(edge: PaneEdge): React.CSSProperties {
   }
   switch (edge) {
     case 'top':
-      return { ...common, top: 0, left: 0, right: 0, height: 10 }
+      return { ...common, top: 0, left: 0, right: 0, height: WORKSPACE_DROP_ZONE_THICKNESS }
     case 'bottom':
-      return { ...common, bottom: 0, left: 0, right: 0, height: 10 }
+      return { ...common, bottom: 0, left: 0, right: 0, height: WORKSPACE_DROP_ZONE_THICKNESS }
     case 'left':
-      return { ...common, top: 0, bottom: 0, left: 0, width: 10 }
+      return { ...common, top: 0, bottom: 0, left: 0, width: WORKSPACE_DROP_ZONE_THICKNESS }
     case 'right':
-      return { ...common, top: 0, bottom: 0, right: 0, width: 10 }
+      return { ...common, top: 0, bottom: 0, right: 0, width: WORKSPACE_DROP_ZONE_THICKNESS }
   }
 }
 
-function dividerOverlayStyle(direction: 'horizontal' | 'vertical', active: boolean): React.CSSProperties {
+export function dividerOverlayStyle(direction: 'horizontal' | 'vertical', active: boolean): React.CSSProperties {
+  const offset = -((DIVIDER_DROP_ZONE_THICKNESS - SPLIT_DIVIDER_THICKNESS) / 2)
   return direction === 'horizontal'
     ? {
         position: 'absolute',
         inset: 0,
-        width: 12,
-        marginLeft: -4,
+        width: DIVIDER_DROP_ZONE_THICKNESS,
+        marginLeft: offset,
         backgroundColor: active ? 'rgba(86, 156, 214, 0.35)' : 'transparent',
         pointerEvents: 'none',
       }
     : {
         position: 'absolute',
         inset: 0,
-        height: 12,
-        marginTop: -4,
+        height: DIVIDER_DROP_ZONE_THICKNESS,
+        marginTop: offset,
         backgroundColor: active ? 'rgba(86, 156, 214, 0.35)' : 'transparent',
         pointerEvents: 'none',
       }

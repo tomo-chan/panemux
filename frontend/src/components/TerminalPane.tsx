@@ -8,6 +8,7 @@ import { PaneStatusBar } from './PaneStatusBar'
 import { LayoutActionsContext } from './SplitContainer'
 
 const DEFAULT_DISPLAY: DisplayConfig = { show_header: true, show_status_bar: true }
+export const PANE_DROP_ZONE_THICKNESS = 24
 
 interface TerminalPaneProps {
   pane: PaneConfig
@@ -170,7 +171,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
   )
 }
 
-function dropZoneStyle(edge: PaneEdge, active: boolean): React.CSSProperties {
+export function dropZoneStyle(edge: PaneEdge, active: boolean): React.CSSProperties {
   const common: React.CSSProperties = {
     position: 'absolute',
     zIndex: 8,
@@ -180,12 +181,12 @@ function dropZoneStyle(edge: PaneEdge, active: boolean): React.CSSProperties {
 
   switch (edge) {
     case 'top':
-      return { ...common, top: 0, left: 0, right: 0, height: 12, cursor: 'row-resize' }
+      return { ...common, top: 0, left: 0, right: 0, height: PANE_DROP_ZONE_THICKNESS, cursor: 'row-resize' }
     case 'bottom':
-      return { ...common, bottom: 0, left: 0, right: 0, height: 12, cursor: 'row-resize' }
+      return { ...common, bottom: 0, left: 0, right: 0, height: PANE_DROP_ZONE_THICKNESS, cursor: 'row-resize' }
     case 'left':
-      return { ...common, top: 0, bottom: 0, left: 0, width: 12, cursor: 'col-resize' }
+      return { ...common, top: 0, bottom: 0, left: 0, width: PANE_DROP_ZONE_THICKNESS, cursor: 'col-resize' }
     case 'right':
-      return { ...common, top: 0, bottom: 0, right: 0, width: 12, cursor: 'col-resize' }
+      return { ...common, top: 0, bottom: 0, right: 0, width: PANE_DROP_ZONE_THICKNESS, cursor: 'col-resize' }
   }
 }

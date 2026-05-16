@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { render, act } from '@testing-library/react'
 import { describe, it, expect, vi } from 'vitest'
-import { LayoutRenderer, LayoutActionsContext, LayoutActionsContextValue } from './SplitContainer'
+import { LayoutRenderer, LayoutActionsContext, LayoutActionsContextValue, dividerOverlayStyle, DIVIDER_DROP_ZONE_THICKNESS, workspaceDropZoneStyle, WORKSPACE_DROP_ZONE_THICKNESS } from './SplitContainer'
 import { LayoutChild } from '../types'
 
 // Stub TerminalPane and SplitDivider so we don't need xterm.js or drag logic
@@ -120,5 +120,19 @@ describe('LayoutRenderer maximize CSS', () => {
     act(() => { getByRole('button').click() })
     const [w1c] = getWrapperDivs(container)
     expect(w1c.style.position).not.toBe('absolute')
+  })
+})
+
+describe('SplitContainer drop zones', () => {
+  it('uses the expanded thickness for workspace edge drop zones', () => {
+    expect(workspaceDropZoneStyle('top')).toMatchObject({ height: WORKSPACE_DROP_ZONE_THICKNESS })
+    expect(workspaceDropZoneStyle('bottom')).toMatchObject({ height: WORKSPACE_DROP_ZONE_THICKNESS })
+    expect(workspaceDropZoneStyle('left')).toMatchObject({ width: WORKSPACE_DROP_ZONE_THICKNESS })
+    expect(workspaceDropZoneStyle('right')).toMatchObject({ width: WORKSPACE_DROP_ZONE_THICKNESS })
+  })
+
+  it('uses the expanded thickness for divider drop overlays', () => {
+    expect(dividerOverlayStyle('horizontal', false)).toMatchObject({ width: DIVIDER_DROP_ZONE_THICKNESS, marginLeft: -10 })
+    expect(dividerOverlayStyle('vertical', true)).toMatchObject({ height: DIVIDER_DROP_ZONE_THICKNESS, marginTop: -10 })
   })
 })
