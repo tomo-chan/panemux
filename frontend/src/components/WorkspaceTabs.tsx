@@ -78,9 +78,7 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
         flexShrink: 0,
         marginLeft: !vertical ? 'auto' : undefined,
         marginTop: vertical ? 'auto' : undefined,
-        padding: vertical ? 8 : 0,
         alignItems: 'center',
-        justifyContent: 'center',
       }}
     >
       <div
@@ -90,10 +88,6 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
           flexDirection: 'row',
           width: vertical ? 112 : 136,
           height: 34,
-          backgroundColor: '#262a31',
-          borderRadius: 4,
-          overflow: 'hidden',
-          boxShadow: 'inset 0 0 0 1px #333842',
         }}
       >
         {([
