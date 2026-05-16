@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.0](https://github.com/tomo-chan/panemux/compare/v0.13.2...v0.14.0) (2026-05-16)
+
+
+### Features
+
+* add persistent pane layout editing ([#89](https://github.com/tomo-chan/panemux/issues/89)) ([201ccd5](https://github.com/tomo-chan/panemux/commit/201ccd59fac1b087aeb64d46ad090dee2d32b906))
+
 ## [0.13.2](https://github.com/tomo-chan/panemux/compare/v0.13.1...v0.13.2) (2026-05-14)
 
 
