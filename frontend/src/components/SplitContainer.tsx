@@ -46,6 +46,7 @@ export const SplitContainer: React.FC<SplitContainerProps> = ({ layout, onLayout
           {(['top', 'bottom', 'left', 'right'] as PaneEdge[]).map((edge) => (
             <div
               key={edge}
+              data-workspace-drop-edge={edge}
               onDragOver={(e) => {
                 e.preventDefault()
                 e.dataTransfer.dropEffect = 'move'
@@ -202,16 +203,20 @@ const DividerDropZone: React.FC<DividerDropZoneProps> = ({ direction, beforeChil
 
   return (
     <div
-      onDragOver={(e) => {
-        if (!ctx?.dragSourcePaneId) return
-        e.preventDefault()
-        e.dataTransfer.dropEffect = 'move'
-        setHovered(true)
-      }}
-      onDragLeave={() => setHovered(false)}
-      onDrop={handleDrop}
       style={{ position: 'relative', flexShrink: 0 }}
     >
+      <div
+        data-divider-drop-zone={direction}
+        onDragOver={(e) => {
+          if (!ctx?.dragSourcePaneId) return
+          e.preventDefault()
+          e.dataTransfer.dropEffect = 'move'
+          setHovered(true)
+        }}
+        onDragLeave={() => setHovered(false)}
+        onDrop={handleDrop}
+        style={dividerHitAreaStyle(direction, Boolean(ctx?.dragSourcePaneId))}
+      />
       <SplitDivider direction={direction} onDrag={onResize} />
       {ctx?.dragSourcePaneId && (
         <div
@@ -265,5 +270,31 @@ export function dividerOverlayStyle(direction: 'horizontal' | 'vertical', active
         marginTop: offset,
         backgroundColor: active ? 'rgba(86, 156, 214, 0.35)' : 'transparent',
         pointerEvents: 'none',
+      }
+}
+
+export function dividerHitAreaStyle(direction: 'horizontal' | 'vertical', active: boolean): React.CSSProperties {
+  const offset = -((DIVIDER_DROP_ZONE_THICKNESS - SPLIT_DIVIDER_THICKNESS) / 2)
+  const common: React.CSSProperties = {
+    position: 'absolute',
+    zIndex: 15,
+    pointerEvents: active ? 'auto' : 'none',
+    backgroundColor: 'transparent',
+  }
+
+  return direction === 'horizontal'
+    ? {
+        ...common,
+        top: 0,
+        bottom: 0,
+        left: offset,
+        width: DIVIDER_DROP_ZONE_THICKNESS,
+      }
+    : {
+        ...common,
+        left: 0,
+        right: 0,
+        top: offset,
+        height: DIVIDER_DROP_ZONE_THICKNESS,
       }
 }

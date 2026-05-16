@@ -54,6 +54,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
 
   const handleDragStart = useCallback((e: React.DragEvent) => {
     e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', pane.id)
     ctx?.setDragSourcePaneId(pane.id)
   }, [ctx, pane.id])
 
@@ -118,6 +119,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
             {(['top', 'bottom', 'left', 'right'] as PaneEdge[]).map((edge) => (
               <div
                 key={edge}
+                data-pane-drop-edge={edge}
                 onDragOver={(e) => {
                   if (!ctx?.dragSourcePaneId || ctx.dragSourcePaneId === pane.id) return
                   e.preventDefault()
