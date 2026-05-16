@@ -315,7 +315,7 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
               aria-label="Add terminal"
               title="Add terminal"
               onClick={onAddTerminal}
-              style={actionButtonStyle(vertical)}
+              style={actionButtonStyle(vertical, !onAdd)}
             >
               + Terminal
             </button>
@@ -326,7 +326,7 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
               aria-label="Add workspace"
               title="Add workspace"
               onClick={onAdd}
-              style={actionButtonStyle(vertical)}
+              style={actionButtonStyle(vertical, true)}
             >
               + WS
             </button>
@@ -338,12 +338,12 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
   )
 }
 
-function actionButtonStyle(vertical: boolean): React.CSSProperties {
+function actionButtonStyle(vertical: boolean, isLast: boolean): React.CSSProperties {
   return {
     appearance: 'none',
     border: 'none',
-    borderRight: !vertical ? '1px solid #333842' : undefined,
-    borderBottom: vertical ? '1px solid #333842' : undefined,
+    borderRight: !vertical && !isLast ? '1px solid #333842' : undefined,
+    borderBottom: vertical && !isLast ? '1px solid #333842' : undefined,
     backgroundColor: 'transparent',
     color: '#b8beca',
     cursor: 'pointer',
