@@ -110,7 +110,7 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
                 appearance: 'none',
                 border: 'none',
                 borderRight: !isLast ? '1px solid #333842' : undefined,
-                backgroundColor: selected ? '#3a4350' : 'transparent',
+                backgroundColor: 'transparent',
                 color: selected ? '#ffffff' : '#b8beca',
                 cursor: selected ? 'default' : 'pointer',
                 fontFamily: TERMINAL_FONT_FAMILY,
@@ -121,6 +121,7 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
                 flex: '0 0 34px',
                 padding: 0,
                 textAlign: 'center',
+                boxShadow: selected ? 'inset 0 -2px 0 #569cd6' : 'none',
               }}
             >
               {label}
