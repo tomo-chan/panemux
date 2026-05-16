@@ -225,6 +225,60 @@ describe('App workspace deletion', () => {
     )
   })
 
+  it('shows a user-visible error when creating a pane fails', async () => {
+    mockCreatePane.mockRejectedValueOnce(new Error('HTTP 500'))
+    mockTerminalPane.mockImplementation(({ pane }: { pane: { id: string } }) => {
+      const ctx = useContext(LayoutActionsContext)
+      return (
+        <div data-pane-id={pane.id}>
+          <button onClick={() => ctx?.onCreatePaneBeside(pane.id, 'right')}>Add right of {pane.id}</button>
+        </div>
+      )
+    })
+
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Add right of main' }))
+
+    expect(await screen.findByText('Failed to create terminal: HTTP 500')).toBeInTheDocument()
+  })
+
+  it('dismisses the create pane error banner when requested', async () => {
+    mockCreatePane.mockRejectedValueOnce(new Error('HTTP 500'))
+    mockTerminalPane.mockImplementation(({ pane }: { pane: { id: string } }) => {
+      const ctx = useContext(LayoutActionsContext)
+      return (
+        <div data-pane-id={pane.id}>
+          <button onClick={() => ctx?.onCreatePaneBeside(pane.id, 'right')}>Add right of {pane.id}</button>
+        </div>
+      )
+    })
+
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Add right of main' }))
+
+    expect(await screen.findByRole('alert')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss create terminal error' }))
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('shows a generic create error when the rejection is not an Error instance', async () => {
+    mockCreatePane.mockRejectedValueOnce('boom')
+    mockTerminalPane.mockImplementation(({ pane }: { pane: { id: string } }) => {
+      const ctx = useContext(LayoutActionsContext)
+      return (
+        <div data-pane-id={pane.id}>
+          <button onClick={() => ctx?.onCreatePaneBeside(pane.id, 'right')}>Add right of {pane.id}</button>
+        </div>
+      )
+    })
+
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Add right of main' }))
+
+    expect(await screen.findByText('Failed to create terminal: Something went wrong')).toBeInTheDocument()
+  })
+
   it('passes workspace rename from edit-mode tabs', () => {
     render(<App />)
     fireEvent.click(screen.getByRole('button', { name: 'Rename Dev workspace' }))

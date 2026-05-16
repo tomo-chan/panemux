@@ -8,7 +8,6 @@ import { PaneStatusBar } from './PaneStatusBar'
 import { LayoutActionsContext } from './SplitContainer'
 
 const DEFAULT_DISPLAY: DisplayConfig = { show_header: true, show_status_bar: true }
-export const PANE_DROP_ZONE_THICKNESS = 24
 export const PANE_DROP_ZONE_RATIO = 0.5
 
 interface TerminalPaneProps {

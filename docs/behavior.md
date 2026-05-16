@@ -101,7 +101,7 @@ Host-key verification uses `known_hosts_file` if configured, or `~/.ssh/known_ho
 Persistence behavior:
 
 - layout and workspace changes are persisted immediately when a save path is available
-- pane resize, split, close, move, add-terminal, workspace add/delete/rename, active-workspace changes, and `tab_position` changes all follow the same immediate-save path
+- pane resize, split, close, quick-add create, move, workspace add/delete/rename, active-workspace changes, and `tab_position` changes all follow the same immediate-save path
 - when no `--config` is given, the default save path is `~/.config/panemux/config.yaml`; the directory is created automatically on first save
 
 ## Agent Attention Notifications

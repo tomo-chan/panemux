@@ -159,22 +159,23 @@ The frontend now uses modal dialogs for higher-friction configuration tasks, rat
 
 ## Transient Error Banner
 
-Pane moves are optimistic in the UI and then persisted. If persistence fails, the user needs immediate feedback because the visible layout can temporarily diverge from saved config.
+Pane creation and moves are optimistic in the UI and then persisted. If persistence fails, the user needs immediate feedback because the visible layout can temporarily diverge from saved config.
 
-The move error banner:
+The create/move error banner pattern:
 
 - appears in the top-right of the workspace content area
 - uses a destructive but subdued palette (`#2f1313`, `#7f1d1d`, `#fca5a5`)
 - includes an explicit dismiss button
 - remains separate from modal dialog errors because it belongs to an in-place interaction, not a form
+- stacks vertically when both a create failure and a move failure are present at the same time
 
 ### Error state lifecycle
 
 The banner state is:
 
 - hidden by default
-- visible when a move persistence request rejects
-- hidden again when dismissed or when the next move attempt starts
+- visible when a pane-create or pane-move persistence request rejects
+- hidden again when dismissed or when the next create/move attempt starts
 
 This keeps the error noticeable without forcing it into a blocking dialog.
 

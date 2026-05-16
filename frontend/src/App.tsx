@@ -125,7 +125,7 @@ export const App: React.FC = () => {
       { id: generatePaneId(), type: 'local' },
       { type: 'pane-edge', targetPaneId, edge },
     ).catch((err) => {
-      setCreatePaneError(err instanceof Error ? err.message : 'Failed to create terminal')
+      setCreatePaneError(err instanceof Error ? err.message : 'Something went wrong')
     })
   }, [createPane])
 
@@ -284,7 +284,7 @@ export const App: React.FC = () => {
               role="alert"
               style={{
                 position: 'absolute',
-                top: 12,
+                top: createPaneError ? 72 : 12,
                 right: 12,
                 zIndex: 30,
                 maxWidth: 320,
