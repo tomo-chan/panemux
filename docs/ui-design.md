@@ -55,7 +55,7 @@ The new terminal flow starts from the workspace bar, so hiding the entire bar fo
 
 The top/bottom/left/right controls use compact directional buttons with `aria-pressed` on the active position. They are deliberately terse because they are structural controls, not primary content.
 
-The four direction buttons are grouped inside a single tab-like cluster rather than being split across separate segments. This keeps the workspace-position control readable as one concept instead of four unrelated actions.
+The four direction buttons are grouped inside a single tab-like cluster rather than being split across separate segments. In practice this is rendered as one tab surface containing a 2x2 button grid, so even on left/right bars it reads as one control group instead of four separate tabs. This keeps the workspace-position control readable as one concept instead of four unrelated actions.
 
 The position cluster sits on the opposite end of the workspace tabs:
 
