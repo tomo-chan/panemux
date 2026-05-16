@@ -350,11 +350,6 @@ func validateRemotePath(label, path string) error {
 	return fmt.Errorf("invalid %s %q: %s", label, path, invalidRemotePathMsg)
 }
 
-// ValidateRemotePath applies the CodeQL-approved remote path validation rules.
-func ValidateRemotePath(label, path string) error {
-	return validateRemotePath(label, path)
-}
-
 func closeSSHResources(sess *ssh.Session, client, jumpClient *ssh.Client) {
 	if sess != nil {
 		sess.Close()

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
 	"os/exec"
@@ -21,6 +22,8 @@ import (
 	"panemux/internal/session"
 	"panemux/internal/sshconfig"
 )
+
+var readDir = os.ReadDir
 
 // Handler provides REST API endpoints.
 type Handler struct {
@@ -777,7 +780,7 @@ func listLocalDirectories(path string, showHidden bool) (directoryBrowserRespons
 		return directoryBrowserResponse{}, errors.New("path is not a directory")
 	}
 
-	entries, err := os.ReadDir(resolvedPath)
+	entries, err := readDir(resolvedPath)
 	if err != nil {
 		return directoryBrowserResponse{}, fmt.Errorf("reading directory: %w", err)
 	}
@@ -796,6 +799,9 @@ func listLocalDirectories(path string, showHidden bool) (directoryBrowserRespons
 		childPath := filepath.Join(resolvedPath, entry.Name())
 		hasChildren, childErr := localDirectoryHasChildren(childPath)
 		if childErr != nil {
+			if errors.Is(childErr, fs.ErrPermission) {
+				continue
+			}
 			return directoryBrowserResponse{}, fmt.Errorf("reading directory: %w", childErr)
 		}
 		resp.Entries = append(resp.Entries, directoryEntryResponse{
@@ -858,7 +864,7 @@ func resolveLocalDirectoryBrowsePath(path string) (string, error) {
 }
 
 func localDirectoryHasChildren(path string) (bool, error) {
-	entries, err := os.ReadDir(path)
+	entries, err := readDir(path)
 	if err != nil {
 		return false, fmt.Errorf("read dir %s: %w", path, err)
 	}
