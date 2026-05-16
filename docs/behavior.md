@@ -98,6 +98,8 @@ Host-key verification uses `known_hosts_file` if configured, or `~/.ssh/known_ho
 
 `cwd` is validated against `validRemotePath` before use: absolute paths only, no shell metacharacters (`;|&$` + "`" + `'"<>(){}[]!`), no control characters. See *Security Design* in `architecture.md`.
 
+Pane settings in the frontend expose a directory browser for `cwd`. Local and local tmux panes browse the local filesystem; `ssh` and `ssh_tmux` panes browse the selected SSH connection's remote filesystem. The browser lists directories only and hides dot-directories by default unless the user enables the hidden-directory toggle.
+
 Persistence behavior:
 
 - layout and workspace changes are persisted immediately when a save path is available

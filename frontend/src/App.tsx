@@ -20,7 +20,7 @@ export const App: React.FC = () => {
   const [maximizedPaneId, setMaximizedPaneId] = useState<string | null>(null)
   const [dragSourcePaneId, setDragSourcePaneId] = useState<string | null>(null)
   const [attentionPaneIds, setAttentionPaneIds] = useState<Set<string>>(() => new Set())
-  const { isOpen, currentPane, sshConnectionNames, saveError, isSaving, openSettings, closeSettings, saveSettings, addSSHConfigHost, detectShell } =
+  const { isOpen, currentPane, sshConnectionNames, saveError, isSaving, openSettings, closeSettings, saveSettings, addSSHConfigHost, detectShell, browseDirectories } =
     usePaneSettings(layout, updateSizes)
 
   const [isAddSSHHostOpen, setIsAddSSHHostOpen] = useState(false)
@@ -338,6 +338,7 @@ export const App: React.FC = () => {
           onClose={closeSettings}
           onAddSSHHost={() => setIsAddSSHHostOpen(true)}
           onDetectShell={detectShell}
+          onBrowseDirectories={browseDirectories}
         />
         <AddSSHHostDialog
           isOpen={isAddSSHHostOpen}

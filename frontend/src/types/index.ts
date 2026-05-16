@@ -11,4 +11,6 @@ export type {
   SessionInfo,
   WSControlMessage,
   SSHConnectionsResponse,
+  DirectoryEntry,
+  DirectoryBrowserResponse,
 } from '../schemas'

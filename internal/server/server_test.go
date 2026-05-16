@@ -196,3 +196,16 @@ func TestServer_WorkspaceTabPositionRouteWiredBeforeWorkspaceIDRoute(t *testing.
 	assert.Equal(t, "right", cfg.Workspaces.TabPosition)
 	assert.Equal(t, "Default", cfg.Workspaces.Items[0].Title)
 }
+
+func TestServer_DirectoriesRouteWired(t *testing.T) {
+	cfg := testConfig()
+	mgr := session.NewManager()
+	srv := New(cfg, mgr, emptyFS)
+	require.NotNil(t, srv)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/directories", nil)
+	srv.httpSrv.Handler.ServeHTTP(rec, req)
+
+	assert.NotEqual(t, http.StatusNotFound, rec.Code)
+}

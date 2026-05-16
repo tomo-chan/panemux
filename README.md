@@ -122,6 +122,7 @@ Common uses:
 - A pane with `connection: my-host` can use either a named `ssh_connections` entry or a `Host my-host` entry from `~/.ssh/config`.
 - `tmux` and `ssh_tmux` panes automatically create the target tmux session if it does not already exist.
 - Set `cwd` on `local`, `ssh`, or `ssh_tmux` panes when you want the shell to start in a specific directory.
+- In the pane settings dialog, `Working Directory` can be chosen from a browsable directory tree for both local and SSH-backed panes. Hidden directories are available through a toggle.
 
 ---
 

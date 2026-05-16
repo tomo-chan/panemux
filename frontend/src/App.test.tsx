@@ -88,6 +88,7 @@ vi.mock('./hooks/usePaneSettings', () => ({
     saveSettings: vi.fn(),
     addSSHConfigHost: vi.fn(),
     detectShell: vi.fn(),
+    browseDirectories: vi.fn(),
   }),
 }))
 

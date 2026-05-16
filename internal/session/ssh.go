@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -349,6 +350,11 @@ func validateRemotePath(label, path string) error {
 	return fmt.Errorf("invalid %s %q: %s", label, path, invalidRemotePathMsg)
 }
 
+// ValidateRemotePath applies the CodeQL-approved remote path validation rules.
+func ValidateRemotePath(label, path string) error {
+	return validateRemotePath(label, path)
+}
+
 func closeSSHResources(sess *ssh.Session, client, jumpClient *ssh.Client) {
 	if sess != nil {
 		sess.Close()
@@ -394,6 +400,102 @@ func DetectRemoteShell(cfg SSHConfig) (string, error) {
 		return "", errors.New("remote $SHELL is not set")
 	}
 	return shell, nil
+}
+
+// ListRemoteDirectories connects to the remote host and returns immediate child
+// directories below the requested path. When path is empty, the remote home
+// directory is used.
+func ListRemoteDirectories(cfg SSHConfig, path string, showHidden bool) ([]DirectoryEntry, string, error) {
+	if path != "" {
+		if err := validateRemotePath("directory path", path); err != nil {
+			return nil, "", err
+		}
+	}
+
+	client, jumpClient, err := dialSSHClient(cfg)
+	if err != nil {
+		return nil, "", fmt.Errorf("connecting to remote host: %w", err)
+	}
+	defer client.Close()
+	if jumpClient != nil {
+		defer jumpClient.Close()
+	}
+
+	sess, err := client.NewSession()
+	if err != nil {
+		return nil, "", fmt.Errorf("creating session: %w", err)
+	}
+	defer sess.Close()
+
+	out, err := sess.Output(remoteDirectoryListCommand(path, showHidden))
+	if err != nil {
+		return nil, "", fmt.Errorf("listing remote directories: %w", err)
+	}
+
+	resolvedPath, entries, err := parseRemoteDirectoryListOutput(out)
+	if err != nil {
+		return nil, "", err
+	}
+	return entries, resolvedPath, nil
+}
+
+func remoteDirectoryListCommand(path string, showHidden bool) string {
+	target := "$PWD"
+	if path != "" {
+		target = shellQuotePath(path)
+	}
+
+	showHiddenFlag := "0"
+	if showHidden {
+		showHiddenFlag = "1"
+	}
+
+	return strings.Join([]string{
+		"target=" + target,
+		"show_hidden=" + showHiddenFlag,
+		`if ! cd "$target" 2>/dev/null; then echo "__PANEMUX_NOT_DIR__"; exit 0; fi`,
+		`pwd`,
+		`find . -mindepth 1 -maxdepth 1 -type d -print | LC_ALL=C sort | while IFS= read -r entry; do`,
+		`  [ -n "$entry" ] || continue`,
+		`  name=${entry#./}`,
+		`  if [ "$show_hidden" != "1" ] && [ "${name#*.}" != "$name" ]; then continue; fi`,
+		`  has_children=0`,
+		`  child=$(find "$entry" -mindepth 1 -maxdepth 1 -type d -print -quit 2>/dev/null)`,
+		`  if [ -n "$child" ]; then has_children=1; fi`,
+		`  printf '%s\t%s\t%s\n' "$name" "$PWD/${name}" "$has_children"`,
+		`done`,
+	}, "\n")
+}
+
+func parseRemoteDirectoryListOutput(out []byte) (string, []DirectoryEntry, error) {
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) == "" {
+		return "", nil, errors.New("remote directory listing returned no path")
+	}
+	if strings.TrimSpace(lines[0]) == "__PANEMUX_NOT_DIR__" {
+		return "", nil, errors.New("directory path does not exist")
+	}
+
+	resolvedPath := strings.TrimSpace(lines[0])
+	entries := make([]DirectoryEntry, 0, len(lines))
+	for _, line := range lines[1:] {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\t", 3)
+		if len(parts) != 3 {
+			return "", nil, fmt.Errorf("invalid remote directory listing row %q", line)
+		}
+		entries = append(entries, DirectoryEntry{
+			Name:        parts[0],
+			Path:        parts[1],
+			HasChildren: parts[2] == "1",
+		})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		return strings.ToLower(entries[i].Name) < strings.ToLower(entries[j].Name)
+	})
+	return resolvedPath, entries, nil
 }
 
 // buildHostKeyCallback resolves the known_hosts file path and returns a
