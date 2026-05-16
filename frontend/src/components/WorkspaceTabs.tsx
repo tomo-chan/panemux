@@ -74,47 +74,63 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
       style={{
         display: 'flex',
         flexDirection: vertical ? 'column' : 'row',
+        alignItems: 'stretch',
         borderLeft: !vertical ? '1px solid #333842' : undefined,
         borderTop: vertical ? '1px solid #333842' : undefined,
         flexShrink: 0,
+        marginLeft: !vertical ? 'auto' : undefined,
+        marginTop: vertical ? 'auto' : undefined,
+        minWidth: vertical ? '100%' : undefined,
       }}
     >
-      {([
-        ['top', '▲', 'Place workspace tabs at top'],
-        ['bottom', '▼', 'Place workspace tabs at bottom'],
-        ['left', '◀', 'Place workspace tabs on left'],
-        ['right', '▶', 'Place workspace tabs on right'],
-      ] as const).map(([position, label, ariaLabel]) => {
-        const selected = tabPosition === position
-        return (
-          <button
-            key={position}
-            type="button"
-            aria-label={ariaLabel}
-            aria-pressed={selected}
-            title={ariaLabel}
-            onClick={() => onTabPositionChange(position)}
-            style={{
-              appearance: 'none',
-              border: 'none',
-              borderRight: !vertical ? '1px solid #333842' : undefined,
-              borderBottom: vertical ? '1px solid #333842' : undefined,
-              backgroundColor: selected ? '#3a4350' : 'transparent',
-              color: selected ? '#ffffff' : '#b8beca',
-              cursor: selected ? 'default' : 'pointer',
-              fontFamily: TERMINAL_FONT_FAMILY,
-              fontSize: 12,
-              height: vertical ? 30 : 34,
-              lineHeight: vertical ? '30px' : '34px',
-              minWidth: vertical ? '100%' : 34,
-              padding: 0,
-              textAlign: 'center',
-            }}
-          >
-            {label}
-          </button>
-        )
-      })}
+      <div
+        data-testid="workspace-tab-position-cluster"
+        style={{
+          display: 'flex',
+          flexDirection: vertical ? 'column' : 'row',
+          alignItems: 'stretch',
+          minWidth: vertical ? '100%' : undefined,
+          backgroundColor: '#262a31',
+        }}
+      >
+        {([
+          ['top', '▲', 'Place workspace tabs at top'],
+          ['bottom', '▼', 'Place workspace tabs at bottom'],
+          ['left', '◀', 'Place workspace tabs on left'],
+          ['right', '▶', 'Place workspace tabs on right'],
+        ] as const).map(([position, label, ariaLabel], index, positions) => {
+          const selected = tabPosition === position
+          const isLast = index === positions.length - 1
+          return (
+            <button
+              key={position}
+              type="button"
+              aria-label={ariaLabel}
+              aria-pressed={selected}
+              title={ariaLabel}
+              onClick={() => onTabPositionChange(position)}
+              style={{
+                appearance: 'none',
+                border: 'none',
+                borderRight: !vertical && !isLast ? '1px solid #333842' : undefined,
+                borderBottom: vertical && !isLast ? '1px solid #333842' : undefined,
+                backgroundColor: selected ? '#3a4350' : 'transparent',
+                color: selected ? '#ffffff' : '#b8beca',
+                cursor: selected ? 'default' : 'pointer',
+                fontFamily: TERMINAL_FONT_FAMILY,
+                fontSize: 12,
+                height: vertical ? 30 : 34,
+                lineHeight: vertical ? '30px' : '34px',
+                minWidth: vertical ? '100%' : 34,
+                padding: 0,
+                textAlign: 'center',
+              }}
+            >
+              {label}
+            </button>
+          )
+        })}
+      </div>
     </div>
   ) : null
 

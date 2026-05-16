@@ -101,9 +101,42 @@ describe('WorkspaceTabs', () => {
     )
 
     expect(screen.getByRole('group', { name: 'Workspace tab position' })).toBeInTheDocument()
+    expect(screen.getByTestId('workspace-tab-position-cluster').children).toHaveLength(4)
     expect(screen.getByRole('button', { name: 'Place workspace tabs at top' })).toHaveAttribute('aria-pressed', 'true')
     fireEvent.click(screen.getByRole('button', { name: 'Place workspace tabs on left' }))
     expect(onTabPositionChange).toHaveBeenCalledWith('left')
+  })
+
+  it('places the tab position controls after the tablist and action group for horizontal bars', () => {
+    const { container } = render(
+      <WorkspaceTabs
+        workspaces={workspaces}
+        activeWorkspaceId="dev"
+        tabPosition="top"
+        onSelect={() => {}}
+        onAdd={() => {}}
+        onTabPositionChange={() => {}}
+      />,
+    )
+
+    const bar = container.firstElementChild
+    expect(bar?.children.item(0)).toHaveAttribute('role', 'tablist')
+    expect(bar?.children.item(1)?.textContent).toContain('+ WS')
+    expect(bar?.children.item(2)).toHaveAttribute('role', 'group')
+  })
+
+  it('places the tab position controls at the opposite end for vertical bars', () => {
+    render(
+      <WorkspaceTabs
+        workspaces={workspaces}
+        activeWorkspaceId="dev"
+        tabPosition="left"
+        onSelect={() => {}}
+        onTabPositionChange={() => {}}
+      />,
+    )
+
+    expect(screen.getByRole('group', { name: 'Workspace tab position' })).toHaveStyle({ marginTop: 'auto' })
   })
 
   it('hides tab position controls when the position change handler is omitted', () => {

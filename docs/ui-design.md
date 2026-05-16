@@ -55,6 +55,15 @@ The new terminal flow starts from the workspace bar, so hiding the entire bar fo
 
 The top/bottom/left/right controls use compact directional buttons with `aria-pressed` on the active position. They are deliberately terse because they are structural controls, not primary content.
 
+The four direction buttons are grouped inside a single tab-like cluster rather than being split across separate segments. This keeps the workspace-position control readable as one concept instead of four unrelated actions.
+
+The position cluster sits on the opposite end of the workspace tabs:
+
+- top/bottom bars: tabs stay at the leading side, position controls stay at the far trailing side
+- left/right bars: tabs stay near the top, position controls stay at the bottom
+
+This separation keeps workspace navigation and workspace-bar relocation visually distinct.
+
 `+ Terminal` uses explicit text because it is a primary creation action. `+ WS` is intentionally more compact to keep the bar from becoming overly wide, but it should still be visually subordinate to terminal creation.
 
 ---
