@@ -2,6 +2,17 @@ import React from 'react'
 import { DisplayConfig, PaneConfig } from '../types'
 import { GitInfo } from '../schemas'
 import { TERMINAL_FONT_FAMILY } from '../utils/fonts'
+import {
+  AddPaneBottomIcon,
+  AddPaneRightIcon,
+  CloseIcon,
+  CodeIcon,
+  MaximizeIcon,
+  RestoreIcon,
+  SettingsIcon,
+  SplitHorizontalIcon,
+  SplitVerticalIcon,
+} from './PaneHeaderIcons'
 
 interface PaneHeaderProps {
   pane: PaneConfig
@@ -132,7 +143,7 @@ export const PaneHeader: React.FC<PaneHeaderProps> = ({
           onClick={onSettings}
           style={buttonStyle}
         >
-          ⚙
+          <SettingsIcon />
         </button>
         {connected && onOpenVSCode && (
           <button
@@ -140,7 +151,7 @@ export const PaneHeader: React.FC<PaneHeaderProps> = ({
             onClick={onOpenVSCode}
             style={buttonStyle}
           >
-            {'</>'}
+            <CodeIcon />
           </button>
         )}
         <button
@@ -148,42 +159,42 @@ export const PaneHeader: React.FC<PaneHeaderProps> = ({
           onClick={onMaximize}
           style={buttonStyle}
         >
-          {isMaximized ? '⤡' : '⤢'}
+          {isMaximized ? <RestoreIcon /> : <MaximizeIcon />}
         </button>
         <button
           title="Split horizontal"
           onClick={() => onSplit('horizontal')}
           style={buttonStyle}
         >
-          ⇔
+          <SplitHorizontalIcon />
         </button>
         <button
           title="Split vertical"
           onClick={() => onSplit('vertical')}
           style={buttonStyle}
         >
-          ⇕
+          <SplitVerticalIcon />
         </button>
         <button
           title="Add new pane to the right"
           onClick={() => onCreateDefaultPane('right')}
           style={buttonStyle}
         >
-          +→
+          <AddPaneRightIcon />
         </button>
         <button
           title="Add new pane below"
           onClick={() => onCreateDefaultPane('bottom')}
           style={buttonStyle}
         >
-          +↓
+          <AddPaneBottomIcon />
         </button>
         <button
           title="Close pane"
           onClick={onClose}
           style={{ ...buttonStyle, color: '#f44747' }}
         >
-          ✕
+          <CloseIcon />
         </button>
       </div>
     </div>
