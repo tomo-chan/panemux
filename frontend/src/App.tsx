@@ -1,24 +1,22 @@
 import React, { useState, useCallback, useMemo } from 'react'
 import { SplitContainer, LayoutActionsContext } from './components/SplitContainer'
-import { EditModeToggle } from './components/EditModeToggle'
 import { PaneSettingsDialog } from './components/PaneSettingsDialog'
 import { AddSSHHostDialog } from './components/AddSSHHostDialog'
 import { WorkspaceTabs } from './components/WorkspaceTabs'
 import { useLayout } from './hooks/useLayout'
-import { useEditMode } from './hooks/useEditMode'
 import { usePaneSettings } from './hooks/usePaneSettings'
 import { useWorkspaceAttentionMonitor } from './hooks/useWorkspaceAttentionMonitor'
 import { useBrowserNotificationPermission } from './hooks/useBrowserNotificationPermission'
 import { DisplayConfig } from './types'
 import { TERMINAL_FONT_FAMILY } from './utils/fonts'
-import { findPaneById, layoutContainsPane } from './utils/layoutTree'
+import { findPaneById, generatePaneId, layoutContainsPane } from './utils/layoutTree'
+import type { PanePlacement } from './hooks/useLayout'
 import type { LayoutChild, LayoutNode, SSHConfigHost } from './schemas'
 
 const DEFAULT_DISPLAY: DisplayConfig = { show_header: true, show_status_bar: true }
 
 export const App: React.FC = () => {
-  const { layout, workspaces, displayConfig, error, updateSizes, splitPane, closePane, swapPanes, setActiveWorkspace, addWorkspace, deleteWorkspace, renameWorkspace, setWorkspaceTabPosition } = useLayout()
-  const { editMode, toggleEditMode } = useEditMode()
+  const { layout, workspaces, displayConfig, error, updateSizes, splitPane, closePane, swapPanes, createPane, movePane, setActiveWorkspace, addWorkspace, deleteWorkspace, renameWorkspace, setWorkspaceTabPosition } = useLayout()
   const [maximizedPaneId, setMaximizedPaneId] = useState<string | null>(null)
   const [dragSourcePaneId, setDragSourcePaneId] = useState<string | null>(null)
   const [attentionPaneIds, setAttentionPaneIds] = useState<Set<string>>(() => new Set())
@@ -28,6 +26,8 @@ export const App: React.FC = () => {
   const [isAddSSHHostOpen, setIsAddSSHHostOpen] = useState(false)
   const [addSSHHostError, setAddSSHHostError] = useState<string | null>(null)
   const [isAddSSHHostSaving, setIsAddSSHHostSaving] = useState(false)
+  const [createPaneError, setCreatePaneError] = useState<string | null>(null)
+  const [movePaneError, setMovePaneError] = useState<string | null>(null)
 
   const paneMetadataByID = useMemo(() => {
     const metadata = new Map<string, { paneTitle: string; workspaceId: string; workspaceTitle: string }>()
@@ -119,6 +119,23 @@ export const App: React.FC = () => {
     }
   }, [addSSHConfigHost])
 
+  const handleCreateDefaultPane = useCallback((targetPaneId: string, edge: 'right' | 'bottom') => {
+    setCreatePaneError(null)
+    void createPane(
+      { id: generatePaneId(), type: 'local' },
+      { type: 'pane-edge', targetPaneId, edge },
+    ).catch((err) => {
+      setCreatePaneError(err instanceof Error ? err.message : 'Something went wrong')
+    })
+  }, [createPane])
+
+  const handleMovePane = useCallback((sourcePaneId: string, placement: PanePlacement) => {
+    setMovePaneError(null)
+    void movePane(sourcePaneId, placement).catch((err) => {
+      setMovePaneError(err instanceof Error ? err.message : 'Something went wrong')
+    })
+  }, [movePane])
+
   if (error) {
     return (
       <div style={{
@@ -154,6 +171,7 @@ export const App: React.FC = () => {
   return (
     <LayoutActionsContext.Provider value={{
       onSplit: splitPane,
+      onCreatePaneBeside: handleCreateDefaultPane,
       onClose: closePane,
       onMaximize: setMaximizedPaneId,
       onSettings: (paneId: string) => {
@@ -161,11 +179,16 @@ export const App: React.FC = () => {
         if (pane) openSettings(pane)
       },
       onSwapPanes: swapPanes,
+      onMovePaneToWorkspaceEdge: (sourcePaneId, edge) => {
+        handleMovePane(sourcePaneId, { type: 'workspace-edge', edge })
+      },
+      onMovePaneBeside: (sourcePaneId, targetPaneId, edge) => {
+        handleMovePane(sourcePaneId, { type: 'pane-edge', targetPaneId, edge })
+      },
       maximizedPaneId,
       dragSourcePaneId,
       setDragSourcePaneId,
       displayConfig: displayConfig ?? DEFAULT_DISPLAY,
-      editMode,
       onPaneAttention: notifyAttention,
       clearPaneAttention,
       hasPaneAttention: (paneId: string) => attentionPaneIds.has(paneId),
@@ -186,7 +209,7 @@ export const App: React.FC = () => {
           backgroundColor: '#1a1b1e',
         }}
       >
-        {workspaces && (workspaces.items.length > 1 || editMode) && (
+        {workspaces && (
           <WorkspaceTabs
             workspaces={workspaces.items}
             activeWorkspaceId={workspaces.active}
@@ -194,22 +217,117 @@ export const App: React.FC = () => {
             onSelect={setActiveWorkspace}
             attentionWorkspaceIds={attentionWorkspaceIds}
             onClearAttention={clearWorkspaceAttention}
-            onAdd={editMode ? addWorkspace : undefined}
-            onRename={editMode ? renameWorkspace : undefined}
-            onTabPositionChange={editMode ? setWorkspaceTabPosition : undefined}
-            onDelete={editMode ? (workspaceId) => {
+            onAdd={addWorkspace}
+            onRename={renameWorkspace}
+            onTabPositionChange={setWorkspaceTabPosition}
+            onDelete={(workspaceId) => {
               const workspace = workspaces.items.find((item) => item.id === workspaceId)
               if (!workspace) return
               if (window.confirm(`Delete workspace "${workspace.title}"?`)) {
                 void deleteWorkspace(workspaceId)
               }
-            } : undefined}
+            }}
           />
         )}
         <div style={{ position: 'relative', flex: 1, minWidth: 0, minHeight: 0 }}>
           <SplitContainer layout={layout} onLayoutChange={updateSizes} />
+          {createPaneError && (
+            <div
+              role="alert"
+              style={{
+                position: 'absolute',
+                top: 12,
+                right: 12,
+                zIndex: 30,
+                maxWidth: 320,
+                padding: '8px 12px',
+                border: '1px solid #7f1d1d',
+                borderRadius: 6,
+                backgroundColor: '#2f1313',
+                color: '#fca5a5',
+                fontFamily: TERMINAL_FONT_FAMILY,
+                fontSize: '12px',
+                boxShadow: '0 8px 20px rgba(0, 0, 0, 0.35)',
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: 12,
+                }}
+              >
+                <span style={{ flex: 1 }}>Failed to create terminal: {createPaneError}</span>
+                <button
+                  type="button"
+                  aria-label="Dismiss create terminal error"
+                  onClick={() => setCreatePaneError(null)}
+                  style={{
+                    appearance: 'none',
+                    border: 'none',
+                    background: 'transparent',
+                    color: '#fca5a5',
+                    cursor: 'pointer',
+                    fontFamily: TERMINAL_FONT_FAMILY,
+                    fontSize: '12px',
+                    lineHeight: 1,
+                    padding: 0,
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+          )}
+          {movePaneError && (
+            <div
+              role="alert"
+              style={{
+                position: 'absolute',
+                top: createPaneError ? 72 : 12,
+                right: 12,
+                zIndex: 30,
+                maxWidth: 320,
+                padding: '8px 12px',
+                border: '1px solid #7f1d1d',
+                borderRadius: 6,
+                backgroundColor: '#2f1313',
+                color: '#fca5a5',
+                fontFamily: TERMINAL_FONT_FAMILY,
+                fontSize: '12px',
+                boxShadow: '0 8px 20px rgba(0, 0, 0, 0.35)',
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: 12,
+                }}
+              >
+                <span style={{ flex: 1 }}>Failed to move terminal: {movePaneError}</span>
+                <button
+                  type="button"
+                  aria-label="Dismiss move error"
+                  onClick={() => setMovePaneError(null)}
+                  style={{
+                    appearance: 'none',
+                    border: 'none',
+                    background: 'transparent',
+                    color: '#fca5a5',
+                    cursor: 'pointer',
+                    fontFamily: TERMINAL_FONT_FAMILY,
+                    fontSize: '12px',
+                    lineHeight: 1,
+                    padding: 0,
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+          )}
         </div>
-        <EditModeToggle editMode={editMode} onToggle={toggleEditMode} />
         <PaneSettingsDialog
           isOpen={isOpen}
           pane={currentPane}

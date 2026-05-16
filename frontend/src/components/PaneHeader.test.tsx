@@ -13,8 +13,8 @@ const defaultProps = {
   connected: true,
   displayConfig: defaultDisplay,
   isMaximized: false,
-  editMode: false,
   onSplit: vi.fn(),
+  onCreateDefaultPane: vi.fn(),
   onClose: vi.fn(),
   onMaximize: vi.fn(),
   onSettings: vi.fn(),
@@ -47,5 +47,56 @@ describe('PaneHeader VSCode button', () => {
   it('does not render header when show_header is false', () => {
     render(<PaneHeader {...defaultProps} displayConfig={{ show_header: false, show_status_bar: false }} />)
     expect(screen.queryByTitle('Open in VSCode')).toBeNull()
+  })
+
+  it('shows a grabbing cursor while the pane is being dragged', () => {
+    render(<PaneHeader {...defaultProps} isDragging moveHandleProps={{ onMouseDown: vi.fn() }} />)
+    expect(screen.getByTitle('Drag to move pane')).toHaveStyle({ cursor: 'grabbing' })
+  })
+
+  it('shows hover affordance on header action buttons', () => {
+    render(<PaneHeader {...defaultProps} />)
+
+    const button = screen.getByTitle('Split horizontal')
+    fireEvent.mouseEnter(button)
+
+    expect(button).toHaveStyle({
+      backgroundColor: 'rgba(255, 255, 255, 0.07)',
+      boxShadow: 'inset 0 0 0 1px rgba(255, 255, 255, 0.06)',
+    })
+  })
+
+  it('shows a pressed state while a header action button is held down', () => {
+    render(<PaneHeader {...defaultProps} />)
+
+    const button = screen.getByTitle('Split horizontal')
+    fireEvent.mouseDown(button, { button: 0 })
+
+    expect(button).toHaveStyle({
+      backgroundColor: 'rgba(255, 255, 255, 0.12)',
+      boxShadow: 'inset 0 1px 2px rgba(0, 0, 0, 0.45)',
+      transform: 'translateY(1px)',
+    })
+
+    fireEvent.mouseUp(button)
+    expect(button).toHaveStyle({ transform: 'translateY(0)' })
+  })
+
+  it('calls onCreateDefaultPane for the right-side button', () => {
+    const onCreateDefaultPane = vi.fn()
+    render(<PaneHeader {...defaultProps} onCreateDefaultPane={onCreateDefaultPane} />)
+
+    fireEvent.click(screen.getByTitle('Add new pane to the right'))
+
+    expect(onCreateDefaultPane).toHaveBeenCalledWith('right')
+  })
+
+  it('calls onCreateDefaultPane for the bottom-side button', () => {
+    const onCreateDefaultPane = vi.fn()
+    render(<PaneHeader {...defaultProps} onCreateDefaultPane={onCreateDefaultPane} />)
+
+    fireEvent.click(screen.getByTitle('Add new pane below'))
+
+    expect(onCreateDefaultPane).toHaveBeenCalledWith('bottom')
   })
 })

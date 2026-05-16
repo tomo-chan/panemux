@@ -15,6 +15,79 @@ interface WorkspaceTabsProps {
   onClearAttention?: (workspaceId: string) => void
 }
 
+interface InteractiveSurfaceButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+  selected?: boolean
+  danger?: boolean
+}
+
+const InteractiveSurfaceButton = React.forwardRef<HTMLButtonElement, InteractiveSurfaceButtonProps>(function InteractiveSurfaceButton(
+  { selected = false, danger = false, style, children, onMouseEnter, onMouseLeave, onMouseDown, onMouseUp, onBlur, ...props },
+  ref,
+) {
+  const [hovered, setHovered] = useState(false)
+  const [pressed, setPressed] = useState(false)
+  const mergedStyle = style ?? {}
+  const baseColor = (mergedStyle.color as string | undefined) ?? '#b8beca'
+
+  let backgroundColor = selected ? '#2f3540' : 'transparent'
+  let boxShadow = 'none'
+  let color = danger ? '#f08b8b' : baseColor
+  let transform = 'translateY(0)'
+
+  if (hovered) {
+    backgroundColor = selected ? '#353d4a' : 'rgba(255, 255, 255, 0.07)'
+    boxShadow = 'inset 0 0 0 1px rgba(255, 255, 255, 0.06)'
+    color = selected ? '#ffffff' : '#d7dce5'
+  }
+
+  if (pressed) {
+    backgroundColor = selected ? '#39414f' : 'rgba(255, 255, 255, 0.12)'
+    boxShadow = 'inset 0 1px 2px rgba(0, 0, 0, 0.45)'
+    color = '#ffffff'
+    transform = 'translateY(1px)'
+  }
+
+  return (
+    <button
+      {...props}
+      ref={ref}
+      onMouseEnter={(event) => {
+        setHovered(true)
+        onMouseEnter?.(event)
+      }}
+      onMouseLeave={(event) => {
+        setHovered(false)
+        setPressed(false)
+        onMouseLeave?.(event)
+      }}
+      onMouseDown={(event) => {
+        if (event.button === 0) setPressed(true)
+        onMouseDown?.(event)
+      }}
+      onMouseUp={(event) => {
+        setPressed(false)
+        onMouseUp?.(event)
+      }}
+      onBlur={(event) => {
+        setPressed(false)
+        onBlur?.(event)
+      }}
+      style={{
+        ...mergedStyle,
+        appearance: 'none',
+        border: 'none',
+        transition: 'background-color 0.12s ease, box-shadow 0.12s ease, color 0.12s ease, transform 0.12s ease',
+        backgroundColor,
+        boxShadow,
+        color,
+        transform,
+      }}
+    >
+      {children}
+    </button>
+  )
+})
+
 export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
   workspaces,
   activeWorkspaceId,
@@ -29,6 +102,7 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
 }) => {
   const vertical = tabPosition === 'left' || tabPosition === 'right'
   const showTabs = workspaces.length > 1
+  const showBar = showTabs || Boolean(onAdd || onDelete || onRename || onTabPositionChange)
   const [editingWorkspaceId, setEditingWorkspaceId] = useState<string | null>(null)
   const [draftTitle, setDraftTitle] = useState('')
   const inputRef = useRef<HTMLInputElement | null>(null)
@@ -70,50 +144,64 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
       aria-label="Workspace tab position"
       style={{
         display: 'flex',
-        flexDirection: vertical ? 'column' : 'row',
         borderLeft: !vertical ? '1px solid #333842' : undefined,
         borderTop: vertical ? '1px solid #333842' : undefined,
         flexShrink: 0,
+        marginLeft: !vertical ? 'auto' : undefined,
+        marginTop: vertical ? 'auto' : undefined,
+        alignItems: 'center',
       }}
     >
-      {([
-        ['top', '▲', 'Place workspace tabs at top'],
-        ['bottom', '▼', 'Place workspace tabs at bottom'],
-        ['left', '◀', 'Place workspace tabs on left'],
-        ['right', '▶', 'Place workspace tabs on right'],
-      ] as const).map(([position, label, ariaLabel]) => {
-        const selected = tabPosition === position
-        return (
-          <button
-            key={position}
-            type="button"
-            aria-label={ariaLabel}
-            aria-pressed={selected}
-            title={ariaLabel}
-            onClick={() => onTabPositionChange(position)}
-            style={{
-              appearance: 'none',
-              border: 'none',
-              borderRight: !vertical ? '1px solid #333842' : undefined,
-              borderBottom: vertical ? '1px solid #333842' : undefined,
-              backgroundColor: selected ? '#3a4350' : 'transparent',
-              color: selected ? '#ffffff' : '#b8beca',
-              cursor: selected ? 'default' : 'pointer',
-              fontFamily: TERMINAL_FONT_FAMILY,
-              fontSize: 12,
-              height: vertical ? 30 : 34,
-              lineHeight: vertical ? '30px' : '34px',
-              minWidth: vertical ? '100%' : 34,
-              padding: 0,
-              textAlign: 'center',
-            }}
-          >
-            {label}
-          </button>
-        )
-      })}
+      <div
+        data-testid="workspace-tab-position-cluster"
+        style={{
+          display: 'flex',
+          flexDirection: 'row',
+          width: 136,
+          height: 34,
+        }}
+      >
+        {([
+          ['top', '▲', 'Place workspace tabs at top'],
+          ['bottom', '▼', 'Place workspace tabs at bottom'],
+          ['left', '◀', 'Place workspace tabs on left'],
+          ['right', '▶', 'Place workspace tabs on right'],
+        ] as const).map(([position, label, ariaLabel], index) => {
+          const selected = tabPosition === position
+          const isLast = index === 3
+          return (
+            <InteractiveSurfaceButton
+              key={position}
+              type="button"
+              aria-label={ariaLabel}
+              aria-pressed={selected}
+              title={ariaLabel}
+              onClick={() => onTabPositionChange(position)}
+              selected={selected}
+              style={{
+                border: 'none',
+                borderRight: !isLast ? '1px solid #333842' : undefined,
+                color: selected ? '#ffffff' : '#b8beca',
+                cursor: selected ? 'default' : 'pointer',
+                fontFamily: TERMINAL_FONT_FAMILY,
+                fontSize: 12,
+                width: 34,
+                height: '100%',
+                lineHeight: '34px',
+                flex: '0 0 34px',
+                padding: 0,
+                textAlign: 'center',
+              }}
+            >
+              {label}
+            </InteractiveSurfaceButton>
+          )
+        })}
+      </div>
     </div>
   ) : null
+
+  if (!showBar) return null
 
   return (
     <div
@@ -197,7 +285,7 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
                     }}
                   />
                 ) : (
-                  <button
+                  <InteractiveSurfaceButton
                     role="tab"
                     aria-selected={active}
                     data-attention={hasAttention ? 'true' : undefined}
@@ -207,10 +295,9 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
                     }}
                     onDoubleClick={() => startRename(workspace)}
                     title={workspace.title}
+                    selected={active}
                     style={{
-                      appearance: 'none',
                       border: 'none',
-                      backgroundColor: 'transparent',
                       color: active ? '#ffffff' : '#b8beca',
                       cursor: active ? 'default' : 'pointer',
                       flex: 1,
@@ -226,18 +313,16 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
                     }}
                   >
                     {workspace.title}
-                  </button>
+                  </InteractiveSurfaceButton>
                 )}
                 {onRename && !editing && (
-                  <button
+                  <InteractiveSurfaceButton
                     type="button"
                     aria-label={`Rename ${workspace.title} workspace`}
                     title="Rename workspace"
                     onClick={() => startRename(workspace)}
                     style={{
-                      appearance: 'none',
                       border: 'none',
-                      backgroundColor: 'transparent',
                       color: active ? '#d7dce5' : '#8f96a3',
                       cursor: 'pointer',
                       flex: '0 0 28px',
@@ -250,19 +335,17 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
                     }}
                   >
                     ✎
-                  </button>
+                  </InteractiveSurfaceButton>
                 )}
                 {onDelete && (
-                  <button
+                  <InteractiveSurfaceButton
                     type="button"
                     aria-label={`Delete ${workspace.title} workspace`}
                     title="Delete workspace"
                     onClick={() => onDelete(workspace.id)}
+                    danger
                     style={{
-                      appearance: 'none',
                       border: 'none',
-                      backgroundColor: 'transparent',
-                      color: active ? '#d7dce5' : '#8f96a3',
                       cursor: 'pointer',
                       flex: '0 0 28px',
                       fontFamily: TERMINAL_FONT_FAMILY,
@@ -274,7 +357,7 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
                     }}
                   >
                     ×
-                  </button>
+                  </InteractiveSurfaceButton>
                 )}
               </div>
             )
@@ -282,32 +365,49 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
         </div>
       )}
       {onAdd && (
-        <button
-          type="button"
-          aria-label="Add workspace"
-          title="Add workspace"
-          onClick={onAdd}
+        <div
           style={{
-            appearance: 'none',
-            border: 'none',
             borderRight: !vertical ? '1px solid #333842' : undefined,
             borderBottom: vertical ? '1px solid #333842' : undefined,
             backgroundColor: 'transparent',
-            color: '#b8beca',
-            cursor: 'pointer',
-            fontFamily: TERMINAL_FONT_FAMILY,
-            fontSize: 18,
+            display: 'flex',
+            alignItems: 'center',
             height: vertical ? 38 : 34,
             minWidth: vertical ? '100%' : 40,
-            padding: 0,
-            textAlign: 'center',
-            lineHeight: vertical ? '38px' : '34px',
+            maxWidth: vertical ? '100%' : 40,
+            flexShrink: 0,
           }}
         >
-          +
-        </button>
+          <InteractiveSurfaceButton
+            type="button"
+            aria-label="Add workspace"
+            title="Add workspace"
+            onClick={onAdd}
+            style={actionButtonStyle(vertical)}
+          >
+            +
+          </InteractiveSurfaceButton>
+        </div>
       )}
       {positionControls}
     </div>
   )
+}
+
+function actionButtonStyle(vertical: boolean): React.CSSProperties {
+  return {
+    appearance: 'none',
+    border: 'none',
+    backgroundColor: 'transparent',
+    color: '#b8beca',
+    cursor: 'pointer',
+    fontFamily: TERMINAL_FONT_FAMILY,
+    fontSize: 16,
+    minWidth: vertical ? '100%' : 40,
+    height: '100%',
+    padding: 0,
+    flex: 1,
+    textAlign: 'center',
+    whiteSpace: 'nowrap',
+  }
 }

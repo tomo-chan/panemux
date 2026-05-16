@@ -38,6 +38,13 @@ const mockDeleteWorkspace = vi.fn()
 const mockRenameWorkspace = vi.fn()
 const mockSetWorkspaceTabPosition = vi.fn()
 const mockSetActiveWorkspace = vi.fn()
+const mockUpdateSizes = vi.fn()
+const mockSplitPane = vi.fn()
+const mockClosePane = vi.fn()
+const mockSwapPanes = vi.fn()
+const mockCreatePane = vi.fn().mockResolvedValue(undefined)
+const mockMovePane = vi.fn()
+const mockAddWorkspace = vi.fn()
 const mockUseWorkspaceAttentionMonitor = vi.hoisted(() => vi.fn())
 const mockUseBrowserNotificationPermission = vi.hoisted(() => vi.fn())
 
@@ -47,12 +54,14 @@ vi.mock('./hooks/useLayout', () => ({
     workspaces: currentWorkspaces,
     displayConfig: { show_header: false, show_status_bar: false },
     error: null,
-    updateSizes: vi.fn(),
-    splitPane: vi.fn(),
-    closePane: vi.fn(),
-    swapPanes: vi.fn(),
+    updateSizes: mockUpdateSizes,
+    splitPane: mockSplitPane,
+    closePane: mockClosePane,
+    swapPanes: mockSwapPanes,
+    createPane: mockCreatePane,
+    movePane: mockMovePane,
     setActiveWorkspace: mockSetActiveWorkspace,
-    addWorkspace: vi.fn(),
+    addWorkspace: mockAddWorkspace,
     deleteWorkspace: mockDeleteWorkspace,
     renameWorkspace: mockRenameWorkspace,
     setWorkspaceTabPosition: mockSetWorkspaceTabPosition,
@@ -65,10 +74,6 @@ vi.mock('./hooks/useWorkspaceAttentionMonitor', () => ({
 
 vi.mock('./hooks/useBrowserNotificationPermission', () => ({
   useBrowserNotificationPermission: mockUseBrowserNotificationPermission,
-}))
-
-vi.mock('./hooks/useEditMode', () => ({
-  useEditMode: () => ({ editMode: true, toggleEditMode: vi.fn() }),
 }))
 
 vi.mock('./hooks/usePaneSettings', () => ({
@@ -117,6 +122,13 @@ describe('App workspace deletion', () => {
     mockRenameWorkspace.mockClear()
     mockSetWorkspaceTabPosition.mockClear()
     mockSetActiveWorkspace.mockClear()
+    mockUpdateSizes.mockClear()
+    mockSplitPane.mockClear()
+    mockClosePane.mockClear()
+    mockSwapPanes.mockClear()
+    mockCreatePane.mockClear()
+    mockMovePane.mockClear()
+    mockAddWorkspace.mockClear()
     mockTerminalPane.mockClear()
     mockUseWorkspaceAttentionMonitor.mockReset()
     mockUseBrowserNotificationPermission.mockReset()
@@ -194,6 +206,79 @@ describe('App workspace deletion', () => {
     expect(mockDeleteWorkspace).not.toHaveBeenCalled()
   })
 
+  it('creates a default local pane to the right of the current pane', async () => {
+    mockTerminalPane.mockImplementation(({ pane }: { pane: { id: string } }) => {
+      const ctx = useContext(LayoutActionsContext)
+      return (
+        <div data-pane-id={pane.id}>
+          <button onClick={() => ctx?.onCreatePaneBeside(pane.id, 'right')}>Add right of {pane.id}</button>
+        </div>
+      )
+    })
+
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Add right of main' }))
+
+    expect(mockCreatePane).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'local', id: expect.any(String) }),
+      { type: 'pane-edge', targetPaneId: 'main', edge: 'right' },
+    )
+  })
+
+  it('shows a user-visible error when creating a pane fails', async () => {
+    mockCreatePane.mockRejectedValueOnce(new Error('HTTP 500'))
+    mockTerminalPane.mockImplementation(({ pane }: { pane: { id: string } }) => {
+      const ctx = useContext(LayoutActionsContext)
+      return (
+        <div data-pane-id={pane.id}>
+          <button onClick={() => ctx?.onCreatePaneBeside(pane.id, 'right')}>Add right of {pane.id}</button>
+        </div>
+      )
+    })
+
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Add right of main' }))
+
+    expect(await screen.findByText('Failed to create terminal: HTTP 500')).toBeInTheDocument()
+  })
+
+  it('dismisses the create pane error banner when requested', async () => {
+    mockCreatePane.mockRejectedValueOnce(new Error('HTTP 500'))
+    mockTerminalPane.mockImplementation(({ pane }: { pane: { id: string } }) => {
+      const ctx = useContext(LayoutActionsContext)
+      return (
+        <div data-pane-id={pane.id}>
+          <button onClick={() => ctx?.onCreatePaneBeside(pane.id, 'right')}>Add right of {pane.id}</button>
+        </div>
+      )
+    })
+
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Add right of main' }))
+
+    expect(await screen.findByRole('alert')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss create terminal error' }))
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('shows a generic create error when the rejection is not an Error instance', async () => {
+    mockCreatePane.mockRejectedValueOnce('boom')
+    mockTerminalPane.mockImplementation(({ pane }: { pane: { id: string } }) => {
+      const ctx = useContext(LayoutActionsContext)
+      return (
+        <div data-pane-id={pane.id}>
+          <button onClick={() => ctx?.onCreatePaneBeside(pane.id, 'right')}>Add right of {pane.id}</button>
+        </div>
+      )
+    })
+
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Add right of main' }))
+
+    expect(await screen.findByText('Failed to create terminal: Something went wrong')).toBeInTheDocument()
+  })
+
   it('passes workspace rename from edit-mode tabs', () => {
     render(<App />)
     fireEvent.click(screen.getByRole('button', { name: 'Rename Dev workspace' }))
@@ -209,6 +294,49 @@ describe('App workspace deletion', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Place workspace tabs on right' }))
 
     expect(mockSetWorkspaceTabPosition).toHaveBeenCalledWith('right')
+  })
+
+  it('shows a user-visible error when moving a pane fails to persist', async () => {
+    mockMovePane.mockRejectedValueOnce(new Error('HTTP 500'))
+    mockTerminalPane.mockImplementation(({ pane }: { pane: { id: string } }) => {
+      const ctx = useContext(LayoutActionsContext)
+      return <button onClick={() => ctx?.onMovePaneToWorkspaceEdge(pane.id, 'left')}>Move {pane.id}</button>
+    })
+
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Move main' }))
+
+    expect(mockMovePane).toHaveBeenCalledWith('main', { type: 'workspace-edge', edge: 'left' })
+    expect(await screen.findByText('Failed to move terminal: HTTP 500')).toBeInTheDocument()
+  })
+
+  it('dismisses the move error banner when requested', async () => {
+    mockMovePane.mockRejectedValueOnce(new Error('HTTP 500'))
+    mockTerminalPane.mockImplementation(({ pane }: { pane: { id: string } }) => {
+      const ctx = useContext(LayoutActionsContext)
+      return <button onClick={() => ctx?.onMovePaneToWorkspaceEdge(pane.id, 'left')}>Move {pane.id}</button>
+    })
+
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Move main' }))
+
+    expect(await screen.findByRole('alert')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss move error' }))
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('shows a generic move error when the rejection is not an Error instance', async () => {
+    mockMovePane.mockRejectedValueOnce('boom')
+    mockTerminalPane.mockImplementation(({ pane }: { pane: { id: string } }) => {
+      const ctx = useContext(LayoutActionsContext)
+      return <button onClick={() => ctx?.onMovePaneToWorkspaceEdge(pane.id, 'left')}>Move {pane.id}</button>
+    })
+
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Move main' }))
+
+    expect(await screen.findByText('Failed to move terminal: Something went wrong')).toBeInTheDocument()
   })
 
   it('marks an inactive workspace when the attention monitor reports one of its panes', () => {

@@ -10,7 +10,6 @@ const REPAINT_SETTLE_DELAYS_MS = [50, 250]
 interface UseTerminalOptions {
   sessionId: string
   container: HTMLElement | null
-  editMode?: boolean
 }
 
 interface TerminalEntry {
@@ -21,7 +20,6 @@ interface TerminalEntry {
   repaintTimers: Set<ReturnType<typeof setTimeout>>
   resizeTimers: Set<ReturnType<typeof setTimeout>>
   send: ((data: string | ArrayBuffer | Uint8Array) => void) | null
-  editMode: boolean
   replayActive: boolean
   replayWriteDepth: number
   awaitingReplayEnd: boolean
@@ -34,7 +32,7 @@ interface PendingTerminalMessage {
 
 const terminalEntries = new Map<string, TerminalEntry>()
 
-export function useTerminal({ sessionId, container, editMode = false }: UseTerminalOptions) {
+export function useTerminal({ sessionId, container }: UseTerminalOptions) {
   const termRef = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
   const initializedRef = useRef(false)
@@ -112,11 +110,6 @@ export function useTerminal({ sessionId, container, editMode = false }: UseTermi
     }
   }, [send])
 
-  // Sync editMode into the entry so onData/onBinary handlers can read it
-  useLayoutEffect(() => {
-    if (entryRef.current) entryRef.current.editMode = editMode
-  }, [editMode])
-
   useEffect(() => {
     // Browser focus and tab visibility changes can affect every attached pane's layout,
     // so each mounted terminal repaints its own attached instance when the page returns.
@@ -163,7 +156,6 @@ export function useTerminal({ sessionId, container, editMode = false }: UseTermi
 
     entry.attachedContainer = container
     entry.send = sendRef.current
-    entry.editMode = editMode
     entryRef.current = entry
     termRef.current = entry.term
     fitAddonRef.current = entry.fitAddon
@@ -280,7 +272,6 @@ function getOrCreateTerminalEntry(sessionId: string): TerminalEntry {
     repaintTimers: new Set(),
     resizeTimers: new Set(),
     send: null,
-    editMode: false,
     replayActive: false,
     replayWriteDepth: 0,
     awaitingReplayEnd: false,
@@ -300,17 +291,15 @@ function getOrCreateTerminalEntry(sessionId: string): TerminalEntry {
 
   // Use the entry send ref so the same terminal instance can survive pane remounts.
   term.onData((data) => {
-    if (!entry.editMode) entry.send?.(new TextEncoder().encode(data))
+    entry.send?.(new TextEncoder().encode(data))
   })
 
   term.onBinary((data) => {
-    if (!entry.editMode) {
-      const bytes = new Uint8Array(data.length)
-      for (let i = 0; i < data.length; i++) {
-        bytes[i] = data.charCodeAt(i) & 0xff
-      }
-      entry.send?.(bytes)
+    const bytes = new Uint8Array(data.length)
+    for (let i = 0; i < data.length; i++) {
+      bytes[i] = data.charCodeAt(i) & 0xff
     }
+    entry.send?.(bytes)
   })
 
   terminalEntries.set(sessionId, entry)
@@ -325,10 +314,9 @@ function attachTerminal(entry: TerminalEntry, container: HTMLElement) {
 
   if (entry.term.element.parentElement !== container) {
     // Use appendChild (not replaceChildren) so that React-managed siblings
-    // (edit-mode overlay, session-exited overlay) are preserved.  replaceChildren()
+    // (session-exited overlay) are preserved. replaceChildren()
     // would remove those React-owned DOM nodes, causing React to crash when it
-    // next tries to reconcile them (e.g. removeChild on a detached node when
-    // edit mode is toggled off).
+    // next tries to reconcile them.
     container.appendChild(entry.term.element)
   }
 }

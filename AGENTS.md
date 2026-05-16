@@ -68,17 +68,17 @@ Each terminal pane opens its own WebSocket connection (`/ws/{sessionID}`). There
 - **`config/`** — Loads YAML config into `Config` struct. `LayoutNode`/`LayoutChild`/`PaneConfig` have both `yaml:` and `json:` tags so they can be served directly from the REST API. `LayoutChild.Size` is `float64` to preserve fractional percentages after drag-resize.
 - **`session/`** — `Session` interface (`Read`/`Write`/`Resize`/`Close`). Four implementations: `LocalSession` (creack/pty), `SSHSession` (x/crypto/ssh), `TmuxLocalSession` (tmux attach via pty), `TmuxSSHSession` (SSH → tmux attach). `Manager` is a thread-safe map of active sessions.
 - **`ws/handler.go`** — Upgrades HTTP to WebSocket, then bidirectionally bridges the session. Binary frames = raw terminal I/O (no encoding). Text frames = JSON control messages (resize, status).
-- **`api/handler.go`** — REST handlers for layout and session management.
+- **`api/handler.go`** — REST handlers for layout, workspace, and session management.
 - **`server/server.go`** — chi router wiring API, WebSocket, and embedded frontend static files. The embedded `frontend/dist` is served with SPA fallback to `index.html`.
 
-Sessions are started at server startup from the YAML config (`main.go: startSessionsFromConfig`). There is no dynamic session creation from the UI yet — the REST `POST /api/sessions` endpoint is reserved for future use.
+Sessions are started at server startup from the YAML config (`main.go: startSessionsFromConfig`). The UI can also create additional sessions dynamically through `POST /api/sessions` when splitting a pane or adding a terminal.
 
 ### Frontend (`frontend/src/`)
 
 - **`useWebSocket.ts`** — Manages a single WebSocket with auto-reconnect. Callbacks (`onMessage`, `onOpen`, `onClose`) are stored in refs so the `connect` function is stable and does not trigger reconnects on re-renders.
 - **`useTerminal.ts`** — Initialises an xterm.js `Terminal` instance once per container element. `send` is accessed via `sendRef` inside `onData`/`onBinary` so the handlers never capture a stale closure.
-- **`SplitContainer.tsx`** — Recursively renders `LayoutNode`/`LayoutChild` trees. `LayoutRenderer` handles drag-resize by computing `deltaPercent` from the container's pixel size and updating sibling `size` values (which are percentages summing to 100).
-- **`TerminalPane.tsx`** — Mounts the container div, passes it to `useTerminal`, attaches a `ResizeObserver` to call `handleResize` whenever the pane changes size.
+- **`SplitContainer.tsx`** — Recursively renders `LayoutNode`/`LayoutChild` trees. `LayoutRenderer` handles drag-resize by computing `deltaPercent` from the container's pixel size and updating sibling `size` values (which are percentages summing to 100). It also exposes workspace-edge and divider drop targets for pane moves.
+- **`TerminalPane.tsx`** — Mounts the container div, passes it to `useTerminal`, attaches a `ResizeObserver` to call `handleResize` whenever the pane changes size, and exposes pane-edge drop targets plus a header drag handle for pane moves.
 
 ### Config format
 
@@ -105,7 +105,7 @@ Sessions are started at server startup from the YAML config (`main.go: startSess
 For every new feature or behavior change, explicitly consider:
 
 - **Input shape variants:** legacy and new schemas, omitted optional fields, defaulted fields, invalid enum values, empty lists, duplicate IDs, unknown references, malformed request bodies.
-- **State variants:** active vs inactive items, empty vs populated state, existing vs missing resources, edit mode on vs off, persisted config vs memory-only config.
+- **State variants:** active vs inactive items, empty vs populated state, existing vs missing resources, persisted config vs memory-only config, and visible vs dismissed transient UI errors when user actions can fail after optimistic updates.
 - **Operation variants:** read, create, update, delete, switch, save, reload, restart, and no-op cases where applicable.
 - **Boundary variants:** minimum/maximum values, zero/negative values, size sums, single item vs multiple items, nested structures, and paths with `~/` when paths are involved.
 - **Compatibility and migration:** old config/API shape, new config/API shape, precedence when both exist, migration-on-save behavior, and post-reload behavior after migration.

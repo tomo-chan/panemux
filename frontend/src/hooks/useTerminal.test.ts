@@ -705,21 +705,9 @@ describe('useTerminal', () => {
     expect(mockTerm.refresh).not.toHaveBeenCalled()
   })
 
-  it('editMode blocks terminal input', () => {
+  it('passes terminal input to the websocket', () => {
     const container = makeContainer()
-    renderHook(() => useTerminal({ sessionId: 's1', container, editMode: true }))
-    act(() => MockWebSocket.instances[0].simulateOpen())
-
-    const ws = MockWebSocket.instances[0]
-    const sentBefore = ws.sent.length
-    const onDataCallback = mockTerm.onData.mock.calls[0][0] as (data: string) => void
-    act(() => onDataCallback('hello'))
-    expect(ws.sent.length).toBe(sentBefore)
-  })
-
-  it('normal mode passes terminal input', () => {
-    const container = makeContainer()
-    renderHook(() => useTerminal({ sessionId: 's1', container, editMode: false }))
+    renderHook(() => useTerminal({ sessionId: 's1', container }))
     act(() => MockWebSocket.instances[0].simulateOpen())
 
     const ws = MockWebSocket.instances[0]
@@ -729,32 +717,15 @@ describe('useTerminal', () => {
     expect(ws.sent.length).toBeGreaterThan(sentBefore)
   })
 
-  it('editMode blocks binary input', () => {
+  it('passes binary input to the websocket', () => {
     const container = makeContainer()
-    renderHook(() => useTerminal({ sessionId: 's1', container, editMode: true }))
+    renderHook(() => useTerminal({ sessionId: 's1', container }))
     act(() => MockWebSocket.instances[0].simulateOpen())
 
     const ws = MockWebSocket.instances[0]
     const sentBefore = ws.sent.length
     const onBinaryCallback = mockTerm.onBinary.mock.calls[0][0] as (data: string) => void
     act(() => onBinaryCallback('ABC'))
-    expect(ws.sent.length).toBe(sentBefore)
-  })
-
-  it('re-enables terminal input when editMode is turned off after mount', () => {
-    const container = makeContainer()
-    const { rerender } = renderHook(
-      ({ editMode }: { editMode: boolean }) => useTerminal({ sessionId: 's1', container, editMode }),
-      { initialProps: { editMode: true } },
-    )
-    act(() => MockWebSocket.instances[0].simulateOpen())
-
-    rerender({ editMode: false })
-
-    const ws = MockWebSocket.instances[0]
-    const sentBefore = ws.sent.length
-    const onDataCallback = mockTerm.onData.mock.calls[0][0] as (data: string) => void
-    act(() => onDataCallback('hello after unlock'))
     expect(ws.sent.length).toBeGreaterThan(sentBefore)
   })
 

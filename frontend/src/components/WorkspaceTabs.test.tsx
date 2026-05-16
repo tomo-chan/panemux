@@ -26,6 +26,44 @@ describe('WorkspaceTabs', () => {
     expect(onSelect).toHaveBeenCalledWith('ops')
   })
 
+  it('shows hover affordance on workspace tabs', () => {
+    render(<WorkspaceTabs workspaces={workspaces} activeWorkspaceId="dev" tabPosition="top" onSelect={() => {}} />)
+
+    const tab = screen.getByRole('tab', { name: 'Ops' })
+    fireEvent.mouseEnter(tab)
+
+    expect(tab).toHaveStyle({
+      backgroundColor: 'rgba(255, 255, 255, 0.07)',
+      boxShadow: 'inset 0 0 0 1px rgba(255, 255, 255, 0.06)',
+    })
+  })
+
+  it('keeps hover affordance after a component re-render', () => {
+    render(<WorkspaceTabs workspaces={workspaces} activeWorkspaceId="dev" tabPosition="top" onSelect={() => {}} onRename={() => {}} />)
+
+    const tab = screen.getByRole('tab', { name: 'Ops' })
+    fireEvent.mouseEnter(tab)
+    fireEvent.click(screen.getByRole('button', { name: 'Rename Dev workspace' }))
+
+    expect(tab).toHaveStyle({
+      backgroundColor: 'rgba(255, 255, 255, 0.07)',
+      boxShadow: 'inset 0 0 0 1px rgba(255, 255, 255, 0.06)',
+    })
+  })
+
+  it('shows a pressed state on workspace add button while held down', () => {
+    render(<WorkspaceTabs workspaces={workspaces} activeWorkspaceId="dev" tabPosition="top" onSelect={() => {}} onAdd={() => {}} />)
+
+    const button = screen.getByRole('button', { name: 'Add workspace' })
+    fireEvent.mouseDown(button, { button: 0 })
+
+    expect(button).toHaveStyle({
+      backgroundColor: 'rgba(255, 255, 255, 0.12)',
+      boxShadow: 'inset 0 1px 2px rgba(0, 0, 0, 0.45)',
+      transform: 'translateY(1px)',
+    })
+  })
+
   it('marks inactive workspaces that need attention', () => {
     render(
       <WorkspaceTabs
@@ -88,6 +126,18 @@ describe('WorkspaceTabs', () => {
     expect(onAdd).toHaveBeenCalled()
   })
 
+  it('renders the add workspace control with the same tab height', () => {
+    render(<WorkspaceTabs workspaces={workspaces} activeWorkspaceId="dev" tabPosition="top" onSelect={() => {}} onAdd={() => {}} />)
+
+    expect(screen.getByRole('button', { name: 'Add workspace' }).parentElement).toHaveStyle({ height: '34px' })
+  })
+
+  it('does not render a workspace-bar add terminal button', () => {
+    render(<WorkspaceTabs workspaces={workspaces} activeWorkspaceId="dev" tabPosition="top" onSelect={() => {}} onAdd={() => {}} />)
+
+    expect(screen.queryByRole('button', { name: 'Add terminal' })).not.toBeInTheDocument()
+  })
+
   it('renders tab position controls when a position change handler is provided', () => {
     const onTabPositionChange = vi.fn()
     render(
@@ -101,9 +151,43 @@ describe('WorkspaceTabs', () => {
     )
 
     expect(screen.getByRole('group', { name: 'Workspace tab position' })).toBeInTheDocument()
+    expect(screen.getByTestId('workspace-tab-position-cluster').children).toHaveLength(4)
+    expect(screen.getByTestId('workspace-tab-position-cluster')).toHaveStyle({ display: 'flex', flexDirection: 'row' })
     expect(screen.getByRole('button', { name: 'Place workspace tabs at top' })).toHaveAttribute('aria-pressed', 'true')
     fireEvent.click(screen.getByRole('button', { name: 'Place workspace tabs on left' }))
     expect(onTabPositionChange).toHaveBeenCalledWith('left')
+  })
+
+  it('places the tab position controls after the tablist and action group for horizontal bars', () => {
+    const { container } = render(
+      <WorkspaceTabs
+        workspaces={workspaces}
+        activeWorkspaceId="dev"
+        tabPosition="top"
+        onSelect={() => {}}
+        onAdd={() => {}}
+        onTabPositionChange={() => {}}
+      />,
+    )
+
+    const bar = container.firstElementChild
+    expect(bar?.children.item(0)).toHaveAttribute('role', 'tablist')
+    expect(bar?.children.item(1)?.textContent).toContain('+')
+    expect(bar?.children.item(2)).toHaveAttribute('role', 'group')
+  })
+
+  it('places the tab position controls at the opposite end for vertical bars', () => {
+    render(
+      <WorkspaceTabs
+        workspaces={workspaces}
+        activeWorkspaceId="dev"
+        tabPosition="left"
+        onSelect={() => {}}
+        onTabPositionChange={() => {}}
+      />,
+    )
+
+    expect(screen.getByRole('group', { name: 'Workspace tab position' })).toHaveStyle({ marginTop: 'auto' })
   })
 
   it('hides tab position controls when the position change handler is omitted', () => {

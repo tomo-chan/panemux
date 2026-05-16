@@ -104,12 +104,6 @@ export const GitInfoSchema = z.object({
 
 export type GitInfo = z.infer<typeof GitInfoSchema>
 
-export const EditModeResponseSchema = z.object({
-  editMode: z.boolean(),
-})
-
-export type EditModeResponse = z.infer<typeof EditModeResponseSchema>
-
 export const SSHConnectionsResponseSchema = z.object({
   names: z.array(z.string()),
 })

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { splitPaneInTree, removePaneFromTree, generatePaneId, generateTmuxSessionName, findPaneById, replacePaneInTree, swapPanesInTree } from './layoutTree'
+import { insertPaneAtWorkspaceEdge, insertPaneBesideTargetPane, movePaneBesideTargetPane, movePaneToWorkspaceEdge, splitPaneInTree, removePaneFromTree, generatePaneId, generateTmuxSessionName, findPaneById, replacePaneInTree, swapPanesInTree } from './layoutTree'
 import type { LayoutNode } from '../schemas'
 
 const simpleLayout: LayoutNode = {
@@ -246,6 +246,65 @@ describe('swapPanesInTree', () => {
   it('returns unchanged layout when a pane id is not found', () => {
     const result = swapPanesInTree(twoChildLayout, 'left', 'nonexistent')
     expect(result).toBe(twoChildLayout)
+  })
+})
+
+describe('insertPaneAtWorkspaceEdge', () => {
+  it('prepends a pane at the workspace top edge by wrapping the layout', () => {
+    const result = insertPaneAtWorkspaceEdge(simpleLayout, 'top', { id: 'new-pane', type: 'local' })
+    expect(result.direction).toBe('vertical')
+    expect(result.children[0].pane?.id).toBe('new-pane')
+  })
+
+  it('appends a pane to the workspace right edge when the axis already matches', () => {
+    const result = insertPaneAtWorkspaceEdge(twoChildLayout, 'right', { id: 'new-pane', type: 'local' })
+    expect(result.direction).toBe('horizontal')
+    expect(result.children).toHaveLength(3)
+    expect(result.children[2].pane?.id).toBe('new-pane')
+    expect(result.children.every((child) => child.size === 100 / 3)).toBe(true)
+  })
+})
+
+describe('insertPaneBesideTargetPane', () => {
+  it('inserts a pane beside a target pane within the same parent axis', () => {
+    const result = insertPaneBesideTargetPane(twoChildLayout, 'left', 'right', { id: 'new-pane', type: 'local' })
+    expect(result.children).toHaveLength(3)
+    expect(result.children[1].pane?.id).toBe('new-pane')
+  })
+
+  it('wraps the target pane when inserting across the parent axis', () => {
+    const result = insertPaneBesideTargetPane(twoChildLayout, 'left', 'top', { id: 'new-pane', type: 'local' })
+    expect(result.children[0].direction).toBe('vertical')
+    expect(result.children[0].children?.[0].pane?.id).toBe('new-pane')
+  })
+})
+
+describe('movePane helpers', () => {
+  it('moves a pane to the workspace edge without duplicating it', () => {
+    const result = movePaneToWorkspaceEdge(twoChildLayout, 'left', 'right')
+    expect(result.children).toHaveLength(2)
+    expect(result.children[1].pane?.id).toBe('left')
+  })
+
+  it('moves a pane beside another target pane', () => {
+    const nested: LayoutNode = {
+      direction: 'horizontal',
+      children: [
+        { size: 50, pane: { id: 'left', type: 'local' } },
+        {
+          size: 50,
+          direction: 'vertical',
+          children: [
+            { size: 50, pane: { id: 'top-right', type: 'local' } },
+            { size: 50, pane: { id: 'bottom-right', type: 'local' } },
+          ],
+        },
+      ],
+    }
+    const result = movePaneBesideTargetPane(nested, 'left', 'bottom-right', 'bottom')
+    const rightBranch = result.children[0].direction ? result.children[0] : result.children[1]
+    expect(findPaneById({ direction: result.direction, children: result.children }, 'left')).not.toBeNull()
+    expect(rightBranch.children?.some((child) => child.pane?.id === 'left')).toBe(true)
   })
 })
 

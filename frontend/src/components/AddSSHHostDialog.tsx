@@ -60,6 +60,15 @@ export const AddSSHHostDialog: React.FC<AddSSHHostDialogProps> = ({
     }
   }, [isOpen])
 
+  useEffect(() => {
+    if (!isOpen || isSaving) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isOpen, isSaving, onClose])
+
   if (!isOpen) return null
 
   const handleSave = async () => {
@@ -114,7 +123,9 @@ export const AddSSHHostDialog: React.FC<AddSSHHostDialogProps> = ({
         justifyContent: 'center',
         zIndex: 1100,
       }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget && !isSaving) onClose()
+      }}
     >
       <div
         style={{
@@ -123,6 +134,10 @@ export const AddSSHHostDialog: React.FC<AddSSHHostDialogProps> = ({
           borderRadius: '6px',
           padding: '20px 24px',
           width: '360px',
+          maxWidth: 'calc(100vw - 32px)',
+          maxHeight: 'calc(100vh - 32px)',
+          overflowY: 'auto',
+          boxSizing: 'border-box',
           fontFamily: TERMINAL_FONT_FAMILY,
           color: '#d4d4d4',
         }}
