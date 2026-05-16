@@ -30,13 +30,14 @@ describe('useGitInfo', () => {
   it('returns branch and repo when in a git repo', async () => {
     window.fetch = vi.fn().mockResolvedValue({
       ok: true,
-      json: () => Promise.resolve({ is_git: true, branch: 'main', repo: 'myrepo', pr_url: 'https://github.com/example/repo/pull/1' }),
+      json: () => Promise.resolve({ is_git: true, branch: 'main', repo: 'myrepo', pr_number: 1, pr_url: 'https://github.com/example/repo/pull/1' }),
     } as Response)
 
     const { result } = renderHook(() => useGitInfo('pane1'))
     await waitFor(() => expect(result.current.is_git).toBe(true))
     expect(result.current.branch).toBe('main')
     expect(result.current.repo).toBe('myrepo')
+    expect(result.current.pr_number).toBe(1)
     expect(result.current.pr_url).toBe('https://github.com/example/repo/pull/1')
   })
 

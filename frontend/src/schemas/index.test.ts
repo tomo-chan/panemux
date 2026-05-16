@@ -22,14 +22,16 @@ describe('GitInfoSchema', () => {
       is_git: true,
       branch: 'feature/pane-pr-link',
       repo: 'panemux',
+      pr_number: 123,
       pr_url: 'https://github.com/example/panemux/pull/123',
     })
     expect(result.success).toBe(true)
   })
 
-  it('rejects non-string pr_url', () => {
+  it('rejects invalid PR metadata types', () => {
     const result = GitInfoSchema.safeParse({
       is_git: true,
+      pr_number: '123',
       pr_url: 123,
     })
     expect(result.success).toBe(false)

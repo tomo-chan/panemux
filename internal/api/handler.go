@@ -682,10 +682,11 @@ func (h *Handler) GetDirectories(w http.ResponseWriter, r *http.Request) {
 }
 
 type gitInfoResponse struct {
-	Branch string `json:"branch,omitempty"`
-	PRURL  string `json:"pr_url,omitempty"`
-	Repo   string `json:"repo,omitempty"`
-	IsGit  bool   `json:"is_git"`
+	Branch   string `json:"branch,omitempty"`
+	PRURL    string `json:"pr_url,omitempty"`
+	Repo     string `json:"repo,omitempty"`
+	PRNumber int    `json:"pr_number,omitempty"`
+	IsGit    bool   `json:"is_git"`
 }
 
 // GetGitInfo returns git repository information for the session's current working directory.
@@ -741,11 +742,14 @@ func (h *Handler) GetGitInfo(w http.ResponseWriter, r *http.Request) {
 	}
 	branch := strings.TrimSpace(string(branchOut))
 
+	prURL, prNumber := h.lookupPRInfo(cwd, branch)
+
 	writeJSON(w, gitInfoResponse{
-		IsGit:  true,
-		Branch: branch,
-		Repo:   repo,
-		PRURL:  h.lookupPRURL(cwd, branch),
+		IsGit:    true,
+		Branch:   branch,
+		Repo:     repo,
+		PRURL:    prURL,
+		PRNumber: prNumber,
 	})
 }
 
@@ -772,14 +776,14 @@ func (h *Handler) findGH() (string, error) {
 	return path, nil
 }
 
-func (h *Handler) lookupPRURL(cwd, branch string) string {
+func (h *Handler) lookupPRInfo(cwd, branch string) (string, int) {
 	if branch == "" {
-		return ""
+		return "", 0
 	}
 
 	ghPath, err := h.findGH()
 	if err != nil {
-		return ""
+		return "", 0
 	}
 
 	cmd := exec.Command( //nolint:gosec // G204: ghPath is from trusted lookup
@@ -788,21 +792,22 @@ func (h *Handler) lookupPRURL(cwd, branch string) string {
 		"view",
 		branch,
 		"--json",
-		"url",
+		"url,number",
 	)
 	cmd.Dir = cwd
 	out, err := cmd.Output()
 	if err != nil {
-		return ""
+		return "", 0
 	}
 
 	var resp struct {
-		URL string `json:"url"`
+		URL    string `json:"url"`
+		Number int    `json:"number"`
 	}
 	if err := json.Unmarshal(out, &resp); err != nil {
-		return ""
+		return "", 0
 	}
-	return strings.TrimSpace(resp.URL)
+	return strings.TrimSpace(resp.URL), resp.Number
 }
 
 func writeValidationError(w http.ResponseWriter, msg string) {

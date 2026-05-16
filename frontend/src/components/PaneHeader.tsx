@@ -184,12 +184,12 @@ export const PaneHeader: React.FC<PaneHeaderProps> = ({
           {gitInfo.repo && <span>{gitInfo.repo}</span>}
           {gitInfo.repo && gitInfo.branch && <span style={{ color: '#4a6a4a' }}>{' '}⎇{' '}</span>}
           {gitInfo.branch && <span>{gitInfo.branch}</span>}
-          {gitInfo.pr_url && (
+          {gitInfo.pr_url && gitInfo.pr_number && (
             <a
               href={gitInfo.pr_url}
               target="_blank"
               rel="noopener noreferrer"
-              aria-label="PR"
+              aria-label={`#${gitInfo.pr_number}`}
               title="Open pull request"
               style={{
                 color: '#8fb7ff',
@@ -200,7 +200,7 @@ export const PaneHeader: React.FC<PaneHeaderProps> = ({
                 lineHeight: '16px',
               }}
             >
-              PR
+              #{gitInfo.pr_number}
             </a>
           )}
         </span>

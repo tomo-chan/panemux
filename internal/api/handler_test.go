@@ -1413,7 +1413,7 @@ func TestGetGitInfo_IsGitRepo_ReturnsBranchAndRepo(t *testing.T) {
 	assert.NotEmpty(t, resp.Repo)
 }
 
-func TestGetGitInfo_IsGitRepo_WithLinkedPR_ReturnsPRURL(t *testing.T) {
+func TestGetGitInfo_IsGitRepo_WithLinkedPR_ReturnsPRInfo(t *testing.T) {
 	dir := initTempGitRepo(t)
 	out, err := exec.Command( //nolint:gosec // G204: trusted test args
 		"git",
@@ -1431,7 +1431,10 @@ func TestGetGitInfo_IsGitRepo_WithLinkedPR_ReturnsPRURL(t *testing.T) {
 		cwd:         dir,
 	})
 	h := NewHandler(defaultTestConfig(), mgr)
-	h.ghBinaryPath = writeFakeGHBinary(t, "#!/bin/sh\necho '{\"url\":\"https://github.com/example/panemux/pull/123\"}'\n")
+	h.ghBinaryPath = writeFakeGHBinary(
+		t,
+		"#!/bin/sh\necho '{\"url\":\"https://github.com/example/panemux/pull/123\",\"number\":123}'\n",
+	)
 	r := setupRouterWithGitInfo(h)
 
 	rec := httptest.NewRecorder()
@@ -1444,6 +1447,7 @@ func TestGetGitInfo_IsGitRepo_WithLinkedPR_ReturnsPRURL(t *testing.T) {
 	assert.True(t, resp.IsGit)
 	assert.Equal(t, "feature/pane-pr-link", resp.Branch)
 	assert.Equal(t, "https://github.com/example/panemux/pull/123", resp.PRURL)
+	assert.Equal(t, 123, resp.PRNumber)
 }
 
 func TestGetGitInfo_SubdirOfGitRepo_ReturnsBranchAndRepo(t *testing.T) {
@@ -1491,6 +1495,7 @@ func TestGetGitInfo_PRLookupFails_StillReturnsGitInfo(t *testing.T) {
 	assert.True(t, resp.IsGit)
 	assert.Equal(t, "main", resp.Branch)
 	assert.Empty(t, resp.PRURL)
+	assert.Zero(t, resp.PRNumber)
 }
 
 func TestGetGitInfo_GitNotFound_IsGitFalse(t *testing.T) {
