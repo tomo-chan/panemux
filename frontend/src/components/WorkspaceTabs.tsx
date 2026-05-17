@@ -7,6 +7,8 @@ interface WorkspaceTabsProps {
   activeWorkspaceId: string
   tabPosition: TabPosition
   onSelect: (workspaceId: string) => void
+  dragSourcePaneId?: string | null
+  onMovePaneToWorkspace?: (sourcePaneId: string, workspaceId: string) => void
   onAdd?: () => void
   onDelete?: (workspaceId: string) => void
   onRename?: (workspaceId: string, title: string) => void
@@ -93,6 +95,8 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
   activeWorkspaceId,
   tabPosition,
   onSelect,
+  dragSourcePaneId,
+  onMovePaneToWorkspace,
   onAdd,
   onDelete,
   onRename,
@@ -105,6 +109,7 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
   const showBar = showTabs || Boolean(onAdd || onDelete || onRename || onTabPositionChange)
   const [editingWorkspaceId, setEditingWorkspaceId] = useState<string | null>(null)
   const [draftTitle, setDraftTitle] = useState('')
+  const [hoveredDropWorkspaceId, setHoveredDropWorkspaceId] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
   const renameFinalizedRef = useRef(false)
 
@@ -136,6 +141,12 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
   const cancelRename = () => {
     renameFinalizedRef.current = true
     setEditingWorkspaceId(null)
+  }
+
+  const moveDraggedPaneToWorkspace = (workspaceId: string) => {
+    if (!dragSourcePaneId || workspaceId === activeWorkspaceId) return
+    onMovePaneToWorkspace?.(dragSourcePaneId, workspaceId)
+    setHoveredDropWorkspaceId(null)
   }
 
   const positionControls = onTabPositionChange ? (
@@ -240,14 +251,43 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
             const active = workspace.id === activeWorkspaceId
             const editing = editingWorkspaceId === workspace.id
             const hasAttention = !active && (attentionWorkspaceIds?.has(workspace.id) ?? false)
+            const isWorkspaceDropTarget = Boolean(dragSourcePaneId) && !editing && workspace.id !== activeWorkspaceId
             return (
               <div
                 key={workspace.id}
                 className={hasAttention ? 'panemux-workspace-tab-attention' : undefined}
+                onDragOver={(event) => {
+                  if (!isWorkspaceDropTarget) return
+                  event.preventDefault()
+                  event.dataTransfer.dropEffect = 'move'
+                  setHoveredDropWorkspaceId(workspace.id)
+                }}
+                onDragLeave={() => setHoveredDropWorkspaceId((current) => current === workspace.id ? null : current)}
+                onDrop={(event) => {
+                  if (!isWorkspaceDropTarget) return
+                  event.preventDefault()
+                  moveDraggedPaneToWorkspace(workspace.id)
+                }}
+                onMouseEnter={() => {
+                  if (!isWorkspaceDropTarget) return
+                  setHoveredDropWorkspaceId(workspace.id)
+                }}
+                onMouseLeave={() => setHoveredDropWorkspaceId((current) => current === workspace.id ? null : current)}
+                onMouseUp={() => {
+                  if (!isWorkspaceDropTarget) return
+                  moveDraggedPaneToWorkspace(workspace.id)
+                }}
                 style={{
                   borderRight: !vertical ? '1px solid #333842' : undefined,
                   borderBottom: vertical ? '1px solid #333842' : undefined,
-                  backgroundColor: active ? '#2f3540' : 'transparent',
+                  backgroundColor: hoveredDropWorkspaceId === workspace.id
+                    ? 'rgba(86, 156, 214, 0.24)'
+                    : active
+                      ? '#2f3540'
+                      : 'transparent',
+                  boxShadow: hoveredDropWorkspaceId === workspace.id
+                    ? 'inset 0 0 0 1px rgba(137, 196, 244, 0.45)'
+                    : 'none',
                   display: 'flex',
                   alignItems: 'center',
                   height: vertical ? 38 : 34,
@@ -290,6 +330,7 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
                     aria-selected={active}
                     data-attention={hasAttention ? 'true' : undefined}
                     onClick={() => {
+                      if (dragSourcePaneId) return
                       onClearAttention?.(workspace.id)
                       onSelect(workspace.id)
                     }}

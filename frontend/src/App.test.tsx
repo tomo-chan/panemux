@@ -43,7 +43,7 @@ const mockSplitPane = vi.fn()
 const mockClosePane = vi.fn()
 const mockSwapPanes = vi.fn()
 const mockCreatePane = vi.fn().mockResolvedValue(undefined)
-const mockMovePane = vi.fn()
+const mockMovePane = vi.fn().mockResolvedValue(undefined)
 const mockAddWorkspace = vi.fn()
 const mockUseWorkspaceAttentionMonitor = vi.hoisted(() => vi.fn())
 const mockUseBrowserNotificationPermission = vi.hoisted(() => vi.fn())
@@ -295,6 +295,20 @@ describe('App workspace deletion', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Place workspace tabs on right' }))
 
     expect(mockSetWorkspaceTabPosition).toHaveBeenCalledWith('right')
+  })
+
+  it('moves a dragged pane to another workspace tab', () => {
+    mockTerminalPane.mockImplementation(({ pane }: { pane: { id: string } }) => {
+      const ctx = useContext(LayoutActionsContext)
+      return <button onMouseDown={() => ctx?.setDragSourcePaneId(pane.id)}>Start drag {pane.id}</button>
+    })
+
+    render(<App />)
+    fireEvent.mouseDown(screen.getByRole('button', { name: 'Start drag main' }), { button: 0 })
+    fireEvent.mouseEnter(screen.getByRole('tab', { name: 'Ops' }))
+    fireEvent.mouseUp(screen.getByRole('tab', { name: 'Ops' }))
+
+    expect(mockMovePane).toHaveBeenCalledWith('main', { type: 'workspace-tab', workspaceId: 'ops' })
   })
 
   it('shows a user-visible error when moving a pane fails to persist', async () => {

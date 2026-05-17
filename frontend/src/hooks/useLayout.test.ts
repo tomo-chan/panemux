@@ -991,6 +991,74 @@ describe('useLayout', () => {
       expect(fetchMock).toHaveBeenCalledWith('/api/workspaces/dev/layout', expect.objectContaining({ method: 'PUT' }))
     })
 
+    it('moves a pane to another workspace and activates the destination workspace', async () => {
+      const multiPaneWorkspaces = {
+        active: 'dev',
+        tab_position: 'top' as const,
+        items: [
+          {
+            id: 'dev',
+            title: 'Dev',
+            layout: {
+              direction: 'horizontal' as const,
+              children: [
+                { size: 50, pane: { id: 'main', type: 'local' as const } },
+                { size: 50, pane: { id: 'side', type: 'local' as const } },
+              ],
+            },
+          },
+          {
+            id: 'ops',
+            title: 'Ops',
+            layout: {
+              direction: 'vertical' as const,
+              children: [{ size: 100, pane: { id: 'ops-main', type: 'local' as const } }],
+            },
+          },
+        ],
+      }
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(multiPaneWorkspaces) } as Response)
+        .mockResolvedValueOnce({ ok: false } as Response)
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) } as Response)
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) } as Response)
+      window.fetch = fetchMock
+
+      const { result } = renderHook(() => useLayout())
+      await waitFor(() => expect(result.current.layout).not.toBeNull())
+
+      await act(async () => {
+        await result.current.movePane('main', { type: 'workspace-tab', workspaceId: 'ops' })
+      })
+
+      expect(fetchMock).toHaveBeenCalledWith('/api/workspaces/dev/layout', expect.objectContaining({ method: 'PUT' }))
+      expect(fetchMock).toHaveBeenCalledWith('/api/workspaces/ops/layout', expect.objectContaining({ method: 'PUT' }))
+      expect(result.current.workspaces?.active).toBe('ops')
+      expect(result.current.layout?.children[result.current.layout.children.length - 1].pane?.id).toBe('main')
+      expect(result.current.workspaces?.items.find((workspace) => workspace.id === 'dev')?.layout.children).toHaveLength(1)
+      expect(result.current.workspaces?.items.find((workspace) => workspace.id === 'dev')?.layout.children[0].pane?.id).toBe('side')
+    })
+
+    it('rejects moving the last pane out of a workspace', async () => {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validWorkspaces) } as Response)
+        .mockResolvedValueOnce({ ok: false } as Response)
+      window.fetch = fetchMock
+
+      const { result } = renderHook(() => useLayout())
+      await waitFor(() => expect(result.current.layout).not.toBeNull())
+
+      await act(async () => {
+        await expect(result.current.movePane('main', { type: 'workspace-tab', workspaceId: 'ops' })).rejects.toThrow(
+          'Cannot move the last pane out of a workspace',
+        )
+      })
+
+      expect(fetchMock).not.toHaveBeenCalledWith('/api/workspaces/dev/layout', expect.anything())
+      expect(fetchMock).not.toHaveBeenCalledWith('/api/workspaces/ops/layout', expect.anything())
+      expect(result.current.workspaces?.active).toBe('dev')
+    })
+
     it('throws when persisting a moved pane fails', async () => {
       const fetchMock = vi.fn()
         .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validWorkspaces) } as Response)

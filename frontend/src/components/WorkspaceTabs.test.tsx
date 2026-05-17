@@ -99,6 +99,47 @@ describe('WorkspaceTabs', () => {
     expect(onSelect).toHaveBeenCalledWith('ops')
   })
 
+  it('moves a dragged pane into another workspace when the tab receives a drop', () => {
+    const onMovePaneToWorkspace = vi.fn()
+    const dataTransfer = { dropEffect: 'none' }
+    render(
+      <WorkspaceTabs
+        workspaces={workspaces}
+        activeWorkspaceId="dev"
+        tabPosition="top"
+        dragSourcePaneId="pane-source"
+        onMovePaneToWorkspace={onMovePaneToWorkspace}
+        onSelect={() => {}}
+      />,
+    )
+
+    const tab = screen.getByRole('tab', { name: 'Ops' })
+    fireEvent.dragOver(tab, { dataTransfer })
+    fireEvent.drop(tab, { dataTransfer })
+
+    expect(onMovePaneToWorkspace).toHaveBeenCalledWith('pane-source', 'ops')
+  })
+
+  it('moves a dragged pane into another workspace on pointer drag release', () => {
+    const onMovePaneToWorkspace = vi.fn()
+    render(
+      <WorkspaceTabs
+        workspaces={workspaces}
+        activeWorkspaceId="dev"
+        tabPosition="top"
+        dragSourcePaneId="pane-source"
+        onMovePaneToWorkspace={onMovePaneToWorkspace}
+        onSelect={() => {}}
+      />,
+    )
+
+    const tab = screen.getByRole('tab', { name: 'Ops' })
+    fireEvent.mouseEnter(tab)
+    fireEvent.mouseUp(tab)
+
+    expect(onMovePaneToWorkspace).toHaveBeenCalledWith('pane-source', 'ops')
+  })
+
   it('hides workspace tabs for a single workspace while keeping add available', () => {
     const onAdd = vi.fn()
     render(
