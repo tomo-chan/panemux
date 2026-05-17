@@ -245,11 +245,11 @@ func (f *fakeSSHRunner) Close() error { return nil }
 func TestActiveRemoteWorkdir_IgnoresNonInteractiveAgents(t *testing.T) {
 	runner := &fakeSSHRunner{
 		outputs: map[string][]byte{
-			sshListProcessesCmd: []byte(" 120 1 codex exec\n 130 1 claude -p\n"),
+			sshListProcessesCmd: []byte(" 100 1 sh\n 120 100 codex exec\n 130 100 claude -p\n"),
 		},
 	}
 
-	cwd, err := activeRemoteWorkdir(runner, "/repo/main", 0)
+	cwd, err := activeRemoteWorkdir(runner, "/repo/main", 100)
 	require.NoError(t, err)
 	assert.Empty(t, cwd)
 }
@@ -258,7 +258,7 @@ func TestActiveRemoteWorkdir_PrefersRemoteCodexSessionCWD(t *testing.T) {
 	sessionPath := "/home/user/.codex/sessions/2026/05/17/session.jsonl"
 	runner := &fakeSSHRunner{
 		outputs: map[string][]byte{
-			sshListProcessesCmd:                       []byte(" 220 1 codex resume --last\n"),
+			sshListProcessesCmd:                       []byte(" 100 1 sh\n 220 100 codex resume --last\n"),
 			fmt.Sprintf(sshOpenFilesCmdTemplate, 220): []byte(sessionPath + "\n"),
 			"cat " + shellQuotePath(sessionPath): []byte(
 				"{\"type\":\"session_meta\",\"payload\":{\"cwd\":\"/repo/main\"}}\n" +
@@ -267,7 +267,7 @@ func TestActiveRemoteWorkdir_PrefersRemoteCodexSessionCWD(t *testing.T) {
 		},
 	}
 
-	cwd, err := activeRemoteWorkdir(runner, "/repo/main", 0)
+	cwd, err := activeRemoteWorkdir(runner, "/repo/main", 100)
 	require.NoError(t, err)
 	assert.Equal(t, "/tmp/remote-worktree", cwd)
 }
@@ -275,14 +275,14 @@ func TestActiveRemoteWorkdir_PrefersRemoteCodexSessionCWD(t *testing.T) {
 func TestActiveRemoteWorkdir_FallsBackToRemoteDescendantCWD(t *testing.T) {
 	runner := &fakeSSHRunner{
 		outputs: map[string][]byte{
-			sshListProcessesCmd:                       []byte(" 220 1 codex\n 230 220 node helper\n"),
+			sshListProcessesCmd:                       []byte(" 100 1 sh\n 220 100 codex\n 230 220 node helper\n"),
 			fmt.Sprintf(sshOpenFilesCmdTemplate, 220): []byte(""),
 			fmt.Sprintf(sshPIDCWDCmdTemplate, 230):    []byte("/tmp/remote-worktree\n"),
 			fmt.Sprintf(sshPIDCWDCmdTemplate, 220):    []byte("/repo/main\n"),
 		},
 	}
 
-	cwd, err := activeRemoteWorkdir(runner, "/repo/main", 0)
+	cwd, err := activeRemoteWorkdir(runner, "/repo/main", 100)
 	require.NoError(t, err)
 	assert.Equal(t, "/tmp/remote-worktree", cwd)
 }
@@ -310,6 +310,23 @@ func TestActiveRemoteWorkdir_RootPIDScopesRemoteAgents(t *testing.T) {
 	}
 
 	cwd, err := activeRemoteWorkdir(runner, "/repo/main", 100)
+	require.NoError(t, err)
+	assert.Equal(t, "/tmp/remote-worktree", cwd)
+}
+
+func TestTmuxSSHActiveWorkdir_UsesPanePIDAndBaseCWD(t *testing.T) {
+	runner := &fakeSSHRunner{
+		outputs: map[string][]byte{
+			"tmux display-message -p -t 'demo' '#{pane_pid}'":          []byte("220\n"),
+			"tmux display-message -p -t 'demo' '#{pane_current_path}'": []byte("/repo/main\n"),
+			sshListProcessesCmd:                       []byte(" 220 1 zsh\n 230 220 codex\n 240 230 node helper\n"),
+			fmt.Sprintf(sshOpenFilesCmdTemplate, 230): []byte(""),
+			fmt.Sprintf(sshPIDCWDCmdTemplate, 240):    []byte("/tmp/remote-worktree\n"),
+			fmt.Sprintf(sshPIDCWDCmdTemplate, 230):    []byte("/repo/main\n"),
+		},
+	}
+
+	cwd, err := tmuxSSHActiveWorkdir(runner, "demo")
 	require.NoError(t, err)
 	assert.Equal(t, "/tmp/remote-worktree", cwd)
 }

@@ -14,6 +14,10 @@ import (
 	"github.com/creack/pty"
 )
 
+var tmuxLocalOutputFn = func(args ...string) ([]byte, error) {
+	return exec.Command("tmux", args...).Output()
+}
+
 // TmuxLocalSession attaches to an existing local tmux session via PTY.
 type TmuxLocalSession struct {
 	cmd         *exec.Cmd
@@ -105,39 +109,31 @@ func (s *TmuxLocalSession) Resize(cols, rows uint16) error {
 
 // GetCWD returns the current working directory of the active tmux pane.
 func (s *TmuxLocalSession) GetCWD() (string, error) {
-	target, err := validateTmuxSessionName(s.tmuxSession)
+	out, err := tmuxLocalCWD(s.tmuxSession)
 	if err != nil {
 		return "", err
 	}
-	out, err := exec.Command(
-		"tmux",
-		"display-message",
-		"-p",
-		"-t",
-		target,
-		"#{pane_current_path}",
-	).Output()
-	if err != nil {
-		return "", fmt.Errorf("tmux display-message: %w", err)
-	}
-	return strings.TrimSpace(string(out)), nil
+	return out, nil
 }
 
 // GetActiveWorkdir returns the working directory of the newest active Codex or
 // Claude descendant process under the active tmux pane, or empty string if none exists.
 func (s *TmuxLocalSession) GetActiveWorkdir() (string, error) {
-	target, err := validateTmuxSessionName(s.tmuxSession)
+	return tmuxLocalActiveWorkdir(s.tmuxSession)
+}
+
+func tmuxLocalActiveWorkdir(tmuxSession string) (string, error) {
+	target, err := validateTmuxSessionName(tmuxSession)
 	if err != nil {
 		return "", err
 	}
-	out, err := exec.Command(
-		"tmux",
+	out, err := tmuxLocalOutputFn(
 		"display-message",
 		"-p",
 		"-t",
 		target,
 		"#{pane_pid}",
-	).Output()
+	)
 	if err != nil {
 		return "", fmt.Errorf("tmux pane pid: %w", err)
 	}
@@ -160,12 +156,24 @@ func (s *TmuxLocalSession) GetActiveWorkdir() (string, error) {
 		return "", nil
 	}
 
-	baseCWD, err := s.GetCWD()
+	baseCWD, err := tmuxLocalCWD(target)
 	if err != nil {
 		return "", err
 	}
 
 	return resolveInteractiveAgentWorkdir(processes, agentPID, baseCWD)
+}
+
+func tmuxLocalCWD(tmuxSession string) (string, error) {
+	target, err := validateTmuxSessionName(tmuxSession)
+	if err != nil {
+		return "", err
+	}
+	out, err := tmuxLocalOutputFn("display-message", "-p", "-t", target, "#{pane_current_path}")
+	if err != nil {
+		return "", fmt.Errorf("tmux display-message: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 func (s *TmuxLocalSession) Close() error {

@@ -467,3 +467,47 @@ func TestDetectLocalShellDscl_NoUserShellLine_Error(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "UserShell not found")
 }
+
+func TestTmuxLocalSessionGetActiveWorkdir_UsesPanePIDAndBaseCWD(t *testing.T) {
+	prevTmuxOutput := tmuxLocalOutputFn
+	prevListProcesses := listProcessesFn
+	prevGetPIDCWD := getPIDCWDFn
+	t.Cleanup(func() {
+		tmuxLocalOutputFn = prevTmuxOutput
+		listProcessesFn = prevListProcesses
+		getPIDCWDFn = prevGetPIDCWD
+	})
+
+	tmuxLocalOutputFn = func(args ...string) ([]byte, error) {
+		switch {
+		case len(args) == 5 && args[4] == "#{pane_pid}":
+			return []byte("220\n"), nil
+		case len(args) == 5 && args[4] == "#{pane_current_path}":
+			return []byte("/repo/main\n"), nil
+		default:
+			return nil, errors.New("unexpected tmux args")
+		}
+	}
+	listProcessesFn = func() ([]processInfo, error) {
+		return []processInfo{
+			{PID: 220, PPID: 1, Command: "zsh"},
+			{PID: 230, PPID: 220, Command: "codex"},
+			{PID: 240, PPID: 230, Command: "node helper"},
+		}, nil
+	}
+	getPIDCWDFn = func(pid int) (string, error) {
+		switch pid {
+		case 240:
+			return "/tmp/worktree", nil
+		case 230:
+			return "/repo/main", nil
+		default:
+			return "", errors.New("unexpected pid")
+		}
+	}
+
+	sess := &TmuxLocalSession{tmuxSession: "demo"}
+	cwd, err := sess.GetActiveWorkdir()
+	require.NoError(t, err)
+	assert.Equal(t, "/tmp/worktree", cwd)
+}

@@ -153,7 +153,11 @@ func (s *TmuxSSHSession) GetActiveWorkdir() (string, error) {
 	}
 	defer sess.Close()
 
-	panePIDOut, err := sess.Output(fmt.Sprintf("tmux display-message -p -t '%s' '#{pane_pid}'", s.tmuxSession))
+	return tmuxSSHActiveWorkdir(sess, s.tmuxSession)
+}
+
+func tmuxSSHActiveWorkdir(runner sshSessionRunner, tmuxSession string) (string, error) {
+	panePIDOut, err := runner.Output(fmt.Sprintf("tmux display-message -p -t '%s' '#{pane_pid}'", tmuxSession))
 	if err != nil {
 		return "", fmt.Errorf("tmux pane pid over ssh: %w", err)
 	}
@@ -162,12 +166,13 @@ func (s *TmuxSSHSession) GetActiveWorkdir() (string, error) {
 		return "", fmt.Errorf("parse remote tmux pane pid: %w", err)
 	}
 
-	baseCWD, err := s.GetCWD()
+	baseCWDOut, err := runner.Output(fmt.Sprintf("tmux display-message -p -t '%s' '#{pane_current_path}'", tmuxSession))
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("tmux display-message over ssh: %w", err)
 	}
+	baseCWD := strings.TrimSpace(string(baseCWDOut))
 
-	return activeRemoteWorkdir(sess, baseCWD, panePID)
+	return activeRemoteWorkdir(runner, baseCWD, panePID)
 }
 
 func (s *TmuxSSHSession) Close() error {

@@ -678,13 +678,7 @@ func activeRemoteWorkdir(runner sshSessionRunner, baseCWD string, rootPID int) (
 		return "", err
 	}
 
-	var agentPID int
-	var ok bool
-	if rootPID == 0 {
-		agentPID, ok = newestInteractiveAgentPID(processes)
-	} else {
-		agentPID, ok = newestInteractiveAgentDescendantPID(processes, rootPID)
-	}
+	agentPID, ok := newestInteractiveAgentDescendantPID(processes, rootPID)
 	if !ok {
 		return "", nil
 	}
@@ -694,20 +688,6 @@ func activeRemoteWorkdir(runner sshSessionRunner, baseCWD string, rootPID int) (
 	}
 
 	return resolveRemoteInteractiveAgentWorkdir(runner, processes, agentPID, baseCWD)
-}
-
-func newestInteractiveAgentPID(processes []processInfo) (int, bool) {
-	var matched int
-	var ok bool
-	for _, proc := range processes {
-		if isInteractiveAgentCommand(proc.Command) {
-			if !ok || proc.PID > matched {
-				matched = proc.PID
-				ok = true
-			}
-		}
-	}
-	return matched, ok
 }
 
 func resolveRemoteInteractiveAgentWorkdir(
