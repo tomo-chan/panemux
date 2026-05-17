@@ -98,6 +98,7 @@ Common uses:
 - **Move a pane** by dragging the handle in its header; drop it on a workspace edge to create a new outer split, or on another pane edge / divider to insert it there.
 - **Close a pane** from its header controls; the layout collapses automatically.
 - **Restart a pane** with the on-screen button if the underlying session exits.
+- **Open a linked PR** from the pane header when the current Git branch already has a GitHub pull request. For local panes, panemux can prefer the live worktree of an interactive `codex` or `claude` session, including resumed Codex sessions, and falls back to the pane's own working directory after the agent exits.
 - **Open VS Code** from supported panes using the pane header action.
 
 ### Notifications and attention prompts
@@ -123,6 +124,7 @@ Common uses:
 - `tmux` and `ssh_tmux` panes automatically create the target tmux session if it does not already exist.
 - Set `cwd` on `local`, `ssh`, or `ssh_tmux` panes when you want the shell to start in a specific directory.
 - In the pane settings dialog, `Working Directory` can be chosen from a browsable directory tree for both local and SSH-backed panes. Hidden directories are available through a toggle.
+- Pane headers resolve Git and PR metadata from the live working context, including interactive `codex` and `claude` worktrees for both local and SSH-backed panes. `tmux` and `ssh_tmux` use the currently active tmux pane only.
 
 ---
 

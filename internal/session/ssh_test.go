@@ -4,6 +4,8 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/pem"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -11,7 +13,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	gossh "golang.org/x/crypto/ssh"
-	"golang.org/x/crypto/ssh/knownhosts"
 )
 
 // generateTestKeyFile creates a real ed25519 private key file at the given path
@@ -137,7 +138,7 @@ func TestSubstituteProxyCommand_NoTokens(t *testing.T) {
 }
 
 func TestBuildHostKeyCallback_NonexistentFile_Error(t *testing.T) {
-	_, _, err := buildHostKeyCallback("/nonexistent/path/known_hosts")
+	_, err := buildHostKeyCallback("/nonexistent/path/known_hosts")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "known_hosts")
 }
@@ -147,7 +148,7 @@ func TestBuildHostKeyCallback_ValidFile_NoError(t *testing.T) {
 	knownHostsPath := filepath.Join(dir, "known_hosts")
 	require.NoError(t, os.WriteFile(knownHostsPath, []byte(""), 0600))
 
-	_, _, err := buildHostKeyCallback(knownHostsPath)
+	_, err := buildHostKeyCallback(knownHostsPath)
 	assert.NoError(t, err)
 }
 
@@ -224,53 +225,108 @@ func TestNewTmuxSSH_InvalidSessionName_Error(t *testing.T) {
 	assert.Contains(t, err.Error(), "invalid tmux session name")
 }
 
-func TestKnownHostsAlgorithms_PlaintextEntry(t *testing.T) {
-	_, priv, err := ed25519.GenerateKey(rand.Reader)
-	require.NoError(t, err)
-	pub, err := gossh.NewPublicKey(priv.Public())
-	require.NoError(t, err)
-
-	dir := t.TempDir()
-	knownHostsPath := filepath.Join(dir, "known_hosts")
-	content := knownhosts.Line([]string{"myhost"}, pub) + "\n"
-	require.NoError(t, os.WriteFile(knownHostsPath, []byte(content), 0600))
-
-	algos := knownHostsAlgorithms(knownHostsPath, "myhost:22")
-	assert.Equal(t, []string{pub.Type()}, algos)
+type fakeSSHRunner struct {
+	outputs map[string][]byte
+	errs    map[string]error
 }
 
-func TestKnownHostsAlgorithms_HashedEntry(t *testing.T) {
-	_, priv, err := ed25519.GenerateKey(rand.Reader)
-	require.NoError(t, err)
-	pub, err := gossh.NewPublicKey(priv.Public())
-	require.NoError(t, err)
-
-	dir := t.TempDir()
-	knownHostsPath := filepath.Join(dir, "known_hosts")
-	hashed := knownhosts.HashHostname("hashhost")
-	content := knownhosts.Line([]string{hashed}, pub) + "\n"
-	require.NoError(t, os.WriteFile(knownHostsPath, []byte(content), 0600))
-
-	algos := knownHostsAlgorithms(knownHostsPath, "hashhost:22")
-	assert.Equal(t, []string{pub.Type()}, algos)
+func (f *fakeSSHRunner) Output(cmd string) ([]byte, error) {
+	if err := f.errs[cmd]; err != nil {
+		return nil, err
+	}
+	if out, ok := f.outputs[cmd]; ok {
+		return out, nil
+	}
+	return nil, errors.New("unexpected command: " + cmd)
 }
 
-func TestKnownHostsAlgorithms_NoMatch_ReturnsEmpty(t *testing.T) {
-	_, priv, err := ed25519.GenerateKey(rand.Reader)
-	require.NoError(t, err)
-	pub, err := gossh.NewPublicKey(priv.Public())
-	require.NoError(t, err)
+func (f *fakeSSHRunner) Close() error { return nil }
 
-	dir := t.TempDir()
-	knownHostsPath := filepath.Join(dir, "known_hosts")
-	content := knownhosts.Line([]string{"otherhost"}, pub) + "\n"
-	require.NoError(t, os.WriteFile(knownHostsPath, []byte(content), 0600))
+func TestActiveRemoteWorkdir_IgnoresNonInteractiveAgents(t *testing.T) {
+	runner := &fakeSSHRunner{
+		outputs: map[string][]byte{
+			sshListProcessesCmd: []byte(" 100 1 sh\n 120 100 codex exec\n 130 100 claude -p\n"),
+		},
+	}
 
-	algos := knownHostsAlgorithms(knownHostsPath, "myhost:22")
-	assert.Empty(t, algos)
+	cwd, err := activeRemoteWorkdir(runner, "/repo/main", 100)
+	require.NoError(t, err)
+	assert.Empty(t, cwd)
 }
 
-func TestKnownHostsAlgorithms_FileNotFound_ReturnsEmpty(t *testing.T) {
-	algos := knownHostsAlgorithms("/nonexistent/known_hosts", "myhost:22")
-	assert.Empty(t, algos)
+func TestActiveRemoteWorkdir_PrefersRemoteCodexSessionCWD(t *testing.T) {
+	sessionPath := "/home/user/.codex/sessions/2026/05/17/session.jsonl"
+	runner := &fakeSSHRunner{
+		outputs: map[string][]byte{
+			sshListProcessesCmd:                       []byte(" 100 1 sh\n 220 100 codex resume --last\n"),
+			fmt.Sprintf(sshOpenFilesCmdTemplate, 220): []byte(sessionPath + "\n"),
+			"cat " + shellQuotePath(sessionPath): []byte(
+				"{\"type\":\"session_meta\",\"payload\":{\"cwd\":\"/repo/main\"}}\n" +
+					"{\"type\":\"turn_context\",\"payload\":{\"cwd\":\"/tmp/remote-worktree\"}}\n",
+			),
+		},
+	}
+
+	cwd, err := activeRemoteWorkdir(runner, "/repo/main", 100)
+	require.NoError(t, err)
+	assert.Equal(t, "/tmp/remote-worktree", cwd)
+}
+
+func TestActiveRemoteWorkdir_FallsBackToRemoteDescendantCWD(t *testing.T) {
+	runner := &fakeSSHRunner{
+		outputs: map[string][]byte{
+			sshListProcessesCmd:                       []byte(" 100 1 sh\n 220 100 codex\n 230 220 node helper\n"),
+			fmt.Sprintf(sshOpenFilesCmdTemplate, 220): []byte(""),
+			fmt.Sprintf(sshPIDCWDCmdTemplate, 230):    []byte("/tmp/remote-worktree\n"),
+			fmt.Sprintf(sshPIDCWDCmdTemplate, 220):    []byte("/repo/main\n"),
+		},
+	}
+
+	cwd, err := activeRemoteWorkdir(runner, "/repo/main", 100)
+	require.NoError(t, err)
+	assert.Equal(t, "/tmp/remote-worktree", cwd)
+}
+
+func TestRemoteShellPID_ParsesShellProcess(t *testing.T) {
+	runner := &fakeSSHRunner{
+		outputs: map[string][]byte{
+			sshShellPIDCmd: []byte("220\n"),
+		},
+	}
+
+	pid, err := remoteShellPID(runner)
+	require.NoError(t, err)
+	assert.Equal(t, 220, pid)
+}
+
+func TestActiveRemoteWorkdir_RootPIDScopesRemoteAgents(t *testing.T) {
+	runner := &fakeSSHRunner{
+		outputs: map[string][]byte{
+			sshListProcessesCmd:                       []byte(" 100 1 sh\n 200 1 codex\n 220 100 codex\n 230 220 node helper\n"),
+			fmt.Sprintf(sshOpenFilesCmdTemplate, 220): []byte(""),
+			fmt.Sprintf(sshPIDCWDCmdTemplate, 230):    []byte("/tmp/remote-worktree\n"),
+			fmt.Sprintf(sshPIDCWDCmdTemplate, 220):    []byte("/repo/main\n"),
+		},
+	}
+
+	cwd, err := activeRemoteWorkdir(runner, "/repo/main", 100)
+	require.NoError(t, err)
+	assert.Equal(t, "/tmp/remote-worktree", cwd)
+}
+
+func TestTmuxSSHActiveWorkdir_UsesPanePIDAndBaseCWD(t *testing.T) {
+	runner := &fakeSSHRunner{
+		outputs: map[string][]byte{
+			"tmux display-message -p -t 'demo' '#{pane_pid}'":          []byte("220\n"),
+			"tmux display-message -p -t 'demo' '#{pane_current_path}'": []byte("/repo/main\n"),
+			sshListProcessesCmd:                       []byte(" 220 1 zsh\n 230 220 codex\n 240 230 node helper\n"),
+			fmt.Sprintf(sshOpenFilesCmdTemplate, 230): []byte(""),
+			fmt.Sprintf(sshPIDCWDCmdTemplate, 240):    []byte("/tmp/remote-worktree\n"),
+			fmt.Sprintf(sshPIDCWDCmdTemplate, 230):    []byte("/repo/main\n"),
+		},
+	}
+
+	cwd, err := tmuxSSHActiveWorkdir(runner, "demo")
+	require.NoError(t, err)
+	assert.Equal(t, "/tmp/remote-worktree", cwd)
 }

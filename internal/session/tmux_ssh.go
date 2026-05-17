@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -141,6 +142,37 @@ func (s *TmuxSSHSession) GetCWD() (string, error) {
 		return "", fmt.Errorf("tmux display-message over ssh: %w", err)
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// GetActiveWorkdir returns the working directory of the newest active
+// interactive Codex or Claude process under the active remote tmux pane.
+func (s *TmuxSSHSession) GetActiveWorkdir() (string, error) {
+	sess, err := s.client.NewSession()
+	if err != nil {
+		return "", fmt.Errorf("new ssh session for active tmux workdir: %w", err)
+	}
+	defer sess.Close()
+
+	return tmuxSSHActiveWorkdir(sess, s.tmuxSession)
+}
+
+func tmuxSSHActiveWorkdir(runner sshSessionRunner, tmuxSession string) (string, error) {
+	panePIDOut, err := runner.Output(fmt.Sprintf("tmux display-message -p -t '%s' '#{pane_pid}'", tmuxSession))
+	if err != nil {
+		return "", fmt.Errorf("tmux pane pid over ssh: %w", err)
+	}
+	panePID, err := strconv.Atoi(strings.TrimSpace(string(panePIDOut)))
+	if err != nil {
+		return "", fmt.Errorf("parse remote tmux pane pid: %w", err)
+	}
+
+	baseCWDOut, err := runner.Output(fmt.Sprintf("tmux display-message -p -t '%s' '#{pane_current_path}'", tmuxSession))
+	if err != nil {
+		return "", fmt.Errorf("tmux display-message over ssh: %w", err)
+	}
+	baseCWD := strings.TrimSpace(string(baseCWDOut))
+
+	return activeRemoteWorkdir(runner, baseCWD, panePID)
 }
 
 func (s *TmuxSSHSession) Close() error {

@@ -1,6 +1,9 @@
 package session
 
 import (
+	"bufio"
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -9,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -16,6 +20,10 @@ import (
 
 	"github.com/creack/pty"
 )
+
+var listProcessesFn = listProcesses
+var getPIDCWDFn = getPIDCWD
+var openFilePathsForPIDFn = openFilePathsForPID
 
 // validShellPath matches a valid absolute shell path.
 // Only alphanumeric characters, dots, underscores, hyphens, and slashes are permitted.
@@ -120,17 +128,50 @@ func (s *LocalSession) GetCWD() (string, error) {
 	if s.pid == 0 {
 		return "", errors.New("session has no PID")
 	}
+	return getPIDCWD(s.pid)
+}
+
+// GetActiveWorkdir returns the working directory of the newest active Codex or
+// Claude descendant process, or an empty string when none is running.
+func (s *LocalSession) GetActiveWorkdir() (string, error) {
+	if s.pid == 0 {
+		return "", errors.New("session has no PID")
+	}
+
+	processes, err := listProcessesFn()
+	if err != nil {
+		return "", err
+	}
+
+	baseCWD, err := getPIDCWDFn(s.pid)
+	if err != nil {
+		return "", err
+	}
+
+	pid, ok := newestInteractiveAgentDescendantPID(processes, s.pid)
+	if !ok {
+		return "", nil
+	}
+
+	return resolveInteractiveAgentWorkdir(processes, pid, baseCWD)
+}
+
+func getPIDCWD(pid int) (string, error) {
 	switch runtime.GOOS {
 	case "linux":
-		return os.Readlink("/proc/" + strconv.Itoa(s.pid) + "/cwd")
+		return os.Readlink("/proc/" + strconv.Itoa(pid) + "/cwd")
 	case "darwin":
+		pidArg, err := processIDArg(pid)
+		if err != nil {
+			return "", err
+		}
 		// -a ANDs the -p and -d conditions; without -a they are OR'd, which
 		// causes -d cwd to dump the cwd of every process on the system.
-		out, err := exec.Command( //nolint:gosec // G204: lsof is trusted and pid is an internal process ID
+		out, err := exec.Command(
 			"lsof",
 			"-a",
 			"-p",
-			strconv.Itoa(s.pid),
+			pidArg,
 			"-d",
 			"cwd",
 			"-Fn",
@@ -154,6 +195,311 @@ func (s *LocalSession) GetCWD() (string, error) {
 	default:
 		return "", fmt.Errorf("GetCWD not supported on %s", runtime.GOOS)
 	}
+}
+
+type processInfo struct {
+	Command string
+	PID     int
+	PPID    int
+}
+
+var validProcessIDArg = regexp.MustCompile(`^[1-9][0-9]*$`)
+var validLocalUsername = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
+
+func listProcesses() ([]processInfo, error) {
+	out, err := exec.Command("ps", "-Ao", "pid,ppid,command").Output()
+	if err != nil {
+		return nil, fmt.Errorf("ps: %w", err)
+	}
+	return parsePSOutput(out)
+}
+
+func parsePSOutput(out []byte) ([]processInfo, error) {
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(lines) < 2 {
+		return nil, errors.New("ps output missing process rows")
+	}
+
+	processes := make([]processInfo, 0, len(lines)-1)
+	for _, line := range lines[1:] {
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+
+		pid, err := strconv.Atoi(fields[0])
+		if err != nil {
+			return nil, fmt.Errorf("parse pid %q: %w", fields[0], err)
+		}
+		ppid, err := strconv.Atoi(fields[1])
+		if err != nil {
+			return nil, fmt.Errorf("parse ppid %q: %w", fields[1], err)
+		}
+
+		processes = append(processes, processInfo{
+			PID:     pid,
+			PPID:    ppid,
+			Command: strings.Join(fields[2:], " "),
+		})
+	}
+
+	return processes, nil
+}
+
+func newestInteractiveAgentDescendantPID(processes []processInfo, rootPID int) (int, bool) {
+	children := childProcessMap(processes)
+	stack := append([]processInfo(nil), children[rootPID]...)
+	var matched int
+	var ok bool
+
+	for len(stack) > 0 {
+		proc := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		stack = append(stack, children[proc.PID]...)
+
+		if isInteractiveAgentCommand(proc.Command) {
+			if !ok || proc.PID > matched {
+				matched = proc.PID
+				ok = true
+			}
+		}
+	}
+
+	return matched, ok
+}
+
+func childProcessMap(processes []processInfo) map[int][]processInfo {
+	children := make(map[int][]processInfo)
+	for _, proc := range processes {
+		children[proc.PPID] = append(children[proc.PPID], proc)
+	}
+	return children
+}
+
+func descendantPIDs(processes []processInfo, rootPID int) []int {
+	children := childProcessMap(processes)
+	stack := append([]processInfo(nil), children[rootPID]...)
+	ids := []int{rootPID}
+
+	for len(stack) > 0 {
+		proc := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		stack = append(stack, children[proc.PID]...)
+		ids = append(ids, proc.PID)
+	}
+
+	return ids
+}
+
+func resolveInteractiveAgentWorkdir(processes []processInfo, agentPID int, baseCWD string) (string, error) {
+	if sessionCWD, err := codexSessionCWD(processes, agentPID); err == nil && sessionCWD != "" {
+		return sessionCWD, nil
+	}
+
+	candidatePIDs := descendantPIDs(processes, agentPID)
+	sort.Slice(candidatePIDs, func(i, j int) bool {
+		return candidatePIDs[i] > candidatePIDs[j]
+	})
+
+	var agentCWD string
+	for _, pid := range candidatePIDs {
+		cwd, err := getPIDCWDFn(pid)
+		if err != nil || cwd == "" {
+			continue
+		}
+
+		if pid == agentPID {
+			agentCWD = cwd
+		}
+		if cwd != baseCWD {
+			return cwd, nil
+		}
+	}
+
+	if agentCWD != "" {
+		return agentCWD, nil
+	}
+	return "", nil
+}
+
+func codexSessionCWD(processes []processInfo, agentPID int) (string, error) {
+	proc, ok := processByPID(processes, agentPID)
+	if !ok || !isCodexCommand(proc.Command) {
+		return "", nil
+	}
+
+	paths, err := openFilePathsForPIDFn(agentPID)
+	if err != nil {
+		return "", err
+	}
+
+	sessionPath, ok := codexSessionPath(paths)
+	if !ok {
+		return "", nil
+	}
+
+	return readCodexSessionCWD(sessionPath)
+}
+
+func processByPID(processes []processInfo, pid int) (processInfo, bool) {
+	for _, proc := range processes {
+		if proc.PID == pid {
+			return proc, true
+		}
+	}
+	return processInfo{}, false
+}
+
+func isInteractiveAgentCommand(command string) bool {
+	fields := strings.Fields(command)
+	if len(fields) == 0 {
+		return false
+	}
+
+	binary := strings.ToLower(filepath.Base(fields[0]))
+	switch binary {
+	case "codex":
+		return !containsToken(fields[1:], "exec")
+	case "claude":
+		return !containsAnyToken(fields[1:], "-p", "--print")
+	default:
+		return false
+	}
+}
+
+func isCodexCommand(command string) bool {
+	fields := strings.Fields(command)
+	return len(fields) > 0 && strings.ToLower(filepath.Base(fields[0])) == "codex"
+}
+
+func containsToken(tokens []string, target string) bool {
+	for _, token := range tokens {
+		if token == target {
+			return true
+		}
+	}
+	return false
+}
+
+func containsAnyToken(tokens []string, targets ...string) bool {
+	for _, token := range tokens {
+		for _, target := range targets {
+			if token == target {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func openFilePathsForPID(pid int) ([]string, error) {
+	switch runtime.GOOS {
+	case "linux":
+		fdDir := "/proc/" + strconv.Itoa(pid) + "/fd"
+		entries, err := os.ReadDir(fdDir)
+		if err != nil {
+			return nil, fmt.Errorf("read %s: %w", fdDir, err)
+		}
+
+		paths := make([]string, 0, len(entries))
+		for _, entry := range entries {
+			target, err := os.Readlink(filepath.Join(fdDir, entry.Name()))
+			if err == nil {
+				paths = append(paths, target)
+			}
+		}
+		return paths, nil
+	case "darwin":
+		pidArg, err := processIDArg(pid)
+		if err != nil {
+			return nil, err
+		}
+		out, err := exec.Command(
+			"lsof",
+			"-a",
+			"-p",
+			pidArg,
+			"-Fn",
+		).Output()
+		if err != nil {
+			return nil, fmt.Errorf("lsof files: %w", err)
+		}
+
+		paths := make([]string, 0, 32)
+		for _, line := range strings.Split(string(out), "\n") {
+			if strings.HasPrefix(line, "n") {
+				paths = append(paths, strings.TrimSpace(strings.TrimPrefix(line, "n")))
+			}
+		}
+		return paths, nil
+	default:
+		return nil, fmt.Errorf("open file inspection not supported on %s", runtime.GOOS)
+	}
+}
+
+func codexSessionPath(paths []string) (string, bool) {
+	for _, path := range paths {
+		if strings.Contains(path, "/.codex/sessions/") && strings.HasSuffix(path, ".jsonl") {
+			return path, true
+		}
+	}
+	return "", false
+}
+
+func processIDArg(pid int) (string, error) {
+	if pid <= 0 {
+		return "", fmt.Errorf("invalid pid: %d", pid)
+	}
+	pidArg := strconv.Itoa(pid)
+	if !validProcessIDArg.MatchString(pidArg) {
+		return "", fmt.Errorf("invalid pid: %d", pid)
+	}
+	return pidArg, nil
+}
+
+func readCodexSessionCWD(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read codex session log %q: %w", path, err)
+	}
+	return parseCodexSessionCWD(data)
+}
+
+func parseCodexSessionCWD(data []byte) (string, error) {
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+	type payloadWithCWD struct {
+		Cwd string `json:"cwd"`
+	}
+	type record struct {
+		Type    string         `json:"type"`
+		Payload payloadWithCWD `json:"payload"`
+	}
+
+	var latestTurnCWD string
+	var sessionMetaCWD string
+	for scanner.Scan() {
+		var rec record
+		if err := json.Unmarshal(scanner.Bytes(), &rec); err != nil {
+			continue
+		}
+		switch rec.Type {
+		case "turn_context":
+			if rec.Payload.Cwd != "" {
+				latestTurnCWD = rec.Payload.Cwd
+			}
+		case "session_meta":
+			if rec.Payload.Cwd != "" && sessionMetaCWD == "" {
+				sessionMetaCWD = rec.Payload.Cwd
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return "", fmt.Errorf("scan codex session log: %w", err)
+	}
+	if latestTurnCWD != "" {
+		return latestTurnCWD, nil
+	}
+	return sessionMetaCWD, nil
 }
 
 // validateShell ensures the shell path is safe to execute.
@@ -201,11 +547,15 @@ func DetectLocalShell() (string, error) {
 	}
 	// /etc/passwd lookup failed (expected on macOS) — try dscl.
 	return detectLocalShellDscl(currentUser.Username, func(username string) ([]byte, error) {
-		return exec.Command( //nolint:gosec // G204: username comes from os/user.Current for the local account
+		userPath, err := localDirectoryServiceUserPath(username)
+		if err != nil {
+			return nil, err
+		}
+		return exec.Command(
 			"/usr/bin/dscl",
 			".",
 			"-read",
-			"/Users/"+username,
+			userPath,
 			"UserShell",
 		).Output()
 	})
@@ -228,6 +578,13 @@ func detectLocalShellDscl(username string, runner func(string) ([]byte, error)) 
 		}
 	}
 	return "", fmt.Errorf("UserShell not found in dscl output for user %q", username)
+}
+
+func localDirectoryServiceUserPath(username string) (string, error) {
+	if !validLocalUsername.MatchString(username) {
+		return "", fmt.Errorf("invalid username for dscl lookup: %q", username)
+	}
+	return "/Users/" + username, nil
 }
 
 // detectLocalShellFrom is the testable version that accepts a custom passwd file path.

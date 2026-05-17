@@ -175,6 +175,12 @@ See `docs/architecture.md` → *Security Design* for the full rationale and the 
 
 **Remote path arguments (SSH working directory):** user-supplied paths that flow into `sess.Start()` shell commands must be validated with `validRemotePath` (defined in `internal/session/ssh.go`) before use. This regex guard is the CodeQL-recommended sanitization pattern for shell arguments, and it rejects shell metacharacters (`;|&$\`'"<>(){}[]!\`) and control characters while allowing valid Unix path characters including spaces and Unicode.
 
+### `gosec` suppressions
+- Do not add `//nolint:gosec` to production code as the default response to a finding.
+- First change the code so the finding is structurally avoided and the reason is evident in the implementation.
+- A `//nolint:gosec` suppression is acceptable only when the code is not shipped in the application, such as tests, fixtures, or other test-only helpers.
+- If a production-code suppression seems unavoidable, stop and document the case explicitly in review before merging instead of silently adding the suppression.
+
 ### Release workflow
 - **Never manually close a release-please PR.** Doing so leaves the `release-please--branches--main` internal tracking branch in a stale state. On the next push to `main`, release-please re-creates the release PR from that stale state, producing incorrect release notes that include all historical commits.
 - If you need to override the version release-please proposes (e.g., cut a patch instead of a minor):

@@ -1,16 +1,22 @@
 package session
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 
 	"github.com/creack/pty"
 )
+
+var tmuxLocalOutputFn = func(args ...string) ([]byte, error) {
+	return exec.Command("tmux", args...).Output()
+}
 
 // TmuxLocalSession attaches to an existing local tmux session via PTY.
 type TmuxLocalSession struct {
@@ -27,11 +33,12 @@ type TmuxLocalSession struct {
 
 // NewTmuxLocal creates a new session that attaches to a local tmux session.
 func NewTmuxLocal(id, title, tmuxSession string) (*TmuxLocalSession, error) {
-	if tmuxSession == "" {
-		tmuxSession = "0"
+	validatedSession, err := validateTmuxSessionName(tmuxSession)
+	if err != nil {
+		return nil, err
 	}
 
-	cmd := exec.Command("tmux", "new-session", "-A", "-s", tmuxSession)
+	cmd := exec.Command("tmux", "new-session", "-A", "-s", validatedSession)
 	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 
@@ -45,7 +52,7 @@ func NewTmuxLocal(id, title, tmuxSession string) (*TmuxLocalSession, error) {
 	s := &TmuxLocalSession{
 		id:          id,
 		title:       title,
-		tmuxSession: tmuxSession,
+		tmuxSession: validatedSession,
 		state:       StateConnected,
 		cmd:         cmd,
 		ptmx:        ptmx,
@@ -102,14 +109,67 @@ func (s *TmuxLocalSession) Resize(cols, rows uint16) error {
 
 // GetCWD returns the current working directory of the active tmux pane.
 func (s *TmuxLocalSession) GetCWD() (string, error) {
-	out, err := exec.Command( //nolint:gosec // G204: tmuxSession is validated config for a tmux target
-		"tmux",
+	out, err := tmuxLocalCWD(s.tmuxSession)
+	if err != nil {
+		return "", err
+	}
+	return out, nil
+}
+
+// GetActiveWorkdir returns the working directory of the newest active Codex or
+// Claude descendant process under the active tmux pane, or empty string if none exists.
+func (s *TmuxLocalSession) GetActiveWorkdir() (string, error) {
+	return tmuxLocalActiveWorkdir(s.tmuxSession)
+}
+
+func tmuxLocalActiveWorkdir(tmuxSession string) (string, error) {
+	target, err := validateTmuxSessionName(tmuxSession)
+	if err != nil {
+		return "", err
+	}
+	out, err := tmuxLocalOutputFn(
 		"display-message",
 		"-p",
 		"-t",
-		s.tmuxSession,
-		"#{pane_current_path}",
-	).Output()
+		target,
+		"#{pane_pid}",
+	)
+	if err != nil {
+		return "", fmt.Errorf("tmux pane pid: %w", err)
+	}
+
+	pid, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil {
+		return "", fmt.Errorf("parse tmux pane pid: %w", err)
+	}
+	if pid == 0 {
+		return "", errors.New("tmux pane pid missing")
+	}
+
+	processes, err := listProcessesFn()
+	if err != nil {
+		return "", err
+	}
+
+	agentPID, ok := newestInteractiveAgentDescendantPID(processes, pid)
+	if !ok {
+		return "", nil
+	}
+
+	baseCWD, err := tmuxLocalCWD(target)
+	if err != nil {
+		return "", err
+	}
+
+	return resolveInteractiveAgentWorkdir(processes, agentPID, baseCWD)
+}
+
+func tmuxLocalCWD(tmuxSession string) (string, error) {
+	target, err := validateTmuxSessionName(tmuxSession)
+	if err != nil {
+		return "", err
+	}
+	out, err := tmuxLocalOutputFn("display-message", "-p", "-t", target, "#{pane_current_path}")
 	if err != nil {
 		return "", fmt.Errorf("tmux display-message: %w", err)
 	}
@@ -129,4 +189,17 @@ func (s *TmuxLocalSession) Close() error {
 		s.cmd.Process.Kill()
 	}
 	return nil
+}
+
+func validateTmuxSessionName(tmuxSession string) (string, error) {
+	if tmuxSession == "" {
+		tmuxSession = "0"
+	}
+	if !validTmuxSessionName.MatchString(tmuxSession) {
+		return "", fmt.Errorf(
+			"invalid tmux session name %q: must match ^[a-zA-Z0-9_.-]+$",
+			tmuxSession,
+		)
+	}
+	return tmuxSession, nil
 }

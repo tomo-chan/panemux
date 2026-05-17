@@ -1,11 +1,6 @@
 package session
 
 import (
-	"bufio"
-	"bytes"
-	"crypto/hmac"
-	"crypto/sha1" //nolint:gosec // G505: OpenSSH hashed known_hosts entries use HMAC-SHA1
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -46,6 +41,11 @@ type SSHSession struct {
 	connectionName string
 	state          State
 	mu             sync.RWMutex
+}
+
+type sshSessionRunner interface {
+	Output(cmd string) ([]byte, error)
+	Close() error
 }
 
 // SSHConfig holds parameters for establishing an SSH connection.
@@ -90,7 +90,7 @@ func dialSSHClient(cfg SSHConfig) (*ssh.Client, *ssh.Client, error) {
 		return nil, nil, err
 	}
 
-	hkCallback, knownHostsPath, err := buildHostKeyCallback(cfg.KnownHostsFile)
+	hkCallback, err := buildHostKeyCallback(cfg.KnownHostsFile)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -102,11 +102,10 @@ func dialSSHClient(cfg SSHConfig) (*ssh.Client, *ssh.Client, error) {
 	addr := net.JoinHostPort(cfg.Host, strconv.Itoa(port))
 
 	sshCfg := &ssh.ClientConfig{
-		User:              cfg.User,
-		Auth:              authMethods,
-		HostKeyCallback:   hkCallback,
-		HostKeyAlgorithms: knownHostsAlgorithms(knownHostsPath, addr),
-		Timeout:           30 * time.Second,
+		User:            cfg.User,
+		Auth:            authMethods,
+		HostKeyCallback: hkCallback,
+		Timeout:         30 * time.Second,
 	}
 
 	var conn net.Conn
@@ -213,7 +212,7 @@ func dialViaProxyCommand(proxyCmd, host string, port int) (net.Conn, error) {
 	cmd := substituteProxyCommand(proxyCmd, host, port)
 	// Pass to /bin/sh -c so the command is interpreted by a shell, matching
 	// OpenSSH behavior. /bin/sh is a hardcoded trusted binary.
-	c := exec.Command("/bin/sh", "-c", cmd) //nolint:gosec // G204: ProxyCommand is trusted SSH config
+	c := exec.Command("/bin/sh", "-c", cmd)
 	c.Stderr = os.Stderr
 
 	stdin, err := c.StdinPipe()
@@ -493,89 +492,17 @@ func parseRemoteDirectoryListOutput(out []byte) (string, []DirectoryEntry, error
 	return resolvedPath, entries, nil
 }
 
-// buildHostKeyCallback resolves the known_hosts file path and returns a
-// HostKeyCallback together with the resolved path. The path is used by the
-// caller to also compute HostKeyAlgorithms.
-func buildHostKeyCallback(knownHostsFile string) (ssh.HostKeyCallback, string, error) {
+// buildHostKeyCallback resolves the known_hosts file path and returns a HostKeyCallback.
+func buildHostKeyCallback(knownHostsFile string) (ssh.HostKeyCallback, error) {
 	path, err := resolveKnownHostsFile(knownHostsFile)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 	cb, err := knownhosts.New(path)
 	if err != nil {
-		return nil, "", fmt.Errorf("loading known_hosts %s: %w", path, err)
+		return nil, fmt.Errorf("loading known_hosts %s: %w", path, err)
 	}
-	return cb, path, nil
-}
-
-// knownHostsAlgorithms returns the host-key algorithm types stored in
-// knownHostsPath that match hostport ("host:port" format). Setting
-// ssh.ClientConfig.HostKeyAlgorithms to this list ensures the server presents
-// a key type that matches our known_hosts entry, preventing "key mismatch"
-// errors when the server supports multiple key types.
-func knownHostsAlgorithms(knownHostsPath, hostport string) []string {
-	f, err := os.Open(knownHostsPath)
-	if err != nil {
-		return nil
-	}
-	defer f.Close()
-
-	normalized := knownhosts.Normalize(hostport)
-	seen := make(map[string]bool)
-	var algos []string
-
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := bytes.TrimSpace(scanner.Bytes())
-		if len(line) == 0 || line[0] == '#' || line[0] == '@' {
-			continue
-		}
-		fields := bytes.Fields(line)
-		if len(fields) < 3 {
-			continue
-		}
-		patterns := string(fields[0])
-		keyType := string(fields[1])
-		for _, pattern := range strings.Split(patterns, ",") {
-			if knownHostsFieldMatchesAddr(pattern, normalized) {
-				if !seen[keyType] {
-					seen[keyType] = true
-					algos = append(algos, keyType)
-				}
-				break
-			}
-		}
-	}
-	return algos
-}
-
-func knownHostsFieldMatchesAddr(field, normalized string) bool {
-	if strings.HasPrefix(field, "|1|") {
-		return knownHostsHashedEntryMatches(field, normalized)
-	}
-	if strings.HasPrefix(field, "!") {
-		return false
-	}
-	return field == normalized
-}
-
-func knownHostsHashedEntryMatches(encoded, normalized string) bool {
-	// Format: |1|base64-salt|base64-hash
-	parts := strings.SplitN(encoded, "|", 4)
-	if len(parts) != 4 || parts[1] != "1" {
-		return false
-	}
-	salt, err := base64.StdEncoding.DecodeString(parts[2])
-	if err != nil {
-		return false
-	}
-	hash, err := base64.StdEncoding.DecodeString(parts[3])
-	if err != nil {
-		return false
-	}
-	mac := hmac.New(sha1.New, salt)
-	mac.Write([]byte(normalized))
-	return hmac.Equal(mac.Sum(nil), hash)
+	return cb, nil
 }
 
 func buildAuthMethods(cfg SSHConfig) ([]ssh.AuthMethod, error) {
@@ -679,6 +606,14 @@ const sshGetCWDCmd = `PID=$(pgrep -P $PPID -o 2>/dev/null) && [ -n "$PID" ] && `
 	`lsof -a -p $PID -d cwd -Fn 2>/dev/null | awk '/^n/{print substr($0,2)}'; } || ` +
 	`pwd`
 
+const sshListProcessesCmd = `ps -Ao pid=,ppid=,command=`
+const sshShellPIDCmd = `pgrep -P $PPID -o 2>/dev/null`
+const sshOpenFilesCmdTemplate = `{ ls -1 /proc/%[1]d/fd 2>/dev/null | ` +
+	`while read -r fd; do readlink /proc/%[1]d/fd/"$fd" 2>/dev/null; done; } || ` +
+	`{ lsof -a -p %[1]d -Fn 2>/dev/null | awk '/^n/{print substr($0,2)}'; }`
+const sshPIDCWDCmdTemplate = `{ readlink /proc/%[1]d/cwd 2>/dev/null || ` +
+	`lsof -a -p %[1]d -d cwd -Fn 2>/dev/null | awk '/^n/{print substr($0,2)}'; }`
+
 // GetCWD returns the current working directory of the interactive shell by
 // inspecting the sshd process tree. See sshGetCWDCmd for the full rationale.
 func (s *SSHSession) GetCWD() (string, error) {
@@ -692,4 +627,142 @@ func (s *SSHSession) GetCWD() (string, error) {
 		return "", fmt.Errorf("cwd over ssh: %w", err)
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// GetActiveWorkdir returns the working directory of the newest active
+// interactive Codex or Claude process on the SSH connection, or empty string
+// when none is active.
+func (s *SSHSession) GetActiveWorkdir() (string, error) {
+	sess, err := s.client.NewSession()
+	if err != nil {
+		return "", fmt.Errorf("new ssh session for active workdir: %w", err)
+	}
+	defer sess.Close()
+
+	baseCWD, err := s.GetCWD()
+	if err != nil {
+		return "", err
+	}
+
+	rootPID, err := remoteShellPID(sess)
+	if err != nil {
+		return "", err
+	}
+
+	return activeRemoteWorkdir(sess, baseCWD, rootPID)
+}
+
+func remoteShellPID(runner sshSessionRunner) (int, error) {
+	out, err := runner.Output(sshShellPIDCmd)
+	if err != nil {
+		return 0, fmt.Errorf("remote shell pid: %w", err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil {
+		return 0, fmt.Errorf("parse remote shell pid: %w", err)
+	}
+	if pid <= 0 {
+		return 0, errors.New("remote shell pid missing")
+	}
+	return pid, nil
+}
+
+func activeRemoteWorkdir(runner sshSessionRunner, baseCWD string, rootPID int) (string, error) {
+	out, err := runner.Output(sshListProcessesCmd)
+	if err != nil {
+		return "", fmt.Errorf("list remote processes: %w", err)
+	}
+
+	processes, err := parsePSOutput(append([]byte("PID PPID COMMAND\n"), out...))
+	if err != nil {
+		return "", err
+	}
+
+	agentPID, ok := newestInteractiveAgentDescendantPID(processes, rootPID)
+	if !ok {
+		return "", nil
+	}
+
+	if sessionCWD, err := remoteCodexSessionCWD(runner, processes, agentPID); err == nil && sessionCWD != "" {
+		return sessionCWD, nil
+	}
+
+	return resolveRemoteInteractiveAgentWorkdir(runner, processes, agentPID, baseCWD)
+}
+
+func resolveRemoteInteractiveAgentWorkdir(
+	runner sshSessionRunner,
+	processes []processInfo,
+	agentPID int,
+	baseCWD string,
+) (string, error) {
+	candidatePIDs := descendantPIDs(processes, agentPID)
+	sort.Slice(candidatePIDs, func(i, j int) bool {
+		return candidatePIDs[i] > candidatePIDs[j]
+	})
+
+	var agentCWD string
+	for _, pid := range candidatePIDs {
+		cwd, err := remotePIDCWD(runner, pid)
+		if err != nil || cwd == "" {
+			continue
+		}
+		if pid == agentPID {
+			agentCWD = cwd
+		}
+		if cwd != baseCWD {
+			return cwd, nil
+		}
+	}
+
+	if agentCWD != "" {
+		return agentCWD, nil
+	}
+	return "", nil
+}
+
+func remotePIDCWD(runner sshSessionRunner, pid int) (string, error) {
+	out, err := runner.Output(fmt.Sprintf(sshPIDCWDCmdTemplate, pid))
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func remoteCodexSessionCWD(runner sshSessionRunner, processes []processInfo, agentPID int) (string, error) {
+	proc, ok := processByPID(processes, agentPID)
+	if !ok || !isCodexCommand(proc.Command) {
+		return "", nil
+	}
+
+	paths, err := remoteOpenFiles(runner, agentPID)
+	if err != nil {
+		return "", err
+	}
+	sessionPath, ok := codexSessionPath(paths)
+	if !ok {
+		return "", nil
+	}
+
+	out, err := runner.Output("cat " + shellQuotePath(sessionPath))
+	if err != nil {
+		return "", err
+	}
+
+	return parseCodexSessionCWD(out)
+}
+
+func remoteOpenFiles(runner sshSessionRunner, pid int) ([]string, error) {
+	out, err := runner.Output(fmt.Sprintf(sshOpenFilesCmdTemplate, pid))
+	if err != nil {
+		return nil, err
+	}
+	paths := []string{}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			paths = append(paths, line)
+		}
+	}
+	return paths, nil
 }

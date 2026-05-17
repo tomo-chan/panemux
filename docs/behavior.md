@@ -448,6 +448,21 @@ When a pane moves to a different parent node, the component may be remounted by 
   4. frontend persists with `PUT /api/workspaces/{active}/layout`
 - For cloned `tmux` and `ssh_tmux` panes, `tmux_session` is regenerated to avoid collisions.
 
+### Pane Git and PR metadata
+
+- The pane header shows Git metadata when the pane's current working context resolves to a Git repository.
+- The displayed Git context is always resolved from the pane's current live work context, not from stale historical output.
+- For normal panes, the base context is the pane's current working directory.
+- For local tmux and SSH+tmux panes, the base context is the currently active tmux pane only.
+- When a local, local tmux, SSH, or SSH+tmux pane has an active interactive `codex` or `claude` process working in a different Git worktree for the same repository, panemux prefers that agent worktree over the pane's base directory.
+- Only interactive agents are eligible for worktree override.
+- Non-interactive commands such as `codex exec`, `claude -p`, and `claude --print` must not affect the displayed Git or PR metadata.
+- For `codex resume` flows, panemux may derive the active worktree from the Codex session log metadata (`turn_context.cwd`, falling back to `session_meta.cwd`) when the process has the session log open.
+- If the agent exits, no longer has an eligible worktree, or the resolved worktree is not a sibling worktree of the pane's current repository, panemux falls back to the pane's own working directory immediately.
+- For SSH panes, panemux resolves interactive agent processes from the remote process list on the current SSH connection.
+- For SSH+tmux panes, panemux resolves interactive agent processes only from the currently active remote tmux pane.
+- If the resolved branch has a GitHub pull request, the header shows a PR link labeled `#<number>`.
+
 ## Operational Assumptions
 
 - The app is designed for local or otherwise trusted usage.

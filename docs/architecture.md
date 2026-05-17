@@ -156,6 +156,22 @@ Why this hook:
 - isolates debounce/persistence logic from view components
 - makes split/close behavior easier to reason about and test
 
+### Pane Git/PR resolution
+
+`GET /api/sessions/{id}/git-info` resolves repository metadata in two stages:
+
+- first, it asks the session for its live working directory
+- second, it may ask for an active interactive agent workdir override
+
+The override path is intentionally narrow:
+
+- only interactive `codex` and `claude` processes are considered
+- local and local tmux sessions only consider descendants of the pane's own shell process or active tmux pane process
+- SSH sessions scan the remote process list on the current SSH connection, and SSH+tmux sessions restrict that scan to the active remote tmux pane's process tree
+- only worktrees that belong to the same Git common dir as the pane's base repository are accepted
+
+For resumed Codex sessions, the local and SSH session implementations can inspect the open Codex session log under `~/.codex/sessions/...jsonl` and prefer the latest `turn_context.cwd` when available. This exists because a resumed interactive Codex process may keep its OS-level process cwd at the original pane directory while the live Codex session itself is operating against a different worktree.
+
 ### `useWorkspaceAttentionMonitor`
 
 Opens lightweight background WebSocket subscriptions for every pane ID across all workspaces and
@@ -283,6 +299,8 @@ After validation, the path is wrapped with `shellQuotePath`, which single-quotes
 **General rule**
 
 When adding new session types or new `exec.Command` calls: the value passed as the command (first argument) must come from a hardcoded literal or from a trusted system source (file, registry) with no data-flow path to user input. Arguments after the command may be user-supplied if they cannot be interpreted as commands by the target binary.
+
+`gosec` findings should be fixed in the implementation rather than suppressed in shipped code. Test-only code may use narrow `//nolint:gosec` annotations where the fixture behavior intentionally violates a production hardening rule, but production paths should avoid that pattern and make the safety argument explicit in code structure instead.
 
 ## Tradeoffs and Intentional Limits
 

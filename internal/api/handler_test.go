@@ -11,7 +11,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
@@ -22,24 +24,60 @@ import (
 )
 
 // mockSession implements session.Session for tests.
+//
+//nolint:govet // test helper layout is not performance-sensitive
 type mockSession struct {
-	id    string
-	typ   session.Type
-	title string
-	state session.State
+	buf     chan []byte
+	bufOnce sync.Once
+	id      string
+	typ     session.Type
+	title   string
+	state   session.State
+	closed  bool
+}
+
+func (m *mockSession) ensureBuf() {
+	m.bufOnce.Do(func() {
+		m.buf = make(chan []byte, 64)
+	})
 }
 
 func newMockSession(id string) *mockSession {
-	return &mockSession{id: id, typ: session.TypeLocal, title: id, state: session.StateConnected}
+	m := &mockSession{id: id, typ: session.TypeLocal, title: id, state: session.StateConnected}
+	m.ensureBuf()
+	return m
 }
-func (m *mockSession) ID() string                  { return m.id }
-func (m *mockSession) Type() session.Type          { return m.typ }
-func (m *mockSession) Title() string               { return m.title }
-func (m *mockSession) State() session.State        { return m.state }
-func (m *mockSession) Read(p []byte) (int, error)  { return 0, io.EOF }
-func (m *mockSession) Write(p []byte) (int, error) { return len(p), nil }
-func (m *mockSession) Resize(c, r uint16) error    { return nil }
-func (m *mockSession) Close() error                { return nil }
+func (m *mockSession) ID() string           { return m.id }
+func (m *mockSession) Type() session.Type   { return m.typ }
+func (m *mockSession) Title() string        { return m.title }
+func (m *mockSession) State() session.State { return m.state }
+func (m *mockSession) Read(p []byte) (int, error) {
+	m.ensureBuf()
+	data, ok := <-m.buf
+	if !ok {
+		return 0, io.EOF
+	}
+	n := copy(p, data)
+	return n, nil
+}
+func (m *mockSession) Write(p []byte) (int, error) {
+	m.ensureBuf()
+	if m.closed {
+		return 0, io.ErrClosedPipe
+	}
+	cp := make([]byte, len(p))
+	copy(cp, p)
+	m.buf <- cp
+	return len(p), nil
+}
+func (m *mockSession) Resize(c, r uint16) error { return nil }
+func (m *mockSession) Close() error {
+	if !m.closed {
+		m.closed = true
+		close(m.buf)
+	}
+	return nil
+}
 
 func setupRouter(cfg *config.Config, mgr *session.Manager) *chi.Mux {
 	h := NewHandler(cfg, mgr)
@@ -1098,19 +1136,28 @@ func TestPostSSHConfigHost_InvalidBody_400(t *testing.T) {
 }
 
 // mockCWDSession is a mockSession that also implements session.CWDGetter.
+//
+//nolint:govet // test helper layout is not performance-sensitive
 type mockCWDSession struct {
 	mockSession
-	cwdErr error
-	cwd    string
+	activeWorkdir string
+	activeErr     error
+	cwd           string
+	cwdErr        error
 }
 
 func (m *mockCWDSession) GetCWD() (string, error) { return m.cwd, m.cwdErr }
+func (m *mockCWDSession) GetActiveWorkdir() (string, error) {
+	return m.activeWorkdir, m.activeErr
+}
 
 // mockSSHCWDSession is a mockSession that implements both CWDGetter and SSHConnNamer.
+//
+//nolint:govet // test helper layout is not performance-sensitive
 type mockSSHCWDSession struct {
 	mockSession
-	cwd      string
 	connName string
+	cwd      string
 }
 
 func (m *mockSSHCWDSession) GetCWD() (string, error) { return m.cwd, nil }
@@ -1329,6 +1376,32 @@ func initTempGitRepo(t *testing.T) string {
 	return dir
 }
 
+func addTempGitWorktree(t *testing.T, repoDir, branchName string) string {
+	t.Helper()
+	worktreeDir := filepath.Join(t.TempDir(), "worktree")
+	out, err := exec.Command( //nolint:gosec // G204: trusted test args
+		"git",
+		"-C",
+		repoDir,
+		"worktree",
+		"add",
+		worktreeDir,
+		"-b",
+		branchName,
+	).CombinedOutput()
+	require.NoError(t, err, "git worktree add failed: %s", string(out))
+	return worktreeDir
+}
+
+func writeFakeGHBinary(t *testing.T, body string) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "gh")
+	require.NoError(t, os.WriteFile(path, []byte(body), 0600))
+	require.NoError(t, os.Chmod(path, 0755))
+	return path
+}
+
 func setupRouterWithGitInfo(h *Handler) *chi.Mux {
 	r := setupRouterWithHandler(h)
 	r.Get("/api/sessions/{id}/git-info", h.GetGitInfo)
@@ -1404,6 +1477,43 @@ func TestGetGitInfo_IsGitRepo_ReturnsBranchAndRepo(t *testing.T) {
 	assert.NotEmpty(t, resp.Repo)
 }
 
+func TestGetGitInfo_IsGitRepo_WithLinkedPR_ReturnsPRInfo(t *testing.T) {
+	dir := initTempGitRepo(t)
+	out, err := exec.Command( //nolint:gosec // G204: trusted test args
+		"git",
+		"-C",
+		dir,
+		"checkout",
+		"-b",
+		"feature/pane-pr-link",
+	).CombinedOutput()
+	require.NoError(t, err, "git checkout failed: %s", string(out))
+
+	mgr := session.NewManager()
+	mgr.Add(&mockCWDSession{
+		mockSession: mockSession{id: "local-pr", typ: session.TypeLocal},
+		cwd:         dir,
+	})
+	h := NewHandler(defaultTestConfig(), mgr)
+	h.ghBinaryPath = writeFakeGHBinary(
+		t,
+		"#!/bin/sh\necho '{\"url\":\"https://github.com/example/panemux/pull/123\",\"number\":123}'\n",
+	)
+	r := setupRouterWithGitInfo(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/local-pr/git-info", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var resp gitInfoResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.True(t, resp.IsGit)
+	assert.Equal(t, "feature/pane-pr-link", resp.Branch)
+	assert.Equal(t, "https://github.com/example/panemux/pull/123", resp.PRURL)
+	assert.Equal(t, 123, resp.PRNumber)
+}
+
 func TestGetGitInfo_SubdirOfGitRepo_ReturnsBranchAndRepo(t *testing.T) {
 	dir := initTempGitRepo(t)
 	subdir := filepath.Join(dir, "src")
@@ -1428,6 +1538,127 @@ func TestGetGitInfo_SubdirOfGitRepo_ReturnsBranchAndRepo(t *testing.T) {
 	assert.Equal(t, "main", resp.Branch)
 }
 
+func TestGetGitInfo_PRLookupFails_StillReturnsGitInfo(t *testing.T) {
+	dir := initTempGitRepo(t)
+	mgr := session.NewManager()
+	mgr.Add(&mockCWDSession{
+		mockSession: mockSession{id: "local-pr-miss", typ: session.TypeLocal},
+		cwd:         dir,
+	})
+	h := NewHandler(defaultTestConfig(), mgr)
+	h.ghBinaryPath = writeFakeGHBinary(t, "#!/bin/sh\nexit 1\n")
+	r := setupRouterWithGitInfo(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/local-pr-miss/git-info", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var resp gitInfoResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.True(t, resp.IsGit)
+	assert.Equal(t, "main", resp.Branch)
+	assert.Empty(t, resp.PRURL)
+	assert.Zero(t, resp.PRNumber)
+}
+
+func TestGetGitInfo_DetachedHead_StillReturnsGitInfo(t *testing.T) {
+	dir := initTempGitRepo(t)
+	out, err := exec.Command("git", "-C", dir, "checkout", "HEAD~0").CombinedOutput() //nolint:gosec // trusted test args
+	require.NoError(t, err, "git checkout detached head failed: %s", string(out))
+
+	mgr := session.NewManager()
+	mgr.Add(&mockCWDSession{
+		mockSession: mockSession{id: "detached", typ: session.TypeLocal},
+		cwd:         dir,
+	})
+	h := NewHandler(defaultTestConfig(), mgr)
+	r := setupRouterWithGitInfo(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/detached/git-info", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var resp gitInfoResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.True(t, resp.IsGit)
+	assert.Equal(t, "", resp.Branch)
+	assert.NotEmpty(t, resp.Repo)
+}
+
+func TestLookupPRInfo_TimesOutAndFallsBack(t *testing.T) {
+	h := NewHandler(defaultTestConfig(), session.NewManager())
+	h.ghBinaryPath = writeFakeGHBinary(t, "#!/bin/sh\nsleep 1\n")
+	prev := prLookupTimeout
+	prLookupTimeout = 10 * time.Millisecond
+	t.Cleanup(func() { prLookupTimeout = prev })
+
+	url, number := h.lookupPRInfo(t.TempDir(), "feature/slow")
+	assert.Empty(t, url)
+	assert.Zero(t, number)
+}
+
+func TestGetGitInfo_ActiveAgentWorkdir_PrefersWorktreeBranch(t *testing.T) {
+	repoDir := initTempGitRepo(t)
+	worktreeDir := addTempGitWorktree(t, repoDir, "feature/worktree-pr")
+
+	mgr := session.NewManager()
+	mgr.Add(&mockCWDSession{
+		mockSession:   mockSession{id: "local-worktree", typ: session.TypeLocal},
+		activeWorkdir: worktreeDir,
+		cwd:           repoDir,
+	})
+
+	h := NewHandler(defaultTestConfig(), mgr)
+	h.ghBinaryPath = writeFakeGHBinary(
+		t,
+		"#!/bin/sh\necho '{\"url\":\"https://github.com/example/panemux/pull/456\",\"number\":456}'\n",
+	)
+	r := setupRouterWithGitInfo(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/local-worktree/git-info", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var resp gitInfoResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.True(t, resp.IsGit)
+	assert.Equal(t, "feature/worktree-pr", resp.Branch)
+	assert.Equal(t, "https://github.com/example/panemux/pull/456", resp.PRURL)
+	assert.Equal(t, 456, resp.PRNumber)
+}
+
+func TestGetGitInfo_EndedAgentFallsBackToPaneCWD(t *testing.T) {
+	repoDir := initTempGitRepo(t)
+	_ = addTempGitWorktree(t, repoDir, "feature/worktree-pr")
+
+	mgr := session.NewManager()
+	mgr.Add(&mockCWDSession{
+		mockSession:   mockSession{id: "local-fallback", typ: session.TypeLocal},
+		activeWorkdir: "",
+		cwd:           repoDir,
+	})
+
+	h := NewHandler(defaultTestConfig(), mgr)
+	h.ghBinaryPath = writeFakeGHBinary(
+		t,
+		"#!/bin/sh\necho '{\"url\":\"https://github.com/example/panemux/pull/789\",\"number\":789}'\n",
+	)
+	r := setupRouterWithGitInfo(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/local-fallback/git-info", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var resp gitInfoResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.True(t, resp.IsGit)
+	assert.Equal(t, "main", resp.Branch)
+}
+
 func TestGetGitInfo_GitNotFound_IsGitFalse(t *testing.T) {
 	dir := initTempGitRepo(t)
 	mgr := session.NewManager()
@@ -1436,7 +1667,9 @@ func TestGetGitInfo_GitNotFound_IsGitFalse(t *testing.T) {
 		cwd:         dir,
 	})
 	h := NewHandler(defaultTestConfig(), mgr)
-	h.gitBinaryPath = "/nonexistent/git" // simulate git not found
+	prev := gitExistsFn
+	gitExistsFn = func() error { return errors.New("git not found") }
+	t.Cleanup(func() { gitExistsFn = prev })
 	r := setupRouterWithGitInfo(h)
 
 	rec := httptest.NewRecorder()
@@ -1447,6 +1680,21 @@ func TestGetGitInfo_GitNotFound_IsGitFalse(t *testing.T) {
 	var resp gitInfoResponse
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
 	assert.False(t, resp.IsGit)
+}
+
+func TestSanitizeGitExecDir_ValidAbsolutePath(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "repo")
+	require.NoError(t, os.MkdirAll(dir, 0755))
+
+	got, err := sanitizeGitExecDir(dir)
+	require.NoError(t, err)
+	assert.Equal(t, dir, got)
+}
+
+func TestSanitizeGitExecDir_RejectsRelativePath(t *testing.T) {
+	_, err := sanitizeGitExecDir("relative/path")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "absolute")
 }
 
 func TestGetDirectories_LocalPathReturnsDirectories(t *testing.T) {

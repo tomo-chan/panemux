@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   DisplayConfigSchema,
+  GitInfoSchema,
   PaneConfigSchema,
   LayoutNodeSchema,
   LayoutChildSchema,
@@ -14,6 +15,28 @@ import {
   DirectoryEntrySchema,
   DirectoryBrowserResponseSchema,
 } from './index'
+
+describe('GitInfoSchema', () => {
+  it('accepts git info with PR metadata', () => {
+    const result = GitInfoSchema.safeParse({
+      is_git: true,
+      branch: 'feature/pane-pr-link',
+      repo: 'panemux',
+      pr_number: 123,
+      pr_url: 'https://github.com/example/panemux/pull/123',
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects invalid PR metadata types', () => {
+    const result = GitInfoSchema.safeParse({
+      is_git: true,
+      pr_number: '123',
+      pr_url: 123,
+    })
+    expect(result.success).toBe(false)
+  })
+})
 
 describe('DisplayConfigSchema', () => {
   it('accepts valid display config', () => {

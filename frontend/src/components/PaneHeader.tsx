@@ -67,6 +67,11 @@ const vscodeButtonStyle: React.CSSProperties = {
   color: '#007acc',
 }
 
+const gitLinkStyle: React.CSSProperties = {
+  color: '#7ea6e0',
+  textDecoration: 'none',
+}
+
 interface HeaderIconButtonProps {
   title: string
   onClick: () => void
@@ -107,6 +112,36 @@ const HeaderIconButton: React.FC<HeaderIconButtonProps> = ({ title, onClick, chi
     >
       {children}
     </button>
+  )
+}
+
+interface InlineHeaderLinkProps {
+  href: string
+  title: string
+  label: string
+}
+
+const InlineHeaderLink: React.FC<InlineHeaderLinkProps> = ({ href, title, label }) => {
+  const [hovered, setHovered] = React.useState(false)
+
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label={label}
+      title={title}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        ...gitLinkStyle,
+        color: hovered ? '#a9c4f0' : gitLinkStyle.color,
+        textDecoration: hovered ? 'underline' : gitLinkStyle.textDecoration,
+        textUnderlineOffset: hovered ? '2px' : undefined,
+      }}
+    >
+      {label}
+    </a>
   )
 }
 
@@ -180,10 +215,17 @@ export const PaneHeader: React.FC<PaneHeaderProps> = ({
       <span style={{ color, fontWeight: 600 }}>{label}</span>
       {pane.title && <span style={{ color: '#aaa' }}>{pane.title}</span>}
       {gitInfo?.is_git && (gitInfo.repo || gitInfo.branch) && (
-        <span style={{ color: '#6e8a6e', fontSize: '11px' }}>
+        <span style={{ color: '#6e8a6e', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
           {gitInfo.repo && <span>{gitInfo.repo}</span>}
           {gitInfo.repo && gitInfo.branch && <span style={{ color: '#4a6a4a' }}>{' '}⎇{' '}</span>}
           {gitInfo.branch && <span>{gitInfo.branch}</span>}
+          {gitInfo.pr_url && gitInfo.pr_number && (
+            <InlineHeaderLink
+              href={gitInfo.pr_url}
+              title="Open pull request"
+              label={`#${gitInfo.pr_number}`}
+            />
+          )}
         </span>
       )}
       {!connected && <span style={{ color: '#555' }}>reconnecting…</span>}

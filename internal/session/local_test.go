@@ -1,9 +1,11 @@
 package session
 
 import (
+	"errors"
 	"os"
 	"os/user"
 	"path/filepath"
+	"sort"
 	"testing"
 	"time"
 
@@ -118,6 +120,277 @@ func TestLocalSessionGetCWD(t *testing.T) {
 	assert.NotEmpty(t, cwd)
 }
 
+func TestNewTmuxLocal_InvalidSessionName_Error(t *testing.T) {
+	_, err := NewTmuxLocal("tmux-id", "title", "bad;session")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid tmux session name")
+}
+
+func TestProcessIDArg_RejectsNonPositivePID(t *testing.T) {
+	_, err := processIDArg(0)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid pid")
+}
+
+func TestLocalDirectoryServiceUserPath_RejectsInvalidUsername(t *testing.T) {
+	_, err := localDirectoryServiceUserPath("bad/user")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid username")
+}
+
+func TestParsePSOutput(t *testing.T) {
+	processes, err := parsePSOutput([]byte("  PID  PPID COMMAND\n  101   10 /bin/zsh\n  202  101 codex exec\n"))
+	require.NoError(t, err)
+	require.Len(t, processes, 2)
+	assert.Equal(t, 101, processes[0].PID)
+	assert.Equal(t, 10, processes[0].PPID)
+	assert.Equal(t, "/bin/zsh", processes[0].Command)
+	assert.Equal(t, "codex exec", processes[1].Command)
+}
+
+func TestParsePSOutput_InvalidPID(t *testing.T) {
+	_, err := parsePSOutput([]byte("PID PPID COMMAND\nabc 1 codex\n"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "parse pid")
+}
+
+func TestNewestInteractiveAgentDescendantPID(t *testing.T) {
+	processes := []processInfo{
+		{PID: 100, PPID: 1, Command: "/bin/zsh"},
+		{PID: 110, PPID: 100, Command: "git status"},
+		{PID: 120, PPID: 100, Command: "codex exec"},
+		{PID: 130, PPID: 120, Command: "node helper"},
+		{PID: 140, PPID: 100, Command: "claude"},
+	}
+
+	pid, ok := newestInteractiveAgentDescendantPID(processes, 100)
+	require.True(t, ok)
+	assert.Equal(t, 140, pid)
+}
+
+func TestNewestInteractiveAgentDescendantPID_NoAgent(t *testing.T) {
+	processes := []processInfo{
+		{PID: 100, PPID: 1, Command: "/bin/zsh"},
+		{PID: 110, PPID: 100, Command: "git status"},
+	}
+
+	pid, ok := newestInteractiveAgentDescendantPID(processes, 100)
+	assert.False(t, ok)
+	assert.Zero(t, pid)
+}
+
+func TestNewestInteractiveAgentDescendantPID_IgnoresNonInteractiveAgents(t *testing.T) {
+	processes := []processInfo{
+		{PID: 100, PPID: 1, Command: "/bin/zsh"},
+		{PID: 120, PPID: 100, Command: "codex exec"},
+		{PID: 130, PPID: 100, Command: "claude -p"},
+		{PID: 140, PPID: 100, Command: "/usr/local/bin/codex"},
+	}
+
+	pid, ok := newestInteractiveAgentDescendantPID(processes, 100)
+	require.True(t, ok)
+	assert.Equal(t, 140, pid)
+}
+
+func TestDescendantPIDs(t *testing.T) {
+	processes := []processInfo{
+		{PID: 110, PPID: 100, Command: "/bin/zsh"},
+		{PID: 120, PPID: 110, Command: "codex"},
+		{PID: 130, PPID: 120, Command: "node helper"},
+	}
+
+	ids := descendantPIDs(processes, 110)
+	sort.Ints(ids)
+	assert.Equal(t, []int{110, 120, 130}, ids)
+}
+
+func TestIsInteractiveAgentCommand(t *testing.T) {
+	assert.True(t, isInteractiveAgentCommand("codex"))
+	assert.True(t, isInteractiveAgentCommand("/usr/local/bin/codex --model gpt-5"))
+	assert.True(t, isInteractiveAgentCommand("claude"))
+	assert.False(t, isInteractiveAgentCommand("codex exec"))
+	assert.False(t, isInteractiveAgentCommand("claude -p"))
+	assert.False(t, isInteractiveAgentCommand("claude --print"))
+	assert.False(t, isInteractiveAgentCommand("python worker.py"))
+}
+
+func TestCodexSessionPath(t *testing.T) {
+	path, ok := codexSessionPath([]string{
+		"/tmp/other.log",
+		"/Users/tomo/.codex/sessions/2026/05/17/rollout.jsonl",
+	})
+	require.True(t, ok)
+	assert.Equal(t, "/Users/tomo/.codex/sessions/2026/05/17/rollout.jsonl", path)
+}
+
+func TestReadCodexSessionCWD_PrefersTurnContext(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	content := "" +
+		"{\"type\":\"session_meta\",\"payload\":{\"cwd\":\"/repo/main\"}}\n" +
+		"{\"type\":\"turn_context\",\"payload\":{\"cwd\":\"/tmp/worktree-a\"}}\n" +
+		"{\"type\":\"turn_context\",\"payload\":{\"cwd\":\"/tmp/worktree-b\"}}\n"
+	require.NoError(t, os.WriteFile(path, []byte(content), 0600))
+
+	cwd, err := readCodexSessionCWD(path)
+	require.NoError(t, err)
+	assert.Equal(t, "/tmp/worktree-b", cwd)
+}
+
+func TestReadCodexSessionCWD_FallsBackToSessionMeta(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	content := "{\"type\":\"session_meta\",\"payload\":{\"cwd\":\"/repo/main\"}}\n"
+	require.NoError(t, os.WriteFile(path, []byte(content), 0600))
+
+	cwd, err := readCodexSessionCWD(path)
+	require.NoError(t, err)
+	assert.Equal(t, "/repo/main", cwd)
+}
+
+func TestGetActiveWorkdir_NoDescendantMatchReturnsEmpty(t *testing.T) {
+	sess := &LocalSession{pid: 100}
+
+	originalListProcesses := listProcessesFn
+	originalGetPIDCWD := getPIDCWDFn
+	originalOpenFilePaths := openFilePathsForPIDFn
+	t.Cleanup(func() {
+		listProcessesFn = originalListProcesses
+		getPIDCWDFn = originalGetPIDCWD
+		openFilePathsForPIDFn = originalOpenFilePaths
+	})
+
+	listProcessesFn = func() ([]processInfo, error) {
+		return []processInfo{{PID: 110, PPID: 100, Command: "git status"}}, nil
+	}
+	getPIDCWDFn = func(pid int) (string, error) {
+		if pid == 100 {
+			return "/repo/main", nil
+		}
+		return "", errors.New("should not be called")
+	}
+
+	cwd, err := sess.GetActiveWorkdir()
+	require.NoError(t, err)
+	assert.Empty(t, cwd)
+}
+
+func TestGetActiveWorkdir_ReturnsAgentDescendantCWD(t *testing.T) {
+	sess := &LocalSession{pid: 100}
+
+	originalListProcesses := listProcessesFn
+	originalGetPIDCWD := getPIDCWDFn
+	t.Cleanup(func() {
+		listProcessesFn = originalListProcesses
+		getPIDCWDFn = originalGetPIDCWD
+	})
+
+	listProcessesFn = func() ([]processInfo, error) {
+		return []processInfo{
+			{PID: 110, PPID: 100, Command: "/bin/zsh"},
+			{PID: 210, PPID: 110, Command: "codex exec"},
+			{PID: 220, PPID: 110, Command: "codex"},
+		}, nil
+	}
+	getPIDCWDFn = func(pid int) (string, error) {
+		if pid == 100 {
+			return "/repo/main", nil
+		}
+		assert.Equal(t, 220, pid)
+		return "/tmp/panemux-pane-pr-link", nil
+	}
+	openFilePathsForPIDFn = func(pid int) ([]string, error) {
+		return nil, nil
+	}
+
+	cwd, err := sess.GetActiveWorkdir()
+	require.NoError(t, err)
+	assert.Equal(t, "/tmp/panemux-pane-pr-link", cwd)
+}
+
+func TestGetActiveWorkdir_PrefersInteractiveAgentDescendantWorkdir(t *testing.T) {
+	sess := &LocalSession{pid: 100}
+
+	originalListProcesses := listProcessesFn
+	originalGetPIDCWD := getPIDCWDFn
+	originalOpenFilePaths := openFilePathsForPIDFn
+	t.Cleanup(func() {
+		listProcessesFn = originalListProcesses
+		getPIDCWDFn = originalGetPIDCWD
+		openFilePathsForPIDFn = originalOpenFilePaths
+	})
+
+	listProcessesFn = func() ([]processInfo, error) {
+		return []processInfo{
+			{PID: 110, PPID: 100, Command: "/bin/zsh"},
+			{PID: 220, PPID: 110, Command: "codex resume --last"},
+			{PID: 230, PPID: 220, Command: "node helper"},
+		}, nil
+	}
+	getPIDCWDFn = func(pid int) (string, error) {
+		switch pid {
+		case 100:
+			return "/repo/main", nil
+		case 220:
+			return "/repo/main", nil
+		case 230:
+			return "/tmp/panemux-pane-pr-link", nil
+		default:
+			return "", errors.New("unexpected pid")
+		}
+	}
+	openFilePathsForPIDFn = func(pid int) ([]string, error) {
+		return nil, nil
+	}
+
+	cwd, err := sess.GetActiveWorkdir()
+	require.NoError(t, err)
+	assert.Equal(t, "/tmp/panemux-pane-pr-link", cwd)
+}
+
+func TestGetActiveWorkdir_PrefersCodexSessionCWD(t *testing.T) {
+	sess := &LocalSession{pid: 100}
+
+	originalListProcesses := listProcessesFn
+	originalGetPIDCWD := getPIDCWDFn
+	originalOpenFilePaths := openFilePathsForPIDFn
+	t.Cleanup(func() {
+		listProcessesFn = originalListProcesses
+		getPIDCWDFn = originalGetPIDCWD
+		openFilePathsForPIDFn = originalOpenFilePaths
+	})
+
+	sessionLog := filepath.Join(t.TempDir(), ".codex", "sessions", "2026", "05", "17", "session.jsonl")
+	require.NoError(t, os.MkdirAll(filepath.Dir(sessionLog), 0755))
+	content := "" +
+		"{\"type\":\"session_meta\",\"payload\":{\"cwd\":\"/repo/main\"}}\n" +
+		"{\"type\":\"turn_context\",\"payload\":{\"cwd\":\"/tmp/worktree-from-session\"}}\n"
+	require.NoError(t, os.WriteFile(sessionLog, []byte(content), 0600))
+
+	listProcessesFn = func() ([]processInfo, error) {
+		return []processInfo{
+			{PID: 110, PPID: 100, Command: "/bin/zsh"},
+			{PID: 220, PPID: 110, Command: "codex resume --last"},
+		}, nil
+	}
+	getPIDCWDFn = func(pid int) (string, error) {
+		switch pid {
+		case 100:
+			return "/repo/main", nil
+		case 220:
+			return "/repo/main", nil
+		default:
+			return "", errors.New("unexpected pid")
+		}
+	}
+	openFilePathsForPIDFn = func(pid int) ([]string, error) {
+		assert.Equal(t, 220, pid)
+		return []string{sessionLog}, nil
+	}
+
+	cwd, err := sess.GetActiveWorkdir()
+	require.NoError(t, err)
+	assert.Equal(t, "/tmp/worktree-from-session", cwd)
+}
+
 func TestValidateShell_InEtcShells_OK(t *testing.T) {
 	got, err := validateShell("/bin/sh")
 	assert.NoError(t, err)
@@ -193,4 +466,48 @@ func TestDetectLocalShellDscl_NoUserShellLine_Error(t *testing.T) {
 	_, err := detectLocalShellDscl("tomo", runner)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "UserShell not found")
+}
+
+func TestTmuxLocalSessionGetActiveWorkdir_UsesPanePIDAndBaseCWD(t *testing.T) {
+	prevTmuxOutput := tmuxLocalOutputFn
+	prevListProcesses := listProcessesFn
+	prevGetPIDCWD := getPIDCWDFn
+	t.Cleanup(func() {
+		tmuxLocalOutputFn = prevTmuxOutput
+		listProcessesFn = prevListProcesses
+		getPIDCWDFn = prevGetPIDCWD
+	})
+
+	tmuxLocalOutputFn = func(args ...string) ([]byte, error) {
+		switch {
+		case len(args) == 5 && args[4] == "#{pane_pid}":
+			return []byte("220\n"), nil
+		case len(args) == 5 && args[4] == "#{pane_current_path}":
+			return []byte("/repo/main\n"), nil
+		default:
+			return nil, errors.New("unexpected tmux args")
+		}
+	}
+	listProcessesFn = func() ([]processInfo, error) {
+		return []processInfo{
+			{PID: 220, PPID: 1, Command: "zsh"},
+			{PID: 230, PPID: 220, Command: "codex"},
+			{PID: 240, PPID: 230, Command: "node helper"},
+		}, nil
+	}
+	getPIDCWDFn = func(pid int) (string, error) {
+		switch pid {
+		case 240:
+			return "/tmp/worktree", nil
+		case 230:
+			return "/repo/main", nil
+		default:
+			return "", errors.New("unexpected pid")
+		}
+	}
+
+	sess := &TmuxLocalSession{tmuxSession: "demo"}
+	cwd, err := sess.GetActiveWorkdir()
+	require.NoError(t, err)
+	assert.Equal(t, "/tmp/worktree", cwd)
 }

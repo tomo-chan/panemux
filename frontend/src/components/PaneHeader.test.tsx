@@ -99,4 +99,48 @@ describe('PaneHeader VSCode button', () => {
 
     expect(onCreateDefaultPane).toHaveBeenCalledWith('bottom')
   })
+
+  it('renders a PR number link when git info includes PR metadata', () => {
+    render(
+      <PaneHeader
+        {...defaultProps}
+        gitInfo={{
+          is_git: true,
+          repo: 'panemux',
+          branch: 'feature/pane-pr-link',
+          pr_number: 123,
+          pr_url: 'https://github.com/example/panemux/pull/123',
+        }}
+      />
+    )
+
+    const link = screen.getByRole('link', { name: '#123' })
+    expect(link).toHaveAttribute('href', 'https://github.com/example/panemux/pull/123')
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+    expect(link).toHaveStyle({ textDecoration: 'none' })
+  })
+
+  it('shows an underline on PR link hover', () => {
+    render(
+      <PaneHeader
+        {...defaultProps}
+        gitInfo={{
+          is_git: true,
+          repo: 'panemux',
+          branch: 'feature/pane-pr-link',
+          pr_number: 123,
+          pr_url: 'https://github.com/example/panemux/pull/123',
+        }}
+      />
+    )
+
+    const link = screen.getByRole('link', { name: '#123' })
+    fireEvent.mouseEnter(link)
+
+    expect(link).toHaveStyle({
+      textDecoration: 'underline',
+      textUnderlineOffset: '2px',
+    })
+  })
 })

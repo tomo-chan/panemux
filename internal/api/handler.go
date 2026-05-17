@@ -2,6 +2,8 @@
 package api
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +17,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -24,19 +27,31 @@ import (
 )
 
 // Handler provides REST API endpoints.
+//
+//nolint:govet // keeps test injection hooks and binary-path overrides on one handler value
 type Handler struct {
 	cfg                     *config.Config
 	manager                 *session.Manager
+	sshConfigPath           string
+	codeBinaryPath          string // empty = auto-detect; overridden in tests
+	ghBinaryPath            string // empty = auto-detect; overridden in tests
 	createSession           func(*config.PaneConfig, map[string]config.SSHConnection) (session.Session, error)
 	detectLocalShellFn      func() (string, error)
 	detectRemoteShellFn     func(cfg session.SSHConfig) (string, error)
 	listLocalDirectoriesFn  func(path string, showHidden bool) (directoryBrowserResponse, error)
 	listRemoteDirectoriesFn func(cfg session.SSHConfig, path string, showHidden bool) (directoryBrowserResponse, error)
 	readDirFn               func(name string) ([]os.DirEntry, error)
-	sshConfigPath           string
-	codeBinaryPath          string // empty = auto-detect; overridden in tests
-	gitBinaryPath           string // empty = auto-detect; overridden in tests
 }
+
+var gitExistsFn = func() error {
+	_, err := exec.LookPath("git")
+	if err != nil {
+		return fmt.Errorf("finding git binary: %w", err)
+	}
+	return nil
+}
+
+var prLookupTimeout = 5 * time.Second
 
 type sshConnectionsResponse struct {
 	Names []string `json:"names"`
@@ -546,7 +561,7 @@ func (h *Handler) PostOpenVSCode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Launch VSCode detached — we do not wait for it to exit.
-	cmd := exec.Command(codePath, args...) //nolint:gosec // G204: codePath is from trusted lookup
+	cmd := exec.Command(codePath, args...)
 	if err := cmd.Start(); err != nil {
 		http.Error(w, fmt.Sprintf("failed to launch VSCode: %v", err), http.StatusInternalServerError)
 		return
@@ -567,7 +582,12 @@ func (h *Handler) validateVSCodeCWD(
 ) bool {
 	switch sess.Type() {
 	case session.TypeLocal, session.TypeTmux:
-		if _, err := os.Stat(cwd); err != nil { //nolint:gosec // G703: cwd is from local session process
+		safeCWD, err := sanitizeGitExecDir(cwd)
+		if err != nil {
+			writeValidationError(w, err.Error())
+			return false
+		}
+		if _, err := h.readDirFn(safeCWD); err != nil && !errors.Is(err, fs.ErrPermission) {
 			writeValidationError(w, "working directory no longer exists: "+cwd)
 			return false
 		}
@@ -681,9 +701,18 @@ func (h *Handler) GetDirectories(w http.ResponseWriter, r *http.Request) {
 }
 
 type gitInfoResponse struct {
-	Branch string `json:"branch,omitempty"`
-	Repo   string `json:"repo,omitempty"`
-	IsGit  bool   `json:"is_git"`
+	Branch   string `json:"branch,omitempty"`
+	PRURL    string `json:"pr_url,omitempty"`
+	Repo     string `json:"repo,omitempty"`
+	PRNumber int    `json:"pr_number,omitempty"`
+	IsGit    bool   `json:"is_git"`
+}
+
+type gitContext struct {
+	branch    string
+	commonDir string
+	repo      string
+	root      string
 }
 
 // GetGitInfo returns git repository information for the session's current working directory.
@@ -707,51 +736,160 @@ func (h *Handler) GetGitInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	gitPath, err := h.findGit()
+	err = gitExistsFn()
 	if err != nil {
 		writeJSON(w, gitInfoResponse{IsGit: false})
 		return
 	}
 
-	toplevelOut, err := exec.Command( //nolint:gosec // G204: gitPath is from trusted lookup
-		gitPath,
-		"-C",
-		cwd,
-		"rev-parse",
-		"--show-toplevel",
-	).Output()
+	targetCWD := h.resolveGitInfoCWD(sess, cwd)
+	ctx, err := h.inspectGitContext(targetCWD)
 	if err != nil {
 		writeJSON(w, gitInfoResponse{IsGit: false})
 		return
 	}
-	repo := filepath.Base(strings.TrimSpace(string(toplevelOut)))
+	prURL, prNumber := h.lookupPRInfo(targetCWD, ctx.branch)
 
-	branchOut, err := exec.Command( //nolint:gosec // G204: gitPath is from trusted lookup
-		gitPath,
-		"-C",
-		cwd,
-		"branch",
-		"--show-current",
-	).Output()
-	if err != nil {
-		writeJSON(w, gitInfoResponse{IsGit: true, Repo: repo})
-		return
-	}
-	branch := strings.TrimSpace(string(branchOut))
-
-	writeJSON(w, gitInfoResponse{IsGit: true, Branch: branch, Repo: repo})
+	writeJSON(w, gitInfoResponse{
+		IsGit:    true,
+		Branch:   ctx.branch,
+		Repo:     ctx.repo,
+		PRURL:    prURL,
+		PRNumber: prNumber,
+	})
 }
 
-// findGit returns the path to the git binary.
-func (h *Handler) findGit() (string, error) {
-	if h.gitBinaryPath != "" {
-		return h.gitBinaryPath, nil
-	}
-	path, err := exec.LookPath("git")
+func (h *Handler) resolveGitInfoCWD(sess session.Session, cwd string) string {
+	baseCtx, err := h.inspectGitContext(cwd)
 	if err != nil {
-		return "", fmt.Errorf("finding git binary: %w", err)
+		return cwd
+	}
+
+	activeGetter, ok := sess.(session.ActiveWorkdirGetter)
+	if !ok {
+		return cwd
+	}
+
+	candidate, err := activeGetter.GetActiveWorkdir()
+	if err != nil || candidate == "" {
+		return cwd
+	}
+
+	ctx, err := h.inspectGitContext(candidate)
+	if err != nil {
+		return cwd
+	}
+	if ctx.commonDir == baseCtx.commonDir && ctx.root != baseCtx.root {
+		return candidate
+	}
+
+	return cwd
+}
+
+func (h *Handler) inspectGitContext(cwd string) (gitContext, error) {
+	safeCWD, err := sanitizeGitExecDir(cwd)
+	if err != nil {
+		return gitContext{}, err
+	}
+
+	toplevelCmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	toplevelCmd.Dir = safeCWD
+	toplevelOut, err := toplevelCmd.Output()
+	if err != nil {
+		return gitContext{}, fmt.Errorf("git show toplevel for %q: %w", cwd, err)
+	}
+	toplevelOut = bytes.TrimSpace(toplevelOut)
+
+	commonDirCmd := exec.Command("git", "rev-parse", "--path-format=absolute", "--git-common-dir")
+	commonDirCmd.Dir = safeCWD
+	commonDirOut, err := commonDirCmd.Output()
+	if err != nil {
+		return gitContext{}, fmt.Errorf("git show common dir for %q: %w", cwd, err)
+	}
+	commonDirOut = bytes.TrimSpace(commonDirOut)
+
+	branchCmd := exec.Command("git", "branch", "--show-current")
+	branchCmd.Dir = safeCWD
+	branchOut, err := branchCmd.Output()
+	if err != nil {
+		// Detached HEAD returns non-zero for --show-current. Treat that as
+		// a valid git context with an empty branch instead of a fatal error.
+		branchOut = nil
+	}
+	branchOut = bytes.TrimSpace(branchOut)
+
+	root := string(toplevelOut)
+	return gitContext{
+		branch:    string(branchOut),
+		commonDir: string(commonDirOut),
+		repo:      filepath.Base(root),
+		root:      root,
+	}, nil
+}
+
+var validGitExecDir = regexp.MustCompile(`^(/[^[:cntrl:]\x00]*)+$`)
+
+func sanitizeGitExecDir(cwd string) (string, error) {
+	if !filepath.IsAbs(cwd) {
+		return "", errors.New("working directory must be an absolute path")
+	}
+	cleaned := filepath.Clean(cwd)
+	if !validGitExecDir.MatchString(cleaned) {
+		return "", fmt.Errorf("working directory contains invalid characters: %q", cwd)
+	}
+	return cleaned, nil
+}
+
+func (h *Handler) findGH() (string, error) {
+	if h.ghBinaryPath != "" {
+		return h.ghBinaryPath, nil
+	}
+	path, err := exec.LookPath("gh")
+	if err != nil {
+		return "", fmt.Errorf("finding gh binary: %w", err)
 	}
 	return path, nil
+}
+
+func (h *Handler) lookupPRInfo(cwd, branch string) (string, int) {
+	if branch == "" {
+		return "", 0
+	}
+
+	ghPath, err := h.findGH()
+	if err != nil {
+		return "", 0
+	}
+
+	timeout := prLookupTimeout
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	cmd := exec.CommandContext(
+		ctx,
+		ghPath,
+		"pr",
+		"view",
+		branch,
+		"--json",
+		"url,number",
+	)
+	cmd.Dir = cwd
+	out, err := cmd.Output()
+	if err != nil {
+		return "", 0
+	}
+
+	var resp struct {
+		URL    string `json:"url"`
+		Number int    `json:"number"`
+	}
+	if err := json.Unmarshal(out, &resp); err != nil {
+		return "", 0
+	}
+	return strings.TrimSpace(resp.URL), resp.Number
 }
 
 func writeValidationError(w http.ResponseWriter, msg string) {

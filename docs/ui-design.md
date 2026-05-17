@@ -79,11 +79,13 @@ From left to right, the header contains:
 - connection status dot
 - pane type label
 - optional pane title
-- optional git information
+- optional git information and linked PR shortcut when the current branch has a GitHub pull request
 - reconnecting status text
 - action buttons aligned to the right
 
 The header background stays `#252526` with a `#333` bottom border so the new controls inherit the established terminal chrome instead of introducing a second visual language.
+
+The PR shortcut is rendered as an inline text link labeled `#<number>`. It does not use a pill, badge, or outlined capsule treatment. On hover, the link shifts to a slightly stronger blue and shows an underline so it reads like the rest of the header chrome instead of a separate button system.
 
 ### Split vs quick-add
 

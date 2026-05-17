@@ -100,6 +100,8 @@ export const GitInfoSchema = z.object({
   is_git: z.boolean(),
   branch: z.string().optional(),
   repo: z.string().optional(),
+  pr_number: z.number().int().positive().optional(),
+  pr_url: z.string().url().optional(),
 })
 
 export type GitInfo = z.infer<typeof GitInfoSchema>
