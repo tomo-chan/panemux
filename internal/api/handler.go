@@ -518,6 +518,8 @@ type openVSCodeResponse struct {
 }
 
 // PostOpenVSCode opens VSCode pointed at the session's current working directory.
+// When an interactive Codex or Claude agent is actively working in a sibling git
+// worktree for the same repository, panemux prefers that worktree instead.
 // For local sessions it runs: code <cwd>
 // For SSH sessions it runs: code --remote ssh-remote+<connection> <cwd>
 func (h *Handler) PostOpenVSCode(w http.ResponseWriter, r *http.Request) {
@@ -539,6 +541,8 @@ func (h *Handler) PostOpenVSCode(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("failed to get working directory: %v", err), http.StatusInternalServerError)
 		return
 	}
+
+	cwd = h.resolvePreferredCWD(sess, cwd)
 
 	if !h.validateVSCodeCWD(w, sess, cwd) {
 		return
@@ -742,7 +746,7 @@ func (h *Handler) GetGitInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	targetCWD := h.resolveGitInfoCWD(sess, cwd)
+	targetCWD := h.resolvePreferredCWD(sess, cwd)
 	ctx, err := h.inspectGitContext(targetCWD)
 	if err != nil {
 		writeJSON(w, gitInfoResponse{IsGit: false})
@@ -759,7 +763,7 @@ func (h *Handler) GetGitInfo(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h *Handler) resolveGitInfoCWD(sess session.Session, cwd string) string {
+func (h *Handler) resolvePreferredCWD(sess session.Session, cwd string) string {
 	baseCtx, err := h.inspectGitContext(cwd)
 	if err != nil {
 		return cwd
