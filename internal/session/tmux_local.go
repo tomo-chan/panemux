@@ -151,7 +151,12 @@ func (s *TmuxLocalSession) GetActiveWorkdir() (string, error) {
 		return "", nil
 	}
 
-	return getPIDCWDFn(agentPID)
+	baseCWD, err := s.GetCWD()
+	if err != nil {
+		return "", err
+	}
+
+	return resolveInteractiveAgentWorkdir(processes, agentPID, baseCWD)
 }
 
 func (s *TmuxLocalSession) Close() error {

@@ -1,6 +1,8 @@
 package session
 
 import (
+	"bufio"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -9,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,6 +22,7 @@ import (
 
 var listProcessesFn = listProcesses
 var getPIDCWDFn = getPIDCWD
+var openFilePathsForPIDFn = openFilePathsForPID
 
 // validShellPath matches a valid absolute shell path.
 // Only alphanumeric characters, dots, underscores, hyphens, and slashes are permitted.
@@ -138,12 +142,17 @@ func (s *LocalSession) GetActiveWorkdir() (string, error) {
 		return "", err
 	}
 
+	baseCWD, err := getPIDCWDFn(s.pid)
+	if err != nil {
+		return "", err
+	}
+
 	pid, ok := newestInteractiveAgentDescendantPID(processes, s.pid)
 	if !ok {
 		return "", nil
 	}
 
-	return getPIDCWDFn(pid)
+	return resolveInteractiveAgentWorkdir(processes, pid, baseCWD)
 }
 
 func getPIDCWD(pid int) (string, error) {
@@ -230,11 +239,7 @@ func parsePSOutput(out []byte) ([]processInfo, error) {
 }
 
 func newestInteractiveAgentDescendantPID(processes []processInfo, rootPID int) (int, bool) {
-	children := make(map[int][]processInfo)
-	for _, proc := range processes {
-		children[proc.PPID] = append(children[proc.PPID], proc)
-	}
-
+	children := childProcessMap(processes)
 	stack := append([]processInfo(nil), children[rootPID]...)
 	var matched int
 	var ok bool
@@ -255,6 +260,88 @@ func newestInteractiveAgentDescendantPID(processes []processInfo, rootPID int) (
 	return matched, ok
 }
 
+func childProcessMap(processes []processInfo) map[int][]processInfo {
+	children := make(map[int][]processInfo)
+	for _, proc := range processes {
+		children[proc.PPID] = append(children[proc.PPID], proc)
+	}
+	return children
+}
+
+func descendantPIDs(processes []processInfo, rootPID int) []int {
+	children := childProcessMap(processes)
+	stack := append([]processInfo(nil), children[rootPID]...)
+	ids := []int{rootPID}
+
+	for len(stack) > 0 {
+		proc := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		stack = append(stack, children[proc.PID]...)
+		ids = append(ids, proc.PID)
+	}
+
+	return ids
+}
+
+func resolveInteractiveAgentWorkdir(processes []processInfo, agentPID int, baseCWD string) (string, error) {
+	if sessionCWD, err := codexSessionCWD(processes, agentPID); err == nil && sessionCWD != "" {
+		return sessionCWD, nil
+	}
+
+	candidatePIDs := descendantPIDs(processes, agentPID)
+	sort.Slice(candidatePIDs, func(i, j int) bool {
+		return candidatePIDs[i] > candidatePIDs[j]
+	})
+
+	var agentCWD string
+	for _, pid := range candidatePIDs {
+		cwd, err := getPIDCWDFn(pid)
+		if err != nil || cwd == "" {
+			continue
+		}
+
+		if pid == agentPID {
+			agentCWD = cwd
+		}
+		if cwd != baseCWD {
+			return cwd, nil
+		}
+	}
+
+	if agentCWD != "" {
+		return agentCWD, nil
+	}
+	return "", nil
+}
+
+func codexSessionCWD(processes []processInfo, agentPID int) (string, error) {
+	proc, ok := processByPID(processes, agentPID)
+	if !ok || !isCodexCommand(proc.Command) {
+		return "", nil
+	}
+
+	paths, err := openFilePathsForPIDFn(agentPID)
+	if err != nil {
+		return "", err
+	}
+
+	sessionPath, ok := codexSessionPath(paths)
+	if !ok {
+		return "", nil
+	}
+
+	return readCodexSessionCWD(sessionPath)
+}
+
+func processByPID(processes []processInfo, pid int) (processInfo, bool) {
+	for _, proc := range processes {
+		if proc.PID == pid {
+			return proc, true
+		}
+	}
+	return processInfo{}, false
+}
+
 func isInteractiveAgentCommand(command string) bool {
 	fields := strings.Fields(command)
 	if len(fields) == 0 {
@@ -270,6 +357,11 @@ func isInteractiveAgentCommand(command string) bool {
 	default:
 		return false
 	}
+}
+
+func isCodexCommand(command string) bool {
+	fields := strings.Fields(command)
+	return len(fields) > 0 && strings.ToLower(filepath.Base(fields[0])) == "codex"
 }
 
 func containsToken(tokens []string, target string) bool {
@@ -290,6 +382,99 @@ func containsAnyToken(tokens []string, targets ...string) bool {
 		}
 	}
 	return false
+}
+
+func openFilePathsForPID(pid int) ([]string, error) {
+	switch runtime.GOOS {
+	case "linux":
+		fdDir := "/proc/" + strconv.Itoa(pid) + "/fd"
+		entries, err := os.ReadDir(fdDir)
+		if err != nil {
+			return nil, fmt.Errorf("read %s: %w", fdDir, err)
+		}
+
+		paths := make([]string, 0, len(entries))
+		for _, entry := range entries {
+			target, err := os.Readlink(filepath.Join(fdDir, entry.Name()))
+			if err == nil {
+				paths = append(paths, target)
+			}
+		}
+		return paths, nil
+	case "darwin":
+		out, err := exec.Command( //nolint:gosec // G204: lsof is trusted and pid is an internal process ID
+			"lsof",
+			"-a",
+			"-p",
+			strconv.Itoa(pid),
+			"-Fn",
+		).Output()
+		if err != nil {
+			return nil, fmt.Errorf("lsof files: %w", err)
+		}
+
+		paths := make([]string, 0, 32)
+		for _, line := range strings.Split(string(out), "\n") {
+			if strings.HasPrefix(line, "n") {
+				paths = append(paths, strings.TrimSpace(strings.TrimPrefix(line, "n")))
+			}
+		}
+		return paths, nil
+	default:
+		return nil, fmt.Errorf("open file inspection not supported on %s", runtime.GOOS)
+	}
+}
+
+func codexSessionPath(paths []string) (string, bool) {
+	for _, path := range paths {
+		if strings.Contains(path, "/.codex/sessions/") && strings.HasSuffix(path, ".jsonl") {
+			return path, true
+		}
+	}
+	return "", false
+}
+
+func readCodexSessionCWD(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("open codex session log %q: %w", path, err)
+	}
+	defer file.Close()
+
+	type payloadWithCWD struct {
+		Cwd string `json:"cwd"`
+	}
+	type record struct {
+		Type    string         `json:"type"`
+		Payload payloadWithCWD `json:"payload"`
+	}
+
+	var latestTurnCWD string
+	var sessionMetaCWD string
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		var rec record
+		if err := json.Unmarshal(scanner.Bytes(), &rec); err != nil {
+			continue
+		}
+		switch rec.Type {
+		case "turn_context":
+			if rec.Payload.Cwd != "" {
+				latestTurnCWD = rec.Payload.Cwd
+			}
+		case "session_meta":
+			if rec.Payload.Cwd != "" && sessionMetaCWD == "" {
+				sessionMetaCWD = rec.Payload.Cwd
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return "", fmt.Errorf("scan codex session log %q: %w", path, err)
+	}
+	if latestTurnCWD != "" {
+		return latestTurnCWD, nil
+	}
+	return sessionMetaCWD, nil
 }
 
 // validateShell ensures the shell path is safe to execute.
