@@ -465,41 +465,96 @@ func readCodexSessionCWD(path string) (string, error) {
 	return parseCodexSessionCWD(data)
 }
 
+type codexSessionRecord struct {
+	Type    string          `json:"type"`
+	Payload json.RawMessage `json:"payload"`
+}
+
 func parseCodexSessionCWD(data []byte) (string, error) {
 	scanner := bufio.NewScanner(bytes.NewReader(data))
-	type payloadWithCWD struct {
-		Cwd string `json:"cwd"`
-	}
-	type record struct {
-		Type    string         `json:"type"`
-		Payload payloadWithCWD `json:"payload"`
-	}
 
 	var latestTurnCWD string
 	var sessionMetaCWD string
+	var latestExecWorkdir string
 	for scanner.Scan() {
-		var rec record
+		var rec codexSessionRecord
 		if err := json.Unmarshal(scanner.Bytes(), &rec); err != nil {
 			continue
 		}
-		switch rec.Type {
-		case "turn_context":
-			if rec.Payload.Cwd != "" {
-				latestTurnCWD = rec.Payload.Cwd
-			}
-		case "session_meta":
-			if rec.Payload.Cwd != "" && sessionMetaCWD == "" {
-				sessionMetaCWD = rec.Payload.Cwd
-			}
+		execWorkdir, turnCWD, metaCWD := codexSessionRecordCWD(rec)
+		if execWorkdir != "" {
+			latestExecWorkdir = execWorkdir
+		}
+		if turnCWD != "" {
+			latestTurnCWD = turnCWD
+		}
+		if metaCWD != "" && sessionMetaCWD == "" {
+			sessionMetaCWD = metaCWD
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return "", fmt.Errorf("scan codex session log: %w", err)
 	}
+	// Codex may keep both process cwd and turn/session metadata pinned to the
+	// original pane directory while tool calls run inside a sibling worktree.
+	// The latest exec_command workdir is therefore the strongest signal.
+	if latestExecWorkdir != "" {
+		return latestExecWorkdir, nil
+	}
 	if latestTurnCWD != "" {
 		return latestTurnCWD, nil
 	}
 	return sessionMetaCWD, nil
+}
+
+func codexSessionRecordCWD(rec codexSessionRecord) (execWorkdir, turnCWD, metaCWD string) {
+	switch rec.Type {
+	case "turn_context":
+		return "", parsePayloadCWD(rec.Payload), ""
+	case "session_meta":
+		return "", "", parsePayloadCWD(rec.Payload)
+	case "response_item":
+		return parseExecCommandWorkdir(rec.Payload), "", ""
+	default:
+		return "", "", ""
+	}
+}
+
+func parsePayloadCWD(raw json.RawMessage) string {
+	type payloadWithCWD struct {
+		Cwd string `json:"cwd"`
+	}
+
+	var payload payloadWithCWD
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return ""
+	}
+	return payload.Cwd
+}
+
+func parseExecCommandWorkdir(raw json.RawMessage) string {
+	type responseItemPayload struct {
+		Type      string `json:"type"`
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	}
+	type commandArguments struct {
+		Workdir string `json:"workdir"`
+	}
+
+	var payload responseItemPayload
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return ""
+	}
+	if payload.Type != "function_call" || payload.Name != "exec_command" || payload.Arguments == "" {
+		return ""
+	}
+
+	var args commandArguments
+	if err := json.Unmarshal([]byte(payload.Arguments), &args); err != nil {
+		return ""
+	}
+	return args.Workdir
 }
 
 // validateShell ensures the shell path is safe to execute.
