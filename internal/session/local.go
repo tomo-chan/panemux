@@ -161,13 +161,17 @@ func getPIDCWD(pid int) (string, error) {
 	case "linux":
 		return os.Readlink("/proc/" + strconv.Itoa(pid) + "/cwd")
 	case "darwin":
+		pidArg, err := processIDArg(pid)
+		if err != nil {
+			return "", err
+		}
 		// -a ANDs the -p and -d conditions; without -a they are OR'd, which
 		// causes -d cwd to dump the cwd of every process on the system.
-		out, err := exec.Command( //nolint:gosec // G204: lsof is trusted and pid is an internal process ID
+		out, err := exec.Command(
 			"lsof",
 			"-a",
 			"-p",
-			strconv.Itoa(pid),
+			pidArg,
 			"-d",
 			"cwd",
 			"-Fn",
@@ -198,6 +202,9 @@ type processInfo struct {
 	PID     int
 	PPID    int
 }
+
+var validProcessIDArg = regexp.MustCompile(`^[1-9][0-9]*$`)
+var validLocalUsername = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
 
 func listProcesses() ([]processInfo, error) {
 	out, err := exec.Command("ps", "-Ao", "pid,ppid,command").Output()
@@ -403,11 +410,15 @@ func openFilePathsForPID(pid int) ([]string, error) {
 		}
 		return paths, nil
 	case "darwin":
-		out, err := exec.Command( //nolint:gosec // G204: lsof is trusted and pid is an internal process ID
+		pidArg, err := processIDArg(pid)
+		if err != nil {
+			return nil, err
+		}
+		out, err := exec.Command(
 			"lsof",
 			"-a",
 			"-p",
-			strconv.Itoa(pid),
+			pidArg,
 			"-Fn",
 		).Output()
 		if err != nil {
@@ -433,6 +444,17 @@ func codexSessionPath(paths []string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+func processIDArg(pid int) (string, error) {
+	if pid <= 0 {
+		return "", fmt.Errorf("invalid pid: %d", pid)
+	}
+	pidArg := strconv.Itoa(pid)
+	if !validProcessIDArg.MatchString(pidArg) {
+		return "", fmt.Errorf("invalid pid: %d", pid)
+	}
+	return pidArg, nil
 }
 
 func readCodexSessionCWD(path string) (string, error) {
@@ -525,11 +547,15 @@ func DetectLocalShell() (string, error) {
 	}
 	// /etc/passwd lookup failed (expected on macOS) — try dscl.
 	return detectLocalShellDscl(currentUser.Username, func(username string) ([]byte, error) {
-		return exec.Command( //nolint:gosec // G204: username comes from os/user.Current for the local account
+		userPath, err := localDirectoryServiceUserPath(username)
+		if err != nil {
+			return nil, err
+		}
+		return exec.Command(
 			"/usr/bin/dscl",
 			".",
 			"-read",
-			"/Users/"+username,
+			userPath,
 			"UserShell",
 		).Output()
 	})
@@ -552,6 +578,13 @@ func detectLocalShellDscl(username string, runner func(string) ([]byte, error)) 
 		}
 	}
 	return "", fmt.Errorf("UserShell not found in dscl output for user %q", username)
+}
+
+func localDirectoryServiceUserPath(username string) (string, error) {
+	if !validLocalUsername.MatchString(username) {
+		return "", fmt.Errorf("invalid username for dscl lookup: %q", username)
+	}
+	return "/Users/" + username, nil
 }
 
 // detectLocalShellFrom is the testable version that accepts a custom passwd file path.

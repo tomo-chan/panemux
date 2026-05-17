@@ -120,6 +120,24 @@ func TestLocalSessionGetCWD(t *testing.T) {
 	assert.NotEmpty(t, cwd)
 }
 
+func TestNewTmuxLocal_InvalidSessionName_Error(t *testing.T) {
+	_, err := NewTmuxLocal("tmux-id", "title", "bad;session")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid tmux session name")
+}
+
+func TestProcessIDArg_RejectsNonPositivePID(t *testing.T) {
+	_, err := processIDArg(0)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid pid")
+}
+
+func TestLocalDirectoryServiceUserPath_RejectsInvalidUsername(t *testing.T) {
+	_, err := localDirectoryServiceUserPath("bad/user")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid username")
+}
+
 func TestParsePSOutput(t *testing.T) {
 	processes, err := parsePSOutput([]byte("  PID  PPID COMMAND\n  101   10 /bin/zsh\n  202  101 codex exec\n"))
 	require.NoError(t, err)

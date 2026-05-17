@@ -2,6 +2,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -33,9 +34,9 @@ type Handler struct {
 	listLocalDirectoriesFn  func(path string, showHidden bool) (directoryBrowserResponse, error)
 	listRemoteDirectoriesFn func(cfg session.SSHConfig, path string, showHidden bool) (directoryBrowserResponse, error)
 	readDirFn               func(name string) ([]os.DirEntry, error)
+	gitExistsFn             func() error
 	sshConfigPath           string
 	codeBinaryPath          string // empty = auto-detect; overridden in tests
-	gitBinaryPath           string // empty = auto-detect; overridden in tests
 	ghBinaryPath            string // empty = auto-detect; overridden in tests
 }
 
@@ -97,6 +98,13 @@ func NewHandler(cfg *config.Config, manager *session.Manager) *Handler {
 	h.readDirFn = os.ReadDir
 	h.listLocalDirectoriesFn = h.listLocalDirectories
 	h.listRemoteDirectoriesFn = listRemoteDirectories
+	h.gitExistsFn = func() error {
+		_, err := exec.LookPath("git")
+		if err != nil {
+			return fmt.Errorf("finding git binary: %w", err)
+		}
+		return nil
+	}
 	return h
 }
 
@@ -547,7 +555,7 @@ func (h *Handler) PostOpenVSCode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Launch VSCode detached — we do not wait for it to exit.
-	cmd := exec.Command(codePath, args...) //nolint:gosec // G204: codePath is from trusted lookup
+	cmd := exec.Command(codePath, args...)
 	if err := cmd.Start(); err != nil {
 		http.Error(w, fmt.Sprintf("failed to launch VSCode: %v", err), http.StatusInternalServerError)
 		return
@@ -568,7 +576,12 @@ func (h *Handler) validateVSCodeCWD(
 ) bool {
 	switch sess.Type() {
 	case session.TypeLocal, session.TypeTmux:
-		if _, err := os.Stat(cwd); err != nil { //nolint:gosec // G703: cwd is from local session process
+		safeCWD, err := sanitizeGitExecDir(cwd)
+		if err != nil {
+			writeValidationError(w, err.Error())
+			return false
+		}
+		if _, err := h.readDirFn(safeCWD); err != nil && !errors.Is(err, fs.ErrPermission) {
 			writeValidationError(w, "working directory no longer exists: "+cwd)
 			return false
 		}
@@ -717,14 +730,14 @@ func (h *Handler) GetGitInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	gitPath, err := h.findGit()
+	err = h.gitExistsFn()
 	if err != nil {
 		writeJSON(w, gitInfoResponse{IsGit: false})
 		return
 	}
 
-	targetCWD := h.resolveGitInfoCWD(sess, gitPath, cwd)
-	ctx, err := h.inspectGitContext(gitPath, targetCWD)
+	targetCWD := h.resolveGitInfoCWD(sess, cwd)
+	ctx, err := h.inspectGitContext(targetCWD)
 	if err != nil {
 		writeJSON(w, gitInfoResponse{IsGit: false})
 		return
@@ -740,8 +753,8 @@ func (h *Handler) GetGitInfo(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h *Handler) resolveGitInfoCWD(sess session.Session, gitPath, cwd string) string {
-	baseCtx, err := h.inspectGitContext(gitPath, cwd)
+func (h *Handler) resolveGitInfoCWD(sess session.Session, cwd string) string {
+	baseCtx, err := h.inspectGitContext(cwd)
 	if err != nil {
 		return cwd
 	}
@@ -756,7 +769,7 @@ func (h *Handler) resolveGitInfoCWD(sess session.Session, gitPath, cwd string) s
 		return cwd
 	}
 
-	ctx, err := h.inspectGitContext(gitPath, candidate)
+	ctx, err := h.inspectGitContext(candidate)
 	if err != nil {
 		return cwd
 	}
@@ -767,60 +780,56 @@ func (h *Handler) resolveGitInfoCWD(sess session.Session, gitPath, cwd string) s
 	return cwd
 }
 
-func (h *Handler) inspectGitContext(gitPath, cwd string) (gitContext, error) {
-	toplevelOut, err := exec.Command( //nolint:gosec // G204: gitPath is from trusted lookup
-		gitPath,
-		"-C",
-		cwd,
-		"rev-parse",
-		"--show-toplevel",
-	).Output()
+func (h *Handler) inspectGitContext(cwd string) (gitContext, error) {
+	safeCWD, err := sanitizeGitExecDir(cwd)
+	if err != nil {
+		return gitContext{}, err
+	}
+
+	toplevelCmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	toplevelCmd.Dir = safeCWD
+	toplevelOut, err := toplevelCmd.Output()
 	if err != nil {
 		return gitContext{}, fmt.Errorf("git show toplevel for %q: %w", cwd, err)
 	}
+	toplevelOut = bytes.TrimSpace(toplevelOut)
 
-	commonDirOut, err := exec.Command( //nolint:gosec // G204: gitPath is from trusted lookup
-		gitPath,
-		"-C",
-		cwd,
-		"rev-parse",
-		"--path-format=absolute",
-		"--git-common-dir",
-	).Output()
+	commonDirCmd := exec.Command("git", "rev-parse", "--path-format=absolute", "--git-common-dir")
+	commonDirCmd.Dir = safeCWD
+	commonDirOut, err := commonDirCmd.Output()
 	if err != nil {
 		return gitContext{}, fmt.Errorf("git show common dir for %q: %w", cwd, err)
 	}
+	commonDirOut = bytes.TrimSpace(commonDirOut)
 
-	branchOut, err := exec.Command( //nolint:gosec // G204: gitPath is from trusted lookup
-		gitPath,
-		"-C",
-		cwd,
-		"branch",
-		"--show-current",
-	).Output()
+	branchCmd := exec.Command("git", "branch", "--show-current")
+	branchCmd.Dir = safeCWD
+	branchOut, err := branchCmd.Output()
 	if err != nil {
 		return gitContext{}, fmt.Errorf("git show branch for %q: %w", cwd, err)
 	}
+	branchOut = bytes.TrimSpace(branchOut)
 
-	root := strings.TrimSpace(string(toplevelOut))
+	root := string(toplevelOut)
 	return gitContext{
-		branch:    strings.TrimSpace(string(branchOut)),
-		commonDir: strings.TrimSpace(string(commonDirOut)),
+		branch:    string(branchOut),
+		commonDir: string(commonDirOut),
 		repo:      filepath.Base(root),
 		root:      root,
 	}, nil
 }
 
-// findGit returns the path to the git binary.
-func (h *Handler) findGit() (string, error) {
-	if h.gitBinaryPath != "" {
-		return h.gitBinaryPath, nil
+var validGitExecDir = regexp.MustCompile(`^(/[^[:cntrl:]\x00]*)+$`)
+
+func sanitizeGitExecDir(cwd string) (string, error) {
+	if !filepath.IsAbs(cwd) {
+		return "", errors.New("working directory must be an absolute path")
 	}
-	path, err := exec.LookPath("git")
-	if err != nil {
-		return "", fmt.Errorf("finding git binary: %w", err)
+	cleaned := filepath.Clean(cwd)
+	if !validGitExecDir.MatchString(cleaned) {
+		return "", fmt.Errorf("working directory contains invalid characters: %q", cwd)
 	}
-	return path, nil
+	return cleaned, nil
 }
 
 func (h *Handler) findGH() (string, error) {
@@ -844,7 +853,7 @@ func (h *Handler) lookupPRInfo(cwd, branch string) (string, int) {
 		return "", 0
 	}
 
-	cmd := exec.Command( //nolint:gosec // G204: ghPath is from trusted lookup
+	cmd := exec.Command(
 		ghPath,
 		"pr",
 		"view",

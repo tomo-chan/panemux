@@ -1629,7 +1629,7 @@ func TestGetGitInfo_GitNotFound_IsGitFalse(t *testing.T) {
 		cwd:         dir,
 	})
 	h := NewHandler(defaultTestConfig(), mgr)
-	h.gitBinaryPath = "/nonexistent/git" // simulate git not found
+	h.gitExistsFn = func() error { return errors.New("git not found") }
 	r := setupRouterWithGitInfo(h)
 
 	rec := httptest.NewRecorder()
@@ -1640,6 +1640,21 @@ func TestGetGitInfo_GitNotFound_IsGitFalse(t *testing.T) {
 	var resp gitInfoResponse
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
 	assert.False(t, resp.IsGit)
+}
+
+func TestSanitizeGitExecDir_ValidAbsolutePath(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "repo")
+	require.NoError(t, os.MkdirAll(dir, 0755))
+
+	got, err := sanitizeGitExecDir(dir)
+	require.NoError(t, err)
+	assert.Equal(t, dir, got)
+}
+
+func TestSanitizeGitExecDir_RejectsRelativePath(t *testing.T) {
+	_, err := sanitizeGitExecDir("relative/path")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "absolute")
 }
 
 func TestGetDirectories_LocalPathReturnsDirectories(t *testing.T) {

@@ -29,11 +29,12 @@ type TmuxLocalSession struct {
 
 // NewTmuxLocal creates a new session that attaches to a local tmux session.
 func NewTmuxLocal(id, title, tmuxSession string) (*TmuxLocalSession, error) {
-	if tmuxSession == "" {
-		tmuxSession = "0"
+	validatedSession, err := validateTmuxSessionName(tmuxSession)
+	if err != nil {
+		return nil, err
 	}
 
-	cmd := exec.Command("tmux", "new-session", "-A", "-s", tmuxSession)
+	cmd := exec.Command("tmux", "new-session", "-A", "-s", validatedSession)
 	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 
@@ -47,7 +48,7 @@ func NewTmuxLocal(id, title, tmuxSession string) (*TmuxLocalSession, error) {
 	s := &TmuxLocalSession{
 		id:          id,
 		title:       title,
-		tmuxSession: tmuxSession,
+		tmuxSession: validatedSession,
 		state:       StateConnected,
 		cmd:         cmd,
 		ptmx:        ptmx,
@@ -104,12 +105,16 @@ func (s *TmuxLocalSession) Resize(cols, rows uint16) error {
 
 // GetCWD returns the current working directory of the active tmux pane.
 func (s *TmuxLocalSession) GetCWD() (string, error) {
-	out, err := exec.Command( //nolint:gosec // G204: tmuxSession is validated config for a tmux target
+	target, err := validateTmuxSessionName(s.tmuxSession)
+	if err != nil {
+		return "", err
+	}
+	out, err := exec.Command(
 		"tmux",
 		"display-message",
 		"-p",
 		"-t",
-		s.tmuxSession,
+		target,
 		"#{pane_current_path}",
 	).Output()
 	if err != nil {
@@ -121,12 +126,16 @@ func (s *TmuxLocalSession) GetCWD() (string, error) {
 // GetActiveWorkdir returns the working directory of the newest active Codex or
 // Claude descendant process under the active tmux pane, or empty string if none exists.
 func (s *TmuxLocalSession) GetActiveWorkdir() (string, error) {
-	out, err := exec.Command( //nolint:gosec // G204: tmuxSession is validated config for a tmux target
+	target, err := validateTmuxSessionName(s.tmuxSession)
+	if err != nil {
+		return "", err
+	}
+	out, err := exec.Command(
 		"tmux",
 		"display-message",
 		"-p",
 		"-t",
-		s.tmuxSession,
+		target,
 		"#{pane_pid}",
 	).Output()
 	if err != nil {
@@ -172,4 +181,17 @@ func (s *TmuxLocalSession) Close() error {
 		s.cmd.Process.Kill()
 	}
 	return nil
+}
+
+func validateTmuxSessionName(tmuxSession string) (string, error) {
+	if tmuxSession == "" {
+		tmuxSession = "0"
+	}
+	if !validTmuxSessionName.MatchString(tmuxSession) {
+		return "", fmt.Errorf(
+			"invalid tmux session name %q: must match ^[a-zA-Z0-9_.-]+$",
+			tmuxSession,
+		)
+	}
+	return tmuxSession, nil
 }
