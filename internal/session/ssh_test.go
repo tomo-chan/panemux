@@ -272,6 +272,25 @@ func TestActiveRemoteWorkdir_PrefersRemoteCodexSessionCWD(t *testing.T) {
 	assert.Equal(t, "/tmp/remote-worktree", cwd)
 }
 
+func TestActiveRemoteWorkdir_PrefersRemoteCodexExecCommandWorkdir(t *testing.T) {
+	sessionPath := "/home/user/.codex/sessions/2026/05/17/session.jsonl"
+	runner := &fakeSSHRunner{
+		outputs: map[string][]byte{
+			sshListProcessesCmd:                       []byte(" 100 1 sh\n 220 100 codex resume --last\n"),
+			fmt.Sprintf(sshOpenFilesCmdTemplate, 220): []byte(sessionPath + "\n"),
+			"cat " + shellQuotePath(sessionPath): []byte(
+				"{\"type\":\"session_meta\",\"payload\":{\"cwd\":\"/repo/main\"}}\n" +
+					"{\"type\":\"turn_context\",\"payload\":{\"cwd\":\"/repo/main\"}}\n" +
+					"{\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"exec_command\",\"arguments\":\"{\\\"cmd\\\":\\\"git status\\\",\\\"workdir\\\":\\\"/tmp/remote-worktree-from-command\\\"}\"}}\n",
+			),
+		},
+	}
+
+	cwd, err := activeRemoteWorkdir(runner, "/repo/main", 100)
+	require.NoError(t, err)
+	assert.Equal(t, "/tmp/remote-worktree-from-command", cwd)
+}
+
 func TestActiveRemoteWorkdir_FallsBackToRemoteDescendantCWD(t *testing.T) {
 	runner := &fakeSSHRunner{
 		outputs: map[string][]byte{
@@ -329,4 +348,25 @@ func TestTmuxSSHActiveWorkdir_UsesPanePIDAndBaseCWD(t *testing.T) {
 	cwd, err := tmuxSSHActiveWorkdir(runner, "demo")
 	require.NoError(t, err)
 	assert.Equal(t, "/tmp/remote-worktree", cwd)
+}
+
+func TestTmuxSSHActiveWorkdir_PrefersCodexExecCommandWorkdir(t *testing.T) {
+	sessionPath := "/home/user/.codex/sessions/2026/05/17/session.jsonl"
+	runner := &fakeSSHRunner{
+		outputs: map[string][]byte{
+			"tmux display-message -p -t 'demo' '#{pane_pid}'":          []byte("220\n"),
+			"tmux display-message -p -t 'demo' '#{pane_current_path}'": []byte("/repo/main\n"),
+			sshListProcessesCmd:                       []byte(" 220 1 zsh\n 230 220 codex resume --last\n"),
+			fmt.Sprintf(sshOpenFilesCmdTemplate, 230): []byte(sessionPath + "\n"),
+			"cat " + shellQuotePath(sessionPath): []byte(
+				"{\"type\":\"session_meta\",\"payload\":{\"cwd\":\"/repo/main\"}}\n" +
+					"{\"type\":\"turn_context\",\"payload\":{\"cwd\":\"/repo/main\"}}\n" +
+					"{\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"exec_command\",\"arguments\":\"{\\\"cmd\\\":\\\"go test ./...\\\",\\\"workdir\\\":\\\"/tmp/remote-tmux-worktree-from-command\\\"}\"}}\n",
+			),
+		},
+	}
+
+	cwd, err := tmuxSSHActiveWorkdir(runner, "demo")
+	require.NoError(t, err)
+	assert.Equal(t, "/tmp/remote-tmux-worktree-from-command", cwd)
 }

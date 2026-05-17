@@ -170,7 +170,15 @@ The override path is intentionally narrow:
 - SSH sessions scan the remote process list on the current SSH connection, and SSH+tmux sessions restrict that scan to the active remote tmux pane's process tree
 - only worktrees that belong to the same Git common dir as the pane's base repository are accepted
 
-For resumed Codex sessions, the local and SSH session implementations can inspect the open Codex session log under `~/.codex/sessions/...jsonl` and prefer the latest `turn_context.cwd` when available. This exists because a resumed interactive Codex process may keep its OS-level process cwd at the original pane directory while the live Codex session itself is operating against a different worktree.
+For interactive Codex sessions, all four session implementations (`local`, `ssh`, `tmux`, and `ssh_tmux`) may inspect the open Codex session log under `~/.codex/sessions/...jsonl` when the Codex process has that file open. Panemux currently prefers the latest `exec_command.arguments.workdir` recorded in `response_item` / `function_call` log entries, then falls back to `turn_context.cwd`, then `session_meta.cwd`.
+
+This ordering is intentional and reflects observed Codex behavior as of `codex-tui` `0.130.0`:
+
+- the interactive Codex process may keep its OS-level process cwd at the original pane directory
+- `session_meta.cwd` and later `turn_context.cwd` may also remain pinned to that original pane directory
+- individual tool calls still record their actual execution directory in `exec_command.arguments.workdir`
+
+Panemux treats that `workdir` field as the strongest available signal for the active worktree because it is the only one that changes when Codex executes tools inside a sibling Git worktree while the parent interactive process remains attached to the original pane directory. If a future Codex release changes this logging contract, compare new logs against these three fields before changing the resolver so behavior remains reviewable and intentional.
 
 ### `useWorkspaceAttentionMonitor`
 

@@ -457,7 +457,10 @@ When a pane moves to a different parent node, the component may be remounted by 
 - When a local, local tmux, SSH, or SSH+tmux pane has an active interactive `codex` or `claude` process working in a different Git worktree for the same repository, panemux prefers that agent worktree over the pane's base directory.
 - Only interactive agents are eligible for worktree override.
 - Non-interactive commands such as `codex exec`, `claude -p`, and `claude --print` must not affect the displayed Git or PR metadata.
-- For `codex resume` flows, panemux may derive the active worktree from the Codex session log metadata (`turn_context.cwd`, falling back to `session_meta.cwd`) when the process has the session log open.
+- For interactive Codex flows across all four pane types (`local`, `ssh`, `tmux`, and `ssh_tmux`), panemux may derive the active worktree from the Codex session log when the process has that log open.
+- Codex log resolution currently prefers the most recent `response_item.payload.arguments.workdir` from `exec_command` tool calls, then falls back to `turn_context.cwd`, then `session_meta.cwd`.
+- This ordering exists because the interactive Codex process and its thread metadata may stay on the original pane directory even while tool calls are executing inside a sibling Git worktree.
+- If future Codex versions change their session-log schema or start updating `turn_context.cwd` to the active worktree reliably, compare the three fields above before changing panemux's resolver order.
 - If the agent exits, no longer has an eligible worktree, or the resolved worktree is not a sibling worktree of the pane's current repository, panemux falls back to the pane's own working directory immediately.
 - For SSH panes, panemux resolves interactive agent processes from the remote process list on the current SSH connection.
 - For SSH+tmux panes, panemux resolves interactive agent processes only from the currently active remote tmux pane.

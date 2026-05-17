@@ -470,13 +470,22 @@ func parseCodexSessionCWD(data []byte) (string, error) {
 	type payloadWithCWD struct {
 		Cwd string `json:"cwd"`
 	}
+	type responseItemPayload struct {
+		Type      string `json:"type"`
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	}
+	type commandArguments struct {
+		Workdir string `json:"workdir"`
+	}
 	type record struct {
-		Type    string         `json:"type"`
-		Payload payloadWithCWD `json:"payload"`
+		Type    string          `json:"type"`
+		Payload json.RawMessage `json:"payload"`
 	}
 
 	var latestTurnCWD string
 	var sessionMetaCWD string
+	var latestExecWorkdir string
 	for scanner.Scan() {
 		var rec record
 		if err := json.Unmarshal(scanner.Bytes(), &rec); err != nil {
@@ -484,17 +493,38 @@ func parseCodexSessionCWD(data []byte) (string, error) {
 		}
 		switch rec.Type {
 		case "turn_context":
-			if rec.Payload.Cwd != "" {
-				latestTurnCWD = rec.Payload.Cwd
+			var payload payloadWithCWD
+			if err := json.Unmarshal(rec.Payload, &payload); err == nil && payload.Cwd != "" {
+				latestTurnCWD = payload.Cwd
 			}
 		case "session_meta":
-			if rec.Payload.Cwd != "" && sessionMetaCWD == "" {
-				sessionMetaCWD = rec.Payload.Cwd
+			var payload payloadWithCWD
+			if err := json.Unmarshal(rec.Payload, &payload); err == nil && payload.Cwd != "" && sessionMetaCWD == "" {
+				sessionMetaCWD = payload.Cwd
+			}
+		case "response_item":
+			var payload responseItemPayload
+			if err := json.Unmarshal(rec.Payload, &payload); err != nil {
+				continue
+			}
+			if payload.Type != "function_call" || payload.Name != "exec_command" || payload.Arguments == "" {
+				continue
+			}
+
+			var args commandArguments
+			if err := json.Unmarshal([]byte(payload.Arguments), &args); err == nil && args.Workdir != "" {
+				latestExecWorkdir = args.Workdir
 			}
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return "", fmt.Errorf("scan codex session log: %w", err)
+	}
+	// Codex may keep both process cwd and turn/session metadata pinned to the
+	// original pane directory while tool calls run inside a sibling worktree.
+	// The latest exec_command workdir is therefore the strongest signal.
+	if latestExecWorkdir != "" {
+		return latestExecWorkdir, nil
 	}
 	if latestTurnCWD != "" {
 		return latestTurnCWD, nil
