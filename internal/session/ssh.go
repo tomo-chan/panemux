@@ -48,6 +48,11 @@ type SSHSession struct {
 	mu             sync.RWMutex
 }
 
+type sshSessionRunner interface {
+	Output(cmd string) ([]byte, error)
+	Close() error
+}
+
 // SSHConfig holds parameters for establishing an SSH connection.
 type SSHConfig struct {
 	JumpHost       *SSHConfig // non-nil when ProxyJump is configured
@@ -679,6 +684,13 @@ const sshGetCWDCmd = `PID=$(pgrep -P $PPID -o 2>/dev/null) && [ -n "$PID" ] && `
 	`lsof -a -p $PID -d cwd -Fn 2>/dev/null | awk '/^n/{print substr($0,2)}'; } || ` +
 	`pwd`
 
+const sshListProcessesCmd = `ps -Ao pid=,ppid=,command=`
+const sshOpenFilesCmdTemplate = `{ ls -1 /proc/%[1]d/fd 2>/dev/null | ` +
+	`while read -r fd; do readlink /proc/%[1]d/fd/"$fd" 2>/dev/null; done; } || ` +
+	`{ lsof -a -p %[1]d -Fn 2>/dev/null | awk '/^n/{print substr($0,2)}'; }`
+const sshPIDCWDCmdTemplate = `{ readlink /proc/%[1]d/cwd 2>/dev/null || ` +
+	`lsof -a -p %[1]d -d cwd -Fn 2>/dev/null | awk '/^n/{print substr($0,2)}'; }`
+
 // GetCWD returns the current working directory of the interactive shell by
 // inspecting the sshd process tree. See sshGetCWDCmd for the full rationale.
 func (s *SSHSession) GetCWD() (string, error) {
@@ -692,4 +704,142 @@ func (s *SSHSession) GetCWD() (string, error) {
 		return "", fmt.Errorf("cwd over ssh: %w", err)
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// GetActiveWorkdir returns the working directory of the newest active
+// interactive Codex or Claude process on the SSH connection, or empty string
+// when none is active.
+func (s *SSHSession) GetActiveWorkdir() (string, error) {
+	sess, err := s.client.NewSession()
+	if err != nil {
+		return "", fmt.Errorf("new ssh session for active workdir: %w", err)
+	}
+	defer sess.Close()
+
+	baseCWD, err := s.GetCWD()
+	if err != nil {
+		return "", err
+	}
+
+	return activeRemoteWorkdir(sess, baseCWD, 0)
+}
+
+func activeRemoteWorkdir(runner sshSessionRunner, baseCWD string, rootPID int) (string, error) {
+	out, err := runner.Output(sshListProcessesCmd)
+	if err != nil {
+		return "", fmt.Errorf("list remote processes: %w", err)
+	}
+
+	processes, err := parsePSOutput(append([]byte("PID PPID COMMAND\n"), out...))
+	if err != nil {
+		return "", err
+	}
+
+	var agentPID int
+	var ok bool
+	if rootPID == 0 {
+		agentPID, ok = newestInteractiveAgentPID(processes)
+	} else {
+		agentPID, ok = newestInteractiveAgentDescendantPID(processes, rootPID)
+	}
+	if !ok {
+		return "", nil
+	}
+
+	if sessionCWD, err := remoteCodexSessionCWD(runner, processes, agentPID); err == nil && sessionCWD != "" {
+		return sessionCWD, nil
+	}
+
+	return resolveRemoteInteractiveAgentWorkdir(runner, processes, agentPID, baseCWD)
+}
+
+func newestInteractiveAgentPID(processes []processInfo) (int, bool) {
+	var matched int
+	var ok bool
+	for _, proc := range processes {
+		if isInteractiveAgentCommand(proc.Command) {
+			if !ok || proc.PID > matched {
+				matched = proc.PID
+				ok = true
+			}
+		}
+	}
+	return matched, ok
+}
+
+func resolveRemoteInteractiveAgentWorkdir(
+	runner sshSessionRunner,
+	processes []processInfo,
+	agentPID int,
+	baseCWD string,
+) (string, error) {
+	candidatePIDs := descendantPIDs(processes, agentPID)
+	sort.Slice(candidatePIDs, func(i, j int) bool {
+		return candidatePIDs[i] > candidatePIDs[j]
+	})
+
+	var agentCWD string
+	for _, pid := range candidatePIDs {
+		cwd, err := remotePIDCWD(runner, pid)
+		if err != nil || cwd == "" {
+			continue
+		}
+		if pid == agentPID {
+			agentCWD = cwd
+		}
+		if cwd != baseCWD {
+			return cwd, nil
+		}
+	}
+
+	if agentCWD != "" {
+		return agentCWD, nil
+	}
+	return "", nil
+}
+
+func remotePIDCWD(runner sshSessionRunner, pid int) (string, error) {
+	out, err := runner.Output(fmt.Sprintf(sshPIDCWDCmdTemplate, pid))
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func remoteCodexSessionCWD(runner sshSessionRunner, processes []processInfo, agentPID int) (string, error) {
+	proc, ok := processByPID(processes, agentPID)
+	if !ok || !isCodexCommand(proc.Command) {
+		return "", nil
+	}
+
+	paths, err := remoteOpenFiles(runner, agentPID)
+	if err != nil {
+		return "", err
+	}
+	sessionPath, ok := codexSessionPath(paths)
+	if !ok {
+		return "", nil
+	}
+
+	out, err := runner.Output("cat " + shellQuotePath(sessionPath))
+	if err != nil {
+		return "", err
+	}
+
+	return parseCodexSessionCWD(out)
+}
+
+func remoteOpenFiles(runner sshSessionRunner, pid int) ([]string, error) {
+	out, err := runner.Output(fmt.Sprintf(sshOpenFilesCmdTemplate, pid))
+	if err != nil {
+		return nil, err
+	}
+	paths := []string{}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			paths = append(paths, line)
+		}
+	}
+	return paths, nil
 }

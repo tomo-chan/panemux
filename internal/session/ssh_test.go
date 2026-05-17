@@ -4,6 +4,8 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/pem"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -222,6 +224,68 @@ func TestNewTmuxSSH_InvalidSessionName_Error(t *testing.T) {
 	_, err := NewTmuxSSH("id", "title", "foo;bar$(evil)", cfg)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid tmux session name")
+}
+
+type fakeSSHRunner struct {
+	outputs map[string][]byte
+	errs    map[string]error
+}
+
+func (f *fakeSSHRunner) Output(cmd string) ([]byte, error) {
+	if err := f.errs[cmd]; err != nil {
+		return nil, err
+	}
+	if out, ok := f.outputs[cmd]; ok {
+		return out, nil
+	}
+	return nil, errors.New("unexpected command: " + cmd)
+}
+
+func (f *fakeSSHRunner) Close() error { return nil }
+
+func TestActiveRemoteWorkdir_IgnoresNonInteractiveAgents(t *testing.T) {
+	runner := &fakeSSHRunner{
+		outputs: map[string][]byte{
+			sshListProcessesCmd: []byte(" 120 1 codex exec\n 130 1 claude -p\n"),
+		},
+	}
+
+	cwd, err := activeRemoteWorkdir(runner, "/repo/main", 0)
+	require.NoError(t, err)
+	assert.Empty(t, cwd)
+}
+
+func TestActiveRemoteWorkdir_PrefersRemoteCodexSessionCWD(t *testing.T) {
+	sessionPath := "/home/user/.codex/sessions/2026/05/17/session.jsonl"
+	runner := &fakeSSHRunner{
+		outputs: map[string][]byte{
+			sshListProcessesCmd:                       []byte(" 220 1 codex resume --last\n"),
+			fmt.Sprintf(sshOpenFilesCmdTemplate, 220): []byte(sessionPath + "\n"),
+			"cat " + shellQuotePath(sessionPath): []byte(
+				"{\"type\":\"session_meta\",\"payload\":{\"cwd\":\"/repo/main\"}}\n" +
+					"{\"type\":\"turn_context\",\"payload\":{\"cwd\":\"/tmp/remote-worktree\"}}\n",
+			),
+		},
+	}
+
+	cwd, err := activeRemoteWorkdir(runner, "/repo/main", 0)
+	require.NoError(t, err)
+	assert.Equal(t, "/tmp/remote-worktree", cwd)
+}
+
+func TestActiveRemoteWorkdir_FallsBackToRemoteDescendantCWD(t *testing.T) {
+	runner := &fakeSSHRunner{
+		outputs: map[string][]byte{
+			sshListProcessesCmd:                       []byte(" 220 1 codex\n 230 220 node helper\n"),
+			fmt.Sprintf(sshOpenFilesCmdTemplate, 220): []byte(""),
+			fmt.Sprintf(sshPIDCWDCmdTemplate, 230):    []byte("/tmp/remote-worktree\n"),
+			fmt.Sprintf(sshPIDCWDCmdTemplate, 220):    []byte("/repo/main\n"),
+		},
+	}
+
+	cwd, err := activeRemoteWorkdir(runner, "/repo/main", 0)
+	require.NoError(t, err)
+	assert.Equal(t, "/tmp/remote-worktree", cwd)
 }
 
 func TestKnownHostsAlgorithms_PlaintextEntry(t *testing.T) {

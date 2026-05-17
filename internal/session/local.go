@@ -2,6 +2,7 @@ package session
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -435,12 +436,15 @@ func codexSessionPath(paths []string) (string, bool) {
 }
 
 func readCodexSessionCWD(path string) (string, error) {
-	file, err := os.Open(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return "", fmt.Errorf("open codex session log %q: %w", path, err)
+		return "", fmt.Errorf("read codex session log %q: %w", path, err)
 	}
-	defer file.Close()
+	return parseCodexSessionCWD(data)
+}
 
+func parseCodexSessionCWD(data []byte) (string, error) {
+	scanner := bufio.NewScanner(bytes.NewReader(data))
 	type payloadWithCWD struct {
 		Cwd string `json:"cwd"`
 	}
@@ -451,7 +455,6 @@ func readCodexSessionCWD(path string) (string, error) {
 
 	var latestTurnCWD string
 	var sessionMetaCWD string
-	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		var rec record
 		if err := json.Unmarshal(scanner.Bytes(), &rec); err != nil {
@@ -469,7 +472,7 @@ func readCodexSessionCWD(path string) (string, error) {
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return "", fmt.Errorf("scan codex session log %q: %w", path, err)
+		return "", fmt.Errorf("scan codex session log: %w", err)
 	}
 	if latestTurnCWD != "" {
 		return latestTurnCWD, nil

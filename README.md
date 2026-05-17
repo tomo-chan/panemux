@@ -124,6 +124,7 @@ Common uses:
 - `tmux` and `ssh_tmux` panes automatically create the target tmux session if it does not already exist.
 - Set `cwd` on `local`, `ssh`, or `ssh_tmux` panes when you want the shell to start in a specific directory.
 - In the pane settings dialog, `Working Directory` can be chosen from a browsable directory tree for both local and SSH-backed panes. Hidden directories are available through a toggle.
+- Pane headers resolve Git and PR metadata from the live working context, including interactive `codex` and `claude` worktrees for both local and SSH-backed panes. `tmux` and `ssh_tmux` use the currently active tmux pane only.
 
 ---
 

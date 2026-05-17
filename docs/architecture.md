@@ -161,15 +161,16 @@ Why this hook:
 `GET /api/sessions/{id}/git-info` resolves repository metadata in two stages:
 
 - first, it asks the session for its live working directory
-- second, for local and local tmux sessions only, it may ask for an active interactive agent workdir override
+- second, it may ask for an active interactive agent workdir override
 
 The override path is intentionally narrow:
 
 - only interactive `codex` and `claude` processes are considered
-- only descendants of the pane's own shell process or active tmux pane process are considered
+- local and local tmux sessions only consider descendants of the pane's own shell process or active tmux pane process
+- SSH sessions scan the remote process list on the current SSH connection, and SSH+tmux sessions restrict that scan to the active remote tmux pane's process tree
 - only worktrees that belong to the same Git common dir as the pane's base repository are accepted
 
-For resumed Codex sessions, the local session implementation can inspect the open Codex session log under `~/.codex/sessions/...jsonl` and prefer the latest `turn_context.cwd` when available. This exists because a resumed interactive Codex process may keep its OS-level process cwd at the original pane directory while the live Codex session itself is operating against a different worktree.
+For resumed Codex sessions, the local and SSH session implementations can inspect the open Codex session log under `~/.codex/sessions/...jsonl` and prefer the latest `turn_context.cwd` when available. This exists because a resumed interactive Codex process may keep its OS-level process cwd at the original pane directory while the live Codex session itself is operating against a different worktree.
 
 ### `useWorkspaceAttentionMonitor`
 
