@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.16.0](https://github.com/tomo-chan/panemux/compare/v0.15.0...v0.16.0) (2026-05-17)
+
+
+### Features
+
+* show linked pull requests in pane headers ([#93](https://github.com/tomo-chan/panemux/issues/93)) ([a0cda2c](https://github.com/tomo-chan/panemux/commit/a0cda2c703c8705568658ae5f177a99406f0622b))
+
+
+### Bug Fixes
+
+* open VSCode in active agent worktree ([#94](https://github.com/tomo-chan/panemux/issues/94)) ([890e4a0](https://github.com/tomo-chan/panemux/commit/890e4a0555404e987a03c4fb793665dd67418b91))
+* resolve codex worktree git context across session types ([#95](https://github.com/tomo-chan/panemux/issues/95)) ([8b118cd](https://github.com/tomo-chan/panemux/commit/8b118cdcc5d9f647b56257ffdfa7e2a8845d7898))
+
 ## [0.15.0](https://github.com/tomo-chan/panemux/compare/v0.14.0...v0.15.0) (2026-05-16)
 
 
