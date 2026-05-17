@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.0](https://github.com/tomo-chan/panemux/compare/v0.16.0...v0.17.0) (2026-05-17)
+
+
+### Features
+
+* allow pane moves across workspaces ([#97](https://github.com/tomo-chan/panemux/issues/97)) ([fe55609](https://github.com/tomo-chan/panemux/commit/fe55609d4db21b0eb2f04da84efc7e9c47cbb685))
+
 ## [0.16.0](https://github.com/tomo-chan/panemux/compare/v0.15.0...v0.16.0) (2026-05-17)
 
 
