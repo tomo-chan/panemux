@@ -286,3 +286,30 @@ func TestActiveRemoteWorkdir_FallsBackToRemoteDescendantCWD(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "/tmp/remote-worktree", cwd)
 }
+
+func TestRemoteShellPID_ParsesShellProcess(t *testing.T) {
+	runner := &fakeSSHRunner{
+		outputs: map[string][]byte{
+			sshShellPIDCmd: []byte("220\n"),
+		},
+	}
+
+	pid, err := remoteShellPID(runner)
+	require.NoError(t, err)
+	assert.Equal(t, 220, pid)
+}
+
+func TestActiveRemoteWorkdir_RootPIDScopesRemoteAgents(t *testing.T) {
+	runner := &fakeSSHRunner{
+		outputs: map[string][]byte{
+			sshListProcessesCmd:                       []byte(" 100 1 sh\n 200 1 codex\n 220 100 codex\n 230 220 node helper\n"),
+			fmt.Sprintf(sshOpenFilesCmdTemplate, 220): []byte(""),
+			fmt.Sprintf(sshPIDCWDCmdTemplate, 230):    []byte("/tmp/remote-worktree\n"),
+			fmt.Sprintf(sshPIDCWDCmdTemplate, 220):    []byte("/repo/main\n"),
+		},
+	}
+
+	cwd, err := activeRemoteWorkdir(runner, "/repo/main", 100)
+	require.NoError(t, err)
+	assert.Equal(t, "/tmp/remote-worktree", cwd)
+}

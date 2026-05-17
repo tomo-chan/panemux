@@ -3,6 +3,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -25,20 +27,31 @@ import (
 )
 
 // Handler provides REST API endpoints.
+//
+//nolint:govet // keeps test injection hooks and binary-path overrides on one handler value
 type Handler struct {
 	cfg                     *config.Config
 	manager                 *session.Manager
+	sshConfigPath           string
+	codeBinaryPath          string // empty = auto-detect; overridden in tests
+	ghBinaryPath            string // empty = auto-detect; overridden in tests
 	createSession           func(*config.PaneConfig, map[string]config.SSHConnection) (session.Session, error)
 	detectLocalShellFn      func() (string, error)
 	detectRemoteShellFn     func(cfg session.SSHConfig) (string, error)
 	listLocalDirectoriesFn  func(path string, showHidden bool) (directoryBrowserResponse, error)
 	listRemoteDirectoriesFn func(cfg session.SSHConfig, path string, showHidden bool) (directoryBrowserResponse, error)
 	readDirFn               func(name string) ([]os.DirEntry, error)
-	gitExistsFn             func() error
-	sshConfigPath           string
-	codeBinaryPath          string // empty = auto-detect; overridden in tests
-	ghBinaryPath            string // empty = auto-detect; overridden in tests
 }
+
+var gitExistsFn = func() error {
+	_, err := exec.LookPath("git")
+	if err != nil {
+		return fmt.Errorf("finding git binary: %w", err)
+	}
+	return nil
+}
+
+var prLookupTimeout = 5 * time.Second
 
 type sshConnectionsResponse struct {
 	Names []string `json:"names"`
@@ -98,13 +111,6 @@ func NewHandler(cfg *config.Config, manager *session.Manager) *Handler {
 	h.readDirFn = os.ReadDir
 	h.listLocalDirectoriesFn = h.listLocalDirectories
 	h.listRemoteDirectoriesFn = listRemoteDirectories
-	h.gitExistsFn = func() error {
-		_, err := exec.LookPath("git")
-		if err != nil {
-			return fmt.Errorf("finding git binary: %w", err)
-		}
-		return nil
-	}
 	return h
 }
 
@@ -730,7 +736,7 @@ func (h *Handler) GetGitInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = h.gitExistsFn()
+	err = gitExistsFn()
 	if err != nil {
 		writeJSON(w, gitInfoResponse{IsGit: false})
 		return
@@ -806,7 +812,9 @@ func (h *Handler) inspectGitContext(cwd string) (gitContext, error) {
 	branchCmd.Dir = safeCWD
 	branchOut, err := branchCmd.Output()
 	if err != nil {
-		return gitContext{}, fmt.Errorf("git show branch for %q: %w", cwd, err)
+		// Detached HEAD returns non-zero for --show-current. Treat that as
+		// a valid git context with an empty branch instead of a fatal error.
+		branchOut = nil
 	}
 	branchOut = bytes.TrimSpace(branchOut)
 
@@ -853,7 +861,14 @@ func (h *Handler) lookupPRInfo(cwd, branch string) (string, int) {
 		return "", 0
 	}
 
-	cmd := exec.Command(
+	timeout := prLookupTimeout
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	cmd := exec.CommandContext(
+		ctx,
 		ghPath,
 		"pr",
 		"view",

@@ -607,6 +607,7 @@ const sshGetCWDCmd = `PID=$(pgrep -P $PPID -o 2>/dev/null) && [ -n "$PID" ] && `
 	`pwd`
 
 const sshListProcessesCmd = `ps -Ao pid=,ppid=,command=`
+const sshShellPIDCmd = `pgrep -P $PPID -o 2>/dev/null`
 const sshOpenFilesCmdTemplate = `{ ls -1 /proc/%[1]d/fd 2>/dev/null | ` +
 	`while read -r fd; do readlink /proc/%[1]d/fd/"$fd" 2>/dev/null; done; } || ` +
 	`{ lsof -a -p %[1]d -Fn 2>/dev/null | awk '/^n/{print substr($0,2)}'; }`
@@ -643,7 +644,27 @@ func (s *SSHSession) GetActiveWorkdir() (string, error) {
 		return "", err
 	}
 
-	return activeRemoteWorkdir(sess, baseCWD, 0)
+	rootPID, err := remoteShellPID(sess)
+	if err != nil {
+		return "", err
+	}
+
+	return activeRemoteWorkdir(sess, baseCWD, rootPID)
+}
+
+func remoteShellPID(runner sshSessionRunner) (int, error) {
+	out, err := runner.Output(sshShellPIDCmd)
+	if err != nil {
+		return 0, fmt.Errorf("remote shell pid: %w", err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil {
+		return 0, fmt.Errorf("parse remote shell pid: %w", err)
+	}
+	if pid <= 0 {
+		return 0, errors.New("remote shell pid missing")
+	}
+	return pid, nil
 }
 
 func activeRemoteWorkdir(runner sshSessionRunner, baseCWD string, rootPID int) (string, error) {

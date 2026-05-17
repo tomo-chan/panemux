@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
@@ -1561,6 +1562,43 @@ func TestGetGitInfo_PRLookupFails_StillReturnsGitInfo(t *testing.T) {
 	assert.Zero(t, resp.PRNumber)
 }
 
+func TestGetGitInfo_DetachedHead_StillReturnsGitInfo(t *testing.T) {
+	dir := initTempGitRepo(t)
+	out, err := exec.Command("git", "-C", dir, "checkout", "HEAD~0").CombinedOutput() //nolint:gosec // trusted test args
+	require.NoError(t, err, "git checkout detached head failed: %s", string(out))
+
+	mgr := session.NewManager()
+	mgr.Add(&mockCWDSession{
+		mockSession: mockSession{id: "detached", typ: session.TypeLocal},
+		cwd:         dir,
+	})
+	h := NewHandler(defaultTestConfig(), mgr)
+	r := setupRouterWithGitInfo(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/detached/git-info", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var resp gitInfoResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.True(t, resp.IsGit)
+	assert.Equal(t, "", resp.Branch)
+	assert.NotEmpty(t, resp.Repo)
+}
+
+func TestLookupPRInfo_TimesOutAndFallsBack(t *testing.T) {
+	h := NewHandler(defaultTestConfig(), session.NewManager())
+	h.ghBinaryPath = writeFakeGHBinary(t, "#!/bin/sh\nsleep 1\n")
+	prev := prLookupTimeout
+	prLookupTimeout = 10 * time.Millisecond
+	t.Cleanup(func() { prLookupTimeout = prev })
+
+	url, number := h.lookupPRInfo(t.TempDir(), "feature/slow")
+	assert.Empty(t, url)
+	assert.Zero(t, number)
+}
+
 func TestGetGitInfo_ActiveAgentWorkdir_PrefersWorktreeBranch(t *testing.T) {
 	repoDir := initTempGitRepo(t)
 	worktreeDir := addTempGitWorktree(t, repoDir, "feature/worktree-pr")
@@ -1629,7 +1667,9 @@ func TestGetGitInfo_GitNotFound_IsGitFalse(t *testing.T) {
 		cwd:         dir,
 	})
 	h := NewHandler(defaultTestConfig(), mgr)
-	h.gitExistsFn = func() error { return errors.New("git not found") }
+	prev := gitExistsFn
+	gitExistsFn = func() error { return errors.New("git not found") }
+	t.Cleanup(func() { gitExistsFn = prev })
 	r := setupRouterWithGitInfo(h)
 
 	rec := httptest.NewRecorder()
