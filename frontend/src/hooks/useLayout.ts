@@ -268,6 +268,8 @@ export function useLayout() {
       const targetWorkspace = workspaces.items.find((workspace) => workspace.id === placement.workspaceId)
       if (!sourceWorkspace || !targetWorkspace || sourceWorkspace.id === targetWorkspace.id) return
 
+      const previousWorkspaces = workspaces
+      const previousLayout = layout
       const sourceWithoutPane = removePaneFromTree(sourceWorkspace.layout, sourcePaneId)
       if (!sourceWithoutPane) {
         throw new Error('Cannot move the last pane out of a workspace')
@@ -289,8 +291,19 @@ export function useLayout() {
 
       setWorkspaces(updatedWorkspaces)
       setLayout(targetWithPane)
-      await saveWorkspaceLayout(sourceWorkspace.id, sourceWithoutPane)
-      await saveWorkspaceLayout(targetWorkspace.id, targetWithPane)
+      try {
+        await saveWorkspaceLayout(sourceWorkspace.id, sourceWithoutPane)
+        await saveWorkspaceLayout(targetWorkspace.id, targetWithPane)
+      } catch (err) {
+        setWorkspaces(previousWorkspaces)
+        setLayout(previousLayout)
+        try {
+          await saveWorkspaceLayout(sourceWorkspace.id, sourceWorkspace.layout)
+        } catch (rollbackErr) {
+          console.error(rollbackErr)
+        }
+        throw err
+      }
       return
     }
 

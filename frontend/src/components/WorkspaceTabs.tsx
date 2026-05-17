@@ -120,6 +120,12 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
     }
   }, [editingWorkspaceId])
 
+  useEffect(() => {
+    if (!dragSourcePaneId) {
+      setHoveredDropWorkspaceId(null)
+    }
+  }, [dragSourcePaneId])
+
   const startRename = (workspace: Workspace) => {
     if (!onRename) return
     renameFinalizedRef.current = false
@@ -280,12 +286,12 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
                 style={{
                   borderRight: !vertical ? '1px solid #333842' : undefined,
                   borderBottom: vertical ? '1px solid #333842' : undefined,
-                  backgroundColor: hoveredDropWorkspaceId === workspace.id
+                  backgroundColor: dragSourcePaneId && hoveredDropWorkspaceId === workspace.id
                     ? 'rgba(86, 156, 214, 0.24)'
                     : active
                       ? '#2f3540'
                       : 'transparent',
-                  boxShadow: hoveredDropWorkspaceId === workspace.id
+                  boxShadow: dragSourcePaneId && hoveredDropWorkspaceId === workspace.id
                     ? 'inset 0 0 0 1px rgba(137, 196, 244, 0.45)'
                     : 'none',
                   display: 'flex',
