@@ -99,7 +99,7 @@ Common uses:
 - **Close a pane** from its header controls; the layout collapses automatically.
 - **Restart a pane** with the on-screen button if the underlying session exits.
 - **Open a linked PR** from the pane header when the current Git branch already has a GitHub pull request. For local panes, panemux can prefer the live worktree of an interactive `codex` or `claude` session, including resumed Codex sessions, and falls back to the pane's own working directory after the agent exits.
-- **Open VS Code** from supported panes using the pane header action.
+- **Open VS Code** from supported panes using the pane header action. Like pane Git/PR metadata, this can prefer the live worktree of an interactive `codex` or `claude` session and falls back to the pane's own working directory after the agent exits.
 
 ### Notifications and attention prompts
 

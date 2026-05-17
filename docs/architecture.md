@@ -78,7 +78,7 @@ Workspace-related endpoints:
 - `PUT /api/workspaces/{id}/layout` updates a specific workspace layout.
 - `GET/PUT /api/layout` remain as compatibility endpoints for the active workspace layout.
 
-`POST /api/sessions/{id}/open-vscode` launches VSCode pointed at the session's live working directory. For local sessions it runs `code <cwd>`; for SSH sessions it runs `code --remote ssh-remote+<connection> <cwd>`. The binary is located via `exec.LookPath("code")` with a macOS app-bundle fallback.
+`POST /api/sessions/{id}/open-vscode` launches VSCode pointed at the session's live working directory. Like `GET /api/sessions/{id}/git-info`, it may prefer the worktree of an active interactive `codex` or `claude` process when that worktree belongs to the same repository. For local sessions it runs `code <cwd>`; for SSH sessions it runs `code --remote ssh-remote+<connection> <cwd>`. The binary is located via `exec.LookPath("code")` with a macOS app-bundle fallback.
 
 Why REST here:
 
