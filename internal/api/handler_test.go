@@ -1216,6 +1216,19 @@ func TestPostOpenVSCode_ActiveAgentWorkdir_PrefersWorktree(t *testing.T) {
 	assert.Equal(t, worktreeDir, resp.Cwd)
 }
 
+func TestPostOpenVSCode_EndedAgentFallsBackToPaneCWD(t *testing.T) {
+	repoDir := initTempGitRepo(t)
+	_ = addTempGitWorktree(t, repoDir, "feature/open-in-worktree")
+
+	resp := postOpenVSCodeOK(t, "local-fallback", &mockCWDSession{
+		mockSession:   mockSession{id: "local-fallback", typ: session.TypeLocal},
+		activeWorkdir: "",
+		cwd:           repoDir,
+	})
+
+	assert.Equal(t, repoDir, resp.Cwd)
+}
+
 func postOpenVSCodeOK(t *testing.T, id string, sess session.Session) openVSCodeResponse {
 	t.Helper()
 
