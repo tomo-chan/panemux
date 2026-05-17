@@ -17,6 +17,10 @@ import (
 	"github.com/creack/pty"
 )
 
+var agentCommandPattern = regexp.MustCompile(`(?i)\b(codex|claude)\b`)
+var listProcessesFn = listProcesses
+var getPIDCWDFn = getPIDCWD
+
 // validShellPath matches a valid absolute shell path.
 // Only alphanumeric characters, dots, underscores, hyphens, and slashes are permitted.
 // This character allowlist is the sanitizer CodeQL requires for go/command-injection.
@@ -120,9 +124,33 @@ func (s *LocalSession) GetCWD() (string, error) {
 	if s.pid == 0 {
 		return "", errors.New("session has no PID")
 	}
+	return getPIDCWD(s.pid)
+}
+
+// GetActiveWorkdir returns the working directory of the newest active Codex or
+// Claude descendant process, or an empty string when none is running.
+func (s *LocalSession) GetActiveWorkdir() (string, error) {
+	if s.pid == 0 {
+		return "", errors.New("session has no PID")
+	}
+
+	processes, err := listProcessesFn()
+	if err != nil {
+		return "", err
+	}
+
+	pid, ok := newestMatchingDescendantPID(processes, s.pid, agentCommandPattern)
+	if !ok {
+		return "", nil
+	}
+
+	return getPIDCWDFn(pid)
+}
+
+func getPIDCWD(pid int) (string, error) {
 	switch runtime.GOOS {
 	case "linux":
-		return os.Readlink("/proc/" + strconv.Itoa(s.pid) + "/cwd")
+		return os.Readlink("/proc/" + strconv.Itoa(pid) + "/cwd")
 	case "darwin":
 		// -a ANDs the -p and -d conditions; without -a they are OR'd, which
 		// causes -d cwd to dump the cwd of every process on the system.
@@ -130,7 +158,7 @@ func (s *LocalSession) GetCWD() (string, error) {
 			"lsof",
 			"-a",
 			"-p",
-			strconv.Itoa(s.pid),
+			strconv.Itoa(pid),
 			"-d",
 			"cwd",
 			"-Fn",
@@ -154,6 +182,78 @@ func (s *LocalSession) GetCWD() (string, error) {
 	default:
 		return "", fmt.Errorf("GetCWD not supported on %s", runtime.GOOS)
 	}
+}
+
+type processInfo struct {
+	Command string
+	PID     int
+	PPID    int
+}
+
+func listProcesses() ([]processInfo, error) {
+	out, err := exec.Command("ps", "-Ao", "pid,ppid,command").Output()
+	if err != nil {
+		return nil, fmt.Errorf("ps: %w", err)
+	}
+	return parsePSOutput(out)
+}
+
+func parsePSOutput(out []byte) ([]processInfo, error) {
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(lines) < 2 {
+		return nil, errors.New("ps output missing process rows")
+	}
+
+	processes := make([]processInfo, 0, len(lines)-1)
+	for _, line := range lines[1:] {
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+
+		pid, err := strconv.Atoi(fields[0])
+		if err != nil {
+			return nil, fmt.Errorf("parse pid %q: %w", fields[0], err)
+		}
+		ppid, err := strconv.Atoi(fields[1])
+		if err != nil {
+			return nil, fmt.Errorf("parse ppid %q: %w", fields[1], err)
+		}
+
+		processes = append(processes, processInfo{
+			PID:     pid,
+			PPID:    ppid,
+			Command: strings.Join(fields[2:], " "),
+		})
+	}
+
+	return processes, nil
+}
+
+func newestMatchingDescendantPID(processes []processInfo, rootPID int, pattern *regexp.Regexp) (int, bool) {
+	children := make(map[int][]processInfo)
+	for _, proc := range processes {
+		children[proc.PPID] = append(children[proc.PPID], proc)
+	}
+
+	stack := append([]processInfo(nil), children[rootPID]...)
+	var matched int
+	var ok bool
+
+	for len(stack) > 0 {
+		proc := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		stack = append(stack, children[proc.PID]...)
+
+		if pattern.MatchString(proc.Command) {
+			if !ok || proc.PID > matched {
+				matched = proc.PID
+				ok = true
+			}
+		}
+	}
+
+	return matched, ok
 }
 
 // validateShell ensures the shell path is safe to execute.

@@ -1,10 +1,12 @@
 package session
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -114,6 +116,42 @@ func (s *TmuxLocalSession) GetCWD() (string, error) {
 		return "", fmt.Errorf("tmux display-message: %w", err)
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// GetActiveWorkdir returns the working directory of the newest active Codex or
+// Claude descendant process under the active tmux pane, or empty string if none exists.
+func (s *TmuxLocalSession) GetActiveWorkdir() (string, error) {
+	out, err := exec.Command( //nolint:gosec // G204: tmuxSession is validated config for a tmux target
+		"tmux",
+		"display-message",
+		"-p",
+		"-t",
+		s.tmuxSession,
+		"#{pane_pid}",
+	).Output()
+	if err != nil {
+		return "", fmt.Errorf("tmux pane pid: %w", err)
+	}
+
+	pid, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil {
+		return "", fmt.Errorf("parse tmux pane pid: %w", err)
+	}
+	if pid == 0 {
+		return "", errors.New("tmux pane pid missing")
+	}
+
+	processes, err := listProcessesFn()
+	if err != nil {
+		return "", err
+	}
+
+	agentPID, ok := newestMatchingDescendantPID(processes, pid, agentCommandPattern)
+	if !ok {
+		return "", nil
+	}
+
+	return getPIDCWDFn(agentPID)
 }
 
 func (s *TmuxLocalSession) Close() error {

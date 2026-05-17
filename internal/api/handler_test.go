@@ -11,10 +11,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
@@ -1141,11 +1139,16 @@ func TestPostSSHConfigHost_InvalidBody_400(t *testing.T) {
 //nolint:govet // test helper layout is not performance-sensitive
 type mockCWDSession struct {
 	mockSession
-	cwd    string
-	cwdErr error
+	activeWorkdir string
+	activeErr     error
+	cwd           string
+	cwdErr        error
 }
 
 func (m *mockCWDSession) GetCWD() (string, error) { return m.cwd, m.cwdErr }
+func (m *mockCWDSession) GetActiveWorkdir() (string, error) {
+	return m.activeWorkdir, m.activeErr
+}
 
 // mockSSHCWDSession is a mockSession that implements both CWDGetter and SSHConnNamer.
 //
@@ -1558,24 +1561,16 @@ func TestGetGitInfo_PRLookupFails_StillReturnsGitInfo(t *testing.T) {
 	assert.Zero(t, resp.PRNumber)
 }
 
-func TestGetGitInfo_WorktreePathInSessionHistory_PrefersWorktreeBranch(t *testing.T) {
+func TestGetGitInfo_ActiveAgentWorkdir_PrefersWorktreeBranch(t *testing.T) {
 	repoDir := initTempGitRepo(t)
 	worktreeDir := addTempGitWorktree(t, repoDir, "feature/worktree-pr")
 
 	mgr := session.NewManager()
-	sess := &mockCWDSession{
-		mockSession: mockSession{id: "local-worktree", typ: session.TypeLocal},
-		cwd:         repoDir,
-	}
-	mgr.Add(sess)
-
-	_, err := sess.Write([]byte("git worktree add " + worktreeDir + " -b feature/worktree-pr\n"))
-	require.NoError(t, err)
-
-	require.Eventually(t, func() bool {
-		snapshot, ok := mgr.Snapshot("local-worktree")
-		return ok && strings.Contains(string(snapshot), worktreeDir)
-	}, time.Second, 10*time.Millisecond)
+	mgr.Add(&mockCWDSession{
+		mockSession:   mockSession{id: "local-worktree", typ: session.TypeLocal},
+		activeWorkdir: worktreeDir,
+		cwd:           repoDir,
+	})
 
 	h := NewHandler(defaultTestConfig(), mgr)
 	h.ghBinaryPath = writeFakeGHBinary(
@@ -1595,6 +1590,35 @@ func TestGetGitInfo_WorktreePathInSessionHistory_PrefersWorktreeBranch(t *testin
 	assert.Equal(t, "feature/worktree-pr", resp.Branch)
 	assert.Equal(t, "https://github.com/example/panemux/pull/456", resp.PRURL)
 	assert.Equal(t, 456, resp.PRNumber)
+}
+
+func TestGetGitInfo_EndedAgentFallsBackToPaneCWD(t *testing.T) {
+	repoDir := initTempGitRepo(t)
+	_ = addTempGitWorktree(t, repoDir, "feature/worktree-pr")
+
+	mgr := session.NewManager()
+	mgr.Add(&mockCWDSession{
+		mockSession:   mockSession{id: "local-fallback", typ: session.TypeLocal},
+		activeWorkdir: "",
+		cwd:           repoDir,
+	})
+
+	h := NewHandler(defaultTestConfig(), mgr)
+	h.ghBinaryPath = writeFakeGHBinary(
+		t,
+		"#!/bin/sh\necho '{\"url\":\"https://github.com/example/panemux/pull/789\",\"number\":789}'\n",
+	)
+	r := setupRouterWithGitInfo(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/local-fallback/git-info", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var resp gitInfoResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.True(t, resp.IsGit)
+	assert.Equal(t, "main", resp.Branch)
 }
 
 func TestGetGitInfo_GitNotFound_IsGitFalse(t *testing.T) {

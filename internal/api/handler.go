@@ -87,9 +87,6 @@ type directoryBrowserResponse struct {
 }
 
 var validHostName = regexp.MustCompile(`^[a-zA-Z0-9_.\-]+$`)
-var absolutePathPattern = regexp.MustCompile(`/[A-Za-z0-9._\-/]+`)
-var worktreeHintPattern = regexp.MustCompile(`(?i)\b(worktree|working directory|workdir|cwd)\b`)
-var ansiPattern = regexp.MustCompile(`\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\))`)
 
 // NewHandler creates a new API handler.
 func NewHandler(cfg *config.Config, manager *session.Manager) *Handler {
@@ -726,7 +723,7 @@ func (h *Handler) GetGitInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	targetCWD := h.resolveGitInfoCWD(id, gitPath, cwd)
+	targetCWD := h.resolveGitInfoCWD(sess, gitPath, cwd)
 	ctx, err := h.inspectGitContext(gitPath, targetCWD)
 	if err != nil {
 		writeJSON(w, gitInfoResponse{IsGit: false})
@@ -743,25 +740,28 @@ func (h *Handler) GetGitInfo(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h *Handler) resolveGitInfoCWD(sessionID, gitPath, cwd string) string {
+func (h *Handler) resolveGitInfoCWD(sess session.Session, gitPath, cwd string) string {
 	baseCtx, err := h.inspectGitContext(gitPath, cwd)
 	if err != nil {
 		return cwd
 	}
 
-	snapshot, ok := h.manager.Snapshot(sessionID)
-	if !ok || len(snapshot) == 0 {
+	activeGetter, ok := sess.(session.ActiveWorkdirGetter)
+	if !ok {
 		return cwd
 	}
 
-	for _, candidate := range worktreePathCandidates(snapshot) {
-		ctx, err := h.inspectGitContext(gitPath, candidate)
-		if err != nil {
-			continue
-		}
-		if ctx.commonDir == baseCtx.commonDir && ctx.root != baseCtx.root {
-			return candidate
-		}
+	candidate, err := activeGetter.GetActiveWorkdir()
+	if err != nil || candidate == "" {
+		return cwd
+	}
+
+	ctx, err := h.inspectGitContext(gitPath, candidate)
+	if err != nil {
+		return cwd
+	}
+	if ctx.commonDir == baseCtx.commonDir && ctx.root != baseCtx.root {
+		return candidate
 	}
 
 	return cwd
@@ -809,34 +809,6 @@ func (h *Handler) inspectGitContext(gitPath, cwd string) (gitContext, error) {
 		repo:      filepath.Base(root),
 		root:      root,
 	}, nil
-}
-
-func worktreePathCandidates(snapshot []byte) []string {
-	lines := strings.Split(stripANSI(string(snapshot)), "\n")
-	candidates := make([]string, 0, 8)
-	seen := make(map[string]struct{})
-
-	for i := len(lines) - 1; i >= 0; i-- {
-		line := lines[i]
-		if !worktreeHintPattern.MatchString(line) {
-			continue
-		}
-		matches := absolutePathPattern.FindAllString(line, -1)
-		for j := len(matches) - 1; j >= 0; j-- {
-			candidate := filepath.Clean(matches[j])
-			if _, ok := seen[candidate]; ok {
-				continue
-			}
-			seen[candidate] = struct{}{}
-			candidates = append(candidates, candidate)
-		}
-	}
-
-	return candidates
-}
-
-func stripANSI(value string) string {
-	return ansiPattern.ReplaceAllString(value, "")
 }
 
 // findGit returns the path to the git binary.

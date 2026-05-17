@@ -1,6 +1,7 @@
 package session
 
 import (
+	"errors"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -116,6 +117,95 @@ func TestLocalSessionGetCWD(t *testing.T) {
 	cwd, err := sess.GetCWD()
 	require.NoError(t, err)
 	assert.NotEmpty(t, cwd)
+}
+
+func TestParsePSOutput(t *testing.T) {
+	processes, err := parsePSOutput([]byte("  PID  PPID COMMAND\n  101   10 /bin/zsh\n  202  101 codex exec\n"))
+	require.NoError(t, err)
+	require.Len(t, processes, 2)
+	assert.Equal(t, 101, processes[0].PID)
+	assert.Equal(t, 10, processes[0].PPID)
+	assert.Equal(t, "/bin/zsh", processes[0].Command)
+	assert.Equal(t, "codex exec", processes[1].Command)
+}
+
+func TestParsePSOutput_InvalidPID(t *testing.T) {
+	_, err := parsePSOutput([]byte("PID PPID COMMAND\nabc 1 codex\n"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "parse pid")
+}
+
+func TestNewestMatchingDescendantPID(t *testing.T) {
+	processes := []processInfo{
+		{PID: 100, PPID: 1, Command: "/bin/zsh"},
+		{PID: 110, PPID: 100, Command: "git status"},
+		{PID: 120, PPID: 100, Command: "codex exec"},
+		{PID: 130, PPID: 120, Command: "node helper"},
+		{PID: 140, PPID: 100, Command: "claude"},
+	}
+
+	pid, ok := newestMatchingDescendantPID(processes, 100, agentCommandPattern)
+	require.True(t, ok)
+	assert.Equal(t, 140, pid)
+}
+
+func TestNewestMatchingDescendantPID_NoAgent(t *testing.T) {
+	processes := []processInfo{
+		{PID: 100, PPID: 1, Command: "/bin/zsh"},
+		{PID: 110, PPID: 100, Command: "git status"},
+	}
+
+	pid, ok := newestMatchingDescendantPID(processes, 100, agentCommandPattern)
+	assert.False(t, ok)
+	assert.Zero(t, pid)
+}
+
+func TestGetActiveWorkdir_NoDescendantMatchReturnsEmpty(t *testing.T) {
+	sess := &LocalSession{pid: 100}
+
+	originalListProcesses := listProcessesFn
+	originalGetPIDCWD := getPIDCWDFn
+	t.Cleanup(func() {
+		listProcessesFn = originalListProcesses
+		getPIDCWDFn = originalGetPIDCWD
+	})
+
+	listProcessesFn = func() ([]processInfo, error) {
+		return []processInfo{{PID: 110, PPID: 100, Command: "git status"}}, nil
+	}
+	getPIDCWDFn = func(pid int) (string, error) {
+		return "", errors.New("should not be called")
+	}
+
+	cwd, err := sess.GetActiveWorkdir()
+	require.NoError(t, err)
+	assert.Empty(t, cwd)
+}
+
+func TestGetActiveWorkdir_ReturnsAgentDescendantCWD(t *testing.T) {
+	sess := &LocalSession{pid: 100}
+
+	originalListProcesses := listProcessesFn
+	originalGetPIDCWD := getPIDCWDFn
+	t.Cleanup(func() {
+		listProcessesFn = originalListProcesses
+		getPIDCWDFn = originalGetPIDCWD
+	})
+
+	listProcessesFn = func() ([]processInfo, error) {
+		return []processInfo{
+			{PID: 110, PPID: 100, Command: "/bin/zsh"},
+			{PID: 220, PPID: 110, Command: "codex exec"},
+		}, nil
+	}
+	getPIDCWDFn = func(pid int) (string, error) {
+		assert.Equal(t, 220, pid)
+		return "/tmp/panemux-pane-pr-link", nil
+	}
+
+	cwd, err := sess.GetActiveWorkdir()
+	require.NoError(t, err)
+	assert.Equal(t, "/tmp/panemux-pane-pr-link", cwd)
 }
 
 func TestValidateShell_InEtcShells_OK(t *testing.T) {

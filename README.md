@@ -98,7 +98,7 @@ Common uses:
 - **Move a pane** by dragging the handle in its header; drop it on a workspace edge to create a new outer split, or on another pane edge / divider to insert it there.
 - **Close a pane** from its header controls; the layout collapses automatically.
 - **Restart a pane** with the on-screen button if the underlying session exits.
-- **Open a linked PR** from the pane header when the current Git branch already has a GitHub pull request. If an agent such as Codex or Claude is working in a separate `git worktree`, panemux prefers that worktree branch when it can detect the path from recent pane output.
+- **Open a linked PR** from the pane header when the current Git branch already has a GitHub pull request. If an agent such as Codex or Claude is actively working in a separate `git worktree`, panemux prefers that agent process's current worktree and falls back to the pane's own working directory after the agent exits.
 - **Open VS Code** from supported panes using the pane header action.
 
 ### Notifications and attention prompts

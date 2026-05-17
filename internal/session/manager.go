@@ -81,17 +81,6 @@ func (m *Manager) Subscribe(id string) ([]byte, <-chan []byte, func(), bool) {
 	return snapshot, stream, unsubscribe, true
 }
 
-// Snapshot returns the recent buffered output for a session.
-func (m *Manager) Snapshot(id string) ([]byte, bool) {
-	m.mu.RLock()
-	entry, ok := m.sessions[id]
-	m.mu.RUnlock()
-	if !ok {
-		return nil, false
-	}
-	return entry.snapshot(), true
-}
-
 // List returns all current sessions.
 func (m *Manager) List() []Session {
 	m.mu.RLock()
@@ -198,12 +187,6 @@ func (m *managedSession) subscribe() ([]byte, <-chan []byte, func()) {
 	}
 
 	return snapshot, ch, unsubscribe
-}
-
-func (m *managedSession) snapshot() []byte {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return append([]byte(nil), m.history...)
 }
 
 func (m *managedSession) closeSubscribers() {
