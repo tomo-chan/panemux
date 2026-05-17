@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { DetectShellResponseSchema, DisplayConfig, DisplayConfigSchema, LayoutNode, PaneConfig, TabPosition, WorkspacesResponse, WorkspacesResponseSchema, WorkspaceTabPositionRequestSchema } from '../schemas'
-import { PaneEdge, findPaneById, generatePaneId, generateTmuxSessionName, insertPaneAtWorkspaceEdge, insertPaneBesideTargetPane, movePaneBesideTargetPane, movePaneToWorkspaceEdge, removePaneFromTree, splitPaneInTree, swapPanesInTree } from '../utils/layoutTree'
+import { PaneEdge, findPaneById, generatePaneId, generateTmuxSessionName, insertPaneAtWorkspaceEdge, insertPaneBesideTargetPane, layoutContainsPane, movePaneBesideTargetPane, movePaneToWorkspaceEdge, removePaneFromTree, splitPaneInTree, swapPanesInTree } from '../utils/layoutTree'
 
-export type PanePlacement =
-  | { type: 'workspace-edge'; edge: PaneEdge }
-  | { type: 'pane-edge'; targetPaneId: string; edge: PaneEdge }
+type WorkspaceEdgePlacement = { type: 'workspace-edge'; edge: PaneEdge }
+type PaneEdgePlacement = { type: 'pane-edge'; targetPaneId: string; edge: PaneEdge }
+type WorkspaceTabPlacement = { type: 'workspace-tab'; workspaceId: string }
+
+export type CreatePanePlacement = WorkspaceEdgePlacement | PaneEdgePlacement
+export type MovePanePlacement = CreatePanePlacement | WorkspaceTabPlacement
 
 export function useLayout() {
   const [layout, setLayout] = useState<LayoutNode | null>(null)
@@ -234,7 +237,7 @@ export function useLayout() {
     [layout, saveLayout],
   )
 
-  const createPane = useCallback(async (pane: PaneConfig, placement: PanePlacement) => {
+  const createPane = useCallback(async (pane: PaneConfig, placement: CreatePanePlacement) => {
     if (!layout) return
     const paneWithDefaults = await ensurePaneDefaults(pane)
     setError(null)
@@ -256,18 +259,75 @@ export function useLayout() {
     await saveLayout(newLayout, true)
   }, [ensurePaneDefaults, layout, saveLayout])
 
-  const movePane = useCallback(async (sourcePaneId: string, placement: PanePlacement) => {
-    if (!layout) return
+  const movePane = useCallback(async (sourcePaneId: string, placement: MovePanePlacement) => {
+    if (!layout || !workspaces) return
     setError(null)
+
+    if (placement.type === 'workspace-tab') {
+      const sourceWorkspace = workspaces.items.find((workspace) => layoutContainsPane(workspace.layout, sourcePaneId))
+      const targetWorkspace = workspaces.items.find((workspace) => workspace.id === placement.workspaceId)
+      if (!sourceWorkspace || !targetWorkspace || sourceWorkspace.id === targetWorkspace.id) return
+
+      const previousWorkspaces = workspaces
+      const previousLayout = layout
+      const sourceWithoutPane = removePaneFromTree(sourceWorkspace.layout, sourcePaneId)
+      if (!sourceWithoutPane) {
+        throw new Error('Cannot move the last pane out of a workspace')
+      }
+
+      const sourcePane = findPaneById(sourceWorkspace.layout, sourcePaneId)
+      if (!sourcePane) return
+
+      const targetWithPane = insertPaneAtWorkspaceEdge(targetWorkspace.layout, 'right', sourcePane)
+      const updatedWorkspaces: WorkspacesResponse = {
+        ...workspaces,
+        active: targetWorkspace.id,
+        items: workspaces.items.map((workspace) => {
+          if (workspace.id === sourceWorkspace.id) return { ...workspace, layout: sourceWithoutPane }
+          if (workspace.id === targetWorkspace.id) return { ...workspace, layout: targetWithPane }
+          return workspace
+        }),
+      }
+
+      setWorkspaces(updatedWorkspaces)
+      setLayout(targetWithPane)
+      try {
+        await saveWorkspaceLayout(sourceWorkspace.id, sourceWithoutPane)
+        await saveWorkspaceLayout(targetWorkspace.id, targetWithPane)
+      } catch (err) {
+        setWorkspaces(previousWorkspaces)
+        setLayout(previousLayout)
+        try {
+          await saveWorkspaceLayout(sourceWorkspace.id, sourceWorkspace.layout)
+        } catch (rollbackErr) {
+          console.error(rollbackErr)
+          throw new Error('Move failed and rollback also failed. Reload to sync.')
+        }
+        throw err
+      }
+      return
+    }
+
     const newLayout = placement.type === 'workspace-edge'
       ? movePaneToWorkspaceEdge(layout, sourcePaneId, placement.edge)
       : movePaneBesideTargetPane(layout, sourcePaneId, placement.targetPaneId, placement.edge)
     setLayout(newLayout)
     setWorkspaces((current) => current ? replaceActiveWorkspaceLayout(current, newLayout) : current)
     await saveLayout(newLayout, true)
-  }, [layout, saveLayout])
+  }, [layout, saveLayout, workspaces])
 
   return { layout, workspaces, displayConfig, error, updateSizes, splitPane, closePane, swapPanes, createPane, movePane, setActiveWorkspace, addWorkspace, deleteWorkspace, renameWorkspace, setWorkspaceTabPosition }
+}
+
+async function saveWorkspaceLayout(workspaceID: string, updatedLayout: LayoutNode) {
+  const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceID)}/layout`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(updatedLayout),
+  })
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`)
+  }
 }
 
 function replaceActiveWorkspaceLayout(workspaces: WorkspacesResponse, layout: LayoutNode): WorkspacesResponse {

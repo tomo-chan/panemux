@@ -431,6 +431,7 @@ When a pane moves to a different parent node, the component may be remounted by 
 - The original pane keeps its current visible terminal contents when split; it must not go blank or reset to a fresh prompt while the new sibling pane is created.
 - Closing a pane calls `DELETE /api/sessions/{id}`, removes the pane from the tree, collapses parents with a single child, and renormalizes sizes to total `100`.
 - Moving a pane calls the workspace layout save path only; it does not call session create or delete APIs.
+- Dropping a pane on another workspace tab moves it into that workspace, inserts it at the destination workspace's right edge, persists both affected workspace layouts, and switches the active workspace to the destination.
 
 ### New terminal creation
 

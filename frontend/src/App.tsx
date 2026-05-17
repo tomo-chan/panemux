@@ -10,7 +10,7 @@ import { useBrowserNotificationPermission } from './hooks/useBrowserNotification
 import { DisplayConfig } from './types'
 import { TERMINAL_FONT_FAMILY } from './utils/fonts'
 import { findPaneById, generatePaneId, layoutContainsPane } from './utils/layoutTree'
-import type { PanePlacement } from './hooks/useLayout'
+import type { MovePanePlacement } from './hooks/useLayout'
 import type { LayoutChild, LayoutNode, SSHConfigHost } from './schemas'
 
 const DEFAULT_DISPLAY: DisplayConfig = { show_header: true, show_status_bar: true }
@@ -129,7 +129,7 @@ export const App: React.FC = () => {
     })
   }, [createPane])
 
-  const handleMovePane = useCallback((sourcePaneId: string, placement: PanePlacement) => {
+  const handleMovePane = useCallback((sourcePaneId: string, placement: MovePanePlacement) => {
     setMovePaneError(null)
     void movePane(sourcePaneId, placement).catch((err) => {
       setMovePaneError(err instanceof Error ? err.message : 'Something went wrong')
@@ -214,6 +214,11 @@ export const App: React.FC = () => {
             workspaces={workspaces.items}
             activeWorkspaceId={workspaces.active}
             tabPosition={workspaces.tab_position}
+            dragSourcePaneId={dragSourcePaneId}
+            onMovePaneToWorkspace={(sourcePaneId, workspaceId) => {
+              handleMovePane(sourcePaneId, { type: 'workspace-tab', workspaceId })
+              setDragSourcePaneId(null)
+            }}
             onSelect={setActiveWorkspace}
             attentionWorkspaceIds={attentionWorkspaceIds}
             onClearAttention={clearWorkspaceAttention}

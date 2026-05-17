@@ -99,6 +99,86 @@ describe('WorkspaceTabs', () => {
     expect(onSelect).toHaveBeenCalledWith('ops')
   })
 
+  it('moves a dragged pane into another workspace when the tab receives a drop', () => {
+    const onMovePaneToWorkspace = vi.fn()
+    const dataTransfer = { dropEffect: 'none' }
+    render(
+      <WorkspaceTabs
+        workspaces={workspaces}
+        activeWorkspaceId="dev"
+        tabPosition="top"
+        dragSourcePaneId="pane-source"
+        onMovePaneToWorkspace={onMovePaneToWorkspace}
+        onSelect={() => {}}
+      />,
+    )
+
+    const tab = screen.getByRole('tab', { name: 'Ops' })
+    fireEvent.dragOver(tab, { dataTransfer })
+    fireEvent.drop(tab, { dataTransfer })
+
+    expect(onMovePaneToWorkspace).toHaveBeenCalledWith('pane-source', 'ops')
+  })
+
+  it('moves a dragged pane into another workspace on pointer drag release', () => {
+    const onMovePaneToWorkspace = vi.fn()
+    render(
+      <WorkspaceTabs
+        workspaces={workspaces}
+        activeWorkspaceId="dev"
+        tabPosition="top"
+        dragSourcePaneId="pane-source"
+        onMovePaneToWorkspace={onMovePaneToWorkspace}
+        onSelect={() => {}}
+      />,
+    )
+
+    const tab = screen.getByRole('tab', { name: 'Ops' })
+    fireEvent.mouseEnter(tab)
+    fireEvent.mouseUp(tab)
+
+    expect(onMovePaneToWorkspace).toHaveBeenCalledWith('pane-source', 'ops')
+  })
+
+  it('clears the workspace drop highlight when dragging is cancelled externally', () => {
+    const { rerender } = render(
+      <WorkspaceTabs
+        workspaces={workspaces}
+        activeWorkspaceId="dev"
+        tabPosition="top"
+        dragSourcePaneId="pane-source"
+        onMovePaneToWorkspace={() => {}}
+        onSelect={() => {}}
+      />,
+    )
+
+    const tab = screen.getByRole('tab', { name: 'Ops' }).parentElement
+    expect(tab).not.toBeNull()
+    fireEvent.mouseEnter(tab!)
+    expect(tab).toHaveStyle({
+      backgroundColor: 'rgba(86, 156, 214, 0.24)',
+      boxShadow: 'inset 0 0 0 1px rgba(137, 196, 244, 0.45)',
+    })
+
+    rerender(
+      <WorkspaceTabs
+        workspaces={workspaces}
+        activeWorkspaceId="dev"
+        tabPosition="top"
+        dragSourcePaneId={null}
+        onMovePaneToWorkspace={() => {}}
+        onSelect={() => {}}
+      />,
+    )
+
+    const rerenderedTab = screen.getByRole('tab', { name: 'Ops' }).parentElement
+    expect(rerenderedTab).not.toBeNull()
+    expect(rerenderedTab).not.toHaveStyle({
+      backgroundColor: 'rgba(86, 156, 214, 0.24)',
+      boxShadow: 'inset 0 0 0 1px rgba(137, 196, 244, 0.45)',
+    })
+  })
+
   it('hides workspace tabs for a single workspace while keeping add available', () => {
     const onAdd = vi.fn()
     render(
