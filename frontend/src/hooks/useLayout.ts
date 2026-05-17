@@ -301,6 +301,7 @@ export function useLayout() {
           await saveWorkspaceLayout(sourceWorkspace.id, sourceWorkspace.layout)
         } catch (rollbackErr) {
           console.error(rollbackErr)
+          throw new Error('Move failed and rollback also failed. Reload to sync.')
         }
         throw err
       }

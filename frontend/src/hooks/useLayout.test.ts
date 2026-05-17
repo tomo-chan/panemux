@@ -1109,6 +1109,55 @@ describe('useLayout', () => {
       expect(result.current.workspaces?.items.find((workspace) => workspace.id === 'ops')?.layout.children[0].pane?.id).toBe('ops-main')
     })
 
+    it('throws a distinct error when both the destination save and rollback save fail', async () => {
+      const multiPaneWorkspaces = {
+        active: 'dev',
+        tab_position: 'top' as const,
+        items: [
+          {
+            id: 'dev',
+            title: 'Dev',
+            layout: {
+              direction: 'horizontal' as const,
+              children: [
+                { size: 50, pane: { id: 'main', type: 'local' as const } },
+                { size: 50, pane: { id: 'side', type: 'local' as const } },
+              ],
+            },
+          },
+          {
+            id: 'ops',
+            title: 'Ops',
+            layout: {
+              direction: 'vertical' as const,
+              children: [{ size: 100, pane: { id: 'ops-main', type: 'local' as const } }],
+            },
+          },
+        ],
+      }
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(multiPaneWorkspaces) } as Response)
+        .mockResolvedValueOnce({ ok: false } as Response)
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) } as Response)
+        .mockResolvedValueOnce({ ok: false, status: 500 } as Response)
+        .mockRejectedValueOnce(new Error('rollback failed'))
+      window.fetch = fetchMock
+
+      const { result } = renderHook(() => useLayout())
+      await waitFor(() => expect(result.current.layout).not.toBeNull())
+
+      await act(async () => {
+        await expect(result.current.movePane('main', { type: 'workspace-tab', workspaceId: 'ops' })).rejects.toThrow(
+          'Move failed and rollback also failed. Reload to sync.',
+        )
+      })
+
+      expect(consoleErrorSpy).toHaveBeenCalledWith(expect.any(Error))
+      expect(result.current.workspaces?.active).toBe('dev')
+      expect(result.current.layout?.children[0].pane?.id).toBe('main')
+    })
+
     it('throws when persisting a moved pane fails', async () => {
       const fetchMock = vi.fn()
         .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validWorkspaces) } as Response)
