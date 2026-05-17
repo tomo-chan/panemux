@@ -223,6 +223,15 @@ func TestCodexSessionPath(t *testing.T) {
 	assert.Equal(t, "/Users/tomo/.codex/sessions/2026/05/17/rollout.jsonl", path)
 }
 
+func codexExecCommandRecord(cmd, workdir string) string {
+	return "" +
+		"{\"type\":\"response_item\",\"payload\":{" +
+		"\"type\":\"function_call\"," +
+		"\"name\":\"exec_command\"," +
+		"\"arguments\":\"{\\\"cmd\\\":\\\"" + cmd + "\\\",\\\"workdir\\\":\\\"" + workdir + "\\\"}\"" +
+		"}}\n"
+}
+
 func TestReadCodexSessionCWD_PrefersTurnContext(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.jsonl")
 	content := "" +
@@ -251,8 +260,8 @@ func TestReadCodexSessionCWD_PrefersLatestExecCommandWorkdir(t *testing.T) {
 	content := "" +
 		"{\"type\":\"session_meta\",\"payload\":{\"cwd\":\"/repo/main\"}}\n" +
 		"{\"type\":\"turn_context\",\"payload\":{\"cwd\":\"/repo/main\"}}\n" +
-		"{\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"exec_command\",\"arguments\":\"{\\\"cmd\\\":\\\"git status --short --branch\\\",\\\"workdir\\\":\\\"/tmp/worktree-a\\\"}\"}}\n" +
-		"{\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"exec_command\",\"arguments\":\"{\\\"cmd\\\":\\\"go test ./...\\\",\\\"workdir\\\":\\\"/tmp/worktree-b\\\"}\"}}\n"
+		codexExecCommandRecord("git status --short --branch", "/tmp/worktree-a") +
+		codexExecCommandRecord("go test ./...", "/tmp/worktree-b")
 	require.NoError(t, os.WriteFile(path, []byte(content), 0600))
 
 	cwd, err := readCodexSessionCWD(path)
@@ -422,7 +431,7 @@ func TestGetActiveWorkdir_PrefersCodexExecCommandWorkdir(t *testing.T) {
 	content := "" +
 		"{\"type\":\"session_meta\",\"payload\":{\"cwd\":\"/repo/main\"}}\n" +
 		"{\"type\":\"turn_context\",\"payload\":{\"cwd\":\"/repo/main\"}}\n" +
-		"{\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"exec_command\",\"arguments\":\"{\\\"cmd\\\":\\\"git status\\\",\\\"workdir\\\":\\\"/tmp/worktree-from-command\\\"}\"}}\n"
+		codexExecCommandRecord("git status", "/tmp/worktree-from-command")
 	require.NoError(t, os.WriteFile(sessionLog, []byte(content), 0600))
 
 	listProcessesFn = func() ([]processInfo, error) {
@@ -589,7 +598,7 @@ func TestTmuxLocalSessionGetActiveWorkdir_PrefersCodexExecCommandWorkdir(t *test
 	content := "" +
 		"{\"type\":\"session_meta\",\"payload\":{\"cwd\":\"/repo/main\"}}\n" +
 		"{\"type\":\"turn_context\",\"payload\":{\"cwd\":\"/repo/main\"}}\n" +
-		"{\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"exec_command\",\"arguments\":\"{\\\"cmd\\\":\\\"go test ./...\\\",\\\"workdir\\\":\\\"/tmp/tmux-worktree-from-command\\\"}\"}}\n"
+		codexExecCommandRecord("go test ./...", "/tmp/tmux-worktree-from-command")
 	require.NoError(t, os.WriteFile(sessionLog, []byte(content), 0600))
 
 	tmuxLocalOutputFn = func(args ...string) ([]byte, error) {
