@@ -1,6 +1,7 @@
 package session
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"os/user"
@@ -223,13 +224,45 @@ func TestCodexSessionPath(t *testing.T) {
 	assert.Equal(t, "/Users/tomo/.codex/sessions/2026/05/17/rollout.jsonl", path)
 }
 
-func codexExecCommandRecord(cmd, workdir string) string {
-	return "" +
-		"{\"type\":\"response_item\",\"payload\":{" +
-		"\"type\":\"function_call\"," +
-		"\"name\":\"exec_command\"," +
-		"\"arguments\":\"{\\\"cmd\\\":\\\"" + cmd + "\\\",\\\"workdir\\\":\\\"" + workdir + "\\\"}\"" +
-		"}}\n"
+func mustJSONLine(t *testing.T, value any) string {
+	t.Helper()
+
+	data, err := json.Marshal(value)
+	require.NoError(t, err)
+	return string(data) + "\n"
+}
+
+func codexExecCommandRecord(t *testing.T, cmd, workdir string) string {
+	t.Helper()
+
+	type commandArguments struct {
+		Cmd     string `json:"cmd"`
+		Workdir string `json:"workdir"`
+	}
+	type responseItemPayload struct {
+		Type      string `json:"type"`
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	}
+	argsJSON, err := json.Marshal(commandArguments{Cmd: cmd, Workdir: workdir})
+	require.NoError(t, err)
+
+	return mustJSONLine(t, codexSessionRecord{
+		Type: "response_item",
+		Payload: mustRawJSON(t, responseItemPayload{
+			Type:      "function_call",
+			Name:      "exec_command",
+			Arguments: string(argsJSON),
+		}),
+	})
+}
+
+func mustRawJSON(t *testing.T, value any) json.RawMessage {
+	t.Helper()
+
+	data, err := json.Marshal(value)
+	require.NoError(t, err)
+	return data
 }
 
 func TestReadCodexSessionCWD_PrefersTurnContext(t *testing.T) {
@@ -260,13 +293,26 @@ func TestReadCodexSessionCWD_PrefersLatestExecCommandWorkdir(t *testing.T) {
 	content := "" +
 		"{\"type\":\"session_meta\",\"payload\":{\"cwd\":\"/repo/main\"}}\n" +
 		"{\"type\":\"turn_context\",\"payload\":{\"cwd\":\"/repo/main\"}}\n" +
-		codexExecCommandRecord("git status --short --branch", "/tmp/worktree-a") +
-		codexExecCommandRecord("go test ./...", "/tmp/worktree-b")
+		codexExecCommandRecord(t, "git status --short --branch", "/tmp/worktree-a") +
+		codexExecCommandRecord(t, "go test ./...", "/tmp/worktree-b")
 	require.NoError(t, os.WriteFile(path, []byte(content), 0600))
 
 	cwd, err := readCodexSessionCWD(path)
 	require.NoError(t, err)
 	assert.Equal(t, "/tmp/worktree-b", cwd)
+}
+
+func TestReadCodexSessionCWD_PrefersExecCommandWorkdirEvenWhenTurnContextAppearsLater(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	content := "" +
+		"{\"type\":\"session_meta\",\"payload\":{\"cwd\":\"/repo/main\"}}\n" +
+		codexExecCommandRecord(t, "git status", "/tmp/worktree-from-command") +
+		"{\"type\":\"turn_context\",\"payload\":{\"cwd\":\"/repo/main\"}}\n"
+	require.NoError(t, os.WriteFile(path, []byte(content), 0600))
+
+	cwd, err := readCodexSessionCWD(path)
+	require.NoError(t, err)
+	assert.Equal(t, "/tmp/worktree-from-command", cwd)
 }
 
 func TestGetActiveWorkdir_NoDescendantMatchReturnsEmpty(t *testing.T) {
@@ -431,7 +477,7 @@ func TestGetActiveWorkdir_PrefersCodexExecCommandWorkdir(t *testing.T) {
 	content := "" +
 		"{\"type\":\"session_meta\",\"payload\":{\"cwd\":\"/repo/main\"}}\n" +
 		"{\"type\":\"turn_context\",\"payload\":{\"cwd\":\"/repo/main\"}}\n" +
-		codexExecCommandRecord("git status", "/tmp/worktree-from-command")
+		codexExecCommandRecord(t, "git status", "/tmp/worktree-from-command")
 	require.NoError(t, os.WriteFile(sessionLog, []byte(content), 0600))
 
 	listProcessesFn = func() ([]processInfo, error) {
@@ -598,7 +644,7 @@ func TestTmuxLocalSessionGetActiveWorkdir_PrefersCodexExecCommandWorkdir(t *test
 	content := "" +
 		"{\"type\":\"session_meta\",\"payload\":{\"cwd\":\"/repo/main\"}}\n" +
 		"{\"type\":\"turn_context\",\"payload\":{\"cwd\":\"/repo/main\"}}\n" +
-		codexExecCommandRecord("go test ./...", "/tmp/tmux-worktree-from-command")
+		codexExecCommandRecord(t, "go test ./...", "/tmp/tmux-worktree-from-command")
 	require.NoError(t, os.WriteFile(sessionLog, []byte(content), 0600))
 
 	tmuxLocalOutputFn = func(args ...string) ([]byte, error) {

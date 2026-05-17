@@ -465,12 +465,13 @@ func readCodexSessionCWD(path string) (string, error) {
 	return parseCodexSessionCWD(data)
 }
 
+type codexSessionRecord struct {
+	Type    string          `json:"type"`
+	Payload json.RawMessage `json:"payload"`
+}
+
 func parseCodexSessionCWD(data []byte) (string, error) {
 	scanner := bufio.NewScanner(bytes.NewReader(data))
-	type codexSessionRecord struct {
-		Type    string          `json:"type"`
-		Payload json.RawMessage `json:"payload"`
-	}
 
 	var latestTurnCWD string
 	var sessionMetaCWD string
@@ -506,10 +507,7 @@ func parseCodexSessionCWD(data []byte) (string, error) {
 	return sessionMetaCWD, nil
 }
 
-func codexSessionRecordCWD(rec struct {
-	Type    string          `json:"type"`
-	Payload json.RawMessage `json:"payload"`
-}) (execWorkdir, turnCWD, metaCWD string) {
+func codexSessionRecordCWD(rec codexSessionRecord) (execWorkdir, turnCWD, metaCWD string) {
 	switch rec.Type {
 	case "turn_context":
 		return "", parsePayloadCWD(rec.Payload), ""

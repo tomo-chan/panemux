@@ -281,7 +281,7 @@ func TestActiveRemoteWorkdir_PrefersRemoteCodexExecCommandWorkdir(t *testing.T) 
 			"cat " + shellQuotePath(sessionPath): []byte(
 				"{\"type\":\"session_meta\",\"payload\":{\"cwd\":\"/repo/main\"}}\n" +
 					"{\"type\":\"turn_context\",\"payload\":{\"cwd\":\"/repo/main\"}}\n" +
-					codexExecCommandRecord("git status", "/tmp/remote-worktree-from-command"),
+					codexExecCommandRecord(t, "git status", "/tmp/remote-worktree-from-command"),
 			),
 		},
 	}
@@ -361,7 +361,7 @@ func TestTmuxSSHActiveWorkdir_PrefersCodexExecCommandWorkdir(t *testing.T) {
 			"cat " + shellQuotePath(sessionPath): []byte(
 				"{\"type\":\"session_meta\",\"payload\":{\"cwd\":\"/repo/main\"}}\n" +
 					"{\"type\":\"turn_context\",\"payload\":{\"cwd\":\"/repo/main\"}}\n" +
-					codexExecCommandRecord("go test ./...", "/tmp/remote-tmux-worktree-from-command"),
+					codexExecCommandRecord(t, "go test ./...", "/tmp/remote-tmux-worktree-from-command"),
 			),
 		},
 	}
