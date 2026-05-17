@@ -300,6 +300,8 @@ After validation, the path is wrapped with `shellQuotePath`, which single-quotes
 
 When adding new session types or new `exec.Command` calls: the value passed as the command (first argument) must come from a hardcoded literal or from a trusted system source (file, registry) with no data-flow path to user input. Arguments after the command may be user-supplied if they cannot be interpreted as commands by the target binary.
 
+`gosec` findings should be fixed in the implementation rather than suppressed in shipped code. Test-only code may use narrow `//nolint:gosec` annotations where the fixture behavior intentionally violates a production hardening rule, but production paths should avoid that pattern and make the safety argument explicit in code structure instead.
+
 ## Tradeoffs and Intentional Limits
 
 - One WebSocket per pane is simple and isolates failures, but increases connection count with many panes.
