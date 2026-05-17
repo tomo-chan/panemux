@@ -17,7 +17,6 @@ import (
 	"github.com/creack/pty"
 )
 
-var agentCommandPattern = regexp.MustCompile(`(?i)\b(codex|claude)\b`)
 var listProcessesFn = listProcesses
 var getPIDCWDFn = getPIDCWD
 
@@ -139,7 +138,7 @@ func (s *LocalSession) GetActiveWorkdir() (string, error) {
 		return "", err
 	}
 
-	pid, ok := newestMatchingDescendantPID(processes, s.pid, agentCommandPattern)
+	pid, ok := newestInteractiveAgentDescendantPID(processes, s.pid)
 	if !ok {
 		return "", nil
 	}
@@ -230,7 +229,7 @@ func parsePSOutput(out []byte) ([]processInfo, error) {
 	return processes, nil
 }
 
-func newestMatchingDescendantPID(processes []processInfo, rootPID int, pattern *regexp.Regexp) (int, bool) {
+func newestInteractiveAgentDescendantPID(processes []processInfo, rootPID int) (int, bool) {
 	children := make(map[int][]processInfo)
 	for _, proc := range processes {
 		children[proc.PPID] = append(children[proc.PPID], proc)
@@ -245,7 +244,7 @@ func newestMatchingDescendantPID(processes []processInfo, rootPID int, pattern *
 		stack = stack[:len(stack)-1]
 		stack = append(stack, children[proc.PID]...)
 
-		if pattern.MatchString(proc.Command) {
+		if isInteractiveAgentCommand(proc.Command) {
 			if !ok || proc.PID > matched {
 				matched = proc.PID
 				ok = true
@@ -254,6 +253,43 @@ func newestMatchingDescendantPID(processes []processInfo, rootPID int, pattern *
 	}
 
 	return matched, ok
+}
+
+func isInteractiveAgentCommand(command string) bool {
+	fields := strings.Fields(command)
+	if len(fields) == 0 {
+		return false
+	}
+
+	binary := strings.ToLower(filepath.Base(fields[0]))
+	switch binary {
+	case "codex":
+		return !containsToken(fields[1:], "exec")
+	case "claude":
+		return !containsAnyToken(fields[1:], "-p", "--print")
+	default:
+		return false
+	}
+}
+
+func containsToken(tokens []string, target string) bool {
+	for _, token := range tokens {
+		if token == target {
+			return true
+		}
+	}
+	return false
+}
+
+func containsAnyToken(tokens []string, targets ...string) bool {
+	for _, token := range tokens {
+		for _, target := range targets {
+			if token == target {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // validateShell ensures the shell path is safe to execute.

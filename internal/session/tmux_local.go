@@ -146,7 +146,7 @@ func (s *TmuxLocalSession) GetActiveWorkdir() (string, error) {
 		return "", err
 	}
 
-	agentPID, ok := newestMatchingDescendantPID(processes, pid, agentCommandPattern)
+	agentPID, ok := newestInteractiveAgentDescendantPID(processes, pid)
 	if !ok {
 		return "", nil
 	}

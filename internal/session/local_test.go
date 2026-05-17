@@ -135,7 +135,7 @@ func TestParsePSOutput_InvalidPID(t *testing.T) {
 	assert.Contains(t, err.Error(), "parse pid")
 }
 
-func TestNewestMatchingDescendantPID(t *testing.T) {
+func TestNewestInteractiveAgentDescendantPID(t *testing.T) {
 	processes := []processInfo{
 		{PID: 100, PPID: 1, Command: "/bin/zsh"},
 		{PID: 110, PPID: 100, Command: "git status"},
@@ -144,20 +144,43 @@ func TestNewestMatchingDescendantPID(t *testing.T) {
 		{PID: 140, PPID: 100, Command: "claude"},
 	}
 
-	pid, ok := newestMatchingDescendantPID(processes, 100, agentCommandPattern)
+	pid, ok := newestInteractiveAgentDescendantPID(processes, 100)
 	require.True(t, ok)
 	assert.Equal(t, 140, pid)
 }
 
-func TestNewestMatchingDescendantPID_NoAgent(t *testing.T) {
+func TestNewestInteractiveAgentDescendantPID_NoAgent(t *testing.T) {
 	processes := []processInfo{
 		{PID: 100, PPID: 1, Command: "/bin/zsh"},
 		{PID: 110, PPID: 100, Command: "git status"},
 	}
 
-	pid, ok := newestMatchingDescendantPID(processes, 100, agentCommandPattern)
+	pid, ok := newestInteractiveAgentDescendantPID(processes, 100)
 	assert.False(t, ok)
 	assert.Zero(t, pid)
+}
+
+func TestNewestInteractiveAgentDescendantPID_IgnoresNonInteractiveAgents(t *testing.T) {
+	processes := []processInfo{
+		{PID: 100, PPID: 1, Command: "/bin/zsh"},
+		{PID: 120, PPID: 100, Command: "codex exec"},
+		{PID: 130, PPID: 100, Command: "claude -p"},
+		{PID: 140, PPID: 100, Command: "/usr/local/bin/codex"},
+	}
+
+	pid, ok := newestInteractiveAgentDescendantPID(processes, 100)
+	require.True(t, ok)
+	assert.Equal(t, 140, pid)
+}
+
+func TestIsInteractiveAgentCommand(t *testing.T) {
+	assert.True(t, isInteractiveAgentCommand("codex"))
+	assert.True(t, isInteractiveAgentCommand("/usr/local/bin/codex --model gpt-5"))
+	assert.True(t, isInteractiveAgentCommand("claude"))
+	assert.False(t, isInteractiveAgentCommand("codex exec"))
+	assert.False(t, isInteractiveAgentCommand("claude -p"))
+	assert.False(t, isInteractiveAgentCommand("claude --print"))
+	assert.False(t, isInteractiveAgentCommand("python worker.py"))
 }
 
 func TestGetActiveWorkdir_NoDescendantMatchReturnsEmpty(t *testing.T) {
@@ -195,7 +218,8 @@ func TestGetActiveWorkdir_ReturnsAgentDescendantCWD(t *testing.T) {
 	listProcessesFn = func() ([]processInfo, error) {
 		return []processInfo{
 			{PID: 110, PPID: 100, Command: "/bin/zsh"},
-			{PID: 220, PPID: 110, Command: "codex exec"},
+			{PID: 210, PPID: 110, Command: "codex exec"},
+			{PID: 220, PPID: 110, Command: "codex"},
 		}, nil
 	}
 	getPIDCWDFn = func(pid int) (string, error) {
