@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.1](https://github.com/tomo-chan/panemux/compare/v0.17.0...v0.17.1) (2026-05-18)
+
+
+### Bug Fixes
+
+* restore known_hosts SHA-1 compatibility ([#99](https://github.com/tomo-chan/panemux/issues/99)) ([6b53e6e](https://github.com/tomo-chan/panemux/commit/6b53e6e7e6d6abf433f62fa4bcd120e25080e978))
+
 ## [0.17.0](https://github.com/tomo-chan/panemux/compare/v0.16.0...v0.17.0) (2026-05-17)
 
 
