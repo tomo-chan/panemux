@@ -115,7 +115,7 @@ Example: `Config.sshConfigPath` uses `sshconfig.DefaultPath()` only when the ove
 
 ### Security-sensitive implementation
 
-- When code changes affect command execution, SSH path handling, or `gosec` posture, follow the Security Design section in [docs/architecture.md](docs/architecture.md).
+- When code changes affect command execution, shell argument handling, SSH path handling, host key handling, or `gosec` posture, read [docs/security.md](docs/security.md) before implementation and follow it during the change.
 - Prefer structural fixes over `//nolint:gosec` in shipped code.
 
 ### Ignore generated resources
@@ -159,6 +159,7 @@ git worktree remove /tmp/<repo>-<feature>
 
 - Product overview: [docs/overview.md](docs/overview.md)
 - Architecture and security design: [docs/architecture.md](docs/architecture.md)
+- Security requirements for implementation: [docs/security.md](docs/security.md)
 - Behavior and API specification: [docs/behavior.md](docs/behavior.md)
 - UI intent: [docs/ui-design.md](docs/ui-design.md)
 - CI and release maintenance: [docs/maintenance.md](docs/maintenance.md)
