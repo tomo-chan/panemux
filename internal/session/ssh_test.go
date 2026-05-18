@@ -1,7 +1,9 @@
 package session
 
 import (
+	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/pem"
 	"errors"
@@ -13,6 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	gossh "golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
 )
 
 // generateTestKeyFile creates a real ed25519 private key file at the given path
@@ -138,7 +141,7 @@ func TestSubstituteProxyCommand_NoTokens(t *testing.T) {
 }
 
 func TestBuildHostKeyCallback_NonexistentFile_Error(t *testing.T) {
-	_, err := buildHostKeyCallback("/nonexistent/path/known_hosts")
+	_, _, err := buildHostKeyCallback("/nonexistent/path/known_hosts")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "known_hosts")
 }
@@ -148,8 +151,90 @@ func TestBuildHostKeyCallback_ValidFile_NoError(t *testing.T) {
 	knownHostsPath := filepath.Join(dir, "known_hosts")
 	require.NoError(t, os.WriteFile(knownHostsPath, []byte(""), 0600))
 
-	_, err := buildHostKeyCallback(knownHostsPath)
+	_, resolvedPath, err := buildHostKeyCallback(knownHostsPath)
 	assert.NoError(t, err)
+	assert.Equal(t, knownHostsPath, resolvedPath)
+}
+
+func generateTestPublicKey(t *testing.T) gossh.PublicKey {
+	t.Helper()
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	pub, err := gossh.NewPublicKey(priv.Public())
+	require.NoError(t, err)
+	return pub
+}
+
+func generateTestECDSAPublicKey(t *testing.T) gossh.PublicKey {
+	t.Helper()
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	pub, err := gossh.NewPublicKey(priv.Public())
+	require.NoError(t, err)
+	return pub
+}
+
+func TestKnownHostsAlgorithms(t *testing.T) {
+	pub1 := generateTestPublicKey(t)
+	pub2 := generateTestECDSAPublicKey(t)
+	hashedHost := knownhosts.HashHostname("hashed.example.com")
+
+	tests := []struct {
+		name    string
+		addr    string
+		content string
+		want    []string
+	}{
+		{
+			name:    "plaintext host",
+			addr:    "plain.example.com:22",
+			content: knownhosts.Line([]string{"plain.example.com"}, pub1) + "\n",
+			want:    []string{pub1.Type()},
+		},
+		{
+			name:    "bracketed host and port",
+			addr:    "port.example.com:2200",
+			content: knownhosts.Line([]string{"[port.example.com]:2200"}, pub1) + "\n",
+			want:    []string{pub1.Type()},
+		},
+		{
+			name: "multiple matching algorithms preserve file order and dedupe",
+			addr: "multi.example.com:22",
+			content: knownhosts.Line([]string{"multi.example.com"}, pub1) + "\n" +
+				knownhosts.Line([]string{"multi.example.com"}, pub1) + "\n" +
+				knownhosts.Line([]string{"multi.example.com"}, pub2) + "\n",
+			want: []string{pub1.Type(), pub2.Type()},
+		},
+		{
+			name:    "hashed host",
+			addr:    "hashed.example.com:22",
+			content: knownhosts.Line([]string{hashedHost}, pub1) + "\n",
+			want:    []string{pub1.Type()},
+		},
+		{
+			name: "ignores unmatched and malformed entries",
+			addr: "target.example.com:22",
+			content: "# comment\n" +
+				"@cert-authority *.example.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZm\n" +
+				"!target.example.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZm\n" +
+				"|1|bad|entry ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZm\n" +
+				knownhosts.Line([]string{"other.example.com"}, pub1) + "\n",
+			want: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			knownHostsPath := filepath.Join(dir, "known_hosts")
+			require.NoError(t, os.WriteFile(knownHostsPath, []byte(tt.content), 0600))
+			assert.Equal(t, tt.want, knownHostsAlgorithms(knownHostsPath, tt.addr))
+		})
+	}
+}
+
+func TestKnownHostsAlgorithms_FileNotFound_ReturnsEmpty(t *testing.T) {
+	assert.Empty(t, knownHostsAlgorithms("/nonexistent/known_hosts", "myhost:22"))
 }
 
 // TestSSHGetCWDCmd_* verify that the CWD-detection shell command embeds the
