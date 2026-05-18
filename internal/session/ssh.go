@@ -218,7 +218,7 @@ func dialViaProxyCommand(proxyCmd, host string, port int) (net.Conn, error) {
 	cmd := substituteProxyCommand(proxyCmd, host, port)
 	// Pass to /bin/sh -c so the command is interpreted by a shell, matching
 	// OpenSSH behavior. /bin/sh is a hardcoded trusted binary.
-	c := exec.Command("/bin/sh", "-c", cmd) //nolint:gosec // G204: ProxyCommand is trusted SSH config
+	c := exec.Command("/bin/sh", "-c", cmd)
 	c.Stderr = os.Stderr
 
 	stdin, err := c.StdinPipe()
