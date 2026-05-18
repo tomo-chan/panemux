@@ -1,6 +1,11 @@
 package session
 
 import (
+	"bufio"
+	"bytes"
+	"crypto/hmac"
+	"crypto/sha1" //nolint:gosec // G505: OpenSSH hashed known_hosts entries use HMAC-SHA1
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -90,7 +95,7 @@ func dialSSHClient(cfg SSHConfig) (*ssh.Client, *ssh.Client, error) {
 		return nil, nil, err
 	}
 
-	hkCallback, err := buildHostKeyCallback(cfg.KnownHostsFile)
+	hkCallback, knownHostsPath, err := buildHostKeyCallback(cfg.KnownHostsFile)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -102,10 +107,11 @@ func dialSSHClient(cfg SSHConfig) (*ssh.Client, *ssh.Client, error) {
 	addr := net.JoinHostPort(cfg.Host, strconv.Itoa(port))
 
 	sshCfg := &ssh.ClientConfig{
-		User:            cfg.User,
-		Auth:            authMethods,
-		HostKeyCallback: hkCallback,
-		Timeout:         30 * time.Second,
+		User:              cfg.User,
+		Auth:              authMethods,
+		HostKeyCallback:   hkCallback,
+		HostKeyAlgorithms: knownHostsAlgorithms(knownHostsPath, addr),
+		Timeout:           30 * time.Second,
 	}
 
 	var conn net.Conn
@@ -492,17 +498,86 @@ func parseRemoteDirectoryListOutput(out []byte) (string, []DirectoryEntry, error
 	return resolvedPath, entries, nil
 }
 
-// buildHostKeyCallback resolves the known_hosts file path and returns a HostKeyCallback.
-func buildHostKeyCallback(knownHostsFile string) (ssh.HostKeyCallback, error) {
+// buildHostKeyCallback resolves the known_hosts file path and returns a
+// HostKeyCallback together with the resolved path.
+func buildHostKeyCallback(knownHostsFile string) (ssh.HostKeyCallback, string, error) {
 	path, err := resolveKnownHostsFile(knownHostsFile)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	cb, err := knownhosts.New(path)
 	if err != nil {
-		return nil, fmt.Errorf("loading known_hosts %s: %w", path, err)
+		return nil, "", fmt.Errorf("loading known_hosts %s: %w", path, err)
 	}
-	return cb, nil
+	return cb, path, nil
+}
+
+// knownHostsAlgorithms returns the host-key algorithm types stored in
+// knownHostsPath that match hostport ("host:port" format). Setting
+// ssh.ClientConfig.HostKeyAlgorithms to this list ensures the server presents
+// a key type that matches our known_hosts entry.
+func knownHostsAlgorithms(knownHostsPath, hostport string) []string {
+	f, err := os.Open(knownHostsPath)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+
+	normalized := knownhosts.Normalize(hostport)
+	seen := make(map[string]bool)
+	var algos []string
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 || line[0] == '#' || line[0] == '@' {
+			continue
+		}
+		fields := bytes.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+		patterns := string(fields[0])
+		keyType := string(fields[1])
+		for _, pattern := range strings.Split(patterns, ",") {
+			if knownHostsFieldMatchesAddr(pattern, normalized) {
+				if !seen[keyType] {
+					seen[keyType] = true
+					algos = append(algos, keyType)
+				}
+				break
+			}
+		}
+	}
+	return algos
+}
+
+func knownHostsFieldMatchesAddr(field, normalized string) bool {
+	if strings.HasPrefix(field, "|1|") {
+		return knownHostsHashedEntryMatches(field, normalized)
+	}
+	if strings.HasPrefix(field, "!") {
+		return false
+	}
+	return field == normalized
+}
+
+func knownHostsHashedEntryMatches(encoded, normalized string) bool {
+	parts := strings.SplitN(encoded, "|", 4)
+	if len(parts) != 4 || parts[1] != "1" {
+		return false
+	}
+	salt, err := base64.StdEncoding.DecodeString(parts[2])
+	if err != nil {
+		return false
+	}
+	hash, err := base64.StdEncoding.DecodeString(parts[3])
+	if err != nil {
+		return false
+	}
+	mac := hmac.New(sha1.New, salt)
+	mac.Write([]byte(normalized))
+	return hmac.Equal(mac.Sum(nil), hash)
 }
 
 func buildAuthMethods(cfg SSHConfig) ([]ssh.AuthMethod, error) {

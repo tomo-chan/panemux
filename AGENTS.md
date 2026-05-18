@@ -180,6 +180,10 @@ See `docs/architecture.md` → *Security Design* for the full rationale and the 
 - First change the code so the finding is structurally avoided and the reason is evident in the implementation.
 - A `//nolint:gosec` suppression is acceptable only when the code is not shipped in the application, such as tests, fixtures, or other test-only helpers.
 - If a production-code suppression seems unavoidable, stop and document the case explicitly in review before merging instead of silently adding the suppression.
+- Exception: `internal/session/ssh.go` may keep a narrow `//nolint:gosec` for `crypto/sha1` (`G505`) when matching OpenSSH hashed `known_hosts` entries (`|1|...`).
+- Rationale: OpenSSH defines hashed `known_hosts` matching in terms of HMAC-SHA1, so this compatibility path cannot be structurally rewritten to another hash without breaking host-key verification for existing user files.
+- Scope: this exception applies only to `known_hosts` compatibility code that verifies or matches OpenSSH `|1|...` entries. It does not justify SHA-1 elsewhere, and it does not relax host-key verification away from `knownhosts.New(...)`.
+- Review guidance: when this exception is used, reference `docs/architecture.md` → *Security Design* and state in the PR or review reply that the suppression is for OpenSSH `known_hosts` compatibility, not for application-defined hashing.
 
 ### Release workflow
 - **Never manually close a release-please PR.** Doing so leaves the `release-please--branches--main` internal tracking branch in a stale state. On the next push to `main`, release-please re-creates the release PR from that stale state, producing incorrect release notes that include all historical commits.
