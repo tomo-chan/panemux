@@ -7,10 +7,10 @@ This document is the developer workflow reference for building, testing, changin
 **Full build**:
 
 ```sh
-make install-deps
-make install-deps-ci
-make build
-make release-snapshot
+make install-deps      # first-time setup: npm install + go mod download
+make install-deps-ci   # CI / reproducible dependency install
+make build             # full build; frontend/dist is embedded into the Go binary
+make release-snapshot  # local release archives via GoReleaser
 ```
 
 **Run**:
@@ -24,8 +24,8 @@ make release-snapshot
 **Frontend dev server**:
 
 ```sh
-make dev-frontend
-make dev-backend
+make dev-frontend   # Vite dev server on :5173
+make dev-backend    # run backend separately while the frontend proxies /api and /ws
 ```
 
 **Format**:
@@ -133,6 +133,8 @@ Example: `Config.sshConfigPath` uses `sshconfig.DefaultPath()` only when the ove
 ```sh
 git worktree add /tmp/<repo>-<feature> -b feature/<name>
 ```
+
+- Use `/tmp/<repo>-<feature>` as the default location so the workflow matches the repository's agent instructions and avoids editing in the main working directory by accident.
 
 - Do all editing, testing, and committing inside the feature worktree.
 - Push and open a PR before merging.
