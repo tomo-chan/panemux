@@ -4,14 +4,7 @@ This document is the developer workflow reference for building, testing, changin
 
 ## Build And Run
 
-**Full build** (frontend must be built before backend, because Go embeds `frontend/dist/`):
-
-```sh
-cd frontend && npm run build
-go build -o bin/panemux .
-```
-
-Or via Makefile:
+**Full build**:
 
 ```sh
 make install-deps
