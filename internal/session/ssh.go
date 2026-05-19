@@ -688,6 +688,12 @@ const sshOpenFilesCmdTemplate = `{ ls -1 /proc/%[1]d/fd 2>/dev/null | ` +
 	`{ lsof -a -p %[1]d -Fn 2>/dev/null | awk '/^n/{print substr($0,2)}'; }`
 const sshPIDCWDCmdTemplate = `{ readlink /proc/%[1]d/cwd 2>/dev/null || ` +
 	`lsof -a -p %[1]d -d cwd -Fn 2>/dev/null | awk '/^n/{print substr($0,2)}'; }`
+const sshGitContextCmdTemplate = `cd %[1]s && ` +
+	`root=$(git rev-parse --show-toplevel) && ` +
+	`common=$(git rev-parse --path-format=absolute --git-common-dir) && ` +
+	`branch=$(git branch --show-current 2>/dev/null || true) && ` +
+	`origin=$(git config --get remote.origin.url 2>/dev/null || true) && ` +
+	`printf '%%s\n%%s\n%%s\n%%s\n' "$root" "$common" "$branch" "$origin"`
 
 // GetCWD returns the current working directory of the interactive shell by
 // inspecting the sshd process tree. See sshGetCWDCmd for the full rationale.
@@ -725,6 +731,18 @@ func (s *SSHSession) GetActiveWorkdir() (string, error) {
 	}
 
 	return activeRemoteWorkdir(sess, baseCWD, rootPID)
+}
+
+// InspectGitContext resolves Git metadata on the remote host for the provided
+// absolute working directory.
+func (s *SSHSession) InspectGitContext(cwd string) (GitContext, error) {
+	sess, err := s.client.NewSession()
+	if err != nil {
+		return GitContext{}, fmt.Errorf("new ssh session for git context: %w", err)
+	}
+	defer sess.Close()
+
+	return remoteGitContext(sess, cwd)
 }
 
 func remoteShellPID(runner sshSessionRunner) (int, error) {
@@ -825,6 +843,31 @@ func remoteCodexSessionCWD(runner sshSessionRunner, processes []processInfo, age
 	}
 
 	return parseCodexSessionCWD(out)
+}
+
+func remoteGitContext(runner sshSessionRunner, cwd string) (GitContext, error) {
+	if err := validateRemotePath("working directory", cwd); err != nil {
+		return GitContext{}, err
+	}
+
+	out, err := runner.Output(fmt.Sprintf(sshGitContextCmdTemplate, shellQuotePath(cwd)))
+	if err != nil {
+		return GitContext{}, fmt.Errorf("git context over ssh: %w", err)
+	}
+
+	lines := strings.Split(strings.TrimRight(string(out), "\n"), "\n")
+	if len(lines) < 4 {
+		return GitContext{}, errors.New("git context over ssh: incomplete response")
+	}
+
+	root := strings.TrimSpace(lines[0])
+	return GitContext{
+		Branch:    strings.TrimSpace(lines[2]),
+		CommonDir: strings.TrimSpace(lines[1]),
+		OriginURL: strings.TrimSpace(lines[3]),
+		Repo:      filepath.Base(root),
+		Root:      root,
+	}, nil
 }
 
 func remoteOpenFiles(runner sshSessionRunner, pid int) ([]string, error) {

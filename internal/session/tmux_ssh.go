@@ -156,6 +156,18 @@ func (s *TmuxSSHSession) GetActiveWorkdir() (string, error) {
 	return tmuxSSHActiveWorkdir(sess, s.tmuxSession)
 }
 
+// InspectGitContext resolves Git metadata on the remote host for the provided
+// absolute working directory.
+func (s *TmuxSSHSession) InspectGitContext(cwd string) (GitContext, error) {
+	sess, err := s.client.NewSession()
+	if err != nil {
+		return GitContext{}, fmt.Errorf("new ssh session for tmux git context: %w", err)
+	}
+	defer sess.Close()
+
+	return remoteGitContext(sess, cwd)
+}
+
 func tmuxSSHActiveWorkdir(runner sshSessionRunner, tmuxSession string) (string, error) {
 	panePIDOut, err := runner.Output(fmt.Sprintf("tmux display-message -p -t '%s' '#{pane_pid}'", tmuxSession))
 	if err != nil {
