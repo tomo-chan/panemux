@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.2](https://github.com/tomo-chan/panemux/compare/v0.17.1...v0.17.2) (2026-05-19)
+
+
+### Bug Fixes
+
+* restore git header for ssh and ssh tmux panes ([#102](https://github.com/tomo-chan/panemux/issues/102)) ([3f76f7e](https://github.com/tomo-chan/panemux/commit/3f76f7ec1c478b5f4bb75dc22180aa6f48a79261))
+
 ## [0.17.1](https://github.com/tomo-chan/panemux/compare/v0.17.0...v0.17.1) (2026-05-18)
 
 
