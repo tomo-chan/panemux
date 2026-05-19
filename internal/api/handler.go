@@ -746,7 +746,7 @@ func (h *Handler) GetGitInfo(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, gitInfoResponse{IsGit: false})
 		return
 	}
-	prURL, prNumber := h.lookupPRInfo(targetCWD, ctx)
+	prURL, prNumber := h.lookupPRInfo(sess, targetCWD, ctx)
 
 	writeJSON(w, gitInfoResponse{
 		IsGit:    true,
@@ -860,7 +860,7 @@ func (h *Handler) findGH() (string, error) {
 	return path, nil
 }
 
-func (h *Handler) lookupPRInfo(cwd string, gitCtx session.GitContext) (string, int) {
+func (h *Handler) lookupPRInfo(sess session.Session, cwd string, gitCtx session.GitContext) (string, int) {
 	if gitCtx.Branch == "" {
 		return "", 0
 	}
@@ -887,6 +887,11 @@ func (h *Handler) lookupPRInfo(cwd string, gitCtx session.GitContext) (string, i
 	)
 	if repoSpec := repoSpecFromOriginURL(gitCtx.OriginURL); repoSpec != "" {
 		cmd.Args = append(cmd.Args, "--repo", repoSpec)
+	} else if _, ok := sess.(session.GitContextGetter); ok {
+		// Remote SSH-backed sessions may point at repositories that do not exist
+		// on the local filesystem. Without an origin-derived repo spec, `gh`
+		// cannot resolve PR metadata for that remote-only checkout.
+		return "", 0
 	} else {
 		cmd.Dir = cwd
 	}
@@ -923,11 +928,15 @@ func repoSpecFromOriginURL(origin string) string {
 	if err != nil || u.Host == "" {
 		return ""
 	}
+	host := u.Hostname()
+	if host == "" {
+		return ""
+	}
 	path := strings.TrimPrefix(u.Path, "/")
 	if path == "" {
 		return ""
 	}
-	return u.Host + "/" + path
+	return host + "/" + path
 }
 
 func writeValidationError(w http.ResponseWriter, msg string) {

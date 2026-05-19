@@ -1645,7 +1645,7 @@ func TestLookupPRInfo_TimesOutAndFallsBack(t *testing.T) {
 	prLookupTimeout = 10 * time.Millisecond
 	t.Cleanup(func() { prLookupTimeout = prev })
 
-	url, number := h.lookupPRInfo(t.TempDir(), session.GitContext{Branch: "feature/slow"})
+	url, number := h.lookupPRInfo(newMockSession("s1"), t.TempDir(), session.GitContext{Branch: "feature/slow"})
 	assert.Empty(t, url)
 	assert.Zero(t, number)
 }
@@ -1808,6 +1808,17 @@ func TestGetGitInfo_RemoteActiveWorkdir_PrefersRemoteWorktreeBranch(t *testing.T
 	assert.Equal(t, "panemux", resp.Repo)
 }
 
+func TestLookupPRInfo_RemoteSessionWithoutOriginSkipsLookup(t *testing.T) {
+	h := NewHandler(defaultTestConfig(), session.NewManager())
+	h.ghBinaryPath = writeFakeGHBinary(t, "#!/bin/sh\nexit 99\n")
+
+	url, number := h.lookupPRInfo(&mockRemoteGitSession{}, "/home/demo/panemux", session.GitContext{
+		Branch: "feature/no-origin",
+	})
+	assert.Empty(t, url)
+	assert.Zero(t, number)
+}
+
 func TestSanitizeGitExecDir_ValidAbsolutePath(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "repo")
 	require.NoError(t, os.MkdirAll(dir, 0755))
@@ -1818,10 +1829,54 @@ func TestSanitizeGitExecDir_ValidAbsolutePath(t *testing.T) {
 }
 
 func TestRepoSpecFromOriginURL(t *testing.T) {
-	assert.Equal(t, "github.com/example/panemux", repoSpecFromOriginURL("git@github.com:example/panemux.git"))
-	assert.Equal(t, "github.com/example/panemux", repoSpecFromOriginURL("https://github.com/example/panemux.git"))
-	assert.Equal(t, "git.example.com/team/panemux", repoSpecFromOriginURL("ssh://git@git.example.com/team/panemux.git"))
-	assert.Empty(t, repoSpecFromOriginURL("not-a-url"))
+	credentialOrigin := "https://user:" + "placeholder" + "@github.com/example/panemux.git"
+	tests := []struct {
+		name   string
+		origin string
+		want   string
+	}{
+		{
+			name:   "scp style ssh",
+			origin: "git@github.com:example/panemux.git",
+			want:   "github.com/example/panemux",
+		},
+		{
+			name:   "https",
+			origin: "https://github.com/example/panemux.git",
+			want:   "github.com/example/panemux",
+		},
+		{
+			name:   "ssh url",
+			origin: "ssh://git@git.example.com/team/panemux.git",
+			want:   "git.example.com/team/panemux",
+		},
+		{
+			name:   "ssh url with explicit port",
+			origin: "ssh://git@git.example.com:2222/team/panemux.git",
+			want:   "git.example.com/team/panemux",
+		},
+		{
+			name:   "https without git suffix",
+			origin: "https://github.com/example/panemux",
+			want:   "github.com/example/panemux",
+		},
+		{
+			name:   "https with embedded credentials",
+			origin: credentialOrigin,
+			want:   "github.com/example/panemux",
+		},
+		{
+			name:   "invalid",
+			origin: "not-a-url",
+			want:   "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, repoSpecFromOriginURL(tt.origin))
+		})
+	}
 }
 
 func TestSanitizeGitExecDir_RejectsRelativePath(t *testing.T) {
