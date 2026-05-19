@@ -162,6 +162,7 @@ Why this hook:
 
 - first, it asks the session for its live working directory
 - second, it may ask for an active interactive agent workdir override
+- local and local tmux sessions inspect Git metadata on the local filesystem; SSH and SSH+tmux sessions inspect Git metadata on the remote host over the existing SSH connection so remote-only repositories still render header Git info
 
 The override path is intentionally narrow:
 

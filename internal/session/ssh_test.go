@@ -455,3 +455,32 @@ func TestTmuxSSHActiveWorkdir_PrefersCodexExecCommandWorkdir(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "/tmp/remote-tmux-worktree-from-command", cwd)
 }
+
+func TestRemoteGitContext_ReturnsBranchAndRepo(t *testing.T) {
+	const cwd = "/home/user/panemux"
+
+	runner := &fakeSSHRunner{
+		outputs: map[string][]byte{
+			fmt.Sprintf(sshGitContextCmdTemplate, shellQuotePath(cwd)): []byte(
+				"/home/user/panemux\n" +
+					"/home/user/panemux/.git\n" +
+					"main\n" +
+					"git@github.com:example/panemux.git\n",
+			),
+		},
+	}
+
+	ctx, err := remoteGitContext(runner, cwd)
+	require.NoError(t, err)
+	assert.Equal(t, "main", ctx.Branch)
+	assert.Equal(t, "/home/user/panemux/.git", ctx.CommonDir)
+	assert.Equal(t, "git@github.com:example/panemux.git", ctx.OriginURL)
+	assert.Equal(t, "panemux", ctx.Repo)
+	assert.Equal(t, cwd, ctx.Root)
+}
+
+func TestRemoteGitContext_RejectsRelativePath(t *testing.T) {
+	_, err := remoteGitContext(&fakeSSHRunner{}, "panemux")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "working directory")
+}

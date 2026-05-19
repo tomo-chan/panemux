@@ -63,6 +63,21 @@ type ActiveWorkdirGetter interface {
 	GetActiveWorkdir() (string, error)
 }
 
+// GitContext describes the repository state for a session's working directory.
+type GitContext struct {
+	Branch    string
+	CommonDir string
+	OriginURL string
+	Repo      string
+	Root      string
+}
+
+// GitContextGetter is implemented by sessions that must inspect Git state
+// somewhere other than the local filesystem, such as a remote SSH host.
+type GitContextGetter interface {
+	InspectGitContext(cwd string) (GitContext, error)
+}
+
 // SSHConnNamer is implemented by sessions that have an SSH connection name.
 type SSHConnNamer interface {
 	ConnectionName() string

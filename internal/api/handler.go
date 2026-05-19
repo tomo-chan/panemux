@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -712,13 +713,6 @@ type gitInfoResponse struct {
 	IsGit    bool   `json:"is_git"`
 }
 
-type gitContext struct {
-	branch    string
-	commonDir string
-	repo      string
-	root      string
-}
-
 // GetGitInfo returns git repository information for the session's current working directory.
 func (h *Handler) GetGitInfo(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
@@ -747,24 +741,24 @@ func (h *Handler) GetGitInfo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	targetCWD := h.resolvePreferredCWD(sess, cwd)
-	ctx, err := h.inspectGitContext(targetCWD)
+	ctx, err := h.inspectGitContextForSession(sess, targetCWD)
 	if err != nil {
 		writeJSON(w, gitInfoResponse{IsGit: false})
 		return
 	}
-	prURL, prNumber := h.lookupPRInfo(targetCWD, ctx.branch)
+	prURL, prNumber := h.lookupPRInfo(targetCWD, ctx)
 
 	writeJSON(w, gitInfoResponse{
 		IsGit:    true,
-		Branch:   ctx.branch,
-		Repo:     ctx.repo,
+		Branch:   ctx.Branch,
+		Repo:     ctx.Repo,
 		PRURL:    prURL,
 		PRNumber: prNumber,
 	})
 }
 
 func (h *Handler) resolvePreferredCWD(sess session.Session, cwd string) string {
-	baseCtx, err := h.inspectGitContext(cwd)
+	baseCtx, err := h.inspectGitContextForSession(sess, cwd)
 	if err != nil {
 		return cwd
 	}
@@ -779,28 +773,39 @@ func (h *Handler) resolvePreferredCWD(sess session.Session, cwd string) string {
 		return cwd
 	}
 
-	ctx, err := h.inspectGitContext(candidate)
+	ctx, err := h.inspectGitContextForSession(sess, candidate)
 	if err != nil {
 		return cwd
 	}
-	if ctx.commonDir == baseCtx.commonDir && ctx.root != baseCtx.root {
+	if ctx.CommonDir == baseCtx.CommonDir && ctx.Root != baseCtx.Root {
 		return candidate
 	}
 
 	return cwd
 }
 
-func (h *Handler) inspectGitContext(cwd string) (gitContext, error) {
+func (h *Handler) inspectGitContextForSession(sess session.Session, cwd string) (session.GitContext, error) {
+	if getter, ok := sess.(session.GitContextGetter); ok {
+		ctx, err := getter.InspectGitContext(cwd)
+		if err != nil {
+			return session.GitContext{}, fmt.Errorf("inspect session git context: %w", err)
+		}
+		return ctx, nil
+	}
+	return h.inspectLocalGitContext(cwd)
+}
+
+func (h *Handler) inspectLocalGitContext(cwd string) (session.GitContext, error) {
 	safeCWD, err := sanitizeGitExecDir(cwd)
 	if err != nil {
-		return gitContext{}, err
+		return session.GitContext{}, err
 	}
 
 	toplevelCmd := exec.Command("git", "rev-parse", "--show-toplevel")
 	toplevelCmd.Dir = safeCWD
 	toplevelOut, err := toplevelCmd.Output()
 	if err != nil {
-		return gitContext{}, fmt.Errorf("git show toplevel for %q: %w", cwd, err)
+		return session.GitContext{}, fmt.Errorf("git show toplevel for %q: %w", cwd, err)
 	}
 	toplevelOut = bytes.TrimSpace(toplevelOut)
 
@@ -808,7 +813,7 @@ func (h *Handler) inspectGitContext(cwd string) (gitContext, error) {
 	commonDirCmd.Dir = safeCWD
 	commonDirOut, err := commonDirCmd.Output()
 	if err != nil {
-		return gitContext{}, fmt.Errorf("git show common dir for %q: %w", cwd, err)
+		return session.GitContext{}, fmt.Errorf("git show common dir for %q: %w", cwd, err)
 	}
 	commonDirOut = bytes.TrimSpace(commonDirOut)
 
@@ -823,11 +828,11 @@ func (h *Handler) inspectGitContext(cwd string) (gitContext, error) {
 	branchOut = bytes.TrimSpace(branchOut)
 
 	root := string(toplevelOut)
-	return gitContext{
-		branch:    string(branchOut),
-		commonDir: string(commonDirOut),
-		repo:      filepath.Base(root),
-		root:      root,
+	return session.GitContext{
+		Branch:    string(branchOut),
+		CommonDir: string(commonDirOut),
+		Repo:      filepath.Base(root),
+		Root:      root,
 	}, nil
 }
 
@@ -855,8 +860,8 @@ func (h *Handler) findGH() (string, error) {
 	return path, nil
 }
 
-func (h *Handler) lookupPRInfo(cwd, branch string) (string, int) {
-	if branch == "" {
+func (h *Handler) lookupPRInfo(cwd string, gitCtx session.GitContext) (string, int) {
+	if gitCtx.Branch == "" {
 		return "", 0
 	}
 
@@ -876,11 +881,15 @@ func (h *Handler) lookupPRInfo(cwd, branch string) (string, int) {
 		ghPath,
 		"pr",
 		"view",
-		branch,
+		gitCtx.Branch,
 		"--json",
 		"url,number",
 	)
-	cmd.Dir = cwd
+	if repoSpec := repoSpecFromOriginURL(gitCtx.OriginURL); repoSpec != "" {
+		cmd.Args = append(cmd.Args, "--repo", repoSpec)
+	} else {
+		cmd.Dir = cwd
+	}
 	out, err := cmd.Output()
 	if err != nil {
 		return "", 0
@@ -894,6 +903,31 @@ func (h *Handler) lookupPRInfo(cwd, branch string) (string, int) {
 		return "", 0
 	}
 	return strings.TrimSpace(resp.URL), resp.Number
+}
+
+func repoSpecFromOriginURL(origin string) string {
+	trimmed := strings.TrimSpace(strings.TrimSuffix(origin, ".git"))
+	if trimmed == "" {
+		return ""
+	}
+	if strings.HasPrefix(trimmed, "git@") {
+		hostPath := strings.TrimPrefix(trimmed, "git@")
+		parts := strings.SplitN(hostPath, ":", 2)
+		if len(parts) != 2 {
+			return ""
+		}
+		return parts[0] + "/" + strings.TrimPrefix(parts[1], "/")
+	}
+
+	u, err := url.Parse(trimmed)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	path := strings.TrimPrefix(u.Path, "/")
+	if path == "" {
+		return ""
+	}
+	return u.Host + "/" + path
 }
 
 func writeValidationError(w http.ResponseWriter, msg string) {
