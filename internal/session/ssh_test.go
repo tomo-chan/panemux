@@ -423,6 +423,8 @@ func TestActiveRemoteWorkdirFromSessionFactory_UsesSeparateRunners(t *testing.T)
 	)
 	require.NoError(t, err)
 	assert.Equal(t, "/tmp/remote-worktree", cwd)
+	// Separate runners are used for: shell PID, process list, open-files probe,
+	// and PID cwd fallback.
 	assert.Equal(t, 4, index)
 }
 
@@ -517,6 +519,8 @@ func TestTmuxSSHActiveWorkdirFromSessionFactory_UsesSeparateRunners(t *testing.T
 	)
 	require.NoError(t, err)
 	assert.Equal(t, "/tmp/remote-worktree", cwd)
+	// Separate runners are used for: tmux pane info, process list, open-files
+	// probe, and PID cwd fallback.
 	assert.Equal(t, 4, index)
 }
 
