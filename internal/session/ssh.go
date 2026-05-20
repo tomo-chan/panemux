@@ -758,7 +758,7 @@ func remoteShellPID(runner sshSessionRunner) (int, error) {
 
 func activeRemoteWorkdirFromSessionFactory(
 	newRunner func() (sshSessionRunner, error),
-	debugScope, baseCWD string,
+	logScope, baseCWD string,
 ) (string, error) {
 	rootRunner, err := newRunner()
 	if err != nil {
@@ -773,74 +773,74 @@ func activeRemoteWorkdirFromSessionFactory(
 
 	return activeRemoteWorkdirWithOutput(
 		outputFromSessionFactory(newRunner),
-		debugScope,
+		logScope,
 		baseCWD,
 		rootPID,
 	)
 }
 
-func activeRemoteWorkdir(runner sshSessionRunner, debugScope, baseCWD string, rootPID int) (string, error) {
-	return activeRemoteWorkdirWithOutput(runner.Output, debugScope, baseCWD, rootPID)
+func activeRemoteWorkdir(runner sshSessionRunner, logScope, baseCWD string, rootPID int) (string, error) {
+	return activeRemoteWorkdirWithOutput(runner.Output, logScope, baseCWD, rootPID)
 }
 
 func activeRemoteWorkdirWithOutput(
 	run remoteOutputFunc,
-	debugScope, baseCWD string,
+	logScope, baseCWD string,
 	rootPID int,
 ) (string, error) {
-	log.Printf("%s resolving active workdir from base_cwd=%q root_pid=%d", debugScope, baseCWD, rootPID)
+	log.Printf("%s resolving active workdir from base_cwd=%q root_pid=%d", logScope, baseCWD, rootPID)
 
 	out, err := run(sshListProcessesCmd)
 	if err != nil {
-		log.Printf("%s list remote processes failed: %v", debugScope, err)
+		log.Printf("%s list remote processes failed: %v", logScope, err)
 		return "", fmt.Errorf("list remote processes: %w", err)
 	}
 
 	processes, err := parsePSOutput(append([]byte("PID PPID COMMAND\n"), out...))
 	if err != nil {
-		log.Printf("%s parse remote processes failed: %v", debugScope, err)
+		log.Printf("%s parse remote processes failed: %v", logScope, err)
 		return "", err
 	}
 
 	agentPID, ok := newestInteractiveAgentDescendantPID(processes, rootPID)
 	if !ok {
-		log.Printf("%s no interactive codex/claude process found beneath root_pid=%d", debugScope, rootPID)
+		log.Printf("%s no interactive codex/claude process found beneath root_pid=%d", logScope, rootPID)
 		return "", nil
 	}
 	if proc, found := processByPID(processes, agentPID); found {
-		log.Printf("%s selected interactive agent pid=%d command=%q", debugScope, agentPID, proc.Command)
+		log.Printf("%s selected interactive agent pid=%d command=%q", logScope, agentPID, proc.Command)
 	}
 
 	sessionCWD, sessionErr := remoteCodexSessionCWD(
 		run,
-		debugScope,
+		logScope,
 		processes,
 		agentPID,
 	)
 	if sessionErr == nil && sessionCWD != "" {
-		log.Printf("%s resolved active workdir from codex session log: %q", debugScope, sessionCWD)
+		log.Printf("%s resolved active workdir from codex session log: %q", logScope, sessionCWD)
 		return sessionCWD, nil
 	} else if sessionErr != nil {
-		log.Printf("%s codex session workdir lookup failed: %v", debugScope, sessionErr)
+		log.Printf("%s codex session workdir lookup failed: %v", logScope, sessionErr)
 	} else {
-		log.Printf("%s no codex session-log workdir found; falling back to descendant cwd scan", debugScope)
+		log.Printf("%s no codex session-log workdir found; falling back to descendant cwd scan", logScope)
 	}
 
-	cwd, err := resolveRemoteInteractiveAgentWorkdir(debugScope, run, processes, agentPID, baseCWD)
+	cwd, err := resolveRemoteInteractiveAgentWorkdir(logScope, run, processes, agentPID, baseCWD)
 	if err != nil {
-		log.Printf("%s descendant cwd resolution failed: %v", debugScope, err)
+		log.Printf("%s descendant cwd resolution failed: %v", logScope, err)
 		return "", err
 	}
 	if cwd == "" {
-		log.Printf("%s descendant cwd scan found no override; keeping base_cwd=%q", debugScope, baseCWD)
+		log.Printf("%s descendant cwd scan found no override; keeping base_cwd=%q", logScope, baseCWD)
 	} else {
-		log.Printf("%s descendant cwd scan selected %q", debugScope, cwd)
+		log.Printf("%s descendant cwd scan selected %q", logScope, cwd)
 	}
 	return cwd, nil
 }
 
 func resolveRemoteInteractiveAgentWorkdir(
-	debugScope string,
+	logScope string,
 	run remoteOutputFunc,
 	processes []processInfo,
 	agentPID int,
@@ -861,7 +861,7 @@ func resolveRemoteInteractiveAgentWorkdir(
 			agentCWD = cwd
 		}
 		if cwd != baseCWD {
-			log.Printf("%s descendant cwd candidate pid=%d cwd=%q", debugScope, pid, cwd)
+			log.Printf("%s descendant cwd candidate pid=%d cwd=%q", logScope, pid, cwd)
 			return cwd, nil
 		}
 	}
@@ -897,7 +897,7 @@ func remotePIDCWD(run remoteOutputFunc, pid int) (string, error) {
 
 func remoteCodexSessionCWD(
 	run remoteOutputFunc,
-	debugScope string,
+	logScope string,
 	processes []processInfo,
 	agentPID int,
 ) (string, error) {
@@ -908,28 +908,28 @@ func remoteCodexSessionCWD(
 
 	paths, err := remoteOpenFiles(run, agentPID)
 	if err != nil {
-		log.Printf("%s open files lookup failed pid=%d: %v", debugScope, agentPID, err)
+		log.Printf("%s open files lookup failed pid=%d: %v", logScope, agentPID, err)
 		return "", err
 	}
 	sessionPath, ok := codexSessionPath(paths)
 	if !ok {
-		log.Printf("%s no codex session log found for pid=%d", debugScope, agentPID)
+		log.Printf("%s no codex session log found for pid=%d", logScope, agentPID)
 		return "", nil
 	}
-	log.Printf("%s found codex session log for pid=%d path=%q", debugScope, agentPID, sessionPath)
+	log.Printf("%s found codex session log for pid=%d path=%q", logScope, agentPID, sessionPath)
 
 	out, err := run("cat " + shellQuotePath(sessionPath))
 	if err != nil {
-		log.Printf("%s reading codex session log failed path=%q: %v", debugScope, sessionPath, err)
+		log.Printf("%s reading codex session log failed path=%q: %v", logScope, sessionPath, err)
 		return "", err
 	}
 
 	cwd, err := parseCodexSessionCWD(out)
 	if err != nil {
-		log.Printf("%s parsing codex session log failed path=%q: %v", debugScope, sessionPath, err)
+		log.Printf("%s parsing codex session log failed path=%q: %v", logScope, sessionPath, err)
 		return "", err
 	}
-	log.Printf("%s parsed codex session workdir path=%q cwd=%q", debugScope, sessionPath, cwd)
+	log.Printf("%s parsed codex session workdir path=%q cwd=%q", logScope, sessionPath, cwd)
 	return cwd, nil
 }
 

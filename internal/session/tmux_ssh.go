@@ -183,7 +183,7 @@ func parseRemoteTmuxPaneInfo(out []byte) (int, string, error) {
 	return panePID, strings.TrimSpace(fields[1]), nil
 }
 
-func tmuxSSHActiveWorkdir(runner sshSessionRunner, debugScope, tmuxSession string) (string, error) {
+func tmuxSSHActiveWorkdir(runner sshSessionRunner, logScope, tmuxSession string) (string, error) {
 	out, err := runner.Output(
 		fmt.Sprintf(
 			"tmux display-message -p -t '%s' '#{pane_pid}\t#{pane_current_path}'",
@@ -191,22 +191,22 @@ func tmuxSSHActiveWorkdir(runner sshSessionRunner, debugScope, tmuxSession strin
 		),
 	)
 	if err != nil {
-		log.Printf("%s tmux pane info lookup failed: %v", debugScope, err)
+		log.Printf("%s tmux pane info lookup failed: %v", logScope, err)
 		return "", fmt.Errorf("tmux pane info over ssh: %w", err)
 	}
 	panePID, baseCWD, err := parseRemoteTmuxPaneInfo(out)
 	if err != nil {
-		log.Printf("%s %v", debugScope, err)
+		log.Printf("%s %v", logScope, err)
 		return "", err
 	}
-	log.Printf("%s active tmux pane pid=%d base_cwd=%q", debugScope, panePID, baseCWD)
+	log.Printf("%s active tmux pane pid=%d base_cwd=%q", logScope, panePID, baseCWD)
 
-	return activeRemoteWorkdir(runner, debugScope, baseCWD, panePID)
+	return activeRemoteWorkdir(runner, logScope, baseCWD, panePID)
 }
 
 func tmuxSSHActiveWorkdirFromSessionFactory(
 	newRunner func() (sshSessionRunner, error),
-	debugScope, tmuxSession string,
+	logScope, tmuxSession string,
 ) (string, error) {
 	paneRunner, err := newRunner()
 	if err != nil {
@@ -221,19 +221,19 @@ func tmuxSSHActiveWorkdirFromSessionFactory(
 		),
 	)
 	if err != nil {
-		log.Printf("%s tmux pane info lookup failed: %v", debugScope, err)
+		log.Printf("%s tmux pane info lookup failed: %v", logScope, err)
 		return "", fmt.Errorf("tmux pane info over ssh: %w", err)
 	}
 	panePID, baseCWD, err := parseRemoteTmuxPaneInfo(out)
 	if err != nil {
-		log.Printf("%s %v", debugScope, err)
+		log.Printf("%s %v", logScope, err)
 		return "", err
 	}
-	log.Printf("%s active tmux pane pid=%d base_cwd=%q", debugScope, panePID, baseCWD)
+	log.Printf("%s active tmux pane pid=%d base_cwd=%q", logScope, panePID, baseCWD)
 
 	return activeRemoteWorkdirWithOutput(
 		outputFromSessionFactory(newRunner),
-		debugScope,
+		logScope,
 		baseCWD,
 		panePID,
 	)
