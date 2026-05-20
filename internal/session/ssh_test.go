@@ -553,6 +553,41 @@ func TestTmuxSSHActiveWorkdir_DebugLogging(t *testing.T) {
 	}
 }
 
+func TestTmuxSSHActiveWorkdirFromSessionFactory_UsesSeparateRunners(t *testing.T) {
+	runners := []*fakeSSHRunner{
+		{
+			outputs: map[string][]byte{
+				"tmux display-message -p -t 'demo' '#{pane_pid}\t#{pane_current_path}'": []byte("220\t/repo/main\n"),
+			},
+		},
+		{
+			outputs: map[string][]byte{
+				sshListProcessesCmd:                       []byte(" 220 1 zsh\n 230 220 codex resume --last\n"),
+				fmt.Sprintf(sshOpenFilesCmdTemplate, 230): []byte(""),
+				fmt.Sprintf(sshPIDCWDCmdTemplate, 230):    []byte("/tmp/remote-worktree\n"),
+			},
+		},
+	}
+	index := 0
+	factory := func() (sshSessionRunner, error) {
+		if index >= len(runners) {
+			return nil, errors.New("too many runner requests")
+		}
+		runner := runners[index]
+		index++
+		return runner, nil
+	}
+
+	cwd, err := tmuxSSHActiveWorkdirFromSessionFactory(
+		factory,
+		"test ssh_tmux",
+		"demo",
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "/tmp/remote-worktree", cwd)
+	assert.Equal(t, 2, index)
+}
+
 func TestRemoteGitContext_ReturnsBranchAndRepo(t *testing.T) {
 	const cwd = "/home/user/panemux"
 
