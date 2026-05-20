@@ -407,6 +407,41 @@ func TestRemoteShellPID_ParsesShellProcess(t *testing.T) {
 	assert.Equal(t, 220, pid)
 }
 
+func TestActiveRemoteWorkdirFromSessionFactory_UsesSeparateRunners(t *testing.T) {
+	runners := []*fakeSSHRunner{
+		{
+			outputs: map[string][]byte{
+				sshShellPIDCmd: []byte("220\n"),
+			},
+		},
+		{
+			outputs: map[string][]byte{
+				sshListProcessesCmd:                       []byte(" 220 1 zsh\n 230 220 codex resume --last\n"),
+				fmt.Sprintf(sshOpenFilesCmdTemplate, 230): []byte(""),
+				fmt.Sprintf(sshPIDCWDCmdTemplate, 230):    []byte("/tmp/remote-worktree\n"),
+			},
+		},
+	}
+	index := 0
+	factory := func() (sshSessionRunner, error) {
+		if index >= len(runners) {
+			return nil, errors.New("too many runner requests")
+		}
+		runner := runners[index]
+		index++
+		return runner, nil
+	}
+
+	cwd, err := activeRemoteWorkdirFromSessionFactory(
+		factory,
+		"test active remote",
+		"/repo/main",
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "/tmp/remote-worktree", cwd)
+	assert.Equal(t, 2, index)
+}
+
 func TestActiveRemoteWorkdir_RootPIDScopesRemoteAgents(t *testing.T) {
 	runner := &fakeSSHRunner{
 		outputs: map[string][]byte{

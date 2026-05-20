@@ -716,27 +716,17 @@ func (s *SSHSession) GetCWD() (string, error) {
 // interactive Codex or Claude process on the SSH connection, or empty string
 // when none is active.
 func (s *SSHSession) GetActiveWorkdir() (string, error) {
-	sess, err := s.client.NewSession()
-	if err != nil {
-		return "", fmt.Errorf("new ssh session for active workdir: %w", err)
-	}
-	defer sess.Close()
-
 	baseCWD, err := s.GetCWD()
 	if err != nil {
 		return "", err
 	}
 
-	rootPID, err := remoteShellPID(sess)
-	if err != nil {
-		return "", err
-	}
-
-	return activeRemoteWorkdir(
-		sess,
+	return activeRemoteWorkdirFromSessionFactory(
+		func() (sshSessionRunner, error) {
+			return s.client.NewSession()
+		},
 		fmt.Sprintf("session=%s type=%s", s.id, s.Type()),
 		baseCWD,
-		rootPID,
 	)
 }
 
@@ -765,6 +755,30 @@ func remoteShellPID(runner sshSessionRunner) (int, error) {
 		return 0, errors.New("remote shell pid missing")
 	}
 	return pid, nil
+}
+
+func activeRemoteWorkdirFromSessionFactory(
+	newRunner func() (sshSessionRunner, error),
+	debugScope, baseCWD string,
+) (string, error) {
+	rootRunner, err := newRunner()
+	if err != nil {
+		return "", fmt.Errorf("new ssh session for remote shell pid: %w", err)
+	}
+	defer rootRunner.Close()
+
+	rootPID, err := remoteShellPID(rootRunner)
+	if err != nil {
+		return "", err
+	}
+
+	workdirRunner, err := newRunner()
+	if err != nil {
+		return "", fmt.Errorf("new ssh session for active workdir scan: %w", err)
+	}
+	defer workdirRunner.Close()
+
+	return activeRemoteWorkdir(workdirRunner, debugScope, baseCWD, rootPID)
 }
 
 func activeRemoteWorkdir(runner sshSessionRunner, debugScope, baseCWD string, rootPID int) (string, error) {
