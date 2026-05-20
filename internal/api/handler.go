@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -760,6 +761,7 @@ func (h *Handler) GetGitInfo(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) resolvePreferredCWD(sess session.Session, cwd string) string {
 	baseCtx, err := h.inspectGitContextForSession(sess, cwd)
 	if err != nil {
+		log.Printf("git info base context lookup failed: %v", err)
 		return cwd
 	}
 
@@ -770,16 +772,31 @@ func (h *Handler) resolvePreferredCWD(sess session.Session, cwd string) string {
 
 	candidate, err := activeGetter.GetActiveWorkdir()
 	if err != nil || candidate == "" {
+		if err != nil {
+			log.Printf("git info active workdir lookup failed: %v", err)
+		}
 		return cwd
 	}
 
 	ctx, err := h.inspectGitContextForSession(sess, candidate)
 	if err != nil {
+		log.Printf("git info active workdir candidate context lookup failed: %v", err)
 		return cwd
 	}
 	if ctx.CommonDir == baseCtx.CommonDir && ctx.Root != baseCtx.Root {
+		log.Printf(
+			"git info selected active workdir branch transition %q -> %q",
+			baseCtx.Branch,
+			ctx.Branch,
+		)
 		return candidate
 	}
+
+	log.Printf(
+		"git info ignored active workdir candidate (same_root=%t same_common_dir=%t)",
+		ctx.Root == baseCtx.Root,
+		ctx.CommonDir == baseCtx.CommonDir,
+	)
 
 	return cwd
 }
