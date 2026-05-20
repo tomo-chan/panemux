@@ -1,7 +1,6 @@
 package session
 
 import (
-	"bytes"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
@@ -9,12 +8,9 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"testing"
-
-	"panemux/internal/debuglog"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -499,46 +495,6 @@ func TestTmuxSSHActiveWorkdir_WhenPanePIDIsCodex_PrefersCodexExecCommandWorkdir(
 	cwd, err := tmuxSSHActiveWorkdir(runner, "test ssh_tmux", "demo")
 	require.NoError(t, err)
 	assert.Equal(t, "/tmp/remote-root-codex-worktree", cwd)
-}
-
-func TestTmuxSSHActiveWorkdir_DebugLogging(t *testing.T) {
-	var buf bytes.Buffer
-	prevEnabled := debuglog.Enabled()
-	debuglog.SetEnabled(true)
-	debuglog.SetLogger(log.New(&buf, "", 0))
-	t.Cleanup(func() {
-		debuglog.SetEnabled(prevEnabled)
-		debuglog.SetLogger(nil)
-	})
-
-	sessionPath := "/home/user/.codex/sessions/2026/05/17/session.jsonl"
-	runner := &fakeSSHRunner{
-		outputs: map[string][]byte{
-			"tmux display-message -p -t 'demo' '#{pane_pid}\t#{pane_current_path}'": []byte("220\t/repo/main\n"),
-			sshListProcessesCmd:                       []byte(" 220 1 zsh\n 230 220 codex resume --last\n"),
-			fmt.Sprintf(sshOpenFilesCmdTemplate, 230): []byte(sessionPath + "\n"),
-			"cat " + shellQuotePath(sessionPath): []byte(
-				"{\"type\":\"session_meta\",\"payload\":{\"cwd\":\"/repo/main\"}}\n" +
-					"{\"type\":\"turn_context\",\"payload\":{\"cwd\":\"/repo/main\"}}\n" +
-					codexExecCommandRecord(t, "go test ./...", "/tmp/remote-tmux-worktree-from-command"),
-			),
-		},
-	}
-
-	cwd, err := tmuxSSHActiveWorkdir(runner, "session=ssh-tmux type=ssh_tmux tmux_session=demo", "demo")
-	require.NoError(t, err)
-	assert.Equal(t, "/tmp/remote-tmux-worktree-from-command", cwd)
-
-	logs := buf.String()
-	for _, want := range []string{
-		"tmux active pane pid=220 base_cwd=\"/repo/main\"",
-		"selected agent pid=230 command=\"codex resume --last\"",
-		"found codex session log pid=230",
-		"parsed codex session workdir",
-		"cwd=\"/tmp/remote-tmux-worktree-from-command\"",
-	} {
-		assert.Contains(t, logs, want)
-	}
 }
 
 func TestTmuxSSHActiveWorkdirFromSessionFactory_UsesSeparateRunners(t *testing.T) {

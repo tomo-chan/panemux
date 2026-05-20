@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"io/fs"
-	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -21,7 +20,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"panemux/internal/config"
-	"panemux/internal/debuglog"
 	"panemux/internal/session"
 )
 
@@ -1808,62 +1806,6 @@ func TestGetGitInfo_RemoteActiveWorkdir_PrefersRemoteWorktreeBranch(t *testing.T
 	assert.True(t, resp.IsGit)
 	assert.Equal(t, "feature/remote-worktree", resp.Branch)
 	assert.Equal(t, "panemux", resp.Repo)
-}
-
-func TestResolvePreferredCWD_DebugLogging(t *testing.T) {
-	var buf bytes.Buffer
-	prevEnabled := debuglog.Enabled()
-	debuglog.SetEnabled(true)
-	debuglog.SetLogger(log.New(&buf, "", 0))
-	t.Cleanup(func() {
-		debuglog.SetEnabled(prevEnabled)
-		debuglog.SetLogger(nil)
-	})
-
-	h := NewHandler(defaultTestConfig(), session.NewManager())
-	cwd := h.resolvePreferredCWD(newDebugRemoteGitSession(), "/home/demo/panemux")
-	assert.Equal(t, "/home/demo/panemux-worktree", cwd)
-
-	logs := buf.String()
-	for _, want := range []string{
-		"resolvePreferredCWD start cwd=\"/home/demo/panemux\"",
-		"base git context root=\"/home/demo/panemux\"",
-		"common_dir=\"/home/demo/panemux/.git\" branch=\"main\"",
-		"active workdir candidate=\"/home/demo/panemux-worktree\"",
-		"candidate git context root=\"/home/demo/panemux-worktree\"",
-		"branch=\"feature/remote-worktree\"",
-		"selected candidate cwd=\"/home/demo/panemux-worktree\"",
-	} {
-		assert.Contains(t, logs, want)
-	}
-}
-
-func newDebugRemoteGitSession() *mockRemoteGitSession {
-	const (
-		remoteRepo     = "/home/demo/panemux"
-		remoteWorktree = "/home/demo/panemux-worktree"
-		commonDir      = "/home/demo/panemux/.git"
-	)
-
-	return &mockRemoteGitSession{
-		mockSession:   mockSession{id: "ssh-worktree", typ: session.TypeSSHTmux},
-		cwd:           remoteRepo,
-		activeWorkdir: remoteWorktree,
-		gitContexts: map[string]session.GitContext{
-			remoteRepo: {
-				Branch:    "main",
-				CommonDir: commonDir,
-				Repo:      "panemux",
-				Root:      remoteRepo,
-			},
-			remoteWorktree: {
-				Branch:    "feature/remote-worktree",
-				CommonDir: commonDir,
-				Repo:      "panemux",
-				Root:      remoteWorktree,
-			},
-		},
-	}
 }
 
 func TestLookupPRInfo_RemoteSessionWithoutOriginSkipsLookup(t *testing.T) {

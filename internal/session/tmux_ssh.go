@@ -3,12 +3,11 @@ package session
 import (
 	"fmt"
 	"io"
+	"log"
 	"regexp"
 	"strconv"
 	"strings"
 	"sync"
-
-	"panemux/internal/debuglog"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -178,22 +177,22 @@ func tmuxSSHActiveWorkdir(runner sshSessionRunner, debugScope, tmuxSession strin
 		),
 	)
 	if err != nil {
-		debuglog.Debugf("%s tmux pane info lookup failed err=%v", debugScope, err)
+		log.Printf("%s tmux pane info lookup failed: %v", debugScope, err)
 		return "", fmt.Errorf("tmux pane info over ssh: %w", err)
 	}
 	fields := strings.SplitN(strings.TrimSpace(string(out)), "\t", 2)
 	if len(fields) != 2 {
-		debuglog.Debugf("%s parse tmux pane info failed raw=%q", debugScope, strings.TrimSpace(string(out)))
+		log.Printf("%s tmux pane info parse failed raw=%q", debugScope, strings.TrimSpace(string(out)))
 		return "", fmt.Errorf("parse remote tmux pane info: unexpected output %q", strings.TrimSpace(string(out)))
 	}
 
 	panePID, err := strconv.Atoi(strings.TrimSpace(fields[0]))
 	if err != nil {
-		debuglog.Debugf("%s parse tmux pane pid failed raw=%q err=%v", debugScope, strings.TrimSpace(fields[0]), err)
+		log.Printf("%s tmux pane pid parse failed raw=%q: %v", debugScope, strings.TrimSpace(fields[0]), err)
 		return "", fmt.Errorf("parse remote tmux pane pid: %w", err)
 	}
 	baseCWD := strings.TrimSpace(fields[1])
-	debuglog.Debugf("%s tmux active pane pid=%d base_cwd=%q", debugScope, panePID, baseCWD)
+	log.Printf("%s active tmux pane pid=%d base_cwd=%q", debugScope, panePID, baseCWD)
 
 	return activeRemoteWorkdir(runner, debugScope, baseCWD, panePID)
 }
@@ -215,22 +214,22 @@ func tmuxSSHActiveWorkdirFromSessionFactory(
 		),
 	)
 	if err != nil {
-		debuglog.Debugf("%s tmux pane info lookup failed err=%v", debugScope, err)
+		log.Printf("%s tmux pane info lookup failed: %v", debugScope, err)
 		return "", fmt.Errorf("tmux pane info over ssh: %w", err)
 	}
 	fields := strings.SplitN(strings.TrimSpace(string(out)), "\t", 2)
 	if len(fields) != 2 {
-		debuglog.Debugf("%s parse tmux pane info failed raw=%q", debugScope, strings.TrimSpace(string(out)))
+		log.Printf("%s tmux pane info parse failed raw=%q", debugScope, strings.TrimSpace(string(out)))
 		return "", fmt.Errorf("parse remote tmux pane info: unexpected output %q", strings.TrimSpace(string(out)))
 	}
 
 	panePID, err := strconv.Atoi(strings.TrimSpace(fields[0]))
 	if err != nil {
-		debuglog.Debugf("%s parse tmux pane pid failed raw=%q err=%v", debugScope, strings.TrimSpace(fields[0]), err)
+		log.Printf("%s tmux pane pid parse failed raw=%q: %v", debugScope, strings.TrimSpace(fields[0]), err)
 		return "", fmt.Errorf("parse remote tmux pane pid: %w", err)
 	}
 	baseCWD := strings.TrimSpace(fields[1])
-	debuglog.Debugf("%s tmux active pane pid=%d base_cwd=%q", debugScope, panePID, baseCWD)
+	log.Printf("%s active tmux pane pid=%d base_cwd=%q", debugScope, panePID, baseCWD)
 
 	return activeRemoteWorkdirWithOutput(
 		outputFromSessionFactory(newRunner),

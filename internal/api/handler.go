@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -23,7 +24,6 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"panemux/internal/config"
-	"panemux/internal/debuglog"
 	"panemux/internal/session"
 	"panemux/internal/sshconfig"
 )
@@ -759,57 +759,43 @@ func (h *Handler) GetGitInfo(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) resolvePreferredCWD(sess session.Session, cwd string) string {
-	debugScope := fmt.Sprintf("session=%s type=%s", sess.ID(), sess.Type())
-	debuglog.Debugf("%s resolvePreferredCWD start cwd=%q", debugScope, cwd)
-
 	baseCtx, err := h.inspectGitContextForSession(sess, cwd)
 	if err != nil {
-		debuglog.Debugf("%s inspect base git context failed cwd=%q err=%v", debugScope, cwd, err)
+		log.Printf("git info base context lookup failed: %v", err)
 		return cwd
 	}
-	debuglog.Debugf(
-		"%s base git context root=%q common_dir=%q branch=%q",
-		debugScope,
-		baseCtx.Root,
-		baseCtx.CommonDir,
-		baseCtx.Branch,
-	)
 
 	activeGetter, ok := sess.(session.ActiveWorkdirGetter)
 	if !ok {
-		debuglog.Debugf("%s no active workdir getter; using cwd=%q", debugScope, cwd)
 		return cwd
 	}
 
 	candidate, err := activeGetter.GetActiveWorkdir()
 	if err != nil || candidate == "" {
-		debuglog.Debugf("%s active workdir unavailable candidate=%q err=%v", debugScope, candidate, err)
+		if err != nil {
+			log.Printf("git info active workdir lookup failed: %v", err)
+		}
 		return cwd
 	}
-	debuglog.Debugf("%s active workdir candidate=%q", debugScope, candidate)
 
 	ctx, err := h.inspectGitContextForSession(sess, candidate)
 	if err != nil {
-		debuglog.Debugf("%s inspect candidate git context failed candidate=%q err=%v", debugScope, candidate, err)
+		log.Printf("git info active workdir candidate context lookup failed: %v", err)
 		return cwd
 	}
-	debuglog.Debugf(
-		"%s candidate git context root=%q common_dir=%q branch=%q",
-		debugScope,
-		ctx.Root,
-		ctx.CommonDir,
-		ctx.Branch,
-	)
 	if ctx.CommonDir == baseCtx.CommonDir && ctx.Root != baseCtx.Root {
-		debuglog.Debugf("%s selected candidate cwd=%q", debugScope, candidate)
+		log.Printf(
+			"git info selected active workdir branch transition %q -> %q",
+			baseCtx.Branch,
+			ctx.Branch,
+		)
 		return candidate
 	}
-	debuglog.Debugf(
-		"%s rejected candidate cwd=%q common_dir_match=%t root_changed=%t",
-		debugScope,
-		candidate,
+
+	log.Printf(
+		"git info ignored active workdir candidate (same_root=%t same_common_dir=%t)",
+		ctx.Root == baseCtx.Root,
 		ctx.CommonDir == baseCtx.CommonDir,
-		ctx.Root != baseCtx.Root,
 	)
 
 	return cwd
