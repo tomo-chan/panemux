@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.4](https://github.com/tomo-chan/panemux/compare/v0.17.3...v0.17.4) (2026-05-20)
+
+
+### Bug Fixes
+
+* detect ssh tmux git-info worktree correctly ([#106](https://github.com/tomo-chan/panemux/issues/106)) ([3621b00](https://github.com/tomo-chan/panemux/commit/3621b00662a0458cb54e3c48d721e30bd4df2eb7))
+
 ## [0.17.3](https://github.com/tomo-chan/panemux/compare/v0.17.2...v0.17.3) (2026-05-20)
 
 
