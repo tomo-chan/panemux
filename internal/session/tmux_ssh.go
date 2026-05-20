@@ -232,8 +232,8 @@ func tmuxSSHActiveWorkdirFromSessionFactory(
 	baseCWD := strings.TrimSpace(fields[1])
 	debuglog.Debugf("%s tmux active pane pid=%d base_cwd=%q", debugScope, panePID, baseCWD)
 
-	return activeRemoteWorkdirWithRunnerFactory(
-		newRunner,
+	return activeRemoteWorkdirWithOutput(
+		outputFromSessionFactory(newRunner),
 		debugScope,
 		baseCWD,
 		panePID,

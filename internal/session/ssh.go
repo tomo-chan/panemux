@@ -683,60 +683,19 @@ const sshGetCWDCmd = `PID=$(pgrep -P $PPID -o 2>/dev/null) && [ -n "$PID" ] && `
 	`lsof -a -p $PID -d cwd -Fn 2>/dev/null | awk '/^n/{print substr($0,2)}'; } || ` +
 	`pwd`
 
+const sshListProcessesCmd = `ps -Ao pid=,ppid=,command=`
 const sshShellPIDCmd = `pgrep -P $PPID -o 2>/dev/null`
+const sshOpenFilesCmdTemplate = `{ ls -1 /proc/%[1]d/fd 2>/dev/null | ` +
+	`while read -r fd; do readlink /proc/%[1]d/fd/"$fd" 2>/dev/null; done; } || ` +
+	`{ lsof -a -p %[1]d -Fn 2>/dev/null | awk '/^n/{print substr($0,2)}'; }`
+const sshPIDCWDCmdTemplate = `{ readlink /proc/%[1]d/cwd 2>/dev/null || ` +
+	`lsof -a -p %[1]d -d cwd -Fn 2>/dev/null | awk '/^n/{print substr($0,2)}'; }`
 const sshGitContextCmdTemplate = `cd %[1]s && ` +
 	`root=$(git rev-parse --show-toplevel) && ` +
 	`common=$(git rev-parse --path-format=absolute --git-common-dir) && ` +
 	`branch=$(git branch --show-current 2>/dev/null || true) && ` +
 	`origin=$(git config --get remote.origin.url 2>/dev/null || true) && ` +
 	`printf '%%s\n%%s\n%%s\n%%s\n' "$root" "$common" "$branch" "$origin"`
-
-var sshAgentProbeCmdTemplate = strings.Join([]string{
-	`root_pid=%[1]d; `,
-	`ps -Ao pid=,ppid=,command= | awk -v root="$root_pid" '`,
-	`function is_codex(cmd, n, a, bin, i) { `,
-	`n = split(cmd, a, " "); if (n < 1) return 0; `,
-	`bin = a[1]; sub(/^.*\//, "", bin); if (tolower(bin) != "codex") return 0; `,
-	`for (i = 2; i <= n; i++) if (a[i] == "exec") return 0; return 1 } `,
-	`function is_claude(cmd, n, a, bin, i) { `,
-	`n = split(cmd, a, " "); if (n < 1) return 0; `,
-	`bin = a[1]; sub(/^.*\//, "", bin); if (tolower(bin) != "claude") return 0; `,
-	`for (i = 2; i <= n; i++) if (a[i] == "-p" || a[i] == "--print") return 0; return 1 } `,
-	`{ pid = $1; ppid = $2; cmd = $0; `,
-	`sub(/^[[:space:]]*[0-9]+[[:space:]]+[0-9]+[[:space:]]+/, "", cmd); `,
-	`parent[pid] = ppid; command[pid] = cmd } `,
-	`END { changed = 1; seen[root] = 1; `,
-	`while (changed) { changed = 0; `,
-	`for (pid in parent) if (seen[parent[pid]] && !seen[pid]) { seen[pid] = 1; changed = 1 } } `,
-	`best = 0; `,
-	`for (pid in seen) if (is_codex(command[pid]) || is_claude(command[pid])) if (pid + 0 > best + 0) best = pid; `,
-	`if (best) printf "AGENT_PID\t%%s\nAGENT_CMD\t%%s\n", best, command[best] }'`,
-}, "")
-
-var sshAgentDetailsProbeCmdTemplate = strings.Join([]string{
-	`agent_pid=%[1]d; `,
-	`session_log=$({ ls -1 "/proc/$agent_pid/fd" 2>/dev/null | `,
-	`while read -r fd; do readlink "/proc/$agent_pid/fd/$fd" 2>/dev/null; done; } `,
-	`|| { lsof -a -p "$agent_pid" -Fn 2>/dev/null | awk '/^n/{print substr($0,2)}'; }) || true; `,
-	`session_log=$(printf '%%s\n' "$session_log" | awk '/\/\.codex\/sessions\/.*\.jsonl$$/ { print; exit }'); `,
-	`if [ -n "$session_log" ]; then printf 'SESSION_LOG\t%%s\n' "$session_log"; `,
-	`workdir=$(awk '/"type":"response_item"/ && /"name":"exec_command"/ && /"workdir":"/ { `,
-	`if (match($0, /"workdir":"([^"]+)"/, m)) last=m[1] } `,
-	`/"type":"turn_context"/ && /"cwd":"/ { if (match($0, /"cwd":"([^"]+)"/, m)) turn=m[1] } `,
-	`/"type":"session_meta"/ && /"cwd":"/ { if (!meta && match($0, /"cwd":"([^"]+)"/, m)) meta=m[1] } `,
-	`END { if (last) print last; `,
-	`else if (turn) print turn; else if (meta) print meta }' "$session_log" 2>/dev/null) || true; `,
-	`if [ -n "$workdir" ]; then printf 'WORKDIR\t%%s\nSOURCE\tsession_log\n' "$workdir"; fi; fi; `,
-	`ps -Ao pid=,ppid=,command= 2>/dev/null | `,
-	`awk -v root="$agent_pid" '{ parent[$1] = $2 } `,
-	`END { changed = 1; seen[root] = 1; `,
-	`while (changed) { changed = 0; `,
-	`for (pid in parent) if (seen[parent[pid]] && !seen[pid]) { seen[pid] = 1; changed = 1 } } `,
-	`for (pid in seen) print pid }' | sort -rn | `,
-	`while read -r pid; do cwd=$({ readlink "/proc/$pid/cwd" 2>/dev/null; } `,
-	`|| { lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | awk '/^n/{print substr($0,2)}'; }) || true; `,
-	`if [ -n "$cwd" ]; then printf 'PID_CWD\t%%s\t%%s\n' "$pid" "$cwd"; fi; done`,
-}, "")
 
 // GetCWD returns the current working directory of the interactive shell by
 // inspecting the sshd process tree. See sshGetCWDCmd for the full rationale.
@@ -813,8 +772,8 @@ func activeRemoteWorkdirFromSessionFactory(
 		return "", err
 	}
 
-	return activeRemoteWorkdirWithRunnerFactory(
-		newRunner,
+	return activeRemoteWorkdirWithOutput(
+		outputFromSessionFactory(newRunner),
 		debugScope,
 		baseCWD,
 		rootPID,
@@ -822,84 +781,152 @@ func activeRemoteWorkdirFromSessionFactory(
 }
 
 func activeRemoteWorkdir(runner sshSessionRunner, debugScope, baseCWD string, rootPID int) (string, error) {
-	return activeRemoteWorkdirWithRunnerFactory(
-		func() (sshSessionRunner, error) { return runner, nil },
-		debugScope,
-		baseCWD,
-		rootPID,
-	)
+	return activeRemoteWorkdirWithOutput(runner.Output, debugScope, baseCWD, rootPID)
 }
 
-func activeRemoteWorkdirWithRunnerFactory(
-	newRunner func() (sshSessionRunner, error),
+func activeRemoteWorkdirWithOutput(
+	run remoteOutputFunc,
 	debugScope, baseCWD string,
 	rootPID int,
 ) (string, error) {
 	debuglog.Debugf("%s activeRemoteWorkdir start base_cwd=%q root_pid=%d", debugScope, baseCWD, rootPID)
 
-	agentProbe, err := runRemoteProbe(newRunner, remoteAgentProbeCmd(rootPID))
+	out, err := run(sshListProcessesCmd)
 	if err != nil {
-		debuglog.Debugf("%s agent probe failed err=%v", debugScope, err)
-		return "", fmt.Errorf("agent probe: %w", err)
+		debuglog.Debugf("%s list remote processes failed err=%v", debugScope, err)
+		return "", fmt.Errorf("list remote processes: %w", err)
 	}
-	agentPID, agentCmd, ok, err := parseRemoteAgentProbe(agentProbe)
+
+	processes, err := parsePSOutput(append([]byte("PID PPID COMMAND\n"), out...))
 	if err != nil {
-		debuglog.Debugf("%s parse remote agent probe failed err=%v", debugScope, err)
+		debuglog.Debugf("%s parse remote processes failed err=%v", debugScope, err)
 		return "", err
 	}
+
+	agentPID, ok := newestInteractiveAgentDescendantPID(processes, rootPID)
 	if !ok {
 		debuglog.Debugf("%s no interactive agent descendant found", debugScope)
 		return "", nil
 	}
-	debuglog.Debugf("%s selected agent pid=%d command=%q", debugScope, agentPID, agentCmd)
-
-	detailsProbe, err := runRemoteProbe(newRunner, remoteAgentDetailsProbeCmd(agentPID))
-	if err != nil {
-		debuglog.Debugf("%s agent details probe failed err=%v", debugScope, err)
-		return "", fmt.Errorf("agent details probe: %w", err)
+	if proc, found := processByPID(processes, agentPID); found {
+		debuglog.Debugf("%s selected agent pid=%d command=%q", debugScope, agentPID, proc.Command)
 	}
-	details, err := parseRemoteAgentDetailsProbe(detailsProbe)
+
+	sessionCWD, sessionErr := remoteCodexSessionCWD(
+		run,
+		debugScope,
+		processes,
+		agentPID,
+	)
+	if sessionErr == nil && sessionCWD != "" {
+		debuglog.Debugf("%s using codex session workdir=%q", debugScope, sessionCWD)
+		return sessionCWD, nil
+	} else if sessionErr != nil {
+		debuglog.Debugf("%s codex session workdir lookup failed err=%v", debugScope, sessionErr)
+	} else {
+		debuglog.Debugf("%s codex session workdir unavailable; falling back to pid cwd scan", debugScope)
+	}
+
+	cwd, err := resolveRemoteInteractiveAgentWorkdir(run, processes, agentPID, baseCWD)
 	if err != nil {
-		debuglog.Debugf("%s parse remote agent details probe failed err=%v", debugScope, err)
+		debuglog.Debugf("%s descendant cwd resolution failed err=%v", debugScope, err)
 		return "", err
 	}
-	if details.SessionLog != "" {
-		debuglog.Debugf("%s found codex session log pid=%d path=%q", debugScope, agentPID, details.SessionLog)
-	}
-	if details.Workdir != "" {
-		debuglog.Debugf("%s parsed codex session workdir path=%q cwd=%q", debugScope, details.SessionLog, details.Workdir)
-		debuglog.Debugf("%s using codex session workdir=%q", debugScope, details.Workdir)
-		return details.Workdir, nil
-	}
-	debuglog.Debugf("%s codex session workdir unavailable; falling back to pid cwd scan", debugScope)
-
-	cwd := resolveRemoteInteractiveAgentWorkdir(debugScope, details.PIDCWDs, agentPID, baseCWD)
 	debuglog.Debugf("%s descendant cwd resolution selected=%q", debugScope, cwd)
 	return cwd, nil
 }
 
 func resolveRemoteInteractiveAgentWorkdir(
-	debugScope string,
-	pidCWDs []remotePIDCWDEntry,
+	run remoteOutputFunc,
+	processes []processInfo,
 	agentPID int,
 	baseCWD string,
-) string {
+) (string, error) {
+	candidatePIDs := descendantPIDs(processes, agentPID)
+	sort.Slice(candidatePIDs, func(i, j int) bool {
+		return candidatePIDs[i] > candidatePIDs[j]
+	})
+
 	var agentCWD string
-	for _, entry := range pidCWDs {
-		cwd := entry.CWD
-		if entry.PID == agentPID {
+	for _, pid := range candidatePIDs {
+		cwd, err := remotePIDCWD(run, pid)
+		if err != nil || cwd == "" {
+			continue
+		}
+		if pid == agentPID {
 			agentCWD = cwd
 		}
 		if cwd != baseCWD {
-			debuglog.Debugf("%s descendant cwd candidate pid=%d cwd=%q", debugScope, entry.PID, cwd)
-			return cwd
+			return cwd, nil
 		}
 	}
 
 	if agentCWD != "" {
-		return agentCWD
+		return agentCWD, nil
 	}
-	return ""
+	return "", nil
+}
+
+type remoteOutputFunc func(string) ([]byte, error)
+
+func outputFromSessionFactory(
+	newRunner func() (sshSessionRunner, error),
+) remoteOutputFunc {
+	return func(cmd string) ([]byte, error) {
+		runner, err := newRunner()
+		if err != nil {
+			return nil, err
+		}
+		defer runner.Close()
+		return runner.Output(cmd)
+	}
+}
+
+func remotePIDCWD(run remoteOutputFunc, pid int) (string, error) {
+	out, err := run(fmt.Sprintf(sshPIDCWDCmdTemplate, pid))
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func remoteCodexSessionCWD(
+	run remoteOutputFunc,
+	debugScope string,
+	processes []processInfo,
+	agentPID int,
+) (string, error) {
+	proc, ok := processByPID(processes, agentPID)
+	if !ok || !isCodexCommand(proc.Command) {
+		debuglog.Debugf("%s agent pid=%d is not a codex command", debugScope, agentPID)
+		return "", nil
+	}
+
+	paths, err := remoteOpenFiles(run, agentPID)
+	if err != nil {
+		debuglog.Debugf("%s open files lookup failed pid=%d err=%v", debugScope, agentPID, err)
+		return "", err
+	}
+	sessionPath, ok := codexSessionPath(paths)
+	if !ok {
+		debuglog.Debugf("%s no codex session log found pid=%d", debugScope, agentPID)
+		return "", nil
+	}
+	debuglog.Debugf("%s found codex session log pid=%d path=%q", debugScope, agentPID, sessionPath)
+
+	out, err := run("cat " + shellQuotePath(sessionPath))
+	if err != nil {
+		debuglog.Debugf("%s read codex session log failed path=%q err=%v", debugScope, sessionPath, err)
+		return "", err
+	}
+
+	cwd, err := parseCodexSessionCWD(out)
+	if err != nil {
+		debuglog.Debugf("%s parse codex session log failed path=%q err=%v", debugScope, sessionPath, err)
+		return "", err
+	}
+	debuglog.Debugf("%s parsed codex session workdir path=%q cwd=%q", debugScope, sessionPath, cwd)
+	return cwd, nil
 }
 
 func remoteGitContext(runner sshSessionRunner, cwd string) (GitContext, error) {
@@ -927,103 +954,17 @@ func remoteGitContext(runner sshSessionRunner, cwd string) (GitContext, error) {
 	}, nil
 }
 
-type remotePIDCWDEntry struct {
-	CWD string
-	PID int
-}
-
-type remoteAgentDetails struct {
-	SessionLog string
-	Source     string
-	Workdir    string
-	PIDCWDs    []remotePIDCWDEntry
-}
-
-func remoteAgentProbeCmd(rootPID int) string {
-	return fmt.Sprintf(sshAgentProbeCmdTemplate, rootPID)
-}
-
-func remoteAgentDetailsProbeCmd(agentPID int) string {
-	return fmt.Sprintf(sshAgentDetailsProbeCmdTemplate, agentPID)
-}
-
-func runRemoteProbe(newRunner func() (sshSessionRunner, error), cmd string) ([]byte, error) {
-	runner, err := newRunner()
+func remoteOpenFiles(run remoteOutputFunc, pid int) ([]string, error) {
+	out, err := run(fmt.Sprintf(sshOpenFilesCmdTemplate, pid))
 	if err != nil {
 		return nil, err
 	}
-	defer runner.Close()
-	return runner.Output(cmd)
-}
-
-func parseRemoteAgentProbe(out []byte) (int, string, bool, error) {
-	var agentPID int
-	var agentCmd string
+	paths := []string{}
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		fields := strings.SplitN(line, "\t", 2)
-		if len(fields) != 2 {
-			return 0, "", false, fmt.Errorf("parse remote agent probe line %q", line)
-		}
-		switch fields[0] {
-		case "AGENT_PID":
-			pid, err := strconv.Atoi(strings.TrimSpace(fields[1]))
-			if err != nil {
-				return 0, "", false, fmt.Errorf("parse remote agent pid %q: %w", fields[1], err)
-			}
-			agentPID = pid
-		case "AGENT_CMD":
-			agentCmd = fields[1]
+		if line != "" {
+			paths = append(paths, line)
 		}
 	}
-	if agentPID == 0 {
-		return 0, "", false, nil
-	}
-	return agentPID, agentCmd, true, nil
-}
-
-func parseRemoteAgentDetailsProbe(out []byte) (remoteAgentDetails, error) {
-	var details remoteAgentDetails
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		fields := strings.Split(line, "\t")
-		switch fields[0] {
-		case "SESSION_LOG":
-			if len(fields) != 2 {
-				return remoteAgentDetails{}, fmt.Errorf("parse session log line %q", line)
-			}
-			details.SessionLog = fields[1]
-		case "WORKDIR":
-			if len(fields) != 2 {
-				return remoteAgentDetails{}, fmt.Errorf("parse workdir line %q", line)
-			}
-			details.Workdir = fields[1]
-		case "SOURCE":
-			if len(fields) != 2 {
-				return remoteAgentDetails{}, fmt.Errorf("parse source line %q", line)
-			}
-			details.Source = fields[1]
-		case "PID_CWD":
-			if len(fields) != 3 {
-				return remoteAgentDetails{}, fmt.Errorf("parse pid cwd line %q", line)
-			}
-			pid, err := strconv.Atoi(strings.TrimSpace(fields[1]))
-			if err != nil {
-				return remoteAgentDetails{}, fmt.Errorf("parse pid cwd pid %q: %w", fields[1], err)
-			}
-			details.PIDCWDs = append(details.PIDCWDs, remotePIDCWDEntry{
-				PID: pid,
-				CWD: fields[2],
-			})
-		default:
-			return remoteAgentDetails{}, fmt.Errorf("unexpected remote agent details line %q", line)
-		}
-	}
-	return details, nil
+	return paths, nil
 }

@@ -334,7 +334,7 @@ func (f *fakeSSHRunner) Close() error { return nil }
 func TestActiveRemoteWorkdir_IgnoresNonInteractiveAgents(t *testing.T) {
 	runner := &fakeSSHRunner{
 		outputs: map[string][]byte{
-			remoteAgentProbeCmd(100): []byte(""),
+			sshListProcessesCmd: []byte(" 100 1 sh\n 120 100 codex exec\n 130 100 claude -p\n"),
 		},
 	}
 
@@ -347,11 +347,11 @@ func TestActiveRemoteWorkdir_PrefersRemoteCodexSessionCWD(t *testing.T) {
 	sessionPath := "/home/user/.codex/sessions/2026/05/17/session.jsonl"
 	runner := &fakeSSHRunner{
 		outputs: map[string][]byte{
-			remoteAgentProbeCmd(100): []byte("AGENT_PID\t220\nAGENT_CMD\tcodex resume --last\n"),
-			remoteAgentDetailsProbeCmd(220): []byte(
-				"SESSION_LOG\t" + sessionPath + "\n" +
-					"WORKDIR\t/tmp/remote-worktree\n" +
-					"SOURCE\tsession_log\n",
+			sshListProcessesCmd:                       []byte(" 100 1 sh\n 220 100 codex resume --last\n"),
+			fmt.Sprintf(sshOpenFilesCmdTemplate, 220): []byte(sessionPath + "\n"),
+			"cat " + shellQuotePath(sessionPath): []byte(
+				"{\"type\":\"session_meta\",\"payload\":{\"cwd\":\"/repo/main\"}}\n" +
+					"{\"type\":\"turn_context\",\"payload\":{\"cwd\":\"/tmp/remote-worktree\"}}\n",
 			),
 		},
 	}
@@ -365,11 +365,12 @@ func TestActiveRemoteWorkdir_PrefersRemoteCodexExecCommandWorkdir(t *testing.T) 
 	sessionPath := "/home/user/.codex/sessions/2026/05/17/session.jsonl"
 	runner := &fakeSSHRunner{
 		outputs: map[string][]byte{
-			remoteAgentProbeCmd(100): []byte("AGENT_PID\t220\nAGENT_CMD\tcodex resume --last\n"),
-			remoteAgentDetailsProbeCmd(220): []byte(
-				"SESSION_LOG\t" + sessionPath + "\n" +
-					"WORKDIR\t/tmp/remote-worktree-from-command\n" +
-					"SOURCE\tsession_log\n",
+			sshListProcessesCmd:                       []byte(" 100 1 sh\n 220 100 codex resume --last\n"),
+			fmt.Sprintf(sshOpenFilesCmdTemplate, 220): []byte(sessionPath + "\n"),
+			"cat " + shellQuotePath(sessionPath): []byte(
+				"{\"type\":\"session_meta\",\"payload\":{\"cwd\":\"/repo/main\"}}\n" +
+					"{\"type\":\"turn_context\",\"payload\":{\"cwd\":\"/repo/main\"}}\n" +
+					codexExecCommandRecord(t, "git status", "/tmp/remote-worktree-from-command"),
 			),
 		},
 	}
@@ -382,11 +383,10 @@ func TestActiveRemoteWorkdir_PrefersRemoteCodexExecCommandWorkdir(t *testing.T) 
 func TestActiveRemoteWorkdir_FallsBackToRemoteDescendantCWD(t *testing.T) {
 	runner := &fakeSSHRunner{
 		outputs: map[string][]byte{
-			remoteAgentProbeCmd(100): []byte("AGENT_PID\t220\nAGENT_CMD\tcodex\n"),
-			remoteAgentDetailsProbeCmd(220): []byte(
-				"PID_CWD\t230\t/tmp/remote-worktree\n" +
-					"PID_CWD\t220\t/repo/main\n",
-			),
+			sshListProcessesCmd:                       []byte(" 100 1 sh\n 220 100 codex\n 230 220 node helper\n"),
+			fmt.Sprintf(sshOpenFilesCmdTemplate, 220): []byte(""),
+			fmt.Sprintf(sshPIDCWDCmdTemplate, 230):    []byte("/tmp/remote-worktree\n"),
+			fmt.Sprintf(sshPIDCWDCmdTemplate, 220):    []byte("/repo/main\n"),
 		},
 	}
 
@@ -409,9 +409,10 @@ func TestRemoteShellPID_ParsesShellProcess(t *testing.T) {
 
 func TestActiveRemoteWorkdirFromSessionFactory_UsesSeparateRunners(t *testing.T) {
 	outputs := map[string][]byte{
-		sshShellPIDCmd:                  []byte("220\n"),
-		remoteAgentProbeCmd(220):        []byte("AGENT_PID\t230\nAGENT_CMD\tcodex resume --last\n"),
-		remoteAgentDetailsProbeCmd(230): []byte("PID_CWD\t230\t/tmp/remote-worktree\n"),
+		sshShellPIDCmd:      []byte("220\n"),
+		sshListProcessesCmd: []byte(" 220 1 zsh\n 230 220 codex resume --last\n"),
+		fmt.Sprintf(sshOpenFilesCmdTemplate, 230): []byte(""),
+		fmt.Sprintf(sshPIDCWDCmdTemplate, 230):    []byte("/tmp/remote-worktree\n"),
 	}
 	index := 0
 	factory := func() (sshSessionRunner, error) {
@@ -426,17 +427,16 @@ func TestActiveRemoteWorkdirFromSessionFactory_UsesSeparateRunners(t *testing.T)
 	)
 	require.NoError(t, err)
 	assert.Equal(t, "/tmp/remote-worktree", cwd)
-	assert.Equal(t, 3, index)
+	assert.Equal(t, 4, index)
 }
 
 func TestActiveRemoteWorkdir_RootPIDScopesRemoteAgents(t *testing.T) {
 	runner := &fakeSSHRunner{
 		outputs: map[string][]byte{
-			remoteAgentProbeCmd(100): []byte("AGENT_PID\t220\nAGENT_CMD\tcodex\n"),
-			remoteAgentDetailsProbeCmd(220): []byte(
-				"PID_CWD\t230\t/tmp/remote-worktree\n" +
-					"PID_CWD\t220\t/repo/main\n",
-			),
+			sshListProcessesCmd:                       []byte(" 100 1 sh\n 200 1 codex\n 220 100 codex\n 230 220 node helper\n"),
+			fmt.Sprintf(sshOpenFilesCmdTemplate, 220): []byte(""),
+			fmt.Sprintf(sshPIDCWDCmdTemplate, 230):    []byte("/tmp/remote-worktree\n"),
+			fmt.Sprintf(sshPIDCWDCmdTemplate, 220):    []byte("/repo/main\n"),
 		},
 	}
 
@@ -449,11 +449,10 @@ func TestTmuxSSHActiveWorkdir_UsesPanePIDAndBaseCWD(t *testing.T) {
 	runner := &fakeSSHRunner{
 		outputs: map[string][]byte{
 			"tmux display-message -p -t 'demo' '#{pane_pid}\t#{pane_current_path}'": []byte("220\t/repo/main\n"),
-			remoteAgentProbeCmd(220): []byte("AGENT_PID\t230\nAGENT_CMD\tcodex\n"),
-			remoteAgentDetailsProbeCmd(230): []byte(
-				"PID_CWD\t240\t/tmp/remote-worktree\n" +
-					"PID_CWD\t230\t/repo/main\n",
-			),
+			sshListProcessesCmd:                       []byte(" 220 1 zsh\n 230 220 codex\n 240 230 node helper\n"),
+			fmt.Sprintf(sshOpenFilesCmdTemplate, 230): []byte(""),
+			fmt.Sprintf(sshPIDCWDCmdTemplate, 240):    []byte("/tmp/remote-worktree\n"),
+			fmt.Sprintf(sshPIDCWDCmdTemplate, 230):    []byte("/repo/main\n"),
 		},
 	}
 
@@ -467,11 +466,12 @@ func TestTmuxSSHActiveWorkdir_PrefersCodexExecCommandWorkdir(t *testing.T) {
 	runner := &fakeSSHRunner{
 		outputs: map[string][]byte{
 			"tmux display-message -p -t 'demo' '#{pane_pid}\t#{pane_current_path}'": []byte("220\t/repo/main\n"),
-			remoteAgentProbeCmd(220): []byte("AGENT_PID\t230\nAGENT_CMD\tcodex resume --last\n"),
-			remoteAgentDetailsProbeCmd(230): []byte(
-				"SESSION_LOG\t" + sessionPath + "\n" +
-					"WORKDIR\t/tmp/remote-tmux-worktree-from-command\n" +
-					"SOURCE\tsession_log\n",
+			sshListProcessesCmd:                       []byte(" 220 1 zsh\n 230 220 codex resume --last\n"),
+			fmt.Sprintf(sshOpenFilesCmdTemplate, 230): []byte(sessionPath + "\n"),
+			"cat " + shellQuotePath(sessionPath): []byte(
+				"{\"type\":\"session_meta\",\"payload\":{\"cwd\":\"/repo/main\"}}\n" +
+					"{\"type\":\"turn_context\",\"payload\":{\"cwd\":\"/repo/main\"}}\n" +
+					codexExecCommandRecord(t, "go test ./...", "/tmp/remote-tmux-worktree-from-command"),
 			),
 		},
 	}
@@ -486,11 +486,12 @@ func TestTmuxSSHActiveWorkdir_WhenPanePIDIsCodex_PrefersCodexExecCommandWorkdir(
 	runner := &fakeSSHRunner{
 		outputs: map[string][]byte{
 			"tmux display-message -p -t 'demo' '#{pane_pid}\t#{pane_current_path}'": []byte("230\t/repo/main\n"),
-			remoteAgentProbeCmd(230): []byte("AGENT_PID\t230\nAGENT_CMD\tcodex resume --last\n"),
-			remoteAgentDetailsProbeCmd(230): []byte(
-				"SESSION_LOG\t" + sessionPath + "\n" +
-					"WORKDIR\t/tmp/remote-root-codex-worktree\n" +
-					"SOURCE\tsession_log\n",
+			sshListProcessesCmd:                       []byte(" 230 1 codex resume --last\n"),
+			fmt.Sprintf(sshOpenFilesCmdTemplate, 230): []byte(sessionPath + "\n"),
+			"cat " + shellQuotePath(sessionPath): []byte(
+				"{\"type\":\"session_meta\",\"payload\":{\"cwd\":\"/repo/main\"}}\n" +
+					"{\"type\":\"turn_context\",\"payload\":{\"cwd\":\"/repo/main\"}}\n" +
+					codexExecCommandRecord(t, "go test ./...", "/tmp/remote-root-codex-worktree"),
 			),
 		},
 	}
@@ -514,11 +515,12 @@ func TestTmuxSSHActiveWorkdir_DebugLogging(t *testing.T) {
 	runner := &fakeSSHRunner{
 		outputs: map[string][]byte{
 			"tmux display-message -p -t 'demo' '#{pane_pid}\t#{pane_current_path}'": []byte("220\t/repo/main\n"),
-			remoteAgentProbeCmd(220): []byte("AGENT_PID\t230\nAGENT_CMD\tcodex resume --last\n"),
-			remoteAgentDetailsProbeCmd(230): []byte(
-				"SESSION_LOG\t" + sessionPath + "\n" +
-					"WORKDIR\t/tmp/remote-tmux-worktree-from-command\n" +
-					"SOURCE\tsession_log\n",
+			sshListProcessesCmd:                       []byte(" 220 1 zsh\n 230 220 codex resume --last\n"),
+			fmt.Sprintf(sshOpenFilesCmdTemplate, 230): []byte(sessionPath + "\n"),
+			"cat " + shellQuotePath(sessionPath): []byte(
+				"{\"type\":\"session_meta\",\"payload\":{\"cwd\":\"/repo/main\"}}\n" +
+					"{\"type\":\"turn_context\",\"payload\":{\"cwd\":\"/repo/main\"}}\n" +
+					codexExecCommandRecord(t, "go test ./...", "/tmp/remote-tmux-worktree-from-command"),
 			),
 		},
 	}
@@ -542,8 +544,9 @@ func TestTmuxSSHActiveWorkdir_DebugLogging(t *testing.T) {
 func TestTmuxSSHActiveWorkdirFromSessionFactory_UsesSeparateRunners(t *testing.T) {
 	outputs := map[string][]byte{
 		"tmux display-message -p -t 'demo' '#{pane_pid}\t#{pane_current_path}'": []byte("220\t/repo/main\n"),
-		remoteAgentProbeCmd(220):        []byte("AGENT_PID\t230\nAGENT_CMD\tcodex resume --last\n"),
-		remoteAgentDetailsProbeCmd(230): []byte("PID_CWD\t230\t/tmp/remote-worktree\n"),
+		sshListProcessesCmd:                       []byte(" 220 1 zsh\n 230 220 codex resume --last\n"),
+		fmt.Sprintf(sshOpenFilesCmdTemplate, 230): []byte(""),
+		fmt.Sprintf(sshPIDCWDCmdTemplate, 230):    []byte("/tmp/remote-worktree\n"),
 	}
 	index := 0
 	factory := func() (sshSessionRunner, error) {
@@ -558,7 +561,7 @@ func TestTmuxSSHActiveWorkdirFromSessionFactory_UsesSeparateRunners(t *testing.T
 	)
 	require.NoError(t, err)
 	assert.Equal(t, "/tmp/remote-worktree", cwd)
-	assert.Equal(t, 3, index)
+	assert.Equal(t, 4, index)
 }
 
 func TestRemoteGitContext_ReturnsBranchAndRepo(t *testing.T) {
