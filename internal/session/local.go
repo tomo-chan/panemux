@@ -247,14 +247,15 @@ func parsePSOutput(out []byte) ([]processInfo, error) {
 }
 
 func newestInteractiveAgentDescendantPID(processes []processInfo, rootPID int) (int, bool) {
-	if proc, ok := processByPID(processes, rootPID); ok && isInteractiveAgentCommand(proc.Command) {
-		return rootPID, true
-	}
-
 	children := childProcessMap(processes)
 	stack := append([]processInfo(nil), children[rootPID]...)
-	var matched int
-	var ok bool
+	matched := 0
+	ok := false
+
+	if proc, found := processByPID(processes, rootPID); found && isInteractiveAgentCommand(proc.Command) {
+		matched = rootPID
+		ok = true
+	}
 
 	for len(stack) > 0 {
 		proc := stack[len(stack)-1]

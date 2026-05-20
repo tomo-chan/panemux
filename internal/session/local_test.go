@@ -193,6 +193,19 @@ func TestNewestInteractiveAgentDescendantPID_IgnoresNonInteractiveAgents(t *test
 	assert.Equal(t, 140, pid)
 }
 
+func TestNewestInteractiveAgentDescendantPID_PrefersNewerChildOverInteractiveRoot(t *testing.T) {
+	processes := []processInfo{
+		{PID: 100, PPID: 1, Command: "codex resume --last"},
+		{PID: 140, PPID: 100, Command: "claude"},
+		{PID: 150, PPID: 100, Command: "codex exec"},
+		{PID: 160, PPID: 100, Command: "codex"},
+	}
+
+	pid, ok := newestInteractiveAgentDescendantPID(processes, 100)
+	require.True(t, ok)
+	assert.Equal(t, 160, pid)
+}
+
 func TestDescendantPIDs(t *testing.T) {
 	processes := []processInfo{
 		{PID: 110, PPID: 100, Command: "/bin/zsh"},
