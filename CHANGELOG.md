@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.3](https://github.com/tomo-chan/panemux/compare/v0.17.2...v0.17.3) (2026-05-20)
+
+
+### Bug Fixes
+
+* detect codex root process in tmux worktrees ([#104](https://github.com/tomo-chan/panemux/issues/104)) ([da7c303](https://github.com/tomo-chan/panemux/commit/da7c3037ffc2d3958d2bbaf50e14220c6c4b8d67))
+
 ## [0.17.2](https://github.com/tomo-chan/panemux/compare/v0.17.1...v0.17.2) (2026-05-19)
 
 
