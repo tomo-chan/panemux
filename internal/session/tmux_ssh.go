@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 
+	"panemux/internal/debuglog"
+
 	"golang.org/x/crypto/ssh"
 )
 
@@ -153,7 +155,11 @@ func (s *TmuxSSHSession) GetActiveWorkdir() (string, error) {
 	}
 	defer sess.Close()
 
-	return tmuxSSHActiveWorkdir(sess, s.tmuxSession)
+	return tmuxSSHActiveWorkdir(
+		sess,
+		fmt.Sprintf("session=%s type=%s tmux_session=%s", s.id, s.Type(), s.tmuxSession),
+		s.tmuxSession,
+	)
 }
 
 // InspectGitContext resolves Git metadata on the remote host for the provided
@@ -168,23 +174,27 @@ func (s *TmuxSSHSession) InspectGitContext(cwd string) (GitContext, error) {
 	return remoteGitContext(sess, cwd)
 }
 
-func tmuxSSHActiveWorkdir(runner sshSessionRunner, tmuxSession string) (string, error) {
+func tmuxSSHActiveWorkdir(runner sshSessionRunner, debugScope, tmuxSession string) (string, error) {
 	panePIDOut, err := runner.Output(fmt.Sprintf("tmux display-message -p -t '%s' '#{pane_pid}'", tmuxSession))
 	if err != nil {
+		debuglog.Debugf("%s tmux pane pid lookup failed err=%v", debugScope, err)
 		return "", fmt.Errorf("tmux pane pid over ssh: %w", err)
 	}
 	panePID, err := strconv.Atoi(strings.TrimSpace(string(panePIDOut)))
 	if err != nil {
+		debuglog.Debugf("%s parse tmux pane pid failed raw=%q err=%v", debugScope, strings.TrimSpace(string(panePIDOut)), err)
 		return "", fmt.Errorf("parse remote tmux pane pid: %w", err)
 	}
 
 	baseCWDOut, err := runner.Output(fmt.Sprintf("tmux display-message -p -t '%s' '#{pane_current_path}'", tmuxSession))
 	if err != nil {
+		debuglog.Debugf("%s tmux pane cwd lookup failed err=%v", debugScope, err)
 		return "", fmt.Errorf("tmux display-message over ssh: %w", err)
 	}
 	baseCWD := strings.TrimSpace(string(baseCWDOut))
+	debuglog.Debugf("%s tmux active pane pid=%d base_cwd=%q", debugScope, panePID, baseCWD)
 
-	return activeRemoteWorkdir(runner, baseCWD, panePID)
+	return activeRemoteWorkdir(runner, debugScope, baseCWD, panePID)
 }
 
 func (s *TmuxSSHSession) Close() error {

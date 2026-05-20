@@ -20,6 +20,8 @@ import (
 	"sync"
 	"time"
 
+	"panemux/internal/debuglog"
+
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
 )
@@ -730,7 +732,12 @@ func (s *SSHSession) GetActiveWorkdir() (string, error) {
 		return "", err
 	}
 
-	return activeRemoteWorkdir(sess, baseCWD, rootPID)
+	return activeRemoteWorkdir(
+		sess,
+		fmt.Sprintf("session=%s type=%s", s.id, s.Type()),
+		baseCWD,
+		rootPID,
+	)
 }
 
 // InspectGitContext resolves Git metadata on the remote host for the provided
@@ -760,27 +767,52 @@ func remoteShellPID(runner sshSessionRunner) (int, error) {
 	return pid, nil
 }
 
-func activeRemoteWorkdir(runner sshSessionRunner, baseCWD string, rootPID int) (string, error) {
+func activeRemoteWorkdir(runner sshSessionRunner, debugScope, baseCWD string, rootPID int) (string, error) {
+	debuglog.Debugf("%s activeRemoteWorkdir start base_cwd=%q root_pid=%d", debugScope, baseCWD, rootPID)
+
 	out, err := runner.Output(sshListProcessesCmd)
 	if err != nil {
+		debuglog.Debugf("%s list remote processes failed err=%v", debugScope, err)
 		return "", fmt.Errorf("list remote processes: %w", err)
 	}
 
 	processes, err := parsePSOutput(append([]byte("PID PPID COMMAND\n"), out...))
 	if err != nil {
+		debuglog.Debugf("%s parse remote processes failed err=%v", debugScope, err)
 		return "", err
 	}
 
 	agentPID, ok := newestInteractiveAgentDescendantPID(processes, rootPID)
 	if !ok {
+		debuglog.Debugf("%s no interactive agent descendant found", debugScope)
 		return "", nil
 	}
-
-	if sessionCWD, err := remoteCodexSessionCWD(runner, processes, agentPID); err == nil && sessionCWD != "" {
-		return sessionCWD, nil
+	if proc, found := processByPID(processes, agentPID); found {
+		debuglog.Debugf("%s selected agent pid=%d command=%q", debugScope, agentPID, proc.Command)
 	}
 
-	return resolveRemoteInteractiveAgentWorkdir(runner, processes, agentPID, baseCWD)
+	sessionCWD, sessionErr := remoteCodexSessionCWD(
+		runner,
+		debugScope,
+		processes,
+		agentPID,
+	)
+	if sessionErr == nil && sessionCWD != "" {
+		debuglog.Debugf("%s using codex session workdir=%q", debugScope, sessionCWD)
+		return sessionCWD, nil
+	} else if sessionErr != nil {
+		debuglog.Debugf("%s codex session workdir lookup failed err=%v", debugScope, sessionErr)
+	} else {
+		debuglog.Debugf("%s codex session workdir unavailable; falling back to pid cwd scan", debugScope)
+	}
+
+	cwd, err := resolveRemoteInteractiveAgentWorkdir(runner, processes, agentPID, baseCWD)
+	if err != nil {
+		debuglog.Debugf("%s descendant cwd resolution failed err=%v", debugScope, err)
+		return "", err
+	}
+	debuglog.Debugf("%s descendant cwd resolution selected=%q", debugScope, cwd)
+	return cwd, nil
 }
 
 func resolveRemoteInteractiveAgentWorkdir(
@@ -822,27 +854,43 @@ func remotePIDCWD(runner sshSessionRunner, pid int) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-func remoteCodexSessionCWD(runner sshSessionRunner, processes []processInfo, agentPID int) (string, error) {
+func remoteCodexSessionCWD(
+	runner sshSessionRunner,
+	debugScope string,
+	processes []processInfo,
+	agentPID int,
+) (string, error) {
 	proc, ok := processByPID(processes, agentPID)
 	if !ok || !isCodexCommand(proc.Command) {
+		debuglog.Debugf("%s agent pid=%d is not a codex command", debugScope, agentPID)
 		return "", nil
 	}
 
 	paths, err := remoteOpenFiles(runner, agentPID)
 	if err != nil {
+		debuglog.Debugf("%s open files lookup failed pid=%d err=%v", debugScope, agentPID, err)
 		return "", err
 	}
 	sessionPath, ok := codexSessionPath(paths)
 	if !ok {
+		debuglog.Debugf("%s no codex session log found pid=%d", debugScope, agentPID)
 		return "", nil
 	}
+	debuglog.Debugf("%s found codex session log pid=%d path=%q", debugScope, agentPID, sessionPath)
 
 	out, err := runner.Output("cat " + shellQuotePath(sessionPath))
 	if err != nil {
+		debuglog.Debugf("%s read codex session log failed path=%q err=%v", debugScope, sessionPath, err)
 		return "", err
 	}
 
-	return parseCodexSessionCWD(out)
+	cwd, err := parseCodexSessionCWD(out)
+	if err != nil {
+		debuglog.Debugf("%s parse codex session log failed path=%q err=%v", debugScope, sessionPath, err)
+		return "", err
+	}
+	debuglog.Debugf("%s parsed codex session workdir path=%q cwd=%q", debugScope, sessionPath, cwd)
+	return cwd, nil
 }
 
 func remoteGitContext(runner sshSessionRunner, cwd string) (GitContext, error) {

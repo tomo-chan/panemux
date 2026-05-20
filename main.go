@@ -10,10 +10,12 @@ import (
 	"os/exec"
 	"os/signal"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
 	"panemux/internal/config"
+	"panemux/internal/debuglog"
 	"panemux/internal/server"
 	"panemux/internal/session"
 )
@@ -42,6 +44,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
 	}
+	configureDebugLogging()
 
 	manager := session.NewManager()
 	if err := startSessionsFromConfig(cfg, manager); err != nil {
@@ -141,5 +144,18 @@ func openChrome(url string) {
 	}
 	if err := cmd.Run(); err != nil {
 		log.Printf("Failed to open browser: %v", err)
+	}
+}
+
+func configureDebugLogging() {
+	raw := strings.TrimSpace(os.Getenv("PANEMUX_DEBUG_GITINFO"))
+	switch {
+	case raw == "":
+		return
+	case strings.EqualFold(raw, "1"), strings.EqualFold(raw, "true"), strings.EqualFold(raw, "yes"):
+		debuglog.SetEnabled(true)
+		log.Print("Enabled gitinfo debug logging via PANEMUX_DEBUG_GITINFO")
+	default:
+		log.Print("Ignoring PANEMUX_DEBUG_GITINFO; expected 1, true, or yes")
 	}
 }
