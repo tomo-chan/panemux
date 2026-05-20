@@ -425,8 +425,7 @@ func TestActiveRemoteWorkdir_RootPIDScopesRemoteAgents(t *testing.T) {
 func TestTmuxSSHActiveWorkdir_UsesPanePIDAndBaseCWD(t *testing.T) {
 	runner := &fakeSSHRunner{
 		outputs: map[string][]byte{
-			"tmux display-message -p -t 'demo' '#{pane_pid}'":          []byte("220\n"),
-			"tmux display-message -p -t 'demo' '#{pane_current_path}'": []byte("/repo/main\n"),
+			"tmux display-message -p -t 'demo' '#{pane_pid}\t#{pane_current_path}'": []byte("220\t/repo/main\n"),
 			sshListProcessesCmd:                       []byte(" 220 1 zsh\n 230 220 codex\n 240 230 node helper\n"),
 			fmt.Sprintf(sshOpenFilesCmdTemplate, 230): []byte(""),
 			fmt.Sprintf(sshPIDCWDCmdTemplate, 240):    []byte("/tmp/remote-worktree\n"),
@@ -443,8 +442,7 @@ func TestTmuxSSHActiveWorkdir_PrefersCodexExecCommandWorkdir(t *testing.T) {
 	sessionPath := "/home/user/.codex/sessions/2026/05/17/session.jsonl"
 	runner := &fakeSSHRunner{
 		outputs: map[string][]byte{
-			"tmux display-message -p -t 'demo' '#{pane_pid}'":          []byte("220\n"),
-			"tmux display-message -p -t 'demo' '#{pane_current_path}'": []byte("/repo/main\n"),
+			"tmux display-message -p -t 'demo' '#{pane_pid}\t#{pane_current_path}'": []byte("220\t/repo/main\n"),
 			sshListProcessesCmd:                       []byte(" 220 1 zsh\n 230 220 codex resume --last\n"),
 			fmt.Sprintf(sshOpenFilesCmdTemplate, 230): []byte(sessionPath + "\n"),
 			"cat " + shellQuotePath(sessionPath): []byte(
@@ -464,8 +462,7 @@ func TestTmuxSSHActiveWorkdir_WhenPanePIDIsCodex_PrefersCodexExecCommandWorkdir(
 	sessionPath := "/home/user/.codex/sessions/2026/05/17/session.jsonl"
 	runner := &fakeSSHRunner{
 		outputs: map[string][]byte{
-			"tmux display-message -p -t 'demo' '#{pane_pid}'":          []byte("230\n"),
-			"tmux display-message -p -t 'demo' '#{pane_current_path}'": []byte("/repo/main\n"),
+			"tmux display-message -p -t 'demo' '#{pane_pid}\t#{pane_current_path}'": []byte("230\t/repo/main\n"),
 			sshListProcessesCmd:                       []byte(" 230 1 codex resume --last\n"),
 			fmt.Sprintf(sshOpenFilesCmdTemplate, 230): []byte(sessionPath + "\n"),
 			"cat " + shellQuotePath(sessionPath): []byte(
@@ -494,8 +491,7 @@ func TestTmuxSSHActiveWorkdir_DebugLogging(t *testing.T) {
 	sessionPath := "/home/user/.codex/sessions/2026/05/17/session.jsonl"
 	runner := &fakeSSHRunner{
 		outputs: map[string][]byte{
-			"tmux display-message -p -t 'demo' '#{pane_pid}'":          []byte("220\n"),
-			"tmux display-message -p -t 'demo' '#{pane_current_path}'": []byte("/repo/main\n"),
+			"tmux display-message -p -t 'demo' '#{pane_pid}\t#{pane_current_path}'": []byte("220\t/repo/main\n"),
 			sshListProcessesCmd:                       []byte(" 220 1 zsh\n 230 220 codex resume --last\n"),
 			fmt.Sprintf(sshOpenFilesCmdTemplate, 230): []byte(sessionPath + "\n"),
 			"cat " + shellQuotePath(sessionPath): []byte(

@@ -175,23 +175,28 @@ func (s *TmuxSSHSession) InspectGitContext(cwd string) (GitContext, error) {
 }
 
 func tmuxSSHActiveWorkdir(runner sshSessionRunner, debugScope, tmuxSession string) (string, error) {
-	panePIDOut, err := runner.Output(fmt.Sprintf("tmux display-message -p -t '%s' '#{pane_pid}'", tmuxSession))
+	out, err := runner.Output(
+		fmt.Sprintf(
+			"tmux display-message -p -t '%s' '#{pane_pid}\t#{pane_current_path}'",
+			tmuxSession,
+		),
+	)
 	if err != nil {
-		debuglog.Debugf("%s tmux pane pid lookup failed err=%v", debugScope, err)
-		return "", fmt.Errorf("tmux pane pid over ssh: %w", err)
+		debuglog.Debugf("%s tmux pane info lookup failed err=%v", debugScope, err)
+		return "", fmt.Errorf("tmux pane info over ssh: %w", err)
 	}
-	panePID, err := strconv.Atoi(strings.TrimSpace(string(panePIDOut)))
-	if err != nil {
-		debuglog.Debugf("%s parse tmux pane pid failed raw=%q err=%v", debugScope, strings.TrimSpace(string(panePIDOut)), err)
-		return "", fmt.Errorf("parse remote tmux pane pid: %w", err)
+	fields := strings.SplitN(strings.TrimSpace(string(out)), "\t", 2)
+	if len(fields) != 2 {
+		debuglog.Debugf("%s parse tmux pane info failed raw=%q", debugScope, strings.TrimSpace(string(out)))
+		return "", fmt.Errorf("parse remote tmux pane info: unexpected output %q", strings.TrimSpace(string(out)))
 	}
 
-	baseCWDOut, err := runner.Output(fmt.Sprintf("tmux display-message -p -t '%s' '#{pane_current_path}'", tmuxSession))
+	panePID, err := strconv.Atoi(strings.TrimSpace(fields[0]))
 	if err != nil {
-		debuglog.Debugf("%s tmux pane cwd lookup failed err=%v", debugScope, err)
-		return "", fmt.Errorf("tmux display-message over ssh: %w", err)
+		debuglog.Debugf("%s parse tmux pane pid failed raw=%q err=%v", debugScope, strings.TrimSpace(fields[0]), err)
+		return "", fmt.Errorf("parse remote tmux pane pid: %w", err)
 	}
-	baseCWD := strings.TrimSpace(string(baseCWDOut))
+	baseCWD := strings.TrimSpace(fields[1])
 	debuglog.Debugf("%s tmux active pane pid=%d base_cwd=%q", debugScope, panePID, baseCWD)
 
 	return activeRemoteWorkdir(runner, debugScope, baseCWD, panePID)
