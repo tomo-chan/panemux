@@ -232,13 +232,12 @@ func tmuxSSHActiveWorkdirFromSessionFactory(
 	baseCWD := strings.TrimSpace(fields[1])
 	debuglog.Debugf("%s tmux active pane pid=%d base_cwd=%q", debugScope, panePID, baseCWD)
 
-	workdirRunner, err := newRunner()
-	if err != nil {
-		return "", fmt.Errorf("new ssh session for active tmux workdir scan: %w", err)
-	}
-	defer workdirRunner.Close()
-
-	return activeRemoteWorkdir(workdirRunner, debugScope, baseCWD, panePID)
+	return activeRemoteWorkdirWithOutput(
+		outputFromSessionFactory(newRunner),
+		debugScope,
+		baseCWD,
+		panePID,
+	)
 }
 
 func (s *TmuxSSHSession) Close() error {

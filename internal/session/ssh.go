@@ -772,19 +772,26 @@ func activeRemoteWorkdirFromSessionFactory(
 		return "", err
 	}
 
-	workdirRunner, err := newRunner()
-	if err != nil {
-		return "", fmt.Errorf("new ssh session for active workdir scan: %w", err)
-	}
-	defer workdirRunner.Close()
-
-	return activeRemoteWorkdir(workdirRunner, debugScope, baseCWD, rootPID)
+	return activeRemoteWorkdirWithOutput(
+		outputFromSessionFactory(newRunner),
+		debugScope,
+		baseCWD,
+		rootPID,
+	)
 }
 
 func activeRemoteWorkdir(runner sshSessionRunner, debugScope, baseCWD string, rootPID int) (string, error) {
+	return activeRemoteWorkdirWithOutput(runner.Output, debugScope, baseCWD, rootPID)
+}
+
+func activeRemoteWorkdirWithOutput(
+	run remoteOutputFunc,
+	debugScope, baseCWD string,
+	rootPID int,
+) (string, error) {
 	debuglog.Debugf("%s activeRemoteWorkdir start base_cwd=%q root_pid=%d", debugScope, baseCWD, rootPID)
 
-	out, err := runner.Output(sshListProcessesCmd)
+	out, err := run(sshListProcessesCmd)
 	if err != nil {
 		debuglog.Debugf("%s list remote processes failed err=%v", debugScope, err)
 		return "", fmt.Errorf("list remote processes: %w", err)
@@ -806,7 +813,7 @@ func activeRemoteWorkdir(runner sshSessionRunner, debugScope, baseCWD string, ro
 	}
 
 	sessionCWD, sessionErr := remoteCodexSessionCWD(
-		runner,
+		run,
 		debugScope,
 		processes,
 		agentPID,
@@ -820,7 +827,7 @@ func activeRemoteWorkdir(runner sshSessionRunner, debugScope, baseCWD string, ro
 		debuglog.Debugf("%s codex session workdir unavailable; falling back to pid cwd scan", debugScope)
 	}
 
-	cwd, err := resolveRemoteInteractiveAgentWorkdir(runner, processes, agentPID, baseCWD)
+	cwd, err := resolveRemoteInteractiveAgentWorkdir(run, processes, agentPID, baseCWD)
 	if err != nil {
 		debuglog.Debugf("%s descendant cwd resolution failed err=%v", debugScope, err)
 		return "", err
@@ -830,7 +837,7 @@ func activeRemoteWorkdir(runner sshSessionRunner, debugScope, baseCWD string, ro
 }
 
 func resolveRemoteInteractiveAgentWorkdir(
-	runner sshSessionRunner,
+	run remoteOutputFunc,
 	processes []processInfo,
 	agentPID int,
 	baseCWD string,
@@ -842,7 +849,7 @@ func resolveRemoteInteractiveAgentWorkdir(
 
 	var agentCWD string
 	for _, pid := range candidatePIDs {
-		cwd, err := remotePIDCWD(runner, pid)
+		cwd, err := remotePIDCWD(run, pid)
 		if err != nil || cwd == "" {
 			continue
 		}
@@ -860,8 +867,23 @@ func resolveRemoteInteractiveAgentWorkdir(
 	return "", nil
 }
 
-func remotePIDCWD(runner sshSessionRunner, pid int) (string, error) {
-	out, err := runner.Output(fmt.Sprintf(sshPIDCWDCmdTemplate, pid))
+type remoteOutputFunc func(string) ([]byte, error)
+
+func outputFromSessionFactory(
+	newRunner func() (sshSessionRunner, error),
+) remoteOutputFunc {
+	return func(cmd string) ([]byte, error) {
+		runner, err := newRunner()
+		if err != nil {
+			return nil, err
+		}
+		defer runner.Close()
+		return runner.Output(cmd)
+	}
+}
+
+func remotePIDCWD(run remoteOutputFunc, pid int) (string, error) {
+	out, err := run(fmt.Sprintf(sshPIDCWDCmdTemplate, pid))
 	if err != nil {
 		return "", err
 	}
@@ -869,7 +891,7 @@ func remotePIDCWD(runner sshSessionRunner, pid int) (string, error) {
 }
 
 func remoteCodexSessionCWD(
-	runner sshSessionRunner,
+	run remoteOutputFunc,
 	debugScope string,
 	processes []processInfo,
 	agentPID int,
@@ -880,7 +902,7 @@ func remoteCodexSessionCWD(
 		return "", nil
 	}
 
-	paths, err := remoteOpenFiles(runner, agentPID)
+	paths, err := remoteOpenFiles(run, agentPID)
 	if err != nil {
 		debuglog.Debugf("%s open files lookup failed pid=%d err=%v", debugScope, agentPID, err)
 		return "", err
@@ -892,7 +914,7 @@ func remoteCodexSessionCWD(
 	}
 	debuglog.Debugf("%s found codex session log pid=%d path=%q", debugScope, agentPID, sessionPath)
 
-	out, err := runner.Output("cat " + shellQuotePath(sessionPath))
+	out, err := run("cat " + shellQuotePath(sessionPath))
 	if err != nil {
 		debuglog.Debugf("%s read codex session log failed path=%q err=%v", debugScope, sessionPath, err)
 		return "", err
@@ -932,8 +954,8 @@ func remoteGitContext(runner sshSessionRunner, cwd string) (GitContext, error) {
 	}, nil
 }
 
-func remoteOpenFiles(runner sshSessionRunner, pid int) ([]string, error) {
-	out, err := runner.Output(fmt.Sprintf(sshOpenFilesCmdTemplate, pid))
+func remoteOpenFiles(run remoteOutputFunc, pid int) ([]string, error) {
+	out, err := run(fmt.Sprintf(sshOpenFilesCmdTemplate, pid))
 	if err != nil {
 		return nil, err
 	}
