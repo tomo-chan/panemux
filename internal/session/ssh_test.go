@@ -456,6 +456,27 @@ func TestTmuxSSHActiveWorkdir_PrefersCodexExecCommandWorkdir(t *testing.T) {
 	assert.Equal(t, "/tmp/remote-tmux-worktree-from-command", cwd)
 }
 
+func TestTmuxSSHActiveWorkdir_WhenPanePIDIsCodex_PrefersCodexExecCommandWorkdir(t *testing.T) {
+	sessionPath := "/home/user/.codex/sessions/2026/05/17/session.jsonl"
+	runner := &fakeSSHRunner{
+		outputs: map[string][]byte{
+			"tmux display-message -p -t 'demo' '#{pane_pid}'":          []byte("230\n"),
+			"tmux display-message -p -t 'demo' '#{pane_current_path}'": []byte("/repo/main\n"),
+			sshListProcessesCmd:                       []byte(" 230 1 codex resume --last\n"),
+			fmt.Sprintf(sshOpenFilesCmdTemplate, 230): []byte(sessionPath + "\n"),
+			"cat " + shellQuotePath(sessionPath): []byte(
+				"{\"type\":\"session_meta\",\"payload\":{\"cwd\":\"/repo/main\"}}\n" +
+					"{\"type\":\"turn_context\",\"payload\":{\"cwd\":\"/repo/main\"}}\n" +
+					codexExecCommandRecord(t, "go test ./...", "/tmp/remote-root-codex-worktree"),
+			),
+		},
+	}
+
+	cwd, err := tmuxSSHActiveWorkdir(runner, "demo")
+	require.NoError(t, err)
+	assert.Equal(t, "/tmp/remote-root-codex-worktree", cwd)
+}
+
 func TestRemoteGitContext_ReturnsBranchAndRepo(t *testing.T) {
 	const cwd = "/home/user/panemux"
 

@@ -681,3 +681,60 @@ func TestTmuxLocalSessionGetActiveWorkdir_PrefersCodexExecCommandWorkdir(t *test
 	require.NoError(t, err)
 	assert.Equal(t, "/tmp/tmux-worktree-from-command", cwd)
 }
+
+func TestTmuxLocalSessionGetActiveWorkdir_WhenPanePIDIsCodex_PrefersCodexExecCommandWorkdir(t *testing.T) {
+	sessionLog := filepath.Join(t.TempDir(), ".codex", "sessions", "2026", "05", "17", "session.jsonl")
+	require.NoError(t, os.MkdirAll(filepath.Dir(sessionLog), 0755))
+	require.NoError(t, os.WriteFile(
+		sessionLog,
+		[]byte(
+			"{\"type\":\"session_meta\",\"payload\":{\"cwd\":\"/repo/main\"}}\n"+
+				"{\"type\":\"turn_context\",\"payload\":{\"cwd\":\"/repo/main\"}}\n"+
+				codexExecCommandRecord(t, "go test ./...", "/tmp/tmux-root-codex-worktree"),
+		),
+		0600,
+	))
+
+	originalTmuxLocalOutput := tmuxLocalOutputFn
+	originalListProcesses := listProcessesFn
+	originalOpenFilePaths := openFilePathsForPIDFn
+	t.Cleanup(func() {
+		tmuxLocalOutputFn = originalTmuxLocalOutput
+		listProcessesFn = originalListProcesses
+		openFilePathsForPIDFn = originalOpenFilePaths
+	})
+
+	tmuxLocalOutputFn = func(args ...string) ([]byte, error) {
+		switch {
+		case len(args) == 5 &&
+			args[0] == "display-message" &&
+			args[1] == "-p" &&
+			args[2] == "-t" &&
+			args[3] == "demo" &&
+			args[4] == "#{pane_pid}":
+			return []byte("220\n"), nil
+		case len(args) == 5 &&
+			args[0] == "display-message" &&
+			args[1] == "-p" &&
+			args[2] == "-t" &&
+			args[3] == "demo" &&
+			args[4] == "#{pane_current_path}":
+			return []byte("/repo/main\n"), nil
+		default:
+			return nil, errors.New("unexpected tmux args")
+		}
+	}
+	listProcessesFn = func() ([]processInfo, error) {
+		return []processInfo{
+			{PID: 220, PPID: 1, Command: "codex resume --last"},
+		}, nil
+	}
+	openFilePathsForPIDFn = func(pid int) ([]string, error) {
+		require.Equal(t, 220, pid)
+		return []string{sessionLog}, nil
+	}
+
+	cwd, err := tmuxLocalActiveWorkdir("demo")
+	require.NoError(t, err)
+	assert.Equal(t, "/tmp/tmux-root-codex-worktree", cwd)
+}
