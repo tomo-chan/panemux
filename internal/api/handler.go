@@ -913,7 +913,7 @@ func (h *Handler) lookupPRInfo(sess session.Session, cwd string, gitCtx session.
 		"--json",
 		"url,number",
 	)
-	if repoSpec := repoSpecFromOriginURL(gitCtx.OriginURL); repoSpec != "" {
+	if repoSpec := h.repoSpecFromOriginURL(gitCtx.OriginURL); repoSpec != "" {
 		cmd.Args = append(cmd.Args, "--repo", repoSpec)
 	} else if _, ok := sess.(session.GitContextGetter); ok {
 		// Remote SSH-backed sessions may point at repositories that do not exist
@@ -942,6 +942,17 @@ func repoSpecFromOriginURL(origin string) string {
 	host, path := repoHostAndPathFromOriginURL(origin)
 	if host == "" || path == "" {
 		return ""
+	}
+	return host + "/" + path
+}
+
+func (h *Handler) repoSpecFromOriginURL(origin string) string {
+	host, path, scpStyle := repoHostAndPathFromOriginURLDetailed(origin)
+	if host == "" || path == "" {
+		return ""
+	}
+	if scpStyle {
+		host = h.resolveSSHConfigHostAlias(host)
 	}
 	return host + "/" + path
 }

@@ -1889,6 +1889,28 @@ func TestLookupPRInfo_RemoteSessionWithoutOriginSkipsLookup(t *testing.T) {
 	assert.Zero(t, number)
 }
 
+func TestLookupPRInfo_RemoteSessionWithSSHConfigAliasOrigin_UsesResolvedRepoSpec(t *testing.T) {
+	h := NewHandler(defaultTestConfig(), session.NewManager())
+	h.sshConfigPath = writeTempSSHConfigForAPI(t, "Host github-work\n    HostName github.com\n    User git\n")
+	h.ghBinaryPath = writeFakeGHBinary(
+		t,
+		"#!/bin/sh\n"+
+			"if [ \"$6\" != \"--repo\" ] || [ \"$7\" != \"github.com/example/panemux\" ]; then\n"+
+			"  echo \"unexpected repo args: $6 $7\" >&2\n"+
+			"  exit 1\n"+
+			"fi\n"+
+			"echo '{\"url\":\"https://github.com/example/panemux/pull/999\",\"number\":999}'\n",
+	)
+
+	url, number := h.lookupPRInfo(&mockRemoteGitSession{}, "/home/demo/panemux", session.GitContext{
+		Branch:    "feature/alias-pr",
+		OriginURL: "git@github-work:example/panemux.git",
+	})
+
+	assert.Equal(t, "https://github.com/example/panemux/pull/999", url)
+	assert.Equal(t, 999, number)
+}
+
 func TestSanitizeGitExecDir_ValidAbsolutePath(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "repo")
 	require.NoError(t, os.MkdirAll(dir, 0755))
@@ -2011,6 +2033,15 @@ func TestHandlerRepoPageURLFromOriginURL_LeavesUnknownSCPHostUntouched(t *testin
 	got := h.repoPageURLFromOriginURL("git@source:example/panemux.git")
 
 	assert.Equal(t, "https://source/example/panemux", got)
+}
+
+func TestHandlerRepoSpecFromOriginURL_ResolvesSSHConfigAlias(t *testing.T) {
+	h := NewHandler(defaultTestConfig(), session.NewManager())
+	h.sshConfigPath = writeTempSSHConfigForAPI(t, "Host github-work\n    HostName github.com\n    User git\n")
+
+	got := h.repoSpecFromOriginURL("git@github-work:example/panemux.git")
+
+	assert.Equal(t, "github.com/example/panemux", got)
 }
 
 func TestSanitizeGitExecDir_RejectsRelativePath(t *testing.T) {

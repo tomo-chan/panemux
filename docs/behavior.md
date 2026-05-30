@@ -474,7 +474,7 @@ When a pane moves to a different parent node, the component may be remounted by 
 - For SSH panes, panemux resolves interactive agent processes from the remote process list on the current SSH connection.
 - For SSH+tmux panes, panemux resolves interactive agent processes only from the currently active remote tmux pane.
 - If the resolved repository origin can be converted into a browser URL, the header shows the repository name as a link to that repository page.
-- For SCP-style SSH origins such as `git@alias:owner/repo.git`, panemux uses `~/.ssh/config` `Host` aliases to resolve the browser link hostname when a matching alias exists; otherwise it treats the SSH host token as the hostname directly.
+- For SCP-style SSH origins such as `git@alias:owner/repo.git`, panemux uses `~/.ssh/config` `Host` aliases to resolve both the browser link hostname and GitHub PR lookup repo host when a matching alias exists; otherwise it treats the SSH host token as the hostname directly.
 - If the resolved branch has a GitHub pull request, the header shows a PR link labeled `#<number>`.
 
 ## Operational Assumptions
