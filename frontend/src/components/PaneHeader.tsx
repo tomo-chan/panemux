@@ -216,7 +216,15 @@ export const PaneHeader: React.FC<PaneHeaderProps> = ({
       {pane.title && <span style={{ color: '#aaa' }}>{pane.title}</span>}
       {gitInfo?.is_git && (gitInfo.repo || gitInfo.branch) && (
         <span style={{ color: '#6e8a6e', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-          {gitInfo.repo && <span>{gitInfo.repo}</span>}
+          {gitInfo.repo && (gitInfo.repo_url ? (
+            <InlineHeaderLink
+              href={gitInfo.repo_url}
+              title="Open repository"
+              label={gitInfo.repo}
+            />
+          ) : (
+            <span>{gitInfo.repo}</span>
+          ))}
           {gitInfo.repo && gitInfo.branch && <span style={{ color: '#4a6a4a' }}>{' '}⎇{' '}</span>}
           {gitInfo.branch && <span>{gitInfo.branch}</span>}
           {gitInfo.pr_url && gitInfo.pr_number && (

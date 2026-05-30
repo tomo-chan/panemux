@@ -710,6 +710,7 @@ type gitInfoResponse struct {
 	Branch   string `json:"branch,omitempty"`
 	PRURL    string `json:"pr_url,omitempty"`
 	Repo     string `json:"repo,omitempty"`
+	RepoURL  string `json:"repo_url,omitempty"`
 	PRNumber int    `json:"pr_number,omitempty"`
 	IsGit    bool   `json:"is_git"`
 }
@@ -753,6 +754,7 @@ func (h *Handler) GetGitInfo(w http.ResponseWriter, r *http.Request) {
 		IsGit:    true,
 		Branch:   ctx.Branch,
 		Repo:     ctx.Repo,
+		RepoURL:  h.repoPageURLFromOriginURL(ctx.OriginURL),
 		PRURL:    prURL,
 		PRNumber: prNumber,
 	})
@@ -844,10 +846,19 @@ func (h *Handler) inspectLocalGitContext(cwd string) (session.GitContext, error)
 	}
 	branchOut = bytes.TrimSpace(branchOut)
 
+	originCmd := exec.Command("git", "config", "--get", "remote.origin.url")
+	originCmd.Dir = safeCWD
+	originOut, err := originCmd.Output()
+	if err != nil {
+		originOut = nil
+	}
+	originOut = bytes.TrimSpace(originOut)
+
 	root := string(toplevelOut)
 	return session.GitContext{
 		Branch:    string(branchOut),
 		CommonDir: string(commonDirOut),
+		OriginURL: string(originOut),
 		Repo:      filepath.Base(root),
 		Root:      root,
 	}, nil
@@ -902,7 +913,7 @@ func (h *Handler) lookupPRInfo(sess session.Session, cwd string, gitCtx session.
 		"--json",
 		"url,number",
 	)
-	if repoSpec := repoSpecFromOriginURL(gitCtx.OriginURL); repoSpec != "" {
+	if repoSpec := h.repoSpecFromOriginURL(gitCtx.OriginURL); repoSpec != "" {
 		cmd.Args = append(cmd.Args, "--repo", repoSpec)
 	} else if _, ok := sess.(session.GitContextGetter); ok {
 		// Remote SSH-backed sessions may point at repositories that do not exist
@@ -928,32 +939,94 @@ func (h *Handler) lookupPRInfo(sess session.Session, cwd string, gitCtx session.
 }
 
 func repoSpecFromOriginURL(origin string) string {
+	host, path := repoHostAndPathFromOriginURL(origin)
+	if host == "" || path == "" {
+		return ""
+	}
+	return host + "/" + path
+}
+
+func (h *Handler) repoSpecFromOriginURL(origin string) string {
+	host, path, scpStyle := repoHostAndPathFromOriginURLDetailed(origin)
+	if host == "" || path == "" {
+		return ""
+	}
+	if scpStyle {
+		host = h.resolveSSHConfigHostAlias(host)
+	}
+	return host + "/" + path
+}
+
+func repoPageURLFromOriginURL(origin string) string {
+	host, path := repoHostAndPathFromOriginURL(origin)
+	if host == "" || path == "" {
+		return ""
+	}
+	return "https://" + host + "/" + path
+}
+
+func (h *Handler) repoPageURLFromOriginURL(origin string) string {
+	host, path, scpStyle := repoHostAndPathFromOriginURLDetailed(origin)
+	if host == "" || path == "" {
+		return ""
+	}
+	if scpStyle {
+		host = h.resolveSSHConfigHostAlias(host)
+	}
+	return "https://" + host + "/" + path
+}
+
+func (h *Handler) resolveSSHConfigHostAlias(host string) string {
+	hosts, err := sshconfig.ParseHosts(h.sshConfigPath)
+	if err != nil {
+		log.Printf("parse ssh config for repo URL alias resolution failed: %v", err)
+		return host
+	}
+	for _, candidate := range hosts {
+		if candidate.Name == host {
+			if candidate.Hostname != "" {
+				return candidate.Hostname
+			}
+			return host
+		}
+	}
+	return host
+}
+
+func repoHostAndPathFromOriginURL(origin string) (string, string) {
+	host, path, _ := repoHostAndPathFromOriginURLDetailed(origin)
+	return host, path
+}
+
+func repoHostAndPathFromOriginURLDetailed(origin string) (string, string, bool) {
 	trimmed := strings.TrimSpace(strings.TrimSuffix(origin, ".git"))
 	if trimmed == "" {
-		return ""
+		return "", "", false
 	}
 	if strings.HasPrefix(trimmed, "git@") {
 		hostPath := strings.TrimPrefix(trimmed, "git@")
 		parts := strings.SplitN(hostPath, ":", 2)
 		if len(parts) != 2 {
-			return ""
+			return "", "", false
 		}
-		return parts[0] + "/" + strings.TrimPrefix(parts[1], "/")
+		host := strings.TrimSpace(parts[0])
+		path := strings.TrimPrefix(strings.TrimSpace(parts[1]), "/")
+		if host == "" || path == "" {
+			return "", "", false
+		}
+		return host, path, true
 	}
 
 	u, err := url.Parse(trimmed)
 	if err != nil || u.Host == "" {
-		return ""
+		return "", "", false
 	}
 	host := u.Hostname()
-	if host == "" {
-		return ""
-	}
 	path := strings.TrimPrefix(u.Path, "/")
-	if path == "" {
-		return ""
+	if host == "" || path == "" {
+		return "", "", false
 	}
-	return host + "/" + path
+	return host, path, false
 }
 
 func writeValidationError(w http.ResponseWriter, msg string) {
