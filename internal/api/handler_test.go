@@ -1845,6 +1845,39 @@ func TestGetGitInfo_RemoteGitContext_WithOrigin_ReturnsRepoURL(t *testing.T) {
 	assert.Equal(t, "https://github.com/example/panemux", resp.RepoURL)
 }
 
+func TestGetGitInfo_RemoteGitContext_WithSSHConfigAliasOrigin_ReturnsResolvedRepoURL(t *testing.T) {
+	const remoteRepo = "/home/demo/panemux"
+
+	mgr := session.NewManager()
+	mgr.Add(&mockRemoteGitSession{
+		mockSession: mockSession{id: "ssh-remote-alias-origin", typ: session.TypeSSH},
+		cwd:         remoteRepo,
+		gitContexts: map[string]session.GitContext{
+			remoteRepo: {
+				Branch:    "main",
+				CommonDir: "/home/demo/panemux/.git",
+				OriginURL: "git@github-work:example/panemux.git",
+				Repo:      "panemux",
+				Root:      remoteRepo,
+			},
+		},
+	})
+
+	h := NewHandler(defaultTestConfig(), mgr)
+	h.sshConfigPath = writeTempSSHConfigForAPI(t, "Host github-work\n    HostName github.com\n    User git\n")
+	r := setupRouterWithGitInfo(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/ssh-remote-alias-origin/git-info", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var resp gitInfoResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.True(t, resp.IsGit)
+	assert.Equal(t, "https://github.com/example/panemux", resp.RepoURL)
+}
+
 func TestLookupPRInfo_RemoteSessionWithoutOriginSkipsLookup(t *testing.T) {
 	h := NewHandler(defaultTestConfig(), session.NewManager())
 	h.ghBinaryPath = writeFakeGHBinary(t, "#!/bin/sh\nexit 99\n")
@@ -1960,6 +1993,24 @@ func TestRepoPageURLFromOriginURL(t *testing.T) {
 			assert.Equal(t, tt.want, repoPageURLFromOriginURL(tt.origin))
 		})
 	}
+}
+
+func TestHandlerRepoPageURLFromOriginURL_ResolvesSSHConfigAlias(t *testing.T) {
+	h := NewHandler(defaultTestConfig(), session.NewManager())
+	h.sshConfigPath = writeTempSSHConfigForAPI(t, "Host github-work\n    HostName github.com\n    User git\n")
+
+	got := h.repoPageURLFromOriginURL("git@github-work:example/panemux.git")
+
+	assert.Equal(t, "https://github.com/example/panemux", got)
+}
+
+func TestHandlerRepoPageURLFromOriginURL_LeavesUnknownSCPHostUntouched(t *testing.T) {
+	h := NewHandler(defaultTestConfig(), session.NewManager())
+	h.sshConfigPath = writeTempSSHConfigForAPI(t, "Host github-work\n    HostName github.com\n    User git\n")
+
+	got := h.repoPageURLFromOriginURL("git@source:example/panemux.git")
+
+	assert.Equal(t, "https://source/example/panemux", got)
 }
 
 func TestSanitizeGitExecDir_RejectsRelativePath(t *testing.T) {
