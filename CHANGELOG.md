@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.0](https://github.com/tomo-chan/panemux/compare/v0.17.4...v0.18.0) (2026-05-30)
+
+
+### Features
+
+* link pane header repo name to repository page ([#108](https://github.com/tomo-chan/panemux/issues/108)) ([d60f129](https://github.com/tomo-chan/panemux/commit/d60f129e849b69721cb0d0d2e12c208712e098da))
+
 ## [0.17.4](https://github.com/tomo-chan/panemux/compare/v0.17.3...v0.17.4) (2026-05-20)
 
 
