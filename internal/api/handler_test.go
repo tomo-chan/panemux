@@ -1939,6 +1939,11 @@ func TestRepoPageURLFromOriginURL(t *testing.T) {
 			want:   "https://git.example.com/team/panemux",
 		},
 		{
+			name:   "ssh url with explicit port",
+			origin: "ssh://git@git.example.com:2222/team/panemux.git",
+			want:   "https://git.example.com/team/panemux",
+		},
+		{
 			name:   "https with embedded credentials",
 			origin: credentialOrigin,
 			want:   "https://github.com/example/panemux",
