@@ -22,6 +22,7 @@ describe('GitInfoSchema', () => {
       is_git: true,
       branch: 'feature/pane-pr-link',
       repo: 'panemux',
+      repo_url: 'https://github.com/example/panemux',
       pr_number: 123,
       pr_url: 'https://github.com/example/panemux/pull/123',
     })

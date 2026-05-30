@@ -473,6 +473,7 @@ When a pane moves to a different parent node, the component may be remounted by 
 - If the agent exits, no longer has an eligible worktree, or the resolved worktree is not a sibling worktree of the pane's current repository, panemux falls back to the pane's own working directory immediately.
 - For SSH panes, panemux resolves interactive agent processes from the remote process list on the current SSH connection.
 - For SSH+tmux panes, panemux resolves interactive agent processes only from the currently active remote tmux pane.
+- If the resolved repository origin can be converted into a browser URL, the header shows the repository name as a link to that repository page.
 - If the resolved branch has a GitHub pull request, the header shows a PR link labeled `#<number>`.
 
 ## Operational Assumptions

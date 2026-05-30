@@ -107,6 +107,7 @@ describe('PaneHeader VSCode button', () => {
         gitInfo={{
           is_git: true,
           repo: 'panemux',
+          repo_url: 'https://github.com/example/panemux',
           branch: 'feature/pane-pr-link',
           pr_number: 123,
           pr_url: 'https://github.com/example/panemux/pull/123',
@@ -128,6 +129,7 @@ describe('PaneHeader VSCode button', () => {
         gitInfo={{
           is_git: true,
           repo: 'panemux',
+          repo_url: 'https://github.com/example/panemux',
           branch: 'feature/pane-pr-link',
           pr_number: 123,
           pr_url: 'https://github.com/example/panemux/pull/123',
@@ -136,6 +138,63 @@ describe('PaneHeader VSCode button', () => {
     )
 
     const link = screen.getByRole('link', { name: '#123' })
+    fireEvent.mouseEnter(link)
+
+    expect(link).toHaveStyle({
+      textDecoration: 'underline',
+      textUnderlineOffset: '2px',
+    })
+  })
+
+  it('renders the repo name as a link when repo_url is present', () => {
+    render(
+      <PaneHeader
+        {...defaultProps}
+        gitInfo={{
+          is_git: true,
+          repo: 'panemux',
+          repo_url: 'https://github.com/example/panemux',
+          branch: 'main',
+        }}
+      />
+    )
+
+    const link = screen.getByRole('link', { name: 'panemux' })
+    expect(link).toHaveAttribute('href', 'https://github.com/example/panemux')
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+  })
+
+  it('shows repo name as plain text when repo_url is absent', () => {
+    render(
+      <PaneHeader
+        {...defaultProps}
+        gitInfo={{
+          is_git: true,
+          repo: 'panemux',
+          branch: 'main',
+        }}
+      />
+    )
+
+    expect(screen.queryByRole('link', { name: 'panemux' })).toBeNull()
+    expect(screen.getByText('panemux')).toBeInTheDocument()
+  })
+
+  it('shows an underline on repo link hover', () => {
+    render(
+      <PaneHeader
+        {...defaultProps}
+        gitInfo={{
+          is_git: true,
+          repo: 'panemux',
+          repo_url: 'https://github.com/example/panemux',
+          branch: 'main',
+        }}
+      />
+    )
+
+    const link = screen.getByRole('link', { name: 'panemux' })
     fireEvent.mouseEnter(link)
 
     expect(link).toHaveStyle({

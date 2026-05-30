@@ -710,6 +710,7 @@ type gitInfoResponse struct {
 	Branch   string `json:"branch,omitempty"`
 	PRURL    string `json:"pr_url,omitempty"`
 	Repo     string `json:"repo,omitempty"`
+	RepoURL  string `json:"repo_url,omitempty"`
 	PRNumber int    `json:"pr_number,omitempty"`
 	IsGit    bool   `json:"is_git"`
 }
@@ -753,6 +754,7 @@ func (h *Handler) GetGitInfo(w http.ResponseWriter, r *http.Request) {
 		IsGit:    true,
 		Branch:   ctx.Branch,
 		Repo:     ctx.Repo,
+		RepoURL:  repoPageURLFromOriginURL(ctx.OriginURL),
 		PRURL:    prURL,
 		PRNumber: prNumber,
 	})
@@ -844,10 +846,19 @@ func (h *Handler) inspectLocalGitContext(cwd string) (session.GitContext, error)
 	}
 	branchOut = bytes.TrimSpace(branchOut)
 
+	originCmd := exec.Command("git", "config", "--get", "remote.origin.url")
+	originCmd.Dir = safeCWD
+	originOut, err := originCmd.Output()
+	if err != nil {
+		originOut = nil
+	}
+	originOut = bytes.TrimSpace(originOut)
+
 	root := string(toplevelOut)
 	return session.GitContext{
 		Branch:    string(branchOut),
 		CommonDir: string(commonDirOut),
+		OriginURL: string(originOut),
 		Repo:      filepath.Base(root),
 		Root:      root,
 	}, nil
@@ -928,32 +939,50 @@ func (h *Handler) lookupPRInfo(sess session.Session, cwd string, gitCtx session.
 }
 
 func repoSpecFromOriginURL(origin string) string {
+	host, path := repoHostAndPathFromOriginURL(origin)
+	if host == "" || path == "" {
+		return ""
+	}
+	return host + "/" + path
+}
+
+func repoPageURLFromOriginURL(origin string) string {
+	host, path := repoHostAndPathFromOriginURL(origin)
+	if host == "" || path == "" {
+		return ""
+	}
+	return "https://" + host + "/" + path
+}
+
+func repoHostAndPathFromOriginURL(origin string) (string, string) {
 	trimmed := strings.TrimSpace(strings.TrimSuffix(origin, ".git"))
 	if trimmed == "" {
-		return ""
+		return "", ""
 	}
 	if strings.HasPrefix(trimmed, "git@") {
 		hostPath := strings.TrimPrefix(trimmed, "git@")
 		parts := strings.SplitN(hostPath, ":", 2)
 		if len(parts) != 2 {
-			return ""
+			return "", ""
 		}
-		return parts[0] + "/" + strings.TrimPrefix(parts[1], "/")
+		host := strings.TrimSpace(parts[0])
+		path := strings.TrimPrefix(strings.TrimSpace(parts[1]), "/")
+		if host == "" || path == "" {
+			return "", ""
+		}
+		return host, path
 	}
 
 	u, err := url.Parse(trimmed)
 	if err != nil || u.Host == "" {
-		return ""
+		return "", ""
 	}
 	host := u.Hostname()
-	if host == "" {
-		return ""
-	}
 	path := strings.TrimPrefix(u.Path, "/")
-	if path == "" {
-		return ""
+	if host == "" || path == "" {
+		return "", ""
 	}
-	return host + "/" + path
+	return host, path
 }
 
 func writeValidationError(w http.ResponseWriter, msg string) {

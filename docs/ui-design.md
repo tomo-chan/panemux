@@ -85,6 +85,8 @@ From left to right, the header contains:
 
 The header background stays `#252526` with a `#333` bottom border so the new controls inherit the established terminal chrome instead of introducing a second visual language.
 
+When panemux can derive a repository page URL from the pane's Git origin, the repository name is rendered as an inline text link using the same visual treatment as the PR shortcut.
+
 The PR shortcut is rendered as an inline text link labeled `#<number>`. It does not use a pill, badge, or outlined capsule treatment. On hover, the link shifts to a slightly stronger blue and shows an underline so it reads like the rest of the header chrome instead of a separate button system.
 
 ### Split vs quick-add
