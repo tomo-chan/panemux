@@ -231,10 +231,10 @@ func TestIsInteractiveAgentCommand(t *testing.T) {
 func TestCodexSessionPath(t *testing.T) {
 	path, ok := codexSessionPath([]string{
 		"/tmp/other.log",
-		"/Users/tomo/.codex/sessions/2026/05/17/rollout.jsonl",
+		"/Users/demo/.codex/sessions/2026/05/17/rollout.jsonl",
 	})
 	require.True(t, ok)
-	assert.Equal(t, "/Users/tomo/.codex/sessions/2026/05/17/rollout.jsonl", path)
+	assert.Equal(t, "/Users/demo/.codex/sessions/2026/05/17/rollout.jsonl", path)
 }
 
 func mustJSONLine(t *testing.T, value any) string {
