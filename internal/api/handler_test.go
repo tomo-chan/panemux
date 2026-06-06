@@ -1395,6 +1395,34 @@ func TestPostOpenVSCode_StaleStickyWorktreeFallsBackToPaneCWD(t *testing.T) {
 	assert.False(t, ok)
 }
 
+func TestResolveValidatedPreferredCWD_ReusesInspectedContext(t *testing.T) {
+	sess := &mockRemoteGitSession{
+		mockSession:   mockSession{id: "pane-ctx", typ: session.TypeSSH},
+		activeWorkdir: "/repo/base-worktree",
+		cwd:           "/repo/base",
+		gitContexts: map[string]session.GitContext{
+			"/repo/base": {
+				Branch:    "main",
+				CommonDir: "/repo/.git",
+				Repo:      "base",
+				Root:      "/repo/base",
+			},
+			"/repo/base-worktree": {
+				Branch:    "feature/worktree",
+				CommonDir: "/repo/.git",
+				Repo:      "base",
+				Root:      "/repo/base-worktree",
+			},
+		},
+	}
+
+	h := NewHandler(defaultTestConfig(), session.NewManager())
+	cwd, ctx := h.resolveValidatedPreferredCWD(sess, sess.cwd)
+	require.NotNil(t, ctx)
+	assert.Equal(t, "/repo/base-worktree", cwd)
+	assert.Equal(t, "feature/worktree", ctx.Branch)
+}
+
 func postOpenVSCodeOK(t *testing.T, id string, sess session.Session) openVSCodeResponse {
 	t.Helper()
 

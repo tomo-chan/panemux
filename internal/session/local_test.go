@@ -378,6 +378,27 @@ func TestLatestClaudeTrackedPath_IsDeterministic(t *testing.T) {
 	assert.Equal(t, "/tmp/repo-worktree/README.md", first)
 }
 
+func TestParseClaudeProjectCWD_TrackedBackupTieBreakUsesAlphabeticalLastPath(t *testing.T) {
+	dir := t.TempDir()
+	mainFile := filepath.Join(dir, "repo-main", "AGENTS.md")
+	worktreeFile := filepath.Join(dir, "repo-worktree", "README.md")
+	require.NoError(t, os.MkdirAll(filepath.Dir(mainFile), 0755))
+	require.NoError(t, os.MkdirAll(filepath.Dir(worktreeFile), 0755))
+	require.NoError(t, os.WriteFile(mainFile, []byte("main"), 0600))
+	require.NoError(t, os.WriteFile(worktreeFile, []byte("worktree"), 0600))
+
+	data := []byte(
+		"{\"type\":\"file-history-snapshot\",\"snapshot\":{\"trackedFileBackups\":{" +
+			"\"" + mainFile + "\":{}," +
+			"\"" + worktreeFile + "\":{}" +
+			"}}}\n",
+	)
+
+	cwd, err := parseClaudeProjectCWD(data)
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Dir(worktreeFile), cwd)
+}
+
 func TestGetActiveWorkdir_NoDescendantMatchReturnsEmpty(t *testing.T) {
 	sess := &LocalSession{pid: 100}
 

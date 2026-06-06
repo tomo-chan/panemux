@@ -562,7 +562,7 @@ func (h *Handler) PostOpenVSCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cwd = h.resolveValidatedPreferredCWD(sess, cwd)
+	cwd, _ = h.resolveValidatedPreferredCWD(sess, cwd)
 
 	if !h.validateVSCodeCWD(w, sess, cwd) {
 		return
@@ -760,13 +760,12 @@ func (h *Handler) GetGitInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	targetCWD := h.resolveValidatedPreferredCWD(sess, cwd)
-	ctx, err := h.inspectGitContextForSession(sess, targetCWD)
-	if err != nil {
+	targetCWD, ctx := h.resolveValidatedPreferredCWD(sess, cwd)
+	if ctx == nil {
 		writeJSON(w, gitInfoResponse{IsGit: false})
 		return
 	}
-	prURL, prNumber := h.lookupPRInfo(sess, targetCWD, ctx)
+	prURL, prNumber := h.lookupPRInfo(sess, targetCWD, *ctx)
 
 	writeJSON(w, gitInfoResponse{
 		IsGit:    true,
@@ -827,16 +826,25 @@ func (h *Handler) resolvePreferredCWD(sess session.Session, cwd string) string {
 	return cwd
 }
 
-func (h *Handler) resolveValidatedPreferredCWD(sess session.Session, cwd string) string {
+func (h *Handler) resolveValidatedPreferredCWD(sess session.Session, cwd string) (string, *session.GitContext) {
 	targetCWD := h.resolvePreferredCWD(sess, cwd)
 	if targetCWD == cwd {
-		return cwd
+		ctx, err := h.inspectGitContextForSession(sess, cwd)
+		if err != nil {
+			return cwd, nil
+		}
+		return cwd, &ctx
 	}
-	if _, err := h.inspectGitContextForSession(sess, targetCWD); err == nil {
-		return targetCWD
+	ctx, err := h.inspectGitContextForSession(sess, targetCWD)
+	if err == nil {
+		return targetCWD, &ctx
 	}
 	h.clearPreferredCWD(sess.ID())
-	return cwd
+	ctx, err = h.inspectGitContextForSession(sess, cwd)
+	if err != nil {
+		return cwd, nil
+	}
+	return cwd, &ctx
 }
 
 func (h *Handler) rememberPreferredCWD(sessionID, cwd string, ctx session.GitContext) {
