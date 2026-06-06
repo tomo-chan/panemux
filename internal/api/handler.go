@@ -776,9 +776,11 @@ func (h *Handler) GetGitInfo(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) resolvePreferredCWD(sess session.Session, cwd string) string {
+	logScope := h.gitInfoLogScope(sess)
+
 	baseCtx, err := h.inspectGitContextForSession(sess, cwd)
 	if err != nil {
-		log.Printf("git info base context lookup failed: %v", err)
+		log.Printf("%s base context lookup failed: %v", logScope, err)
 		h.clearPreferredCWD(sess.ID())
 		return cwd
 	}
@@ -791,20 +793,21 @@ func (h *Handler) resolvePreferredCWD(sess session.Session, cwd string) string {
 	candidate, err := activeGetter.GetActiveWorkdir()
 	if err != nil || candidate == "" {
 		if err != nil {
-			log.Printf("git info active workdir lookup failed: %v", err)
+			log.Printf("%s active workdir lookup failed: %v", logScope, err)
 		}
 		return h.recallPreferredCWD(sess.ID(), cwd, baseCtx)
 	}
 
 	ctx, err := h.inspectGitContextForSession(sess, candidate)
 	if err != nil {
-		log.Printf("git info active workdir candidate context lookup failed: %v", err)
+		log.Printf("%s active workdir candidate context lookup failed: %v", logScope, err)
 		return h.recallPreferredCWD(sess.ID(), cwd, baseCtx)
 	}
 	if ctx.CommonDir == baseCtx.CommonDir && ctx.Root != baseCtx.Root {
 		h.rememberPreferredCWD(sess.ID(), candidate, ctx)
 		log.Printf(
-			"git info selected active workdir branch transition %q -> %q",
+			"%s selected active workdir branch transition %q -> %q",
+			logScope,
 			baseCtx.Branch,
 			ctx.Branch,
 		)
@@ -813,7 +816,8 @@ func (h *Handler) resolvePreferredCWD(sess session.Session, cwd string) string {
 
 	h.clearPreferredCWD(sess.ID())
 	log.Printf(
-		"git info ignored active workdir candidate (same_root=%t same_common_dir=%t)",
+		"%s ignored active workdir candidate (same_root=%t same_common_dir=%t)",
+		logScope,
 		ctx.Root == baseCtx.Root,
 		ctx.CommonDir == baseCtx.CommonDir,
 	)
@@ -852,6 +856,10 @@ func (h *Handler) clearPreferredCWD(sessionID string) {
 	defer h.preferredCWDMu.Unlock()
 
 	delete(h.preferredCWDBySession, sessionID)
+}
+
+func (h *Handler) gitInfoLogScope(sess session.Session) string {
+	return fmt.Sprintf("git info pane=%q type=%q", sess.ID(), sess.Type())
 }
 
 func (h *Handler) inspectGitContextForSession(sess session.Session, cwd string) (session.GitContext, error) {

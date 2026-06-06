@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"io/fs"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -1822,6 +1823,42 @@ func TestResolvePreferredCWD_StickyWorktreeIgnoredAfterRepoChange(t *testing.T) 
 	sess.cwd = otherRepo
 
 	assert.Equal(t, otherRepo, h.resolvePreferredCWD(sess, sess.cwd))
+}
+
+func TestResolvePreferredCWD_LogsPaneIdentity(t *testing.T) {
+	sess := &mockRemoteGitSession{
+		mockSession:   mockSession{id: "pane-123", typ: session.TypeSSHTmux},
+		activeWorkdir: "/repo/base-worktree",
+		cwd:           "/repo/base",
+		gitContexts: map[string]session.GitContext{
+			"/repo/base": {
+				Branch:    "main",
+				CommonDir: "/repo/.git",
+				Repo:      "base",
+				Root:      "/repo/base",
+			},
+			"/repo/base-worktree": {
+				Branch:    "feature/worktree",
+				CommonDir: "/repo/.git",
+				Repo:      "base",
+				Root:      "/repo/base-worktree",
+			},
+		},
+	}
+
+	var buf bytes.Buffer
+	originalWriter := log.Writer()
+	originalFlags := log.Flags()
+	log.SetOutput(&buf)
+	log.SetFlags(0)
+	t.Cleanup(func() {
+		log.SetOutput(originalWriter)
+		log.SetFlags(originalFlags)
+	})
+
+	h := NewHandler(defaultTestConfig(), session.NewManager())
+	assert.Equal(t, "/repo/base-worktree", h.resolvePreferredCWD(sess, sess.cwd))
+	assert.Contains(t, buf.String(), `git info pane="pane-123" type="ssh_tmux" selected active workdir`)
 }
 
 func TestGetGitInfo_RemoteEndedAgentKeepsLastWorktree(t *testing.T) {
