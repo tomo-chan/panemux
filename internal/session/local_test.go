@@ -364,6 +364,20 @@ func TestParseClaudeProjectCWD_PrefersBashCDWorktree(t *testing.T) {
 	assert.Equal(t, worktreeDir, cwd)
 }
 
+func TestLatestClaudeTrackedPath_IsDeterministic(t *testing.T) {
+	backups := map[string]json.RawMessage{
+		"/tmp/repo-main/AGENTS.md":       {},
+		"/tmp/repo-worktree/README.md":   {},
+		"/Users/demo/.claude/plans/x.md": {},
+	}
+
+	first := latestClaudeTrackedPath(backups)
+	for range 20 {
+		assert.Equal(t, first, latestClaudeTrackedPath(backups))
+	}
+	assert.Equal(t, "/tmp/repo-worktree/README.md", first)
+}
+
 func TestGetActiveWorkdir_NoDescendantMatchReturnsEmpty(t *testing.T) {
 	sess := &LocalSession{pid: 100}
 
@@ -598,6 +612,68 @@ func TestGetActiveWorkdir_PrefersClaudeTranscriptWorktree(t *testing.T) {
 		case 100:
 			return "/repo/main", nil
 		case 220:
+			return "/repo/main", nil
+		default:
+			return "", errors.New("unexpected pid")
+		}
+	}
+
+	cwd, err := sess.GetActiveWorkdir()
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Dir(worktreeFile), cwd)
+}
+
+func TestGetActiveWorkdir_ClaudeSessionScanSkipsUnreadableMetadata(t *testing.T) {
+	sess := &LocalSession{pid: 100}
+
+	originalListProcesses := listProcessesFn
+	originalGetPIDCWD := getPIDCWDFn
+	originalUserHomeDir := userHomeDirFn
+	originalReadFile := readFileFn
+	t.Cleanup(func() {
+		listProcessesFn = originalListProcesses
+		getPIDCWDFn = originalGetPIDCWD
+		userHomeDirFn = originalUserHomeDir
+		readFileFn = originalReadFile
+	})
+
+	homeDir := t.TempDir()
+	userHomeDirFn = func() (string, error) { return homeDir, nil }
+
+	badSessionPath := filepath.Join(homeDir, ".claude", "sessions", "100.json")
+	goodSessionPath := filepath.Join(homeDir, ".claude", "sessions", "220.json")
+	require.NoError(t, os.MkdirAll(filepath.Dir(badSessionPath), 0755))
+	require.NoError(t, os.WriteFile(goodSessionPath, []byte(
+		`{"pid":220,"sessionId":"session-123","cwd":"/repo/main"}`,
+	), 0600))
+
+	transcriptPath := filepath.Join(homeDir, ".claude", "projects", "-repo-main", "session-123.jsonl")
+	require.NoError(t, os.MkdirAll(filepath.Dir(transcriptPath), 0755))
+	worktreeFile := filepath.Join(t.TempDir(), "panemux-worktree", "AGENTS.md")
+	require.NoError(t, os.MkdirAll(filepath.Dir(worktreeFile), 0755))
+	require.NoError(t, os.WriteFile(worktreeFile, []byte("test"), 0600))
+	require.NoError(t, os.WriteFile(transcriptPath, []byte(
+		"{\"type\":\"file-history-snapshot\",\"snapshot\":{\"trackedFileBackups\":{\""+
+			worktreeFile+
+			"\":{}}}}\n",
+	), 0600))
+
+	readFileFn = func(path string) ([]byte, error) {
+		if path == badSessionPath {
+			return nil, errors.New("transient read failure")
+		}
+		return os.ReadFile(path)
+	}
+
+	listProcessesFn = func() ([]processInfo, error) {
+		return []processInfo{
+			{PID: 110, PPID: 100, Command: "/bin/zsh"},
+			{PID: 220, PPID: 110, Command: "claude"},
+		}, nil
+	}
+	getPIDCWDFn = func(pid int) (string, error) {
+		switch pid {
+		case 100, 220:
 			return "/repo/main", nil
 		default:
 			return "", errors.New("unexpected pid")

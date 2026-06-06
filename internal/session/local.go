@@ -25,11 +25,13 @@ var listProcessesFn = listProcesses
 var getPIDCWDFn = getPIDCWD
 var openFilePathsForPIDFn = openFilePathsForPID
 var userHomeDirFn = os.UserHomeDir
+var readFileFn = os.ReadFile
 
 // validShellPath matches a valid absolute shell path.
 // Only alphanumeric characters, dots, underscores, hyphens, and slashes are permitted.
 // This character allowlist is the sanitizer CodeQL requires for go/command-injection.
 var validShellPath = regexp.MustCompile(`^(/[a-zA-Z0-9._\-/]+)$`)
+var claudeBashCDPattern = regexp.MustCompile(`(?:^|&&)\s*cd\s+((?:"[^"]+"|'[^']+'|[^&|;]+))\s*&&`)
 
 // LocalSession is a local PTY-based terminal session.
 type LocalSession struct {
@@ -408,9 +410,9 @@ func findClaudeSessionMeta(homeDir string, agentPID int) (*claudeSessionMeta, er
 		}
 
 		path := filepath.Join(sessionsDir, entry.Name())
-		data, err := os.ReadFile(path)
+		data, err := readFileFn(path)
 		if err != nil {
-			return nil, fmt.Errorf("read claude session metadata %q: %w", path, err)
+			continue
 		}
 
 		var meta claudeSessionMeta
@@ -547,7 +549,7 @@ func processIDArg(pid int) (string, error) {
 }
 
 func readCodexSessionCWD(path string) (string, error) {
-	data, err := os.ReadFile(path)
+	data, err := readFileFn(path)
 	if err != nil {
 		return "", fmt.Errorf("read codex session log %q: %w", path, err)
 	}
@@ -651,7 +653,7 @@ func claudeProjectDirName(cwd string) string {
 }
 
 func readClaudeProjectCWD(path string) (string, error) {
-	data, err := os.ReadFile(path)
+	data, err := readFileFn(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return "", nil
@@ -708,14 +710,18 @@ func claudeRecordPath(line []byte) string {
 }
 
 func latestClaudeTrackedPath(backups map[string]json.RawMessage) string {
-	latest := ""
+	paths := make([]string, 0, len(backups))
 	for path := range backups {
 		if isClaudeAuxiliaryPath(path) {
 			continue
 		}
-		latest = path
+		paths = append(paths, path)
 	}
-	return latest
+	sort.Strings(paths)
+	if len(paths) == 0 {
+		return ""
+	}
+	return paths[len(paths)-1]
 }
 
 func latestClaudeToolPath(content []json.RawMessage) string {
@@ -772,7 +778,7 @@ func isClaudeAuxiliaryPath(path string) bool {
 }
 
 func claudeBashCommandDir(command string) string {
-	matches := regexp.MustCompile(`(?:^|&&)\s*cd\s+((?:"[^"]+"|'[^']+'|[^&|;]+))\s*&&`).FindStringSubmatch(command)
+	matches := claudeBashCDPattern.FindStringSubmatch(command)
 	if len(matches) < 2 {
 		return ""
 	}

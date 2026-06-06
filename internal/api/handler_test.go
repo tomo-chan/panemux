@@ -1358,6 +1358,43 @@ func TestPostOpenVSCode_EndedAgentKeepsLastWorktree(t *testing.T) {
 	assert.Equal(t, worktreeDir, resp.Cwd)
 }
 
+func TestPostOpenVSCode_StaleStickyWorktreeFallsBackToPaneCWD(t *testing.T) {
+	repoDir := initTempGitRepo(t)
+	worktreeDir := addTempGitWorktree(t, repoDir, "feature/open-in-worktree")
+
+	sess := &mockCWDSession{
+		mockSession:   mockSession{id: "local-open-stale", typ: session.TypeLocal},
+		activeWorkdir: worktreeDir,
+		cwd:           repoDir,
+	}
+
+	mgr := session.NewManager()
+	mgr.Add(sess)
+	h := NewHandler(defaultTestConfig(), mgr)
+	h.codeBinaryPath = "/bin/echo"
+	r := setupRouterWithVSCode(h)
+
+	resp := postOpenVSCodeOKWithRouter(t, r, "local-open-stale")
+	assert.Equal(t, worktreeDir, resp.Cwd)
+
+	sess.activeWorkdir = ""
+	out, err := exec.Command( //nolint:gosec // trusted test args
+		"git",
+		"-C",
+		repoDir,
+		"worktree",
+		"remove",
+		worktreeDir,
+		"--force",
+	).CombinedOutput()
+	require.NoError(t, err, "git worktree remove failed: %s", string(out))
+
+	resp = postOpenVSCodeOKWithRouter(t, r, "local-open-stale")
+	assert.Equal(t, repoDir, resp.Cwd)
+	_, ok := h.preferredCWDBySession["local-open-stale"]
+	assert.False(t, ok)
+}
+
 func postOpenVSCodeOK(t *testing.T, id string, sess session.Session) openVSCodeResponse {
 	t.Helper()
 
