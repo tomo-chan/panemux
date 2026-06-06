@@ -434,6 +434,30 @@ func TestDeleteWorkspace_RemovesWorkspaceSessionsAndPersists(t *testing.T) {
 	require.Len(t, loaded.Workspaces.Items, 1)
 }
 
+func TestDeleteWorkspace_ClearsPreferredCWDForRemovedPanes(t *testing.T) {
+	cfg, _ := loadWorkspaceTestConfigFromFile(t)
+	require.True(t, cfg.SetActiveWorkspace("two"))
+	mgr := session.NewManager()
+	mgr.Add(newMockSession("one-main"))
+	mgr.Add(newMockSession("two-main"))
+	h := NewHandler(cfg, mgr)
+	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
+	h.preferredCWDBySession["two-main"] = preferredCWDState{
+		CWD:       "/tmp/worktree",
+		CommonDir: "/repo/.git",
+		Root:      "/tmp/worktree",
+	}
+	r := setupRouterWithHandler(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/workspaces/two", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	_, ok := h.preferredCWDBySession["two-main"]
+	assert.False(t, ok)
+}
+
 func TestPutWorkspace_RenamesWorkspaceAndPersists(t *testing.T) {
 	cfg, path := loadWorkspaceTestConfigFromFile(t)
 	h := NewHandler(cfg, session.NewManager())
@@ -767,6 +791,39 @@ func TestRestartSession_Found_200(t *testing.T) {
 	assert.True(t, ok)
 }
 
+func TestRestartSession_ClearsPreferredCWD(t *testing.T) {
+	cfg := &config.Config{
+		Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1"},
+		Layout: config.LayoutNode{
+			Direction: "horizontal",
+			Children: []config.LayoutChild{
+				{Size: 100, Pane: &config.PaneConfig{ID: "main", Type: "local"}},
+			},
+		},
+	}
+	mgr := session.NewManager()
+	mgr.Add(newMockSession("main"))
+	h := NewHandler(cfg, mgr)
+	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
+	h.preferredCWDBySession["main"] = preferredCWDState{
+		CWD:       "/tmp/worktree",
+		CommonDir: "/repo/.git",
+		Root:      "/tmp/worktree",
+	}
+	h.createSession = func(pane *config.PaneConfig, _ map[string]config.SSHConnection) (session.Session, error) {
+		return newMockSession(pane.ID), nil
+	}
+	r := setupRouterWithHandler(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/main/restart", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	_, ok := h.preferredCWDBySession["main"]
+	assert.False(t, ok)
+}
+
 func TestRestartSession_NotFound_404(t *testing.T) {
 	r := setupRouter(defaultTestConfig(), session.NewManager())
 	rec := httptest.NewRecorder()
@@ -795,6 +852,27 @@ func TestDeleteSession_RemovesSessionAndSaves(t *testing.T) {
 
 	assert.Equal(t, http.StatusNoContent, rec.Code)
 	_, ok := mgr.Get("s1")
+	assert.False(t, ok)
+}
+
+func TestDeleteSession_ClearsPreferredCWD(t *testing.T) {
+	mgr := session.NewManager()
+	mgr.Add(newMockSession("s1"))
+	cfg := defaultTestConfig()
+	h := NewHandler(cfg, mgr)
+	h.preferredCWDBySession["s1"] = preferredCWDState{
+		CWD:       "/tmp/worktree",
+		CommonDir: "/repo/.git",
+		Root:      "/tmp/worktree",
+	}
+	r := setupRouterWithHandler(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/sessions/s1", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+	_, ok := h.preferredCWDBySession["s1"]
 	assert.False(t, ok)
 }
 
@@ -1783,6 +1861,51 @@ func TestGetGitInfo_EndedAgentKeepsLastWorktree(t *testing.T) {
 	assert.Equal(t, "feature/worktree-pr", resp.Branch)
 	assert.Equal(t, "https://github.com/example/panemux/pull/999", resp.PRURL)
 	assert.Equal(t, 999, resp.PRNumber)
+}
+
+func TestGetGitInfo_StaleStickyWorktreeFallsBackToPaneCWD(t *testing.T) {
+	repoDir := initTempGitRepo(t)
+	worktreeDir := addTempGitWorktree(t, repoDir, "feature/worktree-pr")
+
+	sess := &mockCWDSession{
+		mockSession:   mockSession{id: "local-stale", typ: session.TypeLocal},
+		activeWorkdir: worktreeDir,
+		cwd:           repoDir,
+	}
+	mgr := session.NewManager()
+	mgr.Add(sess)
+
+	h := NewHandler(defaultTestConfig(), mgr)
+	r := setupRouterWithGitInfo(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/local-stale/git-info", nil)
+	r.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	sess.activeWorkdir = ""
+	out, err := exec.Command( //nolint:gosec // trusted test args
+		"git",
+		"-C",
+		repoDir,
+		"worktree",
+		"remove",
+		worktreeDir,
+		"--force",
+	).CombinedOutput()
+	require.NoError(t, err, "git worktree remove failed: %s", string(out))
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/sessions/local-stale/git-info", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var resp gitInfoResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.True(t, resp.IsGit)
+	assert.Equal(t, "main", resp.Branch)
+	_, ok := h.preferredCWDBySession["local-stale"]
+	assert.False(t, ok)
 }
 
 func TestResolvePreferredCWD_StickyWorktreeIgnoredAfterRepoChange(t *testing.T) {

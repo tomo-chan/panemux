@@ -242,6 +242,7 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, pane := range panesInLayout(workspace.Layout) {
 		_ = h.manager.Remove(pane.ID)
+		h.clearPreferredCWD(pane.ID)
 	}
 	writeJSON(w, h.cfg.WorkspacesView())
 }
@@ -377,6 +378,7 @@ func (h *Handler) DeleteSession(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
+	h.clearPreferredCWD(id)
 	h.cfg.RemovePaneFromLayout(id)
 	if err := h.cfg.SaveLayout(h.cfg.Layout); err != nil {
 		http.Error(w, "failed to save layout", http.StatusInternalServerError)
@@ -402,6 +404,7 @@ func (h *Handler) RestartSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.manager.Remove(id) //nolint:errcheck // ok if already gone
+	h.clearPreferredCWD(id)
 
 	sess, err := h.createSession(found, h.cfg.SSHConnections)
 	if err != nil {
@@ -760,8 +763,15 @@ func (h *Handler) GetGitInfo(w http.ResponseWriter, r *http.Request) {
 	targetCWD := h.resolvePreferredCWD(sess, cwd)
 	ctx, err := h.inspectGitContextForSession(sess, targetCWD)
 	if err != nil {
-		writeJSON(w, gitInfoResponse{IsGit: false})
-		return
+		if targetCWD != cwd {
+			h.clearPreferredCWD(sess.ID())
+			targetCWD = cwd
+			ctx, err = h.inspectGitContextForSession(sess, targetCWD)
+		}
+		if err != nil {
+			writeJSON(w, gitInfoResponse{IsGit: false})
+			return
+		}
 	}
 	prURL, prNumber := h.lookupPRInfo(sess, targetCWD, ctx)
 
@@ -781,7 +791,6 @@ func (h *Handler) resolvePreferredCWD(sess session.Session, cwd string) string {
 	baseCtx, err := h.inspectGitContextForSession(sess, cwd)
 	if err != nil {
 		log.Printf("%s base context lookup failed: %v", logScope, err)
-		h.clearPreferredCWD(sess.ID())
 		return cwd
 	}
 
