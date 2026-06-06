@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"io/fs"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -433,6 +434,30 @@ func TestDeleteWorkspace_RemovesWorkspaceSessionsAndPersists(t *testing.T) {
 	require.Len(t, loaded.Workspaces.Items, 1)
 }
 
+func TestDeleteWorkspace_ClearsPreferredCWDForRemovedPanes(t *testing.T) {
+	cfg, _ := loadWorkspaceTestConfigFromFile(t)
+	require.True(t, cfg.SetActiveWorkspace("two"))
+	mgr := session.NewManager()
+	mgr.Add(newMockSession("one-main"))
+	mgr.Add(newMockSession("two-main"))
+	h := NewHandler(cfg, mgr)
+	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
+	h.preferredCWDBySession["two-main"] = preferredCWDState{
+		CWD:       "/tmp/worktree",
+		CommonDir: "/repo/.git",
+		Root:      "/tmp/worktree",
+	}
+	r := setupRouterWithHandler(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/workspaces/two", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	_, ok := h.preferredCWDBySession["two-main"]
+	assert.False(t, ok)
+}
+
 func TestPutWorkspace_RenamesWorkspaceAndPersists(t *testing.T) {
 	cfg, path := loadWorkspaceTestConfigFromFile(t)
 	h := NewHandler(cfg, session.NewManager())
@@ -766,6 +791,39 @@ func TestRestartSession_Found_200(t *testing.T) {
 	assert.True(t, ok)
 }
 
+func TestRestartSession_ClearsPreferredCWD(t *testing.T) {
+	cfg := &config.Config{
+		Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1"},
+		Layout: config.LayoutNode{
+			Direction: "horizontal",
+			Children: []config.LayoutChild{
+				{Size: 100, Pane: &config.PaneConfig{ID: "main", Type: "local"}},
+			},
+		},
+	}
+	mgr := session.NewManager()
+	mgr.Add(newMockSession("main"))
+	h := NewHandler(cfg, mgr)
+	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
+	h.preferredCWDBySession["main"] = preferredCWDState{
+		CWD:       "/tmp/worktree",
+		CommonDir: "/repo/.git",
+		Root:      "/tmp/worktree",
+	}
+	h.createSession = func(pane *config.PaneConfig, _ map[string]config.SSHConnection) (session.Session, error) {
+		return newMockSession(pane.ID), nil
+	}
+	r := setupRouterWithHandler(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/main/restart", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	_, ok := h.preferredCWDBySession["main"]
+	assert.False(t, ok)
+}
+
 func TestRestartSession_NotFound_404(t *testing.T) {
 	r := setupRouter(defaultTestConfig(), session.NewManager())
 	rec := httptest.NewRecorder()
@@ -794,6 +852,27 @@ func TestDeleteSession_RemovesSessionAndSaves(t *testing.T) {
 
 	assert.Equal(t, http.StatusNoContent, rec.Code)
 	_, ok := mgr.Get("s1")
+	assert.False(t, ok)
+}
+
+func TestDeleteSession_ClearsPreferredCWD(t *testing.T) {
+	mgr := session.NewManager()
+	mgr.Add(newMockSession("s1"))
+	cfg := defaultTestConfig()
+	h := NewHandler(cfg, mgr)
+	h.preferredCWDBySession["s1"] = preferredCWDState{
+		CWD:       "/tmp/worktree",
+		CommonDir: "/repo/.git",
+		Root:      "/tmp/worktree",
+	}
+	r := setupRouterWithHandler(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/sessions/s1", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+	_, ok := h.preferredCWDBySession["s1"]
 	assert.False(t, ok)
 }
 
@@ -1254,6 +1333,96 @@ func TestPostOpenVSCode_EndedAgentFallsBackToPaneCWD(t *testing.T) {
 	assert.Equal(t, repoDir, resp.Cwd)
 }
 
+func TestPostOpenVSCode_EndedAgentKeepsLastWorktree(t *testing.T) {
+	repoDir := initTempGitRepo(t)
+	worktreeDir := addTempGitWorktree(t, repoDir, "feature/open-in-worktree")
+
+	sess := &mockCWDSession{
+		mockSession:   mockSession{id: "local-sticky", typ: session.TypeLocal},
+		activeWorkdir: worktreeDir,
+		cwd:           repoDir,
+	}
+
+	mgr := session.NewManager()
+	mgr.Add(sess)
+	h := NewHandler(defaultTestConfig(), mgr)
+	h.codeBinaryPath = "/bin/echo"
+	r := setupRouterWithVSCode(h)
+
+	resp := postOpenVSCodeOKWithRouter(t, r, "local-sticky")
+	assert.Equal(t, worktreeDir, resp.Cwd)
+
+	sess.activeWorkdir = ""
+
+	resp = postOpenVSCodeOKWithRouter(t, r, "local-sticky")
+	assert.Equal(t, worktreeDir, resp.Cwd)
+}
+
+func TestPostOpenVSCode_StaleStickyWorktreeFallsBackToPaneCWD(t *testing.T) {
+	repoDir := initTempGitRepo(t)
+	worktreeDir := addTempGitWorktree(t, repoDir, "feature/open-in-worktree")
+
+	sess := &mockCWDSession{
+		mockSession:   mockSession{id: "local-open-stale", typ: session.TypeLocal},
+		activeWorkdir: worktreeDir,
+		cwd:           repoDir,
+	}
+
+	mgr := session.NewManager()
+	mgr.Add(sess)
+	h := NewHandler(defaultTestConfig(), mgr)
+	h.codeBinaryPath = "/bin/echo"
+	r := setupRouterWithVSCode(h)
+
+	resp := postOpenVSCodeOKWithRouter(t, r, "local-open-stale")
+	assert.Equal(t, worktreeDir, resp.Cwd)
+
+	sess.activeWorkdir = ""
+	out, err := exec.Command( //nolint:gosec // trusted test args
+		"git",
+		"-C",
+		repoDir,
+		"worktree",
+		"remove",
+		worktreeDir,
+		"--force",
+	).CombinedOutput()
+	require.NoError(t, err, "git worktree remove failed: %s", string(out))
+
+	resp = postOpenVSCodeOKWithRouter(t, r, "local-open-stale")
+	assert.Equal(t, repoDir, resp.Cwd)
+	_, ok := h.preferredCWDBySession["local-open-stale"]
+	assert.False(t, ok)
+}
+
+func TestResolveValidatedPreferredCWD_ReusesInspectedContext(t *testing.T) {
+	sess := &mockRemoteGitSession{
+		mockSession:   mockSession{id: "pane-ctx", typ: session.TypeSSH},
+		activeWorkdir: "/repo/base-worktree",
+		cwd:           "/repo/base",
+		gitContexts: map[string]session.GitContext{
+			"/repo/base": {
+				Branch:    "main",
+				CommonDir: "/repo/.git",
+				Repo:      "base",
+				Root:      "/repo/base",
+			},
+			"/repo/base-worktree": {
+				Branch:    "feature/worktree",
+				CommonDir: "/repo/.git",
+				Repo:      "base",
+				Root:      "/repo/base-worktree",
+			},
+		},
+	}
+
+	h := NewHandler(defaultTestConfig(), session.NewManager())
+	cwd, ctx := h.resolveValidatedPreferredCWD(sess, sess.cwd)
+	require.NotNil(t, ctx)
+	assert.Equal(t, "/repo/base-worktree", cwd)
+	assert.Equal(t, "feature/worktree", ctx.Branch)
+}
+
 func postOpenVSCodeOK(t *testing.T, id string, sess session.Session) openVSCodeResponse {
 	t.Helper()
 
@@ -1262,6 +1431,12 @@ func postOpenVSCodeOK(t *testing.T, id string, sess session.Session) openVSCodeR
 	h := NewHandler(defaultTestConfig(), mgr)
 	h.codeBinaryPath = "/bin/echo"
 	r := setupRouterWithVSCode(h)
+
+	return postOpenVSCodeOKWithRouter(t, r, id)
+}
+
+func postOpenVSCodeOKWithRouter(t *testing.T, r *chi.Mux, id string) openVSCodeResponse {
+	t.Helper()
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+id+"/open-vscode", nil)
@@ -1711,6 +1886,224 @@ func TestGetGitInfo_EndedAgentFallsBackToPaneCWD(t *testing.T) {
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
 	assert.True(t, resp.IsGit)
 	assert.Equal(t, "main", resp.Branch)
+}
+
+func TestGetGitInfo_EndedAgentKeepsLastWorktree(t *testing.T) {
+	repoDir := initTempGitRepo(t)
+	worktreeDir := addTempGitWorktree(t, repoDir, "feature/worktree-pr")
+
+	sess := &mockCWDSession{
+		mockSession:   mockSession{id: "local-sticky", typ: session.TypeLocal},
+		activeWorkdir: worktreeDir,
+		cwd:           repoDir,
+	}
+	mgr := session.NewManager()
+	mgr.Add(sess)
+
+	h := NewHandler(defaultTestConfig(), mgr)
+	h.ghBinaryPath = writeFakeGHBinary(
+		t,
+		"#!/bin/sh\necho '{\"url\":\"https://github.com/example/panemux/pull/999\",\"number\":999}'\n",
+	)
+	r := setupRouterWithGitInfo(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/local-sticky/git-info", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	sess.activeWorkdir = ""
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/sessions/local-sticky/git-info", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var resp gitInfoResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.True(t, resp.IsGit)
+	assert.Equal(t, "feature/worktree-pr", resp.Branch)
+	assert.Equal(t, "https://github.com/example/panemux/pull/999", resp.PRURL)
+	assert.Equal(t, 999, resp.PRNumber)
+}
+
+func TestGetGitInfo_StaleStickyWorktreeFallsBackToPaneCWD(t *testing.T) {
+	repoDir := initTempGitRepo(t)
+	worktreeDir := addTempGitWorktree(t, repoDir, "feature/worktree-pr")
+
+	sess := &mockCWDSession{
+		mockSession:   mockSession{id: "local-stale", typ: session.TypeLocal},
+		activeWorkdir: worktreeDir,
+		cwd:           repoDir,
+	}
+	mgr := session.NewManager()
+	mgr.Add(sess)
+
+	h := NewHandler(defaultTestConfig(), mgr)
+	r := setupRouterWithGitInfo(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/local-stale/git-info", nil)
+	r.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	sess.activeWorkdir = ""
+	out, err := exec.Command( //nolint:gosec // trusted test args
+		"git",
+		"-C",
+		repoDir,
+		"worktree",
+		"remove",
+		worktreeDir,
+		"--force",
+	).CombinedOutput()
+	require.NoError(t, err, "git worktree remove failed: %s", string(out))
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/sessions/local-stale/git-info", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var resp gitInfoResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.True(t, resp.IsGit)
+	assert.Equal(t, "main", resp.Branch)
+	_, ok := h.preferredCWDBySession["local-stale"]
+	assert.False(t, ok)
+}
+
+func TestResolvePreferredCWD_StickyWorktreeIgnoredAfterRepoChange(t *testing.T) {
+	baseRepo := "/repo/base"
+	worktreeDir := "/repo/base-worktree"
+	otherRepo := "/repo/other"
+
+	sess := &mockRemoteGitSession{
+		mockSession:   mockSession{id: "remote-sticky", typ: session.TypeSSH},
+		activeWorkdir: worktreeDir,
+		cwd:           baseRepo,
+		gitContexts: map[string]session.GitContext{
+			baseRepo: {
+				Branch:    "main",
+				CommonDir: "/repo/.git",
+				Repo:      "base",
+				Root:      baseRepo,
+			},
+			worktreeDir: {
+				Branch:    "feature/worktree",
+				CommonDir: "/repo/.git",
+				Repo:      "base",
+				Root:      worktreeDir,
+			},
+			otherRepo: {
+				Branch:    "main",
+				CommonDir: "/repo/other/.git",
+				Repo:      "other",
+				Root:      otherRepo,
+			},
+		},
+	}
+
+	h := NewHandler(defaultTestConfig(), session.NewManager())
+	assert.Equal(t, worktreeDir, h.resolvePreferredCWD(sess, sess.cwd))
+
+	sess.activeWorkdir = ""
+	sess.cwd = otherRepo
+
+	assert.Equal(t, otherRepo, h.resolvePreferredCWD(sess, sess.cwd))
+}
+
+func TestResolvePreferredCWD_LogsPaneIdentity(t *testing.T) {
+	sess := &mockRemoteGitSession{
+		mockSession:   mockSession{id: "pane-123", typ: session.TypeSSHTmux},
+		activeWorkdir: "/repo/base-worktree",
+		cwd:           "/repo/base",
+		gitContexts: map[string]session.GitContext{
+			"/repo/base": {
+				Branch:    "main",
+				CommonDir: "/repo/.git",
+				Repo:      "base",
+				Root:      "/repo/base",
+			},
+			"/repo/base-worktree": {
+				Branch:    "feature/worktree",
+				CommonDir: "/repo/.git",
+				Repo:      "base",
+				Root:      "/repo/base-worktree",
+			},
+		},
+	}
+
+	var buf bytes.Buffer
+	originalWriter := log.Writer()
+	originalFlags := log.Flags()
+	log.SetOutput(&buf)
+	log.SetFlags(0)
+	t.Cleanup(func() {
+		log.SetOutput(originalWriter)
+		log.SetFlags(originalFlags)
+	})
+
+	h := NewHandler(defaultTestConfig(), session.NewManager())
+	assert.Equal(t, "/repo/base-worktree", h.resolvePreferredCWD(sess, sess.cwd))
+	assert.Contains(t, buf.String(), `git info pane="pane-123" type="ssh_tmux" selected active workdir`)
+}
+
+func TestGetGitInfo_RemoteEndedAgentKeepsLastWorktree(t *testing.T) {
+	const (
+		baseRepo     = "/home/demo/panemux"
+		worktreeRepo = "/home/demo/panemux-worktree"
+	)
+
+	sess := &mockRemoteGitSession{
+		mockSession:   mockSession{id: "ssh-sticky", typ: session.TypeSSH},
+		activeWorkdir: worktreeRepo,
+		cwd:           baseRepo,
+		gitContexts: map[string]session.GitContext{
+			baseRepo: {
+				Branch:    "main",
+				CommonDir: "/home/demo/panemux/.git",
+				OriginURL: "git@github.com:example/panemux.git",
+				Repo:      "panemux",
+				Root:      baseRepo,
+			},
+			worktreeRepo: {
+				Branch:    "feature/remote-worktree",
+				CommonDir: "/home/demo/panemux/.git",
+				OriginURL: "git@github.com:example/panemux.git",
+				Repo:      "panemux",
+				Root:      worktreeRepo,
+			},
+		},
+	}
+	mgr := session.NewManager()
+	mgr.Add(sess)
+
+	h := NewHandler(defaultTestConfig(), mgr)
+	h.ghBinaryPath = writeFakeGHBinary(
+		t,
+		"#!/bin/sh\necho '{\"url\":\"https://github.com/example/panemux/pull/654\",\"number\":654}'\n",
+	)
+	r := setupRouterWithGitInfo(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/ssh-sticky/git-info", nil)
+	r.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	sess.activeWorkdir = ""
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/sessions/ssh-sticky/git-info", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var resp gitInfoResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.True(t, resp.IsGit)
+	assert.Equal(t, "feature/remote-worktree", resp.Branch)
+	assert.Equal(t, "https://github.com/example/panemux/pull/654", resp.PRURL)
+	assert.Equal(t, 654, resp.PRNumber)
 }
 
 func TestGetGitInfo_GitNotFound_IsGitFalse(t *testing.T) {

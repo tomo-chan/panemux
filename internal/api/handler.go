@@ -19,6 +19,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -43,6 +44,14 @@ type Handler struct {
 	listLocalDirectoriesFn  func(path string, showHidden bool) (directoryBrowserResponse, error)
 	listRemoteDirectoriesFn func(cfg session.SSHConfig, path string, showHidden bool) (directoryBrowserResponse, error)
 	readDirFn               func(name string) ([]os.DirEntry, error)
+	preferredCWDMu          sync.Mutex
+	preferredCWDBySession   map[string]preferredCWDState
+}
+
+type preferredCWDState struct {
+	CWD       string
+	CommonDir string
+	Root      string
 }
 
 var gitExistsFn = func() error {
@@ -106,7 +115,12 @@ var validHostName = regexp.MustCompile(`^[a-zA-Z0-9_.\-]+$`)
 
 // NewHandler creates a new API handler.
 func NewHandler(cfg *config.Config, manager *session.Manager) *Handler {
-	h := &Handler{cfg: cfg, manager: manager, sshConfigPath: sshconfig.DefaultPath()}
+	h := &Handler{
+		cfg:                   cfg,
+		manager:               manager,
+		sshConfigPath:         sshconfig.DefaultPath(),
+		preferredCWDBySession: make(map[string]preferredCWDState),
+	}
 	h.createSession = session.CreateFromConfig
 	h.detectLocalShellFn = session.DetectLocalShell
 	h.detectRemoteShellFn = session.DetectRemoteShell
@@ -228,6 +242,7 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, pane := range panesInLayout(workspace.Layout) {
 		_ = h.manager.Remove(pane.ID)
+		h.clearPreferredCWD(pane.ID)
 	}
 	writeJSON(w, h.cfg.WorkspacesView())
 }
@@ -363,6 +378,7 @@ func (h *Handler) DeleteSession(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
+	h.clearPreferredCWD(id)
 	h.cfg.RemovePaneFromLayout(id)
 	if err := h.cfg.SaveLayout(h.cfg.Layout); err != nil {
 		http.Error(w, "failed to save layout", http.StatusInternalServerError)
@@ -388,6 +404,7 @@ func (h *Handler) RestartSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.manager.Remove(id) //nolint:errcheck // ok if already gone
+	h.clearPreferredCWD(id)
 
 	sess, err := h.createSession(found, h.cfg.SSHConnections)
 	if err != nil {
@@ -521,7 +538,8 @@ type openVSCodeResponse struct {
 
 // PostOpenVSCode opens VSCode pointed at the session's current working directory.
 // When an interactive Codex or Claude agent is actively working in a sibling git
-// worktree for the same repository, panemux prefers that worktree instead.
+// worktree for the same repository, panemux prefers that worktree instead and
+// keeps the last valid sibling worktree pinned until the pane changes repo context.
 // For local sessions it runs: code <cwd>
 // For SSH sessions it runs: code --remote ssh-remote+<connection> <cwd>
 func (h *Handler) PostOpenVSCode(w http.ResponseWriter, r *http.Request) {
@@ -544,7 +562,7 @@ func (h *Handler) PostOpenVSCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cwd = h.resolvePreferredCWD(sess, cwd)
+	cwd, _ = h.resolveValidatedPreferredCWD(sess, cwd)
 
 	if !h.validateVSCodeCWD(w, sess, cwd) {
 		return
@@ -742,13 +760,12 @@ func (h *Handler) GetGitInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	targetCWD := h.resolvePreferredCWD(sess, cwd)
-	ctx, err := h.inspectGitContextForSession(sess, targetCWD)
-	if err != nil {
+	targetCWD, ctx := h.resolveValidatedPreferredCWD(sess, cwd)
+	if ctx == nil {
 		writeJSON(w, gitInfoResponse{IsGit: false})
 		return
 	}
-	prURL, prNumber := h.lookupPRInfo(sess, targetCWD, ctx)
+	prURL, prNumber := h.lookupPRInfo(sess, targetCWD, *ctx)
 
 	writeJSON(w, gitInfoResponse{
 		IsGit:    true,
@@ -761,46 +778,110 @@ func (h *Handler) GetGitInfo(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) resolvePreferredCWD(sess session.Session, cwd string) string {
+	logScope := h.gitInfoLogScope(sess)
+
 	baseCtx, err := h.inspectGitContextForSession(sess, cwd)
 	if err != nil {
-		log.Printf("git info base context lookup failed: %v", err)
+		log.Printf("%s base context lookup failed: %v", logScope, err)
 		return cwd
 	}
 
 	activeGetter, ok := sess.(session.ActiveWorkdirGetter)
 	if !ok {
-		return cwd
+		return h.recallPreferredCWD(sess.ID(), cwd, baseCtx)
 	}
 
 	candidate, err := activeGetter.GetActiveWorkdir()
 	if err != nil || candidate == "" {
 		if err != nil {
-			log.Printf("git info active workdir lookup failed: %v", err)
+			log.Printf("%s active workdir lookup failed: %v", logScope, err)
 		}
-		return cwd
+		return h.recallPreferredCWD(sess.ID(), cwd, baseCtx)
 	}
 
 	ctx, err := h.inspectGitContextForSession(sess, candidate)
 	if err != nil {
-		log.Printf("git info active workdir candidate context lookup failed: %v", err)
-		return cwd
+		log.Printf("%s active workdir candidate context lookup failed: %v", logScope, err)
+		return h.recallPreferredCWD(sess.ID(), cwd, baseCtx)
 	}
 	if ctx.CommonDir == baseCtx.CommonDir && ctx.Root != baseCtx.Root {
+		h.rememberPreferredCWD(sess.ID(), candidate, ctx)
 		log.Printf(
-			"git info selected active workdir branch transition %q -> %q",
+			"%s selected active workdir branch transition %q -> %q",
+			logScope,
 			baseCtx.Branch,
 			ctx.Branch,
 		)
 		return candidate
 	}
 
+	h.clearPreferredCWD(sess.ID())
 	log.Printf(
-		"git info ignored active workdir candidate (same_root=%t same_common_dir=%t)",
+		"%s ignored active workdir candidate (same_root=%t same_common_dir=%t)",
+		logScope,
 		ctx.Root == baseCtx.Root,
 		ctx.CommonDir == baseCtx.CommonDir,
 	)
 
 	return cwd
+}
+
+func (h *Handler) resolveValidatedPreferredCWD(sess session.Session, cwd string) (string, *session.GitContext) {
+	targetCWD := h.resolvePreferredCWD(sess, cwd)
+	if targetCWD == cwd {
+		ctx, err := h.inspectGitContextForSession(sess, cwd)
+		if err != nil {
+			return cwd, nil
+		}
+		return cwd, &ctx
+	}
+	ctx, err := h.inspectGitContextForSession(sess, targetCWD)
+	if err == nil {
+		return targetCWD, &ctx
+	}
+	h.clearPreferredCWD(sess.ID())
+	ctx, err = h.inspectGitContextForSession(sess, cwd)
+	if err != nil {
+		return cwd, nil
+	}
+	return cwd, &ctx
+}
+
+func (h *Handler) rememberPreferredCWD(sessionID, cwd string, ctx session.GitContext) {
+	h.preferredCWDMu.Lock()
+	defer h.preferredCWDMu.Unlock()
+
+	h.preferredCWDBySession[sessionID] = preferredCWDState{
+		CWD:       cwd,
+		CommonDir: ctx.CommonDir,
+		Root:      ctx.Root,
+	}
+}
+
+func (h *Handler) recallPreferredCWD(sessionID, cwd string, baseCtx session.GitContext) string {
+	h.preferredCWDMu.Lock()
+	defer h.preferredCWDMu.Unlock()
+
+	state, ok := h.preferredCWDBySession[sessionID]
+	if !ok {
+		return cwd
+	}
+	if state.CommonDir != baseCtx.CommonDir || state.Root == baseCtx.Root || state.CWD == "" {
+		delete(h.preferredCWDBySession, sessionID)
+		return cwd
+	}
+	return state.CWD
+}
+
+func (h *Handler) clearPreferredCWD(sessionID string) {
+	h.preferredCWDMu.Lock()
+	defer h.preferredCWDMu.Unlock()
+
+	delete(h.preferredCWDBySession, sessionID)
+}
+
+func (h *Handler) gitInfoLogScope(sess session.Session) string {
+	return fmt.Sprintf("git info pane=%q type=%q", sess.ID(), sess.Type())
 }
 
 func (h *Handler) inspectGitContextForSession(sess session.Session, cwd string) (session.GitContext, error) {

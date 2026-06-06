@@ -24,11 +24,14 @@ import (
 var listProcessesFn = listProcesses
 var getPIDCWDFn = getPIDCWD
 var openFilePathsForPIDFn = openFilePathsForPID
+var userHomeDirFn = os.UserHomeDir
+var readFileFn = os.ReadFile
 
 // validShellPath matches a valid absolute shell path.
 // Only alphanumeric characters, dots, underscores, hyphens, and slashes are permitted.
 // This character allowlist is the sanitizer CodeQL requires for go/command-injection.
 var validShellPath = regexp.MustCompile(`^(/[a-zA-Z0-9._\-/]+)$`)
+var claudeBashCDPattern = regexp.MustCompile(`(?:^|&&)\s*cd\s+((?:"[^"]+"|'[^']+'|[^&|;]+))\s*&&`)
 
 // LocalSession is a local PTY-based terminal session.
 type LocalSession struct {
@@ -297,7 +300,7 @@ func descendantPIDs(processes []processInfo, rootPID int) []int {
 }
 
 func resolveInteractiveAgentWorkdir(processes []processInfo, agentPID int, baseCWD string) (string, error) {
-	if sessionCWD, err := codexSessionCWD(processes, agentPID); err == nil && sessionCWD != "" {
+	if sessionCWD, err := interactiveAgentSessionCWD(processes, agentPID); err == nil && sessionCWD != "" {
 		return sessionCWD, nil
 	}
 
@@ -327,6 +330,21 @@ func resolveInteractiveAgentWorkdir(processes []processInfo, agentPID int, baseC
 	return "", nil
 }
 
+func interactiveAgentSessionCWD(processes []processInfo, agentPID int) (string, error) {
+	proc, ok := processByPID(processes, agentPID)
+	if !ok {
+		return "", nil
+	}
+	switch {
+	case isCodexCommand(proc.Command):
+		return codexSessionCWD(processes, agentPID)
+	case isClaudeCommand(proc.Command):
+		return claudeSessionCWD(agentPID)
+	default:
+		return "", nil
+	}
+}
+
 func codexSessionCWD(processes []processInfo, agentPID int) (string, error) {
 	proc, ok := processByPID(processes, agentPID)
 	if !ok || !isCodexCommand(proc.Command) {
@@ -344,6 +362,69 @@ func codexSessionCWD(processes []processInfo, agentPID int) (string, error) {
 	}
 
 	return readCodexSessionCWD(sessionPath)
+}
+
+type claudeSessionMeta struct {
+	SessionID string `json:"sessionId"`
+	CWD       string `json:"cwd"`
+	PID       int    `json:"pid"`
+}
+
+func claudeSessionCWD(agentPID int) (string, error) {
+	homeDir, err := userHomeDirFn()
+	if err != nil {
+		return "", fmt.Errorf("resolve home dir for claude session: %w", err)
+	}
+
+	sessionMeta, err := findClaudeSessionMeta(homeDir, agentPID)
+	if err != nil {
+		return "", err
+	}
+	if sessionMeta == nil || sessionMeta.SessionID == "" || sessionMeta.CWD == "" {
+		return "", nil
+	}
+
+	projectPath := filepath.Join(
+		homeDir,
+		".claude",
+		"projects",
+		claudeProjectDirName(sessionMeta.CWD),
+		sessionMeta.SessionID+".jsonl",
+	)
+	return readClaudeProjectCWD(projectPath)
+}
+
+func findClaudeSessionMeta(homeDir string, agentPID int) (*claudeSessionMeta, error) {
+	sessionsDir := filepath.Join(homeDir, ".claude", "sessions")
+	entries, err := os.ReadDir(sessionsDir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read claude sessions dir %q: %w", sessionsDir, err)
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+
+		path := filepath.Join(sessionsDir, entry.Name())
+		data, err := readFileFn(path)
+		if err != nil {
+			continue
+		}
+
+		var meta claudeSessionMeta
+		if err := json.Unmarshal(data, &meta); err != nil {
+			continue
+		}
+		if meta.PID == agentPID {
+			return &meta, nil
+		}
+	}
+
+	return nil, nil
 }
 
 func processByPID(processes []processInfo, pid int) (processInfo, bool) {
@@ -375,6 +456,11 @@ func isInteractiveAgentCommand(command string) bool {
 func isCodexCommand(command string) bool {
 	fields := strings.Fields(command)
 	return len(fields) > 0 && strings.ToLower(filepath.Base(fields[0])) == "codex"
+}
+
+func isClaudeCommand(command string) bool {
+	fields := strings.Fields(command)
+	return len(fields) > 0 && strings.ToLower(filepath.Base(fields[0])) == "claude"
 }
 
 func containsToken(tokens []string, target string) bool {
@@ -463,7 +549,7 @@ func processIDArg(pid int) (string, error) {
 }
 
 func readCodexSessionCWD(path string) (string, error) {
-	data, err := os.ReadFile(path)
+	data, err := readFileFn(path)
 	if err != nil {
 		return "", fmt.Errorf("read codex session log %q: %w", path, err)
 	}
@@ -560,6 +646,143 @@ func parseExecCommandWorkdir(raw json.RawMessage) string {
 		return ""
 	}
 	return args.Workdir
+}
+
+func claudeProjectDirName(cwd string) string {
+	return strings.ReplaceAll(filepath.Clean(cwd), string(os.PathSeparator), "-")
+}
+
+func readClaudeProjectCWD(path string) (string, error) {
+	data, err := readFileFn(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", nil
+		}
+		return "", fmt.Errorf("read claude transcript %q: %w", path, err)
+	}
+	return parseClaudeProjectCWD(data)
+}
+
+func parseClaudeProjectCWD(data []byte) (string, error) {
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+	var latestPath string
+	for scanner.Scan() {
+		if candidate := claudeRecordPath(scanner.Bytes()); candidate != "" {
+			latestPath = candidate
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return "", fmt.Errorf("scan claude transcript: %w", err)
+	}
+	if latestPath == "" {
+		return "", nil
+	}
+	if info, err := os.Stat(latestPath); err == nil && info.IsDir() {
+		return latestPath, nil
+	}
+	return filepath.Dir(latestPath), nil
+}
+
+type claudeProjectRecord struct {
+	Type     string `json:"type"`
+	Snapshot struct {
+		TrackedFileBackups map[string]json.RawMessage `json:"trackedFileBackups"`
+	} `json:"snapshot"`
+	Message struct {
+		Content []json.RawMessage `json:"content"`
+	} `json:"message"`
+}
+
+func claudeRecordPath(line []byte) string {
+	var rec claudeProjectRecord
+	if err := json.Unmarshal(line, &rec); err != nil {
+		return ""
+	}
+
+	switch rec.Type {
+	case "file-history-snapshot":
+		return latestClaudeTrackedPath(rec.Snapshot.TrackedFileBackups)
+	case "assistant":
+		return latestClaudeToolPath(rec.Message.Content)
+	default:
+		return ""
+	}
+}
+
+func latestClaudeTrackedPath(backups map[string]json.RawMessage) string {
+	paths := make([]string, 0, len(backups))
+	for path := range backups {
+		if isClaudeAuxiliaryPath(path) {
+			continue
+		}
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	if len(paths) == 0 {
+		return ""
+	}
+	return paths[len(paths)-1]
+}
+
+func latestClaudeToolPath(content []json.RawMessage) string {
+	latest := ""
+	for _, item := range content {
+		if path := claudeToolPath(item); path != "" {
+			latest = path
+		}
+	}
+	return latest
+}
+
+func claudeToolPath(raw json.RawMessage) string {
+	type toolUseContent struct {
+		Type  string          `json:"type"`
+		Name  string          `json:"name"`
+		Input json.RawMessage `json:"input"`
+	}
+	type fileInput struct {
+		FilePath string `json:"file_path"`
+	}
+	type bashInput struct {
+		Command string `json:"command"`
+	}
+
+	var item toolUseContent
+	if err := json.Unmarshal(raw, &item); err != nil || item.Type != "tool_use" {
+		return ""
+	}
+
+	switch item.Name {
+	case "Read", "Edit", "Write", "MultiEdit", "NotebookEdit":
+		var input fileInput
+		if err := json.Unmarshal(item.Input, &input); err != nil {
+			return ""
+		}
+		if input.FilePath == "" || isClaudeAuxiliaryPath(input.FilePath) {
+			return ""
+		}
+		return input.FilePath
+	case "Bash":
+		var input bashInput
+		if err := json.Unmarshal(item.Input, &input); err != nil {
+			return ""
+		}
+		return claudeBashCommandDir(input.Command)
+	default:
+		return ""
+	}
+}
+
+func isClaudeAuxiliaryPath(path string) bool {
+	return strings.Contains(path, "/.claude/")
+}
+
+func claudeBashCommandDir(command string) string {
+	matches := claudeBashCDPattern.FindStringSubmatch(command)
+	if len(matches) < 2 {
+		return ""
+	}
+	return strings.Trim(strings.TrimSpace(matches[1]), `"'`)
 }
 
 // validateShell ensures the shell path is safe to execute.

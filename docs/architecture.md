@@ -78,7 +78,7 @@ Workspace-related endpoints:
 - `PUT /api/workspaces/{id}/layout` updates a specific workspace layout.
 - `GET/PUT /api/layout` remain as compatibility endpoints for the active workspace layout.
 
-`POST /api/sessions/{id}/open-vscode` launches VSCode pointed at the session's live working directory. Like `GET /api/sessions/{id}/git-info`, it may prefer the worktree of an active interactive `codex` or `claude` process when that worktree belongs to the same repository. For local sessions it runs `code <cwd>`; for SSH sessions it runs `code --remote ssh-remote+<connection> <cwd>`. The binary is located via `exec.LookPath("code")` with a macOS app-bundle fallback.
+`POST /api/sessions/{id}/open-vscode` launches VSCode pointed at the session's live working directory. Like `GET /api/sessions/{id}/git-info`, it may prefer the worktree of an active interactive `codex` or `claude` process when that worktree belongs to the same repository, and it keeps using the last valid sibling worktree after the agent exits until the pane changes repository context. For local sessions it runs `code <cwd>`; for SSH sessions it runs `code --remote ssh-remote+<connection> <cwd>`. The binary is located via `exec.LookPath("code")` with a macOS app-bundle fallback.
 
 Why REST here:
 
@@ -170,6 +170,12 @@ The override path is intentionally narrow:
 - local and local tmux sessions only consider descendants of the pane's own shell process or active tmux pane process
 - SSH sessions scan the remote process list on the current SSH connection, and SSH+tmux sessions restrict that scan to the active remote tmux pane's process tree
 - only worktrees that belong to the same Git common dir as the pane's base repository are accepted
+
+When a valid override worktree is accepted, the API layer caches that sibling worktree per pane
+session. Later requests reuse it when no active agent workdir is currently detectable, but only
+while the pane still resolves to the same Git common dir and a different worktree root. This keeps
+pane headers and editor-opening behavior stable after an agent exits without allowing stale
+cross-repository reuse.
 
 For interactive Codex sessions, all four session implementations (`local`, `ssh`, `tmux`, and `ssh_tmux`) may inspect the open Codex session log under `~/.codex/sessions/...jsonl` when the Codex process has that file open. Panemux currently prefers the latest `exec_command.arguments.workdir` recorded in `response_item` / `function_call` log entries, then falls back to `turn_context.cwd`, then `session_meta.cwd`.
 
