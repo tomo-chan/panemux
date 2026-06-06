@@ -1,3 +1,6 @@
+@DEVELOPMENT.md
+@docs/security.md
+
 # AGENTS.md
 
 This file is an index for coding agents working in this repository. Do not duplicate long-form guidance here; follow the linked documents.
