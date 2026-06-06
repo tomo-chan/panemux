@@ -2,6 +2,16 @@
 
 This file is an index for coding agents working in this repository. Do not duplicate long-form guidance here; follow the linked documents.
 
+## Setup
+
+Before building or running tests, always run:
+
+```sh
+make install-deps
+```
+
+This installs npm packages and downloads Go modules. Required once per environment.
+
 ## Read This First
 
 1. Read [DEVELOPMENT.md](DEVELOPMENT.md) for build, test, branch, and PR workflow rules.
