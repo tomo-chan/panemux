@@ -1,5 +1,5 @@
 import { fireEvent, render } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 class ResizeObserverMock {
   observe() {}
@@ -9,14 +9,12 @@ class ResizeObserverMock {
 
 vi.stubGlobal('ResizeObserver', ResizeObserverMock)
 
+const { mockUseTerminal } = vi.hoisted(() => ({
+  mockUseTerminal: vi.fn(),
+}))
+
 vi.mock('../hooks/useTerminal', () => ({
-  useTerminal: () => ({
-    handleResize: vi.fn(),
-    connected: true,
-    dims: null,
-    sessionExited: false,
-    restartSession: vi.fn(),
-  }),
+  useTerminal: mockUseTerminal,
 }))
 vi.mock('../hooks/useGitInfo', () => ({
   useGitInfo: () => ({ is_git: false }),
@@ -25,6 +23,17 @@ import { dropZoneStyle, PANE_DROP_ZONE_RATIO, resolvePaneDropEdge, TerminalPane 
 import { LayoutActionsContext, type LayoutActionsContextValue } from './SplitContainer'
 
 describe('TerminalPane drop zones', () => {
+  beforeEach(() => {
+    mockUseTerminal.mockReturnValue({
+      handleResize: vi.fn(),
+      connected: true,
+      dims: null,
+      sessionState: 'running',
+      reconnectFailed: false,
+      restartSession: vi.fn(),
+    })
+  })
+
   it('uses a top or bottom half-pane preview for horizontal edge drop zones', () => {
     expect(dropZoneStyle('top', false)).toMatchObject({ height: `${PANE_DROP_ZONE_RATIO * 100}%` })
     expect(dropZoneStyle('bottom', true)).toMatchObject({ height: `${PANE_DROP_ZONE_RATIO * 100}%` })
@@ -91,6 +100,45 @@ describe('TerminalPane drop zones', () => {
 
     expect(ctx.onMovePaneBeside).toHaveBeenCalledWith('pane-source', 'pane-target', 'left')
     expect(ctx.setDragSourcePaneId).toHaveBeenCalledWith(null)
+  })
+
+  it('shows restart button only when the session exited', () => {
+    mockUseTerminal.mockReturnValue({
+      handleResize: vi.fn(),
+      connected: false,
+      dims: null,
+      sessionState: 'exited',
+      reconnectFailed: false,
+      restartSession: vi.fn(),
+    })
+
+    const { getByRole } = render(
+      <LayoutActionsContext.Provider value={makeCtx()}>
+        <TerminalPane pane={{ id: 'pane-1', type: 'local', title: 'Pane 1' }} />
+      </LayoutActionsContext.Provider>,
+    )
+
+    expect(getByRole('button', { name: 'Restart Session' })).toBeInTheDocument()
+  })
+
+  it('shows reconnect button after disconnected auto-recovery fails', () => {
+    mockUseTerminal.mockReturnValue({
+      handleResize: vi.fn(),
+      connected: false,
+      dims: null,
+      sessionState: 'disconnected',
+      reconnectFailed: true,
+      restartSession: vi.fn(),
+    })
+
+    const { getByRole, queryByRole } = render(
+      <LayoutActionsContext.Provider value={makeCtx()}>
+        <TerminalPane pane={{ id: 'pane-1', type: 'local', title: 'Pane 1' }} />
+      </LayoutActionsContext.Provider>,
+    )
+
+    expect(getByRole('button', { name: 'Reconnect Session' })).toBeInTheDocument()
+    expect(queryByRole('button', { name: 'Restart Session' })).toBeNull()
   })
 })
 

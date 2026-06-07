@@ -277,10 +277,10 @@ func NewSSH(id, title string, cfg SSHConfig) (*SSHSession, error) {
 		jumpClient:     jumpClient,
 	}
 
-	monitorSSHSession(sess, pw, func() {
+	monitorSSHSession(sess, pw, func(state State) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		s.state = StateExited
+		s.state = state
 	})
 
 	return s, nil
@@ -366,12 +366,30 @@ func closeSSHResources(sess *ssh.Session, client, jumpClient *ssh.Client) {
 	}
 }
 
-func monitorSSHSession(sess *ssh.Session, pw *io.PipeWriter, markExited func()) {
+func monitorSSHSession(sess *ssh.Session, pw *io.PipeWriter, markExited func(State)) {
 	go func() {
-		sess.Wait()
+		waitErr := sess.Wait()
+		markExited(classifySSHWaitError(waitErr))
 		pw.Close()
-		markExited()
 	}()
+}
+
+func classifySSHWaitError(err error) State {
+	if err == nil {
+		return StateExited
+	}
+
+	var exitErr *ssh.ExitError
+	if errors.As(err, &exitErr) {
+		return StateExited
+	}
+
+	var exitMissingErr *ssh.ExitMissingError
+	if errors.As(err, &exitMissingErr) {
+		return StateExited
+	}
+
+	return StateDisconnected
 }
 
 // DetectRemoteShell connects to the remote host via SSH and returns the value of $SHELL.

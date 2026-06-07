@@ -172,7 +172,7 @@ func (h *Handler) forwardTerminalOutput(
 		log.Printf("session %s stream closed in state %s", sessionID, sess.State())
 	}
 
-	h.sendStatus(conn, "exited")
+	h.sendStatus(conn, string(sess.State()))
 }
 
 func (h *Handler) pipeWebSocketToTerminal(

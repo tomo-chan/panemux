@@ -304,7 +304,7 @@ func TestWS_ReplayEndWriteFailureDetected(t *testing.T) {
 	assert.Equal(t, "start", replayStart.State)
 }
 
-func TestWS_SendsExitedStatusWhenSessionStreamEndsWithReadError(t *testing.T) {
+func TestWS_SendsDisconnectedStatusWhenSessionStreamEndsWithReadError(t *testing.T) {
 	mgr := session.NewManager()
 	sess := newWsMock("s1")
 	sess.state = session.StateDisconnected
@@ -331,6 +331,35 @@ func TestWS_SendsExitedStatusWhenSessionStreamEndsWithReadError(t *testing.T) {
 
 	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 	msgType, data, err = conn.ReadMessage()
+	require.NoError(t, err)
+	assert.Equal(t, websocket.TextMessage, msgType)
+
+	var disconnected ControlMessage
+	require.NoError(t, json.Unmarshal(data, &disconnected))
+	assert.Equal(t, "disconnected", disconnected.State)
+}
+
+func TestWS_SendsExitedStatusWhenSessionStreamEndsExplicitly(t *testing.T) {
+	mgr := session.NewManager()
+	sess := newWsMock("s1")
+	sess.state = session.StateExited
+	mgr.Add(sess)
+	close(sess.out)
+	time.Sleep(50 * time.Millisecond)
+
+	srv := setupWSServer(mgr)
+	defer srv.Close()
+
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL(srv, "s1"), nil)
+	require.NoError(t, err)
+	defer conn.Close()
+
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_, _, err = conn.ReadMessage()
+	require.NoError(t, err)
+
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	msgType, data, err := conn.ReadMessage()
 	require.NoError(t, err)
 	assert.Equal(t, websocket.TextMessage, msgType)
 

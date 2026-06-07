@@ -396,6 +396,11 @@ During replayed reconnect output, xterm stdin is suppressed until the replay end
 applied, so terminal query responses embedded in old output are not regenerated as fresh shell
 input.
 
+When an SSH-backed pane loses its transport unexpectedly, panemux classifies that session as
+`disconnected` instead of `exited`. The frontend performs one automatic recovery attempt by
+recreating the session and reconnecting the pane. Deliberate remote shell termination such as
+`exit` remains `exited` and shows the restart action instead of auto-reconnecting.
+
 ### Selection and copy behavior
 
 - Terminal text can be selected with the mouse using xterm.js standard selection behavior.

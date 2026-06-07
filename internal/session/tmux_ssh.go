@@ -82,10 +82,10 @@ func NewTmuxSSH(id, title, tmuxSession string, cfg SSHConfig) (*TmuxSSHSession, 
 		jumpClient:     jumpClient,
 	}
 
-	monitorSSHSession(sess, pw, func() {
+	monitorSSHSession(sess, pw, func(state State) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		s.state = StateExited
+		s.state = state
 	})
 
 	return s, nil
