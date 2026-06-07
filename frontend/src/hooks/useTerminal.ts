@@ -4,6 +4,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { useWebSocket } from './useWebSocket'
 import { TERMINAL_FONT_FAMILY } from '../utils/fonts'
+import type { SessionState } from '../schemas'
 
 const REPAINT_SETTLE_DELAYS_MS = [50, 250]
 
@@ -31,6 +32,7 @@ interface PendingTerminalMessage {
 }
 
 const terminalEntries = new Map<string, TerminalEntry>()
+type TerminalLifecycleState = 'running' | 'disconnected' | 'exited'
 
 export function useTerminal({ sessionId, container }: UseTerminalOptions) {
   const termRef = useRef<Terminal | null>(null)
@@ -39,8 +41,11 @@ export function useTerminal({ sessionId, container }: UseTerminalOptions) {
   const sendRef = useRef<((data: string | ArrayBuffer | Uint8Array) => void) | null>(null)
   const entryRef = useRef<TerminalEntry | null>(null)
   const pendingMessagesRef = useRef<PendingTerminalMessage[]>([])
+  const reconnectingAfterDisconnectRef = useRef(false)
+  const recoverDisconnectedSessionRef = useRef<(() => Promise<void>) | null>(null)
   const [dims, setDims] = useState<{ cols: number; rows: number } | null>(null)
-  const [sessionExited, setSessionExited] = useState(false)
+  const [sessionState, setSessionState] = useState<TerminalLifecycleState>('running')
+  const [reconnectFailed, setReconnectFailed] = useState(false)
 
   const applyMessageToTerminal = useCallback((data: ArrayBuffer | string, isBinary: boolean) => {
     const term = termRef.current
@@ -54,10 +59,18 @@ export function useTerminal({ sessionId, container }: UseTerminalOptions) {
       try {
         const msg = JSON.parse(data as string)
         if (msg.type === 'status') {
-          console.log(`Session ${sessionId} status:`, msg.state)
-          if (msg.state === 'exited') {
-            setSessionExited(true)
+          const state = msg.state as SessionState
+          console.log(`Session ${sessionId} status:`, state)
+          if (state === 'exited') {
+            setSessionState('exited')
+            setReconnectFailed(false)
             term.write('\r\n\x1b[2m[Session ended]\x1b[0m\r\n')
+          } else if (state === 'disconnected') {
+            setSessionState('disconnected')
+            void recoverDisconnectedSessionRef.current?.()
+          } else {
+            setSessionState('running')
+            setReconnectFailed(false)
           }
         } else if (msg.type === 'replay') {
           if (msg.state === 'start') {
@@ -96,11 +109,34 @@ export function useTerminal({ sessionId, container }: UseTerminalOptions) {
   const { send, connected, reconnect } = useWebSocket(wsUrl, {
     onMessage: handleMessage,
     onOpen: () => {
-      setSessionExited(false)
+      setSessionState('running')
+      setReconnectFailed(false)
+      reconnectingAfterDisconnectRef.current = false
       const entry = entryRef.current
       if (entry) resetReplayState(entry)
     },
   })
+
+  const recoverDisconnectedSession = useCallback(async () => {
+    if (reconnectingAfterDisconnectRef.current) return
+    reconnectingAfterDisconnectRef.current = true
+    setReconnectFailed(false)
+
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}/restart`, { method: 'POST' })
+      if (!res.ok) {
+        setReconnectFailed(true)
+        return
+      }
+      reconnect()
+    } catch {
+      setReconnectFailed(true)
+    } finally {
+      reconnectingAfterDisconnectRef.current = false
+    }
+  }, [reconnect, sessionId])
+
+  recoverDisconnectedSessionRef.current = recoverDisconnectedSession
 
   // Keep sendRef in sync so onData closure always has the latest send
   useLayoutEffect(() => {
@@ -192,9 +228,14 @@ export function useTerminal({ sessionId, container }: UseTerminalOptions) {
   const restartSession = useCallback(async () => {
     try {
       const res = await fetch(`/api/sessions/${sessionId}/restart`, { method: 'POST' })
-      if (res.ok) reconnect()
+      if (res.ok) {
+        setReconnectFailed(false)
+        reconnect()
+      } else if (sessionState === 'disconnected') {
+        setReconnectFailed(true)
+      }
     } catch { /* ignore network errors */ }
-  }, [sessionId, reconnect])
+  }, [sessionId, reconnect, sessionState])
 
   // Handle resize
   const handleResize = useCallback(() => {
@@ -208,7 +249,7 @@ export function useTerminal({ sessionId, container }: UseTerminalOptions) {
     }
   }, [send, connected])
 
-  return { handleResize, connected, dims, sessionExited, restartSession }
+  return { handleResize, connected, dims, sessionState, reconnectFailed, restartSession }
 }
 
 function flushPendingMessages(

@@ -30,7 +30,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
   const isDragSource = ctx?.dragSourcePaneId === pane.id
   const dragActive = Boolean(ctx?.dragSourcePaneId)
 
-  const { handleResize, connected, dims, sessionExited, restartSession } = useTerminal({
+  const { handleResize, connected, dims, sessionState, reconnectFailed, restartSession } = useTerminal({
     sessionId: pane.id,
     container: containerEl,
   })
@@ -178,7 +178,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
             style={dropZoneStyle(hoverEdge, true)}
           />
         )}
-        {sessionExited && (
+        {(sessionState === 'exited' || (sessionState === 'disconnected' && reconnectFailed)) && (
           <div style={{
             position: 'absolute',
             inset: 0,
@@ -200,7 +200,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
                 cursor: 'pointer',
               }}
             >
-              Restart Session
+              {sessionState === 'exited' ? 'Restart Session' : 'Reconnect Session'}
             </button>
           </div>
         )}

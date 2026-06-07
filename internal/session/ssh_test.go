@@ -8,6 +8,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -296,6 +297,24 @@ func TestSSHSessionConnectionName(t *testing.T) {
 func TestTmuxSSHSessionConnectionName(t *testing.T) {
 	s := &TmuxSSHSession{connectionName: "remote-box"}
 	assert.Equal(t, "remote-box", s.ConnectionName())
+}
+
+func TestClassifySSHWaitError_ExitedOnNil(t *testing.T) {
+	assert.Equal(t, StateExited, classifySSHWaitError(nil))
+}
+
+func TestClassifySSHWaitError_ExitedOnExitError(t *testing.T) {
+	err := &gossh.ExitError{Waitmsg: gossh.Waitmsg{}}
+	assert.Equal(t, StateExited, classifySSHWaitError(err))
+}
+
+func TestClassifySSHWaitError_ExitedOnExitMissingError(t *testing.T) {
+	err := &gossh.ExitMissingError{}
+	assert.Equal(t, StateExited, classifySSHWaitError(err))
+}
+
+func TestClassifySSHWaitError_DisconnectedOnTransportError(t *testing.T) {
+	assert.Equal(t, StateDisconnected, classifySSHWaitError(io.EOF))
 }
 
 func TestNewTmuxSSH_InvalidSessionName_Error(t *testing.T) {

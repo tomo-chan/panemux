@@ -83,13 +83,17 @@ export const SessionInfoSchema = z.object({
 
 export type SessionInfo = z.infer<typeof SessionInfoSchema>
 
+export const SessionStateSchema = z.enum(['connected', 'disconnected', 'exited'])
+
+export type SessionState = z.infer<typeof SessionStateSchema>
+
 export const WSControlMessageSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('resize'),
     cols: z.number().positive(),
     rows: z.number().positive(),
   }),
-  z.object({ type: z.literal('status'), state: z.string() }),
+  z.object({ type: z.literal('status'), state: SessionStateSchema }),
   z.object({ type: z.literal('replay'), state: z.enum(['start', 'end']) }),
   z.object({ type: z.literal('error'), message: z.string().max(2000) }),
 ])

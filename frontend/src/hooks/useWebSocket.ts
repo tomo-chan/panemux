@@ -17,6 +17,7 @@ export function useWebSocket(url: string, options: UseWebSocketOptions) {
   const wsRef = useRef<WebSocket | null>(null)
   const attemptsRef = useRef(0)
   const mountedRef = useRef(true)
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [connected, setConnected] = useState(false)
 
   // Store callbacks in refs so connect() doesn't need them as deps
@@ -28,6 +29,13 @@ export function useWebSocket(url: string, options: UseWebSocketOptions) {
   useEffect(() => { onOpenRef.current = options.onOpen })
   useEffect(() => { onCloseRef.current = options.onClose })
 
+  const clearReconnectTimer = useCallback(() => {
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current)
+      reconnectTimerRef.current = null
+    }
+  }, [])
+
   const connect = useCallback(() => {
     if (!mountedRef.current) return
     if (attemptsRef.current >= maxReconnectAttempts) return
@@ -37,6 +45,7 @@ export function useWebSocket(url: string, options: UseWebSocketOptions) {
     wsRef.current = ws
 
     ws.onopen = () => {
+      clearReconnectTimer()
       attemptsRef.current = 0
       setConnected(true)
       onOpenRef.current?.()
@@ -61,23 +70,28 @@ export function useWebSocket(url: string, options: UseWebSocketOptions) {
       onCloseRef.current?.()
       if (mountedRef.current) {
         attemptsRef.current++
-        setTimeout(connect, reconnectDelay)
+        clearReconnectTimer()
+        reconnectTimerRef.current = setTimeout(() => {
+          reconnectTimerRef.current = null
+          connect()
+        }, reconnectDelay)
       }
     }
 
     ws.onerror = () => {
       ws.close()
     }
-  }, [url, reconnectDelay, maxReconnectAttempts]) // callbacks excluded via refs
+  }, [url, reconnectDelay, maxReconnectAttempts, clearReconnectTimer]) // callbacks excluded via refs
 
   useEffect(() => {
     mountedRef.current = true
     connect()
     return () => {
       mountedRef.current = false
+      clearReconnectTimer()
       wsRef.current?.close()
     }
-  }, [connect])
+  }, [connect, clearReconnectTimer])
 
   const send = useCallback((data: string | ArrayBuffer | Uint8Array) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -88,6 +102,7 @@ export function useWebSocket(url: string, options: UseWebSocketOptions) {
   // Imperatively reconnect: detach the current socket (without triggering the
   // onclose reconnect loop), reset the attempt counter, then connect fresh.
   const reconnect = useCallback(() => {
+    clearReconnectTimer()
     const ws = wsRef.current
     if (ws) {
       ws.onclose = null
@@ -98,7 +113,7 @@ export function useWebSocket(url: string, options: UseWebSocketOptions) {
     }
     attemptsRef.current = 0
     connect()
-  }, [connect])
+  }, [connect, clearReconnectTimer])
 
   return { send, connected, reconnect }
 }

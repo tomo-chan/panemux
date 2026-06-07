@@ -539,10 +539,10 @@ describe('useTerminal', () => {
   it('sessionExited is false initially', () => {
     const container = makeContainer()
     const { result } = renderHook(() => useTerminal({ sessionId: 's1', container }))
-    expect(result.current.sessionExited).toBe(false)
+    expect(result.current.sessionState).toBe('running')
   })
 
-  it('sessionExited is true after exited status frame', () => {
+  it('sessionState is exited after exited status frame', () => {
     const container = makeContainer()
     const { result } = renderHook(() => useTerminal({ sessionId: 's1', container }))
     act(() => MockWebSocket.instances[0].simulateOpen())
@@ -552,10 +552,10 @@ describe('useTerminal', () => {
         JSON.stringify({ type: 'status', state: 'exited' })
       )
     )
-    expect(result.current.sessionExited).toBe(true)
+    expect(result.current.sessionState).toBe('exited')
   })
 
-  it('sessionExited resets to false when WebSocket reconnects', () => {
+  it('sessionState resets to running when WebSocket reconnects', () => {
     const container = makeContainer()
     const { result } = renderHook(() => useTerminal({ sessionId: 's1', container }))
     act(() => MockWebSocket.instances[0].simulateOpen())
@@ -565,11 +565,11 @@ describe('useTerminal', () => {
         JSON.stringify({ type: 'status', state: 'exited' })
       )
     )
-    expect(result.current.sessionExited).toBe(true)
+    expect(result.current.sessionState).toBe('exited')
 
     // Simulate WebSocket reconnecting
     act(() => MockWebSocket.instances[0].simulateOpen())
-    expect(result.current.sessionExited).toBe(false)
+    expect(result.current.sessionState).toBe('running')
   })
 
   it('restartSession calls restart API then reconnects', async () => {
@@ -585,6 +585,76 @@ describe('useTerminal', () => {
 
     expect(fetchMock).toHaveBeenCalledWith('/api/sessions/pane1/restart', { method: 'POST' })
     expect(MockWebSocket.instances.length).toBeGreaterThan(countBefore)
+  })
+
+  it('disconnected status triggers one restart attempt and reconnect', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const container = makeContainer()
+    const { result } = renderHook(() => useTerminal({ sessionId: 'pane1', container }))
+    act(() => MockWebSocket.instances[0].simulateOpen())
+
+    const countBefore = MockWebSocket.instances.length
+    await act(async () => {
+      MockWebSocket.instances[0].simulateMessage(
+        JSON.stringify({ type: 'status', state: 'disconnected' })
+      )
+      await Promise.resolve()
+    })
+
+    expect(result.current.sessionState).toBe('disconnected')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/pane1/restart', { method: 'POST' })
+    expect(MockWebSocket.instances.length).toBeGreaterThan(countBefore)
+    expect(result.current.reconnectFailed).toBe(false)
+  })
+
+  it('disconnected status does not start concurrent restart attempts', async () => {
+    let resolveFetch: ((value: { ok: boolean }) => void) | null = null
+    const fetchMock = vi.fn().mockImplementation(
+      () => new Promise<{ ok: boolean }>((resolve) => { resolveFetch = resolve })
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const container = makeContainer()
+    renderHook(() => useTerminal({ sessionId: 'pane1', container }))
+    act(() => MockWebSocket.instances[0].simulateOpen())
+
+    act(() => {
+      MockWebSocket.instances[0].simulateMessage(
+        JSON.stringify({ type: 'status', state: 'disconnected' })
+      )
+      MockWebSocket.instances[0].simulateMessage(
+        JSON.stringify({ type: 'status', state: 'disconnected' })
+      )
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      resolveFetch?.({ ok: true })
+      await Promise.resolve()
+    })
+  })
+
+  it('failed disconnected recovery exposes reconnectFailed state', async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error('network error'))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const container = makeContainer()
+    const { result } = renderHook(() => useTerminal({ sessionId: 'pane1', container }))
+    act(() => MockWebSocket.instances[0].simulateOpen())
+
+    await act(async () => {
+      MockWebSocket.instances[0].simulateMessage(
+        JSON.stringify({ type: 'status', state: 'disconnected' })
+      )
+      await Promise.resolve()
+    })
+
+    expect(result.current.sessionState).toBe('disconnected')
+    expect(result.current.reconnectFailed).toBe(true)
   })
 
   it('reuses the same terminal instance across remounts for the same session', () => {
