@@ -24,9 +24,17 @@ import (
 var desktopAssets embed.FS
 
 func runDesktop(opts cliOptions) error {
+	desktopAssetFS, runtimeApp, err := bootstrapDesktopApp(opts)
+	if err != nil {
+		return err
+	}
+	return runDesktopShell(desktopAssetFS, runtimeApp)
+}
+
+func bootstrapDesktopApp(opts cliOptions) (fs.FS, *app.Runtime, error) {
 	desktopAssetFS, err := fs.Sub(desktopAssets, "desktop_assets")
 	if err != nil {
-		return fmt.Errorf("prepare desktop assets: %w", err)
+		return nil, nil, fmt.Errorf("prepare desktop assets: %w", err)
 	}
 
 	runtimeApp, err := app.Bootstrap(app.Options{
@@ -34,12 +42,15 @@ func runDesktop(opts cliOptions) error {
 		Mode:       app.ModeDesktop,
 	}, frontendFS)
 	if err != nil {
-		return fmt.Errorf("bootstrap desktop mode: %w", err)
+		return nil, nil, fmt.Errorf("bootstrap desktop mode: %w", err)
 	}
 
 	runtimeApp.Start()
 	log.Printf("Listening on %s", runtimeApp.BaseURL)
+	return desktopAssetFS, runtimeApp, nil
+}
 
+func runDesktopShell(desktopAssetFS fs.FS, runtimeApp *app.Runtime) error {
 	var shutdownOnce sync.Once
 	var redirectOnce sync.Once
 	shutdown := func() {
@@ -56,7 +67,30 @@ func runDesktop(opts cliOptions) error {
 		return fmt.Errorf("marshal desktop base URL: %w", err)
 	}
 
-	if err := wails.Run(&options.App{
+	appOptions := buildDesktopOptions(
+		desktopAssetFS,
+		runtimeApp,
+		string(baseURLJSON),
+		shutdown,
+		&shutdownOnce,
+		&redirectOnce,
+	)
+	if err := wails.Run(appOptions); err != nil {
+		return fmt.Errorf("run desktop shell: %w", err)
+	}
+
+	return nil
+}
+
+func buildDesktopOptions(
+	desktopAssetFS fs.FS,
+	runtimeApp *app.Runtime,
+	baseURLJSON string,
+	shutdown func(),
+	shutdownOnce *sync.Once,
+	redirectOnce *sync.Once,
+) *options.App {
+	return &options.App{
 		Title:     "panemux",
 		Width:     1440,
 		Height:    960,
@@ -75,15 +109,11 @@ func runDesktop(opts cliOptions) error {
 		},
 		OnDomReady: func(ctx context.Context) {
 			redirectOnce.Do(func() {
-				wailsruntime.WindowExecJS(ctx, fmt.Sprintf("window.location.replace(%s);", string(baseURLJSON)))
+				wailsruntime.WindowExecJS(ctx, fmt.Sprintf("window.location.replace(%s);", baseURLJSON))
 			})
 		},
 		OnShutdown: func(context.Context) {
 			shutdownOnce.Do(shutdown)
 		},
-	}); err != nil {
-		return fmt.Errorf("run desktop shell: %w", err)
 	}
-
-	return nil
 }

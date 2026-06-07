@@ -8,9 +8,11 @@
 GOLANGCI_LINT_VERSION := v2.11.4
 UNAME_S := $(shell uname -s)
 DESKTOP_ENV :=
+GOLANGCI_LINT_RUN := golangci-lint run ./...
 
 ifeq ($(UNAME_S),Darwin)
 DESKTOP_ENV := CGO_LDFLAGS="-framework UniformTypeIdentifiers"
+GOLANGCI_LINT_RUN := /bin/zsh -lc 'cd "$(CURDIR)" && golangci-lint run ./...'
 endif
 
 # ── Dependencies ──────────────────────────────────────────────────────────────
@@ -92,7 +94,7 @@ lint-go-deps:
 
 lint-go: fmt-check-go lint-go-deps
 	go vet ./...
-	golangci-lint run ./...
+	$(GOLANGCI_LINT_RUN)
 
 lint-frontend:
 	cd frontend && npx tsc --noEmit
