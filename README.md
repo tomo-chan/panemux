@@ -1,6 +1,6 @@
 # panemux
 
-**Browser-based terminal multiplexer** — split your terminal into multiple panes, each connecting to a local shell, remote SSH host, or tmux session, all rendered in your browser via xterm.js.
+**Terminal workspace with browser and desktop modes** — split your terminal into multiple panes, each connecting to a local shell, remote SSH host, or tmux session, rendered either in your browser or in an embedded desktop window via xterm.js.
 
 [![CI](https://github.com/tomo-chan/panemux/actions/workflows/ci.yml/badge.svg)](https://github.com/tomo-chan/panemux/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -20,6 +20,7 @@
 - **`~/.ssh/config` integration** — reference any host alias from `~/.ssh/config` directly as a `connection` without duplicating entries in YAML
 - **Session resilience** — tmux sessions are auto-created when absent; exited panes show a Restart button to reconnect without reloading
 - **xterm.js rendering** — full-featured terminal emulation with Unicode and colour support
+- **Browser mode and desktop mode** — run in your browser or in an embedded desktop window without opening an external browser
 - **Single binary** — Go backend embeds the compiled frontend; no separate web server needed
 - **YAML config** — declare your entire layout and SSH connections in one file; defaults to `~/.config/panemux/config.yaml`
 
@@ -63,9 +64,12 @@ make build          # outputs bin/panemux
 
 # Override port and open Chrome automatically
 ./bin/panemux --port 9090 --open
+
+# Start desktop mode (macOS / Linux)
+./bin/panemux --mode=desktop
 ```
 
-Then open [http://localhost:8080](http://localhost:8080) in your browser.
+Browser mode then opens [http://localhost:8080](http://localhost:8080) in your browser. Desktop mode launches an embedded window and binds the backend to loopback only.
 
 ---
 
@@ -73,7 +77,7 @@ Then open [http://localhost:8080](http://localhost:8080) in your browser.
 
 ### Daily workflow
 
-1. Start `panemux` and open it in your browser.
+1. Start `panemux` in browser mode or desktop mode.
 2. Click a workspace tab to switch between layouts such as development, operations, or production.
 3. Work inside each terminal pane exactly like a normal shell, SSH session, or tmux attach session.
 4. Rearrange panes or add terminals directly from the main UI when you need to evolve the layout.
@@ -110,6 +114,7 @@ Common uses:
 - Browser notifications are shown after notification permission has been granted only when the prompt is not currently visible to the user, and clicking one switches to the matching workspace.
 - panemux remembers the last browser-notified prompt per pane, so refreshes, reconnects, and maximize toggles do not re-notify the same prompt replay.
 - Notification permission is requested on the first browser interaction, instead of waiting for the first prompt.
+- Desktop mode may not expose the full browser notification feature set on every platform WebView. When unsupported, panemux skips browser notifications and still keeps in-app attention indicators.
 
 ### Choosing pane types
 
@@ -225,6 +230,7 @@ make install-deps   # first time: npm install + go mod download
 ```sh
 make dev-backend    # Go backend on :8080
 make dev-frontend   # Vite dev server on :5173 (proxies /api and /ws to :8080)
+make dev-desktop    # embedded desktop window (macOS / Linux)
 ```
 
 ### Quality gate

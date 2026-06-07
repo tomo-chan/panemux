@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"embed"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -13,15 +15,14 @@ import (
 	"syscall"
 	"time"
 
-	"panemux/internal/config"
-	"panemux/internal/server"
-	"panemux/internal/session"
+	"panemux/internal/app"
 )
 
 var version = "dev"
 
 type cliOptions struct {
 	configPath  string
+	mode        string
 	openBrowser bool
 	showVersion bool
 	port        int
@@ -31,99 +32,110 @@ type cliOptions struct {
 var frontendFS embed.FS
 
 func main() {
-	opts := parseOptions()
+	opts, err := parseOptions(os.Args[1:])
+	if err != nil {
+		log.Fatalf("Failed to parse options: %v", err)
+	}
 
 	if opts.showVersion {
 		fmt.Println(version)
 		os.Exit(0)
 	}
 
-	cfg, err := loadConfig(opts)
+	if validateErr := validateOptions(opts); validateErr != nil {
+		log.Fatalf("Invalid options: %v", validateErr)
+	}
+
+	switch opts.mode {
+	case string(app.ModeDesktop):
+		err = runDesktop(opts)
+	default:
+		err = runBrowser(opts)
+	}
 	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+		log.Fatalf("Failed to run panemux: %v", err)
+	}
+}
+
+func parseOptions(args []string) (cliOptions, error) {
+	var opts cliOptions
+
+	flags := flag.NewFlagSet("panemux", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	opts.mode = string(app.ModeBrowser)
+	flags.StringVar(&opts.configPath, "config", "", "Path to YAML config file")
+	flags.StringVar(&opts.mode, "mode", opts.mode, "Run mode: browser or desktop")
+	flags.BoolVar(&opts.openBrowser, "open", false, "Open Chrome automatically")
+	flags.IntVar(&opts.port, "port", 0, "Override server port")
+	flags.BoolVar(&opts.showVersion, "version", false, "Print version and exit")
+
+	if err := flags.Parse(args); err != nil {
+		return cliOptions{}, fmt.Errorf("parse flags: %w", err)
 	}
 
-	manager := session.NewManager()
-	if err := startSessionsFromConfig(cfg, manager); err != nil {
-		log.Fatalf("Failed to start sessions: %v", err)
+	return opts, nil
+}
+
+func validateOptions(opts cliOptions) error {
+	switch opts.mode {
+	case string(app.ModeBrowser), string(app.ModeDesktop):
+	default:
+		return fmt.Errorf("unsupported mode %q: must be browser or desktop", opts.mode)
 	}
 
-	srv := server.New(cfg, manager, frontendFS)
-	addr := "http://" + srv.Addr()
-	log.Printf("Listening on %s", addr)
+	if opts.mode == string(app.ModeDesktop) {
+		if opts.openBrowser {
+			return errors.New("desktop mode does not support --open")
+		}
+		if opts.port != 0 {
+			return errors.New("desktop mode does not support --port")
+		}
+	}
+
+	return nil
+}
+
+func runBrowser(opts cliOptions) error {
+	runtimeApp, err := app.Bootstrap(app.Options{
+		ConfigPath: opts.configPath,
+		Mode:       app.ModeBrowser,
+		Port:       opts.port,
+	}, frontendFS)
+	if err != nil {
+		return fmt.Errorf("bootstrap browser mode: %w", err)
+	}
+
+	log.Printf("Listening on %s", runtimeApp.BaseURL)
+	runtimeApp.Start()
 
 	if opts.openBrowser {
-		go openChrome(addr)
+		go openChrome(runtimeApp.BaseURL)
 	}
 
-	runServer(srv, manager)
+	return waitForShutdown(runtimeApp)
 }
 
-func parseOptions() cliOptions {
-	var opts cliOptions
-	flag.StringVar(&opts.configPath, "config", "", "Path to YAML config file")
-	flag.BoolVar(&opts.openBrowser, "open", false, "Open Chrome automatically")
-	flag.IntVar(&opts.port, "port", 0, "Override server port")
-	flag.BoolVar(&opts.showVersion, "version", false, "Print version and exit")
-	flag.Parse()
-	return opts
-}
-
-func loadConfig(opts cliOptions) (*config.Config, error) {
-	var (
-		cfg *config.Config
-		err error
-	)
-	if opts.configPath != "" {
-		cfg, err = config.Load(opts.configPath)
-	} else {
-		cfg, err = config.LoadOrDefault()
-	}
-	if err != nil {
-		return nil, fmt.Errorf("loading config: %w", err)
-	}
-	if opts.port != 0 {
-		cfg.Server.Port = opts.port
-	}
-	return cfg, nil
-}
-
-func runServer(srv *server.Server, manager *session.Manager) {
+func waitForShutdown(runtimeApp *app.Runtime) error {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- srv.Start()
-	}()
-
 	select {
-	case err := <-errCh:
+	case err := <-runtimeApp.Errors():
 		if err != nil {
-			log.Fatalf("Server error: %v", err)
+			return fmt.Errorf("server error: %w", err)
 		}
 	case <-sigCh:
 		log.Println("Shutting down...")
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if err := srv.Shutdown(ctx); err != nil {
-			log.Printf("Shutdown error: %v", err)
+		if err := runtimeApp.Shutdown(ctx); err != nil {
+			return fmt.Errorf("shutdown error: %w", err)
 		}
-		manager.CloseAll()
+		if err := <-runtimeApp.Errors(); err != nil {
+			return fmt.Errorf("server error: %w", err)
+		}
 	}
-}
 
-func startSessionsFromConfig(cfg *config.Config, manager *session.Manager) error {
-	panes := cfg.AllPanes()
-	for _, pane := range panes {
-		sess, err := session.CreateFromConfig(pane, cfg.SSHConnections)
-		if err != nil {
-			log.Printf("Warning: failed to start session %s (%s): %v", pane.ID, pane.Type, err)
-			continue
-		}
-		manager.Add(sess)
-		log.Printf("Started session: %s (%s)", pane.ID, pane.Type)
-	}
 	return nil
 }
 

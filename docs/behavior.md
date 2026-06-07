@@ -2,15 +2,23 @@
 
 ## Startup Sequence
 
-1. Parse `--config`, `--open`, and `--port`.
+1. Parse `--config`, `--mode`, `--open`, and `--port`.
 2. Load config: if `--config` is given, load that file; otherwise try `~/.config/panemux/config.yaml`; if that file does not exist, use the built-in default config with `~/.config/panemux/config.yaml` as the save path.
-3. Override the configured port if `--port` is set.
+3. In browser mode, override the configured port if `--port` is set.
 4. Create the in-memory session manager.
 5. Traverse the configured layout and create each pane session.
 6. Start the HTTP server and serve the embedded frontend.
-7. On `SIGINT` or `SIGTERM`, shut down the server and close all sessions.
+7. In desktop mode, bind the backend to `127.0.0.1` on an ephemeral port and open the embedded WebView to that loopback URL.
+8. On `SIGINT` or `SIGTERM`, shut down the server and close all sessions in browser mode. In desktop mode, closing the window shuts down the backend.
 
 If a configured session fails to start, the server logs a warning and continues booting other sessions.
+
+Mode rules:
+
+- `--mode=browser` is the default
+- `--mode=desktop` is supported on macOS and Linux
+- `--mode=desktop --open` is invalid
+- `--mode=desktop --port` is invalid
 
 ## Configuration Rules
 
@@ -140,6 +148,9 @@ Attention detection remains frontend-only. The backend still buffers recent term
 session and replays that snapshot when a pane reconnects after a workspace switch or browser reload,
 but prompt notifications no longer depend on the pane being visibly mounted at the time the output
 arrives.
+
+In desktop mode, Notification API support depends on the host WebView. When the WebView does not
+offer that API, panemux skips browser notifications and still keeps in-app attention indicators.
 
 For pane-header Git status, local and local tmux panes inspect the local filesystem, while `ssh`
 and `ssh_tmux` panes run the equivalent Git inspection on the remote host. This allows headers to

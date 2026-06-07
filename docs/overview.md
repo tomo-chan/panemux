@@ -2,9 +2,9 @@
 
 ## Purpose
 
-`PaneMux` is a browser-based terminal workspace that displays multiple terminal sessions in a resizable split layout. A single server process hosts both the frontend UI and the backend APIs, then bridges browser input/output to local PTYs, SSH shells, local tmux sessions, or tmux sessions reached over SSH.
+`PaneMux` is a terminal workspace that displays multiple terminal sessions in a resizable split layout. A single server process hosts both the frontend UI and the backend APIs, then bridges browser or embedded-webview input/output to local PTYs, SSH shells, local tmux sessions, or tmux sessions reached over SSH.
 
-The application is optimized for a local or trusted-network workflow where a developer wants one browser tab to act as a terminal dashboard.
+The application is optimized for a local or trusted-network workflow where a developer wants either one browser tab or one embedded desktop window to act as a terminal dashboard.
 
 ## Core Capabilities
 
@@ -15,6 +15,7 @@ The application is optimized for a local or trusted-network workflow where a dev
 - Support four pane backends: `local`, `ssh`, `tmux`, and `ssh_tmux`.
 - Allow limited runtime pane creation/removal from the UI.
 - Build as a self-contained CLI binary and distribute it through GitHub Releases.
+- Run in browser mode or desktop mode without changing the workspace data model.
 
 ## High-Level Data Flow
 
@@ -43,6 +44,7 @@ Benefits:
 - Backend and frontend versions are always paired.
 - Suitable for a desktop-style local tool.
 - Fits standard CLI distribution via tarballs and shell installers.
+- Lets desktop mode reuse the same REST and WebSocket contracts as browser mode.
 
 ### Config-driven initial state
 

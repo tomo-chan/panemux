@@ -44,6 +44,29 @@ After validation, the path is wrapped with `shellQuotePath`, which single-quotes
 - Arguments after the command may be user-supplied only when the target binary cannot reinterpret them as commands.
 - Do not use `os.Getenv` values in flows that reach `exec.Command` unless the security model for that path is explicitly reworked and documented.
 
+## Desktop Mode Loopback Transport
+
+Desktop mode intentionally keeps the existing HTTP and WebSocket transport, but limits it to a
+loopback-only listener on `127.0.0.1` with an ephemeral port chosen by the OS.
+
+This design is acceptable for panemux because:
+
+- the app is explicitly a trusted-local-machine tool
+- the backend is not exposed on external interfaces in desktop mode
+- the existing frontend protocol can be reused without reimplementing terminal streaming over a custom desktop bridge
+
+Desktop mode does **not** add a session token layer and does **not** enable HTTPS/WSS. That is
+intentional:
+
+- a token would not add confidentiality without transport encryption
+- the main desktop-mode threat reduction comes from loopback-only binding, not from application-layer tokens
+- the remaining risk is the local machine itself; if that machine is already compromised, loopback HTTP is not the primary weakness
+
+Security boundary:
+
+- protected: accidental or opportunistic access from other machines on the network
+- not protected: same-machine malware, high-privilege process inspection, local screen capture, or memory inspection
+
 ## `gosec` Policy
 
 - Fix `gosec` findings structurally in the implementation rather than suppressing them in shipped code.
