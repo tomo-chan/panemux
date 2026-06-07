@@ -41,6 +41,7 @@ func runDesktop(opts cliOptions) error {
 	log.Printf("Listening on %s", runtimeApp.BaseURL)
 
 	var shutdownOnce sync.Once
+	var redirectOnce sync.Once
 	shutdown := func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -73,7 +74,9 @@ func runDesktop(opts cliOptions) error {
 			}()
 		},
 		OnDomReady: func(ctx context.Context) {
-			wailsruntime.WindowExecJS(ctx, fmt.Sprintf("window.location.replace(%s);", string(baseURLJSON)))
+			redirectOnce.Do(func() {
+				wailsruntime.WindowExecJS(ctx, fmt.Sprintf("window.location.replace(%s);", string(baseURLJSON)))
+			})
 		},
 		OnShutdown: func(context.Context) {
 			shutdownOnce.Do(shutdown)
