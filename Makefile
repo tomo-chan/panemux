@@ -6,6 +6,12 @@
         check release-snapshot package package-desktop dev-desktop run-desktop
 
 GOLANGCI_LINT_VERSION := v2.11.4
+UNAME_S := $(shell uname -s)
+DESKTOP_ENV :=
+
+ifeq ($(UNAME_S),Darwin)
+DESKTOP_ENV := CGO_LDFLAGS="-framework UniformTypeIdentifiers"
+endif
 
 # ── Dependencies ──────────────────────────────────────────────────────────────
 
@@ -109,7 +115,7 @@ build-backend:
 	go build -ldflags "$(LDFLAGS)" -o bin/panemux .
 
 build-desktop: build-frontend
-	go build -ldflags "$(LDFLAGS)" -o bin/panemux-desktop .
+	$(DESKTOP_ENV) go build -tags production -ldflags "$(LDFLAGS)" -o bin/panemux-desktop .
 
 # ── Release packaging ─────────────────────────────────────────────────────────
 
@@ -136,7 +142,7 @@ dev-frontend:
 	cd frontend && npm run dev
 
 dev-desktop:
-	go run . --mode=desktop
+	$(DESKTOP_ENV) go run -tags dev . --mode=desktop
 
 # ── Run ───────────────────────────────────────────────────────────────────────
 
