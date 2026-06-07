@@ -87,6 +87,14 @@ type Config struct { //nolint:govet
 }
 
 func Load(path string) (*Config, error) {
+	return load(path, false)
+}
+
+func LoadDesktopCompatible(path string) (*Config, error) {
+	return load(path, true)
+}
+
+func load(path string, repairDesktopPort bool) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("reading config: %w", err)
@@ -100,6 +108,9 @@ func Load(path string) (*Config, error) {
 	cfg.filePath = path
 	cfg.normalizeWorkspaces()
 	cfg.expandPaths()
+	if repairDesktopPort && cfg.Server.Port == 0 {
+		cfg.Server.Port = Default().Server.Port
+	}
 
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
@@ -440,6 +451,14 @@ func LoadOrDefault() (*Config, error) {
 	return loadOrDefaultAt(path)
 }
 
+func LoadOrDefaultDesktopCompatible() (*Config, error) {
+	path, err := DefaultConfigPath()
+	if err != nil {
+		return defaultAfterConfigPathError()
+	}
+	return loadOrDefaultAtDesktopCompatible(path)
+}
+
 func defaultAfterConfigPathError() (*Config, error) {
 	// Preserve the historical startup fallback when the user's home directory
 	// cannot be resolved.
@@ -453,6 +472,15 @@ func loadOrDefaultAt(path string) (*Config, error) {
 		return cfg, nil
 	}
 	return Load(path)
+}
+
+func loadOrDefaultAtDesktopCompatible(path string) (*Config, error) {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		cfg := Default()
+		cfg.filePath = path
+		return cfg, nil
+	}
+	return LoadDesktopCompatible(path)
 }
 
 // SaveLayout updates the layout section and writes the config file.

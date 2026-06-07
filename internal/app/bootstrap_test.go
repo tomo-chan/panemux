@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -26,7 +27,7 @@ func TestBootstrapDesktopUsesLoopbackWithEphemeralPort(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "127.0.0.1", runtime.Config.Server.Host)
-	assert.Equal(t, 0, runtime.Config.Server.Port)
+	assert.Equal(t, 8080, runtime.Config.Server.Port)
 	assert.Regexp(t, `^http://127\.0\.0\.1:\d+$`, runtime.BaseURL)
 }
 
@@ -72,14 +73,35 @@ func TestRuntimeStartAndShutdownWithDesktopListener(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestBootstrapDesktopRepairsZeroPortConfig(t *testing.T) {
+	t.Parallel()
+
+	cfgPath := writeConfigWithPort(t, 0)
+
+	runtime, err := Bootstrap(Options{
+		ConfigPath: cfgPath,
+		Mode:       ModeDesktop,
+	}, fstest.MapFS{
+		"frontend/dist/index.html": {Data: []byte("ok")},
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, 8080, runtime.Config.Server.Port)
+	assert.Regexp(t, `^http://127\.0\.0\.1:\d+$`, runtime.BaseURL)
+}
+
 func writeConfig(t *testing.T) string {
+	return writeConfigWithPort(t, 8080)
+}
+
+func writeConfigWithPort(t *testing.T, port int) string {
 	t.Helper()
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	config := []byte(`server:
+	config := []byte(fmt.Sprintf(`server:
   host: "127.0.0.1"
-  port: 8080
+  port: %d
 workspaces:
   active: dev
   tab_position: top
@@ -95,7 +117,7 @@ workspaces:
               type: local
               shell: "/bin/sh"
               title: "Shell"
-`)
+`, port))
 	require.NoError(t, os.WriteFile(path, config, 0o600))
 	return path
 }

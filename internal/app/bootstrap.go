@@ -100,6 +100,18 @@ func loadConfig(opts Options) (*config.Config, error) {
 		cfg *config.Config
 		err error
 	)
+	if opts.Mode == ModeDesktop {
+		if opts.ConfigPath != "" {
+			cfg, err = config.LoadDesktopCompatible(opts.ConfigPath)
+		} else {
+			cfg, err = config.LoadOrDefaultDesktopCompatible()
+		}
+		if err != nil {
+			return nil, fmt.Errorf("loading config: %w", err)
+		}
+		return cfg, nil
+	}
+
 	if opts.ConfigPath != "" {
 		cfg, err = config.Load(opts.ConfigPath)
 	} else {
@@ -107,12 +119,6 @@ func loadConfig(opts Options) (*config.Config, error) {
 	}
 	if err != nil {
 		return nil, fmt.Errorf("loading config: %w", err)
-	}
-
-	if opts.Mode == ModeDesktop {
-		cfg.Server.Host = "127.0.0.1"
-		cfg.Server.Port = 0
-		return cfg, nil
 	}
 
 	if opts.Port != 0 {
