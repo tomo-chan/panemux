@@ -369,8 +369,8 @@ func closeSSHResources(sess *ssh.Session, client, jumpClient *ssh.Client) {
 func monitorSSHSession(sess *ssh.Session, pw *io.PipeWriter, markExited func(State)) {
 	go func() {
 		waitErr := sess.Wait()
-		pw.Close()
 		markExited(classifySSHWaitError(waitErr))
+		pw.Close()
 	}()
 }
 
