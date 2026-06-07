@@ -136,6 +136,8 @@ export function useTerminal({ sessionId, container }: UseTerminalOptions) {
     }
   }, [reconnect, sessionId])
 
+  // This ref is read from an async status-frame handler that can run before an
+  // effect flushes, so keep it current during render rather than one commit later.
   recoverDisconnectedSessionRef.current = recoverDisconnectedSession
 
   // Keep sendRef in sync so onData closure always has the latest send
