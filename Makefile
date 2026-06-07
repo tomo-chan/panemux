@@ -125,6 +125,8 @@ release-check:
 
 package: release-snapshot
 
+package-desktop: build-desktop
+
 # ── Dev ───────────────────────────────────────────────────────────────────────
 
 dev-backend:

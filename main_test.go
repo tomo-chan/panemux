@@ -36,3 +36,17 @@ func TestValidateOptionsRejectsDesktopPort(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "--port")
 }
+
+func TestValidateOptionsAcceptsBrowserMode(t *testing.T) {
+	t.Parallel()
+
+	require.NoError(t, validateOptions(cliOptions{mode: "browser"}))
+}
+
+func TestValidateOptionsRejectsUnknownMode(t *testing.T) {
+	t.Parallel()
+
+	err := validateOptions(cliOptions{mode: "foobar"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported mode")
+}

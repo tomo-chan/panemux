@@ -3,12 +3,10 @@ package app
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io/fs"
 	"log"
 	"net"
-	"net/http"
 	"sync"
 
 	"panemux/internal/config"
@@ -49,9 +47,7 @@ func Bootstrap(opts Options, frontendFS fs.FS) (*Runtime, error) {
 	}
 
 	manager := session.NewManager()
-	if err := startSessionsFromConfig(cfg, manager); err != nil {
-		return nil, err
-	}
+	startSessionsFromConfig(cfg, manager)
 
 	runtime := &Runtime{
 		Config:  cfg,
@@ -93,12 +89,8 @@ func (r *Runtime) Errors() <-chan error {
 
 func (r *Runtime) Shutdown(ctx context.Context) error {
 	r.shutOnce.Do(func() {
-		err := r.Server.Shutdown(ctx)
+		r.shutdownErr = r.Server.Shutdown(ctx)
 		r.Manager.CloseAll()
-		if errors.Is(err, http.ErrServerClosed) {
-			err = nil
-		}
-		r.shutdownErr = err
 	})
 	return r.shutdownErr
 }
@@ -129,9 +121,8 @@ func loadConfig(opts Options) (*config.Config, error) {
 	return cfg, nil
 }
 
-func startSessionsFromConfig(cfg *config.Config, manager *session.Manager) error {
-	panes := cfg.AllPanes()
-	for _, pane := range panes {
+func startSessionsFromConfig(cfg *config.Config, manager *session.Manager) {
+	for _, pane := range cfg.AllPanes() {
 		sess, err := session.CreateFromConfig(pane, cfg.SSHConnections)
 		if err != nil {
 			log.Printf("Warning: failed to start session %s (%s): %v", pane.ID, pane.Type, err)
@@ -140,5 +131,4 @@ func startSessionsFromConfig(cfg *config.Config, manager *session.Manager) error
 		manager.Add(sess)
 		log.Printf("Started session: %s (%s)", pane.ID, pane.Type)
 	}
-	return nil
 }
