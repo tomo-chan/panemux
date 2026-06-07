@@ -225,4 +225,24 @@ describe('PaneHeader VSCode button', () => {
     expect(browserOpenURL).toHaveBeenCalledWith('https://github.com/example/panemux')
     delete (window as Window & { runtime?: { BrowserOpenURL?: (url: string) => void } }).runtime
   })
+
+  it('does not intercept header links when Wails runtime is unavailable', () => {
+    const preventDefaultSpy = vi.spyOn(MouseEvent.prototype, 'preventDefault')
+
+    render(
+      <PaneHeader
+        {...defaultProps}
+        gitInfo={{
+          is_git: true,
+          repo: 'panemux',
+          repo_url: 'https://github.com/example/panemux',
+          branch: 'main',
+        }}
+      />
+    )
+
+    fireEvent.click(screen.getByRole('link', { name: 'panemux' }))
+    expect(preventDefaultSpy).not.toHaveBeenCalled()
+    preventDefaultSpy.mockRestore()
+  })
 })
