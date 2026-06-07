@@ -202,4 +202,27 @@ describe('PaneHeader VSCode button', () => {
       textUnderlineOffset: '2px',
     })
   })
+
+  it('opens header links via Wails runtime when BrowserOpenURL is available', () => {
+    const browserOpenURL = vi.fn()
+    ;(window as Window & { runtime?: { BrowserOpenURL?: (url: string) => void } }).runtime = {
+      BrowserOpenURL: browserOpenURL,
+    }
+
+    render(
+      <PaneHeader
+        {...defaultProps}
+        gitInfo={{
+          is_git: true,
+          repo: 'panemux',
+          repo_url: 'https://github.com/example/panemux',
+          branch: 'main',
+        }}
+      />
+    )
+
+    fireEvent.click(screen.getByRole('link', { name: 'panemux' }))
+    expect(browserOpenURL).toHaveBeenCalledWith('https://github.com/example/panemux')
+    delete (window as Window & { runtime?: { BrowserOpenURL?: (url: string) => void } }).runtime
+  })
 })
