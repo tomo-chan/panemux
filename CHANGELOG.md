@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.18.1](https://github.com/tomo-chan/panemux/compare/v0.18.0...v0.18.1) (2026-06-07)
+
+
+### Bug Fixes
+
+* keep agent worktree git context after exit ([#110](https://github.com/tomo-chan/panemux/issues/110)) ([327a393](https://github.com/tomo-chan/panemux/commit/327a3934228be4cd7ba45eed528d1e1e545c11b1))
+* reconnect disconnected SSH sessions ([#113](https://github.com/tomo-chan/panemux/issues/113)) ([fd7313b](https://github.com/tomo-chan/panemux/commit/fd7313be8c655f071f7167fa47731ebb5e3fee63))
+
 ## [0.18.0](https://github.com/tomo-chan/panemux/compare/v0.17.4...v0.18.0) (2026-05-30)
 
 
