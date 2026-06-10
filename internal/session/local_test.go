@@ -644,6 +644,73 @@ func TestGetActiveWorkdir_PrefersClaudeTranscriptWorktree(t *testing.T) {
 	assert.Equal(t, filepath.Dir(worktreeFile), cwd)
 }
 
+func TestClaudeProjectDirName_NormalizesDots(t *testing.T) {
+	assert.Equal(t, "-repo-main", claudeProjectDirName("/repo/main"))
+	assert.Equal(
+		t,
+		"-Users-tomo-chan-development-panemux",
+		claudeProjectDirName("/Users/tomo.chan/development/panemux"),
+	)
+}
+
+func TestGetActiveWorkdir_PrefersClaudeTranscriptWorktree_WithDotInCWD(t *testing.T) {
+	sess := &LocalSession{pid: 100}
+
+	originalListProcesses := listProcessesFn
+	originalGetPIDCWD := getPIDCWDFn
+	originalUserHomeDir := userHomeDirFn
+	t.Cleanup(func() {
+		listProcessesFn = originalListProcesses
+		getPIDCWDFn = originalGetPIDCWD
+		userHomeDirFn = originalUserHomeDir
+	})
+
+	homeDir := t.TempDir()
+	userHomeDirFn = func() (string, error) { return homeDir, nil }
+
+	sessionMetaPath := filepath.Join(homeDir, ".claude", "sessions", "220.json")
+	require.NoError(t, os.MkdirAll(filepath.Dir(sessionMetaPath), 0755))
+	require.NoError(t, os.WriteFile(sessionMetaPath, []byte(
+		`{"pid":220,"sessionId":"session-123","cwd":"/Users/tomo.chan/development/panemux"}`,
+	), 0600))
+
+	transcriptPath := filepath.Join(
+		homeDir,
+		".claude",
+		"projects",
+		"-Users-tomo-chan-development-panemux",
+		"session-123.jsonl",
+	)
+	require.NoError(t, os.MkdirAll(filepath.Dir(transcriptPath), 0755))
+	worktreeFile := filepath.Join(t.TempDir(), "panemux-worktree", "AGENTS.md")
+	require.NoError(t, os.MkdirAll(filepath.Dir(worktreeFile), 0755))
+	require.NoError(t, os.WriteFile(worktreeFile, []byte("test"), 0600))
+	require.NoError(t, os.WriteFile(transcriptPath, []byte(
+		"{\"type\":\"file-history-snapshot\",\"snapshot\":{\"trackedFileBackups\":{\""+
+			worktreeFile+
+			"\":{}}}}\n",
+	), 0600))
+
+	listProcessesFn = func() ([]processInfo, error) {
+		return []processInfo{
+			{PID: 110, PPID: 100, Command: "/bin/zsh"},
+			{PID: 220, PPID: 110, Command: "claude"},
+		}, nil
+	}
+	getPIDCWDFn = func(pid int) (string, error) {
+		switch pid {
+		case 100, 220:
+			return "/repo/main", nil
+		default:
+			return "", errors.New("unexpected pid")
+		}
+	}
+
+	cwd, err := sess.GetActiveWorkdir()
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Dir(worktreeFile), cwd)
+}
+
 func TestGetActiveWorkdir_ClaudeSessionScanSkipsUnreadableMetadata(t *testing.T) {
 	sess := &LocalSession{pid: 100}
 
