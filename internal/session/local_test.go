@@ -706,6 +706,47 @@ func TestGetActiveWorkdir_ClaudeSessionScanSkipsUnreadableMetadata(t *testing.T)
 	assert.Equal(t, filepath.Dir(worktreeFile), cwd)
 }
 
+func TestGetActiveWorkdir_ClaudeSessionScanRejectsInvalidSessionID(t *testing.T) {
+	sess := &LocalSession{pid: 100}
+
+	originalListProcesses := listProcessesFn
+	originalGetPIDCWD := getPIDCWDFn
+	originalUserHomeDir := userHomeDirFn
+	t.Cleanup(func() {
+		listProcessesFn = originalListProcesses
+		getPIDCWDFn = originalGetPIDCWD
+		userHomeDirFn = originalUserHomeDir
+	})
+
+	homeDir := t.TempDir()
+	userHomeDirFn = func() (string, error) { return homeDir, nil }
+
+	sessionMetaPath := filepath.Join(homeDir, ".claude", "sessions", "220.json")
+	require.NoError(t, os.MkdirAll(filepath.Dir(sessionMetaPath), 0755))
+	require.NoError(t, os.WriteFile(sessionMetaPath, []byte(
+		`{"pid":220,"sessionId":"../../etc/shadow","cwd":"/repo/main"}`,
+	), 0600))
+
+	listProcessesFn = func() ([]processInfo, error) {
+		return []processInfo{
+			{PID: 110, PPID: 100, Command: "/bin/zsh"},
+			{PID: 220, PPID: 110, Command: "claude"},
+		}, nil
+	}
+	getPIDCWDFn = func(pid int) (string, error) {
+		switch pid {
+		case 100, 220:
+			return "/repo/main", nil
+		default:
+			return "", errors.New("unexpected pid")
+		}
+	}
+
+	cwd, err := sess.GetActiveWorkdir()
+	require.NoError(t, err)
+	assert.Equal(t, "/repo/main", cwd)
+}
+
 func TestValidateShell_InEtcShells_OK(t *testing.T) {
 	got, err := validateShell("/bin/sh")
 	assert.NoError(t, err)

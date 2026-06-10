@@ -410,6 +410,65 @@ func TestActiveRemoteWorkdir_FallsBackToRemoteDescendantCWD(t *testing.T) {
 	assert.Equal(t, "/tmp/remote-worktree", cwd)
 }
 
+func TestActiveRemoteWorkdir_PrefersRemoteClaudeTranscriptWorktree(t *testing.T) {
+	sessionPath := "~/.claude/sessions/220.json"
+	projectCmd := "cat ~/.claude/projects/'-repo-main/session-123.jsonl'"
+	worktreeFile := "/tmp/remote-claude-worktree/AGENTS.md"
+
+	runner := &fakeSSHRunner{
+		outputs: map[string][]byte{
+			sshListProcessesCmd:  []byte(" 100 1 sh\n 220 100 claude\n"),
+			"cat " + sessionPath: []byte(`{"pid":220,"sessionId":"session-123","cwd":"/repo/main"}`),
+			projectCmd: []byte(
+				"{\"type\":\"file-history-snapshot\",\"snapshot\":{\"trackedFileBackups\":{\"" +
+					worktreeFile +
+					"\":{}}}}\n",
+			),
+		},
+	}
+
+	cwd, err := activeRemoteWorkdir(runner, "test active remote", "/repo/main", 100)
+	require.NoError(t, err)
+	assert.Equal(t, "/tmp/remote-claude-worktree", cwd)
+}
+
+func TestActiveRemoteWorkdir_PrefersRemoteClaudeBashCDWorktree(t *testing.T) {
+	sessionPath := "~/.claude/sessions/220.json"
+	projectCmd := "cat ~/.claude/projects/'-repo-main/session-123.jsonl'"
+
+	runner := &fakeSSHRunner{
+		outputs: map[string][]byte{
+			sshListProcessesCmd:  []byte(" 100 1 sh\n 220 100 claude\n"),
+			"cat " + sessionPath: []byte(`{"pid":220,"sessionId":"session-123","cwd":"/repo/main"}`),
+			projectCmd: []byte(
+				"{\"type\":\"assistant\",\"message\":{\"content\":[" +
+					"{\"type\":\"tool_use\",\"name\":\"Bash\"," +
+					"\"input\":{\"command\":\"cd /tmp/remote-bash-worktree && git status\"}}" +
+					"]}}\n",
+			),
+		},
+	}
+
+	cwd, err := activeRemoteWorkdir(runner, "test active remote", "/repo/main", 100)
+	require.NoError(t, err)
+	assert.Equal(t, "/tmp/remote-bash-worktree", cwd)
+}
+
+func TestActiveRemoteWorkdir_RejectsRemoteClaudeInvalidSessionID(t *testing.T) {
+	sessionPath := "~/.claude/sessions/220.json"
+	runner := &fakeSSHRunner{
+		outputs: map[string][]byte{
+			sshListProcessesCmd:                    []byte(" 100 1 sh\n 220 100 claude\n"),
+			"cat " + sessionPath:                   []byte(`{"pid":220,"sessionId":"../../etc/shadow","cwd":"/repo/main"}`),
+			fmt.Sprintf(sshPIDCWDCmdTemplate, 220): []byte("/repo/main\n"),
+		},
+	}
+
+	cwd, err := activeRemoteWorkdir(runner, "test active remote", "/repo/main", 100)
+	require.NoError(t, err)
+	assert.Equal(t, "/repo/main", cwd)
+}
+
 func TestRemoteShellPID_ParsesShellProcess(t *testing.T) {
 	runner := &fakeSSHRunner{
 		outputs: map[string][]byte{
@@ -496,6 +555,29 @@ func TestTmuxSSHActiveWorkdir_PrefersCodexExecCommandWorkdir(t *testing.T) {
 	cwd, err := tmuxSSHActiveWorkdir(runner, "test ssh_tmux", "demo")
 	require.NoError(t, err)
 	assert.Equal(t, "/tmp/remote-tmux-worktree-from-command", cwd)
+}
+
+func TestTmuxSSHActiveWorkdir_PrefersClaudeTranscriptWorktree(t *testing.T) {
+	sessionPath := "~/.claude/sessions/230.json"
+	projectCmd := "cat ~/.claude/projects/'-repo-main/session-123.jsonl'"
+	worktreeFile := "/tmp/remote-tmux-claude-worktree/AGENTS.md"
+
+	runner := &fakeSSHRunner{
+		outputs: map[string][]byte{
+			"tmux display-message -p -t 'demo' '#{pane_pid}\t#{pane_current_path}'": []byte("220\t/repo/main\n"),
+			sshListProcessesCmd:  []byte(" 220 1 zsh\n 230 220 claude\n"),
+			"cat " + sessionPath: []byte(`{"pid":230,"sessionId":"session-123","cwd":"/repo/main"}`),
+			projectCmd: []byte(
+				"{\"type\":\"file-history-snapshot\",\"snapshot\":{\"trackedFileBackups\":{\"" +
+					worktreeFile +
+					"\":{}}}}\n",
+			),
+		},
+	}
+
+	cwd, err := tmuxSSHActiveWorkdir(runner, "test ssh_tmux", "demo")
+	require.NoError(t, err)
+	assert.Equal(t, "/tmp/remote-tmux-claude-worktree", cwd)
 }
 
 func TestTmuxSSHActiveWorkdir_WhenPanePIDIsCodex_PrefersCodexExecCommandWorkdir(t *testing.T) {
