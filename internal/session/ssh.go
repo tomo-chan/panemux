@@ -5,8 +5,8 @@ import (
 	"bytes"
 	"crypto/hmac"
 	"crypto/sha1" //nolint:gosec // G505: OpenSSH hashed known_hosts entries use HMAC-SHA1
-	"encoding/json"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"

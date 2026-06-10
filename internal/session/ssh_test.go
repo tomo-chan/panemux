@@ -417,8 +417,8 @@ func TestActiveRemoteWorkdir_PrefersRemoteClaudeTranscriptWorktree(t *testing.T)
 
 	runner := &fakeSSHRunner{
 		outputs: map[string][]byte{
-			sshListProcessesCmd:    []byte(" 100 1 sh\n 220 100 claude\n"),
-			"cat " + sessionPath:   []byte(`{"pid":220,"sessionId":"session-123","cwd":"/repo/main"}`),
+			sshListProcessesCmd:  []byte(" 100 1 sh\n 220 100 claude\n"),
+			"cat " + sessionPath: []byte(`{"pid":220,"sessionId":"session-123","cwd":"/repo/main"}`),
 			"cat " + shellQuotePath(projectPath): []byte(
 				"{\"type\":\"file-history-snapshot\",\"snapshot\":{\"trackedFileBackups\":{\"" +
 					worktreeFile +
@@ -438,11 +438,12 @@ func TestActiveRemoteWorkdir_PrefersRemoteClaudeBashCDWorktree(t *testing.T) {
 
 	runner := &fakeSSHRunner{
 		outputs: map[string][]byte{
-			sshListProcessesCmd:    []byte(" 100 1 sh\n 220 100 claude\n"),
-			"cat " + sessionPath:   []byte(`{"pid":220,"sessionId":"session-123","cwd":"/repo/main"}`),
+			sshListProcessesCmd:  []byte(" 100 1 sh\n 220 100 claude\n"),
+			"cat " + sessionPath: []byte(`{"pid":220,"sessionId":"session-123","cwd":"/repo/main"}`),
 			"cat " + shellQuotePath(projectPath): []byte(
 				"{\"type\":\"assistant\",\"message\":{\"content\":[" +
-					"{\"type\":\"tool_use\",\"name\":\"Bash\",\"input\":{\"command\":\"cd /tmp/remote-bash-worktree && git status\"}}" +
+					"{\"type\":\"tool_use\",\"name\":\"Bash\"," +
+					"\"input\":{\"command\":\"cd /tmp/remote-bash-worktree && git status\"}}" +
 					"]}}\n",
 			),
 		},
