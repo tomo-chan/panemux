@@ -993,7 +993,7 @@ func remoteClaudeSessionCWD(
 	}
 
 	projectPath := remoteClaudeProjectPath(sessionMeta)
-	out, err := run("cat " + shellQuotePath(projectPath))
+	out, err := run(remoteClaudeProjectReadCmd(sessionMeta))
 	if err != nil {
 		log.Printf("%s reading claude transcript failed path=%q: %v", logScope, projectPath, err)
 		return "", err
@@ -1032,6 +1032,12 @@ func remoteClaudeProjectPath(meta *claudeSessionMeta) string {
 		"~/.claude/projects",
 		claudeProjectDirName(meta.CWD),
 		meta.SessionID+".jsonl",
+	)
+}
+
+func remoteClaudeProjectReadCmd(meta *claudeSessionMeta) string {
+	return "cat ~/.claude/projects/" + shellQuotePath(
+		filepath.Join(claudeProjectDirName(meta.CWD), meta.SessionID+".jsonl"),
 	)
 }
 
