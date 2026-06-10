@@ -432,6 +432,28 @@ func TestActiveRemoteWorkdir_PrefersRemoteClaudeTranscriptWorktree(t *testing.T)
 	assert.Equal(t, "/tmp/remote-claude-worktree", cwd)
 }
 
+func TestActiveRemoteWorkdir_PrefersRemoteClaudeTranscriptWorktree_WithDotInCWD(t *testing.T) {
+	sessionPath := "~/.claude/sessions/220.json"
+	projectCmd := "cat ~/.claude/projects/'-home-tomo-chan-repo-main/session-123.jsonl'"
+	worktreeFile := "/tmp/remote-claude-worktree/AGENTS.md"
+
+	runner := &fakeSSHRunner{
+		outputs: map[string][]byte{
+			sshListProcessesCmd:  []byte(" 100 1 sh\n 220 100 claude\n"),
+			"cat " + sessionPath: []byte(`{"pid":220,"sessionId":"session-123","cwd":"/home/tomo.chan/repo/main"}`),
+			projectCmd: []byte(
+				"{\"type\":\"file-history-snapshot\",\"snapshot\":{\"trackedFileBackups\":{\"" +
+					worktreeFile +
+					"\":{}}}}\n",
+			),
+		},
+	}
+
+	cwd, err := activeRemoteWorkdir(runner, "test active remote", "/repo/main", 100)
+	require.NoError(t, err)
+	assert.Equal(t, "/tmp/remote-claude-worktree", cwd)
+}
+
 func TestActiveRemoteWorkdir_PrefersRemoteClaudeBashCDWorktree(t *testing.T) {
 	sessionPath := "~/.claude/sessions/220.json"
 	projectCmd := "cat ~/.claude/projects/'-repo-main/session-123.jsonl'"

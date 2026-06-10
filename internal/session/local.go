@@ -653,7 +653,8 @@ func parseExecCommandWorkdir(raw json.RawMessage) string {
 }
 
 func claudeProjectDirName(cwd string) string {
-	return strings.ReplaceAll(filepath.Clean(cwd), string(os.PathSeparator), "-")
+	name := strings.ReplaceAll(filepath.Clean(cwd), string(os.PathSeparator), "-")
+	return strings.ReplaceAll(name, ".", "-")
 }
 
 func readClaudeProjectCWD(path string) (string, error) {
