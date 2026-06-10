@@ -32,6 +32,7 @@ var readFileFn = os.ReadFile
 // This character allowlist is the sanitizer CodeQL requires for go/command-injection.
 var validShellPath = regexp.MustCompile(`^(/[a-zA-Z0-9._\-/]+)$`)
 var claudeBashCDPattern = regexp.MustCompile(`(?:^|&&)\s*cd\s+((?:"[^"]+"|'[^']+'|[^&|;]+))\s*&&`)
+var validClaudeSessionID = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 // LocalSession is a local PTY-based terminal session.
 type LocalSession struct {
@@ -381,6 +382,9 @@ func claudeSessionCWD(agentPID int) (string, error) {
 		return "", err
 	}
 	if sessionMeta == nil || sessionMeta.SessionID == "" || sessionMeta.CWD == "" {
+		return "", nil
+	}
+	if !validClaudeSessionID.MatchString(sessionMeta.SessionID) {
 		return "", nil
 	}
 

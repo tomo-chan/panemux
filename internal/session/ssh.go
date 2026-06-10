@@ -991,6 +991,9 @@ func remoteClaudeSessionCWD(
 	if sessionMeta == nil || sessionMeta.SessionID == "" || sessionMeta.CWD == "" {
 		return "", nil
 	}
+	if !validClaudeSessionID.MatchString(sessionMeta.SessionID) {
+		return "", nil
+	}
 
 	projectPath := remoteClaudeProjectPath(sessionMeta)
 	out, err := run(remoteClaudeProjectReadCmd(sessionMeta))

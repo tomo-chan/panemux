@@ -454,6 +454,21 @@ func TestActiveRemoteWorkdir_PrefersRemoteClaudeBashCDWorktree(t *testing.T) {
 	assert.Equal(t, "/tmp/remote-bash-worktree", cwd)
 }
 
+func TestActiveRemoteWorkdir_RejectsRemoteClaudeInvalidSessionID(t *testing.T) {
+	sessionPath := "~/.claude/sessions/220.json"
+	runner := &fakeSSHRunner{
+		outputs: map[string][]byte{
+			sshListProcessesCmd:                    []byte(" 100 1 sh\n 220 100 claude\n"),
+			"cat " + sessionPath:                   []byte(`{"pid":220,"sessionId":"../../etc/shadow","cwd":"/repo/main"}`),
+			fmt.Sprintf(sshPIDCWDCmdTemplate, 220): []byte("/repo/main\n"),
+		},
+	}
+
+	cwd, err := activeRemoteWorkdir(runner, "test active remote", "/repo/main", 100)
+	require.NoError(t, err)
+	assert.Equal(t, "/repo/main", cwd)
+}
+
 func TestRemoteShellPID_ParsesShellProcess(t *testing.T) {
 	runner := &fakeSSHRunner{
 		outputs: map[string][]byte{
