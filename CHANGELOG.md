@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.3](https://github.com/tomo-chan/panemux/compare/v0.18.2...v0.18.3) (2026-06-10)
+
+
+### Bug Fixes
+
+* normalize claude transcript project dir names ([#118](https://github.com/tomo-chan/panemux/issues/118)) ([d834d42](https://github.com/tomo-chan/panemux/commit/d834d421ea02f484f3c1fa757e800bf1bbd80df3))
+
 ## [0.18.2](https://github.com/tomo-chan/panemux/compare/v0.18.1...v0.18.2) (2026-06-10)
 
 
