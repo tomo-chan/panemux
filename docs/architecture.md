@@ -187,6 +187,8 @@ This ordering is intentional and reflects observed Codex behavior as of `codex-t
 
 Panemux treats that `workdir` field as the strongest available signal for the active worktree because it is the only one that changes when Codex executes tools inside a sibling Git worktree while the parent interactive process remains attached to the original pane directory. If a future Codex release changes this logging contract, compare new logs against these three fields before changing the resolver so behavior remains reviewable and intentional.
 
+For interactive Claude sessions, all four session implementations may inspect `~/.claude/sessions/<pid>.json` to locate the active transcript under `~/.claude/projects/...`. Panemux derives the active worktree from the latest non-auxiliary file path or `Bash` tool `cd ... &&` target recorded in that transcript.
+
 ### `useWorkspaceAttentionMonitor`
 
 Opens lightweight background WebSocket subscriptions for every pane ID across all workspaces and

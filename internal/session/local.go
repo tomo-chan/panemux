@@ -665,22 +665,22 @@ func readClaudeProjectCWD(path string) (string, error) {
 
 func parseClaudeProjectCWD(data []byte) (string, error) {
 	scanner := bufio.NewScanner(bytes.NewReader(data))
-	var latestPath string
+	var latest claudePathCandidate
 	for scanner.Scan() {
-		if candidate := claudeRecordPath(scanner.Bytes()); candidate != "" {
-			latestPath = candidate
+		if candidate := claudeRecordPath(scanner.Bytes()); candidate.Path != "" {
+			latest = candidate
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return "", fmt.Errorf("scan claude transcript: %w", err)
 	}
-	if latestPath == "" {
+	if latest.Path == "" {
 		return "", nil
 	}
-	if info, err := os.Stat(latestPath); err == nil && info.IsDir() {
-		return latestPath, nil
+	if latest.IsDir {
+		return latest.Path, nil
 	}
-	return filepath.Dir(latestPath), nil
+	return filepath.Dir(latest.Path), nil
 }
 
 type claudeProjectRecord struct {
@@ -693,19 +693,24 @@ type claudeProjectRecord struct {
 	} `json:"message"`
 }
 
-func claudeRecordPath(line []byte) string {
+type claudePathCandidate struct {
+	Path  string
+	IsDir bool
+}
+
+func claudeRecordPath(line []byte) claudePathCandidate {
 	var rec claudeProjectRecord
 	if err := json.Unmarshal(line, &rec); err != nil {
-		return ""
+		return claudePathCandidate{}
 	}
 
 	switch rec.Type {
 	case "file-history-snapshot":
-		return latestClaudeTrackedPath(rec.Snapshot.TrackedFileBackups)
+		return claudePathCandidate{Path: latestClaudeTrackedPath(rec.Snapshot.TrackedFileBackups)}
 	case "assistant":
 		return latestClaudeToolPath(rec.Message.Content)
 	default:
-		return ""
+		return claudePathCandidate{}
 	}
 }
 
@@ -724,17 +729,17 @@ func latestClaudeTrackedPath(backups map[string]json.RawMessage) string {
 	return paths[len(paths)-1]
 }
 
-func latestClaudeToolPath(content []json.RawMessage) string {
-	latest := ""
+func latestClaudeToolPath(content []json.RawMessage) claudePathCandidate {
+	latest := claudePathCandidate{}
 	for _, item := range content {
-		if path := claudeToolPath(item); path != "" {
+		if path := claudeToolPath(item); path.Path != "" {
 			latest = path
 		}
 	}
 	return latest
 }
 
-func claudeToolPath(raw json.RawMessage) string {
+func claudeToolPath(raw json.RawMessage) claudePathCandidate {
 	type toolUseContent struct {
 		Type  string          `json:"type"`
 		Name  string          `json:"name"`
@@ -749,27 +754,31 @@ func claudeToolPath(raw json.RawMessage) string {
 
 	var item toolUseContent
 	if err := json.Unmarshal(raw, &item); err != nil || item.Type != "tool_use" {
-		return ""
+		return claudePathCandidate{}
 	}
 
 	switch item.Name {
 	case "Read", "Edit", "Write", "MultiEdit", "NotebookEdit":
 		var input fileInput
 		if err := json.Unmarshal(item.Input, &input); err != nil {
-			return ""
+			return claudePathCandidate{}
 		}
 		if input.FilePath == "" || isClaudeAuxiliaryPath(input.FilePath) {
-			return ""
+			return claudePathCandidate{}
 		}
-		return input.FilePath
+		return claudePathCandidate{Path: input.FilePath}
 	case "Bash":
 		var input bashInput
 		if err := json.Unmarshal(item.Input, &input); err != nil {
-			return ""
+			return claudePathCandidate{}
 		}
-		return claudeBashCommandDir(input.Command)
+		path := claudeBashCommandDir(input.Command)
+		if path == "" {
+			return claudePathCandidate{}
+		}
+		return claudePathCandidate{Path: path, IsDir: true}
 	default:
-		return ""
+		return claudePathCandidate{}
 	}
 }
 

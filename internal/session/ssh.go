@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"crypto/hmac"
 	"crypto/sha1" //nolint:gosec // G505: OpenSSH hashed known_hosts entries use HMAC-SHA1
+	"encoding/json"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -829,19 +830,19 @@ func activeRemoteWorkdirWithOutput(
 		log.Printf("%s selected interactive agent pid=%d command=%q", logScope, agentPID, proc.Command)
 	}
 
-	sessionCWD, sessionErr := remoteCodexSessionCWD(
+	sessionCWD, sessionErr := remoteInteractiveAgentSessionCWD(
 		run,
 		logScope,
 		processes,
 		agentPID,
 	)
 	if sessionErr == nil && sessionCWD != "" {
-		log.Printf("%s resolved active workdir from codex session log: %q", logScope, sessionCWD)
+		log.Printf("%s resolved active workdir from interactive agent session data: %q", logScope, sessionCWD)
 		return sessionCWD, nil
 	} else if sessionErr != nil {
-		log.Printf("%s codex session workdir lookup failed: %v", logScope, sessionErr)
+		log.Printf("%s interactive agent session workdir lookup failed: %v", logScope, sessionErr)
 	} else {
-		log.Printf("%s no codex session-log workdir found; falling back to descendant cwd scan", logScope)
+		log.Printf("%s no interactive agent session workdir found; falling back to descendant cwd scan", logScope)
 	}
 
 	cwd, err := resolveRemoteInteractiveAgentWorkdir(logScope, run, processes, agentPID, baseCWD)
@@ -949,6 +950,89 @@ func remoteCodexSessionCWD(
 	}
 	log.Printf("%s parsed codex session workdir path=%q cwd=%q", logScope, sessionPath, cwd)
 	return cwd, nil
+}
+
+func remoteInteractiveAgentSessionCWD(
+	run remoteOutputFunc,
+	logScope string,
+	processes []processInfo,
+	agentPID int,
+) (string, error) {
+	proc, ok := processByPID(processes, agentPID)
+	if !ok {
+		return "", nil
+	}
+
+	switch {
+	case isCodexCommand(proc.Command):
+		return remoteCodexSessionCWD(run, logScope, processes, agentPID)
+	case isClaudeCommand(proc.Command):
+		return remoteClaudeSessionCWD(run, logScope, processes, agentPID)
+	default:
+		return "", nil
+	}
+}
+
+func remoteClaudeSessionCWD(
+	run remoteOutputFunc,
+	logScope string,
+	processes []processInfo,
+	agentPID int,
+) (string, error) {
+	proc, ok := processByPID(processes, agentPID)
+	if !ok || !isClaudeCommand(proc.Command) {
+		return "", nil
+	}
+
+	sessionMeta, err := remoteClaudeSessionMeta(run, logScope, agentPID)
+	if err != nil {
+		return "", err
+	}
+	if sessionMeta == nil || sessionMeta.SessionID == "" || sessionMeta.CWD == "" {
+		return "", nil
+	}
+
+	projectPath := remoteClaudeProjectPath(sessionMeta)
+	out, err := run("cat " + shellQuotePath(projectPath))
+	if err != nil {
+		log.Printf("%s reading claude transcript failed path=%q: %v", logScope, projectPath, err)
+		return "", err
+	}
+
+	cwd, err := parseClaudeProjectCWD(out)
+	if err != nil {
+		log.Printf("%s parsing claude transcript failed path=%q: %v", logScope, projectPath, err)
+		return "", err
+	}
+	log.Printf("%s parsed claude transcript path=%q cwd=%q", logScope, projectPath, cwd)
+	return cwd, nil
+}
+
+func remoteClaudeSessionMeta(run remoteOutputFunc, logScope string, agentPID int) (*claudeSessionMeta, error) {
+	sessionPath := fmt.Sprintf("~/.claude/sessions/%d.json", agentPID)
+	out, err := run("cat " + sessionPath)
+	if err != nil {
+		log.Printf("%s reading claude session metadata failed path=%q: %v", logScope, sessionPath, err)
+		return nil, err
+	}
+
+	var meta claudeSessionMeta
+	if err := json.Unmarshal(out, &meta); err != nil {
+		log.Printf("%s parsing claude session metadata failed path=%q: %v", logScope, sessionPath, err)
+		return nil, err
+	}
+	if meta.PID != agentPID {
+		return nil, nil
+	}
+	return &meta, nil
+}
+
+func remoteClaudeProjectPath(meta *claudeSessionMeta) string {
+	return filepath.Join(
+		"~/.claude/projects",
+		claudeProjectDirName(meta.CWD),
+		meta.SessionID+".jsonl",
+	)
 }
 
 func remoteGitContext(runner sshSessionRunner, cwd string) (GitContext, error) {
