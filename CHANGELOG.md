@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.2](https://github.com/tomo-chan/panemux/compare/v0.18.1...v0.18.2) (2026-06-10)
+
+
+### Bug Fixes
+
+* resolve remote Claude worktree headers ([#116](https://github.com/tomo-chan/panemux/issues/116)) ([04fa53e](https://github.com/tomo-chan/panemux/commit/04fa53ef8aa552de90009aa6a76d6b28b4ec6a85))
+
 ## [0.18.1](https://github.com/tomo-chan/panemux/compare/v0.18.0...v0.18.1) (2026-06-07)
 
 
