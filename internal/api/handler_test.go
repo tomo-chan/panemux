@@ -1253,6 +1253,7 @@ type mockRemoteGitSession struct {
 	cwd           string
 	cwdErr        error
 	gitContexts   map[string]session.GitContext
+	gitErrs       map[string]error
 }
 
 func (m *mockRemoteGitSession) GetCWD() (string, error) { return m.cwd, m.cwdErr }
@@ -1260,9 +1261,19 @@ func (m *mockRemoteGitSession) GetActiveWorkdir() (string, error) {
 	return m.activeWorkdir, m.activeErr
 }
 func (m *mockRemoteGitSession) InspectGitContext(cwd string) (session.GitContext, error) {
+	if err, ok := m.gitErrs[cwd]; ok {
+		return session.GitContext{}, err
+	}
 	ctx, ok := m.gitContexts[cwd]
 	if !ok {
-		return session.GitContext{}, errors.New("not a git repo")
+		return session.GitContext{}, session.NewGitContextError(
+			"ssh",
+			"git rev-parse --show-toplevel",
+			cwd,
+			session.GitContextCauseNotGitRepo,
+			errors.New("Process exited with status 128"),
+			"fatal: not a git repository (or any of the parent directories): .git",
+		)
 	}
 	return ctx, nil
 }
@@ -1680,6 +1691,43 @@ func TestGetGitInfo_NotAGitRepo_IsGitFalse(t *testing.T) {
 	var resp gitInfoResponse
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
 	assert.False(t, resp.IsGit)
+}
+
+func TestGetGitInfo_NotAGitRepo_LogsCauseAndRemediation(t *testing.T) {
+	dir := t.TempDir()
+	mgr := session.NewManager()
+	mgr.Add(&mockCWDSession{
+		mockSession: mockSession{id: "local-log", typ: session.TypeLocal},
+		cwd:         dir,
+	})
+
+	var buf bytes.Buffer
+	originalWriter := log.Writer()
+	originalFlags := log.Flags()
+	log.SetOutput(&buf)
+	log.SetFlags(0)
+	t.Cleanup(func() {
+		log.SetOutput(originalWriter)
+		log.SetFlags(originalFlags)
+	})
+
+	h := NewHandler(defaultTestConfig(), mgr)
+	r := setupRouterWithGitInfo(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/local-log/git-info", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, buf.String(), `source="base context lookup"`)
+	assert.Contains(t, buf.String(), `cause="current directory is outside a Git repository"`)
+	assert.Contains(
+		t,
+		buf.String(),
+		`remediation="move the pane to a Git repository or worktree directory, `+
+			`or update the pane cwd to the repository root"`,
+	)
+	assert.Contains(t, buf.String(), `operation="git rev-parse --show-toplevel"`)
 }
 
 func TestGetGitInfo_IsGitRepo_ReturnsBranchAndRepo(t *testing.T) {
@@ -2160,6 +2208,49 @@ func TestGetGitInfo_RemoteGitContext_ReturnsBranchAndRepo(t *testing.T) {
 	assert.Equal(t, "main", resp.Branch)
 	assert.Equal(t, "panemux", resp.Repo)
 	assert.Empty(t, resp.RepoURL)
+}
+
+func TestGetGitInfo_RemoteGitContextFailure_LogsCauseAndRemediation(t *testing.T) {
+	const remoteDir = "/home/demo"
+
+	mgr := session.NewManager()
+	mgr.Add(&mockRemoteGitSession{
+		mockSession: mockSession{id: "ssh-log", typ: session.TypeSSH},
+		cwd:         remoteDir,
+		gitErrs: map[string]error{
+			remoteDir: session.NewGitContextError(
+				"ssh",
+				"git rev-parse --show-toplevel",
+				remoteDir,
+				session.GitContextCauseNotGitRepo,
+				errors.New("Process exited with status 128"),
+				"fatal: not a git repository (or any of the parent directories): .git",
+			),
+		},
+	})
+
+	var buf bytes.Buffer
+	originalWriter := log.Writer()
+	originalFlags := log.Flags()
+	log.SetOutput(&buf)
+	log.SetFlags(0)
+	t.Cleanup(func() {
+		log.SetOutput(originalWriter)
+		log.SetFlags(originalFlags)
+	})
+
+	h := NewHandler(defaultTestConfig(), mgr)
+	r := setupRouterWithGitInfo(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/ssh-log/git-info", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, buf.String(), `source="base context lookup"`)
+	assert.Contains(t, buf.String(), `transport="ssh"`)
+	assert.Contains(t, buf.String(), `cause="current directory is outside a Git repository"`)
+	assert.Contains(t, buf.String(), `stderr="fatal: not a git repository (or any of the parent directories): .git"`)
 }
 
 func TestGetGitInfo_RemoteActiveWorkdir_PrefersRemoteWorktreeBranch(t *testing.T) {
