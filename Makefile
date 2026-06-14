@@ -1,9 +1,9 @@
-.PHONY: all build build-frontend build-backend build-desktop dev clean run install-deps install-deps-ci \
+.PHONY: all build build-frontend build-backend dev clean run install-deps install-deps-ci \
         test test-go test-frontend test-e2e \
         fmt fmt-go fmt-check-go \
         lint lint-go lint-go-deps lint-frontend \
         coverage coverage-go coverage-frontend \
-        check release-snapshot package package-desktop dev-desktop run-desktop
+        check release-snapshot package dev-desktop run-desktop
 
 GOLANGCI_LINT_VERSION := v2.11.4
 UNAME_S := $(shell uname -s)
@@ -124,8 +124,6 @@ LDFLAGS := -X main.version=$(shell git describe --tags --always --dirty 2>/dev/n
 build-backend:
 	$(BUILD_ENV) go build $(BUILD_TAGS) -ldflags "$(LDFLAGS)" -o bin/panemux .
 
-build-desktop: build-frontend build-backend
-
 # ── Release packaging ─────────────────────────────────────────────────────────
 
 release-snapshot:
@@ -139,8 +137,6 @@ release-check:
 	goreleaser check
 
 package: release-snapshot
-
-package-desktop: build-desktop
 
 # ── Dev ───────────────────────────────────────────────────────────────────────
 
@@ -161,7 +157,7 @@ run: build
 run-config: build
 	./bin/panemux --config config.example.yaml --open
 
-run-desktop: build-desktop
+run-desktop: build
 	./bin/panemux --mode=desktop
 
 # ── Clean ─────────────────────────────────────────────────────────────────────
