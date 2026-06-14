@@ -419,7 +419,8 @@ func TestActiveRemoteWorkdir_PrefersRemoteClaudeTranscriptWorktree(t *testing.T)
 			sshListProcessesCmd:  []byte(" 100 1 sh\n 220 100 claude\n"),
 			"cat " + sessionPath: []byte(`{"pid":220,"sessionId":"session-123","cwd":"/repo/main"}`),
 			projectCmd: []byte(
-				"{\"type\":\"assistant\",\"cwd\":\"/tmp/remote-claude-worktree\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}\n",
+				"{\"type\":\"assistant\",\"cwd\":\"/tmp/remote-claude-worktree\"," +
+					"\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}\n",
 			),
 		},
 	}
@@ -438,7 +439,8 @@ func TestActiveRemoteWorkdir_PrefersRemoteClaudeTranscriptWorktree_WithDotInCWD(
 			sshListProcessesCmd:  []byte(" 100 1 sh\n 220 100 claude\n"),
 			"cat " + sessionPath: []byte(`{"pid":220,"sessionId":"session-123","cwd":"/home/tomo.chan/repo/main"}`),
 			projectCmd: []byte(
-				"{\"type\":\"assistant\",\"cwd\":\"/tmp/remote-claude-worktree\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}\n",
+				"{\"type\":\"assistant\",\"cwd\":\"/tmp/remote-claude-worktree\"," +
+					"\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}\n",
 			),
 		},
 	}

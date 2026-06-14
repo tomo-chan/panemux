@@ -350,7 +350,8 @@ func TestParseClaudeProjectCWD_PrefersLatestTrackedFileBackup(t *testing.T) {
 func TestParseClaudeProjectCWD_PrefersLatestTopLevelCWD(t *testing.T) {
 	data := []byte("" +
 		"{\"type\":\"user\",\"cwd\":\"/repo/main\"}\n" +
-		"{\"type\":\"assistant\",\"cwd\":\"/tmp/worktree-a\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}}\n" +
+		"{\"type\":\"assistant\",\"cwd\":\"/tmp/worktree-a\"," +
+		"\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}}\n" +
 		"{\"type\":\"system\",\"subtype\":\"turn_duration\",\"cwd\":\"/tmp/worktree-b\"}\n")
 
 	cwd, err := parseClaudeProjectCWD(data)
@@ -657,7 +658,8 @@ func TestGetActiveWorkdir_PrefersClaudeTranscriptWorktree(t *testing.T) {
 	transcriptPath := filepath.Join(homeDir, ".claude", "projects", "-repo-main", "session-123.jsonl")
 	require.NoError(t, os.MkdirAll(filepath.Dir(transcriptPath), 0755))
 	require.NoError(t, os.WriteFile(transcriptPath, []byte(
-		"{\"type\":\"assistant\",\"cwd\":\"/tmp/panemux-worktree\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}\n",
+		"{\"type\":\"assistant\",\"cwd\":\"/tmp/panemux-worktree\","+
+			"\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}\n",
 	), 0600))
 
 	listProcessesFn = func() ([]processInfo, error) {
@@ -721,7 +723,8 @@ func TestGetActiveWorkdir_PrefersClaudeTranscriptWorktree_WithDotInCWD(t *testin
 	)
 	require.NoError(t, os.MkdirAll(filepath.Dir(transcriptPath), 0755))
 	require.NoError(t, os.WriteFile(transcriptPath, []byte(
-		"{\"type\":\"assistant\",\"cwd\":\"/tmp/panemux-worktree\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}\n",
+		"{\"type\":\"assistant\",\"cwd\":\"/tmp/panemux-worktree\","+
+			"\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}\n",
 	), 0600))
 
 	listProcessesFn = func() ([]processInfo, error) {
