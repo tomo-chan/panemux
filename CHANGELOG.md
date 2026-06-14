@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.4](https://github.com/tomo-chan/panemux/compare/v0.18.3...v0.18.4) (2026-06-14)
+
+
+### Bug Fixes
+
+* improve git context error diagnostics ([#121](https://github.com/tomo-chan/panemux/issues/121)) ([96875f6](https://github.com/tomo-chan/panemux/commit/96875f613ebeeef3cfa7b375c17a4004d4e1df5a))
+
 ## [0.18.3](https://github.com/tomo-chan/panemux/compare/v0.18.2...v0.18.3) (2026-06-10)
 
 
