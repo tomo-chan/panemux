@@ -9,10 +9,18 @@ GOLANGCI_LINT_VERSION := v2.11.4
 UNAME_S := $(shell uname -s)
 DESKTOP_ENV :=
 GOLANGCI_LINT_RUN := golangci-lint run ./...
+BUILD_TAGS :=
+BUILD_ENV :=
 
 ifeq ($(UNAME_S),Darwin)
 DESKTOP_ENV := CGO_LDFLAGS="-framework UniformTypeIdentifiers"
 GOLANGCI_LINT_RUN := /bin/zsh -lc 'cd "$(CURDIR)" && golangci-lint run ./...'
+BUILD_TAGS := -tags production
+BUILD_ENV := $(DESKTOP_ENV)
+endif
+
+ifeq ($(UNAME_S),Linux)
+BUILD_TAGS := -tags production
 endif
 
 # ── Dependencies ──────────────────────────────────────────────────────────────
@@ -114,10 +122,9 @@ build-frontend:
 LDFLAGS := -X main.version=$(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
 build-backend:
-	go build -ldflags "$(LDFLAGS)" -o bin/panemux .
+	$(BUILD_ENV) go build $(BUILD_TAGS) -ldflags "$(LDFLAGS)" -o bin/panemux .
 
-build-desktop: build-frontend
-	$(DESKTOP_ENV) go build -tags production -ldflags "$(LDFLAGS)" -o bin/panemux-desktop .
+build-desktop: build-frontend build-backend
 
 # ── Release packaging ─────────────────────────────────────────────────────────
 
@@ -155,7 +162,7 @@ run-config: build
 	./bin/panemux --config config.example.yaml --open
 
 run-desktop: build-desktop
-	./bin/panemux-desktop --mode=desktop
+	./bin/panemux --mode=desktop
 
 # ── Clean ─────────────────────────────────────────────────────────────────────
 
