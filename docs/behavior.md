@@ -482,7 +482,10 @@ When a pane moves to a different parent node, the component may be remounted by 
 - This ordering exists because the interactive Codex process and its thread metadata may stay on the original pane directory even while tool calls are executing inside a sibling Git worktree.
 - If future Codex versions change their session-log schema or start updating `turn_context.cwd` to the active worktree reliably, compare the three fields above before changing panemux's resolver order.
 - For interactive Claude flows across all four pane types, panemux may derive the active worktree from `~/.claude/sessions/<pid>.json` plus the matching transcript under `~/.claude/projects/...`.
-- Claude transcript resolution prefers the latest non-auxiliary tracked file path or `Bash` tool `cd ... &&` target recorded in that transcript.
+- Claude session metadata is used only to identify the matching transcript (`sessionId`) and project directory key.
+- Claude transcript resolution prefers the latest top-level `cwd` recorded on transcript entries such as `user`, `assistant`, `attachment`, and `system`.
+- When a Claude transcript entry does not expose top-level `cwd`, panemux falls back to the latest non-auxiliary tool file path, then the latest `Bash` tool `cd ... &&` target, then file-history snapshot paths.
+- This resolver intentionally does not depend on Claude `hooks` or `statusLine` configuration, so no extra Claude-side setup is required for pane-header Git or PR detection.
 - If the agent exits, no longer has an eligible worktree, or the resolved worktree is not a sibling worktree of the pane's current repository, panemux falls back to the pane's own working directory immediately.
 - For SSH panes, panemux resolves interactive agent processes from the remote process list on the current SSH connection.
 - For SSH+tmux panes, panemux resolves interactive agent processes only from the currently active remote tmux pane.
