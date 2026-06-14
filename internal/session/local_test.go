@@ -347,6 +347,49 @@ func TestParseClaudeProjectCWD_PrefersLatestTrackedFileBackup(t *testing.T) {
 	assert.Equal(t, worktreeDir, cwd)
 }
 
+func TestParseClaudeProjectCWD_PrefersLatestTopLevelCWD(t *testing.T) {
+	data := []byte("" +
+		"{\"type\":\"user\",\"cwd\":\"/repo/main\"}\n" +
+		"{\"type\":\"assistant\",\"cwd\":\"/tmp/worktree-a\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}}\n" +
+		"{\"type\":\"system\",\"subtype\":\"turn_duration\",\"cwd\":\"/tmp/worktree-b\"}\n")
+
+	cwd, err := parseClaudeProjectCWD(data)
+	require.NoError(t, err)
+	assert.Equal(t, "/tmp/worktree-b", cwd)
+}
+
+func TestParseClaudeProjectCWD_PrefersTopLevelCWDOverToolPaths(t *testing.T) {
+	worktreeDir := filepath.Join(t.TempDir(), "panemux-worktree")
+	require.NoError(t, os.MkdirAll(worktreeDir, 0755))
+	targetFile := filepath.Join(worktreeDir, "AGENTS.md")
+	require.NoError(t, os.WriteFile(targetFile, []byte("test"), 0600))
+
+	data := []byte("" +
+		"{\"type\":\"assistant\",\"cwd\":\"/repo/main\",\"message\":{\"content\":[" +
+		"{\"type\":\"tool_use\",\"name\":\"Read\",\"input\":{\"file_path\":\"" + targetFile + "\"}}" +
+		"]}}\n")
+
+	cwd, err := parseClaudeProjectCWD(data)
+	require.NoError(t, err)
+	assert.Equal(t, "/repo/main", cwd)
+}
+
+func TestParseClaudeProjectCWD_FallsBackWhenTopLevelCWDMissing(t *testing.T) {
+	worktreeDir := filepath.Join(t.TempDir(), "panemux-worktree")
+	require.NoError(t, os.MkdirAll(worktreeDir, 0755))
+
+	data := []byte(
+		"{\"type\":\"assistant\",\"message\":{\"content\":[" +
+			"{\"type\":\"tool_use\",\"name\":\"Bash\",\"input\":{\"command\":\"cd " +
+			worktreeDir +
+			" && git status\"}}]}}\n",
+	)
+
+	cwd, err := parseClaudeProjectCWD(data)
+	require.NoError(t, err)
+	assert.Equal(t, worktreeDir, cwd)
+}
+
 func TestParseClaudeProjectCWD_PrefersBashCDWorktree(t *testing.T) {
 	worktreeDir := filepath.Join(t.TempDir(), "panemux-worktree")
 	require.NoError(t, os.MkdirAll(worktreeDir, 0755))
@@ -613,13 +656,8 @@ func TestGetActiveWorkdir_PrefersClaudeTranscriptWorktree(t *testing.T) {
 
 	transcriptPath := filepath.Join(homeDir, ".claude", "projects", "-repo-main", "session-123.jsonl")
 	require.NoError(t, os.MkdirAll(filepath.Dir(transcriptPath), 0755))
-	worktreeFile := filepath.Join(t.TempDir(), "panemux-worktree", "AGENTS.md")
-	require.NoError(t, os.MkdirAll(filepath.Dir(worktreeFile), 0755))
-	require.NoError(t, os.WriteFile(worktreeFile, []byte("test"), 0600))
 	require.NoError(t, os.WriteFile(transcriptPath, []byte(
-		"{\"type\":\"file-history-snapshot\",\"snapshot\":{\"trackedFileBackups\":{\""+
-			worktreeFile+
-			"\":{}}}}\n",
+		"{\"type\":\"assistant\",\"cwd\":\"/tmp/panemux-worktree\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}\n",
 	), 0600))
 
 	listProcessesFn = func() ([]processInfo, error) {
@@ -641,7 +679,7 @@ func TestGetActiveWorkdir_PrefersClaudeTranscriptWorktree(t *testing.T) {
 
 	cwd, err := sess.GetActiveWorkdir()
 	require.NoError(t, err)
-	assert.Equal(t, filepath.Dir(worktreeFile), cwd)
+	assert.Equal(t, "/tmp/panemux-worktree", cwd)
 }
 
 func TestClaudeProjectDirName_NormalizesDots(t *testing.T) {
@@ -682,13 +720,8 @@ func TestGetActiveWorkdir_PrefersClaudeTranscriptWorktree_WithDotInCWD(t *testin
 		"session-123.jsonl",
 	)
 	require.NoError(t, os.MkdirAll(filepath.Dir(transcriptPath), 0755))
-	worktreeFile := filepath.Join(t.TempDir(), "panemux-worktree", "AGENTS.md")
-	require.NoError(t, os.MkdirAll(filepath.Dir(worktreeFile), 0755))
-	require.NoError(t, os.WriteFile(worktreeFile, []byte("test"), 0600))
 	require.NoError(t, os.WriteFile(transcriptPath, []byte(
-		"{\"type\":\"file-history-snapshot\",\"snapshot\":{\"trackedFileBackups\":{\""+
-			worktreeFile+
-			"\":{}}}}\n",
+		"{\"type\":\"assistant\",\"cwd\":\"/tmp/panemux-worktree\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}\n",
 	), 0600))
 
 	listProcessesFn = func() ([]processInfo, error) {
@@ -708,7 +741,7 @@ func TestGetActiveWorkdir_PrefersClaudeTranscriptWorktree_WithDotInCWD(t *testin
 
 	cwd, err := sess.GetActiveWorkdir()
 	require.NoError(t, err)
-	assert.Equal(t, filepath.Dir(worktreeFile), cwd)
+	assert.Equal(t, "/tmp/panemux-worktree", cwd)
 }
 
 func TestGetActiveWorkdir_ClaudeSessionScanSkipsUnreadableMetadata(t *testing.T) {

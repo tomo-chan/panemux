@@ -670,26 +670,35 @@ func readClaudeProjectCWD(path string) (string, error) {
 
 func parseClaudeProjectCWD(data []byte) (string, error) {
 	scanner := bufio.NewScanner(bytes.NewReader(data))
-	var latest claudePathCandidate
+	var latestCWD string
+	var latestPath claudePathCandidate
 	for scanner.Scan() {
-		if candidate := claudeRecordPath(scanner.Bytes()); candidate.Path != "" {
-			latest = candidate
+		cwd, candidate := claudeRecordPath(scanner.Bytes())
+		if cwd != "" {
+			latestCWD = cwd
+		}
+		if candidate.Path != "" {
+			latestPath = candidate
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return "", fmt.Errorf("scan claude transcript: %w", err)
 	}
-	if latest.Path == "" {
+	if latestCWD != "" {
+		return latestCWD, nil
+	}
+	if latestPath.Path == "" {
 		return "", nil
 	}
-	if latest.IsDir {
-		return latest.Path, nil
+	if latestPath.IsDir {
+		return latestPath.Path, nil
 	}
-	return filepath.Dir(latest.Path), nil
+	return filepath.Dir(latestPath.Path), nil
 }
 
 type claudeProjectRecord struct {
 	Type     string `json:"type"`
+	CWD      string `json:"cwd"`
 	Snapshot struct {
 		TrackedFileBackups map[string]json.RawMessage `json:"trackedFileBackups"`
 	} `json:"snapshot"`
@@ -703,19 +712,19 @@ type claudePathCandidate struct {
 	IsDir bool
 }
 
-func claudeRecordPath(line []byte) claudePathCandidate {
+func claudeRecordPath(line []byte) (string, claudePathCandidate) {
 	var rec claudeProjectRecord
 	if err := json.Unmarshal(line, &rec); err != nil {
-		return claudePathCandidate{}
+		return "", claudePathCandidate{}
 	}
 
 	switch rec.Type {
 	case "file-history-snapshot":
-		return claudePathCandidate{Path: latestClaudeTrackedPath(rec.Snapshot.TrackedFileBackups)}
+		return rec.CWD, claudePathCandidate{Path: latestClaudeTrackedPath(rec.Snapshot.TrackedFileBackups)}
 	case "assistant":
-		return latestClaudeToolPath(rec.Message.Content)
+		return rec.CWD, latestClaudeToolPath(rec.Message.Content)
 	default:
-		return claudePathCandidate{}
+		return rec.CWD, claudePathCandidate{}
 	}
 }
 
