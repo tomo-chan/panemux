@@ -352,11 +352,12 @@ func TestParseClaudeProjectCWD_PrefersLatestTopLevelCWD(t *testing.T) {
 		"{\"type\":\"user\",\"cwd\":\"/repo/main\"}\n" +
 		"{\"type\":\"assistant\",\"cwd\":\"/tmp/worktree-a\"," +
 		"\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}}\n" +
-		"{\"type\":\"system\",\"subtype\":\"turn_duration\",\"cwd\":\"/tmp/worktree-b\"}\n")
+		"{\"type\":\"attachment\",\"cwd\":\"/tmp/worktree-b\"}\n" +
+		"{\"type\":\"system\",\"subtype\":\"turn_duration\",\"cwd\":\"/tmp/worktree-c\"}\n")
 
 	cwd, err := parseClaudeProjectCWD(data)
 	require.NoError(t, err)
-	assert.Equal(t, "/tmp/worktree-b", cwd)
+	assert.Equal(t, "/tmp/worktree-c", cwd)
 }
 
 func TestParseClaudeProjectCWD_PrefersTopLevelCWDOverToolPaths(t *testing.T) {
