@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.5](https://github.com/tomo-chan/panemux/compare/v0.18.4...v0.18.5) (2026-06-14)
+
+
+### Bug Fixes
+
+* prefer claude transcript cwd for workdir detection ([#123](https://github.com/tomo-chan/panemux/issues/123)) ([e4b54ca](https://github.com/tomo-chan/panemux/commit/e4b54ca5a4085735c9f4d82142fbed1acf6a240f))
+
 ## [0.18.4](https://github.com/tomo-chan/panemux/compare/v0.18.3...v0.18.4) (2026-06-14)
 
 
