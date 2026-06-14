@@ -336,7 +336,7 @@ type fakeSSHRunner struct {
 
 func (f *fakeSSHRunner) Output(cmd string) ([]byte, error) {
 	if err := f.errs[cmd]; err != nil {
-		return nil, err
+		return f.outputs[cmd], err
 	}
 	if out, ok := f.outputs[cmd]; ok {
 		return out, nil
@@ -673,5 +673,50 @@ func TestRemoteGitContext_ReturnsBranchAndRepo(t *testing.T) {
 func TestRemoteGitContext_RejectsRelativePath(t *testing.T) {
 	_, err := remoteGitContext(&fakeSSHRunner{}, "panemux")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "working directory")
+	var gitErr *GitContextError
+	require.ErrorAs(t, err, &gitErr)
+	assert.Equal(t, GitContextCauseInvalidCWD, gitErr.Cause)
+	assert.Equal(t, "validate remote working directory", gitErr.Operation)
+}
+
+func TestRemoteGitContext_NotGitRepoReturnsDiagnosticError(t *testing.T) {
+	const cwd = "/home/user"
+
+	runner := &fakeSSHRunner{
+		errs: map[string]error{
+			fmt.Sprintf(sshGitContextCmdTemplate, shellQuotePath(cwd)): errors.New("Process exited with status 128"),
+		},
+		outputs: map[string][]byte{
+			fmt.Sprintf(sshGitContextCmdTemplate, shellQuotePath(cwd)): []byte(
+				"__PANEMUX_GIT_CONTEXT_ERROR__\n" +
+					"show-toplevel\n" +
+					"fatal: not a git repository (or any of the parent directories): .git\n",
+			),
+		},
+	}
+
+	_, err := remoteGitContext(runner, cwd)
+	require.Error(t, err)
+	var gitErr *GitContextError
+	require.ErrorAs(t, err, &gitErr)
+	assert.Equal(t, GitContextCauseNotGitRepo, gitErr.Cause)
+	assert.Equal(t, "git rev-parse --show-toplevel", gitErr.Operation)
+	assert.Equal(t, "fatal: not a git repository (or any of the parent directories): .git", gitErr.Stderr)
+}
+
+func TestRemoteGitContext_IncompleteResponseReturnsDiagnosticError(t *testing.T) {
+	const cwd = "/home/user/panemux"
+
+	runner := &fakeSSHRunner{
+		outputs: map[string][]byte{
+			fmt.Sprintf(sshGitContextCmdTemplate, shellQuotePath(cwd)): []byte("/home/user/panemux\n"),
+		},
+	}
+
+	_, err := remoteGitContext(runner, cwd)
+	require.Error(t, err)
+	var gitErr *GitContextError
+	require.ErrorAs(t, err, &gitErr)
+	assert.Equal(t, GitContextCauseIncomplete, gitErr.Cause)
+	assert.Equal(t, "/home/user/panemux", gitErr.Stderr)
 }

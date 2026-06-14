@@ -709,8 +709,12 @@ const sshOpenFilesCmdTemplate = `{ ls -1 /proc/%[1]d/fd 2>/dev/null | ` +
 const sshPIDCWDCmdTemplate = `{ readlink /proc/%[1]d/cwd 2>/dev/null || ` +
 	`lsof -a -p %[1]d -d cwd -Fn 2>/dev/null | awk '/^n/{print substr($0,2)}'; }`
 const sshGitContextCmdTemplate = `cd %[1]s && ` +
-	`root=$(git rev-parse --show-toplevel) && ` +
-	`common=$(git rev-parse --path-format=absolute --git-common-dir) && ` +
+	`root=$(git rev-parse --show-toplevel 2>&1); status=$?; ` +
+	`if [ $status -ne 0 ]; then ` +
+	`printf '__PANEMUX_GIT_CONTEXT_ERROR__\nshow-toplevel\n%%s\n' "$root"; exit $status; fi && ` +
+	`common=$(git rev-parse --path-format=absolute --git-common-dir 2>&1); status=$?; ` +
+	`if [ $status -ne 0 ]; then ` +
+	`printf '__PANEMUX_GIT_CONTEXT_ERROR__\ngit-common-dir\n%%s\n' "$common"; exit $status; fi && ` +
 	`branch=$(git branch --show-current 2>/dev/null || true) && ` +
 	`origin=$(git config --get remote.origin.url 2>/dev/null || true) && ` +
 	`printf '%%s\n%%s\n%%s\n%%s\n' "$root" "$common" "$branch" "$origin"`
@@ -1046,17 +1050,31 @@ func remoteClaudeProjectReadCmd(meta *claudeSessionMeta) string {
 
 func remoteGitContext(runner sshSessionRunner, cwd string) (GitContext, error) {
 	if err := validateRemotePath("working directory", cwd); err != nil {
-		return GitContext{}, err
+		return GitContext{}, NewGitContextError(
+			"ssh",
+			"validate remote working directory",
+			cwd,
+			GitContextCauseInvalidCWD,
+			err,
+			"",
+		)
 	}
 
 	out, err := runner.Output(fmt.Sprintf(sshGitContextCmdTemplate, shellQuotePath(cwd)))
 	if err != nil {
-		return GitContext{}, fmt.Errorf("git context over ssh: %w", err)
+		return GitContext{}, classifyRemoteGitContextError(cwd, string(out), err)
 	}
 
 	lines := strings.Split(strings.TrimRight(string(out), "\n"), "\n")
 	if len(lines) < 4 {
-		return GitContext{}, errors.New("git context over ssh: incomplete response")
+		return GitContext{}, NewGitContextError(
+			"ssh",
+			"git context command",
+			cwd,
+			GitContextCauseIncomplete,
+			errors.New("git context over ssh: incomplete response"),
+			string(out),
+		)
 	}
 
 	root := strings.TrimSpace(lines[0])
@@ -1067,6 +1085,44 @@ func remoteGitContext(runner sshSessionRunner, cwd string) (GitContext, error) {
 		Repo:      filepath.Base(root),
 		Root:      root,
 	}, nil
+}
+
+func classifyRemoteGitContextError(cwd, output string, err error) error {
+	trimmed := strings.TrimSpace(output)
+	if trimmed == "" {
+		return NewGitContextError("ssh", "git context command", cwd, GitContextCauseSSHSessionFailed, err, "")
+	}
+
+	const marker = "__PANEMUX_GIT_CONTEXT_ERROR__"
+	lines := strings.Split(trimmed, "\n")
+	if len(lines) >= 3 && lines[0] == marker {
+		operation := strings.TrimSpace(lines[1])
+		stderr := strings.TrimSpace(strings.Join(lines[2:], "\n"))
+		// Keep SSH-side unknowns as unknown. Unlike the local path, we cannot
+		// reliably distinguish a remote repository metadata problem from shell or
+		// environment differences once we only have stderr text back.
+		return NewGitContextError(
+			"ssh",
+			sshGitOperationName(operation),
+			cwd,
+			ClassifyGitFailureCause(stderr, err),
+			err,
+			stderr,
+		)
+	}
+
+	return NewGitContextError("ssh", "git context command", cwd, GitContextCauseSSHSessionFailed, err, trimmed)
+}
+
+func sshGitOperationName(operation string) string {
+	switch operation {
+	case "show-toplevel":
+		return "git rev-parse --show-toplevel"
+	case "git-common-dir":
+		return "git rev-parse --path-format=absolute --git-common-dir"
+	default:
+		return "git context command"
+	}
 }
 
 func remoteOpenFiles(run remoteOutputFunc, pid int) ([]string, error) {

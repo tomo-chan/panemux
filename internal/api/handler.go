@@ -782,7 +782,7 @@ func (h *Handler) resolvePreferredCWD(sess session.Session, cwd string) string {
 
 	baseCtx, err := h.inspectGitContextForSession(sess, cwd)
 	if err != nil {
-		log.Printf("%s base context lookup failed: %v", logScope, err)
+		log.Printf("%s", formatGitContextLookupError(logScope, "base context lookup", err))
 		return cwd
 	}
 
@@ -801,7 +801,7 @@ func (h *Handler) resolvePreferredCWD(sess session.Session, cwd string) string {
 
 	ctx, err := h.inspectGitContextForSession(sess, candidate)
 	if err != nil {
-		log.Printf("%s active workdir candidate context lookup failed: %v", logScope, err)
+		log.Printf("%s", formatGitContextLookupError(logScope, "active workdir candidate context lookup", err))
 		return h.recallPreferredCWD(sess.ID(), cwd, baseCtx)
 	}
 	if ctx.CommonDir == baseCtx.CommonDir && ctx.Root != baseCtx.Root {
@@ -898,25 +898,53 @@ func (h *Handler) inspectGitContextForSession(sess session.Session, cwd string) 
 func (h *Handler) inspectLocalGitContext(cwd string) (session.GitContext, error) {
 	safeCWD, err := sanitizeGitExecDir(cwd)
 	if err != nil {
-		return session.GitContext{}, err
+		return session.GitContext{}, session.NewGitContextError(
+			"local",
+			"validate local working directory",
+			cwd,
+			session.GitContextCauseInvalidCWD,
+			err,
+			"",
+		)
 	}
 
-	toplevelCmd := exec.Command("git", "rev-parse", "--show-toplevel")
-	toplevelCmd.Dir = safeCWD
-	toplevelOut, err := toplevelCmd.Output()
+	toplevelOut, err := runLocalGitContextCommand(
+		safeCWD,
+		cwd,
+		"git rev-parse --show-toplevel",
+		"rev-parse",
+		"--show-toplevel",
+	)
 	if err != nil {
-		return session.GitContext{}, fmt.Errorf("git show toplevel for %q: %w", cwd, err)
+		return session.GitContext{}, err
 	}
 	toplevelOut = bytes.TrimSpace(toplevelOut)
 
-	commonDirCmd := exec.Command("git", "rev-parse", "--path-format=absolute", "--git-common-dir")
-	commonDirCmd.Dir = safeCWD
-	commonDirOut, err := commonDirCmd.Output()
+	commonDirOut, err := runLocalGitContextCommand(
+		safeCWD,
+		cwd,
+		"git rev-parse --path-format=absolute --git-common-dir",
+		"rev-parse",
+		"--path-format=absolute",
+		"--git-common-dir",
+	)
 	if err != nil {
-		return session.GitContext{}, fmt.Errorf("git show common dir for %q: %w", cwd, err)
+		return session.GitContext{}, err
 	}
 	commonDirOut = bytes.TrimSpace(commonDirOut)
 
+	branchOut, originOut := localGitOptionalMetadata(safeCWD)
+	root := string(toplevelOut)
+	return session.GitContext{
+		Branch:    string(branchOut),
+		CommonDir: string(commonDirOut),
+		OriginURL: string(originOut),
+		Repo:      filepath.Base(root),
+		Root:      root,
+	}, nil
+}
+
+func localGitOptionalMetadata(safeCWD string) ([]byte, []byte) {
 	branchCmd := exec.Command("git", "branch", "--show-current")
 	branchCmd.Dir = safeCWD
 	branchOut, err := branchCmd.Output()
@@ -934,15 +962,32 @@ func (h *Handler) inspectLocalGitContext(cwd string) (session.GitContext, error)
 		originOut = nil
 	}
 	originOut = bytes.TrimSpace(originOut)
+	return branchOut, originOut
+}
 
-	root := string(toplevelOut)
-	return session.GitContext{
-		Branch:    string(branchOut),
-		CommonDir: string(commonDirOut),
-		OriginURL: string(originOut),
-		Repo:      filepath.Base(root),
-		Root:      root,
-	}, nil
+func runLocalGitContextCommand(safeCWD, originalCWD, operation string, args ...string) ([]byte, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = safeCWD
+	out, err := cmd.Output()
+	if err == nil {
+		return out, nil
+	}
+
+	stderr := ""
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		stderr = string(exitErr.Stderr)
+	}
+
+	cause := session.ClassifyGitFailureCause(stderr, err)
+	if cause == session.GitContextCauseUnknown && errors.Is(err, exec.ErrNotFound) {
+		cause = session.GitContextCauseGitNotInstalled
+	}
+	if cause == session.GitContextCauseUnknown {
+		cause = session.GitContextCauseGitMetadata
+	}
+
+	return nil, session.NewGitContextError("local", operation, originalCWD, cause, err, stderr)
 }
 
 var validGitExecDir = regexp.MustCompile(`^(/[^[:cntrl:]\x00]*)+$`)
@@ -956,6 +1001,40 @@ func sanitizeGitExecDir(cwd string) (string, error) {
 		return "", fmt.Errorf("working directory contains invalid characters: %q", cwd)
 	}
 	return cleaned, nil
+}
+
+func formatGitContextLookupError(logScope, source string, err error) string {
+	var ctxErr *session.GitContextError
+	if errors.As(err, &ctxErr) {
+		return fmt.Sprintf(
+			"%s git context lookup failed: source=%q cause=%q remediation=%q transport=%q cwd=%q "+
+				`operation=%q stderr=%q raw_error=%q`,
+			logScope,
+			source,
+			ctxErr.CauseMessage,
+			ctxErr.Remediation,
+			ctxErr.Transport,
+			ctxErr.CWD,
+			ctxErr.Operation,
+			singleLineLogValue(ctxErr.Stderr),
+			singleLineLogValue(ctxErr.RawError),
+		)
+	}
+
+	// Keep a defensive fallback here so future callers that wrap a non-GitContextError
+	// still produce an actionable log instead of regressing to a raw `%v` message.
+	return fmt.Sprintf(
+		`%s git context lookup failed: source=%q cause=%q remediation=%q raw_error=%q`,
+		logScope,
+		source,
+		"Git context lookup failed for an unknown reason",
+		"inspect the raw error details to determine the next action",
+		singleLineLogValue(err.Error()),
+	)
+}
+
+func singleLineLogValue(value string) string {
+	return strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
 }
 
 func (h *Handler) findGH() (string, error) {
