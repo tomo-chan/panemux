@@ -1098,6 +1098,9 @@ func classifyRemoteGitContextError(cwd, output string, err error) error {
 	if len(lines) >= 3 && lines[0] == marker {
 		operation := strings.TrimSpace(lines[1])
 		stderr := strings.TrimSpace(strings.Join(lines[2:], "\n"))
+		// Keep SSH-side unknowns as unknown. Unlike the local path, we cannot
+		// reliably distinguish a remote repository metadata problem from shell or
+		// environment differences once we only have stderr text back.
 		return NewGitContextError(
 			"ssh",
 			sshGitOperationName(operation),

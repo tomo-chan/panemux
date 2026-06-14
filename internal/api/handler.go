@@ -944,9 +944,9 @@ func (h *Handler) inspectLocalGitContext(cwd string) (session.GitContext, error)
 	}, nil
 }
 
-func localGitOptionalMetadata(cwd string) ([]byte, []byte) {
+func localGitOptionalMetadata(safeCWD string) ([]byte, []byte) {
 	branchCmd := exec.Command("git", "branch", "--show-current")
-	branchCmd.Dir = cwd
+	branchCmd.Dir = safeCWD
 	branchOut, err := branchCmd.Output()
 	if err != nil {
 		// Detached HEAD returns non-zero for --show-current. Treat that as
@@ -956,7 +956,7 @@ func localGitOptionalMetadata(cwd string) ([]byte, []byte) {
 	branchOut = bytes.TrimSpace(branchOut)
 
 	originCmd := exec.Command("git", "config", "--get", "remote.origin.url")
-	originCmd.Dir = cwd
+	originCmd.Dir = safeCWD
 	originOut, err := originCmd.Output()
 	if err != nil {
 		originOut = nil
@@ -1021,6 +1021,8 @@ func formatGitContextLookupError(logScope, source string, err error) string {
 		)
 	}
 
+	// Keep a defensive fallback here so future callers that wrap a non-GitContextError
+	// still produce an actionable log instead of regressing to a raw `%v` message.
 	return fmt.Sprintf(
 		`%s git context lookup failed: source=%q cause=%q remediation=%q raw_error=%q`,
 		logScope,
