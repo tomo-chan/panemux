@@ -110,6 +110,11 @@ The handle uses `#4a7ea5` and a `grab` cursor. While dragging it switches to `gr
 
 The terminal body must stay available for text selection, focus, mouse reporting, and shell input. Restricting drag initiation to the header avoids gesture conflicts that would otherwise make terminal interaction unreliable.
 
+For `tmux` and `ssh_tmux` panes, panemux currently chooses copy-first behavior inside the pane body:
+plain mouse drag is reserved for browser text selection rather than tmux-native mouse selection. This
+keeps copy interactions consistent across all pane types, even though some tmux mouse interactions are
+deprioritized.
+
 ---
 
 ## Drag and Drop

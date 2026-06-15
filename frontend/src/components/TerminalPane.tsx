@@ -33,6 +33,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
   const { handleResize, connected, dims, sessionState, reconnectFailed, restartSession } = useTerminal({
     sessionId: pane.id,
     container: containerEl,
+    sessionType: pane.type,
   })
 
   const gitInfo = useGitInfo(pane.id)

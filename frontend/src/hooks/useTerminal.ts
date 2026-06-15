@@ -4,13 +4,14 @@ import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { useWebSocket } from './useWebSocket'
 import { TERMINAL_FONT_FAMILY } from '../utils/fonts'
-import type { SessionState } from '../schemas'
+import type { PaneConfig, SessionState } from '../schemas'
 
 const REPAINT_SETTLE_DELAYS_MS = [50, 250]
 
 interface UseTerminalOptions {
   sessionId: string
   container: HTMLElement | null
+  sessionType: PaneConfig['type']
 }
 
 interface TerminalEntry {
@@ -24,6 +25,7 @@ interface TerminalEntry {
   replayActive: boolean
   replayWriteDepth: number
   awaitingReplayEnd: boolean
+  selectionModeCleanup: (() => void) | null
 }
 
 interface PendingTerminalMessage {
@@ -34,7 +36,7 @@ interface PendingTerminalMessage {
 const terminalEntries = new Map<string, TerminalEntry>()
 type TerminalLifecycleState = 'running' | 'disconnected' | 'exited'
 
-export function useTerminal({ sessionId, container }: UseTerminalOptions) {
+export function useTerminal({ sessionId, container, sessionType }: UseTerminalOptions) {
   const termRef = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
   const initializedRef = useRef(false)
@@ -199,6 +201,7 @@ export function useTerminal({ sessionId, container }: UseTerminalOptions) {
     fitAddonRef.current = entry.fitAddon
 
     attachTerminal(entry, container)
+    syncSelectionMode(entry, sessionType)
     // Flush anything buffered while the pane was logically mounted but the xterm
     // element had not yet been attached back into this container.
     flushPendingMessages(pendingMessagesRef.current, applyMessageToTerminal)
@@ -216,6 +219,8 @@ export function useTerminal({ sessionId, container }: UseTerminalOptions) {
         if (currentEntry.attachedContainer) return
         clearScheduledRepaints(currentEntry)
         clearScheduledResizes(currentEntry)
+        currentEntry.selectionModeCleanup?.()
+        currentEntry.selectionModeCleanup = null
         currentEntry.term.dispose()
         terminalEntries.delete(sessionId)
       }, 0)
@@ -225,7 +230,7 @@ export function useTerminal({ sessionId, container }: UseTerminalOptions) {
       entryRef.current = null
       initializedRef.current = false
     }
-  }, [container, sessionId])
+  }, [applyMessageToTerminal, container, sessionId, sessionType])
 
   const restartSession = useCallback(async () => {
     try {
@@ -318,6 +323,7 @@ function getOrCreateTerminalEntry(sessionId: string): TerminalEntry {
     replayActive: false,
     replayWriteDepth: 0,
     awaitingReplayEnd: false,
+    selectionModeCleanup: null,
   }
 
   term.loadAddon(fitAddon)
@@ -349,6 +355,17 @@ function getOrCreateTerminalEntry(sessionId: string): TerminalEntry {
   return entry
 }
 
+function syncSelectionMode(entry: TerminalEntry, sessionType: PaneConfig['type']) {
+  entry.selectionModeCleanup?.()
+  entry.selectionModeCleanup = null
+
+  if (sessionType !== 'tmux' && sessionType !== 'ssh_tmux') {
+    return
+  }
+
+  entry.selectionModeCleanup = installTmuxCopyFirstSelection(entry.term)
+}
+
 function attachTerminal(entry: TerminalEntry, container: HTMLElement) {
   if (!entry.term.element) {
     entry.term.open(container)
@@ -361,6 +378,42 @@ function attachTerminal(entry: TerminalEntry, container: HTMLElement) {
     // would remove those React-owned DOM nodes, causing React to crash when it
     // next tries to reconcile them.
     container.appendChild(entry.term.element)
+  }
+}
+
+function installTmuxCopyFirstSelection(term: Terminal): () => void {
+  const element = term.element
+  if (!element) return () => {}
+
+  const handleMouseDown = (event: MouseEvent) => {
+    if (event.button !== 0) return
+    if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return
+
+    const core = (term as Terminal & {
+      _core?: {
+        _selectionService?: { handleMouseDown: (event: MouseEvent) => void }
+        coreMouseService?: { areMouseEventsActive?: boolean }
+      }
+    })._core
+    if (!core?.coreMouseService?.areMouseEventsActive || !core._selectionService) {
+      return
+    }
+
+    // xterm only forces selection on Shift+drag while mouse reporting is active.
+    // For tmux-backed panes we deliberately coerce plain drag into that path so
+    // browser selection wins over tmux-native mouse selection.
+    event.preventDefault()
+    event.stopImmediatePropagation()
+
+    const forcedSelectionEvent = Object.create(event, {
+      shiftKey: { value: true },
+    }) as MouseEvent
+    core._selectionService.handleMouseDown(forcedSelectionEvent)
+  }
+
+  element.addEventListener('mousedown', handleMouseDown, true)
+  return () => {
+    element.removeEventListener('mousedown', handleMouseDown, true)
   }
 }
 

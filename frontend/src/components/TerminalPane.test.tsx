@@ -73,6 +73,19 @@ describe('TerminalPane drop zones', () => {
     expect(ctx.setDragSourcePaneId).toHaveBeenCalledWith('pane-1')
   })
 
+  it('passes pane type through to useTerminal', () => {
+    render(
+      <LayoutActionsContext.Provider value={makeCtx()}>
+        <TerminalPane pane={{ id: 'pane-1', type: 'ssh_tmux', title: 'Pane 1' }} />
+      </LayoutActionsContext.Provider>,
+    )
+
+    expect(mockUseTerminal).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 'pane-1',
+      sessionType: 'ssh_tmux',
+    }))
+  })
+
   it('moves a dragged pane beside the target pane on edge drop', () => {
     const ctx = makeCtx({ dragSourcePaneId: 'pane-source' })
     const { container } = render(

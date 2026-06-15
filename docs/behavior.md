@@ -406,6 +406,8 @@ recreating the session and reconnecting the pane. Deliberate remote shell termin
 - Terminal text can be selected with the mouse using xterm.js standard selection behavior.
 - If text is selected, `Cmd+C` or `Ctrl+C` copies the current selection instead of sending terminal input.
 - If no text is selected, `Cmd+C` or `Ctrl+C` is left to normal terminal behavior, so shell interrupts still work.
+- `tmux` and `ssh_tmux` panes intentionally prioritize browser/xterm text selection over tmux-native mouse selection so drag-copy works the same way as `local` and `ssh`.
+- As a result, tmux-backed panes may lose tmux-native drag selection and some mouse-driven TUI interactions.
 - This interaction is currently validated in Chrome.
 
 ### Resize and layout updates

@@ -4,8 +4,9 @@ import { __resetTerminalEntriesForTests, useTerminal } from './useTerminal'
 import { TERMINAL_FONT_FAMILY } from '../utils/fonts'
 
 // ── xterm.js mocks ───────────────────────────────────────────────────────────
-const { mockWrite, mockTerm, mockFitAddon, mockTerminalCtor } = vi.hoisted(() => {
+const { mockWrite, mockSelectionHandleMouseDown, mockTerm, mockFitAddon, mockTerminalCtor } = vi.hoisted(() => {
   const mockWrite = vi.fn()
+  const mockSelectionHandleMouseDown = vi.fn()
   const mockTerm = {
     options: { disableStdin: false },
     attachCustomKeyEventHandler: vi.fn(),
@@ -20,6 +21,14 @@ const { mockWrite, mockTerm, mockFitAddon, mockTerminalCtor } = vi.hoisted(() =>
     cols: 80,
     rows: 24,
     refresh: vi.fn(),
+    _core: {
+      _selectionService: {
+        handleMouseDown: mockSelectionHandleMouseDown,
+      },
+      coreMouseService: {
+        areMouseEventsActive: true,
+      },
+    },
     write: vi.fn((data: string | Uint8Array, callback?: () => void) => {
       mockWrite(data)
       callback?.()
@@ -27,7 +36,7 @@ const { mockWrite, mockTerm, mockFitAddon, mockTerminalCtor } = vi.hoisted(() =>
   }
   const mockFitAddon = { fit: vi.fn() }
   const mockTerminalCtor = vi.fn(function () { return mockTerm })
-  return { mockWrite, mockTerm, mockFitAddon, mockTerminalCtor }
+  return { mockWrite, mockSelectionHandleMouseDown, mockTerm, mockFitAddon, mockTerminalCtor }
 })
 
 vi.mock('@xterm/xterm', () => ({ Terminal: mockTerminalCtor }))
@@ -66,6 +75,10 @@ function makeContainer() {
   return document.createElement('div')
 }
 
+function renderUseTerminal(sessionType: 'local' | 'ssh' | 'tmux' | 'ssh_tmux', container: HTMLDivElement | null) {
+  return renderHook(() => useTerminal({ sessionId: 's1', container, sessionType }))
+}
+
 // ── tests ─────────────────────────────────────────────────────────────────────
 describe('useTerminal', () => {
   let originalWebSocket: typeof WebSocket
@@ -86,6 +99,7 @@ describe('useTerminal', () => {
     }) as typeof window.requestAnimationFrame
     mockTerm.element = undefined
     mockTerm.options.disableStdin = false
+    mockTerm._core.coreMouseService.areMouseEventsActive = true
     mockTerm.open.mockImplementation((container: HTMLElement) => {
       const el = document.createElement('div')
       mockTerm.element = el
@@ -112,13 +126,13 @@ describe('useTerminal', () => {
   })
 
   it('does not initialise terminal when container is null', () => {
-    renderHook(() => useTerminal({ sessionId: 's1', container: null }))
+    renderUseTerminal('local', null)
     expect(mockTerm.open).not.toHaveBeenCalled()
   })
 
   it('initialises terminal when container is provided', () => {
     const container = makeContainer()
-    renderHook(() => useTerminal({ sessionId: 's1', container }))
+    renderUseTerminal('local', container)
     expect(mockTerm.open).toHaveBeenCalledWith(container)
     expect(mockFitAddon.fit).toHaveBeenCalled()
   })
@@ -126,7 +140,7 @@ describe('useTerminal', () => {
   it('configures a Unicode-capable terminal font stack', () => {
     const container = makeContainer()
 
-    renderHook(() => useTerminal({ sessionId: 's1', container }))
+    renderUseTerminal('local', container)
 
     expect(mockTerminalCtor).toHaveBeenCalledWith(expect.objectContaining({
       customGlyphs: true,
@@ -141,20 +155,20 @@ describe('useTerminal', () => {
 
   it('loads all addons on init', () => {
     const container = makeContainer()
-    renderHook(() => useTerminal({ sessionId: 's1', container }))
+    renderUseTerminal('local', container)
     expect(mockTerm.loadAddon).toHaveBeenCalledTimes(2)
   })
 
   it('registers onData and onBinary handlers', () => {
     const container = makeContainer()
-    renderHook(() => useTerminal({ sessionId: 's1', container }))
+    renderUseTerminal('local', container)
     expect(mockTerm.onData).toHaveBeenCalled()
     expect(mockTerm.onBinary).toHaveBeenCalled()
   })
 
   it('registers a custom key handler for copy shortcuts', () => {
     const container = makeContainer()
-    renderHook(() => useTerminal({ sessionId: 's1', container }))
+    renderUseTerminal('local', container)
     expect(mockTerm.attachCustomKeyEventHandler).toHaveBeenCalledTimes(1)
   })
 
@@ -162,7 +176,7 @@ describe('useTerminal', () => {
     const container = makeContainer()
     mockTerm.hasSelection.mockReturnValue(true)
     mockTerm.getSelection.mockReturnValue('copied text')
-    renderHook(() => useTerminal({ sessionId: 's1', container }))
+    renderUseTerminal('local', container)
 
     const handler = mockTerm.attachCustomKeyEventHandler.mock.calls[0][0] as (event: KeyboardEvent) => boolean
     const preventDefault = vi.fn()
@@ -181,7 +195,7 @@ describe('useTerminal', () => {
   it('keeps Ctrl+C available to the terminal when nothing is selected', () => {
     const container = makeContainer()
     mockTerm.hasSelection.mockReturnValue(false)
-    renderHook(() => useTerminal({ sessionId: 's1', container }))
+    renderUseTerminal('local', container)
 
     const handler = mockTerm.attachCustomKeyEventHandler.mock.calls[0][0] as (event: KeyboardEvent) => boolean
     const allowed = handler({
@@ -197,14 +211,50 @@ describe('useTerminal', () => {
 
   it('connects a WebSocket for the given sessionId', () => {
     const container = makeContainer()
-    renderHook(() => useTerminal({ sessionId: 'mysession', container }))
+    renderHook(() => useTerminal({ sessionId: 'mysession', container, sessionType: 'local' }))
     expect(MockWebSocket.instances).toHaveLength(1)
     expect(MockWebSocket.instances[0].url).toContain('mysession')
   })
 
+  it('forces browser selection for tmux panes when mouse reporting is active', () => {
+    const container = makeContainer()
+    renderUseTerminal('tmux', container)
+
+    const event = new MouseEvent('mousedown', { button: 0, bubbles: true, cancelable: true })
+    const stopImmediatePropagation = vi.fn()
+    Object.defineProperty(event, 'stopImmediatePropagation', { value: stopImmediatePropagation })
+
+    mockTerm.element!.dispatchEvent(event)
+
+    expect(stopImmediatePropagation).toHaveBeenCalled()
+    expect(mockSelectionHandleMouseDown).toHaveBeenCalledTimes(1)
+    expect(mockSelectionHandleMouseDown.mock.calls[0][0].shiftKey).toBe(true)
+  })
+
+  it('does not force browser selection for local panes', () => {
+    const container = makeContainer()
+    renderUseTerminal('local', container)
+
+    const event = new MouseEvent('mousedown', { button: 0, bubbles: true, cancelable: true })
+    mockTerm.element!.dispatchEvent(event)
+
+    expect(mockSelectionHandleMouseDown).not.toHaveBeenCalled()
+  })
+
+  it('does not force browser selection when tmux mouse reporting is inactive', () => {
+    mockTerm._core.coreMouseService.areMouseEventsActive = false
+    const container = makeContainer()
+    renderUseTerminal('tmux', container)
+
+    const event = new MouseEvent('mousedown', { button: 0, bubbles: true, cancelable: true })
+    mockTerm.element!.dispatchEvent(event)
+
+    expect(mockSelectionHandleMouseDown).not.toHaveBeenCalled()
+  })
+
   it('sends resize on WebSocket open when terminal is ready', () => {
     const container = makeContainer()
-    renderHook(() => useTerminal({ sessionId: 's1', container }))
+    renderUseTerminal('local', container)
     act(() => MockWebSocket.instances[0].simulateOpen())
     const sentResizes = MockWebSocket.instances[0].sent.filter(
       (d) => typeof d === 'string' && (d as string).includes('resize')
@@ -230,7 +280,7 @@ describe('useTerminal', () => {
       }
     })
 
-    renderHook(() => useTerminal({ sessionId: 's1', container }))
+    renderUseTerminal('local', container)
 
     act(() => MockWebSocket.instances[0].simulateOpen())
 
@@ -252,7 +302,7 @@ describe('useTerminal', () => {
 
   it('writes binary data directly to terminal', () => {
     const container = makeContainer()
-    renderHook(() => useTerminal({ sessionId: 's1', container }))
+    renderUseTerminal('local', container)
     act(() => MockWebSocket.instances[0].simulateOpen())
 
     const buf = new ArrayBuffer(4)
@@ -269,7 +319,7 @@ describe('useTerminal', () => {
       callback?.()
     })
 
-    renderHook(() => useTerminal({ sessionId: 's1', container }))
+    renderUseTerminal('local', container)
     act(() => MockWebSocket.instances[0].simulateOpen())
 
     const replayBuf = new TextEncoder().encode('\u001b[>0;276;0c').buffer
@@ -302,7 +352,7 @@ describe('useTerminal', () => {
     })
     const { rerender } = renderHook(
       ({ currentContainer }: { currentContainer: HTMLDivElement | null }) =>
-        useTerminal({ sessionId: 's1', container: currentContainer }),
+        useTerminal({ sessionId: 's1', container: currentContainer, sessionType: 'local' }),
       { initialProps: { currentContainer: null as HTMLDivElement | null } },
     )
 
@@ -334,7 +384,7 @@ describe('useTerminal', () => {
       callback?.()
     })
 
-    renderHook(() => useTerminal({ sessionId: 's1', container }))
+    renderUseTerminal('local', container)
     act(() => MockWebSocket.instances[0].simulateOpen())
 
     const replayBuf = new TextEncoder().encode('replayed prompt').buffer
@@ -358,7 +408,7 @@ describe('useTerminal', () => {
 
   it('resets stale replay suppression when the socket reconnects', () => {
     const container = makeContainer()
-    renderHook(() => useTerminal({ sessionId: 's1', container }))
+    renderUseTerminal('local', container)
     act(() => MockWebSocket.instances[0].simulateOpen())
 
     const replayBuf = new TextEncoder().encode('replayed prompt').buffer
@@ -386,7 +436,7 @@ describe('useTerminal', () => {
     const container = makeContainer()
     const { rerender } = renderHook(
       ({ currentContainer }: { currentContainer: HTMLDivElement | null }) =>
-        useTerminal({ sessionId: 's1', container: currentContainer }),
+        useTerminal({ sessionId: 's1', container: currentContainer, sessionType: 'local' }),
       { initialProps: { currentContainer: null as HTMLDivElement | null } },
     )
 
@@ -402,7 +452,7 @@ describe('useTerminal', () => {
 
   it('writes error message to terminal on error control frame', () => {
     const container = makeContainer()
-    renderHook(() => useTerminal({ sessionId: 's1', container }))
+    renderUseTerminal('local', container)
     act(() => MockWebSocket.instances[0].simulateOpen())
 
     act(() =>
@@ -417,7 +467,7 @@ describe('useTerminal', () => {
 
   it('writes session ended message to terminal on exited status', () => {
     const container = makeContainer()
-    renderHook(() => useTerminal({ sessionId: 's1', container }))
+    renderUseTerminal('local', container)
     act(() => MockWebSocket.instances[0].simulateOpen())
 
     mockWrite.mockClear()
@@ -433,7 +483,7 @@ describe('useTerminal', () => {
 
   it('does not write to terminal on status control frame', () => {
     const container = makeContainer()
-    renderHook(() => useTerminal({ sessionId: 's1', container }))
+    renderUseTerminal('local', container)
     act(() => MockWebSocket.instances[0].simulateOpen())
 
     act(() =>
@@ -451,7 +501,7 @@ describe('useTerminal', () => {
 
   it('handleResize fits and sends resize when connected', () => {
     const container = makeContainer()
-    const { result } = renderHook(() => useTerminal({ sessionId: 's1', container }))
+    const { result } = renderHook(() => useTerminal({ sessionId: 's1', container, sessionType: 'local' }))
     act(() => MockWebSocket.instances[0].simulateOpen())
 
     const sentBefore = MockWebSocket.instances[0].sent.length
@@ -467,7 +517,7 @@ describe('useTerminal', () => {
 
   it('handleResize does not send when not connected', () => {
     const container = makeContainer()
-    const { result } = renderHook(() => useTerminal({ sessionId: 's1', container }))
+    const { result } = renderHook(() => useTerminal({ sessionId: 's1', container, sessionType: 'local' }))
     // Do NOT simulate open — connected stays false
 
     const sentBefore = MockWebSocket.instances[0].sent.length
@@ -479,7 +529,7 @@ describe('useTerminal', () => {
   it('disposes terminal on unmount', () => {
     vi.useFakeTimers()
     const container = makeContainer()
-    const { unmount } = renderHook(() => useTerminal({ sessionId: 's1', container }))
+    const { unmount } = renderHook(() => useTerminal({ sessionId: 's1', container, sessionType: 'local' }))
     unmount()
     vi.runAllTimers()
     expect(mockTerm.dispose).toHaveBeenCalled()
@@ -488,7 +538,7 @@ describe('useTerminal', () => {
 
   it('returns connected state', () => {
     const container = makeContainer()
-    const { result } = renderHook(() => useTerminal({ sessionId: 's1', container }))
+    const { result } = renderHook(() => useTerminal({ sessionId: 's1', container, sessionType: 'local' }))
     // Before open, connected should be false initially
     act(() => MockWebSocket.instances[0].simulateOpen())
     expect(result.current.connected).toBe(true)
@@ -496,7 +546,7 @@ describe('useTerminal', () => {
 
   it('onData callback encodes user input and sends via WebSocket', () => {
     const container = makeContainer()
-    renderHook(() => useTerminal({ sessionId: 's1', container }))
+    renderUseTerminal('local', container)
     act(() => MockWebSocket.instances[0].simulateOpen())
 
     const ws = MockWebSocket.instances[0]
@@ -508,7 +558,7 @@ describe('useTerminal', () => {
 
   it('onBinary callback encodes binary string and sends via WebSocket', () => {
     const container = makeContainer()
-    renderHook(() => useTerminal({ sessionId: 's1', container }))
+    renderUseTerminal('local', container)
     act(() => MockWebSocket.instances[0].simulateOpen())
 
     const onBinaryCallback = mockTerm.onBinary.mock.calls[0][0] as (data: string) => void
@@ -528,7 +578,7 @@ describe('useTerminal', () => {
     const container = makeContainer()
     mockTerm.hasSelection.mockReturnValue(true)
     mockTerm.getSelection.mockReturnValue('fallback text')
-    renderHook(() => useTerminal({ sessionId: 's1', container }))
+    renderUseTerminal('local', container)
 
     const handler = mockTerm.attachCustomKeyEventHandler.mock.calls[0][0] as (event: KeyboardEvent) => boolean
     handler({ key: 'c', ctrlKey: true, metaKey: false, preventDefault: vi.fn() } as unknown as KeyboardEvent)
@@ -538,13 +588,13 @@ describe('useTerminal', () => {
 
   it('sessionExited is false initially', () => {
     const container = makeContainer()
-    const { result } = renderHook(() => useTerminal({ sessionId: 's1', container }))
+    const { result } = renderHook(() => useTerminal({ sessionId: 's1', container, sessionType: 'local' }))
     expect(result.current.sessionState).toBe('running')
   })
 
   it('sessionState is exited after exited status frame', () => {
     const container = makeContainer()
-    const { result } = renderHook(() => useTerminal({ sessionId: 's1', container }))
+    const { result } = renderHook(() => useTerminal({ sessionId: 's1', container, sessionType: 'local' }))
     act(() => MockWebSocket.instances[0].simulateOpen())
 
     act(() =>
@@ -557,7 +607,7 @@ describe('useTerminal', () => {
 
   it('sessionState resets to running when WebSocket reconnects', () => {
     const container = makeContainer()
-    const { result } = renderHook(() => useTerminal({ sessionId: 's1', container }))
+    const { result } = renderHook(() => useTerminal({ sessionId: 's1', container, sessionType: 'local' }))
     act(() => MockWebSocket.instances[0].simulateOpen())
 
     act(() =>
@@ -577,7 +627,7 @@ describe('useTerminal', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     const container = makeContainer()
-    const { result } = renderHook(() => useTerminal({ sessionId: 'pane1', container }))
+    const { result } = renderHook(() => useTerminal({ sessionId: 'pane1', container, sessionType: 'local' }))
     act(() => MockWebSocket.instances[0].simulateOpen())
 
     const countBefore = MockWebSocket.instances.length
@@ -592,7 +642,7 @@ describe('useTerminal', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     const container = makeContainer()
-    const { result } = renderHook(() => useTerminal({ sessionId: 'pane1', container }))
+    const { result } = renderHook(() => useTerminal({ sessionId: 'pane1', container, sessionType: 'local' }))
     act(() => MockWebSocket.instances[0].simulateOpen())
 
     const countBefore = MockWebSocket.instances.length
@@ -618,7 +668,7 @@ describe('useTerminal', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     const container = makeContainer()
-    renderHook(() => useTerminal({ sessionId: 'pane1', container }))
+    renderHook(() => useTerminal({ sessionId: 'pane1', container, sessionType: 'local' }))
     act(() => MockWebSocket.instances[0].simulateOpen())
 
     act(() => {
@@ -643,7 +693,7 @@ describe('useTerminal', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     const container = makeContainer()
-    const { result } = renderHook(() => useTerminal({ sessionId: 'pane1', container }))
+    const { result } = renderHook(() => useTerminal({ sessionId: 'pane1', container, sessionType: 'local' }))
     act(() => MockWebSocket.instances[0].simulateOpen())
 
     await act(async () => {
@@ -661,10 +711,10 @@ describe('useTerminal', () => {
     const firstContainer = makeContainer()
     const secondContainer = makeContainer()
 
-    const first = renderHook(() => useTerminal({ sessionId: 's1', container: firstContainer }))
+    const first = renderHook(() => useTerminal({ sessionId: 's1', container: firstContainer, sessionType: 'local' }))
     first.unmount()
 
-    renderHook(() => useTerminal({ sessionId: 's1', container: secondContainer }))
+    renderHook(() => useTerminal({ sessionId: 's1', container: secondContainer, sessionType: 'local' }))
 
     expect(mockTerminalCtor).toHaveBeenCalledTimes(1)
     expect(mockTerm.dispose).not.toHaveBeenCalled()
@@ -680,12 +730,12 @@ describe('useTerminal', () => {
     const firstContainer = makeContainer()
     const secondContainer = makeContainer()
 
-    const first = renderHook(() => useTerminal({ sessionId: 's1', container: firstContainer }))
+    const first = renderHook(() => useTerminal({ sessionId: 's1', container: firstContainer, sessionType: 'local' }))
     first.unmount()
     mockFitAddon.fit.mockClear()
     mockTerm.refresh.mockClear()
 
-    renderHook(() => useTerminal({ sessionId: 's1', container: secondContainer }))
+    renderHook(() => useTerminal({ sessionId: 's1', container: secondContainer, sessionType: 'local' }))
 
     expect(mockFitAddon.fit).toHaveBeenCalledTimes(1)
     expect(mockTerm.refresh).toHaveBeenCalledTimes(1)
@@ -710,7 +760,7 @@ describe('useTerminal', () => {
     }) as typeof window.requestAnimationFrame
     const container = makeContainer()
 
-    renderHook(() => useTerminal({ sessionId: 's1', container }))
+    renderUseTerminal('local', container)
     mockFitAddon.fit.mockClear()
     mockTerm.refresh.mockClear()
 
@@ -740,7 +790,7 @@ describe('useTerminal', () => {
     vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
     const container = makeContainer()
 
-    renderHook(() => useTerminal({ sessionId: 's1', container }))
+    renderUseTerminal('local', container)
     mockFitAddon.fit.mockClear()
     mockTerm.refresh.mockClear()
 
@@ -765,7 +815,7 @@ describe('useTerminal', () => {
     vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
     const container = makeContainer()
 
-    renderHook(() => useTerminal({ sessionId: 's1', container }))
+    renderUseTerminal('local', container)
     mockFitAddon.fit.mockClear()
     mockTerm.refresh.mockClear()
 
@@ -777,7 +827,7 @@ describe('useTerminal', () => {
 
   it('passes terminal input to the websocket', () => {
     const container = makeContainer()
-    renderHook(() => useTerminal({ sessionId: 's1', container }))
+    renderUseTerminal('local', container)
     act(() => MockWebSocket.instances[0].simulateOpen())
 
     const ws = MockWebSocket.instances[0]
@@ -789,7 +839,7 @@ describe('useTerminal', () => {
 
   it('passes binary input to the websocket', () => {
     const container = makeContainer()
-    renderHook(() => useTerminal({ sessionId: 's1', container }))
+    renderUseTerminal('local', container)
     act(() => MockWebSocket.instances[0].simulateOpen())
 
     const ws = MockWebSocket.instances[0]
@@ -801,7 +851,7 @@ describe('useTerminal', () => {
 
   it('strips complete ANSI sequences from error messages before writing to terminal', () => {
     const container = makeContainer()
-    renderHook(() => useTerminal({ sessionId: 's1', container }))
+    renderUseTerminal('local', container)
     act(() => MockWebSocket.instances[0].simulateOpen())
 
     mockWrite.mockClear()
@@ -826,7 +876,7 @@ describe('useTerminal', () => {
 
   it('strips private-use CSI sequences (DEC private markers) from error messages', () => {
     const container = makeContainer()
-    renderHook(() => useTerminal({ sessionId: 's1', container }))
+    renderUseTerminal('local', container)
     act(() => MockWebSocket.instances[0].simulateOpen())
 
     mockWrite.mockClear()
