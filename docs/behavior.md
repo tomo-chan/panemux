@@ -155,6 +155,11 @@ Remote Git inspection currently depends on `git rev-parse --path-format=absolute
 on the SSH target, which requires Git 2.31 or newer. Older remote Git versions degrade to "no git
 info" in the pane header for SSH-backed panes.
 
+For terminal text selection, panemux keeps tmux mouse mode unchanged for `tmux` and `ssh_tmux`
+panes. Plain drag therefore continues to follow tmux mouse behavior. To force browser-side xterm
+selection while tmux mouse mode is active, hold `Option` during drag on macOS or `Shift` during
+drag on Linux and Windows.
+
 ## REST API
 
 ### `GET /api/layout`

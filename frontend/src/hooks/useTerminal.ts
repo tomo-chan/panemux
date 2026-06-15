@@ -279,6 +279,9 @@ function getOrCreateTerminalEntry(sessionId: string): TerminalEntry {
     customGlyphs: true,
     fontSize: 14,
     fontFamily: TERMINAL_FONT_FAMILY,
+    // xterm supports Shift-drag for forced selection by default; this option
+    // additionally enables Option-drag on macOS while terminal mouse mode is active.
+    macOptionClickForcesSelection: true,
     // Hide xterm.js accessibility textarea (still exists for IME/a11y but invisible)
     screenReaderMode: false,
     theme: {
