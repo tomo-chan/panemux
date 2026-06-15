@@ -279,6 +279,7 @@ function getOrCreateTerminalEntry(sessionId: string): TerminalEntry {
     customGlyphs: true,
     fontSize: 14,
     fontFamily: TERMINAL_FONT_FAMILY,
+    macOptionClickForcesSelection: true,
     // Hide xterm.js accessibility textarea (still exists for IME/a11y but invisible)
     screenReaderMode: false,
     theme: {
