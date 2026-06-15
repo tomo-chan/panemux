@@ -121,8 +121,25 @@ interface InlineHeaderLinkProps {
   label: string
 }
 
+function openExternalHeaderLink(href: string) {
+  if (!/^https?:\/\//.test(href)) return
+
+  const runtime = (window as Window & {
+    runtime?: {
+      BrowserOpenURL?: (url: string) => void
+    }
+  }).runtime
+
+  runtime?.BrowserOpenURL?.(href)
+}
+
 const InlineHeaderLink: React.FC<InlineHeaderLinkProps> = ({ href, title, label }) => {
   const [hovered, setHovered] = React.useState(false)
+  const hasWailsBrowserOpen = typeof (window as Window & {
+    runtime?: {
+      BrowserOpenURL?: unknown
+    }
+  }).runtime?.BrowserOpenURL === 'function'
 
   return (
     <a
@@ -131,6 +148,11 @@ const InlineHeaderLink: React.FC<InlineHeaderLinkProps> = ({ href, title, label 
       rel="noopener noreferrer"
       aria-label={label}
       title={title}
+      onClick={(event) => {
+        if (!hasWailsBrowserOpen) return
+        event.preventDefault()
+        openExternalHeaderLink(href)
+      }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{

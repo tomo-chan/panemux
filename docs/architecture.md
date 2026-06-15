@@ -2,7 +2,7 @@
 
 ## System Structure
 
-The system is split into a Go backend and a React frontend, bundled together at build time. The Go server owns process/session management and serves the built SPA. The frontend owns layout rendering, browser terminal integration, and user interactions.
+The system is split into a Go backend and a React frontend, bundled together at build time. The Go server owns process/session management and serves the built SPA. The frontend owns layout rendering, browser terminal integration, and user interactions. Browser mode opens that SPA in an external browser. Desktop mode opens it inside a Wails-managed WebView after the backend binds to loopback on an ephemeral port.
 
 ## Backend
 
@@ -11,13 +11,23 @@ The system is split into a Go backend and a React frontend, bundled together at 
 Entrypoint responsibilities:
 
 - parse CLI flags
+- choose browser mode or desktop mode
+- delegate backend startup to the shared bootstrap path
+- shut down gracefully on signal in browser mode
+
+Why this design: CLI parsing stays shallow while shared backend bootstrap remains reusable by both the standard server process and the embedded desktop window launcher.
+
+### `internal/app`
+
+This package owns shared backend bootstrap for both runtime modes:
+
 - load YAML config or default config
 - create the session manager
 - start all configured sessions
-- start the HTTP server
-- shut down gracefully on signal
+- create the HTTP server
+- choose the bind strategy for browser mode vs desktop mode
 
-Why this design: startup orchestration is centralized, so session boot, config loading, and HTTP serving have one clear lifecycle.
+Desktop mode creates a dedicated loopback listener on `127.0.0.1:0` before the window opens, so the app can know the exact base URL and keep the backend unreachable from non-local interfaces.
 
 ### `internal/config`
 
@@ -145,6 +155,20 @@ Why Vite:
 - low-config setup
 - fast local dev loop
 - build output is easy to embed into the Go binary
+
+### Desktop shell
+
+Desktop mode uses Wails as a thin shell around the existing app:
+
+- the Go backend still serves the SPA and WebSocket endpoints
+- Wails shows a temporary loading page
+- once the WebView is ready, Wails redirects the window to the loopback backend URL
+
+Why this shape:
+
+- preserves the existing frontend fetch and WebSocket behavior
+- keeps browser mode and desktop mode on the same application contracts
+- avoids rewriting terminal streaming around a custom desktop bridge
 
 ### `useLayout`
 

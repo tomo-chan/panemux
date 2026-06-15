@@ -3,9 +3,25 @@
         fmt fmt-go fmt-check-go \
         lint lint-go lint-go-deps lint-frontend \
         coverage coverage-go coverage-frontend \
-        check release-snapshot package
+        check release-snapshot package dev-desktop run-desktop
 
 GOLANGCI_LINT_VERSION := v2.11.4
+UNAME_S := $(shell uname -s)
+DESKTOP_ENV :=
+GOLANGCI_LINT_RUN := golangci-lint run ./...
+BUILD_TAGS :=
+BUILD_ENV :=
+
+ifeq ($(UNAME_S),Darwin)
+DESKTOP_ENV := CGO_LDFLAGS="-framework UniformTypeIdentifiers"
+GOLANGCI_LINT_RUN := /bin/zsh -lc 'cd "$(CURDIR)" && golangci-lint run ./...'
+BUILD_TAGS := -tags production
+BUILD_ENV := $(DESKTOP_ENV)
+endif
+
+ifeq ($(UNAME_S),Linux)
+BUILD_TAGS := -tags production
+endif
 
 # ── Dependencies ──────────────────────────────────────────────────────────────
 
@@ -86,7 +102,7 @@ lint-go-deps:
 
 lint-go: fmt-check-go lint-go-deps
 	go vet ./...
-	golangci-lint run ./...
+	$(GOLANGCI_LINT_RUN)
 
 lint-frontend:
 	cd frontend && npx tsc --noEmit
@@ -106,7 +122,7 @@ build-frontend:
 LDFLAGS := -X main.version=$(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
 build-backend:
-	go build -ldflags "$(LDFLAGS)" -o bin/panemux .
+	$(BUILD_ENV) go build $(BUILD_TAGS) -ldflags "$(LDFLAGS)" -o bin/panemux .
 
 # ── Release packaging ─────────────────────────────────────────────────────────
 
@@ -130,6 +146,9 @@ dev-backend:
 dev-frontend:
 	cd frontend && npm run dev
 
+dev-desktop:
+	$(DESKTOP_ENV) go run -tags dev . --mode=desktop
+
 # ── Run ───────────────────────────────────────────────────────────────────────
 
 run: build
@@ -137,6 +156,9 @@ run: build
 
 run-config: build
 	./bin/panemux --config config.example.yaml --open
+
+run-desktop: build
+	./bin/panemux --mode=desktop
 
 # ── Clean ─────────────────────────────────────────────────────────────────────
 

@@ -3,7 +3,6 @@ package server
 
 import (
 	"context"
-	"embed"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -29,7 +28,7 @@ type Server struct {
 }
 
 // New creates a new server instance.
-func New(cfg *config.Config, manager *session.Manager, frontendFS embed.FS) *Server {
+func New(cfg *config.Config, manager *session.Manager, frontendFS fs.FS) *Server {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
@@ -55,7 +54,7 @@ func New(cfg *config.Config, manager *session.Manager, frontendFS embed.FS) *Ser
 	}
 }
 
-func registerRoutes(r chi.Router, apiHandler *api.Handler, wsHandler *ws.Handler, frontendFS embed.FS) {
+func registerRoutes(r chi.Router, apiHandler *api.Handler, wsHandler *ws.Handler, frontendFS fs.FS) {
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/layout", apiHandler.GetLayout)
 		r.Put("/layout", apiHandler.PutLayout)
@@ -83,7 +82,7 @@ func registerRoutes(r chi.Router, apiHandler *api.Handler, wsHandler *ws.Handler
 	registerFrontend(r, frontendFS)
 }
 
-func registerFrontend(r chi.Router, frontendFS embed.FS) {
+func registerFrontend(r chi.Router, frontendFS fs.FS) {
 	distFS, err := fs.Sub(frontendFS, "frontend/dist")
 	if err != nil {
 		r.Get("/*", http.FileServer(http.Dir("frontend/dist")).ServeHTTP)
@@ -108,9 +107,20 @@ func (s *Server) Addr() string {
 func (s *Server) Start() error {
 	if err := s.httpSrv.ListenAndServe(); err != nil {
 		if errors.Is(err, http.ErrServerClosed) {
-			return http.ErrServerClosed
+			return nil
 		}
 		return fmt.Errorf("starting HTTP server: %w", err)
+	}
+	return nil
+}
+
+// Serve begins serving with the provided listener.
+func (s *Server) Serve(listener net.Listener) error {
+	if err := s.httpSrv.Serve(listener); err != nil {
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		return fmt.Errorf("serving HTTP server: %w", err)
 	}
 	return nil
 }
