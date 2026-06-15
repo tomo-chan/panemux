@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.6](https://github.com/tomo-chan/panemux/compare/v0.18.5...v0.18.6) (2026-06-15)
+
+
+### Bug Fixes
+
+* add cross-platform tmux selection modifier ([#126](https://github.com/tomo-chan/panemux/issues/126)) ([a3a5858](https://github.com/tomo-chan/panemux/commit/a3a5858938f33df309b8459e51476333cb6fb400))
+
 ## [0.18.5](https://github.com/tomo-chan/panemux/compare/v0.18.4...v0.18.5) (2026-06-14)
 
 
