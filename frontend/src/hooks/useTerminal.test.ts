@@ -139,6 +139,16 @@ describe('useTerminal', () => {
     expect(TERMINAL_FONT_FAMILY).toContain('Hiragino Sans')
   })
 
+  it('enables forced selection for tmux mouse mode across platforms', () => {
+    const container = makeContainer()
+
+    renderHook(() => useTerminal({ sessionId: 's1', container }))
+
+    expect(mockTerminalCtor).toHaveBeenCalledWith(expect.objectContaining({
+      macOptionClickForcesSelection: true,
+    }))
+  })
+
   it('loads all addons on init', () => {
     const container = makeContainer()
     renderHook(() => useTerminal({ sessionId: 's1', container }))
