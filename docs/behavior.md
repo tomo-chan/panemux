@@ -156,9 +156,9 @@ on the SSH target, which requires Git 2.31 or newer. Older remote Git versions d
 info" in the pane header for SSH-backed panes.
 
 For terminal text selection, panemux keeps tmux mouse mode unchanged for `tmux` and `ssh_tmux`
-panes. Plain drag therefore continues to follow tmux mouse behavior, while macOS users can hold
-`Option` during drag to force browser-side xterm selection and copy text without changing tmux
-session settings.
+panes. Plain drag therefore continues to follow tmux mouse behavior. To force browser-side xterm
+selection while tmux mouse mode is active, hold `Option` during drag on macOS or `Shift` during
+drag on Linux and Windows.
 
 ## REST API
 

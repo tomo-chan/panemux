@@ -139,7 +139,7 @@ describe('useTerminal', () => {
     expect(TERMINAL_FONT_FAMILY).toContain('Hiragino Sans')
   })
 
-  it('enables Option-drag selection when terminal apps turn on mouse mode', () => {
+  it('enables forced selection for tmux mouse mode across platforms', () => {
     const container = makeContainer()
 
     renderHook(() => useTerminal({ sessionId: 's1', container }))
