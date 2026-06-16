@@ -1,7 +1,6 @@
 package session
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -566,15 +565,13 @@ type codexSessionRecord struct {
 }
 
 func parseCodexSessionCWD(data []byte) (string, error) {
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-
 	var latestTurnCWD string
 	var sessionMetaCWD string
 	var latestExecWorkdir string
-	for scanner.Scan() {
+	forEachJSONLRecord(data, func(line []byte) {
 		var rec codexSessionRecord
-		if err := json.Unmarshal(scanner.Bytes(), &rec); err != nil {
-			continue
+		if err := json.Unmarshal(line, &rec); err != nil {
+			return
 		}
 		execWorkdir, turnCWD, metaCWD := codexSessionRecordCWD(rec)
 		if execWorkdir != "" {
@@ -586,10 +583,7 @@ func parseCodexSessionCWD(data []byte) (string, error) {
 		if metaCWD != "" && sessionMetaCWD == "" {
 			sessionMetaCWD = metaCWD
 		}
-	}
-	if err := scanner.Err(); err != nil {
-		return "", fmt.Errorf("scan codex session log: %w", err)
-	}
+	})
 	// Codex may keep both process cwd and turn/session metadata pinned to the
 	// original pane directory while tool calls run inside a sibling worktree.
 	// The latest exec_command workdir is therefore the strongest signal.
@@ -669,21 +663,17 @@ func readClaudeProjectCWD(path string) (string, error) {
 }
 
 func parseClaudeProjectCWD(data []byte) (string, error) {
-	scanner := bufio.NewScanner(bytes.NewReader(data))
 	var latestCWD string
 	var latestPath claudePathCandidate
-	for scanner.Scan() {
-		cwd, candidate := claudeRecordPath(scanner.Bytes())
+	forEachJSONLRecord(data, func(line []byte) {
+		cwd, candidate := claudeRecordPath(line)
 		if cwd != "" {
 			latestCWD = cwd
 		}
 		if candidate.Path != "" {
 			latestPath = candidate
 		}
-	}
-	if err := scanner.Err(); err != nil {
-		return "", fmt.Errorf("scan claude transcript: %w", err)
-	}
+	})
 	if latestCWD != "" {
 		return latestCWD, nil
 	}
@@ -694,6 +684,24 @@ func parseClaudeProjectCWD(data []byte) (string, error) {
 		return latestPath.Path, nil
 	}
 	return filepath.Dir(latestPath.Path), nil
+}
+
+func forEachJSONLRecord(data []byte, fn func([]byte)) {
+	for len(data) > 0 {
+		line := data
+		if idx := bytes.IndexByte(data, '\n'); idx >= 0 {
+			line = data[:idx]
+			data = data[idx+1:]
+		} else {
+			data = nil
+		}
+
+		line = bytes.TrimSuffix(line, []byte{'\r'})
+		if len(line) == 0 {
+			continue
+		}
+		fn(line)
+	}
 }
 
 type claudeProjectRecord struct {

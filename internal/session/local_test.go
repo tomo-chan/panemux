@@ -7,6 +7,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -328,6 +329,20 @@ func TestReadCodexSessionCWD_PrefersExecCommandWorkdirEvenWhenTurnContextAppears
 	assert.Equal(t, "/tmp/worktree-from-command", cwd)
 }
 
+func TestParseCodexSessionCWD_LargeExecCommandRecord(t *testing.T) {
+	data := []byte(
+		codexExecCommandRecord(
+			t,
+			"printf '%s' '"+strings.Repeat("x", 70_000)+"'",
+			"/tmp/worktree-from-large-command",
+		),
+	)
+
+	cwd, err := parseCodexSessionCWD(data)
+	require.NoError(t, err)
+	assert.Equal(t, "/tmp/worktree-from-large-command", cwd)
+}
+
 func TestParseClaudeProjectCWD_PrefersLatestTrackedFileBackup(t *testing.T) {
 	worktreeDir := filepath.Join(t.TempDir(), "panemux-worktree")
 	require.NoError(t, os.MkdirAll(worktreeDir, 0755))
@@ -407,6 +422,18 @@ func TestParseClaudeProjectCWD_PrefersBashCDWorktree(t *testing.T) {
 	cwd, err := parseClaudeProjectCWD(data)
 	require.NoError(t, err)
 	assert.Equal(t, worktreeDir, cwd)
+}
+
+func TestParseClaudeProjectCWD_LargeTopLevelCWDRecord(t *testing.T) {
+	data := []byte(
+		"{\"type\":\"assistant\",\"cwd\":\"/tmp/worktree-from-large-record\",\"message\":{\"content\":[" +
+			"{\"type\":\"text\",\"text\":\"" + strings.Repeat("x", 70_000) + "\"}" +
+			"]}}\n",
+	)
+
+	cwd, err := parseClaudeProjectCWD(data)
+	require.NoError(t, err)
+	assert.Equal(t, "/tmp/worktree-from-large-record", cwd)
 }
 
 func TestLatestClaudeTrackedPath_IsDeterministic(t *testing.T) {
