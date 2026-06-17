@@ -25,10 +25,7 @@ var agentLogCache = agentLogCacheStore{
 var statFileFn = os.Stat
 
 func resetAgentLogCache() {
-	agentLogCache.mu.Lock()
-	defer agentLogCache.mu.Unlock()
-
-	agentLogCache.entries = make(map[string]agentLogCacheEntry)
+	agentLogCache.reset()
 }
 
 func cachedAgentLogCWD(
@@ -36,10 +33,7 @@ func cachedAgentLogCWD(
 	fingerprint agentLogFingerprint,
 	load func() (string, error),
 ) (string, error) {
-	agentLogCache.mu.Lock()
-	entry, ok := agentLogCache.entries[cacheKey]
-	agentLogCache.mu.Unlock()
-
+	entry, ok := agentLogCache.load(cacheKey)
 	if ok && entry.fingerprint == fingerprint {
 		return entry.cwd, nil
 	}
@@ -49,12 +43,10 @@ func cachedAgentLogCWD(
 		return "", err
 	}
 
-	agentLogCache.mu.Lock()
-	agentLogCache.entries[cacheKey] = agentLogCacheEntry{
+	agentLogCache.store(cacheKey, agentLogCacheEntry{
 		cwd:         cwd,
 		fingerprint: fingerprint,
-	}
-	agentLogCache.mu.Unlock()
+	})
 
 	return cwd, nil
 }
@@ -65,4 +57,26 @@ func localFileFingerprint(path string) (agentLogFingerprint, error) {
 		return "", err
 	}
 	return agentLogFingerprint(fmt.Sprintf("%d:%d", info.Size(), info.ModTime().UnixNano())), nil
+}
+
+func (c *agentLogCacheStore) reset() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.entries = make(map[string]agentLogCacheEntry)
+}
+
+func (c *agentLogCacheStore) load(cacheKey string) (agentLogCacheEntry, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	entry, ok := c.entries[cacheKey]
+	return entry, ok
+}
+
+func (c *agentLogCacheStore) store(cacheKey string, entry agentLogCacheEntry) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.entries[cacheKey] = entry
 }

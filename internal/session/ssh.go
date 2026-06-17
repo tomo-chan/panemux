@@ -1064,24 +1064,34 @@ func remoteCachedAgentLogCWD(
 	fingerprint, err := remoteFileFingerprint(run, shellPath)
 	if err == nil {
 		return cachedAgentLogCWD(cacheKey, fingerprint, func() (string, error) {
-			out, readErr := run("cat " + shellPath)
-			if readErr != nil {
-				log.Printf("%s reading %s failed path=%q: %v", logScope, label, displayPath, readErr)
-				return "", readErr
-			}
-
-			cwd, parseErr := parse(out)
-			if parseErr != nil {
-				log.Printf("%s parsing %s failed path=%q: %v", logScope, label, displayPath, parseErr)
-				return "", parseErr
-			}
-			log.Printf("%s parsed %s path=%q cwd=%q", logScope, label, displayPath, cwd)
-			return cwd, nil
+			return readAndParseRemoteAgentLog(
+				run,
+				logScope,
+				displayPath,
+				shellPath,
+				label,
+				parse,
+			)
 		})
 	}
 
 	log.Printf("%s fingerprint lookup failed for %s path=%q: %v", logScope, label, displayPath, err)
 
+	return readAndParseRemoteAgentLog(
+		run,
+		logScope,
+		displayPath,
+		shellPath,
+		label,
+		parse,
+	)
+}
+
+func readAndParseRemoteAgentLog(
+	run remoteOutputFunc,
+	logScope, displayPath, shellPath, label string,
+	parse func([]byte) (string, error),
+) (string, error) {
 	out, readErr := run("cat " + shellPath)
 	if readErr != nil {
 		log.Printf("%s reading %s failed path=%q: %v", logScope, label, displayPath, readErr)
