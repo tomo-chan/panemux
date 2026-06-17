@@ -12,12 +12,15 @@ vi.stubGlobal('ResizeObserver', ResizeObserverMock)
 const { mockUseTerminal } = vi.hoisted(() => ({
   mockUseTerminal: vi.fn(),
 }))
+const { mockUseGitInfo } = vi.hoisted(() => ({
+  mockUseGitInfo: vi.fn(),
+}))
 
 vi.mock('../hooks/useTerminal', () => ({
   useTerminal: mockUseTerminal,
 }))
 vi.mock('../hooks/useGitInfo', () => ({
-  useGitInfo: () => ({ is_git: false }),
+  useGitInfo: mockUseGitInfo,
 }))
 import { dropZoneStyle, PANE_DROP_ZONE_RATIO, resolvePaneDropEdge, TerminalPane } from './TerminalPane'
 import { LayoutActionsContext, type LayoutActionsContextValue } from './SplitContainer'
@@ -32,6 +35,7 @@ describe('TerminalPane drop zones', () => {
       reconnectFailed: false,
       restartSession: vi.fn(),
     })
+    mockUseGitInfo.mockReturnValue({ is_git: false })
   })
 
   it('uses a top or bottom half-pane preview for horizontal edge drop zones', () => {
@@ -139,6 +143,26 @@ describe('TerminalPane drop zones', () => {
 
     expect(getByRole('button', { name: 'Reconnect Session' })).toBeInTheDocument()
     expect(queryByRole('button', { name: 'Restart Session' })).toBeNull()
+  })
+
+  it('disables git polling for panes hidden behind maximize', () => {
+    render(
+      <LayoutActionsContext.Provider value={makeCtx({ maximizedPaneId: 'other-pane' })}>
+        <TerminalPane pane={{ id: 'pane-1', type: 'local', title: 'Pane 1' }} />
+      </LayoutActionsContext.Provider>,
+    )
+
+    expect(mockUseGitInfo).toHaveBeenCalledWith('pane-1', false)
+  })
+
+  it('keeps git polling enabled for the maximized pane', () => {
+    render(
+      <LayoutActionsContext.Provider value={makeCtx({ maximizedPaneId: 'pane-1' })}>
+        <TerminalPane pane={{ id: 'pane-1', type: 'local', title: 'Pane 1' }} />
+      </LayoutActionsContext.Provider>,
+    )
+
+    expect(mockUseGitInfo).toHaveBeenCalledWith('pane-1', true)
   })
 })
 

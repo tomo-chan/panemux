@@ -941,19 +941,15 @@ func remoteCodexSessionCWD(
 	}
 	log.Printf("%s found codex session log for pid=%d path=%q", logScope, agentPID, sessionPath)
 
-	out, err := run("cat " + shellQuotePath(sessionPath))
-	if err != nil {
-		log.Printf("%s reading codex session log failed path=%q: %v", logScope, sessionPath, err)
-		return "", err
-	}
-
-	cwd, err := parseCodexSessionCWD(out)
-	if err != nil {
-		log.Printf("%s parsing codex session log failed path=%q: %v", logScope, sessionPath, err)
-		return "", err
-	}
-	log.Printf("%s parsed codex session workdir path=%q cwd=%q", logScope, sessionPath, cwd)
-	return cwd, nil
+	return remoteCachedAgentLogCWD(
+		run,
+		"ssh:"+logScope+":codex:"+sessionPath,
+		logScope,
+		sessionPath,
+		shellQuotePath(sessionPath),
+		"codex session log",
+		parseCodexSessionCWD,
+	)
 }
 
 func remoteInteractiveAgentSessionCWD(
@@ -1000,19 +996,15 @@ func remoteClaudeSessionCWD(
 	}
 
 	projectPath := remoteClaudeProjectPath(sessionMeta)
-	out, err := run(remoteClaudeProjectReadCmd(sessionMeta))
-	if err != nil {
-		log.Printf("%s reading claude transcript failed path=%q: %v", logScope, projectPath, err)
-		return "", err
-	}
-
-	cwd, err := parseClaudeProjectCWD(out)
-	if err != nil {
-		log.Printf("%s parsing claude transcript failed path=%q: %v", logScope, projectPath, err)
-		return "", err
-	}
-	log.Printf("%s parsed claude transcript path=%q cwd=%q", logScope, projectPath, cwd)
-	return cwd, nil
+	return remoteCachedAgentLogCWD(
+		run,
+		"ssh:"+logScope+":claude:"+projectPath,
+		logScope,
+		projectPath,
+		remoteClaudeProjectShellPath(sessionMeta),
+		"claude transcript",
+		parseClaudeProjectCWD,
+	)
 }
 
 func remoteClaudeSessionMeta(run remoteOutputFunc, logScope string, agentPID int) (*claudeSessionMeta, error) {
@@ -1042,10 +1034,71 @@ func remoteClaudeProjectPath(meta *claudeSessionMeta) string {
 	)
 }
 
-func remoteClaudeProjectReadCmd(meta *claudeSessionMeta) string {
-	return "cat ~/.claude/projects/" + shellQuotePath(
+func remoteClaudeProjectShellPath(meta *claudeSessionMeta) string {
+	return "~/.claude/projects/" + shellQuotePath(
 		filepath.Join(claudeProjectDirName(meta.CWD), meta.SessionID+".jsonl"),
 	)
+}
+
+func remoteClaudeProjectReadCmd(meta *claudeSessionMeta) string {
+	return "cat " + remoteClaudeProjectShellPath(meta)
+}
+
+func remoteFileFingerprintCmd(shellPath string) string {
+	return "if out=$(stat -c '%s %Y' " + shellPath + " 2>/dev/null); then " +
+		"printf '%s\\n' \"$out\"; " +
+		"elif out=$(stat -f '%z %m' " + shellPath + " 2>/dev/null); then " +
+		"printf '%s\\n' \"$out\"; " +
+		"else bytes=$(wc -c < " + shellPath + " 2>/dev/null) || exit 1; printf '%s -\\n' \"$bytes\"; fi"
+}
+
+func remoteFileFingerprint(run remoteOutputFunc, shellPath string) (agentLogFingerprint, error) {
+	out, err := run(remoteFileFingerprintCmd(shellPath))
+	if err != nil {
+		return "", err
+	}
+	return agentLogFingerprint(strings.TrimSpace(string(out))), nil
+}
+
+func remoteCachedAgentLogCWD(
+	run remoteOutputFunc,
+	cacheKey, logScope, displayPath, shellPath, label string,
+	parse func([]byte) (string, error),
+) (string, error) {
+	fingerprint, err := remoteFileFingerprint(run, shellPath)
+	if err == nil {
+		return cachedAgentLogCWD(cacheKey, fingerprint, func() (string, error) {
+			out, err := run("cat " + shellPath)
+			if err != nil {
+				log.Printf("%s reading %s failed path=%q: %v", logScope, label, displayPath, err)
+				return "", err
+			}
+
+			cwd, err := parse(out)
+			if err != nil {
+				log.Printf("%s parsing %s failed path=%q: %v", logScope, label, displayPath, err)
+				return "", err
+			}
+			log.Printf("%s parsed %s path=%q cwd=%q", logScope, label, displayPath, cwd)
+			return cwd, nil
+		})
+	}
+
+	log.Printf("%s fingerprint lookup failed for %s path=%q: %v", logScope, label, displayPath, err)
+
+	out, readErr := run("cat " + shellPath)
+	if readErr != nil {
+		log.Printf("%s reading %s failed path=%q: %v", logScope, label, displayPath, readErr)
+		return "", readErr
+	}
+
+	cwd, parseErr := parse(out)
+	if parseErr != nil {
+		log.Printf("%s parsing %s failed path=%q: %v", logScope, label, displayPath, parseErr)
+		return "", parseErr
+	}
+	log.Printf("%s parsed %s path=%q cwd=%q", logScope, label, displayPath, cwd)
+	return cwd, nil
 }
 
 func remoteGitContext(runner sshSessionRunner, cwd string) (GitContext, error) {

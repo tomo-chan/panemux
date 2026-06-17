@@ -29,13 +29,14 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
   const hasAttention = ctx?.hasPaneAttention(pane.id) ?? false
   const isDragSource = ctx?.dragSourcePaneId === pane.id
   const dragActive = Boolean(ctx?.dragSourcePaneId)
+  const gitInfoEnabled = !ctx?.maximizedPaneId || ctx.maximizedPaneId === pane.id
 
   const { handleResize, connected, dims, sessionState, reconnectFailed, restartSession } = useTerminal({
     sessionId: pane.id,
     container: containerEl,
   })
 
-  const gitInfo = useGitInfo(pane.id)
+  const gitInfo = useGitInfo(pane.id, gitInfoEnabled)
 
   // Observe resize events for this pane
   useEffect(() => {

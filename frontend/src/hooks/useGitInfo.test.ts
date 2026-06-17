@@ -1,9 +1,17 @@
 import { renderHook, waitFor, act } from '@testing-library/react'
-import { describe, it, expect, vi, afterEach } from 'vitest'
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { useGitInfo } from './useGitInfo'
 
 describe('useGitInfo', () => {
+  beforeEach(() => {
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'visible',
+    })
+  })
+
   afterEach(() => {
+    vi.useRealTimers()
     vi.restoreAllMocks()
   })
 
@@ -52,13 +60,76 @@ describe('useGitInfo', () => {
     expect(window.fetch).toHaveBeenCalledWith('/api/sessions/my-session-id/git-info')
   })
 
-  it('registers a 5-second polling interval', () => {
+  it('registers a 10-second polling interval', () => {
+    vi.useFakeTimers()
     const intervalSpy = vi.spyOn(window, 'setInterval')
     window.fetch = vi.fn().mockReturnValue(new Promise(() => {}))
 
     renderHook(() => useGitInfo('pane1'))
 
-    expect(intervalSpy).toHaveBeenCalledWith(expect.any(Function), 5000)
+    expect(intervalSpy).toHaveBeenCalledWith(expect.any(Function), 10000)
+  })
+
+  it('does not fetch while disabled', () => {
+    window.fetch = vi.fn()
+
+    renderHook(() => useGitInfo('pane1', false))
+
+    expect(window.fetch).not.toHaveBeenCalled()
+  })
+
+  it('fetches immediately when re-enabled', async () => {
+    window.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ is_git: false }),
+    } as Response)
+
+    const { rerender } = renderHook(({ enabled }) => useGitInfo('pane1', enabled), {
+      initialProps: { enabled: false },
+    })
+
+    expect(window.fetch).not.toHaveBeenCalled()
+
+    rerender({ enabled: true })
+
+    await waitFor(() => expect(window.fetch).toHaveBeenCalledTimes(1))
+  })
+
+  it('stops polling while the document is hidden and refetches on visibility restore', async () => {
+    vi.useFakeTimers()
+    window.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ is_git: false }),
+    } as Response)
+
+    renderHook(() => useGitInfo('pane1'))
+
+    await act(async () => {})
+    expect(window.fetch).toHaveBeenCalledTimes(1)
+
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'hidden',
+    })
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'))
+    })
+    act(() => {
+      vi.advanceTimersByTime(10000)
+    })
+
+    expect(window.fetch).toHaveBeenCalledTimes(1)
+
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'visible',
+    })
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'))
+    })
+
+    await act(async () => {})
+    expect(window.fetch).toHaveBeenCalledTimes(2)
   })
 
   it('silently ignores fetch errors — state stays at default', async () => {

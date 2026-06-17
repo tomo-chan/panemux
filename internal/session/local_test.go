@@ -15,6 +15,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type fakeFileInfo struct {
+	name        string
+	size        int64
+	modTimeUnix int64
+}
+
+func (f fakeFileInfo) Name() string       { return f.name }
+func (f fakeFileInfo) Size() int64        { return f.size }
+func (f fakeFileInfo) Mode() os.FileMode  { return 0600 }
+func (f fakeFileInfo) ModTime() time.Time { return time.Unix(f.modTimeUnix, 0) }
+func (f fakeFileInfo) IsDir() bool        { return false }
+func (f fakeFileInfo) Sys() any           { return nil }
+
 func TestNewLocal_Default(t *testing.T) {
 	sess, err := NewLocal("test-id", "", "", "Test Title")
 	require.NoError(t, err)
@@ -672,6 +685,77 @@ func TestGetActiveWorkdir_PrefersCodexExecCommandWorkdir(t *testing.T) {
 	cwd, err := sess.GetActiveWorkdir()
 	require.NoError(t, err)
 	assert.Equal(t, "/tmp/worktree-from-command", cwd)
+}
+
+func TestReadCodexSessionCWD_UsesCachedValueWhenFingerprintUnchanged(t *testing.T) {
+	originalReadFile := readFileFn
+	originalStatFile := statFileFn
+	t.Cleanup(func() {
+		readFileFn = originalReadFile
+		statFileFn = originalStatFile
+		resetAgentLogCache()
+	})
+
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	content := []byte("{\"type\":\"turn_context\",\"payload\":{\"cwd\":\"/tmp/worktree-a\"}}\n")
+	var readCount int
+	readFileFn = func(name string) ([]byte, error) {
+		readCount++
+		assert.Equal(t, path, name)
+		return content, nil
+	}
+	statFileFn = func(name string) (os.FileInfo, error) {
+		assert.Equal(t, path, name)
+		return fakeFileInfo{name: filepath.Base(name), size: int64(len(content)), modTimeUnix: 100}, nil
+	}
+
+	cwd, err := readCodexSessionCWD(path)
+	require.NoError(t, err)
+	assert.Equal(t, "/tmp/worktree-a", cwd)
+
+	cwd, err = readCodexSessionCWD(path)
+	require.NoError(t, err)
+	assert.Equal(t, "/tmp/worktree-a", cwd)
+	assert.Equal(t, 1, readCount)
+}
+
+func TestReadClaudeProjectCWD_ReReadsWhenFingerprintChanges(t *testing.T) {
+	originalReadFile := readFileFn
+	originalStatFile := statFileFn
+	t.Cleanup(func() {
+		readFileFn = originalReadFile
+		statFileFn = originalStatFile
+		resetAgentLogCache()
+	})
+
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	contents := [][]byte{
+		[]byte("{\"type\":\"assistant\",\"cwd\":\"/tmp/worktree-a\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}\n"),
+		[]byte("{\"type\":\"assistant\",\"cwd\":\"/tmp/worktree-b\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}\n"),
+	}
+	readCount := 0
+	statCall := 0
+	readFileFn = func(name string) ([]byte, error) {
+		assert.Equal(t, path, name)
+		data := contents[readCount]
+		readCount++
+		return data, nil
+	}
+	statFileFn = func(name string) (os.FileInfo, error) {
+		assert.Equal(t, path, name)
+		info := fakeFileInfo{name: filepath.Base(name), size: int64(len(contents[min(statCall, len(contents)-1)])), modTimeUnix: int64(100 + statCall)}
+		statCall++
+		return info, nil
+	}
+
+	cwd, err := readClaudeProjectCWD(path)
+	require.NoError(t, err)
+	assert.Equal(t, "/tmp/worktree-a", cwd)
+
+	cwd, err = readClaudeProjectCWD(path)
+	require.NoError(t, err)
+	assert.Equal(t, "/tmp/worktree-b", cwd)
+	assert.Equal(t, 2, readCount)
 }
 
 func TestGetActiveWorkdir_PrefersClaudeTranscriptWorktree(t *testing.T) {

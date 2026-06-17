@@ -395,6 +395,69 @@ func TestActiveRemoteWorkdir_PrefersRemoteCodexExecCommandWorkdir(t *testing.T) 
 	assert.Equal(t, "/tmp/remote-worktree-from-command", cwd)
 }
 
+func TestActiveRemoteWorkdir_SkipsRemoteCodexLogReadWhenFingerprintUnchanged(t *testing.T) {
+	resetAgentLogCache()
+	t.Cleanup(resetAgentLogCache)
+
+	sessionPath := "/home/user/.codex/sessions/2026/05/17/session.jsonl"
+	shellPath := shellQuotePath(sessionPath)
+	fingerprintCmd := remoteFileFingerprintCmd(shellPath)
+	catCmd := "cat " + shellQuotePath(sessionPath)
+	runner := &fakeSSHRunner{
+		outputs: map[string][]byte{
+			sshListProcessesCmd:                       []byte(" 100 1 sh\n 220 100 codex resume --last\n"),
+			fmt.Sprintf(sshOpenFilesCmdTemplate, 220): []byte(sessionPath + "\n"),
+			fingerprintCmd:                            []byte("42 1700000000\n"),
+			catCmd: []byte(
+				"{\"type\":\"session_meta\",\"payload\":{\"cwd\":\"/repo/main\"}}\n" +
+					"{\"type\":\"turn_context\",\"payload\":{\"cwd\":\"/tmp/remote-worktree\"}}\n",
+			),
+		},
+	}
+
+	cwd, err := activeRemoteWorkdir(runner, "test active remote", "/repo/main", 100)
+	require.NoError(t, err)
+	assert.Equal(t, "/tmp/remote-worktree", cwd)
+
+	delete(runner.outputs, catCmd)
+	cwd, err = activeRemoteWorkdir(runner, "test active remote", "/repo/main", 100)
+	require.NoError(t, err)
+	assert.Equal(t, "/tmp/remote-worktree", cwd)
+}
+
+func TestActiveRemoteWorkdir_ReReadsRemoteClaudeTranscriptWhenFingerprintChanges(t *testing.T) {
+	resetAgentLogCache()
+	t.Cleanup(resetAgentLogCache)
+
+	projectShellPath := "~/.claude/projects/'-repo-main/session-123.jsonl'"
+	projectCmd := "cat " + projectShellPath
+	fingerprintCmd := remoteFileFingerprintCmd(projectShellPath)
+	runner := &fakeSSHRunner{
+		outputs: map[string][]byte{
+			sshListProcessesCmd:               []byte(" 100 1 sh\n 220 100 claude\n"),
+			"cat ~/.claude/sessions/220.json": []byte(`{"pid":220,"sessionId":"session-123","cwd":"/repo/main"}`),
+			fingerprintCmd:                    []byte("100 1700000000\n"),
+			projectCmd: []byte(
+				"{\"type\":\"assistant\",\"cwd\":\"/tmp/remote-claude-worktree-a\"," +
+					"\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}\n",
+			),
+		},
+	}
+
+	cwd, err := activeRemoteWorkdir(runner, "test active remote", "/repo/main", 100)
+	require.NoError(t, err)
+	assert.Equal(t, "/tmp/remote-claude-worktree-a", cwd)
+
+	runner.outputs[fingerprintCmd] = []byte("101 1700000001\n")
+	runner.outputs[projectCmd] = []byte(
+		"{\"type\":\"assistant\",\"cwd\":\"/tmp/remote-claude-worktree-b\"," +
+			"\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}\n",
+	)
+	cwd, err = activeRemoteWorkdir(runner, "test active remote", "/repo/main", 100)
+	require.NoError(t, err)
+	assert.Equal(t, "/tmp/remote-claude-worktree-b", cwd)
+}
+
 func TestActiveRemoteWorkdir_FallsBackToRemoteDescendantCWD(t *testing.T) {
 	runner := &fakeSSHRunner{
 		outputs: map[string][]byte{

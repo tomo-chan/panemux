@@ -552,11 +552,18 @@ func processIDArg(pid int) (string, error) {
 }
 
 func readCodexSessionCWD(path string) (string, error) {
-	data, err := readFileFn(path)
+	fingerprint, err := localFileFingerprint(path)
 	if err != nil {
-		return "", fmt.Errorf("read codex session log %q: %w", path, err)
+		return "", fmt.Errorf("stat codex session log %q: %w", path, err)
 	}
-	return parseCodexSessionCWD(data)
+
+	return cachedAgentLogCWD("local:codex:"+path, fingerprint, func() (string, error) {
+		data, err := readFileFn(path)
+		if err != nil {
+			return "", fmt.Errorf("read codex session log %q: %w", path, err)
+		}
+		return parseCodexSessionCWD(data)
+	})
 }
 
 type codexSessionRecord struct {
@@ -652,14 +659,24 @@ func claudeProjectDirName(cwd string) string {
 }
 
 func readClaudeProjectCWD(path string) (string, error) {
-	data, err := readFileFn(path)
+	fingerprint, err := localFileFingerprint(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return "", nil
 		}
-		return "", fmt.Errorf("read claude transcript %q: %w", path, err)
+		return "", fmt.Errorf("stat claude transcript %q: %w", path, err)
 	}
-	return parseClaudeProjectCWD(data)
+
+	return cachedAgentLogCWD("local:claude:"+path, fingerprint, func() (string, error) {
+		data, err := readFileFn(path)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return "", nil
+			}
+			return "", fmt.Errorf("read claude transcript %q: %w", path, err)
+		}
+		return parseClaudeProjectCWD(data)
+	})
 }
 
 func parseClaudeProjectCWD(data []byte) (string, error) {
