@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.18.7](https://github.com/tomo-chan/panemux/compare/v0.18.6...v0.18.7) (2026-06-17)
+
+
+### Bug Fixes
+
+* handle large interactive agent session logs ([#130](https://github.com/tomo-chan/panemux/issues/130)) ([5cb4fd6](https://github.com/tomo-chan/panemux/commit/5cb4fd6e91c0c4dd9bf2cf6746c47ef59ec904d6))
+* reduce git-info polling and session log reads ([#133](https://github.com/tomo-chan/panemux/issues/133)) ([eacde38](https://github.com/tomo-chan/panemux/commit/eacde38cbde0a282788b2240753a42ad0539c55d))
+
 ## [0.18.6](https://github.com/tomo-chan/panemux/compare/v0.18.5...v0.18.6) (2026-06-15)
 
 
