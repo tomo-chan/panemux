@@ -686,6 +686,9 @@ func parseClaudeProjectCWD(data []byte) (string, error) {
 	return filepath.Dir(latestPath.Path), nil
 }
 
+// forEachJSONLRecord iterates over already-buffered JSONL data without using
+// bufio.Scanner, so it cannot surface Scanner's token-size limit.
+// It also preserves a final unterminated record.
 func forEachJSONLRecord(data []byte, fn func([]byte)) {
 	for len(data) > 0 {
 		line := data

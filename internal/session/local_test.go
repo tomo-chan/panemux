@@ -436,6 +436,18 @@ func TestParseClaudeProjectCWD_LargeTopLevelCWDRecord(t *testing.T) {
 	assert.Equal(t, "/tmp/worktree-from-large-record", cwd)
 }
 
+func TestParseClaudeProjectCWD_LargeTopLevelCWDRecord_WithoutTrailingNewline(t *testing.T) {
+	data := []byte(
+		"{\"type\":\"assistant\",\"cwd\":\"/tmp/worktree-without-trailing-newline\",\"message\":{\"content\":[" +
+			"{\"type\":\"text\",\"text\":\"" + strings.Repeat("x", 70_000) + "\"}" +
+			"]}}",
+	)
+
+	cwd, err := parseClaudeProjectCWD(data)
+	require.NoError(t, err)
+	assert.Equal(t, "/tmp/worktree-without-trailing-newline", cwd)
+}
+
 func TestLatestClaudeTrackedPath_IsDeterministic(t *testing.T) {
 	backups := map[string]json.RawMessage{
 		"/tmp/repo-main/AGENTS.md":       {},
