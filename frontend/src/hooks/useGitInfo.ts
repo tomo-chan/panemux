@@ -1,8 +1,11 @@
 import { useState, useEffect, useCallback } from 'react'
 import { GitInfo, GitInfoSchema } from '../schemas'
 
-export function useGitInfo(sessionId: string): GitInfo {
+const GIT_INFO_POLL_INTERVAL_MS = 10000
+
+export function useGitInfo(sessionId: string, enabled = true): GitInfo {
   const [gitInfo, setGitInfo] = useState<GitInfo>({ is_git: false })
+  const [isVisible, setIsVisible] = useState(() => document.visibilityState === 'visible')
 
   const fetchGitInfo = useCallback(async () => {
     try {
@@ -16,10 +19,21 @@ export function useGitInfo(sessionId: string): GitInfo {
   }, [sessionId])
 
   useEffect(() => {
+    const handleVisibilityChange = () => {
+      setIsVisible(document.visibilityState === 'visible')
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
+  }, [])
+
+  useEffect(() => {
+    if (!enabled || !isVisible) return
+
     fetchGitInfo()
-    const interval = setInterval(fetchGitInfo, 5000)
+    const interval = setInterval(fetchGitInfo, GIT_INFO_POLL_INTERVAL_MS)
     return () => clearInterval(interval)
-  }, [fetchGitInfo])
+  }, [enabled, fetchGitInfo, isVisible])
 
   return gitInfo
 }

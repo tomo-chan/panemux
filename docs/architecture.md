@@ -179,6 +179,11 @@ cross-repository reuse.
 
 For interactive Codex sessions, all four session implementations (`local`, `ssh`, `tmux`, and `ssh_tmux`) may inspect the open Codex session log under `~/.codex/sessions/...jsonl` when the Codex process has that file open. Panemux currently prefers the latest `exec_command.arguments.workdir` recorded in `response_item` / `function_call` log entries, then falls back to `turn_context.cwd`, then `session_meta.cwd`.
 
+To avoid repeatedly reparsing unchanged agent logs, panemux caches the last resolved workdir per
+session-log path fingerprint. Local sessions use file size plus modtime; SSH-backed sessions ask
+the remote host for lightweight file metadata first and only transfer the full `jsonl` contents
+again when that fingerprint changes.
+
 This ordering is intentional and reflects observed Codex behavior as of `codex-tui` `0.130.0`:
 
 - the interactive Codex process may keep its OS-level process cwd at the original pane directory

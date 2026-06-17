@@ -145,11 +145,23 @@ For pane-header Git status, local and local tmux panes inspect the local filesys
 and `ssh_tmux` panes run the equivalent Git inspection on the remote host. This allows headers to
 show branch/repository info even when the repository exists only on the SSH target.
 
+Pane-header Git and PR metadata is fetched immediately when a pane becomes visible, then refreshed
+every 10 seconds only while both the browser tab and that pane remain visible.
+
+When a pane is hidden behind maximize, its header Git/PR polling stops until it becomes visible
+again. Restoring the browser tab or making a pane visible again triggers an immediate refresh so
+newly created PR links become clickable without waiting for the next steady-state poll.
+
 When panemux detects that an interactive `codex` or `claude` session is operating in a sibling Git
 worktree for the same repository, pane-header Git/PR metadata and the VS Code open action prefer
 that worktree. After the agent exits, panemux keeps the last valid sibling worktree pinned for that
 pane session until a newer valid sibling worktree is detected or the pane itself changes to a
 different repository.
+
+To avoid repeatedly transferring and parsing unchanged interactive-agent logs, panemux reuses the
+last parsed Codex or Claude worktree result while the underlying session-log or transcript file
+fingerprint remains unchanged. For SSH-backed panes this check uses remote file metadata first and
+only reads the full `jsonl` contents again when the fingerprint changes.
 
 Remote Git inspection currently depends on `git rev-parse --path-format=absolute --git-common-dir`
 on the SSH target, which requires Git 2.31 or newer. Older remote Git versions degrade to "no git
