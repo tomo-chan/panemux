@@ -730,8 +730,14 @@ func TestReadClaudeProjectCWD_ReReadsWhenFingerprintChanges(t *testing.T) {
 
 	path := filepath.Join(t.TempDir(), "session.jsonl")
 	contents := [][]byte{
-		[]byte("{\"type\":\"assistant\",\"cwd\":\"/tmp/worktree-a\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}\n"),
-		[]byte("{\"type\":\"assistant\",\"cwd\":\"/tmp/worktree-b\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}\n"),
+		[]byte(
+			"{\"type\":\"assistant\",\"cwd\":\"/tmp/worktree-a\"," +
+				"\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}\n",
+		),
+		[]byte(
+			"{\"type\":\"assistant\",\"cwd\":\"/tmp/worktree-b\"," +
+				"\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}\n",
+		),
 	}
 	readCount := 0
 	statCall := 0
@@ -743,7 +749,11 @@ func TestReadClaudeProjectCWD_ReReadsWhenFingerprintChanges(t *testing.T) {
 	}
 	statFileFn = func(name string) (os.FileInfo, error) {
 		assert.Equal(t, path, name)
-		info := fakeFileInfo{name: filepath.Base(name), size: int64(len(contents[min(statCall, len(contents)-1)])), modTimeUnix: int64(100 + statCall)}
+		info := fakeFileInfo{
+			name:        filepath.Base(name),
+			size:        int64(len(contents[min(statCall, len(contents)-1)])),
+			modTimeUnix: int64(100 + statCall),
+		}
 		statCall++
 		return info, nil
 	}

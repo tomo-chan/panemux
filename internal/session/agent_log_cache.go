@@ -13,10 +13,12 @@ type agentLogCacheEntry struct {
 	fingerprint agentLogFingerprint
 }
 
-var agentLogCache = struct {
-	mu      sync.Mutex
+type agentLogCacheStore struct {
 	entries map[string]agentLogCacheEntry
-}{
+	mu      sync.Mutex
+}
+
+var agentLogCache = agentLogCacheStore{
 	entries: make(map[string]agentLogCacheEntry),
 }
 

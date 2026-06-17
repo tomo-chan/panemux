@@ -1040,10 +1040,6 @@ func remoteClaudeProjectShellPath(meta *claudeSessionMeta) string {
 	)
 }
 
-func remoteClaudeProjectReadCmd(meta *claudeSessionMeta) string {
-	return "cat " + remoteClaudeProjectShellPath(meta)
-}
-
 func remoteFileFingerprintCmd(shellPath string) string {
 	return "if out=$(stat -c '%s %Y' " + shellPath + " 2>/dev/null); then " +
 		"printf '%s\\n' \"$out\"; " +
@@ -1068,16 +1064,16 @@ func remoteCachedAgentLogCWD(
 	fingerprint, err := remoteFileFingerprint(run, shellPath)
 	if err == nil {
 		return cachedAgentLogCWD(cacheKey, fingerprint, func() (string, error) {
-			out, err := run("cat " + shellPath)
-			if err != nil {
-				log.Printf("%s reading %s failed path=%q: %v", logScope, label, displayPath, err)
-				return "", err
+			out, readErr := run("cat " + shellPath)
+			if readErr != nil {
+				log.Printf("%s reading %s failed path=%q: %v", logScope, label, displayPath, readErr)
+				return "", readErr
 			}
 
-			cwd, err := parse(out)
-			if err != nil {
-				log.Printf("%s parsing %s failed path=%q: %v", logScope, label, displayPath, err)
-				return "", err
+			cwd, parseErr := parse(out)
+			if parseErr != nil {
+				log.Printf("%s parsing %s failed path=%q: %v", logScope, label, displayPath, parseErr)
+				return "", parseErr
 			}
 			log.Printf("%s parsed %s path=%q cwd=%q", logScope, label, displayPath, cwd)
 			return cwd, nil
