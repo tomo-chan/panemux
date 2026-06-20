@@ -102,11 +102,19 @@ Example: `Config.sshConfigPath` uses `sshconfig.DefaultPath()` only when the ove
 ### Quality gate
 
 - `make check` must pass before `make build`.
+- `make check` must pass before reporting implementation complete.
+- There are no exceptions for frontend-only, docs-adjacent, or "small" code changes.
 - Test commands: `make test-go`, `make test-frontend`, `make test-e2e`, `make test`
 - Coverage commands: `make coverage-go`, `make coverage-frontend`
 - Lint commands: `make lint-go`, `make lint-frontend`, `make lint`
 - Go lint includes `gofmt`, `go vet`, and `golangci-lint run ./...` using `.golangci.yml`.
 - Run `make lint-go` or `make lint` after every Go code change before committing.
+
+### Push protection
+
+- `make install-deps` configures the repo-local Git hooks path to `.githooks`.
+- The tracked `pre-push` hook runs `make check` and blocks `git push` when it fails.
+- Do not bypass the hook for ordinary development. Fix the failing checks instead.
 
 ### Documentation updates
 

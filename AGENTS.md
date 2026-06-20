@@ -13,12 +13,12 @@ Before building or running tests, always run:
 make install-deps
 ```
 
-This installs npm packages and downloads Go modules. Required once per environment.
+This installs npm packages, downloads Go modules, and configures the repo-local Git hooks. Required once per environment.
 
 ## Read This First
 
 1. Read [DEVELOPMENT.md](DEVELOPMENT.md) for build, test, branch, and PR workflow rules.
-   This includes the path-sanitization rule for tests, fixtures, PR bodies, PR comments, and review replies.
+   This includes the path-sanitization rule for tests, fixtures, PR bodies, PR comments, review replies, and the mandatory `make check` completion rule.
 2. Read [docs/overview.md](docs/overview.md) for the product purpose and current boundaries.
 3. Read [docs/architecture.md](docs/architecture.md) for implementation structure and security design.
 4. Read [docs/security.md](docs/security.md) before implementing changes that affect command execution, shell argument handling, SSH path handling, or `gosec` posture.
