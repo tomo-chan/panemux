@@ -105,6 +105,7 @@ Persistence behavior:
 - layout and workspace changes are persisted immediately when a save path is available
 - pane resize, split, close, quick-add create, move, workspace add/delete/rename, active-workspace changes, and `tab_position` changes all follow the same immediate-save path
 - when no `--config` is given, the default save path is `~/.config/panemux/config.yaml`; the directory is created automatically on first save
+- pane maximize state is frontend-local, tracked per workspace, and restored when the user switches away from a workspace and then returns
 
 ## Agent Attention Notifications
 

@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react'
+import React, { useState, useCallback, useEffect, useMemo } from 'react'
 import { SplitContainer, LayoutActionsContext } from './components/SplitContainer'
 import { PaneSettingsDialog } from './components/PaneSettingsDialog'
 import { AddSSHHostDialog } from './components/AddSSHHostDialog'
@@ -17,7 +17,7 @@ const DEFAULT_DISPLAY: DisplayConfig = { show_header: true, show_status_bar: tru
 
 export const App: React.FC = () => {
   const { layout, workspaces, displayConfig, error, updateSizes, splitPane, closePane, swapPanes, createPane, movePane, setActiveWorkspace, addWorkspace, deleteWorkspace, renameWorkspace, setWorkspaceTabPosition } = useLayout()
-  const [maximizedPaneId, setMaximizedPaneId] = useState<string | null>(null)
+  const [maximizedPaneIdsByWorkspace, setMaximizedPaneIdsByWorkspace] = useState<Record<string, string | null>>({})
   const [dragSourcePaneId, setDragSourcePaneId] = useState<string | null>(null)
   const [attentionPaneIds, setAttentionPaneIds] = useState<Set<string>>(() => new Set())
   const { isOpen, currentPane, sshConnectionNames, saveError, isSaving, openSettings, closeSettings, saveSettings, addSSHConfigHost, detectShell, browseDirectories } =
@@ -39,6 +39,42 @@ export const App: React.FC = () => {
 
     return metadata
   }, [workspaces])
+
+  const activeWorkspaceId = workspaces?.active ?? null
+  const maximizedPaneId = useMemo(() => {
+    if (!activeWorkspaceId || !layout) return null
+    const paneId = maximizedPaneIdsByWorkspace[activeWorkspaceId] ?? null
+    if (!paneId || !layoutContainsPane(layout, paneId)) return null
+    return paneId
+  }, [activeWorkspaceId, layout, maximizedPaneIdsByWorkspace])
+
+  useEffect(() => {
+    if (!workspaces) return
+
+    const activeWorkspaceIDs = new Set(workspaces.items.map((workspace) => workspace.id))
+    setMaximizedPaneIdsByWorkspace((current) => {
+      let changed = false
+      const next: Record<string, string | null> = {}
+
+      for (const [workspaceID, paneID] of Object.entries(current)) {
+        if (!activeWorkspaceIDs.has(workspaceID)) {
+          changed = true
+          continue
+        }
+        next[workspaceID] = paneID
+      }
+
+      return changed ? next : current
+    })
+  }, [workspaces])
+
+  const setMaximizedPaneId = useCallback((paneId: string | null) => {
+    if (!activeWorkspaceId) return
+    setMaximizedPaneIdsByWorkspace((current) => {
+      if ((current[activeWorkspaceId] ?? null) === paneId) return current
+      return { ...current, [activeWorkspaceId]: paneId }
+    })
+  }, [activeWorkspaceId])
 
   const findWorkspaceForPane = useCallback((paneId: string) => {
     return workspaces?.items.find((workspace) => layoutContainsPane(workspace.layout, paneId)) ?? null
