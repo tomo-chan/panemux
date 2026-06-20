@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { WorkspaceOverviewDashboard } from './WorkspaceOverviewDashboard'
 
@@ -54,6 +54,54 @@ describe('WorkspaceOverviewDashboard', () => {
     expect(screen.getByText('1 exited')).toBeInTheDocument()
     expect(screen.getByText('PR #12')).toBeInTheDocument()
     expect(screen.getByText('Needs input')).toBeInTheDocument()
+  })
+
+  it('does not count panes without fetched session data as up', () => {
+    render(
+      <WorkspaceOverviewDashboard
+        workspaces={workspaces}
+        activeWorkspaceId="dev"
+        attentionPaneIds={new Set()}
+        attentionWorkspaceIds={new Set()}
+        sessionsById={{}}
+        gitInfoById={{}}
+        onSelectWorkspace={() => {}}
+        onSelectPane={() => {}}
+      />,
+    )
+
+    const devWorkspace = screen.getByRole('button', { name: 'Open workspace Dev' })
+    expect(within(devWorkspace).getByText('0 up')).toBeInTheDocument()
+    expect(within(devWorkspace).getByText('2 pending')).toBeInTheDocument()
+  })
+
+  it('prefers pane metadata when a malformed child contains both pane and children', () => {
+    render(
+      <WorkspaceOverviewDashboard
+        workspaces={[{
+          id: 'weird',
+          title: 'Weird',
+          layout: {
+            direction: 'horizontal' as const,
+            children: [{
+              size: 100,
+              pane: { id: 'parent', type: 'local' as const, title: 'Parent Pane' },
+              children: [{ size: 100, pane: { id: 'nested', type: 'local' as const, title: 'Nested Pane' } }],
+            }],
+          },
+        }]}
+        activeWorkspaceId="weird"
+        attentionPaneIds={new Set()}
+        attentionWorkspaceIds={new Set()}
+        sessionsById={{}}
+        gitInfoById={{}}
+        onSelectWorkspace={() => {}}
+        onSelectPane={() => {}}
+      />,
+    )
+
+    expect(screen.getByText('Parent Pane')).toBeInTheDocument()
+    expect(screen.queryByText('Nested Pane')).not.toBeInTheDocument()
   })
 
   it('routes workspace and pane clicks through the provided callbacks', () => {

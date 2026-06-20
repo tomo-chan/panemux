@@ -54,13 +54,15 @@ export const WorkspaceOverviewDashboard: React.FC<WorkspaceOverviewDashboardProp
           connected: 0,
           disconnected: 0,
           exited: 0,
+          pending: 0,
         }
 
         for (const pane of panes) {
           const state = sessionsById[pane.id]?.state
           if (state === 'disconnected') counts.disconnected += 1
           else if (state === 'exited') counts.exited += 1
-          else counts.connected += 1
+          else if (state === 'connected' || state === 'connecting') counts.connected += 1
+          else counts.pending += 1
         }
 
         const isActive = workspace.id === activeWorkspaceId
@@ -118,6 +120,7 @@ export const WorkspaceOverviewDashboard: React.FC<WorkspaceOverviewDashboardProp
                   <span>{counts.connected} up</span>
                   <span>{counts.disconnected} down</span>
                   <span>{counts.exited} exited</span>
+                  {counts.pending > 0 && <span>{counts.pending} pending</span>}
                 </div>
               </div>
               <span style={{ color: '#697385', fontSize: 12 }}>Open</span>
@@ -195,7 +198,10 @@ function collectChildPanes(
   child: LayoutChild,
   panes: Array<{ id: string; type: string; title?: string }>,
 ) {
-  if (child.pane && (!child.children || child.children.length === 0)) {
+  // Dashboard rows mirror terminal leaf panes. If a malformed layout node ever
+  // carries both pane metadata and nested children, prefer the pane and stop so
+  // the dashboard does not silently drop it.
+  if (child.pane) {
     panes.push(child.pane)
     return
   }
