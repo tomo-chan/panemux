@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.8](https://github.com/tomo-chan/panemux/compare/v0.18.7...v0.18.8) (2026-06-20)
+
+
+### Bug Fixes
+
+* preserve maximize state across workspace switches ([#138](https://github.com/tomo-chan/panemux/issues/138)) ([004aaf5](https://github.com/tomo-chan/panemux/commit/004aaf5efd15c77cce040e3599d7cb26a54dae14))
+
 ## [0.18.7](https://github.com/tomo-chan/panemux/compare/v0.18.6...v0.18.7) (2026-06-17)
 
 
