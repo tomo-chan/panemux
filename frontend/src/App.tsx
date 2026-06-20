@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react'
+import React, { useState, useCallback, useEffect, useMemo } from 'react'
 import { SplitContainer, LayoutActionsContext } from './components/SplitContainer'
 import { PaneSettingsDialog } from './components/PaneSettingsDialog'
 import { AddSSHHostDialog } from './components/AddSSHHostDialog'
@@ -47,6 +47,26 @@ export const App: React.FC = () => {
     if (!paneId || !layoutContainsPane(layout, paneId)) return null
     return paneId
   }, [activeWorkspaceId, layout, maximizedPaneIdsByWorkspace])
+
+  useEffect(() => {
+    if (!workspaces) return
+
+    const activeWorkspaceIDs = new Set(workspaces.items.map((workspace) => workspace.id))
+    setMaximizedPaneIdsByWorkspace((current) => {
+      let changed = false
+      const next: Record<string, string | null> = {}
+
+      for (const [workspaceID, paneID] of Object.entries(current)) {
+        if (!activeWorkspaceIDs.has(workspaceID)) {
+          changed = true
+          continue
+        }
+        next[workspaceID] = paneID
+      }
+
+      return changed ? next : current
+    })
+  }, [workspaces])
 
   const setMaximizedPaneId = useCallback((paneId: string | null) => {
     if (!activeWorkspaceId) return

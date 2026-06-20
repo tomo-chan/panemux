@@ -159,10 +159,10 @@ describe('App workspace deletion', () => {
 
   it('keeps workspace attention while another pane in that workspace still needs attention', () => {
     currentWorkspaces = { ...workspaces, active: 'ops' }
-    mockTerminalPane.mockImplementation(() => {
+    mockTerminalPane.mockImplementation(({ pane }: { pane: { id: string } }) => {
       const ctx = useContext(LayoutActionsContext)
       return (
-        <div>
+        <div data-pane-id={pane.id} data-attention={ctx?.hasPaneAttention(pane.id) ? 'true' : undefined}>
           <button onClick={() => ctx?.onPaneAttention('main')}>Notify main</button>
           <button onClick={() => ctx?.onPaneAttention('side')}>Notify side</button>
           <button onClick={() => ctx?.clearPaneAttention('main')}>Clear main</button>
@@ -171,19 +171,26 @@ describe('App workspace deletion', () => {
       )
     })
 
-    render(<App />)
+    const { rerender } = render(<App />)
     fireEvent.click(screen.getByRole('button', { name: 'Notify main' }))
     fireEvent.click(screen.getByRole('button', { name: 'Notify side' }))
 
     expect(screen.getByRole('tab', { name: 'Dev' })).toHaveAttribute('data-attention', 'true')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Clear main' }))
+    currentWorkspaces = workspaces
+    rerender(<App />)
 
-    expect(screen.getByRole('tab', { name: 'Dev' })).toHaveAttribute('data-attention', 'true')
+    expect(document.querySelector('[data-pane-id="main"]')).toHaveAttribute('data-attention', 'true')
+    expect(document.querySelector('[data-pane-id="side"]')).toHaveAttribute('data-attention', 'true')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Clear side' }))
+    fireEvent.click(screen.getAllByRole('button', { name: 'Clear main' })[0])
 
-    expect(screen.getByRole('tab', { name: 'Dev' })).not.toHaveAttribute('data-attention')
+    expect(document.querySelector('[data-pane-id="main"]')).not.toHaveAttribute('data-attention')
+    expect(document.querySelector('[data-pane-id="side"]')).toHaveAttribute('data-attention', 'true')
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Clear side' })[0])
+
+    expect(document.querySelector('[data-pane-id="side"]')).not.toHaveAttribute('data-attention')
   })
 
   it('confirms before deleting a workspace from edit-mode tabs', () => {
@@ -259,6 +266,39 @@ describe('App workspace deletion', () => {
     rerender(<App />)
 
     expect(screen.getByText('Toggle maximize ops-main').closest('[data-pane-id="ops-main"]')).toHaveAttribute('data-maximized', 'true')
+  })
+
+  it('drops maximize state for workspaces that no longer exist', () => {
+    mockTerminalPane.mockImplementation(({ pane }: { pane: { id: string } }) => {
+      const ctx = useContext(LayoutActionsContext)
+      const maximized = ctx?.maximizedPaneId === pane.id
+      return (
+        <div data-pane-id={pane.id} data-maximized={maximized ? 'true' : 'false'}>
+          <button onClick={() => ctx?.onMaximize(maximized ? null : pane.id)}>
+            Toggle maximize {pane.id}
+          </button>
+        </div>
+      )
+    })
+
+    const { rerender } = render(<App />)
+
+    currentWorkspaces = { ...workspaces, active: 'ops' }
+    rerender(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle maximize ops-main' }))
+    expect(screen.getByText('Toggle maximize ops-main').closest('[data-pane-id="ops-main"]')).toHaveAttribute('data-maximized', 'true')
+
+    currentWorkspaces = {
+      ...workspaces,
+      active: 'dev',
+      items: [workspaces.items[0]],
+    }
+    rerender(<App />)
+
+    currentWorkspaces = { ...workspaces, active: 'ops' }
+    rerender(<App />)
+
+    expect(screen.getByText('Toggle maximize ops-main').closest('[data-pane-id="ops-main"]')).toHaveAttribute('data-maximized', 'false')
   })
 
   it('shows a user-visible error when creating a pane fails', async () => {
