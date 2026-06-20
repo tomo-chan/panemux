@@ -1,4 +1,4 @@
-.PHONY: all build build-frontend build-backend dev clean run install-deps install-deps-ci \
+.PHONY: all build build-frontend build-backend dev clean run install-deps install-deps-ci install-hooks \
         test test-go test-frontend test-e2e \
         fmt fmt-go fmt-check-go \
         lint lint-go lint-go-deps lint-frontend \
@@ -9,13 +9,17 @@ GOLANGCI_LINT_VERSION := v2.11.4
 
 # ── Dependencies ──────────────────────────────────────────────────────────────
 
-install-deps: lint-go-deps
+install-deps: lint-go-deps install-hooks
 	cd frontend && npm install
 	go mod download
 
 install-deps-ci: lint-go-deps
 	cd frontend && npm ci
 	go mod download
+
+install-hooks:
+	chmod +x .githooks/pre-push
+	git config core.hooksPath .githooks
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
 

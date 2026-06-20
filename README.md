@@ -218,7 +218,7 @@ Authentication is attempted in order: configured `key_file` → configured `pass
 ### Setup
 
 ```sh
-make install-deps   # first time: npm install + go mod download
+make install-deps   # first time: npm install + go mod download + repo-local pre-push hook setup
 ```
 
 ### Dev servers
@@ -233,6 +233,9 @@ make dev-frontend   # Vite dev server on :5173 (proxies /api and /ws to :8080)
 ```sh
 make check   # lint + test + coverage (must pass before build)
 ```
+
+`make install-deps` also configures the tracked `.githooks/pre-push` hook, which runs `make check`
+before every `git push`.
 
 Individual commands:
 
@@ -253,7 +256,8 @@ cd frontend && npx tsc --noEmit  # TypeScript type check
 1. Fork the repository and create a feature branch.
 2. Make your changes — write tests first, confirm they fail, then implement.
 3. Run `make check` and ensure all checks pass.
-4. Open a pull request against `main` with a description of what and why.
+4. Push only after the local `pre-push` hook passes.
+5. Open a pull request against `main` with a description of what and why.
 
 Please keep pull requests focused. One logical change per PR makes review faster and history cleaner.
 
