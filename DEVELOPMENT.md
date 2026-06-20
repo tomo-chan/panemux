@@ -114,6 +114,7 @@ Example: `Config.sshConfigPath` uses `sshconfig.DefaultPath()` only when the ove
 
 - `make install-deps` configures the repo-local Git hooks path to `.githooks`.
 - The tracked `pre-push` hook runs `make check` and blocks `git push` when it fails.
+- The hook clears Git's repository-scoped hook environment variables before running `make check` so nested test Git repositories behave the same way they do outside hook execution.
 - Do not bypass the hook for ordinary development. Fix the failing checks instead.
 
 ### Documentation updates

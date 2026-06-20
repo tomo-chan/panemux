@@ -3,6 +3,12 @@
 set -eu
 
 repo_root=$(git rev-parse --show-toplevel)
+git_local_env_vars=$(git rev-parse --local-env-vars)
+
+# Git exports repository-scoped environment variables into hooks. Clear them so
+# nested git commands during make check can target their own test repositories.
+# shellcheck disable=SC2086
+unset $git_local_env_vars
 
 echo "pre-push: running make check"
 cd "$repo_root"
