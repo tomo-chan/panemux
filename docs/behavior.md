@@ -145,8 +145,15 @@ For pane-header Git status, local and local tmux panes inspect the local filesys
 and `ssh_tmux` panes run the equivalent Git inspection on the remote host. This allows headers to
 show branch/repository info even when the repository exists only on the SSH target.
 
+The workspace overview dashboard uses the same Git metadata source and also polls `/api/sessions`
+to summarize pane connection state across every workspace, including inactive ones.
+
 Pane-header Git and PR metadata is fetched immediately when a pane becomes visible, then refreshed
 every 10 seconds only while both the browser tab and that pane remain visible.
+
+Dashboard session-state and Git metadata polling are frontend-only and best-effort. While the
+browser tab is visible, the dashboard polls every 10 seconds so it can summarize all known panes
+across all workspaces without mounting hidden terminal instances.
 
 When a pane is hidden behind maximize, its header Git/PR polling stops until it becomes visible
 again. Restoring the browser tab or making a pane visible again triggers an immediate refresh so

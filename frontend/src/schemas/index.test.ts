@@ -6,6 +6,7 @@ import {
   LayoutNodeSchema,
   LayoutChildSchema,
   SessionInfoSchema,
+  SessionInfoListSchema,
   WSControlMessageSchema,
   SSHConfigHostSchema,
   SSHConfigHostsResponseSchema,
@@ -244,6 +245,38 @@ describe('SessionInfoSchema', () => {
       title: 'Terminal',
       state: 'unknown',
     })
+    expect(result.success).toBe(false)
+  })
+})
+
+describe('SessionInfoListSchema', () => {
+  it('accepts a valid sessions list response', () => {
+    const result = SessionInfoListSchema.safeParse([
+      {
+        id: 's1',
+        type: 'local',
+        title: 'Terminal',
+        state: 'connected',
+      },
+      {
+        id: 's2',
+        type: 'ssh',
+        title: 'Remote',
+        state: 'disconnected',
+      },
+    ])
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects invalid session items in the list', () => {
+    const result = SessionInfoListSchema.safeParse([
+      {
+        id: 's1',
+        type: 'local',
+        title: 'Terminal',
+        state: 'unknown',
+      },
+    ])
     expect(result.success).toBe(false)
   })
 })

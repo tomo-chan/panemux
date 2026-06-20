@@ -3,10 +3,13 @@ import { SplitContainer, LayoutActionsContext } from './components/SplitContaine
 import { PaneSettingsDialog } from './components/PaneSettingsDialog'
 import { AddSSHHostDialog } from './components/AddSSHHostDialog'
 import { WorkspaceTabs } from './components/WorkspaceTabs'
+import { WorkspaceOverviewDashboard } from './components/WorkspaceOverviewDashboard'
 import { useLayout } from './hooks/useLayout'
 import { usePaneSettings } from './hooks/usePaneSettings'
 import { useWorkspaceAttentionMonitor } from './hooks/useWorkspaceAttentionMonitor'
 import { useBrowserNotificationPermission } from './hooks/useBrowserNotificationPermission'
+import { useSessionsOverview } from './hooks/useSessionsOverview'
+import { useGitInfoMap } from './hooks/useGitInfoMap'
 import { DisplayConfig } from './types'
 import { TERMINAL_FONT_FAMILY } from './utils/fonts'
 import { findPaneById, generatePaneId, layoutContainsPane } from './utils/layoutTree'
@@ -28,6 +31,7 @@ export const App: React.FC = () => {
   const [isAddSSHHostSaving, setIsAddSSHHostSaving] = useState(false)
   const [createPaneError, setCreatePaneError] = useState<string | null>(null)
   const [movePaneError, setMovePaneError] = useState<string | null>(null)
+  const sessionsById = useSessionsOverview(Boolean(workspaces))
 
   const paneMetadataByID = useMemo(() => {
     const metadata = new Map<string, { paneTitle: string; workspaceId: string; workspaceTitle: string }>()
@@ -39,6 +43,8 @@ export const App: React.FC = () => {
 
     return metadata
   }, [workspaces])
+  const overviewPaneIds = useMemo(() => Array.from(paneMetadataByID.keys()), [paneMetadataByID])
+  const gitInfoById = useGitInfoMap(overviewPaneIds, overviewPaneIds.length > 0)
 
   const findWorkspaceForPane = useCallback((paneId: string) => {
     return workspaces?.items.find((workspace) => layoutContainsPane(workspace.layout, paneId)) ?? null
@@ -135,6 +141,12 @@ export const App: React.FC = () => {
       setMovePaneError(err instanceof Error ? err.message : 'Something went wrong')
     })
   }, [movePane])
+
+  const handleSelectOverviewPane = useCallback((workspaceId: string, paneId: string) => {
+    clearPaneAttention(paneId)
+    clearWorkspaceAttention(workspaceId)
+    void setActiveWorkspace(workspaceId)
+  }, [clearPaneAttention, clearWorkspaceAttention, setActiveWorkspace])
 
   if (error) {
     return (
@@ -234,103 +246,120 @@ export const App: React.FC = () => {
             }}
           />
         )}
-        <div style={{ position: 'relative', flex: 1, minWidth: 0, minHeight: 0 }}>
-          <SplitContainer layout={layout} onLayoutChange={updateSizes} />
-          {createPaneError && (
-            <div
-              role="alert"
-              style={{
-                position: 'absolute',
-                top: 12,
-                right: 12,
-                zIndex: 30,
-                maxWidth: 320,
-                padding: '8px 12px',
-                border: '1px solid #7f1d1d',
-                borderRadius: 6,
-                backgroundColor: '#2f1313',
-                color: '#fca5a5',
-                fontFamily: TERMINAL_FONT_FAMILY,
-                fontSize: '12px',
-                boxShadow: '0 8px 20px rgba(0, 0, 0, 0.35)',
-              }}
-            >
+        <div style={{ display: 'flex', flex: 1, minWidth: 0, minHeight: 0 }}>
+          <div style={{ position: 'relative', flex: 1, minWidth: 0, minHeight: 0 }}>
+            <SplitContainer layout={layout} onLayoutChange={updateSizes} />
+            {createPaneError && (
               <div
+                role="alert"
                 style={{
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  gap: 12,
+                  position: 'absolute',
+                  top: 12,
+                  right: 12,
+                  zIndex: 30,
+                  maxWidth: 320,
+                  padding: '8px 12px',
+                  border: '1px solid #7f1d1d',
+                  borderRadius: 6,
+                  backgroundColor: '#2f1313',
+                  color: '#fca5a5',
+                  fontFamily: TERMINAL_FONT_FAMILY,
+                  fontSize: '12px',
+                  boxShadow: '0 8px 20px rgba(0, 0, 0, 0.35)',
                 }}
               >
-                <span style={{ flex: 1 }}>Failed to create terminal: {createPaneError}</span>
-                <button
-                  type="button"
-                  aria-label="Dismiss create terminal error"
-                  onClick={() => setCreatePaneError(null)}
+                <div
                   style={{
-                    appearance: 'none',
-                    border: 'none',
-                    background: 'transparent',
-                    color: '#fca5a5',
-                    cursor: 'pointer',
-                    fontFamily: TERMINAL_FONT_FAMILY,
-                    fontSize: '12px',
-                    lineHeight: 1,
-                    padding: 0,
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: 12,
                   }}
                 >
-                  ×
-                </button>
+                  <span style={{ flex: 1 }}>Failed to create terminal: {createPaneError}</span>
+                  <button
+                    type="button"
+                    aria-label="Dismiss create terminal error"
+                    onClick={() => setCreatePaneError(null)}
+                    style={{
+                      appearance: 'none',
+                      border: 'none',
+                      background: 'transparent',
+                      color: '#fca5a5',
+                      cursor: 'pointer',
+                      fontFamily: TERMINAL_FONT_FAMILY,
+                      fontSize: '12px',
+                      lineHeight: 1,
+                      padding: 0,
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
               </div>
-            </div>
-          )}
-          {movePaneError && (
-            <div
-              role="alert"
-              style={{
-                position: 'absolute',
-                top: createPaneError ? 72 : 12,
-                right: 12,
-                zIndex: 30,
-                maxWidth: 320,
-                padding: '8px 12px',
-                border: '1px solid #7f1d1d',
-                borderRadius: 6,
-                backgroundColor: '#2f1313',
-                color: '#fca5a5',
-                fontFamily: TERMINAL_FONT_FAMILY,
-                fontSize: '12px',
-                boxShadow: '0 8px 20px rgba(0, 0, 0, 0.35)',
-              }}
-            >
+            )}
+            {movePaneError && (
               <div
+                role="alert"
                 style={{
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  gap: 12,
+                  position: 'absolute',
+                  top: createPaneError ? 72 : 12,
+                  right: 12,
+                  zIndex: 30,
+                  maxWidth: 320,
+                  padding: '8px 12px',
+                  border: '1px solid #7f1d1d',
+                  borderRadius: 6,
+                  backgroundColor: '#2f1313',
+                  color: '#fca5a5',
+                  fontFamily: TERMINAL_FONT_FAMILY,
+                  fontSize: '12px',
+                  boxShadow: '0 8px 20px rgba(0, 0, 0, 0.35)',
                 }}
               >
-                <span style={{ flex: 1 }}>Failed to move terminal: {movePaneError}</span>
-                <button
-                  type="button"
-                  aria-label="Dismiss move error"
-                  onClick={() => setMovePaneError(null)}
+                <div
                   style={{
-                    appearance: 'none',
-                    border: 'none',
-                    background: 'transparent',
-                    color: '#fca5a5',
-                    cursor: 'pointer',
-                    fontFamily: TERMINAL_FONT_FAMILY,
-                    fontSize: '12px',
-                    lineHeight: 1,
-                    padding: 0,
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: 12,
                   }}
                 >
-                  ×
-                </button>
+                  <span style={{ flex: 1 }}>Failed to move terminal: {movePaneError}</span>
+                  <button
+                    type="button"
+                    aria-label="Dismiss move error"
+                    onClick={() => setMovePaneError(null)}
+                    style={{
+                      appearance: 'none',
+                      border: 'none',
+                      background: 'transparent',
+                      color: '#fca5a5',
+                      cursor: 'pointer',
+                      fontFamily: TERMINAL_FONT_FAMILY,
+                      fontSize: '12px',
+                      lineHeight: 1,
+                      padding: 0,
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
+          </div>
+          {workspaces && (
+            <WorkspaceOverviewDashboard
+              workspaces={workspaces.items}
+              activeWorkspaceId={workspaces.active}
+              attentionPaneIds={attentionPaneIds}
+              attentionWorkspaceIds={attentionWorkspaceIds}
+              sessionsById={sessionsById}
+              gitInfoById={gitInfoById}
+              onSelectWorkspace={(workspaceId) => {
+                clearWorkspaceAttention(workspaceId)
+                void setActiveWorkspace(workspaceId)
+              }}
+              onSelectPane={handleSelectOverviewPane}
+            />
           )}
         </div>
         <PaneSettingsDialog

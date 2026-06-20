@@ -37,6 +37,8 @@ Three core principles guide the interactive UI:
 
 The workspace bar is always available, even when there is only one workspace. This avoids hiding structure-management actions behind a special mode and keeps workspace-level actions in one place.
 
+The workspace bar is separate from the workspace overview dashboard. The bar remains the movable navigation/control strip, while the overview dashboard is a fixed inner rail that summarizes every workspace and pane at once.
+
 ### Contents
 
 The bar can contain:
@@ -158,6 +160,41 @@ This model deliberately favors spatial predictability over hidden container sele
 ## Modal Dialogs
 
 The frontend now uses modal dialogs for higher-friction configuration tasks, rather than trying to compress all editing into inline chrome.
+
+## Workspace Overview Dashboard
+
+The main content area now includes a persistent overview dashboard on the right side. It does not move when the workspace bar moves to the top, bottom, left, or right.
+
+### Purpose
+
+- give the user one place to scan every workspace without switching tabs
+- show which panes are healthy, disconnected, exited, or requesting attention
+- surface repository and PR context for panes that are inside Git worktrees
+
+### Contents
+
+Each workspace card shows:
+
+- workspace title
+- active marker
+- attention marker when any pane in that workspace needs input
+- aggregate counts for connected, disconnected, and exited panes
+
+Each pane row shows:
+
+- pane title
+- pane type
+- connection state
+- repository and branch when available
+- PR number when available
+- attention marker when that pane needs input
+
+### Interaction model
+
+- clicking a workspace card switches to that workspace
+- clicking a pane row switches to the pane's workspace and clears its attention marker
+
+The dashboard intentionally uses the existing terminal chrome palette with slightly brighter card surfaces so it reads as operational status, not a separate admin screen.
 
 ---
 

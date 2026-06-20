@@ -47,6 +47,8 @@ const mockMovePane = vi.fn().mockResolvedValue(undefined)
 const mockAddWorkspace = vi.fn()
 const mockUseWorkspaceAttentionMonitor = vi.hoisted(() => vi.fn())
 const mockUseBrowserNotificationPermission = vi.hoisted(() => vi.fn())
+const mockUseSessionsOverview = vi.hoisted(() => vi.fn())
+const mockUseGitInfoMap = vi.hoisted(() => vi.fn())
 
 vi.mock('./hooks/useLayout', () => ({
   useLayout: () => ({
@@ -76,6 +78,14 @@ vi.mock('./hooks/useBrowserNotificationPermission', () => ({
   useBrowserNotificationPermission: mockUseBrowserNotificationPermission,
 }))
 
+vi.mock('./hooks/useSessionsOverview', () => ({
+  useSessionsOverview: mockUseSessionsOverview,
+}))
+
+vi.mock('./hooks/useGitInfoMap', () => ({
+  useGitInfoMap: mockUseGitInfoMap,
+}))
+
 vi.mock('./hooks/usePaneSettings', () => ({
   usePaneSettings: () => ({
     isOpen: false,
@@ -100,6 +110,8 @@ describe('App workspace deletion', () => {
     originalNotification = window.Notification
     mockUseWorkspaceAttentionMonitor.mockImplementation(() => {})
     mockUseBrowserNotificationPermission.mockImplementation(() => {})
+    mockUseSessionsOverview.mockReturnValue({})
+    mockUseGitInfoMap.mockReturnValue({})
     notificationInstance = null
     vi.stubGlobal('Notification', vi.fn(function MockNotification(this: Notification) {
       notificationInstance = {
@@ -133,6 +145,8 @@ describe('App workspace deletion', () => {
     mockTerminalPane.mockClear()
     mockUseWorkspaceAttentionMonitor.mockReset()
     mockUseBrowserNotificationPermission.mockReset()
+    mockUseSessionsOverview.mockReset()
+    mockUseGitInfoMap.mockReset()
     currentWorkspaces = workspaces
     vi.restoreAllMocks()
     if (originalNotification === undefined) {
@@ -155,6 +169,33 @@ describe('App workspace deletion', () => {
       expect.objectContaining({ pane: expect.objectContaining({ id: 'ops-main' }) }),
       expect.anything(),
     )
+  })
+
+  it('renders the overview dashboard with every workspace and pane summary', () => {
+    mockUseSessionsOverview.mockReturnValue({
+      main: { id: 'main', type: 'local', title: 'Main', state: 'connected' },
+      side: { id: 'side', type: 'local', title: 'Side', state: 'disconnected' },
+      'ops-main': { id: 'ops-main', type: 'local', title: 'Ops Main', state: 'exited' },
+    })
+    mockUseGitInfoMap.mockReturnValue({
+      main: { is_git: true, repo: 'panemux', branch: 'feature/dashboard', pr_number: 42, pr_url: 'https://github.com/example/panemux/pull/42' },
+    })
+
+    render(<App />)
+
+    expect(screen.getByLabelText('Workspace overview dashboard')).toBeInTheDocument()
+    expect(screen.getByText('Workspace Overview')).toBeInTheDocument()
+    expect(screen.getByText('Ops Main')).toBeInTheDocument()
+    expect(screen.getByText('feature/dashboard')).toBeInTheDocument()
+    expect(screen.getByText('PR #42')).toBeInTheDocument()
+  })
+
+  it('switches workspace from the overview dashboard', () => {
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open workspace Ops' }))
+
+    expect(mockSetActiveWorkspace).toHaveBeenCalledWith('ops')
   })
 
   it('keeps workspace attention while another pane in that workspace still needs attention', () => {
