@@ -183,6 +183,7 @@ describe('App workspace deletion', () => {
     expect(document.querySelector('[data-pane-id="main"]')).toHaveAttribute('data-attention', 'true')
     expect(document.querySelector('[data-pane-id="side"]')).toHaveAttribute('data-attention', 'true')
 
+    // Both visible panes render the same mock controls, so target the first one.
     fireEvent.click(screen.getAllByRole('button', { name: 'Clear main' })[0])
 
     expect(document.querySelector('[data-pane-id="main"]')).not.toHaveAttribute('data-attention')
