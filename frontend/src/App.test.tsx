@@ -1,5 +1,5 @@
 import { useContext, useEffect } from 'react'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
 import { LayoutActionsContext } from './components/SplitContainer'
@@ -171,7 +171,7 @@ describe('App workspace deletion', () => {
     )
   })
 
-  it('renders the overview dashboard with every workspace and pane summary', () => {
+  it('renders workspace summaries in the tabs and opens integrated details', () => {
     mockUseSessionsOverview.mockReturnValue({
       main: { id: 'main', type: 'local', title: 'Main', state: 'connected' },
       side: { id: 'side', type: 'local', title: 'Side', state: 'disconnected' },
@@ -183,19 +183,41 @@ describe('App workspace deletion', () => {
 
     render(<App />)
 
-    expect(screen.getByLabelText('Workspace overview dashboard')).toBeInTheDocument()
-    expect(screen.getByText('Workspace Overview')).toBeInTheDocument()
-    expect(screen.getByText('Ops Main')).toBeInTheDocument()
+    expect(screen.getByText('2 panes · 1 up · 1 down')).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Dev workspace details' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Ops workspace details' })).toBeInTheDocument()
+    expect(screen.getByText('Main')).toBeInTheDocument()
     expect(screen.getByText('feature/dashboard')).toBeInTheDocument()
     expect(screen.getByText('PR #42')).toBeInTheDocument()
   })
 
-  it('switches workspace from the overview dashboard', () => {
+  it('switches workspace from the integrated details panel', () => {
+    mockUseSessionsOverview.mockReturnValue({
+      'ops-main': { id: 'ops-main', type: 'local', title: 'Ops Main', state: 'connected' },
+    })
     render(<App />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open workspace Ops' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open pane Ops Main in Ops' }))
 
     expect(mockSetActiveWorkspace).toHaveBeenCalledWith('ops')
+  })
+
+  it('focuses the pane when a pane summary is selected in the active workspace', async () => {
+    mockTerminalPane.mockImplementation(({ pane }: { pane: { id: string } }) => (
+      <div data-pane-id={pane.id}>
+        <button type="button">Focus target {pane.id}</button>
+      </div>
+    ))
+
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: /Open pane main in Dev/i }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Focus target main' })).toHaveFocus()
+    })
+    expect(screen.getByRole('button', { name: /Open pane main in Dev/i })).toHaveStyle({
+      background: 'rgba(86, 156, 214, 0.16)',
+    })
   })
 
   it('keeps workspace attention while another pane in that workspace still needs attention', () => {
@@ -214,19 +236,19 @@ describe('App workspace deletion', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Notify main' }))
     fireEvent.click(screen.getByRole('button', { name: 'Notify side' }))
 
-    expect(screen.getByRole('tab', { name: 'Dev' })).toHaveAttribute('data-attention', 'true')
+    expect(screen.getByRole('tab', { name: /^Dev\b/ })).toHaveAttribute('data-attention', 'true')
     expect(screen.getByText('Notify main').closest('[data-pane-id="main"]')).toHaveAttribute('data-attention', 'true')
     expect(screen.getByText('Notify side').closest('[data-pane-id="side"]')).toHaveAttribute('data-attention', 'true')
 
     fireEvent.click(screen.getByRole('button', { name: 'Clear main' }))
 
-    expect(screen.getByRole('tab', { name: 'Dev' })).toHaveAttribute('data-attention', 'true')
+    expect(screen.getByRole('tab', { name: /^Dev\b/ })).toHaveAttribute('data-attention', 'true')
     expect(screen.getByText('Notify main').closest('[data-pane-id="main"]')).not.toHaveAttribute('data-attention')
     expect(screen.getByText('Notify side').closest('[data-pane-id="side"]')).toHaveAttribute('data-attention', 'true')
 
     fireEvent.click(screen.getByRole('button', { name: 'Clear side' }))
 
-    expect(screen.getByRole('tab', { name: 'Dev' })).not.toHaveAttribute('data-attention')
+    expect(screen.getByRole('tab', { name: /^Dev\b/ })).not.toHaveAttribute('data-attention')
   })
 
   it('confirms before deleting a workspace from edit-mode tabs', () => {
@@ -346,8 +368,8 @@ describe('App workspace deletion', () => {
 
     render(<App />)
     fireEvent.mouseDown(screen.getByRole('button', { name: 'Start drag main' }), { button: 0 })
-    fireEvent.mouseEnter(screen.getByRole('tab', { name: 'Ops' }))
-    fireEvent.mouseUp(screen.getByRole('tab', { name: 'Ops' }))
+    fireEvent.mouseEnter(screen.getByRole('tab', { name: /^Ops\b/ }))
+    fireEvent.mouseUp(screen.getByRole('tab', { name: /^Ops\b/ }))
 
     expect(mockMovePane).toHaveBeenCalledWith('main', { type: 'workspace-tab', workspaceId: 'ops' })
   })
@@ -405,8 +427,8 @@ describe('App workspace deletion', () => {
 
     render(<App />)
 
-    expect(screen.getByRole('tab', { name: 'Dev' })).toHaveAttribute('data-attention', 'true')
-    expect(screen.getByRole('tab', { name: 'Ops' })).not.toHaveAttribute('data-attention')
+    expect(screen.getByRole('tab', { name: /^Dev\b/ })).toHaveAttribute('data-attention', 'true')
+    expect(screen.getByRole('tab', { name: /^Ops\b/ })).not.toHaveAttribute('data-attention')
   })
 
   it('shows a browser notification with pane and workspace titles for inactive workspace attention', () => {
@@ -473,8 +495,8 @@ describe('App workspace deletion', () => {
 
     render(<App />)
 
-    expect(screen.getByRole('tab', { name: 'Dev' })).not.toHaveAttribute('data-attention')
-    expect(screen.getByRole('tab', { name: 'Ops' })).not.toHaveAttribute('data-attention')
+    expect(screen.getByRole('tab', { name: /^Dev\b/ })).not.toHaveAttribute('data-attention')
+    expect(screen.getByRole('tab', { name: /^Ops\b/ })).not.toHaveAttribute('data-attention')
   })
 
   it('does not request browser notification permission when attention is reported', () => {

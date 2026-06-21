@@ -35,6 +35,8 @@ function makeCtx(maximizedPaneId: string | null): LayoutActionsContextValue {
     onPaneAttention: vi.fn(),
     clearPaneAttention: vi.fn(),
     hasPaneAttention: vi.fn(() => false),
+    activePaneId: null,
+    setActivePaneId: vi.fn(),
   }
 }
 

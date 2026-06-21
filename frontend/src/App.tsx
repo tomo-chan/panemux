@@ -1,9 +1,8 @@
-import React, { useState, useCallback, useMemo } from 'react'
+import React, { useState, useCallback, useEffect, useMemo } from 'react'
 import { SplitContainer, LayoutActionsContext } from './components/SplitContainer'
 import { PaneSettingsDialog } from './components/PaneSettingsDialog'
 import { AddSSHHostDialog } from './components/AddSSHHostDialog'
 import { WorkspaceTabs } from './components/WorkspaceTabs'
-import { WorkspaceOverviewDashboard } from './components/WorkspaceOverviewDashboard'
 import { useLayout } from './hooks/useLayout'
 import { usePaneSettings } from './hooks/usePaneSettings'
 import { useWorkspaceAttentionMonitor } from './hooks/useWorkspaceAttentionMonitor'
@@ -14,7 +13,8 @@ import { DisplayConfig } from './types'
 import { TERMINAL_FONT_FAMILY } from './utils/fonts'
 import { findPaneById, generatePaneId, layoutContainsPane } from './utils/layoutTree'
 import type { MovePanePlacement } from './hooks/useLayout'
-import type { LayoutChild, LayoutNode, SSHConfigHost } from './schemas'
+import type { WorkspacePaneSummary, WorkspaceSummary } from './components/WorkspaceTabs'
+import type { GitInfo, LayoutChild, LayoutNode, SessionInfo, SSHConfigHost } from './schemas'
 
 const DEFAULT_DISPLAY: DisplayConfig = { show_header: true, show_status_bar: true }
 
@@ -22,6 +22,7 @@ export const App: React.FC = () => {
   const { layout, workspaces, displayConfig, error, updateSizes, splitPane, closePane, swapPanes, createPane, movePane, setActiveWorkspace, addWorkspace, deleteWorkspace, renameWorkspace, setWorkspaceTabPosition } = useLayout()
   const [maximizedPaneId, setMaximizedPaneId] = useState<string | null>(null)
   const [dragSourcePaneId, setDragSourcePaneId] = useState<string | null>(null)
+  const [activePaneId, setActivePaneId] = useState<string | null>(null)
   const [attentionPaneIds, setAttentionPaneIds] = useState<Set<string>>(() => new Set())
   const { isOpen, currentPane, sshConnectionNames, saveError, isSaving, openSettings, closeSettings, saveSettings, addSSHConfigHost, detectShell, browseDirectories } =
     usePaneSettings(layout, updateSizes)
@@ -31,6 +32,7 @@ export const App: React.FC = () => {
   const [isAddSSHHostSaving, setIsAddSSHHostSaving] = useState(false)
   const [createPaneError, setCreatePaneError] = useState<string | null>(null)
   const [movePaneError, setMovePaneError] = useState<string | null>(null)
+  const [pendingFocusedPaneId, setPendingFocusedPaneId] = useState<string | null>(null)
   const sessionsById = useSessionsOverview(Boolean(workspaces))
 
   const paneMetadataByID = useMemo(() => {
@@ -45,6 +47,30 @@ export const App: React.FC = () => {
   }, [workspaces])
   const overviewPaneIds = useMemo(() => Array.from(paneMetadataByID.keys()), [paneMetadataByID])
   const gitInfoById = useGitInfoMap(overviewPaneIds, overviewPaneIds.length > 0)
+  const workspaceSummaries = useMemo(() => {
+    const summaries: Record<string, WorkspaceSummary> = {}
+    if (!workspaces) return summaries
+
+    for (const workspace of workspaces.items) {
+      const panes = collectWorkspacePaneSummaries(
+        workspace.layout.children,
+        sessionsById,
+        gitInfoById,
+        attentionPaneIds,
+      )
+
+      summaries[workspace.id] = {
+        paneCount: panes.length,
+        connectedCount: panes.filter((pane) => pane.state === 'connected').length,
+        disconnectedCount: panes.filter((pane) => pane.state === 'disconnected').length,
+        exitedCount: panes.filter((pane) => pane.state === 'exited').length,
+        pendingCount: panes.filter((pane) => pane.state === 'pending').length,
+        panes,
+      }
+    }
+
+    return summaries
+  }, [attentionPaneIds, gitInfoById, sessionsById, workspaces])
 
   const findWorkspaceForPane = useCallback((paneId: string) => {
     return workspaces?.items.find((workspace) => layoutContainsPane(workspace.layout, paneId)) ?? null
@@ -142,16 +168,37 @@ export const App: React.FC = () => {
     })
   }, [movePane])
 
-  const handleSelectOverviewPane = useCallback((workspaceId: string, paneId: string) => {
+  const handleSelectWorkspacePaneSummary = useCallback((workspaceId: string, paneId: string) => {
     clearPaneAttention(paneId)
     clearWorkspaceAttention(workspaceId)
+    setActivePaneId(paneId)
+    setPendingFocusedPaneId(paneId)
     void setActiveWorkspace(workspaceId)
   }, [clearPaneAttention, clearWorkspaceAttention, setActiveWorkspace])
 
-  const handleSelectOverviewWorkspace = useCallback((workspaceId: string) => {
-    clearWorkspaceAttention(workspaceId)
-    void setActiveWorkspace(workspaceId)
-  }, [clearWorkspaceAttention, setActiveWorkspace])
+  useEffect(() => {
+    if (!pendingFocusedPaneId) return
+
+    let cancelled = false
+    let timeoutId: number | null = null
+
+    const attemptFocus = (remainingAttempts: number) => {
+      if (cancelled) return
+      if (focusPaneSurface(pendingFocusedPaneId)) {
+        setPendingFocusedPaneId(null)
+        return
+      }
+      if (remainingAttempts <= 0) return
+      timeoutId = window.setTimeout(() => attemptFocus(remainingAttempts - 1), 50)
+    }
+
+    attemptFocus(8)
+
+    return () => {
+      cancelled = true
+      if (timeoutId !== null) window.clearTimeout(timeoutId)
+    }
+  }, [pendingFocusedPaneId, workspaces?.active])
 
   if (error) {
     return (
@@ -209,6 +256,8 @@ export const App: React.FC = () => {
       onPaneAttention: notifyAttention,
       clearPaneAttention,
       hasPaneAttention: (paneId: string) => attentionPaneIds.has(paneId),
+      activePaneId,
+      setActivePaneId,
     }}>
       <div
         style={{
@@ -239,6 +288,11 @@ export const App: React.FC = () => {
             onSelect={setActiveWorkspace}
             attentionWorkspaceIds={attentionWorkspaceIds}
             onClearAttention={clearWorkspaceAttention}
+            workspaceSummaries={workspaceSummaries}
+            onSelectPaneFromSummary={handleSelectWorkspacePaneSummary}
+            onStartPaneDragFromSummary={setDragSourcePaneId}
+            onEndPaneDragFromSummary={() => setDragSourcePaneId(null)}
+            activePaneId={activePaneId}
             onAdd={addWorkspace}
             onRename={renameWorkspace}
             onTabPositionChange={setWorkspaceTabPosition}
@@ -251,117 +305,103 @@ export const App: React.FC = () => {
             }}
           />
         )}
-        <div style={{ display: 'flex', flex: 1, minWidth: 0, minHeight: 0 }}>
-          <div style={{ position: 'relative', flex: 1, minWidth: 0, minHeight: 0 }}>
-            <SplitContainer layout={layout} onLayoutChange={updateSizes} />
-            {createPaneError && (
+        <div style={{ position: 'relative', flex: 1, minWidth: 0, minHeight: 0 }}>
+          <SplitContainer layout={layout} onLayoutChange={updateSizes} />
+          {createPaneError && (
+            <div
+              role="alert"
+              style={{
+                position: 'absolute',
+                top: 12,
+                right: 12,
+                zIndex: 30,
+                maxWidth: 320,
+                padding: '8px 12px',
+                border: '1px solid #7f1d1d',
+                borderRadius: 6,
+                backgroundColor: '#2f1313',
+                color: '#fca5a5',
+                fontFamily: TERMINAL_FONT_FAMILY,
+                fontSize: '12px',
+                boxShadow: '0 8px 20px rgba(0, 0, 0, 0.35)',
+              }}
+            >
               <div
-                role="alert"
                 style={{
-                  position: 'absolute',
-                  top: 12,
-                  right: 12,
-                  zIndex: 30,
-                  maxWidth: 320,
-                  padding: '8px 12px',
-                  border: '1px solid #7f1d1d',
-                  borderRadius: 6,
-                  backgroundColor: '#2f1313',
-                  color: '#fca5a5',
-                  fontFamily: TERMINAL_FONT_FAMILY,
-                  fontSize: '12px',
-                  boxShadow: '0 8px 20px rgba(0, 0, 0, 0.35)',
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: 12,
                 }}
               >
-                <div
+                <span style={{ flex: 1 }}>Failed to create terminal: {createPaneError}</span>
+                <button
+                  type="button"
+                  aria-label="Dismiss create terminal error"
+                  onClick={() => setCreatePaneError(null)}
                   style={{
-                    display: 'flex',
-                    alignItems: 'flex-start',
-                    gap: 12,
+                    appearance: 'none',
+                    border: 'none',
+                    background: 'transparent',
+                    color: '#fca5a5',
+                    cursor: 'pointer',
+                    fontFamily: TERMINAL_FONT_FAMILY,
+                    fontSize: '12px',
+                    lineHeight: 1,
+                    padding: 0,
                   }}
                 >
-                  <span style={{ flex: 1 }}>Failed to create terminal: {createPaneError}</span>
-                  <button
-                    type="button"
-                    aria-label="Dismiss create terminal error"
-                    onClick={() => setCreatePaneError(null)}
-                    style={{
-                      appearance: 'none',
-                      border: 'none',
-                      background: 'transparent',
-                      color: '#fca5a5',
-                      cursor: 'pointer',
-                      fontFamily: TERMINAL_FONT_FAMILY,
-                      fontSize: '12px',
-                      lineHeight: 1,
-                      padding: 0,
-                    }}
-                  >
-                    ×
-                  </button>
-                </div>
+                  ×
+                </button>
               </div>
-            )}
-            {movePaneError && (
+            </div>
+          )}
+          {movePaneError && (
+            <div
+              role="alert"
+              style={{
+                position: 'absolute',
+                top: createPaneError ? 72 : 12,
+                right: 12,
+                zIndex: 30,
+                maxWidth: 320,
+                padding: '8px 12px',
+                border: '1px solid #7f1d1d',
+                borderRadius: 6,
+                backgroundColor: '#2f1313',
+                color: '#fca5a5',
+                fontFamily: TERMINAL_FONT_FAMILY,
+                fontSize: '12px',
+                boxShadow: '0 8px 20px rgba(0, 0, 0, 0.35)',
+              }}
+            >
               <div
-                role="alert"
                 style={{
-                  position: 'absolute',
-                  top: createPaneError ? 72 : 12,
-                  right: 12,
-                  zIndex: 30,
-                  maxWidth: 320,
-                  padding: '8px 12px',
-                  border: '1px solid #7f1d1d',
-                  borderRadius: 6,
-                  backgroundColor: '#2f1313',
-                  color: '#fca5a5',
-                  fontFamily: TERMINAL_FONT_FAMILY,
-                  fontSize: '12px',
-                  boxShadow: '0 8px 20px rgba(0, 0, 0, 0.35)',
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: 12,
                 }}
               >
-                <div
+                <span style={{ flex: 1 }}>Failed to move terminal: {movePaneError}</span>
+                <button
+                  type="button"
+                  aria-label="Dismiss move error"
+                  onClick={() => setMovePaneError(null)}
                   style={{
-                    display: 'flex',
-                    alignItems: 'flex-start',
-                    gap: 12,
+                    appearance: 'none',
+                    border: 'none',
+                    background: 'transparent',
+                    color: '#fca5a5',
+                    cursor: 'pointer',
+                    fontFamily: TERMINAL_FONT_FAMILY,
+                    fontSize: '12px',
+                    lineHeight: 1,
+                    padding: 0,
                   }}
                 >
-                  <span style={{ flex: 1 }}>Failed to move terminal: {movePaneError}</span>
-                  <button
-                    type="button"
-                    aria-label="Dismiss move error"
-                    onClick={() => setMovePaneError(null)}
-                    style={{
-                      appearance: 'none',
-                      border: 'none',
-                      background: 'transparent',
-                      color: '#fca5a5',
-                      cursor: 'pointer',
-                      fontFamily: TERMINAL_FONT_FAMILY,
-                      fontSize: '12px',
-                      lineHeight: 1,
-                      padding: 0,
-                    }}
-                  >
-                    ×
-                  </button>
-                </div>
+                  ×
+                </button>
               </div>
-            )}
-          </div>
-          {workspaces && (
-            <WorkspaceOverviewDashboard
-              workspaces={workspaces.items}
-              activeWorkspaceId={workspaces.active}
-              attentionPaneIds={attentionPaneIds}
-              attentionWorkspaceIds={attentionWorkspaceIds}
-              sessionsById={sessionsById}
-              gitInfoById={gitInfoById}
-              onSelectWorkspace={handleSelectOverviewWorkspace}
-              onSelectPane={handleSelectOverviewPane}
-            />
+            </div>
           )}
         </div>
         <PaneSettingsDialog
@@ -402,6 +442,22 @@ function showBrowserNotification(title: string, body: string, onClick?: () => vo
   }
 }
 
+function focusPaneSurface(paneId: string): boolean {
+  const pane = document.querySelector<HTMLElement>(`[data-pane-id="${escapeAttributeValue(paneId)}"]`)
+  if (!pane) return false
+
+  pane.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+  const focusTarget = pane.querySelector<HTMLElement>('.xterm-helper-textarea, textarea, [tabindex]:not([tabindex="-1"]), button, input')
+  if (!focusTarget) return false
+
+  focusTarget.focus({ preventScroll: true })
+  return document.activeElement === focusTarget
+}
+
+function escapeAttributeValue(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+}
+
 function collectPaneMetadata(
   layout: LayoutNode,
   workspaceId: string,
@@ -432,5 +488,52 @@ function collectChildPaneMetadata(
 
   for (const nestedChild of child.children) {
     collectChildPaneMetadata(nestedChild, workspaceId, workspaceTitle, metadata)
+  }
+}
+
+function collectWorkspacePaneSummaries(
+  children: LayoutChild[],
+  sessionsById: Record<string, SessionInfo>,
+  gitInfoById: Record<string, GitInfo>,
+  attentionPaneIds: ReadonlySet<string>,
+): WorkspacePaneSummary[] {
+  const panes: WorkspacePaneSummary[] = []
+
+  for (const child of children) {
+    collectChildPaneSummaries(child, sessionsById, gitInfoById, attentionPaneIds, panes)
+  }
+
+  return panes
+}
+
+function collectChildPaneSummaries(
+  child: LayoutChild,
+  sessionsById: Record<string, SessionInfo>,
+  gitInfoById: Record<string, GitInfo>,
+  attentionPaneIds: ReadonlySet<string>,
+  panes: WorkspacePaneSummary[],
+) {
+  if (child.pane) {
+    const session = sessionsById[child.pane.id]
+    const gitInfo = gitInfoById[child.pane.id]
+    const state = session?.state === 'connecting' ? 'pending' : session?.state ?? 'pending'
+    panes.push({
+      id: child.pane.id,
+      title: child.pane.title ?? session?.title ?? child.pane.id,
+      type: child.pane.type,
+      state,
+      connection: child.pane.connection,
+      repo: gitInfo?.repo,
+      branch: gitInfo?.branch,
+      prNumber: gitInfo?.pr_number,
+      attention: attentionPaneIds.has(child.pane.id),
+    })
+    return
+  }
+
+  if (!child.children?.length) return
+
+  for (const nestedChild of child.children) {
+    collectChildPaneSummaries(nestedChild, sessionsById, gitInfoById, attentionPaneIds, panes)
   }
 }

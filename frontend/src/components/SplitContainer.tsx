@@ -24,6 +24,8 @@ export interface LayoutActionsContextValue {
   onPaneAttention: (paneId: string) => void
   clearPaneAttention: (paneId: string) => void
   hasPaneAttention: (paneId: string) => boolean
+  activePaneId: string | null
+  setActivePaneId: (paneId: string | null) => void
 }
 
 export const LayoutActionsContext = React.createContext<LayoutActionsContextValue | null>(null)
