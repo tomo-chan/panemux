@@ -357,6 +357,7 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
                 style={{
                   position: 'relative',
                   display: 'flex',
+                  flexDirection: vertical ? 'column' : 'row',
                   flex: vertical ? '1 1 100%' : '0 1 auto',
                   minWidth: vertical ? '100%' : 200,
                 }}
@@ -533,7 +534,7 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
                     <div
                       style={{
                         display: 'grid',
-                        gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+                        gridTemplateColumns: vertical ? 'minmax(0, 1fr)' : 'repeat(auto-fit, minmax(160px, 1fr))',
                         gap: 6,
                         alignItems: 'start',
                       }}
@@ -643,7 +644,7 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
                     <div
                       style={{
                         display: 'grid',
-                        gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+                        gridTemplateColumns: vertical ? 'minmax(0, 1fr)' : 'repeat(auto-fit, minmax(160px, 1fr))',
                         gap: 6,
                         alignItems: 'start',
                       }}
