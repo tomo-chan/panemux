@@ -332,7 +332,8 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
             const hasAttention = !active && (attentionWorkspaceIds?.has(workspace.id) ?? false)
             const isWorkspaceDropTarget = Boolean(dragSourcePaneId) && !editing && workspace.id !== activeWorkspaceId
             const summary = workspaceSummaries?.[workspace.id]
-            const overlaySummary = expandedWorkspaceId === workspace.id && summary && !editing ? summary : null
+            const overlaySummary = !vertical && expandedWorkspaceId === workspace.id && summary && !editing ? summary : null
+            const inlineSummary = vertical && summary && !editing ? summary : null
             const dropHandlers = workspaceDropHandlers(workspace.id, isWorkspaceDropTarget)
 
             return (
@@ -538,6 +539,116 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
                       }}
                     >
                       {overlaySummary.panes.map((pane) => (
+                        <button
+                          key={pane.id}
+                          type="button"
+                          aria-label={`Open pane ${pane.title} in ${workspace.title}`}
+                          draggable
+                          onDragStart={(event) => handleSummaryPaneDragStart(event, pane.id)}
+                          onDragEnd={() => onEndPaneDragFromSummary?.()}
+                          onClick={() => {
+                            if (dragSourcePaneId) return
+                            onSelectPaneFromSummary?.(workspace.id, pane.id)
+                          }}
+                          style={{
+                            appearance: 'none',
+                            border: activePaneId === pane.id ? '1px solid rgba(137, 196, 244, 0.75)' : '1px solid #2d323c',
+                            borderRadius: 8,
+                            background: activePaneId === pane.id
+                              ? 'rgba(86, 156, 214, 0.16)'
+                              : pane.attention
+                                ? 'rgba(244, 191, 79, 0.08)'
+                                : '#1b1e24',
+                            color: '#d7dce5',
+                            padding: '7px 8px',
+                            textAlign: 'left',
+                            cursor: onSelectPaneFromSummary ? 'pointer' : 'default',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 4,
+                            fontFamily: TERMINAL_FONT_FAMILY,
+                            boxShadow: activePaneId === pane.id ? '0 0 0 1px rgba(137, 196, 244, 0.18)' : 'none',
+                            minHeight: 0,
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                            <span style={statusDotStyle(pane.state)} />
+                            <span
+                              style={{
+                                fontSize: 11,
+                                fontWeight: 700,
+                                minWidth: 0,
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                                flex: '1 1 auto',
+                              }}
+                            >
+                              {pane.title}
+                            </span>
+                            {pane.connection && <span style={pillStyle('#2d253f', '#cbb3ff', true)}>{pane.connection}</span>}
+                            {pane.attention && <span style={pillStyle('#5a4311', '#f4bf4f', true)}>Input</span>}
+                          </div>
+                          <div
+                            style={{
+                              display: 'flex',
+                              gap: 6,
+                              flexWrap: 'nowrap',
+                              color: '#8f98a8',
+                              fontSize: 10,
+                              minWidth: 0,
+                              overflow: 'hidden',
+                            }}
+                          >
+                            {pane.repo && (
+                              <span style={{ color: '#9fcbff', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {pane.repo}
+                              </span>
+                            )}
+                            {pane.branch && (
+                              <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pane.branch}</span>
+                            )}
+                            {pane.connection && !pane.repo && (
+                              <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pane.type}</span>
+                            )}
+                            {!pane.repo && <span style={{ whiteSpace: 'nowrap', flexShrink: 0 }}>{pane.state}</span>}
+                            {pane.prNumber && <span style={{ whiteSpace: 'nowrap', flexShrink: 0 }}>PR #{pane.prNumber}</span>}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+                )}
+                {inlineSummary && (
+                  <section
+                    aria-label={`${workspace.title} workspace details`}
+                    style={{
+                      flexBasis: 'auto',
+                      width: '100%',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 6,
+                      padding: '6px 8px 8px',
+                      borderTop: '1px solid #30353f',
+                      borderBottom: '1px solid #333842',
+                      background: active ? 'linear-gradient(180deg, #212733 0%, #1a1f28 100%)' : 'linear-gradient(180deg, #181a1f 0%, #15171b 100%)',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={workspaceMarkerStyle(active)} />
+                      <div style={{ color: active ? '#cfdced' : '#8f98a8', fontFamily: TERMINAL_FONT_FAMILY, fontSize: 10, lineHeight: 1.3 }}>
+                        {formatWorkspaceCounts(inlineSummary, true)}
+                      </div>
+                    </div>
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+                        gap: 6,
+                        alignItems: 'start',
+                      }}
+                    >
+                      {inlineSummary.panes.map((pane) => (
                         <button
                           key={pane.id}
                           type="button"

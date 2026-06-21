@@ -91,6 +91,22 @@ describe('WorkspaceTabs', () => {
     expect(screen.getByText('bastion')).toBeInTheDocument()
   })
 
+  it('keeps workspace details expanded for left-positioned workspace bars', () => {
+    render(
+      <WorkspaceTabs
+        workspaces={workspaces}
+        activeWorkspaceId="dev"
+        tabPosition="left"
+        workspaceSummaries={workspaceSummaries}
+        onSelect={() => {}}
+      />,
+    )
+
+    expect(screen.getByRole('region', { name: 'Dev workspace details' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Ops workspace details' })).toBeInTheDocument()
+    expect(screen.getByText('bastion')).toBeInTheDocument()
+  })
+
   it('routes pane selection from the integrated workspace details panel', () => {
     const onSelectPaneFromSummary = vi.fn()
     render(

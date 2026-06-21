@@ -37,7 +37,7 @@ Three core principles guide the interactive UI:
 
 The workspace bar is always available, even when there is only one workspace. This avoids hiding structure-management actions behind a special mode and keeps workspace-level actions in one place.
 
-The workspace bar now also carries compact operational summaries for each workspace. Detailed pane status stays visible inline for every workspace instead of living in a separate persistent rail or a per-workspace disclosure.
+The workspace bar now also carries compact operational summaries for each workspace. Detailed pane status is integrated with the workspace tabs themselves instead of living in a separate persistent rail.
 
 ### Contents
 
@@ -78,11 +78,16 @@ Each workspace tab can show a compact one-line summary of that workspace:
 - exited pane count
 - pending pane count when session data has not arrived yet
 
-Each summarized workspace card keeps its pane list visible by default. This preserves the operational overview while keeping the pointer travel short and making workspace-to-pane ownership obvious at a glance.
+Each summarized workspace tab also shows a compact pane-name strip so users can see what lives in that workspace without opening the full detail view.
 
 ### Workspace pane groups
 
-Each workspace renders as a grouped strip card: workspace title and summary on top, pane cards immediately beneath.
+Each workspace renders as a grouped strip anchored to its tab surface. The pane cards are not an independent dashboard panel; they are visually and interactively subordinate to the workspace tab they belong to.
+
+Presentation depends on bar position:
+
+- top/bottom bars: pane cards appear as a hover/focus overlay attached to the tab
+- left/right bars: pane cards stay expanded inline under the tab
 
 Each pane group shows:
 
@@ -94,7 +99,9 @@ Each pane group shows:
 - attention badges for panes that need input
 - a stronger selection treatment for the currently focused pane
 
-Clicking a pane card switches to that workspace and clears pane/workspace attention, so the summary surface also works as a lightweight status-driven navigator.
+Clicking a pane card switches to that workspace if needed, focuses the corresponding pane, and clears pane/workspace attention. This makes the summary surface a status-driven navigator rather than a passive label.
+
+Pane cards are also drag sources for cross-workspace moves. The drag gesture starts from the overview card itself, not from the pane body, so terminal interaction and layout interaction remain separate.
 
 ---
 
