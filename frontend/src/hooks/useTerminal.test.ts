@@ -1,6 +1,6 @@
 import { renderHook, act } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { __resetTerminalEntriesForTests, useTerminal } from './useTerminal'
+import { __computePullRequestLinksForTests, __resetTerminalEntriesForTests, useTerminal } from './useTerminal'
 import { TERMINAL_FONT_FAMILY } from '../utils/fonts'
 
 // ── xterm.js mocks ───────────────────────────────────────────────────────────
@@ -10,12 +10,18 @@ const { mockWrite, mockTerm, mockFitAddon, mockTerminalCtor } = vi.hoisted(() =>
     options: { disableStdin: false },
     attachCustomKeyEventHandler: vi.fn(),
     element: undefined as HTMLElement | undefined,
+    registerLinkProvider: vi.fn(),
     hasSelection: vi.fn(() => false),
     getSelection: vi.fn(() => ''),
     loadAddon: vi.fn(),
     open: vi.fn(),
     onData: vi.fn(),
     onBinary: vi.fn(),
+    buffer: {
+      active: {
+        getLine: vi.fn(() => null),
+      },
+    },
     dispose: vi.fn(),
     cols: 80,
     rows: 24,
@@ -155,6 +161,70 @@ describe('useTerminal', () => {
     expect(mockTerm.loadAddon).toHaveBeenCalledTimes(2)
   })
 
+  it('registers a custom link provider for pull request numbers', () => {
+    const container = makeContainer()
+    renderHook(() => useTerminal({ sessionId: 's1', container, repoURL: 'https://github.com/example/panemux' }))
+
+    expect(mockTerm.registerLinkProvider).toHaveBeenCalledTimes(1)
+  })
+
+  it('turns visible #123 references into pull request links when repo metadata is available', () => {
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null)
+    const term = {
+      buffer: {
+        active: {
+          getLine: vi.fn(() => ({
+            translateToString: vi.fn(() => 'Reviewing #123 now'),
+          })),
+        },
+      },
+    } as unknown as typeof mockTerm
+
+    const links = __computePullRequestLinksForTests(term as never, 'https://github.com/example/panemux', 1)
+
+    expect(links).toHaveLength(1)
+    expect(links[0].range).toEqual({
+      start: { x: 10, y: 0 },
+      end: { x: 14, y: 0 },
+    })
+    links[0].activate()
+    expect(openSpy).toHaveBeenCalledWith(
+      'https://github.com/example/panemux/pull/123',
+      '_blank',
+      'noopener,noreferrer',
+    )
+  })
+
+  it('skips pull request link generation when repo metadata is unavailable', () => {
+    const term = {
+      buffer: {
+        active: {
+          getLine: vi.fn(() => ({
+            translateToString: vi.fn(() => 'Reviewing #123 now'),
+          })),
+        },
+      },
+    } as unknown as typeof mockTerm
+
+    const links = __computePullRequestLinksForTests(term as never, null, 1)
+
+    expect(links).toHaveLength(0)
+  })
+
+  it('skips pull request link generation when the buffer line is missing', () => {
+    const term = {
+      buffer: {
+        active: {
+          getLine: vi.fn(() => null),
+        },
+      },
+    } as unknown as typeof mockTerm
+
+    const links = __computePullRequestLinksForTests(term as never, 'https://github.com/example/panemux', 1)
+
+    expect(links).toHaveLength(0)
+  })
+
   it('registers onData and onBinary handlers', () => {
     const container = makeContainer()
     renderHook(() => useTerminal({ sessionId: 's1', container }))
@@ -166,6 +236,20 @@ describe('useTerminal', () => {
     const container = makeContainer()
     renderHook(() => useTerminal({ sessionId: 's1', container }))
     expect(mockTerm.attachCustomKeyEventHandler).toHaveBeenCalledTimes(1)
+  })
+
+  it('notifies the caller when the terminal container receives interaction', () => {
+    const container = makeContainer()
+    const onInteraction = vi.fn()
+
+    renderHook(() => useTerminal({ sessionId: 's1', container, onInteraction }))
+
+    act(() => {
+      container.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }))
+      container.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }))
+    })
+
+    expect(onInteraction).toHaveBeenCalledTimes(2)
   })
 
   it('copies selected text and suppresses terminal input on copy shortcut', () => {
