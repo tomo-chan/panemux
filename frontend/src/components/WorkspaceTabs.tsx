@@ -141,6 +141,7 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
   const [editingWorkspaceId, setEditingWorkspaceId] = useState<string | null>(null)
   const [draftTitle, setDraftTitle] = useState('')
   const [hoveredDropWorkspaceId, setHoveredDropWorkspaceId] = useState<string | null>(null)
+  const [expandedWorkspaceId, setExpandedWorkspaceId] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
   const renameFinalizedRef = useRef(false)
 
@@ -156,6 +157,12 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
       setHoveredDropWorkspaceId(null)
     }
   }, [dragSourcePaneId])
+
+  useEffect(() => {
+    if (editingWorkspaceId) {
+      setExpandedWorkspaceId(editingWorkspaceId)
+    }
+  }, [editingWorkspaceId])
 
   const startRename = (workspace: Workspace) => {
     if (!onRename) return
@@ -297,24 +304,26 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
               ? '0 1px 0 0'
               : '0 0 0 1px',
         flexDirection: vertical ? 'column' : 'row',
-        overflowX: vertical ? 'hidden' : 'auto',
-        overflowY: vertical ? 'auto' : 'hidden',
+        overflow: 'visible',
         maxWidth: vertical ? 360 : undefined,
         minWidth: vertical ? 280 : undefined,
+        position: 'relative',
+        zIndex: 20,
       }}
     >
       {showTabs && (
         <div
           role="tablist"
-          aria-orientation={vertical ? 'vertical' : 'horizontal'}
+          aria-orientation="horizontal"
           style={{
             display: 'flex',
-            flexDirection: vertical ? 'column' : 'row',
-            flexWrap: vertical ? 'nowrap' : 'wrap',
+            flexDirection: 'row',
+            flexWrap: 'wrap',
             alignContent: 'flex-start',
             flex: 1,
             minWidth: 0,
             minHeight: 0,
+            overflow: 'visible',
           }}
         >
           {workspaces.map((workspace) => {
@@ -323,14 +332,36 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
             const hasAttention = !active && (attentionWorkspaceIds?.has(workspace.id) ?? false)
             const isWorkspaceDropTarget = Boolean(dragSourcePaneId) && !editing && workspace.id !== activeWorkspaceId
             const summary = workspaceSummaries?.[workspace.id]
-            const previewRows = summary ? workspacePreviewRows(summary) : []
+            const overlaySummary = expandedWorkspaceId === workspace.id && summary && !editing ? summary : null
             const dropHandlers = workspaceDropHandlers(workspace.id, isWorkspaceDropTarget)
 
             return (
-              <React.Fragment key={workspace.id}>
+              <div
+                key={workspace.id}
+                {...dropHandlers}
+                onMouseEnter={() => {
+                  dropHandlers.onMouseEnter()
+                  setExpandedWorkspaceId(workspace.id)
+                }}
+                onMouseLeave={() => {
+                  dropHandlers.onMouseLeave()
+                  setExpandedWorkspaceId((current) => current === workspace.id ? null : current)
+                }}
+                onFocusCapture={() => setExpandedWorkspaceId(workspace.id)}
+                onBlurCapture={(event) => {
+                  const nextTarget = event.relatedTarget
+                  if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) return
+                  setExpandedWorkspaceId((current) => current === workspace.id ? null : current)
+                }}
+                style={{
+                  position: 'relative',
+                  display: 'flex',
+                  flex: vertical ? '1 1 100%' : '0 1 auto',
+                  minWidth: vertical ? '100%' : 200,
+                }}
+              >
                 <div
                   className={hasAttention ? 'panemux-workspace-tab-attention' : undefined}
-                  {...dropHandlers}
                   style={{
                     borderRight: !vertical ? '1px solid #333842' : undefined,
                     borderBottom: vertical ? '1px solid #333842' : undefined,
@@ -345,10 +376,9 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
                       : 'none',
                     display: 'flex',
                     alignItems: 'stretch',
-                    minHeight: vertical ? 0 : 88,
-                    minWidth: vertical ? '100%' : 250,
-                    maxWidth: vertical ? '100%' : 320,
-                    flex: vertical ? '0 0 auto' : '1 1 250px',
+                    minHeight: vertical ? 44 : 48,
+                    minWidth: '100%',
+                    flex: '1 1 auto',
                   }}
                 >
                   {editing ? (
@@ -401,11 +431,11 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
                         fontFamily: TERMINAL_FONT_FAMILY,
                         fontSize: 13,
                         minWidth: 0,
-                        padding: '8px 8px 10px 12px',
+                        padding: '8px 10px',
                         textAlign: 'left',
                       }}
                     >
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0 }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
                           <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontWeight: 700, fontSize: 13 }}>
                             {workspace.title}
@@ -416,24 +446,19 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
                             </span>
                           )}
                         </div>
-                        {previewRows.length > 0 && (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
-                            {previewRows.map((row) => (
-                              <span
-                                key={row}
-                                style={{
-                                  color: active ? '#d7dce5' : '#9aa3b2',
-                                  fontSize: 11,
-                                  lineHeight: 1.3,
-                                  whiteSpace: 'nowrap',
-                                  overflow: 'hidden',
-                                  textOverflow: 'ellipsis',
-                                }}
-                              >
-                                {row}
-                              </span>
-                            ))}
-                          </div>
+                        {summary && (
+                          <span
+                            style={{
+                              color: active ? '#d7dce5' : '#9aa3b2',
+                              fontSize: 11,
+                              lineHeight: 1.3,
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                            }}
+                          >
+                            {summary.panes.map((pane) => pane.title).join(' · ')}
+                          </span>
                         )}
                       </div>
                     </InteractiveSurfaceButton>
@@ -479,36 +504,40 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
                     </InteractiveSurfaceButton>
                   )}
                 </div>
-                {summary && !editing && (
+                {overlaySummary && (
                   <section
                     aria-label={`${workspace.title} workspace details`}
-                    {...dropHandlers}
                     style={{
-                      flexBasis: vertical ? 'auto' : '100%',
-                      width: vertical ? '100%' : '100%',
+                      position: 'absolute',
+                      ...overlayPositionStyle(tabPosition),
+                      width: vertical ? 320 : 360,
+                      maxWidth: 'min(360px, calc(100vw - 32px))',
                       display: 'flex',
                       flexDirection: 'column',
                       gap: 6,
-                      padding: '6px 8px 8px',
-                      borderTop: '1px solid #30353f',
-                      borderBottom: vertical ? '1px solid #333842' : undefined,
+                      padding: '8px',
+                      border: '1px solid #30353f',
+                      borderRadius: 10,
                       background: active ? 'linear-gradient(180deg, #212733 0%, #1a1f28 100%)' : 'linear-gradient(180deg, #181a1f 0%, #15171b 100%)',
+                      boxShadow: '0 14px 28px rgba(0, 0, 0, 0.38)',
+                      zIndex: 30,
                     }}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <span style={workspaceMarkerStyle(active)} />
                       <div style={{ color: active ? '#cfdced' : '#8f98a8', fontFamily: TERMINAL_FONT_FAMILY, fontSize: 10, lineHeight: 1.3 }}>
-                        {formatWorkspaceCounts(summary, true)}
+                        {formatWorkspaceCounts(overlaySummary, true)}
                       </div>
                     </div>
                     <div
                       style={{
                         display: 'grid',
-                        gridTemplateColumns: vertical ? 'minmax(0, 1fr)' : 'repeat(auto-fit, minmax(170px, 1fr))',
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
                         gap: 6,
+                        alignItems: 'start',
                       }}
                     >
-                      {summary.panes.map((pane) => (
+                      {overlaySummary.panes.map((pane) => (
                         <button
                           key={pane.id}
                           type="button"
@@ -538,29 +567,58 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
                             gap: 4,
                             fontFamily: TERMINAL_FONT_FAMILY,
                             boxShadow: activePaneId === pane.id ? '0 0 0 1px rgba(137, 196, 244, 0.18)' : 'none',
+                            minHeight: 0,
                           }}
                         >
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flexWrap: 'wrap' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
                             <span style={statusDotStyle(pane.state)} />
-                            <span style={{ fontSize: 11, fontWeight: 700, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            <span
+                              style={{
+                                fontSize: 11,
+                                fontWeight: 700,
+                                minWidth: 0,
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                                flex: '1 1 auto',
+                              }}
+                            >
                               {pane.title}
                             </span>
-                            {pane.connection && <span style={pillStyle('#2d253f', '#cbb3ff')}>{pane.connection}</span>}
-                            {pane.attention && <span style={pillStyle('#5a4311', '#f4bf4f')}>Input</span>}
+                            {pane.connection && <span style={pillStyle('#2d253f', '#cbb3ff', true)}>{pane.connection}</span>}
+                            {pane.attention && <span style={pillStyle('#5a4311', '#f4bf4f', true)}>Input</span>}
                           </div>
-                          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', color: '#8f98a8', fontSize: 10 }}>
-                            {pane.repo && <span style={{ color: '#9fcbff' }}>{pane.repo}</span>}
-                            {pane.branch && <span>{pane.branch}</span>}
-                            {pane.connection && !pane.repo && <span>{pane.type}</span>}
-                            {!pane.repo && <span>{pane.state}</span>}
-                            {pane.prNumber && <span>PR #{pane.prNumber}</span>}
+                          <div
+                            style={{
+                              display: 'flex',
+                              gap: 6,
+                              flexWrap: 'nowrap',
+                              color: '#8f98a8',
+                              fontSize: 10,
+                              minWidth: 0,
+                              overflow: 'hidden',
+                            }}
+                          >
+                            {pane.repo && (
+                              <span style={{ color: '#9fcbff', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {pane.repo}
+                              </span>
+                            )}
+                            {pane.branch && (
+                              <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pane.branch}</span>
+                            )}
+                            {pane.connection && !pane.repo && (
+                              <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pane.type}</span>
+                            )}
+                            {!pane.repo && <span style={{ whiteSpace: 'nowrap', flexShrink: 0 }}>{pane.state}</span>}
+                            {pane.prNumber && <span style={{ whiteSpace: 'nowrap', flexShrink: 0 }}>PR #{pane.prNumber}</span>}
                           </div>
                         </button>
                       ))}
                     </div>
                   </section>
                 )}
-              </React.Fragment>
+              </div>
             )
           })}
         </div>
@@ -613,18 +671,33 @@ function actionButtonStyle(vertical: boolean): React.CSSProperties {
   }
 }
 
-function pillStyle(backgroundColor: string, color: string): React.CSSProperties {
+function pillStyle(backgroundColor: string, color: string, compact = false): React.CSSProperties {
   return {
     display: 'inline-flex',
     alignItems: 'center',
-    padding: '2px 6px',
+    padding: compact ? '1px 5px' : '2px 6px',
     borderRadius: 999,
     backgroundColor,
     color,
-    fontSize: 10,
+    fontSize: compact ? 9 : 10,
     fontWeight: 700,
     letterSpacing: '0.02em',
+    whiteSpace: 'nowrap',
+    flexShrink: 0,
   }
+}
+
+function overlayPositionStyle(tabPosition: TabPosition): React.CSSProperties {
+  if (tabPosition === 'bottom') {
+    return { bottom: 'calc(100% + 8px)', left: 0 }
+  }
+  if (tabPosition === 'left') {
+    return { left: 'calc(100% + 8px)', top: 0 }
+  }
+  if (tabPosition === 'right') {
+    return { right: 'calc(100% + 8px)', top: 0 }
+  }
+  return { top: 'calc(100% + 8px)', left: 0 }
 }
 
 function formatWorkspaceCounts(summary: WorkspaceSummary, includeExited = false): string {
@@ -633,19 +706,6 @@ function formatWorkspaceCounts(summary: WorkspaceSummary, includeExited = false)
   if (includeExited || summary.exitedCount > 0) parts.push(`${summary.exitedCount} exited`)
   if (summary.pendingCount > 0) parts.push(`${summary.pendingCount} pending`)
   return parts.join(' · ')
-}
-
-function workspacePreviewRows(summary: WorkspaceSummary): string[] {
-  const rows = summary.panes.slice(0, 2).map((pane) => {
-    const details = [pane.connection, pane.repo, pane.branch].filter(Boolean).join(' · ')
-    return details ? `${pane.title} · ${details}` : `${pane.title} · ${pane.state}`
-  })
-
-  if (summary.paneCount > 2) {
-    rows.push(`+${summary.paneCount - 2} more panes`)
-  }
-
-  return rows
 }
 
 function workspaceMarkerStyle(active: boolean): React.CSSProperties {

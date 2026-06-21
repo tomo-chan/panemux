@@ -63,12 +63,11 @@ describe('WorkspaceTabs', () => {
     )
 
     expect(screen.getByText('2 panes · 1 up · 1 down')).toBeInTheDocument()
-    expect(screen.getByText('Main · panemux · main')).toBeInTheDocument()
-    expect(screen.getByText('Side · prod')).toBeInTheDocument()
-    expect(screen.getByText('Ops Main · bastion')).toBeInTheDocument()
+    expect(screen.getByText('Main · Side')).toBeInTheDocument()
+    expect(screen.getByText('Ops Main')).toBeInTheDocument()
   })
 
-  it('keeps every workspace details section open by default', () => {
+  it('shows workspace details as an overlay when hovering a workspace tab', () => {
     render(
       <WorkspaceTabs
         workspaces={workspaces}
@@ -79,13 +78,17 @@ describe('WorkspaceTabs', () => {
       />,
     )
 
+    expect(screen.queryByRole('region', { name: 'Dev workspace details' })).not.toBeInTheDocument()
+    fireEvent.mouseEnter(screen.getByRole('tab', { name: /^Dev\b/ }))
     expect(screen.getByRole('region', { name: 'Dev workspace details' })).toBeInTheDocument()
-    expect(screen.getByRole('region', { name: 'Ops workspace details' })).toBeInTheDocument()
     expect(screen.getByText('Main')).toBeInTheDocument()
     expect(screen.getByText('PR #12')).toBeInTheDocument()
     expect(screen.getByText('prod')).toBeInTheDocument()
-    expect(screen.getByText('bastion')).toBeInTheDocument()
     expect(screen.getByText('Input')).toBeInTheDocument()
+
+    fireEvent.mouseEnter(screen.getByRole('tab', { name: /^Ops\b/ }))
+    expect(screen.getByRole('region', { name: 'Ops workspace details' })).toBeInTheDocument()
+    expect(screen.getByText('bastion')).toBeInTheDocument()
   })
 
   it('routes pane selection from the integrated workspace details panel', () => {
@@ -101,6 +104,7 @@ describe('WorkspaceTabs', () => {
       />,
     )
 
+    fireEvent.mouseEnter(screen.getByRole('tab', { name: /^Dev\b/ }))
     fireEvent.click(screen.getByRole('button', { name: 'Open pane Side in Dev' }))
 
     expect(onSelectPaneFromSummary).toHaveBeenCalledWith('dev', 'side')
@@ -124,6 +128,7 @@ describe('WorkspaceTabs', () => {
       />,
     )
 
+    fireEvent.mouseEnter(screen.getByRole('tab', { name: /^Dev\b/ }))
     fireEvent.dragStart(screen.getByRole('button', { name: 'Open pane Side in Dev' }), { dataTransfer })
 
     expect(dataTransfer.effectAllowed).toBe('move')
@@ -143,6 +148,7 @@ describe('WorkspaceTabs', () => {
       />,
     )
 
+    fireEvent.mouseEnter(screen.getByRole('tab', { name: /^Dev\b/ }))
     expect(screen.getByRole('button', { name: 'Open pane Side in Dev' })).toHaveStyle({
       background: 'rgba(86, 156, 214, 0.16)',
     })
@@ -257,6 +263,7 @@ describe('WorkspaceTabs', () => {
       />,
     )
 
+    fireEvent.mouseEnter(screen.getByRole('tab', { name: /^Ops\b/ }))
     const details = screen.getByRole('region', { name: 'Ops workspace details' })
     fireEvent.dragOver(details, { dataTransfer })
     fireEvent.drop(details, { dataTransfer })
@@ -298,6 +305,7 @@ describe('WorkspaceTabs', () => {
       />,
     )
 
+    fireEvent.mouseEnter(screen.getByRole('tab', { name: /^Ops\b/ }))
     const paneCard = screen.getByRole('button', { name: 'Open pane Ops Main in Ops' })
     fireEvent.mouseEnter(paneCard)
     fireEvent.mouseUp(paneCard)
@@ -317,10 +325,13 @@ describe('WorkspaceTabs', () => {
       />,
     )
 
-    const tab = screen.getByRole('tab', { name: /^Ops\b/ }).parentElement
-    expect(tab).not.toBeNull()
-    fireEvent.mouseEnter(tab!)
-    expect(tab).toHaveStyle({
+    const tabButton = screen.getByRole('tab', { name: /^Ops\b/ })
+    const tabSurface = tabButton.parentElement
+    const wrapper = tabSurface?.parentElement
+    expect(tabSurface).not.toBeNull()
+    expect(wrapper).not.toBeNull()
+    fireEvent.mouseEnter(wrapper!)
+    expect(tabSurface!).toHaveStyle({
       backgroundColor: 'rgba(86, 156, 214, 0.24)',
       boxShadow: 'inset 0 0 0 1px rgba(137, 196, 244, 0.45)',
     })
@@ -338,7 +349,7 @@ describe('WorkspaceTabs', () => {
 
     const rerenderedTab = screen.getByRole('tab', { name: /^Ops\b/ }).parentElement
     expect(rerenderedTab).not.toBeNull()
-    expect(rerenderedTab).not.toHaveStyle({
+    expect(rerenderedTab!).not.toHaveStyle({
       backgroundColor: 'rgba(86, 156, 214, 0.24)',
       boxShadow: 'inset 0 0 0 1px rgba(137, 196, 244, 0.45)',
     })
@@ -534,12 +545,12 @@ describe('WorkspaceTabs', () => {
     expect(screen.getByRole('tab', { name: /^Dev\b/ })).toBeInTheDocument()
   })
 
-  it('uses vertical orientation for left and right positions', () => {
+  it('uses horizontal orientation for left and right positions', () => {
     for (const tabPosition of ['left', 'right'] as const) {
       const { unmount } = render(
         <WorkspaceTabs workspaces={workspaces} activeWorkspaceId="dev" tabPosition={tabPosition} onSelect={() => {}} />,
       )
-      expect(screen.getByRole('tablist')).toHaveAttribute('aria-orientation', 'vertical')
+      expect(screen.getByRole('tablist')).toHaveAttribute('aria-orientation', 'horizontal')
       unmount()
     }
   })

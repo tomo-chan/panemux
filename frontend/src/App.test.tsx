@@ -184,8 +184,8 @@ describe('App workspace deletion', () => {
     render(<App />)
 
     expect(screen.getByText('2 panes · 1 up · 1 down')).toBeInTheDocument()
+    fireEvent.mouseEnter(screen.getByRole('tab', { name: /^Dev\b/ }))
     expect(screen.getByRole('region', { name: 'Dev workspace details' })).toBeInTheDocument()
-    expect(screen.getByRole('region', { name: 'Ops workspace details' })).toBeInTheDocument()
     expect(screen.getByText('Main')).toBeInTheDocument()
     expect(screen.getByText('feature/dashboard')).toBeInTheDocument()
     expect(screen.getByText('PR #42')).toBeInTheDocument()
@@ -197,6 +197,7 @@ describe('App workspace deletion', () => {
     })
     render(<App />)
 
+    fireEvent.mouseEnter(screen.getByRole('tab', { name: /^Ops\b/ }))
     fireEvent.click(screen.getByRole('button', { name: 'Open pane Ops Main in Ops' }))
 
     expect(mockSetActiveWorkspace).toHaveBeenCalledWith('ops')
@@ -210,6 +211,7 @@ describe('App workspace deletion', () => {
     ))
 
     render(<App />)
+    fireEvent.mouseEnter(screen.getByRole('tab', { name: /^Dev\b/ }))
     fireEvent.click(screen.getByRole('button', { name: /Open pane main in Dev/i }))
 
     await waitFor(() => {
