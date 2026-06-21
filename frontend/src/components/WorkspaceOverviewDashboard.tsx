@@ -61,7 +61,7 @@ export const WorkspaceOverviewDashboard: React.FC<WorkspaceOverviewDashboardProp
           const state = sessionsById[pane.id]?.state
           if (state === 'disconnected') counts.disconnected += 1
           else if (state === 'exited') counts.exited += 1
-          else if (state === 'connected' || state === 'connecting') counts.connected += 1
+          else if (state === 'connected') counts.connected += 1
           else counts.pending += 1
         }
 

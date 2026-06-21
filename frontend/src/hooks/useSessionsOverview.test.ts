@@ -94,6 +94,7 @@ describe('useSessionsOverview', () => {
   })
 
   it('keeps the previous state when the response is not ok', async () => {
+    vi.useFakeTimers()
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({
         ok: true,
@@ -103,17 +104,15 @@ describe('useSessionsOverview', () => {
     window.fetch = fetchMock
 
     const { result } = renderHook(() => useSessionsOverview())
-    await waitFor(() => expect(result.current.main?.state).toBe('connected'))
+    await act(async () => {})
+    expect(result.current.main?.state).toBe('connected')
 
-    await act(async () => {
-      await fetchMock.mock.results[0]?.value
+    act(() => {
+      vi.advanceTimersByTime(10000)
     })
+    await act(async () => {})
 
-    await act(async () => {
-      const refetch = fetchMock.mock.calls.length
-      await (fetchMock as ReturnType<typeof vi.fn>).mock.results[refetch - 1]?.value
-    })
-
+    expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(result.current.main?.state).toBe('connected')
   })
 })

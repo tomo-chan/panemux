@@ -148,6 +148,11 @@ export const App: React.FC = () => {
     void setActiveWorkspace(workspaceId)
   }, [clearPaneAttention, clearWorkspaceAttention, setActiveWorkspace])
 
+  const handleSelectOverviewWorkspace = useCallback((workspaceId: string) => {
+    clearWorkspaceAttention(workspaceId)
+    void setActiveWorkspace(workspaceId)
+  }, [clearWorkspaceAttention, setActiveWorkspace])
+
   if (error) {
     return (
       <div style={{
@@ -354,10 +359,7 @@ export const App: React.FC = () => {
               attentionWorkspaceIds={attentionWorkspaceIds}
               sessionsById={sessionsById}
               gitInfoById={gitInfoById}
-              onSelectWorkspace={(workspaceId) => {
-                clearWorkspaceAttention(workspaceId)
-                void setActiveWorkspace(workspaceId)
-              }}
+              onSelectWorkspace={handleSelectOverviewWorkspace}
               onSelectPane={handleSelectOverviewPane}
             />
           )}
