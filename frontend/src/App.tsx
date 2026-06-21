@@ -447,7 +447,8 @@ function focusPaneSurface(paneId: string): boolean {
   if (!pane) return false
 
   pane.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
-  const focusTarget = pane.querySelector<HTMLElement>('.xterm-helper-textarea, textarea, [tabindex]:not([tabindex="-1"]), button, input')
+  const focusTarget = pane.querySelector<HTMLElement>('.xterm-helper-textarea')
+    ?? pane.querySelector<HTMLElement>('textarea, [tabindex]:not([tabindex="-1"]), button, input')
   if (!focusTarget) return false
 
   focusTarget.focus({ preventScroll: true })
@@ -455,6 +456,9 @@ function focusPaneSurface(paneId: string): boolean {
 }
 
 function escapeAttributeValue(value: string): string {
+  if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
+    return CSS.escape(value)
+  }
   return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
 }
 
@@ -516,7 +520,7 @@ function collectChildPaneSummaries(
   if (child.pane) {
     const session = sessionsById[child.pane.id]
     const gitInfo = gitInfoById[child.pane.id]
-    const state = session?.state === 'connecting' ? 'pending' : session?.state ?? 'pending'
+    const state = session?.state === 'connecting' || !session ? 'pending' : session.state
     panes.push({
       id: child.pane.id,
       title: child.pane.title ?? session?.title ?? child.pane.id,

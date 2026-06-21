@@ -222,6 +222,23 @@ describe('App workspace deletion', () => {
     })
   })
 
+  it('prefers the xterm focus target over header buttons when focusing from a pane summary', async () => {
+    mockTerminalPane.mockImplementation(({ pane }: { pane: { id: string } }) => (
+      <div data-pane-id={pane.id}>
+        <button type="button">Header action {pane.id}</button>
+        <textarea className="xterm-helper-textarea" aria-label={`Terminal focus ${pane.id}`} />
+      </div>
+    ))
+
+    render(<App />)
+    fireEvent.mouseEnter(screen.getByRole('tab', { name: /^Dev\b/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Open pane main in Dev/i }))
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Terminal focus main')).toHaveFocus()
+    })
+  })
+
   it('keeps workspace attention while another pane in that workspace still needs attention', () => {
     currentWorkspaces = { ...workspaces, active: 'ops' }
     mockTerminalPane.mockImplementation(({ pane }: { pane: { id: string } }) => {
