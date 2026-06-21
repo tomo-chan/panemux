@@ -31,12 +31,14 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
   const dragActive = Boolean(ctx?.dragSourcePaneId)
   const gitInfoEnabled = !ctx?.maximizedPaneId || ctx.maximizedPaneId === pane.id
 
+  const { gitInfo, refreshIfStale, refreshNow } = useGitInfo(pane.id, gitInfoEnabled)
+
   const { handleResize, connected, dims, sessionState, reconnectFailed, restartSession } = useTerminal({
     sessionId: pane.id,
     container: containerEl,
+    repoURL: gitInfo.repo_url,
+    onInteraction: refreshIfStale,
   })
-
-  const gitInfo = useGitInfo(pane.id, gitInfoEnabled)
 
   // Observe resize events for this pane
   useEffect(() => {
@@ -49,9 +51,10 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
   }, [containerEl, handleResize])
 
   const handleOpenVSCode = useCallback(() => {
+    void refreshNow()
     fetch(`/api/sessions/${pane.id}/open-vscode`, { method: 'POST' })
       .catch((err) => console.error('open-vscode failed:', err))
-  }, [pane.id])
+  }, [pane.id, refreshNow])
 
   const handleDragStart = useCallback((e: React.DragEvent) => {
     e.dataTransfer.effectAllowed = 'move'
@@ -107,8 +110,14 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
       data-pane-id={pane.id}
       className={hasAttention ? 'panemux-pane-attention' : undefined}
       data-attention={hasAttention ? 'true' : undefined}
-      onMouseDown={() => ctx?.clearPaneAttention(pane.id)}
-      onFocusCapture={() => ctx?.clearPaneAttention(pane.id)}
+      onMouseDown={() => {
+        ctx?.clearPaneAttention(pane.id)
+        void refreshIfStale()
+      }}
+      onFocusCapture={() => {
+        ctx?.clearPaneAttention(pane.id)
+        void refreshIfStale()
+      }}
       style={{
         display: 'flex',
         flexDirection: 'column',

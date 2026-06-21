@@ -35,7 +35,11 @@ describe('TerminalPane drop zones', () => {
       reconnectFailed: false,
       restartSession: vi.fn(),
     })
-    mockUseGitInfo.mockReturnValue({ is_git: false })
+    mockUseGitInfo.mockReturnValue({
+      gitInfo: { is_git: false },
+      refreshIfStale: vi.fn(),
+      refreshNow: vi.fn(),
+    })
   })
 
   it('uses a top or bottom half-pane preview for horizontal edge drop zones', () => {
