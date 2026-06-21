@@ -92,7 +92,7 @@ describe('WorkspaceTabs', () => {
   })
 
   it('keeps workspace details expanded for left-positioned workspace bars', () => {
-    render(
+    const { container } = render(
       <WorkspaceTabs
         workspaces={workspaces}
         activeWorkspaceId="dev"
@@ -105,6 +105,7 @@ describe('WorkspaceTabs', () => {
     expect(screen.getByRole('region', { name: 'Dev workspace details' })).toBeInTheDocument()
     expect(screen.getByRole('region', { name: 'Ops workspace details' })).toBeInTheDocument()
     expect(screen.getByText('bastion')).toBeInTheDocument()
+    expect(container.querySelector('[role="tab"]')?.parentElement?.parentElement).toHaveStyle({ flexDirection: 'column' })
   })
 
   it('routes pane selection from the integrated workspace details panel', () => {
