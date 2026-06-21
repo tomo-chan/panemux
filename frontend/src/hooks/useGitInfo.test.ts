@@ -222,6 +222,7 @@ describe('useGitInfo', () => {
     })
 
     expect(window.fetch).toHaveBeenCalledTimes(1)
+    expect(result.current.gitInfo.is_git).toBe(false)
   })
 
   it('silently ignores fetch errors', async () => {

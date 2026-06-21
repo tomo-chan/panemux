@@ -245,7 +245,7 @@ export function useTerminal({ sessionId, container, repoURL, onInteraction }: Us
 
     container.addEventListener('pointerdown', handleInteraction, true)
     container.addEventListener('keydown', handleInteraction, true)
-    container.addEventListener('wheel', handleInteraction, { capture: true })
+    container.addEventListener('wheel', handleInteraction, { capture: true, passive: true })
 
     return () => {
       container.removeEventListener('pointerdown', handleInteraction, true)
@@ -401,8 +401,8 @@ function computePullRequestLinks(term: Terminal, repoURL: string | null, y: numb
     const hashIndex = match.index + prefix.length
     links.push({
       range: {
-        start: { x: hashIndex + 1, y },
-        end: { x: hashIndex + 1 + number.length + 1, y },
+        start: { x: hashIndex, y: y - 1 },
+        end: { x: hashIndex + number.length + 1, y: y - 1 },
       },
       text: `#${number}`,
       activate: () => {

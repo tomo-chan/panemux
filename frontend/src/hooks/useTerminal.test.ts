@@ -183,6 +183,10 @@ describe('useTerminal', () => {
     const links = __computePullRequestLinksForTests(term as never, 'https://github.com/example/panemux', 1)
 
     expect(links).toHaveLength(1)
+    expect(links[0].range).toEqual({
+      start: { x: 10, y: 0 },
+      end: { x: 14, y: 0 },
+    })
     links[0].activate()
     expect(openSpy).toHaveBeenCalledWith(
       'https://github.com/example/panemux/pull/123',
