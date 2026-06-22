@@ -11,6 +11,8 @@ const REPAINT_SETTLE_DELAYS_MS = [50, 250]
 interface UseTerminalOptions {
   sessionId: string
   container: HTMLElement | null
+  repoURL?: string
+  onInteraction?: () => void | Promise<void>
 }
 
 interface TerminalEntry {
@@ -24,6 +26,7 @@ interface TerminalEntry {
   replayActive: boolean
   replayWriteDepth: number
   awaitingReplayEnd: boolean
+  repoURL: string | null
 }
 
 interface PendingTerminalMessage {
@@ -34,7 +37,7 @@ interface PendingTerminalMessage {
 const terminalEntries = new Map<string, TerminalEntry>()
 type TerminalLifecycleState = 'running' | 'disconnected' | 'exited'
 
-export function useTerminal({ sessionId, container }: UseTerminalOptions) {
+export function useTerminal({ sessionId, container, repoURL, onInteraction }: UseTerminalOptions) {
   const termRef = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
   const initializedRef = useRef(false)
@@ -181,6 +184,12 @@ export function useTerminal({ sessionId, container }: UseTerminalOptions) {
     scheduleConnectedResize(entry, setDims, send)
   }, [connected, send, sessionId])
 
+  useEffect(() => {
+    const entry = entryRef.current
+    if (!entry) return
+    entry.repoURL = repoURL ?? null
+  }, [repoURL, sessionId])
+
   // Initialize terminal
   useEffect(() => {
     if (!container || initializedRef.current) return
@@ -226,6 +235,24 @@ export function useTerminal({ sessionId, container }: UseTerminalOptions) {
       initializedRef.current = false
     }
   }, [container, sessionId])
+
+  useEffect(() => {
+    if (!container || !onInteraction) return
+
+    const handleInteraction = () => {
+      void onInteraction()
+    }
+
+    container.addEventListener('pointerdown', handleInteraction, true)
+    container.addEventListener('keydown', handleInteraction, true)
+    container.addEventListener('wheel', handleInteraction, { capture: true, passive: true })
+
+    return () => {
+      container.removeEventListener('pointerdown', handleInteraction, true)
+      container.removeEventListener('keydown', handleInteraction, true)
+      container.removeEventListener('wheel', handleInteraction, true)
+    }
+  }, [container, onInteraction])
 
   const restartSession = useCallback(async () => {
     try {
@@ -321,10 +348,16 @@ function getOrCreateTerminalEntry(sessionId: string): TerminalEntry {
     replayActive: false,
     replayWriteDepth: 0,
     awaitingReplayEnd: false,
+    repoURL: null,
   }
 
   term.loadAddon(fitAddon)
   term.loadAddon(webLinksAddon)
+  term.registerLinkProvider({
+    provideLinks(y, callback) {
+      callback(computePullRequestLinks(term, entry.repoURL, y))
+    },
+  })
   term.attachCustomKeyEventHandler((event) => {
     if (!isCopyShortcut(event) || !term.hasSelection()) {
       return true
@@ -351,6 +384,36 @@ function getOrCreateTerminalEntry(sessionId: string): TerminalEntry {
   terminalEntries.set(sessionId, entry)
   return entry
 }
+
+function computePullRequestLinks(term: Terminal, repoURL: string | null, y: number) {
+  if (!repoURL) return []
+
+  const line = term.buffer.active.getLine(y - 1)
+  if (!line) return []
+
+  const text = line.translateToString(true)
+  const links = []
+  const pattern = /(^|[^\w])#(\d{1,8})(?![\w/])/g
+  let match: RegExpExecArray | null
+  while ((match = pattern.exec(text)) !== null) {
+    const prefix = match[1] ?? ''
+    const number = match[2]
+    const hashIndex = match.index + prefix.length
+    links.push({
+      range: {
+        start: { x: hashIndex, y: y - 1 },
+        end: { x: hashIndex + number.length + 1, y: y - 1 },
+      },
+      text: `#${number}`,
+      activate: () => {
+        window.open(`${repoURL}/pull/${number}`, '_blank', 'noopener,noreferrer')
+      },
+    })
+  }
+  return links
+}
+
+export const __computePullRequestLinksForTests = computePullRequestLinks
 
 function attachTerminal(entry: TerminalEntry, container: HTMLElement) {
   if (!entry.term.element) {
