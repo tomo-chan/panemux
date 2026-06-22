@@ -48,7 +48,7 @@ const mockAddWorkspace = vi.fn()
 const mockUseWorkspaceAttentionMonitor = vi.hoisted(() => vi.fn())
 const mockUseBrowserNotificationPermission = vi.hoisted(() => vi.fn())
 const mockUseSessionsOverview = vi.hoisted(() => vi.fn())
-const mockUseGitInfoMap = vi.hoisted(() => vi.fn())
+const mockUseGitInfoSnapshotMap = vi.hoisted(() => vi.fn())
 
 vi.mock('./hooks/useLayout', () => ({
   useLayout: () => ({
@@ -82,8 +82,8 @@ vi.mock('./hooks/useSessionsOverview', () => ({
   useSessionsOverview: mockUseSessionsOverview,
 }))
 
-vi.mock('./hooks/useGitInfoMap', () => ({
-  useGitInfoMap: mockUseGitInfoMap,
+vi.mock('./hooks/useGitInfo', () => ({
+  useGitInfoSnapshotMap: mockUseGitInfoSnapshotMap,
 }))
 
 vi.mock('./hooks/usePaneSettings', () => ({
@@ -111,7 +111,7 @@ describe('App workspace deletion', () => {
     mockUseWorkspaceAttentionMonitor.mockImplementation(() => {})
     mockUseBrowserNotificationPermission.mockImplementation(() => {})
     mockUseSessionsOverview.mockReturnValue({})
-    mockUseGitInfoMap.mockReturnValue({})
+    mockUseGitInfoSnapshotMap.mockReturnValue({})
     notificationInstance = null
     vi.stubGlobal('Notification', vi.fn(function MockNotification(this: Notification) {
       notificationInstance = {
@@ -146,7 +146,7 @@ describe('App workspace deletion', () => {
     mockUseWorkspaceAttentionMonitor.mockReset()
     mockUseBrowserNotificationPermission.mockReset()
     mockUseSessionsOverview.mockReset()
-    mockUseGitInfoMap.mockReset()
+    mockUseGitInfoSnapshotMap.mockReset()
     currentWorkspaces = workspaces
     vi.restoreAllMocks()
     if (originalNotification === undefined) {
@@ -177,7 +177,7 @@ describe('App workspace deletion', () => {
       side: { id: 'side', type: 'local', title: 'Side', state: 'disconnected' },
       'ops-main': { id: 'ops-main', type: 'local', title: 'Ops Main', state: 'exited' },
     })
-    mockUseGitInfoMap.mockReturnValue({
+    mockUseGitInfoSnapshotMap.mockReturnValue({
       main: { is_git: true, repo: 'panemux', branch: 'feature/dashboard', pr_number: 42, pr_url: 'https://github.com/example/panemux/pull/42' },
     })
 

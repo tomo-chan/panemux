@@ -8,7 +8,7 @@ import { usePaneSettings } from './hooks/usePaneSettings'
 import { useWorkspaceAttentionMonitor } from './hooks/useWorkspaceAttentionMonitor'
 import { useBrowserNotificationPermission } from './hooks/useBrowserNotificationPermission'
 import { useSessionsOverview } from './hooks/useSessionsOverview'
-import { useGitInfoMap } from './hooks/useGitInfoMap'
+import { useGitInfoSnapshotMap } from './hooks/useGitInfo'
 import { DisplayConfig } from './types'
 import { TERMINAL_FONT_FAMILY } from './utils/fonts'
 import { findPaneById, generatePaneId, layoutContainsPane } from './utils/layoutTree'
@@ -46,7 +46,7 @@ export const App: React.FC = () => {
     return metadata
   }, [workspaces])
   const overviewPaneIds = useMemo(() => Array.from(paneMetadataByID.keys()), [paneMetadataByID])
-  const gitInfoById = useGitInfoMap(overviewPaneIds, overviewPaneIds.length > 0)
+  const gitInfoById = useGitInfoSnapshotMap(overviewPaneIds)
   const workspaceSummaries = useMemo(() => {
     const summaries: Record<string, WorkspaceSummary> = {}
     if (!workspaces) return summaries
