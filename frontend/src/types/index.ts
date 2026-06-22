@@ -9,6 +9,7 @@ export type {
   Workspace,
   WorkspacesResponse,
   SessionInfo,
+  SessionInfoList,
   WSControlMessage,
   SSHConnectionsResponse,
   DirectoryEntry,

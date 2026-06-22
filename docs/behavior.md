@@ -146,8 +146,20 @@ For pane-header Git status, local and local tmux panes inspect the local filesys
 and `ssh_tmux` panes run the equivalent Git inspection on the remote host. This allows headers to
 show branch/repository info even when the repository exists only on the SSH target.
 
+Workspace tab summaries and their integrated pane groups use the same Git metadata source and also
+poll `/api/sessions` to summarize pane connection state across every workspace, including inactive
+ones.
+
 Pane-header Git and PR metadata is fetched immediately when a pane becomes visible, then refreshed
 every 10 seconds only while both the browser tab and that pane remain visible.
+
+Workspace-summary session-state and Git metadata polling are frontend-only and best-effort. While
+the browser tab is visible, the frontend polls every 10 seconds so it can summarize all known
+panes across all workspaces without mounting hidden terminal instances. The integrated summary view
+marks the currently focused pane so the overview stays aligned with the live terminal focus state.
+For `top` and `bottom` workspace bars, pane cards are shown in a hover/focus overlay anchored to
+the workspace tab. For `left` and `right` workspace bars, pane cards stay expanded inline beneath
+their workspace tab.
 
 When a pane is hidden behind maximize, its header Git/PR polling stops until it becomes visible
 again. Restoring the browser tab or making a pane visible again triggers an immediate refresh so
@@ -469,6 +481,7 @@ When a pane moves to a different parent node, the component may be remounted by 
 - Closing a pane calls `DELETE /api/sessions/{id}`, removes the pane from the tree, collapses parents with a single child, and renormalizes sizes to total `100`.
 - Moving a pane calls the workspace layout save path only; it does not call session create or delete APIs.
 - Dropping a pane on another workspace tab moves it into that workspace, inserts it at the destination workspace's right edge, persists both affected workspace layouts, and switches the active workspace to the destination.
+- Dragging a pane card from the workspace summary view onto another workspace uses the same move path as dragging from the pane-header handle.
 
 ### New terminal creation
 

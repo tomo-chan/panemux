@@ -84,6 +84,9 @@ Then open [http://localhost:8080](http://localhost:8080) in your browser.
 - Click a tab to switch workspaces without restarting the underlying sessions.
 - If a hidden workspace needs attention, its tab flashes until you open it.
 - You can add a workspace, rename it inline, delete it, or move the tab bar to the top, bottom, left, or right directly from the workspace bar.
+- The workspace bar also shows per-workspace pane status at a glance. Each tab includes a compact pane-name summary, and each workspace can expose pane detail cards with connection state, SSH host alias, repository, branch, and PR number.
+- When the bar is on the top or bottom, pane detail cards appear as a hover/focus overlay attached to the workspace tab so the terminal area keeps its height.
+- When the bar is on the left or right, pane detail cards stay expanded inline under each workspace tab so the workspace-to-pane grouping remains visible without extra pointer travel.
 
 Common uses:
 
@@ -183,7 +186,7 @@ workspaces:
 
 Older config files with a top-level `layout:` are still accepted. When the config is next saved, panemux migrates that layout into a `default` workspace and writes the `workspaces:` format.
 
-The workspace bar is always available for workspace actions. Newly added workspaces start with a single local terminal pane, become active immediately, and are saved to the config. The same bar also exposes `+ Terminal`, inline workspace rename, workspace delete with confirmation, and tab-position controls. Switching the active workspace and changing `tab_position` are persisted so the same workspace and tab placement are restored after restart. Agent confirmation prompts, including Codex MCP allow menus, can mark inactive workspace tabs and trigger browser notifications after notification permission has been granted. Clicking the notification switches to the relevant workspace.
+The workspace bar is always available for workspace actions. Newly added workspaces start with a single local terminal pane, become active immediately, and are saved to the config. The same bar also exposes inline workspace rename, workspace delete with confirmation, a `+` workspace action, and tab-position controls. It also acts as a cross-workspace operational overview: pane detail cards can be selected to focus that pane, and those same cards can be dragged onto another workspace to move the pane there. Switching the active workspace and changing `tab_position` are persisted so the same workspace and tab placement are restored after restart. Agent confirmation prompts, including Codex MCP allow menus, can mark inactive workspace tabs and trigger browser notifications after notification permission has been granted. Clicking the notification switches to the relevant workspace.
 
 ### Pane types
 

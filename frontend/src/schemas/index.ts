@@ -83,6 +83,10 @@ export const SessionInfoSchema = z.object({
 
 export type SessionInfo = z.infer<typeof SessionInfoSchema>
 
+export const SessionInfoListSchema = z.array(SessionInfoSchema)
+
+export type SessionInfoList = z.infer<typeof SessionInfoListSchema>
+
 export const SessionStateSchema = z.enum(['connected', 'disconnected', 'exited'])
 
 export type SessionState = z.infer<typeof SessionStateSchema>

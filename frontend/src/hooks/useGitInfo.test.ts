@@ -1,6 +1,6 @@
 import { renderHook, waitFor, act } from '@testing-library/react'
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
-import { __resetGitInfoCacheForTests, useGitInfo } from './useGitInfo'
+import { __resetGitInfoCacheForTests, useGitInfo, useGitInfoSnapshotMap } from './useGitInfo'
 
 describe('useGitInfo', () => {
   beforeEach(() => {
@@ -240,5 +240,22 @@ describe('useGitInfo', () => {
     })
 
     expect(result.current.gitInfo.is_git).toBe(false)
+  })
+
+  it('shares cached git info with snapshot consumers without triggering extra fetches', async () => {
+    window.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ is_git: true, branch: 'main', repo: 'panemux', pr_number: 42 }),
+    } as Response)
+
+    const snapshot = renderHook(() => useGitInfoSnapshotMap(['pane1']))
+    expect(snapshot.result.current.pane1?.is_git).toBe(false)
+
+    renderHook(() => useGitInfo('pane1'))
+
+    await waitFor(() => expect(snapshot.result.current.pane1?.repo).toBe('panemux'))
+    expect(snapshot.result.current.pane1?.branch).toBe('main')
+    expect(snapshot.result.current.pane1?.pr_number).toBe(42)
+    expect(window.fetch).toHaveBeenCalledTimes(1)
   })
 })

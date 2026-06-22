@@ -187,6 +187,8 @@ function makeCtx(overrides: Partial<LayoutActionsContextValue> = {}): LayoutActi
     onPaneAttention: vi.fn(),
     clearPaneAttention: vi.fn(),
     hasPaneAttention: vi.fn(() => false),
+    activePaneId: null,
+    setActivePaneId: vi.fn(),
     ...overrides,
   }
 }

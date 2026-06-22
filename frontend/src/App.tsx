@@ -7,11 +7,14 @@ import { useLayout } from './hooks/useLayout'
 import { usePaneSettings } from './hooks/usePaneSettings'
 import { useWorkspaceAttentionMonitor } from './hooks/useWorkspaceAttentionMonitor'
 import { useBrowserNotificationPermission } from './hooks/useBrowserNotificationPermission'
+import { useSessionsOverview } from './hooks/useSessionsOverview'
+import { useGitInfoSnapshotMap } from './hooks/useGitInfo'
 import { DisplayConfig } from './types'
 import { TERMINAL_FONT_FAMILY } from './utils/fonts'
 import { findPaneById, generatePaneId, layoutContainsPane } from './utils/layoutTree'
 import type { MovePanePlacement } from './hooks/useLayout'
-import type { LayoutChild, LayoutNode, SSHConfigHost } from './schemas'
+import type { WorkspacePaneSummary, WorkspaceSummary } from './components/WorkspaceTabs'
+import type { GitInfo, LayoutChild, LayoutNode, SessionInfo, SSHConfigHost } from './schemas'
 
 const DEFAULT_DISPLAY: DisplayConfig = { show_header: true, show_status_bar: true }
 
@@ -19,6 +22,7 @@ export const App: React.FC = () => {
   const { layout, workspaces, displayConfig, error, updateSizes, splitPane, closePane, swapPanes, createPane, movePane, setActiveWorkspace, addWorkspace, deleteWorkspace, renameWorkspace, setWorkspaceTabPosition } = useLayout()
   const [maximizedPaneIdsByWorkspace, setMaximizedPaneIdsByWorkspace] = useState<Record<string, string | null>>({})
   const [dragSourcePaneId, setDragSourcePaneId] = useState<string | null>(null)
+  const [activePaneId, setActivePaneId] = useState<string | null>(null)
   const [attentionPaneIds, setAttentionPaneIds] = useState<Set<string>>(() => new Set())
   const { isOpen, currentPane, sshConnectionNames, saveError, isSaving, openSettings, closeSettings, saveSettings, addSSHConfigHost, detectShell, browseDirectories } =
     usePaneSettings(layout, updateSizes)
@@ -28,6 +32,8 @@ export const App: React.FC = () => {
   const [isAddSSHHostSaving, setIsAddSSHHostSaving] = useState(false)
   const [createPaneError, setCreatePaneError] = useState<string | null>(null)
   const [movePaneError, setMovePaneError] = useState<string | null>(null)
+  const [pendingFocusedPaneId, setPendingFocusedPaneId] = useState<string | null>(null)
+  const sessionsById = useSessionsOverview(Boolean(workspaces))
 
   const paneMetadataByID = useMemo(() => {
     const metadata = new Map<string, { paneTitle: string; workspaceId: string; workspaceTitle: string }>()
@@ -39,6 +45,32 @@ export const App: React.FC = () => {
 
     return metadata
   }, [workspaces])
+  const overviewPaneIds = useMemo(() => Array.from(paneMetadataByID.keys()), [paneMetadataByID])
+  const gitInfoById = useGitInfoSnapshotMap(overviewPaneIds)
+  const workspaceSummaries = useMemo(() => {
+    const summaries: Record<string, WorkspaceSummary> = {}
+    if (!workspaces) return summaries
+
+    for (const workspace of workspaces.items) {
+      const panes = collectWorkspacePaneSummaries(
+        workspace.layout.children,
+        sessionsById,
+        gitInfoById,
+        attentionPaneIds,
+      )
+
+      summaries[workspace.id] = {
+        paneCount: panes.length,
+        connectedCount: panes.filter((pane) => pane.state === 'connected').length,
+        disconnectedCount: panes.filter((pane) => pane.state === 'disconnected').length,
+        exitedCount: panes.filter((pane) => pane.state === 'exited').length,
+        pendingCount: panes.filter((pane) => pane.state === 'pending').length,
+        panes,
+      }
+    }
+
+    return summaries
+  }, [attentionPaneIds, gitInfoById, sessionsById, workspaces])
 
   const activeWorkspaceId = workspaces?.active ?? null
   const maximizedPaneId = useMemo(() => {
@@ -172,6 +204,38 @@ export const App: React.FC = () => {
     })
   }, [movePane])
 
+  const handleSelectWorkspacePaneSummary = useCallback((workspaceId: string, paneId: string) => {
+    clearPaneAttention(paneId)
+    clearWorkspaceAttention(workspaceId)
+    setActivePaneId(paneId)
+    setPendingFocusedPaneId(paneId)
+    void setActiveWorkspace(workspaceId)
+  }, [clearPaneAttention, clearWorkspaceAttention, setActiveWorkspace])
+
+  useEffect(() => {
+    if (!pendingFocusedPaneId) return
+
+    let cancelled = false
+    let timeoutId: number | null = null
+
+    const attemptFocus = (remainingAttempts: number) => {
+      if (cancelled) return
+      if (focusPaneSurface(pendingFocusedPaneId)) {
+        setPendingFocusedPaneId(null)
+        return
+      }
+      if (remainingAttempts <= 0) return
+      timeoutId = window.setTimeout(() => attemptFocus(remainingAttempts - 1), 50)
+    }
+
+    attemptFocus(8)
+
+    return () => {
+      cancelled = true
+      if (timeoutId !== null) window.clearTimeout(timeoutId)
+    }
+  }, [pendingFocusedPaneId, workspaces?.active])
+
   if (error) {
     return (
       <div style={{
@@ -228,6 +292,8 @@ export const App: React.FC = () => {
       onPaneAttention: notifyAttention,
       clearPaneAttention,
       hasPaneAttention: (paneId: string) => attentionPaneIds.has(paneId),
+      activePaneId,
+      setActivePaneId,
     }}>
       <div
         style={{
@@ -258,6 +324,11 @@ export const App: React.FC = () => {
             onSelect={setActiveWorkspace}
             attentionWorkspaceIds={attentionWorkspaceIds}
             onClearAttention={clearWorkspaceAttention}
+            workspaceSummaries={workspaceSummaries}
+            onSelectPaneFromSummary={handleSelectWorkspacePaneSummary}
+            onStartPaneDragFromSummary={setDragSourcePaneId}
+            onEndPaneDragFromSummary={() => setDragSourcePaneId(null)}
+            activePaneId={activePaneId}
             onAdd={addWorkspace}
             onRename={renameWorkspace}
             onTabPositionChange={setWorkspaceTabPosition}
@@ -407,6 +478,26 @@ function showBrowserNotification(title: string, body: string, onClick?: () => vo
   }
 }
 
+function focusPaneSurface(paneId: string): boolean {
+  const pane = document.querySelector<HTMLElement>(`[data-pane-id="${escapeAttributeValue(paneId)}"]`)
+  if (!pane) return false
+
+  pane.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+  const focusTarget = pane.querySelector<HTMLElement>('.xterm-helper-textarea')
+    ?? pane.querySelector<HTMLElement>('textarea, [tabindex]:not([tabindex="-1"]), button, input')
+  if (!focusTarget) return false
+
+  focusTarget.focus({ preventScroll: true })
+  return document.activeElement === focusTarget
+}
+
+function escapeAttributeValue(value: string): string {
+  if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
+    return CSS.escape(value)
+  }
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+}
+
 function collectPaneMetadata(
   layout: LayoutNode,
   workspaceId: string,
@@ -437,5 +528,52 @@ function collectChildPaneMetadata(
 
   for (const nestedChild of child.children) {
     collectChildPaneMetadata(nestedChild, workspaceId, workspaceTitle, metadata)
+  }
+}
+
+function collectWorkspacePaneSummaries(
+  children: LayoutChild[],
+  sessionsById: Record<string, SessionInfo>,
+  gitInfoById: Record<string, GitInfo>,
+  attentionPaneIds: ReadonlySet<string>,
+): WorkspacePaneSummary[] {
+  const panes: WorkspacePaneSummary[] = []
+
+  for (const child of children) {
+    collectChildPaneSummaries(child, sessionsById, gitInfoById, attentionPaneIds, panes)
+  }
+
+  return panes
+}
+
+function collectChildPaneSummaries(
+  child: LayoutChild,
+  sessionsById: Record<string, SessionInfo>,
+  gitInfoById: Record<string, GitInfo>,
+  attentionPaneIds: ReadonlySet<string>,
+  panes: WorkspacePaneSummary[],
+) {
+  if (child.pane) {
+    const session = sessionsById[child.pane.id]
+    const gitInfo = gitInfoById[child.pane.id]
+    const state = session?.state === 'connecting' || !session ? 'pending' : session.state
+    panes.push({
+      id: child.pane.id,
+      title: child.pane.title ?? session?.title ?? child.pane.id,
+      type: child.pane.type,
+      state,
+      connection: child.pane.connection,
+      repo: gitInfo?.repo,
+      branch: gitInfo?.branch,
+      prNumber: gitInfo?.pr_number,
+      attention: attentionPaneIds.has(child.pane.id),
+    })
+    return
+  }
+
+  if (!child.children?.length) return
+
+  for (const nestedChild of child.children) {
+    collectChildPaneSummaries(nestedChild, sessionsById, gitInfoById, attentionPaneIds, panes)
   }
 }

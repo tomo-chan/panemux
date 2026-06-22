@@ -27,6 +27,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
   const ctx = useContext(LayoutActionsContext)
   const displayConfig = ctx?.displayConfig ?? DEFAULT_DISPLAY
   const hasAttention = ctx?.hasPaneAttention(pane.id) ?? false
+  const isActivePane = ctx?.activePaneId === pane.id
   const isDragSource = ctx?.dragSourcePaneId === pane.id
   const dragActive = Boolean(ctx?.dragSourcePaneId)
   const gitInfoEnabled = !ctx?.maximizedPaneId || ctx.maximizedPaneId === pane.id
@@ -110,12 +111,15 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
       data-pane-id={pane.id}
       className={hasAttention ? 'panemux-pane-attention' : undefined}
       data-attention={hasAttention ? 'true' : undefined}
+      data-active-pane={isActivePane ? 'true' : undefined}
       onMouseDown={() => {
         ctx?.clearPaneAttention(pane.id)
+        ctx?.setActivePaneId(pane.id)
         void refreshIfStale()
       }}
       onFocusCapture={() => {
         ctx?.clearPaneAttention(pane.id)
+        ctx?.setActivePaneId(pane.id)
         void refreshIfStale()
       }}
       style={{
@@ -127,12 +131,18 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
         backgroundColor: '#1a1b1e',
         outline: hasAttention
           ? '2px solid rgba(244, 191, 79, 0.95)'
-          : 'none',
+          : isActivePane
+            ? '2px solid rgba(137, 196, 244, 0.92)'
+            : 'none',
         outlineOffset: '-2px',
         opacity: isDragSource ? 0.38 : 1,
         transform: isDragSource ? 'scale(0.985)' : 'scale(1)',
-        boxShadow: isDragSource ? '0 14px 36px rgba(0, 0, 0, 0.32)' : 'none',
-        transition: 'opacity 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease',
+        boxShadow: isDragSource
+          ? '0 14px 36px rgba(0, 0, 0, 0.32)'
+          : isActivePane
+            ? '0 0 0 1px rgba(137, 196, 244, 0.35), 0 10px 24px rgba(0, 0, 0, 0.18)'
+            : 'none',
+        transition: 'opacity 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease, outline-color 0.15s ease',
       }}
     >
       <PaneHeader

@@ -1,5 +1,5 @@
 import { useContext, useEffect } from 'react'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
 import { LayoutActionsContext } from './components/SplitContainer'
@@ -47,6 +47,8 @@ const mockMovePane = vi.fn().mockResolvedValue(undefined)
 const mockAddWorkspace = vi.fn()
 const mockUseWorkspaceAttentionMonitor = vi.hoisted(() => vi.fn())
 const mockUseBrowserNotificationPermission = vi.hoisted(() => vi.fn())
+const mockUseSessionsOverview = vi.hoisted(() => vi.fn())
+const mockUseGitInfoSnapshotMap = vi.hoisted(() => vi.fn())
 
 vi.mock('./hooks/useLayout', () => ({
   useLayout: () => ({
@@ -76,6 +78,14 @@ vi.mock('./hooks/useBrowserNotificationPermission', () => ({
   useBrowserNotificationPermission: mockUseBrowserNotificationPermission,
 }))
 
+vi.mock('./hooks/useSessionsOverview', () => ({
+  useSessionsOverview: mockUseSessionsOverview,
+}))
+
+vi.mock('./hooks/useGitInfo', () => ({
+  useGitInfoSnapshotMap: mockUseGitInfoSnapshotMap,
+}))
+
 vi.mock('./hooks/usePaneSettings', () => ({
   usePaneSettings: () => ({
     isOpen: false,
@@ -100,6 +110,8 @@ describe('App workspace deletion', () => {
     originalNotification = window.Notification
     mockUseWorkspaceAttentionMonitor.mockImplementation(() => {})
     mockUseBrowserNotificationPermission.mockImplementation(() => {})
+    mockUseSessionsOverview.mockReturnValue({})
+    mockUseGitInfoSnapshotMap.mockReturnValue({})
     notificationInstance = null
     vi.stubGlobal('Notification', vi.fn(function MockNotification(this: Notification) {
       notificationInstance = {
@@ -133,6 +145,8 @@ describe('App workspace deletion', () => {
     mockTerminalPane.mockClear()
     mockUseWorkspaceAttentionMonitor.mockReset()
     mockUseBrowserNotificationPermission.mockReset()
+    mockUseSessionsOverview.mockReset()
+    mockUseGitInfoSnapshotMap.mockReset()
     currentWorkspaces = workspaces
     vi.restoreAllMocks()
     if (originalNotification === undefined) {
@@ -157,6 +171,74 @@ describe('App workspace deletion', () => {
     )
   })
 
+  it('renders workspace summaries in the tabs and opens integrated details', () => {
+    mockUseSessionsOverview.mockReturnValue({
+      main: { id: 'main', type: 'local', title: 'Main', state: 'connected' },
+      side: { id: 'side', type: 'local', title: 'Side', state: 'disconnected' },
+      'ops-main': { id: 'ops-main', type: 'local', title: 'Ops Main', state: 'exited' },
+    })
+    mockUseGitInfoSnapshotMap.mockReturnValue({
+      main: { is_git: true, repo: 'panemux', branch: 'feature/dashboard', pr_number: 42, pr_url: 'https://github.com/example/panemux/pull/42' },
+    })
+
+    render(<App />)
+
+    expect(screen.getByText('2 panes · 1 up · 1 down')).toBeInTheDocument()
+    fireEvent.mouseEnter(screen.getByRole('tab', { name: /^Dev\b/ }))
+    expect(screen.getByRole('region', { name: 'Dev workspace details' })).toBeInTheDocument()
+    expect(screen.getByText('Main')).toBeInTheDocument()
+    expect(screen.getByText('feature/dashboard')).toBeInTheDocument()
+    expect(screen.getByText('PR #42')).toBeInTheDocument()
+  })
+
+  it('switches workspace from the integrated details panel', () => {
+    mockUseSessionsOverview.mockReturnValue({
+      'ops-main': { id: 'ops-main', type: 'local', title: 'Ops Main', state: 'connected' },
+    })
+    render(<App />)
+
+    fireEvent.mouseEnter(screen.getByRole('tab', { name: /^Ops\b/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open pane Ops Main in Ops' }))
+
+    expect(mockSetActiveWorkspace).toHaveBeenCalledWith('ops')
+  })
+
+  it('focuses the pane when a pane summary is selected in the active workspace', async () => {
+    mockTerminalPane.mockImplementation(({ pane }: { pane: { id: string } }) => (
+      <div data-pane-id={pane.id}>
+        <button type="button">Focus target {pane.id}</button>
+      </div>
+    ))
+
+    render(<App />)
+    fireEvent.mouseEnter(screen.getByRole('tab', { name: /^Dev\b/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Open pane main in Dev/i }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Focus target main' })).toHaveFocus()
+    })
+    expect(screen.getByRole('button', { name: /Open pane main in Dev/i })).toHaveStyle({
+      background: 'rgba(86, 156, 214, 0.16)',
+    })
+  })
+
+  it('prefers the xterm focus target over header buttons when focusing from a pane summary', async () => {
+    mockTerminalPane.mockImplementation(({ pane }: { pane: { id: string } }) => (
+      <div data-pane-id={pane.id}>
+        <button type="button">Header action {pane.id}</button>
+        <textarea className="xterm-helper-textarea" aria-label={`Terminal focus ${pane.id}`} />
+      </div>
+    ))
+
+    render(<App />)
+    fireEvent.mouseEnter(screen.getByRole('tab', { name: /^Dev\b/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Open pane main in Dev/i }))
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Terminal focus main')).toHaveFocus()
+    })
+  })
+
   it('keeps workspace attention while another pane in that workspace still needs attention', () => {
     currentWorkspaces = { ...workspaces, active: 'ops' }
     mockTerminalPane.mockImplementation(({ pane }: { pane: { id: string } }) => {
@@ -175,7 +257,7 @@ describe('App workspace deletion', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Notify main' }))
     fireEvent.click(screen.getByRole('button', { name: 'Notify side' }))
 
-    expect(screen.getByRole('tab', { name: 'Dev' })).toHaveAttribute('data-attention', 'true')
+    expect(screen.getByRole('tab', { name: /^Dev\b/ })).toHaveAttribute('data-attention', 'true')
 
     currentWorkspaces = workspaces
     rerender(<App />)
@@ -381,8 +463,8 @@ describe('App workspace deletion', () => {
 
     render(<App />)
     fireEvent.mouseDown(screen.getByRole('button', { name: 'Start drag main' }), { button: 0 })
-    fireEvent.mouseEnter(screen.getByRole('tab', { name: 'Ops' }))
-    fireEvent.mouseUp(screen.getByRole('tab', { name: 'Ops' }))
+    fireEvent.mouseEnter(screen.getByRole('tab', { name: /^Ops\b/ }))
+    fireEvent.mouseUp(screen.getByRole('tab', { name: /^Ops\b/ }))
 
     expect(mockMovePane).toHaveBeenCalledWith('main', { type: 'workspace-tab', workspaceId: 'ops' })
   })
@@ -440,8 +522,8 @@ describe('App workspace deletion', () => {
 
     render(<App />)
 
-    expect(screen.getByRole('tab', { name: 'Dev' })).toHaveAttribute('data-attention', 'true')
-    expect(screen.getByRole('tab', { name: 'Ops' })).not.toHaveAttribute('data-attention')
+    expect(screen.getByRole('tab', { name: /^Dev\b/ })).toHaveAttribute('data-attention', 'true')
+    expect(screen.getByRole('tab', { name: /^Ops\b/ })).not.toHaveAttribute('data-attention')
   })
 
   it('shows a browser notification with pane and workspace titles for inactive workspace attention', () => {
@@ -508,8 +590,8 @@ describe('App workspace deletion', () => {
 
     render(<App />)
 
-    expect(screen.getByRole('tab', { name: 'Dev' })).not.toHaveAttribute('data-attention')
-    expect(screen.getByRole('tab', { name: 'Ops' })).not.toHaveAttribute('data-attention')
+    expect(screen.getByRole('tab', { name: /^Dev\b/ })).not.toHaveAttribute('data-attention')
+    expect(screen.getByRole('tab', { name: /^Ops\b/ })).not.toHaveAttribute('data-attention')
   })
 
   it('does not request browser notification permission when attention is reported', () => {

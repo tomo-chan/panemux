@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { WorkspaceTabs } from './WorkspaceTabs'
 import type { Workspace } from '../types'
+import type { WorkspaceSummary } from './WorkspaceTabs'
 
 const workspaces: Workspace[] = [
   {
@@ -16,6 +17,30 @@ const workspaces: Workspace[] = [
   },
 ]
 
+const workspaceSummaries: Record<string, WorkspaceSummary> = {
+  dev: {
+    paneCount: 2,
+    connectedCount: 1,
+    disconnectedCount: 1,
+    exitedCount: 0,
+    pendingCount: 0,
+    panes: [
+      { id: 'main', title: 'Main', type: 'local', state: 'connected', repo: 'panemux', branch: 'main', prNumber: 12, attention: false },
+      { id: 'side', title: 'Side', type: 'ssh', state: 'disconnected', connection: 'prod', attention: true },
+    ],
+  },
+  ops: {
+    paneCount: 1,
+    connectedCount: 0,
+    disconnectedCount: 0,
+    exitedCount: 1,
+    pendingCount: 0,
+    panes: [
+      { id: 'ops', title: 'Ops Main', type: 'ssh_tmux', state: 'exited', connection: 'bastion', attention: false },
+    ],
+  },
+}
+
 describe('WorkspaceTabs', () => {
   it('renders workspace tabs and calls onSelect', () => {
     const onSelect = vi.fn()
@@ -24,6 +49,136 @@ describe('WorkspaceTabs', () => {
     expect(screen.getByRole('tab', { name: 'Dev' })).toHaveAttribute('aria-selected', 'true')
     fireEvent.click(screen.getByRole('tab', { name: 'Ops' }))
     expect(onSelect).toHaveBeenCalledWith('ops')
+  })
+
+  it('renders compact workspace summaries in the tabs when provided', () => {
+    render(
+      <WorkspaceTabs
+        workspaces={workspaces}
+        activeWorkspaceId="dev"
+        tabPosition="top"
+        workspaceSummaries={workspaceSummaries}
+        onSelect={() => {}}
+      />,
+    )
+
+    expect(screen.getByText('2 panes · 1 up · 1 down')).toBeInTheDocument()
+    expect(screen.getByText('Main · Side')).toBeInTheDocument()
+    expect(screen.getByText('Ops Main')).toBeInTheDocument()
+  })
+
+  it('shows workspace details as an overlay when hovering a workspace tab', () => {
+    render(
+      <WorkspaceTabs
+        workspaces={workspaces}
+        activeWorkspaceId="dev"
+        tabPosition="top"
+        workspaceSummaries={workspaceSummaries}
+        onSelect={() => {}}
+      />,
+    )
+
+    expect(screen.queryByRole('region', { name: 'Dev workspace details' })).not.toBeInTheDocument()
+    fireEvent.mouseEnter(screen.getByRole('tab', { name: /^Dev\b/ }))
+    expect(screen.getByRole('region', { name: 'Dev workspace details' })).toBeInTheDocument()
+    expect(screen.getByText('Main')).toBeInTheDocument()
+    expect(screen.getByText('PR #12')).toBeInTheDocument()
+    expect(screen.getByText('prod')).toBeInTheDocument()
+    expect(screen.getByText('Input')).toBeInTheDocument()
+    expect(screen.getByTestId('workspace-pane-group-dev')).toHaveStyle({
+      marginLeft: '10px',
+      paddingLeft: '12px',
+      borderLeft: '1px solid #364050',
+    })
+
+    fireEvent.mouseEnter(screen.getByRole('tab', { name: /^Ops\b/ }))
+    expect(screen.getByRole('region', { name: 'Ops workspace details' })).toBeInTheDocument()
+    expect(screen.getByText('bastion')).toBeInTheDocument()
+  })
+
+  it('keeps workspace details expanded for left-positioned workspace bars', () => {
+    const { container } = render(
+      <WorkspaceTabs
+        workspaces={workspaces}
+        activeWorkspaceId="dev"
+        tabPosition="left"
+        workspaceSummaries={workspaceSummaries}
+        onSelect={() => {}}
+      />,
+    )
+
+    expect(screen.getByRole('region', { name: 'Dev workspace details' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Ops workspace details' })).toBeInTheDocument()
+    expect(screen.getByText('bastion')).toBeInTheDocument()
+    expect(screen.getByTestId('workspace-pane-group-dev')).toHaveStyle({
+      marginLeft: '10px',
+      paddingLeft: '12px',
+      borderLeft: '1px solid #364050',
+    })
+    expect(container.querySelector('[role="tab"]')?.parentElement?.parentElement).toHaveStyle({ flexDirection: 'column' })
+  })
+
+  it('routes pane selection from the integrated workspace details panel', () => {
+    const onSelectPaneFromSummary = vi.fn()
+    render(
+      <WorkspaceTabs
+        workspaces={workspaces}
+        activeWorkspaceId="dev"
+        tabPosition="top"
+        workspaceSummaries={workspaceSummaries}
+        onSelect={() => {}}
+        onSelectPaneFromSummary={onSelectPaneFromSummary}
+      />,
+    )
+
+    fireEvent.mouseEnter(screen.getByRole('tab', { name: /^Dev\b/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open pane Side in Dev' }))
+
+    expect(onSelectPaneFromSummary).toHaveBeenCalledWith('dev', 'side')
+  })
+
+  it('starts dragging from a workspace pane summary card', () => {
+    const onStartPaneDragFromSummary = vi.fn()
+    const dataTransfer = {
+      effectAllowed: 'none',
+      setData: vi.fn(),
+    }
+
+    render(
+      <WorkspaceTabs
+        workspaces={workspaces}
+        activeWorkspaceId="dev"
+        tabPosition="top"
+        workspaceSummaries={workspaceSummaries}
+        onSelect={() => {}}
+        onStartPaneDragFromSummary={onStartPaneDragFromSummary}
+      />,
+    )
+
+    fireEvent.mouseEnter(screen.getByRole('tab', { name: /^Dev\b/ }))
+    fireEvent.dragStart(screen.getByRole('button', { name: 'Open pane Side in Dev' }), { dataTransfer })
+
+    expect(dataTransfer.effectAllowed).toBe('move')
+    expect(dataTransfer.setData).toHaveBeenCalledWith('text/plain', 'side')
+    expect(onStartPaneDragFromSummary).toHaveBeenCalledWith('side')
+  })
+
+  it('highlights the active pane summary card', () => {
+    render(
+      <WorkspaceTabs
+        workspaces={workspaces}
+        activeWorkspaceId="dev"
+        activePaneId="side"
+        tabPosition="top"
+        workspaceSummaries={workspaceSummaries}
+        onSelect={() => {}}
+      />,
+    )
+
+    fireEvent.mouseEnter(screen.getByRole('tab', { name: /^Dev\b/ }))
+    expect(screen.getByRole('button', { name: 'Open pane Side in Dev' })).toHaveStyle({
+      background: 'rgba(86, 156, 214, 0.16)',
+    })
   })
 
   it('shows hover affordance on workspace tabs', () => {
@@ -75,8 +230,8 @@ describe('WorkspaceTabs', () => {
       />,
     )
 
-    expect(screen.getByRole('tab', { name: 'Ops' })).toHaveAttribute('data-attention', 'true')
-    expect(screen.getByRole('tab', { name: 'Dev' })).not.toHaveAttribute('data-attention')
+    expect(screen.getByRole('tab', { name: /^Ops\b/ })).toHaveAttribute('data-attention', 'true')
+    expect(screen.getByRole('tab', { name: /^Dev\b/ })).not.toHaveAttribute('data-attention')
   })
 
   it('clears workspace attention before selecting the tab', () => {
@@ -93,7 +248,7 @@ describe('WorkspaceTabs', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Ops' }))
+    fireEvent.click(screen.getByRole('tab', { name: /^Ops\b/ }))
 
     expect(onClearAttention).toHaveBeenCalledWith('ops')
     expect(onSelect).toHaveBeenCalledWith('ops')
@@ -113,9 +268,32 @@ describe('WorkspaceTabs', () => {
       />,
     )
 
-    const tab = screen.getByRole('tab', { name: 'Ops' })
+    const tab = screen.getByRole('tab', { name: /^Ops\b/ })
     fireEvent.dragOver(tab, { dataTransfer })
     fireEvent.drop(tab, { dataTransfer })
+
+    expect(onMovePaneToWorkspace).toHaveBeenCalledWith('pane-source', 'ops')
+  })
+
+  it('moves a dragged pane into another workspace when the workspace details receive a drop', () => {
+    const onMovePaneToWorkspace = vi.fn()
+    const dataTransfer = { dropEffect: 'none' }
+    render(
+      <WorkspaceTabs
+        workspaces={workspaces}
+        activeWorkspaceId="dev"
+        tabPosition="top"
+        dragSourcePaneId="pane-source"
+        workspaceSummaries={workspaceSummaries}
+        onMovePaneToWorkspace={onMovePaneToWorkspace}
+        onSelect={() => {}}
+      />,
+    )
+
+    fireEvent.mouseEnter(screen.getByRole('tab', { name: /^Ops\b/ }))
+    const details = screen.getByRole('region', { name: 'Ops workspace details' })
+    fireEvent.dragOver(details, { dataTransfer })
+    fireEvent.drop(details, { dataTransfer })
 
     expect(onMovePaneToWorkspace).toHaveBeenCalledWith('pane-source', 'ops')
   })
@@ -133,9 +311,31 @@ describe('WorkspaceTabs', () => {
       />,
     )
 
-    const tab = screen.getByRole('tab', { name: 'Ops' })
+    const tab = screen.getByRole('tab', { name: /^Ops\b/ })
     fireEvent.mouseEnter(tab)
     fireEvent.mouseUp(tab)
+
+    expect(onMovePaneToWorkspace).toHaveBeenCalledWith('pane-source', 'ops')
+  })
+
+  it('moves a dragged pane into another workspace when released over a pane card', () => {
+    const onMovePaneToWorkspace = vi.fn()
+    render(
+      <WorkspaceTabs
+        workspaces={workspaces}
+        activeWorkspaceId="dev"
+        tabPosition="top"
+        dragSourcePaneId="pane-source"
+        workspaceSummaries={workspaceSummaries}
+        onMovePaneToWorkspace={onMovePaneToWorkspace}
+        onSelect={() => {}}
+      />,
+    )
+
+    fireEvent.mouseEnter(screen.getByRole('tab', { name: /^Ops\b/ }))
+    const paneCard = screen.getByRole('button', { name: 'Open pane Ops Main in Ops' })
+    fireEvent.mouseEnter(paneCard)
+    fireEvent.mouseUp(paneCard)
 
     expect(onMovePaneToWorkspace).toHaveBeenCalledWith('pane-source', 'ops')
   })
@@ -152,10 +352,13 @@ describe('WorkspaceTabs', () => {
       />,
     )
 
-    const tab = screen.getByRole('tab', { name: 'Ops' }).parentElement
-    expect(tab).not.toBeNull()
-    fireEvent.mouseEnter(tab!)
-    expect(tab).toHaveStyle({
+    const tabButton = screen.getByRole('tab', { name: /^Ops\b/ })
+    const tabSurface = tabButton.parentElement
+    const wrapper = tabSurface?.parentElement
+    expect(tabSurface).not.toBeNull()
+    expect(wrapper).not.toBeNull()
+    fireEvent.mouseEnter(wrapper!)
+    expect(tabSurface!).toHaveStyle({
       backgroundColor: 'rgba(86, 156, 214, 0.24)',
       boxShadow: 'inset 0 0 0 1px rgba(137, 196, 244, 0.45)',
     })
@@ -171,9 +374,9 @@ describe('WorkspaceTabs', () => {
       />,
     )
 
-    const rerenderedTab = screen.getByRole('tab', { name: 'Ops' }).parentElement
+    const rerenderedTab = screen.getByRole('tab', { name: /^Ops\b/ }).parentElement
     expect(rerenderedTab).not.toBeNull()
-    expect(rerenderedTab).not.toHaveStyle({
+    expect(rerenderedTab!).not.toHaveStyle({
       backgroundColor: 'rgba(86, 156, 214, 0.24)',
       boxShadow: 'inset 0 0 0 1px rgba(137, 196, 244, 0.45)',
     })
@@ -201,7 +404,7 @@ describe('WorkspaceTabs', () => {
     const onAdd = vi.fn()
     render(<WorkspaceTabs workspaces={workspaces} activeWorkspaceId="dev" tabPosition="top" onSelect={() => {}} onAdd={onAdd} />)
 
-    expect(screen.getByRole('tab', { name: 'Dev' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /^Dev\b/ })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Add workspace' }))
     expect(onAdd).toHaveBeenCalled()
   })
@@ -209,7 +412,7 @@ describe('WorkspaceTabs', () => {
   it('renders the add workspace control with the same tab height', () => {
     render(<WorkspaceTabs workspaces={workspaces} activeWorkspaceId="dev" tabPosition="top" onSelect={() => {}} onAdd={() => {}} />)
 
-    expect(screen.getByRole('button', { name: 'Add workspace' }).parentElement).toHaveStyle({ height: '34px' })
+    expect(screen.getByRole('button', { name: 'Add workspace' }).parentElement).toHaveStyle({ minWidth: '40px' })
   })
 
   it('does not render a workspace-bar add terminal button', () => {
@@ -333,27 +536,27 @@ describe('WorkspaceTabs', () => {
     const onRename = vi.fn()
     render(<WorkspaceTabs workspaces={workspaces} activeWorkspaceId="dev" tabPosition="top" onSelect={() => {}} onRename={onRename} />)
 
-    fireEvent.doubleClick(screen.getByRole('tab', { name: 'Dev' }))
+    fireEvent.doubleClick(screen.getByRole('tab', { name: /^Dev\b/ }))
     const input = screen.getByLabelText('Workspace name')
     fireEvent.change(input, { target: { value: 'Development' } })
     fireEvent.keyDown(input, { key: 'Escape' })
 
     expect(onRename).not.toHaveBeenCalled()
-    expect(screen.getByRole('tab', { name: 'Dev' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /^Dev\b/ })).toBeInTheDocument()
   })
 
   it('does not save when Escape is followed by blur', () => {
     const onRename = vi.fn()
     render(<WorkspaceTabs workspaces={workspaces} activeWorkspaceId="dev" tabPosition="top" onSelect={() => {}} onRename={onRename} />)
 
-    fireEvent.doubleClick(screen.getByRole('tab', { name: 'Dev' }))
+    fireEvent.doubleClick(screen.getByRole('tab', { name: /^Dev\b/ }))
     const input = screen.getByLabelText('Workspace name')
     fireEvent.change(input, { target: { value: 'Development' } })
     fireEvent.keyDown(input, { key: 'Escape' })
     fireEvent.blur(input)
 
     expect(onRename).not.toHaveBeenCalled()
-    expect(screen.getByRole('tab', { name: 'Dev' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /^Dev\b/ })).toBeInTheDocument()
   })
 
   it('does not save a blank inline rename', () => {
@@ -366,15 +569,15 @@ describe('WorkspaceTabs', () => {
     fireEvent.blur(input)
 
     expect(onRename).not.toHaveBeenCalled()
-    expect(screen.getByRole('tab', { name: 'Dev' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /^Dev\b/ })).toBeInTheDocument()
   })
 
-  it('uses vertical orientation for left and right positions', () => {
+  it('uses horizontal orientation for left and right positions', () => {
     for (const tabPosition of ['left', 'right'] as const) {
       const { unmount } = render(
         <WorkspaceTabs workspaces={workspaces} activeWorkspaceId="dev" tabPosition={tabPosition} onSelect={() => {}} />,
       )
-      expect(screen.getByRole('tablist')).toHaveAttribute('aria-orientation', 'vertical')
+      expect(screen.getByRole('tablist')).toHaveAttribute('aria-orientation', 'horizontal')
       unmount()
     }
   })

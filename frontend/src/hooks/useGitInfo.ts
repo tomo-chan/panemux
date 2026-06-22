@@ -13,6 +13,7 @@ interface GitInfoCacheEntry {
 
 const DEFAULT_GIT_INFO: GitInfo = { is_git: false }
 const gitInfoCache = new Map<string, GitInfoCacheEntry>()
+const gitInfoListeners = new Map<string, Set<(gitInfo: GitInfo) => void>>()
 
 export interface UseGitInfoResult {
   gitInfo: GitInfo
@@ -40,6 +41,7 @@ export function useGitInfo(sessionId: string, enabled = true): UseGitInfoResult 
         cacheEntry.gitInfo = data
         cacheEntry.lastFetchedAt = Date.now()
         setGitInfo(data)
+        notifyGitInfoListeners(sessionId, data)
       } catch {
         // ignore errors silently — git info is best-effort
       } finally {
@@ -91,6 +93,46 @@ export function useGitInfo(sessionId: string, enabled = true): UseGitInfoResult 
   return { gitInfo, refreshIfStale, refreshNow }
 }
 
+export function useGitInfoSnapshotMap(sessionIds: string[]): Record<string, GitInfo> {
+  const sessionIdsKey = sessionIds.join('\u0000')
+  const [gitInfoById, setGitInfoById] = useState<Record<string, GitInfo>>(() => {
+    const next: Record<string, GitInfo> = {}
+    for (const sessionId of sessionIds) {
+      next[sessionId] = getOrCreateCacheEntry(sessionId).gitInfo
+    }
+    return next
+  })
+
+  useEffect(() => {
+    const next: Record<string, GitInfo> = {}
+    for (const sessionId of sessionIds) {
+      next[sessionId] = getOrCreateCacheEntry(sessionId).gitInfo
+    }
+    setGitInfoById((current) => {
+      if (
+        Object.keys(current).length === sessionIds.length &&
+        sessionIds.every((sessionId) => current[sessionId] === next[sessionId])
+      ) {
+        return current
+      }
+      return next
+    })
+
+    const unsubscribers = sessionIds.map((sessionId) => subscribeToGitInfo(sessionId, (gitInfo) => {
+      setGitInfoById((current) => {
+        if (current[sessionId] === gitInfo) return current
+        return { ...current, [sessionId]: gitInfo }
+      })
+    }))
+
+    return () => {
+      for (const unsubscribe of unsubscribers) unsubscribe()
+    }
+  }, [sessionIdsKey])
+
+  return gitInfoById
+}
+
 function getOrCreateCacheEntry(sessionId: string): GitInfoCacheEntry {
   const existing = gitInfoCache.get(sessionId)
   if (existing) return existing
@@ -105,6 +147,30 @@ function getOrCreateCacheEntry(sessionId: string): GitInfoCacheEntry {
   return created
 }
 
+function subscribeToGitInfo(sessionId: string, listener: (gitInfo: GitInfo) => void): () => void {
+  const listeners = gitInfoListeners.get(sessionId) ?? new Set<(gitInfo: GitInfo) => void>()
+  listeners.add(listener)
+  gitInfoListeners.set(sessionId, listeners)
+
+  return () => {
+    const currentListeners = gitInfoListeners.get(sessionId)
+    if (!currentListeners) return
+    currentListeners.delete(listener)
+    if (currentListeners.size === 0) {
+      gitInfoListeners.delete(sessionId)
+    }
+  }
+}
+
+function notifyGitInfoListeners(sessionId: string, gitInfo: GitInfo) {
+  const listeners = gitInfoListeners.get(sessionId)
+  if (!listeners) return
+  for (const listener of listeners) {
+    listener(gitInfo)
+  }
+}
+
 export function __resetGitInfoCacheForTests() {
   gitInfoCache.clear()
+  gitInfoListeners.clear()
 }
