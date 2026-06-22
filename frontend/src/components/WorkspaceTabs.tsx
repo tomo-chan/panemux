@@ -532,11 +532,15 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
                       </div>
                     </div>
                     <div
+                      data-testid={`workspace-pane-group-${workspace.id}`}
                       style={{
                         display: 'grid',
                         gridTemplateColumns: vertical ? 'minmax(0, 1fr)' : 'repeat(auto-fit, minmax(160px, 1fr))',
                         gap: 6,
                         alignItems: 'start',
+                        marginLeft: 10,
+                        paddingLeft: 12,
+                        borderLeft: '1px solid #364050',
                       }}
                     >
                       {overlaySummary.panes.map((pane) => (
@@ -642,11 +646,15 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
                       </div>
                     </div>
                     <div
+                      data-testid={`workspace-pane-group-${workspace.id}`}
                       style={{
                         display: 'grid',
                         gridTemplateColumns: vertical ? 'minmax(0, 1fr)' : 'repeat(auto-fit, minmax(160px, 1fr))',
                         gap: 6,
                         alignItems: 'start',
+                        marginLeft: 10,
+                        paddingLeft: 12,
+                        borderLeft: '1px solid #364050',
                       }}
                     >
                       {inlineSummary.panes.map((pane) => (

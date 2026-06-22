@@ -85,6 +85,11 @@ describe('WorkspaceTabs', () => {
     expect(screen.getByText('PR #12')).toBeInTheDocument()
     expect(screen.getByText('prod')).toBeInTheDocument()
     expect(screen.getByText('Input')).toBeInTheDocument()
+    expect(screen.getByTestId('workspace-pane-group-dev')).toHaveStyle({
+      marginLeft: '10px',
+      paddingLeft: '12px',
+      borderLeft: '1px solid #364050',
+    })
 
     fireEvent.mouseEnter(screen.getByRole('tab', { name: /^Ops\b/ }))
     expect(screen.getByRole('region', { name: 'Ops workspace details' })).toBeInTheDocument()
@@ -105,6 +110,11 @@ describe('WorkspaceTabs', () => {
     expect(screen.getByRole('region', { name: 'Dev workspace details' })).toBeInTheDocument()
     expect(screen.getByRole('region', { name: 'Ops workspace details' })).toBeInTheDocument()
     expect(screen.getByText('bastion')).toBeInTheDocument()
+    expect(screen.getByTestId('workspace-pane-group-dev')).toHaveStyle({
+      marginLeft: '10px',
+      paddingLeft: '12px',
+      borderLeft: '1px solid #364050',
+    })
     expect(container.querySelector('[role="tab"]')?.parentElement?.parentElement).toHaveStyle({ flexDirection: 'column' })
   })
 
