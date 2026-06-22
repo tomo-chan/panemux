@@ -13,6 +13,7 @@ const validDisplay = { show_header: true, show_status_bar: true }
 const validWorkspaces = {
   active: 'dev',
   tab_position: 'top',
+  vertical_bar_width: 280,
   items: [
     { id: 'dev', title: 'Dev', layout: validLayout },
     {
@@ -30,6 +31,7 @@ function workspacesForLayout(layout: LayoutNode) {
   return {
     active: 'dev',
     tab_position: 'top',
+    vertical_bar_width: 280,
     items: [{ id: 'dev', title: 'Dev', layout }],
   }
 }
@@ -153,6 +155,7 @@ describe('useLayout', () => {
     const remainingWorkspaces = {
       active: 'ops',
       tab_position: 'top',
+      vertical_bar_width: 280,
       items: [validWorkspaces.items[1]],
     }
     const fetchMock = vi.fn()
@@ -369,6 +372,56 @@ describe('useLayout', () => {
 
     expect(result.current.error).toContain('422')
     expect(result.current.workspaces?.tab_position).toBe('top')
+  })
+
+  it('updates workspace vertical bar width optimistically and persists it', async () => {
+    const updatedWorkspaces = { ...validWorkspaces, vertical_bar_width: 320 }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validWorkspaces) } as Response)
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validDisplay) } as Response)
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(updatedWorkspaces) } as Response)
+    window.fetch = fetchMock
+
+    const { result } = renderHook(() => useLayout())
+    await waitFor(() => expect(result.current.workspaces).not.toBeNull())
+
+    act(() => {
+      result.current.setWorkspaceVerticalBarWidth(320)
+    })
+
+    expect(result.current.workspaces?.vertical_bar_width).toBe(320)
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/workspaces/vertical-bar-width', expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({ vertical_bar_width: 320 }),
+      }))
+    })
+    expect(result.current.workspaces?.vertical_bar_width).toBe(320)
+  })
+
+  it('sets error when updating workspace vertical bar width fails', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validWorkspaces) } as Response)
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validDisplay) } as Response)
+      .mockResolvedValueOnce({ ok: false, status: 422 } as Response)
+    window.fetch = fetchMock
+
+    const { result } = renderHook(() => useLayout())
+    await waitFor(() => expect(result.current.workspaces).not.toBeNull())
+
+    act(() => {
+      result.current.setWorkspaceVerticalBarWidth(120)
+    })
+    expect(result.current.error).toContain('greater than or equal to 180')
+
+    act(() => {
+      result.current.setWorkspaceVerticalBarWidth(320)
+    })
+
+    await waitFor(() => {
+      expect(result.current.error).toContain('422')
+    })
   })
 
   it('fetches display config on mount', async () => {
@@ -995,6 +1048,7 @@ describe('useLayout', () => {
       const multiPaneWorkspaces = {
         active: 'dev',
         tab_position: 'top' as const,
+        vertical_bar_width: 280,
         items: [
           {
             id: 'dev',
@@ -1063,6 +1117,7 @@ describe('useLayout', () => {
       const multiPaneWorkspaces = {
         active: 'dev',
         tab_position: 'top' as const,
+        vertical_bar_width: 280,
         items: [
           {
             id: 'dev',
@@ -1113,6 +1168,7 @@ describe('useLayout', () => {
       const multiPaneWorkspaces = {
         active: 'dev',
         tab_position: 'top' as const,
+        vertical_bar_width: 280,
         items: [
           {
             id: 'dev',

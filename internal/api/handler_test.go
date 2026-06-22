@@ -95,6 +95,7 @@ func setupRouterWithHandler(h *Handler) *chi.Mux {
 	r.Post("/api/workspaces", h.PostWorkspace)
 	r.Put("/api/workspaces/active", h.PutActiveWorkspace)
 	r.Put("/api/workspaces/tab-position", h.PutWorkspaceTabPosition)
+	r.Put("/api/workspaces/vertical-bar-width", h.PutWorkspaceVerticalBarWidth)
 	r.Put("/api/workspaces/{id}", h.PutWorkspace)
 	r.Delete("/api/workspaces/{id}", h.DeleteWorkspace)
 	r.Put("/api/workspaces/{id}/layout", h.PutWorkspaceLayout)
@@ -128,8 +129,9 @@ func workspaceTestConfig() *config.Config {
 	return &config.Config{
 		Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1"},
 		Workspaces: config.WorkspacesConfig{
-			Active:      "one",
-			TabPosition: "top",
+			Active:           "one",
+			TabPosition:      "top",
+			VerticalBarWidth: 280,
 			Items: []config.WorkspaceConfig{
 				{
 					ID:    "one",
@@ -162,6 +164,7 @@ server:
 workspaces:
   active: one
   tab_position: top
+  vertical_bar_width: 280
   items:
     - id: one
       title: One
@@ -186,6 +189,25 @@ workspaces:
 	cfg, err := config.Load(path)
 	require.NoError(t, err)
 	return cfg, path
+}
+
+func assertWorkspaceSettingRejected(
+	t *testing.T,
+	r *chi.Mux,
+	path string,
+	body string,
+	assertState func(t *testing.T),
+	wantError string,
+) {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, path, bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
+	assertState(t)
+	assert.Contains(t, rec.Body.String(), wantError)
 }
 
 func TestGetLayout_ReturnsJSON(t *testing.T) {
@@ -228,6 +250,7 @@ func TestGetWorkspaces_ReturnsJSON(t *testing.T) {
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&workspaces))
 	assert.Equal(t, "default", workspaces.Active)
 	assert.Equal(t, "top", workspaces.TabPosition)
+	assert.Equal(t, 280, workspaces.VerticalBarWidth)
 	require.Len(t, workspaces.Items, 1)
 	assert.Equal(t, "Default", workspaces.Items[0].Title)
 }
@@ -326,18 +349,67 @@ func TestPutWorkspaceTabPosition_InvalidPosition_Returns422AndKeepsExistingValue
 	cfg := workspaceTestConfig()
 	h := NewHandler(cfg, session.NewManager())
 	r := setupRouterWithHandler(h)
+	assertWorkspaceSettingRejected(
+		t,
+		r,
+		"/api/workspaces/tab-position",
+		`{"tab_position":"diagonal"}`,
+		func(t *testing.T) {
+			assert.Equal(t, "top", cfg.Workspaces.TabPosition)
+		},
+		"invalid tab_position",
+	)
+}
+
+func TestPutWorkspaceVerticalBarWidth_UpdatesAndPersists(t *testing.T) {
+	cfg, path := loadWorkspaceTestConfigFromFile(t)
+	h := NewHandler(cfg, session.NewManager())
+	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
+	r := setupRouterWithHandler(h)
+
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(
 		http.MethodPut,
-		"/api/workspaces/tab-position",
-		bytes.NewBufferString(`{"tab_position":"diagonal"}`),
+		"/api/workspaces/vertical-bar-width",
+		bytes.NewBufferString(`{"vertical_bar_width":320}`),
 	)
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(rec, req)
 
-	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
-	assert.Equal(t, "top", cfg.Workspaces.TabPosition)
-	assert.Contains(t, rec.Body.String(), "invalid tab_position")
+	require.Equal(t, http.StatusOK, rec.Code)
+	var workspaces config.WorkspacesConfig
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&workspaces))
+	assert.Equal(t, 320, workspaces.VerticalBarWidth)
+
+	loaded, err := config.Load(path)
+	require.NoError(t, err)
+	assert.Equal(t, 320, loaded.Workspaces.VerticalBarWidth)
+}
+
+func TestPutWorkspaceVerticalBarWidth_InvalidBody_Returns400(t *testing.T) {
+	h := NewHandler(workspaceTestConfig(), session.NewManager())
+	r := setupRouterWithHandler(h)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/vertical-bar-width", bytes.NewBufferString("not json"))
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestPutWorkspaceVerticalBarWidth_InvalidWidth_Returns422AndKeepsExistingValue(t *testing.T) {
+	cfg := workspaceTestConfig()
+	h := NewHandler(cfg, session.NewManager())
+	r := setupRouterWithHandler(h)
+	assertWorkspaceSettingRejected(
+		t,
+		r,
+		"/api/workspaces/vertical-bar-width",
+		`{"vertical_bar_width":120}`,
+		func(t *testing.T) {
+			assert.Equal(t, 280, cfg.Workspaces.VerticalBarWidth)
+		},
+		"invalid vertical_bar_width",
+	)
 }
 
 func TestPostWorkspace_AddsDefaultLocalWorkspaceAndPersists(t *testing.T) {

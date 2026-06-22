@@ -19,7 +19,24 @@ import type { GitInfo, LayoutChild, LayoutNode, SessionInfo, SSHConfigHost } fro
 const DEFAULT_DISPLAY: DisplayConfig = { show_header: true, show_status_bar: true }
 
 export const App: React.FC = () => {
-  const { layout, workspaces, displayConfig, error, updateSizes, splitPane, closePane, swapPanes, createPane, movePane, setActiveWorkspace, addWorkspace, deleteWorkspace, renameWorkspace, setWorkspaceTabPosition } = useLayout()
+  const {
+    layout,
+    workspaces,
+    displayConfig,
+    error,
+    updateSizes,
+    splitPane,
+    closePane,
+    swapPanes,
+    createPane,
+    movePane,
+    setActiveWorkspace,
+    addWorkspace,
+    deleteWorkspace,
+    renameWorkspace,
+    setWorkspaceTabPosition,
+    setWorkspaceVerticalBarWidth,
+  } = useLayout()
   const [maximizedPaneIdsByWorkspace, setMaximizedPaneIdsByWorkspace] = useState<Record<string, string | null>>({})
   const [dragSourcePaneId, setDragSourcePaneId] = useState<string | null>(null)
   const [activePaneId, setActivePaneId] = useState<string | null>(null)
@@ -316,6 +333,7 @@ export const App: React.FC = () => {
             workspaces={workspaces.items}
             activeWorkspaceId={workspaces.active}
             tabPosition={workspaces.tab_position}
+            verticalBarWidth={workspaces.vertical_bar_width}
             dragSourcePaneId={dragSourcePaneId}
             onMovePaneToWorkspace={(sourcePaneId, workspaceId) => {
               handleMovePane(sourcePaneId, { type: 'workspace-tab', workspaceId })
@@ -332,6 +350,7 @@ export const App: React.FC = () => {
             onAdd={addWorkspace}
             onRename={renameWorkspace}
             onTabPositionChange={setWorkspaceTabPosition}
+            onVerticalBarWidthChange={setWorkspaceVerticalBarWidth}
             onDelete={(workspaceId) => {
               const workspace = workspaces.items.find((item) => item.id === workspaceId)
               if (!workspace) return

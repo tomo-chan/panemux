@@ -103,7 +103,7 @@ Pane settings in the frontend expose a directory browser for `cwd`. Local and lo
 Persistence behavior:
 
 - layout and workspace changes are persisted immediately when a save path is available
-- pane resize, split, close, quick-add create, move, workspace add/delete/rename, active-workspace changes, and `tab_position` changes all follow the same immediate-save path
+- pane resize, split, close, quick-add create, move, workspace add/delete/rename, active-workspace changes, `tab_position` changes, and vertical workspace-bar width changes all follow the same immediate-save path
 - when no `--config` is given, the default save path is `~/.config/panemux/config.yaml`; the directory is created automatically on first save
 - pane maximize state is frontend-local, tracked per workspace, and restored when the user switches away from a workspace and then returns
 
@@ -159,7 +159,8 @@ panes across all workspaces without mounting hidden terminal instances. The inte
 marks the currently focused pane so the overview stays aligned with the live terminal focus state.
 For `top` and `bottom` workspace bars, pane cards are shown in a hover/focus overlay anchored to
 the workspace tab. For `left` and `right` workspace bars, pane cards stay expanded inline beneath
-their workspace tab.
+their workspace tab. In vertical mode, the workspace tabs and inline cards scroll inside the bar,
+while the `+` action and tab-position controls stay pinned at the bottom.
 
 When a pane is hidden behind maximize, its header Git/PR polling stops until it becomes visible
 again. Restoring the browser tab or making a pane visible again triggers an immediate refresh so
@@ -201,7 +202,7 @@ Accepts a layout JSON document, validates it, updates in-memory state, and persi
 
 ### `GET /api/workspaces`
 
-Returns the active workspace ID, `tab_position`, and all workspace layouts.
+Returns the active workspace ID, `tab_position`, `vertical_bar_width`, and all workspace layouts.
 
 ### `PUT /api/workspaces/tab-position`
 
@@ -209,6 +210,15 @@ Accepts `{ "tab_position": "top" | "bottom" | "left" | "right" }`, validates it,
 
 - `400`: invalid JSON
 - `422`: invalid tab position
+- `500`: unable to save the config
+- `200`: updated and returned
+
+### `PUT /api/workspaces/vertical-bar-width`
+
+Accepts `{ "vertical_bar_width": <int> }`, validates the shared vertical workspace-bar width in pixels, persists the workspace config, and returns the updated workspace response.
+
+- `400`: invalid JSON
+- `422`: invalid width
 - `500`: unable to save the config
 - `200`: updated and returned
 

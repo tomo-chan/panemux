@@ -22,6 +22,7 @@ const devLayout: LayoutNode = {
 const workspaces: WorkspacesResponse = {
   active: 'dev',
   tab_position: 'top',
+  vertical_bar_width: 280,
   items: [
     { id: 'dev', title: 'Dev', layout: devLayout },
     {
@@ -37,6 +38,7 @@ let currentWorkspaces = workspaces
 const mockDeleteWorkspace = vi.fn()
 const mockRenameWorkspace = vi.fn()
 const mockSetWorkspaceTabPosition = vi.fn()
+const mockSetWorkspaceVerticalBarWidth = vi.fn()
 const mockSetActiveWorkspace = vi.fn()
 const mockUpdateSizes = vi.fn()
 const mockSplitPane = vi.fn()
@@ -67,6 +69,7 @@ vi.mock('./hooks/useLayout', () => ({
     deleteWorkspace: mockDeleteWorkspace,
     renameWorkspace: mockRenameWorkspace,
     setWorkspaceTabPosition: mockSetWorkspaceTabPosition,
+    setWorkspaceVerticalBarWidth: mockSetWorkspaceVerticalBarWidth,
   }),
 }))
 
@@ -134,6 +137,7 @@ describe('App workspace deletion', () => {
     mockDeleteWorkspace.mockClear()
     mockRenameWorkspace.mockClear()
     mockSetWorkspaceTabPosition.mockClear()
+    mockSetWorkspaceVerticalBarWidth.mockClear()
     mockSetActiveWorkspace.mockClear()
     mockUpdateSizes.mockClear()
     mockSplitPane.mockClear()
@@ -453,6 +457,17 @@ describe('App workspace deletion', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Place workspace tabs on right' }))
 
     expect(mockSetWorkspaceTabPosition).toHaveBeenCalledWith('right')
+  })
+
+  it('passes vertical workspace bar width changes from the resizer', () => {
+    currentWorkspaces = { ...workspaces, tab_position: 'left' }
+    render(<App />)
+
+    fireEvent.mouseDown(screen.getByTestId('workspace-bar-resizer'), { clientX: 280 })
+    fireEvent.mouseMove(window, { clientX: 320 })
+    fireEvent.mouseUp(window)
+
+    expect(mockSetWorkspaceVerticalBarWidth).toHaveBeenCalledWith(320)
   })
 
   it('moves a dragged pane to another workspace tab', () => {

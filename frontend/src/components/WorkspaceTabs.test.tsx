@@ -466,11 +466,60 @@ describe('WorkspaceTabs', () => {
         activeWorkspaceId="dev"
         tabPosition="left"
         onSelect={() => {}}
+        onAdd={() => {}}
         onTabPositionChange={() => {}}
       />,
     )
 
-    expect(screen.getByRole('group', { name: 'Workspace tab position' })).toHaveStyle({ marginTop: 'auto' })
+    expect(screen.getByTestId('workspace-tabs-footer')).toContainElement(screen.getByRole('group', { name: 'Workspace tab position' }))
+    expect(screen.getByTestId('workspace-tabs-footer')).toContainElement(screen.getByRole('button', { name: 'Add workspace' }))
+  })
+
+  it('uses a dedicated scroll region above the fixed footer for vertical bars', () => {
+    render(
+      <WorkspaceTabs
+        workspaces={workspaces}
+        activeWorkspaceId="dev"
+        tabPosition="left"
+        onSelect={() => {}}
+        onAdd={() => {}}
+        onTabPositionChange={() => {}}
+      />,
+    )
+
+    expect(screen.getByTestId('workspace-tabs-scroll-region')).toHaveStyle({
+      overflowY: 'auto',
+      overflowX: 'hidden',
+    })
+    expect(screen.getByTestId('workspace-tabs-footer')).toBeInTheDocument()
+  })
+
+  it('renders a resizer only for vertical bars when width changes are enabled', () => {
+    const { rerender } = render(
+      <WorkspaceTabs
+        workspaces={workspaces}
+        activeWorkspaceId="dev"
+        tabPosition="left"
+        verticalBarWidth={280}
+        onSelect={() => {}}
+        onVerticalBarWidthChange={() => {}}
+      />,
+    )
+
+    expect(screen.getByTestId('workspace-bar-resizer')).toBeInTheDocument()
+
+    rerender(
+      <WorkspaceTabs
+        workspaces={workspaces}
+        activeWorkspaceId="dev"
+        tabPosition="top"
+        verticalBarWidth={280}
+        onSelect={() => {}}
+        onVerticalBarWidthChange={() => {}}
+      />,
+    )
+
+    expect(screen.queryByTestId('workspace-bar-resizer')).not.toBeInTheDocument()
   })
 
   it('hides tab position controls when the position change handler is omitted', () => {

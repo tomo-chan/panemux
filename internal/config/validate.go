@@ -12,16 +12,18 @@ import (
 var tmuxSessionNameRe = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`)
 
 const (
-	directionHorizontal = "horizontal"
-	directionVertical   = "vertical"
-	paneTypeLocal       = "local"
-	paneTypeSSH         = "ssh"
-	paneTypeTmux        = "tmux"
-	paneTypeSSHTmux     = "ssh_tmux"
-	tabPositionTop      = "top"
-	tabPositionBottom   = "bottom"
-	tabPositionLeft     = "left"
-	tabPositionRight    = "right"
+	directionHorizontal          = "horizontal"
+	directionVertical            = "vertical"
+	paneTypeLocal                = "local"
+	paneTypeSSH                  = "ssh"
+	paneTypeTmux                 = "tmux"
+	paneTypeSSHTmux              = "ssh_tmux"
+	tabPositionTop               = "top"
+	tabPositionBottom            = "bottom"
+	tabPositionLeft              = "left"
+	tabPositionRight             = "right"
+	minWorkspaceVerticalBarWidth = 180
+	maxWorkspaceVerticalBarWidth = 520
 )
 
 // Validate checks the configuration for correctness.
@@ -74,6 +76,11 @@ func validateWorkspaces(workspaces WorkspacesConfig, sshConns map[string]SSHConn
 			errs = append(errs, err.Error())
 		}
 	}
+	if workspaces.VerticalBarWidth != 0 {
+		if err := ValidateWorkspaceVerticalBarWidth(workspaces.VerticalBarWidth); err != nil {
+			errs = append(errs, err.Error())
+		}
+	}
 	if len(workspaces.Items) == 0 {
 		errs = append(errs, "workspaces.items must not be empty")
 		return errs
@@ -111,6 +118,18 @@ func ValidateWorkspaceTabPosition(position string) error {
 	default:
 		return fmt.Errorf("invalid tab_position %q: must be top, bottom, left, or right", position)
 	}
+}
+
+func ValidateWorkspaceVerticalBarWidth(width int) error {
+	if width < minWorkspaceVerticalBarWidth || width > maxWorkspaceVerticalBarWidth {
+		return fmt.Errorf(
+			"invalid vertical_bar_width %d: must be between %d and %d",
+			width,
+			minWorkspaceVerticalBarWidth,
+			maxWorkspaceVerticalBarWidth,
+		)
+	}
+	return nil
 }
 
 // ValidatePane validates a standalone PaneConfig without ssh_connections context.

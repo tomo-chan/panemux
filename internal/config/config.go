@@ -13,6 +13,7 @@ import (
 )
 
 const configFileMode os.FileMode = 0600
+const defaultWorkspaceVerticalBarWidth = 280
 
 var chmodConfigFile = os.Chmod
 
@@ -67,9 +68,10 @@ type WorkspaceConfig struct {
 }
 
 type WorkspacesConfig struct {
-	Active      string            `yaml:"active,omitempty"       json:"active"`
-	TabPosition string            `yaml:"tab_position,omitempty" json:"tab_position"`
-	Items       []WorkspaceConfig `yaml:"items,omitempty"       json:"items"`
+	Active           string            `yaml:"active,omitempty"             json:"active"`
+	TabPosition      string            `yaml:"tab_position,omitempty"       json:"tab_position"`
+	Items            []WorkspaceConfig `yaml:"items,omitempty"              json:"items"`
+	VerticalBarWidth int               `yaml:"vertical_bar_width,omitempty" json:"vertical_bar_width"`
 }
 
 // Config field order controls YAML serialization order for newly written
@@ -124,8 +126,9 @@ func Default() *Config {
 		},
 		Layout: defaultLayout(),
 		Workspaces: WorkspacesConfig{
-			Active:      "default",
-			TabPosition: "top",
+			Active:           "default",
+			TabPosition:      "top",
+			VerticalBarWidth: defaultWorkspaceVerticalBarWidth,
 			Items: []WorkspaceConfig{
 				{
 					ID:     "default",
@@ -165,8 +168,9 @@ func (c *Config) normalizedWorkspaces() WorkspacesConfig {
 	workspaces := c.Workspaces
 	if len(workspaces.Items) == 0 {
 		workspaces = WorkspacesConfig{
-			Active:      "default",
-			TabPosition: "top",
+			Active:           "default",
+			TabPosition:      "top",
+			VerticalBarWidth: defaultWorkspaceVerticalBarWidth,
 			Items: []WorkspaceConfig{
 				{
 					ID:     "default",
@@ -178,6 +182,9 @@ func (c *Config) normalizedWorkspaces() WorkspacesConfig {
 	}
 	if workspaces.TabPosition == "" {
 		workspaces.TabPosition = "top"
+	}
+	if workspaces.VerticalBarWidth == 0 {
+		workspaces.VerticalBarWidth = defaultWorkspaceVerticalBarWidth
 	}
 	if workspaces.Active == "" && len(workspaces.Items) > 0 {
 		workspaces.Active = workspaces.Items[0].ID
@@ -299,6 +306,15 @@ func (c *Config) SetWorkspaceTabPosition(position string) error {
 	}
 	c.normalizeWorkspaces()
 	c.Workspaces.TabPosition = position
+	return nil
+}
+
+func (c *Config) SetWorkspaceVerticalBarWidth(width int) error {
+	if err := ValidateWorkspaceVerticalBarWidth(width); err != nil {
+		return err
+	}
+	c.normalizeWorkspaces()
+	c.Workspaces.VerticalBarWidth = width
 	return nil
 }
 

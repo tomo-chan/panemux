@@ -100,6 +100,10 @@ type workspaceTabPositionRequest struct {
 	TabPosition string `json:"tab_position"`
 }
 
+type workspaceVerticalBarWidthRequest struct {
+	VerticalBarWidth int `json:"vertical_bar_width"`
+}
+
 type directoryEntryResponse struct {
 	Name        string `json:"name"`
 	Path        string `json:"path"`
@@ -190,10 +194,24 @@ func (h *Handler) PutWorkspaceTabPosition(w http.ResponseWriter, r *http.Request
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	if err := h.cfg.SetWorkspaceTabPosition(req.TabPosition); err != nil {
+	h.applyWorkspaceSettingUpdate(w, h.cfg.SetWorkspaceTabPosition(req.TabPosition))
+}
+
+// PutWorkspaceVerticalBarWidth updates the shared vertical workspace bar width.
+func (h *Handler) PutWorkspaceVerticalBarWidth(w http.ResponseWriter, r *http.Request) {
+	var req workspaceVerticalBarWidthRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	h.applyWorkspaceSettingUpdate(w, h.cfg.SetWorkspaceVerticalBarWidth(req.VerticalBarWidth))
+}
+
+func (h *Handler) applyWorkspaceSettingUpdate(w http.ResponseWriter, updateErr error) {
+	if updateErr != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnprocessableEntity)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": updateErr.Error()})
 		return
 	}
 	if err := h.cfg.SaveWorkspaces(); err != nil {

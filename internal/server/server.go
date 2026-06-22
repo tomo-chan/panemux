@@ -63,6 +63,7 @@ func registerRoutes(r chi.Router, apiHandler *api.Handler, wsHandler *ws.Handler
 		r.Post("/workspaces", apiHandler.PostWorkspace)
 		r.Put("/workspaces/active", apiHandler.PutActiveWorkspace)
 		r.Put("/workspaces/tab-position", apiHandler.PutWorkspaceTabPosition)
+		r.Put("/workspaces/vertical-bar-width", apiHandler.PutWorkspaceVerticalBarWidth)
 		r.Put("/workspaces/{id}", apiHandler.PutWorkspace)
 		r.Delete("/workspaces/{id}", apiHandler.DeleteWorkspace)
 		r.Put("/workspaces/{id}/layout", apiHandler.PutWorkspaceLayout)

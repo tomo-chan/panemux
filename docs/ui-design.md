@@ -66,6 +66,8 @@ The position cluster sits on the opposite end of the workspace tabs:
 
 This separation keeps workspace navigation and workspace-bar relocation visually distinct.
 
+For left/right bars, the bar width is user-resizable by dragging its inner edge. The chosen width is shared across workspaces and restored on reload, while the pane layout inside the remaining work area continues to use its own saved percentage splits.
+
 Workspace creation uses a single `+` control because it is now the only creation action in the bar and does not need extra wording to distinguish it from terminal creation.
 
 ### Integrated workspace summaries
@@ -88,6 +90,8 @@ Presentation depends on bar position:
 
 - top/bottom bars: pane cards appear as a hover/focus overlay attached to the tab
 - left/right bars: pane cards stay expanded inline under the tab
+
+When the bar is on the left or right, the tab list and inline pane groups live in a dedicated scroll region. The fixed footer below them keeps the `+` action and all four tab-position buttons visible even when the workspace list is taller than the viewport.
 
 Each pane group shows:
 

@@ -53,7 +53,8 @@ ssh_connections:
 # workspaces, or move workspace tabs. New workspaces start with one local
 # terminal pane. Deleting a workspace asks for confirmation, and the last
 # remaining workspace cannot be deleted. The active workspace selection and
-# tab_position are saved.
+# tab_position are saved. `vertical_bar_width` controls the shared width in
+# pixels when the workspace bar is on the left or right.
 #
 # Split node  — has `direction` and `children` (no `pane`)
 # Leaf node   — has `pane` (no `direction` / `children`)
@@ -72,6 +73,7 @@ ssh_connections:
 workspaces:
   active: dev
   tab_position: top
+  vertical_bar_width: 280
   items:
     - id: dev
       title: "Development"

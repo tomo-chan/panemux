@@ -1,5 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { DetectShellResponseSchema, DisplayConfig, DisplayConfigSchema, LayoutNode, PaneConfig, TabPosition, WorkspacesResponse, WorkspacesResponseSchema, WorkspaceTabPositionRequestSchema } from '../schemas'
+import {
+  DetectShellResponseSchema,
+  DisplayConfig,
+  DisplayConfigSchema,
+  LayoutNode,
+  PaneConfig,
+  TabPosition,
+  WorkspacesResponse,
+  WorkspacesResponseSchema,
+  WorkspaceTabPositionRequestSchema,
+  WorkspaceVerticalBarWidthRequestSchema,
+} from '../schemas'
 import { PaneEdge, findPaneById, generatePaneId, generateTmuxSessionName, insertPaneAtWorkspaceEdge, insertPaneBesideTargetPane, layoutContainsPane, movePaneBesideTargetPane, movePaneToWorkspaceEdge, removePaneFromTree, splitPaneInTree, swapPanesInTree } from '../utils/layoutTree'
 
 type WorkspaceEdgePlacement = { type: 'workspace-edge'; edge: PaneEdge }
@@ -15,6 +26,7 @@ export function useLayout() {
   const [displayConfig, setDisplayConfig] = useState<DisplayConfig | null>(null)
   const [error, setError] = useState<string | null>(null)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const workspaceBarWidthSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     fetch('/api/workspaces')
@@ -175,6 +187,33 @@ export function useLayout() {
     }
   }, [])
 
+  const setWorkspaceVerticalBarWidth = useCallback((width: number) => {
+    try {
+      setError(null)
+      const request = WorkspaceVerticalBarWidthRequestSchema.parse({ vertical_bar_width: width })
+      setWorkspaces((current) => current ? { ...current, vertical_bar_width: request.vertical_bar_width } : current)
+
+      if (workspaceBarWidthSaveTimerRef.current) clearTimeout(workspaceBarWidthSaveTimerRef.current)
+      workspaceBarWidthSaveTimerRef.current = setTimeout(() => {
+        fetch('/api/workspaces/vertical-bar-width', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(request),
+        })
+          .then(async (response) => {
+            if (!response.ok) throw new Error(`HTTP ${response.status}`)
+            const parsed = WorkspacesResponseSchema.parse(await response.json())
+            setWorkspaces((current) => current ? { ...parsed, items: current.items } : parsed)
+          })
+          .catch((err) => {
+            setError(err instanceof Error ? err.message : 'Failed to update workspace bar width')
+          })
+      }, 150)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update workspace bar width')
+    }
+  }, [])
+
   const splitPane = useCallback(
     async (targetPaneId: string, direction: 'horizontal' | 'vertical') => {
       if (!layout) return
@@ -316,7 +355,24 @@ export function useLayout() {
     await saveLayout(newLayout, true)
   }, [layout, saveLayout, workspaces])
 
-  return { layout, workspaces, displayConfig, error, updateSizes, splitPane, closePane, swapPanes, createPane, movePane, setActiveWorkspace, addWorkspace, deleteWorkspace, renameWorkspace, setWorkspaceTabPosition }
+  return {
+    layout,
+    workspaces,
+    displayConfig,
+    error,
+    updateSizes,
+    splitPane,
+    closePane,
+    swapPanes,
+    createPane,
+    movePane,
+    setActiveWorkspace,
+    addWorkspace,
+    deleteWorkspace,
+    renameWorkspace,
+    setWorkspaceTabPosition,
+    setWorkspaceVerticalBarWidth,
+  }
 }
 
 async function saveWorkspaceLayout(workspaceID: string, updatedLayout: LayoutNode) {
