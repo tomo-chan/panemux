@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.0](https://github.com/tomo-chan/panemux/compare/v0.18.8...v0.19.0) (2026-06-22)
+
+
+### Features
+
+* add workspace overview dashboard ([#137](https://github.com/tomo-chan/panemux/issues/137)) ([66f0ac2](https://github.com/tomo-chan/panemux/commit/66f0ac2cc0b9899bd9934151f114664cbb07ab98))
+
 ## [0.18.8](https://github.com/tomo-chan/panemux/compare/v0.18.7...v0.18.8) (2026-06-20)
 
 
