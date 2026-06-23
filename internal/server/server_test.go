@@ -24,8 +24,9 @@ func testConfig() *config.Config {
 			Host: "127.0.0.1",
 		},
 		Workspaces: config.WorkspacesConfig{
-			Active:      "default",
-			TabPosition: "top",
+			Active:           "default",
+			TabPosition:      "top",
+			VerticalBarWidth: 280,
 			Items: []config.WorkspaceConfig{
 				{
 					ID:    "default",
@@ -183,18 +184,30 @@ func TestServer_WorkspaceTabPositionRouteWiredBeforeWorkspaceIDRoute(t *testing.
 	srv := New(cfg, mgr, emptyFS)
 	require.NotNil(t, srv)
 
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(
-		http.MethodPut,
-		"/api/workspaces/tab-position",
-		bytes.NewBufferString(`{"tab_position":"right"}`),
-	)
-	req.Header.Set("Content-Type", "application/json")
-	srv.httpSrv.Handler.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
+	performWorkspaceSettingUpdate(t, srv, "/api/workspaces/tab-position", `{"tab_position":"right"}`)
 	assert.Equal(t, "right", cfg.Workspaces.TabPosition)
 	assert.Equal(t, "Default", cfg.Workspaces.Items[0].Title)
+}
+
+func TestServer_WorkspaceVerticalBarWidthRouteWiredBeforeWorkspaceIDRoute(t *testing.T) {
+	cfg := testConfig()
+	mgr := session.NewManager()
+	srv := New(cfg, mgr, emptyFS)
+	require.NotNil(t, srv)
+
+	performWorkspaceSettingUpdate(t, srv, "/api/workspaces/vertical-bar-width", `{"vertical_bar_width":320}`)
+	assert.Equal(t, 320, cfg.Workspaces.VerticalBarWidth)
+	assert.Equal(t, "Default", cfg.Workspaces.Items[0].Title)
+}
+
+func performWorkspaceSettingUpdate(t *testing.T, srv *Server, path string, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, path, bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.httpSrv.Handler.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	return rec
 }
 
 func TestServer_DirectoriesRouteWired(t *testing.T) {

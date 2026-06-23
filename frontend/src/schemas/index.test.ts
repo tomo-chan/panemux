@@ -12,6 +12,7 @@ import {
   SSHConfigHostsResponseSchema,
   DetectShellResponseSchema,
   WorkspaceTabPositionRequestSchema,
+  WorkspaceVerticalBarWidthRequestSchema,
   WorkspacesResponseSchema,
   DirectoryEntrySchema,
   DirectoryBrowserResponseSchema,
@@ -143,6 +144,7 @@ describe('WorkspacesResponseSchema', () => {
     const result = WorkspacesResponseSchema.safeParse({
       active: 'dev',
       tab_position: 'left',
+      vertical_bar_width: 280,
       items: [
         {
           id: 'dev',
@@ -161,6 +163,7 @@ describe('WorkspacesResponseSchema', () => {
     const result = WorkspacesResponseSchema.safeParse({
       active: 'dev',
       tab_position: 'diagonal',
+      vertical_bar_width: 280,
       items: [
         {
           id: 'dev',
@@ -177,6 +180,7 @@ describe('WorkspacesResponseSchema', () => {
       const result = WorkspacesResponseSchema.safeParse({
         active: 'dev',
         tab_position: tabPosition,
+        vertical_bar_width: 280,
         items: [
           {
             id: 'dev',
@@ -196,17 +200,37 @@ describe('WorkspacesResponseSchema', () => {
     expect(WorkspacesResponseSchema.safeParse({
       active: 'dev',
       tab_position: 'top',
+      vertical_bar_width: 280,
       items: [],
     }).success).toBe(false)
 
     expect(WorkspacesResponseSchema.safeParse({
       active: '',
       tab_position: 'top',
+      vertical_bar_width: 280,
       items: [
         {
           id: '',
           title: '',
           layout: { direction: 'horizontal', children: [] },
+        },
+      ],
+    }).success).toBe(false)
+  })
+
+  it('rejects out-of-range vertical bar widths', () => {
+    expect(WorkspacesResponseSchema.safeParse({
+      active: 'dev',
+      tab_position: 'left',
+      vertical_bar_width: 120,
+      items: [
+        {
+          id: 'dev',
+          title: 'Dev',
+          layout: {
+            direction: 'horizontal',
+            children: [{ size: 100, pane: { id: 'main', type: 'local' } }],
+          },
         },
       ],
     }).success).toBe(false)
@@ -224,6 +248,20 @@ describe('WorkspaceTabPositionRequestSchema', () => {
   it('rejects invalid or missing tab position', () => {
     expect(WorkspaceTabPositionRequestSchema.safeParse({ tab_position: 'diagonal' }).success).toBe(false)
     expect(WorkspaceTabPositionRequestSchema.safeParse({}).success).toBe(false)
+  })
+})
+
+describe('WorkspaceVerticalBarWidthRequestSchema', () => {
+  it('accepts valid widths', () => {
+    for (const width of [180, 280, 520]) {
+      const result = WorkspaceVerticalBarWidthRequestSchema.safeParse({ vertical_bar_width: width })
+      expect(result.success).toBe(true)
+    }
+  })
+
+  it('rejects invalid or missing widths', () => {
+    expect(WorkspaceVerticalBarWidthRequestSchema.safeParse({ vertical_bar_width: 120 }).success).toBe(false)
+    expect(WorkspaceVerticalBarWidthRequestSchema.safeParse({}).success).toBe(false)
   })
 })
 

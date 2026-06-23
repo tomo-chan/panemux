@@ -41,6 +41,7 @@ class MockWebSocket {
 const workspaces: WorkspacesResponse = {
   active: 'dev',
   tab_position: 'top',
+  vertical_bar_width: 280,
   items: [
     {
       id: 'dev',

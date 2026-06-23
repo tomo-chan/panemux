@@ -58,6 +58,14 @@ export const WorkspaceTabPositionRequestSchema = z.object({
 
 export type WorkspaceTabPositionRequest = z.infer<typeof WorkspaceTabPositionRequestSchema>
 
+export const WorkspaceVerticalBarWidthSchema = z.number().int().min(180).max(520)
+
+export const WorkspaceVerticalBarWidthRequestSchema = z.object({
+  vertical_bar_width: WorkspaceVerticalBarWidthSchema,
+})
+
+export type WorkspaceVerticalBarWidthRequest = z.infer<typeof WorkspaceVerticalBarWidthRequestSchema>
+
 export const WorkspaceSchema = z.object({
   id: z.string().min(1),
   title: z.string().min(1),
@@ -69,6 +77,7 @@ export type Workspace = z.infer<typeof WorkspaceSchema>
 export const WorkspacesResponseSchema = z.object({
   active: z.string().min(1),
   tab_position: TabPositionSchema,
+  vertical_bar_width: WorkspaceVerticalBarWidthSchema,
   items: z.array(WorkspaceSchema).min(1),
 })
 

@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -109,6 +110,17 @@ func TestValidate_WorkspaceTabPositions_AllValid(t *testing.T) {
 			cfg := validConfig()
 			cfg.normalizeWorkspaces()
 			cfg.Workspaces.TabPosition = position
+			require.NoError(t, cfg.Validate())
+		})
+	}
+}
+
+func TestValidate_WorkspaceVerticalBarWidth_Range(t *testing.T) {
+	for _, width := range []int{180, 280, 520} {
+		t.Run(strconv.Itoa(width), func(t *testing.T) {
+			cfg := validConfig()
+			cfg.normalizeWorkspaces()
+			cfg.Workspaces.VerticalBarWidth = width
 			require.NoError(t, cfg.Validate())
 		})
 	}
@@ -224,6 +236,25 @@ func TestSetWorkspaceTabPosition_InvalidPositionKeepsExistingValue(t *testing.T)
 	assert.Equal(t, "left", cfg.Workspaces.TabPosition)
 }
 
+func TestSetWorkspaceVerticalBarWidth_ValidWidth(t *testing.T) {
+	cfg := validConfig()
+
+	require.NoError(t, cfg.SetWorkspaceVerticalBarWidth(320))
+
+	assert.Equal(t, 320, cfg.Workspaces.VerticalBarWidth)
+}
+
+func TestSetWorkspaceVerticalBarWidth_InvalidWidthKeepsExistingValue(t *testing.T) {
+	cfg := validConfig()
+	require.NoError(t, cfg.SetWorkspaceVerticalBarWidth(280))
+
+	err := cfg.SetWorkspaceVerticalBarWidth(120)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid vertical_bar_width")
+	assert.Equal(t, 280, cfg.Workspaces.VerticalBarWidth)
+}
+
 func TestValidate_PaneEmptyID_Error(t *testing.T) {
 	cfg := validConfig()
 	cfg.Layout.Children[0].Pane.ID = ""
@@ -320,6 +351,7 @@ layout:
 	assert.Equal(t, "horizontal", cfg.Layout.Direction)
 	assert.Equal(t, "default", cfg.Workspaces.Active)
 	assert.Equal(t, "top", cfg.Workspaces.TabPosition)
+	assert.Equal(t, 280, cfg.Workspaces.VerticalBarWidth)
 	require.Len(t, cfg.Workspaces.Items, 1)
 	assert.Equal(t, "Default", cfg.Workspaces.Items[0].Title)
 }
@@ -332,6 +364,7 @@ server:
 workspaces:
   active: ops
   tab_position: left
+  vertical_bar_width: 320
   items:
     - id: dev
       title: Dev
@@ -357,6 +390,7 @@ workspaces:
 	require.NoError(t, err)
 	assert.Equal(t, "ops", cfg.Workspaces.Active)
 	assert.Equal(t, "left", cfg.Workspaces.TabPosition)
+	assert.Equal(t, 320, cfg.Workspaces.VerticalBarWidth)
 	assert.Equal(t, "vertical", cfg.ActiveLayout().Direction)
 }
 
@@ -375,6 +409,7 @@ layout:
 workspaces:
   active: dev
   tab_position: bottom
+  vertical_bar_width: 300
   items:
     - id: dev
       title: Dev
@@ -390,6 +425,7 @@ workspaces:
 	cfg, err := Load(f)
 	require.NoError(t, err)
 	assert.Equal(t, "bottom", cfg.Workspaces.TabPosition)
+	assert.Equal(t, 300, cfg.Workspaces.VerticalBarWidth)
 	assert.Equal(t, "horizontal", cfg.Layout.Direction)
 	require.Len(t, cfg.AllPanes(), 1)
 	assert.Equal(t, "dev-main", cfg.AllPanes()[0].ID)
@@ -417,6 +453,7 @@ workspaces:
 	require.NoError(t, err)
 	assert.Equal(t, "first", cfg.Workspaces.Active)
 	assert.Equal(t, "top", cfg.Workspaces.TabPosition)
+	assert.Equal(t, 280, cfg.Workspaces.VerticalBarWidth)
 	assert.Equal(t, "vertical", cfg.ActiveLayout().Direction)
 }
 

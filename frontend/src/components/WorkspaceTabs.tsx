@@ -2,6 +2,9 @@ import React, { useEffect, useRef, useState } from 'react'
 import type { TabPosition, Workspace } from '../types'
 import { TERMINAL_FONT_FAMILY } from '../utils/fonts'
 
+const MIN_VERTICAL_BAR_WIDTH = 180
+const MAX_VERTICAL_BAR_WIDTH = 520
+
 export interface WorkspacePaneSummary {
   id: string
   title: string
@@ -27,6 +30,7 @@ interface WorkspaceTabsProps {
   workspaces: Workspace[]
   activeWorkspaceId: string
   tabPosition: TabPosition
+  verticalBarWidth?: number
   onSelect: (workspaceId: string) => void
   dragSourcePaneId?: string | null
   onMovePaneToWorkspace?: (sourcePaneId: string, workspaceId: string) => void
@@ -34,6 +38,7 @@ interface WorkspaceTabsProps {
   onDelete?: (workspaceId: string) => void
   onRename?: (workspaceId: string, title: string) => void
   onTabPositionChange?: (position: TabPosition) => void
+  onVerticalBarWidthChange?: (width: number) => void
   attentionWorkspaceIds?: ReadonlySet<string>
   onClearAttention?: (workspaceId: string) => void
   workspaceSummaries?: Record<string, WorkspaceSummary>
@@ -120,6 +125,7 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
   workspaces,
   activeWorkspaceId,
   tabPosition,
+  verticalBarWidth = 280,
   onSelect,
   dragSourcePaneId,
   onMovePaneToWorkspace,
@@ -127,6 +133,7 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
   onDelete,
   onRename,
   onTabPositionChange,
+  onVerticalBarWidthChange,
   attentionWorkspaceIds,
   onClearAttention,
   workspaceSummaries,
@@ -142,8 +149,12 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
   const [draftTitle, setDraftTitle] = useState('')
   const [hoveredDropWorkspaceId, setHoveredDropWorkspaceId] = useState<string | null>(null)
   const [expandedWorkspaceId, setExpandedWorkspaceId] = useState<string | null>(null)
+  const [previewVerticalBarWidth, setPreviewVerticalBarWidth] = useState<number | null>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
   const renameFinalizedRef = useRef(false)
+  const resizeStateRef = useRef<{ startX: number; startWidth: number; pointerId: number | null } | null>(null)
+  const previewVerticalBarWidthRef = useRef<number | null>(null)
+  const effectiveVerticalBarWidth = clampVerticalBarWidth(previewVerticalBarWidth ?? verticalBarWidth)
 
   useEffect(() => {
     if (editingWorkspaceId) {
@@ -163,6 +174,65 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
       setExpandedWorkspaceId(editingWorkspaceId)
     }
   }, [editingWorkspaceId])
+
+  useEffect(() => {
+    if (!vertical) {
+      setPreviewVerticalBarWidth(null)
+      previewVerticalBarWidthRef.current = null
+    }
+  }, [vertical])
+
+  const setPreviewWidth = (width: number | null) => {
+    previewVerticalBarWidthRef.current = width
+    setPreviewVerticalBarWidth(width)
+  }
+
+  const updatePreviewWidth = (clientX: number) => {
+    const current = resizeStateRef.current
+    if (!current) return
+    const delta = tabPosition === 'left' ? clientX - current.startX : current.startX - clientX
+    setPreviewWidth(clampVerticalBarWidth(current.startWidth + delta))
+  }
+
+  const stopResizing = () => {
+    if (!resizeStateRef.current) return
+    resizeStateRef.current = null
+    const committedWidth = previewVerticalBarWidthRef.current
+    if (committedWidth !== null && committedWidth !== verticalBarWidth) {
+      onVerticalBarWidthChange?.(committedWidth)
+    }
+    setPreviewWidth(null)
+    document.body.style.userSelect = ''
+    document.body.style.cursor = ''
+  }
+
+  useEffect(() => {
+    if (!vertical || !onVerticalBarWidthChange) return
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const current = resizeStateRef.current
+      if (!current) return
+      if (current.pointerId !== null && event.pointerId !== current.pointerId) return
+      updatePreviewWidth(event.clientX)
+    }
+
+    const handleMouseMove = (event: MouseEvent) => {
+      updatePreviewWidth(event.clientX)
+    }
+
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', stopResizing)
+    window.addEventListener('pointercancel', stopResizing)
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseup', stopResizing)
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', stopResizing)
+      window.removeEventListener('pointercancel', stopResizing)
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseup', stopResizing)
+    }
+  }, [onVerticalBarWidthChange, tabPosition, vertical, verticalBarWidth])
 
   const startRename = (workspace: Workspace) => {
     if (!onRename) return
@@ -223,18 +293,63 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
     onStartPaneDragFromSummary?.(paneId)
   }
 
+  const beginResize = (clientX: number, pointerId: number | null) => {
+    if (!vertical || !onVerticalBarWidthChange) return
+    resizeStateRef.current = { startX: clientX, startWidth: effectiveVerticalBarWidth, pointerId }
+    setPreviewWidth(effectiveVerticalBarWidth)
+    document.body.style.userSelect = 'none'
+    document.body.style.cursor = 'col-resize'
+  }
+
+  const handleResizePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    beginResize(event.clientX, event.pointerId)
+    event.preventDefault()
+  }
+
+  const handleResizeMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
+    beginResize(event.clientX, null)
+    event.preventDefault()
+  }
+
+  const handleResizeKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!vertical || !onVerticalBarWidthChange) return
+
+    let nextWidth: number | null = null
+    const step = event.shiftKey ? 24 : 12
+    switch (event.key) {
+      case 'ArrowLeft':
+        nextWidth = clampVerticalBarWidth(effectiveVerticalBarWidth + (tabPosition === 'left' ? -step : step))
+        break
+      case 'ArrowRight':
+        nextWidth = clampVerticalBarWidth(effectiveVerticalBarWidth + (tabPosition === 'left' ? step : -step))
+        break
+      case 'Home':
+        nextWidth = MIN_VERTICAL_BAR_WIDTH
+        break
+      case 'End':
+        nextWidth = MAX_VERTICAL_BAR_WIDTH
+        break
+      default:
+        return
+    }
+
+    event.preventDefault()
+    if (nextWidth !== verticalBarWidth) {
+      onVerticalBarWidthChange(nextWidth)
+    }
+  }
+
+  if (!showBar) return null
+
   const positionControls = onTabPositionChange ? (
     <div
       role="group"
       aria-label="Workspace tab position"
       style={{
         display: 'flex',
-        borderLeft: !vertical ? '1px solid #333842' : undefined,
-        borderTop: vertical ? '1px solid #333842' : undefined,
+        alignItems: 'center',
         flexShrink: 0,
         marginLeft: !vertical ? 'auto' : undefined,
-        marginTop: vertical ? 'auto' : undefined,
-        alignItems: 'center',
       }}
     >
       <div
@@ -286,12 +401,304 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
     </div>
   ) : null
 
-  if (!showBar) return null
+  const tabList = showTabs ? (
+    <div
+      role="tablist"
+      aria-orientation="horizontal"
+      style={{
+        display: 'flex',
+        flexDirection: vertical ? 'column' : 'row',
+        flexWrap: vertical ? 'nowrap' : 'wrap',
+        alignContent: 'flex-start',
+        flex: vertical ? undefined : 1,
+        minWidth: 0,
+        minHeight: 0,
+        width: vertical ? '100%' : undefined,
+      }}
+    >
+      {workspaces.map((workspace) => {
+        const active = workspace.id === activeWorkspaceId
+        const editing = editingWorkspaceId === workspace.id
+        const hasAttention = !active && (attentionWorkspaceIds?.has(workspace.id) ?? false)
+        const isWorkspaceDropTarget = Boolean(dragSourcePaneId) && !editing && workspace.id !== activeWorkspaceId
+        const summary = workspaceSummaries?.[workspace.id]
+        const overlaySummary = !vertical && expandedWorkspaceId === workspace.id && summary && !editing ? summary : null
+        const inlineSummary = vertical && summary && !editing ? summary : null
+        const dropHandlers = workspaceDropHandlers(workspace.id, isWorkspaceDropTarget)
+
+        return (
+          <div
+            key={workspace.id}
+            {...dropHandlers}
+            onMouseEnter={() => {
+              dropHandlers.onMouseEnter()
+              setExpandedWorkspaceId(workspace.id)
+            }}
+            onMouseLeave={() => {
+              dropHandlers.onMouseLeave()
+              setExpandedWorkspaceId((current) => current === workspace.id ? null : current)
+            }}
+            onFocusCapture={() => setExpandedWorkspaceId(workspace.id)}
+            onBlurCapture={(event) => {
+              const nextTarget = event.relatedTarget
+              if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) return
+              setExpandedWorkspaceId((current) => current === workspace.id ? null : current)
+            }}
+            style={{
+              position: 'relative',
+              display: 'flex',
+              flexDirection: vertical ? 'column' : 'row',
+              flex: vertical ? '0 0 auto' : '0 1 auto',
+              minWidth: vertical ? '100%' : 200,
+            }}
+          >
+            <div
+              className={hasAttention ? 'panemux-workspace-tab-attention' : undefined}
+              style={{
+                borderRight: !vertical ? '1px solid #333842' : undefined,
+                borderBottom: vertical ? '1px solid #333842' : undefined,
+                borderTop: !vertical ? '1px solid #2a2f39' : undefined,
+                backgroundColor: dragSourcePaneId && hoveredDropWorkspaceId === workspace.id
+                  ? 'rgba(86, 156, 214, 0.24)'
+                  : active
+                    ? '#2f3540'
+                    : 'transparent',
+                boxShadow: dragSourcePaneId && hoveredDropWorkspaceId === workspace.id
+                  ? 'inset 0 0 0 1px rgba(137, 196, 244, 0.45)'
+                  : 'none',
+                display: 'flex',
+                alignItems: 'stretch',
+                minHeight: vertical ? 44 : 48,
+                minWidth: '100%',
+                flex: '1 1 auto',
+              }}
+            >
+              {editing ? (
+                <input
+                  ref={inputRef}
+                  aria-label="Workspace name"
+                  value={draftTitle}
+                  onChange={(event) => setDraftTitle(event.target.value)}
+                  onBlur={() => commitRename(workspace)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      commitRename(workspace)
+                    } else if (event.key === 'Escape') {
+                      cancelRename()
+                    }
+                  }}
+                  style={{
+                    appearance: 'none',
+                    border: '1px solid #5f6b7a',
+                    borderRadius: 3,
+                    backgroundColor: '#15171a',
+                    color: '#ffffff',
+                    flex: 1,
+                    fontFamily: TERMINAL_FONT_FAMILY,
+                    fontSize: 14,
+                    height: vertical ? 28 : 34,
+                    margin: '10px 8px',
+                    minWidth: 0,
+                    padding: '0 8px',
+                  }}
+                />
+              ) : (
+                <InteractiveSurfaceButton
+                  role="tab"
+                  aria-selected={active}
+                  data-attention={hasAttention ? 'true' : undefined}
+                  onClick={() => {
+                    if (dragSourcePaneId) return
+                    onClearAttention?.(workspace.id)
+                    onSelect(workspace.id)
+                  }}
+                  onDoubleClick={() => startRename(workspace)}
+                  title={workspace.title}
+                  selected={active}
+                  style={{
+                    border: 'none',
+                    color: active ? '#ffffff' : '#b8beca',
+                    cursor: active ? 'default' : 'pointer',
+                    flex: 1,
+                    fontFamily: TERMINAL_FONT_FAMILY,
+                    fontSize: 13,
+                    minWidth: 0,
+                    padding: '8px 10px',
+                    textAlign: 'left',
+                  }}
+                >
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                      <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontWeight: 700, fontSize: 13 }}>
+                        {workspace.title}
+                      </span>
+                      {summary && (
+                        <span style={{ color: active ? '#c4d0df' : '#8f98a8', fontSize: 10, whiteSpace: 'nowrap' }}>
+                          {formatWorkspaceCounts(summary)}
+                        </span>
+                      )}
+                    </div>
+                    {summary && (
+                      <span
+                        style={{
+                          color: active ? '#d7dce5' : '#9aa3b2',
+                          fontSize: 11,
+                          lineHeight: 1.3,
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                        }}
+                      >
+                        {summary.panes.map((pane) => pane.title).join(' · ')}
+                      </span>
+                    )}
+                  </div>
+                </InteractiveSurfaceButton>
+              )}
+              {onRename && !editing && (
+                <InteractiveSurfaceButton
+                  type="button"
+                  aria-label={`Rename ${workspace.title} workspace`}
+                  title="Rename workspace"
+                  onClick={() => startRename(workspace)}
+                  style={{
+                    border: 'none',
+                    color: active ? '#d7dce5' : '#8f96a3',
+                    cursor: 'pointer',
+                    flex: '0 0 32px',
+                    fontFamily: TERMINAL_FONT_FAMILY,
+                    fontSize: 13,
+                    padding: 0,
+                    textAlign: 'center',
+                  }}
+                >
+                  ✎
+                </InteractiveSurfaceButton>
+              )}
+              {onDelete && (
+                <InteractiveSurfaceButton
+                  type="button"
+                  aria-label={`Delete ${workspace.title} workspace`}
+                  title="Delete workspace"
+                  onClick={() => onDelete(workspace.id)}
+                  danger
+                  style={{
+                    border: 'none',
+                    cursor: 'pointer',
+                    flex: '0 0 32px',
+                    fontFamily: TERMINAL_FONT_FAMILY,
+                    fontSize: 16,
+                    padding: 0,
+                    textAlign: 'center',
+                  }}
+                >
+                  ×
+                </InteractiveSurfaceButton>
+              )}
+            </div>
+            {overlaySummary && (
+              <SummarySection
+                summary={overlaySummary}
+                workspace={workspace}
+                active={active}
+                vertical={vertical}
+                activePaneId={activePaneId}
+                dragSourcePaneId={dragSourcePaneId}
+                onSelectPaneFromSummary={onSelectPaneFromSummary}
+                onStartPaneDragFromSummary={handleSummaryPaneDragStart}
+                onEndPaneDragFromSummary={onEndPaneDragFromSummary}
+                overlay
+                tabPosition={tabPosition}
+              />
+            )}
+            {inlineSummary && (
+              <SummarySection
+                summary={inlineSummary}
+                workspace={workspace}
+                active={active}
+                vertical={vertical}
+                activePaneId={activePaneId}
+                dragSourcePaneId={dragSourcePaneId}
+                onSelectPaneFromSummary={onSelectPaneFromSummary}
+                onStartPaneDragFromSummary={handleSummaryPaneDragStart}
+                onEndPaneDragFromSummary={onEndPaneDragFromSummary}
+              />
+            )}
+          </div>
+        )
+      })}
+    </div>
+  ) : null
+
+  const horizontalActions = (
+    <>
+      {onAdd && (
+        <div
+          style={{
+            borderLeft: '1px solid #333842',
+            backgroundColor: 'transparent',
+            display: 'flex',
+            alignItems: 'center',
+            minWidth: 40,
+            maxWidth: 40,
+            flexShrink: 0,
+          }}
+        >
+          <InteractiveSurfaceButton
+            type="button"
+            aria-label="Add workspace"
+            title="Add workspace"
+            onClick={onAdd}
+            style={actionButtonStyle(false)}
+          >
+            +
+          </InteractiveSurfaceButton>
+        </div>
+      )}
+      {positionControls}
+    </>
+  )
+
+  const verticalFooter = (
+    <div
+      data-testid="workspace-tabs-footer"
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        padding: '8px',
+        borderTop: '1px solid #333842',
+        background: '#1d1f23',
+        flexShrink: 0,
+      }}
+    >
+      {onAdd && (
+        <InteractiveSurfaceButton
+          type="button"
+          aria-label="Add workspace"
+          title="Add workspace"
+          onClick={onAdd}
+          style={{
+            ...actionButtonStyle(true),
+            minWidth: 40,
+            maxWidth: 40,
+            height: 34,
+            borderRadius: 6,
+            border: '1px solid #333842',
+          }}
+        >
+          +
+        </InteractiveSurfaceButton>
+      )}
+      {positionControls}
+    </div>
+  )
 
   return (
     <div
       style={{
         display: 'flex',
+        flexDirection: vertical ? 'column' : 'row',
         flexShrink: 0,
         backgroundColor: '#202124',
         borderColor: '#333842',
@@ -303,474 +710,226 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
             : tabPosition === 'left'
               ? '0 1px 0 0'
               : '0 0 0 1px',
-        flexDirection: vertical ? 'column' : 'row',
         overflow: 'visible',
-        maxWidth: vertical ? 360 : undefined,
-        minWidth: vertical ? 280 : undefined,
+        width: vertical ? effectiveVerticalBarWidth : undefined,
+        minWidth: vertical ? MIN_VERTICAL_BAR_WIDTH : undefined,
+        maxWidth: vertical ? MAX_VERTICAL_BAR_WIDTH : undefined,
         position: 'relative',
         zIndex: 20,
       }}
     >
-      {showTabs && (
-        <div
-          role="tablist"
-          aria-orientation="horizontal"
-          style={{
-            display: 'flex',
-            flexDirection: 'row',
-            flexWrap: 'wrap',
-            alignContent: 'flex-start',
-            flex: 1,
-            minWidth: 0,
-            minHeight: 0,
-            overflow: 'visible',
-          }}
-        >
-          {workspaces.map((workspace) => {
-            const active = workspace.id === activeWorkspaceId
-            const editing = editingWorkspaceId === workspace.id
-            const hasAttention = !active && (attentionWorkspaceIds?.has(workspace.id) ?? false)
-            const isWorkspaceDropTarget = Boolean(dragSourcePaneId) && !editing && workspace.id !== activeWorkspaceId
-            const summary = workspaceSummaries?.[workspace.id]
-            const overlaySummary = !vertical && expandedWorkspaceId === workspace.id && summary && !editing ? summary : null
-            const inlineSummary = vertical && summary && !editing ? summary : null
-            const dropHandlers = workspaceDropHandlers(workspace.id, isWorkspaceDropTarget)
-
-            return (
-              <div
-                key={workspace.id}
-                {...dropHandlers}
-                onMouseEnter={() => {
-                  dropHandlers.onMouseEnter()
-                  setExpandedWorkspaceId(workspace.id)
-                }}
-                onMouseLeave={() => {
-                  dropHandlers.onMouseLeave()
-                  setExpandedWorkspaceId((current) => current === workspace.id ? null : current)
-                }}
-                onFocusCapture={() => setExpandedWorkspaceId(workspace.id)}
-                onBlurCapture={(event) => {
-                  const nextTarget = event.relatedTarget
-                  if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) return
-                  setExpandedWorkspaceId((current) => current === workspace.id ? null : current)
-                }}
-                style={{
-                  position: 'relative',
-                  display: 'flex',
-                  flexDirection: vertical ? 'column' : 'row',
-                  flex: vertical ? '1 1 100%' : '0 1 auto',
-                  minWidth: vertical ? '100%' : 200,
-                }}
-              >
-                <div
-                  className={hasAttention ? 'panemux-workspace-tab-attention' : undefined}
-                  style={{
-                    borderRight: !vertical ? '1px solid #333842' : undefined,
-                    borderBottom: vertical ? '1px solid #333842' : undefined,
-                    borderTop: !vertical ? '1px solid #2a2f39' : undefined,
-                    backgroundColor: dragSourcePaneId && hoveredDropWorkspaceId === workspace.id
-                      ? 'rgba(86, 156, 214, 0.24)'
-                      : active
-                        ? '#2f3540'
-                        : 'transparent',
-                    boxShadow: dragSourcePaneId && hoveredDropWorkspaceId === workspace.id
-                      ? 'inset 0 0 0 1px rgba(137, 196, 244, 0.45)'
-                      : 'none',
-                    display: 'flex',
-                    alignItems: 'stretch',
-                    minHeight: vertical ? 44 : 48,
-                    minWidth: '100%',
-                    flex: '1 1 auto',
-                  }}
-                >
-                  {editing ? (
-                    <input
-                      ref={inputRef}
-                      aria-label="Workspace name"
-                      value={draftTitle}
-                      onChange={(event) => setDraftTitle(event.target.value)}
-                      onBlur={() => commitRename(workspace)}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter') {
-                          commitRename(workspace)
-                        } else if (event.key === 'Escape') {
-                          cancelRename()
-                        }
-                      }}
-                      style={{
-                        appearance: 'none',
-                        border: '1px solid #5f6b7a',
-                        borderRadius: 3,
-                        backgroundColor: '#15171a',
-                        color: '#ffffff',
-                        flex: 1,
-                        fontFamily: TERMINAL_FONT_FAMILY,
-                        fontSize: 14,
-                        height: vertical ? 28 : 34,
-                        margin: '10px 8px',
-                        minWidth: 0,
-                        padding: '0 8px',
-                      }}
-                    />
-                  ) : (
-                    <InteractiveSurfaceButton
-                      role="tab"
-                      aria-selected={active}
-                      data-attention={hasAttention ? 'true' : undefined}
-                      onClick={() => {
-                        if (dragSourcePaneId) return
-                        onClearAttention?.(workspace.id)
-                        onSelect(workspace.id)
-                      }}
-                      onDoubleClick={() => startRename(workspace)}
-                      title={workspace.title}
-                      selected={active}
-                      style={{
-                        border: 'none',
-                        color: active ? '#ffffff' : '#b8beca',
-                        cursor: active ? 'default' : 'pointer',
-                        flex: 1,
-                        fontFamily: TERMINAL_FONT_FAMILY,
-                        fontSize: 13,
-                        minWidth: 0,
-                        padding: '8px 10px',
-                        textAlign: 'left',
-                      }}
-                    >
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                          <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontWeight: 700, fontSize: 13 }}>
-                            {workspace.title}
-                          </span>
-                          {summary && (
-                            <span style={{ color: active ? '#c4d0df' : '#8f98a8', fontSize: 10, whiteSpace: 'nowrap' }}>
-                              {formatWorkspaceCounts(summary)}
-                            </span>
-                          )}
-                        </div>
-                        {summary && (
-                          <span
-                            style={{
-                              color: active ? '#d7dce5' : '#9aa3b2',
-                              fontSize: 11,
-                              lineHeight: 1.3,
-                              whiteSpace: 'nowrap',
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                            }}
-                          >
-                            {summary.panes.map((pane) => pane.title).join(' · ')}
-                          </span>
-                        )}
-                      </div>
-                    </InteractiveSurfaceButton>
-                  )}
-                  {onRename && !editing && (
-                    <InteractiveSurfaceButton
-                      type="button"
-                      aria-label={`Rename ${workspace.title} workspace`}
-                      title="Rename workspace"
-                      onClick={() => startRename(workspace)}
-                      style={{
-                        border: 'none',
-                        color: active ? '#d7dce5' : '#8f96a3',
-                        cursor: 'pointer',
-                        flex: '0 0 32px',
-                        fontFamily: TERMINAL_FONT_FAMILY,
-                        fontSize: 13,
-                        padding: 0,
-                        textAlign: 'center',
-                      }}
-                    >
-                      ✎
-                    </InteractiveSurfaceButton>
-                  )}
-                  {onDelete && (
-                    <InteractiveSurfaceButton
-                      type="button"
-                      aria-label={`Delete ${workspace.title} workspace`}
-                      title="Delete workspace"
-                      onClick={() => onDelete(workspace.id)}
-                      danger
-                      style={{
-                        border: 'none',
-                        cursor: 'pointer',
-                        flex: '0 0 32px',
-                        fontFamily: TERMINAL_FONT_FAMILY,
-                        fontSize: 16,
-                        padding: 0,
-                        textAlign: 'center',
-                      }}
-                    >
-                      ×
-                    </InteractiveSurfaceButton>
-                  )}
-                </div>
-                {overlaySummary && (
-                  <section
-                    aria-label={`${workspace.title} workspace details`}
-                    style={{
-                      position: 'absolute',
-                      ...overlayPositionStyle(tabPosition),
-                      width: vertical ? 320 : 360,
-                      maxWidth: 'min(360px, calc(100vw - 32px))',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 6,
-                      padding: '8px',
-                      border: '1px solid #30353f',
-                      borderRadius: 10,
-                      background: active ? 'linear-gradient(180deg, #212733 0%, #1a1f28 100%)' : 'linear-gradient(180deg, #181a1f 0%, #15171b 100%)',
-                      boxShadow: '0 14px 28px rgba(0, 0, 0, 0.38)',
-                      zIndex: 30,
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={workspaceMarkerStyle(active)} />
-                      <div style={{ color: active ? '#cfdced' : '#8f98a8', fontFamily: TERMINAL_FONT_FAMILY, fontSize: 10, lineHeight: 1.3 }}>
-                        {formatWorkspaceCounts(overlaySummary, true)}
-                      </div>
-                    </div>
-                    <div
-                      data-testid={`workspace-pane-group-${workspace.id}`}
-                      style={{
-                        display: 'grid',
-                        gridTemplateColumns: vertical ? 'minmax(0, 1fr)' : 'repeat(auto-fit, minmax(160px, 1fr))',
-                        gap: 6,
-                        alignItems: 'start',
-                        marginLeft: 10,
-                        paddingLeft: 12,
-                        borderLeft: '1px solid #364050',
-                      }}
-                    >
-                      {overlaySummary.panes.map((pane) => (
-                        <button
-                          key={pane.id}
-                          type="button"
-                          aria-label={`Open pane ${pane.title} in ${workspace.title}`}
-                          draggable
-                          onDragStart={(event) => handleSummaryPaneDragStart(event, pane.id)}
-                          onDragEnd={() => onEndPaneDragFromSummary?.()}
-                          onClick={() => {
-                            if (dragSourcePaneId) return
-                            onSelectPaneFromSummary?.(workspace.id, pane.id)
-                          }}
-                          style={{
-                            appearance: 'none',
-                            border: activePaneId === pane.id ? '1px solid rgba(137, 196, 244, 0.75)' : '1px solid #2d323c',
-                            borderRadius: 8,
-                            background: activePaneId === pane.id
-                              ? 'rgba(86, 156, 214, 0.16)'
-                              : pane.attention
-                                ? 'rgba(244, 191, 79, 0.08)'
-                                : '#1b1e24',
-                            color: '#d7dce5',
-                            padding: '7px 8px',
-                            textAlign: 'left',
-                            cursor: onSelectPaneFromSummary ? 'pointer' : 'default',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            gap: 4,
-                            fontFamily: TERMINAL_FONT_FAMILY,
-                            boxShadow: activePaneId === pane.id ? '0 0 0 1px rgba(137, 196, 244, 0.18)' : 'none',
-                            minHeight: 0,
-                          }}
-                        >
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                            <span style={statusDotStyle(pane.state)} />
-                            <span
-                              style={{
-                                fontSize: 11,
-                                fontWeight: 700,
-                                minWidth: 0,
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap',
-                                flex: '1 1 auto',
-                              }}
-                            >
-                              {pane.title}
-                            </span>
-                            {pane.connection && <span style={pillStyle('#2d253f', '#cbb3ff', true)}>{pane.connection}</span>}
-                            {pane.attention && <span style={pillStyle('#5a4311', '#f4bf4f', true)}>Input</span>}
-                          </div>
-                          <div
-                            style={{
-                              display: 'flex',
-                              gap: 6,
-                              flexWrap: 'nowrap',
-                              color: '#8f98a8',
-                              fontSize: 10,
-                              minWidth: 0,
-                              overflow: 'hidden',
-                            }}
-                          >
-                            {pane.repo && (
-                              <span style={{ color: '#9fcbff', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                {pane.repo}
-                              </span>
-                            )}
-                            {pane.branch && (
-                              <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pane.branch}</span>
-                            )}
-                            {pane.connection && !pane.repo && (
-                              <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pane.type}</span>
-                            )}
-                            {!pane.repo && <span style={{ whiteSpace: 'nowrap', flexShrink: 0 }}>{pane.state}</span>}
-                            {pane.prNumber && <span style={{ whiteSpace: 'nowrap', flexShrink: 0 }}>PR #{pane.prNumber}</span>}
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  </section>
-                )}
-                {inlineSummary && (
-                  <section
-                    aria-label={`${workspace.title} workspace details`}
-                    style={{
-                      flexBasis: 'auto',
-                      width: '100%',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 6,
-                      padding: '6px 8px 8px',
-                      borderTop: '1px solid #30353f',
-                      borderBottom: '1px solid #333842',
-                      background: active ? 'linear-gradient(180deg, #212733 0%, #1a1f28 100%)' : 'linear-gradient(180deg, #181a1f 0%, #15171b 100%)',
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={workspaceMarkerStyle(active)} />
-                      <div style={{ color: active ? '#cfdced' : '#8f98a8', fontFamily: TERMINAL_FONT_FAMILY, fontSize: 10, lineHeight: 1.3 }}>
-                        {formatWorkspaceCounts(inlineSummary, true)}
-                      </div>
-                    </div>
-                    <div
-                      data-testid={`workspace-pane-group-${workspace.id}`}
-                      style={{
-                        display: 'grid',
-                        gridTemplateColumns: vertical ? 'minmax(0, 1fr)' : 'repeat(auto-fit, minmax(160px, 1fr))',
-                        gap: 6,
-                        alignItems: 'start',
-                        marginLeft: 10,
-                        paddingLeft: 12,
-                        borderLeft: '1px solid #364050',
-                      }}
-                    >
-                      {inlineSummary.panes.map((pane) => (
-                        <button
-                          key={pane.id}
-                          type="button"
-                          aria-label={`Open pane ${pane.title} in ${workspace.title}`}
-                          draggable
-                          onDragStart={(event) => handleSummaryPaneDragStart(event, pane.id)}
-                          onDragEnd={() => onEndPaneDragFromSummary?.()}
-                          onClick={() => {
-                            if (dragSourcePaneId) return
-                            onSelectPaneFromSummary?.(workspace.id, pane.id)
-                          }}
-                          style={{
-                            appearance: 'none',
-                            border: activePaneId === pane.id ? '1px solid rgba(137, 196, 244, 0.75)' : '1px solid #2d323c',
-                            borderRadius: 8,
-                            background: activePaneId === pane.id
-                              ? 'rgba(86, 156, 214, 0.16)'
-                              : pane.attention
-                                ? 'rgba(244, 191, 79, 0.08)'
-                                : '#1b1e24',
-                            color: '#d7dce5',
-                            padding: '7px 8px',
-                            textAlign: 'left',
-                            cursor: onSelectPaneFromSummary ? 'pointer' : 'default',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            gap: 4,
-                            fontFamily: TERMINAL_FONT_FAMILY,
-                            boxShadow: activePaneId === pane.id ? '0 0 0 1px rgba(137, 196, 244, 0.18)' : 'none',
-                            minHeight: 0,
-                          }}
-                        >
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                            <span style={statusDotStyle(pane.state)} />
-                            <span
-                              style={{
-                                fontSize: 11,
-                                fontWeight: 700,
-                                minWidth: 0,
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap',
-                                flex: '1 1 auto',
-                              }}
-                            >
-                              {pane.title}
-                            </span>
-                            {pane.connection && <span style={pillStyle('#2d253f', '#cbb3ff', true)}>{pane.connection}</span>}
-                            {pane.attention && <span style={pillStyle('#5a4311', '#f4bf4f', true)}>Input</span>}
-                          </div>
-                          <div
-                            style={{
-                              display: 'flex',
-                              gap: 6,
-                              flexWrap: 'nowrap',
-                              color: '#8f98a8',
-                              fontSize: 10,
-                              minWidth: 0,
-                              overflow: 'hidden',
-                            }}
-                          >
-                            {pane.repo && (
-                              <span style={{ color: '#9fcbff', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                {pane.repo}
-                              </span>
-                            )}
-                            {pane.branch && (
-                              <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pane.branch}</span>
-                            )}
-                            {pane.connection && !pane.repo && (
-                              <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pane.type}</span>
-                            )}
-                            {!pane.repo && <span style={{ whiteSpace: 'nowrap', flexShrink: 0 }}>{pane.state}</span>}
-                            {pane.prNumber && <span style={{ whiteSpace: 'nowrap', flexShrink: 0 }}>PR #{pane.prNumber}</span>}
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  </section>
-                )}
-              </div>
-            )
-          })}
-        </div>
-      )}
-      {onAdd && (
-        <div
-          style={{
-            borderLeft: !vertical ? '1px solid #333842' : undefined,
-            borderTop: vertical ? '1px solid #333842' : undefined,
-            backgroundColor: 'transparent',
-            display: 'flex',
-            alignItems: 'center',
-            height: vertical ? 40 : 'auto',
-            minWidth: vertical ? '100%' : 40,
-            maxWidth: vertical ? '100%' : 40,
-            flexShrink: 0,
-          }}
-        >
-          <InteractiveSurfaceButton
-            type="button"
-            aria-label="Add workspace"
-            title="Add workspace"
-            onClick={onAdd}
-            style={actionButtonStyle(vertical)}
+      {vertical ? (
+        <>
+          <div
+            data-testid="workspace-tabs-scroll-region"
+            style={{
+              flex: 1,
+              minHeight: 0,
+              overflowY: 'auto',
+              overflowX: 'hidden',
+            }}
           >
-            +
-          </InteractiveSurfaceButton>
-        </div>
+            {tabList}
+          </div>
+          {verticalFooter}
+          {onVerticalBarWidthChange && (
+            <div
+              role="separator"
+              aria-label="Resize workspace bar"
+              aria-orientation="vertical"
+              aria-valuemin={MIN_VERTICAL_BAR_WIDTH}
+              aria-valuemax={MAX_VERTICAL_BAR_WIDTH}
+              aria-valuenow={effectiveVerticalBarWidth}
+              data-testid="workspace-bar-resizer"
+              tabIndex={0}
+              onPointerDown={handleResizePointerDown}
+              onMouseDown={handleResizeMouseDown}
+              onPointerMove={(event) => updatePreviewWidth(event.clientX)}
+              onMouseMove={(event) => updatePreviewWidth(event.clientX)}
+              onPointerUp={stopResizing}
+              onMouseUp={stopResizing}
+              onKeyDown={handleResizeKeyDown}
+              style={{
+                position: 'absolute',
+                top: 0,
+                bottom: 0,
+                [tabPosition === 'left' ? 'right' : 'left']: -3,
+                width: 6,
+                cursor: 'col-resize',
+                zIndex: 35,
+              }}
+            />
+          )}
+        </>
+      ) : (
+        <>
+          {tabList}
+          {horizontalActions}
+        </>
       )}
-      {positionControls}
     </div>
   )
+}
+
+interface SummarySectionProps {
+  summary: WorkspaceSummary
+  workspace: Workspace
+  active: boolean
+  vertical: boolean
+  activePaneId?: string | null
+  dragSourcePaneId?: string | null
+  tabPosition?: TabPosition
+  overlay?: boolean
+  onSelectPaneFromSummary?: (workspaceId: string, paneId: string) => void
+  onStartPaneDragFromSummary?: (event: React.DragEvent<HTMLButtonElement>, paneId: string) => void
+  onEndPaneDragFromSummary?: () => void
+}
+
+function SummarySection({
+  summary,
+  workspace,
+  active,
+  vertical,
+  activePaneId,
+  dragSourcePaneId,
+  tabPosition = 'top',
+  overlay = false,
+  onSelectPaneFromSummary,
+  onStartPaneDragFromSummary,
+  onEndPaneDragFromSummary,
+}: SummarySectionProps) {
+  return (
+    <section
+      aria-label={`${workspace.title} workspace details`}
+      style={overlay ? {
+        position: 'absolute',
+        ...overlayPositionStyle(tabPosition),
+        width: vertical ? 320 : 360,
+        maxWidth: 'min(360px, calc(100vw - 32px))',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 6,
+        padding: '8px',
+        border: '1px solid #30353f',
+        borderRadius: 10,
+        background: active ? 'linear-gradient(180deg, #212733 0%, #1a1f28 100%)' : 'linear-gradient(180deg, #181a1f 0%, #15171b 100%)',
+        boxShadow: '0 14px 28px rgba(0, 0, 0, 0.38)',
+        zIndex: 30,
+      } : {
+        flexBasis: 'auto',
+        width: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 6,
+        padding: '6px 8px 8px',
+        borderTop: '1px solid #30353f',
+        borderBottom: '1px solid #333842',
+        background: active ? 'linear-gradient(180deg, #212733 0%, #1a1f28 100%)' : 'linear-gradient(180deg, #181a1f 0%, #15171b 100%)',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={workspaceMarkerStyle(active)} />
+        <div style={{ color: active ? '#cfdced' : '#8f98a8', fontFamily: TERMINAL_FONT_FAMILY, fontSize: 10, lineHeight: 1.3 }}>
+          {formatWorkspaceCounts(summary, true)}
+        </div>
+      </div>
+      <div
+        data-testid={`workspace-pane-group-${workspace.id}`}
+        style={{
+          display: 'grid',
+          gridTemplateColumns: vertical ? 'minmax(0, 1fr)' : 'repeat(auto-fit, minmax(160px, 1fr))',
+          gap: 6,
+          alignItems: 'start',
+          marginLeft: 10,
+          paddingLeft: 12,
+          borderLeft: '1px solid #364050',
+        }}
+      >
+        {summary.panes.map((pane) => (
+          <button
+            key={pane.id}
+            type="button"
+            aria-label={`Open pane ${pane.title} in ${workspace.title}`}
+            draggable
+            onDragStart={(event) => onStartPaneDragFromSummary?.(event, pane.id)}
+            onDragEnd={() => onEndPaneDragFromSummary?.()}
+            onClick={() => {
+              if (dragSourcePaneId) return
+              onSelectPaneFromSummary?.(workspace.id, pane.id)
+            }}
+            style={{
+              appearance: 'none',
+              border: activePaneId === pane.id ? '1px solid rgba(137, 196, 244, 0.75)' : '1px solid #2d323c',
+              borderRadius: 8,
+              background: activePaneId === pane.id
+                ? 'rgba(86, 156, 214, 0.16)'
+                : pane.attention
+                  ? 'rgba(244, 191, 79, 0.08)'
+                  : '#1b1e24',
+              color: '#d7dce5',
+              padding: '7px 8px',
+              textAlign: 'left',
+              cursor: onSelectPaneFromSummary ? 'pointer' : 'default',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 4,
+              fontFamily: TERMINAL_FONT_FAMILY,
+              boxShadow: activePaneId === pane.id ? '0 0 0 1px rgba(137, 196, 244, 0.18)' : 'none',
+              minHeight: 0,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+              <span style={statusDotStyle(pane.state)} />
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  minWidth: 0,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  flex: '1 1 auto',
+                }}
+              >
+                {pane.title}
+              </span>
+              {pane.connection && <span style={pillStyle('#2d253f', '#cbb3ff', true)}>{pane.connection}</span>}
+              {pane.attention && <span style={pillStyle('#5a4311', '#f4bf4f', true)}>Input</span>}
+            </div>
+            <div
+              style={{
+                display: 'flex',
+                gap: 6,
+                flexWrap: 'nowrap',
+                color: '#8f98a8',
+                fontSize: 10,
+                minWidth: 0,
+                overflow: 'hidden',
+              }}
+            >
+              {pane.repo && (
+                <span style={{ color: '#9fcbff', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {pane.repo}
+                </span>
+              )}
+              {pane.branch && (
+                <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pane.branch}</span>
+              )}
+              {pane.connection && !pane.repo && (
+                <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pane.type}</span>
+              )}
+              {!pane.repo && <span style={{ whiteSpace: 'nowrap', flexShrink: 0 }}>{pane.state}</span>}
+              {pane.prNumber && <span style={{ whiteSpace: 'nowrap', flexShrink: 0 }}>PR #{pane.prNumber}</span>}
+            </div>
+          </button>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function clampVerticalBarWidth(width: number) {
+  return Math.max(MIN_VERTICAL_BAR_WIDTH, Math.min(MAX_VERTICAL_BAR_WIDTH, Math.round(width)))
 }
 
 function actionButtonStyle(vertical: boolean): React.CSSProperties {

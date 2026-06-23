@@ -466,11 +466,103 @@ describe('WorkspaceTabs', () => {
         activeWorkspaceId="dev"
         tabPosition="left"
         onSelect={() => {}}
+        onAdd={() => {}}
         onTabPositionChange={() => {}}
       />,
     )
 
-    expect(screen.getByRole('group', { name: 'Workspace tab position' })).toHaveStyle({ marginTop: 'auto' })
+    expect(screen.getByTestId('workspace-tabs-footer')).toContainElement(screen.getByRole('group', { name: 'Workspace tab position' }))
+    expect(screen.getByTestId('workspace-tabs-footer')).toContainElement(screen.getByRole('button', { name: 'Add workspace' }))
+  })
+
+  it('uses a dedicated scroll region above the fixed footer for vertical bars', () => {
+    render(
+      <WorkspaceTabs
+        workspaces={workspaces}
+        activeWorkspaceId="dev"
+        tabPosition="left"
+        onSelect={() => {}}
+        onAdd={() => {}}
+        onTabPositionChange={() => {}}
+      />,
+    )
+
+    expect(screen.getByTestId('workspace-tabs-scroll-region')).toHaveStyle({
+      overflowY: 'auto',
+      overflowX: 'hidden',
+    })
+    expect(screen.getByTestId('workspace-tabs-footer')).toBeInTheDocument()
+  })
+
+  it('renders a resizer only for vertical bars when width changes are enabled', () => {
+    const { rerender } = render(
+      <WorkspaceTabs
+        workspaces={workspaces}
+        activeWorkspaceId="dev"
+        tabPosition="left"
+        verticalBarWidth={280}
+        onSelect={() => {}}
+        onVerticalBarWidthChange={() => {}}
+      />,
+    )
+
+    expect(screen.getByTestId('workspace-bar-resizer')).toBeInTheDocument()
+    expect(screen.getByTestId('workspace-bar-resizer')).toHaveAttribute('tabindex', '0')
+
+    rerender(
+      <WorkspaceTabs
+        workspaces={workspaces}
+        activeWorkspaceId="dev"
+        tabPosition="top"
+        verticalBarWidth={280}
+        onSelect={() => {}}
+        onVerticalBarWidthChange={() => {}}
+      />,
+    )
+
+    expect(screen.queryByTestId('workspace-bar-resizer')).not.toBeInTheDocument()
+  })
+
+  it('supports keyboard resizing on the separator', () => {
+    const onVerticalBarWidthChange = vi.fn()
+    render(
+      <WorkspaceTabs
+        workspaces={workspaces}
+        activeWorkspaceId="dev"
+        tabPosition="left"
+        verticalBarWidth={280}
+        onSelect={() => {}}
+        onVerticalBarWidthChange={onVerticalBarWidthChange}
+      />,
+    )
+
+    const resizer = screen.getByTestId('workspace-bar-resizer')
+    fireEvent.keyDown(resizer, { key: 'ArrowRight' })
+    fireEvent.keyDown(resizer, { key: 'End' })
+
+    expect(onVerticalBarWidthChange).toHaveBeenNthCalledWith(1, 292)
+    expect(onVerticalBarWidthChange).toHaveBeenNthCalledWith(2, 520)
+  })
+
+  it('commits the resized width after mouse dragging the separator', () => {
+    const onVerticalBarWidthChange = vi.fn()
+    render(
+      <WorkspaceTabs
+        workspaces={workspaces}
+        activeWorkspaceId="dev"
+        tabPosition="left"
+        verticalBarWidth={280}
+        onSelect={() => {}}
+        onVerticalBarWidthChange={onVerticalBarWidthChange}
+      />,
+    )
+
+    const resizer = screen.getByTestId('workspace-bar-resizer')
+    fireEvent.mouseDown(resizer, { clientX: 280 })
+    fireEvent.mouseMove(window, { clientX: 320 })
+    fireEvent.mouseUp(window)
+
+    expect(onVerticalBarWidthChange).toHaveBeenCalledWith(320)
   })
 
   it('hides tab position controls when the position change handler is omitted', () => {
