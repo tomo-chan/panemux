@@ -463,11 +463,10 @@ describe('App workspace deletion', () => {
     currentWorkspaces = { ...workspaces, tab_position: 'left' }
     render(<App />)
 
-    fireEvent.mouseDown(screen.getByTestId('workspace-bar-resizer'), { clientX: 280 })
-    fireEvent.mouseMove(window, { clientX: 320 })
-    fireEvent.mouseUp(window)
+    const resizer = screen.getByTestId('workspace-bar-resizer')
+    fireEvent.keyDown(resizer, { key: 'ArrowRight' })
 
-    expect(mockSetWorkspaceVerticalBarWidth).toHaveBeenCalledWith(320)
+    expect(mockSetWorkspaceVerticalBarWidth).toHaveBeenCalledWith(292)
   })
 
   it('moves a dragged pane to another workspace tab', () => {

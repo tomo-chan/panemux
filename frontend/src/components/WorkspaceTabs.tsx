@@ -149,9 +149,11 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
   const [draftTitle, setDraftTitle] = useState('')
   const [hoveredDropWorkspaceId, setHoveredDropWorkspaceId] = useState<string | null>(null)
   const [expandedWorkspaceId, setExpandedWorkspaceId] = useState<string | null>(null)
+  const [previewVerticalBarWidth, setPreviewVerticalBarWidth] = useState<number | null>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
   const renameFinalizedRef = useRef(false)
-  const resizeStateRef = useRef<{ startX: number; startWidth: number } | null>(null)
+  const resizeStateRef = useRef<{ startX: number; startWidth: number; pointerId: number | null } | null>(null)
+  const effectiveVerticalBarWidth = clampVerticalBarWidth(previewVerticalBarWidth ?? verticalBarWidth)
 
   useEffect(() => {
     if (editingWorkspaceId) {
@@ -173,30 +175,70 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
   }, [editingWorkspaceId])
 
   useEffect(() => {
+    if (!vertical) {
+      setPreviewVerticalBarWidth(null)
+    }
+  }, [vertical])
+
+  useEffect(() => {
     if (!vertical || !onVerticalBarWidthChange) return
 
-    const handleMouseMove = (event: MouseEvent) => {
+    const handlePointerMove = (event: PointerEvent) => {
       const current = resizeStateRef.current
       if (!current) return
-      const delta = tabPosition === 'left' ? event.clientX - current.startX : current.startX - event.clientX
-      onVerticalBarWidthChange(clampVerticalBarWidth(current.startWidth + delta))
+      if (current.pointerId !== null && event.pointerId !== current.pointerId) return
+      updatePreviewWidth(event.clientX)
     }
 
-    const stopResizing = () => {
-      if (!resizeStateRef.current) return
-      resizeStateRef.current = null
-      document.body.style.userSelect = ''
-      document.body.style.cursor = ''
+    const handleMouseMove = (event: MouseEvent) => {
+      updatePreviewWidth(event.clientX)
     }
 
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', stopResizing)
+    window.addEventListener('pointercancel', stopResizing)
     window.addEventListener('mousemove', handleMouseMove)
     window.addEventListener('mouseup', stopResizing)
+    document.addEventListener('pointermove', handlePointerMove)
+    document.addEventListener('pointerup', stopResizing)
+    document.addEventListener('pointercancel', stopResizing)
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', stopResizing)
     return () => {
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', stopResizing)
+      window.removeEventListener('pointercancel', stopResizing)
       window.removeEventListener('mousemove', handleMouseMove)
       window.removeEventListener('mouseup', stopResizing)
+      document.removeEventListener('pointermove', handlePointerMove)
+      document.removeEventListener('pointerup', stopResizing)
+      document.removeEventListener('pointercancel', stopResizing)
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', stopResizing)
       stopResizing()
     }
-  }, [onVerticalBarWidthChange, tabPosition, vertical])
+  }, [onVerticalBarWidthChange, previewVerticalBarWidth, tabPosition, vertical, verticalBarWidth])
+
+  const updatePreviewWidth = (clientX: number) => {
+    const current = resizeStateRef.current
+    if (!current) return
+    const delta = tabPosition === 'left' ? clientX - current.startX : current.startX - clientX
+    setPreviewVerticalBarWidth(clampVerticalBarWidth(current.startWidth + delta))
+  }
+
+  const commitPreviewWidth = () => {
+    if (previewVerticalBarWidth === null || previewVerticalBarWidth === verticalBarWidth) return
+    onVerticalBarWidthChange?.(previewVerticalBarWidth)
+  }
+
+  const stopResizing = () => {
+    if (!resizeStateRef.current) return
+    resizeStateRef.current = null
+    commitPreviewWidth()
+    setPreviewVerticalBarWidth(null)
+    document.body.style.userSelect = ''
+    document.body.style.cursor = ''
+  }
 
   const startRename = (workspace: Workspace) => {
     if (!onRename) return
@@ -257,12 +299,50 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
     onStartPaneDragFromSummary?.(paneId)
   }
 
-  const handleResizeMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
+  const beginResize = (clientX: number, pointerId: number | null) => {
     if (!vertical || !onVerticalBarWidthChange) return
-    resizeStateRef.current = { startX: event.clientX, startWidth: verticalBarWidth }
+    resizeStateRef.current = { startX: clientX, startWidth: effectiveVerticalBarWidth, pointerId }
+    setPreviewVerticalBarWidth(effectiveVerticalBarWidth)
     document.body.style.userSelect = 'none'
     document.body.style.cursor = 'col-resize'
+  }
+
+  const handleResizePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    beginResize(event.clientX, event.pointerId)
     event.preventDefault()
+  }
+
+  const handleResizeMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
+    beginResize(event.clientX, null)
+    event.preventDefault()
+  }
+
+  const handleResizeKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!vertical || !onVerticalBarWidthChange) return
+
+    let nextWidth: number | null = null
+    const step = event.shiftKey ? 24 : 12
+    switch (event.key) {
+      case 'ArrowLeft':
+        nextWidth = clampVerticalBarWidth(effectiveVerticalBarWidth + (tabPosition === 'left' ? -step : step))
+        break
+      case 'ArrowRight':
+        nextWidth = clampVerticalBarWidth(effectiveVerticalBarWidth + (tabPosition === 'left' ? step : -step))
+        break
+      case 'Home':
+        nextWidth = MIN_VERTICAL_BAR_WIDTH
+        break
+      case 'End':
+        nextWidth = MAX_VERTICAL_BAR_WIDTH
+        break
+      default:
+        return
+    }
+
+    event.preventDefault()
+    if (nextWidth !== verticalBarWidth) {
+      onVerticalBarWidthChange(nextWidth)
+    }
   }
 
   if (!showBar) return null
@@ -637,7 +717,7 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
               ? '0 1px 0 0'
               : '0 0 0 1px',
         overflow: 'visible',
-        width: vertical ? clampVerticalBarWidth(verticalBarWidth) : undefined,
+        width: vertical ? effectiveVerticalBarWidth : undefined,
         minWidth: vertical ? MIN_VERTICAL_BAR_WIDTH : undefined,
         maxWidth: vertical ? MAX_VERTICAL_BAR_WIDTH : undefined,
         position: 'relative',
@@ -662,8 +742,19 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
             <div
               role="separator"
               aria-label="Resize workspace bar"
+              aria-orientation="vertical"
+              aria-valuemin={MIN_VERTICAL_BAR_WIDTH}
+              aria-valuemax={MAX_VERTICAL_BAR_WIDTH}
+              aria-valuenow={effectiveVerticalBarWidth}
               data-testid="workspace-bar-resizer"
+              tabIndex={0}
+              onPointerDown={handleResizePointerDown}
               onMouseDown={handleResizeMouseDown}
+              onPointerMove={(event) => updatePreviewWidth(event.clientX)}
+              onMouseMove={(event) => updatePreviewWidth(event.clientX)}
+              onPointerUp={stopResizing}
+              onMouseUp={stopResizing}
+              onKeyDown={handleResizeKeyDown}
               style={{
                 position: 'absolute',
                 top: 0,

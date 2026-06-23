@@ -507,6 +507,7 @@ describe('WorkspaceTabs', () => {
     )
 
     expect(screen.getByTestId('workspace-bar-resizer')).toBeInTheDocument()
+    expect(screen.getByTestId('workspace-bar-resizer')).toHaveAttribute('tabindex', '0')
 
     rerender(
       <WorkspaceTabs
@@ -520,6 +521,27 @@ describe('WorkspaceTabs', () => {
     )
 
     expect(screen.queryByTestId('workspace-bar-resizer')).not.toBeInTheDocument()
+  })
+
+  it('supports keyboard resizing on the separator', () => {
+    const onVerticalBarWidthChange = vi.fn()
+    render(
+      <WorkspaceTabs
+        workspaces={workspaces}
+        activeWorkspaceId="dev"
+        tabPosition="left"
+        verticalBarWidth={280}
+        onSelect={() => {}}
+        onVerticalBarWidthChange={onVerticalBarWidthChange}
+      />,
+    )
+
+    const resizer = screen.getByTestId('workspace-bar-resizer')
+    fireEvent.keyDown(resizer, { key: 'ArrowRight' })
+    fireEvent.keyDown(resizer, { key: 'End' })
+
+    expect(onVerticalBarWidthChange).toHaveBeenNthCalledWith(1, 292)
+    expect(onVerticalBarWidthChange).toHaveBeenNthCalledWith(2, 520)
   })
 
   it('hides tab position controls when the position change handler is omitted', () => {
