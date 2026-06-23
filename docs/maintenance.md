@@ -6,12 +6,21 @@ This document captures repository maintenance rules that belong in durable proje
 
 - Pin GitHub Actions to full commit SHAs, not floating tags such as `@v4` or `@v5`.
 - When updating workflows, resolve the intended tag to its exact commit SHA first, then commit the SHA-pinned reference.
+- Renovate manages scheduled GitHub Actions updates for this repository. Keep workflow `uses:` entries SHA-pinned so Renovate can advance them as explicit reviewable changes.
 
 Why this matters:
 
 - it makes workflow execution reproducible
 - it narrows supply-chain drift
 - it keeps workflow changes explicit in code review
+
+## Dependency Updates
+
+- Renovate is the repository's scheduled dependency update mechanism.
+- Weekly update PRs run before 9am on Monday in the `Asia/Tokyo` timezone.
+- Monthly lockfile maintenance runs before 9am on the first day of the month.
+- Renovate covers Go modules, frontend npm dependencies, GitHub Actions, and the `GOLANGCI_LINT_VERSION` pin in `Makefile`.
+- Review Renovate PRs like any other dependency bump and keep automerge disabled unless project policy changes.
 
 ## Release Workflow
 
