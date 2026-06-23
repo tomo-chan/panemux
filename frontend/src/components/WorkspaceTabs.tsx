@@ -153,6 +153,7 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
   const inputRef = useRef<HTMLInputElement | null>(null)
   const renameFinalizedRef = useRef(false)
   const resizeStateRef = useRef<{ startX: number; startWidth: number; pointerId: number | null } | null>(null)
+  const previewVerticalBarWidthRef = useRef<number | null>(null)
   const effectiveVerticalBarWidth = clampVerticalBarWidth(previewVerticalBarWidth ?? verticalBarWidth)
 
   useEffect(() => {
@@ -177,8 +178,33 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
   useEffect(() => {
     if (!vertical) {
       setPreviewVerticalBarWidth(null)
+      previewVerticalBarWidthRef.current = null
     }
   }, [vertical])
+
+  const setPreviewWidth = (width: number | null) => {
+    previewVerticalBarWidthRef.current = width
+    setPreviewVerticalBarWidth(width)
+  }
+
+  const updatePreviewWidth = (clientX: number) => {
+    const current = resizeStateRef.current
+    if (!current) return
+    const delta = tabPosition === 'left' ? clientX - current.startX : current.startX - clientX
+    setPreviewWidth(clampVerticalBarWidth(current.startWidth + delta))
+  }
+
+  const stopResizing = () => {
+    if (!resizeStateRef.current) return
+    resizeStateRef.current = null
+    const committedWidth = previewVerticalBarWidthRef.current
+    if (committedWidth !== null && committedWidth !== verticalBarWidth) {
+      onVerticalBarWidthChange?.(committedWidth)
+    }
+    setPreviewWidth(null)
+    document.body.style.userSelect = ''
+    document.body.style.cursor = ''
+  }
 
   useEffect(() => {
     if (!vertical || !onVerticalBarWidthChange) return
@@ -199,46 +225,14 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
     window.addEventListener('pointercancel', stopResizing)
     window.addEventListener('mousemove', handleMouseMove)
     window.addEventListener('mouseup', stopResizing)
-    document.addEventListener('pointermove', handlePointerMove)
-    document.addEventListener('pointerup', stopResizing)
-    document.addEventListener('pointercancel', stopResizing)
-    document.addEventListener('mousemove', handleMouseMove)
-    document.addEventListener('mouseup', stopResizing)
     return () => {
       window.removeEventListener('pointermove', handlePointerMove)
       window.removeEventListener('pointerup', stopResizing)
       window.removeEventListener('pointercancel', stopResizing)
       window.removeEventListener('mousemove', handleMouseMove)
       window.removeEventListener('mouseup', stopResizing)
-      document.removeEventListener('pointermove', handlePointerMove)
-      document.removeEventListener('pointerup', stopResizing)
-      document.removeEventListener('pointercancel', stopResizing)
-      document.removeEventListener('mousemove', handleMouseMove)
-      document.removeEventListener('mouseup', stopResizing)
-      stopResizing()
     }
-  }, [onVerticalBarWidthChange, previewVerticalBarWidth, tabPosition, vertical, verticalBarWidth])
-
-  const updatePreviewWidth = (clientX: number) => {
-    const current = resizeStateRef.current
-    if (!current) return
-    const delta = tabPosition === 'left' ? clientX - current.startX : current.startX - clientX
-    setPreviewVerticalBarWidth(clampVerticalBarWidth(current.startWidth + delta))
-  }
-
-  const commitPreviewWidth = () => {
-    if (previewVerticalBarWidth === null || previewVerticalBarWidth === verticalBarWidth) return
-    onVerticalBarWidthChange?.(previewVerticalBarWidth)
-  }
-
-  const stopResizing = () => {
-    if (!resizeStateRef.current) return
-    resizeStateRef.current = null
-    commitPreviewWidth()
-    setPreviewVerticalBarWidth(null)
-    document.body.style.userSelect = ''
-    document.body.style.cursor = ''
-  }
+  }, [onVerticalBarWidthChange, tabPosition, vertical, verticalBarWidth])
 
   const startRename = (workspace: Workspace) => {
     if (!onRename) return
@@ -302,7 +296,7 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
   const beginResize = (clientX: number, pointerId: number | null) => {
     if (!vertical || !onVerticalBarWidthChange) return
     resizeStateRef.current = { startX: clientX, startWidth: effectiveVerticalBarWidth, pointerId }
-    setPreviewVerticalBarWidth(effectiveVerticalBarWidth)
+    setPreviewWidth(effectiveVerticalBarWidth)
     document.body.style.userSelect = 'none'
     document.body.style.cursor = 'col-resize'
   }

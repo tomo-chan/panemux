@@ -544,6 +544,27 @@ describe('WorkspaceTabs', () => {
     expect(onVerticalBarWidthChange).toHaveBeenNthCalledWith(2, 520)
   })
 
+  it('commits the resized width after mouse dragging the separator', () => {
+    const onVerticalBarWidthChange = vi.fn()
+    render(
+      <WorkspaceTabs
+        workspaces={workspaces}
+        activeWorkspaceId="dev"
+        tabPosition="left"
+        verticalBarWidth={280}
+        onSelect={() => {}}
+        onVerticalBarWidthChange={onVerticalBarWidthChange}
+      />,
+    )
+
+    const resizer = screen.getByTestId('workspace-bar-resizer')
+    fireEvent.mouseDown(resizer, { clientX: 280 })
+    fireEvent.mouseMove(window, { clientX: 320 })
+    fireEvent.mouseUp(window)
+
+    expect(onVerticalBarWidthChange).toHaveBeenCalledWith(320)
+  })
+
   it('hides tab position controls when the position change handler is omitted', () => {
     render(<WorkspaceTabs workspaces={workspaces} activeWorkspaceId="dev" tabPosition="top" onSelect={() => {}} />)
 
