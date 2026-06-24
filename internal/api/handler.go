@@ -64,6 +64,8 @@ var gitExistsFn = func() error {
 
 var prLookupTimeout = 5 * time.Second
 
+const responseErrorKey = "error"
+
 type sshConnectionsResponse struct {
 	Names []string `json:"names"`
 }
@@ -152,7 +154,7 @@ func (h *Handler) PutLayout(w http.ResponseWriter, r *http.Request) {
 	if err := config.ValidateLayout(layout); err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnprocessableEntity)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		_ = json.NewEncoder(w).Encode(map[string]string{responseErrorKey: err.Error()})
 		return
 	}
 
@@ -211,7 +213,7 @@ func (h *Handler) applyWorkspaceSettingUpdate(w http.ResponseWriter, updateErr e
 	if updateErr != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnprocessableEntity)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": updateErr.Error()})
+		_ = json.NewEncoder(w).Encode(map[string]string{responseErrorKey: updateErr.Error()})
 		return
 	}
 	if err := h.cfg.SaveWorkspaces(); err != nil {
@@ -277,7 +279,7 @@ func (h *Handler) PutWorkspace(w http.ResponseWriter, r *http.Request) {
 	if title == "" {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnprocessableEntity)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "workspace title must not be empty"})
+		_ = json.NewEncoder(w).Encode(map[string]string{responseErrorKey: "workspace title must not be empty"})
 		return
 	}
 	if !h.cfg.RenameWorkspace(id, title) {
@@ -305,7 +307,7 @@ func (h *Handler) PutWorkspaceLayout(w http.ResponseWriter, r *http.Request) {
 	if err := config.ValidateLayout(layout); err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnprocessableEntity)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		_ = json.NewEncoder(w).Encode(map[string]string{responseErrorKey: err.Error()})
 		return
 	}
 
@@ -363,7 +365,7 @@ func (h *Handler) PostSession(w http.ResponseWriter, r *http.Request) {
 	if err := config.ValidatePane(&pane); err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnprocessableEntity)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		_ = json.NewEncoder(w).Encode(map[string]string{responseErrorKey: err.Error()})
 		return
 	}
 
@@ -530,7 +532,7 @@ func (h *Handler) PostSSHConfigHost(w http.ResponseWriter, r *http.Request) {
 		if host.Name == req.Name {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusConflict)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": "host already exists"})
+			_ = json.NewEncoder(w).Encode(map[string]string{responseErrorKey: "host already exists"})
 			return
 		}
 	}
@@ -1210,7 +1212,7 @@ func repoHostAndPathFromOriginURLDetailed(origin string) (string, string, bool) 
 func writeValidationError(w http.ResponseWriter, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusUnprocessableEntity)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
+	_ = json.NewEncoder(w).Encode(map[string]string{responseErrorKey: msg})
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

@@ -17,6 +17,11 @@ import (
 
 const wsReadLimitBytes = 1 << 20 // 1 MB
 
+const (
+	controlMessageTypeResize = "resize"
+	controlMessageTypeReplay = "replay"
+)
+
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  4096,
 	WriteBufferSize: 4096,
@@ -226,7 +231,7 @@ func waitForTerminalPipe(done <-chan struct{}) {
 
 func (h *Handler) handleControl(conn *websocket.Conn, sess session.Session, msg ControlMessage) {
 	switch msg.Type {
-	case "resize":
+	case controlMessageTypeResize:
 		if msg.Cols > 0 && msg.Rows > 0 {
 			if err := sess.Resize(msg.Cols, msg.Rows); err != nil {
 				log.Printf("resize error: %v", err)
@@ -240,7 +245,7 @@ func (h *Handler) sendStatus(conn *websocket.Conn, state string) {
 }
 
 func (h *Handler) sendReplay(conn *websocket.Conn, state string) bool {
-	return writeControlMessage(conn, ControlMessage{Type: "replay", State: state})
+	return writeControlMessage(conn, ControlMessage{Type: controlMessageTypeReplay, State: state})
 }
 
 func writeControlMessage(conn messageWriter, msg ControlMessage) bool {
