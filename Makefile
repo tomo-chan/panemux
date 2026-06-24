@@ -5,7 +5,7 @@
         coverage coverage-go coverage-frontend \
         check release-snapshot package
 
-GOLANGCI_LINT_VERSION := v2.11.4
+GOLANGCI_LINT_VERSION := v2.12.2
 
 # ── Dependencies ──────────────────────────────────────────────────────────────
 
@@ -85,8 +85,14 @@ fmt-check-go:
 lint: lint-go lint-frontend
 
 lint-go-deps:
-	@command -v golangci-lint >/dev/null 2>&1 || \
-	  go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+	@expected_version="$$(printf '%s' '$(GOLANGCI_LINT_VERSION)' | sed 's/^v//')"; \
+	current_version="$$(command -v golangci-lint >/dev/null 2>&1 && golangci-lint --version 2>/dev/null | awk 'NR==1 {print $$4; exit}' || true)"; \
+	if [ "$$current_version" = "$$expected_version" ]; then \
+	  :; \
+	else \
+	  echo "Installing golangci-lint $(GOLANGCI_LINT_VERSION)"; \
+	  go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION); \
+	fi
 
 lint-go: fmt-check-go lint-go-deps
 	go vet ./...

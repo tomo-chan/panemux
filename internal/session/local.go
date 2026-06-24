@@ -33,6 +33,11 @@ var validShellPath = regexp.MustCompile(`^(/[a-zA-Z0-9._\-/]+)$`)
 var claudeBashCDPattern = regexp.MustCompile(`(?:^|&&)\s*cd\s+((?:"[^"]+"|'[^']+'|[^&|;]+))\s*&&`)
 var validClaudeSessionID = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
+const (
+	interactiveAgentCodex  = "codex"
+	interactiveAgentClaude = "claude"
+)
+
 // LocalSession is a local PTY-based terminal session.
 type LocalSession struct {
 	cmd   *exec.Cmd
@@ -447,9 +452,9 @@ func isInteractiveAgentCommand(command string) bool {
 
 	binary := strings.ToLower(filepath.Base(fields[0]))
 	switch binary {
-	case "codex":
+	case interactiveAgentCodex:
 		return !containsToken(fields[1:], "exec")
-	case "claude":
+	case interactiveAgentClaude:
 		return !containsAnyToken(fields[1:], "-p", "--print")
 	default:
 		return false
@@ -458,12 +463,12 @@ func isInteractiveAgentCommand(command string) bool {
 
 func isCodexCommand(command string) bool {
 	fields := strings.Fields(command)
-	return len(fields) > 0 && strings.ToLower(filepath.Base(fields[0])) == "codex"
+	return len(fields) > 0 && strings.ToLower(filepath.Base(fields[0])) == interactiveAgentCodex
 }
 
 func isClaudeCommand(command string) bool {
 	fields := strings.Fields(command)
-	return len(fields) > 0 && strings.ToLower(filepath.Base(fields[0])) == "claude"
+	return len(fields) > 0 && strings.ToLower(filepath.Base(fields[0])) == interactiveAgentClaude
 }
 
 func containsToken(tokens []string, target string) bool {

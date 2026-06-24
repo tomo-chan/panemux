@@ -15,6 +15,15 @@ import (
 const configFileMode os.FileMode = 0600
 const defaultWorkspaceVerticalBarWidth = 280
 
+const (
+	defaultServerHost      = "127.0.0.1"
+	defaultWorkspaceID     = "default"
+	defaultWorkspaceTitle  = "Default"
+	defaultTabPosition     = "top"
+	defaultLayoutDirection = "horizontal"
+	defaultPaneType        = "local"
+)
+
 var chmodConfigFile = os.Chmod
 
 type ServerConfig struct {
@@ -118,7 +127,7 @@ func Default() *Config {
 	return &Config{
 		Server: ServerConfig{
 			Port: 8080,
-			Host: "127.0.0.1",
+			Host: defaultServerHost,
 		},
 		Display: DisplayConfig{
 			ShowHeader:    true,
@@ -126,13 +135,13 @@ func Default() *Config {
 		},
 		Layout: defaultLayout(),
 		Workspaces: WorkspacesConfig{
-			Active:           "default",
-			TabPosition:      "top",
+			Active:           defaultWorkspaceID,
+			TabPosition:      defaultTabPosition,
 			VerticalBarWidth: defaultWorkspaceVerticalBarWidth,
 			Items: []WorkspaceConfig{
 				{
-					ID:     "default",
-					Title:  "Default",
+					ID:     defaultWorkspaceID,
+					Title:  defaultWorkspaceTitle,
 					Layout: defaultLayout(),
 				},
 			},
@@ -142,13 +151,13 @@ func Default() *Config {
 
 func defaultLayout() LayoutNode {
 	return LayoutNode{
-		Direction: "horizontal",
+		Direction: defaultLayoutDirection,
 		Children: []LayoutChild{
 			{
 				Size: 100.0,
 				Pane: &PaneConfig{
 					ID:    "local-main",
-					Type:  "local",
+					Type:  defaultPaneType,
 					Shell: os.Getenv("SHELL"),
 					Title: "Terminal",
 				},
@@ -168,20 +177,20 @@ func (c *Config) normalizedWorkspaces() WorkspacesConfig {
 	workspaces := c.Workspaces
 	if len(workspaces.Items) == 0 {
 		workspaces = WorkspacesConfig{
-			Active:           "default",
-			TabPosition:      "top",
+			Active:           defaultWorkspaceID,
+			TabPosition:      defaultTabPosition,
 			VerticalBarWidth: defaultWorkspaceVerticalBarWidth,
 			Items: []WorkspaceConfig{
 				{
-					ID:     "default",
-					Title:  "Default",
+					ID:     defaultWorkspaceID,
+					Title:  defaultWorkspaceTitle,
 					Layout: c.Layout,
 				},
 			},
 		}
 	}
 	if workspaces.TabPosition == "" {
-		workspaces.TabPosition = "top"
+		workspaces.TabPosition = defaultTabPosition
 	}
 	if workspaces.VerticalBarWidth == 0 {
 		workspaces.VerticalBarWidth = defaultWorkspaceVerticalBarWidth
@@ -242,7 +251,7 @@ func (c *Config) ActiveWorkspaceID() string {
 	if len(c.Workspaces.Items) > 0 {
 		return c.Workspaces.Items[0].ID
 	}
-	return "default"
+	return defaultWorkspaceID
 }
 
 func (c *Config) WorkspacesView() WorkspacesConfig {
@@ -349,13 +358,13 @@ func (c *Config) nextPaneID(base string) string {
 
 func singleLocalPaneLayout(paneID string) LayoutNode {
 	return LayoutNode{
-		Direction: "horizontal",
+		Direction: defaultLayoutDirection,
 		Children: []LayoutChild{
 			{
 				Size: 100.0,
 				Pane: &PaneConfig{
 					ID:    paneID,
-					Type:  "local",
+					Type:  defaultPaneType,
 					Shell: os.Getenv("SHELL"),
 					Title: "Terminal",
 				},
