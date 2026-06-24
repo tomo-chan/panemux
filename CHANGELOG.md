@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.0](https://github.com/tomo-chan/panemux/compare/v0.19.0...v0.20.0) (2026-06-24)
+
+
+### Features
+
+* resize vertical workspace bar ([#142](https://github.com/tomo-chan/panemux/issues/142)) ([1800065](https://github.com/tomo-chan/panemux/commit/18000657d7e1bcaeb04f3b7d0d6417b72249310b))
+
 ## [0.19.0](https://github.com/tomo-chan/panemux/compare/v0.18.8...v0.19.0) (2026-06-22)
 
 
