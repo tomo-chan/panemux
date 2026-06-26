@@ -183,6 +183,8 @@ function makeCtx(overrides: Partial<LayoutActionsContextValue> = {}): LayoutActi
     maximizedPaneId: null,
     dragSourcePaneId: null,
     setDragSourcePaneId: vi.fn(),
+    isResizing: false,
+    setIsResizing: vi.fn(),
     displayConfig: { show_header: true, show_status_bar: false },
     onPaneAttention: vi.fn(),
     clearPaneAttention: vi.fn(),

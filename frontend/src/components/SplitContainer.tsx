@@ -20,6 +20,8 @@ export interface LayoutActionsContextValue {
   maximizedPaneId: string | null
   dragSourcePaneId: string | null
   setDragSourcePaneId: (id: string | null) => void
+  isResizing: boolean
+  setIsResizing: (v: boolean) => void
   displayConfig: DisplayConfig
   onPaneAttention: (paneId: string) => void
   clearPaneAttention: (paneId: string) => void
@@ -246,7 +248,12 @@ const DividerDropZone: React.FC<DividerDropZoneProps> = ({ direction, beforeChil
         }}
         style={dividerHitAreaStyle(direction, Boolean(ctx?.dragSourcePaneId))}
       />
-      <SplitDivider direction={direction} onDrag={onResize} />
+      <SplitDivider
+        direction={direction}
+        onDrag={onResize}
+        onResizeStart={() => ctx?.setIsResizing(true)}
+        onResizeEnd={() => ctx?.setIsResizing(false)}
+      />
       {ctx?.dragSourcePaneId && (
         <div
           style={dividerOverlayStyle(direction, hovered)}

@@ -30,18 +30,20 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
   const isActivePane = ctx?.activePaneId === pane.id
   const isDragSource = ctx?.dragSourcePaneId === pane.id
   const dragActive = Boolean(ctx?.dragSourcePaneId)
+  const isResizing = ctx?.isResizing ?? false
   const gitInfoEnabled = !ctx?.maximizedPaneId || ctx.maximizedPaneId === pane.id
 
   const { gitInfo, refreshIfStale, refreshNow } = useGitInfo(pane.id, gitInfoEnabled)
 
-  const { handleResize, connected, dims, sessionState, reconnectFailed, restartSession } = useTerminal({
+  const { handleResize, connected, dims, sessionState, reconnectFailed, restartSession, scrollLines } = useTerminal({
     sessionId: pane.id,
     container: containerEl,
     repoURL: gitInfo.repo_url,
     onInteraction: refreshIfStale,
   })
 
-  // Observe resize events for this pane
+  // Observe resize events for this pane. handleResize is stable (does not
+  // depend on connected), so the observer is never torn down during reconnects.
   useEffect(() => {
     if (!containerEl) return
     const observer = new ResizeObserver(() => {
@@ -50,6 +52,22 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
     observer.observe(containerEl)
     return () => observer.disconnect()
   }, [containerEl, handleResize])
+
+  // Shift+wheel scrolls the local xterm.js viewport without forwarding events
+  // to the remote session. This keeps scrolling usable when the remote app
+  // has mouse tracking enabled and SSH latency is high.
+  useEffect(() => {
+    if (!containerEl) return
+    const handleWheel = (e: WheelEvent) => {
+      if (!e.shiftKey) return
+      e.preventDefault()
+      e.stopPropagation()
+      const lines = Math.round(e.deltaY / 40) || (e.deltaY > 0 ? 1 : -1)
+      scrollLines(lines)
+    }
+    containerEl.addEventListener('wheel', handleWheel, { capture: true, passive: false })
+    return () => containerEl.removeEventListener('wheel', handleWheel, true)
+  }, [containerEl, scrollLines])
 
   const handleOpenVSCode = useCallback(() => {
     void refreshNow()
@@ -167,6 +185,10 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
           overflow: 'hidden',
           padding: '4px',
           position: 'relative',
+          // Suppress xterm.js mouse event forwarding during pane resize drags.
+          // This prevents spurious mouse-tracking escape sequences from congesting
+          // the SSH write path and delaying the window-change (PTY resize) request.
+          pointerEvents: isResizing ? 'none' : undefined,
         }}
         onDragOver={(e) => {
           if (!ctx?.dragSourcePaneId || ctx.dragSourcePaneId === pane.id) return
