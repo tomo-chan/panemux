@@ -62,7 +62,13 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
       if (!e.shiftKey) return
       e.preventDefault()
       e.stopPropagation()
-      const lines = Math.round(e.deltaY / 40) || (e.deltaY > 0 ? 1 : -1)
+      const rawLines =
+        e.deltaMode === 1 /* DOM_DELTA_LINE */
+          ? Math.round(e.deltaY)
+          : e.deltaMode === 2 /* DOM_DELTA_PAGE */
+          ? Math.round(e.deltaY * 20)
+          : Math.round(e.deltaY / 40)
+      const lines = rawLines || (e.deltaY > 0 ? 1 : -1)
       scrollLines(lines)
     }
     containerEl.addEventListener('wheel', handleWheel, { capture: true, passive: false })

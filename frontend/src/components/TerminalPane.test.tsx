@@ -34,6 +34,7 @@ describe('TerminalPane drop zones', () => {
       sessionState: 'running',
       reconnectFailed: false,
       restartSession: vi.fn(),
+      scrollLines: vi.fn(),
     })
     mockUseGitInfo.mockReturnValue({
       gitInfo: { is_git: false },
@@ -167,6 +168,73 @@ describe('TerminalPane drop zones', () => {
     )
 
     expect(mockUseGitInfo).toHaveBeenCalledWith('pane-1', true)
+  })
+})
+
+describe('TerminalPane Shift+wheel handler', () => {
+  const scrollLinesMock = vi.fn()
+
+  beforeEach(() => {
+    scrollLinesMock.mockReset()
+    mockUseTerminal.mockReturnValue({
+      handleResize: vi.fn(),
+      connected: true,
+      dims: null,
+      sessionState: 'running',
+      reconnectFailed: false,
+      restartSession: vi.fn(),
+      scrollLines: scrollLinesMock,
+    })
+    mockUseGitInfo.mockReturnValue({
+      gitInfo: { is_git: false },
+      refreshIfStale: vi.fn(),
+      refreshNow: vi.fn(),
+    })
+  })
+
+  function renderPane() {
+    const { container } = render(
+      <LayoutActionsContext.Provider value={makeCtx()}>
+        <TerminalPane pane={{ id: 'pane-1', type: 'local', title: 'Pane 1' }} />
+      </LayoutActionsContext.Provider>,
+    )
+    return container.querySelector('[data-pane-id="pane-1"] > div:nth-child(2)') as HTMLElement
+  }
+
+  it('DOM_DELTA_PIXEL: scrolls lines from pixel delta', () => {
+    const el = renderPane()
+    fireEvent.wheel(el, { shiftKey: true, deltaY: 120, deltaMode: 0 })
+    expect(scrollLinesMock).toHaveBeenCalledWith(3)
+  })
+
+  it('DOM_DELTA_PIXEL: falls back to 1 when pixel delta rounds to zero', () => {
+    const el = renderPane()
+    fireEvent.wheel(el, { shiftKey: true, deltaY: 10, deltaMode: 0 })
+    expect(scrollLinesMock).toHaveBeenCalledWith(1)
+  })
+
+  it('DOM_DELTA_LINE: uses deltaY directly as line count', () => {
+    const el = renderPane()
+    fireEvent.wheel(el, { shiftKey: true, deltaY: 3, deltaMode: 1 })
+    expect(scrollLinesMock).toHaveBeenCalledWith(3)
+  })
+
+  it('DOM_DELTA_LINE: scrolls in reverse for negative delta', () => {
+    const el = renderPane()
+    fireEvent.wheel(el, { shiftKey: true, deltaY: -3, deltaMode: 1 })
+    expect(scrollLinesMock).toHaveBeenCalledWith(-3)
+  })
+
+  it('DOM_DELTA_PAGE: converts pages to lines by multiplying by 20', () => {
+    const el = renderPane()
+    fireEvent.wheel(el, { shiftKey: true, deltaY: 1, deltaMode: 2 })
+    expect(scrollLinesMock).toHaveBeenCalledWith(20)
+  })
+
+  it('does not scroll when Shift is not held', () => {
+    const el = renderPane()
+    fireEvent.wheel(el, { shiftKey: false, deltaY: 120, deltaMode: 0 })
+    expect(scrollLinesMock).not.toHaveBeenCalled()
   })
 })
 
