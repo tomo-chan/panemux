@@ -423,14 +423,18 @@ func (h *Handler) RestartSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.manager.Remove(id) //nolint:errcheck // ok if already gone
-	h.clearPreferredCWD(id)
-
+	// Create the replacement session before touching the manager. If this fails
+	// (e.g. a transient SSH dial error), the existing session for id stays
+	// registered instead of being orphaned, so /ws and /git-info keep working
+	// against it and the frontend's disconnected-status recovery path can retry.
 	sess, err := h.createSession(found, h.cfg.SSHConnections)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	h.manager.Remove(id) //nolint:errcheck // ok if already gone
+	h.clearPreferredCWD(id)
 	h.manager.Add(sess)
 	w.WriteHeader(http.StatusOK)
 }

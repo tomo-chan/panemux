@@ -9,9 +9,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -800,4 +802,156 @@ func TestRemoteGitContext_IncompleteResponseReturnsDiagnosticError(t *testing.T)
 	require.ErrorAs(t, err, &gitErr)
 	assert.Equal(t, GitContextCauseIncomplete, gitErr.Cause)
 	assert.Equal(t, "/home/user/panemux", gitErr.Stderr)
+}
+
+// stubDialTransport tracks how many times it was called and pops canned
+// results off the given queue, useful for exercising dialTransportWithRetry
+// without any real network I/O.
+func stubDialTransport(
+	t *testing.T, results ...error,
+) (func(SSHConfig, string, int) (net.Conn, *gossh.Client, error), *int) {
+	t.Helper()
+	calls := 0
+	fn := func(SSHConfig, string, int) (net.Conn, *gossh.Client, error) {
+		calls++
+		idx := calls - 1
+		require.Less(t, idx, len(results), "unexpected extra dial attempt")
+		if results[idx] != nil {
+			return nil, nil, results[idx]
+		}
+		return &net.TCPConn{}, nil, nil
+	}
+	return fn, &calls
+}
+
+func withStubbedSleep(t *testing.T) *[]time.Duration {
+	t.Helper()
+	var slept []time.Duration
+	origSleep := sleepFn
+	sleepFn = func(d time.Duration) { slept = append(slept, d) }
+	t.Cleanup(func() { sleepFn = origSleep })
+	return &slept
+}
+
+func TestDialWithRetry_SucceedsFirstTry(t *testing.T) {
+	slept := withStubbedSleep(t)
+	origDial := dialTransportFn
+	fn, calls := stubDialTransport(t, nil)
+	dialTransportFn = fn
+	t.Cleanup(func() { dialTransportFn = origDial })
+
+	_, _, err := dialTransportWithRetry(SSHConfig{}, "host:22", 22)
+	require.NoError(t, err)
+	assert.Equal(t, 1, *calls)
+	assert.Empty(t, *slept)
+}
+
+func TestDialWithRetry_SucceedsAfterTransientFailures(t *testing.T) {
+	slept := withStubbedSleep(t)
+	origDial := dialTransportFn
+	fn, calls := stubDialTransport(t,
+		errors.New("dial tcp: lookup host: no address associated with hostname"),
+		errors.New("dial tcp: lookup host: no address associated with hostname"),
+		nil,
+	)
+	dialTransportFn = fn
+	t.Cleanup(func() { dialTransportFn = origDial })
+
+	_, _, err := dialTransportWithRetry(SSHConfig{}, "host:22", 22)
+	require.NoError(t, err)
+	assert.Equal(t, 3, *calls)
+	assert.Len(t, *slept, 2)
+}
+
+func TestDialWithRetry_ExhaustsAllRetries(t *testing.T) {
+	withStubbedSleep(t)
+	origDial := dialTransportFn
+	wantErr := errors.New("dial tcp: lookup host: no address associated with hostname")
+	fn, calls := stubDialTransport(t, errors.New("attempt 1"), errors.New("attempt 2"), wantErr)
+	dialTransportFn = fn
+	t.Cleanup(func() { dialTransportFn = origDial })
+
+	_, _, err := dialTransportWithRetry(SSHConfig{}, "host:22", 22)
+	require.Error(t, err)
+	assert.Equal(t, dialRetryMaxAttempts, *calls)
+	assert.Equal(t, wantErr, err)
+}
+
+func TestDialWithRetry_StopsRetryingPastElapsedBudget(t *testing.T) {
+	withStubbedSleep(t)
+	origDial := dialTransportFn
+	fn, calls := stubDialTransport(t, errors.New("attempt 1"), errors.New("attempt 2"), nil)
+	dialTransportFn = fn
+	t.Cleanup(func() { dialTransportFn = origDial })
+
+	origNow := nowFn
+	callCount := 0
+	start := time.Now()
+	nowFn = func() time.Time {
+		callCount++
+		if callCount == 1 {
+			return start
+		}
+		// Every subsequent check already sees the budget exceeded.
+		return start.Add(dialRetryBudget + time.Second)
+	}
+	t.Cleanup(func() { nowFn = origNow })
+
+	_, _, err := dialTransportWithRetry(SSHConfig{}, "host:22", 22)
+	require.Error(t, err)
+	assert.Equal(t, 1, *calls)
+}
+
+// TestDialSSHClient_HandshakeFailure_NotRetried verifies that a TCP connection
+// that succeeds but fails the SSH handshake is not retried by the transport
+// dial loop: only auth/handshake failures should fail fast, since retrying
+// them could look like automated credential-guessing.
+func TestDialSSHClient_HandshakeFailure_NotRetried(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer ln.Close()
+
+	var accepted int32
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			conn, acceptErr := ln.Accept()
+			if acceptErr != nil {
+				return
+			}
+			accepted++
+			conn.Close()
+		}
+	}()
+
+	host, portStr, err := net.SplitHostPort(ln.Addr().String())
+	require.NoError(t, err)
+	var port int
+	_, err = fmt.Sscanf(portStr, "%d", &port)
+	require.NoError(t, err)
+
+	knownHosts := filepath.Join(t.TempDir(), "known_hosts")
+	require.NoError(t, os.WriteFile(knownHosts, nil, 0600))
+
+	cfg := SSHConfig{
+		Host:           host,
+		Port:           port,
+		User:           "test",
+		Password:       "wrong",
+		KnownHostsFile: knownHosts,
+	}
+
+	start := time.Now()
+	_, _, err = dialSSHClient(cfg)
+	elapsed := time.Since(start)
+	require.Error(t, err)
+
+	ln.Close()
+	<-done
+
+	// The transport itself connects fine every time; only the handshake
+	// fails, and handshake failures happen outside the dial-retry loop.
+	assert.Equal(t, int32(1), accepted)
+	assert.Less(t, elapsed, dialRetryInitialBackoff, "handshake failure should fail fast without dial-retry backoff")
 }

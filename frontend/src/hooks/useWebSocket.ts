@@ -8,17 +8,21 @@ interface UseWebSocketOptions {
   onOpen?: () => void
   onClose?: () => void
   reconnectDelay?: number
+  maxReconnectDelay?: number
   maxReconnectAttempts?: number
 }
 
 export function useWebSocket(url: string, options: UseWebSocketOptions) {
-  const { reconnectDelay = 2000, maxReconnectAttempts = 10 } = options
+  const { reconnectDelay = 2000, maxReconnectDelay = 30000, maxReconnectAttempts = 10 } = options
 
   const wsRef = useRef<WebSocket | null>(null)
   const attemptsRef = useRef(0)
   const mountedRef = useRef(true)
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [connected, setConnected] = useState(false)
+  // Set once the reconnect budget is exhausted so callers can stop assuming
+  // automatic recovery will happen and surface a manual retry affordance.
+  const [exhausted, setExhausted] = useState(false)
 
   // Store callbacks in refs so connect() doesn't need them as deps
   // and won't recreate/reconnect on every render
@@ -38,7 +42,10 @@ export function useWebSocket(url: string, options: UseWebSocketOptions) {
 
   const connect = useCallback(() => {
     if (!mountedRef.current) return
-    if (attemptsRef.current >= maxReconnectAttempts) return
+    if (attemptsRef.current >= maxReconnectAttempts) {
+      setExhausted(true)
+      return
+    }
 
     const ws = new WebSocket(url)
     ws.binaryType = 'arraybuffer'
@@ -69,19 +76,23 @@ export function useWebSocket(url: string, options: UseWebSocketOptions) {
       setConnected(false)
       onCloseRef.current?.()
       if (mountedRef.current) {
+        // Exponential backoff (base delay doubles each attempt), capped at
+        // maxReconnectDelay so a long outage doesn't grow the wait unbounded.
+        const delay = Math.min(reconnectDelay * 2 ** attemptsRef.current, maxReconnectDelay)
         attemptsRef.current++
         clearReconnectTimer()
         reconnectTimerRef.current = setTimeout(() => {
           reconnectTimerRef.current = null
           connect()
-        }, reconnectDelay)
+        }, delay)
       }
     }
 
     ws.onerror = () => {
       ws.close()
     }
-  }, [url, reconnectDelay, maxReconnectAttempts, clearReconnectTimer]) // callbacks excluded via refs
+    // callbacks excluded via refs
+  }, [url, reconnectDelay, maxReconnectDelay, maxReconnectAttempts, clearReconnectTimer])
 
   useEffect(() => {
     mountedRef.current = true
@@ -112,10 +123,11 @@ export function useWebSocket(url: string, options: UseWebSocketOptions) {
       setConnected(false)
     }
     attemptsRef.current = 0
+    setExhausted(false)
     connect()
   }, [connect, clearReconnectTimer])
 
-  return { send, connected, reconnect }
+  return { send, connected, exhausted, reconnect }
 }
 
 function isArrayBuffer(value: unknown): value is ArrayBuffer {

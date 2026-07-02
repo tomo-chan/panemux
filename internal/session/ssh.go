@@ -116,17 +116,7 @@ func dialSSHClient(cfg SSHConfig) (*ssh.Client, *ssh.Client, error) {
 		Timeout:           30 * time.Second,
 	}
 
-	var conn net.Conn
-	var jumpClient *ssh.Client
-
-	switch {
-	case cfg.JumpHost != nil:
-		conn, jumpClient, err = dialThroughJump(*cfg.JumpHost, addr)
-	case cfg.ProxyCommand != "":
-		conn, err = dialViaProxyCommand(cfg.ProxyCommand, cfg.Host, port)
-	default:
-		conn, err = net.DialTimeout("tcp", addr, 30*time.Second)
-	}
+	conn, jumpClient, err := dialTransportWithRetry(cfg, addr, port)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -141,6 +131,84 @@ func dialSSHClient(cfg SSHConfig) (*ssh.Client, *ssh.Client, error) {
 	}
 
 	return ssh.NewClient(sshConn, chans, reqs), jumpClient, nil
+}
+
+const (
+	// dialRetryMaxAttempts bounds how many times the transport-dial step (TCP
+	// dial / ProxyJump / ProxyCommand) is retried before giving up. Retrying
+	// here smooths over transient DNS blips (e.g. "no address associated with
+	// hostname") on unstable networks; it deliberately does not cover the SSH
+	// handshake/auth step, which fails fast on the first attempt.
+	dialRetryMaxAttempts = 3
+	// dialRetryInitialBackoff is the delay before the second attempt; it
+	// doubles on each subsequent attempt (300ms, 600ms).
+	dialRetryInitialBackoff = 300 * time.Millisecond
+	// dialRetryBudget caps the total wall-clock time spent retrying at the
+	// same ceiling as a single dial attempt's own timeout, so a caller
+	// synchronously waiting on dialSSHClient (e.g. the /restart HTTP handler)
+	// never waits dramatically longer than it already tolerates today.
+	dialRetryBudget = 30 * time.Second
+)
+
+// sleepFn and nowFn are package-level so tests can inject deterministic
+// timing without real delays or wall-clock dependence.
+var (
+	sleepFn = time.Sleep
+	nowFn   = time.Now
+)
+
+// dialTransportFn is the transport-dial step, injectable for tests. Assigned
+// in init (rather than at the var declaration) to avoid a spurious Go
+// initialization-cycle error: dialTransport transitively calls back into
+// dialTransportFn through dialThroughJump -> dialSSHClient, and Go's
+// init-order analysis does not distinguish "referenced in a function body"
+// from "referenced at initialization time".
+var dialTransportFn func(cfg SSHConfig, addr string, port int) (net.Conn, *ssh.Client, error)
+
+func init() {
+	dialTransportFn = dialTransport
+}
+
+// dialTransport establishes the raw transport (TCP, ProxyJump, or
+// ProxyCommand) for an SSH connection, without performing the SSH handshake.
+func dialTransport(cfg SSHConfig, addr string, port int) (net.Conn, *ssh.Client, error) {
+	switch {
+	case cfg.JumpHost != nil:
+		return dialThroughJump(*cfg.JumpHost, addr)
+	case cfg.ProxyCommand != "":
+		conn, err := dialViaProxyCommand(cfg.ProxyCommand, cfg.Host, port)
+		return conn, nil, err
+	default:
+		conn, err := net.DialTimeout("tcp", addr, 30*time.Second)
+		return conn, nil, err
+	}
+}
+
+// dialTransportWithRetry retries dialTransport with a short backoff on
+// failure, bounded by dialRetryMaxAttempts and dialRetryBudget. Only the
+// transport step is retried; a successful transport dial followed by an SSH
+// handshake/auth failure is never retried by this function since that
+// happens in a separate step in dialSSHClient.
+func dialTransportWithRetry(cfg SSHConfig, addr string, port int) (net.Conn, *ssh.Client, error) {
+	start := nowFn()
+	backoff := dialRetryInitialBackoff
+
+	var conn net.Conn
+	var jumpClient *ssh.Client
+	var err error
+
+	for attempt := 1; attempt <= dialRetryMaxAttempts; attempt++ {
+		conn, jumpClient, err = dialTransportFn(cfg, addr, port)
+		if err == nil {
+			return conn, jumpClient, nil
+		}
+		if attempt == dialRetryMaxAttempts || nowFn().Sub(start) >= dialRetryBudget {
+			break
+		}
+		sleepFn(backoff)
+		backoff *= 2
+	}
+	return nil, nil, err
 }
 
 // dialThroughJump connects to targetAddr by tunneling through a ProxyJump host.

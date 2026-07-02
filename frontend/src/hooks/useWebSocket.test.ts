@@ -146,13 +146,66 @@ describe('useWebSocket', () => {
 
   it('stops reconnecting after max attempts', () => {
     const onMessage = vi.fn()
-    renderHook(() =>
+    const { result } = renderHook(() =>
       useWebSocket('ws://localhost/ws/s1', { onMessage, reconnectDelay: 100, maxReconnectAttempts: 1 })
     )
     act(() => MockWebSocket.instances[0].simulateClose())
     act(() => vi.advanceTimersByTime(200))
     // connect() was called but attemptsRef >= maxReconnectAttempts → no new instance
     expect(MockWebSocket.instances).toHaveLength(1)
+    expect(result.current.exhausted).toBe(true)
+  })
+
+  it('exhausted stays false while attempts remain', () => {
+    const onMessage = vi.fn()
+    const { result } = renderHook(() =>
+      useWebSocket('ws://localhost/ws/s1', { onMessage, reconnectDelay: 100, maxReconnectAttempts: 3 })
+    )
+    act(() => MockWebSocket.instances[0].simulateClose())
+    act(() => vi.advanceTimersByTime(100))
+    expect(MockWebSocket.instances).toHaveLength(2)
+    expect(result.current.exhausted).toBe(false)
+  })
+
+  it('backs off exponentially between reconnect attempts', () => {
+    const onMessage = vi.fn()
+    renderHook(() =>
+      useWebSocket('ws://localhost/ws/s1', { onMessage, reconnectDelay: 100, maxReconnectAttempts: 5 })
+    )
+    act(() => MockWebSocket.instances[0].simulateClose())
+    expect(MockWebSocket.instances).toHaveLength(1)
+    act(() => vi.advanceTimersByTime(99))
+    expect(MockWebSocket.instances).toHaveLength(1)
+    act(() => vi.advanceTimersByTime(1))
+    expect(MockWebSocket.instances).toHaveLength(2) // first retry fires at 100ms
+
+    act(() => MockWebSocket.instances[1].simulateClose())
+    act(() => vi.advanceTimersByTime(199))
+    expect(MockWebSocket.instances).toHaveLength(2)
+    act(() => vi.advanceTimersByTime(1))
+    expect(MockWebSocket.instances).toHaveLength(3) // second retry fires at 200ms (doubled)
+  })
+
+  it('caps backoff at maxReconnectDelay', () => {
+    const onMessage = vi.fn()
+    renderHook(() =>
+      useWebSocket('ws://localhost/ws/s1', {
+        onMessage,
+        reconnectDelay: 1000,
+        maxReconnectAttempts: 10,
+        maxReconnectDelay: 1500,
+      })
+    )
+    act(() => MockWebSocket.instances[0].simulateClose())
+    act(() => vi.advanceTimersByTime(1000))
+    expect(MockWebSocket.instances).toHaveLength(2) // first retry at base delay (1000ms)
+
+    act(() => MockWebSocket.instances[1].simulateClose())
+    // Uncapped exponential delay would be 2000ms; capped delay is 1500ms.
+    act(() => vi.advanceTimersByTime(1499))
+    expect(MockWebSocket.instances).toHaveLength(2)
+    act(() => vi.advanceTimersByTime(1))
+    expect(MockWebSocket.instances).toHaveLength(3)
   })
 
   it('does not reconnect if component unmounts before reconnect delay fires', () => {
@@ -200,9 +253,11 @@ describe('useWebSocket', () => {
     act(() => MockWebSocket.instances[0].simulateClose())
     act(() => vi.advanceTimersByTime(200))
     expect(MockWebSocket.instances).toHaveLength(1) // stopped reconnecting
+    expect(result.current.exhausted).toBe(true)
 
     act(() => result.current.reconnect())
     expect(MockWebSocket.instances).toHaveLength(2)
+    expect(result.current.exhausted).toBe(false)
   })
 
   it('passes binary messages through without validation', () => {

@@ -904,6 +904,127 @@ func TestRestartSession_NotFound_404(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
+func TestRestartSession_CreateFails_OldSessionStaysRegistered(t *testing.T) {
+	cfg := &config.Config{
+		Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1"},
+		Layout: config.LayoutNode{
+			Direction: "horizontal",
+			Children: []config.LayoutChild{
+				{Size: 100, Pane: &config.PaneConfig{ID: "main", Type: "local"}},
+			},
+		},
+	}
+	mgr := session.NewManager()
+	original := newMockSession("main")
+	mgr.Add(original)
+	h := NewHandler(cfg, mgr)
+	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
+	h.createSession = func(*config.PaneConfig, map[string]config.SSHConnection) (session.Session, error) {
+		return nil, errors.New("dial failed")
+	}
+	r := setupRouterWithHandler(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/main/restart", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	// The pre-existing session must still be registered under the same ID
+	// so subsequent /ws and /git-info requests do not 404 permanently.
+	got, ok := mgr.Get("main")
+	assert.True(t, ok)
+	assert.Same(t, session.Session(original), got)
+}
+
+func TestRestartSession_CreateFails_PreservesPreferredCWD(t *testing.T) {
+	cfg := &config.Config{
+		Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1"},
+		Layout: config.LayoutNode{
+			Direction: "horizontal",
+			Children: []config.LayoutChild{
+				{Size: 100, Pane: &config.PaneConfig{ID: "main", Type: "local"}},
+			},
+		},
+	}
+	mgr := session.NewManager()
+	mgr.Add(newMockSession("main"))
+	h := NewHandler(cfg, mgr)
+	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
+	h.preferredCWDBySession["main"] = preferredCWDState{
+		CWD:       "/remote/home/demo",
+		CommonDir: "/remote/home/demo/.git",
+		Root:      "/remote/home/demo",
+	}
+	h.createSession = func(*config.PaneConfig, map[string]config.SSHConnection) (session.Session, error) {
+		return nil, errors.New("dial failed")
+	}
+	r := setupRouterWithHandler(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/main/restart", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	_, ok := h.preferredCWDBySession["main"]
+	assert.True(t, ok)
+}
+
+func TestRestartSession_CreateFails_500Body(t *testing.T) {
+	cfg := &config.Config{
+		Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1"},
+		Layout: config.LayoutNode{
+			Direction: "horizontal",
+			Children: []config.LayoutChild{
+				{Size: 100, Pane: &config.PaneConfig{ID: "main", Type: "local"}},
+			},
+		},
+	}
+	mgr := session.NewManager()
+	mgr.Add(newMockSession("main"))
+	h := NewHandler(cfg, mgr)
+	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
+	h.createSession = func(*config.PaneConfig, map[string]config.SSHConnection) (session.Session, error) {
+		return nil, errors.New("dial tcp: lookup host.example: no such host")
+	}
+	r := setupRouterWithHandler(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/main/restart", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.Contains(t, rec.Body.String(), "no such host")
+}
+
+func TestRestartSession_CreateFails_NoPanicWhenNoPriorSession(t *testing.T) {
+	cfg := &config.Config{
+		Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1"},
+		Layout: config.LayoutNode{
+			Direction: "horizontal",
+			Children: []config.LayoutChild{
+				{Size: 100, Pane: &config.PaneConfig{ID: "main", Type: "local"}},
+			},
+		},
+	}
+	mgr := session.NewManager()
+	h := NewHandler(cfg, mgr)
+	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
+	h.createSession = func(*config.PaneConfig, map[string]config.SSHConnection) (session.Session, error) {
+		return nil, errors.New("dial failed")
+	}
+	r := setupRouterWithHandler(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/main/restart", nil)
+	assert.NotPanics(t, func() {
+		r.ServeHTTP(rec, req)
+	})
+
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	_, ok := mgr.Get("main")
+	assert.False(t, ok)
+}
+
 func TestPutLayout_PersistsImmediately(t *testing.T) {
 	cfg := defaultTestConfig()
 	r := setupRouter(cfg, session.NewManager())
