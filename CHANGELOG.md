@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.1](https://github.com/tomo-chan/panemux/compare/v0.20.0...v0.20.1) (2026-07-03)
+
+
+### Bug Fixes
+
+* stop ssh/ssh+tmux panes from getting stuck reconnecting forever ([#146](https://github.com/tomo-chan/panemux/issues/146)) ([cd085b1](https://github.com/tomo-chan/panemux/commit/cd085b1b39c0f96dfe41aa3fda7aad0208edfa77))
+
 ## [0.20.0](https://github.com/tomo-chan/panemux/compare/v0.19.0...v0.20.0) (2026-06-24)
 
 
