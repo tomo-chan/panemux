@@ -294,19 +294,28 @@ export function useTerminal({
     } catch { /* ignore network errors */ }
   }, [sessionId, reconnect, sessionState])
 
-  // Handle resize
+  // Keep a ref to connected so handleResize doesn't need it as a dep.
+  // This prevents ResizeObserver from being torn down on every WebSocket
+  // reconnect event, which would cause resize events to be missed.
+  const connectedRef = useRef(connected)
+  useEffect(() => { connectedRef.current = connected })
+
   const handleResize = useCallback(() => {
     const entry = entryRef.current
     if (!entry) return
 
     repaintTerminal(entry, setDims)
     const { cols, rows } = entry.term
-    if (connected && cols > 0 && rows > 0) {
+    if (connectedRef.current && cols > 0 && rows > 0) {
       send(JSON.stringify({ type: 'resize', cols, rows }))
     }
-  }, [send, connected])
+  }, [send])
 
-  return { handleResize, connected, dims, sessionState, reconnectFailed, restartSession }
+  const scrollLines = useCallback((lines: number) => {
+    entryRef.current?.term.scrollLines(lines)
+  }, [])
+
+  return { handleResize, connected, dims, sessionState, reconnectFailed, restartSession, scrollLines }
 }
 
 function flushPendingMessages(

@@ -3,17 +3,24 @@ import React, { useCallback, useRef } from 'react'
 interface SplitDividerProps {
   direction: 'horizontal' | 'vertical'
   onDrag: (delta: number) => void
+  onResizeStart?: () => void
+  onResizeEnd?: () => void
 }
 
-export const SplitDivider: React.FC<SplitDividerProps> = ({ direction, onDrag }) => {
+export const SplitDivider: React.FC<SplitDividerProps> = ({ direction, onDrag, onResizeStart, onResizeEnd }) => {
   const startRef = useRef<number>(0)
   const onDragRef = useRef(onDrag)
   onDragRef.current = onDrag
+  const onResizeStartRef = useRef(onResizeStart)
+  onResizeStartRef.current = onResizeStart
+  const onResizeEndRef = useRef(onResizeEnd)
+  onResizeEndRef.current = onResizeEnd
   const isHorizontal = direction === 'horizontal'
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
     startRef.current = isHorizontal ? e.clientX : e.clientY
+    onResizeStartRef.current?.()
 
     const handleMouseMove = (moveEvent: MouseEvent) => {
       const current = isHorizontal ? moveEvent.clientX : moveEvent.clientY
@@ -23,6 +30,7 @@ export const SplitDivider: React.FC<SplitDividerProps> = ({ direction, onDrag })
     }
 
     const handleMouseUp = () => {
+      onResizeEndRef.current?.()
       document.removeEventListener('mousemove', handleMouseMove)
       document.removeEventListener('mouseup', handleMouseUp)
       document.body.style.cursor = ''

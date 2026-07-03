@@ -30,6 +30,7 @@ const { mockWrite, mockTerm, mockFitAddon, mockTerminalCtor } = vi.hoisted(() =>
       mockWrite(data)
       callback?.()
     }),
+    scrollLines: vi.fn(),
   }
   const mockFitAddon = { fit: vi.fn() }
   const mockTerminalCtor = vi.fn(function () { return mockTerm })
@@ -988,5 +989,28 @@ describe('useTerminal', () => {
     expect(written).not.toContain('\x1b[>1h')
     expect(written).toContain('hidden cursor')
     expect(written).toContain('text')
+  })
+
+  it('handleResize reference is stable when connected changes', () => {
+    const container = makeContainer()
+    const { result, rerender } = renderHook(() => useTerminal({ sessionId: 's1', container }))
+
+    const refBefore = result.current.handleResize
+    // Simulate connected changing by opening then closing the WebSocket
+    act(() => MockWebSocket.instances[0].simulateOpen())
+    rerender()
+    act(() => MockWebSocket.instances[0].close())
+    rerender()
+
+    expect(result.current.handleResize).toBe(refBefore)
+  })
+
+  it('scrollLines calls term.scrollLines', () => {
+    const container = makeContainer()
+    const { result } = renderHook(() => useTerminal({ sessionId: 's1', container }))
+
+    act(() => result.current.scrollLines(3))
+
+    expect(mockTerm.scrollLines).toHaveBeenCalledWith(3)
   })
 })

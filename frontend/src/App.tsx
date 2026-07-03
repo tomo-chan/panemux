@@ -39,6 +39,7 @@ export const App: React.FC = () => {
   } = useLayout()
   const [maximizedPaneIdsByWorkspace, setMaximizedPaneIdsByWorkspace] = useState<Record<string, string | null>>({})
   const [dragSourcePaneId, setDragSourcePaneId] = useState<string | null>(null)
+  const [isResizing, setIsResizing] = useState(false)
   const [activePaneId, setActivePaneId] = useState<string | null>(null)
   const [attentionPaneIds, setAttentionPaneIds] = useState<Set<string>>(() => new Set())
   const { isOpen, currentPane, sshConnectionNames, saveError, isSaving, openSettings, closeSettings, saveSettings, addSSHConfigHost, detectShell, browseDirectories } =
@@ -305,6 +306,8 @@ export const App: React.FC = () => {
       maximizedPaneId,
       dragSourcePaneId,
       setDragSourcePaneId,
+      isResizing,
+      setIsResizing,
       displayConfig: displayConfig ?? DEFAULT_DISPLAY,
       onPaneAttention: notifyAttention,
       clearPaneAttention,
