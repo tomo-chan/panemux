@@ -241,6 +241,30 @@ Current product use: the frontend uses this endpoint when the user splits a pane
 
 Closes the session, removes its pane from the layout, collapses redundant parent splits, normalizes sibling sizes, and returns `204`.
 
+### `POST /api/sessions/{id}/restart`
+
+Recreates the session for an existing pane from its config (e.g. after an SSH connection was lost). The
+replacement session is created first; the old session is only removed and swapped out once the new one
+starts successfully.
+
+- `404`: no pane config exists for `id`
+- `409`: a restart for this `id` is already in progress. Session creation can block on a real SSH
+  dial, so concurrent restart requests for the same pane are serialized instead of each building a
+  session independently and racing to swap it in.
+- `500`: session creation failed (e.g. SSH dial/handshake error). The pane's prior session, if any,
+  remains registered and servable — it is not removed on failure — so `/ws/{id}` and `/git-info` keep
+  working against it instead of 404ing until a future restart succeeds.
+- `200`: the new session replaced the old one (or was created fresh if none existed)
+
+The SSH transport-dial step retries transient failures (such as a momentary DNS resolution error) a
+bounded number of times with a short backoff before this endpoint returns `500`. Only the initial
+TCP/ProxyJump/ProxyCommand connection step is retried, not SSH handshake or authentication failures.
+The retry budget is a single wall-clock deadline shared across an entire ProxyJump chain (each hop
+reuses the same deadline rather than getting its own fresh budget), and each retried attempt's own
+timeout shrinks to whatever of that budget remains, so a hanging/unreachable host cannot make this
+endpoint wait dramatically longer than the ceiling a single dial attempt already tolerated before
+retries were introduced.
+
 ### `GET /api/ssh-connections`
 
 Returns a sorted list of all known SSH connection names — the union of names defined in `ssh_connections` (YAML) and non-wildcard hosts from `~/.ssh/config`. Names present in both sources are deduplicated, with the YAML entry taking precedence.
@@ -298,7 +322,10 @@ Endpoint: `GET /ws/{sessionID}`
 
 Connection behavior:
 
-- `404` if the session ID does not exist
+- `404` if the session ID does not exist. After a successful `/restart` this cannot happen for a
+  pane that was previously running; if `/restart` itself fails, the pane's prior session stays
+  registered (see `POST /api/sessions/{id}/restart` below), so this 404 is limited to session IDs
+  that were never created in the first place.
 - initial text frame is a JSON status message with `type: "status"` and `state: "connected"`
 - if a reconnect has buffered output, the backend sends `{"type":"replay","state":"start"}`,
   replays up to the recent per-session output buffer as a binary frame, then sends
@@ -440,6 +467,13 @@ When an SSH-backed pane loses its transport unexpectedly, panemux classifies tha
 `disconnected` instead of `exited`. The frontend performs one automatic recovery attempt by
 recreating the session and reconnecting the pane. Deliberate remote shell termination such as
 `exit` remains `exited` and shows the restart action instead of auto-reconnecting.
+
+The same one-shot automatic recovery also triggers if the pane's WebSocket connection itself
+repeatedly fails to (re)establish and exhausts its own reconnect attempt budget, even if the
+backend never reported a `disconnected` status frame (e.g. during a prolonged network outage that
+prevents the WebSocket handshake from completing at all). Either way, if the automatic recovery
+attempt itself fails, the pane shows the manual "Reconnect Session" action instead of the
+"reconnecting..." indicator forever.
 
 ### Selection and copy behavior
 

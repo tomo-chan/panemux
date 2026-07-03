@@ -751,6 +751,56 @@ describe('useTerminal', () => {
     expect(result.current.reconnectFailed).toBe(true)
   })
 
+  it('WS reconnect exhaustion drives sessionState to disconnected and attempts recovery', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true })
+    vi.stubGlobal('fetch', fetchMock)
+    vi.useFakeTimers()
+
+    const container = makeContainer()
+    const { result } = renderHook(() =>
+      useTerminal({ sessionId: 'pane1', container, reconnectDelay: 10, maxReconnectAttempts: 1 })
+    )
+
+    await act(async () => {
+      // No simulateOpen(): the WebSocket itself keeps failing to establish,
+      // independent of any backend "disconnected" status frame.
+      MockWebSocket.instances[0].close()
+      await vi.advanceTimersByTimeAsync(20)
+    })
+
+    expect(result.current.sessionState).toBe('disconnected')
+    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/pane1/restart', { method: 'POST' })
+
+    vi.useRealTimers()
+  })
+
+  // Regression test for the reported bug: an unstable ssh/ssh+tmux connection
+  // left panes showing "reconnecting..." forever with no way out, because the
+  // low-level WebSocket reconnect loop gave up silently after its attempt
+  // budget without ever producing a "disconnected" status frame, so the
+  // manual "Reconnect Session" button (driven by sessionState/reconnectFailed)
+  // never appeared.
+  it('manual Reconnect Session affordance is reachable after WS exhaustion without any status frame ever arriving', async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error('network error'))
+    vi.stubGlobal('fetch', fetchMock)
+    vi.useFakeTimers()
+
+    const container = makeContainer()
+    const { result } = renderHook(() =>
+      useTerminal({ sessionId: 'pane1', container, reconnectDelay: 10, maxReconnectAttempts: 1 })
+    )
+
+    await act(async () => {
+      MockWebSocket.instances[0].close()
+      await vi.advanceTimersByTimeAsync(20)
+    })
+
+    expect(result.current.sessionState).toBe('disconnected')
+    expect(result.current.reconnectFailed).toBe(true)
+
+    vi.useRealTimers()
+  })
+
   it('reuses the same terminal instance across remounts for the same session', () => {
     const firstContainer = makeContainer()
     const secondContainer = makeContainer()

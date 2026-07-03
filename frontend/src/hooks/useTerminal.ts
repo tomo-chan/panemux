@@ -13,6 +13,11 @@ interface UseTerminalOptions {
   container: HTMLElement | null
   repoURL?: string
   onInteraction?: () => void | Promise<void>
+  // Reconnect tuning, forwarded to useWebSocket. Only overridden in tests;
+  // production callers rely on useWebSocket's defaults.
+  reconnectDelay?: number
+  maxReconnectDelay?: number
+  maxReconnectAttempts?: number
 }
 
 interface TerminalEntry {
@@ -37,7 +42,15 @@ interface PendingTerminalMessage {
 const terminalEntries = new Map<string, TerminalEntry>()
 type TerminalLifecycleState = 'running' | 'disconnected' | 'exited'
 
-export function useTerminal({ sessionId, container, repoURL, onInteraction }: UseTerminalOptions) {
+export function useTerminal({
+  sessionId,
+  container,
+  repoURL,
+  onInteraction,
+  reconnectDelay,
+  maxReconnectDelay,
+  maxReconnectAttempts,
+}: UseTerminalOptions) {
   const termRef = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
   const initializedRef = useRef(false)
@@ -109,7 +122,7 @@ export function useTerminal({ sessionId, container, repoURL, onInteraction }: Us
   }, [applyMessageToTerminal])
 
   const wsUrl = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws/${sessionId}`
-  const { send, connected, reconnect } = useWebSocket(wsUrl, {
+  const { send, connected, exhausted, reconnect } = useWebSocket(wsUrl, {
     onMessage: handleMessage,
     onOpen: () => {
       setSessionState('running')
@@ -118,6 +131,9 @@ export function useTerminal({ sessionId, container, repoURL, onInteraction }: Us
       const entry = entryRef.current
       if (entry) resetReplayState(entry)
     },
+    reconnectDelay,
+    maxReconnectDelay,
+    maxReconnectAttempts,
   })
 
   const recoverDisconnectedSession = useCallback(async () => {
@@ -142,6 +158,18 @@ export function useTerminal({ sessionId, container, repoURL, onInteraction }: Us
   // This ref is read from an async status-frame handler that can run before an
   // effect flushes, so keep it current during render rather than one commit later.
   recoverDisconnectedSessionRef.current = recoverDisconnectedSession
+
+  // A backend-reported "disconnected" status frame isn't the only way a pane
+  // can go bad: the WebSocket itself can repeatedly fail to (re)establish and
+  // exhaust its own retry budget without ever delivering a status frame (e.g.
+  // during a prolonged network outage). Route that case through the same
+  // recovery path so the pane doesn't get stuck showing "reconnecting..."
+  // forever with no way to reach the manual restart button.
+  useEffect(() => {
+    if (!exhausted) return
+    setSessionState('disconnected')
+    void recoverDisconnectedSessionRef.current?.()
+  }, [exhausted])
 
   // Keep sendRef in sync so onData closure always has the latest send
   useLayoutEffect(() => {
