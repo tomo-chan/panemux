@@ -121,7 +121,16 @@ func dialSSHClientUntil(cfg SSHConfig, deadline time.Time) (*ssh.Client, *ssh.Cl
 		Auth:              authMethods,
 		HostKeyCallback:   hkCallback,
 		HostKeyAlgorithms: knownHostsAlgorithms(knownHostsPath, addr),
-		Timeout:           30 * time.Second,
+		// Timeout is documented as bounding TCP connection establishment, but
+		// golang.org/x/crypto/ssh only reads it inside ssh.Dial(); it has no
+		// effect on ssh.NewClientConn (called below), which is what this
+		// package actually uses since it always dials its own net.Conn first.
+		// The handshake itself is therefore currently unbounded regardless of
+		// this value, for every transport (TCP, ProxyJump, and ProxyCommand
+		// alike) — retrying the dial (dialTransportWithRetry, above) does not
+		// change that. Kept here only so a future switch to ssh.Dial-style
+		// usage picks up a sane default; do not rely on it as a real timeout.
+		Timeout: 30 * time.Second,
 	}
 
 	conn, jumpClient, err := dialTransportWithRetry(cfg, addr, port, deadline)
