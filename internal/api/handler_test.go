@@ -1025,6 +1025,99 @@ func TestRestartSession_CreateFails_NoPanicWhenNoPriorSession(t *testing.T) {
 	assert.False(t, ok)
 }
 
+// TestRestartSession_ConcurrentRequests_SecondReturns409 guards against a
+// race the create-first reordering (TestRestartSession_CreateFails_*) newly
+// exposed: two concurrent /restart calls for the same pane each build their
+// own replacement session independently, and whichever finishes last wins
+// the manager swap while the other's freshly-created (and never-used)
+// session is orphaned/leaked. A per-id in-flight guard rejects the second
+// concurrent call instead.
+func TestRestartSession_ConcurrentRequests_SecondReturns409(t *testing.T) {
+	cfg := &config.Config{
+		Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1"},
+		Layout: config.LayoutNode{
+			Direction: "horizontal",
+			Children: []config.LayoutChild{
+				{Size: 100, Pane: &config.PaneConfig{ID: "main", Type: "local"}},
+			},
+		},
+	}
+	mgr := session.NewManager()
+	mgr.Add(newMockSession("main"))
+	h := NewHandler(cfg, mgr)
+	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
+
+	started := make(chan struct{})
+	proceed := make(chan struct{})
+	h.createSession = func(pane *config.PaneConfig, _ map[string]config.SSHConnection) (session.Session, error) {
+		close(started)
+		<-proceed
+		return newMockSession(pane.ID), nil
+	}
+	r := setupRouterWithHandler(h)
+
+	firstDone := make(chan int, 1)
+	go func() {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/sessions/main/restart", nil)
+		r.ServeHTTP(rec, req)
+		firstDone <- rec.Code
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for first restart to start")
+	}
+
+	rec2 := httptest.NewRecorder()
+	req2 := httptest.NewRequest(http.MethodPost, "/api/sessions/main/restart", nil)
+	r.ServeHTTP(rec2, req2)
+	assert.Equal(t, http.StatusConflict, rec2.Code)
+
+	close(proceed)
+
+	select {
+	case code := <-firstDone:
+		assert.Equal(t, http.StatusOK, code)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for first restart to finish")
+	}
+
+	_, ok := mgr.Get("main")
+	assert.True(t, ok)
+}
+
+// TestRestartSession_GuardReleasedAfterCompletion verifies the per-id
+// in-flight guard is released once a restart finishes (success or failure),
+// so it never permanently locks a pane out of future restarts.
+func TestRestartSession_GuardReleasedAfterCompletion(t *testing.T) {
+	cfg := &config.Config{
+		Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1"},
+		Layout: config.LayoutNode{
+			Direction: "horizontal",
+			Children: []config.LayoutChild{
+				{Size: 100, Pane: &config.PaneConfig{ID: "main", Type: "local"}},
+			},
+		},
+	}
+	mgr := session.NewManager()
+	mgr.Add(newMockSession("main"))
+	h := NewHandler(cfg, mgr)
+	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
+	h.createSession = func(pane *config.PaneConfig, _ map[string]config.SSHConnection) (session.Session, error) {
+		return nil, errors.New("dial failed")
+	}
+	r := setupRouterWithHandler(h)
+
+	for range 2 {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/sessions/main/restart", nil)
+		r.ServeHTTP(rec, req)
+		assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	}
+}
+
 func TestPutLayout_PersistsImmediately(t *testing.T) {
 	cfg := defaultTestConfig()
 	r := setupRouter(cfg, session.NewManager())

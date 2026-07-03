@@ -248,14 +248,22 @@ replacement session is created first; the old session is only removed and swappe
 starts successfully.
 
 - `404`: no pane config exists for `id`
+- `409`: a restart for this `id` is already in progress. Session creation can block on a real SSH
+  dial, so concurrent restart requests for the same pane are serialized instead of each building a
+  session independently and racing to swap it in.
 - `500`: session creation failed (e.g. SSH dial/handshake error). The pane's prior session, if any,
   remains registered and servable — it is not removed on failure — so `/ws/{id}` and `/git-info` keep
   working against it instead of 404ing until a future restart succeeds.
 - `200`: the new session replaced the old one (or was created fresh if none existed)
 
 The SSH transport-dial step retries transient failures (such as a momentary DNS resolution error) a
-few times with a short backoff before this endpoint returns `500`; only the initial TCP/ProxyJump/
-ProxyCommand connection step is retried, not SSH handshake or authentication failures.
+bounded number of times with a short backoff before this endpoint returns `500`. Only the initial
+TCP/ProxyJump/ProxyCommand connection step is retried, not SSH handshake or authentication failures.
+The retry budget is a single wall-clock deadline shared across an entire ProxyJump chain (each hop
+reuses the same deadline rather than getting its own fresh budget), and each retried attempt's own
+timeout shrinks to whatever of that budget remains, so a hanging/unreachable host cannot make this
+endpoint wait dramatically longer than the ceiling a single dial attempt already tolerated before
+retries were introduced.
 
 ### `GET /api/ssh-connections`
 

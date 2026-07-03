@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -804,15 +805,38 @@ func TestRemoteGitContext_IncompleteResponseReturnsDiagnosticError(t *testing.T)
 	assert.Equal(t, "/home/user/panemux", gitErr.Stderr)
 }
 
+// fakeClock is a mutable clock so tests can simulate a dial attempt itself
+// consuming wall-clock time (as a slow/hanging attempt would), which a plain
+// injected nowFn sequence cannot express since the retry loop reads nowFn
+// independently of when dialTransportFn returns.
+type fakeClock struct {
+	t  time.Time
+	mu sync.Mutex
+}
+
+func newFakeClock() *fakeClock { return &fakeClock{t: time.Now()} }
+
+func (c *fakeClock) now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.t
+}
+
+func (c *fakeClock) advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.t = c.t.Add(d)
+}
+
 // stubDialTransport tracks how many times it was called and pops canned
 // results off the given queue, useful for exercising dialTransportWithRetry
 // without any real network I/O.
 func stubDialTransport(
 	t *testing.T, results ...error,
-) (func(SSHConfig, string, int) (net.Conn, *gossh.Client, error), *int) {
+) (func(SSHConfig, string, int, time.Time) (net.Conn, *gossh.Client, error), *int) {
 	t.Helper()
 	calls := 0
-	fn := func(SSHConfig, string, int) (net.Conn, *gossh.Client, error) {
+	fn := func(SSHConfig, string, int, time.Time) (net.Conn, *gossh.Client, error) {
 		calls++
 		idx := calls - 1
 		require.Less(t, idx, len(results), "unexpected extra dial attempt")
@@ -840,7 +864,7 @@ func TestDialWithRetry_SucceedsFirstTry(t *testing.T) {
 	dialTransportFn = fn
 	t.Cleanup(func() { dialTransportFn = origDial })
 
-	_, _, err := dialTransportWithRetry(SSHConfig{}, "host:22", 22)
+	_, _, err := dialTransportWithRetry(SSHConfig{}, "host:22", 22, nowFn().Add(dialRetryBudget))
 	require.NoError(t, err)
 	assert.Equal(t, 1, *calls)
 	assert.Empty(t, *slept)
@@ -857,7 +881,7 @@ func TestDialWithRetry_SucceedsAfterTransientFailures(t *testing.T) {
 	dialTransportFn = fn
 	t.Cleanup(func() { dialTransportFn = origDial })
 
-	_, _, err := dialTransportWithRetry(SSHConfig{}, "host:22", 22)
+	_, _, err := dialTransportWithRetry(SSHConfig{}, "host:22", 22, nowFn().Add(dialRetryBudget))
 	require.NoError(t, err)
 	assert.Equal(t, 3, *calls)
 	assert.Len(t, *slept, 2)
@@ -871,7 +895,7 @@ func TestDialWithRetry_ExhaustsAllRetries(t *testing.T) {
 	dialTransportFn = fn
 	t.Cleanup(func() { dialTransportFn = origDial })
 
-	_, _, err := dialTransportWithRetry(SSHConfig{}, "host:22", 22)
+	_, _, err := dialTransportWithRetry(SSHConfig{}, "host:22", 22, nowFn().Add(dialRetryBudget))
 	require.Error(t, err)
 	assert.Equal(t, dialRetryMaxAttempts, *calls)
 	assert.Equal(t, wantErr, err)
@@ -884,22 +908,84 @@ func TestDialWithRetry_StopsRetryingPastElapsedBudget(t *testing.T) {
 	dialTransportFn = fn
 	t.Cleanup(func() { dialTransportFn = origDial })
 
+	clock := newFakeClock()
 	origNow := nowFn
-	callCount := 0
-	start := time.Now()
-	nowFn = func() time.Time {
-		callCount++
-		if callCount == 1 {
-			return start
-		}
-		// Every subsequent check already sees the budget exceeded.
-		return start.Add(dialRetryBudget + time.Second)
-	}
+	nowFn = clock.now
 	t.Cleanup(func() { nowFn = origNow })
 
-	_, _, err := dialTransportWithRetry(SSHConfig{}, "host:22", 22)
+	deadline := clock.now().Add(dialRetryBudget)
+	// Advance past the deadline before the retry loop even starts its first
+	// pre-attempt check.
+	clock.advance(dialRetryBudget + time.Second)
+
+	_, _, err := dialTransportWithRetry(SSHConfig{}, "host:22", 22, deadline)
 	require.Error(t, err)
-	assert.Equal(t, 1, *calls)
+	assert.Equal(t, 0, *calls, "no attempt should be made once the deadline has already passed")
+}
+
+// TestDialWithRetry_HangingFirstAttemptConsumesWholeBudget is the regression
+// test for a reviewer-flagged gap: the retry loop only checked elapsed time
+// *between* attempts, so a target that fails slowly (hangs near its own
+// per-attempt timeout) rather than quickly (e.g. an instant DNS error) could
+// still cost up to dialRetryMaxAttempts full timeouts before the budget
+// check caught up. Each attempt must now be dialed with a timeout clamped to
+// the *remaining* budget, so one hanging attempt that consumes the whole
+// budget leaves no room for further attempts.
+func TestDialWithRetry_HangingFirstAttemptConsumesWholeBudget(t *testing.T) {
+	withStubbedSleep(t)
+	clock := newFakeClock()
+	origNow := nowFn
+	nowFn = clock.now
+	t.Cleanup(func() { nowFn = origNow })
+
+	origDial := dialTransportFn
+	calls := 0
+	var gotTimeouts []time.Duration
+	dialTransportFn = func(_ SSHConfig, _ string, _ int, deadline time.Time) (net.Conn, *gossh.Client, error) {
+		calls++
+		gotTimeouts = append(gotTimeouts, deadline.Sub(clock.now()))
+		// Simulate the attempt itself hanging for its entire allotted budget
+		// before finally failing, rather than failing instantly.
+		clock.advance(dialRetryBudget)
+		return nil, nil, errors.New("i/o timeout")
+	}
+	t.Cleanup(func() { dialTransportFn = origDial })
+
+	deadline := clock.now().Add(dialRetryBudget)
+	_, _, err := dialTransportWithRetry(SSHConfig{}, "host:22", 22, deadline)
+	require.Error(t, err)
+	assert.Equal(t, 1, calls, "a hanging attempt that consumes the whole budget must not be retried")
+	require.Len(t, gotTimeouts, 1)
+	assert.InDelta(t, dialRetryBudget, gotTimeouts[0], float64(50*time.Millisecond))
+}
+
+// TestDialWithRetry_ShrinksTimeoutForSubsequentAttempts verifies each retry's
+// own dial timeout is clamped to whatever budget remains, not a fresh
+// dialRetryBudget every time — otherwise attempts that each take just under
+// the full budget could cumulatively run far longer than dialRetryBudget.
+func TestDialWithRetry_ShrinksTimeoutForSubsequentAttempts(t *testing.T) {
+	withStubbedSleep(t)
+	clock := newFakeClock()
+	origNow := nowFn
+	nowFn = clock.now
+	t.Cleanup(func() { nowFn = origNow })
+
+	origDial := dialTransportFn
+	var gotTimeouts []time.Duration
+	dialTransportFn = func(_ SSHConfig, _ string, _ int, deadline time.Time) (net.Conn, *gossh.Client, error) {
+		gotTimeouts = append(gotTimeouts, deadline.Sub(clock.now()))
+		// Each attempt takes most, but not all, of what's currently left.
+		clock.advance(dialRetryBudget / 2)
+		return nil, nil, errors.New("attempt failed")
+	}
+	t.Cleanup(func() { dialTransportFn = origDial })
+
+	deadline := clock.now().Add(dialRetryBudget)
+	_, _, err := dialTransportWithRetry(SSHConfig{}, "host:22", 22, deadline)
+	require.Error(t, err)
+	require.Len(t, gotTimeouts, 2, "budget should be exhausted after two half-budget attempts")
+	assert.InDelta(t, dialRetryBudget, gotTimeouts[0], float64(50*time.Millisecond))
+	assert.InDelta(t, dialRetryBudget/2, gotTimeouts[1], float64(50*time.Millisecond))
 }
 
 // TestDialSSHClient_HandshakeFailure_NotRetried verifies that a TCP connection
@@ -954,4 +1040,37 @@ func TestDialSSHClient_HandshakeFailure_NotRetried(t *testing.T) {
 	// fails, and handshake failures happen outside the dial-retry loop.
 	assert.Equal(t, int32(1), accepted)
 	assert.Less(t, elapsed, dialRetryInitialBackoff, "handshake failure should fail fast without dial-retry backoff")
+}
+
+// TestDialTransport_JumpHostSharesRetryDeadlineWithOuterCall is the
+// regression test for a reviewer-flagged gap: dialThroughJump used to call
+// dialSSHClient (the public entry point), which computed its own fresh
+// dialRetryBudget window. That meant a ProxyJump chain could retry the jump
+// hop's own transport dial independently of the outer target dial's retry
+// loop, multiplying the worst-case wall-clock time for a hanging/unreachable
+// jump host. The jump hop must now reuse the exact same deadline as the
+// outer call.
+func TestDialTransport_JumpHostSharesRetryDeadlineWithOuterCall(t *testing.T) {
+	withStubbedSleep(t)
+	origDial := dialTransportFn
+	var gotDeadlines []time.Time
+	dialTransportFn = func(_ SSHConfig, _ string, _ int, deadline time.Time) (net.Conn, *gossh.Client, error) {
+		gotDeadlines = append(gotDeadlines, deadline)
+		return nil, nil, errors.New("jump dial failed")
+	}
+	t.Cleanup(func() { dialTransportFn = origDial })
+
+	knownHosts := filepath.Join(t.TempDir(), "known_hosts")
+	require.NoError(t, os.WriteFile(knownHosts, nil, 0600))
+
+	jumpCfg := SSHConfig{Host: "jump.invalid", Port: 22, User: "jump", Password: "x", KnownHostsFile: knownHosts}
+	cfg := SSHConfig{Host: "target.invalid", Port: 22, JumpHost: &jumpCfg}
+
+	deadline := nowFn().Add(dialRetryBudget)
+	_, _, err := dialTransport(cfg, "target.invalid:22", 22, deadline)
+	require.Error(t, err)
+	require.NotEmpty(t, gotDeadlines)
+	for _, d := range gotDeadlines {
+		assert.True(t, d.Equal(deadline), "jump host dial must reuse the same deadline as the outer call, not a fresh budget")
+	}
 }

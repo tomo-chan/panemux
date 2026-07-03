@@ -46,6 +46,8 @@ type Handler struct {
 	readDirFn               func(name string) ([]os.DirEntry, error)
 	preferredCWDMu          sync.Mutex
 	preferredCWDBySession   map[string]preferredCWDState
+	restartMu               sync.Mutex
+	restartInFlight         map[string]struct{}
 }
 
 type preferredCWDState struct {
@@ -126,6 +128,7 @@ func NewHandler(cfg *config.Config, manager *session.Manager) *Handler {
 		manager:               manager,
 		sshConfigPath:         sshconfig.DefaultPath(),
 		preferredCWDBySession: make(map[string]preferredCWDState),
+		restartInFlight:       make(map[string]struct{}),
 	}
 	h.createSession = session.CreateFromConfig
 	h.detectLocalShellFn = session.DetectLocalShell
@@ -410,6 +413,18 @@ func (h *Handler) DeleteSession(w http.ResponseWriter, r *http.Request) {
 // RestartSession recreates a session from its original config.
 func (h *Handler) RestartSession(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+
+	// Creating the replacement session happens outside the manager's lock (it
+	// can block on a real SSH dial), so two concurrent restarts for the same
+	// pane would otherwise each build their own session independently; the
+	// one that finishes last would win the manager swap while the other's
+	// session is silently discarded unused. Serialize per-id instead of
+	// letting that race play out.
+	if !h.beginRestart(id) {
+		http.Error(w, "a restart is already in progress for this session", http.StatusConflict)
+		return
+	}
+	defer h.endRestart(id)
 
 	var found *config.PaneConfig
 	for _, p := range h.cfg.AllPanes() {
@@ -902,6 +917,27 @@ func (h *Handler) clearPreferredCWD(sessionID string) {
 	defer h.preferredCWDMu.Unlock()
 
 	delete(h.preferredCWDBySession, sessionID)
+}
+
+// beginRestart claims the per-id restart guard, returning false if a restart
+// for id is already in progress.
+func (h *Handler) beginRestart(id string) bool {
+	h.restartMu.Lock()
+	defer h.restartMu.Unlock()
+
+	if _, ok := h.restartInFlight[id]; ok {
+		return false
+	}
+	h.restartInFlight[id] = struct{}{}
+	return true
+}
+
+// endRestart releases the per-id restart guard claimed by beginRestart.
+func (h *Handler) endRestart(id string) {
+	h.restartMu.Lock()
+	defer h.restartMu.Unlock()
+
+	delete(h.restartInFlight, id)
 }
 
 func (h *Handler) gitInfoLogScope(sess session.Session) string {
