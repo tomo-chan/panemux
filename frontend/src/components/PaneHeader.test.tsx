@@ -217,7 +217,7 @@ describe('PaneHeader VSCode button', () => {
     )
 
     expect(screen.getByText('main')).toBeInTheDocument()
-    expect(screen.queryByRole('menu')).toBeNull()
+    expect(screen.queryByRole('group', { name: 'Active worktrees' })).toBeNull()
     expect(screen.queryByRole('button', { name: /worktree/i })).toBeNull()
   })
 
@@ -227,6 +227,11 @@ describe('PaneHeader VSCode button', () => {
         {...defaultProps}
         gitInfo={{
           is_git: true,
+          // The backend always mirrors worktrees[0] into the top-level fields.
+          repo: 'panemux',
+          branch: 'feature/worktree-a',
+          pr_number: 111,
+          pr_url: 'https://github.com/example/panemux/pull/111',
           worktrees: [
             {
               repo: 'panemux',
@@ -246,7 +251,7 @@ describe('PaneHeader VSCode button', () => {
     )
 
     expect(screen.getByRole('button', { name: '2 worktrees' })).toBeInTheDocument()
-    expect(screen.queryByRole('menu')).toBeNull()
+    expect(screen.queryByRole('group', { name: 'Active worktrees' })).toBeNull()
     expect(screen.queryByRole('link', { name: '#111' })).toBeNull()
   })
 
@@ -256,6 +261,11 @@ describe('PaneHeader VSCode button', () => {
         {...defaultProps}
         gitInfo={{
           is_git: true,
+          // The backend always mirrors worktrees[0] into the top-level fields.
+          repo: 'panemux',
+          branch: 'feature/worktree-a',
+          pr_number: 111,
+          pr_url: 'https://github.com/example/panemux/pull/111',
           worktrees: [
             {
               repo: 'panemux',
@@ -276,7 +286,7 @@ describe('PaneHeader VSCode button', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '2 worktrees' }))
 
-    expect(screen.getByRole('menu')).toBeInTheDocument()
+    expect(screen.getByRole('group', { name: 'Active worktrees' })).toBeInTheDocument()
     const prLinkA = screen.getByRole('link', { name: '#111' })
     const prLinkB = screen.getByRole('link', { name: '#222' })
     expect(prLinkA).toHaveAttribute('href', 'https://github.com/example/panemux/pull/111')
@@ -289,6 +299,9 @@ describe('PaneHeader VSCode button', () => {
         {...defaultProps}
         gitInfo={{
           is_git: true,
+          // The backend always mirrors worktrees[0] into the top-level fields.
+          repo: 'panemux',
+          branch: 'feature/worktree-a',
           worktrees: [
             { repo: 'panemux', branch: 'feature/worktree-a' },
             { repo: 'panemux', branch: 'feature/worktree-b' },
@@ -298,10 +311,10 @@ describe('PaneHeader VSCode button', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: '2 worktrees' }))
-    expect(screen.getByRole('menu')).toBeInTheDocument()
+    expect(screen.getByRole('group', { name: 'Active worktrees' })).toBeInTheDocument()
 
     fireEvent.keyDown(window, { key: 'Escape' })
-    expect(screen.queryByRole('menu')).toBeNull()
+    expect(screen.queryByRole('group', { name: 'Active worktrees' })).toBeNull()
   })
 
   it('closes the worktree menu when clicking outside it', () => {
@@ -310,6 +323,9 @@ describe('PaneHeader VSCode button', () => {
         {...defaultProps}
         gitInfo={{
           is_git: true,
+          // The backend always mirrors worktrees[0] into the top-level fields.
+          repo: 'panemux',
+          branch: 'feature/worktree-a',
           worktrees: [
             { repo: 'panemux', branch: 'feature/worktree-a' },
             { repo: 'panemux', branch: 'feature/worktree-b' },
@@ -319,9 +335,9 @@ describe('PaneHeader VSCode button', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: '2 worktrees' }))
-    expect(screen.getByRole('menu')).toBeInTheDocument()
+    expect(screen.getByRole('group', { name: 'Active worktrees' })).toBeInTheDocument()
 
     fireEvent.click(screen.getByTestId('worktree-menu-backdrop'))
-    expect(screen.queryByRole('menu')).toBeNull()
+    expect(screen.queryByRole('group', { name: 'Active worktrees' })).toBeNull()
   })
 })

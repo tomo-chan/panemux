@@ -188,7 +188,6 @@ const WorktreeMenu: React.FC<WorktreeMenuProps> = ({ worktrees }) => {
     <span style={{ position: 'relative', display: 'inline-flex' }}>
       <button
         type="button"
-        aria-haspopup="true"
         aria-expanded={open}
         onClick={() => setOpen((prev) => !prev)}
         style={{
@@ -212,7 +211,8 @@ const WorktreeMenu: React.FC<WorktreeMenuProps> = ({ worktrees }) => {
             style={{ position: 'fixed', inset: 0, zIndex: 1 }}
           />
           <div
-            role="menu"
+            role="group"
+            aria-label="Active worktrees"
             style={{
               position: 'absolute',
               top: '100%',
@@ -315,7 +315,7 @@ export const PaneHeader: React.FC<PaneHeaderProps> = ({
       />
       <span style={{ color, fontWeight: 600 }}>{label}</span>
       {pane.title && <span style={{ color: '#aaa' }}>{pane.title}</span>}
-      {gitInfo?.is_git && (gitInfo.repo || gitInfo.branch || (gitInfo.worktrees?.length ?? 0) > 0) && (
+      {gitInfo?.is_git && (gitInfo.repo || gitInfo.branch) && (
         <span style={{ color: '#6e8a6e', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
           {gitInfo.worktrees && gitInfo.worktrees.length > 1 ? (
             <WorktreeMenu worktrees={gitInfo.worktrees} />
