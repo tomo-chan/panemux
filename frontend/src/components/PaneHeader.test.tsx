@@ -202,4 +202,142 @@ describe('PaneHeader VSCode button', () => {
       textUnderlineOffset: '2px',
     })
   })
+
+  it('renders a single worktree inline even when the worktrees array has one entry', () => {
+    render(
+      <PaneHeader
+        {...defaultProps}
+        gitInfo={{
+          is_git: true,
+          repo: 'panemux',
+          branch: 'main',
+          worktrees: [{ repo: 'panemux', branch: 'main' }],
+        }}
+      />
+    )
+
+    expect(screen.getByText('main')).toBeInTheDocument()
+    expect(screen.queryByRole('group', { name: 'Active worktrees' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /worktree/i })).toBeNull()
+  })
+
+  it('collapses two or more worktrees into a closed menu trigger', () => {
+    render(
+      <PaneHeader
+        {...defaultProps}
+        gitInfo={{
+          is_git: true,
+          // The backend always mirrors worktrees[0] into the top-level fields.
+          repo: 'panemux',
+          branch: 'feature/worktree-a',
+          pr_number: 111,
+          pr_url: 'https://github.com/example/panemux/pull/111',
+          worktrees: [
+            {
+              repo: 'panemux',
+              branch: 'feature/worktree-a',
+              pr_number: 111,
+              pr_url: 'https://github.com/example/panemux/pull/111',
+            },
+            {
+              repo: 'panemux',
+              branch: 'feature/worktree-b',
+              pr_number: 222,
+              pr_url: 'https://github.com/example/panemux/pull/222',
+            },
+          ],
+        }}
+      />
+    )
+
+    expect(screen.getByRole('button', { name: '2 worktrees' })).toBeInTheDocument()
+    expect(screen.queryByRole('group', { name: 'Active worktrees' })).toBeNull()
+    expect(screen.queryByRole('link', { name: '#111' })).toBeNull()
+  })
+
+  it('opens the worktree menu on trigger click and lists every worktree', () => {
+    render(
+      <PaneHeader
+        {...defaultProps}
+        gitInfo={{
+          is_git: true,
+          // The backend always mirrors worktrees[0] into the top-level fields.
+          repo: 'panemux',
+          branch: 'feature/worktree-a',
+          pr_number: 111,
+          pr_url: 'https://github.com/example/panemux/pull/111',
+          worktrees: [
+            {
+              repo: 'panemux',
+              branch: 'feature/worktree-a',
+              pr_number: 111,
+              pr_url: 'https://github.com/example/panemux/pull/111',
+            },
+            {
+              repo: 'panemux',
+              branch: 'feature/worktree-b',
+              pr_number: 222,
+              pr_url: 'https://github.com/example/panemux/pull/222',
+            },
+          ],
+        }}
+      />
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '2 worktrees' }))
+
+    expect(screen.getByRole('group', { name: 'Active worktrees' })).toBeInTheDocument()
+    const prLinkA = screen.getByRole('link', { name: '#111' })
+    const prLinkB = screen.getByRole('link', { name: '#222' })
+    expect(prLinkA).toHaveAttribute('href', 'https://github.com/example/panemux/pull/111')
+    expect(prLinkB).toHaveAttribute('href', 'https://github.com/example/panemux/pull/222')
+  })
+
+  it('closes the worktree menu on Escape', () => {
+    render(
+      <PaneHeader
+        {...defaultProps}
+        gitInfo={{
+          is_git: true,
+          // The backend always mirrors worktrees[0] into the top-level fields.
+          repo: 'panemux',
+          branch: 'feature/worktree-a',
+          worktrees: [
+            { repo: 'panemux', branch: 'feature/worktree-a' },
+            { repo: 'panemux', branch: 'feature/worktree-b' },
+          ],
+        }}
+      />
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '2 worktrees' }))
+    expect(screen.getByRole('group', { name: 'Active worktrees' })).toBeInTheDocument()
+
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(screen.queryByRole('group', { name: 'Active worktrees' })).toBeNull()
+  })
+
+  it('closes the worktree menu when clicking outside it', () => {
+    render(
+      <PaneHeader
+        {...defaultProps}
+        gitInfo={{
+          is_git: true,
+          // The backend always mirrors worktrees[0] into the top-level fields.
+          repo: 'panemux',
+          branch: 'feature/worktree-a',
+          worktrees: [
+            { repo: 'panemux', branch: 'feature/worktree-a' },
+            { repo: 'panemux', branch: 'feature/worktree-b' },
+          ],
+        }}
+      />
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '2 worktrees' }))
+    expect(screen.getByRole('group', { name: 'Active worktrees' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId('worktree-menu-backdrop'))
+    expect(screen.queryByRole('group', { name: 'Active worktrees' })).toBeNull()
+  })
 })

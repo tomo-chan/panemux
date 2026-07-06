@@ -57,10 +57,12 @@ type CWDGetter interface {
 	GetCWD() (string, error)
 }
 
-// ActiveWorkdirGetter is implemented by sessions that can detect the current
-// working directory of an active Codex/Claude child process.
+// ActiveWorkdirGetter is implemented by sessions that can detect every
+// distinct working directory currently in play for an active Codex/Claude
+// child process, including sibling worktrees only visited by a delegated
+// Claude Task subagent.
 type ActiveWorkdirGetter interface {
-	GetActiveWorkdir() (string, error)
+	GetActiveWorkdirs() ([]string, error)
 }
 
 // GitContext describes the repository state for a session's working directory.

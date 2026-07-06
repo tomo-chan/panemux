@@ -1,6 +1,6 @@
 import React from 'react'
 import { DisplayConfig, PaneConfig } from '../types'
-import { GitInfo } from '../schemas'
+import { GitInfo, WorktreeInfo } from '../schemas'
 import { TERMINAL_FONT_FAMILY } from '../utils/fonts'
 import {
   AddPaneBottomIcon,
@@ -145,6 +145,107 @@ const InlineHeaderLink: React.FC<InlineHeaderLinkProps> = ({ href, title, label 
   )
 }
 
+interface WorktreeEntryLineProps {
+  repo?: string
+  repoUrl?: string
+  branch?: string
+  prUrl?: string
+  prNumber?: number
+}
+
+const WorktreeEntryLine: React.FC<WorktreeEntryLineProps> = ({ repo, repoUrl, branch, prUrl, prNumber }) => (
+  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+    {repo && (repoUrl ? (
+      <InlineHeaderLink href={repoUrl} title="Open repository" label={repo} />
+    ) : (
+      <span>{repo}</span>
+    ))}
+    {repo && branch && <span style={{ color: '#4a6a4a' }}>{' '}⎇{' '}</span>}
+    {branch && <span>{branch}</span>}
+    {prUrl && prNumber && (
+      <InlineHeaderLink href={prUrl} title="Open pull request" label={`#${prNumber}`} />
+    )}
+  </span>
+)
+
+interface WorktreeMenuProps {
+  worktrees: WorktreeInfo[]
+}
+
+const WorktreeMenu: React.FC<WorktreeMenuProps> = ({ worktrees }) => {
+  const [open, setOpen] = React.useState(false)
+
+  React.useEffect(() => {
+    if (!open) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [open])
+
+  return (
+    <span style={{ position: 'relative', display: 'inline-flex' }}>
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((prev) => !prev)}
+        style={{
+          appearance: 'none',
+          background: 'none',
+          border: 'none',
+          padding: 0,
+          margin: 0,
+          font: 'inherit',
+          color: gitLinkStyle.color,
+          cursor: 'pointer',
+        }}
+      >
+        {worktrees.length} worktrees
+      </button>
+      {open && (
+        <>
+          <div
+            data-testid="worktree-menu-backdrop"
+            onClick={() => setOpen(false)}
+            style={{ position: 'fixed', inset: 0, zIndex: 1 }}
+          />
+          <div
+            role="group"
+            aria-label="Active worktrees"
+            style={{
+              position: 'absolute',
+              top: '100%',
+              left: 0,
+              marginTop: '4px',
+              backgroundColor: '#252526',
+              border: '1px solid #333',
+              borderRadius: '4px',
+              padding: '6px 10px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '4px',
+              whiteSpace: 'nowrap',
+              zIndex: 2,
+            }}
+          >
+            {worktrees.map((worktree, index) => (
+              <WorktreeEntryLine
+                key={index}
+                repo={worktree.repo}
+                repoUrl={worktree.repo_url}
+                branch={worktree.branch}
+                prUrl={worktree.pr_url}
+                prNumber={worktree.pr_number}
+              />
+            ))}
+          </div>
+        </>
+      )}
+    </span>
+  )
+}
+
 export const PaneHeader: React.FC<PaneHeaderProps> = ({
   pane,
   connected,
@@ -216,22 +317,15 @@ export const PaneHeader: React.FC<PaneHeaderProps> = ({
       {pane.title && <span style={{ color: '#aaa' }}>{pane.title}</span>}
       {gitInfo?.is_git && (gitInfo.repo || gitInfo.branch) && (
         <span style={{ color: '#6e8a6e', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-          {gitInfo.repo && (gitInfo.repo_url ? (
-            <InlineHeaderLink
-              href={gitInfo.repo_url}
-              title="Open repository"
-              label={gitInfo.repo}
-            />
+          {gitInfo.worktrees && gitInfo.worktrees.length > 1 ? (
+            <WorktreeMenu worktrees={gitInfo.worktrees} />
           ) : (
-            <span>{gitInfo.repo}</span>
-          ))}
-          {gitInfo.repo && gitInfo.branch && <span style={{ color: '#4a6a4a' }}>{' '}⎇{' '}</span>}
-          {gitInfo.branch && <span>{gitInfo.branch}</span>}
-          {gitInfo.pr_url && gitInfo.pr_number && (
-            <InlineHeaderLink
-              href={gitInfo.pr_url}
-              title="Open pull request"
-              label={`#${gitInfo.pr_number}`}
+            <WorktreeEntryLine
+              repo={gitInfo.repo}
+              repoUrl={gitInfo.repo_url}
+              branch={gitInfo.branch}
+              prUrl={gitInfo.pr_url}
+              prNumber={gitInfo.pr_number}
             />
           )}
         </span>

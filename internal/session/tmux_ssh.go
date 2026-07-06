@@ -145,10 +145,12 @@ func (s *TmuxSSHSession) GetCWD() (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// GetActiveWorkdir returns the working directory of the newest active
-// interactive Codex or Claude process under the active remote tmux pane.
-func (s *TmuxSSHSession) GetActiveWorkdir() (string, error) {
-	return tmuxSSHActiveWorkdirFromSessionFactory(
+// GetActiveWorkdirs returns every distinct working directory currently in
+// play for the newest active interactive Codex or Claude process under the
+// active remote tmux pane, including worktrees only visited by a delegated
+// Claude Task subagent.
+func (s *TmuxSSHSession) GetActiveWorkdirs() ([]string, error) {
+	return tmuxSSHActiveWorkdirsFromSessionFactory(
 		func() (sshSessionRunner, error) {
 			return s.client.NewSession()
 		},
@@ -183,7 +185,7 @@ func parseRemoteTmuxPaneInfo(out []byte) (int, string, error) {
 	return panePID, strings.TrimSpace(fields[1]), nil
 }
 
-func tmuxSSHActiveWorkdir(runner sshSessionRunner, logScope, tmuxSession string) (string, error) {
+func tmuxSSHActiveWorkdirs(runner sshSessionRunner, logScope, tmuxSession string) ([]string, error) {
 	out, err := runner.Output(
 		fmt.Sprintf(
 			"tmux display-message -p -t '%s' '#{pane_pid}\t#{pane_current_path}'",
@@ -192,25 +194,25 @@ func tmuxSSHActiveWorkdir(runner sshSessionRunner, logScope, tmuxSession string)
 	)
 	if err != nil {
 		log.Printf("%s tmux pane info lookup failed: %v", logScope, err)
-		return "", fmt.Errorf("tmux pane info over ssh: %w", err)
+		return nil, fmt.Errorf("tmux pane info over ssh: %w", err)
 	}
 	panePID, baseCWD, err := parseRemoteTmuxPaneInfo(out)
 	if err != nil {
 		log.Printf("%s %v", logScope, err)
-		return "", err
+		return nil, err
 	}
 	log.Printf("%s active tmux pane pid=%d base_cwd=%q", logScope, panePID, baseCWD)
 
-	return activeRemoteWorkdir(runner, logScope, baseCWD, panePID)
+	return activeRemoteWorkdirs(runner, logScope, baseCWD, panePID)
 }
 
-func tmuxSSHActiveWorkdirFromSessionFactory(
+func tmuxSSHActiveWorkdirsFromSessionFactory(
 	newRunner func() (sshSessionRunner, error),
 	logScope, tmuxSession string,
-) (string, error) {
+) ([]string, error) {
 	paneRunner, err := newRunner()
 	if err != nil {
-		return "", fmt.Errorf("new ssh session for active tmux pane info: %w", err)
+		return nil, fmt.Errorf("new ssh session for active tmux pane info: %w", err)
 	}
 	defer paneRunner.Close()
 
@@ -222,16 +224,16 @@ func tmuxSSHActiveWorkdirFromSessionFactory(
 	)
 	if err != nil {
 		log.Printf("%s tmux pane info lookup failed: %v", logScope, err)
-		return "", fmt.Errorf("tmux pane info over ssh: %w", err)
+		return nil, fmt.Errorf("tmux pane info over ssh: %w", err)
 	}
 	panePID, baseCWD, err := parseRemoteTmuxPaneInfo(out)
 	if err != nil {
 		log.Printf("%s %v", logScope, err)
-		return "", err
+		return nil, err
 	}
 	log.Printf("%s active tmux pane pid=%d base_cwd=%q", logScope, panePID, baseCWD)
 
-	return activeRemoteWorkdirWithOutput(
+	return activeRemoteWorkdirsWithOutput(
 		outputFromSessionFactory(newRunner),
 		logScope,
 		baseCWD,

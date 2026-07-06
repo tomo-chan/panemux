@@ -840,16 +840,17 @@ func (s *SSHSession) GetCWD() (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// GetActiveWorkdir returns the working directory of the newest active
-// interactive Codex or Claude process on the SSH connection, or empty string
-// when none is active.
-func (s *SSHSession) GetActiveWorkdir() (string, error) {
+// GetActiveWorkdirs returns every distinct working directory currently in
+// play for the newest active interactive Codex or Claude process on the SSH
+// connection, including worktrees only visited by a delegated Claude Task
+// subagent. Returns an empty slice when none is active.
+func (s *SSHSession) GetActiveWorkdirs() ([]string, error) {
 	baseCWD, err := s.GetCWD()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	return activeRemoteWorkdirFromSessionFactory(
+	return activeRemoteWorkdirsFromSessionFactory(
 		func() (sshSessionRunner, error) {
 			return s.client.NewSession()
 		},
@@ -885,22 +886,22 @@ func remoteShellPID(runner sshSessionRunner) (int, error) {
 	return pid, nil
 }
 
-func activeRemoteWorkdirFromSessionFactory(
+func activeRemoteWorkdirsFromSessionFactory(
 	newRunner func() (sshSessionRunner, error),
 	logScope, baseCWD string,
-) (string, error) {
+) ([]string, error) {
 	rootRunner, err := newRunner()
 	if err != nil {
-		return "", fmt.Errorf("new ssh session for remote shell pid: %w", err)
+		return nil, fmt.Errorf("new ssh session for remote shell pid: %w", err)
 	}
 	defer rootRunner.Close()
 
 	rootPID, err := remoteShellPID(rootRunner)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	return activeRemoteWorkdirWithOutput(
+	return activeRemoteWorkdirsWithOutput(
 		outputFromSessionFactory(newRunner),
 		logScope,
 		baseCWD,
@@ -908,47 +909,47 @@ func activeRemoteWorkdirFromSessionFactory(
 	)
 }
 
-func activeRemoteWorkdir(runner sshSessionRunner, logScope, baseCWD string, rootPID int) (string, error) {
-	return activeRemoteWorkdirWithOutput(runner.Output, logScope, baseCWD, rootPID)
+func activeRemoteWorkdirs(runner sshSessionRunner, logScope, baseCWD string, rootPID int) ([]string, error) {
+	return activeRemoteWorkdirsWithOutput(runner.Output, logScope, baseCWD, rootPID)
 }
 
-func activeRemoteWorkdirWithOutput(
+func activeRemoteWorkdirsWithOutput(
 	run remoteOutputFunc,
 	logScope, baseCWD string,
 	rootPID int,
-) (string, error) {
-	log.Printf("%s resolving active workdir from base_cwd=%q root_pid=%d", logScope, baseCWD, rootPID)
+) ([]string, error) {
+	log.Printf("%s resolving active workdirs from base_cwd=%q root_pid=%d", logScope, baseCWD, rootPID)
 
 	out, err := run(sshListProcessesCmd)
 	if err != nil {
 		log.Printf("%s list remote processes failed: %v", logScope, err)
-		return "", fmt.Errorf("list remote processes: %w", err)
+		return nil, fmt.Errorf("list remote processes: %w", err)
 	}
 
 	processes, err := parsePSOutput(append([]byte("PID PPID COMMAND\n"), out...))
 	if err != nil {
 		log.Printf("%s parse remote processes failed: %v", logScope, err)
-		return "", err
+		return nil, err
 	}
 
 	agentPID, ok := newestInteractiveAgentDescendantPID(processes, rootPID)
 	if !ok {
 		log.Printf("%s no interactive codex/claude process found beneath root_pid=%d", logScope, rootPID)
-		return "", nil
+		return nil, nil
 	}
 	if proc, found := processByPID(processes, agentPID); found {
 		log.Printf("%s selected interactive agent pid=%d command=%q", logScope, agentPID, proc.Command)
 	}
 
-	sessionCWD, sessionErr := remoteInteractiveAgentSessionCWD(
+	sessionCWDs, sessionErr := remoteInteractiveAgentSessionCWDs(
 		run,
 		logScope,
 		processes,
 		agentPID,
 	)
-	if sessionErr == nil && sessionCWD != "" {
-		log.Printf("%s resolved active workdir from interactive agent session data: %q", logScope, sessionCWD)
-		return sessionCWD, nil
+	if sessionErr == nil && len(sessionCWDs) > 0 {
+		log.Printf("%s resolved active workdirs from interactive agent session data: %q", logScope, sessionCWDs)
+		return sessionCWDs, nil
 	} else if sessionErr != nil {
 		log.Printf("%s interactive agent session workdir lookup failed: %v", logScope, sessionErr)
 	} else {
@@ -958,14 +959,14 @@ func activeRemoteWorkdirWithOutput(
 	cwd, err := resolveRemoteInteractiveAgentWorkdir(logScope, run, processes, agentPID, baseCWD)
 	if err != nil {
 		log.Printf("%s descendant cwd resolution failed: %v", logScope, err)
-		return "", err
+		return nil, err
 	}
 	if cwd == "" {
 		log.Printf("%s descendant cwd scan found no override; keeping base_cwd=%q", logScope, baseCWD)
-	} else {
-		log.Printf("%s descendant cwd scan selected %q", logScope, cwd)
+		return nil, nil
 	}
-	return cwd, nil
+	log.Printf("%s descendant cwd scan selected %q", logScope, cwd)
+	return []string{cwd}, nil
 }
 
 func resolveRemoteInteractiveAgentWorkdir(
@@ -1058,58 +1059,133 @@ func remoteCodexSessionCWD(
 	)
 }
 
-func remoteInteractiveAgentSessionCWD(
+func remoteInteractiveAgentSessionCWDs(
 	run remoteOutputFunc,
 	logScope string,
 	processes []processInfo,
 	agentPID int,
-) (string, error) {
+) ([]string, error) {
 	proc, ok := processByPID(processes, agentPID)
 	if !ok {
-		return "", nil
+		return nil, nil
 	}
 
 	switch {
 	case isCodexCommand(proc.Command):
-		return remoteCodexSessionCWD(run, logScope, processes, agentPID)
+		cwd, err := remoteCodexSessionCWD(run, logScope, processes, agentPID)
+		if err != nil || cwd == "" {
+			return nil, err
+		}
+		return []string{cwd}, nil
 	case isClaudeCommand(proc.Command):
-		return remoteClaudeSessionCWD(run, logScope, processes, agentPID)
+		return remoteClaudeSessionCWDs(run, logScope, processes, agentPID)
 	default:
-		return "", nil
+		return nil, nil
 	}
 }
 
-func remoteClaudeSessionCWD(
+// remoteClaudeSessionCWDs returns every distinct workdir found across the
+// Claude session's own remote transcript and any Task subagent transcripts
+// recorded alongside it under a remote "subagents" directory. See
+// claudeSessionCWDs (local.go) for why subagent transcripts matter: a
+// delegated subagent's worktree-relative work is otherwise invisible because
+// it is never reflected in the parent transcript.
+func remoteClaudeSessionCWDs(
 	run remoteOutputFunc,
 	logScope string,
 	processes []processInfo,
 	agentPID int,
-) (string, error) {
+) ([]string, error) {
 	proc, ok := processByPID(processes, agentPID)
 	if !ok || !isClaudeCommand(proc.Command) {
-		return "", nil
+		return nil, nil
 	}
 
 	sessionMeta, err := remoteClaudeSessionMeta(run, logScope, agentPID)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if sessionMeta == nil || sessionMeta.SessionID == "" || sessionMeta.CWD == "" {
-		return "", nil
+		return nil, nil
 	}
 	if !validClaudeSessionID.MatchString(sessionMeta.SessionID) {
-		return "", nil
+		return nil, nil
 	}
 
 	projectPath := remoteClaudeProjectPath(sessionMeta)
-	return remoteCachedAgentLogCWD(
-		run,
-		"ssh:"+logScope+":claude:"+projectPath,
-		logScope,
-		projectPath,
-		remoteClaudeProjectShellPath(sessionMeta),
-		"claude transcript",
-		parseClaudeProjectCWD,
+
+	cwds := make([]string, 0, 1)
+	seen := make(map[string]bool)
+	addCandidate := func(displayPath, shellPath string) {
+		cwd, lookupErr := remoteCachedAgentLogCWD(
+			run,
+			"ssh:"+logScope+":claude:"+displayPath,
+			logScope,
+			displayPath,
+			shellPath,
+			"claude transcript",
+			parseClaudeProjectCWD,
+		)
+		if lookupErr != nil || cwd == "" || seen[cwd] {
+			return
+		}
+		seen[cwd] = true
+		cwds = append(cwds, cwd)
+	}
+
+	addCandidate(projectPath, remoteClaudeProjectShellPath(sessionMeta))
+
+	subagentNames, err := remoteClaudeSubagentTranscriptNames(run, logScope, sessionMeta)
+	if err != nil {
+		log.Printf("%s listing claude subagent transcripts failed: %v", logScope, err)
+		return cwds, nil
+	}
+	for _, name := range subagentNames {
+		addCandidate(
+			filepath.Join(filepath.Dir(projectPath), sessionMeta.SessionID, "subagents", name),
+			remoteClaudeSubagentShellPath(sessionMeta, name),
+		)
+	}
+
+	return cwds, nil
+}
+
+// remoteClaudeSubagentTranscriptNames lists the ".jsonl" filenames in the
+// remote session's "subagents" directory, or returns an empty list (no
+// error) when that directory does not exist, matching older Claude Code
+// session layouts that never created it.
+func remoteClaudeSubagentTranscriptNames(
+	run remoteOutputFunc,
+	logScope string,
+	meta *claudeSessionMeta,
+) ([]string, error) {
+	out, err := run("ls -1 " + remoteClaudeSubagentsDirShellPath(meta) + " 2>/dev/null || true")
+	if err != nil {
+		return nil, err
+	}
+
+	var names []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || !strings.HasSuffix(line, ".jsonl") {
+			continue
+		}
+		names = append(names, line)
+	}
+	sort.Strings(names)
+	log.Printf("%s found %d claude subagent transcript(s)", logScope, len(names))
+	return names, nil
+}
+
+func remoteClaudeSubagentsDirShellPath(meta *claudeSessionMeta) string {
+	return "~/.claude/projects/" + shellQuotePath(
+		filepath.Join(claudeProjectDirName(meta.CWD), meta.SessionID, "subagents"),
+	)
+}
+
+func remoteClaudeSubagentShellPath(meta *claudeSessionMeta, name string) string {
+	return "~/.claude/projects/" + shellQuotePath(
+		filepath.Join(claudeProjectDirName(meta.CWD), meta.SessionID, "subagents", name),
 	)
 }
 

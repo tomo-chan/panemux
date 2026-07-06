@@ -356,9 +356,9 @@ func TestActiveRemoteWorkdir_IgnoresNonInteractiveAgents(t *testing.T) {
 		},
 	}
 
-	cwd, err := activeRemoteWorkdir(runner, "test active remote", "/repo/main", 100)
+	cwds, err := activeRemoteWorkdirs(runner, "test active remote", "/repo/main", 100)
 	require.NoError(t, err)
-	assert.Empty(t, cwd)
+	assert.Empty(t, cwds)
 }
 
 func TestActiveRemoteWorkdir_PrefersRemoteCodexSessionCWD(t *testing.T) {
@@ -374,9 +374,9 @@ func TestActiveRemoteWorkdir_PrefersRemoteCodexSessionCWD(t *testing.T) {
 		},
 	}
 
-	cwd, err := activeRemoteWorkdir(runner, "test active remote", "/repo/main", 100)
+	cwds, err := activeRemoteWorkdirs(runner, "test active remote", "/repo/main", 100)
 	require.NoError(t, err)
-	assert.Equal(t, "/tmp/remote-worktree", cwd)
+	assert.Equal(t, []string{"/tmp/remote-worktree"}, cwds)
 }
 
 func TestActiveRemoteWorkdir_PrefersRemoteCodexExecCommandWorkdir(t *testing.T) {
@@ -393,9 +393,9 @@ func TestActiveRemoteWorkdir_PrefersRemoteCodexExecCommandWorkdir(t *testing.T) 
 		},
 	}
 
-	cwd, err := activeRemoteWorkdir(runner, "test active remote", "/repo/main", 100)
+	cwds, err := activeRemoteWorkdirs(runner, "test active remote", "/repo/main", 100)
 	require.NoError(t, err)
-	assert.Equal(t, "/tmp/remote-worktree-from-command", cwd)
+	assert.Equal(t, []string{"/tmp/remote-worktree-from-command"}, cwds)
 }
 
 func TestActiveRemoteWorkdir_SkipsRemoteCodexLogReadWhenFingerprintUnchanged(t *testing.T) {
@@ -418,14 +418,14 @@ func TestActiveRemoteWorkdir_SkipsRemoteCodexLogReadWhenFingerprintUnchanged(t *
 		},
 	}
 
-	cwd, err := activeRemoteWorkdir(runner, "test active remote", "/repo/main", 100)
+	cwds, err := activeRemoteWorkdirs(runner, "test active remote", "/repo/main", 100)
 	require.NoError(t, err)
-	assert.Equal(t, "/tmp/remote-worktree", cwd)
+	assert.Equal(t, []string{"/tmp/remote-worktree"}, cwds)
 
 	delete(runner.outputs, catCmd)
-	cwd, err = activeRemoteWorkdir(runner, "test active remote", "/repo/main", 100)
+	cwds, err = activeRemoteWorkdirs(runner, "test active remote", "/repo/main", 100)
 	require.NoError(t, err)
-	assert.Equal(t, "/tmp/remote-worktree", cwd)
+	assert.Equal(t, []string{"/tmp/remote-worktree"}, cwds)
 }
 
 func TestActiveRemoteWorkdir_ReReadsRemoteClaudeTranscriptWhenFingerprintChanges(t *testing.T) {
@@ -447,18 +447,18 @@ func TestActiveRemoteWorkdir_ReReadsRemoteClaudeTranscriptWhenFingerprintChanges
 		},
 	}
 
-	cwd, err := activeRemoteWorkdir(runner, "test active remote", "/repo/main", 100)
+	cwds, err := activeRemoteWorkdirs(runner, "test active remote", "/repo/main", 100)
 	require.NoError(t, err)
-	assert.Equal(t, "/tmp/remote-claude-worktree-a", cwd)
+	assert.Equal(t, []string{"/tmp/remote-claude-worktree-a"}, cwds)
 
 	runner.outputs[fingerprintCmd] = []byte("101 1700000001\n")
 	runner.outputs[projectCmd] = []byte(
 		"{\"type\":\"assistant\",\"cwd\":\"/tmp/remote-claude-worktree-b\"," +
 			"\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}\n",
 	)
-	cwd, err = activeRemoteWorkdir(runner, "test active remote", "/repo/main", 100)
+	cwds, err = activeRemoteWorkdirs(runner, "test active remote", "/repo/main", 100)
 	require.NoError(t, err)
-	assert.Equal(t, "/tmp/remote-claude-worktree-b", cwd)
+	assert.Equal(t, []string{"/tmp/remote-claude-worktree-b"}, cwds)
 }
 
 func TestActiveRemoteWorkdir_FallsBackToRemoteDescendantCWD(t *testing.T) {
@@ -471,9 +471,9 @@ func TestActiveRemoteWorkdir_FallsBackToRemoteDescendantCWD(t *testing.T) {
 		},
 	}
 
-	cwd, err := activeRemoteWorkdir(runner, "test active remote", "/repo/main", 100)
+	cwds, err := activeRemoteWorkdirs(runner, "test active remote", "/repo/main", 100)
 	require.NoError(t, err)
-	assert.Equal(t, "/tmp/remote-worktree", cwd)
+	assert.Equal(t, []string{"/tmp/remote-worktree"}, cwds)
 }
 
 func TestActiveRemoteWorkdir_PrefersRemoteClaudeTranscriptWorktree(t *testing.T) {
@@ -491,9 +491,9 @@ func TestActiveRemoteWorkdir_PrefersRemoteClaudeTranscriptWorktree(t *testing.T)
 		},
 	}
 
-	cwd, err := activeRemoteWorkdir(runner, "test active remote", "/repo/main", 100)
+	cwds, err := activeRemoteWorkdirs(runner, "test active remote", "/repo/main", 100)
 	require.NoError(t, err)
-	assert.Equal(t, "/tmp/remote-claude-worktree", cwd)
+	assert.Equal(t, []string{"/tmp/remote-claude-worktree"}, cwds)
 }
 
 func TestActiveRemoteWorkdir_PrefersRemoteClaudeTranscriptWorktree_WithDotInCWD(t *testing.T) {
@@ -511,9 +511,9 @@ func TestActiveRemoteWorkdir_PrefersRemoteClaudeTranscriptWorktree_WithDotInCWD(
 		},
 	}
 
-	cwd, err := activeRemoteWorkdir(runner, "test active remote", "/repo/main", 100)
+	cwds, err := activeRemoteWorkdirs(runner, "test active remote", "/repo/main", 100)
 	require.NoError(t, err)
-	assert.Equal(t, "/tmp/remote-claude-worktree", cwd)
+	assert.Equal(t, []string{"/tmp/remote-claude-worktree"}, cwds)
 }
 
 func TestActiveRemoteWorkdir_PrefersRemoteClaudeTopLevelCWDOverToolPaths(t *testing.T) {
@@ -533,9 +533,9 @@ func TestActiveRemoteWorkdir_PrefersRemoteClaudeTopLevelCWDOverToolPaths(t *test
 		},
 	}
 
-	cwd, err := activeRemoteWorkdir(runner, "test active remote", "/repo/main", 100)
+	cwds, err := activeRemoteWorkdirs(runner, "test active remote", "/repo/main", 100)
 	require.NoError(t, err)
-	assert.Equal(t, "/repo/main", cwd)
+	assert.Equal(t, []string{"/repo/main"}, cwds)
 }
 
 func TestActiveRemoteWorkdir_PrefersRemoteClaudeBashCDWorktree(t *testing.T) {
@@ -555,9 +555,9 @@ func TestActiveRemoteWorkdir_PrefersRemoteClaudeBashCDWorktree(t *testing.T) {
 		},
 	}
 
-	cwd, err := activeRemoteWorkdir(runner, "test active remote", "/repo/main", 100)
+	cwds, err := activeRemoteWorkdirs(runner, "test active remote", "/repo/main", 100)
 	require.NoError(t, err)
-	assert.Equal(t, "/tmp/remote-bash-worktree", cwd)
+	assert.Equal(t, []string{"/tmp/remote-bash-worktree"}, cwds)
 }
 
 func TestActiveRemoteWorkdir_RejectsRemoteClaudeInvalidSessionID(t *testing.T) {
@@ -570,9 +570,128 @@ func TestActiveRemoteWorkdir_RejectsRemoteClaudeInvalidSessionID(t *testing.T) {
 		},
 	}
 
-	cwd, err := activeRemoteWorkdir(runner, "test active remote", "/repo/main", 100)
+	cwds, err := activeRemoteWorkdirs(runner, "test active remote", "/repo/main", 100)
 	require.NoError(t, err)
-	assert.Equal(t, "/repo/main", cwd)
+	assert.Equal(t, []string{"/repo/main"}, cwds)
+}
+
+func TestActiveRemoteWorkdir_IncludesSubagentTranscriptWorktree(t *testing.T) {
+	sessionPath := "~/.claude/sessions/220.json"
+	projectCmd := "cat ~/.claude/projects/'-repo-main/session-123.jsonl'"
+	subagentsListCmd := "ls -1 ~/.claude/projects/'-repo-main/session-123/subagents' 2>/dev/null || true"
+	subagentCmd := "cat ~/.claude/projects/'-repo-main/session-123/subagents/agent-a1.jsonl'"
+
+	runner := &fakeSSHRunner{
+		outputs: map[string][]byte{
+			sshListProcessesCmd:  []byte(" 100 1 sh\n 220 100 claude\n"),
+			"cat " + sessionPath: []byte(`{"pid":220,"sessionId":"session-123","cwd":"/repo/main"}`),
+			projectCmd: []byte(
+				"{\"type\":\"assistant\",\"cwd\":\"/repo/main\"," +
+					"\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}\n",
+			),
+			subagentsListCmd: []byte("agent-a1.jsonl\n"),
+			subagentCmd: []byte(
+				"{\"type\":\"assistant\",\"cwd\":\"/repo/worktree-a\"," +
+					"\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}\n",
+			),
+		},
+	}
+
+	cwds, err := activeRemoteWorkdirs(runner, "test active remote", "/repo/main", 100)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"/repo/main", "/repo/worktree-a"}, cwds)
+}
+
+func TestActiveRemoteWorkdir_MultipleSubagentTranscripts_AllDistinctWorktreesReturned(t *testing.T) {
+	sessionPath := "~/.claude/sessions/220.json"
+	projectCmd := "cat ~/.claude/projects/'-repo-main/session-123.jsonl'"
+	subagentsListCmd := "ls -1 ~/.claude/projects/'-repo-main/session-123/subagents' 2>/dev/null || true"
+	subagentACmd := "cat ~/.claude/projects/'-repo-main/session-123/subagents/agent-a1.jsonl'"
+	subagentBCmd := "cat ~/.claude/projects/'-repo-main/session-123/subagents/agent-a2.jsonl'"
+	subagentCCmd := "cat ~/.claude/projects/'-repo-main/session-123/subagents/agent-a3.jsonl'"
+
+	runner := &fakeSSHRunner{
+		outputs: map[string][]byte{
+			sshListProcessesCmd:  []byte(" 100 1 sh\n 220 100 claude\n"),
+			"cat " + sessionPath: []byte(`{"pid":220,"sessionId":"session-123","cwd":"/repo/main"}`),
+			projectCmd: []byte(
+				"{\"type\":\"assistant\",\"cwd\":\"/repo/main\"," +
+					"\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}\n",
+			),
+			subagentsListCmd: []byte("agent-a1.jsonl\nagent-a2.jsonl\nagent-a3.jsonl\n"),
+			subagentACmd: []byte(
+				"{\"type\":\"assistant\",\"cwd\":\"/repo/worktree-a\"," +
+					"\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}\n",
+			),
+			subagentBCmd: []byte(
+				"{\"type\":\"assistant\",\"cwd\":\"/repo/worktree-b\"," +
+					"\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}\n",
+			),
+			// A subagent that stayed in the same worktree as the parent should
+			// not produce a duplicate entry.
+			subagentCCmd: []byte(
+				"{\"type\":\"assistant\",\"cwd\":\"/repo/main\"," +
+					"\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}\n",
+			),
+		},
+	}
+
+	cwds, err := activeRemoteWorkdirs(runner, "test active remote", "/repo/main", 100)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"/repo/main", "/repo/worktree-a", "/repo/worktree-b"}, cwds)
+}
+
+func TestActiveRemoteWorkdir_NoSubagentsDirectory_BackwardCompatible(t *testing.T) {
+	sessionPath := "~/.claude/sessions/220.json"
+	projectCmd := "cat ~/.claude/projects/'-repo-main/session-123.jsonl'"
+	subagentsListCmd := "ls -1 ~/.claude/projects/'-repo-main/session-123/subagents' 2>/dev/null || true"
+
+	runner := &fakeSSHRunner{
+		outputs: map[string][]byte{
+			sshListProcessesCmd:  []byte(" 100 1 sh\n 220 100 claude\n"),
+			"cat " + sessionPath: []byte(`{"pid":220,"sessionId":"session-123","cwd":"/repo/main"}`),
+			projectCmd: []byte(
+				"{\"type\":\"assistant\",\"cwd\":\"/tmp/remote-claude-worktree\"," +
+					"\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}\n",
+			),
+			// The remote "|| true" makes a missing subagents directory look like
+			// an empty, successful listing rather than a command error.
+			subagentsListCmd: []byte(""),
+		},
+	}
+
+	cwds, err := activeRemoteWorkdirs(runner, "test active remote", "/repo/main", 100)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"/tmp/remote-claude-worktree"}, cwds)
+}
+
+func TestActiveRemoteWorkdir_CorruptSubagentTranscriptIgnored(t *testing.T) {
+	sessionPath := "~/.claude/sessions/220.json"
+	projectCmd := "cat ~/.claude/projects/'-repo-main/session-123.jsonl'"
+	subagentsListCmd := "ls -1 ~/.claude/projects/'-repo-main/session-123/subagents' 2>/dev/null || true"
+	corruptCmd := "cat ~/.claude/projects/'-repo-main/session-123/subagents/agent-corrupt.jsonl'"
+	goodCmd := "cat ~/.claude/projects/'-repo-main/session-123/subagents/agent-good.jsonl'"
+
+	runner := &fakeSSHRunner{
+		outputs: map[string][]byte{
+			sshListProcessesCmd:  []byte(" 100 1 sh\n 220 100 claude\n"),
+			"cat " + sessionPath: []byte(`{"pid":220,"sessionId":"session-123","cwd":"/repo/main"}`),
+			projectCmd: []byte(
+				"{\"type\":\"assistant\",\"cwd\":\"/repo/main\"," +
+					"\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}\n",
+			),
+			subagentsListCmd: []byte("agent-corrupt.jsonl\nagent-good.jsonl\n"),
+			corruptCmd:       []byte("not json at all\n"),
+			goodCmd: []byte(
+				"{\"type\":\"assistant\",\"cwd\":\"/repo/worktree-good\"," +
+					"\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}\n",
+			),
+		},
+	}
+
+	cwds, err := activeRemoteWorkdirs(runner, "test active remote", "/repo/main", 100)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"/repo/main", "/repo/worktree-good"}, cwds)
 }
 
 func TestRemoteShellPID_ParsesShellProcess(t *testing.T) {
@@ -600,13 +719,13 @@ func TestActiveRemoteWorkdirFromSessionFactory_UsesSeparateRunners(t *testing.T)
 		return &fakeSSHRunner{outputs: outputs}, nil
 	}
 
-	cwd, err := activeRemoteWorkdirFromSessionFactory(
+	cwds, err := activeRemoteWorkdirsFromSessionFactory(
 		factory,
 		"test active remote",
 		"/repo/main",
 	)
 	require.NoError(t, err)
-	assert.Equal(t, "/tmp/remote-worktree", cwd)
+	assert.Equal(t, []string{"/tmp/remote-worktree"}, cwds)
 	// Separate runners are used for: shell PID, process list, open-files probe,
 	// and PID cwd fallback.
 	assert.Equal(t, 4, index)
@@ -622,9 +741,9 @@ func TestActiveRemoteWorkdir_RootPIDScopesRemoteAgents(t *testing.T) {
 		},
 	}
 
-	cwd, err := activeRemoteWorkdir(runner, "test active remote", "/repo/main", 100)
+	cwds, err := activeRemoteWorkdirs(runner, "test active remote", "/repo/main", 100)
 	require.NoError(t, err)
-	assert.Equal(t, "/tmp/remote-worktree", cwd)
+	assert.Equal(t, []string{"/tmp/remote-worktree"}, cwds)
 }
 
 func TestTmuxSSHActiveWorkdir_UsesPanePIDAndBaseCWD(t *testing.T) {
@@ -638,9 +757,9 @@ func TestTmuxSSHActiveWorkdir_UsesPanePIDAndBaseCWD(t *testing.T) {
 		},
 	}
 
-	cwd, err := tmuxSSHActiveWorkdir(runner, "test ssh_tmux", "demo")
+	cwds, err := tmuxSSHActiveWorkdirs(runner, "test ssh_tmux", "demo")
 	require.NoError(t, err)
-	assert.Equal(t, "/tmp/remote-worktree", cwd)
+	assert.Equal(t, []string{"/tmp/remote-worktree"}, cwds)
 }
 
 func TestTmuxSSHActiveWorkdir_PrefersCodexExecCommandWorkdir(t *testing.T) {
@@ -658,9 +777,9 @@ func TestTmuxSSHActiveWorkdir_PrefersCodexExecCommandWorkdir(t *testing.T) {
 		},
 	}
 
-	cwd, err := tmuxSSHActiveWorkdir(runner, "test ssh_tmux", "demo")
+	cwds, err := tmuxSSHActiveWorkdirs(runner, "test ssh_tmux", "demo")
 	require.NoError(t, err)
-	assert.Equal(t, "/tmp/remote-tmux-worktree-from-command", cwd)
+	assert.Equal(t, []string{"/tmp/remote-tmux-worktree-from-command"}, cwds)
 }
 
 func TestTmuxSSHActiveWorkdir_PrefersClaudeTranscriptWorktree(t *testing.T) {
@@ -681,9 +800,9 @@ func TestTmuxSSHActiveWorkdir_PrefersClaudeTranscriptWorktree(t *testing.T) {
 		},
 	}
 
-	cwd, err := tmuxSSHActiveWorkdir(runner, "test ssh_tmux", "demo")
+	cwds, err := tmuxSSHActiveWorkdirs(runner, "test ssh_tmux", "demo")
 	require.NoError(t, err)
-	assert.Equal(t, "/tmp/remote-tmux-claude-worktree", cwd)
+	assert.Equal(t, []string{"/tmp/remote-tmux-claude-worktree"}, cwds)
 }
 
 func TestTmuxSSHActiveWorkdir_WhenPanePIDIsCodex_PrefersCodexExecCommandWorkdir(t *testing.T) {
@@ -701,9 +820,9 @@ func TestTmuxSSHActiveWorkdir_WhenPanePIDIsCodex_PrefersCodexExecCommandWorkdir(
 		},
 	}
 
-	cwd, err := tmuxSSHActiveWorkdir(runner, "test ssh_tmux", "demo")
+	cwds, err := tmuxSSHActiveWorkdirs(runner, "test ssh_tmux", "demo")
 	require.NoError(t, err)
-	assert.Equal(t, "/tmp/remote-root-codex-worktree", cwd)
+	assert.Equal(t, []string{"/tmp/remote-root-codex-worktree"}, cwds)
 }
 
 func TestTmuxSSHActiveWorkdirFromSessionFactory_UsesSeparateRunners(t *testing.T) {
@@ -719,13 +838,13 @@ func TestTmuxSSHActiveWorkdirFromSessionFactory_UsesSeparateRunners(t *testing.T
 		return &fakeSSHRunner{outputs: outputs}, nil
 	}
 
-	cwd, err := tmuxSSHActiveWorkdirFromSessionFactory(
+	cwds, err := tmuxSSHActiveWorkdirsFromSessionFactory(
 		factory,
 		"test ssh_tmux",
 		"demo",
 	)
 	require.NoError(t, err)
-	assert.Equal(t, "/tmp/remote-worktree", cwd)
+	assert.Equal(t, []string{"/tmp/remote-worktree"}, cwds)
 	// Separate runners are used for: tmux pane info, process list, open-files
 	// probe, and PID cwd fallback.
 	assert.Equal(t, 4, index)
