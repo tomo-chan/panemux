@@ -39,6 +39,46 @@ describe('GitInfoSchema', () => {
     })
     expect(result.success).toBe(false)
   })
+
+  it('accepts git info without a worktrees array', () => {
+    const result = GitInfoSchema.safeParse({
+      is_git: true,
+      branch: 'main',
+      repo: 'panemux',
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('accepts git info with multiple worktrees', () => {
+    const result = GitInfoSchema.safeParse({
+      is_git: true,
+      branch: 'feature/worktree-a',
+      repo: 'panemux',
+      pr_number: 111,
+      pr_url: 'https://github.com/example/panemux/pull/111',
+      worktrees: [
+        {
+          branch: 'feature/worktree-a',
+          repo: 'panemux',
+          pr_number: 111,
+          pr_url: 'https://github.com/example/panemux/pull/111',
+        },
+        {
+          branch: 'feature/worktree-b',
+          repo: 'panemux',
+        },
+      ],
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects a worktrees entry with invalid PR metadata types', () => {
+    const result = GitInfoSchema.safeParse({
+      is_git: true,
+      worktrees: [{ branch: 'main', pr_number: '111' }],
+    })
+    expect(result.success).toBe(false)
+  })
 })
 
 describe('DisplayConfigSchema', () => {

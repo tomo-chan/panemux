@@ -139,29 +139,31 @@ func (s *LocalSession) GetCWD() (string, error) {
 	return getPIDCWD(s.pid)
 }
 
-// GetActiveWorkdir returns the working directory of the newest active Codex or
-// Claude descendant process, or an empty string when none is running.
-func (s *LocalSession) GetActiveWorkdir() (string, error) {
+// GetActiveWorkdirs returns every distinct working directory currently in
+// play for the newest active Codex or Claude descendant process, including
+// worktrees only visited by a delegated Claude Task subagent. Returns an
+// empty slice if no such process exists.
+func (s *LocalSession) GetActiveWorkdirs() ([]string, error) {
 	if s.pid == 0 {
-		return "", errors.New("session has no PID")
+		return nil, errors.New("session has no PID")
 	}
 
 	processes, err := listProcessesFn()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	baseCWD, err := getPIDCWDFn(s.pid)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	pid, ok := newestInteractiveAgentDescendantPID(processes, s.pid)
 	if !ok {
-		return "", nil
+		return nil, nil
 	}
 
-	return resolveInteractiveAgentWorkdir(processes, pid, baseCWD)
+	return resolveInteractiveAgentWorkdirs(processes, pid, baseCWD)
 }
 
 func getPIDCWD(pid int) (string, error) {
@@ -304,11 +306,23 @@ func descendantPIDs(processes []processInfo, rootPID int) []int {
 	return ids
 }
 
-func resolveInteractiveAgentWorkdir(processes []processInfo, agentPID int, baseCWD string) (string, error) {
-	if sessionCWD, err := interactiveAgentSessionCWD(processes, agentPID); err == nil && sessionCWD != "" {
-		return sessionCWD, nil
+// resolveInteractiveAgentWorkdirs returns every distinct workdir signaled by
+// the interactive agent's own session data (e.g. a Claude session's parent
+// transcript plus any Task subagent transcripts), falling back to the single
+// descendant-process cwd scan when no session-derived candidates are found.
+func resolveInteractiveAgentWorkdirs(processes []processInfo, agentPID int, baseCWD string) ([]string, error) {
+	if cwds, err := interactiveAgentSessionCWDs(processes, agentPID); err == nil && len(cwds) > 0 {
+		return cwds, nil
 	}
 
+	cwd, err := descendantCWDFallback(processes, agentPID, baseCWD)
+	if err != nil || cwd == "" {
+		return nil, err
+	}
+	return []string{cwd}, nil
+}
+
+func descendantCWDFallback(processes []processInfo, agentPID int, baseCWD string) (string, error) {
 	candidatePIDs := descendantPIDs(processes, agentPID)
 	sort.Slice(candidatePIDs, func(i, j int) bool {
 		return candidatePIDs[i] > candidatePIDs[j]
@@ -335,18 +349,22 @@ func resolveInteractiveAgentWorkdir(processes []processInfo, agentPID int, baseC
 	return "", nil
 }
 
-func interactiveAgentSessionCWD(processes []processInfo, agentPID int) (string, error) {
+func interactiveAgentSessionCWDs(processes []processInfo, agentPID int) ([]string, error) {
 	proc, ok := processByPID(processes, agentPID)
 	if !ok {
-		return "", nil
+		return nil, nil
 	}
 	switch {
 	case isCodexCommand(proc.Command):
-		return codexSessionCWD(processes, agentPID)
+		cwd, err := codexSessionCWD(processes, agentPID)
+		if err != nil || cwd == "" {
+			return nil, err
+		}
+		return []string{cwd}, nil
 	case isClaudeCommand(proc.Command):
-		return claudeSessionCWD(agentPID)
+		return claudeSessionCWDs(agentPID)
 	default:
-		return "", nil
+		return nil, nil
 	}
 }
 
@@ -375,21 +393,29 @@ type claudeSessionMeta struct {
 	PID       int    `json:"pid"`
 }
 
-func claudeSessionCWD(agentPID int) (string, error) {
+// claudeSessionCWDs returns every distinct workdir found across the Claude
+// session's own transcript and any Task subagent transcripts recorded
+// alongside it. Claude Code records delegated subagent activity in separate
+// per-agent transcript files under a "subagents" directory next to the
+// parent transcript; a subagent that does worktree-relative work there
+// never touches the parent transcript's own recorded cwd, so panemux must
+// read those files too or the pane header silently falls back to the base
+// working directory (see docs/behavior.md "Pane Git and PR metadata").
+func claudeSessionCWDs(agentPID int) ([]string, error) {
 	homeDir, err := userHomeDirFn()
 	if err != nil {
-		return "", fmt.Errorf("resolve home dir for claude session: %w", err)
+		return nil, fmt.Errorf("resolve home dir for claude session: %w", err)
 	}
 
 	sessionMeta, err := findClaudeSessionMeta(homeDir, agentPID)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if sessionMeta == nil || sessionMeta.SessionID == "" || sessionMeta.CWD == "" {
-		return "", nil
+		return nil, nil
 	}
 	if !validClaudeSessionID.MatchString(sessionMeta.SessionID) {
-		return "", nil
+		return nil, nil
 	}
 
 	projectPath := filepath.Join(
@@ -399,7 +425,47 @@ func claudeSessionCWD(agentPID int) (string, error) {
 		claudeProjectDirName(sessionMeta.CWD),
 		sessionMeta.SessionID+".jsonl",
 	)
-	return readClaudeProjectCWD(projectPath)
+
+	cwds := make([]string, 0, 1)
+	seen := make(map[string]bool)
+	for _, path := range claudeTranscriptPaths(projectPath) {
+		cwd, err := readClaudeProjectCWD(path)
+		if err != nil || cwd == "" || seen[cwd] {
+			continue
+		}
+		seen[cwd] = true
+		cwds = append(cwds, cwd)
+	}
+	return cwds, nil
+}
+
+// claudeTranscriptPaths returns the parent transcript path followed by every
+// sibling Task subagent transcript path, sorted by filename for a
+// deterministic order. Older sessions without a "subagents" directory yield
+// just the parent path.
+func claudeTranscriptPaths(projectPath string) []string {
+	paths := []string{projectPath}
+
+	sessionDir := strings.TrimSuffix(projectPath, ".jsonl")
+	subagentsDir := filepath.Join(sessionDir, "subagents")
+	entries, err := os.ReadDir(subagentsDir)
+	if err != nil {
+		return paths
+	}
+
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".jsonl") {
+			continue
+		}
+		names = append(names, entry.Name())
+	}
+	sort.Strings(names)
+
+	for _, name := range names {
+		paths = append(paths, filepath.Join(subagentsDir, name))
+	}
+	return paths
 }
 
 func findClaudeSessionMeta(homeDir string, agentPID int) (*claudeSessionMeta, error) {

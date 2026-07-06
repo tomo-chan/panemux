@@ -116,16 +116,18 @@ func (s *TmuxLocalSession) GetCWD() (string, error) {
 	return out, nil
 }
 
-// GetActiveWorkdir returns the working directory of the newest active Codex or
-// Claude descendant process under the active tmux pane, or empty string if none exists.
-func (s *TmuxLocalSession) GetActiveWorkdir() (string, error) {
-	return tmuxLocalActiveWorkdir(s.tmuxSession)
+// GetActiveWorkdirs returns every distinct working directory currently in
+// play for the newest active Codex or Claude descendant process under the
+// active tmux pane, including worktrees only visited by a delegated Claude
+// Task subagent. Returns an empty slice if no such process exists.
+func (s *TmuxLocalSession) GetActiveWorkdirs() ([]string, error) {
+	return tmuxLocalActiveWorkdirs(s.tmuxSession)
 }
 
-func tmuxLocalActiveWorkdir(tmuxSession string) (string, error) {
+func tmuxLocalActiveWorkdirs(tmuxSession string) ([]string, error) {
 	target, err := validateTmuxSessionName(tmuxSession)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	out, err := tmuxLocalOutputFn(
 		"display-message",
@@ -135,33 +137,33 @@ func tmuxLocalActiveWorkdir(tmuxSession string) (string, error) {
 		"#{pane_pid}",
 	)
 	if err != nil {
-		return "", fmt.Errorf("tmux pane pid: %w", err)
+		return nil, fmt.Errorf("tmux pane pid: %w", err)
 	}
 
 	pid, err := strconv.Atoi(strings.TrimSpace(string(out)))
 	if err != nil {
-		return "", fmt.Errorf("parse tmux pane pid: %w", err)
+		return nil, fmt.Errorf("parse tmux pane pid: %w", err)
 	}
 	if pid == 0 {
-		return "", errors.New("tmux pane pid missing")
+		return nil, errors.New("tmux pane pid missing")
 	}
 
 	processes, err := listProcessesFn()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	agentPID, ok := newestInteractiveAgentDescendantPID(processes, pid)
 	if !ok {
-		return "", nil
+		return nil, nil
 	}
 
 	baseCWD, err := tmuxLocalCWD(target)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	return resolveInteractiveAgentWorkdir(processes, agentPID, baseCWD)
+	return resolveInteractiveAgentWorkdirs(processes, agentPID, baseCWD)
 }
 
 func tmuxLocalCWD(tmuxSession string) (string, error) {

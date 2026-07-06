@@ -131,6 +131,12 @@ When panemux can derive a repository page URL from the pane's Git origin, the re
 
 The PR shortcut is rendered as an inline text link labeled `#<number>`. It does not use a pill, badge, or outlined capsule treatment. On hover, the link shifts to a slightly stronger blue and shows an underline so it reads like the rest of the header chrome instead of a separate button system.
 
+### Multiple worktrees
+
+When the pane's active agent has diverged into exactly one sibling worktree, the header shows that worktree's repo, branch, and PR shortcut inline, exactly as described above.
+
+When two or more distinct worktrees are active at once (for example, several Claude Task subagents each working in a different sibling worktree), the header does not try to fit every branch and PR shortcut inline — the compact header would not have room and would become unreadable. Instead the header shows a single inline text trigger labeled `<N> worktrees` (e.g. `2 worktrees`), styled like the other inline text links rather than as a pill or badge. Clicking the trigger opens a small popover menu anchored below the header, listing every active worktree as its own `repo ⎇ branch #<number>` line using the same inline-link treatment as the single-worktree case. The menu closes on Escape or on clicking outside it.
+
 ### Split vs quick-add
 
 The header now carries two distinct expansion actions:

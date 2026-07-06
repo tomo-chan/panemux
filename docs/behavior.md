@@ -560,6 +560,8 @@ When a pane moves to a different parent node, the component may be remounted by 
 - Claude session metadata is used only to identify the matching transcript (`sessionId`) and project directory key.
 - Claude transcript resolution prefers the latest top-level `cwd` recorded on transcript entries such as `user`, `assistant`, `attachment`, and `system`.
 - When a Claude transcript entry does not expose top-level `cwd`, panemux falls back to the latest non-auxiliary tool file path, then the latest `Bash` tool `cd ... &&` target, then file-history snapshot paths.
+- Claude Code also records delegated Task subagent activity in separate transcript files under `<sessionId>/subagents/*.jsonl`, next to the parent transcript. A subagent that does worktree-relative work there never updates the parent transcript's own `cwd`, so panemux additionally reads every subagent transcript file and resolves each one with the same rule above, independently of the parent.
+- panemux does not apply any recency or time-window filter when considering subagent transcripts: every distinct worktree signaled by the parent transcript or any subagent transcript for the current session is a candidate, regardless of how long ago that transcript file was last written.
 - This resolver intentionally does not depend on Claude `hooks` or `statusLine` configuration, so no extra Claude-side setup is required for pane-header Git or PR detection.
 - If the agent exits, no longer has an eligible worktree, or the resolved worktree is not a sibling worktree of the pane's current repository, panemux falls back to the pane's own working directory immediately.
 - For SSH panes, panemux resolves interactive agent processes from the remote process list on the current SSH connection.
@@ -567,6 +569,8 @@ When a pane moves to a different parent node, the component may be remounted by 
 - If the resolved repository origin can be converted into a browser URL, the header shows the repository name as a link to that repository page.
 - For SCP-style SSH origins such as `git@alias:owner/repo.git`, panemux uses `~/.ssh/config` `Host` aliases to resolve both the browser link hostname and GitHub PR lookup repo host when a matching alias exists; otherwise it treats the SSH host token as the hostname directly.
 - If the resolved branch has a GitHub pull request, the header shows a PR link labeled `#<number>`.
+- When the active agent (including its subagents) has diverged into more than one distinct sibling worktree of the same repository, panemux shows all of them instead of just one, deduplicated by the worktree's repository root; the pane's own base directory is shown only when nothing has diverged from it. Each distinct worktree gets its own independent GitHub PR lookup, so more than one PR link can be shown at once. See [ui-design.md](ui-design.md) for how the header presents more than one worktree.
+- The "last known worktree" sticky behavior applies per distinct worktree: if the active-workdir lookup transiently fails or returns nothing, panemux keeps showing the previously resolved set of worktrees until a subsequent lookup confirms they are no longer valid (e.g. the branch changed or the worktree was removed).
 
 ## Operational Assumptions
 

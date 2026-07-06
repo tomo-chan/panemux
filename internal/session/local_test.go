@@ -518,9 +518,9 @@ func TestGetActiveWorkdir_NoDescendantMatchReturnsEmpty(t *testing.T) {
 		return "", errors.New("should not be called")
 	}
 
-	cwd, err := sess.GetActiveWorkdir()
+	cwds, err := sess.GetActiveWorkdirs()
 	require.NoError(t, err)
-	assert.Empty(t, cwd)
+	assert.Empty(t, cwds)
 }
 
 func TestGetActiveWorkdir_ReturnsAgentDescendantCWD(t *testing.T) {
@@ -551,9 +551,9 @@ func TestGetActiveWorkdir_ReturnsAgentDescendantCWD(t *testing.T) {
 		return nil, nil
 	}
 
-	cwd, err := sess.GetActiveWorkdir()
+	cwds, err := sess.GetActiveWorkdirs()
 	require.NoError(t, err)
-	assert.Equal(t, "/tmp/panemux-pane-pr-link", cwd)
+	assert.Equal(t, []string{"/tmp/panemux-pane-pr-link"}, cwds)
 }
 
 func TestGetActiveWorkdir_PrefersInteractiveAgentDescendantWorkdir(t *testing.T) {
@@ -591,9 +591,9 @@ func TestGetActiveWorkdir_PrefersInteractiveAgentDescendantWorkdir(t *testing.T)
 		return nil, nil
 	}
 
-	cwd, err := sess.GetActiveWorkdir()
+	cwds, err := sess.GetActiveWorkdirs()
 	require.NoError(t, err)
-	assert.Equal(t, "/tmp/panemux-pane-pr-link", cwd)
+	assert.Equal(t, []string{"/tmp/panemux-pane-pr-link"}, cwds)
 }
 
 func TestGetActiveWorkdir_PrefersCodexSessionCWD(t *testing.T) {
@@ -636,9 +636,9 @@ func TestGetActiveWorkdir_PrefersCodexSessionCWD(t *testing.T) {
 		return []string{sessionLog}, nil
 	}
 
-	cwd, err := sess.GetActiveWorkdir()
+	cwds, err := sess.GetActiveWorkdirs()
 	require.NoError(t, err)
-	assert.Equal(t, "/tmp/worktree-from-session", cwd)
+	assert.Equal(t, []string{"/tmp/worktree-from-session"}, cwds)
 }
 
 func TestGetActiveWorkdir_PrefersCodexExecCommandWorkdir(t *testing.T) {
@@ -682,9 +682,9 @@ func TestGetActiveWorkdir_PrefersCodexExecCommandWorkdir(t *testing.T) {
 		return []string{sessionLog}, nil
 	}
 
-	cwd, err := sess.GetActiveWorkdir()
+	cwds, err := sess.GetActiveWorkdirs()
 	require.NoError(t, err)
-	assert.Equal(t, "/tmp/worktree-from-command", cwd)
+	assert.Equal(t, []string{"/tmp/worktree-from-command"}, cwds)
 }
 
 func TestReadCodexSessionCWD_UsesCachedValueWhenFingerprintUnchanged(t *testing.T) {
@@ -813,9 +813,9 @@ func TestGetActiveWorkdir_PrefersClaudeTranscriptWorktree(t *testing.T) {
 		}
 	}
 
-	cwd, err := sess.GetActiveWorkdir()
+	cwds, err := sess.GetActiveWorkdirs()
 	require.NoError(t, err)
-	assert.Equal(t, "/tmp/panemux-worktree", cwd)
+	assert.Equal(t, []string{"/tmp/panemux-worktree"}, cwds)
 }
 
 func TestClaudeProjectDirName_NormalizesDots(t *testing.T) {
@@ -876,9 +876,9 @@ func TestGetActiveWorkdir_PrefersClaudeTranscriptWorktree_WithDotInCWD(t *testin
 		}
 	}
 
-	cwd, err := sess.GetActiveWorkdir()
+	cwds, err := sess.GetActiveWorkdirs()
 	require.NoError(t, err)
-	assert.Equal(t, "/tmp/panemux-worktree", cwd)
+	assert.Equal(t, []string{"/tmp/panemux-worktree"}, cwds)
 }
 
 func TestGetActiveWorkdir_ClaudeSessionScanSkipsUnreadableMetadata(t *testing.T) {
@@ -938,9 +938,9 @@ func TestGetActiveWorkdir_ClaudeSessionScanSkipsUnreadableMetadata(t *testing.T)
 		}
 	}
 
-	cwd, err := sess.GetActiveWorkdir()
+	cwds, err := sess.GetActiveWorkdirs()
 	require.NoError(t, err)
-	assert.Equal(t, filepath.Dir(worktreeFile), cwd)
+	assert.Equal(t, []string{filepath.Dir(worktreeFile)}, cwds)
 }
 
 func TestGetActiveWorkdir_ClaudeSessionScanRejectsInvalidSessionID(t *testing.T) {
@@ -979,9 +979,346 @@ func TestGetActiveWorkdir_ClaudeSessionScanRejectsInvalidSessionID(t *testing.T)
 		}
 	}
 
-	cwd, err := sess.GetActiveWorkdir()
+	cwds, err := sess.GetActiveWorkdirs()
 	require.NoError(t, err)
-	assert.Equal(t, "/repo/main", cwd)
+	assert.Equal(t, []string{"/repo/main"}, cwds)
+}
+
+func setUpClaudeSessionTranscripts(t *testing.T, homeDir string) (sessionMetaPath, transcriptPath string) {
+	t.Helper()
+
+	sessionMetaPath = filepath.Join(homeDir, ".claude", "sessions", "220.json")
+	require.NoError(t, os.MkdirAll(filepath.Dir(sessionMetaPath), 0755))
+	require.NoError(t, os.WriteFile(sessionMetaPath, []byte(
+		`{"pid":220,"sessionId":"session-123","cwd":"/repo/main"}`,
+	), 0600))
+
+	transcriptPath = filepath.Join(homeDir, ".claude", "projects", "-repo-main", "session-123.jsonl")
+	require.NoError(t, os.MkdirAll(filepath.Dir(transcriptPath), 0755))
+	return sessionMetaPath, transcriptPath
+}
+
+func claudeAssistantCWDRecord(cwd string) string {
+	return "{\"type\":\"assistant\",\"cwd\":\"" + cwd + "\"," +
+		"\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}\n"
+}
+
+func TestGetActiveWorkdirs_EmptySubagentsDirectory(t *testing.T) {
+	// Distinct from TestGetActiveWorkdirs_NoSubagentsDirectory_BackwardCompatible:
+	// here the "subagents" directory exists but contains no transcript files,
+	// rather than not existing at all.
+	sess := &LocalSession{pid: 100}
+
+	originalListProcesses := listProcessesFn
+	originalGetPIDCWD := getPIDCWDFn
+	originalUserHomeDir := userHomeDirFn
+	t.Cleanup(func() {
+		listProcessesFn = originalListProcesses
+		getPIDCWDFn = originalGetPIDCWD
+		userHomeDirFn = originalUserHomeDir
+	})
+
+	homeDir := t.TempDir()
+	userHomeDirFn = func() (string, error) { return homeDir, nil }
+
+	_, transcriptPath := setUpClaudeSessionTranscripts(t, homeDir)
+	require.NoError(t, os.WriteFile(
+		transcriptPath,
+		[]byte(claudeAssistantCWDRecord("/tmp/panemux-worktree")),
+		0600,
+	))
+	subagentsDir := filepath.Join(filepath.Dir(transcriptPath), "session-123", "subagents")
+	require.NoError(t, os.MkdirAll(subagentsDir, 0755))
+
+	listProcessesFn = func() ([]processInfo, error) {
+		return []processInfo{
+			{PID: 110, PPID: 100, Command: "/bin/zsh"},
+			{PID: 220, PPID: 110, Command: "claude"},
+		}, nil
+	}
+	getPIDCWDFn = func(pid int) (string, error) {
+		switch pid {
+		case 100, 220:
+			return "/repo/main", nil
+		default:
+			return "", errors.New("unexpected pid")
+		}
+	}
+
+	cwds, err := sess.GetActiveWorkdirs()
+	require.NoError(t, err)
+	assert.Equal(t, []string{"/tmp/panemux-worktree"}, cwds)
+}
+
+func TestGetActiveWorkdirs_IncludesSubagentTranscriptWorktree(t *testing.T) {
+	sess := &LocalSession{pid: 100}
+
+	originalListProcesses := listProcessesFn
+	originalGetPIDCWD := getPIDCWDFn
+	originalUserHomeDir := userHomeDirFn
+	t.Cleanup(func() {
+		listProcessesFn = originalListProcesses
+		getPIDCWDFn = originalGetPIDCWD
+		userHomeDirFn = originalUserHomeDir
+	})
+
+	homeDir := t.TempDir()
+	userHomeDirFn = func() (string, error) { return homeDir, nil }
+
+	// Parent transcript never leaves the base repo; only a subagent transcript
+	// actually visited a sibling worktree, mirroring the real-world case where
+	// a delegated Task subagent does the worktree-relative work.
+	_, transcriptPath := setUpClaudeSessionTranscripts(t, homeDir)
+	require.NoError(t, os.WriteFile(
+		transcriptPath,
+		[]byte(claudeAssistantCWDRecord("/repo/main")),
+		0600,
+	))
+
+	subagentsDir := filepath.Join(filepath.Dir(transcriptPath), "session-123", "subagents")
+	require.NoError(t, os.MkdirAll(subagentsDir, 0755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(subagentsDir, "agent-a1.jsonl"),
+		[]byte(claudeAssistantCWDRecord("/repo/worktree-a")),
+		0600,
+	))
+
+	listProcessesFn = func() ([]processInfo, error) {
+		return []processInfo{
+			{PID: 110, PPID: 100, Command: "/bin/zsh"},
+			{PID: 220, PPID: 110, Command: "claude"},
+		}, nil
+	}
+	getPIDCWDFn = func(pid int) (string, error) {
+		switch pid {
+		case 100, 220:
+			return "/repo/main", nil
+		default:
+			return "", errors.New("unexpected pid")
+		}
+	}
+
+	cwds, err := sess.GetActiveWorkdirs()
+	require.NoError(t, err)
+	assert.Equal(t, []string{"/repo/main", "/repo/worktree-a"}, cwds)
+}
+
+func TestGetActiveWorkdirs_MultipleSubagentTranscripts_AllDistinctWorktreesReturned(t *testing.T) {
+	sess := &LocalSession{pid: 100}
+
+	originalListProcesses := listProcessesFn
+	originalGetPIDCWD := getPIDCWDFn
+	originalUserHomeDir := userHomeDirFn
+	t.Cleanup(func() {
+		listProcessesFn = originalListProcesses
+		getPIDCWDFn = originalGetPIDCWD
+		userHomeDirFn = originalUserHomeDir
+	})
+
+	homeDir := t.TempDir()
+	userHomeDirFn = func() (string, error) { return homeDir, nil }
+
+	_, transcriptPath := setUpClaudeSessionTranscripts(t, homeDir)
+	require.NoError(t, os.WriteFile(
+		transcriptPath,
+		[]byte(claudeAssistantCWDRecord("/repo/main")),
+		0600,
+	))
+
+	subagentsDir := filepath.Join(filepath.Dir(transcriptPath), "session-123", "subagents")
+	require.NoError(t, os.MkdirAll(subagentsDir, 0755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(subagentsDir, "agent-a1.jsonl"),
+		[]byte(claudeAssistantCWDRecord("/repo/worktree-a")),
+		0600,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(subagentsDir, "agent-a2.jsonl"),
+		[]byte(claudeAssistantCWDRecord("/repo/worktree-b")),
+		0600,
+	))
+	// A subagent that stayed in the same worktree as the parent should not
+	// produce a duplicate entry.
+	require.NoError(t, os.WriteFile(
+		filepath.Join(subagentsDir, "agent-a3.jsonl"),
+		[]byte(claudeAssistantCWDRecord("/repo/main")),
+		0600,
+	))
+
+	listProcessesFn = func() ([]processInfo, error) {
+		return []processInfo{
+			{PID: 110, PPID: 100, Command: "/bin/zsh"},
+			{PID: 220, PPID: 110, Command: "claude"},
+		}, nil
+	}
+	getPIDCWDFn = func(pid int) (string, error) {
+		switch pid {
+		case 100, 220:
+			return "/repo/main", nil
+		default:
+			return "", errors.New("unexpected pid")
+		}
+	}
+
+	cwds, err := sess.GetActiveWorkdirs()
+	require.NoError(t, err)
+	assert.Equal(t, []string{"/repo/main", "/repo/worktree-a", "/repo/worktree-b"}, cwds)
+}
+
+func TestGetActiveWorkdirs_StaleSubagentTranscriptStillIncluded(t *testing.T) {
+	// Confirms there is no recency/time-window filter: a subagent transcript
+	// with an old modification time is still returned as a candidate.
+	sess := &LocalSession{pid: 100}
+
+	originalListProcesses := listProcessesFn
+	originalGetPIDCWD := getPIDCWDFn
+	originalUserHomeDir := userHomeDirFn
+	t.Cleanup(func() {
+		listProcessesFn = originalListProcesses
+		getPIDCWDFn = originalGetPIDCWD
+		userHomeDirFn = originalUserHomeDir
+	})
+
+	homeDir := t.TempDir()
+	userHomeDirFn = func() (string, error) { return homeDir, nil }
+
+	_, transcriptPath := setUpClaudeSessionTranscripts(t, homeDir)
+	require.NoError(t, os.WriteFile(
+		transcriptPath,
+		[]byte(claudeAssistantCWDRecord("/repo/main")),
+		0600,
+	))
+
+	subagentsDir := filepath.Join(filepath.Dir(transcriptPath), "session-123", "subagents")
+	require.NoError(t, os.MkdirAll(subagentsDir, 0755))
+	oldAgentPath := filepath.Join(subagentsDir, "agent-old.jsonl")
+	require.NoError(t, os.WriteFile(
+		oldAgentPath,
+		[]byte(claudeAssistantCWDRecord("/repo/worktree-old")),
+		0600,
+	))
+	oldTime := time.Now().Add(-90 * 24 * time.Hour)
+	require.NoError(t, os.Chtimes(oldAgentPath, oldTime, oldTime))
+
+	listProcessesFn = func() ([]processInfo, error) {
+		return []processInfo{
+			{PID: 110, PPID: 100, Command: "/bin/zsh"},
+			{PID: 220, PPID: 110, Command: "claude"},
+		}, nil
+	}
+	getPIDCWDFn = func(pid int) (string, error) {
+		switch pid {
+		case 100, 220:
+			return "/repo/main", nil
+		default:
+			return "", errors.New("unexpected pid")
+		}
+	}
+
+	cwds, err := sess.GetActiveWorkdirs()
+	require.NoError(t, err)
+	assert.Equal(t, []string{"/repo/main", "/repo/worktree-old"}, cwds)
+}
+
+func TestGetActiveWorkdirs_NoSubagentsDirectory_BackwardCompatible(t *testing.T) {
+	sess := &LocalSession{pid: 100}
+
+	originalListProcesses := listProcessesFn
+	originalGetPIDCWD := getPIDCWDFn
+	originalUserHomeDir := userHomeDirFn
+	t.Cleanup(func() {
+		listProcessesFn = originalListProcesses
+		getPIDCWDFn = originalGetPIDCWD
+		userHomeDirFn = originalUserHomeDir
+	})
+
+	homeDir := t.TempDir()
+	userHomeDirFn = func() (string, error) { return homeDir, nil }
+
+	_, transcriptPath := setUpClaudeSessionTranscripts(t, homeDir)
+	require.NoError(t, os.WriteFile(
+		transcriptPath,
+		[]byte(claudeAssistantCWDRecord("/tmp/panemux-worktree")),
+		0600,
+	))
+	// No subagents directory is created at all (older session layout).
+
+	listProcessesFn = func() ([]processInfo, error) {
+		return []processInfo{
+			{PID: 110, PPID: 100, Command: "/bin/zsh"},
+			{PID: 220, PPID: 110, Command: "claude"},
+		}, nil
+	}
+	getPIDCWDFn = func(pid int) (string, error) {
+		switch pid {
+		case 100, 220:
+			return "/repo/main", nil
+		default:
+			return "", errors.New("unexpected pid")
+		}
+	}
+
+	cwds, err := sess.GetActiveWorkdirs()
+	require.NoError(t, err)
+	assert.Equal(t, []string{"/tmp/panemux-worktree"}, cwds)
+}
+
+func TestGetActiveWorkdirs_CorruptSubagentTranscriptIgnored(t *testing.T) {
+	sess := &LocalSession{pid: 100}
+
+	originalListProcesses := listProcessesFn
+	originalGetPIDCWD := getPIDCWDFn
+	originalUserHomeDir := userHomeDirFn
+	t.Cleanup(func() {
+		listProcessesFn = originalListProcesses
+		getPIDCWDFn = originalGetPIDCWD
+		userHomeDirFn = originalUserHomeDir
+	})
+
+	homeDir := t.TempDir()
+	userHomeDirFn = func() (string, error) { return homeDir, nil }
+
+	_, transcriptPath := setUpClaudeSessionTranscripts(t, homeDir)
+	require.NoError(t, os.WriteFile(
+		transcriptPath,
+		[]byte(claudeAssistantCWDRecord("/repo/main")),
+		0600,
+	))
+
+	subagentsDir := filepath.Join(filepath.Dir(transcriptPath), "session-123", "subagents")
+	require.NoError(t, os.MkdirAll(subagentsDir, 0755))
+	// Empty/corrupt subagent transcripts should be skipped without affecting
+	// resolution of the other, well-formed subagent transcript.
+	require.NoError(t, os.WriteFile(filepath.Join(subagentsDir, "agent-empty.jsonl"), []byte(""), 0600))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(subagentsDir, "agent-corrupt.jsonl"),
+		[]byte("not json at all\n"),
+		0600,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(subagentsDir, "agent-good.jsonl"),
+		[]byte(claudeAssistantCWDRecord("/repo/worktree-good")),
+		0600,
+	))
+
+	listProcessesFn = func() ([]processInfo, error) {
+		return []processInfo{
+			{PID: 110, PPID: 100, Command: "/bin/zsh"},
+			{PID: 220, PPID: 110, Command: "claude"},
+		}, nil
+	}
+	getPIDCWDFn = func(pid int) (string, error) {
+		switch pid {
+		case 100, 220:
+			return "/repo/main", nil
+		default:
+			return "", errors.New("unexpected pid")
+		}
+	}
+
+	cwds, err := sess.GetActiveWorkdirs()
+	require.NoError(t, err)
+	assert.Equal(t, []string{"/repo/main", "/repo/worktree-good"}, cwds)
 }
 
 func TestValidateShell_InEtcShells_OK(t *testing.T) {
@@ -1100,9 +1437,9 @@ func TestTmuxLocalSessionGetActiveWorkdir_UsesPanePIDAndBaseCWD(t *testing.T) {
 	}
 
 	sess := &TmuxLocalSession{tmuxSession: "demo"}
-	cwd, err := sess.GetActiveWorkdir()
+	cwds, err := sess.GetActiveWorkdirs()
 	require.NoError(t, err)
-	assert.Equal(t, "/tmp/worktree", cwd)
+	assert.Equal(t, []string{"/tmp/worktree"}, cwds)
 }
 
 func TestTmuxLocalSessionGetActiveWorkdir_PrefersCodexExecCommandWorkdir(t *testing.T) {
@@ -1155,9 +1492,9 @@ func TestTmuxLocalSessionGetActiveWorkdir_PrefersCodexExecCommandWorkdir(t *test
 	}
 
 	sess := &TmuxLocalSession{tmuxSession: "demo"}
-	cwd, err := sess.GetActiveWorkdir()
+	cwds, err := sess.GetActiveWorkdirs()
 	require.NoError(t, err)
-	assert.Equal(t, "/tmp/tmux-worktree-from-command", cwd)
+	assert.Equal(t, []string{"/tmp/tmux-worktree-from-command"}, cwds)
 }
 
 func TestTmuxLocalSessionGetActiveWorkdir_WhenPanePIDIsCodex_PrefersCodexExecCommandWorkdir(t *testing.T) {
@@ -1212,7 +1549,7 @@ func TestTmuxLocalSessionGetActiveWorkdir_WhenPanePIDIsCodex_PrefersCodexExecCom
 		return []string{sessionLog}, nil
 	}
 
-	cwd, err := tmuxLocalActiveWorkdir("demo")
+	cwds, err := tmuxLocalActiveWorkdirs("demo")
 	require.NoError(t, err)
-	assert.Equal(t, "/tmp/tmux-root-codex-worktree", cwd)
+	assert.Equal(t, []string{"/tmp/tmux-root-codex-worktree"}, cwds)
 }

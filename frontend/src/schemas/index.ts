@@ -113,6 +113,16 @@ export const WSControlMessageSchema = z.discriminatedUnion('type', [
 
 export type WSControlMessage = z.infer<typeof WSControlMessageSchema>
 
+export const WorktreeInfoSchema = z.object({
+  branch: z.string().optional(),
+  repo: z.string().optional(),
+  repo_url: z.string().url().optional(),
+  pr_number: z.number().int().positive().optional(),
+  pr_url: z.string().url().optional(),
+})
+
+export type WorktreeInfo = z.infer<typeof WorktreeInfoSchema>
+
 export const GitInfoSchema = z.object({
   is_git: z.boolean(),
   branch: z.string().optional(),
@@ -120,6 +130,7 @@ export const GitInfoSchema = z.object({
   repo_url: z.string().url().optional(),
   pr_number: z.number().int().positive().optional(),
   pr_url: z.string().url().optional(),
+  worktrees: z.array(WorktreeInfoSchema).optional(),
 })
 
 export type GitInfo = z.infer<typeof GitInfoSchema>
