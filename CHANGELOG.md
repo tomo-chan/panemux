@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.2](https://github.com/tomo-chan/panemux/compare/v0.20.1...v0.20.2) (2026-07-06)
+
+
+### Bug Fixes
+
+* detect worktrees from Claude subagent transcripts, show multiple PRs ([#149](https://github.com/tomo-chan/panemux/issues/149)) ([ccde544](https://github.com/tomo-chan/panemux/commit/ccde544b755071438fca674fbcf272dc63ec9f33))
+
 ## [0.20.1](https://github.com/tomo-chan/panemux/compare/v0.20.0...v0.20.1) (2026-07-03)
 
 
