@@ -1509,9 +1509,13 @@ type mockCWDSession struct {
 	cwd       string
 	mockSession
 	activeWorkdirs []string
+	getCWDCalls    int
 }
 
-func (m *mockCWDSession) GetCWD() (string, error) { return m.cwd, m.cwdErr }
+func (m *mockCWDSession) GetCWD() (string, error) {
+	m.getCWDCalls++
+	return m.cwd, m.cwdErr
+}
 func (m *mockCWDSession) GetActiveWorkdirs() ([]string, error) {
 	return m.activeWorkdirs, m.activeErr
 }
@@ -2395,6 +2399,8 @@ func TestGetGitInfo_StaleStickyWorktreeFallsBackToPaneCWD(t *testing.T) {
 	mgr.Add(sess)
 
 	h := NewHandler(defaultTestConfig(), mgr)
+	now := time.Now()
+	h.nowFn = func() time.Time { return now }
 	r := setupRouterWithGitInfo(h)
 
 	rec := httptest.NewRecorder()
@@ -2413,6 +2419,10 @@ func TestGetGitInfo_StaleStickyWorktreeFallsBackToPaneCWD(t *testing.T) {
 		"--force",
 	).CombinedOutput()
 	require.NoError(t, err, "git worktree remove failed: %s", string(out))
+
+	// Advance past the git-info response cache TTL so the second request
+	// recomputes instead of replaying the first response's cached worktree.
+	now = now.Add(gitInfoCacheTTL + time.Second)
 
 	rec = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodGet, "/api/sessions/local-stale/git-info", nil)
@@ -2581,6 +2591,121 @@ func TestGetGitInfo_GitNotFound_IsGitFalse(t *testing.T) {
 	var resp gitInfoResponse
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
 	assert.False(t, resp.IsGit)
+}
+
+func TestGetGitInfo_SecondRequestWithinTTL_ServesCachedResponseWithoutRecomputing(t *testing.T) {
+	dir := initTempGitRepo(t)
+	sess := &mockCWDSession{
+		mockSession: mockSession{id: "local-cached", typ: session.TypeLocal},
+		cwd:         dir,
+	}
+	mgr := session.NewManager()
+	mgr.Add(sess)
+	h := NewHandler(defaultTestConfig(), mgr)
+	now := time.Now()
+	h.nowFn = func() time.Time { return now }
+	r := setupRouterWithGitInfo(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/local-cached/git-info", nil)
+	r.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, 1, sess.getCWDCalls)
+
+	// Well within gitInfoCacheTTL: the second request must be served from
+	// cache, not recomputed.
+	now = now.Add(5 * time.Second)
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/sessions/local-cached/git-info", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, 1, sess.getCWDCalls, "expected the cached response to be served without recomputing")
+
+	var resp gitInfoResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.True(t, resp.IsGit)
+	assert.Equal(t, "main", resp.Branch)
+}
+
+func TestGetGitInfo_RequestAfterTTLExpires_Recomputes(t *testing.T) {
+	dir := initTempGitRepo(t)
+	sess := &mockCWDSession{
+		mockSession: mockSession{id: "local-expired", typ: session.TypeLocal},
+		cwd:         dir,
+	}
+	mgr := session.NewManager()
+	mgr.Add(sess)
+	h := NewHandler(defaultTestConfig(), mgr)
+	now := time.Now()
+	h.nowFn = func() time.Time { return now }
+	r := setupRouterWithGitInfo(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/local-expired/git-info", nil)
+	r.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, 1, sess.getCWDCalls)
+
+	now = now.Add(gitInfoCacheTTL + time.Second)
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/sessions/local-expired/git-info", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, 2, sess.getCWDCalls, "expected the cache to expire and the response to be recomputed")
+}
+
+func TestGetGitInfo_AfterSessionRecreatedWithSameID_DoesNotServeOldSessionsCache(t *testing.T) {
+	oldDir := initTempGitRepo(t)
+	oldSess := &mockCWDSession{
+		mockSession: mockSession{id: "local-recreated", typ: session.TypeLocal},
+		cwd:         oldDir,
+	}
+	oldSess.ensureBuf()
+	mgr := session.NewManager()
+	mgr.Add(oldSess)
+	h := NewHandler(defaultTestConfig(), mgr)
+	r := setupRouterWithGitInfo(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/local-recreated/git-info", nil)
+	r.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var oldResp gitInfoResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&oldResp))
+	assert.Equal(t, "main", oldResp.Branch)
+
+	require.NoError(t, mgr.Remove("local-recreated"))
+	h.clearGitInfoCache("local-recreated")
+
+	newDir := initTempGitRepo(t)
+	out, err := exec.Command( //nolint:gosec // G204: trusted test args
+		"git",
+		"-C",
+		newDir,
+		"checkout",
+		"-b",
+		"feature/recreated-session",
+	).CombinedOutput()
+	require.NoError(t, err, "git checkout failed: %s", string(out))
+	newSess := &mockCWDSession{
+		mockSession: mockSession{id: "local-recreated", typ: session.TypeLocal},
+		cwd:         newDir,
+	}
+	newSess.ensureBuf()
+	mgr.Add(newSess)
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/sessions/local-recreated/git-info", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var newResp gitInfoResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&newResp))
+	assert.Equal(t, "feature/recreated-session", newResp.Branch)
 }
 
 func TestGetGitInfo_RemoteGitContext_ReturnsBranchAndRepo(t *testing.T) {

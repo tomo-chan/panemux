@@ -116,16 +116,19 @@ describe('useGitInfo', () => {
     })
     expect(window.fetch).toHaveBeenCalledTimes(1)
 
-    act(() => {
-      vi.advanceTimersByTime(30001)
-    })
-
+    // Go hidden immediately so the steady-state poll (which only runs while
+    // the tab is visible) cannot itself refresh the cache in the background;
+    // this isolates the visibility-restore refresh path from polling.
     Object.defineProperty(document, 'visibilityState', {
       configurable: true,
       value: 'hidden',
     })
     await act(async () => {
       document.dispatchEvent(new Event('visibilitychange'))
+    })
+
+    act(() => {
+      vi.advanceTimersByTime(30001)
     })
 
     Object.defineProperty(document, 'visibilityState', {
@@ -150,9 +153,11 @@ describe('useGitInfo', () => {
       json: () => Promise.resolve({ is_git: false }),
     } as Response)
 
-    const { result } = renderHook(() => useGitInfo('pane1'))
+    // Disabled so the steady-state poll doesn't run; this test targets
+    // refreshIfStale's own throttle in isolation.
+    const { result } = renderHook(() => useGitInfo('pane1', false))
     await act(async () => {
-      await Promise.resolve()
+      await result.current.refreshIfStale()
     })
     expect(window.fetch).toHaveBeenCalledTimes(1)
 
@@ -240,6 +245,102 @@ describe('useGitInfo', () => {
     })
 
     expect(result.current.gitInfo.is_git).toBe(false)
+  })
+
+  it('polls automatically every 10 seconds while the tab and pane remain visible, with no interaction required', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-06-21T00:00:00Z'))
+    window.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ is_git: false }),
+    } as Response)
+
+    renderHook(() => useGitInfo('pane1'))
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(window.fetch).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      vi.advanceTimersByTime(10000)
+      await Promise.resolve()
+    })
+    expect(window.fetch).toHaveBeenCalledTimes(2)
+
+    await act(async () => {
+      vi.advanceTimersByTime(10000)
+      await Promise.resolve()
+    })
+    expect(window.fetch).toHaveBeenCalledTimes(3)
+  })
+
+  it('stops polling once the pane becomes disabled', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-06-21T00:00:00Z'))
+    window.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ is_git: false }),
+    } as Response)
+
+    const { rerender } = renderHook(({ enabled }) => useGitInfo('pane1', enabled), {
+      initialProps: { enabled: true },
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(window.fetch).toHaveBeenCalledTimes(1)
+
+    rerender({ enabled: false })
+
+    await act(async () => {
+      vi.advanceTimersByTime(30000)
+      await Promise.resolve()
+    })
+    expect(window.fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('stops polling while the browser tab is hidden and resumes once visible again', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-06-21T00:00:00Z'))
+    window.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ is_git: false }),
+    } as Response)
+
+    renderHook(() => useGitInfo('pane1'))
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(window.fetch).toHaveBeenCalledTimes(1)
+
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'hidden',
+    })
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'))
+    })
+
+    await act(async () => {
+      vi.advanceTimersByTime(30000)
+      await Promise.resolve()
+    })
+    expect(window.fetch).toHaveBeenCalledTimes(1)
+
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'visible',
+    })
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'))
+      await Promise.resolve()
+    })
+
+    await act(async () => {
+      vi.advanceTimersByTime(10000)
+      await Promise.resolve()
+    })
+    expect(window.fetch).not.toHaveBeenCalledTimes(1)
   })
 
   it('shares cached git info with snapshot consumers without triggering extra fetches', async () => {

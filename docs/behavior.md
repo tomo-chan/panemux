@@ -153,6 +153,13 @@ ones.
 Pane-header Git and PR metadata is fetched immediately when a pane becomes visible, then refreshed
 every 10 seconds only while both the browser tab and that pane remain visible.
 
+The backend caches each session's git-info response for 30 seconds so that this steady-state polling
+(and any other concurrent viewer of the same session, such as another browser tab) does not repeat
+process/transcript scanning, remote git inspection over SSH, or `gh pr view` lookups on every request.
+A pane's displayed Git/PR metadata may therefore lag the true state by up to 30 seconds; the cache is
+cleared whenever a session is deleted or recreated so a new session never inherits another session's
+cached response.
+
 Workspace-summary session-state and Git metadata polling are frontend-only and best-effort. While
 the browser tab is visible, the frontend polls every 10 seconds so it can summarize all known
 panes across all workspaces without mounting hidden terminal instances. The integrated summary view
@@ -546,7 +553,7 @@ When a pane moves to a different parent node, the component may be remounted by 
 ### Pane Git and PR metadata
 
 - The pane header shows Git metadata when the pane's current working context resolves to a Git repository.
-- The displayed Git context is always resolved from the pane's current live work context, not from stale historical output.
+- The displayed Git context is always resolved from the pane's current live work context, not from stale historical output, subject to the 30-second server-side response cache described above.
 - For normal panes, the base context is the pane's current working directory.
 - For local tmux and SSH+tmux panes, the base context is the currently active tmux pane only.
 - When a local, local tmux, SSH, or SSH+tmux pane has an active interactive `codex` or `claude` process working in a different Git worktree for the same repository, panemux prefers that agent worktree over the pane's base directory.
