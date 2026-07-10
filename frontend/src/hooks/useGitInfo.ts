@@ -1,7 +1,15 @@
 import { useState, useEffect, useCallback } from 'react'
 import { GitInfo, GitInfoSchema } from '../schemas'
 
-const GIT_INFO_STALE_MS = 30000
+// Matches GIT_INFO_POLL_INTERVAL_MS: since the steady-state poll already
+// keeps the cache within 10s of fresh while a pane is visible, an
+// interaction-triggered refresh (click/focus/keydown, visibility regain)
+// should not tolerate data any older than that before treating it as stale.
+// Keeping this aligned with the poll interval also bounds the worst-case
+// staleness of an explicit refresh to this value plus the server-side cache
+// TTL, instead of compounding a larger, independent client-side window on
+// top of it.
+const GIT_INFO_STALE_MS = 10000
 const GIT_INFO_RECHECK_THROTTLE_MS = 5000
 const GIT_INFO_POLL_INTERVAL_MS = 10000
 

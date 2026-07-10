@@ -158,7 +158,11 @@ The backend caches each session's git-info response for 30 seconds so that this 
 process/transcript scanning, remote git inspection over SSH, or `gh pr view` lookups on every request.
 A pane's displayed Git/PR metadata may therefore lag the true state by up to 30 seconds; the cache is
 cleared whenever a session is deleted or recreated so a new session never inherits another session's
-cached response.
+cached response. Explicit refresh triggers — clicking or focusing a pane, restoring the browser tab,
+or opening VS Code — only skip the frontend's own request if it already has a response no older than
+10 seconds, matching the steady-state poll interval, so an explicit refresh is bounded by that 10
+seconds plus the server-side cache above rather than compounding a larger, independent client-side
+window on top of it.
 
 Workspace-summary session-state and Git metadata polling are frontend-only and best-effort. While
 the browser tab is visible, the frontend polls every 10 seconds so it can summarize all known

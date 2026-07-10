@@ -530,6 +530,29 @@ func TestDeleteWorkspace_ClearsPreferredCWDForRemovedPanes(t *testing.T) {
 	assert.False(t, ok)
 }
 
+func TestDeleteWorkspace_ClearsGitInfoCacheForRemovedPanes(t *testing.T) {
+	cfg, _ := loadWorkspaceTestConfigFromFile(t)
+	require.True(t, cfg.SetActiveWorkspace("two"))
+	mgr := session.NewManager()
+	mgr.Add(newMockSession("one-main"))
+	mgr.Add(newMockSession("two-main"))
+	h := NewHandler(cfg, mgr)
+	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
+	h.gitInfoCacheBySession["two-main"] = gitInfoCacheEntry{
+		expiresAt: h.nowFn().Add(gitInfoCacheTTL),
+		response:  gitInfoResponse{IsGit: true, Branch: "stale-branch"},
+	}
+	r := setupRouterWithHandler(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/workspaces/two", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	_, ok := h.gitInfoCacheBySession["two-main"]
+	assert.False(t, ok, "expected the removed pane's stale cached git-info to be cleared")
+}
+
 func TestPutWorkspace_RenamesWorkspaceAndPersists(t *testing.T) {
 	cfg, path := loadWorkspaceTestConfigFromFile(t)
 	h := NewHandler(cfg, session.NewManager())
@@ -896,6 +919,38 @@ func TestRestartSession_ClearsPreferredCWD(t *testing.T) {
 	assert.False(t, ok)
 }
 
+func TestRestartSession_ClearsGitInfoCache(t *testing.T) {
+	cfg := &config.Config{
+		Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1"},
+		Layout: config.LayoutNode{
+			Direction: "horizontal",
+			Children: []config.LayoutChild{
+				{Size: 100, Pane: &config.PaneConfig{ID: "main", Type: "local"}},
+			},
+		},
+	}
+	mgr := session.NewManager()
+	mgr.Add(newMockSession("main"))
+	h := NewHandler(cfg, mgr)
+	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
+	h.gitInfoCacheBySession["main"] = gitInfoCacheEntry{
+		expiresAt: h.nowFn().Add(gitInfoCacheTTL),
+		response:  gitInfoResponse{IsGit: true, Branch: "stale-branch"},
+	}
+	h.createSession = func(pane *config.PaneConfig, _ map[string]config.SSHConnection) (session.Session, error) {
+		return newMockSession(pane.ID), nil
+	}
+	r := setupRouterWithHandler(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/main/restart", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	_, ok := h.gitInfoCacheBySession["main"]
+	assert.False(t, ok, "expected the restarted session's stale cached git-info to be cleared")
+}
+
 func TestRestartSession_NotFound_404(t *testing.T) {
 	r := setupRouter(defaultTestConfig(), session.NewManager())
 	rec := httptest.NewRecorder()
@@ -1160,6 +1215,26 @@ func TestDeleteSession_ClearsPreferredCWD(t *testing.T) {
 	assert.Equal(t, http.StatusNoContent, rec.Code)
 	_, ok := h.preferredCWDBySession["s1"]
 	assert.False(t, ok)
+}
+
+func TestDeleteSession_ClearsGitInfoCache(t *testing.T) {
+	mgr := session.NewManager()
+	mgr.Add(newMockSession("s1"))
+	cfg := defaultTestConfig()
+	h := NewHandler(cfg, mgr)
+	h.gitInfoCacheBySession["s1"] = gitInfoCacheEntry{
+		expiresAt: h.nowFn().Add(gitInfoCacheTTL),
+		response:  gitInfoResponse{IsGit: true, Branch: "stale-branch"},
+	}
+	r := setupRouterWithHandler(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/sessions/s1", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+	_, ok := h.gitInfoCacheBySession["s1"]
+	assert.False(t, ok, "expected the deleted session's stale cached git-info to be cleared")
 }
 
 func TestGetDisplay_ReturnsJSON(t *testing.T) {

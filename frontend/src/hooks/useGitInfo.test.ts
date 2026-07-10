@@ -128,7 +128,7 @@ describe('useGitInfo', () => {
     })
 
     act(() => {
-      vi.advanceTimersByTime(30001)
+      vi.advanceTimersByTime(10001)
     })
 
     Object.defineProperty(document, 'visibilityState', {
@@ -162,7 +162,7 @@ describe('useGitInfo', () => {
     expect(window.fetch).toHaveBeenCalledTimes(1)
 
     act(() => {
-      vi.advanceTimersByTime(30001)
+      vi.advanceTimersByTime(10001)
     })
 
     await act(async () => {
