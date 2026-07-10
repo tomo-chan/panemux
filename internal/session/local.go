@@ -750,28 +750,49 @@ func readClaudeProjectCWD(path string) (string, error) {
 	})
 }
 
+// parseClaudeProjectCWD resolves the effective working directory for a
+// Claude transcript, in priority order: the latest Bash `cd X && ...`
+// target, then the latest top-level `cwd` field, then the latest
+// non-auxiliary file-touch path (Read/Edit/Write/etc, or file-history
+// snapshot). See docs/architecture.md's "Pane Git/PR resolution" section
+// for the full rationale (top-level `cwd` is pinned at process launch and
+// never tracks a Bash `cd`, mirroring Codex's `workdir` precedence).
+//
+// A Bash-cd target, once seen, remains authoritative for the rest of the
+// transcript until a *later* Bash-cd target replaces it — a top-level `cwd`
+// or file-touch appearing afterward cannot displace it. This is intentional:
+// an explicit `cd` is a durable "the agent has moved its base of operations
+// here" signal, and neither of the weaker signals below it in this
+// function's priority order is reliable enough evidence that the agent
+// moved back to justify overriding it.
 func parseClaudeProjectCWD(data []byte) (string, error) {
 	var latestCWD string
-	var latestPath claudePathCandidate
+	var latestBashCDPath string
+	var latestFileTouchPath claudePathCandidate
 	forEachJSONLRecord(data, func(line []byte) {
 		cwd, candidate := claudeRecordPath(line)
 		if cwd != "" {
 			latestCWD = cwd
 		}
-		if candidate.Path != "" {
-			latestPath = candidate
+		if candidate.Path == "" {
+			return
+		}
+		if candidate.IsDir {
+			latestBashCDPath = candidate.Path
+		} else {
+			latestFileTouchPath = candidate
 		}
 	})
+	if latestBashCDPath != "" {
+		return latestBashCDPath, nil
+	}
 	if latestCWD != "" {
 		return latestCWD, nil
 	}
-	if latestPath.Path == "" {
+	if latestFileTouchPath.Path == "" {
 		return "", nil
 	}
-	if latestPath.IsDir {
-		return latestPath.Path, nil
-	}
-	return filepath.Dir(latestPath.Path), nil
+	return filepath.Dir(latestFileTouchPath.Path), nil
 }
 
 // forEachJSONLRecord iterates over already-buffered JSONL data without using

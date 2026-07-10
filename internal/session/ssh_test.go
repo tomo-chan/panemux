@@ -516,7 +516,43 @@ func TestActiveRemoteWorkdir_PrefersRemoteClaudeTranscriptWorktree_WithDotInCWD(
 	assert.Equal(t, []string{"/tmp/remote-claude-worktree"}, cwds)
 }
 
+// TestActiveRemoteWorkdir_PrefersRemoteClaudeTopLevelCWDOverToolPaths
+// asserts that top-level `cwd` still wins over a *file-touch* tool path
+// (Read/Edit/Write/etc), which remains a weaker signal than `cwd`: touching
+// a single unrelated file elsewhere does not by itself mean the agent moved
+// its active work there. This is distinct from a Bash `cd` target, which is
+// a stronger, explicit directory-change signal — see
+// TestActiveRemoteWorkdir_PrefersRemoteClaudeBashCDWorktreeOverTopLevelCWD.
 func TestActiveRemoteWorkdir_PrefersRemoteClaudeTopLevelCWDOverToolPaths(t *testing.T) {
+	sessionPath := "~/.claude/sessions/220.json"
+	projectCmd := "cat ~/.claude/projects/'-repo-main/session-123.jsonl'"
+
+	runner := &fakeSSHRunner{
+		outputs: map[string][]byte{
+			sshListProcessesCmd:  []byte(" 100 1 sh\n 220 100 claude\n"),
+			"cat " + sessionPath: []byte(`{"pid":220,"sessionId":"session-123","cwd":"/repo/main"}`),
+			projectCmd: []byte(
+				"{\"type\":\"assistant\",\"cwd\":\"/repo/main\",\"message\":{\"content\":[" +
+					"{\"type\":\"tool_use\",\"name\":\"Read\"," +
+					"\"input\":{\"file_path\":\"/tmp/remote-unrelated-file.txt\"}}" +
+					"]}}\n",
+			),
+		},
+	}
+
+	cwds, err := activeRemoteWorkdirs(runner, "test active remote", "/repo/main", 100)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"/repo/main"}, cwds)
+}
+
+// TestActiveRemoteWorkdir_PrefersRemoteClaudeBashCDWorktreeOverTopLevelCWD
+// encodes the bug reproduced against a real Claude Code transcript: the
+// top-level `cwd` field is set once from the interactive process's own
+// OS-level working directory and never changes for its lifetime, so it
+// cannot by itself signal that a Bash tool call `cd`'d into a sibling
+// worktree. See parseClaudeProjectCWD (local.go) for the full reasoning;
+// this is the same resolver used for both local and remote transcripts.
+func TestActiveRemoteWorkdir_PrefersRemoteClaudeBashCDWorktreeOverTopLevelCWD(t *testing.T) {
 	sessionPath := "~/.claude/sessions/220.json"
 	projectCmd := "cat ~/.claude/projects/'-repo-main/session-123.jsonl'"
 
@@ -535,7 +571,7 @@ func TestActiveRemoteWorkdir_PrefersRemoteClaudeTopLevelCWDOverToolPaths(t *test
 
 	cwds, err := activeRemoteWorkdirs(runner, "test active remote", "/repo/main", 100)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"/repo/main"}, cwds)
+	assert.Equal(t, []string{"/tmp/remote-bash-worktree"}, cwds)
 }
 
 func TestActiveRemoteWorkdir_PrefersRemoteClaudeBashCDWorktree(t *testing.T) {
