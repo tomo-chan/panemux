@@ -754,21 +754,17 @@ func readClaudeProjectCWD(path string) (string, error) {
 // Claude transcript, in priority order: the latest Bash `cd X && ...`
 // target, then the latest top-level `cwd` field, then the latest
 // non-auxiliary file-touch path (Read/Edit/Write/etc, or file-history
-// snapshot). Bash-cd targets are checked first because the top-level `cwd`
-// field is set once from the interactive process's own OS-level working
-// directory and never changes for the life of that process — it does not
-// track directories a Bash tool call actually `cd`'d into. A real Claude
-// Code transcript has a non-empty top-level `cwd` on nearly every record,
-// so naively preferring it (as this function once did) makes Bash-cd
-// detection unreachable in practice: every record trivially "wins" on
-// `cwd`, permanently masking any sibling-worktree divergence reached via a
-// plain Bash `cd`. This mirrors the same class of problem already solved
-// for Codex, whose own OS-level process cwd is similarly static; see
-// docs/architecture.md's Codex `workdir` precedence for the equivalent
-// reasoning. File-touch paths (a `Read` of some unrelated file, for
-// example) remain a weaker signal than the top-level `cwd`, since touching
-// a single file elsewhere does not by itself indicate the agent has moved
-// its active work there.
+// snapshot). See docs/architecture.md's "Pane Git/PR resolution" section
+// for the full rationale (top-level `cwd` is pinned at process launch and
+// never tracks a Bash `cd`, mirroring Codex's `workdir` precedence).
+//
+// A Bash-cd target, once seen, remains authoritative for the rest of the
+// transcript until a *later* Bash-cd target replaces it — a top-level `cwd`
+// or file-touch appearing afterward cannot displace it. This is intentional:
+// an explicit `cd` is a durable "the agent has moved its base of operations
+// here" signal, and neither of the weaker signals below it in this
+// function's priority order is reliable enough evidence that the agent
+// moved back to justify overriding it.
 func parseClaudeProjectCWD(data []byte) (string, error) {
 	var latestCWD string
 	var latestBashCDPath string

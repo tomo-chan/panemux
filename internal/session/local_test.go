@@ -466,6 +466,39 @@ func TestParseClaudeProjectCWD_PrefersBashCDWorktreeOverTopLevelCWD(t *testing.T
 	assert.Equal(t, worktreeDir, cwd)
 }
 
+// TestParseClaudeProjectCWD_BashCDPersistsOverLaterWeakerSignals documents
+// an intentional asymmetry: a Bash `cd` target is a durable "the agent has
+// moved its base of operations here" signal, so once seen it stays
+// authoritative for the rest of the transcript — later top-level `cwd`
+// records and later file-touch paths cannot displace it, since neither is
+// reliable enough evidence that the agent moved back. Only a later Bash
+// `cd` target can replace it. See docs/architecture.md's "Pane Git/PR
+// resolution" section.
+func TestParseClaudeProjectCWD_BashCDPersistsOverLaterWeakerSignals(t *testing.T) {
+	worktreeDir := filepath.Join(t.TempDir(), "panemux-worktree")
+	require.NoError(t, os.MkdirAll(worktreeDir, 0755))
+	unrelatedFile := filepath.Join(t.TempDir(), "unrelated", "notes.md")
+	require.NoError(t, os.MkdirAll(filepath.Dir(unrelatedFile), 0755))
+
+	data := []byte(
+		"{\"type\":\"assistant\",\"cwd\":\"/repo/main\",\"message\":{\"content\":[" +
+			"{\"type\":\"tool_use\",\"name\":\"Bash\",\"input\":{\"command\":\"cd " +
+			worktreeDir +
+			" && git status\"}}]}}\n" +
+			// A later record's top-level cwd is still pinned to the launch
+			// directory, and a later file-touch reads some unrelated file —
+			// neither should displace the earlier Bash cd target.
+			"{\"type\":\"assistant\",\"cwd\":\"/repo/main\",\"message\":{\"content\":[" +
+			"{\"type\":\"tool_use\",\"name\":\"Read\",\"input\":{\"file_path\":\"" +
+			unrelatedFile +
+			"\"}}]}}\n",
+	)
+
+	cwd, err := parseClaudeProjectCWD(data)
+	require.NoError(t, err)
+	assert.Equal(t, worktreeDir, cwd)
+}
+
 func TestParseClaudeProjectCWD_LargeTopLevelCWDRecord(t *testing.T) {
 	data := []byte(
 		"{\"type\":\"assistant\",\"cwd\":\"/tmp/worktree-from-large-record\",\"message\":{\"content\":[" +
