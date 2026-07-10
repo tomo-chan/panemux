@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.4](https://github.com/tomo-chan/panemux/compare/v0.20.3...v0.20.4) (2026-07-10)
+
+
+### Bug Fixes
+
+* detect Claude worktree switches via Bash cd, not only top-level cwd ([#155](https://github.com/tomo-chan/panemux/issues/155)) ([302a965](https://github.com/tomo-chan/panemux/commit/302a965e0fce4b067fba092a5c978e4715681561))
+
 ## [0.20.3](https://github.com/tomo-chan/panemux/compare/v0.20.2...v0.20.3) (2026-07-10)
 
 
