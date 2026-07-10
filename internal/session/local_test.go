@@ -437,6 +437,35 @@ func TestParseClaudeProjectCWD_PrefersBashCDWorktree(t *testing.T) {
 	assert.Equal(t, worktreeDir, cwd)
 }
 
+// TestParseClaudeProjectCWD_PrefersBashCDWorktreeOverTopLevelCWD encodes a
+// bug reproduced against a real Claude Code transcript: the top-level `cwd`
+// field on every record always reflects the CLI's own launch directory, not
+// wherever a `Bash` tool call's `cd X && ...` actually executed, because the
+// interactive Claude process's own OS-level cwd never changes for its
+// lifetime — only the individual tool call records the real execution
+// directory. If `cwd` is naively preferred whenever present (as it always
+// is in real transcripts), the resolver can never detect a sibling-worktree
+// divergence reached via a plain Bash `cd`, mirroring the same class of
+// problem already solved for Codex (see claudeBashCDPattern and
+// docs/architecture.md's Codex `workdir` precedence).
+func TestParseClaudeProjectCWD_PrefersBashCDWorktreeOverTopLevelCWD(t *testing.T) {
+	worktreeDir := filepath.Join(t.TempDir(), "panemux-worktree")
+	require.NoError(t, os.MkdirAll(worktreeDir, 0755))
+
+	data := []byte(
+		"{\"type\":\"assistant\",\"cwd\":\"/repo/main\",\"message\":{\"content\":[" +
+			"{\"type\":\"tool_use\",\"name\":\"Bash\",\"input\":{\"command\":\"cd " +
+			worktreeDir +
+			" && git status\"}}]}}\n" +
+			"{\"type\":\"assistant\",\"cwd\":\"/repo/main\",\"message\":{\"content\":[" +
+			"{\"type\":\"text\",\"text\":\"done\"}]}}\n",
+	)
+
+	cwd, err := parseClaudeProjectCWD(data)
+	require.NoError(t, err)
+	assert.Equal(t, worktreeDir, cwd)
+}
+
 func TestParseClaudeProjectCWD_LargeTopLevelCWDRecord(t *testing.T) {
 	data := []byte(
 		"{\"type\":\"assistant\",\"cwd\":\"/tmp/worktree-from-large-record\",\"message\":{\"content\":[" +

@@ -750,28 +750,53 @@ func readClaudeProjectCWD(path string) (string, error) {
 	})
 }
 
+// parseClaudeProjectCWD resolves the effective working directory for a
+// Claude transcript, in priority order: the latest Bash `cd X && ...`
+// target, then the latest top-level `cwd` field, then the latest
+// non-auxiliary file-touch path (Read/Edit/Write/etc, or file-history
+// snapshot). Bash-cd targets are checked first because the top-level `cwd`
+// field is set once from the interactive process's own OS-level working
+// directory and never changes for the life of that process — it does not
+// track directories a Bash tool call actually `cd`'d into. A real Claude
+// Code transcript has a non-empty top-level `cwd` on nearly every record,
+// so naively preferring it (as this function once did) makes Bash-cd
+// detection unreachable in practice: every record trivially "wins" on
+// `cwd`, permanently masking any sibling-worktree divergence reached via a
+// plain Bash `cd`. This mirrors the same class of problem already solved
+// for Codex, whose own OS-level process cwd is similarly static; see
+// docs/architecture.md's Codex `workdir` precedence for the equivalent
+// reasoning. File-touch paths (a `Read` of some unrelated file, for
+// example) remain a weaker signal than the top-level `cwd`, since touching
+// a single file elsewhere does not by itself indicate the agent has moved
+// its active work there.
 func parseClaudeProjectCWD(data []byte) (string, error) {
 	var latestCWD string
-	var latestPath claudePathCandidate
+	var latestBashCDPath string
+	var latestFileTouchPath claudePathCandidate
 	forEachJSONLRecord(data, func(line []byte) {
 		cwd, candidate := claudeRecordPath(line)
 		if cwd != "" {
 			latestCWD = cwd
 		}
-		if candidate.Path != "" {
-			latestPath = candidate
+		if candidate.Path == "" {
+			return
+		}
+		if candidate.IsDir {
+			latestBashCDPath = candidate.Path
+		} else {
+			latestFileTouchPath = candidate
 		}
 	})
+	if latestBashCDPath != "" {
+		return latestBashCDPath, nil
+	}
 	if latestCWD != "" {
 		return latestCWD, nil
 	}
-	if latestPath.Path == "" {
+	if latestFileTouchPath.Path == "" {
 		return "", nil
 	}
-	if latestPath.IsDir {
-		return latestPath.Path, nil
-	}
-	return filepath.Dir(latestPath.Path), nil
+	return filepath.Dir(latestFileTouchPath.Path), nil
 }
 
 // forEachJSONLRecord iterates over already-buffered JSONL data without using
