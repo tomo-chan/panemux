@@ -48,6 +48,9 @@ type Handler struct {
 	preferredCWDBySession   map[string][]preferredCWDState
 	restartMu               sync.Mutex
 	restartInFlight         map[string]struct{}
+	nowFn                   func() time.Time
+	gitInfoCacheMu          sync.Mutex
+	gitInfoCacheBySession   map[string]gitInfoCacheEntry
 }
 
 type preferredCWDState struct {
@@ -55,6 +58,22 @@ type preferredCWDState struct {
 	CommonDir string
 	Root      string
 }
+
+// gitInfoCacheEntry holds a previously computed git-info response for a
+// session, valid until expiresAt. Caching the whole response — not just the
+// remote git/PR lookups — keeps this simple and uniform across local, tmux,
+// ssh, and ssh_tmux sessions alike: local sessions also pay for process and
+// transcript scanning on every request, so they benefit from the same cap.
+type gitInfoCacheEntry struct {
+	expiresAt time.Time
+	response  gitInfoResponse
+}
+
+// gitInfoCacheTTL bounds how long a pane header may show git/PR metadata
+// that is no longer perfectly current, in exchange for not re-running
+// process/transcript scans, remote git inspection, and `gh pr view` lookups
+// on every poll. See docs/behavior.md "Pane Git and PR metadata".
+const gitInfoCacheTTL = 30 * time.Second
 
 // activeGitContext pairs a resolved git context with the working directory
 // (pane base cwd, or an agent-signaled sibling worktree path) it was
@@ -137,6 +156,8 @@ func NewHandler(cfg *config.Config, manager *session.Manager) *Handler {
 		sshConfigPath:         sshconfig.DefaultPath(),
 		preferredCWDBySession: make(map[string][]preferredCWDState),
 		restartInFlight:       make(map[string]struct{}),
+		nowFn:                 time.Now,
+		gitInfoCacheBySession: make(map[string]gitInfoCacheEntry),
 	}
 	h.createSession = session.CreateFromConfig
 	h.detectLocalShellFn = session.DetectLocalShell
@@ -274,6 +295,7 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	for _, pane := range panesInLayout(workspace.Layout) {
 		_ = h.manager.Remove(pane.ID)
 		h.clearPreferredCWDs(pane.ID)
+		h.clearGitInfoCache(pane.ID)
 	}
 	writeJSON(w, h.cfg.WorkspacesView())
 }
@@ -410,6 +432,7 @@ func (h *Handler) DeleteSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.clearPreferredCWDs(id)
+	h.clearGitInfoCache(id)
 	h.cfg.RemovePaneFromLayout(id)
 	if err := h.cfg.SaveLayout(h.cfg.Layout); err != nil {
 		http.Error(w, "failed to save layout", http.StatusInternalServerError)
@@ -458,6 +481,7 @@ func (h *Handler) RestartSession(w http.ResponseWriter, r *http.Request) {
 
 	h.manager.Remove(id) //nolint:errcheck // ok if already gone
 	h.clearPreferredCWDs(id)
+	h.clearGitInfoCache(id)
 	h.manager.Add(sess)
 	w.WriteHeader(http.StatusOK)
 }
@@ -798,34 +822,46 @@ func (h *Handler) GetGitInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if resp, ok := h.cachedGitInfo(id); ok {
+		writeJSON(w, resp)
+		return
+	}
+
+	resp := h.computeGitInfo(sess)
+	h.storeGitInfoCache(id, resp)
+	writeJSON(w, resp)
+}
+
+// computeGitInfo resolves a session's current git/PR metadata. This is the
+// expensive path: process and transcript scanning, remote git inspection
+// over SSH, and `gh pr view` lookups. Callers should go through the
+// gitInfoCacheBySession TTL cache in GetGitInfo rather than calling this
+// directly on every request.
+func (h *Handler) computeGitInfo(sess session.Session) gitInfoResponse {
 	cwdGetter, ok := sess.(session.CWDGetter)
 	if !ok {
-		writeJSON(w, gitInfoResponse{IsGit: false})
-		return
+		return gitInfoResponse{IsGit: false}
 	}
 
 	cwd, err := cwdGetter.GetCWD()
 	if err != nil {
-		writeJSON(w, gitInfoResponse{IsGit: false})
-		return
+		return gitInfoResponse{IsGit: false}
 	}
 
 	err = gitExistsFn()
 	if err != nil {
-		writeJSON(w, gitInfoResponse{IsGit: false})
-		return
+		return gitInfoResponse{IsGit: false}
 	}
 
 	activeContexts, err := h.resolveActiveGitContexts(sess, cwd)
 	if err != nil {
-		writeJSON(w, gitInfoResponse{IsGit: false})
-		return
+		return gitInfoResponse{IsGit: false}
 	}
 
 	worktrees := h.lookupPRInfoForContexts(sess, activeContexts)
 	primary := worktrees[0]
 
-	writeJSON(w, gitInfoResponse{
+	return gitInfoResponse{
 		IsGit:     true,
 		Branch:    primary.Branch,
 		Repo:      primary.Repo,
@@ -833,7 +869,42 @@ func (h *Handler) GetGitInfo(w http.ResponseWriter, r *http.Request) {
 		PRURL:     primary.PRURL,
 		PRNumber:  primary.PRNumber,
 		Worktrees: worktrees,
-	})
+	}
+}
+
+// cachedGitInfo returns a still-valid cached git-info response for a
+// session, if one exists.
+func (h *Handler) cachedGitInfo(sessionID string) (gitInfoResponse, bool) {
+	h.gitInfoCacheMu.Lock()
+	defer h.gitInfoCacheMu.Unlock()
+
+	entry, ok := h.gitInfoCacheBySession[sessionID]
+	if !ok || h.nowFn().After(entry.expiresAt) {
+		return gitInfoResponse{}, false
+	}
+	return entry.response, true
+}
+
+// storeGitInfoCache records a freshly computed git-info response, valid for
+// gitInfoCacheTTL.
+func (h *Handler) storeGitInfoCache(sessionID string, resp gitInfoResponse) {
+	h.gitInfoCacheMu.Lock()
+	defer h.gitInfoCacheMu.Unlock()
+
+	h.gitInfoCacheBySession[sessionID] = gitInfoCacheEntry{
+		response:  resp,
+		expiresAt: h.nowFn().Add(gitInfoCacheTTL),
+	}
+}
+
+// clearGitInfoCache discards any cached git-info response for a session, so
+// a removed or recreated session doesn't serve another session's stale data
+// under the same ID.
+func (h *Handler) clearGitInfoCache(sessionID string) {
+	h.gitInfoCacheMu.Lock()
+	defer h.gitInfoCacheMu.Unlock()
+
+	delete(h.gitInfoCacheBySession, sessionID)
 }
 
 // lookupPRInfoForContexts runs an independent PR lookup for each active git
