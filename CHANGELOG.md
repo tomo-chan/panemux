@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.3](https://github.com/tomo-chan/panemux/compare/v0.20.2...v0.20.3) (2026-07-10)
+
+
+### Bug Fixes
+
+* keep pane header worktree/PR info fresh after claude --resume ([#151](https://github.com/tomo-chan/panemux/issues/151)) ([dd2be4b](https://github.com/tomo-chan/panemux/commit/dd2be4bc3b03820555b4fe93117f9a074c299780))
+
 ## [0.20.2](https://github.com/tomo-chan/panemux/compare/v0.20.1...v0.20.2) (2026-07-06)
 
 
