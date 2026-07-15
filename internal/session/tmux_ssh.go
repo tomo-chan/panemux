@@ -80,13 +80,7 @@ func NewTmuxSSH(id, title, tmuxSession string, cfg SSHConfig) (*TmuxSSHSession, 
 		keepaliveStop:  make(chan struct{}),
 	}
 
-	monitorSSHSession(sess, pw, func(state State) {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		s.state = state
-	})
-
-	startSSHKeepalive(client, s.keepaliveStop, sshKeepaliveOnDeadFn(client, jumpClient))
+	wireSSHSessionLifecycle(sess, pw, client, jumpClient, s.keepaliveStop, &s.mu, &s.state)
 
 	return s, nil
 }

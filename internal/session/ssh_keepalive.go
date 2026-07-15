@@ -1,6 +1,8 @@
 package session
 
 import (
+	"io"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -28,16 +30,57 @@ type sshKeepaliveSender interface {
 }
 
 // sshKeepaliveOnDeadFn builds the onDead callback shared by NewSSH and
-// NewTmuxSSH: on transport death, close the primary client (and jump client,
-// if any) so the session's existing monitorSSHSession/classifySSHWaitError
-// machinery observes the resulting error and transitions state normally.
-func sshKeepaliveOnDeadFn(client, jumpClient *ssh.Client) func() {
+// NewTmuxSSH. It marks the session disconnected *before* closing the
+// client, then closes the primary client (and jump client, if any).
+//
+// Ordering matters here: forcing the transport closed makes the still-
+// pending monitorSSHSession goroutine's sess.Wait() return
+// *ssh.ExitMissingError — the same error golang.org/x/crypto/ssh returns
+// when a remote process's channel closes without ever sending a clean SSH
+// exit-status message, which is indistinguishable from "the transport was
+// severed out from under an in-flight session." classifySSHWaitError
+// therefore classifies it as StateExited, not StateDisconnected, which
+// would misreport a keepalive-detected network failure as a normal session
+// exit and could suppress the frontend's reconnect behavior. Setting
+// StateDisconnected first, combined with the guard in the markExited
+// closure passed to monitorSSHSession, ensures that later, less specific
+// classification never overwrites this one.
+func sshKeepaliveOnDeadFn(markDisconnected func(), client, jumpClient *ssh.Client) func() {
 	return func() {
+		markDisconnected()
 		client.Close()
 		if jumpClient != nil {
 			jumpClient.Close()
 		}
 	}
+}
+
+// wireSSHSessionLifecycle wires monitorSSHSession and startSSHKeepalive
+// together for a *ssh.Session-backed session (SSHSession, TmuxSSHSession),
+// sharing the state guard that keeps a keepalive-detected disconnect from
+// being downgraded back to StateExited by the session's own later Wait()
+// error — see sshKeepaliveOnDeadFn for why that distinction matters.
+// mu/state are the caller's own mutex-protected state field.
+func wireSSHSessionLifecycle(
+	sess *ssh.Session, pw *io.PipeWriter,
+	client, jumpClient *ssh.Client,
+	keepaliveStop chan struct{},
+	mu *sync.RWMutex, state *State,
+) {
+	monitorSSHSession(sess, pw, func(newState State) {
+		mu.Lock()
+		defer mu.Unlock()
+		if *state == StateDisconnected {
+			return
+		}
+		*state = newState
+	})
+
+	startSSHKeepalive(client, keepaliveStop, sshKeepaliveOnDeadFn(func() {
+		mu.Lock()
+		*state = StateDisconnected
+		mu.Unlock()
+	}, client, jumpClient))
 }
 
 // startSSHKeepalive runs a background probe loop and calls onDead once
