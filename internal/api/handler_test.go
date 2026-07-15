@@ -2230,6 +2230,63 @@ func TestGetGitInfo_DetachedHead_StillReturnsGitInfo(t *testing.T) {
 	assert.NotEmpty(t, resp.Repo)
 }
 
+// writeFakeGitBinary writes an executable shell script named "git" into a
+// fresh directory and returns that directory, for prepending to PATH.
+func writeFakeGitBinary(t *testing.T, body string) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "git")
+	require.NoError(t, os.WriteFile(path, []byte(body), 0600))
+	require.NoError(t, os.Chmod(path, 0755))
+	return dir
+}
+
+func TestRunLocalGitContextCommand_TimesOutOnHungGit(t *testing.T) {
+	binDir := writeFakeGitBinary(t, "#!/bin/sh\nsleep 5\n")
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	prev := localGitCommandTimeout
+	localGitCommandTimeout = 10 * time.Millisecond
+	t.Cleanup(func() { localGitCommandTimeout = prev })
+
+	start := time.Now()
+	_, err := runLocalGitContextCommand(
+		t.TempDir(), t.TempDir(), "rev-parse --show-toplevel", "rev-parse", "--show-toplevel",
+	)
+	elapsed := time.Since(start)
+
+	require.Error(t, err)
+	assert.Less(t, elapsed, 2*time.Second, "runLocalGitContextCommand should be bounded by localGitCommandTimeout")
+}
+
+func TestRunLocalGitContextCommand_ReturnsOutputBeforeTimeout(t *testing.T) {
+	binDir := writeFakeGitBinary(t, "#!/bin/sh\necho /repo/main\n")
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	out, err := runLocalGitContextCommand(
+		t.TempDir(), t.TempDir(), "rev-parse --show-toplevel", "rev-parse", "--show-toplevel",
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "/repo/main\n", string(out))
+}
+
+func TestLocalGitOptionalMetadata_TimesOutOnHungGit(t *testing.T) {
+	binDir := writeFakeGitBinary(t, "#!/bin/sh\nsleep 5\n")
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	prev := localGitCommandTimeout
+	localGitCommandTimeout = 10 * time.Millisecond
+	t.Cleanup(func() { localGitCommandTimeout = prev })
+
+	start := time.Now()
+	branch, origin := localGitOptionalMetadata(t.TempDir())
+	elapsed := time.Since(start)
+
+	assert.Empty(t, branch)
+	assert.Empty(t, origin)
+	assert.Less(t, elapsed, 2*time.Second, "localGitOptionalMetadata should be bounded by localGitCommandTimeout")
+}
+
 func TestLookupPRInfo_TimesOutAndFallsBack(t *testing.T) {
 	h := NewHandler(defaultTestConfig(), session.NewManager())
 	h.ghBinaryPath = writeFakeGHBinary(t, "#!/bin/sh\nsleep 1\n")

@@ -16,29 +16,26 @@ var validTmuxSessionName = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`)
 
 // TmuxSSHSession attaches to a tmux session on a remote host via SSH.
 type TmuxSSHSession struct {
-	client         *ssh.Client
-	session        *ssh.Session
-	jumpClient     *ssh.Client // non-nil when connected via ProxyJump; closed after client
-	stdin          io.WriteCloser
-	reader         io.Reader
-	id             string
-	title          string
-	tmuxSession    string
-	connectionName string
-	state          State
-	mu             sync.RWMutex
+	stdin             io.WriteCloser
+	reader            io.Reader
+	client            *ssh.Client
+	session           *ssh.Session
+	jumpClient        *ssh.Client
+	keepaliveStop     chan struct{}
+	title             string
+	tmuxSession       string
+	connectionName    string
+	state             State
+	id                string
+	mu                sync.RWMutex
+	keepaliveStopOnce sync.Once
 }
 
 // NewTmuxSSH creates a session that attaches to a remote tmux session.
 func NewTmuxSSH(id, title, tmuxSession string, cfg SSHConfig) (*TmuxSSHSession, error) {
-	if tmuxSession == "" {
-		tmuxSession = "0"
-	}
-	if !validTmuxSessionName.MatchString(tmuxSession) {
-		return nil, fmt.Errorf(
-			"invalid tmux session name %q: must match ^[a-zA-Z0-9_.-]+$",
-			tmuxSession,
-		)
+	tmuxSession, err := validateTmuxSessionName(tmuxSession)
+	if err != nil {
+		return nil, err
 	}
 
 	client, jumpClient, err := dialSSHClient(cfg)
@@ -80,6 +77,7 @@ func NewTmuxSSH(id, title, tmuxSession string, cfg SSHConfig) (*TmuxSSHSession, 
 		reader:         pr,
 		connectionName: cfg.ConnectionName,
 		jumpClient:     jumpClient,
+		keepaliveStop:  make(chan struct{}),
 	}
 
 	monitorSSHSession(sess, pw, func(state State) {
@@ -87,6 +85,8 @@ func NewTmuxSSH(id, title, tmuxSession string, cfg SSHConfig) (*TmuxSSHSession, 
 		defer s.mu.Unlock()
 		s.state = state
 	})
+
+	startSSHKeepalive(client, s.keepaliveStop, sshKeepaliveOnDeadFn(client, jumpClient))
 
 	return s, nil
 }
@@ -138,7 +138,12 @@ func (s *TmuxSSHSession) GetCWD() (string, error) {
 		return "", fmt.Errorf("new ssh session for tmux cwd: %w", err)
 	}
 	defer sess.Close()
-	out, err := sess.Output(fmt.Sprintf("tmux display-message -p -t '%s' '#{pane_current_path}'", s.tmuxSession))
+	out, err := runOutputWithTimeout(
+		sess.Output,
+		sess.Close,
+		fmt.Sprintf("tmux display-message -p -t '%s' '#{pane_current_path}'", s.tmuxSession),
+		sshRunTimeout,
+	)
 	if err != nil {
 		return "", fmt.Errorf("tmux display-message over ssh: %w", err)
 	}
@@ -152,7 +157,11 @@ func (s *TmuxSSHSession) GetCWD() (string, error) {
 func (s *TmuxSSHSession) GetActiveWorkdirs() ([]string, error) {
 	return tmuxSSHActiveWorkdirsFromSessionFactory(
 		func() (sshSessionRunner, error) {
-			return s.client.NewSession()
+			sess, err := s.client.NewSession()
+			if err != nil {
+				return nil, err
+			}
+			return &timeoutSessionRunner{sess: sess}, nil
 		},
 		fmt.Sprintf("session=%s type=%s tmux_session=%s", s.id, s.Type(), s.tmuxSession),
 		s.tmuxSession,
@@ -168,7 +177,7 @@ func (s *TmuxSSHSession) InspectGitContext(cwd string) (GitContext, error) {
 	}
 	defer sess.Close()
 
-	return remoteGitContext(sess, cwd)
+	return remoteGitContext(&timeoutSessionRunner{sess: sess}, cwd)
 }
 
 func parseRemoteTmuxPaneInfo(out []byte) (int, string, error) {
@@ -242,6 +251,8 @@ func tmuxSSHActiveWorkdirsFromSessionFactory(
 }
 
 func (s *TmuxSSHSession) Close() error {
+	s.keepaliveStopOnce.Do(func() { close(s.keepaliveStop) })
+
 	s.mu.Lock()
 	s.state = StateExited
 	s.mu.Unlock()

@@ -93,6 +93,14 @@ var gitExistsFn = func() error {
 
 var prLookupTimeout = 5 * time.Second
 
+// localGitCommandTimeout bounds how long a single local `git` invocation used
+// for pane git-context inspection (rev-parse, branch, config) may block
+// before being killed. Without this, a hung local git process (e.g. a stuck
+// network filesystem mount under the pane's cwd) left GetGitInfo blocked
+// indefinitely. Kept separate from prLookupTimeout so shrinking one in tests
+// does not affect the other.
+var localGitCommandTimeout = 5 * time.Second
+
 const responseErrorKey = "error"
 
 type sshConnectionsResponse struct {
@@ -1130,7 +1138,9 @@ func (h *Handler) inspectLocalGitContext(cwd string) (session.GitContext, error)
 }
 
 func localGitOptionalMetadata(safeCWD string) ([]byte, []byte) {
-	branchCmd := exec.Command("git", "branch", "--show-current")
+	branchCtx, branchCancel := context.WithTimeout(context.Background(), localGitCommandTimeout)
+	defer branchCancel()
+	branchCmd := exec.CommandContext(branchCtx, "git", "branch", "--show-current")
 	branchCmd.Dir = safeCWD
 	branchOut, err := branchCmd.Output()
 	if err != nil {
@@ -1140,7 +1150,9 @@ func localGitOptionalMetadata(safeCWD string) ([]byte, []byte) {
 	}
 	branchOut = bytes.TrimSpace(branchOut)
 
-	originCmd := exec.Command("git", "config", "--get", "remote.origin.url")
+	originCtx, originCancel := context.WithTimeout(context.Background(), localGitCommandTimeout)
+	defer originCancel()
+	originCmd := exec.CommandContext(originCtx, "git", "config", "--get", "remote.origin.url")
 	originCmd.Dir = safeCWD
 	originOut, err := originCmd.Output()
 	if err != nil {
@@ -1151,7 +1163,9 @@ func localGitOptionalMetadata(safeCWD string) ([]byte, []byte) {
 }
 
 func runLocalGitContextCommand(safeCWD, originalCWD, operation string, args ...string) ([]byte, error) {
-	cmd := exec.Command("git", args...)
+	ctx, cancel := context.WithTimeout(context.Background(), localGitCommandTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = safeCWD
 	out, err := cmd.Output()
 	if err == nil {

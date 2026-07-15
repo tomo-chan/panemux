@@ -146,6 +146,16 @@ For pane-header Git status, local and local tmux panes inspect the local filesys
 and `ssh_tmux` panes run the equivalent Git inspection on the remote host. This allows headers to
 show branch/repository info even when the repository exists only on the SSH target.
 
+The tmux/git/process-inspection commands behind this (`GetCWD`, `GetActiveWorkdirs`, git-context
+lookups) are individually bounded by a short timeout (5 seconds for local calls and
+background-polling SSH calls, 10 seconds for user-triggered SSH calls). A wedged remote tmux server
+or a hung `git` invocation therefore fails and falls back within seconds instead of leaving
+`GET /api/sessions/{id}/git-info` — and the pane header refresh backing it — blocked indefinitely.
+SSH and SSH+tmux sessions additionally run a background keepalive probe that detects a fully dead
+transport (e.g. a network outage with no clean TCP close) within roughly 40 seconds and transitions
+the pane to `disconnected`, rather than leaving it silently unresponsive with no visible state
+change.
+
 Workspace tab summaries and their integrated pane groups use the same Git metadata source and also
 poll `/api/sessions` to summarize pane connection state across every workspace, including inactive
 ones.
