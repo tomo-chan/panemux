@@ -60,8 +60,29 @@ Why an interface-first session layer:
 
 Optional capability interfaces extend the base `Session` contract without breaking existing types:
 
-- `CWDGetter` — implemented by `LocalSession` and `SSHSession`; returns the live working directory of the running shell. `LocalSession` reads it via `lsof` (macOS) or `/proc/<pid>/cwd` (Linux). `SSHSession` runs `pwd` over a new exec channel on the existing SSH connection.
+- `CWDGetter` — implemented by `LocalSession` and `SSHSession`; returns the live working directory of the running shell. `LocalSession` reads it via `lsof` (macOS) or `/proc/<pid>/cwd` (Linux). `SSHSession` runs a shell command over a new exec channel on the existing SSH connection.
 - `SSHConnNamer` — implemented by `SSHSession`; returns the panemux connection alias used when building the `code --remote ssh-remote+<host>` command.
+
+Every local `tmux`/`ps`/`lsof`/`git` invocation used for pane metadata inspection (`GetCWD`,
+`GetActiveWorkdirs`, git-context lookups) runs under a package-level timeout (5s for local calls and
+background-polling SSH calls, 10s for user-triggered SSH calls such as directory browsing and remote
+shell detection). `ssh.Session.Output` has no built-in timeout, so SSH call sites route through a
+shared `runOutputWithTimeout` helper (`internal/session/ssh_timeout.go`) that races the command
+against the timeout in a goroutine and force-closes the session to unblock it on expiry. Without this,
+a wedged remote tmux server or a hung `git` process (e.g. a stuck network filesystem mount under the
+pane's cwd) left `GET /api/sessions/{id}/git-info` blocked indefinitely, since that handler calls
+`GetCWD`/`InspectGitContext` synchronously.
+
+`SSHSession` and `TmuxSSHSession` also run a background keepalive probe
+(`internal/session/ssh_keepalive.go`) that sends an unrecognized SSH global request every 15 seconds;
+a compliant server's `SSH_MSG_REQUEST_FAILURE` reply is itself proof of liveness, mirroring OpenSSH's
+`ServerAliveInterval`. `golang.org/x/crypto/ssh` has no built-in equivalent, so without this probe a
+half-dead TCP connection (packets black-holed in one or both directions, no RST/FIN) left
+`Read`/`Write`/`NewSession`/`Session.Wait` blocked forever with no signal — this is the direct cause of
+a pane appearing to hang with no terminal output. After two consecutive failed/timed-out probes (worst
+case ~40s), the keepalive closes the underlying `ssh.Client`, which the existing
+`monitorSSHSession`/`classifySSHWaitError` machinery already observes as a transport error and reacts
+to by transitioning session state to `disconnected`.
 
 ### `internal/api`
 

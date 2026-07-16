@@ -93,6 +93,14 @@ var gitExistsFn = func() error {
 
 var prLookupTimeout = 5 * time.Second
 
+// localGitCommandTimeout bounds how long a single local `git` invocation used
+// for pane git-context inspection (rev-parse, branch, config) may block
+// before being killed. Without this, a hung local git process (e.g. a stuck
+// network filesystem mount under the pane's cwd) left GetGitInfo blocked
+// indefinitely. Kept separate from prLookupTimeout so shrinking one in tests
+// does not affect the other.
+var localGitCommandTimeout = 5 * time.Second
+
 const responseErrorKey = "error"
 
 type sshConnectionsResponse struct {
@@ -1080,6 +1088,14 @@ func (h *Handler) inspectGitContextForSession(sess session.Session, cwd string) 
 	return h.inspectLocalGitContext(cwd)
 }
 
+// inspectLocalGitContext runs up to four sequential git subprocesses
+// (rev-parse --show-toplevel, rev-parse --git-common-dir, then branch and
+// origin lookups inside localGitOptionalMetadata) against a single shared
+// deadline, rather than giving each an independent localGitCommandTimeout.
+// A stuck working directory (e.g. a hung network filesystem mount) makes
+// every git invocation against it hang the same way, so without a shared
+// deadline the calls could accumulate up to 4x localGitCommandTimeout
+// before the whole lookup fails through.
 func (h *Handler) inspectLocalGitContext(cwd string) (session.GitContext, error) {
 	safeCWD, err := sanitizeGitExecDir(cwd)
 	if err != nil {
@@ -1093,7 +1109,11 @@ func (h *Handler) inspectLocalGitContext(cwd string) (session.GitContext, error)
 		)
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), localGitCommandTimeout)
+	defer cancel()
+
 	toplevelOut, err := runLocalGitContextCommand(
+		ctx,
 		safeCWD,
 		cwd,
 		"git rev-parse --show-toplevel",
@@ -1106,6 +1126,7 @@ func (h *Handler) inspectLocalGitContext(cwd string) (session.GitContext, error)
 	toplevelOut = bytes.TrimSpace(toplevelOut)
 
 	commonDirOut, err := runLocalGitContextCommand(
+		ctx,
 		safeCWD,
 		cwd,
 		"git rev-parse --path-format=absolute --git-common-dir",
@@ -1118,7 +1139,7 @@ func (h *Handler) inspectLocalGitContext(cwd string) (session.GitContext, error)
 	}
 	commonDirOut = bytes.TrimSpace(commonDirOut)
 
-	branchOut, originOut := localGitOptionalMetadata(safeCWD)
+	branchOut, originOut := localGitOptionalMetadata(ctx, safeCWD)
 	root := string(toplevelOut)
 	return session.GitContext{
 		Branch:    string(branchOut),
@@ -1129,8 +1150,8 @@ func (h *Handler) inspectLocalGitContext(cwd string) (session.GitContext, error)
 	}, nil
 }
 
-func localGitOptionalMetadata(safeCWD string) ([]byte, []byte) {
-	branchCmd := exec.Command("git", "branch", "--show-current")
+func localGitOptionalMetadata(ctx context.Context, safeCWD string) ([]byte, []byte) {
+	branchCmd := exec.CommandContext(ctx, "git", "branch", "--show-current")
 	branchCmd.Dir = safeCWD
 	branchOut, err := branchCmd.Output()
 	if err != nil {
@@ -1140,7 +1161,7 @@ func localGitOptionalMetadata(safeCWD string) ([]byte, []byte) {
 	}
 	branchOut = bytes.TrimSpace(branchOut)
 
-	originCmd := exec.Command("git", "config", "--get", "remote.origin.url")
+	originCmd := exec.CommandContext(ctx, "git", "config", "--get", "remote.origin.url")
 	originCmd.Dir = safeCWD
 	originOut, err := originCmd.Output()
 	if err != nil {
@@ -1150,8 +1171,10 @@ func localGitOptionalMetadata(safeCWD string) ([]byte, []byte) {
 	return branchOut, originOut
 }
 
-func runLocalGitContextCommand(safeCWD, originalCWD, operation string, args ...string) ([]byte, error) {
-	cmd := exec.Command("git", args...)
+func runLocalGitContextCommand(
+	ctx context.Context, safeCWD, originalCWD, operation string, args ...string,
+) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = safeCWD
 	out, err := cmd.Output()
 	if err == nil {

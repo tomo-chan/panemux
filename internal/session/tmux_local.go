@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -10,12 +11,22 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/creack/pty"
 )
 
+// tmuxExecTimeout bounds how long a single local `tmux` CLI invocation (used
+// to query pane metadata such as cwd/pid, not to attach a session) may block
+// before being killed. Without this, a wedged local tmux server left
+// GetCWD/GetActiveWorkdirs blocked indefinitely, which in turn hung the
+// GetGitInfo HTTP handler. Package-level so tests can shrink it.
+var tmuxExecTimeout = 5 * time.Second
+
 var tmuxLocalOutputFn = func(args ...string) ([]byte, error) {
-	return exec.Command("tmux", args...).Output()
+	ctx, cancel := context.WithTimeout(context.Background(), tmuxExecTimeout)
+	defer cancel()
+	return exec.CommandContext(ctx, "tmux", args...).Output()
 }
 
 // TmuxLocalSession attaches to an existing local tmux session via PTY.

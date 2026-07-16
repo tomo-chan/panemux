@@ -2,6 +2,7 @@ package session
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/creack/pty"
 )
@@ -25,6 +27,12 @@ var getPIDCWDFn = getPIDCWD
 var openFilePathsForPIDFn = openFilePathsForPID
 var userHomeDirFn = os.UserHomeDir
 var readFileFn = os.ReadFile
+
+// localExecTimeout bounds how long a single local `ps`/`lsof` CLI invocation
+// may block before being killed. Without this, a wedged process-inspection
+// call left GetActiveWorkdirs/GetCWD blocked indefinitely. Package-level so
+// tests can shrink it.
+var localExecTimeout = 5 * time.Second
 
 // validShellPath matches a valid absolute shell path.
 // Only alphanumeric characters, dots, underscores, hyphens, and slashes are permitted.
@@ -166,18 +174,26 @@ func (s *LocalSession) GetActiveWorkdirs() ([]string, error) {
 	return resolveInteractiveAgentWorkdirs(processes, pid, baseCWD)
 }
 
+// goosDarwin names the darwin GOOS value used by the lsof-based fallback
+// paths below (getPIDCWD, openFilePathsForPID), so darwin-specific logic and
+// tests referencing it don't repeat the string literal.
+const goosDarwin = "darwin"
+
 func getPIDCWD(pid int) (string, error) {
 	switch runtime.GOOS {
 	case "linux":
 		return os.Readlink("/proc/" + strconv.Itoa(pid) + "/cwd")
-	case "darwin":
+	case goosDarwin:
 		pidArg, err := processIDArg(pid)
 		if err != nil {
 			return "", err
 		}
 		// -a ANDs the -p and -d conditions; without -a they are OR'd, which
 		// causes -d cwd to dump the cwd of every process on the system.
-		out, err := exec.Command(
+		ctx, cancel := context.WithTimeout(context.Background(), localExecTimeout)
+		defer cancel()
+		out, err := exec.CommandContext(
+			ctx,
 			"lsof",
 			"-a",
 			"-p",
@@ -217,7 +233,9 @@ var validProcessIDArg = regexp.MustCompile(`^[1-9][0-9]*$`)
 var validLocalUsername = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
 
 func listProcesses() ([]processInfo, error) {
-	out, err := exec.Command("ps", "-Ao", "pid,ppid,command").Output()
+	ctx, cancel := context.WithTimeout(context.Background(), localExecTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "ps", "-Ao", "pid,ppid,command").Output()
 	if err != nil {
 		return nil, fmt.Errorf("ps: %w", err)
 	}
@@ -574,12 +592,15 @@ func openFilePathsForPID(pid int) ([]string, error) {
 			}
 		}
 		return paths, nil
-	case "darwin":
+	case goosDarwin:
 		pidArg, err := processIDArg(pid)
 		if err != nil {
 			return nil, err
 		}
-		out, err := exec.Command(
+		ctx, cancel := context.WithTimeout(context.Background(), localExecTimeout)
+		defer cancel()
+		out, err := exec.CommandContext(
+			ctx,
 			"lsof",
 			"-a",
 			"-p",

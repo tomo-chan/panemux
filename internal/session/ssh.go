@@ -37,17 +37,18 @@ const invalidRemotePathMsg = "must be an absolute path with no shell metacharact
 
 // SSHSession manages an SSH connection with a PTY.
 type SSHSession struct {
-	client     *ssh.Client
-	session    *ssh.Session
-	jumpClient *ssh.Client // non-nil when connected via ProxyJump; closed after client
-	stdin      io.WriteCloser
-	// combined reader for stdout+stderr
-	reader         io.Reader
-	id             string
-	title          string
-	connectionName string
-	state          State
-	mu             sync.RWMutex
+	stdin             io.WriteCloser
+	reader            io.Reader
+	client            *ssh.Client
+	session           *ssh.Session
+	jumpClient        *ssh.Client
+	keepaliveStop     chan struct{}
+	id                string
+	title             string
+	connectionName    string
+	state             State
+	mu                sync.RWMutex
+	keepaliveStopOnce sync.Once
 }
 
 type sshSessionRunner interface {
@@ -382,13 +383,10 @@ func NewSSH(id, title string, cfg SSHConfig) (*SSHSession, error) {
 		reader:         pr,
 		connectionName: cfg.ConnectionName,
 		jumpClient:     jumpClient,
+		keepaliveStop:  make(chan struct{}),
 	}
 
-	monitorSSHSession(sess, pw, func(state State) {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		s.state = state
-	})
+	wireSSHSessionLifecycle(sess, pw, client, jumpClient, s.keepaliveStop, &s.mu, &s.state)
 
 	return s, nil
 }
@@ -516,7 +514,7 @@ func DetectRemoteShell(cfg SSHConfig) (string, error) {
 	}
 	defer sess.Close()
 
-	out, err := sess.Output("echo $SHELL")
+	out, err := runOutputWithTimeout(sess.Output, sess.Close, "echo $SHELL", sshInteractiveTimeout)
 	if err != nil {
 		return "", fmt.Errorf("detecting remote shell: %w", err)
 	}
@@ -553,7 +551,9 @@ func ListRemoteDirectories(cfg SSHConfig, path string, showHidden bool) ([]Direc
 	}
 	defer sess.Close()
 
-	out, err := sess.Output(remoteDirectoryListCommand(path, showHidden))
+	out, err := runOutputWithTimeout(
+		sess.Output, sess.Close, remoteDirectoryListCommand(path, showHidden), sshInteractiveTimeout,
+	)
 	if err != nil {
 		return nil, "", fmt.Errorf("listing remote directories: %w", err)
 	}
@@ -772,6 +772,8 @@ func (s *SSHSession) Resize(cols, rows uint16) error {
 }
 
 func (s *SSHSession) Close() error {
+	s.keepaliveStopOnce.Do(func() { close(s.keepaliveStop) })
+
 	s.mu.Lock()
 	s.state = StateExited
 	s.mu.Unlock()
@@ -833,7 +835,7 @@ func (s *SSHSession) GetCWD() (string, error) {
 		return "", fmt.Errorf("new ssh session for cwd: %w", err)
 	}
 	defer sess.Close()
-	out, err := sess.Output(sshGetCWDCmd)
+	out, err := runOutputWithTimeout(sess.Output, sess.Close, sshGetCWDCmd, sshRunTimeout)
 	if err != nil {
 		return "", fmt.Errorf("cwd over ssh: %w", err)
 	}
@@ -852,7 +854,11 @@ func (s *SSHSession) GetActiveWorkdirs() ([]string, error) {
 
 	return activeRemoteWorkdirsFromSessionFactory(
 		func() (sshSessionRunner, error) {
-			return s.client.NewSession()
+			sess, err := s.client.NewSession()
+			if err != nil {
+				return nil, err
+			}
+			return &timeoutSessionRunner{sess: sess}, nil
 		},
 		fmt.Sprintf("session=%s type=%s", s.id, s.Type()),
 		baseCWD,
@@ -868,7 +874,7 @@ func (s *SSHSession) InspectGitContext(cwd string) (GitContext, error) {
 	}
 	defer sess.Close()
 
-	return remoteGitContext(sess, cwd)
+	return remoteGitContext(&timeoutSessionRunner{sess: sess}, cwd)
 }
 
 func remoteShellPID(runner sshSessionRunner) (int, error) {

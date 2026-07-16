@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -1614,4 +1615,100 @@ func TestTmuxLocalSessionGetActiveWorkdir_WhenPanePIDIsCodex_PrefersCodexExecCom
 	cwds, err := tmuxLocalActiveWorkdirs("demo")
 	require.NoError(t, err)
 	assert.Equal(t, []string{"/tmp/tmux-root-codex-worktree"}, cwds)
+}
+
+// writeFakeBinary writes an executable shell script named binName into a
+// fresh directory and returns that directory, for prepending to PATH.
+func writeFakeBinary(t *testing.T, binName, body string) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, binName)
+	require.NoError(t, os.WriteFile(path, []byte(body), 0600))
+	require.NoError(t, os.Chmod(path, 0755))
+	return dir
+}
+
+func TestTmuxLocalOutputFn_TimesOutOnHungTmux(t *testing.T) {
+	binDir := writeFakeBinary(t, "tmux", "#!/bin/sh\nexec sleep 5\n")
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	prevTimeout := tmuxExecTimeout
+	tmuxExecTimeout = 10 * time.Millisecond
+	t.Cleanup(func() { tmuxExecTimeout = prevTimeout })
+
+	start := time.Now()
+	_, err := tmuxLocalOutputFn("display-message", "-p", "-t", "demo", "#{pane_current_path}")
+	elapsed := time.Since(start)
+
+	require.Error(t, err)
+	assert.Less(t, elapsed, 2*time.Second, "tmuxLocalOutputFn should be bounded by tmuxExecTimeout, not the sleep")
+}
+
+func TestTmuxLocalOutputFn_ReturnsOutputBeforeTimeout(t *testing.T) {
+	binDir := writeFakeBinary(t, "tmux", "#!/bin/sh\necho /repo/main\n")
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	out, err := tmuxLocalOutputFn("display-message", "-p", "-t", "demo", "#{pane_current_path}")
+	require.NoError(t, err)
+	assert.Equal(t, "/repo/main\n", string(out))
+}
+
+func TestListProcesses_TimesOutOnHungPS(t *testing.T) {
+	binDir := writeFakeBinary(t, "ps", "#!/bin/sh\nexec sleep 5\n")
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	prevTimeout := localExecTimeout
+	localExecTimeout = 10 * time.Millisecond
+	t.Cleanup(func() { localExecTimeout = prevTimeout })
+
+	start := time.Now()
+	_, err := listProcesses()
+	elapsed := time.Since(start)
+
+	require.Error(t, err)
+	assert.Less(t, elapsed, 2*time.Second, "listProcesses should be bounded by localExecTimeout, not the sleep")
+}
+
+func TestListProcesses_ReturnsOutputBeforeTimeout(t *testing.T) {
+	binDir := writeFakeBinary(t, "ps", "#!/bin/sh\necho '  PID  PPID COMMAND'\necho '   1     0 init'\n")
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	processes, err := listProcesses()
+	require.NoError(t, err)
+	assert.Equal(t, []processInfo{{PID: 1, PPID: 0, Command: "init"}}, processes)
+}
+
+// TestDarwinLsofCallers_TimeOutOnHungLsof covers the two darwin-only
+// lsof-backed helpers (getPIDCWD, openFilePathsForPID) with the same
+// hung-binary/timeout scenario, table-driven to avoid duplicating the setup.
+func TestDarwinLsofCallers_TimeOutOnHungLsof(t *testing.T) {
+	if runtime.GOOS != goosDarwin {
+		t.Skip("lsof-based helpers only run on darwin")
+	}
+
+	tests := []struct {
+		call func() error
+		name string
+	}{
+		{name: "getPIDCWD", call: func() error { _, err := getPIDCWD(1); return err }},
+		{name: "openFilePathsForPID", call: func() error { _, err := openFilePathsForPID(1); return err }},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			binDir := writeFakeBinary(t, "lsof", "#!/bin/sh\nexec sleep 5\n")
+			t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+			prevTimeout := localExecTimeout
+			localExecTimeout = 10 * time.Millisecond
+			t.Cleanup(func() { localExecTimeout = prevTimeout })
+
+			start := time.Now()
+			err := tt.call()
+			elapsed := time.Since(start)
+
+			require.Error(t, err)
+			assert.Less(t, elapsed, 2*time.Second, "should be bounded by localExecTimeout, not the fake binary's sleep")
+		})
+	}
 }
