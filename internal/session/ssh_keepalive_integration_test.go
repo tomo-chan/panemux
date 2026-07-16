@@ -211,3 +211,74 @@ func TestSSHSession_KeepaliveDoesNotDisconnectHealthyTransport(t *testing.T) {
 	time.Sleep(15 * sshKeepaliveInterval)
 	assert.Equal(t, StateConnected, sess.State(), "a transport that keeps answering keepalive probes must stay connected")
 }
+
+// TestSSHSession_CloseDuringInFlightKeepaliveProbe_StaysExited is the
+// regression test for the reviewer-flagged race in sshKeepaliveOnDeadFn:
+// Close() sets StateExited and then closes the transport; if a keepalive
+// probe was already blocked on SendRequest at that moment,
+// close(keepaliveStop) doesn't reach the loop until its next iteration, but
+// Close()'s own client.Close() call unblocks the in-flight SendRequest with
+// an error first. With sshKeepaliveMaxFailures set to 1, that single
+// failure is enough to fire onDead strictly after Close() already set
+// StateExited. Without a guard in markDisconnected mirroring the one
+// monitorSSHSession's callback already has, this would overwrite an
+// intentional clean close with StateDisconnected.
+func TestSSHSession_CloseDuringInFlightKeepaliveProbe_StaysExited(t *testing.T) {
+	prevInterval := sshKeepaliveInterval
+	prevProbeTimeout := sshKeepaliveProbeTimeout
+	prevMaxFailures := sshKeepaliveMaxFailures
+	sshKeepaliveInterval = 10 * time.Millisecond
+	// Long enough that the test can reliably call Close() while this
+	// probe is still blocked waiting for a reply that never comes.
+	sshKeepaliveProbeTimeout = 300 * time.Millisecond
+	sshKeepaliveMaxFailures = 1
+	t.Cleanup(func() {
+		sshKeepaliveInterval = prevInterval
+		sshKeepaliveProbeTimeout = prevProbeTimeout
+		sshKeepaliveMaxFailures = prevMaxFailures
+	})
+
+	probeStarted := make(chan struct{}, 1)
+	host, port, hostKey := startTestSSHServer(t, func(reqs <-chan *gossh.Request) {
+		for range reqs {
+			select {
+			case probeStarted <- struct{}{}:
+			default:
+			}
+			// Never reply: this probe stays in flight until client.Close()
+			// (called by SSHSession.Close(), below) unblocks it with an error.
+		}
+	})
+
+	knownHostsPath := writeTestKnownHosts(t, host, port, hostKey)
+	cfg := SSHConfig{
+		Host:           host,
+		Port:           port,
+		User:           "test",
+		Password:       "test",
+		KnownHostsFile: knownHostsPath,
+	}
+
+	sess, err := NewSSH("close-race-test", "close race test", cfg)
+	require.NoError(t, err)
+
+	select {
+	case <-probeStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected a keepalive probe to start")
+	}
+
+	// Close() sets StateExited synchronously before it closes the
+	// transport, which is what will unblock the in-flight probe above.
+	require.NoError(t, sess.Close())
+	assert.Equal(t, StateExited, sess.State())
+
+	// Give the keepalive loop time to actually observe the now-failing
+	// probe and call onDead, proving the guard — not just timing luck —
+	// is what keeps the state at StateExited.
+	time.Sleep(5 * sshKeepaliveProbeTimeout)
+	assert.Equal(
+		t, StateExited, sess.State(),
+		"an in-flight keepalive probe's failure must not overwrite an explicit Close()",
+	)
+}

@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -2242,21 +2243,20 @@ func writeFakeGitBinary(t *testing.T, body string) string {
 }
 
 func TestRunLocalGitContextCommand_TimesOutOnHungGit(t *testing.T) {
-	binDir := writeFakeGitBinary(t, "#!/bin/sh\nsleep 5\n")
+	binDir := writeFakeGitBinary(t, "#!/bin/sh\nexec sleep 5\n")
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	prev := localGitCommandTimeout
-	localGitCommandTimeout = 10 * time.Millisecond
-	t.Cleanup(func() { localGitCommandTimeout = prev })
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
 
 	start := time.Now()
 	_, err := runLocalGitContextCommand(
-		t.TempDir(), t.TempDir(), "rev-parse --show-toplevel", "rev-parse", "--show-toplevel",
+		ctx, t.TempDir(), t.TempDir(), "rev-parse --show-toplevel", "rev-parse", "--show-toplevel",
 	)
 	elapsed := time.Since(start)
 
 	require.Error(t, err)
-	assert.Less(t, elapsed, 2*time.Second, "runLocalGitContextCommand should be bounded by localGitCommandTimeout")
+	assert.Less(t, elapsed, 2*time.Second, "runLocalGitContextCommand should be bounded by the passed-in context")
 }
 
 func TestRunLocalGitContextCommand_ReturnsOutputBeforeTimeout(t *testing.T) {
@@ -2264,27 +2264,82 @@ func TestRunLocalGitContextCommand_ReturnsOutputBeforeTimeout(t *testing.T) {
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	out, err := runLocalGitContextCommand(
-		t.TempDir(), t.TempDir(), "rev-parse --show-toplevel", "rev-parse", "--show-toplevel",
+		context.Background(), t.TempDir(), t.TempDir(), "rev-parse --show-toplevel", "rev-parse", "--show-toplevel",
 	)
 	require.NoError(t, err)
 	assert.Equal(t, "/repo/main\n", string(out))
 }
 
 func TestLocalGitOptionalMetadata_TimesOutOnHungGit(t *testing.T) {
-	binDir := writeFakeGitBinary(t, "#!/bin/sh\nsleep 5\n")
+	binDir := writeFakeGitBinary(t, "#!/bin/sh\nexec sleep 5\n")
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	prev := localGitCommandTimeout
-	localGitCommandTimeout = 10 * time.Millisecond
-	t.Cleanup(func() { localGitCommandTimeout = prev })
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
 
 	start := time.Now()
-	branch, origin := localGitOptionalMetadata(t.TempDir())
+	branch, origin := localGitOptionalMetadata(ctx, t.TempDir())
 	elapsed := time.Since(start)
 
 	assert.Empty(t, branch)
 	assert.Empty(t, origin)
-	assert.Less(t, elapsed, 2*time.Second, "localGitOptionalMetadata should be bounded by localGitCommandTimeout")
+	assert.Less(t, elapsed, 2*time.Second, "localGitOptionalMetadata should be bounded by the passed-in context")
+}
+
+// TestInspectLocalGitContext_SharesDeadlineAcrossAllGitCommands is the
+// regression test for a reviewer-flagged issue: inspectLocalGitContext runs
+// up to four sequential git subprocesses (rev-parse --show-toplevel,
+// rev-parse --git-common-dir, then branch --show-current and
+// config --get remote.origin.url inside localGitOptionalMetadata). If each
+// got its own independent localGitCommandTimeout, a stuck network
+// filesystem mount under the pane's cwd — where all four invocations hang —
+// could take up to 4x localGitCommandTimeout to fail through instead of
+// being bounded by one shared deadline for the whole call.
+//
+// The fake git here lets the first two (toplevel, common-dir) succeed
+// immediately so the call reaches localGitOptionalMetadata's two
+// subprocesses, which both hang. A shared deadline keeps the total near one
+// localGitCommandTimeout window; two independent per-call deadlines would
+// take roughly twice that.
+func TestInspectLocalGitContext_SharesDeadlineAcrossAllGitCommands(t *testing.T) {
+	binDir := writeFakeGitBinary(t, ""+
+		"#!/bin/sh\n"+
+		"case \"$1 $2\" in\n"+
+		"'rev-parse --show-toplevel') echo /repo/main ;;\n"+
+		"'rev-parse --path-format=absolute') echo /repo/main/.git ;;\n"+
+		// exec (rather than a plain "sleep 5") replaces this shell process
+		// image with sleep instead of forking a child that would keep
+		// inheriting stdout after the parent shell is killed on timeout —
+		// without it, cmd.Output() blocks until the orphaned sleep child
+		// itself exits, defeating the timeout this test is verifying.
+		"*) exec sleep 5 ;;\n"+
+		"esac\n",
+	)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	prev := localGitCommandTimeout
+	// Long enough that the toplevel/common-dir subprocesses (which just
+	// echo and exit) reliably complete within it even under slow process-
+	// spawn conditions, while still keeping the whole test fast.
+	localGitCommandTimeout = 300 * time.Millisecond
+	t.Cleanup(func() { localGitCommandTimeout = prev })
+
+	h := NewHandler(defaultTestConfig(), session.NewManager())
+
+	// localGitOptionalMetadata treats a failed/timed-out branch or origin
+	// lookup as an empty (not fatal) value, so inspectLocalGitContext
+	// succeeds here even though both underlying commands hung — the
+	// regression this test guards against is elapsed wall-clock time, not
+	// the returned error.
+	start := time.Now()
+	_, err := h.inspectLocalGitContext(t.TempDir())
+	elapsed := time.Since(start)
+
+	require.NoError(t, err)
+	assert.Less(
+		t, elapsed, 2*localGitCommandTimeout,
+		"branch and origin lookups should share one deadline, not accumulate localGitCommandTimeout per call",
+	)
 }
 
 func TestLookupPRInfo_TimesOutAndFallsBack(t *testing.T) {

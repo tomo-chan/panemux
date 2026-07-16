@@ -1088,6 +1088,14 @@ func (h *Handler) inspectGitContextForSession(sess session.Session, cwd string) 
 	return h.inspectLocalGitContext(cwd)
 }
 
+// inspectLocalGitContext runs up to four sequential git subprocesses
+// (rev-parse --show-toplevel, rev-parse --git-common-dir, then branch and
+// origin lookups inside localGitOptionalMetadata) against a single shared
+// deadline, rather than giving each an independent localGitCommandTimeout.
+// A stuck working directory (e.g. a hung network filesystem mount) makes
+// every git invocation against it hang the same way, so without a shared
+// deadline the calls could accumulate up to 4x localGitCommandTimeout
+// before the whole lookup fails through.
 func (h *Handler) inspectLocalGitContext(cwd string) (session.GitContext, error) {
 	safeCWD, err := sanitizeGitExecDir(cwd)
 	if err != nil {
@@ -1101,7 +1109,11 @@ func (h *Handler) inspectLocalGitContext(cwd string) (session.GitContext, error)
 		)
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), localGitCommandTimeout)
+	defer cancel()
+
 	toplevelOut, err := runLocalGitContextCommand(
+		ctx,
 		safeCWD,
 		cwd,
 		"git rev-parse --show-toplevel",
@@ -1114,6 +1126,7 @@ func (h *Handler) inspectLocalGitContext(cwd string) (session.GitContext, error)
 	toplevelOut = bytes.TrimSpace(toplevelOut)
 
 	commonDirOut, err := runLocalGitContextCommand(
+		ctx,
 		safeCWD,
 		cwd,
 		"git rev-parse --path-format=absolute --git-common-dir",
@@ -1126,7 +1139,7 @@ func (h *Handler) inspectLocalGitContext(cwd string) (session.GitContext, error)
 	}
 	commonDirOut = bytes.TrimSpace(commonDirOut)
 
-	branchOut, originOut := localGitOptionalMetadata(safeCWD)
+	branchOut, originOut := localGitOptionalMetadata(ctx, safeCWD)
 	root := string(toplevelOut)
 	return session.GitContext{
 		Branch:    string(branchOut),
@@ -1137,10 +1150,8 @@ func (h *Handler) inspectLocalGitContext(cwd string) (session.GitContext, error)
 	}, nil
 }
 
-func localGitOptionalMetadata(safeCWD string) ([]byte, []byte) {
-	branchCtx, branchCancel := context.WithTimeout(context.Background(), localGitCommandTimeout)
-	defer branchCancel()
-	branchCmd := exec.CommandContext(branchCtx, "git", "branch", "--show-current")
+func localGitOptionalMetadata(ctx context.Context, safeCWD string) ([]byte, []byte) {
+	branchCmd := exec.CommandContext(ctx, "git", "branch", "--show-current")
 	branchCmd.Dir = safeCWD
 	branchOut, err := branchCmd.Output()
 	if err != nil {
@@ -1150,9 +1161,7 @@ func localGitOptionalMetadata(safeCWD string) ([]byte, []byte) {
 	}
 	branchOut = bytes.TrimSpace(branchOut)
 
-	originCtx, originCancel := context.WithTimeout(context.Background(), localGitCommandTimeout)
-	defer originCancel()
-	originCmd := exec.CommandContext(originCtx, "git", "config", "--get", "remote.origin.url")
+	originCmd := exec.CommandContext(ctx, "git", "config", "--get", "remote.origin.url")
 	originCmd.Dir = safeCWD
 	originOut, err := originCmd.Output()
 	if err != nil {
@@ -1162,9 +1171,9 @@ func localGitOptionalMetadata(safeCWD string) ([]byte, []byte) {
 	return branchOut, originOut
 }
 
-func runLocalGitContextCommand(safeCWD, originalCWD, operation string, args ...string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), localGitCommandTimeout)
-	defer cancel()
+func runLocalGitContextCommand(
+	ctx context.Context, safeCWD, originalCWD, operation string, args ...string,
+) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = safeCWD
 	out, err := cmd.Output()

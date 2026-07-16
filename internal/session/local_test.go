@@ -1629,7 +1629,7 @@ func writeFakeBinary(t *testing.T, binName, body string) string {
 }
 
 func TestTmuxLocalOutputFn_TimesOutOnHungTmux(t *testing.T) {
-	binDir := writeFakeBinary(t, "tmux", "#!/bin/sh\nsleep 5\n")
+	binDir := writeFakeBinary(t, "tmux", "#!/bin/sh\nexec sleep 5\n")
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	prevTimeout := tmuxExecTimeout
@@ -1654,7 +1654,7 @@ func TestTmuxLocalOutputFn_ReturnsOutputBeforeTimeout(t *testing.T) {
 }
 
 func TestListProcesses_TimesOutOnHungPS(t *testing.T) {
-	binDir := writeFakeBinary(t, "ps", "#!/bin/sh\nsleep 5\n")
+	binDir := writeFakeBinary(t, "ps", "#!/bin/sh\nexec sleep 5\n")
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	prevTimeout := localExecTimeout
@@ -1696,7 +1696,7 @@ func TestDarwinLsofCallers_TimeOutOnHungLsof(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			binDir := writeFakeBinary(t, "lsof", "#!/bin/sh\nsleep 5\n")
+			binDir := writeFakeBinary(t, "lsof", "#!/bin/sh\nexec sleep 5\n")
 			t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 			prevTimeout := localExecTimeout

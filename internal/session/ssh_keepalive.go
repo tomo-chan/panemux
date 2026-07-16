@@ -45,6 +45,13 @@ type sshKeepaliveSender interface {
 // StateDisconnected first, combined with the guard in the markExited
 // closure passed to monitorSSHSession, ensures that later, less specific
 // classification never overwrites this one.
+//
+// markDisconnected itself must also refuse to overwrite an explicit
+// StateExited — see wireSSHSessionLifecycle's symmetric guard for why:
+// Close() can already have committed to StateExited before a probe that was
+// already in flight (blocked on SendRequest) unblocks via Close()'s own
+// client.Close() call and reports a failure, racing onDead in after the
+// fact.
 func sshKeepaliveOnDeadFn(markDisconnected func(), client, jumpClient *ssh.Client) func() {
 	return func() {
 		markDisconnected()
@@ -56,10 +63,24 @@ func sshKeepaliveOnDeadFn(markDisconnected func(), client, jumpClient *ssh.Clien
 }
 
 // wireSSHSessionLifecycle wires monitorSSHSession and startSSHKeepalive
-// together for a *ssh.Session-backed session (SSHSession, TmuxSSHSession),
-// sharing the state guard that keeps a keepalive-detected disconnect from
-// being downgraded back to StateExited by the session's own later Wait()
-// error — see sshKeepaliveOnDeadFn for why that distinction matters.
+// together for a *ssh.Session-backed session (SSHSession, TmuxSSHSession).
+// Both directions of state transition are mutually guarded so neither can
+// downgrade the other's more specific classification:
+//
+//   - monitorSSHSession's callback won't downgrade a keepalive-detected
+//     StateDisconnected back to StateExited when the session's own Wait()
+//     later returns (see sshKeepaliveOnDeadFn's doc comment).
+//   - the keepalive onDead callback won't overwrite an explicit
+//     Close()-driven StateExited with StateDisconnected. Close() sets
+//     StateExited and then closes the transport; if a keepalive probe was
+//     already blocked on SendRequest at that moment, close(keepaliveStop)
+//     doesn't reach it until the next loop iteration, but Close()'s own
+//     client.Close() call unblocks the in-flight SendRequest with an error
+//     first — which can push the loop's failure count over
+//     sshKeepaliveMaxFailures and fire onDead strictly after Close() already
+//     set StateExited. Without this guard, an intentional clean close could
+//     be reported as an unexpected disconnect.
+//
 // mu/state are the caller's own mutex-protected state field.
 func wireSSHSessionLifecycle(
 	sess *ssh.Session, pw *io.PipeWriter,
@@ -78,8 +99,11 @@ func wireSSHSessionLifecycle(
 
 	startSSHKeepalive(client, keepaliveStop, sshKeepaliveOnDeadFn(func() {
 		mu.Lock()
+		defer mu.Unlock()
+		if *state == StateExited {
+			return
+		}
 		*state = StateDisconnected
-		mu.Unlock()
 	}, client, jumpClient))
 }
 
