@@ -136,9 +136,19 @@ func TestLocalSessionGetCWD(t *testing.T) {
 }
 
 func TestNewTmuxLocal_InvalidSessionName_Error(t *testing.T) {
-	_, err := NewTmuxLocal("tmux-id", "title", "bad;session")
+	_, err := NewTmuxLocal("tmux-id", "title", "bad;session", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid tmux session name")
+}
+
+func TestTmuxLocalArgs_EmptyCwd_NoDashC(t *testing.T) {
+	args := tmuxLocalArgs("mysession", "")
+	assert.Equal(t, []string{tmuxNewSessionSubcommand, "-A", "-s", "mysession"}, args)
+}
+
+func TestTmuxLocalArgs_WithCwd_AppendsDashC(t *testing.T) {
+	args := tmuxLocalArgs("mysession", "/workspace/user/project")
+	assert.Equal(t, []string{tmuxNewSessionSubcommand, "-A", "-s", "mysession", "-c", "/workspace/user/project"}, args)
 }
 
 func TestProcessIDArg_RejectsNonPositivePID(t *testing.T) {

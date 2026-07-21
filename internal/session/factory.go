@@ -39,7 +39,7 @@ func createSession(
 		return NewSSH(pane.ID, pane.Title, cfg)
 
 	case TypeTmux:
-		return NewTmuxLocal(pane.ID, pane.Title, pane.TmuxSession)
+		return NewTmuxLocal(pane.ID, pane.Title, pane.TmuxSession, pane.Cwd)
 
 	case TypeSSHTmux:
 		cfg, err := resolveSSHConfig(pane.Connection, sshConns, sshConfigPath)
