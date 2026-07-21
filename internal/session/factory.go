@@ -17,6 +17,11 @@ func CreateFromConfig(pane *config.PaneConfig, sshConns map[string]config.SSHCon
 	return createSession(pane, sshConns, sshconfig.DefaultPath())
 }
 
+// newTmuxLocalFn is an injectable seam over NewTmuxLocal so tests can verify
+// the TypeTmux branch below forwards PaneConfig fields (in particular Cwd)
+// without spawning a real tmux process.
+var newTmuxLocalFn = NewTmuxLocal
+
 // createSession is the internal, testable version of CreateFromConfig that accepts
 // an explicit SSH config path instead of always using the default.
 func createSession(
@@ -39,7 +44,7 @@ func createSession(
 		return NewSSH(pane.ID, pane.Title, cfg)
 
 	case TypeTmux:
-		return NewTmuxLocal(pane.ID, pane.Title, pane.TmuxSession, pane.Cwd)
+		return newTmuxLocalFn(pane.ID, pane.Title, pane.TmuxSession, pane.Cwd)
 
 	case TypeSSHTmux:
 		cfg, err := resolveSSHConfig(pane.Connection, sshConns, sshConfigPath)

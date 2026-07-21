@@ -14,8 +14,10 @@ import (
 	"github.com/creack/pty"
 )
 
+const tmuxBinary = "tmux"
+
 var tmuxLocalOutputFn = func(args ...string) ([]byte, error) {
-	return exec.Command("tmux", args...).Output()
+	return exec.Command(tmuxBinary, args...).Output()
 }
 
 // TmuxLocalSession attaches to an existing local tmux session via PTY.
@@ -41,8 +43,13 @@ func NewTmuxLocal(id, title, tmuxSession, cwd string) (*TmuxLocalSession, error)
 		return nil, err
 	}
 
-	cmd := exec.Command("tmux")
-	cmd.Args = append([]string{"tmux"}, tmuxLocalArgs(validatedSession, cwd)...)
+	// cmd.Args is assigned after construction, rather than passed directly to
+	// exec.Command, because gosec's G204 check flags any exec.Command call
+	// whose argument list is not a literal. The args (including cwd) are
+	// still discrete argv entries handed to the tmux binary, never a shell
+	// string, so this carries no injection risk — see docs/security.md.
+	cmd := exec.Command(tmuxBinary)
+	cmd.Args = append([]string{tmuxBinary}, tmuxLocalArgs(validatedSession, cwd)...)
 	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 
