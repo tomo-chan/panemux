@@ -27,6 +27,66 @@ func TestCreateFromConfig_Local(t *testing.T) {
 	assert.Equal(t, TypeLocal, sess.Type())
 }
 
+// TestCreateSession_Tmux_PassesCwdThrough verifies that pane.Cwd flows from
+// PaneConfig through createSession's TypeTmux branch into the constructor
+// used to build the local tmux session. This targets the wiring itself
+// (factory.go forgetting to forward pane.Cwd), not the argument-building
+// logic already covered by TestTmuxLocalArgs_*, using an injected stub so no
+// real tmux process is spawned.
+func TestCreateSession_Tmux_PassesCwdThrough(t *testing.T) {
+	prev := newTmuxLocalFn
+	defer func() { newTmuxLocalFn = prev }()
+
+	var gotID, gotTitle, gotTmuxSession, gotCwd string
+	newTmuxLocalFn = func(id, title, tmuxSession, cwd string) (*TmuxLocalSession, error) {
+		gotID, gotTitle, gotTmuxSession, gotCwd = id, title, tmuxSession, cwd
+		return &TmuxLocalSession{id: id, title: title, tmuxSession: tmuxSession, state: StateConnected}, nil
+	}
+
+	pane := &config.PaneConfig{
+		ID:          "test-tmux",
+		Type:        "tmux",
+		Title:       "Test Tmux",
+		TmuxSession: "mysession",
+		Cwd:         "/workspace/user/project",
+	}
+	sess, err := createSession(pane, nil, "")
+	require.NoError(t, err)
+
+	assert.Equal(t, "test-tmux", gotID)
+	assert.Equal(t, "Test Tmux", gotTitle)
+	assert.Equal(t, "mysession", gotTmuxSession)
+	assert.Equal(t, "/workspace/user/project", gotCwd)
+	assert.Equal(t, TypeTmux, sess.Type())
+}
+
+// TestCreateSession_Tmux_EmptyCwd_PassesEmptyString verifies the empty-cwd
+// case is also forwarded as-is (not substituted with a default), matching
+// NewTmuxLocal's own empty-cwd handling in tmuxLocalArgs.
+func TestCreateSession_Tmux_EmptyCwd_PassesEmptyString(t *testing.T) {
+	prev := newTmuxLocalFn
+	defer func() { newTmuxLocalFn = prev }()
+
+	var gotCwd string
+	cwdSeen := false
+	newTmuxLocalFn = func(id, title, tmuxSession, cwd string) (*TmuxLocalSession, error) {
+		gotCwd = cwd
+		cwdSeen = true
+		return &TmuxLocalSession{id: id, title: title, tmuxSession: tmuxSession, state: StateConnected}, nil
+	}
+
+	pane := &config.PaneConfig{
+		ID:          "test-tmux-no-cwd",
+		Type:        "tmux",
+		TmuxSession: "mysession2",
+	}
+	_, err := createSession(pane, nil, "")
+	require.NoError(t, err)
+
+	require.True(t, cwdSeen)
+	assert.Empty(t, gotCwd)
+}
+
 func TestCreateFromConfig_UnknownType(t *testing.T) {
 	pane := &config.PaneConfig{
 		ID:   "test",

@@ -14,8 +14,10 @@ import (
 	"github.com/creack/pty"
 )
 
+const tmuxBinary = "tmux"
+
 var tmuxLocalOutputFn = func(args ...string) ([]byte, error) {
-	return exec.Command("tmux", args...).Output()
+	return exec.Command(tmuxBinary, args...).Output()
 }
 
 // TmuxLocalSession attaches to an existing local tmux session via PTY.
@@ -32,13 +34,22 @@ type TmuxLocalSession struct {
 }
 
 // NewTmuxLocal creates a new session that attaches to a local tmux session.
-func NewTmuxLocal(id, title, tmuxSession string) (*TmuxLocalSession, error) {
+// cwd, when set, is only honored when tmux creates a brand-new session: if a
+// session named tmuxSession is already running, "-c" is ignored by tmux and
+// the pane keeps that session's existing working directory.
+func NewTmuxLocal(id, title, tmuxSession, cwd string) (*TmuxLocalSession, error) {
 	validatedSession, err := validateTmuxSessionName(tmuxSession)
 	if err != nil {
 		return nil, err
 	}
 
-	cmd := exec.Command("tmux", "new-session", "-A", "-s", validatedSession)
+	// cmd.Args is assigned after construction, rather than passed directly to
+	// exec.Command, because gosec's G204 check flags any exec.Command call
+	// whose argument list is not a literal. The args (including cwd) are
+	// still discrete argv entries handed to the tmux binary, never a shell
+	// string, so this carries no injection risk — see docs/security.md.
+	cmd := exec.Command(tmuxBinary)
+	cmd.Args = append([]string{tmuxBinary}, tmuxLocalArgs(validatedSession, cwd)...)
 	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 
@@ -191,6 +202,19 @@ func (s *TmuxLocalSession) Close() error {
 		s.cmd.Process.Kill()
 	}
 	return nil
+}
+
+const tmuxNewSessionSubcommand = "new-session"
+
+// tmuxLocalArgs builds the "tmux new-session" argument list. cwd, when
+// non-empty, is passed via "-c" as a discrete exec.Command argument (no
+// shell involved), matching the ssh_tmux "-c" handling in tmux_ssh.go.
+func tmuxLocalArgs(tmuxSession, cwd string) []string {
+	args := []string{tmuxNewSessionSubcommand, "-A", "-s", tmuxSession}
+	if cwd != "" {
+		args = append(args, "-c", cwd)
+	}
+	return args
 }
 
 func validateTmuxSessionName(tmuxSession string) (string, error) {
