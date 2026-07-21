@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.5](https://github.com/tomo-chan/panemux/compare/v0.20.4...v0.20.5) (2026-07-21)
+
+
+### Bug Fixes
+
+* pass configured cwd to local tmux sessions ([#159](https://github.com/tomo-chan/panemux/issues/159)) ([4e5f996](https://github.com/tomo-chan/panemux/commit/4e5f996a505fa5b59fac354ab25d540bdd9f885b))
+
 ## [0.20.4](https://github.com/tomo-chan/panemux/compare/v0.20.3...v0.20.4) (2026-07-10)
 
 
