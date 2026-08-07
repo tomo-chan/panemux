@@ -43,16 +43,28 @@ After validation, the path is wrapped with `shellQuotePath`, which single-quotes
 The planned `internal/board` package (full design in [agent-board.md](agent-board.md)) writes
 cross-pane agent messages into a remote host's message store over the SSH exec channel already used
 by `GetCWD`/`InspectGitContext`. Two backends are planned, `native` (panemux's own SQLite file) and
-`agmsg` (delegating to an operator-installed [agmsg](https://github.com/fujibee/agmsg) instance via
-its `scripts/api.sh`); the same rule applies to both. Message bodies are arbitrary text written by a
-Claude (or other agent) process, not a trusted value, so the same discipline as `cwd` above applies:
-`RunBoardCommand` must send the body over the remote command's **stdin** as a JSON payload to a
-fixed argv (`panemux board recv` for `native`, agmsg's own script entry point for `agmsg`), and must
-never build a shell command string that interpolates the body. These are the only board-related
-commands panemux itself ever executes remotely; each performs a parameterized write against that
-backend's own local store on that host. panemux only ever detects an existing agmsg installation —
-it never installs, updates, or otherwise manages agmsg on the operator's behalf, locally or
-remotely.
+`agmsg` (delegating to an operator-installed [agmsg](https://github.com/fujibee/agmsg) instance).
+Message bodies are arbitrary text written by a Claude (or other agent) process, not a trusted value,
+so both backends must ensure no unescaped body content reaches a remote shell — but they satisfy
+that requirement by different means, verified against each tool's actual argument contract rather
+than assumed to match:
+
+- `native`: `RunBoardCommand` sends the body over the remote command's **stdin** as a JSON payload
+  to the fixed argv `panemux board recv`, the same discipline as `cwd` above. The body never
+  appears in the command string at all.
+- `agmsg`: reads go through `scripts/api.sh`, which only takes digit- or
+  path-traversal-validated arguments. Writes go through `scripts/api.sh`'s sibling script,
+  `scripts/send.sh <team> <from> <to> <body> [--force]`, which — per agmsg's own source — takes
+  `body` as a positional argument with **no stdin option**. For this script only, `RunBoardCommand`
+  must single-quote-escape every argument (`shellQuotePath`-style, matching the existing `cwd`
+  discipline) before building the remote command string, since keeping the body out of the command
+  string entirely is not possible here. This is a documented exception driven by `send.sh`'s own
+  contract, not a relaxation of the "no unescaped user content in a remote shell" requirement.
+
+These are the only board-related commands panemux itself ever executes remotely; each performs a
+write against that backend's own local store on that host. panemux only ever detects an existing
+agmsg installation — it never installs, updates, or otherwise manages agmsg on the operator's
+behalf, locally or remotely.
 
 ### Auth token and transport encryption (design, not yet implemented)
 

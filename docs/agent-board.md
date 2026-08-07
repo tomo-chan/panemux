@@ -112,11 +112,27 @@ host. Claude-to-Claude only — a Codex pane on the same host cannot join a `nat
 
 ### `agmsg`
 
-Delegates to an agmsg installation already present on the pane's host, using only the interfaces
-agmsg documents as stable for third-party use: the CLI/skill entry points (`/agmsg ...` from inside
-Claude Code, or the equivalent `$agmsg`/skill invocation for other agents) and `scripts/api.sh` for
-JSON-in/JSON-out reads and writes. panemux never reads or writes agmsg's `messages.db` or
-`teams/*/config.json` directly, matching agmsg's own README guidance that those are internal.
+Delegates to an agmsg installation already present on the pane's host. Reads and writes go through
+two different scripts under agmsg's `scripts/` directory, verified against agmsg's source (not
+inferred): panemux never reads or writes agmsg's `messages.db` or `teams/*/config.json` directly,
+matching agmsg's own README guidance that those are internal.
+
+**Reads — `scripts/api.sh`, read-only.** Its `case "$VERB"` block implements only `get`:
+
+| Call | Returns |
+|---|---|
+| `api.sh get teams` | `{"name": "<team>"}` per line, one per team under `teams/` |
+| `api.sh get teams <team> members` | `{"name","types","project"}` per line |
+| `api.sh get teams <team> messages [--agent <name>] [--limit N] [--before-id <id>]` | `{"type":"message_sent","id","team","from","to","body","at"}` per line, JSONL, oldest-first |
+
+`id` is returned as a string (agmsg's own future-proofing against a non-integer ID scheme, per its
+source comments), and `--agent`/`--limit`/`--before-id` are validated as plain digits before being
+used in a query, guarding against SQL injection on agmsg's own side.
+
+**Writes — `scripts/send.sh`, not `api.sh`.** Signature: `send.sh <team> <from> <to> <body>
+[--force]`. Unlike `api.sh`, `send.sh` takes `body` as a **positional shell argument**, not stdin —
+there is no stdin-based write path in agmsg to delegate to. `from` is checked against that team's
+roster unless `--force` is passed, in which case an unregistered sender name is accepted as-is.
 
 Choosing `agmsg` for a pane means:
 
@@ -125,13 +141,14 @@ Choosing `agmsg` for a pane means:
   agent already using agmsg on that host (Codex, Gemini CLI, etc.) can then exchange messages with
   it directly through agmsg, with no panemux involvement in that same-host exchange at all.
 - agmsg has no native "status" concept, only messages. panemux's status reports map onto ordinary
-  agmsg messages addressed to a reserved agent name (e.g. `_panemux_dashboard`) inside the team;
-  `LatestStatusByAgent` for this backend reads the history addressed to that reserved name and
-  keeps only the newest row per sender. The exact `scripts/api.sh` flags this requires must be
-  confirmed against a pinned agmsg version at implementation time — this document does not assert
-  a flag surface it has not verified.
-- panemux's own dashboard reads and the cross-host relay both go through `scripts/api.sh`, not
-  through a shared schema, for the same reason panemux itself avoids the raw file.
+  agmsg messages addressed to a reserved agent name, `_panemux_dashboard`, inside the team;
+  `LatestStatusByAgent` for this backend calls `api.sh get teams <team> messages --agent
+  _panemux_dashboard --limit <N>` and keeps only the newest row per `from`.
+- **The relay and the command center are never agmsg roster members**, so any send they originate
+  into an agmsg team (relaying a `native` pane's message, or the command center instructing an
+  `agmsg` pane) always passes `send.sh ... --force`. `from` is set to the originating pane's ID (or
+  `_panemux` for the command center) exactly as with the `native` backend — `--force` only skips
+  agmsg's own roster check, it does not change how `from` is chosen.
 - **Detection, not installation.** At bootstrap time panemux checks whether agmsg is available on
   that pane's host (local: presence of `scripts/api.sh` under agmsg's known skill-install location,
   or `command -v agmsg`; remote: the same check run once over the existing SSH exec channel). If
@@ -139,10 +156,11 @@ Choosing `agmsg` for a pane means:
   leaves the pane's shell session itself untouched — board is additive, never load-bearing for the
   pane to function. panemux never runs `npx agmsg`, `npm i -g agmsg`, `git clone`, or any other
   installer on the operator's behalf, on any host.
-- **Version pinning.** Because agmsg's own compatibility promise only covers `scripts/api.sh`'s
-  JSON contract (not internal storage), panemux implementation must pin a specific tested agmsg
-  version/tag range and treat a break in that script's behavior as an external dependency
-  compatibility bug, tracked the same way any other pinned dependency's breaking change would be.
+- **Version pinning.** agmsg's own compatibility promise (per its README) only covers reading
+  through `scripts/api.sh`, not `send.sh`'s argument order or `messages.db`. panemux implementation
+  must pin a specific tested agmsg version/tag and treat any change to either script's observed
+  behavior as an external dependency compatibility bug, tracked the same way any other pinned
+  dependency's breaking change would be.
 
 ## Package layout
 
@@ -177,11 +195,24 @@ Four concrete implementations, chosen per host by that host's panes' `agent_boar
   over the existing SSH exec channel and writes the row as JSON to that command's **stdin**. It
   never interpolates message bodies into a shell command string. See
   [Security model](#security-model) and [security.md](security.md).
-- `LocalAgmsgStore` shells out to the local agmsg installation's `scripts/api.sh` (see
-  [Backends](#backends)); it never touches `messages.db` directly.
-- `RemoteAgmsgStore` runs the remote host's `scripts/api.sh` over the same SSH exec channel as
-  `RemoteNativeStore`, with the same stdin-only, no-argv-interpolation discipline for message
-  bodies.
+- `LocalAgmsgStore` shells out to the local agmsg installation's `scripts/api.sh` for reads and
+  `scripts/send.sh ... --force` for writes (see [Backends](#backends)); it never touches
+  `messages.db` directly. Because this is a local `exec.Command` invocation, Go passes each
+  argument as a genuine array element with no intermediate shell, so `send.sh`'s argument-based
+  `body` parameter carries no injection risk here regardless of its content.
+- `RemoteAgmsgStore` runs the same two scripts on the remote host over the same SSH exec channel as
+  `RemoteNativeStore`. Reads (`api.sh get ...`) only ever take digit-validated or
+  path-traversal-validated arguments, so they need no special quoting beyond the discipline already
+  applied everywhere else. Writes are different: `send.sh` has no stdin-based way to receive `body`
+  (see [Backends](#backends)), so unlike `RemoteNativeStore`'s `panemux board recv`, `body` cannot
+  be kept off the exec command string here. `RemoteAgmsgStore` must instead single-quote-escape
+  every argument (team, from, to, body) with the same `shellQuotePath`-style escaping
+  `internal/session/ssh.go` already applies to `cwd`, and build the exec command string from that —
+  never from unescaped concatenation. This is a documented, precedented exception to the
+  stdin-preferred rule in [Security model](#security-model), not a relaxation of it: the underlying
+  requirement ("no user-controlled content reaches a remote shell unescaped") is upheld by
+  quoting instead of by avoiding the exec command string, because `send.sh`'s own contract leaves
+  no other way to pass `body` to it remotely.
 
 ### `internal/session` capability interfaces
 
@@ -197,9 +228,12 @@ type BoardHostID interface {
 }
 
 // BoardExecutor is implemented by SSH-backed sessions. It runs the remote board command for
-// whichever backend that pane's host uses (`panemux board recv` for native, agmsg's own
-// scripts/api.sh for agmsg) over the session's existing exec channel, writing stdin and returning
-// stdout, without ever building a shell command string from body content.
+// whichever backend that pane's host uses over the session's existing exec channel. For `native`,
+// args is just ["board", "recv"] and body content goes over stdin, never into the command string.
+// For `agmsg`, send.sh has no stdin path for its body argument (see docs/agent-board.md#backends),
+// so args carries every value including body, and the implementation must single-quote-escape each
+// element (the same discipline internal/session/ssh.go already applies to cwd) before building the
+// remote command string — stdin is unused on that path.
 type BoardExecutor interface {
     RunBoardCommand(ctx context.Context, args []string, stdin []byte) ([]byte, error)
 }
@@ -427,11 +461,16 @@ that shaped the design.
   ultimately drive shell-executing agents). Config validation must therefore fail closed: if
   `server.host` resolves to a non-loopback address and `server.auth_token` is empty, startup must
   be rejected (`internal/config/validate.go`, alongside the existing `server.port` range check).
-- **Message bodies never reach a remote shell as an interpolated argument.** `RunBoardCommand`
-  always sends the body over the exec channel's stdin to a fixed argv (`panemux board recv` for
-  `native`, agmsg's own script invocation for `agmsg`), never via a constructed shell string. This
-  is the same rule already applied to `cwd` in `internal/session/ssh.go` (`validRemotePath` /
-  `shellQuotePath`), extended to board content, and it applies identically to both backends.
+- **Message bodies never reach a remote shell unescaped.** For `native`, `RunBoardCommand` sends
+  the body over the exec channel's stdin to the fixed argv `panemux board recv`, keeping it out of
+  the command string entirely. For `agmsg`, `send.sh` has no stdin-based way to receive its `body`
+  argument — verified against agmsg's own source, not assumed — so this backend cannot avoid
+  putting the body in the remote command string. The requirement is upheld the same way `cwd`
+  already is in `internal/session/ssh.go` (`validRemotePath` / `shellQuotePath`): every argument,
+  body included, is single-quote-escaped before the command string is built, never concatenated
+  unescaped. Both backends satisfy "no unescaped user content reaches a remote shell"; they satisfy
+  it by different means because `send.sh`'s own argument-based contract leaves `native` a stdin
+  option that `agmsg` does not have.
 - **agmsg is an operator-installed, unpinned-by-panemux external dependency.** panemux only detects
   and calls it; it never bundles, vendors, or auto-installs it (see [Backends](#backends) and
   [Design principles](#design-principles)). MIT license permits depending on it, but panemux's
@@ -483,8 +522,13 @@ that shaped the design.
   `origin_host`+`origin_id` inserted twice is a no-op), cursor persistence across a simulated
   restart, `LatestStatusByAgent` with multiple status rows (only the newest per agent wins), empty
   board.
-- `internal/session`: `RunBoardCommand` never places body content in `exec.Command` args (mirrors
-  the existing `validateShell` test pattern).
+- `internal/session`: for `native`, `RunBoardCommand` never places body content in the remote
+  command string, only in stdin (mirrors the existing `validateShell` test pattern). For `agmsg`,
+  the reverse must hold and be tested explicitly: a body containing shell metacharacters (`'`, `;`,
+  `` ` ``, `$(...)`) round-trips through the built `send.sh` command string as a single escaped
+  literal argument, not as executed shell syntax — this is the one board path where the assertion
+  is "the command string must escape this correctly," not "this must never enter the command
+  string," and the test suite must cover both properties without conflating them.
 - `internal/config`: `host != loopback && auth_token == ""` is a validation error; all other
   combinations are valid. `agent_board.backend` accepts only `native`/`agmsg`; anything else is a
   validation error (no silent fallback to a default).
