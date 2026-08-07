@@ -41,13 +41,18 @@ After validation, the path is wrapped with `shellQuotePath`, which single-quotes
 ### Agent board remote writes (design, not yet implemented)
 
 The planned `internal/board` package (full design in [agent-board.md](agent-board.md)) writes
-cross-pane agent messages into a remote host's SQLite file over the SSH exec channel already used
-by `GetCWD`/`InspectGitContext`. Message bodies are arbitrary text written by a Claude process, not
-a trusted value, so the same discipline as `cwd` above applies: `RunBoardCommand` must send the
-body over the remote command's **stdin** as a JSON payload to the fixed argv `panemux board recv`,
-and must never build a shell command string that interpolates the body. `panemux board recv` is the
-only board subcommand panemux itself executes remotely; it performs a parameterized SQL insert
-against the local SQLite file on that host.
+cross-pane agent messages into a remote host's message store over the SSH exec channel already used
+by `GetCWD`/`InspectGitContext`. Two backends are planned, `native` (panemux's own SQLite file) and
+`agmsg` (delegating to an operator-installed [agmsg](https://github.com/fujibee/agmsg) instance via
+its `scripts/api.sh`); the same rule applies to both. Message bodies are arbitrary text written by a
+Claude (or other agent) process, not a trusted value, so the same discipline as `cwd` above applies:
+`RunBoardCommand` must send the body over the remote command's **stdin** as a JSON payload to a
+fixed argv (`panemux board recv` for `native`, agmsg's own script entry point for `agmsg`), and must
+never build a shell command string that interpolates the body. These are the only board-related
+commands panemux itself ever executes remotely; each performs a parameterized write against that
+backend's own local store on that host. panemux only ever detects an existing agmsg installation —
+it never installs, updates, or otherwise manages agmsg on the operator's behalf, locally or
+remotely.
 
 ### Auth token and transport encryption (design, not yet implemented)
 
