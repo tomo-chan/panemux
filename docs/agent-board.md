@@ -34,12 +34,21 @@ Agent Board replaces that inference with a small, self-reported, structured chan
   mechanism already used for terminal input) telling Claude to use the `Monitor` tool to watch its
   own inbox and to run a small CLI to report status and send messages. Everything panemux observes
   is something Claude itself chose to write, using its own `Bash`/`Monitor` tool calls.
-- **Hooks are optional, not primary.** A `Stop` hook that checks the inbox between turns can be
-  added by a user who wants delivery guarantees even when `Monitor` isn't running, mirroring how
-  the [agmsg](https://github.com/fujibee/agmsg) project treats hooks as a fallback "turn mode"
-  behind its primary `Monitor`-based "monitor mode". panemux does not write to a user's
-  `~/.claude/settings.json` on their behalf; if a user wants the hook fallback they add it
-  themselves following the instructions the bootstrap message prints.
+- **Hooks are avoidable, not required — because panemux has something agmsg doesn't.**
+  [agmsg](https://github.com/fujibee/agmsg) is a plain bash+sqlite3 skill with no host-side
+  controller, so it needs a `SessionStart` hook just to auto-launch `Monitor` when a Claude Code
+  session starts, and a `Stop` hook for its "turn mode" fallback (`/agmsg mode monitor|turn|both`) —
+  hooks are how agmsg gets *anything* to happen automatically, for both modes, not only the
+  fallback one. panemux does not have that constraint: it already has write access to every pane's
+  PTY (the same path used for all terminal input), so it can type the `Monitor`-launching bootstrap
+  instruction itself, once, the moment it detects a `claude` process starting in a board-enabled
+  pane — reproducing agmsg's "automatic, no user action" property without ever touching the user's
+  `~/.claude/settings.json`. A user who additionally wants a `Stop`-hook "turn mode" fallback for
+  extra delivery reliability (mirroring agmsg's `turn`/`both` modes) can still add one manually; the
+  bootstrap message prints the hook snippet to add, but panemux never installs it itself.
+- **Delivery mode is configurable per pane, mirroring agmsg's `/agmsg mode`.** `join` accepts
+  `--mode monitor|turn|both` (default `monitor`). `turn` and `both` require the user-added `Stop`
+  hook above; panemux cannot upgrade a pane into those modes on its own.
 - **panemux is a trusted relay, not an end-to-end encrypted channel.** See
   [Cross-host relay](#cross-host-relay) and [Security model](#security-model).
 
@@ -157,24 +166,31 @@ Same binary, `panemux board <subcommand>`:
 
 | Subcommand | Run where | Purpose |
 |---|---|---|
-| `panemux board join <pane-id> [--role worker\|supervisor]` | inside the pane, by Claude | Prints usage and writes an initial `status` row |
-| `panemux board inbox <pane-id> --watch` | inside the pane, by Claude via `Monitor` | Polls for unread rows addressed to `<pane-id>` every ~1s, prints one line per message, marks each read after printing |
+| `panemux board join <pane-id> [--role worker\|supervisor] [--mode monitor\|turn\|both]` | inside the pane, by Claude | Prints usage (including the `Stop` hook snippet for `turn`/`both`) and writes an initial `status` row. `--mode` defaults to `monitor` |
+| `panemux board inbox <pane-id> --watch` | inside the pane, by Claude via `Monitor` (`monitor`/`both` modes) or a `Stop` hook script (`turn`/`both` modes) | Polls for unread rows addressed to `<pane-id>`, prints one line per message, marks each read after printing. Under `Monitor` this polls every ~1s; under a `Stop` hook it runs once, between turns |
 | `panemux board status <pane-id> "<summary>"` | inside the pane, by Claude | Inserts a `kind='status'` row |
 | `panemux board send <to-pane-id> "<body>"` | inside a `role: supervisor` pane, by Claude | Inserts a `kind='message'` row addressed to another pane |
 | `panemux board recv` | remote host only, invoked by panemux over the exec channel | Reads one JSON row from stdin, inserts it with parameterized SQL. The only board subcommand panemux itself ever executes remotely |
 
 ## Bootstrap flow
 
-1. A pane config (or the global default) sets `agent_board.enabled: true`.
+1. A pane config (or the global default) sets `agent_board.enabled: true` (optionally with a
+   non-default `mode`).
 2. panemux's existing interactive-agent process detection (already used for the Claude worktree
    override in [architecture.md](architecture.md)) notices a `claude` process start in that pane.
 3. panemux writes a one-time instruction into the pane's PTY (the same `Session.Write` path already
-   used for all terminal input) telling Claude to run `panemux board join <pane-id>` and to start
-   `panemux board inbox <pane-id> --watch` under the `Monitor` tool.
+   used for all terminal input) telling Claude to run `panemux board join <pane-id> [--mode ...]`
+   and to start `panemux board inbox <pane-id> --watch` under the `Monitor` tool. This single PTY
+   write is what lets panemux skip the `SessionStart` hook agmsg needs for the same auto-launch
+   effect — see [Design principles](#design-principles).
 4. panemux installs one skill file, e.g. `~/.claude/commands/panemux-board.md`, once, explicitly
    (not a silent `settings.json` hooks edit) so the bootstrap instruction can also be given as a
    short slash command. Installing this skill is itself gated on `agent_board.enabled` and is
    idempotent.
+5. If the pane was joined with `--mode turn` or `--mode both`, `join` prints the exact `Stop` hook
+   entry to add to `~/.claude/settings.json`; panemux never writes that file itself, so this step
+   requires the user (or Claude, with the user's confirmation, since editing `settings.json` is a
+   file write like any other) to apply it manually.
 
 ## Roles: worker and supervisor
 
@@ -217,6 +233,7 @@ panes:
     agent_board:
       enabled: true
       role: worker   # or supervisor; supervisor must always be explicit, never a default
+      mode: monitor  # monitor (default) | turn | both; turn/both need a manually-added Stop hook
 ```
 
 A global `agent_board.enabled` default may also be supported so individual panes don't need to
