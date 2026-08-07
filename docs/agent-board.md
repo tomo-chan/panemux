@@ -19,9 +19,11 @@ Agent Board replaces that inference with a small, self-reported, structured chan
 
 1. Lets panemux collect accurate per-pane Claude status (idle / working / waiting for approval,
    last tool used, current summary) instead of guessing from transcripts.
-2. Lets a human (or one designated "supervisor" pane) broadcast a message to one or more panes'
-   Claude sessions without racing raw keystrokes into a live PTY.
-3. Aggregates all of the above into one dashboard and, for a supervisor pane, one queryable feed.
+2. Lets a human broadcast a message to one or more panes' Claude sessions without racing raw
+   keystrokes into a live PTY, and lets a local **command center** (see
+   [Command center](#command-center)) do the same conversationally on the human's behalf.
+3. Aggregates all of the above into one dashboard and, for the command center, one continuous,
+   reviewable conversation history.
 4. Optionally interoperates with [agmsg](https://github.com/fujibee/agmsg), an existing MIT-licensed
    bash+sqlite3 agent-messaging tool that already supports Claude Code, Codex, Gemini CLI, GitHub
    Copilot, Antigravity, OpenCode, and Hermes. Where a pane's host already runs agmsg, a
@@ -251,11 +253,16 @@ never calls `panemux board *`; it drives agmsg's own `/agmsg`/skill entry points
 
 | Subcommand | Run where | Purpose |
 |---|---|---|
-| `panemux board join <pane-id> [--role worker\|supervisor] [--mode monitor\|turn\|both]` | inside the pane, by Claude | Prints usage (including the `Stop` hook snippet for `turn`/`both`) and writes an initial `status` row. `--mode` defaults to `monitor` |
+| `panemux board join <pane-id> [--mode monitor\|turn\|both]` | inside the pane, by Claude | Prints usage (including the `Stop` hook snippet for `turn`/`both`) and writes an initial `status` row. `--mode` defaults to `monitor` |
 | `panemux board inbox <pane-id> --watch` | inside the pane, by Claude via `Monitor` (`monitor`/`both` modes) or a `Stop` hook script (`turn`/`both` modes) | Polls for unread rows addressed to `<pane-id>`, prints one line per message, marks each read after printing. Under `Monitor` this polls every ~1s; under a `Stop` hook it runs once, between turns |
-| `panemux board status <pane-id> "<summary>"` | inside the pane, by Claude | Inserts a `kind='status'` row |
-| `panemux board send <to-pane-id> "<body>"` | inside a `role: supervisor` pane, by Claude | Inserts a `kind='message'` row addressed to another pane |
+| `panemux board status <pane-id> "<summary>"` | inside the pane, by Claude | Inserts a `kind='status'` row for that pane |
+| `panemux board status --all` | on panemux's local host, by the command center | Reads `LatestStatusByAgent` across every managed `Store` |
+| `panemux board send <to-pane-id> "<body>"` | on panemux's local host, by the command center | Inserts a `kind='message'` row addressed to any pane, local or remote, native or agmsg; the existing relay (not this command) handles cross-`Store` delivery |
 | `panemux board recv` | remote host only, invoked by panemux over the exec channel | Reads one JSON row from stdin, inserts it with parameterized SQL. The only board subcommand panemux itself ever executes remotely |
+
+Every board-enabled pane can run `join`/`inbox`/`status` for itself. `status --all` and `send
+<any-pane-id>` are not pane-scoped — see [Command center](#command-center) for who actually runs
+them and how that is authorized.
 
 ## Bootstrap flow
 
@@ -291,26 +298,78 @@ Steps 1–2 are shared; step 3 branches on the pane's configured backend.
    `settings.json` is a file write like any other) to apply it manually. `agmsg` panes use agmsg's
    own `/agmsg mode` instead, entirely outside panemux's control.
 
-## Roles: worker and supervisor
+## Command center
 
-- `role: worker` (default): only reads its own inbox and reports its own status.
-- `role: supervisor` (explicit opt-in only, never default): may read every agent's latest status
-  (`panemux board status --all`) and send to any pane (`panemux board send <any-pane-id> ...`).
-  A supervisor pane is typically a local pane the user starts specifically for this purpose.
+Earlier drafts of this document modeled the orchestrator as a pane with `role: supervisor` running
+an ordinary interactive `claude` process. That is no longer the design: the intended experience is
+a local, Spotlight-style command palette the user converses with, not a terminal pane sitting in
+the layout. This section replaces the old "Roles" section.
 
-**Trust implication, stated explicitly:** giving a pane `role: supervisor` means its Claude process
-can inject instructions into every other board-enabled pane, local or remote, including ones
-executing arbitrary shell commands. This is the same class of risk called out for the `SendMessage`
-tool in Claude Code itself: a receiving pane must not treat a board message as pre-authorized, only
-as an ordinary instruction subject to its own normal confirmation flow. This must be stated in the
-bootstrap instruction text itself, not just in this document.
+### What it is
 
-`role` is a `native`-backend concept enforced by panemux's own CLI. agmsg has no equivalent
-supervisor/worker distinction of its own — every team member can already read team history and
-send to any other member through agmsg's normal commands. On `backend: agmsg` panes, `role` only
-affects how panemux's bootstrap instruction phrases that pane's purpose to Claude; it grants no
-extra permission panemux itself enforces, since panemux does not intermediate agmsg's own team
-membership.
+- A single, persistent **headless** Claude session, not a pane and not a PTY. panemux invokes it as
+  a short-lived subprocess per query — `claude -p --resume <command-center-session-id> "<prompt>"`
+  — rather than a long-running process, so this does not introduce the "new daemon" this document's
+  [Design principles](#design-principles) rule out. `--resume` against one fixed session id is what
+  gives the command center conversational continuity across separate queries.
+- It reads and writes the board through the exact same `panemux board status --all` / `panemux
+  board send <any-pane-id> "<body>"` native CLI already defined in
+  [CLI subcommands](#cli-subcommands), invoked as ordinary `Bash` tool calls within its own turn —
+  no new board primitive is needed for it.
+- `board send` always writes to the *local* native `Store` (the command center is not itself a
+  pane bound to a particular host/backend). The existing [cross-host relay](#cross-host-relay)
+  — which already routes by the destination pane's `(host, backend)` regardless of where a message
+  originated — delivers it onward to native or agmsg panes, local or remote, with no
+  command-center-specific routing logic required.
+- The reserved agent identity `_panemux` is used both as the `from_agent` when the command center
+  sends, and as the `to_agent` workers report status to for dashboard aggregation (unifying the
+  identity already introduced for the `agmsg` backend's status mapping in [Backends](#backends)
+  rather than adding a second reserved name).
+
+### Authorization
+
+The command center's privilege (it can message *any* board-enabled pane) is not granted by any
+board-level pane role — there is no pane role left in this design. It is granted the same way every
+other capability in panemux is: `POST`/WS access to the command center's own endpoint requires the
+global bearer-token auth described in [Security model](#security-model). This is a cleaner trust
+boundary than a pane self-declaring `role: supervisor` ever was, because it is enforced by
+panemux's existing authenticated API layer rather than by convention a receiving pane has to trust.
+
+**Trust implication, stated explicitly, still applies:** a message the command center sends is an
+ordinary instruction to the receiving pane, not something pre-authorized — the same caveat already
+called out for the `SendMessage` tool in Claude Code itself. The receiving pane's own normal
+confirmation flow still applies.
+
+### API and streaming
+
+- `POST /ws/board-command` (WebSocket, matching the existing `/ws/{sessionID}` streaming pattern
+  rather than a blocking REST call): the frontend sends `{"prompt": "..."}`, panemux runs `claude -p
+  --resume <id> --output-format=stream-json "<prompt>"` and streams tokens back as they're
+  generated, so the palette can show live output instead of waiting for the full response.
+- `GET /api/board/command/history`: returns the command center's own turn-by-turn history, parsed
+  from its Claude Code session transcript using the transcript-reading capability panemux already
+  has for Claude worktree resolution (see [architecture.md](architecture.md)) — reused as-is, not
+  duplicated into the board's `messages` table. Because `board send`/`board status --all` calls
+  the command center makes appear as ordinary tool calls in that same transcript, the returned
+  history already interleaves "what the user asked," "what the command center did on the board,"
+  and "what it told the user" in one chronological feed, with no extra bookkeeping required.
+
+### UI
+
+- A global keyboard shortcut opens a Spotlight-style modal palette (exact binding to be decided at
+  implementation time, avoiding conflicts with OS-level shortcuts and existing terminal bindings).
+- The palette shows recent history inline on open (via the history endpoint above) and streams the
+  live response as it's generated.
+- A separate, persistently accessible history panel (following the same UI pattern as the existing
+  workspace-summary overlay) exposes the same history outside the quick-palette flow, for scrolling
+  back further than what the palette shows inline.
+
+### Scope, kept intentionally narrow for now
+
+Exactly one command center session per panemux instance — not per-workspace, not multiple
+concurrent command centers. Nothing in this design forecloses that later, but nothing here should
+be built to anticipate it either, per this repository's own guidance against designing for
+hypothetical future requirements.
 
 ## API additions
 
@@ -324,6 +383,8 @@ unauthenticated `/ws/{sessionID}` full-shell endpoint, and once auth exists it s
 | `GET /api/board/status` | Latest `kind='status'` row per pane, across every host panemux manages |
 | `GET /api/board/messages?since=<id>` | History feed for the dashboard UI |
 | `POST /api/board/broadcast` | `{ "to": ["pane-a","pane-b"], "body": "..." }`; inserts directly into each target's own host `Store` (never via PTY injection, so it is safe to send to a pane mid-turn) |
+| `WS /ws/board-command` | Command center chat: client sends `{"prompt": "..."}`, server streams the headless Claude response — see [Command center](#command-center) |
+| `GET /api/board/command/history` | Command center's own transcript-derived conversation history — see [Command center](#command-center) |
 
 ## Config additions
 
@@ -333,13 +394,15 @@ server:
   port: 8080
   auth_token: ""   # empty = auto-generate on first run, saved to ~/.config/panemux/token (0600)
 
+command_center:
+  enabled: true   # default false; spawns the headless claude -p --resume process on demand
+
 panes:
   - id: pane-a
     type: local
     agent_board:
       enabled: true
       backend: native  # native (default) | agmsg; explicit only, never auto-detected
-      role: worker     # or supervisor; supervisor must always be explicit, never a default
       mode: monitor    # monitor (default) | turn | both; turn/both need a manually-added Stop hook
 
   - id: pane-b          # e.g. a Codex pane sharing pane-a's host
@@ -389,6 +452,12 @@ that shaped the design.
   panemux↔host B), but panemux itself decrypts and re-serializes the row in between, so the
   panemux process/host must be trusted for the relay to be meaningful. There is no end-to-end
   encryption between two remote agents' Claude processes.
+- **The command center's `/ws/board-command` and `/api/board/command/history` are gated by the same
+  bearer token as everything else, and that gate is the entire authorization model for
+  `board send <any-pane-id>`** — see [Command center](#command-center). There is deliberately no
+  separate, weaker permission tier for it; anyone who can authenticate to panemux at all can already
+  reach the full-shell terminal WebSocket, so a second, narrower gate here would not reduce real
+  risk, only add a second thing to keep in sync.
 
 ## Known limitations
 
@@ -406,6 +475,13 @@ that shaped the design.
   has changed incompatibly, panemux's `LocalAgmsgStore`/`RemoteAgmsgStore` can fail even though
   nothing in panemux's own config changed. This is the accepted cost of not vendoring/pinning a
   copy of agmsg inside panemux itself.
+- Exactly one command center session exists per panemux instance (see
+  [Command center](#command-center)); it is not per-workspace and does not support multiple
+  concurrent orchestrators today.
+- The command center spawns `claude -p` as a subprocess per query; response latency includes
+  process startup plus generation time, which is higher than a warm, already-running interactive
+  session would give — acceptable for a "converse with an orchestrator" UX, not for anything
+  latency-sensitive.
 
 ## Testing plan (see DEVELOPMENT.md for the TDD/coverage rules this must follow)
 
@@ -426,6 +502,13 @@ that shaped the design.
   `backend: agmsg` where agmsg is present bootstraps through the agmsg path instead of `panemux
   board *`; mixed-backend same-host relay (a `native` pane and an `agmsg` pane on one host,
   addressed to each other) goes through the relay step rather than being treated as already-shared.
+- Command center: `/ws/board-command` rejects an unauthenticated connection the same way the
+  terminal WebSocket does; `board send`/`board status --all` issued from the command center's
+  subprocess reach a target pane regardless of that pane's `(host, backend)`, using a fake `Store`
+  per combination to assert routing without a real agmsg/SSH dependency; `GET
+  /api/board/command/history` parses a fixture transcript containing interleaved user turns,
+  assistant text, and `board send`/`status --all` tool calls into one ordered feed, and returns an
+  empty/well-defined result before the command center has ever been used (no transcript file yet).
 
 ## Related documents
 
