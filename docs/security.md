@@ -44,27 +44,34 @@ The planned `internal/board` package (full design in [agent-board.md](agent-boar
 cross-pane agent messages into a remote host's message store over the SSH exec channel already used
 by `GetCWD`/`InspectGitContext`. Two backends are planned, `native` (panemux's own SQLite file) and
 `agmsg` (delegating to an operator-installed [agmsg](https://github.com/fujibee/agmsg) instance).
-Message bodies are arbitrary text written by a Claude (or other agent) process, not a trusted value,
-so both backends must ensure no unescaped body content reaches a remote shell — but they satisfy
-that requirement by different means, verified against each tool's actual argument contract rather
-than assumed to match:
+The `panemux` binary itself is never installed on a remote host under any circumstances — it is
+also a server, and a stray copy on an SSH-reached host could start its own HTTP/WS listener and
+command center. `native`'s remote support is therefore built entirely on `sqlite3`, the same tool
+`agmsg` already depends on, invoked directly over the exec channel rather than through any
+panemux-provided remote binary.
 
-- `native`: `RunBoardCommand` sends the body over the remote command's **stdin** as a JSON payload
-  to the fixed argv `panemux board recv`, the same discipline as `cwd` above. The body never
-  appears in the command string at all.
+Message bodies are arbitrary text written by a Claude (or other agent) process, not a trusted
+value, so both backends must ensure no unescaped body content reaches a remote shell — but neither
+has a stdin-based write path to fall back on (verified against each tool's actual argument contract,
+not assumed), so both build a remote command string and both must escape it correctly:
+
+- `native`: `RunBoardCommand` builds a `sqlite3 <path> "<SQL>"` invocation itself, so it needs two
+  escaping layers — SQL string-literal escaping (doubling embedded `'`) for every value placed in
+  the SQL text, then POSIX shell escaping (`shellQuotePath`-style, matching the existing `cwd`
+  discipline) around that SQL text as a whole before it becomes part of the remote command string.
+  Skipping either layer alone is a real injection path.
 - `agmsg`: reads go through `scripts/api.sh`, which only takes digit- or
   path-traversal-validated arguments. Writes go through `scripts/api.sh`'s sibling script,
   `scripts/send.sh <team> <from> <to> <body> [--force]`, which — per agmsg's own source — takes
-  `body` as a positional argument with **no stdin option**. For this script only, `RunBoardCommand`
-  must single-quote-escape every argument (`shellQuotePath`-style, matching the existing `cwd`
-  discipline) before building the remote command string, since keeping the body out of the command
-  string entirely is not possible here. This is a documented exception driven by `send.sh`'s own
-  contract, not a relaxation of the "no unescaped user content in a remote shell" requirement.
+  `body` as a positional argument with **no stdin option**, but does its own SQL escaping
+  internally. `RunBoardCommand` therefore only needs the shell-escaping layer here, not the
+  SQL-literal one `native` also needs.
 
 These are the only board-related commands panemux itself ever executes remotely; each performs a
-write against that backend's own local store on that host. panemux only ever detects an existing
-agmsg installation — it never installs, updates, or otherwise manages agmsg on the operator's
-behalf, locally or remotely.
+write against that backend's own local store on that host, using only `sqlite3` or agmsg's own
+scripts — never a copy of panemux itself. panemux only ever detects an existing agmsg
+installation — it never installs, updates, or otherwise manages agmsg on the operator's behalf,
+locally or remotely.
 
 ### Auth token and transport encryption (design, not yet implemented)
 
