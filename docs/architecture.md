@@ -63,6 +63,16 @@ Optional capability interfaces extend the base `Session` contract without breaki
 - `CWDGetter` — implemented by `LocalSession` and `SSHSession`; returns the live working directory of the running shell. `LocalSession` reads it via `lsof` (macOS) or `/proc/<pid>/cwd` (Linux). `SSHSession` runs `pwd` over a new exec channel on the existing SSH connection.
 - `SSHConnNamer` — implemented by `SSHSession`; returns the panemux connection alias used when building the `code --remote ssh-remote+<host>` command.
 
+### `internal/board` (design, not yet implemented)
+
+A planned package that replaces transcript-based Claude activity inference with a self-reported
+channel: a per-host SQLite file that panemux and the Claude process running in that host's panes
+both read/write directly, plus a relay for messages addressed across hosts. Two new optional
+session capability interfaces, `BoardHostID` and `BoardExecutor`, extend the same pattern as
+`CWDGetter`/`ActiveWorkdirGetter` above. Full design, schema, and rationale live in
+[agent-board.md](agent-board.md); do not treat that document's API/config surface as implemented
+until its status note says so.
+
 ### `internal/api`
 
 REST endpoints expose workspaces, layout compatibility, display settings, session lifecycle operations, and editor integrations.
@@ -300,6 +310,7 @@ Architecture-level security summary:
 - remote shell entrypoints validate SSH working directories before interpolating them into shell commands
 - host-key handling intentionally preserves compatibility with OpenSSH hashed `known_hosts` entries
 - shipped code should structurally avoid `gosec` findings rather than suppress them
+- panemux does not terminate TLS; non-loopback exposure is expected to sit behind operator-managed infrastructure (reverse proxy, tunnel, VPN), and the planned `internal/board` auth token is only meaningful once that transport is encrypted — see [agent-board.md](agent-board.md#security-model)
 
 ## Tradeoffs and Intentional Limits
 
@@ -307,3 +318,4 @@ Architecture-level security summary:
 - Open CORS and permissive WebSocket origin checks reduce friction for local use, but are not suitable as-is for an untrusted deployment.
 - All workspace panes are started at backend startup, including panes in inactive workspaces. This keeps tab switching fast and preserves terminal state, at the cost of using resources for hidden workspaces.
 - Dynamic session creation exists, but current UI behavior mainly creates new local panes; this is not yet a full remote session orchestration product.
+- The planned `internal/board` cross-host relay (see [agent-board.md](agent-board.md)) makes panemux a persistent relay for agent-to-agent messages between hosts it cannot make talk to each other directly, closer to a TURN server than a STUN server: panemux stays in the data path for the life of the exchange rather than helping two hosts connect directly and stepping aside, and it sees each relayed message as plaintext in process memory between the two encrypted SSH hops.

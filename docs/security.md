@@ -38,6 +38,27 @@ It accepts only absolute Unix paths and rejects shell metacharacters and control
 
 After validation, the path is wrapped with `shellQuotePath`, which single-quotes the value and escapes any interior single quotes. This keeps paths containing spaces or unusual but allowed characters safe when embedded in a shell string.
 
+### Agent board remote writes (design, not yet implemented)
+
+The planned `internal/board` package (full design in [agent-board.md](agent-board.md)) writes
+cross-pane agent messages into a remote host's SQLite file over the SSH exec channel already used
+by `GetCWD`/`InspectGitContext`. Message bodies are arbitrary text written by a Claude process, not
+a trusted value, so the same discipline as `cwd` above applies: `RunBoardCommand` must send the
+body over the remote command's **stdin** as a JSON payload to the fixed argv `panemux board recv`,
+and must never build a shell command string that interpolates the body. `panemux board recv` is the
+only board subcommand panemux itself executes remotely; it performs a parameterized SQL insert
+against the local SQLite file on that host.
+
+### Auth token and transport encryption (design, not yet implemented)
+
+panemux does not terminate TLS itself. `server.host` defaults to `127.0.0.1`; if it is set to a
+non-loopback address, `server.auth_token` must also be set, or startup must fail validation
+(`internal/config/validate.go`, alongside the existing `server.port` range check). An auth token
+sent over an unencrypted non-loopback hop can be replayed and the request it authenticates can be
+tampered with in transit, so the token only provides real protection once the operator has placed a
+TLS-terminating reverse proxy, SSH tunnel, or VPN in front of the non-loopback listener. See
+[agent-board.md](agent-board.md#security-model) for the full rationale.
+
 ## General Rules
 
 - When adding new session types or new `exec.Command` calls, the command value passed as the first argument must come from a hardcoded literal or from a trusted system source such as a file or registry with no data-flow path to user input.
