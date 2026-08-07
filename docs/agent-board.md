@@ -28,7 +28,11 @@ Agent Board replaces that inference with a small, self-reported, structured chan
    bash+sqlite3 agent-messaging tool that already supports Claude Code, Codex, Gemini CLI, GitHub
    Copilot, Antigravity, OpenCode, and Hermes. Where a pane's host already runs agmsg, a
    panemux-managed pane can join the same team as a Codex pane and reuse agmsg's own Codex support
-   (boot-prompt handoff, turn-mode delivery) instead of panemux reimplementing it. See
+   (its `Stop`-hook turn-mode delivery, since Codex has no `Monitor` tool to auto-launch) instead of
+   panemux reimplementing it. Note this is about an *already-running* Codex process in a
+   panemux-managed pane joining an existing team — it does not involve agmsg's own `spawn.sh`
+   (which launches a brand-new terminal window/process itself, a separate use case panemux never
+   triggers, since panemux already owns pane creation). See
    [Backends](#backends).
 
 ## Design principles
@@ -127,7 +131,10 @@ matching agmsg's own README guidance that those are internal.
 
 `id` is returned as a string (agmsg's own future-proofing against a non-integer ID scheme, per its
 source comments), and `--agent`/`--limit`/`--before-id` are validated as plain digits before being
-used in a query, guarding against SQL injection on agmsg's own side.
+used in a query, guarding against SQL injection on agmsg's own side. Unlike agmsg's own
+human-facing `inbox.sh`/`check-inbox.sh` (which mark whatever they display as read), `api.sh` never
+writes `read_at` — panemux's dashboard polling through it cannot cause a joined agent to miss a
+message its own inbox/`Monitor` delivery would otherwise have shown it.
 
 **Writes — `scripts/send.sh`, not `api.sh`.** Signature: `send.sh <team> <from> <to> <body>
 [--force]`. Unlike `api.sh`, `send.sh` takes `body` as a **positional shell argument**, not stdin —
@@ -137,18 +144,28 @@ roster unless `--force` is passed, in which case an unregistered sender name is 
 Choosing `agmsg` for a pane means:
 
 - That pane's bootstrap instruction (see [Bootstrap flow](#bootstrap-flow)) tells Claude to join
-  agmsg's team instead of panemux's own, using agmsg's own `join`/`actas` semantics. Any other
-  agent already using agmsg on that host (Codex, Gemini CLI, etc.) can then exchange messages with
-  it directly through agmsg, with no panemux involvement in that same-host exchange at all.
+  agmsg's team using agmsg's own onboarding (typically the `/agmsg` skill flow a live Claude
+  session runs itself). The underlying primitive that establishes membership is `join.sh <team>
+  <agent_id> <agent_type> <project_path> [--force]`, which registers the pane into `teams/<team>
+  /config.json` — this is the "roster" `send.sh` checks `from` against. Any other agent already
+  using agmsg on that host (Codex, Gemini CLI, etc.) can then exchange messages with it directly
+  through agmsg, with no panemux involvement in that same-host exchange at all. Once joined, agmsg's
+  own `SessionStart`/`SessionEnd` hooks own that pane's `Monitor`(`watch.sh`)-process lifecycle
+  end-to-end (launch, liveness, cleanup) — panemux has no part in it and does not need to.
 - agmsg has no native "status" concept, only messages. panemux's status reports map onto ordinary
   agmsg messages addressed to a reserved agent name, `_panemux_dashboard`, inside the team;
   `LatestStatusByAgent` for this backend calls `api.sh get teams <team> messages --agent
   _panemux_dashboard --limit <N>` and keeps only the newest row per `from`.
-- **The relay and the command center are never agmsg roster members**, so any send they originate
-  into an agmsg team (relaying a `native` pane's message, or the command center instructing an
-  `agmsg` pane) always passes `send.sh ... --force`. `from` is set to the originating pane's ID (or
-  `_panemux` for the command center) exactly as with the `native` backend — `--force` only skips
-  agmsg's own roster check, it does not change how `from` is chosen.
+- **The relay and the command center are never agmsg roster members, and never go through agmsg's
+  own identity-detection layer, so any send they originate into an agmsg team always passes
+  `send.sh ... --force`.** A live Claude session's own `/agmsg send` normally resolves `from`
+  automatically — `whoami.sh` matches environment variables or, failing that, walks the process
+  tree against each agent type's known process-name patterns, then `identities.sh` reconciles that
+  against a joined team/project — but that whole chain assumes a live process to introspect. The
+  relay and command center are panemux's own Go code, not a joined Claude/Codex process, so no
+  identity-detection result would ever exist for them to look up; `--force` is what lets `send.sh`
+  accept an explicit `from` (the originating pane's ID, or `_panemux` for the command center)
+  without that lookup succeeding first.
 - **Detection, not installation.** At bootstrap time panemux checks whether agmsg is available on
   that pane's host (local: presence of `scripts/api.sh` under agmsg's known skill-install location,
   or `command -v agmsg`; remote: the same check run once over the existing SSH exec channel). If
@@ -496,7 +513,10 @@ that shaped the design.
 
 - No claim/lease semantics: if two workers were both addressed by the same message (not a supported
   case today, since `to_agent` targets one pane), there is no exclusion mechanism. This mirrors
-  agmsg's own documented v1 limitation.
+  agmsg's own documented v1 limitation. Note this is distinct from agmsg's `actas-claim.sh` lock,
+  verified against its source: that lock only prevents two sessions from claiming the *same role
+  name* at once (exit code 1 if already held) — it says nothing about, and does not provide, message
+  claim/lease semantics for delivery.
 - Agents/teams are free-text identifiers with no cryptographic authentication of `from_agent`. Any
   local process that can open the board file can forge a sender. This is an integrity gap distinct
   from the transport-confidentiality concerns above and is accepted for the same reason panemux
