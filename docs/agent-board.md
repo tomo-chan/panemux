@@ -42,22 +42,11 @@ Agent Board replaces that inference with a small, self-reported, structured chan
   mechanism already used for terminal input) telling Claude to use the `Monitor` tool to watch its
   own inbox and to run a small CLI to report status and send messages. Everything panemux observes
   is something Claude itself chose to write, using its own `Bash`/`Monitor` tool calls.
-- **Hooks are optional for panemux-managed panes because panemux and
-  [agmsg](https://github.com/fujibee/agmsg) sit at different layers of the system, not because one
-  supersedes the other.** agmsg is deliberately environment-agnostic: a skill that works the same
-  way whether or not anything is hosting the terminal it runs in, which is exactly why it relies on
-  hooks (`SessionStart` to auto-launch `Monitor`, `Stop` for its "turn mode" fallback via `/agmsg
-  mode monitor|turn|both`) — hooks are how *any* Claude Code session gets something to happen
-  automatically, agmsg included, when nothing external is watching. panemux, by contrast, already
-  sits between the user and the pane as the terminal host, with write access to every pane's PTY
-  (the same path used for all terminal input). That host-level position is what lets it type the
-  `Monitor`-launching bootstrap instruction itself, once, the moment it detects a `claude` process
-  starting in a board-enabled pane, without touching the user's `~/.claude/settings.json` —
-  reproducing the same "automatic, no user action" property agmsg achieves through hooks, just by a
-  different mechanism available to a host application that a standalone skill does not have access
-  to. A user who additionally wants a `Stop`-hook "turn mode" fallback for extra delivery
-  reliability (mirroring agmsg's `turn`/`both` modes) can still add one manually; the bootstrap
-  message prints the hook snippet to add, but panemux never installs it itself.
+- **`native`-backend bootstrap does not edit `~/.claude/settings.json`.** panemux writes the
+  `Monitor`-launching instruction directly into the pane's PTY (the same path used for all terminal
+  input) the moment it detects a `claude` process starting in a board-enabled pane. A user who wants
+  a `Stop`-hook "turn mode" fallback for extra delivery reliability can still add one manually; the
+  bootstrap message prints the hook snippet to add, but panemux never installs it itself.
 - **Delivery mode is configurable per pane, mirroring agmsg's `/agmsg mode`.** `join` accepts
   `--mode monitor|turn|both` (default `monitor`). `turn` and `both` require the user-added `Stop`
   hook above; panemux cannot upgrade a pane into those modes on its own.
@@ -111,15 +100,8 @@ default — never inferred by probing the host. Both backends implement the same
 (below), so the relay and dashboard code is backend-agnostic; only the bootstrap flow and the CLI
 surface a board-enabled pane actually runs differ.
 
-These two backends are not ranked against each other, and this document does not treat either as
-the "real" or preferred one. They cover different ground: agmsg is a general, host-agnostic,
-multi-agent messaging tool that already works across many CLI agents and many environments, with a
-maturity and breadth panemux does not attempt to duplicate. `native` exists for the narrower case
-of Claude-only panes on a host where the operator has not installed a separate tool, and it works
-only *because* panemux is already the terminal host for those panes, giving it options (PTY
-injection, an existing SSH exec channel to relay over) that a portable, environment-agnostic tool
-like agmsg deliberately does not assume it has. Choosing one over the other for a given pane is a
-question of what that pane needs, not which backend is "better."
+`native` is panemux's own mechanism for Claude-only panes. `agmsg` is the communication layer used
+whenever a pane needs to coordinate with agents other than Claude (Codex, Gemini CLI, etc.).
 
 ### `native`
 
@@ -297,12 +279,9 @@ Steps 1–2 are shared; step 3 branches on the pane's configured backend.
      `/agmsg` or the equivalent first-run prompt for that team/agent name) and to rely on agmsg's
      own `Monitor`/hook wiring for delivery, exactly as it would if the user had set this up by
      hand outside of panemux.
-   Either way, this single PTY write is panemux's host-level counterpart to the `SessionStart` hook
-   agmsg relies on for the same auto-launch effect in environments with no host application present
-   — see [Design principles](#design-principles). This step
-   only ever establishes *that pane's* participation; it never touches any other pane or any other
-   agent already using agmsg on that host (a pre-existing Codex agent, for example, keeps working
-   exactly as it did before panemux was involved).
+   This step only ever establishes *that pane's* participation; it never touches any other pane or
+   any other agent already using agmsg on that host (a pre-existing Codex agent, for example, keeps
+   working exactly as it did before panemux was involved).
 4. `native` only: panemux installs one skill file, e.g. `~/.claude/commands/panemux-board.md`, once,
    explicitly (not a silent `settings.json` hooks edit) so the bootstrap instruction can also be
    given as a short slash command. Installing this skill is itself gated on `agent_board.enabled`
