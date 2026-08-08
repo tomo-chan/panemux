@@ -495,15 +495,27 @@ var base64Alphabet = regexp.MustCompile(`^[A-Za-z0-9+/]*=*$`)
 // substitution wrapped in double quotes, which prevents word-splitting/glob
 // expansion of the decoded result while still substituting it as a single
 // argument: `"$(printf '%s' '<base64>' | base64 -d)"`.
-func boardArgLiteral(v string) string {
+// boardArgLiteral returns an error, rather than silently substituting a
+// fallback value, when the encoded form fails the allowlist check.
+// docs/security.md's accepted CodeQL-safe idiom for cwd (validateRemotePath)
+// is a regex check that *returns an error on mismatch*, so the caller
+// cannot proceed to the sink with the checked value on any path but the
+// validated one — that early return, not the regex alone, is what CodeQL's
+// taint tracking recognizes as breaking the flow. A conditional fallback
+// (checked value on success, a hardcoded default on failure, both flowing
+// to the same return) does not: the sink is still reached on every path,
+// so CodeQL keeps tracking the tainted value through it regardless of the
+// check. Matching validateRemotePath's error-return shape exactly is what
+// this function does.
+func boardArgLiteral(v string) (string, error) {
 	enc := base64.StdEncoding.EncodeToString([]byte(v))
 	if !base64Alphabet.MatchString(enc) {
 		// Unreachable in practice: base64.StdEncoding cannot produce
 		// anything outside this alphabet. Refuse rather than pass through
 		// an unvalidated value if that ever stops being true.
-		enc = ""
+		return "", errors.New("board argument failed to encode to the expected base64 alphabet")
 	}
-	return `"$(printf '%s' ` + shellQuotePath(enc) + ` | base64 -d)"`
+	return `"$(printf '%s' ` + shellQuotePath(enc) + ` | base64 -d)"`, nil
 }
 
 // buildBoardCommand builds the remote shell command string for a board
@@ -522,7 +534,11 @@ func buildBoardCommand(args []string) (string, error) {
 	parts := make([]string, 0, len(args))
 	parts = append(parts, shellQuotePath(args[0]))
 	for _, a := range args[1:] {
-		parts = append(parts, boardArgLiteral(a))
+		lit, err := boardArgLiteral(a)
+		if err != nil {
+			return "", err
+		}
+		parts = append(parts, lit)
 	}
 	return strings.Join(parts, " "), nil
 }

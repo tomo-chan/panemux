@@ -1001,21 +1001,23 @@ that shaped the design.
   construction of that string. `send.sh` does its own SQL escaping internally, so shell-escaping is
   the only layer panemux is responsible for on the write path — there is no panemux-owned SQL text
   to also escape, unlike an earlier draft of this design that had panemux building its own SQL.
-- **Open implementation question: `shellQuotePath`-style escaping alone may not satisfy this
-  repository's own CodeQL bar for a message body.** `docs/security.md` is explicit that a quoting
-  or regex-submatch transform does not, by itself, break CodeQL's taint-tracking — the accepted
-  pattern (`cwd`) is a **regex allowlist** (`validRemotePath`) applied *before* `shellQuotePath`,
-  and the allowlist is what actually breaks the taint chain. A message body is arbitrary
-  agent-authored text; it cannot be regex-allowlisted the way a path can. Encoding the body to a
-  constrained alphabet before it ever reaches the command string (e.g. base64, then a regex check
-  that the *encoded* string is pure base64 — genuinely mirroring the `validRemotePath`-then-quote
-  shape, since a base64 alphabet cannot itself contain shell metacharacters) is the most promising
-  direction, but it requires the remote side to decode before handing the value to `send.sh` (which
-  does not accept pre-encoded input), which is its own small piece of remote shell composition to
-  get right. This document does not claim the question is resolved; implementation must either find
-  a construction that satisfies CodeQL structurally, or make a deliberate, documented, narrowly
-  scoped exception consistent with `docs/security.md`'s stated preference for structural fixes over
-  suppression — not assume plain `shellQuotePath` on a message body will pass review unremarked.
+- **Resolved in Phase 1's implementation: `shellQuotePath`-style escaping alone does not satisfy
+  this repository's own CodeQL bar for a message body — and the fix requires more than just a
+  regex allowlist somewhere in the function.** `docs/security.md`'s accepted pattern (`cwd`) is a
+  **regex allowlist** (`validRemotePath`) applied *before* `shellQuotePath`. A message body is
+  arbitrary agent-authored text and cannot be regex-allowlisted directly the way a path can, so
+  `RunBoardCommand` instead base64-encodes the body first and allowlists the *encoded* form (a
+  base64 alphabet cannot contain a shell metacharacter, mirroring `validRemotePath`'s role). The
+  first implementation of that idea still shipped a real CodeQL `go/command-injection` finding on
+  PR #163 (two critical alerts): the allowlist check fell back to a hardcoded default value on
+  mismatch instead of aborting, so the sink was still reachable on every path and CodeQL kept
+  tracking the tainted value through it. The fix — `boardArgLiteral` returning `(string, error)`
+  and propagating an early `return "", err` on mismatch, exactly matching `validateRemotePath`'s
+  shape rather than approximating it — is what actually cleared the alert. The lesson for future
+  work on this repository's CodeQL bar: a regex allowlist only breaks the taint chain when a
+  mismatch produces a genuine early return, not merely a substituted safe-looking value that still
+  flows to the same sink. See `docs/security.md`'s "Agent board remote writes" section and
+  `buildBoardCommand`/`boardArgLiteral` in `internal/session/ssh.go`.
 - **panemux itself is never deployed to a remote host.** Beyond the injection-surface argument
   above, the `panemux` binary is also the server: a copy running on an SSH-reached host could start
   its own HTTP/WS listener, auth surface, and command center — a second, unmanaged instance of

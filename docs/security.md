@@ -70,6 +70,21 @@ an operator-configured filesystem path, not agent-authored text. `send.sh` does 
 escaping internally, so this is the only escaping layer panemux is responsible for. See
 `buildBoardCommand`/`boardArgLiteral` in `internal/session/ssh.go` for the implementation.
 
+**The allowlist check must return an error on mismatch, not fall back to a default value.** An
+earlier version of `boardArgLiteral` reset the encoded value to `""` and continued when the
+alphabet check failed, instead of aborting. CodeQL's `go/command-injection` query flagged this on
+PR #163 (two critical alerts, one per `RunBoardCommand` call site) even though the same alphabet
+check was present: a conditional fallback that still reaches the same `return` on every path does
+not remove the sink from the tainted value's flow, because the checked variable — not the original
+untrusted input, but still data flow the query tracks — reaches `sess.Output` regardless of which
+branch was taken. `validateRemotePath`'s accepted pattern for `cwd` isn't just "a regex check exists
+somewhere before the sink" — it's specifically an early `return "", err` on mismatch, which removes
+the tainted value from the flow entirely on the failing path. `boardArgLiteral` now does the same:
+it returns `(string, error)` and `buildBoardCommand` propagates that error instead of building a
+command string with a silently-substituted value. This is unreachable in practice (`base64.
+StdEncoding.EncodeToString` cannot produce output outside its own alphabet), but the shape of the
+check — not just its practical unreachability — is what satisfies CodeQL's taint analysis.
+
 `send.sh` and `api.sh` are the only board-related commands panemux itself ever executes remotely;
 each runs against agmsg's own local store on that host. panemux only ever detects an existing agmsg
 installation (`scripts/api.sh` presence, never `command -v agmsg`) — it never installs, updates, or
