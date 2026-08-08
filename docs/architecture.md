@@ -72,9 +72,18 @@ calls rather than inferred by panemux) and exchange messages through an operator
 hosts. panemux owns no message schema or storage of its own — it is only ever a client of agmsg's
 own documented scripts (`scripts/api.sh`, `scripts/send.sh`), never a reader of its internal
 SQLite file. Two new optional session capability interfaces, `BoardHostID` and `BoardExecutor`,
-extend the same pattern as `CWDGetter`/`ActiveWorkdirGetter` above. Full design and rationale live
-in [agent-board.md](agent-board.md); do not treat that document's API/config surface as implemented
-until its status note says so.
+extend the same pattern as `CWDGetter`/`ActiveWorkdirGetter` above.
+
+The same design also specifies a **command center**: a single headless `claude -p --resume`
+subprocess, invoked per query, that reads and writes the board exclusively through panemux's own
+authenticated REST API (never agmsg directly) via a narrow, purpose-built MCP server panemux
+provides — so `internal/board` stays the only code that ever calls agmsg's scripts even though the
+command center is a second, independent consumer of the board's data. This is a substantial part of
+the design's own scope (its own process lifecycle, permission model, and streaming API), not a minor
+addendum to the messaging/relay piece described above.
+
+Full design and rationale for both pieces live in [agent-board.md](agent-board.md); do not treat
+that document's API/config surface as implemented until its status note says so.
 
 ### `internal/api`
 
@@ -322,3 +331,4 @@ Architecture-level security summary:
 - All workspace panes are started at backend startup, including panes in inactive workspaces. This keeps tab switching fast and preserves terminal state, at the cost of using resources for hidden workspaces.
 - Dynamic session creation exists, but current UI behavior mainly creates new local panes; this is not yet a full remote session orchestration product.
 - The planned `internal/board` cross-host relay (see [agent-board.md](agent-board.md)) makes panemux a persistent relay for agent-to-agent messages between hosts it cannot make talk to each other directly, closer to a TURN server than a STUN server: panemux stays in the data path for the life of the exchange rather than helping two hosts connect directly and stepping aside, and it sees each relayed message as plaintext in process memory between the two encrypted SSH hops.
+- The same planned design's command center spawns a `claude -p` subprocess per query rather than keeping one warm — simpler process lifecycle and no persistent extra process, at the cost of response latency that includes subprocess startup on every query (see [agent-board.md's Process lifecycle](agent-board.md#process-lifecycle)).

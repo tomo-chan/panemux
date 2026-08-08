@@ -3,8 +3,9 @@
 > **Status: design, not yet implemented.** This document specifies the target design for the
 > `internal/board` package and its supporting API, config, and security surface. Update this
 > status note (and cross-link it from [architecture.md](architecture.md), [security.md](security.md),
-> and [behavior.md](behavior.md) as appropriate) once a phase below actually ships; until then, no
-> other doc should describe `board` endpoints or config fields as current behavior.
+> [behavior.md](behavior.md), and [ui-design.md](ui-design.md) as appropriate) once a phase below
+> actually ships; until then, no other doc should describe `board` endpoints or config fields as
+> current behavior.
 
 ## Purpose
 
@@ -41,10 +42,14 @@ Agent Board replaces that inference with a small, self-reported channel:
 3. Aggregates all of the above into one dashboard and, for the command center, one continuous,
    reviewable conversation history.
 4. Is built entirely on [agmsg](https://github.com/fujibee/agmsg), an existing MIT-licensed
-   bash+sqlite3 agent-messaging tool that already supports Claude Code, Codex, Gemini CLI, GitHub
-   Copilot, Antigravity, OpenCode, and Hermes. panemux does not maintain a second, parallel
-   messaging protocol of its own — see [Design principles](#design-principles) for why, and
-   [Integration with agmsg](#integration-with-agmsg) for how.
+   bash+sqlite3 agent-messaging tool. As of this writing agmsg's own README lists Claude Code,
+   Codex, Gemini CLI, GitHub Copilot, Antigravity, OpenCode, and Hermes as supported agent types;
+   treat that as a snapshot of agmsg's documentation, not a list panemux enforces or keeps in sync
+   itself — implementation should re-check agmsg's current README rather than trust this document's
+   copy of it, since agmsg adding or renaming a supported agent type has no effect on panemux's own
+   code (panemux never branches on agent type; it only ever calls `api.sh`/`send.sh`/`join.sh`
+   generically). panemux does not maintain a second, parallel messaging protocol of its own — see
+   [Design principles](#design-principles) for why, and [Integration with agmsg](#integration-with-agmsg) for how.
 
 ## Design principles
 
@@ -69,10 +74,16 @@ Agent Board replaces that inference with a small, self-reported channel:
   offer, and every pane on `agmsg` from the start means no relay step is needed even for two panes
   that happen to both be Claude. Agent Board is therefore built entirely on agmsg; panemux owns no
   message schema of its own.
-- **No new daemon, no new listening port.** panemux talks to agmsg the same way any of its scripts
-  or a live agent session would: local `exec.Command` calls on the host panemux itself runs on,
-  and the existing SSH exec channel (`GetCWD`/`InspectGitContext` already use it) for every other
-  host. No new process listens for anything, locally or remotely.
+- **No new daemon, no new listening port — scoped to what panemux itself starts.** panemux talks to
+  agmsg the same way any of its scripts or a live agent session would: local `exec.Command` calls on
+  the host panemux itself runs on, and the existing SSH exec channel (`GetCWD`/`InspectGitContext`
+  already use it) for every other host. panemux itself starts no new process that listens for
+  anything, locally or remotely. This claim is specifically about processes *panemux* starts —
+  agmsg's own `SessionStart` hook already launches its own `Monitor`/`watch.sh` process per joined
+  pane independently of panemux (see [Integration with agmsg](#integration-with-agmsg)), exactly as
+  it would if an operator had set up agmsg by hand with no panemux involved at all. That process is
+  agmsg's, lives and dies by agmsg's own hook lifecycle, and is not a daemon this design introduces
+  or is responsible for.
 - **panemux itself is never installed on a remote host, under any circumstances.** The `panemux`
   binary is also a server: running it can start the HTTP/WS listener, the auth surface, and the
   command center. Placing a copy on every SSH-reached host that wants board features would mean
@@ -301,6 +312,35 @@ case but overridable), not a heuristic guess. If the configured/default path doe
 and leaves the pane's shell session itself untouched. panemux never runs `npx agmsg`, `npm i -g
 agmsg`, `git clone`, or any other installer on the operator's behalf, on any host.
 
+**`~` in `agmsg_path` is expanded by panemux, never left for the remote shell to expand.** A leading
+`~` in `agent_board.agmsg_path` is resolved to an absolute path before it is ever placed into a
+`RunBoardCommand` argument list — for the local host this is the ordinary `os.UserHomeDir()`-based
+expansion this repository already uses elsewhere (see `DEVELOPMENT.md`'s testability rule); for a
+remote host, panemux resolves the remote user's home directory once per SSH connection (a single
+`echo -n "$HOME"` probe over the existing exec channel, cached for the life of that connection) and
+substitutes it locally before building any command string. This is not optional: `shellQuotePath`
+single-quotes every argument specifically to *suppress* shell expansion of its contents (see
+[Security model](#security-model)), and tilde expansion only happens for an unquoted leading `~` —
+a literal `~` placed inside single quotes reaches the remote shell as the two-character string `~`,
+not the operator's home directory, silently breaking detection and every subsequent `api.sh`/
+`send.sh` call. `validRemotePath`'s own regex already only accepts paths starting with `/` for the
+same underlying reason (see [security.md](security.md)), so this expansion step is what lets an
+operator write the natural `~/...` form in config while still handing `RunBoardCommand` an
+already-absolute, already-safe-to-quote path.
+
+**Remote command execution assumes a working, if non-interactive, shell environment.** The SSH exec
+channel `RunBoardCommand` uses runs each command as a single non-login, typically non-interactive
+shell invocation — the same channel `GetCWD`/`InspectGitContext` already use — which on many systems
+does not source `~/.bashrc`, `~/.profile`, or equivalent interactive-only startup files. agmsg's own
+runtime dependencies (`bash`, `node`, `sqlite3`) must therefore already be reachable from that
+non-interactive shell's `PATH` for board detection and every subsequent command to succeed, even if
+an operator's *interactive* SSH session (where they installed agmsg by hand) has a `PATH` that
+differs — for example, a `node` made available only by an interactively-sourced version manager
+(`nvm`, `asdf`, etc.) is not guaranteed visible here. This mirrors an assumption panemux's existing
+SSH session handling already makes for the pane's own shell startup, and is not a new category of
+risk this design introduces — but it is worth stating explicitly since a working interactive SSH
+session is not sufficient evidence that board detection will also work on that host.
+
 **Version pinning.** agmsg's own compatibility promise (per its README) only covers reading through
 `scripts/api.sh`; there is no equivalent promise for `send.sh`'s argument order/behavior or for
 `messages.db`. Because this design's write path depends entirely on `send.sh`, panemux is taking on
@@ -331,6 +371,7 @@ itself, using its own `Bash` tool, and include it as a small JSON body:
 
 ```json
 {
+  "kind": "board_status",
   "state": "working",
   "cwd": "/home/user/project",
   "branch": "feature/x",
@@ -340,6 +381,17 @@ itself, using its own `Bash` tool, and include it as a small JSON body:
   "summary": "fixing failing tests"
 }
 ```
+
+**`kind: "board_status"` is a fixed, required discriminator, not an optional field.** Detecting a
+status report by *shape alone* — "does this JSON happen to have a `state` key" — has a real false-
+positive edge: a human typing an ordinary chat message to `_panemux` through the command center or
+Spotlight palette could, by coincidence or by pasting unrelated JSON, produce a body that parses as
+valid JSON and happens to contain a `state` field, and would then be silently swallowed into the
+status cache instead of showing up as a message. Requiring a literal `"kind": "board_status"` value
+removes the ambiguity: the relay treats a row as a status update only when `Body` parses as JSON
+*and* `kind` is exactly that string; every other body — including JSON that merely resembles the
+status shape — is left alone as an ordinary message, matching [Package
+layout](#package-layout)'s detection rule.
 
 `branch`/`repo`/`pr_url` come from the agent running `git branch --show-current`, `git remote get-
 url origin`, and a PR lookup (e.g. `gh pr view --json url -q .url`) itself — panemux never computes
@@ -414,6 +466,27 @@ type AgmsgClient interface {
     Since(ctx context.Context, team, afterID string, limit int) ([]Row, error)
 }
 
+// ownSendLedger is a short-lived, in-memory record of Send calls panemux itself has issued (the
+// broadcast handler and the command center — see Cross-host relay), used only to verify a row the
+// relay later observes with From == "_panemux" actually corresponds to one of panemux's own sends,
+// since send.sh --force never checks From against a roster and an ordinary board pane could
+// otherwise forge that identity. Entries expire after a few poll intervals; a body is stored only
+// as a hash, since the ledger's job is matching, not re-displaying content.
+type ownSendLedger struct {
+    mu      sync.Mutex
+    entries map[ownSendKey]time.Time // value is expiry
+}
+
+type ownSendKey struct {
+    DestHost string
+    Team     string
+    To       string
+    BodyHash string // e.g. sha256, truncated; not a security boundary by itself, only a dedup key
+}
+
+func (l *ownSendLedger) Record(destHost, team, to, body string)      { /* inserts with a short TTL */ }
+func (l *ownSendLedger) Consume(destHost, team, to, body string) bool { /* true+deletes if matched, false if expired/absent */ }
+
 // BoardCache is the in-memory, panemux-owned view of recent board activity shown in Architecture.
 // Only the relay writes to it, as a side effect of the same Since polling it already does for
 // message forwarding; both dashboard-facing endpoints only ever read it, never calling
@@ -440,11 +513,14 @@ func (c *BoardCache) StatusSnapshot() map[string]Status    { /* mutex-guarded co
 func (c *BoardCache) MessagesSince(afterSeq int64) []Row   { /* mutex-guarded copy, filtered by Seq */ }
 ```
 
-The relay inspects every `Row` it reads: if `To == "_panemux"` and `Body` parses as the JSON shape
-from [Status self-report](#status-self-report-and-message-flow), it calls `RecordStatus` and does
+The relay inspects every `Row` it reads: if `To == "_panemux"` and `Body` parses as JSON with
+`kind == "board_status"` (see [Status self-report](#status-self-report-and-message-flow) for why
+the discriminator, not shape-sniffing, is what triggers this), it calls `RecordStatus` and does
 *not* forward that row through the cross-host relay logic (status reports are local bookkeeping,
-not messages meant for another pane). A `Body` addressed to `_panemux` that isn't valid JSON in
-that shape is left alone as an ordinary chat message. Every row, status or not, is also appended to
+not messages meant for another pane). A `Body` addressed to `_panemux` that isn't valid JSON, or is
+valid JSON without that exact `kind`, is left alone as an ordinary chat message — including a body
+that happens to share some field names with the status shape by coincidence. Every row, status or
+not, is also appended to
 `history` via `AppendMessage`, which is what `GET /api/board/messages` reads from — that endpoint
 never calls `AgmsgClient` at request time either, for the same reason `GET /api/board/status`
 doesn't: the relay has already seen everything the dashboard needs, as a side effect of polling it
@@ -539,11 +615,22 @@ to reach each other). panemux is the only node with a connection to every host, 
    comparable across hosts — persisted in a small local JSON file (e.g.
    `~/.config/panemux/board-relay-cursor.json`) — not a database table, since panemux owns no
    database — so a panemux restart resumes roughly where it left off.
-3. For each new row, panemux first checks `from`: **if `from` is not a board-enabled pane ID
-   panemux knows about on that row's source host (or is itself `_panemux`), the row is dropped and
-   logged, never relayed and never cached.** This is a deliberate integrity check on the one field
-   `--force` makes otherwise unverifiable — see [Security model](#security-model) for the forgery
-   scenario it closes. If `from` passes that check: when `to == "_panemux"`, panemux updates the
+3. For each new row, panemux first checks `from`. If `from` is a board-enabled pane ID panemux
+   knows about on that row's source host, the row passes. **If `from == "_panemux"`, the row passes
+   only if it matches an entry in panemux's own short-lived "own-send ledger"** (see [Package
+   layout](#package-layout)) — a small in-memory record of `(destination host, team, to, body hash)`
+   for every `Send` panemux's own broadcast handler and command center have issued recently, kept
+   for a few poll intervals and then discarded. This is deliberately stricter than treating
+   `_panemux` as unconditionally trusted: because `send.sh --force` never checks `from` against a
+   roster, any agent on any host can locally write a row claiming `from: "_panemux"`, and nothing at
+   the agmsg layer distinguishes that from a row that reached the same host because panemux's own
+   broadcast handler really did call `Send` there — the ledger match is what tells them apart. A row
+   with `from == "_panemux"` that matches nothing in the ledger is a suspected forgery: it is dropped
+   and logged the same as any other failed check, never relayed and never cached. Any other `from` —
+   one that is neither a known local pane ID nor a ledger-matched `_panemux` — is dropped and logged
+   too. See [Security model](#security-model) for the forgery scenario this closes and why a
+   universal `_panemux` allowance (an earlier revision of this document's check) was not enough. If
+   `from` passes: when `to == "_panemux"`, panemux updates the
    [in-memory status cache](#architecture) instead of relaying it — status reports never leave the
    host they were written on. Otherwise, panemux resolves `to` to its owning pane and that pane's
    host via the already-known pane→session config; if that host differs from the source host,
@@ -554,6 +641,21 @@ to reach each other). panemux is the only node with a connection to every host, 
    team.
 5. `GET /api/board/status` never triggers an `AgmsgClient` call at all — it only reads the status
    cache the relay already keeps current, per [Architecture](#architecture).
+
+**Cold-start backfill.** `BoardCache` starts empty on every panemux process start (see [Known
+limitations](#known-limitations)), and the regular poll loop's small `--limit` (tuned for "a few
+seconds' worth of new rows," per [Package layout](#package-layout)) is the wrong size for
+repopulating a cold cache — most panes' latest status could easily be older than that small a
+window. Before entering its steady-state poll loop, the relay therefore performs exactly one
+larger-`--limit` call per (host, team) — e.g. `--limit 1000` versus the steady-state default — scans
+those rows the same way the steady-state loop would (status rows update the cache, per-pane keeping
+only the newest; ordinary messages are appended to `history`), and only then starts polling normally
+from whatever cursor position that backfill pass reached. This does not change any of the
+correctness properties above: it is still a bounded `--limit` read with the same accepted truncation
+risk if a host has produced more than the backfill limit's worth of rows since the cursor file was
+last written, and it does not retroactively fix a restart that lost the cursor file entirely (that
+case still starts from the newest rows only, same as today). It shortens, but does not eliminate,
+the window in which the dashboard shows stale or empty status after a panemux restart.
 
 **Delivery is at-least-once, not exactly-once — an accepted simplification, not an oversight.**
 Because agmsg's own schema has no field for panemux to mark "this row has already been relayed,"
@@ -597,9 +699,25 @@ always routed through it by construction.
    panemux provisions per pane. This step only ever establishes *that pane's* participation; it
    never touches any other pane or any other agent already using agmsg on that host (a pre-existing
    Codex agent, for example, keeps working exactly as it did before panemux was involved).
-4. If `mode` is `turn` or `both` (mirroring agmsg's own `/agmsg mode monitor|turn|both`, default
+4. If `mode` is `turn` or `both` (mirroring agmsg's own `/agmsg mode monitor|turn|both|off`, default
    `monitor`), the bootstrap instruction also tells the agent to run `/agmsg mode <value>` — this
-   is agmsg's own setting, not something panemux tracks or enforces separately.
+   is agmsg's own setting, not something panemux tracks or enforces separately. agmsg's own docs
+   mark `turn` as a legacy mode kept for backward compatibility rather than the recommended one;
+   this document does not steer operators toward it, and `mode: turn` in panemux's config is a
+   pass-through of an operator's explicit choice, not a default panemux picks. `off` is agmsg's own
+   way to disable its hook-driven delivery for a pane without leaving the team — panemux's config
+   equivalent is `agent_board.enabled: false`, which is the preferred way to keep a pane out of
+   board features entirely, since it skips bootstrap for that pane rather than bootstrapping it and
+   then telling it to turn itself back off. **This step has a real repo-local side effect worth
+   stating plainly: `/agmsg mode` writes hook wiring into the pane's own project
+   `.claude/settings.local.json`, a file that outlives the pane session and is scoped to that Git
+   repository, not to panemux or to this one pane.** "Additive, never load-bearing" (see [Design
+   principles](#design-principles)) describes what happens when board features are *unavailable* —
+   the pane's shell keeps working normally — not a claim that bootstrap makes zero changes outside
+   panemux's own state. Because this write is agmsg's own onboarding behavior, not something panemux
+   scripts itself, panemux does not attempt to undo it if a pane later disables
+   `agent_board.enabled`; an operator who wants that hook wiring removed does so the same way they
+   would for any other agmsg-managed repo, outside panemux entirely.
 
 ## Command center
 
@@ -614,7 +732,10 @@ always routed through it by construction.
 - **It reads and writes the board through panemux's own authenticated REST API — `GET
   /api/board/status`, `GET /api/board/messages`, `POST /api/board/broadcast` — the same endpoints
   the browser dashboard uses, over loopback, with a token panemux injects into the subprocess's
-  environment.** This is a correction from an earlier revision of this document, which had the
+  environment.** The LLM itself never composes the HTTP call: panemux points the subprocess at a
+  narrow MCP server it provides (see [Process lifecycle](#process-lifecycle)) that exposes exactly
+  those three operations as tools and makes the actual authenticated request on the model's behalf.
+  This is a correction from an earlier revision of this document, which had the
   command center shell out to `send.sh`/`api.sh` directly. That was wrong on two counts: it made
   the LLM itself responsible for composing safely-escaped shell invocations, a second, unaudited
   path to the same exec sink alongside `AgmsgClient`'s own (see [Security
@@ -631,6 +752,39 @@ always routed through it by construction.
   identity, `_panemux` — the exact same code path a human-triggered broadcast takes, which already
   resolves the destination pane's host and calls that host's `AgmsgClient.Send` (always `--force`)
   without the command center needing any host-routing logic of its own.
+
+### Process lifecycle
+
+- **First run.** No persisted command-center session id exists yet the first time a query arrives.
+  panemux invokes `claude -p --output-format=stream-json --verbose "<prompt>"` — note `--verbose` is
+  required alongside `-p --output-format=stream-json`; the CLI refuses to stream structured output
+  in print mode without it — omitting `--resume` entirely, captures the `session_id` the stream-json
+  output reports for that first exchange, and persists it to a small local file (e.g.
+  `~/.config/panemux/command-center-session.json`, the same kind of local bookkeeping file as the
+  relay cursor in [Cross-host relay](#cross-host-relay)). Every later query reuses that id:
+  `claude -p --resume <id> --output-format=stream-json --verbose "<prompt>"`.
+- **Permissions.** The subprocess never receives `--dangerously-skip-permissions`. It has no PTY to
+  surface an interactive approval prompt through, and this design does not substitute a blanket
+  bypass for that missing prompt. Instead panemux runs a narrow, purpose-built MCP server exposing
+  exactly three tools — `board_status`, `board_messages`, `board_broadcast`, thin wrappers around the
+  three REST endpoints in [API additions](#api-additions) — and launches the command center with
+  `--allowedTools` scoped to only those three, no `Bash`, no filesystem tools, and no other MCP
+  servers an interactive Claude Code session might otherwise have configured. This is also why the
+  command center goes through an MCP server rather than a `Bash`+`curl` tool call: an MCP tool can be
+  individually allow-listed ahead of time, while a generic `Bash` grant cannot be scoped down to "only
+  run curl against this one loopback endpoint" — granting `Bash` at all would hand the command center
+  everything `Bash` can do, which is exactly the blanket-bypass outcome this design avoids.
+- **Concurrency.** At most one query may be in flight against the command center's session id at a
+  time. A `WS /ws/board-command` request that arrives while one is already running is rejected
+  immediately with an explicit "command center busy" error rather than queued — two concurrent
+  `claude -p --resume <same-id>` invocations against one session id have no ordering guarantee from
+  the CLI itself, and building a queue would add state-machine complexity this design deliberately
+  avoids for a feature kept to [one session per instance](#scope-kept-intentionally-narrow-for-now).
+- **Failure modes.** A subprocess that exits non-zero, emits malformed `stream-json`, or times out
+  surfaces as an explicit error frame on the WS connection — never a silently empty response, so the
+  frontend can distinguish "no output yet" from "the query failed." A failed query never corrupts
+  `--resume` continuity for the next one: the persisted session id is replaced only by a fresh
+  first-run capture, never derived from a failed query's absent or partial output.
 
 ### Authorization
 
@@ -669,6 +823,10 @@ flow still applies.
   workspace-summary overlay) exposes the same history outside the quick-palette flow, for scrolling
   back further than what the palette shows inline.
 
+See [ui-design.md's Agent Board UI section](ui-design.md#agent-board-ui-planned) for how these
+surfaces are meant to reuse this repository's existing dialog/overlay patterns and status vocabulary
+instead of introducing a parallel visual language.
+
 ### Scope, kept intentionally narrow for now
 
 Exactly one command center session per panemux instance — not per-workspace, not multiple
@@ -687,7 +845,7 @@ unauthenticated `/ws/{sessionID}` full-shell endpoint, and once auth exists it s
 |---|---|
 | `GET /api/board/status` | A snapshot of panemux's in-memory status cache — no `AgmsgClient` call happens on this request (see [Architecture](#architecture)) |
 | `GET /api/board/messages?since=<seq>` | History feed for the dashboard UI. `<seq>` is `BoardCache`'s own panemux-local sequence number (see [Package layout](#package-layout)), not an agmsg-native `id` — those aren't comparable across hosts |
-| `POST /api/board/broadcast` | `{ "to": ["pane-a","pane-b"], "body": "..." }`; sends directly to each target's own host via `AgmsgClient` (never via PTY injection, so it is safe to send to a pane mid-turn) |
+| `POST /api/board/broadcast` | `{ "to": ["pane-a","pane-b"], "body": "..." }`; sends directly to each target's own host via `AgmsgClient` (never via PTY injection, so it is safe to send to a pane mid-turn); delivery to the pane is immediate, but the message appears in `GET /api/board/messages`' history only after the relay's next poll cycle reads it back — see [Known limitations](#known-limitations) |
 | `WS /ws/board-command` | Command center chat: client sends `{"prompt": "..."}`, server streams the headless Claude response — see [Command center](#command-center) |
 | `GET /api/board/command/history` | Command center's own captured conversation history — see [Command center](#command-center) |
 
@@ -711,7 +869,7 @@ panes:
     type: local
     agent_board:
       enabled: true
-      mode: monitor    # monitor (default) | turn | both, mirrors agmsg's own /agmsg mode
+      mode: monitor    # monitor (default) | turn (legacy) | both | off, mirrors agmsg's own /agmsg mode
 
   - id: pane-b          # e.g. a Codex pane
     type: ssh
@@ -723,6 +881,25 @@ panes:
 A global `agent_board.enabled` default may also be supported so individual panes don't need to
 repeat it, but board features on any given host still require agmsg to already be present there —
 panemux will not install it, per [Integration with agmsg](#integration-with-agmsg).
+
+**Why `command_center` is a top-level key, not nested under `agent_board`, despite both belonging to
+the same Agent Board feature.** Nesting it would imply command_center depends on agent_board/agmsg
+being configured too, which is false by design: the command center never calls agmsg directly (see
+[Command center](#command-center)) and works with every pane's `agent_board.enabled` left `false`.
+The two keys are siblings in this config because their actual dependency graph is siblings — not
+because they're unrelated features that happen to share a document.
+
+**`_panemux` is reserved and validated where panemux can actually enforce it.** `internal/config/
+validate.go` rejects any pane config whose `id` is literally `_panemux`, the same way it already
+rejects duplicate pane IDs (see [architecture.md](architecture.md)) — panemux will not let itself be
+configured into a collision with its own reserved sentinel. This is a real but partial guarantee:
+nothing stops an operator or a live agent from running agmsg's own `join.sh <team> _panemux ...`
+by hand, outside any pane panemux bootstrapped, since agmsg's roster is agmsg's own state and
+`join.sh` is not gated by panemux at all. That gap is exactly why the [own-send
+ledger](#package-layout) check in [Cross-host relay](#cross-host-relay) does not trust the
+`_panemux` string by itself even after this validation — config-time reservation closes the
+"panemux accidentally misconfigures itself" case, not the "an agmsg team member deliberately
+registers the reserved name" case, which only the ledger check closes.
 
 ## Security model
 
@@ -790,10 +967,14 @@ that shaped the design.
   [Integration with agmsg](#integration-with-agmsg)) — so nothing at the agmsg layer stops an agent
   on Host A from sending a message with `from: "_panemux"` to a pane on Host B, which
   [Cross-host relay](#cross-host-relay) would otherwise happily forward as if the command center had
-  sent it. The relay's `from` check described there — drop and log any row whose `from` isn't a
-  known board-enabled pane ID on that row's source host, or the reserved `_panemux` identity when
-  the row is legitimately relay/command-center-originated rather than read from an agent's own
-  team — is what closes this, not anything agmsg itself enforces.
+  sent it. Unconditionally trusting any row with `from == "_panemux"` would not close this — that
+  string carries no more authority than any other free-text `from` value once `--force` is
+  universal, so treating it as automatically legitimate is exactly the gap being described, not a
+  fix for it. The actual check the relay performs — matching the row against panemux's own
+  short-lived **own-send ledger** of `Send` calls it issued itself (see [Cross-host
+  relay](#cross-host-relay) and [Package layout](#package-layout)) — is what closes this: a
+  `_panemux`-attributed row is only accepted if it corresponds to a send panemux's own broadcast
+  handler or command center actually made, never on the strength of the string alone.
 - **The command center's `/ws/board-command` and `/api/board/command/history` are gated by the same
   bearer token as everything else, and that gate is the entire authorization model for messaging
   any pane from the command center** — see [Command center](#command-center). There is deliberately
@@ -816,17 +997,27 @@ that shaped the design.
   turn — reading and summing it is a much shallower, lower-risk read than the branch/PR/worktree
   heuristics this redesign moved away from (those depended on deep, undocumented precedence rules
   across `session_meta.cwd`, `turn_context.cwd`, and subagent transcript files, which is what
-  actually proved unstable in practice). This is not Agent Board's own responsibility to build,
-  though: it fits naturally as an extension of panemux's existing, pre-board per-pane transcript
-  inspection (already used for worktree/PR detection — see [architecture.md](architecture.md) and
-  [behavior.md](behavior.md)), summing a stable field rather than parsing fragile ones, not as
-  something carried through the agmsg self-report this document specifies. A future change to that
-  existing mechanism, not to `internal/board`, is the right place for it.
+  actually proved unstable in practice). **This looks like it contradicts [Design
+  principles](#design-principles)'s "ask the agent, don't reverse-engineer its internal state" rule
+  — it isn't, and the distinction matters.** That rule targets *inference*: guessing a fact (which
+  directory the agent is really in) from a schema panemux does not control and that has already
+  drifted once. Reading `usage` is not inference — it is summing a documented, versioned field of
+  the Messages API response envelope itself, the same envelope Claude Code's own transcript already
+  stores verbatim per turn. There is no guessing step, no precedence chain across several
+  loosely-related fields, and no plausible "wrong directory" analogue: a turn's `usage` object either
+  is present with the numbers the API returned, or it isn't. This is not Agent Board's own
+  responsibility to build, though: it fits naturally as an extension of panemux's existing, pre-board
+  per-pane transcript inspection (already used for worktree/PR detection — see
+  [architecture.md](architecture.md) and [behavior.md](behavior.md)), summing a stable field rather
+  than parsing fragile ones, not as something carried through the agmsg self-report this document
+  specifies. A future change to that existing mechanism, not to `internal/board`, is the right place
+  for it.
 - The status/history cache is in-memory only, not persisted to disk. A panemux restart starts it
-  empty; `GET /api/board/status`/`/messages` show nothing until the relay's next poll cycle (which
-  resumes from the persisted cursor, so it still only sees genuinely new rows, not the pane's full
-  history) repopulates it. This is the same accepted eventual-consistency tradeoff already made for
-  the relay cursor itself.
+  empty; the relay's [cold-start backfill](#cross-host-relay) pass shortens the gap before
+  `GET /api/board/status`/`/messages` show current data again, but it is still a bounded `--limit`
+  read, not a full replay — a host that produced more rows than the backfill limit since the cursor
+  was last persisted still shows a gap. This is the same accepted eventual-consistency tradeoff
+  already made for the relay cursor itself.
 - No claim/lease semantics: if two workers were both addressed by the same message (not a supported
   case today, since `to` targets one pane), there is no exclusion mechanism. This mirrors agmsg's
   own documented v1 limitation. Distinct from that: agmsg's `actas-claim.sh` lock only prevents two
@@ -839,6 +1030,16 @@ that shaped the design.
   host's agmsg installation and pick a real, currently-registered pane ID can forge a sender inside
   that host. This is an integrity gap distinct from the transport-confidentiality concerns above and
   is accepted for the same reason panemux already accepts same-user process trust elsewhere.
+- **A broadcast's delivery and its appearance in dashboard history are decoupled.**
+  `POST /api/board/broadcast` calls `AgmsgClient.Send` directly, so the destination pane receives it
+  immediately through agmsg's own hook delivery — but `BoardCache.AppendMessage` is only ever called
+  from the relay's own poll loop, not from the broadcast handler itself, so the dashboard's history
+  view of that same message lags by up to one poll interval, same as any other row. This is a
+  deliberate choice to keep `BoardCache` populated from exactly one code path (the relay) rather than
+  give the broadcast handler a second, racing write path into the same cache that would need its own
+  reconciliation against the row the relay later reads back for the same send. The [own-send
+  ledger](#package-layout) used for `_panemux` forgery detection intentionally is not repurposed to
+  paper over this lag: it exists for that one security check, not as a second history source.
 - Relay delivery is at-least-once, bounded by the poll interval, not real-time or exactly-once; see
   [Cross-host relay](#cross-host-relay) for why a duplicate message after a panemux restart is an
   accepted outcome rather than something engineered away. Separately, and for a different reason
@@ -859,6 +1060,10 @@ that shaped the design.
   cross-agent interoperability agmsg provides that a panemux-owned protocol never could. See [agmsg
   compatibility contract](#agmsg-compatibility-contract) for how this exposure is meant to be
   caught mechanically rather than discovered by a user.
+- Bootstrap is not free of side effects outside panemux's own state: `/agmsg mode turn|both` (see
+  [Bootstrap flow](#bootstrap-flow)) writes hook wiring into the pane's project
+  `.claude/settings.local.json`, which persists in that Git repository after the pane closes and is
+  never reverted by panemux, including when a pane later disables `agent_board.enabled`.
 - Self-reported status depends on the agent's cooperation each time — see the honest tradeoff
   called out in [Status self-report](#status-self-report-and-message-flow). A pane that stops
   following its bootstrap instruction (e.g. a very long uninterrupted tool-use turn) simply stops
@@ -921,9 +1126,12 @@ documented behavior changed.
 
 ## Testing plan (see DEVELOPMENT.md for the TDD/coverage rules this must follow)
 
-- `internal/board`: status JSON parsing (valid full payload, missing optional fields, a body that
-  isn't the expected shape falls back to being treated as a plain message and is not mistaken for a
-  status update), `BoardCache.StatusSnapshot` with multiple status rows for one pane (only the
+- `internal/board`: status JSON parsing (valid full payload with `kind: "board_status"`, missing
+  optional fields, a body that isn't valid JSON falls back to being treated as a plain message, and
+  — the regression test for the shape-sniffing ambiguity this document used to have — a body that
+  *is* valid JSON, contains a `state` field, but is missing or has the wrong `kind` is also treated
+  as a plain message rather than mistaken for a status update), `BoardCache.StatusSnapshot` with
+  multiple status rows for one pane (only the
   newest wins, `UpdatedAt` reflects when it was recorded) and across multiple panes, `BoardCache`'s
   own `Seq` assignment giving a stable total order across rows from different hosts even when their
   agmsg-native `ID`s collide or aren't comparable, `MessagesSince(afterSeq)` ordering and bounding,
@@ -934,10 +1142,15 @@ documented behavior changed.
   accepted at-least-once duplicate case — assert it is delivered again, not that it's silently
   dropped or that the relay errors), the accepted truncation case (more new rows on one host than
   one poll's `--limit` — assert the newest ones are kept and the oldest of the overflow are dropped,
-  not that everything is delivered), the relay's `from`-validation (a row whose `from` is not a
-  known local pane ID or `_panemux` is dropped and logged, never cached or relayed — this is the
-  regression test for the cross-host `_panemux` impersonation scenario in [Security
-  model](#security-model)), empty team.
+  not that everything is delivered), the relay's `from`-validation (a row whose `from` is neither a
+  known local pane ID on its source host nor a ledger-matched `_panemux` is dropped and logged, never
+  cached or relayed), the own-send ledger specifically (a `from == "_panemux"` row that matches a
+  recently recorded `Send` is accepted; a `from == "_panemux"` row with no matching ledger entry —
+  including one crafted with a `to`/`body` that doesn't match any real recent send — is dropped and
+  logged, never treated as legitimate on the strength of the string alone; an entry past its TTL is
+  no longer matchable — this is the regression test for the cross-host `_panemux` impersonation
+  scenario in [Security model](#security-model), and for why an earlier revision's blanket
+  `_panemux` allowance was insufficient), empty team.
 - `internal/session`: for `RemoteAgmsgClient`, a body containing shell metacharacters (`'`, `;`,
   `` ` ``, `$(...)`) round-trips through the built `send.sh` command string as a single escaped
   literal argument, not as executed shell syntax — and the same for a `team`/`--agent` value
@@ -946,14 +1159,40 @@ documented behavior changed.
   `AgmsgClient.Send` call is asserted to include `--force` unconditionally, with no code path that
   omits it.
 - `internal/config`: `host != loopback && auth_token == ""` is a validation error; all other
-  combinations are valid. `agent_board.team` defaults to `"panemux"` when unset.
+  combinations are valid. `agent_board.team` defaults to `"panemux"` when unset. A pane config with
+  `id: "_panemux"` is a validation error, both alone and alongside otherwise-valid other panes.
 - `internal/api`: missing/incorrect bearer token is rejected (401) on both REST and the WebSocket
   handshake; correct token succeeds.
+- `internal/ws`: `/ws/board-command` is new surface under the same package as the existing terminal
+  WebSocket handler, so it is covered by `coverage-go`'s existing `internal/ws` gate (see
+  `DEVELOPMENT.md`) — no separate coverage carve-out is introduced for it. Its handshake rejection
+  and message-framing tests follow the same pattern as the terminal socket's existing tests.
+- Frontend (schema-first, per `DEVELOPMENT.md`): `frontend/src/schemas/index.ts` gets Zod schemas
+  for every board API shape before any component consumes it — `BoardStatus`, `BoardMessage` (the
+  `GET /api/board/messages` row shape), and the `board-command` WS frame shapes (prompt, streamed
+  assistant text/tool-use chunks, error frame) — with acceptance tests for a valid payload and
+  rejection tests for a payload missing a required field or carrying an unexpected type, matching
+  the existing coverage pattern for other API schemas. The Spotlight-style command palette and the
+  separate history panel (see [Command center](#command-center)) each need component tests covering:
+  opening the palette renders inline history from a fixture history response; a streamed response
+  updates the visible output incrementally as WS frames arrive; an error frame renders a visible
+  error state rather than leaving the palette silently stuck; the history panel's empty state before
+  the command center has ever been used; and dismiss/close behavior returning focus to the
+  previously focused pane. These fall under `coverage-frontend`'s existing `frontend/src/hooks/` and
+  `frontend/src/schemas/` gates for the schema and any new hook, plus ordinary component tests for
+  the palette/history UI itself, matching the existing project convention rather than introducing a
+  new coverage carve-out.
 - agmsg detection: a pane on a host where the configured/default agmsg path doesn't contain
   `scripts/api.sh` skips bootstrap and logs a warning without touching the pane's session (asserted
   against a fake/no-op `BoardExecutor`/host check, not a real agmsg install, and not via `command -v
   agmsg` — see [Integration with agmsg](#integration-with-agmsg) for why that check is unreliable);
   a pane on a host where agmsg is present bootstraps normally.
+- `agmsg_path` expansion: a config value with a leading `~` resolves to a fully expanded absolute
+  path for a local host (via the injectable home-dir override, per `DEVELOPMENT.md`'s testability
+  rule) and for a remote host (via a fake exec channel returning a fixed `$HOME` probe response)
+  before it reaches any `RunBoardCommand` call, asserted by inspecting the built argument list
+  directly rather than the final shell string — this is the regression test for a literal `~`
+  reaching the remote shell inside single quotes and failing to expand.
 - Command center: `/ws/board-command` rejects an unauthenticated connection the same way the
   terminal WebSocket does; a `POST /api/board/broadcast` call issued from the command center's own
   HTTP client reaches a target pane regardless of that pane's host, using a fake `AgmsgClient` per
@@ -963,10 +1202,20 @@ documented behavior changed.
   fixture `stream-json` capture containing interleaved user turns, assistant text, and tool calls,
   and returns an empty/well-defined result before the command center has ever been used; enabling
   `command_center` does not require or check for a local agmsg installation.
+- Command center [process lifecycle](#process-lifecycle): a first query with no persisted session id
+  invokes the subprocess without `--resume` and persists the `session_id` captured from a fixture
+  stream-json response; a subsequent query reuses that persisted id with `--resume`; a second query
+  arriving while one is still in flight is rejected with the "busy" error and never spawns a second
+  subprocess; the invoked command line always includes `--verbose` whenever `--output-format=stream-
+  json` is present; the subprocess is always launched with `--allowedTools` scoped to exactly the
+  three board MCP tools and never with `--dangerously-skip-permissions`; a non-zero subprocess exit
+  and a malformed `stream-json` line each surface as a distinct WS error frame rather than an empty
+  or hung response, and neither overwrites the previously persisted session id.
 
 ## Related documents
 
 - Implementation structure: [architecture.md](architecture.md)
 - Security requirements for implementation: [security.md](security.md)
 - Runtime behavior and API specification: [behavior.md](behavior.md)
+- UI intent for the dashboard, palette, and history panel: [ui-design.md](ui-design.md#agent-board-ui-planned)
 - Developer workflow rules: [../DEVELOPMENT.md](../DEVELOPMENT.md)
