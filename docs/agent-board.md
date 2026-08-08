@@ -1,11 +1,19 @@
 # Agent Board: Cross-Pane Claude Messaging and Status Aggregation
 
-> **Status: design, not yet implemented.** This document specifies the target design for the
-> `internal/board` package and its supporting API, config, and security surface. Update this
-> status note (and cross-link it from [architecture.md](architecture.md), [security.md](security.md),
-> [behavior.md](behavior.md), and [ui-design.md](ui-design.md) as appropriate) once a phase below
-> actually ships; until then, no other doc should describe `board` endpoints or config fields as
-> current behavior.
+> **Status: Phase 1 (messaging/status/relay backend) implemented; Command center, Spotlight
+> palette, and history panel are still design-only.** The `internal/board` package, the
+> `BoardHostID`/`BoardExecutor`/`BoardHomeDirer` session capabilities, the bootstrap flow, the
+> `agent_board`/`server.auth_token` config additions, and the first three rows of
+> [API additions](#api-additions) (`GET /api/board/status`, `GET /api/board/messages`,
+> `POST /api/board/broadcast`) exist and are tested as described below. Not implemented: the
+> headless command-center subprocess, its MCP server, `WS /ws/board-command`,
+> `GET /api/board/command/history`, the Spotlight palette, the history panel, and
+> `server.auth_token` auto-generation-on-first-run (the config field and its loopback-requires-a-
+> token validation rule are implemented; an operator must currently set the token explicitly to use
+> board features over a non-loopback listener). Treat every [Command center](#command-center)
+> section and its rows in [API additions](#api-additions) as still design-only. See
+> [security.md](security.md) and [architecture.md](architecture.md) for the corresponding
+> implemented-vs-planned notes.
 
 ## Purpose
 

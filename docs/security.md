@@ -38,38 +38,59 @@ It accepts only absolute Unix paths and rejects shell metacharacters and control
 
 After validation, the path is wrapped with `shellQuotePath`, which single-quotes the value and escapes any interior single quotes. This keeps paths containing spaces or unusual but allowed characters safe when embedded in a shell string.
 
-### Agent board remote writes (design, not yet implemented)
+### Agent board remote writes (Phase 1 implemented)
 
-The planned `internal/board` package (full design in [agent-board.md](agent-board.md)) writes
-cross-pane agent messages into a remote host's message store over the SSH exec channel already used
-by `GetCWD`/`InspectGitContext`, by running an operator-installed
+The `internal/board` package (full design in [agent-board.md](agent-board.md)) writes cross-pane
+agent messages into a remote host's message store over the SSH exec channel already used by
+`GetCWD`/`InspectGitContext` (`RunBoardCommand` on `SSHSession`/`TmuxSSHSession`, in
+`internal/session/ssh.go` and `internal/session/tmux_ssh.go`), by running an operator-installed
 [agmsg](https://github.com/fujibee/agmsg) instance's own scripts. panemux owns no message schema or
 storage of its own — it is a client of agmsg only. The `panemux` binary itself is never installed
 on a remote host under any circumstances — it is also a server, and a stray copy on an SSH-reached
-host could start its own HTTP/WS listener and command center.
+host could start its own HTTP/WS listener and (in a later phase) command center.
 
 Message bodies are arbitrary text written by a Claude (or other agent) process, not a trusted
-value. Reads go through `scripts/api.sh`, which only takes digit- or path-traversal-validated
-arguments. Writes go through `scripts/api.sh`'s sibling script, `scripts/send.sh <team> <from> <to>
-<body> [--force]`, which — per agmsg's own source, verified rather than assumed — takes `body` as a
-positional argument with **no stdin option**, so it cannot be kept out of the remote command
-string. `send.sh` does its own SQL escaping internally, so `RunBoardCommand` is responsible only for
-POSIX shell escaping (`shellQuotePath`-style, matching the existing `cwd` discipline) of every
-argument before the remote command string is built — never unescaped concatenation.
+value. Reads go through `scripts/api.sh`; verified against agmsg's own source, only `--limit` and
+`--before-id` are digit-validated there — `--agent` is not validated at all, only escaped by
+agmsg's own internal SQL escaping. Writes go through `scripts/api.sh`'s sibling script,
+`scripts/send.sh <team> <from> <to> <body> [--force]`, which takes `body` as a positional argument
+with **no stdin option**, so it cannot be kept out of the remote command string.
+
+Because neither script's arguments are shell-shape-validated by agmsg itself, and a message body
+is arbitrary text that cannot be regex-allowlisted the way `cwd` can, `RunBoardCommand` does not
+use plain `shellQuotePath` alone for non-path arguments. Every argument after the script path
+(verb, team, `--agent` value, message body, ...) is base64-encoded, the *encoded* form is checked
+against the base64 alphabet (which cannot contain a shell metacharacter — the regex-allowlist step
+this repository's CodeQL bar expects, mirroring `validRemotePath`'s role for `cwd`), single-quoted,
+and decoded back on the remote side via a double-quoted command substitution
+(`"$(printf '%s' '<base64>' | base64 -d)"`) before it ever reaches `send.sh`/`api.sh`. Only the
+script path itself (`args[0]`, e.g. `<agmsg_path>/scripts/send.sh`) goes through the
+`validRemotePath`-then-`shellQuotePath` path this document already documents for `cwd`, since it is
+an operator-configured filesystem path, not agent-authored text. `send.sh` does its own SQL
+escaping internally, so this is the only escaping layer panemux is responsible for. See
+`buildBoardCommand`/`boardArgLiteral` in `internal/session/ssh.go` for the implementation.
 
 `send.sh` and `api.sh` are the only board-related commands panemux itself ever executes remotely;
 each runs against agmsg's own local store on that host. panemux only ever detects an existing agmsg
-installation — it never installs, updates, or otherwise manages agmsg on the operator's behalf,
-locally or remotely.
+installation (`scripts/api.sh` presence, never `command -v agmsg`) — it never installs, updates, or
+otherwise manages agmsg on the operator's behalf, locally or remotely.
 
-### Auth token and transport encryption (design, not yet implemented)
+### Auth token and transport encryption (config/validation implemented; auto-generation not yet implemented)
 
 panemux does not terminate TLS itself. `server.host` defaults to `127.0.0.1`; if it is set to a
 non-loopback address, `server.auth_token` must also be set, or startup must fail validation
-(`internal/config/validate.go`, alongside the existing `server.port` range check). An auth token
-sent over an unencrypted non-loopback hop can be replayed and the request it authenticates can be
-tampered with in transit, so the token only provides real protection once the operator has placed a
-TLS-terminating reverse proxy, SSH tunnel, or VPN in front of the non-loopback listener. See
+(`internal/config/validate.go`'s `isLoopbackHost` check, alongside the existing `server.port` range
+check). This validation rule and the `server.auth_token` config field are implemented; the "empty =
+auto-generate on first run, saved to `~/.config/panemux/token` (0600)" behavior described in
+[agent-board.md's Config additions](agent-board.md#config-additions) is not — an operator who wants
+board features reachable over a non-loopback listener must set `server.auth_token` explicitly today.
+`GET /api/board/status`, `GET /api/board/messages`, and `POST /api/board/broadcast` are gated by
+this token via `internal/api`'s `BoardAuthMiddleware` (constant-time comparison); an empty token
+means those endpoints require no `Authorization` header, matching every other endpoint's pre-board,
+unauthenticated-by-default behavior. An auth token sent over an unencrypted non-loopback hop can be
+replayed and the request it authenticates can be tampered with in transit, so the token only
+provides real protection once the operator has placed a TLS-terminating reverse proxy, SSH tunnel,
+or VPN in front of the non-loopback listener. See
 [agent-board.md](agent-board.md#security-model) for the full rationale.
 
 ## General Rules

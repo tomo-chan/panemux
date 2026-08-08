@@ -63,27 +63,30 @@ Optional capability interfaces extend the base `Session` contract without breaki
 - `CWDGetter` — implemented by `LocalSession` and `SSHSession`; returns the live working directory of the running shell. `LocalSession` reads it via `lsof` (macOS) or `/proc/<pid>/cwd` (Linux). `SSHSession` runs `pwd` over a new exec channel on the existing SSH connection.
 - `SSHConnNamer` — implemented by `SSHSession`; returns the panemux connection alias used when building the `code --remote ssh-remote+<host>` command.
 
-### `internal/board` (design, not yet implemented)
+### `internal/board` (Phase 1 implemented; command center still design-only)
 
-A planned package that replaces transcript-based Claude activity inference with a self-reported
-channel: panes report status (including branch/PR/cwd, gathered by the agent's own `git`/`gh`
-calls rather than inferred by panemux) and exchange messages through an operator-installed
+A package that replaces transcript-based Claude activity inference with a self-reported channel:
+panes report status (including branch/PR/cwd, gathered by the agent's own `git`/`gh` calls rather
+than inferred by panemux) and exchange messages through an operator-installed
 [agmsg](https://github.com/fujibee/agmsg) instance, plus a relay for messages addressed across
 hosts. panemux owns no message schema or storage of its own — it is only ever a client of agmsg's
 own documented scripts (`scripts/api.sh`, `scripts/send.sh`), never a reader of its internal
-SQLite file. Two new optional session capability interfaces, `BoardHostID` and `BoardExecutor`,
-extend the same pattern as `CWDGetter`/`ActiveWorkdirGetter` above.
+SQLite file. Three optional session capability interfaces, `BoardHostID`, `BoardExecutor`, and
+`BoardHomeDirer`, extend the same pattern as `CWDGetter`/`ActiveWorkdirGetter` above; `BoardCache`,
+the relay goroutine, `LocalAgmsgClient`/`RemoteAgmsgClient`, the own-send ledger, and the bootstrap
+flow are implemented and tested as described in [agent-board.md](agent-board.md).
 
 The same design also specifies a **command center**: a single headless `claude -p --resume`
 subprocess, invoked per query, that reads and writes the board exclusively through panemux's own
 authenticated REST API (never agmsg directly) via a narrow, purpose-built MCP server panemux
 provides — so `internal/board` stays the only code that ever calls agmsg's scripts even though the
-command center is a second, independent consumer of the board's data. This is a substantial part of
-the design's own scope (its own process lifecycle, permission model, and streaming API), not a minor
-addendum to the messaging/relay piece described above.
+command center is a second, independent consumer of the board's data. This remains design-only:
+`WS /ws/board-command`, `GET /api/board/command/history`, and the MCP server it depends on are not
+implemented, only `GET /api/board/status`, `GET /api/board/messages`, and
+`POST /api/board/broadcast` are.
 
-Full design and rationale for both pieces live in [agent-board.md](agent-board.md); do not treat
-that document's API/config surface as implemented until its status note says so.
+Full design and rationale for both pieces live in [agent-board.md](agent-board.md); its own status
+note tracks which parts are implemented versus still design-only.
 
 ### `internal/api`
 
@@ -322,7 +325,7 @@ Architecture-level security summary:
 - remote shell entrypoints validate SSH working directories before interpolating them into shell commands
 - host-key handling intentionally preserves compatibility with OpenSSH hashed `known_hosts` entries
 - shipped code should structurally avoid `gosec` findings rather than suppress them
-- panemux does not terminate TLS; non-loopback exposure is expected to sit behind operator-managed infrastructure (reverse proxy, tunnel, VPN), and the planned `internal/board` auth token is only meaningful once that transport is encrypted — see [agent-board.md](agent-board.md#security-model)
+- panemux does not terminate TLS; non-loopback exposure is expected to sit behind operator-managed infrastructure (reverse proxy, tunnel, VPN), and the `server.auth_token`/Agent Board auth token is only meaningful once that transport is encrypted — see [agent-board.md](agent-board.md#security-model)
 
 ## Tradeoffs and Intentional Limits
 
@@ -330,5 +333,5 @@ Architecture-level security summary:
 - Open CORS and permissive WebSocket origin checks reduce friction for local use, but are not suitable as-is for an untrusted deployment.
 - All workspace panes are started at backend startup, including panes in inactive workspaces. This keeps tab switching fast and preserves terminal state, at the cost of using resources for hidden workspaces.
 - Dynamic session creation exists, but current UI behavior mainly creates new local panes; this is not yet a full remote session orchestration product.
-- The planned `internal/board` cross-host relay (see [agent-board.md](agent-board.md)) makes panemux a persistent relay for agent-to-agent messages between hosts it cannot make talk to each other directly, closer to a TURN server than a STUN server: panemux stays in the data path for the life of the exchange rather than helping two hosts connect directly and stepping aside, and it sees each relayed message as plaintext in process memory between the two encrypted SSH hops.
-- The same planned design's command center spawns a `claude -p` subprocess per query rather than keeping one warm — simpler process lifecycle and no persistent extra process, at the cost of response latency that includes subprocess startup on every query (see [agent-board.md's Process lifecycle](agent-board.md#process-lifecycle)).
+- The `internal/board` cross-host relay (see [agent-board.md](agent-board.md)) makes panemux a persistent relay for agent-to-agent messages between hosts it cannot make talk to each other directly, closer to a TURN server than a STUN server: panemux stays in the data path for the life of the exchange rather than helping two hosts connect directly and stepping aside, and it sees each relayed message as plaintext in process memory between the two encrypted SSH hops.
+- The same design's still-planned command center would spawn a `claude -p` subprocess per query rather than keeping one warm — simpler process lifecycle and no persistent extra process, at the cost of response latency that includes subprocess startup on every query (see [agent-board.md's Process lifecycle](agent-board.md#process-lifecycle)). Not implemented in Phase 1.
