@@ -96,6 +96,46 @@ func (r *Relay) RecordOwnSend(destHost, team, to, body string) {
 	r.ledger.Record(destHost, team, to, body)
 }
 
+// BroadcastResult reports the outcome of sending to one pane via Broadcast.
+type BroadcastResult struct {
+	Pane  string
+	Error string // empty on success
+}
+
+// Broadcast sends body from PanemuxSentinel to every pane in to, resolving
+// each pane's host via the configured PaneResolver and recording an
+// own-send ledger entry before sending, so the relay's own from-validation
+// later accepts the resulting _panemux-attributed row when it polls the
+// destination host back. This is the same code path POST
+// /api/board/broadcast uses (and, in a later phase, the command center) —
+// see docs/agent-board.md's Command center and API additions sections.
+// Delivery to a resolved pane is immediate; the message's appearance in
+// BoardCache history still lags until the relay's next poll cycle reads it
+// back (see docs/agent-board.md's Known limitations).
+func (r *Relay) Broadcast(ctx context.Context, team string, to []string, body string) []BroadcastResult {
+	results := make([]BroadcastResult, 0, len(to))
+	for _, paneID := range to {
+		results = append(results, r.broadcastOne(ctx, team, paneID, body))
+	}
+	return results
+}
+
+func (r *Relay) broadcastOne(ctx context.Context, team, paneID, body string) BroadcastResult {
+	host, ok := r.resolver.HostForPane(paneID)
+	if !ok {
+		return BroadcastResult{Pane: paneID, Error: fmt.Sprintf("unknown pane %q", paneID)}
+	}
+	client, ok := r.client(host)
+	if !ok {
+		return BroadcastResult{Pane: paneID, Error: fmt.Sprintf("no agmsg client for host %q", host)}
+	}
+	r.ledger.Record(host, team, paneID, body)
+	if err := client.Send(ctx, team, PanemuxSentinel, paneID, body); err != nil {
+		return BroadcastResult{Pane: paneID, Error: err.Error()}
+	}
+	return BroadcastResult{Pane: paneID}
+}
+
 // LoadCursors loads persisted cursor state via the configured CursorStore.
 // Call once before Run/Backfill.
 func (r *Relay) LoadCursors() error {

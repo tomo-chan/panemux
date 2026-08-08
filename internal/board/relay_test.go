@@ -335,6 +335,72 @@ func TestRelay_EmptyTeam_NoRowsIsNotAnError(t *testing.T) {
 	}
 }
 
+func TestRelay_Broadcast_SendsAndRecordsLedgerEntry(t *testing.T) {
+	resolver := NewStaticPaneResolver([]PaneRef{{ID: "pane-b", HostID: "hostB"}})
+	clientB := newFakeAgmsgClient("hostB")
+
+	r, _ := newTestRelay(t, resolver, nil, clientB)
+	results := r.Broadcast(context.Background(), "panemux", []string{"pane-b"}, "hello")
+
+	if len(results) != 1 || results[0].Error != "" || results[0].Pane != "pane-b" {
+		t.Fatalf("unexpected results: %+v", results)
+	}
+	if len(clientB.sent) != 1 {
+		t.Fatalf("expected Send to be called, got %+v", clientB.sent)
+	}
+
+	// The relay's own from-validation must now accept a row it later
+	// observes claiming From == "_panemux" for this exact (host, team, to,
+	// body) — this is the ledger entry Broadcast is responsible for.
+	if !r.ledger.Consume("hostB", "panemux", "pane-b", "hello") {
+		t.Fatal("expected Broadcast to record a matching own-send ledger entry")
+	}
+}
+
+func TestRelay_Broadcast_SendsFromPanemuxSentinel(t *testing.T) {
+	resolver := NewStaticPaneResolver([]PaneRef{{ID: "pane-b", HostID: "hostB"}})
+	clientB := newFakeAgmsgClient("hostB")
+
+	r, _ := newTestRelay(t, resolver, nil, clientB)
+	r.Broadcast(context.Background(), "panemux", []string{"pane-b"}, "hello")
+
+	if clientB.sent[0].From != PanemuxSentinel {
+		t.Fatalf("From = %q, want %q", clientB.sent[0].From, PanemuxSentinel)
+	}
+}
+
+func TestRelay_Broadcast_UnknownPane(t *testing.T) {
+	resolver := NewStaticPaneResolver(nil)
+	r, _ := newTestRelay(t, resolver, nil)
+	results := r.Broadcast(context.Background(), "panemux", []string{"no-such-pane"}, "hi")
+	if len(results) != 1 || results[0].Error == "" {
+		t.Fatalf("expected an error result for an unknown pane, got %+v", results)
+	}
+}
+
+func TestRelay_Broadcast_MultipleTargetsAcrossHosts(t *testing.T) {
+	resolver := NewStaticPaneResolver([]PaneRef{
+		{ID: "pane-a", HostID: "hostA"},
+		{ID: "pane-b", HostID: "hostB"},
+	})
+	clientA := newFakeAgmsgClient("hostA")
+	clientB := newFakeAgmsgClient("hostB")
+	r, _ := newTestRelay(t, resolver, nil, clientA, clientB)
+
+	results := r.Broadcast(context.Background(), "panemux", []string{"pane-a", "pane-b"}, "hi all")
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %+v", results)
+	}
+	for _, res := range results {
+		if res.Error != "" {
+			t.Fatalf("unexpected error for pane %s: %s", res.Pane, res.Error)
+		}
+	}
+	if len(clientA.sent) != 1 || len(clientB.sent) != 1 {
+		t.Fatalf("expected each destination host's client to receive exactly one Send")
+	}
+}
+
 func TestRelay_NoClientForHost_LogsAndDoesNotPanic(t *testing.T) {
 	resolver := NewStaticPaneResolver(nil)
 	r, _ := newTestRelay(t, resolver, []HostTeam{{Host: "unregistered-host", Team: "panemux"}})

@@ -24,6 +24,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"panemux/internal/board"
 	"panemux/internal/config"
 	"panemux/internal/session"
 	"panemux/internal/sshconfig"
@@ -51,6 +52,9 @@ type Handler struct {
 	nowFn                   func() time.Time
 	gitInfoCacheMu          sync.Mutex
 	gitInfoCacheBySession   map[string]gitInfoCacheEntry
+	boardCache              *board.BoardCache
+	boardBroadcaster        boardBroadcaster
+	boardDefaultTeam        string
 }
 
 type preferredCWDState struct {
