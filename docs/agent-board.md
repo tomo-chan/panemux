@@ -82,39 +82,55 @@ Agent Board replaces that inference with a small, self-reported channel:
 
 ```mermaid
 flowchart TB
-    Browser["ブラウザ<br/>ダッシュボード + Spotlightパレット"]
+    subgraph UILayer["UI層（ブラウザ）"]
+        Dashboard["ダッシュボード"]
+        Palette["Spotlightパレット"]
+    end
 
-    subgraph Local["panemuxが動くホスト（常にここだけ）"]
-        Server["panemux Goプロセス<br/>WS / REST, Bearerトークン認証"]
+    subgraph CommLayer["通信層"]
+        RestWs["REST /api/board/*<br/>WS /ws/board-command<br/>Bearerトークン認証"]
+        LocalExec["ローカル exec.Command"]
+        ExecCh["SSH exec channel<br/>（GetCWD/InspectGitContextと共用）"]
+    end
+
+    subgraph ClientLayer["クライアント層（panemux Goプロセス）"]
         Relay["中継ゴルーチン<br/>数秒間隔でポーリング"]
         CmdCenter["司令塔<br/>claude -p --resume（クエリごとに起動）"]
+        AgmsgClient["AgmsgClient<br/>Local/RemoteAgmsgClient"]
+    end
+
+    subgraph AgentLayer["エージェント層（agmsgチーム）"]
         LocalAgmsg[("ローカルagmsg<br/>（任意インストール）")]
-    end
-
-    subgraph HostA["リモートホストA（SSH）"]
-        AgmsgA[("agmsg")]
+        AgmsgA[("agmsg（Host A）")]
         ClaudeA["Claude pane"]
-    end
-
-    subgraph HostB["リモートホストB（SSH）"]
-        AgmsgB[("agmsg")]
+        AgmsgB[("agmsg（Host B）")]
         CodexB["Codex pane"]
     end
 
-    Browser <--> Server
-    Server --> Relay
-    Server --> CmdCenter
-    Relay -->|"api.sh / send.sh"| LocalAgmsg
-    CmdCenter -->|"api.sh / send.sh --force"| LocalAgmsg
-    Relay -->|"SSH exec channel<br/>api.sh / send.sh"| AgmsgA
-    Relay -->|"SSH exec channel<br/>api.sh / send.sh"| AgmsgB
+    Dashboard --> RestWs
+    Palette --> RestWs
+    RestWs --> Relay
+    RestWs --> CmdCenter
+    Relay --> AgmsgClient
+    CmdCenter --> AgmsgClient
+    AgmsgClient --> LocalExec
+    AgmsgClient --> ExecCh
+    LocalExec -->|"api.sh / send.sh"| LocalAgmsg
+    ExecCh -->|"api.sh / send.sh"| AgmsgA
+    ExecCh -->|"api.sh / send.sh"| AgmsgB
     ClaudeA -->|"Bashツール呼び出し"| AgmsgA
     CodexB -->|"Bashツール呼び出し"| AgmsgB
 ```
 
-panemux is never a participant on more than one host's agmsg installation from the inside — it
-only ever reaches a remote host's agmsg through the SSH exec channel it already holds for that
-pane's session, running agmsg's own scripts, exactly as [Local vs remote resource
+Four layers, top to bottom: the **UI layer** (dashboard + Spotlight palette) never talks to agmsg
+directly — everything goes through the **communication layer** (the authenticated REST/WS surface
+for the browser, plus local `exec.Command`/SSH exec channel for reaching agmsg itself). The
+**client layer** is panemux's own Go code (relay, command center, the `AgmsgClient` abstraction
+from [Package layout](#package-layout)) — it is the only thing that ever calls agmsg's scripts, and
+it is never a participant *inside* more than one host's agmsg installation at a time. The **agent
+layer** is agmsg itself (one team per host) plus the Claude/Codex panes that are its actual
+members; panemux only ever reaches a remote one through the SSH exec channel it already holds for
+that pane's session, exactly as [Local vs remote resource
 placement](#local-vs-remote-resource-placement) details.
 
 ## Integration with agmsg
