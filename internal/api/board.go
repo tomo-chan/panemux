@@ -35,6 +35,15 @@ func (h *Handler) BoardEnabled() bool {
 	return h.boardCache != nil
 }
 
+// BoardSessionRestartHookConfigured reports whether
+// SetBoardSessionRestartHook has been called. Exported for callers (server
+// startup wiring, tests) that need to confirm the hook was actually wired
+// without reaching into Handler's internals — mirrors BoardEnabled's
+// existing pattern.
+func (h *Handler) BoardSessionRestartHookConfigured() bool {
+	return h.boardSessionRestartHook != nil
+}
+
 // RequireBoardAuth gates a board request behind server.auth_token. An empty
 // configured token means no token is required, matching the rest of this
 // repo's pre-board, unauthenticated-by-default local API; a non-empty token

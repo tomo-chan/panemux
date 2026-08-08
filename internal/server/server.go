@@ -26,6 +26,7 @@ type Server struct {
 	cfg         *config.Config
 	manager     *session.Manager
 	httpSrv     *http.Server
+	apiHandler  *api.Handler
 	cancelBoard context.CancelFunc // nil when Agent Board has no board-enabled panes
 }
 
@@ -47,6 +48,7 @@ func New(cfg *config.Config, manager *session.Manager, frontendFS embed.FS) *Ser
 	return &Server{
 		cfg:         cfg,
 		manager:     manager,
+		apiHandler:  apiHandler,
 		cancelBoard: cancelBoard,
 		httpSrv: &http.Server{
 			Addr:           addr,

@@ -65,6 +65,9 @@ func wireAgentBoard(cfg *config.Config, manager *session.Manager, apiHandler *ap
 	}
 
 	apiHandler.EnableBoard(cache, relay, team)
+	apiHandler.SetBoardSessionRestartHook(func(pane *config.PaneConfig, sess session.Session) {
+		reregisterBoardClientAfterRestart(relay, cfg, pane, sess)
+	})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	go relay.Run(ctx, board.DefaultPollInterval)
@@ -139,27 +142,63 @@ func registerRemoteBoardClient(
 		if !ok {
 			continue
 		}
-		executor, ok := sess.(session.BoardExecutor)
-		if !ok {
-			continue
+		if registerRemoteClientFromSession(relay, cfg, host, sess) {
+			return
 		}
-		homeDirer, ok := sess.(session.BoardHomeDirer)
-		if !ok {
-			continue
-		}
-
-		agmsgPath := cfg.AgentBoard.AgmsgPath
-		if agmsgPath == "~" || len(agmsgPath) >= 2 && agmsgPath[:2] == "~/" {
-			home, err := homeDirer.BoardHomeDir(context.Background())
-			if err != nil {
-				log.Printf("board: failed to resolve remote home dir on host %q: %v", host, err)
-				return
-			}
-			agmsgPath = board.ExpandRemoteAgmsgPath(agmsgPath, home)
-		}
-
-		relay.RegisterClient(board.NewRemoteAgmsgClient(host, agmsgPath, executor))
-		return
 	}
 	log.Printf("board: no live, board-capable session found for host %q; its board traffic will not be relayed", host)
+}
+
+// registerRemoteClientFromSession builds and registers a RemoteAgmsgClient
+// for host from sess if sess implements the required capabilities
+// (session.BoardExecutor, session.BoardHomeDirer), returning whether
+// registration happened. Shared by registerRemoteBoardClient (startup) and
+// reregisterBoardClientAfterRestart (a pane's session being replaced later),
+// so the two callers can't drift on how a client is actually built.
+func registerRemoteClientFromSession(relay *board.Relay, cfg *config.Config, host string, sess session.Session) bool {
+	executor, ok := sess.(session.BoardExecutor)
+	if !ok {
+		return false
+	}
+	homeDirer, ok := sess.(session.BoardHomeDirer)
+	if !ok {
+		return false
+	}
+
+	agmsgPath := cfg.AgentBoard.AgmsgPath
+	if agmsgPath == "~" || len(agmsgPath) >= 2 && agmsgPath[:2] == "~/" {
+		home, err := homeDirer.BoardHomeDir(context.Background())
+		if err != nil {
+			log.Printf("board: failed to resolve remote home dir on host %q: %v", host, err)
+			return false
+		}
+		agmsgPath = board.ExpandRemoteAgmsgPath(agmsgPath, home)
+	}
+
+	relay.RegisterClient(board.NewRemoteAgmsgClient(host, agmsgPath, executor))
+	return true
+}
+
+// reregisterBoardClientAfterRestart re-runs remote AgmsgClient registration
+// for pane's host when pane's session is replaced (e.g. via POST
+// /api/sessions/{id}/restart's board session-restart hook), so a host whose
+// only session wasn't live at server startup — or was later restarted — can
+// still have its board traffic relayed without requiring a full panemux
+// restart. See the PR #163 review finding this closes: wireAgentBoard only
+// ever registered each host once, at startup, with no code path to retry.
+// A board-disabled pane or the local host (whose client is process-lifetime
+// and never needs re-registration) are no-ops.
+func reregisterBoardClientAfterRestart(
+	relay *board.Relay, cfg *config.Config, pane *config.PaneConfig, sess session.Session,
+) {
+	if pane.AgentBoard == nil || !pane.AgentBoard.Enabled {
+		return
+	}
+	host := paneBoardHostID(pane)
+	if host == board.LocalHostID {
+		return
+	}
+	if registerRemoteClientFromSession(relay, cfg, host, sess) {
+		log.Printf("board: re-registered agmsg client for host %q after pane %q restarted", host, pane.ID)
+	}
 }

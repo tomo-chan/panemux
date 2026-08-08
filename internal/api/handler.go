@@ -55,6 +55,20 @@ type Handler struct {
 	boardCache              *board.BoardCache
 	boardBroadcaster        boardBroadcaster
 	boardDefaultTeam        string
+	boardSessionRestartHook func(pane *config.PaneConfig, sess session.Session)
+}
+
+// SetBoardSessionRestartHook registers a callback RestartSession invokes
+// after successfully replacing a pane's session with a live one, so
+// Agent Board's wiring (internal/server) can re-register that pane's
+// host's AgmsgClient if the pane is board-enabled. Until Agent Board is
+// wired in (EnableBoard), no hook is set and RestartSession is a no-op on
+// this front — see the PR #163 review finding this closes: without it, a
+// host whose only session failed to connect at startup permanently lost
+// board relay for the rest of the process's life, even after a later
+// successful restart.
+func (h *Handler) SetBoardSessionRestartHook(fn func(pane *config.PaneConfig, sess session.Session)) {
+	h.boardSessionRestartHook = fn
 }
 
 type preferredCWDState struct {
@@ -487,6 +501,9 @@ func (h *Handler) RestartSession(w http.ResponseWriter, r *http.Request) {
 	h.clearPreferredCWDs(id)
 	h.clearGitInfoCache(id)
 	h.manager.Add(sess)
+	if h.boardSessionRestartHook != nil {
+		h.boardSessionRestartHook(found, sess)
+	}
 	w.WriteHeader(http.StatusOK)
 }
 

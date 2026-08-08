@@ -1173,6 +1173,107 @@ func TestRestartSession_GuardReleasedAfterCompletion(t *testing.T) {
 	}
 }
 
+// Regression test for the PR #163 review finding: Agent Board's relay
+// registered each host's AgmsgClient only once at server startup, so a pane
+// whose session wasn't live at that instant (e.g. a transient SSH dial
+// failure) permanently lost board relay for its host even after a
+// successful later restart. RestartSession must invoke the configured hook
+// on success so internal/server's wiring can re-register that host.
+func TestRestartSession_InvokesBoardSessionRestartHookOnSuccess(t *testing.T) {
+	cfg := &config.Config{
+		Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1"},
+		Layout: config.LayoutNode{
+			Direction: "horizontal",
+			Children: []config.LayoutChild{
+				{Size: 100, Pane: &config.PaneConfig{ID: "main", Type: "ssh", Connection: "build-host"}},
+			},
+		},
+	}
+	mgr := session.NewManager()
+	mgr.Add(newMockSession("main"))
+	h := NewHandler(cfg, mgr)
+	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
+	var newSess session.Session
+	h.createSession = func(pane *config.PaneConfig, _ map[string]config.SSHConnection) (session.Session, error) {
+		newSess = newMockSession(pane.ID)
+		return newSess, nil
+	}
+	var gotPane *config.PaneConfig
+	var gotSess session.Session
+	calls := 0
+	h.SetBoardSessionRestartHook(func(pane *config.PaneConfig, sess session.Session) {
+		calls++
+		gotPane = pane
+		gotSess = sess
+	})
+	r := setupRouterWithHandler(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/main/restart", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, 1, calls)
+	require.NotNil(t, gotPane)
+	assert.Equal(t, "main", gotPane.ID)
+	assert.Same(t, newSess, gotSess)
+}
+
+func TestRestartSession_CreateFails_DoesNotInvokeBoardSessionRestartHook(t *testing.T) {
+	cfg := &config.Config{
+		Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1"},
+		Layout: config.LayoutNode{
+			Direction: "horizontal",
+			Children: []config.LayoutChild{
+				{Size: 100, Pane: &config.PaneConfig{ID: "main", Type: "ssh", Connection: "build-host"}},
+			},
+		},
+	}
+	mgr := session.NewManager()
+	mgr.Add(newMockSession("main"))
+	h := NewHandler(cfg, mgr)
+	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
+	h.createSession = func(pane *config.PaneConfig, _ map[string]config.SSHConnection) (session.Session, error) {
+		return nil, errors.New("dial failed")
+	}
+	calls := 0
+	h.SetBoardSessionRestartHook(func(_ *config.PaneConfig, _ session.Session) { calls++ })
+	r := setupRouterWithHandler(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/main/restart", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.Equal(t, 0, calls)
+}
+
+// A nil hook (the default when Agent Board isn't wired in) must not panic.
+func TestRestartSession_NoBoardHookConfigured_NoPanic(t *testing.T) {
+	cfg := &config.Config{
+		Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1"},
+		Layout: config.LayoutNode{
+			Direction: "horizontal",
+			Children: []config.LayoutChild{
+				{Size: 100, Pane: &config.PaneConfig{ID: "main", Type: "local"}},
+			},
+		},
+	}
+	mgr := session.NewManager()
+	mgr.Add(newMockSession("main"))
+	h := NewHandler(cfg, mgr)
+	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
+	h.createSession = func(pane *config.PaneConfig, _ map[string]config.SSHConnection) (session.Session, error) {
+		return newMockSession(pane.ID), nil
+	}
+	r := setupRouterWithHandler(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/main/restart", nil)
+	assert.NotPanics(t, func() { r.ServeHTTP(rec, req) })
+	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
 func TestPutLayout_PersistsImmediately(t *testing.T) {
 	cfg := defaultTestConfig()
 	r := setupRouter(cfg, session.NewManager())
