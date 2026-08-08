@@ -38,6 +38,40 @@ It accepts only absolute Unix paths and rejects shell metacharacters and control
 
 After validation, the path is wrapped with `shellQuotePath`, which single-quotes the value and escapes any interior single quotes. This keeps paths containing spaces or unusual but allowed characters safe when embedded in a shell string.
 
+### Agent board remote writes (design, not yet implemented)
+
+The planned `internal/board` package (full design in [agent-board.md](agent-board.md)) writes
+cross-pane agent messages into a remote host's message store over the SSH exec channel already used
+by `GetCWD`/`InspectGitContext`, by running an operator-installed
+[agmsg](https://github.com/fujibee/agmsg) instance's own scripts. panemux owns no message schema or
+storage of its own — it is a client of agmsg only. The `panemux` binary itself is never installed
+on a remote host under any circumstances — it is also a server, and a stray copy on an SSH-reached
+host could start its own HTTP/WS listener and command center.
+
+Message bodies are arbitrary text written by a Claude (or other agent) process, not a trusted
+value. Reads go through `scripts/api.sh`, which only takes digit- or path-traversal-validated
+arguments. Writes go through `scripts/api.sh`'s sibling script, `scripts/send.sh <team> <from> <to>
+<body> [--force]`, which — per agmsg's own source, verified rather than assumed — takes `body` as a
+positional argument with **no stdin option**, so it cannot be kept out of the remote command
+string. `send.sh` does its own SQL escaping internally, so `RunBoardCommand` is responsible only for
+POSIX shell escaping (`shellQuotePath`-style, matching the existing `cwd` discipline) of every
+argument before the remote command string is built — never unescaped concatenation.
+
+`send.sh` and `api.sh` are the only board-related commands panemux itself ever executes remotely;
+each runs against agmsg's own local store on that host. panemux only ever detects an existing agmsg
+installation — it never installs, updates, or otherwise manages agmsg on the operator's behalf,
+locally or remotely.
+
+### Auth token and transport encryption (design, not yet implemented)
+
+panemux does not terminate TLS itself. `server.host` defaults to `127.0.0.1`; if it is set to a
+non-loopback address, `server.auth_token` must also be set, or startup must fail validation
+(`internal/config/validate.go`, alongside the existing `server.port` range check). An auth token
+sent over an unencrypted non-loopback hop can be replayed and the request it authenticates can be
+tampered with in transit, so the token only provides real protection once the operator has placed a
+TLS-terminating reverse proxy, SSH tunnel, or VPN in front of the non-loopback listener. See
+[agent-board.md](agent-board.md#security-model) for the full rationale.
+
 ## General Rules
 
 - When adding new session types or new `exec.Command` calls, the command value passed as the first argument must come from a hardcoded literal or from a trusted system source such as a file or registry with no data-flow path to user input.

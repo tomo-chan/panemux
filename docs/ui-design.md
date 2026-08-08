@@ -240,3 +240,32 @@ Agent-attention highlighting remains visually distinct from layout-editing affor
 - move targets use blue overlays instead of gold
 
 Using separate colors avoids mixing "this needs your attention" with "you can drop here".
+
+---
+
+## Agent Board UI (planned)
+
+> **Status: design, not yet implemented.** This section only cross-links the UI-facing pieces of a
+> larger design; it does not add new interaction principles of its own. Full design lives in
+> [agent-board.md](agent-board.md); do not treat any of this as current behavior until that
+> document's status note says so.
+
+Agent Board (see [agent-board.md](agent-board.md)) introduces two new UI surfaces, both layered on
+top of the principles above rather than replacing them:
+
+- A **dashboard** view of per-pane self-reported status (state, branch, PR, summary — see
+  [agent-board.md's Status self-report](agent-board.md#status-self-report-and-message-flow)),
+  intended to extend the existing workspace-bar/pane-card status vocabulary (**Integrated workspace
+  summaries** and **Workspace pane groups**, above) rather than introduce a competing status
+  language — connection-state dots, attention framing, and repo/branch/PR chrome should read the
+  same way in Agent Board's dashboard as they already do in the pane header and workspace bar.
+- A **Spotlight-style command palette** and **history panel** for the [command
+  center](agent-board.md#command-center), following this document's existing **Modal Dialogs**
+  pattern for the palette itself (a higher-friction, focused interaction that shouldn't be
+  compressed into inline chrome) and the existing overlay-panel pattern already used for the
+  workspace-summary overlay for the persistent history view.
+
+Concrete visual decisions (palette keybinding, color treatment, streaming-response layout, error
+presentation) are deferred to implementation time and belong in this document once they're made —
+this section exists so that work doesn't start from a blank page on cross-cutting concerns
+(status-language consistency, dialog/overlay pattern reuse) that are already settled here.

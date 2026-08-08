@@ -25,6 +25,9 @@ This installs npm packages, downloads Go modules, and configures the repo-local 
 5. Read [docs/behavior.md](docs/behavior.md) for runtime behavior, API behavior, and operational assumptions.
 6. Read [docs/ui-design.md](docs/ui-design.md) when changing frontend interaction or presentation.
 7. Read [docs/maintenance.md](docs/maintenance.md) when touching CI, release automation, or GitHub workflow operations.
+8. Read [docs/agent-board.md](docs/agent-board.md) before implementing cross-pane Claude
+   messaging/status features (the `internal/board` package). It is a design document — check its
+   status note before treating anything in it as shipped behavior.
 
 ## Document Map
 
@@ -35,6 +38,7 @@ This installs npm packages, downloads Go modules, and configures the repo-local 
 - Behavior and API specification: [docs/behavior.md](docs/behavior.md)
 - UI intent and interaction design: [docs/ui-design.md](docs/ui-design.md)
 - CI and release maintenance: [docs/maintenance.md](docs/maintenance.md)
+- Cross-pane Claude messaging design: [docs/agent-board.md](docs/agent-board.md)
 
 ## Editing Rules
 
