@@ -24,8 +24,8 @@ type PaneResolver interface {
 // StaticPaneResolver is a PaneResolver backed by a fixed snapshot of
 // panemux's pane config.
 type StaticPaneResolver struct {
-	byID     map[string]string            // paneID -> hostID
-	byHostID map[string]map[string]bool   // hostID -> set of paneIDs
+	byID     map[string]string          // paneID -> hostID
+	byHostID map[string]map[string]bool // hostID -> set of paneIDs
 }
 
 // NewStaticPaneResolver builds a resolver from a flat list of pane refs.

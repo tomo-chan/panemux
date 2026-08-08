@@ -19,7 +19,7 @@ const LocalHostID = "local"
 // element with no intermediate shell, so no argument carries shell-injection
 // risk here regardless of its content (see docs/agent-board.md's Package
 // layout section).
-type LocalAgmsgClient struct {
+type LocalAgmsgClient struct { //nolint:govet // fieldalignment: clarity preferred
 	agmsgPath string // expanded, absolute path to the agmsg install root
 	execFn    func(ctx context.Context, name string, args ...string) *exec.Cmd
 }
@@ -35,8 +35,10 @@ func NewLocalAgmsgClient(agmsgPath string) *LocalAgmsgClient {
 
 func (c *LocalAgmsgClient) HostID() string { return LocalHostID }
 
-func (c *LocalAgmsgClient) apiScript() string  { return filepath.Join(c.agmsgPath, "scripts", "api.sh") }
-func (c *LocalAgmsgClient) sendScript() string { return filepath.Join(c.agmsgPath, "scripts", "send.sh") }
+func (c *LocalAgmsgClient) apiScript() string { return filepath.Join(c.agmsgPath, "scripts", "api.sh") }
+func (c *LocalAgmsgClient) sendScript() string {
+	return filepath.Join(c.agmsgPath, "scripts", "send.sh")
+}
 
 // Send always passes --force, per AgmsgClient's contract.
 func (c *LocalAgmsgClient) Send(ctx context.Context, team, from, to, body string) error {

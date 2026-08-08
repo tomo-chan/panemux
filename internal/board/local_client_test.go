@@ -11,7 +11,9 @@ import (
 // instead of the real agmsg scripts, so tests exercise the full exec.Cmd
 // plumbing (argv, CombinedOutput/Output) without depending on a real agmsg
 // install. It records the invoked name+args for assertions.
-func fakeCommandRecorder(t *testing.T, script string) (func(ctx context.Context, name string, args ...string) *exec.Cmd, *[]string) {
+type execFunc func(ctx context.Context, name string, args ...string) *exec.Cmd
+
+func fakeCommandRecorder(t *testing.T, script string) (execFunc, *[]string) {
 	t.Helper()
 	var recorded []string
 	fn := func(ctx context.Context, name string, args ...string) *exec.Cmd {

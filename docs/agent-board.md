@@ -567,16 +567,27 @@ func (c *BoardCache) MessagesSince(afterSeq int64) []Row   { /* mutex-guarded co
 
 The relay inspects every `Row` it reads: if `To == "_panemux"` and `Body` parses as JSON with
 `kind == "board_status"` (see [Status self-report](#status-self-report-and-message-flow) for why
-the discriminator, not shape-sniffing, is what triggers this), it calls `RecordStatus` and does
-*not* forward that row through the cross-host relay logic (status reports are local bookkeeping,
-not messages meant for another pane). A `Body` addressed to `_panemux` that isn't valid JSON, or is
-valid JSON without that exact `kind`, is left alone as an ordinary chat message — including a body
-that happens to share some field names with the status shape by coincidence. Every row, status or
-not, is also appended to
-`history` via `AppendMessage`, which is what `GET /api/board/messages` reads from — that endpoint
-never calls `AgmsgClient` at request time either, for the same reason `GET /api/board/status`
-doesn't: the relay has already seen everything the dashboard needs, as a side effect of polling it
-was already doing.
+the discriminator, not shape-sniffing, is what triggers this), it calls `RecordStatus` *only* —
+that row is never appended to `history` and never forwarded through the cross-host relay logic
+(status reports are local bookkeeping, not messages meant for another pane, and the dashboard's
+message history is not the right place to show a machine-readable status blob a human never
+composed). A `Body` addressed to `_panemux` that isn't valid JSON, or is valid JSON without that
+exact `kind`, is left alone as an ordinary chat message — including a body that happens to share
+some field names with the status shape by coincidence — and *is* appended to `history` via
+`AppendMessage`, the same as any other row that passes `from`-validation and isn't a status update.
+`history` is what `GET /api/board/messages` reads from — that endpoint never calls `AgmsgClient` at
+request time either, for the same reason `GET /api/board/status` doesn't: the relay has already
+seen everything the dashboard needs, as a side effect of polling it was already doing.
+
+**Correction from an earlier revision of this document:** this section previously said "every row,
+status or not, is also appended to `history`," which directly contradicted this document's own
+[Testing plan](#testing-plan) bullet requiring "a row addressed to `_panemux` updating `status` and
+*not* appearing in `history`'s cross-pane relay output." The Testing plan's statement was correct
+and is what implementation follows: a status update is cache-only. Only a non-status row addressed
+to `_panemux`, and every ordinary cross-pane row that passes `from`/`to` validation (see
+[Cross-host relay](#cross-host-relay)), is appended to `history`. A row dropped for failing
+`from`/`to` validation is still never cached or relayed, exactly as already stated in
+[Cross-host relay](#cross-host-relay).
 
 - `LocalAgmsgClient` shells out to the local agmsg installation's `scripts/api.sh` for reads and
   `scripts/send.sh ... --force` for writes. Because this is a local `exec.Command` invocation, Go

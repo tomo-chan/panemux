@@ -15,7 +15,7 @@ const defaultMaxHistory = 5000
 // Message pairs a Row with the panemux-local sequence number BoardCache
 // assigned it, which is what GET /api/board/messages?since=<seq> actually
 // paginates on (agmsg's own per-host ids are not comparable across hosts).
-type Message struct {
+type Message struct { //nolint:govet // fieldalignment: clarity preferred
 	Seq int64
 	Row Row
 }
@@ -24,7 +24,7 @@ type Message struct {
 // Only the relay writes to it, as a side effect of the polling it already
 // does for message forwarding; both dashboard-facing endpoints only ever
 // read it, never calling AgmsgClient directly at request time.
-type BoardCache struct {
+type BoardCache struct { //nolint:govet // fieldalignment: clarity preferred
 	mu         sync.RWMutex
 	status     map[string]Status
 	nextSeq    int64

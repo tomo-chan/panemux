@@ -14,7 +14,7 @@ const PanemuxSentinel = "_panemux"
 
 // Row is a single agmsg message row, normalized into panemux's own
 // representation regardless of which host it came from.
-type Row struct {
+type Row struct { //nolint:govet // fieldalignment: clarity preferred
 	// ID is agmsg's own id for this row. It is host-scoped, not globally
 	// unique, and must not be assumed to stay numeric forever (agmsg's own
 	// source comments describe this as future-proofing against a
@@ -33,7 +33,7 @@ type Row struct {
 
 // Status is a pane's self-reported state, decoded from a board_status
 // message body addressed to PanemuxSentinel. See ParseStatus.
-type Status struct {
+type Status struct { //nolint:govet // fieldalignment: clarity preferred
 	State    string
 	CWD      string
 	Branch   string

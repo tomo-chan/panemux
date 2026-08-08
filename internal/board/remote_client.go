@@ -23,7 +23,7 @@ type BoardExecutor interface {
 // here — see docs/agent-board.md's Package layout section: "there is
 // exactly one place this can be gotten wrong rather than one per call
 // site." RemoteAgmsgClient itself only ever builds raw, unescaped argv.
-type RemoteAgmsgClient struct {
+type RemoteAgmsgClient struct { //nolint:govet // fieldalignment: clarity preferred
 	hostID    string // SSH connection name
 	agmsgPath string // expanded, absolute path to the agmsg install root on the remote host
 	executor  BoardExecutor

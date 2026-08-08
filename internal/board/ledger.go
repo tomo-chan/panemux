@@ -30,7 +30,7 @@ type ownSendKey struct {
 // distinguish a row genuinely sent by panemux's own broadcast handler from
 // one merely claiming From == "_panemux", since send.sh --force never
 // checks From against a roster.
-type ownSendLedger struct {
+type ownSendLedger struct { //nolint:govet // fieldalignment: clarity preferred
 	mu      sync.Mutex
 	entries map[ownSendKey]time.Time // value is expiry
 	ttl     time.Duration

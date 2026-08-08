@@ -2,13 +2,33 @@ package board
 
 import "testing"
 
-func TestParseStatus(t *testing.T) {
-	tests := []struct {
-		name    string
-		body    string
-		wantOK  bool
-		wantSt  Status
-	}{
+type parseStatusCase struct { //nolint:govet // fieldalignment: clarity preferred
+	name   string
+	body   string
+	wantSt Status
+	wantOK bool
+}
+
+func runParseStatusCases(t *testing.T, tests []parseStatusCase) {
+	t.Helper()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := ParseStatus(tt.body)
+			if ok != tt.wantOK {
+				t.Fatalf("ParseStatus(%q) ok = %v, want %v", tt.body, ok, tt.wantOK)
+			}
+			if !ok {
+				return
+			}
+			if got != tt.wantSt {
+				t.Fatalf("ParseStatus(%q) = %+v, want %+v", tt.body, got, tt.wantSt)
+			}
+		})
+	}
+}
+
+func TestParseStatus_ValidCases(t *testing.T) {
+	runParseStatusCases(t, []parseStatusCase{
 		{
 			name: "valid full payload",
 			body: `{"kind":"board_status","state":"working","cwd":"/workspace/user/project",` +
@@ -32,6 +52,11 @@ func TestParseStatus(t *testing.T) {
 			wantOK: true,
 			wantSt: Status{State: "idle"},
 		},
+	})
+}
+
+func TestParseStatus_InvalidCases(t *testing.T) {
+	runParseStatusCases(t, []parseStatusCase{
 		{
 			name:   "not valid JSON falls back to plain message",
 			body:   "please review this PR when you get a chance",
@@ -67,20 +92,5 @@ func TestParseStatus(t *testing.T) {
 			body:   "",
 			wantOK: false,
 		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, ok := ParseStatus(tt.body)
-			if ok != tt.wantOK {
-				t.Fatalf("ParseStatus(%q) ok = %v, want %v", tt.body, ok, tt.wantOK)
-			}
-			if !ok {
-				return
-			}
-			if got != tt.wantSt {
-				t.Fatalf("ParseStatus(%q) = %+v, want %+v", tt.body, got, tt.wantSt)
-			}
-		})
-	}
+	})
 }

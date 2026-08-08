@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-type fakeBoardExecutor struct {
+type fakeBoardExecutor struct { //nolint:govet // fieldalignment: clarity preferred
 	calls   [][]string
 	outputs [][]byte
 	err     error
