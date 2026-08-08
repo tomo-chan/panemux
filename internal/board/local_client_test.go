@@ -32,13 +32,13 @@ func TestLocalAgmsgClient_Send_AlwaysIncludesForce(t *testing.T) {
 		t.Fatalf("Send: %v", err)
 	}
 	got := *recorded
-	if got[len(got)-1] != "--force" {
+	if got[len(got)-1] != forceFlag {
 		t.Fatalf("expected the last argument to be --force, got %v", got)
 	}
 	if !strings.HasSuffix(got[0], "scripts/send.sh") {
 		t.Fatalf("expected send.sh to be invoked, got %v", got)
 	}
-	wantArgs := []string{"panemux", "pane-a", "pane-b", "please review", "--force"}
+	wantArgs := []string{"panemux", "pane-a", "pane-b", "please review", forceFlag}
 	for i, a := range wantArgs {
 		if got[i+1] != a {
 			t.Fatalf("arg[%d] = %q, want %q (full: %v)", i, got[i+1], a, got)
@@ -73,7 +73,7 @@ func TestLocalAgmsgClient_Since_BuildsExpectedArgsAndFiltersAfterID(t *testing.T
 	if !strings.HasSuffix(got[0], "scripts/api.sh") {
 		t.Fatalf("expected api.sh to be invoked, got %v", got)
 	}
-	want := []string{"get", "teams", "panemux", "messages", "--limit", "50"}
+	want := []string{apiVerbGet, apiNounTeams, "panemux", apiNounMessages, limitFlag, "50"}
 	for i, a := range want {
 		if got[i+1] != a {
 			t.Fatalf("arg[%d] = %q, want %q (full: %v)", i, got[i+1], a, got)

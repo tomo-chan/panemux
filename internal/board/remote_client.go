@@ -47,7 +47,7 @@ func (c *RemoteAgmsgClient) sendScript() string { return path.Join(c.agmsgPath, 
 // Send always passes --force, per AgmsgClient's contract.
 func (c *RemoteAgmsgClient) Send(ctx context.Context, team, from, to, body string) error {
 	_, err := c.executor.RunBoardCommand(ctx, []string{
-		c.sendScript(), team, from, to, body, "--force",
+		c.sendScript(), team, from, to, body, forceFlag,
 	})
 	if err != nil {
 		return fmt.Errorf("remote agmsg send.sh on %s: %w", c.hostID, err)
@@ -60,7 +60,7 @@ func (c *RemoteAgmsgClient) Send(ctx context.Context, team, from, to, body strin
 // after afterID.
 func (c *RemoteAgmsgClient) Since(ctx context.Context, team, afterID string, limit int) ([]Row, error) {
 	out, err := c.executor.RunBoardCommand(ctx, []string{
-		c.apiScript(), "get", "teams", team, "messages", "--limit", strconv.Itoa(limit),
+		c.apiScript(), apiVerbGet, apiNounTeams, team, apiNounMessages, limitFlag, strconv.Itoa(limit),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("remote agmsg api.sh on %s: %w", c.hostID, err)

@@ -710,7 +710,7 @@ layout:
 func TestSaveLayout_UpdatesOnlyActiveWorkspace(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	cfg := &Config{
-		Server: ServerConfig{Port: 8080, Host: "127.0.0.1"},
+		Server: ServerConfig{Port: 8080, Host: defaultServerHost},
 		Workspaces: WorkspacesConfig{
 			Active:      "two",
 			TabPosition: "right",
@@ -1092,7 +1092,7 @@ func TestValidatePane_ShellOnSSH_RelativePath_Error(t *testing.T) {
 
 func validConfig() *Config {
 	return &Config{
-		Server: ServerConfig{Port: 8080, Host: "127.0.0.1"},
+		Server: ServerConfig{Port: 8080, Host: defaultServerHost},
 		Layout: LayoutNode{
 			Direction: "horizontal",
 			Children: []LayoutChild{

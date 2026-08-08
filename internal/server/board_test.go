@@ -92,7 +92,7 @@ func TestBoardEnabledPanes_FiltersToEnabledOnly(t *testing.T) {
 func TestPaneBoardHostID(t *testing.T) {
 	assert.Equal(t, "local", paneBoardHostID(&config.PaneConfig{Type: "local"}))
 	assert.Equal(t, "local", paneBoardHostID(&config.PaneConfig{Type: "tmux"}))
-	assert.Equal(t, "build-host", paneBoardHostID(&config.PaneConfig{Type: "ssh", Connection: "build-host"}))
+	assert.Equal(t, "build-host", paneBoardHostID(&config.PaneConfig{Type: paneTypeSSH, Connection: "build-host"}))
 	assert.Equal(t, "build-host", paneBoardHostID(&config.PaneConfig{Type: "ssh_tmux", Connection: "build-host"}))
 }
 
@@ -125,7 +125,7 @@ func TestRegisterRemoteBoardClient_LiveCapableSession_RegistersClient(t *testing
 	cfg.AgentBoard.Team = "panemux"
 	cfg.AgentBoard.AgmsgPath = "~/.agents/skills/agmsg"
 	pane := &config.PaneConfig{
-		ID: "remote-pane", Type: "ssh", Connection: "build-host",
+		ID: "remote-pane", Type: paneTypeSSH, Connection: "build-host",
 		AgentBoard: &config.PaneAgentBoardConfig{Enabled: true},
 	}
 	mgr := session.NewManager()
@@ -143,7 +143,7 @@ func TestRegisterRemoteBoardClient_NoLiveSession_LogsAndSkips(t *testing.T) {
 	cfg := boardTestConfig(false)
 	cfg.AgentBoard.Team = "panemux"
 	pane := &config.PaneConfig{
-		ID: "remote-pane", Type: "ssh", Connection: "build-host",
+		ID: "remote-pane", Type: paneTypeSSH, Connection: "build-host",
 		AgentBoard: &config.PaneAgentBoardConfig{Enabled: true},
 	}
 	mgr := session.NewManager() // no session registered for "remote-pane"

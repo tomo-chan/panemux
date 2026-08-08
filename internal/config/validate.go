@@ -291,7 +291,7 @@ func validatePaneAgentBoard(p *PaneConfig) []string {
 // DNS resolution — validation must not make network calls.
 func isLoopbackHost(host string) bool {
 	switch host {
-	case "", "localhost", "127.0.0.1", "::1":
+	case "", "localhost", defaultServerHost, "::1":
 		return true
 	}
 	if ip := net.ParseIP(host); ip != nil {

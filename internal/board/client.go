@@ -2,6 +2,21 @@ package board
 
 import "context"
 
+const (
+	// forceFlag is the argument every board-originated Send passes to
+	// send.sh, per AgmsgClient's contract below.
+	forceFlag = "--force"
+	// limitFlag is api.sh's bounded-poll argument name, per Since's contract
+	// below.
+	limitFlag = "--limit"
+	// The following mirror api.sh's fixed `get teams <team> messages`
+	// verb/noun sequence (see docs/agent-board.md's "Integration with
+	// agmsg"), shared by both AgmsgClient implementations and their tests.
+	apiVerbGet      = "get"
+	apiNounTeams    = "teams"
+	apiNounMessages = "messages"
+)
+
 // AgmsgClient is the only abstraction in panemux allowed to call agmsg's
 // scripts (scripts/api.sh for reads, scripts/send.sh for writes). See
 // docs/agent-board.md's "Integration with agmsg" and "Package layout".

@@ -42,7 +42,7 @@ func (c *LocalAgmsgClient) sendScript() string {
 
 // Send always passes --force, per AgmsgClient's contract.
 func (c *LocalAgmsgClient) Send(ctx context.Context, team, from, to, body string) error {
-	cmd := c.execFn(ctx, c.sendScript(), team, from, to, body, "--force")
+	cmd := c.execFn(ctx, c.sendScript(), team, from, to, body, forceFlag)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("local agmsg send.sh: %w (output: %s)", err, strings.TrimSpace(string(out)))
@@ -54,7 +54,7 @@ func (c *LocalAgmsgClient) Send(ctx context.Context, team, from, to, body string
 // --before-id — see AgmsgClient's contract) and filters client-side to rows
 // after afterID.
 func (c *LocalAgmsgClient) Since(ctx context.Context, team, afterID string, limit int) ([]Row, error) {
-	cmd := c.execFn(ctx, c.apiScript(), "get", "teams", team, "messages", "--limit", strconv.Itoa(limit))
+	cmd := c.execFn(ctx, c.apiScript(), apiVerbGet, apiNounTeams, team, apiNounMessages, limitFlag, strconv.Itoa(limit))
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("local agmsg api.sh: %w", err)

@@ -12,7 +12,7 @@ func validBaseConfigForAgentBoardTests() *Config {
 
 func TestValidate_LoopbackHostEmptyAuthToken_NoError(t *testing.T) {
 	cfg := validBaseConfigForAgentBoardTests()
-	cfg.Server.Host = "127.0.0.1"
+	cfg.Server.Host = defaultServerHost
 	cfg.Server.AuthToken = ""
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("expected no error for loopback host with empty auth_token, got %v", err)
@@ -21,7 +21,7 @@ func TestValidate_LoopbackHostEmptyAuthToken_NoError(t *testing.T) {
 
 func TestValidate_LoopbackHostWithAuthToken_NoError(t *testing.T) {
 	cfg := validBaseConfigForAgentBoardTests()
-	cfg.Server.Host = "127.0.0.1"
+	cfg.Server.Host = defaultServerHost
 	cfg.Server.AuthToken = "some-token"
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("expected no error for loopback host with an explicit auth_token, got %v", err)
@@ -56,7 +56,7 @@ func TestIsLoopbackHost(t *testing.T) {
 		want bool
 	}{
 		{"", true},
-		{"127.0.0.1", true},
+		{defaultServerHost, true},
 		{"127.0.0.2", true},
 		{"::1", true},
 		{"localhost", true},

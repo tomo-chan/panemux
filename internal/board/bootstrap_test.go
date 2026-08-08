@@ -130,7 +130,7 @@ func TestBootstrapInstruction_UsesPaneIDAsAgentID(t *testing.T) {
 	if !strings.Contains(instr, "panemux") {
 		t.Fatalf("expected instruction to name the team, got: %s", instr)
 	}
-	if !strings.Contains(instr, "--force") {
+	if !strings.Contains(instr, forceFlag) {
 		t.Fatalf("expected instruction to require --force, got: %s", instr)
 	}
 	if !strings.Contains(instr, "board_status") {

@@ -36,7 +36,7 @@ func TestRemoteAgmsgClient_Send_AlwaysIncludesForce(t *testing.T) {
 		t.Fatalf("expected exactly one RunBoardCommand call, got %d", len(exec.calls))
 	}
 	args := exec.calls[0]
-	want := []string{"/opt/agmsg/scripts/send.sh", "panemux", "pane-a", "pane-b", "please review; `rm -rf /`", "--force"}
+	want := []string{"/opt/agmsg/scripts/send.sh", "panemux", "pane-a", "pane-b", "please review; `rm -rf /`", forceFlag}
 	if len(args) != len(want) {
 		t.Fatalf("args = %v, want %v", args, want)
 	}
@@ -74,7 +74,7 @@ func TestRemoteAgmsgClient_Since_BuildsExpectedArgs(t *testing.T) {
 	}
 
 	args := exec.calls[0]
-	want := []string{"/opt/agmsg/scripts/api.sh", "get", "teams", "panemux", "messages", "--limit", "50"}
+	want := []string{"/opt/agmsg/scripts/api.sh", apiVerbGet, apiNounTeams, "panemux", apiNounMessages, limitFlag, "50"}
 	if len(args) != len(want) {
 		t.Fatalf("args = %v, want %v", args, want)
 	}

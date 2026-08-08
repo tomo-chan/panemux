@@ -82,13 +82,18 @@ func boardEnabledPanes(cfg *config.Config) []*config.PaneConfig {
 	return out
 }
 
+// paneTypeSSH mirrors config's own unexported pane-type constant of the same
+// value; it isn't exported from internal/config, so it's redeclared here
+// rather than reaching into that package's internals.
+const paneTypeSSH = "ssh"
+
 // paneBoardHostID mirrors session.BoardHostID's local/ssh-connection-name
 // split, computed from static config rather than a live session, since the
 // relay's PaneResolver only needs to know host identity, never a live
 // connection.
 func paneBoardHostID(p *config.PaneConfig) string {
 	switch p.Type {
-	case "ssh", "ssh_tmux":
+	case paneTypeSSH, "ssh_tmux":
 		return p.Connection
 	default:
 		return board.LocalHostID
