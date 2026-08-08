@@ -116,7 +116,7 @@ func (f *fakeRemoteSession) BoardHomeDir(_ context.Context) (string, error) {
 	return "/home/build-user", nil
 }
 
-func (f *fakeRemoteSession) RunBoardCommand(_ context.Context, _ []string) ([]byte, error) {
+func (f *fakeRemoteSession) RunBoardCommand(_ context.Context, _ string, _ []string) ([]byte, error) {
 	return nil, nil
 }
 

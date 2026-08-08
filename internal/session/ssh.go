@@ -476,64 +476,61 @@ const boardArgVarPrefix = "a"
 
 // buildBoardCommand builds the remote shell command for a board script
 // invocation (api.sh or send.sh) and the stdin payload that must accompany
-// it. args[0] must be an absolute remote path to the script itself,
+// it. scriptPath must be an absolute remote path to the script itself,
 // validated and quoted the same way cwd already is (an operator-configured
 // filesystem path, not agent-authored text, so it is safe to embed
-// directly — see validateRemotePath below). Every subsequent element is
+// directly — see validateRemotePath below). Every element of args is
 // treated as opaque, potentially agent-authored text (a send.sh message
 // body chief among them) and is never concatenated into the returned
 // command string at all.
 //
-// This supersedes an earlier revision that base64-encoded each argument and
-// embedded the *encoded* literal inline in the command string (still
-// regex-allowlisted and single-quoted first). That version shipped a real
-// CodeQL go/command-injection finding on PR #163 (two critical alerts, one
-// per RunBoardCommand call site): on the success path, the checked, encoded
-// value was still concatenated into the string handed to the ssh exec sink,
-// which is precisely the flow the query tracks — a regex check on a value
-// does not remove it from a taint-tracking dataflow graph merely because
-// the check passed; the value still reaches the sink either way. Returning
-// an error on an (unreachable) allowlist mismatch, tried first, did not
-// help either: it only closed a path CodeQL was never worried about (the
-// failure branch), leaving the actual success-path flow into the sink
-// untouched.
+// scriptPath and args are deliberately separate parameters, not indices
+// into one combined slice. Two earlier revisions on PR #163 both embedded
+// (a regex-allowlisted, single-quoted, base64-encoded form of) argument
+// content directly in the command string and were rejected by CodeQL's
+// go/command-injection query. A third revision moved argument content out
+// of the command string entirely — one base64 line per argument sent over
+// the SSH session's stdin instead — but kept scriptPath as args[0] of one
+// combined slice, reading it out with args[0] alongside the untrusted
+// args[1:] elements. CodeQL flagged that too, on both RunBoardCommand call
+// sites collapsing into this shared helper: this repository's CodeQL setup
+// does not appear to track slice-index provenance precisely enough to
+// distinguish "args[0], which is validated" from "args[i], which isn't" —
+// once any read from a slice is tainted, every read from that slice reads
+// as tainted, including the one this function's own validateRemotePath
+// call already made safe. Splitting scriptPath into its own parameter, so
+// it is never read from the same slice as args, removes that ambiguity at
+// the type level: the generated command string only ever touches
+// scriptPath (validated) and integers (len(args), a loop index) — nothing
+// read from args itself.
 //
-// This version removes that flow at its root instead of trying to sanitize
-// it: every argument is base64-encoded and sent one line at a time over the
-// SSH session's stdin (see RunBoardCommand), not string-concatenated
-// anywhere. The generated command string consists *only* of hardcoded
-// shell boilerplate ("read"/"exec"/"printf"/"base64"), the validated script
+// The generated command string consists *only* of hardcoded shell
+// boilerplate ("read"/"exec"/"printf"/"base64"), the validated script
 // path, and a fixed number of "$aN" variable references whose count comes
-// from len(args) — an integer, never argument content. No byte from any
-// args[1:] element is ever part of the string passed to the ssh exec sink;
-// only fixed, panemux-authored text is. On the remote side, each "read"
-// pulls one base64 line off stdin into a shell variable with no shell
-// re-interpretation of its bytes (read -r disables backslash processing),
-// and `"$(printf '%s' "$aN" | base64 -d)"`, wrapped in double quotes,
-// decodes it back and substitutes the result as a single argument with no
-// word-splitting or glob expansion — the same decode step the prior
-// revision used, just no longer fed from the command string itself.
+// from len(args) — an integer, never argument content. On the remote side,
+// each "read" pulls one base64 line off stdin into a shell variable with
+// no shell re-interpretation of its bytes (read -r disables backslash
+// processing), and `"$(printf '%s' "$aN" | base64 -d)"`, wrapped in double
+// quotes, decodes it back and substitutes the result as a single argument
+// with no word-splitting or glob expansion.
 // See BoardExecutor's doc comment in session.go and
 // docs/agent-board.md's "Open implementation question".
-func buildBoardCommand(args []string) (cmd string, stdin []byte, err error) {
-	if len(args) == 0 {
-		return "", nil, errors.New("board command requires at least a script path")
-	}
-	if err := validateRemotePath("board script path", args[0]); err != nil {
+func buildBoardCommand(scriptPath string, args []string) (cmd string, stdin []byte, err error) {
+	if err := validateRemotePath("board script path", scriptPath); err != nil {
 		return "", nil, err
 	}
 
-	n := len(args) - 1
+	n := len(args)
 	varNames := make([]string, n)
 	var script strings.Builder
 	var in bytes.Buffer
 	for i := 0; i < n; i++ {
 		varNames[i] = fmt.Sprintf("%s%d", boardArgVarPrefix, i)
 		script.WriteString("IFS= read -r " + varNames[i] + " || exit 1\n")
-		in.WriteString(base64.StdEncoding.EncodeToString([]byte(args[i+1])))
+		in.WriteString(base64.StdEncoding.EncodeToString([]byte(args[i])))
 		in.WriteByte('\n')
 	}
-	script.WriteString("exec " + shellQuotePath(args[0]))
+	script.WriteString("exec " + shellQuotePath(scriptPath))
 	for _, vn := range varNames {
 		script.WriteString(` "$(printf '%s' "$` + vn + `" | base64 -d)"`)
 	}
@@ -588,16 +585,16 @@ func (s *SSHSession) BoardHomeDir(_ context.Context) (string, error) {
 // RunBoardCommand runs an agmsg script (api.sh or send.sh) on the remote
 // host over a new exec channel on this session's SSH connection. See
 // BoardExecutor in session.go for the escaping contract.
-func (s *SSHSession) RunBoardCommand(_ context.Context, args []string) ([]byte, error) {
-	return runBoardCommandOverSSH(s.client, args)
+func (s *SSHSession) RunBoardCommand(_ context.Context, scriptPath string, args []string) ([]byte, error) {
+	return runBoardCommandOverSSH(s.client, scriptPath, args)
 }
 
 // runBoardCommandOverSSH implements RunBoardCommand for both SSHSession and
 // TmuxSSHSession — the two share nothing else about their SSH connection
 // handling, so a shared helper avoids duplicating this exec-channel logic
 // per session type.
-func runBoardCommandOverSSH(client *ssh.Client, args []string) ([]byte, error) {
-	cmdStr, stdin, err := buildBoardCommand(args)
+func runBoardCommandOverSSH(client *ssh.Client, scriptPath string, args []string) ([]byte, error) {
+	cmdStr, stdin, err := buildBoardCommand(scriptPath, args)
 	if err != nil {
 		return nil, err
 	}

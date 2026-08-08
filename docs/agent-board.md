@@ -631,17 +631,23 @@ type BoardHostID interface {
     BoardHostID() string
 }
 
-// BoardExecutor is implemented by SSH-backed sessions. It runs an agmsg script on the remote host
-// over the session's existing exec channel, as a single shell command string built from args.
-// RunBoardCommand itself single-quote-escapes every element of args (the same discipline
-// internal/session/ssh.go already applies to cwd) before building that string — the caller passes
-// raw, unescaped values, exactly like exec.Command's own argv contract, so there is exactly one
-// place this can be gotten wrong rather than one per call site. Neither api.sh (reads) nor send.sh
-// (writes) has a stdin option for the values this carries (see
-// docs/agent-board.md#integration-with-agmsg), so escaping the command string is the only
-// available defense for either.
+// BoardExecutor is implemented by SSH-backed sessions. It runs an agmsg script (scriptPath) on the
+// remote host over the session's existing exec channel, passing args to it. RunBoardCommand
+// delivers every element of args to the remote shell over the SSH session's stdin, base64-encoded
+// one line per argument, rather than concatenating them into the command string — see
+// docs/agent-board.md#security-model's "Open implementation question" for why (three approaches
+// short of this one were rejected by this repository's CodeQL analysis). scriptPath and args are
+// deliberately separate parameters, not indices into one combined slice: even after argument
+// *content* was moved off the command string, CodeQL kept flagging a shared implementation that
+// read a validated scriptPath out of args[0] alongside untrusted args[1:] — this repository's
+// CodeQL setup does not track slice-index provenance precisely enough to tell them apart. The
+// caller passes raw, unescaped values for both, exactly like exec.Command's own argv contract, so
+// there is exactly one place this can be gotten wrong rather than one per call site. Neither api.sh
+// (reads) nor send.sh (writes) has a stdin option of its own for these values — RunBoardCommand's
+// generated remote shell script is what bridges panemux's stdin delivery back to the
+// positional-argument form those scripts require.
 type BoardExecutor interface {
-    RunBoardCommand(ctx context.Context, args []string) ([]byte, error)
+    RunBoardCommand(ctx context.Context, scriptPath string, args []string) ([]byte, error)
 }
 ```
 
@@ -1001,33 +1007,50 @@ that shaped the design.
   construction of that string. `send.sh` does its own SQL escaping internally, so shell-escaping is
   the only layer panemux is responsible for on the write path — there is no panemux-owned SQL text
   to also escape, unlike an earlier draft of this design that had panemux building its own SQL.
-- **Resolved in Phase 1's implementation, after two false starts: `shellQuotePath`-style escaping —
-  even a base64-encode-then-allowlist variant of it — does not satisfy this repository's own
-  CodeQL bar for a message body, no matter how the allowlist check's failure path is handled.**
-  `docs/security.md`'s accepted pattern (`cwd`) is a **regex allowlist** (`validRemotePath`) applied
-  *before* `shellQuotePath`. A message body is arbitrary agent-authored text and cannot be
-  regex-allowlisted directly the way a path can, so the first attempt had `RunBoardCommand`
-  base64-encode the body first and allowlist the *encoded* form (a base64 alphabet cannot contain a
-  shell metacharacter, mirroring `validRemotePath`'s role) before embedding it, single-quoted,
-  inline in the command string. CodeQL's `go/command-injection` query still reported 2 critical
-  alerts on PR #163 (one per `RunBoardCommand` call site). The second attempt made the allowlist
-  check return an error on mismatch instead of silently substituting a default value — exactly
-  matching `validateRemotePath`'s early-return shape — on the theory that the *shape* of the check,
-  not just its presence, was what CodeQL needed. Same 2 alerts, unchanged. Both attempts missed the
-  actual problem: on the success path (the only one that matters, since the encoding can't
-  realistically fail), the checked, encoded value was still concatenated into the command string
-  either way — a regex check does not remove a value from a taint-tracking dataflow graph just
-  because it passed, if the value still reaches the sink afterward. The fix that actually cleared
-  both alerts stops trying to sanitize the value in the command string and instead removes it from
-  that string entirely: every argument after the script path is base64-encoded and delivered over
-  the SSH session's **stdin**, one line per argument, and the remote shell reads each into a
-  variable (`IFS= read -r aN`) before decoding and using it — the command string handed to
-  `Session.Output` contains only hardcoded shell boilerplate, the validated script path, and `$aN`
-  variable references, never any argument's bytes. The lesson for future work on this repository's
-  CodeQL bar: a regex-allowlist-then-quote pattern is only a sanitizer when the *checked value
-  itself* never reaches the sink through string concatenation — moving a value out of the
-  command-string dataflow entirely (a different channel like stdin) is a stronger and, in this case,
-  necessary guarantee than checking-then-quoting it in place. See `docs/security.md`'s "Agent board
+- **Resolved in Phase 1's implementation, after three false starts: `shellQuotePath`-style
+  escaping — even a base64-encode-then-allowlist variant of it, and even after moving argument
+  content off the command string entirely — does not satisfy this repository's own CodeQL bar for
+  a message body unless the trusted script path is also structurally separated from untrusted
+  argument content, not just from its bytes.** `docs/security.md`'s accepted pattern (`cwd`) is a
+  **regex allowlist** (`validRemotePath`) applied *before* `shellQuotePath`. A message body is
+  arbitrary agent-authored text and cannot be regex-allowlisted directly the way a path can, so the
+  first attempt had `RunBoardCommand` base64-encode the body first and allowlist the *encoded* form
+  (a base64 alphabet cannot contain a shell metacharacter, mirroring `validRemotePath`'s role)
+  before embedding it, single-quoted, inline in the command string. CodeQL's `go/command-injection`
+  query still reported 2 critical alerts on PR #163 (one per `RunBoardCommand` call site). The
+  second attempt made the allowlist check return an error on mismatch instead of silently
+  substituting a default value — exactly matching `validateRemotePath`'s early-return shape — on
+  the theory that the *shape* of the check, not just its presence, was what CodeQL needed. Same 2
+  alerts, unchanged. Both attempts missed the actual problem: on the success path (the only one
+  that matters, since the encoding can't realistically fail), the checked, encoded value was still
+  concatenated into the command string either way — a regex check does not remove a value from a
+  taint-tracking dataflow graph just because it passed, if the value still reaches the sink
+  afterward.
+
+  The third attempt moved every argument off the command string entirely: base64-encoded and
+  delivered over the SSH session's **stdin**, one line per argument, with the remote shell reading
+  each into a variable (`IFS= read -r aN`) before decoding and using it — but `RunBoardCommand`
+  still took one `args []string` parameter with the script path at `args[0]`, the same shape it had
+  always used. CodeQL cleared the `tmux_ssh.go` alert (that method no longer builds a command string
+  at all) but kept flagging the shared helper in `ssh.go`, even though that helper's command-string
+  construction only ever reads `args[0]` (already regex-validated via `validateRemotePath`) and
+  integer loop indices — never `args[i]` for `i > 0`, where the actual untrusted content lives. The
+  most plausible explanation: this repository's CodeQL setup doesn't track slice-index provenance
+  precisely — once *any* read from a slice is tainted because some caller puts agent-authored
+  content into it, *every* read from that slice, including one already validated, is treated as
+  tainted too.
+
+  **The fix that actually cleared both alerts: `RunBoardCommand(ctx, scriptPath string, args
+  []string)` — splitting the script path into its own parameter, never read from the same slice as
+  args.** `BoardExecutor`'s signature and every implementation/caller (`internal/session`,
+  `internal/board.BoardExecutor`, `RemoteAgmsgClient.Send`/`Since`, `HasAgmsgRemote`) changed to
+  match. The lesson for future work on this repository's CodeQL bar, beyond this one feature: a
+  regex-allowlist-then-quote pattern is only a sanitizer when the checked value itself never reaches
+  the sink through string concatenation (moving a value to a different channel like stdin is a
+  stronger guarantee than checking-then-quoting it in place) — *and*, separately, when a function
+  takes both a trusted validated value and an untrusted collection, keep them as genuinely distinct
+  parameters, not different indices into one combined slice, even after the untrusted collection's
+  *content* has already been moved off the dangerous path. See `docs/security.md`'s "Agent board
   remote writes" section and `buildBoardCommand`/`runBoardCommandOverSSH` in
   `internal/session/ssh.go`.
 - **panemux itself is never deployed to a remote host.** Beyond the injection-surface argument

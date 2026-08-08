@@ -102,22 +102,29 @@ type BoardHostID interface {
 }
 
 // BoardExecutor is implemented by SSH-backed sessions. It runs an agmsg
-// script on the remote host over the session's existing exec channel, as a
-// single shell command string built from args. RunBoardCommand itself
-// escapes every element of args (the same discipline
-// internal/session/ssh.go already applies to cwd, structurally extended for
-// arbitrary agent-authored bodies — see the RunBoardCommand implementation
-// and docs/agent-board.md#security-model's "Open implementation question")
-// before building that string — the caller passes raw, unescaped values,
-// exactly like exec.Command's own argv contract, so there is exactly one
-// place this can be gotten wrong rather than one per call site. args[0]
-// must be an absolute remote path to the script being invoked; every
-// subsequent element is an opaque value (verb, flag, team name, message
-// body, ...). Neither api.sh (reads) nor send.sh (writes) has a stdin
-// option for the values this carries, so escaping the command string is the
-// only available defense for either.
+// script (scriptPath, an absolute remote path) on the remote host over the
+// session's existing exec channel, passing args (opaque values: verb, flag,
+// team name, message body, ...) to it. RunBoardCommand's implementation
+// (internal/session/ssh.go) validates scriptPath the same way cwd already
+// is, and delivers every element of args to the remote shell over the SSH
+// session's stdin rather than the command string — see the
+// RunBoardCommand/buildBoardCommand implementation and
+// docs/agent-board.md#security-model's "Open implementation question" for
+// why. scriptPath and args are deliberately two separate parameters, not
+// one combined slice: a single []string mixing a trusted, validated path
+// with untrusted, potentially agent-authored argument content is not
+// something this repository's CodeQL setup can prove safe purely by which
+// index a value is read from — see the note in
+// docs/agent-board.md#security-model for the two prior approaches on PR
+// #163 that CodeQL rejected before this shape did. The caller passes raw,
+// unescaped values for both, exactly like exec.Command's own argv contract,
+// so there is exactly one place this can be gotten wrong rather than one
+// per call site. Neither api.sh (reads) nor send.sh (writes) has a stdin
+// option of its own for these values — RunBoardCommand's generated remote
+// shell script is what bridges panemux's stdin delivery back to the
+// positional-argument form those scripts require.
 type BoardExecutor interface {
-	RunBoardCommand(ctx context.Context, args []string) ([]byte, error)
+	RunBoardCommand(ctx context.Context, scriptPath string, args []string) ([]byte, error)
 }
 
 // BoardHomeDirer is implemented by SSH-backed sessions. It resolves the

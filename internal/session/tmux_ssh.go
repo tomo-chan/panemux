@@ -164,8 +164,8 @@ func (s *TmuxSSHSession) BoardHomeDir(_ context.Context) (string, error) {
 // RunBoardCommand runs an agmsg script (api.sh or send.sh) on the remote
 // host over a new exec channel on this session's SSH connection. See
 // BoardExecutor in session.go for the escaping contract.
-func (s *TmuxSSHSession) RunBoardCommand(_ context.Context, args []string) ([]byte, error) {
-	return runBoardCommandOverSSH(s.client, args)
+func (s *TmuxSSHSession) RunBoardCommand(_ context.Context, scriptPath string, args []string) ([]byte, error) {
+	return runBoardCommandOverSSH(s.client, scriptPath, args)
 }
 
 // GetCWD runs `tmux display-message` over a new SSH exec channel to get the active pane's CWD.

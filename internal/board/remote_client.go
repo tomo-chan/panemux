@@ -12,8 +12,11 @@ import (
 // import internal/session (avoiding a session <-> board import cycle,
 // since session.CreateFromConfig will need to construct board clients);
 // internal/session.SSHSession and TmuxSSHSession satisfy it structurally.
+// scriptPath and args are separate parameters, not indices into one
+// combined slice — see internal/session.BoardExecutor's doc comment for why
+// that split matters for this repository's CodeQL setup.
 type BoardExecutor interface {
-	RunBoardCommand(ctx context.Context, args []string) ([]byte, error)
+	RunBoardCommand(ctx context.Context, scriptPath string, args []string) ([]byte, error)
 }
 
 // RemoteAgmsgClient runs agmsg's scripts.sh scripts on a remote host over
@@ -46,8 +49,8 @@ func (c *RemoteAgmsgClient) sendScript() string { return path.Join(c.agmsgPath, 
 
 // Send always passes --force, per AgmsgClient's contract.
 func (c *RemoteAgmsgClient) Send(ctx context.Context, team, from, to, body string) error {
-	_, err := c.executor.RunBoardCommand(ctx, []string{
-		c.sendScript(), team, from, to, body, forceFlag,
+	_, err := c.executor.RunBoardCommand(ctx, c.sendScript(), []string{
+		team, from, to, body, forceFlag,
 	})
 	if err != nil {
 		return fmt.Errorf("remote agmsg send.sh on %s: %w", c.hostID, err)
@@ -59,8 +62,8 @@ func (c *RemoteAgmsgClient) Send(ctx context.Context, team, from, to, body strin
 // --before-id) over the remote exec channel and filters client-side to rows
 // after afterID.
 func (c *RemoteAgmsgClient) Since(ctx context.Context, team, afterID string, limit int) ([]Row, error) {
-	out, err := c.executor.RunBoardCommand(ctx, []string{
-		c.apiScript(), apiVerbGet, apiNounTeams, team, apiNounMessages, limitFlag, strconv.Itoa(limit),
+	out, err := c.executor.RunBoardCommand(ctx, c.apiScript(), []string{
+		apiVerbGet, apiNounTeams, team, apiNounMessages, limitFlag, strconv.Itoa(limit),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("remote agmsg api.sh on %s: %w", c.hostID, err)

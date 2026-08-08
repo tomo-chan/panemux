@@ -57,26 +57,48 @@ func TestBoardCapabilities_ImplementedBySSHTypesOnly(t *testing.T) {
 }
 
 func TestBuildBoardCommand_ScriptPathValidatedAndQuoted(t *testing.T) {
-	cmd, stdin, err := buildBoardCommand([]string{"/opt/agmsg/scripts/api.sh", "get", "teams"})
+	cmd, stdin, err := buildBoardCommand("/opt/agmsg/scripts/api.sh", []string{"get", "teams"})
 	require.NoError(t, err)
 	assert.Contains(t, cmd, "exec '/opt/agmsg/scripts/api.sh' ")
-	// Two arguments after the script path means two "read" lines and two
-	// base64 lines on stdin.
+	// Two arguments means two "read" lines and two base64 lines on stdin.
 	assert.Equal(t, 2, strings.Count(cmd, "IFS= read -r"))
 	assert.Equal(t, 2, strings.Count(string(stdin), "\n"))
 }
 
 func TestBuildBoardCommand_RejectsRelativeOrMetacharacterScriptPath(t *testing.T) {
-	_, _, err := buildBoardCommand([]string{"scripts/api.sh"})
+	_, _, err := buildBoardCommand("scripts/api.sh", nil)
 	require.Error(t, err)
 
-	_, _, err = buildBoardCommand([]string{"/opt/agmsg; rm -rf /"})
+	_, _, err = buildBoardCommand("/opt/agmsg; rm -rf /", nil)
 	require.Error(t, err)
 }
 
-func TestBuildBoardCommand_EmptyArgs(t *testing.T) {
-	_, _, err := buildBoardCommand(nil)
-	require.Error(t, err)
+func TestBuildBoardCommand_NoArgs(t *testing.T) {
+	cmd, stdin, err := buildBoardCommand("/opt/agmsg/scripts/api.sh", nil)
+	require.NoError(t, err)
+	assert.Equal(t, "exec '/opt/agmsg/scripts/api.sh'", cmd)
+	assert.Empty(t, stdin)
+}
+
+// Regression test for the CodeQL go/command-injection finding on PR #163
+// surviving the first stdin-based fix: even with argument content moved
+// out of the command string, CodeQL kept flagging the shared
+// runBoardCommandOverSSH sink as long as the validated script path was
+// read out of the same []string as untrusted argument content (args[0]) —
+// this repository's CodeQL setup does not appear to track slice-index
+// provenance precisely enough to tell "args[0], which is validated" apart
+// from "args[i], which isn't." Splitting scriptPath into its own parameter
+// is what actually cleared it. This asserts the command string is
+// buildable, and dangerous, from args-only content with no script-path
+// involvement at all, to guard against a future regression that folds
+// scriptPath back into a shared slice with args.
+func TestBuildBoardCommand_ScriptPathNeverReadFromArgsSlice(t *testing.T) {
+	cmd, _, err := buildBoardCommand("/opt/agmsg/scripts/send.sh", []string{"/opt/agmsg/scripts/send.sh"})
+	require.NoError(t, err)
+	// The script path appears exactly once in the command string (in the
+	// "exec" clause) even though the same string was also passed as an
+	// element of args — proof that args content never reaches cmd.
+	assert.Equal(t, 1, strings.Count(cmd, "/opt/agmsg/scripts/send.sh"))
 }
 
 // Regression test for the CodeQL go/command-injection finding on PR #163:
@@ -99,7 +121,7 @@ func TestBuildBoardCommand_NoArgumentBytesInCommandString(t *testing.T) {
 		"body\nwith\nembedded\nnewlines",
 		"",
 	}
-	cmd, stdin, err := buildBoardCommand(append([]string{"/opt/agmsg/scripts/send.sh"}, dangerous...))
+	cmd, stdin, err := buildBoardCommand("/opt/agmsg/scripts/send.sh", dangerous)
 	require.NoError(t, err)
 	for _, v := range dangerous {
 		if v != "" && strings.Contains(cmd, v) {
@@ -145,7 +167,7 @@ func TestBuildBoardCommand_EndToEndRoundTripThroughRealShell(t *testing.T) {
 		"please review; `rm -rf /` $(evil) 'quoted' \"double\" \nsecond line",
 		"--force",
 	}
-	cmd, stdin, err := buildBoardCommand(append([]string{dumpScript}, dangerous...))
+	cmd, stdin, err := buildBoardCommand(dumpScript, dangerous)
 	require.NoError(t, err)
 
 	execCmd := exec.Command("/bin/sh", "-c", cmd)
@@ -159,8 +181,8 @@ func TestBuildBoardCommand_EndToEndRoundTripThroughRealShell(t *testing.T) {
 
 func TestBuildBoardCommand_SendShMessageBodyRoundTrips(t *testing.T) {
 	body := "please review; `rm -rf /` $(evil) 'quoted'"
-	cmd, stdin, err := buildBoardCommand([]string{
-		"/opt/agmsg/scripts/send.sh", "panemux", "pane-a", "pane-b", body, "--force",
+	cmd, stdin, err := buildBoardCommand("/opt/agmsg/scripts/send.sh", []string{
+		"panemux", "pane-a", "pane-b", body, "--force",
 	})
 	require.NoError(t, err)
 	if strings.Contains(cmd, "rm -rf") {

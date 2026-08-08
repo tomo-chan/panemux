@@ -62,7 +62,7 @@ func HasAgmsgLocal(agmsgPath string) bool {
 }
 
 // remoteAgmsgProbeBin is an absolute path to a POSIX `test` binary,
-// satisfying RunBoardCommand's requirement that args[0] be an absolute
+// satisfying RunBoardCommand's requirement that scriptPath be an absolute
 // remote path (see buildBoardCommand in internal/session/ssh.go). `test` is
 // not itself an agmsg script, but HasAgmsgRemote reuses the same escaped
 // exec channel RunBoardCommand already provides rather than adding a
@@ -74,7 +74,7 @@ const remoteAgmsgProbeBin = "/bin/test"
 // `command -v agmsg` for the same reason as HasAgmsgLocal.
 func HasAgmsgRemote(ctx context.Context, executor BoardExecutor, agmsgPath string) bool {
 	candidate := agmsgPath + "/scripts/api.sh"
-	_, err := executor.RunBoardCommand(ctx, []string{remoteAgmsgProbeBin, "-f", candidate})
+	_, err := executor.RunBoardCommand(ctx, remoteAgmsgProbeBin, []string{"-f", candidate})
 	return err == nil
 }
 

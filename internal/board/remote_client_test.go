@@ -12,8 +12,12 @@ type fakeBoardExecutor struct { //nolint:govet // fieldalignment: clarity prefer
 	err     error
 }
 
-func (f *fakeBoardExecutor) RunBoardCommand(_ context.Context, args []string) ([]byte, error) {
-	f.calls = append(f.calls, append([]string(nil), args...))
+// RunBoardCommand records scriptPath and args flattened into one slice
+// (scriptPath first) so existing index-based assertions in this file don't
+// need to change shape — the real interface keeps them as separate
+// parameters; see internal/session.BoardExecutor's doc comment for why.
+func (f *fakeBoardExecutor) RunBoardCommand(_ context.Context, scriptPath string, args []string) ([]byte, error) {
+	f.calls = append(f.calls, append([]string{scriptPath}, args...))
 	if f.err != nil {
 		return nil, f.err
 	}
