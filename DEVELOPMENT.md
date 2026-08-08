@@ -96,7 +96,7 @@ Example: `Config.sshConfigPath` uses `sshconfig.DefaultPath()` only when the ove
 
 ### Coverage
 
-- `make coverage-go` enforces at least 80% combined coverage across `internal/config`, `internal/api`, `internal/ws`, and `internal/server`.
+- `make coverage-go` enforces at least 80% combined coverage across `internal/config`, `internal/api`, `internal/ws`, `internal/server`, and `internal/board`.
 - `make coverage-frontend` enforces at least 80% coverage across `frontend/src/hooks/` and `frontend/src/schemas/`.
 
 ### Quality gate
