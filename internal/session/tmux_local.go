@@ -97,6 +97,10 @@ func (s *TmuxLocalSession) ID() string    { return s.id }
 func (s *TmuxLocalSession) Type() Type    { return TypeTmux }
 func (s *TmuxLocalSession) Title() string { return s.title }
 
+// BoardHostID returns "local": a local-tmux session's pane participates in
+// the agmsg installation on the host panemux itself runs on.
+func (s *TmuxLocalSession) BoardHostID() string { return LocalBoardHostID }
+
 func (s *TmuxLocalSession) State() State {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

@@ -97,6 +97,10 @@ func (s *LocalSession) ID() string    { return s.id }
 func (s *LocalSession) Type() Type    { return TypeLocal }
 func (s *LocalSession) Title() string { return s.title }
 
+// BoardHostID returns "local": a local session's pane participates in the
+// agmsg installation on the host panemux itself runs on.
+func (s *LocalSession) BoardHostID() string { return LocalBoardHostID }
+
 func (s *LocalSession) State() State {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

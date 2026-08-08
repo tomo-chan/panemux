@@ -1,6 +1,9 @@
 package session
 
-import "io"
+import (
+	"context"
+	"io"
+)
 
 // Type represents the type of terminal session.
 type Type string
@@ -83,6 +86,49 @@ type GitContextGetter interface {
 // SSHConnNamer is implemented by sessions that have an SSH connection name.
 type SSHConnNamer interface {
 	ConnectionName() string
+}
+
+// LocalBoardHostID is the BoardHostID() value shared by local and local-tmux
+// sessions: the agmsg installation on the host panemux itself runs on.
+const LocalBoardHostID = "local"
+
+// BoardHostID is implemented by every session type. It returns the
+// identifier of the host whose agmsg installation this session's pane
+// participates in: "local" for local/tmux sessions, the SSH connection name
+// for ssh/ssh_tmux sessions. See docs/agent-board.md's "internal/session
+// capability interfaces".
+type BoardHostID interface {
+	BoardHostID() string
+}
+
+// BoardExecutor is implemented by SSH-backed sessions. It runs an agmsg
+// script on the remote host over the session's existing exec channel, as a
+// single shell command string built from args. RunBoardCommand itself
+// escapes every element of args (the same discipline
+// internal/session/ssh.go already applies to cwd, structurally extended for
+// arbitrary agent-authored bodies — see the RunBoardCommand implementation
+// and docs/agent-board.md#security-model's "Open implementation question")
+// before building that string — the caller passes raw, unescaped values,
+// exactly like exec.Command's own argv contract, so there is exactly one
+// place this can be gotten wrong rather than one per call site. args[0]
+// must be an absolute remote path to the script being invoked; every
+// subsequent element is an opaque value (verb, flag, team name, message
+// body, ...). Neither api.sh (reads) nor send.sh (writes) has a stdin
+// option for the values this carries, so escaping the command string is the
+// only available defense for either.
+type BoardExecutor interface {
+	RunBoardCommand(ctx context.Context, args []string) ([]byte, error)
+}
+
+// BoardHomeDirer is implemented by SSH-backed sessions. It resolves the
+// remote user's home directory once per SSH connection (a single
+// `echo -n "$HOME"` probe over the existing exec channel), cached for the
+// life of that connection, so a leading `~` in agent_board.agmsg_path can be
+// expanded locally before it ever reaches a BoardExecutor argument — a
+// literal `~` placed inside RunBoardCommand's escaping would never expand on
+// the remote side. See docs/agent-board.md's "Integration with agmsg".
+type BoardHomeDirer interface {
+	BoardHomeDir(ctx context.Context) (string, error)
 }
 
 // DirectoryEntry represents a browsable directory in a filesystem tree.

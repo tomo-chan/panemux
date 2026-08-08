@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -15,6 +16,8 @@ import (
 var validTmuxSessionName = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`)
 
 // TmuxSSHSession attaches to a tmux session on a remote host via SSH.
+//
+//nolint:govet // fieldalignment: clarity is preferred over splitting this session handle.
 type TmuxSSHSession struct {
 	client         *ssh.Client
 	session        *ssh.Session
@@ -27,6 +30,8 @@ type TmuxSSHSession struct {
 	connectionName string
 	state          State
 	mu             sync.RWMutex
+	boardHomeDir   string
+	boardHomeMu    sync.Mutex
 }
 
 // NewTmuxSSH creates a session that attaches to a remote tmux session.
@@ -130,6 +135,51 @@ func (s *TmuxSSHSession) Resize(cols, rows uint16) error {
 
 // ConnectionName returns the panemux connection alias for this SSH session.
 func (s *TmuxSSHSession) ConnectionName() string { return s.connectionName }
+
+// BoardHostID returns the SSH connection alias: an ssh_tmux session's pane
+// participates in that remote host's agmsg installation.
+func (s *TmuxSSHSession) BoardHostID() string { return s.connectionName }
+
+// BoardHomeDir resolves and caches the remote user's home directory for the
+// life of this SSH connection. See BoardHomeDirer in session.go.
+func (s *TmuxSSHSession) BoardHomeDir(_ context.Context) (string, error) {
+	s.boardHomeMu.Lock()
+	defer s.boardHomeMu.Unlock()
+	if s.boardHomeDir != "" {
+		return s.boardHomeDir, nil
+	}
+	sess, err := s.client.NewSession()
+	if err != nil {
+		return "", fmt.Errorf("new ssh session for board home dir: %w", err)
+	}
+	defer sess.Close()
+	home, err := remoteBoardHomeDir(sess)
+	if err != nil {
+		return "", err
+	}
+	s.boardHomeDir = home
+	return home, nil
+}
+
+// RunBoardCommand runs an agmsg script (api.sh or send.sh) on the remote
+// host over a new exec channel on this session's SSH connection. See
+// BoardExecutor in session.go for the escaping contract.
+func (s *TmuxSSHSession) RunBoardCommand(_ context.Context, args []string) ([]byte, error) {
+	cmdStr, err := buildBoardCommand(args)
+	if err != nil {
+		return nil, err
+	}
+	sess, err := s.client.NewSession()
+	if err != nil {
+		return nil, fmt.Errorf("new ssh session for board command: %w", err)
+	}
+	defer sess.Close()
+	out, err := sess.Output(cmdStr)
+	if err != nil {
+		return nil, fmt.Errorf("board command over ssh: %w", err)
+	}
+	return out, nil
+}
 
 // GetCWD runs `tmux display-message` over a new SSH exec channel to get the active pane's CWD.
 func (s *TmuxSSHSession) GetCWD() (string, error) {

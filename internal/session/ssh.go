@@ -3,6 +3,7 @@ package session
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/sha1" //nolint:gosec // G505: OpenSSH hashed known_hosts entries use HMAC-SHA1
 	"encoding/base64"
@@ -36,6 +37,8 @@ var validRemotePath = regexp.MustCompile(`^(/[^;|&$` + "`" + `'"<>()\[\]{}!\\\x0
 const invalidRemotePathMsg = "must be an absolute path with no shell metacharacters"
 
 // SSHSession manages an SSH connection with a PTY.
+//
+//nolint:govet // fieldalignment: clarity is preferred over splitting this session handle.
 type SSHSession struct {
 	client     *ssh.Client
 	session    *ssh.Session
@@ -48,6 +51,8 @@ type SSHSession struct {
 	connectionName string
 	state          State
 	mu             sync.RWMutex
+	boardHomeDir   string // cached BoardHomeDir() result; empty until first probe succeeds
+	boardHomeMu    sync.Mutex
 }
 
 type sshSessionRunner interface {
@@ -461,6 +466,130 @@ func validateRemotePath(label, path string) error {
 		return nil
 	}
 	return fmt.Errorf("invalid %s %q: %s", label, path, invalidRemotePathMsg)
+}
+
+// base64Alphabet is the character set base64.StdEncoding can ever produce.
+// boardArgLiteral checks its own output against it defensively — the
+// encoder cannot produce anything outside this alphabet, but the check
+// mirrors validRemotePath's regex-allowlist-then-quote shape rather than
+// trusting the encoding step silently.
+var base64Alphabet = regexp.MustCompile(`^[A-Za-z0-9+/]*=*$`)
+
+// boardArgLiteral encodes an arbitrary, potentially agent-authored board
+// command argument (a send.sh message body chief among them) so it can be
+// embedded in a remote shell command string with no injection risk,
+// regardless of its content.
+//
+// docs/security.md's accepted CodeQL-safe pattern for a shell argument is a
+// regex allowlist (validRemotePath) applied before shellQuotePath — the
+// allowlist is what actually breaks the taint chain, not the quoting alone.
+// A message body is arbitrary text and cannot be regex-allowlisted the way
+// a path can (see docs/agent-board.md#security-model's "Open implementation
+// question"). The structural fix adopted here mirrors that shape instead of
+// trying to allowlist the body itself: every non-path board argument is
+// base64-encoded first. The encoded form *can* be regex-allowlisted (its
+// alphabet contains no shell metacharacter by construction), so the value
+// that is ever concatenated into the command string is always the
+// allowlisted, single-quoted, base64 literal — never the original
+// attacker-influenced bytes. The remote shell decodes it back via a command
+// substitution wrapped in double quotes, which prevents word-splitting/glob
+// expansion of the decoded result while still substituting it as a single
+// argument: `"$(printf '%s' '<base64>' | base64 -d)"`.
+func boardArgLiteral(v string) string {
+	enc := base64.StdEncoding.EncodeToString([]byte(v))
+	if !base64Alphabet.MatchString(enc) {
+		// Unreachable in practice: base64.StdEncoding cannot produce
+		// anything outside this alphabet. Refuse rather than pass through
+		// an unvalidated value if that ever stops being true.
+		enc = ""
+	}
+	return `"$(printf '%s' ` + shellQuotePath(enc) + ` | base64 -d)"`
+}
+
+// buildBoardCommand builds the remote shell command string for a board
+// script invocation (api.sh or send.sh). args[0] must be an absolute
+// remote path to the script itself, validated and quoted the same way cwd
+// already is; every subsequent element is treated as opaque, untrusted text
+// and encoded via boardArgLiteral. See BoardExecutor's doc comment in
+// session.go.
+func buildBoardCommand(args []string) (string, error) {
+	if len(args) == 0 {
+		return "", errors.New("board command requires at least a script path")
+	}
+	if err := validateRemotePath("board script path", args[0]); err != nil {
+		return "", err
+	}
+	parts := make([]string, 0, len(args))
+	parts = append(parts, shellQuotePath(args[0]))
+	for _, a := range args[1:] {
+		parts = append(parts, boardArgLiteral(a))
+	}
+	return strings.Join(parts, " "), nil
+}
+
+// boardHomeDirCmd probes the remote user's home directory once per SSH
+// connection. Used to expand a leading `~` in agent_board.agmsg_path
+// locally, before the path ever reaches a BoardExecutor argument — a
+// literal `~` placed inside single quotes (or inside boardArgLiteral's
+// base64 encoding) would never expand on the remote side. See
+// docs/agent-board.md's "Integration with agmsg".
+const boardHomeDirCmd = `echo -n "$HOME"`
+
+func remoteBoardHomeDir(runner sshSessionRunner) (string, error) {
+	out, err := runner.Output(boardHomeDirCmd)
+	if err != nil {
+		return "", fmt.Errorf("remote $HOME probe: %w", err)
+	}
+	home := strings.TrimSpace(string(out))
+	if home == "" {
+		return "", errors.New("remote $HOME probe returned empty output")
+	}
+	return home, nil
+}
+
+// BoardHostID returns the SSH connection alias: an ssh/ssh_tmux session's
+// pane participates in that remote host's agmsg installation.
+func (s *SSHSession) BoardHostID() string { return s.connectionName }
+
+// BoardHomeDir resolves and caches the remote user's home directory for the
+// life of this SSH connection. See BoardHomeDirer in session.go.
+func (s *SSHSession) BoardHomeDir(_ context.Context) (string, error) {
+	s.boardHomeMu.Lock()
+	defer s.boardHomeMu.Unlock()
+	if s.boardHomeDir != "" {
+		return s.boardHomeDir, nil
+	}
+	sess, err := s.client.NewSession()
+	if err != nil {
+		return "", fmt.Errorf("new ssh session for board home dir: %w", err)
+	}
+	defer sess.Close()
+	home, err := remoteBoardHomeDir(sess)
+	if err != nil {
+		return "", err
+	}
+	s.boardHomeDir = home
+	return home, nil
+}
+
+// RunBoardCommand runs an agmsg script (api.sh or send.sh) on the remote
+// host over a new exec channel on this session's SSH connection. See
+// BoardExecutor in session.go for the escaping contract.
+func (s *SSHSession) RunBoardCommand(_ context.Context, args []string) ([]byte, error) {
+	cmdStr, err := buildBoardCommand(args)
+	if err != nil {
+		return nil, err
+	}
+	sess, err := s.client.NewSession()
+	if err != nil {
+		return nil, fmt.Errorf("new ssh session for board command: %w", err)
+	}
+	defer sess.Close()
+	out, err := sess.Output(cmdStr)
+	if err != nil {
+		return nil, fmt.Errorf("board command over ssh: %w", err)
+	}
+	return out, nil
 }
 
 func closeSSHResources(sess *ssh.Session, client, jumpClient *ssh.Client) {
