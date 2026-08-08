@@ -58,32 +58,40 @@ with **no stdin option**, so it cannot be kept out of the remote command string.
 
 Because neither script's arguments are shell-shape-validated by agmsg itself, and a message body
 is arbitrary text that cannot be regex-allowlisted the way `cwd` can, `RunBoardCommand` does not
-use plain `shellQuotePath` alone for non-path arguments. Every argument after the script path
-(verb, team, `--agent` value, message body, ...) is base64-encoded, the *encoded* form is checked
-against the base64 alphabet (which cannot contain a shell metacharacter — the regex-allowlist step
-this repository's CodeQL bar expects, mirroring `validRemotePath`'s role for `cwd`), single-quoted,
-and decoded back on the remote side via a double-quoted command substitution
-(`"$(printf '%s' '<base64>' | base64 -d)"`) before it ever reaches `send.sh`/`api.sh`. Only the
-script path itself (`args[0]`, e.g. `<agmsg_path>/scripts/send.sh`) goes through the
-`validRemotePath`-then-`shellQuotePath` path this document already documents for `cwd`, since it is
-an operator-configured filesystem path, not agent-authored text. `send.sh` does its own SQL
-escaping internally, so this is the only escaping layer panemux is responsible for. See
-`buildBoardCommand`/`boardArgLiteral` in `internal/session/ssh.go` for the implementation.
+build a command string containing any argument content at all. Every argument after the script
+path (verb, team, `--agent` value, message body, ...) is base64-encoded and sent to the remote
+shell over the SSH session's **stdin**, one encoded line per argument — never concatenated into
+the command string `Session.Output` runs. The generated command string consists only of hardcoded
+shell boilerplate (a fixed number of `IFS= read -r aN || exit 1` lines, one per argument, followed
+by `exec <script> "$(printf '%s' "$aN" | base64 -d)" ...`), the validated script path, and `$aN`
+variable references — the argument count (`len(args)`) drives how many `read`/`$aN` pairs appear,
+but no argument's *bytes* ever do. On the remote side, `read -r` pulls one base64 line off stdin
+into a shell variable with no re-interpretation of its content, and each
+`"$(printf '%s' "$aN" | base64 -d)"`, wrapped in double quotes, decodes it back and substitutes the
+result as a single argument with no word-splitting or glob expansion. Only the script path itself
+(`args[0]`, e.g. `<agmsg_path>/scripts/send.sh`) goes through the `validRemotePath`-then-
+`shellQuotePath` path this document already documents for `cwd`, since it is an operator-configured
+filesystem path, not agent-authored text, and is embedded directly in the command string. `send.sh`
+does its own SQL escaping internally, so encoding/transport is the only escaping layer panemux is
+responsible for. See `buildBoardCommand` and `RunBoardCommand` in `internal/session/ssh.go` (shared
+by `SSHSession` and `TmuxSSHSession` via `runBoardCommandOverSSH`) for the implementation.
 
-**The allowlist check must return an error on mismatch, not fall back to a default value.** An
-earlier version of `boardArgLiteral` reset the encoded value to `""` and continued when the
-alphabet check failed, instead of aborting. CodeQL's `go/command-injection` query flagged this on
-PR #163 (two critical alerts, one per `RunBoardCommand` call site) even though the same alphabet
-check was present: a conditional fallback that still reaches the same `return` on every path does
-not remove the sink from the tainted value's flow, because the checked variable — not the original
-untrusted input, but still data flow the query tracks — reaches `sess.Output` regardless of which
-branch was taken. `validateRemotePath`'s accepted pattern for `cwd` isn't just "a regex check exists
-somewhere before the sink" — it's specifically an early `return "", err` on mismatch, which removes
-the tainted value from the flow entirely on the failing path. `boardArgLiteral` now does the same:
-it returns `(string, error)` and `buildBoardCommand` propagates that error instead of building a
-command string with a silently-substituted value. This is unreachable in practice (`base64.
-StdEncoding.EncodeToString` cannot produce output outside its own alphabet), but the shape of the
-check — not just its practical unreachability — is what satisfies CodeQL's taint analysis.
+**Two prior approaches on PR #163 did not satisfy CodeQL, and the reasons why matter for future
+work against this repository's CodeQL bar.** The first revision base64-encoded each argument and
+embedded the *encoded* literal inline in the command string (regex-checked against the base64
+alphabet, then single-quoted) — structurally mirroring `validRemotePath`-then-`shellQuotePath`, but
+CodeQL's `go/command-injection` query still reported 2 critical alerts (one per `RunBoardCommand`
+call site). The second revision made the allowlist check return an error on mismatch instead of
+silently falling back to a default value, exactly matching `validateRemotePath`'s early-return
+shape — and CodeQL flagged the exact same 2 alerts again. Both attempts missed the actual issue: on
+the *success* path (the only path that matters in practice, since the encoding can't fail), the
+checked, encoded value was still concatenated into the string handed to `Session.Output` either
+way. A regex check does not remove a value from a taint-tracking dataflow graph merely because the
+check passed — the value still reaches the sink on the path that matters, regardless of how the
+failure path is handled. The fix that actually cleared both alerts removes the flow at its root
+instead of trying to sanitize it in place: no argument byte is ever part of the command string, so
+there is nothing for the query to trace from an argument into `Session.Output` in the first place.
+See `docs/agent-board.md`'s "Open implementation question" for the full account.
 
 `send.sh` and `api.sh` are the only board-related commands panemux itself ever executes remotely;
 each runs against agmsg's own local store on that host. panemux only ever detects an existing agmsg

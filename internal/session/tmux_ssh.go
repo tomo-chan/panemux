@@ -165,20 +165,7 @@ func (s *TmuxSSHSession) BoardHomeDir(_ context.Context) (string, error) {
 // host over a new exec channel on this session's SSH connection. See
 // BoardExecutor in session.go for the escaping contract.
 func (s *TmuxSSHSession) RunBoardCommand(_ context.Context, args []string) ([]byte, error) {
-	cmdStr, err := buildBoardCommand(args)
-	if err != nil {
-		return nil, err
-	}
-	sess, err := s.client.NewSession()
-	if err != nil {
-		return nil, fmt.Errorf("new ssh session for board command: %w", err)
-	}
-	defer sess.Close()
-	out, err := sess.Output(cmdStr)
-	if err != nil {
-		return nil, fmt.Errorf("board command over ssh: %w", err)
-	}
-	return out, nil
+	return runBoardCommandOverSSH(s.client, args)
 }
 
 // GetCWD runs `tmux display-message` over a new SSH exec channel to get the active pane's CWD.

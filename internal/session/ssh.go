@@ -468,87 +468,84 @@ func validateRemotePath(label, path string) error {
 	return fmt.Errorf("invalid %s %q: %s", label, path, invalidRemotePathMsg)
 }
 
-// base64Alphabet is the character set base64.StdEncoding can ever produce.
-// boardArgLiteral checks its own output against it defensively — the
-// encoder cannot produce anything outside this alphabet, but the check
-// mirrors validRemotePath's regex-allowlist-then-quote shape rather than
-// trusting the encoding step silently.
-var base64Alphabet = regexp.MustCompile(`^[A-Za-z0-9+/]*=*$`)
+// boardArgVarPrefix names the shell variables buildBoardCommand's generated
+// script reads board arguments into ("a0", "a1", ...). Always followed by a
+// loop index — an integer panemux controls, never content derived from an
+// argument's bytes.
+const boardArgVarPrefix = "a"
 
-// boardArgLiteral encodes an arbitrary, potentially agent-authored board
-// command argument (a send.sh message body chief among them) so it can be
-// embedded in a remote shell command string with no injection risk,
-// regardless of its content.
+// buildBoardCommand builds the remote shell command for a board script
+// invocation (api.sh or send.sh) and the stdin payload that must accompany
+// it. args[0] must be an absolute remote path to the script itself,
+// validated and quoted the same way cwd already is (an operator-configured
+// filesystem path, not agent-authored text, so it is safe to embed
+// directly — see validateRemotePath below). Every subsequent element is
+// treated as opaque, potentially agent-authored text (a send.sh message
+// body chief among them) and is never concatenated into the returned
+// command string at all.
 //
-// docs/security.md's accepted CodeQL-safe pattern for a shell argument is a
-// regex allowlist (validRemotePath) applied before shellQuotePath — the
-// allowlist is what actually breaks the taint chain, not the quoting alone.
-// A message body is arbitrary text and cannot be regex-allowlisted the way
-// a path can (see docs/agent-board.md#security-model's "Open implementation
-// question"). The structural fix adopted here mirrors that shape instead of
-// trying to allowlist the body itself: every non-path board argument is
-// base64-encoded first. The encoded form *can* be regex-allowlisted (its
-// alphabet contains no shell metacharacter by construction), so the value
-// that is ever concatenated into the command string is always the
-// allowlisted, single-quoted, base64 literal — never the original
-// attacker-influenced bytes. The remote shell decodes it back via a command
-// substitution wrapped in double quotes, which prevents word-splitting/glob
-// expansion of the decoded result while still substituting it as a single
-// argument: `"$(printf '%s' '<base64>' | base64 -d)"`.
-// boardArgLiteral returns an error, rather than silently substituting a
-// fallback value, when the encoded form fails the allowlist check.
-// docs/security.md's accepted CodeQL-safe idiom for cwd (validateRemotePath)
-// is a regex check that *returns an error on mismatch*, so the caller
-// cannot proceed to the sink with the checked value on any path but the
-// validated one — that early return, not the regex alone, is what CodeQL's
-// taint tracking recognizes as breaking the flow. A conditional fallback
-// (checked value on success, a hardcoded default on failure, both flowing
-// to the same return) does not: the sink is still reached on every path,
-// so CodeQL keeps tracking the tainted value through it regardless of the
-// check. Matching validateRemotePath's error-return shape exactly is what
-// this function does.
-func boardArgLiteral(v string) (string, error) {
-	enc := base64.StdEncoding.EncodeToString([]byte(v))
-	if !base64Alphabet.MatchString(enc) {
-		// Unreachable in practice: base64.StdEncoding cannot produce
-		// anything outside this alphabet. Refuse rather than pass through
-		// an unvalidated value if that ever stops being true.
-		return "", errors.New("board argument failed to encode to the expected base64 alphabet")
-	}
-	return `"$(printf '%s' ` + shellQuotePath(enc) + ` | base64 -d)"`, nil
-}
-
-// buildBoardCommand builds the remote shell command string for a board
-// script invocation (api.sh or send.sh). args[0] must be an absolute
-// remote path to the script itself, validated and quoted the same way cwd
-// already is; every subsequent element is treated as opaque, untrusted text
-// and encoded via boardArgLiteral. See BoardExecutor's doc comment in
-// session.go.
-func buildBoardCommand(args []string) (string, error) {
+// This supersedes an earlier revision that base64-encoded each argument and
+// embedded the *encoded* literal inline in the command string (still
+// regex-allowlisted and single-quoted first). That version shipped a real
+// CodeQL go/command-injection finding on PR #163 (two critical alerts, one
+// per RunBoardCommand call site): on the success path, the checked, encoded
+// value was still concatenated into the string handed to the ssh exec sink,
+// which is precisely the flow the query tracks — a regex check on a value
+// does not remove it from a taint-tracking dataflow graph merely because
+// the check passed; the value still reaches the sink either way. Returning
+// an error on an (unreachable) allowlist mismatch, tried first, did not
+// help either: it only closed a path CodeQL was never worried about (the
+// failure branch), leaving the actual success-path flow into the sink
+// untouched.
+//
+// This version removes that flow at its root instead of trying to sanitize
+// it: every argument is base64-encoded and sent one line at a time over the
+// SSH session's stdin (see RunBoardCommand), not string-concatenated
+// anywhere. The generated command string consists *only* of hardcoded
+// shell boilerplate ("read"/"exec"/"printf"/"base64"), the validated script
+// path, and a fixed number of "$aN" variable references whose count comes
+// from len(args) — an integer, never argument content. No byte from any
+// args[1:] element is ever part of the string passed to the ssh exec sink;
+// only fixed, panemux-authored text is. On the remote side, each "read"
+// pulls one base64 line off stdin into a shell variable with no shell
+// re-interpretation of its bytes (read -r disables backslash processing),
+// and `"$(printf '%s' "$aN" | base64 -d)"`, wrapped in double quotes,
+// decodes it back and substitutes the result as a single argument with no
+// word-splitting or glob expansion — the same decode step the prior
+// revision used, just no longer fed from the command string itself.
+// See BoardExecutor's doc comment in session.go and
+// docs/agent-board.md's "Open implementation question".
+func buildBoardCommand(args []string) (cmd string, stdin []byte, err error) {
 	if len(args) == 0 {
-		return "", errors.New("board command requires at least a script path")
+		return "", nil, errors.New("board command requires at least a script path")
 	}
 	if err := validateRemotePath("board script path", args[0]); err != nil {
-		return "", err
+		return "", nil, err
 	}
-	parts := make([]string, 0, len(args))
-	parts = append(parts, shellQuotePath(args[0]))
-	for _, a := range args[1:] {
-		lit, err := boardArgLiteral(a)
-		if err != nil {
-			return "", err
-		}
-		parts = append(parts, lit)
+
+	n := len(args) - 1
+	varNames := make([]string, n)
+	var script strings.Builder
+	var in bytes.Buffer
+	for i := 0; i < n; i++ {
+		varNames[i] = fmt.Sprintf("%s%d", boardArgVarPrefix, i)
+		script.WriteString("IFS= read -r " + varNames[i] + " || exit 1\n")
+		in.WriteString(base64.StdEncoding.EncodeToString([]byte(args[i+1])))
+		in.WriteByte('\n')
 	}
-	return strings.Join(parts, " "), nil
+	script.WriteString("exec " + shellQuotePath(args[0]))
+	for _, vn := range varNames {
+		script.WriteString(` "$(printf '%s' "$` + vn + `" | base64 -d)"`)
+	}
+	return script.String(), in.Bytes(), nil
 }
 
 // boardHomeDirCmd probes the remote user's home directory once per SSH
 // connection. Used to expand a leading `~` in agent_board.agmsg_path
 // locally, before the path ever reaches a BoardExecutor argument — a
-// literal `~` placed inside single quotes (or inside boardArgLiteral's
-// base64 encoding) would never expand on the remote side. See
-// docs/agent-board.md's "Integration with agmsg".
+// literal `~` placed inside single quotes, or inside a base64-encoded,
+// stdin-delivered board argument, would never expand on the remote side.
+// See docs/agent-board.md's "Integration with agmsg".
 const boardHomeDirCmd = `echo -n "$HOME"`
 
 func remoteBoardHomeDir(runner sshSessionRunner) (string, error) {
@@ -592,15 +589,24 @@ func (s *SSHSession) BoardHomeDir(_ context.Context) (string, error) {
 // host over a new exec channel on this session's SSH connection. See
 // BoardExecutor in session.go for the escaping contract.
 func (s *SSHSession) RunBoardCommand(_ context.Context, args []string) ([]byte, error) {
-	cmdStr, err := buildBoardCommand(args)
+	return runBoardCommandOverSSH(s.client, args)
+}
+
+// runBoardCommandOverSSH implements RunBoardCommand for both SSHSession and
+// TmuxSSHSession — the two share nothing else about their SSH connection
+// handling, so a shared helper avoids duplicating this exec-channel logic
+// per session type.
+func runBoardCommandOverSSH(client *ssh.Client, args []string) ([]byte, error) {
+	cmdStr, stdin, err := buildBoardCommand(args)
 	if err != nil {
 		return nil, err
 	}
-	sess, err := s.client.NewSession()
+	sess, err := client.NewSession()
 	if err != nil {
 		return nil, fmt.Errorf("new ssh session for board command: %w", err)
 	}
 	defer sess.Close()
+	sess.Stdin = bytes.NewReader(stdin)
 	out, err := sess.Output(cmdStr)
 	if err != nil {
 		return nil, fmt.Errorf("board command over ssh: %w", err)
