@@ -10,139 +10,118 @@
 
 panemux currently infers what an interactive Claude process in a pane is doing by parsing
 `~/.claude/sessions/<pid>.json` and the matching transcript JSONL (see the Claude worktree
-resolution notes in [architecture.md](architecture.md) and [behavior.md](behavior.md)). That
-approach is read-only, heuristic, and pane-local: it cannot tell whether a session is idle or
-mid-turn, and it gives panemux no way to send an agent a message or to let two agents in different
-panes talk to each other.
+resolution notes in [architecture.md](architecture.md) and [behavior.md](behavior.md)). In
+practice this is unreliable: it depends on undocumented, internal Claude/Codex transcript fields
+that change without notice, and pane headers frequently fail to show a branch or PR as a result.
+It is also read-only and pane-local: it cannot tell whether a session is idle or mid-turn, and it
+gives panemux no way to send an agent a message or to let two agents in different panes talk to
+each other.
 
-Agent Board replaces that inference with a small, self-reported, structured channel that:
+Agent Board replaces that inference with a small, self-reported channel:
 
-1. Lets panemux collect accurate per-pane Claude status (idle / working / waiting for approval,
-   last tool used, current summary) instead of guessing from transcripts.
+1. Panes report their own state — working directory, branch, repository, PR link, and whether
+   they're idle, working, or waiting for approval — by running their own commands (`git`, `gh`)
+   and telling panemux the result, instead of panemux guessing from an internal file format. This
+   is the same information a human looking at the pane would see, obtained the same way a human
+   would get it, so it is exactly as stable as the agent's own tool use — not as fragile as
+   reverse-engineering a private transcript schema. See
+   [Design principles](#design-principles) for why this generalizes beyond just this one field.
 2. Lets a human broadcast a message to one or more panes' Claude sessions without racing raw
    keystrokes into a live PTY, and lets a local **command center** (see
    [Command center](#command-center)) do the same conversationally on the human's behalf.
 3. Aggregates all of the above into one dashboard and, for the command center, one continuous,
    reviewable conversation history.
-4. Optionally interoperates with [agmsg](https://github.com/fujibee/agmsg), an existing MIT-licensed
+4. Is built entirely on [agmsg](https://github.com/fujibee/agmsg), an existing MIT-licensed
    bash+sqlite3 agent-messaging tool that already supports Claude Code, Codex, Gemini CLI, GitHub
-   Copilot, Antigravity, OpenCode, and Hermes. Where a pane's host already runs agmsg, a
-   panemux-managed pane can join the same team as a Codex pane and reuse agmsg's own Codex support
-   (its `Stop`-hook turn-mode delivery, since Codex has no `Monitor` tool to auto-launch) instead of
-   panemux reimplementing it. Note this is about an *already-running* Codex process in a
-   panemux-managed pane joining an existing team — it does not involve agmsg's own `spawn.sh`
-   (which launches a brand-new terminal window/process itself, a separate use case panemux never
-   triggers, since panemux already owns pane creation). See
-   [Backends](#backends).
+   Copilot, Antigravity, OpenCode, and Hermes. panemux does not maintain a second, parallel
+   messaging protocol of its own — see [Design principles](#design-principles) for why, and
+   [Integration with agmsg](#integration-with-agmsg) for how.
 
 ## Design principles
 
-- **No new daemon, no new listening port.** The mechanism is a local SQLite file per host. On the
-  host panemux itself runs on, panemux's Go process and the Claude process in that host's panes
-  both open it directly. On a remote (SSH) host, panemux never opens the file directly and never
-  places any binary of its own there — see the next principle — it only runs `sqlite3` over the SSH
-  exec channel panemux already holds open for `GetCWD`/`InspectGitContext`
-  (`internal/session/ssh.go`), the same tool a remote Claude pane's own Bash calls also use.
+- **Ask the agent; don't reverse-engineer its internal state.** This is the central lesson behind
+  this whole redesign, and it applies uniformly to every piece of external state Agent Board
+  touches, not only pane status:
+  - panemux does not parse Claude/Codex transcript internals to guess branch/PR/cwd — it asks the
+    agent to run `git`/`gh` itself and report the result (see
+    [Status self-report](#status-self-report-and-message-flow)).
+  - panemux does not read agmsg's `messages.db` or `teams/*/config.json` directly — those are
+    agmsg's own internal storage, explicitly documented in agmsg's README as "internal and free to
+    change." panemux only calls agmsg's own stable, documented entry points (`scripts/api.sh`,
+    `scripts/send.sh`) — see [Integration with agmsg](#integration-with-agmsg).
+  - Any future integration this document doesn't yet cover should default to the same rule: prefer
+    a tool's own documented command/output contract over parsing whatever file it happens to keep
+    its state in today.
+- **One messaging mechanism, not two.** An earlier draft of this design also specified a
+  panemux-owned SQLite schema and CLI ("`native`") for Claude-only panes, with agmsg reserved for
+  panes that needed to talk to non-Claude agents. Building and maintaining a second protocol next
+  to an already-working one turned out not to be worth it: agmsg already covers everything
+  `native` tried to do, plus interoperability with Codex/Gemini/etc. that `native` could never
+  offer, and every pane on `agmsg` from the start means no relay step is needed even for two panes
+  that happen to both be Claude. Agent Board is therefore built entirely on agmsg; panemux owns no
+  message schema of its own.
+- **No new daemon, no new listening port.** panemux talks to agmsg the same way any of its scripts
+  or a live agent session would: local `exec.Command` calls on the host panemux itself runs on,
+  and the existing SSH exec channel (`GetCWD`/`InspectGitContext` already use it) for every other
+  host. No new process listens for anything, locally or remotely.
 - **panemux itself is never installed on a remote host, under any circumstances.** The `panemux`
   binary is also a server: running it can start the HTTP/WS listener, the auth surface, and the
-  command center. Placing a copy on every SSH-reached host that wants `native`-backend board
-  features would mean each of those hosts could accidentally end up running a second panemux
-  server — a second command center, a second thing to firewall and issue an auth token for, and a
-  second instance of every network-exposure question already worked through for the primary one in
-  [Security model](#security-model). `native`'s remote support is therefore built entirely on
-  `sqlite3`, a tool that cannot itself become a server, exactly mirroring the minimal-footprint
-  assumption the `agmsg` backend already makes about what a remote host has installed.
-- **Claude drives its own participation with its own tools.** panemux does not push data into
-  Claude's context out-of-band. It types a one-time bootstrap instruction into the pane (the same
-  mechanism already used for terminal input) telling Claude to use the `Monitor` tool to watch its
-  own inbox and to run a small CLI to report status and send messages. Everything panemux observes
-  is something Claude itself chose to write, using its own `Bash`/`Monitor` tool calls.
-- **`native`-backend bootstrap does not edit `~/.claude/settings.json`.** panemux writes the
-  `Monitor`-launching instruction directly into the pane's PTY (the same path used for all terminal
-  input) the moment it detects a `claude` process starting in a board-enabled pane. A user who wants
-  a `Stop`-hook "turn mode" fallback for extra delivery reliability can still add one manually; the
-  bootstrap message prints the hook snippet to add, but panemux never installs it itself.
-- **Delivery mode is configurable per pane, mirroring agmsg's `/agmsg mode`.** `join` accepts
-  `--mode monitor|turn|both` (default `monitor`). `turn` and `both` require the user-added `Stop`
-  hook above; panemux cannot upgrade a pane into those modes on its own.
-- **Backend selection is explicit config, never auto-detected, and panemux never installs agmsg
-  itself.** A pane either uses panemux's own built-in ("native") board, or agmsg, per the pane's
-  configured `agent_board.backend`. panemux does not probe a host for agmsg and silently switch
-  behavior based on what it finds — that would make a pane's messaging behavior depend on
-  unrelated host state and would be surprising to debug. If `backend: agmsg` is set for a pane and
-  agmsg is not present on that pane's host, board bootstrap for that pane is skipped with a clear,
-  visible warning; panemux never runs an installer on the operator's behalf, local or remote. See
-  [Backends](#backends).
+  command center. Placing a copy on every SSH-reached host that wants board features would mean
+  each of those hosts could accidentally end up running a second, unmanaged panemux server. Board
+  features on a remote host depend only on an agmsg installation the operator put there themselves
+  (see the next principle) — never on anything panemux ships.
+- **Backend presence is detected, never installed, by panemux.** If agmsg is not found on a pane's
+  host, panemux skips board bootstrap for that pane, logs a clear warning, and leaves the pane's
+  shell session otherwise untouched — board is additive, never load-bearing for the pane to
+  function. panemux never runs `npx agmsg`, `npm i -g agmsg`, `git clone`, or any other installer
+  on the operator's behalf, on any host. See [Integration with agmsg](#integration-with-agmsg).
 - **panemux is a trusted relay, not an end-to-end encrypted channel.** See
   [Cross-host relay](#cross-host-relay) and [Security model](#security-model).
 
-## Schema (native backend only)
+## Architecture
 
-This schema belongs solely to panemux's own built-in ("native") backend. It is loosely inspired by
-agmsg's message-oriented shape (team/from/to/body/read_at), but it is **not** an attempt at
-schema-level compatibility with agmsg's actual `messages.db`: agmsg's own README states that
-`messages.db` and `teams/*/config.json` are "internal and free to change" and that third parties
-should integrate through `scripts/api.sh` instead. panemux follows that guidance — see
-[Backends](#backends) for how the agmsg backend actually integrates. One table per host, with two
-added columns for cross-host relay dedup that agmsg (a single-host tool) has no equivalent of:
+```mermaid
+flowchart TB
+    Browser["ブラウザ<br/>ダッシュボード + Spotlightパレット"]
 
-```sql
-CREATE TABLE messages (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  team TEXT NOT NULL DEFAULT 'panemux',
-  from_agent TEXT NOT NULL,
-  to_agent TEXT NOT NULL,
-  kind TEXT NOT NULL DEFAULT 'message',   -- 'message' | 'status'
-  body TEXT NOT NULL,
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-  read_at TEXT,
-  origin_host TEXT,     -- NULL if this row originated on this host; source host id if relayed in
-  origin_id INTEGER     -- the row's id on origin_host, for relay dedup
-);
-CREATE UNIQUE INDEX idx_relay_dedup ON messages(origin_host, origin_id) WHERE origin_host IS NOT NULL;
-CREATE INDEX idx_unread ON messages(team, to_agent, read_at) WHERE read_at IS NULL;
-CREATE INDEX idx_history ON messages(team, created_at DESC);
+    subgraph Local["panemuxが動くホスト（常にここだけ）"]
+        Server["panemux Goプロセス<br/>WS / REST, Bearerトークン認証"]
+        Relay["中継ゴルーチン<br/>数秒間隔でポーリング"]
+        CmdCenter["司令塔<br/>claude -p --resume（クエリごとに起動）"]
+        LocalAgmsg[("ローカルagmsg<br/>（任意インストール）")]
+    end
+
+    subgraph HostA["リモートホストA（SSH）"]
+        AgmsgA[("agmsg")]
+        ClaudeA["Claude pane"]
+    end
+
+    subgraph HostB["リモートホストB（SSH）"]
+        AgmsgB[("agmsg")]
+        CodexB["Codex pane"]
+    end
+
+    Browser <--> Server
+    Server --> Relay
+    Server --> CmdCenter
+    Relay -->|"api.sh / send.sh"| LocalAgmsg
+    CmdCenter -->|"api.sh / send.sh --force"| LocalAgmsg
+    Relay -->|"SSH exec channel<br/>api.sh / send.sh"| AgmsgA
+    Relay -->|"SSH exec channel<br/>api.sh / send.sh"| AgmsgB
+    ClaudeA -->|"Bashツール呼び出し"| AgmsgA
+    CodexB -->|"Bashツール呼び出し"| AgmsgB
 ```
 
-`from_agent`/`to_agent` are pane IDs (already globally unique across workspaces per
-[architecture.md](architecture.md)). `kind='status'` rows carry the latest self-reported activity
-summary; `kind='message'` rows carry chat/instruction content.
+panemux is never a participant on more than one host's agmsg installation from the inside — it
+only ever reaches a remote host's agmsg through the SSH exec channel it already holds for that
+pane's session, running agmsg's own scripts, exactly as [Local vs remote resource
+placement](#local-vs-remote-resource-placement) details.
 
-## Backends
+## Integration with agmsg
 
-`agent_board.backend` is `native` (default) or `agmsg`, set explicitly per pane or as a global
-default — never inferred by probing the host. Both backends implement the same `Store` interface
-(below), so the relay and dashboard code is backend-agnostic; only the bootstrap flow and the CLI
-surface a board-enabled pane actually runs differ.
-
-`native` is panemux's own mechanism for Claude-only panes. `agmsg` is the communication layer used
-whenever a pane needs to coordinate with agents other than Claude (Codex, Gemini CLI, etc.).
-
-### `native`
-
-panemux's own schema. Claude-to-Claude only — a Codex pane on the same host cannot join a `native`
-team, because `native` is a panemux-specific protocol Codex has no knowledge of.
-
-The CLI surface differs by where the pane lives, because of the no-remote-install rule above:
-
-- **Local/local-tmux panes** (same host as panemux): the pane's Claude process runs the
-  `panemux board join/inbox/status/send` CLI described in [CLI subcommands](#cli-subcommands)
-  directly — the `panemux` binary is trivially already there, since it's the same one serving the
-  pane.
-- **SSH/SSH+tmux panes**: there is no `panemux board *` CLI to run remotely. The bootstrap
-  instruction (see [Bootstrap flow](#bootstrap-flow)) instead defines a handful of shell functions
-  inline, in the text typed into the pane, that wrap direct `sqlite3 <path> "<SQL>"` calls against
-  that host's own `~/.config/panemux/board.db` — nothing is written to disk on the remote host to
-  provide this; the functions exist only for the lifetime of that shell session, the same way any
-  other one-off shell function would. This is self-contained the same way `native` is everywhere
-  else: still no third-party tool, only `sqlite3`, which most hosts already have.
-
-### `agmsg`
-
-Delegates to an agmsg installation already present on the pane's host. Reads and writes go through
-two different scripts under agmsg's `scripts/` directory, verified against agmsg's source (not
-inferred): panemux never reads or writes agmsg's `messages.db` or `teams/*/config.json` directly,
-matching agmsg's own README guidance that those are internal.
+Reads and writes go through two different scripts under agmsg's `scripts/` directory, verified
+against agmsg's source (not inferred). panemux never reads or writes agmsg's `messages.db` or
+`teams/*/config.json` directly, matching agmsg's own README guidance that those are internal.
 
 **Reads — `scripts/api.sh`, read-only.** Its `case "$VERB"` block implements only `get`:
 
@@ -156,51 +135,108 @@ matching agmsg's own README guidance that those are internal.
 source comments), and `--agent`/`--limit`/`--before-id` are validated as plain digits before being
 used in a query, guarding against SQL injection on agmsg's own side. Unlike agmsg's own
 human-facing `inbox.sh`/`check-inbox.sh` (which mark whatever they display as read), `api.sh` never
-writes `read_at` — panemux's dashboard polling through it cannot cause a joined agent to miss a
-message its own inbox/`Monitor` delivery would otherwise have shown it.
+writes `read_at` — panemux's dashboard/relay polling through it cannot cause a joined agent to miss
+a message its own inbox/`Monitor` delivery would otherwise have shown it.
 
 **Writes — `scripts/send.sh`, not `api.sh`.** Signature: `send.sh <team> <from> <to> <body>
 [--force]`. Unlike `api.sh`, `send.sh` takes `body` as a **positional shell argument**, not stdin —
 there is no stdin-based write path in agmsg to delegate to. `from` is checked against that team's
 roster unless `--force` is passed, in which case an unregistered sender name is accepted as-is.
 
-Choosing `agmsg` for a pane means:
+**Panes join with `join.sh <team> <agent_id> <agent_type> <project_path> [--force]`**, typically
+via agmsg's own onboarding (the `/agmsg` skill flow a live Claude session runs itself, or the
+equivalent for another agent type) rather than the raw script directly — see [Bootstrap
+flow](#bootstrap-flow). This registers the pane into `teams/<team>/config.json`, which is the
+"roster" `send.sh` checks `from` against. Any other agent already using agmsg on that host (Codex,
+Gemini CLI, etc.) can then exchange messages with a panemux-managed pane directly through agmsg,
+with no panemux involvement in that same-host exchange at all. Once joined, agmsg's own
+`SessionStart`/`SessionEnd` hooks own that pane's `Monitor` (`watch.sh`)-process lifecycle
+end-to-end (launch, liveness, cleanup) — panemux has no part in it and does not need to.
 
-- That pane's bootstrap instruction (see [Bootstrap flow](#bootstrap-flow)) tells Claude to join
-  agmsg's team using agmsg's own onboarding (typically the `/agmsg` skill flow a live Claude
-  session runs itself). The underlying primitive that establishes membership is `join.sh <team>
-  <agent_id> <agent_type> <project_path> [--force]`, which registers the pane into `teams/<team>
-  /config.json` — this is the "roster" `send.sh` checks `from` against. Any other agent already
-  using agmsg on that host (Codex, Gemini CLI, etc.) can then exchange messages with it directly
-  through agmsg, with no panemux involvement in that same-host exchange at all. Once joined, agmsg's
-  own `SessionStart`/`SessionEnd` hooks own that pane's `Monitor`(`watch.sh`)-process lifecycle
-  end-to-end (launch, liveness, cleanup) — panemux has no part in it and does not need to.
-- agmsg has no native "status" concept, only messages. panemux's status reports map onto ordinary
-  agmsg messages addressed to a reserved agent name, `_panemux_dashboard`, inside the team;
-  `LatestStatusByAgent` for this backend calls `api.sh get teams <team> messages --agent
-  _panemux_dashboard --limit <N>` and keeps only the newest row per `from`.
-- **The relay and the command center are never agmsg roster members, and never go through agmsg's
-  own identity-detection layer, so any send they originate into an agmsg team always passes
-  `send.sh ... --force`.** A live Claude session's own `/agmsg send` normally resolves `from`
-  automatically — `whoami.sh` matches environment variables or, failing that, walks the process
-  tree against each agent type's known process-name patterns, then `identities.sh` reconciles that
-  against a joined team/project — but that whole chain assumes a live process to introspect. The
-  relay and command center are panemux's own Go code, not a joined Claude/Codex process, so no
-  identity-detection result would ever exist for them to look up; `--force` is what lets `send.sh`
-  accept an explicit `from` (the originating pane's ID, or `_panemux` for the command center)
-  without that lookup succeeding first.
-- **Detection, not installation.** At bootstrap time panemux checks whether agmsg is available on
-  that pane's host (local: presence of `scripts/api.sh` under agmsg's known skill-install location,
-  or `command -v agmsg`; remote: the same check run once over the existing SSH exec channel). If
-  not found, panemux skips board bootstrap for that pane, logs a clear warning naming the pane, and
-  leaves the pane's shell session itself untouched — board is additive, never load-bearing for the
-  pane to function. panemux never runs `npx agmsg`, `npm i -g agmsg`, `git clone`, or any other
-  installer on the operator's behalf, on any host.
-- **Version pinning.** agmsg's own compatibility promise (per its README) only covers reading
-  through `scripts/api.sh`, not `send.sh`'s argument order or `messages.db`. panemux implementation
-  must pin a specific tested agmsg version/tag and treat any change to either script's observed
-  behavior as an external dependency compatibility bug, tracked the same way any other pinned
-  dependency's breaking change would be.
+**panemux's own relay and command center are never agmsg roster members, and never go through
+agmsg's own identity-detection layer, so any send they originate always passes `send.sh ...
+--force`.** A live Claude session's own `/agmsg send` normally resolves `from` automatically —
+`whoami.sh` matches environment variables or, failing that, walks the process tree against each
+agent type's known process-name patterns, then `identities.sh` reconciles that against a joined
+team/project — but that whole chain assumes a live process to introspect. The relay and command
+center are panemux's own Go code, not a joined Claude/Codex process, so no identity-detection
+result would ever exist for them to look up; `--force` is what lets `send.sh` accept an explicit
+`from` (the originating pane's ID, or the reserved identity `_panemux` for the command center)
+without that lookup succeeding first.
+
+**Team naming.** All board-enabled panes on a given panemux instance join the same agmsg team by
+default (`agent_board.team`, default `"panemux"`), so message addressing is just pane IDs within
+one team — see [Config additions](#config-additions).
+
+**Detection, not installation.** At bootstrap time panemux checks whether agmsg is available on
+that pane's host (local: presence of `scripts/api.sh` under agmsg's known skill-install location,
+or `command -v agmsg`; remote: the same check run once over the existing SSH exec channel). If not
+found, panemux skips board bootstrap for that pane, logs a clear warning naming the pane, and
+leaves the pane's shell session itself untouched. panemux never runs `npx agmsg`, `npm i -g agmsg`,
+`git clone`, or any other installer on the operator's behalf, on any host.
+
+**Version pinning.** agmsg's own compatibility promise (per its README) only covers reading through
+`scripts/api.sh`, not `send.sh`'s argument order or `messages.db`. panemux implementation must pin
+a specific tested agmsg version/tag and treat any change to either script's observed behavior as an
+external dependency compatibility bug, tracked the same way any other pinned dependency's breaking
+change would be.
+
+## Status self-report and message flow
+
+Instead of a `kind='status'` field panemux owns (agmsg has no such column), status reports are
+ordinary agmsg messages addressed to the reserved identity `_panemux` — the same identity the
+command center uses as its own `from` when sending. panemux's dashboard reads them with `api.sh get
+teams <team> messages --agent _panemux --limit <N>` and keeps only the newest row per sender.
+
+The bootstrap instruction (see [Bootstrap flow](#bootstrap-flow)) tells Claude to gather this
+itself, using its own `Bash` tool, and include it as a small JSON body:
+
+```json
+{
+  "state": "working",
+  "cwd": "/home/user/project",
+  "branch": "feature/x",
+  "repo": "owner/repo",
+  "pr_url": "https://github.com/owner/repo/pull/123",
+  "last_tool": "Edit internal/api/handler.go",
+  "summary": "テスト修正中"
+}
+```
+
+`branch`/`repo`/`pr_url` come from the agent running `git branch --show-current`, `git remote get-
+url origin`, and a PR lookup (e.g. `gh pr view --json url -q .url`) itself — panemux never computes
+these; it only displays what the agent reported. `cwd`/`pr_url` may be absent if the agent isn't in
+a repository or there's no open PR; the dashboard shows what's present.
+
+```mermaid
+sequenceDiagram
+    participant ClaudeA as "Claude pane (Host A)"
+    participant AgmsgA as "agmsg (Host A)"
+    participant Relay as "panemux 中継"
+    participant AgmsgB as "agmsg (Host B)"
+    participant CodexB as "Codex pane (Host B)"
+    participant Dash as "panemux ダッシュボード"
+
+    Note over ClaudeA: 状態報告（自己申告）
+    ClaudeA->>ClaudeA: git branch / gh pr view を実行
+    ClaudeA->>AgmsgA: send.sh team ClaudeA _panemux "{branch,pr_url,state,...}"
+    Dash->>AgmsgA: api.sh get teams team messages --agent _panemux
+    AgmsgA-->>Dash: 最新status(JSON)
+
+    Note over ClaudeA,CodexB: pane間メッセージの中継
+    ClaudeA->>AgmsgA: send.sh team ClaudeA CodexB "レビューして"
+    Relay->>AgmsgA: api.sh get teams team messages --before-id cursor
+    AgmsgA-->>Relay: 新規行
+    Relay->>AgmsgB: send.sh team ClaudeA CodexB "レビューして" --force
+    CodexB->>AgmsgB: Monitor / watch.sh で受信
+```
+
+**Honest tradeoff, stated explicitly.** Self-report is only as good as the agent's compliance: it
+depends on the agent actually running the bootstrap instruction's commands each time it reports,
+whereas the old transcript-parsing approach was passive and automatic (when it worked at all). The
+bet this redesign makes is that "ask, and get an answer that tracks reality because the agent just
+computed it" is more often correct than "silently infer from an internal format panemux does not
+control," even though the former requires the agent's cooperation and the latter didn't.
 
 ## Package layout
 
@@ -208,55 +244,47 @@ Choosing `agmsg` for a pane means:
 
 ```go
 type Row struct {
-    ID, OriginID int64
-    Team, FromAgent, ToAgent, Kind, Body string
-    CreatedAt time.Time
-    ReadAt    *time.Time
-    OriginHost string
+    ID          int64
+    Team        string
+    From, To    string
+    Body        string
+    At          time.Time
 }
 
-type Store interface {
+type Status struct {
+    State, CWD, Branch, Repo, PRURL, LastTool, Summary string
+}
+
+type AgmsgClient interface {
     HostID() string
-    Insert(ctx context.Context, r Row) (int64, error)
-    InsertRelayed(ctx context.Context, r Row) error // requires OriginHost/OriginID; INSERT OR IGNORE
-    Since(ctx context.Context, afterID int64) ([]Row, error)
-    LatestStatusByAgent(ctx context.Context, team string) (map[string]Row, error)
-    MarkRead(ctx context.Context, ids []int64) error
+    Send(ctx context.Context, team, from, to, body string) error         // send.sh ... --force
+    Since(ctx context.Context, team string, afterID int64) ([]Row, error) // api.sh get ... messages
+    LatestStatusByAgent(ctx context.Context, team string) (map[string]Status, error)
 }
 ```
 
-Four concrete implementations, chosen per host by that host's panes' `agent_board.backend`:
+`LatestStatusByAgent` is derived, not a separate agmsg call: it reads the same `messages` stream
+filtered to `--agent _panemux`, and parses each `body` as the JSON shape from [Status
+self-report](#status-self-report-and-message-flow); a body that isn't valid JSON in that shape is
+treated as an ordinary chat message to `_panemux`, not a status update.
 
-- `LocalNativeStore` opens `~/.config/panemux/board.db` directly with a pure-Go SQLite driver (no
-  CGO, consistent with the single-binary distribution story in [overview.md](overview.md)), in WAL
-  mode. One file is shared by every local and local-tmux pane on the host, and by panemux itself.
-- `RemoteNativeStore` never opens a remote file directly (SQLite's WAL guarantees do not extend
-  across a network filesystem boundary), and — per the no-remote-install rule in
-  [Design principles](#design-principles) — never assumes a `panemux` binary is present on that
-  host either. It runs bare `sqlite3 <path> "<SQL>"` over the existing SSH exec channel: the same
-  binary `agmsg` itself depends on, nothing panemux-specific. Because the SQL text is built by
-  panemux, not by a script that escapes its own inputs the way `send.sh` does, this path requires
-  **two independent escaping layers**: SQL string-literal escaping (doubling embedded `'`) for every
-  value placed inside the SQL text, and then POSIX shell escaping (the same `shellQuotePath`-style
-  single-quote wrapping already used for `cwd`) around the resulting SQL text as a whole, since it
-  is itself one argument in the remote command string. Skipping either layer alone is a real
-  injection path — see [Security model](#security-model) and [security.md](security.md).
-- `LocalAgmsgStore` shells out to the local agmsg installation's `scripts/api.sh` for reads and
-  `scripts/send.sh ... --force` for writes (see [Backends](#backends)); it never touches
-  `messages.db` directly. Because this is a local `exec.Command` invocation, Go passes each
-  argument as a genuine array element with no intermediate shell, so `send.sh`'s argument-based
-  `body` parameter carries no injection risk here regardless of its content.
-- `RemoteAgmsgStore` runs the same two scripts on the remote host over the same SSH exec channel as
-  `RemoteNativeStore`. Reads (`api.sh get ...`) only ever take digit-validated or
-  path-traversal-validated arguments, so they need no special quoting beyond the discipline already
-  applied everywhere else. Writes need only the shell-escaping layer, not the SQL-literal layer:
-  `send.sh` does its own SQL escaping internally (verified in [Backends](#backends)), so
-  `RemoteAgmsgStore` only has to single-quote-escape each argument (team, from, to, body) before
-  building the remote command string — the same single layer `RemoteNativeStore` also needs, minus
-  the SQL-literal step that backend's raw SQL construction requires. Both remote stores satisfy the
-  same underlying requirement ("no user-controlled content reaches a remote shell unescaped") the
-  same way — quoting the exec command string correctly — since `send.sh`'s own contract leaves no
-  stdin-based alternative to fall back on; see [Security model](#security-model).
+- `LocalAgmsgClient` shells out to the local agmsg installation's `scripts/api.sh` for reads and
+  `scripts/send.sh ... --force` for writes. Because this is a local `exec.Command` invocation, Go
+  passes each argument as a genuine array element with no intermediate shell, so `send.sh`'s
+  argument-based `body` parameter carries no injection risk here regardless of its content.
+- `RemoteAgmsgClient` runs the same two scripts on the remote host over the SSH exec channel.
+  Reads (`api.sh get ...`) only ever take digit-validated or path-traversal-validated arguments, so
+  they need no special quoting beyond the discipline already applied everywhere else. Writes need
+  single-quote-escaping of every argument (team, from, to, body) — the same `shellQuotePath`-style
+  discipline `internal/session/ssh.go` already applies to `cwd` — before building the remote
+  command string, since `send.sh` has no stdin option to keep `body` out of it entirely. `send.sh`
+  does its own SQL escaping internally, so this is the *only* escaping layer panemux is responsible
+  for here — there is no local schema of panemux's own to also escape SQL text for. See [Security
+  model](#security-model) and [security.md](security.md).
+
+Because panemux owns no schema, it needs no embedded database driver of its own at all — every
+board operation is either a local `exec.Command` or a remote exec-channel command running agmsg's
+own scripts.
 
 ### `internal/session` capability interfaces
 
@@ -265,20 +293,17 @@ Following the existing optional-capability pattern (`CWDGetter`, `ActiveWorkdirG
 
 ```go
 // BoardHostID is implemented by every session type. It returns the identifier of the host whose
-// board this session's pane belongs to: "local" for local/tmux sessions, the SSH connection name
-// for ssh/ssh_tmux sessions.
+// agmsg installation this session's pane participates in: "local" for local/tmux sessions, the
+// SSH connection name for ssh/ssh_tmux sessions.
 type BoardHostID interface {
     BoardHostID() string
 }
 
-// BoardExecutor is implemented by SSH-backed sessions. It runs the remote board command for
-// whichever backend that pane's host uses, over the session's existing exec channel, as a single
-// shell command string built from args — there is no stdin-based write path for either backend
-// (see docs/agent-board.md#backends), so every argument must be single-quote-escaped (the same
-// discipline internal/session/ssh.go already applies to cwd) before that string is built. `native`
-// additionally SQL-literal-escapes each value before shell-escaping it, since it constructs raw SQL
-// text itself; `agmsg`'s send.sh does its own SQL escaping internally, so RunBoardCommand only
-// needs the shell-escaping layer for that backend.
+// BoardExecutor is implemented by SSH-backed sessions. It runs an agmsg script on the remote host
+// over the session's existing exec channel, as a single shell command string built from args.
+// Every argument must be single-quote-escaped (the same discipline internal/session/ssh.go already
+// applies to cwd) before that string is built; send.sh has no stdin-based write path (see
+// docs/agent-board.md#integration-with-agmsg).
 type BoardExecutor interface {
     RunBoardCommand(ctx context.Context, args []string) ([]byte, error)
 }
@@ -287,31 +312,57 @@ type BoardExecutor interface {
 `LocalSession`/`TmuxLocalSession` implement only `BoardHostID` (`"local"`). `SSHSession`/
 `SSHTmuxSession` implement both.
 
+## Local vs remote resource placement
+
+```mermaid
+flowchart LR
+    subgraph PanemuxHost["panemuxホスト（1台だけ）"]
+        direction TB
+        P1["panemuxバイナリ<br/>(HTTP/WSサーバー本体)"]
+        P2["ローカルagmsg（任意導入）"]
+        P3["中継カーソル<br/>(ローカルJSONファイル)"]
+    end
+
+    subgraph RemoteHost["リモートホスト（SSH到達先、複数可）"]
+        direction TB
+        R1["agmsg<br/>(操作者が別途導入)"]
+        R2["Claude / Codex pane"]
+    end
+
+    PanemuxHost -->|"SSH exec channel経由でapi.sh / send.shのみ実行<br/>panemuxバイナリは絶対に置かない"| RemoteHost
+```
+
+Nothing panemux-specific is ever written to a remote host's disk: no binary, no persisted helper
+script. The only thing a remote host needs beyond what it already has for its own agents is agmsg
+itself, installed by the operator for that host's own reasons (typically: so a non-Claude agent
+there can participate at all).
+
 ## Cross-host relay
 
-Two Claude processes on two different SSH-reached hosts cannot share a board file directly (no
-shared filesystem, and the two hosts may not even be able to reach each other — see the write-up in
-this document's revision history / PR discussion for the TURN-server analogy). panemux is the only
-node with a connection to every host, so it relays:
+Two Claude/Codex processes on two different SSH-reached hosts cannot share one agmsg team directly
+(agmsg is a single-host tool with no cross-host awareness, and the two hosts may not even be able
+to reach each other). panemux is the only node with a connection to every host, so it relays:
 
-1. A single goroutine polls every known `Store.Since(cursor)` every 3 seconds. Note this is one
-   cursor per distinct `Store` instance, i.e. per (host, backend) pair — a host running both a
-   `native` pane and an `agmsg` pane has two independent stores and two cursors, not one.
-2. `cursor` is one value per source store, persisted in a `relay_cursors(source_host TEXT,
-   source_backend TEXT, last_id INTEGER, PRIMARY KEY(source_host, source_backend))` table in the
-   local native board so a panemux restart resumes correctly.
-3. For each new row, panemux resolves `to_agent` to its owning pane, and that pane's `Store` via
-   its configured `(host, backend)`, using the already-known pane→session config. If that
-   destination `Store` differs from the source `Store`, panemux calls `InsertRelayed` on it with
-   `OriginHost`/`OriginID` set to the source row, so a re-relay after a crash/restart is a harmless
-   no-op against `idx_relay_dedup`. This is why cross-*backend* messaging works the same way as
-   cross-*host* messaging even when both panes happen to be on the same host: a `native` pane and
-   an `agmsg` pane on one host are still two different stores, and a message between them still
-   goes through this same relay step, not direct sharing.
-4. A message needs no relay only when source and destination are the exact same `Store` instance
-   (same host, same backend): sender and receiver already share one file.
-5. panemux's own dashboard/status reads (`GET /api/board/status`) go directly to every managed
-   `Store` and are not relayed; relay only matters for agent-to-agent delivery.
+1. A single goroutine polls every known host's `Since(team, cursor)` every few seconds.
+2. `cursor` is one value per (host, team), persisted in a small local JSON file (e.g.
+   `~/.config/panemux/board-relay-cursor.json`) — not a database table, since panemux owns no
+   database — so a panemux restart resumes roughly where it left off.
+3. For each new row, panemux resolves `to` to its owning pane and that pane's host via the
+   already-known pane→session config. If that host differs from the source host, panemux calls
+   `Send` on the destination host's `AgmsgClient` with `--force`.
+4. Same-host `to` needs no relay: sender and receiver are already members of the same local agmsg
+   team.
+5. panemux's own dashboard/status reads (`GET /api/board/status`) go directly to every host's
+   `AgmsgClient` and are not relayed; relay only matters for agent-to-agent delivery.
+
+**Delivery is at-least-once, not exactly-once — an accepted simplification, not an oversight.**
+Because agmsg's own schema has no field for panemux to mark "this row has already been relayed,"
+the cursor file is the only bookkeeping. If panemux crashes or restarts between relaying a message
+and persisting the updated cursor, that message can be relayed again, and the destination agent
+sees a duplicate. This is judged an acceptable, self-evident nuisance (a repeated message is easy
+for an agent to recognize and ignore) rather than something worth a more complex dedup scheme —
+consistent with agmsg's own documented v1 limitations elsewhere (see [Known
+limitations](#known-limitations)).
 
 This makes panemux's relay role structurally similar to a TURN server (always in the data path for
 the life of the exchange, because a direct path between the two remote hosts is not assumed to
@@ -320,132 +371,77 @@ Unlike a general-purpose TURN server, panemux is the only possible relay for a g
 (it is the sole node holding SSH credentials to both), so there is no negotiation step — delivery is
 always routed through it by construction.
 
-## CLI subcommands
-
-These apply to panes configured with `agent_board.backend: native` **on the host panemux itself
-runs on** — local and local-tmux panes, where the `panemux` binary is already present. A pane on
-`backend: agmsg` never calls `panemux board *`; it drives agmsg's own `/agmsg`/skill entry points
-instead — see [Backends](#backends). A `native` pane reached over SSH also never calls `panemux
-board *` — per the no-remote-install rule in [Design principles](#design-principles), it runs the
-equivalent `sqlite3` statements directly instead; see [`native`](#native) for exactly how. Same
-binary, `panemux board <subcommand>`:
-
-| Subcommand | Run where | Purpose |
-|---|---|---|
-| `panemux board join <pane-id> [--mode monitor\|turn\|both]` | inside a local pane, by Claude | Prints usage (including the `Stop` hook snippet for `turn`/`both`) and writes an initial `status` row. `--mode` defaults to `monitor` |
-| `panemux board inbox <pane-id> --watch` | inside a local pane, by Claude via `Monitor` (`monitor`/`both` modes) or a `Stop` hook script (`turn`/`both` modes) | Polls for unread rows addressed to `<pane-id>`, prints one line per message, marks each read after printing. Under `Monitor` this polls every ~1s; under a `Stop` hook it runs once, between turns |
-| `panemux board status <pane-id> "<summary>"` | inside a local pane, by Claude | Inserts a `kind='status'` row for that pane |
-| `panemux board status --all` | on panemux's local host, by the command center | Reads `LatestStatusByAgent` across every managed `Store` |
-| `panemux board send <to-pane-id> "<body>"` | on panemux's local host, by the command center | Inserts a `kind='message'` row addressed to any pane, local or remote, native or agmsg; the existing relay (not this command) handles cross-`Store` delivery |
-
-Every board-enabled local pane can run `join`/`inbox`/`status` for itself. `status --all` and `send
-<any-pane-id>` are not pane-scoped — see [Command center](#command-center) for who actually runs
-them and how that is authorized. panemux's own Go code never shells out to this CLI for its own
-reads/writes either: local access goes through `LocalNativeStore`'s direct database driver (see
-[Package layout](#package-layout)), and remote access goes through bare `sqlite3`, never through
-this CLI, since this CLI's binary is never present on a remote host.
-
 ## Bootstrap flow
 
-Steps 1–2 are shared; step 3 branches on the pane's configured backend.
-
-1. A pane config (or the global default) sets `agent_board.enabled: true` with a `backend`
-   (`native`, the default, or `agmsg`) and optionally a non-default `mode`.
+1. A pane config (or the global default) sets `agent_board.enabled: true`, optionally overriding
+   `team` or `mode`.
 2. panemux's existing interactive-agent process detection (already used for the Claude worktree
-   override in [architecture.md](architecture.md)) notices a `claude` process start in that pane.
-   For `backend: agmsg`, panemux first runs the detection check described in
-   [Backends](#backends); if agmsg is not found on that host, it logs a warning naming the pane and
-   stops here — no PTY write happens, and the pane's shell session is otherwise unaffected.
+   override in [architecture.md](architecture.md)) notices a `claude` (or other configured agent)
+   process start in that pane, then runs the agmsg detection check from [Integration with
+   agmsg](#integration-with-agmsg). If agmsg is not found on that host, it logs a warning naming the
+   pane and stops here — no PTY write happens, and the pane's shell session is otherwise unaffected.
 3. panemux writes a one-time instruction into the pane's PTY (the same `Session.Write` path already
-   used for all terminal input):
-   - **`native`, local/local-tmux pane**: tells Claude to run `panemux board join <pane-id>
-     [--mode ...]` and to start `panemux board inbox <pane-id> --watch` under the `Monitor` tool.
-   - **`native`, SSH/SSH+tmux pane**: per the no-remote-install rule in
-     [Design principles](#design-principles), there is no `panemux board *` to run remotely. The
-     instruction instead defines the small set of `sqlite3`-wrapping shell functions described in
-     [`native`](#native) inline, then tells Claude to use them for `join`/`status`/`inbox` and to
-     watch the inbox function's output under `Monitor`. Nothing from this step is written to the
-     remote host's disk; the functions live only in that shell session.
-   - **`agmsg`**: tells Claude to join agmsg's team using agmsg's own onboarding flow (e.g.
-     `/agmsg` or the equivalent first-run prompt for that team/agent name) and to rely on agmsg's
-     own `Monitor`/hook wiring for delivery, exactly as it would if the user had set this up by
-     hand outside of panemux. This is unaffected by local vs. remote, since it is agmsg's own
-     already-installed skill doing the work either way, not something panemux provisions per pane.
-   This step only ever establishes *that pane's* participation; it never touches any other pane or
-   any other agent already using agmsg on that host (a pre-existing Codex agent, for example, keeps
-   working exactly as it did before panemux was involved).
-4. `native`, local/local-tmux only: panemux installs one skill file, e.g.
-   `~/.claude/commands/panemux-board.md`, once, explicitly (not a silent `settings.json` hooks edit)
-   so the bootstrap instruction can also be given as a short slash command. Installing this skill is
-   itself gated on `agent_board.enabled` and is idempotent. `native` SSH panes skip this step
-   entirely — the same no-remote-install rule that keeps the `panemux` binary off remote hosts
-   applies to this skill file too, so remote panes rely solely on the self-contained PTY instruction
-   from step 3. `agmsg` panes rely on agmsg's own already-installed skill instead, regardless of
-   local or remote.
-5. `native`, local/local-tmux only: if the pane was joined with `--mode turn` or `--mode both`,
-   `join` prints the exact `Stop` hook entry to add to `~/.claude/settings.json`; panemux never
-   writes that file itself, so this step requires the user (or Claude, with the user's confirmation,
-   since editing `settings.json` is a file write like any other) to apply it manually. `native` SSH
-   panes would need this edit applied to `~/.claude/settings.json` *on the remote host*, which is
-   the user's own file to manage there, same as it would be for a `local` pane's `settings.json`;
-   panemux's role is limited to printing the snippet either way. `agmsg` panes use agmsg's own
-   `/agmsg mode` instead, entirely outside panemux's control.
+   used for all terminal input) telling the agent to join agmsg's team using agmsg's own onboarding
+   flow (e.g. `/agmsg` or the equivalent first-run prompt), to rely on agmsg's own `Monitor`/hook
+   wiring for delivery exactly as it would if the user had set this up by hand, and to include the
+   [status self-report](#status-self-report-and-message-flow) fields on every status update. This
+   is unaffected by local vs. remote — it is agmsg's own already-installed skill doing the work
+   either way, not something panemux provisions per pane. This step only ever establishes *that
+   pane's* participation; it never touches any other pane or any other agent already using agmsg on
+   that host (a pre-existing Codex agent, for example, keeps working exactly as it did before
+   panemux was involved).
+4. If `mode` is `turn` or `both` (mirroring agmsg's own `/agmsg mode monitor|turn|both`, default
+   `monitor`), the bootstrap instruction also tells the agent to run `/agmsg mode <value>` — this
+   is agmsg's own setting, not something panemux tracks or enforces separately.
 
 ## Command center
-
-Earlier drafts of this document modeled the orchestrator as a pane with `role: supervisor` running
-an ordinary interactive `claude` process. That is no longer the design: the intended experience is
-a local, Spotlight-style command palette the user converses with, not a terminal pane sitting in
-the layout. This section replaces the old "Roles" section.
 
 ### What it is
 
 - A single, persistent **headless** Claude session, not a pane and not a PTY. panemux invokes it as
-  a short-lived subprocess per query — `claude -p --resume <command-center-session-id> "<prompt>"`
-  — rather than a long-running process, so this does not introduce the "new daemon" this document's
-  [Design principles](#design-principles) rule out. `--resume` against one fixed session id is what
-  gives the command center conversational continuity across separate queries.
-- It reads and writes the board through the exact same `panemux board status --all` / `panemux
-  board send <any-pane-id> "<body>"` native CLI already defined in
-  [CLI subcommands](#cli-subcommands), invoked as ordinary `Bash` tool calls within its own turn —
-  no new board primitive is needed for it.
-- `board send` always writes to the *local* native `Store` (the command center is not itself a
-  pane bound to a particular host/backend). The existing [cross-host relay](#cross-host-relay)
-  — which already routes by the destination pane's `(host, backend)` regardless of where a message
-  originated — delivers it onward to native or agmsg panes, local or remote, with no
-  command-center-specific routing logic required.
-- The reserved agent identity `_panemux` is used both as the `from_agent` when the command center
-  sends, and as the `to_agent` workers report status to for dashboard aggregation (unifying the
-  identity already introduced for the `agmsg` backend's status mapping in [Backends](#backends)
-  rather than adding a second reserved name).
+  a short-lived subprocess per query — `claude -p --resume <command-center-session-id>
+  --output-format=stream-json "<prompt>"` — rather than a long-running process, so this does not
+  introduce the "new daemon" [Design principles](#design-principles) rules out. `--resume` against
+  one fixed session id is what gives the command center conversational continuity across separate
+  queries.
+- It runs on panemux's own local host only (never remote), so it uses the local agmsg installation
+  directly: `send.sh <team> _panemux <to-pane-id> "<body>" --force` to instruct any pane, and
+  `api.sh get teams <team> messages --agent _panemux --limit <N>` to read status across every pane
+  — the same calls [Package layout](#package-layout)'s `AgmsgClient` already wraps, invoked as
+  ordinary `Bash` tool calls within its own turn. Enabling the command center therefore requires
+  agmsg to be present on panemux's own host, gated by the same detection (never installation) rule
+  as any other agmsg-backed pane.
+- Because the destination pane's host is resolved the same way for any `send.sh --force` call
+  regardless of who issued it, the command center needs no special-cased routing: the [cross-host
+  relay](#cross-host-relay) delivers its messages onward exactly as it would for any other pane's
+  message to a pane on a different host.
 
 ### Authorization
 
 The command center's privilege (it can message *any* board-enabled pane) is not granted by any
-board-level pane role — there is no pane role left in this design. It is granted the same way every
-other capability in panemux is: `POST`/WS access to the command center's own endpoint requires the
-global bearer-token auth described in [Security model](#security-model). This is a cleaner trust
-boundary than a pane self-declaring `role: supervisor` ever was, because it is enforced by
-panemux's existing authenticated API layer rather than by convention a receiving pane has to trust.
+per-pane role — there is no pane role in this design. It is granted the same way every other
+capability in panemux is: WS/REST access to the command center's own endpoints requires the global
+bearer-token auth described in [Security model](#security-model).
 
-**Trust implication, stated explicitly, still applies:** a message the command center sends is an
-ordinary instruction to the receiving pane, not something pre-authorized — the same caveat already
-called out for the `SendMessage` tool in Claude Code itself. The receiving pane's own normal
-confirmation flow still applies.
+**Trust implication, stated explicitly:** a message the command center sends is an ordinary
+instruction to the receiving pane, not something pre-authorized — the same caveat already called
+out for the `SendMessage` tool in Claude Code itself. The receiving pane's own normal confirmation
+flow still applies.
 
 ### API and streaming
 
-- `POST /ws/board-command` (WebSocket, matching the existing `/ws/{sessionID}` streaming pattern
-  rather than a blocking REST call): the frontend sends `{"prompt": "..."}`, panemux runs `claude -p
-  --resume <id> --output-format=stream-json "<prompt>"` and streams tokens back as they're
-  generated, so the palette can show live output instead of waiting for the full response.
-- `GET /api/board/command/history`: returns the command center's own turn-by-turn history, parsed
-  from its Claude Code session transcript using the transcript-reading capability panemux already
-  has for Claude worktree resolution (see [architecture.md](architecture.md)) — reused as-is, not
-  duplicated into the board's `messages` table. Because `board send`/`board status --all` calls
-  the command center makes appear as ordinary tool calls in that same transcript, the returned
-  history already interleaves "what the user asked," "what the command center did on the board,"
-  and "what it told the user" in one chronological feed, with no extra bookkeeping required.
+- `WS /ws/board-command`: the frontend sends `{"prompt": "..."}`, panemux runs `claude -p --resume
+  <id> --output-format=stream-json "<prompt>"` and streams the subprocess's output back as it
+  arrives, so the palette can show live output instead of waiting for the full response.
+- `GET /api/board/command/history`: returns the command center's own turn-by-turn history. This is
+  **not** re-derived from Claude Code's transcript file after the fact — per [Design
+  principles](#design-principles)'s "ask, don't reverse-engineer" rule, panemux persists what it
+  already captured directly from the `--output-format=stream-json` stream while relaying it to the
+  WS client (a documented, stable CLI output contract), appending it to a local file panemux fully
+  owns the format of. Because `send.sh`/`api.sh` calls the command center makes appear as ordinary
+  tool-use entries in that same captured stream, the returned history already interleaves "what the
+  user asked," "what the command center did on the board," and "what it told the user" in one
+  chronological feed, with no extra bookkeeping required.
 
 ### UI
 
@@ -473,11 +469,11 @@ unauthenticated `/ws/{sessionID}` full-shell endpoint, and once auth exists it s
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /api/board/status` | Latest `kind='status'` row per pane, across every host panemux manages |
+| `GET /api/board/status` | Latest self-reported status per pane, across every host panemux manages |
 | `GET /api/board/messages?since=<id>` | History feed for the dashboard UI |
-| `POST /api/board/broadcast` | `{ "to": ["pane-a","pane-b"], "body": "..." }`; inserts directly into each target's own host `Store` (never via PTY injection, so it is safe to send to a pane mid-turn) |
+| `POST /api/board/broadcast` | `{ "to": ["pane-a","pane-b"], "body": "..." }`; sends directly to each target's own host via `AgmsgClient` (never via PTY injection, so it is safe to send to a pane mid-turn) |
 | `WS /ws/board-command` | Command center chat: client sends `{"prompt": "..."}`, server streams the headless Claude response — see [Command center](#command-center) |
-| `GET /api/board/command/history` | Command center's own transcript-derived conversation history — see [Command center](#command-center) |
+| `GET /api/board/command/history` | Command center's own captured conversation history — see [Command center](#command-center) |
 
 ## Config additions
 
@@ -488,27 +484,28 @@ server:
   auth_token: ""   # empty = auto-generate on first run, saved to ~/.config/panemux/token (0600)
 
 command_center:
-  enabled: true   # default false; spawns the headless claude -p --resume process on demand
+  enabled: true   # default false; requires agmsg present on panemux's own host
+
+agent_board:
+  team: "panemux"  # default; all board-enabled panes share this agmsg team unless overridden
 
 panes:
   - id: pane-a
     type: local
     agent_board:
       enabled: true
-      backend: native  # native (default) | agmsg; explicit only, never auto-detected
-      mode: monitor    # monitor (default) | turn | both; turn/both need a manually-added Stop hook
+      mode: monitor    # monitor (default) | turn | both, mirrors agmsg's own /agmsg mode
 
-  - id: pane-b          # e.g. a Codex pane sharing pane-a's host
+  - id: pane-b          # e.g. a Codex pane
     type: ssh
     connection: build-host
     agent_board:
       enabled: true
-      backend: agmsg   # required for any non-Claude agent; panemux has no native protocol for Codex
 ```
 
-A global `agent_board.enabled`/`backend` default may also be supported so individual panes don't
-need to repeat it, but `backend: agmsg` still requires agmsg to already be present on that pane's
-host — panemux will not install it, per [Backends](#backends).
+A global `agent_board.enabled` default may also be supported so individual panes don't need to
+repeat it, but board features on any given host still require agmsg to already be present there —
+panemux will not install it, per [Integration with agmsg](#integration-with-agmsg).
 
 ## Security model
 
@@ -526,64 +523,60 @@ that shaped the design.
   ultimately drive shell-executing agents). Config validation must therefore fail closed: if
   `server.host` resolves to a non-loopback address and `server.auth_token` is empty, startup must
   be rejected (`internal/config/validate.go`, alongside the existing `server.port` range check).
-- **Message bodies never reach a remote shell unescaped.** Neither remote backend has a stdin-based
-  write path: `native` builds its own `sqlite3 <path> "<SQL>"` invocation (no panemux binary is ever
-  on the remote host to hand a JSON payload to over stdin — see the next point), and `send.sh` — the
-  `agmsg` write path, verified against its own source, not assumed — takes `body` as a positional
-  argument with no stdin option either. The requirement is upheld the way `cwd` already is in
-  `internal/session/ssh.go` (`validRemotePath` / `shellQuotePath`): every argument is single-quote
-  escaped before the remote command string is built, never concatenated unescaped. `native`
-  additionally SQL-literal-escapes each value first, since it is the one constructing the SQL text
-  itself; `agmsg`'s `send.sh` does that escaping internally, so only the shell-escaping layer is
-  panemux's responsibility on that path. See [Package layout](#package-layout) for exactly which
-  store needs which layer.
-- **panemux itself is never deployed to a remote host, for its own sake as much as for the reasons
-  above.** Beyond the injection-surface argument, the `panemux` binary is also the server: a copy
-  running on an SSH-reached host could start its own HTTP/WS listener, auth surface, and command
-  center — a second, unmanaged instance of everything [Security model](#security-model) already
-  works to contain for the primary one, multiplied by every remote host in the config. `native`'s
-  remote support is deliberately built only on `sqlite3` so this can never happen as a side effect
-  of using board features.
+- **Message bodies never reach a remote shell unescaped.** `send.sh` has no stdin-based way to
+  receive its `body` argument — verified against agmsg's own source, not assumed — so
+  `RemoteAgmsgClient` cannot avoid putting the body in the remote command string. The requirement
+  is upheld the way `cwd` already is in `internal/session/ssh.go` (`validRemotePath` /
+  `shellQuotePath`): every argument is single-quote-escaped before the command string is built,
+  never concatenated unescaped. `send.sh` does its own SQL escaping internally, so this
+  shell-escaping layer is the only one panemux is responsible for — there is no panemux-owned SQL
+  text to also escape, unlike an earlier draft of this design that had panemux building its own SQL.
+- **panemux itself is never deployed to a remote host.** Beyond the injection-surface argument
+  above, the `panemux` binary is also the server: a copy running on an SSH-reached host could start
+  its own HTTP/WS listener, auth surface, and command center — a second, unmanaged instance of
+  everything this section already works to contain for the primary one, multiplied by every remote
+  host in the config. Board features depend only on an agmsg installation the operator placed
+  there, never on anything panemux ships.
 - **agmsg is an operator-installed, unpinned-by-panemux external dependency.** panemux only detects
-  and calls it; it never bundles, vendors, or auto-installs it (see [Backends](#backends) and
-  [Design principles](#design-principles)). MIT license permits depending on it, but panemux's
-  implementation still owes itself a pinned tested version/tag and treats a break in
-  `scripts/api.sh`'s behavior as an external dependency compatibility bug.
-- **Local board files are `0600`.** `~/.config/panemux/board.db` and the remote equivalent are
-  created with owner-only permissions. This does not create a new trust boundary — any other
-  process running as the same OS user is already inside panemux's existing trust boundary per
-  [overview.md](overview.md) — but it does prevent a different local *user* on a shared host from
-  reading cross-pane agent chatter.
+  and calls it; it never bundles, vendors, or auto-installs it (see [Integration with
+  agmsg](#integration-with-agmsg) and [Design principles](#design-principles)). MIT license permits
+  depending on it, but panemux's implementation still owes itself a pinned tested version/tag and
+  treats a break in `scripts/api.sh`'s or `scripts/send.sh`'s behavior as an external dependency
+  compatibility bug.
 - **panemux sees plaintext at each relay hop.** SSH encrypts each hop (panemux↔host A,
   panemux↔host B), but panemux itself decrypts and re-serializes the row in between, so the
   panemux process/host must be trusted for the relay to be meaningful. There is no end-to-end
-  encryption between two remote agents' Claude processes.
+  encryption between two remote agents' Claude/Codex processes.
 - **The command center's `/ws/board-command` and `/api/board/command/history` are gated by the same
-  bearer token as everything else, and that gate is the entire authorization model for
-  `board send <any-pane-id>`** — see [Command center](#command-center). There is deliberately no
-  separate, weaker permission tier for it; anyone who can authenticate to panemux at all can already
-  reach the full-shell terminal WebSocket, so a second, narrower gate here would not reduce real
-  risk, only add a second thing to keep in sync.
+  bearer token as everything else, and that gate is the entire authorization model for messaging
+  any pane from the command center** — see [Command center](#command-center). There is deliberately
+  no separate, weaker permission tier for it; anyone who can authenticate to panemux at all can
+  already reach the full-shell terminal WebSocket, so a second, narrower gate here would not reduce
+  real risk, only add a second thing to keep in sync.
 
 ## Known limitations
 
 - No claim/lease semantics: if two workers were both addressed by the same message (not a supported
-  case today, since `to_agent` targets one pane), there is no exclusion mechanism. This mirrors
-  agmsg's own documented v1 limitation. Note this is distinct from agmsg's `actas-claim.sh` lock,
-  verified against its source: that lock only prevents two sessions from claiming the *same role
-  name* at once (exit code 1 if already held) — it says nothing about, and does not provide, message
-  claim/lease semantics for delivery.
-- Agents/teams are free-text identifiers with no cryptographic authentication of `from_agent`. Any
-  local process that can open the board file can forge a sender. This is an integrity gap distinct
-  from the transport-confidentiality concerns above and is accepted for the same reason panemux
-  already accepts same-user process trust elsewhere.
-- Relay latency is bounded by the 3s poll interval, not real-time; cross-host messaging is not
-  suitable for anything requiring sub-second delivery.
-- `backend: agmsg` panes depend on an operator-installed third-party tool panemux does not manage
-  the lifecycle of. If that installation is upgraded to a version whose `scripts/api.sh` behavior
-  has changed incompatibly, panemux's `LocalAgmsgStore`/`RemoteAgmsgStore` can fail even though
-  nothing in panemux's own config changed. This is the accepted cost of not vendoring/pinning a
-  copy of agmsg inside panemux itself.
+  case today, since `to` targets one pane), there is no exclusion mechanism. This mirrors agmsg's
+  own documented v1 limitation. Distinct from that: agmsg's `actas-claim.sh` lock only prevents two
+  sessions from claiming the *same role name* at once (exit code 1 if already held) — it says
+  nothing about, and does not provide, message claim/lease semantics for delivery.
+- Agents/teams are free-text identifiers with no cryptographic authentication of `from`. Any local
+  process that can reach a host's agmsg installation can forge a sender. This is an integrity gap
+  distinct from the transport-confidentiality concerns above and is accepted for the same reason
+  panemux already accepts same-user process trust elsewhere.
+- Relay delivery is at-least-once, bounded by the poll interval, not real-time or exactly-once; see
+  [Cross-host relay](#cross-host-relay) for why a duplicate message after a panemux restart is an
+  accepted outcome rather than something engineered away.
+- Board features depend on an operator-installed third-party tool (agmsg) panemux does not manage
+  the lifecycle of. If that installation is upgraded to a version whose scripts behave
+  incompatibly, panemux's `AgmsgClient` can fail even though nothing in panemux's own config
+  changed. This is the accepted cost of not vendoring/pinning a copy of agmsg inside panemux
+  itself.
+- Self-reported status depends on the agent's cooperation each time — see the honest tradeoff
+  called out in [Status self-report](#status-self-report-and-message-flow). A pane that stops
+  following its bootstrap instruction (e.g. a very long uninterrupted tool-use turn) simply stops
+  updating its status until its next report, with no separate liveness signal from panemux itself.
 - Exactly one command center session exists per panemux instance (see
   [Command center](#command-center)); it is not per-workspace and does not support multiple
   concurrent orchestrators today.
@@ -594,37 +587,28 @@ that shaped the design.
 
 ## Testing plan (see DEVELOPMENT.md for the TDD/coverage rules this must follow)
 
-- `internal/board`: insert/read roundtrip, unread filtering and `MarkRead`, relay dedup (same
-  `origin_host`+`origin_id` inserted twice is a no-op), cursor persistence across a simulated
-  restart, `LatestStatusByAgent` with multiple status rows (only the newest per agent wins), empty
-  board.
-- `internal/session`: for `RemoteAgmsgStore`, a body containing shell metacharacters (`'`, `;`,
+- `internal/board`: status JSON parsing (valid full payload, missing optional fields, a body that
+  isn't the expected shape falls back to being treated as a plain message), `LatestStatusByAgent`
+  with multiple status rows (only the newest per sender wins), relay cursor persistence across a
+  simulated restart (including the accepted at-least-once duplicate case — assert it is delivered
+  again, not that it's silently dropped or that the relay errors), empty team.
+- `internal/session`: for `RemoteAgmsgClient`, a body containing shell metacharacters (`'`, `;`,
   `` ` ``, `$(...)`) round-trips through the built `send.sh` command string as a single escaped
-  literal argument, not as executed shell syntax. For `RemoteNativeStore`, the same class of body
-  must round-trip through *two* escaping layers correctly: the built `sqlite3` SQL text contains
-  the value as a valid SQL string literal (embedded `'` doubled), and that whole SQL text then
-  round-trips through shell-escaping as a single argument — a test that only checks one layer would
-  miss a real injection path in the other. Neither backend has a "must never enter the command
-  string" property to test anymore (see [Design principles](#design-principles) for why); the
-  assertion for both is "the command string must escape this correctly."
+  literal argument, not as executed shell syntax.
 - `internal/config`: `host != loopback && auth_token == ""` is a validation error; all other
-  combinations are valid. `agent_board.backend` accepts only `native`/`agmsg`; anything else is a
-  validation error (no silent fallback to a default).
+  combinations are valid. `agent_board.team` defaults to `"panemux"` when unset.
 - `internal/api`: missing/incorrect bearer token is rejected (401) on both REST and the WebSocket
   handshake; correct token succeeds.
-- Backend selection and detection: a pane configured with `backend: agmsg` on a host where agmsg is
-  absent skips bootstrap and logs a warning without touching the pane's session (asserted against a
-  fake/no-op `BoardExecutor`/host check, not a real agmsg install); a pane configured with
-  `backend: agmsg` where agmsg is present bootstraps through the agmsg path instead of `panemux
-  board *`; mixed-backend same-host relay (a `native` pane and an `agmsg` pane on one host,
-  addressed to each other) goes through the relay step rather than being treated as already-shared.
+- agmsg detection: a pane on a host where agmsg is absent skips bootstrap and logs a warning
+  without touching the pane's session (asserted against a fake/no-op `BoardExecutor`/host check,
+  not a real agmsg install); a pane on a host where agmsg is present bootstraps normally.
 - Command center: `/ws/board-command` rejects an unauthenticated connection the same way the
-  terminal WebSocket does; `board send`/`board status --all` issued from the command center's
-  subprocess reach a target pane regardless of that pane's `(host, backend)`, using a fake `Store`
-  per combination to assert routing without a real agmsg/SSH dependency; `GET
-  /api/board/command/history` parses a fixture transcript containing interleaved user turns,
-  assistant text, and `board send`/`status --all` tool calls into one ordered feed, and returns an
-  empty/well-defined result before the command center has ever been used (no transcript file yet).
+  terminal WebSocket does; a `send.sh --force` call issued from the command center's subprocess
+  reaches a target pane regardless of that pane's host, using a fake `AgmsgClient` per host to
+  assert routing without a real agmsg/SSH dependency; `GET /api/board/command/history` returns a
+  correctly ordered feed built from a fixture `stream-json` capture containing interleaved user
+  turns, assistant text, and tool calls, and returns an empty/well-defined result before the
+  command center has ever been used.
 
 ## Related documents
 

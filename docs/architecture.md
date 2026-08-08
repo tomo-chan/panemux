@@ -66,11 +66,14 @@ Optional capability interfaces extend the base `Session` contract without breaki
 ### `internal/board` (design, not yet implemented)
 
 A planned package that replaces transcript-based Claude activity inference with a self-reported
-channel: a per-host SQLite file that panemux and the Claude process running in that host's panes
-both read/write directly, plus a relay for messages addressed across hosts. Two new optional
-session capability interfaces, `BoardHostID` and `BoardExecutor`, extend the same pattern as
-`CWDGetter`/`ActiveWorkdirGetter` above. Full design, schema, and rationale live in
-[agent-board.md](agent-board.md); do not treat that document's API/config surface as implemented
+channel: panes report status (including branch/PR/cwd, gathered by the agent's own `git`/`gh`
+calls rather than inferred by panemux) and exchange messages through an operator-installed
+[agmsg](https://github.com/fujibee/agmsg) instance, plus a relay for messages addressed across
+hosts. panemux owns no message schema or storage of its own — it is only ever a client of agmsg's
+own documented scripts (`scripts/api.sh`, `scripts/send.sh`), never a reader of its internal
+SQLite file. Two new optional session capability interfaces, `BoardHostID` and `BoardExecutor`,
+extend the same pattern as `CWDGetter`/`ActiveWorkdirGetter` above. Full design and rationale live
+in [agent-board.md](agent-board.md); do not treat that document's API/config surface as implemented
 until its status note says so.
 
 ### `internal/api`
