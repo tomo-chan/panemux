@@ -308,7 +308,9 @@ more exposure to agmsg's evolution than a "we only read from it" dependency woul
 in Known limitations](#known-limitations) for that tradeoff stated plainly. panemux implementation
 must pin a specific tested agmsg version/tag and treat any change to either script's observed
 behavior as an external dependency compatibility bug, tracked the same way any other pinned
-dependency's breaking change would be.
+dependency's breaking change would be — and must be able to *detect* such a break mechanically
+rather than discover it from a pane silently failing to communicate; see [agmsg compatibility
+contract](#agmsg-compatibility-contract).
 
 ## Status self-report and message flow
 
@@ -854,7 +856,9 @@ that shaped the design.
   `AgmsgClient` can fail even though nothing in panemux's own config changed. This is a real,
   accepted cost of not vendoring/pinning a copy of agmsg inside panemux itself, and is more exposure
   than a read-only dependency on `api.sh` alone would have carried — worth weighing against the
-  cross-agent interoperability agmsg provides that a panemux-owned protocol never could.
+  cross-agent interoperability agmsg provides that a panemux-owned protocol never could. See [agmsg
+  compatibility contract](#agmsg-compatibility-contract) for how this exposure is meant to be
+  caught mechanically rather than discovered by a user.
 - Self-reported status depends on the agent's cooperation each time — see the honest tradeoff
   called out in [Status self-report](#status-self-report-and-message-flow). A pane that stops
   following its bootstrap instruction (e.g. a very long uninterrupted tool-use turn) simply stops
@@ -866,6 +870,54 @@ that shaped the design.
   process startup plus generation time, which is higher than a warm, already-running interactive
   session would give — acceptable for a "converse with an orchestrator" UX, not for anything
   latency-sensitive.
+
+## agmsg compatibility contract
+
+agmsg's own compatibility promise only covers reading through `scripts/api.sh` (see [Version
+pinning](#integration-with-agmsg)); `send.sh`, `join.sh`, and everything else this design depends on
+carry no such promise. Without a mechanical check, an agmsg upgrade that changes one of those
+scripts' behavior would surface as a pane silently failing to communicate, discovered by a user
+long after the fact rather than by CI at the moment it happened.
+
+**What this borrows from [Pact](https://docs.pact.io/), and what it deliberately doesn't.** Pact's
+core idea — the *consumer* writes down the exact interactions it depends on as a contract, and that
+contract is mechanically verified against the real *provider* — is exactly the right shape here:
+panemux is the consumer, agmsg is the provider, and [Integration with
+agmsg](#integration-with-agmsg)'s precise, source-verified prose about `api.sh`/`send.sh`/`join.sh`
+*is* that contract in everything but file format. What doesn't transfer is Pact's actual
+machinery: Pact is built for HTTP/message request-response between two services that both
+participate in verification (typically via a shared Pact Broker, with the *provider's own CI*
+replaying the consumer's recorded interactions against itself). agmsg is a CLI script tool whose
+maintainers are not signed up for any such loop, and there is no request/response protocol here to
+generate Pact's consumer-side mocks from in the first place — shoehorning the actual Pact
+tooling/broker onto shell-exec fixtures would add a heavyweight dependency for no benefit over a
+plain table-driven Go test. So: adopt the *idea*, skip the *tool*.
+
+**Two test tiers, not one:**
+
+- **Tier 1 — fast, hermetic, part of `make check` on every commit.** `internal/board`'s existing
+  test bullets (below) already do this: a fake `AgmsgClient`/`BoardExecutor` asserts the exact
+  command strings panemux builds for each operation, and parses fixed, versioned fixture output
+  (frozen JSONL captured from a real, pinned agmsg run — e.g. `internal/board/testdata/agmsg-v1.1.x/
+  *.jsonl`) the way the real `api.sh` would produce it. This protects panemux's own code from
+  regressing against its own documented assumptions; it cannot, by itself, detect that agmsg
+  changed, since it never touches a real agmsg install.
+- **Tier 2 — a separate, non-blocking-by-default CI job that runs the same contract against a real
+  agmsg install.** Install the pinned agmsg version (via its own documented installer, the same way
+  an operator would) into an ephemeral CI environment, run the exact `join.sh`/`send.sh`/`api.sh`
+  invocations the contract specifies against a throwaway team, and assert the real output/exit-code
+  behavior matches what Tier 1's fixtures encode. This is the piece that actually catches drift, and
+  it should run in at least two situations: **on a schedule** (e.g. weekly) against agmsg's latest
+  tag, as an early warning before panemux's maintainers have chosen to bump the pin at all; and **as
+  a required check** whenever a change actually bumps the pinned version, so a real behavioral diff
+  blocks that bump rather than shipping silently. It is deliberately kept out of the main `make
+  check` gate — it depends on installing and executing a real external tool, which is slower and
+  less hermetic than the rest of this repository's test suite is designed to be.
+
+This does not remove the underlying risk noted in [Known limitations](#known-limitations) — agmsg
+still makes no compatibility promise for the scripts panemux's write path depends on — but it turns
+a silent, user-discovered failure into a specific, actionable CI signal naming exactly which
+documented behavior changed.
 
 ## Testing plan (see DEVELOPMENT.md for the TDD/coverage rules this must follow)
 
