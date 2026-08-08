@@ -23,9 +23,10 @@ import (
 
 // Server is the HTTP server.
 type Server struct {
-	cfg     *config.Config
-	manager *session.Manager
-	httpSrv *http.Server
+	cfg         *config.Config
+	manager     *session.Manager
+	httpSrv     *http.Server
+	cancelBoard context.CancelFunc // nil when Agent Board has no board-enabled panes
 }
 
 // New creates a new server instance.
@@ -40,10 +41,13 @@ func New(cfg *config.Config, manager *session.Manager, frontendFS embed.FS) *Ser
 	wsHandler := ws.NewHandler(manager)
 	registerRoutes(r, apiHandler, wsHandler, frontendFS)
 
+	cancelBoard := wireAgentBoard(cfg, manager, apiHandler)
+
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	return &Server{
-		cfg:     cfg,
-		manager: manager,
+		cfg:         cfg,
+		manager:     manager,
+		cancelBoard: cancelBoard,
 		httpSrv: &http.Server{
 			Addr:           addr,
 			Handler:        r,
@@ -122,8 +126,12 @@ func (s *Server) Start() error {
 	return nil
 }
 
-// Shutdown gracefully stops the server.
+// Shutdown gracefully stops the server, including the Agent Board relay
+// goroutine, if one is running.
 func (s *Server) Shutdown(ctx context.Context) error {
+	if s.cancelBoard != nil {
+		s.cancelBoard()
+	}
 	if err := s.httpSrv.Shutdown(ctx); err != nil {
 		return fmt.Errorf("shutting down HTTP server: %w", err)
 	}

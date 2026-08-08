@@ -1,8 +1,8 @@
 package config
 
-// defaultAgentBoardTeam is the agmsg team every board-enabled pane joins
+// DefaultAgentBoardTeam is the agmsg team every board-enabled pane joins
 // unless overridden. See docs/agent-board.md's "Config additions".
-const defaultAgentBoardTeam = "panemux"
+const DefaultAgentBoardTeam = "panemux"
 
 // PanemuxReservedPaneID is the sentinel agmsg identity reserved for status
 // reports and every message panemux itself originates. A pane may never be
@@ -36,7 +36,7 @@ type AgentBoardConfig struct {
 // normalize fills in defaults left unset by the operator.
 func (c *AgentBoardConfig) normalize() {
 	if c.Team == "" {
-		c.Team = defaultAgentBoardTeam
+		c.Team = DefaultAgentBoardTeam
 	}
 }
 

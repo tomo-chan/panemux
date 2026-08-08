@@ -140,7 +140,7 @@ func Default() *Config {
 			ShowHeader:    true,
 			ShowStatusBar: true,
 		},
-		AgentBoard: AgentBoardConfig{Team: defaultAgentBoardTeam},
+		AgentBoard: AgentBoardConfig{Team: DefaultAgentBoardTeam},
 		Layout:     defaultLayout(),
 		Workspaces: WorkspacesConfig{
 			Active:           defaultWorkspaceID,
