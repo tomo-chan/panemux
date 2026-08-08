@@ -45,6 +45,30 @@ func TestOwnSendLedger_NoMatch(t *testing.T) {
 	}
 }
 
+// Regression test for the PR #163 review finding: two genuine broadcasts
+// with identical (destHost, team, to, body) must each be independently
+// matchable, not collapse into one overwritable map entry that silently
+// drops the second real send.sh row as if it were a forgery.
+func TestOwnSendLedger_DuplicateRecordsAreBothConsumable(t *testing.T) {
+	l := newOwnSendLedger(time.Minute)
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	l.nowFn = func() time.Time { return now }
+
+	l.Record("hostB", "panemux", "codex-b", "please review")
+	l.Record("hostB", "panemux", "codex-b", "please review")
+
+	if !l.Consume("hostB", "panemux", "codex-b", "please review") {
+		t.Fatal("expected the first duplicate Record to be consumable")
+	}
+	if !l.Consume("hostB", "panemux", "codex-b", "please review") {
+		t.Fatal("expected the second duplicate Record to be independently consumable")
+	}
+	// Both entries are now spent: a third Consume must fail.
+	if l.Consume("hostB", "panemux", "codex-b", "please review") {
+		t.Fatal("expected no third match after both duplicate entries were consumed")
+	}
+}
+
 func TestOwnSendLedger_TTLExpiry(t *testing.T) {
 	l := newOwnSendLedger(time.Minute)
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
