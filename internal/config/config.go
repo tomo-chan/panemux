@@ -28,7 +28,11 @@ var chmodConfigFile = os.Chmod
 
 type ServerConfig struct {
 	Host string `yaml:"host"`
-	Port int    `yaml:"port"`
+	// AuthToken gates every board REST endpoint. Empty means no bearer
+	// token is required (matches the pre-board default of an unauthenticated
+	// local API); see Validate for when leaving it empty is a config error.
+	AuthToken string `yaml:"auth_token,omitempty" json:"-"`
+	Port      int    `yaml:"port"`
 }
 
 type SSHConnection struct {
@@ -46,15 +50,16 @@ type DisplayConfig struct {
 }
 
 type PaneConfig struct {
-	ShowHeader    *bool  `yaml:"show_header,omitempty"    json:"show_header,omitempty"`
-	ShowStatusBar *bool  `yaml:"show_status_bar,omitempty" json:"show_status_bar,omitempty"`
-	ID            string `yaml:"id"           json:"id"`
-	Type          string `yaml:"type"         json:"type"` // local | ssh | tmux | ssh_tmux
-	Shell         string `yaml:"shell,omitempty"        json:"shell,omitempty"`
-	Cwd           string `yaml:"cwd,omitempty"          json:"cwd,omitempty"`
-	Title         string `yaml:"title,omitempty"        json:"title,omitempty"`
-	Connection    string `yaml:"connection,omitempty"   json:"connection,omitempty"` // ssh_connections key
-	TmuxSession   string `yaml:"tmux_session,omitempty" json:"tmux_session,omitempty"`
+	ShowHeader    *bool                 `yaml:"show_header,omitempty"    json:"show_header,omitempty"`
+	ShowStatusBar *bool                 `yaml:"show_status_bar,omitempty" json:"show_status_bar,omitempty"`
+	AgentBoard    *PaneAgentBoardConfig `yaml:"agent_board,omitempty"    json:"agent_board,omitempty"`
+	ID            string                `yaml:"id"           json:"id"`
+	Type          string                `yaml:"type"         json:"type"` // local | ssh | tmux | ssh_tmux
+	Shell         string                `yaml:"shell,omitempty"        json:"shell,omitempty"`
+	Cwd           string                `yaml:"cwd,omitempty"          json:"cwd,omitempty"`
+	Title         string                `yaml:"title,omitempty"        json:"title,omitempty"`
+	Connection    string                `yaml:"connection,omitempty"   json:"connection,omitempty"` // ssh_connections key
+	TmuxSession   string                `yaml:"tmux_session,omitempty" json:"tmux_session,omitempty"`
 }
 
 type LayoutNode struct {
@@ -92,6 +97,7 @@ type Config struct { //nolint:govet
 	Workspaces     WorkspacesConfig         `yaml:"workspaces,omitempty" json:"workspaces"`
 	Layout         LayoutNode               `yaml:"layout,omitempty"`
 	Display        DisplayConfig            `yaml:"display,omitempty" json:"display"`
+	AgentBoard     AgentBoardConfig         `yaml:"agent_board,omitempty" json:"agent_board"`
 
 	filePath      string
 	sshConfigPath string // overridable for tests; empty = use sshconfig.DefaultPath()
@@ -110,6 +116,7 @@ func Load(path string) (*Config, error) {
 
 	cfg.filePath = path
 	cfg.normalizeWorkspaces()
+	cfg.AgentBoard.normalize()
 	cfg.expandPaths()
 
 	if err := cfg.Validate(); err != nil {
@@ -133,7 +140,8 @@ func Default() *Config {
 			ShowHeader:    true,
 			ShowStatusBar: true,
 		},
-		Layout: defaultLayout(),
+		AgentBoard: AgentBoardConfig{Team: defaultAgentBoardTeam},
+		Layout:     defaultLayout(),
 		Workspaces: WorkspacesConfig{
 			Active:           defaultWorkspaceID,
 			TabPosition:      defaultTabPosition,
@@ -387,12 +395,14 @@ func (c *Config) write() error {
 		SSHConnections map[string]SSHConnection `yaml:"ssh_connections,omitempty"`
 		Workspaces     WorkspacesConfig         `yaml:"workspaces,omitempty"`
 		Display        DisplayConfig            `yaml:"display,omitempty"`
+		AgentBoard     AgentBoardConfig         `yaml:"agent_board,omitempty"`
 	}
 	data, err := yaml.Marshal(configFile{
 		Server:         c.Server,
 		SSHConnections: c.SSHConnections,
 		Workspaces:     c.Workspaces,
 		Display:        c.Display,
+		AgentBoard:     c.AgentBoard,
 	})
 	if err != nil {
 		return fmt.Errorf("marshaling config: %w", err)

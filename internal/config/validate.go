@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
 	"regexp"
 	"strings"
 
@@ -33,6 +34,18 @@ func (c *Config) Validate() error {
 
 	if c.Server.Port < 1 || c.Server.Port > 65535 {
 		errs = append(errs, fmt.Sprintf("server.port %d is out of range (1-65535)", c.Server.Port))
+	}
+
+	// An auth token sent over an unencrypted, non-loopback hop can be
+	// replayed and the request it authenticates can be tampered with in
+	// transit, so a non-loopback server.host requires an explicit
+	// server.auth_token. See docs/security.md's "Auth token and transport
+	// encryption" and docs/agent-board.md's Security model.
+	if !isLoopbackHost(c.Server.Host) && c.Server.AuthToken == "" {
+		errs = append(
+			errs,
+			fmt.Sprintf("server.host %q is not loopback: server.auth_token must be set", c.Server.Host),
+		)
 	}
 
 	sshConns := c.SSHConnections
@@ -201,6 +214,7 @@ func validatePane(p *PaneConfig, sshConns map[string]SSHConnection) []string {
 	if p.ID == "" {
 		errs = append(errs, "pane id must not be empty")
 	}
+	errs = append(errs, validatePaneAgentBoard(p)...)
 
 	switch p.Type {
 	case paneTypeLocal, paneTypeSSH, paneTypeTmux, paneTypeSSHTmux:
@@ -247,4 +261,41 @@ func validatePane(p *PaneConfig, sshConns map[string]SSHConnection) []string {
 	}
 
 	return errs
+}
+
+// validatePaneAgentBoard checks the pane-scoped Agent Board fields: the
+// reserved sentinel pane id (see docs/agent-board.md's "Config additions")
+// and, when set, the agent_board.mode enum.
+func validatePaneAgentBoard(p *PaneConfig) []string {
+	var errs []string
+	if p.ID == PanemuxReservedPaneID {
+		errs = append(errs, fmt.Sprintf("pane id %q is reserved for panemux's own Agent Board sentinel identity", p.ID))
+	}
+	if p.AgentBoard != nil && !ValidAgentBoardMode(p.AgentBoard.Mode) {
+		errs = append(
+			errs,
+			fmt.Sprintf(
+				"pane %q: agent_board.mode %q is invalid: must be monitor, turn, both, or off",
+				p.ID, p.AgentBoard.Mode,
+			),
+		)
+	}
+	return errs
+}
+
+// isLoopbackHost reports whether host is a loopback address: the default
+// (empty, meaning the ServerConfig zero value before Default()/Load()
+// fills it in), the literal loopback names panemux already documents
+// ("127.0.0.1", "::1", "localhost"), or any other address net.ParseIP
+// recognizes as loopback (e.g. 127.0.0.2). This is a syntactic check, not a
+// DNS resolution — validation must not make network calls.
+func isLoopbackHost(host string) bool {
+	switch host {
+	case "", "localhost", "127.0.0.1", "::1":
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
 }
