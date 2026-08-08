@@ -87,51 +87,67 @@ flowchart TB
         Palette["Spotlightパレット"]
     end
 
-    subgraph CommLayer["通信層"]
-        RestWs["REST /api/board/*<br/>WS /ws/board-command<br/>Bearerトークン認証"]
-        LocalExec["ローカル exec.Command"]
-        ExecCh["SSH exec channel<br/>（GetCWD/InspectGitContextと共用）"]
+    subgraph PanemuxBoundary["panemuxの責務範囲（唯一のホストで完結）"]
+        direction TB
+        AuthAPI["認証付きREST/WS<br/>Bearerトークン"]
+        BoardCache[("状態＋履歴キャッシュ<br/>インメモリ、panemuxが所有")]
+        Relay["中継ゴルーチン<br/>数秒間隔でagmsgをポーリング"]
+        CmdCenter["司令塔<br/>claude -p --resume"]
+        AgmsgClient["AgmsgClient<br/>agmsg呼び出しの唯一の窓口"]
+
+        AuthAPI -->|"GET /api/board/status, /messages"| BoardCache
+        AuthAPI --> CmdCenter
+        Relay -->|"statusと履歴を書き込み"| BoardCache
+        Relay --> AgmsgClient
+        CmdCenter --> AgmsgClient
     end
 
-    subgraph ClientLayer["クライアント層（panemux Goプロセス）"]
-        Relay["中継ゴルーチン<br/>数秒間隔でポーリング"]
-        CmdCenter["司令塔<br/>claude -p --resume（クエリごとに起動）"]
-        AgmsgClient["AgmsgClient<br/>Local/RemoteAgmsgClient"]
-    end
-
-    subgraph AgentLayer["エージェント層（agmsgチーム）"]
-        LocalAgmsg[("ローカルagmsg<br/>（任意インストール）")]
+    subgraph AgmsgBoundary["agmsgの責務範囲（ホストごとに独立、panemuxは所有しない）"]
+        direction TB
+        AgmsgLocal[("ローカルagmsg<br/>（任意インストール）")]
         AgmsgA[("agmsg（Host A）")]
         ClaudeA["Claude pane"]
         AgmsgB[("agmsg（Host B）")]
         CodexB["Codex pane"]
+        ClaudeA -->|"Bashツール呼び出し"| AgmsgA
+        CodexB -->|"Bashツール呼び出し"| AgmsgB
     end
 
-    Dashboard --> RestWs
-    Palette --> RestWs
-    RestWs --> Relay
-    RestWs --> CmdCenter
-    Relay --> AgmsgClient
-    CmdCenter --> AgmsgClient
-    AgmsgClient --> LocalExec
-    AgmsgClient --> ExecCh
-    LocalExec -->|"api.sh / send.sh"| LocalAgmsg
-    ExecCh -->|"api.sh / send.sh"| AgmsgA
-    ExecCh -->|"api.sh / send.sh"| AgmsgB
-    ClaudeA -->|"Bashツール呼び出し"| AgmsgA
-    CodexB -->|"Bashツール呼び出し"| AgmsgB
+    Dashboard -->|"REST"| AuthAPI
+    Palette -->|"WS"| AuthAPI
+    AgmsgClient -->|"ローカル exec.Command<br/>api.sh / send.sh"| AgmsgLocal
+    AgmsgClient -->|"SSH exec channel<br/>api.sh / send.sh"| AgmsgA
+    AgmsgClient -->|"SSH exec channel<br/>api.sh / send.sh"| AgmsgB
 ```
 
-Four layers, top to bottom: the **UI layer** (dashboard + Spotlight palette) never talks to agmsg
-directly — everything goes through the **communication layer** (the authenticated REST/WS surface
-for the browser, plus local `exec.Command`/SSH exec channel for reaching agmsg itself). The
-**client layer** is panemux's own Go code (relay, command center, the `AgmsgClient` abstraction
-from [Package layout](#package-layout)) — it is the only thing that ever calls agmsg's scripts, and
-it is never a participant *inside* more than one host's agmsg installation at a time. The **agent
-layer** is agmsg itself (one team per host) plus the Claude/Codex panes that are its actual
-members; panemux only ever reaches a remote one through the SSH exec channel it already holds for
-that pane's session, exactly as [Local vs remote resource
-placement](#local-vs-remote-resource-placement) details.
+Two responsibility boundaries, not four generic layers, because the boundary that actually matters
+here is "what agmsg owns" vs. "what panemux owns" — the one place a future agmsg version bump can
+break something is entirely inside `AgmsgClient`'s two call sites (`api.sh`, `send.sh`), never
+anywhere else in panemux:
+
+- **panemuxの責務範囲**: authentication, the relay, the **in-memory status cache** the dashboard
+  actually reads (see below), the command center, and the single `AgmsgClient` abstraction that is
+  the *only* code in panemux allowed to call agmsg's scripts. Everything here is panemux's own,
+  version-independent of agmsg beyond that one narrow interface.
+- **agmsgの責務範囲**: one independent agmsg installation per host, each with its own durable
+  message log, team roster, and delivery to the live agent sessions that are its actual members.
+  panemux does not own this box, does not persist a copy of its contents beyond what the cache
+  below needs, and is never a participant *inside* more than one host's agmsg installation at a
+  time — it only ever reaches a remote one through the SSH exec channel it already holds for that
+  pane's session, exactly as [Local vs remote resource
+  placement](#local-vs-remote-resource-placement) details.
+
+**Where agent status actually lives.** It does not live in a database panemux owns, and it is not
+recomputed from a live agmsg call on every dashboard request either — both would be wrong for
+different reasons (the first re-introduces "panemux owns a schema," which [Design
+principles](#design-principles) rules out; the second makes every dashboard poll pay for an agmsg
+round-trip, including an SSH hop for remote hosts). Instead: the relay goroutine, which is already
+polling every host's agmsg for messages to forward, updates an **in-memory status cache** as a side
+effect whenever it sees a status report addressed to `_panemux`. `GET /api/board/status` reads only
+that cache — never agmsg directly. agmsg's own message log remains the durable source of truth (a
+lost or restarted panemux process just means the cache is empty until the next poll cycle refills
+it, per [Known limitations](#known-limitations)), but the *current, dashboard-facing view* of that
+state is unambiguously something panemux computes and holds itself.
 
 ## Integration with agmsg
 
@@ -201,8 +217,11 @@ change would be.
 
 Instead of a `kind='status'` field panemux owns (agmsg has no such column), status reports are
 ordinary agmsg messages addressed to the reserved identity `_panemux` — the same identity the
-command center uses as its own `from` when sending. panemux's dashboard reads them with `api.sh get
-teams <team> messages --agent _panemux --limit <N>` and keeps only the newest row per sender.
+command center uses as its own `from` when sending. The relay goroutine, already polling every
+host's agmsg with `api.sh get teams <team> messages --before-id <cursor>` for message forwarding,
+recognizes any row addressed to `_panemux` as a status update and writes it into panemux's own
+in-memory status cache (see [Architecture](#architecture)), keeping only the newest entry per
+sender. The dashboard never queries agmsg directly for this — it only ever reads that cache.
 
 The bootstrap instruction (see [Bootstrap flow](#bootstrap-flow)) tells Claude to gather this
 itself, using its own `Bash` tool, and include it as a small JSON body:
@@ -229,6 +248,7 @@ sequenceDiagram
     participant ClaudeA as "Claude pane (Host A)"
     participant AgmsgA as "agmsg (Host A)"
     participant Relay as "panemux 中継"
+    participant Cache as "panemux 状態キャッシュ"
     participant AgmsgB as "agmsg (Host B)"
     participant CodexB as "Codex pane (Host B)"
     participant Dash as "panemux ダッシュボード"
@@ -236,13 +256,16 @@ sequenceDiagram
     Note over ClaudeA: 状態報告（自己申告）
     ClaudeA->>ClaudeA: git branch / gh pr view を実行
     ClaudeA->>AgmsgA: send.sh team ClaudeA _panemux "{branch,pr_url,state,...}"
-    Dash->>AgmsgA: api.sh get teams team messages --agent _panemux
-    AgmsgA-->>Dash: 最新status(JSON)
+    Relay->>AgmsgA: api.sh get teams team messages --before-id cursor
+    AgmsgA-->>Relay: 新規行（宛先が _panemux）
+    Relay->>Cache: 最新status(JSON)を書き込み
+    Dash->>Cache: GET /api/board/status
+    Cache-->>Dash: 最新status（agmsgへは問い合わせない）
 
     Note over ClaudeA,CodexB: pane間メッセージの中継
     ClaudeA->>AgmsgA: send.sh team ClaudeA CodexB "レビューして"
     Relay->>AgmsgA: api.sh get teams team messages --before-id cursor
-    AgmsgA-->>Relay: 新規行
+    AgmsgA-->>Relay: 新規行（宛先が他pane）
     Relay->>AgmsgB: send.sh team ClaudeA CodexB "レビューして" --force
     CodexB->>AgmsgB: Monitor / watch.sh で受信
 ```
@@ -275,14 +298,33 @@ type AgmsgClient interface {
     HostID() string
     Send(ctx context.Context, team, from, to, body string) error         // send.sh ... --force
     Since(ctx context.Context, team string, afterID int64) ([]Row, error) // api.sh get ... messages
-    LatestStatusByAgent(ctx context.Context, team string) (map[string]Status, error)
 }
+
+// BoardCache is the in-memory, panemux-owned view of recent board activity shown in Architecture.
+// Only the relay writes to it, as a side effect of the same Since polling it already does for
+// message forwarding; both dashboard-facing endpoints only ever read it, never calling
+// AgmsgClient directly at request time.
+type BoardCache struct {
+    mu      sync.RWMutex
+    status  map[string]Status // paneID -> latest self-reported status
+    history []Row             // bounded ring buffer of recent messages, most recent last
+}
+
+func (c *BoardCache) RecordStatus(paneID string, s Status)  { /* mutex-guarded write */ }
+func (c *BoardCache) AppendMessage(r Row)                   { /* mutex-guarded write */ }
+func (c *BoardCache) StatusSnapshot() map[string]Status     { /* mutex-guarded copy */ }
+func (c *BoardCache) MessagesSince(afterID int64) []Row     { /* mutex-guarded copy */ }
 ```
 
-`LatestStatusByAgent` is derived, not a separate agmsg call: it reads the same `messages` stream
-filtered to `--agent _panemux`, and parses each `body` as the JSON shape from [Status
-self-report](#status-self-report-and-message-flow); a body that isn't valid JSON in that shape is
-treated as an ordinary chat message to `_panemux`, not a status update.
+The relay inspects every `Row` it reads: if `To == "_panemux"` and `Body` parses as the JSON shape
+from [Status self-report](#status-self-report-and-message-flow), it calls `RecordStatus` and does
+*not* forward that row through the cross-host relay logic (status reports are local bookkeeping,
+not messages meant for another pane). A `Body` addressed to `_panemux` that isn't valid JSON in
+that shape is left alone as an ordinary chat message. Every row, status or not, is also appended to
+`history` via `AppendMessage`, which is what `GET /api/board/messages` reads from — that endpoint
+never calls `AgmsgClient` at request time either, for the same reason `GET /api/board/status`
+doesn't: the relay has already seen everything the dashboard needs, as a side effect of polling it
+was already doing.
 
 - `LocalAgmsgClient` shells out to the local agmsg installation's `scripts/api.sh` for reads and
   `scripts/send.sh ... --force` for writes. Because this is a local `exec.Command` invocation, Go
@@ -363,13 +405,15 @@ to reach each other). panemux is the only node with a connection to every host, 
 2. `cursor` is one value per (host, team), persisted in a small local JSON file (e.g.
    `~/.config/panemux/board-relay-cursor.json`) — not a database table, since panemux owns no
    database — so a panemux restart resumes roughly where it left off.
-3. For each new row, panemux resolves `to` to its owning pane and that pane's host via the
-   already-known pane→session config. If that host differs from the source host, panemux calls
+3. For each new row, if `to == "_panemux"`, panemux updates the [in-memory status
+   cache](#architecture) instead of relaying it — status reports never leave the host they were
+   written on. Otherwise, panemux resolves `to` to its owning pane and that pane's host via the
+   already-known pane→session config; if that host differs from the source host, panemux calls
    `Send` on the destination host's `AgmsgClient` with `--force`.
 4. Same-host `to` needs no relay: sender and receiver are already members of the same local agmsg
    team.
-5. panemux's own dashboard/status reads (`GET /api/board/status`) go directly to every host's
-   `AgmsgClient` and are not relayed; relay only matters for agent-to-agent delivery.
+5. `GET /api/board/status` never triggers an `AgmsgClient` call at all — it only reads the status
+   cache the relay already keeps current, per [Architecture](#architecture).
 
 **Delivery is at-least-once, not exactly-once — an accepted simplification, not an oversight.**
 Because agmsg's own schema has no field for panemux to mark "this row has already been relayed,"
@@ -485,7 +529,7 @@ unauthenticated `/ws/{sessionID}` full-shell endpoint, and once auth exists it s
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /api/board/status` | Latest self-reported status per pane, across every host panemux manages |
+| `GET /api/board/status` | A snapshot of panemux's in-memory status cache — no `AgmsgClient` call happens on this request (see [Architecture](#architecture)) |
 | `GET /api/board/messages?since=<id>` | History feed for the dashboard UI |
 | `POST /api/board/broadcast` | `{ "to": ["pane-a","pane-b"], "body": "..." }`; sends directly to each target's own host via `AgmsgClient` (never via PTY injection, so it is safe to send to a pane mid-turn) |
 | `WS /ws/board-command` | Command center chat: client sends `{"prompt": "..."}`, server streams the headless Claude response — see [Command center](#command-center) |
@@ -572,6 +616,11 @@ that shaped the design.
 
 ## Known limitations
 
+- The status/history cache is in-memory only, not persisted to disk. A panemux restart starts it
+  empty; `GET /api/board/status`/`/messages` show nothing until the relay's next poll cycle (which
+  resumes from the persisted cursor, so it still only sees genuinely new rows, not the pane's full
+  history) repopulates it. This is the same accepted eventual-consistency tradeoff already made for
+  the relay cursor itself.
 - No claim/lease semantics: if two workers were both addressed by the same message (not a supported
   case today, since `to` targets one pane), there is no exclusion mechanism. This mirrors agmsg's
   own documented v1 limitation. Distinct from that: agmsg's `actas-claim.sh` lock only prevents two
@@ -604,10 +653,14 @@ that shaped the design.
 ## Testing plan (see DEVELOPMENT.md for the TDD/coverage rules this must follow)
 
 - `internal/board`: status JSON parsing (valid full payload, missing optional fields, a body that
-  isn't the expected shape falls back to being treated as a plain message), `LatestStatusByAgent`
-  with multiple status rows (only the newest per sender wins), relay cursor persistence across a
-  simulated restart (including the accepted at-least-once duplicate case — assert it is delivered
-  again, not that it's silently dropped or that the relay errors), empty team.
+  isn't the expected shape falls back to being treated as a plain message and is not mistaken for a
+  status update), `BoardCache.StatusSnapshot` with multiple status rows for one pane (only the
+  newest wins) and across multiple panes, `BoardCache.MessagesSince` ordering and bounding, a row
+  addressed to `_panemux` never appearing in `MessagesSince`'s cross-pane relay path, an empty
+  cache read (fresh start / post-restart) returning a well-defined empty result rather than an
+  error, relay cursor persistence across a simulated restart (including the accepted at-least-once
+  duplicate case — assert it is delivered again, not that it's silently dropped or that the relay
+  errors), empty team.
 - `internal/session`: for `RemoteAgmsgClient`, a body containing shell metacharacters (`'`, `;`,
   `` ` ``, `$(...)`) round-trips through the built `send.sh` command string as a single escaped
   literal argument, not as executed shell syntax.
