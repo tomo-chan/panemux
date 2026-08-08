@@ -557,19 +557,21 @@ func remoteBoardHomeDir(runner sshSessionRunner) (string, error) {
 	return home, nil
 }
 
-// BoardHostID returns the SSH connection alias: an ssh/ssh_tmux session's
-// pane participates in that remote host's agmsg installation.
-func (s *SSHSession) BoardHostID() string { return s.connectionName }
-
-// BoardHomeDir resolves and caches the remote user's home directory for the
-// life of this SSH connection. See BoardHomeDirer in session.go.
-func (s *SSHSession) BoardHomeDir(_ context.Context) (string, error) {
-	s.boardHomeMu.Lock()
-	defer s.boardHomeMu.Unlock()
-	if s.boardHomeDir != "" {
-		return s.boardHomeDir, nil
+// boardHomeDirCached resolves and caches the remote user's home directory
+// for the life of an SSH connection, sharing the cache-plus-mutex logic
+// SSHSession.BoardHomeDir and TmuxSSHSession.BoardHomeDir would otherwise
+// each duplicate verbatim — mirroring how their sibling RunBoardCommand
+// method is already shared via runBoardCommandOverSSH (PR #163 review
+// finding). cache and mu must be the caller's own boardHomeDir/boardHomeMu
+// fields, passed by pointer so this helper can populate the caller's cache
+// in place.
+func boardHomeDirCached(client *ssh.Client, cache *string, mu *sync.Mutex) (string, error) {
+	mu.Lock()
+	defer mu.Unlock()
+	if *cache != "" {
+		return *cache, nil
 	}
-	sess, err := s.client.NewSession()
+	sess, err := client.NewSession()
 	if err != nil {
 		return "", fmt.Errorf("new ssh session for board home dir: %w", err)
 	}
@@ -578,8 +580,18 @@ func (s *SSHSession) BoardHomeDir(_ context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	s.boardHomeDir = home
+	*cache = home
 	return home, nil
+}
+
+// BoardHostID returns the SSH connection alias: an ssh/ssh_tmux session's
+// pane participates in that remote host's agmsg installation.
+func (s *SSHSession) BoardHostID() string { return s.connectionName }
+
+// BoardHomeDir resolves and caches the remote user's home directory for the
+// life of this SSH connection. See BoardHomeDirer in session.go.
+func (s *SSHSession) BoardHomeDir(_ context.Context) (string, error) {
+	return boardHomeDirCached(s.client, &s.boardHomeDir, &s.boardHomeMu)
 }
 
 // RunBoardCommand runs an agmsg script (api.sh or send.sh) on the remote

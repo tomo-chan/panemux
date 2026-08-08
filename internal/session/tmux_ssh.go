@@ -143,22 +143,7 @@ func (s *TmuxSSHSession) BoardHostID() string { return s.connectionName }
 // BoardHomeDir resolves and caches the remote user's home directory for the
 // life of this SSH connection. See BoardHomeDirer in session.go.
 func (s *TmuxSSHSession) BoardHomeDir(_ context.Context) (string, error) {
-	s.boardHomeMu.Lock()
-	defer s.boardHomeMu.Unlock()
-	if s.boardHomeDir != "" {
-		return s.boardHomeDir, nil
-	}
-	sess, err := s.client.NewSession()
-	if err != nil {
-		return "", fmt.Errorf("new ssh session for board home dir: %w", err)
-	}
-	defer sess.Close()
-	home, err := remoteBoardHomeDir(sess)
-	if err != nil {
-		return "", err
-	}
-	s.boardHomeDir = home
-	return home, nil
+	return boardHomeDirCached(s.client, &s.boardHomeDir, &s.boardHomeMu)
 }
 
 // RunBoardCommand runs an agmsg script (api.sh or send.sh) on the remote
