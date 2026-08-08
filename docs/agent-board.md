@@ -659,6 +659,25 @@ that shaped the design.
 
 ## Known limitations
 
+- **Account-wide token/cost totals are explicitly out of scope for Agent Board.** Unlike
+  branch/PR/cwd, token usage isn't external world-state an agent can query with an ordinary command
+  (`git`, `gh`), and there's no verified way for an agent to introspect its own cumulative usage and
+  include it in a self-report. Since panemux-managed panes and the command center all run under the
+  same Claude account in the common case, Claude Code's own `/usage` already gives an accurate
+  account-wide view; Agent Board does not need to duplicate it.
+- **Per-pane usage — "which session is using disproportionately more than the others" — is a
+  different, genuinely useful question `/usage` doesn't answer, and is not ruled out by the above.**
+  Every assistant turn's `usage` field (input/output/cache tokens) is a foundational, stable part
+  of the Messages API response envelope that Claude Code's transcript already records for each
+  turn — reading and summing it is a much shallower, lower-risk read than the branch/PR/worktree
+  heuristics this redesign moved away from (those depended on deep, undocumented precedence rules
+  across `session_meta.cwd`, `turn_context.cwd`, and subagent transcript files, which is what
+  actually proved unstable in practice). This is not Agent Board's own responsibility to build,
+  though: it fits naturally as an extension of panemux's existing, pre-board per-pane transcript
+  inspection (already used for worktree/PR detection — see [architecture.md](architecture.md) and
+  [behavior.md](behavior.md)), summing a stable field rather than parsing fragile ones, not as
+  something carried through the agmsg self-report this document specifies. A future change to that
+  existing mechanism, not to `internal/board`, is the right place for it.
 - The status/history cache is in-memory only, not persisted to disk. A panemux restart starts it
   empty; `GET /api/board/status`/`/messages` show nothing until the relay's next poll cycle (which
   resumes from the persisted cursor, so it still only sees genuinely new rows, not the pane's full
