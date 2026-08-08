@@ -335,6 +335,19 @@ func TestRelay_EmptyTeam_NoRowsIsNotAnError(t *testing.T) {
 	}
 }
 
+func TestRelayOptions_OverridePollAndBackfillLimits(t *testing.T) {
+	r := NewRelay(
+		NewBoardCache(), NewStaticPaneResolver(nil), NewMemCursorStore(), nil,
+		WithPollLimit(7), WithBackfillLimit(42),
+	)
+	if r.pollLimit != 7 {
+		t.Fatalf("pollLimit = %d, want 7", r.pollLimit)
+	}
+	if r.backfillLimit != 42 {
+		t.Fatalf("backfillLimit = %d, want 42", r.backfillLimit)
+	}
+}
+
 func TestRelay_Broadcast_SendsAndRecordsLedgerEntry(t *testing.T) {
 	resolver := NewStaticPaneResolver([]PaneRef{{ID: "pane-b", HostID: "hostB"}})
 	clientB := newFakeAgmsgClient("hostB")
@@ -405,6 +418,19 @@ func TestRelay_NoClientForHost_LogsAndDoesNotPanic(t *testing.T) {
 	resolver := NewStaticPaneResolver(nil)
 	r, _ := newTestRelay(t, resolver, []HostTeam{{Host: "unregistered-host", Team: "panemux"}})
 	r.PollAll(context.Background()) // must not panic
+}
+
+func TestRelay_HasClient(t *testing.T) {
+	resolver := NewStaticPaneResolver(nil)
+	client := newFakeAgmsgClient("hostA")
+	r, _ := newTestRelay(t, resolver, nil, client)
+
+	if !r.HasClient("hostA") {
+		t.Fatal("expected HasClient to report true for a registered host")
+	}
+	if r.HasClient("hostB") {
+		t.Fatal("expected HasClient to report false for an unregistered host")
+	}
 }
 
 func TestRelay_Run_BackfillsThenStopsOnContextCancel(t *testing.T) {

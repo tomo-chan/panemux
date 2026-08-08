@@ -156,6 +156,14 @@ func (r *Relay) client(host string) (AgmsgClient, bool) {
 	return c, ok
 }
 
+// HasClient reports whether an AgmsgClient is registered for hostID.
+// Exported for callers (server startup wiring, tests) that need to confirm
+// registration succeeded without reaching into Relay's internals.
+func (r *Relay) HasClient(hostID string) bool {
+	_, ok := r.client(hostID)
+	return ok
+}
+
 func (r *Relay) cursorFor(key CursorKey) string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
