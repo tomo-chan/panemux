@@ -80,42 +80,85 @@ Agent Board replaces that inference with a small, self-reported channel:
 
 ## Architecture
 
+### System overview
+
 ```mermaid
 flowchart TB
-    subgraph UILayer["UI層（ブラウザ）"]
-        Dashboard["ダッシュボード"]
-        Palette["Spotlightパレット"]
+    Browser["Browser<br/>Dashboard + Spotlight palette"]
+
+    subgraph Local["Host panemux runs on (exactly one)"]
+        Server["panemux Go process<br/>REST/WS, Bearer-token auth"]
+        Relay["Relay goroutine<br/>polls agmsg every few seconds"]
+        Cache[("BoardCache<br/>in-memory, panemux-owned")]
+        CmdCenter["Command center<br/>claude -p --resume (per query)"]
+        LocalAgmsg[("Local agmsg<br/>(optional install)")]
     end
 
-    subgraph PanemuxBoundary["panemuxの責務範囲（唯一のホストで完結）"]
+    subgraph HostA["Remote Host A (SSH)"]
+        AgmsgA[("agmsg")]
+        ClaudeA["Claude pane"]
+    end
+
+    subgraph HostB["Remote Host B (SSH)"]
+        AgmsgB[("agmsg")]
+        CodexB["Codex pane"]
+    end
+
+    Browser <--> Server
+    Server --> Relay
+    Server --> CmdCenter
+    Relay --> Cache
+    Relay -->|"api.sh / send.sh"| LocalAgmsg
+    CmdCenter -->|"api.sh / send.sh --force"| LocalAgmsg
+    Relay -->|"SSH exec channel<br/>api.sh / send.sh"| AgmsgA
+    Relay -->|"SSH exec channel<br/>api.sh / send.sh"| AgmsgB
+    ClaudeA -->|"Bash tool calls"| AgmsgA
+    CodexB -->|"Bash tool calls"| AgmsgB
+```
+
+Every host in this picture is either the one host panemux itself runs on, or a host panemux only
+ever reaches through an SSH exec channel it already holds for that pane's session — never a host
+panemux is installed on. See [Local vs remote resource
+placement](#local-vs-remote-resource-placement) for that constraint in more detail.
+
+### Responsibility boundaries
+
+```mermaid
+flowchart TB
+    subgraph UILayer["UI layer (browser)"]
+        Dashboard["Dashboard"]
+        Palette["Spotlight palette"]
+    end
+
+    subgraph PanemuxBoundary["panemux's responsibility (one host only)"]
         direction TB
-        AuthAPI["認証付きREST/WS<br/>Bearerトークン"]
-        BoardCache[("状態＋履歴キャッシュ<br/>インメモリ、panemuxが所有")]
-        Relay["中継ゴルーチン<br/>数秒間隔でagmsgをポーリング"]
-        CmdCenter["司令塔<br/>claude -p --resume"]
-        AgmsgClient["AgmsgClient<br/>agmsg呼び出しの唯一の窓口"]
+        AuthAPI["Authenticated REST/WS<br/>Bearer token"]
+        BoardCache[("Status + history cache<br/>in-memory, panemux-owned")]
+        Relay["Relay goroutine<br/>polls agmsg every few seconds"]
+        CmdCenter["Command center<br/>claude -p --resume"]
+        AgmsgClient["AgmsgClient<br/>the only caller of agmsg's scripts"]
 
         AuthAPI -->|"GET /api/board/status, /messages"| BoardCache
         AuthAPI --> CmdCenter
-        Relay -->|"statusと履歴を書き込み"| BoardCache
+        Relay -->|"writes status and history"| BoardCache
         Relay --> AgmsgClient
         CmdCenter --> AgmsgClient
     end
 
-    subgraph AgmsgBoundary["agmsgの責務範囲（ホストごとに独立、panemuxは所有しない）"]
+    subgraph AgmsgBoundary["agmsg's responsibility (independent per host, not owned by panemux)"]
         direction TB
-        AgmsgLocal[("ローカルagmsg<br/>（任意インストール）")]
-        AgmsgA[("agmsg（Host A）")]
+        AgmsgLocal[("Local agmsg<br/>(optional install)")]
+        AgmsgA[("agmsg (Host A)")]
         ClaudeA["Claude pane"]
-        AgmsgB[("agmsg（Host B）")]
+        AgmsgB[("agmsg (Host B)")]
         CodexB["Codex pane"]
-        ClaudeA -->|"Bashツール呼び出し"| AgmsgA
-        CodexB -->|"Bashツール呼び出し"| AgmsgB
+        ClaudeA -->|"Bash tool calls"| AgmsgA
+        CodexB -->|"Bash tool calls"| AgmsgB
     end
 
     Dashboard -->|"REST"| AuthAPI
     Palette -->|"WS"| AuthAPI
-    AgmsgClient -->|"ローカル exec.Command<br/>api.sh / send.sh"| AgmsgLocal
+    AgmsgClient -->|"local exec.Command<br/>api.sh / send.sh"| AgmsgLocal
     AgmsgClient -->|"SSH exec channel<br/>api.sh / send.sh"| AgmsgA
     AgmsgClient -->|"SSH exec channel<br/>api.sh / send.sh"| AgmsgB
 ```
@@ -125,15 +168,15 @@ here is "what agmsg owns" vs. "what panemux owns" — the one place a future agm
 break something is entirely inside `AgmsgClient`'s two call sites (`api.sh`, `send.sh`), never
 anywhere else in panemux:
 
-- **panemuxの責務範囲**: authentication, the relay, the **in-memory status cache** the dashboard
-  actually reads (see below), the command center, and the single `AgmsgClient` abstraction that is
-  the *only* code in panemux allowed to call agmsg's scripts. Everything here is panemux's own,
-  version-independent of agmsg beyond that one narrow interface.
-- **agmsgの責務範囲**: one independent agmsg installation per host, each with its own durable
-  message log, team roster, and delivery to the live agent sessions that are its actual members.
-  panemux does not own this box, does not persist a copy of its contents beyond what the cache
-  below needs, and is never a participant *inside* more than one host's agmsg installation at a
-  time — it only ever reaches a remote one through the SSH exec channel it already holds for that
+- **panemux's responsibility**: authentication, the relay, the **in-memory status cache** the
+  dashboard actually reads (see below), the command center, and the single `AgmsgClient`
+  abstraction that is the *only* code in panemux allowed to call agmsg's scripts. Everything here
+  is panemux's own, version-independent of agmsg beyond that one narrow interface.
+- **agmsg's responsibility**: one independent agmsg installation per host, each with its own
+  durable message log, team roster, and delivery to the live agent sessions that are its actual
+  members. panemux does not own this box, does not persist a copy of its contents beyond what the
+  cache below needs, and is never a participant *inside* more than one host's agmsg installation at
+  a time — it only ever reaches a remote one through the SSH exec channel it already holds for that
   pane's session, exactly as [Local vs remote resource
   placement](#local-vs-remote-resource-placement) details.
 
@@ -234,7 +277,7 @@ itself, using its own `Bash` tool, and include it as a small JSON body:
   "repo": "owner/repo",
   "pr_url": "https://github.com/owner/repo/pull/123",
   "last_tool": "Edit internal/api/handler.go",
-  "summary": "テスト修正中"
+  "summary": "fixing failing tests"
 }
 ```
 
@@ -247,27 +290,27 @@ a repository or there's no open PR; the dashboard shows what's present.
 sequenceDiagram
     participant ClaudeA as "Claude pane (Host A)"
     participant AgmsgA as "agmsg (Host A)"
-    participant Relay as "panemux 中継"
-    participant Cache as "panemux 状態キャッシュ"
+    participant Relay as "panemux relay"
+    participant Cache as "panemux BoardCache"
     participant AgmsgB as "agmsg (Host B)"
     participant CodexB as "Codex pane (Host B)"
-    participant Dash as "panemux ダッシュボード"
+    participant Dash as "panemux dashboard"
 
-    Note over ClaudeA: 状態報告（自己申告）
-    ClaudeA->>ClaudeA: git branch / gh pr view を実行
+    Note over ClaudeA: Status self-report
+    ClaudeA->>ClaudeA: run git branch / gh pr view
     ClaudeA->>AgmsgA: send.sh team ClaudeA _panemux "{branch,pr_url,state,...}"
     Relay->>AgmsgA: api.sh get teams team messages --before-id cursor
-    AgmsgA-->>Relay: 新規行（宛先が _panemux）
-    Relay->>Cache: 最新status(JSON)を書き込み
+    AgmsgA-->>Relay: new row (addressed to _panemux)
+    Relay->>Cache: write latest status (JSON)
     Dash->>Cache: GET /api/board/status
-    Cache-->>Dash: 最新status（agmsgへは問い合わせない）
+    Cache-->>Dash: latest status (no agmsg call)
 
-    Note over ClaudeA,CodexB: pane間メッセージの中継
-    ClaudeA->>AgmsgA: send.sh team ClaudeA CodexB "レビューして"
+    Note over ClaudeA,CodexB: Cross-pane message relay
+    ClaudeA->>AgmsgA: send.sh team ClaudeA CodexB "please review"
     Relay->>AgmsgA: api.sh get teams team messages --before-id cursor
-    AgmsgA-->>Relay: 新規行（宛先が他pane）
-    Relay->>AgmsgB: send.sh team ClaudeA CodexB "レビューして" --force
-    CodexB->>AgmsgB: Monitor / watch.sh で受信
+    AgmsgA-->>Relay: new row (addressed to another pane)
+    Relay->>AgmsgB: send.sh team ClaudeA CodexB "please review" --force
+    CodexB->>AgmsgB: received via Monitor / watch.sh
 ```
 
 **Honest tradeoff, stated explicitly.** Self-report is only as good as the agent's compliance: it
@@ -374,20 +417,20 @@ type BoardExecutor interface {
 
 ```mermaid
 flowchart LR
-    subgraph PanemuxHost["panemuxホスト（1台だけ）"]
+    subgraph PanemuxHost["panemux's host (exactly one)"]
         direction TB
-        P1["panemuxバイナリ<br/>(HTTP/WSサーバー本体)"]
-        P2["ローカルagmsg（任意導入）"]
-        P3["中継カーソル<br/>(ローカルJSONファイル)"]
+        P1["panemux binary<br/>(the HTTP/WS server itself)"]
+        P2["Local agmsg (optional install)"]
+        P3["Relay cursor<br/>(local JSON file)"]
     end
 
-    subgraph RemoteHost["リモートホスト（SSH到達先、複数可）"]
+    subgraph RemoteHost["Remote host (any number of SSH-reached hosts)"]
         direction TB
-        R1["agmsg<br/>(操作者が別途導入)"]
+        R1["agmsg<br/>(installed separately by the operator)"]
         R2["Claude / Codex pane"]
     end
 
-    PanemuxHost -->|"SSH exec channel経由でapi.sh / send.shのみ実行<br/>panemuxバイナリは絶対に置かない"| RemoteHost
+    PanemuxHost -->|"SSH exec channel runs only api.sh / send.sh<br/>the panemux binary is never placed here"| RemoteHost
 ```
 
 Nothing panemux-specific is ever written to a remote host's disk: no binary, no persisted helper
