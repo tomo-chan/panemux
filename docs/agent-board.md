@@ -7,6 +7,31 @@
 > actually ships; until then, no other doc should describe `board` endpoints or config fields as
 > current behavior.
 
+## Implementation roadmap
+
+This design ships incrementally, one independently mergeable PR per phase, not as one large change.
+This section documents what each phase contains and why the ordering is what it is; it is not where
+live status lives, since that changes far more often than the scope or dependency rationale below
+does and would otherwise need a doc edit on every phase transition. **Live status — which phase is
+in flight, which PR shipped it — is tracked in [issue
+#165](https://github.com/tomo-chan/panemux/issues/165)**, checked off as each phase lands. Update
+the status note at the top of this document in the same PR that ships a phase; that note is about
+this document's own trustworthiness and belongs here, not in the tracking issue.
+
+| Phase | Scope | Depends on |
+|---|---|---|
+| **1 — Board core** | `internal/board` (`Row`, `Status`, `AgmsgClient`, `BoardCache`, the own-send ledger), `LocalAgmsgClient`/`RemoteAgmsgClient`, the `BoardHostID`/`BoardExecutor` session capability interfaces, [Bootstrap flow](#bootstrap-flow), `agent_board.*` config and validation, `GET /api/board/status`, `GET /api/board/messages`, `POST /api/board/broadcast`, and Tier 1 of the [agmsg compatibility contract](#agmsg-compatibility-contract) (fixture-based, part of `make check`) | Nothing — first phase |
+| **2 — Command center** | The headless `claude -p --resume` subprocess, its narrow MCP server (`board_status`/`board_messages`/`board_broadcast`), `--allowedTools` scoping, `WS /ws/board-command`, `GET /api/board/command/history`, and the rest of [Process lifecycle](#process-lifecycle) | Phase 1's `BoardCache` and REST endpoints, which it reads/writes through instead of calling agmsg itself |
+| **3a — Dashboard UI** | Frontend status/message display, folded into the existing workspace-bar/pane-card status vocabulary (see [ui-design.md](ui-design.md#agent-board-ui-planned)) | Only Phase 1's `GET` endpoints |
+| **3b — Command palette UI** | Spotlight-style palette, the persistent history panel, and the Zod schemas for every board API/WS shape (schema-first, per `DEVELOPMENT.md`) | Phase 2's WS/history endpoints |
+| **Ongoing, any time from Phase 1 onward** | Tier 2 of the [agmsg compatibility contract](#agmsg-compatibility-contract): a separate CI job installing real agmsg, scheduled against its latest tag as an early-warning canary, and a required gate whenever the pin is bumped | Phase 1's Tier 1 fixtures |
+
+Phase 1 and Phase 3a are each independently useful without the phases that don't (yet) exist —
+status/message visibility works without the conversational orchestrator. Phase 2 and 3b are additive
+on top of that, not prerequisites for it. The ordering above is a sequencing choice the phases'
+actual dependency edges justify, not an arbitrary priority list: nothing stops doing Phase 3a before
+Phase 2, but Phase 2 before Phase 1 has nothing to read or write yet.
+
 ## Purpose
 
 panemux already runs real `git`/`gh` commands to show branch and PR info in a pane header — that
