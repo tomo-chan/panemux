@@ -90,7 +90,7 @@ func (r *Relay) RegisterClient(client AgmsgClient) {
 
 // RecordOwnSend registers a Send panemux itself is about to issue (the
 // broadcast handler), so a relay-observed row later claiming
-// From == PanemuxSentinel can be matched back to it. See the own-send
+// From == Sentinel can be matched back to it. See the own-send
 // ledger's doc comment and docs/agent-board.md's Security model.
 func (r *Relay) RecordOwnSend(destHost, team, to, body string) {
 	r.ledger.Record(destHost, team, to, body)
@@ -102,10 +102,10 @@ type BroadcastResult struct {
 	Error string // empty on success
 }
 
-// Broadcast sends body from PanemuxSentinel to every pane in to, resolving
+// Broadcast sends body from Sentinel to every pane in to, resolving
 // each pane's host via the configured PaneResolver and recording an
 // own-send ledger entry before sending, so the relay's own from-validation
-// later accepts the resulting _panemux-attributed row when it polls the
+// later accepts the resulting Sentinel-attributed row when it polls the
 // destination host back. This is the same code path POST
 // /api/board/broadcast uses (and, in a later phase, the command center) —
 // see docs/agent-board.md's Command center and API additions sections.
@@ -130,7 +130,7 @@ func (r *Relay) broadcastOne(ctx context.Context, team, paneID, body string) Bro
 		return BroadcastResult{Pane: paneID, Error: fmt.Sprintf("no agmsg client for host %q", host)}
 	}
 	r.ledger.Record(host, team, paneID, body)
-	if err := client.Send(ctx, team, PanemuxSentinel, paneID, body); err != nil {
+	if err := client.Send(ctx, team, Sentinel, paneID, body); err != nil {
 		return BroadcastResult{Pane: paneID, Error: err.Error()}
 	}
 	return BroadcastResult{Pane: paneID}
@@ -259,12 +259,12 @@ func (r *Relay) pollOnce(ctx context.Context, pair HostTeam, limit int) error {
 // handleRow validates and routes a single row observed on row.Host, per
 // docs/agent-board.md's Cross-host relay section:
 //  1. from-validation: a known local pane ID on the row's source host, or a
-//     ledger-matched "_panemux", passes; anything else is dropped and
+//     ledger-matched Sentinel, passes; anything else is dropped and
 //     logged, never cached or relayed.
-//  2. to == PanemuxSentinel: a valid board_status body updates the status
+//  2. to == Sentinel: a valid board_status body updates the status
 //     cache only (never appended to history, never relayed — status
 //     reports are local bookkeeping, not messages meant for another pane).
-//     Any other body addressed to _panemux is an ordinary message and is
+//     Any other body addressed to Sentinel is an ordinary message and is
 //     appended to history.
 //  3. Otherwise: to must resolve to a known pane, or the row is dropped and
 //     logged, the same as an invalid from. A resolved row is always
@@ -277,7 +277,7 @@ func (r *Relay) handleRow(ctx context.Context, row Row) {
 		return
 	}
 
-	if row.To == PanemuxSentinel {
+	if row.To == Sentinel {
 		if st, ok := ParseStatus(row.Body); ok {
 			r.cache.RecordStatus(row.From, st)
 			return
@@ -309,7 +309,7 @@ func (r *Relay) handleRow(ctx context.Context, row Row) {
 }
 
 func (r *Relay) fromPasses(row Row) bool {
-	if row.From == PanemuxSentinel {
+	if row.From == Sentinel {
 		return r.ledger.Consume(row.Host, row.Team, row.To, row.Body)
 	}
 	return r.resolver.KnownPane(row.Host, row.From)

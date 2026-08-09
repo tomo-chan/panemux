@@ -99,7 +99,7 @@ func TestBoardCache_HistoryBounded(t *testing.T) {
 	}
 }
 
-// A status row addressed to _panemux must not itself decide anything about
+// A status row addressed to _agent-board must not itself decide anything about
 // history membership — that's the relay's job (see relay_test.go). Here we
 // only assert BoardCache's two write paths are independent: recording a
 // status does not implicitly append to history, and appending to history

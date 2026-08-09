@@ -71,27 +71,27 @@ func TestIsLoopbackHost(t *testing.T) {
 	}
 }
 
-func TestValidate_PanemuxReservedPaneID_Error(t *testing.T) {
+func TestValidate_ReservedSentinelPaneID_Error(t *testing.T) {
 	cfg := validBaseConfigForAgentBoardTests()
-	cfg.Layout = singleLocalPaneLayout(PanemuxReservedPaneID)
+	cfg.Layout = singleLocalPaneLayout(ReservedSentinelPaneID)
 	cfg.Workspaces.Items[0].Layout = cfg.Layout
 
 	err := cfg.Validate()
 	if err == nil {
-		t.Fatal("expected an error for a pane id of _panemux")
+		t.Fatal("expected an error for a pane id of _agent-board")
 	}
-	if !strings.Contains(err.Error(), "_panemux") {
+	if !strings.Contains(err.Error(), "_agent-board") {
 		t.Fatalf("expected error to mention the reserved id, got %v", err)
 	}
 }
 
-func TestValidate_PanemuxReservedPaneID_ErrorAlongsideOtherValidPanes(t *testing.T) {
+func TestValidate_ReservedSentinelPaneID_ErrorAlongsideOtherValidPanes(t *testing.T) {
 	cfg := validBaseConfigForAgentBoardTests()
 	cfg.Layout = LayoutNode{
 		Direction: "horizontal",
 		Children: []LayoutChild{
 			{Size: 50, Pane: &PaneConfig{ID: "pane-a", Type: "local"}},
-			{Size: 50, Pane: &PaneConfig{ID: PanemuxReservedPaneID, Type: "local"}},
+			{Size: 50, Pane: &PaneConfig{ID: ReservedSentinelPaneID, Type: "local"}},
 		},
 	}
 	cfg.Workspaces.Items[0].Layout = cfg.Layout
@@ -100,7 +100,7 @@ func TestValidate_PanemuxReservedPaneID_ErrorAlongsideOtherValidPanes(t *testing
 	if err == nil {
 		t.Fatal("expected an error even when other panes in the same config are valid")
 	}
-	if !strings.Contains(err.Error(), "_panemux") {
+	if !strings.Contains(err.Error(), "_agent-board") {
 		t.Fatalf("expected error to mention the reserved id, got %v", err)
 	}
 }

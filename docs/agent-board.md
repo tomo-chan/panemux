@@ -267,7 +267,7 @@ different reasons (the first re-introduces "panemux owns a schema," which [Desig
 principles](#design-principles) rules out; the second makes every dashboard poll pay for an agmsg
 round-trip, including an SSH hop for remote hosts). Instead: the relay goroutine, which is already
 polling every host's agmsg for messages to forward, updates an **in-memory status cache** as a side
-effect whenever it sees a status report addressed to `_panemux`. `GET /api/board/status` reads only
+effect whenever it sees a status report addressed to `_agent-board`. `GET /api/board/status` reads only
 that cache — never agmsg directly. agmsg's own message log remains the durable source of truth (a
 lost or restarted panemux process just means the cache is empty until the next poll cycle refills
 it, per [Known limitations](#known-limitations)), but the *current, dashboard-facing view* of that
@@ -318,7 +318,7 @@ there is no stdin-based write path in agmsg to delegate to. **Both `from` and `t
 against that team's roster unless `--force` is passed** — an earlier revision of this document said
 only `from` was checked, which is wrong and was load-bearing: it made every message in [Status
 self-report](#status-self-report-and-message-flow)'s sequence diagram fail at the source, since
-`_panemux` (the status-report recipient) and any pane on a *different* host (the cross-host relay
+`_agent-board` (the status-report recipient) and any pane on a *different* host (the cross-host relay
 target) are never registered in the sending pane's own local roster.
 
 **The fix this document adopts: every board-related `send.sh` call always passes `--force`,
@@ -414,14 +414,23 @@ contract](#agmsg-compatibility-contract).
 
 ## Status self-report and message flow
 
+**Naming correction:** an earlier revision of this document (and PR #163's initial implementation)
+used `_panemux` as this reserved identity. Renamed to `_agent-board` (`board.Sentinel` in
+`internal/board`, `config.ReservedSentinelPaneID` in `internal/config`) because the sentinel is a
+wire-level agmsg protocol identity, not an application name — coupling it to panemux's own current
+product name meant a future rename of the application would also force a change to this protocol
+constant, for no reason the protocol itself cares about. Every reference in this document, in code,
+and in test fixtures uses `_agent-board` consistently; treat any remaining `_panemux` reference
+anywhere in this codebase as stale.
+
 Instead of a `kind='status'` field panemux owns (agmsg has no such column), status reports are
-ordinary agmsg messages addressed to the reserved identity `_panemux` — the same identity the
-command center uses as its own `from` when sending. Because `_panemux` is never an agmsg roster
+ordinary agmsg messages addressed to the reserved identity `_agent-board` — the same identity the
+command center uses as its own `from` when sending. Because `_agent-board` is never an agmsg roster
 member (see [Integration with agmsg](#integration-with-agmsg)), the agent's own `send.sh ...
 --force` call is what lets a status report reach it at all. The relay goroutine, already polling
 every host's agmsg with `api.sh get teams <team> messages --limit <N>` (no `--before-id` — see
 [Integration with agmsg](#integration-with-agmsg) for why that flag can't do this) for message
-forwarding, recognizes any row addressed to `_panemux` as a status update and writes it into
+forwarding, recognizes any row addressed to `_agent-board` as a status update and writes it into
 panemux's own in-memory status cache (see [Architecture](#architecture)), keeping only the newest
 entry per sender. The dashboard never queries agmsg directly for this — it only ever reads that
 cache.
@@ -444,7 +453,7 @@ itself, using its own `Bash` tool, and include it as a small JSON body:
 
 **`kind: "board_status"` is a fixed, required discriminator, not an optional field.** Detecting a
 status report by *shape alone* — "does this JSON happen to have a `state` key" — has a real false-
-positive edge: a human typing an ordinary chat message to `_panemux` through the command center or
+positive edge: a human typing an ordinary chat message to `_agent-board` through the command center or
 Spotlight palette could, by coincidence or by pasting unrelated JSON, produce a body that parses as
 valid JSON and happens to contain a `state` field, and would then be silently swallowed into the
 status cache instead of showing up as a message. Requiring a literal `"kind": "board_status"` value
@@ -470,9 +479,9 @@ sequenceDiagram
 
     Note over ClaudeA: Status self-report
     ClaudeA->>ClaudeA: run git branch / gh pr view
-    ClaudeA->>AgmsgA: send.sh team ClaudeA _panemux "{branch,pr_url,state,...}" --force
+    ClaudeA->>AgmsgA: send.sh team ClaudeA _agent-board "{branch,pr_url,state,...}" --force
     Relay->>AgmsgA: api.sh get teams team messages --limit N
-    AgmsgA-->>Relay: rows with id > cursor (addressed to _panemux)
+    AgmsgA-->>Relay: rows with id > cursor (addressed to _agent-board)
     Relay->>Cache: write latest status (JSON)
     Dash->>Cache: GET /api/board/status
     Cache-->>Dash: latest status (no agmsg call)
@@ -528,7 +537,7 @@ type AgmsgClient interface {
 
 // ownSendLedger is a short-lived, in-memory record of Send calls panemux itself has issued (the
 // broadcast handler and the command center — see Cross-host relay), used only to verify a row the
-// relay later observes with From == "_panemux" actually corresponds to one of panemux's own sends,
+// relay later observes with From == "_agent-board" actually corresponds to one of panemux's own sends,
 // since send.sh --force never checks From against a roster and an ordinary board pane could
 // otherwise forge that identity. Entries expire after a few poll intervals; a body is stored only
 // as a hash, since the ledger's job is matching, not re-displaying content.
@@ -573,13 +582,13 @@ func (c *BoardCache) StatusSnapshot() map[string]Status    { /* mutex-guarded co
 func (c *BoardCache) MessagesSince(afterSeq int64) []Row   { /* mutex-guarded copy, filtered by Seq */ }
 ```
 
-The relay inspects every `Row` it reads: if `To == "_panemux"` and `Body` parses as JSON with
+The relay inspects every `Row` it reads: if `To == "_agent-board"` and `Body` parses as JSON with
 `kind == "board_status"` (see [Status self-report](#status-self-report-and-message-flow) for why
 the discriminator, not shape-sniffing, is what triggers this), it calls `RecordStatus` *only* —
 that row is never appended to `history` and never forwarded through the cross-host relay logic
 (status reports are local bookkeeping, not messages meant for another pane, and the dashboard's
 message history is not the right place to show a machine-readable status blob a human never
-composed). A `Body` addressed to `_panemux` that isn't valid JSON, or is valid JSON without that
+composed). A `Body` addressed to `_agent-board` that isn't valid JSON, or is valid JSON without that
 exact `kind`, is left alone as an ordinary chat message — including a body that happens to share
 some field names with the status shape by coincidence — and *is* appended to `history` via
 `AppendMessage`, the same as any other row that passes `from`-validation and isn't a status update.
@@ -589,10 +598,10 @@ seen everything the dashboard needs, as a side effect of polling it was already 
 
 **Correction from an earlier revision of this document:** this section previously said "every row,
 status or not, is also appended to `history`," which directly contradicted this document's own
-[Testing plan](#testing-plan) bullet requiring "a row addressed to `_panemux` updating `status` and
+[Testing plan](#testing-plan) bullet requiring "a row addressed to `_agent-board` updating `status` and
 *not* appearing in `history`'s cross-pane relay output." The Testing plan's statement was correct
 and is what implementation follows: a status update is cache-only. Only a non-status row addressed
-to `_panemux`, and every ordinary cross-pane row that passes `from`/`to` validation (see
+to `_agent-board`, and every ordinary cross-pane row that passes `from`/`to` validation (see
 [Cross-host relay](#cross-host-relay)), is appended to `history`. A row dropped for failing
 `from`/`to` validation is still never cached or relayed, exactly as already stated in
 [Cross-host relay](#cross-host-relay).
@@ -693,21 +702,21 @@ to reach each other). panemux is the only node with a connection to every host, 
    `~/.config/panemux/board-relay-cursor.json`) — not a database table, since panemux owns no
    database — so a panemux restart resumes roughly where it left off.
 3. For each new row, panemux first checks `from`. If `from` is a board-enabled pane ID panemux
-   knows about on that row's source host, the row passes. **If `from == "_panemux"`, the row passes
+   knows about on that row's source host, the row passes. **If `from == "_agent-board"`, the row passes
    only if it matches an entry in panemux's own short-lived "own-send ledger"** (see [Package
    layout](#package-layout)) — a small in-memory record of `(destination host, team, to, body hash)`
    for every `Send` panemux's own broadcast handler and command center have issued recently, kept
    for a few poll intervals and then discarded. This is deliberately stricter than treating
-   `_panemux` as unconditionally trusted: because `send.sh --force` never checks `from` against a
-   roster, any agent on any host can locally write a row claiming `from: "_panemux"`, and nothing at
+   `_agent-board` as unconditionally trusted: because `send.sh --force` never checks `from` against a
+   roster, any agent on any host can locally write a row claiming `from: "_agent-board"`, and nothing at
    the agmsg layer distinguishes that from a row that reached the same host because panemux's own
    broadcast handler really did call `Send` there — the ledger match is what tells them apart. A row
-   with `from == "_panemux"` that matches nothing in the ledger is a suspected forgery: it is dropped
+   with `from == "_agent-board"` that matches nothing in the ledger is a suspected forgery: it is dropped
    and logged the same as any other failed check, never relayed and never cached. Any other `from` —
-   one that is neither a known local pane ID nor a ledger-matched `_panemux` — is dropped and logged
+   one that is neither a known local pane ID nor a ledger-matched `_agent-board` — is dropped and logged
    too. See [Security model](#security-model) for the forgery scenario this closes and why a
-   universal `_panemux` allowance (an earlier revision of this document's check) was not enough. If
-   `from` passes: when `to == "_panemux"`, panemux updates the
+   universal `_agent-board` allowance (an earlier revision of this document's check) was not enough. If
+   `from` passes: when `to == "_agent-board"`, panemux updates the
    [in-memory status cache](#architecture) instead of relaying it — status reports never leave the
    host they were written on. Otherwise, panemux resolves `to` to its owning pane and that pane's
    host via the already-known pane→session config; if that host differs from the source host,
@@ -818,7 +827,7 @@ always routed through it by construction.
   path to the same exec sink alongside `AgmsgClient`'s own (see [Security
   model](#security-model)); and it meant the command center could only ever see the *local* agmsg
   installation's status, never a remote pane's, because [Cross-host relay](#cross-host-relay)
-  intercepts `_panemux`-addressed status reports before they ever leave the host they were written
+  intercepts `_agent-board`-addressed status reports before they ever leave the host they were written
   on. Reading `BoardCache` through `GET /api/board/status` (already aggregated across every host by
   the relay) fixes both: `AgmsgClient` stays the *only* code that ever calls agmsg's scripts, and
   the command center sees every pane's status, not just local ones.
@@ -826,7 +835,7 @@ always routed through it by construction.
   agmsg directly, so `command_center.enabled: true` is not gated on the same agmsg-presence check a
   board-enabled pane is (see [Config additions](#config-additions)).
 - Sending a message is `POST /api/board/broadcast` with the command center's own reserved `from`
-  identity, `_panemux` — the exact same code path a human-triggered broadcast takes, which already
+  identity, `_agent-board` — the exact same code path a human-triggered broadcast takes, which already
   resolves the destination pane's host and calls that host's `AgmsgClient.Send` (always `--force`)
   without the command center needing any host-routing logic of its own.
 
@@ -966,15 +975,15 @@ being configured too, which is false by design: the command center never calls a
 The two keys are siblings in this config because their actual dependency graph is siblings — not
 because they're unrelated features that happen to share a document.
 
-**`_panemux` is reserved and validated where panemux can actually enforce it.** `internal/config/
-validate.go` rejects any pane config whose `id` is literally `_panemux`, the same way it already
+**`_agent-board` is reserved and validated where panemux can actually enforce it.** `internal/config/
+validate.go` rejects any pane config whose `id` is literally `_agent-board`, the same way it already
 rejects duplicate pane IDs (see [architecture.md](architecture.md)) — panemux will not let itself be
 configured into a collision with its own reserved sentinel. This is a real but partial guarantee:
-nothing stops an operator or a live agent from running agmsg's own `join.sh <team> _panemux ...`
+nothing stops an operator or a live agent from running agmsg's own `join.sh <team> _agent-board ...`
 by hand, outside any pane panemux bootstrapped, since agmsg's roster is agmsg's own state and
 `join.sh` is not gated by panemux at all. That gap is exactly why the [own-send
 ledger](#package-layout) check in [Cross-host relay](#cross-host-relay) does not trust the
-`_panemux` string by itself even after this validation — config-time reservation closes the
+`_agent-board` string by itself even after this validation — config-time reservation closes the
 "panemux accidentally misconfigures itself" case, not the "an agmsg team member deliberately
 registers the reserved name" case, which only the ledger check closes.
 
@@ -1070,18 +1079,18 @@ that shaped the design.
   panemux process/host must be trusted for the relay to be meaningful. There is no end-to-end
   encryption between two remote agents' Claude/Codex processes.
 - **Universal `--force` makes `from` forgeable across the whole team, including impersonating
-  `_panemux` itself, unless the relay actively checks it.** `send.sh --force` accepts any `from`
+  `_agent-board` itself, unless the relay actively checks it.** `send.sh --force` accepts any `from`
   without checking it against a roster, and by design *every* board send uses `--force` (see
   [Integration with agmsg](#integration-with-agmsg)) — so nothing at the agmsg layer stops an agent
-  on Host A from sending a message with `from: "_panemux"` to a pane on Host B, which
+  on Host A from sending a message with `from: "_agent-board"` to a pane on Host B, which
   [Cross-host relay](#cross-host-relay) would otherwise happily forward as if the command center had
-  sent it. Unconditionally trusting any row with `from == "_panemux"` would not close this — that
+  sent it. Unconditionally trusting any row with `from == "_agent-board"` would not close this — that
   string carries no more authority than any other free-text `from` value once `--force` is
   universal, so treating it as automatically legitimate is exactly the gap being described, not a
   fix for it. The actual check the relay performs — matching the row against panemux's own
   short-lived **own-send ledger** of `Send` calls it issued itself (see [Cross-host
   relay](#cross-host-relay) and [Package layout](#package-layout)) — is what closes this: a
-  `_panemux`-attributed row is only accepted if it corresponds to a send panemux's own broadcast
+  `_agent-board`-attributed row is only accepted if it corresponds to a send panemux's own broadcast
   handler or command center actually made, never on the strength of the string alone.
 - **The command center's `/ws/board-command` and `/api/board/command/history` are gated by the same
   bearer token as everything else, and that gate is the entire authorization model for messaging
@@ -1133,7 +1142,7 @@ that shaped the design.
   nothing about, and does not provide, message claim/lease semantics for delivery.
 - Agents/teams are free-text identifiers with no cryptographic authentication of `from`. The relay's
   own `from` check (see [Cross-host relay](#cross-host-relay)) rejects a forged `from` that doesn't
-  match a known local pane ID or `_panemux`, but within that set there is still no proof a given
+  match a known local pane ID or `_agent-board`, but within that set there is still no proof a given
   message actually came from the pane process it claims to — any local process that can reach a
   host's agmsg installation and pick a real, currently-registered pane ID can forge a sender inside
   that host. This is an integrity gap distinct from the transport-confidentiality concerns above and
@@ -1146,7 +1155,7 @@ that shaped the design.
   deliberate choice to keep `BoardCache` populated from exactly one code path (the relay) rather than
   give the broadcast handler a second, racing write path into the same cache that would need its own
   reconciliation against the row the relay later reads back for the same send. The [own-send
-  ledger](#package-layout) used for `_panemux` forgery detection intentionally is not repurposed to
+  ledger](#package-layout) used for `_agent-board` forgery detection intentionally is not repurposed to
   paper over this lag: it exists for that one security check, not as a second history source.
 - Relay delivery is at-least-once, bounded by the poll interval, not real-time or exactly-once; see
   [Cross-host relay](#cross-host-relay) for why a duplicate message after a panemux restart is an
@@ -1243,22 +1252,22 @@ documented behavior changed.
   newest wins, `UpdatedAt` reflects when it was recorded) and across multiple panes, `BoardCache`'s
   own `Seq` assignment giving a stable total order across rows from different hosts even when their
   agmsg-native `ID`s collide or aren't comparable, `MessagesSince(afterSeq)` ordering and bounding,
-  a row addressed to `_panemux` updating `status` and *not* appearing in `history`'s cross-pane
-  relay output (a plain non-status row addressed to `_panemux` correctly *does* appear, as an
+  a row addressed to `_agent-board` updating `status` and *not* appearing in `history`'s cross-pane
+  relay output (a plain non-status row addressed to `_agent-board` correctly *does* appear, as an
   ordinary message), an empty cache read (fresh start / post-restart) returning a well-defined empty
   result rather than an error, relay cursor persistence across a simulated restart (including the
   accepted at-least-once duplicate case — assert it is delivered again, not that it's silently
   dropped or that the relay errors), the accepted truncation case (more new rows on one host than
   one poll's `--limit` — assert the newest ones are kept and the oldest of the overflow are dropped,
   not that everything is delivered), the relay's `from`-validation (a row whose `from` is neither a
-  known local pane ID on its source host nor a ledger-matched `_panemux` is dropped and logged, never
-  cached or relayed), the own-send ledger specifically (a `from == "_panemux"` row that matches a
-  recently recorded `Send` is accepted; a `from == "_panemux"` row with no matching ledger entry —
+  known local pane ID on its source host nor a ledger-matched `_agent-board` is dropped and logged, never
+  cached or relayed), the own-send ledger specifically (a `from == "_agent-board"` row that matches a
+  recently recorded `Send` is accepted; a `from == "_agent-board"` row with no matching ledger entry —
   including one crafted with a `to`/`body` that doesn't match any real recent send — is dropped and
   logged, never treated as legitimate on the strength of the string alone; an entry past its TTL is
-  no longer matchable — this is the regression test for the cross-host `_panemux` impersonation
+  no longer matchable — this is the regression test for the cross-host `_agent-board` impersonation
   scenario in [Security model](#security-model), and for why an earlier revision's blanket
-  `_panemux` allowance was insufficient), empty team.
+  `_agent-board` allowance was insufficient), empty team.
 - `internal/session`: for `RemoteAgmsgClient`, a body containing shell metacharacters (`'`, `;`,
   `` ` ``, `$(...)`) round-trips through the built `send.sh` command string as a single escaped
   literal argument, not as executed shell syntax — and the same for a `team`/`--agent` value
@@ -1268,7 +1277,7 @@ documented behavior changed.
   omits it.
 - `internal/config`: `host != loopback && auth_token == ""` is a validation error; all other
   combinations are valid. `agent_board.team` defaults to `"panemux"` when unset. A pane config with
-  `id: "_panemux"` is a validation error, both alone and alongside otherwise-valid other panes.
+  `id: "_agent-board"` is a validation error, both alone and alongside otherwise-valid other panes.
 - `internal/api`: missing/incorrect bearer token is rejected (401) on both REST and the WebSocket
   handshake; correct token succeeds.
 - `internal/ws`: `/ws/board-command` is new surface under the same package as the existing terminal

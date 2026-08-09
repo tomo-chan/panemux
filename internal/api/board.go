@@ -184,7 +184,7 @@ type boardBroadcastResponse struct {
 	Results []boardBroadcastResultEntry `json:"results"`
 }
 
-// PostBoardBroadcast sends body from the reserved _panemux identity to
+// PostBoardBroadcast sends body from the reserved board.Sentinel identity to
 // every pane in the request's `to` list, resolving each pane's host and
 // relaying via that host's AgmsgClient — never via PTY injection, so it is
 // safe to send to a pane mid-turn. See docs/agent-board.md's API additions.

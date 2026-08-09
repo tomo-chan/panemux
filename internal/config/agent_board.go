@@ -4,11 +4,13 @@ package config
 // unless overridden. See docs/agent-board.md's "Config additions".
 const DefaultAgentBoardTeam = "panemux"
 
-// PanemuxReservedPaneID is the sentinel agmsg identity reserved for status
-// reports and every message panemux itself originates. A pane may never be
+// ReservedSentinelPaneID is the sentinel agmsg identity reserved for status
+// reports and every message panemux itself originates (must match
+// internal/board.Sentinel — duplicated here rather than imported, to keep
+// this package free of a dependency on internal/board). A pane may never be
 // configured with this ID — see Validate and
 // docs/agent-board.md#config-additions.
-const PanemuxReservedPaneID = "_panemux"
+const ReservedSentinelPaneID = "_agent-board"
 
 // Agent Board delivery modes, mirroring agmsg's own
 // `/agmsg mode monitor|turn|both|off`. See docs/agent-board.md's Bootstrap

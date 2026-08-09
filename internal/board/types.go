@@ -7,10 +7,14 @@ package board
 
 import "time"
 
-// PanemuxSentinel is the reserved agmsg identity used for status reports
-// and every message panemux itself originates (broadcast handler, and in a
-// later phase, the command center). It is never a real agmsg roster member.
-const PanemuxSentinel = "_panemux"
+// Sentinel is the reserved agmsg identity used for status reports and
+// every message panemux itself originates (broadcast handler, and in a
+// later phase, the command center). It is never a real agmsg roster
+// member. Deliberately not derived from the application's own name
+// ("panemux"): the two are independent, and baking one into the other
+// would make a future product rename touch this wire-level protocol
+// identity too.
+const Sentinel = "_agent-board"
 
 // Row is a single agmsg message row, normalized into panemux's own
 // representation regardless of which host it came from.
@@ -32,7 +36,7 @@ type Row struct { //nolint:govet // fieldalignment: clarity preferred
 }
 
 // Status is a pane's self-reported state, decoded from a board_status
-// message body addressed to PanemuxSentinel. See ParseStatus.
+// message body addressed to Sentinel. See ParseStatus.
 type Status struct { //nolint:govet // fieldalignment: clarity preferred
 	State    string
 	CWD      string

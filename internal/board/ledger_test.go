@@ -26,7 +26,7 @@ func TestOwnSendLedger_NoMatch(t *testing.T) {
 	l := newOwnSendLedger(time.Minute)
 	l.Record("hostB", "panemux", "codex-b", "please review")
 
-	// This is the regression test for cross-host _panemux impersonation:
+	// This is the regression test for cross-host _agent-board impersonation:
 	// a row crafted with a to/body that doesn't match any real recent send
 	// must not be treated as legitimate on the strength of From alone.
 	if l.Consume("hostB", "panemux", "codex-b", "a completely different body") {

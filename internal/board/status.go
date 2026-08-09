@@ -5,7 +5,7 @@ import "encoding/json"
 // statusKind is the fixed, required discriminator for a status-report
 // message body. See docs/agent-board.md's "Status self-report and message
 // flow" section for why shape-sniffing (e.g. checking for a "state" field)
-// is not used: a human-composed chat message to _panemux that happens to be
+// is not used: a human-composed chat message to Sentinel that happens to be
 // valid JSON with a similarly named field must never be silently swallowed
 // into the status cache.
 const statusKind = "board_status"

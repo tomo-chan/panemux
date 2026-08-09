@@ -93,14 +93,15 @@ func BootstrapInstruction(paneID, team, mode string) string {
 	)
 	fmt.Fprintf(&b,
 		"For every board-related send (status self-reports, and any message addressed to "+
-			"another pane or to \"_panemux\"), call send.sh directly rather than /agmsg send, "+
+			"another pane or to %q), call send.sh directly rather than /agmsg send, "+
 			"always with --force:\n  <agmsg-path>/scripts/send.sh %s <from> <to> \"<body>\" --force\n",
-		team,
+		Sentinel, team,
 	)
-	b.WriteString(
-		"On every status update, address the body to \"_panemux\" and shape it exactly as:\n" +
-			`  {"kind":"board_status","state":"working|idle|waiting_approval","cwd":"...",` +
-			`"branch":"...","repo":"...","pr_url":"...","last_tool":"...","summary":"..."}` + "\n",
+	fmt.Fprintf(&b,
+		"On every status update, address the body to %q and shape it exactly as:\n"+
+			`  {"kind":"board_status","state":"working|idle|waiting_approval","cwd":"...",`+
+			`"branch":"...","repo":"...","pr_url":"...","last_tool":"...","summary":"..."}`+"\n",
+		Sentinel,
 	)
 	switch mode {
 	case "turn", "both":

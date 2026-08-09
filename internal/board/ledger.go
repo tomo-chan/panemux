@@ -14,7 +14,7 @@ import (
 const defaultLedgerTTL = 2 * time.Minute
 
 // ownSendKey identifies a Send call panemux itself issued, for later
-// matching against a relay-observed row claiming From == PanemuxSentinel.
+// matching against a relay-observed row claiming From == Sentinel.
 // BodyHash is a dedup key, not a security boundary by itself — the ledger's
 // job is matching a row to a real recent Send, not re-displaying content.
 type ownSendKey struct {
@@ -28,7 +28,7 @@ type ownSendKey struct {
 // itself has issued (the broadcast handler — see relay.go's from-validation
 // and docs/agent-board.md's Security model). It is what lets the relay
 // distinguish a row genuinely sent by panemux's own broadcast handler from
-// one merely claiming From == "_panemux", since send.sh --force never
+// one merely claiming From == Sentinel, since send.sh --force never
 // checks From against a roster.
 type ownSendLedger struct { //nolint:govet // fieldalignment: clarity preferred
 	mu sync.Mutex
@@ -37,7 +37,7 @@ type ownSendLedger struct { //nolint:govet // fieldalignment: clarity preferred
 	// let two genuine broadcasts with identical (destHost, team, to, body)
 	// collapse into a single overwritable entry: the second real send.sh
 	// row then found nothing to Consume and was dropped through the same
-	// path used for a forged _panemux row — see the PR #163 review finding
+	// path used for a forged Sentinel row — see the PR #163 review finding
 	// this is the regression fix for. A slice per key lets each Record
 	// call be independently matched and consumed by its own row.
 	entries map[ownSendKey][]time.Time

@@ -268,7 +268,7 @@ func validatePane(p *PaneConfig, sshConns map[string]SSHConnection) []string {
 // and, when set, the agent_board.mode enum.
 func validatePaneAgentBoard(p *PaneConfig) []string {
 	var errs []string
-	if p.ID == PanemuxReservedPaneID {
+	if p.ID == ReservedSentinelPaneID {
 		errs = append(errs, fmt.Sprintf("pane id %q is reserved for panemux's own Agent Board sentinel identity", p.ID))
 	}
 	if p.AgentBoard != nil && !ValidAgentBoardMode(p.AgentBoard.Mode) {

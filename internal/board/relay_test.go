@@ -80,7 +80,7 @@ func TestRelay_StatusRowUpdatesCacheNotHistory(t *testing.T) {
 	resolver := NewStaticPaneResolver([]PaneRef{{ID: "pane-a", HostID: "local"}})
 	client := newFakeAgmsgClient("local")
 	statusBody := `{"kind":"board_status","state":"working","branch":"feature/x"}`
-	client.seed(Row{ID: "1", From: "pane-a", To: PanemuxSentinel, Body: statusBody})
+	client.seed(Row{ID: "1", From: "pane-a", To: Sentinel, Body: statusBody})
 
 	r, _ := newTestRelay(t, resolver, []HostTeam{{Host: "local", Team: "panemux"}}, client)
 	r.PollAll(context.Background())
@@ -97,7 +97,7 @@ func TestRelay_StatusRowUpdatesCacheNotHistory(t *testing.T) {
 func TestRelay_PlainMessageToPanemuxAppearsInHistory(t *testing.T) {
 	resolver := NewStaticPaneResolver([]PaneRef{{ID: "pane-a", HostID: "local"}})
 	client := newFakeAgmsgClient("local")
-	client.seed(Row{ID: "1", From: "pane-a", To: PanemuxSentinel, Body: "hey are you around?"})
+	client.seed(Row{ID: "1", From: "pane-a", To: Sentinel, Body: "hey are you around?"})
 
 	r, _ := newTestRelay(t, resolver, []HostTeam{{Host: "local", Team: "panemux"}}, client)
 	r.PollAll(context.Background())
@@ -183,31 +183,31 @@ func TestRelay_ToValidation_UnresolvedPaneDropped(t *testing.T) {
 func TestRelay_PanemuxFrom_LedgerMatchAccepted(t *testing.T) {
 	resolver := NewStaticPaneResolver([]PaneRef{{ID: "pane-b", HostID: "local"}})
 	client := newFakeAgmsgClient("local")
-	client.seed(Row{ID: "1", From: PanemuxSentinel, To: "pane-b", Body: "broadcast message"})
+	client.seed(Row{ID: "1", From: Sentinel, To: "pane-b", Body: "broadcast message"})
 
 	r, _ := newTestRelay(t, resolver, []HostTeam{{Host: "local", Team: "panemux"}}, client)
 	r.RecordOwnSend("local", "panemux", "pane-b", "broadcast message")
 	r.PollAll(context.Background())
 
 	if msgs := r.cache.MessagesSince(0); len(msgs) != 1 {
-		t.Fatalf("expected a ledger-matched _panemux row to be accepted, got %+v", msgs)
+		t.Fatalf("expected a ledger-matched _agent-board row to be accepted, got %+v", msgs)
 	}
 }
 
-// Regression test for the cross-host _panemux impersonation scenario in
+// Regression test for the cross-host _agent-board impersonation scenario in
 // docs/agent-board.md's Security model: unconditionally trusting
-// From == "_panemux" would let any agent on any host forge the sentinel.
+// From == "_agent-board" would let any agent on any host forge the sentinel.
 func TestRelay_PanemuxFrom_NoLedgerMatchDropped(t *testing.T) {
 	resolver := NewStaticPaneResolver([]PaneRef{{ID: "pane-b", HostID: "local"}})
 	client := newFakeAgmsgClient("local")
-	client.seed(Row{ID: "1", From: PanemuxSentinel, To: "pane-b", Body: "forged message"})
+	client.seed(Row{ID: "1", From: Sentinel, To: "pane-b", Body: "forged message"})
 
 	r, _ := newTestRelay(t, resolver, []HostTeam{{Host: "local", Team: "panemux"}}, client)
 	// Deliberately do NOT call RecordOwnSend — nothing panemux actually sent.
 	r.PollAll(context.Background())
 
 	if msgs := r.cache.MessagesSince(0); len(msgs) != 0 {
-		t.Fatalf("expected an unmatched _panemux row to be dropped as a suspected forgery, got %+v", msgs)
+		t.Fatalf("expected an unmatched _agent-board row to be dropped as a suspected forgery, got %+v", msgs)
 	}
 }
 
@@ -215,8 +215,8 @@ func TestRelay_PanemuxFrom_LedgerMatchIsOneShot(t *testing.T) {
 	resolver := NewStaticPaneResolver([]PaneRef{{ID: "pane-b", HostID: "local"}})
 	client := newFakeAgmsgClient("local")
 	client.seed(
-		Row{ID: "1", From: PanemuxSentinel, To: "pane-b", Body: "hi"},
-		Row{ID: "2", From: PanemuxSentinel, To: "pane-b", Body: "hi"}, // replay attempt, same body/to
+		Row{ID: "1", From: Sentinel, To: "pane-b", Body: "hi"},
+		Row{ID: "2", From: Sentinel, To: "pane-b", Body: "hi"}, // replay attempt, same body/to
 	)
 
 	r, _ := newTestRelay(t, resolver, []HostTeam{{Host: "local", Team: "panemux"}}, client)
@@ -363,22 +363,22 @@ func TestRelay_Broadcast_SendsAndRecordsLedgerEntry(t *testing.T) {
 	}
 
 	// The relay's own from-validation must now accept a row it later
-	// observes claiming From == "_panemux" for this exact (host, team, to,
+	// observes claiming From == "_agent-board" for this exact (host, team, to,
 	// body) — this is the ledger entry Broadcast is responsible for.
 	if !r.ledger.Consume("hostB", "panemux", "pane-b", "hello") {
 		t.Fatal("expected Broadcast to record a matching own-send ledger entry")
 	}
 }
 
-func TestRelay_Broadcast_SendsFromPanemuxSentinel(t *testing.T) {
+func TestRelay_Broadcast_SendsFromSentinel(t *testing.T) {
 	resolver := NewStaticPaneResolver([]PaneRef{{ID: "pane-b", HostID: "hostB"}})
 	clientB := newFakeAgmsgClient("hostB")
 
 	r, _ := newTestRelay(t, resolver, nil, clientB)
 	r.Broadcast(context.Background(), "panemux", []string{"pane-b"}, "hello")
 
-	if clientB.sent[0].From != PanemuxSentinel {
-		t.Fatalf("From = %q, want %q", clientB.sent[0].From, PanemuxSentinel)
+	if clientB.sent[0].From != Sentinel {
+		t.Fatalf("From = %q, want %q", clientB.sent[0].From, Sentinel)
 	}
 }
 
