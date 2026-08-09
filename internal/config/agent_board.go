@@ -66,14 +66,19 @@ func (c *Config) expandAgentBoardPaths() {
 	}
 }
 
-// ensureAuthToken fills in Server.AuthToken when it is not already set,
+// EnsureAuthToken fills in Server.AuthToken when it is not already set,
 // either by reading a previously persisted token file or by generating and
 // persisting a new random token. Failure to resolve, read, or persist a
 // token is non-fatal: it is logged as a warning and AuthToken is left
 // empty, so Validate's non-loopback-requires-token rule remains the actual
-// enforcement point rather than Load/Default hard-failing for the common
+// enforcement point rather than this method hard-failing for the common
 // loopback case.
-func (c *Config) ensureAuthToken() {
+//
+// Deliberately not called by Load/Default/finishLoad — see finishLoad's own
+// doc comment for why. Callers that want the "auto-generate on first run"
+// behavior (currently only main.go's real startup path) must call this
+// explicitly after Load/LoadOrDefault has already succeeded.
+func (c *Config) EnsureAuthToken() {
 	if c.Server.AuthToken != "" {
 		return
 	}

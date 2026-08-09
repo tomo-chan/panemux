@@ -43,6 +43,8 @@ func (c *Config) Validate() error {
 		))
 	}
 
+	errs = append(errs, validateAgentBoard(c.AgentBoard)...)
+
 	sshConns := c.SSHConnections
 	if sshConns == nil {
 		sshConns = make(map[string]SSHConnection)
@@ -277,6 +279,22 @@ func validatePaneAgentBoardMode(p *PaneConfig) []string {
 			mode,
 		)}
 	}
+}
+
+// validateAgentBoard checks the top-level agent_board settings. Both fields
+// tolerate being empty here (Validate can run before normalizeAgentBoard has
+// filled in defaults — see finishLoad), matching the same "only validate a
+// path-like field when it's actually set" pattern validatePane already uses
+// for a pane's Shell.
+func validateAgentBoard(ab AgentBoardConfig) []string {
+	var errs []string
+	if ab.Team == reservedSystemID {
+		errs = append(errs, fmt.Sprintf("agent_board.team must not be the reserved id %q", reservedSystemID))
+	}
+	if path := ab.AgmsgPath; path != "" && !strings.HasPrefix(path, "/") && !strings.HasPrefix(path, "~/") {
+		errs = append(errs, fmt.Sprintf("agent_board.agmsg_path %q must be an absolute path or start with ~/", path))
+	}
+	return errs
 }
 
 // isLoopbackHost reports whether host is a loopback address panemux treats

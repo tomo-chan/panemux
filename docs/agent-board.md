@@ -987,21 +987,25 @@ that shaped the design.
   construction of that string. `send.sh` does its own SQL escaping internally, so shell-escaping is
   the only layer panemux is responsible for on the write path — there is no panemux-owned SQL text
   to also escape, unlike an earlier draft of this design that had panemux building its own SQL.
-- **Open implementation question: `shellQuotePath`-style escaping alone may not satisfy this
-  repository's own CodeQL bar for a message body.** `docs/security.md` is explicit that a quoting
-  or regex-submatch transform does not, by itself, break CodeQL's taint-tracking — the accepted
-  pattern (`cwd`) is a **regex allowlist** (`validRemotePath`) applied *before* `shellQuotePath`,
-  and the allowlist is what actually breaks the taint chain. A message body is arbitrary
-  agent-authored text; it cannot be regex-allowlisted the way a path can. Encoding the body to a
-  constrained alphabet before it ever reaches the command string (e.g. base64, then a regex check
-  that the *encoded* string is pure base64 — genuinely mirroring the `validRemotePath`-then-quote
-  shape, since a base64 alphabet cannot itself contain shell metacharacters) is the most promising
-  direction, but it requires the remote side to decode before handing the value to `send.sh` (which
-  does not accept pre-encoded input), which is its own small piece of remote shell composition to
-  get right. This document does not claim the question is resolved; implementation must either find
-  a construction that satisfies CodeQL structurally, or make a deliberate, documented, narrowly
-  scoped exception consistent with `docs/security.md`'s stated preference for structural fixes over
-  suppression — not assume plain `shellQuotePath` on a message body will pass review unremarked.
+- **Implementation status: attempted resolution, not a verified one.** `shellQuotePath`-style
+  escaping alone does not satisfy this repository's own CodeQL bar for a message body — `docs/security.md`
+  is explicit that a quoting or regex-submatch transform does not, by itself, break CodeQL's
+  taint-tracking; the accepted pattern (`cwd`) is a **regex allowlist** (`validRemotePath`) applied
+  *before* `shellQuotePath`. A message body is arbitrary agent-authored text; it cannot be
+  regex-allowlisted the way a path can. `internal/board/remote_client.go`'s `RemoteAgmsgClient.Send`
+  base64-encodes the body, regex-checks the *encoded* string against `^[A-Za-z0-9+/]*={0,2}$`, and
+  only then places it in the `RunBoardCommand` argument list; a fixed wrapper script
+  (`sendBase64WrapperScript`) decodes it back to the original bytes on the remote host via shell
+  positional parameters, immediately before `send.sh` sees it — proven correct end to end against a
+  real `/bin/sh` (`internal/board/wrapper_script_integration_test.go`).
+  **What this construction does not establish**, and what a reviewer should not assume from the code
+  alone: Go's `base64.StdEncoding` output is, by construction, always a subset of the checked
+  alphabet, so the `MatchString` branch that gates it can never actually fail for correctly-encoded
+  input — it is a regex-allowlist branch in *shape* (mirroring `validRemotePath`'s structure), but no
+  CodeQL scan has actually been run against this code in the environment that implemented it to
+  confirm it is recognized as one in *practice*. Treat the taint chain as *plausibly* broken by
+  structural analogy to `validRemotePath`, not as confirmed broken by an actual scan, until a real
+  CodeQL run against this code says otherwise.
 - **panemux itself is never deployed to a remote host.** Beyond the injection-surface argument
   above, the `panemux` binary is also the server: a copy running on an SSH-reached host could start
   its own HTTP/WS listener, auth surface, and command center — a second, unmanaged instance of

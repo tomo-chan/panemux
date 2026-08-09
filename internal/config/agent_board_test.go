@@ -25,6 +25,12 @@ layout:
         type: local
 `
 
+// loadWithAuthTokenPath loads content the same way Load(path) would, but
+// lets the caller pre-set authTokenPath (impossible through the real Load
+// function, which always constructs a fresh, override-less Config
+// internally). It also calls EnsureAuthToken explicitly, mirroring what
+// main.go's real startup path does after Load succeeds — finishLoad itself
+// deliberately never calls EnsureAuthToken; see finishLoad's own comment.
 func loadWithAuthTokenPath(t *testing.T, content, tokenPath string) (*Config, error) {
 	t.Helper()
 	f := writeTempFile(t, content)
@@ -39,6 +45,7 @@ func loadWithAuthTokenPath(t *testing.T, content, tokenPath string) (*Config, er
 	if err := cfg.finishLoad(); err != nil {
 		return nil, err
 	}
+	cfg.EnsureAuthToken()
 	return &cfg, nil
 }
 
@@ -114,7 +121,31 @@ func TestEnsureAuthToken_WriteFailure_NonFatal_LoopbackHost(t *testing.T) {
 
 	cfg, err := loadWithAuthTokenPath(t, validConfigYAML, tokenPath)
 	require.NoError(t, err, "loopback host must load successfully even if token persistence fails")
-	assert.Empty(t, cfg.Server.AuthToken)
+	assert.Empty(t, cfg.Server.AuthToken,
+		"EnsureAuthToken must leave AuthToken empty, never panic or fatally error, on persistence failure")
+}
+
+func TestFinishLoad_NeverCallsEnsureAuthToken(t *testing.T) {
+	// Regression test: finishLoad (and therefore the real Load) must never
+	// touch the token file itself — only an explicit EnsureAuthToken call
+	// does. Point authTokenPath at a location finishLoad could plausibly
+	// have written to and confirm nothing appears there.
+	tokenPath := filepath.Join(t.TempDir(), "token")
+
+	f := writeTempFile(t, validConfigYAML)
+	data, err := os.ReadFile(f)
+	require.NoError(t, err)
+
+	var cfg Config
+	require.NoError(t, yaml.Unmarshal(data, &cfg))
+	cfg.filePath = f
+	cfg.authTokenPath = tokenPath
+
+	require.NoError(t, cfg.finishLoad())
+	assert.Empty(t, cfg.Server.AuthToken, "finishLoad alone must never populate AuthToken")
+
+	_, statErr := os.Stat(tokenPath)
+	assert.True(t, os.IsNotExist(statErr), "finishLoad alone must never create the token file")
 }
 
 func TestValidate_NonLoopbackHost_EmptyToken_Error(t *testing.T) {
@@ -182,6 +213,53 @@ func TestValidate_AgentBoardMode_ValidValues_NoError(t *testing.T) {
 	}
 }
 
+func TestValidate_AgentBoardTeam_ReservedSystemID_Error(t *testing.T) {
+	cfg := validConfig()
+	cfg.AgentBoard.Team = "_system"
+	err := cfg.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "agent_board.team")
+	assert.Contains(t, err.Error(), "_system")
+}
+
+func TestValidate_AgentBoardTeam_Empty_NoError(t *testing.T) {
+	cfg := validConfig()
+	cfg.AgentBoard.Team = ""
+	assert.NoError(t, cfg.Validate())
+}
+
+func TestValidate_AgentBoardTeam_NonReserved_NoError(t *testing.T) {
+	cfg := validConfig()
+	cfg.AgentBoard.Team = "my-team"
+	assert.NoError(t, cfg.Validate())
+}
+
+func TestValidate_AgmsgPath_RelativePath_Error(t *testing.T) {
+	cfg := validConfig()
+	cfg.AgentBoard.AgmsgPath = "relative/path"
+	err := cfg.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "agent_board.agmsg_path")
+}
+
+func TestValidate_AgmsgPath_Empty_NoError(t *testing.T) {
+	cfg := validConfig()
+	cfg.AgentBoard.AgmsgPath = ""
+	assert.NoError(t, cfg.Validate())
+}
+
+func TestValidate_AgmsgPath_AbsolutePath_NoError(t *testing.T) {
+	cfg := validConfig()
+	cfg.AgentBoard.AgmsgPath = "/opt/agmsg"
+	assert.NoError(t, cfg.Validate())
+}
+
+func TestValidate_AgmsgPath_TildePrefixed_NoError(t *testing.T) {
+	cfg := validConfig()
+	cfg.AgentBoard.AgmsgPath = "~/.agents/skills/agmsg"
+	assert.NoError(t, cfg.Validate())
+}
+
 func TestNormalizeAgentBoard_DefaultsTeamAndAgmsgPath(t *testing.T) {
 	home, err := os.UserHomeDir()
 	require.NoError(t, err)
@@ -218,14 +296,25 @@ layout:
 	assert.Equal(t, "/opt/agmsg", cfg.AgentBoard.AgmsgPath)
 }
 
-func TestDefault_SetsAgentBoardDefaultsAndToken(t *testing.T) {
+func TestDefault_SetsAgentBoardDefaultsAndLeavesTokenEmpty(t *testing.T) {
 	cfg := Default()
 	assert.Equal(t, "panemux", cfg.AgentBoard.Team)
 	assert.False(t, strings.HasPrefix(cfg.AgentBoard.AgmsgPath, "~/"))
-	// Default() uses the real token path; just assert it attempted
-	// resolution without erroring the whole call (AuthToken empty is
-	// also an acceptable outcome if the real home dir isn't writable).
-	_ = cfg.Server.AuthToken
+	// Default() must never touch the real filesystem for a token — see
+	// finishLoad's doc comment. AuthToken is only ever populated by an
+	// explicit EnsureAuthToken call, which the real startup path (main.go)
+	// makes but Default() itself never does.
+	assert.Empty(t, cfg.Server.AuthToken)
+}
+
+func TestDefault_EnsureAuthTokenExplicitly_Populates(t *testing.T) {
+	tokenPath := filepath.Join(t.TempDir(), "token")
+
+	cfg := Default()
+	cfg.authTokenPath = tokenPath
+	cfg.EnsureAuthToken()
+
+	assert.NotEmpty(t, cfg.Server.AuthToken)
 }
 
 func TestSaveConfig_AutoGeneratedToken_NotWrittenBack(t *testing.T) {
@@ -237,7 +326,7 @@ func TestSaveConfig_AutoGeneratedToken_NotWrittenBack(t *testing.T) {
 	cfg.filePath = path
 	cfg.Server.AuthToken = ""
 	cfg.authTokenFromFile = false
-	cfg.ensureAuthToken()
+	cfg.EnsureAuthToken()
 	require.NotEmpty(t, cfg.Server.AuthToken)
 	require.True(t, cfg.authTokenFromFile)
 

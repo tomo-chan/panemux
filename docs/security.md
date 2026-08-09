@@ -54,9 +54,17 @@ value, and plain `shellQuotePath`-style quoting of that value alone does not sat
 repository's `go/command-injection` CodeQL bar (a quoting transform does not itself break a taint
 chain; only a preceding regex-allowlist branch does — see `validateShell`'s explanation above).
 Because a message body is free text and cannot be regex-allowlisted directly the way a path can,
-`RemoteAgmsgClient.Send` base64-encodes the body, regex-allowlists the *encoded* string against
-`^[A-Za-z0-9+/]*={0,2}$` (mirroring `validRemotePath`'s accepted shape for a value that couldn't
-otherwise take it), and only then places it in the `RunBoardCommand` argument list. `team`/`from`/`to`
+`RemoteAgmsgClient.Send` base64-encodes the body, regex-checks the *encoded* string against
+`^[A-Za-z0-9+/]*={0,2}$`, and only then places it in the `RunBoardCommand` argument list — structurally
+mirroring `validRemotePath`'s accepted shape (a regex-allowlist branch gating a value before it reaches
+the exec sink) for a value that couldn't otherwise take it. **Caveat, stated plainly:** because
+`base64.StdEncoding`'s output is by construction always within that alphabet, the `MatchString` branch
+can never actually fail for correctly-encoded input — it is a regex-allowlist branch in *shape*, not
+one that can reject real input. No CodeQL scan has been run against this code to confirm the taint
+chain is actually recognized as broken in practice; treat it as a structurally-motivated best effort,
+not a verified one, until a real scan says otherwise — see
+[agent-board.md's Security model](agent-board.md#security-model) for the same caveat stated in more
+detail. `team`/`from`/`to`
 identifiers are regex-allowlisted directly (`^[A-Za-z0-9_.-]+$`) for the same reason, since agmsg's
 own `--agent` argument validation is not a claim panemux can rely on — it runs inside the remote
 shell process that only exists because panemux's own command string has already been parsed, so it

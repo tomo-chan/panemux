@@ -126,17 +126,32 @@ func Load(path string) (*Config, error) {
 	return &cfg, nil
 }
 
-// finishLoad applies normalization, path expansion, auth-token resolution,
-// and validation to a Config whose raw fields (including any test-only
-// overrides such as authTokenPath) have already been set. Load uses this
-// directly; tests that need to set an override before validation runs call
-// it the same way, since Load itself has no way to inject an override into
-// the Config it constructs internally.
+// finishLoad applies normalization, path expansion, and validation to a
+// Config whose raw fields (including any test-only overrides such as
+// authTokenPath) have already been set. Load uses this directly; tests that
+// need to set an override before validation runs call it the same way,
+// since Load itself has no way to inject an override into the Config it
+// constructs internally.
+//
+// This deliberately does NOT call EnsureAuthToken: doing so here would mean
+// every caller of Load/Default — including the many pre-existing, otherwise
+// fully hermetic tests in this package that construct a config with no
+// authTokenPath override — would write a real token file to the invoking
+// process's actual $HOME as a side effect of loading a config, which is
+// exactly what DEVELOPMENT.md's testability rule exists to prevent. It also
+// changes what Validate's non-loopback-requires-token rule actually
+// enforces: if EnsureAuthToken ran first, a non-loopback host with no
+// explicit auth_token would always have a token silently filled in before
+// Validate ever saw it, and that check would only ever fire on a token-file
+// I/O failure. Running EnsureAuthToken only in the real startup path (see
+// main.go) after Load/LoadOrDefault has already succeeded makes that rule
+// mean what its own name says: an operator who points panemux at a
+// non-loopback host must have explicitly configured a token, not rely on
+// one having been silently generated for them.
 func (c *Config) finishLoad() error {
 	c.normalizeWorkspaces()
 	c.normalizeAgentBoard()
 	c.expandPaths()
-	c.ensureAuthToken()
 
 	if err := c.Validate(); err != nil {
 		return fmt.Errorf("invalid config: %w", err)
@@ -170,7 +185,6 @@ func Default() *Config {
 	}
 	cfg.normalizeAgentBoard()
 	cfg.expandAgentBoardPaths()
-	cfg.ensureAuthToken()
 	return cfg
 }
 
