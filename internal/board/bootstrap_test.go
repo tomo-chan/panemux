@@ -1,8 +1,10 @@
 package board
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -257,5 +259,22 @@ func TestBootstrap_PTYWriteError_LogsWarning(t *testing.T) {
 
 	if !warned {
 		t.Fatal("expected a warning to be logged on PTY write failure")
+	}
+}
+
+// Regression test for Bootstrap's nil-logf default: callers that don't care
+// about capturing log output (the common case) must still get a warning
+// somewhere rather than a nil-func panic.
+func TestBootstrap_NilLogf_FallsBackToLogPrintf(t *testing.T) {
+	var buf bytes.Buffer
+	orig := log.Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(orig)
+
+	pty := &fakePTY{}
+	Bootstrap(context.Background(), "pane-a", LocalHostID, "panemux", "monitor", t.TempDir(), pty, nil, nil)
+
+	if !strings.Contains(buf.String(), "pane-a") {
+		t.Fatalf("expected the default log.Printf fallback to log a warning naming the pane, got %q", buf.String())
 	}
 }

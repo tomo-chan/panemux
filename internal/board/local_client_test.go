@@ -103,6 +103,15 @@ func TestLocalAgmsgClient_Since_EmptyAfterIDReturnsEverything(t *testing.T) {
 	}
 }
 
+func TestLocalAgmsgClient_Since_ParseFailurePropagates(t *testing.T) {
+	execFn, _ := fakeCommandRecorder(t, "echo 'not json'")
+	c := &LocalAgmsgClient{agmsgPath: "/opt/agmsg", execFn: execFn}
+
+	if _, err := c.Since(context.Background(), "panemux", "", 50); err == nil {
+		t.Fatal("expected an error when api.sh output cannot be parsed")
+	}
+}
+
 func TestLocalAgmsgClient_HostID(t *testing.T) {
 	c := NewLocalAgmsgClient("/opt/agmsg")
 	if c.HostID() != LocalHostID {

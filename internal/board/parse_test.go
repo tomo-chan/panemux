@@ -1,6 +1,7 @@
 package board
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
@@ -76,6 +77,47 @@ func TestParseMessageRows_MalformedLine(t *testing.T) {
 	_, err := parseMessageRows([]byte("not json\n"), "hostA")
 	if err == nil {
 		t.Fatal("expected an error for a malformed line, not a silent drop")
+	}
+}
+
+func TestParseMessageRows_BlankLinesSkipped(t *testing.T) {
+	line1 := `{"type":"message_sent","id":"1","team":"panemux","from":"pane-a","to":"pane-b",` +
+		`"body":"hi","at":"2026-08-08T10:00:00Z"}`
+	line2 := `{"type":"message_sent","id":"2","team":"panemux","from":"pane-a","to":"pane-b",` +
+		`"body":"hi again","at":"2026-08-08T10:01:00Z"}`
+	data := []byte(line1 + "\n" + "\n" + "   \n" + line2 + "\n")
+	rows, err := parseMessageRows(data, "hostA")
+	if err != nil {
+		t.Fatalf("parseMessageRows: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("expected blank lines to be skipped without affecting row count, got %d rows: %+v", len(rows), rows)
+	}
+}
+
+func TestParseMessageRows_MalformedTimestamp_FallsBackToZeroTime(t *testing.T) {
+	line := `{"type":"message_sent","id":"1","team":"panemux","from":"pane-a","to":"pane-b",` +
+		`"body":"hi","at":"not-a-timestamp"}`
+	data := []byte(line + "\n")
+	rows, err := parseMessageRows(data, "hostA")
+	if err != nil {
+		t.Fatalf("parseMessageRows: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row despite the malformed timestamp, got %d", len(rows))
+	}
+	if !rows[0].At.IsZero() {
+		t.Fatalf("expected a zero-time fallback for a malformed timestamp, got %v", rows[0].At)
+	}
+	if rows[0].ID != "1" || rows[0].From != "pane-a" || rows[0].To != "pane-b" {
+		t.Fatalf("expected identity/routing fields to remain intact despite the timestamp failure, got %+v", rows[0])
+	}
+}
+
+func TestParseMessageRows_LineTooLong_ReturnsScanError(t *testing.T) {
+	longLine := bytes.Repeat([]byte("a"), 2*1024*1024) // exceeds the scanner's 1MB max token size
+	if _, err := parseMessageRows(longLine, "hostA"); err == nil {
+		t.Fatal("expected a scan error for a line exceeding the scanner's max token size")
 	}
 }
 

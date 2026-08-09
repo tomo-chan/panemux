@@ -108,6 +108,22 @@ func TestRemoteAgmsgClient_Since_TeamWithMetacharactersPassedAsSingleArg(t *test
 	}
 }
 
+func TestRemoteAgmsgClient_Since_RunBoardCommandErrorPropagates(t *testing.T) {
+	exec := &fakeBoardExecutor{err: errors.New("ssh exec failed")}
+	c := NewRemoteAgmsgClient("build-host", "/opt/agmsg", exec)
+	if _, err := c.Since(context.Background(), "panemux", "", 50); err == nil {
+		t.Fatal("expected an error when RunBoardCommand fails")
+	}
+}
+
+func TestRemoteAgmsgClient_Since_ParseFailurePropagates(t *testing.T) {
+	exec := &fakeBoardExecutor{outputs: [][]byte{[]byte("not json\n")}}
+	c := NewRemoteAgmsgClient("build-host", "/opt/agmsg", exec)
+	if _, err := c.Since(context.Background(), "panemux", "", 50); err == nil {
+		t.Fatal("expected an error when api.sh output cannot be parsed")
+	}
+}
+
 func TestRemoteAgmsgClient_HostID(t *testing.T) {
 	c := NewRemoteAgmsgClient("build-host", "/opt/agmsg", &fakeBoardExecutor{})
 	if c.HostID() != "build-host" {

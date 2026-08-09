@@ -2,6 +2,7 @@ package board
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"testing"
 	"time"
@@ -9,10 +10,11 @@ import (
 
 // fakeAgmsgClient is an in-memory AgmsgClient for relay tests. Rows are
 // pre-seeded via seed(); Send appends to sent for assertions.
-type fakeAgmsgClient struct {
-	host string
-	rows []Row
-	sent []sentCall
+type fakeAgmsgClient struct { //nolint:govet // fieldalignment: clarity preferred
+	host    string
+	rows    []Row
+	sent    []sentCall
+	sendErr error
 }
 
 type sentCall struct {
@@ -26,6 +28,9 @@ func newFakeAgmsgClient(host string) *fakeAgmsgClient {
 func (c *fakeAgmsgClient) HostID() string { return c.host }
 
 func (c *fakeAgmsgClient) Send(_ context.Context, team, from, to, body string) error {
+	if c.sendErr != nil {
+		return c.sendErr
+	}
 	c.sent = append(c.sent, sentCall{Team: team, From: from, To: to, Body: body})
 	// A real send.sh would also make the row observable on this host's
 	// team on the next poll; the relay's own from-validation tests exercise
@@ -33,6 +38,14 @@ func (c *fakeAgmsgClient) Send(_ context.Context, team, from, to, body string) e
 	// the two concerns independent.
 	return nil
 }
+
+// errCursorStore is a CursorStore whose Load/Save always fail, for exercising
+// the relay's error-handling around persistence I/O without touching the
+// real filesystem.
+type errCursorStore struct{ err error }
+
+func (e *errCursorStore) Load() (map[CursorKey]string, error) { return nil, e.err }
+func (e *errCursorStore) Save(map[CursorKey]string) error     { return e.err }
 
 func (c *fakeAgmsgClient) Since(_ context.Context, team, afterID string, limit int) ([]Row, error) {
 	var out []Row
@@ -464,5 +477,91 @@ func TestRelay_Run_BackfillsThenStopsOnContextCancel(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("expected Run to return promptly after context cancellation")
+	}
+}
+
+func TestRelay_Broadcast_NoClientForHost(t *testing.T) {
+	resolver := NewStaticPaneResolver([]PaneRef{{ID: "pane-b", HostID: "hostB"}})
+	r, _ := newTestRelay(t, resolver, nil) // no client registered for hostB
+
+	results := r.Broadcast(context.Background(), "panemux", []string{"pane-b"}, "hi")
+	if len(results) != 1 || results[0].Error == "" {
+		t.Fatalf("expected an error result when no client is registered for the resolved host, got %+v", results)
+	}
+}
+
+func TestRelay_Broadcast_ClientSendFailure(t *testing.T) {
+	resolver := NewStaticPaneResolver([]PaneRef{{ID: "pane-b", HostID: "hostB"}})
+	clientB := newFakeAgmsgClient("hostB")
+	clientB.sendErr = errors.New("send failed")
+	r, _ := newTestRelay(t, resolver, nil, clientB)
+
+	results := r.Broadcast(context.Background(), "panemux", []string{"pane-b"}, "hi")
+	if len(results) != 1 || results[0].Error == "" {
+		t.Fatalf("expected an error result when Send fails, got %+v", results)
+	}
+}
+
+func TestRelay_LoadCursors_PropagatesError(t *testing.T) {
+	resolver := NewStaticPaneResolver(nil)
+	cursors := &errCursorStore{err: errors.New("disk error")}
+	r := NewRelay(NewBoardCache(), resolver, cursors, nil, WithLogf(func(string, ...any) {}))
+	if err := r.LoadCursors(); err == nil {
+		t.Fatal("expected LoadCursors to propagate the underlying CursorStore error")
+	}
+}
+
+func TestRelay_SetCursor_SaveFailureLogsAndContinues(t *testing.T) {
+	resolver := NewStaticPaneResolver([]PaneRef{{ID: "pane-a", HostID: "local"}, {ID: "pane-b", HostID: "local"}})
+	client := newFakeAgmsgClient("local")
+	client.seed(Row{ID: "1", From: "pane-a", To: "pane-b", Body: "hi"})
+
+	var logged bool
+	r := NewRelay(NewBoardCache(), resolver, &errCursorStore{err: errors.New("disk full")},
+		[]HostTeam{{Host: "local", Team: "panemux"}}, WithLogf(func(string, ...any) { logged = true }))
+	r.RegisterClient(client)
+
+	r.PollAll(context.Background()) // must not panic despite the cursor Save failure
+
+	if !logged {
+		t.Fatal("expected the cursor Save failure to be logged")
+	}
+	if msgs := r.cache.MessagesSince(0); len(msgs) != 1 {
+		t.Fatalf("expected the poll's message to still be cached despite the cursor Save failure, got %+v", msgs)
+	}
+}
+
+func TestRelay_CrossHostMessage_NoClientForDestHost_LogsAndDropsRelay(t *testing.T) {
+	resolver := NewStaticPaneResolver([]PaneRef{
+		{ID: "pane-a", HostID: "hostA"},
+		{ID: "pane-b", HostID: "hostB"},
+	})
+	clientA := newFakeAgmsgClient("hostA")
+	clientA.seed(Row{ID: "1", From: "pane-a", To: "pane-b", Body: "please review"})
+	// clientB (hostB) is deliberately never registered.
+
+	r, _ := newTestRelay(t, resolver, []HostTeam{{Host: "hostA", Team: "panemux"}}, clientA)
+	r.PollAll(context.Background()) // must not panic
+
+	if msgs := r.cache.MessagesSince(0); len(msgs) != 1 {
+		t.Fatalf("expected the message to still be cached even with no destination client to relay to, got %+v", msgs)
+	}
+}
+
+func TestRelay_CrossHostMessage_DestClientSendFailure_LogsAndContinues(t *testing.T) {
+	resolver := NewStaticPaneResolver([]PaneRef{
+		{ID: "pane-a", HostID: "hostA"},
+		{ID: "pane-b", HostID: "hostB"},
+	})
+	clientA := newFakeAgmsgClient("hostA")
+	clientB := newFakeAgmsgClient("hostB")
+	clientB.sendErr = errors.New("relay send failed")
+	clientA.seed(Row{ID: "1", From: "pane-a", To: "pane-b", Body: "please review"})
+
+	r, _ := newTestRelay(t, resolver, []HostTeam{{Host: "hostA", Team: "panemux"}}, clientA, clientB)
+	r.PollAll(context.Background()) // must not panic despite the relay Send failure
+
+	if msgs := r.cache.MessagesSince(0); len(msgs) != 1 {
+		t.Fatalf("expected the message to still be cached despite the relay Send failure, got %+v", msgs)
 	}
 }
