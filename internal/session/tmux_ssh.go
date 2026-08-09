@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -130,6 +131,18 @@ func (s *TmuxSSHSession) Resize(cols, rows uint16) error {
 
 // ConnectionName returns the panemux connection alias for this SSH session.
 func (s *TmuxSSHSession) ConnectionName() string { return s.connectionName }
+
+// BoardHostID identifies this session's Agent Board host as its SSH
+// connection name — the same identifier ConnectionName already returns.
+func (s *TmuxSSHSession) BoardHostID() string { return s.connectionName }
+
+// RunBoardCommand runs an agmsg script on the remote host over a new SSH
+// exec channel, matching the pattern GetCWD/InspectGitContext already use.
+func (s *TmuxSSHSession) RunBoardCommand(ctx context.Context, args []string) ([]byte, error) {
+	return runBoardCommand(ctx, func() (sshSessionRunner, error) {
+		return s.client.NewSession()
+	}, args)
+}
 
 // GetCWD runs `tmux display-message` over a new SSH exec channel to get the active pane's CWD.
 func (s *TmuxSSHSession) GetCWD() (string, error) {

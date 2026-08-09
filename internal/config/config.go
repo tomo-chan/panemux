@@ -27,8 +27,9 @@ const (
 var chmodConfigFile = os.Chmod
 
 type ServerConfig struct {
-	Host string `yaml:"host"`
-	Port int    `yaml:"port"`
+	Host      string `yaml:"host"`
+	AuthToken string `yaml:"auth_token,omitempty"`
+	Port      int    `yaml:"port"`
 }
 
 type SSHConnection struct {
@@ -46,15 +47,16 @@ type DisplayConfig struct {
 }
 
 type PaneConfig struct {
-	ShowHeader    *bool  `yaml:"show_header,omitempty"    json:"show_header,omitempty"`
-	ShowStatusBar *bool  `yaml:"show_status_bar,omitempty" json:"show_status_bar,omitempty"`
-	ID            string `yaml:"id"           json:"id"`
-	Type          string `yaml:"type"         json:"type"` // local | ssh | tmux | ssh_tmux
-	Shell         string `yaml:"shell,omitempty"        json:"shell,omitempty"`
-	Cwd           string `yaml:"cwd,omitempty"          json:"cwd,omitempty"`
-	Title         string `yaml:"title,omitempty"        json:"title,omitempty"`
-	Connection    string `yaml:"connection,omitempty"   json:"connection,omitempty"` // ssh_connections key
-	TmuxSession   string `yaml:"tmux_session,omitempty" json:"tmux_session,omitempty"`
+	ShowHeader    *bool                `yaml:"show_header,omitempty"    json:"show_header,omitempty"`
+	ShowStatusBar *bool                `yaml:"show_status_bar,omitempty" json:"show_status_bar,omitempty"`
+	ID            string               `yaml:"id"           json:"id"`
+	Type          string               `yaml:"type"         json:"type"` // local | ssh | tmux | ssh_tmux
+	Shell         string               `yaml:"shell,omitempty"        json:"shell,omitempty"`
+	Cwd           string               `yaml:"cwd,omitempty"          json:"cwd,omitempty"`
+	Title         string               `yaml:"title,omitempty"        json:"title,omitempty"`
+	Connection    string               `yaml:"connection,omitempty"   json:"connection,omitempty"` // ssh_connections key
+	TmuxSession   string               `yaml:"tmux_session,omitempty" json:"tmux_session,omitempty"`
+	AgentBoard    PaneAgentBoardConfig `yaml:"agent_board,omitempty" json:"agent_board,omitempty"`
 }
 
 type LayoutNode struct {
@@ -92,9 +94,13 @@ type Config struct { //nolint:govet
 	Workspaces     WorkspacesConfig         `yaml:"workspaces,omitempty" json:"workspaces"`
 	Layout         LayoutNode               `yaml:"layout,omitempty"`
 	Display        DisplayConfig            `yaml:"display,omitempty" json:"display"`
+	AgentBoard     AgentBoardConfig         `yaml:"agent_board,omitempty" json:"agent_board"`
+	CommandCenter  CommandCenterConfig      `yaml:"command_center,omitempty" json:"command_center"`
 
-	filePath      string
-	sshConfigPath string // overridable for tests; empty = use sshconfig.DefaultPath()
+	filePath          string
+	sshConfigPath     string // overridable for tests; empty = use sshconfig.DefaultPath()
+	authTokenPath     string // overridable for tests; empty = use ~/.config/panemux/token
+	authTokenFromFile bool   // true when AuthToken came from the token file, not from config.yaml
 }
 
 func Load(path string) (*Config, error) {
@@ -109,11 +115,8 @@ func Load(path string) (*Config, error) {
 	}
 
 	cfg.filePath = path
-	cfg.normalizeWorkspaces()
-	cfg.expandPaths()
-
-	if err := cfg.Validate(); err != nil {
-		return nil, fmt.Errorf("invalid config: %w", err)
+	if err := cfg.finishLoad(); err != nil {
+		return nil, err
 	}
 	if err := tightenConfigFilePermissions(path); err != nil {
 		//nolint:gosec // G706: local filesystem warning
@@ -123,8 +126,26 @@ func Load(path string) (*Config, error) {
 	return &cfg, nil
 }
 
+// finishLoad applies normalization, path expansion, auth-token resolution,
+// and validation to a Config whose raw fields (including any test-only
+// overrides such as authTokenPath) have already been set. Load uses this
+// directly; tests that need to set an override before validation runs call
+// it the same way, since Load itself has no way to inject an override into
+// the Config it constructs internally.
+func (c *Config) finishLoad() error {
+	c.normalizeWorkspaces()
+	c.normalizeAgentBoard()
+	c.expandPaths()
+	c.ensureAuthToken()
+
+	if err := c.Validate(); err != nil {
+		return fmt.Errorf("invalid config: %w", err)
+	}
+	return nil
+}
+
 func Default() *Config {
-	return &Config{
+	cfg := &Config{
 		Server: ServerConfig{
 			Port: 8080,
 			Host: defaultServerHost,
@@ -147,6 +168,10 @@ func Default() *Config {
 			},
 		},
 	}
+	cfg.normalizeAgentBoard()
+	cfg.expandAgentBoardPaths()
+	cfg.ensureAuthToken()
+	return cfg
 }
 
 func defaultLayout() LayoutNode {
@@ -387,12 +412,25 @@ func (c *Config) write() error {
 		SSHConnections map[string]SSHConnection `yaml:"ssh_connections,omitempty"`
 		Workspaces     WorkspacesConfig         `yaml:"workspaces,omitempty"`
 		Display        DisplayConfig            `yaml:"display,omitempty"`
+		AgentBoard     AgentBoardConfig         `yaml:"agent_board,omitempty"`
+		CommandCenter  CommandCenterConfig      `yaml:"command_center,omitempty"`
 	}
+
+	server := c.Server
+	if c.authTokenFromFile {
+		// The token came from the token file (auto-generated or read from
+		// disk there), not from an operator-set config.yaml value — never
+		// echo it back into config.yaml.
+		server.AuthToken = ""
+	}
+
 	data, err := yaml.Marshal(configFile{
-		Server:         c.Server,
+		Server:         server,
 		SSHConnections: c.SSHConnections,
 		Workspaces:     c.Workspaces,
 		Display:        c.Display,
+		AgentBoard:     c.AgentBoard,
+		CommandCenter:  c.CommandCenter,
 	})
 	if err != nil {
 		return fmt.Errorf("marshaling config: %w", err)
@@ -420,6 +458,7 @@ func (c *Config) expandPaths() {
 	if active, ok := c.ActiveWorkspace(); ok {
 		c.Layout = active.Layout
 	}
+	c.expandAgentBoardPaths()
 }
 
 func expandPanesCwd(children []LayoutChild) {

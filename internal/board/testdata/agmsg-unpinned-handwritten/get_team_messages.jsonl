@@ -1,0 +1,4 @@
+{"type":"message_sent","id":"1","team":"panemux","from":"pane-a","to":"pane-b","body":"please review my latest commit","at":"2026-01-01T10:00:00Z"}
+{"type":"message_sent","id":"2","team":"panemux","from":"pane-a","to":"_system","body":"{\"kind\":\"board_status\",\"state\":\"working\",\"cwd\":\"/home/user/project\",\"branch\":\"feature/x\",\"repo\":\"owner/repo\",\"pr_url\":\"https://github.com/owner/repo/pull/123\",\"last_tool\":\"Edit internal/api/handler.go\",\"summary\":\"fixing failing tests\"}","at":"2026-01-01T10:01:00Z"}
+{"type":"message_sent","id":"3","team":"panemux","from":"pane-b","to":"_system","body":"{\"state\":\"looks like status but has no kind field\"}","at":"2026-01-01T10:02:00Z"}
+{"type":"message_sent","id":"4","team":"panemux","from":"pane-b","to":"pane-a","body":"lgtm, merging now","at":"2026-01-01T10:03:00Z"}

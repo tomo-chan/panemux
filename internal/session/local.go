@@ -130,6 +130,9 @@ func (s *LocalSession) Close() error {
 	return nil
 }
 
+// BoardHostID identifies this session as running on panemux's own host.
+func (s *LocalSession) BoardHostID() string { return boardHostIDLocal }
+
 // GetCWD returns the current working directory of the shell process.
 // On Linux it reads /proc/<pid>/cwd; on macOS it runs lsof.
 func (s *LocalSession) GetCWD() (string, error) {

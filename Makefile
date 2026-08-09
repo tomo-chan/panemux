@@ -36,7 +36,7 @@ test-e2e:
 
 # ── Coverage (≥ 80 %) ─────────────────────────────────────────────────────────
 #
-# Go: measures config / api / ws / server (business-logic packages).
+# Go: measures config / api / ws / server / board (business-logic packages).
 #     session/local uses a real PTY and is covered separately.
 #     session/ssh and session/tmux* require live SSH / tmux and are
 #     integration-tested outside the unit-test suite.
@@ -45,7 +45,7 @@ test-e2e:
 #           UI components (App, SplitContainer, TerminalPane …) require a real
 #           browser renderer and are covered by integration / E2E tests.
 
-COVERAGE_PKGS := ./internal/config/...,./internal/api/...,./internal/ws/...,./internal/server/...
+COVERAGE_PKGS := ./internal/config/...,./internal/api/...,./internal/ws/...,./internal/server/...,./internal/board/...
 
 coverage: coverage-go coverage-frontend
 
@@ -55,6 +55,7 @@ coverage-go:
 	  ./internal/api/... \
 	  ./internal/ws/... \
 	  ./internal/server/... \
+	  ./internal/board/... \
 	  -coverprofile=coverage.out \
 	  -coverpkg=$(COVERAGE_PKGS) \
 	  -count=1 -timeout 30s
