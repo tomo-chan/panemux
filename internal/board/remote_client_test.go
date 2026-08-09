@@ -40,7 +40,7 @@ func TestRemoteAgmsgClient_Send_BuildsWrapperScriptArgs(t *testing.T) {
 
 	encoded := base64.StdEncoding.EncodeToString([]byte("hello"))
 	key := strings.Join([]string{
-		"sh", "-c", sendBase64WrapperScript, "board-send",
+		"sh", "-c", sendBase64WrapperScript, sendBase64WrapperScriptName,
 		"/opt/agmsg/scripts/send.sh", "team-a", "from-a", "to-a", encoded,
 	}, "\x00")
 	exec.outputs[key] = []byte("")
@@ -60,7 +60,7 @@ func TestRemoteAgmsgClient_Send_MetacharacterBody_RoundTripsViaBase64(t *testing
 	body := `it's; $(evil) && ` + "`echo hi`" + ` | rm -rf /`
 	encoded := base64.StdEncoding.EncodeToString([]byte(body))
 	key := strings.Join([]string{
-		"sh", "-c", sendBase64WrapperScript, "board-send",
+		"sh", "-c", sendBase64WrapperScript, sendBase64WrapperScriptName,
 		"/opt/agmsg/scripts/send.sh", "team", "from", "to", encoded,
 	}, "\x00")
 	exec.outputs[key] = []byte("")
@@ -113,7 +113,7 @@ func TestRemoteAgmsgClient_Send_ValidSystemIDIdentifier_Accepted(t *testing.T) {
 
 	encoded := base64.StdEncoding.EncodeToString([]byte("status"))
 	key := strings.Join([]string{
-		"sh", "-c", sendBase64WrapperScript, "board-send",
+		"sh", "-c", sendBase64WrapperScript, sendBase64WrapperScriptName,
 		"/opt/agmsg/scripts/send.sh", "panemux", "pane-a", SystemID, encoded,
 	}, "\x00")
 	exec.outputs[key] = []byte("")

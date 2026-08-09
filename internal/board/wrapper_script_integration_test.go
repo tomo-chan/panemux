@@ -56,7 +56,7 @@ func TestSendBase64WrapperScript_RealShell_DecodesMetacharacterBody(t *testing.T
 	encoded := base64.StdEncoding.EncodeToString([]byte(body))
 
 	args := []string{
-		"sh", "-c", sendBase64WrapperScript, "board-send",
+		"sh", "-c", sendBase64WrapperScript, sendBase64WrapperScriptName,
 		sendStub, "team-a", "from-a", "to-a", encoded,
 	}
 	cmd := quoteArgsLikeSession(args)

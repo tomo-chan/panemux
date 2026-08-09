@@ -47,6 +47,12 @@ var validBase64 = regexp.MustCompile(`^[A-Za-z0-9+/]*={0,2}$`)
 const sendBase64WrapperScript = `send="$1"; team="$2"; from="$3"; to="$4"; ` +
 	`body=$(printf '%s' "$5" | base64 -d) && exec "$send" "$team" "$from" "$to" "$body" --force`
 
+// sendBase64WrapperScriptName is the dummy $0 value passed to the `sh -c`
+// invocation that runs sendBase64WrapperScript — it becomes the script's
+// $0, never inspected by the script itself, only present because `sh -c`
+// requires a name argument before the real positional parameters ($1..$5).
+const sendBase64WrapperScriptName = "board-send"
+
 func validateAgmsgIdentifier(label, value string) error {
 	if !validAgmsgIdentifier.MatchString(value) {
 		return fmt.Errorf("agmsg: invalid %s %q: must match %s", label, value, validAgmsgIdentifier)
@@ -89,7 +95,7 @@ func (c *RemoteAgmsgClient) Send(ctx context.Context, team, from, to, body strin
 	}
 
 	args := []string{
-		"sh", "-c", sendBase64WrapperScript, "board-send",
+		"sh", "-c", sendBase64WrapperScript, sendBase64WrapperScriptName,
 		c.sendScript(), team, from, to, encoded,
 	}
 	if _, err := c.executor.RunBoardCommand(ctx, args); err != nil {
