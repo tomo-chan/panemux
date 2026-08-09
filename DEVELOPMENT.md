@@ -122,6 +122,9 @@ Example: `Config.sshConfigPath` uses `sshconfig.DefaultPath()` only when the ove
 
 - When a behavior, operational assumption, browser requirement, rendering constraint, or user-visible rule becomes confirmed, update the relevant files in `docs/` in the same change.
 - Do not leave documentation follow-up as a separate later task once the behavior is settled.
+- **Docs describe the current state only.** A `docs/*.md` file states what the system does and why it's built that way *today* — never "an earlier revision said X," "attempt 1 failed because Y," or other chronological/decision narrative. That history belongs in [docs/DECISIONLOG.md](docs/DECISIONLOG.md), one dated entry per decision, linked from the doc section it affects when a reader would benefit from the fuller story. If a correction changes what a doc says, just change what the doc says — record the *why* and the *what changed from* in DECISIONLOG.md, not inline.
+- **Be concise.** State the point, not the deliberation that produced it. If a topic genuinely needs more than a paragraph or two, give it its own subsection or its own file rather than lengthening the surrounding prose.
+- **Diagram flows, relationships, and structure.** Sequence diagrams for message/request flows, flowcharts for decision logic or component relationships, and architecture diagrams for how pieces fit together — Mermaid, inline in the doc. A diagram also documents itself: a wrong or missing edge is a modeling bug you can see, not just a prose claim to take on faith.
 
 ### Security-sensitive implementation
 

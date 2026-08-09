@@ -63,9 +63,10 @@ Optional capability interfaces extend the base `Session` contract without breaki
 - `CWDGetter` — implemented by `LocalSession` and `SSHSession`; returns the live working directory of the running shell. `LocalSession` reads it via `lsof` (macOS) or `/proc/<pid>/cwd` (Linux). `SSHSession` runs `pwd` over a new exec channel on the existing SSH connection.
 - `SSHConnNamer` — implemented by `SSHSession`; returns the panemux connection alias used when building the `code --remote ssh-remote+<host>` command.
 
-### `internal/board` (Phase 1 implemented; command center still design-only)
+### `internal/board`
 
-A package that replaces transcript-based Claude activity inference with a self-reported channel:
+Phase 1 (messaging/status/relay) implemented; command center still design-only. A package that
+replaces transcript-based Claude activity inference with a self-reported channel:
 panes report status (including branch/PR/cwd, gathered by the agent's own `git`/`gh` calls rather
 than inferred by panemux) and exchange messages through an operator-installed
 [agmsg](https://github.com/fujibee/agmsg) instance, plus a relay for messages addressed across

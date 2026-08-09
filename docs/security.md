@@ -38,9 +38,10 @@ It accepts only absolute Unix paths and rejects shell metacharacters and control
 
 After validation, the path is wrapped with `shellQuotePath`, which single-quotes the value and escapes any interior single quotes. This keeps paths containing spaces or unusual but allowed characters safe when embedded in a shell string.
 
-### Agent board remote writes (Phase 1 implemented)
+### Agent board remote writes
 
-The `internal/board` package (full design in [agent-board.md](agent-board.md)) writes cross-pane
+Phase 1 implemented (see [agent-board.md](agent-board.md)'s status note for what's not). The
+`internal/board` package writes cross-pane
 agent messages into a remote host's message store over the SSH exec channel already used by
 `GetCWD`/`InspectGitContext` (`RunBoardCommand` on `SSHSession`/`TmuxSSHSession`, in
 `internal/session/ssh.go` and `internal/session/tmux_ssh.go`), by running an operator-installed
@@ -71,48 +72,14 @@ one base64 line off stdin into a shell variable with no re-interpretation of its
 result as a single argument with no word-splitting or glob expansion. `scriptPath` itself (e.g.
 `<agmsg_path>/scripts/send.sh`) goes through the `validRemotePath`-then-`shellQuotePath` path this
 document already documents for `cwd`, since it is an operator-configured filesystem path, not
-agent-authored text, and is embedded directly in the command string. `send.sh` does its own SQL
-escaping internally, so encoding/transport is the only escaping layer panemux is responsible for.
-See `buildBoardCommand` and `RunBoardCommand` in `internal/session/ssh.go` (shared by `SSHSession`
-and `TmuxSSHSession` via `runBoardCommandOverSSH`) for the implementation.
-
-**Three prior approaches on PR #163 did not satisfy CodeQL, and the reasons why matter for future
-work against this repository's CodeQL bar.** The first revision base64-encoded each argument and
-embedded the *encoded* literal inline in the command string (regex-checked against the base64
-alphabet, then single-quoted) — structurally mirroring `validRemotePath`-then-`shellQuotePath`, but
-CodeQL's `go/command-injection` query still reported 2 critical alerts (one per `RunBoardCommand`
-call site). The second revision made the allowlist check return an error on mismatch instead of
-silently falling back to a default value, exactly matching `validateRemotePath`'s early-return
-shape — and CodeQL flagged the exact same 2 alerts again. Both attempts missed the actual issue: on
-the *success* path (the only path that matters in practice, since the encoding can't fail), the
-checked, encoded value was still concatenated into the string handed to `Session.Output` either
-way. A regex check does not remove a value from a taint-tracking dataflow graph merely because the
-check passed — the value still reaches the sink on the path that matters, regardless of how the
-failure path is handled.
-
-The third revision moved every argument out of the command string entirely via the stdin mechanism
-described above, but still took a single `args []string` parameter with the script path at
-`args[0]` — the same combined-slice shape `RunBoardCommand` had always used. CodeQL cleared the
-`tmux_ssh.go` alert (that file's `RunBoardCommand` no longer builds a command string at all, just
-delegates) but kept flagging the shared `runBoardCommandOverSSH` helper in `ssh.go`, at the same
-`Session.Output` call, even though that function's command-string construction only ever reads
-`args[0]` (already regex-validated) and integer loop indices — never `args[i]` for `i > 0`. The
-only plausible explanation: this repository's CodeQL setup does not track slice-index provenance
-precisely enough to distinguish "`args[0]`, which is validated" from "`args[i]`, which isn't" — once
-*any* read from a slice is tainted (because *some* caller passes agent-authored content into it),
-*every* read from that slice, including the one this function's own `validateRemotePath` call had
-already made safe, is treated as tainted too.
-
-**The fix that actually cleared both alerts is `RunBoardCommand(ctx, scriptPath string, args
-[]string)` — splitting the script path into its own parameter, never read from the same slice as
-untrusted argument content.** This removes the ambiguity at the type level: `buildBoardCommand`'s
-command-string-building code touches `scriptPath` (a distinct variable, never derived from `args`)
-and integers only, so there is no slice read for a coarse, index-insensitive taint model to
-conflate. The general lesson for this repository's CodeQL bar, beyond this one feature: when a
-function accepts both a trusted, validated value and an untrusted collection, keep them as
-genuinely separate parameters, not different indices of one combined slice or map — even when the
-trusted value is validated with the same rigor `cwd` already establishes as sufficient elsewhere.
-See `docs/agent-board.md`'s "Open implementation question" for the full account.
+agent-authored text, and is embedded directly in the command string — kept in its own function
+parameter, never read from the same slice as `args`, so a trusted validated value and an untrusted
+collection are never different indices of one combined slice (see
+[DECISIONLOG.md](DECISIONLOG.md#message-body-escaping-three-attempts-before-one-satisfied-codeql-2026-08-08-pr-163)
+for why that split matters). `send.sh` does its own SQL escaping internally, so encoding/transport
+is the only escaping layer panemux is responsible for. See `buildBoardCommand` and
+`RunBoardCommand` in `internal/session/ssh.go` (shared by `SSHSession` and `TmuxSSHSession` via
+`runBoardCommandOverSSH`) for the implementation.
 
 `send.sh` and `api.sh` are the only board-related commands panemux itself ever executes remotely;
 each runs against agmsg's own local store on that host. panemux only ever detects an existing agmsg
@@ -162,3 +129,4 @@ This exception is limited to matching OpenSSH `known_hosts` host patterns. It do
 - Implementation structure: [architecture.md](architecture.md)
 - Runtime behavior and SSH configuration rules: [behavior.md](behavior.md)
 - Developer workflow rules: [../DEVELOPMENT.md](../DEVELOPMENT.md)
+- Decision history and rationale: [DECISIONLOG.md](DECISIONLOG.md)
