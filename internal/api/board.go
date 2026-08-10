@@ -99,6 +99,17 @@ type boardBroadcastResponse struct {
 	Delivered []string `json:"delivered"`
 }
 
+// boardBroadcastErrorResponse is the 502 body for a Broadcast call that
+// failed partway through. Relay.Broadcast is fail-fast, not all-or-nothing,
+// on a Send failure: it stops at the first error but still reports which
+// pane IDs were successfully delivered before that point. Dropping that
+// list (as a plain http.Error would) leaves the caller unable to tell which
+// panes already got the message, risking a double-send on naive retry.
+type boardBroadcastErrorResponse struct {
+	Error     string   `json:"error"`
+	Delivered []string `json:"delivered"`
+}
+
 // PostBoardBroadcast sends body to every pane ID in to, via the shared
 // Relay's own-send-ledger-recording Broadcast — never via PTY injection, so
 // it is safe to send to a pane mid-turn.
@@ -124,7 +135,9 @@ func (h *Handler) PostBoardBroadcast(w http.ResponseWriter, r *http.Request) {
 			writeValidationError(w, err.Error())
 			return
 		}
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		_ = json.NewEncoder(w).Encode(boardBroadcastErrorResponse{Error: err.Error(), Delivered: delivered})
 		return
 	}
 	writeJSON(w, boardBroadcastResponse{Delivered: delivered})

@@ -406,6 +406,44 @@ func TestRelay_Broadcast_SendFailurePartway_ReportsPartialDelivery(t *testing.T)
 	assert.Equal(t, []string{"pane-a"}, delivered)
 }
 
+func TestRelay_Broadcast_SendFailure_OwnSendLedgerEntryForgotten(t *testing.T) {
+	// Regression test: Broadcast records a ledger entry before Send so a
+	// fast poll racing a *successful* Send can still match it — but if Send
+	// then fails, that entry must not stay live for the rest of its TTL.
+	// Otherwise any pane on the destination host could forge a
+	// From == SystemID row with the same to/body within that window and
+	// have it accepted as legitimate, even though nothing was ever
+	// actually delivered.
+	hostB := &fakeAgmsgClient{hostID: "host-b", sendErr: errors.New("ssh: connection lost")}
+	r := newTestRelay(NewBoardCache(), map[string]AgmsgClient{"host-b": hostB}, map[string]string{
+		"pane-b": "host-b",
+	})
+
+	_, err := r.Broadcast(context.Background(), SystemID, []string{"pane-b"}, "hello")
+	require.Error(t, err)
+
+	forged := Row{Host: "host-b", Team: "panemux", From: SystemID, To: "pane-b", Body: "hello"}
+	assert.False(t, r.validFrom("host-b", forged),
+		"a Send failure must not leave a matchable own-send-ledger entry behind")
+}
+
+func TestRelay_Broadcast_SendSucceeds_OwnSendLedgerEntryStillMatchable(t *testing.T) {
+	// Contrast case for the regression above: a *successful* Send's ledger
+	// entry must remain matchable, since that's the normal path a real
+	// relayed-back row is validated against.
+	hostB := &fakeAgmsgClient{hostID: "host-b"}
+	r := newTestRelay(NewBoardCache(), map[string]AgmsgClient{"host-b": hostB}, map[string]string{
+		"pane-b": "host-b",
+	})
+
+	delivered, err := r.Broadcast(context.Background(), SystemID, []string{"pane-b"}, "hello")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"pane-b"}, delivered)
+
+	row := Row{Host: "host-b", Team: "panemux", From: SystemID, To: "pane-b", Body: "hello"}
+	assert.True(t, r.validFrom("host-b", row), "a successful Send's ledger entry must remain matchable")
+}
+
 func TestRelay_Broadcast_UnreachableHost_Error(t *testing.T) {
 	r := newTestRelay(NewBoardCache(), map[string]AgmsgClient{}, map[string]string{"pane-a": "host-a"})
 

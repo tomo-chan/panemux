@@ -12,7 +12,11 @@
 > `/ws/{sessionID}` — see [Security model](#security-model) and
 > [security.md](security.md#auth-token-and-transport-encryption) for why those stay unauthenticated
 > for now. `setupBoard` in `board.go` (`package main`) builds the `AgmsgClient`s and pane→host map
-> from config at startup and wires the relay goroutine into `main.go`'s lifecycle. Still design-only:
+> from config at startup and wires the relay goroutine into `main.go`'s lifecycle. A remote host's
+> `RemoteAgmsgClient` is handed a `dynamicBoardExecutor` (`board.go`), which re-resolves a live
+> `BoardExecutor` session on that host on every call rather than holding the one pane's session found
+> at startup — an ordinary pane restart/delete of whichever pane was picked first must not
+> permanently break board traffic for the rest of that host. Still design-only:
 > the PTY bootstrap flow (process detection, the one-time onboarding instruction), `/ws/board-command`,
 > `GET /api/board/command/history`, and the command center itself — none of that exists yet, so this
 > document's bootstrap/command-center sections below are not reachable through any current config or
@@ -1064,7 +1068,11 @@ that shaped the design.
   short-lived **own-send ledger** of `Send` calls it issued itself (see [Cross-host
   relay](#cross-host-relay) and [Package layout](#package-layout)) — is what closes this: a
   `_system`-attributed row is only accepted if it corresponds to a send panemux's own broadcast
-  handler or command center actually made, never on the strength of the string alone.
+  handler or command center actually made, never on the strength of the string alone. The ledger
+  entry is recorded immediately before the `Send` call (needed so a fast poll racing a *successful*
+  `Send` still matches it) and is explicitly forgotten again if that `Send` then fails — otherwise a
+  failed send would leave a live, matchable entry for the rest of its TTL with nothing ever actually
+  delivered behind it, which any pane on the destination host could exploit within that window.
 - **The command center's `/ws/board-command` and `/api/board/command/history` are gated by the same
   bearer token as everything else, and that gate is the entire authorization model for messaging
   any pane from the command center** — see [Command center](#command-center). There is deliberately

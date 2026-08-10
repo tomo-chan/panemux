@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"time"
 
@@ -96,10 +97,14 @@ func distinctBoardHosts(paneHosts map[string]string) []string {
 
 // newAgmsgClientForHost builds the AgmsgClient for host. For the local host
 // this never fails. For a remote host it needs a live session on that host
-// implementing board.BoardExecutor to resolve agent_board.agmsg_path's
-// leading ~/ against the remote $HOME — if no board-enabled pane on that
-// host currently has a started session, the host is skipped with a
-// warning rather than failing startup.
+// implementing board.BoardExecutor, at least once, to resolve
+// agent_board.agmsg_path's leading ~/ against the remote $HOME — if no
+// board-enabled pane on that host currently has a started session, the host
+// is skipped with a warning rather than failing startup. The RemoteAgmsgClient
+// itself is handed a dynamicBoardExecutor, not that one-time snapshot,
+// so it keeps working across the relay's lifetime even if the particular
+// pane used to resolve agmsg_path is later restarted or deleted — see
+// dynamicBoardExecutor's own comment for why a fixed snapshot is wrong here.
 func newAgmsgClientForHost(
 	cfg *config.Config, manager *session.Manager, paneHosts map[string]string, host string,
 ) (board.AgmsgClient, bool) {
@@ -119,7 +124,37 @@ func newAgmsgClientForHost(
 		return nil, false
 	}
 
-	return board.NewRemoteAgmsgClient(host, path, executor), true
+	dynamicExecutor := &dynamicBoardExecutor{manager: manager, paneHosts: paneHosts, host: host}
+	return board.NewRemoteAgmsgClient(host, path, dynamicExecutor), true
+}
+
+// dynamicBoardExecutor re-resolves a live session on host via
+// findBoardExecutor on every call, rather than holding one session found at
+// startup for the relay's entire lifetime. A fixed snapshot would bind a
+// whole remote host's board features to whichever single pane happened to
+// be picked first: an ordinary pane restart or delete (unrelated to Agent
+// Board) closes that pane's underlying SSH client, and nothing would ever
+// notice or fail over to another live pane on the same host, so board
+// traffic to/from that host would silently and permanently break until the
+// entire panemux process restarted. Re-resolving keeps working as long as
+// any board-enabled pane on host has a live session, regardless of which
+// one that is at any given moment.
+type dynamicBoardExecutor struct {
+	manager   *session.Manager
+	paneHosts map[string]string
+	host      string
+}
+
+func (d *dynamicBoardExecutor) RunBoardCommand(ctx context.Context, args []string) ([]byte, error) {
+	executor, ok := findBoardExecutor(d.manager, d.paneHosts, d.host)
+	if !ok {
+		return nil, fmt.Errorf("agent board: no reachable session for host %q", d.host)
+	}
+	out, err := executor.RunBoardCommand(ctx, args)
+	if err != nil {
+		return nil, fmt.Errorf("agent board: %w", err)
+	}
+	return out, nil
 }
 
 // findBoardExecutor returns a board.BoardExecutor for host by finding any

@@ -410,7 +410,11 @@ Request body:
 - `400`: invalid JSON
 - `422`: `to` is empty, `body` is empty, or `to` names one or more pane IDs the relay doesn't know
   about (`board.UnknownPaneError`, which names every unresolvable pane ID at once)
-- `502`: a downstream `AgmsgClient`/SSH error while relaying to a resolved pane's host
+- `502`: a downstream `AgmsgClient`/SSH error while relaying to a resolved pane's host. Broadcasting
+  is fail-fast, not all-or-nothing, once every `to` ID has resolved: it stops at the first `Send`
+  failure, so an earlier pane in `to` may already have received the message. The response body is
+  `{ "error": "...", "delivered": ["pane-a"] }` — the pane IDs successfully delivered to before the
+  failure — so the caller can tell which panes to avoid re-sending to on retry.
 - `200`: `{ "delivered": ["pane-a", "pane-b"] }`, the pane IDs the broadcast actually reached
 
 ## WebSocket Protocol

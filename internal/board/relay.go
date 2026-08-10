@@ -283,10 +283,14 @@ func (e *UnknownPaneError) Error() string {
 // an own-send-ledger entry is recorded for each target immediately before
 // its Send — matching exactly what the relay's own from-validation later
 // checks for such a row, closing the from-forgery gap docs/security.md and
-// docs/agent-board.md describe. On a resolved-but-unreachable-host or a
-// Send failure, Broadcast stops at the first failure and returns the pane
-// IDs successfully delivered so far, plus the error (fail-fast — a
-// deliberate PR2 simplification, not an oversight).
+// docs/agent-board.md describe. If that Send then fails, the just-recorded
+// entry is immediately forgotten again: leaving it live would let any pane
+// on that destination host impersonate SystemID for up to the ledger's TTL
+// with nothing ever actually delivered behind it. On a
+// resolved-but-unreachable-host or a Send failure, Broadcast stops at the
+// first failure and returns the pane IDs successfully delivered so far,
+// plus the error (fail-fast — a deliberate PR2 simplification, not an
+// oversight).
 func (r *Relay) Broadcast(ctx context.Context, from string, to []string, body string) ([]string, error) {
 	hosts := make(map[string]string, len(to))
 	var unknown []string
@@ -313,6 +317,9 @@ func (r *Relay) Broadcast(ctx context.Context, from string, to []string, body st
 			r.ledger.Record(host, r.team, pane, body)
 		}
 		if err := client.Send(ctx, r.team, from, pane, body); err != nil {
+			if from == SystemID {
+				r.ledger.Forget(host, r.team, pane, body)
+			}
 			return delivered, fmt.Errorf("agent board: broadcast to %q failed: %w", pane, err)
 		}
 		delivered = append(delivered, pane)

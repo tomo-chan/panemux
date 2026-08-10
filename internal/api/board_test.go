@@ -188,6 +188,29 @@ func TestPostBoardBroadcast_GenericError_502(t *testing.T) {
 
 	rec := postBoardBroadcast(t, r, boardBroadcastRequest{To: []string{"pane-a"}, Body: "hello"})
 	assert.Equal(t, http.StatusBadGateway, rec.Code)
+	var resp boardBroadcastErrorResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.Contains(t, resp.Error, "ssh: connection lost")
+	assert.Empty(t, resp.Delivered)
+}
+
+func TestPostBoardBroadcast_PartialFailure_502ReportsDelivered(t *testing.T) {
+	// Relay.Broadcast is fail-fast, not all-or-nothing, on a Send failure: it
+	// stops at the first error but reports every pane ID it successfully
+	// delivered to before that point. The handler must forward that partial
+	// list rather than discarding it, so a caller can tell which panes
+	// already got the message instead of risking a double-send on retry.
+	h := setupBoardRouter(board.NewBoardCache(), func(_ context.Context, to []string, body string) ([]string, error) {
+		return []string{"pane-a"}, errors.New("agent board: broadcast to \"pane-b\" failed: ssh timeout")
+	})
+	r := setupRouterWithHandler(h)
+
+	rec := postBoardBroadcast(t, r, boardBroadcastRequest{To: []string{"pane-a", "pane-b"}, Body: "hello"})
+	assert.Equal(t, http.StatusBadGateway, rec.Code)
+	var resp boardBroadcastErrorResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.Equal(t, []string{"pane-a"}, resp.Delivered)
+	assert.Contains(t, resp.Error, "pane-b")
 }
 
 func TestPostBoardBroadcast_Success_200WithDelivered(t *testing.T) {

@@ -74,3 +74,19 @@ func (l *ownSendLedger) Consume(destHost, team, to, body string) bool {
 	delete(l.entries, key)
 	return !l.now().After(expiry)
 }
+
+// Forget removes an entry that was Recorded for a Send that then failed, so
+// it never actually reached the destination host. Record happens before the
+// Send call, not after it succeeds, because a fast poll racing the Send
+// itself must already see the entry once delivery genuinely happens — but
+// that means a failed Send would otherwise leave a live, matchable entry
+// for up to the full TTL with nothing behind it, which any pane on
+// destHost could exploit by producing a row with From == SystemID and a
+// body whose hash it happens to match. Forget closes that window
+// immediately instead of waiting out the TTL.
+func (l *ownSendLedger) Forget(destHost, team, to, body string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	key := ownSendKey{DestHost: destHost, Team: team, To: to, BodyHash: bodyHash(body)}
+	delete(l.entries, key)
+}

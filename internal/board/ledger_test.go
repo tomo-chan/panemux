@@ -92,3 +92,34 @@ func TestOwnSendLedger_UnexpiredEntry_StillMatchable(t *testing.T) {
 	l.now = fixedClock(start.Add(2 * time.Second))
 	assert.True(t, l.Consume("host-b", "team", "pane-x", "hello"))
 }
+
+func TestOwnSendLedger_Forget_RemovesEntryBeforeItExpires(t *testing.T) {
+	// Regression test: a Send that fails after Record must not leave a
+	// live, matchable entry for the rest of the TTL window — that would let
+	// any pane on destHost forge a From == SystemID row until the entry
+	// naturally expired, even though panemux never actually delivered
+	// anything with that body to that host.
+	l := newOwnSendLedger()
+	l.Record("host-b", "team", "pane-x", "hello")
+
+	l.Forget("host-b", "team", "pane-x", "hello")
+
+	assert.False(t, l.Consume("host-b", "team", "pane-x", "hello"), "forgotten entry must not match")
+}
+
+func TestOwnSendLedger_Forget_NoMatchingEntry_NoPanicNoOp(t *testing.T) {
+	l := newOwnSendLedger()
+	l.Forget("host-b", "team", "pane-x", "hello")
+	assert.False(t, l.Consume("host-b", "team", "pane-x", "hello"))
+}
+
+func TestOwnSendLedger_Forget_OnlyRemovesMatchingKey(t *testing.T) {
+	l := newOwnSendLedger()
+	l.Record("host-b", "team", "pane-x", "hello")
+	l.Record("host-b", "team", "pane-y", "hello")
+
+	l.Forget("host-b", "team", "pane-x", "hello")
+
+	assert.False(t, l.Consume("host-b", "team", "pane-x", "hello"), "forgotten entry must not match")
+	assert.True(t, l.Consume("host-b", "team", "pane-y", "hello"), "unrelated entry must be unaffected")
+}
