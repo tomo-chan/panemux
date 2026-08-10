@@ -36,6 +36,16 @@ var validClaudeSessionID = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 const (
 	interactiveAgentCodex  = "codex"
 	interactiveAgentClaude = "claude"
+
+	// agmsgTypeClaudeCode, agmsgTypeGemini, and agmsgTypeOpencode are
+	// agmsgDetectableAgentTypes' own agmsg-recognized type/binary-name
+	// strings, factored out purely to satisfy goconst's package-wide
+	// duplicate-literal check (their many other occurrences are all in
+	// _test.go files, which goconst deliberately excludes — see
+	// .golangci.yml).
+	agmsgTypeClaudeCode = "claude-code"
+	agmsgTypeGemini     = "gemini"
+	agmsgTypeOpencode   = "opencode"
 )
 
 // LocalSession is a local PTY-based terminal session.
@@ -169,6 +179,25 @@ func (s *LocalSession) GetActiveWorkdirs() ([]string, error) {
 	return resolveInteractiveAgentWorkdirs(processes, pid, baseCWD)
 }
 
+// DetectInteractiveAgentType reports the agmsg type name of any live agent
+// process currently running as a descendant of this pane's shell, among
+// agmsgDetectableAgentTypes. It skips the transcript/workdir resolution
+// GetActiveWorkdirs does, so it's cheap enough to poll frequently — see
+// AgentTypeDetector.
+func (s *LocalSession) DetectInteractiveAgentType() (string, bool, error) {
+	if s.pid == 0 {
+		return "", false, errors.New("session has no PID")
+	}
+
+	processes, err := listProcessesFn()
+	if err != nil {
+		return "", false, err
+	}
+
+	_, agmsgType, ok := newestKnownAgentTypeDescendantPID(processes, s.pid)
+	return agmsgType, ok, nil
+}
+
 func getPIDCWD(pid int) (string, error) {
 	switch runtime.GOOS {
 	case "linux":
@@ -260,12 +289,124 @@ func parsePSOutput(out []byte) ([]processInfo, error) {
 }
 
 func newestInteractiveAgentDescendantPID(processes []processInfo, rootPID int) (int, bool) {
+	return newestMatchingDescendantPID(processes, rootPID, isInteractiveAgentCommand)
+}
+
+// agmsgAgentType describes one agmsg-recognized agent type panemux can
+// detect via process name.
+type agmsgAgentType struct {
+	agmsgType string   // the exact type name agmsg's own scripts expect (join.sh/whoami.sh/delivery.sh's <type> argument)
+	patterns  []string // binary basenames; a trailing "*" matches as a prefix, mirroring agmsg's own detect_proc syntax
+	// excludeTokens: if any of these appear as an argument, this is a
+	// known headless/non-interactive invocation of the same binary and
+	// must not match — mirrors isInteractiveAgentCommand's existing
+	// claude/codex exclusions.
+	excludeTokens []string
+}
+
+// agmsgDetectableAgentTypes mirrors agmsg's own type.conf `detect_proc` key
+// for every type that declares one (verified against agmsg v1.1.13,
+// github.com/fujibee/agmsg/scripts/drivers/types/<type>/type.conf, 2026-08).
+// agmsg itself does NOT attempt process-based detection for antigravity,
+// copilot, or hermes (all three use `detect=explicit` instead — agmsg's own
+// maintainers judged process-name detection unreliable for them), and
+// agmsg-app is not a spawnable CLI at all (it's the desktop app's own
+// human-user identity). Agent Board's bootstrap flow inherits this same
+// boundary rather than inventing a wider one panemux can't independently
+// verify: an operator on one of the undetectable types can still join
+// agmsg by hand.
+//
+// The claude-code and codex exclude-token lists are independently
+// confirmed via agmsg's own template.md wording (claude -p/--print, codex
+// exec are explicitly called out as non-interactive). No equivalent
+// headless-invocation carve-out is documented for the other four types as
+// of the verified version; treat their absence here as "not documented",
+// not as a positive claim that no such flag exists.
+var agmsgDetectableAgentTypes = []agmsgAgentType{
+	{
+		agmsgType: agmsgTypeClaudeCode, patterns: []string{interactiveAgentClaude, agmsgTypeClaudeCode, "claude-*"},
+		excludeTokens: []string{"-p", "--print"},
+	},
+	{
+		agmsgType: interactiveAgentCodex, patterns: []string{interactiveAgentCodex, "codex-*"},
+		excludeTokens: []string{"exec"},
+	},
+	{agmsgType: "cursor", patterns: []string{"cursor-agent", "cursor-agent-*"}},
+	{agmsgType: agmsgTypeGemini, patterns: []string{agmsgTypeGemini, "gemini-*"}},
+	{agmsgType: "grok-build", patterns: []string{"grok", "grok-*"}},
+	{agmsgType: agmsgTypeOpencode, patterns: []string{agmsgTypeOpencode, "opencode-*"}},
+}
+
+// detectAgmsgAgentType reports the agmsg type name of command, if it
+// matches one of agmsgDetectableAgentTypes and isn't a known headless
+// invocation of that same binary.
+func detectAgmsgAgentType(command string) (string, bool) {
+	fields := strings.Fields(command)
+	if len(fields) == 0 {
+		return "", false
+	}
+	binary := strings.ToLower(filepath.Base(fields[0]))
+	for _, t := range agmsgDetectableAgentTypes {
+		if !matchesAnyAgentPattern(binary, t.patterns) {
+			continue
+		}
+		if containsAnyToken(fields[1:], t.excludeTokens...) {
+			return "", false
+		}
+		return t.agmsgType, true
+	}
+	return "", false
+}
+
+func matchesAnyAgentPattern(binary string, patterns []string) bool {
+	for _, p := range patterns {
+		if prefix, ok := strings.CutSuffix(p, "*"); ok {
+			if strings.HasPrefix(binary, prefix) {
+				return true
+			}
+		} else if binary == p {
+			return true
+		}
+	}
+	return false
+}
+
+// newestKnownAgentTypeDescendantPID is AgentTypeDetector's primitive: like
+// newestInteractiveAgentDescendantPID, but matches any of
+// agmsgDetectableAgentTypes (not just claude/codex) and reports which type
+// matched, since Agent Board's bootstrap instruction differs by type.
+func newestKnownAgentTypeDescendantPID(processes []processInfo, rootPID int) (pid int, agmsgType string, ok bool) {
+	children := childProcessMap(processes)
+	stack := append([]processInfo(nil), children[rootPID]...)
+
+	if proc, found := processByPID(processes, rootPID); found {
+		if t, matched := detectAgmsgAgentType(proc.Command); matched {
+			pid, agmsgType, ok = rootPID, t, true
+		}
+	}
+
+	for len(stack) > 0 {
+		proc := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		stack = append(stack, children[proc.PID]...)
+
+		if t, matched := detectAgmsgAgentType(proc.Command); matched {
+			if !ok || proc.PID > pid {
+				pid, agmsgType, ok = proc.PID, t, true
+			}
+		}
+	}
+
+	return pid, agmsgType, ok
+}
+
+func newestMatchingDescendantPID(processes []processInfo, rootPID int, match func(string) bool) (int, bool) {
 	children := childProcessMap(processes)
 	stack := append([]processInfo(nil), children[rootPID]...)
 	matched := 0
 	ok := false
 
-	if proc, found := processByPID(processes, rootPID); found && isInteractiveAgentCommand(proc.Command) {
+	if proc, found := processByPID(processes, rootPID); found && match(proc.Command) {
 		matched = rootPID
 		ok = true
 	}
@@ -275,7 +416,7 @@ func newestInteractiveAgentDescendantPID(processes []processInfo, rootPID int) (
 		stack = stack[:len(stack)-1]
 		stack = append(stack, children[proc.PID]...)
 
-		if isInteractiveAgentCommand(proc.Command) {
+		if match(proc.Command) {
 			if !ok || proc.PID > matched {
 				matched = proc.PID
 				ok = true

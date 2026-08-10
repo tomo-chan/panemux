@@ -63,7 +63,7 @@ Optional capability interfaces extend the base `Session` contract without breaki
 - `CWDGetter` — implemented by `LocalSession` and `SSHSession`; returns the live working directory of the running shell. `LocalSession` reads it via `lsof` (macOS) or `/proc/<pid>/cwd` (Linux). `SSHSession` runs `pwd` over a new exec channel on the existing SSH connection.
 - `SSHConnNamer` — implemented by `SSHSession`; returns the panemux connection alias used when building the `code --remote ssh-remote+<host>` command.
 
-### `internal/board` (relay + REST status/messages/broadcast implemented; bootstrap and command center still planned)
+### `internal/board` (relay, REST status/messages/broadcast, and bootstrap implemented; command center still planned)
 
 A package that replaces transcript-based Claude activity inference with a self-reported channel:
 panes report status (including branch/PR/cwd, gathered by the agent's own `git`/`gh` calls rather
@@ -80,10 +80,14 @@ The package's foundational pieces are implemented and tested: `Row`/`Status` and
 model](agent-board.md#security-model) describes), and the two `AgmsgClient` implementations —
 `LocalAgmsgClient` (plain `exec.Command`, no shell involved) and `RemoteAgmsgClient` (the SSH exec
 channel, with the base64-encode-then-allowlist body escaping and identifier allowlisting
-[security.md](security.md#agent-board-remote-writes) describes). Two new optional session capability
-interfaces, `BoardHostID` and `BoardExecutor`, extend the same pattern as
+[security.md](security.md#agent-board-remote-writes) describes). Three new optional session capability
+interfaces, `BoardHostID`, `BoardExecutor`, and `AgentTypeDetector`, extend the same pattern as
 `CWDGetter`/`ActiveWorkdirGetter` above and are implemented on all four session types
-(`BoardHostID`) and on `SSHSession`/`TmuxSSHSession` (`BoardExecutor`'s `RunBoardCommand`).
+(`BoardHostID`, `AgentTypeDetector`) and on `SSHSession`/`TmuxSSHSession` (`BoardExecutor`'s
+`RunBoardCommand`). `AgentTypeDetector.DetectInteractiveAgentType` is a separate, purpose-built
+primitive for bootstrap (below) — it shares only the generic process-tree-walk helper with the
+pre-existing `ActiveWorkdirGetter`/`isInteractiveAgentCommand` path this section already documents,
+not its Codex/Claude-only matching logic.
 
 Also implemented and tested: the relay goroutine (`internal/board/relay.go`'s `Relay`, run from
 `main.go` via `board.go`'s `setupBoard`) that polls every configured host's agmsg on a schedule,
@@ -98,9 +102,14 @@ That middleware is wired **only** onto the new `/api/board/*` sub-route; every p
 route and `/ws/{sessionID}` remain unauthenticated, since retrofitting auth onto routes the current
 frontend already relies on is a separate, larger change.
 
-Not yet implemented: the bootstrap flow that writes a one-time onboarding instruction into a pane's
-PTY, the `/ws/board-command` WS endpoint, `GET /api/board/command/history`, and the command center
-itself.
+Also implemented and tested: the bootstrap flow (`bootstrapWatcher` in `bootstrap.go`, `package
+main`) that polls board-enabled panes via `AgentTypeDetector` for a newly started, agmsg-detectable
+agent process and writes a one-time onboarding instruction into that pane's PTY (the same
+`Session.Write` path used for real terminal input) — see [agent-board.md's Bootstrap
+flow](agent-board.md#bootstrap-flow) for the full detection/debounce/persistence algorithm.
+
+Not yet implemented: the `/ws/board-command` WS endpoint, `GET /api/board/command/history`, and the
+command center itself.
 
 The same design also specifies a **command center**: a single headless `claude -p --resume`
 subprocess, invoked per query, that reads and writes the board exclusively through panemux's own

@@ -767,6 +767,46 @@ func TestActiveRemoteWorkdirFromSessionFactory_UsesSeparateRunners(t *testing.T)
 	assert.Equal(t, 4, index)
 }
 
+func TestDetectRemoteAgentTypeFromSessionFactory_FindsGemini(t *testing.T) {
+	outputs := map[string][]byte{
+		sshShellPIDCmd:      []byte("220\n"),
+		sshListProcessesCmd: []byte(" 220 1 zsh\n 240 220 gemini\n"),
+	}
+	factory := func() (sshSessionRunner, error) {
+		return &fakeSSHRunner{outputs: outputs}, nil
+	}
+
+	agmsgType, ok, err := detectRemoteAgentTypeFromSessionFactory(factory)
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, "gemini", agmsgType)
+}
+
+func TestDetectRemoteAgentTypeFromSessionFactory_IgnoresHeadlessCodex(t *testing.T) {
+	outputs := map[string][]byte{
+		sshShellPIDCmd:      []byte("220\n"),
+		sshListProcessesCmd: []byte(" 220 1 zsh\n 240 220 codex exec\n"),
+	}
+	factory := func() (sshSessionRunner, error) {
+		return &fakeSSHRunner{outputs: outputs}, nil
+	}
+
+	agmsgType, ok, err := detectRemoteAgentTypeFromSessionFactory(factory)
+	require.NoError(t, err)
+	assert.False(t, ok)
+	assert.Empty(t, agmsgType)
+}
+
+func TestDetectRemoteAgentTypeFromSessionFactory_ShellPIDError_Propagated(t *testing.T) {
+	factory := func() (sshSessionRunner, error) {
+		return &fakeSSHRunner{outputs: map[string][]byte{}}, nil
+	}
+
+	_, ok, err := detectRemoteAgentTypeFromSessionFactory(factory)
+	require.Error(t, err)
+	assert.False(t, ok)
+}
+
 func TestActiveRemoteWorkdir_RootPIDScopesRemoteAgents(t *testing.T) {
 	runner := &fakeSSHRunner{
 		outputs: map[string][]byte{
@@ -884,6 +924,36 @@ func TestTmuxSSHActiveWorkdirFromSessionFactory_UsesSeparateRunners(t *testing.T
 	// Separate runners are used for: tmux pane info, process list, open-files
 	// probe, and PID cwd fallback.
 	assert.Equal(t, 4, index)
+}
+
+func TestTmuxSSHDetectInteractiveAgentTypeFromSessionFactory_FindsOpencode(t *testing.T) {
+	outputs := map[string][]byte{
+		"tmux display-message -p -t 'demo' '#{pane_pid}\t#{pane_current_path}'": []byte("220\t/repo/main\n"),
+		sshListProcessesCmd: []byte(" 220 1 zsh\n 240 220 opencode\n"),
+	}
+	factory := func() (sshSessionRunner, error) {
+		return &fakeSSHRunner{outputs: outputs}, nil
+	}
+
+	agmsgType, ok, err := tmuxSSHDetectInteractiveAgentTypeFromSessionFactory(factory, "demo")
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, "opencode", agmsgType)
+}
+
+func TestTmuxSSHDetectInteractiveAgentTypeFromSessionFactory_NoKnownAgent(t *testing.T) {
+	outputs := map[string][]byte{
+		"tmux display-message -p -t 'demo' '#{pane_pid}\t#{pane_current_path}'": []byte("220\t/repo/main\n"),
+		sshListProcessesCmd: []byte(" 220 1 zsh\n 230 220 git status\n"),
+	}
+	factory := func() (sshSessionRunner, error) {
+		return &fakeSSHRunner{outputs: outputs}, nil
+	}
+
+	agmsgType, ok, err := tmuxSSHDetectInteractiveAgentTypeFromSessionFactory(factory, "demo")
+	require.NoError(t, err)
+	assert.False(t, ok)
+	assert.Empty(t, agmsgType)
 }
 
 func TestRemoteGitContext_ReturnsBranchAndRepo(t *testing.T) {

@@ -49,31 +49,7 @@ func SaveCursorFile(path string, entries []CursorEntry) error {
 	if err != nil {
 		return fmt.Errorf("encoding relay cursor file: %w", err)
 	}
-	dir := filepath.Dir(path)
-	if mkdirErr := os.MkdirAll(dir, 0750); mkdirErr != nil {
-		return fmt.Errorf("creating relay cursor directory: %w", mkdirErr)
-	}
-	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-*")
-	if err != nil {
-		return fmt.Errorf("creating temp relay cursor file: %w", err)
-	}
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath) // no-op once the rename below succeeds
-
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("writing temp relay cursor file: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("closing temp relay cursor file: %w", err)
-	}
-	if err := os.Chmod(tmpPath, cursorFileMode); err != nil {
-		return fmt.Errorf("setting relay cursor file mode: %w", err)
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		return fmt.Errorf("replacing relay cursor file: %w", err)
-	}
-	return nil
+	return atomicWriteFile(path, data, cursorFileMode, "relay cursor file")
 }
 
 // DefaultCursorFilePath returns ~/.config/panemux/board-relay-cursor.json.

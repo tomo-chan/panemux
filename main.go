@@ -49,7 +49,7 @@ func main() {
 		log.Fatalf("Failed to start sessions: %v", err)
 	}
 
-	boardCache, boardRelay := setupBoard(cfg, manager)
+	boardCache, boardRelay, boardBootstrap := setupBoard(cfg, manager)
 
 	srv := server.New(cfg, manager, boardCache, boardRelay, frontendFS)
 	addr := "http://" + srv.Addr()
@@ -59,7 +59,7 @@ func main() {
 		go openChrome(addr)
 	}
 
-	runServer(srv, manager, boardRelay)
+	runServer(srv, manager, boardRelay, boardBootstrap)
 }
 
 func parseOptions() cliOptions {
@@ -92,7 +92,9 @@ func loadConfig(opts cliOptions) (*config.Config, error) {
 	return cfg, nil
 }
 
-func runServer(srv *server.Server, manager *session.Manager, boardRelay *board.Relay) {
+func runServer(
+	srv *server.Server, manager *session.Manager, boardRelay *board.Relay, boardBootstrap *bootstrapWatcher,
+) {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
@@ -105,6 +107,11 @@ func runServer(srv *server.Server, manager *session.Manager, boardRelay *board.R
 	// panemux users who have never configured agent board at all.
 	if boardRelay.HasClients() {
 		go boardRelay.Run(boardCtx, defaultBoardPollInterval)
+	}
+	// Same reasoning as boardRelay.HasClients() above: no board-enabled pane
+	// at all means every tick would be a guaranteed no-op.
+	if boardBootstrap.HasWork() {
+		go boardBootstrap.Run(boardCtx, defaultBootstrapPollInterval)
 	}
 
 	errCh := make(chan error, 1)

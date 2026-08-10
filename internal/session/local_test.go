@@ -252,6 +252,93 @@ func TestIsInteractiveAgentCommand(t *testing.T) {
 	assert.False(t, isInteractiveAgentCommand("python worker.py"))
 }
 
+func TestDetectAgmsgAgentType(t *testing.T) {
+	tests := []struct {
+		command  string
+		wantType string
+		wantOK   bool
+	}{
+		{"claude", "claude-code", true},
+		{"/usr/local/bin/claude --resume", "claude-code", true},
+		{"claude-code", "claude-code", true},
+		{"claude-code-nightly", "claude-code", true}, // matches the claude-* wildcard
+		{"claude -p", "", false},
+		{"claude --print", "", false},
+		{"codex", "codex", true},
+		{"/usr/local/bin/codex --model gpt-5", "codex", true},
+		{"codex-nightly", "codex", true}, // matches the codex-* wildcard
+		{"codex exec", "", false},
+		{"cursor-agent", "cursor", true},
+		{"gemini", "gemini", true},
+		{"grok", "grok-build", true},
+		{"opencode", "opencode", true},
+		{"python worker.py", "", false},
+		{"", "", false},
+		// Types agmsg itself does not process-detect (detect=explicit in its
+		// own type.conf) must never match here either.
+		{"agy", "", false}, // antigravity's cli
+		{"copilot", "", false},
+		{"hermes", "", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.command, func(t *testing.T) {
+			gotType, gotOK := detectAgmsgAgentType(tc.command)
+			assert.Equal(t, tc.wantOK, gotOK)
+			assert.Equal(t, tc.wantType, gotType)
+		})
+	}
+}
+
+func TestNewestKnownAgentTypeDescendantPID_FindsClaudeAmongOthers(t *testing.T) {
+	processes := []processInfo{
+		{PID: 100, PPID: 1, Command: "/bin/zsh"},
+		{PID: 120, PPID: 100, Command: "codex exec"}, // headless, excluded
+		{PID: 140, PPID: 100, Command: "claude"},
+	}
+
+	pid, agmsgType, ok := newestKnownAgentTypeDescendantPID(processes, 100)
+	require.True(t, ok)
+	assert.Equal(t, 140, pid)
+	assert.Equal(t, "claude-code", agmsgType)
+}
+
+func TestNewestKnownAgentTypeDescendantPID_FindsGemini(t *testing.T) {
+	processes := []processInfo{
+		{PID: 100, PPID: 1, Command: "/bin/zsh"},
+		{PID: 150, PPID: 100, Command: "gemini"},
+	}
+
+	pid, agmsgType, ok := newestKnownAgentTypeDescendantPID(processes, 100)
+	require.True(t, ok)
+	assert.Equal(t, 150, pid)
+	assert.Equal(t, "gemini", agmsgType)
+}
+
+func TestNewestKnownAgentTypeDescendantPID_PrefersNewestAcrossTypes(t *testing.T) {
+	processes := []processInfo{
+		{PID: 100, PPID: 1, Command: "/bin/zsh"},
+		{PID: 140, PPID: 100, Command: "claude"},
+		{PID: 160, PPID: 100, Command: "opencode"},
+	}
+
+	pid, agmsgType, ok := newestKnownAgentTypeDescendantPID(processes, 100)
+	require.True(t, ok)
+	assert.Equal(t, 160, pid)
+	assert.Equal(t, "opencode", agmsgType)
+}
+
+func TestNewestKnownAgentTypeDescendantPID_NoneFound(t *testing.T) {
+	processes := []processInfo{
+		{PID: 100, PPID: 1, Command: "/bin/zsh"},
+		{PID: 110, PPID: 100, Command: "git status"},
+	}
+
+	pid, agmsgType, ok := newestKnownAgentTypeDescendantPID(processes, 100)
+	assert.False(t, ok)
+	assert.Zero(t, pid)
+	assert.Empty(t, agmsgType)
+}
+
 func TestCodexSessionPath(t *testing.T) {
 	path, ok := codexSessionPath([]string{
 		"/tmp/other.log",
@@ -566,6 +653,73 @@ func TestParseClaudeProjectCWD_TrackedBackupTieBreakUsesAlphabeticalLastPath(t *
 	cwd, err := parseClaudeProjectCWD(data)
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Dir(worktreeFile), cwd)
+}
+
+func TestLocalSession_DetectInteractiveAgentType_NoPID_Error(t *testing.T) {
+	sess := &LocalSession{pid: 0}
+	_, _, err := sess.DetectInteractiveAgentType()
+	assert.Error(t, err)
+}
+
+func TestLocalSession_DetectInteractiveAgentType_Present(t *testing.T) {
+	tests := []struct {
+		command  string
+		wantType string
+	}{
+		{"claude", "claude-code"},
+		{"gemini", "gemini"},
+		{"opencode", "opencode"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.command, func(t *testing.T) {
+			sess := &LocalSession{pid: 100}
+
+			original := listProcessesFn
+			t.Cleanup(func() { listProcessesFn = original })
+			listProcessesFn = func() ([]processInfo, error) {
+				return []processInfo{
+					{PID: 100, PPID: 1, Command: "/bin/zsh"},
+					{PID: 110, PPID: 100, Command: tc.command},
+				}, nil
+			}
+
+			agmsgType, ok, err := sess.DetectInteractiveAgentType()
+			require.NoError(t, err)
+			require.True(t, ok)
+			assert.Equal(t, tc.wantType, agmsgType)
+		})
+	}
+}
+
+func TestLocalSession_DetectInteractiveAgentType_NoKnownAgent_False(t *testing.T) {
+	sess := &LocalSession{pid: 100}
+
+	original := listProcessesFn
+	t.Cleanup(func() { listProcessesFn = original })
+	listProcessesFn = func() ([]processInfo, error) {
+		return []processInfo{
+			{PID: 100, PPID: 1, Command: "/bin/zsh"},
+			{PID: 110, PPID: 100, Command: "git status"},
+		}, nil
+	}
+
+	agmsgType, ok, err := sess.DetectInteractiveAgentType()
+	require.NoError(t, err)
+	assert.False(t, ok)
+	assert.Empty(t, agmsgType)
+}
+
+func TestLocalSession_DetectInteractiveAgentType_ListProcessesError_Propagated(t *testing.T) {
+	sess := &LocalSession{pid: 100}
+	wantErr := errors.New("ps failed")
+
+	original := listProcessesFn
+	t.Cleanup(func() { listProcessesFn = original })
+	listProcessesFn = func() ([]processInfo, error) { return nil, wantErr }
+
+	_, _, err := sess.DetectInteractiveAgentType()
+	require.Error(t, err)
+	assert.ErrorIs(t, err, wantErr)
 }
 
 func TestGetActiveWorkdir_NoDescendantMatchReturnsEmpty(t *testing.T) {
@@ -1468,6 +1622,59 @@ func TestDetectLocalShellDscl_NoUserShellLine_Error(t *testing.T) {
 	_, err := detectLocalShellDscl("tomo", runner)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "UserShell not found")
+}
+
+func TestTmuxLocalSession_DetectInteractiveAgentType_ClaudePresent(t *testing.T) {
+	prevTmuxOutput := tmuxLocalOutputFn
+	prevListProcesses := listProcessesFn
+	t.Cleanup(func() {
+		tmuxLocalOutputFn = prevTmuxOutput
+		listProcessesFn = prevListProcesses
+	})
+
+	tmuxLocalOutputFn = func(args ...string) ([]byte, error) {
+		if len(args) == 5 && args[4] == "#{pane_pid}" {
+			return []byte("220\n"), nil
+		}
+		return nil, errors.New("unexpected tmux args")
+	}
+	listProcessesFn = func() ([]processInfo, error) {
+		return []processInfo{
+			{PID: 220, PPID: 1, Command: "/bin/zsh"},
+			{PID: 230, PPID: 220, Command: "claude"},
+		}, nil
+	}
+
+	sess := &TmuxLocalSession{tmuxSession: "demo"}
+	agmsgType, ok, err := sess.DetectInteractiveAgentType()
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, "claude-code", agmsgType)
+}
+
+func TestTmuxLocalSession_DetectInteractiveAgentType_NoKnownAgent_False(t *testing.T) {
+	prevTmuxOutput := tmuxLocalOutputFn
+	prevListProcesses := listProcessesFn
+	t.Cleanup(func() {
+		tmuxLocalOutputFn = prevTmuxOutput
+		listProcessesFn = prevListProcesses
+	})
+
+	tmuxLocalOutputFn = func(args ...string) ([]byte, error) {
+		if len(args) == 5 && args[4] == "#{pane_pid}" {
+			return []byte("220\n"), nil
+		}
+		return nil, errors.New("unexpected tmux args")
+	}
+	listProcessesFn = func() ([]processInfo, error) {
+		return []processInfo{{PID: 220, PPID: 1, Command: "/bin/zsh"}}, nil
+	}
+
+	sess := &TmuxLocalSession{tmuxSession: "demo"}
+	agmsgType, ok, err := sess.DetectInteractiveAgentType()
+	require.NoError(t, err)
+	assert.False(t, ok)
+	assert.Empty(t, agmsgType)
 }
 
 func TestTmuxLocalSessionGetActiveWorkdir_UsesPanePIDAndBaseCWD(t *testing.T) {

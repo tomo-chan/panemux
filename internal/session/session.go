@@ -68,6 +68,20 @@ type ActiveWorkdirGetter interface {
 	GetActiveWorkdirs() ([]string, error)
 }
 
+// AgentTypeDetector is implemented by every session type. It reports the
+// agmsg-recognized type name (e.g. "claude-code", "codex", "gemini") of any
+// live, interactive coding-agent process currently running as a descendant
+// of this pane's shell, among the set agmsg's own type.conf `detect_proc`
+// key considers reliably process-detectable — see agmsgDetectableAgentTypes.
+// This is narrower than ActiveWorkdirGetter (which only distinguishes
+// Codex/Claude, and additionally resolves transcript-derived workdirs at
+// real I/O cost) and returns WHICH type rather than a bare bool, since
+// Agent Board's bootstrap flow writes a different onboarding instruction
+// per agent type.
+type AgentTypeDetector interface {
+	DetectInteractiveAgentType() (agmsgType string, ok bool, err error)
+}
+
 // GitContext describes the repository state for a session's working directory.
 type GitContext struct {
 	Branch    string
