@@ -335,9 +335,18 @@ Full design and rationale live in [agent-board.md](agent-board.md); this section
 request/response shapes and status codes of what is actually implemented today. Unlike every route
 above, every endpoint in this section requires `Authorization: Bearer <server.auth_token>` — see
 [security.md](security.md#auth-token-and-transport-encryption). A missing or incorrect token returns
-`401` before the handler runs. The bootstrap flow, `/ws/board-command`, and `GET
-/api/board/command/history` are not implemented yet and are not documented here — see
-[agent-board.md](agent-board.md)'s status note.
+`401` before the handler runs. `/ws/board-command` and `GET /api/board/command/history` are not
+implemented yet and are not documented here — see [agent-board.md](agent-board.md)'s status note.
+
+**Bootstrap flow** (not a REST/WS endpoint — a background behavior). For every pane with
+`agent_board.enabled: true`, panemux polls every 5s for a live, agmsg-detectable coding-agent
+process (one of six agent types; see [agent-board.md's Bootstrap
+flow](agent-board.md#bootstrap-flow)) and, once detected on two consecutive polls and agmsg is
+confirmed present on that pane's host, writes a one-time onboarding instruction directly into the
+pane's terminal — visible in the browser the same way any other terminal output is. This happens
+with no operator action beyond setting the config flag; there is no API call to trigger or observe
+it directly (its effect is only visible in the pane's own terminal output and, once the agent
+follows the instruction, in `GET /api/board/status`/`/messages` after the relay's next poll).
 
 ### `GET /api/board/status`
 

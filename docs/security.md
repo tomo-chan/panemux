@@ -80,17 +80,42 @@ internally, so `RunBoardCommand` remains responsible only for the POSIX shell es
 including the wrapper script text itself, before the remote command string is built.
 
 `send.sh` and `api.sh` are the two agmsg scripts this design's message read/write path runs
-remotely; each runs against agmsg's own local store on that host. The only other remote command
-panemux itself ever executes is a fixed, non-tainted `sh -c 'printf '%s' "$HOME"'` probe
-(`internal/board/agmsg_path.go`'s `remoteHomeProbeCmd`), run once per remote host to resolve
-`agent_board.agmsg_path`'s leading `~/` against that host's own home directory before it is ever
-placed in a `RunBoardCommand` argument list — see [agent-board.md](agent-board.md)'s "`~` in
-`agmsg_path` is expanded by panemux" section. panemux only ever detects an existing agmsg
-installation — it never installs, updates, or otherwise manages agmsg on the operator's behalf,
-locally or remotely. The relay goroutine that drives this on a schedule (`internal/board/relay.go`)
-and the `/api/board/*` REST surface (`GET /status`, `GET /messages`, `POST /broadcast`) are
-implemented — see [agent-board.md](agent-board.md)'s status note. The bootstrap flow that writes an
-onboarding instruction into a pane's PTY, and the command center, are not yet implemented.
+remotely; each runs against agmsg's own local store on that host. The only other remote commands
+panemux itself ever executes are two fixed, non-tainted `sh -c` probes, neither of which takes any
+caller-supplied data: `internal/board/agmsg_path.go`'s `remoteHomeProbeCmd`
+(`sh -c 'printf '%s' "$HOME"'`), run once per remote host to resolve `agent_board.agmsg_path`'s
+leading `~/` against that host's own home directory before it is ever placed in a `RunBoardCommand`
+argument list — see [agent-board.md](agent-board.md)'s "`~` in `agmsg_path` is expanded by panemux"
+section — and `internal/board/agmsg_presence.go`'s `remoteAgmsgPresenceProbeScript`
+(`test -f "$1" && printf 'yes' || printf 'no'`), run by the bootstrap watcher (and, independently,
+whenever the relay resolves a host's client) to check whether `scripts/api.sh` exists at the
+already-resolved `agmsg_path` before treating that host as bootstrap-eligible. Because
+`remoteAgmsgPresenceProbeScript` takes its one variable input (the path to test) as a positional
+parameter (`$1`), not string-interpolated into the script body, it carries no taint from
+`agent_board.agmsg_path` into the script text itself — the same discipline
+`sendBase64WrapperScript` above uses, just with no caller-supplied value needing a preceding
+regex-allowlist branch at all here, since the path being tested is `agent_board.agmsg_path` already
+resolved to an absolute path by the `~` expansion step, itself derived from operator config, not
+runtime request data. panemux only ever detects an existing agmsg installation — it never installs,
+updates, or otherwise manages agmsg on the operator's behalf, locally or remotely. The relay
+goroutine that drives this on a schedule (`internal/board/relay.go`), the bootstrap watcher
+(`bootstrapWatcher` in `bootstrap.go`, `package main`), and the `/api/board/*` REST surface
+(`GET /status`, `GET /messages`, `POST /broadcast`) are implemented — see
+[agent-board.md](agent-board.md)'s status note. The command center is not yet implemented.
+
+**The bootstrap watcher's PTY write is not a command-execution sink and is out of scope for this
+document's `exec.Command`-focused rules above.** `bootstrapWatcher` writes a synthesized onboarding
+instruction into a pane's PTY via `Session.Write` — the same path real user keystrokes already go
+through — not via `exec.Command`, so none of the shell-argument-escaping or CodeQL taint-chain
+reasoning above applies to that write itself: there is no shell parsing panemux's own Go code
+performs on that text, and no distinction between "trusted" and "tainted" content for a PTY write
+the way there is for a command-string argument. The one identifier bootstrap itself passes into a `RunBoardCommand` call — the already-resolved
+`agmsg_path` used to build the presence probe's `$1` — is quoted with the same `shellQuotePath`-style
+discipline `RunBoardCommand` already applies uniformly to every argument, board-related or not.
+`agent_board.team`, a pane's own ID, and the agmsg-recognized type string
+`session.AgentTypeDetector` returns are written only into the PTY instruction text, never into a
+`RunBoardCommand` call bootstrap itself makes; they are operator config or panemux's own fixed
+detection-table output either way, not external request data.
 
 ### Auth token and transport encryption
 

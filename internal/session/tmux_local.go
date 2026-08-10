@@ -138,6 +138,45 @@ func (s *TmuxLocalSession) GetActiveWorkdirs() ([]string, error) {
 	return tmuxLocalActiveWorkdirs(s.tmuxSession)
 }
 
+// DetectInteractiveAgentType reports the agmsg type name of any live agent
+// process currently running under this tmux pane — see AgentTypeDetector.
+func (s *TmuxLocalSession) DetectInteractiveAgentType() (string, bool, error) {
+	return tmuxLocalDetectInteractiveAgentType(s.tmuxSession)
+}
+
+func tmuxLocalDetectInteractiveAgentType(tmuxSession string) (string, bool, error) {
+	target, err := validateTmuxSessionName(tmuxSession)
+	if err != nil {
+		return "", false, err
+	}
+	out, err := tmuxLocalOutputFn(
+		"display-message",
+		"-p",
+		"-t",
+		target,
+		"#{pane_pid}",
+	)
+	if err != nil {
+		return "", false, fmt.Errorf("tmux pane pid: %w", err)
+	}
+
+	pid, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil {
+		return "", false, fmt.Errorf("parse tmux pane pid: %w", err)
+	}
+	if pid == 0 {
+		return "", false, errors.New("tmux pane pid missing")
+	}
+
+	processes, err := listProcessesFn()
+	if err != nil {
+		return "", false, err
+	}
+
+	_, agmsgType, ok := newestKnownAgentTypeDescendantPID(processes, pid)
+	return agmsgType, ok, nil
+}
+
 func tmuxLocalActiveWorkdirs(tmuxSession string) ([]string, error) {
 	target, err := validateTmuxSessionName(tmuxSession)
 	if err != nil {

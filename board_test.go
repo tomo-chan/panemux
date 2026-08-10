@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"panemux/internal/config"
 	"panemux/internal/session"
 )
 
@@ -185,5 +186,81 @@ func TestExpandLocalAgmsgPath_AbsolutePath_Unchanged(t *testing.T) {
 	got := expandLocalAgmsgPath("/opt/agmsg")
 	if got != "/opt/agmsg" {
 		t.Fatalf("expandLocalAgmsgPath(/opt/agmsg) = %q, want unchanged", got)
+	}
+}
+
+func TestResolveAgmsgPathForHost_Local_ExpandsAgainstLocalHome(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("os.UserHomeDir: %v", err)
+	}
+	cfg := &config.Config{AgentBoard: config.AgentBoardConfig{AgmsgPath: "~/.agents/skills/agmsg"}}
+
+	path, ok := resolveAgmsgPathForHost(cfg, session.NewManager(), nil, boardHostIDLocal)
+	if !ok {
+		t.Fatal("expected ok=true for the local host")
+	}
+	want := filepath.Join(home, ".agents", "skills", "agmsg")
+	if path != want {
+		t.Fatalf("resolveAgmsgPathForHost(local) = %q, want %q", path, want)
+	}
+}
+
+func TestResolveAgmsgPathForHost_RemoteNoReachableSession_False(t *testing.T) {
+	cfg := &config.Config{AgentBoard: config.AgentBoardConfig{AgmsgPath: "/opt/agmsg"}}
+	manager := session.NewManager()
+	paneHosts := map[string]string{"pane-a": "ssh:build-host"}
+
+	_, ok := resolveAgmsgPathForHost(cfg, manager, paneHosts, "ssh:build-host")
+	if ok {
+		t.Fatal("expected ok=false when no session on the host implements BoardExecutor")
+	}
+}
+
+func TestResolveAgmsgPathForHost_Remote_ResolvesViaLiveExecutor(t *testing.T) {
+	cfg := &config.Config{AgentBoard: config.AgentBoardConfig{AgmsgPath: "/opt/agmsg"}}
+	manager := session.NewManager()
+	paneHosts := map[string]string{"pane-a": "ssh:build-host"}
+	manager.Add(&fakeBoardSession{id: "pane-a", tag: "unused-for-absolute-paths"})
+
+	path, ok := resolveAgmsgPathForHost(cfg, manager, paneHosts, "ssh:build-host")
+	if !ok {
+		t.Fatal("expected ok=true when a live BoardExecutor session exists on the host")
+	}
+	if path != "/opt/agmsg" {
+		t.Fatalf("resolveAgmsgPathForHost(remote, absolute path) = %q, want unchanged", path)
+	}
+}
+
+func TestResolveBootstrapPaths_MixOfReachableAndUnreachableHosts(t *testing.T) {
+	cfg := &config.Config{AgentBoard: config.AgentBoardConfig{AgmsgPath: "/opt/agmsg"}}
+	manager := session.NewManager()
+	paneHosts := map[string]string{
+		"pane-a": "ssh:reachable-host",
+		"pane-b": "ssh:unreachable-host",
+	}
+	manager.Add(&fakeBoardSession{id: "pane-a", tag: "unused-for-absolute-paths"})
+
+	resolved := resolveBootstrapPaths(cfg, manager, paneHosts)
+
+	if got, ok := resolved["ssh:reachable-host"]; !ok || got != "/opt/agmsg" {
+		t.Fatalf("resolved[reachable-host] = (%q, %v), want (/opt/agmsg, true)", got, ok)
+	}
+	if _, ok := resolved["ssh:unreachable-host"]; ok {
+		t.Fatal("expected no entry for a host with no reachable BoardExecutor session")
+	}
+}
+
+func TestSetupBoard_ReturnsNonNilBootstrapWatcher(t *testing.T) {
+	cfg := config.Default()
+	manager := session.NewManager()
+
+	_, _, bootstrap := setupBoard(cfg, manager)
+
+	if bootstrap == nil {
+		t.Fatal("expected setupBoard to return a non-nil bootstrapWatcher")
+	}
+	if bootstrap.HasWork() {
+		t.Fatal("expected HasWork()=false for a config with no board-enabled panes")
 	}
 }

@@ -30,19 +30,22 @@ const (
 	boardStartupProbeTimeout = 10 * time.Second
 )
 
-// setupBoard builds the shared BoardCache and Relay from cfg/manager. It
-// never fails startup — agent board is additive, never load-bearing (see
-// docs/agent-board.md's Design principles) — a host whose connection isn't
-// usable simply gets no AgmsgClient and is logged, not fatal.
-func setupBoard(cfg *config.Config, manager *session.Manager) (*board.BoardCache, *board.Relay) {
+// setupBoard builds the shared BoardCache, Relay, and bootstrapWatcher from
+// cfg/manager. It never fails startup — agent board is additive, never
+// load-bearing (see docs/agent-board.md's Design principles) — a host whose
+// connection isn't usable simply gets no AgmsgClient/bootstrap eligibility
+// and is logged, not fatal.
+func setupBoard(cfg *config.Config, manager *session.Manager) (*board.BoardCache, *board.Relay, *bootstrapWatcher) {
 	cache := board.NewBoardCache()
 
 	paneHosts := map[string]string{}
+	paneModes := map[string]string{}
 	for _, pane := range cfg.AllPanes() {
 		if pane.AgentBoard.Enabled == nil || !*pane.AgentBoard.Enabled {
 			continue
 		}
 		paneHosts[pane.ID] = boardHostForPane(pane)
+		paneModes[pane.ID] = pane.AgentBoard.Mode
 	}
 
 	clients := map[string]board.AgmsgClient{}
@@ -71,7 +74,40 @@ func setupBoard(cfg *config.Config, manager *session.Manager) (*board.BoardCache
 		}
 	}
 
-	return cache, relay
+	bootstrap := newBootstrapWatcher(bootstrapWatcherConfig{
+		Manager:       manager,
+		PaneHosts:     paneHosts,
+		PaneModes:     paneModes,
+		ResolvedPaths: resolveBootstrapPaths(cfg, manager, paneHosts),
+		Team:          cfg.AgentBoard.Team,
+		Persist:       persistBootstrapState,
+	})
+	if path, err := board.DefaultBootstrapStateFilePath(); err == nil {
+		if paneIDs, err := board.LoadBootstrapState(path); err == nil {
+			bootstrap.LoadPersistedState(paneIDs)
+		} else {
+			log.Printf("Warning: agent board bootstrap: loading bootstrap state file: %v", err)
+		}
+	}
+
+	return cache, relay, bootstrap
+}
+
+// resolveBootstrapPaths resolves agmsg_path for every distinct board-enabled
+// host, independently of newAgmsgClientForHost's own resolution for the
+// relay's client map — see bootstrapWatcherConfig's ResolvedPaths comment
+// for why this deliberately duplicates that probe rather than sharing its
+// result.
+func resolveBootstrapPaths(
+	cfg *config.Config, manager *session.Manager, paneHosts map[string]string,
+) map[string]string {
+	resolved := map[string]string{}
+	for _, host := range distinctBoardHosts(paneHosts) {
+		if path, ok := resolveAgmsgPathForHost(cfg, manager, paneHosts, host); ok {
+			resolved[host] = path
+		}
+	}
+	return resolved
 }
 
 func persistBoardCursors(entries []board.CursorEntry) {
@@ -82,6 +118,17 @@ func persistBoardCursors(entries []board.CursorEntry) {
 	}
 	if err := board.SaveCursorFile(path, entries); err != nil {
 		log.Printf("Warning: agent board: persisting relay cursor: %v", err)
+	}
+}
+
+func persistBootstrapState(paneIDs []string) {
+	path, err := board.DefaultBootstrapStateFilePath()
+	if err != nil {
+		log.Printf("Warning: agent board bootstrap: resolving bootstrap state file path: %v", err)
+		return
+	}
+	if err := board.SaveBootstrapState(path, paneIDs); err != nil {
+		log.Printf("Warning: agent board bootstrap: persisting bootstrap state: %v", err)
 	}
 }
 
@@ -117,32 +164,54 @@ func distinctBoardHosts(paneHosts map[string]string) []string {
 }
 
 // newAgmsgClientForHost builds the AgmsgClient for host. For the local host
-// this never fails. For a remote host it needs a live session on that host
-// implementing board.BoardExecutor, at least once, to resolve
-// agent_board.agmsg_path's leading ~/ against the remote $HOME — if no
-// board-enabled pane on that host currently has a started session, the host
-// is skipped with a warning rather than failing startup. The RemoteAgmsgClient
-// itself is handed a dynamicBoardExecutor, not that one-time snapshot,
-// so it keeps working across the relay's lifetime even if the particular
-// pane used to resolve agmsg_path is later restarted or deleted — see
-// dynamicBoardExecutor's own comment for why a fixed snapshot is wrong here.
+// this never fails. For a remote host it needs resolveAgmsgPathForHost to
+// succeed (a live session on that host implementing board.BoardExecutor, at
+// least once) — if not, the host is skipped with a warning rather than
+// failing startup. The RemoteAgmsgClient itself is handed a
+// dynamicBoardExecutor, not that one-time snapshot, so it keeps working
+// across the relay's lifetime even if the particular pane used to resolve
+// agmsg_path is later restarted or deleted — see dynamicBoardExecutor's own
+// comment for why a fixed snapshot is wrong here.
 func newAgmsgClientForHost(
 	cfg *config.Config, manager *session.Manager, paneHosts map[string]string, host string,
 ) (board.AgmsgClient, bool) {
+	path, ok := resolveAgmsgPathForHost(cfg, manager, paneHosts, host)
+	if !ok {
+		return nil, false
+	}
 	if host == boardHostIDLocal {
-		// AgentBoard.AgmsgPath is intentionally left un-expanded by
-		// internal/config (see config.go's expandPaths), since a single
-		// config value is shared by every host, local and remote alike.
-		// The local host expands against its own home directory here; a
-		// remote host expands against its own $HOME below, via
-		// ResolveRemoteAgmsgPath's SSH probe.
-		return board.NewLocalAgmsgClient(expandLocalAgmsgPath(cfg.AgentBoard.AgmsgPath)), true
+		return board.NewLocalAgmsgClient(path), true
+	}
+
+	dynamicExecutor := &dynamicBoardExecutor{manager: manager, paneHosts: paneHosts, host: host}
+	return board.NewRemoteAgmsgClient(host, path, dynamicExecutor), true
+}
+
+// resolveAgmsgPathForHost expands agent_board.agmsg_path's leading ~/ for
+// host: locally against panemux's own home directory (AgentBoard.AgmsgPath
+// is intentionally left un-expanded by internal/config — see config.go's
+// expandPaths — since a single config value is shared by every host, local
+// and remote alike), remotely via a bounded SSH $HOME probe using any live
+// BoardExecutor session currently available for that host. Returns
+// ok=false, having already logged a warning naming host, if no live
+// session/executor is reachable or the probe itself fails — callers use
+// this to skip whatever host-scoped resource they were about to build (an
+// AgmsgClient, a bootstrap-eligibility entry) rather than propagating the
+// error further. Shared by newAgmsgClientForHost and the bootstrap
+// watcher's own setup so the two independently-scoped subsystems (relay
+// client construction vs. bootstrap eligibility) never disagree about how
+// a host's agmsg_path resolves, without coupling them to each other.
+func resolveAgmsgPathForHost(
+	cfg *config.Config, manager *session.Manager, paneHosts map[string]string, host string,
+) (string, bool) {
+	if host == boardHostIDLocal {
+		return expandLocalAgmsgPath(cfg.AgentBoard.AgmsgPath), true
 	}
 
 	executors := findBoardExecutors(manager, paneHosts, host)
 	if len(executors) == 0 {
 		log.Printf("Warning: agent board: no reachable session for host %q, skipping", host)
-		return nil, false
+		return "", false
 	}
 
 	probeCtx, cancel := context.WithTimeout(context.Background(), boardStartupProbeTimeout)
@@ -150,11 +219,9 @@ func newAgmsgClientForHost(
 	path, err := board.ResolveRemoteAgmsgPath(probeCtx, executors[0], cfg.AgentBoard.AgmsgPath)
 	if err != nil {
 		log.Printf("Warning: agent board: resolving agmsg_path on host %q: %v", host, err)
-		return nil, false
+		return "", false
 	}
-
-	dynamicExecutor := &dynamicBoardExecutor{manager: manager, paneHosts: paneHosts, host: host}
-	return board.NewRemoteAgmsgClient(host, path, dynamicExecutor), true
+	return path, true
 }
 
 // expandLocalAgmsgPath expands a leading ~/ in path against panemux's own

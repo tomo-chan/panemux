@@ -925,6 +925,14 @@ func (s *SSHSession) GetActiveWorkdirs() ([]string, error) {
 	)
 }
 
+// DetectInteractiveAgentType reports the agmsg type name of any live agent
+// process currently running on this SSH connection — see AgentTypeDetector.
+func (s *SSHSession) DetectInteractiveAgentType() (string, bool, error) {
+	return detectRemoteAgentTypeFromSessionFactory(func() (sshSessionRunner, error) {
+		return s.client.NewSession()
+	})
+}
+
 // InspectGitContext resolves Git metadata on the remote host for the provided
 // absolute working directory.
 func (s *SSHSession) InspectGitContext(cwd string) (GitContext, error) {
@@ -977,6 +985,38 @@ func activeRemoteWorkdirsFromSessionFactory(
 
 func activeRemoteWorkdirs(runner sshSessionRunner, logScope, baseCWD string, rootPID int) ([]string, error) {
 	return activeRemoteWorkdirsWithOutput(runner.Output, logScope, baseCWD, rootPID)
+}
+
+// detectRemoteAgentTypeFromSessionFactory is AgentTypeDetector's SSH
+// primitive: it stops at "which agent type is present", skipping the
+// transcript/workdir resolution activeRemoteWorkdirsFromSessionFactory does
+// afterward — cheap enough to poll frequently.
+func detectRemoteAgentTypeFromSessionFactory(newRunner func() (sshSessionRunner, error)) (string, bool, error) {
+	rootRunner, err := newRunner()
+	if err != nil {
+		return "", false, fmt.Errorf("new ssh session for remote shell pid: %w", err)
+	}
+	defer rootRunner.Close()
+
+	rootPID, err := remoteShellPID(rootRunner)
+	if err != nil {
+		return "", false, err
+	}
+
+	return detectRemoteAgentType(outputFromSessionFactory(newRunner), rootPID)
+}
+
+func detectRemoteAgentType(run remoteOutputFunc, rootPID int) (string, bool, error) {
+	out, err := run(sshListProcessesCmd)
+	if err != nil {
+		return "", false, fmt.Errorf("list remote processes: %w", err)
+	}
+	processes, err := parsePSOutput(append([]byte("PID PPID COMMAND\n"), out...))
+	if err != nil {
+		return "", false, err
+	}
+	_, agmsgType, ok := newestKnownAgentTypeDescendantPID(processes, rootPID)
+	return agmsgType, ok, nil
 }
 
 func activeRemoteWorkdirsWithOutput(

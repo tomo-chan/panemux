@@ -172,6 +172,44 @@ func (s *TmuxSSHSession) GetActiveWorkdirs() ([]string, error) {
 	)
 }
 
+// DetectInteractiveAgentType reports the agmsg type name of any live agent
+// process currently running under the active remote tmux pane — see
+// AgentTypeDetector.
+func (s *TmuxSSHSession) DetectInteractiveAgentType() (string, bool, error) {
+	return tmuxSSHDetectInteractiveAgentTypeFromSessionFactory(
+		func() (sshSessionRunner, error) {
+			return s.client.NewSession()
+		},
+		s.tmuxSession,
+	)
+}
+
+func tmuxSSHDetectInteractiveAgentTypeFromSessionFactory(
+	newRunner func() (sshSessionRunner, error), tmuxSession string,
+) (string, bool, error) {
+	paneRunner, err := newRunner()
+	if err != nil {
+		return "", false, fmt.Errorf("new ssh session for active tmux pane info: %w", err)
+	}
+	defer paneRunner.Close()
+
+	out, err := paneRunner.Output(
+		fmt.Sprintf(
+			"tmux display-message -p -t '%s' '#{pane_pid}\t#{pane_current_path}'",
+			tmuxSession,
+		),
+	)
+	if err != nil {
+		return "", false, fmt.Errorf("tmux pane info over ssh: %w", err)
+	}
+	panePID, _, err := parseRemoteTmuxPaneInfo(out)
+	if err != nil {
+		return "", false, err
+	}
+
+	return detectRemoteAgentType(outputFromSessionFactory(newRunner), panePID)
+}
+
 // InspectGitContext resolves Git metadata on the remote host for the provided
 // absolute working directory.
 func (s *TmuxSSHSession) InspectGitContext(cwd string) (GitContext, error) {

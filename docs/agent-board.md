@@ -1,26 +1,32 @@
 # Agent Board: Cross-Pane Claude Messaging and Status Aggregation
 
-> **Status: relay and REST status/messages/broadcast implemented; bootstrap and command center not
-> yet usable.** The `internal/board` package's core types (`Row`, `Status`, `AgmsgClient`,
-> `BoardCache`, `ownSendLedger`, `LocalAgmsgClient`, `RemoteAgmsgClient`), the `BoardHostID`/
-> `BoardExecutor` session capability interfaces, the `agent_board`/`command_center`/
-> `server.auth_token` config surface, the relay goroutine (`internal/board/relay.go`, cursor
-> persistence in `internal/board/cursor_store.go`), and the three REST endpoints in [API
-> additions](#api-additions) — `GET /api/board/status`, `GET /api/board/messages`, `POST
-> /api/board/broadcast` — are implemented and tested. `bearerAuthMiddleware` is wired, but **only**
-> onto the new `/api/board/*` sub-route, not onto any pre-existing `/api/*` route or
-> `/ws/{sessionID}` — see [Security model](#security-model) and
+> **Status: relay, REST status/messages/broadcast, and the PTY bootstrap flow are implemented;
+> command center is not yet usable.** The `internal/board` package's core types (`Row`, `Status`,
+> `AgmsgClient`, `BoardCache`, `ownSendLedger`, `LocalAgmsgClient`, `RemoteAgmsgClient`), the
+> `BoardHostID`/`BoardExecutor`/`AgentTypeDetector` session capability interfaces, the
+> `agent_board`/`command_center`/`server.auth_token` config surface, the relay goroutine
+> (`internal/board/relay.go`, cursor persistence in `internal/board/cursor_store.go`), and the three
+> REST endpoints in [API additions](#api-additions) — `GET /api/board/status`, `GET
+> /api/board/messages`, `POST /api/board/broadcast` — are implemented and tested.
+> `bearerAuthMiddleware` is wired, but **only** onto the new `/api/board/*` sub-route, not onto any
+> pre-existing `/api/*` route or `/ws/{sessionID}` — see [Security model](#security-model) and
 > [security.md](security.md#auth-token-and-transport-encryption) for why those stay unauthenticated
-> for now. `setupBoard` in `board.go` (`package main`) builds the `AgmsgClient`s and pane→host map
-> from config at startup and wires the relay goroutine into `main.go`'s lifecycle. A remote host's
+> for now (tracked as a separate follow-up issue, not part of this phase). `setupBoard` in `board.go`
+> (`package main`) builds the `AgmsgClient`s and pane→host map from config at startup and wires both
+> the relay goroutine and the bootstrap watcher into `main.go`'s lifecycle. A remote host's
 > `RemoteAgmsgClient` is handed a `dynamicBoardExecutor` (`board.go`), which re-resolves a live
 > `BoardExecutor` session on that host on every call rather than holding the one pane's session found
 > at startup — an ordinary pane restart/delete of whichever pane was picked first must not
-> permanently break board traffic for the rest of that host. Still design-only:
-> the PTY bootstrap flow (process detection, the one-time onboarding instruction), `/ws/board-command`,
-> `GET /api/board/command/history`, and the command center itself — none of that exists yet, so this
-> document's bootstrap/command-center sections below are not reachable through any current config or
-> endpoint. Update this note (and its cross-links) again once a later phase closes that gap.
+> permanently break board traffic for the rest of that host. The bootstrap watcher
+> (`bootstrapWatcher` in `bootstrap.go`, `package main`) polls every board-enabled pane for a newly
+> started, agmsg-detectable agent process (`session.AgentTypeDetector`, covering the six agmsg agent
+> types agmsg's own `type.conf` marks as process-detectable — see [`internal/session` capability
+> interfaces](#internal-session-capability-interfaces)) and writes a one-time onboarding instruction
+> into that pane's PTY; see [Bootstrap flow](#bootstrap-flow) for the full algorithm. Still
+> design-only: `/ws/board-command`, `GET /api/board/command/history`, and the command center itself —
+> none of that exists yet, so this document's [Command center](#command-center) section below is not
+> reachable through any current config or endpoint. Update this note (and its cross-links) again once
+> a later phase closes that gap.
 
 ## Purpose
 
@@ -340,16 +346,23 @@ check uniformly instead of trying to satisfy it. A pane can still use unforced `
 its *own*, non-board conversations with other agmsg-native agents already on that host (Codex,
 Gemini CLI, etc.) — that path is untouched and still roster-checked normally.
 
-**Panes join with `join.sh <team> <agent_id> <agent_type> <project_path> [--force]`**, typically
-via agmsg's own onboarding (the `/agmsg` skill flow a live Claude session runs itself, or the
-equivalent for another agent type) rather than the raw script directly — see [Bootstrap
-flow](#bootstrap-flow). This registers the pane into `teams/<team>/config.json`. Because board
-sends always pass `--force`, this registration is no longer what gates board delivery — its
-purpose is solely to let other, non-board-aware agmsg agents on the same host (Codex, Gemini CLI,
-etc.) address the pane normally, and to give the pane a working `/agmsg` identity for its own
-non-board use. Once joined, agmsg's own `SessionStart`/`SessionEnd` hooks own that pane's `Monitor`
-(`watch.sh`)-process lifecycle end-to-end (launch, liveness, cleanup) — panemux has no part in it
-and does not need to.
+**Panes join with `join.sh <team> <agent_id> <agent_type> <project_path> [--force]`**, invoked
+directly by the agent as the first step of panemux's own bootstrap instruction (see [Bootstrap
+flow](#bootstrap-flow)) — not via agmsg's slash-command onboarding shorthand. This is a deliberate
+deviation from "run agmsg's normal first-run flow": that shorthand's own invocation prefix is not
+uniform across agmsg's agent types — agmsg's per-type `type.conf` driver files set `cmd_prefix` to
+`/agmsg` for some types (`claude-code`, `cursor`, `grok-build`, `copilot`) and to `$agmsg` for
+others (`codex`, `gemini`, `antigravity`, `opencode`) — so a bootstrap instruction that hardcoded
+either prefix would silently be wrong for roughly half of agmsg's supported agent types. Calling
+`join.sh` with its own verified positional-argument signature sidesteps that divergence entirely,
+at the cost of bypassing whatever additional first-run behavior agmsg's slash-command flow might
+otherwise perform beyond the join itself. This registers the pane into `teams/<team>/config.json`.
+Because board sends always pass `--force`, this registration is no longer what gates board
+delivery — its purpose is solely to let other, non-board-aware agmsg agents on the same host
+(Codex, Gemini CLI, etc.) address the pane normally, and to give the pane a working `/agmsg`/`$agmsg`
+identity for its own non-board use. Once joined, agmsg's own `SessionStart`/`SessionEnd` hooks own
+that pane's `Monitor` (`watch.sh`)-process lifecycle end-to-end (launch, liveness, cleanup) —
+panemux has no part in it and does not need to.
 
 **panemux's own relay and command center are never agmsg roster members, and never go through
 agmsg's own identity-detection layer, so any send they originate uses `--force` for the same reason
@@ -636,6 +649,24 @@ Because panemux owns no schema, it needs no embedded database driver of its own 
 board operation is either a local `exec.Command` or a remote exec-channel command running agmsg's
 own scripts.
 
+`internal/board/agmsg_presence.go` implements the "is agmsg actually installed here" check bootstrap
+depends on: `LocalAgmsgPresent(agmsgPath string) bool` (`os.Stat` on `scripts/api.sh`) and
+`RemoteAgmsgPresent(ctx, executor BoardExecutor, agmsgPath string) (bool, error)`, the latter running
+a fixed, non-tainted `sh -c` probe script over the same `RunBoardCommand` channel `ResolveRemoteAgmsgPath`
+already uses (see [security.md](security.md) for why this probe is safe despite carrying no
+regex-allowlist branch of its own — it takes no caller-supplied data at all). `internal/board/atomic_write.go`
+factors the temp-file-plus-rename write discipline shared by `cursor_store.go` and
+`internal/board/bootstrap_store.go`'s `SaveBootstrapState`/`LoadBootstrapState`
+(`~/.config/panemux/board-bootstrap-state.json`, `0600`) into one helper, since both files need the
+identical atomicity guarantee for an unrelated piece of persisted state.
+
+`bootstrap.go` (`package main`, not `internal/board` — it depends on `internal/session.Manager` the
+same way `board.go` already does) implements `bootstrapWatcher`, the poller described in [Bootstrap
+flow](#bootstrap-flow). It deliberately takes no dependency on `internal/config` at all: like
+`board.RelayConfig`, its `bootstrapWatcherConfig` is a precomputed, static struct (`PaneHosts`,
+`PaneModes`, `ResolvedPaths`, `Team`, `Persist`) that `board.go`'s `setupBoard` builds from config,
+mirroring the same dependency direction `internal/board` itself already uses.
+
 ### `internal/session` capability interfaces
 
 Following the existing optional-capability pattern (`CWDGetter`, `ActiveWorkdirGetter`,
@@ -661,10 +692,25 @@ type BoardHostID interface {
 type BoardExecutor interface {
     RunBoardCommand(ctx context.Context, args []string) ([]byte, error)
 }
+
+// AgentTypeDetector is implemented by every session type. It reports the agmsg-recognized type
+// name (e.g. "claude-code", "codex", "gemini") of any live, interactive coding-agent process
+// currently running as a descendant of this pane's shell, among the set agmsg's own type.conf
+// detect_proc key considers reliably process-detectable. This is narrower than the pre-existing
+// ActiveWorkdirGetter (which only distinguishes Codex/Claude, and additionally resolves
+// transcript-derived workdirs at real I/O cost) and returns WHICH type rather than a bare bool,
+// since bootstrap writes a different onboarding instruction per agent type.
+type AgentTypeDetector interface {
+    DetectInteractiveAgentType() (agmsgType string, ok bool, err error)
+}
 ```
 
-`LocalSession`/`TmuxLocalSession` implement only `BoardHostID` (`"local"`). `SSHSession`/
-`SSHTmuxSession` implement both.
+`LocalSession`/`TmuxLocalSession` implement `BoardHostID` (`"local"`) and `AgentTypeDetector`.
+`SSHSession`/`SSHTmuxSession` implement `BoardHostID`, `BoardExecutor`, and `AgentTypeDetector`.
+`AgentTypeDetector` is a separate, purpose-built primitive for bootstrap — it does not reuse or
+modify the pre-existing `ActiveWorkdirGetter`/`isInteractiveAgentCommand` code path the Claude
+worktree override (see [architecture.md](architecture.md)) depends on, though both share the same
+generic process-tree-walk helper underneath.
 
 ## Local vs remote resource placement
 
@@ -764,49 +810,110 @@ always routed through it by construction.
 
 ## Bootstrap flow
 
+Implemented in `bootstrap.go` (`package main`) as `bootstrapWatcher`, constructed in `board.go`'s
+`setupBoard` and polled on its own goroutine from `main.go`'s lifecycle (`defaultBootstrapPollInterval`,
+5s — the same interval as the relay), gated the same way the relay is: `HasWork()` (at least one
+board-enabled pane) must be true before the goroutine even starts.
+
 1. A pane config (or the global default) sets `agent_board.enabled: true`, optionally overriding
-   `team` or `mode`.
-2. panemux's existing interactive-agent process detection (already used for the Claude worktree
-   override in [architecture.md](architecture.md)) notices a `claude` (or other configured agent)
-   process start in that pane, then runs the agmsg detection check from [Integration with
-   agmsg](#integration-with-agmsg). If agmsg is not found on that host, it logs a warning naming the
-   pane and stops here — no PTY write happens, and the pane's shell session is otherwise unaffected.
-3. panemux writes a one-time instruction into the pane's PTY (the same `Session.Write` path already
-   used for all terminal input) telling the agent to: join agmsg's team **using the pane's own ID
-   (the same `<pane-id>` panemux's config and every other part of this document address it by) as
-   the agmsg `agent_id`** — required, and stated explicitly, because agmsg's own onboarding can
-   otherwise prompt for an arbitrary name of the agent's choosing, which would silently break every
-   cross-pane and relay address in this design (they all assume `from`/`to` *are* pane IDs) — via
-   agmsg's own onboarding flow (e.g. `/agmsg` or the equivalent first-run prompt), rely on agmsg's
-   own `Monitor`/hook wiring for delivery exactly as it would if the user had set this up by hand,
-   include the [status self-report](#status-self-report-and-message-flow) fields on every status
-   update, and — this is the one deviation from "just do what agmsg's normal flow does" — send
-   every board-related message (status reports, cross-pane messages) with the raw `send.sh <team>
-   <from> <to> "<body>" --force` invocation rather than `/agmsg send`, per [Integration with
-   agmsg](#integration-with-agmsg). Joining and non-board `/agmsg` use are unaffected by local vs.
-   remote — it is agmsg's own already-installed skill doing the work either way, not something
-   panemux provisions per pane. This step only ever establishes *that pane's* participation; it
-   never touches any other pane or any other agent already using agmsg on that host (a pre-existing
-   Codex agent, for example, keeps working exactly as it did before panemux was involved).
-4. If `mode` is `turn` or `both` (mirroring agmsg's own `/agmsg mode monitor|turn|both|off`, default
-   `monitor`), the bootstrap instruction also tells the agent to run `/agmsg mode <value>` — this
-   is agmsg's own setting, not something panemux tracks or enforces separately. agmsg's own docs
-   mark `turn` as a legacy mode kept for backward compatibility rather than the recommended one;
-   this document does not steer operators toward it, and `mode: turn` in panemux's config is a
-   pass-through of an operator's explicit choice, not a default panemux picks. `off` is agmsg's own
-   way to disable its hook-driven delivery for a pane without leaving the team — panemux's config
-   equivalent is `agent_board.enabled: false`, which is the preferred way to keep a pane out of
-   board features entirely, since it skips bootstrap for that pane rather than bootstrapping it and
-   then telling it to turn itself back off. **This step has a real repo-local side effect worth
-   stating plainly: `/agmsg mode` writes hook wiring into the pane's own project
-   `.claude/settings.local.json`, a file that outlives the pane session and is scoped to that Git
-   repository, not to panemux or to this one pane.** "Additive, never load-bearing" (see [Design
-   principles](#design-principles)) describes what happens when board features are *unavailable* —
-   the pane's shell keeps working normally — not a claim that bootstrap makes zero changes outside
-   panemux's own state. Because this write is agmsg's own onboarding behavior, not something panemux
-   scripts itself, panemux does not attempt to undo it if a pane later disables
-   `agent_board.enabled`; an operator who wants that hook wiring removed does so the same way they
-   would for any other agmsg-managed repo, outside panemux entirely.
+   `mode`. (Per-pane `team` override does not exist — every board-enabled pane on one panemux
+   instance joins the single `agent_board.team`.)
+2. Every poll tick, for every board-enabled pane, `bootstrapWatcher.checkPane` calls that pane's
+   `session.AgentTypeDetector.DetectInteractiveAgentType()` — implemented by all four session types
+   (`LocalSession`, `TmuxLocalSession`, `SSHSession`, `TmuxSSHSession`) — which walks the pane's
+   process tree for a live descendant matching one of the six agmsg agent types agmsg's own
+   `type.conf` driver files mark `detect_proc` (process-name-based auto-detection) for:
+   `claude-code`, `codex`, `cursor`, `gemini`, `grok-build`, `opencode`. The other three CLI types
+   agmsg supports (`antigravity`, `copilot`, `hermes`) declare `detect=explicit` in their own
+   `type.conf` — agmsg's own maintainers judged process detection unreliable for them — and the
+   tenth, `agmsg-app`, is a desktop app, not a spawnable CLI at all (`spawnable=no`). Bootstrap
+   inherits this exact boundary rather than picking its own: a type agmsg itself doesn't trust
+   process detection for is not a type panemux invents its own detection heuristic for either. A
+   pane whose live process doesn't match any of the six is simply never bootstrapped — its shell
+   session is otherwise completely unaffected.
+3. **Debounce.** A pane is only eligible to bootstrap once the *same* `session.Session` object has
+   reported the same "known agent type detected" result on two consecutive poll ticks
+   (`bootstrapWatcher.pending`). This is a partial mitigation, not a complete one, against writing
+   into a pane the instant its shell is still settling right after the agent process starts — stated
+   as an honest tradeoff, not a claim of full safety; see [Known limitations](#known-limitations).
+4. Once debounced, `bootstrapWatcher.agmsgPresent` runs the agmsg detection check from [Integration
+   with agmsg](#integration-with-agmsg) (`board.LocalAgmsgPresent`/`board.RemoteAgmsgPresent`,
+   `internal/board/agmsg_presence.go`) against a startup-time snapshot of each host's resolved
+   `agmsg_path` (`resolveBootstrapPaths` in `board.go`, using the same `resolveAgmsgPathForHost`
+   helper `newAgmsgClientForHost` uses for the relay's own client map — resolved independently for
+   bootstrap, not shared, so that coupling bootstrap eligibility to relay client construction can't
+   reintroduce the kind of permanent-failure regression `dynamicBoardExecutor` exists to avoid; see
+   [Known limitations](#known-limitations) for the accepted cost of that duplication). If agmsg is
+   not found on that host, or presence can't be determined at all (an unreachable host, a transport
+   error), panemux logs one warning naming the pane and retries on every subsequent tick — no PTY
+   write happens, and the pane's shell session is otherwise unaffected.
+5. panemux writes a one-time instruction into the pane's PTY (the same `Session.Write` path already
+   used for all terminal input; `buildBootstrapInstruction` in `bootstrap.go`) telling the agent to:
+   1. Join agmsg's team by running `join.sh <team> <pane-id> <agmsg-type> "$(pwd)" --force` directly
+      — **using the pane's own ID (the same `<pane-id>` panemux's config and every other part of
+      this document address it by) as the agmsg `agent_id`**, required and stated explicitly because
+      agmsg's own onboarding can otherwise prompt for an arbitrary name of the agent's choosing,
+      which would silently break every cross-pane and relay address in this design (they all assume
+      `from`/`to` *are* pane IDs). Invoking `join.sh` directly, rather than through agmsg's
+      slash-command onboarding shorthand, is itself deliberate — see [Integration with
+      agmsg](#integration-with-agmsg) for why hardcoding either of agmsg's two `cmd_prefix`
+      conventions (`/agmsg` vs. `$agmsg`) into one bootstrap instruction would be wrong for roughly
+      half of the six detectable agent types.
+   2. From then on, send every board-related message (status reports, cross-pane messages) with the
+      raw `send.sh <team> <from> <to> "<body>" --force` invocation rather than `/agmsg send`/`$agmsg
+      send`, per [Integration with agmsg](#integration-with-agmsg).
+   3. Include the [status self-report](#status-self-report-and-message-flow) fields on every status
+      update, sent to `_system` via that same `send.sh` invocation.
+   4. Only if `mode` is `turn` or `both` (mirroring agmsg's own `delivery.sh set
+      monitor|turn|both|off`, default `monitor`): also run `delivery.sh set <mode> <agmsg-type>
+      "$(pwd)"` directly (again bypassing the `cmd_prefix` divergence) and read/follow the
+      `AGMSG-DIRECTIVE:` block it prints — this is agmsg's own mechanism for telling an agent how to
+      reconfigure its own delivery behavior, not something panemux parses or acts on itself. agmsg's
+      own docs mark `turn` as a legacy mode kept for backward compatibility rather than the
+      recommended one; this document does not steer operators toward it, and `mode: turn` in
+      panemux's config is a pass-through of an operator's explicit choice, not a default panemux
+      picks. `off` is agmsg's own way to disable its hook-driven delivery for a pane without leaving
+      the team — panemux's config equivalent is `agent_board.enabled: false`, which is the preferred
+      way to keep a pane out of board features entirely, since it skips bootstrap for that pane
+      rather than bootstrapping it and then telling it to turn itself back off. **This step has a
+      real repo-local side effect worth stating plainly: agmsg's own `delivery.sh set` writes hook
+      wiring into the pane's own project config (e.g. `.claude/settings.local.json` for
+      `claude-code`; the exact file is agmsg's own per-type convention, not something panemux
+      controls), which outlives the pane session and is scoped to that Git repository, not to
+      panemux or to this one pane.** "Additive, never load-bearing" (see [Design
+      principles](#design-principles)) describes what happens when board features are *unavailable*
+      — the pane's shell keeps working normally — not a claim that bootstrap makes zero changes
+      outside panemux's own state. Because this write is agmsg's own behavior, not something panemux
+      scripts itself, panemux does not attempt to undo it if a pane later disables
+      `agent_board.enabled`; an operator who wants that hook wiring removed does so the same way
+      they would for any other agmsg-managed repo, outside panemux entirely.
+
+   Joining and non-board `/agmsg`/`$agmsg` use are unaffected by local vs. remote — it is agmsg's own
+   already-installed skill doing the work either way, not something panemux provisions per pane. This
+   step only ever establishes *that pane's* participation; it never touches any other pane or any
+   other agent already using agmsg on that host (a pre-existing Codex agent, for example, keeps
+   working exactly as it did before panemux was involved). A write is only treated as successful if
+   `Session.Write` returns the full payload length with no error — this is the first place in this
+   codebase where panemux writes synthesized input into a pane's PTY rather than relaying real user
+   keystrokes, so a short write is treated the same as a failed one (retried next tick) rather than
+   silently accepted.
+6. On a successful write, the pane is marked bootstrapped (`bootstrapWatcher.bootstrapped`, keyed by
+   pane ID and compared by `session.Session` identity, not by process) and the full set of
+   bootstrapped pane IDs is persisted to `~/.config/panemux/board-bootstrap-state.json`
+   (`internal/board/bootstrap_store.go`, same atomic-write/`0600` discipline as the relay's cursor
+   file). On the very first poll tick after a panemux restart, this persisted set is used once to
+   seed `bootstrapped` with each persisted pane ID's *currently live* session — purely so that an
+   already-onboarded, still-running agent is never re-bootstrapped just because panemux itself
+   restarted — and is never consulted again after that; from then on only session-object identity
+   governs re-bootstrap decisions. See [Known limitations](#known-limitations) for what this
+   session-identity granularity does and does not catch.
+
+**Consent model, stated explicitly.** Setting `agent_board.enabled: true` on a pane *is* the consent
+mechanism for this PTY write — it is not a new category of risk beyond what that config flag already
+implies enabling. The 2-tick debounce in step 3 narrows, but does not eliminate, the window in which
+an operator who happens to be typing their own input into a pane at the exact moment an agent process
+starts there could have panemux's instruction interleaved with it; this is a stated, accepted
+tradeoff (see [Known limitations](#known-limitations)), not a claim of a race-free design.
 
 ## Command center
 
@@ -1177,10 +1284,38 @@ that shaped the design.
   cross-agent interoperability agmsg provides that a panemux-owned protocol never could. See [agmsg
   compatibility contract](#agmsg-compatibility-contract) for how this exposure is meant to be
   caught mechanically rather than discovered by a user.
-- Bootstrap is not free of side effects outside panemux's own state: `/agmsg mode turn|both` (see
-  [Bootstrap flow](#bootstrap-flow)) writes hook wiring into the pane's project
-  `.claude/settings.local.json`, which persists in that Git repository after the pane closes and is
-  never reverted by panemux, including when a pane later disables `agent_board.enabled`.
+- Bootstrap is not free of side effects outside panemux's own state: `delivery.sh set turn|both` (see
+  [Bootstrap flow](#bootstrap-flow)) writes hook wiring into the pane's project config (agmsg's own
+  per-type convention — e.g. `.claude/settings.local.json` for `claude-code`), which persists in that
+  Git repository after the pane closes and is never reverted by panemux, including when a pane later
+  disables `agent_board.enabled`.
+- **Bootstrap tracks "already onboarded" at session-object granularity, not process granularity.**
+  panemux has no way to observe a coding-agent *process* restarting inside a pane whose underlying
+  `session.Session` never changed — there is no PID exposed anywhere in `internal/session`'s public
+  surface for bootstrap to key off of instead (see [`internal/session` capability
+  interfaces](#internal-session-capability-interfaces)). Concretely: once a pane has been
+  bootstrapped, if the agent process inside it exits and a new one starts in the same still-open
+  pane, that new process is not re-detected and does not get a fresh onboarding instruction — only
+  closing and reopening the pane (which creates a new `session.Session`) resets bootstrap eligibility
+  for it. This mirrors, and is accepted for the same reason as, the equivalent limitation already
+  documented above for the relay's `AgmsgClient` construction.
+- **A remote host with no reachable session when `setupBoard` runs never becomes bootstrap-eligible
+  for the rest of that process's lifetime, even if a board-enabled pane on it becomes reachable
+  later** — the same one-shot-at-startup limitation already documented above for
+  `newAgmsgClientForHost`'s `Clients` map applies identically to `resolveBootstrapPaths`'
+  `ResolvedPaths`, and for the same underlying reason: neither is retried on a schedule.
+- **Bootstrap's `resolveBootstrapPaths` and the relay's `newAgmsgClientForHost` each independently
+  probe every remote host's `agmsg_path` once at startup, rather than sharing one resolution.** This
+  is a deliberate choice, not an oversight: coupling bootstrap eligibility to relay client
+  construction (or vice versa) would let a failure in one subsystem silently disable the other, which
+  is exactly the kind of cross-subsystem coupling `dynamicBoardExecutor` was introduced to avoid at
+  the session level. The accepted cost is one extra `sh -c` round-trip per remote host at startup.
+- **The 2-tick bootstrap debounce is a partial mitigation, not a race-free design.** It narrows, but
+  does not eliminate, the window in which an operator's own keystrokes into a pane could interleave
+  with panemux's synthesized onboarding instruction if both happen at almost exactly the moment an
+  agent process starts in that pane. See [Bootstrap flow](#bootstrap-flow)'s consent-model paragraph
+  for why this tradeoff is accepted rather than solved with typing-detection or input-pausing
+  machinery.
 - Self-reported status depends on the agent's cooperation each time — see the honest tradeoff
   called out in [Status self-report](#status-self-report-and-message-flow). A pane that stops
   following its bootstrap instruction (e.g. a very long uninterrupted tool-use turn) simply stops
