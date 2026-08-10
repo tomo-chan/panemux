@@ -63,16 +63,34 @@ Optional capability interfaces extend the base `Session` contract without breaki
 - `CWDGetter` — implemented by `LocalSession` and `SSHSession`; returns the live working directory of the running shell. `LocalSession` reads it via `lsof` (macOS) or `/proc/<pid>/cwd` (Linux). `SSHSession` runs `pwd` over a new exec channel on the existing SSH connection.
 - `SSHConnNamer` — implemented by `SSHSession`; returns the panemux connection alias used when building the `code --remote ssh-remote+<host>` command.
 
-### `internal/board` (design, not yet implemented)
+### `internal/board` (foundation implemented; relay, bootstrap, and API surface still planned)
 
-A planned package that replaces transcript-based Claude activity inference with a self-reported
-channel: panes report status (including branch/PR/cwd, gathered by the agent's own `git`/`gh`
-calls rather than inferred by panemux) and exchange messages through an operator-installed
+A package that replaces transcript-based Claude activity inference with a self-reported channel:
+panes report status (including branch/PR/cwd, gathered by the agent's own `git`/`gh` calls rather
+than inferred by panemux) and exchange messages through an operator-installed
 [agmsg](https://github.com/fujibee/agmsg) instance, plus a relay for messages addressed across
 hosts. panemux owns no message schema or storage of its own — it is only ever a client of agmsg's
 own documented scripts (`scripts/api.sh`, `scripts/send.sh`), never a reader of its internal
-SQLite file. Two new optional session capability interfaces, `BoardHostID` and `BoardExecutor`,
-extend the same pattern as `CWDGetter`/`ActiveWorkdirGetter` above.
+SQLite file.
+
+The package's foundational pieces are implemented and tested: `Row`/`Status` and the
+`board_status`-discriminated status-report parsing, `BoardCache` (the in-memory status/history view
+[agent-board.md's Architecture section](agent-board.md#architecture) describes), `ownSendLedger`
+(the forgery-detection primitive [Security
+model](agent-board.md#security-model) describes), and the two `AgmsgClient` implementations —
+`LocalAgmsgClient` (plain `exec.Command`, no shell involved) and `RemoteAgmsgClient` (the SSH exec
+channel, with the base64-encode-then-allowlist body escaping and identifier allowlisting
+[security.md](security.md#agent-board-remote-writes) describes). Two new optional session capability
+interfaces, `BoardHostID` and `BoardExecutor`, extend the same pattern as
+`CWDGetter`/`ActiveWorkdirGetter` above and are implemented on all four session types
+(`BoardHostID`) and on `SSHSession`/`TmuxSSHSession` (`BoardExecutor`'s `RunBoardCommand`).
+
+Not yet implemented: the relay goroutine that polls every host's agmsg on a schedule and populates
+`BoardCache` as a side effect, the bootstrap flow that writes a one-time onboarding instruction into
+a pane's PTY, the `/api/board/*` and `/ws/board-command` REST/WS surface, and the command center.
+The `server.auth_token` config field, its non-loopback validation rule, and a constant-time bearer
+auth middleware are implemented (see [security.md](security.md#auth-token-and-transport-encryption)),
+but that middleware is not yet connected to any route.
 
 The same design also specifies a **command center**: a single headless `claude -p --resume`
 subprocess, invoked per query, that reads and writes the board exclusively through panemux's own
@@ -322,7 +340,7 @@ Architecture-level security summary:
 - remote shell entrypoints validate SSH working directories before interpolating them into shell commands
 - host-key handling intentionally preserves compatibility with OpenSSH hashed `known_hosts` entries
 - shipped code should structurally avoid `gosec` findings rather than suppress them
-- panemux does not terminate TLS; non-loopback exposure is expected to sit behind operator-managed infrastructure (reverse proxy, tunnel, VPN), and the planned `internal/board` auth token is only meaningful once that transport is encrypted — see [agent-board.md](agent-board.md#security-model)
+- panemux does not terminate TLS; non-loopback exposure is expected to sit behind operator-managed infrastructure (reverse proxy, tunnel, VPN), and the `server.auth_token` config field (implemented, but not yet enforced by any route — see this document's `internal/board` section above) is only meaningful once that transport is encrypted — see [agent-board.md](agent-board.md#security-model)
 
 ## Tradeoffs and Intentional Limits
 

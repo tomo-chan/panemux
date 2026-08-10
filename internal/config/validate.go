@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
 	"regexp"
 	"strings"
 
@@ -34,6 +35,15 @@ func (c *Config) Validate() error {
 	if c.Server.Port < 1 || c.Server.Port > 65535 {
 		errs = append(errs, fmt.Sprintf("server.port %d is out of range (1-65535)", c.Server.Port))
 	}
+
+	if !isLoopbackHost(c.Server.Host) && c.Server.AuthToken == "" {
+		errs = append(errs, fmt.Sprintf(
+			"server.auth_token must be set when server.host %q is not loopback",
+			c.Server.Host,
+		))
+	}
+
+	errs = append(errs, validateAgentBoard(c.AgentBoard)...)
 
 	sshConns := c.SSHConnections
 	if sshConns == nil {
@@ -201,6 +211,9 @@ func validatePane(p *PaneConfig, sshConns map[string]SSHConnection) []string {
 	if p.ID == "" {
 		errs = append(errs, "pane id must not be empty")
 	}
+	if p.ID == reservedSystemID {
+		errs = append(errs, fmt.Sprintf("pane id %q is reserved and cannot be used", reservedSystemID))
+	}
 
 	switch p.Type {
 	case paneTypeLocal, paneTypeSSH, paneTypeTmux, paneTypeSSHTmux:
@@ -230,6 +243,8 @@ func validatePane(p *PaneConfig, sshConns map[string]SSHConnection) []string {
 		errs = append(errs, fmt.Sprintf("pane %q: shell must be an absolute path, got %q", p.ID, p.Shell))
 	}
 
+	errs = append(errs, validatePaneAgentBoardMode(p)...)
+
 	if p.Type == paneTypeTmux || p.Type == paneTypeSSHTmux {
 		if p.TmuxSession == "" {
 			errs = append(errs, fmt.Sprintf("pane %q: tmux_session must not be empty", p.ID))
@@ -247,4 +262,52 @@ func validatePane(p *PaneConfig, sshConns map[string]SSHConnection) []string {
 	}
 
 	return errs
+}
+
+func validatePaneAgentBoardMode(p *PaneConfig) []string {
+	mode := p.AgentBoard.Mode
+	if mode == "" {
+		return nil
+	}
+	switch mode {
+	case agentBoardModeMonitor, agentBoardModeTurn, agentBoardModeBoth, agentBoardModeOff:
+		return nil
+	default:
+		return []string{fmt.Sprintf(
+			"pane %q: agent_board.mode %q must be monitor, turn, both, or off",
+			p.ID,
+			mode,
+		)}
+	}
+}
+
+// validateAgentBoard checks the top-level agent_board settings. Both fields
+// tolerate being empty here (Validate can run before normalizeAgentBoard has
+// filled in defaults — see finishLoad), matching the same "only validate a
+// path-like field when it's actually set" pattern validatePane already uses
+// for a pane's Shell.
+func validateAgentBoard(ab AgentBoardConfig) []string {
+	var errs []string
+	if ab.Team == reservedSystemID {
+		errs = append(errs, fmt.Sprintf("agent_board.team must not be the reserved id %q", reservedSystemID))
+	}
+	if path := ab.AgmsgPath; path != "" && !strings.HasPrefix(path, "/") && !strings.HasPrefix(path, "~/") {
+		errs = append(errs, fmt.Sprintf("agent_board.agmsg_path %q must be an absolute path or start with ~/", path))
+	}
+	return errs
+}
+
+// isLoopbackHost reports whether host is a loopback address panemux treats
+// as not requiring an auth token. An empty host is treated as loopback
+// since Default()/normalizeWorkspaces() fill in the loopback default before
+// Validate ever runs against a config that omitted server.host entirely.
+func isLoopbackHost(host string) bool {
+	if host == "" || host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback()
 }

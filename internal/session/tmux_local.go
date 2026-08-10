@@ -118,6 +118,9 @@ func (s *TmuxLocalSession) Resize(cols, rows uint16) error {
 	})
 }
 
+// BoardHostID identifies this session as running on panemux's own host.
+func (s *TmuxLocalSession) BoardHostID() string { return boardHostIDLocal }
+
 // GetCWD returns the current working directory of the active tmux pane.
 func (s *TmuxLocalSession) GetCWD() (string, error) {
 	out, err := tmuxLocalCWD(s.tmuxSession)

@@ -85,6 +85,7 @@ func loadConfig(opts cliOptions) (*config.Config, error) {
 	if opts.port != 0 {
 		cfg.Server.Port = opts.port
 	}
+	cfg.EnsureAuthToken()
 	return cfg, nil
 }
 

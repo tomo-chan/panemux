@@ -3,6 +3,7 @@ package session
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/sha1" //nolint:gosec // G505: OpenSSH hashed known_hosts entries use HMAC-SHA1
 	"encoding/base64"
@@ -74,6 +75,59 @@ type SSHConfig struct {
 // within the path, making it safe to embed in a POSIX shell command.
 func shellQuotePath(path string) string {
 	return "'" + strings.ReplaceAll(path, "'", `'\''`) + "'"
+}
+
+// quoteArgs joins args into a single POSIX shell command string, with every
+// argument single-quote-escaped via shellQuotePath. This is the only place
+// that builds a board command string from a caller-supplied argument list,
+// matching the discipline validRemotePath/shellQuotePath already apply to
+// cwd — callers pass raw, unescaped values, exactly like exec.Command's own
+// argv contract.
+func quoteArgs(args []string) string {
+	quoted := make([]string, len(args))
+	for i, arg := range args {
+		quoted[i] = shellQuotePath(arg)
+	}
+	return strings.Join(quoted, " ")
+}
+
+// runBoardCommand runs args as a single remote shell command over a new
+// session obtained from newSession, single-quote-escaping each argument
+// before joining them. It is shared by SSHSession and TmuxSSHSession, which
+// do not share a common embedded connection type to hang a method on.
+func runBoardCommand(
+	ctx context.Context,
+	newSession func() (sshSessionRunner, error),
+	args []string,
+) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	sess, err := newSession()
+	if err != nil {
+		return nil, fmt.Errorf("new ssh session for board command: %w", err)
+	}
+	defer sess.Close()
+
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-ctx.Done():
+			sess.Close()
+		case <-done:
+		}
+	}()
+
+	out, err := sess.Output(quoteArgs(args))
+	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+		return nil, fmt.Errorf("board command over ssh: %w", err)
+	}
+	return out, nil
 }
 
 // resolveKnownHostsFile returns the known_hosts file path, defaulting to ~/.ssh/known_hosts.
@@ -787,6 +841,18 @@ func (s *SSHSession) Close() error {
 
 // ConnectionName returns the panemux connection alias for this SSH session.
 func (s *SSHSession) ConnectionName() string { return s.connectionName }
+
+// BoardHostID identifies this session's Agent Board host as its SSH
+// connection name — the same identifier ConnectionName already returns.
+func (s *SSHSession) BoardHostID() string { return s.connectionName }
+
+// RunBoardCommand runs an agmsg script on the remote host over a new SSH
+// exec channel, matching the pattern GetCWD/InspectGitContext already use.
+func (s *SSHSession) RunBoardCommand(ctx context.Context, args []string) ([]byte, error) {
+	return runBoardCommand(ctx, func() (sshSessionRunner, error) {
+		return s.client.NewSession()
+	}, args)
+}
 
 // sshGetCWDCmd is the shell command used by SSHSession.GetCWD to detect the
 // current working directory of the interactive shell.

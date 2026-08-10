@@ -38,39 +38,73 @@ It accepts only absolute Unix paths and rejects shell metacharacters and control
 
 After validation, the path is wrapped with `shellQuotePath`, which single-quotes the value and escapes any interior single quotes. This keeps paths containing spaces or unusual but allowed characters safe when embedded in a shell string.
 
-### Agent board remote writes (design, not yet implemented)
+### Agent board remote writes
 
-The planned `internal/board` package (full design in [agent-board.md](agent-board.md)) writes
+`internal/board`'s `RemoteAgmsgClient` (full design in [agent-board.md](agent-board.md)) writes
 cross-pane agent messages into a remote host's message store over the SSH exec channel already used
-by `GetCWD`/`InspectGitContext`, by running an operator-installed
+by `GetCWD`/`InspectGitContext` — `internal/session`'s `BoardExecutor.RunBoardCommand`, implemented
+on `SSHSession`/`TmuxSSHSession` — by running an operator-installed
 [agmsg](https://github.com/fujibee/agmsg) instance's own scripts. panemux owns no message schema or
 storage of its own — it is a client of agmsg only. The `panemux` binary itself is never installed
 on a remote host under any circumstances — it is also a server, and a stray copy on an SSH-reached
 host could start its own HTTP/WS listener and command center.
 
 Message bodies are arbitrary text written by a Claude (or other agent) process, not a trusted
-value. Reads go through `scripts/api.sh`, which only takes digit- or path-traversal-validated
-arguments. Writes go through `scripts/api.sh`'s sibling script, `scripts/send.sh <team> <from> <to>
-<body> [--force]`, which — per agmsg's own source, verified rather than assumed — takes `body` as a
-positional argument with **no stdin option**, so it cannot be kept out of the remote command
-string. `send.sh` does its own SQL escaping internally, so `RunBoardCommand` is responsible only for
-POSIX shell escaping (`shellQuotePath`-style, matching the existing `cwd` discipline) of every
-argument before the remote command string is built — never unescaped concatenation.
+value, and plain `shellQuotePath`-style quoting of that value alone does not satisfy this
+repository's `go/command-injection` CodeQL bar (a quoting transform does not itself break a taint
+chain; only a preceding regex-allowlist branch does — see `validateShell`'s explanation above).
+Because a message body is free text and cannot be regex-allowlisted directly the way a path can,
+`RemoteAgmsgClient.Send` base64-encodes the body, regex-checks the *encoded* string against
+`^[A-Za-z0-9+/]*={0,2}$`, and only then places it in the `RunBoardCommand` argument list — structurally
+mirroring `validRemotePath`'s accepted shape (a regex-allowlist branch gating a value before it reaches
+the exec sink) for a value that couldn't otherwise take it. **Caveat, stated plainly:** because
+`base64.StdEncoding`'s output is by construction always within that alphabet, the `MatchString` branch
+can never actually fail for correctly-encoded input — it is a regex-allowlist branch in *shape*, not
+one that can reject real input. No CodeQL scan has been run against this code to confirm the taint
+chain is actually recognized as broken in practice; treat it as a structurally-motivated best effort,
+not a verified one, until a real scan says otherwise — see
+[agent-board.md's Security model](agent-board.md#security-model) for the same caveat stated in more
+detail. `team`/`from`/`to`
+identifiers are regex-allowlisted directly (`^[A-Za-z0-9_.-]+$`) for the same reason, since agmsg's
+own `--agent` argument validation is not a claim panemux can rely on — it runs inside the remote
+shell process that only exists because panemux's own command string has already been parsed, so it
+cannot retroactively protect that string's construction. Writes go through `scripts/api.sh`'s
+sibling script, `scripts/send.sh <team> <from> <to> <body> [--force]`, which — per agmsg's own
+source, verified rather than assumed — takes `body` as a positional argument with **no stdin
+option**, so a fixed, non-tainted wrapper script (`sendBase64WrapperScript` in
+`internal/board/remote_client.go`) decodes the base64 body back to its original bytes remotely,
+via shell positional parameters (`$1`..`$5`), immediately before the one call site that needs the
+raw value — never through unquoted string interpolation. `send.sh` does its own SQL escaping
+internally, so `RunBoardCommand` remains responsible only for the POSIX shell escaping
+(`shellQuotePath`-style, matching the existing `cwd` discipline) that wraps every argument,
+including the wrapper script text itself, before the remote command string is built.
 
 `send.sh` and `api.sh` are the only board-related commands panemux itself ever executes remotely;
 each runs against agmsg's own local store on that host. panemux only ever detects an existing agmsg
 installation — it never installs, updates, or otherwise manages agmsg on the operator's behalf,
-locally or remotely.
+locally or remotely. The relay goroutine that actually drives this on a schedule, the bootstrap flow
+that writes an onboarding instruction into a pane's PTY, and the `/api/board/*` REST surface are not
+yet implemented — see [agent-board.md](agent-board.md)'s status note.
 
-### Auth token and transport encryption (design, not yet implemented)
+### Auth token and transport encryption
 
-panemux does not terminate TLS itself. `server.host` defaults to `127.0.0.1`; if it is set to a
-non-loopback address, `server.auth_token` must also be set, or startup must fail validation
-(`internal/config/validate.go`, alongside the existing `server.port` range check). An auth token
-sent over an unencrypted non-loopback hop can be replayed and the request it authenticates can be
-tampered with in transit, so the token only provides real protection once the operator has placed a
-TLS-terminating reverse proxy, SSH tunnel, or VPN in front of the non-loopback listener. See
+`internal/config`'s `ServerConfig.AuthToken` (`server.auth_token` in `config.yaml`) and the
+non-loopback-requires-token validation rule are implemented: panemux does not terminate TLS itself,
+`server.host` defaults to `127.0.0.1`, and if it is set to a non-loopback address,
+`server.auth_token` must also be set, or startup fails validation (`internal/config/validate.go`,
+alongside the existing `server.port` range check). When left empty, `Config.Load`/`Default`
+auto-generate a token on first run and persist it to `~/.config/panemux/token` (`0600`), read back
+on later runs, and never write it into `config.yaml` itself. An auth token sent over an unencrypted
+non-loopback hop can be replayed and the request it authenticates can be tampered with in transit,
+so the token only provides real protection once the operator has placed a TLS-terminating reverse
+proxy, SSH tunnel, or VPN in front of the non-loopback listener. See
 [agent-board.md](agent-board.md#security-model) for the full rationale.
+
+`internal/server`'s constant-time bearer-token middleware (`bearerAuthMiddleware`) is also
+implemented and unit-tested, but it is **not yet wired into `registerRoutes`** — connecting it to
+today's `/api/*` and `/ws/{sessionID}` routes without a matching frontend change would break every
+existing, currently-unauthenticated request. It is connected once board endpoints exist to protect
+and the frontend sends the token; see [agent-board.md](agent-board.md)'s status note.
 
 ## General Rules
 
