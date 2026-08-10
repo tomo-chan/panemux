@@ -24,6 +24,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"panemux/internal/board"
 	"panemux/internal/config"
 	"panemux/internal/session"
 	"panemux/internal/sshconfig"
@@ -33,24 +34,26 @@ import (
 //
 //nolint:govet // keeps test injection hooks and binary-path overrides on one handler value
 type Handler struct {
-	cfg                     *config.Config
+	readDirFn               func(name string) ([]os.DirEntry, error)
 	manager                 *session.Manager
-	sshConfigPath           string
-	codeBinaryPath          string // empty = auto-detect; overridden in tests
-	ghBinaryPath            string // empty = auto-detect; overridden in tests
+	boardBroadcastFn        func(ctx context.Context, to []string, body string) ([]string, error)
+	boardCache              *board.BoardCache
+	gitInfoCacheBySession   map[string]gitInfoCacheEntry
 	createSession           func(*config.PaneConfig, map[string]config.SSHConnection) (session.Session, error)
 	detectLocalShellFn      func() (string, error)
 	detectRemoteShellFn     func(cfg session.SSHConfig) (string, error)
-	listLocalDirectoriesFn  func(path string, showHidden bool) (directoryBrowserResponse, error)
 	listRemoteDirectoriesFn func(cfg session.SSHConfig, path string, showHidden bool) (directoryBrowserResponse, error)
-	readDirFn               func(name string) ([]os.DirEntry, error)
-	preferredCWDMu          sync.Mutex
+	listLocalDirectoriesFn  func(path string, showHidden bool) (directoryBrowserResponse, error)
 	preferredCWDBySession   map[string][]preferredCWDState
-	restartMu               sync.Mutex
-	restartInFlight         map[string]struct{}
 	nowFn                   func() time.Time
+	cfg                     *config.Config
+	restartInFlight         map[string]struct{}
+	ghBinaryPath            string
+	codeBinaryPath          string
+	sshConfigPath           string
+	restartMu               sync.Mutex
+	preferredCWDMu          sync.Mutex
 	gitInfoCacheMu          sync.Mutex
-	gitInfoCacheBySession   map[string]gitInfoCacheEntry
 }
 
 type preferredCWDState struct {
@@ -149,7 +152,9 @@ type directoryBrowserResponse struct {
 var validHostName = regexp.MustCompile(`^[a-zA-Z0-9_.\-]+$`)
 
 // NewHandler creates a new API handler.
-func NewHandler(cfg *config.Config, manager *session.Manager) *Handler {
+func NewHandler(
+	cfg *config.Config, manager *session.Manager, boardCache *board.BoardCache, boardRelay *board.Relay,
+) *Handler {
 	h := &Handler{
 		cfg:                   cfg,
 		manager:               manager,
@@ -158,6 +163,7 @@ func NewHandler(cfg *config.Config, manager *session.Manager) *Handler {
 		restartInFlight:       make(map[string]struct{}),
 		nowFn:                 time.Now,
 		gitInfoCacheBySession: make(map[string]gitInfoCacheEntry),
+		boardCache:            boardCache,
 	}
 	h.createSession = session.CreateFromConfig
 	h.detectLocalShellFn = session.DetectLocalShell
@@ -165,6 +171,9 @@ func NewHandler(cfg *config.Config, manager *session.Manager) *Handler {
 	h.readDirFn = os.ReadDir
 	h.listLocalDirectoriesFn = h.listLocalDirectories
 	h.listRemoteDirectoriesFn = listRemoteDirectories
+	h.boardBroadcastFn = func(ctx context.Context, to []string, body string) ([]string, error) {
+		return boardRelay.Broadcast(ctx, board.SystemID, to, body)
+	}
 	return h
 }
 

@@ -11,7 +11,11 @@ import (
 // cache isn't immediately trimmed back down.
 const defaultBoardCacheHistoryLimit = 2000
 
-type cachedRow struct {
+// CachedRow pairs a Row with the BoardCache-local Seq it was assigned when
+// appended. Exported because GET /api/board/messages?since=<seq> needs the
+// Seq back from every returned row to use as its next since cursor — a bare
+// []Row would discard exactly the value the caller needs.
+type CachedRow struct {
 	Row Row
 	Seq int64
 }
@@ -26,7 +30,7 @@ type cachedRow struct {
 type BoardCache struct {
 	status     map[string]Status
 	now        func() time.Time
-	history    []cachedRow
+	history    []CachedRow
 	nextSeq    int64
 	maxHistory int
 	mu         sync.RWMutex
@@ -60,7 +64,7 @@ func (c *BoardCache) AppendMessage(r Row) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.nextSeq++
-	c.history = append(c.history, cachedRow{Seq: c.nextSeq, Row: r})
+	c.history = append(c.history, CachedRow{Seq: c.nextSeq, Row: r})
 	if overflow := len(c.history) - c.maxHistory; overflow > 0 {
 		c.history = c.history[overflow:]
 	}
@@ -77,16 +81,16 @@ func (c *BoardCache) StatusSnapshot() map[string]Status {
 	return out
 }
 
-// MessagesSince returns every history row whose Seq is greater than
-// afterSeq, oldest first. An empty or fully-consumed history returns nil,
-// never an error.
-func (c *BoardCache) MessagesSince(afterSeq int64) []Row {
+// MessagesSince returns every history row (with its Seq) whose Seq is
+// greater than afterSeq, oldest first. An empty or fully-consumed history
+// returns nil, never an error.
+func (c *BoardCache) MessagesSince(afterSeq int64) []CachedRow {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	var out []Row
+	var out []CachedRow
 	for _, cr := range c.history {
 		if cr.Seq > afterSeq {
-			out = append(out, cr.Row)
+			out = append(out, cr)
 		}
 	}
 	return out

@@ -46,14 +46,14 @@ func testConfig() *config.Config {
 func TestNew_ReturnsServer(t *testing.T) {
 	cfg := testConfig()
 	mgr := session.NewManager()
-	srv := New(cfg, mgr, emptyFS)
+	srv := New(cfg, mgr, nil, nil, emptyFS)
 	require.NotNil(t, srv)
 }
 
 func TestAddr_ReturnsConfiguredAddress(t *testing.T) {
 	cfg := testConfig()
 	mgr := session.NewManager()
-	srv := New(cfg, mgr, emptyFS)
+	srv := New(cfg, mgr, nil, nil, emptyFS)
 	assert.Equal(t, "127.0.0.1:8080", srv.Addr())
 }
 
@@ -154,7 +154,7 @@ func TestIsLocalhostOrigin(t *testing.T) {
 func TestServer_APIRoutesWired(t *testing.T) {
 	cfg := testConfig()
 	mgr := session.NewManager()
-	srv := New(cfg, mgr, emptyFS)
+	srv := New(cfg, mgr, nil, nil, emptyFS)
 	require.NotNil(t, srv)
 
 	rec := httptest.NewRecorder()
@@ -166,7 +166,7 @@ func TestServer_APIRoutesWired(t *testing.T) {
 func TestServer_WorkspaceRenameRouteWired(t *testing.T) {
 	cfg := testConfig()
 	mgr := session.NewManager()
-	srv := New(cfg, mgr, emptyFS)
+	srv := New(cfg, mgr, nil, nil, emptyFS)
 	require.NotNil(t, srv)
 
 	rec := httptest.NewRecorder()
@@ -181,7 +181,7 @@ func TestServer_WorkspaceRenameRouteWired(t *testing.T) {
 func TestServer_WorkspaceTabPositionRouteWiredBeforeWorkspaceIDRoute(t *testing.T) {
 	cfg := testConfig()
 	mgr := session.NewManager()
-	srv := New(cfg, mgr, emptyFS)
+	srv := New(cfg, mgr, nil, nil, emptyFS)
 	require.NotNil(t, srv)
 
 	performWorkspaceSettingUpdate(t, srv, "/api/workspaces/tab-position", `{"tab_position":"right"}`)
@@ -192,7 +192,7 @@ func TestServer_WorkspaceTabPositionRouteWiredBeforeWorkspaceIDRoute(t *testing.
 func TestServer_WorkspaceVerticalBarWidthRouteWiredBeforeWorkspaceIDRoute(t *testing.T) {
 	cfg := testConfig()
 	mgr := session.NewManager()
-	srv := New(cfg, mgr, emptyFS)
+	srv := New(cfg, mgr, nil, nil, emptyFS)
 	require.NotNil(t, srv)
 
 	performWorkspaceSettingUpdate(t, srv, "/api/workspaces/vertical-bar-width", `{"vertical_bar_width":320}`)
@@ -213,7 +213,7 @@ func performWorkspaceSettingUpdate(t *testing.T, srv *Server, path string, body 
 func TestServer_DirectoriesRouteWired(t *testing.T) {
 	cfg := testConfig()
 	mgr := session.NewManager()
-	srv := New(cfg, mgr, emptyFS)
+	srv := New(cfg, mgr, nil, nil, emptyFS)
 	require.NotNil(t, srv)
 
 	rec := httptest.NewRecorder()

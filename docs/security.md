@@ -100,11 +100,15 @@ so the token only provides real protection once the operator has placed a TLS-te
 proxy, SSH tunnel, or VPN in front of the non-loopback listener. See
 [agent-board.md](agent-board.md#security-model) for the full rationale.
 
-`internal/server`'s constant-time bearer-token middleware (`bearerAuthMiddleware`) is also
-implemented and unit-tested, but it is **not yet wired into `registerRoutes`** — connecting it to
-today's `/api/*` and `/ws/{sessionID}` routes without a matching frontend change would break every
-existing, currently-unauthenticated request. It is connected once board endpoints exist to protect
-and the frontend sends the token; see [agent-board.md](agent-board.md)'s status note.
+`internal/server`'s constant-time bearer-token middleware (`bearerAuthMiddleware`, `internal/server/auth.go`)
+is implemented, unit-tested, and wired into `registerRoutes` — but **only** onto the new
+`r.Route("/api/board", ...)` sub-route (`GET /status`, `GET /messages`, `POST /broadcast`), not onto
+any pre-existing `/api/*` route or `/ws/{sessionID}`. Widening it to those routes without a matching
+frontend change would break every existing, currently-unauthenticated request, so that remains a
+separate, larger change. `internal/server/board_routes_test.go` covers this scoping as a regression:
+missing/incorrect token on `/api/board/*` is rejected with `401`, the correct token reaches `200`,
+and pre-existing `/api/*` routes plus `/ws/{sessionID}` stay reachable with no `Authorization` header
+at all. See [agent-board.md](agent-board.md)'s status note.
 
 ## General Rules
 

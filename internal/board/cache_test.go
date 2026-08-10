@@ -59,8 +59,10 @@ func TestBoardCache_AppendMessage_AssignsIncreasingSeq(t *testing.T) {
 
 	rows := c.MessagesSince(0)
 	require.Len(t, rows, 2)
-	assert.Equal(t, "first", rows[0].Body)
-	assert.Equal(t, "second", rows[1].Body)
+	assert.Equal(t, "first", rows[0].Row.Body)
+	assert.Equal(t, "second", rows[1].Row.Body)
+	assert.Equal(t, int64(1), rows[0].Seq)
+	assert.Equal(t, int64(2), rows[1].Seq)
 }
 
 func TestBoardCache_MessagesSince_FiltersByAfterSeq(t *testing.T) {
@@ -71,8 +73,8 @@ func TestBoardCache_MessagesSince_FiltersByAfterSeq(t *testing.T) {
 
 	rows := c.MessagesSince(1)
 	require.Len(t, rows, 2)
-	assert.Equal(t, "two", rows[0].Body)
-	assert.Equal(t, "three", rows[1].Body)
+	assert.Equal(t, "two", rows[0].Row.Body)
+	assert.Equal(t, "three", rows[1].Row.Body)
 }
 
 func TestBoardCache_MessagesSince_EmptyHistory_ReturnsNilNotError(t *testing.T) {
@@ -96,9 +98,9 @@ func TestBoardCache_AppendMessage_BoundedHistory_DropsOldest(t *testing.T) {
 
 	rows := c.MessagesSince(0)
 	require.Len(t, rows, 3)
-	assert.Equal(t, "c", rows[0].Body)
-	assert.Equal(t, "d", rows[1].Body)
-	assert.Equal(t, "e", rows[2].Body)
+	assert.Equal(t, "c", rows[0].Row.Body)
+	assert.Equal(t, "d", rows[1].Row.Body)
+	assert.Equal(t, "e", rows[2].Row.Body)
 }
 
 func TestBoardCache_AppendMessage_BoundedHistory_SeqKeepsIncreasingPastBound(t *testing.T) {
@@ -113,8 +115,10 @@ func TestBoardCache_AppendMessage_BoundedHistory_SeqKeepsIncreasingPastBound(t *
 	// only what survived (b, c), not error or resurrect the dropped row.
 	rows := c.MessagesSince(0)
 	require.Len(t, rows, 2)
-	assert.Equal(t, "b", rows[0].Body)
-	assert.Equal(t, "c", rows[1].Body)
+	assert.Equal(t, "b", rows[0].Row.Body)
+	assert.Equal(t, "c", rows[1].Row.Body)
+	assert.Equal(t, int64(2), rows[0].Seq, "Seq must reflect the original assignment, not be renumbered after truncation")
+	assert.Equal(t, int64(3), rows[1].Seq)
 }
 
 func TestBoardCache_ConcurrentReadWrite_NoRace(t *testing.T) {

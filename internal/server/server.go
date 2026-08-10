@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"panemux/internal/api"
+	"panemux/internal/board"
 	"panemux/internal/config"
 	"panemux/internal/session"
 	"panemux/internal/ws"
@@ -29,16 +30,19 @@ type Server struct {
 }
 
 // New creates a new server instance.
-func New(cfg *config.Config, manager *session.Manager, frontendFS embed.FS) *Server {
+func New(
+	cfg *config.Config, manager *session.Manager, boardCache *board.BoardCache, boardRelay *board.Relay,
+	frontendFS embed.FS,
+) *Server {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(corsMiddleware)
 	r.Use(securityHeadersMiddleware)
 
-	apiHandler := api.NewHandler(cfg, manager)
+	apiHandler := api.NewHandler(cfg, manager, boardCache, boardRelay)
 	wsHandler := ws.NewHandler(manager)
-	registerRoutes(r, apiHandler, wsHandler, frontendFS)
+	registerRoutes(r, apiHandler, wsHandler, frontendFS, cfg.Server.AuthToken)
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	return &Server{
@@ -55,7 +59,9 @@ func New(cfg *config.Config, manager *session.Manager, frontendFS embed.FS) *Ser
 	}
 }
 
-func registerRoutes(r chi.Router, apiHandler *api.Handler, wsHandler *ws.Handler, frontendFS embed.FS) {
+func registerRoutes(
+	r chi.Router, apiHandler *api.Handler, wsHandler *ws.Handler, frontendFS embed.FS, authToken string,
+) {
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/layout", apiHandler.GetLayout)
 		r.Put("/layout", apiHandler.PutLayout)
@@ -79,6 +85,18 @@ func registerRoutes(r chi.Router, apiHandler *api.Handler, wsHandler *ws.Handler
 		r.Post("/ssh-config/hosts", apiHandler.PostSSHConfigHost)
 		r.Get("/detect-shell", apiHandler.GetDetectShell)
 		r.Get("/directories", apiHandler.GetDirectories)
+	})
+	// /api/board/* is the only part of the API gated behind bearer-token
+	// auth today: unlike every other /api/* route and /ws/{sessionID},
+	// nothing relies on these endpoints yet (no frontend calls them), so
+	// gating them from day one costs nothing — retrofitting auth onto the
+	// already-relied-upon unauthenticated routes above is a separate,
+	// larger change. See docs/security.md.
+	r.Route("/api/board", func(r chi.Router) {
+		r.Use(bearerAuthMiddleware(authToken))
+		r.Get("/status", apiHandler.GetBoardStatus)
+		r.Get("/messages", apiHandler.GetBoardMessages)
+		r.Post("/broadcast", apiHandler.PostBoardBroadcast)
 	})
 	r.Get("/ws/{sessionID}", wsHandler.ServeHTTP)
 	registerFrontend(r, frontendFS)

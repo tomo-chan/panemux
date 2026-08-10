@@ -1,16 +1,22 @@
 # Agent Board: Cross-Pane Claude Messaging and Status Aggregation
 
-> **Status: foundation implemented, feature not yet usable.** The `internal/board` package's core
-> types (`Row`, `Status`, `AgmsgClient`, `BoardCache`, `ownSendLedger`, `LocalAgmsgClient`,
-> `RemoteAgmsgClient`), the `BoardHostID`/`BoardExecutor` session capability interfaces, and the
-> `agent_board`/`command_center`/`server.auth_token` config surface described below are implemented
-> and tested — see [architecture.md](architecture.md)'s `internal/board` section and
-> [security.md](security.md#agent-board-remote-writes) for what actually ships today. The relay
-> goroutine, the PTY bootstrap flow, the `/api/board/*` and `/ws/board-command` endpoints, the
-> command center, and wiring the bearer auth middleware into any route are still design-only — none
-> of them exist yet, so this document's API/UI surface below is not reachable through any current
-> config or endpoint. Update this note (and its cross-links) again once a later phase closes that
-> gap; until then, no other doc should describe `board` REST/WS endpoints as current behavior.
+> **Status: relay and REST status/messages/broadcast implemented; bootstrap and command center not
+> yet usable.** The `internal/board` package's core types (`Row`, `Status`, `AgmsgClient`,
+> `BoardCache`, `ownSendLedger`, `LocalAgmsgClient`, `RemoteAgmsgClient`), the `BoardHostID`/
+> `BoardExecutor` session capability interfaces, the `agent_board`/`command_center`/
+> `server.auth_token` config surface, the relay goroutine (`internal/board/relay.go`, cursor
+> persistence in `internal/board/cursor_store.go`), and the three REST endpoints in [API
+> additions](#api-additions) — `GET /api/board/status`, `GET /api/board/messages`, `POST
+> /api/board/broadcast` — are implemented and tested. `bearerAuthMiddleware` is wired, but **only**
+> onto the new `/api/board/*` sub-route, not onto any pre-existing `/api/*` route or
+> `/ws/{sessionID}` — see [Security model](#security-model) and
+> [security.md](security.md#auth-token-and-transport-encryption) for why those stay unauthenticated
+> for now. `setupBoard` in `board.go` (`package main`) builds the `AgmsgClient`s and pane→host map
+> from config at startup and wires the relay goroutine into `main.go`'s lifecycle. Still design-only:
+> the PTY bootstrap flow (process detection, the one-time onboarding instruction), `/ws/board-command`,
+> `GET /api/board/command/history`, and the command center itself — none of that exists yet, so this
+> document's bootstrap/command-center sections below are not reachable through any current config or
+> endpoint. Update this note (and its cross-links) again once a later phase closes that gap.
 
 ## Purpose
 
@@ -556,18 +562,21 @@ type BoardCache struct {
     mu       sync.RWMutex
     status   map[string]Status // paneID -> latest self-reported status (pane IDs are globally unique)
     nextSeq  int64
-    history  []cachedRow       // bounded ring buffer, most recent last
+    history  []CachedRow       // bounded ring buffer, most recent last
 }
 
-type cachedRow struct {
-    Seq int64
+// CachedRow pairs a Row with the BoardCache-local Seq it was assigned when appended. Exported
+// because GET /api/board/messages?since=<seq> needs the Seq back from every returned row to use as
+// its next since cursor — a bare []Row would discard exactly the value the caller needs.
+type CachedRow struct {
     Row Row
+    Seq int64
 }
 
-func (c *BoardCache) RecordStatus(paneID string, s Status) { /* mutex-guarded write; sets s.UpdatedAt */ }
-func (c *BoardCache) AppendMessage(r Row)                  { /* mutex-guarded write; assigns next Seq */ }
-func (c *BoardCache) StatusSnapshot() map[string]Status    { /* mutex-guarded copy */ }
-func (c *BoardCache) MessagesSince(afterSeq int64) []Row   { /* mutex-guarded copy, filtered by Seq */ }
+func (c *BoardCache) RecordStatus(paneID string, s Status)     { /* mutex-guarded write; sets s.UpdatedAt */ }
+func (c *BoardCache) AppendMessage(r Row)                       { /* mutex-guarded write; assigns next Seq */ }
+func (c *BoardCache) StatusSnapshot() map[string]Status         { /* mutex-guarded copy */ }
+func (c *BoardCache) MessagesSince(afterSeq int64) []CachedRow  { /* mutex-guarded copy, filtered by Seq */ }
 ```
 
 The relay inspects every `Row` it reads: if `To == "_system"` and `Body` parses as JSON with
@@ -599,6 +608,21 @@ was already doing.
   own SQL escaping internally, so panemux never needs a second, SQL-literal escaping layer of its
   own on top of the shell layer — there is no local schema of panemux's own to escape SQL text for.
   See [Security model](#security-model) and [security.md](security.md).
+
+`internal/board/relay.go`'s `Relay` type (constructed once in `board.go`'s `setupBoard` and shared
+between the polling goroutine and the broadcast REST handler, per [Cross-host relay](#cross-host-relay))
+implements the row-processing order and cold-start backfill described there: `Poll(ctx)` runs one
+polling pass and is what `Run(ctx, interval)` calls on a real `time.Ticker` in production; tests drive
+`runLoop` directly against an injected `<-chan time.Time` instead, since this is the first
+time-driven goroutine loop in this codebase and keeping `Poll` synchronous and directly testable
+avoids relying on wall-clock timing in any test. `Broadcast(ctx, from, to, body)` is what
+`POST /api/board/broadcast` calls; it records into the same `ownSendLedger` instance the poll loop
+consumes from, resolves each `to` pane ID to its host via the same config-derived pane→host map the
+relay already holds, and returns an `*UnknownPaneError` (naming every unresolvable pane ID at once,
+not just the first) rather than partially delivering to some panes and silently dropping others.
+Relay cursors (`internal/board/cursor_store.go`'s `CursorEntry{Host, Team, Cursor}`) persist to
+`~/.config/panemux/board-relay-cursor.json` (`0600`) after each poll and are loaded once at startup;
+a missing or unreadable cursor file is logged and treated as a cold start, never a fatal error.
 
 Because panemux owns no schema, it needs no embedded database driver of its own at all — every
 board operation is either a local `exec.Command` or a remote exec-channel command running agmsg's
@@ -893,18 +917,23 @@ hypothetical future requirements.
 
 ## API additions
 
-All of the following require the global bearer-token auth described in
-[Security model](#security-model) — board auth is not scoped narrower than the rest of the API,
-because an unauthenticated board endpoint would be a smaller problem than the pre-existing
-unauthenticated `/ws/{sessionID}` full-shell endpoint, and once auth exists it should cover both.
+The first three rows are implemented; see [docs/behavior.md](behavior.md#agent-board-rest-api) for
+exact request/response shapes and status codes. All three require the bearer token described in
+[Security model](#security-model), but — a deliberate, narrower choice than an earlier revision of
+this document specified — that gate today covers **only** `/api/board/*`, not the pre-existing
+`/api/*` routes or `/ws/{sessionID}`: nothing yet relies on the board endpoints (no frontend calls
+them), so gating them from day one costs nothing, while retrofitting auth onto the already-relied-
+upon unauthenticated routes is a separate, larger change with its own frontend work — see
+[security.md](security.md#auth-token-and-transport-encryption). The last two rows (command center)
+remain design-only.
 
 | Endpoint | Purpose |
 |---|---|
 | `GET /api/board/status` | A snapshot of panemux's in-memory status cache — no `AgmsgClient` call happens on this request (see [Architecture](#architecture)) |
 | `GET /api/board/messages?since=<seq>` | History feed for the dashboard UI. `<seq>` is `BoardCache`'s own panemux-local sequence number (see [Package layout](#package-layout)), not an agmsg-native `id` — those aren't comparable across hosts |
 | `POST /api/board/broadcast` | `{ "to": ["pane-a","pane-b"], "body": "..." }`; sends directly to each target's own host via `AgmsgClient` (never via PTY injection, so it is safe to send to a pane mid-turn); delivery to the pane is immediate, but the message appears in `GET /api/board/messages`' history only after the relay's next poll cycle reads it back — see [Known limitations](#known-limitations) |
-| `WS /ws/board-command` | Command center chat: client sends `{"prompt": "..."}`, server streams the headless Claude response — see [Command center](#command-center) |
-| `GET /api/board/command/history` | Command center's own captured conversation history — see [Command center](#command-center) |
+| `WS /ws/board-command` (design-only) | Command center chat: client sends `{"prompt": "..."}`, server streams the headless Claude response — see [Command center](#command-center) |
+| `GET /api/board/command/history` (design-only) | Command center's own captured conversation history — see [Command center](#command-center) |
 
 ## Config additions
 
@@ -1222,8 +1251,19 @@ documented behavior changed.
 - `internal/config`: `host != loopback && auth_token == ""` is a validation error; all other
   combinations are valid. `agent_board.team` defaults to `"panemux"` when unset. A pane config with
   `id: "_system"` is a validation error, both alone and alongside otherwise-valid other panes.
-- `internal/api`: missing/incorrect bearer token is rejected (401) on both REST and the WebSocket
-  handshake; correct token succeeds.
+- `internal/server`: missing/incorrect bearer token on `/api/board/*` is rejected (401); the correct
+  token succeeds; pre-existing `/api/*` routes and `/ws/{sessionID}` remain reachable with no
+  `Authorization` header at all — a required regression test, since scoping the middleware to
+  `/api/board` only (rather than gating the whole API) is exactly the choice that could silently
+  widen later. Once `/ws/board-command` exists, its handshake rejection is covered here too,
+  following the same pattern.
+- `internal/api`: `GetBoardStatus`/`GetBoardMessages`/`PostBoardBroadcast` handler-level behavior —
+  empty cache returns a well-formed empty response (`{"statuses":{}}` / `{"messages":[]}`, never
+  `null`), `since` omitted defaults to `0`, a non-numeric `since` is `400`, `to`/`body` validation
+  failures and `*board.UnknownPaneError` are `422`, malformed request JSON is `400`, any other
+  downstream `AgmsgClient`/relay error is `502`, success is `200`. Auth itself is not this package's
+  concern — that is `internal/server`'s bullet above, since `bearerAuthMiddleware` sits in front of
+  these handlers, not inside them.
 - `internal/ws`: `/ws/board-command` is new surface under the same package as the existing terminal
   WebSocket handler, so it is covered by `coverage-go`'s existing `internal/ws` gate (see
   `DEVELOPMENT.md`) — no separate coverage carve-out is introduced for it. Its handshake rejection
