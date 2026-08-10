@@ -89,6 +89,10 @@ vi.mock('./hooks/useGitInfo', () => ({
   useGitInfoSnapshotMap: mockUseGitInfoSnapshotMap,
 }))
 
+vi.mock('./hooks/useBoardSessionToken', () => ({
+  useBoardSessionToken: () => ({ token: '', commandCenterEnabled: false }),
+}))
+
 vi.mock('./hooks/usePaneSettings', () => ({
   usePaneSettings: () => ({
     isOpen: false,

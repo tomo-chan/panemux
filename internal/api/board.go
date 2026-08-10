@@ -3,11 +3,13 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
 
 	"panemux/internal/board"
+	"panemux/internal/commandcenter"
 )
 
 type boardStatusEntry struct {
@@ -141,4 +143,79 @@ func (h *Handler) PostBoardBroadcast(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, boardBroadcastResponse{Delivered: delivered})
+}
+
+type commandHistoryEntryResponse struct {
+	At  time.Time       `json:"at"`
+	Raw json.RawMessage `json:"raw"`
+}
+
+type commandHistoryResponse struct {
+	Entries []commandHistoryEntryResponse `json:"entries"`
+}
+
+// GetBoardCommandHistory returns the command center's own captured
+// turn-by-turn conversation history — read directly from the local history
+// file the Runner appends to while streaming a query's output, never
+// re-derived from Claude Code's transcript after the fact. See
+// docs/agent-board.md's "API and streaming" section. An empty or missing
+// history file (the command center has never run, or is not enabled) is
+// not an error; it returns an empty list.
+func (h *Handler) GetBoardCommandHistory(w http.ResponseWriter, r *http.Request) {
+	entries, err := h.commandHistoryFn()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to load command center history: %v", err), http.StatusInternalServerError)
+		return
+	}
+	resp := commandHistoryResponse{Entries: make([]commandHistoryEntryResponse, 0, len(entries))}
+	for _, e := range entries {
+		resp.Entries = append(resp.Entries, commandHistoryEntryResponse{At: e.At, Raw: e.Raw})
+	}
+	writeJSON(w, resp)
+}
+
+type boardSessionTokenResponse struct {
+	Token                string `json:"token"`
+	CommandCenterEnabled bool   `json:"command_center_enabled"`
+}
+
+// GetBoardSessionToken lets the same-origin dashboard learn the bearer
+// token panemux generated or was configured with, so its own JavaScript can
+// authenticate the /api/board/* requests and the /ws/board-command
+// WebSocket connection it makes on the user's behalf. There is no other way
+// for the frontend to learn a token that may have been randomly generated
+// on first run (see config.Config.EnsureAuthToken) and is never sent to the
+// browser any other way.
+//
+// This endpoint is deliberately NOT behind bearerAuthMiddleware itself —
+// nothing could ever bootstrap the token without already knowing it
+// otherwise — and instead relies on the same protection every other
+// pre-existing, unauthenticated /api/* route already relies on: the
+// server's CORS policy only allows a loopback origin to read a cross-origin
+// response body at all (see corsMiddleware/isLocalhostOrigin in
+// internal/server), and the operator's own host is already the trust
+// boundary for those routes. See docs/security.md's "Auth token and
+// transport encryption" section.
+func (h *Handler) GetBoardSessionToken(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, boardSessionTokenResponse{
+		Token:                h.cfg.Server.AuthToken,
+		CommandCenterEnabled: h.cfg.CommandCenter.Enabled,
+	})
+}
+
+// defaultCommandHistoryFn reads the command center's history file from its
+// default location. Resolving the path lazily on every call (rather than
+// once at Handler construction) matches commandcenter.LoadHistory's own
+// tolerance of a not-yet-existing file — nothing needs to exist before the
+// command center's first successful query.
+func defaultCommandHistoryFn() ([]commandcenter.HistoryEntry, error) {
+	path, err := commandcenter.DefaultHistoryFilePath()
+	if err != nil {
+		return nil, fmt.Errorf("resolving command center history path: %w", err)
+	}
+	entries, err := commandcenter.LoadHistory(path)
+	if err != nil {
+		return nil, fmt.Errorf("loading command center history: %w", err)
+	}
+	return entries, nil
 }

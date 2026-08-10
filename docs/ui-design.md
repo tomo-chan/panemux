@@ -245,27 +245,44 @@ Using separate colors avoids mixing "this needs your attention" with "you can dr
 
 ## Agent Board UI (planned)
 
-> **Status: design, not yet implemented.** This section only cross-links the UI-facing pieces of a
-> larger design; it does not add new interaction principles of its own. Full design lives in
-> [agent-board.md](agent-board.md); do not treat any of this as current behavior until that
-> document's status note says so.
+> **Status: the command center palette and history panel are implemented; the status dashboard is
+> still design-only.** Full design lives in [agent-board.md](agent-board.md). The section heading
+> keeps its historical "(planned)" suffix since the dashboard bullet below is still unimplemented —
+> update it once that lands too.
 
 Agent Board (see [agent-board.md](agent-board.md)) introduces two new UI surfaces, both layered on
 top of the principles above rather than replacing them:
 
 - A **dashboard** view of per-pane self-reported status (state, branch, PR, summary — see
-  [agent-board.md's Status self-report](agent-board.md#status-self-report-and-message-flow)),
-  intended to extend the existing workspace-bar/pane-card status vocabulary (**Integrated workspace
-  summaries** and **Workspace pane groups**, above) rather than introduce a competing status
-  language — connection-state dots, attention framing, and repo/branch/PR chrome should read the
-  same way in Agent Board's dashboard as they already do in the pane header and workspace bar.
-- A **Spotlight-style command palette** and **history panel** for the [command
-  center](agent-board.md#command-center), following this document's existing **Modal Dialogs**
-  pattern for the palette itself (a higher-friction, focused interaction that shouldn't be
-  compressed into inline chrome) and the existing overlay-panel pattern already used for the
-  workspace-summary overlay for the persistent history view.
+  [agent-board.md's Status self-report](agent-board.md#status-self-report-and-message-flow)) —
+  **still design-only.** It's intended to extend the existing workspace-bar/pane-card status
+  vocabulary (**Integrated workspace summaries** and **Workspace pane groups**, above) rather than
+  introduce a competing status language — connection-state dots, attention framing, and
+  repo/branch/PR chrome should read the same way in Agent Board's dashboard as they already do in
+  the pane header and workspace bar.
+- A **Spotlight-style command palette** (`CommandPalette.tsx`) and **history panel**
+  (`CommandHistoryPanel.tsx`) for the [command center](agent-board.md#command-center) —
+  **implemented.** The palette follows this document's existing **Modal Dialogs** pattern (a
+  higher-friction, focused interaction, not compressed into inline chrome): dark `#252526` panel,
+  `#444` border, backdrop click and `Escape` to dismiss, matching `AddSSHHostDialog`'s own styling
+  tokens rather than introducing new ones. The history panel follows the same overlay pattern as a
+  right-anchored sliding panel rather than a centered modal, since it's meant to stay open alongside
+  other work rather than demand focus the way the palette does.
 
-Concrete visual decisions (palette keybinding, color treatment, streaming-response layout, error
-presentation) are deferred to implementation time and belong in this document once they're made —
-this section exists so that work doesn't start from a blank page on cross-cutting concerns
-(status-language consistency, dialog/overlay pattern reuse) that are already settled here.
+Concrete decisions this section originally deferred to implementation time:
+
+- **Palette keybinding**: `Cmd/Ctrl+Shift+K`, not plain `Cmd/Ctrl+K` — the latter is already bound in
+  many shells/readline setups a terminal pane might be running, and would be captured as literal pane
+  input rather than reaching the browser as a global shortcut. Registered on the keydown capture
+  phase specifically so it still fires while a terminal pane has focus.
+  See [agent-board.md's UI subsection](agent-board.md#ui) for the full rationale.
+- **Color treatment**: reuses this document's existing dark palette exactly (`#252526` panels, `#444`
+  borders, `#d4d4d4` body text, `#4ec9b0` for the user's own prompt echo, `#f44747` for errors) — no
+  new colors were introduced for Agent Board.
+- **Streaming-response layout**: turn-based, not a single scrolling log — each submitted prompt opens
+  a new turn block showing the prompt followed by its streamed `stream-json` lines as they arrive,
+  an ellipsis while still in flight, and either nothing further (success) or a red error/busy line at
+  the end.
+- **Error presentation**: inline within the turn that failed (red text, same treatment as this
+  document's existing form-validation error styling), not a separate banner or toast — an error is
+  scoped to the one query that produced it, and the palette stays open and usable for the next prompt.

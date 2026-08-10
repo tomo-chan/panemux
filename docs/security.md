@@ -117,6 +117,35 @@ discipline `RunBoardCommand` already applies uniformly to every argument, board-
 `RunBoardCommand` call bootstrap itself makes; they are operator config or panemux's own fixed
 detection-table output either way, not external request data.
 
+### Command center subprocess execution
+
+`internal/commandcenter/runner.go`'s `Runner` is the one other place in this repository, besides
+`internal/session`, that calls `exec.Command`/`exec.CommandContext` on a value not fully known at
+compile time. Per this document's own [General Rules](#general-rules): the command name
+(`r.claudeBin`) is a hardcoded literal (`"claude"`) unless an operator explicitly overrides it via
+`RunnerConfig.ClaudeBin` — there is no code path that derives it from request data, environment
+variables, or anything else CodeQL would treat as tainted. The arguments after it are a mix of fixed
+literal flags (`-p`, `--output-format=stream-json`, `--verbose`), a `--resume <session-id>` pulled
+from `SessionState` (itself only ever written by `Runner` from a value `claude` itself reported in an
+earlier run — never client-supplied), a `--mcp-config <path>` pointing at a temp file `Runner` itself
+created, an `--allowedTools` list `commandcenter.AllowedTools()` computes from fixed string literals,
+and finally the user's free-text prompt as the last argument. None of this goes through a shell —
+`exec.CommandContext` passes each argument as a discrete argv element — so there is no shell-injection
+risk from the prompt regardless of its content, matching this document's existing rule that
+"[a]rguments after the command may be user-supplied only when the target binary cannot reinterpret
+them as commands": the `claude` CLI's own argument parser is the only thing that ever sees the prompt
+as anything other than an opaque string, and it is always the final positional argument, after every
+flag this call ever passes.
+
+The `PANEMUX_BOARD_TOKEN`/`PANEMUX_BOARD_BASE_URL` values the `claude -p` subprocess's own MCP-server
+child process reads never reach `Runner`'s own `exec.Command` argv at all — they are set in the MCP
+config file's `env` block (see "Auth token and transport encryption" below for that file's own
+handling), read by `panemux __board-mcp-server` via `os.Getenv` in `board_mcp_server.go`. This is not
+a violation of this document's "do not use `os.Getenv` values in flows that reach `exec.Command`"
+rule: `runBoardMCPServer` never calls `exec.Command` itself, it only makes outbound HTTP requests
+(`internal/boardmcp.HTTPBoardAPIClient`) — an entirely different sink with no shell/argv-reinterpretation
+risk to defend against.
+
 ### Auth token and transport encryption
 
 `internal/config`'s `ServerConfig.AuthToken` (`server.auth_token` in `config.yaml`) and the
@@ -132,14 +161,56 @@ proxy, SSH tunnel, or VPN in front of the non-loopback listener. See
 [agent-board.md](agent-board.md#security-model) for the full rationale.
 
 `internal/server`'s constant-time bearer-token middleware (`bearerAuthMiddleware`, `internal/server/auth.go`)
-is implemented, unit-tested, and wired into `registerRoutes` — but **only** onto the new
-`r.Route("/api/board", ...)` sub-route (`GET /status`, `GET /messages`, `POST /broadcast`), not onto
-any pre-existing `/api/*` route or `/ws/{sessionID}`. Widening it to those routes without a matching
-frontend change would break every existing, currently-unauthenticated request, so that remains a
-separate, larger change. `internal/server/board_routes_test.go` covers this scoping as a regression:
-missing/incorrect token on `/api/board/*` is rejected with `401`, the correct token reaches `200`,
-and pre-existing `/api/*` routes plus `/ws/{sessionID}` stay reachable with no `Authorization` header
-at all. See [agent-board.md](agent-board.md)'s status note.
+is implemented, unit-tested, and wired into `registerRoutes` — but **only** onto the
+`r.Route("/api/board", ...)` sub-route (`GET /status`, `GET /messages`, `POST /broadcast`, `GET
+/command/history`), not onto any pre-existing `/api/*` route or `/ws/{sessionID}`. Widening it to
+those routes without a matching frontend change would break every existing, currently-unauthenticated
+request, so that remains a separate, larger change. `internal/server/board_routes_test.go` covers this
+scoping as a regression: missing/incorrect token on `/api/board/*` is rejected with `401`, the correct
+token reaches `200`, and pre-existing `/api/*` routes plus `/ws/{sessionID}` stay reachable with no
+`Authorization` header at all. See [agent-board.md](agent-board.md)'s status note.
+
+**`WS /ws/board-command` cannot use the `Authorization` header at all** — browsers do not allow a
+WebSocket upgrade request to carry arbitrary headers. `internal/ws/board_command.go`'s
+`BoardCommandHandler` instead reads the token from the `Sec-WebSocket-Protocol` request header (the
+client dials with `new WebSocket(url, [token])`), validated with the same
+`subtle.ConstantTimeCompare` discipline as `bearerAuthMiddleware`, and echoes the same value back in
+the response header on success, completing the WebSocket handshake per spec. **A `?token=...` query
+parameter was deliberately not used**: unlike a header, a query parameter is written into the
+server's own access logs (`middleware.Logger` logs the full request line for every request, including
+this one) and into the browser's navigation history if the WS URL were ever opened as a normal page,
+and would be replayed in the `Referer` header of any same-origin follow-up navigation — a subprotocol
+value has none of those leak paths. This route is registered in `internal/server/server.go` only when
+a `*commandcenter.Runner` is non-nil (`command_center.enabled: true` and a token configured); when
+disabled the route is absent entirely, not present-but-rejecting, so there is nothing there for an
+unauthenticated probe to even find.
+
+**`GET /api/session-token` is the one deliberate, unauthenticated exception**, and exists specifically
+to let the browser dashboard learn the token it needs for every route above — there is no other way
+for client-side JavaScript to learn a value that may have been randomly generated on first run. It
+relies on the same protection every other pre-existing unauthenticated `/api/*` route already relies
+on: `corsMiddleware`'s `isLocalhostOrigin` check only lets a loopback origin read a cross-origin
+response body at all, and the operator's own host is already the trust boundary for those routes. It
+is deliberately registered at `/api/session-token`, **not** `/api/board/session-token`: chi routes any
+path starting with `/api/board/` into the `bearerAuthMiddleware`-wrapped sub-router regardless of
+where else a handler for that literal path is registered — an earlier revision of this endpoint lived
+at that path and was silently caught by the very middleware it exists to bypass, discovered only by
+an end-to-end `curl` check against the real running server, not by any handler-level unit test (those
+construct their own flat test router and never exercise chi's actual mount-precedence behavior).
+`internal/server/board_routes_test.go`'s `TestServer_SessionTokenRoute_RemainsUnauthenticated` is a
+regression test against the real `server.New()`-constructed router specifically because a
+handler-level test would not have caught this class of bug.
+
+**The command center's own MCP config file is the one place this feature writes the bearer token to
+disk, deliberately temporarily.** `internal/commandcenter.BuildMCPConfig` writes a JSON file (mode
+`0600`, created via `os.CreateTemp` then explicitly `os.Chmod`'d) embedding the token as a
+`PANEMUX_BOARD_TOKEN` environment variable value for the `claude -p` subprocess's own MCP server
+child process (`panemux __board-mcp-server`) to read; the caller's `cleanup` func removes it once that
+subprocess has exited. This is a strictly smaller exposure than the existing `~/.config/panemux/token`
+file the token already lives in permanently — the temp file exists only for one query's subprocess
+lifetime and is never written to `~/.config/panemux/config.yaml` — but it is still a plaintext
+token-bearing file on disk, hence the explicit `0600` rather than relying on `os.CreateTemp`'s default
+mode.
 
 ## General Rules
 

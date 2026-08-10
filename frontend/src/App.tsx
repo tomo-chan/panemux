@@ -3,12 +3,15 @@ import { SplitContainer, LayoutActionsContext } from './components/SplitContaine
 import { PaneSettingsDialog } from './components/PaneSettingsDialog'
 import { AddSSHHostDialog } from './components/AddSSHHostDialog'
 import { WorkspaceTabs } from './components/WorkspaceTabs'
+import { CommandPalette } from './components/CommandPalette'
+import { CommandHistoryPanel } from './components/CommandHistoryPanel'
 import { useLayout } from './hooks/useLayout'
 import { usePaneSettings } from './hooks/usePaneSettings'
 import { useWorkspaceAttentionMonitor } from './hooks/useWorkspaceAttentionMonitor'
 import { useBrowserNotificationPermission } from './hooks/useBrowserNotificationPermission'
 import { useSessionsOverview } from './hooks/useSessionsOverview'
 import { useGitInfoSnapshotMap } from './hooks/useGitInfo'
+import { useBoardSessionToken } from './hooks/useBoardSessionToken'
 import { DisplayConfig } from './types'
 import { TERMINAL_FONT_FAMILY } from './utils/fonts'
 import { findPaneById, generatePaneId, layoutContainsPane } from './utils/layoutTree'
@@ -51,6 +54,9 @@ export const App: React.FC = () => {
   const [movePaneError, setMovePaneError] = useState<string | null>(null)
   const [pendingFocusedPaneId, setPendingFocusedPaneId] = useState<string | null>(null)
   const sessionsById = useSessionsOverview(Boolean(workspaces))
+  const { token: boardToken, commandCenterEnabled } = useBoardSessionToken()
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false)
+  const [isCommandHistoryOpen, setIsCommandHistoryOpen] = useState(false)
 
   const paneMetadataByID = useMemo(() => {
     const metadata = new Map<string, { paneTitle: string; workspaceId: string; workspaceTitle: string }>()
@@ -190,6 +196,25 @@ export const App: React.FC = () => {
 
   useWorkspaceAttentionMonitor({ workspaces, maximizedPaneId, onAttention: notifyAttention })
   useBrowserNotificationPermission()
+
+  // Global command center palette shortcut: Cmd/Ctrl+Shift+K, deliberately
+  // not plain Cmd/Ctrl+K (already bound in many shells/readline setups and
+  // would collide with pane-local terminal input) — see docs/ui-design.md's
+  // Agent Board UI section. Registered on the capture phase so it reaches
+  // this handler even when a terminal pane (which owns its own keydown
+  // handling) currently has focus.
+  useEffect(() => {
+    if (!commandCenterEnabled) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const modifier = event.metaKey || event.ctrlKey
+      if (modifier && event.shiftKey && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        setIsCommandPaletteOpen((open) => !open)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown, true)
+    return () => window.removeEventListener('keydown', handleKeyDown, true)
+  }, [commandCenterEnabled])
 
   const handleAddSSHHost = useCallback(async (host: SSHConfigHost) => {
     setIsAddSSHHostSaving(true)
@@ -477,6 +502,40 @@ export const App: React.FC = () => {
           saveError={addSSHHostError}
           onSave={handleAddSSHHost}
           onClose={() => setIsAddSSHHostOpen(false)}
+        />
+        {commandCenterEnabled && (
+          <button
+            type="button"
+            aria-label="Open command center history"
+            onClick={() => setIsCommandHistoryOpen(true)}
+            title="Command center history"
+            style={{
+              position: 'absolute',
+              bottom: 12,
+              right: 12,
+              zIndex: 20,
+              padding: '6px 10px',
+              backgroundColor: '#252526',
+              color: '#888',
+              border: '1px solid #444',
+              borderRadius: '4px',
+              fontFamily: TERMINAL_FONT_FAMILY,
+              fontSize: '11px',
+              cursor: 'pointer',
+            }}
+          >
+            Command History
+          </button>
+        )}
+        <CommandPalette
+          isOpen={isCommandPaletteOpen && commandCenterEnabled}
+          token={boardToken}
+          onClose={() => setIsCommandPaletteOpen(false)}
+        />
+        <CommandHistoryPanel
+          isOpen={isCommandHistoryOpen && commandCenterEnabled}
+          token={boardToken}
+          onClose={() => setIsCommandHistoryOpen(false)}
         />
       </div>
     </LayoutActionsContext.Provider>

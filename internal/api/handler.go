@@ -25,6 +25,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"panemux/internal/board"
+	"panemux/internal/commandcenter"
 	"panemux/internal/config"
 	"panemux/internal/session"
 	"panemux/internal/sshconfig"
@@ -37,6 +38,7 @@ type Handler struct {
 	readDirFn               func(name string) ([]os.DirEntry, error)
 	manager                 *session.Manager
 	boardBroadcastFn        func(ctx context.Context, to []string, body string) ([]string, error)
+	commandHistoryFn        func() ([]commandcenter.HistoryEntry, error)
 	boardCache              *board.BoardCache
 	gitInfoCacheBySession   map[string]gitInfoCacheEntry
 	createSession           func(*config.PaneConfig, map[string]config.SSHConnection) (session.Session, error)
@@ -174,6 +176,7 @@ func NewHandler(
 	h.boardBroadcastFn = func(ctx context.Context, to []string, body string) ([]string, error) {
 		return boardRelay.Broadcast(ctx, board.SystemID, to, body)
 	}
+	h.commandHistoryFn = defaultCommandHistoryFn
 	return h
 }
 

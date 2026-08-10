@@ -332,11 +332,39 @@ Returns display preferences such as header/status-bar visibility.
 ## Agent Board REST API
 
 Full design and rationale live in [agent-board.md](agent-board.md); this section documents only the
-request/response shapes and status codes of what is actually implemented today. Unlike every route
-above, every endpoint in this section requires `Authorization: Bearer <server.auth_token>` — see
+request/response shapes and status codes of what is actually implemented today. Every `/api/board/*`
+endpoint in this section requires `Authorization: Bearer <server.auth_token>` — see
 [security.md](security.md#auth-token-and-transport-encryption). A missing or incorrect token returns
-`401` before the handler runs. `/ws/board-command` and `GET /api/board/command/history` are not
-implemented yet and are not documented here — see [agent-board.md](agent-board.md)'s status note.
+`401` before the handler runs. The one exception is `GET /api/session-token`, documented in its own
+subsection below, which is deliberately unauthenticated.
+
+### `GET /api/session-token`
+
+Returns the bearer token the browser dashboard needs to authenticate every other `/api/board/*`
+request and the `/ws/board-command` connection — there is no other way for the frontend's own
+JavaScript to learn a token that may have been randomly generated on first run (see
+`config.Config.EnsureAuthToken`, [security.md](security.md#auth-token-and-transport-encryption)) and
+is never sent to the browser any other way. **This endpoint is deliberately not behind
+`bearerAuthMiddleware`** — nothing could bootstrap the token without already knowing it otherwise —
+and relies instead on the same protection every other pre-existing, unauthenticated `/api/*` route
+already relies on: the server's CORS policy only lets a loopback origin read a cross-origin response
+body at all (see `corsMiddleware`/`isLocalhostOrigin` in `internal/server`), and the operator's own
+host is already the trust boundary for those routes.
+
+Response:
+
+```json
+{ "token": "a1b2c3...", "command_center_enabled": true }
+```
+
+- `200`: always — there is no failure mode for this handler beyond the server not running at all.
+
+Note this route lives at `/api/session-token`, not under `/api/board/`, despite belonging
+conceptually to Agent Board: chi routes any path starting with `/api/board/` into the
+`bearerAuthMiddleware`-wrapped sub-router regardless of where else a handler for that literal path is
+registered, so a route literally named `/api/board/session-token` would always require the token it
+exists to hand out. This is not a stylistic choice — an earlier revision of this endpoint lived at
+that path and was silently caught by the auth middleware it was supposed to bypass.
 
 **Bootstrap flow** (not a REST/WS endpoint — a background behavior). For every pane with
 `agent_board.enabled: true`, panemux polls every 5s for a live, agmsg-detectable coding-agent
@@ -425,6 +453,64 @@ Request body:
   `{ "error": "...", "delivered": ["pane-a"] }` — the pane IDs successfully delivered to before the
   failure — so the caller can tell which panes to avoid re-sending to on retry.
 - `200`: `{ "delivered": ["pane-a", "pane-b"] }`, the pane IDs the broadcast actually reached
+
+### `GET /api/board/command/history`
+
+Returns the command center's own captured turn-by-turn conversation history — read directly from a
+local file the WS handler (below) appends to while streaming a query's output, never re-derived from
+Claude Code's transcript after the fact. Requires the bearer token like every other route in this
+section.
+
+Response:
+
+```json
+{
+  "entries": [
+    { "at": "2026-08-10T12:00:00Z", "raw": { "type": "system", "subtype": "init", "session_id": "abc" } },
+    { "at": "2026-08-10T12:00:03Z", "raw": { "type": "result", "result": "..." } }
+  ]
+}
+```
+
+`raw` is exactly one line of the command center subprocess's own `--output-format=stream-json`
+output, unmodified. There is no pagination; the whole captured history is returned every time.
+
+- `200`: entries returned (`"entries":[]` when the command center has never run or `command_center`
+  is disabled — an empty or missing history file is not an error)
+- `500`: the history file exists but could not be read (a genuinely corrupt file, not the ordinary
+  missing-file case above)
+
+## Command Center WebSocket Protocol
+
+Endpoint: `GET /ws/board-command` — the Spotlight palette's chat connection. Full design lives in
+[agent-board.md](agent-board.md#command-center).
+
+**Authentication is different from every other route on this page.** Browsers cannot set an
+`Authorization` header on a WebSocket upgrade request, so the token instead travels as a WebSocket
+subprotocol: the client dials with `new WebSocket(url, [token])`, and the server reads it from the
+`Sec-WebSocket-Protocol` request header, comparing it to `server.auth_token` in constant time. A
+missing or incorrect value returns `401` and the upgrade never happens. This is a deliberate choice
+over a `?token=...` query parameter, which would leak the token into server access logs, browser
+history, and same-origin `Referer` headers. On success the server echoes the same value back in its
+own `Sec-WebSocket-Protocol` response header, completing the handshake per the WebSocket spec.
+
+Once connected, the client may send any number of prompts sequentially over the same connection:
+
+- client → server (text frame): `{"prompt": "..."}`
+- server → client (text frames), one of:
+  - `{"type":"line","raw":{...}}` — one raw `--output-format=stream-json` line from the command
+    center subprocess, forwarded as it arrives
+  - `{"type":"error","message":"..."}` — the query failed (non-zero exit, malformed stream-json
+    output, or a context cancellation/timeout); always the last frame for that query
+  - `{"type":"done"}` — the query finished successfully; always the last frame for that query
+  - `{"type":"busy"}` — a query was already in flight against the command center's single session
+    (see [agent-board.md's Concurrency](agent-board.md#process-lifecycle)); the new prompt was
+    rejected outright, not queued
+
+A client that disconnects mid-query does not stop the underlying subprocess or corrupt the next
+query's `--resume` continuity — the server keeps draining (but no longer forwarding) the query's
+remaining output so the subprocess is never left blocked, and the command center's own busy state is
+released normally once it finishes.
 
 ## WebSocket Protocol
 

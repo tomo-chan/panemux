@@ -27,6 +27,24 @@ func setupBoardRouter(cache *board.BoardCache, broadcastFn broadcastFunc) *Handl
 	return h
 }
 
+func TestGetBoardSessionToken_ReturnsConfiguredTokenAndCommandCenterState(t *testing.T) {
+	cfg := defaultTestConfig()
+	cfg.Server.AuthToken = "sekret"
+	cfg.CommandCenter.Enabled = true
+	h := NewHandler(cfg, session.NewManager(), board.NewBoardCache(), nil)
+	r := setupRouterWithHandler(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/session-token", nil)
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var resp boardSessionTokenResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.Equal(t, "sekret", resp.Token)
+	assert.True(t, resp.CommandCenterEnabled)
+}
+
 func TestGetBoardStatus_EmptyCache_ReturnsEmptyObject(t *testing.T) {
 	h := setupBoardRouter(board.NewBoardCache(), nil)
 	r := setupRouterWithHandler(h)

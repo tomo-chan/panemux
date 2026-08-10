@@ -1,17 +1,17 @@
 # Agent Board: Cross-Pane Claude Messaging and Status Aggregation
 
-> **Status: relay, REST status/messages/broadcast, and the PTY bootstrap flow are implemented;
-> command center is not yet usable.** The `internal/board` package's core types (`Row`, `Status`,
-> `AgmsgClient`, `BoardCache`, `ownSendLedger`, `LocalAgmsgClient`, `RemoteAgmsgClient`), the
+> **Status: Phase 1 (Board core) and Phase 2 (Command center) are both implemented.** The
+> `internal/board` package's core types (`Row`, `Status`, `AgmsgClient`, `BoardCache`,
+> `ownSendLedger`, `LocalAgmsgClient`, `RemoteAgmsgClient`), the
 > `BoardHostID`/`BoardExecutor`/`AgentTypeDetector` session capability interfaces, the
 > `agent_board`/`command_center`/`server.auth_token` config surface, the relay goroutine
 > (`internal/board/relay.go`, cursor persistence in `internal/board/cursor_store.go`), and the three
-> REST endpoints in [API additions](#api-additions) — `GET /api/board/status`, `GET
+> Phase 1 REST endpoints in [API additions](#api-additions) — `GET /api/board/status`, `GET
 > /api/board/messages`, `POST /api/board/broadcast` — are implemented and tested.
-> `bearerAuthMiddleware` is wired, but **only** onto the new `/api/board/*` sub-route, not onto any
-> pre-existing `/api/*` route or `/ws/{sessionID}` — see [Security model](#security-model) and
+> `bearerAuthMiddleware` is wired onto the `/api/board/*` sub-route, not onto any pre-existing
+> `/api/*` route or `/ws/{sessionID}` — see [Security model](#security-model) and
 > [security.md](security.md#auth-token-and-transport-encryption) for why those stay unauthenticated
-> for now (tracked as a separate follow-up issue, not part of this phase). `setupBoard` in `board.go`
+> (tracked as a separate follow-up issue, orthogonal to both phases). `setupBoard` in `board.go`
 > (`package main`) builds the `AgmsgClient`s and pane→host map from config at startup and wires both
 > the relay goroutine and the bootstrap watcher into `main.go`'s lifecycle. A remote host's
 > `RemoteAgmsgClient` is handed a `dynamicBoardExecutor` (`board.go`), which re-resolves a live
@@ -22,11 +22,28 @@
 > started, agmsg-detectable agent process (`session.AgentTypeDetector`, covering the six agmsg agent
 > types agmsg's own `type.conf` marks as process-detectable — see [`internal/session` capability
 > interfaces](#internal-session-capability-interfaces)) and writes a one-time onboarding instruction
-> into that pane's PTY; see [Bootstrap flow](#bootstrap-flow) for the full algorithm. Still
-> design-only: `/ws/board-command`, `GET /api/board/command/history`, and the command center itself —
-> none of that exists yet, so this document's [Command center](#command-center) section below is not
-> reachable through any current config or endpoint. Update this note (and its cross-links) again once
-> a later phase closes that gap.
+> into that pane's PTY; see [Bootstrap flow](#bootstrap-flow) for the full algorithm.
+>
+> **Phase 2 (Command center)** — `internal/commandcenter` (the `Runner` subprocess-per-query
+> lifecycle, `SessionState`/`HistoryEntry` persistence, `BuildMCPConfig`) and `internal/boardmcp` (the
+> narrow JSON-RPC-over-stdio MCP server exposing exactly `board_status`/`board_messages`/
+> `board_broadcast`, backed by an `HTTPBoardAPIClient` that calls panemux's own REST API) implement
+> the design in [Command center](#command-center) below as written, with one addition the original
+> design didn't anticipate: **`GET /api/session-token`** (deliberately unauthenticated, see
+> [API additions](#api-additions) and [docs/behavior.md](behavior.md#get-apisession-token)) so the
+> browser dashboard itself can learn the bearer token needed to authenticate `/api/board/*` and
+> `/ws/board-command` — nothing in the original design specified how the frontend, as opposed to the
+> command center subprocess, would ever learn a token that may have been randomly generated on first
+> run. `setupCommandCenter` in `command_center.go` (`package main`) builds the `Runner` when
+> `command_center.enabled` is true and a `server.auth_token` is configured, wiring it into
+> `server.New` alongside the board cache/relay; `/ws/board-command` is registered only when a `Runner`
+> is present, so a disabled command center leaves that route entirely absent (a plain `404`) rather
+> than reachable-but-erroring. `panemux __board-mcp-server` (`board_mcp_server.go`, `package main`) is
+> the hidden subcommand the command center's own `claude -p` subprocess re-invokes as its MCP server,
+> per [Process lifecycle](#process-lifecycle) below. The Spotlight palette (`CommandPalette.tsx`) and
+> persistent history panel (`CommandHistoryPanel.tsx`) are implemented per
+> [ui-design.md's Agent Board UI section](ui-design.md#agent-board-ui-planned), including the
+> concrete decisions that section originally deferred to implementation time.
 
 ## Purpose
 
@@ -1041,17 +1058,25 @@ flow still applies.
 
 ### UI
 
-- A global keyboard shortcut opens a Spotlight-style modal palette (exact binding to be decided at
-  implementation time, avoiding conflicts with OS-level shortcuts and existing terminal bindings).
+- `Cmd/Ctrl+Shift+K` opens a Spotlight-style modal palette (`CommandPalette.tsx`), registered on the
+  keydown capture phase so it reaches the handler even when a terminal pane currently has focus.
+  Plain `Cmd/Ctrl+K` was deliberately not used: it's already bound in many shells/readline setups a
+  terminal pane could be running, and would be swallowed as literal pane input rather than reaching
+  the browser as a shortcut.
 - The palette shows recent history inline on open (via the history endpoint above) and streams the
-  live response as it's generated.
-- A separate, persistently accessible history panel (following the same UI pattern as the existing
-  workspace-summary overlay) exposes the same history outside the quick-palette flow, for scrolling
-  back further than what the palette shows inline.
+  live response turn-by-turn as it's generated, only opening its own `/ws/board-command` connection
+  while the palette itself is open.
+- A separate, persistently accessible history panel (`CommandHistoryPanel.tsx`, reachable via a small
+  "Command History" button) exposes the same history outside the quick-palette flow, for scrolling
+  back further than what the palette shows inline. It reads only the REST history endpoint — it needs
+  no WS connection of its own.
+- Both surfaces are gated on `command_center_enabled` from `GET /api/session-token`: neither the
+  keyboard shortcut nor the history button is wired up at all when the command center is disabled,
+  rather than being present but non-functional.
 
 See [ui-design.md's Agent Board UI section](ui-design.md#agent-board-ui-planned) for how these
-surfaces are meant to reuse this repository's existing dialog/overlay patterns and status vocabulary
-instead of introducing a parallel visual language.
+surfaces reuse this repository's existing dialog/overlay patterns and status vocabulary instead of
+introducing a parallel visual language.
 
 ### Scope, kept intentionally narrow for now
 
@@ -1062,23 +1087,26 @@ hypothetical future requirements.
 
 ## API additions
 
-The first three rows are implemented; see [docs/behavior.md](behavior.md#agent-board-rest-api) for
-exact request/response shapes and status codes. All three require the bearer token described in
-[Security model](#security-model), but — a deliberate, narrower choice than an earlier revision of
-this document specified — that gate today covers **only** `/api/board/*`, not the pre-existing
-`/api/*` routes or `/ws/{sessionID}`: nothing yet relies on the board endpoints (no frontend calls
-them), so gating them from day one costs nothing, while retrofitting auth onto the already-relied-
-upon unauthenticated routes is a separate, larger change with its own frontend work — see
-[security.md](security.md#auth-token-and-transport-encryption). The last two rows (command center)
-remain design-only.
+Every row is implemented; see [docs/behavior.md](behavior.md#agent-board-rest-api) for exact
+request/response shapes and status codes. Every `/api/board/*` endpoint requires the bearer token
+described in [Security model](#security-model), but — a deliberate, narrower choice than an earlier
+revision of this document specified — that gate covers **only** `/api/board/*`, not the pre-existing
+`/api/*` routes or `/ws/{sessionID}`: retrofitting auth onto the already-relied-upon unauthenticated
+routes is a separate, larger change with its own frontend work — see
+[security.md](security.md#auth-token-and-transport-encryption). `GET /api/session-token` is the one
+deliberate exception to "every `/api/board/*` endpoint requires the token" — see its own row below
+and [docs/behavior.md](behavior.md#get-apisession-token) for why. `WS /ws/board-command` is
+authenticated too, but via a WebSocket subprotocol rather than the `Authorization` header — see
+[docs/behavior.md](behavior.md#command-center-websocket-protocol).
 
 | Endpoint | Purpose |
 |---|---|
 | `GET /api/board/status` | A snapshot of panemux's in-memory status cache — no `AgmsgClient` call happens on this request (see [Architecture](#architecture)) |
 | `GET /api/board/messages?since=<seq>` | History feed for the dashboard UI. `<seq>` is `BoardCache`'s own panemux-local sequence number (see [Package layout](#package-layout)), not an agmsg-native `id` — those aren't comparable across hosts |
 | `POST /api/board/broadcast` | `{ "to": ["pane-a","pane-b"], "body": "..." }`; sends directly to each target's own host via `AgmsgClient` (never via PTY injection, so it is safe to send to a pane mid-turn); delivery to the pane is immediate, but the message appears in `GET /api/board/messages`' history only after the relay's next poll cycle reads it back — see [Known limitations](#known-limitations) |
-| `WS /ws/board-command` (design-only) | Command center chat: client sends `{"prompt": "..."}`, server streams the headless Claude response — see [Command center](#command-center) |
-| `GET /api/board/command/history` (design-only) | Command center's own captured conversation history — see [Command center](#command-center) |
+| `WS /ws/board-command` | Command center chat: client sends `{"prompt": "..."}`, server streams the headless Claude response — see [Command center](#command-center) |
+| `GET /api/board/command/history` | Command center's own captured conversation history — see [Command center](#command-center) |
+| `GET /api/session-token` | **Deliberately unauthenticated** — hands the browser dashboard the bearer token it needs to call every route above and open the WS connection, since there is no other way for the frontend's own JavaScript to learn a token that may have been randomly generated on first run. Not part of the original design; added because nothing in it specified how the browser itself (as opposed to the command center subprocess) would learn the token. Lives at `/api/session-token`, not `/api/board/session-token` — see [docs/behavior.md](behavior.md#get-apisession-token) for why that distinction is load-bearing, not stylistic. |
 
 ## Config additions
 

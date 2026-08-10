@@ -17,6 +17,7 @@ import (
 
 	"panemux/internal/api"
 	"panemux/internal/board"
+	"panemux/internal/commandcenter"
 	"panemux/internal/config"
 	"panemux/internal/session"
 	"panemux/internal/ws"
@@ -29,10 +30,13 @@ type Server struct {
 	httpSrv *http.Server
 }
 
-// New creates a new server instance.
+// New creates a new server instance. commandRunner may be nil when
+// command_center.enabled is false — the /ws/board-command route is simply
+// not registered in that case, so it 404s like any other undefined route
+// rather than panicking on a nil runner.
 func New(
 	cfg *config.Config, manager *session.Manager, boardCache *board.BoardCache, boardRelay *board.Relay,
-	frontendFS embed.FS,
+	commandRunner *commandcenter.Runner, frontendFS embed.FS,
 ) *Server {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
@@ -42,7 +46,7 @@ func New(
 
 	apiHandler := api.NewHandler(cfg, manager, boardCache, boardRelay)
 	wsHandler := ws.NewHandler(manager)
-	registerRoutes(r, apiHandler, wsHandler, frontendFS, cfg.Server.AuthToken)
+	registerRoutes(r, apiHandler, wsHandler, commandRunner, frontendFS, cfg.Server.AuthToken)
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	return &Server{
@@ -60,7 +64,8 @@ func New(
 }
 
 func registerRoutes(
-	r chi.Router, apiHandler *api.Handler, wsHandler *ws.Handler, frontendFS embed.FS, authToken string,
+	r chi.Router, apiHandler *api.Handler, wsHandler *ws.Handler, commandRunner *commandcenter.Runner,
+	frontendFS embed.FS, authToken string,
 ) {
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/layout", apiHandler.GetLayout)
@@ -85,6 +90,14 @@ func registerRoutes(
 		r.Post("/ssh-config/hosts", apiHandler.PostSSHConfigHost)
 		r.Get("/detect-shell", apiHandler.GetDetectShell)
 		r.Get("/directories", apiHandler.GetDirectories)
+		// Deliberately NOT placed under /board/ — chi routes any path
+		// starting with /api/board/ into the r.Route("/api/board", ...)
+		// sub-router below regardless of where else a handler for that path
+		// is registered, so a route literally named /api/board/session-token
+		// would always be caught by bearerAuthMiddleware even when defined
+		// here. See GetBoardSessionToken's own doc comment for why this one
+		// route must stay unauthenticated.
+		r.Get("/session-token", apiHandler.GetBoardSessionToken)
 	})
 	// /api/board/* is the only part of the API gated behind bearer-token
 	// auth today: unlike every other /api/* route and /ws/{sessionID},
@@ -97,8 +110,17 @@ func registerRoutes(
 		r.Get("/status", apiHandler.GetBoardStatus)
 		r.Get("/messages", apiHandler.GetBoardMessages)
 		r.Post("/broadcast", apiHandler.PostBoardBroadcast)
+		r.Get("/command/history", apiHandler.GetBoardCommandHistory)
 	})
 	r.Get("/ws/{sessionID}", wsHandler.ServeHTTP)
+	// /ws/board-command is only registered when the command center is
+	// enabled (commandRunner != nil) — see docs/agent-board.md's Command
+	// center section. Unlike /ws/{sessionID}, this route requires the
+	// bearer token, mirroring /api/board/*.
+	if commandRunner != nil {
+		boardCommandHandler := ws.NewBoardCommandHandler(commandRunner, authToken)
+		r.Get("/ws/board-command", boardCommandHandler.ServeHTTP)
+	}
 	registerFrontend(r, frontendFS)
 }
 

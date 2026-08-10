@@ -110,9 +110,11 @@ func setupRouterWithHandler(h *Handler) *chi.Mux {
 	r.Post("/api/ssh-config/hosts", h.PostSSHConfigHost)
 	r.Get("/api/detect-shell", h.GetDetectShell)
 	r.Get("/api/directories", h.GetDirectories)
+	r.Get("/api/session-token", h.GetBoardSessionToken)
 	r.Get("/api/board/status", h.GetBoardStatus)
 	r.Get("/api/board/messages", h.GetBoardMessages)
 	r.Post("/api/board/broadcast", h.PostBoardBroadcast)
+	r.Get("/api/board/command/history", h.GetBoardCommandHistory)
 	return r
 }
 
