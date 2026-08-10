@@ -15,12 +15,12 @@ const bearerPrefix = "Bearer "
 // wrapping a WebSocket upgrade handler with it rejects the handshake before
 // any upgrade attempt — no separate WS-specific logic is needed.
 //
-// This middleware is not yet wired into registerRoutes: doing so today
-// would require every existing, currently-unauthenticated frontend request
-// to start sending a token it doesn't have. It is built and tested standalone
-// so a later change can connect it once there is an auth-aware frontend and
-// board endpoints to protect — see docs/agent-board.md's API additions
-// section.
+// It is wired into registerRoutes onto the /api/board/* sub-route only
+// (see internal/server/server.go) — not onto any pre-existing /api/* route
+// or /ws/{sessionID}, since those would require every existing, currently-
+// unauthenticated frontend request to start sending a token it doesn't
+// have. Widening it to those routes is a separate, larger change — see
+// docs/agent-board.md's API additions section.
 func bearerAuthMiddleware(token string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

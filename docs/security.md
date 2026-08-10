@@ -79,12 +79,18 @@ internally, so `RunBoardCommand` remains responsible only for the POSIX shell es
 (`shellQuotePath`-style, matching the existing `cwd` discipline) that wraps every argument,
 including the wrapper script text itself, before the remote command string is built.
 
-`send.sh` and `api.sh` are the only board-related commands panemux itself ever executes remotely;
-each runs against agmsg's own local store on that host. panemux only ever detects an existing agmsg
+`send.sh` and `api.sh` are the two agmsg scripts this design's message read/write path runs
+remotely; each runs against agmsg's own local store on that host. The only other remote command
+panemux itself ever executes is a fixed, non-tainted `sh -c 'printf '%s' "$HOME"'` probe
+(`internal/board/agmsg_path.go`'s `remoteHomeProbeCmd`), run once per remote host to resolve
+`agent_board.agmsg_path`'s leading `~/` against that host's own home directory before it is ever
+placed in a `RunBoardCommand` argument list — see [agent-board.md](agent-board.md)'s "`~` in
+`agmsg_path` is expanded by panemux" section. panemux only ever detects an existing agmsg
 installation — it never installs, updates, or otherwise manages agmsg on the operator's behalf,
-locally or remotely. The relay goroutine that actually drives this on a schedule, the bootstrap flow
-that writes an onboarding instruction into a pane's PTY, and the `/api/board/*` REST surface are not
-yet implemented — see [agent-board.md](agent-board.md)'s status note.
+locally or remotely. The relay goroutine that drives this on a schedule (`internal/board/relay.go`)
+and the `/api/board/*` REST surface (`GET /status`, `GET /messages`, `POST /broadcast`) are
+implemented — see [agent-board.md](agent-board.md)'s status note. The bootstrap flow that writes an
+onboarding instruction into a pane's PTY, and the command center, are not yet implemented.
 
 ### Auth token and transport encryption
 
@@ -100,11 +106,15 @@ so the token only provides real protection once the operator has placed a TLS-te
 proxy, SSH tunnel, or VPN in front of the non-loopback listener. See
 [agent-board.md](agent-board.md#security-model) for the full rationale.
 
-`internal/server`'s constant-time bearer-token middleware (`bearerAuthMiddleware`) is also
-implemented and unit-tested, but it is **not yet wired into `registerRoutes`** — connecting it to
-today's `/api/*` and `/ws/{sessionID}` routes without a matching frontend change would break every
-existing, currently-unauthenticated request. It is connected once board endpoints exist to protect
-and the frontend sends the token; see [agent-board.md](agent-board.md)'s status note.
+`internal/server`'s constant-time bearer-token middleware (`bearerAuthMiddleware`, `internal/server/auth.go`)
+is implemented, unit-tested, and wired into `registerRoutes` — but **only** onto the new
+`r.Route("/api/board", ...)` sub-route (`GET /status`, `GET /messages`, `POST /broadcast`), not onto
+any pre-existing `/api/*` route or `/ws/{sessionID}`. Widening it to those routes without a matching
+frontend change would break every existing, currently-unauthenticated request, so that remains a
+separate, larger change. `internal/server/board_routes_test.go` covers this scoping as a regression:
+missing/incorrect token on `/api/board/*` is rejected with `401`, the correct token reaches `200`,
+and pre-existing `/api/*` routes plus `/ws/{sessionID}` stay reachable with no `Authorization` header
+at all. See [agent-board.md](agent-board.md)'s status note.
 
 ## General Rules
 

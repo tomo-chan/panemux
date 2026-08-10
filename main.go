@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"panemux/internal/board"
 	"panemux/internal/config"
 	"panemux/internal/server"
 	"panemux/internal/session"
@@ -48,7 +49,9 @@ func main() {
 		log.Fatalf("Failed to start sessions: %v", err)
 	}
 
-	srv := server.New(cfg, manager, frontendFS)
+	boardCache, boardRelay := setupBoard(cfg, manager)
+
+	srv := server.New(cfg, manager, boardCache, boardRelay, frontendFS)
 	addr := "http://" + srv.Addr()
 	log.Printf("Listening on %s", addr)
 
@@ -56,7 +59,7 @@ func main() {
 		go openChrome(addr)
 	}
 
-	runServer(srv, manager)
+	runServer(srv, manager, boardRelay)
 }
 
 func parseOptions() cliOptions {
@@ -89,9 +92,20 @@ func loadConfig(opts cliOptions) (*config.Config, error) {
 	return cfg, nil
 }
 
-func runServer(srv *server.Server, manager *session.Manager) {
+func runServer(srv *server.Server, manager *session.Manager, boardRelay *board.Relay) {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	boardCtx, cancelBoard := context.WithCancel(context.Background())
+	defer cancelBoard()
+	// Skip the poll loop entirely when no host is reachable at all: with
+	// zero AgmsgClients every poll is a guaranteed no-op forever (nothing
+	// to read, nothing to relay), so starting it would just tick a ticker
+	// for the life of the process for no reason — including for the many
+	// panemux users who have never configured agent board at all.
+	if boardRelay.HasClients() {
+		go boardRelay.Run(boardCtx, defaultBoardPollInterval)
+	}
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -105,6 +119,7 @@ func runServer(srv *server.Server, manager *session.Manager) {
 		}
 	case <-sigCh:
 		log.Println("Shutting down...")
+		cancelBoard()
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := srv.Shutdown(ctx); err != nil {

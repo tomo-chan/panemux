@@ -57,15 +57,6 @@ func (c *Config) normalizeAgentBoard() {
 	}
 }
 
-func (c *Config) expandAgentBoardPaths() {
-	if strings.HasPrefix(c.AgentBoard.AgmsgPath, "~/") {
-		home, err := os.UserHomeDir()
-		if err == nil {
-			c.AgentBoard.AgmsgPath = filepath.Join(home, c.AgentBoard.AgmsgPath[2:])
-		}
-	}
-}
-
 // EnsureAuthToken fills in Server.AuthToken when it is not already set,
 // either by reading a previously persisted token file or by generating and
 // persisting a new random token. Failure to resolve, read, or persist a

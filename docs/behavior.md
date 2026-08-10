@@ -329,6 +329,94 @@ Request body:
 
 Returns display preferences such as header/status-bar visibility.
 
+## Agent Board REST API
+
+Full design and rationale live in [agent-board.md](agent-board.md); this section documents only the
+request/response shapes and status codes of what is actually implemented today. Unlike every route
+above, every endpoint in this section requires `Authorization: Bearer <server.auth_token>` — see
+[security.md](security.md#auth-token-and-transport-encryption). A missing or incorrect token returns
+`401` before the handler runs. The bootstrap flow, `/ws/board-command`, and `GET
+/api/board/command/history` are not implemented yet and are not documented here — see
+[agent-board.md](agent-board.md)'s status note.
+
+### `GET /api/board/status`
+
+Returns a snapshot of panemux's in-memory status cache. No `AgmsgClient` call happens on this
+request — the relay goroutine is what keeps the cache current by polling agmsg on a schedule.
+
+Response:
+
+```json
+{
+  "statuses": {
+    "pane-a": {
+      "updated_at": "2026-08-10T12:00:00Z",
+      "state": "working",
+      "cwd": "/home/user/project",
+      "branch": "feature/x",
+      "repo": "owner/repo",
+      "pr_url": "https://github.com/owner/repo/pull/123",
+      "last_tool": "Edit internal/api/handler.go",
+      "summary": "fixing failing tests"
+    }
+  }
+}
+```
+
+An empty cache returns `200` with `{"statuses":{}}`, never `null`. All fields besides `updated_at`
+are omitted (not emitted as empty strings) when the reporting pane didn't include them.
+
+- `200`: snapshot returned (including when empty)
+
+### `GET /api/board/messages?since=<seq>`
+
+Returns board message history newer than `since`, `BoardCache`'s own panemux-local sequence number —
+not an agmsg-native `id`, which isn't comparable across hosts. `since` defaults to `0` when omitted.
+
+Response:
+
+```json
+{
+  "messages": [
+    {
+      "seq": 42,
+      "host": "local",
+      "team": "panemux",
+      "from": "pane-a",
+      "to": "pane-b",
+      "body": "please review",
+      "at": "2026-08-10T12:00:00Z"
+    }
+  ]
+}
+```
+
+- `400`: `since` is present but not a valid integer
+- `200`: messages returned (`"messages":[]` when there are none, never `null`)
+
+### `POST /api/board/broadcast`
+
+Sends `body` to every pane ID in `to`, via the shared relay's `Broadcast`, directly to each target's
+own host — never via PTY injection, so it is safe to send to a pane mid-turn. Delivery is immediate,
+but the message appears in `GET /api/board/messages`'s history only after the relay's next poll
+cycle reads it back.
+
+Request body:
+
+```json
+{ "to": ["pane-a", "pane-b"], "body": "please review" }
+```
+
+- `400`: invalid JSON
+- `422`: `to` is empty, `body` is empty, or `to` names one or more pane IDs the relay doesn't know
+  about (`board.UnknownPaneError`, which names every unresolvable pane ID at once)
+- `502`: a downstream `AgmsgClient`/SSH error while relaying to a resolved pane's host. Broadcasting
+  is fail-fast, not all-or-nothing, once every `to` ID has resolved: it stops at the first `Send`
+  failure, so an earlier pane in `to` may already have received the message. The response body is
+  `{ "error": "...", "delivered": ["pane-a"] }` — the pane IDs successfully delivered to before the
+  failure — so the caller can tell which panes to avoid re-sending to on retry.
+- `200`: `{ "delivered": ["pane-a", "pane-b"] }`, the pane IDs the broadcast actually reached
+
 ## WebSocket Protocol
 
 Endpoint: `GET /ws/{sessionID}`

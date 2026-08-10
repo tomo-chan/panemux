@@ -113,7 +113,7 @@ func TestAgmsgFixture_TeamMessages_BoardCacheIntegration(t *testing.T) {
 	// ordinary message and IS appended.
 	history := cache.MessagesSince(0)
 	require.Len(t, history, 3)
-	bodies := []string{history[0].Body, history[1].Body, history[2].Body}
+	bodies := []string{history[0].Row.Body, history[1].Row.Body, history[2].Row.Body}
 	assert.Equal(t, []string{
 		"please review my latest commit",
 		`{"state":"looks like status but has no kind field"}`,

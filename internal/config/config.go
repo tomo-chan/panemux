@@ -184,7 +184,6 @@ func Default() *Config {
 		},
 	}
 	cfg.normalizeAgentBoard()
-	cfg.expandAgentBoardPaths()
 	return cfg
 }
 
@@ -472,7 +471,17 @@ func (c *Config) expandPaths() {
 	if active, ok := c.ActiveWorkspace(); ok {
 		c.Layout = active.Layout
 	}
-	c.expandAgentBoardPaths()
+	// AgentBoard.AgmsgPath is deliberately NOT expanded here: it names a
+	// path on whichever host it ends up used against (local or, via SSH,
+	// any number of remote hosts), so there is no single "the" home
+	// directory to expand a leading ~/ against at config-load time — that
+	// used to expand it against panemux's own local home unconditionally,
+	// silently breaking every remote host whose home directory differs (see
+	// docs/agent-board.md's "~ in agmsg_path is expanded by panemux, never
+	// left for the remote shell to expand" section). Expansion happens per
+	// host instead, at AgmsgClient construction time in board.go: locally
+	// via os.UserHomeDir(), remotely via board.ResolveRemoteAgmsgPath's
+	// SSH $HOME probe.
 }
 
 func expandPanesCwd(children []LayoutChild) {
