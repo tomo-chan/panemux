@@ -36,6 +36,16 @@ var validClaudeSessionID = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 const (
 	interactiveAgentCodex  = "codex"
 	interactiveAgentClaude = "claude"
+
+	// agmsgTypeClaudeCode, agmsgTypeGemini, and agmsgTypeOpencode are
+	// agmsgDetectableAgentTypes' own agmsg-recognized type/binary-name
+	// strings, factored out purely to satisfy goconst's package-wide
+	// duplicate-literal check (their many other occurrences are all in
+	// _test.go files, which goconst deliberately excludes — see
+	// .golangci.yml).
+	agmsgTypeClaudeCode = "claude-code"
+	agmsgTypeGemini     = "gemini"
+	agmsgTypeOpencode   = "opencode"
 )
 
 // LocalSession is a local PTY-based terminal session.
@@ -314,14 +324,17 @@ type agmsgAgentType struct {
 // not as a positive claim that no such flag exists.
 var agmsgDetectableAgentTypes = []agmsgAgentType{
 	{
-		agmsgType: "claude-code", patterns: []string{"claude", "claude-code", "claude-*"},
+		agmsgType: agmsgTypeClaudeCode, patterns: []string{interactiveAgentClaude, agmsgTypeClaudeCode, "claude-*"},
 		excludeTokens: []string{"-p", "--print"},
 	},
-	{agmsgType: "codex", patterns: []string{"codex", "codex-*"}, excludeTokens: []string{"exec"}},
+	{
+		agmsgType: interactiveAgentCodex, patterns: []string{interactiveAgentCodex, "codex-*"},
+		excludeTokens: []string{"exec"},
+	},
 	{agmsgType: "cursor", patterns: []string{"cursor-agent", "cursor-agent-*"}},
-	{agmsgType: "gemini", patterns: []string{"gemini", "gemini-*"}},
+	{agmsgType: agmsgTypeGemini, patterns: []string{agmsgTypeGemini, "gemini-*"}},
 	{agmsgType: "grok-build", patterns: []string{"grok", "grok-*"}},
-	{agmsgType: "opencode", patterns: []string{"opencode", "opencode-*"}},
+	{agmsgType: agmsgTypeOpencode, patterns: []string{agmsgTypeOpencode, "opencode-*"}},
 }
 
 // detectAgmsgAgentType reports the agmsg type name of command, if it
