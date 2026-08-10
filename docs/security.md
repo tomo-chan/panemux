@@ -79,12 +79,18 @@ internally, so `RunBoardCommand` remains responsible only for the POSIX shell es
 (`shellQuotePath`-style, matching the existing `cwd` discipline) that wraps every argument,
 including the wrapper script text itself, before the remote command string is built.
 
-`send.sh` and `api.sh` are the only board-related commands panemux itself ever executes remotely;
-each runs against agmsg's own local store on that host. panemux only ever detects an existing agmsg
+`send.sh` and `api.sh` are the two agmsg scripts this design's message read/write path runs
+remotely; each runs against agmsg's own local store on that host. The only other remote command
+panemux itself ever executes is a fixed, non-tainted `sh -c 'printf '%s' "$HOME"'` probe
+(`internal/board/agmsg_path.go`'s `remoteHomeProbeCmd`), run once per remote host to resolve
+`agent_board.agmsg_path`'s leading `~/` against that host's own home directory before it is ever
+placed in a `RunBoardCommand` argument list — see [agent-board.md](agent-board.md)'s "`~` in
+`agmsg_path` is expanded by panemux" section. panemux only ever detects an existing agmsg
 installation — it never installs, updates, or otherwise manages agmsg on the operator's behalf,
-locally or remotely. The relay goroutine that actually drives this on a schedule, the bootstrap flow
-that writes an onboarding instruction into a pane's PTY, and the `/api/board/*` REST surface are not
-yet implemented — see [agent-board.md](agent-board.md)'s status note.
+locally or remotely. The relay goroutine that drives this on a schedule (`internal/board/relay.go`)
+and the `/api/board/*` REST surface (`GET /status`, `GET /messages`, `POST /broadcast`) are
+implemented — see [agent-board.md](agent-board.md)'s status note. The bootstrap flow that writes an
+onboarding instruction into a pane's PTY, and the command center, are not yet implemented.
 
 ### Auth token and transport encryption
 

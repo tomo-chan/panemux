@@ -98,7 +98,14 @@ func runServer(srv *server.Server, manager *session.Manager, boardRelay *board.R
 
 	boardCtx, cancelBoard := context.WithCancel(context.Background())
 	defer cancelBoard()
-	go boardRelay.Run(boardCtx, defaultBoardPollInterval)
+	// Skip the poll loop entirely when no host is reachable at all: with
+	// zero AgmsgClients every poll is a guaranteed no-op forever (nothing
+	// to read, nothing to relay), so starting it would just tick a ticker
+	// for the life of the process for no reason — including for the many
+	// panemux users who have never configured agent board at all.
+	if boardRelay.HasClients() {
+		go boardRelay.Run(boardCtx, defaultBoardPollInterval)
+	}
 
 	errCh := make(chan error, 1)
 	go func() {

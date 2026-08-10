@@ -40,16 +40,38 @@ func LoadCursorFile(path string) ([]CursorEntry, error) {
 }
 
 // SaveCursorFile persists entries, creating the parent directory if needed.
+// The write goes through a temp file plus rename, not a direct WriteFile,
+// so a crash or power loss mid-write can never leave a truncated or
+// half-written cursor file on disk — a rename onto an existing path is
+// atomic on the platforms panemux targets, unlike a direct write.
 func SaveCursorFile(path string, entries []CursorEntry) error {
 	data, err := json.Marshal(entries)
 	if err != nil {
 		return fmt.Errorf("encoding relay cursor file: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0750); err != nil {
-		return fmt.Errorf("creating relay cursor directory: %w", err)
+	dir := filepath.Dir(path)
+	if mkdirErr := os.MkdirAll(dir, 0750); mkdirErr != nil {
+		return fmt.Errorf("creating relay cursor directory: %w", mkdirErr)
 	}
-	if err := os.WriteFile(path, data, cursorFileMode); err != nil {
-		return fmt.Errorf("writing relay cursor file: %w", err)
+	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("creating temp relay cursor file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath) // no-op once the rename below succeeds
+
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("writing temp relay cursor file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("closing temp relay cursor file: %w", err)
+	}
+	if err := os.Chmod(tmpPath, cursorFileMode); err != nil {
+		return fmt.Errorf("setting relay cursor file mode: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("replacing relay cursor file: %w", err)
 	}
 	return nil
 }

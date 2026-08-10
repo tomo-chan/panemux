@@ -261,16 +261,18 @@ func TestValidate_AgmsgPath_TildePrefixed_NoError(t *testing.T) {
 }
 
 func TestNormalizeAgentBoard_DefaultsTeamAndAgmsgPath(t *testing.T) {
-	home, err := os.UserHomeDir()
-	require.NoError(t, err)
-
 	tokenPath := filepath.Join(t.TempDir(), "token")
 	cfg, err := loadWithAuthTokenPath(t, validConfigYAML, tokenPath)
 	require.NoError(t, err)
 
 	assert.Equal(t, "panemux", cfg.AgentBoard.Team)
-	assert.Equal(t, filepath.Join(home, ".agents", "skills", "agmsg"), cfg.AgentBoard.AgmsgPath)
-	assert.False(t, strings.HasPrefix(cfg.AgentBoard.AgmsgPath, "~/"))
+	// AgmsgPath is deliberately left un-expanded here: it names a path on
+	// whichever host (local, or any number of remote SSH hosts) it ends up
+	// used against, so there is no single home directory to expand a
+	// leading ~/ against at config-load time. Expansion happens per host at
+	// AgmsgClient construction time in board.go instead — see
+	// docs/agent-board.md's "~ in agmsg_path is expanded by panemux" section.
+	assert.Equal(t, "~/.agents/skills/agmsg", cfg.AgentBoard.AgmsgPath)
 }
 
 func TestNormalizeAgentBoard_PreservesExplicitTeam(t *testing.T) {
@@ -299,7 +301,10 @@ layout:
 func TestDefault_SetsAgentBoardDefaultsAndLeavesTokenEmpty(t *testing.T) {
 	cfg := Default()
 	assert.Equal(t, "panemux", cfg.AgentBoard.Team)
-	assert.False(t, strings.HasPrefix(cfg.AgentBoard.AgmsgPath, "~/"))
+	// Default() must not expand AgmsgPath either, for the same reason
+	// finishLoad's expandPaths doesn't — see
+	// TestNormalizeAgentBoard_DefaultsTeamAndAgmsgPath's comment.
+	assert.Equal(t, "~/.agents/skills/agmsg", cfg.AgentBoard.AgmsgPath)
 	// Default() must never touch the real filesystem for a token — see
 	// finishLoad's doc comment. AuthToken is only ever populated by an
 	// explicit EnsureAuthToken call, which the real startup path (main.go)

@@ -3,6 +3,7 @@ package board
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -353,6 +354,100 @@ func TestRelay_Poll_PersistCursorsCalledWithSnapshot(t *testing.T) {
 	assert.Equal(t, "5", captured[0].Cursor)
 }
 
+func TestRelay_Poll_NoNewRows_PersistCursorsNotCalled(t *testing.T) {
+	// Regression test: a poll that finds nothing new must not write the
+	// cursor file — otherwise every panemux process writes to disk on every
+	// tick forever, including operators who have never configured any
+	// board-enabled pane at all.
+	hostA := &fakeAgmsgClient{hostID: "host-a"} // no sinceRows
+	persistCalls := 0
+	r := NewRelay(NewBoardCache(), RelayConfig{
+		Team: "panemux", Clients: map[string]AgmsgClient{"host-a": hostA},
+		Limit: 100, BackfillLimit: 1000,
+		PersistCursors: func([]CursorEntry) { persistCalls++ },
+	})
+
+	require.NoError(t, r.Poll(context.Background()))
+	require.NoError(t, r.Poll(context.Background()))
+
+	assert.Equal(t, 0, persistCalls, "a poll with no new rows must never trigger a cursor write")
+}
+
+func TestRelay_Poll_NewRowThenSteadyState_PersistCursorsCalledOnceThenNotAgain(t *testing.T) {
+	hostA := &fakeAgmsgClient{hostID: "host-a", sinceRows: []Row{
+		{ID: "5", Team: "panemux", From: "pane-a", To: "pane-b", Body: "hi"},
+	}}
+	persistCalls := 0
+	r := NewRelay(NewBoardCache(), RelayConfig{
+		Team: "panemux", Clients: map[string]AgmsgClient{"host-a": hostA},
+		PaneHosts: map[string]string{"pane-a": "host-a", "pane-b": "host-a"},
+		Limit:     100, BackfillLimit: 1000,
+		PersistCursors: func([]CursorEntry) { persistCalls++ },
+	})
+
+	require.NoError(t, r.Poll(context.Background())) // sees row 5, cursor advances
+	require.NoError(t, r.Poll(context.Background())) // filterRowsAfter("5") -> nothing new
+
+	assert.Equal(t, 1, persistCalls, "cursor write must fire exactly once, only when it actually advanced")
+}
+
+func TestRelay_HasClients_NoClients_False(t *testing.T) {
+	r := newTestRelay(NewBoardCache(), nil, nil)
+	assert.False(t, r.HasClients())
+}
+
+func TestRelay_HasClients_WithClients_True(t *testing.T) {
+	hostA := &fakeAgmsgClient{hostID: "host-a"}
+	r := newTestRelay(NewBoardCache(), map[string]AgmsgClient{"host-a": hostA}, nil)
+	assert.True(t, r.HasClients())
+}
+
+func TestRelay_Poll_HostOperationTimeout_DoesNotBlockOtherHosts(t *testing.T) {
+	// Regression test: a host whose Since call never returns must not wedge
+	// the whole Poll pass — every other host must still get polled within
+	// the per-host timeout, not block forever behind the stuck one. Uses a
+	// tiny injected OperationTimeout so this test doesn't need to actually
+	// wait out the real 10s production default.
+	blocked := &blockingAgmsgClient{hostID: "host-a"}
+	hostB := &fakeAgmsgClient{hostID: "host-b"}
+	r := NewRelay(NewBoardCache(), RelayConfig{
+		Team:             "panemux",
+		Clients:          map[string]AgmsgClient{"host-a": blocked, "host-b": hostB},
+		Limit:            100,
+		BackfillLimit:    1000,
+		OperationTimeout: 50 * time.Millisecond,
+	})
+
+	done := make(chan error, 1)
+	go func() { done <- r.Poll(context.Background()) }()
+
+	select {
+	case err := <-done:
+		require.Error(t, err, "a permanently-blocked host must surface as a timeout error, not silently succeed")
+	case <-time.After(5 * time.Second):
+		t.Fatal("Poll did not return within the per-host timeout budget; a stuck host is blocking the whole pass")
+	}
+	assert.Equal(t, 1, hostB.sinceCallCount(), "host-b must still be polled despite host-a being stuck")
+}
+
+// blockingAgmsgClient's Since never returns on its own — it only returns
+// once ctx is done, so it can only be unblocked by a caller-side timeout.
+type blockingAgmsgClient struct {
+	hostID string
+}
+
+func (b *blockingAgmsgClient) HostID() string { return b.hostID }
+
+func (b *blockingAgmsgClient) Since(ctx context.Context, _, _ string, _ int) ([]Row, error) {
+	<-ctx.Done()
+	return nil, fmt.Errorf("blockingAgmsgClient: %w", ctx.Err())
+}
+
+func (b *blockingAgmsgClient) Send(ctx context.Context, _, _, _, _ string) error {
+	<-ctx.Done()
+	return fmt.Errorf("blockingAgmsgClient: %w", ctx.Err())
+}
+
 func TestRelay_Broadcast_KnownPanesSingleHost_Delivered(t *testing.T) {
 	hostA := &fakeAgmsgClient{hostID: "host-a"}
 	r := newTestRelay(NewBoardCache(), map[string]AgmsgClient{"host-a": hostA}, map[string]string{
@@ -442,6 +537,29 @@ func TestRelay_Broadcast_SendSucceeds_OwnSendLedgerEntryStillMatchable(t *testin
 
 	row := Row{Host: "host-b", Team: "panemux", From: SystemID, To: "pane-b", Body: "hello"}
 	assert.True(t, r.validFrom("host-b", row), "a successful Send's ledger entry must remain matchable")
+}
+
+func TestRelay_Broadcast_DuplicateSuccessfulBroadcast_BothRowsAcceptedOnPollback(t *testing.T) {
+	// End-to-end regression test for adversarial review round 2's finding
+	// B4a: two successful broadcasts with the identical to/body must each
+	// leave the destination host's next poll of that row able to pass
+	// from-validation — a duplicate is ordinary input (a user or the
+	// command center re-sending the same text), not an attack, and must
+	// not silently lose the second occurrence from history.
+	hostB := &fakeAgmsgClient{hostID: "host-b"}
+	r := newTestRelay(NewBoardCache(), map[string]AgmsgClient{"host-b": hostB}, map[string]string{
+		"pane-b": "host-b",
+	})
+
+	_, err := r.Broadcast(context.Background(), SystemID, []string{"pane-b"}, "hello")
+	require.NoError(t, err)
+	_, err = r.Broadcast(context.Background(), SystemID, []string{"pane-b"}, "hello")
+	require.NoError(t, err)
+
+	row := Row{Host: "host-b", Team: "panemux", From: SystemID, To: "pane-b", Body: "hello"}
+	assert.True(t, r.validFrom("host-b", row), "first row must pass from-validation")
+	assert.True(t, r.validFrom("host-b", row), "second, independent row must also pass from-validation")
+	assert.False(t, r.validFrom("host-b", row), "a third, non-existent row must not pass")
 }
 
 func TestRelay_Broadcast_UnreachableHost_Error(t *testing.T) {

@@ -538,10 +538,14 @@ type AgmsgClient interface {
 // relay later observes with From == "_system" actually corresponds to one of panemux's own sends,
 // since send.sh --force never checks From against a roster and an ordinary board pane could
 // otherwise forge that identity. Entries expire after a few poll intervals; a body is stored only
-// as a hash, since the ledger's job is matching, not re-displaying content.
+// as a hash, since the ledger's job is matching, not re-displaying content. entries is a multiset —
+// one expiry per occurrence, not one per distinct key — because two broadcasts with the identical
+// (destHost, team, to, body) are two real, independent sends that each produce their own row; a
+// plain single-entry map would let the second Record silently overwrite the first and drop one of
+// two genuinely delivered messages from history the next time the destination host is polled.
 type ownSendLedger struct {
     mu      sync.Mutex
-    entries map[ownSendKey]time.Time // value is expiry
+    entries map[ownSendKey][]time.Time // one expiry per occurrence of this key
 }
 
 type ownSendKey struct {
@@ -551,7 +555,7 @@ type ownSendKey struct {
     BodyHash string // e.g. sha256, truncated; not a security boundary by itself, only a dedup key
 }
 
-func (l *ownSendLedger) Record(destHost, team, to, body string)      { /* inserts with a short TTL */ }
+func (l *ownSendLedger) Record(destHost, team, to, body string)      { /* appends one occurrence with a short TTL */ }
 func (l *ownSendLedger) Consume(destHost, team, to, body string) bool { /* true+deletes if matched, false if expired/absent */ }
 
 // BoardCache is the in-memory, panemux-owned view of recent board activity shown in Architecture.
@@ -1082,6 +1086,21 @@ that shaped the design.
 
 ## Known limitations
 
+- **A remote host with no reachable session at panemux startup gets no `AgmsgClient` for the rest of
+  that process's lifetime, even if a board-enabled pane on it becomes reachable later.**
+  `newAgmsgClientForHost` (`board.go`) runs exactly once per host, at `setupBoard` time; a host it
+  skips (no live session to resolve `agmsg_path`'s `~/` against, or the probe itself failing) is
+  simply absent from `Relay`'s `Clients` map from then on — nothing retries client construction on a
+  schedule the way `dynamicBoardExecutor` re-resolves a *session* on every call once a client already
+  exists for that host. This is a real, distinct gap from the session-level fix `dynamicBoardExecutor`
+  provides: that fix keeps a host's board features working across a pane restart/delete *after* the
+  host has a client; it does nothing for a host that had no reachable pane at all when panemux itself
+  started. In practice this mostly matters for a host whose only board-enabled pane's SSH connection
+  hadn't finished dialing yet when `setupBoard` ran, or one that was genuinely unreachable at boot but
+  recovers later — in both cases, that host's board features stay silently unavailable (logged once,
+  at startup, as a warning) until the whole panemux process restarts. A future fix would need
+  `newAgmsgClientForHost` to be retried on a schedule, similar in shape to how `dynamicBoardExecutor`
+  already re-resolves sessions, rather than being a one-shot startup step.
 - **Account-wide token/cost totals are explicitly out of scope for Agent Board.** Unlike
   branch/PR/cwd, token usage isn't external world-state an agent can query with an ordinary command
   (`git`, `gh`), and there's no verified way for an agent to introspect its own cumulative usage and

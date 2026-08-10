@@ -11,6 +11,15 @@ import (
 	"time"
 )
 
+// hostOperationTimeout bounds every individual Since/Send call the relay
+// makes against one host. Poll's own ctx is process-lifetime (canceled only
+// on shutdown), so without a per-operation bound one unresponsive host
+// (dead SSH connection, wedged agmsg process) would stall pollHost — and
+// therefore every other host queued behind it in the same Poll pass, since
+// hosts are polled sequentially — indefinitely instead of just for this one
+// poll cycle.
+const hostOperationTimeout = 10 * time.Second
+
 // RelayConfig is the static, precomputed input the relay needs. Building it
 // (which hosts exist, which AgmsgClient reaches each, which board-enabled
 // pane IDs live on which host) is the caller's job — internal/board does
@@ -23,6 +32,11 @@ type RelayConfig struct {
 	Team           string
 	Limit          int // steady-state --limit
 	BackfillLimit  int // cold-start --limit
+	// OperationTimeout bounds every individual Since/Send call against one
+	// host. Zero (the default for every real caller) falls back to
+	// hostOperationTimeout; tests that need to exercise the timeout itself
+	// without an actual multi-second wait can set a small value here.
+	OperationTimeout time.Duration
 }
 
 // Relay is panemux's own agmsg poller: it reads every known host's agmsg
@@ -40,6 +54,7 @@ type Relay struct {
 	team          string
 	limit         int
 	backfillLimit int
+	opTimeout     time.Duration
 	mu            sync.Mutex
 	backfilled    bool
 }
@@ -53,6 +68,10 @@ func NewRelay(cache *BoardCache, cfg RelayConfig) *Relay {
 		}
 		hostPanes[host][pane] = true
 	}
+	opTimeout := cfg.OperationTimeout
+	if opTimeout <= 0 {
+		opTimeout = hostOperationTimeout
+	}
 	return &Relay{
 		cache:         cache,
 		ledger:        newOwnSendLedger(),
@@ -64,6 +83,7 @@ func NewRelay(cache *BoardCache, cfg RelayConfig) *Relay {
 		team:          cfg.Team,
 		limit:         cfg.Limit,
 		backfillLimit: cfg.BackfillLimit,
+		opTimeout:     opTimeout,
 	}
 }
 
@@ -94,13 +114,24 @@ func (r *Relay) Cursors() []CursorEntry {
 	return entries
 }
 
+// HasClients reports whether the relay knows of at least one agmsg-reachable
+// host. Callers can use this to skip starting the poll loop altogether when
+// there is nothing to poll — see main.go's use of this before starting Run.
+func (r *Relay) HasClients() bool {
+	return len(r.clients) > 0
+}
+
 // Poll runs exactly one pass: on the very first call it performs the
 // cold-start backfill (one BackfillLimit-sized Since call per known host),
 // then every call performs the steady-state Limit-sized poll, processes
-// returned rows, advances cursors, and — if PersistCursors is set —
-// persists the resulting snapshot. Poll never panics on a per-host error;
-// it logs and continues with the remaining hosts, returning a joined error
-// only for callers that want to observe failures.
+// returned rows, and advances cursors. If PersistCursors is set, it is
+// called only when at least one host's cursor actually advanced this pass
+// — a poll that finds nothing new (the common steady-state case, and the
+// permanent case for an operator with no board-enabled panes at all) must
+// not turn into a disk write every single interval forever. Poll never
+// panics on a per-host error; it logs and continues with the remaining
+// hosts, returning a joined error only for callers that want to observe
+// failures.
 func (r *Relay) Poll(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("agent board relay: %w", err)
@@ -117,13 +148,17 @@ func (r *Relay) Poll(ctx context.Context) error {
 	}
 
 	var errs []error
+	changed := false
 	for _, host := range sortedHostKeys(r.clients) {
-		if err := r.pollHost(ctx, host, limit); err != nil {
+		hostChanged, err := r.pollHost(ctx, host, limit)
+		if err != nil {
 			errs = append(errs, fmt.Errorf("host %q: %w", host, err))
+			continue
 		}
+		changed = changed || hostChanged
 	}
 
-	if r.persist != nil {
+	if changed && r.persist != nil {
 		r.persist(r.Cursors())
 	}
 
@@ -133,16 +168,19 @@ func (r *Relay) Poll(ctx context.Context) error {
 	return nil
 }
 
-func (r *Relay) pollHost(ctx context.Context, host string, limit int) error {
+// pollHost polls one host and reports whether its cursor advanced.
+func (r *Relay) pollHost(ctx context.Context, host string, limit int) (bool, error) {
 	client := r.clients[host]
 
 	r.mu.Lock()
 	cursor := r.cursors[host]
 	r.mu.Unlock()
 
-	rows, err := client.Since(ctx, r.team, cursor, limit)
+	sinceCtx, cancel := context.WithTimeout(ctx, r.opTimeout)
+	rows, err := client.Since(sinceCtx, r.team, cursor, limit)
+	cancel()
 	if err != nil {
-		return fmt.Errorf("since: %w", err)
+		return false, fmt.Errorf("since: %w", err)
 	}
 
 	for _, row := range rows {
@@ -150,12 +188,13 @@ func (r *Relay) pollHost(ctx context.Context, host string, limit int) error {
 	}
 
 	newCursor := maxRowID(rows, cursor)
-	if newCursor != cursor {
-		r.mu.Lock()
-		r.cursors[host] = newCursor
-		r.mu.Unlock()
+	if newCursor == cursor {
+		return false, nil
 	}
-	return nil
+	r.mu.Lock()
+	r.cursors[host] = newCursor
+	r.mu.Unlock()
+	return true, nil
 }
 
 // maxRowID returns the largest numerically-parseable row ID among rows,
@@ -227,7 +266,9 @@ func (r *Relay) processRow(ctx context.Context, sourceHost string, row Row) {
 		log.Printf("agent board relay: no client for host %q while relaying to pane %q", destHost, row.To)
 		return
 	}
-	if err := client.Send(ctx, row.Team, row.From, row.To, row.Body); err != nil {
+	sendCtx, cancel := context.WithTimeout(ctx, r.opTimeout)
+	defer cancel()
+	if err := client.Send(sendCtx, row.Team, row.From, row.To, row.Body); err != nil {
 		log.Printf("agent board relay: relaying to host %q failed: %v", destHost, err)
 	}
 }
