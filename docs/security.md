@@ -128,14 +128,39 @@ variables, or anything else CodeQL would treat as tainted. The arguments after i
 literal flags (`-p`, `--output-format=stream-json`, `--verbose`), a `--resume <session-id>` pulled
 from `SessionState` (itself only ever written by `Runner` from a value `claude` itself reported in an
 earlier run — never client-supplied), a `--mcp-config <path>` pointing at a temp file `Runner` itself
-created, an `--allowedTools` list `commandcenter.AllowedTools()` computes from fixed string literals,
-and finally the user's free-text prompt as the last argument. None of this goes through a shell —
-`exec.CommandContext` passes each argument as a discrete argv element — so there is no shell-injection
-risk from the prompt regardless of its content, matching this document's existing rule that
-"[a]rguments after the command may be user-supplied only when the target binary cannot reinterpret
-them as commands": the `claude` CLI's own argument parser is the only thing that ever sees the prompt
-as anything other than an opaque string, and it is always the final positional argument, after every
-flag this call ever passes.
+created, an `--allowedTools=<list>` value `commandcenter.AllowedTools()` computes from fixed string
+literals, and finally the user's free-text prompt as the last argument. None of this goes through a
+shell — `exec.CommandContext` passes each argument as a discrete argv element — so there is no
+shell-injection risk from the prompt regardless of its content.
+
+**Being the final positional argument does not, by itself, make the prompt safe — this document's
+own first draft of this section claimed exactly that, and the claim was wrong.** `buildArgs` in
+`internal/commandcenter/runner.go` was verified live against a real installed `claude` CLI (v2.1.226)
+to have two distinct, independently-reproduced bugs before the fix now in place:
+
+1. **Argument injection into the `claude` CLI's own parser.** A prompt beginning with `-` (e.g. a
+   user typing `--help`, or something far more consequential like a `--settings=<json>` payload
+   defining a malicious hook) was not treated as opaque prompt text — the CLI's own option parser
+   scans for flags anywhere in argv, not only before the first positional, so a `-`-prefixed prompt
+   was parsed as a flag. This was reproduced directly: passing `"--help"` as the trailing argument
+   printed the CLI's own help output instead of being sent as a prompt, and a `--settings` payload
+   defining a `SessionStart` hook reached and ran that hook. **The fix**: `buildArgs` now inserts a
+   literal `"--"` end-of-options marker immediately before the prompt, which the CLI's parser was
+   confirmed (live) to honor — everything after it is treated as a positional argument, never a flag,
+   regardless of its content.
+2. **`--allowedTools` is declared variadic** (`<tools...>`) by the CLI's own `--help` output, so
+   passing it and its value as two separate argv elements (`"--allowedTools", "a,b,c"`) let it
+   swallow the very next argv element too — which was the prompt, silently breaking every ordinary
+   query with `Input must be provided either through stdin or as a prompt argument when using
+   --print`, confirmed live. **The fix**: `buildArgs` now uses the `=` form
+   (`"--allowedTools=a,b,c"`) as a single argv element, which cannot be extended by a following one.
+
+Both fixes were verified together, live, end-to-end through the real `Runner`/WS/browser stack (not
+just the CLI in isolation) before being considered closed. `internal/commandcenter/runner_test.go`'s
+`TestRunnerBuildArgsShapeIsSafeAgainstArgumentInjection` pins the exact argv shape as a regression,
+since a fake `cmdRunner` cannot reproduce the real CLI's own argument-parsing behavior — it can only
+assert what argv panemux itself constructs, which is why this was caught by an adversarial review
+verifying claims against the real binary, not by the original test suite.
 
 The `PANEMUX_BOARD_TOKEN`/`PANEMUX_BOARD_BASE_URL` values the `claude -p` subprocess's own MCP-server
 child process reads never reach `Runner`'s own `exec.Command` argv at all — they are set in the MCP
@@ -187,11 +212,53 @@ unauthenticated probe to even find.
 
 **`GET /api/session-token` is the one deliberate, unauthenticated exception**, and exists specifically
 to let the browser dashboard learn the token it needs for every route above — there is no other way
-for client-side JavaScript to learn a value that may have been randomly generated on first run. It
-relies on the same protection every other pre-existing unauthenticated `/api/*` route already relies
-on: `corsMiddleware`'s `isLocalhostOrigin` check only lets a loopback origin read a cross-origin
-response body at all, and the operator's own host is already the trust boundary for those routes. It
-is deliberately registered at `/api/session-token`, **not** `/api/board/session-token`: chi routes any
+for client-side JavaScript to learn a value that may have been randomly generated on first run.
+
+**This endpoint does NOT rely on `corsMiddleware`/CORS for protection, despite an earlier revision of
+this document claiming exactly that.** That claim was wrong and was caught by an adversarial review,
+not by any test: CORS only controls whether a cross-origin *script* can read a response body — it
+never rejects the request from reaching the handler, and a non-browser client (`curl`, any process on
+the LAN) ignores CORS entirely. Since this token is the only thing gating every other
+`/api/board/*` route (see above) and `internal/config/validate.go`'s own non-loopback-requires-token
+rule explicitly permits `server.host` to be a non-loopback address as long as a token is set, a CORS-only
+guard would have handed the token to any LAN client that simply asked, in exactly the deployment shape
+the token exists to protect.
+
+`GetBoardSessionToken` (`internal/api/board.go`) instead checks two things directly against the
+request, neither of which a client fully controls the way it controls the `Origin` header CORS reads:
+
+1. **`r.RemoteAddr`'s IP must be loopback.** This is the check that actually restricts the endpoint to
+   the local machine — it rejects any client that genuinely isn't the box panemux runs on, including a
+   LAN client reaching a non-loopback `server.host`. Checked with `net.ParseIP(...).IsLoopback()`
+   against the net/http-reported socket peer address, not a header.
+2. **`r.Host` must also resolve to a loopback authority.** RemoteAddr alone is not enough: DNS
+   rebinding (a domain whose DNS answer changes to `127.0.0.1` after a browser's same-origin check
+   already passed) makes an attacker page's requests arrive with a genuinely loopback RemoteAddr — the
+   TCP connection really is local — while the Host header still carries the attacker's own domain,
+   since browsers send the navigation URL's original host, not the resolved IP. Only the Host check
+   catches that case; this was verified with a dedicated test
+   (`TestGetBoardSessionToken_DNSRebindingHost_Forbidden`) simulating exactly that header combination.
+
+**Accepted limitation, stated explicitly: a dashboard served from a genuinely non-loopback
+`server.host` can no longer bootstrap its own token through this endpoint at all**, since no real
+remote client can ever satisfy the loopback-RemoteAddr check. This is intentional, not an oversight —
+the alternative (allowing the endpoint to answer non-loopback requests) is exactly the exposure this
+whole guard exists to close, and the token's own purpose in that deployment shape is to gate
+network-reachable access, not to be handed out to it. An operator running panemux non-loopback must
+provision the frontend's token some other way (e.g. a reverse proxy that injects it); that mechanism
+does not exist yet and is tracked as a follow-up, not solved by this endpoint.
+
+**This is a narrower fix than the broader DNS-rebinding exposure across this codebase.** Every other
+pre-existing unauthenticated `/api/*` route and `/ws/{sessionID}` (see below) still has no Host-header
+validation of its own — `checkOrigin` in `internal/ws/handler.go` allows any request with no `Origin`
+header at all, and permits `u.Host == r.Host`, which is exactly the tautology DNS rebinding defeats,
+since the attacker's page and the rebound request both send the same (attacker-controlled) Host. The
+session-token endpoint's guard was added specifically because it is the single highest-value target
+(it hands out the credential to everything else), not because the broader gap across other routes has
+been closed — it has not. Extending Host-header validation to every route is tracked as a separate,
+larger follow-up, out of scope for the command center feature this guard was added alongside.
+
+It is deliberately registered at `/api/session-token`, **not** `/api/board/session-token`: chi routes any
 path starting with `/api/board/` into the `bearerAuthMiddleware`-wrapped sub-router regardless of
 where else a handler for that literal path is registered — an earlier revision of this endpoint lived
 at that path and was silently caught by the very middleware it exists to bypass, discovered only by

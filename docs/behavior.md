@@ -345,11 +345,14 @@ request and the `/ws/board-command` connection — there is no other way for the
 JavaScript to learn a token that may have been randomly generated on first run (see
 `config.Config.EnsureAuthToken`, [security.md](security.md#auth-token-and-transport-encryption)) and
 is never sent to the browser any other way. **This endpoint is deliberately not behind
-`bearerAuthMiddleware`** — nothing could bootstrap the token without already knowing it otherwise —
-and relies instead on the same protection every other pre-existing, unauthenticated `/api/*` route
-already relies on: the server's CORS policy only lets a loopback origin read a cross-origin response
-body at all (see `corsMiddleware`/`isLocalhostOrigin` in `internal/server`), and the operator's own
-host is already the trust boundary for those routes.
+`bearerAuthMiddleware`** — nothing could bootstrap the token without already knowing it otherwise.
+
+It is gated by its own, narrower check instead: the caller's `RemoteAddr` must be a loopback IP *and*
+its `Host` header must also name a loopback authority (`localhost`/`127.0.0.1`/`::1`, any port). Both
+are required — see [security.md's Auth token and transport
+encryption](security.md#auth-token-and-transport-encryption) for why RemoteAddr alone doesn't defend
+against DNS rebinding, and why relying on CORS here (an earlier revision of this document's claim) was
+wrong. A non-loopback `server.host` deployment cannot use this endpoint at all, by design.
 
 Response:
 
@@ -357,7 +360,8 @@ Response:
 { "token": "a1b2c3...", "command_center_enabled": true }
 ```
 
-- `200`: always — there is no failure mode for this handler beyond the server not running at all.
+- `403`: the caller failed the loopback RemoteAddr+Host check above
+- `200`: otherwise, always — there is no other failure mode for this handler
 
 Note this route lives at `/api/session-token`, not under `/api/board/`, despite belonging
 conceptually to Agent Board: chi routes any path starting with `/api/board/` into the
@@ -511,6 +515,14 @@ A client that disconnects mid-query does not stop the underlying subprocess or c
 query's `--resume` continuity — the server keeps draining (but no longer forwarding) the query's
 remaining output so the subprocess is never left blocked, and the command center's own busy state is
 released normally once it finishes.
+
+Two further protections back the "never blocked forever" guarantee above, both defensive: the
+subprocess's own context carries a 5-minute default timeout (`commandcenter.RunnerConfig.QueryTimeout`),
+so a hung or abandoned `claude` invocation is force-killed rather than running indefinitely even if
+nothing else notices it; and every server→client write carries its own 10-second write deadline, so a
+client that stops reading without closing its TCP connection (a sleeping laptop, a dropped network
+with no FIN) fails the write — and falls into the same drain-without-forwarding path described above —
+instead of blocking the server goroutine forever.
 
 ## WebSocket Protocol
 

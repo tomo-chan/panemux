@@ -46,7 +46,17 @@ export function useBoardCommand({ enabled, token }: UseBoardCommandOptions): Use
     wsRef.current = ws
 
     ws.onopen = () => setConnected(true)
-    ws.onclose = () => setConnected(false)
+    ws.onclose = () => {
+      setConnected(false)
+      // A close can arrive mid-query (server restart, network drop) with no
+      // terminal done/error/busy frame ever received. Without this, pending
+      // would stay stuck true forever, permanently disabling the palette's
+      // Send button until a full page reload — see handlePrompt/Query on the
+      // server side for why the query itself is not left running: the
+      // client side must not stay stuck waiting for a reply that will never
+      // arrive on a connection that's gone.
+      setPending(false)
+    }
     ws.onerror = () => ws.close()
     ws.onmessage = (event) => {
       if (typeof event.data !== 'string') return
@@ -62,6 +72,14 @@ export function useBoardCommand({ enabled, token }: UseBoardCommandOptions): Use
       ws.close()
       wsRef.current = null
       setConnected(false)
+      // Reset per-connection state on every teardown (palette closing mid-
+      // query, or the enabled/token deps changing), not just on ws.onclose:
+      // without this, closing the palette mid-query left pending stuck true
+      // (Send permanently disabled on reopen) and left stale turns to
+      // duplicate against the freshly refetched history the palette shows
+      // on its next open.
+      setPending(false)
+      setTurns([])
     }
   }, [enabled, token])
 

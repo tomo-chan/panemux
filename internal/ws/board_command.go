@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/gorilla/websocket"
 
@@ -17,6 +18,23 @@ var boardCommandUpgrader = websocket.Upgrader{
 	ReadBufferSize:  4096,
 	WriteBufferSize: 4096,
 	CheckOrigin:     checkOrigin,
+}
+
+// boardCommandWriteTimeout bounds every WriteMessage call this handler
+// makes. Without it, a client that stops reading without closing its TCP
+// connection (a sleeping laptop, a dropped network with no FIN) makes
+// WriteMessage block indefinitely rather than error — the "keep draining
+// without writing" logic in streamBoardCommandEvents only helps once a
+// write actually fails, so an un-deadlined write can still wedge the
+// Runner's single-query busy flag forever.
+const boardCommandWriteTimeout = 10 * time.Second
+
+// boardCommandConn is the subset of *websocket.Conn this handler writes
+// through, so tests can substitute a fake connection without a real TCP
+// socket. *websocket.Conn satisfies this directly.
+type boardCommandConn interface {
+	WriteMessage(messageType int, data []byte) error
+	SetWriteDeadline(t time.Time) error
 }
 
 // boardCommandRunner is the subset of *commandcenter.Runner the WS handler
@@ -97,7 +115,7 @@ func (h *BoardCommandHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 // handlePrompt processes one client prompt message. It returns false when
 // the underlying connection has failed and the caller should stop reading
 // further messages.
-func (h *BoardCommandHandler) handlePrompt(ctx context.Context, conn *websocket.Conn, data []byte) bool {
+func (h *BoardCommandHandler) handlePrompt(ctx context.Context, conn boardCommandConn, data []byte) bool {
 	var req boardCommandRequest
 	if err := json.Unmarshal(data, &req); err != nil {
 		return writeBoardCommandFrame(conn, boardCommandFrame{Type: "error", Message: "invalid request: " + err.Error()})
@@ -117,7 +135,7 @@ func (h *BoardCommandHandler) handlePrompt(ctx context.Context, conn *websocket.
 // write fails, it keeps ranging over events without writing further — never
 // abandoning the channel — so the Runner's own goroutine (and its busy
 // flag) is never left blocked sending into a channel nobody drains.
-func streamBoardCommandEvents(conn *websocket.Conn, events <-chan commandcenter.Event) bool {
+func streamBoardCommandEvents(conn boardCommandConn, events <-chan commandcenter.Event) bool {
 	ok := true
 	for ev := range events {
 		if !ok {
@@ -143,9 +161,15 @@ func eventToBoardCommandFrame(ev commandcenter.Event) boardCommandFrame {
 	}
 }
 
-func writeBoardCommandFrame(conn *websocket.Conn, frame boardCommandFrame) bool {
+func writeBoardCommandFrame(conn boardCommandConn, frame boardCommandFrame) bool {
 	data, err := json.Marshal(frame)
 	if err != nil {
+		return false
+	}
+	// A deadline error from the connection itself (e.g. it's already
+	// closed) is treated the same as a failed write below — either way the
+	// caller must stop writing and fall back to draining only.
+	if err := conn.SetWriteDeadline(time.Now().Add(boardCommandWriteTimeout)); err != nil {
 		return false
 	}
 	return conn.WriteMessage(websocket.TextMessage, data) == nil

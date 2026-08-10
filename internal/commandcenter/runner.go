@@ -64,8 +64,21 @@ type commandFactory func(ctx context.Context, name string, args ...string) cmdRu
 
 const defaultClaudeBin = "claude"
 
-// RunnerConfig configures a Runner. NewCommand and Now default to
-// production behavior (a real subprocess, time.Now) when left zero.
+// defaultQueryTimeout bounds how long a single query's subprocess may run.
+// Without this, a hung or very slow `claude` invocation would keep the
+// Runner's single-query busy flag set indefinitely — worse, the context
+// Query receives from the WS handler is the request context of an already
+// http.Hijack'd connection (see internal/ws/board_command.go), which the
+// standard library never cancels on client disconnect, so relying on the
+// caller's own context alone is not sufficient. A generous but finite
+// default keeps an abandoned or wedged query from blocking the command
+// center forever, while still allowing a genuinely long agent turn to
+// finish.
+const defaultQueryTimeout = 5 * time.Minute
+
+// RunnerConfig configures a Runner. NewCommand, Now, and QueryTimeout
+// default to production behavior (a real subprocess, time.Now,
+// defaultQueryTimeout) when left zero.
 type RunnerConfig struct {
 	BuildMCPConfig func() (path string, cleanup func(), err error)
 	NewCommand     commandFactory
@@ -74,6 +87,7 @@ type RunnerConfig struct {
 	SessionPath    string
 	HistoryPath    string
 	AllowedTools   []string
+	QueryTimeout   time.Duration
 }
 
 // Runner drives the command center's per-query `claude -p [--resume]`
@@ -89,6 +103,7 @@ type Runner struct {
 	sessionPath    string
 	historyPath    string
 	allowedTools   []string
+	queryTimeout   time.Duration
 	mu             sync.Mutex
 	busy           bool
 }
@@ -103,6 +118,7 @@ func NewRunner(cfg RunnerConfig) *Runner {
 		sessionPath:    cfg.SessionPath,
 		historyPath:    cfg.HistoryPath,
 		allowedTools:   cfg.AllowedTools,
+		queryTimeout:   cfg.QueryTimeout,
 	}
 	if r.claudeBin == "" {
 		r.claudeBin = defaultClaudeBin
@@ -112,6 +128,9 @@ func NewRunner(cfg RunnerConfig) *Runner {
 	}
 	if r.now == nil {
 		r.now = time.Now
+	}
+	if r.queryTimeout <= 0 {
+		r.queryTimeout = defaultQueryTimeout
 	}
 	return r
 }
@@ -150,6 +169,9 @@ func (r *Runner) Query(ctx context.Context, prompt string) (<-chan Event, error)
 }
 
 func (r *Runner) run(ctx context.Context, prompt string, events chan<- Event) {
+	ctx, cancel := context.WithTimeout(ctx, r.queryTimeout)
+	defer cancel()
+
 	state, err := LoadSessionFile(r.sessionPath)
 	if err != nil {
 		events <- errorEvent("loading command center session state: %v", err)
@@ -189,6 +211,17 @@ func (r *Runner) run(ctx context.Context, prompt string, events chan<- Event) {
 		return // an EventError for the malformed line was already sent
 	}
 	if waitErr != nil {
+		if !firstRun {
+			// A resume failure is the CLI's own signal that --resume
+			// continuity is already broken (e.g. the user cleared
+			// ~/.claude, or the session was garbage collected) — clear the
+			// persisted id so the next query starts a fresh first-run
+			// instead of retrying the same doomed id forever. Best-effort:
+			// a failure to clear it doesn't need its own separate event: the
+			// query's own error below is still the actionable one, and the
+			// next query will simply hit the same resume failure again.
+			_ = SaveSessionFile(r.sessionPath, SessionState{})
+		}
 		events <- errorEvent("claude exited with error: %v", waitErr)
 		return
 	}
@@ -201,6 +234,23 @@ func (r *Runner) run(ctx context.Context, prompt string, events chan<- Event) {
 	events <- Event{Type: EventDone}
 }
 
+// buildArgs constructs the claude CLI argv. Two details here are load-bearing
+// for safety, both verified live against the real CLI (v2.1.226), not just
+// inferred from --help text:
+//
+//   - "--allowedTools" is declared variadic (`<tools...>`) by the CLI's own
+//     parser, so passing it and its value as two separate argv elements lets
+//     it swallow the very next element too — which would be the prompt,
+//     silently breaking every query ("Input must be provided either through
+//     stdin or as a prompt argument"). The "=" form
+//     ("--allowedTools=a,b,c") is a single argv element and cannot be
+//     extended by a following element.
+//   - The prompt is preceded by a literal "--" end-of-options marker.
+//     Without it, a prompt beginning with "-" (e.g. a user typing
+//     "--help" into the palette) is parsed as a CLI flag instead of being
+//     passed through as prompt text — argument injection into the claude
+//     CLI's own option parser, up to and including flags that alter its
+//     permission model.
 func (r *Runner) buildArgs(sessionID string, firstRun bool, mcpPath, prompt string) []string {
 	args := []string{"-p"}
 	if !firstRun {
@@ -210,7 +260,8 @@ func (r *Runner) buildArgs(sessionID string, firstRun bool, mcpPath, prompt stri
 		"--output-format=stream-json",
 		"--verbose",
 		"--mcp-config", mcpPath,
-		"--allowedTools", strings.Join(r.allowedTools, ","),
+		"--allowedTools="+strings.Join(r.allowedTools, ","),
+		"--",
 		prompt,
 	)
 	return args
@@ -218,13 +269,17 @@ func (r *Runner) buildArgs(sessionID string, firstRun bool, mcpPath, prompt stri
 
 // streamOutput reads stdout line by line, emitting an EventLine per parsed
 // stream-json line and collecting HistoryEntry copies for persistence. It
-// stops at the first line that fails to parse as a JSON object, having
-// already sent the corresponding EventError, and drains any remaining
-// output so the subprocess is never left blocked writing into a pipe no one
-// is reading — Wait() must still be safe to call after this returns.
+// stops at the first line that fails to parse as a JSON object or the first
+// underlying read error, having already sent the corresponding EventError,
+// and — via the deferred drain below, covering every exit path uniformly —
+// always drains any remaining output so the subprocess is never left
+// blocked writing into a pipe no one is reading. Wait() must still be safe
+// to call after this returns.
 func (r *Runner) streamOutput(
 	stdout io.ReadCloser, events chan<- Event,
 ) (entries []HistoryEntry, sessionID string, failed bool) {
+	defer func() { _, _ = io.Copy(io.Discard, stdout) }()
+
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 	for scanner.Scan() {
@@ -239,7 +294,6 @@ func (r *Runner) streamOutput(
 		}
 		if err := json.Unmarshal(lineCopy, &probe); err != nil {
 			events <- errorEvent("malformed stream-json output: %v", err)
-			_, _ = io.Copy(io.Discard, stdout)
 			return entries, sessionID, true
 		}
 		if probe.SessionID != "" {

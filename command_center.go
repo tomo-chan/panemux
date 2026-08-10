@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	"panemux/internal/commandcenter"
 	"panemux/internal/config"
@@ -38,12 +39,7 @@ func setupCommandCenter(cfg *config.Config) *commandcenter.Runner {
 		return nil
 	}
 
-	// The command center's own claude -p subprocess always talks to
-	// loopback, regardless of what interface server.host binds to — it runs
-	// as a local subprocess on the same host panemux itself runs on, and
-	// 127.0.0.1 always reaches a service bound to any local interface,
-	// including a non-loopback server.host.
-	baseURL := fmt.Sprintf("http://127.0.0.1:%d", cfg.Server.Port)
+	baseURL := commandCenterBaseURL(cfg)
 	token := cfg.Server.AuthToken
 
 	return commandcenter.NewRunner(commandcenter.RunnerConfig{
@@ -58,4 +54,25 @@ func setupCommandCenter(cfg *config.Config) *commandcenter.Runner {
 			return commandcenter.BuildMCPConfig(execPath, baseURL, token)
 		},
 	})
+}
+
+// commandCenterBaseURL returns the URL the command center's own claude -p
+// subprocess should call to reach panemux's own REST API. 127.0.0.1 (or its
+// IPv6 equivalent) is substituted only for a wildcard bind (empty,
+// "0.0.0.0", or "::") — a specific non-wildcard, non-loopback bind (e.g.
+// "192.168.1.50") is NOT reachable via 127.0.0.1, since binding to a
+// specific interface restricts the listening socket to that one address;
+// the configured host must be used as-is in that case.
+func commandCenterBaseURL(cfg *config.Config) string {
+	host := cfg.Server.Host
+	switch host {
+	case "", "0.0.0.0":
+		host = "127.0.0.1"
+	case "::":
+		host = "::1"
+	}
+	if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	return fmt.Sprintf("http://%s:%d", host, cfg.Server.Port)
 }

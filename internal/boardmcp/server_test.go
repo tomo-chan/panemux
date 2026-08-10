@@ -83,6 +83,21 @@ func TestServerNotificationsInitializedProducesNoResponse(t *testing.T) {
 	assert.Empty(t, resp)
 }
 
+func TestServerToolsCallSentAsNotificationNeverExecutesSideEffect(t *testing.T) {
+	// A tools/call with no "id" is a JSON-RPC notification: the server must
+	// not reply (already covered above) — but it must also never dispatch
+	// the underlying tool call at all, since a state-changing call like
+	// board_broadcast would otherwise fire with no response ever
+	// acknowledging (or reporting a failure for) whatever it did.
+	client := &fakeBoardAPIClient{broadcastRaw: json.RawMessage(`{"delivered":["pane-a"]}`)}
+	resp := serveLines(t, client,
+		`{"jsonrpc":"2.0","method":"tools/call","params":`+
+			`{"name":"board_broadcast","arguments":{"to":["pane-a"],"body":"hi"}}}`)
+
+	assert.Empty(t, resp)
+	assert.Nil(t, client.gotBroadcastTo, "board_broadcast must never be dispatched for a notification-shaped request")
+}
+
 func TestServerToolsListReturnsThreeBoardTools(t *testing.T) {
 	resp := serveLines(t, &fakeBoardAPIClient{}, `{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`)
 

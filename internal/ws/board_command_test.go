@@ -23,6 +23,27 @@ type fakeBoardCommandRunner struct {
 	queryFn func(ctx context.Context, prompt string) (<-chan commandcenter.Event, error)
 }
 
+//nolint:govet // fieldalignment: test fixture, padding cost is negligible
+type fakeBoardCommandConn struct {
+	writeErr      error
+	deadlineErr   error
+	deadlines     []time.Time
+	writtenFrames [][]byte
+}
+
+func (f *fakeBoardCommandConn) SetWriteDeadline(t time.Time) error {
+	f.deadlines = append(f.deadlines, t)
+	return f.deadlineErr
+}
+
+func (f *fakeBoardCommandConn) WriteMessage(_ int, data []byte) error {
+	if f.writeErr != nil {
+		return f.writeErr
+	}
+	f.writtenFrames = append(f.writtenFrames, data)
+	return nil
+}
+
 func (f *fakeBoardCommandRunner) Query(ctx context.Context, prompt string) (<-chan commandcenter.Event, error) {
 	return f.queryFn(ctx, prompt)
 }
@@ -235,4 +256,40 @@ func TestBoardCommandWS_ClientDisconnectMidStream_DrainsEventsWithoutBlocking(t 
 	require.Eventually(t, func() bool {
 		return len(ch) == 0
 	}, 2*time.Second, 10*time.Millisecond, "handler must drain all events even after the client disconnects")
+}
+
+func TestWriteBoardCommandFrameSetsWriteDeadlineBeforeEveryWrite(t *testing.T) {
+	conn := &fakeBoardCommandConn{}
+	before := time.Now()
+
+	ok := writeBoardCommandFrame(conn, boardCommandFrame{Type: "done"})
+
+	assert.True(t, ok)
+	require.Len(t, conn.deadlines, 1)
+	assert.WithinDuration(t, before.Add(boardCommandWriteTimeout), conn.deadlines[0], 2*time.Second)
+	require.Len(t, conn.writtenFrames, 1)
+}
+
+func TestWriteBoardCommandFrameFailsWhenSetWriteDeadlineFails(t *testing.T) {
+	conn := &fakeBoardCommandConn{deadlineErr: errors.New("connection closed")}
+
+	ok := writeBoardCommandFrame(conn, boardCommandFrame{Type: "done"})
+
+	assert.False(t, ok)
+	assert.Empty(t, conn.writtenFrames, "must not attempt to write once the deadline itself couldn't be set")
+}
+
+func TestStreamBoardCommandEventsSetsDeadlineOnEveryFrame(t *testing.T) {
+	conn := &fakeBoardCommandConn{}
+	events := closedEventsChan(
+		commandcenter.Event{Type: commandcenter.EventLine, Raw: json.RawMessage(`{"n":1}`)},
+		commandcenter.Event{Type: commandcenter.EventLine, Raw: json.RawMessage(`{"n":2}`)},
+		commandcenter.Event{Type: commandcenter.EventDone},
+	)
+
+	ok := streamBoardCommandEvents(conn, events)
+
+	assert.True(t, ok)
+	assert.Len(t, conn.deadlines, 3, "every write must get its own fresh deadline")
+	assert.Len(t, conn.writtenFrames, 3)
 }

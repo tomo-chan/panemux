@@ -204,4 +204,52 @@ describe('useBoardCommand', () => {
 
     expect(MockWebSocket.instances).toHaveLength(2)
   })
+
+  it('resets pending and turns when disabled mid-query (e.g. the palette closes)', () => {
+    const { result, rerender } = renderHook(
+      ({ enabled }) => useBoardCommand({ enabled, token: 'tok' }),
+      { initialProps: { enabled: true } }
+    )
+    const ws = MockWebSocket.instances[0]
+    act(() => ws.simulateOpen())
+    act(() => result.current.sendPrompt('hello'))
+
+    expect(result.current.pending).toBe(true)
+    expect(result.current.turns).toHaveLength(1)
+
+    rerender({ enabled: false })
+
+    expect(result.current.pending).toBe(false)
+    expect(result.current.turns).toHaveLength(0)
+  })
+
+  it('clears pending when the socket closes mid-query without an explicit disable', () => {
+    const { result } = renderHook(() => useBoardCommand({ enabled: true, token: 'tok' }))
+    const ws = MockWebSocket.instances[0]
+    act(() => ws.simulateOpen())
+    act(() => result.current.sendPrompt('hello'))
+
+    expect(result.current.pending).toBe(true)
+
+    act(() => ws.close())
+
+    expect(result.current.pending).toBe(false)
+  })
+
+  it('reopening after a mid-query close does not resend a stale pending state', () => {
+    const { result, rerender } = renderHook(
+      ({ enabled }) => useBoardCommand({ enabled, token: 'tok' }),
+      { initialProps: { enabled: true } }
+    )
+    const firstWs = MockWebSocket.instances[0]
+    act(() => firstWs.simulateOpen())
+    act(() => result.current.sendPrompt('hello'))
+    expect(result.current.pending).toBe(true)
+
+    rerender({ enabled: false })
+    rerender({ enabled: true })
+
+    expect(result.current.pending).toBe(false)
+    expect(result.current.turns).toHaveLength(0)
+  })
 })

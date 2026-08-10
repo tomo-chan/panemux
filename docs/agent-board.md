@@ -44,6 +44,18 @@
 > persistent history panel (`CommandHistoryPanel.tsx`) are implemented per
 > [ui-design.md's Agent Board UI section](ui-design.md#agent-board-ui-planned), including the
 > concrete decisions that section originally deferred to implementation time.
+>
+> **An adversarial review after the initial implementation found and fixed several real bugs,
+> including two verified live against the real `claude` CLI: the subprocess argument construction let
+> a `-`-prefixed prompt be parsed as a CLI flag, and separately made every ordinary (non-flag) prompt
+> fail outright due to a variadic-flag argv bug — meaning the command center had never actually
+> completed a successful query before the fix.** See
+> [security.md's Command center subprocess execution](security.md#command-center-subprocess-execution)
+> for the full detail and how each was verified, and
+> [security.md's Auth token and transport encryption](security.md#auth-token-and-transport-encryption)
+> for a related fix to `GET /api/session-token`'s own guard (it does not rely on CORS, contrary to an
+> earlier revision of that section). A live, end-to-end query through the real browser → WS → Runner →
+> real `claude` subprocess stack was used to confirm the fix, not just the unit tests.
 
 ## Purpose
 
@@ -1025,9 +1037,16 @@ tradeoff (see [Known limitations](#known-limitations)), not a claim of a race-fr
   avoids for a feature kept to [one session per instance](#scope-kept-intentionally-narrow-for-now).
 - **Failure modes.** A subprocess that exits non-zero, emits malformed `stream-json`, or times out
   surfaces as an explicit error frame on the WS connection — never a silently empty response, so the
-  frontend can distinguish "no output yet" from "the query failed." A failed query never corrupts
-  `--resume` continuity for the next one: the persisted session id is replaced only by a fresh
-  first-run capture, never derived from a failed query's absent or partial output.
+  frontend can distinguish "no output yet" from "the query failed." The timeout is a real, enforced
+  `context.WithTimeout` wrapping the subprocess's own context
+  (`commandcenter.RunnerConfig.QueryTimeout`, default 5 minutes) — not merely aspirational: the WS
+  handler's own request context comes from an already-hijacked HTTP connection, which the standard
+  library never cancels on client disconnect, so this timeout is what actually bounds a hung or
+  abandoned query's lifetime. A failed query never corrupts `--resume` continuity for the next one:
+  the persisted session id is replaced only by a fresh first-run capture, never derived from a failed
+  query's absent or partial output — and a `--resume`d query that itself fails clears the stale
+  session id it was resuming, so a `claude`-side session that no longer exists (e.g. the operator
+  cleared `~/.claude`) doesn't leave every future query retrying the same dead id forever.
 
 ### Authorization
 

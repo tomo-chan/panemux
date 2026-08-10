@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"strconv"
 	"time"
@@ -189,18 +190,73 @@ type boardSessionTokenResponse struct {
 //
 // This endpoint is deliberately NOT behind bearerAuthMiddleware itself —
 // nothing could ever bootstrap the token without already knowing it
-// otherwise — and instead relies on the same protection every other
-// pre-existing, unauthenticated /api/* route already relies on: the
-// server's CORS policy only allows a loopback origin to read a cross-origin
-// response body at all (see corsMiddleware/isLocalhostOrigin in
-// internal/server), and the operator's own host is already the trust
-// boundary for those routes. See docs/security.md's "Auth token and
-// transport encryption" section.
+// otherwise. An earlier revision of this doc comment claimed the server's
+// CORS policy protects it; that claim was wrong and has been corrected —
+// CORS only controls whether a cross-origin script can *read* a response
+// body, it never rejects the request from reaching the handler at all, and
+// a non-browser client (curl, another process on the LAN) ignores CORS
+// entirely. The real guard is below, checked directly against the request
+// rather than delegated to a header a client fully controls:
+//
+//  1. r.RemoteAddr's IP must be loopback. This is what actually restricts
+//     this endpoint to the local machine — it rejects any client that
+//     genuinely isn't the box panemux is running on, including a client on
+//     a LAN that reaches a `server.host` bound to a non-loopback address
+//     (a configuration internal/config/validate.go's own
+//     non-loopback-requires-token rule explicitly allows). Handing the
+//     token to any such client would defeat the entire reason that rule
+//     requires a token in the first place.
+//  2. r.Host must also resolve to a loopback authority. RemoteAddr alone is
+//     not enough: DNS rebinding (a domain whose DNS answer changes to
+//     127.0.0.1 after the browser's same-origin check already passed) makes
+//     an attacker-controlled page's requests arrive with a genuinely
+//     loopback RemoteAddr — the TCP connection really is local — while the
+//     Host header still carries the attacker's own domain, since browsers
+//     send the navigation URL's original host, not the resolved IP. Only
+//     the Host check catches that case.
+//
+// See docs/security.md's "Auth token and transport encryption" section for
+// the full rationale, including the accepted limitation this creates: a
+// dashboard served from a genuinely non-loopback `server.host` can no
+// longer bootstrap its own token through this endpoint at all, by design.
 func (h *Handler) GetBoardSessionToken(w http.ResponseWriter, r *http.Request) {
+	if !isLoopbackRemoteAddr(r.RemoteAddr) || !isLoopbackAuthority(r.Host) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
 	writeJSON(w, boardSessionTokenResponse{
 		Token:                h.cfg.Server.AuthToken,
-		CommandCenterEnabled: h.cfg.CommandCenter.Enabled,
+		CommandCenterEnabled: h.commandCenterAvailable,
 	})
+}
+
+// isLoopbackAuthority reports whether authority (a Host-header-shaped
+// "host" or "host:port" string) names a loopback address, regardless of
+// port — matching internal/server's own isLocalhostOrigin/isLoopbackHost
+// port-agnostic allowance for the Vite dev server's proxied port.
+func isLoopbackAuthority(authority string) bool {
+	host, _, err := net.SplitHostPort(authority)
+	if err != nil {
+		host = authority
+	}
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
+}
+
+// isLoopbackRemoteAddr reports whether remoteAddr (an http.Request's own
+// RemoteAddr, always "IP:port" for a real TCP connection) is a loopback IP.
+// Unlike isLoopbackAuthority, this is checked against net.IP.IsLoopback
+// rather than string equality, since RemoteAddr is the net/http-reported
+// address of the actual socket peer, not attacker-controlled request
+// content — it can carry any valid loopback representation (including
+// IPv4-mapped IPv6 forms), not just the literal strings a Host header
+// realistically contains.
+func isLoopbackRemoteAddr(remoteAddr string) bool {
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
+		host = remoteAddr
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // defaultCommandHistoryFn reads the command center's history file from its

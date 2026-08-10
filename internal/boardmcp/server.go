@@ -103,7 +103,12 @@ func (s *Server) Serve(ctx context.Context, r io.Reader, w io.Writer) error {
 
 // handleLine returns nil for a notification (no id, or a JSON-null id) —
 // per the JSON-RPC 2.0 spec, notifications never receive a response, even
-// an error one, since there is no id to correlate it with.
+// an error one, since there is no id to correlate it with. A notification
+// is never dispatched at all, not just left unanswered: nothing here would
+// ever see the result of a state-changing call like board_broadcast if it
+// ran as a notification, so — unlike a plain request whose caller is
+// choosing to ignore the response — there would be no way to tell the
+// difference between "didn't run" and "ran and nobody found out."
 func (s *Server) handleLine(ctx context.Context, line []byte) *jsonrpcResponse {
 	var req jsonrpcRequest
 	if err := json.Unmarshal(line, &req); err != nil {
@@ -112,12 +117,11 @@ func (s *Server) handleLine(ctx context.Context, line []byte) *jsonrpcResponse {
 			Error:   &jsonrpcError{Code: jsonrpcParseError, Message: "parse error: " + err.Error()},
 		}
 	}
-	isNotification := len(req.ID) == 0 || string(req.ID) == "null"
-
-	result, rpcErr := s.dispatch(ctx, req.Method, req.Params)
-	if isNotification {
+	if len(req.ID) == 0 || string(req.ID) == "null" {
 		return nil
 	}
+
+	result, rpcErr := s.dispatch(ctx, req.Method, req.Params)
 	resp := &jsonrpcResponse{JSONRPC: "2.0", ID: req.ID}
 	if rpcErr != nil {
 		resp.Error = rpcErr

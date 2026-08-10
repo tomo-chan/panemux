@@ -45,6 +45,7 @@ func New(
 	r.Use(securityHeadersMiddleware)
 
 	apiHandler := api.NewHandler(cfg, manager, boardCache, boardRelay)
+	apiHandler.SetCommandCenterAvailable(commandRunner != nil)
 	wsHandler := ws.NewHandler(manager)
 	registerRoutes(r, apiHandler, wsHandler, commandRunner, frontendFS, cfg.Server.AuthToken)
 
