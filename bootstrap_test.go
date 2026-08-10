@@ -27,13 +27,19 @@ type fakeAgentSession struct {
 	boardOutputs map[string][]byte
 	id           string
 	detectType   string
+	sessionType  session.Type
 	writes       [][]byte
 	detectOK     bool
 	writeShort   bool
 }
 
-func (f *fakeAgentSession) ID() string                     { return f.id }
-func (f *fakeAgentSession) Type() session.Type             { return session.TypeLocal }
+func (f *fakeAgentSession) ID() string { return f.id }
+func (f *fakeAgentSession) Type() session.Type {
+	if f.sessionType == "" {
+		return session.TypeLocal
+	}
+	return f.sessionType
+}
 func (f *fakeAgentSession) Title() string                  { return f.id }
 func (f *fakeAgentSession) State() session.State           { return session.StateConnected }
 func (f *fakeAgentSession) Read(p []byte) (int, error)     { return 0, nil }
@@ -225,7 +231,13 @@ func TestBootstrapWatcher_RemotePresenceCheckTransportError_DistinctFromNo(t *te
 	assert.True(t, w.presenceWarned["pane-a"])
 }
 
-func TestBootstrapWatcher_ShortWrite_NotMarkedBootstrapped(t *testing.T) {
+// TestBootstrapWatcher_ShortWrite_GivesUpImmediately_NeverRetries is the
+// regression test for the compounding-partial-write finding: once any bytes
+// have already been typed into the pane, retrying would type the full
+// instruction again on top of that half-written line rather than fixing
+// anything, so a short write must give up on the very first attempt, not
+// just avoid being marked bootstrapped.
+func TestBootstrapWatcher_ShortWrite_GivesUpImmediately_NeverRetries(t *testing.T) {
 	manager := session.NewManager()
 	sess := &fakeAgentSession{id: "pane-a", detectType: "claude-code", detectOK: true, writeShort: true}
 	manager.Add(sess)
@@ -233,13 +245,22 @@ func TestBootstrapWatcher_ShortWrite_NotMarkedBootstrapped(t *testing.T) {
 	w := newLocalWatcher(manager, localAgmsgDir(t, true), "panemux", nil)
 	w.pollOnce(context.Background())
 	w.pollOnce(context.Background())
-
-	require.NotEmpty(t, sess.writes, "a short write attempt still counts as an attempt")
+	require.Len(t, sess.writes, 1, "a short write attempt still counts as one attempt")
 	_, bootstrapped := w.bootstrapped["pane-a"]
 	assert.False(t, bootstrapped, "a short write must not be treated as a successful bootstrap")
+
+	// Further ticks (even with the debounce satisfied again) must not
+	// attempt another write at all — givenUp must block it immediately.
+	for i := 0; i < 4; i++ {
+		w.pollOnce(context.Background())
+	}
+	assert.Len(t, sess.writes, 1, "a short write must never be retried, since it would compound a half-typed line")
 }
 
-func TestBootstrapWatcher_WriteError_NotMarkedBootstrapped(t *testing.T) {
+// TestBootstrapWatcher_WriteError_RetriedUpToLimitThenGivesUp covers a clean
+// (n==0) write failure, which is safe to retry a bounded number of times
+// since nothing has actually been typed into the pane yet.
+func TestBootstrapWatcher_WriteError_RetriedUpToLimitThenGivesUp(t *testing.T) {
 	manager := session.NewManager()
 	sess := &fakeAgentSession{
 		id: "pane-a", detectType: "claude-code", detectOK: true,
@@ -248,9 +269,12 @@ func TestBootstrapWatcher_WriteError_NotMarkedBootstrapped(t *testing.T) {
 	manager.Add(sess)
 
 	w := newLocalWatcher(manager, localAgmsgDir(t, true), "panemux", nil)
-	w.pollOnce(context.Background())
-	w.pollOnce(context.Background())
+	for i := 0; i < 2+maxBootstrapWriteAttempts+2; i++ {
+		w.pollOnce(context.Background())
+	}
 
+	assert.Len(t, sess.writes, maxBootstrapWriteAttempts,
+		"must retry a clean write failure up to the cap, then stop attempting entirely")
 	_, bootstrapped := w.bootstrapped["pane-a"]
 	assert.False(t, bootstrapped)
 }
@@ -261,22 +285,101 @@ func TestBootstrapWatcher_NoAgentTypeDetectorCapability_NoOp(t *testing.T) {
 	manager.Add(sess)
 
 	w := newLocalWatcher(manager, localAgmsgDir(t, true), "panemux", nil)
-	assert.NotPanics(t, func() {
-		w.pollOnce(context.Background())
-		w.pollOnce(context.Background())
+	w.pollOnce(context.Background())
+	w.pollOnce(context.Background())
+
+	assert.Empty(t, w.bootstrapped)
+	assert.Empty(t, w.pending)
+}
+
+// TestBootstrapWatcher_InvalidPaneIDOrTeam_SkipsBootstrap is the regression
+// test for embedding an unvalidated identifier into the onboarding
+// instruction's shell command lines: a pane ID or team outside agmsg's own
+// identifier alphabet (board.ValidAgmsgIdentifier) can never be addressed
+// correctly by the relay even if the write succeeded, so bootstrap must
+// refuse rather than write a broken instruction.
+func TestBootstrapWatcher_InvalidPaneIDOrTeam_SkipsBootstrap(t *testing.T) {
+	t.Run("invalid pane ID", func(t *testing.T) {
+		manager := session.NewManager()
+		sess := &fakeAgentSession{id: "pane a", detectType: "claude-code", detectOK: true}
+		manager.Add(sess)
+
+		w := newBootstrapWatcher(bootstrapWatcherConfig{
+			Manager:       manager,
+			PaneHosts:     map[string]string{"pane a": boardHostIDLocal},
+			ResolvedPaths: map[string]string{boardHostIDLocal: localAgmsgDir(t, true)},
+			Team:          "panemux",
+		})
+		for i := 0; i < 3; i++ {
+			w.pollOnce(context.Background())
+		}
+		assert.Empty(t, sess.writes)
+	})
+
+	t.Run("invalid team", func(t *testing.T) {
+		manager := session.NewManager()
+		sess := &fakeAgentSession{id: "pane-a", detectType: "claude-code", detectOK: true}
+		manager.Add(sess)
+
+		w := newLocalWatcher(manager, localAgmsgDir(t, true), "team; rm -rf", nil)
+		for i := 0; i < 3; i++ {
+			w.pollOnce(context.Background())
+		}
+		assert.Empty(t, sess.writes)
 	})
 }
 
-// TestBootstrapWatcher_PersistedSeed_PreventsReBootstrapOfLiveSession is the
-// central regression test for the seeding design: a pane ID persisted from a
-// previous panemux run, whose session is still alive and still shows an
-// active known agent, must not be re-bootstrapped just because panemux
-// itself restarted. A *different* Session object for the same pane ID
-// (simulating that pane being restarted within the current process) must be
-// bootstrapped again.
-func TestBootstrapWatcher_PersistedSeed_PreventsReBootstrapOfLiveSession(t *testing.T) {
+// TestBootstrapWatcher_RemotePresenceCheck_FailsOverPastDeadFirstCandidate
+// is the regression test for trusting only the alphabetically-first
+// board-enabled pane on a host to answer the presence probe: that pane's
+// own session can be registered but dead (State() can lag reality), which
+// must not block bootstrap for the rest of the host when another pane on
+// it is genuinely reachable.
+func TestBootstrapWatcher_RemotePresenceCheck_FailsOverPastDeadFirstCandidate(t *testing.T) {
+	agmsgPath := "/opt/agmsg"
+	probeKey := strings.Join([]string{
+		"sh", "-c", "test -f \"$1\" && printf 'yes' || printf 'no'", "board-agmsg-presence",
+		agmsgPath + "/scripts/api.sh",
+	}, "\x00")
+
 	manager := session.NewManager()
-	original := &fakeAgentSession{id: "pane-a", detectType: "claude-code", detectOK: true}
+	// "pane-a" sorts first, so dynamicBoardExecutor tries it first; it must
+	// fail over to "pane-b" rather than reporting checked=false forever.
+	dead := &fakeAgentSession{
+		id: "pane-a", detectType: "codex", detectOK: true,
+		boardErr: errors.New("ssh: connection lost"),
+	}
+	alive := &fakeAgentSession{id: "pane-b", boardOutputs: map[string][]byte{probeKey: []byte("yes")}}
+	manager.Add(dead)
+	manager.Add(alive)
+
+	w := newBootstrapWatcher(bootstrapWatcherConfig{
+		Manager:       manager,
+		PaneHosts:     map[string]string{"pane-a": "ssh:build-host", "pane-b": "ssh:build-host"},
+		ResolvedPaths: map[string]string{"ssh:build-host": agmsgPath},
+		Team:          "panemux",
+	})
+	w.pollOnce(context.Background())
+	w.pollOnce(context.Background())
+
+	require.Len(t, dead.writes, 1,
+		"pane-a must still bootstrap via pane-b's working session, despite pane-a's own RunBoardCommand failing")
+}
+
+// TestBootstrapWatcher_PersistedSeed_TmuxPane_PreventsReBootstrapOfLiveSession
+// is the central regression test for the seeding design as it applies to a
+// tmux-backed pane: a persisted pane ID whose session is still alive and
+// still shows an active known agent must not be re-bootstrapped just
+// because panemux itself restarted — this is the case seeding is meant for,
+// since a tmux session (unlike a local/SSH one) reattaches to the same
+// still-running shell across a panemux restart. A *different* Session
+// object for the same pane ID (simulating that pane being restarted within
+// the current process) must be bootstrapped again.
+func TestBootstrapWatcher_PersistedSeed_TmuxPane_PreventsReBootstrapOfLiveSession(t *testing.T) {
+	manager := session.NewManager()
+	original := &fakeAgentSession{
+		id: "pane-a", detectType: "claude-code", detectOK: true, sessionType: session.TypeTmux,
+	}
 	manager.Add(original)
 
 	w := newLocalWatcher(manager, localAgmsgDir(t, true), "panemux", nil)
@@ -292,13 +395,37 @@ func TestBootstrapWatcher_PersistedSeed_PreventsReBootstrapOfLiveSession(t *test
 	// Now simulate the pane being restarted within this same process: a new
 	// Session object takes its place under the same pane ID.
 	require.NoError(t, manager.Remove("pane-a"))
-	replacement := &fakeAgentSession{id: "pane-a", detectType: "claude-code", detectOK: true}
+	replacement := &fakeAgentSession{
+		id: "pane-a", detectType: "claude-code", detectOK: true, sessionType: session.TypeTmux,
+	}
 	manager.Add(replacement)
 
 	w.pollOnce(context.Background())
 	assert.Empty(t, replacement.writes, "first tick after restart must still debounce")
 	w.pollOnce(context.Background())
 	assert.Len(t, replacement.writes, 1, "the replacement session must be bootstrapped like any new one")
+}
+
+// TestBootstrapWatcher_PersistedSeed_LocalPane_StillBootstraps is the
+// regression test for the bug the tmux-only seeding restriction fixes: a
+// local (or SSH) pane's underlying process cannot survive a panemux
+// restart — CreateFromConfig always spawns a brand-new, empty shell — so a
+// pane ID persisted from a previous run must NOT be treated as
+// already-onboarded here, or that pane would never be bootstrapped again on
+// any future run even though the fresh shell has never received the
+// instruction.
+func TestBootstrapWatcher_PersistedSeed_LocalPane_StillBootstraps(t *testing.T) {
+	manager := session.NewManager()
+	sess := &fakeAgentSession{id: "pane-a", detectType: "claude-code", detectOK: true} // sessionType zero value -> local
+	manager.Add(sess)
+
+	w := newLocalWatcher(manager, localAgmsgDir(t, true), "panemux", nil)
+	w.LoadPersistedState([]string{"pane-a"}) // as if this pane was bootstrapped before the restart
+
+	w.pollOnce(context.Background())
+	assert.Empty(t, sess.writes, "first tick must still debounce")
+	w.pollOnce(context.Background())
+	assert.Len(t, sess.writes, 1, "a local pane's fresh shell must be bootstrapped despite being in persisted state")
 }
 
 func TestBootstrapWatcher_PersistSuccessfulBootstrap(t *testing.T) {

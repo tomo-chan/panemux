@@ -815,9 +815,10 @@ Implemented in `bootstrap.go` (`package main`) as `bootstrapWatcher`, constructe
 5s — the same interval as the relay), gated the same way the relay is: `HasWork()` (at least one
 board-enabled pane) must be true before the goroutine even starts.
 
-1. A pane config (or the global default) sets `agent_board.enabled: true`, optionally overriding
-   `mode`. (Per-pane `team` override does not exist — every board-enabled pane on one panemux
-   instance joins the single `agent_board.team`.)
+1. A pane config sets `agent_board.enabled: true`, optionally overriding `mode`. (There is no
+   top-level default for `enabled` — `AgentBoardConfig` only carries `team`/`agmsg_path`, shared by
+   every board-enabled pane; each pane opts in individually. Per-pane `team` override does not exist
+   either — every board-enabled pane on one panemux instance joins the single `agent_board.team`.)
 2. Every poll tick, for every board-enabled pane, `bootstrapWatcher.checkPane` calls that pane's
    `session.AgentTypeDetector.DetectInteractiveAgentType()` — implemented by all four session types
    (`LocalSession`, `TmuxLocalSession`, `SSHSession`, `TmuxSSHSession`) — which walks the pane's
@@ -832,10 +833,17 @@ board-enabled pane) must be true before the goroutine even starts.
    pane whose live process doesn't match any of the six is simply never bootstrapped — its shell
    session is otherwise completely unaffected.
 3. **Debounce.** A pane is only eligible to bootstrap once the *same* `session.Session` object has
-   reported the same "known agent type detected" result on two consecutive poll ticks
-   (`bootstrapWatcher.pending`). This is a partial mitigation, not a complete one, against writing
-   into a pane the instant its shell is still settling right after the agent process starts — stated
-   as an honest tradeoff, not a claim of full safety; see [Known limitations](#known-limitations).
+   been seen with a known agent type detected on two consecutive poll ticks (`bootstrapWatcher.pending`,
+   compared by session identity only — the detected type itself is not compared tick-to-tick, so a
+   pane whose agent type genuinely changes between two ticks still debounces on session identity
+   alone and simply uses whichever type the second tick reported). This is a partial mitigation, not
+   a complete one, against writing into a pane the instant its shell is still settling right after
+   the agent process starts — stated as an honest tradeoff, not a claim of full safety; see [Known
+   limitations](#known-limitations). Pane IDs and the configured team are also checked against
+   `board.ValidAgmsgIdentifier` (the same identifier alphabet `RemoteAgmsgClient` already enforces —
+   see [Integration with agmsg](#integration-with-agmsg)) before anything else: a pane ID or team
+   outside that alphabet is skipped with one warning, since it could never be joined or addressed
+   correctly even if the PTY write itself succeeded.
 4. Once debounced, `bootstrapWatcher.agmsgPresent` runs the agmsg detection check from [Integration
    with agmsg](#integration-with-agmsg) (`board.LocalAgmsgPresent`/`board.RemoteAgmsgPresent`,
    `internal/board/agmsg_presence.go`) against a startup-time snapshot of each host's resolved
@@ -843,10 +851,19 @@ board-enabled pane) must be true before the goroutine even starts.
    helper `newAgmsgClientForHost` uses for the relay's own client map — resolved independently for
    bootstrap, not shared, so that coupling bootstrap eligibility to relay client construction can't
    reintroduce the kind of permanent-failure regression `dynamicBoardExecutor` exists to avoid; see
-   [Known limitations](#known-limitations) for the accepted cost of that duplication). If agmsg is
-   not found on that host, or presence can't be determined at all (an unreachable host, a transport
-   error), panemux logs one warning naming the pane and retries on every subsequent tick — no PTY
-   write happens, and the pane's shell session is otherwise unaffected.
+   [Known limitations](#known-limitations) for the accepted cost of that duplication). For a remote
+   host, the probe itself goes through a `dynamicBoardExecutor` (the same fail-over-across-candidates
+   wrapper the relay's own client construction uses), not a single fixed candidate session — a
+   board-enabled pane's session can still be registered (and report a normal `State()`) after its
+   underlying SSH connection has actually died, so trusting only one candidate could otherwise treat
+   a perfectly reachable host as permanently unreachable for bootstrap purposes. The probe itself is
+   bounded by a bootstrap-specific timeout shorter than the relay's own startup-probe timeout, since
+   `pollOnce` checks every board-enabled pane sequentially within one poll interval and an
+   unreachable host's probe must not be allowed to stall every other pane queued behind it in the
+   same tick. If agmsg is not found on that host, or presence can't be determined at all (an
+   unreachable host, a transport error), panemux logs one warning naming the pane and retries on
+   every subsequent tick — no PTY write happens, and the pane's shell session is otherwise
+   unaffected.
 5. panemux writes a one-time instruction into the pane's PTY (the same `Session.Write` path already
    used for all terminal input; `buildBootstrapInstruction` in `bootstrap.go`) telling the agent to:
    1. Join agmsg's team by running `join.sh <team> <pane-id> <agmsg-type> "$(pwd)" --force` directly
@@ -895,16 +912,29 @@ board-enabled pane) must be true before the goroutine even starts.
    working exactly as it did before panemux was involved). A write is only treated as successful if
    `Session.Write` returns the full payload length with no error — this is the first place in this
    codebase where panemux writes synthesized input into a pane's PTY rather than relaying real user
-   keystrokes, so a short write is treated the same as a failed one (retried next tick) rather than
-   silently accepted.
+   keystrokes, so a short or failed write is never silently accepted as success. The two failure
+   shapes are handled differently, deliberately: a **short** write (`n > 0`) has already put part of
+   the instruction into the pane, so retrying would type the full instruction again on top of that
+   half-written line, compounding the corruption rather than fixing it — panemux gives up on that
+   pane immediately, with one warning, rather than retry. A **clean** failure (`n == 0`, nothing
+   written yet) is safe to retry, so panemux retries up to `maxBootstrapWriteAttempts` (3) times
+   before giving up the same way. Either way, "given up" is tracked the same way `bootstrapped` is —
+   keyed by pane ID and compared by `session.Session` identity — so a pane that is later restarted
+   (a new `Session` object) is eligible again.
 6. On a successful write, the pane is marked bootstrapped (`bootstrapWatcher.bootstrapped`, keyed by
    pane ID and compared by `session.Session` identity, not by process) and the full set of
    bootstrapped pane IDs is persisted to `~/.config/panemux/board-bootstrap-state.json`
    (`internal/board/bootstrap_store.go`, same atomic-write/`0600` discipline as the relay's cursor
    file). On the very first poll tick after a panemux restart, this persisted set is used once to
-   seed `bootstrapped` with each persisted pane ID's *currently live* session — purely so that an
-   already-onboarded, still-running agent is never re-bootstrapped just because panemux itself
-   restarted — and is never consulted again after that; from then on only session-object identity
+   seed `bootstrapped` with each persisted pane ID's *currently live* session — but **only** for a
+   `TypeTmux`/`TypeSSHTmux` pane, whose underlying tmux session (and whatever process is running
+   inside it) is independent of panemux and can genuinely still be running after a panemux restart. A
+   `TypeLocal`/`TypeSSH` pane's session is recreated from scratch on every panemux startup
+   (`session.CreateFromConfig` always spawns a brand-new shell for these two types, with nothing
+   running in it yet) — seeding one of those from persisted state would wrongly treat "we
+   bootstrapped a previous, now-gone process" as "the current, fresh shell is already onboarded",
+   permanently blocking that pane from ever being bootstrapped again on any future run. Seeding is
+   never consulted again after this first tick either way; from then on only session-object identity
    governs re-bootstrap decisions. See [Known limitations](#known-limitations) for what this
    session-identity granularity does and does not catch.
 
@@ -1316,6 +1346,32 @@ that shaped the design.
   agent process starts in that pane. See [Bootstrap flow](#bootstrap-flow)'s consent-model paragraph
   for why this tradeoff is accepted rather than solved with typing-detection or input-pausing
   machinery.
+- **The onboarding instruction's line-feed-vs-carriage-return input encoding has not been verified
+  against a live instance of all six detectable agent types.** `buildBootstrapInstruction` writes the
+  instruction as multiple `\n`-separated lines with a single trailing `\r` (matching this codebase's
+  existing convention that only `\r` submits input to a pane, per `frontend/src/hooks/useTerminal.ts`'s
+  own `term.onData` handling), on the assumption that each agent's own interactive input handling
+  treats an embedded `\n` as a literal newline rather than as its own submit/Enter event. This has not
+  been confirmed against a real running instance of any of the six types. If that assumption is wrong
+  for a given type, the instruction would arrive fragmented into several separate prompts instead of
+  one coherent message, rather than failing loudly — an operator would see a confused agent, not an
+  error. Stated here as an explicit, unverified risk rather than fixed with an unverified
+  countermeasure (e.g. bracketed-paste wrapping), since neither this document's authors nor its tests
+  have a way to confirm such a countermeasure actually helps without live testing against all six
+  types.
+- **`agmsgDetectableAgentTypes`'s `excludeTokens` matching (`internal/session/local.go`) can produce
+  a false negative for a positional prompt argument that happens to contain an exclude token as its
+  own whitespace-separated word** — e.g. `codex "fix the exec path"` tokenizes to include a
+  standalone `exec` token the same way `codex exec ...` (the real headless-mode invocation this
+  exclusion exists to detect) does, so the interactive invocation would incorrectly be treated as
+  headless and never bootstrapped. This is a pre-existing shape inherited from the pattern
+  `isInteractiveAgentCommand` (the separate, untouched worktree-detection feature; see
+  [architecture.md](architecture.md)) already uses for its own claude/codex exclusions, not something
+  bootstrap introduced — but bootstrap makes it newly load-bearing for five additional agent types.
+  Fixing this correctly needs argv-boundary-aware tokenization (distinguishing "a word inside one
+  quoted argument" from "a separate argument"), which the current process-listing capture does not
+  provide; that is a larger, riskier change than this document's other bootstrap tradeoffs and is
+  left as a known gap rather than attempted here.
 - Self-reported status depends on the agent's cooperation each time — see the honest tradeoff
   called out in [Status self-report](#status-self-report-and-message-flow). A pane that stops
   following its bootstrap instruction (e.g. a very long uninterrupted tool-use turn) simply stops

@@ -19,6 +19,22 @@ import (
 // rather than 10s keeps that added latency from being felt twice.
 const defaultBootstrapPollInterval = 5 * time.Second
 
+// bootstrapProbeTimeout bounds an individual remote presence probe
+// checkPane makes. Deliberately shorter than boardStartupProbeTimeout
+// (10s, sized for a one-shot startup call): pollOnce runs every board pane
+// sequentially within one defaultBootstrapPollInterval-wide tick, so an
+// unreachable host's probe must not be allowed to eat most of that budget
+// and delay every other pane queued behind it in the same tick.
+const bootstrapProbeTimeout = 3 * time.Second
+
+// maxBootstrapWriteAttempts bounds how many times checkPane retries a
+// failed (but not short/partial) Session.Write before giving up on a pane
+// for the rest of that session's lifetime. A write that returns n==0 with
+// an error hasn't put anything into the pane yet, so a few retries are
+// safe; see the giveUp/writeAttempts fields for why a *short* write is
+// never retried at all.
+const maxBootstrapWriteAttempts = 3
+
 // boardModeTurn and boardModeBoth mirror internal/config's own (unexported)
 // agentBoardModeTurn/agentBoardModeBoth string values. Duplicated here
 // rather than exported from internal/config because bootstrapWatcher
@@ -53,13 +69,25 @@ type bootstrapWatcherConfig struct {
 // goroutine driving runLoop — nothing else ever reads or writes this
 // watcher's state.
 type bootstrapWatcher struct {
-	manager          *session.Manager
-	paneHosts        map[string]string
-	paneModes        map[string]string
-	resolvedPaths    map[string]string
-	persist          func(paneIDs []string)
-	bootstrapped     map[string]session.Session
-	pending          map[string]session.Session
+	manager       *session.Manager
+	paneHosts     map[string]string
+	paneModes     map[string]string
+	resolvedPaths map[string]string
+	persist       func(paneIDs []string)
+	bootstrapped  map[string]session.Session
+	pending       map[string]session.Session
+	// givenUp holds panes checkPane will never attempt to write to again for
+	// the life of the current session object: either a Write returned a
+	// nonzero-but-short n (any retry would type on top of an already
+	// half-written line — see checkPane), or a clean (n==0) failure recurred
+	// maxBootstrapWriteAttempts times in a row. Keyed and compared by
+	// session identity exactly like bootstrapped, so a pane that is later
+	// restarted (a new Session object) is eligible again.
+	givenUp map[string]session.Session
+	// writeAttempts counts consecutive clean (n==0) Write failures per pane,
+	// reset on success and on giving up. Not persisted: it only needs to
+	// survive within one session object's lifetime.
+	writeAttempts    map[string]int
 	presenceWarned   map[string]bool
 	team             string
 	persistedPaneIDs []string
@@ -78,6 +106,8 @@ func newBootstrapWatcher(cfg bootstrapWatcherConfig) *bootstrapWatcher {
 		persist:        cfg.Persist,
 		bootstrapped:   map[string]session.Session{},
 		pending:        map[string]session.Session{},
+		givenUp:        map[string]session.Session{},
+		writeAttempts:  map[string]int{},
 		presenceWarned: map[string]bool{},
 	}
 }
@@ -124,16 +154,28 @@ func (b *bootstrapWatcher) runLoop(ctx context.Context, tick <-chan time.Time) {
 // to compare future ticks against. persistedPaneIDs is never consulted
 // again after this: from here on, only bootstrapped's own session-identity
 // map governs re-bootstrap decisions. This is what makes seeding safe across
-// a panemux restart (an already-onboarded, still-running agent is seeded
-// before its pane is ever checked, so it is never re-bootstrapped) while
-// still allowing a pane that restarts within this same process's lifetime to
-// be bootstrapped again (its new Session object won't match the seeded one).
+// a panemux restart, but only for a pane whose underlying agent process can
+// actually have survived that restart: seeding only ever applies to
+// TypeTmux/TypeSSHTmux sessions, which reattach to an independently-running
+// tmux session on every panemux startup. A TypeLocal/TypeSSH pane's
+// Session.CreateFromConfig always spawns a brand-new shell with nothing
+// running in it — seeding those from persisted state would permanently
+// suppress bootstrap for that pane on every future run, mistaking "we
+// bootstrapped a previous, now-gone process" for "the current process is
+// already onboarded". A pane that restarts within this same process's
+// lifetime is unaffected either way (its new Session object won't match
+// whatever was seeded).
 func (b *bootstrapWatcher) pollOnce(ctx context.Context) {
 	if !b.seeded {
 		for _, paneID := range b.persistedPaneIDs {
-			if sess, ok := b.manager.Get(paneID); ok {
-				b.bootstrapped[paneID] = sess
+			sess, ok := b.manager.Get(paneID)
+			if !ok {
+				continue
 			}
+			if sess.Type() != session.TypeTmux && sess.Type() != session.TypeSSHTmux {
+				continue
+			}
+			b.bootstrapped[paneID] = sess
 		}
 		b.seeded = true
 	}
@@ -152,6 +194,25 @@ func (b *bootstrapWatcher) checkPane(ctx context.Context, paneID, host string) {
 		return
 	}
 	if existing, alreadyBootstrapped := b.bootstrapped[paneID]; alreadyBootstrapped && existing == sess {
+		return
+	}
+	if existing, gaveUp := b.givenUp[paneID]; gaveUp && existing == sess {
+		return
+	}
+
+	// A pane ID or team that doesn't match agmsg's own identifier alphabet
+	// (internal/board.ValidAgmsgIdentifier — the same allowlist
+	// RemoteAgmsgClient already enforces before any RunBoardCommand call)
+	// can never be bootstrapped correctly: it would either break the shell
+	// command the onboarding instruction tells the agent to run, or join
+	// agmsg under an identity the relay can never address back. Skip and
+	// warn once rather than write a broken instruction.
+	if !board.ValidAgmsgIdentifier(paneID) || !board.ValidAgmsgIdentifier(b.team) {
+		b.warnOnce(paneID, fmt.Sprintf(
+			"agent board bootstrap: pane %q or team %q is not a valid agmsg identifier, skipping bootstrap",
+			paneID, b.team,
+		))
+		delete(b.pending, paneID)
 		return
 	}
 
@@ -193,25 +254,72 @@ func (b *bootstrapWatcher) checkPane(ctx context.Context, paneID, host string) {
 	}
 
 	instruction := buildBootstrapInstruction(b.resolvedPaths[host], b.team, paneID, agmsgType, b.paneModes[paneID])
+	b.writeInstruction(paneID, sess, instruction)
+}
+
+// writeInstruction attempts the actual PTY write for paneID's onboarding
+// instruction and updates bootstrapped/givenUp/writeAttempts/pending based
+// on the outcome. Split out of checkPane to keep each function's branching
+// manageable on its own.
+//
+// A short write (n > 0) has already put part of the instruction into the
+// pane — retrying would type the full instruction again on top of that
+// half-written line, compounding the corruption rather than fixing it, so
+// checkPane gives up on that pane immediately. A clean failure (n == 0,
+// nothing written yet) is safe to retry, so it's retried up to
+// maxBootstrapWriteAttempts times before giving up the same way.
+func (b *bootstrapWatcher) writeInstruction(paneID string, sess session.Session, instruction string) {
 	payload := []byte(instruction + "\r")
 	n, err := sess.Write(payload)
-	if err != nil || n != len(payload) {
-		log.Printf(
-			"Warning: agent board bootstrap: writing onboarding instruction to pane %q: %v (wrote %d/%d bytes)",
-			paneID, err, n, len(payload),
-		)
+	if err == nil && n == len(payload) {
+		delete(b.writeAttempts, paneID)
+		b.bootstrapped[paneID] = sess
+		delete(b.pending, paneID)
+		b.persistBootstrapped()
 		return
 	}
 
-	b.bootstrapped[paneID] = sess
-	delete(b.pending, paneID)
-	b.persistBootstrapped()
+	if n > 0 {
+		log.Printf(
+			"Warning: agent board bootstrap: partial write to pane %q (%d/%d bytes); "+
+				"not retrying, since a retry would type on top of a half-written instruction",
+			paneID, n, len(payload),
+		)
+		b.givenUp[paneID] = sess
+		delete(b.pending, paneID)
+		delete(b.writeAttempts, paneID)
+		return
+	}
+
+	b.writeAttempts[paneID]++
+	if b.writeAttempts[paneID] >= maxBootstrapWriteAttempts {
+		log.Printf(
+			"Warning: agent board bootstrap: giving up writing onboarding instruction to pane %q "+
+				"after %d failed attempts: %v",
+			paneID, b.writeAttempts[paneID], err,
+		)
+		b.givenUp[paneID] = sess
+		delete(b.pending, paneID)
+		delete(b.writeAttempts, paneID)
+		return
+	}
+	log.Printf(
+		"Warning: agent board bootstrap: writing onboarding instruction to pane %q: %v (attempt %d/%d)",
+		paneID, err, b.writeAttempts[paneID], maxBootstrapWriteAttempts,
+	)
 }
 
 // agmsgPresent reports whether agmsg is present on host, and whether that
 // question could be answered at all (checked=false means "couldn't tell this
 // tick, try again next tick" — a transport error or an unreachable host, not
-// "not present").
+// "not present"). For a remote host, the probe goes through a
+// dynamicBoardExecutor rather than a single findBoardExecutors candidate
+// directly: a session can still be registered (and report a normal State())
+// after its underlying connection has actually died, so trusting only the
+// first candidate could permanently and silently treat a bootstrap-eligible
+// host as unreachable even while some other pane on it is genuinely
+// live — see dynamicBoardExecutor's own comment in board.go for the full
+// rationale, which applies identically here.
 func (b *bootstrapWatcher) agmsgPresent(ctx context.Context, paneID, host string) (present bool, checked bool) {
 	path, ok := b.resolvedPaths[host]
 	if !ok {
@@ -223,15 +331,10 @@ func (b *bootstrapWatcher) agmsgPresent(ctx context.Context, paneID, host string
 		return board.LocalAgmsgPresent(path), true
 	}
 
-	executors := findBoardExecutors(b.manager, b.paneHosts, host)
-	if len(executors) == 0 {
-		b.warnOnce(paneID, fmt.Sprintf("agent board bootstrap: no reachable session for host %q (pane %q)", host, paneID))
-		return false, false
-	}
-
-	probeCtx, cancel := context.WithTimeout(ctx, boardStartupProbeTimeout)
+	executor := &dynamicBoardExecutor{manager: b.manager, paneHosts: b.paneHosts, host: host}
+	probeCtx, cancel := context.WithTimeout(ctx, bootstrapProbeTimeout)
 	defer cancel()
-	present, err := board.RemoteAgmsgPresent(probeCtx, executors[0], path)
+	present, err := board.RemoteAgmsgPresent(probeCtx, executor, path)
 	if err != nil {
 		b.warnOnce(paneID, fmt.Sprintf(
 			"agent board bootstrap: checking agmsg presence on host %q (pane %q): %v", host, paneID, err,

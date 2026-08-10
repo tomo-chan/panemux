@@ -60,6 +60,17 @@ func validateAgmsgIdentifier(label, value string) error {
 	return nil
 }
 
+// ValidAgmsgIdentifier reports whether value is safe to use as an agmsg
+// team/from/to identifier — the same regex-allowlist RunBoardCommand calls
+// already enforce internally via validateAgmsgIdentifier. Exported so
+// callers outside internal/board (bootstrap.go) can reject a pane ID or
+// team name up front, before it is ever embedded in a command line the
+// agent itself will type and execute — see docs/agent-board.md's Bootstrap
+// flow section.
+func ValidAgmsgIdentifier(value string) bool {
+	return validAgmsgIdentifier.MatchString(value)
+}
+
 var _ AgmsgClient = (*RemoteAgmsgClient)(nil)
 
 // RemoteAgmsgClient runs agmsg's scripts on a remote host over the SSH exec
