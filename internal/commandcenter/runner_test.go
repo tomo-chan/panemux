@@ -197,6 +197,170 @@ func TestRunnerResumeFailureClearsStaleSessionID(t *testing.T) {
 	assert.Empty(t, state.SessionID, "a failed --resume must clear the stale session id, not repeat it forever")
 }
 
+// TestRunnerMalformedPersistedSessionIDFallsBackToFirstRun covers a
+// persisted session id that doesn't look like anything claude itself would
+// ever emit — in particular one shaped like a CLI flag. --resume's value is
+// optional in the claude CLI's own parser, so passing such a value straight
+// through as the argv element after "--resume" risks the same class of
+// argument-injection buildArgs's own "--" marker defends the prompt
+// against, except --resume's value sits before that marker and has no
+// marker of its own to rely on. The Runner must instead treat this the same
+// as no persisted id at all: query without --resume, and persist whatever
+// fresh session id this successful first-run query captures.
+func TestRunnerMalformedPersistedSessionIDFallsBackToFirstRun(t *testing.T) {
+	sessionPath := filepath.Join(t.TempDir(), "session.json")
+	require.NoError(t, SaveSessionFile(sessionPath, SessionState{SessionID: "--dangerously-skip-permissions"}))
+	historyPath := filepath.Join(t.TempDir(), "history.jsonl")
+
+	output := `{"type":"system","subtype":"init","session_id":"new-session-1"}` + "\n" +
+		`{"type":"result","session_id":"new-session-1","result":"done"}` + "\n"
+	var captured capturedInvocation
+	factory := func(_ context.Context, name string, args ...string) cmdRunner {
+		captured = capturedInvocation{Name: name, Args: args}
+		return &fakeCmd{stdout: io.NopCloser(strings.NewReader(output))}
+	}
+	r := NewRunner(RunnerConfig{
+		ClaudeBin:   "claude",
+		SessionPath: sessionPath,
+		HistoryPath: historyPath,
+		BuildMCPConfig: func() (string, func(), error) {
+			return "/tmp/fake-mcp-config.json", func() {}, nil
+		},
+		NewCommand: factory,
+	})
+
+	events, err := r.Query(context.Background(), "hello there")
+	require.NoError(t, err)
+	got := drain(t, events)
+
+	require.NotEmpty(t, got)
+	assert.Equal(t, EventDone, got[len(got)-1].Type)
+	assert.NotContains(t, captured.Args, "--resume",
+		"a flag-shaped persisted session id must never reach --resume's argv slot")
+
+	state, err := LoadSessionFile(sessionPath)
+	require.NoError(t, err)
+	assert.Equal(t, "new-session-1", state.SessionID,
+		"the fallback first run's own freshly captured session id must still be persisted")
+}
+
+// sleepingFakeCmd behaves like fakeCmd, but Wait() sleeps first — used to
+// force a query's own context deadline to have already passed by the time
+// Wait() returns, so ctx.Err() reliably reports context.DeadlineExceeded
+// rather than depending on scheduler timing.
+type sleepingFakeCmd struct {
+	stdout          io.ReadCloser
+	waitErr         error
+	sleepBeforeWait time.Duration
+}
+
+func (f *sleepingFakeCmd) StdoutPipe() (io.ReadCloser, error) { return f.stdout, nil }
+func (f *sleepingFakeCmd) Start() error                       { return nil }
+func (f *sleepingFakeCmd) Wait() error {
+	time.Sleep(f.sleepBeforeWait)
+	return f.waitErr
+}
+
+func TestRunnerTimeoutDoesNotClearSessionIdAndReportsTimeoutMessage(t *testing.T) {
+	sessionPath := filepath.Join(t.TempDir(), "session.json")
+	require.NoError(t, SaveSessionFile(sessionPath, SessionState{SessionID: "existing-session"}))
+	historyPath := filepath.Join(t.TempDir(), "history.jsonl")
+
+	factory := func(_ context.Context, _ string, _ ...string) cmdRunner {
+		return &sleepingFakeCmd{
+			stdout:          io.NopCloser(strings.NewReader("")),
+			waitErr:         errors.New("signal: killed"),
+			sleepBeforeWait: 50 * time.Millisecond,
+		}
+	}
+	r := NewRunner(RunnerConfig{
+		SessionPath: sessionPath,
+		HistoryPath: historyPath,
+		BuildMCPConfig: func() (string, func(), error) {
+			return "/tmp/fake.json", func() {}, nil
+		},
+		NewCommand:   factory,
+		QueryTimeout: 10 * time.Millisecond, // well under sleepBeforeWait, so the deadline has already passed
+	})
+
+	events, err := r.Query(context.Background(), "prompt")
+	require.NoError(t, err)
+	got := drain(t, events)
+
+	require.Len(t, got, 1)
+	assert.Equal(t, EventError, got[0].Type)
+	assert.Contains(t, got[0].Err, "timed out")
+
+	state, err := LoadSessionFile(sessionPath)
+	require.NoError(t, err)
+	assert.Equal(t, "existing-session", state.SessionID,
+		"a query-timeout kill must never be mistaken for a genuine --resume rejection")
+}
+
+// ctxAwareFakeCmd's Wait() blocks until ctx is canceled, then returns
+// ctx.Err() — mirroring exec.CommandContext's real behavior, where
+// canceling the context kills the process and is what unblocks a real
+// Wait() call. Used to prove a query context is actually canceled
+// immediately on a malformed line, not merely eventually via the deferred
+// cancel() that only fires after run() itself returns — which can't happen
+// until Wait() returns, an actual deadlock without the fix.
+type ctxAwareFakeCmd struct {
+	stdout io.ReadCloser
+	// Deliberately stored: this fake needs it inside Wait(), mirroring
+	// exec.Cmd's own real ctx-awareness.
+	ctx context.Context //nolint:containedctx
+}
+
+func (f *ctxAwareFakeCmd) StdoutPipe() (io.ReadCloser, error) { return f.stdout, nil }
+func (f *ctxAwareFakeCmd) Start() error                       { return nil }
+func (f *ctxAwareFakeCmd) Wait() error {
+	<-f.ctx.Done()
+	return f.ctx.Err() //nolint:wrapcheck // test fake mirrors exec.Cmd's own unwrapped ctx.Err() propagation
+}
+
+func TestRunnerMalformedStreamJSONCancelsQueryContextImmediately(t *testing.T) {
+	// A malformed line already tells the client the query failed (see
+	// TestRunnerMalformedStreamJSONEmitsErrorAndStops); the subprocess must
+	// not be left running for up to the full query timeout just to exit on
+	// its own afterward, holding the busy flag the whole time.
+	output := `not json` + "\n"
+	factory := func(ctx context.Context, _ string, _ ...string) cmdRunner {
+		return &ctxAwareFakeCmd{stdout: io.NopCloser(strings.NewReader(output)), ctx: ctx}
+	}
+	sessionPath := filepath.Join(t.TempDir(), "session.json")
+	historyPath := filepath.Join(t.TempDir(), "history.jsonl")
+	r := NewRunner(RunnerConfig{
+		SessionPath: sessionPath,
+		HistoryPath: historyPath,
+		BuildMCPConfig: func() (string, func(), error) {
+			return "/tmp/fake.json", func() {}, nil
+		},
+		NewCommand: factory,
+		// Deliberately long: if the fix doesn't call cancel() before
+		// cmd.Wait(), this test deadlocks (Wait() can't return until
+		// canceled; run() can't call its deferred cancel() until Wait()
+		// returns) rather than merely running slowly, so the 2s bound below
+		// catches a real regression, not just a slow one.
+		QueryTimeout: time.Minute,
+	})
+
+	events, err := r.Query(context.Background(), "prompt")
+	require.NoError(t, err)
+
+	done := make(chan struct{})
+	go func() {
+		drain(t, events)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("query did not complete promptly after a malformed line — " +
+			"the subprocess context was not canceled immediately")
+	}
+}
+
 func TestRunnerRejectsSecondQueryWhileBusy(t *testing.T) {
 	pr, pw := io.Pipe()
 	factory := func(_ context.Context, _ string, _ ...string) cmdRunner {

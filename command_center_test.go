@@ -64,6 +64,23 @@ func TestCommandCenterBaseURL(t *testing.T) {
 			want: "http://192.168.1.50:8080",
 		},
 		{name: "IPv6 literal host is bracketed", host: "::1", want: "http://[::1]:8080"},
+		{
+			// A bare "::" cannot actually be passed to net.Listen — the real
+			// bindable wildcard form is "[::]" — so this must resolve the
+			// same way the bare-"::" case above does, not fall through to
+			// the generic bracketing branch and become double-bracketed
+			// ("http://[[::]]:8080").
+			name: "bracketed IPv6 wildcard becomes IPv6 loopback, not double-bracketed",
+			host: "[::]",
+			want: "http://[::1]:8080",
+		},
+		{
+			// A host value that already arrives bracketed must not be
+			// bracketed a second time.
+			name: "already-bracketed IPv6 literal is not double-bracketed",
+			host: "[::1]",
+			want: "http://[::1]:8080",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

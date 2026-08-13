@@ -524,6 +524,26 @@ client that stops reading without closing its TCP connection (a sleeping laptop,
 with no FIN) fails the write — and falls into the same drain-without-forwarding path described above —
 instead of blocking the server goroutine forever.
 
+**A query killed by the timeout above is not treated as a `--resume` rejection.** The client sees a
+distinct `{"type":"error","message":"claude query timed out after 5m0s"}` (or whatever
+`QueryTimeout` is configured to), and the command center's persisted session id is left untouched —
+running long says nothing about whether `claude` would still recognize that id on a fresh attempt.
+Only a genuine resume failure (the CLI's own non-zero exit when it no longer recognizes the id — e.g.
+the user cleared `~/.claude`, or the session was garbage collected) clears the persisted id, so it
+isn't retried forever; a timeout on an otherwise-healthy, still-resumable conversation never does.
+
+**A malformed `--output-format=stream-json` line cancels the subprocess immediately**, rather than
+waiting for the subprocess to exit on its own (which, for a wedged or misbehaving `claude` process,
+could otherwise hold the single-query busy flag for up to the full `QueryTimeout`). The client has
+already received the corresponding `{"type":"error",...}` frame by the time this happens.
+
+**The persisted `--resume` session id is validated before every use, not only when this Runner itself
+wrote it.** `--resume`'s value is optional in the claude CLI's own argument parser, so a value
+beginning with `-` would be parsed as a new CLI flag rather than a `--resume` value if passed through
+as-is. A persisted id that doesn't match `^[A-Za-z0-9][A-Za-z0-9._-]*$` (the shape of every id claude
+itself has ever been observed to emit) is treated exactly like no persisted id at all: the query runs
+without `--resume`, and whatever session id that fresh run captures is persisted in its place.
+
 ## WebSocket Protocol
 
 Endpoint: `GET /ws/{sessionID}`

@@ -248,6 +248,28 @@ network-reachable access, not to be handed out to it. An operator running panemu
 provision the frontend's token some other way (e.g. a reverse proxy that injects it); that mechanism
 does not exist yet and is tracked as a follow-up, not solved by this endpoint.
 
+**The RemoteAddr+Host loopback checks alone still have a gap: they trust `r.RemoteAddr` even when the
+request actually arrived through a reverse proxy**, and a proxy sitting on the loopback interface
+itself produces a genuinely loopback `RemoteAddr` for every request it forwards, no matter its real
+origin — the two checks above cannot distinguish "the browser dialed this box directly" from "a local
+proxy relayed someone else's request to this box." `GetBoardSessionToken` closes this with a third,
+`isProxiedRequest` check: any request carrying an `X-Forwarded-For`, `X-Real-IP`, or `Forwarded` header
+is rejected outright, on the theory that a direct loopback browser request never carries proxy
+metadata — only a proxy adds those headers. This is a fail-closed heuristic, not a guarantee: a proxy
+that strips or never sets any of these three headers still defeats it, and the accepted limitation
+above (no token-bootstrap path for a genuinely non-loopback `server.host`) already covers that
+residual case by design — an operator fronting panemux with such a proxy must provision the token some
+other way, the same as any other non-loopback deployment.
+
+**A `server.host` of `0.0.0.0` is explicitly treated as loopback-equivalent for the `r.Host` check.**
+`isLoopbackAuthority` accepts `"0.0.0.0"` alongside `localhost`/`127.0.0.1`/`::1`: a server bound to
+`0.0.0.0` listens on every interface including loopback, so a genuinely local browser's request often
+carries `Host: 0.0.0.0:<port>` (or the operator configured it that way) even though the connection is
+via loopback — rejecting that Host would have made the endpoint unusable for a common, otherwise-safe
+deployment shape. This does not widen what the endpoint accepts from the network: the `RemoteAddr`
+loopback check and the `isProxiedRequest` check above still gate every request the same way regardless
+of which loopback-equivalent Host string it presents.
+
 **This is a narrower fix than the broader DNS-rebinding exposure across this codebase.** Every other
 pre-existing unauthenticated `/api/*` route and `/ws/{sessionID}` (see below) still has no Host-header
 validation of its own — `checkOrigin` in `internal/ws/handler.go` allows any request with no `Origin`

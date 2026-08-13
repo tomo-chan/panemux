@@ -218,9 +218,13 @@ type boardSessionTokenResponse struct {
 // See docs/security.md's "Auth token and transport encryption" section for
 // the full rationale, including the accepted limitation this creates: a
 // dashboard served from a genuinely non-loopback `server.host` can no
-// longer bootstrap its own token through this endpoint at all, by design.
+// longer bootstrap its own token through this endpoint at all, by design —
+// and the narrower, NOT fully closed gap a same-host reverse proxy still
+// opens, which the forwarding-header check below only partially mitigates.
+// See that same security.md section for why a complete fix needs an
+// operator-configured trusted-proxy allowlist this endpoint does not have.
 func (h *Handler) GetBoardSessionToken(w http.ResponseWriter, r *http.Request) {
-	if !isLoopbackRemoteAddr(r.RemoteAddr) || !isLoopbackAuthority(r.Host) {
+	if isProxiedRequest(r) || !isLoopbackRemoteAddr(r.RemoteAddr) || !isLoopbackAuthority(r.Host) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
@@ -230,16 +234,44 @@ func (h *Handler) GetBoardSessionToken(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// isProxiedRequest reports whether r carries any of the standard
+// client-address forwarding headers (X-Forwarded-For, X-Real-IP, the RFC
+// 7239 Forwarded header). A genuine direct request from a local browser
+// never carries these — only a request that passed through a reverse proxy
+// does — so their mere presence is treated as proof the RemoteAddr/Host
+// pair below can no longer be trusted to mean "this really is the local
+// machine": a same-host reverse proxy (the exact mitigation this
+// repository's own docs recommend for exposing panemux beyond loopback)
+// makes every proxied request's RemoteAddr loopback and, under common
+// proxy defaults, its Host loopback-looking too, for a client that may be
+// anywhere on the internet. This is a partial mitigation, not a complete
+// one: a proxy configured not to set any of these headers is not caught by
+// it. See docs/security.md's "Auth token and transport encryption" section
+// for the accepted residual gap.
+func isProxiedRequest(r *http.Request) bool {
+	return r.Header.Get("X-Forwarded-For") != "" ||
+		r.Header.Get("X-Real-IP") != "" ||
+		r.Header.Get("Forwarded") != ""
+}
+
 // isLoopbackAuthority reports whether authority (a Host-header-shaped
 // "host" or "host:port" string) names a loopback address, regardless of
 // port — matching internal/server's own isLocalhostOrigin/isLoopbackHost
-// port-agnostic allowance for the Vite dev server's proxied port.
+// port-agnostic allowance for the Vite dev server's proxied port. "0.0.0.0"
+// is accepted too: a wildcard-bound server.host reached via `--open`
+// launches the browser at exactly http://0.0.0.0:<port>/, so the
+// dashboard's own same-origin request legitimately carries that literal
+// Host value — this does not weaken the DNS-rebinding defense, since an
+// attacker would need a victim to navigate to a URL whose hostname is
+// literally "0.0.0.0", which a DNS answer for an attacker-chosen domain
+// cannot produce (Host reflects the URL's original hostname, never the
+// resolved IP).
 func isLoopbackAuthority(authority string) bool {
 	host, _, err := net.SplitHostPort(authority)
 	if err != nil {
 		host = authority
 	}
-	return host == "localhost" || host == "127.0.0.1" || host == "::1"
+	return host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "0.0.0.0"
 }
 
 // isLoopbackRemoteAddr reports whether remoteAddr (an http.Request's own

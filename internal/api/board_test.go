@@ -139,6 +139,77 @@ func TestGetBoardSessionToken_LocalhostHostname_Allowed(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
+func TestGetBoardSessionToken_WildcardBindHost_Allowed(t *testing.T) {
+	// A wildcard-bound server (server.host: "0.0.0.0") reached via `--open`
+	// launches the browser at exactly http://0.0.0.0:<port>/, so the
+	// dashboard's own same-origin request carries a literal "0.0.0.0" Host
+	// header — a legitimate case, not an attacker-supplied one (an attacker
+	// would need a victim to specifically navigate to a URL naming
+	// "0.0.0.0", which DNS rebinding does not produce).
+	cfg := defaultTestConfig()
+	cfg.Server.AuthToken = "sekret"
+	h := NewHandler(cfg, session.NewManager(), board.NewBoardCache(), nil)
+	r := setupRouterWithHandler(h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/session-token", nil)
+	req.RemoteAddr = "127.0.0.1:54321"
+	req.Host = "0.0.0.0:8080"
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
+func TestGetBoardSessionToken_XForwardedForHeader_Forbidden(t *testing.T) {
+	// A same-host reverse proxy (the exact mitigation docs/security.md
+	// itself recommends for exposing panemux beyond loopback) makes every
+	// proxied request arrive with a loopback RemoteAddr and, under common
+	// proxy defaults (nginx's $proxy_host, Apache's ProxyPreserveHost Off),
+	// a loopback-looking Host too — defeating both checks above for a
+	// genuinely remote client. A forwarding header is the one signal a
+	// direct local browser request never carries, so its mere presence is
+	// treated as proof this request was proxied and must be rejected.
+	cfg := defaultTestConfig()
+	cfg.Server.AuthToken = "sekret"
+	h := NewHandler(cfg, session.NewManager(), board.NewBoardCache(), nil)
+	r := setupRouterWithHandler(h)
+
+	rec := httptest.NewRecorder()
+	req := loopbackSessionTokenRequest()
+	req.Header.Set("X-Forwarded-For", "203.0.113.7")
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+}
+
+func TestGetBoardSessionToken_XRealIPHeader_Forbidden(t *testing.T) {
+	cfg := defaultTestConfig()
+	cfg.Server.AuthToken = "sekret"
+	h := NewHandler(cfg, session.NewManager(), board.NewBoardCache(), nil)
+	r := setupRouterWithHandler(h)
+
+	rec := httptest.NewRecorder()
+	req := loopbackSessionTokenRequest()
+	req.Header.Set("X-Real-IP", "203.0.113.7")
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+}
+
+func TestGetBoardSessionToken_ForwardedHeader_Forbidden(t *testing.T) {
+	cfg := defaultTestConfig()
+	cfg.Server.AuthToken = "sekret"
+	h := NewHandler(cfg, session.NewManager(), board.NewBoardCache(), nil)
+	r := setupRouterWithHandler(h)
+
+	rec := httptest.NewRecorder()
+	req := loopbackSessionTokenRequest()
+	req.Header.Set("Forwarded", "for=203.0.113.7")
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+}
+
 func TestGetBoardStatus_EmptyCache_ReturnsEmptyObject(t *testing.T) {
 	h := setupBoardRouter(board.NewBoardCache(), nil)
 	r := setupRouterWithHandler(h)

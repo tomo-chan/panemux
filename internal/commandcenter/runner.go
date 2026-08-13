@@ -9,10 +9,24 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
 )
+
+// validSessionID matches the shape of a session id claude itself would ever
+// emit — an alphanumeric token, optionally with internal "." "_" "-"
+// separators (a UUID fits this), and critically never starting with "-".
+// --resume's value is optional in the claude CLI's own parser, so a
+// persisted session id beginning with "-" would be parsed as a new CLI flag
+// rather than a --resume value — the same class of argument-injection
+// buildArgs's own "--" end-of-options marker defends the prompt against,
+// except --resume's value sits before that marker and needs its own guard.
+// A regex-allowlist branch gating a value before it reaches exec.Command
+// argv is this repository's established pattern for exactly this problem
+// (see docs/security.md's validateShell/validTmuxSessionName/validRemotePath).
+var validSessionID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
 // ErrBusy is returned by Query when a previous query against this Runner's
 // single command-center session is still in flight. See
@@ -172,12 +186,11 @@ func (r *Runner) run(ctx context.Context, prompt string, events chan<- Event) {
 	ctx, cancel := context.WithTimeout(ctx, r.queryTimeout)
 	defer cancel()
 
-	state, err := LoadSessionFile(r.sessionPath)
+	state, firstRun, err := r.loadValidatedSessionState()
 	if err != nil {
 		events <- errorEvent("loading command center session state: %v", err)
 		return
 	}
-	firstRun := state.SessionID == ""
 
 	mcpPath, cleanup, err := r.buildMCPConfig()
 	if err != nil {
@@ -199,34 +212,94 @@ func (r *Runner) run(ctx context.Context, prompt string, events chan<- Event) {
 
 	historyEntries, capturedSessionID, scanFailed := r.streamOutput(stdout, events)
 
+	if scanFailed {
+		// The client has already been told the query failed (streamOutput
+		// sent the EventError). Cancel now, before Wait(), rather than
+		// relying on the deferred cancel() at the top of this function:
+		// that one only fires once run() itself returns, which can't
+		// happen until Wait() returns — so without this, a subprocess that
+		// doesn't exit on its own after a malformed line would hold the
+		// busy flag (and this goroutine) for up to the full query timeout
+		// instead of being killed immediately.
+		cancel()
+	}
+
+	r.finishAfterStream(ctx, cmd, finishParams{
+		firstRun:          firstRun,
+		capturedSessionID: capturedSessionID,
+		historyEntries:    historyEntries,
+		scanFailed:        scanFailed,
+	}, events)
+}
+
+// loadValidatedSessionState loads the persisted session state and, if its
+// session id doesn't match validSessionID's shape, treats that exactly like
+// no persisted id at all (see validSessionID's doc comment) rather than
+// letting an unsafe value reach buildArgs.
+func (r *Runner) loadValidatedSessionState() (state SessionState, firstRun bool, err error) {
+	state, err = LoadSessionFile(r.sessionPath)
+	if err != nil {
+		return SessionState{}, false, err
+	}
+	if state.SessionID != "" && !validSessionID.MatchString(state.SessionID) {
+		// Best-effort clear so a future query doesn't keep re-tripping this
+		// same fallback.
+		_ = SaveSessionFile(r.sessionPath, SessionState{})
+		state.SessionID = ""
+	}
+	return state, state.SessionID == "", nil
+}
+
+// finishParams bundles what finishAfterStream needs to know about the
+// streamOutput phase that already ran before cmd.Wait().
+type finishParams struct {
+	capturedSessionID string
+	historyEntries    []HistoryEntry
+	firstRun          bool
+	scanFailed        bool
+}
+
+// finishAfterStream waits for the subprocess to exit, persists any captured
+// history, and emits the query's final event. Split out of run so run stays
+// under this repository's function-length lint limit.
+func (r *Runner) finishAfterStream(ctx context.Context, cmd cmdRunner, p finishParams, events chan<- Event) {
 	waitErr := cmd.Wait()
 
-	if len(historyEntries) > 0 {
-		if err := AppendHistory(r.historyPath, historyEntries); err != nil {
+	if len(p.historyEntries) > 0 {
+		if err := AppendHistory(r.historyPath, p.historyEntries); err != nil {
 			events <- errorEvent("persisting command center history: %v", err)
 		}
 	}
 
-	if scanFailed {
+	if p.scanFailed {
 		return // an EventError for the malformed line was already sent
 	}
 	if waitErr != nil {
-		if !firstRun {
-			// A resume failure is the CLI's own signal that --resume
-			// continuity is already broken (e.g. the user cleared
-			// ~/.claude, or the session was garbage collected) — clear the
-			// persisted id so the next query starts a fresh first-run
-			// instead of retrying the same doomed id forever. Best-effort:
-			// a failure to clear it doesn't need its own separate event: the
-			// query's own error below is still the actionable one, and the
-			// next query will simply hit the same resume failure again.
+		// A query killed by this Runner's own timeout is not evidence the
+		// --resume id itself is bad — it's evidence the query took too
+		// long, which says nothing about whether claude would still
+		// recognize the id on a fresh attempt. Only a genuine resume
+		// rejection (the CLI's own signal that --resume continuity is
+		// already broken — e.g. the user cleared ~/.claude, or the session
+		// was garbage collected) should clear the persisted id; conflating
+		// the two would silently drop a perfectly good, still-resumable
+		// conversation just because one turn happened to run long.
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			events <- Event{Type: EventError, Err: fmt.Sprintf("claude query timed out after %s", r.queryTimeout)}
+			return
+		}
+		if !p.firstRun {
+			// Best-effort: a failure to clear it doesn't need its own
+			// separate event — the query's own error below is still the
+			// actionable one, and the next query will simply hit the same
+			// resume failure again.
 			_ = SaveSessionFile(r.sessionPath, SessionState{})
 		}
 		events <- errorEvent("claude exited with error: %v", waitErr)
 		return
 	}
-	if firstRun && capturedSessionID != "" {
-		if err := SaveSessionFile(r.sessionPath, SessionState{SessionID: capturedSessionID}); err != nil {
+	if p.firstRun && p.capturedSessionID != "" {
+		if err := SaveSessionFile(r.sessionPath, SessionState{SessionID: p.capturedSessionID}); err != nil {
 			events <- errorEvent("persisting command center session id: %v", err)
 			return
 		}

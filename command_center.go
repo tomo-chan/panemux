@@ -3,7 +3,9 @@ package main
 import (
 	"fmt"
 	"log"
+	"net"
 	"os"
+	"strconv"
 	"strings"
 
 	"panemux/internal/commandcenter"
@@ -65,14 +67,19 @@ func setupCommandCenter(cfg *config.Config) *commandcenter.Runner {
 // the configured host must be used as-is in that case.
 func commandCenterBaseURL(cfg *config.Config) string {
 	host := cfg.Server.Host
+	// net.Listen requires the wildcard IPv6 bind bracketed ("[::]") — a bare
+	// "::" is not itself a form it accepts — so a config value may arrive
+	// either way. Strip any pre-existing brackets before the wildcard/host
+	// checks below so both "::" and "[::]" are recognized identically, and
+	// so net.JoinHostPort (which adds its own brackets for any address
+	// containing a colon) never receives an already-bracketed host and
+	// double-brackets it.
+	host = strings.TrimPrefix(strings.TrimSuffix(host, "]"), "[")
 	switch host {
 	case "", "0.0.0.0":
 		host = "127.0.0.1"
 	case "::":
 		host = "::1"
 	}
-	if strings.Contains(host, ":") {
-		host = "[" + host + "]"
-	}
-	return fmt.Sprintf("http://%s:%d", host, cfg.Server.Port)
+	return "http://" + net.JoinHostPort(host, strconv.Itoa(cfg.Server.Port))
 }
