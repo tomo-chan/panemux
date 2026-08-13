@@ -213,6 +213,7 @@ flowchart TB
         Relay["Relay goroutine<br/>polls agmsg every few seconds"]
         Cache[("BoardCache<br/>in-memory, panemux-owned")]
         CmdCenter["Command center<br/>claude -p --resume (per query)"]
+        McpServer["panemux __board-mcp-server<br/>(claude's own MCP child process)"]
         LocalAgmsg[("Local agmsg<br/>(optional install)")]
     end
 
@@ -230,7 +231,8 @@ flowchart TB
     Server --> Relay
     Server --> CmdCenter
     Server --> Cache
-    CmdCenter -->|"REST, loopback<br/>same endpoints Browser uses"| Server
+    CmdCenter -->|"--mcp-config child process<br/>MCP tool calls, stdio JSON-RPC"| McpServer
+    McpServer -->|"REST, loopback<br/>same endpoints Browser uses"| Server
     Relay --> Cache
     Relay -->|"api.sh / send.sh --force"| LocalAgmsg
     Relay -->|"SSH exec channel<br/>api.sh / send.sh"| AgmsgA
@@ -243,6 +245,11 @@ Every host in this picture is either the one host panemux itself runs on, or a h
 ever reaches through an SSH exec channel it already holds for that pane's session — never a host
 panemux is installed on. See [Local vs remote resource
 placement](#local-vs-remote-resource-placement) for that constraint in more detail.
+
+The command center's own REST call is made by `McpServer` (`panemux __board-mcp-server`,
+`internal/boardmcp`'s `Server` over stdio JSON-RPC) on the LLM's behalf, never by `CmdCenter`
+(the `claude -p` subprocess) directly — see [Command center](#command-center)'s "Permissions"
+subsection for why an MCP tool, not a `Bash`+`curl` call, is what's allow-listed.
 
 ### Responsibility boundaries
 
@@ -259,11 +266,13 @@ flowchart TB
         BoardCache[("Status + history cache<br/>in-memory, panemux-owned")]
         Relay["Relay goroutine<br/>polls agmsg every few seconds"]
         CmdCenter["Command center<br/>claude -p --resume"]
+        McpServer["__board-mcp-server<br/>claude's own MCP child process"]
         AgmsgClient["AgmsgClient<br/>the only caller of agmsg's scripts"]
 
         AuthAPI -->|"GET /api/board/status, /messages"| BoardCache
         AuthAPI --> CmdCenter
-        CmdCenter -->|"POST /api/board/broadcast<br/>(same path a browser request takes)"| AuthAPI
+        CmdCenter -->|"MCP tool calls<br/>stdio JSON-RPC"| McpServer
+        McpServer -->|"POST /api/board/broadcast<br/>(same path a browser request takes)"| AuthAPI
         Relay -->|"writes status and history"| BoardCache
         Relay --> AgmsgClient
     end

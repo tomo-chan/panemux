@@ -63,7 +63,7 @@ Optional capability interfaces extend the base `Session` contract without breaki
 - `CWDGetter` — implemented by `LocalSession` and `SSHSession`; returns the live working directory of the running shell. `LocalSession` reads it via `lsof` (macOS) or `/proc/<pid>/cwd` (Linux). `SSHSession` runs `pwd` over a new exec channel on the existing SSH connection.
 - `SSHConnNamer` — implemented by `SSHSession`; returns the panemux connection alias used when building the `code --remote ssh-remote+<host>` command.
 
-### `internal/board` (relay, REST status/messages/broadcast, and bootstrap implemented; command center still planned)
+### `internal/board`, `internal/commandcenter`, `internal/boardmcp` (Phase 1 board core and Phase 2 command center both implemented)
 
 A package that replaces transcript-based Claude activity inference with a self-reported channel:
 panes report status (including branch/PR/cwd, gathered by the agent's own `git`/`gh` calls rather
@@ -108,19 +108,25 @@ agent process and writes a one-time onboarding instruction into that pane's PTY 
 `Session.Write` path used for real terminal input) — see [agent-board.md's Bootstrap
 flow](agent-board.md#bootstrap-flow) for the full detection/debounce/persistence algorithm.
 
-Not yet implemented: the `/ws/board-command` WS endpoint, `GET /api/board/command/history`, and the
-command center itself.
+Also implemented: the **command center** — a single headless `claude -p --resume` subprocess,
+invoked per query by `internal/commandcenter`'s `Runner` (`SessionState`/`HistoryEntry`
+persistence, `BuildMCPConfig`), that reads and writes the board exclusively through panemux's own
+authenticated REST API, never agmsg directly. It never calls agmsg's scripts itself — `internal/board`
+stays the only code in panemux that does — because the subprocess is instead pointed at a narrow,
+purpose-built MCP server, `internal/boardmcp`'s `Server`, exposing exactly `board_status`/
+`board_messages`/`board_broadcast` as MCP tools backed by an `HTTPBoardAPIClient` that calls the same
+REST endpoints the browser dashboard uses. `panemux __board-mcp-server` (`board_mcp_server.go`,
+`package main`) is the hidden subcommand the `claude -p` subprocess re-invokes as that MCP server's
+child process, per its own `--mcp-config`; the LLM itself never composes the HTTP call or a shell
+invocation. `/ws/board-command` (streaming) and `GET /api/board/command/history` are its REST/WS
+surface; `setupCommandCenter` in `command_center.go` (`package main`) wires the `Runner` into
+`server.New` when `command_center.enabled` is true and a `server.auth_token` is configured. This is a
+substantial, independently-tested part of the design's own scope (its own process lifecycle,
+permission model, and streaming API), not a minor addendum to the messaging/relay piece described
+above.
 
-The same design also specifies a **command center**: a single headless `claude -p --resume`
-subprocess, invoked per query, that reads and writes the board exclusively through panemux's own
-authenticated REST API (never agmsg directly) via a narrow, purpose-built MCP server panemux
-provides — so `internal/board` stays the only code that ever calls agmsg's scripts even though the
-command center is a second, independent consumer of the board's data. This is a substantial part of
-the design's own scope (its own process lifecycle, permission model, and streaming API), not a minor
-addendum to the messaging/relay piece described above.
-
-Full design and rationale for both pieces live in [agent-board.md](agent-board.md); do not treat
-that document's API/config surface as implemented until its status note says so.
+Full design and rationale for both pieces live in [agent-board.md](agent-board.md), whose status
+note confirms both Phase 1 (board core) and Phase 2 (command center) are implemented.
 
 ### `internal/api`
 
@@ -368,4 +374,4 @@ Architecture-level security summary:
 - All workspace panes are started at backend startup, including panes in inactive workspaces. This keeps tab switching fast and preserves terminal state, at the cost of using resources for hidden workspaces.
 - Dynamic session creation exists, but current UI behavior mainly creates new local panes; this is not yet a full remote session orchestration product.
 - The implemented `internal/board` cross-host relay (see [agent-board.md](agent-board.md)) makes panemux a persistent relay for agent-to-agent messages between hosts it cannot make talk to each other directly, closer to a TURN server than a STUN server: panemux stays in the data path for the life of the exchange rather than helping two hosts connect directly and stepping aside, and it sees each relayed message as plaintext in process memory between the two encrypted SSH hops.
-- The still-planned command center design spawns a `claude -p` subprocess per query rather than keeping one warm — simpler process lifecycle and no persistent extra process, at the cost of response latency that includes subprocess startup on every query (see [agent-board.md's Process lifecycle](agent-board.md#process-lifecycle)).
+- The command center spawns a `claude -p` subprocess per query rather than keeping one warm — simpler process lifecycle and no persistent extra process, at the cost of response latency that includes subprocess startup on every query (see [agent-board.md's Process lifecycle](agent-board.md#process-lifecycle)).

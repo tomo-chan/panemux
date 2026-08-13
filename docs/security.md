@@ -99,9 +99,10 @@ resolved to an absolute path by the `~` expansion step, itself derived from oper
 runtime request data. panemux only ever detects an existing agmsg installation — it never installs,
 updates, or otherwise manages agmsg on the operator's behalf, locally or remotely. The relay
 goroutine that drives this on a schedule (`internal/board/relay.go`), the bootstrap watcher
-(`bootstrapWatcher` in `bootstrap.go`, `package main`), and the `/api/board/*` REST surface
-(`GET /status`, `GET /messages`, `POST /broadcast`) are implemented — see
-[agent-board.md](agent-board.md)'s status note. The command center is not yet implemented.
+(`bootstrapWatcher` in `bootstrap.go`, `package main`), the `/api/board/*` REST surface
+(`GET /status`, `GET /messages`, `POST /broadcast`), and the command center (`internal/commandcenter`,
+`internal/boardmcp` — see "Command center subprocess execution" below) are all implemented — see
+[agent-board.md](agent-board.md)'s status note.
 
 **The bootstrap watcher's PTY write is not a command-execution sink and is out of scope for this
 document's `exec.Command`-focused rules above.** `bootstrapWatcher` writes a synthesized onboarding
