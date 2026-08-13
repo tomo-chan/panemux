@@ -120,7 +120,7 @@ func setupRouterWithHandler(h *Handler) *chi.Mux {
 
 func defaultTestConfig() *config.Config {
 	return &config.Config{
-		Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1"},
+		Server: config.ServerConfig{Port: 8080, Host: loopbackIPv4},
 		Layout: config.LayoutNode{
 			Direction: "horizontal",
 			Children: []config.LayoutChild{
@@ -132,7 +132,7 @@ func defaultTestConfig() *config.Config {
 
 func workspaceTestConfig() *config.Config {
 	return &config.Config{
-		Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1"},
+		Server: config.ServerConfig{Port: 8080, Host: loopbackIPv4},
 		Workspaces: config.WorkspacesConfig{
 			Active:           "one",
 			TabPosition:      "top",
@@ -864,7 +864,7 @@ func TestPostSession_DuplicateID_409(t *testing.T) {
 
 func TestRestartSession_Found_200(t *testing.T) {
 	cfg := &config.Config{
-		Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1"},
+		Server: config.ServerConfig{Port: 8080, Host: loopbackIPv4},
 		Layout: config.LayoutNode{
 			Direction: "horizontal",
 			Children: []config.LayoutChild{
@@ -893,7 +893,7 @@ func TestRestartSession_Found_200(t *testing.T) {
 
 func TestRestartSession_ClearsPreferredCWD(t *testing.T) {
 	cfg := &config.Config{
-		Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1"},
+		Server: config.ServerConfig{Port: 8080, Host: loopbackIPv4},
 		Layout: config.LayoutNode{
 			Direction: "horizontal",
 			Children: []config.LayoutChild{
@@ -926,7 +926,7 @@ func TestRestartSession_ClearsPreferredCWD(t *testing.T) {
 
 func TestRestartSession_ClearsGitInfoCache(t *testing.T) {
 	cfg := &config.Config{
-		Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1"},
+		Server: config.ServerConfig{Port: 8080, Host: loopbackIPv4},
 		Layout: config.LayoutNode{
 			Direction: "horizontal",
 			Children: []config.LayoutChild{
@@ -966,7 +966,7 @@ func TestRestartSession_NotFound_404(t *testing.T) {
 
 func TestRestartSession_CreateFails_OldSessionStaysRegistered(t *testing.T) {
 	cfg := &config.Config{
-		Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1"},
+		Server: config.ServerConfig{Port: 8080, Host: loopbackIPv4},
 		Layout: config.LayoutNode{
 			Direction: "horizontal",
 			Children: []config.LayoutChild{
@@ -998,7 +998,7 @@ func TestRestartSession_CreateFails_OldSessionStaysRegistered(t *testing.T) {
 
 func TestRestartSession_CreateFails_PreservesPreferredCWD(t *testing.T) {
 	cfg := &config.Config{
-		Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1"},
+		Server: config.ServerConfig{Port: 8080, Host: loopbackIPv4},
 		Layout: config.LayoutNode{
 			Direction: "horizontal",
 			Children: []config.LayoutChild{
@@ -1031,7 +1031,7 @@ func TestRestartSession_CreateFails_PreservesPreferredCWD(t *testing.T) {
 
 func TestRestartSession_CreateFails_500Body(t *testing.T) {
 	cfg := &config.Config{
-		Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1"},
+		Server: config.ServerConfig{Port: 8080, Host: loopbackIPv4},
 		Layout: config.LayoutNode{
 			Direction: "horizontal",
 			Children: []config.LayoutChild{
@@ -1058,7 +1058,7 @@ func TestRestartSession_CreateFails_500Body(t *testing.T) {
 
 func TestRestartSession_CreateFails_NoPanicWhenNoPriorSession(t *testing.T) {
 	cfg := &config.Config{
-		Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1"},
+		Server: config.ServerConfig{Port: 8080, Host: loopbackIPv4},
 		Layout: config.LayoutNode{
 			Direction: "horizontal",
 			Children: []config.LayoutChild{
@@ -1094,7 +1094,7 @@ func TestRestartSession_CreateFails_NoPanicWhenNoPriorSession(t *testing.T) {
 // concurrent call instead.
 func TestRestartSession_ConcurrentRequests_SecondReturns409(t *testing.T) {
 	cfg := &config.Config{
-		Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1"},
+		Server: config.ServerConfig{Port: 8080, Host: loopbackIPv4},
 		Layout: config.LayoutNode{
 			Direction: "horizontal",
 			Children: []config.LayoutChild{
@@ -1153,7 +1153,7 @@ func TestRestartSession_ConcurrentRequests_SecondReturns409(t *testing.T) {
 // so it never permanently locks a pane out of future restarts.
 func TestRestartSession_GuardReleasedAfterCompletion(t *testing.T) {
 	cfg := &config.Config{
-		Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1"},
+		Server: config.ServerConfig{Port: 8080, Host: loopbackIPv4},
 		Layout: config.LayoutNode{
 			Direction: "horizontal",
 			Children: []config.LayoutChild{

@@ -67,7 +67,7 @@ func (c *HTTPBoardAPIClient) Messages(ctx context.Context, since int64) (json.Ra
 
 // Broadcast calls POST /api/board/broadcast with {"to": to, "body": body}.
 func (c *HTTPBoardAPIClient) Broadcast(ctx context.Context, to []string, body string) (json.RawMessage, error) {
-	reqBody, err := json.Marshal(map[string]any{"to": to, "body": body})
+	reqBody, err := json.Marshal(map[string]any{"to": to, broadcastBodyField: body})
 	if err != nil {
 		return nil, fmt.Errorf("encoding broadcast request: %w", err)
 	}

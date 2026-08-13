@@ -24,6 +24,11 @@ const (
 	toolBoardBroadcast = "board_broadcast"
 )
 
+// broadcastBodyField is the board_broadcast tool's "body" argument/schema
+// field name — shared between this file's tool schema, callBroadcast's
+// argument struct, and client.go's outgoing request body.
+const broadcastBodyField = "body"
+
 const (
 	jsonrpcParseError     = -32700
 	jsonrpcMethodNotFound = -32601
@@ -175,41 +180,59 @@ type toolsListResult struct {
 	Tools []toolDef `json:"tools"`
 }
 
+// jsonSchemaFieldType is the JSON Schema "type" keyword, shared by every
+// helper below so it's a single literal rather than one per call site.
+const jsonSchemaFieldType = "type"
+
+// objectSchema builds a JSON Schema "object" InputSchema, optionally
+// requiring the given property names. These helpers exist so the hand-built
+// schemas below don't each repeat JSON Schema keyword string literals
+// ("type", "properties", "description", ...) at every call site.
+func objectSchema(properties map[string]any, required ...string) map[string]any {
+	schema := map[string]any{jsonSchemaFieldType: "object", "properties": properties}
+	if len(required) > 0 {
+		schema["required"] = required
+	}
+	return schema
+}
+
+// typedProperty builds a JSON Schema property of the given primitive kind
+// ("integer", "string", ...) with a human-readable description.
+func typedProperty(kind, description string) map[string]any {
+	return map[string]any{jsonSchemaFieldType: kind, "description": description}
+}
+
+// arrayProperty builds a JSON Schema "array" property whose items are all
+// of itemKind, with a human-readable description.
+func arrayProperty(itemKind, description string) map[string]any {
+	return map[string]any{
+		jsonSchemaFieldType: "array",
+		"items":             map[string]any{jsonSchemaFieldType: itemKind},
+		"description":       description,
+	}
+}
+
 func (s *Server) handleToolsList() toolsListResult {
 	return toolsListResult{Tools: []toolDef{
 		{
 			Name:        toolBoardStatus,
 			Description: "Get the current self-reported status of every board-enabled pane " + statusToolFieldsHint,
-			InputSchema: map[string]any{"type": "object", "properties": map[string]any{}},
+			InputSchema: objectSchema(map[string]any{}),
 		},
 		{
 			Name:        toolBoardMessages,
 			Description: "Get recent board message history. Optional 'since' returns only newer messages.",
-			InputSchema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"since": map[string]any{
-						"type":        "integer",
-						"description": "Only return messages newer than this sequence number",
-					},
-				},
-			},
+			InputSchema: objectSchema(map[string]any{
+				"since": typedProperty("integer", "Only return messages newer than this sequence number"),
+			}),
 		},
 		{
 			Name:        toolBoardBroadcast,
 			Description: "Send a message to one or more board-enabled panes.",
-			InputSchema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"to": map[string]any{
-						"type":        "array",
-						"items":       map[string]any{"type": "string"},
-						"description": "Pane IDs to send to",
-					},
-					"body": map[string]any{"type": "string", "description": "Message text"},
-				},
-				"required": []string{"to", "body"},
-			},
+			InputSchema: objectSchema(map[string]any{
+				"to":               arrayProperty("string", "Pane IDs to send to"),
+				broadcastBodyField: typedProperty("string", "Message text"),
+			}, "to", broadcastBodyField),
 		},
 	}}
 }

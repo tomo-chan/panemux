@@ -29,6 +29,15 @@ var boardCommandUpgrader = websocket.Upgrader{
 // Runner's single-query busy flag forever.
 const boardCommandWriteTimeout = 10 * time.Second
 
+// boardCommandFrame.Type wire values — see docs/agent-board.md's "API and
+// streaming" section.
+const (
+	boardCommandFrameTypeLine  = "line"
+	boardCommandFrameTypeError = "error"
+	boardCommandFrameTypeDone  = "done"
+	boardCommandFrameTypeBusy  = "busy"
+)
+
 // boardCommandConn is the subset of *websocket.Conn this handler writes
 // through, so tests can substitute a fake connection without a real TCP
 // socket. *websocket.Conn satisfies this directly.
@@ -118,15 +127,16 @@ func (h *BoardCommandHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 func (h *BoardCommandHandler) handlePrompt(ctx context.Context, conn boardCommandConn, data []byte) bool {
 	var req boardCommandRequest
 	if err := json.Unmarshal(data, &req); err != nil {
-		return writeBoardCommandFrame(conn, boardCommandFrame{Type: "error", Message: "invalid request: " + err.Error()})
+		frame := boardCommandFrame{Type: boardCommandFrameTypeError, Message: "invalid request: " + err.Error()}
+		return writeBoardCommandFrame(conn, frame)
 	}
 
 	events, err := h.runner.Query(ctx, req.Prompt)
 	if err != nil {
 		if errors.Is(err, commandcenter.ErrBusy) {
-			return writeBoardCommandFrame(conn, boardCommandFrame{Type: "busy"})
+			return writeBoardCommandFrame(conn, boardCommandFrame{Type: boardCommandFrameTypeBusy})
 		}
-		return writeBoardCommandFrame(conn, boardCommandFrame{Type: "error", Message: err.Error()})
+		return writeBoardCommandFrame(conn, boardCommandFrame{Type: boardCommandFrameTypeError, Message: err.Error()})
 	}
 	return streamBoardCommandEvents(conn, events)
 }
@@ -151,13 +161,13 @@ func streamBoardCommandEvents(conn boardCommandConn, events <-chan commandcenter
 func eventToBoardCommandFrame(ev commandcenter.Event) boardCommandFrame {
 	switch ev.Type {
 	case commandcenter.EventLine:
-		return boardCommandFrame{Type: "line", Raw: ev.Raw}
+		return boardCommandFrame{Type: boardCommandFrameTypeLine, Raw: ev.Raw}
 	case commandcenter.EventError:
-		return boardCommandFrame{Type: "error", Message: ev.Err}
+		return boardCommandFrame{Type: boardCommandFrameTypeError, Message: ev.Err}
 	case commandcenter.EventDone:
-		return boardCommandFrame{Type: "done"}
+		return boardCommandFrame{Type: boardCommandFrameTypeDone}
 	default:
-		return boardCommandFrame{Type: "error", Message: "unknown event type: " + string(ev.Type)}
+		return boardCommandFrame{Type: boardCommandFrameTypeError, Message: "unknown event type: " + string(ev.Type)}
 	}
 }
 

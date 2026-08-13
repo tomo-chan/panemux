@@ -13,6 +13,10 @@ import (
 	"panemux/internal/commandcenter"
 )
 
+// loopbackIPv4 is the literal IPv4 loopback host string, as it appears in a
+// Host header or server.host config value (as opposed to a parsed net.IP).
+const loopbackIPv4 = "127.0.0.1"
+
 type boardStatusEntry struct {
 	UpdatedAt time.Time `json:"updated_at"`
 	State     string    `json:"state,omitempty"`
@@ -271,7 +275,7 @@ func isLoopbackAuthority(authority string) bool {
 	if err != nil {
 		host = authority
 	}
-	return host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "0.0.0.0"
+	return host == "localhost" || host == loopbackIPv4 || host == "::1" || host == "0.0.0.0"
 }
 
 // isLoopbackRemoteAddr reports whether remoteAddr (an http.Request's own

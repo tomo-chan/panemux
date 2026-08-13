@@ -8,7 +8,7 @@ import (
 
 func TestSetupCommandCenterDisabledReturnsNil(t *testing.T) {
 	cfg := &config.Config{
-		Server:        config.ServerConfig{Host: "127.0.0.1", Port: 8080, AuthToken: "tok"},
+		Server:        config.ServerConfig{Host: loopbackIPv4, Port: 8080, AuthToken: "tok"},
 		CommandCenter: config.CommandCenterConfig{Enabled: false},
 	}
 
@@ -21,7 +21,7 @@ func TestSetupCommandCenterDisabledReturnsNil(t *testing.T) {
 
 func TestSetupCommandCenterEnabledWithTokenReturnsRunner(t *testing.T) {
 	cfg := &config.Config{
-		Server:        config.ServerConfig{Host: "127.0.0.1", Port: 8080, AuthToken: "tok"},
+		Server:        config.ServerConfig{Host: loopbackIPv4, Port: 8080, AuthToken: "tok"},
 		CommandCenter: config.CommandCenterConfig{Enabled: true},
 	}
 
@@ -34,7 +34,7 @@ func TestSetupCommandCenterEnabledWithTokenReturnsRunner(t *testing.T) {
 
 func TestSetupCommandCenterEnabledWithoutTokenReturnsNil(t *testing.T) {
 	cfg := &config.Config{
-		Server:        config.ServerConfig{Host: "127.0.0.1", Port: 8080, AuthToken: ""},
+		Server:        config.ServerConfig{Host: loopbackIPv4, Port: 8080, AuthToken: ""},
 		CommandCenter: config.CommandCenterConfig{Enabled: true},
 	}
 
@@ -51,7 +51,7 @@ func TestCommandCenterBaseURL(t *testing.T) {
 		host string
 		want string
 	}{
-		{name: "loopback host used as-is", host: "127.0.0.1", want: "http://127.0.0.1:8080"},
+		{name: "loopback host used as-is", host: loopbackIPv4, want: "http://" + loopbackIPv4 + ":8080"},
 		{name: "empty wildcard becomes loopback", host: "", want: "http://127.0.0.1:8080"},
 		{name: "0.0.0.0 wildcard becomes loopback", host: "0.0.0.0", want: "http://127.0.0.1:8080"},
 		{name: "IPv6 wildcard becomes IPv6 loopback", host: "::", want: "http://[::1]:8080"},

@@ -122,9 +122,9 @@ func TestBoardCommandWS_CorrectToken_StreamsLineAndDoneEvents(t *testing.T) {
 	require.NoError(t, conn.ReadJSON(&f1))
 	require.NoError(t, conn.ReadJSON(&f2))
 
-	assert.Equal(t, "line", f1.Type)
+	assert.Equal(t, boardCommandFrameTypeLine, f1.Type)
 	assert.JSONEq(t, `{"type":"result"}`, string(f1.Raw))
-	assert.Equal(t, "done", f2.Type)
+	assert.Equal(t, boardCommandFrameTypeDone, f2.Type)
 }
 
 func TestBoardCommandWS_Busy_SendsBusyFrame(t *testing.T) {
@@ -142,7 +142,7 @@ func TestBoardCommandWS_Busy_SendsBusyFrame(t *testing.T) {
 
 	var frame boardCommandFrame
 	require.NoError(t, conn.ReadJSON(&frame))
-	assert.Equal(t, "busy", frame.Type)
+	assert.Equal(t, boardCommandFrameTypeBusy, frame.Type)
 }
 
 func TestBoardCommandWS_RunnerError_SendsErrorFrame(t *testing.T) {
@@ -160,7 +160,7 @@ func TestBoardCommandWS_RunnerError_SendsErrorFrame(t *testing.T) {
 
 	var frame boardCommandFrame
 	require.NoError(t, conn.ReadJSON(&frame))
-	assert.Equal(t, "error", frame.Type)
+	assert.Equal(t, boardCommandFrameTypeError, frame.Type)
 	assert.Contains(t, frame.Message, "mcp config build failed")
 }
 
@@ -180,7 +180,7 @@ func TestBoardCommandWS_QueryEventError_ForwardedAsErrorFrame(t *testing.T) {
 
 	var frame boardCommandFrame
 	require.NoError(t, conn.ReadJSON(&frame))
-	assert.Equal(t, "error", frame.Type)
+	assert.Equal(t, boardCommandFrameTypeError, frame.Type)
 	assert.Contains(t, frame.Message, "exit status 1")
 }
 
@@ -196,7 +196,7 @@ func TestBoardCommandWS_InvalidJSONRequest_SendsErrorFrame(t *testing.T) {
 
 	var frame boardCommandFrame
 	require.NoError(t, conn.ReadJSON(&frame))
-	assert.Equal(t, "error", frame.Type)
+	assert.Equal(t, boardCommandFrameTypeError, frame.Type)
 }
 
 func TestBoardCommandWS_MultiplePromptsSequentially(t *testing.T) {
@@ -215,12 +215,12 @@ func TestBoardCommandWS_MultiplePromptsSequentially(t *testing.T) {
 	require.NoError(t, conn.WriteJSON(boardCommandRequest{Prompt: "first"}))
 	var f1 boardCommandFrame
 	require.NoError(t, conn.ReadJSON(&f1))
-	assert.Equal(t, "done", f1.Type)
+	assert.Equal(t, boardCommandFrameTypeDone, f1.Type)
 
 	require.NoError(t, conn.WriteJSON(boardCommandRequest{Prompt: "second"}))
 	var f2 boardCommandFrame
 	require.NoError(t, conn.ReadJSON(&f2))
-	assert.Equal(t, "done", f2.Type)
+	assert.Equal(t, boardCommandFrameTypeDone, f2.Type)
 
 	assert.Equal(t, 2, calls)
 }
@@ -262,7 +262,7 @@ func TestWriteBoardCommandFrameSetsWriteDeadlineBeforeEveryWrite(t *testing.T) {
 	conn := &fakeBoardCommandConn{}
 	before := time.Now()
 
-	ok := writeBoardCommandFrame(conn, boardCommandFrame{Type: "done"})
+	ok := writeBoardCommandFrame(conn, boardCommandFrame{Type: boardCommandFrameTypeDone})
 
 	assert.True(t, ok)
 	require.Len(t, conn.deadlines, 1)
@@ -273,7 +273,7 @@ func TestWriteBoardCommandFrameSetsWriteDeadlineBeforeEveryWrite(t *testing.T) {
 func TestWriteBoardCommandFrameFailsWhenSetWriteDeadlineFails(t *testing.T) {
 	conn := &fakeBoardCommandConn{deadlineErr: errors.New("connection closed")}
 
-	ok := writeBoardCommandFrame(conn, boardCommandFrame{Type: "done"})
+	ok := writeBoardCommandFrame(conn, boardCommandFrame{Type: boardCommandFrameTypeDone})
 
 	assert.False(t, ok)
 	assert.Empty(t, conn.writtenFrames, "must not attempt to write once the deadline itself couldn't be set")

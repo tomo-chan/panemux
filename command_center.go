@@ -65,6 +65,10 @@ func setupCommandCenter(cfg *config.Config) *commandcenter.Runner {
 // "192.168.1.50") is NOT reachable via 127.0.0.1, since binding to a
 // specific interface restricts the listening socket to that one address;
 // the configured host must be used as-is in that case.
+// loopbackIPv4 is the literal IPv4 loopback host string substituted for a
+// wildcard server.host bind.
+const loopbackIPv4 = "127.0.0.1"
+
 func commandCenterBaseURL(cfg *config.Config) string {
 	host := cfg.Server.Host
 	// net.Listen requires the wildcard IPv6 bind bracketed ("[::]") — a bare
@@ -77,7 +81,7 @@ func commandCenterBaseURL(cfg *config.Config) string {
 	host = strings.TrimPrefix(strings.TrimSuffix(host, "]"), "[")
 	switch host {
 	case "", "0.0.0.0":
-		host = "127.0.0.1"
+		host = loopbackIPv4
 	case "::":
 		host = "::1"
 	}
