@@ -208,15 +208,23 @@ export const BoardCommandHistoryResponseSchema = z.object({
 
 export type BoardCommandHistoryResponse = z.infer<typeof BoardCommandHistoryResponseSchema>
 
+// Deliberately no .max() on any field, unlike most schemas in this file.
+// Every value here is free text an agent wrote about itself, and the Go side
+// (internal/board's ParseStatus) imposes no length limit of its own, so a
+// cap here could only ever reject a payload the server considers valid. Zod
+// rejects rather than truncates, and because these entries live inside a
+// z.record, one over-long summary would fail the whole response — blanking
+// every other pane's status too, on every poll, until that one pane happened
+// to report something shorter. Same reasoning as BoardMessageSchema.body.
 export const BoardStatusEntrySchema = z.object({
   updated_at: z.string(),
-  state: z.string().max(256).optional(),
-  cwd: z.string().max(4096).optional(),
-  branch: z.string().max(512).optional(),
-  repo: z.string().max(512).optional(),
-  pr_url: z.string().max(2048).optional(),
-  last_tool: z.string().max(512).optional(),
-  summary: z.string().max(2000).optional(),
+  state: z.string().optional(),
+  cwd: z.string().optional(),
+  branch: z.string().optional(),
+  repo: z.string().optional(),
+  pr_url: z.string().optional(),
+  last_tool: z.string().optional(),
+  summary: z.string().optional(),
 })
 
 export type BoardStatusEntry = z.infer<typeof BoardStatusEntrySchema>
@@ -239,12 +247,23 @@ export const BoardMessageSchema = z.object({
   // single malformed row is tolerated instead of failing the whole batch.
   body: z.string(),
   seq: z.number().int(),
+  // Computed server-side by internal/board's IsStatusRow. Re-deriving it
+  // here by parsing body in JavaScript would be a second implementation of a
+  // rule Go already owns, and the two diverge on real inputs: Go's
+  // json.Unmarshal matches field names case-insensitively and errors on a
+  // type mismatch, JSON.parse does neither.
+  is_status: z.boolean(),
 })
 
 export type BoardMessage = z.infer<typeof BoardMessageSchema>
 
 export const BoardMessagesResponseSchema = z.object({
   messages: z.array(BoardMessageSchema),
+  // Identifies the server-side cache these seq values were assigned by. The
+  // cache is in-memory only, so a panemux restart renumbers from 1 and a
+  // cursor held across it would never match anything again. See
+  // useBoardStatus for the reset this drives.
+  epoch: z.string(),
 })
 
 export type BoardMessagesResponse = z.infer<typeof BoardMessagesResponseSchema>

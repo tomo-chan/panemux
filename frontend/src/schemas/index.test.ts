@@ -770,6 +770,39 @@ describe('BoardStatusEntrySchema', () => {
     const result = BoardStatusEntrySchema.safeParse({ updated_at: '2026-08-14T12:00:00Z', state: 'something-new' })
     expect(result.success).toBe(true)
   })
+
+  // Regression test for a length cap this schema used to carry. The Go side
+  // imposes no limit on any of these fields, so a cap here could only reject
+  // payloads the server considers valid — and because entries live inside a
+  // z.record, one over-long field failed the entire response, blanking every
+  // other pane's status on every poll until that pane reported something
+  // shorter. An agent writing a couple of paragraphs of summary is ordinary,
+  // not exceptional: the bootstrap instruction gives it no length guidance.
+  it.each([
+    ['summary', 'summary'],
+    ['cwd', 'cwd'],
+    ['branch', 'branch'],
+    ['repo', 'repo'],
+    ['pr_url', 'pr_url'],
+    ['last_tool', 'last_tool'],
+    ['state', 'state'],
+  ])('accepts an arbitrarily long %s', (_name, field) => {
+    const result = BoardStatusEntrySchema.safeParse({
+      updated_at: '2026-08-14T12:00:00Z',
+      [field]: 'x'.repeat(10000),
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('keeps every other pane readable when one pane reports a very long summary', () => {
+    const result = BoardStatusResponseSchema.safeParse({
+      statuses: {
+        chatty: { updated_at: '2026-08-14T12:00:00Z', summary: 'x'.repeat(10000) },
+        quiet: { updated_at: '2026-08-14T12:00:00Z', state: 'idle' },
+      },
+    })
+    expect(result.success).toBe(true)
+  })
 })
 
 describe('BoardStatusResponseSchema', () => {
@@ -808,6 +841,7 @@ describe('BoardMessageSchema', () => {
       to: '_system',
       body: '{"kind":"board_status"}',
       seq: 7,
+      is_status: true,
     })
     expect(result.success).toBe(true)
   })
@@ -825,6 +859,7 @@ describe('BoardMessageSchema', () => {
       to: 'claude-side',
       body: 'x'.repeat(10000),
       seq: 1,
+      is_status: false,
     })
     expect(result.success).toBe(true)
   })
@@ -838,6 +873,7 @@ describe('BoardMessageSchema', () => {
       to: 'claude-side',
       body: 'hi',
       seq: 'seven',
+      is_status: false,
     })
     expect(result.success).toBe(false)
   })
@@ -850,6 +886,7 @@ describe('BoardMessageSchema', () => {
       to: 'claude-side',
       body: 'hi',
       seq: 1,
+      is_status: false,
     })
     expect(result.success).toBe(false)
   })
@@ -857,21 +894,30 @@ describe('BoardMessageSchema', () => {
 
 describe('BoardMessagesResponseSchema', () => {
   it('accepts an empty messages array', () => {
-    const result = BoardMessagesResponseSchema.safeParse({ messages: [] })
+    const result = BoardMessagesResponseSchema.safeParse({ messages: [], epoch: 'cache-1' })
     expect(result.success).toBe(true)
   })
 
   it('accepts a populated messages array', () => {
     const result = BoardMessagesResponseSchema.safeParse({
       messages: [
-        { at: '2026-08-14T12:00:00Z', host: 'devbox', team: 'panemux', from: 'a', to: 'b', body: 'hi', seq: 1 },
+        { at: '2026-08-14T12:00:00Z', host: 'devbox', team: 'panemux', from: 'a', to: 'b', body: 'hi', seq: 1, is_status: false },
       ],
+      epoch: 'cache-1',
     })
     expect(result.success).toBe(true)
   })
 
   it('rejects a non-array messages field', () => {
-    const result = BoardMessagesResponseSchema.safeParse({ messages: {} })
+    const result = BoardMessagesResponseSchema.safeParse({ messages: {}, epoch: 'cache-1' })
+    expect(result.success).toBe(false)
+  })
+
+  it('rejects a response missing epoch', () => {
+    // epoch is what lets a client notice the server-side cache restarted and
+    // renumbered its seq values; without it a stale cursor silently freezes
+    // the feed, so it is required rather than optional.
+    const result = BoardMessagesResponseSchema.safeParse({ messages: [] })
     expect(result.success).toBe(false)
   })
 })
