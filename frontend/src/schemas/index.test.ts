@@ -16,6 +16,14 @@ import {
   WorkspacesResponseSchema,
   DirectoryEntrySchema,
   DirectoryBrowserResponseSchema,
+  BoardSessionTokenResponseSchema,
+  BoardCommandFrameSchema,
+  BoardCommandHistoryEntrySchema,
+  BoardCommandHistoryResponseSchema,
+  BoardStatusEntrySchema,
+  BoardStatusResponseSchema,
+  BoardMessageSchema,
+  BoardMessagesResponseSchema,
 } from './index'
 
 describe('GitInfoSchema', () => {
@@ -615,5 +623,255 @@ describe('WSControlMessageSchema error message length limit', () => {
   it('accepts error message at the 2000 character limit', () => {
     const result = WSControlMessageSchema.safeParse({ type: 'error', message: 'x'.repeat(2000) })
     expect(result.success).toBe(true)
+  })
+})
+
+describe('BoardSessionTokenResponseSchema', () => {
+  it('accepts a full response', () => {
+    const result = BoardSessionTokenResponseSchema.safeParse({
+      token: 'sekret',
+      command_center_enabled: true,
+      agent_board_enabled: true,
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects a response missing agent_board_enabled', () => {
+    const result = BoardSessionTokenResponseSchema.safeParse({
+      token: 'sekret',
+      command_center_enabled: true,
+    })
+    expect(result.success).toBe(false)
+  })
+
+  it('rejects a response missing command_center_enabled', () => {
+    const result = BoardSessionTokenResponseSchema.safeParse({
+      token: 'sekret',
+      agent_board_enabled: true,
+    })
+    expect(result.success).toBe(false)
+  })
+
+  it('rejects a response missing token', () => {
+    const result = BoardSessionTokenResponseSchema.safeParse({
+      command_center_enabled: true,
+      agent_board_enabled: true,
+    })
+    expect(result.success).toBe(false)
+  })
+
+  it('rejects non-boolean agent_board_enabled', () => {
+    const result = BoardSessionTokenResponseSchema.safeParse({
+      token: 'sekret',
+      command_center_enabled: true,
+      agent_board_enabled: 'true',
+    })
+    expect(result.success).toBe(false)
+  })
+})
+
+describe('BoardCommandFrameSchema', () => {
+  it('accepts a line frame with arbitrary raw payload', () => {
+    const result = BoardCommandFrameSchema.safeParse({ type: 'line', raw: { type: 'result', result: 'done' } })
+    expect(result.success).toBe(true)
+  })
+
+  it('accepts an error frame', () => {
+    const result = BoardCommandFrameSchema.safeParse({ type: 'error', message: 'boom' })
+    expect(result.success).toBe(true)
+  })
+
+  it('accepts a done frame', () => {
+    const result = BoardCommandFrameSchema.safeParse({ type: 'done' })
+    expect(result.success).toBe(true)
+  })
+
+  it('accepts a busy frame', () => {
+    const result = BoardCommandFrameSchema.safeParse({ type: 'busy' })
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects an error frame missing message', () => {
+    const result = BoardCommandFrameSchema.safeParse({ type: 'error' })
+    expect(result.success).toBe(false)
+  })
+
+  it('rejects an unknown frame type', () => {
+    const result = BoardCommandFrameSchema.safeParse({ type: 'ping' })
+    expect(result.success).toBe(false)
+  })
+})
+
+describe('BoardCommandHistoryEntrySchema', () => {
+  it('accepts an entry with arbitrary raw payload', () => {
+    const result = BoardCommandHistoryEntrySchema.safeParse({
+      at: '2026-08-10T12:00:00Z',
+      raw: { type: 'result', result: 'done' },
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects an entry missing at', () => {
+    const result = BoardCommandHistoryEntrySchema.safeParse({ raw: {} })
+    expect(result.success).toBe(false)
+  })
+})
+
+describe('BoardCommandHistoryResponseSchema', () => {
+  it('accepts an empty entries array', () => {
+    const result = BoardCommandHistoryResponseSchema.safeParse({ entries: [] })
+    expect(result.success).toBe(true)
+  })
+
+  it('accepts a populated entries array', () => {
+    const result = BoardCommandHistoryResponseSchema.safeParse({
+      entries: [{ at: '2026-08-10T12:00:00Z', raw: { type: 'result' } }],
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects a non-array entries field', () => {
+    const result = BoardCommandHistoryResponseSchema.safeParse({ entries: {} })
+    expect(result.success).toBe(false)
+  })
+})
+
+describe('BoardStatusEntrySchema', () => {
+  it('accepts an entry with every field present', () => {
+    const result = BoardStatusEntrySchema.safeParse({
+      updated_at: '2026-08-14T12:00:00.123456789Z',
+      state: 'working',
+      cwd: '/workspace/user/project',
+      branch: 'feature/dashboard',
+      repo: 'panemux',
+      pr_url: 'https://github.com/example/panemux/pull/42',
+      last_tool: 'Bash',
+      summary: 'Running tests',
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('accepts an entry with every optional field omitted', () => {
+    const result = BoardStatusEntrySchema.safeParse({ updated_at: '2026-08-14T12:00:00Z' })
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects an entry missing updated_at', () => {
+    const result = BoardStatusEntrySchema.safeParse({ state: 'working' })
+    expect(result.success).toBe(false)
+  })
+
+  it('rejects a non-string state', () => {
+    const result = BoardStatusEntrySchema.safeParse({ updated_at: '2026-08-14T12:00:00Z', state: 42 })
+    expect(result.success).toBe(false)
+  })
+
+  it('accepts an unrecognized state string (agent free text, not an enum)', () => {
+    const result = BoardStatusEntrySchema.safeParse({ updated_at: '2026-08-14T12:00:00Z', state: 'something-new' })
+    expect(result.success).toBe(true)
+  })
+})
+
+describe('BoardStatusResponseSchema', () => {
+  it('accepts an empty statuses map', () => {
+    const result = BoardStatusResponseSchema.safeParse({ statuses: {} })
+    expect(result.success).toBe(true)
+  })
+
+  it('accepts a populated statuses map keyed by pane id', () => {
+    const result = BoardStatusResponseSchema.safeParse({
+      statuses: { main: { updated_at: '2026-08-14T12:00:00Z', state: 'idle' } },
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects statuses given as an array instead of a map', () => {
+    const result = BoardStatusResponseSchema.safeParse({
+      statuses: [{ updated_at: '2026-08-14T12:00:00Z' }],
+    })
+    expect(result.success).toBe(false)
+  })
+
+  it('rejects a response missing statuses', () => {
+    const result = BoardStatusResponseSchema.safeParse({})
+    expect(result.success).toBe(false)
+  })
+})
+
+describe('BoardMessageSchema', () => {
+  it('accepts a fully populated message', () => {
+    const result = BoardMessageSchema.safeParse({
+      at: '2026-08-14T12:00:00Z',
+      host: 'devbox',
+      team: 'panemux',
+      from: 'claude-main',
+      to: '_system',
+      body: '{"kind":"board_status"}',
+      seq: 7,
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('accepts an arbitrarily long body (no max, unlike other free-text fields)', () => {
+    // Deliberately no .max() here: Zod's .max() rejects rather than
+    // truncates, so a cap would let one oversized message fail parsing for
+    // the whole feed. See useBoardStatus's fetch handling for how a single
+    // bad row is expected to be tolerated instead.
+    const result = BoardMessageSchema.safeParse({
+      at: '2026-08-14T12:00:00Z',
+      host: 'devbox',
+      team: 'panemux',
+      from: 'claude-main',
+      to: 'claude-side',
+      body: 'x'.repeat(10000),
+      seq: 1,
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects a non-integer seq', () => {
+    const result = BoardMessageSchema.safeParse({
+      at: '2026-08-14T12:00:00Z',
+      host: 'devbox',
+      team: 'panemux',
+      from: 'claude-main',
+      to: 'claude-side',
+      body: 'hi',
+      seq: 'seven',
+    })
+    expect(result.success).toBe(false)
+  })
+
+  it('rejects a message missing from', () => {
+    const result = BoardMessageSchema.safeParse({
+      at: '2026-08-14T12:00:00Z',
+      host: 'devbox',
+      team: 'panemux',
+      to: 'claude-side',
+      body: 'hi',
+      seq: 1,
+    })
+    expect(result.success).toBe(false)
+  })
+})
+
+describe('BoardMessagesResponseSchema', () => {
+  it('accepts an empty messages array', () => {
+    const result = BoardMessagesResponseSchema.safeParse({ messages: [] })
+    expect(result.success).toBe(true)
+  })
+
+  it('accepts a populated messages array', () => {
+    const result = BoardMessagesResponseSchema.safeParse({
+      messages: [
+        { at: '2026-08-14T12:00:00Z', host: 'devbox', team: 'panemux', from: 'a', to: 'b', body: 'hi', seq: 1 },
+      ],
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects a non-array messages field', () => {
+    const result = BoardMessagesResponseSchema.safeParse({ messages: {} })
+    expect(result.success).toBe(false)
   })
 })

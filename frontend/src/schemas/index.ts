@@ -181,6 +181,7 @@ export type DirectoryBrowserResponse = z.infer<typeof DirectoryBrowserResponseSc
 export const BoardSessionTokenResponseSchema = z.object({
   token: z.string(),
   command_center_enabled: z.boolean(),
+  agent_board_enabled: z.boolean(),
 })
 
 export type BoardSessionTokenResponse = z.infer<typeof BoardSessionTokenResponseSchema>
@@ -206,3 +207,44 @@ export const BoardCommandHistoryResponseSchema = z.object({
 })
 
 export type BoardCommandHistoryResponse = z.infer<typeof BoardCommandHistoryResponseSchema>
+
+export const BoardStatusEntrySchema = z.object({
+  updated_at: z.string(),
+  state: z.string().max(256).optional(),
+  cwd: z.string().max(4096).optional(),
+  branch: z.string().max(512).optional(),
+  repo: z.string().max(512).optional(),
+  pr_url: z.string().max(2048).optional(),
+  last_tool: z.string().max(512).optional(),
+  summary: z.string().max(2000).optional(),
+})
+
+export type BoardStatusEntry = z.infer<typeof BoardStatusEntrySchema>
+
+export const BoardStatusResponseSchema = z.object({
+  statuses: z.record(z.string(), BoardStatusEntrySchema),
+})
+
+export type BoardStatusResponse = z.infer<typeof BoardStatusResponseSchema>
+
+export const BoardMessageSchema = z.object({
+  at: z.string(),
+  host: z.string(),
+  team: z.string(),
+  from: z.string(),
+  to: z.string(),
+  // body deliberately has no .max(): Zod's .max() rejects rather than
+  // truncates, so capping it would let a single oversized message fail
+  // parsing for the entire feed response. See useBoardStatus for how a
+  // single malformed row is tolerated instead of failing the whole batch.
+  body: z.string(),
+  seq: z.number().int(),
+})
+
+export type BoardMessage = z.infer<typeof BoardMessageSchema>
+
+export const BoardMessagesResponseSchema = z.object({
+  messages: z.array(BoardMessageSchema),
+})
+
+export type BoardMessagesResponse = z.infer<typeof BoardMessagesResponseSchema>
