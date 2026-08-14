@@ -55,11 +55,15 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, token, o
 
   useEffect(() => {
     if (!isOpen) return
+    // Capture phase: a focused xterm terminal stops keydown propagation, so
+    // a bubble-phase window listener never sees Escape at all. The palette
+    // opens over a terminal that usually still holds focus, which is exactly
+    // the state where a bubble-registered handler would silently do nothing.
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose()
     }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
+    window.addEventListener('keydown', handleKeyDown, true)
+    return () => window.removeEventListener('keydown', handleKeyDown, true)
   }, [isOpen, onClose])
 
   if (!isOpen) return null

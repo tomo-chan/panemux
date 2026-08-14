@@ -109,4 +109,17 @@ describe('CommandHistoryPanel', () => {
     expect(document.activeElement).toBe(trigger)
     document.body.removeChild(trigger)
   })
+
+  it('closes on Escape even when the focused element stops propagation before window', () => {
+    const onClose = vi.fn()
+    const swallowingTarget = document.createElement('textarea')
+    swallowingTarget.addEventListener('keydown', (event) => event.stopPropagation())
+    document.body.appendChild(swallowingTarget)
+
+    render(<CommandHistoryPanel isOpen token="tok" onClose={onClose} />)
+
+    fireEvent.keyDown(swallowingTarget, { key: 'Escape' })
+
+    expect(onClose).toHaveBeenCalled()
+  })
 })
