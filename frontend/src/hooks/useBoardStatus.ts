@@ -4,16 +4,6 @@ import { BoardMessage, BoardMessagesResponseSchema, BoardStatusEntry, BoardStatu
 const BOARD_STATUS_POLL_INTERVAL_MS = 5000
 const MAX_MESSAGES = 500
 
-// SYSTEM_ID mirrors internal/board.SystemID (Go) / config's reservedSystemID
-// — the reserved agmsg identity panemux's own relay and command center use
-// as their status-report to. Duplicated here rather than imported since the
-// frontend has no dependency on the Go package; see internal/board/board.go's
-// own comment for why the two copies are kept in sync by convention.
-const SYSTEM_ID = '_system'
-
-// STATUS_KIND mirrors internal/board's own statusKind literal.
-const STATUS_KIND = 'board_status'
-
 interface UseBoardStatusOptions {
   enabled: boolean
   token: string
@@ -30,26 +20,6 @@ function errorMessageForStatus(status: number): string {
   return `Failed to load board status (${status}).`
 }
 
-// isBoardStatusRow reports whether message is a pane's own status
-// self-report rather than an ordinary cross-pane message. These are
-// appended to agmsg history alongside real messages (see
-// internal/board/relay.go), so the dashboard's message feed must filter
-// them out itself — otherwise raw board_status JSON would show up as if it
-// were a message a user or agent actually sent.
-function isBoardStatusRow(message: BoardMessage): boolean {
-  if (message.to !== SYSTEM_ID) return false
-  try {
-    const parsed: unknown = JSON.parse(message.body)
-    return (
-      typeof parsed === 'object' &&
-      parsed !== null &&
-      (parsed as Record<string, unknown>).kind === STATUS_KIND
-    )
-  } catch {
-    return false
-  }
-}
-
 // useBoardStatus polls the Agent Board's status snapshot and incremental
 // message history for the dashboard panel. See docs/agent-board.md's
 // Architecture section: GET /api/board/status always returns a full
@@ -61,6 +31,8 @@ export function useBoardStatus({ enabled, token }: UseBoardStatusOptions): UseBo
   const [error, setError] = useState<string | null>(null)
   const [isVisible, setIsVisible] = useState(() => document.visibilityState === 'visible')
   const lastSeqRef = useRef(0)
+  const epochRef = useRef('')
+  const inFlightRef = useRef(false)
 
   useEffect(() => {
     const handleVisibilityChange = () => setIsVisible(document.visibilityState === 'visible')
@@ -93,22 +65,51 @@ export function useBoardStatus({ enabled, token }: UseBoardStatusOptions): UseBo
     }
     if (cancelledRef.current) return
 
-    try {
-      const res = await fetch(`/api/board/messages?since=${lastSeqRef.current}`, { headers })
-      if (cancelledRef.current) return
+    const fetchMessagesPage = async (since: number) => {
+      const res = await fetch(`/api/board/messages?since=${since}`, { headers })
       if (!res.ok) {
         messagesError = errorMessageForStatus(res.status)
-      } else {
-        const data = BoardMessagesResponseSchema.parse(await res.json())
-        if (!cancelledRef.current && data.messages.length > 0) {
-          for (const message of data.messages) {
-            if (message.seq > lastSeqRef.current) lastSeqRef.current = message.seq
-          }
-          const nonStatusRows = data.messages.filter((message) => !isBoardStatusRow(message))
-          if (nonStatusRows.length > 0) {
-            setMessages((prev) => [...prev, ...nonStatusRows].slice(-MAX_MESSAGES))
+        return null
+      }
+      return BoardMessagesResponseSchema.parse(await res.json())
+    }
+
+    // appendPage advances the cursor and appends only rows the feed does not
+    // already hold. Filtering on the cursor's own previous value (rather than
+    // tracking every seq ever seen) bounds this to O(1) state and is exact:
+    // seq is server-assigned and monotonic, so anything at or below the
+    // cursor is by definition a row already delivered.
+    const appendPage = (page: { messages: BoardMessage[] }) => {
+      const previousSeq = lastSeqRef.current
+      for (const message of page.messages) {
+        if (message.seq > lastSeqRef.current) lastSeqRef.current = message.seq
+      }
+      const fresh = page.messages.filter((message) => message.seq > previousSeq && !message.is_status)
+      if (fresh.length > 0) {
+        setMessages((prev) => [...prev, ...fresh].slice(-MAX_MESSAGES))
+      }
+    }
+
+    try {
+      let page = await fetchMessagesPage(lastSeqRef.current)
+      if (cancelledRef.current) return
+      if (page) {
+        // A changed epoch means the server-side cache was rebuilt (panemux
+        // restarted): the cursor we just sent counts against a numbering that
+        // no longer exists, so every future poll would come back empty and
+        // the feed would freeze without ever reporting an error. Drop what we
+        // hold and re-read from the start of the new cache.
+        if (epochRef.current !== page.epoch) {
+          const staleCursor = lastSeqRef.current
+          epochRef.current = page.epoch
+          lastSeqRef.current = 0
+          if (staleCursor > 0) {
+            setMessages([])
+            page = await fetchMessagesPage(0)
+            if (cancelledRef.current) return
           }
         }
+        if (page) appendPage(page)
       }
     } catch {
       messagesError = 'Failed to load board status.'
@@ -122,13 +123,29 @@ export function useBoardStatus({ enabled, token }: UseBoardStatusOptions): UseBo
     if (!enabled || !token || !isVisible) return
 
     const cancelledRef = { current: false }
-    void poll(cancelledRef)
+    // A poll that outlives the interval must not be joined by a second one:
+    // both would send the same since cursor, both would get the same rows
+    // back, and the feed would show every one of them twice. Skipping the
+    // tick is the right response rather than queueing it — the next tick
+    // re-reads the same cursor a few seconds later anyway.
+    const pollUnlessBusy = async () => {
+      if (inFlightRef.current) return
+      inFlightRef.current = true
+      try {
+        await poll(cancelledRef)
+      } finally {
+        inFlightRef.current = false
+      }
+    }
+
+    void pollUnlessBusy()
     const interval = setInterval(() => {
-      void poll(cancelledRef)
+      void pollUnlessBusy()
     }, BOARD_STATUS_POLL_INTERVAL_MS)
 
     return () => {
       cancelledRef.current = true
+      inFlightRef.current = false
       clearInterval(interval)
     }
   }, [enabled, token, isVisible, poll])

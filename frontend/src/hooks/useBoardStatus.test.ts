@@ -6,8 +6,26 @@ function statusResponse(statuses: Record<string, unknown> = {}) {
   return { ok: true, json: () => Promise.resolve({ statuses }) } as Response
 }
 
-function messagesResponse(messages: unknown[] = []) {
-  return { ok: true, json: () => Promise.resolve({ messages }) } as Response
+function messagesResponse(messages: unknown[] = [], epoch = 'epoch-1') {
+  return { ok: true, json: () => Promise.resolve({ messages, epoch }) } as Response
+}
+
+// message builds one row in the shape GET /api/board/messages actually
+// returns, so a test never accidentally asserts against a shape the server
+// cannot produce. is_status is server-computed (board.IsStatusRow); the hook
+// must not re-derive it.
+function message(overrides: Record<string, unknown> = {}) {
+  return {
+    at: '2026-08-14T12:00:00Z',
+    host: 'devbox',
+    team: 'panemux',
+    from: 'a',
+    to: 'b',
+    body: 'hi',
+    seq: 1,
+    is_status: false,
+    ...overrides,
+  }
 }
 
 function fetchRouter(handlers: { status?: () => Response | Promise<Response>; messages?: (since: string) => Response | Promise<Response> }) {
@@ -57,7 +75,7 @@ describe('useBoardStatus', () => {
     window.fetch = fetchRouter({
       status: () => statusResponse({ main: { updated_at: '2026-08-14T12:00:00Z', state: 'working' } }),
       messages: () => messagesResponse([
-        { at: '2026-08-14T12:00:00Z', host: 'devbox', team: 'panemux', from: 'a', to: 'b', body: 'hi', seq: 1 },
+        { at: '2026-08-14T12:00:00Z', host: 'devbox', team: 'panemux', from: 'a', to: 'b', body: 'hi', is_status: false, seq: 1 },
       ]),
     })
 
@@ -100,7 +118,7 @@ describe('useBoardStatus', () => {
       messages: (since) => {
         if (since === '0') {
           return messagesResponse([
-            { at: '2026-08-14T12:00:00Z', host: 'devbox', team: 'panemux', from: 'a', to: 'b', body: 'one', seq: 5 },
+            { at: '2026-08-14T12:00:00Z', host: 'devbox', team: 'panemux', from: 'a', to: 'b', body: 'one', is_status: false, seq: 5 },
           ])
         }
         return messagesResponse([])
@@ -125,12 +143,12 @@ describe('useBoardStatus', () => {
       messages: (since) => {
         if (since === '0') {
           return messagesResponse([
-            { at: '2026-08-14T12:00:00Z', host: 'devbox', team: 'panemux', from: 'a', to: 'b', body: 'one', seq: 1 },
+            { at: '2026-08-14T12:00:00Z', host: 'devbox', team: 'panemux', from: 'a', to: 'b', body: 'one', is_status: false, seq: 1 },
           ])
         }
         if (since === '1') {
           return messagesResponse([
-            { at: '2026-08-14T12:00:05Z', host: 'devbox', team: 'panemux', from: 'a', to: 'b', body: 'two', seq: 2 },
+            { at: '2026-08-14T12:00:05Z', host: 'devbox', team: 'panemux', from: 'a', to: 'b', body: 'two', is_status: false, seq: 2 },
           ])
         }
         return messagesResponse([])
@@ -154,10 +172,10 @@ describe('useBoardStatus', () => {
   it('caps accumulated messages at 500, dropping the oldest', async () => {
     vi.useFakeTimers()
     const firstBatch = Array.from({ length: 400 }, (_, i) => ({
-      at: '2026-08-14T12:00:00Z', host: 'devbox', team: 'panemux', from: 'a', to: 'b', body: `m${i}`, seq: i + 1,
+      at: '2026-08-14T12:00:00Z', host: 'devbox', team: 'panemux', from: 'a', to: 'b', body: `m${i}`, is_status: false, seq: i + 1,
     }))
     const secondBatch = Array.from({ length: 400 }, (_, i) => ({
-      at: '2026-08-14T12:00:05Z', host: 'devbox', team: 'panemux', from: 'a', to: 'b', body: `n${i}`, seq: 401 + i,
+      at: '2026-08-14T12:00:05Z', host: 'devbox', team: 'panemux', from: 'a', to: 'b', body: `n${i}`, is_status: false, seq: 401 + i,
     }))
     const fetchMock = fetchRouter({
       messages: (since) => {
@@ -185,9 +203,9 @@ describe('useBoardStatus', () => {
   it('excludes _system board_status rows from the message feed but keeps other _system rows', async () => {
     window.fetch = fetchRouter({
       messages: () => messagesResponse([
-        { at: '2026-08-14T12:00:00Z', host: 'devbox', team: 'panemux', from: 'main', to: '_system', body: JSON.stringify({ kind: 'board_status', state: 'working' }), seq: 1 },
-        { at: '2026-08-14T12:00:01Z', host: 'devbox', team: 'panemux', from: 'main', to: '_system', body: 'not a status report', seq: 2 },
-        { at: '2026-08-14T12:00:02Z', host: 'devbox', team: 'panemux', from: 'main', to: 'other-pane', body: 'ordinary message', seq: 3 },
+        { at: '2026-08-14T12:00:00Z', host: 'devbox', team: 'panemux', from: 'main', to: '_system', body: JSON.stringify({ kind: 'board_status', state: 'working' }), is_status: true, seq: 1 },
+        { at: '2026-08-14T12:00:01Z', host: 'devbox', team: 'panemux', from: 'main', to: '_system', body: 'not a status report', is_status: false, seq: 2 },
+        { at: '2026-08-14T12:00:02Z', host: 'devbox', team: 'panemux', from: 'main', to: 'other-pane', body: 'ordinary message', is_status: false, seq: 3 },
       ]),
     })
 
@@ -290,5 +308,120 @@ describe('useBoardStatus', () => {
 
     expect(consoleErrorSpy).not.toHaveBeenCalledWith(expect.stringContaining('act('))
     consoleErrorSpy.mockRestore()
+  })
+
+  it('resumes polling when the tab becomes visible again', async () => {
+    vi.useFakeTimers()
+    const fetchMock = fetchRouter({})
+    window.fetch = fetchMock
+
+    renderHook(() => useBoardStatus({ enabled: true, token: 'tok' }))
+    await act(async () => {})
+
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' })
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'))
+    })
+    const callsWhileHidden = fetchMock.mock.calls.length
+
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'))
+    })
+
+    // Without this assertion a hook that stopped polling forever on the first
+    // visibilitychange would pass the "stops polling while hidden" test above
+    // just as happily.
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(callsWhileHidden)
+  })
+
+  it('resets the cursor and feed when the server reports a new cache epoch', async () => {
+    vi.useFakeTimers()
+    // panemux restarts: BoardCache is in-memory only, so Seq restarts at 1
+    // and the rows the client already holds are gone. Without the epoch
+    // check the client would keep asking for ?since=9 forever and its feed
+    // would silently stop updating.
+    let epoch = 'before-restart'
+    const fetchMock = fetchRouter({
+      messages: (since) => {
+        if (epoch === 'before-restart') {
+          return since === '0'
+            ? messagesResponse([message({ body: 'old', seq: 9 })], epoch)
+            : messagesResponse([], epoch)
+        }
+        return since === '0'
+          ? messagesResponse([message({ body: 'fresh', seq: 1 })], epoch)
+          : messagesResponse([], epoch)
+      },
+    })
+    window.fetch = fetchMock
+
+    const { result } = renderHook(() => useBoardStatus({ enabled: true, token: 'tok' }))
+    await act(async () => {})
+    expect(result.current.messages.map((m) => m.body)).toEqual(['old'])
+
+    epoch = 'after-restart'
+    act(() => {
+      vi.advanceTimersByTime(5000)
+    })
+    await act(async () => {})
+
+    // The poll that discovered the new epoch re-requests from scratch, so the
+    // feed shows the restarted cache's rows rather than staying frozen.
+    expect(fetchMock).toHaveBeenCalledWith('/api/board/messages?since=9', expect.anything())
+    await act(async () => {})
+    expect(result.current.messages.map((m) => m.body)).toEqual(['fresh'])
+  })
+
+  it('does not start a second poll while one is still in flight', async () => {
+    vi.useFakeTimers()
+    let releaseMessages: ((value: Response) => void) | undefined
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.startsWith('/api/board/status')) return Promise.resolve(statusResponse())
+      return new Promise<Response>((resolve) => {
+        releaseMessages = resolve
+      })
+    })
+    window.fetch = fetchMock
+
+    const { result } = renderHook(() => useBoardStatus({ enabled: true, token: 'tok' }))
+    await act(async () => {})
+    const callsBefore = fetchMock.mock.calls.length
+
+    // The interval fires while the first poll's messages request is still
+    // outstanding. A second concurrent poll would send the same ?since=0 and
+    // append the same rows twice.
+    act(() => {
+      vi.advanceTimersByTime(15000)
+    })
+    await act(async () => {})
+    expect(fetchMock.mock.calls.length).toBe(callsBefore)
+
+    await act(async () => {
+      releaseMessages?.(messagesResponse([message({ body: 'only-once-please', seq: 1 })]))
+      await Promise.resolve()
+    })
+
+    expect(result.current.messages.map((m) => m.body)).toEqual(['only-once-please'])
+  })
+
+  it('ignores a row whose seq it already holds', async () => {
+    vi.useFakeTimers()
+    // A server that re-sends a row the client already has (the relay's
+    // delivery is at-least-once by design) must not double it in the feed.
+    const fetchMock = fetchRouter({
+      messages: () => messagesResponse([message({ body: 'dup', seq: 1 })]),
+    })
+    window.fetch = fetchMock
+
+    const { result } = renderHook(() => useBoardStatus({ enabled: true, token: 'tok' }))
+    await act(async () => {})
+    act(() => {
+      vi.advanceTimersByTime(5000)
+    })
+    await act(async () => {})
+
+    expect(result.current.messages.map((m) => m.body)).toEqual(['dup'])
   })
 })
