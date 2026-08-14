@@ -193,6 +193,28 @@ describe('BoardDashboardPanel', () => {
     expect(onClose).toHaveBeenCalled()
   })
 
+  // Regression test for the Escape handler's listener phase, not merely
+  // that it exists: a focused xterm terminal stops keydown propagation
+  // before it ever reaches a bubble-phase window listener, so a
+  // bubble-registered Escape handler silently does nothing in exactly the
+  // state Cmd/Ctrl+Shift+B leaves the user in (panel open, terminal still
+  // holding focus). Verified in a real browser by
+  // frontend/e2e/agent-board.spec.ts; this is the same assertion at the
+  // smallest unit, with a stand-in element that swallows the event the same
+  // way.
+  it('closes on Escape even when the focused element stops propagation before window', () => {
+    const onClose = vi.fn()
+    const swallowingTarget = document.createElement('textarea')
+    swallowingTarget.addEventListener('keydown', (event) => event.stopPropagation())
+    document.body.appendChild(swallowingTarget)
+
+    render(<BoardDashboardPanel isOpen token="tok" onClose={onClose} />)
+
+    fireEvent.keyDown(swallowingTarget, { key: 'Escape' })
+
+    expect(onClose).toHaveBeenCalled()
+  })
+
   it('closes when clicking the overlay backdrop', async () => {
     const onClose = vi.fn()
     render(<BoardDashboardPanel isOpen token="tok" onClose={onClose} />)
