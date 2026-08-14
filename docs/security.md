@@ -99,9 +99,10 @@ resolved to an absolute path by the `~` expansion step, itself derived from oper
 runtime request data. panemux only ever detects an existing agmsg installation — it never installs,
 updates, or otherwise manages agmsg on the operator's behalf, locally or remotely. The relay
 goroutine that drives this on a schedule (`internal/board/relay.go`), the bootstrap watcher
-(`bootstrapWatcher` in `bootstrap.go`, `package main`), and the `/api/board/*` REST surface
-(`GET /status`, `GET /messages`, `POST /broadcast`) are implemented — see
-[agent-board.md](agent-board.md)'s status note. The command center is not yet implemented.
+(`bootstrapWatcher` in `bootstrap.go`, `package main`), the `/api/board/*` REST surface
+(`GET /status`, `GET /messages`, `POST /broadcast`), and the command center (`internal/commandcenter`,
+`internal/boardmcp` — see "Command center subprocess execution" below) are all implemented — see
+[agent-board.md](agent-board.md)'s status note.
 
 **The bootstrap watcher's PTY write is not a command-execution sink and is out of scope for this
 document's `exec.Command`-focused rules above.** `bootstrapWatcher` writes a synthesized onboarding
@@ -116,6 +117,60 @@ discipline `RunBoardCommand` already applies uniformly to every argument, board-
 `session.AgentTypeDetector` returns are written only into the PTY instruction text, never into a
 `RunBoardCommand` call bootstrap itself makes; they are operator config or panemux's own fixed
 detection-table output either way, not external request data.
+
+### Command center subprocess execution
+
+`internal/commandcenter/runner.go`'s `Runner` is the one other place in this repository, besides
+`internal/session`, that calls `exec.Command`/`exec.CommandContext` on a value not fully known at
+compile time. Per this document's own [General Rules](#general-rules): the command name
+(`r.claudeBin`) is a hardcoded literal (`"claude"`) unless an operator explicitly overrides it via
+`RunnerConfig.ClaudeBin` — there is no code path that derives it from request data, environment
+variables, or anything else CodeQL would treat as tainted. The arguments after it are a mix of fixed
+literal flags (`-p`, `--output-format=stream-json`, `--verbose`), a `--resume <session-id>` pulled
+from `SessionState` (itself only ever written by `Runner` from a value `claude` itself reported in an
+earlier run — never client-supplied), a `--mcp-config <path>` pointing at a temp file `Runner` itself
+created, an `--allowedTools=<list>` value `commandcenter.AllowedTools()` computes from fixed string
+literals, and finally the user's free-text prompt as the last argument. None of this goes through a
+shell — `exec.CommandContext` passes each argument as a discrete argv element — so there is no
+shell-injection risk from the prompt regardless of its content.
+
+**Being the final positional argument does not, by itself, make the prompt safe — this document's
+own first draft of this section claimed exactly that, and the claim was wrong.** `buildArgs` in
+`internal/commandcenter/runner.go` was verified live against a real installed `claude` CLI (v2.1.226)
+to have two distinct, independently-reproduced bugs before the fix now in place:
+
+1. **Argument injection into the `claude` CLI's own parser.** A prompt beginning with `-` (e.g. a
+   user typing `--help`, or something far more consequential like a `--settings=<json>` payload
+   defining a malicious hook) was not treated as opaque prompt text — the CLI's own option parser
+   scans for flags anywhere in argv, not only before the first positional, so a `-`-prefixed prompt
+   was parsed as a flag. This was reproduced directly: passing `"--help"` as the trailing argument
+   printed the CLI's own help output instead of being sent as a prompt, and a `--settings` payload
+   defining a `SessionStart` hook reached and ran that hook. **The fix**: `buildArgs` now inserts a
+   literal `"--"` end-of-options marker immediately before the prompt, which the CLI's parser was
+   confirmed (live) to honor — everything after it is treated as a positional argument, never a flag,
+   regardless of its content.
+2. **`--allowedTools` is declared variadic** (`<tools...>`) by the CLI's own `--help` output, so
+   passing it and its value as two separate argv elements (`"--allowedTools", "a,b,c"`) let it
+   swallow the very next argv element too — which was the prompt, silently breaking every ordinary
+   query with `Input must be provided either through stdin or as a prompt argument when using
+   --print`, confirmed live. **The fix**: `buildArgs` now uses the `=` form
+   (`"--allowedTools=a,b,c"`) as a single argv element, which cannot be extended by a following one.
+
+Both fixes were verified together, live, end-to-end through the real `Runner`/WS/browser stack (not
+just the CLI in isolation) before being considered closed. `internal/commandcenter/runner_test.go`'s
+`TestRunnerBuildArgsShapeIsSafeAgainstArgumentInjection` pins the exact argv shape as a regression,
+since a fake `cmdRunner` cannot reproduce the real CLI's own argument-parsing behavior — it can only
+assert what argv panemux itself constructs, which is why this was caught by an adversarial review
+verifying claims against the real binary, not by the original test suite.
+
+The `PANEMUX_BOARD_TOKEN`/`PANEMUX_BOARD_BASE_URL` values the `claude -p` subprocess's own MCP-server
+child process reads never reach `Runner`'s own `exec.Command` argv at all — they are set in the MCP
+config file's `env` block (see "Auth token and transport encryption" below for that file's own
+handling), read by `panemux __board-mcp-server` via `os.Getenv` in `board_mcp_server.go`. This is not
+a violation of this document's "do not use `os.Getenv` values in flows that reach `exec.Command`"
+rule: `runBoardMCPServer` never calls `exec.Command` itself, it only makes outbound HTTP requests
+(`internal/boardmcp.HTTPBoardAPIClient`) — an entirely different sink with no shell/argv-reinterpretation
+risk to defend against.
 
 ### Auth token and transport encryption
 
@@ -132,14 +187,120 @@ proxy, SSH tunnel, or VPN in front of the non-loopback listener. See
 [agent-board.md](agent-board.md#security-model) for the full rationale.
 
 `internal/server`'s constant-time bearer-token middleware (`bearerAuthMiddleware`, `internal/server/auth.go`)
-is implemented, unit-tested, and wired into `registerRoutes` — but **only** onto the new
-`r.Route("/api/board", ...)` sub-route (`GET /status`, `GET /messages`, `POST /broadcast`), not onto
-any pre-existing `/api/*` route or `/ws/{sessionID}`. Widening it to those routes without a matching
-frontend change would break every existing, currently-unauthenticated request, so that remains a
-separate, larger change. `internal/server/board_routes_test.go` covers this scoping as a regression:
-missing/incorrect token on `/api/board/*` is rejected with `401`, the correct token reaches `200`,
-and pre-existing `/api/*` routes plus `/ws/{sessionID}` stay reachable with no `Authorization` header
-at all. See [agent-board.md](agent-board.md)'s status note.
+is implemented, unit-tested, and wired into `registerRoutes` — but **only** onto the
+`r.Route("/api/board", ...)` sub-route (`GET /status`, `GET /messages`, `POST /broadcast`, `GET
+/command/history`), not onto any pre-existing `/api/*` route or `/ws/{sessionID}`. Widening it to
+those routes without a matching frontend change would break every existing, currently-unauthenticated
+request, so that remains a separate, larger change. `internal/server/board_routes_test.go` covers this
+scoping as a regression: missing/incorrect token on `/api/board/*` is rejected with `401`, the correct
+token reaches `200`, and pre-existing `/api/*` routes plus `/ws/{sessionID}` stay reachable with no
+`Authorization` header at all. See [agent-board.md](agent-board.md)'s status note.
+
+**`WS /ws/board-command` cannot use the `Authorization` header at all** — browsers do not allow a
+WebSocket upgrade request to carry arbitrary headers. `internal/ws/board_command.go`'s
+`BoardCommandHandler` instead reads the token from the `Sec-WebSocket-Protocol` request header (the
+client dials with `new WebSocket(url, [token])`), validated with the same
+`subtle.ConstantTimeCompare` discipline as `bearerAuthMiddleware`, and echoes the same value back in
+the response header on success, completing the WebSocket handshake per spec. **A `?token=...` query
+parameter was deliberately not used**: unlike a header, a query parameter is written into the
+server's own access logs (`middleware.Logger` logs the full request line for every request, including
+this one) and into the browser's navigation history if the WS URL were ever opened as a normal page,
+and would be replayed in the `Referer` header of any same-origin follow-up navigation — a subprotocol
+value has none of those leak paths. This route is registered in `internal/server/server.go` only when
+a `*commandcenter.Runner` is non-nil (`command_center.enabled: true` and a token configured); when
+disabled the route is absent entirely, not present-but-rejecting, so there is nothing there for an
+unauthenticated probe to even find.
+
+**`GET /api/session-token` is the one deliberate, unauthenticated exception**, and exists specifically
+to let the browser dashboard learn the token it needs for every route above — there is no other way
+for client-side JavaScript to learn a value that may have been randomly generated on first run.
+
+**This endpoint does NOT rely on `corsMiddleware`/CORS for protection, despite an earlier revision of
+this document claiming exactly that.** That claim was wrong and was caught by an adversarial review,
+not by any test: CORS only controls whether a cross-origin *script* can read a response body — it
+never rejects the request from reaching the handler, and a non-browser client (`curl`, any process on
+the LAN) ignores CORS entirely. Since this token is the only thing gating every other
+`/api/board/*` route (see above) and `internal/config/validate.go`'s own non-loopback-requires-token
+rule explicitly permits `server.host` to be a non-loopback address as long as a token is set, a CORS-only
+guard would have handed the token to any LAN client that simply asked, in exactly the deployment shape
+the token exists to protect.
+
+`GetBoardSessionToken` (`internal/api/board.go`) instead checks two things directly against the
+request, neither of which a client fully controls the way it controls the `Origin` header CORS reads:
+
+1. **`r.RemoteAddr`'s IP must be loopback.** This is the check that actually restricts the endpoint to
+   the local machine — it rejects any client that genuinely isn't the box panemux runs on, including a
+   LAN client reaching a non-loopback `server.host`. Checked with `net.ParseIP(...).IsLoopback()`
+   against the net/http-reported socket peer address, not a header.
+2. **`r.Host` must also resolve to a loopback authority.** RemoteAddr alone is not enough: DNS
+   rebinding (a domain whose DNS answer changes to `127.0.0.1` after a browser's same-origin check
+   already passed) makes an attacker page's requests arrive with a genuinely loopback RemoteAddr — the
+   TCP connection really is local — while the Host header still carries the attacker's own domain,
+   since browsers send the navigation URL's original host, not the resolved IP. Only the Host check
+   catches that case; this was verified with a dedicated test
+   (`TestGetBoardSessionToken_DNSRebindingHost_Forbidden`) simulating exactly that header combination.
+
+**Accepted limitation, stated explicitly: a dashboard served from a genuinely non-loopback
+`server.host` can no longer bootstrap its own token through this endpoint at all**, since no real
+remote client can ever satisfy the loopback-RemoteAddr check. This is intentional, not an oversight —
+the alternative (allowing the endpoint to answer non-loopback requests) is exactly the exposure this
+whole guard exists to close, and the token's own purpose in that deployment shape is to gate
+network-reachable access, not to be handed out to it. An operator running panemux non-loopback must
+provision the frontend's token some other way (e.g. a reverse proxy that injects it); that mechanism
+does not exist yet and is tracked as a follow-up, not solved by this endpoint.
+
+**The RemoteAddr+Host loopback checks alone still have a gap: they trust `r.RemoteAddr` even when the
+request actually arrived through a reverse proxy**, and a proxy sitting on the loopback interface
+itself produces a genuinely loopback `RemoteAddr` for every request it forwards, no matter its real
+origin — the two checks above cannot distinguish "the browser dialed this box directly" from "a local
+proxy relayed someone else's request to this box." `GetBoardSessionToken` closes this with a third,
+`isProxiedRequest` check: any request carrying an `X-Forwarded-For`, `X-Real-IP`, or `Forwarded` header
+is rejected outright, on the theory that a direct loopback browser request never carries proxy
+metadata — only a proxy adds those headers. This is a fail-closed heuristic, not a guarantee: a proxy
+that strips or never sets any of these three headers still defeats it, and the accepted limitation
+above (no token-bootstrap path for a genuinely non-loopback `server.host`) already covers that
+residual case by design — an operator fronting panemux with such a proxy must provision the token some
+other way, the same as any other non-loopback deployment.
+
+**A `server.host` of `0.0.0.0` is explicitly treated as loopback-equivalent for the `r.Host` check.**
+`isLoopbackAuthority` accepts `"0.0.0.0"` alongside `localhost`/`127.0.0.1`/`::1`: a server bound to
+`0.0.0.0` listens on every interface including loopback, so a genuinely local browser's request often
+carries `Host: 0.0.0.0:<port>` (or the operator configured it that way) even though the connection is
+via loopback — rejecting that Host would have made the endpoint unusable for a common, otherwise-safe
+deployment shape. This does not widen what the endpoint accepts from the network: the `RemoteAddr`
+loopback check and the `isProxiedRequest` check above still gate every request the same way regardless
+of which loopback-equivalent Host string it presents.
+
+**This is a narrower fix than the broader DNS-rebinding exposure across this codebase.** Every other
+pre-existing unauthenticated `/api/*` route and `/ws/{sessionID}` (see below) still has no Host-header
+validation of its own — `checkOrigin` in `internal/ws/handler.go` allows any request with no `Origin`
+header at all, and permits `u.Host == r.Host`, which is exactly the tautology DNS rebinding defeats,
+since the attacker's page and the rebound request both send the same (attacker-controlled) Host. The
+session-token endpoint's guard was added specifically because it is the single highest-value target
+(it hands out the credential to everything else), not because the broader gap across other routes has
+been closed — it has not. Extending Host-header validation to every route is tracked as a separate,
+larger follow-up, out of scope for the command center feature this guard was added alongside.
+
+It is deliberately registered at `/api/session-token`, **not** `/api/board/session-token`: chi routes any
+path starting with `/api/board/` into the `bearerAuthMiddleware`-wrapped sub-router regardless of
+where else a handler for that literal path is registered — an earlier revision of this endpoint lived
+at that path and was silently caught by the very middleware it exists to bypass, discovered only by
+an end-to-end `curl` check against the real running server, not by any handler-level unit test (those
+construct their own flat test router and never exercise chi's actual mount-precedence behavior).
+`internal/server/board_routes_test.go`'s `TestServer_SessionTokenRoute_RemainsUnauthenticated` is a
+regression test against the real `server.New()`-constructed router specifically because a
+handler-level test would not have caught this class of bug.
+
+**The command center's own MCP config file is the one place this feature writes the bearer token to
+disk, deliberately temporarily.** `internal/commandcenter.BuildMCPConfig` writes a JSON file (mode
+`0600`, created via `os.CreateTemp` then explicitly `os.Chmod`'d) embedding the token as a
+`PANEMUX_BOARD_TOKEN` environment variable value for the `claude -p` subprocess's own MCP server
+child process (`panemux __board-mcp-server`) to read; the caller's `cleanup` func removes it once that
+subprocess has exited. This is a strictly smaller exposure than the existing `~/.config/panemux/token`
+file the token already lives in permanently — the temp file exists only for one query's subprocess
+lifetime and is never written to `~/.config/panemux/config.yaml` — but it is still a plaintext
+token-bearing file on disk, hence the explicit `0600` rather than relying on `os.CreateTemp`'s default
+mode.
 
 ## General Rules
 

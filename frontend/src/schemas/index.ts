@@ -177,3 +177,32 @@ export const DirectoryBrowserResponseSchema = z.object({
 })
 
 export type DirectoryBrowserResponse = z.infer<typeof DirectoryBrowserResponseSchema>
+
+export const BoardSessionTokenResponseSchema = z.object({
+  token: z.string(),
+  command_center_enabled: z.boolean(),
+})
+
+export type BoardSessionTokenResponse = z.infer<typeof BoardSessionTokenResponseSchema>
+
+export const BoardCommandFrameSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('line'), raw: z.unknown() }),
+  z.object({ type: z.literal('error'), message: z.string() }),
+  z.object({ type: z.literal('done') }),
+  z.object({ type: z.literal('busy') }),
+])
+
+export type BoardCommandFrame = z.infer<typeof BoardCommandFrameSchema>
+
+export const BoardCommandHistoryEntrySchema = z.object({
+  at: z.string(),
+  raw: z.unknown(),
+})
+
+export type BoardCommandHistoryEntry = z.infer<typeof BoardCommandHistoryEntrySchema>
+
+export const BoardCommandHistoryResponseSchema = z.object({
+  entries: z.array(BoardCommandHistoryEntrySchema),
+})
+
+export type BoardCommandHistoryResponse = z.infer<typeof BoardCommandHistoryResponseSchema>

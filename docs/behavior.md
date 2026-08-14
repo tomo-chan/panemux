@@ -332,11 +332,43 @@ Returns display preferences such as header/status-bar visibility.
 ## Agent Board REST API
 
 Full design and rationale live in [agent-board.md](agent-board.md); this section documents only the
-request/response shapes and status codes of what is actually implemented today. Unlike every route
-above, every endpoint in this section requires `Authorization: Bearer <server.auth_token>` — see
+request/response shapes and status codes of what is actually implemented today. Every `/api/board/*`
+endpoint in this section requires `Authorization: Bearer <server.auth_token>` — see
 [security.md](security.md#auth-token-and-transport-encryption). A missing or incorrect token returns
-`401` before the handler runs. `/ws/board-command` and `GET /api/board/command/history` are not
-implemented yet and are not documented here — see [agent-board.md](agent-board.md)'s status note.
+`401` before the handler runs. The one exception is `GET /api/session-token`, documented in its own
+subsection below, which is deliberately unauthenticated.
+
+### `GET /api/session-token`
+
+Returns the bearer token the browser dashboard needs to authenticate every other `/api/board/*`
+request and the `/ws/board-command` connection — there is no other way for the frontend's own
+JavaScript to learn a token that may have been randomly generated on first run (see
+`config.Config.EnsureAuthToken`, [security.md](security.md#auth-token-and-transport-encryption)) and
+is never sent to the browser any other way. **This endpoint is deliberately not behind
+`bearerAuthMiddleware`** — nothing could bootstrap the token without already knowing it otherwise.
+
+It is gated by its own, narrower check instead: the caller's `RemoteAddr` must be a loopback IP *and*
+its `Host` header must also name a loopback authority (`localhost`/`127.0.0.1`/`::1`, any port). Both
+are required — see [security.md's Auth token and transport
+encryption](security.md#auth-token-and-transport-encryption) for why RemoteAddr alone doesn't defend
+against DNS rebinding, and why relying on CORS here (an earlier revision of this document's claim) was
+wrong. A non-loopback `server.host` deployment cannot use this endpoint at all, by design.
+
+Response:
+
+```json
+{ "token": "a1b2c3...", "command_center_enabled": true }
+```
+
+- `403`: the caller failed the loopback RemoteAddr+Host check above
+- `200`: otherwise, always — there is no other failure mode for this handler
+
+Note this route lives at `/api/session-token`, not under `/api/board/`, despite belonging
+conceptually to Agent Board: chi routes any path starting with `/api/board/` into the
+`bearerAuthMiddleware`-wrapped sub-router regardless of where else a handler for that literal path is
+registered, so a route literally named `/api/board/session-token` would always require the token it
+exists to hand out. This is not a stylistic choice — an earlier revision of this endpoint lived at
+that path and was silently caught by the auth middleware it was supposed to bypass.
 
 **Bootstrap flow** (not a REST/WS endpoint — a background behavior). For every pane with
 `agent_board.enabled: true`, panemux polls every 5s for a live, agmsg-detectable coding-agent
@@ -425,6 +457,92 @@ Request body:
   `{ "error": "...", "delivered": ["pane-a"] }` — the pane IDs successfully delivered to before the
   failure — so the caller can tell which panes to avoid re-sending to on retry.
 - `200`: `{ "delivered": ["pane-a", "pane-b"] }`, the pane IDs the broadcast actually reached
+
+### `GET /api/board/command/history`
+
+Returns the command center's own captured turn-by-turn conversation history — read directly from a
+local file the WS handler (below) appends to while streaming a query's output, never re-derived from
+Claude Code's transcript after the fact. Requires the bearer token like every other route in this
+section.
+
+Response:
+
+```json
+{
+  "entries": [
+    { "at": "2026-08-10T12:00:00Z", "raw": { "type": "system", "subtype": "init", "session_id": "abc" } },
+    { "at": "2026-08-10T12:00:03Z", "raw": { "type": "result", "result": "..." } }
+  ]
+}
+```
+
+`raw` is exactly one line of the command center subprocess's own `--output-format=stream-json`
+output, unmodified. There is no pagination; the whole captured history is returned every time.
+
+- `200`: entries returned (`"entries":[]` when the command center has never run or `command_center`
+  is disabled — an empty or missing history file is not an error)
+- `500`: the history file exists but could not be read (a genuinely corrupt file, not the ordinary
+  missing-file case above)
+
+## Command Center WebSocket Protocol
+
+Endpoint: `GET /ws/board-command` — the Spotlight palette's chat connection. Full design lives in
+[agent-board.md](agent-board.md#command-center).
+
+**Authentication is different from every other route on this page.** Browsers cannot set an
+`Authorization` header on a WebSocket upgrade request, so the token instead travels as a WebSocket
+subprotocol: the client dials with `new WebSocket(url, [token])`, and the server reads it from the
+`Sec-WebSocket-Protocol` request header, comparing it to `server.auth_token` in constant time. A
+missing or incorrect value returns `401` and the upgrade never happens. This is a deliberate choice
+over a `?token=...` query parameter, which would leak the token into server access logs, browser
+history, and same-origin `Referer` headers. On success the server echoes the same value back in its
+own `Sec-WebSocket-Protocol` response header, completing the handshake per the WebSocket spec.
+
+Once connected, the client may send any number of prompts sequentially over the same connection:
+
+- client → server (text frame): `{"prompt": "..."}`
+- server → client (text frames), one of:
+  - `{"type":"line","raw":{...}}` — one raw `--output-format=stream-json` line from the command
+    center subprocess, forwarded as it arrives
+  - `{"type":"error","message":"..."}` — the query failed (non-zero exit, malformed stream-json
+    output, or a context cancellation/timeout); always the last frame for that query
+  - `{"type":"done"}` — the query finished successfully; always the last frame for that query
+  - `{"type":"busy"}` — a query was already in flight against the command center's single session
+    (see [agent-board.md's Concurrency](agent-board.md#process-lifecycle)); the new prompt was
+    rejected outright, not queued
+
+A client that disconnects mid-query does not stop the underlying subprocess or corrupt the next
+query's `--resume` continuity — the server keeps draining (but no longer forwarding) the query's
+remaining output so the subprocess is never left blocked, and the command center's own busy state is
+released normally once it finishes.
+
+Two further protections back the "never blocked forever" guarantee above, both defensive: the
+subprocess's own context carries a 5-minute default timeout (`commandcenter.RunnerConfig.QueryTimeout`),
+so a hung or abandoned `claude` invocation is force-killed rather than running indefinitely even if
+nothing else notices it; and every server→client write carries its own 10-second write deadline, so a
+client that stops reading without closing its TCP connection (a sleeping laptop, a dropped network
+with no FIN) fails the write — and falls into the same drain-without-forwarding path described above —
+instead of blocking the server goroutine forever.
+
+**A query killed by the timeout above is not treated as a `--resume` rejection.** The client sees a
+distinct `{"type":"error","message":"claude query timed out after 5m0s"}` (or whatever
+`QueryTimeout` is configured to), and the command center's persisted session id is left untouched —
+running long says nothing about whether `claude` would still recognize that id on a fresh attempt.
+Only a genuine resume failure (the CLI's own non-zero exit when it no longer recognizes the id — e.g.
+the user cleared `~/.claude`, or the session was garbage collected) clears the persisted id, so it
+isn't retried forever; a timeout on an otherwise-healthy, still-resumable conversation never does.
+
+**A malformed `--output-format=stream-json` line cancels the subprocess immediately**, rather than
+waiting for the subprocess to exit on its own (which, for a wedged or misbehaving `claude` process,
+could otherwise hold the single-query busy flag for up to the full `QueryTimeout`). The client has
+already received the corresponding `{"type":"error",...}` frame by the time this happens.
+
+**The persisted `--resume` session id is validated before every use, not only when this Runner itself
+wrote it.** `--resume`'s value is optional in the claude CLI's own argument parser, so a value
+beginning with `-` would be parsed as a new CLI flag rather than a `--resume` value if passed through
+as-is. A persisted id that doesn't match `^[A-Za-z0-9][A-Za-z0-9._-]*$` (the shape of every id claude
+itself has ever been observed to emit) is treated exactly like no persisted id at all: the query runs
+without `--resume`, and whatever session id that fresh run captures is persisted in its place.
 
 ## WebSocket Protocol
 

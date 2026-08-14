@@ -7,6 +7,16 @@
 
 GOLANGCI_LINT_VERSION := v2.12.2
 
+# Resolve the exact path `go install` places golangci-lint at (GOBIN if set,
+# otherwise $GOPATH/bin), and always invoke that path explicitly rather than
+# a bare `golangci-lint` from $PATH. A bare invocation can silently resolve
+# to an unrelated, unpinned golangci-lint earlier on $PATH (e.g. one
+# preinstalled system-wide) even after this file's own install step just
+# put the correct pinned version at $GOBIN/$GOPATH/bin — the install would
+# succeed and the very next lint run would still lint with the wrong
+# binary. Pinning the invocation path removes that ambiguity entirely.
+GOLANGCI_LINT_BIN := $(shell bin="$$(go env GOBIN)"; if [ -z "$$bin" ]; then bin="$$(go env GOPATH)/bin"; fi; echo "$$bin")/golangci-lint
+
 # ── Dependencies ──────────────────────────────────────────────────────────────
 
 install-deps: lint-go-deps install-hooks
@@ -87,17 +97,17 @@ lint: lint-go lint-frontend
 
 lint-go-deps:
 	@expected_version="$$(printf '%s' '$(GOLANGCI_LINT_VERSION)' | sed 's/^v//')"; \
-	current_version="$$(command -v golangci-lint >/dev/null 2>&1 && golangci-lint --version 2>/dev/null | awk 'NR==1 {print $$4; exit}' || true)"; \
+	current_version="$$(test -x '$(GOLANGCI_LINT_BIN)' && '$(GOLANGCI_LINT_BIN)' --version 2>/dev/null | awk 'NR==1 {print $$4; exit}' || true)"; \
 	if [ "$$current_version" = "$$expected_version" ]; then \
 	  :; \
 	else \
-	  echo "Installing golangci-lint $(GOLANGCI_LINT_VERSION)"; \
+	  echo "Installing golangci-lint $(GOLANGCI_LINT_VERSION) to $(GOLANGCI_LINT_BIN)"; \
 	  go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION); \
 	fi
 
 lint-go: fmt-check-go lint-go-deps
 	go vet ./...
-	golangci-lint run ./...
+	'$(GOLANGCI_LINT_BIN)' run ./...
 
 lint-frontend:
 	cd frontend && npx tsc --noEmit

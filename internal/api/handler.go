@@ -25,6 +25,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"panemux/internal/board"
+	"panemux/internal/commandcenter"
 	"panemux/internal/config"
 	"panemux/internal/session"
 	"panemux/internal/sshconfig"
@@ -37,6 +38,8 @@ type Handler struct {
 	readDirFn               func(name string) ([]os.DirEntry, error)
 	manager                 *session.Manager
 	boardBroadcastFn        func(ctx context.Context, to []string, body string) ([]string, error)
+	commandHistoryFn        func() ([]commandcenter.HistoryEntry, error)
+	commandCenterAvailable  bool
 	boardCache              *board.BoardCache
 	gitInfoCacheBySession   map[string]gitInfoCacheEntry
 	createSession           func(*config.PaneConfig, map[string]config.SSHConnection) (session.Session, error)
@@ -174,7 +177,20 @@ func NewHandler(
 	h.boardBroadcastFn = func(ctx context.Context, to []string, body string) ([]string, error) {
 		return boardRelay.Broadcast(ctx, board.SystemID, to, body)
 	}
+	h.commandHistoryFn = defaultCommandHistoryFn
 	return h
+}
+
+// SetCommandCenterAvailable records whether /ws/board-command is actually
+// registered, for GetBoardSessionToken to report. This is a separate,
+// later-set field rather than a NewHandler parameter deliberately: the
+// caller (internal/server.New) only knows whether setupCommandCenter
+// actually produced a Runner — which can differ from cfg.CommandCenter.Enabled
+// (e.g. enabled but no server.auth_token configured) — and threading that
+// decision through NewHandler's existing four-argument, ~90-call-site
+// signature was judged not worth the churn for one boolean.
+func (h *Handler) SetCommandCenterAvailable(available bool) {
+	h.commandCenterAvailable = available
 }
 
 // GetLayout returns the current layout configuration.

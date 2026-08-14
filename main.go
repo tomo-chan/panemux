@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"panemux/internal/board"
+	"panemux/internal/commandcenter"
 	"panemux/internal/config"
 	"panemux/internal/server"
 	"panemux/internal/session"
@@ -32,6 +33,17 @@ type cliOptions struct {
 var frontendFS embed.FS
 
 func main() {
+	// __board-mcp-server is a hidden subcommand, not an ordinary flag: the
+	// command center's own claude -p subprocess re-invokes this same binary
+	// as its MCP server (see docs/agent-board.md's Command center section),
+	// so it must be recognized before flag.Parse ever runs.
+	if len(os.Args) > 1 && os.Args[1] == commandcenter.BoardMCPServerSubcommand {
+		if err := runBoardMCPServer(context.Background(), os.Getenv, os.Stdin, os.Stdout); err != nil {
+			log.Fatalf("board mcp server: %v", err)
+		}
+		return
+	}
+
 	opts := parseOptions()
 
 	if opts.showVersion {
@@ -50,8 +62,9 @@ func main() {
 	}
 
 	boardCache, boardRelay, boardBootstrap := setupBoard(cfg, manager)
+	commandRunner := setupCommandCenter(cfg)
 
-	srv := server.New(cfg, manager, boardCache, boardRelay, frontendFS)
+	srv := server.New(cfg, manager, boardCache, boardRelay, commandRunner, frontendFS)
 	addr := "http://" + srv.Addr()
 	log.Printf("Listening on %s", addr)
 
