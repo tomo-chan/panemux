@@ -62,9 +62,21 @@ type boardMessageResponse struct {
 	To   string    `json:"to"`
 	Body string    `json:"body"`
 	Seq  int64     `json:"seq"`
+	// IsStatus marks a row as a pane's own status self-report rather than an
+	// ordinary cross-pane message. Status rows are appended to history
+	// alongside real messages, so a dashboard has to tell them apart to avoid
+	// rendering raw board_status JSON as if someone had sent it. Deciding it
+	// here rather than in the client keeps one implementation of the rule:
+	// board.IsStatusRow's Go decoding is the definition, and no second,
+	// necessarily-divergent copy of it exists in JavaScript.
+	IsStatus bool `json:"is_status"`
 }
 
 type boardMessagesResponse struct {
+	// Epoch identifies the BoardCache instance these Seq values came from —
+	// see BoardCache.Epoch. A client that sees it change must reset its since
+	// cursor to 0, because the cache it was counting against is gone.
+	Epoch    string                 `json:"epoch"`
 	Messages []boardMessageResponse `json:"messages"`
 }
 
@@ -83,16 +95,21 @@ func (h *Handler) GetBoardMessages(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows := h.boardCache.MessagesSince(since)
-	resp := boardMessagesResponse{Messages: make([]boardMessageResponse, 0, len(rows))}
+	resp := boardMessagesResponse{
+		Messages: make([]boardMessageResponse, 0, len(rows)),
+		Epoch:    h.boardCache.Epoch(),
+	}
 	for _, cr := range rows {
+		_, isStatus := board.IsStatusRow(cr.Row)
 		resp.Messages = append(resp.Messages, boardMessageResponse{
-			Seq:  cr.Seq,
-			Host: cr.Row.Host,
-			Team: cr.Row.Team,
-			From: cr.Row.From,
-			To:   cr.Row.To,
-			Body: cr.Row.Body,
-			At:   cr.Row.At,
+			Seq:      cr.Seq,
+			Host:     cr.Row.Host,
+			Team:     cr.Row.Team,
+			From:     cr.Row.From,
+			To:       cr.Row.To,
+			Body:     cr.Row.Body,
+			At:       cr.Row.At,
+			IsStatus: isStatus,
 		})
 	}
 	writeJSON(w, resp)
