@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"panemux/internal/board"
+	"panemux/internal/config"
 	"panemux/internal/session"
 )
 
@@ -82,6 +83,55 @@ func TestGetBoardSessionToken_CommandCenterUnavailable_ReportsFalse(t *testing.T
 	var resp boardSessionTokenResponse
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
 	assert.False(t, resp.CommandCenterEnabled)
+}
+
+func boolPtr(b bool) *bool { return &b }
+
+// TestGetBoardSessionToken_AgentBoardEnabled covers agentBoardEnabledAnyPane
+// (internal/api/board.go): the response field must be true only when at
+// least one pane has agent_board.enabled: true, independent of
+// CommandCenterEnabled — see agentBoardEnabledAnyPane's own doc comment.
+func TestGetBoardSessionToken_AgentBoardEnabled(t *testing.T) {
+	tests := []struct {
+		mutateLayout func(cfg *config.Config)
+		name         string
+		want         bool
+	}{
+		{
+			name:         "one pane enabled reports true",
+			mutateLayout: func(cfg *config.Config) { cfg.Layout.Children[0].Pane.AgentBoard.Enabled = boolPtr(true) },
+			want:         true,
+		},
+		{
+			name:         "pane explicitly disabled reports false",
+			mutateLayout: func(cfg *config.Config) { cfg.Layout.Children[0].Pane.AgentBoard.Enabled = boolPtr(false) },
+			want:         false,
+		},
+		{
+			name:         "no panes reports false",
+			mutateLayout: func(cfg *config.Config) { cfg.Layout.Children = nil },
+			want:         false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := defaultTestConfig()
+			cfg.Server.AuthToken = "sekret"
+			tt.mutateLayout(cfg)
+			h := NewHandler(cfg, session.NewManager(), board.NewBoardCache(), nil)
+			r := setupRouterWithHandler(h)
+
+			rec := httptest.NewRecorder()
+			req := loopbackSessionTokenRequest()
+			r.ServeHTTP(rec, req)
+
+			assert.Equal(t, http.StatusOK, rec.Code)
+			var resp boardSessionTokenResponse
+			require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+			assert.Equal(t, tt.want, resp.AgentBoardEnabled)
+		})
+	}
 }
 
 func TestGetBoardSessionToken_NonLoopbackRemoteAddr_Forbidden(t *testing.T) {

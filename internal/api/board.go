@@ -11,6 +11,7 @@ import (
 
 	"panemux/internal/board"
 	"panemux/internal/commandcenter"
+	"panemux/internal/config"
 )
 
 // loopbackIPv4 is the literal IPv4 loopback host string, as it appears in a
@@ -182,6 +183,22 @@ func (h *Handler) GetBoardCommandHistory(w http.ResponseWriter, r *http.Request)
 type boardSessionTokenResponse struct {
 	Token                string `json:"token"`
 	CommandCenterEnabled bool   `json:"command_center_enabled"`
+	AgentBoardEnabled    bool   `json:"agent_board_enabled"`
+}
+
+// agentBoardEnabledAnyPane reports whether at least one pane in cfg has
+// agent_board.enabled: true. command_center_enabled alone can't gate the
+// dashboard UI: a config can enable agent_board without the command center,
+// and vice versa. This is recomputed on every request rather than cached at
+// Handler construction, matching the rest of this handler's read-cfg-live
+// pattern (see GetBoardSessionToken's own use of h.cfg.Server.AuthToken).
+func agentBoardEnabledAnyPane(cfg *config.Config) bool {
+	for _, pane := range cfg.AllPanes() {
+		if pane.AgentBoard.Enabled != nil && *pane.AgentBoard.Enabled {
+			return true
+		}
+	}
+	return false
 }
 
 // GetBoardSessionToken lets the same-origin dashboard learn the bearer
@@ -235,6 +252,7 @@ func (h *Handler) GetBoardSessionToken(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, boardSessionTokenResponse{
 		Token:                h.cfg.Server.AuthToken,
 		CommandCenterEnabled: h.commandCenterAvailable,
+		AgentBoardEnabled:    agentBoardEnabledAnyPane(h.cfg),
 	})
 }
 
