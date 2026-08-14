@@ -147,4 +147,64 @@ describe('CommandPalette', () => {
 
     expect(await screen.findByText('claude exited with error: exit status 1')).toBeDefined()
   })
+
+  it('renders fixture history entries immediately on open', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        entries: [
+          { at: '2026-08-10T12:00:00Z', raw: { type: 'result', result: 'previous answer' } },
+        ],
+      }),
+    }))
+
+    render(<CommandPalette isOpen token="tok" onClose={vi.fn()} />)
+
+    expect(await screen.findByText('previous answer')).toBeDefined()
+  })
+
+  it('updates incrementally as line frames stream in, one at a time', async () => {
+    render(<CommandPalette isOpen token="tok" onClose={vi.fn()} />)
+    const ws = MockWebSocket.instances[0]
+    act(() => ws.simulateOpen())
+
+    fireEvent.change(screen.getByLabelText('Command center prompt'), { target: { value: 'hi' } })
+    fireEvent.click(screen.getByRole('button', { name: /send/i }))
+
+    act(() => ws.simulateMessage({ type: 'line', raw: { type: 'progress' } }))
+    expect(await screen.findByText('[progress]')).toBeDefined()
+    expect(screen.queryByText('done')).toBeNull()
+
+    act(() => ws.simulateMessage({ type: 'line', raw: { result: 'done' } }))
+    expect(await screen.findByText('done')).toBeDefined()
+    expect(screen.getByText('[progress]')).toBeDefined()
+  })
+
+  it('shows the busy message when a busy frame arrives', async () => {
+    render(<CommandPalette isOpen token="tok" onClose={vi.fn()} />)
+    const ws = MockWebSocket.instances[0]
+    act(() => ws.simulateOpen())
+
+    fireEvent.change(screen.getByLabelText('Command center prompt'), { target: { value: 'hi' } })
+    fireEvent.click(screen.getByRole('button', { name: /send/i }))
+    act(() => ws.simulateMessage({ type: 'busy' }))
+
+    expect(await screen.findByText('Command center is busy — try again shortly.')).toBeDefined()
+  })
+
+  it('restores focus to the element that opened it once it closes', async () => {
+    const trigger = document.createElement('button')
+    trigger.textContent = 'Open palette'
+    document.body.appendChild(trigger)
+    trigger.focus()
+
+    const { rerender } = render(<CommandPalette isOpen={false} token="tok" onClose={vi.fn()} />)
+    rerender(<CommandPalette isOpen token="tok" onClose={vi.fn()} />)
+    await waitFor(() => expect(screen.getByRole('dialog')).toBeDefined())
+
+    rerender(<CommandPalette isOpen={false} token="tok" onClose={vi.fn()} />)
+
+    expect(document.activeElement).toBe(trigger)
+    document.body.removeChild(trigger)
+  })
 })

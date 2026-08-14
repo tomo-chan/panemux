@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { BoardCommandHistoryResponseSchema } from '../schemas'
 import type { BoardCommandHistoryEntry } from '../schemas'
 import { TERMINAL_FONT_FAMILY } from '../utils/fonts'
+import { useRestoreFocusOnClose } from '../hooks/useRestoreFocusOnClose'
 
 interface CommandHistoryPanelProps {
   isOpen: boolean
@@ -18,6 +19,8 @@ interface CommandHistoryPanelProps {
 export const CommandHistoryPanel: React.FC<CommandHistoryPanelProps> = ({ isOpen, token, onClose }) => {
   const [entries, setEntries] = useState<BoardCommandHistoryEntry[]>([])
   const [error, setError] = useState<string | null>(null)
+
+  useRestoreFocusOnClose(isOpen)
 
   useEffect(() => {
     if (!isOpen) return

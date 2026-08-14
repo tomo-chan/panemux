@@ -3,6 +3,7 @@ import { useBoardCommand } from '../hooks/useBoardCommand'
 import { BoardCommandHistoryResponseSchema } from '../schemas'
 import type { BoardCommandHistoryEntry } from '../schemas'
 import { TERMINAL_FONT_FAMILY } from '../utils/fonts'
+import { useRestoreFocusOnClose } from '../hooks/useRestoreFocusOnClose'
 
 interface CommandPaletteProps {
   isOpen: boolean
@@ -23,6 +24,8 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, token, o
   const [prompt, setPrompt] = useState('')
   const [recentHistory, setRecentHistory] = useState<BoardCommandHistoryEntry[]>([])
   const inputRef = useRef<HTMLInputElement>(null)
+
+  useRestoreFocusOnClose(isOpen)
 
   useEffect(() => {
     if (!isOpen) {

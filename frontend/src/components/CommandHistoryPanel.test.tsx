@@ -88,4 +88,25 @@ describe('CommandHistoryPanel', () => {
 
     expect(onClose).toHaveBeenCalled()
   })
+
+  it('restores focus to the element that opened it once it closes', async () => {
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ entries: [] }) } as Response)
+    const trigger = document.createElement('button')
+    trigger.textContent = 'Open history'
+    document.body.appendChild(trigger)
+    trigger.focus()
+
+    const { rerender } = render(<CommandHistoryPanel isOpen={false} token="tok" onClose={vi.fn()} />)
+    rerender(<CommandHistoryPanel isOpen token="tok" onClose={vi.fn()} />)
+    // Simulate the panel's own content stealing focus while open (e.g. a
+    // user clicking inside it), so restoring the trigger's focus on close
+    // is actually exercised rather than trivially already true because
+    // nothing ever moved focus away from it.
+    ;(await screen.findByLabelText('Close history panel')).focus()
+
+    rerender(<CommandHistoryPanel isOpen={false} token="tok" onClose={vi.fn()} />)
+
+    expect(document.activeElement).toBe(trigger)
+    document.body.removeChild(trigger)
+  })
 })
