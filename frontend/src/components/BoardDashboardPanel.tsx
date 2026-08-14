@@ -83,6 +83,7 @@ export const BoardDashboardPanel: React.FC<BoardDashboardPanelProps> = ({ isOpen
 
 const PaneStatusCard: React.FC<{ paneId: string; status: BoardStatusEntry }> = ({ paneId, status }) => {
   const stale = isStaleUpdatedAt(status.updated_at)
+  const prHref = status.pr_url ? safeExternalURL(status.pr_url) : null
 
   return (
     <div style={{ ...cardStyle, opacity: stale ? 0.6 : 1 }}>
@@ -95,16 +96,14 @@ const PaneStatusCard: React.FC<{ paneId: string; status: BoardStatusEntry }> = (
       <div style={metaRowStyle}>
         {status.repo && <span style={repoStyle}>{status.repo}</span>}
         {status.branch && <span style={ellipsisStyle}>{status.branch}</span>}
-        {status.pr_url && (
-          <a
-            href={status.pr_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={linkStyle}
-          >
-            {prLabel(status.pr_url)}
-          </a>
-        )}
+        {status.pr_url &&
+          (prHref ? (
+            <a href={prHref} target="_blank" rel="noopener noreferrer" style={linkStyle}>
+              {prLabel(status.pr_url)}
+            </a>
+          ) : (
+            <span style={ellipsisStyle}>{status.pr_url}</span>
+          ))}
       </div>
       {status.summary && <div style={detailStyle}>{status.summary}</div>}
       {status.last_tool && <div style={mutedDetailStyle}>tool: {status.last_tool}</div>}
@@ -124,6 +123,28 @@ const MessageRow: React.FC<{ message: BoardMessage; showHost: boolean }> = ({ me
     <div style={messageBodyStyle}>{message.body}</div>
   </div>
 )
+
+// safeExternalURL returns url only when it is an ordinary web address, and
+// null otherwise, so the caller can fall back to rendering it as text.
+//
+// pr_url reaches this component as free text an agent wrote about itself
+// (internal/board's ParseStatus copies it through unvalidated, and the
+// relay only checks who sent a row, never what is in it), possibly from a
+// remote host. React 18 — the version this app pins — merely logs a warning
+// for a javascript: href and renders it anyway, so without this check a
+// status report would be enough to run script in the dashboard's origin,
+// which holds the board bearer token. target="_blank" and rel="noopener
+// noreferrer" do not help: they constrain the opened document, not whether
+// a script-scheme URL executes.
+function safeExternalURL(url: string): string | null {
+  try {
+    const parsed = new URL(url)
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:' ? url : null
+  } catch {
+    // Not an absolute URL at all — nothing safe to link to.
+    return null
+  }
+}
 
 // prLabel extracts a "PR #N" label from a github.com pull request URL,
 // matching WorkspaceTabs.tsx's own "PR #{n}" text convention. Falls back to

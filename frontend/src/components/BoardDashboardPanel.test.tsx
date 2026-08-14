@@ -15,7 +15,7 @@ function fetchRouter(handlers: {
     }
     if (url.startsWith('/api/board/messages')) {
       return Promise.resolve(
-        handlers.messages ? handlers.messages() : ({ ok: true, json: async () => ({ messages: [] }) } as Response),
+        handlers.messages ? handlers.messages() : ({ ok: true, json: async () => ({ messages: [], epoch: 'e1' }) } as Response),
       )
     }
     throw new Error(`unexpected fetch: ${url}`)
@@ -91,6 +91,50 @@ describe('BoardDashboardPanel', () => {
     expect(link).toHaveAttribute('rel', 'noopener noreferrer')
   })
 
+  // pr_url is free text an agent process wrote about itself, relayed from a
+  // possibly-remote host — it is not a value panemux computed or validated.
+  // React 18 only warns about a javascript: href, it does not block it, so
+  // rendering the value straight into an anchor would make a status report a
+  // script-execution vector for anyone who clicks the link. These stay text.
+  it.each([
+    ['javascript:', 'javascript:alert(document.domain)//'],
+    ['data:', 'data:text/html,<script>alert(1)</script>'],
+    ['vbscript:', 'vbscript:msgbox(1)'],
+    ['scheme-relative with a javascript payload', 'javascript:void%20alert(1)'],
+  ])('renders a %s pr_url as plain text instead of a link', async (_name, prUrl) => {
+    vi.stubGlobal('fetch', fetchRouter({
+      status: () => ({
+        ok: true,
+        json: async () => ({
+          statuses: { main: { updated_at: new Date().toISOString(), pr_url: prUrl } },
+        }),
+      } as Response),
+    }))
+
+    render(<BoardDashboardPanel isOpen token="tok" onClose={vi.fn()} />)
+
+    expect(await screen.findByText(prUrl)).toBeDefined()
+    expect(screen.queryByRole('link')).toBeNull()
+  })
+
+  it('renders a plain http pr_url as a link', async () => {
+    vi.stubGlobal('fetch', fetchRouter({
+      status: () => ({
+        ok: true,
+        json: async () => ({
+          statuses: {
+            main: { updated_at: new Date().toISOString(), pr_url: 'http://git.internal/x/pull/7' },
+          },
+        }),
+      } as Response),
+    }))
+
+    render(<BoardDashboardPanel isOpen token="tok" onClose={vi.fn()} />)
+
+    const link = await screen.findByRole('link')
+    expect(link).toHaveAttribute('href', 'http://git.internal/x/pull/7')
+  })
+
   it('renders a card with every optional field omitted without crashing', async () => {
     vi.stubGlobal('fetch', fetchRouter({
       status: () => ({
@@ -153,9 +197,10 @@ describe('BoardDashboardPanel', () => {
         ok: true,
         json: async () => ({
           messages: [
-            { at: '2026-08-14T12:00:00Z', host: 'devbox', team: 'panemux', from: 'main', to: '_system', body: JSON.stringify({ kind: 'board_status' }), seq: 1 },
-            { at: '2026-08-14T12:00:01Z', host: 'devbox', team: 'panemux', from: 'main', to: 'side', body: 'hello there', seq: 2 },
+            { at: '2026-08-14T12:00:00Z', host: 'devbox', team: 'panemux', from: 'main', to: '_system', body: JSON.stringify({ kind: 'board_status' }), is_status: true, seq: 1 },
+            { at: '2026-08-14T12:00:01Z', host: 'devbox', team: 'panemux', from: 'main', to: 'side', body: 'hello there', is_status: false, seq: 2 },
           ],
+          epoch: 'e1',
         }),
       } as Response),
     }))

@@ -118,6 +118,32 @@ discipline `RunBoardCommand` already applies uniformly to every argument, board-
 `RunBoardCommand` call bootstrap itself makes; they are operator config or panemux's own fixed
 detection-table output either way, not external request data.
 
+### Agent-reported values in the dashboard UI
+
+Everything in a `board_status` self-report — `state`, `cwd`, `branch`, `repo`, `pr_url`, `last_tool`,
+`summary` — is free text written by an agent process, possibly on a remote host, and panemux
+validates none of it: `internal/board`'s `ParseStatus` copies each field through verbatim, and the
+relay's only gate is `validFrom` (was this row sent by a known board-enabled pane), which says
+nothing about a row's *contents*. A pane that has been talked into writing a hostile status report,
+or any process on that host able to call `send.sh`, therefore controls these strings end to end.
+
+The dashboard renders them as text children, which React escapes; there is no `dangerouslySetInnerHTML`
+anywhere in `frontend/src`. **`pr_url` is the one field that would otherwise reach a
+DOM sink with meaning of its own**, as the `href` of the only `<a>` element in the component tree. It
+is passed through `safeExternalURL` in `frontend/src/components/BoardDashboardPanel.tsx` first, which
+renders an anchor only when the value parses as an `http:` or `https:` URL and falls back to plain
+text for everything else. This is not defense in depth over a framework guarantee — it is the only
+guard: React 18, the version this app pins, merely logs *"A future version of React will block
+javascript: URLs"* and renders the attribute anyway (React 19 blocks it; this codebase is not on it).
+`target="_blank"` and `rel="noopener noreferrer"` do not help either, as they constrain the opened
+document rather than whether a script-scheme URL executes at all. Script running in the dashboard's
+own origin would have access to the board bearer token, so this is a real escalation path, not a
+cosmetic one.
+
+`frontend/src/components/BoardDashboardPanel.test.tsx` pins the guard against `javascript:`, `data:`,
+and `vbscript:` values, alongside the positive `http:`/`https:` cases. Any future UI that renders a
+new agent-reported field into an attribute rather than as a text child needs the same treatment.
+
 ### Command center subprocess execution
 
 `internal/commandcenter/runner.go`'s `Runner` is the one other place in this repository, besides

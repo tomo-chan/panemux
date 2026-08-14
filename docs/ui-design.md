@@ -261,8 +261,14 @@ top of the principles above rather than replacing them:
   the keydown capture phase the same way the palette's own shortcut is, so it still fires while a
   terminal pane has focus. It extends the existing workspace-bar/pane-card status vocabulary
   (**Integrated workspace summaries** and **Workspace pane groups**, above) rather than introduce a
-  competing one: the same 8px status-dot-plus-`${color}33`-ring treatment, the same repo (`#9fcbff`)
-  / branch (`#8f98a8`) / `PR #{n}` chrome as `WorkspaceTabs.tsx`. The self-reported `state` string is
+  competing one: the same 8px status-dot-plus-`${color}33`-ring treatment and the same repo
+  (`#9fcbff`) / branch (`#8f98a8`) colors as `WorkspaceTabs.tsx`. The PR treatment is the one place
+  it goes further than the workspace bar, and deliberately so: `WorkspaceTabs.tsx` renders `PR #{n}`
+  as plain text from a server-derived number, while the dashboard has a full `pr_url` the agent
+  reported and links it. Because that URL is agent-written free text rather than a value panemux
+  computed, it is rendered as an anchor **only** when it parses as an `http:`/`https:` URL, and as
+  plain text otherwise — see [security.md's Agent-reported values in the
+  dashboard](security.md#agent-reported-values-in-the-dashboard-ui). The self-reported `state` string is
   free text (an agent's own report, not a fixed enum), mapped to a dot color via
   `utils/boardStatusColors.ts`: `working` → `#7bd88f`, `idle` → `#7aa2f7`, `waiting` → `#f4bf4f`
   (deliberately reusing the existing attention-gold pill color, since "waiting" is the same kind of
