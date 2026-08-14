@@ -243,23 +243,34 @@ Using separate colors avoids mixing "this needs your attention" with "you can dr
 
 ---
 
-## Agent Board UI (planned)
+## Agent Board UI
 
-> **Status: the command center palette and history panel are implemented; the status dashboard is
-> still design-only.** Full design lives in [agent-board.md](agent-board.md). The section heading
-> keeps its historical "(planned)" suffix since the dashboard bullet below is still unimplemented —
-> update it once that lands too.
+> **Status: implemented.** The command center palette, history panel, and the status dashboard
+> (`BoardDashboardPanel.tsx`) all ship. Full design lives in [agent-board.md](agent-board.md).
 
 Agent Board (see [agent-board.md](agent-board.md)) introduces two new UI surfaces, both layered on
 top of the principles above rather than replacing them:
 
 - A **dashboard** view of per-pane self-reported status (state, branch, PR, summary — see
   [agent-board.md's Status self-report](agent-board.md#status-self-report-and-message-flow)) —
-  **still design-only.** It's intended to extend the existing workspace-bar/pane-card status
-  vocabulary (**Integrated workspace summaries** and **Workspace pane groups**, above) rather than
-  introduce a competing status language — connection-state dots, attention framing, and
-  repo/branch/PR chrome should read the same way in Agent Board's dashboard as they already do in
-  the pane header and workspace bar.
+  **implemented** as `BoardDashboardPanel.tsx`, a right-anchored overlay panel following the same
+  structure and styling tokens as `CommandHistoryPanel.tsx` (dark `#252526` panel, `#444` border,
+  420px wide, backdrop click and `Escape` to dismiss) rather than a new visual language. It opens via
+  an "Agent Board" button next to the existing "Command History" button (shown only when
+  `agent_board_enabled` is true and a token is available) or via `Cmd/Ctrl+Shift+B`, registered on
+  the keydown capture phase the same way the palette's own shortcut is, so it still fires while a
+  terminal pane has focus. It extends the existing workspace-bar/pane-card status vocabulary
+  (**Integrated workspace summaries** and **Workspace pane groups**, above) rather than introduce a
+  competing one: the same 8px status-dot-plus-`${color}33`-ring treatment, the same repo (`#9fcbff`)
+  / branch (`#8f98a8`) / `PR #{n}` chrome as `WorkspaceTabs.tsx`. The self-reported `state` string is
+  free text (an agent's own report, not a fixed enum), mapped to a dot color via
+  `utils/boardStatusColors.ts`: `working` → `#7bd88f`, `idle` → `#7aa2f7`, `waiting` → `#f4bf4f`
+  (deliberately reusing the existing attention-gold pill color, since "waiting" is the same kind of
+  "needs a look" signal), and any other or missing value → a neutral `#4b5565` rather than a crash or
+  blank dot. A status entry whose `updated_at` is older than 5 minutes gets a `stale` pill and its
+  card rendered at 60% opacity — dimmed, not hidden, since a stale report is still the most recent
+  information available for that pane. No new colors were introduced for the dashboard, matching the
+  rest of Agent Board's UI (see below).
 - A **Spotlight-style command palette** (`CommandPalette.tsx`) and **history panel**
   (`CommandHistoryPanel.tsx`) for the [command center](agent-board.md#command-center) —
   **implemented.** The palette follows this document's existing **Modal Dialogs** pattern (a
@@ -267,7 +278,10 @@ top of the principles above rather than replacing them:
   `#444` border, backdrop click and `Escape` to dismiss, matching `AddSSHHostDialog`'s own styling
   tokens rather than introducing new ones. The history panel follows the same overlay pattern as a
   right-anchored sliding panel rather than a centered modal, since it's meant to stay open alongside
-  other work rather than demand focus the way the palette does.
+  other work rather than demand focus the way the palette does. All three overlays (palette, history
+  panel, dashboard) share one `useRestoreFocusOnClose` hook that returns keyboard focus to whatever
+  element had it before the overlay opened, once the overlay closes or unmounts — so dismissing any
+  of them (Escape, backdrop click, or the close button) never strands focus on a removed panel.
 
 Concrete decisions this section originally deferred to implementation time:
 

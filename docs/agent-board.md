@@ -42,7 +42,7 @@
 > the hidden subcommand the command center's own `claude -p` subprocess re-invokes as its MCP server,
 > per [Process lifecycle](#process-lifecycle) below. The Spotlight palette (`CommandPalette.tsx`) and
 > persistent history panel (`CommandHistoryPanel.tsx`) are implemented per
-> [ui-design.md's Agent Board UI section](ui-design.md#agent-board-ui-planned), including the
+> [ui-design.md's Agent Board UI section](ui-design.md#agent-board-ui), including the
 > concrete decisions that section originally deferred to implementation time.
 >
 > **An adversarial review after the initial implementation found and fixed several real bugs,
@@ -56,6 +56,26 @@
 > for a related fix to `GET /api/session-token`'s own guard (it does not rely on CORS, contrary to an
 > earlier revision of that section). A live, end-to-end query through the real browser → WS → Runner →
 > real `claude` subprocess stack was used to confirm the fix, not just the unit tests.
+>
+> **Phase 3 (Dashboard UI and command palette test completion)** is implemented. The read-only status
+> dashboard (`BoardDashboardPanel.tsx`, its own `useBoardStatus` polling hook, and the
+> `utils/boardStatusColors.ts` state→color/staleness helpers) ships as a right-anchored overlay panel
+> reachable via an "Agent Board" button or `Cmd/Ctrl+Shift+B` — see
+> [ui-design.md's Agent Board UI section](ui-design.md#agent-board-ui) for the full presentation
+> detail. It required one addition the Phase 3 design didn't originally anticipate:
+> **`agent_board_enabled`** on `GET /api/session-token`'s response (see
+> [API additions](#api-additions) and [docs/behavior.md](behavior.md#get-apisession-token)), because
+> `command_center_enabled` alone can't gate the dashboard button — a config can enable `agent_board`
+> without the command center, or vice versa, and the frontend has no other cheap way to learn whether
+> any pane has `agent_board.enabled: true` without re-fetching and walking the full layout tree.
+> Broadcast-sending from the dashboard was deliberately left out of Phase 3's scope — the dashboard is
+> read-only, matching the original Phase 3 issue definition. Phase 3 also completed test coverage the
+> command palette and history panel had been shipped without: `schemas/index.test.ts` now exercises
+> every board-related Zod schema's accept/reject paths, `CommandPalette.test.tsx` covers fixture
+> history rendering, incremental streaming updates, and the busy frame, and a shared
+> `useRestoreFocusOnClose` hook (used by the palette, history panel, and dashboard alike) returns
+> keyboard focus to whatever triggered an overlay once that overlay closes — behavior the original
+> Phase 3b issue text called for that had no implementation at all before this phase.
 
 ## Purpose
 
@@ -1101,8 +1121,17 @@ flow still applies.
 - Both surfaces are gated on `command_center_enabled` from `GET /api/session-token`: neither the
   keyboard shortcut nor the history button is wired up at all when the command center is disabled,
   rather than being present but non-functional.
+- A third surface, `BoardDashboardPanel.tsx`, is gated the same way but on `agent_board_enabled`
+  instead: an "Agent Board" button next to "Command History", plus `Cmd/Ctrl+Shift+B` on the same
+  capture-phase registration. Its own `useBoardStatus` hook polls `GET /api/board/status` (full
+  snapshot every 5s, paused while the tab is hidden — the same `document.hidden` pattern
+  `useSessionsOverview.ts` already uses) and `GET /api/board/messages?since=<seq>` (incremental,
+  capped at the most recent 500 messages client-side) and filters out `to === "_system"` /
+  `kind === "board_status"` rows from the message feed client-side, since the relay also appends
+  those to history (see [Status self-report and message flow](#status-self-report-and-message-flow)
+  above) and the dashboard's message feed is meant to show conversation, not raw status JSON.
 
-See [ui-design.md's Agent Board UI section](ui-design.md#agent-board-ui-planned) for how these
+See [ui-design.md's Agent Board UI section](ui-design.md#agent-board-ui) for how these
 surfaces reuse this repository's existing dialog/overlay patterns and status vocabulary instead of
 introducing a parallel visual language.
 
@@ -1134,7 +1163,7 @@ authenticated too, but via a WebSocket subprotocol rather than the `Authorizatio
 | `POST /api/board/broadcast` | `{ "to": ["pane-a","pane-b"], "body": "..." }`; sends directly to each target's own host via `AgmsgClient` (never via PTY injection, so it is safe to send to a pane mid-turn); delivery to the pane is immediate, but the message appears in `GET /api/board/messages`' history only after the relay's next poll cycle reads it back — see [Known limitations](#known-limitations) |
 | `WS /ws/board-command` | Command center chat: client sends `{"prompt": "..."}`, server streams the headless Claude response — see [Command center](#command-center) |
 | `GET /api/board/command/history` | Command center's own captured conversation history — see [Command center](#command-center) |
-| `GET /api/session-token` | **Deliberately unauthenticated** — hands the browser dashboard the bearer token it needs to call every route above and open the WS connection, since there is no other way for the frontend's own JavaScript to learn a token that may have been randomly generated on first run. Not part of the original design; added because nothing in it specified how the browser itself (as opposed to the command center subprocess) would learn the token. Lives at `/api/session-token`, not `/api/board/session-token` — see [docs/behavior.md](behavior.md#get-apisession-token) for why that distinction is load-bearing, not stylistic. |
+| `GET /api/session-token` | **Deliberately unauthenticated** — hands the browser dashboard the bearer token it needs to call every route above and open the WS connection, since there is no other way for the frontend's own JavaScript to learn a token that may have been randomly generated on first run. Not part of the original design; added because nothing in it specified how the browser itself (as opposed to the command center subprocess) would learn the token. Lives at `/api/session-token`, not `/api/board/session-token` — see [docs/behavior.md](behavior.md#get-apisession-token) for why that distinction is load-bearing, not stylistic. Its response also carries `agent_board_enabled` (added in Phase 3, likewise not part of the original design — see the Phase 3 status note above), computed by scanning every configured pane for `agent_board.enabled: true`, so the frontend can gate the "Agent Board" dashboard button independently of `command_center_enabled`. |
 
 ## Config additions
 
@@ -1592,5 +1621,5 @@ documented behavior changed.
 - Implementation structure: [architecture.md](architecture.md)
 - Security requirements for implementation: [security.md](security.md)
 - Runtime behavior and API specification: [behavior.md](behavior.md)
-- UI intent for the dashboard, palette, and history panel: [ui-design.md](ui-design.md#agent-board-ui-planned)
+- UI intent for the dashboard, palette, and history panel: [ui-design.md](ui-design.md#agent-board-ui)
 - Developer workflow rules: [../DEVELOPMENT.md](../DEVELOPMENT.md)
