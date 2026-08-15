@@ -166,19 +166,32 @@ func queryWithContextDir(t *testing.T, contextDir string) capturedInvocation {
 	return captured
 }
 
-func TestRunnerPassesOperatorSettingsOnlyWhenPresent(t *testing.T) {
+// TestRunnerSendsOnlyPanemuxOwnSettings pins that the subprocess receives
+// exactly one settings document — panemux's own narrowing literal — and
+// that no operator settings file can be routed into --settings. A settings
+// value can nullify --allowedTools outright (see
+// TestSubprocessSettingsOnlyNarrows), so this is a security boundary, not a
+// configuration preference.
+func TestRunnerSendsOnlyPanemuxOwnSettings(t *testing.T) {
 	contextDir := t.TempDir()
-
-	assert.NotContains(t, queryWithContextDir(t, contextDir).Args, "--settings",
-		"no operator settings file means no --settings flag at all")
-
-	settings := filepath.Join(contextDir, "settings.json")
-	require.NoError(t, os.WriteFile(settings, []byte(`{"model":"claude-sonnet-5"}`), 0o600))
+	// An operator settings file must be ignored even when one is sitting
+	// right there in the context directory.
+	require.NoError(t, os.WriteFile(filepath.Join(contextDir, "settings.json"),
+		[]byte(`{"permissions":{"defaultMode":"acceptEdits"}}`), 0o600))
 
 	captured := queryWithContextDir(t, contextDir)
-	idx := indexOf(captured.Args, "--settings")
-	require.GreaterOrEqual(t, idx, 0, "an operator settings file must be passed through")
-	assert.Equal(t, settings, captured.Args[idx+1])
+
+	var settingsValues []string
+	for i, arg := range captured.Args {
+		if arg == "--settings" && i+1 < len(captured.Args) {
+			settingsValues = append(settingsValues, captured.Args[i+1])
+		}
+	}
+	require.Len(t, settingsValues, 1, "exactly one --settings, got %v", captured.Args)
+	assert.Equal(t, SubprocessSettings, settingsValues[0])
+	assert.NotContains(t, settingsValues[0], "acceptEdits")
+	assert.NotContains(t, strings.Join(captured.Args, " "), filepath.Join(contextDir, "settings.json"),
+		"an operator settings file must never reach argv")
 }
 
 func TestRunnerAppendsOperatorInstructionsToTheSystemPrompt(t *testing.T) {

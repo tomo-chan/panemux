@@ -41,16 +41,37 @@ import (
 //     purely an operator-facing override.
 
 // commandCenterDirName is the operator-facing directory, under panemux's own
-// config dir, where an operator may place instructions and settings for the
-// command center. Nothing is required to exist: panemux ships its own
-// defaults compiled into the binary, because panemux is installed as a
-// standalone binary (install.sh) with no repository on disk to read from.
+// config dir, where an operator may place *instructions* for the command
+// center. Instructions only: text appended to a system prompt has no
+// execution semantics, unlike a settings file (see SubprocessSettings).
+// Nothing is required to exist — panemux ships its own defaults compiled
+// into the binary, because it installs as a standalone binary (install.sh)
+// with no repository on disk to read from.
 const commandCenterDirName = "command-center"
 
-const (
-	operatorInstructionsFile = "CLAUDE.md"
-	operatorSettingsFile     = "settings.json"
-)
+const operatorInstructionsFile = "CLAUDE.md"
+
+// SubprocessSettings is the entire settings document panemux hands the
+// subprocess via --settings. It is a fixed literal, and deliberately
+// contains only keys that *narrow* what the subprocess may do.
+//
+// Nothing from the operator's own ~/.claude/settings.json is merged in, and
+// there is no operator settings file for the command center either. That is
+// not caution for its own sake — a settings value can nullify the tool
+// scoping that is this feature's actual security boundary. Reproduced twice
+// against the real CLI (v2.1.233): with --allowedTools scoped to a single
+// board tool, adding {"permissions":{"defaultMode":"acceptEdits"}} let the
+// subprocess run Bash, with no entry in permission_denials at all. An
+// operator who sets that mode for their own interactive sessions — an
+// entirely ordinary thing to do — would have silently unscoped the command
+// center by inheritance.
+//
+// sandbox confines the tools that *are* permitted. It is a no-op where the
+// OS cannot provide it (verified: the setting is ignored, the query still
+// succeeds, is_error stays false), so passing it unconditionally costs
+// nothing on an unsupported host. See docs/security.md for what this was and
+// was not verified to do.
+const SubprocessSettings = `{"sandbox":{"enabled":true}}`
 
 // DefaultSystemPrompt is the instruction layer every command center query
 // runs under, passed via --append-system-prompt. It is a compile-time
@@ -123,22 +144,6 @@ func SystemPrompt(contextDir string) string {
 		return DefaultSystemPrompt
 	}
 	return DefaultSystemPrompt + "\n\nOperator instructions:\n\n" + extra
-}
-
-// OperatorSettingsPath returns the path to the operator's settings.json when
-// it exists, or "" when it does not. The caller passes it to --settings;
-// with no file, no --settings flag is passed at all and the subprocess runs
-// on the CLI's own defaults minus everything --setting-sources excludes.
-func OperatorSettingsPath(contextDir string) string {
-	if contextDir == "" {
-		return ""
-	}
-	path := filepath.Join(contextDir, operatorSettingsFile)
-	info, err := os.Stat(path)
-	if err != nil || info.IsDir() {
-		return ""
-	}
-	return path
 }
 
 // NewWorkDir creates the empty directory the subprocess runs in, so it never

@@ -220,11 +220,39 @@ Note the interaction between the last two: `--setting-sources ''` suppresses `CL
 **as well as** settings files, so "ship our own `CLAUDE.md`" and "inherit none of the operator's
 configuration" cannot both be satisfied through files. panemux's own instructions therefore travel via
 `--append-system-prompt` (a compile-time literal in `DefaultSystemPrompt`, never operator input, so it
-carries no taint into argv). An operator may still refine the command center by placing `CLAUDE.md`
-and/or `settings.json` in `~/.config/panemux/command-center/`; the first is appended to the system
-prompt, the second passed as `--settings`. Both are optional, both are operator-owned config at the
-same trust level as `config.yaml`, and neither is required for the feature to work — panemux is
-installed as a standalone binary, so it can never rely on a repository being present on disk.
+carries no taint into argv). An operator may refine those instructions by placing a `CLAUDE.md` in
+`~/.config/panemux/command-center/`; it is optional, and it is *text appended to a system prompt*,
+which has no execution semantics.
+
+**No settings file is accepted from anywhere — not the operator's `~/.claude/settings.json`, and not a
+command-center-specific one.** This is not caution for its own sake. A settings value can nullify
+`--allowedTools`, which is this feature's actual security boundary. Reproduced twice against the real
+CLI (v2.1.233): with `--allowedTools` scoped to a single board tool, adding
+`{"permissions":{"defaultMode":"acceptEdits"}}` let the subprocess run `Bash` — the file it was told to
+write appeared on disk, and `permission_denials` was **empty**, so the call was not merely permitted
+but not even recorded as a decision. `defaultMode: "acceptEdits"` is an entirely ordinary thing for an
+operator to set for their own interactive sessions, so inheriting it would silently unscope the command
+center. The trust boundary is the point: host settings are written on the assumption that a human typed
+the request and is watching, while the command center accepts input from anyone holding the board
+bearer token, unattended.
+
+What panemux does send is `SubprocessSettings` (`internal/commandcenter/context.go`), a fixed literal
+containing only keys that *narrow* what the subprocess may do — currently
+`{"sandbox":{"enabled":true}}`. Sandboxing has to be passed explicitly precisely because
+`--setting-sources ''` means nothing else can ever enable it, so without this the command center could
+never be sandboxed even on a host where the operator had enabled it globally.
+`TestSubprocessSettingsOnlyNarrows` fails if a widening key (`permissions`, `hooks`, `apiKeyHelper`,
+`statusLine`, `env`, `enabledPlugins`, `additionalDirectories`, `mcpServers`) is ever added, and
+`TestRunnerSendsOnlyPanemuxOwnSettings` fails if any other `--settings` value reaches argv.
+
+**Stated plainly, because this repository distinguishes verified claims from unverified ones: the
+sandbox was *not* confirmed to confine anything.** What was verified is that passing it is harmless
+where the OS cannot provide it — the setting is ignored, the query completes, `is_error` stays false —
+and that `CLAUDE_CODE_SANDBOXED` remained unset in the implementation sandbox, with a write outside the
+workspace still succeeding, including under `CLAUDE_CODE_FORCE_SANDBOX=1`. The CLI's own error strings
+describe sandboxing as a per-device capability, so the reasonable reading is that the container this
+was tested in cannot provide it. Treat the confinement itself as unverified until someone runs it on a
+host where `/sandbox` reports the sandbox as available.
 
 The `PANEMUX_BOARD_TOKEN`/`PANEMUX_BOARD_BASE_URL` values the `claude -p` subprocess's own MCP-server
 child process reads never reach `Runner`'s own `exec.Command` argv at all — they are set in the MCP

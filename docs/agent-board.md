@@ -1060,8 +1060,11 @@ tradeoff (see [Known limitations](#known-limitations)), not a claim of a race-fr
   `--strict-mcp-config` limits it to the board MCP server this query configured, and `cmd.Dir` is an
   empty per-query temp directory rather than wherever panemux was launched. Since an empty
   `--setting-sources` also suppresses `CLAUDE.md` discovery, panemux's own instructions are passed via
-  `--append-system-prompt`. An operator may place `CLAUDE.md` and/or `settings.json` in
-  `~/.config/panemux/command-center/` to refine it; both are optional.
+  `--append-system-prompt`. An operator may place a `CLAUDE.md` in
+  `~/.config/panemux/command-center/` to refine those instructions; it is optional. No settings file is
+  accepted from any source — a settings value can nullify `--allowedTools`, so panemux sends only its
+  own fixed, narrowing document (currently `{"sandbox":{"enabled":true}}`). See
+  [security.md](security.md#command-center-subprocess-execution).
 - **Permissions.** The subprocess never receives `--dangerously-skip-permissions`. It has no PTY to
   surface an interactive approval prompt through, and this design does not substitute a blanket
   bypass for that missing prompt. Instead panemux runs a narrow, purpose-built MCP server exposing

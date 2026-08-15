@@ -391,10 +391,11 @@ func (r *Runner) buildArgs(sessionID string, firstRun bool, mcpPath, prompt stri
 		// is independent of setting sources.
 		"--setting-sources", "",
 		"--append-system-prompt", SystemPrompt(r.contextDir),
+		// A fixed literal that only narrows what the subprocess may do; the
+		// operator's own settings are never merged in. See
+		// SubprocessSettings for the escalation that rules out merging.
+		"--settings", SubprocessSettings,
 	)
-	if settings := OperatorSettingsPath(r.contextDir); settings != "" {
-		args = append(args, "--settings", settings)
-	}
 	args = append(args,
 		"--allowedTools="+strings.Join(r.allowedTools, ","),
 		"--",

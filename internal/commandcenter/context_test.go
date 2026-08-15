@@ -1,6 +1,7 @@
 package commandcenter
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -67,19 +68,29 @@ func TestSystemPromptIgnoresEmptyOperatorInstructions(t *testing.T) {
 	assert.Equal(t, DefaultSystemPrompt, SystemPrompt(dir))
 }
 
-func TestOperatorSettingsPath(t *testing.T) {
-	dir := t.TempDir()
-	assert.Empty(t, OperatorSettingsPath(dir), "absent file yields no --settings flag")
-	assert.Empty(t, OperatorSettingsPath(""))
+// TestSubprocessSettingsOnlyNarrows is the regression guard for the
+// escalation that rules out merging the operator's own settings: with
+// --allowedTools scoped to a single board tool, a settings document
+// carrying {"permissions":{"defaultMode":"acceptEdits"}} let the real CLI
+// run Bash with no permission denial recorded at all (reproduced twice,
+// v2.1.233). Whatever else this document grows, it must never carry a key
+// that can widen the subprocess's reach.
+func TestSubprocessSettingsOnlyNarrows(t *testing.T) {
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal([]byte(SubprocessSettings), &doc), "must be valid JSON for --settings")
 
-	path := filepath.Join(dir, "settings.json")
-	require.NoError(t, os.WriteFile(path, []byte(`{"model":"claude-sonnet-5"}`), 0o600))
-	assert.Equal(t, path, OperatorSettingsPath(dir))
+	widening := []string{
+		"permissions", "hooks", "apiKeyHelper", "statusLine",
+		"env", "enabledPlugins", "additionalDirectories", "mcpServers",
+	}
+	for _, key := range widening {
+		assert.NotContains(t, doc, key,
+			"%q can widen what the subprocess may do and must never be sent", key)
+	}
 
-	// A directory of that name is not a settings file.
-	other := t.TempDir()
-	require.NoError(t, os.Mkdir(filepath.Join(other, "settings.json"), 0o700))
-	assert.Empty(t, OperatorSettingsPath(other))
+	sandbox, ok := doc["sandbox"].(map[string]any)
+	require.True(t, ok, "sandbox must be present: nothing else can enable it once --setting-sources is empty")
+	assert.Equal(t, true, sandbox["enabled"])
 }
 
 func TestDefaultContextDirIsUnderPanemuxConfig(t *testing.T) {
