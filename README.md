@@ -22,6 +22,7 @@
 - **xterm.js rendering** — full-featured terminal emulation with Unicode and colour support
 - **Single binary** — Go backend embeds the compiled frontend; no separate web server needed
 - **YAML config** — declare your entire layout and SSH connections in one file; defaults to `~/.config/panemux/config.yaml`
+- **Agent Board** — one dashboard for what every pane's coding agent is doing, and a command palette to message them ([setup](#agent-board))
 
 ---
 
@@ -130,6 +131,118 @@ Common uses:
 - Set `cwd` on `local`, `ssh`, or `ssh_tmux` panes when you want the shell to start in a specific directory.
 - In the pane settings dialog, `Working Directory` can be chosen from a browsable directory tree for both local and SSH-backed panes. Hidden directories are available through a toggle.
 - Pane headers resolve Git and PR metadata from the live working context, including interactive `codex` and `claude` worktrees for both local and SSH-backed panes. When a valid sibling worktree was detected recently, panemux keeps that worktree pinned after the agent exits until the pane moves to a different repository context. `tmux` and `ssh_tmux` use the currently active tmux pane only.
+
+---
+
+## Agent Board
+
+Agent Board gives you one view of what every coding agent in your panes is doing, and one place to
+message them. Two independent pieces, either of which can be used without the other:
+
+- **Dashboard** — each pane's self-reported status (state, repo, branch, PR, summary), plus the
+  cross-pane message history. Opens from the **Agent Board** button or `Cmd/Ctrl+Shift+B`.
+- **Command center** — a Spotlight-style palette (`Cmd/Ctrl+Shift+K`) where you ask in plain language:
+  *"which panes are blocked?"*, *"tell every pane the branch is frozen"*.
+
+Full design lives in [docs/agent-board.md](docs/agent-board.md).
+
+### Prerequisites
+
+**[agmsg](https://github.com/fujibee/agmsg) must already be installed** on every host whose panes join
+the board — including remote hosts for `ssh`/`ssh_tmux` panes. panemux never installs, updates, or
+manages agmsg; it only detects an existing installation by looking for `scripts/api.sh` under the
+configured path. If it isn't there, panemux logs a warning naming the pane and leaves that pane alone.
+
+The command center additionally needs the `claude` CLI on the machine running panemux. It does **not**
+need agmsg.
+
+Remote hosts run these scripts over the SSH exec channel, which does not source `.bashrc`/`.profile`.
+Whatever agmsg needs (`bash`, `node`, `sqlite3`) must be on the non-interactive `PATH` — a common
+surprise when agmsg was installed under `nvm`/`asdf` in an interactive session.
+
+### Configuration
+
+```yaml
+server:
+    host: 127.0.0.1
+    # Required for the command center. Leave empty and panemux generates one on
+    # first run, storing it in ~/.config/panemux/token (never in this file).
+    auth_token: ""
+
+command_center:
+    enabled: true            # default false
+
+agent_board:
+    team: panemux                      # shared agmsg team for all board-enabled panes
+    agmsg_path: ~/.agents/skills/agmsg # ~ is expanded per host, including remote hosts
+
+workspaces:
+    items:
+        - id: default
+          title: Default
+          layout:
+            direction: horizontal
+            children:
+                - pane:
+                    id: api          # this id becomes the pane's agmsg identity
+                    type: local
+                    agent_board:
+                        enabled: true
+                        mode: monitor  # monitor (default) | turn | both | off
+                  size: 50
+```
+
+Pane ids become board addresses, so give them names you will recognize (`api`, `web`, `infra`) rather
+than `pane-1`. `_system` is reserved and rejected at config validation.
+
+### How a pane joins
+
+Joining is automatic — you do not run anything by hand.
+
+1. Start your agent in the pane as usual (`claude`, `codex`, `cursor-agent`, `gemini`, `grok`, or
+   `opencode`). panemux polls every 5s and needs to see it on two consecutive polls.
+2. panemux confirms agmsg exists at `agmsg_path` on that pane's host.
+3. It writes a **one-time instruction into the pane's terminal**, asking the agent to run agmsg's
+   `join.sh` using the pane id as its agmsg agent id, and from then on to send board messages with
+   `send.sh` and to self-report its status periodically.
+
+You will see that instruction appear in the pane, and the agent's replies to it. That is expected —
+it is written into the terminal the same way your own keystrokes are, so nothing happens mid-command
+that you cannot see. It is written once per pane; panemux remembers which panes are done across
+restarts.
+
+The pane id is used deliberately as the agmsg agent id: every board address assumes `from`/`to` are
+pane ids, so an agent that picks its own name breaks addressing.
+
+`mode: turn` or `both` additionally has the agent run agmsg's `delivery.sh`, which **writes hook
+configuration into that project's `.claude/settings.local.json`**. That file persists in the Git
+repository after the pane closes, and panemux does not revert it — including when the pane later sets
+`agent_board.enabled: false`. `monitor` (the default) does not touch it.
+
+### Checking that it worked
+
+Open the dashboard. A pane appears there only after its agent has actually sent a status report, so
+give it a moment after the agent starts.
+
+Nothing showing up? In order of likelihood:
+
+- **agmsg isn't where panemux looked.** Check the startup log for a warning naming the pane, and
+  confirm `<agmsg_path>/scripts/api.sh` exists on that pane's host.
+- **The agent wasn't detected.** Headless invocations are deliberately ignored (`claude -p`,
+  `codex exec`), so the agent must be running interactively in the pane.
+- **The agent hasn't reported yet.** Status is entirely self-reported; panemux computes nothing. A
+  card older than five minutes is dimmed and marked `stale`.
+- **Remote `PATH`.** See the prerequisites above.
+
+### What the command center can and cannot do
+
+It has exactly three tools: read board status, read message history, and send messages to panes. It
+has **no shell, no filesystem access, and no network access** — it cannot write code, run tests, or
+open pull requests, and it is launched in a way that enforces this rather than relying on it being
+asked nicely (see [docs/security.md](docs/security.md#command-center-subprocess-execution)).
+
+A message it sends is an ordinary message to the receiving agent, not a pre-authorized command. That
+agent's own confirmation behavior still applies, so "sent" is not "done".
 
 ---
 
