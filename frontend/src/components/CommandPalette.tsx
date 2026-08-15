@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { useBoardCommand } from '../hooks/useBoardCommand'
 import { BoardCommandHistoryResponseSchema } from '../schemas'
-import type { BoardCommandHistoryEntry } from '../schemas'
 import { TERMINAL_FONT_FAMILY } from '../utils/fonts'
+import { summarizeStreamLines } from '../utils/streamJson'
+import type { StreamSummaryLine } from '../utils/streamJson'
 import { useRestoreFocusOnClose } from '../hooks/useRestoreFocusOnClose'
 
 interface CommandPaletteProps {
@@ -22,8 +23,9 @@ const RECENT_HISTORY_LIMIT = 20
 export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, token, onClose }) => {
   const { connected, turns, pending, sendPrompt } = useBoardCommand({ enabled: isOpen, token })
   const [prompt, setPrompt] = useState('')
-  const [recentHistory, setRecentHistory] = useState<BoardCommandHistoryEntry[]>([])
+  const [recentHistory, setRecentHistory] = useState<StreamSummaryLine[]>([])
   const inputRef = useRef<HTMLInputElement>(null)
+  const transcriptRef = useRef<HTMLDivElement>(null)
 
   useRestoreFocusOnClose(isOpen)
 
@@ -43,7 +45,11 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, token, o
         })
         if (!res.ok) return
         const data = BoardCommandHistoryResponseSchema.parse(await res.json())
-        if (!cancelled) setRecentHistory(data.entries.slice(-RECENT_HISTORY_LIMIT))
+        if (!cancelled) {
+          // Summarize before slicing: the last N raw lines are almost always
+          // all bookkeeping frames, which would summarize to nothing.
+          setRecentHistory(summarizeStreamLines(data.entries.map((entry) => entry.raw)).slice(-RECENT_HISTORY_LIMIT))
+        }
       } catch {
         // Best-effort inline history — the palette still works without it.
       }
@@ -52,6 +58,15 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, token, o
       cancelled = true
     }
   }, [isOpen, token])
+
+  // Pin the transcript to its newest line. Without this the one line worth
+  // reading — the assistant's answer — lands below the fold on every query
+  // long enough to overflow, and the palette looks like it produced nothing.
+  useEffect(() => {
+    const transcript = transcriptRef.current
+    if (!transcript) return
+    transcript.scrollTop = transcript.scrollHeight
+  }, [turns, recentHistory])
 
   useEffect(() => {
     if (!isOpen) return
@@ -89,18 +104,18 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, token, o
       <div style={paletteStyle}>
         <div style={headerStyle}>Command Center{connected ? '' : ' (connecting…)'}</div>
 
-        <div style={historyStyle}>
+        <div style={historyStyle} ref={transcriptRef} data-testid="command-palette-transcript">
           {recentHistory.length === 0 && turns.length === 0 && (
             <div style={emptyStyle}>No recent activity.</div>
           )}
-          {recentHistory.map((entry, i) => (
-            <div key={`recent-${i}`} style={lineStyle}>{summarizeRaw(entry.raw)}</div>
+          {recentHistory.map((line, i) => (
+            <SummaryLine key={`recent-${i}`} line={line} />
           ))}
           {turns.map((turn) => (
             <div key={turn.id} style={turnStyle}>
               <div style={promptLineStyle}>&gt; {turn.prompt}</div>
-              {turn.lines.map((line, i) => (
-                <div key={i} style={lineStyle}>{summarizeRaw(line)}</div>
+              {summarizeStreamLines(turn.lines).map((line, i) => (
+                <SummaryLine key={i} line={line} />
               ))}
               {turn.error && <div style={errorLineStyle}>{turn.error}</div>}
               {turn.busy && <div style={errorLineStyle}>Command center is busy — try again shortly.</div>}
@@ -128,18 +143,15 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, token, o
   )
 }
 
-// summarizeRaw renders one stream-json line as a single readable string.
-// This is deliberately simple — a small preview, not a full JSON viewer —
-// since the palette's own inline history is a "recent context" glance, and
-// the persistent history panel is where a user reviews the full record.
-function summarizeRaw(raw: unknown): string {
-  if (raw && typeof raw === 'object') {
-    const obj = raw as Record<string, unknown>
-    if (typeof obj.result === 'string') return obj.result
-    if (typeof obj.type === 'string') return `[${obj.type}]`
-  }
-  return JSON.stringify(raw)
-}
+// SummaryLine renders one readable line of a command center turn. Tool calls
+// are marked rather than spelled out — knowing that board_broadcast ran is the
+// useful part; its arguments belong in the history panel, not the palette.
+const SummaryLine: React.FC<{ line: StreamSummaryLine }> = ({ line }) =>
+  line.kind === 'tool' ? (
+    <div style={toolLineStyle}>{`→ ${line.text}`}</div>
+  ) : (
+    <div style={lineStyle}>{line.text}</div>
+  )
 
 const overlayStyle: React.CSSProperties = {
   position: 'fixed',
@@ -189,6 +201,13 @@ const emptyStyle: React.CSSProperties = { color: '#666' }
 const turnStyle: React.CSSProperties = { marginBottom: '10px' }
 
 const promptLineStyle: React.CSSProperties = { color: '#4ec9b0' }
+
+const toolLineStyle: React.CSSProperties = {
+  color: '#8f98a8',
+  fontSize: '12px',
+  whiteSpace: 'pre-wrap',
+  wordBreak: 'break-word',
+}
 
 const lineStyle: React.CSSProperties = { color: '#ccc', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }
 
