@@ -74,7 +74,7 @@ type cmdRunner interface {
 
 // commandFactory constructs the subprocess for one query. The production
 // default wraps exec.CommandContext; tests inject a fake.
-type commandFactory func(ctx context.Context, name string, args ...string) cmdRunner
+type commandFactory func(ctx context.Context, dir, name string, args ...string) cmdRunner
 
 const defaultClaudeBin = "claude"
 
@@ -97,9 +97,12 @@ type RunnerConfig struct {
 	BuildMCPConfig func() (path string, cleanup func(), err error)
 	NewCommand     commandFactory
 	Now            func() time.Time
+	NewSessionID   func() (string, error)
+	NewWorkDir     func() (dir string, cleanup func(), err error)
 	ClaudeBin      string
 	SessionPath    string
 	HistoryPath    string
+	ContextDir     string
 	AllowedTools   []string
 	QueryTimeout   time.Duration
 }
@@ -113,9 +116,12 @@ type Runner struct {
 	buildMCPConfig func() (path string, cleanup func(), err error)
 	newCommand     commandFactory
 	now            func() time.Time
+	newSessionID   func() (string, error)
+	newWorkDir     func() (dir string, cleanup func(), err error)
 	claudeBin      string
 	sessionPath    string
 	historyPath    string
+	contextDir     string
 	allowedTools   []string
 	queryTimeout   time.Duration
 	mu             sync.Mutex
@@ -128,9 +134,12 @@ func NewRunner(cfg RunnerConfig) *Runner {
 		buildMCPConfig: cfg.BuildMCPConfig,
 		newCommand:     cfg.NewCommand,
 		now:            cfg.Now,
+		newSessionID:   cfg.NewSessionID,
+		newWorkDir:     cfg.NewWorkDir,
 		claudeBin:      cfg.ClaudeBin,
 		sessionPath:    cfg.SessionPath,
 		historyPath:    cfg.HistoryPath,
+		contextDir:     cfg.ContextDir,
 		allowedTools:   cfg.AllowedTools,
 		queryTimeout:   cfg.QueryTimeout,
 	}
@@ -143,6 +152,12 @@ func NewRunner(cfg RunnerConfig) *Runner {
 	if r.now == nil {
 		r.now = time.Now
 	}
+	if r.newSessionID == nil {
+		r.newSessionID = NewSessionID
+	}
+	if r.newWorkDir == nil {
+		r.newWorkDir = NewWorkDir
+	}
 	if r.queryTimeout <= 0 {
 		r.queryTimeout = defaultQueryTimeout
 	}
@@ -153,8 +168,13 @@ func NewRunner(cfg RunnerConfig) *Runner {
 // ("claude") unless operator-overridden, and args are passed as discrete
 // argv elements with no intermediate shell, so no argument here can be
 // reinterpreted as a command.
-func realCommandFactory(ctx context.Context, name string, args ...string) cmdRunner {
-	return exec.CommandContext(ctx, name, args...) //nolint:gosec // G204: see doc comment above
+func realCommandFactory(ctx context.Context, dir, name string, args ...string) cmdRunner {
+	cmd := exec.CommandContext(ctx, name, args...) //nolint:gosec // G204: see doc comment above
+	// An empty, panemux-created directory, so the subprocess never reads a
+	// CLAUDE.md belonging to whatever project the operator started panemux
+	// in. See context.go for the live verification behind this.
+	cmd.Dir = dir
+	return cmd
 }
 
 // Query starts one command-center turn if none is currently in flight,
@@ -192,6 +212,19 @@ func (r *Runner) run(ctx context.Context, prompt string, events chan<- Event) {
 		return
 	}
 
+	// A first run mints its own session id rather than adopting the one the
+	// CLI reports: `claude -p` with no --resume reports the *ambient*
+	// session id, so adopting it attaches this subprocess to a conversation
+	// panemux does not own. See context.go.
+	sessionID := state.SessionID
+	if firstRun {
+		sessionID, err = r.newSessionID()
+		if err != nil {
+			events <- errorEvent("%v", err)
+			return
+		}
+	}
+
 	mcpPath, cleanup, err := r.buildMCPConfig()
 	if err != nil {
 		events <- errorEvent("building mcp config: %v", err)
@@ -199,7 +232,14 @@ func (r *Runner) run(ctx context.Context, prompt string, events chan<- Event) {
 	}
 	defer cleanup()
 
-	cmd := r.newCommand(ctx, r.claudeBin, r.buildArgs(state.SessionID, firstRun, mcpPath, prompt)...)
+	workDir, cleanupWorkDir, err := r.newWorkDir()
+	if err != nil {
+		events <- errorEvent("%v", err)
+		return
+	}
+	defer cleanupWorkDir()
+
+	cmd := r.newCommand(ctx, workDir, r.claudeBin, r.buildArgs(sessionID, firstRun, mcpPath, prompt)...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		events <- errorEvent("creating stdout pipe: %v", err)
@@ -210,7 +250,7 @@ func (r *Runner) run(ctx context.Context, prompt string, events chan<- Event) {
 		return
 	}
 
-	historyEntries, capturedSessionID, scanFailed := r.streamOutput(stdout, events)
+	historyEntries, _, scanFailed := r.streamOutput(stdout, events)
 
 	if scanFailed {
 		// The client has already been told the query failed (streamOutput
@@ -225,10 +265,10 @@ func (r *Runner) run(ctx context.Context, prompt string, events chan<- Event) {
 	}
 
 	r.finishAfterStream(ctx, cmd, finishParams{
-		firstRun:          firstRun,
-		capturedSessionID: capturedSessionID,
-		historyEntries:    historyEntries,
-		scanFailed:        scanFailed,
+		firstRun:       firstRun,
+		sessionID:      sessionID,
+		historyEntries: historyEntries,
+		scanFailed:     scanFailed,
 	}, events)
 }
 
@@ -253,10 +293,10 @@ func (r *Runner) loadValidatedSessionState() (state SessionState, firstRun bool,
 // finishParams bundles what finishAfterStream needs to know about the
 // streamOutput phase that already ran before cmd.Wait().
 type finishParams struct {
-	capturedSessionID string
-	historyEntries    []HistoryEntry
-	firstRun          bool
-	scanFailed        bool
+	sessionID      string
+	historyEntries []HistoryEntry
+	firstRun       bool
+	scanFailed     bool
 }
 
 // finishAfterStream waits for the subprocess to exit, persists any captured
@@ -298,8 +338,11 @@ func (r *Runner) finishAfterStream(ctx context.Context, cmd cmdRunner, p finishP
 		events <- errorEvent("claude exited with error: %v", waitErr)
 		return
 	}
-	if p.firstRun && p.capturedSessionID != "" {
-		if err := SaveSessionFile(r.sessionPath, SessionState{SessionID: p.capturedSessionID}); err != nil {
+	// The id persisted here is the one panemux minted and passed as
+	// --session-id, never the one the subprocess reported back: the report
+	// is what used to leak an ambient session into this file.
+	if p.firstRun && p.sessionID != "" {
+		if err := SaveSessionFile(r.sessionPath, SessionState{SessionID: p.sessionID}); err != nil {
 			events <- errorEvent("persisting command center session id: %v", err)
 			return
 		}
@@ -326,13 +369,33 @@ func (r *Runner) finishAfterStream(ctx context.Context, cmd cmdRunner, p finishP
 //     permission model.
 func (r *Runner) buildArgs(sessionID string, firstRun bool, mcpPath, prompt string) []string {
 	args := []string{"-p"}
-	if !firstRun {
+	if firstRun {
+		// Pin the conversation to an id panemux minted. Without this the
+		// CLI reports an ambient session id that a later --resume would
+		// attach to — see context.go for the live verification.
+		args = append(args, "--session-id", sessionID)
+	} else {
 		args = append(args, "--resume", sessionID)
 	}
 	args = append(args,
 		"--output-format=stream-json",
 		"--verbose",
 		"--mcp-config", mcpPath,
+		// Only the board MCP server this query was configured with; never
+		// whatever else the operator has registered globally.
+		"--strict-mcp-config",
+		// Load no user, project or local settings: the operator's own hooks
+		// must not fire inside a subprocess panemux spawned, and their
+		// CLAUDE.md is not this orchestrator's instruction set. panemux's
+		// own instructions arrive via --append-system-prompt below, which
+		// is independent of setting sources.
+		"--setting-sources", "",
+		"--append-system-prompt", SystemPrompt(r.contextDir),
+	)
+	if settings := OperatorSettingsPath(r.contextDir); settings != "" {
+		args = append(args, "--settings", settings)
+	}
+	args = append(args,
 		"--allowedTools="+strings.Join(r.allowedTools, ","),
 		"--",
 		prompt,

@@ -41,12 +41,24 @@ func setupCommandCenter(cfg *config.Config) *commandcenter.Runner {
 		return nil
 	}
 
+	// Optional: an operator may drop a CLAUDE.md and/or settings.json here to
+	// refine the command center. Neither is required — panemux ships its own
+	// instructions compiled into the binary, since it is installed as a
+	// standalone binary with no repository on disk to read them from. A
+	// resolution failure only costs the override, not the feature.
+	contextDir, err := commandcenter.DefaultContextDir()
+	if err != nil {
+		log.Printf("Warning: command center: resolving context directory, operator overrides disabled: %v", err)
+		contextDir = ""
+	}
+
 	baseURL := commandCenterBaseURL(cfg)
 	token := cfg.Server.AuthToken
 
 	return commandcenter.NewRunner(commandcenter.RunnerConfig{
 		SessionPath:  sessionPath,
 		HistoryPath:  historyPath,
+		ContextDir:   contextDir,
 		AllowedTools: commandcenter.AllowedTools(),
 		BuildMCPConfig: func() (string, func(), error) {
 			execPath, err := os.Executable()

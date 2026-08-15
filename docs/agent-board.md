@@ -1040,13 +1040,28 @@ tradeoff (see [Known limitations](#known-limitations)), not a claim of a race-fr
 ### Process lifecycle
 
 - **First run.** No persisted command-center session id exists yet the first time a query arrives.
-  panemux invokes `claude -p --output-format=stream-json --verbose "<prompt>"` — note `--verbose` is
-  required alongside `-p --output-format=stream-json`; the CLI refuses to stream structured output
-  in print mode without it — omitting `--resume` entirely, captures the `session_id` the stream-json
-  output reports for that first exchange, and persists it to a small local file (e.g.
-  `~/.config/panemux/command-center-session.json`, the same kind of local bookkeeping file as the
-  relay cursor in [Cross-host relay](#cross-host-relay)). Every later query reuses that id:
-  `claude -p --resume <id> --output-format=stream-json --verbose "<prompt>"`.
+  panemux **mints its own v4 UUID** and pins the conversation to it with `--session-id <uuid>`, then
+  persists that id to a small local file (`~/.config/panemux/command-center-session.json`, the same
+  kind of local bookkeeping file as the relay cursor in [Cross-host relay](#cross-host-relay)). Every
+  later query reuses it: `claude -p --resume <id> ...`. Note `--verbose` is required alongside
+  `-p --output-format=stream-json`; the CLI refuses to stream structured output in print mode without
+  it.
+
+  **The id the subprocess reports is deliberately ignored.** An earlier revision omitted
+  `--session-id` on a first run and adopted whatever `session_id` the stream reported, on the
+  assumption that a `-p` invocation without `--resume` starts a fresh conversation. Verified against
+  the real CLI, it does not: it reports the *ambient* session id of the Claude Code session the
+  environment already belongs to, so the command center silently attached itself to a conversation it
+  does not own — one holding full tool permissions, while the command center is launched with three.
+  See [security.md's command center section](security.md#command-center-subprocess-execution).
+
+  The subprocess is also isolated from the operator's own configuration: `--setting-sources` is passed
+  with an empty value (no user, project or local settings, so operator hooks never fire inside it),
+  `--strict-mcp-config` limits it to the board MCP server this query configured, and `cmd.Dir` is an
+  empty per-query temp directory rather than wherever panemux was launched. Since an empty
+  `--setting-sources` also suppresses `CLAUDE.md` discovery, panemux's own instructions are passed via
+  `--append-system-prompt`. An operator may place `CLAUDE.md` and/or `settings.json` in
+  `~/.config/panemux/command-center/` to refine it; both are optional.
 - **Permissions.** The subprocess never receives `--dangerously-skip-permissions`. It has no PTY to
   surface an interactive approval prompt through, and this design does not substitute a blanket
   bypass for that missing prompt. Instead panemux runs a narrow, purpose-built MCP server exposing

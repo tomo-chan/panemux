@@ -189,6 +189,43 @@ since a fake `cmdRunner` cannot reproduce the real CLI's own argument-parsing be
 assert what argv panemux itself constructs, which is why this was caught by an adversarial review
 verifying claims against the real binary, not by the original test suite.
 
+**The subprocess's execution context is pinned by panemux, not inherited from the environment.** Three
+of `claude`'s defaults resolve from ambient state, and all three were wrong for a subprocess panemux
+spawns on an operator's behalf. Each finding below was reproduced against the real CLI (v2.1.233),
+not inferred from `--help`:
+
+- **Conversation identity.** A plain `claude -p` with no `--resume` does **not** mint a fresh
+  conversation — it reports the *ambient* session id of whatever Claude Code session the environment
+  already belongs to. `Runner` previously captured that reported id, persisted it, and `--resume`d it
+  on every later query, which attached the command center to a conversation it does not own. This was
+  observed live: a palette query returned a reply carrying the operator's own session context,
+  referencing a scratch file name that appeared in no prompt panemux ever sent. **The escalation is
+  the point:** the command center is deliberately launched with `--allowedTools` scoped to exactly
+  three board tools, while the session it joined held that session's full tool permissions, so palette
+  text became input to a far more capable agent than the palette's own contract admits.
+  `internal/commandcenter/context.go`'s `NewSessionID` now mints a v4 UUID, `buildArgs` pins it with
+  `--session-id` on a first run, and the persisted value is always the id panemux minted — the
+  subprocess's own reported id is never adopted.
+  `TestRunnerFirstRunMintsAndPersistsItsOwnSessionID` pins this by feeding the fake subprocess a
+  *different* reported id and asserting it never reaches the session file.
+- **Settings and hooks.** With no `--setting-sources`, the subprocess loads the operator's user,
+  project and local settings — including their hooks, which would then execute inside a process
+  panemux started. `buildArgs` passes `--setting-sources` with an empty value, and
+  `--strict-mcp-config` so only the board MCP server this query configured is connected.
+- **Working directory.** `claude -p` reads `CLAUDE.md` from its working directory, and `cmd.Dir` was
+  unset, so it read whatever project the operator happened to launch panemux from. `NewWorkDir`
+  creates an empty per-query temp directory and `realCommandFactory` sets `cmd.Dir` to it.
+
+Note the interaction between the last two: `--setting-sources ''` suppresses `CLAUDE.md` discovery
+**as well as** settings files, so "ship our own `CLAUDE.md`" and "inherit none of the operator's
+configuration" cannot both be satisfied through files. panemux's own instructions therefore travel via
+`--append-system-prompt` (a compile-time literal in `DefaultSystemPrompt`, never operator input, so it
+carries no taint into argv). An operator may still refine the command center by placing `CLAUDE.md`
+and/or `settings.json` in `~/.config/panemux/command-center/`; the first is appended to the system
+prompt, the second passed as `--settings`. Both are optional, both are operator-owned config at the
+same trust level as `config.yaml`, and neither is required for the feature to work — panemux is
+installed as a standalone binary, so it can never rely on a repository being present on disk.
+
 The `PANEMUX_BOARD_TOKEN`/`PANEMUX_BOARD_BASE_URL` values the `claude -p` subprocess's own MCP-server
 child process reads never reach `Runner`'s own `exec.Command` argv at all — they are set in the MCP
 config file's `env` block (see "Auth token and transport encryption" below for that file's own
