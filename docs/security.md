@@ -226,7 +226,7 @@ which has no execution semantics.
 
 **No settings file is accepted from anywhere — not the operator's `~/.claude/settings.json`, and not a
 command-center-specific one.** This is not caution for its own sake. A settings value can nullify
-`--allowedTools`, which is this feature's actual security boundary. Reproduced twice against the real
+`--allowedTools`. Reproduced twice against the real
 CLI (v2.1.233): with `--allowedTools` scoped to a single board tool, adding
 `{"permissions":{"defaultMode":"acceptEdits"}}` let the subprocess run `Bash` — the file it was told to
 write appeared on disk, and `permission_denials` was **empty**, so the call was not merely permitted
@@ -236,11 +236,54 @@ center. The trust boundary is the point: host settings are written on the assump
 the request and is watching, while the command center accepts input from anyone holding the board
 bearer token, unattended.
 
+**`--allowedTools` alone is therefore not a boundary — it is a permission policy another policy layer
+can override, and an earlier revision of this document called it "the actual security boundary", which
+was wrong.** The argv the subprocess is launched with carries a second, stronger list:
+`--disallowedTools`, built by `DisallowedTools()` in `internal/commandcenter/mcp_config.go`. The
+difference is measurable, all three rows run against the real CLI with `--allowedTools` scoped to a
+single board tool and a prompt instructing the model to write a file with `Bash`:
+
+| argv | `Bash` |
+|---|---|
+| `--allowedTools` alone | blocked |
+| `+ {"permissions":{"defaultMode":"acceptEdits"}}` | **executed** — file written, `permission_denials` empty |
+| `+ --disallowedTools=Bash` | blocked |
+
+panemux sends no `permissions` key today, so the middle row is not the shipped configuration — but it
+is one settings key away, and the third row is what keeps that from being a full escape. The shipped
+argv was then verified end to end against a live board: `Bash` stays blocked *and* `board_status` still
+returns real data, both with and without the `acceptEdits` override applied on top.
+
+A wildcard was tried first and rejected on evidence: `--disallowedTools="*"` removes the board MCP
+tools as well, leaving the command center with nothing to call, while the model still reported file
+tools as available. So the list is an explicit enumeration of the tools that can *act* — execute,
+write, reach the network, spawn further agents, persist work, or contact anything outside the process.
+It will drift as the CLI gains tools. That weakness is accepted because it is the only argv-level
+denial that holds; `TestDisallowedToolsCoversActingTools` and `TestRunnerDeniesActingToolsByName` fail
+if the list or the flag disappears.
+
+Relatedly, `AllowedTools`'s own doc comment used to say the subprocess had "no `Bash`, no filesystem
+tools". That was imprecise in a way that mattered: those tools are *present* in the subprocess's tool
+list and refused at call time, not absent. "Refused" is exactly the property the middle row above
+defeats.
+
 What panemux does send is `SubprocessSettings` (`internal/commandcenter/context.go`), a fixed literal
 containing only keys that *narrow* what the subprocess may do — currently
 `{"sandbox":{"enabled":true}}`. Sandboxing has to be passed explicitly precisely because
 `--setting-sources ''` means nothing else can ever enable it, so without this the command center could
 never be sandboxed even on a host where the operator had enabled it globally.
+
+**With `Bash` denied by name, the sandbox confines nothing today** — its subject is Bash command
+execution (`autoAllowBashIfSandboxed`, `allowUnsandboxedCommands`, `forbidUnsandboxedCommands` and
+`commandPattern` all sit in that area of the settings schema, and nothing suggests it wraps MCP stdio
+server child processes). It is kept as the layer that would still apply if both argv lists were ever
+widened. Its `network` sub-key (`allowedDomains`/`deniedDomains`, matched as `*`, `localhost`,
+`host[:port]` or `*.host[:port]`) is deliberately left unset for the same reason: the board MCP
+server's loopback call to panemux's own API is outside the sandbox's scope, so there is nothing to
+allow-list, and guessing at a network policy could only break the one path the feature depends on.
+Note also that `autoAllowBashIfSandboxed` runs in the *widening* direction — being sandboxed can be a
+reason to auto-permit `Bash` — so "sandbox" must not be read here as a uniformly restrictive concept.
+panemux never sets it, and `TestSubprocessSettingsOnlyNarrows` would fail if a widening key appeared.
 `TestSubprocessSettingsOnlyNarrows` fails if a widening key (`permissions`, `hooks`, `apiKeyHelper`,
 `statusLine`, `env`, `enabledPlugins`, `additionalDirectories`, `mcpServers`) is ever added, and
 `TestRunnerSendsOnlyPanemuxOwnSettings` fails if any other `--settings` value reaches argv.

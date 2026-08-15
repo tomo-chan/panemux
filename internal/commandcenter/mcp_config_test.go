@@ -63,3 +63,22 @@ func TestAllowedToolsScopedToBoardToolsOnly(t *testing.T) {
 		"mcp__panemux-board__board_broadcast",
 	}, tools)
 }
+
+// TestDisallowedToolsCoversActingTools guards the list that is the command
+// center's only argv-level denial that survives a permissions override. See
+// DisallowedTools for the three-row experiment against the real CLI.
+func TestDisallowedToolsCoversActingTools(t *testing.T) {
+	deny := DisallowedTools()
+
+	for _, tool := range []string{"Bash", "Write", "Edit", "Read", "Agent", "Task", "WebFetch", "Monitor"} {
+		assert.Contains(t, deny, tool, "%s can act outside the board and must be denied by name", tool)
+	}
+
+	// A wildcard was tried and rejected on evidence: it removes the board
+	// MCP tools too, leaving the command center with nothing to call.
+	assert.NotContains(t, deny, "*", "a wildcard denial also removes the board tools")
+
+	for _, allowed := range AllowedTools() {
+		assert.NotContains(t, deny, allowed, "the board tools must never be denied")
+	}
+}

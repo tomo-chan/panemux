@@ -746,3 +746,35 @@ func indexOf(haystack []string, needle string) int {
 	}
 	return -1
 }
+
+// TestRunnerDeniesActingToolsByName pins that the subprocess is launched
+// with an explicit denial list, not only an allowlist. Verified against the
+// real CLI: --allowedTools alone blocks Bash, but a settings document
+// carrying {"permissions":{"defaultMode":"acceptEdits"}} defeats it and Bash
+// runs; adding --disallowedTools blocks it again. The allowlist is a policy
+// another policy can override; this denial is not.
+func TestRunnerDeniesActingToolsByName(t *testing.T) {
+	var captured capturedInvocation
+	factory := func(_ context.Context, _, name string, args ...string) cmdRunner {
+		captured = capturedInvocation{Name: name, Args: args}
+		return &fakeCmd{stdout: io.NopCloser(strings.NewReader(""))}
+	}
+	r, _, _ := newTestRunner(t, factory)
+
+	events, err := r.Query(context.Background(), "status")
+	require.NoError(t, err)
+	drain(t, events)
+
+	var denyArg string
+	for _, arg := range captured.Args {
+		if strings.HasPrefix(arg, "--disallowedTools=") {
+			denyArg = arg
+		}
+	}
+	require.NotEmpty(t, denyArg, "expected a --disallowedTools argument, got %v", captured.Args)
+	// The "=" form, for the same reason --allowedTools uses it: the flag is
+	// variadic and a two-element form would swallow the next argv element.
+	assert.NotContains(t, captured.Args, "--disallowedTools")
+	assert.Contains(t, denyArg, "Bash")
+	assert.Contains(t, denyArg, "Agent")
+}

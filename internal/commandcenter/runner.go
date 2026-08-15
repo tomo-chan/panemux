@@ -398,6 +398,9 @@ func (r *Runner) buildArgs(sessionID string, firstRun bool, mcpPath, prompt stri
 	)
 	args = append(args,
 		"--allowedTools="+strings.Join(r.allowedTools, ","),
+		// The denial that survives a permissions override; see
+		// DisallowedTools for the three-row experiment behind it.
+		"--disallowedTools="+strings.Join(DisallowedTools(), ","),
 		"--",
 		prompt,
 	)
