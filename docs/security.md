@@ -189,6 +189,23 @@ since a fake `cmdRunner` cannot reproduce the real CLI's own argument-parsing be
 assert what argv panemux itself constructs, which is why this was caught by an adversarial review
 verifying claims against the real binary, not by the original test suite.
 
+**Slash commands are disabled, because they are outside both tool lists.** `--allowedTools` and
+`--disallowedTools` govern tools; neither governs the CLI's own slash-command registry. Verified
+against the real CLI: a prompt of `/context`, sent through the otherwise-shipped argv, returned that
+command's own output (a context-usage table) rather than being treated as prompt text. The palette is
+reachable by anyone holding the board bearer token, so that put the whole registry — `/config`,
+`/model`, `/mcp`, `/doctor`, `/clear` and the rest, 46 commands in the environment this was measured
+in — one message away. `buildArgs` passes `--disable-slash-commands`; the same prompt then returns
+"/context isn't available in this environment." while `board_status` still returns real data, both
+confirmed live. `TestRunnerDisablesSlashCommands` pins the flag and that the prompt still travels as
+prompt text after the `--` marker.
+
+One related observation, recorded because it bounds what the three-tool contract actually covers: the
+subprocess can still describe its own execution environment, since the CLI injects environment context
+into its system prompt that `--append-system-prompt` only adds to. In a Claude Code on the web
+environment that context included the session URL. This is not reachable through a tool and is not
+closed by any flag above.
+
 **The subprocess's execution context is pinned by panemux, not inherited from the environment.** Three
 of `claude`'s defaults resolve from ambient state, and all three were wrong for a subprocess panemux
 spawns on an operator's behalf. Each finding below was reproduced against the real CLI (v2.1.233),

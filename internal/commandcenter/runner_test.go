@@ -778,3 +778,27 @@ func TestRunnerDeniesActingToolsByName(t *testing.T) {
 	assert.Contains(t, denyArg, "Bash")
 	assert.Contains(t, denyArg, "Agent")
 }
+
+// TestRunnerDisablesSlashCommands pins the third argv-level restriction.
+// Slash commands are outside both --allowedTools and --disallowedTools: a
+// prompt of "/context" against the real CLI returned the command's own
+// output, so anyone able to type into the palette could reach the CLI's
+// whole slash-command registry (/config, /model, /mcp, /doctor, ...).
+// --disable-slash-commands turns that into "/context isn't available in
+// this environment." while leaving the board MCP tools untouched.
+func TestRunnerDisablesSlashCommands(t *testing.T) {
+	var captured capturedInvocation
+	factory := func(_ context.Context, _, name string, args ...string) cmdRunner {
+		captured = capturedInvocation{Name: name, Args: args}
+		return &fakeCmd{stdout: io.NopCloser(strings.NewReader(""))}
+	}
+	r, _, _ := newTestRunner(t, factory)
+
+	events, err := r.Query(context.Background(), "/context")
+	require.NoError(t, err)
+	drain(t, events)
+
+	assert.Contains(t, captured.Args, "--disable-slash-commands")
+	// The prompt still travels as prompt text, after the end-of-options marker.
+	assert.Equal(t, "/context", captured.Args[len(captured.Args)-1])
+}

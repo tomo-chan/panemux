@@ -390,6 +390,12 @@ func (r *Runner) buildArgs(sessionID string, firstRun bool, mcpPath, prompt stri
 		// own instructions arrive via --append-system-prompt below, which
 		// is independent of setting sources.
 		"--setting-sources", "",
+		// Slash commands sit outside both tool lists. Verified against the
+		// real CLI: a prompt of "/context" returned that command's own
+		// output, so the palette — reachable by anyone holding the board
+		// token — could otherwise drive the CLI's whole slash-command
+		// registry (/config, /model, /mcp, /doctor, ...).
+		"--disable-slash-commands",
 		"--append-system-prompt", SystemPrompt(r.contextDir),
 		// A fixed literal that only narrows what the subprocess may do; the
 		// operator's own settings are never merged in. See
