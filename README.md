@@ -149,7 +149,10 @@ Full design lives in [docs/agent-board.md](docs/agent-board.md).
 ### Prerequisites
 
 **[agmsg](https://github.com/fujibee/agmsg) must already be installed** on every host whose panes join
-the board — including remote hosts for `ssh`/`ssh_tmux` panes. panemux never installs, updates, or
+the board — including remote hosts for `ssh`/`ssh_tmux` panes. panemux is tested against **agmsg
+1.2.0**; it reads each host's `VERSION` at startup and logs a warning for anything else, without
+blocking. agmsg promises compatibility only for reading through `scripts/api.sh`, while panemux also
+depends on `send.sh`, `join.sh` and `delivery.sh`, so a different version may work or may misbehave. panemux never installs, updates, or
 manages agmsg; it only detects an existing installation by looking for `scripts/api.sh` under the
 configured path. If it isn't there, panemux logs a warning naming the pane and leaves that pane alone.
 

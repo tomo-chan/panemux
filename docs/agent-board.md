@@ -486,7 +486,14 @@ more exposure to agmsg's evolution than a "we only read from it" dependency woul
 in Known limitations](#known-limitations) for that tradeoff stated plainly. panemux implementation
 must pin a specific tested agmsg version/tag and treat any change to either script's observed
 behavior as an external dependency compatibility bug, tracked the same way any other pinned
-dependency's breaking change would be — and must be able to *detect* such a break mechanically
+dependency's breaking change would be. **That pin is `board.TestedAgmsgVersion`
+(`internal/board/agmsg_version.go`), currently `1.2.0`** — the version whose own source
+(`delivery.sh`, `scripts/lib/type-registry.sh`, the per-type `type.conf` manifests) the script
+argument shapes documented here were read from. panemux reads each board-enabled host's
+`<agmsg_path>/VERSION` once at startup and logs a warning when it differs; a mismatch never blocks
+startup, because refusing to run against an untested agmsg would turn a possible incompatibility into
+a certain outage. An install with no `VERSION` file reads as unknown and is not warned about — panemux
+does not claim a mismatch it could not observe — and must be able to *detect* such a break mechanically
 rather than discover it from a pane silently failing to communicate; see [agmsg compatibility
 contract](#agmsg-compatibility-contract).
 

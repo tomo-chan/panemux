@@ -90,7 +90,49 @@ func setupBoard(cfg *config.Config, manager *session.Manager) (*board.BoardCache
 		}
 	}
 
+	warnOnAgmsgVersionMismatch(manager, paneHosts, resolveBootstrapPaths(cfg, manager, paneHosts))
+
 	return cache, relay, bootstrap
+}
+
+// warnOnAgmsgVersionMismatch reports, once per board-enabled host at
+// startup, an agmsg install that is not board.TestedAgmsgVersion. It never
+// blocks startup: see board.VersionMismatchWarning for why a mismatch is a
+// warning rather than a refusal. An unreadable VERSION is logged at the
+// same level and otherwise ignored — panemux cannot claim a mismatch it
+// could not observe.
+func warnOnAgmsgVersionMismatch(
+	manager *session.Manager, paneHosts map[string]string, resolvedPaths map[string]string,
+) {
+	for _, host := range distinctBoardHosts(paneHosts) {
+		agmsgPath, ok := resolvedPaths[host]
+		if !ok {
+			continue
+		}
+
+		var (
+			installed string
+			err       error
+		)
+		if host == boardHostIDLocal {
+			installed, err = board.LocalAgmsgVersion(agmsgPath)
+		} else {
+			executors := findBoardExecutors(manager, paneHosts, host)
+			if len(executors) == 0 {
+				continue
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), boardStartupProbeTimeout)
+			installed, err = board.RemoteAgmsgVersion(ctx, executors[0], agmsgPath)
+			cancel()
+		}
+		if err != nil {
+			log.Printf("Warning: agent board: reading agmsg version on host %q: %v", host, err)
+			continue
+		}
+		if warning := board.VersionMismatchWarning(host, installed); warning != "" {
+			log.Printf("Warning: %s", warning)
+		}
+	}
 }
 
 // resolveBootstrapPaths resolves agmsg_path for every distinct board-enabled
