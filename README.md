@@ -214,10 +214,54 @@ restarts.
 The pane id is used deliberately as the agmsg agent id: every board address assumes `from`/`to` are
 pane ids, so an agent that picks its own name breaks addressing.
 
-`mode: turn` or `both` additionally has the agent run agmsg's `delivery.sh`, which **writes hook
-configuration into that project's `.claude/settings.local.json`**. That file persists in the Git
-repository after the pane closes, and panemux does not revert it — including when the pane later sets
-`agent_board.enabled: false`. `monitor` (the default) does not touch it.
+### Delivery mode, and the one setup step it needs
+
+`agent_board.mode` decides whether messages *reach* a pane's agent. It is worth understanding before
+you pick a value, because the default is the quiet one:
+
+| mode | Writes into your repository | Broadcasts reach the agent |
+|---|---|---|
+| `monitor` (default) | no | **no** — they sit in agmsg until the agent looks |
+| `turn` / `both` | yes, one file | yes |
+
+With `monitor`, panemux does not run agmsg's `delivery.sh` at all, so no delivery hooks exist and the
+board is effectively read-only: panes report their status and you can see it, but a broadcast is not
+pushed to anyone. Choose `turn` or `both` if you want the messaging half to work.
+
+`turn` and `both` have the agent run agmsg's `delivery.sh`, and **agmsg** — not panemux — writes a
+hook file into the pane's project directory. The path is agmsg's own per-type convention
+(`scripts/drivers/types/<type>/type.conf`, `hooks_file=`), and agmsg deliberately rejects any
+non-project-relative value, so it cannot be redirected to a user-scope location:
+
+| agent type | file agmsg writes |
+|---|---|
+| claude-code | `.claude/settings.local.json` |
+| codex | `.codex/hooks.json` |
+| gemini | `.agent/rules/agmsg.md` |
+| opencode | `.opencode/rules/agmsg.md` |
+| cursor | `.cursor/rules/agmsg.mdc` |
+| grok-build | `.grok/rules/agmsg.md` |
+
+These are local, machine-specific files — none of them belong in version control. Rather than editing
+`.gitignore` in every repository you work in, set a global exclude file once per machine:
+
+```sh
+git config --global core.excludesFile ~/.gitignore_global
+cat >> ~/.gitignore_global <<'EOF'
+.claude/settings.local.json
+.codex/hooks.json
+.agent/rules/agmsg.md
+.opencode/rules/agmsg.md
+.cursor/rules/agmsg.mdc
+.grok/rules/agmsg.md
+EOF
+```
+
+Repeat that once on each host that runs `ssh`/`ssh_tmux` panes. Writes are idempotent — each
+`delivery.sh set` strips agmsg's own hook entries before re-adding them — but they persist after the
+pane closes, and panemux never reverts them, including when a pane later sets
+`agent_board.enabled: false`. Removing them is done through agmsg (`delivery.sh set off`), outside
+panemux.
 
 ### Checking that it worked
 
