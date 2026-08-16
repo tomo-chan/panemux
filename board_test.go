@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"panemux/internal/config"
 	"panemux/internal/session"
 )
@@ -263,4 +266,29 @@ func TestSetupBoard_ReturnsNonNilBootstrapWatcher(t *testing.T) {
 	if bootstrap.HasWork() {
 		t.Fatal("expected HasWork()=false for a config with no board-enabled panes")
 	}
+}
+
+// TestAgmsgPresentOnHostLocal covers the gate that keeps the relay from
+// polling a host with no agmsg. Without it the relay logged the same exec
+// failure every few seconds forever — observed against a real server, 8
+// identical errors in the first 25 seconds — which buries the one line
+// naming the cause in precisely the situation the README calls the most
+// likely first failure.
+func TestAgmsgPresentOnHostLocal(t *testing.T) {
+	missing := t.TempDir()
+	assert.False(t, agmsgPresentOnHost(nil, nil, boardHostIDLocal, missing),
+		"no scripts/api.sh means no client, so the relay never polls this host")
+
+	present := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(present, "scripts"), 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(present, "scripts", "api.sh"), []byte("#!/bin/sh\n"), 0o600))
+	assert.True(t, agmsgPresentOnHost(nil, nil, boardHostIDLocal, present))
+}
+
+// TestAgmsgPresentOnHostRemoteUncheckable pins the deliberate asymmetry: a
+// remote host panemux cannot reach right now is treated as present. The
+// alternative — skipping it — would turn a transient connectivity problem
+// into a host that stays off the board for the rest of the process's life.
+func TestAgmsgPresentOnHostRemoteUncheckable(t *testing.T) {
+	assert.True(t, agmsgPresentOnHost(session.NewManager(), map[string]string{}, "remote-host", "/remote/home/demo/agmsg"))
 }

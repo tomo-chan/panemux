@@ -154,7 +154,8 @@ the board — including remote hosts for `ssh`/`ssh_tmux` panes. panemux is test
 blocking. agmsg promises compatibility only for reading through `scripts/api.sh`, while panemux also
 depends on `send.sh`, `join.sh` and `delivery.sh`, so a different version may work or may misbehave. panemux never installs, updates, or
 manages agmsg; it only detects an existing installation by looking for `scripts/api.sh` under the
-configured path. If it isn't there, panemux logs a warning naming the pane and leaves that pane alone.
+configured path. If it isn't there, panemux logs one warning naming the host and the path it looked in,
+and skips that host — panes there simply stay off the board, and nothing else about them changes.
 
 The command center additionally needs the `claude` CLI on the machine running panemux. It does **not**
 need agmsg.
@@ -277,8 +278,9 @@ give it a moment after the agent starts.
 
 Nothing showing up? In order of likelihood:
 
-- **agmsg isn't where panemux looked.** Check the startup log for a warning naming the pane, and
-  confirm `<agmsg_path>/scripts/api.sh` exists on that pane's host.
+- **agmsg isn't where panemux looked.** The startup log carries one
+  `no agmsg installation at "<path>" on host "<host>"` warning per affected host. Confirm
+  `<agmsg_path>/scripts/api.sh` exists there.
 - **The agent wasn't detected.** Headless invocations are deliberately ignored (`claude -p`,
   `codex exec`), so the agent must be running interactively in the pane.
 - **The agent hasn't reported yet.** Status is entirely self-reported; panemux computes nothing. A

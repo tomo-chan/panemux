@@ -221,12 +221,52 @@ func newAgmsgClientForHost(
 	if !ok {
 		return nil, false
 	}
+	if !agmsgPresentOnHost(manager, paneHosts, host, path) {
+		// Skipping the client is what keeps an absent agmsg quiet. Building
+		// one anyway means the relay polls a host that cannot answer, and
+		// logs the same exec failure every few seconds for as long as
+		// panemux runs — noise that buries the one line naming the cause,
+		// in exactly the situation (agmsg not installed yet) the README
+		// calls the most likely first failure.
+		log.Printf(
+			"Warning: agent board: no agmsg installation at %q on host %q, "+
+				"skipping that host (panes there stay off the board)",
+			path, host,
+		)
+		return nil, false
+	}
 	if host == boardHostIDLocal {
 		return board.NewLocalAgmsgClient(path), true
 	}
 
 	dynamicExecutor := &dynamicBoardExecutor{manager: manager, paneHosts: paneHosts, host: host}
 	return board.NewRemoteAgmsgClient(host, path, dynamicExecutor), true
+}
+
+// agmsgPresentOnHost reports whether host carries an agmsg install at path.
+// A remote host with no reachable executor is reported as present: panemux
+// cannot check, and refusing to build the client would turn a transient
+// connectivity problem into a permanently board-less host for the rest of
+// this process's life.
+func agmsgPresentOnHost(
+	manager *session.Manager, paneHosts map[string]string, host, path string,
+) bool {
+	if host == boardHostIDLocal {
+		return board.LocalAgmsgPresent(path)
+	}
+
+	executors := findBoardExecutors(manager, paneHosts, host)
+	if len(executors) == 0 {
+		return true
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), boardStartupProbeTimeout)
+	defer cancel()
+	present, err := board.RemoteAgmsgPresent(ctx, executors[0], path)
+	if err != nil {
+		log.Printf("Warning: agent board: checking agmsg on host %q: %v", host, err)
+		return true
+	}
+	return present
 }
 
 // resolveAgmsgPathForHost expands agent_board.agmsg_path's leading ~/ for
