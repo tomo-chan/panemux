@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { PaneSettingsDialog } from './PaneSettingsDialog'
+import type { PaneConfig } from '../schemas'
 
 const defaultProps = {
   isOpen: true,
@@ -189,5 +190,67 @@ describe('PaneSettingsDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: '/workspace/user/projects' }))
 
     await screen.findByText('sample-app')
+  })
+})
+
+describe('PaneSettingsDialog agent board', () => {
+  const basePane = { id: 'api', type: 'local' as const, title: 'API' }
+
+  function renderDialog(pane: PaneConfig, onSave = vi.fn()) {
+    render(<PaneSettingsDialog {...defaultProps} pane={pane} onSave={onSave} />)
+    return onSave
+  }
+
+  it('reflects a pane that is already on the board', () => {
+    renderDialog({ ...basePane, agent_board: { enabled: true, mode: 'turn' } })
+
+    expect((screen.getByLabelText('Join the agent board') as HTMLInputElement).checked).toBe(true)
+    expect((screen.getByLabelText('Message delivery') as HTMLSelectElement).value).toBe('turn')
+  })
+
+  it('leaves a pane off the board by default', () => {
+    renderDialog(basePane)
+
+    expect((screen.getByLabelText('Join the agent board') as HTMLInputElement).checked).toBe(false)
+  })
+
+  it('adds agent_board when the pane is joined', async () => {
+    const onSave = renderDialog(basePane)
+
+    fireEvent.click(screen.getByLabelText('Join the agent board'))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    expect(onSave.mock.calls[0][0].agent_board).toEqual({ enabled: true, mode: 'monitor' })
+  })
+
+  it('omits agent_board entirely for a pane left off the board', async () => {
+    const onSave = renderDialog(basePane)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    expect(onSave.mock.calls[0][0].agent_board).toBeUndefined()
+  })
+
+  // The mode picker is the only control in this dialog that causes a write
+  // into the user's own repository, so it must say so before it is used.
+  it('warns that turn and both write into the repository', () => {
+    renderDialog({ ...basePane, agent_board: { enabled: true, mode: 'monitor' } })
+    expect(screen.queryByTestId('agent-board-repo-warning')).toBeNull()
+
+    fireEvent.change(screen.getByLabelText('Message delivery'), { target: { value: 'both' } })
+
+    expect(screen.getByTestId('agent-board-repo-warning')).toBeDefined()
+  })
+
+  it('preserves an unrelated pane field it does not edit', async () => {
+    const onSave = renderDialog({ ...basePane, show_header: false, agent_board: { enabled: true, mode: 'off' } })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    expect(onSave.mock.calls[0][0].show_header).toBe(false)
+    expect(onSave.mock.calls[0][0].agent_board).toEqual({ enabled: true, mode: 'off' })
   })
 })

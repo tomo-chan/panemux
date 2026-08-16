@@ -921,3 +921,62 @@ describe('BoardMessagesResponseSchema', () => {
     expect(result.success).toBe(false)
   })
 })
+
+describe('PaneConfigSchema agent_board round-trip', () => {
+  // Regression test for silent config loss: the layout tree is parsed with
+  // this schema and PUT back wholesale on any edit, so a field the schema
+  // drops is deleted from config.yaml by an unrelated action — verified
+  // against a real server, where one browser-shaped layout PUT removed a
+  // pane's agent_board entirely and turned the dashboard off.
+  it('preserves agent_board through a parse', () => {
+    const pane = {
+      id: 'api',
+      type: 'local' as const,
+      title: 'API',
+      agent_board: { enabled: true, mode: 'turn' as const },
+    }
+
+    const parsed = PaneConfigSchema.parse(pane)
+
+    expect(parsed.agent_board).toEqual({ enabled: true, mode: 'turn' })
+  })
+
+  it('accepts a pane with no agent_board at all', () => {
+    const parsed = PaneConfigSchema.parse({ id: 'api', type: 'local' })
+    expect(parsed.agent_board).toBeUndefined()
+  })
+
+  it('accepts every mode the backend validates', () => {
+    for (const mode of ['monitor', 'turn', 'both', 'off']) {
+      const parsed = PaneConfigSchema.parse({ id: 'api', type: 'local', agent_board: { enabled: true, mode } })
+      expect(parsed.agent_board?.mode).toBe(mode)
+    }
+  })
+
+  it('rejects a mode the backend does not know', () => {
+    const result = PaneConfigSchema.safeParse({
+      id: 'api',
+      type: 'local',
+      agent_board: { enabled: true, mode: 'watch' },
+    })
+    expect(result.success).toBe(false)
+  })
+
+  it('rejects a non-boolean enabled', () => {
+    const result = PaneConfigSchema.safeParse({ id: 'api', type: 'local', agent_board: { enabled: 'yes' } })
+    expect(result.success).toBe(false)
+  })
+
+  it('survives a full layout parse, not just a bare pane', () => {
+    const layout = {
+      direction: 'horizontal' as const,
+      children: [
+        { size: 100, pane: { id: 'api', type: 'local' as const, agent_board: { enabled: true, mode: 'both' as const } } },
+      ],
+    }
+
+    const parsed = LayoutNodeSchema.parse(layout)
+
+    expect(parsed.children[0].pane?.agent_board).toEqual({ enabled: true, mode: 'both' })
+  })
+})

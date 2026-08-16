@@ -198,6 +198,10 @@ workspaces:
 Pane ids become board addresses, so give them names you will recognize (`api`, `web`, `infra`) rather
 than `pane-1`. `_system` is reserved and rejected at config validation.
 
+You do not have to edit YAML for this: **Pane Settings** in the pane header has a *Join the agent
+board* checkbox and, once ticked, a *Message delivery* picker for the mode. Changes there are saved
+to `config.yaml` like any other pane setting.
+
 ### How a pane joins
 
 Joining is automatic — you do not run anything by hand.
