@@ -19,6 +19,38 @@ const userToolResult = { type: 'user', message: { role: 'user', content: [{ type
 const result = (text: string) => ({ type: 'result', subtype: 'success', result: text })
 
 describe('summarizeStreamLines', () => {
+  it('renders a panemux-recorded prompt as its own kind', () => {
+    expect(summarizeStreamLines([{ type: 'panemux_prompt', text: 'which panes are blocked?' }])).toEqual([
+      { kind: 'prompt', text: 'which panes are blocked?' },
+    ])
+  })
+
+  it('keeps the prompt ahead of the answer it produced', () => {
+    expect(
+      summarizeStreamLines([
+        { type: 'panemux_prompt', text: 'status?' },
+        streamEvent,
+        assistantText('Two panes are working.'),
+      ]),
+    ).toEqual([
+      { kind: 'prompt', text: 'status?' },
+      { kind: 'text', text: 'Two panes are working.' },
+    ])
+  })
+
+  // A prompt is not assistant text, so it must not suppress the result
+  // fallback for a turn that produced no assistant text of its own.
+  it('still falls back to result when a turn only has a prompt', () => {
+    expect(summarizeStreamLines([{ type: 'panemux_prompt', text: 'status?' }, result('Nobody home.')])).toEqual([
+      { kind: 'prompt', text: 'status?' },
+      { kind: 'text', text: 'Nobody home.' },
+    ])
+  })
+
+  it('ignores a prompt frame with no usable text', () => {
+    expect(summarizeStreamLines([{ type: 'panemux_prompt', text: '  ' }, { type: 'panemux_prompt' }])).toEqual([])
+  })
+
   it('returns nothing for an empty input', () => {
     expect(summarizeStreamLines([])).toEqual([])
   })

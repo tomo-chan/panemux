@@ -78,6 +78,10 @@ type commandFactory func(ctx context.Context, dir, name string, args ...string) 
 
 const defaultClaudeBin = "claude"
 
+// promptHistoryType marks a history entry panemux wrote itself. The CLI
+// never emits this type.
+const promptHistoryType = "panemux_prompt"
+
 // defaultQueryTimeout bounds how long a single query's subprocess may run.
 // Without this, a hung or very slow `claude` invocation would keep the
 // Runner's single-query busy flag set indefinitely — worse, the context
@@ -246,11 +250,19 @@ func (r *Runner) run(ctx context.Context, prompt string, events chan<- Event) {
 		return
 	}
 	if err := cmd.Start(); err != nil {
+		// The turn never ran, so there is no stream to pair the prompt
+		// with; recording it alone would imply an exchange that did not
+		// happen.
 		events <- errorEvent("starting claude: %v", err)
 		return
 	}
 
-	historyEntries, _, scanFailed := r.streamOutput(stdout, events)
+	// The prompt leads its own turn in the record. The stream carries no
+	// trace of it — verified against a real run — so without this the
+	// history is a list of answers with nothing to attach them to.
+	historyEntries := []HistoryEntry{r.promptHistoryEntry(prompt)}
+	streamed, _, scanFailed := r.streamOutput(stdout, events)
+	historyEntries = append(historyEntries, streamed...)
 
 	if scanFailed {
 		// The client has already been told the query failed (streamOutput
@@ -348,6 +360,21 @@ func (r *Runner) finishAfterStream(ctx context.Context, cmd cmdRunner, p finishP
 		}
 	}
 	events <- Event{Type: EventDone}
+}
+
+// promptHistoryEntry records the operator's own prompt as a history entry.
+// panemux owns this file's format (see docs/agent-board.md's "API and
+// streaming"), and the type is one the CLI never emits, so a reader can
+// always tell a panemux-written entry from a relayed subprocess line.
+func (r *Runner) promptHistoryEntry(prompt string) HistoryEntry {
+	// json.Marshal on a string cannot fail, so the error is not reachable;
+	// the fallback keeps the entry well-formed rather than empty if that
+	// ever stops being true.
+	raw, err := json.Marshal(map[string]string{"type": promptHistoryType, "text": prompt})
+	if err != nil {
+		raw = []byte(`{"type":"` + promptHistoryType + `","text":""}`)
+	}
+	return HistoryEntry{At: r.now(), Raw: raw}
 }
 
 // buildArgs constructs the claude CLI argv. Two details here are load-bearing

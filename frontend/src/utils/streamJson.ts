@@ -10,9 +10,19 @@
 // what this extracts and everything else is dropped.
 
 export interface StreamSummaryLine {
-  kind: 'text' | 'tool'
+  kind: 'prompt' | 'text' | 'tool'
   text: string
 }
+
+// promptFrameType marks a history entry panemux wrote itself, recording the
+// operator's own prompt. The CLI never emits this type, so it cannot be
+// confused with a real stream-json frame — deliberate, since the rest of
+// this file's input is the CLI's output verbatim. It exists because the
+// stream carries no record of the prompt at all (verified against a real
+// run: the frames are stream_event, system, assistant and result — the
+// question that produced them appears nowhere), which left the history
+// panel showing answers with nothing to attach them to.
+const promptFrameType = 'panemux_prompt'
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : null
@@ -36,6 +46,12 @@ export function summarizeStreamLines(lines: readonly unknown[]): StreamSummaryLi
   for (const line of lines) {
     const frame = asRecord(line)
     if (!frame) continue
+
+    if (frame.type === promptFrameType) {
+      const text = nonEmptyString(frame.text)
+      if (text !== null) summary.push({ kind: 'prompt', text })
+      continue
+    }
 
     if (frame.type === 'result') {
       resultFallback = nonEmptyString(frame.result) ?? resultFallback

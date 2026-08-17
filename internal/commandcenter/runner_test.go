@@ -2,6 +2,7 @@ package commandcenter
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -105,7 +106,9 @@ func TestRunnerFirstRunMintsAndPersistsItsOwnSessionID(t *testing.T) {
 
 	entries, err := LoadHistory(historyPath)
 	require.NoError(t, err)
-	assert.Len(t, entries, 2)
+	// The prompt leads the turn, followed by the subprocess's own lines.
+	require.Len(t, entries, 3)
+	assert.Contains(t, string(entries[0].Raw), promptHistoryType)
 }
 
 // TestRunnerIsolatesTheSubprocessFromOperatorConfig pins the flags that keep
@@ -532,10 +535,13 @@ func TestRunnerMalformedStreamJSONEmitsErrorAndStops(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, state.SessionID)
 
-	// What was captured before the failure is still persisted to history.
+	// What was captured before the failure is still persisted to history,
+	// behind the prompt that leads the turn.
 	entries, err := LoadHistory(historyPath)
 	require.NoError(t, err)
-	assert.Len(t, entries, 1)
+	require.Len(t, entries, 2)
+	assert.Contains(t, string(entries[0].Raw), promptHistoryType)
+	assert.Contains(t, string(entries[1].Raw), "sess-1")
 }
 
 func TestRunnerNonZeroExitEmitsErrorEventAndSkipsSessionPersist(t *testing.T) {
@@ -560,7 +566,11 @@ func TestRunnerNonZeroExitEmitsErrorEventAndSkipsSessionPersist(t *testing.T) {
 
 	entries, err := LoadHistory(historyPath)
 	require.NoError(t, err)
-	assert.Len(t, entries, 1, "output captured before the failing exit is still persisted")
+	// The prompt leads the turn, and the line captured before the failing
+	// exit follows it — a failed turn is still part of the record.
+	require.Len(t, entries, 2)
+	assert.Contains(t, string(entries[0].Raw), promptHistoryType)
+	assert.Contains(t, string(entries[1].Raw), "sess-1", "output captured before the failing exit is still persisted")
 }
 
 func TestRunnerStartErrorEmitsErrorEventAndReleasesBusy(t *testing.T) {
@@ -801,4 +811,51 @@ func TestRunnerDisablesSlashCommands(t *testing.T) {
 	assert.Contains(t, captured.Args, "--disable-slash-commands")
 	// The prompt still travels as prompt text, after the end-of-options marker.
 	assert.Equal(t, "/context", captured.Args[len(captured.Args)-1])
+}
+
+// TestRunnerRecordsThePromptInHistory covers a gap found by reading a real
+// history file: the stream carries no record of the operator's own prompt.
+// A real run produced stream_event, system, assistant and result frames and
+// nothing else, so the history panel could only ever show answers with no
+// question attached to them. panemux owns this file's format, so it records
+// the prompt itself, under a type the CLI never emits.
+func TestRunnerRecordsThePromptInHistory(t *testing.T) {
+	output := `{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}` + "\n"
+	factory := func(_ context.Context, _, _ string, _ ...string) cmdRunner {
+		return &fakeCmd{stdout: io.NopCloser(strings.NewReader(output))}
+	}
+	r, _, historyPath := newTestRunner(t, factory)
+
+	events, err := r.Query(context.Background(), "which panes are blocked?")
+	require.NoError(t, err)
+	drain(t, events)
+
+	entries, err := LoadHistory(historyPath)
+	require.NoError(t, err)
+	require.NotEmpty(t, entries)
+
+	var first map[string]any
+	require.NoError(t, json.Unmarshal(entries[0].Raw, &first))
+	assert.Equal(t, "panemux_prompt", first["type"], "the prompt must be the first entry of its turn")
+	assert.Equal(t, "which panes are blocked?", first["text"])
+
+	// The subprocess's own lines still follow, unmodified.
+	require.Len(t, entries, 2)
+	assert.JSONEq(t, strings.TrimSpace(output), string(entries[1].Raw))
+}
+
+func TestRunnerRecordsThePromptEvenWhenTheQueryFails(t *testing.T) {
+	factory := func(_ context.Context, _, _ string, _ ...string) cmdRunner {
+		return &fakeCmd{stdout: io.NopCloser(strings.NewReader("")), waitErr: errors.New("exit status 1")}
+	}
+	r, _, historyPath := newTestRunner(t, factory)
+
+	events, err := r.Query(context.Background(), "a question that failed")
+	require.NoError(t, err)
+	drain(t, events)
+
+	entries, err := LoadHistory(historyPath)
+	require.NoError(t, err)
+	require.Len(t, entries, 1, "a failed turn still belongs in the record")
+	assert.Contains(t, string(entries[0].Raw), "a question that failed")
 }
