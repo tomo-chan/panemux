@@ -1124,10 +1124,18 @@ flow still applies.
   principles](#design-principles)'s "ask, don't reverse-engineer" rule, panemux persists what it
   already captured directly from the `--output-format=stream-json` stream while relaying it to the
   WS client (a documented, stable CLI output contract), appending it to a local file panemux fully
-  owns the format of. Because `send.sh`/`api.sh` calls the command center makes appear as ordinary
-  tool-use entries in that same captured stream, the returned history already interleaves "what the
-  user asked," "what the command center did on the board," and "what it told the user" in one
-  chronological feed, with no extra bookkeeping required.
+  owns the format of. Because the board tool calls the command center makes appear as ordinary
+  tool-use entries in that same captured stream, the returned history interleaves "what the command
+  center did on the board" and "what it told the user" in one chronological feed.
+
+  **"What the user asked" is the one part the stream does not carry**, contrary to what this
+  paragraph claimed until the history panel was actually read against a real capture: a real run
+  emits `stream_event`, `system`, `assistant` and `result` frames, and the prompt that produced them
+  appears in none of them. panemux therefore records it itself, as the first entry of each turn,
+  under type `panemux_prompt` — a type the CLI never emits, so a reader can always distinguish a
+  panemux-written entry from a relayed subprocess line. A turn whose subprocess failed still has its
+  prompt recorded; a turn whose subprocess never started does not, since there is no exchange to
+  record.
 
 ### UI
 
