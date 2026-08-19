@@ -75,9 +75,12 @@ func setupBoard(cfg *config.Config, manager *session.Manager) (*board.BoardCache
 	}
 
 	bootstrap := newBootstrapWatcher(bootstrapWatcherConfig{
-		Manager:       manager,
-		PaneHosts:     paneHosts,
-		PaneModes:     paneModes,
+		Manager:   manager,
+		PaneHosts: paneHosts,
+		// Read live: a mode changed through the pane settings dialog lands
+		// in cfg, and the watcher must see it on its next tick rather than
+		// keeping the value this function saw at startup.
+		PaneModes:     func() map[string]string { return currentPaneModes(cfg) },
 		ResolvedPaths: resolveBootstrapPaths(cfg, manager, paneHosts),
 		Team:          cfg.AgentBoard.Team,
 		Persist:       persistBootstrapState,
@@ -133,6 +136,20 @@ func warnOnAgmsgVersionMismatch(
 			log.Printf("Warning: %s", warning)
 		}
 	}
+}
+
+// currentPaneModes reads every board-enabled pane's mode from the live
+// config, so a mode changed while panemux runs takes effect on the next
+// bootstrap tick.
+func currentPaneModes(cfg *config.Config) map[string]string {
+	modes := map[string]string{}
+	for _, pane := range cfg.AllPanes() {
+		if pane.AgentBoard.Enabled == nil || !*pane.AgentBoard.Enabled {
+			continue
+		}
+		modes[pane.ID] = pane.AgentBoard.Mode
+	}
+	return modes
 }
 
 // resolveBootstrapPaths resolves agmsg_path for every distinct board-enabled

@@ -41,8 +41,9 @@ const maxBootstrapWriteAttempts = 3
 // deliberately takes no dependency on internal/config at all — see
 // bootstrapWatcherConfig's own comment.
 const (
-	boardModeTurn = "turn"
-	boardModeBoth = "both"
+	boardModeMonitor = "monitor"
+	boardModeTurn    = "turn"
+	boardModeBoth    = "both"
 )
 
 // bootstrapWatcherConfig is the precomputed, static input the bootstrap
@@ -52,9 +53,13 @@ const (
 // no dependency on internal/config, mirroring board.RelayConfig's own
 // existing dependency direction (see relay.go's RelayConfig comment).
 type bootstrapWatcherConfig struct {
-	Manager       *session.Manager
-	PaneHosts     map[string]string
-	PaneModes     map[string]string
+	Manager   *session.Manager
+	PaneHosts map[string]string
+	// PaneModes is a function, not a map, because a pane's mode can change
+	// while panemux runs — the pane settings dialog writes it straight into
+	// config.yaml. A snapshot taken at startup meant a mode set to "both"
+	// never reached the instruction, so agmsg's own delivery stayed off.
+	PaneModes     func() map[string]string
 	ResolvedPaths map[string]string
 	Persist       func(paneIDs []string)
 	Team          string
@@ -71,7 +76,7 @@ type bootstrapWatcherConfig struct {
 type bootstrapWatcher struct {
 	manager       *session.Manager
 	paneHosts     map[string]string
-	paneModes     map[string]string
+	paneModes     func() map[string]string
 	resolvedPaths map[string]string
 	persist       func(paneIDs []string)
 	bootstrapped  map[string]session.Session
@@ -187,6 +192,20 @@ func (b *bootstrapWatcher) pollOnce(ctx context.Context) {
 // checkPane runs the bootstrap decision for one pane. See
 // docs/agent-board.md's Bootstrap flow section for the algorithm this
 // implements.
+// modeFor reads the pane's current board mode, defaulting to monitor when
+// the pane carries no explicit value — matching internal/config's own
+// default rather than sending an empty mode into the instruction.
+func (b *bootstrapWatcher) modeFor(paneID string) string {
+	if b.paneModes == nil {
+		return boardModeMonitor
+	}
+	mode := b.paneModes()[paneID]
+	if mode == "" {
+		return boardModeMonitor
+	}
+	return mode
+}
+
 func (b *bootstrapWatcher) checkPane(ctx context.Context, paneID, host string) {
 	sess, ok := b.manager.Get(paneID)
 	if !ok {
@@ -253,7 +272,7 @@ func (b *bootstrapWatcher) checkPane(ctx context.Context, paneID, host string) {
 		return
 	}
 
-	instruction := buildBootstrapInstruction(b.resolvedPaths[host], b.team, paneID, agmsgType, b.paneModes[paneID])
+	instruction := buildBootstrapInstruction(b.resolvedPaths[host], b.team, paneID, agmsgType, b.modeFor(paneID))
 	b.writeInstruction(paneID, sess, instruction)
 }
 

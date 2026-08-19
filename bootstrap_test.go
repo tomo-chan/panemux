@@ -98,7 +98,7 @@ func newLocalWatcher(manager *session.Manager, agmsgPath, team string, paneModes
 	return newBootstrapWatcher(bootstrapWatcherConfig{
 		Manager:       manager,
 		PaneHosts:     map[string]string{"pane-a": boardHostIDLocal},
-		PaneModes:     paneModes,
+		PaneModes:     func() map[string]string { return paneModes },
 		ResolvedPaths: map[string]string{boardHostIDLocal: agmsgPath},
 		Team:          team,
 	})
@@ -523,4 +523,29 @@ func TestBuildBootstrapInstruction_ContainsVerifiedScriptInvocations(t *testing.
 		assert.False(t, strings.HasPrefix(trimmed, "$agmsg "),
 			"line invokes codex/gemini-style slash-command shorthand: %q", trimmed)
 	}
+}
+
+// TestBootstrapWatcherReadsModeLive covers a bug reported from real use:
+// setting a pane's mode to "both" in the pane settings dialog left agmsg's
+// own delivery mode at "off". paneModes was a snapshot taken once in
+// setupBoard, so a mode changed at runtime never reached the instruction —
+// the watcher kept using the startup value, and for the default "monitor"
+// that means delivery.sh is never run at all, which is exactly what leaves
+// agmsg reporting "off".
+func TestBootstrapWatcherReadsModeLive(t *testing.T) {
+	modes := map[string]string{"api": boardModeMonitor}
+	b := newBootstrapWatcher(bootstrapWatcherConfig{
+		Manager:       session.NewManager(),
+		PaneHosts:     map[string]string{"api": boardHostIDLocal},
+		PaneModes:     func() map[string]string { return modes },
+		ResolvedPaths: map[string]string{boardHostIDLocal: "/workspace/user/agmsg"},
+		Team:          "panemux",
+	})
+
+	assert.Equal(t, boardModeMonitor, b.modeFor("api"))
+
+	// The dialog writes a new mode into config; the watcher must see it.
+	modes["api"] = boardModeBoth
+	assert.Equal(t, boardModeBoth, b.modeFor("api"),
+		"a mode changed after startup must reach the next bootstrap instruction")
 }
