@@ -1,0 +1,37 @@
+#!/bin/sh
+# Stands in for the `claude` CLI in the command-center e2e fixture.
+#
+# The command center resolves its binary through PATH (`exec.Command("claude",
+# ...)`), so putting this first on PATH exercises the real resolution path
+# rather than an injected test double. What it deliberately does NOT do is
+# reproduce the CLI's own argument parsing — the exact argv panemux builds is
+# pinned by internal/commandcenter/runner_test.go against the real binary's
+# documented behavior, and duplicating that here would only re-assert it
+# against a fake.
+#
+# What this fixture is for is the half those tests cannot reach: a real
+# server, a real WebSocket, a real browser, and stream-json arriving one
+# line at a time.
+set -eu
+
+# panemux passes the prompt as the final argument, after a "--"
+# end-of-options marker. Taking the last argument is enough here and keeps
+# the stub from having to know the flag list.
+prompt=""
+for arg in "$@"; do
+    prompt="$arg"
+done
+
+# A slow query, so a test can observe a turn while it is still streaming.
+case "$prompt" in
+    *slowly*) delay=1 ;;
+    *) delay=0 ;;
+esac
+
+printf '{"type":"system","subtype":"init","session_id":"e2e-stub-session","tools":["Task","Bash"]}\n'
+printf '{"type":"stream_event","event":{"type":"content_block_delta"}}\n'
+printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Checking the board for: %s"}]}}\n' "$prompt"
+printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"board_status","input":{}}]}}\n'
+[ "$delay" -gt 0 ] && sleep "$delay"
+printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Two panes are on the board."}]}}\n'
+printf '{"type":"result","subtype":"success","session_id":"e2e-stub-session","result":"Two panes are on the board."}\n'

@@ -21,9 +21,11 @@ const chromium = {
 const DEFAULT_BASE_URL = 'http://127.0.0.1:4173'
 const AGENT_BOARD_BASE_URL = 'http://127.0.0.1:4174'
 const AGENT_BOARD_AGMSG_BASE_URL = 'http://127.0.0.1:4175'
+const COMMAND_CENTER_BASE_URL = 'http://127.0.0.1:4176'
 
 const AGENT_BOARD_SPEC = /agent-board\.spec\.ts$/
 const AGENT_BOARD_AGMSG_SPEC = /agent-board-agmsg\.spec\.ts$/
+const COMMAND_CENTER_SPEC = /command-center\.spec\.ts$/
 
 export default defineConfig({
   testDir: './e2e',
@@ -56,12 +58,19 @@ export default defineConfig({
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
     },
+    {
+      command: 'sh ./e2e/run-panemux-command-center-e2e.sh',
+      url: COMMAND_CENTER_BASE_URL,
+      cwd: '.',
+      reuseExistingServer: !process.env.CI,
+      timeout: 120_000,
+    },
   ],
   projects: [
     {
       name: 'chromium',
       use: { ...chromium, baseURL: DEFAULT_BASE_URL },
-      testIgnore: [AGENT_BOARD_SPEC, AGENT_BOARD_AGMSG_SPEC],
+      testIgnore: [AGENT_BOARD_SPEC, AGENT_BOARD_AGMSG_SPEC, COMMAND_CENTER_SPEC],
     },
     {
       name: 'chromium-agent-board',
@@ -72,6 +81,11 @@ export default defineConfig({
       name: 'chromium-agent-board-agmsg',
       use: { ...chromium, baseURL: AGENT_BOARD_AGMSG_BASE_URL },
       testMatch: AGENT_BOARD_AGMSG_SPEC,
+    },
+    {
+      name: 'chromium-command-center',
+      use: { ...chromium, baseURL: COMMAND_CENTER_BASE_URL },
+      testMatch: COMMAND_CENTER_SPEC,
     },
   ],
 })
