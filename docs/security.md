@@ -116,7 +116,12 @@ discipline `RunBoardCommand` already applies uniformly to every argument, board-
 `agent_board.team`, a pane's own ID, and the agmsg-recognized type string
 `session.AgentTypeDetector` returns are written only into the PTY instruction text, never into a
 `RunBoardCommand` call bootstrap itself makes; they are operator config or panemux's own fixed
-detection-table output either way, not external request data.
+detection-table output either way, not external request data. The same holds for the
+`actas-claim.sh`/`watch.sh` invocations the instruction gained for `claude-code` panes (see
+[agent-board.md](agent-board.md#two-panes-in-one-project-directory)): the script names and the
+`$CLAUDE_CODE_SESSION_ID` reference are compile-time literals, the value behind that variable is
+expanded by the agent's own shell and never by panemux, and no part of it reaches an
+`exec.Command` argv.
 
 ### Agent-reported values in the dashboard UI
 

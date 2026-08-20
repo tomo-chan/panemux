@@ -549,12 +549,83 @@ func TestBuildBootstrapInstruction_DefinesWhatASummaryShouldSay(t *testing.T) {
 }
 
 // The instruction is written into a PTY and read by a person as often as by
-// an agent, so it must not grow into a wall of prose.
+// an agent, so its prose must not grow into a wall. Command lines are
+// exempt: they carry an operator-configured agmsg path and a generated pane
+// ID, so their length is not something this file can choose, and wrapping
+// one would make it uncopyable.
 func TestBuildBootstrapInstruction_StaysReadableInATerminal(t *testing.T) {
 	text := buildBootstrapInstruction("/opt/agmsg", "panemux", "pane-a", "claude-code", "both")
 
 	for _, line := range strings.Split(text, "\n") {
+		if strings.Contains(line, "/scripts/") {
+			continue
+		}
 		assert.LessOrEqual(t, len(line), 100, "line is too long to read in a pane: %q", line)
+	}
+}
+
+// TestBuildBootstrapInstruction_ClaimsItsOwnIdentity covers the collision
+// two board-enabled panes in the SAME project directory otherwise have.
+//
+// Verified against agmsg's own source (v1.2.0, the pinned tested version,
+// and unchanged in v1.2.2): scripts/watch.sh resolves its subscription with
+// identities.sh <project> <type>, which returns EVERY (team, agent) pair
+// registered for that project and type — both pane IDs. Without a 4th
+// <agent> argument the watcher does a broad subscribe: it drops only pairs
+// another live session already holds an actas lock on, and claims nothing
+// itself. Two panes in one repo therefore each receive messages addressed
+// to the other. agmsg's own scripts/lib/actas-lock.sh names this exact
+// failure ("every concurrent CC session in that project would subscribe to
+// every registered identity's messages"), and scripts/actas-claim.sh is the
+// remedy its claude-code template calls right after join.sh.
+func TestBuildBootstrapInstruction_ClaimsItsOwnIdentity(t *testing.T) {
+	text := buildBootstrapInstruction("/opt/agmsg", "panemux", "pane-a", "claude-code", "monitor")
+
+	want := `/opt/agmsg/scripts/actas-claim.sh "$(pwd)" "claude-code" "pane-a" "$CLAUDE_CODE_SESSION_ID"`
+	assert.Contains(t, text, want)
+	// status=held is the case that must not be silently ignored: another
+	// live session owns this pane ID, and the template's own rule is to
+	// stop rather than disturb the running Monitor.
+	assert.Contains(t, text, "status=held")
+}
+
+// The session-id source is per agent type — agmsg's own type.conf `detect`
+// key is CLAUDE_CODE_SESSION_ID for claude-code, CODEX_THREAD_ID for codex,
+// and absent entirely for opencode and cursor. panemux has only verified
+// the claude-code invocation against agmsg's own template, so the step is
+// emitted for that type alone rather than guessing an env var for the rest.
+func TestBuildBootstrapInstruction_OmitsClaimForUnverifiedTypes(t *testing.T) {
+	for _, agentType := range []string{"codex", "gemini", "opencode", "cursor"} {
+		text := buildBootstrapInstruction("/opt/agmsg", "panemux", "pane-a", agentType, "monitor")
+		assert.NotContains(t, text, "actas-claim.sh",
+			"type %q has no verified session-id source", agentType)
+		assert.NotContains(t, text, "CLAUDE_CODE_SESSION_ID",
+			"type %q must not be handed claude-code's own env var", agentType)
+	}
+}
+
+// Claiming the lock is not enough on its own: the watcher this session is
+// already running was launched with no <agent> argument, so it keeps its
+// broad subscription until it is replaced. watch.sh's 4th argument is what
+// narrows it, and re-claims the lock.
+func TestBuildBootstrapInstruction_RearmsTheMonitorForItsOwnPaneOnly(t *testing.T) {
+	for _, mode := range []string{"", "monitor", "both"} {
+		text := buildBootstrapInstruction("/opt/agmsg", "panemux", "pane-a", "claude-code", mode)
+		want := `/opt/agmsg/scripts/watch.sh "$CLAUDE_CODE_SESSION_ID" "$(pwd)" "claude-code" "pane-a"`
+		assert.Contains(t, text, want, "mode %q runs a Monitor and must re-arm it", mode)
+		assert.Contains(t, text, "agmsg inbox stream", "mode %q must name the task to stop", mode)
+	}
+}
+
+// turn mode has no Monitor to re-arm (delivery is a Stop hook), and off
+// means the operator wants no automatic delivery at all — starting one
+// would contradict the setting. Both still claim the lock, which is what
+// check-inbox.sh's own subscription filtering reads.
+func TestBuildBootstrapInstruction_DoesNotStartAMonitorForTurnOrOff(t *testing.T) {
+	for _, mode := range []string{"turn", "off"} {
+		text := buildBootstrapInstruction("/opt/agmsg", "panemux", "pane-a", "claude-code", mode)
+		assert.NotContains(t, text, "watch.sh", "mode %q must not launch a watcher", mode)
+		assert.Contains(t, text, "actas-claim.sh", "mode %q still needs the exclusivity claim", mode)
 	}
 }
 

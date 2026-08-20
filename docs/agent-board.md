@@ -497,6 +497,54 @@ does not claim a mismatch it could not observe — and must be able to *detect* 
 rather than discover it from a pane silently failing to communicate; see [agmsg compatibility
 contract](#agmsg-compatibility-contract).
 
+### Two panes in one project directory
+
+Two board-enabled panes whose agents run in the **same** project directory each used to receive the
+other's messages. Board *identity* was never the problem — that is the pane ID end to end
+(`join.sh`'s `agent_id`, the `from`/`to` on every row, `BoardCache.RecordStatus`'s key, and the
+relay's own `validFrom` check), and a repository path plays no part in it. Delivery was.
+
+Read from agmsg's own source at the pinned `1.2.0` (unchanged in `1.2.2`): `scripts/watch.sh`
+resolves what it subscribes to with `identities.sh <project> <type>`, which returns **every** (team,
+agent) pair registered for that project and type — both pane IDs. Handed no 4th `<agent>` argument
+the watcher subscribes broadly: it drops only pairs another live session already holds an actas
+exclusivity lock on, and claims none itself. Neither pane claimed one, so neither pane's messages
+were private to it. agmsg states the same failure in `scripts/lib/actas-lock.sh`'s own header —
+"every concurrent CC session in that project would subscribe to every registered identity's
+messages" — and ships `scripts/actas-claim.sh` as the remedy, which its `claude-code` template calls
+directly after `join.sh`.
+
+The bootstrap instruction now follows that template's own call order and argument shapes: `join.sh`,
+then `actas-claim.sh "$(pwd)" <type> <pane-id> "$CLAUDE_CODE_SESSION_ID"`, then — only when a
+watcher is actually running — stop the existing `agmsg inbox stream` task and invoke a new Monitor
+with `watch.sh "$CLAUDE_CODE_SESSION_ID" "$(pwd)" <type> <pane-id>`, whose 4th argument both narrows
+the subscription and re-claims the lock. A `status=held` result means another live session owns that
+pane ID; the instruction tells the agent to report it and stop rather than disturb the running
+watcher.
+
+Three scoping decisions worth stating, because each one leaves something unfixed:
+
+- **`claude-code` only.** `actas-claim.sh`'s 4th argument is the session id, and its source is
+  per-type in agmsg's own `type.conf` `detect` key: `CLAUDE_CODE_SESSION_ID` here,
+  `CODEX_THREAD_ID` for codex, absent entirely for opencode and cursor. Only the `claude-code`
+  invocation has been verified against agmsg's own template, so it is the only one emitted — guessing
+  an env var for another type would hand the script an empty session id. Panes of other types in a
+  shared directory still cross-receive.
+- **No watcher is started for `turn` or `off`.** `turn` delivers through a Stop hook with no
+  watcher to replace, and `off` means the operator asked for no automatic delivery — starting one
+  would contradict the setting. Both still claim the lock, which is what `check-inbox.sh`'s own
+  subscription filtering reads.
+- **This is bootstrap-time only.** The claim happens once, when the pane is onboarded. An agent
+  process that exits and restarts inside a still-open pane is not re-bootstrapped (see [Known
+  limitations](#known-limitations)), so it does not re-claim; the lock it left behind becomes
+  reclaimable once agmsg's own liveness check sees the old instance is gone.
+
+What is *not* affected by any of this: the dashboard. Status rows are keyed by pane ID and validated
+against the sending host's own board-enabled pane set, so two panes in one repository have always
+rendered as two cards. Since the card no longer shows `repo` or `branch` (see
+[ui-design.md](ui-design.md#agent-board-ui)), the pane title is what distinguishes them at a glance —
+worth setting to something meaningful when running several agents against one repository.
+
 ## Status self-report and message flow
 
 Instead of a `kind='status'` field panemux owns (agmsg has no such column), status reports are
@@ -957,12 +1005,18 @@ board-enabled pane) must be true before the goroutine even starts.
       agmsg](#integration-with-agmsg) for why hardcoding either of agmsg's two `cmd_prefix`
       conventions (`/agmsg` vs. `$agmsg`) into one bootstrap instruction would be wrong for roughly
       half of the six detectable agent types.
-   2. From then on, send every board-related message (status reports, cross-pane messages) with the
+   2. **Only when the pane's agent type is `claude-code`:** claim that identity for this process by
+      running `actas-claim.sh "$(pwd)" <agmsg-type> <pane-id> "$CLAUDE_CODE_SESSION_ID"`, and — when
+      a Monitor-based watcher is running for this mode — replace that watcher with one restricted to
+      this pane (`watch.sh "$CLAUDE_CODE_SESSION_ID" "$(pwd)" <agmsg-type> <pane-id>`). See [Two
+      panes in one project directory](#two-panes-in-one-project-directory) for what this fixes and
+      why it is emitted for one agent type only.
+   3. From then on, send every board-related message (status reports, cross-pane messages) with the
       raw `send.sh <team> <from> <to> "<body>" --force` invocation rather than `/agmsg send`/`$agmsg
       send`, per [Integration with agmsg](#integration-with-agmsg).
-   3. Include the [status self-report](#status-self-report-and-message-flow) fields on every status
+   4. Include the [status self-report](#status-self-report-and-message-flow) fields on every status
       update, sent to `_system` via that same `send.sh` invocation.
-   4. Only if `mode` is `turn` or `both` (mirroring agmsg's own `delivery.sh set
+   5. Only if `mode` is `turn` or `both` (mirroring agmsg's own `delivery.sh set
       monitor|turn|both|off`, default `monitor`): also run `delivery.sh set <mode> <agmsg-type>
       "$(pwd)"` directly (again bypassing the `cmd_prefix` divergence) and read/follow the
       `AGMSG-DIRECTIVE:` block it prints — this is agmsg's own mechanism for telling an agent how to
