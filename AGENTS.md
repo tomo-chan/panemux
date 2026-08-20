@@ -28,6 +28,8 @@ This installs npm packages, downloads Go modules, and configures the repo-local 
 8. Read [docs/agent-board.md](docs/agent-board.md) before implementing cross-pane Claude
    messaging/status features (the `internal/board` package). It is a design document — check its
    status note before treating anything in it as shipped behavior.
+9. Read [docs/scenarios.md](docs/scenarios.md) when adding or changing a user-facing feature: it
+   maps each use case to where it is verified, and every feature change is expected to update it.
 
 ## Document Map
 
@@ -39,6 +41,7 @@ This installs npm packages, downloads Go modules, and configures the repo-local 
 - UI intent and interaction design: [docs/ui-design.md](docs/ui-design.md)
 - CI and release maintenance: [docs/maintenance.md](docs/maintenance.md)
 - Cross-pane Claude messaging design: [docs/agent-board.md](docs/agent-board.md)
+- Use-case scenario coverage map: [docs/scenarios.md](docs/scenarios.md)
 
 ## Editing Rules
 
