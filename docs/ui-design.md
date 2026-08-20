@@ -267,8 +267,9 @@ top of the principles above rather than replacing them:
     never joined" and "not configured at all" both rendered as absence. Panes still reporting after
     being removed from config stay listed for the same reason — silent disappearance is the failure
     mode being designed against.
-  - **Each card shows activity, not repository facts**: the state pill, the agent's own `summary`,
-    the `last_tool` it used, and how long ago it reported. `repo`, `branch` and `pr_url` are
+  - **Each card shows activity, not repository facts**: the pane ID with the operator's own pane
+    title beside it, the state pill, the agent's own `summary`, the `last_tool` it used, and how
+    long ago it reported. `repo`, `branch` and `pr_url` are
     deliberately *not* shown even though the status report carries them — panemux computes those
     itself by running git, and already renders them in the pane header and the workspace bar. The
     board's copies are self-reported and go stale silently, so showing both meant the same pane
@@ -283,6 +284,15 @@ top of the principles above rather than replacing them:
     `waiting` → `#f4bf4f` (deliberately reusing the existing attention-gold pill color, since
     "waiting" is the same kind of "needs a look" signal), and any other or missing value → a neutral
     `#4b5565` rather than a crash or blank dot.
+  - **The summary wraps; everything else on the card stays on one line.** Every field started out
+    sharing one nowrap-plus-ellipsis style, which clipped a real summary to roughly the first 45
+    characters in a 420px panel — so the board could report that eight panes were `working` without
+    saying what any of them was working on, which is the question a board of many panes exists to
+    answer. The summary now wraps, bounded to four lines via `-webkit-line-clamp` so one talkative
+    agent cannot push every other pane below the fold. `last_tool` is a bare tool name and keeps the
+    single-line treatment. The pane title is shown next to the ID for the same readability reason —
+    a column of raw IDs stops being scannable as soon as there are more than a couple of panes —
+    while the ID itself always stays visible, since it is the agmsg address every `from`/`to` uses.
   - A status entry whose `updated_at` is older than 5 minutes gets a `stale` pill and its card
     rendered at 60% opacity — dimmed, not hidden, since a stale report is still the most recent
     information available for that pane. No new colors were introduced for the dashboard, matching

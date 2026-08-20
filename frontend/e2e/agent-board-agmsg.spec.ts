@@ -27,8 +27,21 @@ test('renders the pane status and message the relay read from the agmsg installa
   // the board, and this is what it is doing.
   await expect(panel.getByText('board-main', { exact: true })).toBeVisible()
   await expect(panel.getByText('working', { exact: true })).toBeVisible()
-  await expect(panel.getByText('Wiring the dashboard panel')).toBeVisible()
   await expect(panel.getByText('tool: Edit')).toBeVisible()
+
+  // The summary is longer than one line of the 420px panel. A clipped
+  // string is still "visible" to Playwright, so assert the rendered box is
+  // taller than a single line instead — that is what wrapping actually
+  // means, and it is the assertion jsdom cannot make.
+  const summary = panel.getByText(/^Wiring the dashboard panel so a pane/)
+  await expect(summary).toBeVisible()
+  await expect(summary).toContainText('silently missing')
+  const box = await summary.boundingBox()
+  expect(box).not.toBeNull()
+  expect(box!.height).toBeGreaterThan(20)
+
+  // The pane title sits beside the ID so a column of panes is readable.
+  await expect(panel.getByText('Board Main', { exact: true })).toBeVisible()
 
   // The fixture's second pane is board-enabled but never sends a status
   // row, so it is listed as not joined rather than omitted — the whole

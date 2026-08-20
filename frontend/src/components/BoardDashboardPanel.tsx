@@ -5,6 +5,15 @@ import type { BoardMessage, BoardStatusEntry } from '../schemas'
 import { TERMINAL_FONT_FAMILY } from '../utils/fonts'
 import { colorForBoardState, formatRelativeTime, isStaleUpdatedAt } from '../utils/boardStatusColors'
 
+// BoardPaneRef is a pane the config put on the board. The title is the
+// operator's own name for it and is what makes a column of them readable;
+// the ID is the agmsg address every from/to value uses, so it stays visible
+// even when a title exists.
+export interface BoardPaneRef {
+  id: string
+  title?: string
+}
+
 interface BoardDashboardPanelProps {
   isOpen: boolean
   token: string
@@ -12,7 +21,7 @@ interface BoardDashboardPanelProps {
   // only panes that already reported made "configured but never joined"
   // indistinguishable from "not configured at all" — the first question this
   // panel exists to answer.
-  boardPaneIds: readonly string[]
+  boardPanes: readonly BoardPaneRef[]
   onClose: () => void
 }
 
@@ -23,7 +32,7 @@ interface BoardDashboardPanelProps {
 // visual language. Broadcast sending is out of scope by design (see the
 // implementation plan's "Scope外" section) — this panel only ever reads
 // /api/board/status and /api/board/messages.
-export const BoardDashboardPanel: React.FC<BoardDashboardPanelProps> = ({ isOpen, token, boardPaneIds, onClose }) => {
+export const BoardDashboardPanel: React.FC<BoardDashboardPanelProps> = ({ isOpen, token, boardPanes, onClose }) => {
   const { statuses, messages, error } = useBoardStatus({ enabled: isOpen, token })
   useRestoreFocusOnClose(isOpen)
 
@@ -46,8 +55,11 @@ export const BoardDashboardPanel: React.FC<BoardDashboardPanelProps> = ({ isOpen
   if (!isOpen) return null
 
   // Union, so a pane that dropped out of the config but is still reporting
-  // does not silently vanish from the board.
-  const paneIds = Array.from(new Set([...boardPaneIds, ...Object.keys(statuses)])).sort()
+  // does not silently vanish from the board. A reporting pane the config no
+  // longer lists has no title to look up, which is why the title is
+  // optional rather than part of the key.
+  const titles = new Map(boardPanes.map((pane) => [pane.id, pane.title]))
+  const paneIds = Array.from(new Set([...boardPanes.map((p) => p.id), ...Object.keys(statuses)])).sort()
   const messagesNewestFirst = [...messages].reverse()
   const hosts = new Set(messages.map((m) => m.host))
   const showHost = hosts.size > 1
@@ -74,7 +86,7 @@ export const BoardDashboardPanel: React.FC<BoardDashboardPanelProps> = ({ isOpen
           <div style={sectionTitleStyle}>Panes</div>
           {paneIds.length === 0 && <div style={emptyStyle}>No pane has agent board enabled yet.</div>}
           {paneIds.map((paneId) => (
-            <PaneStatusCard key={paneId} paneId={paneId} status={statuses[paneId]} />
+            <PaneStatusCard key={paneId} paneId={paneId} title={titles.get(paneId)} status={statuses[paneId]} />
           ))}
 
           <div style={{ ...sectionTitleStyle, marginTop: '16px' }}>Messages</div>
@@ -97,7 +109,11 @@ export const BoardDashboardPanel: React.FC<BoardDashboardPanelProps> = ({ isOpen
 // stale silently, so the same pane could show two different branches in two
 // places. Dropping them also removed the only <a> in this component tree,
 // and with it the agent-controlled href that needed scheme validation.
-const PaneStatusCard: React.FC<{ paneId: string; status?: BoardStatusEntry }> = ({ paneId, status }) => {
+const PaneStatusCard: React.FC<{ paneId: string; title?: string; status?: BoardStatusEntry }> = ({
+  paneId,
+  title,
+  status,
+}) => {
   const stale = status !== undefined && isStaleUpdatedAt(status.updated_at)
 
   return (
@@ -105,16 +121,19 @@ const PaneStatusCard: React.FC<{ paneId: string; status?: BoardStatusEntry }> = 
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
         <span style={statusDotStyle(status?.state)} />
         <span style={paneIdStyle}>{paneId}</span>
-        {!status && <span style={pillStyle('#3a2a2a', '#f08b8b')}>not joined</span>}
-        {status?.state && <span style={pillStyle('#2d253f', '#cbb3ff')}>{status.state}</span>}
-        {stale && <span style={pillStyle('#5a4311', '#f4bf4f')}>stale</span>}
+        {title && <span style={paneTitleStyle}>{title}</span>}
+        <span style={pillGroupStyle}>
+          {!status && <span style={pillStyle('#3a2a2a', '#f08b8b')}>not joined</span>}
+          {status?.state && <span style={pillStyle('#2d253f', '#cbb3ff')}>{status.state}</span>}
+          {stale && <span style={pillStyle('#5a4311', '#f4bf4f')}>stale</span>}
+        </span>
       </div>
       {!status && (
         <div style={notJoinedDetailStyle}>
           On the board in config, but no status has arrived. It reports once its agent joins.
         </div>
       )}
-      {status?.summary && <div style={detailStyle}>{status.summary}</div>}
+      {status?.summary && <div style={summaryStyle}>{status.summary}</div>}
       {status?.last_tool && <div style={mutedDetailStyle}>tool: {status.last_tool}</div>}
       {status && <div style={timestampStyle}>{formatRelativeTime(status.updated_at)}</div>}
     </div>
@@ -239,7 +258,43 @@ const paneIdStyle: React.CSSProperties = {
   overflow: 'hidden',
   textOverflow: 'ellipsis',
   whiteSpace: 'nowrap',
-  flex: '1 1 auto',
+  flexShrink: 0,
+}
+
+// The summary is the one field a person actually reads down the column, so
+// it wraps instead of being clipped to one 420px line. It is still bounded:
+// four lines, because an agent that reports a paragraph must not push every
+// other pane below the fold. -webkit-line-clamp is the only widely supported
+// way to bound by lines rather than pixels, and it is honored by every
+// browser panemux supports (see docs/behavior.md's browser requirements).
+const summaryStyle: React.CSSProperties = {
+  color: '#ccc',
+  fontSize: 11,
+  display: '-webkit-box',
+  WebkitBoxOrient: 'vertical',
+  WebkitLineClamp: 4,
+  overflow: 'hidden',
+  wordBreak: 'break-word',
+}
+
+// marginLeft: auto rather than letting the title flex-grow, so the pills
+// stay right-aligned whether or not a pane has a title.
+const pillGroupStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 6,
+  marginLeft: 'auto',
+  flexShrink: 0,
+}
+
+const paneTitleStyle: React.CSSProperties = {
+  color: '#8f98a8',
+  fontSize: 11,
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+  minWidth: 0,
+  flexShrink: 1,
 }
 
 const detailStyle: React.CSSProperties = {

@@ -525,6 +525,39 @@ func TestBuildBootstrapInstruction_ContainsVerifiedScriptInvocations(t *testing.
 	}
 }
 
+// TestBuildBootstrapInstruction_DefinesWhatASummaryShouldSay covers the
+// half of "show what each pane is doing" that no amount of dashboard work
+// can fix: the dashboard can only render a summary the agent chose to
+// write. The instruction used to list "summary" as one field name among
+// eight with no guidance at all, and "send an update whenever your state
+// changes meaningfully" left both the content and the cadence to the
+// agent's discretion — which is how a board of many panes ends up with
+// state pills and nothing to read.
+func TestBuildBootstrapInstruction_DefinesWhatASummaryShouldSay(t *testing.T) {
+	text := buildBootstrapInstruction("/opt/agmsg", "panemux", "pane-a", "claude-code", "monitor")
+
+	// The summary must be described as the current task in the operator's
+	// terms, not left as a bare field name.
+	assert.Contains(t, text, "summary")
+	assert.Contains(t, text, "one short sentence")
+	assert.Contains(t, text, "what you are working on right now")
+
+	// A cadence the agent can actually act on, rather than "meaningfully".
+	assert.Contains(t, text, "starting a new task")
+	assert.Contains(t, text, "finishing one")
+	assert.Contains(t, text, "blocked")
+}
+
+// The instruction is written into a PTY and read by a person as often as by
+// an agent, so it must not grow into a wall of prose.
+func TestBuildBootstrapInstruction_StaysReadableInATerminal(t *testing.T) {
+	text := buildBootstrapInstruction("/opt/agmsg", "panemux", "pane-a", "claude-code", "both")
+
+	for _, line := range strings.Split(text, "\n") {
+		assert.LessOrEqual(t, len(line), 100, "line is too long to read in a pane: %q", line)
+	}
+}
+
 // TestBootstrapWatcherReadsModeLive covers a bug reported from real use:
 // setting a pane's mode to "both" in the pane settings dialog left agmsg's
 // own delivery mode at "off". paneModes was a snapshot taken once in

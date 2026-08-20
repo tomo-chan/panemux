@@ -541,7 +541,23 @@ layout](#package-layout)'s detection rule.
 `branch`/`repo`/`pr_url` come from the agent running `git branch --show-current`, `git remote get-
 url origin`, and a PR lookup (e.g. `gh pr view --json url -q .url`) itself — panemux never computes
 these; it only displays what the agent reported. `cwd`/`pr_url` may be absent if the agent isn't in
-a repository or there's no open PR; the dashboard shows what's present.
+a repository or there's no open PR. The dashboard does not render `branch`/`repo`/`pr_url` at all
+(see [ui-design.md's Agent Board UI](ui-design.md#agent-board-ui) for why), but they stay in the
+schema because the relay stores whatever a pane reports.
+
+**`summary` is the field the dashboard is built around, and the bootstrap instruction says so
+explicitly.** It used to appear in the instruction as one field name among eight with no guidance,
+alongside "send an update whenever your state changes meaningfully" — which leaves both content and
+cadence to the agent's discretion. That is survivable with two panes and useless with eight: a
+column of state pills tells an operator that work is happening somewhere, not which pane is doing
+what. The instruction now asks for one short sentence in plain language naming the current task
+("Fixing the flaky relay test"), explicitly *not* the last tool call and not a session recap, with
+what the pane is blocked on when it is blocked, sent when starting a task, finishing one, becoming
+blocked, or going idle — events an agent can recognize, rather than a timer it would have to run.
+
+panemux cannot enforce any of this. A pane that reports no `summary`, or a stale one, renders as a
+card with a state pill and nothing to read, and that is the honest display of what the board knows
+— the dashboard never invents a summary from `last_tool` or from git state to fill the gap.
 
 ```mermaid
 sequenceDiagram

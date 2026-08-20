@@ -6,6 +6,7 @@ import { WorkspaceTabs } from './components/WorkspaceTabs'
 import { CommandPalette } from './components/CommandPalette'
 import { CommandHistoryPanel } from './components/CommandHistoryPanel'
 import { BoardDashboardPanel } from './components/BoardDashboardPanel'
+import type { BoardPaneRef } from './components/BoardDashboardPanel'
 import { useLayout } from './hooks/useLayout'
 import { usePaneSettings } from './hooks/usePaneSettings'
 import { useWorkspaceAttentionMonitor } from './hooks/useWorkspaceAttentionMonitor'
@@ -87,7 +88,7 @@ export const App: React.FC = () => {
 
   // Panes configured for the board, whether or not they have reported. The
   // dashboard needs these to tell "never joined" from "not configured".
-  const boardPaneIds = useMemo(() => collectBoardPaneIds(workspaces?.items ?? []), [workspaces])
+  const boardPanes = useMemo(() => collectBoardPanes(workspaces?.items ?? []), [workspaces])
   const workspaceSummaries = useMemo(() => {
     const summaries: Record<string, WorkspaceSummary> = {}
     if (!workspaces) return summaries
@@ -577,7 +578,7 @@ export const App: React.FC = () => {
         <BoardDashboardPanel
           isOpen={isBoardDashboardOpen && boardDashboardAvailable}
           token={boardToken}
-          boardPaneIds={boardPaneIds}
+          boardPanes={boardPanes}
           onClose={() => setIsBoardDashboardOpen(false)}
         />
       </div>
@@ -652,18 +653,21 @@ function collectChildPaneMetadata(
   }
 }
 
-function collectBoardPaneIds(items: Workspace[]): string[] {
-  const ids: string[] = []
+// collectBoardPanes gathers every pane the config puts on the board, with
+// the operator's own title for it when there is one — a column of raw pane
+// IDs stops being readable as soon as there are more than a couple.
+function collectBoardPanes(items: Workspace[]): BoardPaneRef[] {
+  const panes: BoardPaneRef[] = []
 
   const walk = (child: LayoutChild) => {
-    if (child.pane?.agent_board?.enabled) ids.push(child.pane.id)
+    if (child.pane?.agent_board?.enabled) panes.push({ id: child.pane.id, title: child.pane.title })
     for (const nested of child.children ?? []) walk(nested)
   }
   for (const workspace of items) {
     for (const child of workspace.layout.children) walk(child)
   }
 
-  return ids
+  return panes
 }
 
 function collectWorkspacePaneSummaries(

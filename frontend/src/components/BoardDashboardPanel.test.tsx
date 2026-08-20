@@ -33,7 +33,7 @@ describe('BoardDashboardPanel', () => {
   })
 
   it('does not render when closed', () => {
-    render(<BoardDashboardPanel isOpen={false} token="tok" boardPaneIds={[]} onClose={vi.fn()} />)
+    render(<BoardDashboardPanel isOpen={false} token="tok" boardPanes={[]} onClose={vi.fn()} />)
     expect(screen.queryByRole('dialog')).toBeNull()
   })
 
@@ -57,7 +57,7 @@ describe('BoardDashboardPanel', () => {
       } as Response),
     }))
 
-    render(<BoardDashboardPanel isOpen token="tok" boardPaneIds={[]} onClose={vi.fn()} />)
+    render(<BoardDashboardPanel isOpen token="tok" boardPanes={[]} onClose={vi.fn()} />)
 
     expect(await screen.findByText('main')).toBeDefined()
     expect(screen.getByText('working')).toBeDefined()
@@ -74,7 +74,7 @@ describe('BoardDashboardPanel', () => {
       } as Response),
     }))
 
-    render(<BoardDashboardPanel isOpen token="tok" boardPaneIds={[]} onClose={vi.fn()} />)
+    render(<BoardDashboardPanel isOpen token="tok" boardPanes={[]} onClose={vi.fn()} />)
 
     expect(await screen.findByText('main')).toBeDefined()
   })
@@ -89,7 +89,7 @@ describe('BoardDashboardPanel', () => {
       } as Response),
     }))
 
-    render(<BoardDashboardPanel isOpen token="tok" boardPaneIds={[]} onClose={vi.fn()} />)
+    render(<BoardDashboardPanel isOpen token="tok" boardPanes={[]} onClose={vi.fn()} />)
 
     expect(await screen.findByText('something-new')).toBeDefined()
   })
@@ -103,7 +103,7 @@ describe('BoardDashboardPanel', () => {
       } as Response),
     }))
 
-    render(<BoardDashboardPanel isOpen token="tok" boardPaneIds={[]} onClose={vi.fn()} />)
+    render(<BoardDashboardPanel isOpen token="tok" boardPanes={[]} onClose={vi.fn()} />)
 
     expect(await screen.findByText('stale')).toBeDefined()
   })
@@ -116,7 +116,7 @@ describe('BoardDashboardPanel', () => {
       } as Response),
     }))
 
-    render(<BoardDashboardPanel isOpen token="tok" boardPaneIds={[]} onClose={vi.fn()} />)
+    render(<BoardDashboardPanel isOpen token="tok" boardPanes={[]} onClose={vi.fn()} />)
 
     await screen.findByText('main')
     expect(screen.queryByText('stale')).toBeNull()
@@ -136,14 +136,14 @@ describe('BoardDashboardPanel', () => {
       } as Response),
     }))
 
-    render(<BoardDashboardPanel isOpen token="tok" boardPaneIds={[]} onClose={vi.fn()} />)
+    render(<BoardDashboardPanel isOpen token="tok" boardPanes={[]} onClose={vi.fn()} />)
 
     expect(await screen.findByText('hello there')).toBeDefined()
     expect(screen.queryByText(/board_status/)).toBeNull()
   })
 
   it('shows the empty states when there are no statuses or messages', async () => {
-    render(<BoardDashboardPanel isOpen token="tok" boardPaneIds={[]} onClose={vi.fn()} />)
+    render(<BoardDashboardPanel isOpen token="tok" boardPanes={[]} onClose={vi.fn()} />)
 
     expect(await screen.findByText('No pane has agent board enabled yet.')).toBeDefined()
     expect(screen.getByText('No messages yet.')).toBeDefined()
@@ -154,7 +154,7 @@ describe('BoardDashboardPanel', () => {
       status: () => ({ ok: false, status: 401 } as Response),
     }))
 
-    render(<BoardDashboardPanel isOpen token="tok" boardPaneIds={[]} onClose={vi.fn()} />)
+    render(<BoardDashboardPanel isOpen token="tok" boardPanes={[]} onClose={vi.fn()} />)
 
     expect(await screen.findByText('Not authorized to view the agent board.')).toBeDefined()
     expect(screen.getByRole('dialog')).toBeDefined()
@@ -162,7 +162,7 @@ describe('BoardDashboardPanel', () => {
 
   it('closes on Escape', () => {
     const onClose = vi.fn()
-    render(<BoardDashboardPanel isOpen token="tok" boardPaneIds={[]} onClose={onClose} />)
+    render(<BoardDashboardPanel isOpen token="tok" boardPanes={[]} onClose={onClose} />)
 
     fireEvent.keyDown(window, { key: 'Escape' })
 
@@ -184,7 +184,7 @@ describe('BoardDashboardPanel', () => {
     swallowingTarget.addEventListener('keydown', (event) => event.stopPropagation())
     document.body.appendChild(swallowingTarget)
 
-    render(<BoardDashboardPanel isOpen token="tok" boardPaneIds={[]} onClose={onClose} />)
+    render(<BoardDashboardPanel isOpen token="tok" boardPanes={[]} onClose={onClose} />)
 
     fireEvent.keyDown(swallowingTarget, { key: 'Escape' })
 
@@ -193,7 +193,7 @@ describe('BoardDashboardPanel', () => {
 
   it('closes when clicking the overlay backdrop', async () => {
     const onClose = vi.fn()
-    render(<BoardDashboardPanel isOpen token="tok" boardPaneIds={[]} onClose={onClose} />)
+    render(<BoardDashboardPanel isOpen token="tok" boardPanes={[]} onClose={onClose} />)
 
     fireEvent.click(await screen.findByRole('dialog'))
 
@@ -202,7 +202,7 @@ describe('BoardDashboardPanel', () => {
 
   it('closes when clicking the close button', async () => {
     const onClose = vi.fn()
-    render(<BoardDashboardPanel isOpen token="tok" boardPaneIds={[]} onClose={onClose} />)
+    render(<BoardDashboardPanel isOpen token="tok" boardPanes={[]} onClose={onClose} />)
 
     fireEvent.click(await screen.findByLabelText('Close agent board panel'))
 
@@ -214,12 +214,12 @@ describe('BoardDashboardPanel', () => {
     document.body.appendChild(trigger)
     trigger.focus()
 
-    const { rerender } = render(<BoardDashboardPanel isOpen={false} token="tok" boardPaneIds={[]} onClose={vi.fn()} />)
-    rerender(<BoardDashboardPanel isOpen token="tok" boardPaneIds={[]} onClose={vi.fn()} />)
+    const { rerender } = render(<BoardDashboardPanel isOpen={false} token="tok" boardPanes={[]} onClose={vi.fn()} />)
+    rerender(<BoardDashboardPanel isOpen token="tok" boardPanes={[]} onClose={vi.fn()} />)
 
     await waitFor(() => expect(screen.getByRole('dialog')).toBeDefined())
 
-    rerender(<BoardDashboardPanel isOpen={false} token="tok" boardPaneIds={[]} onClose={vi.fn()} />)
+    rerender(<BoardDashboardPanel isOpen={false} token="tok" boardPanes={[]} onClose={vi.fn()} />)
 
     expect(document.activeElement).toBe(trigger)
   })
@@ -236,21 +236,21 @@ describe('BoardDashboardPanel connection and activity', () => {
     pr_url: 'https://github.com/example/project/pull/42',
   }
 
-  function renderPanel(statuses: Record<string, unknown>, boardPaneIds: string[]) {
+  function renderPanel(statuses: Record<string, unknown>, boardPanes: { id: string; title?: string }[]) {
     vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) =>
       Promise.resolve({
         ok: true,
         json: async () => (String(url).includes('/status') ? { statuses } : { messages: [], epoch: 'e' }),
       }),
     ))
-    render(<BoardDashboardPanel isOpen token="tok" boardPaneIds={boardPaneIds} onClose={vi.fn()} />)
+    render(<BoardDashboardPanel isOpen token="tok" boardPanes={boardPanes} onClose={vi.fn()} />)
   }
 
   // The point of the board is telling you whether a pane is actually on it.
   // Listing only panes that already reported made "configured but never
   // joined" indistinguishable from "not configured at all".
   it('lists a board-enabled pane that has never reported', async () => {
-    renderPanel({}, ['api', 'web'])
+    renderPanel({}, [{ id: 'api' }, { id: 'web' }])
 
     expect(await screen.findByText('api')).toBeDefined()
     expect(screen.getByText('web')).toBeDefined()
@@ -258,7 +258,7 @@ describe('BoardDashboardPanel connection and activity', () => {
   })
 
   it('shows what a joined pane is doing', async () => {
-    renderPanel({ api: reported }, ['api'])
+    renderPanel({ api: reported }, [{ id: 'api' }])
 
     expect(await screen.findByText('working')).toBeDefined()
     expect(screen.getByText('Rewriting the relay tests')).toBeDefined()
@@ -270,7 +270,7 @@ describe('BoardDashboardPanel connection and activity', () => {
   // header and the workspace bar. The board's copies are self-reported and
   // can contradict them, so the board does not repeat them.
   it('does not repeat the repo, branch or PR the header already owns', async () => {
-    renderPanel({ api: reported }, ['api'])
+    renderPanel({ api: reported }, [{ id: 'api' }])
     await screen.findByText('working')
 
     expect(screen.queryByText('example/project')).toBeNull()
@@ -286,5 +286,78 @@ describe('BoardDashboardPanel connection and activity', () => {
   it('keeps the empty state when no pane is board-enabled', async () => {
     renderPanel({}, [])
     expect(await screen.findByText('No pane has agent board enabled yet.')).toBeDefined()
+  })
+})
+
+// The board's reason to exist once a workspace has more than a couple of
+// board-enabled panes: reading down the column and knowing what each one is
+// working on. That fails in two ways that have nothing to do with whether a
+// summary was reported — a summary clipped to one 420px line, and a column
+// of opaque pane IDs with no human name attached.
+describe('BoardDashboardPanel work summaries', () => {
+  const longSummary =
+    'Rewriting the relay integration tests so a status row that arrives before its ' +
+    'pane finishes joining is retried rather than dropped on the floor'
+
+  function renderPanel(statuses: Record<string, unknown>, boardPanes: { id: string; title?: string }[]) {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) =>
+      Promise.resolve({
+        ok: true,
+        json: async () => (String(url).includes('/status') ? { statuses } : { messages: [], epoch: 'e' }),
+      }),
+    ))
+    render(<BoardDashboardPanel isOpen token="tok" boardPanes={boardPanes} onClose={vi.fn()} />)
+  }
+
+  it('renders a long summary in full rather than clipping it to one line', async () => {
+    renderPanel({ api: { updated_at: new Date().toISOString(), summary: longSummary } }, [{ id: 'api' }])
+
+    const summary = await screen.findByText(longSummary)
+    // getByText matches on normalized text content, so a CSS-clipped string
+    // would still be "found" here — the style is the actual assertion.
+    expect(summary.style.whiteSpace).not.toBe('nowrap')
+    expect(summary.style.textOverflow).not.toBe('ellipsis')
+  })
+
+  // The summary is the one field worth spending vertical space on, but not
+  // unbounded space: an agent that reports three paragraphs must not push
+  // every other pane below the fold.
+  it('caps how much vertical space one summary can take', async () => {
+    renderPanel({ api: { updated_at: new Date().toISOString(), summary: longSummary } }, [{ id: 'api' }])
+
+    const summary = await screen.findByText(longSummary)
+    expect(summary.style.getPropertyValue('-webkit-line-clamp')).toBe('4')
+    expect(summary.style.overflow).toBe('hidden')
+  })
+
+  it('shows the pane title next to the ID so the column is readable', async () => {
+    renderPanel({}, [{ id: 'pane-1755', title: 'Board Main' }])
+
+    expect(await screen.findByText('pane-1755')).toBeDefined()
+    expect(screen.getByText('Board Main')).toBeDefined()
+  })
+
+  it('falls back to the ID alone when a pane has no title', async () => {
+    renderPanel({}, [{ id: 'pane-1755' }])
+
+    expect(await screen.findByText('pane-1755')).toBeDefined()
+  })
+
+  // A pane reporting from outside the config has no title to look up, and
+  // that must not blank out its ID.
+  it('shows an unconfigured reporting pane by ID', async () => {
+    renderPanel({ ghost: { updated_at: new Date().toISOString(), summary: 'Cleaning up' } }, [])
+
+    expect(await screen.findByText('ghost')).toBeDefined()
+    expect(screen.getByText('Cleaning up')).toBeDefined()
+  })
+
+  // last_tool is a bare tool name and stays on one line; only the summary
+  // gets the extra room.
+  it('keeps the tool line to a single line', async () => {
+    renderPanel({ api: { updated_at: new Date().toISOString(), last_tool: 'Edit' } }, [{ id: 'api' }])
+
+    const tool = await screen.findByText('tool: Edit')
+    expect(tool.style.whiteSpace).toBe('nowrap')
   })
 })
