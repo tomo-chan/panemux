@@ -23,17 +23,28 @@ test('renders the pane status and message the relay read from the agmsg installa
   const panel = boardDialog(page)
   await expect(panel).toBeVisible()
 
-  // Pane status card, from the board_status self-report row.
+  // Pane status card, from the board_status self-report row: the pane is on
+  // the board, and this is what it is doing.
   await expect(panel.getByText('board-main', { exact: true })).toBeVisible()
   await expect(panel.getByText('working', { exact: true })).toBeVisible()
-  await expect(panel.getByText('example/project')).toBeVisible()
-  await expect(panel.getByText('feature/agent-board')).toBeVisible()
   await expect(panel.getByText('Wiring the dashboard panel')).toBeVisible()
   await expect(panel.getByText('tool: Edit')).toBeVisible()
-  await expect(panel.getByText('/workspace/user/project')).toBeVisible()
 
-  const prLink = panel.getByRole('link', { name: 'PR #42' })
-  await expect(prLink).toHaveAttribute('href', 'https://github.com/example/project/pull/42')
+  // The fixture's second pane is board-enabled but never sends a status
+  // row, so it is listed as not joined rather than omitted — the whole
+  // point of listing configured panes, not just reporting ones.
+  await expect(panel.getByText('board-worker', { exact: true })).toBeVisible()
+  await expect(panel.getByText('not joined')).toHaveCount(1)
+
+  // The same fixture row also carries repo, branch, cwd and pr_url, which
+  // the card deliberately does not render — panemux computes those itself
+  // for the pane header, and a self-reported copy can contradict it. The
+  // card having no <a> at all is the same decision seen from the security
+  // side (docs/security.md's Agent-reported values in the dashboard UI).
+  await expect(panel.getByText('example/project')).toHaveCount(0)
+  await expect(panel.getByText('feature/agent-board')).toHaveCount(0)
+  await expect(panel.getByText('/workspace/user/project')).toHaveCount(0)
+  await expect(panel.getByRole('link')).toHaveCount(0)
 
   // Ordinary cross-pane message row.
   await expect(panel.getByText('board-main → board-worker')).toBeVisible()

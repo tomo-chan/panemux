@@ -42,12 +42,17 @@ test('opens the dashboard with the keyboard shortcut while a terminal pane holds
   await expect(boardDialog(page)).toBeHidden()
 })
 
-test('renders the empty states when no agmsg installation exists', async ({ page }) => {
+test('lists a board-enabled pane as not joined when no agmsg installation exists', async ({ page }) => {
   await gotoAndReadSessionToken(page)
   await boardOpenButton(page).click()
 
   const panel = boardDialog(page)
-  await expect(panel.getByText('No pane has reported status yet.')).toBeVisible()
+  // The fixture's one pane has agent_board.enabled but no agmsg to report
+  // through, which is exactly the state the "not joined" pill exists for:
+  // before, this pane rendered as nothing at all, indistinguishable from a
+  // pane that was never put on the board.
+  await expect(panel.getByText('board-main')).toBeVisible()
+  await expect(panel.getByText('not joined')).toBeVisible()
   await expect(panel.getByText('No messages yet.')).toBeVisible()
   // A missing agmsg installation is not an API failure: /api/board/status
   // and /api/board/messages both answer 200 from an empty cache, so no

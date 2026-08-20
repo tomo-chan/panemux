@@ -251,32 +251,42 @@ Using separate colors avoids mixing "this needs your attention" with "you can dr
 Agent Board (see [agent-board.md](agent-board.md)) introduces two new UI surfaces, both layered on
 top of the principles above rather than replacing them:
 
-- A **dashboard** view of per-pane self-reported status (state, branch, PR, summary — see
-  [agent-board.md's Status self-report](agent-board.md#status-self-report-and-message-flow)) —
-  **implemented** as `BoardDashboardPanel.tsx`, a right-anchored overlay panel following the same
-  structure and styling tokens as `CommandHistoryPanel.tsx` (dark `#252526` panel, `#444` border,
-  420px wide, backdrop click and `Escape` to dismiss) rather than a new visual language. It opens via
-  an "Agent Board" button next to the existing "Command History" button (shown only when
-  `agent_board_enabled` is true and a token is available) or via `Cmd/Ctrl+Shift+B`, registered on
-  the keydown capture phase the same way the palette's own shortcut is, so it still fires while a
-  terminal pane has focus. It extends the existing workspace-bar/pane-card status vocabulary
-  (**Integrated workspace summaries** and **Workspace pane groups**, above) rather than introduce a
-  competing one: the same 8px status-dot-plus-`${color}33`-ring treatment and the same repo
-  (`#9fcbff`) / branch (`#8f98a8`) colors as `WorkspaceTabs.tsx`. The PR treatment is the one place
-  it goes further than the workspace bar, and deliberately so: `WorkspaceTabs.tsx` renders `PR #{n}`
-  as plain text from a server-derived number, while the dashboard has a full `pr_url` the agent
-  reported and links it. Because that URL is agent-written free text rather than a value panemux
-  computed, it is rendered as an anchor **only** when it parses as an `http:`/`https:` URL, and as
-  plain text otherwise — see [security.md's Agent-reported values in the
-  dashboard](security.md#agent-reported-values-in-the-dashboard-ui). The self-reported `state` string is
-  free text (an agent's own report, not a fixed enum), mapped to a dot color via
-  `utils/boardStatusColors.ts`: `working` → `#7bd88f`, `idle` → `#7aa2f7`, `waiting` → `#f4bf4f`
-  (deliberately reusing the existing attention-gold pill color, since "waiting" is the same kind of
-  "needs a look" signal), and any other or missing value → a neutral `#4b5565` rather than a crash or
-  blank dot. A status entry whose `updated_at` is older than 5 minutes gets a `stale` pill and its
-  card rendered at 60% opacity — dimmed, not hidden, since a stale report is still the most recent
-  information available for that pane. No new colors were introduced for the dashboard, matching the
-  rest of Agent Board's UI (see below).
+- A **dashboard** answering two questions about each board-enabled pane — is it actually on the
+  board, and what is it doing right now (see [agent-board.md's Status
+  self-report](agent-board.md#status-self-report-and-message-flow)) — **implemented** as
+  `BoardDashboardPanel.tsx`, a right-anchored overlay panel following the same structure and styling
+  tokens as `CommandHistoryPanel.tsx` (dark `#252526` panel, `#444` border, 420px wide, backdrop
+  click and `Escape` to dismiss) rather than a new visual language. It opens via an "Agent Board"
+  button next to the existing "Command History" button (shown only when `agent_board_enabled` is
+  true and a token is available) or via `Cmd/Ctrl+Shift+B`, registered on the keydown capture phase
+  the same way the palette's own shortcut is, so it still fires while a terminal pane has focus.
+  - **The pane list is the union of configured and reporting panes**, not just the panes the relay
+    has heard from. Every pane with `agent_board.enabled` appears, and one that has never reported
+    carries a `not joined` pill with a line explaining it reports once its agent joins. Listing only
+    panes that had already reported made the board's first question unanswerable: "configured but
+    never joined" and "not configured at all" both rendered as absence. Panes still reporting after
+    being removed from config stay listed for the same reason — silent disappearance is the failure
+    mode being designed against.
+  - **Each card shows activity, not repository facts**: the state pill, the agent's own `summary`,
+    the `last_tool` it used, and how long ago it reported. `repo`, `branch` and `pr_url` are
+    deliberately *not* shown even though the status report carries them — panemux computes those
+    itself by running git, and already renders them in the pane header and the workspace bar. The
+    board's copies are self-reported and go stale silently, so showing both meant the same pane
+    could display two different branches in two places. Dropping them also removed the only `<a>` in
+    this component tree; see [security.md's Agent-reported values in the
+    dashboard](security.md#agent-reported-values-in-the-dashboard-ui) for what that changes.
+  - It extends the existing workspace-bar/pane-card status vocabulary (**Integrated workspace
+    summaries** and **Workspace pane groups**, above) rather than introduce a competing one: the same
+    8px status-dot-plus-`${color}33`-ring treatment and the same pill shapes as `WorkspaceTabs.tsx`.
+    The self-reported `state` string is free text (an agent's own report, not a fixed enum), mapped to
+    a dot color via `utils/boardStatusColors.ts`: `working` → `#7bd88f`, `idle` → `#7aa2f7`,
+    `waiting` → `#f4bf4f` (deliberately reusing the existing attention-gold pill color, since
+    "waiting" is the same kind of "needs a look" signal), and any other or missing value → a neutral
+    `#4b5565` rather than a crash or blank dot.
+  - A status entry whose `updated_at` is older than 5 minutes gets a `stale` pill and its card
+    rendered at 60% opacity — dimmed, not hidden, since a stale report is still the most recent
+    information available for that pane. No new colors were introduced for the dashboard, matching
+    the rest of Agent Board's UI (see below).
 - A **Spotlight-style command palette** (`CommandPalette.tsx`) and **history panel**
   (`CommandHistoryPanel.tsx`) for the [command center](agent-board.md#command-center) —
   **implemented.** The palette follows this document's existing **Modal Dialogs** pattern (a

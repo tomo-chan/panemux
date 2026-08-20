@@ -33,7 +33,7 @@ describe('BoardDashboardPanel', () => {
   })
 
   it('does not render when closed', () => {
-    render(<BoardDashboardPanel isOpen={false} token="tok" onClose={vi.fn()} />)
+    render(<BoardDashboardPanel isOpen={false} token="tok" boardPaneIds={[]} onClose={vi.fn()} />)
     expect(screen.queryByRole('dialog')).toBeNull()
   })
 
@@ -57,83 +57,14 @@ describe('BoardDashboardPanel', () => {
       } as Response),
     }))
 
-    render(<BoardDashboardPanel isOpen token="tok" onClose={vi.fn()} />)
+    render(<BoardDashboardPanel isOpen token="tok" boardPaneIds={[]} onClose={vi.fn()} />)
 
     expect(await screen.findByText('main')).toBeDefined()
     expect(screen.getByText('working')).toBeDefined()
-    expect(screen.getByText('panemux')).toBeDefined()
-    expect(screen.getByText('feature/dashboard')).toBeDefined()
     expect(screen.getByText('Running tests')).toBeDefined()
     expect(screen.getByText(/tool:\s*Bash/)).toBeDefined()
-    expect(screen.getByText('/workspace/user/project')).toBeDefined()
   })
 
-  it('renders pr_url as an external link', async () => {
-    vi.stubGlobal('fetch', fetchRouter({
-      status: () => ({
-        ok: true,
-        json: async () => ({
-          statuses: {
-            main: {
-              updated_at: new Date().toISOString(),
-              pr_url: 'https://github.com/example/panemux/pull/42',
-            },
-          },
-        }),
-      } as Response),
-    }))
-
-    render(<BoardDashboardPanel isOpen token="tok" onClose={vi.fn()} />)
-
-    const link = await screen.findByRole('link', { name: /pr #42|pull\/42/i })
-    expect(link).toHaveAttribute('href', 'https://github.com/example/panemux/pull/42')
-    expect(link).toHaveAttribute('target', '_blank')
-    expect(link).toHaveAttribute('rel', 'noopener noreferrer')
-  })
-
-  // pr_url is free text an agent process wrote about itself, relayed from a
-  // possibly-remote host — it is not a value panemux computed or validated.
-  // React 18 only warns about a javascript: href, it does not block it, so
-  // rendering the value straight into an anchor would make a status report a
-  // script-execution vector for anyone who clicks the link. These stay text.
-  it.each([
-    ['javascript:', 'javascript:alert(document.domain)//'],
-    ['data:', 'data:text/html,<script>alert(1)</script>'],
-    ['vbscript:', 'vbscript:msgbox(1)'],
-    ['scheme-relative with a javascript payload', 'javascript:void%20alert(1)'],
-  ])('renders a %s pr_url as plain text instead of a link', async (_name, prUrl) => {
-    vi.stubGlobal('fetch', fetchRouter({
-      status: () => ({
-        ok: true,
-        json: async () => ({
-          statuses: { main: { updated_at: new Date().toISOString(), pr_url: prUrl } },
-        }),
-      } as Response),
-    }))
-
-    render(<BoardDashboardPanel isOpen token="tok" onClose={vi.fn()} />)
-
-    expect(await screen.findByText(prUrl)).toBeDefined()
-    expect(screen.queryByRole('link')).toBeNull()
-  })
-
-  it('renders a plain http pr_url as a link', async () => {
-    vi.stubGlobal('fetch', fetchRouter({
-      status: () => ({
-        ok: true,
-        json: async () => ({
-          statuses: {
-            main: { updated_at: new Date().toISOString(), pr_url: 'http://git.internal/x/pull/7' },
-          },
-        }),
-      } as Response),
-    }))
-
-    render(<BoardDashboardPanel isOpen token="tok" onClose={vi.fn()} />)
-
-    const link = await screen.findByRole('link')
-    expect(link).toHaveAttribute('href', 'http://git.internal/x/pull/7')
-  })
 
   it('renders a card with every optional field omitted without crashing', async () => {
     vi.stubGlobal('fetch', fetchRouter({
@@ -143,7 +74,7 @@ describe('BoardDashboardPanel', () => {
       } as Response),
     }))
 
-    render(<BoardDashboardPanel isOpen token="tok" onClose={vi.fn()} />)
+    render(<BoardDashboardPanel isOpen token="tok" boardPaneIds={[]} onClose={vi.fn()} />)
 
     expect(await screen.findByText('main')).toBeDefined()
   })
@@ -158,7 +89,7 @@ describe('BoardDashboardPanel', () => {
       } as Response),
     }))
 
-    render(<BoardDashboardPanel isOpen token="tok" onClose={vi.fn()} />)
+    render(<BoardDashboardPanel isOpen token="tok" boardPaneIds={[]} onClose={vi.fn()} />)
 
     expect(await screen.findByText('something-new')).toBeDefined()
   })
@@ -172,7 +103,7 @@ describe('BoardDashboardPanel', () => {
       } as Response),
     }))
 
-    render(<BoardDashboardPanel isOpen token="tok" onClose={vi.fn()} />)
+    render(<BoardDashboardPanel isOpen token="tok" boardPaneIds={[]} onClose={vi.fn()} />)
 
     expect(await screen.findByText('stale')).toBeDefined()
   })
@@ -185,7 +116,7 @@ describe('BoardDashboardPanel', () => {
       } as Response),
     }))
 
-    render(<BoardDashboardPanel isOpen token="tok" onClose={vi.fn()} />)
+    render(<BoardDashboardPanel isOpen token="tok" boardPaneIds={[]} onClose={vi.fn()} />)
 
     await screen.findByText('main')
     expect(screen.queryByText('stale')).toBeNull()
@@ -205,16 +136,16 @@ describe('BoardDashboardPanel', () => {
       } as Response),
     }))
 
-    render(<BoardDashboardPanel isOpen token="tok" onClose={vi.fn()} />)
+    render(<BoardDashboardPanel isOpen token="tok" boardPaneIds={[]} onClose={vi.fn()} />)
 
     expect(await screen.findByText('hello there')).toBeDefined()
     expect(screen.queryByText(/board_status/)).toBeNull()
   })
 
   it('shows the empty states when there are no statuses or messages', async () => {
-    render(<BoardDashboardPanel isOpen token="tok" onClose={vi.fn()} />)
+    render(<BoardDashboardPanel isOpen token="tok" boardPaneIds={[]} onClose={vi.fn()} />)
 
-    expect(await screen.findByText('No pane has reported status yet.')).toBeDefined()
+    expect(await screen.findByText('No pane has agent board enabled yet.')).toBeDefined()
     expect(screen.getByText('No messages yet.')).toBeDefined()
   })
 
@@ -223,7 +154,7 @@ describe('BoardDashboardPanel', () => {
       status: () => ({ ok: false, status: 401 } as Response),
     }))
 
-    render(<BoardDashboardPanel isOpen token="tok" onClose={vi.fn()} />)
+    render(<BoardDashboardPanel isOpen token="tok" boardPaneIds={[]} onClose={vi.fn()} />)
 
     expect(await screen.findByText('Not authorized to view the agent board.')).toBeDefined()
     expect(screen.getByRole('dialog')).toBeDefined()
@@ -231,7 +162,7 @@ describe('BoardDashboardPanel', () => {
 
   it('closes on Escape', () => {
     const onClose = vi.fn()
-    render(<BoardDashboardPanel isOpen token="tok" onClose={onClose} />)
+    render(<BoardDashboardPanel isOpen token="tok" boardPaneIds={[]} onClose={onClose} />)
 
     fireEvent.keyDown(window, { key: 'Escape' })
 
@@ -253,7 +184,7 @@ describe('BoardDashboardPanel', () => {
     swallowingTarget.addEventListener('keydown', (event) => event.stopPropagation())
     document.body.appendChild(swallowingTarget)
 
-    render(<BoardDashboardPanel isOpen token="tok" onClose={onClose} />)
+    render(<BoardDashboardPanel isOpen token="tok" boardPaneIds={[]} onClose={onClose} />)
 
     fireEvent.keyDown(swallowingTarget, { key: 'Escape' })
 
@@ -262,7 +193,7 @@ describe('BoardDashboardPanel', () => {
 
   it('closes when clicking the overlay backdrop', async () => {
     const onClose = vi.fn()
-    render(<BoardDashboardPanel isOpen token="tok" onClose={onClose} />)
+    render(<BoardDashboardPanel isOpen token="tok" boardPaneIds={[]} onClose={onClose} />)
 
     fireEvent.click(await screen.findByRole('dialog'))
 
@@ -271,7 +202,7 @@ describe('BoardDashboardPanel', () => {
 
   it('closes when clicking the close button', async () => {
     const onClose = vi.fn()
-    render(<BoardDashboardPanel isOpen token="tok" onClose={onClose} />)
+    render(<BoardDashboardPanel isOpen token="tok" boardPaneIds={[]} onClose={onClose} />)
 
     fireEvent.click(await screen.findByLabelText('Close agent board panel'))
 
@@ -283,13 +214,77 @@ describe('BoardDashboardPanel', () => {
     document.body.appendChild(trigger)
     trigger.focus()
 
-    const { rerender } = render(<BoardDashboardPanel isOpen={false} token="tok" onClose={vi.fn()} />)
-    rerender(<BoardDashboardPanel isOpen token="tok" onClose={vi.fn()} />)
+    const { rerender } = render(<BoardDashboardPanel isOpen={false} token="tok" boardPaneIds={[]} onClose={vi.fn()} />)
+    rerender(<BoardDashboardPanel isOpen token="tok" boardPaneIds={[]} onClose={vi.fn()} />)
 
     await waitFor(() => expect(screen.getByRole('dialog')).toBeDefined())
 
-    rerender(<BoardDashboardPanel isOpen={false} token="tok" onClose={vi.fn()} />)
+    rerender(<BoardDashboardPanel isOpen={false} token="tok" boardPaneIds={[]} onClose={vi.fn()} />)
 
     expect(document.activeElement).toBe(trigger)
+  })
+})
+
+describe('BoardDashboardPanel connection and activity', () => {
+  const reported = {
+    updated_at: new Date().toISOString(),
+    state: 'working',
+    summary: 'Rewriting the relay tests',
+    last_tool: 'Edit',
+    repo: 'example/project',
+    branch: 'feature/x',
+    pr_url: 'https://github.com/example/project/pull/42',
+  }
+
+  function renderPanel(statuses: Record<string, unknown>, boardPaneIds: string[]) {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) =>
+      Promise.resolve({
+        ok: true,
+        json: async () => (String(url).includes('/status') ? { statuses } : { messages: [], epoch: 'e' }),
+      }),
+    ))
+    render(<BoardDashboardPanel isOpen token="tok" boardPaneIds={boardPaneIds} onClose={vi.fn()} />)
+  }
+
+  // The point of the board is telling you whether a pane is actually on it.
+  // Listing only panes that already reported made "configured but never
+  // joined" indistinguishable from "not configured at all".
+  it('lists a board-enabled pane that has never reported', async () => {
+    renderPanel({}, ['api', 'web'])
+
+    expect(await screen.findByText('api')).toBeDefined()
+    expect(screen.getByText('web')).toBeDefined()
+    expect(screen.getAllByText('not joined')).toHaveLength(2)
+  })
+
+  it('shows what a joined pane is doing', async () => {
+    renderPanel({ api: reported }, ['api'])
+
+    expect(await screen.findByText('working')).toBeDefined()
+    expect(screen.getByText('Rewriting the relay tests')).toBeDefined()
+    expect(screen.getByText('tool: Edit')).toBeDefined()
+    expect(screen.queryByText('not joined')).toBeNull()
+  })
+
+  // repo/branch/PR come from panemux running git itself, shown in the pane
+  // header and the workspace bar. The board's copies are self-reported and
+  // can contradict them, so the board does not repeat them.
+  it('does not repeat the repo, branch or PR the header already owns', async () => {
+    renderPanel({ api: reported }, ['api'])
+    await screen.findByText('working')
+
+    expect(screen.queryByText('example/project')).toBeNull()
+    expect(screen.queryByText('feature/x')).toBeNull()
+    expect(screen.queryByRole('link')).toBeNull()
+  })
+
+  it('still reports a pane that left the config but has a status', async () => {
+    renderPanel({ ghost: reported }, [])
+    expect(await screen.findByText('ghost')).toBeDefined()
+  })
+
+  it('keeps the empty state when no pane is board-enabled', async () => {
+    renderPanel({}, [])
+    expect(await screen.findByText('No pane has agent board enabled yet.')).toBeDefined()
   })
 })

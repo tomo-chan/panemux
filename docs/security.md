@@ -128,21 +128,26 @@ nothing about a row's *contents*. A pane that has been talked into writing a hos
 or any process on that host able to call `send.sh`, therefore controls these strings end to end.
 
 The dashboard renders them as text children, which React escapes; there is no `dangerouslySetInnerHTML`
-anywhere in `frontend/src`. **`pr_url` is the one field that would otherwise reach a
-DOM sink with meaning of its own**, as the `href` of the only `<a>` element in the component tree. It
-is passed through `safeExternalURL` in `frontend/src/components/BoardDashboardPanel.tsx` first, which
-renders an anchor only when the value parses as an `http:` or `https:` URL and falls back to plain
-text for everything else. This is not defense in depth over a framework guarantee — it is the only
-guard: React 18, the version this app pins, merely logs *"A future version of React will block
-javascript: URLs"* and renders the attribute anyway (React 19 blocks it; this codebase is not on it).
-`target="_blank"` and `rel="noopener noreferrer"` do not help either, as they constrain the opened
-document rather than whether a script-scheme URL executes at all. Script running in the dashboard's
-own origin would have access to the board bearer token, so this is a real escalation path, not a
-cosmetic one.
+anywhere in `frontend/src`. **No agent-reported value reaches a DOM attribute at all** — the dashboard
+card renders only `state`, `summary`, `last_tool` and the relative time, each as a text child, and the
+component tree now contains no `<a>` element.
 
-`frontend/src/components/BoardDashboardPanel.test.tsx` pins the guard against `javascript:`, `data:`,
-and `vbscript:` values, alongside the positive `http:`/`https:` cases. Any future UI that renders a
-new agent-reported field into an attribute rather than as a text child needs the same treatment.
+That is a change from an earlier design, and the reason it is worth recording here rather than
+quietly deleting: the card used to render `pr_url` as an `href`, which is the one shape where an
+agent-controlled string carries meaning of its own rather than being escaped as text. It was guarded
+by a `safeExternalURL` helper that admitted only `http:`/`https:` and fell back to plain text
+otherwise — necessarily so, because React 18, the version this app pins, merely logs *"A future
+version of React will block javascript: URLs"* and renders the attribute anyway (React 19 blocks it;
+this codebase is not on it), and `target="_blank"`/`rel="noopener noreferrer"` constrain the opened
+document rather than whether a script-scheme URL executes. Script running in the dashboard's own
+origin would have the board bearer token, so that was a real escalation path.
+
+`pr_url`, `repo` and `branch` were dropped from the card for a product reason — panemux computes
+those itself by running git, and the board's self-reported copies could contradict the pane header —
+but the security consequence is that the sink is gone rather than guarded. The rule that replaces the
+old guard: **any future UI that renders an agent-reported field into an attribute rather than as a
+text child reintroduces this sink and needs its own scheme validation**; a `safeExternalURL`-style
+allowlist is the pattern to restore, not React's escaping to rely on.
 
 ### Command center subprocess execution
 

@@ -8,6 +8,11 @@ import { colorForBoardState, formatRelativeTime, isStaleUpdatedAt } from '../uti
 interface BoardDashboardPanelProps {
   isOpen: boolean
   token: string
+  // Every pane configured with agent_board.enabled, reported or not. Listing
+  // only panes that already reported made "configured but never joined"
+  // indistinguishable from "not configured at all" — the first question this
+  // panel exists to answer.
+  boardPaneIds: readonly string[]
   onClose: () => void
 }
 
@@ -18,7 +23,7 @@ interface BoardDashboardPanelProps {
 // visual language. Broadcast sending is out of scope by design (see the
 // implementation plan's "Scope外" section) — this panel only ever reads
 // /api/board/status and /api/board/messages.
-export const BoardDashboardPanel: React.FC<BoardDashboardPanelProps> = ({ isOpen, token, onClose }) => {
+export const BoardDashboardPanel: React.FC<BoardDashboardPanelProps> = ({ isOpen, token, boardPaneIds, onClose }) => {
   const { statuses, messages, error } = useBoardStatus({ enabled: isOpen, token })
   useRestoreFocusOnClose(isOpen)
 
@@ -40,7 +45,9 @@ export const BoardDashboardPanel: React.FC<BoardDashboardPanelProps> = ({ isOpen
 
   if (!isOpen) return null
 
-  const paneIds = Object.keys(statuses).sort()
+  // Union, so a pane that dropped out of the config but is still reporting
+  // does not silently vanish from the board.
+  const paneIds = Array.from(new Set([...boardPaneIds, ...Object.keys(statuses)])).sort()
   const messagesNewestFirst = [...messages].reverse()
   const hosts = new Set(messages.map((m) => m.host))
   const showHost = hosts.size > 1
@@ -65,7 +72,7 @@ export const BoardDashboardPanel: React.FC<BoardDashboardPanelProps> = ({ isOpen
           {error && <div style={errorStyle}>{error}</div>}
 
           <div style={sectionTitleStyle}>Panes</div>
-          {paneIds.length === 0 && <div style={emptyStyle}>No pane has reported status yet.</div>}
+          {paneIds.length === 0 && <div style={emptyStyle}>No pane has agent board enabled yet.</div>}
           {paneIds.map((paneId) => (
             <PaneStatusCard key={paneId} paneId={paneId} status={statuses[paneId]} />
           ))}
@@ -81,34 +88,35 @@ export const BoardDashboardPanel: React.FC<BoardDashboardPanelProps> = ({ isOpen
   )
 }
 
-const PaneStatusCard: React.FC<{ paneId: string; status: BoardStatusEntry }> = ({ paneId, status }) => {
-  const stale = isStaleUpdatedAt(status.updated_at)
-  const prHref = status.pr_url ? safeExternalURL(status.pr_url) : null
+// PaneStatusCard answers two questions and deliberately no others: is this
+// pane actually on the board, and what is it doing now.
+//
+// It used to also show repo, branch and the PR link. Those are computed
+// authoritatively elsewhere — panemux runs git itself for the pane header
+// and the workspace bar — while the board's copies are self-reported and go
+// stale silently, so the same pane could show two different branches in two
+// places. Dropping them also removed the only <a> in this component tree,
+// and with it the agent-controlled href that needed scheme validation.
+const PaneStatusCard: React.FC<{ paneId: string; status?: BoardStatusEntry }> = ({ paneId, status }) => {
+  const stale = status !== undefined && isStaleUpdatedAt(status.updated_at)
 
   return (
     <div style={{ ...cardStyle, opacity: stale ? 0.6 : 1 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-        <span style={statusDotStyle(status.state)} />
+        <span style={statusDotStyle(status?.state)} />
         <span style={paneIdStyle}>{paneId}</span>
-        {status.state && <span style={pillStyle('#2d253f', '#cbb3ff')}>{status.state}</span>}
+        {!status && <span style={pillStyle('#3a2a2a', '#f08b8b')}>not joined</span>}
+        {status?.state && <span style={pillStyle('#2d253f', '#cbb3ff')}>{status.state}</span>}
         {stale && <span style={pillStyle('#5a4311', '#f4bf4f')}>stale</span>}
       </div>
-      <div style={metaRowStyle}>
-        {status.repo && <span style={repoStyle}>{status.repo}</span>}
-        {status.branch && <span style={ellipsisStyle}>{status.branch}</span>}
-        {status.pr_url &&
-          (prHref ? (
-            <a href={prHref} target="_blank" rel="noopener noreferrer" style={linkStyle}>
-              {prLabel(status.pr_url)}
-            </a>
-          ) : (
-            <span style={ellipsisStyle}>{status.pr_url}</span>
-          ))}
-      </div>
-      {status.summary && <div style={detailStyle}>{status.summary}</div>}
-      {status.last_tool && <div style={mutedDetailStyle}>tool: {status.last_tool}</div>}
-      {status.cwd && <div style={mutedDetailStyle}>{status.cwd}</div>}
-      <div style={timestampStyle}>{formatRelativeTime(status.updated_at)}</div>
+      {!status && (
+        <div style={notJoinedDetailStyle}>
+          On the board in config, but no status has arrived. It reports once its agent joins.
+        </div>
+      )}
+      {status?.summary && <div style={detailStyle}>{status.summary}</div>}
+      {status?.last_tool && <div style={mutedDetailStyle}>tool: {status.last_tool}</div>}
+      {status && <div style={timestampStyle}>{formatRelativeTime(status.updated_at)}</div>}
     </div>
   )
 }
@@ -123,37 +131,6 @@ const MessageRow: React.FC<{ message: BoardMessage; showHost: boolean }> = ({ me
     <div style={messageBodyStyle}>{message.body}</div>
   </div>
 )
-
-// safeExternalURL returns url only when it is an ordinary web address, and
-// null otherwise, so the caller can fall back to rendering it as text.
-//
-// pr_url reaches this component as free text an agent wrote about itself
-// (internal/board's ParseStatus copies it through unvalidated, and the
-// relay only checks who sent a row, never what is in it), possibly from a
-// remote host. React 18 — the version this app pins — merely logs a warning
-// for a javascript: href and renders it anyway, so without this check a
-// status report would be enough to run script in the dashboard's origin,
-// which holds the board bearer token. target="_blank" and rel="noopener
-// noreferrer" do not help: they constrain the opened document, not whether
-// a script-scheme URL executes.
-function safeExternalURL(url: string): string | null {
-  try {
-    const parsed = new URL(url)
-    return parsed.protocol === 'https:' || parsed.protocol === 'http:' ? url : null
-  } catch {
-    // Not an absolute URL at all — nothing safe to link to.
-    return null
-  }
-}
-
-// prLabel extracts a "PR #N" label from a github.com pull request URL,
-// matching WorkspaceTabs.tsx's own "PR #{n}" text convention. Falls back to
-// the raw URL for any URL shape that doesn't match (a non-GitHub agmsg
-// deployment could plausibly report something else here).
-function prLabel(prUrl: string): string {
-  const match = prUrl.match(/\/pull\/(\d+)/)
-  return match ? `PR #${match[1]}` : prUrl
-}
 
 function statusDotStyle(state: string | undefined): React.CSSProperties {
   const color = colorForBoardState(state)
@@ -265,35 +242,6 @@ const paneIdStyle: React.CSSProperties = {
   flex: '1 1 auto',
 }
 
-const metaRowStyle: React.CSSProperties = {
-  display: 'flex',
-  gap: 6,
-  flexWrap: 'wrap',
-  color: '#8f98a8',
-  fontSize: 10,
-}
-
-const repoStyle: React.CSSProperties = {
-  color: '#9fcbff',
-  minWidth: 0,
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
-  whiteSpace: 'nowrap',
-}
-
-const ellipsisStyle: React.CSSProperties = {
-  minWidth: 0,
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
-  whiteSpace: 'nowrap',
-}
-
-const linkStyle: React.CSSProperties = {
-  color: '#7ea6e0',
-  textDecoration: 'none',
-  whiteSpace: 'nowrap',
-}
-
 const detailStyle: React.CSSProperties = {
   color: '#ccc',
   fontSize: 11,
@@ -305,6 +253,15 @@ const detailStyle: React.CSSProperties = {
 const mutedDetailStyle: React.CSSProperties = {
   ...detailStyle,
   color: '#8f98a8',
+}
+
+// The one line in a card that is a sentence rather than a value, so it wraps
+// instead of being ellipsised: a truncated explanation of why a pane has no
+// status is worse than no explanation.
+const notJoinedDetailStyle: React.CSSProperties = {
+  color: '#8f98a8',
+  fontSize: 11,
+  whiteSpace: 'normal',
 }
 
 const timestampStyle: React.CSSProperties = { color: '#666', fontSize: '11px' }

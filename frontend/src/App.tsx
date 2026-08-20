@@ -18,7 +18,7 @@ import { TERMINAL_FONT_FAMILY } from './utils/fonts'
 import { findPaneById, generatePaneId, layoutContainsPane } from './utils/layoutTree'
 import type { MovePanePlacement } from './hooks/useLayout'
 import type { WorkspacePaneSummary, WorkspaceSummary } from './components/WorkspaceTabs'
-import type { GitInfo, LayoutChild, LayoutNode, SessionInfo, SSHConfigHost } from './schemas'
+import type { Workspace, GitInfo, LayoutChild, LayoutNode, SessionInfo, SSHConfigHost } from './schemas'
 
 const DEFAULT_DISPLAY: DisplayConfig = { show_header: true, show_status_bar: true }
 
@@ -84,6 +84,10 @@ export const App: React.FC = () => {
   }, [workspaces])
   const overviewPaneIds = useMemo(() => Array.from(paneMetadataByID.keys()), [paneMetadataByID])
   const gitInfoById = useGitInfoSnapshotMap(overviewPaneIds)
+
+  // Panes configured for the board, whether or not they have reported. The
+  // dashboard needs these to tell "never joined" from "not configured".
+  const boardPaneIds = useMemo(() => collectBoardPaneIds(workspaces?.items ?? []), [workspaces])
   const workspaceSummaries = useMemo(() => {
     const summaries: Record<string, WorkspaceSummary> = {}
     if (!workspaces) return summaries
@@ -573,6 +577,7 @@ export const App: React.FC = () => {
         <BoardDashboardPanel
           isOpen={isBoardDashboardOpen && boardDashboardAvailable}
           token={boardToken}
+          boardPaneIds={boardPaneIds}
           onClose={() => setIsBoardDashboardOpen(false)}
         />
       </div>
@@ -645,6 +650,20 @@ function collectChildPaneMetadata(
   for (const nestedChild of child.children) {
     collectChildPaneMetadata(nestedChild, workspaceId, workspaceTitle, metadata)
   }
+}
+
+function collectBoardPaneIds(items: Workspace[]): string[] {
+  const ids: string[] = []
+
+  const walk = (child: LayoutChild) => {
+    if (child.pane?.agent_board?.enabled) ids.push(child.pane.id)
+    for (const nested of child.children ?? []) walk(nested)
+  }
+  for (const workspace of items) {
+    for (const child of workspace.layout.children) walk(child)
+  }
+
+  return ids
 }
 
 function collectWorkspacePaneSummaries(
