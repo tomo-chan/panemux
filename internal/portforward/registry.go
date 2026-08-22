@@ -64,6 +64,9 @@ type forward struct {
 	expiresAt time.Time
 	sessionID string
 	port      int
+	// active counts the connections currently proxied through this
+	// forward. Guarded by Registry.mu, like expiresAt.
+	active int
 }
 
 // Registry owns every live loopback forward and their lifecycles.
@@ -203,10 +206,11 @@ func (r *Registry) serve(f *forward) {
 		if err != nil {
 			return
 		}
-		r.touch(f.port)
+		r.beginConn(f)
 		r.wg.Add(1)
 		go func() {
 			defer r.wg.Done()
+			defer r.endConn(f)
 			r.proxy(f, conn)
 		}()
 	}
@@ -240,13 +244,25 @@ func (r *Registry) proxy(f *forward, local net.Conn) {
 	}
 }
 
-// touch refreshes a forward's idle deadline when traffic flows through it.
-func (r *Registry) touch(port int) {
+// beginConn records a connection entering the forward, which both refreshes
+// the idle deadline and keeps the reaper away while the connection lives.
+func (r *Registry) beginConn(f *forward) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if f, ok := r.forwards[port]; ok {
-		f.expiresAt = r.nowFn().Add(r.ttl)
+	f.active++
+	f.expiresAt = r.nowFn().Add(r.ttl)
+}
+
+// endConn records a connection leaving the forward and restarts its idle
+// clock: the TTL measures time without traffic, not time since the last
+// accept, so a long-lived connection must not be torn down mid-transfer.
+func (r *Registry) endConn(f *forward) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if f.active > 0 {
+		f.active--
 	}
+	f.expiresAt = r.nowFn().Add(r.ttl)
 }
 
 // Ports returns the forwarded ports for one pane, in ascending order.
@@ -318,7 +334,7 @@ func (r *Registry) reapExpired() {
 	r.mu.Lock()
 	var stale []*forward
 	for port, f := range r.forwards {
-		if now.After(f.expiresAt) {
+		if f.active == 0 && now.After(f.expiresAt) {
 			stale = append(stale, f)
 			delete(r.forwards, port)
 		}

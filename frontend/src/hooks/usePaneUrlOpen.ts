@@ -62,12 +62,13 @@ export function usePaneUrlOpen(sessionId: string): UsePaneUrlOpenResult {
     setPendingUrl(url)
   }, [])
 
+  // The open happens here, not inside a setPendingUrl updater: React treats
+  // updaters as pure and re-runs them (StrictMode does so on every update),
+  // which would open the tab and post the forward request twice per approval.
   const confirmPendingOpen = useCallback(() => {
-    setPendingUrl((current) => {
-      if (current) openUrl(current)
-      return null
-    })
-  }, [openUrl])
+    if (pendingUrl) openUrl(pendingUrl)
+    setPendingUrl(null)
+  }, [openUrl, pendingUrl])
 
   const dismissPendingOpen = useCallback(() => setPendingUrl(null), [])
   const dismissError = useCallback(() => setError(null), [])

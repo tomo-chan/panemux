@@ -1088,6 +1088,60 @@ describe('useTerminal URL opening', () => {
     expect(onBrowserOpenRequest).not.toHaveBeenCalled()
   })
 
+  it('ignores a browser-open OSC that arrives in replayed scrollback', () => {
+    const onBrowserOpenRequest = vi.fn()
+    mountTerminal('url-6', { onBrowserOpenRequest })
+    const handler = oscHandlers.get(7373)!
+    act(() => MockWebSocket.instances[0].simulateOpen())
+
+    act(() =>
+      MockWebSocket.instances[0].simulateMessage(JSON.stringify({ type: 'replay', state: 'start' }))
+    )
+    expect(handler('panemux-open;https://example.com/stale')).toBe(true)
+    expect(onBrowserOpenRequest).not.toHaveBeenCalled()
+
+    act(() =>
+      MockWebSocket.instances[0].simulateMessage(JSON.stringify({ type: 'replay', state: 'end' }))
+    )
+    handler('panemux-open;https://example.com/live')
+
+    expect(onBrowserOpenRequest).toHaveBeenCalledTimes(1)
+    expect(onBrowserOpenRequest).toHaveBeenCalledWith('https://example.com/live')
+  })
+
+  // The replay-end control message arrives before xterm finishes parsing the
+  // replayed bytes, so the write depth is what covers the sequences still in
+  // the parser when it does.
+  it('ignores a browser-open OSC still being parsed out of a finished replay', () => {
+    const onBrowserOpenRequest = vi.fn()
+    const pendingWrites: (() => void)[] = []
+    mockTerm.write.mockImplementation((_data: string | Uint8Array, callback?: () => void) => {
+      if (callback) pendingWrites.push(callback)
+    })
+    mountTerminal('url-7', { onBrowserOpenRequest })
+    const handler = oscHandlers.get(7373)!
+    act(() => MockWebSocket.instances[0].simulateOpen())
+
+    act(() =>
+      MockWebSocket.instances[0].simulateMessage(JSON.stringify({ type: 'replay', state: 'start' }))
+    )
+    act(() =>
+      MockWebSocket.instances[0].simulateMessage(new TextEncoder().encode('replayed').buffer)
+    )
+    act(() =>
+      MockWebSocket.instances[0].simulateMessage(JSON.stringify({ type: 'replay', state: 'end' }))
+    )
+
+    expect(handler('panemux-open;https://example.com/stale')).toBe(true)
+    expect(onBrowserOpenRequest).not.toHaveBeenCalled()
+
+    act(() => pendingWrites.forEach((done) => done()))
+    handler('panemux-open;https://example.com/live')
+
+    expect(onBrowserOpenRequest).toHaveBeenCalledTimes(1)
+    expect(onBrowserOpenRequest).toHaveBeenCalledWith('https://example.com/live')
+  })
+
   it('keeps handlers working after the pane passes new callbacks', () => {
     const first = vi.fn()
     const second = vi.fn()

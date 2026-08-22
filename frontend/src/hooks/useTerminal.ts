@@ -427,6 +427,10 @@ function getOrCreateTerminalEntry(sessionId: string): TerminalEntry {
   // Consume the browser shim's private OSC sequence so it drives a URL open
   // instead of being drawn into the terminal.
   term.parser.registerOscHandler(BROWSER_OPEN_OSC_IDENT, (data) => {
+    // Replayed scrollback carries every sequence the pane emitted earlier, so
+    // a request that was already answered (or dismissed) would be raised again
+    // on each reconnect. A browser-open request is a live event only.
+    if (entry.replayActive || entry.replayWriteDepth > 0) return true
     const url = parseBrowserOpenOsc(data)
     if (url) entry.onBrowserOpen?.(url)
     return true

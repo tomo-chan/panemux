@@ -108,6 +108,28 @@ func newTestRegistry(t *testing.T, opts Options) *Registry {
 	return r
 }
 
+// hasActiveConns reports whether a forward is currently proxying anything.
+func (r *Registry) hasActiveConns(port int) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	f, ok := r.forwards[port]
+	return ok && f.active > 0
+}
+
+// waitFor polls cond until it holds, so a test can wait for the registry's own
+// goroutines without sleeping for a fixed time.
+func waitFor(t *testing.T, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("condition was never met")
+}
+
 func roundTrip(t *testing.T, port int, payload string) string {
 	t.Helper()
 	conn, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), 2*time.Second)
@@ -320,6 +342,64 @@ func TestRegistryReapsIdleForwardsAndKeepsUsedOnes(t *testing.T) {
 	}
 	if _, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(idlePort)), time.Second); err == nil {
 		t.Fatal("idle forward still accepts connections after reaping")
+	}
+}
+
+// The TTL bounds time without traffic, so a connection that stays open longer
+// than the TTL (an SSE stream or a dev server's HMR socket, say) must not have
+// the forward pulled out from under it.
+func TestRegistryKeepsAForwardWithALiveConnectionPastTheTTL(t *testing.T) {
+	dialer := &echoDialer{addr: startEchoServer(t)}
+	clock := newFakeClock()
+	r := newTestRegistry(t, Options{
+		TTL:           10 * time.Minute,
+		SweepInterval: -1,
+		Now:           clock.Now,
+	})
+	port := freePort(t)
+	if _, err := r.Ensure("pane-1", port, dialer); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), 2*time.Second)
+	if err != nil {
+		t.Fatalf("dial forwarded port: %v", err)
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(2 * time.Second))
+	// Exchange a byte so the connection is fully established on both sides.
+	if _, err := io.WriteString(conn, "x"); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	buf := make([]byte, 1)
+	if _, err := io.ReadFull(conn, buf); err != nil {
+		t.Fatalf("read: %v", err)
+	}
+
+	clock.Advance(30 * time.Minute)
+	r.reapExpired()
+
+	if got := r.Ports("pane-1"); len(got) != 1 || got[0] != port {
+		t.Fatalf("Ports after reap = %v, want the in-use forward kept", got)
+	}
+	if _, err := io.WriteString(conn, "y"); err != nil {
+		t.Fatalf("write after reap: %v", err)
+	}
+	if _, err := io.ReadFull(conn, buf); err != nil {
+		t.Fatalf("read after reap: %v", err)
+	}
+
+	// Once it closes, the idle clock starts again from that moment.
+	conn.Close()
+	waitFor(t, func() bool { return len(r.Ports("pane-1")) == 1 && !r.hasActiveConns(port) })
+	r.reapExpired()
+	if got := r.Ports("pane-1"); len(got) != 1 {
+		t.Fatalf("Ports right after the connection closed = %v, want the forward kept", got)
+	}
+	clock.Advance(11 * time.Minute)
+	r.reapExpired()
+	if got := r.Ports("pane-1"); len(got) != 0 {
+		t.Fatalf("Ports after idling past the TTL = %v, want the forward reaped", got)
 	}
 }
 

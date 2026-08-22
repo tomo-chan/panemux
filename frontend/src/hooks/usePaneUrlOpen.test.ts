@@ -1,3 +1,4 @@
+import { StrictMode } from 'react'
 import { renderHook, act, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { usePaneUrlOpen } from './usePaneUrlOpen'
@@ -108,6 +109,21 @@ describe('usePaneUrlOpen', () => {
     expect(result.current.pendingUrl).toBe('https://example.com/auth')
     expect(calls).toEqual([])
 
+    act(() => result.current.confirmPendingOpen())
+
+    expect(calls).toEqual(['https://example.com/auth'])
+    expect(result.current.pendingUrl).toBeNull()
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+  })
+
+  // React re-runs state updater functions (StrictMode does so on every
+  // update), so approving a request must not open the tab from inside one.
+  it('opens a confirmed request exactly once under StrictMode', async () => {
+    const { calls } = mockWindowOpen()
+    const fetchMock = mockForwardResponse({ url: 'https://example.com/auth', forwarded: true, port: 8085 })
+    const { result } = renderHook(() => usePaneUrlOpen('pane1'), { wrapper: StrictMode })
+
+    act(() => result.current.requestOpen('https://example.com/auth'))
     act(() => result.current.confirmPendingOpen())
 
     expect(calls).toEqual(['https://example.com/auth'])

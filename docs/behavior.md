@@ -883,7 +883,9 @@ without panemux. When the shim cannot be installed (a read-only home directory, 
 pane still starts, just without interception.
 
 A URL requested this way is never opened automatically. The pane shows a strip naming the URL with
-`Open` and `Ignore`; only `Open` opens the tab and prepares the forward. Terminal output is
+`Open` and `Ignore`; only `Open` opens the tab and prepares the forward. The request is a live event:
+a sequence that arrives in replayed scrollback is ignored, so reconnecting a pane never re-raises a
+request that was already opened or dismissed. Terminal output is
 untrusted — see [security.md](security.md) — and the browser also requires a user gesture to open a
 tab, so the approval step is both a safety and a functional requirement.
 
