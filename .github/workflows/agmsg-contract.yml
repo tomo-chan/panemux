@@ -115,20 +115,32 @@ jobs:
               ;;
           esac
 
+  # This job always runs and always reports a conclusion, with its expensive
+  # steps gated individually. A job skipped by a job-level `if` reports
+  # "skipped" instead, and how branch protection scores that is exactly the
+  # ambiguity a required check should not depend on — so there is none here.
   contract:
     needs: scope
-    if: needs.scope.outputs.run == 'true'
     runs-on: ubuntu-latest
     steps:
+      - name: Nothing to verify
+        if: needs.scope.outputs.run != 'true'
+        run: |
+          echo "No contract-relevant files changed; agmsg was not installed." \
+            >> "$GITHUB_STEP_SUMMARY"
+
       - name: Checkout
+        if: needs.scope.outputs.run == 'true'
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
 
       - name: Set up Go
+        if: needs.scope.outputs.run == 'true'
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
           go-version-file: go.mod
 
       - name: Install sqlite3
+        if: needs.scope.outputs.run == 'true'
         # agmsg stores messages in SQLite and shells out to the sqlite3
         # binary; api.sh cannot run at all without it. GitHub's ubuntu image
         # does not ship it.
@@ -138,6 +150,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends sqlite3
 
       - name: Install agmsg
+        if: needs.scope.outputs.run == 'true'
         env:
           AGMSG_REF: ${{ needs.scope.outputs.agmsg_ref }}
         run: |
@@ -152,10 +165,11 @@ jobs:
           echo "installed agmsg $(cat "$HOME/.agents/skills/agmsg/VERSION")"
 
       - name: Run the contract
+        if: needs.scope.outputs.run == 'true'
         run: make test-agmsg-contract AGMSG_PATH="$HOME/.agents/skills/agmsg"
 
       - name: Summary
-        if: always()
+        if: always() && needs.scope.outputs.run == 'true'
         env:
           AGMSG_REF: ${{ needs.scope.outputs.agmsg_ref }}
           EVENT: ${{ github.event_name }}

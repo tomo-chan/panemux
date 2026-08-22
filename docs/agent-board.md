@@ -1649,7 +1649,9 @@ plain table-driven Go test. So: adopt the *idea*, skip the *tool*.
   version whose real behavior differs. The PR trigger deliberately carries no `paths:` filter — a
   path-filtered workflow reports no status at all on the PRs it skips, and a required check that
   never reports blocks every one of them — so a fast `scope` job decides instead whether installing
-  agmsg is warranted, which lets the check be marked required in branch protection. It stays out of
+  agmsg is warranted, and the contract job always reports rather than skipping itself, which lets the
+  check be marked required in branch protection (a repository setting; see
+  [maintenance.md](maintenance.md#the-agmsg-compatibility-contract-job)). It stays out of
   the main `make check` gate, and the test skips itself when `PANEMUX_AGMSG_PATH` is unset, so a
   contributor without agmsg installed still gets a green, hermetic local run.
 

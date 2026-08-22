@@ -29,7 +29,9 @@ Why this matters:
 - **Weekly (Mondays, 06:00 UTC)** it installs agmsg's **latest release tag** and runs the contract. This run gates nothing — a failure is an early warning that an agmsg release changed behavior panemux depends on, arriving before anyone here has chosen to bump the pin.
 - **On every pull request** a fast `scope` job checks whether the PR touches the pin, the contract test, its fixtures, or the client code the contract drives. If it does, the contract runs against the **pinned** version; if not, the job reports success without installing anything.
 
-The PR trigger has no `paths:` filter on purpose. A path-filtered workflow reports no status on the PRs it skips, and a required check that never reports blocks every one of them — hence the always-running `scope` job. That is what makes this workflow safe to mark as a **required check** in branch protection, which is how the contract's "a bump of the pin cannot merge unverified" requirement is actually enforced.
+The PR trigger has no `paths:` filter on purpose. A path-filtered workflow reports no status on the PRs it skips, and a required check that never reports blocks every one of them — hence the always-running `scope` job. The `contract` job likewise always runs and gates its expensive steps individually rather than skipping itself, so it always reports a real success or failure and never a `skipped` conclusion whose scoring branch protection would have to be trusted to get right.
+
+That is what makes **`agmsg-contract / contract`** safe to mark as a required check in branch protection — which is how the contract's "a bump of the pin cannot merge unverified" requirement is actually enforced. Marking it required is a repository setting, not something this workflow can do for itself; until someone sets it, the job still runs and still reports, it just does not block.
 
 ### Bumping the pinned agmsg version
 
