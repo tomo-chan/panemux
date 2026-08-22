@@ -1061,6 +1061,9 @@ describe('TERMINAL_URL_REGEX', () => {
     ['credentials, port, query and fragment', 'https://user:pw@example.com:8443/p?q=1#frag'],
     ['loopback with port', 'http://localhost:8080/path'],
     ['uppercase scheme', 'HTTPS://example.com/a'],
+    ['ideographic iteration mark in path', 'https://ja.wikipedia.org/wiki/\u65e5\u3005'],
+    ['ideographic closing mark in path', 'https://ja.wikipedia.org/wiki/\u3006\u5207'],
+    ['ideographic number zero in path', 'https://ja.wikipedia.org/wiki/\u3007\u3007'],
   ])('keeps valid urls intact (%s)', (_name, line) => {
     expect(detectURLs(line)).toEqual([line])
   })
