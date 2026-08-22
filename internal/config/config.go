@@ -96,6 +96,7 @@ type Config struct { //nolint:govet
 	Display        DisplayConfig            `yaml:"display,omitempty" json:"display"`
 	AgentBoard     AgentBoardConfig         `yaml:"agent_board,omitempty" json:"agent_board"`
 	CommandCenter  CommandCenterConfig      `yaml:"command_center,omitempty" json:"command_center"`
+	URLOpen        URLOpenConfig            `yaml:"url_open,omitempty" json:"url_open"`
 
 	filePath          string
 	sshConfigPath     string // overridable for tests; empty = use sshconfig.DefaultPath()
@@ -427,6 +428,7 @@ func (c *Config) write() error {
 		Display        DisplayConfig            `yaml:"display,omitempty"`
 		AgentBoard     AgentBoardConfig         `yaml:"agent_board,omitempty"`
 		CommandCenter  CommandCenterConfig      `yaml:"command_center,omitempty"`
+		URLOpen        URLOpenConfig            `yaml:"url_open,omitempty"`
 	}
 
 	server := c.Server
@@ -444,6 +446,7 @@ func (c *Config) write() error {
 		Display:        c.Display,
 		AgentBoard:     c.AgentBoard,
 		CommandCenter:  c.CommandCenter,
+		URLOpen:        c.URLOpen,
 	})
 	if err != nil {
 		return fmt.Errorf("marshaling config: %w", err)

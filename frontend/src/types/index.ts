@@ -14,4 +14,5 @@ export type {
   SSHConnectionsResponse,
   DirectoryEntry,
   DirectoryBrowserResponse,
+  OpenUrlResponse,
 } from '../schemas'

@@ -206,3 +206,14 @@ export const BoardCommandHistoryResponseSchema = z.object({
 })
 
 export type BoardCommandHistoryResponse = z.infer<typeof BoardCommandHistoryResponseSchema>
+
+// Response from POST /api/sessions/{id}/open-url: whether panemux published
+// the URL's loopback callback port on this host, and why not when it did not.
+export const OpenUrlResponseSchema = z.object({
+  url: z.string(),
+  forwarded: z.boolean(),
+  port: z.number().int().min(1).max(65535).optional(),
+  reason: z.string().max(512).optional(),
+})
+
+export type OpenUrlResponse = z.infer<typeof OpenUrlResponseSchema>

@@ -13,6 +13,19 @@ display:
   show_header: true      # show pane header with title and controls (default: true)
   show_status_bar: true  # show terminal dimensions bar at the bottom (default: true)
 
+# ── Opening URLs from a pane ──────────────────────────────────────────────────
+# When a URL is opened from a pane, panemux republishes the URL's loopback
+# callback port (from `redirect_uri` and friends) at the same port on this host,
+# so a CLI login flow running on an SSH host completes its OAuth callback.
+#
+# `browser_shim` additionally intercepts programs that open a browser directly
+# (`$BROWSER`, `xdg-open`, `open`) on `local` and `ssh` panes, by installing a
+# small shell shim under the pane host's `~/.cache/panemux/bin`. The pane then
+# asks before anything is opened. Set it to false to install nothing and leave
+# `ssh` panes' shell startup exactly as it was.
+url_open:
+  browser_shim: true  # default: true
+
 # ── SSH connections ────────────────────────────────────────────────────────────
 # Define named SSH connections here; reference them in panes with `connection:`.
 ssh_connections:

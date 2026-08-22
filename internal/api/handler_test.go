@@ -103,6 +103,7 @@ func setupRouterWithHandler(h *Handler) *chi.Mux {
 	r.Post("/api/sessions", h.PostSession)
 	r.Delete("/api/sessions/{id}", h.DeleteSession)
 	r.Post("/api/sessions/{id}/restart", h.RestartSession)
+	r.Post("/api/sessions/{id}/open-url", h.PostOpenURL)
 	r.Get("/api/sessions/{id}/git-info", h.GetGitInfo)
 	r.Get("/api/display", h.GetDisplay)
 	r.Get("/api/ssh-connections", h.GetSSHConnections)

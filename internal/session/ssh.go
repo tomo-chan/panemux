@@ -484,7 +484,29 @@ func startSSHShell(sess *ssh.Session, cfg SSHConfig) error {
 // sess.Shell. Paths are validated with the regex guard (CodeQL go/command-injection
 // recommended pattern) before being embedded in the shell command.
 // sess.Shell() and sess.Start() are mutually exclusive in the SSH protocol.
+//
+// With the browser-open shim enabled, a fixed, non-tainted setup snippet is
+// prepended (see browseropen.go). A pane that would otherwise have used
+// sess.Shell() then has to run a command instead, so it execs the login
+// shell explicitly to keep the profile files an SSH login would source.
 func sshShellCommand(cfg SSHConfig) (string, error) {
+	tail, err := sshShellExecTail(cfg)
+	if err != nil {
+		return "", err
+	}
+	if !browserShimEnabled.Load() {
+		return tail, nil
+	}
+	if tail == "" {
+		tail = remoteLoginShellExec
+	}
+	return remoteBrowserShimSetup() + tail, nil
+}
+
+// sshShellExecTail builds the part of the remote command that enters the
+// working directory and starts the shell. An empty result means the pane can
+// use the SSH shell request instead of a command.
+func sshShellExecTail(cfg SSHConfig) (string, error) {
 	if cfg.Shell != "" {
 		if err := validateRemotePath("shell", cfg.Shell); err != nil {
 			return "", err

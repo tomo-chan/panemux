@@ -56,6 +56,10 @@ func main() {
 		log.Fatalf("Failed to load config: %v", err)
 	}
 
+	// Must be set before any session is created: the factory reads it when
+	// it builds a pane's environment (see internal/session/browseropen.go).
+	session.SetBrowserShimEnabled(cfg.BrowserShimEnabled())
+
 	manager := session.NewManager()
 	if err := startSessionsFromConfig(cfg, manager); err != nil {
 		log.Fatalf("Failed to start sessions: %v", err)

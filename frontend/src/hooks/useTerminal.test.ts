@@ -4,8 +4,12 @@ import { __computePullRequestLinksForTests, __resetTerminalEntriesForTests, useT
 import { TERMINAL_FONT_FAMILY } from '../utils/fonts'
 
 // ── xterm.js mocks ───────────────────────────────────────────────────────────
-const { mockWrite, mockTerm, mockFitAddon, mockTerminalCtor } = vi.hoisted(() => {
+const {
+  mockWrite, mockTerm, mockFitAddon, mockTerminalCtor, mockWebLinksCtor, oscHandlers, linkHandlers,
+} = vi.hoisted(() => {
   const mockWrite = vi.fn()
+  const oscHandlers = new Map<number, (data: string) => boolean>()
+  const linkHandlers: ((event: MouseEvent, uri: string) => void)[] = []
   const mockTerm = {
     options: { disableStdin: false },
     attachCustomKeyEventHandler: vi.fn(),
@@ -22,6 +26,12 @@ const { mockWrite, mockTerm, mockFitAddon, mockTerminalCtor } = vi.hoisted(() =>
         getLine: vi.fn(() => null),
       },
     },
+    parser: {
+      registerOscHandler: vi.fn((ident: number, handler: (data: string) => boolean) => {
+        oscHandlers.set(ident, handler)
+        return { dispose: vi.fn() }
+      }),
+    },
     dispose: vi.fn(),
     cols: 80,
     rows: 24,
@@ -33,12 +43,18 @@ const { mockWrite, mockTerm, mockFitAddon, mockTerminalCtor } = vi.hoisted(() =>
   }
   const mockFitAddon = { fit: vi.fn() }
   const mockTerminalCtor = vi.fn(function () { return mockTerm })
-  return { mockWrite, mockTerm, mockFitAddon, mockTerminalCtor }
+  const mockWebLinksCtor = vi.fn(function (handler?: (event: MouseEvent, uri: string) => void) {
+    if (handler) linkHandlers.push(handler)
+    return {}
+  })
+  return {
+    mockWrite, mockTerm, mockFitAddon, mockTerminalCtor, mockWebLinksCtor, oscHandlers, linkHandlers,
+  }
 })
 
 vi.mock('@xterm/xterm', () => ({ Terminal: mockTerminalCtor }))
 vi.mock('@xterm/addon-fit', () => ({ FitAddon: vi.fn(function () { return mockFitAddon }) }))
-vi.mock('@xterm/addon-web-links', () => ({ WebLinksAddon: vi.fn(function () { return {} }) }))
+vi.mock('@xterm/addon-web-links', () => ({ WebLinksAddon: mockWebLinksCtor }))
 
 // ── WebSocket mock ────────────────────────────────────────────────────────────
 class MockWebSocket {
@@ -102,6 +118,8 @@ describe('useTerminal', () => {
       value: { writeText: vi.fn().mockResolvedValue(undefined) },
     })
     document.execCommand = vi.fn(() => true)
+    oscHandlers.clear()
+    linkHandlers.length = 0
     vi.clearAllMocks()
   })
 
@@ -988,5 +1006,103 @@ describe('useTerminal', () => {
     expect(written).not.toContain('\x1b[>1h')
     expect(written).toContain('hidden cursor')
     expect(written).toContain('text')
+  })
+})
+
+// ── URL opening from a pane ──────────────────────────────────────────────────
+describe('useTerminal URL opening', () => {
+  let originalWebSocket: typeof WebSocket
+  let originalOpen: typeof window.open
+
+  beforeEach(() => {
+    originalWebSocket = window.WebSocket
+    originalOpen = window.open
+    MockWebSocket.instances = []
+    window.WebSocket = MockWebSocket as unknown as typeof WebSocket
+    mockTerm.element = undefined
+    mockTerm.open.mockImplementation((container: HTMLElement) => {
+      const el = document.createElement('div')
+      mockTerm.element = el
+      container.appendChild(el)
+    })
+    oscHandlers.clear()
+    linkHandlers.length = 0
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    __resetTerminalEntriesForTests()
+    window.WebSocket = originalWebSocket
+    window.open = originalOpen
+    vi.restoreAllMocks()
+  })
+
+  function mountTerminal(sessionId: string, handlers: {
+    onLinkActivate?: (url: string) => void
+    onBrowserOpenRequest?: (url: string) => void
+  } = {}) {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    return renderHook(() => useTerminal({ sessionId, container, ...handlers }))
+  }
+
+  it('routes an activated link to the pane instead of opening it directly', () => {
+    const onLinkActivate = vi.fn()
+    window.open = vi.fn() as unknown as typeof window.open
+    mountTerminal('url-1', { onLinkActivate })
+
+    linkHandlers[0](new MouseEvent('click'), 'https://example.com/auth')
+
+    expect(onLinkActivate).toHaveBeenCalledWith('https://example.com/auth')
+    expect(window.open).not.toHaveBeenCalled()
+  })
+
+  it('falls back to opening a tab when the pane provides no handler', () => {
+    window.open = vi.fn() as unknown as typeof window.open
+    mountTerminal('url-2')
+
+    linkHandlers[0](new MouseEvent('click'), 'https://example.com/docs')
+
+    expect(window.open).toHaveBeenCalledWith('https://example.com/docs', '_blank', 'noopener,noreferrer')
+  })
+
+  it('hands a browser-open OSC sequence to the pane and consumes it', () => {
+    const onBrowserOpenRequest = vi.fn()
+    mountTerminal('url-3', { onBrowserOpenRequest })
+
+    const handler = oscHandlers.get(7373)
+    expect(handler).toBeDefined()
+    expect(handler!('panemux-open;https://example.com/device')).toBe(true)
+
+    expect(onBrowserOpenRequest).toHaveBeenCalledWith('https://example.com/device')
+  })
+
+  it('ignores OSC payloads that are not openable URLs', () => {
+    const onBrowserOpenRequest = vi.fn()
+    mountTerminal('url-4', { onBrowserOpenRequest })
+    const handler = oscHandlers.get(7373)!
+
+    expect(handler('panemux-open;file:///etc/passwd')).toBe(true)
+    expect(handler('unrelated;https://example.com/')).toBe(true)
+
+    expect(onBrowserOpenRequest).not.toHaveBeenCalled()
+  })
+
+  it('keeps handlers working after the pane passes new callbacks', () => {
+    const first = vi.fn()
+    const second = vi.fn()
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const { rerender } = renderHook(
+      ({ handler }: { handler: (url: string) => void }) =>
+        useTerminal({ sessionId: 'url-5', container, onLinkActivate: handler }),
+      { initialProps: { handler: first } },
+    )
+
+    rerender({ handler: second })
+    linkHandlers[0](new MouseEvent('click'), 'https://example.com/auth')
+
+    expect(second).toHaveBeenCalledWith('https://example.com/auth')
+    expect(first).not.toHaveBeenCalled()
   })
 })
