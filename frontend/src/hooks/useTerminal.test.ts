@@ -1,6 +1,12 @@
 import { renderHook, act } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { __computePullRequestLinksForTests, __resetTerminalEntriesForTests, useTerminal } from './useTerminal'
+import {
+  TERMINAL_URL_REGEX,
+  __computePullRequestLinksForTests,
+  __resetTerminalEntriesForTests,
+  useTerminal,
+} from './useTerminal'
+import { WebLinksAddon } from '@xterm/addon-web-links'
 import { TERMINAL_FONT_FAMILY } from '../utils/fonts'
 
 // ── xterm.js mocks ───────────────────────────────────────────────────────────
@@ -159,6 +165,14 @@ describe('useTerminal', () => {
     const container = makeContainer()
     renderHook(() => useTerminal({ sessionId: 's1', container }))
     expect(mockTerm.loadAddon).toHaveBeenCalledTimes(2)
+  })
+
+  it('configures the web links addon with the CJK-aware url regex', () => {
+    const container = makeContainer()
+    renderHook(() => useTerminal({ sessionId: 's1', container }))
+
+    expect(WebLinksAddon).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(WebLinksAddon).mock.calls[0][1]).toEqual({ urlRegex: TERMINAL_URL_REGEX })
   })
 
   it('registers a custom link provider for pull request numbers', () => {
@@ -988,5 +1002,93 @@ describe('useTerminal', () => {
     expect(written).not.toContain('\x1b[>1h')
     expect(written).toContain('hidden cursor')
     expect(written).toContain('text')
+  })
+})
+
+// The web links addon applies the regex as `new RegExp(regex.source, regex.flags + 'g')`
+// (see LinkComputer.computeLink), so mirror that here instead of matching the regex directly.
+function detectURLs(line: string): string[] {
+  const rex = new RegExp(TERMINAL_URL_REGEX.source, `${TERMINAL_URL_REGEX.flags}g`)
+  const found: string[] = []
+  let match: RegExpExecArray | null
+  while ((match = rex.exec(line)) !== null) {
+    found.push(match[0])
+  }
+  return found
+}
+
+describe('TERMINAL_URL_REGEX', () => {
+  it('is unicode-aware and not global so the addon can safely append the g flag', () => {
+    expect(TERMINAL_URL_REGEX.flags).toContain('u')
+    expect(TERMINAL_URL_REGEX.global).toBe(false)
+  })
+
+  it.each([
+    ['ideographic full stop', 'https://example.com/docs\u3002', 'https://example.com/docs'],
+    ['ideographic comma then text', 'https://example.com/docs\u3001\u6b21\u306e\u624b\u9806\u3078', 'https://example.com/docs'],
+    ['fullwidth parentheses', '\uff08https://example.com/docs\uff09', 'https://example.com/docs'],
+    ['corner brackets', '\u300chttps://example.com/docs\u300d', 'https://example.com/docs'],
+    ['lenticular bracket', 'https://example.com/docs\u3010', 'https://example.com/docs'],
+    ['katakana middle dot', 'https://example.com/docs\u30fb', 'https://example.com/docs'],
+    ['halfwidth ideographic full stop', 'https://example.com/docs\uff61', 'https://example.com/docs'],
+    ['horizontal ellipsis', 'https://example.com/docs\u2026', 'https://example.com/docs'],
+    ['curly double quotes', '\u201chttps://example.com/docs\u201d', 'https://example.com/docs'],
+    ['wave dash', 'https://example.com/docs\u301c', 'https://example.com/docs'],
+    ['fullwidth colon', 'https://example.com/docs\uff1a', 'https://example.com/docs'],
+  ])('drops trailing CJK punctuation (%s)', (_name, line, expected) => {
+    expect(detectURLs(line)).toEqual([expected])
+  })
+
+  it.each([
+    ['full stop', 'https://example.com/a.', 'https://example.com/a'],
+    ['comma', 'https://example.com/a,', 'https://example.com/a'],
+    ['exclamation mark', 'https://example.com/a!', 'https://example.com/a'],
+    ['question mark', 'https://example.com/a?', 'https://example.com/a'],
+    ['colon', 'https://example.com/a:', 'https://example.com/a'],
+    ['closing paren', 'see https://example.com/a) here', 'https://example.com/a'],
+    ['angle brackets', '<https://example.com/a>', 'https://example.com/a'],
+    ['double quotes', '"https://example.com/a"', 'https://example.com/a'],
+  ])('keeps the existing ASCII boundary behaviour (%s)', (_name, line, expected) => {
+    expect(detectURLs(line)).toEqual([expected])
+  })
+
+  it.each([
+    ['raw IRI path', 'https://ja.wikipedia.org/wiki/\u65e5\u672c\u8a9e'],
+    ['percent-encoded path', 'https://example.com/%E6%97%A5%E6%9C%AC%E8%AA%9E'],
+    ['fullwidth alphanumerics in path', 'https://example.com/\uff46\uff55\uff4c\uff4c\uff11\uff12\uff13'],
+    ['trailing slash', 'https://example.com/'],
+    ['bare host', 'https://example.com'],
+    ['credentials, port, query and fragment', 'https://user:pw@example.com:8443/p?q=1#frag'],
+    ['loopback with port', 'http://localhost:8080/path'],
+    ['uppercase scheme', 'HTTPS://example.com/a'],
+  ])('keeps valid urls intact (%s)', (_name, line) => {
+    expect(detectURLs(line)).toEqual([line])
+  })
+
+  it('drops trailing CJK punctuation without truncating a raw IRI path', () => {
+    expect(detectURLs('https://ja.wikipedia.org/wiki/\u65e5\u672c\u8a9e\u3002')).toEqual([
+      'https://ja.wikipedia.org/wiki/\u65e5\u672c\u8a9e',
+    ])
+  })
+
+  it('detects every url on a line that mixes CJK delimiters', () => {
+    const line = '\uff08https://a.example.com/x\uff09\u3068\u300chttps://b.example.com/y\u300d'
+    expect(detectURLs(line)).toEqual(['https://a.example.com/x', 'https://b.example.com/y'])
+  })
+
+  it.each([
+    ['unsupported scheme', 'ftp://example.com/a'],
+    ['file scheme', 'file:///tmp/sample-project'],
+    ['scheme-less host', 'example.com/a'],
+    ['scheme only', 'https://'],
+  ])('does not detect a link for %s', (_name, line) => {
+    expect(detectURLs(line)).toEqual([])
+  })
+
+  // Documented limitation (see issue #173): kana directly following a url cannot be
+  // distinguished from a legitimate kana IRI path, so the whole run stays part of the link.
+  it('still absorbs kana that directly follows a url with no delimiter', () => {
+    const line = 'https://example.com/docs\u3092\u53c2\u7167\u3057\u3066\u304f\u3060\u3055\u3044'
+    expect(detectURLs(line)).toEqual([line])
   })
 })

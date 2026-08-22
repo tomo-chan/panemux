@@ -710,6 +710,14 @@ attempt itself fails, the pane shows the manual "Reconnect Session" action inste
 - If no text is selected, `Cmd+C` or `Ctrl+C` is left to normal terminal behavior, so shell interrupts still work.
 - This interaction is currently validated in Chrome.
 
+### Terminal link detection
+
+- `http://` and `https://` URLs printed into a pane are auto-detected and become clickable through the xterm.js web links addon.
+- The addon's default URL pattern only excludes ASCII punctuation, so panemux supplies its own pattern (`TERMINAL_URL_REGEX` in `frontend/src/hooks/useTerminal.ts`) that also excludes CJK and fullwidth punctuation. Trailing `。`, `、`, `・`, `…` and enclosing `（）`, `「」`, `【】`, `“”` are not part of the detected link.
+- Non-ASCII *letters* are never excluded, so raw IRIs such as `https://ja.wikipedia.org/wiki/日本語` stay linkable in full. Fullwidth digits and fullwidth letters stay linkable for the same reason.
+- Known limitation: kana or kanji that directly follows a URL with no delimiter (for example `https://example.com/docsを参照`) is still absorbed into the link. That case cannot be distinguished from a legitimate kana IRI path by pattern matching alone. Separate the URL with whitespace or punctuation, or emit an OSC 8 hyperlink — xterm.js resolves those itself, independently of this pattern, and its built-in handler asks for confirmation before navigating.
+- `#<number>` references are linked separately to the pane's GitHub pull request (see [Pane Git and PR metadata](#pane-git-and-pr-metadata)).
+
 ### Resize and layout updates
 
 - `ResizeObserver` triggers terminal fit logic when pane size changes.
