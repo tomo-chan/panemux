@@ -5,6 +5,8 @@ import { AddSSHHostDialog } from './components/AddSSHHostDialog'
 import { WorkspaceTabs } from './components/WorkspaceTabs'
 import { CommandPalette } from './components/CommandPalette'
 import { CommandHistoryPanel } from './components/CommandHistoryPanel'
+import { BoardDashboardPanel } from './components/BoardDashboardPanel'
+import type { BoardPaneRef } from './components/BoardDashboardPanel'
 import { useLayout } from './hooks/useLayout'
 import { usePaneSettings } from './hooks/usePaneSettings'
 import { useWorkspaceAttentionMonitor } from './hooks/useWorkspaceAttentionMonitor'
@@ -17,9 +19,20 @@ import { TERMINAL_FONT_FAMILY } from './utils/fonts'
 import { findPaneById, generatePaneId, layoutContainsPane } from './utils/layoutTree'
 import type { MovePanePlacement } from './hooks/useLayout'
 import type { WorkspacePaneSummary, WorkspaceSummary } from './components/WorkspaceTabs'
-import type { GitInfo, LayoutChild, LayoutNode, SessionInfo, SSHConfigHost } from './schemas'
+import type { Workspace, GitInfo, LayoutChild, LayoutNode, SessionInfo, SSHConfigHost } from './schemas'
 
 const DEFAULT_DISPLAY: DisplayConfig = { show_header: true, show_status_bar: true }
+
+const cornerButtonStyle: React.CSSProperties = {
+  padding: '6px 10px',
+  backgroundColor: '#252526',
+  color: '#888',
+  border: '1px solid #444',
+  borderRadius: '4px',
+  fontFamily: TERMINAL_FONT_FAMILY,
+  fontSize: '11px',
+  cursor: 'pointer',
+}
 
 export const App: React.FC = () => {
   const {
@@ -54,9 +67,11 @@ export const App: React.FC = () => {
   const [movePaneError, setMovePaneError] = useState<string | null>(null)
   const [pendingFocusedPaneId, setPendingFocusedPaneId] = useState<string | null>(null)
   const sessionsById = useSessionsOverview(Boolean(workspaces))
-  const { token: boardToken, commandCenterEnabled } = useBoardSessionToken()
+  const { token: boardToken, commandCenterEnabled, agentBoardEnabled } = useBoardSessionToken()
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false)
   const [isCommandHistoryOpen, setIsCommandHistoryOpen] = useState(false)
+  const [isBoardDashboardOpen, setIsBoardDashboardOpen] = useState(false)
+  const boardDashboardAvailable = agentBoardEnabled && boardToken !== ''
 
   const paneMetadataByID = useMemo(() => {
     const metadata = new Map<string, { paneTitle: string; workspaceId: string; workspaceTitle: string }>()
@@ -70,6 +85,10 @@ export const App: React.FC = () => {
   }, [workspaces])
   const overviewPaneIds = useMemo(() => Array.from(paneMetadataByID.keys()), [paneMetadataByID])
   const gitInfoById = useGitInfoSnapshotMap(overviewPaneIds)
+
+  // Panes configured for the board, whether or not they have reported. The
+  // dashboard needs these to tell "never joined" from "not configured".
+  const boardPanes = useMemo(() => collectBoardPanes(workspaces?.items ?? []), [workspaces])
   const workspaceSummaries = useMemo(() => {
     const summaries: Record<string, WorkspaceSummary> = {}
     if (!workspaces) return summaries
@@ -215,6 +234,23 @@ export const App: React.FC = () => {
     window.addEventListener('keydown', handleKeyDown, true)
     return () => window.removeEventListener('keydown', handleKeyDown, true)
   }, [commandCenterEnabled])
+
+  // Global agent board dashboard shortcut: Cmd/Ctrl+Shift+B, on the capture
+  // phase for the same reason as the command palette's own Cmd/Ctrl+Shift+K
+  // above — it must reach this handler even when a terminal pane currently
+  // has focus. See docs/ui-design.md's Agent Board UI section.
+  useEffect(() => {
+    if (!boardDashboardAvailable) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const modifier = event.metaKey || event.ctrlKey
+      if (modifier && event.shiftKey && event.key.toLowerCase() === 'b') {
+        event.preventDefault()
+        setIsBoardDashboardOpen((open) => !open)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown, true)
+    return () => window.removeEventListener('keydown', handleKeyDown, true)
+  }, [boardDashboardAvailable])
 
   const handleAddSSHHost = useCallback(async (host: SSHConfigHost) => {
     setIsAddSSHHostSaving(true)
@@ -503,29 +539,31 @@ export const App: React.FC = () => {
           onSave={handleAddSSHHost}
           onClose={() => setIsAddSSHHostOpen(false)}
         />
-        {commandCenterEnabled && (
-          <button
-            type="button"
-            aria-label="Open command center history"
-            onClick={() => setIsCommandHistoryOpen(true)}
-            title="Command center history"
-            style={{
-              position: 'absolute',
-              bottom: 12,
-              right: 12,
-              zIndex: 20,
-              padding: '6px 10px',
-              backgroundColor: '#252526',
-              color: '#888',
-              border: '1px solid #444',
-              borderRadius: '4px',
-              fontFamily: TERMINAL_FONT_FAMILY,
-              fontSize: '11px',
-              cursor: 'pointer',
-            }}
-          >
-            Command History
-          </button>
+        {(commandCenterEnabled || boardDashboardAvailable) && (
+          <div style={{ position: 'absolute', bottom: 12, right: 12, zIndex: 20, display: 'flex', gap: '8px' }}>
+            {commandCenterEnabled && (
+              <button
+                type="button"
+                aria-label="Open command center history"
+                onClick={() => setIsCommandHistoryOpen(true)}
+                title="Command center history"
+                style={cornerButtonStyle}
+              >
+                Command History
+              </button>
+            )}
+            {boardDashboardAvailable && (
+              <button
+                type="button"
+                aria-label="Open agent board"
+                onClick={() => setIsBoardDashboardOpen(true)}
+                title="Agent board"
+                style={cornerButtonStyle}
+              >
+                Agent Board
+              </button>
+            )}
+          </div>
         )}
         <CommandPalette
           isOpen={isCommandPaletteOpen && commandCenterEnabled}
@@ -536,6 +574,12 @@ export const App: React.FC = () => {
           isOpen={isCommandHistoryOpen && commandCenterEnabled}
           token={boardToken}
           onClose={() => setIsCommandHistoryOpen(false)}
+        />
+        <BoardDashboardPanel
+          isOpen={isBoardDashboardOpen && boardDashboardAvailable}
+          token={boardToken}
+          boardPanes={boardPanes}
+          onClose={() => setIsBoardDashboardOpen(false)}
         />
       </div>
     </LayoutActionsContext.Provider>
@@ -607,6 +651,23 @@ function collectChildPaneMetadata(
   for (const nestedChild of child.children) {
     collectChildPaneMetadata(nestedChild, workspaceId, workspaceTitle, metadata)
   }
+}
+
+// collectBoardPanes gathers every pane the config puts on the board, with
+// the operator's own title for it when there is one — a column of raw pane
+// IDs stops being readable as soon as there are more than a couple.
+function collectBoardPanes(items: Workspace[]): BoardPaneRef[] {
+  const panes: BoardPaneRef[] = []
+
+  const walk = (child: LayoutChild) => {
+    if (child.pane?.agent_board?.enabled) panes.push({ id: child.pane.id, title: child.pane.title })
+    for (const nested of child.children ?? []) walk(nested)
+  }
+  for (const workspace of items) {
+    for (const child of workspace.layout.children) walk(child)
+  }
+
+  return panes
 }
 
 function collectWorkspacePaneSummaries(

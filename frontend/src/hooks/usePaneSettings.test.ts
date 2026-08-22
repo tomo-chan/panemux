@@ -339,3 +339,55 @@ describe('usePaneSettings', () => {
     })
   })
 })
+
+describe('usePaneSettings restart policy', () => {
+  const pane = {
+    id: 'api',
+    type: 'local' as const,
+    shell: '/bin/bash',
+    title: 'API',
+    cwd: '/workspace/user/project',
+  }
+  const layout = { direction: 'horizontal' as const, children: [{ size: 100, pane }] }
+
+  function restartCalls() {
+    return vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes('/restart'))
+  }
+
+  async function save(updated: Record<string, unknown>) {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }))
+    const { result } = renderHook(() => usePaneSettings(layout, vi.fn()))
+    act(() => result.current.openSettings(pane))
+    await act(async () => {
+      await result.current.saveSettings({ ...pane, ...updated })
+    })
+  }
+
+  // Restarting kills the shell running in the pane, so it must happen only
+  // when something about the session itself changed. Board settings, the
+  // title and the chrome toggles do not.
+  it('does not restart when only agent_board changed', async () => {
+    await save({ agent_board: { enabled: true, mode: 'both' } })
+    expect(restartCalls()).toHaveLength(0)
+  })
+
+  it('does not restart when only the title changed', async () => {
+    await save({ title: 'Renamed' })
+    expect(restartCalls()).toHaveLength(0)
+  })
+
+  it('restarts when the shell changed', async () => {
+    await save({ shell: '/bin/zsh' })
+    expect(restartCalls()).toHaveLength(1)
+  })
+
+  it('restarts when the working directory changed', async () => {
+    await save({ cwd: '/workspace/user/other' })
+    expect(restartCalls()).toHaveLength(1)
+  })
+
+  it('restarts when the pane type changed', async () => {
+    await save({ type: 'ssh', connection: 'prod' })
+    expect(restartCalls()).toHaveLength(1)
+  })
+})

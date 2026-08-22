@@ -122,6 +122,7 @@ Example: `Config.sshConfigPath` uses `sshconfig.DefaultPath()` only when the ove
 
 - When a behavior, operational assumption, browser requirement, rendering constraint, or user-visible rule becomes confirmed, update the relevant files in `docs/` in the same change.
 - Do not leave documentation follow-up as a separate later task once the behavior is settled.
+- When a change adds or alters a user-facing use case, add or update its row in [docs/scenarios.md](docs/scenarios.md) in the same change, including the column naming where it is verified. `manual` is an acceptable answer there; an absent row is not.
 
 ### Security-sensitive implementation
 

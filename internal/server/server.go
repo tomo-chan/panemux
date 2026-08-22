@@ -102,10 +102,13 @@ func registerRoutes(
 	})
 	// /api/board/* is the only part of the API gated behind bearer-token
 	// auth today: unlike every other /api/* route and /ws/{sessionID},
-	// nothing relies on these endpoints yet (no frontend calls them), so
-	// gating them from day one costs nothing — retrofitting auth onto the
-	// already-relied-upon unauthenticated routes above is a separate,
-	// larger change. See docs/security.md.
+	// these endpoints were gated from day one, before the frontend called
+	// any of them — GetBoardStatus/GetBoardMessages are now polled by the
+	// dashboard's useBoardStatus hook and GetBoardCommandHistory by the
+	// command palette/history panel (see docs/agent-board.md), but the
+	// auth gate itself was never contingent on that. Retrofitting auth
+	// onto the already-relied-upon unauthenticated routes above is a
+	// separate, larger change. See docs/security.md.
 	r.Route("/api/board", func(r chi.Router) {
 		r.Use(bearerAuthMiddleware(authToken))
 		r.Get("/status", apiHandler.GetBoardStatus)

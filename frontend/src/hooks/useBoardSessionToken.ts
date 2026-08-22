@@ -4,9 +4,10 @@ import { BoardSessionTokenResponseSchema } from '../schemas'
 export interface BoardSession {
   token: string
   commandCenterEnabled: boolean
+  agentBoardEnabled: boolean
 }
 
-const DEFAULT_BOARD_SESSION: BoardSession = { token: '', commandCenterEnabled: false }
+const DEFAULT_BOARD_SESSION: BoardSession = { token: '', commandCenterEnabled: false, agentBoardEnabled: false }
 
 // useBoardSessionToken fetches the bearer token panemux generated or was
 // configured with, so the dashboard can authenticate its own
@@ -24,7 +25,11 @@ export function useBoardSessionToken(): BoardSession {
         if (!res.ok) return
         const data = BoardSessionTokenResponseSchema.parse(await res.json())
         if (!cancelled) {
-          setSession({ token: data.token, commandCenterEnabled: data.command_center_enabled })
+          setSession({
+            token: data.token,
+            commandCenterEnabled: data.command_center_enabled,
+            agentBoardEnabled: data.agent_board_enabled,
+          })
         }
       } catch {
         // Best-effort: the command center simply stays unavailable.

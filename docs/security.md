@@ -116,7 +116,43 @@ discipline `RunBoardCommand` already applies uniformly to every argument, board-
 `agent_board.team`, a pane's own ID, and the agmsg-recognized type string
 `session.AgentTypeDetector` returns are written only into the PTY instruction text, never into a
 `RunBoardCommand` call bootstrap itself makes; they are operator config or panemux's own fixed
-detection-table output either way, not external request data.
+detection-table output either way, not external request data. The same holds for the
+`actas-claim.sh`/`watch.sh` invocations the instruction gained for `claude-code` panes (see
+[agent-board.md](agent-board.md#two-panes-in-one-project-directory)): the script names and the
+`$CLAUDE_CODE_SESSION_ID` reference are compile-time literals, the value behind that variable is
+expanded by the agent's own shell and never by panemux, and no part of it reaches an
+`exec.Command` argv.
+
+### Agent-reported values in the dashboard UI
+
+Everything in a `board_status` self-report — `state`, `cwd`, `branch`, `repo`, `pr_url`, `last_tool`,
+`summary` — is free text written by an agent process, possibly on a remote host, and panemux
+validates none of it: `internal/board`'s `ParseStatus` copies each field through verbatim, and the
+relay's only gate is `validFrom` (was this row sent by a known board-enabled pane), which says
+nothing about a row's *contents*. A pane that has been talked into writing a hostile status report,
+or any process on that host able to call `send.sh`, therefore controls these strings end to end.
+
+The dashboard renders them as text children, which React escapes; there is no `dangerouslySetInnerHTML`
+anywhere in `frontend/src`. **No agent-reported value reaches a DOM attribute at all** — the dashboard
+card renders only `state`, `summary`, `last_tool` and the relative time, each as a text child, and the
+component tree now contains no `<a>` element.
+
+That is a change from an earlier design, and the reason it is worth recording here rather than
+quietly deleting: the card used to render `pr_url` as an `href`, which is the one shape where an
+agent-controlled string carries meaning of its own rather than being escaped as text. It was guarded
+by a `safeExternalURL` helper that admitted only `http:`/`https:` and fell back to plain text
+otherwise — necessarily so, because React 18, the version this app pins, merely logs *"A future
+version of React will block javascript: URLs"* and renders the attribute anyway (React 19 blocks it;
+this codebase is not on it), and `target="_blank"`/`rel="noopener noreferrer"` constrain the opened
+document rather than whether a script-scheme URL executes. Script running in the dashboard's own
+origin would have the board bearer token, so that was a real escalation path.
+
+`pr_url`, `repo` and `branch` were dropped from the card for a product reason — panemux computes
+those itself by running git, and the board's self-reported copies could contradict the pane header —
+but the security consequence is that the sink is gone rather than guarded. The rule that replaces the
+old guard: **any future UI that renders an agent-reported field into an attribute rather than as a
+text child reintroduces this sink and needs its own scheme validation**; a `safeExternalURL`-style
+allowlist is the pattern to restore, not React's escaping to rely on.
 
 ### Command center subprocess execution
 
@@ -162,6 +198,131 @@ just the CLI in isolation) before being considered closed. `internal/commandcent
 since a fake `cmdRunner` cannot reproduce the real CLI's own argument-parsing behavior — it can only
 assert what argv panemux itself constructs, which is why this was caught by an adversarial review
 verifying claims against the real binary, not by the original test suite.
+
+**Slash commands are disabled, because they are outside both tool lists.** `--allowedTools` and
+`--disallowedTools` govern tools; neither governs the CLI's own slash-command registry. Verified
+against the real CLI: a prompt of `/context`, sent through the otherwise-shipped argv, returned that
+command's own output (a context-usage table) rather than being treated as prompt text. The palette is
+reachable by anyone holding the board bearer token, so that put the whole registry — `/config`,
+`/model`, `/mcp`, `/doctor`, `/clear` and the rest, 46 commands in the environment this was measured
+in — one message away. `buildArgs` passes `--disable-slash-commands`; the same prompt then returns
+"/context isn't available in this environment." while `board_status` still returns real data, both
+confirmed live. `TestRunnerDisablesSlashCommands` pins the flag and that the prompt still travels as
+prompt text after the `--` marker.
+
+One related observation, recorded because it bounds what the three-tool contract actually covers: the
+subprocess can still describe its own execution environment, since the CLI injects environment context
+into its system prompt that `--append-system-prompt` only adds to. In a Claude Code on the web
+environment that context included the session URL. This is not reachable through a tool and is not
+closed by any flag above.
+
+**The subprocess's execution context is pinned by panemux, not inherited from the environment.** Three
+of `claude`'s defaults resolve from ambient state, and all three were wrong for a subprocess panemux
+spawns on an operator's behalf. Each finding below was reproduced against the real CLI (v2.1.233),
+not inferred from `--help`:
+
+- **Conversation identity.** A plain `claude -p` with no `--resume` does **not** mint a fresh
+  conversation — it reports the *ambient* session id of whatever Claude Code session the environment
+  already belongs to. `Runner` previously captured that reported id, persisted it, and `--resume`d it
+  on every later query, which attached the command center to a conversation it does not own. This was
+  observed live: a palette query returned a reply carrying the operator's own session context,
+  referencing a scratch file name that appeared in no prompt panemux ever sent. **The escalation is
+  the point:** the command center is deliberately launched with `--allowedTools` scoped to exactly
+  three board tools, while the session it joined held that session's full tool permissions, so palette
+  text became input to a far more capable agent than the palette's own contract admits.
+  `internal/commandcenter/context.go`'s `NewSessionID` now mints a v4 UUID, `buildArgs` pins it with
+  `--session-id` on a first run, and the persisted value is always the id panemux minted — the
+  subprocess's own reported id is never adopted.
+  `TestRunnerFirstRunMintsAndPersistsItsOwnSessionID` pins this by feeding the fake subprocess a
+  *different* reported id and asserting it never reaches the session file.
+- **Settings and hooks.** With no `--setting-sources`, the subprocess loads the operator's user,
+  project and local settings — including their hooks, which would then execute inside a process
+  panemux started. `buildArgs` passes `--setting-sources` with an empty value, and
+  `--strict-mcp-config` so only the board MCP server this query configured is connected.
+- **Working directory.** `claude -p` reads `CLAUDE.md` from its working directory, and `cmd.Dir` was
+  unset, so it read whatever project the operator happened to launch panemux from. `NewWorkDir`
+  creates an empty per-query temp directory and `realCommandFactory` sets `cmd.Dir` to it.
+
+Note the interaction between the last two: `--setting-sources ''` suppresses `CLAUDE.md` discovery
+**as well as** settings files, so "ship our own `CLAUDE.md`" and "inherit none of the operator's
+configuration" cannot both be satisfied through files. panemux's own instructions therefore travel via
+`--append-system-prompt` (a compile-time literal in `DefaultSystemPrompt`, never operator input, so it
+carries no taint into argv). An operator may refine those instructions by placing a `CLAUDE.md` in
+`~/.config/panemux/command-center/`; it is optional, and it is *text appended to a system prompt*,
+which has no execution semantics.
+
+**No settings file is accepted from anywhere — not the operator's `~/.claude/settings.json`, and not a
+command-center-specific one.** This is not caution for its own sake. A settings value can nullify
+`--allowedTools`. Reproduced twice against the real
+CLI (v2.1.233): with `--allowedTools` scoped to a single board tool, adding
+`{"permissions":{"defaultMode":"acceptEdits"}}` let the subprocess run `Bash` — the file it was told to
+write appeared on disk, and `permission_denials` was **empty**, so the call was not merely permitted
+but not even recorded as a decision. `defaultMode: "acceptEdits"` is an entirely ordinary thing for an
+operator to set for their own interactive sessions, so inheriting it would silently unscope the command
+center. The trust boundary is the point: host settings are written on the assumption that a human typed
+the request and is watching, while the command center accepts input from anyone holding the board
+bearer token, unattended.
+
+**`--allowedTools` alone is therefore not a boundary — it is a permission policy another policy layer
+can override, and an earlier revision of this document called it "the actual security boundary", which
+was wrong.** The argv the subprocess is launched with carries a second, stronger list:
+`--disallowedTools`, built by `DisallowedTools()` in `internal/commandcenter/mcp_config.go`. The
+difference is measurable, all three rows run against the real CLI with `--allowedTools` scoped to a
+single board tool and a prompt instructing the model to write a file with `Bash`:
+
+| argv | `Bash` |
+|---|---|
+| `--allowedTools` alone | blocked |
+| `+ {"permissions":{"defaultMode":"acceptEdits"}}` | **executed** — file written, `permission_denials` empty |
+| `+ --disallowedTools=Bash` | blocked |
+
+panemux sends no `permissions` key today, so the middle row is not the shipped configuration — but it
+is one settings key away, and the third row is what keeps that from being a full escape. The shipped
+argv was then verified end to end against a live board: `Bash` stays blocked *and* `board_status` still
+returns real data, both with and without the `acceptEdits` override applied on top.
+
+A wildcard was tried first and rejected on evidence: `--disallowedTools="*"` removes the board MCP
+tools as well, leaving the command center with nothing to call, while the model still reported file
+tools as available. So the list is an explicit enumeration of the tools that can *act* — execute,
+write, reach the network, spawn further agents, persist work, or contact anything outside the process.
+It will drift as the CLI gains tools. That weakness is accepted because it is the only argv-level
+denial that holds; `TestDisallowedToolsCoversActingTools` and `TestRunnerDeniesActingToolsByName` fail
+if the list or the flag disappears.
+
+Relatedly, `AllowedTools`'s own doc comment used to say the subprocess had "no `Bash`, no filesystem
+tools". That was imprecise in a way that mattered: those tools are *present* in the subprocess's tool
+list and refused at call time, not absent. "Refused" is exactly the property the middle row above
+defeats.
+
+What panemux does send is `SubprocessSettings` (`internal/commandcenter/context.go`), a fixed literal
+containing only keys that *narrow* what the subprocess may do — currently
+`{"sandbox":{"enabled":true}}`. Sandboxing has to be passed explicitly precisely because
+`--setting-sources ''` means nothing else can ever enable it, so without this the command center could
+never be sandboxed even on a host where the operator had enabled it globally.
+
+**With `Bash` denied by name, the sandbox confines nothing today** — its subject is Bash command
+execution (`autoAllowBashIfSandboxed`, `allowUnsandboxedCommands`, `forbidUnsandboxedCommands` and
+`commandPattern` all sit in that area of the settings schema, and nothing suggests it wraps MCP stdio
+server child processes). It is kept as the layer that would still apply if both argv lists were ever
+widened. Its `network` sub-key (`allowedDomains`/`deniedDomains`, matched as `*`, `localhost`,
+`host[:port]` or `*.host[:port]`) is deliberately left unset for the same reason: the board MCP
+server's loopback call to panemux's own API is outside the sandbox's scope, so there is nothing to
+allow-list, and guessing at a network policy could only break the one path the feature depends on.
+Note also that `autoAllowBashIfSandboxed` runs in the *widening* direction — being sandboxed can be a
+reason to auto-permit `Bash` — so "sandbox" must not be read here as a uniformly restrictive concept.
+panemux never sets it, and `TestSubprocessSettingsOnlyNarrows` would fail if a widening key appeared.
+`TestSubprocessSettingsOnlyNarrows` fails if a widening key (`permissions`, `hooks`, `apiKeyHelper`,
+`statusLine`, `env`, `enabledPlugins`, `additionalDirectories`, `mcpServers`) is ever added, and
+`TestRunnerSendsOnlyPanemuxOwnSettings` fails if any other `--settings` value reaches argv.
+
+**Stated plainly, because this repository distinguishes verified claims from unverified ones: the
+sandbox was *not* confirmed to confine anything.** What was verified is that passing it is harmless
+where the OS cannot provide it — the setting is ignored, the query completes, `is_error` stays false —
+and that `CLAUDE_CODE_SANDBOXED` remained unset in the implementation sandbox, with a write outside the
+workspace still succeeding, including under `CLAUDE_CODE_FORCE_SANDBOX=1`. The CLI's own error strings
+describe sandboxing as a per-device capability, so the reasonable reading is that the container this
+was tested in cannot provide it. Treat the confinement itself as unverified until someone runs it on a
+host where `/sandbox` reports the sandbox as available.
 
 The `PANEMUX_BOARD_TOKEN`/`PANEMUX_BOARD_BASE_URL` values the `claude -p` subprocess's own MCP-server
 child process reads never reach `Runner`'s own `exec.Command` argv at all — they are set in the MCP

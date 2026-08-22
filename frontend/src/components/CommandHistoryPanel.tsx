@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react'
 import { BoardCommandHistoryResponseSchema } from '../schemas'
-import type { BoardCommandHistoryEntry } from '../schemas'
 import { TERMINAL_FONT_FAMILY } from '../utils/fonts'
+import { summarizeStreamLines } from '../utils/streamJson'
+import type { StreamSummaryLine } from '../utils/streamJson'
+import { useRestoreFocusOnClose } from '../hooks/useRestoreFocusOnClose'
 
 interface CommandHistoryPanelProps {
   isOpen: boolean
@@ -16,8 +18,10 @@ interface CommandHistoryPanelProps {
 // and docs/ui-design.md's Agent Board UI section (existing overlay-panel
 // pattern reused here, not a new visual language).
 export const CommandHistoryPanel: React.FC<CommandHistoryPanelProps> = ({ isOpen, token, onClose }) => {
-  const [entries, setEntries] = useState<BoardCommandHistoryEntry[]>([])
+  const [lines, setLines] = useState<StreamSummaryLine[]>([])
   const [error, setError] = useState<string | null>(null)
+
+  useRestoreFocusOnClose(isOpen)
 
   useEffect(() => {
     if (!isOpen) return
@@ -33,7 +37,7 @@ export const CommandHistoryPanel: React.FC<CommandHistoryPanelProps> = ({ isOpen
           return
         }
         const data = BoardCommandHistoryResponseSchema.parse(await res.json())
-        if (!cancelled) setEntries(data.entries)
+        if (!cancelled) setLines(summarizeStreamLines(data.entries.map((entry) => entry.raw)))
       } catch {
         if (!cancelled) setError('Failed to load history.')
       }
@@ -45,11 +49,15 @@ export const CommandHistoryPanel: React.FC<CommandHistoryPanelProps> = ({ isOpen
 
   useEffect(() => {
     if (!isOpen) return
+    // Capture phase: a focused xterm terminal stops keydown propagation, so
+    // a bubble-phase window listener never sees Escape at all. The palette
+    // opens over a terminal that usually still holds focus, which is exactly
+    // the state where a bubble-registered handler would silently do nothing.
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose()
     }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
+    window.addEventListener('keydown', handleKeyDown, true)
+    return () => window.removeEventListener('keydown', handleKeyDown, true)
   }, [isOpen, onClose])
 
   if (!isOpen) return null
@@ -72,22 +80,20 @@ export const CommandHistoryPanel: React.FC<CommandHistoryPanelProps> = ({ isOpen
 
         <div style={bodyStyle}>
           {error && <div style={errorStyle}>{error}</div>}
-          {!error && entries.length === 0 && <div style={emptyStyle}>No history yet.</div>}
-          {entries.map((entry, i) => (
-            <div key={i} style={entryStyle}>
-              <div style={timestampStyle}>{formatTimestamp(entry.at)}</div>
-              <div style={rawStyle}>{JSON.stringify(entry.raw)}</div>
-            </div>
-          ))}
+          {!error && lines.length === 0 && <div style={emptyStyle}>No history yet.</div>}
+          {lines.map((line, i) => {
+            if (line.kind === 'prompt') {
+              return <div key={i} style={promptLineStyle}>{`> ${line.text}`}</div>
+            }
+            if (line.kind === 'tool') {
+              return <div key={i} style={toolLineStyle}>{`→ ${line.text}`}</div>
+            }
+            return <div key={i} style={rawStyle}>{line.text}</div>
+          })}
         </div>
       </div>
     </div>
   )
-}
-
-function formatTimestamp(at: string): string {
-  const date = new Date(at)
-  return Number.isNaN(date.getTime()) ? at : date.toLocaleString()
 }
 
 const overlayStyle: React.CSSProperties = {
@@ -142,8 +148,25 @@ const emptyStyle: React.CSSProperties = { color: '#666' }
 
 const errorStyle: React.CSSProperties = { color: '#f44747' }
 
-const entryStyle: React.CSSProperties = { marginBottom: '10px' }
+// A prompt opens its turn, so it carries the same marker and colour the
+// palette uses for the operator's own line.
+const promptLineStyle: React.CSSProperties = {
+  color: '#4ec9b0',
+  marginTop: '14px',
+  marginBottom: '4px',
+  whiteSpace: 'pre-wrap',
+  wordBreak: 'break-word',
+}
 
-const timestampStyle: React.CSSProperties = { color: '#666', fontSize: '11px', marginBottom: '2px' }
+const toolLineStyle: React.CSSProperties = {
+  color: '#8f98a8',
+  fontSize: '11px',
+  marginBottom: '2px',
+}
 
-const rawStyle: React.CSSProperties = { color: '#ccc', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }
+const rawStyle: React.CSSProperties = {
+  color: '#ccc',
+  marginBottom: '4px',
+  whiteSpace: 'pre-wrap',
+  wordBreak: 'break-word',
+}

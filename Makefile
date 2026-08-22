@@ -1,5 +1,5 @@
 .PHONY: all build build-frontend build-backend dev clean run install-deps install-deps-ci install-hooks \
-        test test-go test-frontend test-e2e \
+        test test-go test-frontend test-e2e test-agmsg-contract \
         fmt fmt-go fmt-check-go \
         lint lint-go lint-go-deps lint-frontend \
         coverage coverage-go coverage-frontend \
@@ -43,6 +43,16 @@ test-frontend:
 
 test-e2e:
 	cd frontend && npm run test:e2e
+
+# Tier 2 of docs/agent-board.md's agmsg compatibility contract: asserts the
+# agmsg script behaviors panemux depends on against a REAL agmsg install.
+# Deliberately outside `make check`, which must stay hermetic — the tests
+# skip themselves when AGMSG_PATH is unset.
+#
+#   make test-agmsg-contract AGMSG_PATH=~/.agents/skills/agmsg
+AGMSG_PATH ?=
+test-agmsg-contract:
+	PANEMUX_AGMSG_PATH="$(AGMSG_PATH)" go test ./internal/board/ -run 'TestAgmsgContract' -v -count=1
 
 # ── Coverage (≥ 80 %) ─────────────────────────────────────────────────────────
 #

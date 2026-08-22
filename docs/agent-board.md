@@ -42,7 +42,7 @@
 > the hidden subcommand the command center's own `claude -p` subprocess re-invokes as its MCP server,
 > per [Process lifecycle](#process-lifecycle) below. The Spotlight palette (`CommandPalette.tsx`) and
 > persistent history panel (`CommandHistoryPanel.tsx`) are implemented per
-> [ui-design.md's Agent Board UI section](ui-design.md#agent-board-ui-planned), including the
+> [ui-design.md's Agent Board UI section](ui-design.md#agent-board-ui), including the
 > concrete decisions that section originally deferred to implementation time.
 >
 > **An adversarial review after the initial implementation found and fixed several real bugs,
@@ -56,6 +56,26 @@
 > for a related fix to `GET /api/session-token`'s own guard (it does not rely on CORS, contrary to an
 > earlier revision of that section). A live, end-to-end query through the real browser → WS → Runner →
 > real `claude` subprocess stack was used to confirm the fix, not just the unit tests.
+>
+> **Phase 3 (Dashboard UI and command palette test completion)** is implemented. The read-only status
+> dashboard (`BoardDashboardPanel.tsx`, its own `useBoardStatus` polling hook, and the
+> `utils/boardStatusColors.ts` state→color/staleness helpers) ships as a right-anchored overlay panel
+> reachable via an "Agent Board" button or `Cmd/Ctrl+Shift+B` — see
+> [ui-design.md's Agent Board UI section](ui-design.md#agent-board-ui) for the full presentation
+> detail. It required one addition the Phase 3 design didn't originally anticipate:
+> **`agent_board_enabled`** on `GET /api/session-token`'s response (see
+> [API additions](#api-additions) and [docs/behavior.md](behavior.md#get-apisession-token)), because
+> `command_center_enabled` alone can't gate the dashboard button — a config can enable `agent_board`
+> without the command center, or vice versa, and the frontend has no other cheap way to learn whether
+> any pane has `agent_board.enabled: true` without re-fetching and walking the full layout tree.
+> Broadcast-sending from the dashboard was deliberately left out of Phase 3's scope — the dashboard is
+> read-only, matching the original Phase 3 issue definition. Phase 3 also completed test coverage the
+> command palette and history panel had been shipped without: `schemas/index.test.ts` now exercises
+> every board-related Zod schema's accept/reject paths, `CommandPalette.test.tsx` covers fixture
+> history rendering, incremental streaming updates, and the busy frame, and a shared
+> `useRestoreFocusOnClose` hook (used by the palette, history panel, and dashboard alike) returns
+> keyboard focus to whatever triggered an overlay once that overlay closes — behavior the original
+> Phase 3b issue text called for that had no implementation at all before this phase.
 
 ## Purpose
 
@@ -466,9 +486,64 @@ more exposure to agmsg's evolution than a "we only read from it" dependency woul
 in Known limitations](#known-limitations) for that tradeoff stated plainly. panemux implementation
 must pin a specific tested agmsg version/tag and treat any change to either script's observed
 behavior as an external dependency compatibility bug, tracked the same way any other pinned
-dependency's breaking change would be — and must be able to *detect* such a break mechanically
+dependency's breaking change would be. **That pin is `board.TestedAgmsgVersion`
+(`internal/board/agmsg_version.go`), currently `1.2.0`** — the version whose own source
+(`delivery.sh`, `scripts/lib/type-registry.sh`, the per-type `type.conf` manifests) the script
+argument shapes documented here were read from. panemux reads each board-enabled host's
+`<agmsg_path>/VERSION` once at startup and logs a warning when it differs; a mismatch never blocks
+startup, because refusing to run against an untested agmsg would turn a possible incompatibility into
+a certain outage. An install with no `VERSION` file reads as unknown and is not warned about — panemux
+does not claim a mismatch it could not observe — and must be able to *detect* such a break mechanically
 rather than discover it from a pane silently failing to communicate; see [agmsg compatibility
 contract](#agmsg-compatibility-contract).
+
+### Two panes in one project directory
+
+Two board-enabled panes whose agents run in the **same** project directory each used to receive the
+other's messages. Board *identity* was never the problem — that is the pane ID end to end
+(`join.sh`'s `agent_id`, the `from`/`to` on every row, `BoardCache.RecordStatus`'s key, and the
+relay's own `validFrom` check), and a repository path plays no part in it. Delivery was.
+
+Read from agmsg's own source at the pinned `1.2.0` (unchanged in `1.2.2`): `scripts/watch.sh`
+resolves what it subscribes to with `identities.sh <project> <type>`, which returns **every** (team,
+agent) pair registered for that project and type — both pane IDs. Handed no 4th `<agent>` argument
+the watcher subscribes broadly: it drops only pairs another live session already holds an actas
+exclusivity lock on, and claims none itself. Neither pane claimed one, so neither pane's messages
+were private to it. agmsg states the same failure in `scripts/lib/actas-lock.sh`'s own header —
+"every concurrent CC session in that project would subscribe to every registered identity's
+messages" — and ships `scripts/actas-claim.sh` as the remedy, which its `claude-code` template calls
+directly after `join.sh`.
+
+The bootstrap instruction now follows that template's own call order and argument shapes: `join.sh`,
+then `actas-claim.sh "$(pwd)" <type> <pane-id> "$CLAUDE_CODE_SESSION_ID"`, then — only when a
+watcher is actually running — stop the existing `agmsg inbox stream` task and invoke a new Monitor
+with `watch.sh "$CLAUDE_CODE_SESSION_ID" "$(pwd)" <type> <pane-id>`, whose 4th argument both narrows
+the subscription and re-claims the lock. A `status=held` result means another live session owns that
+pane ID; the instruction tells the agent to report it and stop rather than disturb the running
+watcher.
+
+Three scoping decisions worth stating, because each one leaves something unfixed:
+
+- **`claude-code` only.** `actas-claim.sh`'s 4th argument is the session id, and its source is
+  per-type in agmsg's own `type.conf` `detect` key: `CLAUDE_CODE_SESSION_ID` here,
+  `CODEX_THREAD_ID` for codex, absent entirely for opencode and cursor. Only the `claude-code`
+  invocation has been verified against agmsg's own template, so it is the only one emitted — guessing
+  an env var for another type would hand the script an empty session id. Panes of other types in a
+  shared directory still cross-receive.
+- **No watcher is started for `turn` or `off`.** `turn` delivers through a Stop hook with no
+  watcher to replace, and `off` means the operator asked for no automatic delivery — starting one
+  would contradict the setting. Both still claim the lock, which is what `check-inbox.sh`'s own
+  subscription filtering reads.
+- **This is bootstrap-time only.** The claim happens once, when the pane is onboarded. An agent
+  process that exits and restarts inside a still-open pane is not re-bootstrapped (see [Known
+  limitations](#known-limitations)), so it does not re-claim; the lock it left behind becomes
+  reclaimable once agmsg's own liveness check sees the old instance is gone.
+
+What is *not* affected by any of this: the dashboard. Status rows are keyed by pane ID and validated
+against the sending host's own board-enabled pane set, so two panes in one repository have always
+rendered as two cards. Since the card no longer shows `repo` or `branch` (see
+[ui-design.md](ui-design.md#agent-board-ui)), the pane title is what distinguishes them at a glance —
+worth setting to something meaningful when running several agents against one repository.
 
 ## Status self-report and message flow
 
@@ -514,7 +589,23 @@ layout](#package-layout)'s detection rule.
 `branch`/`repo`/`pr_url` come from the agent running `git branch --show-current`, `git remote get-
 url origin`, and a PR lookup (e.g. `gh pr view --json url -q .url`) itself — panemux never computes
 these; it only displays what the agent reported. `cwd`/`pr_url` may be absent if the agent isn't in
-a repository or there's no open PR; the dashboard shows what's present.
+a repository or there's no open PR. The dashboard does not render `branch`/`repo`/`pr_url` at all
+(see [ui-design.md's Agent Board UI](ui-design.md#agent-board-ui) for why), but they stay in the
+schema because the relay stores whatever a pane reports.
+
+**`summary` is the field the dashboard is built around, and the bootstrap instruction says so
+explicitly.** It used to appear in the instruction as one field name among eight with no guidance,
+alongside "send an update whenever your state changes meaningfully" — which leaves both content and
+cadence to the agent's discretion. That is survivable with two panes and useless with eight: a
+column of state pills tells an operator that work is happening somewhere, not which pane is doing
+what. The instruction now asks for one short sentence in plain language naming the current task
+("Fixing the flaky relay test"), explicitly *not* the last tool call and not a session recap, with
+what the pane is blocked on when it is blocked, sent when starting a task, finishing one, becoming
+blocked, or going idle — events an agent can recognize, rather than a timer it would have to run.
+
+panemux cannot enforce any of this. A pane that reports no `summary`, or a stale one, renders as a
+card with a state pill and nothing to read, and that is the honest display of what the board knows
+— the dashboard never invents a summary from `last_tool` or from git state to fill the gap.
 
 ```mermaid
 sequenceDiagram
@@ -914,12 +1005,18 @@ board-enabled pane) must be true before the goroutine even starts.
       agmsg](#integration-with-agmsg) for why hardcoding either of agmsg's two `cmd_prefix`
       conventions (`/agmsg` vs. `$agmsg`) into one bootstrap instruction would be wrong for roughly
       half of the six detectable agent types.
-   2. From then on, send every board-related message (status reports, cross-pane messages) with the
+   2. **Only when the pane's agent type is `claude-code`:** claim that identity for this process by
+      running `actas-claim.sh "$(pwd)" <agmsg-type> <pane-id> "$CLAUDE_CODE_SESSION_ID"`, and — when
+      a Monitor-based watcher is running for this mode — replace that watcher with one restricted to
+      this pane (`watch.sh "$CLAUDE_CODE_SESSION_ID" "$(pwd)" <agmsg-type> <pane-id>`). See [Two
+      panes in one project directory](#two-panes-in-one-project-directory) for what this fixes and
+      why it is emitted for one agent type only.
+   3. From then on, send every board-related message (status reports, cross-pane messages) with the
       raw `send.sh <team> <from> <to> "<body>" --force` invocation rather than `/agmsg send`/`$agmsg
       send`, per [Integration with agmsg](#integration-with-agmsg).
-   3. Include the [status self-report](#status-self-report-and-message-flow) fields on every status
+   4. Include the [status self-report](#status-self-report-and-message-flow) fields on every status
       update, sent to `_system` via that same `send.sh` invocation.
-   4. Only if `mode` is `turn` or `both` (mirroring agmsg's own `delivery.sh set
+   5. Only if `mode` is `turn` or `both` (mirroring agmsg's own `delivery.sh set
       monitor|turn|both|off`, default `monitor`): also run `delivery.sh set <mode> <agmsg-type>
       "$(pwd)"` directly (again bypassing the `cmd_prefix` divergence) and read/follow the
       `AGMSG-DIRECTIVE:` block it prints — this is agmsg's own mechanism for telling an agent how to
@@ -1020,13 +1117,31 @@ tradeoff (see [Known limitations](#known-limitations)), not a claim of a race-fr
 ### Process lifecycle
 
 - **First run.** No persisted command-center session id exists yet the first time a query arrives.
-  panemux invokes `claude -p --output-format=stream-json --verbose "<prompt>"` — note `--verbose` is
-  required alongside `-p --output-format=stream-json`; the CLI refuses to stream structured output
-  in print mode without it — omitting `--resume` entirely, captures the `session_id` the stream-json
-  output reports for that first exchange, and persists it to a small local file (e.g.
-  `~/.config/panemux/command-center-session.json`, the same kind of local bookkeeping file as the
-  relay cursor in [Cross-host relay](#cross-host-relay)). Every later query reuses that id:
-  `claude -p --resume <id> --output-format=stream-json --verbose "<prompt>"`.
+  panemux **mints its own v4 UUID** and pins the conversation to it with `--session-id <uuid>`, then
+  persists that id to a small local file (`~/.config/panemux/command-center-session.json`, the same
+  kind of local bookkeeping file as the relay cursor in [Cross-host relay](#cross-host-relay)). Every
+  later query reuses it: `claude -p --resume <id> ...`. Note `--verbose` is required alongside
+  `-p --output-format=stream-json`; the CLI refuses to stream structured output in print mode without
+  it.
+
+  **The id the subprocess reports is deliberately ignored.** An earlier revision omitted
+  `--session-id` on a first run and adopted whatever `session_id` the stream reported, on the
+  assumption that a `-p` invocation without `--resume` starts a fresh conversation. Verified against
+  the real CLI, it does not: it reports the *ambient* session id of the Claude Code session the
+  environment already belongs to, so the command center silently attached itself to a conversation it
+  does not own — one holding full tool permissions, while the command center is launched with three.
+  See [security.md's command center section](security.md#command-center-subprocess-execution).
+
+  The subprocess is also isolated from the operator's own configuration: `--setting-sources` is passed
+  with an empty value (no user, project or local settings, so operator hooks never fire inside it),
+  `--strict-mcp-config` limits it to the board MCP server this query configured, and `cmd.Dir` is an
+  empty per-query temp directory rather than wherever panemux was launched. Since an empty
+  `--setting-sources` also suppresses `CLAUDE.md` discovery, panemux's own instructions are passed via
+  `--append-system-prompt`. An operator may place a `CLAUDE.md` in
+  `~/.config/panemux/command-center/` to refine those instructions; it is optional. No settings file is
+  accepted from any source — a settings value can nullify `--allowedTools`, so panemux sends only its
+  own fixed, narrowing document (currently `{"sandbox":{"enabled":true}}`). See
+  [security.md](security.md#command-center-subprocess-execution).
 - **Permissions.** The subprocess never receives `--dangerously-skip-permissions`. It has no PTY to
   surface an interactive approval prompt through, and this design does not substitute a blanket
   bypass for that missing prompt. Instead panemux runs a narrow, purpose-built MCP server exposing
@@ -1079,10 +1194,18 @@ flow still applies.
   principles](#design-principles)'s "ask, don't reverse-engineer" rule, panemux persists what it
   already captured directly from the `--output-format=stream-json` stream while relaying it to the
   WS client (a documented, stable CLI output contract), appending it to a local file panemux fully
-  owns the format of. Because `send.sh`/`api.sh` calls the command center makes appear as ordinary
-  tool-use entries in that same captured stream, the returned history already interleaves "what the
-  user asked," "what the command center did on the board," and "what it told the user" in one
-  chronological feed, with no extra bookkeeping required.
+  owns the format of. Because the board tool calls the command center makes appear as ordinary
+  tool-use entries in that same captured stream, the returned history interleaves "what the command
+  center did on the board" and "what it told the user" in one chronological feed.
+
+  **"What the user asked" is the one part the stream does not carry**, contrary to what this
+  paragraph claimed until the history panel was actually read against a real capture: a real run
+  emits `stream_event`, `system`, `assistant` and `result` frames, and the prompt that produced them
+  appears in none of them. panemux therefore records it itself, as the first entry of each turn,
+  under type `panemux_prompt` — a type the CLI never emits, so a reader can always distinguish a
+  panemux-written entry from a relayed subprocess line. A turn whose subprocess failed still has its
+  prompt recorded; a turn whose subprocess never started does not, since there is no exchange to
+  record.
 
 ### UI
 
@@ -1101,8 +1224,17 @@ flow still applies.
 - Both surfaces are gated on `command_center_enabled` from `GET /api/session-token`: neither the
   keyboard shortcut nor the history button is wired up at all when the command center is disabled,
   rather than being present but non-functional.
+- A third surface, `BoardDashboardPanel.tsx`, is gated the same way but on `agent_board_enabled`
+  instead: an "Agent Board" button next to "Command History", plus `Cmd/Ctrl+Shift+B` on the same
+  capture-phase registration. Its own `useBoardStatus` hook polls `GET /api/board/status` (full
+  snapshot every 5s, paused while the tab is hidden — the same `document.hidden` pattern
+  `useSessionsOverview.ts` already uses) and `GET /api/board/messages?since=<seq>` (incremental,
+  capped at the most recent 500 messages client-side) and filters out `to === "_system"` /
+  `kind === "board_status"` rows from the message feed client-side, since the relay also appends
+  those to history (see [Status self-report and message flow](#status-self-report-and-message-flow)
+  above) and the dashboard's message feed is meant to show conversation, not raw status JSON.
 
-See [ui-design.md's Agent Board UI section](ui-design.md#agent-board-ui-planned) for how these
+See [ui-design.md's Agent Board UI section](ui-design.md#agent-board-ui) for how these
 surfaces reuse this repository's existing dialog/overlay patterns and status vocabulary instead of
 introducing a parallel visual language.
 
@@ -1134,7 +1266,7 @@ authenticated too, but via a WebSocket subprotocol rather than the `Authorizatio
 | `POST /api/board/broadcast` | `{ "to": ["pane-a","pane-b"], "body": "..." }`; sends directly to each target's own host via `AgmsgClient` (never via PTY injection, so it is safe to send to a pane mid-turn); delivery to the pane is immediate, but the message appears in `GET /api/board/messages`' history only after the relay's next poll cycle reads it back — see [Known limitations](#known-limitations) |
 | `WS /ws/board-command` | Command center chat: client sends `{"prompt": "..."}`, server streams the headless Claude response — see [Command center](#command-center) |
 | `GET /api/board/command/history` | Command center's own captured conversation history — see [Command center](#command-center) |
-| `GET /api/session-token` | **Deliberately unauthenticated** — hands the browser dashboard the bearer token it needs to call every route above and open the WS connection, since there is no other way for the frontend's own JavaScript to learn a token that may have been randomly generated on first run. Not part of the original design; added because nothing in it specified how the browser itself (as opposed to the command center subprocess) would learn the token. Lives at `/api/session-token`, not `/api/board/session-token` — see [docs/behavior.md](behavior.md#get-apisession-token) for why that distinction is load-bearing, not stylistic. |
+| `GET /api/session-token` | **Deliberately unauthenticated** — hands the browser dashboard the bearer token it needs to call every route above and open the WS connection, since there is no other way for the frontend's own JavaScript to learn a token that may have been randomly generated on first run. Not part of the original design; added because nothing in it specified how the browser itself (as opposed to the command center subprocess) would learn the token. Lives at `/api/session-token`, not `/api/board/session-token` — see [docs/behavior.md](behavior.md#get-apisession-token) for why that distinction is load-bearing, not stylistic. Its response also carries `agent_board_enabled` (added in Phase 3, likewise not part of the original design — see the Phase 3 status note above), computed by scanning every configured pane for `agent_board.enabled: true`, so the frontend can gate the "Agent Board" dashboard button independently of `command_center_enabled`. |
 
 ## Config additions
 
@@ -1592,5 +1724,5 @@ documented behavior changed.
 - Implementation structure: [architecture.md](architecture.md)
 - Security requirements for implementation: [security.md](security.md)
 - Runtime behavior and API specification: [behavior.md](behavior.md)
-- UI intent for the dashboard, palette, and history panel: [ui-design.md](ui-design.md#agent-board-ui-planned)
+- UI intent for the dashboard, palette, and history panel: [ui-design.md](ui-design.md#agent-board-ui)
 - Developer workflow rules: [../DEVELOPMENT.md](../DEVELOPMENT.md)

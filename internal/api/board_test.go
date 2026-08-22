@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"panemux/internal/board"
+	"panemux/internal/config"
 	"panemux/internal/session"
 )
 
@@ -82,6 +83,55 @@ func TestGetBoardSessionToken_CommandCenterUnavailable_ReportsFalse(t *testing.T
 	var resp boardSessionTokenResponse
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
 	assert.False(t, resp.CommandCenterEnabled)
+}
+
+func boolPtr(b bool) *bool { return &b }
+
+// TestGetBoardSessionToken_AgentBoardEnabled covers agentBoardEnabledAnyPane
+// (internal/api/board.go): the response field must be true only when at
+// least one pane has agent_board.enabled: true, independent of
+// CommandCenterEnabled — see agentBoardEnabledAnyPane's own doc comment.
+func TestGetBoardSessionToken_AgentBoardEnabled(t *testing.T) {
+	tests := []struct {
+		mutateLayout func(cfg *config.Config)
+		name         string
+		want         bool
+	}{
+		{
+			name:         "one pane enabled reports true",
+			mutateLayout: func(cfg *config.Config) { cfg.Layout.Children[0].Pane.AgentBoard.Enabled = boolPtr(true) },
+			want:         true,
+		},
+		{
+			name:         "pane explicitly disabled reports false",
+			mutateLayout: func(cfg *config.Config) { cfg.Layout.Children[0].Pane.AgentBoard.Enabled = boolPtr(false) },
+			want:         false,
+		},
+		{
+			name:         "no panes reports false",
+			mutateLayout: func(cfg *config.Config) { cfg.Layout.Children = nil },
+			want:         false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := defaultTestConfig()
+			cfg.Server.AuthToken = "sekret"
+			tt.mutateLayout(cfg)
+			h := NewHandler(cfg, session.NewManager(), board.NewBoardCache(), nil)
+			r := setupRouterWithHandler(h)
+
+			rec := httptest.NewRecorder()
+			req := loopbackSessionTokenRequest()
+			r.ServeHTTP(rec, req)
+
+			assert.Equal(t, http.StatusOK, rec.Code)
+			var resp boardSessionTokenResponse
+			require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+			assert.Equal(t, tt.want, resp.AgentBoardEnabled)
+		})
+	}
 }
 
 func TestGetBoardSessionToken_NonLoopbackRemoteAddr_Forbidden(t *testing.T) {
@@ -409,4 +459,98 @@ func TestPostBoardBroadcast_Success_200WithDelivered(t *testing.T) {
 	var resp boardBroadcastResponse
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
 	assert.Equal(t, []string{"pane-a", "pane-b"}, resp.Delivered)
+}
+
+// TestGetBoardMessages_MarksStatusRows pins that the server, not the
+// browser, decides which rows are status self-reports. An earlier revision
+// left this to the frontend, which re-parsed the body in JavaScript and so
+// diverged from board.IsStatusRow in both directions: Go's json.Unmarshal
+// matches field names case-insensitively (so {"KIND":"board_status"} is a
+// status row to Go but was an ordinary message to the browser) and errors on
+// a type mismatch (so {"kind":"board_status","state":123} is an ordinary
+// message to Go but was hidden by the browser).
+func TestGetBoardMessages_MarksStatusRows(t *testing.T) {
+	tests := []struct {
+		name     string
+		to       string
+		body     string
+		isStatus bool
+	}{
+		{
+			name: "canonical status report", to: board.SystemID, isStatus: true,
+			body: `{"kind":"board_status","state":"working"}`,
+		},
+		{
+			name: "case-variant kind key", to: board.SystemID, isStatus: true,
+			body: `{"KIND":"board_status","state":"working"}`,
+		},
+		{
+			name: "wrong kind", to: board.SystemID, isStatus: false,
+			body: `{"kind":"chat","state":"working"}`,
+		},
+		{
+			name: "type mismatch makes it an ordinary message", to: board.SystemID, isStatus: false,
+			body: `{"kind":"board_status","state":123}`,
+		},
+		{
+			name: "plain text to system is an ordinary message", to: board.SystemID, isStatus: false,
+			body: "status?",
+		},
+		{
+			name: "status-shaped body addressed to a pane", to: "pane-a", isStatus: false,
+			body: `{"kind":"board_status","state":"working"}`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cache := board.NewBoardCache()
+			cache.AppendMessage(board.Row{From: "pane-a", To: tc.to, Body: tc.body, At: time.Now()})
+			h := setupBoardRouter(cache, nil)
+			r := setupRouterWithHandler(h)
+
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/api/board/messages", nil)
+			r.ServeHTTP(rec, req)
+
+			assert.Equal(t, http.StatusOK, rec.Code)
+			var resp boardMessagesResponse
+			require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+			require.Len(t, resp.Messages, 1)
+			assert.Equal(t, tc.isStatus, resp.Messages[0].IsStatus)
+		})
+	}
+}
+
+// TestGetBoardMessages_ReportsCacheEpoch pins the marker a client uses to
+// notice that BoardCache restarted. Seq is in-memory only and restarts at 1
+// on every panemux process start, so a browser holding since=300 across a
+// restart would otherwise poll forever against a cache whose newest row is
+// seq 3, and its feed would silently stop updating until a page reload.
+func TestGetBoardMessages_ReportsCacheEpoch(t *testing.T) {
+	cache := board.NewBoardCache()
+	h := setupBoardRouter(cache, nil)
+	r := setupRouterWithHandler(h)
+
+	get := func() boardMessagesResponse {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/board/messages", nil)
+		r.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code)
+		var resp boardMessagesResponse
+		require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+		return resp
+	}
+
+	first := get()
+	assert.NotEmpty(t, first.Epoch, "epoch must be reported so a client can detect a cache restart")
+	assert.Equal(t, first.Epoch, get().Epoch, "epoch must be stable for the life of one cache")
+
+	restarted := setupBoardRouter(board.NewBoardCache(), nil)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/board/messages", nil)
+	setupRouterWithHandler(restarted).ServeHTTP(rec, req)
+	var afterRestart boardMessagesResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&afterRestart))
+	assert.NotEqual(t, first.Epoch, afterRestart.Epoch, "a new cache must report a different epoch")
 }

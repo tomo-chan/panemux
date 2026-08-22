@@ -357,8 +357,15 @@ wrong. A non-loopback `server.host` deployment cannot use this endpoint at all, 
 Response:
 
 ```json
-{ "token": "a1b2c3...", "command_center_enabled": true }
+{ "token": "a1b2c3...", "command_center_enabled": true, "agent_board_enabled": true }
 ```
+
+`agent_board_enabled` (added alongside the Phase 3 dashboard UI) is `true` when at least one
+configured pane has `agent_board.enabled: true`, computed by scanning `cfg.AllPanes()` on every
+request rather than cached at startup. It is deliberately independent of `command_center_enabled`:
+a config can enable `agent_board` without `command_center`, or vice versa, and the frontend needs
+both flags to decide whether to show the "Agent Board" dashboard button and the "Command History"
+button separately.
 
 - `403`: the caller failed the loopback RemoteAddr+Host check above
 - `200`: otherwise, always — there is no other failure mode for this handler
@@ -426,11 +433,29 @@ Response:
       "from": "pane-a",
       "to": "pane-b",
       "body": "please review",
-      "at": "2026-08-10T12:00:00Z"
+      "at": "2026-08-10T12:00:00Z",
+      "is_status": false
     }
-  ]
+  ],
+  "epoch": "3f1c9a2b7d4e5061"
 }
 ```
+
+`is_status` marks a row as a pane's own status self-report rather than an ordinary message. Status
+rows are appended to history alongside real messages, so a client has to tell them apart to avoid
+rendering raw `board_status` JSON as if someone had sent it. It is computed server-side by
+`internal/board`'s `IsStatusRow` rather than left to the client: Go's `json.Unmarshal` matches field
+names case-insensitively and errors on a type mismatch, so a JavaScript re-implementation of the same
+rule diverges on real inputs (`{"KIND":"board_status"}` is a status row to Go but not to
+`JSON.parse`, and `{"kind":"board_status","state":123}` is an ordinary message to Go but a status row
+to a naive client check).
+
+`epoch` identifies the `BoardCache` instance that assigned these `seq` values. The cache is in-memory
+only, so a panemux restart renumbers from 1 while a browser may still hold a cursor from before it —
+`?since=300` against a cache whose newest row is `seq` 3 returns an empty list forever, and the
+client's feed stops updating without any error to show for it. A client that sees `epoch` change must
+reset its cursor to `0` and re-read. The value is opaque: compare it for equality only, never parse
+or order it.
 
 - `400`: `since` is present but not a valid integer
 - `200`: messages returned (`"messages":[]` when there are none, never `null`)

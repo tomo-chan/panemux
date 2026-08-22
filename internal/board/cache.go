@@ -1,6 +1,9 @@
 package board
 
 import (
+	"crypto/rand"
+	"encoding/hex"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -30,6 +33,7 @@ type CachedRow struct {
 type BoardCache struct {
 	status     map[string]Status
 	now        func() time.Time
+	epoch      string
 	history    []CachedRow
 	nextSeq    int64
 	maxHistory int
@@ -42,8 +46,33 @@ func NewBoardCache() *BoardCache {
 	return &BoardCache{
 		status:     make(map[string]Status),
 		now:        time.Now,
+		epoch:      newCacheEpoch(),
 		maxHistory: defaultBoardCacheHistoryLimit,
 	}
+}
+
+// Epoch identifies this particular cache instance. Because the cache is
+// never persisted, Seq restarts at 1 on every process start, and a client
+// holding a since cursor from before a restart would poll forever against
+// rows numbered below it — its feed stopping silently rather than visibly
+// failing. Epoch gives that client something to compare: a changed value
+// means the cursor it holds refers to a cache that no longer exists and must
+// be reset. It is deliberately opaque; callers must only test it for
+// equality, never parse or order it.
+func (c *BoardCache) Epoch() string {
+	return c.epoch
+}
+
+// newCacheEpoch returns an opaque per-instance marker. Randomness only has
+// to make an accidental collision between two caches implausible; it is not
+// a security boundary, so a failed read from the system source falls back to
+// the wall clock rather than failing process start over it.
+func newCacheEpoch() string {
+	var buf [8]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return strconv.FormatInt(time.Now().UnixNano(), 16)
+	}
+	return hex.EncodeToString(buf[:])
 }
 
 // RecordStatus stores s as paneID's latest self-reported status, overwriting
