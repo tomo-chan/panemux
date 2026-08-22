@@ -79,10 +79,10 @@
 >
 > **Tier 2 of the [agmsg compatibility contract](#agmsg-compatibility-contract) is now implemented
 > too** — `.github/workflows/agmsg-contract.yml` runs `make test-agmsg-contract` against a real
-> agmsg install, weekly against agmsg's latest release tag and on pull requests against the pinned
-> `board.TestedAgmsgVersion`. Its first real run against a live install found two things every
-> hermetic test had missed: two of the contract's own assertions described `watch.sh` output that
-> does not exist in the branch they asserted it in, and — the substantive one — the relay compared
+> agmsg install, daily against agmsg's latest release tag (doing real work once per new release) and
+> on pull requests against the pinned `board.TestedAgmsgVersion`. Its first real run against a live
+> install found two things every hermetic test had missed: two of the contract's own assertions
+> described `watch.sh` output that does not exist in the branch they asserted it in, and — the substantive one — the relay compared
 > agmsg's message ids **numerically**, which no id from agmsg's event-log storage driver satisfies,
 > so the poll cursor never advanced and every row was re-delivered on every tick. Both are fixed;
 > see [Integration with agmsg](#integration-with-agmsg) for the cursor rule that replaced the
@@ -1643,10 +1643,14 @@ plain table-driven Go test. So: adopt the *idea*, skip the *tool*.
   runner, then drives `join.sh`/`identities.sh`/`actas-claim.sh`/`watch.sh` directly and
   `send.sh`/`api.sh` **through panemux's own `LocalAgmsgClient`** — deliberately, since a test that
   rebuilt those invocations itself would keep passing after panemux started sending something
-  different. It runs in both situations this contract calls for: **on a schedule** (weekly) against
-  agmsg's latest release tag, as an early warning before anyone here has chosen to bump the pin, and
-  **on pull requests** against the pinned version, so a PR that bumps the pin cannot merge on a
-  version whose real behavior differs. The PR trigger deliberately carries no `paths:` filter — a
+  different. It runs in both situations this contract calls for: **on a schedule** against agmsg's latest
+  release tag, as an early warning before anyone here has chosen to bump the pin, and **on pull
+  requests** against the pinned version, so a PR that bumps the pin cannot merge on a version whose
+  real behavior differs. The canary polls daily rather than weekly because agmsg's median gap
+  between releases is 2.9 days (22 releases, `v1.0.2`→`v1.2.2`), so a weekly poll would straddle
+  several releases and leave a failure unattributable; it caches which tag it last verified, so the
+  work it actually does happens once per agmsg release, and a failing release is retried every day
+  until it is handled. The PR trigger deliberately carries no `paths:` filter — a
   path-filtered workflow reports no status at all on the PRs it skips, and a required check that
   never reports blocks every one of them — so a fast `scope` job decides instead whether installing
   agmsg is warranted, and the contract job always reports rather than skipping itself, which lets the

@@ -12,6 +12,23 @@ name: agmsg-contract
 #     that a release has broken an assumption panemux depends on, before
 #     anyone here has chosen to bump the pin. Nothing is blocked by this
 #     run; a failure is a notification, not a gate.
+#
+#     It polls DAILY rather than weekly because agmsg ships far faster than
+#     weekly: measured over its 22 releases from v1.0.2 (2026-06-08) to
+#     v1.2.2 (2026-08-20), the median gap between releases is 2.9 days and
+#     only 3 of 21 gaps exceeded a week. A weekly canary would therefore
+#     usually straddle two or three releases, and a failure could not be
+#     attributed to any one of them. A daily poll costs a few minutes a
+#     month and keeps the answer to "which release broke this" to one
+#     candidate.
+#
+#     Polling daily does not mean re-testing daily. The scope job remembers
+#     the last tag that passed and skips a run whose latest tag is already
+#     verified, so the real cadence is "once per agmsg release" — which is
+#     the cadence that actually matters, and it stays correct if agmsg
+#     speeds up or goes quiet. A tag that FAILED is never remembered, so it
+#     is retried every day until it is dealt with.
+#
 #   * On every pull request, against the PINNED version
 #     (board.TestedAgmsgVersion) — so a PR that actually bumps the pin
 #     cannot merge on a version whose real behavior differs.
@@ -24,8 +41,8 @@ name: agmsg-contract
 
 on:
   schedule:
-    # Mondays, 06:00 UTC.
-    - cron: '0 6 * * 1'
+    # Daily, 06:00 UTC (15:00 JST).
+    - cron: '0 6 * * *'
   pull_request:
     branches:
       - main
@@ -47,15 +64,16 @@ jobs:
   scope:
     runs-on: ubuntu-latest
     outputs:
-      run: ${{ steps.decide.outputs.run }}
+      run: ${{ steps.verified.outputs.run }}
       agmsg_ref: ${{ steps.decide.outputs.agmsg_ref }}
+      cache_key: ${{ steps.decide.outputs.cache_key }}
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           fetch-depth: 0
 
-      - name: Decide whether to run, and against which agmsg ref
+      - name: Resolve the agmsg ref to test
         id: decide
         env:
           EVENT: ${{ github.event_name }}
@@ -89,6 +107,9 @@ jobs:
               fi
               echo "run=true"           >> "$GITHUB_OUTPUT"
               echo "agmsg_ref=$latest"  >> "$GITHUB_OUTPUT"
+              # Only the canary dedupes. A pull request always verifies the
+              # pin, however many times that same version has been tested.
+              echo "cache_key=agmsg-contract-passed-$latest" >> "$GITHUB_OUTPUT"
               echo "canary run against agmsg's latest tag: $latest (pin is v$pinned)"
               ;;
             workflow_dispatch)
@@ -114,6 +135,37 @@ jobs:
               fi
               ;;
           esac
+
+      # A cache entry under this key exists only if the contract has already
+      # PASSED against this exact tag. Restoring it is the whole check: an
+      # exact hit means there is nothing new to verify. A failed run never
+      # writes one, so a broken release is retried on every poll rather than
+      # being marked done.
+      - name: Look up whether this tag already passed
+        id: verified_cache
+        if: steps.decide.outputs.cache_key != ''
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .agmsg-contract-passed
+          key: ${{ steps.decide.outputs.cache_key }}
+          lookup-only: true
+
+      - name: Skip a tag that has already been verified
+        id: verified
+        env:
+          DECIDED: ${{ steps.decide.outputs.run }}
+          AGMSG_REF: ${{ steps.decide.outputs.agmsg_ref }}
+          ALREADY_PASSED: ${{ steps.verified_cache.outputs.cache-hit }}
+        run: |
+          set -euo pipefail
+          if [ "$DECIDED" = "true" ] && [ "$ALREADY_PASSED" = "true" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "agmsg $AGMSG_REF already passed this contract; nothing new to verify."
+            echo "agmsg \`$AGMSG_REF\` has already passed this contract — no new release to check." \
+              >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "run=$DECIDED" >> "$GITHUB_OUTPUT"
+          fi
 
   # This job always runs and always reports a conclusion, with its expensive
   # steps gated individually. A job skipped by a job-level `if` reports
@@ -167,6 +219,19 @@ jobs:
       - name: Run the contract
         if: needs.scope.outputs.run == 'true'
         run: make test-agmsg-contract AGMSG_PATH="$HOME/.agents/skills/agmsg"
+
+      # Written only after the contract passed, so the skip in the scope job
+      # can never mark a broken release as verified.
+      - name: Remember that this tag passed
+        if: needs.scope.outputs.run == 'true' && needs.scope.outputs.cache_key != ''
+        run: date -u +%FT%TZ > .agmsg-contract-passed
+
+      - name: Save the verified marker
+        if: needs.scope.outputs.run == 'true' && needs.scope.outputs.cache_key != ''
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .agmsg-contract-passed
+          key: ${{ needs.scope.outputs.cache_key }}
 
       - name: Summary
         if: always() && needs.scope.outputs.run == 'true'
