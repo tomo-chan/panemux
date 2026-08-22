@@ -76,6 +76,17 @@
 > `useRestoreFocusOnClose` hook (used by the palette, history panel, and dashboard alike) returns
 > keyboard focus to whatever triggered an overlay once that overlay closes — behavior the original
 > Phase 3b issue text called for that had no implementation at all before this phase.
+>
+> **Tier 2 of the [agmsg compatibility contract](#agmsg-compatibility-contract) is now implemented
+> too** — `.github/workflows/agmsg-contract.yml` runs `make test-agmsg-contract` against a real
+> agmsg install, weekly against agmsg's latest release tag and on pull requests against the pinned
+> `board.TestedAgmsgVersion`. Its first real run against a live install found two things every
+> hermetic test had missed: two of the contract's own assertions described `watch.sh` output that
+> does not exist in the branch they asserted it in, and — the substantive one — the relay compared
+> agmsg's message ids **numerically**, which no id from agmsg's event-log storage driver satisfies,
+> so the poll cursor never advanced and every row was re-delivered on every tick. Both are fixed;
+> see [Integration with agmsg](#integration-with-agmsg) for the cursor rule that replaced the
+> comparison, and the contract section for what the tiers now cover.
 
 ## Purpose
 
@@ -375,11 +386,29 @@ cursor, the opposite of what an incremental poll needs — and `api.sh` has no a
 all. The relay therefore cannot use `--before-id` for its poll loop (an earlier revision of this
 document specified exactly that mistake). Instead, each poll calls `api.sh get teams <team>
 messages --limit <N>` with **no** `--before-id`, taking the `N` most recent rows (`N` defaults to a
-few hundred; see [Package layout](#package-layout)), and filters client-side to rows whose `id` is
-numerically greater than the persisted cursor. **This has a real, accepted truncation risk:** if
-more than `N` genuinely new rows land on one host between two poll cycles, the oldest of that
-overflow are silently skipped — there is no way to detect or recover them through `api.sh`'s
-documented interface. `--before-id` remains useful for one thing only: paging *backwards* through
+few hundred; see [Package layout](#package-layout)), and filters client-side to the rows that
+*follow* the persisted cursor **in the order `api.sh` itself returned them**. **This has a real,
+accepted truncation risk:** if more than `N` genuinely new rows land on one host between two poll
+cycles, the oldest of that overflow are silently skipped — there is no way to detect or recover
+them through `api.sh`'s documented interface.
+
+**The cursor is matched by identity, never compared** — and that distinction is not pedantry, it
+was a shipped bug. An earlier implementation compared `id` *numerically*, which held only for
+agmsg's legacy sqlite driver (integer rowids exposed as decimal strings). The event-log driver that
+1.2.0 actually writes through emits **UUIDv7**, which parses as no integer at all, so every
+comparison answered "nothing parses, everything is new": the cursor never advanced and the relay
+re-delivered its entire poll window on every tick, forever. agmsg's own `api.sh` states the rule
+this now follows — its message `id` column is TEXT because "the driver-interface spec treats every
+message id as opaque", and its rows are ordered by each storage source's native counter
+(`events.seq` / `messages.id`), a value the same comment says is "never compared across sources",
+while one response can `UNION` both. Ordering by the response's own order is therefore the only
+signal agmsg offers. Note that lexicographic comparison would not have rescued this either:
+messages written in the same millisecond share their whole UUIDv7 time prefix and differ only in
+random bits, so sorting them as strings reorders them (the Tier 1 fixtures capture exactly such a
+set, and a test asserts that they do). Two cases treat every returned row as new: no cursor yet
+(cold start), and a cursor absent from the response — which means it scrolled out of the window, and
+costs one bounded re-delivery of that window, consistent with the at-least-once delivery this design
+already accepts, rather than a silent skip. `--before-id` remains useful for one thing only: paging *backwards* through
 older history on demand (e.g. a "load more" action in the dashboard's history view), never for the
 relay's forward poll.
 
@@ -647,7 +676,8 @@ control," even though the former requires the agent's cooperation and the latter
 
 ```go
 type Row struct {
-    ID          string    // agmsg's own id, host-scoped — NOT globally unique, NOT assumed numeric
+    ID          string    // agmsg's own id, host-scoped — NOT globally unique, NOT assumed numeric,
+                          // NOT ordered: matched by equality only (see filterRowsAfter)
     Host        string    // which AgmsgClient/host this row came from; required to compare/sort across hosts
     Team        string
     From, To    string
@@ -876,7 +906,9 @@ to reach each other). panemux is the only node with a connection to every host, 
    [Integration with agmsg](#integration-with-agmsg) for why this is a bounded `--limit` poll with
    client-side filtering, not a true incremental read, and the truncation risk that implies).
 2. `cursor` is one value per (host, team) — agmsg's own opaque `id` string for that host, *not*
-   comparable across hosts — persisted in a small local JSON file (e.g.
+   comparable across hosts and *not comparable at all* (see [Integration with
+   agmsg](#integration-with-agmsg): it anchors a position in `api.sh`'s own returned order) —
+   persisted in a small local JSON file (e.g.
    `~/.config/panemux/board-relay-cursor.json`) — not a database table, since panemux owns no
    database — so a panemux restart resumes roughly where it left off.
 3. For each new row, panemux first checks `from`. If `from` is a board-enabled pane ID panemux
@@ -1596,29 +1628,45 @@ plain table-driven Go test. So: adopt the *idea*, skip the *tool*.
 
 **Two test tiers, not one:**
 
-- **Tier 1 — fast, hermetic, part of `make check` on every commit.** `internal/board`'s existing
-  test bullets (below) already do this: a fake `AgmsgClient`/`BoardExecutor` asserts the exact
-  command strings panemux builds for each operation, and parses fixed, versioned fixture output
-  (frozen JSONL captured from a real, pinned agmsg run — e.g. `internal/board/testdata/agmsg-v1.1.x/
-  *.jsonl`) the way the real `api.sh` would produce it. This protects panemux's own code from
-  regressing against its own documented assumptions; it cannot, by itself, detect that agmsg
-  changed, since it never touches a real agmsg install.
-- **Tier 2 — a separate, non-blocking-by-default CI job that runs the same contract against a real
-  agmsg install.** Install the pinned agmsg version (via its own documented installer, the same way
-  an operator would) into an ephemeral CI environment, run the exact `join.sh`/`send.sh`/`api.sh`
-  invocations the contract specifies against a throwaway team, and assert the real output/exit-code
-  behavior matches what Tier 1's fixtures encode. This is the piece that actually catches drift, and
-  it should run in at least two situations: **on a schedule** (e.g. weekly) against agmsg's latest
-  tag, as an early warning before panemux's maintainers have chosen to bump the pin at all; and **as
-  a required check** whenever a change actually bumps the pinned version, so a real behavioral diff
-  blocks that bump rather than shipping silently. It is deliberately kept out of the main `make
-  check` gate — it depends on installing and executing a real external tool, which is slower and
-  less hermetic than the rest of this repository's test suite is designed to be.
+- **Tier 1 — fast, hermetic, part of `make check` on every commit.** Implemented. A fake
+  `AgmsgClient`/`BoardExecutor` asserts the exact command strings panemux builds for each operation,
+  and `internal/board/agmsg_fixture_test.go` parses frozen JSONL in
+  `internal/board/testdata/agmsg-v1.2.0/` the way real `api.sh` output is parsed. Those fixtures are
+  **captured, not hand-written** — `testdata/agmsg-v1.2.0/capture.sh` regenerates them by installing
+  agmsg at that tag into a throwaway `HOME` and recording what `api.sh` actually printed. This
+  protects panemux's own code from regressing against its own documented assumptions; it cannot, by
+  itself, detect that agmsg changed, since it never touches a real agmsg install at test time.
+- **Tier 2 — a separate CI job that runs the same contract against a real agmsg install.**
+  Implemented: `make test-agmsg-contract AGMSG_PATH=...` (`internal/board/agmsg_contract_test.go`),
+  run in CI by `.github/workflows/agmsg-contract.yml`. The job installs agmsg through its own
+  documented installer (`install.sh --cmd agmsg`, the same path an operator takes) into an ephemeral
+  runner, then drives `join.sh`/`identities.sh`/`actas-claim.sh`/`watch.sh` directly and
+  `send.sh`/`api.sh` **through panemux's own `LocalAgmsgClient`** — deliberately, since a test that
+  rebuilt those invocations itself would keep passing after panemux started sending something
+  different. It runs in both situations this contract calls for: **on a schedule** (weekly) against
+  agmsg's latest release tag, as an early warning before anyone here has chosen to bump the pin, and
+  **on pull requests** against the pinned version, so a PR that bumps the pin cannot merge on a
+  version whose real behavior differs. The PR trigger deliberately carries no `paths:` filter — a
+  path-filtered workflow reports no status at all on the PRs it skips, and a required check that
+  never reports blocks every one of them — so a fast `scope` job decides instead whether installing
+  agmsg is warranted, which lets the check be marked required in branch protection. It stays out of
+  the main `make check` gate, and the test skips itself when `PANEMUX_AGMSG_PATH` is unset, so a
+  contributor without agmsg installed still gets a green, hermetic local run.
 
 This does not remove the underlying risk noted in [Known limitations](#known-limitations) — agmsg
 still makes no compatibility promise for the scripts panemux's write path depends on — but it turns
 a silent, user-discovered failure into a specific, actionable CI signal naming exactly which
 documented behavior changed.
+
+**It has already paid for itself twice, which is worth recording as evidence rather than as a
+claim.** Running the contract against a real install for the first time found (1) that two of its
+own pre-existing assertions described behavior agmsg does not have — `watch.sh` prints nothing at
+all naming the pairs it resolved when it skips none, so "which identities did this watcher
+subscribe to" was being read off a log line that only exists in the *other* branch; the assertions
+now observe message *delivery* instead, which is both what a user experiences and visible in either
+branch — and (2) the numeric-cursor bug described under [Integration with
+agmsg](#integration-with-agmsg), which every hermetic test missed because the hand-written fixtures
+carried integer ids that no real 1.2.0 install emits.
 
 ## Testing plan (see DEVELOPMENT.md for the TDD/coverage rules this must follow)
 

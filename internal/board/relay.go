@@ -50,7 +50,7 @@ type Relay struct {
 	paneHosts     map[string]string
 	hostPanes     map[string]map[string]bool // host -> set of board-enabled pane IDs on that host
 	persist       func([]CursorEntry)
-	cursors       map[string]string // host -> agmsg-native cursor id
+	cursors       map[string]string // host -> agmsg-native cursor id (opaque; see filterRowsAfter)
 	team          string
 	limit         int
 	backfillLimit int
@@ -187,7 +187,7 @@ func (r *Relay) pollHost(ctx context.Context, host string, limit int) (bool, err
 		r.processRow(ctx, host, row)
 	}
 
-	newCursor := maxRowID(rows, cursor)
+	newCursor := lastRowID(rows, cursor)
 	if newCursor == cursor {
 		return false, nil
 	}
@@ -197,24 +197,16 @@ func (r *Relay) pollHost(ctx context.Context, host string, limit int) (bool, err
 	return true, nil
 }
 
-// maxRowID returns the largest numerically-parseable row ID among rows,
-// falling back to prev if no row's ID parses (or rows is empty) — a row
-// whose ID doesn't parse never regresses the cursor.
-func maxRowID(rows []Row, prev string) string {
-	best := prev
-	bestN, bestOK := parseAgmsgID(prev)
-	for _, row := range rows {
-		n, ok := parseAgmsgID(row.ID)
-		if !ok {
-			continue
-		}
-		if !bestOK || n > bestN {
-			best = row.ID
-			bestN = n
-			bestOK = true
-		}
+// lastRowID returns the cursor to store after a poll: the id of the LAST
+// row api.sh returned, which is the newest one, since the response is
+// ordered by agmsg's own native counter. It never parses or compares the id
+// — see filterRowsAfter for why agmsg's ids admit neither. An empty
+// response leaves the previous cursor in place.
+func lastRowID(rows []Row, prev string) string {
+	if len(rows) == 0 {
+		return prev
 	}
-	return best
+	return rows[len(rows)-1].ID
 }
 
 // processRow applies the row-processing algorithm documented in

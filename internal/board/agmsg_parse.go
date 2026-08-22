@@ -3,7 +3,6 @@ package board
 import (
 	"bytes"
 	"encoding/json"
-	"strconv"
 	"time"
 )
 
@@ -56,37 +55,46 @@ func parseAgmsgMessageRows(data []byte, host string) []Row {
 	return rows
 }
 
-// parseAgmsgID parses agmsg's own row id as the integer it is in today's
-// implementation. agmsg's source comments describe this as future-proofing
-// against a non-integer ID scheme; a row whose id doesn't parse this way is
-// signaled via ok == false rather than assumed to sort anywhere in
-// particular.
-func parseAgmsgID(id string) (int64, bool) {
-	n, err := strconv.ParseInt(id, 10, 64)
-	if err != nil {
-		return 0, false
-	}
-	return n, true
-}
-
-// filterRowsAfter returns the rows whose id sorts numerically after
-// afterID. There is no true "after" primitive in api.sh (see
-// docs/agent-board.md's Integration with agmsg section) — this is the
-// client-side filtering step every poll performs. An afterID that doesn't
-// parse (including the empty string used before any cursor exists) means
-// every row is "new". A row whose own id doesn't parse is conservatively
-// kept rather than dropped, since panemux cannot safely order it.
+// filterRowsAfter returns the rows that follow afterID in the order api.sh
+// itself returned them.
+//
+// The cursor is an OPAQUE token, matched by identity and never compared.
+// That is agmsg's own contract, not caution on panemux's part: api.sh's
+// `messages` query documents its id column as TEXT ("the driver-interface
+// spec treats every message id as opaque"), and orders rows by each
+// storage source's native counter — `events.seq` or `messages.id` — a value
+// its own comment says is "never compared across sources". The legacy sqlite
+// driver exposes integer rowids as decimal strings while the event-log
+// driver emits UUIDv7, and a single response can UNION both. Comparing ids
+// is therefore wrong for two independent reasons, and panemux used to do it
+// numerically: every UUID failed to parse, so no cursor ever advanced and
+// the relay re-delivered its whole poll window on every tick. Ordering by
+// the response's own order is the only signal agmsg actually offers.
+//
+// afterID is anchored on its LAST occurrence, since ids are host-scoped and
+// carry no global-uniqueness promise; anchoring on the newest occurrence
+// never re-delivers a row an earlier poll already handled.
+//
+// Two cases yield every row: an afterID that is empty (no cursor yet, i.e.
+// cold start) and one that is absent from this response. Absent means the
+// cursor scrolled out of the poll window — more than --limit new rows since
+// the last poll, or a reset store — and agmsg has no forward "since"
+// primitive to resolve it with (only backwards --before-id pagination), so
+// the window is re-delivered rather than skipped. That matches the
+// at-least-once delivery this design already documents, and self-corrects
+// on the next poll.
 func filterRowsAfter(rows []Row, afterID string) []Row {
-	afterN, ok := parseAgmsgID(afterID)
-	if !ok {
+	if afterID == "" {
 		return rows
 	}
-	var out []Row
-	for _, r := range rows {
-		n, ok := parseAgmsgID(r.ID)
-		if !ok || n > afterN {
-			out = append(out, r)
+	anchor := -1
+	for i, r := range rows {
+		if r.ID == afterID {
+			anchor = i
 		}
 	}
-	return out
+	if anchor < 0 {
+		return rows
+	}
+	return rows[anchor+1:]
 }

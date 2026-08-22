@@ -1,0 +1,177 @@
+name: agmsg-contract
+
+# Tier 2 of docs/agent-board.md's agmsg compatibility contract: runs
+# `make test-agmsg-contract` against a REAL agmsg install, which Tier 1's
+# hermetic fixtures cannot do. Tier 1 pins panemux against a fixed shape and
+# stays green when agmsg itself changes; this job is the piece that notices.
+#
+# It runs in the two situations that contract calls for, and the ref it
+# installs differs between them:
+#
+#   * On a schedule, against agmsg's LATEST release tag — an early warning
+#     that a release has broken an assumption panemux depends on, before
+#     anyone here has chosen to bump the pin. Nothing is blocked by this
+#     run; a failure is a notification, not a gate.
+#   * On every pull request, against the PINNED version
+#     (board.TestedAgmsgVersion) — so a PR that actually bumps the pin
+#     cannot merge on a version whose real behavior differs.
+#
+# The PR trigger has no `paths:` filter on purpose. A path-filtered workflow
+# reports no status at all on the PRs it skips, and a required check that
+# never reports blocks every one of them. Instead this always runs and the
+# `scope` job decides in a few seconds whether the contract is worth
+# installing agmsg for, so the check can safely be marked required.
+
+on:
+  schedule:
+    # Mondays, 06:00 UTC.
+    - cron: '0 6 * * 1'
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      agmsg_ref:
+        description: 'agmsg git ref to test against (default: the pinned version)'
+        required: false
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  scope:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+      agmsg_ref: ${{ steps.decide.outputs.agmsg_ref }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          fetch-depth: 0
+
+      - name: Decide whether to run, and against which agmsg ref
+        id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          DISPATCH_REF: ${{ inputs.agmsg_ref }}
+        run: |
+          set -euo pipefail
+
+          # The pin lives in Go source, as the single value the running
+          # binary also warns against at startup. Reading it here keeps this
+          # workflow from becoming a second place to update.
+          pinned="$(sed -n 's/^const TestedAgmsgVersion = "\(.*\)"$/\1/p' internal/board/agmsg_version.go)"
+          if [ -z "$pinned" ]; then
+            echo "could not read TestedAgmsgVersion from internal/board/agmsg_version.go" >&2
+            exit 1
+          fi
+          echo "pinned agmsg version: $pinned"
+
+          case "$EVENT" in
+            schedule)
+              # agmsg's own release tags are vN.N.N. The filter excludes the
+              # co-located app-v* lineage and every -rc tag, so "latest"
+              # means the newest core release a user would install.
+              latest="$(git ls-remote --tags --refs https://github.com/fujibee/agmsg.git 'v*' \
+                | awk -F'refs/tags/' '{print $2}' \
+                | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+                | sort -V | tail -1)"
+              if [ -z "$latest" ]; then
+                echo "could not resolve agmsg's latest release tag" >&2
+                exit 1
+              fi
+              echo "run=true"           >> "$GITHUB_OUTPUT"
+              echo "agmsg_ref=$latest"  >> "$GITHUB_OUTPUT"
+              echo "canary run against agmsg's latest tag: $latest (pin is v$pinned)"
+              ;;
+            workflow_dispatch)
+              echo "run=true" >> "$GITHUB_OUTPUT"
+              echo "agmsg_ref=${DISPATCH_REF:-v$pinned}" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              # A pull request. Install agmsg only when this PR touches the
+              # pin, the contract itself, its fixtures, or the client code
+              # the contract drives — everything else cannot change what
+              # this job would assert.
+              git fetch --quiet origin "$BASE_REF"
+              changed="$(git diff --name-only "origin/$BASE_REF"...HEAD)"
+              echo "changed files:"; echo "$changed"
+              if echo "$changed" | grep -qE '^(internal/board/(agmsg_version\.go|agmsg_parse\.go|agmsg_contract_test\.go|local_client\.go|testdata/)|Makefile|\.github/workflows/agmsg-contract\.yml)'; then
+                echo "run=true" >> "$GITHUB_OUTPUT"
+                echo "agmsg_ref=v$pinned" >> "$GITHUB_OUTPUT"
+                echo "contract-relevant files changed; running against the pinned v$pinned"
+              else
+                echo "run=false" >> "$GITHUB_OUTPUT"
+                echo "agmsg_ref=" >> "$GITHUB_OUTPUT"
+                echo "no contract-relevant files changed; nothing to verify"
+              fi
+              ;;
+          esac
+
+  contract:
+    needs: scope
+    if: needs.scope.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version-file: go.mod
+
+      - name: Install sqlite3
+        # agmsg stores messages in SQLite and shells out to the sqlite3
+        # binary; api.sh cannot run at all without it. GitHub's ubuntu image
+        # does not ship it.
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends sqlite3
+
+      - name: Install agmsg
+        env:
+          AGMSG_REF: ${{ needs.scope.outputs.agmsg_ref }}
+        run: |
+          set -euo pipefail
+          git clone --quiet https://github.com/fujibee/agmsg.git /tmp/agmsg-src
+          git -C /tmp/agmsg-src checkout --quiet "$AGMSG_REF"
+          # install.sh is agmsg's own documented installer, the same path an
+          # operator takes; --cmd makes it non-interactive. It installs into
+          # ~/.agents/skills/agmsg, which on an ephemeral runner is a
+          # throwaway home directory.
+          (cd /tmp/agmsg-src && ./install.sh --cmd agmsg)
+          echo "installed agmsg $(cat "$HOME/.agents/skills/agmsg/VERSION")"
+
+      - name: Run the contract
+        run: make test-agmsg-contract AGMSG_PATH="$HOME/.agents/skills/agmsg"
+
+      - name: Summary
+        if: always()
+        env:
+          AGMSG_REF: ${{ needs.scope.outputs.agmsg_ref }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          {
+            echo "## agmsg compatibility contract — Tier 2"
+            echo
+            echo "| | |"
+            echo "| --- | --- |"
+            echo "| agmsg ref | \`$AGMSG_REF\` |"
+            echo "| trigger | \`$EVENT\` |"
+            echo "| result | ${{ job.status }} |"
+            echo
+            if [ "$EVENT" = "schedule" ]; then
+              echo "A failure here is an early warning against agmsg's latest release, not a gate:"
+              echo "the pinned version (\`board.TestedAgmsgVersion\`) is unchanged and panemux still"
+              echo "runs against it. See docs/agent-board.md's agmsg compatibility contract."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

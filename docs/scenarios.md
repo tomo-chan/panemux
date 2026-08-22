@@ -60,7 +60,7 @@ Verification column values:
 | C3 | No agent running in the pane | Nothing is written | `auto`: root — `TestBootstrapWatcher_NoAgentDetected_NoWrite` |
 | C4 | The instruction's content | Names the pane ID as the agmsg `agent_id`, defines what a `summary` is, and never uses a slash-command prefix | `auto`: root — `TestBuildBootstrapInstruction_*` |
 | C5 | Two board panes in one project directory | Each claims its own identity, so neither receives the other's messages | `auto`: root — `TestBuildBootstrapInstruction_ClaimsItsOwnIdentity` (the instruction) plus C6 (the agmsg behavior it relies on) |
-| C6 | agmsg really does need that claim, and honors it | Without a claim a second session resolves both panes; after `actas-claim.sh` it skips the claimed one | `auto (opt-in)`: `make test-agmsg-contract AGMSG_PATH=~/.agents/skills/agmsg` — `internal/board/agmsg_contract_test.go` |
+| C6 | agmsg really does need that claim, and honors it | Without a claim, one pane's watcher receives the *other* pane's messages; after `actas-claim.sh` it receives only its own | `auto (opt-in)`: `make test-agmsg-contract AGMSG_PATH=~/.agents/skills/agmsg` — `internal/board/agmsg_contract_test.go`; runs in CI via `.github/workflows/agmsg-contract.yml` |
 | C7 | A remote (SSH) host | Presence is probed over the existing exec channel, and a transport error is distinguished from "absent" | `auto`: root — `TestBootstrapWatcher_RemotePresenceCheck_YesWritesNoDoesNot`, `..._TransportError_DistinctFromNo` |
 | C8 | The PTY write fails or is short | A short write is never retried; a clean failure is retried up to the limit | `auto`: root — `TestBootstrapWatcher_ShortWrite_GivesUpImmediately_NeverRetries`, `..._WriteError_RetriedUpToLimitThenGivesUp` |
 
@@ -105,6 +105,26 @@ Documentation is part of the product here: an operator cannot use Agent Board wi
 | F5 | Security claims are current | Every claim in [security.md](security.md) is either verified or explicitly marked unverified | `manual`: reread the sections touching whatever changed |
 | F6 | Design docs match shipped behavior | Status notes in [agent-board.md](agent-board.md) and [ui-design.md](ui-design.md) reflect what actually ships | `manual`: check the status note of any section you relied on |
 
+## G. The agmsg compatibility contract
+
+agmsg is an external tool that promises compatibility only for reading through `api.sh`, while
+panemux's write path depends on `send.sh` and its bootstrap on `join.sh`/`actas-claim.sh`/`watch.sh`.
+These rows are what turns "an agmsg release broke us" from a user-discovered outage into a CI signal.
+See [agent-board.md](agent-board.md#agmsg-compatibility-contract) for the two tiers.
+
+| # | Scenario | Expected | Verification |
+|---|---|---|---|
+| G1 | panemux parses what agmsg really prints | Real captured `api.sh` JSONL parses into rows, status reports and history exactly as the code assumes | `auto`: `internal/board/agmsg_fixture_test.go` against `testdata/agmsg-v1.2.0/` (captured, not hand-written — see its README) |
+| G2 | A message survives the round trip | What `send.sh` wrote comes back out of `api.sh` with team/from/to/body/timestamp intact, through panemux's own `LocalAgmsgClient` | `auto (opt-in)`: `TestAgmsgContract_SendThenSinceRoundTrip` |
+| G3 | A body full of shell and SQL metacharacters | Stored and returned byte for byte — no expansion, no quote stripping, no SQL interpretation | `auto (opt-in)`: `TestAgmsgContract_ShellMetacharacterBodyRoundTrips` |
+| G4 | The relay's poll cursor against a real store | A poll with nothing new returns nothing; the next message, and only it, comes back | `auto (opt-in)`: `TestAgmsgContract_SinceCursorAnchorsOnReturnedOrder` — the regression test for the numeric-id cursor bug |
+| G5 | agmsg's message ids | Present and distinct; nothing about their ordering is assumed (today's are UUIDv7, not integers) | `auto (opt-in)`: `TestAgmsgContract_MessageIDsAreOpaque`, plus `TestAgmsgFixture_TeamMessages_IDsAreNotNumeric` in `make check` |
+| G6 | `--limit` bounds a poll | Returns the *newest* n rows, oldest first — the assumption the accepted truncation tradeoff rests on | `auto (opt-in)`: `TestAgmsgContract_SinceLimitKeepsTheNewestRows` |
+| G7 | A `board_status` report end to end | The `_system` sentinel survives agmsg verbatim and the body is still recognized as a status report | `auto (opt-in)`: `TestAgmsgContract_StatusRowRoundTrips` |
+| G8 | A pane ID is used verbatim as the agmsg agent id | A generated ID like `pane-1787195690568-re241` registers unchanged | `auto (opt-in)`: `TestAgmsgContract_JoinUsesThePaneIDVerbatim` |
+| G9 | An agmsg release changes behavior | The weekly canary fails against agmsg's latest tag, before anyone here bumps the pin | `auto`: `.github/workflows/agmsg-contract.yml`, `schedule` trigger (Mondays 06:00 UTC) |
+| G10 | A PR bumps `board.TestedAgmsgVersion` | The contract runs against the new pin and blocks the merge if real behavior differs | `auto`: same workflow, `pull_request` trigger — see [maintenance.md](maintenance.md#the-agmsg-compatibility-contract-job) for the branch-protection step this depends on |
+
 ## Not covered
 
 Stated explicitly, because an absent row reads as an oversight and these are decisions:
@@ -115,8 +135,13 @@ Stated explicitly, because an absent row reads as an oversight and these are dec
 - **The command center's real `claude` binary is only exercised manually** (E7). The e2e fixture
   stubs the binary, deliberately: the shipped argv is pinned against the real CLI's documented
   behavior in `internal/commandcenter/runner_test.go`, and a stub cannot reproduce that parsing.
-- **The agmsg contract tests are opt-in** (C6). They need a real agmsg install and `sqlite3`, so
-  `make check` would stop being hermetic. No CI job runs them yet.
+- **The agmsg contract tests stay opt-in locally** (C6, G2–G8). They need a real agmsg install and
+  `sqlite3`, so running them inside `make check` would stop it being hermetic. CI does run them
+  (G9/G10), which is where the drift signal comes from; a contributor without agmsg installed sees
+  them skip.
+- **Nothing verifies the contract against a *remote* agmsg install.** `RemoteAgmsgClient` builds and
+  escapes its commands identically and is unit-tested, but Tier 2 only ever drives the local client,
+  for the same reason C7's remote paths have no e2e row: a second host cannot be assumed.
 - **Install scenarios A1/A2 are manual.** CI builds the binary on every PR, but nobody automatically
   downloads a release artifact and runs it.
 - **Every row in section F is manual.** Documentation accuracy is not mechanically checkable here.
