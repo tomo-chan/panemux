@@ -27,7 +27,7 @@ export default defineConfig({
       // Measure only hooks and schemas — UI components and entry points
       // (App.tsx, main.tsx, components/) require browser rendering and are
       // covered by integration/E2E tests, not unit tests.
-      include: ['src/hooks/**', 'src/schemas/**'],
+      include: ['src/hooks/**', 'src/schemas/**', 'src/utils/**'],
       exclude: ['src/test/**'],
       reporter: ['text', 'json-summary'],
       thresholds: {
