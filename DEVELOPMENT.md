@@ -110,6 +110,7 @@ Example: `Config.sshConfigPath` uses `sshconfig.DefaultPath()` only when the ove
 - Go lint includes `gofmt`, `go vet`, and `golangci-lint run ./...` using `.golangci.yml`.
 - `lint-go-deps` refreshes the pinned `golangci-lint` binary when the local version does not match `GOLANGCI_LINT_VERSION`, so local lint matches CI.
 - Run `make lint-go` or `make lint` after every Go code change before committing.
+- [docs/quality-gateway.md](docs/quality-gateway.md) explains what these gates are responsible for and which further gates are designed but not yet built. Read it before changing the gate set itself.
 
 ### Push protection
 
@@ -176,3 +177,4 @@ git worktree remove /tmp/<repo>-<feature>
 - Behavior and API specification: [docs/behavior.md](docs/behavior.md)
 - UI intent: [docs/ui-design.md](docs/ui-design.md)
 - CI and release maintenance: [docs/maintenance.md](docs/maintenance.md)
+- Test quality characteristics and the gate design: [docs/quality-gateway.md](docs/quality-gateway.md)

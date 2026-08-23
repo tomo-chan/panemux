@@ -30,6 +30,10 @@ This installs npm packages, downloads Go modules, and configures the repo-local 
    status note before treating anything in it as shipped behavior.
 9. Read [docs/scenarios.md](docs/scenarios.md) when adding or changing a user-facing feature: it
    maps each use case to where it is verified, and every feature change is expected to update it.
+10. Read [docs/quality-gateway.md](docs/quality-gateway.md) when changing what the test suite,
+    coverage gates, or CI checks are responsible for. It defines the quality characteristics tests
+    must protect and the layered gates that enforce them. It is a design document — check a gate's
+    status row before treating it as shipped.
 
 ## Document Map
 
@@ -42,6 +46,7 @@ This installs npm packages, downloads Go modules, and configures the repo-local 
 - CI and release maintenance: [docs/maintenance.md](docs/maintenance.md)
 - Cross-pane Claude messaging design: [docs/agent-board.md](docs/agent-board.md)
 - Use-case scenario coverage map: [docs/scenarios.md](docs/scenarios.md)
+- Test quality characteristics and the gate design: [docs/quality-gateway.md](docs/quality-gateway.md)
 
 ## Editing Rules
 
