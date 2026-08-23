@@ -2,8 +2,10 @@ package commandcenter
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -56,11 +58,23 @@ func drain(t *testing.T, events <-chan Event) []Event {
 	return got
 }
 
-func TestRunnerFirstRunCapturesAndPersistsSessionID(t *testing.T) {
-	output := `{"type":"system","subtype":"init","session_id":"sess-1"}` + "\n" +
-		`{"type":"result","session_id":"sess-1","result":"done"}` + "\n"
+// TestRunnerFirstRunMintsAndPersistsItsOwnSessionID pins the fix for a real
+// isolation failure, reproduced against the real CLI (v2.1.233): a plain
+// `claude -p` with no --resume does not mint a fresh conversation, it
+// reports the *ambient* session id of the Claude Code session the
+// environment already belongs to. The Runner used to persist that reported
+// id and --resume it, silently attaching the command center to a
+// conversation it does not own — one holding full tool permissions, while
+// the command center is deliberately launched with three board tools. The
+// subprocess's reported id must therefore never be adopted; panemux mints
+// its own and pins it with --session-id.
+func TestRunnerFirstRunMintsAndPersistsItsOwnSessionID(t *testing.T) {
+	// The stream reports an id that is NOT the one panemux minted — exactly
+	// the ambient-session case this guards against.
+	output := `{"type":"system","subtype":"init","session_id":"ambient-session-of-the-operator"}` + "\n" +
+		`{"type":"result","session_id":"ambient-session-of-the-operator","result":"done"}` + "\n"
 	var captured capturedInvocation
-	factory := func(_ context.Context, name string, args ...string) cmdRunner {
+	factory := func(_ context.Context, _, name string, args ...string) cmdRunner {
 		captured = capturedInvocation{Name: name, Args: args}
 		return &fakeCmd{stdout: io.NopCloser(strings.NewReader(output))}
 	}
@@ -79,13 +93,121 @@ func TestRunnerFirstRunCapturesAndPersistsSessionID(t *testing.T) {
 	assert.NotContains(t, captured.Args, "--resume")
 	assert.Equal(t, "hello there", captured.Args[len(captured.Args)-1])
 
+	idIdx := indexOf(captured.Args, "--session-id")
+	require.GreaterOrEqual(t, idIdx, 0, "a first run must pin its own session id, got %v", captured.Args)
+	minted := captured.Args[idIdx+1]
+	assert.Regexp(t, uuidV4, minted, "--session-id requires a v4 UUID")
+
 	state, err := LoadSessionFile(sessionPath)
 	require.NoError(t, err)
-	assert.Equal(t, "sess-1", state.SessionID)
+	assert.Equal(t, minted, state.SessionID, "the persisted id must be the one panemux passed")
+	assert.NotEqual(t, "ambient-session-of-the-operator", state.SessionID,
+		"the id the subprocess reported must never be adopted")
 
 	entries, err := LoadHistory(historyPath)
 	require.NoError(t, err)
-	assert.Len(t, entries, 2)
+	// The prompt leads the turn, followed by the subprocess's own lines.
+	require.Len(t, entries, 3)
+	assert.Contains(t, string(entries[0].Raw), promptHistoryType)
+}
+
+// TestRunnerIsolatesTheSubprocessFromOperatorConfig pins the flags that keep
+// the command center from inheriting ambient context. Each was verified
+// against the real CLI: --setting-sources ” suppresses user/project/local
+// settings *and* CLAUDE.md discovery, which is why panemux's own
+// instructions travel via --append-system-prompt instead of a file.
+func TestRunnerIsolatesTheSubprocessFromOperatorConfig(t *testing.T) {
+	var captured capturedInvocation
+	var capturedDir string
+	factory := func(_ context.Context, dir, name string, args ...string) cmdRunner {
+		captured = capturedInvocation{Name: name, Args: args}
+		capturedDir = dir
+		return &fakeCmd{stdout: io.NopCloser(strings.NewReader(""))}
+	}
+	r, _, _ := newTestRunner(t, factory)
+
+	events, err := r.Query(context.Background(), "status")
+	require.NoError(t, err)
+	drain(t, events)
+
+	assert.Contains(t, captured.Args, "--strict-mcp-config",
+		"only the board MCP server this query configured may load")
+
+	srcIdx := indexOf(captured.Args, "--setting-sources")
+	require.GreaterOrEqual(t, srcIdx, 0, "settings inheritance must be switched off explicitly")
+	assert.Empty(t, captured.Args[srcIdx+1], "no user, project or local settings — operator hooks must not fire here")
+
+	promptIdx := indexOf(captured.Args, "--append-system-prompt")
+	require.GreaterOrEqual(t, promptIdx, 0, "panemux's own instructions must reach the subprocess")
+	assert.Equal(t, DefaultSystemPrompt, captured.Args[promptIdx+1])
+
+	assert.NotEmpty(t, capturedDir, "the subprocess needs its own working directory")
+	assert.NotEqual(t, ".", capturedDir)
+}
+
+// queryWithContextDir runs one query against a Runner configured with the
+// given operator context directory and returns the argv it produced.
+func queryWithContextDir(t *testing.T, contextDir string) capturedInvocation {
+	t.Helper()
+	var captured capturedInvocation
+	r := NewRunner(RunnerConfig{
+		ClaudeBin:   "claude",
+		SessionPath: filepath.Join(t.TempDir(), "session.json"),
+		HistoryPath: filepath.Join(t.TempDir(), "history.jsonl"),
+		ContextDir:  contextDir,
+		BuildMCPConfig: func() (string, func(), error) {
+			return "/tmp/fake-mcp-config.json", func() {}, nil
+		},
+		NewCommand: func(_ context.Context, _, name string, args ...string) cmdRunner {
+			captured = capturedInvocation{Name: name, Args: args}
+			return &fakeCmd{stdout: io.NopCloser(strings.NewReader(""))}
+		},
+	})
+	events, err := r.Query(context.Background(), "status")
+	require.NoError(t, err)
+	drain(t, events)
+	return captured
+}
+
+// TestRunnerSendsOnlyPanemuxOwnSettings pins that the subprocess receives
+// exactly one settings document — panemux's own narrowing literal — and
+// that no operator settings file can be routed into --settings. A settings
+// value can nullify --allowedTools outright (see
+// TestSubprocessSettingsOnlyNarrows), so this is a security boundary, not a
+// configuration preference.
+func TestRunnerSendsOnlyPanemuxOwnSettings(t *testing.T) {
+	contextDir := t.TempDir()
+	// An operator settings file must be ignored even when one is sitting
+	// right there in the context directory.
+	require.NoError(t, os.WriteFile(filepath.Join(contextDir, "settings.json"),
+		[]byte(`{"permissions":{"defaultMode":"acceptEdits"}}`), 0o600))
+
+	captured := queryWithContextDir(t, contextDir)
+
+	var settingsValues []string
+	for i, arg := range captured.Args {
+		if arg == "--settings" && i+1 < len(captured.Args) {
+			settingsValues = append(settingsValues, captured.Args[i+1])
+		}
+	}
+	require.Len(t, settingsValues, 1, "exactly one --settings, got %v", captured.Args)
+	assert.Equal(t, SubprocessSettings, settingsValues[0])
+	assert.NotContains(t, settingsValues[0], "acceptEdits")
+	assert.NotContains(t, strings.Join(captured.Args, " "), filepath.Join(contextDir, "settings.json"),
+		"an operator settings file must never reach argv")
+}
+
+func TestRunnerAppendsOperatorInstructionsToTheSystemPrompt(t *testing.T) {
+	contextDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(contextDir, "CLAUDE.md"),
+		[]byte("Never broadcast during a release freeze."), 0o600))
+
+	captured := queryWithContextDir(t, contextDir)
+
+	prompt := captured.Args[indexOf(captured.Args, "--append-system-prompt")+1]
+	assert.Contains(t, prompt, "Never broadcast during a release freeze.")
+	assert.Contains(t, prompt, "Always call board_status before answering",
+		"operator text extends panemux's own rules, it does not replace them")
 }
 
 // TestRunnerBuildArgsShapeIsSafeAgainstArgumentInjection locks in the exact
@@ -105,7 +227,7 @@ func TestRunnerFirstRunCapturesAndPersistsSessionID(t *testing.T) {
 // needing the CLI installed.
 func TestRunnerBuildArgsShapeIsSafeAgainstArgumentInjection(t *testing.T) {
 	var captured capturedInvocation
-	factory := func(_ context.Context, name string, args ...string) cmdRunner {
+	factory := func(_ context.Context, _, name string, args ...string) cmdRunner {
 		captured = capturedInvocation{Name: name, Args: args}
 		return &fakeCmd{stdout: io.NopCloser(strings.NewReader(""))}
 	}
@@ -131,7 +253,7 @@ func TestRunnerResumeUsesPersistedSessionIDAndNeverOverwritesIt(t *testing.T) {
 
 	output := `{"type":"result","session_id":"existing-session","result":"ok"}` + "\n"
 	var captured capturedInvocation
-	factory := func(_ context.Context, name string, args ...string) cmdRunner {
+	factory := func(_ context.Context, _, name string, args ...string) cmdRunner {
 		captured = capturedInvocation{Name: name, Args: args}
 		return &fakeCmd{stdout: io.NopCloser(strings.NewReader(output))}
 	}
@@ -172,7 +294,7 @@ func TestRunnerResumeFailureClearsStaleSessionID(t *testing.T) {
 	require.NoError(t, SaveSessionFile(sessionPath, SessionState{SessionID: "dead-session"}))
 	historyPath := filepath.Join(t.TempDir(), "history.jsonl")
 
-	factory := func(_ context.Context, _ string, _ ...string) cmdRunner {
+	factory := func(_ context.Context, _, _ string, _ ...string) cmdRunner {
 		return &fakeCmd{stdout: io.NopCloser(strings.NewReader("")), waitErr: errors.New("exit status 1")}
 	}
 	r := NewRunner(RunnerConfig{
@@ -215,7 +337,7 @@ func TestRunnerMalformedPersistedSessionIDFallsBackToFirstRun(t *testing.T) {
 	output := `{"type":"system","subtype":"init","session_id":"new-session-1"}` + "\n" +
 		`{"type":"result","session_id":"new-session-1","result":"done"}` + "\n"
 	var captured capturedInvocation
-	factory := func(_ context.Context, name string, args ...string) cmdRunner {
+	factory := func(_ context.Context, _, name string, args ...string) cmdRunner {
 		captured = capturedInvocation{Name: name, Args: args}
 		return &fakeCmd{stdout: io.NopCloser(strings.NewReader(output))}
 	}
@@ -238,10 +360,16 @@ func TestRunnerMalformedPersistedSessionIDFallsBackToFirstRun(t *testing.T) {
 	assert.NotContains(t, captured.Args, "--resume",
 		"a flag-shaped persisted session id must never reach --resume's argv slot")
 
+	require.Contains(t, captured.Args, "--session-id",
+		"a fallback first run must still pin its own session id")
+	minted := captured.Args[indexOf(captured.Args, "--session-id")+1]
+
 	state, err := LoadSessionFile(sessionPath)
 	require.NoError(t, err)
-	assert.Equal(t, "new-session-1", state.SessionID,
-		"the fallback first run's own freshly captured session id must still be persisted")
+	assert.Equal(t, minted, state.SessionID,
+		"the fallback first run must persist the id panemux minted")
+	assert.NotEqual(t, "new-session-1", state.SessionID,
+		"the id the subprocess reported must never be adopted")
 }
 
 // sleepingFakeCmd behaves like fakeCmd, but Wait() sleeps first — used to
@@ -266,7 +394,7 @@ func TestRunnerTimeoutDoesNotClearSessionIdAndReportsTimeoutMessage(t *testing.T
 	require.NoError(t, SaveSessionFile(sessionPath, SessionState{SessionID: "existing-session"}))
 	historyPath := filepath.Join(t.TempDir(), "history.jsonl")
 
-	factory := func(_ context.Context, _ string, _ ...string) cmdRunner {
+	factory := func(_ context.Context, _, _ string, _ ...string) cmdRunner {
 		return &sleepingFakeCmd{
 			stdout:          io.NopCloser(strings.NewReader("")),
 			waitErr:         errors.New("signal: killed"),
@@ -324,7 +452,7 @@ func TestRunnerMalformedStreamJSONCancelsQueryContextImmediately(t *testing.T) {
 	// not be left running for up to the full query timeout just to exit on
 	// its own afterward, holding the busy flag the whole time.
 	output := `not json` + "\n"
-	factory := func(ctx context.Context, _ string, _ ...string) cmdRunner {
+	factory := func(ctx context.Context, _, _ string, _ ...string) cmdRunner {
 		return &ctxAwareFakeCmd{stdout: io.NopCloser(strings.NewReader(output)), ctx: ctx}
 	}
 	sessionPath := filepath.Join(t.TempDir(), "session.json")
@@ -363,7 +491,7 @@ func TestRunnerMalformedStreamJSONCancelsQueryContextImmediately(t *testing.T) {
 
 func TestRunnerRejectsSecondQueryWhileBusy(t *testing.T) {
 	pr, pw := io.Pipe()
-	factory := func(_ context.Context, _ string, _ ...string) cmdRunner {
+	factory := func(_ context.Context, _, _ string, _ ...string) cmdRunner {
 		return &fakeCmd{stdout: pr}
 	}
 	r, _, _ := newTestRunner(t, factory)
@@ -388,7 +516,7 @@ func TestRunnerMalformedStreamJSONEmitsErrorAndStops(t *testing.T) {
 	output := `{"type":"system","subtype":"init","session_id":"sess-1"}` + "\n" +
 		`not json` + "\n" +
 		`{"type":"result","session_id":"sess-1"}` + "\n"
-	factory := func(_ context.Context, _ string, _ ...string) cmdRunner {
+	factory := func(_ context.Context, _, _ string, _ ...string) cmdRunner {
 		return &fakeCmd{stdout: io.NopCloser(strings.NewReader(output))}
 	}
 	r, sessionPath, historyPath := newTestRunner(t, factory)
@@ -407,15 +535,18 @@ func TestRunnerMalformedStreamJSONEmitsErrorAndStops(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, state.SessionID)
 
-	// What was captured before the failure is still persisted to history.
+	// What was captured before the failure is still persisted to history,
+	// behind the prompt that leads the turn.
 	entries, err := LoadHistory(historyPath)
 	require.NoError(t, err)
-	assert.Len(t, entries, 1)
+	require.Len(t, entries, 2)
+	assert.Contains(t, string(entries[0].Raw), promptHistoryType)
+	assert.Contains(t, string(entries[1].Raw), "sess-1")
 }
 
 func TestRunnerNonZeroExitEmitsErrorEventAndSkipsSessionPersist(t *testing.T) {
 	output := `{"type":"system","subtype":"init","session_id":"sess-1"}` + "\n"
-	factory := func(_ context.Context, _ string, _ ...string) cmdRunner {
+	factory := func(_ context.Context, _, _ string, _ ...string) cmdRunner {
 		return &fakeCmd{stdout: io.NopCloser(strings.NewReader(output)), waitErr: errors.New("exit status 1")}
 	}
 	r, sessionPath, historyPath := newTestRunner(t, factory)
@@ -435,11 +566,15 @@ func TestRunnerNonZeroExitEmitsErrorEventAndSkipsSessionPersist(t *testing.T) {
 
 	entries, err := LoadHistory(historyPath)
 	require.NoError(t, err)
-	assert.Len(t, entries, 1, "output captured before the failing exit is still persisted")
+	// The prompt leads the turn, and the line captured before the failing
+	// exit follows it — a failed turn is still part of the record.
+	require.Len(t, entries, 2)
+	assert.Contains(t, string(entries[0].Raw), promptHistoryType)
+	assert.Contains(t, string(entries[1].Raw), "sess-1", "output captured before the failing exit is still persisted")
 }
 
 func TestRunnerStartErrorEmitsErrorEventAndReleasesBusy(t *testing.T) {
-	factory := func(_ context.Context, _ string, _ ...string) cmdRunner {
+	factory := func(_ context.Context, _, _ string, _ ...string) cmdRunner {
 		return &fakeCmd{stdout: io.NopCloser(strings.NewReader("")), startErr: errors.New("claude: command not found")}
 	}
 	r, _, _ := newTestRunner(t, factory)
@@ -460,7 +595,7 @@ func TestRunnerStartErrorEmitsErrorEventAndReleasesBusy(t *testing.T) {
 
 func TestRunnerBuildMCPConfigFailureEmitsErrorAndNeverStartsProcess(t *testing.T) {
 	started := false
-	factory := func(_ context.Context, _ string, _ ...string) cmdRunner {
+	factory := func(_ context.Context, _, _ string, _ ...string) cmdRunner {
 		started = true
 		return &fakeCmd{stdout: io.NopCloser(strings.NewReader(""))}
 	}
@@ -488,7 +623,7 @@ func TestRunnerBuildMCPConfigFailureEmitsErrorAndNeverStartsProcess(t *testing.T
 
 func TestRunnerAlwaysCallsMCPConfigCleanup(t *testing.T) {
 	cleanupCalled := false
-	factory := func(_ context.Context, _ string, _ ...string) cmdRunner {
+	factory := func(_ context.Context, _, _ string, _ ...string) cmdRunner {
 		return &fakeCmd{stdout: io.NopCloser(strings.NewReader("")), waitErr: errors.New("boom")}
 	}
 	sessionPath := filepath.Join(t.TempDir(), "session.json")
@@ -512,7 +647,7 @@ func TestRunnerAlwaysCallsMCPConfigCleanup(t *testing.T) {
 
 func TestRunnerAppliesConfiguredQueryTimeoutToSubprocessContext(t *testing.T) {
 	var capturedCtx context.Context
-	factory := func(ctx context.Context, _ string, _ ...string) cmdRunner {
+	factory := func(ctx context.Context, _, _ string, _ ...string) cmdRunner {
 		capturedCtx = ctx
 		return &fakeCmd{stdout: io.NopCloser(strings.NewReader(""))}
 	}
@@ -620,4 +755,107 @@ func indexOf(haystack []string, needle string) int {
 		}
 	}
 	return -1
+}
+
+// TestRunnerDeniesActingToolsByName pins that the subprocess is launched
+// with an explicit denial list, not only an allowlist. Verified against the
+// real CLI: --allowedTools alone blocks Bash, but a settings document
+// carrying {"permissions":{"defaultMode":"acceptEdits"}} defeats it and Bash
+// runs; adding --disallowedTools blocks it again. The allowlist is a policy
+// another policy can override; this denial is not.
+func TestRunnerDeniesActingToolsByName(t *testing.T) {
+	var captured capturedInvocation
+	factory := func(_ context.Context, _, name string, args ...string) cmdRunner {
+		captured = capturedInvocation{Name: name, Args: args}
+		return &fakeCmd{stdout: io.NopCloser(strings.NewReader(""))}
+	}
+	r, _, _ := newTestRunner(t, factory)
+
+	events, err := r.Query(context.Background(), "status")
+	require.NoError(t, err)
+	drain(t, events)
+
+	var denyArg string
+	for _, arg := range captured.Args {
+		if strings.HasPrefix(arg, "--disallowedTools=") {
+			denyArg = arg
+		}
+	}
+	require.NotEmpty(t, denyArg, "expected a --disallowedTools argument, got %v", captured.Args)
+	// The "=" form, for the same reason --allowedTools uses it: the flag is
+	// variadic and a two-element form would swallow the next argv element.
+	assert.NotContains(t, captured.Args, "--disallowedTools")
+	assert.Contains(t, denyArg, "Bash")
+	assert.Contains(t, denyArg, "Agent")
+}
+
+// TestRunnerDisablesSlashCommands pins the third argv-level restriction.
+// Slash commands are outside both --allowedTools and --disallowedTools: a
+// prompt of "/context" against the real CLI returned the command's own
+// output, so anyone able to type into the palette could reach the CLI's
+// whole slash-command registry (/config, /model, /mcp, /doctor, ...).
+// --disable-slash-commands turns that into "/context isn't available in
+// this environment." while leaving the board MCP tools untouched.
+func TestRunnerDisablesSlashCommands(t *testing.T) {
+	var captured capturedInvocation
+	factory := func(_ context.Context, _, name string, args ...string) cmdRunner {
+		captured = capturedInvocation{Name: name, Args: args}
+		return &fakeCmd{stdout: io.NopCloser(strings.NewReader(""))}
+	}
+	r, _, _ := newTestRunner(t, factory)
+
+	events, err := r.Query(context.Background(), "/context")
+	require.NoError(t, err)
+	drain(t, events)
+
+	assert.Contains(t, captured.Args, "--disable-slash-commands")
+	// The prompt still travels as prompt text, after the end-of-options marker.
+	assert.Equal(t, "/context", captured.Args[len(captured.Args)-1])
+}
+
+// TestRunnerRecordsThePromptInHistory covers a gap found by reading a real
+// history file: the stream carries no record of the operator's own prompt.
+// A real run produced stream_event, system, assistant and result frames and
+// nothing else, so the history panel could only ever show answers with no
+// question attached to them. panemux owns this file's format, so it records
+// the prompt itself, under a type the CLI never emits.
+func TestRunnerRecordsThePromptInHistory(t *testing.T) {
+	output := `{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}` + "\n"
+	factory := func(_ context.Context, _, _ string, _ ...string) cmdRunner {
+		return &fakeCmd{stdout: io.NopCloser(strings.NewReader(output))}
+	}
+	r, _, historyPath := newTestRunner(t, factory)
+
+	events, err := r.Query(context.Background(), "which panes are blocked?")
+	require.NoError(t, err)
+	drain(t, events)
+
+	entries, err := LoadHistory(historyPath)
+	require.NoError(t, err)
+	require.NotEmpty(t, entries)
+
+	var first map[string]any
+	require.NoError(t, json.Unmarshal(entries[0].Raw, &first))
+	assert.Equal(t, "panemux_prompt", first["type"], "the prompt must be the first entry of its turn")
+	assert.Equal(t, "which panes are blocked?", first["text"])
+
+	// The subprocess's own lines still follow, unmodified.
+	require.Len(t, entries, 2)
+	assert.JSONEq(t, strings.TrimSpace(output), string(entries[1].Raw))
+}
+
+func TestRunnerRecordsThePromptEvenWhenTheQueryFails(t *testing.T) {
+	factory := func(_ context.Context, _, _ string, _ ...string) cmdRunner {
+		return &fakeCmd{stdout: io.NopCloser(strings.NewReader("")), waitErr: errors.New("exit status 1")}
+	}
+	r, _, historyPath := newTestRunner(t, factory)
+
+	events, err := r.Query(context.Background(), "a question that failed")
+	require.NoError(t, err)
+	drain(t, events)
+
+	entries, err := LoadHistory(historyPath)
+	require.NoError(t, err)
+	require.Len(t, entries, 1, "a failed turn still belongs in the record")
+	assert.Contains(t, string(entries[0].Raw), "a question that failed")
 }

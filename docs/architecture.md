@@ -66,7 +66,7 @@ Optional capability interfaces extend the base `Session` contract without breaki
 
 `browseropen.go` holds the browser-open shim: a fixed POSIX shell script installed into the pane host's user cache directory and exported as `$BROWSER`/`PATH` for `local` and `ssh` panes, plus the process-wide switch (`SetBrowserShimEnabled`) startup sets from `url_open.browser_shim`. See [behavior.md](behavior.md)'s "Opening URLs from a pane".
 
-### `internal/board`, `internal/commandcenter`, `internal/boardmcp` (Phase 1 board core and Phase 2 command center both implemented)
+### `internal/board`, `internal/commandcenter`, `internal/boardmcp` (Phase 1 board core, Phase 2 command center, and Phase 3 dashboard UI all implemented)
 
 A package that replaces transcript-based Claude activity inference with a self-reported channel:
 panes report status (including branch/PR/cwd, gathered by the agent's own `git`/`gh` calls rather
@@ -128,8 +128,21 @@ substantial, independently-tested part of the design's own scope (its own proces
 permission model, and streaming API), not a minor addendum to the messaging/relay piece described
 above.
 
-Full design and rationale for both pieces live in [agent-board.md](agent-board.md), whose status
-note confirms both Phase 1 (board core) and Phase 2 (command center) are implemented.
+Also implemented: the **dashboard UI** (Phase 3), which is frontend-only — it adds no new backend
+package, only the `agent_board_enabled` field on `GET /api/session-token` (`internal/api/board.go`;
+see [docs/behavior.md](behavior.md#get-apisession-token)). On the frontend, `useBoardStatus.ts`
+polls `GET /api/board/status` and `GET /api/board/messages?since=<seq>` (paused while the tab is
+hidden, the same `document.hidden` pattern `useSessionsOverview.ts` already uses) and filters
+`board_status`-kind rows out of the message feed client-side; `BoardDashboardPanel.tsx` renders the
+result as a right-anchored overlay panel styled like the existing `CommandHistoryPanel.tsx`, using
+`utils/boardStatusColors.ts`'s pure state→color and staleness helpers; and a new shared
+`useRestoreFocusOnClose.ts` hook (used by the palette, history panel, and dashboard alike) returns
+keyboard focus to whatever triggered an overlay once it closes. See
+[ui-design.md's Agent Board UI section](ui-design.md#agent-board-ui) for the presentation detail.
+
+Full design and rationale for all three phases live in [agent-board.md](agent-board.md), whose
+status note confirms Phase 1 (board core), Phase 2 (command center), and Phase 3 (dashboard UI and
+command palette test completion) are all implemented.
 
 ### `internal/portforward`
 

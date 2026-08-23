@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import type { DirectoryBrowserResponse, PaneConfig } from '../types'
+import type { BoardMode, DirectoryBrowserResponse, PaneConfig } from '../types'
 import { TERMINAL_FONT_FAMILY } from '../utils/fonts'
 
 interface PaneSettingsDialogProps {
@@ -37,6 +37,23 @@ const inputStyle: React.CSSProperties = {
   fontFamily: TERMINAL_FONT_FAMILY,
   fontSize: '13px',
   boxSizing: 'border-box',
+}
+
+const hintStyle: React.CSSProperties = {
+  fontSize: '11px',
+  color: '#8f98a8',
+  lineHeight: 1.4,
+}
+
+const warningStyle: React.CSSProperties = {
+  marginTop: '6px',
+  padding: '8px 10px',
+  fontSize: '11px',
+  lineHeight: 1.5,
+  color: '#f4bf4f',
+  backgroundColor: 'rgba(244, 191, 79, 0.08)',
+  border: '1px solid rgba(244, 191, 79, 0.28)',
+  borderRadius: '4px',
 }
 
 const labelStyle: React.CSSProperties = {
@@ -79,6 +96,8 @@ export const PaneSettingsDialog: React.FC<PaneSettingsDialogProps> = ({
   const [tmuxSession, setTmuxSession] = useState('')
   const [cwd, setCwd] = useState('')
   const [title, setTitle] = useState('')
+  const [boardEnabled, setBoardEnabled] = useState(false)
+  const [boardMode, setBoardMode] = useState<BoardMode>('monitor')
   const [validationError, setValidationError] = useState<string | null>(null)
   const [isDetecting, setIsDetecting] = useState(false)
   const [showDirectoryBrowser, setShowDirectoryBrowser] = useState(false)
@@ -112,6 +131,8 @@ export const PaneSettingsDialog: React.FC<PaneSettingsDialogProps> = ({
       setTmuxSession(pane.tmux_session ?? '')
       setCwd(pane.cwd ?? '')
       setTitle(pane.title ?? '')
+      setBoardEnabled(pane.agent_board?.enabled ?? false)
+      setBoardMode(pane.agent_board?.mode ?? 'monitor')
       setValidationError(null)
       resetDirectoryBrowser()
       if (pane.type === 'local' && !existingShell) {
@@ -344,6 +365,9 @@ export const PaneSettingsDialog: React.FC<PaneSettingsDialogProps> = ({
       cwd: cwd || undefined,
       show_header: pane.show_header,
       show_status_bar: pane.show_status_bar,
+      // Omitted entirely when off, so a pane that never joined the board
+      // keeps a config.yaml free of board keys.
+      ...(boardEnabled ? { agent_board: { enabled: true, mode: boardMode } } : {}),
       ...(needsShell ? { shell: shell || undefined } : {}),
       ...(needsConnection ? { connection } : {}),
       ...(needsTmux ? { tmux_session: tmuxSession } : {}),
@@ -524,6 +548,47 @@ export const PaneSettingsDialog: React.FC<PaneSettingsDialogProps> = ({
             style={inputStyle}
           />
         </div>
+
+        <div style={fieldStyle}>
+          <label htmlFor="pane-agent-board-enabled" style={labelStyle}>Join the agent board</label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <input
+              id="pane-agent-board-enabled"
+              type="checkbox"
+              checked={boardEnabled}
+              onChange={(e) => setBoardEnabled(e.target.checked)}
+            />
+            <span style={hintStyle}>
+              Report this pane&apos;s status to the dashboard and let it receive board messages.
+              Requires agmsg on this pane&apos;s host.
+            </span>
+          </div>
+        </div>
+
+        {boardEnabled && (
+          <div style={fieldStyle}>
+            <label htmlFor="pane-agent-board-mode" style={labelStyle}>Message delivery</label>
+            <select
+              id="pane-agent-board-mode"
+              value={boardMode}
+              onChange={(e) => setBoardMode(e.target.value as BoardMode)}
+              style={inputStyle}
+            >
+              <option value="monitor">monitor — status only, messages are not delivered</option>
+              <option value="turn">turn — deliver between the agent&apos;s turns</option>
+              <option value="both">both — monitor plus turn</option>
+              <option value="off">off — no automatic delivery</option>
+            </select>
+            {(boardMode === 'turn' || boardMode === 'both') && (
+              <div data-testid="agent-board-repo-warning" style={warningStyle}>
+                Delivery hooks are written into this pane&apos;s project directory by agmsg — for
+                example <code>.claude/settings.local.json</code>, or another path per agent type.
+                The file stays after the pane closes and panemux never removes it. Add it to a global
+                gitignore first; see the README.
+              </div>
+            )}
+          </div>
+        )}
 
         {error && (
           <div style={{ fontSize: '12px', color: '#f44747', marginBottom: '12px' }}>

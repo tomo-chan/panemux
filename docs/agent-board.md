@@ -42,7 +42,7 @@
 > the hidden subcommand the command center's own `claude -p` subprocess re-invokes as its MCP server,
 > per [Process lifecycle](#process-lifecycle) below. The Spotlight palette (`CommandPalette.tsx`) and
 > persistent history panel (`CommandHistoryPanel.tsx`) are implemented per
-> [ui-design.md's Agent Board UI section](ui-design.md#agent-board-ui-planned), including the
+> [ui-design.md's Agent Board UI section](ui-design.md#agent-board-ui), including the
 > concrete decisions that section originally deferred to implementation time.
 >
 > **An adversarial review after the initial implementation found and fixed several real bugs,
@@ -56,6 +56,37 @@
 > for a related fix to `GET /api/session-token`'s own guard (it does not rely on CORS, contrary to an
 > earlier revision of that section). A live, end-to-end query through the real browser → WS → Runner →
 > real `claude` subprocess stack was used to confirm the fix, not just the unit tests.
+>
+> **Phase 3 (Dashboard UI and command palette test completion)** is implemented. The read-only status
+> dashboard (`BoardDashboardPanel.tsx`, its own `useBoardStatus` polling hook, and the
+> `utils/boardStatusColors.ts` state→color/staleness helpers) ships as a right-anchored overlay panel
+> reachable via an "Agent Board" button or `Cmd/Ctrl+Shift+B` — see
+> [ui-design.md's Agent Board UI section](ui-design.md#agent-board-ui) for the full presentation
+> detail. It required one addition the Phase 3 design didn't originally anticipate:
+> **`agent_board_enabled`** on `GET /api/session-token`'s response (see
+> [API additions](#api-additions) and [docs/behavior.md](behavior.md#get-apisession-token)), because
+> `command_center_enabled` alone can't gate the dashboard button — a config can enable `agent_board`
+> without the command center, or vice versa, and the frontend has no other cheap way to learn whether
+> any pane has `agent_board.enabled: true` without re-fetching and walking the full layout tree.
+> Broadcast-sending from the dashboard was deliberately left out of Phase 3's scope — the dashboard is
+> read-only, matching the original Phase 3 issue definition. Phase 3 also completed test coverage the
+> command palette and history panel had been shipped without: `schemas/index.test.ts` now exercises
+> every board-related Zod schema's accept/reject paths, `CommandPalette.test.tsx` covers fixture
+> history rendering, incremental streaming updates, and the busy frame, and a shared
+> `useRestoreFocusOnClose` hook (used by the palette, history panel, and dashboard alike) returns
+> keyboard focus to whatever triggered an overlay once that overlay closes — behavior the original
+> Phase 3b issue text called for that had no implementation at all before this phase.
+>
+> **Tier 2 of the [agmsg compatibility contract](#agmsg-compatibility-contract) is now implemented
+> too** — `.github/workflows/agmsg-contract.yml` runs `make test-agmsg-contract` against a real
+> agmsg install, daily against agmsg's latest release tag (doing real work once per new release) and
+> on pull requests against the pinned `board.TestedAgmsgVersion`. Its first real run against a live
+> install found two things every hermetic test had missed: two of the contract's own assertions
+> described `watch.sh` output that does not exist in the branch they asserted it in, and — the substantive one — the relay compared
+> agmsg's message ids **numerically**, which no id from agmsg's event-log storage driver satisfies,
+> so the poll cursor never advanced and every row was re-delivered on every tick. Both are fixed;
+> see [Integration with agmsg](#integration-with-agmsg) for the cursor rule that replaced the
+> comparison, and the contract section for what the tiers now cover.
 
 ## Purpose
 
@@ -355,11 +386,29 @@ cursor, the opposite of what an incremental poll needs — and `api.sh` has no a
 all. The relay therefore cannot use `--before-id` for its poll loop (an earlier revision of this
 document specified exactly that mistake). Instead, each poll calls `api.sh get teams <team>
 messages --limit <N>` with **no** `--before-id`, taking the `N` most recent rows (`N` defaults to a
-few hundred; see [Package layout](#package-layout)), and filters client-side to rows whose `id` is
-numerically greater than the persisted cursor. **This has a real, accepted truncation risk:** if
-more than `N` genuinely new rows land on one host between two poll cycles, the oldest of that
-overflow are silently skipped — there is no way to detect or recover them through `api.sh`'s
-documented interface. `--before-id` remains useful for one thing only: paging *backwards* through
+few hundred; see [Package layout](#package-layout)), and filters client-side to the rows that
+*follow* the persisted cursor **in the order `api.sh` itself returned them**. **This has a real,
+accepted truncation risk:** if more than `N` genuinely new rows land on one host between two poll
+cycles, the oldest of that overflow are silently skipped — there is no way to detect or recover
+them through `api.sh`'s documented interface.
+
+**The cursor is matched by identity, never compared** — and that distinction is not pedantry, it
+was a shipped bug. An earlier implementation compared `id` *numerically*, which held only for
+agmsg's legacy sqlite driver (integer rowids exposed as decimal strings). The event-log driver that
+1.2.0 actually writes through emits **UUIDv7**, which parses as no integer at all, so every
+comparison answered "nothing parses, everything is new": the cursor never advanced and the relay
+re-delivered its entire poll window on every tick, forever. agmsg's own `api.sh` states the rule
+this now follows — its message `id` column is TEXT because "the driver-interface spec treats every
+message id as opaque", and its rows are ordered by each storage source's native counter
+(`events.seq` / `messages.id`), a value the same comment says is "never compared across sources",
+while one response can `UNION` both. Ordering by the response's own order is therefore the only
+signal agmsg offers. Note that lexicographic comparison would not have rescued this either:
+messages written in the same millisecond share their whole UUIDv7 time prefix and differ only in
+random bits, so sorting them as strings reorders them (the Tier 1 fixtures capture exactly such a
+set, and a test asserts that they do). Two cases treat every returned row as new: no cursor yet
+(cold start), and a cursor absent from the response — which means it scrolled out of the window, and
+costs one bounded re-delivery of that window, consistent with the at-least-once delivery this design
+already accepts, rather than a silent skip. `--before-id` remains useful for one thing only: paging *backwards* through
 older history on demand (e.g. a "load more" action in the dashboard's history view), never for the
 relay's forward poll.
 
@@ -466,9 +515,100 @@ more exposure to agmsg's evolution than a "we only read from it" dependency woul
 in Known limitations](#known-limitations) for that tradeoff stated plainly. panemux implementation
 must pin a specific tested agmsg version/tag and treat any change to either script's observed
 behavior as an external dependency compatibility bug, tracked the same way any other pinned
-dependency's breaking change would be — and must be able to *detect* such a break mechanically
+dependency's breaking change would be. **That pin is `board.TestedAgmsgVersion`
+(`internal/board/agmsg_version.go`), currently `1.2.0`** — the version whose own source
+(`delivery.sh`, `scripts/lib/type-registry.sh`, the per-type `type.conf` manifests) the script
+argument shapes documented here were read from. panemux reads each board-enabled host's
+`<agmsg_path>/VERSION` once at startup and logs a warning when that install is one it has no coverage
+for; a mismatch never blocks startup, because refusing to run against an untested agmsg would turn a
+possible incompatibility into a certain outage.
+
+**What counts as "no coverage" is narrower than "not byte-equal to the pin",** and both narrowings
+were paid for:
+
+- **The VERSION file has no single canonical form.** agmsg's repository carries a bare `1.2.0`, but
+  `install.sh` writes a *provenance* string into the install root instead — `git describe` output
+  from a checkout (`v1.2.0`, or `v1.2.0-6-g1a2b3c4` past the tag, `-dirty` on a modified tree),
+  falling back to the bare `VERSION` only for a tarball install (npx/`setup.sh`, which has no `.git`).
+  A byte comparison therefore warned an operator who had installed *exactly* the tested version
+  through agmsg's own documented clone path, on every startup. The leading `v` and any describe tail
+  are stripped before comparing. This was found by running Tier 2 against a real install, and is
+  asserted there (`TestAgmsgContract_InstalledVersionDoesNotFalselyWarn`) rather than only against
+  strings someone believed `install.sh` emits.
+- **A patch release at or past the pinned one, in the same minor line, is quiet.** agmsg ships
+  roughly every three days (median gap 2.9 days across its first 22 releases), so an operator on a
+  current install is almost never on the exact pinned patch, and moving the pin is this repository's
+  work rather than anything the warning's reader can act on. The silence is bought by coverage rather
+  than assumed: Tier 2's canary runs the real contract against each new agmsg release, so a patch
+  release that breaks the interface surfaces in CI here. Stated plainly — agmsg makes no semver
+  promise for the scripts panemux's write path depends on, so this is a deliberate trade of noise for
+  canary coverage, not a claim that a patch release cannot break anything.
+
+The rule is therefore "same minor line, at or past the pinned patch", and the direction matters:
+
+| Installed | | Why |
+|---|---|---|
+| The pinned release, in any of `install.sh`'s provenance forms | quiet | It *is* the tested version |
+| A **newer** patch in the same minor line | quiet | The canary verified that release when it shipped |
+| An **older** patch in the same minor line | warns | Never went through the canary, and may predate whatever the pin was moved for |
+| Any other minor, or any other major | warns | Exactly where agmsg's script interface can move |
+| A prerelease, or a string that will not parse | warns | Not the tested build; panemux does not assume about what it cannot read |
+| No `VERSION` file at all | quiet | panemux does not claim a mismatch it could not observe |
+
+Note that the older-patch row is unreachable while the pin's patch is `0`, as it is today — no
+`1.2.x` is older than `1.2.0`. It first takes effect on a pin bump, which is why `releaseCovered` is
+split from the pin and tested at that boundary directly rather than only through the pinned value. An install with no `VERSION` file reads as unknown and is not warned about — panemux
+does not claim a mismatch it could not observe — and must be able to *detect* such a break mechanically
 rather than discover it from a pane silently failing to communicate; see [agmsg compatibility
 contract](#agmsg-compatibility-contract).
+
+### Two panes in one project directory
+
+Two board-enabled panes whose agents run in the **same** project directory each used to receive the
+other's messages. Board *identity* was never the problem — that is the pane ID end to end
+(`join.sh`'s `agent_id`, the `from`/`to` on every row, `BoardCache.RecordStatus`'s key, and the
+relay's own `validFrom` check), and a repository path plays no part in it. Delivery was.
+
+Read from agmsg's own source at the pinned `1.2.0` (unchanged in `1.2.2`): `scripts/watch.sh`
+resolves what it subscribes to with `identities.sh <project> <type>`, which returns **every** (team,
+agent) pair registered for that project and type — both pane IDs. Handed no 4th `<agent>` argument
+the watcher subscribes broadly: it drops only pairs another live session already holds an actas
+exclusivity lock on, and claims none itself. Neither pane claimed one, so neither pane's messages
+were private to it. agmsg states the same failure in `scripts/lib/actas-lock.sh`'s own header —
+"every concurrent CC session in that project would subscribe to every registered identity's
+messages" — and ships `scripts/actas-claim.sh` as the remedy, which its `claude-code` template calls
+directly after `join.sh`.
+
+The bootstrap instruction now follows that template's own call order and argument shapes: `join.sh`,
+then `actas-claim.sh "$(pwd)" <type> <pane-id> "$CLAUDE_CODE_SESSION_ID"`, then — only when a
+watcher is actually running — stop the existing `agmsg inbox stream` task and invoke a new Monitor
+with `watch.sh "$CLAUDE_CODE_SESSION_ID" "$(pwd)" <type> <pane-id>`, whose 4th argument both narrows
+the subscription and re-claims the lock. A `status=held` result means another live session owns that
+pane ID; the instruction tells the agent to report it and stop rather than disturb the running
+watcher.
+
+Three scoping decisions worth stating, because each one leaves something unfixed:
+
+- **`claude-code` only.** `actas-claim.sh`'s 4th argument is the session id, and its source is
+  per-type in agmsg's own `type.conf` `detect` key: `CLAUDE_CODE_SESSION_ID` here,
+  `CODEX_THREAD_ID` for codex, absent entirely for opencode and cursor. Only the `claude-code`
+  invocation has been verified against agmsg's own template, so it is the only one emitted — guessing
+  an env var for another type would hand the script an empty session id. Panes of other types in a
+  shared directory still cross-receive.
+- **No watcher is started for `turn` or `off`.** `turn` delivers through a Stop hook with no
+  watcher to replace, and `off` means the operator asked for no automatic delivery — starting one
+  would contradict the setting. Both still claim the lock, which is what `check-inbox.sh`'s own
+  subscription filtering reads.
+- **This is bootstrap-time only.** The claim happens once, when the pane is onboarded. An agent
+  process that exits and restarts inside a still-open pane is not re-bootstrapped (see [Known
+  limitations](#known-limitations)), so it does not re-claim; the lock it left behind becomes
+  reclaimable once agmsg's own liveness check sees the old instance is gone.
+
+What is *not* affected by any of this: the dashboard. Status rows are keyed by pane ID and validated
+against the sending host's own board-enabled pane set, so two panes in one repository have always
+rendered as two cards. Since the card no longer shows `repo` or `branch` (see
+[ui-design.md](ui-design.md#agent-board-ui)), the pane title is what distinguishes them at a glance —
+worth setting to something meaningful when running several agents against one repository.
 
 ## Status self-report and message flow
 
@@ -514,7 +654,23 @@ layout](#package-layout)'s detection rule.
 `branch`/`repo`/`pr_url` come from the agent running `git branch --show-current`, `git remote get-
 url origin`, and a PR lookup (e.g. `gh pr view --json url -q .url`) itself — panemux never computes
 these; it only displays what the agent reported. `cwd`/`pr_url` may be absent if the agent isn't in
-a repository or there's no open PR; the dashboard shows what's present.
+a repository or there's no open PR. The dashboard does not render `branch`/`repo`/`pr_url` at all
+(see [ui-design.md's Agent Board UI](ui-design.md#agent-board-ui) for why), but they stay in the
+schema because the relay stores whatever a pane reports.
+
+**`summary` is the field the dashboard is built around, and the bootstrap instruction says so
+explicitly.** It used to appear in the instruction as one field name among eight with no guidance,
+alongside "send an update whenever your state changes meaningfully" — which leaves both content and
+cadence to the agent's discretion. That is survivable with two panes and useless with eight: a
+column of state pills tells an operator that work is happening somewhere, not which pane is doing
+what. The instruction now asks for one short sentence in plain language naming the current task
+("Fixing the flaky relay test"), explicitly *not* the last tool call and not a session recap, with
+what the pane is blocked on when it is blocked, sent when starting a task, finishing one, becoming
+blocked, or going idle — events an agent can recognize, rather than a timer it would have to run.
+
+panemux cannot enforce any of this. A pane that reports no `summary`, or a stale one, renders as a
+card with a state pill and nothing to read, and that is the honest display of what the board knows
+— the dashboard never invents a summary from `last_tool` or from git state to fill the gap.
 
 ```mermaid
 sequenceDiagram
@@ -556,7 +712,8 @@ control," even though the former requires the agent's cooperation and the latter
 
 ```go
 type Row struct {
-    ID          string    // agmsg's own id, host-scoped — NOT globally unique, NOT assumed numeric
+    ID          string    // agmsg's own id, host-scoped — NOT globally unique, NOT assumed numeric,
+                          // NOT ordered: matched by equality only (see filterRowsAfter)
     Host        string    // which AgmsgClient/host this row came from; required to compare/sort across hosts
     Team        string
     From, To    string
@@ -785,7 +942,9 @@ to reach each other). panemux is the only node with a connection to every host, 
    [Integration with agmsg](#integration-with-agmsg) for why this is a bounded `--limit` poll with
    client-side filtering, not a true incremental read, and the truncation risk that implies).
 2. `cursor` is one value per (host, team) — agmsg's own opaque `id` string for that host, *not*
-   comparable across hosts — persisted in a small local JSON file (e.g.
+   comparable across hosts and *not comparable at all* (see [Integration with
+   agmsg](#integration-with-agmsg): it anchors a position in `api.sh`'s own returned order) —
+   persisted in a small local JSON file (e.g.
    `~/.config/panemux/board-relay-cursor.json`) — not a database table, since panemux owns no
    database — so a panemux restart resumes roughly where it left off.
 3. For each new row, panemux first checks `from`. If `from` is a board-enabled pane ID panemux
@@ -914,12 +1073,18 @@ board-enabled pane) must be true before the goroutine even starts.
       agmsg](#integration-with-agmsg) for why hardcoding either of agmsg's two `cmd_prefix`
       conventions (`/agmsg` vs. `$agmsg`) into one bootstrap instruction would be wrong for roughly
       half of the six detectable agent types.
-   2. From then on, send every board-related message (status reports, cross-pane messages) with the
+   2. **Only when the pane's agent type is `claude-code`:** claim that identity for this process by
+      running `actas-claim.sh "$(pwd)" <agmsg-type> <pane-id> "$CLAUDE_CODE_SESSION_ID"`, and — when
+      a Monitor-based watcher is running for this mode — replace that watcher with one restricted to
+      this pane (`watch.sh "$CLAUDE_CODE_SESSION_ID" "$(pwd)" <agmsg-type> <pane-id>`). See [Two
+      panes in one project directory](#two-panes-in-one-project-directory) for what this fixes and
+      why it is emitted for one agent type only.
+   3. From then on, send every board-related message (status reports, cross-pane messages) with the
       raw `send.sh <team> <from> <to> "<body>" --force` invocation rather than `/agmsg send`/`$agmsg
       send`, per [Integration with agmsg](#integration-with-agmsg).
-   3. Include the [status self-report](#status-self-report-and-message-flow) fields on every status
+   4. Include the [status self-report](#status-self-report-and-message-flow) fields on every status
       update, sent to `_system` via that same `send.sh` invocation.
-   4. Only if `mode` is `turn` or `both` (mirroring agmsg's own `delivery.sh set
+   5. Only if `mode` is `turn` or `both` (mirroring agmsg's own `delivery.sh set
       monitor|turn|both|off`, default `monitor`): also run `delivery.sh set <mode> <agmsg-type>
       "$(pwd)"` directly (again bypassing the `cmd_prefix` divergence) and read/follow the
       `AGMSG-DIRECTIVE:` block it prints — this is agmsg's own mechanism for telling an agent how to
@@ -1020,13 +1185,31 @@ tradeoff (see [Known limitations](#known-limitations)), not a claim of a race-fr
 ### Process lifecycle
 
 - **First run.** No persisted command-center session id exists yet the first time a query arrives.
-  panemux invokes `claude -p --output-format=stream-json --verbose "<prompt>"` — note `--verbose` is
-  required alongside `-p --output-format=stream-json`; the CLI refuses to stream structured output
-  in print mode without it — omitting `--resume` entirely, captures the `session_id` the stream-json
-  output reports for that first exchange, and persists it to a small local file (e.g.
-  `~/.config/panemux/command-center-session.json`, the same kind of local bookkeeping file as the
-  relay cursor in [Cross-host relay](#cross-host-relay)). Every later query reuses that id:
-  `claude -p --resume <id> --output-format=stream-json --verbose "<prompt>"`.
+  panemux **mints its own v4 UUID** and pins the conversation to it with `--session-id <uuid>`, then
+  persists that id to a small local file (`~/.config/panemux/command-center-session.json`, the same
+  kind of local bookkeeping file as the relay cursor in [Cross-host relay](#cross-host-relay)). Every
+  later query reuses it: `claude -p --resume <id> ...`. Note `--verbose` is required alongside
+  `-p --output-format=stream-json`; the CLI refuses to stream structured output in print mode without
+  it.
+
+  **The id the subprocess reports is deliberately ignored.** An earlier revision omitted
+  `--session-id` on a first run and adopted whatever `session_id` the stream reported, on the
+  assumption that a `-p` invocation without `--resume` starts a fresh conversation. Verified against
+  the real CLI, it does not: it reports the *ambient* session id of the Claude Code session the
+  environment already belongs to, so the command center silently attached itself to a conversation it
+  does not own — one holding full tool permissions, while the command center is launched with three.
+  See [security.md's command center section](security.md#command-center-subprocess-execution).
+
+  The subprocess is also isolated from the operator's own configuration: `--setting-sources` is passed
+  with an empty value (no user, project or local settings, so operator hooks never fire inside it),
+  `--strict-mcp-config` limits it to the board MCP server this query configured, and `cmd.Dir` is an
+  empty per-query temp directory rather than wherever panemux was launched. Since an empty
+  `--setting-sources` also suppresses `CLAUDE.md` discovery, panemux's own instructions are passed via
+  `--append-system-prompt`. An operator may place a `CLAUDE.md` in
+  `~/.config/panemux/command-center/` to refine those instructions; it is optional. No settings file is
+  accepted from any source — a settings value can nullify `--allowedTools`, so panemux sends only its
+  own fixed, narrowing document (currently `{"sandbox":{"enabled":true}}`). See
+  [security.md](security.md#command-center-subprocess-execution).
 - **Permissions.** The subprocess never receives `--dangerously-skip-permissions`. It has no PTY to
   surface an interactive approval prompt through, and this design does not substitute a blanket
   bypass for that missing prompt. Instead panemux runs a narrow, purpose-built MCP server exposing
@@ -1079,10 +1262,18 @@ flow still applies.
   principles](#design-principles)'s "ask, don't reverse-engineer" rule, panemux persists what it
   already captured directly from the `--output-format=stream-json` stream while relaying it to the
   WS client (a documented, stable CLI output contract), appending it to a local file panemux fully
-  owns the format of. Because `send.sh`/`api.sh` calls the command center makes appear as ordinary
-  tool-use entries in that same captured stream, the returned history already interleaves "what the
-  user asked," "what the command center did on the board," and "what it told the user" in one
-  chronological feed, with no extra bookkeeping required.
+  owns the format of. Because the board tool calls the command center makes appear as ordinary
+  tool-use entries in that same captured stream, the returned history interleaves "what the command
+  center did on the board" and "what it told the user" in one chronological feed.
+
+  **"What the user asked" is the one part the stream does not carry**, contrary to what this
+  paragraph claimed until the history panel was actually read against a real capture: a real run
+  emits `stream_event`, `system`, `assistant` and `result` frames, and the prompt that produced them
+  appears in none of them. panemux therefore records it itself, as the first entry of each turn,
+  under type `panemux_prompt` — a type the CLI never emits, so a reader can always distinguish a
+  panemux-written entry from a relayed subprocess line. A turn whose subprocess failed still has its
+  prompt recorded; a turn whose subprocess never started does not, since there is no exchange to
+  record.
 
 ### UI
 
@@ -1101,8 +1292,17 @@ flow still applies.
 - Both surfaces are gated on `command_center_enabled` from `GET /api/session-token`: neither the
   keyboard shortcut nor the history button is wired up at all when the command center is disabled,
   rather than being present but non-functional.
+- A third surface, `BoardDashboardPanel.tsx`, is gated the same way but on `agent_board_enabled`
+  instead: an "Agent Board" button next to "Command History", plus `Cmd/Ctrl+Shift+B` on the same
+  capture-phase registration. Its own `useBoardStatus` hook polls `GET /api/board/status` (full
+  snapshot every 5s, paused while the tab is hidden — the same `document.hidden` pattern
+  `useSessionsOverview.ts` already uses) and `GET /api/board/messages?since=<seq>` (incremental,
+  capped at the most recent 500 messages client-side) and filters out `to === "_system"` /
+  `kind === "board_status"` rows from the message feed client-side, since the relay also appends
+  those to history (see [Status self-report and message flow](#status-self-report-and-message-flow)
+  above) and the dashboard's message feed is meant to show conversation, not raw status JSON.
 
-See [ui-design.md's Agent Board UI section](ui-design.md#agent-board-ui-planned) for how these
+See [ui-design.md's Agent Board UI section](ui-design.md#agent-board-ui) for how these
 surfaces reuse this repository's existing dialog/overlay patterns and status vocabulary instead of
 introducing a parallel visual language.
 
@@ -1134,7 +1334,7 @@ authenticated too, but via a WebSocket subprotocol rather than the `Authorizatio
 | `POST /api/board/broadcast` | `{ "to": ["pane-a","pane-b"], "body": "..." }`; sends directly to each target's own host via `AgmsgClient` (never via PTY injection, so it is safe to send to a pane mid-turn); delivery to the pane is immediate, but the message appears in `GET /api/board/messages`' history only after the relay's next poll cycle reads it back — see [Known limitations](#known-limitations) |
 | `WS /ws/board-command` | Command center chat: client sends `{"prompt": "..."}`, server streams the headless Claude response — see [Command center](#command-center) |
 | `GET /api/board/command/history` | Command center's own captured conversation history — see [Command center](#command-center) |
-| `GET /api/session-token` | **Deliberately unauthenticated** — hands the browser dashboard the bearer token it needs to call every route above and open the WS connection, since there is no other way for the frontend's own JavaScript to learn a token that may have been randomly generated on first run. Not part of the original design; added because nothing in it specified how the browser itself (as opposed to the command center subprocess) would learn the token. Lives at `/api/session-token`, not `/api/board/session-token` — see [docs/behavior.md](behavior.md#get-apisession-token) for why that distinction is load-bearing, not stylistic. |
+| `GET /api/session-token` | **Deliberately unauthenticated** — hands the browser dashboard the bearer token it needs to call every route above and open the WS connection, since there is no other way for the frontend's own JavaScript to learn a token that may have been randomly generated on first run. Not part of the original design; added because nothing in it specified how the browser itself (as opposed to the command center subprocess) would learn the token. Lives at `/api/session-token`, not `/api/board/session-token` — see [docs/behavior.md](behavior.md#get-apisession-token) for why that distinction is load-bearing, not stylistic. Its response also carries `agent_board_enabled` (added in Phase 3, likewise not part of the original design — see the Phase 3 status note above), computed by scanning every configured pane for `agent_board.enabled: true`, so the frontend can gate the "Agent Board" dashboard button independently of `command_center_enabled`. |
 
 ## Config additions
 
@@ -1464,29 +1664,64 @@ plain table-driven Go test. So: adopt the *idea*, skip the *tool*.
 
 **Two test tiers, not one:**
 
-- **Tier 1 — fast, hermetic, part of `make check` on every commit.** `internal/board`'s existing
-  test bullets (below) already do this: a fake `AgmsgClient`/`BoardExecutor` asserts the exact
-  command strings panemux builds for each operation, and parses fixed, versioned fixture output
-  (frozen JSONL captured from a real, pinned agmsg run — e.g. `internal/board/testdata/agmsg-v1.1.x/
-  *.jsonl`) the way the real `api.sh` would produce it. This protects panemux's own code from
-  regressing against its own documented assumptions; it cannot, by itself, detect that agmsg
-  changed, since it never touches a real agmsg install.
-- **Tier 2 — a separate, non-blocking-by-default CI job that runs the same contract against a real
-  agmsg install.** Install the pinned agmsg version (via its own documented installer, the same way
-  an operator would) into an ephemeral CI environment, run the exact `join.sh`/`send.sh`/`api.sh`
-  invocations the contract specifies against a throwaway team, and assert the real output/exit-code
-  behavior matches what Tier 1's fixtures encode. This is the piece that actually catches drift, and
-  it should run in at least two situations: **on a schedule** (e.g. weekly) against agmsg's latest
-  tag, as an early warning before panemux's maintainers have chosen to bump the pin at all; and **as
-  a required check** whenever a change actually bumps the pinned version, so a real behavioral diff
-  blocks that bump rather than shipping silently. It is deliberately kept out of the main `make
-  check` gate — it depends on installing and executing a real external tool, which is slower and
-  less hermetic than the rest of this repository's test suite is designed to be.
+- **Tier 1 — fast, hermetic, part of `make check` on every commit.** Implemented. A fake
+  `AgmsgClient`/`BoardExecutor` asserts the exact command strings panemux builds for each operation,
+  and `internal/board/agmsg_fixture_test.go` parses frozen JSONL in
+  `internal/board/testdata/agmsg-v1.2.0/` the way real `api.sh` output is parsed. Those fixtures are
+  **captured, not hand-written** — `testdata/agmsg-v1.2.0/capture.sh` regenerates them by installing
+  agmsg at that tag into a throwaway `HOME` and recording what `api.sh` actually printed. This
+  protects panemux's own code from regressing against its own documented assumptions; it cannot, by
+  itself, detect that agmsg changed, since it never touches a real agmsg install at test time.
+- **Tier 2 — a separate CI job that runs the same contract against a real agmsg install.**
+  Implemented: `make test-agmsg-contract AGMSG_PATH=...` (`internal/board/agmsg_contract_test.go`),
+  run in CI by `.github/workflows/agmsg-contract.yml`. The job installs agmsg through its own
+  documented installer (`install.sh --cmd agmsg`, the same path an operator takes) into an ephemeral
+  runner, then drives `join.sh`/`identities.sh`/`actas-claim.sh`/`watch.sh` directly and
+  `send.sh`/`api.sh` **through panemux's own `LocalAgmsgClient`** — deliberately, since a test that
+  rebuilt those invocations itself would keep passing after panemux started sending something
+  different. It runs in both situations this contract calls for: **on a schedule** against agmsg's latest
+  release tag, as an early warning before anyone here has chosen to bump the pin, and **on pull
+  requests** against the pinned version, so a PR that bumps the pin cannot merge on a version whose
+  real behavior differs. The canary polls daily rather than weekly because agmsg's median gap
+  between releases is 2.9 days (22 releases, `v1.0.2`→`v1.2.2`), so a weekly poll would straddle
+  several releases and leave a failure unattributable; it caches which tag it last verified, so the
+  work it actually does happens once per agmsg release, and a failing release is retried every day
+  until it is handled. The PR trigger deliberately carries no `paths:` filter — a
+  path-filtered workflow reports no status at all on the PRs it skips, and a required check that
+  never reports blocks every one of them — so a fast `scope` job decides instead whether installing
+  agmsg is warranted, and the contract job always reports rather than skipping itself, which lets the
+  check be marked required in branch protection (a repository setting; see
+  [maintenance.md](maintenance.md#the-agmsg-compatibility-contract-job)). It stays out of
+  the main `make check` gate, and the test skips itself when `PANEMUX_AGMSG_PATH` is unset, so a
+  contributor without agmsg installed still gets a green, hermetic local run.
 
 This does not remove the underlying risk noted in [Known limitations](#known-limitations) — agmsg
 still makes no compatibility promise for the scripts panemux's write path depends on — but it turns
 a silent, user-discovered failure into a specific, actionable CI signal naming exactly which
 documented behavior changed.
+
+**It has already paid for itself three times, which is worth recording as evidence rather than as a
+claim.** Running the contract against a real install for the first time found (1) that two of its
+own pre-existing assertions described behavior agmsg does not have — `watch.sh` prints nothing at
+all naming the pairs it resolved when it skips none, so "which identities did this watcher
+subscribe to" was being read off a log line that only exists in the *other* branch; the assertions
+now observe message *delivery* instead, which is both what a user experiences and visible in either
+branch — and (2) the numeric-cursor bug described under [Integration with
+agmsg](#integration-with-agmsg), which every hermetic test missed because the hand-written fixtures
+carried integer ids that no real 1.2.0 install emits.
+
+The third came from the CI job itself, on its first run, and was a flaw in the contract tests rather
+than in panemux: they passed locally and failed on a runner. agmsg keys its actas exclusivity locks
+on an instance id of `<session_id>.<agent pid>` and treats a lock as live only while that pid is,
+resolving the pid by walking its own ancestors for an agent process. Run from inside a real Claude
+Code session, the tests silently inherited that session's pid and every lock looked live; on a
+runner, with no agent process anywhere in the tree, every lock read as stale and reclaimable. The
+assertions were reading the harness's own environment rather than agmsg's behavior. They now declare
+the owning process explicitly through agmsg's own `AGMSG_AGENT_PID` override, and cover the other
+half of the same rule — a lock whose owning process has exited must be reclaimable, or a crashed
+pane would block its own ID forever. The same run also exposed a fixed-sleep delivery probe timed at
+the watcher's own 5-second poll interval; it now sends before the watcher starts and waits on the
+delivery itself.
 
 ## Testing plan (see DEVELOPMENT.md for the TDD/coverage rules this must follow)
 
@@ -1592,5 +1827,5 @@ documented behavior changed.
 - Implementation structure: [architecture.md](architecture.md)
 - Security requirements for implementation: [security.md](security.md)
 - Runtime behavior and API specification: [behavior.md](behavior.md)
-- UI intent for the dashboard, palette, and history panel: [ui-design.md](ui-design.md#agent-board-ui-planned)
+- UI intent for the dashboard, palette, and history panel: [ui-design.md](ui-design.md#agent-board-ui)
 - Developer workflow rules: [../DEVELOPMENT.md](../DEVELOPMENT.md)

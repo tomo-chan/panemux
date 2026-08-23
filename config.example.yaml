@@ -6,6 +6,28 @@
 server:
   port: 8080          # 1–65535  (default: 8080)
   host: "127.0.0.1"  # bind address (default: 127.0.0.1)
+  # Bearer token for the Agent Board API and the command center. Leave empty
+  # and panemux generates one on first run, storing it in
+  # ~/.config/panemux/token rather than writing it back here. Required (and
+  # validated at startup) when `host` is not a loopback address.
+  auth_token: ""
+
+# ── Agent Board ───────────────────────────────────────────────────────────────
+# One dashboard for what every pane's coding agent is doing, plus a command
+# palette to message them. Optional: omit this whole block and panemux behaves
+# exactly as it did without it. See the README's "Agent Board" section for the
+# setup steps, and note that agmsg must already be installed on every host
+# whose panes join — panemux never installs it.
+agent_board:
+  team: "panemux"                      # shared agmsg team for all board-enabled panes
+  agmsg_path: "~/.agents/skills/agmsg"  # ~/ is expanded per host, remote hosts included
+
+# ── Command center ────────────────────────────────────────────────────────────
+# Cmd/Ctrl+Shift+K opens a palette that asks a headless `claude` about the
+# board and can message panes. Needs the `claude` CLI on this machine and a
+# server.auth_token (generated above if left empty). Does not need agmsg.
+command_center:
+  enabled: false  # default: false
 
 # ── Display ───────────────────────────────────────────────────────────────────
 # Global defaults for all panes. Individual panes can override these values.
@@ -160,3 +182,15 @@ workspaces:
               type: local
               shell: "/bin/zsh"
               title: "Ops Shell"
+              # ── Agent Board opt-in (per pane) ───────────────────────────
+              # The pane id doubles as this pane's board address, so prefer a
+              # name you will recognise. Also settable from Pane Settings in
+              # the UI, without editing this file.
+              agent_board:
+                enabled: true
+                # monitor (default) — status only; messages are NOT delivered
+                # turn / both      — messages delivered, but agmsg writes a
+                #                    hook file into the pane's project
+                #                    directory (see the README)
+                # off              — no automatic delivery
+                mode: monitor

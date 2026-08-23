@@ -9,6 +9,40 @@ import type { SessionState } from '../schemas'
 
 const REPAINT_SETTLE_DELAYS_MS = [50, 250]
 
+// Characters that must never be part of an auto-detected URL, on top of the ASCII
+// symbols the web links addon already excludes. The addon default only knows about
+// ASCII punctuation, so Japanese output such as `https://example.com/docs。` or
+// `（https://example.com/docs）` swallowed the trailing CJK punctuation into the link.
+//
+// Ranges (deliberately punctuation only, never letters or digits):
+//   U+2018-U+201F, U+2026   curly quotes and the horizontal ellipsis
+//   U+3000-U+3004, U+3008-U+3020, U+3030, U+303D-U+303F
+//                           CJK symbols and punctuation (、。「」【】〜 ...). The gaps skip the
+//                           letters and digits interleaved into this block: U+3005-U+3007
+//                           (々〆〇), U+3021-U+3029 and U+3038-U+303C (Hangzhou/ideographic
+//                           numerals and iteration marks), and the U+302A-U+302F combining
+//                           marks.
+//   U+30FB                  katakana middle dot (・)
+//   U+FF01-U+FF0F, U+FF1A-U+FF20, U+FF3B-U+FF40, U+FF5B-U+FF65
+//                           fullwidth ASCII punctuation and halfwidth kana punctuation
+// Fullwidth digits (U+FF10-U+FF19) and fullwidth letters are intentionally left out so
+// they stay linkable, and non-ASCII letters are not excluded at all: raw IRIs such as
+// `https://ja.wikipedia.org/wiki/日本語` must keep working. Kana directly following a URL
+// with no delimiter is therefore still absorbed — that case is indistinguishable from a
+// legitimate kana IRI path by regex alone.
+const NON_URL_CJK_PUNCTUATION =
+  '\\u2018-\\u201f\\u2026\\u3000-\\u3004\\u3008-\\u3020\\u3030\\u303d-\\u303f' +
+  '\\u30fb\\uff01-\\uff0f\\uff1a-\\uff20\\uff3b-\\uff40\\uff5b-\\uff65'
+
+// The addon default regex with the ranges above added to both character classes.
+// Kept non-global on purpose: the addon derives its own global copy via
+// `new RegExp(regex.source, regex.flags + 'g')`, which throws on a duplicate `g`.
+export const TERMINAL_URL_REGEX = new RegExp(
+  `(https?|HTTPS?):[/]{2}[^\\s"'!*(){}|\\\\\\^<>\`${NON_URL_CJK_PUNCTUATION}]*` +
+    `[^\\s"':,.!?{}|\\\\\\^~\\[\\]\`()<>${NON_URL_CJK_PUNCTUATION}]`,
+  'u',
+)
+
 interface UseTerminalOptions {
   sessionId: string
   container: HTMLElement | null
@@ -394,13 +428,16 @@ function getOrCreateTerminalEntry(sessionId: string): TerminalEntry {
   const fitAddon = new FitAddon()
   // The pane, not the addon, decides what activation does: opening the tab
   // has to be paired with preparing the URL's loopback callback port.
-  const webLinksAddon = new WebLinksAddon((_event, uri) => {
-    if (entry.onLinkActivate) {
-      entry.onLinkActivate(uri)
-      return
-    }
-    openUrlTab(uri)
-  })
+  const webLinksAddon = new WebLinksAddon(
+    (_event, uri) => {
+      if (entry.onLinkActivate) {
+        entry.onLinkActivate(uri)
+        return
+      }
+      openUrlTab(uri)
+    },
+    { urlRegex: TERMINAL_URL_REGEX },
+  )
   const entry: TerminalEntry = {
     term,
     fitAddon,

@@ -75,9 +75,12 @@ func setupBoard(cfg *config.Config, manager *session.Manager) (*board.BoardCache
 	}
 
 	bootstrap := newBootstrapWatcher(bootstrapWatcherConfig{
-		Manager:       manager,
-		PaneHosts:     paneHosts,
-		PaneModes:     paneModes,
+		Manager:   manager,
+		PaneHosts: paneHosts,
+		// Read live: a mode changed through the pane settings dialog lands
+		// in cfg, and the watcher must see it on its next tick rather than
+		// keeping the value this function saw at startup.
+		PaneModes:     func() map[string]string { return currentPaneModes(cfg) },
 		ResolvedPaths: resolveBootstrapPaths(cfg, manager, paneHosts),
 		Team:          cfg.AgentBoard.Team,
 		Persist:       persistBootstrapState,
@@ -90,7 +93,63 @@ func setupBoard(cfg *config.Config, manager *session.Manager) (*board.BoardCache
 		}
 	}
 
+	warnOnAgmsgVersionMismatch(manager, paneHosts, resolveBootstrapPaths(cfg, manager, paneHosts))
+
 	return cache, relay, bootstrap
+}
+
+// warnOnAgmsgVersionMismatch reports, once per board-enabled host at
+// startup, an agmsg install that is not board.TestedAgmsgVersion. It never
+// blocks startup: see board.VersionMismatchWarning for why a mismatch is a
+// warning rather than a refusal. An unreadable VERSION is logged at the
+// same level and otherwise ignored — panemux cannot claim a mismatch it
+// could not observe.
+func warnOnAgmsgVersionMismatch(
+	manager *session.Manager, paneHosts map[string]string, resolvedPaths map[string]string,
+) {
+	for _, host := range distinctBoardHosts(paneHosts) {
+		agmsgPath, ok := resolvedPaths[host]
+		if !ok {
+			continue
+		}
+
+		var (
+			installed string
+			err       error
+		)
+		if host == boardHostIDLocal {
+			installed, err = board.LocalAgmsgVersion(agmsgPath)
+		} else {
+			executors := findBoardExecutors(manager, paneHosts, host)
+			if len(executors) == 0 {
+				continue
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), boardStartupProbeTimeout)
+			installed, err = board.RemoteAgmsgVersion(ctx, executors[0], agmsgPath)
+			cancel()
+		}
+		if err != nil {
+			log.Printf("Warning: agent board: reading agmsg version on host %q: %v", host, err)
+			continue
+		}
+		if warning := board.VersionMismatchWarning(host, installed); warning != "" {
+			log.Printf("Warning: %s", warning)
+		}
+	}
+}
+
+// currentPaneModes reads every board-enabled pane's mode from the live
+// config, so a mode changed while panemux runs takes effect on the next
+// bootstrap tick.
+func currentPaneModes(cfg *config.Config) map[string]string {
+	modes := map[string]string{}
+	for _, pane := range cfg.AllPanes() {
+		if pane.AgentBoard.Enabled == nil || !*pane.AgentBoard.Enabled {
+			continue
+		}
+		modes[pane.ID] = pane.AgentBoard.Mode
+	}
+	return modes
 }
 
 // resolveBootstrapPaths resolves agmsg_path for every distinct board-enabled
@@ -179,12 +238,52 @@ func newAgmsgClientForHost(
 	if !ok {
 		return nil, false
 	}
+	if !agmsgPresentOnHost(manager, paneHosts, host, path) {
+		// Skipping the client is what keeps an absent agmsg quiet. Building
+		// one anyway means the relay polls a host that cannot answer, and
+		// logs the same exec failure every few seconds for as long as
+		// panemux runs — noise that buries the one line naming the cause,
+		// in exactly the situation (agmsg not installed yet) the README
+		// calls the most likely first failure.
+		log.Printf(
+			"Warning: agent board: no agmsg installation at %q on host %q, "+
+				"skipping that host (panes there stay off the board)",
+			path, host,
+		)
+		return nil, false
+	}
 	if host == boardHostIDLocal {
 		return board.NewLocalAgmsgClient(path), true
 	}
 
 	dynamicExecutor := &dynamicBoardExecutor{manager: manager, paneHosts: paneHosts, host: host}
 	return board.NewRemoteAgmsgClient(host, path, dynamicExecutor), true
+}
+
+// agmsgPresentOnHost reports whether host carries an agmsg install at path.
+// A remote host with no reachable executor is reported as present: panemux
+// cannot check, and refusing to build the client would turn a transient
+// connectivity problem into a permanently board-less host for the rest of
+// this process's life.
+func agmsgPresentOnHost(
+	manager *session.Manager, paneHosts map[string]string, host, path string,
+) bool {
+	if host == boardHostIDLocal {
+		return board.LocalAgmsgPresent(path)
+	}
+
+	executors := findBoardExecutors(manager, paneHosts, host)
+	if len(executors) == 0 {
+		return true
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), boardStartupProbeTimeout)
+	defer cancel()
+	present, err := board.RemoteAgmsgPresent(ctx, executors[0], path)
+	if err != nil {
+		log.Printf("Warning: agent board: checking agmsg on host %q: %v", host, err)
+		return true
+	}
+	return present
 }
 
 // resolveAgmsgPathForHost expands agent_board.agmsg_path's leading ~/ for

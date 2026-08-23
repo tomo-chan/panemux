@@ -3,6 +3,8 @@
 export type {
   DisplayConfig,
   PaneConfig,
+  PaneAgentBoardConfig,
+  BoardMode,
   LayoutChild,
   LayoutNode,
   TabPosition,

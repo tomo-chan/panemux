@@ -16,19 +16,32 @@ describe('useBoardSessionToken', () => {
 
     const { result } = renderHook(() => useBoardSessionToken())
 
-    expect(result.current).toEqual({ token: '', commandCenterEnabled: false })
+    expect(result.current).toEqual({ token: '', commandCenterEnabled: false, agentBoardEnabled: false })
   })
 
-  it('populates token and commandCenterEnabled from a successful response', async () => {
+  it('populates token, commandCenterEnabled, and agentBoardEnabled from a successful response', async () => {
     vi.mocked(fetch).mockResolvedValue({
       ok: true,
-      json: async () => ({ token: 'sekret', command_center_enabled: true }),
+      json: async () => ({ token: 'sekret', command_center_enabled: true, agent_board_enabled: true }),
     } as Response)
 
     const { result } = renderHook(() => useBoardSessionToken())
 
     await waitFor(() => {
-      expect(result.current).toEqual({ token: 'sekret', commandCenterEnabled: true })
+      expect(result.current).toEqual({ token: 'sekret', commandCenterEnabled: true, agentBoardEnabled: true })
+    })
+  })
+
+  it('reports agentBoardEnabled false when the server says so independently of commandCenterEnabled', async () => {
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: async () => ({ token: 'sekret', command_center_enabled: true, agent_board_enabled: false }),
+    } as Response)
+
+    const { result } = renderHook(() => useBoardSessionToken())
+
+    await waitFor(() => {
+      expect(result.current).toEqual({ token: 'sekret', commandCenterEnabled: true, agentBoardEnabled: false })
     })
   })
 
@@ -40,13 +53,13 @@ describe('useBoardSessionToken', () => {
     await waitFor(() => {
       expect(fetch).toHaveBeenCalledWith('/api/session-token')
     })
-    expect(result.current).toEqual({ token: '', commandCenterEnabled: false })
+    expect(result.current).toEqual({ token: '', commandCenterEnabled: false, agentBoardEnabled: false })
   })
 
   it('stays at defaults when the response fails schema validation', async () => {
     vi.mocked(fetch).mockResolvedValue({
       ok: true,
-      json: async () => ({ token: 'sekret' }), // missing command_center_enabled
+      json: async () => ({ token: 'sekret' }), // missing command_center_enabled and agent_board_enabled
     } as Response)
 
     const { result } = renderHook(() => useBoardSessionToken())
@@ -54,6 +67,6 @@ describe('useBoardSessionToken', () => {
     await waitFor(() => {
       expect(fetch).toHaveBeenCalled()
     })
-    expect(result.current).toEqual({ token: '', commandCenterEnabled: false })
+    expect(result.current).toEqual({ token: '', commandCenterEnabled: false, agentBoardEnabled: false })
   })
 })

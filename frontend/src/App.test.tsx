@@ -89,8 +89,10 @@ vi.mock('./hooks/useGitInfo', () => ({
   useGitInfoSnapshotMap: mockUseGitInfoSnapshotMap,
 }))
 
+const mockUseBoardSessionToken = vi.hoisted(() => vi.fn())
+
 vi.mock('./hooks/useBoardSessionToken', () => ({
-  useBoardSessionToken: () => ({ token: '', commandCenterEnabled: false }),
+  useBoardSessionToken: mockUseBoardSessionToken,
 }))
 
 vi.mock('./hooks/usePaneSettings', () => ({
@@ -119,6 +121,7 @@ describe('App workspace deletion', () => {
     mockUseBrowserNotificationPermission.mockImplementation(() => {})
     mockUseSessionsOverview.mockReturnValue({})
     mockUseGitInfoSnapshotMap.mockReturnValue({})
+    mockUseBoardSessionToken.mockReturnValue({ token: '', commandCenterEnabled: false, agentBoardEnabled: false })
     notificationInstance = null
     vi.stubGlobal('Notification', vi.fn(function MockNotification(this: Notification) {
       notificationInstance = {
@@ -155,8 +158,10 @@ describe('App workspace deletion', () => {
     mockUseBrowserNotificationPermission.mockReset()
     mockUseSessionsOverview.mockReset()
     mockUseGitInfoSnapshotMap.mockReset()
+    mockUseBoardSessionToken.mockReset()
     currentWorkspaces = workspaces
     vi.restoreAllMocks()
+    vi.unstubAllGlobals()
     if (originalNotification === undefined) {
       // @ts-expect-error test cleanup
       delete window.Notification
@@ -642,5 +647,62 @@ describe('App workspace deletion', () => {
     render(<App />)
 
     expect(window.Notification).not.toHaveBeenCalled()
+  })
+
+  it('does not show the Agent Board button when agent_board is disabled', () => {
+    mockUseBoardSessionToken.mockReturnValue({ token: 'tok', commandCenterEnabled: false, agentBoardEnabled: false })
+
+    render(<App />)
+
+    expect(screen.queryByRole('button', { name: 'Open agent board' })).toBeNull()
+  })
+
+  it('does not show the Agent Board button when there is no token yet', () => {
+    mockUseBoardSessionToken.mockReturnValue({ token: '', commandCenterEnabled: false, agentBoardEnabled: true })
+
+    render(<App />)
+
+    expect(screen.queryByRole('button', { name: 'Open agent board' })).toBeNull()
+  })
+
+  it('shows the Agent Board button and opens the panel when agent_board is enabled with a token', () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ statuses: {}, messages: [] }),
+    }))
+    mockUseBoardSessionToken.mockReturnValue({ token: 'tok', commandCenterEnabled: false, agentBoardEnabled: true })
+
+    render(<App />)
+
+    const button = screen.getByRole('button', { name: 'Open agent board' })
+    fireEvent.click(button)
+
+    expect(screen.getByRole('dialog', { name: 'Agent board' })).toBeInTheDocument()
+  })
+
+  it('toggles the agent board panel with Cmd/Ctrl+Shift+B even while a pane has focus', () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ statuses: {}, messages: [] }),
+    }))
+    mockUseBoardSessionToken.mockReturnValue({ token: 'tok', commandCenterEnabled: false, agentBoardEnabled: true })
+
+    render(<App />)
+
+    fireEvent.keyDown(window, { key: 'B', shiftKey: true, ctrlKey: true })
+    expect(screen.getByRole('dialog', { name: 'Agent board' })).toBeInTheDocument()
+
+    fireEvent.keyDown(window, { key: 'B', shiftKey: true, ctrlKey: true })
+    expect(screen.queryByRole('dialog', { name: 'Agent board' })).toBeNull()
+  })
+
+  it('does not register the agent board shortcut when agent_board is disabled', () => {
+    mockUseBoardSessionToken.mockReturnValue({ token: 'tok', commandCenterEnabled: false, agentBoardEnabled: false })
+
+    render(<App />)
+
+    fireEvent.keyDown(window, { key: 'B', shiftKey: true, ctrlKey: true })
+
+    expect(screen.queryByRole('dialog', { name: 'Agent board' })).toBeNull()
   })
 })
