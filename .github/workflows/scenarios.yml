@@ -1,0 +1,78 @@
+name: scenarios
+
+# Gate G0 in docs/quality-gateway.md: a user-visible change must update the
+# acceptance ledger in the same pull request.
+#
+# docs/scenarios.md states that "a row whose verification is `manual` is a
+# legitimate answer; a row that is silently absent is not". That rule was
+# written down and then not followed: #177 shipped a whole user-facing feature
+# (loopback port forwarding and browser-open interception) without adding a
+# row, and the core multiplexer had none at all. A rule nobody can forget is a
+# different kind of rule from a rule everybody agrees with.
+#
+# The trigger is deliberately narrow — the three directories where a change is
+# almost always user-visible. Touching internal/session or internal/board can
+# be user-visible too, but is far more often not, and a gate that fires on
+# changes it has no opinion about gets bypassed (design principle 4).
+#
+# No `paths:` filter on the workflow itself, for the reason
+# agmsg-contract.yml records: a path-filtered workflow reports no status at all
+# on the pull requests it skips, so a required check that never reports blocks
+# every one of them. The job decides in seconds instead.
+
+on:
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  ledger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          fetch-depth: 0
+
+      - name: Every auto row must name something that exists
+        run: make check-scenarios
+
+      - name: A user-visible change must update the ledger
+        if: ${{ !contains(github.event.pull_request.labels.*.name, 'scenarios-exempt') }}
+        env:
+          BASE_REF: origin/${{ github.event.pull_request.base.ref }}
+        run: |
+          set -eu
+          merge_base=$(git merge-base "$BASE_REF" HEAD)
+          changed=$(git diff --name-only "$merge_base" HEAD)
+
+          user_visible=$(printf '%s\n' "$changed" \
+            | grep -E '^(frontend/src/|internal/api/|internal/config/)' \
+            | grep -vE '(_test\.go|\.test\.ts|\.test\.tsx)$' || true)
+
+          if [ -z "$user_visible" ]; then
+            echo "No user-visible source changed; the ledger does not need an update."
+            exit 0
+          fi
+
+          if printf '%s\n' "$changed" | grep -qx 'docs/scenarios.md'; then
+            echo "docs/scenarios.md was updated alongside:"
+            printf '%s\n' "$user_visible" | sed 's/^/  /'
+            exit 0
+          fi
+
+          echo "This pull request changes user-visible source but does not touch docs/scenarios.md:"
+          printf '%s\n' "$user_visible" | sed 's/^/  /'
+          echo
+          echo "Add or update the scenario rows for what changed. A row whose verification is"
+          echo "\`manual\` is a legitimate answer; a row that is silently absent is not."
+          echo
+          echo "If this change genuinely alters no use case, apply the 'scenarios-exempt' label."
+          exit 1
