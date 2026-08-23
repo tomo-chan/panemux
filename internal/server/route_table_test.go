@@ -154,40 +154,60 @@ func TestServer_EveryBoardRouteRequiresAuth(t *testing.T) {
 	require.Positive(t, checked, "no board routes were found — the prefix or the router changed")
 }
 
-// The complement of the test above: the routes outside /api/board/ follow the
-// unauthenticated posture the frontend still depends on. Restricted to GET so
-// the check cannot start a session or write config as a side effect.
-func TestServer_NonBoardAPIRoutesStayUnauthenticated(t *testing.T) {
-	// These are real requests against real handlers, and the walk includes
-	// /api/directories, /api/ssh-connections and /api/ssh-config/hosts, which
-	// resolve their paths from the home directory. server.New() builds its own
-	// api.Handler, so there is no override to inject — point HOME at a temp
-	// directory instead, before New() calls sshconfig.DefaultPath(), so the
-	// test never reads the developer's real ~/.ssh/config or home directory.
-	t.Setenv("HOME", t.TempDir())
+// chainMiddleware wraps h in mws in the order chi itself would apply them:
+// the first entry is outermost, so it runs first.
+func chainMiddleware(mws []func(http.Handler) http.Handler, h http.Handler) http.Handler {
+	for i := len(mws) - 1; i >= 0; i-- {
+		h = mws[i](h)
+	}
+	return h
+}
 
+// The complement of the test above: no route outside /api/board/ is behind
+// the bearer-token middleware, which is the unauthenticated posture the
+// frontend still depends on.
+//
+// The probe runs the route's own middleware chain — chi.Walk hands it to the
+// callback alongside the pattern — against a sentinel handler, instead of
+// dispatching a real request at the real handler. That matters for coverage,
+// not just tidiness: an earlier revision issued real requests and therefore
+// had to restrict itself to GET so it could not start a session or rewrite
+// config as a side effect, which left every POST/PUT/DELETE route — the
+// session, workspace and layout writes the frontend makes constantly —
+// unguarded. Gating those behind the token would break the app just as badly
+// as gating the reads, and would not have failed a single test. Running only
+// the middlewares has no side effects at all, so every method is covered, and
+// nothing here reads the developer's home directory either.
+func TestServer_NonBoardAPIRoutesStayUnauthenticated(t *testing.T) {
 	srv := New(testConfigWithToken("secret-token"), session.NewManager(), nil, nil, nil, emptyFS)
 
+	mux, ok := srv.httpSrv.Handler.(*chi.Mux)
+	require.True(t, ok, "the server's handler must be the chi router itself")
+
 	var checked int
-	for _, route := range walkRoutes(t, srv) {
-		method, pattern, _ := strings.Cut(route, " ")
-		if method != http.MethodGet || !strings.HasPrefix(pattern, "/api/") {
-			continue
-		}
-		if strings.HasPrefix(pattern, boardRoutePrefix) {
-			continue
+	err := chi.Walk(mux, func(method, pattern string, _ http.Handler, mws ...func(http.Handler) http.Handler) error {
+		if !strings.HasPrefix(pattern, "/api/") || strings.HasPrefix(pattern, boardRoutePrefix) {
+			return nil
 		}
 		checked++
 
-		t.Run(route, func(t *testing.T) {
-			rec := httptest.NewRecorder()
-			req := httptest.NewRequest(method, routeRequestPath(pattern), nil)
-			srv.httpSrv.Handler.ServeHTTP(rec, req)
+		t.Run(method+" "+pattern, func(t *testing.T) {
+			reached := false
+			h := chainMiddleware(mws, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+				reached = true
+			}))
 
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, httptest.NewRequest(method, routeRequestPath(pattern), nil))
+
+			assert.True(t, reached,
+				"widening bearer auth beyond %s would break every existing frontend request", boardRoutePrefix)
 			assert.NotEqual(t, http.StatusUnauthorized, rec.Code,
 				"widening bearer auth beyond %s would break every existing frontend request", boardRoutePrefix)
 		})
-	}
+		return nil
+	})
+	require.NoError(t, err)
 
-	require.Positive(t, checked, "no unauthenticated GET routes were found — the router changed")
+	require.Positive(t, checked, "no unauthenticated routes were found — the router changed")
 }

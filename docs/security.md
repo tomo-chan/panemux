@@ -366,9 +366,13 @@ asserting anything about the shipped auth posture, by construction — that asse
 `internal/server`, against the router `server.New()` really builds.
 
 Two files cover this scoping as a regression. `internal/server/board_routes_test.go` checks that an
-incorrect token on `/api/board/*` is rejected with `401`, the correct token reaches `200`, and
-pre-existing `/api/*` routes plus `/ws/{sessionID}` stay reachable with no `Authorization` header at
-all. `internal/server/route_table_test.go` adds the missing-token case and, more importantly, derives
+incorrect token on `/api/board/*` is rejected with `401`, that the correct token reaches `200`, and
+that `/api/session-token` and `/ws/{sessionID}` stay reachable with no `Authorization` header at all.
+`internal/server/route_table_test.go` adds the missing-token case and the complementary check that no
+route outside `/api/board/` sits behind the middleware at all — it probes each route's own middleware
+chain, as `chi.Walk` reports it, rather than dispatching a real request, so the check covers the
+`POST`/`PUT`/`DELETE` half of the API the frontend depends on without creating a session or writing
+config as a side effect. More importantly, it derives
 the list of board routes **from the router itself** with `chi.Walk` rather than naming them: a
 `/api/board/*` route added later — or, the failure this actually guards, one registered outside the
 authenticated sub-router — is covered the day it is registered, without anyone remembering to extend
