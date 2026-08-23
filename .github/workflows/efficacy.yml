@@ -1,0 +1,71 @@
+name: efficacy
+
+# red-check: gate G4(b) in docs/quality-gateway.md.
+#
+# Runs `make efficacy`, which reverts this branch's implementation diff in a
+# scratch worktree and requires the tests this branch changed to FAIL against
+# it. A test that still passes without the code it covers protects nothing —
+# see decision D4.
+#
+# Pull requests only, and deliberately not part of `make check`: it needs the
+# base branch and a second test run, which is a per-pull-request cost, not a
+# per-turn one. The same reasoning keeps mutation testing (D2) and the agmsg
+# contract out of the local gate.
+#
+# No `paths:` filter, for the reason agmsg-contract.yml records: a
+# path-filtered workflow reports no status at all on the pull requests it
+# skips, and a required check that never reports blocks every one of them.
+# The script decides in a second or two whether there is anything to check —
+# a branch that changes no implementation, or no test, exits 0 immediately —
+# so this can safely be marked required.
+
+on:
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  efficacy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          # The gate compares against the base branch, so the merge-base has to
+          # be in the clone. A shallow default checkout has no history to
+          # revert to.
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version-file: go.mod
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: make install-deps-ci
+
+      # The escape hatch, and the only one. A change whose tests genuinely
+      # should not go red without it — a pure refactor, or a test-only
+      # rename — carries the `efficacy-exempt` label, which is visible on the
+      # pull request itself rather than buried in a config file. Applying it is
+      # a deliberate, reviewable act; the reviewer sees the label in the same
+      # place they see the diff.
+      - name: Red-check (changed tests must fail without the implementation)
+        env:
+          EFFICACY_BASE: origin/${{ github.event.pull_request.base.ref }}
+          EFFICACY_EXEMPT: ${{ contains(github.event.pull_request.labels.*.name, 'efficacy-exempt') && '1' || '0' }}
+        run: make efficacy

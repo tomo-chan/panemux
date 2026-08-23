@@ -168,7 +168,7 @@ Ordering is meaningful: the point is to stop a defect at the cheapest gate that 
 | **G1** | Edit | Maintainability | `gofmt -s`, `tsc --noEmit`, and `go vet` on the touched packages only | Claude Code `PostToolUse` hook in `.claude/settings.json` | Absent |
 | **G2** | Unit | Functional suitability, fast feedback | `make test-go`, `make test-frontend` — unchanged | Existing (`make check`, pre-push, CI) | Present |
 | **G3** | Contract | **Resistance to refactoring**, compatibility | (a) HTTP/WS integration through the real `server.New()` router; (b) exhaustiveness check on the route table (every registered route against an expected set); (c) Zod schema round-trips; (d) the agmsg contract | New `make test-contract`, folded into `make check`; (b) as an always-on Go test | Partial — (b) and (d) present, (a) and (c) absent |
-| **G4** | Efficacy | **Protection against regressions** | (a) coverage — scope tracks the implementation, threshold stays at 80%; (b) **red-check**: a changed test must fail when the implementation diff is reverted; (c) mutation score over changed lines only | (a) existing `make check`; (b) and (c) a pull-request CI job, `make efficacy` | Partial ((a) only) |
+| **G4** | Efficacy | **Protection against regressions** | (a) coverage — scope tracks the implementation, threshold stays at 80%; (b) **red-check**: a changed test must fail when the implementation diff is reverted; (c) mutation score over changed lines only | (a) existing `make check`; (b) and (c) a pull-request CI job, `make efficacy` | Partial — (a) and (b) present (`make efficacy`, a pull-request-only CI job); (c) absent |
 | **G5** | Scenario | Functional suitability, interaction capability | Playwright E2E, plus a check that every test named by an `auto` row in `scenarios.md` actually exists | CI, extending `make test-e2e` | Partial (E2E only; no ledger cross-check) |
 | **G6** | Adversarial | All characteristics (design judgement) | A fresh-context review of the diff alone. The session that wrote the code does not grade it. Findings limited to correctness and stated requirements. | A review subagent in `.claude/agents/` plus human review. **Does not block** | Absent |
 
@@ -183,7 +183,7 @@ up.** A rule sitting on the bottom two rungs must not be described as "enforced"
 | L1 | A Makefile target | Runnable by hand, produces pass/fail. The first rung an agent can drive itself. |
 | L2 | An agent hook | Claude Code `PostToolUse` / `Stop` hooks. Unlike `AGENTS.md`, deterministic and impossible to forget. |
 | L3 | A git hook | `.githooks/pre-push`. The last local line of defence. |
-| L4 | A CI job | Unavoidable. Slow checks and checks needing an environment can only live here. |
+| L4 | A CI job | Unavoidable. Slow checks and checks needing an environment can only live here. The red-check (`efficacy.yml`) and the agmsg contract are both here. |
 | L5 | Branch protection | Blocks the merge. The agmsg contract job already depends on this rung. |
 
 ### Design decisions
@@ -217,6 +217,24 @@ here — while catching both tautological tests and tests written after the fact
 why it is ordered ahead of mutation testing in the rollout; it is not a claim that nothing else
 would catch more.
 
+Implemented as `scripts/efficacy.sh` / `make efficacy`. Three details of it are decisions in their
+own right, recorded because each one was a way the gate could have been useless:
+
+- **Scope is the changed test *functions*, not the changed packages.** The script maps the diff's
+  touched line numbers onto the function ranges in the file, so editing an assertion inside an
+  existing test brings that test into scope, and appending a new test does *not* drag the untouched
+  one above it in. That second half matters more than it looks: the gate is satisfied when the whole
+  `-run` set goes red, so an over-wide set lets an unrelated failure mask a tautological test. The
+  first implementation had exactly that bug, found by a test written for it.
+- **Skipping is as important as failing.** A branch that changes no implementation (docs, tests
+  only) has nothing to revert, and a branch that changes implementation but no test has no result to
+  check — the latter warns rather than blocking, because making it a failure would fire on every
+  pure refactor. Principle 4 again.
+- **The escape hatch is a pull-request label, not a config file.** `efficacy-exempt` is visible in
+  the same place the reviewer sees the diff. A change whose tests genuinely should not go red — a
+  pure refactor, a test-only rename — is a real category, and hiding the exemption in a tracked file
+  would make it invisible after the fact.
+
 **D5 — The author does not grade its own work.**
 A session carries the context of the approaches it tried and discarded. The Claude Code guidance
 recommends a review in a fresh context that sees only the diff. G6 nonetheless **does not block**: a
@@ -235,7 +253,7 @@ pre-push and CI. A gate that sacrifices fast feedback gets bypassed.
 | 1 | Real-router integration harness; single source of truth for the route table plus an exhaustiveness check | G3 | Phase 1 | **Landed.** The table has one definition and the exhaustiveness check pins it; the full HTTP/WS integration half is still open. |
 | 2 | Widen coverage scope (threshold unchanged) | G4(a) | Phases 2 and 5 | Makes ~2,600 previously ungated lines visible. |
 | 3 | `.claude/settings.json` with G1/G2 hooks; a review subagent | G1, G6 | — | Promotes L0 discipline to L2. Closes the agent's own verification loop. |
-| 4 | red-check (`make efficacy`) in pull-request CI | G4(b) | — | Detects tautological tests mechanically. The largest single win under AI-assisted development. |
+| 4 | red-check (`make efficacy`) in pull-request CI | G4(b) | — | **Landed.** `scripts/efficacy.sh` reverts the branch's implementation diff in a scratch worktree and requires the tests the branch changed to go red against it. Exempted by the `efficacy-exempt` label. |
 | 5 | Core-feature section in `scenarios.md`, ledger cross-check, core E2E | G0, G5 | Phases 4 and 6 | Makes the acceptance ledger real. |
 | 6 | Diff-scoped mutation testing (warn first, gate once stable) | G4(c) | merges with #164 | Measures protection against regressions directly. |
 | 7 | Performance and accessibility observation (measure only, do not gate) | — | — | First visibility into the two unprotected characteristics. |

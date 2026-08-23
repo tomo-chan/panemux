@@ -99,12 +99,22 @@ Example: `Config.sshConfigPath` uses `sshconfig.DefaultPath()` only when the ove
 - `make coverage-go` enforces at least 80% combined coverage across `internal/config`, `internal/api`, `internal/ws`, `internal/server`, and `internal/board`.
 - `make coverage-frontend` enforces at least 80% coverage across `frontend/src/hooks/` and `frontend/src/schemas/`.
 
+### Red-check (`make efficacy`)
+
+- A test you change must **fail** when your implementation diff is reverted. That is the machine-checkable half of the TDD rule above: the order lines were written in cannot be recovered after the fact, but the result can.
+- Run it yourself with `make efficacy` (compares against `origin/main`; override with `EFFICACY_BASE`). CI runs it on every pull request.
+- It is deliberately **not** part of `make check` — it needs the base branch and a second test run, which is a per-pull-request cost, not a per-turn one.
+- A branch that changes no implementation, or changes implementation but no test, is skipped rather than failed.
+- If a change genuinely should not go red without its implementation — a pure refactor, a test-only rename — apply the `efficacy-exempt` label to the pull request and say why in the description. That is the only exemption; do not reach for it to get past a test that turned out not to assert anything.
+- See decision D4 in [docs/quality-gateway.md](docs/quality-gateway.md).
+
 ### Quality gate
 
 - `make check` must pass before `make build`.
 - `make check` must pass before reporting implementation complete.
 - There are no exceptions for frontend-only, docs-adjacent, or "small" code changes.
-- Test commands: `make test-go`, `make test-frontend`, `make test-e2e`, `make test`
+- Test commands: `make test-go`, `make test-frontend`, `make test-e2e`, `make test`, `make test-efficacy`
+- Pull-request-only gate: `make efficacy` (see above)
 - Coverage commands: `make coverage-go`, `make coverage-frontend`
 - Lint commands: `make lint-go`, `make lint-frontend`, `make lint`
 - Go lint includes `gofmt`, `go vet`, and `golangci-lint run ./...` using `.golangci.yml`.
