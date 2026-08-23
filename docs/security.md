@@ -348,14 +348,43 @@ proxy, SSH tunnel, or VPN in front of the non-loopback listener. See
 [agent-board.md](agent-board.md#security-model) for the full rationale.
 
 `internal/server`'s constant-time bearer-token middleware (`bearerAuthMiddleware`, `internal/server/auth.go`)
-is implemented, unit-tested, and wired into `registerRoutes` — but **only** onto the
-`r.Route("/api/board", ...)` sub-route (`GET /status`, `GET /messages`, `POST /broadcast`, `GET
-/command/history`), not onto any pre-existing `/api/*` route or `/ws/{sessionID}`. Widening it to
+is implemented, unit-tested, and wired in `registerRoutes` — but **only** onto the
+`api.BoardRoutePrefix` (`/api/board`) sub-router (`GET /status`, `GET /messages`, `POST /broadcast`,
+`GET /command/history`), not onto any pre-existing `/api/*` route or `/ws/{sessionID}`. Widening it to
 those routes without a matching frontend change would break every existing, currently-unauthenticated
-request, so that remains a separate, larger change. `internal/server/board_routes_test.go` covers this
-scoping as a regression: missing/incorrect token on `/api/board/*` is rejected with `401`, the correct
-token reaches `200`, and pre-existing `/api/*` routes plus `/ws/{sessionID}` stay reachable with no
-`Authorization` header at all. See [agent-board.md](agent-board.md)'s status note.
+request, so that remains a separate, larger change.
+
+**Which package owns which half of that sentence matters, because it changed.** The route table
+itself — every path, method and the `r.Route` nesting, including which routes sit under
+`BoardRoutePrefix` — lives in `internal/api`'s `Handler.Mount` (`internal/api/routes.go`), so that
+`internal/server`'s production wiring and `internal/api`'s own handler tests cannot describe
+different routes; they previously could, and had already drifted, with `/api/board/*` registered flat
+and with no middleware in the test copy. **Choosing the middleware stays with `internal/server`**:
+`registerRoutes` passes `bearerAuthMiddleware(authToken)` as `Mount`'s `boardAuth` argument, and the
+handler tests pass `nil`. A test that mounts the board routes unauthenticated is therefore no longer
+asserting anything about the shipped auth posture, by construction — that assertion lives only in
+`internal/server`, against the router `server.New()` really builds.
+
+Two files cover this scoping as a regression. `internal/server/board_routes_test.go` checks that an
+incorrect token on `/api/board/*` is rejected with `401`, that the correct token reaches `200`, and
+that `/api/session-token` and `/ws/{sessionID}` stay reachable with no `Authorization` header at all.
+`internal/server/route_table_test.go` adds the missing-token case and the complementary check that no
+route outside `/api/board/` sits behind the middleware at all — it probes each route's own middleware
+chain, as `chi.Walk` reports it, rather than dispatching a real request, so the check covers the
+`POST`/`PUT`/`DELETE` half of the API the frontend depends on without creating a session or writing
+config as a side effect. More importantly, it derives
+the list of board routes **from the router itself** with `chi.Walk` rather than naming them: a
+`/api/board/*` route added later — or, the failure this actually guards, one registered outside the
+authenticated sub-router — is covered the day it is registered, without anyone remembering to extend
+a list. It also pins the complete route table, so a route cannot silently appear, move, or be renamed.
+Both properties were confirmed by perturbation, not assumed: registering a *reachable*
+`/api/board/leaked` outside the sub-router fails the auth test, and renaming a route fails the table
+test. One nuance is worth recording, because it bounds what the auth test alone proves: a
+`/api/board/*` route registered inside the `/api` sub-router is *shadowed* by the `/api/board/*`
+mount, so the probe still gets its `401` from the middleware and the auth test passes — what catches
+that case is the table test, which lists a route the router can never actually reach. The two tests
+are complementary, not redundant.
+See [agent-board.md](agent-board.md)'s status note.
 
 **`WS /ws/board-command` cannot use the `Authorization` header at all** — browsers do not allow a
 WebSocket upgrade request to carry arbitrary headers. `internal/ws/board_command.go`'s

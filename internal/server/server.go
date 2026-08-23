@@ -75,55 +75,22 @@ func registerRoutes(
 	r chi.Router, apiHandler *api.Handler, wsHandler *ws.Handler, commandRunner *commandcenter.Runner,
 	frontendFS embed.FS, authToken string,
 ) {
-	r.Route("/api", func(r chi.Router) {
-		r.Get("/layout", apiHandler.GetLayout)
-		r.Put("/layout", apiHandler.PutLayout)
-		r.Get("/workspaces", apiHandler.GetWorkspaces)
-		r.Post("/workspaces", apiHandler.PostWorkspace)
-		r.Put("/workspaces/active", apiHandler.PutActiveWorkspace)
-		r.Put("/workspaces/tab-position", apiHandler.PutWorkspaceTabPosition)
-		r.Put("/workspaces/vertical-bar-width", apiHandler.PutWorkspaceVerticalBarWidth)
-		r.Put("/workspaces/{id}", apiHandler.PutWorkspace)
-		r.Delete("/workspaces/{id}", apiHandler.DeleteWorkspace)
-		r.Put("/workspaces/{id}/layout", apiHandler.PutWorkspaceLayout)
-		r.Get("/sessions", apiHandler.GetSessions)
-		r.Post("/sessions", apiHandler.PostSession)
-		r.Delete("/sessions/{id}", apiHandler.DeleteSession)
-		r.Post("/sessions/{id}/restart", apiHandler.RestartSession)
-		r.Post("/sessions/{id}/open-vscode", apiHandler.PostOpenVSCode)
-		r.Post("/sessions/{id}/open-url", apiHandler.PostOpenURL)
-		r.Get("/sessions/{id}/git-info", apiHandler.GetGitInfo)
-		r.Get("/display", apiHandler.GetDisplay)
-		r.Get("/ssh-connections", apiHandler.GetSSHConnections)
-		r.Get("/ssh-config/hosts", apiHandler.GetSSHConfigHosts)
-		r.Post("/ssh-config/hosts", apiHandler.PostSSHConfigHost)
-		r.Get("/detect-shell", apiHandler.GetDetectShell)
-		r.Get("/directories", apiHandler.GetDirectories)
-		// Deliberately NOT placed under /board/ — chi routes any path
-		// starting with /api/board/ into the r.Route("/api/board", ...)
-		// sub-router below regardless of where else a handler for that path
-		// is registered, so a route literally named /api/board/session-token
-		// would always be caught by bearerAuthMiddleware even when defined
-		// here. See GetBoardSessionToken's own doc comment for why this one
-		// route must stay unauthenticated.
-		r.Get("/session-token", apiHandler.GetBoardSessionToken)
-	})
-	// /api/board/* is the only part of the API gated behind bearer-token
-	// auth today: unlike every other /api/* route and /ws/{sessionID},
+	// The route table itself lives in internal/api (api.Handler.Mount), so
+	// this wiring and the api package's own handler tests cannot describe
+	// different routes. What stays here is the decision this package owns:
+	// which part of the table is authenticated.
+	//
+	// api.BoardRoutePrefix is the only part of the API gated behind bearer-
+	// token auth today: unlike every other /api/* route and /ws/{sessionID},
 	// these endpoints were gated from day one, before the frontend called
 	// any of them — GetBoardStatus/GetBoardMessages are now polled by the
 	// dashboard's useBoardStatus hook and GetBoardCommandHistory by the
 	// command palette/history panel (see docs/agent-board.md), but the
 	// auth gate itself was never contingent on that. Retrofitting auth
-	// onto the already-relied-upon unauthenticated routes above is a
-	// separate, larger change. See docs/security.md.
-	r.Route("/api/board", func(r chi.Router) {
-		r.Use(bearerAuthMiddleware(authToken))
-		r.Get("/status", apiHandler.GetBoardStatus)
-		r.Get("/messages", apiHandler.GetBoardMessages)
-		r.Post("/broadcast", apiHandler.PostBoardBroadcast)
-		r.Get("/command/history", apiHandler.GetBoardCommandHistory)
-	})
+	// onto the rest of the table, which the frontend already relies on
+	// being unauthenticated, is a separate, larger change. See
+	// docs/security.md.
+	apiHandler.Mount(r, bearerAuthMiddleware(authToken))
 	r.Get("/ws/{sessionID}", wsHandler.ServeHTTP)
 	// /ws/board-command is only registered when the command center is
 	// enabled (commandRunner != nil) — see docs/agent-board.md's Command

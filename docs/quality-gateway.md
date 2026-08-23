@@ -21,11 +21,12 @@ panemux does not have a shortage of tests. At the commit above:
 | E2E (Playwright) | 8 specs, 23 tests | not gated |
 
 And yet [issue #178](https://github.com/tomo-chan/panemux/issues/178) established that the route
-table in `internal/server/server.go` can be renamed, reordered, or wrapped in new middleware and
-161 tests in `internal/api` stay green, because those tests build their own copy of the router
-rather than going through `server.New()`. The `/api/board/*` routes are registered in that copy
-*without* `bearerAuthMiddleware`, so 25 board handler tests assert against a shape that does not
-exist in production.
+table in `internal/server/server.go` could be renamed, reordered, or wrapped in new middleware and
+161 tests in `internal/api` would stay green, because those tests built their own copy of the router
+rather than going through `server.New()`. The `/api/board/*` routes were registered in that copy
+*without* `bearerAuthMiddleware`, so 25 board handler tests asserted against a shape that did not
+exist in production. That specific defect is closed — see gate G3 below — but it is the reason this
+document exists, and the reasoning it produced applies to every gate here, not just that one.
 
 That is not a gap in test quantity. It is a gap in two things this repository has never written
 down:
@@ -72,9 +73,9 @@ refactoring is the one that is not negotiable.
 | Pillar | Meaning | What can measure it | panemux today |
 |---|---|---|---|
 | Protection against regressions | Probability a test fails when a bug is introduced | Coverage is only a *lower bound* proxy. The real measure is mutation score | Coverage 88%; mutation never measured |
-| Resistance to refactoring | Behavior-preserving changes do not fail tests (few false positives) | No direct metric exists. Only structure can guarantee it | **Structurally defective** — the duplicated router (#178) |
+| Resistance to refactoring | Behavior-preserving changes do not fail tests (few false positives) | No direct metric exists. Only structure can guarantee it | The duplicated router that prompted this document is gone; nothing measures the property itself |
 | Fast feedback | Wall-clock time | Seconds | Go ≈3s for the gated packages, ≈8s for the whole suite under `-race`; frontend ≈13s. Good |
-| Maintainability | The tests are themselves readable and durable | Test volume, duplication | 4 router copies, 3 `*_routes_test.go` files. Growing |
+| Maintainability | The tests are themselves readable and durable | Test volume, duplication | Was 4 router copies and 3 `*_routes_test.go` files; the copies are gone and the per-route files are consolidated |
 
 ### Why coverage alone misleads
 
@@ -103,7 +104,7 @@ written. Every unprotected area in panemux reduces to "there is no injection poi
 
 | Principle | Rule | Evidence in this repository |
 |---|---|---|
-| **P1 — Single source of truth** | Do not encode the same knowledge twice. Never reconstruct production wiring inside a test. | The route table exists in both `internal/server/server.go` and `internal/api/handler_test.go`, and has drifted: `/api/board/*` is authenticated in one and flat and unauthenticated in the other. |
+| **P1 — Single source of truth** | Do not encode the same knowledge twice. Never reconstruct production wiring inside a test. | The route table used to exist in both `internal/server/server.go` and `internal/api/handler_test.go`, and had drifted: `/api/board/*` was authenticated in one and flat and unauthenticated in the other. It now lives once, in `internal/api`'s `Handler.Mount`. |
 | **P2 — Humble object** | Keep the side-effecting boundary (PTY, SSH, `exec`, filesystem, network) as thin as possible; put decisions in pure functions. | Works: `validRemotePath`, `classifySSHWaitError`, `frontend/src/utils/layoutTree.ts`. Fails: `internal/session/ssh.go`'s lifecycle methods mix transport with decisions and sit at 0%. |
 | **P3 — Injection points are typed** | Do not call globals, environment variables or `os.UserHomeDir()` directly; make them a struct field or constructor argument. | Already stated in [DEVELOPMENT.md](../DEVELOPMENT.md#test-granularity)'s testability rule (`Config.sshConfigPath`). Not applied to `main.go` (0%) or `board.go` (47.8%). |
 | **P4 — Name the observable behavior** | What a test drives is a published contract with domain vocabulary — HTTP responses, WS frames, persisted files, rendered output — not call ordering or mock setup. | `frontend/src/hooks/useTerminalLinks.test.ts` is the model: it drives the real xterm terminal and the real addon, and is named after the behavior rather than a source file. |
@@ -166,7 +167,7 @@ Ordering is meaningful: the point is to stop a defect at the cheapest gate that 
 | **G0** | Spec | Functional suitability (rework) | The change is tied to a row in [scenarios.md](scenarios.md). A user-visible change adds or updates a row in the same commit. | CI: fail when the diff touches `frontend/src`, `internal/api` or `internal/config` and `scenarios.md` is unchanged; a label grants explicit exemption | Absent |
 | **G1** | Edit | Maintainability | `gofmt -s`, `tsc --noEmit`, and `go vet` on the touched packages only | Claude Code `PostToolUse` hook in `.claude/settings.json` | Absent |
 | **G2** | Unit | Functional suitability, fast feedback | `make test-go`, `make test-frontend` — unchanged | Existing (`make check`, pre-push, CI) | Present |
-| **G3** | Contract | **Resistance to refactoring**, compatibility | (a) HTTP/WS integration through the real `server.New()` router; (b) exhaustiveness check on the route table (every registered route against an expected set); (c) Zod schema round-trips; (d) the agmsg contract | New `make test-contract`, folded into `make check`; (b) as an always-on Go test | Partial (agmsg only) |
+| **G3** | Contract | **Resistance to refactoring**, compatibility | (a) HTTP/WS integration through the real `server.New()` router; (b) exhaustiveness check on the route table (every registered route against an expected set); (c) Zod schema round-trips; (d) the agmsg contract | New `make test-contract`, folded into `make check`; (b) as an always-on Go test | Partial — (b) and (d) present, (a) and (c) absent |
 | **G4** | Efficacy | **Protection against regressions** | (a) coverage — scope tracks the implementation, threshold stays at 80%; (b) **red-check**: a changed test must fail when the implementation diff is reverted; (c) mutation score over changed lines only | (a) existing `make check`; (b) and (c) a pull-request CI job, `make efficacy` | Partial ((a) only) |
 | **G5** | Scenario | Functional suitability, interaction capability | Playwright E2E, plus a check that every test named by an `auto` row in `scenarios.md` actually exists | CI, extending `make test-e2e` | Partial (E2E only; no ledger cross-check) |
 | **G6** | Adversarial | All characteristics (design judgement) | A fresh-context review of the diff alone. The session that wrote the code does not grade it. Findings limited to correctness and stated requirements. | A review subagent in `.claude/agents/` plus human review. **Does not block** | Absent |
@@ -231,7 +232,7 @@ pre-push and CI. A gate that sacrifices fast feedback gets bypassed.
 
 | Order | Work | Gate | #178 phase | Effect |
 |---|---|---|---|---|
-| 1 | Real-router integration harness; single source of truth for the route table plus an exhaustiveness check | G3 | Phase 1 | Removes the structural defect in resistance to refactoring. Everything else builds on it. |
+| 1 | Real-router integration harness; single source of truth for the route table plus an exhaustiveness check | G3 | Phase 1 | **Landed.** The table has one definition and the exhaustiveness check pins it; the full HTTP/WS integration half is still open. |
 | 2 | Widen coverage scope (threshold unchanged) | G4(a) | Phases 2 and 5 | Makes ~2,600 previously ungated lines visible. |
 | 3 | `.claude/settings.json` with G1/G2 hooks; a review subagent | G1, G6 | — | Promotes L0 discipline to L2. Closes the agent's own verification loop. |
 | 4 | red-check (`make efficacy`) in pull-request CI | G4(b) | — | Detects tautological tests mechanically. The largest single win under AI-assisted development. |
