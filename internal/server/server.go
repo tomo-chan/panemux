@@ -19,15 +19,17 @@ import (
 	"panemux/internal/board"
 	"panemux/internal/commandcenter"
 	"panemux/internal/config"
+	"panemux/internal/portforward"
 	"panemux/internal/session"
 	"panemux/internal/ws"
 )
 
 // Server is the HTTP server.
 type Server struct {
-	cfg     *config.Config
-	manager *session.Manager
-	httpSrv *http.Server
+	cfg      *config.Config
+	manager  *session.Manager
+	httpSrv  *http.Server
+	forwards *portforward.Registry
 }
 
 // New creates a new server instance. commandRunner may be nil when
@@ -46,13 +48,18 @@ func New(
 
 	apiHandler := api.NewHandler(cfg, manager, boardCache, boardRelay)
 	apiHandler.SetCommandCenterAvailable(commandRunner != nil)
+	// Loopback forwards are process-wide state (they bind ports on this
+	// host), so the server owns the registry and closes it on shutdown.
+	forwards := portforward.New(portforward.Options{})
+	apiHandler.SetPortForwards(forwards)
 	wsHandler := ws.NewHandler(manager)
 	registerRoutes(r, apiHandler, wsHandler, commandRunner, frontendFS, cfg.Server.AuthToken)
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	return &Server{
-		cfg:     cfg,
-		manager: manager,
+		cfg:      cfg,
+		manager:  manager,
+		forwards: forwards,
 		httpSrv: &http.Server{
 			Addr:           addr,
 			Handler:        r,
@@ -84,6 +91,7 @@ func registerRoutes(
 		r.Delete("/sessions/{id}", apiHandler.DeleteSession)
 		r.Post("/sessions/{id}/restart", apiHandler.RestartSession)
 		r.Post("/sessions/{id}/open-vscode", apiHandler.PostOpenVSCode)
+		r.Post("/sessions/{id}/open-url", apiHandler.PostOpenURL)
 		r.Get("/sessions/{id}/git-info", apiHandler.GetGitInfo)
 		r.Get("/display", apiHandler.GetDisplay)
 		r.Get("/ssh-connections", apiHandler.GetSSHConnections)
@@ -160,8 +168,10 @@ func (s *Server) Start() error {
 	return nil
 }
 
-// Shutdown gracefully stops the server.
+// Shutdown gracefully stops the server and closes every loopback port
+// forward it opened on this host.
 func (s *Server) Shutdown(ctx context.Context) error {
+	s.forwards.Close()
 	if err := s.httpSrv.Shutdown(ctx); err != nil {
 		return fmt.Errorf("shutting down HTTP server: %w", err)
 	}

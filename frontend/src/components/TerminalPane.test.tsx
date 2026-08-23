@@ -1,4 +1,4 @@
-import { fireEvent, render } from '@testing-library/react'
+import { act, fireEvent, render } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 class ResizeObserverMock {
@@ -192,3 +192,55 @@ function makeCtx(overrides: Partial<LayoutActionsContextValue> = {}): LayoutActi
     ...overrides,
   }
 }
+
+describe('TerminalPane URL opening', () => {
+  beforeEach(() => {
+    mockUseTerminal.mockReturnValue({
+      handleResize: vi.fn(),
+      connected: true,
+      dims: null,
+      sessionState: 'running',
+      reconnectFailed: false,
+      restartSession: vi.fn(),
+    })
+    mockUseGitInfo.mockReturnValue({
+      gitInfo: { is_git: false },
+      refreshIfStale: vi.fn(),
+      refreshNow: vi.fn(),
+    })
+  })
+
+  function terminalOptions() {
+    return mockUseTerminal.mock.calls[mockUseTerminal.mock.calls.length - 1][0] as {
+      onLinkActivate: (url: string) => void
+      onBrowserOpenRequest: (url: string) => void
+    }
+  }
+
+  it('gives the terminal both URL-opening handlers', () => {
+    render(<TerminalPane pane={{ id: 'p1', type: 'ssh' }} />)
+
+    const options = terminalOptions()
+    expect(typeof options.onLinkActivate).toBe('function')
+    expect(typeof options.onBrowserOpenRequest).toBe('function')
+  })
+
+  it('asks for approval when the pane requests a browser open, then opens it', async () => {
+    const openSpy = vi.fn()
+    window.open = openSpy as unknown as typeof window.open
+    window.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ url: 'https://example.com/device', forwarded: true, port: 8085 }),
+    } as Response)
+    const { findByText, getByRole } = render(<TerminalPane pane={{ id: 'p1', type: 'ssh' }} />)
+
+    act(() => terminalOptions().onBrowserOpenRequest('https://example.com/device'))
+
+    expect(await findByText('https://example.com/device')).toBeInTheDocument()
+    expect(openSpy).not.toHaveBeenCalled()
+
+    fireEvent.click(getByRole('button', { name: 'Open' }))
+
+    expect(openSpy).toHaveBeenCalledWith('https://example.com/device', '_blank', 'noopener,noreferrer')
+  })
+})

@@ -14,6 +14,7 @@ The application is optimized for a local or trusted-network workflow where a dev
 - Persist layout edits back to the config file when the app was launched from one.
 - Support four pane backends: `local`, `ssh`, `tmux`, and `ssh_tmux`.
 - Allow limited runtime pane creation/removal from the UI.
+- Forward a pane's loopback OAuth callback port to this host so CLI login flows started on an SSH host complete in the dashboard's browser.
 - Build as a self-contained CLI binary and distribute it through GitHub Releases.
 
 ## High-Level Data Flow
@@ -67,6 +68,7 @@ Benefits:
 ## Current Boundaries
 
 - The app assumes a trusted environment: CORS is open and WebSocket origin checks are permissive.
+- URL opening assumes the browser showing the dashboard runs on the panemux host. panemux can only bind ports on its own host, so a dashboard opened from a different machine cannot have a pane's `localhost:<port>` callback forwarded to it.
 - Authentication and authorization are not implemented.
 - Runtime session creation exists, but it is intentionally narrow and mainly used by pane splitting in the UI.
 - Terminal prompt rendering is currently validated against Chrome. In particular, oh-my-zsh themes that use Powerline glyphs, such as `agnoster`, depend on browser font behavior that is known to work in Chrome.

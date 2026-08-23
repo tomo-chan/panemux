@@ -231,6 +231,29 @@ This keeps the error noticeable without forcing it into a blocking dialog.
 
 ---
 
+## Pane URL Strip
+
+Opening a URL out of a pane can need the operator's attention twice: before anything opens, when a
+program inside the pane asked for it, and after, when the port forward it needed could not be
+established.
+
+Both use one strip pinned to the top of the pane's terminal area, inside that pane rather than at
+the workspace level, because both belong to one pane's activity:
+
+- the request state names the URL and offers `Open` and `Ignore`; it never opens anything on its own
+- the failure state reuses the transient-error palette (`#f4a9a9` on the pane's own surface with a
+  `#7f1d1d` edge) and offers `Dismiss`
+- a pending request takes precedence over an older failure, so the operator is never asked to read
+  two things before deciding one
+- the URL is truncated with an ellipsis and carries the full value as a tooltip, so a long
+  authorization URL cannot push the buttons out of a narrow pane
+
+The request state is deliberately not a modal: it belongs to one pane, and the operator should be
+able to keep working in other panes — or read the surrounding terminal output that explains what
+asked for it — before deciding.
+
+---
+
 ## Attention Indicators
 
 Agent-attention highlighting remains visually distinct from layout-editing affordances.

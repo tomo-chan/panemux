@@ -225,6 +225,16 @@ export const BoardCommandHistoryResponseSchema = z.object({
 
 export type BoardCommandHistoryResponse = z.infer<typeof BoardCommandHistoryResponseSchema>
 
+// Response from POST /api/sessions/{id}/open-url: whether panemux published
+// the URL's loopback callback port on this host, and why not when it did not.
+export const OpenUrlResponseSchema = z.object({
+  url: z.string(),
+  forwarded: z.boolean(),
+  port: z.number().int().min(1).max(65535).optional(),
+  reason: z.string().max(512).optional(),
+})
+
+export type OpenUrlResponse = z.infer<typeof OpenUrlResponseSchema>
 // Deliberately no .max() on any field, unlike most schemas in this file.
 // Every value here is free text an agent wrote about itself, and the Go side
 // (internal/board's ParseStatus) imposes no length limit of its own, so a

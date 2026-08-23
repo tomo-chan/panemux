@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"os/user"
@@ -72,6 +73,16 @@ func NewLocal(id, shell, cwd, title string) (*LocalSession, error) {
 
 	cmd := exec.Command(sanitizedShell)
 	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
+	if browserShimEnabled.Load() {
+		// Best effort: a pane must still start when the shim cannot be
+		// installed, just without browser-open interception.
+		shimEnv, shimErr := browserShimEnvForLocalSession()
+		if shimErr != nil {
+			log.Printf("browser-open shim unavailable for session %s: %v", id, shimErr)
+		} else {
+			cmd.Env = append(cmd.Env, shimEnv...)
+		}
+	}
 	if cwd != "" {
 		cmd.Dir = cwd
 	}

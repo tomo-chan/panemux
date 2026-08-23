@@ -4,6 +4,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { useWebSocket } from './useWebSocket'
 import { TERMINAL_FONT_FAMILY } from '../utils/fonts'
+import { BROWSER_OPEN_OSC_IDENT, openUrlTab, parseBrowserOpenOsc } from '../utils/paneUrlOpen'
 import type { SessionState } from '../schemas'
 
 const REPAINT_SETTLE_DELAYS_MS = [50, 250]
@@ -47,6 +48,12 @@ interface UseTerminalOptions {
   container: HTMLElement | null
   repoURL?: string
   onInteraction?: () => void | Promise<void>
+  // Called when the operator activates a link in this pane. Without it, links
+  // open directly in a new tab and no port forward is prepared for them.
+  onLinkActivate?: (url: string) => void
+  // Called when a program inside the pane asks panemux to open a URL (see the
+  // browser shim in internal/session/browseropen.go).
+  onBrowserOpenRequest?: (url: string) => void
   // Reconnect tuning, forwarded to useWebSocket. Only overridden in tests;
   // production callers rely on useWebSocket's defaults.
   reconnectDelay?: number
@@ -66,6 +73,8 @@ interface TerminalEntry {
   replayWriteDepth: number
   awaitingReplayEnd: boolean
   repoURL: string | null
+  onLinkActivate: ((url: string) => void) | null
+  onBrowserOpen: ((url: string) => void) | null
 }
 
 interface PendingTerminalMessage {
@@ -81,6 +90,8 @@ export function useTerminal({
   container,
   repoURL,
   onInteraction,
+  onLinkActivate,
+  onBrowserOpenRequest,
   reconnectDelay,
   maxReconnectDelay,
   maxReconnectAttempts,
@@ -90,6 +101,8 @@ export function useTerminal({
   const initializedRef = useRef(false)
   const sendRef = useRef<((data: string | ArrayBuffer | Uint8Array) => void) | null>(null)
   const entryRef = useRef<TerminalEntry | null>(null)
+  const onLinkActivateRef = useRef<((url: string) => void) | null>(null)
+  const onBrowserOpenRef = useRef<((url: string) => void) | null>(null)
   const pendingMessagesRef = useRef<PendingTerminalMessage[]>([])
   const reconnectingAfterDisconnectRef = useRef(false)
   const recoverDisconnectedSessionRef = useRef<(() => Promise<void>) | null>(null)
@@ -265,6 +278,8 @@ export function useTerminal({
 
     entry.attachedContainer = container
     entry.send = sendRef.current
+    entry.onLinkActivate = onLinkActivateRef.current
+    entry.onBrowserOpen = onBrowserOpenRef.current
     entryRef.current = entry
     termRef.current = entry.term
     fitAddonRef.current = entry.fitAddon
@@ -283,6 +298,8 @@ export function useTerminal({
       clearScheduledResizes(currentEntry)
       currentEntry.attachedContainer = null
       currentEntry.send = null
+      currentEntry.onLinkActivate = null
+      currentEntry.onBrowserOpen = null
       currentEntry.disposeTimer = setTimeout(() => {
         if (currentEntry.attachedContainer) return
         clearScheduledRepaints(currentEntry)
@@ -297,6 +314,17 @@ export function useTerminal({
       initializedRef.current = false
     }
   }, [container, sessionId])
+
+  // The terminal instance outlives a pane remount, so its handlers are kept
+  // on the cached entry and refreshed whenever the pane passes new ones.
+  useEffect(() => {
+    onLinkActivateRef.current = onLinkActivate ?? null
+    onBrowserOpenRef.current = onBrowserOpenRequest ?? null
+    const entry = entryRef.current
+    if (!entry) return
+    entry.onLinkActivate = onLinkActivateRef.current
+    entry.onBrowserOpen = onBrowserOpenRef.current
+  }, [onLinkActivate, onBrowserOpenRequest])
 
   useEffect(() => {
     if (!container || !onInteraction) return
@@ -398,7 +426,18 @@ function getOrCreateTerminalEntry(sessionId: string): TerminalEntry {
   })
 
   const fitAddon = new FitAddon()
-  const webLinksAddon = new WebLinksAddon(undefined, { urlRegex: TERMINAL_URL_REGEX })
+  // The pane, not the addon, decides what activation does: opening the tab
+  // has to be paired with preparing the URL's loopback callback port.
+  const webLinksAddon = new WebLinksAddon(
+    (_event, uri) => {
+      if (entry.onLinkActivate) {
+        entry.onLinkActivate(uri)
+        return
+      }
+      openUrlTab(uri)
+    },
+    { urlRegex: TERMINAL_URL_REGEX },
+  )
   const entry: TerminalEntry = {
     term,
     fitAddon,
@@ -411,6 +450,8 @@ function getOrCreateTerminalEntry(sessionId: string): TerminalEntry {
     replayWriteDepth: 0,
     awaitingReplayEnd: false,
     repoURL: null,
+    onLinkActivate: null,
+    onBrowserOpen: null,
   }
 
   term.loadAddon(fitAddon)
@@ -419,6 +460,17 @@ function getOrCreateTerminalEntry(sessionId: string): TerminalEntry {
     provideLinks(y, callback) {
       callback(computePullRequestLinks(term, entry.repoURL, y))
     },
+  })
+  // Consume the browser shim's private OSC sequence so it drives a URL open
+  // instead of being drawn into the terminal.
+  term.parser.registerOscHandler(BROWSER_OPEN_OSC_IDENT, (data) => {
+    // Replayed scrollback carries every sequence the pane emitted earlier, so
+    // a request that was already answered (or dismissed) would be raised again
+    // on each reconnect. A browser-open request is a live event only.
+    if (entry.replayActive || entry.replayWriteDepth > 0) return true
+    const url = parseBrowserOpenOsc(data)
+    if (url) entry.onBrowserOpen?.(url)
+    return true
   })
   term.attachCustomKeyEventHandler((event) => {
     if (!isCopyShortcut(event) || !term.hasSelection()) {

@@ -20,6 +20,7 @@ The YAML config defines:
 - `ssh_connections`
 - `layout`
 - optional `display` settings
+- optional `url_open` settings
 
 Layout rules:
 
@@ -28,6 +29,12 @@ Layout rules:
 - pane IDs must be unique
 - `ssh` and `ssh_tmux` panes must reference a defined SSH connection
 - `tmux` and `ssh_tmux` panes must define `tmux_session`
+
+`url_open` rules:
+
+- `url_open.browser_shim` gates browser-open interception (see "Opening URLs from a pane")
+- it is a tri-state: omitted means enabled, and an omitted block is never written back into an
+  operator's config file on save
 
 Path behavior:
 
@@ -277,6 +284,35 @@ reuses the same deadline rather than getting its own fresh budget), and each ret
 timeout shrinks to whatever of that budget remains, so a hanging/unreachable host cannot make this
 endpoint wait dramatically longer than the ceiling a single dial attempt already tolerated before
 retries were introduced.
+
+### `POST /api/sessions/{id}/open-url`
+
+Accepts `{ "url": "<http(s) URL>" }` and prepares the panemux host for a URL the browser is about to
+open on that pane's behalf. It does not open the browser itself: the browser panemux should drive is
+the one already showing the dashboard, so the frontend opens the tab and this endpoint only
+publishes the URL's loopback callback port on this host.
+
+- `400`: invalid JSON body
+- `404`: no session exists for `id`
+- `409`: the loopback port cannot be bound on the panemux host — another pane already forwards it,
+  or an unrelated local process holds it
+- `422`: the URL is missing, unparseable, or uses a scheme other than `http`/`https`
+- `500`: the forward could not be established for another reason
+- `200`: request understood; the body reports what happened
+
+Response:
+
+```json
+{ "url": "https://example.com/auth?...", "forwarded": true, "port": 51789 }
+```
+
+`forwarded` is `false`, with a human-readable `reason` and no `port`, when nothing needed forwarding:
+the URL carries no loopback callback port, or the pane's shell already runs on the panemux host
+(`local` and `tmux` panes).
+
+A `409` is reported rather than worked around. An OAuth provider matches the registered
+`redirect_uri` exactly, so rewriting the callback to a different local port would break the login it
+is meant to complete.
 
 ### `GET /api/ssh-connections`
 
@@ -833,6 +869,77 @@ When a pane moves to a different parent node, the component may be remounted by 
 - If the resolved branch has a GitHub pull request, the header shows a PR link labeled `#<number>`.
 - When the active agent (including its subagents) has diverged into more than one distinct sibling worktree of the same repository, panemux shows all of them instead of just one, deduplicated by the worktree's repository root; the pane's own base directory is shown only when nothing has diverged from it. Each distinct worktree gets its own independent GitHub PR lookup, so more than one PR link can be shown at once. See [ui-design.md](ui-design.md) for how the header presents more than one worktree.
 - The "last known worktree" sticky behavior applies per distinct worktree: if the active-workdir lookup transiently fails or returns nothing, panemux keeps showing the previously resolved set of worktrees until a subsequent lookup confirms they are no longer valid (e.g. the branch changed or the worktree was removed).
+
+## Opening URLs from a Pane
+
+CLI login flows (`claude` MCP OAuth, `gh auth login`, `wrangler login`, `gcloud auth login`) start a
+listener on the loopback interface of the machine the CLI runs on, then send the browser to an
+authorization URL whose `redirect_uri` points back at `http://localhost:<port>/…`. For `ssh` and
+`ssh_tmux` panes that listener is on the remote host, so the callback would otherwise resolve to the
+wrong machine and the CLI would wait forever.
+
+### Loopback port forwarding
+
+When a URL is opened from a pane, panemux resolves the loopback port it expects its callback on and
+republishes that port at the identical port number on the panemux host, over the pane's existing SSH
+connection. The port is taken from:
+
+- the URL's own host, when it already points at loopback (`http://localhost:3000/…`), or
+- a `redirect_uri` / `redirect_url` / `callback_uri` / `callback_url` query parameter (percent-encoded
+  or plain, and matched regardless of case or `_`/`-` spelling) whose value points at loopback.
+
+Only ports 1024–65535 are forwarded; a callback URL with no explicit port (implying 80 or 443) is
+never an OAuth loopback listener in practice and would need a privileged bind. Forwards bind
+`127.0.0.1` only, are shared per pane and port, expire after 30 minutes without traffic, and are
+closed when the pane is deleted, restarted, or the server shuts down. A pane may hold at most 8
+forwards, and the server at most 32.
+
+`local` and `tmux` panes need no forward: their callback listener is already on the panemux host.
+
+**This assumes the browser showing the dashboard runs on the panemux host** — the documented local
+workflow. panemux can only bind ports on its own host, so when the dashboard is opened from a
+different machine, forwarding does not make that machine's `localhost:<port>` resolve to the pane.
+That deployment shape is out of scope.
+
+### Browser-open interception
+
+Some flows never print a usable URL: they invoke `$BROWSER`, `xdg-open`, or `open` directly on the
+pane's host, which on a remote or headless machine opens nothing the operator can see. With
+`url_open.browser_shim` enabled (the default), `local` and `ssh` panes get a small POSIX shell shim
+installed under the pane host's user cache directory (`~/.cache/panemux/bin` remotely), exported as
+`$BROWSER` and prepended to `PATH` as `xdg-open` and `open`. Given a single `http`/`https` argument
+the shim writes a private OSC sequence (identifier `7373`) to the pane's terminal instead of opening
+anything locally; panemux's frontend consumes that sequence, so it is never drawn. For every other
+invocation — a file path, a non-http scheme, extra flags — the shim execs the real opener from the
+pane's original `PATH`, so `xdg-open report.pdf` and `open -a Safari …` behave exactly as they would
+without panemux. When the shim cannot be installed (a read-only home directory, for instance) the
+pane still starts, just without interception.
+
+A URL requested this way is never opened automatically. The pane shows a strip naming the URL with
+`Open` and `Ignore`; only `Open` opens the tab and prepares the forward. The request is a live event:
+a sequence that arrives in replayed scrollback is ignored, so reconnecting a pane never re-raises a
+request that was already opened or dismissed. Terminal output is
+untrusted — see [security.md](security.md) — and the browser also requires a user gesture to open a
+tab, so the approval step is both a safety and a functional requirement.
+
+Two limitations are inherent to the mechanism:
+
+- `tmux` and `ssh_tmux` panes are not covered. Their shell environment is inherited from a tmux
+  server that was started independently of panemux, and tmux does not pass unknown OSC sequences
+  through to the outer terminal by default.
+- With the shim enabled, an `ssh` pane that would otherwise have used the SSH shell request runs a
+  command instead, so it execs the login shell explicitly (`$SHELL -l` for `bash`, `zsh`, and
+  `fish`; a plain `exec "$SHELL"` for anything else). Panes that set `cwd` or `shell` already ran a
+  command and keep exactly the form they had before. Setting `url_open.browser_shim: false` restores
+  the previous behavior everywhere.
+
+### Clicked links
+
+Links in the terminal are opened by the frontend in a new tab. A link that is itself a loopback URL
+is opened into a blank tab that is navigated once the forward is ready, because the browser would
+otherwise reach the port before it exists; every other URL opens immediately and the forward is
+prepared alongside it, since its callback only fires after the operator has logged in. A forward
+that fails is reported in the pane rather than silently swallowed.
 
 ## Operational Assumptions
 

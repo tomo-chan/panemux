@@ -27,6 +27,7 @@ import (
 	"panemux/internal/board"
 	"panemux/internal/commandcenter"
 	"panemux/internal/config"
+	"panemux/internal/portforward"
 	"panemux/internal/session"
 	"panemux/internal/sshconfig"
 )
@@ -50,6 +51,7 @@ type Handler struct {
 	preferredCWDBySession   map[string][]preferredCWDState
 	nowFn                   func() time.Time
 	cfg                     *config.Config
+	forwards                *portforward.Registry
 	restartInFlight         map[string]struct{}
 	ghBinaryPath            string
 	codeBinaryPath          string
@@ -458,6 +460,7 @@ func (h *Handler) DeleteSession(w http.ResponseWriter, r *http.Request) {
 	}
 	h.clearPreferredCWDs(id)
 	h.clearGitInfoCache(id)
+	h.closeSessionForwards(id)
 	h.cfg.RemovePaneFromLayout(id)
 	if err := h.cfg.SaveLayout(h.cfg.Layout); err != nil {
 		http.Error(w, "failed to save layout", http.StatusInternalServerError)
@@ -507,6 +510,7 @@ func (h *Handler) RestartSession(w http.ResponseWriter, r *http.Request) {
 	h.manager.Remove(id) //nolint:errcheck // ok if already gone
 	h.clearPreferredCWDs(id)
 	h.clearGitInfoCache(id)
+	h.closeSessionForwards(id)
 	h.manager.Add(sess)
 	w.WriteHeader(http.StatusOK)
 }

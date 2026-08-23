@@ -62,6 +62,9 @@ Optional capability interfaces extend the base `Session` contract without breaki
 
 - `CWDGetter` — implemented by `LocalSession` and `SSHSession`; returns the live working directory of the running shell. `LocalSession` reads it via `lsof` (macOS) or `/proc/<pid>/cwd` (Linux). `SSHSession` runs `pwd` over a new exec channel on the existing SSH connection.
 - `SSHConnNamer` — implemented by `SSHSession`; returns the panemux connection alias used when building the `code --remote ssh-remote+<host>` command.
+- `LoopbackDialer` — implemented by `SSHSession` and `TmuxSSHSession`; opens a direct-tcpip channel to `127.0.0.1:<port>` on the SSH host over the connection the pane already holds, which is what an `ssh -L` forward does client-side. `LocalSession` and `TmuxLocalSession` deliberately do not implement it: their loopback is already the panemux host's, so there is nothing to forward.
+
+`browseropen.go` holds the browser-open shim: a fixed POSIX shell script installed into the pane host's user cache directory and exported as `$BROWSER`/`PATH` for `local` and `ssh` panes, plus the process-wide switch (`SetBrowserShimEnabled`) startup sets from `url_open.browser_shim`. See [behavior.md](behavior.md)'s "Opening URLs from a pane".
 
 ### `internal/board`, `internal/commandcenter`, `internal/boardmcp` (Phase 1 board core, Phase 2 command center, and Phase 3 dashboard UI all implemented)
 
@@ -141,6 +144,16 @@ Full design and rationale for all three phases live in [agent-board.md](agent-bo
 status note confirms Phase 1 (board core), Phase 2 (command center), and Phase 3 (dashboard UI and
 command palette test completion) are all implemented.
 
+### `internal/portforward`
+
+Owns loopback TCP forwards and the URL parsing that decides when one is needed. `CallbackPort` extracts the loopback port an authorization URL expects its OAuth callback on; `Registry` binds that port on `127.0.0.1`, pipes each accepted connection through a `Dialer` (satisfied by `internal/session`'s `LoopbackDialer`), and owns the lifecycle: per-pane and per-port deduplication, idle expiry, and teardown when a pane goes away.
+
+Why a separate package:
+
+- the URL-to-port rules are pure functions worth testing directly, without a session or an HTTP request
+- forwards are process-wide resources (they bind ports on this host), so one owner with one shutdown path is clearer than per-handler state
+- `Registry` depends on a small `Dialer` interface rather than on `internal/session`, so the whole forwarding path is testable against a plain TCP echo server
+
 ### `internal/api`
 
 REST endpoints expose workspaces, layout compatibility, display settings, session lifecycle operations, and editor integrations.
@@ -155,6 +168,8 @@ Workspace-related endpoints:
 - `PUT /api/workspaces/active` switches the active workspace and persists the selection.
 - `PUT /api/workspaces/{id}/layout` updates a specific workspace layout.
 - `GET/PUT /api/layout` remain as compatibility endpoints for the active workspace layout.
+
+`POST /api/sessions/{id}/open-url` prepares this host for a URL a pane is about to open in the browser: it resolves the URL's loopback callback port and asks the forward registry to publish it locally. It deliberately does not launch a browser — the browser panemux should drive is the one already showing the dashboard, so the frontend opens the tab.
 
 `POST /api/sessions/{id}/open-vscode` launches VSCode pointed at the session's live working directory. Like `GET /api/sessions/{id}/git-info`, it may prefer the worktree of an active interactive `codex` or `claude` process when that worktree belongs to the same repository, and it keeps using the last valid sibling worktree after the agent exits until the pane changes repository context. For local sessions it runs `code <cwd>`; for SSH sessions it runs `code --remote ssh-remote+<connection> <cwd>`. The binary is located via `exec.LookPath("code")` with a macOS app-bundle fallback.
 
@@ -357,6 +372,16 @@ Why xterm.js:
 - mature browser terminal emulator
 - supports raw byte streams and common terminal behavior
 - avoids implementing terminal emulation from scratch
+
+### `usePaneUrlOpen`
+
+Owns everything that happens when a URL leaves a pane: opening the tab, asking the backend to forward the callback port, holding a pane-initiated request until the operator approves it, and surfacing a failed forward. `useTerminal` supplies the two entry points — a `WebLinksAddon` activation handler for clicked links, and an OSC handler (identifier `7373`) that consumes the browser shim's sequence so it never reaches the screen — and `PaneUrlOpenNotice` renders the approval and error strip.
+
+Why the hook owns the tab, not the backend:
+
+- the tab has to open inside the activating gesture or the popup blocker eats it
+- the browser that should receive the URL is the one rendering the pane, which only the frontend can reach
+- a URL a pane asked for is untrusted input, so the same code path can require approval before anything opens
 
 ### Zod schemas
 

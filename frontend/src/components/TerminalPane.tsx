@@ -2,9 +2,11 @@ import React, { useCallback, useContext, useEffect, useRef, useState } from 'rea
 import { DisplayConfig, PaneConfig } from '../types'
 import { useTerminal } from '../hooks/useTerminal'
 import { useGitInfo } from '../hooks/useGitInfo'
+import { usePaneUrlOpen } from '../hooks/usePaneUrlOpen'
 import type { PaneEdge } from '../utils/layoutTree'
 import { PaneHeader } from './PaneHeader'
 import { PaneStatusBar } from './PaneStatusBar'
+import { PaneUrlOpenNotice } from './PaneUrlOpenNotice'
 import { LayoutActionsContext } from './SplitContainer'
 
 const DEFAULT_DISPLAY: DisplayConfig = { show_header: true, show_status_bar: true }
@@ -33,12 +35,15 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
   const gitInfoEnabled = !ctx?.maximizedPaneId || ctx.maximizedPaneId === pane.id
 
   const { gitInfo, refreshIfStale, refreshNow } = useGitInfo(pane.id, gitInfoEnabled)
+  const urlOpen = usePaneUrlOpen(pane.id)
 
   const { handleResize, connected, dims, sessionState, reconnectFailed, restartSession } = useTerminal({
     sessionId: pane.id,
     container: containerEl,
     repoURL: gitInfo.repo_url,
     onInteraction: refreshIfStale,
+    onLinkActivate: urlOpen.openUrl,
+    onBrowserOpenRequest: urlOpen.requestOpen,
   })
 
   // Observe resize events for this pane
@@ -192,6 +197,13 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
           handleEdgeDrop(edge)
         }}
       >
+        <PaneUrlOpenNotice
+          pendingUrl={urlOpen.pendingUrl}
+          error={urlOpen.error}
+          onConfirm={urlOpen.confirmPendingOpen}
+          onDismiss={urlOpen.dismissPendingOpen}
+          onDismissError={urlOpen.dismissError}
+        />
         {dragActive && !isDragSource && hoverEdge && (
           <div
             data-pane-drop-preview={hoverEdge}
