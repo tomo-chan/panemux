@@ -519,9 +519,34 @@ dependency's breaking change would be. **That pin is `board.TestedAgmsgVersion`
 (`internal/board/agmsg_version.go`), currently `1.2.0`** — the version whose own source
 (`delivery.sh`, `scripts/lib/type-registry.sh`, the per-type `type.conf` manifests) the script
 argument shapes documented here were read from. panemux reads each board-enabled host's
-`<agmsg_path>/VERSION` once at startup and logs a warning when it differs; a mismatch never blocks
-startup, because refusing to run against an untested agmsg would turn a possible incompatibility into
-a certain outage. An install with no `VERSION` file reads as unknown and is not warned about — panemux
+`<agmsg_path>/VERSION` once at startup and logs a warning when that install is one it has no coverage
+for; a mismatch never blocks startup, because refusing to run against an untested agmsg would turn a
+possible incompatibility into a certain outage.
+
+**What counts as "no coverage" is narrower than "not byte-equal to the pin",** and both narrowings
+were paid for:
+
+- **The VERSION file has no single canonical form.** agmsg's repository carries a bare `1.2.0`, but
+  `install.sh` writes a *provenance* string into the install root instead — `git describe` output
+  from a checkout (`v1.2.0`, or `v1.2.0-6-g1a2b3c4` past the tag, `-dirty` on a modified tree),
+  falling back to the bare `VERSION` only for a tarball install (npx/`setup.sh`, which has no `.git`).
+  A byte comparison therefore warned an operator who had installed *exactly* the tested version
+  through agmsg's own documented clone path, on every startup. The leading `v` and any describe tail
+  are stripped before comparing. This was found by running Tier 2 against a real install, and is
+  asserted there (`TestAgmsgContract_InstalledVersionDoesNotFalselyWarn`) rather than only against
+  strings someone believed `install.sh` emits.
+- **A patch release inside the tested minor line is quiet.** agmsg ships roughly every three days
+  (median gap 2.9 days across its first 22 releases), so an operator on a current install is almost
+  never on the exact pinned patch, and moving the pin is this repository's work rather than anything
+  the warning's reader can act on. The silence is bought by coverage rather than assumed: Tier 2's
+  canary runs the real contract against each new agmsg release, so a patch release that breaks the
+  interface surfaces in CI here. Stated plainly — agmsg makes no semver promise for the scripts
+  panemux's write path depends on, so this is a deliberate trade of noise for canary coverage, not a
+  claim that a patch release cannot break anything.
+
+Everything else still warns: an older minor may predate an interface panemux depends on, a newer
+minor or major is exactly where that interface can move, and a version string that cannot be parsed
+is reported rather than assumed to be fine. An install with no `VERSION` file reads as unknown and is not warned about — panemux
 does not claim a mismatch it could not observe — and must be able to *detect* such a break mechanically
 rather than discover it from a pane silently failing to communicate; see [agmsg compatibility
 contract](#agmsg-compatibility-contract).

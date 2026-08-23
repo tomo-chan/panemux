@@ -441,13 +441,22 @@ func TestAgmsgContract_SinceOnEmptyTeamIsEmptyNotAnError(t *testing.T) {
 	assert.Empty(t, rows)
 }
 
-// TestAgmsgContract_InstalledVersionMatchesThePin reports when the install
-// under test is not the version this repository's fixtures and prose were
-// verified against. It is deliberately not a failure: the weekly canary run
-// points at agmsg's latest tag on purpose, and the signal that matters
-// there is whether the behavioral assertions above still hold, not the
-// version string itself.
-func TestAgmsgContract_InstalledVersionMatchesThePin(t *testing.T) {
+// TestAgmsgContract_InstalledVersionDoesNotFalselyWarn asserts what a REAL
+// install writes into its VERSION file, which is the whole reason this
+// belongs in Tier 2 rather than in a hermetic test.
+//
+// agmsg's repository carries a bare "1.2.0", but install.sh writes a
+// provenance string into the install root instead — "v1.2.0" from a
+// checkout on the tag, "v1.2.0-6-g1a2b3c4" past it. panemux compared that
+// to its pin verbatim, so a correctly-pinned install was warned as
+// untested on every startup. A hermetic test can only assert the forms
+// someone believed install.sh emits; this one reads what it actually did.
+//
+// The canary deliberately runs against agmsg's LATEST tag, which is
+// normally outside the pinned line, so a warning there is correct rather
+// than a failure — the assertion applies only when the install under test
+// is one the pin claims to cover.
+func TestAgmsgContract_InstalledVersionDoesNotFalselyWarn(t *testing.T) {
 	root := contractInstall(t)
 
 	data, err := os.ReadFile(filepath.Join(root, "VERSION"))
@@ -455,8 +464,25 @@ func TestAgmsgContract_InstalledVersionMatchesThePin(t *testing.T) {
 		t.Skipf("install has no VERSION file: %v", err)
 	}
 	installed := strings.TrimSpace(string(data))
-	if installed != board.TestedAgmsgVersion {
-		t.Logf("note: contract ran against agmsg %s, while board.TestedAgmsgVersion pins %s",
+	t.Logf("install root VERSION reads %q; board.TestedAgmsgVersion pins %q",
+		installed, board.TestedAgmsgVersion)
+
+	// Strip only the decoration install.sh adds — a leading "v" and a
+	// `git describe` "-<commits>-g<sha>[-dirty]" tail — and see what
+	// release is underneath. This is deliberately a few lines of the test's
+	// own rather than a call into the parser under test: the claim being
+	// made is about what the real installer wrote, not about how panemux
+	// reads it.
+	bare := strings.TrimPrefix(installed, "v")
+	if i := strings.Index(bare, "-"); i >= 0 {
+		bare = bare[:i]
+	}
+	if bare != board.TestedAgmsgVersion {
+		t.Skipf("install is %s, not the pinned %s; this assertion is about the pinned version's own provenance forms",
 			installed, board.TestedAgmsgVersion)
 	}
+
+	assert.Empty(t, board.VersionMismatchWarning("host-a", installed),
+		"an install of the pinned version must not be warned about, "+
+			"whatever provenance form install.sh wrote into VERSION (found %q)", installed)
 }
