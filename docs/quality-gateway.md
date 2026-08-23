@@ -122,7 +122,7 @@ rationale for gate G3.
 | Source | Finding | Consequence here |
 |---|---|---|
 | [DORA 2025](https://cloud.google.com/blog/products/ai-machine-learning/announcing-the-2025-dora-report) | AI adoption now correlates positively with throughput but **still correlates negatively with delivery stability**. AI is an amplifier; strong automated testing, mature version control and fast feedback loops are prerequisites. | The safety net has to be invested in first. panemux's net is *fast*, but nothing measures whether it is *effective*. |
-| [Claude Code best practices](https://code.claude.com/docs/en/best-practices) | Give the agent a check it can run, or "looks done" is the only signal available. Enforcement escalates: in-prompt → `/goal` → **Stop hook (deterministic gate)** → verification subagent. TDD is the strongest pattern. Do not let the author grade its own work. | This repository has no `.claude/` directory: zero hooks, skills or subagents. Every agent-side guard is an advisory document. |
+| [Claude Code best practices](https://code.claude.com/docs/en/best-practices) | Give the agent a check it can run, or "looks done" is the only signal available. Enforcement escalates: in-prompt → `/goal` → **Stop hook (deterministic gate)** → verification subagent. TDD is the strongest pattern. Do not let the author grade its own work. | This repository had no `.claude/` directory at the commit above: zero hooks, skills or subagents, every agent-side guard an advisory document. Rollout item 3 closed that — see gates G1 and G6. |
 | Reported failure modes of AI-written tests | When the same model writes the code and the test, a bug becomes the expected value — a tautological test. Related shapes: asserting a mock's own return value, exact-string matching, order dependence, hard-coded internal helper output. | These break Khorikov's first *and* second pillars simultaneously, and nothing in this repository detects them. |
 | [Spec-driven development](https://github.com/github/spec-kit) | A *constitution* of non-negotiable principles is written once and referenced by every later phase (specify → plan → tasks → implement). | panemux already has this shape: `AGENTS.md` → `DEVELOPMENT.md` / `docs/*`, with [scenarios.md](scenarios.md) as the acceptance ledger. What is missing is enforcement. |
 | [gremlins](https://github.com/go-gremlins/gremlins) and Go mutation testing | Coverage is unreliable as a measure of test quality. gremlins targets small-to-medium modules; a run over a large one can take hours. Diff mode, scoped to new and changed code, is the practical form. | Whole-repository MSI is not a viable target. Scope it to the diff and to pull requests. |
@@ -134,7 +134,7 @@ rationale for gate G3.
 | **Constitution** | `AGENTS.md` indexing `DEVELOPMENT.md` and seven `docs/` files. TDD, test granularity, schema-first and path sanitization are all written down. | — |
 | **Spec** | [scenarios.md](scenarios.md): a use-case ledger with `auto` / `auto (opt-in)` / `manual`, which states that a silently absent row is not a legitimate answer. | No rows at all for the core multiplexer (panes, workspaces, terminal). PR #177 added a user-visible feature and did not add rows either. |
 | **Verification** | One command, `make check`. Enforced by `.githooks/pre-push`, re-run in CI. Alloy model checking. Tier 2 agmsg contract plus a daily canary. | Nothing measures the *efficacy* of the tests. Coverage only reports that a line executed. |
-| **Agent guard** | — | No `.claude/`. The TDD rule ("write tests first, confirm they fail") is stated but **cannot be verified after the fact**. |
+| **Agent guard** | `.claude/settings.json`'s `PostToolUse` and `Stop` hooks (G1, G2) and `.claude/agents/diff-reviewer.md` (G6), added by rollout item 3. | The TDD rule ("write tests first, confirm they fail") is still stated but **cannot be verified after the fact** — that is what red-check (item 4) is for. |
 
 ### The specific risk
 
@@ -165,12 +165,12 @@ Ordering is meaningful: the point is to stop a defect at the cheapest gate that 
 | # | Gate | Protects | Checks | Enforced by | Status |
 |---|---|---|---|---|---|
 | **G0** | Spec | Functional suitability (rework) | The change is tied to a row in [scenarios.md](scenarios.md). A user-visible change adds or updates a row in the same commit. | CI: fail when the diff touches `frontend/src`, `internal/api` or `internal/config` and `scenarios.md` is unchanged; a label grants explicit exemption | Absent |
-| **G1** | Edit | Maintainability | `gofmt -s`, `tsc --noEmit`, and `go vet` on the touched packages only | Claude Code `PostToolUse` hook in `.claude/settings.json` | Absent |
+| **G1** | Edit | Maintainability | `gofmt -s`, `tsc --noEmit`, and `go vet` on the touched packages only | Claude Code `PostToolUse` hook in `.claude/settings.json` | Present — `.claude/hooks/post-edit-check.sh` |
 | **G2** | Unit | Functional suitability, fast feedback | `make test-go`, `make test-frontend` — unchanged | Existing (`make check`, pre-push, CI) | Present |
 | **G3** | Contract | **Resistance to refactoring**, compatibility | (a) HTTP/WS integration through the real `server.New()` router; (b) exhaustiveness check on the route table (every registered route against an expected set); (c) Zod schema round-trips; (d) the agmsg contract | New `make test-contract`, folded into `make check`; (b) as an always-on Go test | Partial — (b) and (d) present, (a) and (c) absent |
 | **G4** | Efficacy | **Protection against regressions** | (a) coverage — scope tracks the implementation, threshold stays at 80%; (b) **red-check**: a changed test must fail when the implementation diff is reverted; (c) mutation score over changed lines only | (a) existing `make check`; (b) and (c) a pull-request CI job, `make efficacy` | Partial ((a) only) |
 | **G5** | Scenario | Functional suitability, interaction capability | Playwright E2E, plus a check that every test named by an `auto` row in `scenarios.md` actually exists | CI, extending `make test-e2e` | Partial (E2E only; no ledger cross-check) |
-| **G6** | Adversarial | All characteristics (design judgement) | A fresh-context review of the diff alone. The session that wrote the code does not grade it. Findings limited to correctness and stated requirements. | A review subagent in `.claude/agents/` plus human review. **Does not block** | Absent |
+| **G6** | Adversarial | All characteristics (design judgement) | A fresh-context review of the diff alone. The session that wrote the code does not grade it. Findings limited to correctness and stated requirements. | A review subagent in `.claude/agents/` plus human review. **Does not block** | Present — `.claude/agents/diff-reviewer.md`; still does not block |
 
 ### The enforcement ladder
 
@@ -181,7 +181,7 @@ up.** A rule sitting on the bottom two rungs must not be described as "enforced"
 |---|---|---|
 | L0 | Written in a document (advisory) | DEVELOPMENT.md's TDD rule is here today. Both humans and agents read it; nobody can confirm it was followed. |
 | L1 | A Makefile target | Runnable by hand, produces pass/fail. The first rung an agent can drive itself. |
-| L2 | An agent hook | Claude Code `PostToolUse` / `Stop` hooks. Unlike `AGENTS.md`, deterministic and impossible to forget. |
+| L2 | An agent hook | Claude Code `PostToolUse` / `Stop` hooks, in `.claude/`. Unlike `AGENTS.md`, deterministic and impossible to forget. gofmt, `go vet` and the touched packages' tests sit here as of rollout item 3. |
 | L3 | A git hook | `.githooks/pre-push`. The last local line of defence. |
 | L4 | A CI job | Unavoidable. Slow checks and checks needing an environment can only live here. |
 | L5 | Branch protection | Blocks the merge. The agmsg contract job already depends on this rung. |
@@ -234,7 +234,7 @@ pre-push and CI. A gate that sacrifices fast feedback gets bypassed.
 |---|---|---|---|---|
 | 1 | Real-router integration harness; single source of truth for the route table plus an exhaustiveness check | G3 | Phase 1 | **Landed.** The table has one definition and the exhaustiveness check pins it; the full HTTP/WS integration half is still open. |
 | 2 | Widen coverage scope (threshold unchanged) | G4(a) | Phases 2 and 5 | Makes ~2,600 previously ungated lines visible. |
-| 3 | `.claude/settings.json` with G1/G2 hooks; a review subagent | G1, G6 | — | Promotes L0 discipline to L2. Closes the agent's own verification loop. |
+| 3 | `.claude/settings.json` with G1/G2 hooks; a review subagent | G1, G6 | — | **Landed.** A `PostToolUse` hook checks the edited file, a `Stop` hook checks what the turn changed, and `.claude/agents/diff-reviewer.md` reviews a diff in a fresh context. `make test-hooks` tests the hooks themselves. |
 | 4 | red-check (`make efficacy`) in pull-request CI | G4(b) | — | Detects tautological tests mechanically. The largest single win under AI-assisted development. |
 | 5 | Core-feature section in `scenarios.md`, ledger cross-check, core E2E | G0, G5 | Phases 4 and 6 | Makes the acceptance ledger real. |
 | 6 | Diff-scoped mutation testing (warn first, gate once stable) | G4(c) | merges with #164 | Measures protection against regressions directly. |
