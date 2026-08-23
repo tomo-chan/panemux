@@ -535,18 +535,29 @@ were paid for:
   are stripped before comparing. This was found by running Tier 2 against a real install, and is
   asserted there (`TestAgmsgContract_InstalledVersionDoesNotFalselyWarn`) rather than only against
   strings someone believed `install.sh` emits.
-- **A patch release inside the tested minor line is quiet.** agmsg ships roughly every three days
-  (median gap 2.9 days across its first 22 releases), so an operator on a current install is almost
-  never on the exact pinned patch, and moving the pin is this repository's work rather than anything
-  the warning's reader can act on. The silence is bought by coverage rather than assumed: Tier 2's
-  canary runs the real contract against each new agmsg release, so a patch release that breaks the
-  interface surfaces in CI here. Stated plainly — agmsg makes no semver promise for the scripts
-  panemux's write path depends on, so this is a deliberate trade of noise for canary coverage, not a
-  claim that a patch release cannot break anything.
+- **A patch release at or past the pinned one, in the same minor line, is quiet.** agmsg ships
+  roughly every three days (median gap 2.9 days across its first 22 releases), so an operator on a
+  current install is almost never on the exact pinned patch, and moving the pin is this repository's
+  work rather than anything the warning's reader can act on. The silence is bought by coverage rather
+  than assumed: Tier 2's canary runs the real contract against each new agmsg release, so a patch
+  release that breaks the interface surfaces in CI here. Stated plainly — agmsg makes no semver
+  promise for the scripts panemux's write path depends on, so this is a deliberate trade of noise for
+  canary coverage, not a claim that a patch release cannot break anything.
 
-Everything else still warns: an older minor may predate an interface panemux depends on, a newer
-minor or major is exactly where that interface can move, and a version string that cannot be parsed
-is reported rather than assumed to be fine. An install with no `VERSION` file reads as unknown and is not warned about — panemux
+The rule is therefore "same minor line, at or past the pinned patch", and the direction matters:
+
+| Installed | | Why |
+|---|---|---|
+| The pinned release, in any of `install.sh`'s provenance forms | quiet | It *is* the tested version |
+| A **newer** patch in the same minor line | quiet | The canary verified that release when it shipped |
+| An **older** patch in the same minor line | warns | Never went through the canary, and may predate whatever the pin was moved for |
+| Any other minor, or any other major | warns | Exactly where agmsg's script interface can move |
+| A prerelease, or a string that will not parse | warns | Not the tested build; panemux does not assume about what it cannot read |
+| No `VERSION` file at all | quiet | panemux does not claim a mismatch it could not observe |
+
+Note that the older-patch row is unreachable while the pin's patch is `0`, as it is today — no
+`1.2.x` is older than `1.2.0`. It first takes effect on a pin bump, which is why `releaseCovered` is
+split from the pin and tested at that boundary directly rather than only through the pinned value. An install with no `VERSION` file reads as unknown and is not warned about — panemux
 does not claim a mismatch it could not observe — and must be able to *detect* such a break mechanically
 rather than discover it from a pane silently failing to communicate; see [agmsg compatibility
 contract](#agmsg-compatibility-contract).

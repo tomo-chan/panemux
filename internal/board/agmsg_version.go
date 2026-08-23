@@ -160,7 +160,8 @@ func describeSuffixIndex(v string) int {
 //     pin of "1.2.0" and was warned about on every startup. Every one of
 //     those warnings was false, and a warning that is usually false trains
 //     its reader to skip the one that is not.
-//  2. **A patch release inside the tested minor line.** agmsg ships roughly
+//  2. **A patch release at or past the pinned one, in the same minor line.**
+//     agmsg ships roughly
 //     every three days, so an operator on a current install is almost never
 //     on the exact pinned patch, and moving the pin is this repository's
 //     work rather than something the warning's reader can act on. What
@@ -176,7 +177,9 @@ func describeSuffixIndex(v string) int {
 // Everything else still warns — an older minor may predate an interface
 // panemux depends on, a newer minor or major is exactly where that
 // interface can move, and a version this cannot parse is reported rather
-// than assumed to be fine.
+// than assumed to be fine. A patch OLDER than the pin warns too, for the
+// reason releaseCovered gives: only releases from the pin forward have been
+// through the canary.
 func VersionMismatchWarning(host, installed string) string {
 	// Unknown version: panemux does not claim a mismatch it could not
 	// observe. agmsg installs predating the VERSION file exist.
@@ -193,9 +196,9 @@ func VersionMismatchWarning(host, installed string) string {
 	)
 }
 
-// coveredByTestedVersion reports whether an installed version string falls
-// inside the tested minor line at or past the pinned patch. A version
-// neither side can parse is never covered.
+// coveredByTestedVersion reports whether an installed version string is one
+// this repository has coverage for. A version neither side can parse is
+// never covered.
 func coveredByTestedVersion(installed string) bool {
 	got, ok := parseAgmsgRelease(installed)
 	if !ok {
@@ -205,5 +208,22 @@ func coveredByTestedVersion(installed string) bool {
 	if !ok {
 		return false
 	}
+	return releaseCovered(got, want)
+}
+
+// releaseCovered is the coverage rule itself, split from the pin so it can
+// be tested at boundaries the current pin cannot reach — with a pinned
+// patch of 0, no same-minor release is older than it, so the last clause
+// below is unreachable today and would first take effect on a pin bump,
+// which is exactly when nobody would be looking for it.
+//
+// Covered means: the same minor line, at or past the pinned patch.
+//
+// The asymmetry is deliberate. A NEWER patch is quiet because Tier 2's
+// canary verifies each agmsg release as it ships, so those versions have
+// been exercised even though the pin has not moved. An OLDER patch has no
+// such backing — it may predate a fix or behavior the pin was moved for —
+// so it is treated like any other version outside the tested line.
+func releaseCovered(got, want agmsgRelease) bool {
 	return got.major == want.major && got.minor == want.minor && got.patch >= want.patch
 }

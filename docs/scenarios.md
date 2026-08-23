@@ -125,7 +125,8 @@ See [agent-board.md](agent-board.md#agmsg-compatibility-contract) for the two ti
 | G9 | An agmsg release changes behavior | The canary fails against agmsg's latest tag, before anyone here bumps the pin | `auto`: `.github/workflows/agmsg-contract.yml`, `schedule` trigger (daily 06:00 UTC, doing real work once per new agmsg release) |
 | G10 | A PR bumps `board.TestedAgmsgVersion` | The contract runs against the new pin and blocks the merge if real behavior differs | `auto`: same workflow, `pull_request` trigger — see [maintenance.md](maintenance.md#the-agmsg-compatibility-contract-job) for the branch-protection step this depends on |
 | G11 | An operator installs exactly the pinned agmsg | No version warning at startup, whichever install path they used — `install.sh` writes `v1.2.0`, not `1.2.0` | `auto`: `TestVersionMismatchWarning_InstallProvenanceForms`; `auto (opt-in)`: `TestAgmsgContract_InstalledVersionDoesNotFalselyWarn` against the real installer |
-| G12 | An operator runs a newer patch of agmsg | No warning — that line is what the canary verifies per release | `auto`: `TestVersionMismatchWarning_PatchReleasesInTheTestedLineAreQuiet` |
+| G12 | An operator runs a newer patch of agmsg | No warning — the canary verified that release when it shipped | `auto`: `TestVersionMismatchWarning_PatchReleasesInTheTestedLineAreQuiet` |
+| G12a | An operator runs a patch *older* than the pin | Warned — it never went through the canary. Unreachable while the pin's patch is 0, so the rule is tested apart from the pin | `auto`: `TestReleaseCovered` |
 | G13 | An operator runs a different minor/major, or an unreadable version | Warned, naming the version found and the pin | `auto`: `TestVersionMismatchWarning_StillWarnsWhereItMatters` |
 
 ## Not covered

@@ -137,7 +137,7 @@ func TestVersionMismatchWarning_InstallProvenanceForms(t *testing.T) {
 // startup says nothing they can act on: bumping the pin is this
 // repository's work, not theirs.
 //
-// A patch release inside the tested minor line is therefore quiet, and that
+// A patch release at or past the pinned one is therefore quiet, and that
 // silence is bought by something real rather than assumed — Tier 2's canary
 // runs the contract against each new agmsg release (see
 // docs/agent-board.md's agmsg compatibility contract). Stated plainly:
@@ -147,12 +147,13 @@ func TestVersionMismatchWarning_InstallProvenanceForms(t *testing.T) {
 func TestVersionMismatchWarning_PatchReleasesInTheTestedLineAreQuiet(t *testing.T) {
 	for _, installed := range []string{"1.2.1", "v1.2.2", "1.2.17"} {
 		assert.Empty(t, VersionMismatchWarning("host-a", installed),
-			"%q is a patch release in the tested %s line, which the canary covers", installed, TestedAgmsgVersion)
+			"%q is at or past the pinned %s in the same minor line, which the canary covers",
+			installed, TestedAgmsgVersion)
 	}
 }
 
 // TestVersionMismatchWarning_StillWarnsWhereItMatters pins what the
-// narrowing above must NOT swallow. Anything outside the tested minor line,
+// narrowing above must NOT swallow. Anything outside the covered set,
 // in either direction, still warns — that is where agmsg's script interface
 // can have moved without the canary having said so about the version this
 // operator is actually running.
@@ -178,6 +179,37 @@ func TestVersionMismatchWarning_StillWarnsWhereItMatters(t *testing.T) {
 			assert.Contains(t, warning, tt.installed,
 				"the warning must name the string actually found on the host, so it can be located")
 			assert.Contains(t, warning, TestedAgmsgVersion)
+		})
+	}
+}
+
+// TestReleaseCovered pins the coverage rule at boundaries the current pin
+// cannot reach. TestedAgmsgVersion's patch is 0, so no same-minor release is
+// older than it and VersionMismatchWarning alone cannot exercise the
+// older-patch branch — it would first take effect on a pin bump, which is
+// exactly when an unnoticed change of behavior would be most costly.
+func TestReleaseCovered(t *testing.T) {
+	pin := agmsgRelease{major: 1, minor: 2, patch: 5}
+
+	tests := []struct {
+		name      string
+		installed agmsgRelease
+		covered   bool
+	}{
+		{"the pinned release itself", agmsgRelease{1, 2, 5}, true},
+		{"a newer patch is covered by the canary", agmsgRelease{1, 2, 6}, true},
+		{"a much newer patch, same line", agmsgRelease{1, 2, 40}, true},
+		{"an older patch has no canary backing", agmsgRelease{1, 2, 4}, false},
+		{"the first patch of the tested minor", agmsgRelease{1, 2, 0}, false},
+		{"a newer minor is where the interface moves", agmsgRelease{1, 3, 0}, false},
+		{"an older minor may predate what panemux needs", agmsgRelease{1, 1, 99}, false},
+		{"a newer major, all the more so", agmsgRelease{2, 0, 0}, false},
+		{"an older major", agmsgRelease{0, 9, 9}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.covered, releaseCovered(tt.installed, pin))
 		})
 	}
 }
