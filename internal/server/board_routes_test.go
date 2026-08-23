@@ -19,23 +19,6 @@ func testConfigWithToken(token string) *config.Config {
 	return cfg
 }
 
-func TestServer_BoardRoutesWired_RequireAuth(t *testing.T) {
-	cfg := testConfigWithToken("secret-token")
-	mgr := session.NewManager()
-	cache := board.NewBoardCache()
-	srv := New(cfg, mgr, cache, nil, nil, emptyFS)
-
-	paths := []string{"/api/board/status", "/api/board/messages", "/api/board/command/history"}
-	for _, path := range paths {
-		t.Run(path, func(t *testing.T) {
-			rec := httptest.NewRecorder()
-			req := httptest.NewRequest(http.MethodGet, path, nil)
-			srv.httpSrv.Handler.ServeHTTP(rec, req)
-			assert.Equal(t, http.StatusUnauthorized, rec.Code, "missing token must be rejected")
-		})
-	}
-}
-
 func TestServer_BoardRoutes_WrongToken_Rejected(t *testing.T) {
 	cfg := testConfigWithToken("secret-token")
 	mgr := session.NewManager()

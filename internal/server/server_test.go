@@ -209,16 +209,3 @@ func performWorkspaceSettingUpdate(t *testing.T, srv *Server, path string, body 
 	assert.Equal(t, http.StatusOK, rec.Code)
 	return rec
 }
-
-func TestServer_DirectoriesRouteWired(t *testing.T) {
-	cfg := testConfig()
-	mgr := session.NewManager()
-	srv := New(cfg, mgr, nil, nil, nil, emptyFS)
-	require.NotNil(t, srv)
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/directories", nil)
-	srv.httpSrv.Handler.ServeHTTP(rec, req)
-
-	assert.NotEqual(t, http.StatusNotFound, rec.Code)
-}

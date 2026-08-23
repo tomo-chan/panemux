@@ -89,33 +89,13 @@ func setupRouter(cfg *config.Config, mgr *session.Manager) *chi.Mux {
 
 func setupRouterWithHandler(h *Handler) *chi.Mux {
 	r := chi.NewRouter()
-	r.Get("/api/layout", h.GetLayout)
-	r.Put("/api/layout", h.PutLayout)
-	r.Get("/api/workspaces", h.GetWorkspaces)
-	r.Post("/api/workspaces", h.PostWorkspace)
-	r.Put("/api/workspaces/active", h.PutActiveWorkspace)
-	r.Put("/api/workspaces/tab-position", h.PutWorkspaceTabPosition)
-	r.Put("/api/workspaces/vertical-bar-width", h.PutWorkspaceVerticalBarWidth)
-	r.Put("/api/workspaces/{id}", h.PutWorkspace)
-	r.Delete("/api/workspaces/{id}", h.DeleteWorkspace)
-	r.Put("/api/workspaces/{id}/layout", h.PutWorkspaceLayout)
-	r.Get("/api/sessions", h.GetSessions)
-	r.Post("/api/sessions", h.PostSession)
-	r.Delete("/api/sessions/{id}", h.DeleteSession)
-	r.Post("/api/sessions/{id}/restart", h.RestartSession)
-	r.Post("/api/sessions/{id}/open-url", h.PostOpenURL)
-	r.Get("/api/sessions/{id}/git-info", h.GetGitInfo)
-	r.Get("/api/display", h.GetDisplay)
-	r.Get("/api/ssh-connections", h.GetSSHConnections)
-	r.Get("/api/ssh-config/hosts", h.GetSSHConfigHosts)
-	r.Post("/api/ssh-config/hosts", h.PostSSHConfigHost)
-	r.Get("/api/detect-shell", h.GetDetectShell)
-	r.Get("/api/directories", h.GetDirectories)
-	r.Get("/api/session-token", h.GetBoardSessionToken)
-	r.Get("/api/board/status", h.GetBoardStatus)
-	r.Get("/api/board/messages", h.GetBoardMessages)
-	r.Post("/api/board/broadcast", h.PostBoardBroadcast)
-	r.Get("/api/board/command/history", h.GetBoardCommandHistory)
+	// Mount is the same route table internal/server wires in production, so
+	// these tests exercise the real paths, methods and mount structure
+	// rather than a hand-maintained copy of them. boardAuth is nil here:
+	// whether the bearer token is enforced is internal/server's contract,
+	// covered by its own tests against the router the binary really serves.
+	// See docs/quality-gateway.md's gate G3.
+	h.Mount(r, nil)
 	return r
 }
 
@@ -1649,15 +1629,9 @@ func (m *mockRemoteGitSession) InspectGitContext(cwd string) (session.GitContext
 	return ctx, nil
 }
 
-func setupRouterWithVSCode(h *Handler) *chi.Mux {
-	r := setupRouterWithHandler(h)
-	r.Post("/api/sessions/{id}/open-vscode", h.PostOpenVSCode)
-	return r
-}
-
 func TestPostOpenVSCode_NotFound_404(t *testing.T) {
 	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
-	r := setupRouterWithVSCode(h)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/sessions/missing/open-vscode", nil)
@@ -1670,7 +1644,7 @@ func TestPostOpenVSCode_NoCWDGetter_422(t *testing.T) {
 	mgr := session.NewManager()
 	mgr.Add(newMockSession("s1"))
 	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
-	r := setupRouterWithVSCode(h)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/sessions/s1/open-vscode", nil)
@@ -1729,7 +1703,7 @@ func TestPostOpenVSCode_EndedAgentKeepsLastWorktree(t *testing.T) {
 	mgr.Add(sess)
 	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
 	h.codeBinaryPath = "/bin/echo"
-	r := setupRouterWithVSCode(h)
+	r := setupRouterWithHandler(h)
 
 	resp := postOpenVSCodeOKWithRouter(t, r, "local-sticky")
 	assert.Equal(t, worktreeDir, resp.Cwd)
@@ -1754,7 +1728,7 @@ func TestPostOpenVSCode_StaleStickyWorktreeFallsBackToPaneCWD(t *testing.T) {
 	mgr.Add(sess)
 	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
 	h.codeBinaryPath = "/bin/echo"
-	r := setupRouterWithVSCode(h)
+	r := setupRouterWithHandler(h)
 
 	resp := postOpenVSCodeOKWithRouter(t, r, "local-open-stale")
 	assert.Equal(t, worktreeDir, resp.Cwd)
@@ -1813,7 +1787,7 @@ func postOpenVSCodeOK(t *testing.T, id string, sess session.Session) openVSCodeR
 	mgr.Add(sess)
 	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
 	h.codeBinaryPath = "/bin/echo"
-	r := setupRouterWithVSCode(h)
+	r := setupRouterWithHandler(h)
 
 	return postOpenVSCodeOKWithRouter(t, r, id)
 }
@@ -1841,7 +1815,7 @@ func TestPostOpenVSCode_Local_DeletedDir_422(t *testing.T) {
 	})
 	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
 	h.codeBinaryPath = "/bin/echo"
-	r := setupRouterWithVSCode(h)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/sessions/local-del/open-vscode", nil)
@@ -1869,7 +1843,7 @@ func TestPostOpenVSCode_SSH_InvalidConnName_422(t *testing.T) {
 	})
 	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
 	h.codeBinaryPath = "/bin/echo"
-	r := setupRouterWithVSCode(h)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/sessions/ssh-bad/open-vscode", nil)
@@ -2012,15 +1986,9 @@ func writeFakeGHBinary(t *testing.T, body string) string {
 	return path
 }
 
-func setupRouterWithGitInfo(h *Handler) *chi.Mux {
-	r := setupRouterWithHandler(h)
-	r.Get("/api/sessions/{id}/git-info", h.GetGitInfo)
-	return r
-}
-
 func TestGetGitInfo_NotFound_404(t *testing.T) {
 	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
-	r := setupRouterWithGitInfo(h)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/missing/git-info", nil)
@@ -2033,7 +2001,7 @@ func TestGetGitInfo_NoCWDGetter_IsGitFalse(t *testing.T) {
 	mgr := session.NewManager()
 	mgr.Add(newMockSession("s1"))
 	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
-	r := setupRouterWithGitInfo(h)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/s1/git-info", nil)
@@ -2053,7 +2021,7 @@ func TestGetGitInfo_NotAGitRepo_IsGitFalse(t *testing.T) {
 		cwd:         dir,
 	})
 	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
-	r := setupRouterWithGitInfo(h)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/local1/git-info", nil)
@@ -2084,7 +2052,7 @@ func TestGetGitInfo_NotAGitRepo_LogsCauseAndRemediation(t *testing.T) {
 	})
 
 	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
-	r := setupRouterWithGitInfo(h)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/local-log/git-info", nil)
@@ -2110,7 +2078,7 @@ func TestGetGitInfo_IsGitRepo_ReturnsBranchAndRepo(t *testing.T) {
 		cwd:         dir,
 	})
 	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
-	r := setupRouterWithGitInfo(h)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/local2/git-info", nil)
@@ -2147,7 +2115,7 @@ func TestGetGitInfo_IsGitRepo_WithLinkedPR_ReturnsPRInfo(t *testing.T) {
 		t,
 		"#!/bin/sh\necho '{\"url\":\"https://github.com/example/panemux/pull/123\",\"number\":123}'\n",
 	)
-	r := setupRouterWithGitInfo(h)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/local-pr/git-info", nil)
@@ -2174,7 +2142,7 @@ func TestGetGitInfo_SubdirOfGitRepo_ReturnsBranchAndRepo(t *testing.T) {
 		cwd:         subdir,
 	})
 	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
-	r := setupRouterWithGitInfo(h)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/sub1/git-info", nil)
@@ -2196,7 +2164,7 @@ func TestGetGitInfo_PRLookupFails_StillReturnsGitInfo(t *testing.T) {
 	})
 	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
 	h.ghBinaryPath = writeFakeGHBinary(t, "#!/bin/sh\nexit 1\n")
-	r := setupRouterWithGitInfo(h)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/local-pr-miss/git-info", nil)
@@ -2222,7 +2190,7 @@ func TestGetGitInfo_DetachedHead_StillReturnsGitInfo(t *testing.T) {
 		cwd:         dir,
 	})
 	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
-	r := setupRouterWithGitInfo(h)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/detached/git-info", nil)
@@ -2264,7 +2232,7 @@ func TestGetGitInfo_ActiveAgentWorkdir_PrefersWorktreeBranch(t *testing.T) {
 		t,
 		"#!/bin/sh\necho '{\"url\":\"https://github.com/example/panemux/pull/456\",\"number\":456}'\n",
 	)
-	r := setupRouterWithGitInfo(h)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/local-worktree/git-info", nil)
@@ -2300,7 +2268,7 @@ func TestGetGitInfo_MultipleActiveWorktrees_ReturnsAllWorktreesWithPRs(t *testin
 		"*) exit 1 ;;\n"+
 		"esac\n",
 	)
-	r := setupRouterWithGitInfo(h)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/local-multi/git-info", nil)
@@ -2345,7 +2313,7 @@ func TestGetGitInfo_MultipleActiveWorktrees_DuplicateRootDeduped(t *testing.T) {
 		t,
 		"#!/bin/sh\necho '{\"url\":\"https://github.com/example/panemux/pull/111\",\"number\":111}'\n",
 	)
-	r := setupRouterWithGitInfo(h)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/local-dup/git-info", nil)
@@ -2378,7 +2346,7 @@ func TestGetGitInfo_MultipleActiveWorktrees_OnePRLookupFails_OthersStillReturned
 		"*) exit 1 ;;\n"+
 		"esac\n",
 	)
-	r := setupRouterWithGitInfo(h)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/local-partial/git-info", nil)
@@ -2414,7 +2382,7 @@ func TestGetGitInfo_EndedAgentFallsBackToPaneCWD(t *testing.T) {
 		t,
 		"#!/bin/sh\necho '{\"url\":\"https://github.com/example/panemux/pull/789\",\"number\":789}'\n",
 	)
-	r := setupRouterWithGitInfo(h)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/local-fallback/git-info", nil)
@@ -2444,7 +2412,7 @@ func TestGetGitInfo_EndedAgentKeepsLastWorktree(t *testing.T) {
 		t,
 		"#!/bin/sh\necho '{\"url\":\"https://github.com/example/panemux/pull/999\",\"number\":999}'\n",
 	)
-	r := setupRouterWithGitInfo(h)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/local-sticky/git-info", nil)
@@ -2482,7 +2450,7 @@ func TestGetGitInfo_StaleStickyWorktreeFallsBackToPaneCWD(t *testing.T) {
 	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
 	now := time.Now()
 	h.nowFn = func() time.Time { return now }
-	r := setupRouterWithGitInfo(h)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/local-stale/git-info", nil)
@@ -2629,7 +2597,7 @@ func TestGetGitInfo_RemoteEndedAgentKeepsLastWorktree(t *testing.T) {
 		t,
 		"#!/bin/sh\necho '{\"url\":\"https://github.com/example/panemux/pull/654\",\"number\":654}'\n",
 	)
-	r := setupRouterWithGitInfo(h)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/ssh-sticky/git-info", nil)
@@ -2662,7 +2630,7 @@ func TestGetGitInfo_GitNotFound_IsGitFalse(t *testing.T) {
 	prev := gitExistsFn
 	gitExistsFn = func() error { return errors.New("git not found") }
 	t.Cleanup(func() { gitExistsFn = prev })
-	r := setupRouterWithGitInfo(h)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/local3/git-info", nil)
@@ -2685,7 +2653,7 @@ func TestGetGitInfo_SecondRequestWithinTTL_ServesCachedResponseWithoutRecomputin
 	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
 	now := time.Now()
 	h.nowFn = func() time.Time { return now }
-	r := setupRouterWithGitInfo(h)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/local-cached/git-info", nil)
@@ -2721,7 +2689,7 @@ func TestGetGitInfo_RequestAfterTTLExpires_Recomputes(t *testing.T) {
 	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
 	now := time.Now()
 	h.nowFn = func() time.Time { return now }
-	r := setupRouterWithGitInfo(h)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/local-expired/git-info", nil)
@@ -2749,7 +2717,7 @@ func TestGetGitInfo_AfterSessionRecreatedWithSameID_DoesNotServeOldSessionsCache
 	mgr := session.NewManager()
 	mgr.Add(oldSess)
 	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
-	r := setupRouterWithGitInfo(h)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/local-recreated/git-info", nil)
@@ -2807,7 +2775,7 @@ func TestGetGitInfo_RemoteGitContext_ReturnsBranchAndRepo(t *testing.T) {
 	})
 
 	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
-	r := setupRouterWithGitInfo(h)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/ssh-remote/git-info", nil)
@@ -2852,7 +2820,7 @@ func TestGetGitInfo_RemoteGitContextFailure_LogsCauseAndRemediation(t *testing.T
 	})
 
 	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
-	r := setupRouterWithGitInfo(h)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/ssh-log/git-info", nil)
@@ -2894,7 +2862,7 @@ func TestGetGitInfo_RemoteActiveWorkdir_PrefersRemoteWorktreeBranch(t *testing.T
 	})
 
 	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
-	r := setupRouterWithGitInfo(h)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/ssh-worktree/git-info", nil)
@@ -2928,7 +2896,7 @@ func TestGetGitInfo_RemoteGitContext_WithOrigin_ReturnsRepoURL(t *testing.T) {
 	})
 
 	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
-	r := setupRouterWithGitInfo(h)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/ssh-remote-origin/git-info", nil)
@@ -2961,7 +2929,7 @@ func TestGetGitInfo_RemoteGitContext_WithSSHConfigAliasOrigin_ReturnsResolvedRep
 
 	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
 	h.sshConfigPath = writeTempSSHConfigForAPI(t, "Host github-work\n    HostName github.com\n    User git\n")
-	r := setupRouterWithGitInfo(h)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/ssh-remote-alias-origin/git-info", nil)
