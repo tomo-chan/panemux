@@ -20,13 +20,16 @@ package board_test
 // must never mutate the operator's real one.
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -40,20 +43,23 @@ import (
 // contributor without agmsg installed still gets a green `make check`.
 const agmsgPathEnv = "PANEMUX_AGMSG_PATH"
 
-// watchProbeTimeout bounds how long watch.sh is allowed to run. It is a
-// streaming process that never exits on its own, so the timeout is the exit
-// condition; it only has to exceed the two grace periods below.
+// watchProbeTimeout is the hard bound on one watch.sh probe. It is a
+// streaming process that never exits on its own, so a deadline is the exit
+// condition; the probe normally finishes well inside this.
 const watchProbeTimeout = 30 * time.Second
 
-// watchStartupGrace gives watch.sh time to resolve its subscription before
-// the first message is sent, and watchDeliveryGrace gives it time to scan
-// and print afterwards. Both are wall-clock waits because watch.sh's only
-// readiness signal is for exclusive (actas) watchers, which the broad
-// watcher under test here deliberately is not.
-const (
-	watchStartupGrace  = 4 * time.Second
-	watchDeliveryGrace = 5 * time.Second
-)
+// watchPollInterval is how often the watcher rescans the store, passed via
+// agmsg's own AGMSG_WATCH_INTERVAL override. The default is 5 seconds, which
+// is also roughly how long a test is willing to wait — so a fixed sleep and
+// one scan cycle were the same order of magnitude, and the probe raced the
+// watcher. Shortening the interval and waiting on the delivery itself
+// (rather than on the clock) is what makes this deterministic.
+const watchPollInterval = "1"
+
+// watchSettle is how long to keep reading after the expected message has
+// arrived, so "the other pane's message did NOT arrive" is a statement about
+// several completed scans rather than about when the test stopped looking.
+const watchSettle = 3 * time.Second
 
 // contractInstall copies the agmsg install named by PANEMUX_AGMSG_PATH into
 // a temp directory and returns its scripts/ directory, skipping the test
@@ -109,32 +115,93 @@ func contractScripts(t *testing.T) string {
 	return filepath.Join(contractInstall(t), "scripts")
 }
 
-// runScript runs one agmsg script to completion and returns its combined
-// output, failing the test if it exits non-zero.
+// agmsgEnv declares which process agmsg should treat as the enclosing agent
+// process for an invocation.
+//
+// This is not incidental plumbing — leaving it unset is what made these
+// tests pass locally and fail in CI. agmsg keys its actas exclusivity locks
+// on an "instance id" of "<session_id>.<agent pid>", and a lock is live only
+// while that pid is (scripts/lib/actas-lock.sh, scripts/lib/instance-id.sh).
+// It resolves the pid by walking its own ancestors looking for an agent
+// process of the given type, so a test run from inside a real Claude Code
+// session silently inherited that session's pid and every lock looked live,
+// while the same test on a CI runner — no agent process anywhere in the
+// tree — fell back to a bare session id, found no live instance, and treated
+// every lock as stale and reclaimable. The assertions were reading the
+// harness's own environment rather than agmsg's behavior.
+//
+// AGMSG_AGENT_PID is agmsg's own documented override for exactly this
+// (agmsg_agent_pid in scripts/lib/resolve-project.sh takes any live numeric
+// pid without requiring it to look like an agent), so each invocation here
+// says which process stands for its session instead of inheriting whatever
+// happened to launch the test.
+func agmsgEnv(agentPID int) []string {
+	return append(os.Environ(), fmt.Sprintf("AGMSG_AGENT_PID=%d", agentPID))
+}
+
+// liveAgentPID starts a placeholder process standing in for another live
+// agent session, and returns its pid. It is killed when the test ends, which
+// is what makes the lock it owns become reclaimable.
+func liveAgentPID(t *testing.T) (pid int, kill func()) {
+	t.Helper()
+
+	cmd := exec.Command("sleep", "600")
+	require.NoError(t, cmd.Start())
+
+	var once sync.Once
+	kill = func() {
+		once.Do(func() {
+			_ = cmd.Process.Kill()
+			_, _ = cmd.Process.Wait()
+		})
+	}
+	t.Cleanup(kill)
+
+	return cmd.Process.Pid, kill
+}
+
+// runScript runs one agmsg script to completion as the test's own process
+// and returns its combined output, failing the test if it exits non-zero.
 func runScript(t *testing.T, scripts, name string, args ...string) string {
+	t.Helper()
+	return runScriptAs(t, scripts, os.Getpid(), name, args...)
+}
+
+// runScriptAs is runScript for an invocation that must belong to a specific
+// agent process — see agmsgEnv.
+func runScriptAs(t *testing.T, scripts string, agentPID int, name string, args ...string) string {
 	t.Helper()
 
 	cmd := exec.Command(filepath.Join(scripts, name), args...) //nolint:gosec // fixed script name, test-local paths
+	cmd.Env = agmsgEnv(agentPID)
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, "%s %v failed: %s", name, args, out)
 	return string(out)
 }
 
-// watchDelivery starts watch.sh for one session, sends the given messages
-// once it is running, and returns everything the watcher printed on stdout
-// — which is the delivery stream itself, one line per message it decided
-// this session should receive. stderr is returned alongside because that is
-// where watch.sh reports which pairs it skipped.
+// watchDelivery sends the given messages, then runs watch.sh for one session
+// and returns everything it delivered on stdout — one line per message it
+// decided this session should receive — alongside its stderr, where it
+// reports which pairs it skipped.
 //
-// Delivery is the observable this test asserts on deliberately. watch.sh
-// prints nothing at all about the pairs it resolved when nothing is
-// skipped, so "which identities did it subscribe to" cannot be read off its
-// logs in the very case that matters; what a person actually experiences —
-// a message for another pane arriving in this pane — is visible either way.
-// watch.sh streams forever by design, so the deadline is the exit
-// condition rather than an error.
-func watchDelivery(t *testing.T, scripts, sessionID, project string, send [][]string) (stdout, stderr string) {
+// Delivery is the observable these tests assert on deliberately. watch.sh
+// prints nothing at all about the pairs it resolved when it skips none, so
+// "which identities did it subscribe to" cannot be read off its logs in the
+// very case that matters; what a person actually experiences — a message for
+// another pane arriving in this pane — is visible either way.
+//
+// The messages are sent BEFORE the watcher starts, and the watcher delivers
+// that backlog on its first scan. That is not incidental: sending afterwards
+// means racing an unobservable startup (a broad watcher signals readiness
+// only in actas mode), which is what an earlier fixed-sleep version of this
+// helper did, and it failed in CI while passing locally. Waiting on the
+// delivery rather than on the clock removes the race instead of widening it.
+func watchDelivery(t *testing.T, scripts, sessionID, project, expect string, send [][]string) (stdout, stderr string) {
 	t.Helper()
+
+	for _, args := range send {
+		runScript(t, scripts, "send.sh", args...)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), watchProbeTimeout)
 	defer cancel()
@@ -142,25 +209,50 @@ func watchDelivery(t *testing.T, scripts, sessionID, project string, send [][]st
 	//nolint:gosec // fixed script name under a test-local copy of the install
 	cmd := exec.CommandContext(ctx,
 		filepath.Join(scripts, "watch.sh"), sessionID, project, "claude-code")
-	var outBuf, errBuf bytes.Buffer
-	cmd.Stdout = &outBuf
+	// The watcher is this test process's own session, distinct from the
+	// separate live process that owns any claim under test.
+	cmd.Env = append(agmsgEnv(os.Getpid()), "AGMSG_WATCH_INTERVAL="+watchPollInterval)
+
+	outPipe, err := cmd.StdoutPipe()
+	require.NoError(t, err)
+	var errBuf bytes.Buffer
 	cmd.Stderr = &errBuf
 	require.NoError(t, cmd.Start())
 
-	// watch.sh resolves its subscription before it can deliver anything, so
-	// a message sent too early is written to the store while the watcher is
-	// still starting. It would still be picked up on a later scan, but this
-	// keeps the test asserting on prompt delivery rather than on catch-up.
-	time.Sleep(watchStartupGrace)
-	for _, args := range send {
-		runScript(t, scripts, "send.sh", args...)
+	var mu sync.Mutex
+	var outBuf bytes.Buffer
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		scanner := bufio.NewScanner(outPipe)
+		for scanner.Scan() {
+			mu.Lock()
+			outBuf.WriteString(scanner.Text())
+			outBuf.WriteString("\n")
+			mu.Unlock()
+		}
+	}()
+
+	delivered := func() string {
+		mu.Lock()
+		defer mu.Unlock()
+		return outBuf.String()
 	}
-	time.Sleep(watchDeliveryGrace)
+
+	// Wait for the message this session is definitely entitled to. Anything
+	// else it was going to receive arrives in the same scan pass.
+	require.Eventually(t, func() bool {
+		return strings.Contains(delivered(), expect)
+	}, watchProbeTimeout-watchSettle, 200*time.Millisecond,
+		"the watcher never delivered %q, which this session is entitled to; stderr: %s", expect, errBuf.String())
+
+	time.Sleep(watchSettle)
 
 	_ = cmd.Process.Kill()
 	_ = cmd.Wait()
+	<-done
 
-	return outBuf.String(), errBuf.String()
+	return delivered(), errBuf.String()
 }
 
 // TestAgmsgContract_TwoAgentsInOneProjectNeedTheClaim is the mechanical
@@ -190,17 +282,20 @@ func TestAgmsgContract_TwoAgentsInOneProjectNeedTheClaim(t *testing.T) {
 	forB := []string{"contract", "pane-x", "pane-b", "message-for-pane-b", "--force"}
 
 	// Without a claim, pane-b's watcher receives pane-a's message too.
-	unclaimed, unclaimedErr := watchDelivery(t, scripts, "sid-b", project, [][]string{forA, forB})
+	unclaimed, unclaimedErr := watchDelivery(t, scripts, "sid-b", project, "message-for-pane-b", [][]string{forA, forB})
 	assert.Contains(t, unclaimed, "message-for-pane-a",
 		"with no claim held, pane-b's watcher must still receive pane-a's message — the exposure this guards")
 	assert.Contains(t, unclaimed, "message-for-pane-b")
 	assert.NotContains(t, unclaimedErr, "skipping pairs held by other sessions")
 
 	// The remedy panemux's bootstrap instruction now tells the agent to run.
-	claim := runScript(t, scripts, "actas-claim.sh", project, "claude-code", "pane-a", "sid-a")
+	// The claim is taken by a *separate* live process, because that is what
+	// agmsg checks: a lock survives only while its owning agent process does.
+	ownerPID, _ := liveAgentPID(t)
+	claim := runScriptAs(t, scripts, ownerPID, "actas-claim.sh", project, "claude-code", "pane-a", "sid-a")
 	assert.Contains(t, claim, "status=ok", "actas-claim.sh must report the claim it took")
 
-	claimed, claimedErr := watchDelivery(t, scripts, "sid-b", project, [][]string{forA, forB})
+	claimed, claimedErr := watchDelivery(t, scripts, "sid-b", project, "message-for-pane-b", [][]string{forA, forB})
 	assert.NotContains(t, claimed, "message-for-pane-a",
 		"pane-a is claimed by another session, so pane-b's watcher must not receive its messages")
 	assert.Contains(t, claimed, "message-for-pane-b",
@@ -218,18 +313,29 @@ func TestAgmsgContract_ClaimIsRefusedWhileAnotherSessionHoldsIt(t *testing.T) {
 	project := t.TempDir()
 
 	runScript(t, scripts, "join.sh", "contract", "pane-a", "claude-code", project, "--force")
-	first := runScript(t, scripts, "actas-claim.sh", project, "claude-code", "pane-a", "sid-a")
+
+	ownerPID, killOwner := liveAgentPID(t)
+	first := runScriptAs(t, scripts, ownerPID, "actas-claim.sh", project, "claude-code", "pane-a", "sid-a")
 	require.Contains(t, first, "status=ok")
 
 	// Not runScript: a refused claim exits non-zero by design (1 = held),
 	// and that exit code is part of the contract.
 	cmd := exec.Command(filepath.Join(scripts, "actas-claim.sh"), //nolint:gosec // fixed script name, test-local paths
 		project, "claude-code", "pane-a", "sid-other")
+	cmd.Env = agmsgEnv(os.Getpid())
 	out, err := cmd.CombinedOutput()
 
 	assert.Error(t, err, "claiming a pane ID another live session owns must fail")
 	assert.Contains(t, string(out), "status=held",
 		"the refusal must be reported as status=held, the string the bootstrap instruction names")
+
+	// The other half of the same rule, and the proof that the refusal above
+	// tracked the owning process rather than anything ambient: once that
+	// process is gone, its lock is stale and the same claim succeeds.
+	killOwner()
+	reclaimed := runScript(t, scripts, "actas-claim.sh", project, "claude-code", "pane-a", "sid-other")
+	assert.Contains(t, reclaimed, "status=ok",
+		"a lock whose owning session has exited must be reclaimable, or a crashed pane would block its own ID forever")
 }
 
 // TestAgmsgContract_JoinUsesThePaneIDVerbatim guards the assumption every

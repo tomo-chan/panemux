@@ -1689,7 +1689,7 @@ still makes no compatibility promise for the scripts panemux's write path depend
 a silent, user-discovered failure into a specific, actionable CI signal naming exactly which
 documented behavior changed.
 
-**It has already paid for itself twice, which is worth recording as evidence rather than as a
+**It has already paid for itself three times, which is worth recording as evidence rather than as a
 claim.** Running the contract against a real install for the first time found (1) that two of its
 own pre-existing assertions described behavior agmsg does not have — `watch.sh` prints nothing at
 all naming the pairs it resolved when it skips none, so "which identities did this watcher
@@ -1698,6 +1698,19 @@ now observe message *delivery* instead, which is both what a user experiences an
 branch — and (2) the numeric-cursor bug described under [Integration with
 agmsg](#integration-with-agmsg), which every hermetic test missed because the hand-written fixtures
 carried integer ids that no real 1.2.0 install emits.
+
+The third came from the CI job itself, on its first run, and was a flaw in the contract tests rather
+than in panemux: they passed locally and failed on a runner. agmsg keys its actas exclusivity locks
+on an instance id of `<session_id>.<agent pid>` and treats a lock as live only while that pid is,
+resolving the pid by walking its own ancestors for an agent process. Run from inside a real Claude
+Code session, the tests silently inherited that session's pid and every lock looked live; on a
+runner, with no agent process anywhere in the tree, every lock read as stale and reclaimable. The
+assertions were reading the harness's own environment rather than agmsg's behavior. They now declare
+the owning process explicitly through agmsg's own `AGMSG_AGENT_PID` override, and cover the other
+half of the same rule — a lock whose owning process has exited must be reclaimable, or a crashed
+pane would block its own ID forever. The same run also exposed a fixed-sleep delivery probe timed at
+the watcher's own 5-second poll interval; it now sends before the watcher starts and waits on the
+delivery itself.
 
 ## Testing plan (see DEVELOPMENT.md for the TDD/coverage rules this must follow)
 
