@@ -21,27 +21,45 @@ package board_test
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"panemux/internal/board"
 )
 
 // agmsgPathEnv names the install under test. Absent means skip: a
 // contributor without agmsg installed still gets a green `make check`.
 const agmsgPathEnv = "PANEMUX_AGMSG_PATH"
 
-// watchProbeTimeout bounds how long watch.sh is allowed to run. It is a
-// streaming process that never exits on its own; everything asserted here
-// is written to stderr during its first subscription-resolution pass, well
-// inside this budget.
-const watchProbeTimeout = 15 * time.Second
+// watchProbeTimeout is the hard bound on one watch.sh probe. It is a
+// streaming process that never exits on its own, so a deadline is the exit
+// condition; the probe normally finishes well inside this.
+const watchProbeTimeout = 30 * time.Second
+
+// watchPollInterval is how often the watcher rescans the store, passed via
+// agmsg's own AGMSG_WATCH_INTERVAL override. The default is 5 seconds, which
+// is also roughly how long a test is willing to wait — so a fixed sleep and
+// one scan cycle were the same order of magnitude, and the probe raced the
+// watcher. Shortening the interval and waiting on the delivery itself
+// (rather than on the clock) is what makes this deterministic.
+const watchPollInterval = "1"
+
+// watchSettle is how long to keep reading after the expected message has
+// arrived, so "the other pane's message did NOT arrive" is a statement about
+// several completed scans rather than about when the test stopped looking.
+const watchSettle = 3 * time.Second
 
 // contractInstall copies the agmsg install named by PANEMUX_AGMSG_PATH into
 // a temp directory and returns its scripts/ directory, skipping the test
@@ -77,34 +95,137 @@ func contractInstall(t *testing.T) string {
 	// The copy inherits whatever teams and locks the real install had, and
 	// a leftover team or actas lock would make these assertions read the
 	// wrong state. Start from an empty one.
+	// db/ holds agmsg's own SQLite message store, which lives inside the
+	// install root (scripts/lib/storage.sh resolves it from BASH_SOURCE, so
+	// the copy really is a separate world). Clearing it is what makes the
+	// message assertions below start from an empty team rather than
+	// whatever the developer's own install happened to contain.
 	require.NoError(t, os.RemoveAll(filepath.Join(dst, "teams")))
 	require.NoError(t, os.RemoveAll(filepath.Join(dst, "run")))
+	require.NoError(t, os.RemoveAll(filepath.Join(dst, "db")))
 
-	return filepath.Join(dst, "scripts")
+	return dst
 }
 
-// runScript runs one agmsg script to completion and returns its combined
-// output, failing the test if it exits non-zero.
+// contractScripts is contractInstall's scripts/ directory, for the tests
+// that invoke agmsg's scripts directly rather than through panemux's own
+// client.
+func contractScripts(t *testing.T) string {
+	t.Helper()
+	return filepath.Join(contractInstall(t), "scripts")
+}
+
+// agmsgEnv declares which process agmsg should treat as the enclosing agent
+// process for an invocation.
+//
+// This is not incidental plumbing — leaving it unset is what made these
+// tests pass locally and fail in CI. agmsg keys its actas exclusivity locks
+// on an "instance id" of "<session_id>.<agent pid>", and a lock is live only
+// while that pid is (scripts/lib/actas-lock.sh, scripts/lib/instance-id.sh).
+// It resolves the pid by walking its own ancestors looking for an agent
+// process of the given type, so a test run from inside a real Claude Code
+// session silently inherited that session's pid and every lock looked live,
+// while the same test on a CI runner — no agent process anywhere in the
+// tree — fell back to a bare session id, found no live instance, and treated
+// every lock as stale and reclaimable. The assertions were reading the
+// harness's own environment rather than agmsg's behavior.
+//
+// AGMSG_AGENT_PID is agmsg's own documented override for exactly this
+// (agmsg_agent_pid in scripts/lib/resolve-project.sh takes any live numeric
+// pid without requiring it to look like an agent), so each invocation here
+// says which process stands for its session instead of inheriting whatever
+// happened to launch the test.
+func agmsgEnv(agentPID int) []string {
+	return append(os.Environ(), fmt.Sprintf("AGMSG_AGENT_PID=%d", agentPID))
+}
+
+// syncBuffer collects a child process's output for reading while that
+// process is still running. os/exec copies into an io.Writer from its own
+// goroutine, so an unguarded bytes.Buffer read from the test goroutine — as
+// the probe below does while waiting — is a data race.
+type syncBuffer struct {
+	buf bytes.Buffer
+	mu  sync.Mutex
+}
+
+// Write never fails: bytes.Buffer.Write only ever returns a nil error (it
+// panics on an allocation it cannot satisfy), so there is nothing to wrap.
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	n, _ := b.buf.Write(p)
+	return n, nil
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// liveAgentPID starts a placeholder process standing in for another live
+// agent session, and returns its pid. It is killed when the test ends, which
+// is what makes the lock it owns become reclaimable.
+func liveAgentPID(t *testing.T) (pid int, kill func()) {
+	t.Helper()
+
+	cmd := exec.Command("sleep", "600")
+	require.NoError(t, cmd.Start())
+
+	var once sync.Once
+	kill = func() {
+		once.Do(func() {
+			_ = cmd.Process.Kill()
+			_, _ = cmd.Process.Wait()
+		})
+	}
+	t.Cleanup(kill)
+
+	return cmd.Process.Pid, kill
+}
+
+// runScript runs one agmsg script to completion as the test's own process
+// and returns its combined output, failing the test if it exits non-zero.
 func runScript(t *testing.T, scripts, name string, args ...string) string {
+	t.Helper()
+	return runScriptAs(t, scripts, os.Getpid(), name, args...)
+}
+
+// runScriptAs is runScript for an invocation that must belong to a specific
+// agent process — see agmsgEnv.
+func runScriptAs(t *testing.T, scripts string, agentPID int, name string, args ...string) string {
 	t.Helper()
 
 	cmd := exec.Command(filepath.Join(scripts, name), args...) //nolint:gosec // fixed script name, test-local paths
+	cmd.Env = agmsgEnv(agentPID)
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, "%s %v failed: %s", name, args, out)
 	return string(out)
 }
 
-// watchStderr starts watch.sh, collects its stderr until it goes quiet, and
-// kills it. watch.sh streams forever by design, so the deadline is the exit
-// condition rather than an error.
+// watchDelivery sends the given messages, then runs watch.sh for one session
+// and returns everything it delivered on stdout — one line per message it
+// decided this session should receive — alongside its stderr, where it
+// reports which pairs it skipped.
 //
-// stderr is the observable this test asserts on deliberately: it is what a
-// person running agmsg sees, and it names the (team, agent) pairs the
-// watcher actually resolved. Sourcing agmsg's own subscription library
-// would reach past that public surface and could keep passing after the
-// behavior a user sees had changed.
-func watchStderr(t *testing.T, scripts, sessionID, project string) string {
+// Delivery is the observable these tests assert on deliberately. watch.sh
+// prints nothing at all about the pairs it resolved when it skips none, so
+// "which identities did it subscribe to" cannot be read off its logs in the
+// very case that matters; what a person actually experiences — a message for
+// another pane arriving in this pane — is visible either way.
+//
+// The messages are sent BEFORE the watcher starts, and the watcher delivers
+// that backlog on its first scan. That is not incidental: sending afterwards
+// means racing an unobservable startup (a broad watcher signals readiness
+// only in actas mode), which is what an earlier fixed-sleep version of this
+// helper did, and it failed in CI while passing locally. Waiting on the
+// delivery rather than on the clock removes the race instead of widening it.
+func watchDelivery(t *testing.T, scripts, sessionID, project, expect string, send [][]string) (stdout, stderr string) {
 	t.Helper()
+
+	for _, args := range send {
+		runScript(t, scripts, "send.sh", args...)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), watchProbeTimeout)
 	defer cancel()
@@ -112,26 +233,50 @@ func watchStderr(t *testing.T, scripts, sessionID, project string) string {
 	//nolint:gosec // fixed script name under a test-local copy of the install
 	cmd := exec.CommandContext(ctx,
 		filepath.Join(scripts, "watch.sh"), sessionID, project, "claude-code")
-	pipe, err := cmd.StderrPipe()
+	// The watcher is this test process's own session, distinct from the
+	// separate live process that owns any claim under test.
+	cmd.Env = append(agmsgEnv(os.Getpid()), "AGMSG_WATCH_INTERVAL="+watchPollInterval)
+
+	outPipe, err := cmd.StdoutPipe()
 	require.NoError(t, err)
+	errBuf := &syncBuffer{}
+	cmd.Stderr = errBuf
 	require.NoError(t, cmd.Start())
 
-	var collected strings.Builder
-	scanner := bufio.NewScanner(pipe)
-	for scanner.Scan() {
-		collected.WriteString(scanner.Text())
-		collected.WriteString("\n")
-		// Every line asserted on here names a pair. Once both registered
-		// pairs have been accounted for there is nothing further to wait
-		// for, and holding the process open would only add latency.
-		if strings.Count(collected.String(), "pane-") >= 2 {
-			break
+	outBuf := &syncBuffer{}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		scanner := bufio.NewScanner(outPipe)
+		for scanner.Scan() {
+			_, _ = outBuf.Write(append(scanner.Bytes(), '\n'))
 		}
+	}()
+
+	// Wait for the message this session is definitely entitled to. Anything
+	// else it was going to receive arrives in the same scan pass.
+	if !assert.Eventually(t, func() bool {
+		return strings.Contains(outBuf.String(), expect)
+	}, watchProbeTimeout-watchSettle, 200*time.Millisecond) {
+		// Read stderr only now: assert.Eventually evaluates its message
+		// arguments eagerly, so passing it up front would read the buffer
+		// while the child is still writing to it.
+		t.Fatalf("the watcher never delivered %q, which this session is entitled to; stderr: %s",
+			expect, errBuf.String())
 	}
+
+	// Keep reading for several more scans, so "the other pane's message did
+	// not arrive" is a statement about the watcher rather than about when
+	// the test stopped looking.
+	time.Sleep(watchSettle)
+
+	// Kill first, then drain: cmd.Wait closes the stdout pipe, so waiting
+	// before the scanner has finished can truncate what it read.
 	_ = cmd.Process.Kill()
+	<-done
 	_ = cmd.Wait()
 
-	return collected.String()
+	return outBuf.String(), errBuf.String()
 }
 
 // TestAgmsgContract_TwoAgentsInOneProjectNeedTheClaim is the mechanical
@@ -144,7 +289,7 @@ func watchStderr(t *testing.T, scripts, sessionID, project string) string {
 // the entire point. panemux's bootstrap instruction tells an agent to run
 // actas-claim.sh precisely because of the behavior asserted here.
 func TestAgmsgContract_TwoAgentsInOneProjectNeedTheClaim(t *testing.T) {
-	scripts := contractInstall(t)
+	scripts := contractScripts(t)
 	project := t.TempDir()
 
 	runScript(t, scripts, "join.sh", "contract", "pane-a", "claude-code", project, "--force")
@@ -157,52 +302,71 @@ func TestAgmsgContract_TwoAgentsInOneProjectNeedTheClaim(t *testing.T) {
 	assert.Contains(t, identities, "pane-a")
 	assert.Contains(t, identities, "pane-b")
 
-	// Without a claim, pane-b's watcher resolves pane-a's identity too —
-	// it would receive messages addressed to the other pane.
-	unclaimed := watchStderr(t, scripts, "sid-b", project)
-	assert.Contains(t, unclaimed, "contract/pane-a",
-		"with no claim held, pane-b's watcher must still resolve pane-a — the exposure this guards")
-	assert.Contains(t, unclaimed, "contract/pane-b")
-	assert.NotContains(t, unclaimed, "skipping pairs held by other sessions")
+	forA := []string{"contract", "pane-x", "pane-a", "message-for-pane-a", "--force"}
+	forB := []string{"contract", "pane-x", "pane-b", "message-for-pane-b", "--force"}
+
+	// Without a claim, pane-b's watcher receives pane-a's message too.
+	unclaimed, unclaimedErr := watchDelivery(t, scripts, "sid-b", project, "message-for-pane-b", [][]string{forA, forB})
+	assert.Contains(t, unclaimed, "message-for-pane-a",
+		"with no claim held, pane-b's watcher must still receive pane-a's message — the exposure this guards")
+	assert.Contains(t, unclaimed, "message-for-pane-b")
+	assert.NotContains(t, unclaimedErr, "skipping pairs held by other sessions")
 
 	// The remedy panemux's bootstrap instruction now tells the agent to run.
-	claim := runScript(t, scripts, "actas-claim.sh", project, "claude-code", "pane-a", "sid-a")
+	// The claim is taken by a *separate* live process, because that is what
+	// agmsg checks: a lock survives only while its owning agent process does.
+	ownerPID, _ := liveAgentPID(t)
+	claim := runScriptAs(t, scripts, ownerPID, "actas-claim.sh", project, "claude-code", "pane-a", "sid-a")
 	assert.Contains(t, claim, "status=ok", "actas-claim.sh must report the claim it took")
 
-	claimed := watchStderr(t, scripts, "sid-b", project)
-	assert.Contains(t, claimed, "skipping pairs held by other sessions",
-		"pane-a is claimed, so pane-b's watcher must say it is skipping it")
-	assert.Contains(t, claimed, "contract/pane-a", "the skip message names the pair it dropped")
-	assert.Contains(t, claimed, "contract/pane-b", "pane-b's own pair must still resolve")
+	claimed, claimedErr := watchDelivery(t, scripts, "sid-b", project, "message-for-pane-b", [][]string{forA, forB})
+	assert.NotContains(t, claimed, "message-for-pane-a",
+		"pane-a is claimed by another session, so pane-b's watcher must not receive its messages")
+	assert.Contains(t, claimed, "message-for-pane-b",
+		"pane-b must still receive its own messages")
+	assert.Contains(t, claimedErr, "skipping pairs held by other sessions",
+		"and the watcher must say which pair it dropped")
+	assert.Contains(t, claimedErr, "contract/pane-a")
 }
 
 // TestAgmsgContract_ClaimIsRefusedWhileAnotherSessionHoldsIt covers the
 // branch panemux's bootstrap instruction tells the agent to stop on: a
 // second live session asking for a pane ID that is already owned.
 func TestAgmsgContract_ClaimIsRefusedWhileAnotherSessionHoldsIt(t *testing.T) {
-	scripts := contractInstall(t)
+	scripts := contractScripts(t)
 	project := t.TempDir()
 
 	runScript(t, scripts, "join.sh", "contract", "pane-a", "claude-code", project, "--force")
-	first := runScript(t, scripts, "actas-claim.sh", project, "claude-code", "pane-a", "sid-a")
+
+	ownerPID, killOwner := liveAgentPID(t)
+	first := runScriptAs(t, scripts, ownerPID, "actas-claim.sh", project, "claude-code", "pane-a", "sid-a")
 	require.Contains(t, first, "status=ok")
 
 	// Not runScript: a refused claim exits non-zero by design (1 = held),
 	// and that exit code is part of the contract.
 	cmd := exec.Command(filepath.Join(scripts, "actas-claim.sh"), //nolint:gosec // fixed script name, test-local paths
 		project, "claude-code", "pane-a", "sid-other")
+	cmd.Env = agmsgEnv(os.Getpid())
 	out, err := cmd.CombinedOutput()
 
 	assert.Error(t, err, "claiming a pane ID another live session owns must fail")
 	assert.Contains(t, string(out), "status=held",
 		"the refusal must be reported as status=held, the string the bootstrap instruction names")
+
+	// The other half of the same rule, and the proof that the refusal above
+	// tracked the owning process rather than anything ambient: once that
+	// process is gone, its lock is stale and the same claim succeeds.
+	killOwner()
+	reclaimed := runScript(t, scripts, "actas-claim.sh", project, "claude-code", "pane-a", "sid-other")
+	assert.Contains(t, reclaimed, "status=ok",
+		"a lock whose owning session has exited must be reclaimable, or a crashed pane would block its own ID forever")
 }
 
 // TestAgmsgContract_JoinUsesThePaneIDVerbatim guards the assumption every
 // board address rests on: agmsg registers the agent_id it was given, so a
 // pane ID stays a pane ID across join, identities, and delivery.
 func TestAgmsgContract_JoinUsesThePaneIDVerbatim(t *testing.T) {
-	scripts := contractInstall(t)
+	scripts := contractScripts(t)
 	project := t.TempDir()
 
 	// A realistic generated pane ID, not a friendly name: panemux's own IDs
@@ -213,4 +377,242 @@ func TestAgmsgContract_JoinUsesThePaneIDVerbatim(t *testing.T) {
 
 	identities := runScript(t, scripts, "identities.sh", project, "claude-code")
 	assert.Contains(t, identities, paneID, "the registered agent_id must be the pane ID panemux passed")
+}
+
+// ── The read/write path: send.sh and api.sh ──────────────────────────────
+//
+// Everything below drives panemux's OWN client — board.LocalAgmsgClient —
+// against the real install, rather than re-deriving the invocations here.
+// That is deliberate: a test that rebuilt the command strings itself would
+// keep passing after panemux started sending something different, which is
+// half of what this contract exists to detect.
+
+// contractClient returns panemux's own local agmsg client, pointed at a
+// throwaway copy of a real install with a team already joined.
+func contractClient(t *testing.T, team string) (*board.LocalAgmsgClient, string) {
+	t.Helper()
+
+	root := contractInstall(t)
+	scripts := filepath.Join(root, "scripts")
+	project := t.TempDir()
+
+	runScript(t, scripts, "join.sh", team, "pane-a", "claude-code", project, "--force")
+	runScript(t, scripts, "join.sh", team, "pane-b", "claude-code", project, "--force")
+
+	return board.NewLocalAgmsgClient(root), project
+}
+
+func contractCtx(t *testing.T) context.Context {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	t.Cleanup(cancel)
+	return ctx
+}
+
+// TestAgmsgContract_SendThenSinceRoundTrip is the core of the read/write
+// contract: what panemux writes through send.sh must come back out of
+// api.sh in the shape panemux parses, with every field intact.
+func TestAgmsgContract_SendThenSinceRoundTrip(t *testing.T) {
+	client, _ := contractClient(t, "contract")
+	ctx := contractCtx(t)
+
+	require.NoError(t, client.Send(ctx, "contract", "pane-a", "pane-b", "please review my latest commit"))
+
+	rows, err := client.Since(ctx, "contract", "", 100)
+	require.NoError(t, err)
+	require.Len(t, rows, 1, "api.sh must return exactly the row send.sh wrote")
+
+	assert.Equal(t, "contract", rows[0].Team)
+	assert.Equal(t, "pane-a", rows[0].From)
+	assert.Equal(t, "pane-b", rows[0].To)
+	assert.Equal(t, "please review my latest commit", rows[0].Body)
+	assert.Equal(t, "local", rows[0].Host)
+	assert.NotEmpty(t, rows[0].ID, "every row must carry agmsg's own id")
+	assert.False(t, rows[0].At.IsZero(),
+		"the at timestamp must parse as RFC3339 — parseAgmsgMessageRows silently zeroes it otherwise")
+}
+
+// TestAgmsgContract_MessageIDsAreOpaque is the drift check for the
+// assumption that broke the relay: panemux used to compare agmsg's ids
+// numerically, which no id emitted by the event-log storage driver
+// satisfies. The contract panemux now relies on is weaker and is asserted
+// directly — ids exist and are distinct, and NOTHING about their ordering
+// is assumed.
+func TestAgmsgContract_MessageIDsAreOpaque(t *testing.T) {
+	client, _ := contractClient(t, "contract")
+	ctx := contractCtx(t)
+
+	for _, body := range []string{"one", "two", "three"} {
+		require.NoError(t, client.Send(ctx, "contract", "pane-a", "pane-b", body))
+	}
+
+	rows, err := client.Since(ctx, "contract", "", 100)
+	require.NoError(t, err)
+	require.Len(t, rows, 3)
+
+	seen := map[string]bool{}
+	for _, r := range rows {
+		assert.False(t, seen[r.ID], "ids within one host must be distinct: %q repeated", r.ID)
+		seen[r.ID] = true
+	}
+
+	// Recorded, not required: today's ids are UUIDv7, not the integers the
+	// legacy sqlite driver exposed. panemux works either way now, so this
+	// only reports which driver the install under test is using.
+	if _, err := strconv.ParseInt(rows[0].ID, 10, 64); err == nil {
+		t.Logf("note: this agmsg install still emits integer message ids (%q) — the legacy sqlite driver", rows[0].ID)
+	}
+}
+
+// TestAgmsgContract_SinceCursorAnchorsOnReturnedOrder walks the relay's
+// actual poll cycle against a real store: read, remember the last id, read
+// again with it, and get only what arrived in between. This is the test
+// that fails against a real install if panemux ever goes back to comparing
+// ids — and the one the hand-written integer fixtures could not express.
+func TestAgmsgContract_SinceCursorAnchorsOnReturnedOrder(t *testing.T) {
+	client, _ := contractClient(t, "contract")
+	ctx := contractCtx(t)
+
+	for _, body := range []string{"one", "two"} {
+		require.NoError(t, client.Send(ctx, "contract", "pane-a", "pane-b", body))
+	}
+
+	first, err := client.Since(ctx, "contract", "", 100)
+	require.NoError(t, err)
+	require.Len(t, first, 2)
+	cursor := first[len(first)-1].ID
+
+	// A poll with nothing new in between must be silent. Before the fix
+	// this returned the whole window again, on every tick, forever.
+	quiet, err := client.Since(ctx, "contract", cursor, 100)
+	require.NoError(t, err)
+	assert.Empty(t, quiet, "a poll with no new rows must report nothing new")
+
+	require.NoError(t, client.Send(ctx, "contract", "pane-b", "pane-a", "three"))
+
+	next, err := client.Since(ctx, "contract", cursor, 100)
+	require.NoError(t, err)
+	require.Len(t, next, 1, "only the row written after the cursor may come back")
+	assert.Equal(t, "three", next[0].Body)
+}
+
+// TestAgmsgContract_SinceLimitKeepsTheNewestRows pins the bound the relay's
+// truncation tradeoff rests on: --limit returns the NEWEST n rows, oldest
+// first. If agmsg ever returned the oldest n instead, the relay would stall
+// on ancient rows and never reach current traffic.
+func TestAgmsgContract_SinceLimitKeepsTheNewestRows(t *testing.T) {
+	client, _ := contractClient(t, "contract")
+	ctx := contractCtx(t)
+
+	for _, body := range []string{"one", "two", "three", "four"} {
+		require.NoError(t, client.Send(ctx, "contract", "pane-a", "pane-b", body))
+	}
+
+	rows, err := client.Since(ctx, "contract", "", 2)
+	require.NoError(t, err)
+	require.Len(t, rows, 2, "--limit must bound the response")
+	assert.Equal(t, []string{"three", "four"}, []string{rows[0].Body, rows[1].Body},
+		"--limit must keep the newest rows and return them oldest-first")
+}
+
+// TestAgmsgContract_ShellMetacharacterBodyRoundTrips is the real-install
+// counterpart of the escaping unit tests in local_client_test.go /
+// remote_client_test.go. Those assert the command string panemux builds;
+// this asserts what agmsg actually stores and returns, which is the half a
+// fake can never answer.
+func TestAgmsgContract_ShellMetacharacterBodyRoundTrips(t *testing.T) {
+	client, _ := contractClient(t, "contract")
+	ctx := contractCtx(t)
+
+	// Every character class that would change meaning if any layer between
+	// here and the store re-parsed the body as shell or SQL.
+	const hostile = `it's ${HOME}; rm -rf /; $(id) ` + "`whoami`" + ` "quoted" 'single' -- DROP TABLE messages;`
+
+	require.NoError(t, client.Send(ctx, "contract", "pane-a", "pane-b", hostile))
+
+	rows, err := client.Since(ctx, "contract", "", 100)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, hostile, rows[0].Body,
+		"the body must round-trip byte for byte: no shell expansion, no SQL interpretation, no quote stripping")
+}
+
+// TestAgmsgContract_StatusRowRoundTrips walks the status path end to end
+// against a real store: a board_status body addressed to _system comes back
+// recognizable to the same parser the relay uses.
+func TestAgmsgContract_StatusRowRoundTrips(t *testing.T) {
+	client, _ := contractClient(t, "contract")
+	ctx := contractCtx(t)
+
+	const body = `{"kind":"board_status","state":"working","cwd":"/tmp/sample-project",` +
+		`"branch":"feature/x","summary":"fixing failing tests"}`
+	require.NoError(t, client.Send(ctx, "contract", "pane-a", board.SystemID, body))
+
+	rows, err := client.Since(ctx, "contract", "", 100)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, board.SystemID, rows[0].To,
+		"the _system sentinel must survive agmsg's own agent-name handling verbatim")
+
+	status, ok := board.IsStatusRow(rows[0])
+	require.True(t, ok, "a board_status body must still be recognized after a real round trip")
+	assert.Equal(t, "working", status.State)
+	assert.Equal(t, "/tmp/sample-project", status.CWD)
+	assert.Equal(t, "fixing failing tests", status.Summary)
+}
+
+// TestAgmsgContract_SinceOnEmptyTeamIsEmptyNotAnError covers the cold-start
+// read every panemux instance performs before any pane has said anything.
+func TestAgmsgContract_SinceOnEmptyTeamIsEmptyNotAnError(t *testing.T) {
+	client, _ := contractClient(t, "contract")
+
+	rows, err := client.Since(contractCtx(t), "contract", "", 100)
+	require.NoError(t, err, "reading a team with no messages must not be an error")
+	assert.Empty(t, rows)
+}
+
+// TestAgmsgContract_InstalledVersionDoesNotFalselyWarn asserts what a REAL
+// install writes into its VERSION file, which is the whole reason this
+// belongs in Tier 2 rather than in a hermetic test.
+//
+// agmsg's repository carries a bare "1.2.0", but install.sh writes a
+// provenance string into the install root instead — "v1.2.0" from a
+// checkout on the tag, "v1.2.0-6-g1a2b3c4" past it. panemux compared that
+// to its pin verbatim, so a correctly-pinned install was warned as
+// untested on every startup. A hermetic test can only assert the forms
+// someone believed install.sh emits; this one reads what it actually did.
+//
+// The canary deliberately runs against agmsg's LATEST tag, which is
+// normally outside the pinned line, so a warning there is correct rather
+// than a failure — the assertion applies only when the install under test
+// is one the pin claims to cover.
+func TestAgmsgContract_InstalledVersionDoesNotFalselyWarn(t *testing.T) {
+	root := contractInstall(t)
+
+	data, err := os.ReadFile(filepath.Join(root, "VERSION"))
+	if err != nil {
+		t.Skipf("install has no VERSION file: %v", err)
+	}
+	installed := strings.TrimSpace(string(data))
+	t.Logf("install root VERSION reads %q; board.TestedAgmsgVersion pins %q",
+		installed, board.TestedAgmsgVersion)
+
+	// Strip only the decoration install.sh adds — a leading "v" and a
+	// `git describe` "-<commits>-g<sha>[-dirty]" tail — and see what
+	// release is underneath. This is deliberately a few lines of the test's
+	// own rather than a call into the parser under test: the claim being
+	// made is about what the real installer wrote, not about how panemux
+	// reads it.
+	bare := strings.TrimPrefix(installed, "v")
+	if i := strings.Index(bare, "-"); i >= 0 {
+		bare = bare[:i]
+	}
+	if bare != board.TestedAgmsgVersion {
+		t.Skipf("install is %s, not the pinned %s; this assertion is about the pinned version's own provenance forms",
+			installed, board.TestedAgmsgVersion)
+	}
+
+	assert.Empty(t, board.VersionMismatchWarning("host-a", installed),
+		"an install of the pinned version must not be warned about, "+
+			"whatever provenance form install.sh wrote into VERSION (found %q)", installed)
 }
