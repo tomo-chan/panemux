@@ -106,6 +106,7 @@ Example: `Config.sshConfigPath` uses `sshconfig.DefaultPath()` only when the ove
 - There are no exceptions for frontend-only, docs-adjacent, or "small" code changes.
 - Test commands: `make test-go`, `make test-frontend`, `make test-e2e`, `make test`
 - Coverage commands: `make coverage-go`, `make coverage-frontend`
+- Measurement (not a gate): `make bench` for terminal throughput, replay-buffer cost and relay polling; `make test-e2e` also records accessibility violations. Neither asserts a threshold — see [docs/quality-gateway.md](docs/quality-gateway.md)'s "First measurements".
 - Lint commands: `make lint-go`, `make lint-frontend`, `make lint`
 - Go lint includes `gofmt`, `go vet`, and `golangci-lint run ./...` using `.golangci.yml`.
 - `lint-go-deps` refreshes the pinned `golangci-lint` binary when the local version does not match `GOLANGCI_LINT_VERSION`, so local lint matches CI.

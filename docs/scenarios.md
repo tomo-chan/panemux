@@ -149,6 +149,12 @@ Stated explicitly, because an absent row reads as an oversight and these are dec
 - **Install scenarios A1/A2 are manual.** CI builds the binary on every PR, but nobody automatically
   downloads a release artifact and runs it.
 - **Every row in section F is manual.** Documentation accuracy is not mechanically checkable here.
+- **Performance and accessibility are measured, not verified.** `make bench` reports terminal
+  throughput, replay-buffer cost and the relay's polling cost, and `frontend/e2e/a11y.spec.ts`
+  records axe violations for the dashboard and for a modal dialog. Neither asserts a threshold: see
+  [quality-gateway.md](quality-gateway.md)'s "First measurements" for the baseline and for why a
+  gate that starts red is worse than no gate. These are therefore not scenario rows — there is no
+  expected outcome to state yet.
 
 ## Related documents
 

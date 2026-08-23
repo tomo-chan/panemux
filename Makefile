@@ -1,5 +1,5 @@
 .PHONY: all build build-frontend build-backend dev clean run install-deps install-deps-ci install-hooks \
-        test test-go test-frontend test-e2e test-agmsg-contract \
+        test test-go test-frontend test-e2e test-agmsg-contract bench \
         fmt fmt-go fmt-check-go \
         lint lint-go lint-go-deps lint-frontend \
         coverage coverage-go coverage-frontend \
@@ -43,6 +43,25 @@ test-frontend:
 
 test-e2e:
 	cd frontend && npm run test:e2e
+
+# ── Performance observation (not a gate) ──────────────────────────────────────
+#
+# Performance efficiency is one of the two ISO 25010 characteristics
+# docs/quality-gateway.md records as completely unprotected. These benchmarks
+# are the first measurement of it: terminal output throughput and replay-buffer
+# cost (internal/session), and the relay's continuous polling cost
+# (internal/board).
+#
+# Deliberately NOT in `make check` and deliberately asserting nothing. Roadmap
+# item 7 of issue #180 is explicit that this stage is measure-only — a
+# threshold guessed at now would be a number nobody trusts, and an untrusted
+# gate is worse than none. Freeze one once a few runs' worth of data exists.
+#
+#   make bench
+#   make bench BENCH_ARGS='-benchtime 3s -count 5'   # for a real comparison
+BENCH_ARGS ?=
+bench:
+	go test ./internal/session/ ./internal/board/ -run '^$$' -bench . -benchmem $(BENCH_ARGS)
 
 # Tier 2 of docs/agent-board.md's agmsg compatibility contract: asserts the
 # agmsg script behaviors panemux depends on against a REAL agmsg install.

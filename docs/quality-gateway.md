@@ -54,8 +54,8 @@ Flexibility, and added Safety). Mapped onto panemux, the depth of protection is 
 | Security | Command injection, bearer token, DNS rebinding, subprocess containment | [security.md](security.md) plus regression tests verified against real binaries, `gosec` | Very strong |
 | Compatibility | The agmsg script contract, config schema back-compat | Tier 1 fixtures, Tier 2 tests against a real agmsg install, daily canary | Very strong |
 | Maintainability | Refactoring does not break tests; behavior changes do | `golangci-lint` (20+ linters), 80% coverage. **Nothing measures the tests themselves** | Unprotected |
-| Interaction capability | Keyboard operation, focus restoration, legibility, notifications | Three focus-restoration E2E tests. No accessibility checks | Thin |
-| Performance efficiency | Terminal output throughput, relay polling cost, many-pane rendering | None | Unprotected |
+| Interaction capability | Keyboard operation, focus restoration, legibility, notifications | Three focus-restoration E2E tests, plus an axe-core scan of the dashboard and of a modal dialog (`frontend/e2e/a11y.spec.ts`) that **records** violations without gating on them | Thin, now measured |
+| Performance efficiency | Terminal output throughput, relay polling cost, many-pane rendering | Benchmarks over the replay buffer and the board cache (`make bench`). No threshold — measurement only | Unprotected, now measured |
 | Flexibility | Old config shapes, migration, environment differences (OS, shell, tmux) | `internal/config` unit tests (thick); environment differences are manual | Partial |
 | Safety | A PTY write does not destroy the user's work; no stray remote side effects | Bootstrap short-write and retry tests (limited) | Limited |
 
@@ -238,7 +238,7 @@ pre-push and CI. A gate that sacrifices fast feedback gets bypassed.
 | 4 | red-check (`make efficacy`) in pull-request CI | G4(b) | — | Detects tautological tests mechanically. The largest single win under AI-assisted development. |
 | 5 | Core-feature section in `scenarios.md`, ledger cross-check, core E2E | G0, G5 | Phases 4 and 6 | Makes the acceptance ledger real. |
 | 6 | Diff-scoped mutation testing (warn first, gate once stable) | G4(c) | merges with #164 | Measures protection against regressions directly. |
-| 7 | Performance and accessibility observation (measure only, do not gate) | — | — | First visibility into the two unprotected characteristics. |
+| 7 | Performance and accessibility observation (measure only, do not gate) | — | — | **Landed.** `make bench` measures terminal throughput, replay-buffer cost and the relay's polling cost; `a11y.spec.ts` records axe violations. Both report; neither asserts. |
 
 ### Relationship to issue #164
 
@@ -248,6 +248,61 @@ different mechanism. Per-block coverage is cheap and exhaustive but still only r
 block executed*; mutation reports *whether the tests would notice it changing*, at a much higher
 cost. The sensible order is therefore to land per-block coverage first and add mutation only for the
 tautologies that survive it — which is why order 6 sits last.
+
+## First measurements
+
+Roadmap item 7 asked for observation without gating, so the point of it is the numbers. These were
+produced by `make bench` and `make test-e2e` on a 4-core Intel Xeon @ 2.80GHz container, and are
+recorded here as the baseline a threshold would later be chosen against — not as targets.
+
+### Terminal output throughput
+
+`managedSession.publish` is the path every byte a pane produces travels. Measured per 4KB chunk with
+no subscribers:
+
+| Replay buffer | ns/op | B/op |
+|---|---|---|
+| Empty (cold) | ~5,400 | 4,096 |
+| Full (steady state) | ~180,000 | ~598,000 |
+
+**The ~33× gap is the trim.** `publish` retains a fixed 256KB replay window by reallocating and
+copying it on every chunk, so a pane that has been open for more than a few seconds pays a full
+window copy per 4KB of output, forever. A ring buffer would make it constant. That is a real finding
+and it is deliberately **not** acted on here: item 7 is measurement, and a change to the buffer
+belongs with the reliability tests that cover replay, not with the benchmark that spotted it.
+
+Subscriber fan-out is comparatively cheap — 16 subscribers add roughly 50% to a 4KB chunk — so
+many-pane cost is dominated by the per-pane buffer, not by the fan-out.
+
+`Subscribe` (what a workspace switch pays per remounted pane) copies the whole buffer: ~3µs empty,
+~61µs at the full 256KB.
+
+### Relay polling cost
+
+| Operation | ns/op |
+|---|---|
+| `AppendMessage`, empty history | ~270 |
+| `AppendMessage`, at the 2000-row limit | ~730 |
+| `MessagesSince`, caught-up cursor | ~10,300 |
+| `MessagesSince`, cold start | ~400,000 |
+| `StatusSnapshot`, 64 panes | ~22,800 |
+
+`MessagesSince` scans the whole history even when the caller is caught up and gets nothing back,
+which is the shape to watch if the history limit is ever raised.
+
+### Accessibility
+
+Excluding `.xterm` (xterm.js owns that canvas and its markup):
+
+| Page state | critical | serious | moderate |
+|---|---|---|---|
+| Dashboard | 1 (`aria-required-children`) | 1 (`color-contrast`, 2 nodes) | 1 (`region`, 7 nodes) |
+| Pane settings dialog open | 2 (`+ select-name`) | 1 (`color-contrast`, 10 nodes) | 1 (`region`, 7 nodes) |
+
+The scan asserts nothing. Turning axe on over an existing UI produces a backlog, and **a gate that
+starts red is routed around on day one** — taking the gates that do work with it (principle 4). The
+intended next step is to freeze these counts as a ceiling that may fall but not rise, which is a
+threshold chosen from data rather than guessed at.
 
 ## Related documents
 
