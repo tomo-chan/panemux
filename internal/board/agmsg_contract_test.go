@@ -139,6 +139,30 @@ func agmsgEnv(agentPID int) []string {
 	return append(os.Environ(), fmt.Sprintf("AGMSG_AGENT_PID=%d", agentPID))
 }
 
+// syncBuffer collects a child process's output for reading while that
+// process is still running. os/exec copies into an io.Writer from its own
+// goroutine, so an unguarded bytes.Buffer read from the test goroutine — as
+// the probe below does while waiting — is a data race.
+type syncBuffer struct {
+	buf bytes.Buffer
+	mu  sync.Mutex
+}
+
+// Write never fails: bytes.Buffer.Write only ever returns a nil error (it
+// panics on an allocation it cannot satisfy), so there is nothing to wrap.
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	n, _ := b.buf.Write(p)
+	return n, nil
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
 // liveAgentPID starts a placeholder process standing in for another live
 // agent session, and returns its pid. It is killed when the test ends, which
 // is what makes the lock it owns become reclaimable.
@@ -215,44 +239,44 @@ func watchDelivery(t *testing.T, scripts, sessionID, project, expect string, sen
 
 	outPipe, err := cmd.StdoutPipe()
 	require.NoError(t, err)
-	var errBuf bytes.Buffer
-	cmd.Stderr = &errBuf
+	errBuf := &syncBuffer{}
+	cmd.Stderr = errBuf
 	require.NoError(t, cmd.Start())
 
-	var mu sync.Mutex
-	var outBuf bytes.Buffer
+	outBuf := &syncBuffer{}
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		scanner := bufio.NewScanner(outPipe)
 		for scanner.Scan() {
-			mu.Lock()
-			outBuf.WriteString(scanner.Text())
-			outBuf.WriteString("\n")
-			mu.Unlock()
+			_, _ = outBuf.Write(append(scanner.Bytes(), '\n'))
 		}
 	}()
 
-	delivered := func() string {
-		mu.Lock()
-		defer mu.Unlock()
-		return outBuf.String()
-	}
-
 	// Wait for the message this session is definitely entitled to. Anything
 	// else it was going to receive arrives in the same scan pass.
-	require.Eventually(t, func() bool {
-		return strings.Contains(delivered(), expect)
-	}, watchProbeTimeout-watchSettle, 200*time.Millisecond,
-		"the watcher never delivered %q, which this session is entitled to; stderr: %s", expect, errBuf.String())
+	if !assert.Eventually(t, func() bool {
+		return strings.Contains(outBuf.String(), expect)
+	}, watchProbeTimeout-watchSettle, 200*time.Millisecond) {
+		// Read stderr only now: assert.Eventually evaluates its message
+		// arguments eagerly, so passing it up front would read the buffer
+		// while the child is still writing to it.
+		t.Fatalf("the watcher never delivered %q, which this session is entitled to; stderr: %s",
+			expect, errBuf.String())
+	}
 
+	// Keep reading for several more scans, so "the other pane's message did
+	// not arrive" is a statement about the watcher rather than about when
+	// the test stopped looking.
 	time.Sleep(watchSettle)
 
+	// Kill first, then drain: cmd.Wait closes the stdout pipe, so waiting
+	// before the scanner has finished can truncate what it read.
 	_ = cmd.Process.Kill()
-	_ = cmd.Wait()
 	<-done
+	_ = cmd.Wait()
 
-	return delivered(), errBuf.String()
+	return outBuf.String(), errBuf.String()
 }
 
 // TestAgmsgContract_TwoAgentsInOneProjectNeedTheClaim is the mechanical
