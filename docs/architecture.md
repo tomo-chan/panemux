@@ -213,7 +213,11 @@ Replay lifecycle contract:
 
 ### `internal/server`
 
-This package wires chi routes, middleware, REST handlers, WebSocket handlers, and static file serving.
+This package wires middleware, WebSocket handlers, and static file serving, and decides which part of
+the API is authenticated. The `/api` route table itself lives in `internal/api` (`Handler.Mount`,
+`internal/api/routes.go`) so production wiring and that package's own handler tests cannot describe
+different routes; `registerRoutes` passes `bearerAuthMiddleware` to `Mount` as the middleware for the
+`api.BoardRoutePrefix` sub-router. See [security.md](security.md#auth-token-and-transport-encryption).
 
 Why `chi`:
 

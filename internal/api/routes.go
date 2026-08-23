@@ -20,8 +20,7 @@ const BoardRoutePrefix = "/api/board"
 // silently missed in the other. That used to be possible: the handler tests
 // built their own chi router listing the routes by hand, and the two had
 // already drifted — /api/board/* was registered there flat and with no
-// middleware, a shape that never existed in production. See
-// docs/quality-gateway.md's gate G3 and issue #178.
+// middleware, a shape that never existed in production. See issue #178.
 //
 // boardAuth wraps the BoardRoutePrefix sub-router. Production passes the
 // bearer-token middleware. A nil value mounts those routes with no

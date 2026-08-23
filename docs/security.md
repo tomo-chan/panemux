@@ -373,8 +373,13 @@ the list of board routes **from the router itself** with `chi.Walk` rather than 
 `/api/board/*` route added later — or, the failure this actually guards, one registered outside the
 authenticated sub-router — is covered the day it is registered, without anyone remembering to extend
 a list. It also pins the complete route table, so a route cannot silently appear, move, or be renamed.
-Both properties were confirmed by perturbation, not assumed: registering `/api/board/leaked` outside
-the sub-router fails the auth test, and renaming a route fails the table test.
+Both properties were confirmed by perturbation, not assumed: registering a *reachable*
+`/api/board/leaked` outside the sub-router fails the auth test, and renaming a route fails the table
+test. One nuance is worth recording, because it bounds what the auth test alone proves: a
+`/api/board/*` route registered inside the `/api` sub-router is *shadowed* by the `/api/board/*`
+mount, so the probe still gets its `401` from the middleware and the auth test passes — what catches
+that case is the table test, which lists a route the router can never actually reach. The two tests
+are complementary, not redundant.
 See [agent-board.md](agent-board.md)'s status note.
 
 **`WS /ws/board-command` cannot use the `Authorization` header at all** — browsers do not allow a

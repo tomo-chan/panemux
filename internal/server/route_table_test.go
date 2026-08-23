@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"panemux/internal/api"
 	"panemux/internal/board"
 	"panemux/internal/commandcenter"
 	"panemux/internal/session"
@@ -21,8 +22,7 @@ import (
 // of the router, so a route could be renamed, reordered, or moved behind
 // different middleware in internal/server without a single one of them
 // failing — and the /api/board/* routes had already drifted apart, registered
-// flat and unauthenticated in the test copy. See docs/quality-gateway.md's
-// gate G3, and issue #178.
+// flat and unauthenticated in the test copy. See issue #178.
 //
 // Adding a route to the server is now expected to fail these tests until the
 // expected sets below are updated. That is the point: the table is stated in
@@ -105,8 +105,10 @@ func TestServer_RouteTable_CommandCenterEnabled_AddsOnlyBoardCommandWS(t *testin
 
 // boardRoutePrefix is the path prefix chi mounts behind the bearer-token
 // middleware. Everything under it must be authenticated; nothing outside it
-// is, today.
-const boardRoutePrefix = "/api/board/"
+// is, today. It is derived from api.BoardRoutePrefix rather than restated,
+// so renaming the prefix moves these tests with it instead of silently
+// leaving them looking for a prefix nothing is mounted at.
+var boardRoutePrefix = api.BoardRoutePrefix + "/"
 
 // routeRequestPath turns a chi pattern into a concrete request path. Board
 // routes carry no URL parameters today, but substituting rather than skipping
@@ -156,6 +158,14 @@ func TestServer_EveryBoardRouteRequiresAuth(t *testing.T) {
 // unauthenticated posture the frontend still depends on. Restricted to GET so
 // the check cannot start a session or write config as a side effect.
 func TestServer_NonBoardAPIRoutesStayUnauthenticated(t *testing.T) {
+	// These are real requests against real handlers, and the walk includes
+	// /api/directories, /api/ssh-connections and /api/ssh-config/hosts, which
+	// resolve their paths from the home directory. server.New() builds its own
+	// api.Handler, so there is no override to inject — point HOME at a temp
+	// directory instead, before New() calls sshconfig.DefaultPath(), so the
+	// test never reads the developer's real ~/.ssh/config or home directory.
+	t.Setenv("HOME", t.TempDir())
+
 	srv := New(testConfigWithToken("secret-token"), session.NewManager(), nil, nil, nil, emptyFS)
 
 	var checked int

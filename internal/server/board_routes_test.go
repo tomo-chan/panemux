@@ -71,26 +71,6 @@ func TestServer_SessionTokenRoute_RemainsUnauthenticated(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code, "session-token must be reachable with no Authorization header")
 }
 
-func TestServer_ExistingAPIRoutes_RemainUnauthenticated(t *testing.T) {
-	// Regression test: scoping bearerAuthMiddleware to /api/board must not
-	// widen to any pre-existing route — the current frontend sends no
-	// token at all.
-	cfg := testConfigWithToken("secret-token")
-	mgr := session.NewManager()
-	srv := New(cfg, mgr, board.NewBoardCache(), nil, nil, emptyFS)
-
-	paths := []string{"/api/layout", "/api/workspaces", "/api/sessions", "/api/display"}
-	for _, path := range paths {
-		t.Run(path, func(t *testing.T) {
-			rec := httptest.NewRecorder()
-			req := httptest.NewRequest(http.MethodGet, path, nil)
-			srv.httpSrv.Handler.ServeHTTP(rec, req)
-			assert.NotEqual(t, http.StatusUnauthorized, rec.Code,
-				"existing routes must stay reachable with no Authorization header")
-		})
-	}
-}
-
 func TestServer_WSRoute_RemainsUnauthenticated(t *testing.T) {
 	cfg := testConfigWithToken("secret-token")
 	mgr := session.NewManager()
