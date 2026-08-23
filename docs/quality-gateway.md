@@ -73,7 +73,7 @@ refactoring is the one that is not negotiable.
 |---|---|---|---|
 | Protection against regressions | Probability a test fails when a bug is introduced | Coverage is only a *lower bound* proxy. The real measure is mutation score | Coverage 88%; mutation never measured |
 | Resistance to refactoring | Behavior-preserving changes do not fail tests (few false positives) | No direct metric exists. Only structure can guarantee it | **Structurally defective** — the duplicated router (#178) |
-| Fast feedback | Wall-clock time | Seconds | Go ≈3s, frontend ≈13s. Good |
+| Fast feedback | Wall-clock time | Seconds | Go ≈3s for the gated packages, ≈8s for the whole suite under `-race`; frontend ≈13s. Good |
 | Maintainability | The tests are themselves readable and durable | Test volume, duplication | 4 router copies, 3 `*_routes_test.go` files. Growing |
 
 ### Why coverage alone misleads
@@ -87,6 +87,14 @@ on coverage alone applies pressure in the direction that lowers resistance to re
 
 This is the central claim the gateway is built on: raise the *scope* of coverage, never the
 threshold, and measure protection against regressions directly instead.
+
+**Stated plainly, because this repository separates verified claims from unverified ones: the
+anti-correlation above is reasoning, not a measurement.** Nothing here has measured how coverage
+pressure actually changes the tests this project writes. The mechanism is plausible and matches the
+reported failure modes of AI-written tests cited below, but it has not been demonstrated on this
+codebase. What *is* measured is the defect that prompted the document: a route table that could be
+renamed with 161 tests staying green. Treat D1 as a decision taken under that reasoning, and
+revisable if evidence contradicts it.
 
 ## Implementation practices that make tests possible
 
@@ -202,9 +210,11 @@ rather than detecting it afterwards.
 **D4 — Verify "the test came first" after the fact (red-check).**
 The TDD rule is stuck at L0 and cannot be checked directly. The *result* can be: **a changed test
 must fail when the implementation diff is reverted.** This is the strongest possible mutation (remove
-the implementation entirely) and is far cheaper than general mutation testing, while catching both
-tautological tests and tests written after the fact. It is the highest-value check available against
-AI-written tests.
+the implementation entirely), and it should cost far less than general mutation testing — it runs
+the changed tests twice rather than once per generated mutant, though neither cost has been measured
+here — while catching both tautological tests and tests written after the fact. That combination is
+why it is ordered ahead of mutation testing in the rollout; it is not a claim that nothing else
+would catch more.
 
 **D5 — The author does not grade its own work.**
 A session carries the context of the approaches it tried and discarded. The Claude Code guidance
