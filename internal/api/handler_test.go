@@ -94,7 +94,7 @@ func setupRouterWithHandler(h *Handler) *chi.Mux {
 	// rather than a hand-maintained copy of them. boardAuth is nil here:
 	// whether the bearer token is enforced is internal/server's contract,
 	// covered by its own tests against the router the binary really serves.
-	// See issue #178.
+	// See docs/quality-gateway.md's gate G3, and issue #178.
 	h.Mount(r, nil)
 	return r
 }
