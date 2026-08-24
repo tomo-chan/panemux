@@ -57,8 +57,14 @@ test-e2e:
 # threshold guessed at now would be a number nobody trusts, and an untrusted
 # gate is worse than none. Freeze one once a few runs' worth of data exists.
 #
+# Use -count for anything you intend to read: on a shared container the publish
+# rows move by up to 2.9x between runs of the same binary, so a single run says
+# almost nothing. The whole suite is ~35s at the default benchtime and ~3min at
+# -count 5.
+#
 #   make bench
-#   make bench BENCH_ARGS='-benchtime 3s -count 5'   # for a real comparison
+#   make bench BENCH_ARGS='-count 5'                 # medians and a spread
+#   make bench BENCH_ARGS='-benchtime 3s -count 5'   # slower, steadier
 BENCH_ARGS ?=
 bench:
 	go test ./internal/session/ ./internal/board/ -run '^$$' -bench . -benchmem $(BENCH_ARGS)

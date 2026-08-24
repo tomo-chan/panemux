@@ -20,9 +20,16 @@ import (
 // are watching), and whether the replay buffer is already full — because the
 // trim reallocates.
 
-// benchSession is a Session whose Read never blocks and never ends, so a
-// benchmark measures the manager rather than a PTY. Nothing here touches a
-// real terminal: `make check` stays hermetic (design principle 5).
+// benchSession is a stub that satisfies the Session interface so a
+// managedSession can be built without a PTY — `make check` stays hermetic
+// (design principle 5). Its I/O methods are never called: every benchmark
+// below drives publish or subscribe directly rather than through the pump.
+//
+// Read returns io.EOF on the first call, so this is NOT a stand-in for a
+// never-ending PTY stream. A benchmark that went through Manager.Add — the
+// obvious next one to write — would take the io.EOF branch immediately, call
+// closeSubscribers, and report a near-zero cost rather than failing. Give
+// chunk a value and return a nil error before using it that way.
 type benchSession struct {
 	id    string
 	chunk []byte
@@ -97,6 +104,15 @@ func BenchmarkSessionPublish(b *testing.B) {
 //
 // It resets the buffer every iteration so it stays cold, which is why it is a
 // separate benchmark rather than another row in the table above.
+//
+// The reset is inside the timed region on purpose. b.StopTimer/b.StartTimer
+// each call runtime.ReadMemStats, which is stop-the-world: doing that per
+// iteration cost ~95µs of pause against a ~2µs operation, so the benchmark
+// spent 50s of wall clock on 1s of measured work — and, worse, the repeated
+// pauses reset the GC and allocator state this benchmark exists to measure,
+// reporting ~5,400 ns/op for a path that actually costs ~1,900. `entry.history
+// = nil` is a single pointer store, a constant well under 1% of the operation,
+// so timing it is far cheaper than excluding it.
 func BenchmarkSessionPublishColdBuffer(b *testing.B) {
 	entry := newBenchEntry()
 	chunk := make([]byte, 4096)
@@ -105,9 +121,7 @@ func BenchmarkSessionPublishColdBuffer(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		b.StopTimer()
 		entry.history = nil
-		b.StartTimer()
 		entry.publish(chunk)
 	}
 }
@@ -116,6 +130,16 @@ func BenchmarkSessionPublishColdBuffer(b *testing.B) {
 // browser remounts calls Subscribe, which copies the whole replay buffer so
 // the terminal can redraw — so this is per-pane, paid all at once, and it is
 // the "many-pane rendering" cost measured on the backend side.
+//
+// The figure covers subscribe AND its unsubscribe, and the doc rows say so.
+// Excluding the unsubscribe would need b.StopTimer per iteration, whose
+// stop-the-world ReadMemStats costs ~95µs against a ~1.5µs operation (see
+// BenchmarkSessionPublishColdBuffer above). The alternative — keeping every
+// subscription alive and draining after the loop — is worse: each one holds a
+// 64-slot channel and a copy of the replay buffer, so at b.N in the hundreds of
+// thousands the buffered=256KB row would need tens of gigabytes. Unsubscribe is
+// a map delete and a channel close, far smaller than the buffer copy it is
+// measured beside, and a remounting pane really does pay both.
 func BenchmarkSessionSubscribe(b *testing.B) {
 	for _, filled := range []int{0, sessionReplayLimitBytes / 2, sessionReplayLimitBytes} {
 		b.Run(fmt.Sprintf("buffered=%dB", filled), func(b *testing.B) {
@@ -126,9 +150,7 @@ func BenchmarkSessionSubscribe(b *testing.B) {
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				_, _, unsubscribe := entry.subscribe()
-				b.StopTimer()
 				unsubscribe()
-				b.StartTimer()
 			}
 		})
 	}

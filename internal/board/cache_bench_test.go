@@ -36,21 +36,31 @@ func filledCache(rows int) *BoardCache {
 	return c
 }
 
-// BenchmarkBoardCacheAppendMessage is what one polled message costs the relay.
-// The full case is the one that matters: at the history limit every append
-// reslices, so a long-running panemux pays that on every message forever.
+// BenchmarkBoardCacheAppendMessage is what one polled message costs the relay,
+// measured at the history limit — the state a long-running panemux is in
+// permanently.
+//
+// There is deliberately no empty-history row. It cannot measure an empty
+// history: b.N is millions at the default benchtime, so the first 2000
+// iterations fill the cache and every one after that measures exactly what
+// this benchmark measures. That is the same b.N-dependent confound
+// BenchmarkSessionPublish avoids by starting its replay buffer full, and it
+// showed: with -benchtime 100000x the "empty" row came out SLOWER than the
+// full one, and at the default benchtime the ordering flipped.
+//
+// Nor is there anything for it to find. The trim is c.history = c.history[n:],
+// a pointer bump; the only real cost is append's amortized regrow, which an
+// empty cache and a full one pay alike. An earlier revision of
+// docs/quality-gateway.md claimed a ~270 vs ~730 ns/op contrast between them.
+// That was noise being read as signal.
 func BenchmarkBoardCacheAppendMessage(b *testing.B) {
-	for _, prefilled := range []int{0, defaultBoardCacheHistoryLimit} {
-		b.Run(fmt.Sprintf("history=%d", prefilled), func(b *testing.B) {
-			c := filledCache(prefilled)
-			row := benchRow(1)
+	c := filledCache(defaultBoardCacheHistoryLimit)
+	row := benchRow(1)
 
-			b.ReportAllocs()
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				c.AppendMessage(row)
-			}
-		})
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		c.AppendMessage(row)
 	}
 }
 

@@ -251,44 +251,63 @@ tautologies that survive it — which is why order 6 sits last.
 
 ## First measurements
 
-Roadmap item 7 asked for observation without gating, so the point of it is the numbers. These were
-produced by `make bench` and `make test-e2e` on a 4-core Intel Xeon @ 2.80GHz container, and are
-recorded here as the baseline a threshold would later be chosen against — not as targets.
+Roadmap item 7 asked for observation without gating, so the point of it is the numbers.
+
+**Read them as indicative, not as a baseline to diff against.** They come from `make bench
+BENCH_ARGS='-count 5'` on one 4-core Intel Xeon @ 2.80GHz shared container, and the median is quoted
+with the observed min–max beside it because that spread is the story: the `publish` rows move by up
+to **2.9× between runs of the same binary on the same machine**. Anyone rerunning these and getting
+a different number has not found a regression. Choosing a threshold from a single run of these
+figures would produce a gate that fires on container noise, which is principle 4's failure mode
+exactly — a distribution measured on dedicated hardware is what that step actually needs.
 
 ### Terminal output throughput
 
 `managedSession.publish` is the path every byte a pane produces travels. Measured per 4KB chunk with
-no subscribers:
+no subscribers, five runs:
 
-| Replay buffer | ns/op | B/op |
-|---|---|---|
-| Empty (cold) | ~5,400 | 4,096 |
-| Full (steady state) | ~180,000 | ~598,000 |
+| Replay buffer | ns/op (median) | range | B/op |
+|---|---|---|---|
+| Empty (cold) | 1,746 | 1,686 – 2,251 | 4,096 |
+| Full (steady state) | 343,034 | 268,696 – 355,473 | ~598,000 |
 
-**The ~33× gap is the trim.** `publish` retains a fixed 256KB replay window by reallocating and
-copying it on every chunk, so a pane that has been open for more than a few seconds pays a full
-window copy per 4KB of output, forever. A ring buffer would make it constant. That is a real finding
-and it is deliberately **not** acted on here: item 7 is measurement, and a change to the buffer
-belongs with the reliability tests that cover replay, not with the benchmark that spotted it.
+**The gap — two orders of magnitude — is the trim.** `publish` retains a fixed 256KB replay window by
+reallocating and copying it on every chunk, so a pane that has been open for more than a few seconds
+pays a full window copy per 4KB of output, forever. A ring buffer would make it constant. That is a
+real finding and it is deliberately **not** acted on here: item 7 is measurement, and a change to the
+buffer belongs with the reliability tests that cover replay, not with the benchmark that spotted it.
 
-Subscriber fan-out is comparatively cheap — 16 subscribers add roughly 50% to a 4KB chunk — so
+The multiple itself is not worth quoting to two significant figures — at these spreads the same two
+benchmarks support anything from ~120× to ~200×, and an earlier revision of this section said "~33×",
+computed from a cold figure that the benchmark's own `b.StopTimer` calls had inflated threefold. The
+finding survives that correction comfortably; the precision never existed.
+
+Subscriber fan-out is comparatively cheap — 16 subscribers add roughly 35% to a 4KB chunk — so
 many-pane cost is dominated by the per-pane buffer, not by the fan-out.
 
-`Subscribe` (what a workspace switch pays per remounted pane) copies the whole buffer: ~3µs empty,
-~61µs at the full 256KB.
+`Subscribe` (what a workspace switch pays per remounted pane) copies the whole buffer: ~1µs empty,
+~141µs at the full 256KB. Both figures include the matching unsubscribe, for the reason
+`BenchmarkSessionSubscribe`'s own comment records.
 
 ### Relay polling cost
 
-| Operation | ns/op |
-|---|---|
-| `AppendMessage`, empty history | ~270 |
-| `AppendMessage`, at the 2000-row limit | ~730 |
-| `MessagesSince`, caught-up cursor | ~10,300 |
-| `MessagesSince`, cold start | ~400,000 |
-| `StatusSnapshot`, 64 panes | ~22,800 |
+Medians of five runs; these are far steadier than the `publish` rows above (≤1.1× spread).
+
+| Operation | ns/op (median) | range |
+|---|---|---|
+| `AppendMessage`, at the 2000-row limit | 288 | 276 – 303 |
+| `MessagesSince`, caught-up cursor | 9,171 | 9,102 – 9,258 |
+| `MessagesSince`, cold start | 602,421 | 567,966 – 625,917 |
+| `StatusSnapshot`, 64 panes | 9,873 | 9,575 – 10,654 |
 
 `MessagesSince` scans the whole history even when the caller is caught up and gets nothing back,
 which is the shape to watch if the history limit is ever raised.
+
+There is no empty-history `AppendMessage` row, and an earlier revision's claim of a ~270 vs ~730
+contrast between empty and full was noise read as signal. A benchmark cannot hold the cache empty:
+`b.N` is millions, so the first 2000 iterations fill it and the rest measure the full case. Nor is
+there anything to find — the trim is a pointer bump, and append's amortized regrow is paid alike
+either way. `BenchmarkBoardCacheAppendMessage`'s comment records both halves.
 
 ### Accessibility
 
