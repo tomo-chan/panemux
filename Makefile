@@ -96,7 +96,14 @@ COVERAGE_PKGS := ./internal/config/...,./internal/api/...,./internal/ws/...,./in
 
 coverage: coverage-go coverage-frontend
 
-coverage-go:
+# build-frontend is a real prerequisite, not tidiness: the root package joined
+# the gate above, and main.go carries `//go:embed frontend/dist`, so compiling
+# it needs that directory to exist. Without this, `make coverage-go` on a clean
+# tree fails with "pattern frontend/dist: no matching files found" — an error
+# that gives no hint the fix is to build the frontend first. `make check` and
+# CI already build it, so this costs them nothing and only makes the
+# standalone command DEVELOPMENT.md documents work on its own.
+coverage-go: build-frontend
 	go test \
 	  ./internal/config/... \
 	  ./internal/api/... \

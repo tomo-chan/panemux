@@ -418,13 +418,32 @@ func TestPersistBoardCursors_WritesAFileLoadCursorFileCanReadBack(t *testing.T) 
 
 // A save failure is a warning, never a crash and never a startup failure:
 // the relay's cursor is an optimisation, and losing it costs a re-read, not
-// correctness. The config directory is deliberately absent here.
+// correctness.
+//
+// Making the save actually fail takes more than an absent directory:
+// board.SaveCursorFile goes through atomicWriteFile, whose first statement is
+// os.MkdirAll, so a missing HOME is simply created on demand and the write
+// succeeds. An earlier version of this test pointed HOME at a nonexistent
+// directory and therefore drove the happy path while claiming to cover the
+// failure branch — a tautological test of exactly the shape this repository's
+// own red-check (docs/quality-gateway.md, D4) exists to catch.
+//
+// A plain FILE where the directory has to go is genuinely unwritable, and
+// unlike a permission bit it cannot be bypassed by running as root: MkdirAll
+// fails with ENOTDIR for every uid.
 func TestPersistBoardCursors_UnwritableLocation_DoesNotPanic(t *testing.T) {
-	t.Setenv("HOME", filepath.Join(t.TempDir(), "nonexistent"))
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".config"), []byte("not a directory"), 0o600))
 
 	assert.NotPanics(t, func() {
 		persistBoardCursors([]board.CursorEntry{{Host: "local", Team: "demo", Cursor: "abc"}})
 	})
+
+	path, err := board.DefaultCursorFilePath()
+	require.NoError(t, err)
+	_, statErr := os.Stat(path)
+	assert.Error(t, statErr, "the save must actually have failed for this test to mean anything")
 }
 
 func TestPersistBootstrapState_WritesAFileLoadBootstrapStateCanReadBack(t *testing.T) {
@@ -441,10 +460,19 @@ func TestPersistBootstrapState_WritesAFileLoadBootstrapStateCanReadBack(t *testi
 	assert.Equal(t, []string{"pane-a", "pane-b"}, got)
 }
 
+// See the cursor test above for why an absent directory is not unwritable and
+// a file in its place is.
 func TestPersistBootstrapState_UnwritableLocation_DoesNotPanic(t *testing.T) {
-	t.Setenv("HOME", filepath.Join(t.TempDir(), "nonexistent"))
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".config"), []byte("not a directory"), 0o600))
 
 	assert.NotPanics(t, func() { persistBootstrapState([]string{"pane-a"}) })
+
+	path, err := board.DefaultBootstrapStateFilePath()
+	require.NoError(t, err)
+	_, statErr := os.Stat(path)
+	assert.Error(t, statErr, "the save must actually have failed for this test to mean anything")
 }
 
 // installAgmsg creates the shape LocalAgmsgPresent looks for: an install

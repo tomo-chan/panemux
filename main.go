@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"embed"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -54,9 +55,7 @@ func main() {
 
 	opts, err := parseOptions(os.Args[1:])
 	if err != nil {
-		// flag.ContinueOnError has already printed the error and the usage
-		// text; 2 is the conventional exit code for a usage error.
-		os.Exit(2)
+		os.Exit(parseExitCode(err))
 	}
 
 	if opts.showVersion {
@@ -109,6 +108,30 @@ func parseOptions(args []string) (cliOptions, error) {
 		return cliOptions{}, fmt.Errorf("parsing command line options: %w", err)
 	}
 	return opts, nil
+}
+
+// parseExitCode maps a parseOptions failure onto a process exit code.
+//
+// -h/--help is not a usage error. Under flag.ExitOnError — which
+// flag.CommandLine uses, and which parseOptions used before it was given its
+// own FlagSet — the flag package exits 0 for help itself. flag.ContinueOnError
+// instead returns flag.ErrHelp like any other error, so without this
+// distinction `panemux --help` would print its usage and then exit 2. It is a
+// documented invocation (install.sh tells the user to run it), so a script
+// running it under `set -e` would see a failure for a command that did exactly
+// what was asked.
+//
+// Split out from main so it can be tested: main itself installs signal
+// handlers and runs for the life of the process.
+func parseExitCode(err error) int {
+	if errors.Is(err, flag.ErrHelp) {
+		// flag has already printed the usage text, and unlike a real parse
+		// error there is no message to add.
+		return 0
+	}
+	// flag has already printed both the error and the usage text; 2 is the
+	// conventional exit code for a usage error.
+	return 2
 }
 
 // configLoader is loadConfig's injection point for the two package-level

@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"flag"
 	"os"
 	"path/filepath"
 	"testing"
@@ -100,6 +101,44 @@ func TestParseOptions_IsRepeatable(t *testing.T) {
 
 	assert.Equal(t, 1, first.port)
 	assert.Equal(t, 2, second.port)
+}
+
+// -h/--help is a documented invocation (install.sh tells the user to run it),
+// so it must exit 0. flag.ContinueOnError reports it as an ordinary error,
+// unlike the flag.ExitOnError default that exits 0 for help itself, so the
+// distinction has to be made by hand — and pinned here, because main() is
+// where it is applied and main() is deliberately outside the coverage gate.
+func TestParseExitCode(t *testing.T) {
+	helpErr := func(args []string) error {
+		_, err := parseOptions(args)
+		require.Error(t, err)
+		return err
+	}
+
+	tests := []struct {
+		err  error
+		name string
+		want int
+	}{
+		{name: "--help is not a usage error", err: helpErr([]string{"--help"}), want: 0},
+		{name: "-h is not a usage error", err: helpErr([]string{"-h"}), want: 0},
+		{name: "an unknown flag is", err: helpErr([]string{"--nonesuch"}), want: 2},
+		{name: "a bad flag value is", err: helpErr([]string{"--port", "http"}), want: 2},
+		{name: "any other error is", err: errors.New("something else"), want: 2},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, parseExitCode(tc.err))
+		})
+	}
+}
+
+// The wrapping in parseOptions must keep flag.ErrHelp reachable through
+// errors.Is, or parseExitCode above silently starts answering 2 for help.
+func TestParseOptions_Help_WrapsErrHelp(t *testing.T) {
+	_, err := parseOptions([]string{"--help"})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, flag.ErrHelp)
 }
 
 func TestLoadConfig_ExplicitPath_UsesLoad(t *testing.T) {
