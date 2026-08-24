@@ -34,6 +34,13 @@ else
 	# this hook must never be the reason a turn stops.
 	if command -v jq > /dev/null 2>&1; then
 		file=$(jq -r '.tool_input.file_path // .tool_response.filePath // empty' 2> /dev/null)
+	else
+		# Exiting 0 is right (principle 4 — never block on something that
+		# cannot be checked), but doing it silently is not: without jq this
+		# gate stops running entirely and nothing ever says so, which is the
+		# "reports the discipline as enforced while enforcing nothing" failure
+		# this file's own header calls worse than no hook at all.
+		printf 'G1: jq not found; the edit gate is not running\n' >&2
 	fi
 fi
 
@@ -49,7 +56,19 @@ case "$file" in
 *.go)
 	command -v gofmt > /dev/null 2>&1 || exit 0
 
-	unformatted=$(gofmt -s -l "$file" 2>&1)
+	# stdout is the list of unformatted files; stderr is a parse error. Merging
+	# them reported a file that does not PARSE as a formatting problem, and
+	# advised `make fmt`, which runs gofmt and fails identically — swallowing
+	# the one diagnostic that would have helped.
+	gofmt_err=$(mktemp)
+	unformatted=$(gofmt -s -l "$file" 2> "$gofmt_err")
+	parse_error=$(cat "$gofmt_err")
+	rm -f "$gofmt_err"
+
+	if [ -n "$parse_error" ]; then
+		block "G1: $file does not parse:
+$parse_error"
+	fi
 	if [ -n "$unformatted" ]; then
 		block "G1: $file is not gofmt -s clean. Run: make fmt"
 	fi
@@ -65,8 +84,26 @@ case "$file" in
 		rel=${rel#/}
 		[ -n "$rel" ] || rel="."
 
-		vet_output=$(cd "$repo_root" && go vet "./$rel" 2>&1)
-		if [ $? -ne 0 ]; then
+		if ! vet_output=$(cd "$repo_root" && go vet "./$rel" 2>&1); then
+			# A package that does not COMPILE is the expected state halfway
+			# through the repository's own TDD rule ("write tests first,
+			# confirm they fail"): the test names a function that does not
+			# exist yet. Blocking there would reject every red test at the
+			# moment it is written and pressure the agent into writing the
+			# implementation first — inverting the rule this gate exists to
+			# support.
+			#
+			# go vet reports a load/type failure on a line starting with
+			# "vet: ", while a genuine diagnostic is a bare "file:line:col:
+			# message". That is the discriminator, verified both ways:
+			#
+			#   vet: sub/b_test.go:6:5: undefined: B          <- mid-TDD, allow
+			#   sub/bad.go:5:26: fmt.Printf format %d has ... <- real, block
+			if printf '%s' "$vet_output" | grep -q '^vet: '; then
+				printf 'G1: ./%s does not compile yet, so go vet was skipped:\n%s\n' \
+					"$rel" "$vet_output" >&2
+				exit 0
+			fi
 			block "G1: go vet ./$rel failed:
 $vet_output"
 		fi
@@ -84,8 +121,7 @@ $vet_output"
 	esac
 	[ -d "$repo_root/frontend/node_modules" ] || exit 0
 
-	tsc_output=$(cd "$repo_root/frontend" && npx --no-install tsc --noEmit 2>&1)
-	if [ $? -ne 0 ]; then
+	if ! tsc_output=$(cd "$repo_root/frontend" && npx --no-install tsc --noEmit 2>&1); then
 		block "G1: tsc --noEmit failed:
 $tsc_output"
 	fi

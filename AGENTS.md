@@ -50,7 +50,13 @@ being left to memory. `.claude/` holds the agent-side half:
   See decision D6 in [docs/quality-gateway.md](docs/quality-gateway.md).
 - `.claude/agents/diff-reviewer.md` reviews a branch's diff in a fresh context.
   It does not block, and it is not meant to: see decision D5.
-- `make test-hooks` tests the hooks themselves, and runs as part of `make test`.
+- `make test-hooks` tests the hooks themselves. It runs as part of `make test`
+  and as its own CI step, since `ci.yml` invokes the suites directly rather
+  than through `make test`.
+- The hook tests use `jq` where they parse `settings.json` or a hook payload.
+  It is not installed by `make install-deps`; without it those checks report
+  themselves as **skipped** rather than passing or failing, and the hooks
+  themselves degrade to a warning on stderr rather than blocking.
 
 These are the checks; they do not replace reading the documents above.
 

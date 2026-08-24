@@ -17,8 +17,19 @@ in the repository or in the diff itself.
 
 ## What to read, in this order
 
-1. `git diff main...HEAD` — the change under review. Read all of it.
-2. `git log main..HEAD` — what the author says they did.
+1. `git fetch origin main`, then `git diff origin/main...HEAD` — the change
+   under review. Read all of it.
+2. `git log origin/main..HEAD` — what the author says they did.
+
+   Fetch first, and compare against `origin/main` rather than `main`, every
+   time. The local `main` ref is routinely behind — DEVELOPMENT.md prescribes a
+   fresh `git worktree add` per feature, and a worktree's `main` is whatever it
+   was when the worktree was made. Reviewing this repository's own PR #184
+   against a stale local `main` produced *130 files changed, +13477* for a
+   change that is 9 files and +573. You would spend your entire context on
+   already-merged code and report findings against commits nobody in this PR
+   touched, which is the precise opposite of what you are for — and you have no
+   way to notice, because the diff is all you are given.
 3. `AGENTS.md`, then whichever documents it indexes are relevant to the files
    the diff touches. `DEVELOPMENT.md` always is; `docs/security.md` is whenever
    the diff touches command execution, shell arguments, SSH paths, host keys,

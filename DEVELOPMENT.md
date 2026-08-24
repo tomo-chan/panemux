@@ -104,7 +104,8 @@ Example: `Config.sshConfigPath` uses `sshconfig.DefaultPath()` only when the ove
 - `make check` must pass before `make build`.
 - `make check` must pass before reporting implementation complete.
 - There are no exceptions for frontend-only, docs-adjacent, or "small" code changes.
-- Test commands: `make test-go`, `make test-frontend`, `make test-e2e`, `make test`
+- Test commands: `make test-go`, `make test-frontend`, `make test-e2e`, `make test`, `make test-hooks`
+- `make test-hooks` uses `jq` where it parses `settings.json` or a hook payload. `jq` is **optional**: without it those checks report themselves as skipped rather than passing or failing, so `make check` — and therefore `git push` — still works. Install it to actually run them.
 - Coverage commands: `make coverage-go`, `make coverage-frontend`
 - Lint commands: `make lint-go`, `make lint-frontend`, `make lint`
 - Go lint includes `gofmt`, `go vet`, and `golangci-lint run ./...` using `.golangci.yml`.
