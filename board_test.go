@@ -416,25 +416,38 @@ func TestPersistBoardCursors_WritesAFileLoadCursorFileCanReadBack(t *testing.T) 
 	assert.Equal(t, entries, got)
 }
 
-// A save failure is a warning, never a crash and never a startup failure:
-// the relay's cursor is an optimisation, and losing it costs a re-read, not
-// correctness.
+// unwritableHome points HOME at a directory whose .config can never be
+// created, and returns once that is true.
 //
-// Making the save actually fail takes more than an absent directory:
-// board.SaveCursorFile goes through atomicWriteFile, whose first statement is
+// Making these saves actually fail takes more than an absent directory, which
+// is the trap an earlier version of both tests below fell into: the persist
+// helpers go through board.atomicWriteFile, whose first statement is
 // os.MkdirAll, so a missing HOME is simply created on demand and the write
-// succeeds. An earlier version of this test pointed HOME at a nonexistent
-// directory and therefore drove the happy path while claiming to cover the
-// failure branch — a tautological test of exactly the shape this repository's
-// own red-check (docs/quality-gateway.md, D4) exists to catch.
+// SUCCEEDS. Those tests therefore drove the happy path while claiming to cover
+// the failure branch — tautological tests of exactly the shape this
+// repository's own red-check (docs/quality-gateway.md, D4) exists to catch,
+// and `go tool cover` showed it: both functions sat at 50%.
 //
 // A plain FILE where the directory has to go is genuinely unwritable, and
 // unlike a permission bit it cannot be bypassed by running as root: MkdirAll
-// fails with ENOTDIR for every uid.
-func TestPersistBoardCursors_UnwritableLocation_DoesNotPanic(t *testing.T) {
+// fails with ENOTDIR for every uid. internal/config's
+// TestEnsureAuthToken_WriteFailure_NonFatal_LoopbackHost uses the same shape.
+//
+// It is one helper rather than two copies so the two tests cannot drift into
+// disagreeing about what "unwritable" means — one of them silently going green
+// again is the failure being guarded against.
+func unwritableHome(t *testing.T) {
+	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	require.NoError(t, os.WriteFile(filepath.Join(home, ".config"), []byte("not a directory"), 0o600))
+}
+
+// A save failure is a warning, never a crash and never a startup failure: the
+// relay's cursor is an optimisation, and losing it costs a re-read, not
+// correctness.
+func TestPersistBoardCursors_UnwritableLocation_DoesNotPanic(t *testing.T) {
+	unwritableHome(t)
 
 	assert.NotPanics(t, func() {
 		persistBoardCursors([]board.CursorEntry{{Host: "local", Team: "demo", Cursor: "abc"}})
@@ -460,12 +473,8 @@ func TestPersistBootstrapState_WritesAFileLoadBootstrapStateCanReadBack(t *testi
 	assert.Equal(t, []string{"pane-a", "pane-b"}, got)
 }
 
-// See the cursor test above for why an absent directory is not unwritable and
-// a file in its place is.
 func TestPersistBootstrapState_UnwritableLocation_DoesNotPanic(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	require.NoError(t, os.WriteFile(filepath.Join(home, ".config"), []byte("not a directory"), 0o600))
+	unwritableHome(t)
 
 	assert.NotPanics(t, func() { persistBootstrapState([]string{"pane-a"}) })
 
