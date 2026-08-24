@@ -396,8 +396,8 @@ TS
 	git checkout -q -b work
 
 	printf 'export const mul = (a: number, b: number) => a * b\n' >> frontend/src/math.ts
-	rewrite frontend/src/math.test.ts "import { add } from './math'" "import { add, mul } from './math'"
-	rewrite frontend/src/math.test.ts '})' '})'
+	# The heredoc below replaces the file wholesale — that is what produces the
+	# diff this fixture scopes, so there is nothing for `rewrite` to do here.
 	cat > frontend/src/math.test.ts <<'TS'
 import { describe, it, expect } from 'vitest'
 import { add, mul } from './math'
@@ -460,6 +460,77 @@ else
 	fail "a touched line outside every case falls back to the whole file" "$listing"
 fi
 rm -rf "$fefallback"
+
+# --- the frontend half's verdict is per case, not per invocation -------------
+#
+# This one drives a real vitest run, because the bug it guards cannot be seen
+# any other way: `-t` selects by unanchored regex and the summary line is an
+# aggregate, so a tautological `it('renders')` was reported red on the strength
+# of its sibling `it('renders empty state')` going red in the same invocation.
+# `--changed-tests` stops before running anything and would not have caught it.
+#
+# It needs the repository's own node_modules, which `make check` has by the time
+# this runs. Without it the check reports itself skipped rather than passed.
+checks=$((checks + 1))
+if [ ! -d "$scripts_dir/../frontend/node_modules" ]; then
+	echo "skip frontend/node_modules missing — the per-case frontend check is skipped"
+else
+	percase=$(mktemp -d)
+	(
+		cd "$percase" || exit 1
+		git_init
+		mkdir -p frontend/src
+		printf 'node_modules/\n' > .gitignore
+		printf '{"name":"efficacy-fixture","private":true,"type":"module"}\n' > frontend/package.json
+		ln -s "$(CDPATH='' cd -- "$scripts_dir/../frontend/node_modules" && pwd)" frontend/node_modules
+		printf 'export const add = (a: number, b: number) => a + b\n' > frontend/src/widget.ts
+		cat > frontend/src/widget.test.ts <<'TS'
+import { describe, it, expect } from 'vitest'
+import { add } from './widget'
+
+describe('widget', () => {
+  it('adds', () => {
+    expect(add(1, 2)).toBe(3)
+  })
+})
+TS
+		git add -A && git commit -q -m "base"
+		git checkout -q -b work
+
+		printf 'export const renderAll = (xs: number[]) => xs.join(",")\n' >> frontend/src/widget.ts
+		cat > frontend/src/widget.test.ts <<'TS'
+import { describe, it, expect } from 'vitest'
+import { add, renderAll } from './widget'
+
+describe('widget', () => {
+  it('adds', () => {
+    expect(add(1, 2)).toBe(3)
+  })
+
+  it('renders', () => {
+    expect('a,b').toBe('a,b')
+  })
+
+  it('renders empty state', () => {
+    expect(renderAll([])).toBe('')
+  })
+})
+TS
+		git add -A && git commit -q -m "add renderAll with one real test and one tautology"
+	)
+	percase_out=$(run_efficacy "$percase")
+	percase_status=$?
+	if [ "$percase_status" -eq 1 ] &&
+		printf '%s' "$percase_out" | grep -q 'SURVIVOR: src/widget.test.ts > renders still passes' &&
+		printf '%s' "$percase_out" | grep -q 'red: src/widget.test.ts > renders empty state'; then
+		pass "a frontend tautology is not vouched for by its red sibling"
+	else
+		fail "a frontend tautology is not vouched for by its red sibling" \
+			"exit $percase_status
+$percase_out"
+	fi
+	rm -rf "$percase"
+fi
 
 # --- skips, which are as important as the failures ---------------------------
 #
@@ -600,8 +671,9 @@ GO
 expect_output 0 "WARNING" \
 	"a benchmark-only change is not failed for selecting no tests" "$benchonly"
 
-# A test skipped at HEAD cannot be red-checked either — but that is a reason to
-# say so, not to call it red.
+# A test skipped at HEAD cannot be red-checked — that is a reason to say so,
+# not to call it red. Beside a test that CAN be checked, the branch still
+# passes.
 skipped=$(new_fixture)
 (
 	cd "$skipped" || exit 1
@@ -613,17 +685,107 @@ func Mul(a, b int) int {
 GO
 	cat >> sample_test.go <<'GO'
 
-func TestMul(t *testing.T) {
+func TestMulSkipped(t *testing.T) {
 	t.Skip("not yet")
 	if Mul(2, 3) != 6 {
 		t.Fatal("Mul is wrong")
 	}
 }
+
+func TestMul(t *testing.T) {
+	if Mul(2, 3) != 6 {
+		t.Fatal("Mul is wrong")
+	}
+}
 GO
-	git add -A && git commit -q -m "add Mul with a skipped test"
+	git add -A && git commit -q -m "add Mul with one skipped test and one real one"
 )
 expect_output 0 "skipped at HEAD" \
 	"a test skipped at HEAD is reported, not counted as red" "$skipped"
+
+# ...but a branch where EVERY changed test is unrunnable has been checked
+# against nothing, which is "could not check", not "nothing to check". Same
+# argument as the missing base ref and the missing node_modules.
+allskipped=$(new_fixture)
+(
+	cd "$allskipped" || exit 1
+	cat >> sample.go <<'GO'
+
+func Mul(a, b int) int {
+	return a * b
+}
+GO
+	cat >> sample_test.go <<'GO'
+
+func TestMul(t *testing.T) {
+	t.Skip("needs a real agmsg install")
+	if Mul(2, 3) != 6 {
+		t.Fatal("Mul is wrong")
+	}
+}
+GO
+	git add -A && git commit -q -m "add Mul with only a skipped test"
+)
+expect_output 1 "nothing was red-checked" \
+	"a branch whose every changed test is unrunnable is an error, not a pass" "$allskipped"
+
+# The per-test escape hatch. A test in a package this branch's implementation
+# never touched was never going to go red, and the PR-wide label is too blunt
+# for it — applying it to get past one unrelated test also exempts a genuine
+# tautology elsewhere in the same branch.
+marked=$(mktemp -d)
+(
+	cd "$marked" || exit 1
+	git_init
+	printf 'module sample\n\ngo 1.25\n' > go.mod
+	mkdir -p a b
+	printf 'package a\n' > a/a.go
+	printf 'package a\n\nimport "testing"\n\nfunc TestNothingA(t *testing.T) {}\n' > a/a_test.go
+	printf 'package b\n\nfunc Bye() string { return "bye" }\n' > b/b.go
+	printf 'package b\n\nimport "testing"\n\nfunc TestBye(t *testing.T) {\n\tif Bye() != "bye" {\n\t\tt.Fatal("Bye is wrong")\n\t}\n}\n' > b/b_test.go
+	git add -A && git commit -q -m "base"
+	git checkout -q -b work
+
+	# Package a gets a real implementation and a real test for it.
+	cat >> a/a.go <<'GO'
+
+func Mul(x, y int) int { return x * y }
+GO
+	cat >> a/a_test.go <<'GO'
+
+func TestMul(t *testing.T) {
+	if Mul(2, 3) != 6 {
+		t.Fatal("Mul is wrong")
+	}
+}
+GO
+	# Package b's implementation is untouched; only an assertion is tightened,
+	# so nothing under this test will be reverted and it cannot go red.
+	rewrite b/b_test.go 'if Bye() != "bye" {' 'if Bye() != "bye" || len(Bye()) != 3 {'
+	git add -A && git commit -q -m "one real test, one in an untouched package"
+)
+checks=$((checks + 1))
+before_marker=$(run_efficacy "$marked")
+before_status=$?
+(
+	cd "$marked" || exit 1
+	rewrite b/b_test.go 'func TestBye(t *testing.T) {' '//efficacy:exempt — b'"'"'s implementation is not part of this branch
+func TestBye(t *testing.T) {'
+	git add -A && git commit -q -m "mark TestBye exempt"
+)
+after_marker=$(run_efficacy "$marked")
+after_status=$?
+if [ "$before_status" -eq 1 ] && printf '%s' "$before_marker" | grep -q 'SURVIVOR: ./b TestBye' &&
+	[ "$after_status" -eq 0 ]; then
+	pass "an efficacy:exempt marker takes one test out of scope, and nothing else"
+else
+	fail "an efficacy:exempt marker takes one test out of scope, and nothing else" \
+		"before: exit $before_status
+$before_marker
+after: exit $after_status
+$after_marker"
+fi
+rm -rf "$marked"
 
 # --- "could not check" is never a pass ---------------------------------------
 #

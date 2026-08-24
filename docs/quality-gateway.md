@@ -238,20 +238,41 @@ them:
 - **Scope is the changed test *functions* and *cases*, not the changed files.** The script maps the
   diff's touched line numbers onto the function ranges in the file, so editing an assertion inside
   an existing test brings that test into scope, and appending a new test does *not* drag the
-  untouched one above it in. The frontend half does the same thing with `it(...)`/`test(...)` blocks
-  and vitest's `-t`, falling back to the whole file only when nothing can be narrowed safely (no
-  literal case name, or a touched line inside no case at all). Scope and per-test verdict are
-  separate decisions that were once conflated: narrowing the set does not stop one member masking
-  another, and this gate needs both.
+  untouched one above it in. The frontend half does the same thing with `it(...)`/`test(...)`
+  blocks, falling back to the whole file only when nothing can be narrowed safely (no literal case
+  name, or a touched line inside no case at all). Scope and per-test verdict are separate decisions
+  that were once conflated: narrowing the set does not stop one member masking another, and this
+  gate needs both.
+
+  On the frontend the verdict comes from vitest's **JSON reporter**, read per case, not from
+  `-t` plus the summary line. That was a second, subtler instance of the same masking: `-t` matches
+  as an *unanchored* regex over the full `describe`-joined name, so `-t 'renders'` also selects
+  `renders empty state`, and the `Tests …` summary is an aggregate — a tautology was reported red on
+  the strength of its sibling. Anchoring does not fix it (`renders$` still matches `always
+  renders`), and this repository has five such name pairs today. Running the whole file once and
+  looking up each case's own status fixes it and is cheaper than one filtered run per case.
 - **Skipping is as important as failing.** A branch that changes no implementation (docs, tests
   only) has nothing to revert, and a branch that changes implementation but no test has no result to
   check — the latter warns rather than blocking, because making it a failure would fire on every
   pure refactor. Each stack is judged only against its own revert, too: a branch that changes Go
   code and also touches a frontend test has nothing reverted under that frontend test, and failing
   it there would be a verdict on a mutation that never happened. Principle 4 again.
+
+  **One case in that family is deliberately left open, and it is a real false positive**: a Go test
+  in a package whose *implementation* this branch never touched — an assertion tightened next to the
+  change, a flake fixed alongside a feature — is still judged against the revert, and cannot go red.
+  Conditioning per package is not the fix: `internal/server`'s tests legitimately cover
+  `internal/api`'s implementation, so narrowing by package would blind the gate to exactly the case
+  it exists for. The answer is a **per-test marker**, `//efficacy:exempt` in the doc comment above
+  the test, because the PR-wide `efficacy-exempt` label is too blunt for it — applying the label to
+  get past one unrelated test also exempts a genuine tautology elsewhere in the same branch. The
+  marker sits in the diff a reviewer reads, one line above the test it excuses.
 - **"Could not check" is a failure, never a skip.** A missing base ref, a scratch worktree that
-  could not be created, a missing `frontend/node_modules` — each of these once printed one line and
-  exited 0. A required check that goes green having checked nothing is the single failure mode a
+  could not be created, a missing `frontend/node_modules`, or every changed test turning out to be
+  skipped or unrunnable — each of these once printed one line and exited 0. The last is the one that
+  looks most like a skip and is not: `internal/board`'s agmsg contract tests carry six `t.Skip`s
+  that fire on every runner without a real agmsg install, so a branch touching only those tests
+  would have gone green having red-checked nothing. A required check that goes green having checked nothing is the single failure mode a
   required check exists to rule out, and it is invisible: the job is green, so nobody looks. These
   now exit 1 with a message saying what to fix. The related trap is the scratch worktree itself:
   `main.go` embeds `frontend/dist`, which is gitignored, so the root package cannot build there at

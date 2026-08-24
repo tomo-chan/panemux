@@ -35,6 +35,11 @@
 #   EFFICACY_BASE=origin/main make efficacy
 #   scripts/efficacy.sh --changed-tests # print what it would check, and stop
 #
+# A single test can be taken out of scope with `//efficacy:exempt` in the
+# comment directly above it — for a test in a package whose implementation this
+# branch never touched, which was never going to go red. That is narrower than
+# EFFICACY_EXEMPT / the efficacy-exempt label, which exempt the whole branch.
+#
 # Exit codes: 0 = the gate passed, or had nothing to check; 1 = a changed test
 # survived its implementation being reverted, or the gate could not run.
 
@@ -150,7 +155,13 @@ changed_test_funcs() {
 				if (fname[k] == "") continue
 				s = fstart[k]
 				j = s - 1
-				while (j >= 1 && line[j] ~ /^\/\//) { s = j; j-- }
+				exempt = 0
+				while (j >= 1 && line[j] ~ /^\/\//) {
+					if (line[j] ~ /efficacy:exempt/) exempt = 1
+					s = j
+					j--
+				}
+				if (exempt) continue
 				e = (k < cnt) ? fstart[k + 1] - 1 : n
 				while (e > s && (line[e] ~ /^[ \t]*$/ || line[e] ~ /^\/\//)) e--
 				print fname[k], s, e
@@ -214,7 +225,12 @@ changed_fe_test_names() {
 			for (k = 1; k <= cnt; k++) {
 				s = dstart[k]
 				j = s - 1
-				while (j >= 1 && line[j] ~ /^[ \t]*\/\//) { s = j; j-- }
+				exempt[k] = 0
+				while (j >= 1 && line[j] ~ /^[ \t]*\/\//) {
+					if (line[j] ~ /efficacy:exempt/) exempt[k] = 1
+					s = j
+					j--
+				}
 				bstart[k] = s
 				e = (k < cnt) ? dstart[k + 1] - 1 : n
 				while (e > s && (line[e] ~ /^[ \t]*$/ || line[e] ~ /^[ \t]*\/\//)) e--
@@ -231,6 +247,7 @@ changed_fe_test_names() {
 			if (!any) { print "__UNMAPPED__"; exit }
 			for (k = 1; k <= cnt; k++) {
 				if (!hit[k]) continue
+				if (exempt[k]) continue
 				if (dname[k] == "") { print "__UNMAPPED__"; exit }
 				print dname[k]
 			}
@@ -266,6 +283,7 @@ for f in $fe_tests; do
 	esac
 done
 sort -u "$tmp/fe_targets" -o "$tmp/fe_targets"
+cut -f1 "$tmp/fe_targets" | sort -u > "$tmp/fe_files"
 
 go_count=$(wc -l < "$tmp/go_targets" | tr -d ' ')
 fe_count=$(wc -l < "$tmp/fe_targets" | tr -d ' ')
@@ -380,22 +398,58 @@ go_verdict() {
 	fi
 }
 
-# fe_verdict <relfile> <name|""> <log> — pass | fail | notrun | broken.
-fe_verdict() {
-	if [ -n "$2" ]; then
-		fv_pat=$(printf '%s' "$2" | sed 's/[][\\.*+?^$(){}|\/]/\\&/g')
-		(cd "$worktree/frontend" && NO_COLOR=1 npx --no-install vitest run "$1" -t "$fv_pat") > "$3" 2>&1
-	else
-		(cd "$worktree/frontend" && NO_COLOR=1 npx --no-install vitest run "$1") > "$3" 2>&1
-	fi
-	fv_rc=$?
-	fv_line=$(sed -n 's/^ *Tests  //p' "$3" | tail -n 1)
-	case "$fv_line" in
-	*failed*) echo fail ;;
-	*passed*) echo pass ;;
-	"") [ "$fv_rc" -ne 0 ] && echo broken || echo notrun ;;
-	*) echo notrun ;;
-	esac
+# fe_run <relfile> <log> — run one test file and record every case's own
+# result. Echoes ok | broken.
+#
+# The whole file runs; no `-t` filter is applied. That is deliberate, and it is
+# what makes the frontend verdict per case rather than per invocation:
+#
+#   - `-t` is an UNANCHORED regex over the full describe-joined name, so
+#     `-t 'renders'` also selects `renders empty state` and `always renders`.
+#     Anchoring does not save it either — `renders$` still matches
+#     `always renders` — and the describe prefix is not in scope here anyway.
+#   - vitest's summary line is an aggregate. Reading it means one sibling's
+#     genuine red is reported as the changed case's red, which is the exact
+#     masking the Go half was restructured to remove. This repository has
+#     five such name pairs today (`closes on Escape` inside
+#     `closes on Escape even when …`, and two in schemas/index.test.ts).
+#
+# So the file runs once and the JSON reporter gives each case's own status,
+# looked up by name below. One invocation per file is also fewer than one per
+# case, so this is cheaper than the filtered version it replaces.
+fe_run() {
+	rm -f "$tmp/fe_results.json"
+	(cd "$worktree/frontend" && NO_COLOR=1 npx --no-install vitest run "$1" \
+		--reporter=default --reporter=json --outputFile="$tmp/fe_results.json") > "$2" 2>&1
+	[ -s "$tmp/fe_results.json" ] || { echo broken; return; }
+	echo ok
+}
+
+# fe_status <title> — passed | failed | skipped | missing | ambiguous.
+# With no argument, the whole file's aggregate verdict.
+#
+# Two cases sharing a title in one file cannot be told apart from a diff, so a
+# split result is reported as `ambiguous` rather than guessed at. Phase 2 counts
+# that as a survivor: fail-closed is the only safe direction when the question
+# is "did the test this branch changed go red".
+fe_status() {
+	FE_JSON="$tmp/fe_results.json" FE_TITLE="${1-}" FE_WANT_TITLE=$([ $# -gt 0 ] && echo 1 || echo 0) \
+		node -e '
+			const j = JSON.parse(require("fs").readFileSync(process.env.FE_JSON, "utf8"))
+			const cases = []
+			for (const f of j.testResults || []) for (const a of f.assertionResults || []) cases.push(a)
+
+			if (process.env.FE_WANT_TITLE !== "1") {
+				const seen = cases.map((a) => a.status)
+				console.log(seen.includes("failed") ? "failed" : seen.includes("passed") ? "passed" : "missing")
+				process.exit(0)
+			}
+
+			const hits = cases.filter((a) => a.title === process.env.FE_TITLE).map((a) => a.status)
+			if (hits.length === 0) console.log("missing")
+			else if (hits.every((s) => s === hits[0])) console.log(hits[0])
+			else console.log("ambiguous")
+		' 2> /dev/null
 }
 
 : > "$tmp/checkable_go"
@@ -440,29 +494,52 @@ if [ "$go_count" -gt 0 ]; then
 fi
 
 if [ "$fe_count" -gt 0 ]; then
-	while IFS="$tab" read -r fefile fename; do
+	while IFS= read -r fefile; do
 		[ -n "$fefile" ] || continue
-		label="$fefile${fename:+ -t \"$fename\"}"
-		case $(fe_verdict "$fefile" "$fename" "$tmp/base.log") in
-		pass)
-			printf '%s%s%s\n' "$fefile" "$tab" "$fename" >> "$tmp/checkable_fe"
-			;;
-		fail)
-			echo "  ERROR: $label already fails at HEAD. Fix the branch first."
+		if [ "$(fe_run "$fefile" "$tmp/base.log")" = broken ]; then
+			echo "  ERROR: $fefile could not be run at HEAD."
 			sed 's/^/         /' "$tmp/base.log"
 			status=1
-			;;
-		notrun)
-			echo "  matched no test at HEAD, so not red-checked: $label"
-			unchecked=$((unchecked + 1))
-			;;
-		broken)
-			echo "  ERROR: $label could not be run at HEAD."
-			sed 's/^/         /' "$tmp/base.log"
-			status=1
-			;;
-		esac
-	done < "$tmp/fe_targets"
+			continue
+		fi
+
+		awk -F"$tab" -v f="$fefile" '$1 == f { print $2 }' "$tmp/fe_targets" |
+			while IFS= read -r fename; do
+				if [ -n "$fename" ]; then
+					fe_state=$(fe_status "$fename")
+					label="$fefile > $fename"
+				else
+					fe_state=$(fe_status)
+					label="$fefile (whole file)"
+				fi
+				printf '%s%s%s%s%s\n' "$fe_state" "$tab" "$fefile" "$tab" "$fename"
+			done > "$tmp/fe_phase1"
+
+		while IFS="$tab" read -r fe_state fefile2 fename; do
+			[ -n "$fe_state" ] || continue
+			label="$fefile2${fename:+ > $fename}"
+			[ -n "$fename" ] || label="$fefile2 (whole file)"
+			case "$fe_state" in
+			passed)
+				printf '%s%s%s\n' "$fefile2" "$tab" "$fename" >> "$tmp/checkable_fe"
+				;;
+			failed)
+				echo "  ERROR: $label already fails at HEAD. Fix the branch first."
+				sed 's/^/         /' "$tmp/base.log"
+				status=1
+				;;
+			ambiguous)
+				echo "  two cases share this name, so not red-checked: $label"
+				echo "    (rename one of them and the gate can tell them apart)"
+				unchecked=$((unchecked + 1))
+				;;
+			*)
+				echo "  skipped or absent at HEAD, so not red-checked: $label"
+				unchecked=$((unchecked + 1))
+				;;
+			esac
+		done < "$tmp/fe_phase1"
+	done < "$tmp/fe_files"
 fi
 
 if [ "$status" -ne 0 ]; then
@@ -519,23 +596,48 @@ while IFS="$tab" read -r pkg fn; do
 	esac
 done < "$tmp/checkable_go"
 
-while IFS="$tab" read -r fefile fename; do
+cut -f1 "$tmp/checkable_fe" | sort -u > "$tmp/checkable_fe_files"
+while IFS= read -r fefile; do
 	[ -n "$fefile" ] || continue
-	run=$((run + 1))
-	label="$fefile${fename:+ -t \"$fename\"}"
-	case $(fe_verdict "$fefile" "$fename" "$tmp/rev.log") in
-	fail | broken)
-		echo "  red: $label"
-		;;
-	*)
-		echo
-		echo "SURVIVOR: $label still passes with this branch's implementation reverted."
-		echo
-		sed 's/^/      /' "$tmp/rev.log"
-		survivors=$((survivors + 1))
-		;;
-	esac
-done < "$tmp/checkable_fe"
+	fe_broken=$(fe_run "$fefile" "$tmp/rev.log")
+
+	awk -F"$tab" -v f="$fefile" '$1 == f { print $2 }' "$tmp/checkable_fe" |
+		while IFS= read -r fename; do
+			if [ "$fe_broken" = broken ]; then
+				printf 'failed%s%s\n' "$tab" "$fename"
+			elif [ -n "$fename" ]; then
+				printf '%s%s%s\n' "$(fe_status "$fename")" "$tab" "$fename"
+			else
+				printf '%s%s\n' "$(fe_status)" "$tab"
+			fi
+		done > "$tmp/fe_phase2"
+
+	while IFS="$tab" read -r fe_state fename; do
+		[ -n "$fe_state" ] || continue
+		run=$((run + 1))
+		label="$fefile${fename:+ > $fename}"
+		[ -n "$fename" ] || label="$fefile (whole file)"
+		case "$fe_state" in
+		failed)
+			echo "  red: $label"
+			;;
+		ambiguous)
+			echo
+			echo "SURVIVOR: $label — two cases share this name and only some went red,"
+			echo "      so the gate cannot tell whether the one this branch changed did."
+			echo "      Rename one of them."
+			survivors=$((survivors + 1))
+			;;
+		*)
+			echo
+			echo "SURVIVOR: $label still passes with this branch's implementation reverted."
+			echo
+			sed 's/^/      /' "$tmp/rev.log"
+			survivors=$((survivors + 1))
+			;;
+		esac
+	done < "$tmp/fe_phase2"
+done < "$tmp/checkable_fe_files"
 
 echo
 if [ "$survivors" -gt 0 ]; then
@@ -544,9 +646,19 @@ if [ "$survivors" -gt 0 ]; then
 fi
 
 if [ "$run" -eq 0 ]; then
-	echo "efficacy: nothing was red-checked — all $unchecked changed test(s) were"
-	echo "  unrunnable here. See the reasons above."
-	exit 0
+	echo "efficacy: ERROR — nothing was red-checked. All $unchecked changed test(s)"
+	echo "  were skipped, absent or unrunnable here, so this branch's tests have not"
+	echo "  been checked against anything."
+	echo
+	echo "  This exits 1 for the same reason the missing-base-ref and missing-"
+	echo "  node_modules paths do: 'could not check' is not 'nothing to check'."
+	echo "  A required check that goes green having checked nothing is invisible."
+	echo
+	echo "  If every changed test is legitimately environment-skipped — the agmsg"
+	echo "  contract tests are, without a real agmsg install — mark them with"
+	echo "  'efficacy:exempt' or apply the efficacy-exempt label, and say which in"
+	echo "  the pull request."
+	exit 1
 fi
 
 echo "efficacy: ok — all $run changed test(s) went red, as a test written before"
