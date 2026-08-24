@@ -51,6 +51,10 @@ test-e2e:
 # remove the implementation entirely — and it catches the two shapes the other
 # gates are blind to: a tautological test, and a test written after the fact.
 #
+# Every changed test is judged on its own, in two phases: pass at HEAD, then
+# fail against the revert. One invocation over the whole set would be a weaker
+# rule, since `go test` goes red if any single member does.
+#
 # Deliberately OUTSIDE `make check`. It needs the base branch, a scratch
 # worktree and a second test run, which is a pull-request-shaped cost rather
 # than an every-turn one — the same reasoning that keeps mutation testing (D2)

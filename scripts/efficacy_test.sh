@@ -8,6 +8,11 @@
 # case in particular cannot be faked, because what makes it a tautology is that
 # the compiler and the test runner are both perfectly happy with it.
 #
+# The frontend half is exercised only through `--changed-tests`, which stops
+# before running anything: driving vitest would mean a node_modules tree per
+# fixture, and what is worth pinning here is the scoping decision, not that
+# vitest can run a file.
+#
 # Run with: make test-efficacy
 
 set -u
@@ -26,15 +31,38 @@ fail() {
 
 pass() { echo "ok   $1"; }
 
+# rewrite <file> <old> <new> — replace a fixed string, without `sed -i`.
+# `sed -i` with no suffix is a GNU extension; BSD/macOS sed reads the next
+# argument as the backup suffix and then fails. macOS is a supported developer
+# platform (.goreleaser.yaml builds darwin) and this suite runs inside
+# `make check`, so it has to work there too.
+rewrite() {
+	rw_file=$1
+	rw_old=$2
+	rw_new=$3
+	OLD=$rw_old NEW=$rw_new awk '
+		BEGIN { old = ENVIRON["OLD"]; new = ENVIRON["NEW"] }
+		{
+			p = index($0, old)
+			if (p > 0) $0 = substr($0, 1, p - 1) new substr($0, p + length(old))
+			print
+		}
+	' "$rw_file" > "$rw_file.tmp" && mv "$rw_file.tmp" "$rw_file"
+}
+
+git_init() {
+	git init -q -b base .
+	git config user.email "test@example.invalid"
+	git config user.name "efficacy test"
+}
+
 # new_fixture — a git repository with a base commit carrying one function and
 # one passing test. Prints its path.
 new_fixture() {
 	dir=$(mktemp -d)
 	(
 		cd "$dir" || exit 1
-		git init -q -b base .
-		git config user.email "test@example.invalid"
-		git config user.name "efficacy test"
+		git_init
 
 		printf 'module sample\n\ngo 1.25\n' > go.mod
 		cat > sample.go <<'GO'
@@ -81,6 +109,27 @@ expect() {
 		pass "$name"
 	else
 		fail "$name: wanted exit $want, got $got" "$output"
+	fi
+	rm -rf "$dir"
+}
+
+# expect_output <exit> <substring> <name> <dir> — exit status AND evidence.
+# Exit status alone is a weak assertion for this gate: several different
+# failures all exit 1, and "it went red" is exactly the claim that has to be
+# true *for the right reason*.
+expect_output() {
+	want=$1
+	needle=$2
+	name=$3
+	dir=$4
+	checks=$((checks + 1))
+
+	output=$(run_efficacy "$dir")
+	got=$?
+	if [ "$got" -eq "$want" ] && printf '%s' "$output" | grep -q "$needle"; then
+		pass "$name"
+	else
+		fail "$name: wanted exit $want and output matching '$needle', got exit $got" "$output"
 	fi
 	rm -rf "$dir"
 }
@@ -136,7 +185,133 @@ func TestSub(t *testing.T) {
 GO
 	git add -A && git commit -q -m "add Sub with a test that does not test it"
 )
-expect 1 "a tautological test is caught" "$tauto"
+expect_output 1 "SURVIVOR: ./. TestSub" "a tautological test is caught" "$tauto"
+
+# --- a genuinely-red test must not vouch for a tautology beside it -----------
+#
+# The verdict has to be per test, not per invocation. `go test` exits nonzero
+# if ANY selected test fails, so judging the whole changed set with one command
+# means one honest test covers for every tautology in the same branch — which
+# is most branches, since almost every PR changes more than one test.
+#
+# Package a gets a real test; package b gets a pure tautology. The gate must
+# still name b.
+masking=$(mktemp -d)
+(
+	cd "$masking" || exit 1
+	git_init
+	printf 'module sample\n\ngo 1.25\n' > go.mod
+	mkdir -p a b
+	printf 'package a\n' > a/a.go
+	printf 'package a\n\nimport "testing"\n\nfunc TestNothingA(t *testing.T) {}\n' > a/a_test.go
+	printf 'package b\n' > b/b.go
+	printf 'package b\n\nimport "testing"\n\nfunc TestNothingB(t *testing.T) {}\n' > b/b_test.go
+	git add -A && git commit -q -m "base"
+	git checkout -q -b work
+
+	cat >> a/a.go <<'GO'
+
+func Mul(x, y int) int { return x * y }
+GO
+	cat >> a/a_test.go <<'GO'
+
+func TestMul(t *testing.T) {
+	if Mul(2, 3) != 6 {
+		t.Fatal("Mul is wrong")
+	}
+}
+GO
+	cat >> b/b.go <<'GO'
+
+func Bye() string { return "bye" }
+GO
+	cat >> b/b_test.go <<'GO'
+
+func TestBye(t *testing.T) {
+	if len("bye") != 3 {
+		t.Fatal("strings are broken")
+	}
+}
+GO
+	git add -A && git commit -q -m "one real test, one tautology"
+)
+expect_output 1 "SURVIVOR: ./b TestBye" \
+	"a real test in one package does not vouch for a tautology in another" "$masking"
+
+# --- the root package must build in the scratch worktree ---------------------
+#
+# main.go has `//go:embed frontend/dist` and .gitignore excludes it, so a fresh
+# `git worktree add` checkout cannot build the root package at all. Left alone,
+# every root-package test "goes red" with zero files reverted and the gate
+# passes everything — vacuously, for the packages where most of this
+# repository's bootstrap and command-center tests live.
+#
+# The fixture reproduces that exact shape, with a tautology inside it. The
+# assertion is that the tautology is *named*: a build failure would also exit 1,
+# so exit status alone would not tell the fix from the bug.
+embedded=$(mktemp -d)
+(
+	cd "$embedded" || exit 1
+	git_init
+	printf 'module sample\n\ngo 1.25\n' > go.mod
+	printf 'frontend/dist/\n' > .gitignore
+	cat > main.go <<'GO'
+package main
+
+import "embed"
+
+//go:embed frontend/dist
+var assets embed.FS
+
+func main() { _ = assets }
+GO
+	printf 'package main\n\nimport "testing"\n\nfunc TestNothing(t *testing.T) {}\n' > main_test.go
+	git add -A && git commit -q -m "base"
+	git checkout -q -b work
+
+	cat >> main.go <<'GO'
+
+func Sub(a, b int) int { return a - b }
+GO
+	cat >> main_test.go <<'GO'
+
+func TestSub(t *testing.T) {
+	if 3-1 != 2 {
+		t.Fatal("arithmetic is broken")
+	}
+}
+GO
+	git add -A && git commit -q -m "add Sub with a tautology"
+)
+expect_output 1 "SURVIVOR: ./. TestSub" \
+	"a gitignored go:embed target does not make the gate vacuous" "$embedded"
+
+# --- a branch already red at HEAD is an error, not a pass --------------------
+#
+# "It failed after the revert" only means something if it passed before. A test
+# that was already failing would otherwise be reported as protecting code it
+# has never once agreed with.
+alreadyred=$(new_fixture)
+(
+	cd "$alreadyred" || exit 1
+	cat >> sample.go <<'GO'
+
+func Mul(a, b int) int {
+	return a * b
+}
+GO
+	cat >> sample_test.go <<'GO'
+
+func TestMul(t *testing.T) {
+	if Mul(2, 3) != 7 {
+		t.Fatal("Mul is wrong")
+	}
+}
+GO
+	git add -A && git commit -q -m "add Mul with a test that does not pass"
+)
+expect_output 1 "already fails at HEAD" \
+	"a test that is already red at HEAD is reported as an error" "$alreadyred"
 
 # --- an edited assertion counts as a changed test ----------------------------
 #
@@ -147,8 +322,8 @@ edited=$(new_fixture)
 (
 	cd "$edited" || exit 1
 	# Add a bug-fix to Add, and tighten the existing test to notice it.
-	sed -i 's/return a + b/return a + b + 0/' sample.go
-	sed -i 's/if Add(1, 2) != 3 {/if Add(1, 2) != 3 || Add(0, 0) != 0 {/' sample_test.go
+	rewrite sample.go 'return a + b' 'return a + b + 0'
+	rewrite sample_test.go 'if Add(1, 2) != 3 {' 'if Add(1, 2) != 3 || Add(0, 0) != 0 {'
 	git add -A && git commit -q -m "tighten TestAdd"
 )
 checks=$((checks + 1))
@@ -163,9 +338,8 @@ rm -rf "$edited"
 # ...and the complement, which is the one that bites. Appending a new test to
 # the end of a file touches the blank line that separates it from the previous
 # one. If that line were attributed to the function above, every append would
-# drag an untouched test into the -run set — and because the gate is satisfied
-# when the whole set goes red, an unrelated failure would then mask a
-# tautological test. Scope must be exactly the appended function.
+# drag an untouched test into scope — and the gate would then spend its verdict
+# on a test this branch never wrote.
 appended=$(new_fixture)
 (
 	cd "$appended" || exit 1
@@ -196,6 +370,96 @@ else
 		"wanted exactly TestMul, got: '$funcs'"
 fi
 rm -rf "$appended"
+
+# --- frontend scope is the changed case, not the whole file ------------------
+#
+# Same reasoning as the Go half: running the whole file means the pre-existing
+# cases in it go red for their own reasons and report as evidence about the new
+# one.
+fescope=$(mktemp -d)
+(
+	cd "$fescope" || exit 1
+	git_init
+	mkdir -p frontend/src
+	printf 'export const add = (a: number, b: number) => a + b\n' > frontend/src/math.ts
+	cat > frontend/src/math.test.ts <<'TS'
+import { describe, it, expect } from 'vitest'
+import { add } from './math'
+
+describe('math', () => {
+  it('adds', () => {
+    expect(add(1, 2)).toBe(3)
+  })
+})
+TS
+	git add -A && git commit -q -m "base"
+	git checkout -q -b work
+
+	printf 'export const mul = (a: number, b: number) => a * b\n' >> frontend/src/math.ts
+	rewrite frontend/src/math.test.ts "import { add } from './math'" "import { add, mul } from './math'"
+	rewrite frontend/src/math.test.ts '})' '})'
+	cat > frontend/src/math.test.ts <<'TS'
+import { describe, it, expect } from 'vitest'
+import { add, mul } from './math'
+
+describe('math', () => {
+  it('adds', () => {
+    expect(add(1, 2)).toBe(3)
+  })
+
+  it('multiplies', () => {
+    expect(mul(2, 3)).toBe(6)
+  })
+})
+TS
+	git add -A && git commit -q -m "add mul with its test"
+)
+checks=$((checks + 1))
+listing=$(run_efficacy "$fescope" --changed-tests)
+cases=$(printf '%s' "$listing" | sed -n '/^frontend cases:/,$p' | sed '1d')
+if printf '%s' "$cases" | grep -q 'multiplies' && ! printf '%s' "$cases" | grep -q "	adds"; then
+	pass "frontend scope is the changed it() case, not the whole file"
+else
+	fail "frontend scope is the changed it() case, not the whole file" "$listing"
+fi
+rm -rf "$fescope"
+
+# ...with a fallback that is over-wide rather than wrong. A touched line that
+# belongs to no case at all — describe-level setup, an import, a helper — has
+# no case name to narrow to, so the whole file runs.
+fefallback=$(mktemp -d)
+(
+	cd "$fefallback" || exit 1
+	git_init
+	mkdir -p frontend/src
+	printf 'export const add = (a: number, b: number) => a + b\n' > frontend/src/math.ts
+	cat > frontend/src/math.test.ts <<'TS'
+import { describe, it, expect, beforeEach } from 'vitest'
+import { add } from './math'
+
+describe('math', () => {
+  beforeEach(() => {})
+
+  it('adds', () => {
+    expect(add(1, 2)).toBe(3)
+  })
+})
+TS
+	git add -A && git commit -q -m "base"
+	git checkout -q -b work
+
+	printf 'export const mul = (a: number, b: number) => a * b\n' >> frontend/src/math.ts
+	rewrite frontend/src/math.test.ts 'beforeEach(() => {})' 'beforeEach(() => { /* reset */ })'
+	git add -A && git commit -q -m "touch describe-level setup"
+)
+checks=$((checks + 1))
+listing=$(run_efficacy "$fefallback" --changed-tests)
+if printf '%s' "$listing" | grep -q '(whole file)'; then
+	pass "a touched line outside every case falls back to the whole file"
+else
+	fail "a touched line outside every case falls back to the whole file" "$listing"
+fi
+rm -rf "$fefallback"
 
 # --- skips, which are as important as the failures ---------------------------
 #
@@ -236,15 +500,185 @@ func Neg(a int) int {
 GO
 	git add -A && git commit -q -m "implementation with no test"
 )
+expect_output 0 "WARNING" \
+	"implementation with no changed test warns without blocking" "$implonly"
+
+# --- each stack is judged only against its own revert ------------------------
+#
+# Nothing Go-side is reverted when only frontend implementation changed, so
+# failing a Go test there would be a verdict on a mutation that never happened.
+crossstack=$(mktemp -d)
+(
+	cd "$crossstack" || exit 1
+	git_init
+	printf 'module sample\n\ngo 1.25\n' > go.mod
+	mkdir -p frontend/src
+	printf 'export const add = (a: number, b: number) => a + b\n' > frontend/src/math.ts
+	printf 'package sample\n\nfunc Add(a, b int) int { return a + b }\n' > sample.go
+	printf 'package sample\n\nimport "testing"\n\nfunc TestAdd(t *testing.T) {\n\tif Add(1, 2) != 3 {\n\t\tt.Fatal("Add is wrong")\n\t}\n}\n' > sample_test.go
+	git add -A && git commit -q -m "base"
+	git checkout -q -b work
+
+	printf 'export const mul = (a: number, b: number) => a * b\n' >> frontend/src/math.ts
+	cat >> sample_test.go <<'GO'
+
+func TestAddZero(t *testing.T) {
+	if Add(0, 0) != 0 {
+		t.Fatal("Add is wrong")
+	}
+}
+GO
+	git add -A && git commit -q -m "frontend implementation, Go test"
+)
+expect_output 0 "WARNING" \
+	"a Go test is not red-checked when only frontend implementation changed" "$crossstack"
+
+# The mirror: Go implementation changed, a frontend test touched, no frontend
+# implementation. The frontend half must be skipped rather than failed — and
+# skipped without needing node_modules, since there is nothing to run.
+mirror=$(mktemp -d)
+(
+	cd "$mirror" || exit 1
+	git_init
+	printf 'module sample\n\ngo 1.25\n' > go.mod
+	mkdir -p frontend/src
+	printf 'package sample\n\nfunc Add(a, b int) int { return a + b }\n' > sample.go
+	printf 'package sample\n\nimport "testing"\n\nfunc TestAdd(t *testing.T) {\n\tif Add(1, 2) != 3 {\n\t\tt.Fatal("Add is wrong")\n\t}\n}\n' > sample_test.go
+	cat > frontend/src/math.test.ts <<'TS'
+import { it, expect } from 'vitest'
+
+it('adds', () => {
+  expect(1 + 2).toBe(3)
+})
+TS
+	git add -A && git commit -q -m "base"
+	git checkout -q -b work
+
+	cat >> sample.go <<'GO'
+
+func Mul(a, b int) int { return a * b }
+GO
+	cat >> sample_test.go <<'GO'
+
+func TestMul(t *testing.T) {
+	if Mul(2, 3) != 6 {
+		t.Fatal("Mul is wrong")
+	}
+}
+GO
+	rewrite frontend/src/math.test.ts "expect(1 + 2).toBe(3)" "expect(2 + 1).toBe(3)"
+	git add -A && git commit -q -m "Go implementation, frontend test touched"
+)
+expect_output 0 "red: ./. TestMul" \
+	"a frontend test is not red-checked when only Go implementation changed" "$mirror"
+
+# --- a run that selected nothing is not a red -------------------------------
+#
+# `go test` exits 0 when -run matches no test, so "the command did not go red"
+# and "the tests passed" are different statements. Benchmarks are the common
+# case: -run never selects them, so a branch whose only new test function is a
+# benchmark used to be failed with `[no tests to run]` quoted as the evidence.
+benchonly=$(new_fixture)
+(
+	cd "$benchonly" || exit 1
+	cat >> sample.go <<'GO'
+
+func Mul(a, b int) int {
+	return a * b
+}
+GO
+	cat >> sample_test.go <<'GO'
+
+func BenchmarkMul(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		_ = Mul(2, 3)
+	}
+}
+GO
+	git add -A && git commit -q -m "add Mul with only a benchmark"
+)
+expect_output 0 "WARNING" \
+	"a benchmark-only change is not failed for selecting no tests" "$benchonly"
+
+# A test skipped at HEAD cannot be red-checked either — but that is a reason to
+# say so, not to call it red.
+skipped=$(new_fixture)
+(
+	cd "$skipped" || exit 1
+	cat >> sample.go <<'GO'
+
+func Mul(a, b int) int {
+	return a * b
+}
+GO
+	cat >> sample_test.go <<'GO'
+
+func TestMul(t *testing.T) {
+	t.Skip("not yet")
+	if Mul(2, 3) != 6 {
+		t.Fatal("Mul is wrong")
+	}
+}
+GO
+	git add -A && git commit -q -m "add Mul with a skipped test"
+)
+expect_output 0 "skipped at HEAD" \
+	"a test skipped at HEAD is reported, not counted as red" "$skipped"
+
+# --- "could not check" is never a pass ---------------------------------------
+#
+# The two fail-open paths. A required check that goes green having checked
+# nothing is the one failure mode a required check exists to rule out.
 checks=$((checks + 1))
-output=$(run_efficacy "$implonly")
+noref=$(new_fixture)
+(
+	cd "$noref" || exit 1
+	cat >> sample.go <<'GO'
+
+func Mul(a, b int) int { return a * b }
+GO
+	git add -A && git commit -q -m "impl"
+)
+output=$(cd "$noref" && EFFICACY_BASE=origin/no-such-ref "$efficacy" 2>&1)
 status=$?
-if [ "$status" -eq 0 ] && printf '%s' "$output" | grep -q 'WARNING'; then
-	pass "implementation with no changed test warns without blocking"
+if [ "$status" -eq 1 ] && printf '%s' "$output" | grep -q 'ERROR'; then
+	pass "a missing base ref is an error, not a silent pass"
 else
-	fail "implementation with no changed test warns without blocking" "$output"
+	fail "a missing base ref is an error, not a silent pass" "exit $status
+$output"
 fi
-rm -rf "$implonly"
+rm -rf "$noref"
+
+# Missing node_modules used to drop the entire frontend red-check with no
+# output at all: green, having checked nothing.
+nodeps=$(mktemp -d)
+(
+	cd "$nodeps" || exit 1
+	git_init
+	mkdir -p frontend/src
+	printf 'export const add = (a: number, b: number) => a + b\n' > frontend/src/math.ts
+	cat > frontend/src/math.test.ts <<'TS'
+import { it, expect } from 'vitest'
+import { add } from './math'
+
+it('adds', () => {
+  expect(add(1, 2)).toBe(3)
+})
+TS
+	git add -A && git commit -q -m "base"
+	git checkout -q -b work
+
+	printf 'export const mul = (a: number, b: number) => a * b\n' >> frontend/src/math.ts
+	cat >> frontend/src/math.test.ts <<'TS'
+
+it('multiplies', () => {
+  expect(mul(2, 3)).toBe(6)
+})
+TS
+	git add -A && git commit -q -m "add mul with its test"
+)
+expect_output 1 "node_modules is missing" \
+	"a missing node_modules is an error, not a silent frontend skip" "$nodeps"
 
 # The documented escape hatch for a change whose tests genuinely should not go
 # red — a pure refactor. It must work, and it must say what it is for.

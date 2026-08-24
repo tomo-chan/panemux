@@ -3,9 +3,9 @@ name: efficacy
 # red-check: gate G4(b) in docs/quality-gateway.md.
 #
 # Runs `make efficacy`, which reverts this branch's implementation diff in a
-# scratch worktree and requires the tests this branch changed to FAIL against
-# it. A test that still passes without the code it covers protects nothing —
-# see decision D4.
+# scratch worktree and requires each test this branch changed to pass at HEAD
+# and then FAIL against the revert, one test at a time. A test that still
+# passes without the code it covers protects nothing — see decision D4.
 #
 # Pull requests only, and deliberately not part of `make check`: it needs the
 # base branch and a second test run, which is a per-pull-request cost, not a
@@ -17,7 +17,15 @@ name: efficacy
 # skips, and a required check that never reports blocks every one of them.
 # The script decides in a second or two whether there is anything to check —
 # a branch that changes no implementation, or no test, exits 0 immediately —
-# so this can safely be marked required.
+# so this can safely be marked required. When there is something to check it
+# stays cheap: a 34-test branch took about 30s locally with a warm Go build
+# cache, both phases included.
+#
+# It fails rather than skips when it *cannot* check (no base ref, no scratch
+# worktree, no node_modules). That is deliberate for a required check: a green
+# job that checked nothing is invisible, which is the one failure mode being
+# required is supposed to rule out. `make install-deps-ci` below is therefore
+# load-bearing, not just convenient.
 
 on:
   pull_request:
