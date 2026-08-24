@@ -157,6 +157,44 @@ else
 	fail "a backslash escape in a row is not expanded before the row is tokenised" "$escaped"
 fi
 
+# Rows that ARE read but resolve nothing. `__CHECKED__` proves the loop
+# finished and the empty-ledger check proves there were rows; neither proves
+# anything was recognised. Tokens are read from backticked values only, and
+# every auto row carries the `auto` token itself, which is skipped — so a
+# Verification column that stops backticking its test names and paths yields
+# one skipped token per row, no findings, and a clean bill of health. This is
+# the fail-open that needs no infrastructure failure at all, only a markdown
+# reformat.
+checks=$((checks + 1))
+printf '%s\n%s\n%s\n%s\n' \
+	'| # | Scenario | Expected | Verification |' \
+	'|---|---|---|---|' \
+	'| Z1 | Something | Works | `auto`: TestDoesNotExistAtAll |' \
+	'| Z2 | Something | Works | `auto`: internal/nope/missing.go |' > "$work/unbackticked.md"
+unbackticked=$("$checker" "$work/unbackticked.md" 2>&1)
+if [ $? -eq 1 ] && printf '%s' "$unbackticked" | grep -q 'format must have changed'; then
+	pass "rows that resolve nothing at all fail rather than reporting all clear"
+else
+	fail "rows that resolve nothing at all fail rather than reporting all clear" "$unbackticked"
+fi
+
+# ...and the complement, so the new guard cannot be satisfied by simply failing
+# every ledger whose rows do not all resolve: a row naming something real
+# alongside one naming something missing must still report the MISSING row,
+# not the format.
+checks=$((checks + 1))
+printf '%s\n%s\n%s\n' \
+	'| # | Scenario | Expected | Verification |' \
+	'|---|---|---|---|' \
+	'| Z3 | Something | Works | `auto`: `scripts/scenarios_check.sh`, `TestThisWasRenamedLongAgo` |' > "$work/mixed.md"
+mixed=$("$checker" "$work/mixed.md" 2>&1)
+if [ $? -eq 1 ] && printf '%s' "$mixed" | grep -q 'Z3 names Go test TestThisWasRenamedLongAgo' &&
+	! printf '%s' "$mixed" | grep -q 'format must have changed'; then
+	pass "a missing name is reported as missing, not as a format change"
+else
+	fail "a missing name is reported as missing, not as a format change" "$mixed"
+fi
+
 # A ledger whose table shape has changed out from under the checker must fail
 # loudly rather than silently pass with zero rows checked — the way a gate
 # quietly stops working.

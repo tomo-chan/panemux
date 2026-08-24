@@ -177,5 +177,25 @@ if [ -n "$findings" ]; then
 	exit 1
 fi
 
+# The third fail-open, and the likeliest of the three to happen by accident.
+# `__CHECKED__` above proves the loop finished; the empty-ledger check at the
+# top proves there were rows to read. Neither proves the loop RECOGNISED
+# anything. Tokens come from `grep -o` on backticked values, and a row selected
+# by `grep '\`auto'` always carries at least the `auto` token — which the first
+# case skips. So if the Verification column stops backticking its test names
+# and paths, every row contributes one skipped token, no findings, and this
+# script's way of saying "all clear". No infrastructure has to fail: someone
+# reformatting a markdown column is enough, and that is not an edit anyone runs
+# a shell script's tests for.
+#
+# It has to come AFTER the findings check: a ledger whose rows all name
+# nonexistent tests also resolves nothing, and there the format is fine and the
+# findings are the real answer.
+if [ "$resolved" -eq 0 ]; then
+	echo "scenarios: $seen auto rows, and not one of them named a path or a Go test."
+	echo "           The Verification column's format must have changed — the check did NOT run."
+	exit 1
+fi
+
 echo "  ok — $resolved path and test names across $seen auto rows all resolve"
 exit 0
