@@ -232,7 +232,7 @@ pre-push and CI. A gate that sacrifices fast feedback gets bypassed.
 
 | Order | Work | Gate | #178 phase | Effect |
 |---|---|---|---|---|
-| 1 | Real-router integration harness; single source of truth for the route table plus an exhaustiveness check | G3 | Phase 1 | **Landed.** The table has one definition, the exhaustiveness check pins it, and every `/api` route is now driven through `server.New()` — itself exhaustive, so a new route has no test until someone writes one. The `/ws` half is still open. |
+| 1 | Real-router integration harness; single source of truth for the route table plus an exhaustiveness check | G3 | Phase 1 | **Landed.** The table has one definition, the exhaustiveness check pins it, and every `/api` route is now driven through `server.New()` — itself exhaustive across both command-center states, so a new route has no test until someone writes one, and a case that stops asserting a success path has to say so. The `/ws` half is still open. |
 | 2 | Widen coverage scope (threshold unchanged) | G4(a) | Phases 2 and 5 | Makes ~2,600 previously ungated lines visible. |
 | 3 | `.claude/settings.json` with G1/G2 hooks; a review subagent | G1, G6 | — | Promotes L0 discipline to L2. Closes the agent's own verification loop. |
 | 4 | red-check (`make efficacy`) in pull-request CI | G4(b) | — | Detects tautological tests mechanically. The largest single win under AI-assisted development. |

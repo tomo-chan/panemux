@@ -1,7 +1,9 @@
 package server
 
 import (
+	"context"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -72,6 +74,11 @@ type apiEnv struct {
 	mgr   *session.Manager
 	cache *board.BoardCache
 	home  string
+	// statuses is every status code do() has returned for this case, which
+	// is what lets the harness decide whether a case drove a success path
+	// rather than taking the author's word for it. See
+	// TestServer_APIIntegration.
+	statuses []int
 }
 
 const integrationToken = "integration-token"
@@ -84,6 +91,12 @@ const integrationToken = "integration-token"
 //     for POST /api/ssh-config/hosts, writing) the developer's own files.
 //     It has to be set before New(), because api.NewHandler resolves
 //     sshconfig.DefaultPath() once at construction.
+//   - XDG_CACHE_HOME points inside it too. HOME alone is not enough:
+//     os.UserCacheDir prefers XDG_CACHE_HOME over $HOME/.cache, and creating
+//     a local pane installs the browser shim there (see
+//     session.installLocalBrowserShim), so on a machine that exports the
+//     variable — a CI image, a desktop session — this suite wrote three real
+//     files into a directory the test never chose.
 //   - the config carries no file path, which makes config.write() a no-op, so
 //     the layout and workspace writes these routes perform stay in memory.
 func newAPIEnv(t *testing.T) *apiEnv {
@@ -91,6 +104,7 @@ func newAPIEnv(t *testing.T) *apiEnv {
 
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
 
 	cfg := testConfigWithToken(integrationToken)
 	mgr := session.NewManager()
@@ -108,6 +122,12 @@ func newAPIEnv(t *testing.T) *apiEnv {
 		for _, s := range mgr.List() {
 			_ = mgr.Remove(s.ID())
 		}
+		// New() starts a port-forward sweeper goroutine that only exits on
+		// Close(), and Shutdown is what releases it — the same process-wide
+		// state TestServer_ShutdownClosesPortForwards pins. Nothing fails
+		// today, but one leaked goroutine per subtest is what makes a package
+		// hostile to a goleak-style check later.
+		_ = e.srv.Shutdown(context.Background())
 	})
 	return e
 }
@@ -135,6 +155,7 @@ func (e *apiEnv) do(t *testing.T, method, path, body string) *httptest.ResponseR
 
 	rr := httptest.NewRecorder()
 	e.srv.httpSrv.Handler.ServeHTTP(rr, req)
+	e.statuses = append(e.statuses, rr.Code)
 	return rr
 }
 
@@ -181,9 +202,27 @@ var apiCases = map[string]apiCase{
 	}},
 
 	"PUT /api/workspaces/active": {run: func(t *testing.T, e *apiEnv) {
-		rr := e.do(t, http.MethodPut, "/api/workspaces/active", `{"id":"default"}`)
+		// Switch AWAY from the starting active workspace. Asserting that
+		// "default" is still active after PUTting {"id":"default"} restates
+		// the fixture: it passes just as well against a handler that ignores
+		// the requested id entirely. Every sibling workspace case moves a
+		// value for the same reason.
+		require.Equal(t, http.StatusCreated, e.do(t, http.MethodPost, "/api/workspaces", "").Code)
+		items := e.cfg.WorkspacesView().Items
+		require.Len(t, items, 2)
+
+		// Creating a workspace already switches to it, so the target is
+		// whichever of the two is not currently active — the assertion has to
+		// be that the switch moved, not which way.
+		target := items[0].ID
+		if target == e.cfg.Workspaces.Active {
+			target = items[1].ID
+		}
+		require.NotEqual(t, e.cfg.Workspaces.Active, target)
+
+		rr := e.do(t, http.MethodPut, "/api/workspaces/active", fmt.Sprintf(`{"id":%q}`, target))
 		assert.Equal(t, http.StatusOK, rr.Code)
-		assert.Equal(t, "default", e.cfg.Workspaces.Active)
+		assert.Equal(t, target, e.cfg.Workspaces.Active)
 	}},
 
 	"PUT /api/workspaces/tab-position": {run: func(t *testing.T, e *apiEnv) {
@@ -305,9 +344,18 @@ var apiCases = map[string]apiCase{
 	}},
 
 	"GET /api/display": {run: func(t *testing.T, e *apiEnv) {
+		// Seeded after New(), which the handler sees because it holds the
+		// same *config.Config pointer — the GET /api/ssh-connections case
+		// below does the same. Without a seed there is nothing distinctive
+		// in DisplayConfig's two booleans to assert, and `Contains("{")` is
+		// true of every JSON object, including the empty one a handler that
+		// dropped the whole configuration would return.
+		e.cfg.Display = config.DisplayConfig{ShowHeader: true, ShowStatusBar: false}
+
 		rr := e.do(t, http.MethodGet, "/api/display", "")
 		assert.Equal(t, http.StatusOK, rr.Code)
-		assert.Contains(t, rr.Body.String(), "{")
+		assert.Contains(t, rr.Body.String(), `"show_header":true`)
+		assert.Contains(t, rr.Body.String(), `"show_status_bar":false`)
 	}},
 
 	"GET /api/ssh-connections": {run: func(t *testing.T, e *apiEnv) {
@@ -356,8 +404,12 @@ var apiCases = map[string]apiCase{
 	}},
 
 	"GET /api/session-token": {run: func(t *testing.T, e *apiEnv) {
-		// httptest.NewRequest's default RemoteAddr and Host are both
-		// loopback, which is exactly what this route requires.
+		// do() gives every request a loopback RemoteAddr and Host — NOT
+		// httptest's own defaults, which are 192.0.2.1:1234 and example.com,
+		// neither of them loopback. This route is the reason do() overrides
+		// them: api.GetBoardSessionToken's DNS-rebinding guard answers 403
+		// otherwise, and that guard is the only thing between this token and
+		// any LAN client (docs/security.md).
 		rr := e.do(t, http.MethodGet, "/api/session-token", "")
 		assert.Equal(t, http.StatusOK, rr.Code)
 		assert.Contains(t, rr.Body.String(), integrationToken)
@@ -379,8 +431,16 @@ var apiCases = map[string]apiCase{
 	}},
 
 	"GET /api/board/status": {run: func(t *testing.T, e *apiEnv) {
+		// A bare 200 is the one thing that does not distinguish this handler
+		// from chi's dispatch alone, and it matters here more than most:
+		// useBoardStatus polls this route and Zod-parses the body, so an
+		// empty or reshaped envelope takes the dashboard down.
+		e.cache.RecordStatus("pane-1", board.Status{State: "working", Summary: "integration"})
+
 		rr := e.do(t, http.MethodGet, "/api/board/status", "")
 		assert.Equal(t, http.StatusOK, rr.Code)
+		assert.Contains(t, rr.Body.String(), `"statuses":{"pane-1":`)
+		assert.Contains(t, rr.Body.String(), `"state":"working"`)
 	}},
 
 	"GET /api/board/messages": {run: func(t *testing.T, e *apiEnv) {
@@ -431,7 +491,23 @@ func TestServer_APIIntegration(t *testing.T) {
 			continue
 		}
 		t.Run(route, func(t *testing.T) {
-			apiCases[route].run(t, newAPIEnv(t))
+			c := apiCases[route]
+			e := newAPIEnv(t)
+			c.run(t, e)
+
+			// The gap ledger below is only as good as this check. Without
+			// it, notHappyPathReason is the sole input and nothing requires
+			// a case that stopped asserting a success path to declare one —
+			// so a happy-path case quietly rewritten into an error-path one
+			// leaves documentedIntegrationGaps untouched and produces no
+			// literal for a reviewer to notice. Deriving the fact from the
+			// run is the same move the exhaustiveness check above makes.
+			if c.notHappyPathReason == "" {
+				assert.True(t,
+					slices.ContainsFunc(e.statuses, func(s int) bool { return s >= 200 && s < 300 }),
+					"a case with no notHappyPathReason must drive the route's success path; "+
+						"observed statuses: %v", e.statuses)
+			}
 		})
 	}
 	assert.Empty(t, missing,
@@ -451,6 +527,11 @@ func TestServer_APIIntegration(t *testing.T) {
 // driven above, and it is a literal on purpose: a gap can be accepted, but not
 // accumulated quietly. Adding one means changing this list, which puts it in
 // the diff a reviewer reads.
+//
+// The list is what a reviewer reads; the check inside TestServer_APIIntegration
+// is what makes it true. Neither works alone — this one cannot see a case that
+// stopped asserting a 2xx without declaring it, and that one produces no
+// literal in the diff.
 var documentedIntegrationGaps = []string{
 	"POST /api/board/broadcast",
 	"POST /api/sessions/{id}/open-vscode",
@@ -474,18 +555,34 @@ func TestServer_APIIntegration_DocumentedGaps(t *testing.T) {
 // registeredAPIRoutes is every /api route on the real router, as
 // "METHOD /pattern". It deliberately reuses walkRoutes so this test and the
 // route table cannot disagree about what "a route" is.
+//
+// Both runner states are walked, and that is load-bearing rather than
+// thorough: registerRoutes has an `if commandRunner != nil` block, so an /api
+// route registered inside it is one the frontend can reach and one this
+// table's exhaustiveness check would never see. Walking only the disabled
+// router made the file header above — and quality-gateway.md's rollout row —
+// claim more than the code delivered. route_table_test.go pins both states
+// for the same reason.
 func registeredAPIRoutes(t *testing.T) []string {
 	t.Helper()
 
-	srv := New(testConfigWithToken(integrationToken), session.NewManager(), board.NewBoardCache(), nil, nil, emptyFS)
+	runners := []*commandcenter.Runner{nil, commandcenter.NewRunner(commandcenter.RunnerConfig{})}
 
-	var out []string
-	for _, route := range walkRoutes(t, srv) {
-		_, pattern, _ := strings.Cut(route, " ")
-		if strings.HasPrefix(pattern, "/api/") {
-			out = append(out, route)
+	seen := map[string]bool{}
+	for _, runner := range runners {
+		srv := New(testConfigWithToken(integrationToken), session.NewManager(), board.NewBoardCache(), nil, runner, emptyFS)
+		t.Cleanup(func() { _ = srv.Shutdown(context.Background()) })
+
+		for _, route := range walkRoutes(t, srv) {
+			_, pattern, _ := strings.Cut(route, " ")
+			if strings.HasPrefix(pattern, "/api/") {
+				seen[route] = true
+			}
 		}
 	}
+
+	out := slices.Collect(maps.Keys(seen))
+	sort.Strings(out)
 	require.Positive(t, len(out), "no /api routes were found — the router changed")
 	return out
 }
