@@ -99,6 +99,64 @@ expect 0 "a bare script name with no directory is not resolved" \
 expect 0 "a path relative to the test that uses it resolves" \
 	'| X13 | Something | Works | `auto`: `internal/board/agmsg_fixture_test.go` against `testdata/agmsg-v1.2.0/` |'
 
+# A rename that APPENDS is the common one (TestFoo -> TestFoo_RemoteVariant),
+# and a row naming the old name is exactly the rot this gate exists to catch.
+# Without the wildcard, the match has to be exact.
+expect 1 "an exact test name that only matches by prefix fails" \
+	'| X14 | Something | Works | `auto`: `TestValidate_AgentBoardMode_InvalidValue` |'
+
+expect 0 "...and the wildcard form of that same name still resolves" \
+	'| X15 | Something | Works | `auto`: `TestValidate_AgentBoardMode_InvalidValue*` |'
+
+# The gate used to collect its findings in $TMPDIR. A redirect that cannot be
+# opened left the findings empty, and empty is how this script says "clean" —
+# so a read-only or stale TMPDIR turned a failing ledger green.
+checks=$((checks + 1))
+printf '%s\n%s\n%s\n' \
+	'| # | Scenario | Expected | Verification |' \
+	'|---|---|---|---|' \
+	'| X16 | Something | Works | `auto`: `TestThisWasRenamedLongAgo` |' > "$work/tmpdir.md"
+if TMPDIR=/nonexistent-dir "$checker" "$work/tmpdir.md" > /dev/null 2>&1; then
+	fail "an unwritable TMPDIR must not turn a failing ledger green"
+else
+	pass "an unwritable TMPDIR does not turn a failing ledger green"
+fi
+
+# A tool that errors must not have its stderr counted as a finding: announcing
+# an infrastructure failure as "these auto rows name something that does not
+# exist" is the one message guaranteed to send the reader to the wrong place.
+checks=$((checks + 1))
+printf '%s\n%s\n%s\n' \
+	'| # | Scenario | Expected | Verification |' \
+	'|---|---|---|---|' \
+	'| X17 | Something | Works | `auto`: `Test(bad` |' > "$work/stderr.md"
+stdout_only=$("$checker" "$work/stderr.md" 2> /dev/null)
+if printf '%s' "$stdout_only" | grep -q 'X17 names Go test' &&
+	! printf '%s' "$stdout_only" | grep -qi 'unmatched'; then
+	pass "a tool error is diagnostics, not a missing-row finding"
+else
+	fail "a tool error is diagnostics, not a missing-row finding" "$stdout_only"
+fi
+
+# `make check-scenarios` runs under dash, whose builtin `echo` expands
+# backslash escapes with no `-e`. A backslash sequence in a cell — `\|` is the
+# only way to write a literal pipe in a GitHub-flavoured table, and `\n` or
+# `\t` are plausible in a column quoting commands — would then be rewritten
+# before the row was ever tokenised. This row carries a literal `\n`: expanded,
+# it breaks one row into two, and the failure comes back naming an empty
+# scenario instead of X18.
+checks=$((checks + 1))
+printf '%s\n%s\n%s\n' \
+	'| # | Scenario | Expected | Verification |' \
+	'|---|---|---|---|' \
+	'| X18 | Something | Works, see \n below | `auto`: `TestThisWasRenamedLongAgo` |' > "$work/escapes.md"
+escaped=$("$checker" "$work/escapes.md" 2>&1)
+if printf '%s' "$escaped" | grep -q 'X18 names Go test TestThisWasRenamedLongAgo'; then
+	pass "a backslash escape in a row is not expanded before the row is tokenised"
+else
+	fail "a backslash escape in a row is not expanded before the row is tokenised" "$escaped"
+fi
+
 # A ledger whose table shape has changed out from under the checker must fail
 # loudly rather than silently pass with zero rows checked — the way a gate
 # quietly stops working.

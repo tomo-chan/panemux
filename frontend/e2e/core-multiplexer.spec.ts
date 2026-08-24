@@ -102,8 +102,16 @@ test('resizes a split by dragging the divider, and the new sizes survive a reloa
   await expect(panes(page).first()).toBeVisible()
 
   const before = await paneIds(page)
+
+  // Wait out the split's OWN layout PUT before touching the divider. Without
+  // this, the subscription below could resolve on the split's response instead
+  // of the drag's — `page.waitForResponse` only sees responses that arrive
+  // after it is called, so a split PUT still in flight is indistinguishable
+  // from the one this test is actually waiting for.
+  const splitSaved = layoutSaved(page)
   await page.getByTitle('Split horizontal').first().click()
   await expect(panes(page)).toHaveCount(before.length + 1)
+  expect((await splitSaved).status()).toBe(200)
 
   const firstPane = panes(page).first()
   const widthBefore = (await firstPane.boundingBox())?.width ?? 0
@@ -113,16 +121,18 @@ test('resizes a split by dragging the divider, and the new sizes survive a reloa
   const box = await divider.boundingBox()
   expect(box).toBeTruthy()
 
-  // The layout PUT is debounced by 500ms (useLayout's updateSizes), so the
-  // reload below has to wait for it. Reloading on the drag alone reads the
-  // config as it was before the drag and looks exactly like "resize is not
-  // persisted" — which is what this test reported before the wait was added.
-  const saved = layoutSaved(page)
-
   await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2)
   await page.mouse.down()
   await page.mouse.move(box!.x + box!.width / 2 - 120, box!.y + box!.height / 2, { steps: 10 })
   await page.mouse.up()
+
+  // The layout PUT is debounced by 500ms (useLayout's updateSizes), so the
+  // reload below has to wait for it. Reloading on the drag alone reads the
+  // config as it was before the drag and looks exactly like "resize is not
+  // persisted" — which is what this test reported before the wait was added.
+  // Subscribing here, after the last mouse event, is still comfortably ahead
+  // of the debounce.
+  const saved = layoutSaved(page)
 
   await expect
     .poll(async () => (await firstPane.boundingBox())?.width ?? 0, {
@@ -135,12 +145,19 @@ test('resizes a split by dragging the divider, and the new sizes survive a reloa
 
   await page.reload()
   await expect(panes(page).first()).toBeVisible()
+
+  // Poll the bound that DISCRIMINATES. A layout that was not restored comes
+  // back at widthBefore, which is greater than widthAfter - 30 — so polling
+  // the lower bound would return on its first sample whether the resize was
+  // persisted or not, and the only assertion that could detect the failure
+  // would be the un-retried one. Polling the upper bound also gives the first
+  // paint room to settle before it is judged.
   await expect
     .poll(async () => (await panes(page).first().boundingBox())?.width ?? 0, {
       message: 'a resize is a layout change, so it must be persisted like any other',
     })
-    .toBeGreaterThan(widthAfter - 30)
-  expect((await panes(page).first().boundingBox())?.width ?? 0).toBeLessThan(widthAfter + 30)
+    .toBeLessThan(widthAfter + 30)
+  expect((await panes(page).first().boundingBox())?.width ?? 0).toBeGreaterThan(widthAfter - 30)
 
   const created = (await paneIds(page)).find((id) => !before.includes(id))
   await closePane(page, created as string)
