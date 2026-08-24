@@ -262,10 +262,14 @@ func openChrome(url string) {
 	if !ok {
 		return
 	}
-	// G204: name is one of three hardcoded literals above and url is
-	// panemux's own listen address; both travel as discrete argv elements,
-	// never through a shell. See docs/security.md's general rules.
-	cmd := exec.Command(name, args...) //nolint:gosec
+	// The first argument is a variable rather than a literal, which is a
+	// shape docs/security.md tracks deliberately — see its "Launching the
+	// operator's browser" section. browserOpenArgv is the only source of
+	// both values, it returns one of three compile-time literals for the
+	// name, and url is panemux's own listen address; every element travels
+	// as a discrete argv entry, never through a shell.
+	//nolint:gosec // G204: name is one of browserOpenArgv's three literals; args are discrete, never a shell
+	cmd := exec.Command(name, args...)
 	if err := cmd.Run(); err != nil {
 		log.Printf("Failed to open browser: %v", err)
 	}
