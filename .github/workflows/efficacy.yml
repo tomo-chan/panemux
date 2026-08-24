@@ -27,8 +27,15 @@ name: efficacy
 # required is supposed to rule out. `make install-deps-ci` below is therefore
 # load-bearing, not just convenient.
 
+# `labeled`/`unlabeled` are in the type list because the `efficacy-exempt`
+# escape hatch below is read from the event payload. Without them, applying the
+# label does not re-run this workflow, and re-running the failed job replays the
+# STORED payload — in which the label is still absent — so the exemption could
+# never actually be applied to the pull request it was written for. The only
+# way out would have been an empty commit to fire `synchronize`.
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
     branches:
       - main
 
