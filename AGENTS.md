@@ -35,6 +35,31 @@ This installs npm packages, downloads Go modules, and configures the repo-local 
     must protect and the layered gates that enforce them. It is a design document — check a gate's
     status row before treating it as shipped.
 
+## Enforcement
+
+Some of the rules in the documents above are checked automatically rather than
+being left to memory. `.claude/` holds the agent-side half:
+
+- `.claude/settings.json` wires two hooks. A `PostToolUse` hook checks the file
+  you just edited (`gofmt -s`, and `go vet` on its package, or `tsc --noEmit`
+  for frontend files). A `Stop` hook checks what the whole turn changed
+  (formatting, plus the tests for the touched Go packages and the frontend
+  tests related to the touched modules) and refuses to end the turn while any
+  of it fails.
+- Neither hook runs `make check` — that stays with `.githooks/pre-push` and CI.
+  See decision D6 in [docs/quality-gateway.md](docs/quality-gateway.md).
+- `.claude/agents/diff-reviewer.md` reviews a branch's diff in a fresh context.
+  It does not block, and it is not meant to: see decision D5.
+- `make test-hooks` tests the hooks themselves. It runs as part of `make test`
+  and as its own CI step, since `ci.yml` invokes the suites directly rather
+  than through `make test`.
+- The hook tests use `jq` where they parse `settings.json` or a hook payload.
+  It is not installed by `make install-deps`; without it those checks report
+  themselves as **skipped** rather than passing or failing, and the hooks
+  themselves degrade to a warning on stderr rather than blocking.
+
+These are the checks; they do not replace reading the documents above.
+
 ## Document Map
 
 - Development workflow: [DEVELOPMENT.md](DEVELOPMENT.md)

@@ -1,5 +1,6 @@
 .PHONY: all build build-frontend build-backend dev clean run install-deps install-deps-ci install-hooks \
-        test test-go test-frontend test-e2e test-agmsg-contract bench \
+        test test-go test-frontend test-e2e test-agmsg-contract test-hooks test-efficacy efficacy \
+        test-scenarios-check check-scenarios bench \
         fmt fmt-go fmt-check-go \
         lint lint-go lint-go-deps lint-frontend \
         coverage coverage-go coverage-frontend \
@@ -33,7 +34,7 @@ install-hooks:
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
-test: test-go test-frontend
+test: test-go test-frontend test-hooks test-efficacy test-scenarios-check
 
 test-go:
 	go test ./... -v -race
@@ -69,6 +70,61 @@ BENCH_ARGS ?=
 bench:
 	go test ./internal/session/ ./internal/board/ -run '^$$' -bench . -benchmem $(BENCH_ARGS)
 
+# ── Scenario ledger (gates G0 / G5) ───────────────────────────────────────────
+#
+# Resolves every path and Go test name that an `auto` row in docs/scenarios.md
+# claims, and fails when one does not exist. The ledger's own rule already says
+# a silently absent row is not a legitimate answer; this closes the failure that
+# rule never anticipated — a row naming a test that has since been renamed,
+# moved or deleted. Such a row reads as coverage and is worth nothing.
+#
+# Hermetic and fast, so it sits inside `make check`.
+check-scenarios:
+	sh scripts/scenarios_check.sh
+
+# The checker's own tests. Its value rests on its false-positive rate — it
+# reads prose, which is full of things shaped like paths that are not — so both
+# directions are asserted.
+test-scenarios-check:
+	sh scripts/scenarios_check_test.sh
+
+# ── Efficacy: red-check (gate G4(b)) ──────────────────────────────────────────
+#
+# Asserts decision D4: a test this branch changed must FAIL when this branch's
+# implementation diff is reverted. That is the strongest possible mutation —
+# remove the implementation entirely — and it catches the two shapes the other
+# gates are blind to: a tautological test, and a test written after the fact.
+#
+# Every changed test is judged on its own, in two phases: pass at HEAD, then
+# fail against the revert. One invocation over the whole set would be a weaker
+# rule, since `go test` goes red if any single member does.
+#
+# Deliberately OUTSIDE `make check`. It needs the base branch, a scratch
+# worktree and a second test run, which is a pull-request-shaped cost rather
+# than an every-turn one — the same reasoning that keeps mutation testing (D2)
+# and the agmsg contract out of the local gate. It runs as its own PR CI job.
+#
+#   make efficacy                          # against origin/main
+#   EFFICACY_BASE=origin/develop make efficacy
+#   EFFICACY_EXEMPT=1 make efficacy        # documented escape hatch; say why in the PR
+efficacy:
+	sh scripts/efficacy.sh
+
+# The red-check's own tests. Unlike `make efficacy` these are hermetic — they
+# drive the script against throwaway git repositories — so they belong in
+# `make test` alongside everything else.
+test-efficacy:
+	sh scripts/efficacy_test.sh
+
+# The agent-side gates themselves (docs/quality-gateway.md's G1 and G2, run as
+# Claude Code hooks from .claude/). Included in `make test` because a hook that
+# silently stops working reports the discipline as enforced while enforcing
+# nothing — and because a hook that blocks a healthy change is worse still, so
+# both directions are asserted. Hermetic: it drives the scripts against temp
+# files and throwaway git repositories, never this checkout.
+test-hooks:
+	sh .claude/hooks/hooks_test.sh
+
 # Tier 2 of docs/agent-board.md's agmsg compatibility contract: asserts the
 # agmsg script behaviors panemux depends on against a REAL agmsg install.
 # Deliberately outside `make check`, which must stay hermetic — the tests
@@ -81,31 +137,69 @@ test-agmsg-contract:
 
 # ── Coverage (≥ 80 %) ─────────────────────────────────────────────────────────
 #
-# Go: measures config / api / ws / server / board (business-logic packages).
-#     session/local uses a real PTY and is covered separately.
-#     session/ssh and session/tmux* require live SSH / tmux and are
-#     integration-tested outside the unit-test suite.
+# The threshold is deliberately NOT raised above 80 %: see decision D1 in
+# docs/quality-gateway.md. Coverage is only meaningful as a lower bound, and
+# the cheapest way to satisfy a higher one is to generate tautological tests,
+# which lowers protection against regressions and resistance to refactoring at
+# the same time. What gets strengthened is the SCOPE below, never the number.
 #
-# Frontend: measured over src/hooks/ and src/schemas/ only.
+# Go: measures every package that holds a decision — config, api, ws, server,
+#     board, portforward, commandcenter, boardmcp, and the root package
+#     (main.go's startup path plus board.go / bootstrap.go / command_center.go
+#     / board_mcp_server.go).
+#
+#     Deliberately excluded, with reasons rather than by omission:
+#
+#       internal/session   its lifecycle methods drive a real PTY (local,
+#                          tmux), a live SSH connection (ssh, ssh_tmux) and a
+#                          real tmux server. `make check` is hermetic —
+#                          principle 5 in docs/quality-gateway.md — so these
+#                          are exercised by the package's own tests and by
+#                          E2E, not gated here. The pure decisions extracted
+#                          out of them (validateShell, validRemotePath,
+#                          classifySSHWaitError …) are unit-tested in place.
+#       internal/sshconfig  a parser over the user's own ~/.ssh/config; it has
+#                          its own tests and no gate-worthy branching that the
+#                          packages above do not already drive.
+#
+#     Within the measured set, main()/runServer()/bootstrapWatcher.Run() stay
+#     uncovered for the same reason: they install signal handlers, start the
+#     listener and run poll loops for the life of the process. Every decision
+#     they used to embed has been extracted into the injectable units around
+#     them (parseOptions, loadConfig, startSessionsFromConfig,
+#     browserOpenArgv), which is where the gate applies.
+#
+# Frontend: measured over src/hooks/, src/schemas/ and src/utils/.
 #           UI components (App, SplitContainer, TerminalPane …) require a real
 #           browser renderer and are covered by integration / E2E tests.
 
-COVERAGE_PKGS := ./internal/config/...,./internal/api/...,./internal/ws/...,./internal/server/...,./internal/board/...
+COVERAGE_PKGS := ./internal/config/...,./internal/api/...,./internal/ws/...,./internal/server/...,./internal/board/...,./internal/portforward/...,./internal/commandcenter/...,./internal/boardmcp/...,.
 
 coverage: coverage-go coverage-frontend
 
-coverage-go:
+# build-frontend is a real prerequisite, not tidiness: the root package joined
+# the gate above, and main.go carries `//go:embed frontend/dist`, so compiling
+# it needs that directory to exist. Without this, `make coverage-go` on a clean
+# tree fails with "pattern frontend/dist: no matching files found" — an error
+# that gives no hint the fix is to build the frontend first. `make check` and
+# CI already build it, so this costs them nothing and only makes the
+# standalone command DEVELOPMENT.md documents work on its own.
+coverage-go: build-frontend
 	go test \
 	  ./internal/config/... \
 	  ./internal/api/... \
 	  ./internal/ws/... \
 	  ./internal/server/... \
 	  ./internal/board/... \
+	  ./internal/portforward/... \
+	  ./internal/commandcenter/... \
+	  ./internal/boardmcp/... \
+	  . \
 	  -coverprofile=coverage.out \
 	  -coverpkg=$(COVERAGE_PKGS) \
-	  -count=1 -timeout 30s
+	  -count=1 -timeout 60s
 	@pct=$$(go tool cover -func=coverage.out | grep "^total:" | awk '{gsub(/%/,""); print $$3}'); \
-	  printf "Go coverage (business-logic packages): %s%%\n" "$$pct"; \
+	  printf "Go coverage (gated packages): %s%%\n" "$$pct"; \
 	  awk -v p="$$pct" 'BEGIN { if (p+0 < 80) { print "FAIL: coverage "p"% is below 80%"; exit 1 } }'
 
 coverage-frontend:
@@ -149,7 +243,7 @@ lint-frontend:
 
 # ── Quality gate (lint + test + coverage) ─────────────────────────────────────
 
-check: build-frontend lint test coverage
+check: build-frontend lint test coverage check-scenarios
 
 # ── Build ─────────────────────────────────────────────────────────────────────
 

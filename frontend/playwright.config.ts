@@ -22,10 +22,15 @@ const DEFAULT_BASE_URL = 'http://127.0.0.1:4173'
 const AGENT_BOARD_BASE_URL = 'http://127.0.0.1:4174'
 const AGENT_BOARD_AGMSG_BASE_URL = 'http://127.0.0.1:4175'
 const COMMAND_CENTER_BASE_URL = 'http://127.0.0.1:4176'
+// core-multiplexer.spec.ts mutates the layout (split, close, resize, workspace
+// CRUD), so it cannot share a server with specs that assert on the default
+// fixture's panes and tabs.
+const CORE_MULTIPLEXER_BASE_URL = 'http://127.0.0.1:4177'
 
 const AGENT_BOARD_SPEC = /agent-board\.spec\.ts$/
 const AGENT_BOARD_AGMSG_SPEC = /agent-board-agmsg\.spec\.ts$/
 const COMMAND_CENTER_SPEC = /command-center\.spec\.ts$/
+const CORE_MULTIPLEXER_SPEC = /core-multiplexer\.spec\.ts$/
 
 export default defineConfig({
   testDir: './e2e',
@@ -65,12 +70,19 @@ export default defineConfig({
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
     },
+    {
+      command: 'sh ./e2e/run-panemux-e2e.sh core-multiplexer.yml 4177',
+      url: CORE_MULTIPLEXER_BASE_URL,
+      cwd: '.',
+      reuseExistingServer: !process.env.CI,
+      timeout: 120_000,
+    },
   ],
   projects: [
     {
       name: 'chromium',
       use: { ...chromium, baseURL: DEFAULT_BASE_URL },
-      testIgnore: [AGENT_BOARD_SPEC, AGENT_BOARD_AGMSG_SPEC, COMMAND_CENTER_SPEC],
+      testIgnore: [AGENT_BOARD_SPEC, AGENT_BOARD_AGMSG_SPEC, COMMAND_CENTER_SPEC, CORE_MULTIPLEXER_SPEC],
     },
     {
       name: 'chromium-agent-board',
@@ -86,6 +98,11 @@ export default defineConfig({
       name: 'chromium-command-center',
       use: { ...chromium, baseURL: COMMAND_CENTER_BASE_URL },
       testMatch: COMMAND_CENTER_SPEC,
+    },
+    {
+      name: 'chromium-core-multiplexer',
+      use: { ...chromium, baseURL: CORE_MULTIPLEXER_BASE_URL },
+      testMatch: CORE_MULTIPLEXER_SPEC,
     },
   ],
 })

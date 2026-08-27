@@ -96,15 +96,31 @@ Example: `Config.sshConfigPath` uses `sshconfig.DefaultPath()` only when the ove
 
 ### Coverage
 
-- `make coverage-go` enforces at least 80% combined coverage across `internal/config`, `internal/api`, `internal/ws`, `internal/server`, and `internal/board`.
-- `make coverage-frontend` enforces at least 80% coverage across `frontend/src/hooks/` and `frontend/src/schemas/`.
+- `make coverage-go` enforces at least 80% combined coverage across `internal/config`, `internal/api`, `internal/ws`, `internal/server`, `internal/board`, `internal/portforward`, `internal/commandcenter`, `internal/boardmcp`, and the root package.
+- `make coverage-frontend` enforces at least 80% coverage across `frontend/src/hooks/`, `frontend/src/schemas/`, and `frontend/src/utils/`.
+- **The threshold stays at 80%; what gets strengthened is the scope.** Raising it works, but the cheapest way to satisfy a higher number is to generate tautological tests, which lowers both protection against regressions and resistance to refactoring. See decision D1 in [docs/quality-gateway.md](docs/quality-gateway.md).
+- The gated package set is checked against `go list ./...` by `TestCoverageScopeCoversEveryPackage`, so a package added to the repository fails the suite until it is either gated or explicitly excluded with a reason. Do not widen the exclusion list to make that failure go away.
+- `make coverage-go` builds the frontend first: the root package is gated and `main.go` embeds `frontend/dist`.
+- What is excluded, and why, is written in the `Makefile` next to `COVERAGE_PKGS` — `internal/session`'s real PTY / SSH / tmux transports, and the process-lifetime entry points (`main`, `runServer`, `bootstrapWatcher.Run`). Do not add an exclusion without a reason recorded there.
+
+### Red-check (`make efficacy`)
+
+- A test you change must **fail** when your implementation diff is reverted. That is the machine-checkable half of the TDD rule above: the order lines were written in cannot be recovered after the fact, but the result can.
+- Run it yourself with `make efficacy` (compares against `origin/main`; override with `EFFICACY_BASE`). CI runs it on every pull request.
+- It is deliberately **not** part of `make check` — it needs the base branch and a second test run, which is a per-pull-request cost, not a per-turn one.
+- A branch that changes no implementation, or changes implementation but no test, is skipped rather than failed.
+- If a change genuinely should not go red without its implementation — a pure refactor, a test-only rename — apply the `efficacy-exempt` label to the pull request and say why in the description. That is the only exemption; do not reach for it to get past a test that turned out not to assert anything.
+- See decision D4 in [docs/quality-gateway.md](docs/quality-gateway.md).
 
 ### Quality gate
 
 - `make check` must pass before `make build`.
 - `make check` must pass before reporting implementation complete.
 - There are no exceptions for frontend-only, docs-adjacent, or "small" code changes.
-- Test commands: `make test-go`, `make test-frontend`, `make test-e2e`, `make test`
+- Test commands: `make test-go`, `make test-frontend`, `make test-e2e`, `make test`, `make test-hooks`, `make test-efficacy`, `make test-scenarios-check`
+- Ledger command: `make check-scenarios`
+- Pull-request-only gate: `make efficacy` (see above)
+- `make test-hooks` uses `jq` where it parses `settings.json` or a hook payload. `jq` is **optional**: without it those checks report themselves as skipped rather than passing or failing, so `make check` — and therefore `git push` — still works. Install it to actually run them.
 - Coverage commands: `make coverage-go`, `make coverage-frontend`
 - Measurement (not a gate): `make bench` for terminal throughput, replay-buffer cost and relay polling; `make test-e2e` also records accessibility violations. Neither asserts a threshold — see [docs/quality-gateway.md](docs/quality-gateway.md)'s "First measurements".
 - Lint commands: `make lint-go`, `make lint-frontend`, `make lint`
@@ -125,6 +141,9 @@ Example: `Config.sshConfigPath` uses `sshconfig.DefaultPath()` only when the ove
 - When a behavior, operational assumption, browser requirement, rendering constraint, or user-visible rule becomes confirmed, update the relevant files in `docs/` in the same change.
 - Do not leave documentation follow-up as a separate later task once the behavior is settled.
 - When a change adds or alters a user-facing use case, add or update its row in [docs/scenarios.md](docs/scenarios.md) in the same change, including the column naming where it is verified. `manual` is an acceptable answer there; an absent row is not.
+- Two checks enforce this rather than leaving it to memory:
+  - `make check-scenarios` (part of `make check`) resolves every path and Go test name an `auto` row names, and fails when one no longer exists. A row that names a renamed or deleted test reads as coverage and is worth nothing.
+  - CI fails a pull request that changes `frontend/src`, `internal/api` or `internal/config` without touching `docs/scenarios.md`. Apply the `scenarios-exempt` label to a change that genuinely alters no use case.
 
 ### Security-sensitive implementation
 
