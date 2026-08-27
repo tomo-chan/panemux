@@ -1,5 +1,6 @@
 .PHONY: all build build-frontend build-backend dev clean run install-deps install-deps-ci install-hooks \
         test test-go test-frontend test-e2e test-agmsg-contract test-hooks test-efficacy efficacy \
+        test-scenarios-check check-scenarios \
         fmt fmt-go fmt-check-go \
         lint lint-go lint-go-deps lint-frontend \
         coverage coverage-go coverage-frontend \
@@ -33,7 +34,7 @@ install-hooks:
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
-test: test-go test-frontend test-hooks test-efficacy
+test: test-go test-frontend test-hooks test-efficacy test-scenarios-check
 
 test-go:
 	go test ./... -v -race
@@ -43,6 +44,24 @@ test-frontend:
 
 test-e2e:
 	cd frontend && npm run test:e2e
+
+# ── Scenario ledger (gates G0 / G5) ───────────────────────────────────────────
+#
+# Resolves every path and Go test name that an `auto` row in docs/scenarios.md
+# claims, and fails when one does not exist. The ledger's own rule already says
+# a silently absent row is not a legitimate answer; this closes the failure that
+# rule never anticipated — a row naming a test that has since been renamed,
+# moved or deleted. Such a row reads as coverage and is worth nothing.
+#
+# Hermetic and fast, so it sits inside `make check`.
+check-scenarios:
+	sh scripts/scenarios_check.sh
+
+# The checker's own tests. Its value rests on its false-positive rate — it
+# reads prose, which is full of things shaped like paths that are not — so both
+# directions are asserted.
+test-scenarios-check:
+	sh scripts/scenarios_check_test.sh
 
 # ── Efficacy: red-check (gate G4(b)) ──────────────────────────────────────────
 #
@@ -199,7 +218,7 @@ lint-frontend:
 
 # ── Quality gate (lint + test + coverage) ─────────────────────────────────────
 
-check: build-frontend lint test coverage
+check: build-frontend lint test coverage check-scenarios
 
 # ── Build ─────────────────────────────────────────────────────────────────────
 

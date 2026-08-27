@@ -61,7 +61,7 @@ Verification column values:
 | C4 | The instruction's content | Names the pane ID as the agmsg `agent_id`, defines what a `summary` is, and never uses a slash-command prefix | `auto`: root — `TestBuildBootstrapInstruction_*` |
 | C5 | Two board panes in one project directory | Each claims its own identity, so neither receives the other's messages | `auto`: root — `TestBuildBootstrapInstruction_ClaimsItsOwnIdentity` (the instruction) plus C6 (the agmsg behavior it relies on) |
 | C6 | agmsg really does need that claim, and honors it | Without a claim, one pane's watcher receives the *other* pane's messages; after `actas-claim.sh` it receives only its own | `auto (opt-in)`: `make test-agmsg-contract AGMSG_PATH=~/.agents/skills/agmsg` — `internal/board/agmsg_contract_test.go`; runs in CI via `.github/workflows/agmsg-contract.yml` |
-| C7 | A remote (SSH) host | Presence is probed over the existing exec channel, and a transport error is distinguished from "absent" | `auto`: root — `TestBootstrapWatcher_RemotePresenceCheck_YesWritesNoDoesNot`, `..._TransportError_DistinctFromNo` |
+| C7 | A remote (SSH) host | Presence is probed over the existing exec channel, and a transport error is distinguished from "absent" | `auto`: root — `TestBootstrapWatcher_RemotePresenceCheck_YesWritesNoDoesNot`, `..._RemotePresenceCheckTransportError_DistinctFromNo` |
 | C8 | The PTY write fails or is short | A short write is never retried; a clean failure is retried up to the limit | `auto`: root — `TestBootstrapWatcher_ShortWrite_GivesUpImmediately_NeverRetries`, `..._WriteError_RetriedUpToLimitThenGivesUp` |
 
 ## D. Read the board
@@ -129,6 +129,64 @@ See [agent-board.md](agent-board.md#agmsg-compatibility-contract) for the two ti
 | G12a | An operator runs a patch *older* than the pin | Warned — it never went through the canary. Unreachable while the pin's patch is 0, so the rule is tested apart from the pin | `auto`: `TestReleaseCovered` |
 | G13 | An operator runs a different minor/major, or an unreadable version | Warned, naming the version found and the pin | `auto`: `TestVersionMismatchWarning_StillWarnsWhereItMatters` |
 
+## H. The core multiplexer
+
+The layer everything else sits on: panes, splits, layout persistence and
+workspaces. It had no rows at all until issue #180's roadmap item 5, which is
+the exact failure this document's own rule was written against — Agent Board
+and the command center were mapped in detail while the feature panemux exists
+to provide was not mapped at all.
+
+These run against their own panemux process and fixture
+(`frontend/e2e/core-multiplexer.yml`, port 4177) rather than the shared one,
+because they mutate the layout: splitting, closing, resizing and deleting
+workspaces would otherwise change the state every later spec sees. Sharing was
+tried first and made an unrelated spec fail intermittently.
+
+| # | Scenario | Expected | Verification |
+|---|---|---|---|
+| H1 | Splitting a pane horizontally | A second pane appears beside the first, with a live session of its own, and closing it restores the original layout exactly | `auto`: `frontend/e2e/core-multiplexer.spec.ts` |
+| H2 | Splitting a pane vertically | The new pane is stacked below rather than beside | `auto`: `frontend/e2e/core-multiplexer.spec.ts` |
+| H3 | A layout change survives a reload | Reloading the dashboard restores the same panes, in the same order — the layout is persisted, not React state | `auto`: `frontend/e2e/core-multiplexer.spec.ts` |
+| H4 | Dragging a divider to resize | The panes either side change size, and the new sizes survive a reload (the save is debounced by 500ms) | `auto`: `frontend/e2e/core-multiplexer.spec.ts` |
+| H5 | Layout tree operations | Insert, remove, swap and move produce the tree the UI expects, including at workspace edges | `auto`: `frontend/src/utils/layoutTree.test.ts` |
+| H6 | Moving a pane by dragging its header | The pane moves to a workspace edge, or beside another pane, without duplicating or losing any pane | `auto`: `frontend/e2e/pane-move.spec.ts` |
+| H7 | Closing the last pane in a workspace | The pane's session is terminated and removed from the persisted layout | `auto`: `internal/api` — `TestDeleteSession*`; `frontend/src/hooks/useLayout.test.ts` |
+| H8 | Adding, renaming and deleting a workspace | The tab appears, the rename survives a reload, and deleting asks for confirmation first | `auto`: `frontend/e2e/core-multiplexer.spec.ts` |
+| H9 | Deleting the last remaining workspace | Refused with `409`, so the dashboard is never left with nothing to show | `auto`: `internal/api` — `TestDeleteWorkspace*`. Deliberately not driven in E2E: doing so means deleting every workspace on the shared server, which wrecks the fixture for every later spec |
+| H10 | Switching to a previously hidden workspace | Its terminal renders rather than coming back blank | `auto`: `frontend/e2e/workspace-switch.spec.ts` |
+| H11 | An inactive workspace needs attention | Its tab is flagged and a browser notification fires | `auto`: `frontend/e2e/workspace-switch.spec.ts` |
+| H12 | Workspace bar position and width | Every position renders, and the width is persisted | `auto`: `frontend/src/components/WorkspaceTabs.test.tsx`, `internal/api` — `TestPutWorkspaceTabPosition*`, `TestPutWorkspaceVerticalBarWidth*` |
+| H13 | Terminal rendering and scrollback | The xterm viewport's scrollbar matches the terminal chrome | `auto`: `frontend/e2e/terminal-scrollbar.spec.ts` |
+| H14 | Session types | `local`, `tmux`, `ssh` and `ssh_tmux` panes are validated and constructed from config | `auto`: `internal/config` — `TestValidatePane*`; `internal/session` for the construction half. The live transports themselves are `manual` — see [Not covered](#not-covered) |
+| H15 | WebSocket reconnect and replay | Output produced while disconnected is replayed once, in order, on reconnect | `auto`: `internal/ws`; plus the Alloy model in `docs/models/replay_state.als`, checked by `.github/workflows/model-check.yml` |
+
+## I. Opening URLs from a pane
+
+Added with [#177](https://github.com/tomo-chan/panemux/pull/177), which shipped
+without rows — the omission this document's rule exists to prevent, so they are
+written out here rather than quietly backfilled into another section. Two
+mechanisms: a shell shim that intercepts `xdg-open`/`open` inside the pane, and
+loopback port forwarding so an OAuth callback aimed at `localhost:<port>` on a
+remote pane's host reaches the process waiting for it.
+
+| # | Scenario | Expected | Verification |
+|---|---|---|---|
+| I1 | A program in the pane runs `xdg-open https://…` | panemux asks before opening anything; the URL is never opened automatically | `auto`: `frontend/e2e/pane-url-open.spec.ts` |
+| I2 | The shim's own behavior | An `http`/`https` argument becomes an OSC sequence; anything else falls through to the real opener | `auto`: `internal/session` — `TestBrowserShimEmitsOSCForHTTPURLs`, `TestBrowserShimFallsThroughForNonHTTPArguments` |
+| I3 | A `PATH` that still contains the shim directory | The shim refuses to exec back into itself | `auto`: `internal/session` — `TestBrowserShimDoesNotRecurseIntoItself` |
+| I4 | No terminal, or no real opener installed | The shim falls through, or exits quietly — the pane's shell is never broken by it | `auto`: `internal/session` — `TestBrowserShimFallsThroughWhenNoTerminalIsAvailable`, `TestBrowserShimExitsQuietlyWhenNoRealOpenerExists` |
+| I5 | A read-only home directory on the pane's host | Installing the shim fails and the pane still works | `auto`: `internal/session` — `TestNewLocalStartsEvenWhenTheShimCannotBeInstalled`, `TestRemoteBrowserShimSetupLeavesTheShellUsableWhenInstallFails` |
+| I6 | `url_open.browser_shim: false` | No shim is installed and the pane's `PATH` is untouched | `auto`: `internal/session` — `TestNewLocalWithoutTheBrowserShim`, `TestSSHShellCommandWithoutTheBrowserShim`; root — `TestApplyBrowserShimSetting` |
+| I7 | A crafted OSC sequence naming a `file:` or `javascript:` URL | Rejected by the scheme allowlist, on the frontend and independently in the backend | `auto`: `frontend/src/utils/paneUrlOpen.test.ts`; `internal/portforward` — `TestValidateOpenURL` |
+| I8 | An SSH pane's OAuth callback URL | The callback port is republished on `127.0.0.1` on the panemux host, so the redirect reaches the remote CLI | `auto`: `internal/portforward` — `TestRegistryEnsureForwardsTrafficToTheDialer`, `TestCallbackPort` |
+| I9 | A URL with no callback port, or a local pane | No forward is opened, and the reason says why | `auto`: `internal/api/openurl_test.go`; the route's own wiring in `internal/server` — `TestServer_APIIntegration` |
+| I10 | A port already in use, or below 1024 | Refused rather than bound, with `409` for a port another pane holds | `auto`: `internal/portforward` — `TestRegistryEnsureRejectsUnforwardablePorts`, `TestRegistryEnsureRejectsPortHeldByAnotherSession`, `TestRegistryEnsureReportsPortAlreadyBoundOnTheHost` |
+| I11 | The forward limits | At most 8 per pane and 32 in total | `auto`: `internal/portforward` — `TestRegistryEnsureEnforcesPerSessionAndTotalLimits` |
+| I12 | An idle forward | Reaped after 30 minutes without traffic, but never while a connection is live | `auto`: `internal/portforward` — `TestRegistryReapsIdleForwardsAndKeepsUsedOnes`, `TestRegistryKeepsAForwardWithALiveConnectionPastTheTTL` |
+| I13 | A pane is deleted, restarted, or the server shuts down | Every forward belonging to it is closed | `auto`: `internal/portforward` — `TestRegistryCloseSessionStopsOnlyThatSessionsForwards`, `TestRegistryCloseStopsEveryForward`; `internal/server` — `TestServer_ShutdownClosesPortForwards` |
+| I14 | An OAuth flow completed end to end against a real remote host | The CLI in the pane receives its callback and completes login | `manual`: run a device-code login in an `ssh` pane, press `Open` when panemux asks, confirm the CLI reports success |
+
 ## Not covered
 
 Stated explicitly, because an absent row reads as an oversight and these are decisions:
@@ -149,6 +207,28 @@ Stated explicitly, because an absent row reads as an oversight and these are dec
 - **Install scenarios A1/A2 are manual.** CI builds the binary on every PR, but nobody automatically
   downloads a release artifact and runs it.
 - **Every row in section F is manual.** Documentation accuracy is not mechanically checkable here.
+- **The live session transports are manual** (H14). `local` needs a real PTY, `tmux` a real tmux
+  server, and `ssh`/`ssh_tmux` a reachable host — the same exclusions the `Makefile` records next to
+  `COVERAGE_PKGS`. What is automated is everything either side of the transport: config validation,
+  construction, and the pure decisions extracted out of the lifecycle methods.
+- **An end-to-end OAuth flow against a real remote host is manual** (I14). The forward itself, the
+  scheme allowlist and the limits are all unit-tested, but a real device-code login needs a real
+  provider and a second host.
+
+## Checking this ledger
+
+`make check-scenarios` (part of `make check`) resolves every path and Go test name an `auto` row
+names, and fails when one does not exist. The rule above says a silently absent row is not a
+legitimate answer; this closes the failure that rule never anticipated — **a row that names a test
+which has since been renamed, moved or deleted**. Such a row reads as coverage and is worth nothing,
+and it is the most likely kind of rot in a living ledger, because nobody grepping for a test name
+expects to find it in a markdown table. It found one the day it was written: C7 named
+`..._TransportError_DistinctFromNo`, and the test is
+`TestBootstrapWatcher_RemotePresenceCheckTransportError_DistinctFromNo`.
+
+CI additionally fails a pull request that touches `frontend/src`, `internal/api` or
+`internal/config` without touching this file. Apply the `scenarios-exempt` label to a change that
+genuinely alters no use case.
 
 ## Related documents
 

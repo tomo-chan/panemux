@@ -49,7 +49,7 @@ Flexibility, and added Safety). Mapped onto panemux, the depth of protection is 
 
 | Characteristic | What it means here | Current protection | State |
 |---|---|---|---|
-| Functional suitability | Panes, workspaces, session types and config read/write behave as specified | Unit tests (thick); E2E covers 6 core tests | Uneven |
+| Functional suitability | Panes, workspaces, session types and config read/write behave as specified | Unit tests (thick); E2E now covers splitting, resizing, layout restore and workspace CRUD as well (`core-multiplexer.spec.ts`), and every scenario row is cross-checked against a real test | Improving |
 | Reliability | Recovery from WS disconnect, replay, session exit, SSH reconnect | `internal/ws` unit tests plus the Alloy model in `docs/models/replay_state.als` and `model-check.yml` | Strong |
 | Security | Command injection, bearer token, DNS rebinding, subprocess containment | [security.md](security.md) plus regression tests verified against real binaries, `gosec` | Very strong |
 | Compatibility | The agmsg script contract, config schema back-compat | Tier 1 fixtures, Tier 2 tests against a real agmsg install, daily canary | Very strong |
@@ -132,7 +132,7 @@ rationale for gate G3.
 | | Present | Missing |
 |---|---|---|
 | **Constitution** | `AGENTS.md` indexing `DEVELOPMENT.md` and seven `docs/` files. TDD, test granularity, schema-first and path sanitization are all written down. | — |
-| **Spec** | [scenarios.md](scenarios.md): a use-case ledger with `auto` / `auto (opt-in)` / `manual`, which states that a silently absent row is not a legitimate answer. | No rows at all for the core multiplexer (panes, workspaces, terminal). PR #177 added a user-visible feature and did not add rows either. |
+| **Spec** | [scenarios.md](scenarios.md): a use-case ledger with `auto` / `auto (opt-in)` / `manual`, which states that a silently absent row is not a legitimate answer — now with sections H and I for the core multiplexer and for #177, a cross-check that every `auto` row resolves, and a CI gate on user-visible changes. | The trigger covers `frontend/src`, `internal/api` and `internal/config` only; a user-visible change confined to `internal/session` still slips past it. |
 | **Verification** | One command, `make check`. Enforced by `.githooks/pre-push`, re-run in CI. Alloy model checking. Tier 2 agmsg contract plus a daily canary. | Nothing measures the *efficacy* of the tests. Coverage only reports that a line executed. |
 | **Agent guard** | `.claude/settings.json`'s `PostToolUse` and `Stop` hooks (G1, G2) and `.claude/agents/diff-reviewer.md` (G6), added by rollout item 3. | The TDD rule ("write tests first, confirm they fail") is still stated but **cannot be verified after the fact** — that is what red-check (item 4) is for. |
 
@@ -164,12 +164,12 @@ Ordering is meaningful: the point is to stop a defect at the cheapest gate that 
 
 | # | Gate | Protects | Checks | Enforced by | Status |
 |---|---|---|---|---|---|
-| **G0** | Spec | Functional suitability (rework) | The change is tied to a row in [scenarios.md](scenarios.md). A user-visible change adds or updates a row in the same commit. | CI: fail when the diff touches `frontend/src`, `internal/api` or `internal/config` and `scenarios.md` is unchanged; a label grants explicit exemption | Absent |
+| **G0** | Spec | Functional suitability (rework) | The change is tied to a row in [scenarios.md](scenarios.md). A user-visible change adds or updates a row in the same commit. | CI: fail when the diff touches `frontend/src`, `internal/api` or `internal/config` and `scenarios.md` is unchanged; a label grants explicit exemption | Present — `.github/workflows/scenarios.yml`, exempted by the `scenarios-exempt` label |
 | **G1** | Edit | Maintainability | `gofmt -s`, `tsc --noEmit`, and `go vet` on the touched packages only | Claude Code `PostToolUse` hook in `.claude/settings.json` | Present — `.claude/hooks/post-edit-check.sh` |
 | **G2** | Unit | Functional suitability, fast feedback | `make test-go`, `make test-frontend` — unchanged | Existing (`make check`, pre-push, CI) | Present |
 | **G3** | Contract | **Resistance to refactoring**, compatibility | (a) HTTP/WS integration through the real `server.New()` router; (b) exhaustiveness check on the route table (every registered route against an expected set); (c) Zod schema round-trips; (d) the agmsg contract | New `make test-contract`, folded into `make check`; (b) as an always-on Go test | Partial — (b) and (d) present; (a) present for HTTP (`internal/server/api_integration_test.go` drives every `/api` route and fails when one has no case), absent for `/ws`; (c) absent |
 | **G4** | Efficacy | **Protection against regressions** | (a) coverage — scope tracks the implementation, threshold stays at 80%; (b) **red-check**: a changed test must fail when the implementation diff is reverted; (c) mutation score over changed lines only | (a) existing `make check`; (b) and (c) a pull-request CI job, `make efficacy` | Partial — (a) present and now scoped to every decision-holding package; (b) present (`make efficacy`, a pull-request-only CI job); (c) absent |
-| **G5** | Scenario | Functional suitability, interaction capability | Playwright E2E, plus a check that every test named by an `auto` row in `scenarios.md` actually exists | CI, extending `make test-e2e` | Partial (E2E only; no ledger cross-check) |
+| **G5** | Scenario | Functional suitability, interaction capability | Playwright E2E, plus a check that every test named by an `auto` row in `scenarios.md` actually exists | CI, extending `make test-e2e` | Present — E2E plus `make check-scenarios`, which resolves every `auto` row |
 | **G6** | Adversarial | All characteristics (design judgement) | A fresh-context review of the diff alone. The session that wrote the code does not grade it. Findings limited to correctness and stated requirements. | A review subagent in `.claude/agents/` plus human review. **Does not block** | Present — `.claude/agents/diff-reviewer.md`; still does not block |
 
 ### The enforcement ladder
@@ -306,6 +306,19 @@ recommends a review in a fresh context that sees only the diff. G6 nonetheless *
 reviewer asked to find gaps will report some even when the work is sound, and blocking on that
 invites over-engineering — extra abstraction, defensive code, tests for cases that cannot occur.
 
+**D7 — The ledger is cross-checked, not just required.**
+Requiring a row is the obvious half of G0, and it is the weaker one. A ledger's most likely failure
+is not an absent row but a **stale** one: a row naming a test that has since been renamed, moved or
+deleted still reads as coverage, and nobody grepping for a test name expects to find it in a markdown
+table. `make check-scenarios` resolves every path and Go test name an `auto` row claims. It found a
+stale row the day it was written — C7 named `..._TransportError_DistinctFromNo` while the test is
+`TestBootstrapWatcher_RemotePresenceCheckTransportError_DistinctFromNo`.
+
+Its own risk is false positives, because it reads prose: `Cmd/Ctrl+Shift+B` looks like a path,
+`/ws/board-command` looks like a path, `bin/panemux` looks like a path and is a build artifact that
+does not exist on a clean checkout. All three were false positives in the first version and all three
+are now regression-tested, because principle 4 applies hardest to a gate that reads English.
+
 **D6 — The Stop hook does not run everything.**
 Claude Code's `Stop` hook can deterministically block a turn from ending, but putting all of
 `make check` there would run E2E on every turn. Put G1 and G2 (seconds) there and leave G3 onward to
@@ -319,7 +332,7 @@ pre-push and CI. A gate that sacrifices fast feedback gets bypassed.
 | 2 | Widen coverage scope (threshold unchanged) | G4(a) | Phases 2 and 5 | **Landed.** `internal/portforward`, `internal/commandcenter`, `internal/boardmcp`, the root package and `frontend/src/utils/**` are now gated. Go reports 86% over the wider set (it was 88% over the narrower one — the drop is the point), frontend 95%; the threshold is unchanged at 80%. |
 | 3 | `.claude/settings.json` with G1/G2 hooks; a review subagent | G1, G6 | — | **Landed.** A `PostToolUse` hook checks the edited file, a `Stop` hook checks what the turn changed, and `.claude/agents/diff-reviewer.md` reviews a diff in a fresh context. `make test-hooks` tests the hooks themselves. |
 | 4 | red-check (`make efficacy`) in pull-request CI | G4(b) | — | **Landed.** `scripts/efficacy.sh` reverts the branch's implementation diff in a scratch worktree and requires each test the branch changed — Go function or vitest case — to pass at HEAD and then go red against the revert, one at a time. Exempted by the `efficacy-exempt` label. |
-| 5 | Core-feature section in `scenarios.md`, ledger cross-check, core E2E | G0, G5 | Phases 4 and 6 | Makes the acceptance ledger real. |
+| 5 | Core-feature section in `scenarios.md`, ledger cross-check, core E2E | G0, G5 | Phases 4 and 6 | **Landed.** Sections H (core multiplexer) and I (opening URLs from a pane, #177's missing rows) added; `make check-scenarios` resolves every `auto` row; `frontend/e2e/core-multiplexer.spec.ts` covers split, resize, layout restore and workspace CRUD. |
 | 6 | Diff-scoped mutation testing (warn first, gate once stable) | G4(c) | merges with #164 | Measures protection against regressions directly. |
 | 7 | Performance and accessibility observation (measure only, do not gate) | — | — | First visibility into the two unprotected characteristics. |
 
