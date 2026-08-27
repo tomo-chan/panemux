@@ -1,5 +1,5 @@
 .PHONY: all build build-frontend build-backend dev clean run install-deps install-deps-ci install-hooks \
-        test test-go test-frontend test-e2e test-agmsg-contract \
+        test test-go test-frontend test-e2e test-agmsg-contract test-hooks \
         fmt fmt-go fmt-check-go \
         lint lint-go lint-go-deps lint-frontend \
         coverage coverage-go coverage-frontend \
@@ -33,7 +33,7 @@ install-hooks:
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
-test: test-go test-frontend
+test: test-go test-frontend test-hooks
 
 test-go:
 	go test ./... -v -race
@@ -43,6 +43,15 @@ test-frontend:
 
 test-e2e:
 	cd frontend && npm run test:e2e
+
+# The agent-side gates themselves (docs/quality-gateway.md's G1 and G2, run as
+# Claude Code hooks from .claude/). Included in `make test` because a hook that
+# silently stops working reports the discipline as enforced while enforcing
+# nothing — and because a hook that blocks a healthy change is worse still, so
+# both directions are asserted. Hermetic: it drives the scripts against temp
+# files and throwaway git repositories, never this checkout.
+test-hooks:
+	sh .claude/hooks/hooks_test.sh
 
 # Tier 2 of docs/agent-board.md's agmsg compatibility contract: asserts the
 # agmsg script behaviors panemux depends on against a REAL agmsg install.

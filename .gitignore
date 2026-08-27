@@ -10,3 +10,4 @@ coverage.out
 !.goreleaser.yaml
 coverrage/
 test-results/
+.claude/settings.local.json
