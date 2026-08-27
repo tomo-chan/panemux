@@ -2,7 +2,10 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"embed"
+	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -151,33 +154,16 @@ func TestIsLocalhostOrigin(t *testing.T) {
 	}
 }
 
-func TestServer_APIRoutesWired(t *testing.T) {
-	cfg := testConfig()
-	mgr := session.NewManager()
-	srv := New(cfg, mgr, nil, nil, nil, emptyFS)
-	require.NotNil(t, srv)
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/layout", nil)
-	srv.httpSrv.Handler.ServeHTTP(rec, req)
-	assert.Equal(t, http.StatusOK, rec.Code)
-}
-
-func TestServer_WorkspaceRenameRouteWired(t *testing.T) {
-	cfg := testConfig()
-	mgr := session.NewManager()
-	srv := New(cfg, mgr, nil, nil, nil, emptyFS)
-	require.NotNil(t, srv)
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/default", bytes.NewBufferString(`{"title":"Renamed"}`))
-	req.Header.Set("Content-Type", "application/json")
-	srv.httpSrv.Handler.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, "Renamed", cfg.Workspaces.Items[0].Title)
-}
-
+// The two tests below are the deliberate exception to the consolidation in
+// api_integration_test.go: they are not per-route wiring checks (those are all
+// covered by the route table plus the integration table now), they are chi
+// *precedence* checks. /api/workspaces/tab-position and
+// /api/workspaces/vertical-bar-width are both matched by the
+// /api/workspaces/{id} pattern registered after them, so the only thing
+// separating "the settings route ran" from "a workspace was renamed to
+// tab-position" is registration order. No exhaustiveness check over the route
+// set can see that — both routes exist either way — so these stay as named
+// tests. See issue #180's roadmap item 1.
 func TestServer_WorkspaceTabPositionRouteWiredBeforeWorkspaceIDRoute(t *testing.T) {
 	cfg := testConfig()
 	mgr := session.NewManager()
@@ -208,4 +194,24 @@ func performWorkspaceSettingUpdate(t *testing.T, srv *Server, path string, body 
 	srv.httpSrv.Handler.ServeHTTP(rec, req)
 	assert.Equal(t, http.StatusOK, rec.Code)
 	return rec
+}
+
+// The loopback forward registry is process-wide state New() owns and Shutdown
+// must release; this is about the server's lifecycle, not about any route, so
+// it is not something the integration table can express.
+func TestServer_ShutdownClosesPortForwards(t *testing.T) {
+	srv := New(testConfig(), session.NewManager(), nil, nil, nil, emptyFS)
+	require.NotNil(t, srv.forwards)
+
+	require.NoError(t, srv.Shutdown(context.Background()))
+
+	// The registry is closed: it refuses to open new forwards.
+	_, err := srv.forwards.Ensure("pane-1", 45000, stubDialer{})
+	assert.Error(t, err)
+}
+
+type stubDialer struct{}
+
+func (stubDialer) DialLoopback(_ context.Context, _ int) (net.Conn, error) {
+	return nil, errors.New("not used")
 }
