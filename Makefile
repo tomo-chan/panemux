@@ -84,31 +84,69 @@ test-agmsg-contract:
 
 # ── Coverage (≥ 80 %) ─────────────────────────────────────────────────────────
 #
-# Go: measures config / api / ws / server / board (business-logic packages).
-#     session/local uses a real PTY and is covered separately.
-#     session/ssh and session/tmux* require live SSH / tmux and are
-#     integration-tested outside the unit-test suite.
+# The threshold is deliberately NOT raised above 80 %: see decision D1 in
+# docs/quality-gateway.md. Coverage is only meaningful as a lower bound, and
+# the cheapest way to satisfy a higher one is to generate tautological tests,
+# which lowers protection against regressions and resistance to refactoring at
+# the same time. What gets strengthened is the SCOPE below, never the number.
 #
-# Frontend: measured over src/hooks/ and src/schemas/ only.
+# Go: measures every package that holds a decision — config, api, ws, server,
+#     board, portforward, commandcenter, boardmcp, and the root package
+#     (main.go's startup path plus board.go / bootstrap.go / command_center.go
+#     / board_mcp_server.go).
+#
+#     Deliberately excluded, with reasons rather than by omission:
+#
+#       internal/session   its lifecycle methods drive a real PTY (local,
+#                          tmux), a live SSH connection (ssh, ssh_tmux) and a
+#                          real tmux server. `make check` is hermetic —
+#                          principle 5 in docs/quality-gateway.md — so these
+#                          are exercised by the package's own tests and by
+#                          E2E, not gated here. The pure decisions extracted
+#                          out of them (validateShell, validRemotePath,
+#                          classifySSHWaitError …) are unit-tested in place.
+#       internal/sshconfig  a parser over the user's own ~/.ssh/config; it has
+#                          its own tests and no gate-worthy branching that the
+#                          packages above do not already drive.
+#
+#     Within the measured set, main()/runServer()/bootstrapWatcher.Run() stay
+#     uncovered for the same reason: they install signal handlers, start the
+#     listener and run poll loops for the life of the process. Every decision
+#     they used to embed has been extracted into the injectable units around
+#     them (parseOptions, loadConfig, startSessionsFromConfig,
+#     browserOpenArgv), which is where the gate applies.
+#
+# Frontend: measured over src/hooks/, src/schemas/ and src/utils/.
 #           UI components (App, SplitContainer, TerminalPane …) require a real
 #           browser renderer and are covered by integration / E2E tests.
 
-COVERAGE_PKGS := ./internal/config/...,./internal/api/...,./internal/ws/...,./internal/server/...,./internal/board/...
+COVERAGE_PKGS := ./internal/config/...,./internal/api/...,./internal/ws/...,./internal/server/...,./internal/board/...,./internal/portforward/...,./internal/commandcenter/...,./internal/boardmcp/...,.
 
 coverage: coverage-go coverage-frontend
 
-coverage-go:
+# build-frontend is a real prerequisite, not tidiness: the root package joined
+# the gate above, and main.go carries `//go:embed frontend/dist`, so compiling
+# it needs that directory to exist. Without this, `make coverage-go` on a clean
+# tree fails with "pattern frontend/dist: no matching files found" — an error
+# that gives no hint the fix is to build the frontend first. `make check` and
+# CI already build it, so this costs them nothing and only makes the
+# standalone command DEVELOPMENT.md documents work on its own.
+coverage-go: build-frontend
 	go test \
 	  ./internal/config/... \
 	  ./internal/api/... \
 	  ./internal/ws/... \
 	  ./internal/server/... \
 	  ./internal/board/... \
+	  ./internal/portforward/... \
+	  ./internal/commandcenter/... \
+	  ./internal/boardmcp/... \
+	  . \
 	  -coverprofile=coverage.out \
 	  -coverpkg=$(COVERAGE_PKGS) \
-	  -count=1 -timeout 30s
+	  -count=1 -timeout 60s
 	@pct=$$(go tool cover -func=coverage.out | grep "^total:" | awk '{gsub(/%/,""); print $$3}'); \
-	  printf "Go coverage (business-logic packages): %s%%\n" "$$pct"; \
+	  printf "Go coverage (gated packages): %s%%\n" "$$pct"; \
 	  awk -v p="$$pct" 'BEGIN { if (p+0 < 80) { print "FAIL: coverage "p"% is below 80%"; exit 1 } }'
 
 coverage-frontend:

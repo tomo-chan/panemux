@@ -24,10 +24,11 @@ export default defineConfig({
     exclude: ['e2e/**'],
     coverage: {
       provider: 'v8',
-      // Measure only hooks and schemas — UI components and entry points
-      // (App.tsx, main.tsx, components/) require browser rendering and are
-      // covered by integration/E2E tests, not unit tests.
-      include: ['src/hooks/**', 'src/schemas/**'],
+      // Measure hooks, schemas and utils — the modules that hold decisions.
+      // UI components and entry points (App.tsx, main.tsx, components/)
+      // require browser rendering and are covered by integration/E2E tests,
+      // not unit tests.
+      include: ['src/hooks/**', 'src/schemas/**', 'src/utils/**'],
       exclude: ['src/test/**'],
       reporter: ['text', 'json-summary'],
       thresholds: {

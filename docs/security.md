@@ -154,11 +154,33 @@ old guard: **any future UI that renders an agent-reported field into an attribut
 text child reintroduces this sink and needs its own scheme validation**; a `safeExternalURL`-style
 allowlist is the pattern to restore, not React's escaping to rely on.
 
+### Launching the operator's browser (`--open`)
+
+`openChrome` in `main.go` runs the platform's browser opener against panemux's own listen address
+when `--open` is given. Its first `exec.Command` argument is a **variable**, which is why it is
+recorded here: that is the shape this document's [General Rules](#general-rules) require an argument
+for, and a reader enumerating `exec.Command` sinks must find it rather than conclude from the
+section below that only two exist.
+
+The argument for it is short. `browserOpenArgv(goos, url)` is the only source of both the program
+name and the arguments, it is pure, and it returns one of exactly three compile-time literals
+(`open`, `google-chrome`, `cmd`) or reports that the OS is unsupported — in which case nothing is
+launched rather than a guess being executed. `url` is `"http://" + srv.Addr()`, panemux's own
+host:port. Every value travels as a discrete argv element; no shell parses any of it. Splitting the
+decision out from the exec call is also what makes each per-OS branch testable
+(`TestBrowserOpenArgv`), including `TestBrowserOpenArgv_URLStaysADiscreteArgument`, which pins that
+the URL is never spliced into another argument.
+
+Before that split the three branches each called `exec.Command` with a literal name, so no variable
+first argument existed. The `//nolint:gosec` on the call therefore keeps its reason inline rather
+than being a bare suppression: what makes it safe is where `name` comes from, and that is not
+visible at the call site.
+
 ### Command center subprocess execution
 
-`internal/commandcenter/runner.go`'s `Runner` is the one other place in this repository, besides
-`internal/session`, that calls `exec.Command`/`exec.CommandContext` on a value not fully known at
-compile time. Per this document's own [General Rules](#general-rules): the command name
+`internal/commandcenter/runner.go`'s `Runner` is the other place in this repository, besides
+`internal/session` and `openChrome` above, that calls `exec.Command`/`exec.CommandContext` on a
+value not fully known at compile time. Per this document's own [General Rules](#general-rules): the command name
 (`r.claudeBin`) is a hardcoded literal (`"claude"`) unless an operator explicitly overrides it via
 `RunnerConfig.ClaudeBin` — there is no code path that derives it from request data, environment
 variables, or anything else CodeQL would treat as tainted. The arguments after it are a mix of fixed
