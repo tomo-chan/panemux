@@ -250,6 +250,17 @@ them:
   the safe direction here: a wider run is likelier to go red for someone else's reason, and going
   red is what this gate reads as success.
 
+  The block *boundaries* come from the source, not from that report: vitest reports a case at the
+  line of its call, which for a multi-line `it.each([` sits several lines below where the block
+  starts, so ranges derived from the report put a block's own opening lines inside the case above
+  it. The same rule the static mapper spells out — the lines between two cases belong to the one
+  below — has to hold in both paths, and the two share a scanner so they cannot disagree.
+
+  One consequence is worth stating because it flips a verdict: a branch whose only frontend test
+  change is describe-level setup — a `beforeEach` gaining a mock the new implementation needs, with
+  no case body touched — has no case to judge, so it lands in "could not check" and fails, where it
+  previously ran the file whole and passed.
+
   On the frontend the verdict comes from vitest's **JSON reporter**, read per case, not from
   `-t` plus the summary line. That was a second, subtler instance of the same masking: `-t` matches
   as an *unanchored* regex over the full `describe`-joined name, so `-t 'renders'` also selects

@@ -424,9 +424,15 @@ else
 fi
 rm -rf "$fescope"
 
-# ...with a fallback that is over-wide rather than wrong. A touched line that
-# belongs to no case at all — describe-level setup, an import, a helper — has
-# no case name to narrow to, so the whole file runs.
+# ...and a touched line that belongs to no case at all — describe-level setup,
+# an import, a helper — has no case name to narrow to statically. It is left
+# for the post-run location resolution, and when that cannot place it either,
+# the file is reported unresolvable and the branch is NOT judged on it.
+#
+# That is a behaviour change worth pinning rather than only listing: a branch
+# whose only frontend test change is a `beforeEach` gaining a mock used to run
+# the file whole and pass. It now ends in "could not check", which is where the
+# unresolvable row of the table puts it.
 fefallback=$(mktemp -d)
 (
 	cd "$fefallback" || exit 1
@@ -454,10 +460,10 @@ TS
 )
 checks=$((checks + 1))
 listing=$(run_efficacy "$fefallback" --changed-tests)
-if printf '%s' "$listing" | grep -q '(whole file)'; then
-	pass "a touched line outside every case falls back to the whole file"
+if printf '%s' "$listing" | grep -q '(resolved after the run)'; then
+	pass "a touched line inside no case yields no static name"
 else
-	fail "a touched line outside every case falls back to the whole file" "$listing"
+	fail "a touched line inside no case yields no static name" "$listing"
 fi
 rm -rf "$fefallback"
 
@@ -603,7 +609,7 @@ it.each([1, 2])('"'"'handles %i'"'"', (n) => {
   expect(n).toBeGreaterThan(0)
 })
 ')
-if printf '%s' "$unmappable" | grep -q '(whole file)'; then
+if printf '%s' "$unmappable" | grep -q '(resolved after the run)'; then
 	pass "a case whose name is not a literal is left for location-based resolution"
 else
 	fail "a case whose name is not a literal is left for location-based resolution" "$unmappable"
@@ -668,6 +674,124 @@ TS
 $byloc_out"
 	fi
 	rm -rf "$byloc"
+fi
+
+# ...and the same fixture run for real, because a listing string is not an
+# outcome. This suite's whole point is that a green check means what it says.
+checks=$((checks + 1))
+if [ ! -d "$scripts_dir/../frontend/node_modules" ]; then
+	echo "skip frontend/node_modules missing — the unresolvable-outcome check is skipped"
+else
+	setuponly=$(mktemp -d)
+	(
+		cd "$setuponly" || exit 1
+		git_init
+		mkdir -p frontend/src
+		printf 'node_modules/\n' > .gitignore
+		printf '{"name":"efficacy-fixture","private":true,"type":"module"}\n' > frontend/package.json
+		ln -s "$(CDPATH='' cd -- "$scripts_dir/../frontend/node_modules" && pwd)" frontend/node_modules
+		printf 'export const add = (a: number, b: number) => a + b\n' > frontend/src/math.ts
+		cat > frontend/src/math.test.ts <<'TS'
+import { describe, it, expect, beforeEach } from 'vitest'
+import { add } from './math'
+
+describe('math', () => {
+  beforeEach(() => {})
+
+  it('adds', () => {
+    expect(add(1, 2)).toBe(3)
+  })
+})
+TS
+		git add -A && git commit -q -m "base"
+		git checkout -q -b work
+		printf 'export const mul = (a: number, b: number) => a * b\n' >> frontend/src/math.ts
+		rewrite frontend/src/math.test.ts 'beforeEach(() => {})' 'beforeEach(() => { /* reset */ })'
+		git add -A && git commit -q -m "touch describe-level setup"
+	)
+	setup_out=$(run_efficacy "$setuponly")
+	setup_status=$?
+	if [ "$setup_status" -eq 1 ] &&
+		printf '%s' "$setup_out" | grep -q 'no case could be resolved' &&
+		printf '%s' "$setup_out" | grep -q 'nothing was red-checked'; then
+		pass "a setup-only frontend change is reported unresolvable, not run whole"
+	else
+		fail "a setup-only frontend change is reported unresolvable, not run whole" \
+			"exit $setup_status
+$setup_out"
+	fi
+	rm -rf "$setuponly"
+fi
+
+# ...and the shape the location path was actually built for. vitest reports a
+# case at its CALL line, so for a multi-line `it.each([` the block's opening
+# lines sit above the reported line — and ranges derived from the report put
+# them inside the case above, dragging an untouched test into scope. Every
+# `it.each` in this repository is the multi-line form, so the one-line fixture
+# above cannot see this at all.
+checks=$((checks + 1))
+if [ ! -d "$scripts_dir/../frontend/node_modules" ]; then
+	echo "skip frontend/node_modules missing — the multi-line it.each check is skipped"
+else
+	multiline=$(mktemp -d)
+	(
+		cd "$multiline" || exit 1
+		git_init
+		mkdir -p frontend/src
+		printf 'node_modules/\n' > .gitignore
+		printf '{"name":"efficacy-fixture","private":true,"type":"module"}\n' > frontend/package.json
+		ln -s "$(CDPATH='' cd -- "$scripts_dir/../frontend/node_modules" && pwd)" frontend/node_modules
+		printf 'export const add = (a: number, b: number) => a + b\n' > frontend/src/math.ts
+		cat > frontend/src/math.test.ts <<'TS'
+import { describe, it, expect } from 'vitest'
+import { add } from './math'
+
+describe('math', () => {
+  it('adds', () => {
+    expect(add(1, 2)).toBe(3)
+  })
+})
+TS
+		git add -A && git commit -q -m "base"
+		git checkout -q -b work
+
+		printf 'export const mul = (a: number, b: number) => a * b\n' >> frontend/src/math.ts
+		cat > frontend/src/math.test.ts <<'TS'
+import { describe, it, expect } from 'vitest'
+import { add, mul } from './math'
+
+describe('math', () => {
+  it('adds', () => {
+    expect(add(1, 2)).toBe(3)
+  })
+
+  it.each([
+    [2, 3],
+    [4, 5],
+  ])('tautological row %i,%i', (a, b) => {
+    expect(a + b).toBeGreaterThan(0)
+  })
+
+  it('multiplies', () => {
+    expect(mul(2, 3)).toBe(6)
+  })
+})
+TS
+		git add -A && git commit -q -m "add mul, a real test and a multi-line it.each tautology"
+	)
+	multi_out=$(run_efficacy "$multiline")
+	multi_status=$?
+	if [ "$multi_status" -eq 1 ] &&
+		printf '%s' "$multi_out" | grep -q 'red: src/math.test.ts > multiplies' &&
+		printf '%s' "$multi_out" | grep -q 'SURVIVOR: src/math.test.ts > tautological row 2,3' &&
+		! printf '%s' "$multi_out" | grep -q '> adds'; then
+		pass "a multi-line it.each does not drag the case above it into scope"
+	else
+		fail "a multi-line it.each does not drag the case above it into scope" \
+			"exit $multi_status
+$multi_out"
+	fi
+	rm -rf "$multiline"
 fi
 
 # --- skips, which are as important as the failures ---------------------------

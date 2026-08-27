@@ -318,7 +318,7 @@ if [ "$mode" = "--changed-tests" ]; then
 	echo "frontend impl:  $fe_impl"
 	echo "frontend tests: $fe_tests"
 	echo "frontend cases:"
-	sed 's/^/  /; s/'"$tab"'$/'"$tab"'(whole file)/' "$tmp/fe_targets"
+	sed 's/^/  /; s/'"$tab"'$/'"$tab"'(resolved after the run)/' "$tmp/fe_targets"
 	exit 0
 fi
 
@@ -465,18 +465,51 @@ fe_run() {
 # the direction this gate is wrong in: a wider run is likelier to go red for
 # someone else's reason, and going red is what the gate reads as success.
 #
-# Cases are ordered by line, and one spans from its own line to the line before
-# the next — with trailing blank and comment lines trimmed off, exactly as the
-# static mapping does. That trim is the load-bearing part: appending a case
-# touches the blank line separating it from the one above, and attributing that
-# line upwards would drag an untouched case in.
+# The block boundaries come from the SOURCE, not from the report. vitest reports
+# a case at the line of its `it(...)`/`])(...)` **call**, which for a multi-line
+# `it.each([` is several lines below where the block starts — so ranges derived
+# from the report put a block's own opening lines inside the case above it, and
+# touching the block drags that untouched case into scope. Every `it.each` in
+# this repository is the multi-line form, which is to say the shape this path
+# exists for is exactly the shape that misfires. `fe_block_starts` runs the same
+# scanner and the same doc-comment walk `changed_fe_test_names` uses, so the two
+# paths cannot disagree about where a case begins.
 #
-# `it.each` generates several cases sharing a line; all of them come back, and
-# all of them must go red, which is right — the whole block was touched.
+# A block spans from its start to the line before the next, with trailing blank
+# and comment lines trimmed off. That trim is load-bearing for the same reason:
+# appending a case touches the blank line separating it from the one above, and
+# attributing that line upwards would drag an untouched case in.
+#
+# The reported line is used only to decide which block each title belongs to.
+# `it.each` generates several titles sharing one line; all of them come back,
+# and all must go red, which is right — the whole block was touched.
+fe_block_starts() {
+	awk '
+		{ line[NR] = $0 }
+		END {
+			cnt = 0
+			for (i = 1; i <= NR; i++) {
+				if (line[i] !~ /^[ \t]*(it|test)(\.[A-Za-z]+)?[ \t]*\(/) continue
+				cnt++
+				dstart[cnt] = i
+			}
+			for (k = 1; k <= cnt; k++) {
+				s = dstart[k]
+				j = s - 1
+				while (j >= 1 && line[j] ~ /^[ \t]*\/\//) { s = j; j-- }
+				print s
+			}
+		}
+	' "$1"
+}
+
 fe_titles_at() {
 	ft_file=$1
 	shift
-	FE_JSON="$tmp/fe_results.json" FE_SRC="$worktree/frontend/$ft_file" FE_LINES="$*" node -e '
+	ft_src="$worktree/frontend/$ft_file"
+	fe_block_starts "$ft_src" > "$tmp/fe_starts"
+
+	FE_JSON="$tmp/fe_results.json" FE_SRC="$ft_src" FE_STARTS="$tmp/fe_starts" FE_LINES="$*" node -e '
 		const fs = require("fs")
 		const j = JSON.parse(fs.readFileSync(process.env.FE_JSON, "utf8"))
 		const cases = []
@@ -488,20 +521,29 @@ fe_titles_at() {
 		const src = fs.readFileSync(process.env.FE_SRC, "utf8").split("\n")
 		const blank = (i) => i < 1 || i > src.length || /^\s*(\/\/.*)?$/.test(src[i - 1])
 
-		const starts = [...new Set(cases.map((c) => c.line))].sort((a, b) => a - b)
+		const starts = fs
+			.readFileSync(process.env.FE_STARTS, "utf8")
+			.split("\n")
+			.map(Number)
+			.filter(Boolean)
+			.sort((a, b) => a - b)
+		if (starts.length === 0) process.exit(0)
+
 		const ranges = starts.map((start, i) => {
 			let end = i + 1 < starts.length ? starts[i + 1] - 1 : src.length
 			while (end > start && blank(end)) end--
 			return { start, end }
 		})
+		const blockOf = (line) => ranges.findIndex((r) => line >= r.start && line <= r.end)
 
 		const wanted = new Set()
 		for (const raw of process.env.FE_LINES.split(/\s+/)) {
 			const line = Number(raw)
 			if (!line) continue
-			for (const r of ranges) if (line >= r.start && line <= r.end) wanted.add(r.start)
+			const b = blockOf(line)
+			if (b !== -1) wanted.add(b)
 		}
-		const out = [...new Set(cases.filter((c) => wanted.has(c.line)).map((c) => c.title))]
+		const out = [...new Set(cases.filter((c) => wanted.has(blockOf(c.line))).map((c) => c.title))]
 		for (const t of out) console.log(t)
 	' 2> /dev/null
 }
