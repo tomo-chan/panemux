@@ -177,11 +177,22 @@ changed_test_funcs() {
 
 # changed_fe_test_names <file> — the vitest cases this branch added or modified
 # in <file>, one name per line, mapped by touched line exactly as the Go half
-# is. Prints the single token __UNMAPPED__ when it cannot narrow safely — no
-# `it(...)`/`test(...)` declaration in the file at all, no touched line inside
-# any case, or a name that cannot be read literally (a template literal,
-# `it.each`, a computed name). The caller then runs the whole file, which is
-# over-wide but never wrong.
+# is.
+#
+# Two tokens stand for the cases it cannot answer with a name:
+#
+#   __UNMAPPED__   nothing could be narrowed statically — no `it(...)`/
+#                  `test(...)` declaration in the file, no touched line inside
+#                  any case, or a name that is not a literal (`it.each`, a
+#                  template literal, a computed name). The caller does NOT fall
+#                  back to a whole-file run: that would let a sibling's red
+#                  vouch for the changed case, which is the masking this gate
+#                  exists to remove. It resolves the case by source location
+#                  after the run instead — see fe_titles_at.
+#   __ALL_EXEMPT__ every case the diff touched carries `//efficacy:exempt`.
+#                  Distinct from the above on purpose: printing nothing for it
+#                  would be read as "could not narrow", and applying the marker
+#                  would then widen scope rather than remove the case.
 #
 # Touched lines that fall outside every case but beside at least one that was
 # hit are ignored rather than treated as unmappable. They are imports, describe
@@ -245,12 +256,21 @@ changed_fe_test_names() {
 				}
 			}
 			if (!any) { print "__UNMAPPED__"; exit }
+
+			# "every hit case is exempt" is NOT "nothing could be narrowed".
+			# Printing nothing for it would leave the caller unable to tell the
+			# two apart, and it would fall back to the whole file — so applying
+			# the marker would WIDEN scope and run the exempted case anyway,
+			# leaving the branch worse off than if the marker were absent.
+			printed = 0
 			for (k = 1; k <= cnt; k++) {
 				if (!hit[k]) continue
 				if (exempt[k]) continue
 				if (dname[k] == "") { print "__UNMAPPED__"; exit }
 				print dname[k]
+				printed = 1
 			}
+			if (!printed) print "__ALL_EXEMPT__"
 		}
 	' "$tmp/fe_touched" "$file"
 }
@@ -273,6 +293,7 @@ for f in $fe_tests; do
 	rel=${f#frontend/}
 	extracted=$(changed_fe_test_names "$f")
 	case "$extracted" in
+	*__ALL_EXEMPT__*) ;;
 	"" | *__UNMAPPED__*) printf '%s%s\n' "$rel" "$tab" >> "$tmp/fe_targets" ;;
 	*)
 		printf '%s\n' "$extracted" | while IFS= read -r n; do
@@ -417,39 +438,91 @@ go_verdict() {
 # So the file runs once and the JSON reporter gives each case's own status,
 # looked up by name below. One invocation per file is also fewer than one per
 # case, so this is cheaper than the filtered version it replaces.
+#
+# --includeTaskLocation additionally puts each case's source line in the report,
+# which is what fe_titles_at lower down uses to narrow a file the static
+# extraction could not.
 fe_run() {
 	rm -f "$tmp/fe_results.json"
 	(cd "$worktree/frontend" && NO_COLOR=1 npx --no-install vitest run "$1" \
-		--reporter=default --reporter=json --outputFile="$tmp/fe_results.json") > "$2" 2>&1
+		--reporter=default --reporter=json --includeTaskLocation \
+		--outputFile="$tmp/fe_results.json") > "$2" 2>&1
 	[ -s "$tmp/fe_results.json" ] || { echo broken; return; }
 	echo ok
 }
 
+# fe_titles_at <line>... — the case titles whose source range covers any of the
+# given lines, from the run fe_run just recorded.
+#
+# This is the second chance at narrowing, for a file `changed_fe_test_names`
+# could not map statically — `it.each([...])` is the shape that reaches it,
+# since its title is a template, not a literal. There are four `it.each` blocks
+# in useTerminal.test.ts and one in schemas/index.test.ts, so this is not a
+# hypothetical path.
+#
+# It replaces a whole-file aggregate verdict, which was the last place this gate
+# still let a sibling's red vouch for a changed case. "Over-wide" is precisely
+# the direction this gate is wrong in: a wider run is likelier to go red for
+# someone else's reason, and going red is what the gate reads as success.
+#
+# Cases are ordered by line, and one spans from its own line to the line before
+# the next — with trailing blank and comment lines trimmed off, exactly as the
+# static mapping does. That trim is the load-bearing part: appending a case
+# touches the blank line separating it from the one above, and attributing that
+# line upwards would drag an untouched case in.
+#
+# `it.each` generates several cases sharing a line; all of them come back, and
+# all of them must go red, which is right — the whole block was touched.
+fe_titles_at() {
+	ft_file=$1
+	shift
+	FE_JSON="$tmp/fe_results.json" FE_SRC="$worktree/frontend/$ft_file" FE_LINES="$*" node -e '
+		const fs = require("fs")
+		const j = JSON.parse(fs.readFileSync(process.env.FE_JSON, "utf8"))
+		const cases = []
+		for (const f of j.testResults || []) for (const a of f.assertionResults || []) {
+			if (a.location && a.location.line) cases.push({ title: a.title, line: a.location.line })
+		}
+		if (cases.length === 0) process.exit(0)
+
+		const src = fs.readFileSync(process.env.FE_SRC, "utf8").split("\n")
+		const blank = (i) => i < 1 || i > src.length || /^\s*(\/\/.*)?$/.test(src[i - 1])
+
+		const starts = [...new Set(cases.map((c) => c.line))].sort((a, b) => a - b)
+		const ranges = starts.map((start, i) => {
+			let end = i + 1 < starts.length ? starts[i + 1] - 1 : src.length
+			while (end > start && blank(end)) end--
+			return { start, end }
+		})
+
+		const wanted = new Set()
+		for (const raw of process.env.FE_LINES.split(/\s+/)) {
+			const line = Number(raw)
+			if (!line) continue
+			for (const r of ranges) if (line >= r.start && line <= r.end) wanted.add(r.start)
+		}
+		const out = [...new Set(cases.filter((c) => wanted.has(c.line)).map((c) => c.title))]
+		for (const t of out) console.log(t)
+	' 2> /dev/null
+}
+
 # fe_status <title> — passed | failed | skipped | missing | ambiguous.
-# With no argument, the whole file's aggregate verdict.
 #
 # Two cases sharing a title in one file cannot be told apart from a diff, so a
 # split result is reported as `ambiguous` rather than guessed at. Phase 2 counts
 # that as a survivor: fail-closed is the only safe direction when the question
 # is "did the test this branch changed go red".
 fe_status() {
-	FE_JSON="$tmp/fe_results.json" FE_TITLE="${1-}" FE_WANT_TITLE=$([ $# -gt 0 ] && echo 1 || echo 0) \
-		node -e '
-			const j = JSON.parse(require("fs").readFileSync(process.env.FE_JSON, "utf8"))
-			const cases = []
-			for (const f of j.testResults || []) for (const a of f.assertionResults || []) cases.push(a)
-
-			if (process.env.FE_WANT_TITLE !== "1") {
-				const seen = cases.map((a) => a.status)
-				console.log(seen.includes("failed") ? "failed" : seen.includes("passed") ? "passed" : "missing")
-				process.exit(0)
-			}
-
-			const hits = cases.filter((a) => a.title === process.env.FE_TITLE).map((a) => a.status)
-			if (hits.length === 0) console.log("missing")
-			else if (hits.every((s) => s === hits[0])) console.log(hits[0])
-			else console.log("ambiguous")
-		' 2> /dev/null
+	FE_JSON="$tmp/fe_results.json" FE_TITLE="$1" node -e '
+		const j = JSON.parse(require("fs").readFileSync(process.env.FE_JSON, "utf8"))
+		const hits = []
+		for (const f of j.testResults || []) for (const a of f.assertionResults || []) {
+			if (a.title === process.env.FE_TITLE) hits.push(a.status)
+		}
+		if (hits.length === 0) console.log("missing")
+		else if (hits.every((s) => s === hits[0])) console.log(hits[0])
+		else console.log("ambiguous")
+	' 2> /dev/null
 }
 
 : > "$tmp/checkable_go"
@@ -503,25 +576,37 @@ if [ "$fe_count" -gt 0 ]; then
 			continue
 		fi
 
+		# An empty name is a file the static extraction could not map. Resolve
+		# it now, from the source locations this run reported, rather than
+		# falling back to a whole-file aggregate verdict.
 		awk -F"$tab" -v f="$fefile" '$1 == f { print $2 }' "$tmp/fe_targets" |
 			while IFS= read -r fename; do
 				if [ -n "$fename" ]; then
-					fe_state=$(fe_status "$fename")
-					label="$fefile > $fename"
+					printf '%s\n' "$fename"
 				else
-					fe_state=$(fe_status)
-					label="$fefile (whole file)"
+					# shellcheck disable=SC2046 # one argument per touched line is the intent
+					fe_titles_at "$fefile" $(touched_lines "frontend/$fefile")
 				fi
-				printf '%s%s%s%s%s\n' "$fe_state" "$tab" "$fefile" "$tab" "$fename"
-			done > "$tmp/fe_phase1"
+			done > "$tmp/fe_names"
+		sort -u "$tmp/fe_names" -o "$tmp/fe_names"
 
-		while IFS="$tab" read -r fe_state fefile2 fename; do
+		if [ ! -s "$tmp/fe_names" ]; then
+			echo "  no case could be resolved, so not red-checked: $fefile"
+			echo "    (every touched line falls outside every test case)"
+			unchecked=$((unchecked + 1))
+			continue
+		fi
+
+		while IFS= read -r fename; do
+			printf '%s%s%s\n' "$(fe_status "$fename")" "$tab" "$fename"
+		done < "$tmp/fe_names" > "$tmp/fe_phase1"
+
+		while IFS="$tab" read -r fe_state fename; do
 			[ -n "$fe_state" ] || continue
-			label="$fefile2${fename:+ > $fename}"
-			[ -n "$fename" ] || label="$fefile2 (whole file)"
+			label="$fefile > $fename"
 			case "$fe_state" in
 			passed)
-				printf '%s%s%s\n' "$fefile2" "$tab" "$fename" >> "$tmp/checkable_fe"
+				printf '%s%s%s\n' "$fefile" "$tab" "$fename" >> "$tmp/checkable_fe"
 				;;
 			failed)
 				echo "  ERROR: $label already fails at HEAD. Fix the branch first."
@@ -582,6 +667,12 @@ while IFS="$tab" read -r pkg fn; do
 		echo "      Either it asserts something the old implementation already did,"
 		echo "      or it asserts nothing at all. See decision D4 in docs/quality-gateway.md."
 		echo
+		echo "      If instead this test's implementation is simply not part of this"
+		echo "      branch — an assertion tightened beside the change, a flake fixed"
+		echo "      alongside a feature — nothing under it was reverted and it was"
+		echo "      never going to go red. Mark it '//efficacy:exempt' in the comment"
+		echo "      above it, and say so in the pull request."
+		echo
 		sed 's/^/      /' "$tmp/rev.log"
 		survivors=$((survivors + 1))
 		;;
@@ -605,18 +696,15 @@ while IFS= read -r fefile; do
 		while IFS= read -r fename; do
 			if [ "$fe_broken" = broken ]; then
 				printf 'failed%s%s\n' "$tab" "$fename"
-			elif [ -n "$fename" ]; then
-				printf '%s%s%s\n' "$(fe_status "$fename")" "$tab" "$fename"
 			else
-				printf '%s%s\n' "$(fe_status)" "$tab"
+				printf '%s%s%s\n' "$(fe_status "$fename")" "$tab" "$fename"
 			fi
 		done > "$tmp/fe_phase2"
 
 	while IFS="$tab" read -r fe_state fename; do
 		[ -n "$fe_state" ] || continue
 		run=$((run + 1))
-		label="$fefile${fename:+ > $fename}"
-		[ -n "$fename" ] || label="$fefile (whole file)"
+		label="$fefile > $fename"
 		case "$fe_state" in
 		failed)
 			echo "  red: $label"
@@ -631,6 +719,9 @@ while IFS= read -r fefile; do
 		*)
 			echo
 			echo "SURVIVOR: $label still passes with this branch's implementation reverted."
+			echo "      If its implementation is not part of this branch, mark it"
+			echo "      '//efficacy:exempt' in the comment above it and say so in"
+			echo "      the pull request."
 			echo
 			sed 's/^/      /' "$tmp/rev.log"
 			survivors=$((survivors + 1))

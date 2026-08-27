@@ -532,6 +532,144 @@ $percase_out"
 	rm -rf "$percase"
 fi
 
+# --- the frontend exemption marker, in all three shapes ----------------------
+#
+# The marker is where scope and the fallback meet, and getting the meeting
+# wrong INVERTS it: if "every hit case is exempt" is indistinguishable from
+# "nothing could be narrowed", applying the marker widens scope to the whole
+# file and the exempted case runs anyway — leaving the branch worse off than
+# without it. These drive `--changed-tests`, which is where scope is decided.
+fe_scope() {
+	fs_dir=$(mktemp -d)
+	(
+		cd "$fs_dir" || exit 1
+		git_init
+		mkdir -p frontend/src
+		printf 'export const add = (a: number, b: number) => a + b\n' > frontend/src/math.ts
+		cat > frontend/src/math.test.ts <<'TS'
+import { it, expect } from 'vitest'
+import { add } from './math'
+
+it('adds', () => {
+  expect(add(1, 2)).toBe(3)
+})
+TS
+		git add -A && git commit -q -m "base"
+		git checkout -q -b work
+		printf 'export const mul = (a: number, b: number) => a * b\n' >> frontend/src/math.ts
+		printf '%s' "$1" >> frontend/src/math.test.ts
+		git add -A && git commit -q -m "change"
+	)
+	run_efficacy "$fs_dir" --changed-tests | sed -n '/^frontend cases:/,$p' | sed '1d'
+	rm -rf "$fs_dir"
+}
+
+checks=$((checks + 1))
+all_exempt=$(fe_scope '
+//efficacy:exempt — mul is not this branch'"'"'s implementation
+it('"'"'multiplies'"'"', () => {
+  expect(2 * 3).toBe(6)
+})
+')
+if [ -z "$(printf '%s' "$all_exempt" | tr -d '[:space:]')" ]; then
+	pass "an all-exempt frontend file drops out of scope instead of widening to the whole file"
+else
+	fail "an all-exempt frontend file drops out of scope instead of widening to the whole file" \
+		"wanted no cases, got:
+$all_exempt"
+fi
+
+checks=$((checks + 1))
+some_exempt=$(fe_scope '
+//efficacy:exempt — not this branch'"'"'s implementation
+it('"'"'multiplies'"'"', () => {
+  expect(2 * 3).toBe(6)
+})
+
+it('"'"'multiplies via mul'"'"', () => {
+  expect(mul(2, 3)).toBe(6)
+})
+')
+if printf '%s' "$some_exempt" | grep -q 'multiplies via mul' &&
+	! printf '%s' "$some_exempt" | grep -qE '\smultiplies$'; then
+	pass "a partly-exempt frontend file narrows to the cases that are not marked"
+else
+	fail "a partly-exempt frontend file narrows to the cases that are not marked" "$some_exempt"
+fi
+
+checks=$((checks + 1))
+unmappable=$(fe_scope '
+it.each([1, 2])('"'"'handles %i'"'"', (n) => {
+  expect(n).toBeGreaterThan(0)
+})
+')
+if printf '%s' "$unmappable" | grep -q '(whole file)'; then
+	pass "a case whose name is not a literal is left for location-based resolution"
+else
+	fail "a case whose name is not a literal is left for location-based resolution" "$unmappable"
+fi
+
+# ...and that resolution, end to end. An `it.each` block cannot be named
+# statically, and running the whole file instead would let its siblings' red
+# vouch for it — the last place this gate still judged by aggregate.
+checks=$((checks + 1))
+if [ ! -d "$scripts_dir/../frontend/node_modules" ]; then
+	echo "skip frontend/node_modules missing — the location-resolution check is skipped"
+else
+	byloc=$(mktemp -d)
+	(
+		cd "$byloc" || exit 1
+		git_init
+		mkdir -p frontend/src
+		printf 'node_modules/\n' > .gitignore
+		printf '{"name":"efficacy-fixture","private":true,"type":"module"}\n' > frontend/package.json
+		ln -s "$(CDPATH='' cd -- "$scripts_dir/../frontend/node_modules" && pwd)" frontend/node_modules
+		printf 'export const add = (a: number, b: number) => a + b\n' > frontend/src/widget.ts
+		cat > frontend/src/widget.test.ts <<'TS'
+import { describe, it, expect } from 'vitest'
+import { add } from './widget'
+
+describe('widget', () => {
+  it('adds', () => {
+    expect(add(1, 2)).toBe(3)
+  })
+})
+TS
+		git add -A && git commit -q -m "base"
+		git checkout -q -b work
+
+		printf 'export const renderAll = (xs: number[]) => xs.join(",")\n' >> frontend/src/widget.ts
+		cat > frontend/src/widget.test.ts <<'TS'
+import { describe, it, expect } from 'vitest'
+import { add, renderAll } from './widget'
+
+describe('widget', () => {
+  it('adds', () => {
+    expect(add(1, 2)).toBe(3)
+  })
+
+  it.each([[[], ''], [[1], '1']])('renders %j', (xs, want) => {
+    expect(renderAll(xs as number[])).toBe(want)
+  })
+})
+TS
+		git add -A && git commit -q -m "add renderAll, covered only by an it.each block"
+	)
+	byloc_out=$(run_efficacy "$byloc")
+	byloc_status=$?
+	if [ "$byloc_status" -eq 0 ] &&
+		printf '%s' "$byloc_out" | grep -q 'red: src/widget.test.ts > renders' &&
+		! printf '%s' "$byloc_out" | grep -q 'whole file' &&
+		! printf '%s' "$byloc_out" | grep -q '> adds'; then
+		pass "an it.each block is resolved by source location, not by running the whole file"
+	else
+		fail "an it.each block is resolved by source location, not by running the whole file" \
+			"exit $byloc_status
+$byloc_out"
+	fi
+	rm -rf "$byloc"
+fi
+
 # --- skips, which are as important as the failures ---------------------------
 #
 # Principle 4: a gate that fires on a change it has no opinion about gets

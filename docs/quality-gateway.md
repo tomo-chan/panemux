@@ -239,10 +239,16 @@ them:
   diff's touched line numbers onto the function ranges in the file, so editing an assertion inside
   an existing test brings that test into scope, and appending a new test does *not* drag the
   untouched one above it in. The frontend half does the same thing with `it(...)`/`test(...)`
-  blocks, falling back to the whole file only when nothing can be narrowed safely (no literal case
-  name, or a touched line inside no case at all). Scope and per-test verdict are separate decisions
-  that were once conflated: narrowing the set does not stop one member masking another, and this
-  gate needs both.
+  blocks. Scope and per-test verdict are separate decisions that were once conflated: narrowing the
+  set does not stop one member masking another, and this gate needs both.
+
+  There is deliberately **no whole-file fallback**. A file the static extraction cannot map — an
+  `it.each([...])` has a template for a title, not a literal, and there are five such blocks in this
+  repository — is narrowed *after* the run instead, from the per-case source locations vitest's
+  reporter emits under `--includeTaskLocation`. Running the whole file and reading the aggregate
+  would be the last place a sibling's red could still vouch for the changed case. "Over-wide" is not
+  the safe direction here: a wider run is likelier to go red for someone else's reason, and going
+  red is what this gate reads as success.
 
   On the frontend the verdict comes from vitest's **JSON reporter**, read per case, not from
   `-t` plus the summary line. That was a second, subtler instance of the same masking: `-t` matches
