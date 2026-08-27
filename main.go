@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"embed"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -21,6 +22,14 @@ import (
 )
 
 var version = "dev"
+
+// The GOOS values browserOpenArgv branches on. Named so the switch and its
+// table-driven test cannot drift apart on a typo.
+const (
+	goosDarwin  = "darwin"
+	goosLinux   = "linux"
+	goosWindows = "windows"
+)
 
 type cliOptions struct {
 	configPath  string
@@ -44,14 +53,17 @@ func main() {
 		return
 	}
 
-	opts := parseOptions()
+	opts, err := parseOptions(os.Args[1:])
+	if err != nil {
+		os.Exit(parseExitCode(err))
+	}
 
 	if opts.showVersion {
 		fmt.Println(version)
 		os.Exit(0)
 	}
 
-	cfg, err := loadConfig(opts)
+	cfg, err := loadConfig(opts, defaultConfigLoader)
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
 	}
@@ -61,7 +73,7 @@ func main() {
 	session.SetBrowserShimEnabled(cfg.BrowserShimEnabled())
 
 	manager := session.NewManager()
-	if err := startSessionsFromConfig(cfg, manager); err != nil {
+	if err := startSessionsFromConfig(cfg, manager, session.CreateFromConfig); err != nil {
 		log.Fatalf("Failed to start sessions: %v", err)
 	}
 
@@ -79,25 +91,72 @@ func main() {
 	runServer(srv, manager, boardRelay, boardBootstrap)
 }
 
-func parseOptions() cliOptions {
+// parseOptions parses args (os.Args[1:] in production) into cliOptions.
+//
+// It builds its own FlagSet rather than using the process-global
+// flag.CommandLine: the global one can only be populated once per process, so
+// with it this function could neither be called twice nor be given arguments
+// a test chose. See DEVELOPMENT.md's testability rule.
+func parseOptions(args []string) (cliOptions, error) {
 	var opts cliOptions
-	flag.StringVar(&opts.configPath, "config", "", "Path to YAML config file")
-	flag.BoolVar(&opts.openBrowser, "open", false, "Open Chrome automatically")
-	flag.IntVar(&opts.port, "port", 0, "Override server port")
-	flag.BoolVar(&opts.showVersion, "version", false, "Print version and exit")
-	flag.Parse()
-	return opts
+	fs := flag.NewFlagSet("panemux", flag.ContinueOnError)
+	fs.StringVar(&opts.configPath, "config", "", "Path to YAML config file")
+	fs.BoolVar(&opts.openBrowser, "open", false, "Open Chrome automatically")
+	fs.IntVar(&opts.port, "port", 0, "Override server port")
+	fs.BoolVar(&opts.showVersion, "version", false, "Print version and exit")
+	if err := fs.Parse(args); err != nil {
+		return cliOptions{}, fmt.Errorf("parsing command line options: %w", err)
+	}
+	return opts, nil
 }
 
-func loadConfig(opts cliOptions) (*config.Config, error) {
+// parseExitCode maps a parseOptions failure onto a process exit code.
+//
+// -h/--help is not a usage error. Under flag.ExitOnError — which
+// flag.CommandLine uses, and which parseOptions used before it was given its
+// own FlagSet — the flag package exits 0 for help itself. flag.ContinueOnError
+// instead returns flag.ErrHelp like any other error, so without this
+// distinction `panemux --help` would print its usage and then exit 2. It is a
+// documented invocation (install.sh tells the user to run it), so a script
+// running it under `set -e` would see a failure for a command that did exactly
+// what was asked.
+//
+// Split out from main so it can be tested: main itself installs signal
+// handlers and runs for the life of the process.
+func parseExitCode(err error) int {
+	if errors.Is(err, flag.ErrHelp) {
+		// flag has already printed the usage text, and unlike a real parse
+		// error there is no message to add.
+		return 0
+	}
+	// flag has already printed both the error and the usage text; 2 is the
+	// conventional exit code for a usage error.
+	return 2
+}
+
+// configLoader is loadConfig's injection point for the two package-level
+// config entry points, so a test can drive the precedence between them (and
+// the failure branch) without reading the developer's own
+// ~/.config/panemux/config.yaml.
+type configLoader struct {
+	load          func(path string) (*config.Config, error)
+	loadOrDefault func() (*config.Config, error)
+}
+
+var defaultConfigLoader = configLoader{
+	load:          config.Load,
+	loadOrDefault: config.LoadOrDefault,
+}
+
+func loadConfig(opts cliOptions, loader configLoader) (*config.Config, error) {
 	var (
 		cfg *config.Config
 		err error
 	)
 	if opts.configPath != "" {
-		cfg, err = config.Load(opts.configPath)
+		cfg, err = loader.load(opts.configPath)
 	} else {
-		cfg, err = config.LoadOrDefault()
+		cfg, err = loader.loadOrDefault()
 	}
 	if err != nil {
 		return nil, fmt.Errorf("loading config: %w", err)
@@ -153,10 +212,20 @@ func runServer(
 	}
 }
 
-func startSessionsFromConfig(cfg *config.Config, manager *session.Manager) error {
+// createSessionFunc is the shape of session.CreateFromConfig. Taking it as an
+// argument is what lets startSessionsFromConfig be driven without spawning a
+// real PTY or dialing a real SSH host — the same injection api.Handler
+// already makes for its own createSession field.
+type createSessionFunc func(*config.PaneConfig, map[string]config.SSHConnection) (session.Session, error)
+
+// startSessionsFromConfig is deliberately best-effort: a pane that fails to
+// start is logged and skipped, and panemux still comes up, so an operator can
+// fix a bad connection from the dashboard instead of from a config file they
+// cannot see. That is why it returns nil even when every pane failed.
+func startSessionsFromConfig(cfg *config.Config, manager *session.Manager, create createSessionFunc) error {
 	panes := cfg.AllPanes()
 	for _, pane := range panes {
-		sess, err := session.CreateFromConfig(pane, cfg.SSHConnections)
+		sess, err := create(pane, cfg.SSHConnections)
 		if err != nil {
 			log.Printf("Warning: failed to start session %s (%s): %v", pane.ID, pane.Type, err)
 			continue
@@ -167,18 +236,40 @@ func startSessionsFromConfig(cfg *config.Config, manager *session.Manager) error
 	return nil
 }
 
-func openChrome(url string) {
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("open", "-a", "Google Chrome", url)
-	case "linux":
-		cmd = exec.Command("google-chrome", "--app="+url) //nolint:gosec // G204: URL is local server host/port
-	case "windows":
-		cmd = exec.Command("cmd", "/c", "start", "chrome", url)
+// browserOpenArgv returns the command that opens url in Chrome on goos, as a
+// program name and discrete arguments — never a shell string. Splitting the
+// decision out from the exec call is the humble-object shape
+// docs/quality-gateway.md's P2 asks for: every per-OS branch is testable
+// here, and what is left below is one unconditional Run.
+//
+// ok is false for an OS panemux has no opener for, in which case nothing is
+// launched rather than a guess being executed.
+func browserOpenArgv(goos, url string) (name string, args []string, ok bool) {
+	switch goos {
+	case goosDarwin:
+		return "open", []string{"-a", "Google Chrome", url}, true
+	case goosLinux:
+		return "google-chrome", []string{"--app=" + url}, true
+	case goosWindows:
+		return "cmd", []string{"/c", "start", "chrome", url}, true
 	default:
+		return "", nil, false
+	}
+}
+
+func openChrome(url string) {
+	name, args, ok := browserOpenArgv(runtime.GOOS, url)
+	if !ok {
 		return
 	}
+	// The first argument is a variable rather than a literal, which is a
+	// shape docs/security.md tracks deliberately — see its "Launching the
+	// operator's browser" section. browserOpenArgv is the only source of
+	// both values, it returns one of three compile-time literals for the
+	// name, and url is panemux's own listen address; every element travels
+	// as a discrete argv entry, never through a shell.
+	//nolint:gosec // G204: name is one of browserOpenArgv's three literals; args are discrete, never a shell
+	cmd := exec.Command(name, args...)
 	if err := cmd.Run(); err != nil {
 		log.Printf("Failed to open browser: %v", err)
 	}

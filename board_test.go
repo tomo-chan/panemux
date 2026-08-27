@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"panemux/internal/board"
 	"panemux/internal/config"
 	"panemux/internal/session"
 )
@@ -291,4 +292,301 @@ func TestAgmsgPresentOnHostLocal(t *testing.T) {
 // into a host that stays off the board for the rest of the process's life.
 func TestAgmsgPresentOnHostRemoteUncheckable(t *testing.T) {
 	assert.True(t, agmsgPresentOnHost(session.NewManager(), map[string]string{}, "remote-host", "/remote/home/demo/agmsg"))
+}
+
+// The helpers below sat outside every coverage gate until the root package
+// joined COVERAGE_PKGS (issue #180 roadmap item 2). They are the parts of
+// board.go with real branching that the existing tests reached only
+// indirectly, through setupBoard.
+
+func boolPtr(v bool) *bool { return &v }
+
+func paneConfig(id string, board config.PaneAgentBoardConfig) *config.PaneConfig {
+	return &config.PaneConfig{ID: id, Type: "local", AgentBoard: board}
+}
+
+func configWithPanes(panes ...*config.PaneConfig) *config.Config {
+	children := make([]config.LayoutChild, 0, len(panes))
+	for _, pane := range panes {
+		children = append(children, config.LayoutChild{Size: float64(100 / max(len(panes), 1)), Pane: pane})
+	}
+	return &config.Config{
+		Workspaces: config.WorkspacesConfig{
+			Active: "default",
+			Items: []config.WorkspaceConfig{{
+				ID:     "default",
+				Title:  "Default",
+				Layout: config.LayoutNode{Direction: "horizontal", Children: children},
+			}},
+		},
+	}
+}
+
+func TestCurrentPaneModes(t *testing.T) {
+	tests := []struct {
+		want  map[string]string
+		name  string
+		panes []*config.PaneConfig
+	}{
+		{
+			name:  "no panes at all",
+			panes: nil,
+			want:  map[string]string{},
+		},
+		{
+			name:  "enabled pane contributes its mode",
+			panes: []*config.PaneConfig{paneConfig("a", config.PaneAgentBoardConfig{Enabled: boolPtr(true), Mode: "auto"})},
+			want:  map[string]string{"a": "auto"},
+		},
+		{
+			name:  "explicitly disabled pane is omitted",
+			panes: []*config.PaneConfig{paneConfig("a", config.PaneAgentBoardConfig{Enabled: boolPtr(false), Mode: "auto"})},
+			want:  map[string]string{},
+		},
+		{
+			name:  "an unset Enabled pointer is not enabled",
+			panes: []*config.PaneConfig{paneConfig("a", config.PaneAgentBoardConfig{Mode: "auto"})},
+			want:  map[string]string{},
+		},
+		{
+			name:  "an enabled pane with no mode still appears, with the empty mode",
+			panes: []*config.PaneConfig{paneConfig("a", config.PaneAgentBoardConfig{Enabled: boolPtr(true)})},
+			want:  map[string]string{"a": ""},
+		},
+		{
+			name: "a mix reports only the enabled panes",
+			panes: []*config.PaneConfig{
+				paneConfig("a", config.PaneAgentBoardConfig{Enabled: boolPtr(true), Mode: "auto"}),
+				paneConfig("b", config.PaneAgentBoardConfig{Enabled: boolPtr(false), Mode: "manual"}),
+				paneConfig("c", config.PaneAgentBoardConfig{Enabled: boolPtr(true), Mode: "manual"}),
+			},
+			want: map[string]string{"a": "auto", "c": "manual"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, currentPaneModes(configWithPanes(tc.panes...)))
+		})
+	}
+}
+
+// The "ssh:" prefix is what keeps an SSH connection alias named literally
+// "local" from colliding with boardHostIDLocal — nothing in the config's own
+// connection-name validation forbids that alias, so the separation has to be
+// structural. See boardHostForPane's own comment.
+func TestBoardHostForPane(t *testing.T) {
+	tests := []struct {
+		name string
+		pane *config.PaneConfig
+		want string
+	}{
+		{"local", &config.PaneConfig{Type: "local"}, boardHostIDLocal},
+		{"tmux is still this host", &config.PaneConfig{Type: "tmux"}, boardHostIDLocal},
+		{"ssh", &config.PaneConfig{Type: "ssh", Connection: "demo"}, "ssh:demo"},
+		{"ssh_tmux", &config.PaneConfig{Type: "ssh_tmux", Connection: "demo"}, "ssh:demo"},
+		{
+			name: "an alias named \"local\" cannot collide with the local host id",
+			pane: &config.PaneConfig{Type: "ssh", Connection: boardHostIDLocal},
+			want: "ssh:local",
+		},
+		{"an unknown type falls back to this host", &config.PaneConfig{Type: "nonesuch"}, boardHostIDLocal},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, boardHostForPane(tc.pane))
+			if tc.want != boardHostIDLocal {
+				assert.NotEqual(t, boardHostIDLocal, boardHostForPane(tc.pane))
+			}
+		})
+	}
+}
+
+func TestPersistBoardCursors_WritesAFileLoadCursorFileCanReadBack(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	require.NoError(t, os.MkdirAll(filepath.Join(home, ".config", "panemux"), 0o700))
+
+	entries := []board.CursorEntry{{Host: "local", Team: "demo", Cursor: "abc"}}
+	persistBoardCursors(entries)
+
+	path, err := board.DefaultCursorFilePath()
+	require.NoError(t, err)
+	got, err := board.LoadCursorFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, entries, got)
+}
+
+// unwritableHome points HOME at a directory whose .config can never be
+// created, and returns once that is true.
+//
+// Making these saves actually fail takes more than an absent directory, which
+// is the trap an earlier version of both tests below fell into: the persist
+// helpers go through board.atomicWriteFile, whose first statement is
+// os.MkdirAll, so a missing HOME is simply created on demand and the write
+// SUCCEEDS. Those tests therefore drove the happy path while claiming to cover
+// the failure branch — tautological tests of exactly the shape this
+// repository's own red-check (docs/quality-gateway.md, D4) exists to catch,
+// and `go tool cover` showed it: both functions sat at 50%.
+//
+// A plain FILE where the directory has to go is genuinely unwritable, and
+// unlike a permission bit it cannot be bypassed by running as root: MkdirAll
+// fails with ENOTDIR for every uid. internal/config's
+// TestEnsureAuthToken_WriteFailure_NonFatal_LoopbackHost uses the same shape.
+//
+// It is one helper rather than two copies so the two tests cannot drift into
+// disagreeing about what "unwritable" means — one of them silently going green
+// again is the failure being guarded against.
+func unwritableHome(t *testing.T) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".config"), []byte("not a directory"), 0o600))
+}
+
+// A save failure is a warning, never a crash and never a startup failure: the
+// relay's cursor is an optimisation, and losing it costs a re-read, not
+// correctness.
+func TestPersistBoardCursors_UnwritableLocation_DoesNotPanic(t *testing.T) {
+	unwritableHome(t)
+
+	assert.NotPanics(t, func() {
+		persistBoardCursors([]board.CursorEntry{{Host: "local", Team: "demo", Cursor: "abc"}})
+	})
+
+	path, err := board.DefaultCursorFilePath()
+	require.NoError(t, err)
+	_, statErr := os.Stat(path)
+	assert.Error(t, statErr, "the save must actually have failed for this test to mean anything")
+}
+
+func TestPersistBootstrapState_WritesAFileLoadBootstrapStateCanReadBack(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	require.NoError(t, os.MkdirAll(filepath.Join(home, ".config", "panemux"), 0o700))
+
+	persistBootstrapState([]string{"pane-a", "pane-b"})
+
+	path, err := board.DefaultBootstrapStateFilePath()
+	require.NoError(t, err)
+	got, err := board.LoadBootstrapState(path)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"pane-a", "pane-b"}, got)
+}
+
+func TestPersistBootstrapState_UnwritableLocation_DoesNotPanic(t *testing.T) {
+	unwritableHome(t)
+
+	assert.NotPanics(t, func() { persistBootstrapState([]string{"pane-a"}) })
+
+	path, err := board.DefaultBootstrapStateFilePath()
+	require.NoError(t, err)
+	_, statErr := os.Stat(path)
+	assert.Error(t, statErr, "the save must actually have failed for this test to mean anything")
+}
+
+// installAgmsg creates the shape LocalAgmsgPresent looks for: an install
+// root carrying scripts/api.sh. version, when non-empty, is written to the
+// VERSION file agmsg's own installer maintains.
+func installAgmsg(t *testing.T, root, version string) string {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "scripts"), 0o700))
+	// LocalAgmsgPresent only stats this file, so a non-executable stub is
+	// enough — and gosec's G306 wants 0600 or less even on a fixture.
+	require.NoError(t, os.WriteFile(filepath.Join(root, "scripts", "api.sh"), []byte("#!/bin/sh\n"), 0o600))
+	if version != "" {
+		require.NoError(t, os.WriteFile(filepath.Join(root, "VERSION"), []byte(version+"\n"), 0o600))
+	}
+	return root
+}
+
+func TestNewAgmsgClientForHost_LocalWithAgmsgInstalled_ReturnsClient(t *testing.T) {
+	agmsgPath := installAgmsg(t, t.TempDir(), board.TestedAgmsgVersion)
+	cfg := &config.Config{AgentBoard: config.AgentBoardConfig{AgmsgPath: agmsgPath}}
+
+	client, ok := newAgmsgClientForHost(cfg, session.NewManager(), map[string]string{}, boardHostIDLocal)
+
+	require.True(t, ok)
+	assert.NotNil(t, client)
+}
+
+// An absent agmsg is the README's most likely first failure, and the host is
+// skipped rather than given a client that would log the same exec failure
+// every poll for the life of the process.
+func TestNewAgmsgClientForHost_LocalWithoutAgmsg_SkipsTheHost(t *testing.T) {
+	cfg := &config.Config{AgentBoard: config.AgentBoardConfig{AgmsgPath: t.TempDir()}}
+
+	client, ok := newAgmsgClientForHost(cfg, session.NewManager(), map[string]string{}, boardHostIDLocal)
+
+	assert.False(t, ok)
+	assert.Nil(t, client)
+}
+
+// A remote host with no reachable pane cannot have its agmsg_path resolved at
+// all, so it is skipped before the presence probe is even reached.
+func TestNewAgmsgClientForHost_RemoteWithNoReachablePane_SkipsTheHost(t *testing.T) {
+	cfg := &config.Config{AgentBoard: config.AgentBoardConfig{AgmsgPath: "/remote/home/demo/agmsg"}}
+
+	client, ok := newAgmsgClientForHost(cfg, session.NewManager(), map[string]string{"pane-a": "ssh:demo"}, "ssh:demo")
+
+	assert.False(t, ok)
+	assert.Nil(t, client)
+}
+
+func TestWarnOnAgmsgVersionMismatch_DoesNotPanicAcrossHostShapes(t *testing.T) {
+	matching := installAgmsg(t, filepath.Join(t.TempDir(), "matching"), board.TestedAgmsgVersion)
+	mismatched := installAgmsg(t, filepath.Join(t.TempDir(), "mismatched"), "0.0.1")
+	unversioned := installAgmsg(t, filepath.Join(t.TempDir(), "unversioned"), "")
+
+	tests := []struct {
+		paneHosts     map[string]string
+		resolvedPaths map[string]string
+		name          string
+	}{
+		{
+			name:          "a matching install warns about nothing",
+			paneHosts:     map[string]string{"pane-a": boardHostIDLocal},
+			resolvedPaths: map[string]string{boardHostIDLocal: matching},
+		},
+		{
+			name:          "a mismatched install is a warning, never a refusal",
+			paneHosts:     map[string]string{"pane-a": boardHostIDLocal},
+			resolvedPaths: map[string]string{boardHostIDLocal: mismatched},
+		},
+		{
+			name:          "an install with no VERSION file is unknown, not broken",
+			paneHosts:     map[string]string{"pane-a": boardHostIDLocal},
+			resolvedPaths: map[string]string{boardHostIDLocal: unversioned},
+		},
+		{
+			name:          "a host with no resolved path is skipped",
+			paneHosts:     map[string]string{"pane-a": boardHostIDLocal},
+			resolvedPaths: map[string]string{},
+		},
+		{
+			name:          "a remote host with no reachable executor is skipped",
+			paneHosts:     map[string]string{"pane-a": "ssh:demo"},
+			resolvedPaths: map[string]string{"ssh:demo": "/remote/home/demo/agmsg"},
+		},
+		{
+			name:          "no board-enabled pane at all",
+			paneHosts:     map[string]string{},
+			resolvedPaths: map[string]string{},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.NotPanics(t, func() {
+				warnOnAgmsgVersionMismatch(session.NewManager(), tc.paneHosts, tc.resolvedPaths)
+			})
+		})
+	}
+}
+
+// VersionMismatchWarning is the decision warnOnAgmsgVersionMismatch delegates
+// to, and unlike the logging above it has a return value to assert, so the
+// mismatch/match distinction is pinned here rather than only observed as
+// "did not panic".
+func TestVersionMismatchWarning_DistinguishesMatchFromMismatch(t *testing.T) {
+	assert.Empty(t, board.VersionMismatchWarning("local", board.TestedAgmsgVersion))
+	assert.NotEmpty(t, board.VersionMismatchWarning("local", "0.0.1"))
 }
