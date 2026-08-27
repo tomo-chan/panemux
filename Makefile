@@ -1,5 +1,5 @@
 .PHONY: all build build-frontend build-backend dev clean run install-deps install-deps-ci install-hooks \
-        test test-go test-frontend test-e2e test-agmsg-contract test-hooks \
+        test test-go test-frontend test-e2e test-agmsg-contract test-hooks test-efficacy efficacy \
         fmt fmt-go fmt-check-go \
         lint lint-go lint-go-deps lint-frontend \
         coverage coverage-go coverage-frontend \
@@ -33,7 +33,7 @@ install-hooks:
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
-test: test-go test-frontend test-hooks
+test: test-go test-frontend test-hooks test-efficacy
 
 test-go:
 	go test ./... -v -race
@@ -43,6 +43,34 @@ test-frontend:
 
 test-e2e:
 	cd frontend && npm run test:e2e
+
+# ── Efficacy: red-check (gate G4(b)) ──────────────────────────────────────────
+#
+# Asserts decision D4: a test this branch changed must FAIL when this branch's
+# implementation diff is reverted. That is the strongest possible mutation —
+# remove the implementation entirely — and it catches the two shapes the other
+# gates are blind to: a tautological test, and a test written after the fact.
+#
+# Every changed test is judged on its own, in two phases: pass at HEAD, then
+# fail against the revert. One invocation over the whole set would be a weaker
+# rule, since `go test` goes red if any single member does.
+#
+# Deliberately OUTSIDE `make check`. It needs the base branch, a scratch
+# worktree and a second test run, which is a pull-request-shaped cost rather
+# than an every-turn one — the same reasoning that keeps mutation testing (D2)
+# and the agmsg contract out of the local gate. It runs as its own PR CI job.
+#
+#   make efficacy                          # against origin/main
+#   EFFICACY_BASE=origin/develop make efficacy
+#   EFFICACY_EXEMPT=1 make efficacy        # documented escape hatch; say why in the PR
+efficacy:
+	sh scripts/efficacy.sh
+
+# The red-check's own tests. Unlike `make efficacy` these are hermetic — they
+# drive the script against throwaway git repositories — so they belong in
+# `make test` alongside everything else.
+test-efficacy:
+	sh scripts/efficacy_test.sh
 
 # The agent-side gates themselves (docs/quality-gateway.md's G1 and G2, run as
 # Claude Code hooks from .claude/). Included in `make test` because a hook that

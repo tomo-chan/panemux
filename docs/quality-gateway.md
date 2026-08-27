@@ -168,7 +168,7 @@ Ordering is meaningful: the point is to stop a defect at the cheapest gate that 
 | **G1** | Edit | Maintainability | `gofmt -s`, `tsc --noEmit`, and `go vet` on the touched packages only | Claude Code `PostToolUse` hook in `.claude/settings.json` | Present — `.claude/hooks/post-edit-check.sh` |
 | **G2** | Unit | Functional suitability, fast feedback | `make test-go`, `make test-frontend` — unchanged | Existing (`make check`, pre-push, CI) | Present |
 | **G3** | Contract | **Resistance to refactoring**, compatibility | (a) HTTP/WS integration through the real `server.New()` router; (b) exhaustiveness check on the route table (every registered route against an expected set); (c) Zod schema round-trips; (d) the agmsg contract | New `make test-contract`, folded into `make check`; (b) as an always-on Go test | Partial — (b) and (d) present; (a) present for HTTP (`internal/server/api_integration_test.go` drives every `/api` route and fails when one has no case), absent for `/ws`; (c) absent |
-| **G4** | Efficacy | **Protection against regressions** | (a) coverage — scope tracks the implementation, threshold stays at 80%; (b) **red-check**: a changed test must fail when the implementation diff is reverted; (c) mutation score over changed lines only | (a) existing `make check`; (b) and (c) a pull-request CI job, `make efficacy` | Partial — (a) present and now scoped to every decision-holding package; (b) and (c) absent |
+| **G4** | Efficacy | **Protection against regressions** | (a) coverage — scope tracks the implementation, threshold stays at 80%; (b) **red-check**: a changed test must fail when the implementation diff is reverted; (c) mutation score over changed lines only | (a) existing `make check`; (b) and (c) a pull-request CI job, `make efficacy` | Partial — (a) present and now scoped to every decision-holding package; (b) present (`make efficacy`, a pull-request-only CI job); (c) absent |
 | **G5** | Scenario | Functional suitability, interaction capability | Playwright E2E, plus a check that every test named by an `auto` row in `scenarios.md` actually exists | CI, extending `make test-e2e` | Partial (E2E only; no ledger cross-check) |
 | **G6** | Adversarial | All characteristics (design judgement) | A fresh-context review of the diff alone. The session that wrote the code does not grade it. Findings limited to correctness and stated requirements. | A review subagent in `.claude/agents/` plus human review. **Does not block** | Present — `.claude/agents/diff-reviewer.md`; still does not block |
 
@@ -183,7 +183,7 @@ up.** A rule sitting on the bottom two rungs must not be described as "enforced"
 | L1 | A Makefile target | Runnable by hand, produces pass/fail. The first rung an agent can drive itself. |
 | L2 | An agent hook | Claude Code `PostToolUse` / `Stop` hooks, in `.claude/`. Unlike `AGENTS.md`, deterministic and impossible to forget. gofmt, `go vet` and the touched packages' tests sit here as of rollout item 3. |
 | L3 | A git hook | `.githooks/pre-push`. The last local line of defence. |
-| L4 | A CI job | Unavoidable. Slow checks and checks needing an environment can only live here. |
+| L4 | A CI job | Unavoidable. Slow checks and checks needing an environment can only live here. The red-check (`efficacy.yml`) and the agmsg contract are both here. |
 | L5 | Branch protection | Blocks the merge. The agmsg contract job already depends on this rung. |
 
 ### Design decisions
@@ -211,11 +211,94 @@ rather than detecting it afterwards.
 **D4 — Verify "the test came first" after the fact (red-check).**
 The TDD rule is stuck at L0 and cannot be checked directly. The *result* can be: **a changed test
 must fail when the implementation diff is reverted.** This is the strongest possible mutation (remove
-the implementation entirely), and it should cost far less than general mutation testing — it runs
-the changed tests twice rather than once per generated mutant, though neither cost has been measured
-here — while catching both tautological tests and tests written after the fact. That combination is
+the implementation entirely), and it costs far less than general mutation testing — it runs each
+changed test twice rather than once per generated mutant — while catching both tautological tests
+and tests written after the fact. Measured once, on the branch for rollout item 2: 34 changed tests,
+both phases, about 30 seconds with a warm Go build cache. Mutation testing's cost is still
+unmeasured here, so "far less" is a claim about the shape of the work, not a measured ratio. That combination is
 why it is ordered ahead of mutation testing in the rollout; it is not a claim that nothing else
 would catch more.
+
+Implemented as `scripts/efficacy.sh` / `make efficacy`. Five details of it are decisions in their
+own right, recorded because each one was a way the gate could have reported green on exactly what it
+was built to catch — and four of them were, in the first implementation, until a review reproduced
+them:
+
+- **The verdict is per test, and it takes two runs.** Every changed test is checked on its own: it
+  must PASS at HEAD, then FAIL with the implementation reverted. Judging the whole changed set with
+  one `go test` invocation is a different, much weaker rule, because that command exits nonzero if
+  *any* selected test fails — so one honest test covers for every tautology beside it, and almost
+  every branch here changes more than one test. The HEAD phase is the other half: without it, a test
+  that was never going to run, a package that was never going to build, or a test that was already
+  failing all report as "red" for reasons that have nothing to do with the revert. `go test` also
+  exits 0 when `-run` selects nothing, so "the command did not go red" and "the tests passed" have
+  to be told apart by looking for the test's own `--- PASS`/`--- FAIL` line rather than by exit
+  status. Benchmarks are excluded at collection for the same reason: `-run` never selects them, and
+  a benchmark asserts nothing that could go red.
+- **Scope is the changed test *functions* and *cases*, not the changed files.** The script maps the
+  diff's touched line numbers onto the function ranges in the file, so editing an assertion inside
+  an existing test brings that test into scope, and appending a new test does *not* drag the
+  untouched one above it in. The frontend half does the same thing with `it(...)`/`test(...)`
+  blocks. Scope and per-test verdict are separate decisions that were once conflated: narrowing the
+  set does not stop one member masking another, and this gate needs both.
+
+  There is deliberately **no whole-file fallback**. A file the static extraction cannot map — an
+  `it.each([...])` has a template for a title, not a literal, and there are five such blocks in this
+  repository — is narrowed *after* the run instead, from the per-case source locations vitest's
+  reporter emits under `--includeTaskLocation`. Running the whole file and reading the aggregate
+  would be the last place a sibling's red could still vouch for the changed case. "Over-wide" is not
+  the safe direction here: a wider run is likelier to go red for someone else's reason, and going
+  red is what this gate reads as success.
+
+  The block *boundaries* come from the source, not from that report: vitest reports a case at the
+  line of its call, which for a multi-line `it.each([` sits several lines below where the block
+  starts, so ranges derived from the report put a block's own opening lines inside the case above
+  it. The same rule the static mapper spells out — the lines between two cases belong to the one
+  below — has to hold in both paths, and the two share a scanner so they cannot disagree.
+
+  One consequence is worth stating because it flips a verdict: a branch whose only frontend test
+  change is describe-level setup — a `beforeEach` gaining a mock the new implementation needs, with
+  no case body touched — has no case to judge, so it lands in "could not check" and fails, where it
+  previously ran the file whole and passed.
+
+  On the frontend the verdict comes from vitest's **JSON reporter**, read per case, not from
+  `-t` plus the summary line. That was a second, subtler instance of the same masking: `-t` matches
+  as an *unanchored* regex over the full `describe`-joined name, so `-t 'renders'` also selects
+  `renders empty state`, and the `Tests …` summary is an aggregate — a tautology was reported red on
+  the strength of its sibling. Anchoring does not fix it (`renders$` still matches `always
+  renders`), and this repository has five such name pairs today. Running the whole file once and
+  looking up each case's own status fixes it and is cheaper than one filtered run per case.
+- **Skipping is as important as failing.** A branch that changes no implementation (docs, tests
+  only) has nothing to revert, and a branch that changes implementation but no test has no result to
+  check — the latter warns rather than blocking, because making it a failure would fire on every
+  pure refactor. Each stack is judged only against its own revert, too: a branch that changes Go
+  code and also touches a frontend test has nothing reverted under that frontend test, and failing
+  it there would be a verdict on a mutation that never happened. Principle 4 again.
+
+  **One case in that family is deliberately left open, and it is a real false positive**: a Go test
+  in a package whose *implementation* this branch never touched — an assertion tightened next to the
+  change, a flake fixed alongside a feature — is still judged against the revert, and cannot go red.
+  Conditioning per package is not the fix: `internal/server`'s tests legitimately cover
+  `internal/api`'s implementation, so narrowing by package would blind the gate to exactly the case
+  it exists for. The answer is a **per-test marker**, `//efficacy:exempt` in the doc comment above
+  the test, because the PR-wide `efficacy-exempt` label is too blunt for it — applying the label to
+  get past one unrelated test also exempts a genuine tautology elsewhere in the same branch. The
+  marker sits in the diff a reviewer reads, one line above the test it excuses.
+- **"Could not check" is a failure, never a skip.** A missing base ref, a scratch worktree that
+  could not be created, a missing `frontend/node_modules`, or every changed test turning out to be
+  skipped or unrunnable — each of these once printed one line and exited 0. The last is the one that
+  looks most like a skip and is not: `internal/board`'s agmsg contract tests carry six `t.Skip`s
+  that fire on every runner without a real agmsg install, so a branch touching only those tests
+  would have gone green having red-checked nothing. A required check that goes green having checked nothing is the single failure mode a
+  required check exists to rule out, and it is invisible: the job is green, so nobody looks. These
+  now exit 1 with a message saying what to fix. The related trap is the scratch worktree itself:
+  `main.go` embeds `frontend/dist`, which is gitignored, so the root package cannot build there at
+  all and every root-package test "went red" with zero files reverted. The script writes a
+  placeholder into the worktree; the HEAD phase above is the backstop that would have caught it.
+- **The escape hatch is a pull-request label, not a config file.** `efficacy-exempt` is visible in
+  the same place the reviewer sees the diff. A change whose tests genuinely should not go red — a
+  pure refactor, a test-only rename — is a real category, and hiding the exemption in a tracked file
+  would make it invisible after the fact.
 
 **D5 — The author does not grade its own work.**
 A session carries the context of the approaches it tried and discarded. The Claude Code guidance
@@ -235,7 +318,7 @@ pre-push and CI. A gate that sacrifices fast feedback gets bypassed.
 | 1 | Real-router integration harness; single source of truth for the route table plus an exhaustiveness check | G3 | Phase 1 | **Landed.** The table has one definition, the exhaustiveness check pins it, and every `/api` route is now driven through `server.New()` — itself exhaustive across both command-center states, so a new route has no test until someone writes one, and a case that stops asserting a success path has to say so. The `/ws` half is still open. |
 | 2 | Widen coverage scope (threshold unchanged) | G4(a) | Phases 2 and 5 | **Landed.** `internal/portforward`, `internal/commandcenter`, `internal/boardmcp`, the root package and `frontend/src/utils/**` are now gated. Go reports 86% over the wider set (it was 88% over the narrower one — the drop is the point), frontend 95%; the threshold is unchanged at 80%. |
 | 3 | `.claude/settings.json` with G1/G2 hooks; a review subagent | G1, G6 | — | **Landed.** A `PostToolUse` hook checks the edited file, a `Stop` hook checks what the turn changed, and `.claude/agents/diff-reviewer.md` reviews a diff in a fresh context. `make test-hooks` tests the hooks themselves. |
-| 4 | red-check (`make efficacy`) in pull-request CI | G4(b) | — | Detects tautological tests mechanically. The largest single win under AI-assisted development. |
+| 4 | red-check (`make efficacy`) in pull-request CI | G4(b) | — | **Landed.** `scripts/efficacy.sh` reverts the branch's implementation diff in a scratch worktree and requires each test the branch changed — Go function or vitest case — to pass at HEAD and then go red against the revert, one at a time. Exempted by the `efficacy-exempt` label. |
 | 5 | Core-feature section in `scenarios.md`, ledger cross-check, core E2E | G0, G5 | Phases 4 and 6 | Makes the acceptance ledger real. |
 | 6 | Diff-scoped mutation testing (warn first, gate once stable) | G4(c) | merges with #164 | Measures protection against regressions directly. |
 | 7 | Performance and accessibility observation (measure only, do not gate) | — | — | First visibility into the two unprotected characteristics. |
