@@ -105,13 +105,11 @@ Example: `Config.sshConfigPath` uses `sshconfig.DefaultPath()` only when the ove
 
 ### Per-block coverage (`make coverage-blocks`)
 
-- The 80% threshold above is a *statement* percentage, and it cannot see an entire `if err != nil { ... }` body that no test ever enters: the happy path around it carries the function past 80% on its own. Issue [#164](https://github.com/tomo-chan/panemux/issues/164) found 28 such branches by hand.
-- `make coverage-blocks` re-reads the `coverage.out` that `make coverage-go` produces, sums each block's execution count across the profile's duplicate entries for it, and reports every block whose sum is zero. `make coverage-go` prints the same figure as a one-line summary.
-- Summing is not a detail. One `go test` over the gated package patterns with a shared `-coverpkg` list emits the same block once per test binary, so reading the raw profile lines one at a time reports blocks as unexecuted that other packages' tests do execute.
-- **As a gate it is scoped to the diff**: `COVERAGE_BLOCKS_BASE=origin/main make coverage-blocks` fails only when a block covering a line your branch changed never executed. CI runs it on every pull request. The repository has ~275 pre-existing unexecuted blocks, so a gate over all of them would start red — see decision D8 in [docs/quality-gateway.md](docs/quality-gateway.md).
-- A changed file in a package `COVERAGE_PKGS` excludes (`internal/session`, for one) is reported as **not measured** rather than as covered — the gate has no evidence either way about it.
-- A block that genuinely cannot be reached from a test is marked `//coverage:exempt <reason>` on its opening line or the line directly above. **The reason is required**; a bare marker exempts nothing. Branch-wide, the `coverage-blocks-exempt` label does the same thing far more bluntly — prefer the marker, which sits in the diff a reviewer is reading.
-- Like the red-check below, it is deliberately **not** part of `make check`: it needs the base branch.
+- The 80% threshold above is a *statement* percentage: it cannot see an entire `if err != nil { ... }` body that no test enters, because the happy path around it carries the function past 80%. Issue [#164](https://github.com/tomo-chan/panemux/issues/164) found 28 such branches by hand.
+- `make coverage-blocks` re-reads `make coverage-go`'s profile and lists every block the suite never entered; `make coverage-go` prints the count as a one-line summary.
+- As a gate it is **scoped to the diff** and pull-request-only — `COVERAGE_BLOCKS_BASE=origin/main make coverage-blocks` fails only on a block covering a line your branch changed. Deliberately not in `make check`: it needs the base branch. Why diff-scoped rather than repository-wide: decision D8 in [docs/quality-gateway.md](docs/quality-gateway.md).
+- A block that cannot be reached from a test is marked `//coverage:exempt <reason>` on its opening line or the line above. **The reason is required.** The `coverage-blocks-exempt` label exempts the whole branch and is the blunter tool; prefer the marker, which sits in the diff a reviewer reads.
+- A changed file in a package `COVERAGE_PKGS` excludes is reported as **not measured**, not as covered.
 
 ### Red-check (`make efficacy`)
 
