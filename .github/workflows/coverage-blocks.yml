@@ -53,6 +53,15 @@ jobs:
           # skipping when it cannot find the base ref.
           fetch-depth: 0
 
+      # The reporter's own tests, before the gate that depends on it — the
+      # ordering scenarios.yml uses for the same reason. They need only sh,
+      # git and awk, so they run ahead of the toolchain setup below. Without
+      # this step they would reach .githooks/pre-push (rung L3) and no
+      # further: ci.yml invokes the test suites directly rather than through
+      # `make test`, and its `paths:` filter does not cover `scripts/`.
+      - name: The reporter's own tests
+        run: make test-coverage-blocks
+
       - name: Set up Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
