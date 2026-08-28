@@ -122,6 +122,7 @@ Example: `Config.sshConfigPath` uses `sshconfig.DefaultPath()` only when the ove
 - Pull-request-only gate: `make efficacy` (see above)
 - `make test-hooks` uses `jq` where it parses `settings.json` or a hook payload. `jq` is **optional**: without it those checks report themselves as skipped rather than passing or failing, so `make check` — and therefore `git push` — still works. Install it to actually run them.
 - Coverage commands: `make coverage-go`, `make coverage-frontend`
+- Measurement (not a gate): `make bench` for terminal throughput, replay-buffer cost and relay polling; `make test-e2e` also records accessibility violations. Neither asserts a threshold — see [docs/quality-gateway.md](docs/quality-gateway.md)'s "First measurements".
 - Lint commands: `make lint-go`, `make lint-frontend`, `make lint`
 - Go lint includes `gofmt`, `go vet`, and `golangci-lint run ./...` using `.golangci.yml`.
 - `lint-go-deps` refreshes the pinned `golangci-lint` binary when the local version does not match `GOLANGCI_LINT_VERSION`, so local lint matches CI.

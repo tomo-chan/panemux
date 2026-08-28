@@ -214,6 +214,12 @@ Stated explicitly, because an absent row reads as an oversight and these are dec
 - **An end-to-end OAuth flow against a real remote host is manual** (I14). The forward itself, the
   scheme allowlist and the limits are all unit-tested, but a real device-code login needs a real
   provider and a second host.
+- **Performance and accessibility are measured, not verified.** `make bench` reports terminal
+  throughput, replay-buffer cost and the relay's polling cost, and `frontend/e2e/a11y.spec.ts`
+  records axe violations for the dashboard and for a modal dialog. Neither asserts a threshold: see
+  [quality-gateway.md](quality-gateway.md)'s "First measurements" for the baseline and for why a
+  gate that starts red is worse than no gate. These are therefore not scenario rows — there is no
+  expected outcome to state yet.
 
 ## Checking this ledger
 
