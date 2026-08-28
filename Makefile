@@ -1,6 +1,6 @@
 .PHONY: all build build-frontend build-backend dev clean run install-deps install-deps-ci install-hooks \
         test test-go test-frontend test-e2e test-agmsg-contract test-hooks test-efficacy efficacy \
-        test-scenarios-check check-scenarios bench \
+        test-scenarios-check check-scenarios coverage-blocks test-coverage-blocks bench \
         fmt fmt-go fmt-check-go \
         lint lint-go lint-go-deps lint-frontend \
         coverage coverage-go coverage-frontend \
@@ -34,7 +34,7 @@ install-hooks:
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
-test: test-go test-frontend test-hooks test-efficacy test-scenarios-check
+test: test-go test-frontend test-hooks test-efficacy test-scenarios-check test-coverage-blocks
 
 test-go:
 	go test ./... -v -race
@@ -115,6 +115,35 @@ efficacy:
 # `make test` alongside everything else.
 test-efficacy:
 	sh scripts/efficacy_test.sh
+
+# ── Per-block coverage (gate G4(d), issue #164) ───────────────────────────────
+#
+# The statement percentage below cannot see a whole `if err != nil { ... }`
+# body that no test ever enters: the happy path around it carries the function
+# past 80% on its own. Issue #164 found 28 such branches by hand. This reads
+# the same coverage.out and reports every block whose execution count, SUMMED
+# across the profile's duplicate entries for it, is zero.
+#
+# Two shapes, and the difference matters:
+#
+#   make coverage-blocks                                  # report, exits 0
+#   COVERAGE_BLOCKS_BASE=origin/main make coverage-blocks # gate, exits 1 on a finding
+#
+# The gate speaks only about blocks covering a line the branch changed. The
+# repository has 275 unexecuted blocks today, so a gate over all of them would
+# start red — and docs/quality-gateway.md principle 4 is that a gate which
+# starts red gets routed around, taking the working gates with it. Diff-scoped,
+# it starts green and stays cheap. Same reasoning as decision D2.
+#
+# Outside `make check` for the reason `make efficacy` is: it needs the base
+# branch. It runs as its own pull-request CI job.
+coverage-blocks: coverage-go
+	sh scripts/coverage_blocks.sh
+
+# The reporter's own tests, hermetic like the red-check's: fixture profiles and
+# throwaway git repositories, no `go test` run needed.
+test-coverage-blocks:
+	sh scripts/coverage_blocks_test.sh
 
 # The agent-side gates themselves (docs/quality-gateway.md's G1 and G2, run as
 # Claude Code hooks from .claude/). Included in `make test` because a hook that
@@ -201,6 +230,7 @@ coverage-go: build-frontend
 	@pct=$$(go tool cover -func=coverage.out | grep "^total:" | awk '{gsub(/%/,""); print $$3}'); \
 	  printf "Go coverage (gated packages): %s%%\n" "$$pct"; \
 	  awk -v p="$$pct" 'BEGIN { if (p+0 < 80) { print "FAIL: coverage "p"% is below 80%"; exit 1 } }'
+	@sh scripts/coverage_blocks.sh --summary
 
 coverage-frontend:
 	cd frontend && npm run coverage
