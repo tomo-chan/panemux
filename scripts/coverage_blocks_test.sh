@@ -19,6 +19,15 @@
 
 set -u
 
+# The two variables DEVELOPMENT.md tells developers to set are exactly the two
+# that would silently rewrite what this suite is testing — a base ref makes
+# every report case run the gate instead, and the branch-wide exemption makes
+# every gate case pass. `make check` runs this, so an exported variable in a
+# developer's shell must not turn into ten unrelated-looking failures.
+# scripts/efficacy_test.sh solves the same problem by passing `EFFICACY_BASE=`
+# on every invocation; unsetting once is the same rule, stated once.
+unset COVERAGE_BLOCKS_BASE COVERAGE_BLOCKS_EXEMPT
+
 scripts_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 checker="$scripts_dir/coverage_blocks.sh"
 
@@ -32,6 +41,26 @@ fail() {
 	return 0
 }
 pass() { echo "ok   $1"; }
+
+# rewrite <file> <old> <new> — replace a fixed string, without `sed -i`.
+# `sed -i` with no suffix is a GNU extension; BSD/macOS sed reads the next
+# argument as the backup suffix and then fails. macOS is a supported developer
+# platform (.goreleaser.yaml builds darwin) and this suite runs inside
+# `make check`, so it has to work there too. Lifted from
+# scripts/efficacy_test.sh, which carries the same helper for the same reason.
+rewrite() {
+	rw_file=$1
+	rw_old=$2
+	rw_new=$3
+	OLD=$rw_old NEW=$rw_new awk '
+		BEGIN { old = ENVIRON["OLD"]; new = ENVIRON["NEW"] }
+		{
+			p = index($0, old)
+			if (p > 0) $0 = substr($0, 1, p - 1) new substr($0, p + length(old))
+			print
+		}
+	' "$rw_file" > "$rw_file.tmp" && mv "$rw_file.tmp" "$rw_file"
+}
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
@@ -123,6 +152,29 @@ expect_no_output() {
 	esac
 }
 
+# write_pkg <repo> — a source file whose line numbers match the fixtures below.
+write_pkg() {
+	cat > "$1/pkg/a.go" << 'EOF'
+package pkg
+
+import "errors"
+
+func Do(fail bool) error {
+	if fail {
+		return errors.New("boom")
+	}
+	return nil
+}
+
+func Other(fail bool) error {
+	if fail {
+		return errors.New("boom")
+	}
+	return nil
+}
+EOF
+}
+
 # ── Report mode ───────────────────────────────────────────────────────────────
 
 repo=$(new_repo)
@@ -186,6 +238,30 @@ expect_status 0 "--summary succeeds" "$repo" --summary
 expect_output "coverage-blocks:" "--summary prints a one-line summary"
 expect_no_output "pkg/a.go:14" "--summary does not list individual blocks"
 
+# A base ref in the environment must not turn --summary into the gate. The
+# shipped CI job sets COVERAGE_BLOCKS_BASE at step level and runs
+# `make coverage-blocks`, whose prerequisite `coverage-go` ends with
+# `--summary`: with the base winning, that line runs the gate a second time,
+# and on a branch with a finding it aborts coverage-go, so the failure is
+# reported against the coverage-percentage target instead of this one.
+repo=$(new_repo)
+write_pkg "$repo"
+cat > "$repo/coverage.out" << 'EOF'
+mode: set
+example/pkg/a.go:6.11,8.3 1 0
+EOF
+(cd "$repo" && git add pkg/a.go && git commit -qm change)
+checks=$((checks + 1))
+out=$(cd "$repo" && COVERAGE_BLOCKS_BASE=main sh "$checker" --summary 2>&1)
+status=$?
+if [ "$status" -eq 0 ]; then
+	pass "--summary stays a summary when a base ref is in the environment"
+else
+	fail "--summary stays a summary when a base ref is in the environment: got exit $status" "$out"
+fi
+expect_output "1 of 1 blocks never executed" "--summary with a base ref prints the summary, not the gate"
+expect_no_output "changed" "--summary with a base ref does not run the gate"
+
 # ── Could not check ───────────────────────────────────────────────────────────
 #
 # Principle 4 / decision D4's "could not check is a failure, never a skip": a
@@ -201,29 +277,6 @@ printf 'mode: set\n' > "$repo/coverage.out"
 expect_status 1 "a profile with no blocks at all fails" "$repo"
 
 # ── Gate mode ─────────────────────────────────────────────────────────────────
-
-# write_pkg <repo> — a source file whose line numbers match the fixtures below.
-write_pkg() {
-	cat > "$1/pkg/a.go" << 'EOF'
-package pkg
-
-import "errors"
-
-func Do(fail bool) error {
-	if fail {
-		return errors.New("boom")
-	}
-	return nil
-}
-
-func Other(fail bool) error {
-	if fail {
-		return errors.New("boom")
-	}
-	return nil
-}
-EOF
-}
 
 # A block that never executed, on a line this branch changed.
 repo=$(new_repo)
@@ -269,8 +322,8 @@ cat > "$repo/coverage.out" << 'EOF'
 mode: set
 example/pkg/a.go:5.28,9.12 4 0
 EOF
-(cd "$repo" && sed -i 's/return errors.New("boom")/return errors.New("bang")/' pkg/a.go &&
-	git add pkg/a.go && git commit -qm tweak)
+rewrite "$repo/pkg/a.go" 'errors.New("boom")' 'errors.New("bang")'
+(cd "$repo" && git add pkg/a.go && git commit -qm tweak)
 expect_status 1 "a changed line inside an unexecuted block fails the gate" "$repo" --base main
 
 # Test files are not implementation: changing one is not a reason to demand
@@ -285,6 +338,33 @@ EOF
 (cd "$repo" && printf 'package pkg\n' > pkg/a_test.go && git add pkg/a_test.go && git commit -qm test-only)
 expect_status 0 "a branch that changes only test files has nothing to check" "$repo" --base main
 expect_output "nothing to check" "a test-only branch is told apart from a clean gate run"
+
+# COVERAGE_PKGS deliberately excludes packages (internal/session's real PTY /
+# SSH / tmux transports among them), so a changed file can be absent from the
+# profile entirely. Reporting that as "every block was executed" is a claim the
+# tool has no basis for — the gate measured nothing about that file.
+repo=$(new_repo)
+mkdir -p "$repo/unmeasured"
+cat > "$repo/unmeasured/a.go" << 'EOF'
+package unmeasured
+
+import "errors"
+
+func Do(fail bool) error {
+	if fail {
+		return errors.New("boom")
+	}
+	return nil
+}
+EOF
+cat > "$repo/coverage.out" << 'EOF'
+mode: set
+example/pkg/a.go:10.20,12.3 2 1
+EOF
+(cd "$repo" && git add unmeasured/a.go && git commit -qm change)
+expect_status 0 "a changed file outside the profile does not fail the gate" "$repo" --base main
+expect_output "unmeasured/a.go" "the gate names the changed file it could not measure"
+expect_no_output "was executed" "the gate does not claim an unmeasured file was covered"
 
 # ── The escape hatch ──────────────────────────────────────────────────────────
 

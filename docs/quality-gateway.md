@@ -347,6 +347,12 @@ false-positive risk is a branch that touches one of the flapping blocks in `boar
 is what `//coverage:exempt <reason>` is for. That marker requires a reason for the reason the
 Makefile's exclusion list does: an exemption nobody has to justify is where gaps go to be forgotten.
 
+One thing the gate refuses to say is that an excluded package is fine: a changed file in a package
+`COVERAGE_PKGS` does not cover is reported as *not measured*, never as covered. Those are different
+answers and only one is evidence — the same distinction D4's "could not check is a failure, never a
+skip" draws, applied where failing would instead make the gate start red for
+`internal/session` work.
+
 What this deliberately does not do is speak about that backlog. It is real, it is listed
 by `make coverage-blocks`, and closing them is ordinary work — but a gate is the wrong instrument
 for a backlog.

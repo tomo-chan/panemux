@@ -46,6 +46,13 @@
 # about code nobody touched, and it needs no second exclusion list to drift out
 # of date. Decision D2 scopes mutation testing to the diff for the same reason.
 #
+# COVERAGE_PKGS excludes whole packages by design, so a changed file can be
+# absent from the profile entirely. The gate says so rather than reporting it as
+# covered: "not measured" and "measured and executed" are different answers, and
+# only one of them is evidence. The unit there is the package directory, not the
+# file — a file holding only types or constants contributes no blocks and is not
+# a gap.
+#
 # Escape hatches, both narrow before they are broad:
 #   //coverage:exempt <reason>   on the block's opening line, or the line
 #                               directly above it. A reason is required — a
@@ -177,12 +184,20 @@ headline="coverage-blocks: $zero_blocks of $total_blocks blocks never executed (
 
 # ── Report modes ──────────────────────────────────────────────────────────────
 
-if [ -z "$base" ]; then
-	if [ "$summary_only" -eq 1 ]; then
-		echo "$headline"
-		exit 0
-	fi
+# --summary wins over a base ref, and the ordering is load-bearing rather than
+# stylistic. `make coverage-go` ends with this flag, `make coverage-blocks`
+# depends on coverage-go, and the CI job sets COVERAGE_BLOCKS_BASE for the whole
+# step — so with the base winning, coverage-go's last line would run the gate,
+# a finding would abort coverage-go, and the failure would be reported against
+# the coverage-percentage target instead of this one. It would also drag the
+# gate inside `make check` for anyone who exported the variable, which
+# DEVELOPMENT.md says it is deliberately not part of.
+if [ "$summary_only" -eq 1 ]; then
+	echo "$headline"
+	exit 0
+fi
 
+if [ -z "$base" ]; then
 	echo "$headline"
 	if [ "$zero_blocks" -gt 0 ]; then
 		echo
@@ -212,6 +227,32 @@ if ! git rev-parse --verify --quiet "$base" > /dev/null 2>&1; then
 fi
 
 merge_base=$(git merge-base "$base" HEAD)
+
+# The directories the profile actually measured. COVERAGE_PKGS excludes whole
+# packages by design — internal/session's real PTY / SSH / tmux transports among
+# them — so a changed file can be absent from the profile entirely, and saying
+# "every block was executed" about it is a claim this tool has no basis for.
+#
+# The unit is the DIRECTORY, not the file, and that distinction is what keeps
+# this from being noise: a changed file holding only types, constants or an
+# interface legitimately contributes no blocks, and its package is measured all
+# the same. A package with no entries at all is the real case — nothing about it
+# was measured.
+awk -v module="$module" '
+	NR == 1 && /^mode:/ { next }
+	NF != 3 { next }
+	{
+		pos = match($1, /:[0-9]+\.[0-9]+,[0-9]+\.[0-9]+$/)
+		if (pos == 0) next
+		file = substr($1, 1, pos - 1)
+		if (module != "" && substr(file, 1, length(module) + 1) == module "/") {
+			file = substr(file, length(module) + 2)
+		}
+		dir = file
+		if (!sub("/[^/]*$", "", dir)) dir = "."
+		print dir
+	}
+' "$profile" | sort -u > "$tmp/measured_dirs"
 
 # Implementation files only. A branch that changes a test file has not created
 # an obligation for some block elsewhere to be covered, and test files never
@@ -248,9 +289,18 @@ touched_lines() {
 
 : > "$tmp/findings"
 : > "$tmp/exempt"
+: > "$tmp/unmeasured"
+: > "$tmp/measured_changed"
 bare_marker=0
 
 for f in $changed; do
+	dir=$(dirname "$f")
+	if ! grep -qx -- "$dir" "$tmp/measured_dirs"; then
+		printf '%s\n' "$f" >> "$tmp/unmeasured"
+		continue
+	fi
+	printf '%s\n' "$f" >> "$tmp/measured_changed"
+
 	awk -F"$tab" -v want="$f" '$1 == want' "$tmp/zero" > "$tmp/blocks" || true
 	[ -s "$tmp/blocks" ] || continue
 
@@ -270,8 +320,23 @@ for f in $changed; do
 	' "$tmp/touched" "$tmp/blocks" >> "$tmp/findings"
 done
 
+unmeasured_note() {
+	[ -s "$tmp/unmeasured" ] || return 0
+	echo
+	echo "  Not measured — these changed files are in packages the coverage profile"
+	echo "  does not cover, so this gate says nothing about them:"
+	sed 's/^/    /' "$tmp/unmeasured"
+	echo
+	echo "  What is excluded, and why, is recorded next to COVERAGE_PKGS in the Makefile."
+}
+
 if [ ! -s "$tmp/findings" ]; then
-	echo "coverage-blocks: nothing to report — every block on a line this branch changed was executed."
+	if [ -s "$tmp/measured_changed" ]; then
+		echo "coverage-blocks: nothing to report — every measured block on a line this branch changed was executed."
+	else
+		echo "coverage-blocks: nothing measured — no changed file is in a package the coverage profile covers."
+	fi
+	unmeasured_note
 	exit 0
 fi
 
@@ -316,11 +381,13 @@ if [ "${COVERAGE_BLOCKS_EXEMPT:-0}" = "1" ]; then
 fi
 
 if [ "$kept_count" -eq 0 ]; then
-	echo "coverage-blocks: nothing to report — every block on a line this branch changed was executed$exempt_note."
+	echo "coverage-blocks: nothing to report — every measured block on a line this branch changed was executed$exempt_note."
+	unmeasured_note
 	exit 0
 fi
 
 echo "coverage-blocks: $kept_count block(s) this branch changed never executed$exempt_note."
+unmeasured_note
 echo
 awk -F"$tab" '{ printf "  %s:%s-%s  %s stmt(s)\n", $1, $2, $3, $4 }' "$tmp/kept"
 echo
