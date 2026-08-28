@@ -130,7 +130,7 @@ test-efficacy:
 #   COVERAGE_BLOCKS_BASE=origin/main make coverage-blocks # gate, exits 1 on a finding
 #
 # The gate speaks only about blocks covering a line the branch changed. The
-# repository has 275 unexecuted blocks today, so a gate over all of them would
+# repository has ~275 unexecuted blocks today, so a gate over all of them would
 # start red — and docs/quality-gateway.md principle 4 is that a gate which
 # starts red gets routed around, taking the working gates with it. Diff-scoped,
 # it starts green and stays cheap. Same reasoning as decision D2.

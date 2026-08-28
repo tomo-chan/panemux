@@ -103,6 +103,15 @@ Example: `Config.sshConfigPath` uses `sshconfig.DefaultPath()` only when the ove
 - `make coverage-go` builds the frontend first: the root package is gated and `main.go` embeds `frontend/dist`.
 - What is excluded, and why, is written in the `Makefile` next to `COVERAGE_PKGS` — `internal/session`'s real PTY / SSH / tmux transports, and the process-lifetime entry points (`main`, `runServer`, `bootstrapWatcher.Run`). Do not add an exclusion without a reason recorded there.
 
+### Per-block coverage (`make coverage-blocks`)
+
+- The 80% threshold above is a *statement* percentage, and it cannot see an entire `if err != nil { ... }` body that no test ever enters: the happy path around it carries the function past 80% on its own. Issue [#164](https://github.com/tomo-chan/panemux/issues/164) found 28 such branches by hand.
+- `make coverage-blocks` re-reads the `coverage.out` that `make coverage-go` produces, sums each block's execution count across the profile's duplicate entries for it, and reports every block whose sum is zero. `make coverage-go` prints the same figure as a one-line summary.
+- Summing is not a detail. One `go test` over the gated package patterns with a shared `-coverpkg` list emits the same block once per test binary, so reading the raw profile lines one at a time reports blocks as unexecuted that other packages' tests do execute.
+- **As a gate it is scoped to the diff**: `COVERAGE_BLOCKS_BASE=origin/main make coverage-blocks` fails only when a block covering a line your branch changed never executed. CI runs it on every pull request. The repository has ~275 pre-existing unexecuted blocks, so a gate over all of them would start red — see decision D8 in [docs/quality-gateway.md](docs/quality-gateway.md).
+- A block that genuinely cannot be reached from a test is marked `//coverage:exempt <reason>` on its opening line or the line directly above. **The reason is required**; a bare marker exempts nothing. Branch-wide, the `coverage-blocks-exempt` label does the same thing far more bluntly — prefer the marker, which sits in the diff a reviewer is reading.
+- Like the red-check below, it is deliberately **not** part of `make check`: it needs the base branch.
+
 ### Red-check (`make efficacy`)
 
 - A test you change must **fail** when your implementation diff is reverted. That is the machine-checkable half of the TDD rule above: the order lines were written in cannot be recovered after the fact, but the result can.
@@ -117,11 +126,11 @@ Example: `Config.sshConfigPath` uses `sshconfig.DefaultPath()` only when the ove
 - `make check` must pass before `make build`.
 - `make check` must pass before reporting implementation complete.
 - There are no exceptions for frontend-only, docs-adjacent, or "small" code changes.
-- Test commands: `make test-go`, `make test-frontend`, `make test-e2e`, `make test`, `make test-hooks`, `make test-efficacy`, `make test-scenarios-check`
+- Test commands: `make test-go`, `make test-frontend`, `make test-e2e`, `make test`, `make test-hooks`, `make test-efficacy`, `make test-scenarios-check`, `make test-coverage-blocks`
 - Ledger command: `make check-scenarios`
-- Pull-request-only gate: `make efficacy` (see above)
+- Pull-request-only gates: `make efficacy` and `COVERAGE_BLOCKS_BASE=origin/main make coverage-blocks` (see above)
 - `make test-hooks` uses `jq` where it parses `settings.json` or a hook payload. `jq` is **optional**: without it those checks report themselves as skipped rather than passing or failing, so `make check` — and therefore `git push` — still works. Install it to actually run them.
-- Coverage commands: `make coverage-go`, `make coverage-frontend`
+- Coverage commands: `make coverage-go`, `make coverage-frontend`, `make coverage-blocks`
 - Measurement (not a gate): `make bench` for terminal throughput, replay-buffer cost and relay polling; `make test-e2e` also records accessibility violations. Neither asserts a threshold — see [docs/quality-gateway.md](docs/quality-gateway.md)'s "First measurements".
 - Lint commands: `make lint-go`, `make lint-frontend`, `make lint`
 - Go lint includes `gofmt`, `go vet`, and `golangci-lint run ./...` using `.golangci.yml`.

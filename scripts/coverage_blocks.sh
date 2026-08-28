@@ -36,7 +36,9 @@
 #
 # THE GATE IS SCOPED TO THE DIFF, and that is a decision taken from the
 # measurement rather than from taste. At the commit this was written on, the
-# repository has 278 unexecuted blocks out of 1801 (378 statements of 2772).
+# repository has ~275 unexecuted blocks out of 1801 (~375 statements of 2772);
+# the figure moves by three between runs of the identical command, which is a
+# finding in its own right — see decision D8.
 # A gate that failed on all of them would start red, and docs/quality-gateway.md
 # principle 4 says what happens to a gate that starts red: it gets routed
 # around, taking the gates that do work with it. So the gate only speaks about
@@ -249,7 +251,6 @@ touched_lines() {
 bare_marker=0
 
 for f in $changed; do
-	grep -c "^$f$tab" "$tmp/zero" > /dev/null 2>&1 || true
 	awk -F"$tab" -v want="$f" '$1 == want' "$tmp/zero" > "$tmp/blocks" || true
 	[ -s "$tmp/blocks" ] || continue
 

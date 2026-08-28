@@ -1,0 +1,85 @@
+name: coverage-blocks
+
+# Per-block coverage: gate G4(d) in docs/quality-gateway.md, from issue #164.
+#
+# `make coverage-go`'s 80% statement threshold cannot see an entire
+# `if err != nil { ... }` body that no test ever enters — the happy path around
+# it carries the function past the threshold on its own. #164 found 28 such
+# branches by hand. This job reads the same coverage.out, sums each block's
+# execution count across the profile's duplicate entries for it, and fails when
+# a block covering a line THIS BRANCH changed never executed.
+#
+# Scoped to the diff, and that is a decision taken from the measurement: the
+# repository has ~275 unexecuted blocks today, so a gate over all of them would
+# start red — and principle 4 in docs/quality-gateway.md is that a gate which
+# starts red gets routed around, taking the gates that do work with it. A
+# branch that changes no Go implementation exits 0 in a second or two.
+#
+# Pull requests only, and deliberately not part of `make check`: it needs the
+# base branch, which the local gate has no business fetching. Same reasoning as
+# efficacy.yml, whose shape this follows — including the absence of a `paths:`
+# filter, since a path-filtered workflow reports no status at all on the pull
+# requests it skips, and a required check that never reports blocks every one
+# of them.
+#
+# `labeled`/`unlabeled` are in the type list because the `coverage-blocks-exempt`
+# escape hatch is read from the event payload. Without them, applying the label
+# does not re-run this workflow, and re-running the failed job replays the
+# STORED payload — in which the label is still absent — so the exemption could
+# never be applied to the pull request it was written for.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  coverage-blocks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          # The gate is scoped to the diff against the base branch, so the
+          # merge-base has to be in the clone. A shallow default checkout has
+          # no history to diff against, and the script fails rather than
+          # skipping when it cannot find the base ref.
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version-file: go.mod
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: make install-deps-ci
+
+      # `make coverage-blocks` depends on `coverage-go`, which builds the
+      # frontend first: the root package is gated and main.go embeds
+      # frontend/dist.
+      #
+      # The escape hatch is the `coverage-blocks-exempt` label, visible on the
+      # pull request itself rather than buried in a tracked file — for a branch
+      # whose new blocks genuinely cannot be reached from a test. The narrower
+      # hatch is `//coverage:exempt <reason>` on the block itself, which is
+      # preferred: it exempts one block, in the diff a reviewer is reading,
+      # instead of the whole branch.
+      - name: Per-block coverage (blocks on changed lines must execute)
+        env:
+          COVERAGE_BLOCKS_BASE: origin/${{ github.event.pull_request.base.ref }}
+          COVERAGE_BLOCKS_EXEMPT: ${{ contains(github.event.pull_request.labels.*.name, 'coverage-blocks-exempt') && '1' || '0' }}
+        run: make coverage-blocks

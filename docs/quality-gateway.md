@@ -168,7 +168,7 @@ Ordering is meaningful: the point is to stop a defect at the cheapest gate that 
 | **G1** | Edit | Maintainability | `gofmt -s`, `tsc --noEmit`, and `go vet` on the touched packages only | Claude Code `PostToolUse` hook in `.claude/settings.json` | Present — `.claude/hooks/post-edit-check.sh` |
 | **G2** | Unit | Functional suitability, fast feedback | `make test-go`, `make test-frontend` — unchanged | Existing (`make check`, pre-push, CI) | Present |
 | **G3** | Contract | **Resistance to refactoring**, compatibility | (a) HTTP/WS integration through the real `server.New()` router; (b) exhaustiveness check on the route table (every registered route against an expected set); (c) Zod schema round-trips; (d) the agmsg contract | New `make test-contract`, folded into `make check`; (b) as an always-on Go test | Partial — (b) and (d) present; (a) present for HTTP (`internal/server/api_integration_test.go` drives every `/api` route and fails when one has no case), absent for `/ws`; (c) absent |
-| **G4** | Efficacy | **Protection against regressions** | (a) coverage — scope tracks the implementation, threshold stays at 80%; (b) **red-check**: a changed test must fail when the implementation diff is reverted; (c) mutation score over changed lines only | (a) existing `make check`; (b) and (c) a pull-request CI job, `make efficacy` | Partial — (a) present and now scoped to every decision-holding package; (b) present (`make efficacy`, a pull-request-only CI job); (c) absent |
+| **G4** | Efficacy | **Protection against regressions** | (a) coverage — scope tracks the implementation, threshold stays at 80%; (b) **red-check**: a changed test must fail when the implementation diff is reverted; (c) mutation score over changed lines only; (d) **per-block coverage**: no block covering a changed line may be one the suite never entered | (a) existing `make check`; (b), (c) and (d) pull-request CI jobs, `make efficacy` and `make coverage-blocks` | Partial — (a) present and now scoped to every decision-holding package; (b) present (`make efficacy`, a pull-request-only CI job); (d) present (`make coverage-blocks`, likewise); (c) absent |
 | **G5** | Scenario | Functional suitability, interaction capability | Playwright E2E, plus a check that every test named by an `auto` row in `scenarios.md` actually exists | CI, extending `make test-e2e` | Present — E2E plus `make check-scenarios`, which resolves every `auto` row |
 | **G6** | Adversarial | All characteristics (design judgement) | A fresh-context review of the diff alone. The session that wrote the code does not grade it. Findings limited to correctness and stated requirements. | A review subagent in `.claude/agents/` plus human review. **Does not block** | Present — `.claude/agents/diff-reviewer.md`; still does not block |
 
@@ -324,6 +324,33 @@ Claude Code's `Stop` hook can deterministically block a turn from ending, but pu
 `make check` there would run E2E on every turn. Put G1 and G2 (seconds) there and leave G3 onward to
 pre-push and CI. A gate that sacrifices fast feedback gets bypassed.
 
+**D8 — Per-block coverage gates the diff, not a baseline.**
+The obvious shape for #164's technique is "no block in the gated packages may have a zero count",
+and the measurement rules it out: **275 to 278 blocks of 1801 (375 to 378 statements of 2772) have
+never executed** at `d0e88ee`, concentrated in `internal/api/handler.go` (70), `main.go` (31) and
+`internal/config/config.go` (24). A gate that starts ~275 red is principle 4's failure mode exactly.
+The range is not sloppiness — it is the second finding, below.
+
+The next-most-obvious shape is a checked-in baseline of per-file ceilings that may fall but not rise
+— the same treatment the accessibility counts above are headed for. That is rejected here on
+evidence too: **the zero-block set is not deterministic.** Six runs of the identical
+`make coverage-go` on one machine produced 275 or 278, the difference being three blocks in
+`internal/ws/board_command.go` whose execution depends on goroutine timing. A ceiling recorded from
+a lucky run fails a later honest one, and a ratchet that treats a *drop* as "update the baseline"
+fails on the same noise in the other direction. Both directions are false positives, and this
+repository has one rule about those.
+
+Scoping to the diff avoids all of it. The gate starts green on a repository with ~275 existing gaps,
+it needs no second exclusion list to drift out of date beside `COVERAGE_PKGS`, and it asks a question
+the author can actually answer: *you wrote this line; does anything execute it?* The residual
+false-positive risk is a branch that touches one of the flapping blocks in `board_command.go`, which
+is what `//coverage:exempt <reason>` is for. That marker requires a reason for the reason the
+Makefile's exclusion list does: an exemption nobody has to justify is where gaps go to be forgotten.
+
+What this deliberately does not do is speak about that backlog. It is real, it is listed
+by `make coverage-blocks`, and closing them is ordinary work — but a gate is the wrong instrument
+for a backlog.
+
 ### Rollout order
 
 | Order | Work | Gate | #178 phase | Effect |
@@ -335,15 +362,41 @@ pre-push and CI. A gate that sacrifices fast feedback gets bypassed.
 | 5 | Core-feature section in `scenarios.md`, ledger cross-check, core E2E | G0, G5 | Phases 4 and 6 | **Landed.** Sections H (core multiplexer) and I (opening URLs from a pane, #177's missing rows) added; `make check-scenarios` resolves every `auto` row; `frontend/e2e/core-multiplexer.spec.ts` covers split, resize, layout restore and workspace CRUD. |
 | 6 | Diff-scoped mutation testing (warn first, gate once stable) | G4(c) | merges with #164 | Measures protection against regressions directly. |
 | 7 | Performance and accessibility observation (measure only, do not gate) | — | — | **Landed.** `make bench` measures terminal throughput, replay-buffer cost and the relay's polling cost; `a11y.spec.ts` records axe violations. Both report; neither asserts. |
+| 8 | Per-block coverage on changed lines | G4(d) | #164 | **Landed.** `scripts/coverage_blocks.sh` sums each block's count across the profile's duplicate entries and fails when a block covering a line the branch changed never executed. This is the prerequisite the #164 section below names for item 6. |
 
 ### Relationship to issue #164
 
-[#164](https://github.com/tomo-chan/panemux/issues/164) proposes parsing the coverage profile per
+[#164](https://github.com/tomo-chan/panemux/issues/164) proposed parsing the coverage profile per
 block and failing on blocks whose summed execution count is zero. That shares G4(c)'s goal with a
 different mechanism. Per-block coverage is cheap and exhaustive but still only reports *whether a
 block executed*; mutation reports *whether the tests would notice it changing*, at a much higher
 cost. The sensible order is therefore to land per-block coverage first and add mutation only for the
 tautologies that survive it — which is why order 6 sits last.
+
+**Per-block coverage has now landed** as `scripts/coverage_blocks.sh` / `make coverage-blocks`
+(rollout row 8), with two changes from what #164 sketched, both taken from measurement:
+
+- The gate is **scoped to the diff** rather than run over the whole gated package set, for the
+  reasons in D8 above.
+- There is no separate coverage run. It re-reads the `coverage.out` that `make coverage-go` already
+  writes, so the extra cost on a pull request is a text parse, not a second test suite.
+
+What #164 got exactly right is the correctness argument, and it is worth restating because it is the
+one part of this that is not obvious: **the counts must be summed per unique block.** `make
+coverage-go` runs one `go test` over nine package patterns with a shared `-coverpkg` list, so every
+gated package is linked into every test binary and emits its own entry for the same block —
+`internal/api/handler.go:1114.16,1123.3` appears nine times with nine different counts. Reading the
+raw lines one at a time reports a block as unexecuted whenever *any* package's tests failed to reach
+it, which on this repository is most of them. `scripts/coverage_blocks_test.sh` pins both halves of
+that: duplicates summing to nonzero are not flagged, and duplicates summing to zero are one finding
+rather than three.
+
+Neither of the alternatives #164 surveyed changed status while this was built. Go still has no
+native branch coverage ([golang/go#70306](https://github.com/golang/go/issues/70306) remains an
+undecided proposal), and gobco still instruments a package at a time with no documented `-coverpkg`
+or `-race` story. This is not C1 or MC/DC coverage and does not claim to be: it does not ask whether
+each condition in a compound `if` was taken both ways, only whether the block ever ran — which is
+the class of gap #164 actually found.
 
 ## First measurements
 
