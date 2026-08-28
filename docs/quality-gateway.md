@@ -368,7 +368,7 @@ for a backlog.
 | 5 | Core-feature section in `scenarios.md`, ledger cross-check, core E2E | G0, G5 | Phases 4 and 6 | **Landed.** Sections H (core multiplexer) and I (opening URLs from a pane, #177's missing rows) added; `make check-scenarios` resolves every `auto` row; `frontend/e2e/core-multiplexer.spec.ts` covers split, resize, layout restore and workspace CRUD. |
 | 6 | Diff-scoped mutation testing (warn first, gate once stable) | G4(c) | merges with #164 | Measures protection against regressions directly. |
 | 7 | Performance and accessibility observation (measure only, do not gate) | — | — | **Landed.** `make bench` measures terminal throughput, replay-buffer cost and the relay's polling cost; `a11y.spec.ts` records axe violations. Both report; neither asserts. |
-| 8 | Per-block coverage on changed lines | G4(d) | #164 | **Landed.** `scripts/coverage_blocks.sh` sums each block's count across the profile's duplicate entries and fails when a block covering a line the branch changed never executed. This is the prerequisite the #164 section below names for item 6. |
+| 8 | Per-block coverage on changed lines — [#164](https://github.com/tomo-chan/panemux/issues/164), not one of [#180](https://github.com/tomo-chan/panemux/issues/180)'s seven items | G4(d) | — | **Landed.** `scripts/coverage_blocks.sh` sums each block's count across the profile's duplicate entries and fails when a block covering a line the branch changed never executed. Rows 1–7 are #180's roadmap; this row is the separate issue that row 6 waits on. |
 
 ### Relationship to issue #164
 
@@ -396,6 +396,14 @@ raw lines one at a time reports a block as unexecuted whenever *any* package's t
 it, which on this repository is most of them. `scripts/coverage_blocks_test.sh` pins both halves of
 that: duplicates summing to nonzero are not flagged, and duplicates summing to zero are one finding
 rather than three.
+
+**What this does not do is finish item 6.** #180 tracks that item's first stage as "implement #164's
+per-block coverage", which this is, and its second as *measuring* whether tautologies still get
+through once both this gate and the red-check are in place — a measurement, not a code deliverable,
+and one that has to be taken after `make efficacy` landed rather than before. Item 6's own completion
+condition is unchanged and still open: protection against regressions measured by whether the tests
+*would notice a change*, not by whether a block *ran*. This gate reports the second of those. The
+next action it unblocks is the measurement, not a mutation-testing implementation.
 
 Neither of the alternatives #164 surveyed changed status while this was built. Go still has no
 native branch coverage ([golang/go#70306](https://github.com/golang/go/issues/70306) remains an
