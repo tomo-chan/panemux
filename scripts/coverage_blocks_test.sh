@@ -395,6 +395,8 @@ EOF
 (cd "$repo" && git add pkg/a.go && git commit -qm change)
 expect_status 0 "a marker on the block's opening line exempts it" "$repo" --base main
 expect_output "1 exempt" "the gate reports how many blocks were exempted"
+expect_output "Exempt by //coverage:exempt:" "the gate lists the exemptions it applied"
+expect_output "pkg/a.go:6-8" "the exemption list names the block"
 
 # Marker on the line directly above.
 repo=$(new_repo)
@@ -405,6 +407,32 @@ example/pkg/a.go:7.11,9.3 1 0
 EOF
 (cd "$repo" && git add pkg/a.go && git commit -qm change)
 expect_status 0 "a marker on the line above exempts the block" "$repo" --base main
+
+# A marker on one block's opening line must not waive the block that opens on
+# the NEXT line — which is what a nested `if`, an `else` on the following line,
+# or a second statement inside a one-line body all look like. The inner block
+# there was never exempted by anyone and no reason was ever written for it.
+repo=$(new_repo)
+cat > "$repo/pkg/a.go" << 'EOF'
+package pkg
+
+func Do(a, b bool) int {
+	if a { //coverage:exempt the outer condition cannot happen
+		if b {
+			return 1
+		}
+	}
+	return 0
+}
+EOF
+cat > "$repo/coverage.out" << 'EOF'
+mode: set
+example/pkg/a.go:4.9,5.8 1 0
+example/pkg/a.go:5.9,7.4 1 0
+EOF
+(cd "$repo" && git add pkg/a.go && git commit -qm change)
+expect_status 1 "a marker on the enclosing block's opening line does not exempt a nested block" "$repo" --base main
+expect_output "1 block(s) this branch changed never executed" "the nested block is reported, not exempted"
 
 # A marker with no reason is not a marker. The repository's rule for the
 # coverage exclusion list in the Makefile is the same one: an exclusion carries
@@ -448,6 +476,29 @@ EOF
 (cd "$repo" && git add pkg/a.go && git commit -qm change)
 expect_status 1 "a base ref that does not exist fails rather than skipping" "$repo" --base origin/nope
 expect_output "does not exist" "the missing-base message says what is wrong"
+
+# A ref that exists but shares no history with HEAD. `rev-parse --verify` passes
+# there, so the check above does not cover it — and the realistic trigger is not
+# an orphan branch but a clone whose history does not reach the merge base,
+# which is the same lost `fetch-depth: 0` that check exists for. Failing open
+# here would report green having measured nothing.
+repo=$(new_repo)
+write_pkg "$repo"
+cat > "$repo/coverage.out" << 'EOF'
+mode: set
+example/pkg/a.go:6.11,8.3 1 0
+EOF
+(
+	cd "$repo" || exit 1
+	git add pkg/a.go && git commit -qm change
+	git checkout -q --orphan unrelated
+	git rm -q -rf . > /dev/null 2>&1
+	printf 'unrelated\n' > README
+	git add README && git commit -qm unrelated
+	git checkout -q feature
+) > /dev/null 2>&1
+expect_status 1 "a base ref with no shared history fails rather than passing quietly" "$repo" --base unrelated
+expect_output "merge base" "the no-merge-base message says what is wrong"
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 

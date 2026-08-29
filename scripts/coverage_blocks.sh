@@ -226,7 +226,20 @@ if ! git rev-parse --verify --quiet "$base" > /dev/null 2>&1; then
 	exit 1
 fi
 
-merge_base=$(git merge-base "$base" HEAD)
+# Checked, not assumed. A failing `git merge-base` prints nothing, and an empty
+# merge base makes the diff below error out and name no files — which lands in
+# the "no Go implementation changed" branch and exits 0. That is a required
+# check reporting green having measured nothing, the one shape the missing-profile
+# and missing-ref paths above exist to rule out. `rev-parse --verify` does not
+# cover it: in a clone whose history does not reach the merge base the ref
+# itself resolves fine and only this command fails.
+merge_base=$(git merge-base "$base" HEAD 2> /dev/null) || merge_base=""
+if [ -z "$merge_base" ]; then
+	echo "coverage-blocks: ERROR — no merge base between '$base' and HEAD."
+	echo "  Without it there is no diff to scope the gate to, so it cannot run."
+	echo "  In CI this usually means the checkout lost 'fetch-depth: 0'."
+	exit 1
+fi
 
 # The directories the profile actually measured. COVERAGE_PKGS excludes whole
 # packages by design — internal/session's real PTY / SSH / tmux transports among
@@ -253,6 +266,29 @@ awk -v module="$module" '
 		print dir
 	}
 ' "$profile" | sort -u > "$tmp/measured_dirs"
+
+# Every line in the profile that opens a block, as `file:line`. A marker on the
+# line ABOVE a block is only that block's when no other block opens there — a
+# nested `if`, an `else` on the following line, or a second statement in a
+# one-line body all put another block's opening line directly above this one,
+# and reading a marker across that boundary waives a block nobody exempted and
+# nobody wrote a reason for.
+awk -v module="$module" '
+	NR == 1 && /^mode:/ { next }
+	NF != 3 { next }
+	{
+		pos = match($1, /:[0-9]+\.[0-9]+,[0-9]+\.[0-9]+$/)
+		if (pos == 0) next
+		file = substr($1, 1, pos - 1)
+		if (module != "" && substr(file, 1, length(module) + 1) == module "/") {
+			file = substr(file, length(module) + 2)
+		}
+		span = substr($1, pos + 1)
+		split(span, ends, ",")
+		split(ends[1], a, ".")
+		print file ":" a[1] + 0
+	}
+' "$profile" | sort -u > "$tmp/block_starts"
 
 # Implementation files only. A branch that changes a test file has not created
 # an obligation for some block elsewhere to be covered, and test files never
@@ -349,9 +385,12 @@ while IFS="$tab" read -r file start end stmts; do
 	src="$repo_root/$file"
 	marker=""
 	if [ -f "$src" ]; then
+		marker=$(sed -n "${start}p" "$src" 2> /dev/null)
 		above=$((start - 1))
-		[ "$above" -lt 1 ] && above=$start
-		marker=$(sed -n "${above},${start}p" "$src" 2> /dev/null)
+		if [ "$above" -ge 1 ] && ! grep -qxF "$file:$above" "$tmp/block_starts"; then
+			marker="$marker
+$(sed -n "${above}p" "$src" 2> /dev/null)"
+		fi
 	fi
 	case "$marker" in
 	*//coverage:exempt*)
@@ -371,6 +410,16 @@ kept_count=$(wc -l < "$tmp/kept" | tr -d ' ')
 exempt_note=""
 [ "$exempt_count" -gt 0 ] && exempt_note=" ($exempt_count exempt)"
 
+# Which blocks were waived, not just how many. A count alone puts the reviewer
+# in the position of re-deriving the mapping from the diff, which is where an
+# exemption stops being reviewable.
+exempt_list() {
+	[ -s "$tmp/exempt" ] || return 0
+	echo
+	echo "  Exempt by //coverage:exempt:"
+	awk -F"$tab" '{ printf "    %s:%s-%s\n", $1, $2, $3 }' "$tmp/exempt"
+}
+
 # The branch-wide hatch, applied last so its output still says what it waved
 # through. Matches EFFICACY_EXEMPT / the efficacy-exempt label: visible on the
 # pull request, not buried in a tracked config file.
@@ -382,11 +431,13 @@ fi
 
 if [ "$kept_count" -eq 0 ]; then
 	echo "coverage-blocks: nothing to report — every measured block on a line this branch changed was executed$exempt_note."
+	exempt_list
 	unmeasured_note
 	exit 0
 fi
 
 echo "coverage-blocks: $kept_count block(s) this branch changed never executed$exempt_note."
+exempt_list
 unmeasured_note
 echo
 awk -F"$tab" '{ printf "  %s:%s-%s  %s stmt(s)\n", $1, $2, $3, $4 }' "$tmp/kept"
