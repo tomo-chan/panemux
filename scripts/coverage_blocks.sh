@@ -309,8 +309,16 @@ fi
 # touched_lines <file> — the line numbers this branch added or modified, against
 # the file as it stands now. -U0 keeps the hunk headers exact so no untouched
 # neighbour is swept in. Same helper, same reasoning, as scripts/efficacy.sh.
+#
+# `-C "$repo_root"` is load-bearing, not tidiness. `git diff --name-only` prints
+# repository-relative paths wherever it runs, but a pathspec is resolved against
+# the caller's cwd — so from a subdirectory every pathspec would miss, every
+# file's touched-line set would come back empty, and the gate would report
+# "nothing to report" having measured nothing. Nothing in this script's usage
+# says it must run from the repository root, and `repo_root` above exists
+# precisely so it does not have to.
 touched_lines() {
-	git diff -U0 "$merge_base" HEAD -- "$1" |
+	git -C "$repo_root" diff -U0 "$merge_base" HEAD -- "$1" |
 		awk '
 			/^@@/ {
 				plus = $3

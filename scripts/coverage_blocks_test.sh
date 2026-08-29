@@ -119,6 +119,27 @@ run_checker() {
 	return 0
 }
 
+# expect_status_in <subdir> <want> <name> <repo> <args...> — like expect_status,
+# but starting from a subdirectory of the fixture repository. Nothing in the
+# script's own usage says it must run from the repository root, so a pathspec
+# that silently resolves against the caller's cwd is a fail-open the root-only
+# cases cannot see.
+expect_status_in() {
+	sub=$1
+	want=$2
+	name=$3
+	rc=$4
+	shift 4
+	checks=$((checks + 1))
+	out=$(cd "$rc/$sub" && sh "$checker" "$@" 2>&1)
+	status=$?
+	if [ "$status" -eq "$want" ]; then
+		pass "$name"
+	else
+		fail "$name: wanted exit $want, got $status" "$out"
+	fi
+}
+
 # expect_status <want> <name> <repo> <args...>
 expect_status() {
 	want=$1
@@ -289,6 +310,23 @@ EOF
 (cd "$repo" && git add pkg/a.go && git commit -qm change)
 expect_status 1 "an unexecuted block on a changed line fails the gate" "$repo" --base main
 expect_output "pkg/a.go:6" "the gate names the file and line of the finding"
+
+# ... and the same finding must survive being run from a subdirectory. `git diff
+# --name-only` prints repository-relative paths wherever it runs, but a pathspec
+# is resolved against the caller's cwd, so a mismatch there makes every file's
+# touched-line set come back empty and the gate report "nothing" having measured
+# nothing.
+repo=$(new_repo)
+write_pkg "$repo"
+cat > "$repo/coverage.out" << 'EOF'
+mode: set
+example/pkg/a.go:5.28,6.11 1 1
+example/pkg/a.go:6.11,8.3 1 0
+EOF
+(cd "$repo" && git add pkg/a.go && git commit -qm change)
+expect_status_in pkg 1 "the same finding is reported when run from a subdirectory" \
+	"$repo" --base main --profile "$repo/coverage.out"
+expect_output "pkg/a.go:6" "the subdirectory run names the same block"
 
 # The same profile, with the change confined to a file the block is not in.
 repo=$(new_repo)
