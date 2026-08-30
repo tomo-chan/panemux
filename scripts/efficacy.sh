@@ -35,10 +35,12 @@
 #   EFFICACY_BASE=origin/main make efficacy
 #   scripts/efficacy.sh --changed-tests # print what it would check, and stop
 #
-# A single test can be taken out of scope with `//efficacy:exempt` in the
-# comment directly above it — for a test in a package whose implementation this
-# branch never touched, which was never going to go red. That is narrower than
-# EFFICACY_EXEMPT / the efficacy-exempt label, which exempt the whole branch.
+# A single test can be taken out of scope with `//efficacy:exempt <reason>` in
+# the comment directly above it — for a test in a package whose implementation
+# this branch never touched, which was never going to go red. That is narrower
+# than EFFICACY_EXEMPT / the efficacy-exempt label, which exempt the whole
+# branch. THE REASON IS REQUIRED, as it is for //coverage:exempt and
+# //mutation:exempt: a bare marker waives nothing and is named in the output.
 #
 # Exit codes: 0 = the gate passed, or had nothing to check; 1 = a changed test
 # survived its implementation being reverted, or the gate could not run.
@@ -135,7 +137,7 @@ changed_test_funcs() {
 	# function, which would otherwise pull the previous, unchanged test into
 	# scope — and an unrelated test is exactly what this gate must not spend
 	# its verdict on.
-	awk '
+	awk -v bare="$tmp/bare_markers" -v file="$file" '
 		{ line[NR] = $0 }
 		END {
 			n = NR
@@ -156,12 +158,19 @@ changed_test_funcs() {
 				s = fstart[k]
 				j = s - 1
 				exempt = 0
+				bare_seen = 0
 				while (j >= 1 && line[j] ~ /^\/\//) {
-					if (line[j] ~ /efficacy:exempt/) exempt = 1
+					# A reason is required, exactly as //coverage:exempt and
+					# //mutation:exempt require one. A bare marker waives
+					# nothing and is named below, rather than silently taking
+					# the test out of scope.
+					if (line[j] ~ /efficacy:exempt[ \t]+[^ \t]/) exempt = 1
+					else if (line[j] ~ /efficacy:exempt/) bare_seen = 1
 					s = j
 					j--
 				}
 				if (exempt) continue
+				if (bare_seen) print file ":" fstart[k] "  " fname[k] >> bare
 				e = (k < cnt) ? fstart[k + 1] - 1 : n
 				while (e > s && (line[e] ~ /^[ \t]*$/ || line[e] ~ /^\/\//)) e--
 				print fname[k], s, e
@@ -205,7 +214,7 @@ changed_fe_test_names() {
 	touched_lines "$file" > "$tmp/fe_touched"
 	[ -s "$tmp/fe_touched" ] || return 0
 
-	awk '
+	awk -v bare="$tmp/bare_markers" -v file="$file" '
 		function qname(s,   p, rest, ch, e, out) {
 			p = index(s, "(")
 			if (p == 0) return ""
@@ -237,10 +246,16 @@ changed_fe_test_names() {
 				s = dstart[k]
 				j = s - 1
 				exempt[k] = 0
+				bare_seen = 0
 				while (j >= 1 && line[j] ~ /^[ \t]*\/\//) {
-					if (line[j] ~ /efficacy:exempt/) exempt[k] = 1
+					# Same reason-required rule as the Go half above.
+					if (line[j] ~ /efficacy:exempt[ \t]+[^ \t]/) exempt[k] = 1
+					else if (line[j] ~ /efficacy:exempt/) bare_seen = 1
 					s = j
 					j--
+				}
+				if (!exempt[k] && bare_seen) {
+					print file ":" dstart[k] "  " (dname[k] == "" ? "(unnamed case)" : dname[k]) >> bare
 				}
 				bstart[k] = s
 				e = (k < cnt) ? dstart[k + 1] - 1 : n
@@ -277,6 +292,10 @@ changed_fe_test_names() {
 
 # ── What this branch changed, as a list of individually-checkable targets ─────
 
+# Bare //efficacy:exempt markers, collected by the two mappers above. Emptied
+# here rather than at mktemp time so it is beside the loops that fill it.
+: > "$tmp/bare_markers"
+
 : > "$tmp/go_targets"
 for f in $go_tests; do
 	[ -f "$f" ] || continue
@@ -308,6 +327,21 @@ cut -f1 "$tmp/fe_targets" | sort -u > "$tmp/fe_files"
 
 go_count=$(wc -l < "$tmp/go_targets" | tr -d ' ')
 fe_count=$(wc -l < "$tmp/fe_targets" | tr -d ' ')
+
+# A bare marker is reported and waives nothing — the rule //coverage:exempt
+# states and //mutation:exempt inherits, and this one had been the only of the
+# three not to hold it. It is not an error on its own: the test stays in scope
+# and is judged like any other, so this note explains a marker that appears to
+# have done nothing rather than failing a branch that is otherwise fine.
+if [ -s "$tmp/bare_markers" ]; then
+	echo "efficacy: NOTE — //efficacy:exempt with no reason waives nothing."
+	echo "  An exemption nobody has to justify is how an exemption stops being"
+	echo "  reviewable. Write what makes the test unable to go red, e.g."
+	echo "  '//efficacy:exempt pins pre-existing behavior; no implementation under it changed'."
+	echo "  Still in scope:"
+	sed 's/^/    /' "$tmp/bare_markers"
+	echo
+fi
 
 if [ "$mode" = "--changed-tests" ]; then
 	echo "base:            $base ($merge_base)"

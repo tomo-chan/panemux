@@ -402,6 +402,13 @@ func newestKnownAgentTypeDescendantPID(processes []processInfo, rootPID int) (pi
 		stack = append(stack, children[proc.PID]...)
 
 		if t, matched := detectAgmsgAgentType(proc.Command); matched {
+			// `>=` here is killable, but only by input the OS cannot
+			// produce: two matching processes sharing a PID, where the
+			// agmsgType reported would differ (the PID would not). A test
+			// for it would have to fabricate that snapshot and then pin
+			// whichever type the traversal happens to reach first — an
+			// accident of stack order, not designed behavior. Issue #190.
+			//mutation:exempt unreachable — killable only by a fabricated snapshot with a duplicate PID
 			if !ok || proc.PID > pid {
 				pid, agmsgType, ok = proc.PID, t, true
 			}
@@ -428,6 +435,12 @@ func newestMatchingDescendantPID(processes []processInfo, rootPID int, match fun
 		stack = append(stack, children[proc.PID]...)
 
 		if match(proc.Command) {
+			// Unlike newestKnownAgentTypeDescendantPID above, this one is
+			// equivalent outright rather than merely unreachable: the guard's
+			// only writes are `matched = proc.PID` and `ok = true`, so on an
+			// equal PID `>=` assigns the value already there. There is no
+			// second return value for it to change. Issue #190.
+			//mutation:exempt equivalent — on an equal PID the guard reassigns the same value, so >= cannot differ
 			if !ok || proc.PID > matched {
 				matched = proc.PID
 				ok = true
@@ -767,6 +780,12 @@ func codexSessionPath(paths []string) (string, bool) {
 }
 
 func processIDArg(pid int) (string, error) {
+	// The `<= 0` boundary cannot be pinned by a test: validProcessIDArg below
+	// is `^[1-9][0-9]*$`, so a pid of 0 that got past this guard is rejected
+	// by the regex with the identical error. TestProcessIDArg_PIDBoundary
+	// covers both sides of the boundary; the mutant on it is equivalent, not
+	// unkilled. Issue #190.
+	//mutation:exempt equivalent — validProcessIDArg rejects "0" with the same error, so < 0 cannot behave differently
 	if pid <= 0 {
 		return "", fmt.Errorf("invalid pid: %d", pid)
 	}

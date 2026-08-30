@@ -148,6 +148,101 @@ func TestManager_Subscribe_ClosedSessionReturnsSnapshotAndClosedStream(t *testin
 	}, time.Second, 10*time.Millisecond)
 }
 
+// TestManagedSession_Publish_ReplayBufferBound pins the replay buffer's own
+// bound. Nothing in this suite published more than a few bytes before, so the
+// truncation arithmetic ran only in the benchmark — the buffer could have been
+// dropping the wrong end, or slicing out of range on the first pane that ever
+// filled it, with the suite still green. Issue #190.
+// Nothing under this test changed on this branch, so the red-check could never
+// see it go red: it pins behavior that was already correct and merely
+// unasserted. See docs/quality-gateway.md's "Clearing the boundary-value class".
+//
+//efficacy:exempt pins pre-existing behavior; no implementation under it changed
+func TestManagedSession_Publish_ReplayBufferBound(t *testing.T) {
+	tests := []struct {
+		name      string
+		published int
+		wantLen   int
+		// wantFirst is the byte the retained history must start with, which
+		// is what says the OLDEST output was dropped and not the newest.
+		wantFirst byte
+	}{
+		{
+			name:      "one short of the bound keeps everything",
+			published: sessionReplayLimitBytes - 1,
+			wantLen:   sessionReplayLimitBytes - 1,
+			wantFirst: 'a',
+		},
+		{
+			name:      "exactly the bound keeps everything",
+			published: sessionReplayLimitBytes,
+			wantLen:   sessionReplayLimitBytes,
+			wantFirst: 'a',
+		},
+		{
+			name:      "one past the bound drops exactly one byte",
+			published: sessionReplayLimitBytes + 1,
+			wantLen:   sessionReplayLimitBytes,
+			wantFirst: 'b',
+		},
+		{
+			name:      "well past the bound keeps only the newest window",
+			published: sessionReplayLimitBytes + 4096,
+			wantLen:   sessionReplayLimitBytes,
+			wantFirst: 'b',
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			entry := &managedSession{subscribers: map[int]chan []byte{}}
+			// A distinguishable first byte, then filler: if truncation kept
+			// the wrong end, the retained history still starts with 'a'.
+			chunk := make([]byte, tt.published)
+			chunk[0] = 'a'
+			for i := 1; i < len(chunk); i++ {
+				chunk[i] = 'b'
+			}
+			entry.publish(chunk)
+
+			snapshot, _, unsubscribe := entry.subscribe()
+			unsubscribe()
+			if len(snapshot) != tt.wantLen {
+				t.Fatalf("replay buffer length after publishing %d bytes = %d, want %d",
+					tt.published, len(snapshot), tt.wantLen)
+			}
+			if snapshot[0] != tt.wantFirst {
+				t.Fatalf("replay buffer starts with %q, want %q — the wrong end was dropped",
+					snapshot[0], tt.wantFirst)
+			}
+		})
+	}
+}
+
+// TestManagedSession_Publish_ReplayBufferBoundAcrossChunks pins the same bound
+// when the buffer crosses it over several publishes, which is how a real pane
+// reaches it — pump() writes 4 KiB at a time.
+// Nothing under this test changed on this branch, so the red-check could never
+// see it go red: it pins behavior that was already correct and merely
+// unasserted. See docs/quality-gateway.md's "Clearing the boundary-value class".
+//
+//efficacy:exempt pins pre-existing behavior; no implementation under it changed
+func TestManagedSession_Publish_ReplayBufferBoundAcrossChunks(t *testing.T) {
+	entry := &managedSession{subscribers: map[int]chan []byte{}}
+	chunk := make([]byte, 4096)
+	for i := range chunk {
+		chunk[i] = 'x'
+	}
+	for published := 0; published < sessionReplayLimitBytes+2*len(chunk); published += len(chunk) {
+		entry.publish(append([]byte(nil), chunk...))
+	}
+
+	snapshot, _, unsubscribe := entry.subscribe()
+	unsubscribe()
+	if len(snapshot) != sessionReplayLimitBytes {
+		t.Fatalf("replay buffer length = %d, want it held at %d", len(snapshot), sessionReplayLimitBytes)
+	}
+}
+
 func TestManagedSession_SubscribeStillWorksWhilePublishWaitsOnSlowSubscriber(t *testing.T) {
 	slowSubscriber := make(chan []byte, 1)
 	slowSubscriber <- []byte("already full")

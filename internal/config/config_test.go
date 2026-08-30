@@ -310,6 +310,109 @@ func TestValidate_ServerPortOutOfRange_Error(t *testing.T) {
 	assert.Contains(t, err.Error(), "port")
 }
 
+// TestValidate_ServerPortRangeBoundaries pins both ends of the 1-65535 range,
+// including the boundaries themselves. The out-of-range test above only ever
+// used 0 and 99999 — one and 34464 past the ends — so widening the rule to
+// `port < 2 || port > 65534` would have rejected two legal ports with the
+// suite still green. Issue #190.
+// Nothing under this test changed on this branch, so the red-check could never
+// see it go red: it pins behavior that was already correct and merely
+// unasserted. See docs/quality-gateway.md's "Clearing the boundary-value class".
+//
+//efficacy:exempt pins pre-existing behavior; no implementation under it changed
+func TestValidate_ServerPortRangeBoundaries(t *testing.T) {
+	tests := []struct {
+		name    string
+		port    int
+		wantErr bool
+	}{
+		{name: "one below the low bound", port: 0, wantErr: true},
+		{name: "the low bound itself", port: 1, wantErr: false},
+		{name: "one above the low bound", port: 2, wantErr: false},
+		{name: "one below the high bound", port: 65534, wantErr: false},
+		{name: "the high bound itself", port: 65535, wantErr: false},
+		{name: "one above the high bound", port: 65536, wantErr: true},
+		{name: "negative", port: -1, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := validConfig()
+			cfg.Server.Port = tt.port
+			err := cfg.Validate()
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "server.port")
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}
+
+// TestValidate_ChildSizeBoundary pins that a size of exactly 0 is rejected
+// while the smallest positive size a sum of 100 can be built from is accepted.
+// TestValidate_NegativeSize_Error above only used -10, so `size < 0` would
+// have accepted a zero-width pane. Issue #190.
+// Nothing under this test changed on this branch, so the red-check could never
+// see it go red: it pins behavior that was already correct and merely
+// unasserted. See docs/quality-gateway.md's "Clearing the boundary-value class".
+//
+//efficacy:exempt pins pre-existing behavior; no implementation under it changed
+func TestValidate_ChildSizeBoundary(t *testing.T) {
+	runChildSizeCases(t, []childSizeCase{
+		{name: "exactly zero is rejected", sizes: []float64{0, 100}, wantErr: "must be positive"},
+		{name: "smallest positive size is accepted", sizes: []float64{0.1, 99.9}},
+		{name: "negative is rejected", sizes: []float64{-0.1, 100.1}, wantErr: "must be positive"},
+	})
+}
+
+// TestValidate_ChildSizeSumTolerance pins both ends of the ±0.1 tolerance the
+// sum check allows. TestValidate_ChildSizesNotSumTo100_Error above sums to 150,
+// so tightening the tolerance to nothing would have rejected the rounded sizes
+// a dragged split produces with the suite still green. Issue #190.
+// Nothing under this test changed on this branch, so the red-check could never
+// see it go red: it pins behavior that was already correct and merely
+// unasserted. See docs/quality-gateway.md's "Clearing the boundary-value class".
+//
+//efficacy:exempt pins pre-existing behavior; no implementation under it changed
+func TestValidate_ChildSizeSumTolerance(t *testing.T) {
+	runChildSizeCases(t, []childSizeCase{
+		{name: "the low tolerance bound itself", sizes: []float64{49.95, 49.95}},
+		{name: "below the low tolerance bound", sizes: []float64{49.9, 49.9}, wantErr: "must be 100"},
+		{name: "exactly 100", sizes: []float64{50, 50}},
+		{name: "the high tolerance bound itself", sizes: []float64{50.05, 50.05}},
+		{name: "above the high tolerance bound", sizes: []float64{50.1, 50.1}, wantErr: "must be 100"},
+	})
+}
+
+// childSizeCase is one two-pane layout and what Validate must say about it.
+// An empty wantErr means the layout is valid.
+type childSizeCase struct {
+	name    string
+	wantErr string
+	sizes   []float64
+}
+
+func runChildSizeCases(t *testing.T, cases []childSizeCase) {
+	t.Helper()
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := validConfig()
+			cfg.Layout.Children = []LayoutChild{
+				{Size: tt.sizes[0], Pane: &PaneConfig{ID: "p1", Type: "local"}},
+				{Size: tt.sizes[1], Pane: &PaneConfig{ID: "p2", Type: "local"}},
+			}
+			err := cfg.Validate()
+			if tt.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}
+
 func TestValidate_NestedLayout_Validates(t *testing.T) {
 	cfg := validConfig()
 	cfg.Layout.Children = []LayoutChild{

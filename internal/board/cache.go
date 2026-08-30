@@ -94,6 +94,12 @@ func (c *BoardCache) AppendMessage(r Row) {
 	defer c.mu.Unlock()
 	c.nextSeq++
 	c.history = append(c.history, CachedRow{Seq: c.nextSeq, Row: r})
+	// The `> 0` boundary cannot be pinned by a test: at overflow == 0,
+	// c.history[0:] is the identical slice, so `>= 0` behaves the same on
+	// every input. TestBoardCache_AppendMessage_BoundedHistory_KeepsExactlyTheBound
+	// covers the boundary's behavior; the mutant on it is equivalent, not
+	// unkilled. Issue #190.
+	//mutation:exempt equivalent at the boundary — history[0:] is a no-op, so >= 0 cannot behave differently
 	if overflow := len(c.history) - c.maxHistory; overflow > 0 {
 		c.history = c.history[overflow:]
 	}

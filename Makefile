@@ -171,7 +171,16 @@ test-coverage-blocks:
 # are: it needs the base branch. It runs as its own pull-request CI job.
 #
 #   MUTATION_BASE=origin/main make mutation
-mutation:
+#
+# Depends on build-frontend for the same reason coverage-go does, and the
+# reason is not obvious from here: gremlins gathers coverage over the WHOLE
+# module before it mutates anything, so the root package has to compile, and
+# main.go embeds frontend/dist. Without this, gremlins exits non-zero with
+# `pattern frontend/dist: no matching files found` and the script correctly
+# reports that it could not run. This went unnoticed until #190 because every
+# earlier branch exited at "no Go implementation changed" before gremlins was
+# ever invoked.
+mutation: build-frontend
 	sh scripts/mutation.sh
 
 # The reporter's own tests. Hermetic, and deliberately so: they drive the

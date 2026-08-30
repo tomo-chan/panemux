@@ -403,6 +403,128 @@ func TestRegistryKeepsAForwardWithALiveConnectionPastTheTTL(t *testing.T) {
 	}
 }
 
+// TestResolveSweepInterval pins the two values on either side of the
+// disabled/defaulted boundary as well as the boundary itself. Every Options
+// literal in this file passes either -1 or nothing at all, so `configured > 0`
+// would have left a default-configured registry with no reaper at all — no
+// forward would ever be reaped in production — with the suite still green.
+// Issue #190.
+func TestResolveSweepInterval(t *testing.T) {
+	tests := []struct {
+		name         string
+		configured   time.Duration
+		wantInterval time.Duration
+		wantRun      bool
+	}{
+		{name: "negative disables the reaper", configured: -1, wantRun: false},
+		{name: "the smallest negative value disables it", configured: -1 * time.Nanosecond, wantRun: false},
+		{
+			name:         "zero selects the default interval",
+			configured:   0,
+			wantInterval: defaultSweepInterval,
+			wantRun:      true,
+		},
+		{
+			name:         "the smallest positive value is used as given",
+			configured:   time.Nanosecond,
+			wantInterval: time.Nanosecond,
+			wantRun:      true,
+		},
+		{
+			name:         "a positive value is used as given",
+			configured:   5 * time.Second,
+			wantInterval: 5 * time.Second,
+			wantRun:      true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			interval, run := resolveSweepInterval(tt.configured)
+			if run != tt.wantRun {
+				t.Fatalf("resolveSweepInterval(%v) run = %v, want %v", tt.configured, run, tt.wantRun)
+			}
+			if run && interval != tt.wantInterval {
+				t.Fatalf(
+					"resolveSweepInterval(%v) interval = %v, want %v",
+					tt.configured, interval, tt.wantInterval,
+				)
+			}
+		})
+	}
+}
+
+// TestRegistryDefaultsTheTTLWhenUnset pins that an unset TTL becomes
+// defaultTTL rather than staying zero. Every other TTL test in this file sets
+// one explicitly, so `r.ttl < 0` would have left a default-configured registry
+// expiring every forward the instant it was created — the reaper's first tick
+// would close a forward the browser had not reached yet — with the suite still
+// green. Issue #190.
+func TestRegistryDefaultsTheTTLWhenUnset(t *testing.T) {
+	dialer := &echoDialer{addr: startEchoServer(t)}
+	clock := newFakeClock()
+	r := newTestRegistry(t, Options{
+		SweepInterval: -1, // no background sweeper; the test drives reaping
+		Now:           clock.Now,
+	})
+	port := freePort(t)
+	if _, err := r.Ensure("pane-1", port, dialer); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+
+	// Just short of the default TTL the forward must survive a reap.
+	clock.Advance(defaultTTL - time.Second)
+	r.reapExpired()
+	if got := r.Ports("pane-1"); len(got) != 1 {
+		t.Fatalf("Ports before the default TTL elapsed = %v, want the forward kept", got)
+	}
+
+	clock.Advance(2 * time.Second)
+	r.reapExpired()
+	if got := r.Ports("pane-1"); len(got) != 0 {
+		t.Fatalf("Ports after the default TTL elapsed = %v, want the forward reaped", got)
+	}
+}
+
+// TestRegistryEndConnNeverDrivesTheCounterNegative pins the defensive half of
+// endConn's `active > 0`. Production only ever calls it paired with beginConn,
+// so nothing else in this suite reaches the guard at all — and `>= 0` is not
+// harmless if it ever is reached: active goes to -1, reapExpired's own
+// `f.active == 0` stops matching, and the forward outlives its TTL for the
+// life of the process. Issue #190.
+func TestRegistryEndConnNeverDrivesTheCounterNegative(t *testing.T) {
+	dialer := &echoDialer{addr: startEchoServer(t)}
+	clock := newFakeClock()
+	r := newTestRegistry(t, Options{
+		TTL:           10 * time.Minute,
+		SweepInterval: -1,
+		Now:           clock.Now,
+	})
+	port := freePort(t)
+	if _, err := r.Ensure("pane-1", port, dialer); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	r.mu.Lock()
+	f := r.forwards[port]
+	r.mu.Unlock()
+
+	// Unpaired: no connection was ever accepted, so beginConn never ran.
+	r.endConn(f)
+
+	r.mu.Lock()
+	active := f.active
+	r.mu.Unlock()
+	if active != 0 {
+		t.Fatalf("active after an unpaired endConn = %d, want it held at 0", active)
+	}
+
+	clock.Advance(11 * time.Minute)
+	r.reapExpired()
+	if got := r.Ports("pane-1"); len(got) != 0 {
+		t.Fatalf("Ports after the TTL elapsed = %v, want the forward reaped — a negative "+
+			"active counter makes it unreapable", got)
+	}
+}
+
 func TestRegistryEnsureRefreshesTheIdleDeadline(t *testing.T) {
 	dialer := &echoDialer{addr: startEchoServer(t)}
 	clock := newFakeClock()

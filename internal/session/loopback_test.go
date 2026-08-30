@@ -235,6 +235,35 @@ func TestDialLoopbackRejectsPortsOutsideTheValidRange(t *testing.T) {
 	}
 }
 
+// TestDialLoopbackAcceptsThePortRangeBoundaries pins the two ports the range
+// check must let through. The rejection test above uses 0, -1 and 65536 —
+// every one of them outside the range — so `port <= 1 || port >= 65535` would
+// have refused to forward both ends of the legal range with the suite still
+// green. Issue #190.
+// Nothing under this test changed on this branch, so the red-check could never
+// see it go red: it pins behavior that was already correct and merely
+// unasserted. See docs/quality-gateway.md's "Clearing the boundary-value class".
+//
+//efficacy:exempt pins pre-existing behavior; no implementation under it changed
+func TestDialLoopbackAcceptsThePortRangeBoundaries(t *testing.T) {
+	for _, port := range []int{1, 2, 65534, 65535} {
+		rec := &forwardRecorder{}
+		client := startTestSSHServer(t, startEchoServer(t), rec)
+		sess := &SSHSession{id: "pane-boundary", client: client, state: StateConnected}
+
+		conn, err := sess.DialLoopback(context.Background(), port)
+		if err != nil {
+			t.Fatalf("DialLoopback(%d) = %v, want the port to be forwarded", port, err)
+		}
+		conn.Close()
+
+		_, ports := rec.snapshot()
+		if len(ports) != 1 || int(ports[0]) != port {
+			t.Fatalf("DialLoopback(%d) reached the remote as %v, want [%d]", port, ports, port)
+		}
+	}
+}
+
 func TestDialLoopbackFailsWhenTheRemotePortIsClosed(t *testing.T) {
 	rec := &forwardRecorder{}
 	// An address nothing listens on: the test server's dial to it fails, so

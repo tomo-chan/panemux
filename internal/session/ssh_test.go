@@ -742,6 +742,41 @@ func TestRemoteShellPID_ParsesShellProcess(t *testing.T) {
 	assert.Equal(t, 220, pid)
 }
 
+// TestRemoteShellPID_RejectsNonPositivePIDs pins the boundary the guard sits
+// on. The parse test above only ever feeds a healthy 220, so `pid < 0` would
+// have let a remote that printed 0 through as a valid PID — every later
+// per-PID command would then have been built around a process that cannot
+// exist. Issue #190.
+// Nothing under this test changed on this branch, so the red-check could never
+// see it go red: it pins behavior that was already correct and merely
+// unasserted. See docs/quality-gateway.md's "Clearing the boundary-value class".
+//
+//efficacy:exempt pins pre-existing behavior; no implementation under it changed
+func TestRemoteShellPID_RejectsNonPositivePIDs(t *testing.T) {
+	for _, out := range []string{"0\n", "-1\n"} {
+		runner := &fakeSSHRunner{outputs: map[string][]byte{sshShellPIDCmd: []byte(out)}}
+
+		pid, err := remoteShellPID(runner)
+		require.Error(t, err, "remoteShellPID(%q) must not report a usable PID", out)
+		assert.Zero(t, pid)
+	}
+}
+
+// TestRemoteShellPID_AcceptsTheLowestUsablePID is the other side of that
+// boundary: 1 is a real PID and must not be rejected.
+// Nothing under this test changed on this branch, so the red-check could never
+// see it go red: it pins behavior that was already correct and merely
+// unasserted. See docs/quality-gateway.md's "Clearing the boundary-value class".
+//
+//efficacy:exempt pins pre-existing behavior; no implementation under it changed
+func TestRemoteShellPID_AcceptsTheLowestUsablePID(t *testing.T) {
+	runner := &fakeSSHRunner{outputs: map[string][]byte{sshShellPIDCmd: []byte("1\n")}}
+
+	pid, err := remoteShellPID(runner)
+	require.NoError(t, err)
+	assert.Equal(t, 1, pid)
+}
+
 func TestActiveRemoteWorkdirFromSessionFactory_UsesSeparateRunners(t *testing.T) {
 	outputs := map[string][]byte{
 		sshShellPIDCmd:      []byte("220\n"),
@@ -1124,6 +1159,60 @@ func TestDialWithRetry_ExhaustsAllRetries(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, dialRetryMaxAttempts, *calls)
 	assert.Equal(t, wantErr, err)
+}
+
+// TestDialTransport_ExhaustedBudget_NeverDials pins the boundary between "no
+// budget left" and "a sliver of budget left". It matters more than it looks:
+// net.DialTimeout treats a zero timeout as *no* timeout, so `timeout < 0`
+// would turn the one case that must fail fast — a deadline that has exactly
+// run out — into a dial that can block indefinitely, and every retry test in
+// this file starts with a full budget. Issue #190.
+// Nothing under this test changed on this branch, so the red-check could never
+// see it go red: it pins behavior that was already correct and merely
+// unasserted. See docs/quality-gateway.md's "Clearing the boundary-value class".
+//
+//efficacy:exempt pins pre-existing behavior; no implementation under it changed
+func TestDialTransport_ExhaustedBudget_NeverDials(t *testing.T) {
+	clock := newFakeClock()
+	origNow := nowFn
+	nowFn = clock.now
+	t.Cleanup(func() { nowFn = origNow })
+
+	// Nothing listens on port 1, so a dial that should never have happened
+	// fails with a connection error the assertion below can tell apart from
+	// the budget error.
+	const addr = "127.0.0.1:1"
+
+	for _, name := range []string{"deadline exactly now", "deadline already past"} {
+		deadline := clock.now()
+		if name == "deadline already past" {
+			deadline = deadline.Add(-time.Nanosecond)
+		}
+		conn, client, err := dialTransport(SSHConfig{}, addr, 22, deadline)
+		require.Error(t, err, name)
+		assert.Nil(t, conn, name)
+		assert.Nil(t, client, name)
+		assert.Contains(t, err.Error(), "retry budget exhausted", name)
+	}
+}
+
+// TestDialTransport_SliverOfBudget_StillDials is the other side of that
+// boundary: one nanosecond of budget is still budget, so the dial is attempted
+// and whatever the network says comes back instead of the budget error.
+// Nothing under this test changed on this branch, so the red-check could never
+// see it go red: it pins behavior that was already correct and merely
+// unasserted. See docs/quality-gateway.md's "Clearing the boundary-value class".
+//
+//efficacy:exempt pins pre-existing behavior; no implementation under it changed
+func TestDialTransport_SliverOfBudget_StillDials(t *testing.T) {
+	clock := newFakeClock()
+	origNow := nowFn
+	nowFn = clock.now
+	t.Cleanup(func() { nowFn = origNow })
+
+	_, _, err := dialTransport(SSHConfig{}, "127.0.0.1:1", 22, clock.now().Add(time.Nanosecond))
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "retry budget exhausted")
 }
 
 func TestDialWithRetry_StopsRetryingPastElapsedBudget(t *testing.T) {
