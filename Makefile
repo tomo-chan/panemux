@@ -1,6 +1,7 @@
 .PHONY: all build build-frontend build-backend dev clean run install-deps install-deps-ci install-hooks \
         test test-go test-frontend test-e2e test-agmsg-contract test-hooks test-efficacy efficacy \
-        test-scenarios-check check-scenarios coverage-blocks test-coverage-blocks bench \
+        test-scenarios-check check-scenarios coverage-blocks test-coverage-blocks \
+        mutation test-mutation bench \
         fmt fmt-go fmt-check-go \
         lint lint-go lint-go-deps lint-frontend \
         coverage coverage-go coverage-frontend \
@@ -34,7 +35,8 @@ install-hooks:
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
-test: test-go test-frontend test-hooks test-efficacy test-scenarios-check test-coverage-blocks
+test: test-go test-frontend test-hooks test-efficacy test-scenarios-check test-coverage-blocks \
+      test-mutation
 
 test-go:
 	go test ./... -v -race
@@ -144,6 +146,39 @@ coverage-blocks: coverage-go
 # throwaway git repositories, no `go test` run needed.
 test-coverage-blocks:
 	sh scripts/coverage_blocks_test.sh
+
+# ── Mutation: would the tests notice? (gate G4(c)) ────────────────────────────
+#
+# The last of the four G4 questions, and the one the other three cannot answer.
+# (a) asks what percentage of statements ran, (d) asks whether a block on a
+# changed line ran at all, (b) asks whether a CHANGED TEST fails without its
+# implementation. This asks whether the tests would notice changed code
+# behaving differently — and #180's measurement found 108 mutants in this
+# repository that survive every test, all of them in code (d) reports as
+# covered.
+#
+# A WARNING, not a gate: a survivor prints and exits 0. Stage 3 of item 6's
+# four. 34% of the measured survivors are ones nobody should "fix" — buffer
+# sizes and timeout constants whose killing test would be a tautology — so
+# failing on them would make this wrong more often than right, which is how a
+# gate loses the credibility the working ones depend on (principle 4). Making
+# it fail is stage 4, and a deliberate separate change.
+#
+# Needs gremlins, which `make install-deps` does not install:
+#   go install github.com/go-gremlins/gremlins/cmd/gremlins@latest
+#
+# Outside `make check` for the reason `make efficacy` and `make coverage-blocks`
+# are: it needs the base branch. It runs as its own pull-request CI job.
+#
+#   MUTATION_BASE=origin/main make mutation
+mutation:
+	sh scripts/mutation.sh
+
+# The reporter's own tests. Hermetic, and deliberately so: they drive the
+# script through `--report <file>` against fixture reports, so `make check`
+# never needs gremlins installed.
+test-mutation:
+	sh scripts/mutation_test.sh
 
 # The agent-side gates themselves (docs/quality-gateway.md's G1 and G2, run as
 # Claude Code hooks from .claude/). Included in `make test` because a hook that

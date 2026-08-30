@@ -111,6 +111,15 @@ Example: `Config.sshConfigPath` uses `sshconfig.DefaultPath()` only when the ove
 - A block that cannot be reached from a test is marked `//coverage:exempt <reason>` on its opening line or the line above. **The reason is required.** The `coverage-blocks-exempt` label exempts the whole branch and is the blunter tool; prefer the marker, which sits in the diff a reviewer reads.
 - A changed file in a package `COVERAGE_PKGS` excludes is reported as **not measured**, not as covered.
 
+### Mutation (`make mutation`)
+
+- Asks the question the other three G4 checks cannot: **would the tests notice if your changed code behaved differently?** A block can execute on every run and still have nothing asserted about it.
+- `MUTATION_BASE=origin/main make mutation` runs [gremlins](https://github.com/go-gremlins/gremlins) scoped to the diff and names every mutant on a line your branch changed that survives the whole suite.
+- **It warns; it does not fail.** A survivor prints and exits 0. Roughly a third of this repository's survivors are ones nobody should act on — buffer sizes and timeout constants whose killing test would be a tautology itself — so failing on them would make the check wrong more often than right. Decision D9 in [docs/quality-gateway.md](docs/quality-gateway.md) records the measurement behind that. It *does* exit 1 when it could not run.
+- Needs gremlins, which `make install-deps` does not install: `go install github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0`. `make test-mutation` — the checker's own tests, inside `make check` — never needs it, because it drives the script through `--report` against fixture reports.
+- A survivor worth keeping is marked `//mutation:exempt <reason>` on the mutated line or the line above. **The reason is required.** The `mutation-exempt` label exempts the whole branch and is the blunter tool.
+- Do not pass gremlins' own defaults: `scripts/mutation.sh` pins `--timeout-coefficient` and `--workers` because the defaults report 44% of runnable mutants as timed out on this repository, and those timeouts hide survivors.
+
 ### Red-check (`make efficacy`)
 
 - A test you change must **fail** when your implementation diff is reverted. That is the machine-checkable half of the TDD rule above: the order lines were written in cannot be recovered after the fact, but the result can.
@@ -125,9 +134,9 @@ Example: `Config.sshConfigPath` uses `sshconfig.DefaultPath()` only when the ove
 - `make check` must pass before `make build`.
 - `make check` must pass before reporting implementation complete.
 - There are no exceptions for frontend-only, docs-adjacent, or "small" code changes.
-- Test commands: `make test-go`, `make test-frontend`, `make test-e2e`, `make test`, `make test-hooks`, `make test-efficacy`, `make test-scenarios-check`, `make test-coverage-blocks`
+- Test commands: `make test-go`, `make test-frontend`, `make test-e2e`, `make test`, `make test-hooks`, `make test-efficacy`, `make test-scenarios-check`, `make test-coverage-blocks`, `make test-mutation`
 - Ledger command: `make check-scenarios`
-- Pull-request-only gates: `make efficacy` and `COVERAGE_BLOCKS_BASE=origin/main make coverage-blocks` (see above)
+- Pull-request-only gates: `make efficacy`, `COVERAGE_BLOCKS_BASE=origin/main make coverage-blocks`, and `MUTATION_BASE=origin/main make mutation` (a warning, not a gate — see above)
 - `make test-hooks` uses `jq` where it parses `settings.json` or a hook payload. `jq` is **optional**: without it those checks report themselves as skipped rather than passing or failing, so `make check` — and therefore `git push` — still works. Install it to actually run them.
 - Coverage commands: `make coverage-go`, `make coverage-frontend`, `make coverage-blocks`
 - Measurement (not a gate): `make bench` for terminal throughput, replay-buffer cost and relay polling; `make test-e2e` also records accessibility violations. Neither asserts a threshold — see [docs/quality-gateway.md](docs/quality-gateway.md)'s "First measurements".

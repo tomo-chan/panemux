@@ -168,7 +168,7 @@ Ordering is meaningful: the point is to stop a defect at the cheapest gate that 
 | **G1** | Edit | Maintainability | `gofmt -s`, `tsc --noEmit`, and `go vet` on the touched packages only | Claude Code `PostToolUse` hook in `.claude/settings.json` | Present — `.claude/hooks/post-edit-check.sh` |
 | **G2** | Unit | Functional suitability, fast feedback | `make test-go`, `make test-frontend` — unchanged | Existing (`make check`, pre-push, CI) | Present |
 | **G3** | Contract | **Resistance to refactoring**, compatibility | (a) HTTP/WS integration through the real `server.New()` router; (b) exhaustiveness check on the route table (every registered route against an expected set); (c) Zod schema round-trips; (d) the agmsg contract | New `make test-contract`, folded into `make check`; (b) as an always-on Go test | Partial — (b) and (d) present; (a) present for HTTP (`internal/server/api_integration_test.go` drives every `/api` route and fails when one has no case), absent for `/ws`; (c) absent |
-| **G4** | Efficacy | **Protection against regressions** | (a) coverage — scope tracks the implementation, threshold stays at 80%; (b) **red-check**: a changed test must fail when the implementation diff is reverted; (c) mutation score over changed lines only; (d) **per-block coverage**: no block covering a changed line may be one the suite never entered | (a) existing `make check`; (b), (c) and (d) pull-request CI jobs, `make efficacy` and `make coverage-blocks` | Partial — (a) present and now scoped to every decision-holding package; (b) present (`make efficacy`, a pull-request-only CI job); (d) present (`make coverage-blocks`, likewise); (c) absent |
+| **G4** | Efficacy | **Protection against regressions** | (a) coverage — scope tracks the implementation, threshold stays at 80%; (b) **red-check**: a changed test must fail when the implementation diff is reverted; (c) mutation score over changed lines only; (d) **per-block coverage**: no block covering a changed line may be one the suite never entered | (a) existing `make check`; (b), (c) and (d) pull-request CI jobs, `make efficacy`, `make mutation` and `make coverage-blocks` | Partial — (a) present and now scoped to every decision-holding package; (b) present (`make efficacy`, a pull-request-only CI job); (d) present (`make coverage-blocks`, likewise); (c) present as a **warning** (`make mutation`), not yet as a gate |
 | **G5** | Scenario | Functional suitability, interaction capability | Playwright E2E, plus a check that every test named by an `auto` row in `scenarios.md` actually exists | CI, extending `make test-e2e` | Present — E2E plus `make check-scenarios`, which resolves every `auto` row |
 | **G6** | Adversarial | All characteristics (design judgement) | A fresh-context review of the diff alone. The session that wrote the code does not grade it. Findings limited to correctness and stated requirements. | A review subagent in `.claude/agents/` plus human review. **Does not block** | Present — `.claude/agents/diff-reviewer.md`; still does not block |
 
@@ -201,6 +201,13 @@ lower bound, so it stays used as one. The correct strengthening is **scope, not 
 gremlins' own documentation states it suits small-to-medium modules and that a run on a large one can
 take hours. Chasing a whole-repository MSI would make the gate unaffordable and therefore ignored.
 Scoring only changed lines, outside `make check`, keeps the gate starting from green.
+
+*Amended once measured.* The cost premise was weaker than it looked: the whole module takes **14m25s**
+here, not hours, and `gremlins --diff` brings a typical branch to seconds. The conclusion stands on
+the other half — 108 surviving mutants repo-wide means a whole-repository gate starts red — so the
+governing reason is now the false-positive rate, not the clock. Recorded rather than quietly
+rewritten, because the two reasons fail differently: a cost argument would be reopened by a faster
+tool, and this one would not.
 
 **D3 — Consolidate gates rather than adding them.**
 As #178 showed, a structure where every new feature adds another `*_routes_test.go` is a tax, not a
@@ -341,6 +348,29 @@ reported as *not measured* rather than as covered — failing there would start 
 `internal/session`. The ~275 remain a backlog, listed by `make coverage-blocks`; a gate is the wrong
 instrument for a backlog.
 
+**D9 — The mutation check warns; it does not fail.**
+Stage 3 of #180's item 6, and the measurement is the argument. Of the 108 surviving mutants found at
+`d42e406`, **37 (34%) are ones nobody should act on**: buffer sizes (`64*1024` in three files),
+timeout constants (`30 * time.Second`), and error branches unreachable without fault injection. A
+test written to kill the buffer-size mutants would pin a constant and assert nothing — a tautology,
+which is the exact defect G4 exists to find. A check that failed on those would be wrong more often
+than right in its first weeks, and principle 4 says what happens to a gate that cries wolf.
+
+So `make mutation` prints its findings and exits 0. What it does **not** soften is "could not run":
+a missing base ref, a shallow clone, a gremlins that exited non-zero or a truncated report all exit 1,
+because a check that decided nothing must never look like one that found nothing. Making the findings
+themselves fail is stage 4, and deliberately a separate change with its own evidence — there is no
+environment variable to flip it early, since an unused switch is an invitation to enable it without
+the data that should decide it.
+
+**Its settings are pinned, and that is not tuning.** With gremlins' defaults on this repository, 465
+of 1059 runnable mutants (44%) come back `TIMED OUT`. They are not infinite loops — they are worker
+contention — and they *hide survivors*: `internal/api` alone reports 0 survivors with the defaults and
+7 without them, and the module-wide count goes from 57 to 108. Note what does *not* move: efficacy
+reads 90.40% before and 89.74% after. A percentage that barely shifts while the absolute count doubles
+is how this would have gone unnoticed, and it is why `--timeout-coefficient` and `--workers` are set
+in `scripts/mutation.sh` rather than left to the tool.
+
 ### Rollout order
 
 | Order | Work | Gate | #178 phase | Effect |
@@ -350,9 +380,44 @@ instrument for a backlog.
 | 3 | `.claude/settings.json` with G1/G2 hooks; a review subagent | G1, G6 | — | **Landed.** A `PostToolUse` hook checks the edited file, a `Stop` hook checks what the turn changed, and `.claude/agents/diff-reviewer.md` reviews a diff in a fresh context. `make test-hooks` tests the hooks themselves. |
 | 4 | red-check (`make efficacy`) in pull-request CI | G4(b) | — | **Landed.** `scripts/efficacy.sh` reverts the branch's implementation diff in a scratch worktree and requires each test the branch changed — Go function or vitest case — to pass at HEAD and then go red against the revert, one at a time. Exempted by the `efficacy-exempt` label. |
 | 5 | Core-feature section in `scenarios.md`, ledger cross-check, core E2E | G0, G5 | Phases 4 and 6 | **Landed.** Sections H (core multiplexer) and I (opening URLs from a pane, #177's missing rows) added; `make check-scenarios` resolves every `auto` row; `frontend/e2e/core-multiplexer.spec.ts` covers split, resize, layout restore and workspace CRUD. |
-| 6 | Diff-scoped mutation testing (warn first, gate once stable) | G4(c) | merges with #164 | Measures protection against regressions directly. |
+| 6 | Diff-scoped mutation testing (warn first, gate once stable) | G4(c) | merges with #164 | **Warning landed.** `scripts/mutation.sh` runs gremlins scoped to the diff and names every mutant on a changed line that survives every test. Exits 0 on a finding — see D9. Making it fail is the remaining step. |
 | 7 | Performance and accessibility observation (measure only, do not gate) | — | — | **Landed.** `make bench` measures terminal throughput, replay-buffer cost and the relay's polling cost; `a11y.spec.ts` records axe violations. Both report; neither asserts. |
-| 8 | Per-block coverage on changed lines (#164, not a #180 item) | G4(d) | — | **Landed.** `scripts/coverage_blocks.sh` fails when a block covering a changed line never executed. Row 6 waits on it. |
+| 8 | Per-block coverage on changed lines (#164, not a #180 item) | G4(d) | — | **Landed.** `scripts/coverage_blocks.sh` fails when a block covering a changed line never executed. It unblocked row 6's measurement, which is what row 6 was waiting on. |
+
+## Surviving mutants: the first measurement
+
+Roadmap item 6's second stage asks whether tautologies survive per-block coverage. They do. The run
+below is at `d42e406`, whole module, `gremlins v0.6.0 unleash --timeout-coefficient 10 --workers 2`,
+14m25s.
+
+| | Count |
+|---|---|
+| Killed | 945 |
+| **Lived** | **108** |
+| Not covered | 172 |
+| Timed out | 6 |
+| Test efficacy | 89.74% |
+
+Every survivor is in code the per-block gate reports as covered, by construction: gremlins only
+mutates covered code. The two gates are not redundant.
+
+| Survivor | Count | What it is |
+|---|---|---|
+| Boundary value | 45 | Already required by DEVELOPMENT.md's "Test granularity" |
+| Other logic | 26 | Case by case |
+| Error branch | 25 | Needs fault injection to reach |
+| Tuning constant | 12 | Killing it would pin a constant and assert nothing |
+
+**The worked example, because it is the clearest statement of what G4(c) is for.** `port > 65535`
+appears in `internal/config/validate.go`, `internal/api/handler.go` and `internal/session/loopback.go`.
+Changing it to `>= 65535` makes all three reject port 65535 — a legal port — and every test still
+passes, in all three packages. The cause is identical in each: the tests use `65536`, one past the
+boundary, and never `65535`, the boundary itself. `make coverage-blocks` lists none of those lines,
+and is right not to: the blocks execute. What is missing is not execution but an assertion.
+
+That the same blind spot appears three times, in three packages, written at three different times, is
+the part worth keeping. It is not an oversight in one test; it is a habit the existing gates cannot
+see.
 
 ### Relationship to issue #164
 
@@ -371,9 +436,11 @@ shared `-coverpkg` list emits each block once per test binary. Neither alternati
 moved: [golang/go#70306](https://github.com/golang/go/issues/70306) is still an undecided proposal
 and gobco still instruments one package at a time. This remains block coverage, not C1.
 
-It closes item 6's first stage, not item 6. That item's completion condition — regression protection
+It closed item 6's first stage, not item 6. That item's completion condition — regression protection
 measured by whether the tests would *notice a change* — is untouched by a gate that reports whether a
-block *ran*. The next step it unblocks is the measurement, not a mutation implementation.
+block *ran*. The step it unblocked was the measurement, which has now been taken: 108 mutants survive
+in code this gate reports as covered (see "Surviving mutants" above). The two are complementary, and
+the measurement is what sized G4(c)'s first shape.
 
 ## First measurements
 
