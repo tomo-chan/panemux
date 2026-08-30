@@ -1,0 +1,78 @@
+{
+  "active": "default",
+  "items": [
+    {
+      "id": "default",
+      "layout": {
+        "children": [
+          {
+            "pane": {
+              "agent_board": {
+                "enabled": true,
+                "mode": "both"
+              },
+              "cwd": "/workspace/user/project",
+              "id": "pane-editor",
+              "shell": "/bin/sh",
+              "show_header": true,
+              "show_status_bar": false,
+              "title": "Editor",
+              "type": "local"
+            },
+            "size": 40
+          },
+          {
+            "children": [
+              {
+                "pane": {
+                  "agent_board": {},
+                  "connection": "build-box",
+                  "cwd": "/remote/home/demo",
+                  "id": "pane-build",
+                  "title": "Build",
+                  "type": "ssh"
+                },
+                "size": 50
+              },
+              {
+                "pane": {
+                  "agent_board": {},
+                  "connection": "build-box",
+                  "id": "pane-logs",
+                  "title": "Logs",
+                  "tmux_session": "logs",
+                  "type": "ssh_tmux"
+                },
+                "size": 50
+              }
+            ],
+            "direction": "vertical",
+            "size": 60
+          }
+        ],
+        "direction": "horizontal"
+      },
+      "title": "Default"
+    },
+    {
+      "id": "scratch",
+      "layout": {
+        "children": [
+          {
+            "pane": {
+              "agent_board": {},
+              "id": "pane-scratch",
+              "tmux_session": "scratch",
+              "type": "tmux"
+            },
+            "size": 100
+          }
+        ],
+        "direction": "horizontal"
+      },
+      "title": "Scratch"
+    }
+  ],
+  "tab_position": "top",
+  "vertical_bar_width": 280
+}

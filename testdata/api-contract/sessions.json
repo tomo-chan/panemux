@@ -1,0 +1,14 @@
+[
+  {
+    "id": "pane-editor",
+    "state": "connected",
+    "title": "pane-editor",
+    "type": "local"
+  },
+  {
+    "id": "pane-build",
+    "state": "connected",
+    "title": "pane-build",
+    "type": "local"
+  }
+]

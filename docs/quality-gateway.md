@@ -167,7 +167,7 @@ Ordering is meaningful: the point is to stop a defect at the cheapest gate that 
 | **G0** | Spec | Functional suitability (rework) | The change is tied to a row in [scenarios.md](scenarios.md). A user-visible change adds or updates a row in the same commit. | CI: fail when the diff touches `frontend/src`, `internal/api` or `internal/config` and `scenarios.md` is unchanged; a label grants explicit exemption | Present — `.github/workflows/scenarios.yml`, exempted by the `scenarios-exempt` label |
 | **G1** | Edit | Maintainability | `gofmt -s`, `tsc --noEmit`, and `go vet` on the touched packages only | Claude Code `PostToolUse` hook in `.claude/settings.json` | Present — `.claude/hooks/post-edit-check.sh` |
 | **G2** | Unit | Functional suitability, fast feedback | `make test-go`, `make test-frontend` — unchanged | Existing (`make check`, pre-push, CI) | Present |
-| **G3** | Contract | **Resistance to refactoring**, compatibility | (a) HTTP/WS integration through the real `server.New()` router; (b) exhaustiveness check on the route table (every registered route against an expected set); (c) Zod schema round-trips; (d) the agmsg contract | New `make test-contract`, folded into `make check`; (b) as an always-on Go test | Partial — (b) and (d) present; (a) present for HTTP (`internal/server/api_integration_test.go` drives every `/api` route and fails when one has no case), absent for `/ws`; (c) absent |
+| **G3** | Contract | **Resistance to refactoring**, compatibility | (a) HTTP/WS integration through the real `server.New()` router; (b) exhaustiveness check on the route table (every registered route against an expected set); (c) Zod schema round-trips; (d) the agmsg contract | Always-on Go and vitest tests, in `make check` | **Present.** (a) `internal/server/api_integration_test.go` drives every `/api` route and fails when one has no case; `ws_integration_test.go` drives both `/ws` routes over a real handshake. (b) and (d) unchanged. (c) `contract_fixture_test.go` captures real responses into `testdata/api-contract/`, which `frontend/src/schemas/contract.test.ts` parses with the schema that owns each one |
 | **G4** | Efficacy | **Protection against regressions** | (a) coverage — scope tracks the implementation, threshold stays at 80%; (b) **red-check**: a changed test must fail when the implementation diff is reverted; (c) mutation score over changed lines only; (d) **per-block coverage**: no block covering a changed line may be one the suite never entered | (a) existing `make check`; (b), (c) and (d) pull-request CI jobs, `make efficacy`, `make mutation` and `make coverage-blocks` | Partial — (a) present and now scoped to every decision-holding package; (b) present (`make efficacy`, a pull-request-only CI job); (d) present (`make coverage-blocks`, likewise); (c) present as a **warning** (`make mutation`), not yet as a gate |
 | **G5** | Scenario | Functional suitability, interaction capability | Playwright E2E, plus a check that every test named by an `auto` row in `scenarios.md` actually exists | CI, extending `make test-e2e` | Present — E2E plus `make check-scenarios`, which resolves every `auto` row |
 | **G6** | Adversarial | All characteristics (design judgement) | A fresh-context review of the diff alone. The session that wrote the code does not grade it. Findings limited to correctness and stated requirements. | A review subagent in `.claude/agents/` plus human review. **Does not block** | Present — `.claude/agents/diff-reviewer.md`; still does not block |
@@ -371,11 +371,37 @@ reads 90.40% before and 89.74% after. A percentage that barely shifts while the 
 is how this would have gone unnoticed, and it is why `--timeout-coefficient` and `--workers` are set
 in `scripts/mutation.sh` rather than left to the tool.
 
+**D10 — The contract fixtures are rewritten on every run, not diffed against.**
+G3(c)'s obvious shape is a golden test: capture the response, compare it to the committed file, fail
+when they differ. That shape defeats the gate. The failure it exists to catch is a Go struct changing
+while the Zod schema does not, and a golden test stops at the **Go** suite — the frontend, which is
+the side holding the stale schema, never sees the new shape at all. So
+`internal/server/contract_fixture_test.go` writes `testdata/api-contract/` unconditionally, and
+because the Go suite runs before the frontend suite in `make test`, `make check` and `ci.yml`, the
+rename reaches `frontend/src/schemas/contract.test.ts` and *that* is what goes red. Both directions
+were confirmed by perturbation before this was called done: renaming a **required** field
+(`is_status`) fails the parse, and renaming an **optional** one (`last_tool`) fails the
+equality check below.
+
+Three consequences worth stating rather than discovering:
+
+- **A fixture is only as current as the last `make test-go`.** After changing a response struct, a
+  green frontend run alone proves nothing. The cost is real; the alternative costs the gate.
+- **Parsing is not enough, so the parsed value must equal the captured one.** Zod *strips* keys a
+  schema does not declare, so an optional field renamed in Go passes `safeParse` cleanly: the old
+  key is absent, the new one is silently dropped. `expect(schema.parse(captured)).toEqual(captured)`
+  is what makes that visible, and it is the check that caught `last_tool` above.
+- **Only values are normalized, never keys or types.** Timestamps, the capture's temp `HOME`, the
+  random `BoardCache` epoch and the detected shell would otherwise rewrite the files on every run and
+  leave a clean checkout dirty. `TestAPIContractFixtures_ContainNoMachinePaths` re-checks the path
+  half against the written files, so a normalization rule that quietly stops matching fails the suite
+  instead of committing someone's home directory.
+
 ### Rollout order
 
 | Order | Work | Gate | #178 phase | Effect |
 |---|---|---|---|---|
-| 1 | Real-router integration harness; single source of truth for the route table plus an exhaustiveness check | G3 | Phase 1 | **Landed.** The table has one definition, the exhaustiveness check pins it, and every `/api` route is now driven through `server.New()` — itself exhaustive across both command-center states, so a new route has no test until someone writes one, and a case that stops asserting a success path has to say so. The `/ws` half is still open. |
+| 1 | Real-router integration harness; single source of truth for the route table plus an exhaustiveness check | G3 | Phase 1 | **Landed.** The table has one definition, the exhaustiveness check pins it, and every `/api` route is now driven through `server.New()` — itself exhaustive across both command-center states, so a new route has no test until someone writes one, and a case that stops asserting a success path has to say so. Both `/ws` routes followed in #191, over real handshakes on a real listener, including that `/ws/board-command` is *absent* rather than rejecting when the command center is off. |
 | 2 | Widen coverage scope (threshold unchanged) | G4(a) | Phases 2 and 5 | **Landed.** `internal/portforward`, `internal/commandcenter`, `internal/boardmcp`, the root package and `frontend/src/utils/**` are now gated. Go reports 86% over the wider set (it was 88% over the narrower one — the drop is the point), frontend 95%; the threshold is unchanged at 80%. |
 | 3 | `.claude/settings.json` with G1/G2 hooks; a review subagent | G1, G6 | — | **Landed.** A `PostToolUse` hook checks the edited file, a `Stop` hook checks what the turn changed, and `.claude/agents/diff-reviewer.md` reviews a diff in a fresh context. `make test-hooks` tests the hooks themselves. |
 | 4 | red-check (`make efficacy`) in pull-request CI | G4(b) | — | **Landed.** `scripts/efficacy.sh` reverts the branch's implementation diff in a scratch worktree and requires each test the branch changed — Go function or vitest case — to pass at HEAD and then go red against the revert, one at a time. Exempted by the `efficacy-exempt` label. |
@@ -383,6 +409,7 @@ in `scripts/mutation.sh` rather than left to the tool.
 | 6 | Diff-scoped mutation testing (warn first, gate once stable) | G4(c) | merges with #164 | **Warning landed.** `scripts/mutation.sh` runs gremlins scoped to the diff and names every mutant on a changed line that survives every test. Exits 0 on a finding — see D9. Making it fail is the remaining step. |
 | 7 | Performance and accessibility observation (measure only, do not gate) | — | — | **Landed.** `make bench` measures terminal throughput, replay-buffer cost and the relay's polling cost; `a11y.spec.ts` records axe violations. Both report; neither asserts. |
 | 8 | Per-block coverage on changed lines (#164, not a #180 item) | G4(d) | — | **Landed.** `scripts/coverage_blocks.sh` fails when a block covering a changed line never executed. It unblocked row 6's measurement, which is what row 6 was waiting on. |
+| 9 | Zod schema round-trips against real Go output (#191, closing G3(c)) | G3 | Phase 1 | **Landed.** `internal/server/contract_fixture_test.go` captures every response the dashboard parses, plus both WebSocket frame streams, into `testdata/api-contract/`; `frontend/src/schemas/contract.test.ts` parses each with the schema that owns it and requires the parsed value to equal the captured one, so a field Zod *strips* fails too. Decision D10 records why the fixtures are rewritten rather than diffed. |
 
 ## Surviving mutants: the first measurement
 

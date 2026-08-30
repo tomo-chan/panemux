@@ -1,0 +1,16 @@
+{
+  "hosts": [
+    {
+      "hostname": "build.invalid",
+      "identity_file": "/remote/home/demo/.ssh/id_ed25519",
+      "name": "build-box",
+      "port": 2222,
+      "user": "demo"
+    },
+    {
+      "hostname": "gpu.invalid",
+      "name": "gpu-box",
+      "user": "demo"
+    }
+  ]
+}
