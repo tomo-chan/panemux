@@ -402,10 +402,13 @@ func newestKnownAgentTypeDescendantPID(processes []processInfo, rootPID int) (pi
 		stack = append(stack, children[proc.PID]...)
 
 		if t, matched := detectAgmsgAgentType(proc.Command); matched {
-			// The `>` boundary cannot be pinned by a test: two processes in
-			// one ps snapshot never share a PID, so `>=` can only differ on
-			// input the OS cannot produce. Issue #190.
-			//mutation:exempt equivalent — PIDs are unique within one snapshot, so >= never sees an equal pair
+			// `>=` here is killable, but only by input the OS cannot
+			// produce: two matching processes sharing a PID, where the
+			// agmsgType reported would differ (the PID would not). A test
+			// for it would have to fabricate that snapshot and then pin
+			// whichever type the traversal happens to reach first — an
+			// accident of stack order, not designed behavior. Issue #190.
+			//mutation:exempt unreachable — killable only by a fabricated snapshot with a duplicate PID
 			if !ok || proc.PID > pid {
 				pid, agmsgType, ok = proc.PID, t, true
 			}
@@ -432,9 +435,12 @@ func newestMatchingDescendantPID(processes []processInfo, rootPID int, match fun
 		stack = append(stack, children[proc.PID]...)
 
 		if match(proc.Command) {
-			// Equivalent for the same reason as
-			// newestKnownAgentTypeDescendantPID above. Issue #190.
-			//mutation:exempt equivalent — PIDs are unique within one snapshot, so >= never sees an equal pair
+			// Unlike newestKnownAgentTypeDescendantPID above, this one is
+			// equivalent outright rather than merely unreachable: the guard's
+			// only writes are `matched = proc.PID` and `ok = true`, so on an
+			// equal PID `>=` assigns the value already there. There is no
+			// second return value for it to change. Issue #190.
+			//mutation:exempt equivalent — on an equal PID the guard reassigns the same value, so >= cannot differ
 			if !ok || proc.PID > matched {
 				matched = proc.PID
 				ok = true

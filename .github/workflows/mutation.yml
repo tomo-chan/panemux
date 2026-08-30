@@ -72,6 +72,26 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # Node and the dependency install are here for one reason, and it is not
+      # the frontend tests — this job runs none. gremlins gathers coverage over
+      # the WHOLE module before mutating anything, so the root package has to
+      # compile, and main.go embeds frontend/dist. `make mutation` therefore
+      # depends on build-frontend, exactly as `make coverage-go` does, and
+      # coverage-blocks.yml carries these same two steps for the same reason.
+      #
+      # This job had never actually reached gremlins before #190: every earlier
+      # pull request exited at "no Go implementation changed" first, so the
+      # missing setup surfaced the first time the gate had real work to do.
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: make install-deps-ci
+
       # gremlins is not a module dependency and `make install-deps` does not
       # install it — it is a tool this one job needs, not something a developer
       # must have to build or test the project. Pinned to the version #180's

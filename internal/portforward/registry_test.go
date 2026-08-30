@@ -485,6 +485,46 @@ func TestRegistryDefaultsTheTTLWhenUnset(t *testing.T) {
 	}
 }
 
+// TestRegistryEndConnNeverDrivesTheCounterNegative pins the defensive half of
+// endConn's `active > 0`. Production only ever calls it paired with beginConn,
+// so nothing else in this suite reaches the guard at all — and `>= 0` is not
+// harmless if it ever is reached: active goes to -1, reapExpired's own
+// `f.active == 0` stops matching, and the forward outlives its TTL for the
+// life of the process. Issue #190.
+func TestRegistryEndConnNeverDrivesTheCounterNegative(t *testing.T) {
+	dialer := &echoDialer{addr: startEchoServer(t)}
+	clock := newFakeClock()
+	r := newTestRegistry(t, Options{
+		TTL:           10 * time.Minute,
+		SweepInterval: -1,
+		Now:           clock.Now,
+	})
+	port := freePort(t)
+	if _, err := r.Ensure("pane-1", port, dialer); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	r.mu.Lock()
+	f := r.forwards[port]
+	r.mu.Unlock()
+
+	// Unpaired: no connection was ever accepted, so beginConn never ran.
+	r.endConn(f)
+
+	r.mu.Lock()
+	active := f.active
+	r.mu.Unlock()
+	if active != 0 {
+		t.Fatalf("active after an unpaired endConn = %d, want it held at 0", active)
+	}
+
+	clock.Advance(11 * time.Minute)
+	r.reapExpired()
+	if got := r.Ports("pane-1"); len(got) != 0 {
+		t.Fatalf("Ports after the TTL elapsed = %v, want the forward reaped — a negative "+
+			"active counter makes it unreapable", got)
+	}
+}
+
 func TestRegistryEnsureRefreshesTheIdleDeadline(t *testing.T) {
 	dialer := &echoDialer{addr: startEchoServer(t)}
 	clock := newFakeClock()

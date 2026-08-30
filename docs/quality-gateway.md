@@ -431,25 +431,39 @@ the board cache's history bound, the replay buffer's 256 KiB bound, the three `t
 fallbacks, and `remoteShellPID`'s `pid <= 0`. Each was confirmed by reverting the comparison by hand
 and watching the suite go red — a passing new test proves nothing on its own here.
 
-**Six of the 45 are equivalent mutants, not missing tests.** They are counted as boundary survivors
-because that is what they look like from outside, but no test can kill them, because the mutated
-program computes the same thing:
+**Five of the 45 are survivors no reasonable test kills — and the distinction between the two ways
+that happens is the part worth keeping**, because they argue for stage 4 differently. An *equivalent*
+mutant computes the same thing on every possible input; nothing can distinguish it. An *unreachable*
+one is killable, but only by input the code's own callers cannot produce.
 
-| Site | Mutant | Why it is equivalent |
-|---|---|---|
-| `internal/board/cache.go` | `overflow > 0` → `>= 0` | at `overflow == 0`, `history[0:]` is the same slice |
-| `internal/session/manager.go` | `len > limit` → `>=` | at exactly the limit, `history[len-limit:]` is the same bytes |
-| `internal/session/local.go` (`processIDArg`) | `pid <= 0` → `< 0` | `validProcessIDArg` (`^[1-9][0-9]*$`) rejects `"0"` with the identical error |
-| `internal/session/local.go` (two newest-PID scans) | `PID > x` → `>=` | two processes in one `ps` snapshot never share a PID |
-| `internal/portforward/registry.go` (`endConn`) | `active > 0` → `>= 0` | `endConn` is only ever called paired with `beginConn`, so `active` is never 0 there |
+| Site | Mutant | Kind | Why |
+|---|---|---|---|
+| `internal/board/cache.go` | `overflow > 0` → `>= 0` | equivalent | at `overflow == 0`, `history[0:]` is the same slice |
+| `internal/session/manager.go` | `len > limit` → `>=` | equivalent | at exactly the limit, `history[len-limit:]` is the same bytes |
+| `internal/session/local.go` (`processIDArg`) | `pid <= 0` → `< 0` | equivalent | `validProcessIDArg` (`^[1-9][0-9]*$`) rejects `"0"` with the identical error |
+| `internal/session/local.go` (`newestMatchingDescendantPID`) | `PID > matched` → `>=` | equivalent | on an equal PID the guard reassigns the value already there, and the function returns nothing else for it to change |
+| `internal/session/local.go` (`newestKnownAgentTypeDescendantPID`) | `PID > pid` → `>=` | unreachable | it *does* differ on two matching processes sharing a PID — in the reported `agmsgType`, not the PID — but only a fabricated snapshot has that, and the assertion would pin traversal order, an accident of the stack |
 
-Each carries a `//mutation:exempt` with that reason. This is the first real evidence for how much of
-G4(c)'s noise is irreducible rather than fixable, which is what item 6's fourth stage — whether to
-make `make mutation` fail — needs before it can be decided: **the "boundary value" row is not 45
-missing tests. At least six of them cannot be killed by anyone**, and that count is a floor, not a
-census — it is what surfaced while working the sites #190 named, not an audit of all 45. A gate that
-failed on that group would be wrong about better than one finding in eight, in the very class the
-measurement called most actionable.
+Each carries a `//mutation:exempt` naming which of the two it is. **The line between them is not
+rhetorical, and this repository got it wrong first: a sixth mutant was filed here as "equivalent" and
+was not.** `endConn`'s `active > 0` in `internal/portforward/registry.go` was exempted on the grounds
+that `endConn` is only ever called paired with `beginConn` — which is an argument about
+*reachability*, and a correct one, but says nothing about equivalence. `>= 0` drives `active` to −1
+on an unpaired call, `reapExpired`'s own `f.active == 0` then never matches again, and the forward
+outlives its TTL for the life of the process. That is a real defect behind a real guard, and it now
+has a test (`TestRegistryEndConnNeverDrivesTheCounterNegative`) rather than an exemption. The check
+that catches this class: *if the mutant were reachable, would anything be wrong?* — "equivalent"
+survives that question, "unreachable" does not.
+
+This is the first real evidence for how much of G4(c)'s noise is irreducible rather than fixable,
+which is what item 6's fourth stage — whether to make `make mutation` fail — needs before it can be
+decided: **the "boundary value" row is not 45 missing tests.** Four of them cannot be killed by
+anyone, one only by a fabricated input, and that count is a floor rather than a census — it is what
+surfaced while working the sites #190 named, not an audit of all 45. A gate failing on that group
+would demand tautologies in the very class the measurement called most actionable. The `endConn`
+correction is the counterweight: a reviewer who accepts an exemption's *reason* without asking which
+kind it claims will wave through real defects, so stage 4 needs the two words kept apart in the
+marker itself, not just in this table.
 
 **The red-check's first live verdict on a Go diff came from here too, and it is worth reading
 carefully.** G4(b) had never judged a real pull request — #185, #186, #187 and #189 all changed no Go

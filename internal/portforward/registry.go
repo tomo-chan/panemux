@@ -275,12 +275,10 @@ func (r *Registry) beginConn(f *forward) {
 func (r *Registry) endConn(f *forward) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	// The `> 0` boundary cannot be pinned by a test: endConn is only ever
-	// called from serve's deferred pairing with beginConn, so active is at
-	// least 1 whenever this runs and `>= 0` decrements exactly the same set
-	// of calls. The guard stays as the defense it was written to be against
-	// a future unpaired caller. Issue #190.
-	//mutation:exempt equivalent — endConn is always paired with beginConn, so active is never 0 here
+	// The guard is not decoration: without it an unpaired endConn drives
+	// active negative, and reapExpired's own `f.active == 0` then never
+	// matches again, so the forward outlives its TTL forever.
+	// TestRegistryEndConnNeverDrivesTheCounterNegative pins that.
 	if f.active > 0 {
 		f.active--
 	}
