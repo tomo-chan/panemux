@@ -126,7 +126,8 @@ Example: `Config.sshConfigPath` uses `sshconfig.DefaultPath()` only when the ove
 - Run it yourself with `make efficacy` (compares against `origin/main`; override with `EFFICACY_BASE`). CI runs it on every pull request.
 - It is deliberately **not** part of `make check` — it needs the base branch and a second test run, which is a per-pull-request cost, not a per-turn one.
 - A branch that changes no implementation, or changes implementation but no test, is skipped rather than failed.
-- If a change genuinely should not go red without its implementation — a pure refactor, a test-only rename — apply the `efficacy-exempt` label to the pull request and say why in the description. That is the only exemption; do not reach for it to get past a test that turned out not to assert anything.
+- If a change genuinely should not go red without its implementation — a pure refactor, a test-only rename, a test pinning behavior this branch never touched — mark that test `//efficacy:exempt <reason>` in the comment directly above it. **The reason is required**, and the marker is the one to reach for first: it is per-test and it sits in the diff a reviewer reads. The `efficacy-exempt` label is the blunter tool and takes the whole branch out of scope.
+- Neither is for getting past a test that turned out not to assert anything. A branch where most changed tests survive is worth a second look before it is exempted: on [#190](https://github.com/tomo-chan/panemux/issues/190) 15 of 18 survived and every one was legitimate, because the whole branch existed to pin already-correct behavior — that is the rare shape, not the usual one.
 - See decision D4 in [docs/quality-gateway.md](docs/quality-gateway.md).
 
 ### Quality gate

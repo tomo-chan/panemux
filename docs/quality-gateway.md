@@ -451,6 +451,21 @@ census — it is what surfaced while working the sites #190 named, not an audit 
 failed on that group would be wrong about better than one finding in eight, in the very class the
 measurement called most actionable.
 
+**The red-check's first live verdict on a Go diff came from here too, and it is worth reading
+carefully.** G4(b) had never judged a real pull request — #185, #186, #187 and #189 all changed no Go
+implementation, so it correctly skipped every time. On this branch it ran, and **15 of 18 changed
+tests survived the revert**. Nothing was wrong with them. A branch that exists to pin behavior that
+is *already correct* cannot make those tests go red by reverting an implementation it never changed;
+that is arithmetic, not a weak assertion. Each carries a per-test `//efficacy:exempt` with that
+reason — the narrow marker `scripts/efficacy.sh` documents, not the branch-wide `efficacy-exempt`
+label — and the three tests around `resolveSweepInterval` went red exactly as they should.
+
+The lesson for stage 4 is not "the gate is too strict". It is that **G4(b) and G4(c) disagree about
+this branch by construction**: mutation says these tests are the fix, the red-check says they are
+out of its scope, and both are right. A rule of thumb falls out of it — a *high* survivor rate on a
+branch whose diff is nearly all tests is expected; the same rate on a branch that changed real
+behavior is the signal D4 was built for.
+
 **One implementation change came out of it**, and it is the shape the repository already prefers.
 `New` in `internal/portforward/registry.go` decided three things at once about `Options.SweepInterval`
 — disabled, defaulted, or as given — and the boundary between the first two sits exactly at zero,
