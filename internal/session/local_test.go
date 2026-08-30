@@ -157,6 +157,35 @@ func TestProcessIDArg_RejectsNonPositivePID(t *testing.T) {
 	assert.Contains(t, err.Error(), "invalid pid")
 }
 
+// TestProcessIDArg_PIDBoundary walks both sides of the boundary. The test
+// above only pins 0; without the accepting cases nothing said the guard stops
+// at exactly the right place. Issue #190.
+func TestProcessIDArg_PIDBoundary(t *testing.T) {
+	tests := []struct {
+		name    string
+		want    string
+		pid     int
+		wantErr bool
+	}{
+		{name: "negative", pid: -1, wantErr: true},
+		{name: "zero", pid: 0, wantErr: true},
+		{name: "the lowest usable pid", pid: 1, want: "1"},
+		{name: "an ordinary pid", pid: 4242, want: "4242"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			arg, err := processIDArg(tt.pid)
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "invalid pid")
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, arg)
+		})
+	}
+}
+
 func TestLocalDirectoryServiceUserPath_RejectsInvalidUsername(t *testing.T) {
 	_, err := localDirectoryServiceUserPath("bad/user")
 	require.Error(t, err)

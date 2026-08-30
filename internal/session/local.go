@@ -402,6 +402,10 @@ func newestKnownAgentTypeDescendantPID(processes []processInfo, rootPID int) (pi
 		stack = append(stack, children[proc.PID]...)
 
 		if t, matched := detectAgmsgAgentType(proc.Command); matched {
+			// The `>` boundary cannot be pinned by a test: two processes in
+			// one ps snapshot never share a PID, so `>=` can only differ on
+			// input the OS cannot produce. Issue #190.
+			//mutation:exempt equivalent — PIDs are unique within one snapshot, so >= never sees an equal pair
 			if !ok || proc.PID > pid {
 				pid, agmsgType, ok = proc.PID, t, true
 			}
@@ -428,6 +432,9 @@ func newestMatchingDescendantPID(processes []processInfo, rootPID int, match fun
 		stack = append(stack, children[proc.PID]...)
 
 		if match(proc.Command) {
+			// Equivalent for the same reason as
+			// newestKnownAgentTypeDescendantPID above. Issue #190.
+			//mutation:exempt equivalent — PIDs are unique within one snapshot, so >= never sees an equal pair
 			if !ok || proc.PID > matched {
 				matched = proc.PID
 				ok = true
@@ -767,6 +774,12 @@ func codexSessionPath(paths []string) (string, bool) {
 }
 
 func processIDArg(pid int) (string, error) {
+	// The `<= 0` boundary cannot be pinned by a test: validProcessIDArg below
+	// is `^[1-9][0-9]*$`, so a pid of 0 that got past this guard is rejected
+	// by the regex with the identical error. TestProcessIDArg_PIDBoundary
+	// covers both sides of the boundary; the mutant on it is equivalent, not
+	// unkilled. Issue #190.
+	//mutation:exempt equivalent — validProcessIDArg rejects "0" with the same error, so < 0 cannot behave differently
 	if pid <= 0 {
 		return "", fmt.Errorf("invalid pid: %d", pid)
 	}

@@ -419,6 +419,48 @@ That the same blind spot appears three times, in three packages, written at thre
 the part worth keeping. It is not an oversight in one test; it is a habit the existing gates cannot
 see.
 
+### Clearing the boundary-value class (issue #190)
+
+[#190](https://github.com/tomo-chan/panemux/issues/190) took the 45 boundary survivors above. What it
+found is worth recording, because it changes how the row should be read.
+
+**The habit was real and it is now pinned.** Every site the issue named is exercised at the boundary
+itself and at both neighbors: the three `port > 65535` checks, `child.Size <= 0` and the `±0.1` sum
+tolerance in `internal/config`, `forwardablePort`'s `1024`/`65535` ends, the registry's TTL default,
+the board cache's history bound, the replay buffer's 256 KiB bound, the three `timeout <= 0`
+fallbacks, and `remoteShellPID`'s `pid <= 0`. Each was confirmed by reverting the comparison by hand
+and watching the suite go red — a passing new test proves nothing on its own here.
+
+**Six of the 45 are equivalent mutants, not missing tests.** They are counted as boundary survivors
+because that is what they look like from outside, but no test can kill them, because the mutated
+program computes the same thing:
+
+| Site | Mutant | Why it is equivalent |
+|---|---|---|
+| `internal/board/cache.go` | `overflow > 0` → `>= 0` | at `overflow == 0`, `history[0:]` is the same slice |
+| `internal/session/manager.go` | `len > limit` → `>=` | at exactly the limit, `history[len-limit:]` is the same bytes |
+| `internal/session/local.go` (`processIDArg`) | `pid <= 0` → `< 0` | `validProcessIDArg` (`^[1-9][0-9]*$`) rejects `"0"` with the identical error |
+| `internal/session/local.go` (two newest-PID scans) | `PID > x` → `>=` | two processes in one `ps` snapshot never share a PID |
+| `internal/portforward/registry.go` (`endConn`) | `active > 0` → `>= 0` | `endConn` is only ever called paired with `beginConn`, so `active` is never 0 there |
+
+Each carries a `//mutation:exempt` with that reason. This is the first real evidence for how much of
+G4(c)'s noise is irreducible rather than fixable, which is what item 6's fourth stage — whether to
+make `make mutation` fail — needs before it can be decided: **the "boundary value" row is not 45
+missing tests. At least six of them cannot be killed by anyone**, and that count is a floor, not a
+census — it is what surfaced while working the sites #190 named, not an audit of all 45. A gate that
+failed on that group would be wrong about better than one finding in eight, in the very class the
+measurement called most actionable.
+
+**One implementation change came out of it**, and it is the shape the repository already prefers.
+`New` in `internal/portforward/registry.go` decided three things at once about `Options.SweepInterval`
+— disabled, defaulted, or as given — and the boundary between the first two sits exactly at zero,
+where nothing observable distinguishes them: a reaper that ticks once a minute cannot be waited on in
+a test. Splitting the decision into the pure `resolveSweepInterval` made all three cases assertable,
+the same move `browserOpenArgv` is split out of `openChrome` for (see
+[security.md](security.md#launching-the-operators-browser---open)) and the same thing
+DEVELOPMENT.md's testability rule asks for. Where a boundary is unverifiable in place, extracting the
+decision is the fix; adding a test that asserts the code's own constant back to itself is not.
+
 ### Relationship to issue #164
 
 [#164](https://github.com/tomo-chan/panemux/issues/164) proposed parsing the coverage profile per

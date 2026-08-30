@@ -430,6 +430,96 @@ func TestRelay_Poll_HostOperationTimeout_DoesNotBlockOtherHosts(t *testing.T) {
 	assert.Equal(t, 1, hostB.sinceCallCount(), "host-b must still be polled despite host-a being stuck")
 }
 
+// TestRelay_OperationTimeout_UnsetOrNegative_FallsBackToTheDefault pins the
+// boundary the fallback sits on. Every other RelayConfig in this suite either
+// omits OperationTimeout entirely — and is served by a fake that ignores its
+// context, so a zero-length deadline would go unnoticed — or sets a positive
+// value, so `opTimeout < 0` would have given every real caller an
+// already-expired context and failed every poll with the suite still green.
+// Issue #190.
+func TestRelay_OperationTimeout_UnsetOrNegative_FallsBackToTheDefault(t *testing.T) {
+	tests := []struct {
+		name       string
+		configured time.Duration
+	}{
+		{name: "unset is the default for every real caller", configured: 0},
+		{name: "negative is nonsense and also falls back", configured: -time.Second},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			host := &deadlineCheckingAgmsgClient{
+				hostID: "host-a",
+				rows: []Row{
+					{ID: "1", Team: "panemux", From: "pane-a", To: "pane-b", Body: "hi"},
+				},
+			}
+			cache := NewBoardCache()
+			r := NewRelay(cache, RelayConfig{
+				Team:             "panemux",
+				Clients:          map[string]AgmsgClient{"host-a": host},
+				PaneHosts:        map[string]string{"pane-a": "host-a", "pane-b": "host-a"},
+				Limit:            100,
+				BackfillLimit:    1000,
+				OperationTimeout: tt.configured,
+			})
+
+			require.NoError(t, r.Poll(context.Background()))
+			assert.Len(t, cache.MessagesSince(0), 1)
+			assert.Equal(
+				t, hostOperationTimeout, host.observedBudget(),
+				"the per-host call must get the default budget, not a zero-length one",
+			)
+		})
+	}
+}
+
+// deadlineCheckingAgmsgClient fails the way a real client would when handed an
+// already-expired context, and records how much budget its context carried, so
+// a test can tell "defaulted to hostOperationTimeout" from "left at zero".
+type deadlineCheckingAgmsgClient struct {
+	hostID string
+	rows   []Row
+	budget time.Duration
+	mu     sync.Mutex
+}
+
+func (d *deadlineCheckingAgmsgClient) HostID() string { return d.hostID }
+
+func (d *deadlineCheckingAgmsgClient) Since(ctx context.Context, _, afterID string, _ int) ([]Row, error) {
+	if err := d.record(ctx); err != nil {
+		return nil, err
+	}
+	return filterRowsAfter(d.rows, afterID), nil
+}
+
+func (d *deadlineCheckingAgmsgClient) Send(ctx context.Context, _, _, _, _ string) error {
+	return d.record(ctx)
+}
+
+// record rounds the remaining budget up to whole seconds: the exact value has
+// already ticked down by the time the client sees it, and the assertion is
+// about which budget was chosen, not about nanosecond accuracy.
+func (d *deadlineCheckingAgmsgClient) record(ctx context.Context) error {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return errors.New("deadlineCheckingAgmsgClient: call carried no deadline at all")
+	}
+	remaining := time.Until(deadline)
+	d.mu.Lock()
+	d.budget = remaining.Round(time.Second)
+	d.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("deadlineCheckingAgmsgClient: %w", err)
+	}
+	return nil
+}
+
+func (d *deadlineCheckingAgmsgClient) observedBudget() time.Duration {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.budget
+}
+
 // blockingAgmsgClient's Since never returns on its own — it only returns
 // once ctx is done, so it can only be unblocked by a caller-side timeout.
 type blockingAgmsgClient struct {

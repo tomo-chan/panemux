@@ -1533,6 +1533,38 @@ func TestPostSSHConfigHost_PortOutOfRange_422(t *testing.T) {
 	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
 }
 
+// TestPostSSHConfigHost_PortRangeBoundaries pins both ends of the accepted
+// range, including the boundaries themselves. The out-of-range test above only
+// used 70000 — 4465 past the top — so `port >= 65535` would have rejected a
+// legal port with the suite still green, and `port <= 0` would have rejected
+// the omitted-port case (0 means "leave Port out of the ssh_config entry",
+// which is why the low bound is 0 here and 1 in internal/config). Issue #190.
+func TestPostSSHConfigHost_PortRangeBoundaries(t *testing.T) {
+	tests := []struct {
+		name     string
+		port     int
+		wantCode int
+	}{
+		{name: "one below the low bound", port: -1, wantCode: http.StatusUnprocessableEntity},
+		{name: "the low bound itself means omitted", port: 0, wantCode: http.StatusCreated},
+		{name: "one above the low bound", port: 1, wantCode: http.StatusCreated},
+		{name: "one below the high bound", port: 65534, wantCode: http.StatusCreated},
+		{name: "the high bound itself", port: 65535, wantCode: http.StatusCreated},
+		{name: "one above the high bound", port: 65536, wantCode: http.StatusUnprocessableEntity},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := postSSHConfigHost(t, sshConfigHostRequest{
+				Name:     "boundary-host",
+				Hostname: "boundary.example.com",
+				User:     "ubuntu",
+				Port:     tt.port,
+			})
+			assert.Equal(t, tt.wantCode, rec.Code)
+		})
+	}
+}
+
 func TestPostSSHConfigHost_DuplicateName_409(t *testing.T) {
 	sshConfigPath := writeTempSSHConfigForAPI(t, "Host existing\n    HostName existing.example.com\n    User ubuntu\n")
 
@@ -2214,6 +2246,33 @@ func TestLookupPRInfo_TimesOutAndFallsBack(t *testing.T) {
 	url, number := h.lookupPRInfo(newMockSession("s1"), t.TempDir(), session.GitContext{Branch: "feature/slow"})
 	assert.Empty(t, url)
 	assert.Zero(t, number)
+}
+
+// TestLookupPRInfo_NonPositiveTimeout_FallsBackToAWorkableBudget pins the
+// boundary the fallback sits on. The timeout test above only ever sets a
+// positive value, and prLookupTimeout's own default is positive too, so
+// `timeout < 0` would have handed context.WithTimeout a zero-length budget
+// whenever the timeout was left unset — every PR lookup failing before `gh`
+// could run — with the suite still green. Issue #190.
+func TestLookupPRInfo_NonPositiveTimeout_FallsBackToAWorkableBudget(t *testing.T) {
+	for _, configured := range []time.Duration{0, -time.Second} {
+		t.Run(configured.String(), func(t *testing.T) {
+			h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
+			h.ghBinaryPath = writeFakeGHBinary(
+				t,
+				"#!/bin/sh\necho '{\"url\":\"https://github.com/example/panemux/pull/7\",\"number\":7}'\n",
+			)
+			prev := prLookupTimeout
+			prLookupTimeout = configured
+			t.Cleanup(func() { prLookupTimeout = prev })
+
+			url, number := h.lookupPRInfo(
+				newMockSession("s1"), t.TempDir(), session.GitContext{Branch: "feature/x"},
+			)
+			assert.Equal(t, "https://github.com/example/panemux/pull/7", url)
+			assert.Equal(t, 7, number)
+		})
+	}
 }
 
 func TestGetGitInfo_ActiveAgentWorkdir_PrefersWorktreeBranch(t *testing.T) {

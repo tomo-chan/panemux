@@ -116,6 +116,45 @@ var callbackPortCases = []callbackPortCase{
 		raw:    "https://example.com/auth?redirect_uri=http%3A%2F%2Flocalhost%3A99999%2Fcb",
 		wantOK: false,
 	},
+	// The forwardable range's own boundaries. Every case above is at least
+	// one port clear of both ends — 3000 and 99999 are the closest — so
+	// `port > minForwardablePort && port < maxPort` would have refused to
+	// forward the lowest and highest ports panemux is willing to bind with
+	// the suite still green. Issue #190.
+	{
+		name:   "one below the lowest forwardable port",
+		raw:    "http://localhost:1023/cb",
+		wantOK: false,
+	},
+	{
+		name:     "the lowest forwardable port itself",
+		raw:      "http://localhost:1024/cb",
+		wantPort: 1024,
+		wantOK:   true,
+	},
+	{
+		name:     "one above the lowest forwardable port",
+		raw:      "http://localhost:1025/cb",
+		wantPort: 1025,
+		wantOK:   true,
+	},
+	{
+		name:     "one below the highest forwardable port",
+		raw:      "http://localhost:65534/cb",
+		wantPort: 65534,
+		wantOK:   true,
+	},
+	{
+		name:     "the highest forwardable port itself",
+		raw:      "http://localhost:65535/cb",
+		wantPort: 65535,
+		wantOK:   true,
+	},
+	{
+		name:   "one above the highest forwardable port",
+		raw:    "http://localhost:65536/cb",
+		wantOK: false,
+	},
 	{
 		name:   "unparseable URL",
 		raw:    "http://%zz",

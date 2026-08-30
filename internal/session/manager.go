@@ -145,6 +145,12 @@ func (m *managedSession) pump() {
 func (m *managedSession) publish(chunk []byte) {
 	m.mu.Lock()
 	m.history = append(m.history, chunk...)
+	// The `>` boundary cannot be pinned by a test: at exactly the limit,
+	// m.history[0:] copies the identical bytes, so `>=` behaves the same on
+	// every input. TestManagedSession_Publish_ReplayBufferBound covers the
+	// boundary's behavior; the mutant on it is equivalent, not unkilled.
+	// Issue #190.
+	//mutation:exempt equivalent at the boundary — history[0:] is the same bytes, so >= cannot behave differently
 	if len(m.history) > sessionReplayLimitBytes {
 		m.history = append([]byte(nil), m.history[len(m.history)-sessionReplayLimitBytes:]...)
 	}

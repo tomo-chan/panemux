@@ -103,6 +103,36 @@ func TestBoardCache_AppendMessage_BoundedHistory_DropsOldest(t *testing.T) {
 	assert.Equal(t, "e", rows[2].Row.Body)
 }
 
+// TestBoardCache_AppendMessage_BoundedHistory_KeepsExactlyTheBound pins the
+// boundary itself: a history filled to exactly maxHistory drops nothing, and
+// the very next append drops exactly one row. The two tests around it only
+// ever overshoot the bound (5 rows into 3, 3 into 2), so a truncation that
+// fired one row early would have silently shortened every bounded feed with
+// the suite still green. Issue #190.
+func TestBoardCache_AppendMessage_BoundedHistory_KeepsExactlyTheBound(t *testing.T) {
+	c := NewBoardCache()
+	c.maxHistory = 3
+
+	for i := 0; i < 2; i++ {
+		c.AppendMessage(Row{Body: string(rune('a' + i))})
+	}
+	rows := c.MessagesSince(0)
+	require.Len(t, rows, 2, "one short of the bound must drop nothing")
+	assert.Equal(t, "a", rows[0].Row.Body)
+
+	c.AppendMessage(Row{Body: "c"})
+	rows = c.MessagesSince(0)
+	require.Len(t, rows, 3, "exactly at the bound must drop nothing")
+	assert.Equal(t, "a", rows[0].Row.Body)
+	assert.Equal(t, "c", rows[2].Row.Body)
+
+	c.AppendMessage(Row{Body: "d"})
+	rows = c.MessagesSince(0)
+	require.Len(t, rows, 3, "one past the bound must drop exactly one row")
+	assert.Equal(t, "b", rows[0].Row.Body)
+	assert.Equal(t, "d", rows[2].Row.Body)
+}
+
 func TestBoardCache_AppendMessage_BoundedHistory_SeqKeepsIncreasingPastBound(t *testing.T) {
 	c := NewBoardCache()
 	c.maxHistory = 2

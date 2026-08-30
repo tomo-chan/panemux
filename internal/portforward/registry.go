@@ -109,15 +109,31 @@ func New(opts Options) *Registry {
 	if r.maxTotal <= 0 {
 		r.maxTotal = defaultMaxTotal
 	}
-	if opts.SweepInterval >= 0 {
-		interval := opts.SweepInterval
-		if interval == 0 {
-			interval = defaultSweepInterval
-		}
+	if interval, run := resolveSweepInterval(opts.SweepInterval); run {
 		r.wg.Add(1)
 		go r.sweep(interval)
 	}
 	return r
+}
+
+// resolveSweepInterval reports the reaper's tick period for a configured
+// Options.SweepInterval, and whether the background reaper runs at all: a
+// negative value disables it so a test can drive reaping itself, zero selects
+// defaultSweepInterval, and any positive value is used as given.
+//
+// Split out of New because the boundary between "disabled" and "defaulted"
+// sits exactly at zero and nothing observable distinguishes the two from
+// outside — a reaper that ticks once a minute cannot be waited on in a test,
+// so New's own behavior at 0 was unverifiable in place. Same reason
+// browserOpenArgv is split out of openChrome (see docs/security.md). Issue #190.
+func resolveSweepInterval(configured time.Duration) (time.Duration, bool) {
+	if configured < 0 {
+		return 0, false
+	}
+	if configured == 0 {
+		return defaultSweepInterval, true
+	}
+	return configured, true
 }
 
 // Ensure makes the pane-side loopback port reachable at the identical port on
@@ -259,6 +275,12 @@ func (r *Registry) beginConn(f *forward) {
 func (r *Registry) endConn(f *forward) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	// The `> 0` boundary cannot be pinned by a test: endConn is only ever
+	// called from serve's deferred pairing with beginConn, so active is at
+	// least 1 whenever this runs and `>= 0` decrements exactly the same set
+	// of calls. The guard stays as the defense it was written to be against
+	// a future unpaired caller. Issue #190.
+	//mutation:exempt equivalent — endConn is always paired with beginConn, so active is never 0 here
 	if f.active > 0 {
 		f.active--
 	}
