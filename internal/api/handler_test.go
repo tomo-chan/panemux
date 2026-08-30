@@ -1539,6 +1539,11 @@ func TestPostSSHConfigHost_PortOutOfRange_422(t *testing.T) {
 // legal port with the suite still green, and `port <= 0` would have rejected
 // the omitted-port case (0 means "leave Port out of the ssh_config entry",
 // which is why the low bound is 0 here and 1 in internal/config). Issue #190.
+// Nothing under this test changed on this branch, so the red-check could never
+// see it go red: it pins behavior that was already correct and merely
+// unasserted. See docs/quality-gateway.md's "Clearing the boundary-value class".
+//
+//efficacy:exempt pins pre-existing behavior; no implementation under it changed
 func TestPostSSHConfigHost_PortRangeBoundaries(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -2254,6 +2259,11 @@ func TestLookupPRInfo_TimesOutAndFallsBack(t *testing.T) {
 // `timeout < 0` would have handed context.WithTimeout a zero-length budget
 // whenever the timeout was left unset — every PR lookup failing before `gh`
 // could run — with the suite still green. Issue #190.
+// Nothing under this test changed on this branch, so the red-check could never
+// see it go red: it pins behavior that was already correct and merely
+// unasserted. See docs/quality-gateway.md's "Clearing the boundary-value class".
+//
+//efficacy:exempt pins pre-existing behavior; no implementation under it changed
 func TestLookupPRInfo_NonPositiveTimeout_FallsBackToAWorkableBudget(t *testing.T) {
 	for _, configured := range []time.Duration{0, -time.Second} {
 		t.Run(configured.String(), func(t *testing.T) {

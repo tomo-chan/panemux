@@ -315,6 +315,11 @@ func TestValidate_ServerPortOutOfRange_Error(t *testing.T) {
 // used 0 and 99999 — one and 34464 past the ends — so widening the rule to
 // `port < 2 || port > 65534` would have rejected two legal ports with the
 // suite still green. Issue #190.
+// Nothing under this test changed on this branch, so the red-check could never
+// see it go red: it pins behavior that was already correct and merely
+// unasserted. See docs/quality-gateway.md's "Clearing the boundary-value class".
+//
+//efficacy:exempt pins pre-existing behavior; no implementation under it changed
 func TestValidate_ServerPortRangeBoundaries(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -348,6 +353,11 @@ func TestValidate_ServerPortRangeBoundaries(t *testing.T) {
 // while the smallest positive size a sum of 100 can be built from is accepted.
 // TestValidate_NegativeSize_Error above only used -10, so `size < 0` would
 // have accepted a zero-width pane. Issue #190.
+// Nothing under this test changed on this branch, so the red-check could never
+// see it go red: it pins behavior that was already correct and merely
+// unasserted. See docs/quality-gateway.md's "Clearing the boundary-value class".
+//
+//efficacy:exempt pins pre-existing behavior; no implementation under it changed
 func TestValidate_ChildSizeBoundary(t *testing.T) {
 	runChildSizeCases(t, []childSizeCase{
 		{name: "exactly zero is rejected", sizes: []float64{0, 100}, wantErr: "must be positive"},
@@ -360,6 +370,11 @@ func TestValidate_ChildSizeBoundary(t *testing.T) {
 // sum check allows. TestValidate_ChildSizesNotSumTo100_Error above sums to 150,
 // so tightening the tolerance to nothing would have rejected the rounded sizes
 // a dragged split produces with the suite still green. Issue #190.
+// Nothing under this test changed on this branch, so the red-check could never
+// see it go red: it pins behavior that was already correct and merely
+// unasserted. See docs/quality-gateway.md's "Clearing the boundary-value class".
+//
+//efficacy:exempt pins pre-existing behavior; no implementation under it changed
 func TestValidate_ChildSizeSumTolerance(t *testing.T) {
 	runChildSizeCases(t, []childSizeCase{
 		{name: "the low tolerance bound itself", sizes: []float64{49.95, 49.95}},

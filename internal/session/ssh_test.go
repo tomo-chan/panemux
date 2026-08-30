@@ -747,6 +747,11 @@ func TestRemoteShellPID_ParsesShellProcess(t *testing.T) {
 // have let a remote that printed 0 through as a valid PID — every later
 // per-PID command would then have been built around a process that cannot
 // exist. Issue #190.
+// Nothing under this test changed on this branch, so the red-check could never
+// see it go red: it pins behavior that was already correct and merely
+// unasserted. See docs/quality-gateway.md's "Clearing the boundary-value class".
+//
+//efficacy:exempt pins pre-existing behavior; no implementation under it changed
 func TestRemoteShellPID_RejectsNonPositivePIDs(t *testing.T) {
 	for _, out := range []string{"0\n", "-1\n"} {
 		runner := &fakeSSHRunner{outputs: map[string][]byte{sshShellPIDCmd: []byte(out)}}
@@ -759,6 +764,11 @@ func TestRemoteShellPID_RejectsNonPositivePIDs(t *testing.T) {
 
 // TestRemoteShellPID_AcceptsTheLowestUsablePID is the other side of that
 // boundary: 1 is a real PID and must not be rejected.
+// Nothing under this test changed on this branch, so the red-check could never
+// see it go red: it pins behavior that was already correct and merely
+// unasserted. See docs/quality-gateway.md's "Clearing the boundary-value class".
+//
+//efficacy:exempt pins pre-existing behavior; no implementation under it changed
 func TestRemoteShellPID_AcceptsTheLowestUsablePID(t *testing.T) {
 	runner := &fakeSSHRunner{outputs: map[string][]byte{sshShellPIDCmd: []byte("1\n")}}
 
@@ -1157,6 +1167,11 @@ func TestDialWithRetry_ExhaustsAllRetries(t *testing.T) {
 // would turn the one case that must fail fast — a deadline that has exactly
 // run out — into a dial that can block indefinitely, and every retry test in
 // this file starts with a full budget. Issue #190.
+// Nothing under this test changed on this branch, so the red-check could never
+// see it go red: it pins behavior that was already correct and merely
+// unasserted. See docs/quality-gateway.md's "Clearing the boundary-value class".
+//
+//efficacy:exempt pins pre-existing behavior; no implementation under it changed
 func TestDialTransport_ExhaustedBudget_NeverDials(t *testing.T) {
 	clock := newFakeClock()
 	origNow := nowFn
@@ -1184,6 +1199,11 @@ func TestDialTransport_ExhaustedBudget_NeverDials(t *testing.T) {
 // TestDialTransport_SliverOfBudget_StillDials is the other side of that
 // boundary: one nanosecond of budget is still budget, so the dial is attempted
 // and whatever the network says comes back instead of the budget error.
+// Nothing under this test changed on this branch, so the red-check could never
+// see it go red: it pins behavior that was already correct and merely
+// unasserted. See docs/quality-gateway.md's "Clearing the boundary-value class".
+//
+//efficacy:exempt pins pre-existing behavior; no implementation under it changed
 func TestDialTransport_SliverOfBudget_StillDials(t *testing.T) {
 	clock := newFakeClock()
 	origNow := nowFn

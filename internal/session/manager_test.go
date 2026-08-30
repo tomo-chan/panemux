@@ -153,6 +153,11 @@ func TestManager_Subscribe_ClosedSessionReturnsSnapshotAndClosedStream(t *testin
 // truncation arithmetic ran only in the benchmark — the buffer could have been
 // dropping the wrong end, or slicing out of range on the first pane that ever
 // filled it, with the suite still green. Issue #190.
+// Nothing under this test changed on this branch, so the red-check could never
+// see it go red: it pins behavior that was already correct and merely
+// unasserted. See docs/quality-gateway.md's "Clearing the boundary-value class".
+//
+//efficacy:exempt pins pre-existing behavior; no implementation under it changed
 func TestManagedSession_Publish_ReplayBufferBound(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -216,6 +221,11 @@ func TestManagedSession_Publish_ReplayBufferBound(t *testing.T) {
 // TestManagedSession_Publish_ReplayBufferBoundAcrossChunks pins the same bound
 // when the buffer crosses it over several publishes, which is how a real pane
 // reaches it — pump() writes 4 KiB at a time.
+// Nothing under this test changed on this branch, so the red-check could never
+// see it go red: it pins behavior that was already correct and merely
+// unasserted. See docs/quality-gateway.md's "Clearing the boundary-value class".
+//
+//efficacy:exempt pins pre-existing behavior; no implementation under it changed
 func TestManagedSession_Publish_ReplayBufferBoundAcrossChunks(t *testing.T) {
 	entry := &managedSession{subscribers: map[int]chan []byte{}}
 	chunk := make([]byte, 4096)

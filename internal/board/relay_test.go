@@ -437,6 +437,11 @@ func TestRelay_Poll_HostOperationTimeout_DoesNotBlockOtherHosts(t *testing.T) {
 // value, so `opTimeout < 0` would have given every real caller an
 // already-expired context and failed every poll with the suite still green.
 // Issue #190.
+// Nothing under this test changed on this branch, so the red-check could never
+// see it go red: it pins behavior that was already correct and merely
+// unasserted. See docs/quality-gateway.md's "Clearing the boundary-value class".
+//
+//efficacy:exempt pins pre-existing behavior; no implementation under it changed
 func TestRelay_OperationTimeout_UnsetOrNegative_FallsBackToTheDefault(t *testing.T) {
 	tests := []struct {
 		name       string
