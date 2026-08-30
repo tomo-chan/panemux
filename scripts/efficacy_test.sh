@@ -1049,6 +1049,73 @@ $after_marker"
 fi
 rm -rf "$marked"
 
+# --- a bare marker waives nothing --------------------------------------------
+#
+# The reason is what makes an exemption reviewable, and the two sibling
+# markers (//coverage:exempt, //mutation:exempt) both refuse a bare one. This
+# one refused nothing until #190: `~ /efficacy:exempt/` matched the bare
+# substring, so a marker with no reason silently took a test out of scope —
+# and #190 is the change that promotes this marker as the one to reach for
+# first, which is a poor time for it to be the only one of the three that
+# cannot be asked to justify itself.
+checks=$((checks + 1))
+bare=$(mktemp -d)
+(
+	cd "$bare" || exit 1
+	git_init
+	printf 'module sample\n\ngo 1.25\n' > go.mod
+	mkdir -p a b
+	printf 'package a\n' > a/a.go
+	printf 'package a\n\nimport "testing"\n\nfunc TestNothingA(t *testing.T) {}\n' > a/a_test.go
+	printf 'package b\n\nfunc Bye() string { return "bye" }\n' > b/b.go
+	printf 'package b\n\nimport "testing"\n\nfunc TestBye(t *testing.T) {\n\tif Bye() != "bye" {\n\t\tt.Fatal("Bye is wrong")\n\t}\n}\n' > b/b_test.go
+	git add -A && git commit -q -m "base"
+	git checkout -q -b work
+
+	cat >> a/a.go <<'GO'
+
+func Mul(x, y int) int { return x * y }
+GO
+	cat >> a/a_test.go <<'GO'
+
+func TestMul(t *testing.T) {
+	if Mul(2, 3) != 6 {
+		t.Fatal("Mul is wrong")
+	}
+}
+GO
+	rewrite b/b_test.go 'if Bye() != "bye" {' 'if Bye() != "bye" || len(Bye()) != 3 {'
+	rewrite b/b_test.go 'func TestBye(t *testing.T) {' '//efficacy:exempt
+func TestBye(t *testing.T) {'
+	git add -A && git commit -q -m "mark TestBye exempt with no reason"
+)
+bare_out=$(run_efficacy "$bare")
+bare_status=$?
+if [ "$bare_status" -eq 1 ] && printf '%s' "$bare_out" | grep -q 'SURVIVOR: ./b TestBye' &&
+	printf '%s' "$bare_out" | grep -q 'no reason'; then
+	pass "a bare efficacy:exempt waives nothing and says why"
+else
+	fail "a bare efficacy:exempt waives nothing and says why" \
+		"exit $bare_status
+$bare_out"
+fi
+rm -rf "$bare"
+
+checks=$((checks + 1))
+bare_fe=$(fe_scope '
+//efficacy:exempt
+it('"'"'multiplies'"'"', () => {
+  expect(mul(2, 3)).toBe(6)
+})
+')
+if printf '%s' "$bare_fe" | grep -q 'multiplies'; then
+	pass "a bare efficacy:exempt leaves a frontend case in scope"
+else
+	fail "a bare efficacy:exempt leaves a frontend case in scope" \
+		"wanted the case still listed, got:
+$bare_fe"
+fi
+
 # --- "could not check" is never a pass ---------------------------------------
 #
 # The two fail-open paths. A required check that goes green having checked

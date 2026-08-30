@@ -455,6 +455,21 @@ has a test (`TestRegistryEndConnNeverDrivesTheCounterNegative`) rather than an e
 that catches this class: *if the mutant were reachable, would anything be wrong?* — "equivalent"
 survives that question, "unreachable" does not.
 
+**One property of the marker itself, which the `Kind` column above makes easy to misread.**
+`scripts/mutation.sh` decides an exemption by file and line — it records the mutant `$type` for the
+report and never compares it — so a reason written about the boundary mutant waives *every* mutant
+gremlins produces on that line, `CONDITIONALS_NEGATION` included. The reason a reader sees and the
+set it actually covers are not the same set.
+
+Measured on the five sites above, nothing is currently hidden by that: each one's negation mutant is
+killed by the suite independently, so the waiver covers only mutants that were dying anyway. The
+`endConn` line is the useful data point rather than a counterexample — its negation mutant (`<= 0`)
+was killed by the existing suite the whole time; what survived under the waiver was exactly the
+boundary mutant the reason was written for. So the gap is structural, not yet load-bearing. It
+matters most for stage 4, when a survivor becomes a failure: a line-scoped waiver applied to a real
+finding of a different kind would then be the difference between a red gate and a green one, with
+nothing in the diff to show for it.
+
 This is the first real evidence for how much of G4(c)'s noise is irreducible rather than fixable,
 which is what item 6's fourth stage — whether to make `make mutation` fail — needs before it can be
 decided: **the "boundary value" row is not 45 missing tests.** Four of them cannot be killed by

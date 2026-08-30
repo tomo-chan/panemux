@@ -470,8 +470,14 @@ func TestRelay_OperationTimeout_UnsetOrNegative_FallsBackToTheDefault(t *testing
 
 			require.NoError(t, r.Poll(context.Background()))
 			assert.Len(t, cache.MessagesSince(0), 1)
-			assert.Equal(
-				t, hostOperationTimeout, host.observedBudget(),
+			// InDelta rather than Equal: the budget observed is wall-clock
+			// remaining, so any stall between WithTimeout and the client's
+			// own read shrinks it. A second of tolerance still separates
+			// the 10s default from the 0s this test exists to rule out —
+			// they are ten seconds apart — without a cliff that turns a
+			// loaded runner into a report of broken timeout plumbing.
+			assert.InDelta(
+				t, hostOperationTimeout, host.observedBudget(), float64(time.Second),
 				"the per-host call must get the default budget, not a zero-length one",
 			)
 		})
@@ -501,9 +507,9 @@ func (d *deadlineCheckingAgmsgClient) Send(ctx context.Context, _, _, _, _ strin
 	return d.record(ctx)
 }
 
-// record rounds the remaining budget up to whole seconds: the exact value has
-// already ticked down by the time the client sees it, and the assertion is
-// about which budget was chosen, not about nanosecond accuracy.
+// record stores the remaining budget as it stands, unrounded: the caller
+// compares it with a tolerance, which is the honest way to assert on a value
+// that has already ticked down by the time the client sees it.
 func (d *deadlineCheckingAgmsgClient) record(ctx context.Context) error {
 	deadline, ok := ctx.Deadline()
 	if !ok {
@@ -511,7 +517,7 @@ func (d *deadlineCheckingAgmsgClient) record(ctx context.Context) error {
 	}
 	remaining := time.Until(deadline)
 	d.mu.Lock()
-	d.budget = remaining.Round(time.Second)
+	d.budget = remaining
 	d.mu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("deadlineCheckingAgmsgClient: %w", err)
