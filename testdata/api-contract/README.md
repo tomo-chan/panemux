@@ -48,6 +48,26 @@ or on every machine and leave a clean checkout dirty:
 the written files, so a normalization rule that stops matching fails the suite
 rather than quietly committing someone's home directory.
 
+## A capture must be deterministic
+
+`TestAPIContractFixtures_AreDeterministic` runs each capture 20 times and
+requires identical bytes. Nothing else can see a wobble: the files are rewritten
+rather than diffed, so a capture whose order varies succeeds silently and leaves
+a modified file behind for the next `git status` to blame on whatever branch
+happened to run the suite — and a fixture diff that is sometimes meaningless is
+a weaker signal than one that is always real.
+
+The trap is response order that comes from a Go map. `GET /api/sessions` returns
+`session.Manager.List()`, which ranges over one, so the `sessions` capture sorts
+its rows before writing them; it sorts the raw JSON elements rather than
+decoding into a struct, because decoding and re-encoding would drop any key the
+struct does not name. Sort in the *capture*, not in the handler, unless a client
+actually depends on the order.
+
+Note that the repetition check is a net, not a proof: Go randomizes a bucket's
+start offset rather than handing out uniform permutations, so a two-element map
+agrees with itself about seven times in eight per run.
+
 ## Optional fields a capture cannot reach
 
 Accepting a capture proves nothing about a field the capture does not contain.

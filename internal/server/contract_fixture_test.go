@@ -188,7 +188,20 @@ var contractFixtures = map[string]contractFixture{
 
 		rr := e.do(t, http.MethodGet, "/api/sessions", "")
 		require.Equal(t, http.StatusOK, rr.Code)
-		return rr.Body.Bytes(), nil
+		// Sorted, because this is the one capture whose order is not the
+		// server's own. GetSessions returns session.Manager.List(), which
+		// ranges over a map, and Go randomizes map iteration — so the two
+		// panes swapped places between runs (measured: 4 of 20). Nothing
+		// failed, because D10 has these files rewritten rather than diffed,
+		// so an unrelated `make test-go` just left a reordered file behind,
+		// and DEVELOPMENT.md's "commit the fixture diff" then carried the
+		// noise into someone's branch. A fixture diff that is sometimes
+		// meaningless is a weaker signal than one that is always real.
+		//
+		// Sorted here rather than in GetSessions: no client depends on the
+		// order, so imposing one on the API would be this fixture changing
+		// production behavior to suit itself.
+		return sortJSONArrayByID(t, rr.Body.Bytes()), nil
 	}},
 
 	// Only the is_git:false shape is reachable hermetically; every other
@@ -297,6 +310,37 @@ var contractFixtures = map[string]contractFixture{
 	"ws-board-command-frames": {capture: func(t *testing.T) ([]byte, map[string]string) {
 		return captureBoardCommandFrames(t), nil
 	}},
+}
+
+// sortJSONArrayByID orders a JSON array of objects by their "id".
+//
+// The elements stay json.RawMessage and are never decoded into a struct. That
+// is the whole point: decoding into a typed value and re-encoding would drop
+// any key the struct does not name, so a Go field added to the response would
+// vanish from the fixture — silently deleting the contract this file exists to
+// carry. (internal/api's sessionInfo is unexported anyway, so there is no
+// struct here to decode into.)
+func sortJSONArrayByID(t *testing.T, body []byte) []byte {
+	t.Helper()
+
+	var rows []json.RawMessage
+	require.NoError(t, json.Unmarshal(body, &rows))
+
+	sort.SliceStable(rows, func(i, j int) bool { return rawJSONID(t, rows[i]) < rawJSONID(t, rows[j]) })
+
+	out, err := json.Marshal(rows)
+	require.NoError(t, err)
+	return out
+}
+
+func rawJSONID(t *testing.T, row json.RawMessage) string {
+	t.Helper()
+
+	var probe struct {
+		ID string `json:"id"`
+	}
+	require.NoError(t, json.Unmarshal(row, &probe))
+	return probe.ID
 }
 
 // seedRichLayout replaces the starting single-pane layout with one that
@@ -522,6 +566,44 @@ func TestAPIContractFixtures(t *testing.T) {
 	}
 }
 
+// Every capture must produce the same bytes every time. Nothing else can see
+// this: the files are rewritten rather than diffed (D10), so a capture whose
+// order wobbles succeeds silently and leaves a modified file behind for the
+// next `git status` to attribute to whatever branch happened to run the suite.
+// That is how `sessions` shipped map-ordered — GetSessions ranges over
+// session.Manager's map, and Go randomizes that.
+//
+// Repetition is the detector, and its strength is worth measuring rather than
+// assuming — the obvious estimate is wrong. Go does not hand out uniform
+// permutations: it randomizes the starting *offset* within a bucket, so for a
+// two-entry map one order comes up about seven times out of eight (measured:
+// 87.6% / 12.4% over 100k iterations). n runs therefore agree by luck with
+// probability ~0.876^n, not 0.5^n — at the first draft's 5 runs this caught
+// the real `sessions` bug only 6 times in 12, where the uniform model
+// predicted 19 in 20. At the 20 runs below it caught the same bug 18
+// times in 20.
+//
+// So this narrows the window; it does not close it, and it is not what makes
+// `sessions` correct — sorting the capture is. This is the net for the *next*
+// map-ordered capture somebody adds.
+func TestAPIContractFixtures_AreDeterministic(t *testing.T) {
+	const runs = 20
+
+	for name, fixture := range contractFixtures {
+		t.Run(name, func(t *testing.T) {
+			body, literals := fixture.capture(t)
+			want := normalizedFixtureBytes(t, body, literals)
+
+			for i := 1; i < runs; i++ {
+				body, literals = fixture.capture(t)
+				require.Equal(t, string(want), string(normalizedFixtureBytes(t, body, literals)),
+					"capture %d of %d differs from the first; a map iteration order reached the fixture",
+					i+1, runs)
+			}
+		})
+	}
+}
+
 // The fixture directory must hold exactly the files the table names. A
 // renamed capture would otherwise leave its old output behind, and the
 // frontend would keep parsing a file nothing regenerates — a passing test
@@ -553,6 +635,17 @@ func TestAPIContractFixtures_DirectoryHasNoStrayFiles(t *testing.T) {
 func writeContractFixture(t *testing.T, name string, body []byte, literals map[string]string) {
 	t.Helper()
 
+	out := normalizedFixtureBytes(t, body, literals)
+	path := filepath.Join(contractFixtureDir, name+".json")
+	require.NoError(t, os.WriteFile(path, append(out, '\n'), 0o600))
+}
+
+// normalizedFixtureBytes is exactly what lands on disk, minus the write — so
+// the determinism check above compares what a reader would actually see rather
+// than a separate rendering of it.
+func normalizedFixtureBytes(t *testing.T, body []byte, literals map[string]string) []byte {
+	t.Helper()
+
 	decoder := json.NewDecoder(strings.NewReader(string(body)))
 	// Numbers stay in the exact spelling Go emitted; decoding them as
 	// float64 and re-encoding would turn a large integer into exponent
@@ -564,9 +657,7 @@ func writeContractFixture(t *testing.T, name string, body []byte, literals map[s
 
 	out, err := json.MarshalIndent(normalizeFixtureValue(decoded, literals), "", "  ")
 	require.NoError(t, err)
-
-	path := filepath.Join(contractFixtureDir, name+".json")
-	require.NoError(t, os.WriteFile(path, append(out, '\n'), 0o600))
+	return out
 }
 
 // normalizeFixtureValue walks a decoded response and rewrites the values

@@ -393,7 +393,10 @@ Three consequences worth stating rather than discovering:
   is what makes that visible, and it is the check that caught `last_tool` above.
 - **Only values are normalized, never keys or types.** Timestamps, the capture's temp `HOME`, the
   random `BoardCache` epoch and the detected shell would otherwise rewrite the files on every run and
-  leave a clean checkout dirty. `TestAPIContractFixtures_ContainNoMachinePaths` re-checks the path
+  leave a clean checkout dirty. Response *order* is the same hazard by another route — `GET
+  /api/sessions` ranges over a map, so its rows swapped places about one run in eight until the
+  capture sorted them — and rewriting rather than diffing is what makes it invisible, so a repetition
+  check guards it. `TestAPIContractFixtures_ContainNoMachinePaths` re-checks the path
   half against the written files, so a normalization rule that quietly stops matching fails the suite
   instead of committing someone's home directory.
 - **Which optional fields a capture leaves empty is derived, not declared.** Accepting a capture
