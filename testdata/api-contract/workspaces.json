@@ -68,7 +68,22 @@
             "size": 100
           }
         ],
-        "direction": "horizontal"
+        "direction": "horizontal",
+        "pane": {
+          "agent_board": {
+            "enabled": true,
+            "mode": "monitor"
+          },
+          "connection": "build-box",
+          "cwd": "/workspace/user/project",
+          "id": "pane-scratch",
+          "shell": "/bin/sh",
+          "show_header": true,
+          "show_status_bar": false,
+          "title": "Scratch",
+          "tmux_session": "scratch",
+          "type": "tmux"
+        }
       },
       "title": "Scratch"
     }

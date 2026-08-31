@@ -47,3 +47,14 @@ or on every machine and leave a clean checkout dirty:
 `TestAPIContractFixtures_ContainNoMachinePaths` re-checks the path rule against
 the written files, so a normalization rule that stops matching fails the suite
 rather than quietly committing someone's home directory.
+
+## Optional fields a capture cannot reach
+
+Accepting a capture proves nothing about a field the capture does not contain.
+`contract.test.ts` walks each schema against its fixture and names every
+optional field that no capture populates anywhere, comparing that against a
+declared list with a reason per entry — so a newly optional Go field that no
+fixture exercises fails the suite rather than passing silently. Two are declared
+today: `GitInfoSchema`'s repository fields (they need a pane whose live cwd is a
+real git repository, plus a `gh pr view` lookup) and `OpenUrlResponseSchema.port`
+(a forward is only opened for an `ssh` pane, which needs a second host).

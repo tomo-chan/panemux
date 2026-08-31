@@ -79,12 +79,22 @@ type contractFixture struct {
 	// to it. The keys are values observed at capture time (a temp path, a
 	// random epoch); nothing here is guessed ahead of the run.
 	capture func(t *testing.T) (body []byte, literals map[string]string)
-	// optionalFieldsUnexercised, when non-empty, records that the captured
-	// payload does not populate every optional field its schema allows, and
-	// why. Same purpose as api_integration_test.go's documentedIntegrationGaps:
-	// a gap may be accepted, but not accumulated silently.
-	optionalFieldsUnexercised string
 }
+
+// Which optional fields a capture leaves unpopulated is NOT tracked here, and
+// the first version of this file got that wrong. It carried a prose
+// `optionalFieldsUnexercised` string per fixture plus a literal list of the
+// fixtures carrying one, in the shape api_integration_test.go's
+// documentedIntegrationGaps uses — but the two inputs were the same hand-
+// written set, so the check could only ever catch a *declared* gap going
+// undeclared, never an undeclared one. It duly reported full coverage while
+// `open-url` never populated `port` and `workspaces` never populated
+// LayoutNode's own `pane`.
+//
+// Optionality is declared in the Zod schemas, so the check belongs where it
+// can be derived rather than asserted: frontend/src/schemas/contract.test.ts
+// walks each schema against its capture and names every optional field the
+// capture leaves absent, against a declared list with a reason for each.
 
 // contractFixtures maps a fixture file name (without .json) to its capture.
 // Every schema the frontend parses a server response with must appear here;
@@ -181,20 +191,18 @@ var contractFixtures = map[string]contractFixture{
 		return rr.Body.Bytes(), nil
 	}},
 
-	"git-info": {
-		optionalFieldsUnexercised: "branch/repo/repo_url/pr_number/pr_url/worktrees are only " +
-			"populated for a pane whose live cwd is a real repository, which needs session.CWDGetter " +
-			"(procfs on Linux, lsof on macOS) and a `gh pr view` lookup — neither of which make check " +
-			"may depend on. The captured shape is the is_git:false one every non-repository pane gets",
-		capture: func(t *testing.T) ([]byte, map[string]string) {
-			e := newAPIEnv(t)
-			e.mgr.Add(newWSFakeSession("pane-editor"))
+	// Only the is_git:false shape is reachable hermetically; every other
+	// field needs a pane whose live cwd is a real repository, which means
+	// session.CWDGetter (procfs on Linux, lsof on macOS) and a `gh pr view`
+	// lookup. The frontend's own declared-gap list names each missing field.
+	"git-info": {capture: func(t *testing.T) ([]byte, map[string]string) {
+		e := newAPIEnv(t)
+		e.mgr.Add(newWSFakeSession("pane-editor"))
 
-			rr := e.do(t, http.MethodGet, "/api/sessions/pane-editor/git-info", "")
-			require.Equal(t, http.StatusOK, rr.Code)
-			return rr.Body.Bytes(), nil
-		},
-	},
+		rr := e.do(t, http.MethodGet, "/api/sessions/pane-editor/git-info", "")
+		require.Equal(t, http.StatusOK, rr.Code)
+		return rr.Body.Bytes(), nil
+	}},
 
 	"session-token": {capture: func(t *testing.T) ([]byte, map[string]string) {
 		e := newAPIEnv(t)
@@ -334,6 +342,29 @@ func seedRichLayout(cfg *config.Config) {
 		Title: "Scratch",
 		Layout: config.LayoutNode{
 			Direction: "horizontal",
+			// LayoutNode carries its own optional `pane` alongside `children`,
+			// and it is set here so the key reaches the fixture — renaming its
+			// json tag has to fail something. It is set *alongside* children
+			// rather than instead of them, and that is a compromise worth
+			// stating: config.LayoutNode's own `direction` and `children` are
+			// `omitempty` while LayoutNodeSchema requires both, so a layout of
+			// `{pane: ...}` alone — which config.Validate accepts, since
+			// validateLayoutNode permits an empty direction and no children —
+			// serializes to `{"pane":{...}}` and Zod rejects the whole
+			// workspaces response. That mismatch predates this branch and is a
+			// production question (which side is right), not a fixture one; it
+			// was found by capturing that shape here and watching the frontend
+			// suite go red. Recorded rather than quietly avoided.
+			// Every optional key set, so this occurrence of PaneConfigSchema
+			// covers them at this path too — the frontend's optional-field
+			// walk tracks a path, not a schema, so a sparse pane here would
+			// report nine gaps that are already covered one level down.
+			Pane: &config.PaneConfig{
+				ID: "pane-scratch", Type: "tmux", TmuxSession: "scratch", Title: "Scratch",
+				Shell: "/bin/sh", Cwd: "/workspace/user/project", Connection: "build-box",
+				ShowHeader: &enabled, ShowStatusBar: &hidden,
+				AgentBoard: config.PaneAgentBoardConfig{Enabled: &enabled, Mode: "monitor"},
+			},
 			Children: []config.LayoutChild{
 				{Size: 100, Pane: &config.PaneConfig{ID: "pane-scratch", Type: "tmux", TmuxSession: "scratch"}},
 			},
@@ -442,6 +473,14 @@ func captureBoardCommandFrames(t *testing.T) []byte {
 func readRawControl(t *testing.T, conn *websocket.Conn) json.RawMessage {
 	t.Helper()
 
+	// The deadline is this function's own, not inherited. captureWSControlFrames
+	// happens to survive without it — its one readFrame call sets an absolute
+	// deadline the later reads reuse — but that is an accident of frame order,
+	// and captureBoardCommandFrames never calls readFrame at all. Without this,
+	// a regression that stops one of the four board-command frames being emitted
+	// blocks here forever and the package dies on its own 10-minute timeout with
+	// a goroutine dump, instead of failing in 5s naming the missing frame.
+	require.NoError(t, conn.SetReadDeadline(time.Now().Add(wsReadTimeout)))
 	msgType, data, err := conn.ReadMessage()
 	require.NoError(t, err)
 	require.Equal(t, websocket.TextMessage, msgType)
@@ -508,27 +547,6 @@ func TestAPIContractFixtures_DirectoryHasNoStrayFiles(t *testing.T) {
 
 	assert.Equal(t, want, found,
 		"every .json in %s must be produced by contractFixtures, and vice versa", contractFixtureDir)
-}
-
-// documentedContractGaps is every fixture that does not populate all of its
-// schema's optional fields. Same contract as api_integration_test.go's
-// documentedIntegrationGaps: the literal is what a reviewer reads, the check
-// is what keeps it true.
-var documentedContractGaps = []string{"git-info"}
-
-func TestAPIContractFixtures_DocumentedGaps(t *testing.T) {
-	var gaps []string
-	for name, fixture := range contractFixtures {
-		if fixture.optionalFieldsUnexercised == "" {
-			continue
-		}
-		gaps = append(gaps, name)
-		t.Logf("%s does not exercise every optional field: %s", name, fixture.optionalFieldsUnexercised)
-	}
-	sort.Strings(gaps)
-
-	assert.Equal(t, documentedContractGaps, gaps,
-		"a fixture that leaves optional fields unexercised must say so, and be listed here")
 }
 
 // writeContractFixture normalizes and writes one captured response.

@@ -396,6 +396,15 @@ Three consequences worth stating rather than discovering:
   leave a clean checkout dirty. `TestAPIContractFixtures_ContainNoMachinePaths` re-checks the path
   half against the written files, so a normalization rule that quietly stops matching fails the suite
   instead of committing someone's home directory.
+- **Which optional fields a capture leaves empty is derived, not declared.** Accepting a capture
+  proves nothing about a field the capture does not contain, and the first version of this tracked
+  that with a prose note per fixture plus a hand-written list of the fixtures carrying one — two
+  copies of the same set, so the check could catch a *declared* gap going undeclared and nothing
+  else. It reported full coverage while `OpenUrlResponseSchema.port` and `LayoutNodeSchema.pane` were
+  never populated by any capture. Optionality is stated in the schemas, so `contract.test.ts` walks
+  each schema against its capture and names every optional field absent everywhere in the corpus,
+  against a declared list carrying a reason per entry. A field that starts being covered has to be
+  deleted from that list, so it cannot rot into excuses for coverage that already exists.
 
 ### Rollout order
 
