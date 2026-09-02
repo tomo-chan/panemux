@@ -608,6 +608,15 @@ func TestAPIContractFixtures_AreDeterministic(t *testing.T) {
 // renamed capture would otherwise leave its old output behind, and the
 // frontend would keep parsing a file nothing regenerates — a passing test
 // over a contract that no longer exists.
+//
+// This one genuinely is about the directory rather than about content, so
+// reading disk is right. It does depend on TestAPIContractFixtures having
+// written it — `go test` runs a file's tests in declaration order, and that
+// one is declared above — which is stated here because nothing enforces it:
+// run under -shuffle=on, or alone via -run, a stray file from a rename would
+// still be reported, but a *missing* one would only mean nobody generated it
+// yet. That is the weaker half, and it is the half the frontend's own
+// "reads every fixture the Go side captured" check covers from the other side.
 func TestAPIContractFixtures_DirectoryHasNoStrayFiles(t *testing.T) {
 	entries, err := os.ReadDir(contractFixtureDir)
 	require.NoError(t, err)
@@ -684,7 +693,29 @@ func normalizeFixtureValue(v any, literals map[string]string) any {
 }
 
 func normalizeFixtureString(s string, literals map[string]string) string {
-	for from, to := range literals {
+	// Longest key first, and sorted at all because ranging a map is the same
+	// randomized order the `sessions` capture was fixed for, one layer down.
+	// Inert while every capture passes a single literal, and the two most
+	// likely additions already overlap by prefix: newWSEnvIn sets HOME and
+	// XDG_CACHE_HOME, and the latter is the former plus "/.cache". Replacing
+	// the shorter one first rewrites the longer one's prefix and leaves it
+	// unmatchable, so with placeholders that do not happen to nest the same
+	// way, one run in some fraction would write a different fixture than the
+	// next — landing, under D10, as a committed file that alternates between
+	// two spellings.
+	froms := make([]string, 0, len(literals))
+	for from := range literals {
+		froms = append(froms, from)
+	}
+	sort.Slice(froms, func(i, j int) bool {
+		if len(froms[i]) != len(froms[j]) {
+			return len(froms[i]) > len(froms[j])
+		}
+		return froms[i] < froms[j]
+	})
+
+	for _, from := range froms {
+		to := literals[from]
 		if from == "" || from == to {
 			continue
 		}
@@ -699,34 +730,63 @@ func normalizeFixtureString(s string, literals map[string]string) string {
 	return s
 }
 
-// Nothing in a fixture may carry a path from the machine that captured it.
-// DEVELOPMENT.md's path-sanitization rule applies to fixtures by name, and a
-// normalization rule that silently stopped matching would put a developer's
-// home directory into a committed file with no other test noticing.
+// The substitution order above is latent today — every capture passes one
+// literal — so it is checked directly rather than through a fixture that
+// cannot yet exercise it. The pair here is the one most likely to be added
+// next: newWSEnvIn sets HOME and XDG_CACHE_HOME, and the second is the first
+// plus "/.cache". The placeholders deliberately do NOT nest the same way the
+// real paths do, which is what makes the two orders give different answers —
+// with nesting placeholders both orders agree by luck and the test would pass
+// against the unsorted code.
+func TestNormalizeFixtureString_AppliesTheMoreSpecificLiteralFirst(t *testing.T) {
+	const home = "/tmp/TestSomething123/001"
+	literals := map[string]string{
+		home:                 "/remote/home/demo",
+		home + "/.cache":     "/tmp/sample-cache",
+		"/some/other/prefix": "/unused",
+	}
+
+	// Ranging the map is randomized, so a single pass could agree by chance;
+	// repeating makes a regression fail rather than flake.
+	for range 20 {
+		assert.Equal(t, "/tmp/sample-cache", normalizeFixtureString(home+"/.cache", literals))
+		assert.Equal(t, "/remote/home/demo", normalizeFixtureString(home, literals))
+	}
+}
+
+// Nothing a capture produces may carry a path from the machine that captured
+// it. DEVELOPMENT.md's path-sanitization rule applies to fixtures by name, and
+// a normalization rule that silently stopped matching would put a developer's
+// home directory into a committed file.
+//
+// This re-captures rather than reading the directory, and the difference is
+// the whole point. Reading disk made the subject "the files already in git",
+// which for the failure above is the thing under suspicion, not the reference
+// — and it only saw this run's output at all because TestAPIContractFixtures
+// is declared earlier in this file and `go test` runs a file's tests in
+// declaration order. Nothing stated that dependency and nothing enforced it,
+// so `-run TestAPIContractFixtures_ContainNoMachinePaths` — a plausible thing
+// to type while iterating on a normalization rule, which is exactly when the
+// rule is broken — passed in 6ms having regenerated nothing. Demonstrated by
+// dropping the `directories` capture's literal: filtered run ok, full run red.
 func TestAPIContractFixtures_ContainNoMachinePaths(t *testing.T) {
 	home, err := os.UserHomeDir()
 	require.NoError(t, err)
 
-	entries, err := os.ReadDir(contractFixtureDir)
-	require.NoError(t, err)
+	for name, fixture := range contractFixtures {
+		t.Run(name, func(t *testing.T) {
+			body, literals := fixture.capture(t)
+			written := string(normalizedFixtureBytes(t, body, literals))
 
-	for _, entry := range entries {
-		if filepath.Ext(entry.Name()) != ".json" {
-			continue
-		}
-		//nolint:gosec // G304: a name from ReadDir on a fixed directory
-		data, err := os.ReadFile(filepath.Join(contractFixtureDir, entry.Name()))
-		require.NoError(t, err)
-
-		body := string(data)
-		assert.NotContains(t, body, home, "%s carries the capturing machine's home directory", entry.Name())
-		// t.TempDir() names its directories after the test
-		// ("/tmp/TestAPIContractFixtures.../001"), and macOS puts them under
-		// /var/folders. A bare os.TempDir() check is not usable here:
-		// fixtureHomePath is itself /tmp/sample-project, which is the
-		// placeholder these paths are replaced *with*.
-		for _, prefix := range []string{filepath.Join(os.TempDir(), "Test"), "/var/folders/"} {
-			assert.NotContains(t, body, prefix, "%s carries a temp path from the capturing machine", entry.Name())
-		}
+			assert.NotContains(t, written, home, "%s carries the capturing machine's home directory", name)
+			// t.TempDir() names its directories after the test
+			// ("/tmp/TestAPIContractFixtures.../001"), and macOS puts them
+			// under /var/folders. A bare os.TempDir() check is not usable
+			// here: fixtureHomePath is itself /tmp/sample-project, which is
+			// the placeholder these paths are replaced *with*.
+			for _, prefix := range []string{filepath.Join(os.TempDir(), "Test"), "/var/folders/"} {
+				assert.NotContains(t, written, prefix, "%s carries a temp path from the capturing machine", name)
+			}
+		})
 	}
 }

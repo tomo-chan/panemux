@@ -397,8 +397,9 @@ Three consequences worth stating rather than discovering:
   /api/sessions` ranges over a map, so its rows swapped places about one run in eight until the
   capture sorted them — and rewriting rather than diffing is what makes it invisible, so a repetition
   check guards it. `TestAPIContractFixtures_ContainNoMachinePaths` re-checks the path
-  half against the written files, so a normalization rule that quietly stops matching fails the suite
-  instead of committing someone's home directory.
+  half by re-capturing and normalizing, not by reading the committed files — for that failure the
+  committed file is the suspect, not the reference, and reading disk also made the check silently
+  depend on an earlier test in the same file having run first.
 - **Which optional fields a capture leaves empty is derived, not declared.** Accepting a capture
   proves nothing about a field the capture does not contain, and the first version of this tracked
   that with a prose note per fixture plus a hand-written list of the fixtures carrying one — two

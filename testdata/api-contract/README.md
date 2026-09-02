@@ -45,8 +45,10 @@ or on every machine and leave a clean checkout dirty:
 | The detected local shell | `/bin/sh` | Whatever shell the capturing machine runs |
 
 `TestAPIContractFixtures_ContainNoMachinePaths` re-checks the path rule against
-the written files, so a normalization rule that stops matching fails the suite
-rather than quietly committing someone's home directory.
+**the bytes each capture produces**, not against the files already committed —
+for that failure the committed file is the thing under suspicion, not the
+reference. So a normalization rule that stops matching fails the suite even when
+run alone, rather than quietly committing someone's home directory.
 
 ## A capture must be deterministic
 

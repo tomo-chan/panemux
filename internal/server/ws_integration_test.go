@@ -159,6 +159,10 @@ type wsFakeSession struct {
 	out     chan []byte
 	in      chan []byte
 	resizes chan [2]uint16
+	// pending is the remainder of the last chunk taken off out. It exists
+	// because Read must behave like the io.Reader it stands in for — see
+	// its doc comment.
+	pending []byte
 	closed  bool
 }
 
@@ -177,12 +181,30 @@ func (s *wsFakeSession) Type() session.Type   { return session.TypeLocal }
 func (s *wsFakeSession) Title() string        { return s.id }
 func (s *wsFakeSession) State() session.State { return s.state }
 
+// Read behaves like the io.Reader every real session.Session is: it fills p
+// as far as it goes and keeps the rest for the next call.
+//
+// The obvious one-liner — take a chunk off the channel and `return copy(p,
+// data), nil` — silently drops everything past len(p), and managedSession.pump
+// reads through a fixed 4096-byte buffer, so a 5000-byte chunk arrived as 4096
+// bytes with no error and no second read. Nothing in this file pushes that
+// much today, which is exactly why it was worth fixing before something did:
+// the natural next test here is the 256KB replay bound driven through the real
+// router, and written against a truncating fake it would have asserted
+// successfully against a truncated value. A test that passes while measuring
+// the wrong thing is worse than an absent one, and this file exists precisely
+// because the unit-level fakes were not trusted to represent the transport.
 func (s *wsFakeSession) Read(p []byte) (int, error) {
-	data, ok := <-s.out
-	if !ok {
-		return 0, io.EOF
+	if len(s.pending) == 0 {
+		data, ok := <-s.out
+		if !ok {
+			return 0, io.EOF
+		}
+		s.pending = data
 	}
-	return copy(p, data), nil
+	n := copy(p, s.pending)
+	s.pending = s.pending[n:]
+	return n, nil
 }
 
 func (s *wsFakeSession) Write(p []byte) (int, error) {
@@ -283,6 +305,35 @@ func TestWSIntegration_TerminalRoute_StreamsBothDirections(t *testing.T) {
 	case <-time.After(wsReadTimeout):
 		t.Fatal("the pane was never resized")
 	}
+}
+
+// Output larger than managedSession.pump's 4096-byte read buffer must arrive
+// whole. This is the case that makes wsFakeSession.Read's remainder handling
+// load-bearing rather than pedantic — without it the client sees a truncated
+// prefix and nothing reports an error.
+func TestWSIntegration_TerminalRoute_StreamsOutputLargerThanThePumpBuffer(t *testing.T) {
+	e := newWSEnv(t, nil)
+	sess := e.addFakePane(t, "pane-bulk")
+
+	conn, _ := e.dial(t, "/ws/pane-bulk")
+	require.NotNil(t, conn)
+	require.Equal(t, map[string]any{"type": "status", "state": "connected"}, readControl(t, conn))
+
+	// Deliberately not a multiple of the pump's buffer, so a fake that
+	// truncated at the boundary could not pass by coincidence.
+	payload := make([]byte, 5000)
+	for i := range payload {
+		payload[i] = byte('a' + i%26)
+	}
+	sess.out <- payload
+
+	var got []byte
+	for len(got) < len(payload) {
+		msgType, data := readFrame(t, conn)
+		require.Equal(t, websocket.BinaryMessage, msgType)
+		got = append(got, data...)
+	}
+	assert.Equal(t, payload, got, "the pane's output must arrive whole, in order")
 }
 
 func TestWSIntegration_TerminalRoute_ReplaysBufferedOutputOnReconnect(t *testing.T) {
