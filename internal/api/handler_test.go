@@ -3315,3 +3315,54 @@ func TestGetDirectories_SkipsUnreadableChildDirectories(t *testing.T) {
 	assert.Equal(t, "readable", resp.Entries[0].Name)
 	assert.True(t, resp.Entries[0].HasChildren)
 }
+
+// Issue #199 review. PutLayout and PutWorkspaceLayout echo the layout back,
+// and until now that echo was the decoded request body — the one LayoutNode
+// in an API response that never passed through normalization. ValidateLayout
+// accepts an empty direction, so a client PUTting a node without one got
+// `"direction":""` back, which LayoutNodeSchema's enum rejects. Latent only
+// because useLayout.saveLayout discards the body, but it is a hole in the
+// invariant this branch exists to establish.
+func TestPutLayoutRoutes_EchoANormalizedNode(t *testing.T) {
+	for name, tc := range map[string]struct {
+		cfg    *config.Config
+		path   string
+		paneID string
+	}{
+		"layout":           {cfg: defaultTestConfig(), path: "/api/layout", paneID: "main"},
+		"workspace layout": {cfg: workspaceTestConfig(), path: "/api/workspaces/one/layout", paneID: "one-main"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := setupRouter(tc.cfg, session.NewManager())
+
+			// No direction, which ValidateLayout accepts.
+			rec := putLayout(t, r, tc.path, config.LayoutNode{
+				Children: []config.LayoutChild{
+					{Size: 100, Pane: &config.PaneConfig{ID: tc.paneID, Type: "local"}},
+				},
+			})
+
+			require.Equal(t, http.StatusOK, rec.Code)
+			var echoed map[string]any
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &echoed))
+			assert.Equal(t, "horizontal", echoed["direction"], "body: %s", rec.Body.String())
+			assert.NotNil(t, echoed["children"], "body: %s", rec.Body.String())
+		})
+	}
+}
+
+// A pane-only root PUT is normalized the same way one loaded from disk is,
+// so a client cannot persist a shape the loader would have migrated.
+func TestPutLayout_RelocatesAPaneOnlyRoot(t *testing.T) {
+	cfg := defaultTestConfig()
+	r := setupRouter(cfg, session.NewManager())
+
+	rec := putLayout(t, r, "/api/layout", config.LayoutNode{
+		Pane: &config.PaneConfig{ID: "solo", Type: "local"},
+	})
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Nil(t, cfg.Layout.Pane, "the stored layout is normalized, not just the echo")
+	require.Len(t, cfg.Layout.Children, 1)
+	assert.Equal(t, "solo", cfg.Layout.Children[0].Pane.ID)
+}

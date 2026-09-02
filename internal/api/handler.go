@@ -209,6 +209,11 @@ func (h *Handler) PutLayout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	config.ExpandLayoutPaths(&layout)
+	// Normalize before validating, saving and echoing, so a PUT stores and
+	// returns exactly the shape a load would have produced. Without this the
+	// echo is the raw request body — the one LayoutNode in an API response
+	// that never passed through normalizeLayoutNode.
+	layout = config.NormalizeLayout(layout)
 
 	if err := config.ValidateLayout(layout); err != nil {
 		w.Header().Set("Content-Type", "application/json")
@@ -363,6 +368,11 @@ func (h *Handler) PutWorkspaceLayout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	config.ExpandLayoutPaths(&layout)
+	// Normalize before validating, saving and echoing, so a PUT stores and
+	// returns exactly the shape a load would have produced. Without this the
+	// echo is the raw request body — the one LayoutNode in an API response
+	// that never passed through normalizeLayoutNode.
+	layout = config.NormalizeLayout(layout)
 
 	if err := config.ValidateLayout(layout); err != nil {
 		w.Header().Set("Content-Type", "application/json")

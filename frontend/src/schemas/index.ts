@@ -57,13 +57,20 @@ export const LayoutChildSchema: z.ZodType<LayoutChild> = z.lazy(() =>
   })
 )
 
-// No `pane` here, unlike LayoutChildSchema. config.LayoutNode has one, but
-// normalizeLayoutNode moves a root pane into the single child it means before
-// anything serializes (issue #198), so the server cannot emit it — and nothing
-// here ever read it: SplitContainer, App.tsx and useWorkspaceAttentionMonitor
-// all read child.pane off a LayoutChild. Declaring a field neither side can
-// produce or consume is what the contract gate exists to surface.
+// `pane` is declared even though nothing here renders it — SplitContainer,
+// App.tsx and useWorkspaceAttentionMonitor all read child.pane off a
+// LayoutChild, never the root's own. It is declared because the server can
+// still emit it: normalizeLayoutNode relocates a root pane only when the node
+// has no children, leaving the `{pane, children}` shape as the operator wrote
+// it. An undeclared key is not merely unread — parse() strips it, useLayout
+// stores the stripped tree, and the next split PUTs it back, deleting the pane
+// from config.yaml. See PaneConfigSchema's comment above: agent_board was lost
+// exactly that way.
+//
+// direction and children, by contrast, are required: normalizeLayoutNode
+// guarantees both on every response (issue #198).
 export const LayoutNodeSchema = z.object({
+  pane: PaneConfigSchema.optional(),
   direction: z.enum(['horizontal', 'vertical']),
   children: z.array(LayoutChildSchema),
 })

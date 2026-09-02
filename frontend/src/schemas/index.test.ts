@@ -980,3 +980,35 @@ describe('PaneConfigSchema agent_board round-trip', () => {
     expect(parsed.children[0].pane?.agent_board).toEqual({ enabled: true, mode: 'both' })
   })
 })
+
+// Issue #199 review. normalizeLayoutNode relocates a root pane only when the
+// node has no children — the `{pane, children}` shape is left alone, because
+// prepending the pane to children that already sum to 100 would rescale every
+// sibling and surface a pane that has never rendered. So the server does emit
+// a root `pane`, and an undeclared key here is not merely unread: parse()
+// strips it, useLayout stores the stripped tree, and the next split PUTs it
+// back — deleting the pane from the user's config.yaml. That is the failure
+// mode the PaneConfigSchema comment records agent_board being lost to.
+describe('LayoutNodeSchema root pane round-trip', () => {
+  const withRootPane = {
+    pane: { id: 'root', type: 'local' as const },
+    direction: 'horizontal' as const,
+    children: [{ size: 100, pane: { id: 'a', type: 'local' as const } }],
+  }
+
+  it('accepts a root pane sitting beside children', () => {
+    expect(LayoutNodeSchema.safeParse(withRootPane).success).toBe(true)
+  })
+
+  it('does not strip the root pane, which would delete it from config.yaml', () => {
+    expect(LayoutNodeSchema.parse(withRootPane)).toEqual(withRootPane)
+  })
+
+  it('still accepts a node with no root pane, the shape normalization produces', () => {
+    const relocated = {
+      direction: 'vertical' as const,
+      children: [{ size: 100, pane: { id: 'a', type: 'local' as const } }],
+    }
+    expect(LayoutNodeSchema.parse(relocated)).toEqual(relocated)
+  })
+})

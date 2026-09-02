@@ -2,6 +2,8 @@ package config
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -177,4 +179,95 @@ func TestNormalizeWorkspaceLayouts_NilBecomesAnEmptySlice(t *testing.T) {
 	data, err := json.Marshal(WorkspacesConfig{Items: got})
 	require.NoError(t, err)
 	assert.Contains(t, string(data), `"items":[]`)
+}
+
+// ── Issue #199 review findings ────────────────────────────────────────────
+
+// The `{pane, children}` shape. The relocation guard deliberately excludes it
+// — prepending the root pane to children that already sum to 100 would mean
+// rescaling every sibling, silently changing proportions the operator wrote,
+// and making a pane that has never rendered appear. So `pane` survives here,
+// which is why LayoutNodeSchema must keep declaring it: an undeclared key is
+// stripped by WorkspacesResponseSchema.parse, stored stripped by useLayout,
+// and PUT back on the next split — deleting it from config.yaml for good.
+// That is the failure mode the PaneConfigSchema comment records agent_board
+// being lost to.
+func TestNormalizeLayoutNode_KeepsARootPaneThatSitsBesideChildren(t *testing.T) {
+	got := normalizeLayoutNode(LayoutNode{
+		Pane:     onePane("root"),
+		Children: []LayoutChild{{Size: 100, Pane: onePane("a")}},
+	})
+
+	require.NotNil(t, got.Pane, "dropping it here is the same data loss, just ours")
+	assert.Equal(t, "root", got.Pane.ID)
+	require.Len(t, got.Children, 1, "siblings are not rescaled to make room")
+	assert.Equal(t, "a", got.Children[0].Pane.ID)
+
+	raw, hasDirection, hasChildren := serializedKeys(t, got)
+	assert.True(t, hasDirection, raw)
+	assert.True(t, hasChildren, raw)
+}
+
+// Relocating a pane-only root moves it somewhere validatePane can see it.
+// validateLayoutNode never inspected LayoutNode.Pane and collectPanes never
+// walked it, so a root pane was previously validated by nothing — which is
+// also why it rendered nothing. A root pane whose type is missing or whose
+// ssh connection is undefined therefore stops a config that used to load,
+// and that is deliberate: the same pane written as a child has always failed
+// this way, and normalization does not invent values an operator never wrote
+// (see TestNormalizeLayoutNode_DoesNotRepairAnInvalidDirection). The error
+// names the pane and the fix; the previous behavior was an empty workspace
+// and no explanation. docs/behavior.md records it.
+func TestLoad_RelocatedRootPaneIsValidatedLikeAnyOther(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(`
+server:
+  port: 8080
+  host: 127.0.0.1
+workspaces:
+  active: main
+  items:
+    - id: main
+      title: Main
+      layout:
+        pane:
+          id: main
+          shell: /bin/sh
+`), 0o600))
+
+	_, err := Load(path)
+
+	require.Error(t, err, "a root pane with no type used to load and render nothing")
+	assert.Contains(t, err.Error(), `pane "main" has invalid type ""`)
+}
+
+// The same config with the type the operator meant loads, and the pane ends
+// up where the dashboard renders it. Without this the test above would be
+// satisfied by normalization breaking every root pane.
+func TestLoad_WellFormedRootPaneRelocatesAndLoads(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(`
+server:
+  port: 8080
+  host: 127.0.0.1
+workspaces:
+  active: main
+  items:
+    - id: main
+      title: Main
+      layout:
+        pane:
+          id: main
+          type: local
+`), 0o600))
+
+	cfg, err := Load(path)
+
+	require.NoError(t, err)
+	layout := cfg.ActiveLayout()
+	assert.Nil(t, layout.Pane)
+	require.Len(t, layout.Children, 1)
+	assert.Equal(t, "main", layout.Children[0].Pane.ID)
 }

@@ -103,6 +103,14 @@ func normalizeLayoutNode(node LayoutNode) LayoutNode {
 	return node
 }
 
+// NormalizeLayout is normalizeLayoutNode for callers outside this package.
+// internal/api needs it because PutLayout and PutWorkspaceLayout echo the
+// layout they were given, and an echo that skipped normalization was the one
+// LayoutNode in an API response the dashboard could still fail to parse.
+func NormalizeLayout(node LayoutNode) LayoutNode {
+	return normalizeLayoutNode(node)
+}
+
 // normalizeWorkspaceLayouts applies normalizeLayoutNode to every workspace in
 // items, returning a copy so a read-only view never mutates stored config.
 //
