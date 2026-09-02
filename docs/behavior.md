@@ -212,6 +212,18 @@ drag on Linux and Windows.
 
 Returns the current layout tree as JSON.
 
+Every layout node in a response carries both `direction` and `children`, whatever the config file
+says. `config.yaml` may omit either — and may write a single-pane workspace as `layout: {pane: ...}`
+with no children at all, which validation accepts — but `normalizeLayoutNode` fills in the direction,
+substitutes an empty array for absent children, and moves a root `pane` into the one child it means
+before anything serializes. The frontend's `LayoutNodeSchema` requires both keys and covers the whole
+response, so a node missing either used to fail the *entire* workspaces payload rather than dropping
+a key; see issue #198. A root `pane` was also rendered by nothing — every frontend call site reads
+`child.pane` off a layout *child* — so relocating it is what makes such a workspace display at all.
+
+The migration is persisted the next time the layout is saved, so a hand-written config converges on
+the `direction` + `children` form rather than being rewritten underneath the operator on read.
+
 ### `PUT /api/layout`
 
 Accepts a layout JSON document, validates it, updates in-memory state, and persists it when possible.

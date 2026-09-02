@@ -159,6 +159,7 @@ tried first and made an unrelated spec fail intermittently.
 | H12 | Workspace bar position and width | Every position renders, and the width is persisted | `auto`: `frontend/src/components/WorkspaceTabs.test.tsx`, `internal/api` — `TestPutWorkspaceTabPosition*`, `TestPutWorkspaceVerticalBarWidth*` |
 | H13 | Terminal rendering and scrollback | The xterm viewport's scrollbar matches the terminal chrome | `auto`: `frontend/e2e/terminal-scrollbar.spec.ts` |
 | H14 | Session types | `local`, `tmux`, `ssh` and `ssh_tmux` panes are validated and constructed from config | `auto`: `internal/config` — `TestValidatePane*`; `internal/session` for the construction half. The live transports themselves are `manual` — see [Not covered](#not-covered) |
+| H14a | A hand-written single-pane workspace (`layout: {pane: ...}`, no children) | Loads and renders: the pane is migrated into the one child it means, so the response carries the `direction` + `children` shape the dashboard parses | `auto`: `internal/config` — `TestNormalizeLayoutNode_PaneOnlyRootBecomesItsSingleChild`, `TestNormalizeLayoutNode_AlwaysSerializesDirectionAndChildren`, `TestWorkspacesView_NormalizesEveryWorkspaceLayout`, `TestActiveLayout_NormalizesWhatItReturns` |
 | H15 | WebSocket reconnect and replay | Output produced while disconnected is replayed once, in order, on reconnect | `auto`: `internal/ws`; plus the Alloy model in `docs/models/replay_state.als`, checked by `.github/workflows/model-check.yml` |
 
 ## I. Opening URLs from a pane

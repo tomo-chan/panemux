@@ -57,10 +57,15 @@ export const LayoutChildSchema: z.ZodType<LayoutChild> = z.lazy(() =>
   })
 )
 
+// No `pane` here, unlike LayoutChildSchema. config.LayoutNode has one, but
+// normalizeLayoutNode moves a root pane into the single child it means before
+// anything serializes (issue #198), so the server cannot emit it — and nothing
+// here ever read it: SplitContainer, App.tsx and useWorkspaceAttentionMonitor
+// all read child.pane off a LayoutChild. Declaring a field neither side can
+// produce or consume is what the contract gate exists to surface.
 export const LayoutNodeSchema = z.object({
   direction: z.enum(['horizontal', 'vertical']),
   children: z.array(LayoutChildSchema),
-  pane: PaneConfigSchema.optional(),
 })
 
 export type LayoutNode = z.infer<typeof LayoutNodeSchema>

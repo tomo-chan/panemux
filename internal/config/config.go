@@ -59,10 +59,62 @@ type PaneConfig struct {
 	AgentBoard    PaneAgentBoardConfig `yaml:"agent_board,omitempty" json:"agent_board,omitempty"`
 }
 
+// LayoutNode is one node of the split tree. Its `direction` and `children` are
+// omitempty in YAML but NOT in JSON, and the asymmetry is issue #198: LayoutNodeSchema requires both, so a
+// node serialized without them fails WorkspacesResponseSchema — which covers
+// the whole response, taking the workspace list down rather than dropping a
+// key. config.yaml stays free of empty keys; the wire always carries them.
+// normalizeLayoutNode is what guarantees the values are meaningful.
 type LayoutNode struct {
 	Pane      *PaneConfig   `yaml:"pane,omitempty"      json:"pane,omitempty"`
-	Direction string        `yaml:"direction,omitempty" json:"direction,omitempty"` // horizontal | vertical
-	Children  []LayoutChild `yaml:"children,omitempty"  json:"children,omitempty"`
+	Direction string        `yaml:"direction,omitempty" json:"direction"` // horizontal | vertical
+	Children  []LayoutChild `yaml:"children,omitempty"  json:"children"`
+}
+
+// normalizeLayoutNode returns node in the one shape the dashboard renders and
+// LayoutNodeSchema accepts. Four shapes reach it that Go accepts and the
+// browser cannot parse — a pane-only root, children with no direction, a
+// direction with no children, and an empty node — and validateLayoutNode
+// permits every one of them, so this is a widening of the layout the API
+// serves rather than a tightening of what a config may say.
+//
+// The root pane is relocated rather than left in place because nothing in
+// frontend/src reads it: SplitContainer, App.tsx and useWorkspaceAttentionMonitor
+// all read child.pane off LayoutChild, never the root's own. A single-pane
+// workspace written by hand as `layout: {pane: ...}` therefore rendered
+// nothing even before the schema rejected it.
+//
+// An invalid direction is deliberately left alone — validateLayoutNode owns
+// reporting that, and correcting it here would substitute a value the
+// operator never wrote for an error they need to see.
+func normalizeLayoutNode(node LayoutNode) LayoutNode {
+	if node.Pane != nil && len(node.Children) == 0 {
+		node.Children = []LayoutChild{{Size: 100.0, Pane: node.Pane}}
+		node.Pane = nil
+	}
+	if node.Direction == "" {
+		node.Direction = directionHorizontal
+	}
+	if node.Children == nil {
+		// A nil slice marshals to null, which an array schema rejects just
+		// as an absent key does.
+		node.Children = []LayoutChild{}
+	}
+	return node
+}
+
+// normalizeWorkspaceLayouts applies normalizeLayoutNode to every workspace in
+// items, returning a copy so a read-only view never mutates stored config.
+func normalizeWorkspaceLayouts(items []WorkspaceConfig) []WorkspaceConfig {
+	if items == nil {
+		return nil
+	}
+	out := make([]WorkspaceConfig, len(items))
+	copy(out, items)
+	for i := range out {
+		out[i].Layout = normalizeLayoutNode(out[i].Layout)
+	}
+	return out
 }
 
 type LayoutChild struct {
@@ -237,6 +289,10 @@ func (c *Config) normalizedWorkspaces() WorkspacesConfig {
 	if workspaces.Active == "" && len(workspaces.Items) > 0 {
 		workspaces.Active = workspaces.Items[0].ID
 	}
+	// Every JSON response carrying a LayoutNode comes from here or from
+	// ActiveLayout, so normalizing at both is what makes issue #198's
+	// guarantee hold for the wire rather than only for freshly loaded config.
+	workspaces.Items = normalizeWorkspaceLayouts(workspaces.Items)
 	return workspaces
 }
 
@@ -254,9 +310,9 @@ func (c *Config) ActiveWorkspace() (WorkspaceConfig, bool) {
 
 func (c *Config) ActiveLayout() LayoutNode {
 	if workspace, ok := c.ActiveWorkspace(); ok {
-		return workspace.Layout
+		return normalizeLayoutNode(workspace.Layout)
 	}
-	return c.Layout
+	return normalizeLayoutNode(c.Layout)
 }
 
 func (c *Config) SetActiveWorkspace(id string) bool {
