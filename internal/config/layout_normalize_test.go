@@ -161,3 +161,20 @@ func TestActiveLayout_NormalizesTheLegacyTopLevelLayout(t *testing.T) {
 	assert.True(t, hasDirection, raw)
 	assert.True(t, hasChildren, raw)
 }
+
+// The nil case, which normalizedWorkspaces itself cannot produce (it
+// substitutes a default workspace whenever Items is empty) but which the
+// helper must still answer safely: a nil slice marshals to null, and
+// WorkspacesResponseSchema requires `items` to be an array. Returning nil
+// here would reintroduce, one level up, the same null-for-an-array defect
+// this file exists to remove from LayoutNode.
+func TestNormalizeWorkspaceLayouts_NilBecomesAnEmptySlice(t *testing.T) {
+	got := normalizeWorkspaceLayouts(nil)
+
+	assert.NotNil(t, got, "nil marshals to null; an array schema rejects it")
+	assert.Empty(t, got)
+
+	data, err := json.Marshal(WorkspacesConfig{Items: got})
+	require.NoError(t, err)
+	assert.Contains(t, string(data), `"items":[]`)
+}

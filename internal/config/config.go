@@ -105,10 +105,12 @@ func normalizeLayoutNode(node LayoutNode) LayoutNode {
 
 // normalizeWorkspaceLayouts applies normalizeLayoutNode to every workspace in
 // items, returning a copy so a read-only view never mutates stored config.
+//
+// A nil input returns an empty slice rather than nil, for the same reason
+// normalizeLayoutNode fills in an empty Children: WorkspacesConfig.Items is
+// not omitempty, so nil would reach the dashboard as `"items": null` against
+// a schema that wants an array.
 func normalizeWorkspaceLayouts(items []WorkspaceConfig) []WorkspaceConfig {
-	if items == nil {
-		return nil
-	}
 	out := make([]WorkspaceConfig, len(items))
 	copy(out, items)
 	for i := range out {
