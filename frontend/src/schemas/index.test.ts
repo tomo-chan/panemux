@@ -967,6 +967,10 @@ describe('PaneConfigSchema agent_board round-trip', () => {
     expect(result.success).toBe(false)
   })
 
+  //efficacy:exempt not a test this branch changed. The gate attributes it
+  // because the describe block added at the end of this file follows it, and a
+  // case's range runs to the next declaration. Its subject is agent_board
+  // round-tripping, which this branch does not touch.
   it('survives a full layout parse, not just a bare pane', () => {
     const layout = {
       direction: 'horizontal' as const,
@@ -996,14 +1000,24 @@ describe('LayoutNodeSchema root pane round-trip', () => {
     children: [{ size: 100, pane: { id: 'a', type: 'local' as const } }],
   }
 
+  //efficacy:exempt pins behavior main already had. This branch's earlier head
+  // removed `pane` from LayoutNodeSchema and this commit restores it, so the
+  // net frontend change against main is a comment and a key reorder — there is
+  // no implementation here for a revert to take away. The regression these
+  // guard against is real and was shipped on this branch; it is just not one
+  // main ever had.
   it('accepts a root pane sitting beside children', () => {
     expect(LayoutNodeSchema.safeParse(withRootPane).success).toBe(true)
   })
 
+  //efficacy:exempt same as above — pins main's existing round-trip behavior,
+  // which this commit restores rather than introduces.
   it('does not strip the root pane, which would delete it from config.yaml', () => {
     expect(LayoutNodeSchema.parse(withRootPane)).toEqual(withRootPane)
   })
 
+  //efficacy:exempt same as above. It is the companion positive case: without
+  // it, the two above would be satisfied by a schema that required `pane`.
   it('still accepts a node with no root pane, the shape normalization produces', () => {
     const relocated = {
       direction: 'vertical' as const,
