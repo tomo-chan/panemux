@@ -1,25 +1,22 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Page, type TestInfo } from '@playwright/test'
 
+import { checkAgainstCeiling, type ScanLabel } from './a11y-ceiling'
+
 // Interaction capability is the other ISO 25010 characteristic
 // docs/quality-gateway.md records as thinly protected: three focus-restoration
-// E2E tests and no accessibility checks at all. This is the first
-// accessibility measurement.
+// E2E tests and, before this file, no accessibility checks at all.
 //
-// **It measures; it does not gate.** Roadmap item 7 of issue #180 says so
-// explicitly, and the reason is design principle 4. Turning axe on over an
-// existing UI produces a backlog, and a gate that starts red is a gate people
-// route around on day one — taking the gates that do work with it. So every
-// violation is recorded, in the run's own log and as an attachment, and the
-// only assertion is that the scan actually ran.
-//
-// What "later" looks like: once a few runs' worth of counts exist, freeze the
-// current count as a ceiling that may fall but not rise. That is a threshold
-// chosen from data, which is what the roadmap asks for.
+// This file drives the two page states and reports what it found. The ceiling
+// it holds them to, and the comparator that applies it, live in
+// ./a11y-ceiling.ts — separated so the comparator can be unit tested, because
+// a green run exercises none of its interesting branches. Read that file for
+// why the ceiling is per rule ID, why it counts nodes, and why lowering it is
+// a manual edit.
 
 const IMPACTS = ['critical', 'serious', 'moderate', 'minor'] as const
 
-async function scan(page: Page, testInfo: TestInfo, label: string) {
+async function scan(page: Page, testInfo: TestInfo, label: ScanLabel) {
   const results = await new AxeBuilder({ page })
     // The terminal is a canvas xterm.js owns and draws into. Auditing it here
     // would report on xterm's markup rather than panemux's, every run, with
@@ -37,6 +34,8 @@ async function scan(page: Page, testInfo: TestInfo, label: string) {
     .sort()
     .join('\n')
 
+  const { failures, lowerable } = checkAgainstCeiling(label, results.violations)
+
   // Both outputs matter: the log line is what a CI run shows without anyone
   // downloading anything, and the attachment is what someone actually fixing
   // these needs.
@@ -44,36 +43,48 @@ async function scan(page: Page, testInfo: TestInfo, label: string) {
     `a11y[${label}] total=${results.violations.length} ` +
       IMPACTS.map((i) => `${i}=${counts[i]}`).join(' '),
   )
+  if (lowerable.length > 0) {
+    console.log(
+      `a11y[${label}] ceiling can be lowered — edit CEILINGS in e2e/a11y-ceiling.ts and the ` +
+        `Accessibility table in docs/quality-gateway.md:\n  ${lowerable.join('\n  ')}`,
+    )
+  }
   await testInfo.attach(`axe-${label}.txt`, {
-    body: summary || 'no violations',
+    body:
+      (summary || 'no violations') +
+      (lowerable.length > 0 ? `\n\nceiling can be lowered:\n${lowerable.join('\n')}` : ''),
     contentType: 'text/plain',
   })
 
-  return results
+  return { results, failures }
 }
 
-test('records the accessibility violations on the dashboard', async ({ page }, testInfo) => {
+test('holds the dashboard at or below its accessibility ceiling', async ({ page }, testInfo) => {
   await page.goto('/')
   await expect(page.locator('[data-pane-id]').first()).toBeVisible()
 
-  const results = await scan(page, testInfo, 'dashboard')
+  const { results, failures } = await scan(page, testInfo, 'dashboard')
 
-  // The scan ran and looked at something. Asserting on the violation count is
-  // deliberately NOT done here — see the note at the top of this file.
+  // The scan ran and looked at something. Without this a page that failed to
+  // render at all would report zero violations and pass the ceiling check
+  // trivially, which is the one way this gate could go quietly green while
+  // measuring nothing.
   expect(results.passes.length + results.violations.length).toBeGreaterThan(0)
+  expect(failures, failures.join('\n')).toEqual([])
 })
 
-test('records the accessibility violations with the pane settings dialog open', async ({ page }, testInfo) => {
+test('holds the pane settings dialog at or below its accessibility ceiling', async ({ page }, testInfo) => {
   await page.goto('/')
   await expect(page.locator('[data-pane-id]').first()).toBeVisible()
 
   await page.getByTitle('Pane settings').first().click()
   await expect(page.getByRole('dialog')).toBeVisible()
 
-  const results = await scan(page, testInfo, 'pane-settings')
+  const { results, failures } = await scan(page, testInfo, 'pane-settings')
 
   // A modal dialog is where accessibility problems are both most likely and
   // most consequential — focus trapping, labelling, escape handling — so it
-  // gets its own scan rather than being folded into the dashboard's.
+  // gets its own ceiling rather than being folded into the dashboard's.
   expect(results.passes.length + results.violations.length).toBeGreaterThan(0)
+  expect(failures, failures.join('\n')).toEqual([])
 })

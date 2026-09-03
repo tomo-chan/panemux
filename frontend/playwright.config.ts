@@ -26,14 +26,26 @@ const COMMAND_CENTER_BASE_URL = 'http://127.0.0.1:4176'
 // CRUD), so it cannot share a server with specs that assert on the default
 // fixture's panes and tabs.
 const CORE_MULTIPLEXER_BASE_URL = 'http://127.0.0.1:4177'
+// a11y.spec.ts is the same coupling seen from the other side: it counts axe
+// violation *nodes*, so any spec that leaves an extra pane behind changes its
+// numbers. See e2e/a11y.yml for what that measured.
+const A11Y_BASE_URL = 'http://127.0.0.1:4178'
 
 const AGENT_BOARD_SPEC = /agent-board\.spec\.ts$/
 const AGENT_BOARD_AGMSG_SPEC = /agent-board-agmsg\.spec\.ts$/
 const COMMAND_CENTER_SPEC = /command-center\.spec\.ts$/
 const CORE_MULTIPLEXER_SPEC = /core-multiplexer\.spec\.ts$/
+const A11Y_SPEC = /a11y\.spec\.ts$/
 
 export default defineConfig({
   testDir: './e2e',
+  // Playwright's default testMatch takes `*.test.ts` as well as `*.spec.ts`,
+  // and e2e/ now holds e2e/a11y-ceiling.test.ts — a vitest unit test for the
+  // a11y comparator, which loads @vitest/expect and dies here with "Cannot
+  // redefine property: Symbol($$jest-matchers-object)". The two runners split
+  // this directory by suffix: `.spec.ts` is Playwright's, `.test.ts` is
+  // vitest's (see vite.config.ts, which draws the same line from its side).
+  testMatch: /\.spec\.ts$/,
   fullyParallel: false,
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : 'list',
@@ -77,12 +89,25 @@ export default defineConfig({
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
     },
+    {
+      command: 'sh ./e2e/run-panemux-e2e.sh a11y.yml 4178',
+      url: A11Y_BASE_URL,
+      cwd: '.',
+      reuseExistingServer: !process.env.CI,
+      timeout: 120_000,
+    },
   ],
   projects: [
     {
       name: 'chromium',
       use: { ...chromium, baseURL: DEFAULT_BASE_URL },
-      testIgnore: [AGENT_BOARD_SPEC, AGENT_BOARD_AGMSG_SPEC, COMMAND_CENTER_SPEC, CORE_MULTIPLEXER_SPEC],
+      testIgnore: [
+        AGENT_BOARD_SPEC,
+        AGENT_BOARD_AGMSG_SPEC,
+        COMMAND_CENTER_SPEC,
+        CORE_MULTIPLEXER_SPEC,
+        A11Y_SPEC,
+      ],
     },
     {
       name: 'chromium-agent-board',
@@ -103,6 +128,11 @@ export default defineConfig({
       name: 'chromium-core-multiplexer',
       use: { ...chromium, baseURL: CORE_MULTIPLEXER_BASE_URL },
       testMatch: CORE_MULTIPLEXER_SPEC,
+    },
+    {
+      name: 'chromium-a11y',
+      use: { ...chromium, baseURL: A11Y_BASE_URL },
+      testMatch: A11Y_SPEC,
     },
   ],
 })
