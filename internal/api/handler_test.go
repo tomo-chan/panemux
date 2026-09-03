@@ -140,10 +140,11 @@ func workspaceTestConfig() *config.Config {
 	}
 }
 
-func loadWorkspaceTestConfigFromFile(t *testing.T) (*config.Config, string) {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "config.yaml")
-	content := `
+// workspaceTestConfigYAML is the on-disk form of workspaceTestConfig(): two
+// workspaces, one local pane each. Shared with the write-failure fixture in
+// handler_error_paths_test.go so both load the same config, one from a path
+// that can still be written and one from a path that cannot.
+const workspaceTestConfigYAML = `
 server:
   port: 8080
   host: "127.0.0.1"
@@ -171,7 +172,11 @@ workspaces:
               id: two-main
               type: local
 `
-	require.NoError(t, os.WriteFile(path, []byte(content), 0600))
+
+func loadWorkspaceTestConfigFromFile(t *testing.T) (*config.Config, string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(workspaceTestConfigYAML), 0600))
 	cfg, err := config.Load(path)
 	require.NoError(t, err)
 	return cfg, path
@@ -3294,7 +3299,7 @@ func TestGetDirectories_SkipsUnreadableChildDirectories(t *testing.T) {
 	originalReadDir := h.readDirFn
 	h.readDirFn = func(name string) ([]os.DirEntry, error) {
 		if name == unreadableDir {
-			return nil, &fs.PathError{Op: "readdir", Path: name, Err: fs.ErrPermission}
+			return nil, &fs.PathError{Op: readdirOp, Path: name, Err: fs.ErrPermission}
 		}
 		return originalReadDir(name)
 	}
