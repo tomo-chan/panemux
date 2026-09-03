@@ -1,0 +1,28 @@
+{
+  "entries": [
+    {
+      "at": "2026-01-01T00:00:00Z",
+      "raw": {
+        "text": "which panes are working?",
+        "type": "panemux_prompt"
+      }
+    },
+    {
+      "at": "2026-01-01T00:00:00Z",
+      "raw": {
+        "message": {
+          "content": [
+            {
+              "text": "pane-1 is working.",
+              "type": "text"
+            }
+          ],
+          "role": "assistant"
+        },
+        "session_id": "00000000-0000-4000-8000-000000000000",
+        "subtype": "text",
+        "type": "assistant"
+      }
+    }
+  ]
+}

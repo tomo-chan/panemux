@@ -1,0 +1,15 @@
+{
+  "entries": [
+    {
+      "has_children": false,
+      "name": "notes",
+      "path": "/tmp/sample-project/notes"
+    },
+    {
+      "has_children": true,
+      "name": "project",
+      "path": "/tmp/sample-project/project"
+    }
+  ],
+  "path": "/tmp/sample-project"
+}

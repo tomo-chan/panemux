@@ -1,0 +1,29 @@
+[
+  {
+    "message": "invalid request: invalid character 'n' looking for beginning of object key string",
+    "type": "error"
+  },
+  {
+    "type": "busy"
+  },
+  {
+    "raw": {
+      "message": {
+        "content": [
+          {
+            "text": "pane-1 is working.",
+            "type": "text"
+          }
+        ],
+        "role": "assistant"
+      },
+      "session_id": "00000000-0000-4000-8000-000000000000",
+      "subtype": "text",
+      "type": "assistant"
+    },
+    "type": "line"
+  },
+  {
+    "type": "done"
+  }
+]
