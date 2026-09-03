@@ -60,6 +60,7 @@ func (r *replayBuffer) append(chunk []byte) {
 	}
 
 	want := r.size + len(chunk)
+	//mutation:exempt equivalent — at want == limit the clamp assigns the value want already has
 	if want > r.limit {
 		want = r.limit
 	}
@@ -71,6 +72,7 @@ func (r *replayBuffer) append(chunk []byte) {
 	copy(r.buf, chunk[written:])
 
 	r.size += len(chunk)
+	//mutation:exempt equivalent — at overflow == 0 both branches leave start and size where they are
 	if overflow := r.size - len(r.buf); overflow > 0 {
 		r.start = (r.start + overflow) % len(r.buf)
 		r.size = len(r.buf)
@@ -90,24 +92,12 @@ func (r *replayBuffer) snapshot() []byte {
 	if r.size == 0 {
 		return nil
 	}
+	//mutation:exempt equivalent — at end == len(buf) the wrap path below appends buf[:0], so it returns the same bytes
 	if end := r.start + r.size; end <= len(r.buf) {
 		return append([]byte(nil), r.buf[r.start:end]...)
 	}
 	out := append([]byte(nil), r.buf[r.start:]...)
 	return append(out, r.buf[:r.start+r.size-len(r.buf)]...)
-}
-
-// copyTo writes the retained bytes, oldest first, into dst.
-func (r *replayBuffer) copyTo(dst []byte) {
-	if r.size == 0 {
-		return
-	}
-	if end := r.start + r.size; end <= len(r.buf) {
-		copy(dst, r.buf[r.start:end])
-		return
-	}
-	n := copy(dst, r.buf[r.start:])
-	copy(dst[n:], r.buf[:r.start+r.size-len(r.buf)])
 }
 
 // reserve grows storage to hold at least n bytes, capped at the limit.
@@ -122,18 +112,35 @@ func (r *replayBuffer) reserve(n int) {
 	}
 
 	grown := len(r.buf)
+	//mutation:exempt equivalent — at grown == replayBufferInitialBytes the floor assigns the value grown already has
 	if grown < replayBufferInitialBytes {
 		grown = replayBufferInitialBytes
 	}
+	// Not equivalent: `<=` would double once more when n lands exactly on a
+	// power of two, so storage would carry one step of slack it does not need.
+	// Waived rather than tested because this loop decides only how much slack
+	// the storage holds, never which bytes it retains — and the bound that
+	// actually matters, that it stops at the limit, is asserted by
+	// TestReplayBuffer_CapacityNeverExceedsLimit. A test that pinned the exact
+	// doubling sequence would restate this loop rather than check anything.
+	//mutation:exempt growth policy — an extra doubling changes slack, not retained bytes, and the limit still caps it
 	for grown < n {
 		grown *= 2
 	}
+	//mutation:exempt equivalent — at grown == limit the cap assigns the value grown already has
 	if grown > r.limit {
 		grown = r.limit
 	}
 
 	next := make([]byte, grown)
-	r.copyTo(next)
+	// The retained bytes are always contiguous here, so this needs none of the
+	// two-part copy snapshot does. start moves only in append's eviction
+	// branch, which sets size to the whole of storage at the same time — so a
+	// wrapped ring is always a full one, and a full one never reaches this far,
+	// because len(r.buf) >= n already returned above. If that ever stopped
+	// holding, this slice expression would panic rather than quietly drop
+	// output.
+	copy(next, r.buf[r.start:r.start+r.size])
 	r.buf = next
 	r.start = 0
 	// r.size is unchanged: growth only ever happens when everything retained

@@ -145,6 +145,51 @@ func TestReplayBuffer_MatchesTailOfEverythingWritten(t *testing.T) {
 	}
 }
 
+// TestReplayBuffer_GrowsWithoutLosingWhatItHolds covers the one path that moves
+// retained bytes between allocations: storage doubles from 4KB towards the
+// limit, and each step has to carry what is already there across.
+//
+// The tests above cannot reach it. They use limits at or below the 4KB initial
+// allocation, so their one and only growth happens while the buffer is still
+// empty and there is nothing to lose. Mutation testing found that gap — a
+// mutant that made the carry-across copy nothing survived the whole suite.
+func TestReplayBuffer_GrowsWithoutLosingWhatItHolds(t *testing.T) {
+	// Well past replayBufferInitialBytes, and never reached: this exercises
+	// growth on its own, with no eviction mixed in.
+	const limit = 64 * 1024
+	r := newReplayBuffer(limit)
+
+	var want []byte
+	var next byte
+	grewWhileHolding := 0
+	for i := 0; i < 40; i++ {
+		chunk := make([]byte, 1000)
+		for j := range chunk {
+			chunk[j] = next
+			next++
+		}
+
+		heldBefore, capacityBefore := r.len(), r.capacity()
+		r.append(chunk)
+		if r.capacity() != capacityBefore && heldBefore > 0 {
+			grewWhileHolding++
+		}
+
+		want = append(want, chunk...)
+		if got := r.snapshot(); !bytes.Equal(got, want) {
+			t.Fatalf("after %d chunks: buffer holds %d bytes, want %d — growth lost output",
+				i+1, len(got), len(want))
+		}
+	}
+
+	// Without this the test could stop exercising growth — a larger initial
+	// allocation, say — and go on passing while asserting nothing it exists for.
+	if grewWhileHolding < 2 {
+		t.Fatalf("storage grew %d times with bytes already in it; this test covers the carry-across copy and needs several",
+			grewWhileHolding)
+	}
+}
+
 // TestReplayBuffer_SnapshotIsIndependentOfLaterAppends is the aliasing bug a
 // ring buffer makes possible and a fresh slice per publish did not: a snapshot
 // is handed to a subscriber goroutine, so it must not be a view onto storage
