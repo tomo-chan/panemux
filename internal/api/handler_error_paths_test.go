@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"testing"
@@ -83,11 +84,41 @@ func newUnwritableWorkspaceHandler(t *testing.T) *Handler {
 const readdirOp = "readdir"
 
 // emptyPATH points PATH at a directory containing nothing, so every
-// exec.LookPath in the test's scope fails.
+// exec.LookPath for a BARE name in the test's scope fails.
+//
+// It does not neutralize a lookup of an absolute path: exec.LookPath checks a
+// name containing a slash directly and never consults PATH. findVSCode's darwin
+// fallback is exactly that shape, which is what requireNoVSCodeAppBundle below
+// exists for.
 func emptyPATH(t *testing.T) {
 	t.Helper()
 
 	t.Setenv("PATH", t.TempDir())
+}
+
+// vscodeAppBundleBin mirrors the darwin fallback path findVSCode probes. It is
+// duplicated here rather than exported, because what the tests below need is
+// not the value the handler uses but the answer to "can this machine make
+// findVSCode fail at all".
+const vscodeAppBundleBin = "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code"
+
+// requireNoVSCodeAppBundle skips a test that needs findVSCode to report "not
+// found" when this machine has VSCode installed where the darwin fallback looks.
+//
+// emptyPATH cannot hide that copy (see above), so on such a machine findVSCode
+// succeeds. For TestFindVSCode_ResolutionOrder that would be a false failure;
+// for the handler test it would be worse — the request runs on to cmd.Start()
+// and launches the operator's real editor. CI is linux, where the branch is not
+// reachable at all, so this only ever fires on a developer's Mac.
+func requireNoVSCodeAppBundle(t *testing.T) {
+	t.Helper()
+
+	if runtime.GOOS != "darwin" {
+		return
+	}
+	if _, err := exec.LookPath(vscodeAppBundleBin); err == nil {
+		t.Skip("VSCode is installed at " + vscodeAppBundleBin + ", so findVSCode cannot be made to fail here")
+	}
 }
 
 // writeFakeBinary writes an executable script named name and returns its path.
@@ -393,6 +424,7 @@ func TestPostOpenVSCode_RelativeCWD_Returns422(t *testing.T) {
 }
 
 func TestPostOpenVSCode_CodeBinaryNotFound_Returns500(t *testing.T) {
+	requireNoVSCodeAppBundle(t)
 	emptyPATH(t)
 
 	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
@@ -462,6 +494,7 @@ func TestFindVSCode_ResolutionOrder(t *testing.T) {
 	})
 
 	t.Run("reports not found", func(t *testing.T) {
+		requireNoVSCodeAppBundle(t)
 		emptyPATH(t)
 
 		h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
@@ -662,6 +695,12 @@ func mustAbs(t *testing.T, path string) string {
 
 // ── Git and PR metadata ──────────────────────────────────────────────────────
 
+// ghNoPRScript stands in for a `gh` that found no pull request. Every test that
+// resolves a git context needs one: without it lookupPRInfo finds the
+// developer's own gh on PATH and makes a real network call for a repository
+// that does not exist.
+const ghNoPRScript = "#!/bin/sh\nexit 1\n"
+
 func TestGitExistsFn_ReportsAMissingGitBinary(t *testing.T) {
 	emptyPATH(t)
 
@@ -671,10 +710,16 @@ func TestGitExistsFn_ReportsAMissingGitBinary(t *testing.T) {
 	assert.Contains(t, err.Error(), "finding git binary")
 }
 
+// The cwd this session would have reported is a real repository, so a handler
+// that ignored the error would answer IsGit true. Without that, the test passes
+// with the error check deleted: an empty cwd fails sanitizeGitExecDir a few
+// frames later and reaches the same IsGit false by a different route.
 func TestGetGitInfo_CWDLookupFails_IsGitFalse(t *testing.T) {
 	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
+	h.ghBinaryPath = writeFakeGHBinary(t, ghNoPRScript)
 	h.manager.Add(&mockCWDSession{
 		mockSession: mockSession{id: "cwd-err", typ: session.TypeLocal},
+		cwd:         initTempGitRepo(t),
 		cwdErr:      errors.New("shell is gone"),
 	})
 
@@ -692,6 +737,7 @@ func TestGetGitInfo_CWDLookupFails_IsGitFalse(t *testing.T) {
 func TestGetGitInfo_SessionWithoutActiveWorkdirs_UsesItsOwnCWD(t *testing.T) {
 	dir := initTempGitRepo(t)
 	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
+	h.ghBinaryPath = writeFakeGHBinary(t, ghNoPRScript)
 	h.manager.Add(&mockSSHCWDSession{
 		mockSession: mockSession{id: "no-workdirs", typ: session.TypeLocal},
 		cwd:         dir,
@@ -716,6 +762,7 @@ func TestGetGitInfo_ActiveWorkdirLookupFails_FallsBackAndLogs(t *testing.T) {
 	buf := captureLog(t)
 
 	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
+	h.ghBinaryPath = writeFakeGHBinary(t, ghNoPRScript)
 	h.manager.Add(&mockCWDSession{
 		mockSession: mockSession{id: "workdir-err", typ: session.TypeLocal},
 		cwd:         dir,
@@ -741,6 +788,7 @@ func TestGetGitInfo_RepoWithoutOrigin_ReturnsBranchWithoutRepoURL(t *testing.T) 
 	runGit(t, dir, "-c", "user.email=dev@example.com", "-c", "user.name=Dev", "commit", "--allow-empty", "-m", "init")
 
 	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
+	h.ghBinaryPath = writeFakeGHBinary(t, ghNoPRScript)
 	h.manager.Add(&mockCWDSession{
 		mockSession: mockSession{id: "no-origin", typ: session.TypeLocal},
 		cwd:         dir,
@@ -846,26 +894,46 @@ func TestFindGH_ResolutionOrder(t *testing.T) {
 }
 
 // `gh pr view` exiting zero is not enough — the pane header only shows a PR it
-// could actually parse. A `gh` that prints something other than JSON is not
-// hypothetical: an auth prompt or a deprecation notice on stdout produces it.
+// could actually parse. Both shapes of unparsable output are exercised, and
+// only the second one can fail if lookupPRInfo stops checking the unmarshal
+// error: encoding/json validates syntax before it decodes anything, so a
+// non-JSON banner leaves the response zero-valued either way. A type mismatch
+// does not — json fills the fields it can before returning the error, so
+// dropping the check would leak a PR number panemux never confirmed.
 func TestGetGitInfo_UnparsableGHOutput_ReportsNoPR(t *testing.T) {
-	dir := initTempGitRepo(t)
+	tests := []struct {
+		name   string
+		stdout string
+	}{
+		{
+			name:   "not json at all",
+			stdout: "gh: a new release is available",
+		},
+		{
+			name:   "json of the wrong shape",
+			stdout: `{"url":123,"number":7}`,
+		},
+	}
 
-	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
-	h.ghBinaryPath = writeFakeGHBinary(t, "#!/bin/sh\necho 'gh: a new release is available'\n")
-	h.manager.Add(&mockCWDSession{
-		mockSession: mockSession{id: "bad-gh", typ: session.TypeLocal},
-		cwd:         dir,
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
+			h.ghBinaryPath = writeFakeGHBinary(t, "#!/bin/sh\ncat <<'JSON'\n"+tt.stdout+"\nJSON\n")
+			h.manager.Add(&mockCWDSession{
+				mockSession: mockSession{id: "bad-gh", typ: session.TypeLocal},
+				cwd:         initTempGitRepo(t),
+			})
 
-	rec := doRequest(t, h, http.MethodGet, "/api/sessions/bad-gh/git-info", "")
+			rec := doRequest(t, h, http.MethodGet, "/api/sessions/bad-gh/git-info", "")
 
-	require.Equal(t, http.StatusOK, rec.Code)
-	var resp gitInfoResponse
-	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
-	assert.True(t, resp.IsGit)
-	assert.Empty(t, resp.PRURL)
-	assert.Zero(t, resp.PRNumber)
+			require.Equal(t, http.StatusOK, rec.Code)
+			var resp gitInfoResponse
+			require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+			assert.True(t, resp.IsGit)
+			assert.Empty(t, resp.PRURL)
+			assert.Zero(t, resp.PRNumber)
+		})
+	}
 }
 
 // An scp-style origin names an ssh_config alias, which only ~/.ssh/config can
