@@ -212,6 +212,35 @@ drag on Linux and Windows.
 
 Returns the current layout tree as JSON.
 
+Every layout node in a response carries both `direction` and `children`, whatever the config file
+says. `config.yaml` may omit either — and may write a single-pane workspace as `layout: {pane: ...}`
+with no children at all, which validation accepts — but `normalizeLayoutNode` fills in the direction,
+substitutes an empty array for absent children, and moves a root `pane` into the one child it means
+before anything serializes. The frontend's `LayoutNodeSchema` requires both keys and covers the whole
+response, so a node missing either used to fail the *entire* workspaces payload rather than dropping
+a key; see issue #198. A root `pane` was also rendered by nothing — every frontend call site reads
+`child.pane` off a layout *child* — so relocating it is what makes such a workspace display at all.
+
+The migration is persisted the next time the layout is saved, so a hand-written config converges on
+the `direction` + `children` form rather than being rewritten underneath the operator on read.
+
+**Relocation applies only to a root `pane` with no children.** A node written as `{pane, children}` is
+left exactly as the operator wrote it, and the response still carries the root `pane` — prepending it
+to children that already sum to 100 would rescale every sibling and surface a pane that has never
+rendered. `LayoutNodeSchema` therefore keeps declaring `pane`: a key the schema does not declare is
+stripped by `parse()`, stored stripped, and written back on the next split, which would delete it from
+`config.yaml`.
+
+**A relocated root pane is validated like any other pane, and that can stop a config that used to
+load.** `validateLayoutNode` never inspected `LayoutNode.Pane` and `collectPanes` never walked it, so
+a root pane was previously validated by nothing — which is also why it rendered nothing. Once it
+becomes a `LayoutChild` it goes through `validatePane`, so a root pane with no `type`, or one of
+`type: ssh` naming a connection that `ssh_connections` does not define, now fails startup with the
+same message the equivalent child pane has always produced. This is deliberate: normalization does not
+substitute values the operator never wrote (the same reason an invalid `direction` is reported rather
+than corrected), and an error naming the pane is more actionable than the previous outcome, which was
+a workspace that started and displayed nothing.
+
 ### `PUT /api/layout`
 
 Accepts a layout JSON document, validates it, updates in-memory state, and persists it when possible.
@@ -219,6 +248,15 @@ Accepts a layout JSON document, validates it, updates in-memory state, and persi
 - `400`: invalid JSON
 - `422`: structurally invalid layout
 - `200`: accepted and returned
+
+The request body is normalized before it is validated, stored and echoed, and `~/` expansion runs
+after normalization rather than before — the same order `finishLoad` uses. `ExpandLayoutPaths` walks
+`children` only, so expanding first would leave a relocated root pane's `cwd` as a literal `~/`, which
+is then a relative path for whatever starts that pane's session. A `PUT` therefore persists and
+returns the same shape a load would have produced. Without that the echoed body is the only
+`LayoutNode` in an API response that never passes through `normalizeLayoutNode` — a node `PUT` without
+a direction would come back as `"direction": ""`, which `LayoutNodeSchema`'s enum rejects. The same
+applies to `PUT /api/workspaces/{id}/layout`.
 
 ### `GET /api/workspaces`
 

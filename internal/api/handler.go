@@ -208,6 +208,16 @@ func (h *Handler) PutLayout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Normalize before validating, saving and echoing, so a PUT stores and
+	// returns exactly the shape a load would have produced. Without this the
+	// echo is the raw request body — the one LayoutNode in an API response
+	// that never passed through normalizeLayoutNode.
+	//
+	// Order matters, and it is finishLoad's: normalize, then expand.
+	// ExpandLayoutPaths walks Children only, so expanding first would leave a
+	// relocated root pane's `~/` cwd literal — it is still at the root when
+	// expansion runs.
+	layout = config.NormalizeLayout(layout)
 	config.ExpandLayoutPaths(&layout)
 
 	if err := config.ValidateLayout(layout); err != nil {
@@ -362,6 +372,16 @@ func (h *Handler) PutWorkspaceLayout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Normalize before validating, saving and echoing, so a PUT stores and
+	// returns exactly the shape a load would have produced. Without this the
+	// echo is the raw request body — the one LayoutNode in an API response
+	// that never passed through normalizeLayoutNode.
+	//
+	// Order matters, and it is finishLoad's: normalize, then expand.
+	// ExpandLayoutPaths walks Children only, so expanding first would leave a
+	// relocated root pane's `~/` cwd literal — it is still at the root when
+	// expansion runs.
+	layout = config.NormalizeLayout(layout)
 	config.ExpandLayoutPaths(&layout)
 
 	if err := config.ValidateLayout(layout); err != nil {
