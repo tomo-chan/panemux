@@ -86,6 +86,24 @@
         }
       },
       "title": "Scratch"
+    },
+    {
+      "id": "solo",
+      "layout": {
+        "children": [
+          {
+            "pane": {
+              "agent_board": {},
+              "id": "pane-solo",
+              "title": "Solo",
+              "type": "local"
+            },
+            "size": 100
+          }
+        ],
+        "direction": "horizontal"
+      },
+      "title": "Solo"
     }
   ],
   "tab_position": "top",

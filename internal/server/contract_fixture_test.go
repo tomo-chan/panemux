@@ -381,28 +381,22 @@ func seedRichLayout(cfg *config.Config) {
 			},
 		},
 	}
+	// Two more workspaces, each pinning one half of what #198 settled about a
+	// root `pane`.
+	//
+	// `scratch` is the `{pane, children}` shape. normalizeLayoutNode relocates
+	// a root pane only when the node has no children, so this one reaches the
+	// wire exactly as written — which is why LayoutNodeSchema still declares
+	// `pane`, and why renaming its json tag has to fail something. Every
+	// optional key is set, so this occurrence of PaneConfigSchema covers them
+	// at this path too: the frontend's optional-field walk tracks a path, not
+	// a schema, so a sparse pane here would report nine gaps that are already
+	// covered one level down.
 	cfg.Workspaces.Items = append(cfg.Workspaces.Items, config.WorkspaceConfig{
 		ID:    "scratch",
 		Title: "Scratch",
 		Layout: config.LayoutNode{
 			Direction: "horizontal",
-			// LayoutNode carries its own optional `pane` alongside `children`,
-			// and it is set here so the key reaches the fixture — renaming its
-			// json tag has to fail something. It is set *alongside* children
-			// rather than instead of them, and that is a compromise worth
-			// stating: config.LayoutNode's own `direction` and `children` are
-			// `omitempty` while LayoutNodeSchema requires both, so a layout of
-			// `{pane: ...}` alone — which config.Validate accepts, since
-			// validateLayoutNode permits an empty direction and no children —
-			// serializes to `{"pane":{...}}` and Zod rejects the whole
-			// workspaces response. That mismatch predates this branch and is a
-			// production question (which side is right), not a fixture one; it
-			// was found by capturing that shape here and watching the frontend
-			// suite go red. Recorded rather than quietly avoided.
-			// Every optional key set, so this occurrence of PaneConfigSchema
-			// covers them at this path too — the frontend's optional-field
-			// walk tracks a path, not a schema, so a sparse pane here would
-			// report nine gaps that are already covered one level down.
 			Pane: &config.PaneConfig{
 				ID: "pane-scratch", Type: "tmux", TmuxSession: "scratch", Title: "Scratch",
 				Shell: "/bin/sh", Cwd: "/workspace/user/project", Connection: "build-box",
@@ -412,6 +406,20 @@ func seedRichLayout(cfg *config.Config) {
 			Children: []config.LayoutChild{
 				{Size: 100, Pane: &config.PaneConfig{ID: "pane-scratch", Type: "tmux", TmuxSession: "scratch"}},
 			},
+		},
+	})
+
+	// `solo` is the other half: a hand-written pane-only root, the shape #198
+	// was filed about. It is seeded unmigrated and captured after
+	// WorkspacesView normalizes it, so the fixture holds the migration's
+	// output — a root with no `pane`, a filled-in direction, and the pane in
+	// the single child it means. Seeding the already-migrated shape instead
+	// would capture the same bytes while proving nothing about the migration.
+	cfg.Workspaces.Items = append(cfg.Workspaces.Items, config.WorkspaceConfig{
+		ID:    "solo",
+		Title: "Solo",
+		Layout: config.LayoutNode{
+			Pane: &config.PaneConfig{ID: "pane-solo", Type: "local", Title: "Solo"},
 		},
 	})
 }
