@@ -21,7 +21,7 @@ type Manager struct {
 //nolint:govet // fieldalignment: clarity is preferred over splitting this tiny state holder.
 type managedSession struct {
 	session        Session
-	history        []byte
+	history        *replayBuffer
 	subscribers    map[int]chan []byte
 	nextSubscriber int
 	closed         bool
@@ -142,18 +142,21 @@ func (m *managedSession) pump() {
 	}
 }
 
+// replay returns the session's replay buffer, creating it on first use.
+//
+// Lazy rather than built in Add so the zero value of managedSession is usable:
+// several tests construct one directly to drive publish and subscribe without a
+// Session behind them. Callers must already hold m.mu.
+func (m *managedSession) replay() *replayBuffer {
+	if m.history == nil {
+		m.history = newReplayBuffer(sessionReplayLimitBytes)
+	}
+	return m.history
+}
+
 func (m *managedSession) publish(chunk []byte) {
 	m.mu.Lock()
-	m.history = append(m.history, chunk...)
-	// The `>` boundary cannot be pinned by a test: at exactly the limit,
-	// m.history[0:] copies the identical bytes, so `>=` behaves the same on
-	// every input. TestManagedSession_Publish_ReplayBufferBound covers the
-	// boundary's behavior; the mutant on it is equivalent, not unkilled.
-	// Issue #190.
-	//mutation:exempt equivalent at the boundary — history[0:] is the same bytes, so >= cannot behave differently
-	if len(m.history) > sessionReplayLimitBytes {
-		m.history = append([]byte(nil), m.history[len(m.history)-sessionReplayLimitBytes:]...)
-	}
+	m.replay().append(chunk)
 
 	for _, subscriber := range m.subscribers {
 		select {
@@ -170,7 +173,7 @@ func (m *managedSession) subscribe() ([]byte, <-chan []byte, func()) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	snapshot := append([]byte(nil), m.history...)
+	snapshot := m.replay().snapshot()
 	ch := make(chan []byte, 64)
 	if m.closed {
 		close(ch)
