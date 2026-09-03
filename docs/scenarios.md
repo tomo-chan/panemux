@@ -165,6 +165,7 @@ tried first and made an unrelated spec fail intermittently.
 | H14d | A client `PUT`s a layout with no `direction` | The stored and echoed layout is normalized, so the response is a shape `LayoutNodeSchema` accepts rather than `"direction": ""` | `auto`: `internal/api` — `TestPutLayoutRoutes_EchoANormalizedNode`, `TestPutLayout_RelocatesAPaneOnlyRoot` |
 | H14e | A client `PUT`s a root pane whose `cwd` is `~/…` | The relocated pane's path is expanded before it is echoed and persisted, rather than a literal `~/` reaching `config.yaml` | `auto`: `internal/api` — `TestPutLayoutRoutes_ExpandARelocatedRootPaneCwd` |
 | H15 | WebSocket reconnect and replay | Output produced while disconnected is replayed once, in order, on reconnect, bracketed by `replay` control frames | `auto`: `internal/ws`, and over a real handshake through the production router in `internal/server/ws_integration_test.go` — `TestWSIntegration_TerminalRoute_ReplaysBufferedOutputOnReconnect`; plus the Alloy model in `docs/models/replay_state.als`, checked by `.github/workflows/model-check.yml` |
+| H15b | A pane that has been producing output for hours is remounted | The replay is the newest 256KB of that pane's output — oldest bytes dropped first, order preserved — however much has scrolled past since | `auto`: `internal/session/replay_buffer_test.go` — `TestReplayBuffer_RetainsNewestBytes`, `TestReplayBuffer_MatchesTailOfEverythingWritten`, `TestReplayBuffer_SnapshotIsIndependentOfLaterAppends`; and `internal/session/manager_test.go` — `TestManagedSession_Publish_ReplayBufferBound`, `TestManagedSession_Publish_DeliversTheChunkWithAFullReplayWindow` |
 | H16 | A browser attaches to a pane's terminal | The handshake succeeds, keystrokes reach the pane, its output comes back as binary frames, a resize is applied, and the pane exiting arrives as a final status frame | `auto`: `internal/server/ws_integration_test.go` — `TestWSIntegration_TerminalRoute_StreamsBothDirections`, `TestWSIntegration_TerminalRoute_ReportsFinalStateWhenThePaneExits`, `TestWSIntegration_TerminalRoute_UnknownPane_404` |
 | H17 | The dashboard parses what the server actually sends | Every Zod schema the frontend parses a response with accepts JSON captured from the real router, and drops nothing from it | `auto`: `internal/server/contract_fixture_test.go` captures into `testdata/api-contract/`, `frontend/src/schemas/contract.test.ts` validates it |
 
@@ -226,7 +227,10 @@ Stated explicitly, because an absent row reads as an oversight and these are dec
   records axe violations for the dashboard and for a modal dialog. Neither asserts a threshold: see
   [quality-gateway.md](quality-gateway.md)'s "First measurements" for the baseline and for why a
   gate that starts red is worse than no gate. These are therefore not scenario rows — there is no
-  expected outcome to state yet.
+  expected outcome to state yet. The one exception is where a performance finding turned out to be
+  about work done rather than time taken: the replay buffer's steady-state cost is asserted as an
+  allocation count in `internal/session`, which has none of a timing's spread. H15b is the row it
+  sits under.
 
 ## Checking this ledger
 

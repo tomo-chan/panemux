@@ -13,12 +13,14 @@ import (
 // real data has accumulated. Nothing here fails on a number.
 //
 // What they measure is the path every byte a pane produces travels:
-// managedSession.publish, which appends to the replay buffer, trims it, and
-// fans the chunk out to every connected subscriber while holding one mutex.
+// managedSession.publish, which appends to the replay buffer and fans the chunk
+// out to every connected subscriber while holding one mutex.
 // The three variables that matter in practice are chunk size (how chatty the
 // program in the pane is), subscriber count (how many browser tabs or panes
-// are watching), and whether the replay buffer is already full — because the
-// trim reallocates.
+// are watching), and whether the replay buffer is already full. That last one
+// used to dominate everything else: the buffer was a slice that reallocated and
+// copied the whole 256KB window per chunk. Issue #193 replaced it with a ring,
+// and the cold/full pair below is what says the difference is gone.
 
 // benchSession is a stub that satisfies the Session interface so a
 // managedSession can be built without a PTY — `make check` stays hermetic
@@ -56,6 +58,19 @@ func newBenchEntry() *managedSession {
 	}
 }
 
+// fillReplayBuffer drives the entry's replay buffer to `filled` bytes through
+// publish, the only way in now that the buffer owns its own storage. The
+// benchmarks that need a full window pay this once, before the timer starts.
+func fillReplayBuffer(entry *managedSession, filled int) {
+	chunk := make([]byte, 4096)
+	for written := 0; written < filled; written += len(chunk) {
+		if remaining := filled - written; remaining < len(chunk) {
+			chunk = chunk[:remaining]
+		}
+		entry.publish(chunk)
+	}
+}
+
 // BenchmarkSessionPublish measures the per-chunk cost of terminal output
 // reaching subscribers, across the shapes that actually occur: a quiet shell
 // (256B), an ordinary command's output (4KB — the pump's own read size), and
@@ -73,7 +88,7 @@ func BenchmarkSessionPublish(b *testing.B) {
 			name := fmt.Sprintf("chunk=%dB/subscribers=%d", size, subscribers)
 			b.Run(name, func(b *testing.B) {
 				entry := newBenchEntry()
-				entry.history = make([]byte, sessionReplayLimitBytes)
+				fillReplayBuffer(entry, sessionReplayLimitBytes)
 				for i := 0; i < subscribers; i++ {
 					_, stream, _ := entry.subscribe()
 					go func() {
@@ -97,10 +112,12 @@ func BenchmarkSessionPublish(b *testing.B) {
 }
 
 // BenchmarkSessionPublishColdBuffer is the same path before the replay buffer
-// has filled, so the trim in publish never runs. The gap between this and the
+// has filled, so no byte has been evicted yet. The gap between this and the
 // 4KB/0-subscriber case above is what retaining the replay window costs per
 // chunk — the first thing to look at if terminal throughput ever becomes a
-// complaint.
+// complaint. Since issue #193 the two are the same order of magnitude, which is
+// that issue's completion condition; before it, the full buffer was ~100×
+// slower and allocated a fresh 256KB window per chunk.
 //
 // It resets the buffer every iteration so it stays cold, which is why it is a
 // separate benchmark rather than another row in the table above.
@@ -110,18 +127,20 @@ func BenchmarkSessionPublish(b *testing.B) {
 // iteration cost ~95µs of pause against a ~2µs operation, so the benchmark
 // spent 50s of wall clock on 1s of measured work — and, worse, the repeated
 // pauses reset the GC and allocator state this benchmark exists to measure,
-// reporting ~5,400 ns/op for a path that actually costs ~1,900. `entry.history
-// = nil` is a single pointer store, a constant well under 1% of the operation,
-// so timing it is far cheaper than excluding it.
+// reporting ~5,400 ns/op for a path that actually costs ~1,900. The reset is
+// two index stores — it kept the whole window's storage rather than dropping
+// it — a constant well under 1% of the operation, so timing it is far cheaper
+// than excluding it.
 func BenchmarkSessionPublishColdBuffer(b *testing.B) {
 	entry := newBenchEntry()
+	entry.publish(nil) // materialize the buffer so reset has one to clear
 	chunk := make([]byte, 4096)
 
 	b.SetBytes(int64(len(chunk)))
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		entry.history = nil
+		entry.history.reset()
 		entry.publish(chunk)
 	}
 }
@@ -144,7 +163,7 @@ func BenchmarkSessionSubscribe(b *testing.B) {
 	for _, filled := range []int{0, sessionReplayLimitBytes / 2, sessionReplayLimitBytes} {
 		b.Run(fmt.Sprintf("buffered=%dB", filled), func(b *testing.B) {
 			entry := newBenchEntry()
-			entry.history = make([]byte, filled)
+			fillReplayBuffer(entry, filled)
 
 			b.ReportAllocs()
 			b.ResetTimer()
