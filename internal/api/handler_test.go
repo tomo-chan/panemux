@@ -3366,3 +3366,50 @@ func TestPutLayout_RelocatesAPaneOnlyRoot(t *testing.T) {
 	require.Len(t, cfg.Layout.Children, 1)
 	assert.Equal(t, "solo", cfg.Layout.Children[0].Pane.ID)
 }
+
+// Issue #199 review, round 2. ExpandLayoutPaths walks layout.Children and
+// never layout.Pane, so expanding before NormalizeLayout leaves a relocated
+// root pane's `~/` cwd literal — it is still at the root when expansion runs,
+// and expansion is over by the time it becomes a LayoutChild. finishLoad
+// orders these the other way (normalizeWorkspaces then expandPaths), which is
+// why the config-file path was already correct and this one was not.
+//
+// Reachable only because of this branch: before it, a root pane PUT stayed a
+// root pane, was walked by nothing, and started no session.
+func TestPutLayoutRoutes_ExpandARelocatedRootPaneCwd(t *testing.T) {
+	for name, tc := range map[string]struct {
+		cfg    *config.Config
+		stored func(*config.Config) config.LayoutNode
+		path   string
+	}{
+		"layout": {
+			cfg:    defaultTestConfig(),
+			path:   "/api/layout",
+			stored: func(c *config.Config) config.LayoutNode { return c.Layout },
+		},
+		"workspace layout": {
+			cfg:    workspaceTestConfig(),
+			path:   "/api/workspaces/one/layout",
+			stored: func(c *config.Config) config.LayoutNode { return c.Workspaces.Items[0].Layout },
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			want := filepath.Join(home, "work")
+
+			r := setupRouter(tc.cfg, session.NewManager())
+			rec := putLayout(t, r, tc.path, config.LayoutNode{
+				Pane: &config.PaneConfig{ID: "root", Type: "local", Cwd: "~/work"},
+			})
+
+			require.Equal(t, http.StatusOK, rec.Code)
+			assert.NotContains(t, rec.Body.String(), "~/work", "the echo carries a literal ~/")
+
+			stored := tc.stored(tc.cfg)
+			require.Len(t, stored.Children, 1)
+			assert.Equal(t, want, stored.Children[0].Pane.Cwd,
+				"a literal ~/ persisted here is a relative path to whatever starts the session")
+		})
+	}
+}

@@ -249,7 +249,10 @@ Accepts a layout JSON document, validates it, updates in-memory state, and persi
 - `422`: structurally invalid layout
 - `200`: accepted and returned
 
-The request body is normalized before it is validated, stored and echoed, so a `PUT` persists and
+The request body is normalized before it is validated, stored and echoed, and `~/` expansion runs
+after normalization rather than before — the same order `finishLoad` uses. `ExpandLayoutPaths` walks
+`children` only, so expanding first would leave a relocated root pane's `cwd` as a literal `~/`, which
+is then a relative path for whatever starts that pane's session. A `PUT` therefore persists and
 returns the same shape a load would have produced. Without that the echoed body is the only
 `LayoutNode` in an API response that never passes through `normalizeLayoutNode` — a node `PUT` without
 a direction would come back as `"direction": ""`, which `LayoutNodeSchema`'s enum rejects. The same
