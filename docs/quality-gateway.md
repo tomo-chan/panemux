@@ -54,7 +54,7 @@ Flexibility, and added Safety). Mapped onto panemux, the depth of protection is 
 | Security | Command injection, bearer token, DNS rebinding, subprocess containment | [security.md](security.md) plus regression tests verified against real binaries, `gosec` | Very strong |
 | Compatibility | The agmsg script contract, config schema back-compat | Tier 1 fixtures, Tier 2 tests against a real agmsg install, daily canary | Very strong |
 | Maintainability | Refactoring does not break tests; behavior changes do | `golangci-lint` (20+ linters), 80% coverage. **Nothing measures the tests themselves** | Unprotected |
-| Interaction capability | Keyboard operation, focus restoration, legibility, notifications | Three focus-restoration E2E tests, plus an axe-core scan of the dashboard and of a modal dialog (`frontend/e2e/a11y.spec.ts`) that **records** violations without gating on them | Thin, now measured |
+| Interaction capability | Keyboard operation, focus restoration, legibility, notifications | Three focus-restoration E2E tests, plus an axe-core scan of the dashboard and of a modal dialog (`frontend/e2e/a11y.spec.ts`) holding each to a per-rule **ceiling** that may fall and must not rise | Thin, measured and now held |
 | Performance efficiency | Terminal output throughput, relay polling cost, many-pane rendering | Benchmarks over the replay buffer and the board cache (`make bench`). No threshold — measurement only | Unprotected, now measured |
 | Flexibility | Old config shapes, migration, environment differences (OS, shell, tmux) | `internal/config` unit tests (thick); environment differences are manual | Partial |
 | Safety | A PTY write does not destroy the user's work; no stray remote side effects | Bootstrap short-write and retry tests (limited) | Limited |
@@ -169,7 +169,7 @@ Ordering is meaningful: the point is to stop a defect at the cheapest gate that 
 | **G2** | Unit | Functional suitability, fast feedback | `make test-go`, `make test-frontend` — unchanged | Existing (`make check`, pre-push, CI) | Present |
 | **G3** | Contract | **Resistance to refactoring**, compatibility | (a) HTTP/WS integration through the real `server.New()` router; (b) exhaustiveness check on the route table (every registered route against an expected set); (c) Zod schema round-trips; (d) the agmsg contract | Always-on Go and vitest tests, in `make check` | **Present.** (a) `internal/server/api_integration_test.go` drives every `/api` route and fails when one has no case; `ws_integration_test.go` drives both `/ws` routes over a real handshake. (b) and (d) unchanged. (c) `contract_fixture_test.go` captures real responses into `testdata/api-contract/`, which `frontend/src/schemas/contract.test.ts` parses with the schema that owns each one |
 | **G4** | Efficacy | **Protection against regressions** | (a) coverage — scope tracks the implementation, threshold stays at 80%; (b) **red-check**: a changed test must fail when the implementation diff is reverted; (c) mutation score over changed lines only; (d) **per-block coverage**: no block covering a changed line may be one the suite never entered | (a) existing `make check`; (b), (c) and (d) pull-request CI jobs, `make efficacy`, `make mutation` and `make coverage-blocks` | Partial — (a) present and now scoped to every decision-holding package; (b) present (`make efficacy`, a pull-request-only CI job); (d) present (`make coverage-blocks`, likewise); (c) present as a **warning** (`make mutation`), not yet as a gate |
-| **G5** | Scenario | Functional suitability, interaction capability | Playwright E2E, plus a check that every test named by an `auto` row in `scenarios.md` actually exists | CI, extending `make test-e2e` | Present — E2E plus `make check-scenarios`, which resolves every `auto` row |
+| **G5** | Scenario | Functional suitability, interaction capability | Playwright E2E, plus a check that every test named by an `auto` row in `scenarios.md` actually exists, plus an axe-core ceiling per page state | CI, extending `make test-e2e` | Present — E2E plus `make check-scenarios`, which resolves every `auto` row, plus `a11y.spec.ts`, which fails when a violation count rises above the frozen current value (D11) |
 | **G6** | Adversarial | All characteristics (design judgement) | A fresh-context review of the diff alone. The session that wrote the code does not grade it. Findings limited to correctness and stated requirements. | A review subagent in `.claude/agents/` plus human review. **Does not block** | Present — `.claude/agents/diff-reviewer.md`; still does not block |
 
 ### The enforcement ladder
@@ -410,6 +410,50 @@ Three consequences worth stating rather than discovering:
   against a declared list carrying a reason per entry. A field that starts being covered has to be
   deleted from that list, so it cannot rot into excuses for coverage that already exists.
 
+**D11 — The accessibility ceiling is per rule, counts nodes, and is lowered by hand.**
+Three choices, and the cheap version of each fails to catch a real regression.
+
+*Per rule ID, not a total.* A single number per page state lets one violation be fixed and a
+different one introduced in the same change without the total moving — the "fixed one, added one"
+case, which is the most likely way this UI regresses while looking maintained. Per rule, a violation
+kind that is not in the map has a ceiling of zero, so a **new** rule fails the run the day it
+appears.
+
+*Node counts, not just presence.* `color-contrast` is one violation at 2 nodes on the dashboard and
+one violation at 10 with the settings dialog open. Counting rules alone would treat those as the
+same fact, so a dialog's worth of unreadable text could appear on the dashboard and register as no
+change.
+
+The cost of the tighter form is brittleness, and it turned out to be real — which is worth stating
+plainly, because the first draft of this decision claimed the counts were simply stable and that
+claim was too strong. Against a **fixed rendered page** they are: they reproduced identically to the
+ones #187 recorded, on different hardware, in a different container, on a later run, including
+`region` at 7 nodes and `color-contrast` at 10 — the counts a layout- or font-sensitive rule would
+be expected to move. What a node count is not stable against is a *different page*, and it is a
+property of whatever happens to be rendered. Sharing the default E2E server, the same two counts
+read **10 and 11** once `pane-move.spec.ts`'s splits had run first: the gate then failed on the
+order of the suite rather than on anything about accessibility, which is principle 4's false
+positive exactly.
+
+The fix is the one `core-multiplexer.yml` already uses from the other side — that spec was
+separated because it is a mutator, and this one because it is the most sensitive to mutators.
+`a11y.spec.ts` gets its own panemux process and fixture (`frontend/e2e/a11y.yml`, port 4178), so the
+page it audits is pinned rather than inherited. **The general rule this is an instance of: a gate
+that counts what is on a page needs to own the page.**
+
+*A ceiling that may fall, and lowering it is a manual edit.* Failing the run when a count comes in
+**under** its ceiling would be the self-enforcing ratchet, and it is the wrong trade here: it makes
+improving accessibility break the build, which trains people to stop improving it, and it converts
+every one of the brittleness risks above into a two-sided flake instead of a one-sided one. So the
+scan prints and attaches the exact replacement entry — `set CEILINGS['pane-settings']['color-contrast']
+to 9 (was 10)` — and passes. The nudge is loud precisely because the enforcement is not: a ceiling
+left above reality re-admits the regression it was set to catch.
+
+This is the same problem #188 solved differently. Per-block coverage faced 275 uncovered blocks out
+of 1801 and gave up the repository-wide gate for a diff-scoped one. A11y has no diff scope available
+— axe reports on a rendered page, not on changed lines — so the ceiling is what stands in for it.
+Both are the same refusal to ship a gate that starts red (principle 4).
+
 ### Rollout order
 
 | Order | Work | Gate | #178 phase | Effect |
@@ -420,7 +464,7 @@ Three consequences worth stating rather than discovering:
 | 4 | red-check (`make efficacy`) in pull-request CI | G4(b) | — | **Landed.** `scripts/efficacy.sh` reverts the branch's implementation diff in a scratch worktree and requires each test the branch changed — Go function or vitest case — to pass at HEAD and then go red against the revert, one at a time. Exempted by the `efficacy-exempt` label. |
 | 5 | Core-feature section in `scenarios.md`, ledger cross-check, core E2E | G0, G5 | Phases 4 and 6 | **Landed.** Sections H (core multiplexer) and I (opening URLs from a pane, #177's missing rows) added; `make check-scenarios` resolves every `auto` row; `frontend/e2e/core-multiplexer.spec.ts` covers split, resize, layout restore and workspace CRUD. |
 | 6 | Diff-scoped mutation testing (warn first, gate once stable) | G4(c) | merges with #164 | **Warning landed.** `scripts/mutation.sh` runs gremlins scoped to the diff and names every mutant on a changed line that survives every test. Exits 0 on a finding — see D9. Making it fail is the remaining step. |
-| 7 | Performance and accessibility observation (measure only, do not gate) | — | — | **Landed.** `make bench` measures terminal throughput, replay-buffer cost and the relay's polling cost; `a11y.spec.ts` records axe violations. Both report; neither asserts. |
+| 7 | Performance and accessibility observation (measure only, do not gate) | — | — | **Landed.** `make bench` measures terminal throughput, replay-buffer cost and the relay's polling cost; `a11y.spec.ts` records axe violations. The performance half still only reports — its spreads are too wide for a threshold (see "First measurements"). The accessibility half now asserts: #194 froze the recorded counts as a ceiling, which is the step this row deferred until data existed. |
 | 8 | Per-block coverage on changed lines (#164, not a #180 item) | G4(d) | — | **Landed.** `scripts/coverage_blocks.sh` fails when a block covering a changed line never executed. It unblocked row 6's measurement, which is what row 6 was waiting on. |
 | 9 | Zod schema round-trips against real Go output (#191, closing G3(c)) | G3 | Phase 1 | **Landed.** `internal/server/contract_fixture_test.go` captures every response the dashboard parses, plus both WebSocket frame streams, into `testdata/api-contract/`; `frontend/src/schemas/contract.test.ts` parses each with the schema that owns it and requires the parsed value to equal the captured one, so a field Zod *strips* fails too. Decision D10 records why the fixtures are rewritten rather than diffed. |
 
@@ -630,17 +674,48 @@ either way. `BenchmarkBoardCacheAppendMessage`'s comment records both halves.
 
 ### Accessibility
 
-Excluding `.xterm` (xterm.js owns that canvas and its markup):
+Unlike the performance figures above, these are **not** indicative: they are the ceiling
+`frontend/e2e/a11y.spec.ts` now enforces, and they reproduced exactly on a second machine before
+being frozen. They are measured against the spec's own fixture and panemux process
+(`frontend/e2e/a11y.yml`, port 4178), not the shared E2E server — D11 records why that separation is
+load-bearing rather than tidiness. Excluding `.xterm` (xterm.js owns that canvas and its markup):
 
-| Page state | critical | serious | moderate |
+| Page state | Rule | Impact | Ceiling (nodes) |
 |---|---|---|---|
-| Dashboard | 1 (`aria-required-children`) | 1 (`color-contrast`, 2 nodes) | 1 (`region`, 7 nodes) |
-| Pane settings dialog open | 2 (`+ select-name`) | 1 (`color-contrast`, 10 nodes) | 1 (`region`, 7 nodes) |
+| Dashboard | `aria-required-children` | critical | 1 |
+| Dashboard | `color-contrast` | serious | 2 |
+| Dashboard | `region` | moderate | 7 |
+| Pane settings dialog open | `aria-required-children` | critical | 1 |
+| Pane settings dialog open | `select-name` | critical | 1 |
+| Pane settings dialog open | `color-contrast` | serious | 10 |
+| Pane settings dialog open | `region` | moderate | 7 |
 
-The scan asserts nothing. Turning axe on over an existing UI produces a backlog, and **a gate that
-starts red is routed around on day one** — taking the gates that do work with it (principle 4). The
-intended next step is to freeze these counts as a ceiling that may fall but not rise, which is a
-threshold chosen from data rather than guessed at.
+**Every row is a violation this repository still has.** Listing it here is not approval of it; it is
+the refusal to ship a gate that starts red, which is what turning axe on over an existing UI would
+otherwise mean (principle 4). A count may fall and must not rise, and a rule absent from the table
+has a ceiling of zero, so a new *kind* of violation fails the run the day it appears. D11 records
+why the ceiling is per rule and counts nodes rather than taking either of the looser forms.
+
+That the gate bites was confirmed by perturbation, not assumed: an `<img>` with no `alt` and a
+low-contrast `<span>` added to `TerminalPane` failed both scans, on both branches — `image-alt` as a
+new rule at a ceiling of zero, `region` as an existing rule risen from 7 nodes to 9.
+
+That it does **not** bite spuriously was confirmed the harder way, by it doing so: the first version
+shared the default E2E server and passed alone while failing inside `make test-e2e`. See D11.
+
+**Lowering a ceiling after fixing something.** The run does the arithmetic; the edit is manual and
+takes two files:
+
+1. Run `make test-e2e`. A count that came in under its ceiling prints as
+   `a11y[<page state>] ceiling can be lowered` with the exact replacement — `set
+   CEILINGS['pane-settings']['color-contrast'] to 9 (was 10)`, or `remove 'select-name' from
+   CEILINGS['pane-settings']` when a rule is gone entirely. The same text is in the run's
+   `axe-<page state>.txt` attachment.
+2. Apply it to `CEILINGS` in `frontend/e2e/a11y.spec.ts` and to the table above, in the same commit
+   as the fix.
+
+The run passes either way. Nothing forces step 2 — deliberately, per D11 — so a fix that skips it
+silently leaves room for the next regression.
 
 ## Related documents
 
