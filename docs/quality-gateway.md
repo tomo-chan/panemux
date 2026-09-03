@@ -169,7 +169,7 @@ Ordering is meaningful: the point is to stop a defect at the cheapest gate that 
 | **G2** | Unit | Functional suitability, fast feedback | `make test-go`, `make test-frontend` — unchanged | Existing (`make check`, pre-push, CI) | Present |
 | **G3** | Contract | **Resistance to refactoring**, compatibility | (a) HTTP/WS integration through the real `server.New()` router; (b) exhaustiveness check on the route table (every registered route against an expected set); (c) Zod schema round-trips; (d) the agmsg contract | Always-on Go and vitest tests, in `make check` | **Present.** (a) `internal/server/api_integration_test.go` drives every `/api` route and fails when one has no case; `ws_integration_test.go` drives both `/ws` routes over a real handshake. (b) and (d) unchanged. (c) `contract_fixture_test.go` captures real responses into `testdata/api-contract/`, which `frontend/src/schemas/contract.test.ts` parses with the schema that owns each one |
 | **G4** | Efficacy | **Protection against regressions** | (a) coverage — scope tracks the implementation, threshold stays at 80%; (b) **red-check**: a changed test must fail when the implementation diff is reverted; (c) mutation score over changed lines only; (d) **per-block coverage**: no block covering a changed line may be one the suite never entered | (a) existing `make check`; (b), (c) and (d) pull-request CI jobs, `make efficacy`, `make mutation` and `make coverage-blocks` | Partial — (a) present and now scoped to every decision-holding package; (b) present (`make efficacy`, a pull-request-only CI job); (d) present (`make coverage-blocks`, likewise); (c) present as a **warning** (`make mutation`), not yet as a gate |
-| **G5** | Scenario | Functional suitability, interaction capability | Playwright E2E, plus a check that every test named by an `auto` row in `scenarios.md` actually exists, plus an axe-core ceiling per page state | CI, extending `make test-e2e` | Present — E2E plus `make check-scenarios`, which resolves every `auto` row, plus `a11y.spec.ts`, which fails when a violation count rises above the frozen current value (D11) |
+| **G5** | Scenario | Functional suitability, interaction capability | Playwright E2E, plus a check that every test named by an `auto` row in `scenarios.md` actually exists, plus an axe-core ceiling per page state | CI, extending `make test-e2e` | Present — E2E plus `make check-scenarios`, which resolves every `auto` row, plus `a11y.spec.ts`, which fails when a violation count rises above the frozen current value (D11), its comparator unit-tested in `a11y-ceiling.test.ts` |
 | **G6** | Adversarial | All characteristics (design judgement) | A fresh-context review of the diff alone. The session that wrote the code does not grade it. Findings limited to correctness and stated requirements. | A review subagent in `.claude/agents/` plus human review. **Does not block** | Present — `.claude/agents/diff-reviewer.md`; still does not block |
 
 ### The enforcement ladder
@@ -441,6 +441,24 @@ separated because it is a mutator, and this one because it is the most sensitive
 page it audits is pinned rather than inherited. **The general rule this is an instance of: a gate
 that counts what is on a page needs to own the page.**
 
+*The comparator is a separate module, and unit tested.* `checkAgainstCeiling` and `CEILINGS` live in
+`frontend/e2e/a11y-ceiling.ts` rather than inside the spec, because of a property this gate shares
+with every ratchet: **on a healthy repository it only ever takes its uninteresting branch.** Observed
+equals ceiling, both returned arrays come back empty, and none of new-rule, risen-count,
+lowerable-count or vanished-rule executes on any green run. An inversion in one of them —
+`actual >= allowed` written as `>`, or a dropped `?? 0` making an unlisted rule compare against
+`undefined` — would ship green and only surface as a *missed* regression later. The perturbation that
+proved the gate bites was a one-time manual run; `a11y-ceiling.test.ts` is what keeps it proven, as a
+vitest table over `(ceiling, observed)` pairs that needs no browser. DEVELOPMENT.md's
+test-granularity rule asks for exactly this: the smallest unit that exercises the logic, not the
+outermost entry point.
+
+That splits `frontend/e2e/` between two runners, so the split is by suffix and both configs state it:
+`*.spec.ts` is Playwright's, `*.test.ts` is vitest's. Playwright's default `testMatch` claims both,
+and letting it load a vitest file is not a subtle failure — `@vitest/expect` throws `Cannot redefine
+property: Symbol($$jest-matchers-object)` and takes the **entire** E2E suite down with it, not just
+that file.
+
 *A ceiling that may fall, and lowering it is a manual edit.* Failing the run when a count comes in
 **under** its ceiling would be the self-enforcing ratchet, and it is the wrong trade here: it makes
 improving accessibility break the build, which trains people to stop improving it, and it converts
@@ -675,7 +693,8 @@ either way. `BenchmarkBoardCacheAppendMessage`'s comment records both halves.
 ### Accessibility
 
 Unlike the performance figures above, these are **not** indicative: they are the ceiling
-`frontend/e2e/a11y.spec.ts` now enforces, and they reproduced exactly on a second machine before
+`frontend/e2e/a11y.spec.ts` now enforces (through the comparator and map in
+`frontend/e2e/a11y-ceiling.ts`), and they reproduced exactly on a second machine before
 being frozen. They are measured against the spec's own fixture and panemux process
 (`frontend/e2e/a11y.yml`, port 4178), not the shared E2E server — D11 records why that separation is
 load-bearing rather than tidiness. Excluding `.xterm` (xterm.js owns that canvas and its markup):
@@ -711,7 +730,7 @@ takes two files:
    CEILINGS['pane-settings']['color-contrast'] to 9 (was 10)`, or `remove 'select-name' from
    CEILINGS['pane-settings']` when a rule is gone entirely. The same text is in the run's
    `axe-<page state>.txt` attachment.
-2. Apply it to `CEILINGS` in `frontend/e2e/a11y.spec.ts` and to the table above, in the same commit
+2. Apply it to `CEILINGS` in `frontend/e2e/a11y-ceiling.ts` and to the table above, in the same commit
    as the fix.
 
 The run passes either way. Nothing forces step 2 — deliberately, per D11 — so a fix that skips it

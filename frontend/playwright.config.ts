@@ -39,6 +39,13 @@ const A11Y_SPEC = /a11y\.spec\.ts$/
 
 export default defineConfig({
   testDir: './e2e',
+  // Playwright's default testMatch takes `*.test.ts` as well as `*.spec.ts`,
+  // and e2e/ now holds e2e/a11y-ceiling.test.ts — a vitest unit test for the
+  // a11y comparator, which loads @vitest/expect and dies here with "Cannot
+  // redefine property: Symbol($$jest-matchers-object)". The two runners split
+  // this directory by suffix: `.spec.ts` is Playwright's, `.test.ts` is
+  // vitest's (see vite.config.ts, which draws the same line from its side).
+  testMatch: /\.spec\.ts$/,
   fullyParallel: false,
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : 'list',

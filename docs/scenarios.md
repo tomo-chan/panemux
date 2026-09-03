@@ -228,7 +228,8 @@ Stated explicitly, because an absent row reads as an oversight and these are dec
   to state yet. See [quality-gateway.md](quality-gateway.md)'s "First measurements".
 - **Accessibility is held at a ceiling, not at zero.** `frontend/e2e/a11y.spec.ts` scans the
   dashboard and a modal dialog with axe-core and fails when a violation count rises above the
-  currently-recorded one; the recorded counts are violations this repository still has, not an
+  currently-recorded one (the ceiling and the comparator are in `frontend/e2e/a11y-ceiling.ts`,
+  unit-tested by `frontend/e2e/a11y-ceiling.test.ts`); the recorded counts are violations this repository still has, not an
   approved state. It is not a scenario row either, for the same reason — the expected outcome is
   "no worse than today", which is a gate's statement rather than a use case's. See
   [quality-gateway.md](quality-gateway.md)'s "Accessibility" for the ceiling and for how to lower

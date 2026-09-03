@@ -20,8 +20,13 @@ export default defineConfig({
     globals: true,
     environment: 'jsdom',
     setupFiles: './src/test/setup.ts',
-    include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
-    exclude: ['e2e/**'],
+    // `e2e/**` holds Playwright specs, which vitest must never run — but it
+    // also holds e2e/a11y-ceiling.ts, a pure comparator with no browser in it
+    // whose branches a passing Playwright run never reaches. Splitting the
+    // exclusion by suffix rather than by directory lets that one be unit
+    // tested here: `.spec.ts` stays Playwright's, `.test.ts` is vitest's.
+    include: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'e2e/**/*.test.ts'],
+    exclude: ['**/node_modules/**', 'e2e/**/*.spec.ts'],
     coverage: {
       provider: 'v8',
       // Measure hooks, schemas and utils — the modules that hold decisions.
