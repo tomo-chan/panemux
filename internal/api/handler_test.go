@@ -2026,6 +2026,25 @@ func addTempGitWorktree(t *testing.T, repoDir, branchName string) string {
 // prLookupTimeout, for a repository that does not exist.
 const ghNoPRScript = "#!/bin/sh\nexit 1\n"
 
+// captureLog redirects the standard logger for the duration of the test and
+// returns the buffer it writes into. Several handlers report a recoverable
+// failure only through log output, so asserting on it is the only way to pin
+// that the failure was noticed rather than swallowed.
+func captureLog(t *testing.T) *bytes.Buffer {
+	t.Helper()
+
+	var buf bytes.Buffer
+	originalWriter := log.Writer()
+	originalFlags := log.Flags()
+	log.SetOutput(&buf)
+	log.SetFlags(0)
+	t.Cleanup(func() {
+		log.SetOutput(originalWriter)
+		log.SetFlags(originalFlags)
+	})
+	return &buf
+}
+
 func writeFakeGHBinary(t *testing.T, body string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -2090,15 +2109,7 @@ func TestGetGitInfo_NotAGitRepo_LogsCauseAndRemediation(t *testing.T) {
 		cwd:         dir,
 	})
 
-	var buf bytes.Buffer
-	originalWriter := log.Writer()
-	originalFlags := log.Flags()
-	log.SetOutput(&buf)
-	log.SetFlags(0)
-	t.Cleanup(func() {
-		log.SetOutput(originalWriter)
-		log.SetFlags(originalFlags)
-	})
+	buf := captureLog(t)
 
 	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
 	r := setupRouterWithHandler(h)
@@ -2631,15 +2642,7 @@ func TestResolveSinglePreferredCWD_LogsPaneIdentity(t *testing.T) {
 		},
 	}
 
-	var buf bytes.Buffer
-	originalWriter := log.Writer()
-	originalFlags := log.Flags()
-	log.SetOutput(&buf)
-	log.SetFlags(0)
-	t.Cleanup(func() {
-		log.SetOutput(originalWriter)
-		log.SetFlags(originalFlags)
-	})
+	buf := captureLog(t)
 
 	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
 	assert.Equal(t, "/repo/base-worktree", h.resolveSinglePreferredCWD(sess, sess.cwd))
@@ -2896,15 +2899,7 @@ func TestGetGitInfo_RemoteGitContextFailure_LogsCauseAndRemediation(t *testing.T
 		},
 	})
 
-	var buf bytes.Buffer
-	originalWriter := log.Writer()
-	originalFlags := log.Flags()
-	log.SetOutput(&buf)
-	log.SetFlags(0)
-	t.Cleanup(func() {
-		log.SetOutput(originalWriter)
-		log.SetFlags(originalFlags)
-	})
+	buf := captureLog(t)
 
 	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
 	r := setupRouterWithHandler(h)

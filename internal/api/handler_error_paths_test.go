@@ -1,11 +1,9 @@
 package api
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"io/fs"
-	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -129,23 +127,6 @@ func writeFakeBinary(t *testing.T, dir, name, body string) string {
 	require.NoError(t, os.WriteFile(path, []byte(body), 0600))
 	require.NoError(t, os.Chmod(path, 0755))
 	return path
-}
-
-// captureLog redirects the standard logger for the duration of the test and
-// returns the buffer it writes into.
-func captureLog(t *testing.T) *bytes.Buffer {
-	t.Helper()
-
-	var buf bytes.Buffer
-	originalWriter := log.Writer()
-	originalFlags := log.Flags()
-	log.SetOutput(&buf)
-	log.SetFlags(0)
-	t.Cleanup(func() {
-		log.SetOutput(originalWriter)
-		log.SetFlags(originalFlags)
-	})
-	return &buf
 }
 
 func doRequest(t *testing.T, h *Handler, method, path, body string) *httptest.ResponseRecorder {
@@ -281,10 +262,25 @@ func TestConfigWriteFails_MutatingRoutesReturn500(t *testing.T) {
 	}
 }
 
-// DeleteWorkspace persists before it tears the workspace's sessions down, so a
-// failed write must leave the manager untouched — otherwise the config on disk
-// and the running sessions disagree after the 500.
-func TestDeleteWorkspace_ConfigWriteFails_LeavesSessionsRunning(t *testing.T) {
+// ── What a failed mutation actually leaves behind ────────────────────────────
+//
+// The 500s asserted above are only half of what these routes do. Each mutates
+// in-memory state before the step that can fail, and none of them rolls back
+// when it does, so the operator is told the operation failed while part of it
+// has already happened — and the next successful write from any other route
+// persists that part to config.yaml.
+//
+// These three tests pin the state as it is today rather than the state it
+// arguably should be. That is deliberate and not an endorsement: this branch
+// exists to retire unexecuted blocks, and rollback semantics are a behavior
+// change with a scope of their own. Pinning puts the asymmetry in the diff a
+// reviewer reads, and makes any future fix show up as a red test here instead
+// of a silent change nobody notices.
+
+// DeleteWorkspace calls RemoveWorkspace before SaveWorkspaces, so a failed
+// write leaves the workspace gone from the in-memory config while its panes go
+// on running — unreachable from any tab, since no workspace lists them.
+func TestDeleteWorkspace_ConfigWriteFails_DropsTheWorkspaceButNotItsSessions(t *testing.T) {
 	h := newUnwritableWorkspaceHandler(t)
 	h.manager.Add(newMockSession("two-main"))
 
@@ -292,7 +288,52 @@ func TestDeleteWorkspace_ConfigWriteFails_LeavesSessionsRunning(t *testing.T) {
 
 	require.Equal(t, http.StatusInternalServerError, rec.Code)
 	_, ok := h.manager.Get("two-main")
-	assert.True(t, ok, "the workspace's session must survive a failed save")
+	assert.True(t, ok, "the teardown loop runs after the save, so the session survives")
+	assert.Len(
+		t,
+		h.cfg.WorkspacesView().Items,
+		1,
+		"today the workspace is already gone from the config the 500 says was not saved",
+	)
+}
+
+// PostWorkspace calls AddDefaultWorkspace before creating any session, so a
+// failed create leaves a workspace behind whose panes have no session at all.
+func TestPostWorkspace_CreateSessionFails_LeavesThePhantomWorkspaceBehind(t *testing.T) {
+	cfg, _ := loadWorkspaceTestConfigFromFile(t)
+	h := NewHandler(cfg, session.NewManager(), nil, nil)
+	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
+	h.createSession = func(*config.PaneConfig, map[string]config.SSHConnection) (session.Session, error) {
+		return nil, errors.New("pty allocation refused")
+	}
+
+	rec := doRequest(t, h, http.MethodPost, "/api/workspaces", "")
+
+	require.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.Contains(t, rec.Body.String(), "failed to create session: pty allocation refused")
+	assert.Len(
+		t,
+		h.cfg.WorkspacesView().Items,
+		3,
+		"today the workspace the 500 reports as not created is still in the config",
+	)
+	assert.Equal(t, "workspace-3", h.cfg.WorkspacesView().Active)
+}
+
+// DeleteSession removes and closes the session before it saves, so a failed
+// write returns 500 for a pane that is already gone for good.
+func TestDeleteSession_ConfigWriteFails_ClosesTheSessionAnyway(t *testing.T) {
+	h := newUnwritableWorkspaceHandler(t)
+	sess := newMockSession("one-main")
+	h.manager.Add(sess)
+
+	rec := doRequest(t, h, http.MethodDelete, "/api/sessions/one-main", "")
+
+	require.Equal(t, http.StatusInternalServerError, rec.Code)
+	_, ok := h.manager.Get("one-main")
+	assert.False(t, ok, "today the session is unregistered before the save is attempted")
+	assert.True(t, sess.closed, "and closed, so the 500 cannot be retried into a working pane")
+	assert.Empty(t, panesInLayout(h.cfg.Layout), "and dropped from the layout the 500 says was not saved")
 }
 
 // ── Creating sessions ────────────────────────────────────────────────────────
@@ -322,20 +363,6 @@ func TestPostSession_CreateFails_Returns500(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), "pty allocation refused")
 	_, ok := h.manager.Get("new-pane")
 	assert.False(t, ok)
-}
-
-func TestPostWorkspace_CreateSessionFails_Returns500(t *testing.T) {
-	cfg, _ := loadWorkspaceTestConfigFromFile(t)
-	h := NewHandler(cfg, session.NewManager(), nil, nil)
-	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
-	h.createSession = func(*config.PaneConfig, map[string]config.SSHConnection) (session.Session, error) {
-		return nil, errors.New("pty allocation refused")
-	}
-
-	rec := doRequest(t, h, http.MethodPost, "/api/workspaces", "")
-
-	require.Equal(t, http.StatusInternalServerError, rec.Code)
-	assert.Contains(t, rec.Body.String(), "failed to create session: pty allocation refused")
 }
 
 // ── Reading and writing ~/.ssh/config ────────────────────────────────────────
@@ -527,15 +554,6 @@ func TestGetDirectories_UnknownConnection_Returns404(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
-func TestGetDetectShell_UnknownConnection_Returns404(t *testing.T) {
-	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
-	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
-
-	rec := doRequest(t, h, http.MethodGet, "/api/detect-shell?connection=nope", "")
-
-	assert.Equal(t, http.StatusNotFound, rec.Code)
-}
-
 // listLocalDirectories translates os.ReadDir's failures into messages the
 // directory browser shows the user. Each arm is a different errno and a
 // different message, and only the "does not exist" one had a test.
@@ -665,13 +683,21 @@ func TestListLocalDirectories_UnresolvablePath_Errors(t *testing.T) {
 
 // The remote lister's own wrapper. session.ListRemoteDirectories rejects a path
 // carrying shell metacharacters before it dials anything, which is what lets
-// this assert the wrapping without a network round trip — the anti-pattern
-// DEVELOPMENT.md names is a test that accepts any error a real dial produces.
+// this assert the wrapping without a network round trip.
+//
+// The prefix alone cannot say that, and asserting only the prefix would be the
+// first row of DEVELOPMENT.md's anti-pattern table: session.ListRemoteDirectories
+// wraps a failed remote command with the byte-identical string, so an error that
+// escaped from a real dial would satisfy it just as well — and on a machine with
+// an unencrypted default SSH key the call gets that far, into a DNS lookup and a
+// TCP connect to a host that is not this test's business. The validation message
+// is what distinguishes "rejected up front" from "failed out on the network".
 func TestListRemoteDirectories_WrapsLookupFailure(t *testing.T) {
 	resp, err := listRemoteDirectories(session.SSHConfig{Host: "remote.example.com"}, "/srv; rm -rf /", false)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "listing remote directories:")
+	assert.Contains(t, err.Error(), "directory path", "must be rejected by validateRemotePath, before any dial")
 	assert.Equal(t, directoryBrowserResponse{}, resp)
 }
 
@@ -779,7 +805,16 @@ func TestGetGitInfo_ActiveWorkdirLookupFails_FallsBackAndLogs(t *testing.T) {
 func TestGetGitInfo_RepoWithoutOrigin_ReturnsBranchWithoutRepoURL(t *testing.T) {
 	dir := t.TempDir()
 	runGit(t, dir, "init", "-b", "main", ".")
-	runGit(t, dir, "-c", "user.email=dev@example.com", "-c", "user.name=Dev", "commit", "--allow-empty", "-m", "init")
+	runGit(
+		t, dir,
+		"-c", "user.email=dev@example.com",
+		"-c", "user.name=Dev",
+		// initTempGitRepo disables signing for the same reason: a developer
+		// whose global gitconfig sets commit.gpgsign true would otherwise have
+		// this commit invoke gpg, and fail or block on a pinentry prompt.
+		"-c", "commit.gpgsign=false",
+		"commit", "--allow-empty", "-m", "init",
+	)
 
 	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
 	h.ghBinaryPath = writeFakeGHBinary(t, ghNoPRScript)
