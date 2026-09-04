@@ -274,8 +274,11 @@ func TestConfigWriteFails_MutatingRoutesReturn500(t *testing.T) {
 // arguably should be. That is deliberate and not an endorsement: this branch
 // exists to retire unexecuted blocks, and rollback semantics are a behavior
 // change with a scope of their own. Pinning puts the asymmetry in the diff a
-// reviewer reads, and makes any future fix show up as a red test here instead
-// of a silent change nobody notices.
+// reviewer reads, and makes the fix show up as a red test here instead of a
+// silent change nobody notices.
+//
+// Issue #204 tracks the fix. Whichever rule it settles on, these three tests
+// are the ones to rewrite — they are expected to go red.
 
 // DeleteWorkspace calls RemoveWorkspace before SaveWorkspaces, so a failed
 // write leaves the workspace gone from the in-memory config while its panes go
