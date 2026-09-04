@@ -695,12 +695,6 @@ func mustAbs(t *testing.T, path string) string {
 
 // ── Git and PR metadata ──────────────────────────────────────────────────────
 
-// ghNoPRScript stands in for a `gh` that found no pull request. Every test that
-// resolves a git context needs one: without it lookupPRInfo finds the
-// developer's own gh on PATH and makes a real network call for a repository
-// that does not exist.
-const ghNoPRScript = "#!/bin/sh\nexit 1\n"
-
 func TestGitExistsFn_ReportsAMissingGitBinary(t *testing.T) {
 	emptyPATH(t)
 

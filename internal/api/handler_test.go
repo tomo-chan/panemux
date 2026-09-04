@@ -2019,6 +2019,13 @@ func addTempGitWorktree(t *testing.T, repoDir, branchName string) string {
 	return worktreeDir
 }
 
+// ghNoPRScript stands in for a `gh` that reports no pull request for the
+// branch. Every test that resolves a git context needs a fake gh, not only
+// the ones asserting about a PR: without one, lookupPRInfo finds the
+// developer's own gh on PATH and makes a real network call, bounded only by
+// prLookupTimeout, for a repository that does not exist.
+const ghNoPRScript = "#!/bin/sh\nexit 1\n"
+
 func writeFakeGHBinary(t *testing.T, body string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -2120,6 +2127,7 @@ func TestGetGitInfo_IsGitRepo_ReturnsBranchAndRepo(t *testing.T) {
 		cwd:         dir,
 	})
 	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
+	h.ghBinaryPath = writeFakeGHBinary(t, ghNoPRScript)
 	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
@@ -2184,6 +2192,7 @@ func TestGetGitInfo_SubdirOfGitRepo_ReturnsBranchAndRepo(t *testing.T) {
 		cwd:         subdir,
 	})
 	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
+	h.ghBinaryPath = writeFakeGHBinary(t, ghNoPRScript)
 	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
@@ -2205,7 +2214,7 @@ func TestGetGitInfo_PRLookupFails_StillReturnsGitInfo(t *testing.T) {
 		cwd:         dir,
 	})
 	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
-	h.ghBinaryPath = writeFakeGHBinary(t, "#!/bin/sh\nexit 1\n")
+	h.ghBinaryPath = writeFakeGHBinary(t, ghNoPRScript)
 	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
@@ -2522,6 +2531,7 @@ func TestGetGitInfo_StaleStickyWorktreeFallsBackToPaneCWD(t *testing.T) {
 	mgr.Add(sess)
 
 	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
+	h.ghBinaryPath = writeFakeGHBinary(t, ghNoPRScript)
 	now := time.Now()
 	h.nowFn = func() time.Time { return now }
 	r := setupRouterWithHandler(h)
@@ -2725,6 +2735,7 @@ func TestGetGitInfo_SecondRequestWithinTTL_ServesCachedResponseWithoutRecomputin
 	mgr := session.NewManager()
 	mgr.Add(sess)
 	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
+	h.ghBinaryPath = writeFakeGHBinary(t, ghNoPRScript)
 	now := time.Now()
 	h.nowFn = func() time.Time { return now }
 	r := setupRouterWithHandler(h)
@@ -2761,6 +2772,7 @@ func TestGetGitInfo_RequestAfterTTLExpires_Recomputes(t *testing.T) {
 	mgr := session.NewManager()
 	mgr.Add(sess)
 	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
+	h.ghBinaryPath = writeFakeGHBinary(t, ghNoPRScript)
 	now := time.Now()
 	h.nowFn = func() time.Time { return now }
 	r := setupRouterWithHandler(h)
@@ -2791,6 +2803,7 @@ func TestGetGitInfo_AfterSessionRecreatedWithSameID_DoesNotServeOldSessionsCache
 	mgr := session.NewManager()
 	mgr.Add(oldSess)
 	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
+	h.ghBinaryPath = writeFakeGHBinary(t, ghNoPRScript)
 	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
@@ -2970,6 +2983,7 @@ func TestGetGitInfo_RemoteGitContext_WithOrigin_ReturnsRepoURL(t *testing.T) {
 	})
 
 	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
+	h.ghBinaryPath = writeFakeGHBinary(t, ghNoPRScript)
 	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
@@ -3002,6 +3016,7 @@ func TestGetGitInfo_RemoteGitContext_WithSSHConfigAliasOrigin_ReturnsResolvedRep
 	})
 
 	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
+	h.ghBinaryPath = writeFakeGHBinary(t, ghNoPRScript)
 	h.sshConfigPath = writeTempSSHConfigForAPI(t, "Host github-work\n    HostName github.com\n    User git\n")
 	r := setupRouterWithHandler(h)
 
