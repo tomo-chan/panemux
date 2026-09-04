@@ -140,10 +140,11 @@ func workspaceTestConfig() *config.Config {
 	}
 }
 
-func loadWorkspaceTestConfigFromFile(t *testing.T) (*config.Config, string) {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "config.yaml")
-	content := `
+// workspaceTestConfigYAML is the on-disk form of workspaceTestConfig(): two
+// workspaces, one local pane each. Shared with the write-failure fixture in
+// handler_error_paths_test.go so both load the same config, one from a path
+// that can still be written and one from a path that cannot.
+const workspaceTestConfigYAML = `
 server:
   port: 8080
   host: "127.0.0.1"
@@ -171,7 +172,11 @@ workspaces:
               id: two-main
               type: local
 `
-	require.NoError(t, os.WriteFile(path, []byte(content), 0600))
+
+func loadWorkspaceTestConfigFromFile(t *testing.T) (*config.Config, string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(workspaceTestConfigYAML), 0600))
 	cfg, err := config.Load(path)
 	require.NoError(t, err)
 	return cfg, path
@@ -2014,6 +2019,32 @@ func addTempGitWorktree(t *testing.T, repoDir, branchName string) string {
 	return worktreeDir
 }
 
+// ghNoPRScript stands in for a `gh` that reports no pull request for the
+// branch. Every test that resolves a git context needs a fake gh, not only
+// the ones asserting about a PR: without one, lookupPRInfo finds the
+// developer's own gh on PATH and makes a real network call, bounded only by
+// prLookupTimeout, for a repository that does not exist.
+const ghNoPRScript = "#!/bin/sh\nexit 1\n"
+
+// captureLog redirects the standard logger for the duration of the test and
+// returns the buffer it writes into. Several handlers report a recoverable
+// failure only through log output, so asserting on it is the only way to pin
+// that the failure was noticed rather than swallowed.
+func captureLog(t *testing.T) *bytes.Buffer {
+	t.Helper()
+
+	var buf bytes.Buffer
+	originalWriter := log.Writer()
+	originalFlags := log.Flags()
+	log.SetOutput(&buf)
+	log.SetFlags(0)
+	t.Cleanup(func() {
+		log.SetOutput(originalWriter)
+		log.SetFlags(originalFlags)
+	})
+	return &buf
+}
+
 func writeFakeGHBinary(t *testing.T, body string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -2078,15 +2109,7 @@ func TestGetGitInfo_NotAGitRepo_LogsCauseAndRemediation(t *testing.T) {
 		cwd:         dir,
 	})
 
-	var buf bytes.Buffer
-	originalWriter := log.Writer()
-	originalFlags := log.Flags()
-	log.SetOutput(&buf)
-	log.SetFlags(0)
-	t.Cleanup(func() {
-		log.SetOutput(originalWriter)
-		log.SetFlags(originalFlags)
-	})
+	buf := captureLog(t)
 
 	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
 	r := setupRouterWithHandler(h)
@@ -2115,6 +2138,7 @@ func TestGetGitInfo_IsGitRepo_ReturnsBranchAndRepo(t *testing.T) {
 		cwd:         dir,
 	})
 	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
+	h.ghBinaryPath = writeFakeGHBinary(t, ghNoPRScript)
 	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
@@ -2179,6 +2203,7 @@ func TestGetGitInfo_SubdirOfGitRepo_ReturnsBranchAndRepo(t *testing.T) {
 		cwd:         subdir,
 	})
 	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
+	h.ghBinaryPath = writeFakeGHBinary(t, ghNoPRScript)
 	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
@@ -2200,7 +2225,7 @@ func TestGetGitInfo_PRLookupFails_StillReturnsGitInfo(t *testing.T) {
 		cwd:         dir,
 	})
 	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
-	h.ghBinaryPath = writeFakeGHBinary(t, "#!/bin/sh\nexit 1\n")
+	h.ghBinaryPath = writeFakeGHBinary(t, ghNoPRScript)
 	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
@@ -2517,6 +2542,7 @@ func TestGetGitInfo_StaleStickyWorktreeFallsBackToPaneCWD(t *testing.T) {
 	mgr.Add(sess)
 
 	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
+	h.ghBinaryPath = writeFakeGHBinary(t, ghNoPRScript)
 	now := time.Now()
 	h.nowFn = func() time.Time { return now }
 	r := setupRouterWithHandler(h)
@@ -2616,15 +2642,7 @@ func TestResolveSinglePreferredCWD_LogsPaneIdentity(t *testing.T) {
 		},
 	}
 
-	var buf bytes.Buffer
-	originalWriter := log.Writer()
-	originalFlags := log.Flags()
-	log.SetOutput(&buf)
-	log.SetFlags(0)
-	t.Cleanup(func() {
-		log.SetOutput(originalWriter)
-		log.SetFlags(originalFlags)
-	})
+	buf := captureLog(t)
 
 	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
 	assert.Equal(t, "/repo/base-worktree", h.resolveSinglePreferredCWD(sess, sess.cwd))
@@ -2720,6 +2738,7 @@ func TestGetGitInfo_SecondRequestWithinTTL_ServesCachedResponseWithoutRecomputin
 	mgr := session.NewManager()
 	mgr.Add(sess)
 	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
+	h.ghBinaryPath = writeFakeGHBinary(t, ghNoPRScript)
 	now := time.Now()
 	h.nowFn = func() time.Time { return now }
 	r := setupRouterWithHandler(h)
@@ -2756,6 +2775,7 @@ func TestGetGitInfo_RequestAfterTTLExpires_Recomputes(t *testing.T) {
 	mgr := session.NewManager()
 	mgr.Add(sess)
 	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
+	h.ghBinaryPath = writeFakeGHBinary(t, ghNoPRScript)
 	now := time.Now()
 	h.nowFn = func() time.Time { return now }
 	r := setupRouterWithHandler(h)
@@ -2786,6 +2806,7 @@ func TestGetGitInfo_AfterSessionRecreatedWithSameID_DoesNotServeOldSessionsCache
 	mgr := session.NewManager()
 	mgr.Add(oldSess)
 	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
+	h.ghBinaryPath = writeFakeGHBinary(t, ghNoPRScript)
 	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
@@ -2878,15 +2899,7 @@ func TestGetGitInfo_RemoteGitContextFailure_LogsCauseAndRemediation(t *testing.T
 		},
 	})
 
-	var buf bytes.Buffer
-	originalWriter := log.Writer()
-	originalFlags := log.Flags()
-	log.SetOutput(&buf)
-	log.SetFlags(0)
-	t.Cleanup(func() {
-		log.SetOutput(originalWriter)
-		log.SetFlags(originalFlags)
-	})
+	buf := captureLog(t)
 
 	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
 	r := setupRouterWithHandler(h)
@@ -2965,6 +2978,7 @@ func TestGetGitInfo_RemoteGitContext_WithOrigin_ReturnsRepoURL(t *testing.T) {
 	})
 
 	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
+	h.ghBinaryPath = writeFakeGHBinary(t, ghNoPRScript)
 	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
@@ -2997,6 +3011,7 @@ func TestGetGitInfo_RemoteGitContext_WithSSHConfigAliasOrigin_ReturnsResolvedRep
 	})
 
 	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
+	h.ghBinaryPath = writeFakeGHBinary(t, ghNoPRScript)
 	h.sshConfigPath = writeTempSSHConfigForAPI(t, "Host github-work\n    HostName github.com\n    User git\n")
 	r := setupRouterWithHandler(h)
 
@@ -3294,7 +3309,7 @@ func TestGetDirectories_SkipsUnreadableChildDirectories(t *testing.T) {
 	originalReadDir := h.readDirFn
 	h.readDirFn = func(name string) ([]os.DirEntry, error) {
 		if name == unreadableDir {
-			return nil, &fs.PathError{Op: "readdir", Path: name, Err: fs.ErrPermission}
+			return nil, &fs.PathError{Op: readdirOp, Path: name, Err: fs.ErrPermission}
 		}
 		return originalReadDir(name)
 	}
