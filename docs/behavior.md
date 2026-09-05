@@ -208,6 +208,35 @@ drag on Linux and Windows.
 
 ## REST API
 
+### A mutation that fails changes nothing
+
+Every route that changes the config persists it before answering, and each one applies the same rule
+when that step fails: **the config panemux is still running is the config the error says was not
+saved.**
+
+This has to be arranged rather than assumed. `Config.write()` serializes the whole in-memory config,
+so a route cannot save first and mutate afterwards — it mutates, then writes. A route that returned
+`500` and left its mutation in place therefore did two things the operator could not see: it kept
+running a config it had just reported as unsaved, and it left that change to be persisted by the next
+successful write from *any other* route, so a failed workspace deletion could land in `config.yaml`
+when an unrelated rename succeeded minutes later.
+
+Each route now takes a `config.Snapshot()` before it mutates and restores it when the write fails
+(issue [#204](https://github.com/tomo-chan/panemux/issues/204)). Sessions are the other half of the
+same rule, and the ordering follows from it:
+
+- A route that **destroys** a session — `DELETE /api/sessions/{id}`, `DELETE /api/workspaces/{id}` —
+  persists the config change first and tears the session down only once the write has succeeded. A
+  `500` therefore leaves a pane that still works and a request the operator can retry.
+- A route that **creates** sessions — `POST /api/workspaces` — closes and unregisters the ones it had
+  already created when a later pane or the write itself fails, so a failed attempt leaves neither a
+  workspace whose panes have no session nor sessions no workspace lists.
+- `POST /api/sessions/{id}/restart` is the shape the other routes were brought in line with: it
+  creates the replacement session before it touches anything, so a failure leaves the existing
+  session registered and servable.
+
+Validation failures (`400`, `422`) and unknown IDs (`404`) never reach the mutation at all.
+
 ### `GET /api/layout`
 
 Returns the current layout tree as JSON.
@@ -297,7 +326,14 @@ Current product use: the frontend uses this endpoint when the user splits a pane
 
 ### `DELETE /api/sessions/{id}`
 
-Closes the session, removes its pane from the layout, collapses redundant parent splits, normalizes sibling sizes, and returns `204`.
+Removes the pane from the layout, collapses redundant parent splits, normalizes sibling sizes,
+persists the result, then closes the session and returns `204`.
+
+- `404`: no session is registered for `id`
+- `500`: the layout could not be saved. The session is left registered and open and the pane is left
+  in the layout, so the request can be retried — see [A mutation that fails changes
+  nothing](#a-mutation-that-fails-changes-nothing).
+- `204`: the pane is gone and its session is closed
 
 ### `POST /api/sessions/{id}/restart`
 
