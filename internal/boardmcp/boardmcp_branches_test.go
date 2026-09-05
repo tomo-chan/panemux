@@ -238,12 +238,16 @@ func TestHTTPBoardAPIClientUnbuildableRequestIsReported(t *testing.T) {
 
 // panemux not listening is the ordinary failure here: the command center
 // subprocess outlives a server shutdown by however long its query takes.
+//
+// Port 0 rather than a closed httptest server, because "nothing is listening
+// there any more" is not a property a closed listener actually guarantees:
+// closing a listener that never accepted a connection returns its port to the
+// ephemeral pool immediately, and `go test ./...` runs package binaries
+// concurrently against that same pool. A dial to port 0 is refused by the
+// kernel before any connection is attempted, so it cannot reach a foreign
+// server no matter what else the machine is running.
 func TestHTTPBoardAPIClientUnreachableServerIsReported(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
-	baseURL := server.URL
-	server.Close() // nothing is listening on that port any more
-
-	client := NewHTTPBoardAPIClient(baseURL, "token")
+	client := NewHTTPBoardAPIClient("http://127.0.0.1:0", "token")
 
 	raw, err := client.Status(context.Background())
 
