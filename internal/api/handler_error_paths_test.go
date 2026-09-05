@@ -412,6 +412,12 @@ func TestDeleteSession_ConfigWriteFails_KeepsTheSessionUsable(t *testing.T) {
 
 // A pane that is not there at all is still a 404, and it stays one now that
 // the existence check no longer rides on Manager.Remove's own error.
+//
+// the 404 was already correct, and what changed under it is which call reports
+// the missing session. It is here so a later reader can see the replacement was
+// checked, and it goes red if the new Manager.Get guard is ever dropped.
+//
+//efficacy:exempt pins behavior this branch preserves rather than introduces —
 func TestDeleteSession_UnknownID_Returns404AndSavesNothing(t *testing.T) {
 	h := newUnwritableWorkspaceHandler(t)
 	before := configFingerprint(t, h)
