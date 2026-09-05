@@ -227,8 +227,8 @@ func (h *Handler) PutLayout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.cfg.SaveLayout(layout); err != nil {
-		http.Error(w, "failed to save layout", http.StatusInternalServerError)
+	snapshot := h.cfg.Snapshot()
+	if !h.saveLayoutOrRollback(w, layout, snapshot) {
 		return
 	}
 
@@ -247,12 +247,12 @@ func (h *Handler) PutActiveWorkspace(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
+	snapshot := h.cfg.Snapshot()
 	if !h.cfg.SetActiveWorkspace(req.ID) {
 		http.Error(w, "workspace not found", http.StatusNotFound)
 		return
 	}
-	if err := h.cfg.SaveWorkspaces(); err != nil {
-		http.Error(w, "failed to save workspaces", http.StatusInternalServerError)
+	if !h.saveWorkspacesOrRollback(w, snapshot) {
 		return
 	}
 	writeJSON(w, h.cfg.WorkspacesView())
@@ -265,7 +265,7 @@ func (h *Handler) PutWorkspaceTabPosition(w http.ResponseWriter, r *http.Request
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	h.applyWorkspaceSettingUpdate(w, h.cfg.SetWorkspaceTabPosition(req.TabPosition))
+	h.applyWorkspaceSettingUpdate(w, func() error { return h.cfg.SetWorkspaceTabPosition(req.TabPosition) })
 }
 
 // PutWorkspaceVerticalBarWidth updates the shared vertical workspace bar width.
@@ -275,41 +275,93 @@ func (h *Handler) PutWorkspaceVerticalBarWidth(w http.ResponseWriter, r *http.Re
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	h.applyWorkspaceSettingUpdate(w, h.cfg.SetWorkspaceVerticalBarWidth(req.VerticalBarWidth))
+	h.applyWorkspaceSettingUpdate(w, func() error { return h.cfg.SetWorkspaceVerticalBarWidth(req.VerticalBarWidth) })
 }
 
-func (h *Handler) applyWorkspaceSettingUpdate(w http.ResponseWriter, updateErr error) {
-	if updateErr != nil {
+// applyWorkspaceSettingUpdate takes the update as a func rather than as the
+// error it returned, so the snapshot the rollback needs is taken before the
+// setting is applied rather than after it.
+func (h *Handler) applyWorkspaceSettingUpdate(w http.ResponseWriter, update func() error) {
+	snapshot := h.cfg.Snapshot()
+	if err := update(); err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnprocessableEntity)
-		_ = json.NewEncoder(w).Encode(map[string]string{responseErrorKey: updateErr.Error()})
+		_ = json.NewEncoder(w).Encode(map[string]string{responseErrorKey: err.Error()})
 		return
 	}
-	if err := h.cfg.SaveWorkspaces(); err != nil {
-		http.Error(w, "failed to save workspaces", http.StatusInternalServerError)
+	if !h.saveWorkspacesOrRollback(w, snapshot) {
 		return
 	}
 	writeJSON(w, h.cfg.WorkspacesView())
 }
 
+// saveWorkspacesOrRollback persists a workspace change the caller has already
+// applied in memory, and puts the config back when the write fails.
+//
+// The rollback is issue #204: Config.write() serializes the whole config, so a
+// route cannot save before it mutates, and a route that answered 500 while
+// leaving its mutation in place left the operator running a config they had
+// been told was not saved — which the next successful write from any other
+// route would then persist. It reports whether the caller may go on; a false
+// result means the response has already been written.
+func (h *Handler) saveWorkspacesOrRollback(w http.ResponseWriter, snapshot config.Snapshot) bool {
+	if err := h.cfg.SaveWorkspaces(); err != nil {
+		h.cfg.Restore(snapshot)
+		http.Error(w, "failed to save workspaces", http.StatusInternalServerError)
+		return false
+	}
+	return true
+}
+
+// saveLayoutOrRollback is saveWorkspacesOrRollback for the two routes that
+// persist through SaveLayout, which reports its own failure differently to the
+// dashboard and so cannot share the message.
+func (h *Handler) saveLayoutOrRollback(w http.ResponseWriter, layout config.LayoutNode, snapshot config.Snapshot) bool {
+	if err := h.cfg.SaveLayout(layout); err != nil {
+		h.cfg.Restore(snapshot)
+		http.Error(w, "failed to save layout", http.StatusInternalServerError)
+		return false
+	}
+	return true
+}
+
 // PostWorkspace adds a new default local workspace and makes it active.
 func (h *Handler) PostWorkspace(w http.ResponseWriter, r *http.Request) {
+	snapshot := h.cfg.Snapshot()
 	workspace := h.cfg.AddDefaultWorkspace()
+	var created []string
 	for _, pane := range panesInLayout(workspace.Layout) {
 		sess, err := h.createSession(pane, h.cfg.SSHConnections)
 		if err != nil {
+			h.rollbackNewWorkspace(snapshot, created)
 			http.Error(w, fmt.Sprintf("failed to create session: %v", err), http.StatusInternalServerError)
 			return
 		}
 		h.manager.Add(sess)
+		created = append(created, sess.ID())
 	}
 	if err := h.cfg.SaveWorkspaces(); err != nil {
+		h.rollbackNewWorkspace(snapshot, created)
 		http.Error(w, "failed to save workspaces", http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(h.cfg.WorkspacesView())
+}
+
+// rollbackNewWorkspace undoes a PostWorkspace that could not be completed.
+//
+// The sessions already created for the new workspace are closed and
+// unregistered — with the workspace gone there is nothing left that lists
+// them, so leaving them running would leak a PTY per attempt and keep their
+// pane IDs taken against a retry — and the config goes back to the state it
+// had before the workspace was added.
+func (h *Handler) rollbackNewWorkspace(snapshot config.Snapshot, created []string) {
+	for _, id := range created {
+		_ = h.manager.Remove(id)
+	}
+	h.cfg.Restore(snapshot)
 }
 
 // DeleteWorkspace removes a workspace.
@@ -320,13 +372,13 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "cannot delete the last workspace", http.StatusConflict)
 		return
 	}
+	snapshot := h.cfg.Snapshot()
 	workspace, ok := h.cfg.RemoveWorkspace(id)
 	if !ok {
 		http.Error(w, "workspace not found", http.StatusNotFound)
 		return
 	}
-	if err := h.cfg.SaveWorkspaces(); err != nil {
-		http.Error(w, "failed to save workspaces", http.StatusInternalServerError)
+	if !h.saveWorkspacesOrRollback(w, snapshot) {
 		return
 	}
 	for _, pane := range panesInLayout(workspace.Layout) {
@@ -352,12 +404,12 @@ func (h *Handler) PutWorkspace(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]string{responseErrorKey: "workspace title must not be empty"})
 		return
 	}
+	snapshot := h.cfg.Snapshot()
 	if !h.cfg.RenameWorkspace(id, title) {
 		http.Error(w, "workspace not found", http.StatusNotFound)
 		return
 	}
-	if err := h.cfg.SaveWorkspaces(); err != nil {
-		http.Error(w, "failed to save workspaces", http.StatusInternalServerError)
+	if !h.saveWorkspacesOrRollback(w, snapshot) {
 		return
 	}
 	writeJSON(w, h.cfg.WorkspacesView())
@@ -391,12 +443,12 @@ func (h *Handler) PutWorkspaceLayout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	snapshot := h.cfg.Snapshot()
 	if !h.cfg.UpdateWorkspaceLayout(id, layout) {
 		http.Error(w, "workspace not found", http.StatusNotFound)
 		return
 	}
-	if err := h.cfg.SaveWorkspaces(); err != nil {
-		http.Error(w, "failed to save workspaces", http.StatusInternalServerError)
+	if !h.saveWorkspacesOrRollback(w, snapshot) {
 		return
 	}
 	writeJSON(w, layout)
@@ -474,18 +526,25 @@ func (h *Handler) PostSession(w http.ResponseWriter, r *http.Request) {
 // DeleteSession terminates a session by ID and removes it from the layout.
 func (h *Handler) DeleteSession(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	if err := h.manager.Remove(id); err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+	if _, ok := h.manager.Get(id); !ok {
+		http.Error(w, fmt.Sprintf("session %s not found", id), http.StatusNotFound)
 		return
 	}
+
+	// The layout change is persisted before the session is touched, which is
+	// the order DeleteWorkspace already used and the one issue #204 settled on
+	// for both. Closing the session first meant a failed write answered 500
+	// for a pane whose PTY was already gone: nothing the operator could retry.
+	snapshot := h.cfg.Snapshot()
+	h.cfg.RemovePaneFromLayout(id)
+	if !h.saveLayoutOrRollback(w, h.cfg.Layout, snapshot) {
+		return
+	}
+
+	_ = h.manager.Remove(id)
 	h.clearPreferredCWDs(id)
 	h.clearGitInfoCache(id)
 	h.closeSessionForwards(id)
-	h.cfg.RemovePaneFromLayout(id)
-	if err := h.cfg.SaveLayout(h.cfg.Layout); err != nil {
-		http.Error(w, "failed to save layout", http.StatusInternalServerError)
-		return
-	}
 	w.WriteHeader(http.StatusNoContent)
 }
 

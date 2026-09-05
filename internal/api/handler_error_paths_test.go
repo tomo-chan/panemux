@@ -160,10 +160,16 @@ type configWriteFailureCase struct {
 	wantBody string
 }
 
-// oneWorkspaceLayout is a valid single-pane layout for the "one" workspace of
+// oneWorkspaceLayout is a valid layout for the "one" workspace of
 // workspaceTestConfigYAML, so a PUT gets past validation and reaches the save.
-const oneWorkspaceLayout = `{"direction":"horizontal","children":[{"size":100,` +
-	`"pane":{"id":"one-main","type":"local"}}]}`
+//
+// It deliberately splits that workspace's single pane in two: a body equal to
+// the layout already stored would leave the rollback assertion below with
+// nothing to detect, since not rolling back and rolling back would produce the
+// same config.
+const oneWorkspaceLayout = `{"direction":"horizontal","children":[` +
+	`{"size":60,"pane":{"id":"one-main","type":"local"}},` +
+	`{"size":40,"pane":{"id":"one-extra","type":"local"}}]}`
 
 // configWriteFailureCases is a package-level table rather than a local one only
 // because the list is longer than funlen allows a single test function to be.
@@ -262,28 +268,73 @@ func TestConfigWriteFails_MutatingRoutesReturn500(t *testing.T) {
 	}
 }
 
-// ── What a failed mutation actually leaves behind ────────────────────────────
+// ── What a failed mutation leaves behind ─────────────────────────────────────
 //
 // The 500s asserted above are only half of what these routes do. Each mutates
-// in-memory state before the step that can fail, and none of them rolls back
-// when it does, so the operator is told the operation failed while part of it
-// has already happened — and the next successful write from any other route
-// persists that part to config.yaml.
+// the config in memory before the step that can fail — the write itself, or a
+// session that has to be created — and issue #204 was that none of them undid
+// that mutation when the step failed. The operator was told the operation had
+// failed while part of it had already happened, and because Config.write()
+// serializes the whole config, the next successful write from any other route
+// persisted the change they were told did not happen.
 //
-// These three tests pin the state as it is today rather than the state it
-// arguably should be. That is deliberate and not an endorsement: this branch
-// exists to retire unexecuted blocks, and rollback semantics are a behavior
-// change with a scope of their own. Pinning puts the asymmetry in the diff a
-// reviewer reads, and makes the fix show up as a red test here instead of a
-// silent change nobody notices.
-//
-// Issue #204 tracks the fix. Whichever rule it settles on, these three tests
-// are the ones to rewrite — they are expected to go red.
+// The rule these tests pin, and the one every mutating route now follows: take
+// a config snapshot before the mutation, and on failure restore it so the
+// config panemux is still running is the config the 500 says was not saved.
+// Sessions are the caller's half of the same undo — a route only tears a
+// session down after the config change is durable, and a route that created
+// sessions before failing closes them again.
 
-// DeleteWorkspace calls RemoveWorkspace before SaveWorkspaces, so a failed
-// write leaves the workspace gone from the in-memory config while its panes go
-// on running — unreachable from any tab, since no workspace lists them.
-func TestDeleteWorkspace_ConfigWriteFails_DropsTheWorkspaceButNotItsSessions(t *testing.T) {
+// configFingerprint renders everything a mutating route could have changed in
+// the in-memory config.
+//
+// Both sides of a comparison go through the normalizing accessors, so a route
+// that merely filled in defaults — every one of them calls normalizeWorkspaces
+// on the way in — does not read as a change that was left behind.
+func configFingerprint(t *testing.T, h *Handler) string {
+	t.Helper()
+
+	data, err := json.Marshal(struct {
+		Layout     config.LayoutNode       `json:"layout"`
+		Workspaces config.WorkspacesConfig `json:"workspaces"`
+	}{
+		Layout:     h.cfg.ActiveLayout(),
+		Workspaces: h.cfg.WorkspacesView(),
+	})
+	require.NoError(t, err)
+	return string(data)
+}
+
+// The companion to TestConfigWriteFails_MutatingRoutesReturn500: the same
+// table, asserting that the 500 each route returns is telling the truth about
+// the config it left behind. Collected here rather than per route for the same
+// reason — the point is that no route is missing the rollback.
+func TestConfigWriteFails_MutatingRoutesRollBackTheInMemoryConfig(t *testing.T) {
+	for _, tt := range configWriteFailureCases {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newUnwritableWorkspaceHandler(t)
+			if tt.prepare != nil {
+				tt.prepare(t, h)
+			}
+			before := configFingerprint(t, h)
+
+			rec := doRequest(t, h, tt.method, tt.path, tt.body)
+
+			require.Equal(t, http.StatusInternalServerError, rec.Code)
+			assert.Equal(
+				t,
+				before,
+				configFingerprint(t, h),
+				"a route that reports the config was not saved must not have changed it either",
+			)
+		})
+	}
+}
+
+// DeleteWorkspace tears its panes' sessions down only after the write, so a
+// failed write has to leave both halves alone: the workspace stays in the
+// config, and the sessions it lists stay reachable through it.
+func TestDeleteWorkspace_ConfigWriteFails_KeepsTheWorkspaceAndItsSessions(t *testing.T) {
 	h := newUnwritableWorkspaceHandler(t)
 	h.manager.Add(newMockSession("two-main"))
 
@@ -292,17 +343,16 @@ func TestDeleteWorkspace_ConfigWriteFails_DropsTheWorkspaceButNotItsSessions(t *
 	require.Equal(t, http.StatusInternalServerError, rec.Code)
 	_, ok := h.manager.Get("two-main")
 	assert.True(t, ok, "the teardown loop runs after the save, so the session survives")
-	assert.Len(
-		t,
-		h.cfg.WorkspacesView().Items,
-		1,
-		"today the workspace is already gone from the config the 500 says was not saved",
-	)
+	view := h.cfg.WorkspacesView()
+	require.Len(t, view.Items, 2, "the workspace the 500 says was not deleted is still there")
+	assert.Equal(t, "one", view.Active)
+	assert.Equal(t, "two", view.Items[1].ID)
 }
 
-// PostWorkspace calls AddDefaultWorkspace before creating any session, so a
-// failed create leaves a workspace behind whose panes have no session at all.
-func TestPostWorkspace_CreateSessionFails_LeavesThePhantomWorkspaceBehind(t *testing.T) {
+// PostWorkspace adds the workspace before it can know whether its panes will
+// start, so a failed create has to take the workspace back out rather than
+// leave one behind whose panes have no session at all.
+func TestPostWorkspace_CreateSessionFails_LeavesNoPhantomWorkspaceBehind(t *testing.T) {
 	cfg, _ := loadWorkspaceTestConfigFromFile(t)
 	h := NewHandler(cfg, session.NewManager(), nil, nil)
 	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
@@ -314,29 +364,73 @@ func TestPostWorkspace_CreateSessionFails_LeavesThePhantomWorkspaceBehind(t *tes
 
 	require.Equal(t, http.StatusInternalServerError, rec.Code)
 	assert.Contains(t, rec.Body.String(), "failed to create session: pty allocation refused")
-	assert.Len(
-		t,
-		h.cfg.WorkspacesView().Items,
-		3,
-		"today the workspace the 500 reports as not created is still in the config",
-	)
-	assert.Equal(t, "workspace-3", h.cfg.WorkspacesView().Active)
+	view := h.cfg.WorkspacesView()
+	assert.Len(t, view.Items, 2, "the workspace the 500 reports as not created is gone again")
+	assert.Equal(t, "one", view.Active, "and it is not left selected")
 }
 
-// DeleteSession removes and closes the session before it saves, so a failed
-// write returns 500 for a pane that is already gone for good.
-func TestDeleteSession_ConfigWriteFails_ClosesTheSessionAnyway(t *testing.T) {
+// The failure can also come after the panes have started: the workspace saves,
+// and the write fails. The sessions created for it have nothing left to belong
+// to, so the rollback closes them rather than leaking a PTY per attempt.
+func TestPostWorkspace_ConfigWriteFails_ClosesTheSessionsItHadCreated(t *testing.T) {
+	h := newUnwritableWorkspaceHandler(t)
+	var created []*mockSession
+	h.createSession = func(pane *config.PaneConfig, _ map[string]config.SSHConnection) (session.Session, error) {
+		sess := newMockSession(pane.ID)
+		created = append(created, sess)
+		return sess, nil
+	}
+
+	rec := doRequest(t, h, http.MethodPost, "/api/workspaces", "")
+
+	require.Equal(t, http.StatusInternalServerError, rec.Code)
+	require.Len(t, created, 1, "the default workspace has one pane, and it was created")
+	assert.True(t, created[0].closed, "a session with no workspace left to belong to is closed")
+	_, ok := h.manager.Get(created[0].ID())
+	assert.False(t, ok, "and unregistered, so a retry can create it again")
+	assert.Len(t, h.cfg.WorkspacesView().Items, 2)
+}
+
+// DeleteSession used to unregister and close the session before it saved, so a
+// failed write returned 500 for a pane that was already gone for good. It now
+// saves first: a 500 means nothing happened, and the operator can retry.
+func TestDeleteSession_ConfigWriteFails_KeepsTheSessionUsable(t *testing.T) {
 	h := newUnwritableWorkspaceHandler(t)
 	sess := newMockSession("one-main")
 	h.manager.Add(sess)
+	h.preferredCWDBySession["one-main"] = []preferredCWDState{{CWD: "/workspace/user/project"}}
 
 	rec := doRequest(t, h, http.MethodDelete, "/api/sessions/one-main", "")
 
 	require.Equal(t, http.StatusInternalServerError, rec.Code)
 	_, ok := h.manager.Get("one-main")
-	assert.False(t, ok, "today the session is unregistered before the save is attempted")
-	assert.True(t, sess.closed, "and closed, so the 500 cannot be retried into a working pane")
-	assert.Empty(t, panesInLayout(h.cfg.Layout), "and dropped from the layout the 500 says was not saved")
+	assert.True(t, ok, "the session is still registered")
+	assert.False(t, sess.closed, "and still open, so the 500 can be retried")
+	assert.Equal(t, []string{"one-main"}, layoutPaneIDs(h.cfg.Layout), "and still in the layout")
+	assert.Len(t, h.preferredCWDBySession["one-main"], 1, "and its per-session state is intact")
+}
+
+// A pane that is not there at all is still a 404, and it stays one now that
+// the existence check no longer rides on Manager.Remove's own error.
+func TestDeleteSession_UnknownID_Returns404AndSavesNothing(t *testing.T) {
+	h := newUnwritableWorkspaceHandler(t)
+	before := configFingerprint(t, h)
+
+	rec := doRequest(t, h, http.MethodDelete, "/api/sessions/nonexistent", "")
+
+	require.Equal(t, http.StatusNotFound, rec.Code)
+	assert.Equal(t, before, configFingerprint(t, h))
+}
+
+// layoutPaneIDs lists a layout's pane IDs in order, so a test can say which
+// panes survived rather than only how many.
+func layoutPaneIDs(layout config.LayoutNode) []string {
+	panes := panesInLayout(layout)
+	ids := make([]string, 0, len(panes))
+	for _, pane := range panes {
+		ids = append(ids, pane.ID)
+	}
+	return ids
 }
 
 // ── Creating sessions ────────────────────────────────────────────────────────
