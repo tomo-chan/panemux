@@ -98,16 +98,25 @@ func TestServeReportsAReadFailure(t *testing.T) {
 
 // `notifications/initialized` normally arrives with no id and is answered with
 // nothing at all. A client that sends it as a request anyway gets a response,
-// not a "method not found": the method exists, it just has no result.
-func TestInitializedSentAsARequestIsAnsweredWithANullResult(t *testing.T) {
+// not a "method not found": the method is known, it just has no result.
+//
+// The response carries neither key. `jsonrpcResponse.Result` is `omitempty`,
+// so a nil result is omitted rather than serialized as `"result": null` —
+// worth pinning by key presence rather than by value, since a lookup that
+// returns nil cannot tell an absent key from a null one. Noted rather than
+// changed: JSON-RPC 2.0 asks a response to carry exactly one of result/error,
+// and this shape carries neither, but that is an implementation question and
+// this branch changes no implementation.
+func TestInitializedSentAsARequestIsAnsweredWithoutAResultOrAnError(t *testing.T) {
 	responses := serveLines(t, &fakeBoardAPIClient{},
 		`{"jsonrpc":"2.0","id":7,"method":"notifications/initialized"}`,
 	)
 
 	require.Len(t, responses, 1)
 	assert.EqualValues(t, 7, responses[0]["id"])
-	assert.Nil(t, responses[0]["result"])
-	assert.Nil(t, responses[0]["error"], "the method is known, so this is not method-not-found")
+	assert.Equal(t, "2.0", responses[0]["jsonrpc"])
+	assert.NotContains(t, responses[0], "error", "the method is known, so this is not method-not-found")
+	assert.NotContains(t, responses[0], "result", "and it has no result to report")
 }
 
 // ── Malformed tool calls ─────────────────────────────────────────────────────
