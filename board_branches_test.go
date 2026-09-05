@@ -86,8 +86,15 @@ func TestSetupBoard_BoardEnabledPane_BuildsAClientForItsHost(t *testing.T) {
 	require.NotNil(t, cache)
 	require.NotNil(t, relay)
 	require.NotNil(t, bootstrap)
+	assert.True(t, relay.HasClients(),
+		"the enabled pane's host must reach the relay's client map, or it is silently off the board")
 	assert.True(t, bootstrap.HasWork(), "the enabled pane is the work the watcher has to do")
-	assert.Equal(t, "both", bootstrap.modeFor("pane-a"),
+
+	// Read through the live config rather than the value setupBoard saw: a
+	// mode changed in the pane settings dialog has to land on the next tick,
+	// and asserting the startup value would pass either way.
+	cfg.Workspaces.Items[0].Layout.Children[0].Pane.AgentBoard.Mode = "turn"
+	assert.Equal(t, "turn", bootstrap.modeFor("pane-a"),
 		"the watcher reads modes from the live config, not a startup snapshot")
 }
 
@@ -103,6 +110,7 @@ func TestSetupBoard_NoAgmsgInstall_SkipsTheHost(t *testing.T) {
 	_, relay, bootstrap := setupBoard(cfg, session.NewManager())
 
 	require.NotNil(t, relay, "the relay is still built; it just has no client to poll")
+	assert.False(t, relay.HasClients(), "and no client, so it never polls a host that cannot answer")
 	assert.True(t, bootstrap.HasWork(), "bootstrap eligibility is a separate decision from the relay client")
 }
 
@@ -148,16 +156,23 @@ func TestSetupBoard_UnparsableBootstrapStateFile_LogsAndContinues(t *testing.T) 
 	assert.Contains(t, buf.String(), "loading bootstrap state file")
 }
 
-// A well-formed cursor file is loaded rather than ignored — the counterpart
-// that makes the two failure tests above mean something.
-func TestSetupBoard_ValidCursorFile_IsLoaded(t *testing.T) {
+// Well-formed persisted state is installed, not merely read without
+// complaint. Asserting only that the error branch was skipped would pass
+// with the parsed values thrown away: the relay would re-poll from the
+// beginning, and every already-bootstrapped pane would be sent its
+// onboarding instruction again after a restart.
+func TestSetupBoard_ValidPersistedState_IsLoadedIntoTheRelayAndWatcher(t *testing.T) {
 	home := isolatedHome(t)
 	panemuxConfigDir(t, home)
+
 	cursorPath, err := board.DefaultCursorFilePath()
 	require.NoError(t, err)
-	require.NoError(t, board.SaveCursorFile(cursorPath, []board.CursorEntry{
-		{Host: boardHostIDLocal, Team: "panemux", Cursor: "42"},
-	}))
+	cursors := []board.CursorEntry{{Host: boardHostIDLocal, Team: "panemux", Cursor: "42"}}
+	require.NoError(t, board.SaveCursorFile(cursorPath, cursors))
+
+	statePath, err := board.DefaultBootstrapStateFilePath()
+	require.NoError(t, err)
+	require.NoError(t, board.SaveBootstrapState(statePath, []string{"pane-a"}))
 
 	buf := captureBoardLog(t)
 	cfg := boardEnabledConfig(
@@ -165,10 +180,14 @@ func TestSetupBoard_ValidCursorFile_IsLoaded(t *testing.T) {
 		paneConfig("pane-a", config.PaneAgentBoardConfig{Enabled: boolPtr(true), Mode: "monitor"}),
 	)
 
-	_, relay, _ := setupBoard(cfg, session.NewManager())
+	_, relay, bootstrap := setupBoard(cfg, session.NewManager())
 
 	require.NotNil(t, relay)
+	assert.Equal(t, cursors, relay.Cursors(), "the parsed cursors must reach the relay")
+	assert.Equal(t, []string{"pane-a"}, bootstrap.persistedPaneIDs,
+		"and the parsed pane IDs must reach the watcher")
 	assert.NotContains(t, buf.String(), "loading relay cursor file")
+	assert.NotContains(t, buf.String(), "loading bootstrap state file")
 }
 
 // ── agmsg version warning ────────────────────────────────────────────────────
