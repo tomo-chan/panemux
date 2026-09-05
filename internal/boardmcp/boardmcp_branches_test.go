@@ -49,16 +49,28 @@ func (f failingWriter) Write([]byte) (int, error) { return 0, f.err }
 
 // A broken stdout ends the loop with the reason, rather than spinning through
 // the remaining requests writing into a pipe nobody is reading.
+//
+// The second request line is what makes that observable. With a single line,
+// input exhaustion and an aborted loop are indistinguishable — both leave
+// Serve returning the same wrapped error — so the assertion the comment
+// describes would hold for a Serve that recorded the write error and kept
+// dispatching. `gotSince` is the recorder: it stays zero only if
+// board_messages was never dispatched.
 func TestServeReportsAWriteFailure(t *testing.T) {
-	in := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize"}` + "\n")
+	in := strings.NewReader(strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"initialize"}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"board_messages","arguments":{"since":42}}}`,
+	}, "\n") + "\n")
+	client := &fakeBoardAPIClient{}
 
-	err := NewServer(&fakeBoardAPIClient{}).Serve(
+	err := NewServer(client).Serve(
 		context.Background(), in, failingWriter{err: errors.New("broken pipe")},
 	)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "writing mcp response")
 	assert.Contains(t, err.Error(), "broken pipe")
+	assert.Zero(t, client.gotSince, "the loop must end at the write failure, not keep dispatching")
 }
 
 // failingReader fails after handing back whatever it was primed with, so the
