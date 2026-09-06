@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -102,10 +103,21 @@ func TestAppendHistoryReportsAFailedWrite(t *testing.T) {
 	assert.Contains(t, err.Error(), "no space left on device")
 }
 
+// The mode check is not redundant with the stat. Existence alone does not
+// make /dev/full the ENOSPC-on-write character device: bind-mount a regular
+// file over it and the write *succeeds*, so this test fails with "An error is
+// expected but got nil" rather than skipping — and running as uid 0 is what
+// keeps that silent, since root bypasses the mode bits that would otherwise
+// turn it into an open failure. A skip is a true statement about the
+// environment; a red require.Error is a false statement about AppendHistory.
 func requireDevFull(t *testing.T) {
 	t.Helper()
-	if _, err := os.Stat("/dev/full"); err != nil {
+	info, err := os.Stat("/dev/full")
+	if err != nil {
 		t.Skipf("/dev/full is not available on this platform: %v", err)
+	}
+	if info.Mode()&os.ModeCharDevice == 0 {
+		t.Skipf("/dev/full is not a character device (%v)", info.Mode())
 	}
 }
 
@@ -161,15 +173,59 @@ func TestLoadHistorySkipsBlankLines(t *testing.T) {
 // A read that fails partway is reported, unlike a line that fails to parse —
 // LoadHistory tolerates the latter deliberately (see its doc comment) and
 // must not extend that leniency to losing the rest of the file silently.
-func TestLoadHistoryReportsAReadFailure(t *testing.T) {
-	path := directoryAt(t, filepath.Join(t.TempDir(), "history-is-a-directory"))
+//
+// The fixture is a good entry followed by a line past the 16 MB max token
+// size LoadHistory sets on its scanner, which is what makes the nil check
+// below mean anything: the good entry is parsed and appended before the read
+// fails, so returning the accumulated entries alongside the error — handing
+// callers a silently truncated history — is distinguishable from returning
+// nil. An `os.Open`'d directory reaches the same arm far more cheaply, but
+// its Scan fails on the first call, leaving the slice nil no matter what
+// LoadHistory does with it. That was the earlier fixture here, and the nil
+// check read as pinning a property it could not observe.
+//
+// The cost is ~150ms and a 16 MB file under t.TempDir(). It buys a real
+// assertion, and the failure itself is not hypothetical: a history line is a
+// raw stream-json line from `claude`, which is why that buffer limit is set
+// at all.
+func TestLoadHistoryReportsAReadFailureWithoutReturningPartialEntries(t *testing.T) {
+	path := filepath.Join(t.TempDir(), historyFileName)
+	writeHistoryWithAnOverlongLine(t, path)
 
 	entries, err := LoadHistory(path)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "reading command center history file")
-	assert.Nil(t, entries)
+	assert.Nil(t, entries, "a failed read must not hand back the entries it managed to parse first")
 }
+
+// writeHistoryWithAnOverlongLine writes one well-formed entry followed by a
+// line longer than LoadHistory's scanner will accept, so the read fails after
+// the first entry has already been parsed.
+func writeHistoryWithAnOverlongLine(t *testing.T, path string) {
+	t.Helper()
+	f, err := os.Create(path)
+	require.NoError(t, err)
+	defer f.Close() //nolint:errcheck
+
+	_, err = f.WriteString(`{"at":"1970-01-01T00:00:00Z","raw":{"n":1}}` + "\n")
+	require.NoError(t, err)
+
+	const oneMiB = 1 << 20
+	chunk := strings.Repeat("x", oneMiB)
+	for written := 0; written <= maxHistoryLineBytes; written += oneMiB {
+		_, err = f.WriteString(chunk)
+		require.NoError(t, err)
+	}
+	_, err = f.WriteString("\n")
+	require.NoError(t, err)
+}
+
+// maxHistoryLineBytes mirrors the max token size LoadHistory passes to
+// scanner.Buffer. It is duplicated rather than exported: the test needs to
+// exceed that limit, and a shared constant would make the production value
+// changeable without this fixture noticing that it no longer does.
+const maxHistoryLineBytes = 16 * 1024 * 1024
 
 // ── LoadSessionFile ──────────────────────────────────────────────────────────
 
