@@ -97,7 +97,7 @@ func TestEnsureAuthTokenMintsPersistsAndReuses(t *testing.T) {
 // hand, and each is checked together with a value that must pass, so a rule
 // that rejects everything is as visible as one that rejects nothing.
 
-// Both bounds, and both of their neighbours. Only the lower one had anything
+// Both bounds, and both of their neighbors. Only the lower one had anything
 // protecting it: with `width > maxWorkspaceVerticalBarWidth` deleted the whole
 // repository suite stayed green, so an arbitrarily wide sidebar was one
 // condition away from being accepted. Verified before writing this, which is
