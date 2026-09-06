@@ -97,13 +97,38 @@ func TestEnsureAuthTokenMintsPersistsAndReuses(t *testing.T) {
 // hand, and each is checked together with a value that must pass, so a rule
 // that rejects everything is as visible as one that rejects nothing.
 
+// Both bounds, and both of their neighbours. Only the lower one had anything
+// protecting it: with `width > maxWorkspaceVerticalBarWidth` deleted the whole
+// repository suite stayed green, so an arbitrarily wide sidebar was one
+// condition away from being accepted. Verified before writing this, which is
+// why the table is a table rather than the one rejecting value it started as.
 func TestValidateRejectsAnOutOfRangeVerticalBarWidth(t *testing.T) {
-	cfg := validatableConfig()
-	cfg.Workspaces.VerticalBarWidth = 1
-	require.Error(t, cfg.Validate())
+	for _, tc := range []struct {
+		name    string
+		width   int
+		wantErr bool
+	}{
+		{name: "far below the minimum", width: 1, wantErr: true},
+		{name: "just below the minimum", width: minWorkspaceVerticalBarWidth - 1, wantErr: true},
+		{name: "at the minimum", width: minWorkspaceVerticalBarWidth},
+		{name: "at the maximum", width: maxWorkspaceVerticalBarWidth},
+		{name: "just above the maximum", width: maxWorkspaceVerticalBarWidth + 1, wantErr: true},
+		{name: "far above the maximum", width: 10000, wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := validatableConfig()
+			cfg.Workspaces.VerticalBarWidth = tc.width
 
-	cfg.Workspaces.VerticalBarWidth = 280
-	assert.NoError(t, cfg.Validate(), "a width in range must still pass")
+			err := cfg.Validate()
+
+			if tc.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "invalid vertical_bar_width")
+				return
+			}
+			assert.NoError(t, err)
+		})
+	}
 }
 
 func TestValidateRejectsAnInvalidChildDirection(t *testing.T) {
