@@ -129,16 +129,40 @@ func TestQueryReportsAFailureToCreateTheWorkDirAndStillCleansUpTheMCPConfig(t *t
 		return "/tmp/sample-mcp-config.json", func() { cleaned = true }, nil
 	}
 	f.config.NewWorkDir = func() (string, func(), error) {
-		return "", nil, errors.New("creating command center work directory: no space left on device")
+		return "", nil, errors.New("no space left on device")
 	}
 
 	events := f.query(t)
 
 	require.Len(t, errorEvents(events), 1)
-	assert.Contains(t, errorEvents(events)[0], "creating command center work directory")
+	// A bare error, deliberately: run() emits this arm as errorEvent("%v", err)
+	// and adds no prefix of its own, so asserting the "creating command center
+	// work directory" context here would only round-trip this fixture's own
+	// literal. That context comes from NewWorkDir's own wrap, and is asserted
+	// where it lives — TestNewWorkDirFailureNamesTheStepThatFailed.
+	assert.Contains(t, errorEvents(events)[0], "no space left on device")
 	assert.False(t, hasDone(events))
 	assert.False(t, *f.started)
 	assert.True(t, cleaned, "the mcp config's cleanup must run even when a later step fails")
+}
+
+// The mirror of the case above: nothing pinned that run() ever invokes the
+// cleanup NewWorkDir hands back. Without it every command-center query leaks
+// a panemux-command-center-* directory into /tmp for the life of the host —
+// one per palette query, never reclaimed.
+func TestQueryCleansUpTheWorkDirWhenTheTurnFails(t *testing.T) {
+	f := newRunnerFixture(t, "")
+	cleaned := false
+	f.config.NewWorkDir = func() (string, func(), error) {
+		return t.TempDir(), func() { cleaned = true }, nil
+	}
+	f.config.NewCommand = func(_ context.Context, _, _ string, _ ...string) cmdRunner {
+		return &noStdoutCmd{err: errors.New("too many open files")}
+	}
+
+	f.query(t)
+
+	assert.True(t, cleaned, "the work directory must be removed however the turn ends")
 }
 
 // The pipe is opened after the command is constructed but before it is
@@ -148,9 +172,8 @@ func TestQueryReportsAFailureToCreateTheWorkDirAndStillCleansUpTheMCPConfig(t *t
 // limit on this host, a start failure is usually a missing binary.
 func TestQueryReportsAFailureToOpenTheSubprocessStdoutPipe(t *testing.T) {
 	f := newRunnerFixture(t, "")
-	f.config.NewCommand = func(_ context.Context, _, _ string, _ ...string) cmdRunner {
-		return &noStdoutCmd{err: errors.New("too many open files")}
-	}
+	cmd := &noStdoutCmd{err: errors.New("too many open files")}
+	f.config.NewCommand = func(_ context.Context, _, _ string, _ ...string) cmdRunner { return cmd }
 
 	events := f.query(t)
 
@@ -158,21 +181,39 @@ func TestQueryReportsAFailureToOpenTheSubprocessStdoutPipe(t *testing.T) {
 	assert.Contains(t, errorEvents(events)[0], "creating stdout pipe")
 	assert.Contains(t, errorEvents(events)[0], "too many open files")
 	assert.False(t, hasDone(events))
+	assert.False(t, cmd.started,
+		"the pipe is opened before Start, and it must stay that way: a subprocess started and then "+
+			"abandoned on the pipe error is never Wait()ed, leaving a zombie claude per failed query, "+
+			"while the deferred work-dir cleanup deletes the directory out from under it")
 }
 
-// noStdoutCmd fails at StdoutPipe. fakeCmd cannot: its StdoutPipe never
-// returns an error, so the arm above is unreachable through it.
-type noStdoutCmd struct{ err error }
+// noStdoutCmd fails at StdoutPipe and records whether Start was reached.
+// fakeCmd can do neither: its StdoutPipe never returns an error, and nothing
+// it records survives the factory this test replaces.
+type noStdoutCmd struct {
+	err     error
+	started bool
+}
 
 func (c *noStdoutCmd) StdoutPipe() (io.ReadCloser, error) { return nil, c.err }
-func (c *noStdoutCmd) Start() error                       { return nil }
+func (c *noStdoutCmd) Start() error                       { c.started = true; return nil }
 func (c *noStdoutCmd) Wait() error                        { return nil }
 
 // ── Persistence failures after the turn itself succeeded ─────────────────────
 
-// A history write is a record of what already happened, so losing it is
-// worth reporting but must not turn a completed turn into a failed one — the
-// operator has the answer on screen either way.
+// A history write is a record of what already happened, so losing it must not
+// turn a completed turn into a failed one — the operator has the answer on
+// screen either way. Continuing rather than returning is right.
+//
+// How it is *reported* is not, and this test pins the present shape rather
+// than endorsing it: an EventError followed by an EventDone. Both are
+// terminal — docs/behavior.md says each is "always the last frame for that
+// query", and EventDone's own doc comment in runner.go says it "is never sent
+// after an EventError on the same channel" — so this path violates both, and
+// the dashboard renders the turn as complete *and* errored because
+// applyFrame's error arm sets done and the later done frame does not clear
+// the message. Filed as #214; the fix is a frame-contract decision, and this
+// branch changes no implementation.
 func TestQueryReportsAFailedHistoryWriteWithoutFailingTheTurn(t *testing.T) {
 	f := newRunnerFixture(t, `{"type":"result","session_id":"s","result":"done"}`+"\n")
 	f.config.HistoryPath = brokenParentPath(t, "history.jsonl")
@@ -181,7 +222,9 @@ func TestQueryReportsAFailedHistoryWriteWithoutFailingTheTurn(t *testing.T) {
 
 	require.Len(t, errorEvents(events), 1)
 	assert.Contains(t, errorEvents(events)[0], "persisting command center history")
-	assert.True(t, hasDone(events), "the turn itself succeeded, so it must still report done")
+	assert.True(t, hasDone(events),
+		"the turn itself succeeded, so it still reports done today — see #214 for why that, "+
+			"alongside the error frame above, is the shape rather than the intent")
 }
 
 // The session id is the opposite case: it is what the *next* turn resumes
@@ -216,7 +259,14 @@ func TestQueryReportsAFailureToPersistTheSessionID(t *testing.T) {
 // without it the blank line reaches json.Unmarshal, which fails, and
 // streamOutput treats a parse failure as a malformed stream — aborting the
 // turn and reporting an error for output that was merely padded.
-func TestStreamOutputSkipsBlankLinesRatherThanFailingTheTurn(t *testing.T) {
+//
+// Asserting the absence of an error and the presence of done is not enough on
+// its own, and this test used to stop there. Turning the `continue` into a
+// `break` also produces no error and still reaches done, while silently
+// dropping every frame after the first blank line — including the result the
+// operator is waiting for. So the line *after* the blank ones is what has to
+// be asserted: skipping and stopping are only distinguishable there.
+func TestStreamOutputSkipsBlankLinesAndKeepsForwardingWhatFollows(t *testing.T) {
 	f := newRunnerFixture(t,
 		`{"type":"system","subtype":"init","session_id":"s"}`+"\n"+
 			"\n"+
@@ -227,4 +277,14 @@ func TestStreamOutputSkipsBlankLinesRatherThanFailingTheTurn(t *testing.T) {
 
 	assert.Empty(t, errorEvents(events), "a blank line is padding, not malformed output")
 	assert.True(t, hasDone(events))
+
+	var lines []string
+	for _, ev := range events {
+		if ev.Type == EventLine {
+			lines = append(lines, string(ev.Raw))
+		}
+	}
+	require.Len(t, lines, 2, "the blank lines produce no frame of their own, and neither one ends the stream")
+	assert.Contains(t, lines[1], `"type":"result"`,
+		"the frame after the blank lines is the answer, and it must still reach the operator")
 }

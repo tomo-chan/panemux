@@ -100,6 +100,27 @@ func TestDefaultContextDirIsUnderPanemuxConfig(t *testing.T) {
 	assert.Equal(t, filepath.Join("/workspace/user/home", ".config", "panemux", "command-center"), dir)
 }
 
+// The wrap is what tells an operator which step failed: run() emits this
+// error with errorEvent("%v", err) and adds no context of its own, so if the
+// wrap is dropped here a full disk surfaces as a bare "no space left on
+// device" with nothing naming the work directory.
+func TestNewWorkDirFailureNamesTheStepThatFailed(t *testing.T) {
+	// MkdirTemp with an empty dir argument resolves through TMPDIR, so
+	// pointing it at a path under a regular file makes it fail with ENOTDIR.
+	notADir := filepath.Join(t.TempDir(), "notadir")
+	require.NoError(t, os.WriteFile(notADir, []byte("not a directory\n"), 0600))
+	t.Setenv("TMPDIR", filepath.Join(notADir, "tmp"))
+
+	dir, cleanup, err := NewWorkDir()
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "creating command center work directory")
+	assert.Contains(t, err.Error(), "not a directory")
+	assert.Empty(t, dir)
+	require.NotNil(t, cleanup, "the caller defers this unconditionally, so it must never be nil")
+	cleanup()
+}
+
 func TestNewWorkDirIsEmptyAndRemovable(t *testing.T) {
 	dir, cleanup, err := NewWorkDir()
 	require.NoError(t, err)
