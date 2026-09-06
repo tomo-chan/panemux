@@ -47,13 +47,21 @@ func captureWSLog(t *testing.T) *bytes.Buffer {
 }
 
 // registerWSSession puts a mock session in a manager and serves it.
+//
+// Closing the session is not optional bookkeeping: Manager.Add starts a pump
+// goroutine that blocks in the mock's Read until its out channel closes, so
+// without this the goroutine outlives the test and accumulates across -count
+// runs.
 func registerWSSession(t *testing.T, id string) (*httptest.Server, *wsMockSession) {
 	t.Helper()
 	mgr := session.NewManager()
 	sess := newWsMock(id)
 	mgr.Add(sess)
 	srv := setupWSServer(mgr)
-	t.Cleanup(srv.Close)
+	t.Cleanup(func() {
+		srv.Close()
+		mgr.CloseAll()
+	})
 	return srv, sess
 }
 
