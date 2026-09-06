@@ -617,6 +617,8 @@ func TestRunnerBuildMCPConfigFailureEmitsErrorAndNeverStartsProcess(t *testing.T
 
 	require.Len(t, got, 1)
 	assert.Equal(t, EventError, got[0].Type)
+	assert.Contains(t, got[0].Err, "building mcp config",
+		"the operator has to be able to tell this apart from a failure to start claude")
 	assert.Contains(t, got[0].Err, "disk full")
 	assert.False(t, started, "must never spawn claude when mcp config setup fails")
 }
