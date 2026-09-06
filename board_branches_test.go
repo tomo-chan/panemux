@@ -2,9 +2,11 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -309,18 +311,38 @@ func TestDistinctBoardHosts_DeduplicatesAndKeepsEachHostOnce(t *testing.T) {
 	assert.ElementsMatch(t, []string{"ssh:build-host", boardHostIDLocal}, hosts)
 }
 
-// A remote host that answers the presence probe gets a remote client, which
-// is the arm the local-host tests never reach.
+// A remote host that answers the presence probe gets a *remote* client,
+// which is the arm the local-host tests never reach.
+//
+// Asserting only that some non-nil client came back is not enough, and that
+// is the whole point of this test (issue #209): handing a remote host a
+// LocalAgmsgClient is a silent failure. The path was resolved for the other
+// machine, agmsgPresentOnHost has already passed, so nothing errors at
+// startup and the pane still reads "board enabled" on the dashboard — while
+// every read and write goes to panemux's own filesystem and no board traffic
+// ever reaches the host.
 func TestNewAgmsgClientForHost_RemoteWithAgmsgPresent_BuildsARemoteClient(t *testing.T) {
 	cfg := &config.Config{AgentBoard: config.AgentBoardConfig{AgmsgPath: "/opt/agmsg"}}
 	manager := session.NewManager()
-	manager.Add(&fakeBoardSession{id: "pane-a", tag: "yes"})
+	sess := &fakeBoardSession{id: "pane-a", tag: "yes"}
+	manager.Add(sess)
 	paneHosts := map[string]string{"pane-a": "ssh:build-host"}
 
 	client, ok := newAgmsgClientForHost(cfg, manager, paneHosts, "ssh:build-host")
 
 	require.True(t, ok)
-	assert.NotNil(t, client)
+	require.NotNil(t, client)
+	assert.IsType(t, &board.RemoteAgmsgClient{}, client)
+	// HostID is the same distinction stated through the AgmsgClient
+	// interface itself: a LocalAgmsgClient reports "local" whichever host it
+	// was built for, so it can never answer with this host's ID.
+	assert.Equal(t, "ssh:build-host", client.HostID())
+
+	// And the client is wired to that host's live session rather than to a
+	// local exec: a write travels over the pane's own exec channel, naming
+	// the remote install's send.sh at the path resolved for that host.
+	require.NoError(t, client.Send(context.Background(), "team", "pane-a", "pane-b", "hi"))
+	assert.Contains(t, strings.Join(sess.lastBoardCommand(), " "), "/opt/agmsg/scripts/send.sh")
 }
 
 // The same host answering "no" is skipped, with the one log line that names
@@ -338,18 +360,6 @@ func TestNewAgmsgClientForHost_RemoteWithoutAgmsg_SkipsTheHost(t *testing.T) {
 	assert.Nil(t, client)
 	assert.Contains(t, buf.String(), "no agmsg installation at")
 	assert.Contains(t, buf.String(), "/opt/agmsg")
-}
-
-// A host whose path cannot be resolved never reaches the presence probe.
-func TestNewAgmsgClientForHost_UnresolvablePath_SkipsTheHost(t *testing.T) {
-	cfg := &config.Config{AgentBoard: config.AgentBoardConfig{AgmsgPath: "/opt/agmsg"}}
-
-	client, ok := newAgmsgClientForHost(
-		cfg, session.NewManager(), map[string]string{"pane-a": "ssh:build-host"}, "ssh:build-host",
-	)
-
-	assert.False(t, ok)
-	assert.Nil(t, client)
 }
 
 // A reachable executor whose probe fails is reported present anyway. Refusing
