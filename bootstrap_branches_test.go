@@ -78,16 +78,23 @@ func TestCheckPaneForgetsAPaneThatDisappeared(t *testing.T) {
 
 // Detection runs a command inside the pane, so it can fail for reasons that
 // have nothing to do with what is running there — the tmux server went away,
-// the SSH connection dropped. It is warned about once and the pane is
-// dropped rather than retried: a pane whose detection is broken would
-// otherwise produce a warning on every tick, forever.
+// the SSH connection dropped. It is logged, the pane is dropped from pending,
+// and nothing is ever written to it.
+//
+// It is logged *again on every tick*, and this pins that rather than the
+// once-per-pane behavior an earlier revision of this comment claimed.
+// Deleting from pending does not suppress anything: the next pollOnce finds
+// the same live session and calls checkPane again. Measured, not assumed —
+// three ticks produce three lines. warnOnce exists in this file and is used
+// for the presence warning, so applying it here is a real option; that is a
+// behavior change and is tracked in #218.
 func TestCheckPaneLogsADetectionFailureAndDropsThePane(t *testing.T) {
 	logs := captureBootstrapLog(t)
 	manager := session.NewManager()
 	sess := &fakeAgentSession{
 		id:          "pane-a",
 		sessionType: session.TypeTmux,
-		detectErr:   errors.New("no server running on /tmp/tmux-0/default"),
+		detectErr:   errors.New("no server running on /tmp/sample-tmux/default"),
 	}
 	manager.Add(sess)
 	t.Cleanup(manager.CloseAll)
@@ -102,6 +109,12 @@ func TestCheckPaneLogsADetectionFailureAndDropsThePane(t *testing.T) {
 	assert.Contains(t, logs.String(), "no server running")
 	assert.NotContains(t, w.pending, "pane-a")
 	assert.Empty(t, sess.writes, "a pane whose agent could not be detected must never be written to")
+
+	afterOne := logs.Len()
+	w.pollOnce(context.Background())
+	assert.Greater(t, logs.Len(), afterOne,
+		"the warning repeats per tick today — if this ever stops, the comment above needs rewriting, "+
+			"not this assertion deleting")
 }
 
 // A pane whose host has no resolved agmsg path is not "agmsg is absent" — it
