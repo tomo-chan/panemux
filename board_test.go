@@ -21,6 +21,7 @@ import (
 type fakeBoardSession struct {
 	id     string
 	tag    string // distinguishes which fakeBoardSession instance answered a call
+	calls  [][]string
 	closed bool
 }
 
@@ -33,11 +34,22 @@ func (f *fakeBoardSession) Write(p []byte) (int, error)    { return len(p), nil 
 func (f *fakeBoardSession) Resize(cols, rows uint16) error { return nil }
 func (f *fakeBoardSession) Close() error                   { f.closed = true; return nil }
 
-func (f *fakeBoardSession) RunBoardCommand(_ context.Context, _ []string) ([]byte, error) {
+func (f *fakeBoardSession) RunBoardCommand(_ context.Context, args []string) ([]byte, error) {
 	if f.closed {
 		return nil, errors.New("fakeBoardSession: use of closed session")
 	}
+	f.calls = append(f.calls, args)
 	return []byte(f.tag), nil
+}
+
+// lastBoardCommand returns the argument list of the most recent
+// RunBoardCommand call, so a test can tell a command that actually traveled
+// over this session's exec channel from one that never left panemux.
+func (f *fakeBoardSession) lastBoardCommand() []string {
+	if len(f.calls) == 0 {
+		return nil
+	}
+	return f.calls[len(f.calls)-1]
 }
 
 func TestDynamicBoardExecutor_ReResolvesAfterPaneRestart(t *testing.T) {
@@ -506,7 +518,13 @@ func TestNewAgmsgClientForHost_LocalWithAgmsgInstalled_ReturnsClient(t *testing.
 	client, ok := newAgmsgClientForHost(cfg, session.NewManager(), map[string]string{}, boardHostIDLocal)
 
 	require.True(t, ok)
-	assert.NotNil(t, client)
+	require.NotNil(t, client)
+	// The mirror of the remote arm's own assertion (issue #209): which
+	// implementation came back is the whole answer this function gives, so
+	// asserting only non-nil would let either arm return the other's client
+	// unnoticed.
+	assert.IsType(t, &board.LocalAgmsgClient{}, client)
+	assert.Equal(t, boardHostIDLocal, client.HostID())
 }
 
 // An absent agmsg is the README's most likely first failure, and the host is
@@ -523,13 +541,20 @@ func TestNewAgmsgClientForHost_LocalWithoutAgmsg_SkipsTheHost(t *testing.T) {
 
 // A remote host with no reachable pane cannot have its agmsg_path resolved at
 // all, so it is skipped before the presence probe is even reached.
+//
+// The log line is asserted because newAgmsgClientForHost has three ways to
+// return (nil, false) and they are indistinguishable from the return value
+// alone: no reachable session, a failed $HOME probe, and an absent agmsg
+// install. Only the line names which one this test actually reached.
 func TestNewAgmsgClientForHost_RemoteWithNoReachablePane_SkipsTheHost(t *testing.T) {
 	cfg := &config.Config{AgentBoard: config.AgentBoardConfig{AgmsgPath: "/remote/home/demo/agmsg"}}
+	buf := captureBoardLog(t)
 
 	client, ok := newAgmsgClientForHost(cfg, session.NewManager(), map[string]string{"pane-a": "ssh:demo"}, "ssh:demo")
 
 	assert.False(t, ok)
 	assert.Nil(t, client)
+	assert.Contains(t, buf.String(), `no reachable session for host "ssh:demo"`)
 }
 
 func TestWarnOnAgmsgVersionMismatch_DoesNotPanicAcrossHostShapes(t *testing.T) {
