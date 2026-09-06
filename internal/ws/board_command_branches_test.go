@@ -3,6 +3,7 @@ package ws
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"testing"
 
@@ -97,4 +98,25 @@ func TestWriteBoardCommandFrameFailsOnAnUnencodableFrame(t *testing.T) {
 	assert.Empty(t, conn.writtenFrames, "nothing may be written for a frame that failed to encode")
 	assert.Empty(t, conn.deadlines,
 		"and the deadline must not be set either — the failure is before the write is attempted")
+}
+
+// Once a write fails the stream stops writing but keeps ranging over the
+// channel. That is not tidiness: the Runner's own goroutine sends into this
+// channel and holds the command center's busy flag until it drains, so
+// abandoning it would leave the palette permanently busy for every later
+// prompt — a disconnected client taking the feature down for the next one.
+func TestStreamBoardCommandEventsDrainsTheChannelAfterAFailedWrite(t *testing.T) {
+	conn := &fakeBoardCommandConn{writeErr: io.ErrClosedPipe}
+	events := make(chan commandcenter.Event, 3)
+	events <- commandcenter.Event{Type: commandcenter.EventLine, Raw: json.RawMessage(`{"n":1}`)}
+	events <- commandcenter.Event{Type: commandcenter.EventLine, Raw: json.RawMessage(`{"n":2}`)}
+	events <- commandcenter.Event{Type: commandcenter.EventDone}
+	close(events)
+
+	ok := streamBoardCommandEvents(conn, events)
+
+	assert.False(t, ok, "the caller has to learn the connection is gone")
+	assert.Empty(t, events, "every event must be consumed, or the Runner stays blocked and busy")
+	assert.Len(t, conn.deadlines, 1,
+		"and only the first write may be attempted — the rest are skipped, not retried")
 }
