@@ -28,7 +28,7 @@ import (
 // leaves a window in which something else could take it. That window is why
 // the callers below retry rather than assume: this repository has already had
 // one flaky test from treating a released ephemeral port as reserved.
-func serverOnAFreePort(t *testing.T) (*Server, int) {
+func serverOnAFreePort(t *testing.T) (*Server, int, chan http.ConnState) {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
@@ -37,21 +37,34 @@ func serverOnAFreePort(t *testing.T) (*Server, int) {
 
 	cfg := testConfig()
 	cfg.Server.Port = port
-	return New(cfg, session.NewManager(), nil, nil, nil, emptyFS), port
+	srv := New(cfg, session.NewManager(), nil, nil, nil, emptyFS)
+
+	// net/http calls this hook from setState, after the connection is already
+	// in the server's active set, so a StateNew here means Shutdown will see
+	// it. Set before Start, never after: the server reads the field per
+	// connection, so assigning it to a running server is a data race.
+	states := make(chan http.ConnState, 64)
+	srv.httpSrv.ConnState = func(_ net.Conn, st http.ConnState) {
+		select {
+		case states <- st:
+		default:
+		}
+	}
+	return srv, port, states
 }
 
 // startListening starts srv and waits until it answers, retrying with a fresh
 // port if the one it was given was taken in the meantime. It returns the
 // running server, its port, and the channel Start's return value arrives on.
-func startListening(t *testing.T) (*Server, int, <-chan error) {
+func startListening(t *testing.T) (*Server, int, <-chan error, chan http.ConnState) {
 	t.Helper()
 	for attempt := range 5 {
-		srv, port := serverOnAFreePort(t)
+		srv, port, states := serverOnAFreePort(t)
 		errCh := make(chan error, 1)
 		go func() { errCh <- srv.Start() }()
 
 		if waitForListener(port) {
-			return srv, port, errCh
+			return srv, port, errCh, states
 		}
 		// Start already returned, so the bind failed; take its error and try
 		// another port rather than leaving a goroutine behind.
@@ -63,7 +76,7 @@ func startListening(t *testing.T) (*Server, int, <-chan error) {
 		}
 	}
 	t.Fatal("could not get a free port in five attempts")
-	return nil, 0, nil
+	return nil, 0, nil, nil
 }
 
 func waitForListener(port int) bool {
@@ -78,11 +91,17 @@ func waitForListener(port int) bool {
 	return false
 }
 
-// A shutdown is not a failure. Start returns http.ErrServerClosed unwrapped
-// so main() can tell "the operator stopped us" from "we could not listen",
-// which is the difference between exiting 0 and exiting with a message.
+// A shutdown is not a failure, and Start says so by returning
+// http.ErrServerClosed rather than a wrapped startup error — the complement
+// of the bind failure below, which must not be mistakable for it.
+//
+// errors.Is, not identity. An earlier revision asserted the sentinel itself
+// on the grounds that main() compares it directly; it does not — runServer
+// treats every non-nil Start result as fatal and never inspects it. Pinning
+// the identity would have rejected a behavior-preserving wrap for a reason
+// that was simply untrue.
 func TestStartReturnsErrServerClosedAfterAShutdown(t *testing.T) {
-	srv, _, errCh := startListening(t)
+	srv, _, errCh, _ := startListening(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -91,8 +110,8 @@ func TestStartReturnsErrServerClosedAfterAShutdown(t *testing.T) {
 	select {
 	case err := <-errCh:
 		assert.ErrorIs(t, err, http.ErrServerClosed)
-		assert.Equal(t, http.ErrServerClosed, err, //nolint:errorlint // the identity is the point
-			"it must be the sentinel itself, not a wrap: main() compares it directly")
+		assert.NotContains(t, err.Error(), "starting HTTP server",
+			"a shutdown must not be dressed up as a failure to start")
 	case <-time.After(5 * time.Second):
 		t.Fatal("Start did not return after Shutdown")
 	}
@@ -130,11 +149,13 @@ func TestStartWrapsAFailureToListen(t *testing.T) {
 // context already canceled, Shutdown returns immediately with its error
 // rather than waiting on a deadline.
 func TestShutdownWrapsAFailureToDrain(t *testing.T) {
-	srv, port, errCh := startListening(t)
+	srv, port, errCh, states := startListening(t)
+	drain(states) // the probe dial from startListening
 
 	held, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", port))
 	require.NoError(t, err)
 	defer held.Close() //nolint:errcheck
+	requireConnRegistered(t, states)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -152,5 +173,35 @@ func TestShutdownWrapsAFailureToDrain(t *testing.T) {
 			"the listener is closed either way, so Start still ends as a shutdown")
 	case <-time.After(5 * time.Second):
 		t.Fatal("Start did not return after Shutdown")
+	}
+}
+
+func drain(states chan http.ConnState) {
+	for {
+		select {
+		case <-states:
+		default:
+			return
+		}
+	}
+}
+
+// requireConnRegistered waits for net/http to report a new connection. A
+// completed TCP handshake is not enough on its own: Shutdown only observes a
+// connection the server has already accepted and tracked, so without this the
+// listener could close first, leave activeConn empty, and let Shutdown return
+// nil — a failure that would show up only occasionally.
+func requireConnRegistered(t *testing.T, states chan http.ConnState) {
+	t.Helper()
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case st := <-states:
+			if st == http.StateNew || st == http.StateActive {
+				return
+			}
+		case <-deadline:
+			t.Fatal("the held connection was never registered by the server")
+		}
 	}
 }
