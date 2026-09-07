@@ -6,7 +6,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -340,9 +339,40 @@ func TestNewAgmsgClientForHost_RemoteWithAgmsgPresent_BuildsARemoteClient(t *tes
 
 	// And the client is wired to that host's live session rather than to a
 	// local exec: a write travels over the pane's own exec channel, naming
-	// the remote install's send.sh at the path resolved for that host.
+	// the remote install's send.sh. Asserted against the argv elements
+	// themselves rather than a flattened string, so the script path has to be
+	// its own argument and not, say, part of the message body.
 	require.NoError(t, client.Send(context.Background(), "team", "pane-a", "pane-b", "hi"))
-	assert.Contains(t, strings.Join(sess.lastBoardCommand(), " "), "/opt/agmsg/scripts/send.sh")
+	assert.Contains(t, sess.lastBoardCommand(), "/opt/agmsg/scripts/send.sh")
+}
+
+// A ~/-prefixed agmsg_path is expanded against the remote host's own $HOME
+// before the client is built. The absolute path every other test here uses
+// short-circuits board.ResolveRemoteAgmsgPath, so this arm is otherwise never
+// entered (DEVELOPMENT.md's "paths with ~/ when paths are involved").
+//
+// Left unexpanded the failure is silent in the same way a wrong client type
+// is: RunBoardCommand single-quotes every argument, so a literal ~ does not
+// expand on the remote shell either, and send.sh is looked for at a path that
+// cannot exist.
+func TestNewAgmsgClientForHost_RemoteWithTildePath_ExpandsAgainstTheRemoteHome(t *testing.T) {
+	cfg := &config.Config{AgentBoard: config.AgentBoardConfig{AgmsgPath: "~/.agents/skills/agmsg"}}
+	manager := session.NewManager()
+	sess := &homeProbingBoardSession{
+		home:             "/remote/home/demo",
+		fakeBoardSession: fakeBoardSession{id: "pane-a", tag: "yes"},
+	}
+	manager.Add(sess)
+	paneHosts := map[string]string{"pane-a": "ssh:build-host"}
+
+	client, ok := newAgmsgClientForHost(cfg, manager, paneHosts, "ssh:build-host")
+
+	require.True(t, ok)
+	require.NotNil(t, client)
+	require.NoError(t, client.Send(context.Background(), "team", "pane-a", "pane-b", "hi"))
+	assert.Contains(
+		t, sess.lastBoardCommand(), "/remote/home/demo/.agents/skills/agmsg/scripts/send.sh",
+	)
 }
 
 // The same host answering "no" is skipped, with the one log line that names
