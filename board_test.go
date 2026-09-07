@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -21,6 +23,7 @@ import (
 type fakeBoardSession struct {
 	id     string
 	tag    string // distinguishes which fakeBoardSession instance answered a call
+	calls  [][]string
 	closed bool
 }
 
@@ -33,11 +36,49 @@ func (f *fakeBoardSession) Write(p []byte) (int, error)    { return len(p), nil 
 func (f *fakeBoardSession) Resize(cols, rows uint16) error { return nil }
 func (f *fakeBoardSession) Close() error                   { f.closed = true; return nil }
 
-func (f *fakeBoardSession) RunBoardCommand(_ context.Context, _ []string) ([]byte, error) {
+// RunBoardCommand records args before the closed guard, not after: a test
+// asserting that no board traffic reached a stale pane needs a call on a
+// closed session to be visible. Recording after the early return would make
+// "never called" and "called on a dead session" look identical.
+func (f *fakeBoardSession) RunBoardCommand(_ context.Context, args []string) ([]byte, error) {
+	f.calls = append(f.calls, args)
 	if f.closed {
 		return nil, errors.New("fakeBoardSession: use of closed session")
 	}
 	return []byte(f.tag), nil
+}
+
+// lastBoardCommand returns the argument list of the most recent
+// RunBoardCommand call, so a test can tell a command that actually traveled
+// over this session's exec channel from one that never left panemux.
+func (f *fakeBoardSession) lastBoardCommand() []string {
+	if len(f.calls) == 0 {
+		return nil
+	}
+	return f.calls[len(f.calls)-1]
+}
+
+// homeProbingBoardSession answers board.ResolveRemoteAgmsgPath's $HOME probe
+// with a fixed remote home directory, and every other board command the way
+// fakeBoardSession would. It exists so a test can drive the ~/-expansion arm,
+// which an absolute agmsg_path short-circuits before RunBoardCommand is
+// reached at all.
+type homeProbingBoardSession struct {
+	home string
+	fakeBoardSession
+}
+
+func (h *homeProbingBoardSession) RunBoardCommand(ctx context.Context, args []string) ([]byte, error) {
+	out, err := h.fakeBoardSession.RunBoardCommand(ctx, args)
+	if err != nil {
+		return nil, err
+	}
+	for _, arg := range args {
+		if strings.Contains(arg, "$HOME") {
+			return []byte(h.home), nil
+		}
+	}
+	return out, nil
 }
 
 func TestDynamicBoardExecutor_ReResolvesAfterPaneRestart(t *testing.T) {
@@ -76,6 +117,10 @@ func TestDynamicBoardExecutor_ReResolvesAfterPaneRestart(t *testing.T) {
 	if !original.closed {
 		t.Fatalf("expected original session to have been closed by Remove")
 	}
+	// The stale session was called once, before the restart, and never again.
+	// fakeBoardSession records a call even when it is closed, so this can
+	// tell "never called again" from "called again and refused".
+	assert.Len(t, original.calls, 1)
 }
 
 func TestDynamicBoardExecutor_NoLiveSessionOnHost_ReturnsError(t *testing.T) {
@@ -499,14 +544,54 @@ func installAgmsg(t *testing.T, root, version string) string {
 	return root
 }
 
+// installExecutableSendScript replaces an installAgmsg tree's send.sh with a
+// stand-in that dumps its own path and argv, NUL-separated, to capturePath.
+// LocalAgmsgClient.Send really execs that file, so this is how a test
+// observes which install a locally-built client is actually rooted at —
+// asserting on HostID() would not: LocalAgmsgClient returns a hardcoded
+// "local" whatever it was constructed with.
+func installExecutableSendScript(t *testing.T, agmsgPath, capturePath string) {
+	t.Helper()
+	script := "#!/bin/sh\nprintf '%s\\0' \"$0\" \"$@\" > '" + capturePath + "'\n"
+	//nolint:gosec // G306: test fixture needs the exec bit
+	require.NoError(t, os.WriteFile(filepath.Join(agmsgPath, "scripts", "send.sh"), []byte(script), 0700))
+}
+
 func TestNewAgmsgClientForHost_LocalWithAgmsgInstalled_ReturnsClient(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not available")
+	}
 	agmsgPath := installAgmsg(t, t.TempDir(), board.TestedAgmsgVersion)
+	capturePath := filepath.Join(t.TempDir(), "captured-argv")
+	installExecutableSendScript(t, agmsgPath, capturePath)
 	cfg := &config.Config{AgentBoard: config.AgentBoardConfig{AgmsgPath: agmsgPath}}
 
 	client, ok := newAgmsgClientForHost(cfg, session.NewManager(), map[string]string{}, boardHostIDLocal)
 
 	require.True(t, ok)
-	assert.NotNil(t, client)
+	require.NotNil(t, client)
+	// Which implementation came back is the whole answer this function gives
+	// (issue #209), so asserting only non-nil would let either arm return the
+	// other's client unnoticed.
+	assert.IsType(t, &board.LocalAgmsgClient{}, client)
+
+	// The real mirror of the remote arm's own Send assertion: the write has to
+	// reach this install's own send.sh, which is what pins that the client was
+	// built around the path this call resolved rather than around anything
+	// else. A RemoteAgmsgClient returned here would have no reachable session
+	// and fail instead.
+	require.NoError(t, client.Send(context.Background(), "team", "pane-a", "pane-b", "hi"))
+	captured, err := os.ReadFile(capturePath)
+	require.NoError(t, err)
+	argv := strings.Split(strings.TrimSuffix(string(captured), "\x00"), "\x00")
+	assert.Equal(
+		t,
+		[]string{
+			filepath.Join(agmsgPath, "scripts", "send.sh"),
+			"team", "pane-a", "pane-b", "hi", "--force",
+		},
+		argv,
+	)
 }
 
 // An absent agmsg is the README's most likely first failure, and the host is
@@ -523,13 +608,20 @@ func TestNewAgmsgClientForHost_LocalWithoutAgmsg_SkipsTheHost(t *testing.T) {
 
 // A remote host with no reachable pane cannot have its agmsg_path resolved at
 // all, so it is skipped before the presence probe is even reached.
+//
+// The log line is asserted because newAgmsgClientForHost has three ways to
+// return (nil, false) and they are indistinguishable from the return value
+// alone: no reachable session, a failed $HOME probe, and an absent agmsg
+// install. Only the line names which one this test actually reached.
 func TestNewAgmsgClientForHost_RemoteWithNoReachablePane_SkipsTheHost(t *testing.T) {
 	cfg := &config.Config{AgentBoard: config.AgentBoardConfig{AgmsgPath: "/remote/home/demo/agmsg"}}
+	buf := captureBoardLog(t)
 
 	client, ok := newAgmsgClientForHost(cfg, session.NewManager(), map[string]string{"pane-a": "ssh:demo"}, "ssh:demo")
 
 	assert.False(t, ok)
 	assert.Nil(t, client)
+	assert.Contains(t, buf.String(), `no reachable session for host "ssh:demo"`)
 }
 
 func TestWarnOnAgmsgVersionMismatch_DoesNotPanicAcrossHostShapes(t *testing.T) {
