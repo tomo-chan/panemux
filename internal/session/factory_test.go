@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"panemux/internal/config"
+	"panemux/internal/homedir"
 )
 
 func TestCreateFromConfig_Local(t *testing.T) {
@@ -186,7 +187,7 @@ func TestResolveSSHConfig_ProxyCommand(t *testing.T) {
 // (e.g. ".ssh/id_ed25519" without "~/") is expanded relative to HOME.
 func TestResolveSSHConfig_RelativeIdentityFile(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	homedir.SetForTest(t, home)
 
 	dir := t.TempDir()
 	sshCfgPath := filepath.Join(dir, "config")
@@ -246,8 +247,8 @@ func TestResolveSSHConfig_FallbackToSSHConfig(t *testing.T) {
 	content := "Host myserver\n    HostName 10.0.0.1\n    User admin\n    IdentityFile ~/.ssh/id_ed25519\n"
 	require.NoError(t, os.WriteFile(sshCfgPath, []byte(content), 0600))
 
-	// Temporarily override HOME so ~/ expansion uses our temp dir
-	t.Setenv("HOME", home)
+	// Point the home-directory seam at our temp dir so ~/ expansion uses it
+	homedir.SetForTest(t, home)
 
 	cfg, err := resolveSSHConfig("myserver", nil, sshCfgPath)
 	require.NoError(t, err)
@@ -356,5 +357,38 @@ func TestCreateSession_SSHConfigPort_UsedWhenSet(t *testing.T) {
 	// We only care that "not found" is NOT returned
 	if err != nil {
 		assert.NotContains(t, err.Error(), "not found")
+	}
+}
+
+// resolveSSHConfig expands an IdentityFile against the home directory and does
+// not report a failure to resolve it — the ssh config's other fields are still
+// usable, and the caller gets a clear "no auth methods" from buildAuthMethods
+// later if the key really is unreachable. Issue #212 asked for that swallow to
+// be decided rather than inherited.
+//
+// What it must not do is join against an empty home. Both arms did:
+// "~/.ssh/id_ed25519" became ".ssh/id_ed25519" and a relative
+// ".ssh/id_ed25519" stayed relative, either of which reads a private key from
+// whatever directory panemux was started in.
+func TestResolveSSHConfig_UnresolvableHomeDirectory_LeavesTheIdentityFileAlone(t *testing.T) {
+	for name, identityFile := range map[string]string{
+		"tilde prefixed": "~/.ssh/id_ed25519",
+		"relative":       ".ssh/id_ed25519",
+	} {
+		t.Run(name, func(t *testing.T) {
+			homedir.SetFailingForTest(t, errNoHomeDir)
+
+			sshCfgPath := filepath.Join(t.TempDir(), "config")
+			content := "Host myhost\n    HostName myhost.example.com\n    User admin\n    IdentityFile " +
+				identityFile + "\n"
+			require.NoError(t, os.WriteFile(sshCfgPath, []byte(content), 0600))
+
+			cfg, err := resolveSSHConfig("myhost", nil, sshCfgPath)
+
+			require.NoError(t, err, "one unexpandable path must not fail the whole lookup")
+			assert.Equal(t, identityFile, cfg.KeyFile,
+				"a private key path must never become relative to the working directory")
+			assert.Equal(t, "myhost.example.com", cfg.Host, "the rest of the entry is still usable")
+		})
 	}
 }

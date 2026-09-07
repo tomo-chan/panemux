@@ -21,6 +21,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"panemux/internal/config"
+	"panemux/internal/homedir"
 	"panemux/internal/session"
 )
 
@@ -1247,8 +1248,8 @@ func TestPutLayout_ExpandsTildeCwd(t *testing.T) {
 	cfg := defaultTestConfig()
 	r := setupRouter(cfg, session.NewManager())
 
-	home, err := os.UserHomeDir()
-	require.NoError(t, err)
+	home := "/workspace/user/home"
+	homedir.SetForTest(t, home)
 
 	layout := config.LayoutNode{
 		Direction: "horizontal",
@@ -1270,8 +1271,8 @@ func TestPutLayout_NestedTildeCwd_Expanded(t *testing.T) {
 	cfg := defaultTestConfig()
 	r := setupRouter(cfg, session.NewManager())
 
-	home, err := os.UserHomeDir()
-	require.NoError(t, err)
+	home := "/workspace/user/home"
+	homedir.SetForTest(t, home)
 
 	layout := config.LayoutNode{
 		Direction: "horizontal",
@@ -3410,7 +3411,7 @@ func TestPutLayoutRoutes_ExpandARelocatedRootPaneCwd(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			home := t.TempDir()
-			t.Setenv("HOME", home)
+			homedir.SetForTest(t, home)
 			want := filepath.Join(home, "work")
 
 			r := setupRouter(tc.cfg, session.NewManager())

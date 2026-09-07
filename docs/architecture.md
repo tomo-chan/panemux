@@ -144,6 +144,25 @@ Full design and rationale for all three phases live in [agent-board.md](agent-bo
 status note confirms Phase 1 (board core), Phase 2 (command center), and Phase 3 (dashboard UI and
 command palette test completion) are all implemented.
 
+### `internal/homedir`
+
+One package, one variable, one exported function: `homedir.Dir()` is the seam every other package
+reaches the user's home directory through. `homedir.SetForTest` / `homedir.SetFailingForTest`
+substitute it for the duration of a test.
+
+Why a separate package rather than a variable in each caller — the shape
+[DEVELOPMENT.md](../DEVELOPMENT.md)'s testability rule already had in `internal/session` — is that
+the callers do not line up with the tests. `internal/api`'s handler tests drive tilde expansion that
+happens inside `internal/config`; `internal/server`'s integration tests drive config, api and
+session at once; the root package's tests drive `internal/commandcenter`'s default paths. A
+package-private variable is invisible from another package's test, so each of those would have kept
+mutating `$HOME` — the process-wide workaround the rule exists to remove. It depends on nothing but
+`os`, and declares its own two-method `TestingT` rather than importing `testing`, so no binary
+linking it links the testing package.
+
+`.golangci.yml`'s `forbidigo` rule fails the build on `os.UserHomeDir` outside this package, which
+is what keeps "one seam" true rather than aspirational.
+
 ### `internal/portforward`
 
 Owns loopback TCP forwards and the URL parsing that decides when one is needed. `CallbackPort` extracts the loopback port an authorization URL expects its OAuth callback on; `Registry` binds that port on `127.0.0.1`, pipes each accepted connection through a `Dialer` (satisfied by `internal/session`'s `LoopbackDialer`), and owns the lifecycle: per-pane and per-port deduplication, idle expiry, and teardown when a pane goes away.

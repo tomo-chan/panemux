@@ -38,6 +38,40 @@ It accepts only absolute Unix paths and rejects shell metacharacters and control
 
 After validation, the path is wrapped with `shellQuotePath`, which single-quotes the value and escapes any interior single quotes. This keeps paths containing spaces or unusual but allowed characters safe when embedded in a shell string.
 
+### SSH private key paths and an unresolvable home directory
+
+Three SSH-adjacent paths are resolved against the user's home directory, and all three used to do it
+with `home, _ := os.UserHomeDir()` — discarding the error and then joining against the empty string
+it left behind. `filepath.Join("", ".ssh", "id_ed25519")` is `.ssh/id_ed25519`, a path relative to
+whatever directory panemux was started in, so what looked like "fall back to the default" was in
+fact "read this out of the current working directory".
+
+For two of them that reached a private key:
+
+- `buildAuthMethods` in `internal/session/ssh.go` probes OpenSSH's default key names when a pane
+  configures neither `key_file` nor `password`. With no home directory it read
+  `./.ssh/id_ed25519` — a key belonging to whatever project panemux happened to be launched from,
+  or one an unrelated process had placed there — and authenticated the outbound SSH connection with
+  it. It now skips the probe entirely when the home directory does not resolve, which surfaces as
+  the existing `no auth methods` error.
+- `resolveSSHConfig` in `internal/session/factory.go` expands an `IdentityFile` read out of the
+  user's `~/.ssh/config`, where both a `~/`-prefixed and a bare relative value are defined by
+  OpenSSH as relative to the home directory. Both became working-directory-relative. The path is
+  now left exactly as the ssh config wrote it, and the unreachable key is reported by
+  `buildAuthMethods` a moment later.
+
+The failure needs no attacker to arrange the missing home directory — a systemd unit with no `HOME`,
+or a container with no passwd entry for the uid, is enough — but it does need one to place a key
+where panemux will be started, so it is recorded here as a hardening fix rather than a disclosed
+vulnerability. `internal/config`'s own `~/` expansion had the same shape without the credential
+consequence, and was fixed the same way (`expandTilde`, which leaves the `~/` in place).
+
+The general rule this leaves behind: **`os.UserHomeDir` returning an error means there is no home
+directory, never that the home directory is `""`.** Do not join against the value it returns
+alongside an error. The home directory is reached through `internal/homedir` (see DEVELOPMENT.md's
+testability rule), which is also what makes these paths testable at all — the failure arms above had
+never been executed by a test before, because nothing could reach them.
+
 ### Agent board remote writes
 
 `internal/board`'s `RemoteAgmsgClient` (full design in [agent-board.md](agent-board.md)) writes

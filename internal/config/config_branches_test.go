@@ -8,6 +8,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"panemux/internal/homedir"
 )
 
 // The branches in this file are ones `make coverage-blocks` reported as never
@@ -40,11 +42,11 @@ func TestLoad_MissingFile_ReportsAReadFailure(t *testing.T) {
 	assert.Contains(t, err.Error(), "reading config")
 }
 
-// LoadOrDefault resolves the path from $HOME, so both of its arms are reachable
-// by pointing $HOME somewhere this test owns.
+// LoadOrDefault resolves the path from the home directory, so both of its arms
+// are reachable by pointing the userHomeDirFn seam somewhere this test owns.
 func TestLoadOrDefault_NoConfigAtTheDefaultPath_ReturnsDefaultsAimedAtIt(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	homedir.SetForTest(t, home)
 
 	cfg, err := LoadOrDefault()
 
@@ -57,7 +59,7 @@ func TestLoadOrDefault_NoConfigAtTheDefaultPath_ReturnsDefaultsAimedAtIt(t *test
 
 func TestLoadOrDefault_ExistingConfig_IsLoaded(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	homedir.SetForTest(t, home)
 	path := filepath.Join(home, ".config", "panemux", "config.yaml")
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0750))
 	require.NoError(t, os.WriteFile(path, []byte("server:\n  port: 9090\n  host: \"127.0.0.1\"\n"), 0600))
@@ -73,7 +75,7 @@ func TestLoadOrDefault_ExistingConfig_IsLoaded(t *testing.T) {
 // Startup falls back to in-memory defaults rather than refusing to run, which
 // is the historical behavior defaultAfterConfigPathError exists to preserve.
 func TestLoadOrDefault_NoHomeDirectory_FallsBackToDefaults(t *testing.T) {
-	t.Setenv("HOME", "")
+	homedir.SetFailingForTest(t, errNoHomeDir)
 
 	cfg, err := LoadOrDefault()
 
@@ -84,7 +86,7 @@ func TestLoadOrDefault_NoHomeDirectory_FallsBackToDefaults(t *testing.T) {
 }
 
 func TestDefaultConfigPath_NoHomeDirectory_Errors(t *testing.T) {
-	t.Setenv("HOME", "")
+	homedir.SetFailingForTest(t, errNoHomeDir)
 
 	path, err := DefaultConfigPath()
 
@@ -135,7 +137,7 @@ func TestWrite_NoFilePath_IsANoOp(t *testing.T) {
 // bodies, so the second one was never entered.
 func TestExpandPaths_ExpandsBothSSHFileFields(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	homedir.SetForTest(t, home)
 
 	cfg := validConfig()
 	cfg.SSHConnections = map[string]SSHConnection{
@@ -392,4 +394,62 @@ func TestRemovePaneFromLayout_UnknownPane_ChangesNothing(t *testing.T) {
 
 	require.Len(t, cfg.Workspaces.Items[0].Layout.Children, 2)
 	require.Len(t, cfg.Workspaces.Items[0].Layout.Children[0].Children, 2)
+}
+
+// ── Expanding ~ without a home directory ─────────────────────────────────────
+
+// Both ~ expansions in this package resolve the home directory and
+// deliberately do not report a failure to resolve it: Load has nowhere to
+// return an error from here, and a config carrying one unexpandable path is
+// still a usable config. Issue #212 asked for that swallow to be decided
+// rather than inherited, so it is pinned here — together with the half of it
+// that was wrong.
+//
+// filepath.Join("", ".ssh/id_ed25519") is ".ssh/id_ed25519": joining against
+// an empty home turned an absolute-by-intent path into one relative to
+// whatever directory panemux happened to be started in, which resolves
+// silently against the wrong file instead of failing where an operator can
+// see it. Leaving the ~/ in place is the diagnosable answer, and it is what
+// board.go's expandLocalAgmsgPath already documents itself as matching.
+func TestExpandPaths_UnresolvableHomeDirectory_LeavesTildePathsAlone(t *testing.T) {
+	homedir.SetFailingForTest(t, errNoHomeDir)
+
+	cfg := validConfig()
+	cfg.SSHConnections = map[string]SSHConnection{
+		"prod": {
+			Host:           "remote.example.com",
+			KeyFile:        "~/.ssh/id_ed25519",
+			KnownHostsFile: "~/.ssh/known_hosts",
+		},
+	}
+
+	cfg.expandPaths()
+
+	conn := cfg.SSHConnections["prod"]
+	assert.Equal(t, "~/.ssh/id_ed25519", conn.KeyFile,
+		"a key path must never become relative to the working directory")
+	assert.Equal(t, "~/.ssh/known_hosts", conn.KnownHostsFile)
+}
+
+func TestExpandPanePaths_UnresolvableHomeDirectory_LeavesTildeCwdAlone(t *testing.T) {
+	homedir.SetFailingForTest(t, errNoHomeDir)
+
+	pane := &PaneConfig{ID: "main", Type: "local", Cwd: "~/src/panemux"}
+
+	ExpandPanePaths(pane)
+
+	assert.Equal(t, "~/src/panemux", pane.Cwd,
+		"a cwd must never become relative to the working directory")
+}
+
+// The expansion still has to happen when the home directory does resolve —
+// the failure arm above is only correct if it is genuinely an arm.
+func TestExpandPanePaths_ResolvableHomeDirectory_ExpandsTheCwd(t *testing.T) {
+	homedir.SetForTest(t, "/workspace/user/home")
+
+	pane := &PaneConfig{ID: "main", Type: "local", Cwd: "~/src/panemux"}
+
+	ExpandPanePaths(pane)
+
+	assert.Equal(t, "/workspace/user/home/src/panemux", pane.Cwd)
 }

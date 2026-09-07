@@ -7,6 +7,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"panemux/internal/homedir"
 )
 
 // The two loopback checks below guard GET /api/session-token, the one
@@ -54,7 +56,7 @@ func TestIsLoopbackRemoteAddrAcceptsAnAddressWithNoPort(t *testing.T) {
 // home directory, the second a file they can go and look at.
 func TestDefaultCommandHistoryFnNamesWhichStepFailed(t *testing.T) {
 	t.Run("path cannot be resolved", func(t *testing.T) {
-		t.Setenv("HOME", "")
+		homedir.SetFailingForTest(t, errNoHomeDir)
 
 		entries, err := defaultCommandHistoryFn()
 
@@ -65,7 +67,7 @@ func TestDefaultCommandHistoryFnNamesWhichStepFailed(t *testing.T) {
 
 	t.Run("file cannot be read", func(t *testing.T) {
 		home := t.TempDir()
-		t.Setenv("HOME", home)
+		homedir.SetForTest(t, home)
 		// The history file lives at ~/.config/panemux/<name>. Making that
 		// directory a regular file leaves the path resolvable but the read
 		// failing with ENOTDIR — the second arm, reached only because the

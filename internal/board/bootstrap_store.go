@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"panemux/internal/homedir"
 )
 
 const bootstrapStateFileName = "board-bootstrap-state.json"
@@ -45,7 +47,7 @@ func SaveBootstrapState(path string, paneIDs []string) error {
 
 // DefaultBootstrapStateFilePath returns ~/.config/panemux/board-bootstrap-state.json.
 func DefaultBootstrapStateFilePath() (string, error) {
-	home, err := os.UserHomeDir()
+	home, err := homedir.Dir()
 	if err != nil {
 		return "", fmt.Errorf("getting home directory: %w", err)
 	}

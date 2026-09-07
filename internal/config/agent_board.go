@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"panemux/internal/homedir"
 )
 
 const (
@@ -110,7 +112,7 @@ func (c *Config) resolveAuthTokenPath() (string, error) {
 	if c.authTokenPath != "" {
 		return c.authTokenPath, nil
 	}
-	home, err := os.UserHomeDir()
+	home, err := homedir.Dir()
 	if err != nil {
 		return "", fmt.Errorf("getting home directory: %w", err)
 	}

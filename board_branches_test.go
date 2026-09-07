@@ -13,6 +13,7 @@ import (
 
 	"panemux/internal/board"
 	"panemux/internal/config"
+	"panemux/internal/homedir"
 	"panemux/internal/session"
 )
 
@@ -25,14 +26,14 @@ import (
 // a log line, so a wrong answer here is silent: a host quietly off the board,
 // or a stale cursor file quietly ignored.
 
-// isolatedHome points $HOME at a directory this test owns, so anything
-// resolving ~/.config/panemux touches the fixture and never the developer's
-// real cursor or bootstrap-state files.
+// isolatedHome points the home-directory seam at a directory this test owns,
+// so anything resolving ~/.config/panemux touches the fixture and never the
+// developer's real cursor or bootstrap-state files.
 func isolatedHome(t *testing.T) string {
 	t.Helper()
 
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	homedir.SetForTest(t, home)
 	return home
 }
 
@@ -287,7 +288,7 @@ func TestPersistHelpers_NoHomeDirectory_LogAndGiveUp(t *testing.T) {
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv("HOME", "")
+			homedir.SetFailingForTest(t, errNoHomeDir)
 			buf := captureBoardLog(t)
 
 			tt.persist()
@@ -440,7 +441,7 @@ func TestResolveAgmsgPathForHost_RemoteProbeFails_SkipsTheHost(t *testing.T) {
 // rather than guessed at — the same thing internal/config does for the other
 // local-only paths it expands.
 func TestExpandLocalAgmsgPath_NoHomeDirectory_LeavesThePathAlone(t *testing.T) {
-	t.Setenv("HOME", "")
+	homedir.SetFailingForTest(t, errNoHomeDir)
 
 	assert.Equal(t, "~/.agents/skills/agmsg", expandLocalAgmsgPath("~/.agents/skills/agmsg"))
 }

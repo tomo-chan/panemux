@@ -20,6 +20,7 @@ import (
 	"panemux/internal/board"
 	"panemux/internal/commandcenter"
 	"panemux/internal/config"
+	"panemux/internal/homedir"
 	"panemux/internal/session"
 )
 
@@ -103,7 +104,7 @@ func newAPIEnv(t *testing.T) *apiEnv {
 	t.Helper()
 
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	homedir.SetForTest(t, home)
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
 
 	cfg := testConfigWithToken(integrationToken)

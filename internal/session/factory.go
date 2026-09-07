@@ -3,11 +3,11 @@ package session
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
 	"panemux/internal/config"
+	"panemux/internal/homedir"
 	"panemux/internal/sshconfig"
 )
 
@@ -92,17 +92,7 @@ func resolveSSHConfig(name string, sshConns map[string]config.SSHConnection, ssh
 			if port == 0 {
 				port = 22
 			}
-			keyFile := h.IdentityFile
-			if keyFile != "" {
-				home, _ := os.UserHomeDir()
-				if strings.HasPrefix(keyFile, "~/") {
-					keyFile = filepath.Join(home, keyFile[2:])
-				} else if !filepath.IsAbs(keyFile) {
-					// Relative paths (e.g. ".ssh/id_ed25519") are relative to HOME,
-					// matching OpenSSH behavior.
-					keyFile = filepath.Join(home, keyFile)
-				}
-			}
+			keyFile := expandIdentityFile(h.IdentityFile)
 			cfg := SSHConfig{
 				Host:         h.Hostname,
 				Port:         port,
@@ -122,4 +112,29 @@ func resolveSSHConfig(name string, sshConns map[string]config.SSHConnection, ssh
 	}
 
 	return SSHConfig{}, fmt.Errorf("ssh connection %q not found", name)
+}
+
+// expandIdentityFile resolves an ssh_config IdentityFile against the user's
+// home directory: a leading ~/ is expanded, and a relative path is taken as
+// relative to the home directory, matching OpenSSH's own behavior.
+//
+// A home directory that cannot be resolved leaves the path exactly as the
+// ssh config wrote it, rather than joining against an empty home — that turned
+// "~/.ssh/id_ed25519" into ".ssh/id_ed25519" and left an already-relative path
+// relative, either of which reads a private key out of whatever directory
+// panemux happened to be started in. No error is reported because the rest of
+// the entry is still usable and buildAuthMethods reports a genuinely
+// unreachable key as "no auth methods" a moment later.
+func expandIdentityFile(keyFile string) string {
+	if keyFile == "" || filepath.IsAbs(keyFile) {
+		return keyFile
+	}
+	home, err := homedir.Dir()
+	if err != nil {
+		return keyFile
+	}
+	if strings.HasPrefix(keyFile, "~/") {
+		return filepath.Join(home, keyFile[2:])
+	}
+	return filepath.Join(home, keyFile)
 }

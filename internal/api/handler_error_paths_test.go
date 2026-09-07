@@ -18,6 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"panemux/internal/config"
+	"panemux/internal/homedir"
 	"panemux/internal/session"
 )
 
@@ -742,19 +743,24 @@ func TestResolveLocalDirectoryBrowsePath(t *testing.T) {
 		path    string
 		want    string
 		wantErr string
+		noHome  bool
 	}{
 		{name: "empty path is home", home: home, path: "", want: home},
 		{name: "bare tilde is home", home: home, path: "~", want: home},
 		{name: "tilde prefix joins home", home: home, path: "~/src/panemux", want: filepath.Join(home, "src/panemux")},
 		{name: "absolute path is cleaned", home: home, path: "/tmp/sample-project/", want: "/tmp/sample-project"},
 		{name: "relative path is made absolute", home: home, path: "sample", want: mustAbs(t, "sample")},
-		{name: "empty path without a home", home: "", path: "", wantErr: "getting home directory"},
-		{name: "tilde prefix without a home", home: "", path: "~/src", wantErr: "getting home directory"},
+		{name: "empty path without a home", noHome: true, path: "", wantErr: "getting home directory"},
+		{name: "tilde prefix without a home", noHome: true, path: "~/src", wantErr: "getting home directory"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv("HOME", tt.home)
+			if tt.noHome {
+				homedir.SetFailingForTest(t, errNoHomeDir)
+			} else {
+				homedir.SetForTest(t, tt.home)
+			}
 
 			got, err := resolveLocalDirectoryBrowsePath(tt.path)
 
@@ -773,7 +779,7 @@ func TestResolveLocalDirectoryBrowsePath(t *testing.T) {
 // listLocalDirectories reports the path resolution failure rather than
 // swallowing it and listing the process's own working directory instead.
 func TestListLocalDirectories_UnresolvablePath_Errors(t *testing.T) {
-	t.Setenv("HOME", "")
+	homedir.SetFailingForTest(t, errNoHomeDir)
 
 	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
 

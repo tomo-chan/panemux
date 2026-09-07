@@ -19,12 +19,13 @@ import (
 	"syscall"
 
 	"github.com/creack/pty"
+
+	"panemux/internal/homedir"
 )
 
 var listProcessesFn = listProcesses
 var getPIDCWDFn = getPIDCWD
 var openFilePathsForPIDFn = openFilePathsForPID
-var userHomeDirFn = os.UserHomeDir
 var readFileFn = os.ReadFile
 
 // validShellPath matches a valid absolute shell path.
@@ -570,7 +571,7 @@ type claudeSessionMeta struct {
 // read those files too or the pane header silently falls back to the base
 // working directory (see docs/behavior.md "Pane Git and PR metadata").
 func claudeSessionCWDs(agentPID int) ([]string, error) {
-	homeDir, err := userHomeDirFn()
+	homeDir, err := homedir.Dir()
 	if err != nil {
 		return nil, fmt.Errorf("resolve home dir for claude session: %w", err)
 	}

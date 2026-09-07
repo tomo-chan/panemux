@@ -10,6 +10,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"panemux/internal/homedir"
 )
 
 // uuidV4 is the shape --session-id requires. Anything else is rejected by
@@ -94,7 +96,7 @@ func TestSubprocessSettingsOnlyNarrows(t *testing.T) {
 }
 
 func TestDefaultContextDirIsUnderPanemuxConfig(t *testing.T) {
-	t.Setenv("HOME", "/workspace/user/home")
+	homedir.SetForTest(t, "/workspace/user/home")
 	dir, err := DefaultContextDir()
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Join("/workspace/user/home", ".config", "panemux", "command-center"), dir)
@@ -132,4 +134,18 @@ func TestNewWorkDirIsEmptyAndRemovable(t *testing.T) {
 	cleanup()
 	_, err = os.Stat(dir)
 	assert.True(t, os.IsNotExist(err), "cleanup must remove the work directory")
+}
+
+// DefaultContextDir is resolved during setupCommandCenter, alongside the
+// history and session paths whose failure arms store_branches_test.go covers.
+// Its own arm has to name the step too: the command center turns itself off on
+// any of the three, and the log line is the operator's only sign of which.
+func TestDefaultContextDirReportsAnUnresolvableHomeDirectory(t *testing.T) {
+	homedir.SetFailingForTest(t, errNoHomeDir)
+
+	dir, err := DefaultContextDir()
+
+	require.ErrorIs(t, err, errNoHomeDir)
+	assert.Contains(t, err.Error(), "resolving home directory")
+	assert.Empty(t, dir, "no path may be returned alongside the error")
 }

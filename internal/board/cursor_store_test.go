@@ -8,6 +8,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"panemux/internal/homedir"
 )
 
 func TestSaveCursorFile_ThenLoad_RoundTrips(t *testing.T) {
@@ -70,4 +72,33 @@ func TestDefaultCursorFilePath_ContainsExpectedSuffix(t *testing.T) {
 	path, err := DefaultCursorFilePath()
 	require.NoError(t, err)
 	assert.True(t, strings.HasSuffix(path, filepath.Join(".config", "panemux", "board-relay-cursor.json")))
+}
+
+// Both default paths are resolved at startup and again on every relay save, so
+// a home directory that cannot be resolved — a stripped environment such as a
+// systemd unit or a container with no passwd entry — has to name the step that
+// failed rather than return a path relative to the working directory. board.go
+// turns each into its own log line, and those lines are all an operator gets.
+func TestDefaultFilePaths_UnresolvableHomeDirectory_Error(t *testing.T) {
+	homedir.SetFailingForTest(t, errNoHomeDir)
+
+	cursorPath, cursorErr := DefaultCursorFilePath()
+	require.ErrorIs(t, cursorErr, errNoHomeDir)
+	assert.Empty(t, cursorPath, "no path may be returned alongside the error")
+
+	statePath, stateErr := DefaultBootstrapStateFilePath()
+	require.ErrorIs(t, stateErr, errNoHomeDir)
+	assert.Empty(t, statePath)
+}
+
+func TestDefaultFilePaths_AreUnderTheResolvedHomeDirectory(t *testing.T) {
+	homedir.SetForTest(t, "/workspace/user/home")
+
+	cursorPath, err := DefaultCursorFilePath()
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join("/workspace/user/home", ".config", "panemux", cursorFileName), cursorPath)
+
+	statePath, err := DefaultBootstrapStateFilePath()
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join("/workspace/user/home", ".config", "panemux", bootstrapStateFileName), statePath)
 }

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"panemux/internal/homedir"
 )
 
 const sessionFileName = "command-center-session.json"
@@ -49,7 +51,7 @@ func SaveSessionFile(path string, state SessionState) error {
 
 // DefaultSessionFilePath returns ~/.config/panemux/command-center-session.json.
 func DefaultSessionFilePath() (string, error) {
-	home, err := os.UserHomeDir()
+	home, err := homedir.Dir()
 	if err != nil {
 		return "", fmt.Errorf("getting home directory: %w", err)
 	}

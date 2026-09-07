@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"panemux/internal/homedir"
 )
 
 // This file owns the command center subprocess's *execution context*: the
@@ -119,7 +121,7 @@ func NewSessionID() (string, error) {
 // alongside the token, relay cursor, history and session files panemux
 // already keeps in its own config directory.
 func DefaultContextDir() (string, error) {
-	home, err := os.UserHomeDir()
+	home, err := homedir.Dir()
 	if err != nil {
 		return "", fmt.Errorf("resolving home directory: %w", err)
 	}

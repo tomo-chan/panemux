@@ -9,6 +9,7 @@ linters:
     - dupl
     - errcheck
     - errname
+    - forbidigo
     - goconst
     - gosec
     - govet
@@ -28,6 +29,18 @@ linters:
   settings:
     dupl:
       threshold: 100
+    forbidigo:
+      # The home directory is a process-wide global, and DEVELOPMENT.md's
+      # testability rule requires an injectable override for those. Sixteen
+      # call sites across nine packages ignored it (issue #212), and nothing
+      # noticed, because "add a seam" was advice rather than a check.
+      forbid:
+        - pattern: ^os\.UserHomeDir$
+          msg: >-
+            call homedir.Dir() instead, and substitute it in tests with
+            homedir.SetForTest / homedir.SetFailingForTest rather than
+            t.Setenv("HOME", ...). See internal/homedir and DEVELOPMENT.md's
+            testability rule.
     govet:
       enable:
         - fieldalignment
@@ -55,6 +68,11 @@ linters:
       - legacy
       - std-error-handling
     rules:
+      # internal/homedir is the seam itself: it is the one place that is
+      # supposed to name os.UserHomeDir.
+      - path: internal/homedir/
+        linters:
+          - forbidigo
       # Session package manages OS processes and SSH connections; Close/Wait/Kill
       # errors in teardown paths are not actionable.
       - path: internal/session/

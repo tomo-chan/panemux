@@ -27,6 +27,7 @@ import (
 	"panemux/internal/board"
 	"panemux/internal/commandcenter"
 	"panemux/internal/config"
+	"panemux/internal/homedir"
 	"panemux/internal/portforward"
 	"panemux/internal/session"
 	"panemux/internal/sshconfig"
@@ -1570,7 +1571,7 @@ func listRemoteDirectories(cfg session.SSHConfig, path string, showHidden bool) 
 
 func resolveLocalDirectoryBrowsePath(path string) (string, error) {
 	if path == "" || path == "~" {
-		home, err := os.UserHomeDir()
+		home, err := homedir.Dir()
 		if err != nil {
 			return "", fmt.Errorf("getting home directory: %w", err)
 		}
@@ -1578,7 +1579,7 @@ func resolveLocalDirectoryBrowsePath(path string) (string, error) {
 	}
 
 	if strings.HasPrefix(path, "~/") {
-		home, err := os.UserHomeDir()
+		home, err := homedir.Dir()
 		if err != nil {
 			return "", fmt.Errorf("getting home directory: %w", err)
 		}

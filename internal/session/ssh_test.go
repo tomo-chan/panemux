@@ -20,6 +20,8 @@ import (
 	"github.com/stretchr/testify/require"
 	gossh "golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
+
+	"panemux/internal/homedir"
 )
 
 // generateTestKeyFile creates a real ed25519 private key file at the given path
@@ -50,8 +52,8 @@ func TestBuildAuthMethods_WithKeyFile(t *testing.T) {
 // This is the case that caused the 500 on Restart Session when ~/.ssh/config
 // entries don't specify IdentityFile.
 func TestBuildAuthMethods_NoKeyNoPassword_NoDefaultKeys_Error(t *testing.T) {
-	// Override HOME to a temp dir with no .ssh keys
-	t.Setenv("HOME", t.TempDir())
+	// Point the home-directory seam at a temp dir with no .ssh keys
+	homedir.SetForTest(t, t.TempDir())
 
 	cfg := SSHConfig{}
 	_, err := buildAuthMethods(cfg)
@@ -69,7 +71,7 @@ func TestBuildAuthMethods_NoKeyNoPassword_DefaultKeyFound(t *testing.T) {
 	require.NoError(t, os.MkdirAll(sshDir, 0700))
 
 	generateTestKeyFile(t, filepath.Join(sshDir, "id_ed25519"))
-	t.Setenv("HOME", home)
+	homedir.SetForTest(t, home)
 
 	cfg := SSHConfig{}
 	methods, err := buildAuthMethods(cfg)
@@ -1387,4 +1389,26 @@ func TestDialTransport_JumpHostSharesRetryDeadlineWithOuterCall(t *testing.T) {
 	for _, d := range gotDeadlines {
 		assert.True(t, d.Equal(deadline), "jump host dial must reuse the same deadline as the outer call, not a fresh budget")
 	}
+}
+
+// With no home directory to resolve, the default-key probe is skipped
+// entirely rather than run against an empty home: filepath.Join("", ".ssh",
+// "id_ed25519") is ".ssh/id_ed25519", so the probe would have read a private
+// key out of whatever directory panemux was started in and authenticated with
+// it. Issue #212 asked for this swallow to be decided rather than inherited;
+// the decision is that no home directory means no default keys.
+func TestBuildAuthMethods_UnresolvableHomeDirectory_DoesNotProbeTheWorkingDirectory(t *testing.T) {
+	workDir := t.TempDir()
+	sshDir := filepath.Join(workDir, ".ssh")
+	require.NoError(t, os.MkdirAll(sshDir, 0700))
+	generateTestKeyFile(t, filepath.Join(sshDir, "id_ed25519"))
+	t.Chdir(workDir)
+
+	homedir.SetFailingForTest(t, errNoHomeDir)
+
+	_, err := buildAuthMethods(SSHConfig{})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no auth methods",
+		"a key sitting in the working directory is not this user's default key")
 }

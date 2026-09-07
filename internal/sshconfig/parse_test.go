@@ -8,6 +8,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"panemux/internal/homedir"
 )
 
 func TestDefaultPath_EndsWithSSHConfig(t *testing.T) {
@@ -241,4 +243,27 @@ func writeTempSSHConfig(t *testing.T, content string) string {
 	f := filepath.Join(dir, "config")
 	require.NoError(t, os.WriteFile(f, []byte(content), 0600))
 	return f
+}
+
+// DefaultPath resolves against the home directory and reports no failure to
+// resolve it, falling back to a relative ".ssh/config". That arm was
+// unreachable before the home-directory seam existed, and issue #212 asked for
+// the swallow to be decided rather than inherited.
+//
+// It is kept here, unlike the identity-file and default-key paths in
+// internal/session, because the consequence is different in kind: this names a
+// config file that ParseHosts reports as an empty host list when it is absent,
+// so a wrong answer costs a lookup that finds nothing. Those named a private
+// key that would have been read out of the working directory and used to
+// authenticate.
+func TestDefaultPath_UnresolvableHomeDirectory_FallsBackToARelativePath(t *testing.T) {
+	homedir.SetFailingForTest(t, errNoHomeDir)
+
+	assert.Equal(t, filepath.Join(".ssh", "config"), DefaultPath())
+}
+
+func TestDefaultPath_ResolvableHomeDirectory_IsUnderTheHomeDirectory(t *testing.T) {
+	homedir.SetForTest(t, "/workspace/user/home")
+
+	assert.Equal(t, filepath.Join("/workspace/user/home", ".ssh", "config"), DefaultPath())
 }

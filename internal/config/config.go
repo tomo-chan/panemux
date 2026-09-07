@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"panemux/internal/homedir"
 )
 
 const configFileMode os.FileMode = 0600
@@ -525,13 +527,8 @@ func (c *Config) write() error {
 
 func (c *Config) expandPaths() {
 	for key, conn := range c.SSHConnections {
-		home, _ := os.UserHomeDir()
-		if strings.HasPrefix(conn.KeyFile, "~/") {
-			conn.KeyFile = filepath.Join(home, conn.KeyFile[2:])
-		}
-		if strings.HasPrefix(conn.KnownHostsFile, "~/") {
-			conn.KnownHostsFile = filepath.Join(home, conn.KnownHostsFile[2:])
-		}
+		conn.KeyFile = expandTilde(conn.KeyFile)
+		conn.KnownHostsFile = expandTilde(conn.KnownHostsFile)
 		c.SSHConnections[key] = conn
 	}
 	for i := range c.Workspaces.Items {
@@ -549,7 +546,7 @@ func (c *Config) expandPaths() {
 	// docs/agent-board.md's "~ in agmsg_path is expanded by panemux, never
 	// left for the remote shell to expand" section). Expansion happens per
 	// host instead, at AgmsgClient construction time in board.go: locally
-	// via os.UserHomeDir(), remotely via board.ResolveRemoteAgmsgPath's
+	// via homedir.Dir(), remotely via board.ResolveRemoteAgmsgPath's
 	// SSH $HOME probe.
 }
 
@@ -564,10 +561,31 @@ func expandPanesCwd(children []LayoutChild) {
 
 // ExpandPanePaths expands ~/  in the pane's CWD to an absolute path.
 func ExpandPanePaths(pane *PaneConfig) {
-	if strings.HasPrefix(pane.Cwd, "~/") {
-		home, _ := os.UserHomeDir()
-		pane.Cwd = filepath.Join(home, pane.Cwd[2:])
+	pane.Cwd = expandTilde(pane.Cwd)
+}
+
+// expandTilde expands a leading ~/ in path against the user's home directory,
+// and leaves path untouched when there is no ~/ to expand or no home directory
+// to expand it against.
+//
+// The unresolvable-home case does not report an error because no caller has
+// anywhere to put one: expansion happens during Load and during layout
+// updates, and a config carrying one unexpandable path is still a usable
+// config. What it must not do is join against an empty home —
+// filepath.Join("", ".ssh/id_ed25519") is ".ssh/id_ed25519", which resolves
+// against whatever directory panemux was started in and so silently names the
+// wrong file rather than failing where an operator can see it. Leaving the ~/
+// in place is the diagnosable answer, and the one board.go's
+// expandLocalAgmsgPath already describes itself as matching.
+func expandTilde(path string) string {
+	if !strings.HasPrefix(path, "~/") {
+		return path
 	}
+	home, err := homedir.Dir()
+	if err != nil {
+		return path
+	}
+	return filepath.Join(home, path[2:])
 }
 
 // ExpandLayoutPaths expands ~/  in all pane CWDs within layout, mirroring
@@ -578,7 +596,7 @@ func ExpandLayoutPaths(layout *LayoutNode) {
 
 // DefaultConfigPath returns the default config file path: ~/.config/panemux/config.yaml.
 func DefaultConfigPath() (string, error) {
-	home, err := os.UserHomeDir()
+	home, err := homedir.Dir()
 	if err != nil {
 		return "", fmt.Errorf("getting home directory: %w", err)
 	}

@@ -778,7 +778,11 @@ func TestNormalizeFixtureString_AppliesTheMoreSpecificLiteralFirst(t *testing.T)
 // rule is broken — passed in 6ms having regenerated nothing. Demonstrated by
 // dropping the `directories` capture's literal: filtered run ok, full run red.
 func TestAPIContractFixtures_ContainNoMachinePaths(t *testing.T) {
-	home, err := os.UserHomeDir()
+	// The real machine's home directory, deliberately: this is the one test
+	// whose subject IS what os.UserHomeDir answers on the capturing machine,
+	// so going through homedir.Dir() would let a substitution elsewhere in the
+	// package hide the very path this is looking for.
+	home, err := os.UserHomeDir() //nolint:forbidigo // the capturing machine's own home is the subject
 	require.NoError(t, err)
 
 	for name, fixture := range contractFixtures {

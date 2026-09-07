@@ -10,6 +10,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"panemux/internal/homedir"
 )
 
 // The command center's two persisted files — the --resume session id and the
@@ -276,11 +278,11 @@ func TestAtomicWriteFileReportsAFailedRenameAndLeavesNoTempFile(t *testing.T) {
 // ── Default paths ────────────────────────────────────────────────────────────
 
 // Both default paths are resolved against the home directory, and both are
-// called at startup. An empty HOME is what os.UserHomeDir reports on, and it
-// is reachable in a stripped environment such as a systemd unit or a
-// container with no passwd entry.
+// called at startup. A home directory that cannot be resolved is reachable in
+// a stripped environment such as a systemd unit or a container with no passwd
+// entry, so both arms have to name the step that failed.
 func TestDefaultPathsReportAnUnresolvableHomeDirectory(t *testing.T) {
-	t.Setenv("HOME", "")
+	homedir.SetFailingForTest(t, errNoHomeDir)
 
 	historyPath, historyErr := DefaultHistoryFilePath()
 	require.Error(t, historyErr)
