@@ -89,8 +89,15 @@ func TestHelpersMarkThemselvesAsHelpers(t *testing.T) {
 
 	assert.Equal(t, 2, spy.helperCalls)
 	require.Len(t, spy.cleanups, 2)
-	for _, cleanup := range spy.cleanups {
-		cleanup()
+	// LIFO, as testing.T unwinds cleanups. Running these in registration order
+	// would end with dirFn holding SetForTest's closure — the value
+	// SetFailingForTest captured as its "original" — rather than the real
+	// os.UserHomeDir, and spy is not a *testing.T, so nothing else would put it
+	// back. That leaks into every later test in the binary: go test -shuffle=on
+	// then fails TestDirDefaultsToTheOperatingSystemHomeDirectory about half the
+	// time, and any test added above it in this file fails permanently.
+	for i := len(spy.cleanups) - 1; i >= 0; i-- {
+		spy.cleanups[i]()
 	}
 }
 

@@ -91,9 +91,12 @@ Example: `Config.sshConfigPath` uses `sshconfig.DefaultPath()` only when the ove
 **The home directory has one seam, and it is `internal/homedir`.** Call `homedir.Dir()`; substitute it
 in a test with `homedir.SetForTest(t, dir)` or `homedir.SetFailingForTest(t, err)`. Do **not** call
 `os.UserHomeDir()` — `.golangci.yml`'s `forbidigo` rule fails the build on it outside that package —
-and do not reach for `t.Setenv("HOME", ...)`, which mutates state the whole test binary shares, is
-refused outright in a test that has called `t.Parallel`, and does nothing on Windows, where
-`os.UserHomeDir` reads `USERPROFILE`. It is one package rather than one variable per caller because
+and do not reach for `t.Setenv("HOME", ...)`, which mutates the process environment every goroutine
+and subprocess in the binary shares, and does nothing on Windows, where `os.UserHomeDir` reads
+`USERPROFILE`. Note what the seam does **not** fix: `homedir.dirFn` is one unsynchronized package
+variable, so substituting it is no safer under `t.Parallel` than `$HOME` was — `t.Setenv` at least
+panics there, while the seam races silently. Substitute it only from non-parallel tests. It is one
+package rather than one variable per caller because
 the callers do not line up with the tests: `internal/api`'s handler tests drive tilde expansion that
 happens inside `internal/config`, `internal/server`'s integration tests drive config, api and session
 at once, and the root package's tests drive `internal/commandcenter`'s default paths — none of which

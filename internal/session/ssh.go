@@ -135,6 +135,9 @@ func runBoardCommand(
 // resolveKnownHostsFile returns the known_hosts file path, defaulting to ~/.ssh/known_hosts.
 func resolveKnownHostsFile(knownHostsFile string) (string, error) {
 	if knownHostsFile != "" {
+		if err := requireAbsolutePath("known_hosts file", knownHostsFile); err != nil {
+			return "", err
+		}
 		return knownHostsFile, nil
 	}
 	home, err := homedir.Dir()
@@ -788,6 +791,9 @@ func buildAuthMethods(cfg SSHConfig) ([]ssh.AuthMethod, error) {
 	var methods []ssh.AuthMethod
 
 	if cfg.KeyFile != "" {
+		if err := requireAbsolutePath("key file", cfg.KeyFile); err != nil {
+			return nil, err
+		}
 		keyData, err := os.ReadFile(cfg.KeyFile)
 		if err != nil {
 			return nil, fmt.Errorf("reading key file %s: %w", cfg.KeyFile, err)
@@ -1519,6 +1525,27 @@ func defaultKeyAuthMethods(home string) []ssh.AuthMethod {
 			continue
 		}
 		return []ssh.AuthMethod{ssh.PublicKeys(signer)}
+	}
+	return nil
+}
+
+// requireAbsolutePath refuses a path that has reached a read still relative.
+//
+// Every route that produces one of these paths yields an absolute path when it
+// works: an operator writing one, internal/config's expandTilde, or
+// resolveSSHConfig's expandIdentityFile. A relative path therefore means an
+// expansion that could not happen — a home directory that would not resolve —
+// and os.ReadFile would resolve it against whatever directory panemux was
+// started in instead. For a private key that means authenticating with a key
+// belonging to that directory; for known_hosts it means letting a file planted
+// there decide host-key verification. Both are refused, naming the path.
+//
+// A leading ~/ is the same case and needs no separate check: it is not
+// absolute either, and no syscall treats ~ as the home directory.
+func requireAbsolutePath(what, path string) error {
+	if !filepath.IsAbs(path) {
+		return fmt.Errorf("%s %s is not an absolute path: it could not be resolved against a home directory, "+
+			"and reading it would resolve it against the working directory", what, path)
 	}
 	return nil
 }

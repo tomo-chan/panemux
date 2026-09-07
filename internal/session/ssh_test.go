@@ -1412,3 +1412,63 @@ func TestBuildAuthMethods_UnresolvableHomeDirectory_DoesNotProbeTheWorkingDirect
 	assert.Contains(t, err.Error(), "no auth methods",
 		"a key sitting in the working directory is not this user's default key")
 }
+
+// A private key path that is not absolute by the time it reaches the read is
+// refused, and the refusal names the path so an operator can see which one it
+// was. Every legitimate route produces an absolute path — an operator writing
+// one, internal/config's expandTilde, or resolveSSHConfig's expandIdentityFile
+// — so a relative one means an expansion that could not happen, never a path
+// worth trying.
+//
+// Leaving it to os.ReadFile is not equivalent, which is the whole point: this
+// test plants a readable key at each relative path first, so without the guard
+// the read SUCCEEDS and the connection authenticates with a key belonging to
+// whatever directory panemux was started in. The bare-relative form is the
+// dangerous one — ".ssh" is an ordinary directory name — and it is exactly what
+// an ssh_config `IdentityFile .ssh/id_ed25519` leaves behind when the home
+// directory cannot be resolved.
+func TestBuildAuthMethods_NonAbsoluteKeyFile_IsRefusedRatherThanReadFromTheWorkingDirectory(t *testing.T) {
+	for name, keyFile := range map[string]string{
+		"unexpanded tilde": "~/.ssh/id_ed25519",
+		"bare relative":    ".ssh/id_ed25519",
+	} {
+		t.Run(name, func(t *testing.T) {
+			workDir := t.TempDir()
+			require.NoError(t, os.MkdirAll(filepath.Join(workDir, filepath.Dir(keyFile)), 0700))
+			generateTestKeyFile(t, filepath.Join(workDir, keyFile))
+			t.Chdir(workDir)
+
+			// Proof that the guard is what refuses this, not a missing file.
+			_, readErr := os.ReadFile(keyFile)
+			require.NoError(t, readErr, "the key must be readable for this test to mean anything")
+
+			_, err := buildAuthMethods(SSHConfig{KeyFile: keyFile})
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "is not an absolute path")
+			assert.Contains(t, err.Error(), keyFile, "the operator has to be told which path was refused")
+		})
+	}
+}
+
+// The same guard on the known_hosts file. The consequence differs — this one
+// decides which host keys are trusted rather than which key authenticates —
+// but the shape is identical: a relative path is one an expansion could not
+// resolve, and reading it from the working directory would let a file planted
+// there decide host-key verification.
+func TestResolveKnownHostsFile_NonAbsolutePath_IsRefused(t *testing.T) {
+	path, err := resolveKnownHostsFile("~/.ssh/known_hosts")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "is not an absolute path")
+	assert.Empty(t, path)
+}
+
+func TestResolveKnownHostsFile_AbsolutePath_IsUsedAsGiven(t *testing.T) {
+	given := filepath.Join(t.TempDir(), "known_hosts")
+
+	path, err := resolveKnownHostsFile(given)
+
+	require.NoError(t, err)
+	assert.Equal(t, given, path)
+}

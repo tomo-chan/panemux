@@ -57,8 +57,31 @@ For two of them that reached a private key:
 - `resolveSSHConfig` in `internal/session/factory.go` expands an `IdentityFile` read out of the
   user's `~/.ssh/config`, where both a `~/`-prefixed and a bare relative value are defined by
   OpenSSH as relative to the home directory. Both became working-directory-relative. The path is
-  now left exactly as the ssh config wrote it, and the unreachable key is reported by
-  `buildAuthMethods` a moment later.
+  now left exactly as the ssh config wrote it, rather than rebuilt against an empty home.
+
+**Leaving the path alone is not by itself the safety property, and an earlier revision of this
+section claimed that it was.** That claim was wrong and was caught in review. An unexpanded
+`~/.ssh/id_ed25519` and an already-relative `.ssh/id_ed25519` are both still relative paths, and no
+syscall treats `~` as the home directory, so `os.ReadFile` resolves either against the working
+directory just as `.ssh/id_ed25519` was resolved before. The bare-relative form is the more
+dangerous of the two, because `.ssh` is an ordinary directory name.
+
+What closes it is `requireAbsolutePath` in `internal/session/ssh.go`, applied at the two reads:
+`buildAuthMethods` refuses a `KeyFile` that is not absolute, and `resolveKnownHostsFile` refuses an
+explicitly configured `known_hosts` file that is not absolute. Every route that produces one of
+these paths yields an absolute path when it works — an operator writing one, `internal/config`'s
+`expandTilde`, or `resolveSSHConfig`'s `expandIdentityFile` — so a relative path at the read means an
+expansion that could not happen, never a path worth trying. This is the same absolute-path-first
+shape `validateShell` and `validRemotePath` already use. The known_hosts half is included because the
+consequence is the same class: a `known_hosts` file read out of the working directory decides
+host-key verification. `TestBuildAuthMethods_NonAbsoluteKeyFile_IsRefusedRatherThanReadFromTheWorkingDirectory`
+plants a readable key at both relative paths first, so it fails if the guard is removed rather than
+merely failing to find a file.
+
+Note the accepted behavior change: a `key_file` or `known_hosts_file` deliberately written as a
+working-directory-relative path in `config.yaml` is now refused. Every documented form
+([behavior.md](behavior.md)'s table and examples, README's) is `~/`-prefixed or absolute, and a
+server process's working directory is not a place credentials are kept on purpose.
 
 The failure needs no attacker to arrange the missing home directory — a systemd unit with no `HOME`,
 or a container with no passwd entry for the uid, is enough — but it does need one to place a key

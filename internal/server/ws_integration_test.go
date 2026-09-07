@@ -79,6 +79,7 @@ func newWSEnvIn(t *testing.T, home string, runner *commandcenter.Runner) *wsEnv 
 	t.Helper()
 
 	homedir.SetForTest(t, home)
+	t.Setenv("HOME", home) // os.UserCacheDir reads $HOME directly on darwin; see newAPIEnv
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
 
 	mgr := session.NewManager()

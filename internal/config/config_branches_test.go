@@ -43,7 +43,7 @@ func TestLoad_MissingFile_ReportsAReadFailure(t *testing.T) {
 }
 
 // LoadOrDefault resolves the path from the home directory, so both of its arms
-// are reachable by pointing the userHomeDirFn seam somewhere this test owns.
+// are reachable by pointing the home-directory seam somewhere this test owns.
 func TestLoadOrDefault_NoConfigAtTheDefaultPath_ReturnsDefaultsAimedAtIt(t *testing.T) {
 	home := t.TempDir()
 	homedir.SetForTest(t, home)

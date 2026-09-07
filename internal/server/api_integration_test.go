@@ -87,17 +87,24 @@ const integrationToken = "integration-token"
 // newAPIEnv builds a server from the same New() the binary calls, with two
 // deliberate hermeticity choices:
 //
-//   - HOME points at a temp directory, so ~/.ssh/config and the command
-//     center's history file resolve inside the test rather than reading (or,
-//     for POST /api/ssh-config/hosts, writing) the developer's own files.
-//     It has to be set before New(), because api.NewHandler resolves
+//   - the home-directory seam points at a temp directory, so ~/.ssh/config and
+//     the command center's history file resolve inside the test rather than
+//     reading (or, for POST /api/ssh-config/hosts, writing) the developer's own
+//     files. It has to be set before New(), because api.NewHandler resolves
 //     sshconfig.DefaultPath() once at construction.
-//   - XDG_CACHE_HOME points inside it too. HOME alone is not enough:
-//     os.UserCacheDir prefers XDG_CACHE_HOME over $HOME/.cache, and creating
-//     a local pane installs the browser shim there (see
-//     session.installLocalBrowserShim), so on a machine that exports the
-//     variable — a CI image, a desktop session — this suite wrote three real
-//     files into a directory the test never chose.
+//   - $HOME and XDG_CACHE_HOME point inside it too, and both are still needed
+//     even with the seam, because the directory at risk here is the *cache*
+//     directory, which os.UserCacheDir resolves without ever consulting
+//     os.UserHomeDir. Creating a local pane installs the browser shim there
+//     (see session.installLocalBrowserShim), so on a machine that exports
+//     XDG_CACHE_HOME — a CI image, a desktop session — this suite wrote three
+//     real files into a directory the test never chose. XDG_CACHE_HOME alone
+//     does not cover it either: os.UserCacheDir ignores that variable on
+//     darwin and returns $HOME/Library/Caches, so dropping the $HOME override
+//     would put the shim in a Mac developer's real cache directory. The shape
+//     that would actually close this is promoting internal/session's own
+//     userCacheDirFn the way this package's homedir seam was promoted; until
+//     then both variables stay.
 //   - the config carries no file path, which makes config.write() a no-op, so
 //     the layout and workspace writes these routes perform stay in memory.
 func newAPIEnv(t *testing.T) *apiEnv {
@@ -105,6 +112,7 @@ func newAPIEnv(t *testing.T) *apiEnv {
 
 	home := t.TempDir()
 	homedir.SetForTest(t, home)
+	t.Setenv("HOME", home) // os.UserCacheDir reads $HOME directly on darwin
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
 
 	cfg := testConfigWithToken(integrationToken)

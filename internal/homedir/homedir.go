@@ -41,11 +41,20 @@ type TestingT interface {
 // SetForTest points Dir at home for the duration of the test, restoring the
 // previous value afterwards.
 //
-// This replaces t.Setenv("HOME", ...), which was the workaround before the
-// seam existed. The difference is not only style: t.Setenv mutates state the
-// whole test binary shares, it is refused outright in a test that has called
-// t.Parallel, and it does not work on Windows at all, where os.UserHomeDir
-// reads USERPROFILE rather than HOME.
+// This replaces t.Setenv("HOME", ...), which was the workaround before the seam
+// existed. What it buys: the process environment is left alone, so nothing else
+// in the binary — or any subprocess it starts — sees the substitution; it works
+// on Windows, where os.UserHomeDir reads USERPROFILE and setting HOME does
+// nothing; and a failure can be injected directly rather than conjured out of
+// os.UserHomeDir rejecting an empty $HOME, which only happens on Unix.
+//
+// What it does NOT buy, stated plainly because the shape invites the
+// assumption: this is not safe under t.Parallel. dirFn is one unsynchronized
+// variable for the whole test binary, exactly as $HOME was, so two parallel
+// tests substituting it race, and the loser silently reads the other's home
+// directory. t.Setenv is in one way better here — it panics rather than
+// letting that happen. Substitute the seam only from tests that do not call
+// t.Parallel; no test in this repository does.
 func SetForTest(t TestingT, home string) {
 	t.Helper()
 	setForTest(t, func() (string, error) { return home, nil })

@@ -362,14 +362,20 @@ func TestCreateSession_SSHConfigPort_UsedWhenSet(t *testing.T) {
 
 // resolveSSHConfig expands an IdentityFile against the home directory and does
 // not report a failure to resolve it — the ssh config's other fields are still
-// usable, and the caller gets a clear "no auth methods" from buildAuthMethods
-// later if the key really is unreachable. Issue #212 asked for that swallow to
-// be decided rather than inherited.
+// usable. Issue #212 asked for that swallow to be decided rather than
+// inherited, and what it must not do is join against an empty home: that turned
+// "~/.ssh/id_ed25519" into ".ssh/id_ed25519", inventing a path that names a
+// real, ordinary directory relative to wherever panemux was started.
 //
-// What it must not do is join against an empty home. Both arms did:
-// "~/.ssh/id_ed25519" became ".ssh/id_ed25519" and a relative
-// ".ssh/id_ed25519" stayed relative, either of which reads a private key from
-// whatever directory panemux was started in.
+// Leaving the value as the ssh config wrote it is only half the answer, and on
+// its own it is not a safety property: an unexpanded "~/.ssh/id_ed25519" and an
+// already-relative ".ssh/id_ed25519" are both still relative, and os.ReadFile
+// resolves either against the working directory. What makes the failure safe is
+// buildAuthMethods' requireAbsolutePath guard refusing to read a path that is
+// not absolute — see
+// TestBuildAuthMethods_NonAbsoluteKeyFile_IsRefusedRatherThanReadFromTheWorkingDirectory,
+// which plants a readable key at both paths to show the read would otherwise
+// succeed. This test pins the half that belongs here: no invented path.
 func TestResolveSSHConfig_UnresolvableHomeDirectory_LeavesTheIdentityFileAlone(t *testing.T) {
 	for name, identityFile := range map[string]string{
 		"tilde prefixed": "~/.ssh/id_ed25519",
@@ -387,7 +393,9 @@ func TestResolveSSHConfig_UnresolvableHomeDirectory_LeavesTheIdentityFileAlone(t
 
 			require.NoError(t, err, "one unexpandable path must not fail the whole lookup")
 			assert.Equal(t, identityFile, cfg.KeyFile,
-				"a private key path must never become relative to the working directory")
+				"the path must be left as the ssh config wrote it, not rebuilt against an empty home")
+			require.Error(t, requireAbsolutePath("key file", cfg.KeyFile),
+				"and the guard at the read must be what refuses it")
 			assert.Equal(t, "myhost.example.com", cfg.Host, "the rest of the entry is still usable")
 		})
 	}

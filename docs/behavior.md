@@ -51,9 +51,9 @@ Each entry under `ssh_connections` in the YAML config has the following fields:
 | `host` | yes | Hostname or IP address |
 | `user` | yes | Remote username |
 | `port` | no (default 22) | SSH port |
-| `key_file` | no | Path to private key; `~/` is expanded at load time |
+| `key_file` | no | Absolute path to a private key, or `~/…`, which is expanded at load time. A path that is still relative when the key is read is refused — see [security.md](security.md#ssh-private-key-paths-and-an-unresolvable-home-directory) |
 | `password` | no | Password for password-based authentication |
-| `known_hosts_file` | no (default `~/.ssh/known_hosts`) | Path to known\_hosts file for host-key verification |
+| `known_hosts_file` | no (default `~/.ssh/known_hosts`) | Path to known\_hosts file for host-key verification. Absolute or `~/…`, refused when still relative at the read, for the same reason as `key_file` |
 
 Example:
 
