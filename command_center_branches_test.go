@@ -10,6 +10,7 @@ import (
 
 	"panemux/internal/commandcenter"
 	"panemux/internal/config"
+	"panemux/internal/homedir"
 )
 
 // setupCommandCenter is additive, never load-bearing: every failure in it
@@ -33,7 +34,7 @@ func commandCenterConfig() *config.Config {
 // is the operator's only sign that the palette will not be there.
 func TestSetupCommandCenterReportsAnUnresolvableHomeDirectory(t *testing.T) {
 	logs := captureBootstrapLog(t)
-	t.Setenv("HOME", "")
+	homedir.SetFailingForTest(t, errNoHomeDir)
 
 	runner := setupCommandCenter(commandCenterConfig())
 
@@ -51,7 +52,7 @@ func TestSetupCommandCenterReportsAnUnresolvableHomeDirectory(t *testing.T) {
 // be the exec, not the config.
 func TestSetupCommandCenterBuildsItsMCPConfigPerQuery(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	homedir.SetForTest(t, home)
 	// An empty PATH so the `claude` the runner tries to exec is certainly
 	// absent, whatever the host has installed.
 	t.Setenv("PATH", t.TempDir())

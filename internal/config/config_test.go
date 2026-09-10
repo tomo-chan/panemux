@@ -12,6 +12,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"panemux/internal/homedir"
 )
 
 func TestValidate_ValidConfig_NoError(t *testing.T) {
@@ -889,8 +891,8 @@ func TestValidate_TmuxPaneEmptyTmuxSession_Error(t *testing.T) {
 }
 
 func TestExpandPaths_SSHKeyTilde(t *testing.T) {
-	home, err := os.UserHomeDir()
-	require.NoError(t, err)
+	home := "/workspace/user/home"
+	homedir.SetForTest(t, home)
 
 	content := `
 server:
@@ -921,8 +923,8 @@ layout:
 }
 
 func TestExpandPanesCwd_Tilde(t *testing.T) {
-	home, err := os.UserHomeDir()
-	require.NoError(t, err)
+	home := "/workspace/user/home"
+	homedir.SetForTest(t, home)
 
 	content := `
 server:
@@ -948,8 +950,8 @@ layout:
 }
 
 func TestExpandPanesCwd_AllWorkspaces(t *testing.T) {
-	home, err := os.UserHomeDir()
-	require.NoError(t, err)
+	home := "/workspace/user/home"
+	homedir.SetForTest(t, home)
 
 	content := `
 server:

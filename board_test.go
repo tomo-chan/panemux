@@ -14,6 +14,7 @@ import (
 
 	"panemux/internal/board"
 	"panemux/internal/config"
+	"panemux/internal/homedir"
 	"panemux/internal/session"
 )
 
@@ -220,10 +221,8 @@ func TestDynamicBoardExecutor_AllCandidatesFail_ReturnsError(t *testing.T) {
 }
 
 func TestExpandLocalAgmsgPath_TildePrefixed_ExpandsToHome(t *testing.T) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Fatalf("os.UserHomeDir: %v", err)
-	}
+	home := "/workspace/user/home"
+	homedir.SetForTest(t, home)
 	got := expandLocalAgmsgPath("~/.agents/skills/agmsg")
 	want := filepath.Join(home, ".agents", "skills", "agmsg")
 	if got != want {
@@ -239,10 +238,8 @@ func TestExpandLocalAgmsgPath_AbsolutePath_Unchanged(t *testing.T) {
 }
 
 func TestResolveAgmsgPathForHost_Local_ExpandsAgainstLocalHome(t *testing.T) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Fatalf("os.UserHomeDir: %v", err)
-	}
+	home := "/workspace/user/home"
+	homedir.SetForTest(t, home)
 	cfg := &config.Config{AgentBoard: config.AgentBoardConfig{AgmsgPath: "~/.agents/skills/agmsg"}}
 
 	path, ok := resolveAgmsgPathForHost(cfg, session.NewManager(), nil, boardHostIDLocal)
@@ -448,7 +445,7 @@ func TestBoardHostForPane(t *testing.T) {
 
 func TestPersistBoardCursors_WritesAFileLoadCursorFileCanReadBack(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	homedir.SetForTest(t, home)
 	require.NoError(t, os.MkdirAll(filepath.Join(home, ".config", "panemux"), 0o700))
 
 	entries := []board.CursorEntry{{Host: "local", Team: "demo", Cursor: "abc"}}
@@ -461,14 +458,14 @@ func TestPersistBoardCursors_WritesAFileLoadCursorFileCanReadBack(t *testing.T) 
 	assert.Equal(t, entries, got)
 }
 
-// unwritableHome points HOME at a directory whose .config can never be
-// created, and returns once that is true.
+// unwritableHome points the home-directory seam at a directory whose .config
+// can never be created, and returns once that is true.
 //
 // Making these saves actually fail takes more than an absent directory, which
 // is the trap an earlier version of both tests below fell into: the persist
 // helpers go through board.atomicWriteFile, whose first statement is
-// os.MkdirAll, so a missing HOME is simply created on demand and the write
-// SUCCEEDS. Those tests therefore drove the happy path while claiming to cover
+// os.MkdirAll, so a missing home directory is simply created on demand and
+// the write SUCCEEDS. Those tests therefore drove the happy path while claiming to cover
 // the failure branch — tautological tests of exactly the shape this
 // repository's own red-check (docs/quality-gateway.md, D4) exists to catch,
 // and `go tool cover` showed it: both functions sat at 50%.
@@ -484,7 +481,7 @@ func TestPersistBoardCursors_WritesAFileLoadCursorFileCanReadBack(t *testing.T) 
 func unwritableHome(t *testing.T) {
 	t.Helper()
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	homedir.SetForTest(t, home)
 	require.NoError(t, os.WriteFile(filepath.Join(home, ".config"), []byte("not a directory"), 0o600))
 }
 
@@ -506,7 +503,7 @@ func TestPersistBoardCursors_UnwritableLocation_DoesNotPanic(t *testing.T) {
 
 func TestPersistBootstrapState_WritesAFileLoadBootstrapStateCanReadBack(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	homedir.SetForTest(t, home)
 	require.NoError(t, os.MkdirAll(filepath.Join(home, ".config", "panemux"), 0o700))
 
 	persistBootstrapState([]string{"pane-a", "pane-b"})

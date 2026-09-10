@@ -13,6 +13,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"panemux/internal/homedir"
 )
 
 type fakeFileInfo struct {
@@ -1033,15 +1035,13 @@ func TestGetActiveWorkdir_PrefersClaudeTranscriptWorktree(t *testing.T) {
 
 	originalListProcesses := listProcessesFn
 	originalGetPIDCWD := getPIDCWDFn
-	originalUserHomeDir := userHomeDirFn
 	t.Cleanup(func() {
 		listProcessesFn = originalListProcesses
 		getPIDCWDFn = originalGetPIDCWD
-		userHomeDirFn = originalUserHomeDir
 	})
 
 	homeDir := t.TempDir()
-	userHomeDirFn = func() (string, error) { return homeDir, nil }
+	homedir.SetForTest(t, homeDir)
 
 	sessionMetaPath := filepath.Join(homeDir, ".claude", "sessions", "220.json")
 	require.NoError(t, os.MkdirAll(filepath.Dir(sessionMetaPath), 0755))
@@ -1092,15 +1092,13 @@ func TestGetActiveWorkdir_PrefersClaudeTranscriptWorktree_WithDotInCWD(t *testin
 
 	originalListProcesses := listProcessesFn
 	originalGetPIDCWD := getPIDCWDFn
-	originalUserHomeDir := userHomeDirFn
 	t.Cleanup(func() {
 		listProcessesFn = originalListProcesses
 		getPIDCWDFn = originalGetPIDCWD
-		userHomeDirFn = originalUserHomeDir
 	})
 
 	homeDir := t.TempDir()
-	userHomeDirFn = func() (string, error) { return homeDir, nil }
+	homedir.SetForTest(t, homeDir)
 
 	sessionMetaPath := filepath.Join(homeDir, ".claude", "sessions", "220.json")
 	require.NoError(t, os.MkdirAll(filepath.Dir(sessionMetaPath), 0755))
@@ -1146,17 +1144,15 @@ func TestGetActiveWorkdir_ClaudeSessionScanSkipsUnreadableMetadata(t *testing.T)
 
 	originalListProcesses := listProcessesFn
 	originalGetPIDCWD := getPIDCWDFn
-	originalUserHomeDir := userHomeDirFn
 	originalReadFile := readFileFn
 	t.Cleanup(func() {
 		listProcessesFn = originalListProcesses
 		getPIDCWDFn = originalGetPIDCWD
-		userHomeDirFn = originalUserHomeDir
 		readFileFn = originalReadFile
 	})
 
 	homeDir := t.TempDir()
-	userHomeDirFn = func() (string, error) { return homeDir, nil }
+	homedir.SetForTest(t, homeDir)
 
 	badSessionPath := filepath.Join(homeDir, ".claude", "sessions", "100.json")
 	goodSessionPath := filepath.Join(homeDir, ".claude", "sessions", "220.json")
@@ -1208,15 +1204,13 @@ func TestGetActiveWorkdir_ClaudeSessionScanRejectsInvalidSessionID(t *testing.T)
 
 	originalListProcesses := listProcessesFn
 	originalGetPIDCWD := getPIDCWDFn
-	originalUserHomeDir := userHomeDirFn
 	t.Cleanup(func() {
 		listProcessesFn = originalListProcesses
 		getPIDCWDFn = originalGetPIDCWD
-		userHomeDirFn = originalUserHomeDir
 	})
 
 	homeDir := t.TempDir()
-	userHomeDirFn = func() (string, error) { return homeDir, nil }
+	homedir.SetForTest(t, homeDir)
 
 	sessionMetaPath := filepath.Join(homeDir, ".claude", "sessions", "220.json")
 	require.NoError(t, os.MkdirAll(filepath.Dir(sessionMetaPath), 0755))
@@ -1271,15 +1265,13 @@ func TestGetActiveWorkdirs_EmptySubagentsDirectory(t *testing.T) {
 
 	originalListProcesses := listProcessesFn
 	originalGetPIDCWD := getPIDCWDFn
-	originalUserHomeDir := userHomeDirFn
 	t.Cleanup(func() {
 		listProcessesFn = originalListProcesses
 		getPIDCWDFn = originalGetPIDCWD
-		userHomeDirFn = originalUserHomeDir
 	})
 
 	homeDir := t.TempDir()
-	userHomeDirFn = func() (string, error) { return homeDir, nil }
+	homedir.SetForTest(t, homeDir)
 
 	_, transcriptPath := setUpClaudeSessionTranscripts(t, homeDir)
 	require.NoError(t, os.WriteFile(
@@ -1315,15 +1307,13 @@ func TestGetActiveWorkdirs_IncludesSubagentTranscriptWorktree(t *testing.T) {
 
 	originalListProcesses := listProcessesFn
 	originalGetPIDCWD := getPIDCWDFn
-	originalUserHomeDir := userHomeDirFn
 	t.Cleanup(func() {
 		listProcessesFn = originalListProcesses
 		getPIDCWDFn = originalGetPIDCWD
-		userHomeDirFn = originalUserHomeDir
 	})
 
 	homeDir := t.TempDir()
-	userHomeDirFn = func() (string, error) { return homeDir, nil }
+	homedir.SetForTest(t, homeDir)
 
 	// Parent transcript never leaves the base repo; only a subagent transcript
 	// actually visited a sibling worktree, mirroring the real-world case where
@@ -1368,15 +1358,13 @@ func TestGetActiveWorkdirs_MultipleSubagentTranscripts_AllDistinctWorktreesRetur
 
 	originalListProcesses := listProcessesFn
 	originalGetPIDCWD := getPIDCWDFn
-	originalUserHomeDir := userHomeDirFn
 	t.Cleanup(func() {
 		listProcessesFn = originalListProcesses
 		getPIDCWDFn = originalGetPIDCWD
-		userHomeDirFn = originalUserHomeDir
 	})
 
 	homeDir := t.TempDir()
-	userHomeDirFn = func() (string, error) { return homeDir, nil }
+	homedir.SetForTest(t, homeDir)
 
 	_, transcriptPath := setUpClaudeSessionTranscripts(t, homeDir)
 	require.NoError(t, os.WriteFile(
@@ -1432,15 +1420,13 @@ func TestGetActiveWorkdirs_StaleSubagentTranscriptStillIncluded(t *testing.T) {
 
 	originalListProcesses := listProcessesFn
 	originalGetPIDCWD := getPIDCWDFn
-	originalUserHomeDir := userHomeDirFn
 	t.Cleanup(func() {
 		listProcessesFn = originalListProcesses
 		getPIDCWDFn = originalGetPIDCWD
-		userHomeDirFn = originalUserHomeDir
 	})
 
 	homeDir := t.TempDir()
-	userHomeDirFn = func() (string, error) { return homeDir, nil }
+	homedir.SetForTest(t, homeDir)
 
 	_, transcriptPath := setUpClaudeSessionTranscripts(t, homeDir)
 	require.NoError(t, os.WriteFile(
@@ -1485,15 +1471,13 @@ func TestGetActiveWorkdirs_NoSubagentsDirectory_BackwardCompatible(t *testing.T)
 
 	originalListProcesses := listProcessesFn
 	originalGetPIDCWD := getPIDCWDFn
-	originalUserHomeDir := userHomeDirFn
 	t.Cleanup(func() {
 		listProcessesFn = originalListProcesses
 		getPIDCWDFn = originalGetPIDCWD
-		userHomeDirFn = originalUserHomeDir
 	})
 
 	homeDir := t.TempDir()
-	userHomeDirFn = func() (string, error) { return homeDir, nil }
+	homedir.SetForTest(t, homeDir)
 
 	_, transcriptPath := setUpClaudeSessionTranscripts(t, homeDir)
 	require.NoError(t, os.WriteFile(
@@ -1528,15 +1512,13 @@ func TestGetActiveWorkdirs_CorruptSubagentTranscriptIgnored(t *testing.T) {
 
 	originalListProcesses := listProcessesFn
 	originalGetPIDCWD := getPIDCWDFn
-	originalUserHomeDir := userHomeDirFn
 	t.Cleanup(func() {
 		listProcessesFn = originalListProcesses
 		getPIDCWDFn = originalGetPIDCWD
-		userHomeDirFn = originalUserHomeDir
 	})
 
 	homeDir := t.TempDir()
-	userHomeDirFn = func() (string, error) { return homeDir, nil }
+	homedir.SetForTest(t, homeDir)
 
 	_, transcriptPath := setUpClaudeSessionTranscripts(t, homeDir)
 	require.NoError(t, os.WriteFile(

@@ -9,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"panemux/internal/homedir"
 )
 
 // Two groups here, and they fail in opposite directions.
@@ -42,7 +44,7 @@ func captureConfigLog(t *testing.T) *bytes.Buffer {
 // invalidating the one the dashboard already holds.
 func TestEnsureAuthTokenReportsAnUnresolvablePath(t *testing.T) {
 	logs := captureConfigLog(t)
-	t.Setenv("HOME", "")
+	homedir.SetFailingForTest(t, errNoHomeDir)
 	cfg := &Config{}
 
 	cfg.EnsureAuthToken()

@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"panemux/internal/homedir"
 )
 
 // Host represents a single Host block parsed from an SSH config file.
@@ -23,7 +25,7 @@ type Host struct {
 
 // DefaultPath returns the default SSH config path (~/.ssh/config).
 func DefaultPath() string {
-	home, err := os.UserHomeDir()
+	home, err := homedir.Dir()
 	if err != nil {
 		return filepath.Join(".ssh", "config")
 	}

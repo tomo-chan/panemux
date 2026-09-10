@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"panemux/internal/homedir"
 )
 
 const historyFileName = "command-center-history.jsonl"
@@ -140,7 +142,7 @@ func LoadHistory(path string) ([]HistoryEntry, error) {
 
 // DefaultHistoryFilePath returns ~/.config/panemux/command-center-history.jsonl.
 func DefaultHistoryFilePath() (string, error) {
-	home, err := os.UserHomeDir()
+	home, err := homedir.Dir()
 	if err != nil {
 		return "", fmt.Errorf("getting home directory: %w", err)
 	}

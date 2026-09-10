@@ -88,6 +88,20 @@ Known anti-patterns:
 
 Example: `Config.sshConfigPath` uses `sshconfig.DefaultPath()` only when the override is empty.
 
+**The home directory has one seam, and it is `internal/homedir`.** Call `homedir.Dir()`; substitute it
+in a test with `homedir.SetForTest(t, dir)` or `homedir.SetFailingForTest(t, err)`. Do **not** call
+`os.UserHomeDir()` — `.golangci.yml`'s `forbidigo` rule fails the build on it outside that package —
+and do not reach for `t.Setenv("HOME", ...)`, which mutates the process environment every goroutine
+and subprocess in the binary shares, and does nothing on Windows, where `os.UserHomeDir` reads
+`USERPROFILE`. Note what the seam does **not** fix: `homedir.dirFn` is one unsynchronized package
+variable, so substituting it is no safer under `t.Parallel` than `$HOME` was — `t.Setenv` at least
+panics there, while the seam races silently. Substitute it only from non-parallel tests. It is one
+package rather than one variable per caller because
+the callers do not line up with the tests: `internal/api`'s handler tests drive tilde expansion that
+happens inside `internal/config`, `internal/server`'s integration tests drive config, api and session
+at once, and the root package's tests drive `internal/commandcenter`'s default paths — none of which
+a package-private variable can reach. See issue [#212](https://github.com/tomo-chan/panemux/issues/212).
+
 ### Schema-first
 
 - For Go structure changes, update validation rules and tests in `internal/config/validate.go` first.
@@ -115,7 +129,7 @@ Example: `Config.sshConfigPath` uses `sshconfig.DefaultPath()` only when the ove
 
 ### Coverage
 
-- `make coverage-go` enforces at least 80% combined coverage across `internal/config`, `internal/api`, `internal/ws`, `internal/server`, `internal/board`, `internal/portforward`, `internal/commandcenter`, `internal/boardmcp`, and the root package.
+- `make coverage-go` enforces at least 80% combined coverage across `internal/config`, `internal/api`, `internal/ws`, `internal/server`, `internal/board`, `internal/portforward`, `internal/commandcenter`, `internal/boardmcp`, `internal/homedir`, and the root package.
 - `make coverage-frontend` enforces at least 80% coverage across `frontend/src/hooks/`, `frontend/src/schemas/`, and `frontend/src/utils/`.
 - **The threshold stays at 80%; what gets strengthened is the scope.** Raising it works, but the cheapest way to satisfy a higher number is to generate tautological tests, which lowers both protection against regressions and resistance to refactoring. See decision D1 in [docs/quality-gateway.md](docs/quality-gateway.md).
 - The gated package set is checked against `go list ./...` by `TestCoverageScopeCoversEveryPackage`, so a package added to the repository fails the suite until it is either gated or explicitly excluded with a reason. Do not widen the exclusion list to make that failure go away.
@@ -166,6 +180,7 @@ Example: `Config.sshConfigPath` uses `sshconfig.DefaultPath()` only when the ove
 - Accessibility ceiling: `make test-e2e` scans the dashboard and the pane settings dialog with axe-core and **fails when a violation count rises** above the value frozen in `CEILINGS` in `frontend/e2e/a11y-ceiling.ts`. A count may fall; a rule not listed has a ceiling of zero. After fixing a violation, lower the ceiling in that map and in the "Accessibility" table in [docs/quality-gateway.md](docs/quality-gateway.md) in the same change — the run prints the exact replacement line.
 - Lint commands: `make lint-go`, `make lint-frontend`, `make lint`
 - Go lint includes `gofmt`, `go vet`, and `golangci-lint run ./...` using `.golangci.yml`.
+- `.golangci.yml`'s `forbidigo` rule is where a repository convention is enforced rather than remembered: it fails the build on any `os.UserHomeDir()` call outside `internal/homedir`. The testability rule above had been advice for long enough to accumulate 16 violations across nine packages before anyone counted them.
 - `lint-go-deps` refreshes the pinned `golangci-lint` binary when the local version does not match `GOLANGCI_LINT_VERSION`, so local lint matches CI.
 - Run `make lint-go` or `make lint` after every Go code change before committing.
 - [docs/quality-gateway.md](docs/quality-gateway.md) explains what these gates are responsible for and which further gates are designed but not yet built. Read it before changing the gate set itself.

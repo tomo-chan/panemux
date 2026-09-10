@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"panemux/internal/config"
+	"panemux/internal/homedir"
 	"panemux/internal/session"
 )
 
@@ -142,7 +143,7 @@ func TestParseOptions_Help_WrapsErrHelp(t *testing.T) {
 }
 
 func TestLoadConfig_ExplicitPath_UsesLoad(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	homedir.SetForTest(t, t.TempDir())
 
 	want := &config.Config{Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1"}}
 	var loadedPath string
@@ -164,7 +165,7 @@ func TestLoadConfig_ExplicitPath_UsesLoad(t *testing.T) {
 }
 
 func TestLoadConfig_NoPath_UsesLoadOrDefault(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	homedir.SetForTest(t, t.TempDir())
 
 	want := &config.Config{Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1"}}
 	loader := configLoader{
@@ -181,7 +182,7 @@ func TestLoadConfig_NoPath_UsesLoadOrDefault(t *testing.T) {
 }
 
 func TestLoadConfig_PortOverride_WinsOverFile(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	homedir.SetForTest(t, t.TempDir())
 
 	loader := configLoader{
 		loadOrDefault: func() (*config.Config, error) {
@@ -197,7 +198,7 @@ func TestLoadConfig_PortOverride_WinsOverFile(t *testing.T) {
 // Port 0 means "not given", not "port zero": the flag's own zero value must
 // leave whatever the config file said intact.
 func TestLoadConfig_ZeroPort_LeavesConfigPortAlone(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	homedir.SetForTest(t, t.TempDir())
 
 	loader := configLoader{
 		loadOrDefault: func() (*config.Config, error) {
@@ -211,7 +212,7 @@ func TestLoadConfig_ZeroPort_LeavesConfigPortAlone(t *testing.T) {
 }
 
 func TestLoadConfig_LoadError_IsWrapped(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	homedir.SetForTest(t, t.TempDir())
 
 	sentinel := errors.New("config file is unreadable")
 	loader := configLoader{
@@ -225,11 +226,12 @@ func TestLoadConfig_LoadError_IsWrapped(t *testing.T) {
 }
 
 // EnsureAuthToken runs as part of loading, so a config that arrives without a
-// token leaves loadConfig with one. HOME is a temp directory here, so the
-// token file lands there rather than in the developer's own ~/.config.
+// token leaves loadConfig with one. The home directory is a temp directory
+// here, so the token file lands there rather than in the developer's own
+// ~/.config.
 func TestLoadConfig_GeneratesAuthToken(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	homedir.SetForTest(t, home)
 
 	loader := configLoader{
 		loadOrDefault: func() (*config.Config, error) {
@@ -247,7 +249,7 @@ func TestLoadConfig_GeneratesAuthToken(t *testing.T) {
 }
 
 func TestLoadConfig_ExistingAuthToken_IsKept(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	homedir.SetForTest(t, t.TempDir())
 
 	loader := configLoader{
 		loadOrDefault: func() (*config.Config, error) {

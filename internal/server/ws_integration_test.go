@@ -18,6 +18,7 @@ import (
 
 	"panemux/internal/board"
 	"panemux/internal/commandcenter"
+	"panemux/internal/homedir"
 	"panemux/internal/session"
 )
 
@@ -77,7 +78,8 @@ func newWSEnv(t *testing.T, runner *commandcenter.Runner) *wsEnv {
 func newWSEnvIn(t *testing.T, home string, runner *commandcenter.Runner) *wsEnv {
 	t.Helper()
 
-	t.Setenv("HOME", home)
+	homedir.SetForTest(t, home)
+	t.Setenv("HOME", home) // os.UserCacheDir reads $HOME directly on darwin; see newAPIEnv
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
 
 	mgr := session.NewManager()
