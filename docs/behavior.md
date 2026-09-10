@@ -641,7 +641,9 @@ Once connected, the client may send any number of prompts sequentially over the 
     center subprocess, forwarded as it arrives
   - `{"type":"error","message":"..."}` — the query failed (non-zero exit, malformed stream-json
     output, or a context cancellation/timeout); always the last frame for that query
-  - `{"type":"done"}` — the query finished successfully; always the last frame for that query
+  - `{"type":"done"}`, optionally `{"type":"done","warnings":["..."]}` — the query finished
+    successfully; always the last frame for that query. `warnings` is omitted entirely unless
+    something around the turn failed — see the paragraph below
   - `{"type":"busy"}` — a query was already in flight against the command center's single session
     (see [agent-board.md's Concurrency](agent-board.md#process-lifecycle)); the new prompt was
     rejected outright, not queued
@@ -658,6 +660,21 @@ nothing else notices it; and every server→client write carries its own 10-seco
 client that stops reading without closing its TCP connection (a sleeping laptop, a dropped network
 with no FIN) fails the write — and falls into the same drain-without-forwarding path described above —
 instead of blocking the server goroutine forever.
+
+**Exactly one of `error` and `done` ends a query, and `warnings` is how the successful one reports a
+non-fatal failure.** Both frames above are documented as the last frame for a query, so only one of
+them can be sent. The case that made this concrete is a failed history write (issue #214): the
+subprocess answered, the operator has the answer on screen, and the only thing that failed was
+persisting the record of it — genuinely not a failed turn, but not something to hide either. It used
+to be reported as an `error` frame followed by a `done` frame, which left the query with no terminal
+frame at all and made the dashboard render a successful answer as failed. It now travels as a string
+in `warnings` on the `done` frame, which the palette renders under the answer rather than in place
+of it.
+
+A turn that ends in an `error` frame carries no warnings: the error is the actionable frame, and a
+note about the record of a turn that produced no answer would only compete with it. Such a failure
+is written to panemux's own log instead, so it is not lost — as it also is on the successful path,
+alongside the frame.
 
 **A query killed by the timeout above is not treated as a `--resume` rejection.** The client sees a
 distinct `{"type":"error","message":"claude query timed out after 5m0s"}` (or whatever

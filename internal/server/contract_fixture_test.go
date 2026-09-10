@@ -307,9 +307,7 @@ var contractFixtures = map[string]contractFixture{
 		return captureWSControlFrames(t), nil
 	}},
 
-	"ws-board-command-frames": {capture: func(t *testing.T) ([]byte, map[string]string) {
-		return captureBoardCommandFrames(t), nil
-	}},
+	"ws-board-command-frames": {capture: captureBoardCommandFrames},
 }
 
 // sortJSONArrayByID orders a JSON array of objects by their "id".
@@ -479,10 +477,18 @@ func captureWSControlFrames(t *testing.T) []byte {
 }
 
 // captureBoardCommandFrames returns one of every server->client frame
-// /ws/board-command emits: error, busy, line and done. The gate file is what
-// makes `busy` reachable without a timing assumption — see
+// /ws/board-command emits: error, busy, line and done — plus the second shape
+// `done` has, the one carrying `warnings`. The gate file is what makes `busy`
+// reachable without a timing assumption — see
 // TestWSIntegration_BoardCommandRoute_SecondConcurrentQueryIsBusy.
-func captureBoardCommandFrames(t *testing.T) []byte {
+//
+// The warning-bearing `done` needs a second connection because it needs a
+// second Runner: `warnings` is only populated when that Runner's own history
+// write fails, and the first one's has to succeed for the plain `done` above
+// it. Capturing both is what keeps the optional field from being declared
+// unexercised in frontend/src/schemas/contract.test.ts — a `warnings` key no
+// capture ever populates would prove nothing about whether Go emits it.
+func captureBoardCommandFrames(t *testing.T) ([]byte, map[string]string) {
 	t.Helper()
 
 	dir := t.TempDir()
@@ -515,9 +521,46 @@ func captureBoardCommandFrames(t *testing.T) []byte {
 		readRawControl(t, first), // done
 	)
 
+	warningFrame, brokenDir := captureBoardCommandDoneWithWarnings(t)
+	frames = append(frames, warningFrame) // done, carrying a warning
+
 	out, err := json.Marshal(frames)
 	require.NoError(t, err)
-	return out
+	return out, map[string]string{brokenDir: fixtureHomePath}
+}
+
+// captureBoardCommandDoneWithWarnings runs one query whose history write
+// cannot succeed, and returns the `done` frame it produced plus the temp
+// directory that appears inside the warning text, for the caller to normalize
+// away. A failed history write does not fail the turn — see #214 and
+// commandcenter.Event's doc comment — so what the client receives is still a
+// single terminal `done`, with the failure attached to it.
+func captureBoardCommandDoneWithWarnings(t *testing.T) (json.RawMessage, string) {
+	t.Helper()
+
+	dir := t.TempDir()
+	notADir := filepath.Join(dir, "notadir")
+	require.NoError(t, os.WriteFile(notADir, []byte("not a directory\n"), 0o600))
+	mcpPath := filepath.Join(dir, "mcp.json")
+	require.NoError(t, os.WriteFile(mcpPath, []byte(`{"mcpServers":{}}`), 0o600))
+
+	runner := commandcenter.NewRunner(commandcenter.RunnerConfig{
+		ClaudeBin:    fixtureClaudeScript(t, ""),
+		SessionPath:  filepath.Join(dir, "session.json"),
+		HistoryPath:  filepath.Join(notADir, "history.jsonl"),
+		AllowedTools: commandcenter.AllowedTools(),
+		BuildMCPConfig: func() (string, func(), error) {
+			return mcpPath, func() {}, nil
+		},
+	})
+
+	e := newWSEnv(t, runner)
+	conn, _ := e.dial(t, "/ws/board-command", integrationToken)
+	require.NotNil(t, conn)
+
+	require.NoError(t, conn.WriteMessage(websocket.TextMessage, []byte(`{"prompt":"which panes are working?"}`)))
+	readRawControl(t, conn) // line
+	return readRawControl(t, conn), dir
 }
 
 // readRawControl reads one text frame and returns it byte for byte, so the

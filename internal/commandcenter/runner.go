@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -49,17 +50,31 @@ const (
 	// the last event on a channel that received one.
 	EventError EventType = "error"
 	// EventDone marks a successful query's end. It is never sent after an
-	// EventError on the same channel.
+	// EventError on the same channel: exactly one of the two ends a query,
+	// which is what lets both be documented as the last frame for it (see
+	// docs/behavior.md's command center WS protocol).
 	EventDone EventType = "done"
 )
 
 // Event is one item streamed back from Query's channel.
 //
-//nolint:govet // fieldalignment: Type/Raw/Err order kept for readability, padding cost is negligible
+// Warnings is set only on EventDone, and carries what went wrong *around* a
+// turn that itself succeeded — today, only a failed history write. It exists
+// because the failure is genuinely non-fatal (the answer is on screen; only
+// the record of it was lost) and the frame vocabulary has no non-terminal
+// channel to say so on: line, error, done and busy, and three of the four
+// end the turn. Reporting it as an EventError before the EventDone is what
+// #214 was filed about — it left a turn with two frames each documented as
+// the last one, and rendered a successful answer as failed. A turn that ends
+// in an EventError carries no warnings: the error is the actionable frame,
+// and the warning is logged instead of competing with it.
+//
+//nolint:govet // fieldalignment: Type/Raw/Err/Warnings order kept for readability, padding cost is negligible
 type Event struct {
-	Type EventType
-	Raw  json.RawMessage
-	Err  string
+	Type     EventType
+	Raw      json.RawMessage
+	Err      string
+	Warnings []string
 }
 
 // cmdRunner abstracts the subset of *exec.Cmd Query needs, so tests can
@@ -317,9 +332,18 @@ type finishParams struct {
 func (r *Runner) finishAfterStream(ctx context.Context, cmd cmdRunner, p finishParams, events chan<- Event) {
 	waitErr := cmd.Wait()
 
+	// A lost history record does not fail the turn — the operator already
+	// has the answer — so this collects a warning for the EventDone below
+	// rather than emitting an EventError of its own. Every arm that returns
+	// before that point ends the turn with an EventError instead, and drops
+	// the warning from the wire deliberately; the log line is what keeps it
+	// from being lost entirely, on that path and on the successful one alike.
+	var warnings []string
 	if len(p.historyEntries) > 0 {
 		if err := AppendHistory(r.historyPath, p.historyEntries); err != nil {
-			events <- errorEvent("persisting command center history: %v", err)
+			warning := fmt.Sprintf("persisting command center history: %v", err)
+			log.Printf("command center: %s", warning)
+			warnings = append(warnings, warning)
 		}
 	}
 
@@ -359,7 +383,7 @@ func (r *Runner) finishAfterStream(ctx context.Context, cmd cmdRunner, p finishP
 			return
 		}
 	}
-	events <- Event{Type: EventDone}
+	events <- Event{Type: EventDone, Warnings: warnings}
 }
 
 // promptHistoryEntry records the operator's own prompt as a history entry.

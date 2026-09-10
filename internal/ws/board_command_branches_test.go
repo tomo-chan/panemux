@@ -120,3 +120,26 @@ func TestStreamBoardCommandEventsDrainsTheChannelAfterAFailedWrite(t *testing.T)
 	assert.Len(t, conn.deadlines, 1,
 		"and only the first write may be attempted — the rest are skipped, not retried")
 }
+
+// A warning attached to the terminal done event has to survive the hop to the
+// wire, and it has to be absent from an ordinary turn's frame rather than
+// serialized as an empty array — a client that shows a "warnings" section
+// whenever the key is present would otherwise render an empty one on every
+// successful query. See #214 for why the failure rides the done frame instead
+// of an error frame of its own.
+func TestDoneEventCarriesItsWarningsOntoTheFrameAndOmitsThemOtherwise(t *testing.T) {
+	warned := eventToBoardCommandFrame(commandcenter.Event{
+		Type:     commandcenter.EventDone,
+		Warnings: []string{"persisting command center history: disk full"},
+	})
+	assert.Equal(t, boardCommandFrameTypeDone, warned.Type)
+	assert.Equal(t, []string{"persisting command center history: disk full"}, warned.Warnings)
+
+	encoded, err := json.Marshal(warned)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"type":"done","warnings":["persisting command center history: disk full"]}`, string(encoded))
+
+	quiet, err := json.Marshal(eventToBoardCommandFrame(commandcenter.Event{Type: commandcenter.EventDone}))
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"type":"done"}`, string(quiet))
+}

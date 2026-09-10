@@ -25,5 +25,11 @@
   },
   {
     "type": "done"
+  },
+  {
+    "type": "done",
+    "warnings": [
+      "persisting command center history: creating command center history directory: mkdir /tmp/sample-project/notadir: not a directory"
+    ]
   }
 ]

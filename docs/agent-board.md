@@ -1256,7 +1256,11 @@ flow still applies.
 
 - `WS /ws/board-command`: the frontend sends `{"prompt": "..."}`, panemux runs `claude -p --resume
   <id> --output-format=stream-json "<prompt>"` and streams the subprocess's output back as it
-  arrives, so the palette can show live output instead of waiting for the full response.
+  arrives, so the palette can show live output instead of waiting for the full response. Exactly one
+  frame ends a query — `error` or `done`, never both — and a non-fatal failure around a turn that
+  itself succeeded rides the `done` frame as `{"type":"done","warnings":["..."]}` rather than
+  claiming the turn failed. Today the only such failure is a history write that could not land; see
+  [behavior.md](behavior.md#command-center-websocket-protocol) for the full frame contract.
 - `GET /api/board/command/history`: returns the command center's own turn-by-turn history. This is
   **not** re-derived from Claude Code's transcript file after the fact — per [Design
   principles](#design-principles)'s "ask, don't reverse-engineer" rule, panemux persists what it

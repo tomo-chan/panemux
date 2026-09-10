@@ -118,6 +118,11 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, token, o
                 <SummaryLine key={i} line={line} />
               ))}
               {turn.error && <div style={errorLineStyle}>{turn.error}</div>}
+              {turn.warnings.map((warning, i) => (
+                <div key={`warning-${i}`} style={warningLineStyle}>
+                  ⚠ {warning}
+                </div>
+              ))}
               {turn.busy && <div style={errorLineStyle}>Command center is busy — try again shortly.</div>}
               {!turn.done && <div style={lineStyle}>…</div>}
             </div>
@@ -212,6 +217,9 @@ const toolLineStyle: React.CSSProperties = {
 const lineStyle: React.CSSProperties = { color: '#ccc', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }
 
 const errorLineStyle: React.CSSProperties = { color: '#f44747' }
+// Amber rather than the error red: the turn itself succeeded, and the answer
+// is right above this line. See #214.
+const warningLineStyle: React.CSSProperties = { color: '#d7ba7d' }
 
 const inputStyle: React.CSSProperties = {
   flex: 1,

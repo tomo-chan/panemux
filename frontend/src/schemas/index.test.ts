@@ -686,6 +686,26 @@ describe('BoardCommandFrameSchema', () => {
     expect(result.success).toBe(true)
   })
 
+  // A turn that succeeded but could not have its history written reports the
+  // failure on the terminal done frame rather than as an error frame of its
+  // own — see #214. The key is optional, so both shapes above and here have to
+  // parse.
+  it('accepts a done frame carrying warnings', () => {
+    const result = BoardCommandFrameSchema.safeParse({
+      type: 'done',
+      warnings: ['persisting command center history: disk full'],
+    })
+    expect(result.success).toBe(true)
+    expect(result.success && result.data.type === 'done' && result.data.warnings).toEqual([
+      'persisting command center history: disk full',
+    ])
+  })
+
+  it('rejects a done frame whose warnings are not strings', () => {
+    const result = BoardCommandFrameSchema.safeParse({ type: 'done', warnings: [{ message: 'nope' }] })
+    expect(result.success).toBe(false)
+  })
+
   it('accepts a busy frame', () => {
     const result = BoardCommandFrameSchema.safeParse({ type: 'busy' })
     expect(result.success).toBe(true)

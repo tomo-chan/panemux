@@ -293,6 +293,32 @@ describe('CommandPalette', () => {
     expect(screen.getByText('Checking the board.')).toBeDefined()
   })
 
+  // The operator has to be able to tell "your answer is above, but panemux
+  // could not write it to the history file" apart from "your query failed" —
+  // #214 is precisely the bug where the two were rendered the same way.
+  it('renders a done frame\'s warnings alongside the answer, not as a failure', async () => {
+    render(<CommandPalette isOpen onClose={() => {}} token="tok" />)
+    const ws = MockWebSocket.instances[0]
+    act(() => ws.simulateOpen())
+
+    fireEvent.change(screen.getByLabelText('Command center prompt'), { target: { value: 'status?' } })
+    fireEvent.submit(screen.getByRole('button', { name: 'Send' }))
+
+    act(() =>
+      ws.simulateMessage({
+        type: 'line',
+        raw: { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'All good.' }] } },
+      }),
+    )
+    act(() => ws.simulateMessage({ type: 'done', warnings: ['persisting command center history: disk full'] }))
+
+    await waitFor(() => expect(screen.getByText('All good.')).toBeTruthy())
+    expect(screen.getByText(/persisting command center history: disk full/)).toBeTruthy()
+    // The in-flight ellipsis is gone, so the turn reads as finished rather
+    // than stuck — a warning is not a reason to keep waiting.
+    expect(screen.queryByText('…')).toBeNull()
+  })
+
   it('shows the busy message when a busy frame arrives', async () => {
     render(<CommandPalette isOpen token="tok" onClose={vi.fn()} />)
     const ws = MockWebSocket.instances[0]

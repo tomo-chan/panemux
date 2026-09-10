@@ -133,6 +133,38 @@ describe('useBoardCommand', () => {
     expect(result.current.pending).toBe(false)
   })
 
+  // #214: a failed history write used to arrive as an error frame followed by
+  // a done frame, so the turn rendered as complete *and* errored even though
+  // the answer was on screen. It now rides the done frame as a warning, which
+  // must not set `error` — the distinction between "this turn failed" and
+  // "the record of it was not written" is the whole point of the change.
+  it('records a done frame\'s warnings without marking the turn errored', () => {
+    const { result } = renderHook(() => useBoardCommand({ enabled: true, token: 'tok' }))
+    const ws = MockWebSocket.instances[0]
+    act(() => ws.simulateOpen())
+    act(() => result.current.sendPrompt('hello'))
+
+    act(() => ws.simulateMessage({ type: 'done', warnings: ['persisting command center history: disk full'] }))
+
+    expect(result.current.turns[0]).toMatchObject({
+      done: true,
+      error: null,
+      warnings: ['persisting command center history: disk full'],
+    })
+    expect(result.current.pending).toBe(false)
+  })
+
+  it('leaves warnings empty on a done frame that carries none', () => {
+    const { result } = renderHook(() => useBoardCommand({ enabled: true, token: 'tok' }))
+    const ws = MockWebSocket.instances[0]
+    act(() => ws.simulateOpen())
+    act(() => result.current.sendPrompt('hello'))
+
+    act(() => ws.simulateMessage({ type: 'done' }))
+
+    expect(result.current.turns[0].warnings).toEqual([])
+  })
+
   it('records an error frame on the turn and clears pending', () => {
     const { result } = renderHook(() => useBoardCommand({ enabled: true, token: 'tok' }))
     const ws = MockWebSocket.instances[0]

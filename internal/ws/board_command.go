@@ -63,11 +63,17 @@ type boardCommandRequest struct {
 // "error", "done", or "busy" — see docs/agent-board.md's "API and
 // streaming" section.
 //
-//nolint:govet // fieldalignment: field order kept as Type/Raw/Message for readability, padding cost is negligible
+// Warnings rides the "done" frame only, and is omitted when there is none,
+// so an ordinary turn's frame is still the bare {"type":"done"} it has
+// always been. It carries what went wrong around a turn that itself
+// succeeded — see commandcenter.Event's own doc comment, and #214.
+//
+//nolint:govet // fieldalignment: Type/Raw/Message/Warnings order kept for readability, padding cost is negligible
 type boardCommandFrame struct {
-	Type    string          `json:"type"`
-	Raw     json.RawMessage `json:"raw,omitempty"`
-	Message string          `json:"message,omitempty"`
+	Type     string          `json:"type"`
+	Raw      json.RawMessage `json:"raw,omitempty"`
+	Message  string          `json:"message,omitempty"`
+	Warnings []string        `json:"warnings,omitempty"`
 }
 
 // BoardCommandHandler serves WS /ws/board-command: the command center chat
@@ -165,7 +171,7 @@ func eventToBoardCommandFrame(ev commandcenter.Event) boardCommandFrame {
 	case commandcenter.EventError:
 		return boardCommandFrame{Type: boardCommandFrameTypeError, Message: ev.Err}
 	case commandcenter.EventDone:
-		return boardCommandFrame{Type: boardCommandFrameTypeDone}
+		return boardCommandFrame{Type: boardCommandFrameTypeDone, Warnings: ev.Warnings}
 	default:
 		return boardCommandFrame{Type: boardCommandFrameTypeError, Message: "unknown event type: " + string(ev.Type)}
 	}
