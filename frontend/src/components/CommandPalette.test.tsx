@@ -310,10 +310,25 @@ describe('CommandPalette', () => {
         raw: { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'All good.' }] } },
       }),
     )
-    act(() => ws.simulateMessage({ type: 'done', warnings: ['persisting command center history: disk full'] }))
+    act(() =>
+      ws.simulateMessage({
+        type: 'done',
+        warnings: [
+          'persisting command center history: creating command center history directory: ' +
+            'mkdir /workspace/user/project/.config/panemux/command-center: permission denied',
+        ],
+      }),
+    )
 
     await waitFor(() => expect(screen.getByText('All good.')).toBeTruthy())
-    expect(screen.getByText(/persisting command center history: disk full/)).toBeTruthy()
+    const warning = screen.getByText(/persisting command center history/)
+    expect(warning).toBeTruthy()
+    // Every warning ends in a filesystem path — one token with no break
+    // opportunity — and the palette is a fixed-width box that only scrolls
+    // vertically. Without these the half of the message naming the path that
+    // failed renders outside the box.
+    expect(warning.style.whiteSpace).toBe('pre-wrap')
+    expect(warning.style.wordBreak).toBe('break-word')
     // The in-flight ellipsis is gone, so the turn reads as finished rather
     // than stuck — a warning is not a reason to keep waiting.
     expect(screen.queryByText('…')).toBeNull()

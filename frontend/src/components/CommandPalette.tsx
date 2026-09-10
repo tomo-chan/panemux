@@ -219,7 +219,17 @@ const lineStyle: React.CSSProperties = { color: '#ccc', whiteSpace: 'pre-wrap', 
 const errorLineStyle: React.CSSProperties = { color: '#f44747' }
 // Amber rather than the error red: the turn itself succeeded, and the answer
 // is right above this line. See #214.
-const warningLineStyle: React.CSSProperties = { color: '#d7ba7d' }
+//
+// The wrapping properties matter more here than on the sibling styles that
+// carry them: every warning ends in a filesystem path, which is one token with
+// no break opportunity, and historyStyle only scrolls vertically. Without them
+// a long $HOME pushes the half of the message naming the failing path outside
+// the palette's fixed-width box, which is the only actionable part of it.
+const warningLineStyle: React.CSSProperties = {
+  color: '#d7ba7d',
+  whiteSpace: 'pre-wrap',
+  wordBreak: 'break-word',
+}
 
 const inputStyle: React.CSSProperties = {
   flex: 1,

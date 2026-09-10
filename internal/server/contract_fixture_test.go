@@ -560,7 +560,32 @@ func captureBoardCommandDoneWithWarnings(t *testing.T) (json.RawMessage, string)
 
 	require.NoError(t, conn.WriteMessage(websocket.TextMessage, []byte(`{"prompt":"which panes are working?"}`)))
 	readRawControl(t, conn) // line
-	return readRawControl(t, conn), dir
+	frame := readRawControl(t, conn)
+
+	// readRawControl returns whatever text frame arrived next, so without this
+	// the only thing claiming the returned frame is the warning-bearing `done`
+	// is the comment above the caller. A Runner that errored earlier — a
+	// BuildMCPConfig or LoadSessionFile failure, a fixtureClaudeScript that
+	// grew a second stream-json line — would write an `error` frame into the
+	// slot the fixture documents as `done`, with the Go suite green because it
+	// asserts nothing about these bytes. The same gap hides the regression this
+	// capture exists to catch: Go silently dropping `warnings` writes a second
+	// plain `{"type":"done"}` here and surfaces one suite and one language away,
+	// as an unexercised optional in frontend/src/schemas/contract.test.ts.
+	//
+	// Decoded rather than substring-matched, so that `warnings` present but
+	// empty fails too — `omitempty` is the only reason that shape cannot reach
+	// the wire today, and it is one struct-tag edit away from being able to.
+	var decoded struct {
+		Type     string   `json:"type"`
+		Warnings []string `json:"warnings"`
+	}
+	require.NoError(t, json.Unmarshal(frame, &decoded))
+	require.Equal(t, "done", decoded.Type,
+		"the terminal frame must be done, not an error from an earlier arm")
+	require.NotEmpty(t, decoded.Warnings,
+		"the whole point of this capture is the populated optional; see #214")
+	return frame, dir
 }
 
 // readRawControl reads one text frame and returns it byte for byte, so the
