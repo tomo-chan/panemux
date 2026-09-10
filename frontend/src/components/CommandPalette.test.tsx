@@ -296,7 +296,7 @@ describe('CommandPalette', () => {
   // The operator has to be able to tell "your answer is above, but panemux
   // could not write it to the history file" apart from "your query failed" —
   // #214 is precisely the bug where the two were rendered the same way.
-  it('renders a done frame\'s warnings alongside the answer, not as a failure', async () => {
+  it('renders warnings from a done frame alongside the answer, not as a failure', async () => {
     render(<CommandPalette isOpen onClose={() => {}} token="tok" />)
     const ws = MockWebSocket.instances[0]
     act(() => ws.simulateOpen())

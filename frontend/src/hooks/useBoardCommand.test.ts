@@ -138,7 +138,7 @@ describe('useBoardCommand', () => {
   // the answer was on screen. It now rides the done frame as a warning, which
   // must not set `error` — the distinction between "this turn failed" and
   // "the record of it was not written" is the whole point of the change.
-  it('records a done frame\'s warnings without marking the turn errored', () => {
+  it('records warnings from a done frame without marking the turn errored', () => {
     const { result } = renderHook(() => useBoardCommand({ enabled: true, token: 'tok' }))
     const ws = MockWebSocket.instances[0]
     act(() => ws.simulateOpen())
