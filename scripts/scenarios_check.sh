@@ -82,7 +82,7 @@ output=$(printf '%s\n' "$rows" | { seen=0
 			# (/ws/board-command) and absolute or home-relative paths are not
 			# references into this repository. Excluding them by shape keeps the
 			# check free of the false positives that would make it noise.
-			auto | manual | make | -* | /* | '~'/* | *+*) continue ;;
+			(auto | manual | make | -* | /* | '~'/* | *+*) continue ;;
 			esac
 
 			case "$token" in
@@ -90,11 +90,11 @@ output=$(printf '%s\n' "$rows" | { seen=0
 			# a source extension. `bin/panemux` is neither — it is a build
 			# artifact, and a gate that demanded it exist would fail on a clean
 			# checkout.
-			internal/* | frontend/* | docs/* | scripts/* | .github/* | testdata/* | \
+			(internal/* | frontend/* | docs/* | scripts/* | .github/* | testdata/* | \
 				*.go | *.ts | *.tsx | *.yml | *.yaml | *.sh)
 				case "$token" in
-				*/*) ;;
-				*) continue ;;
+				(*/*) ;;
+				(*) continue ;;
 				esac
 				target=${token%/}
 				if [ -e "$repo_root/$target" ]; then
@@ -121,7 +121,7 @@ output=$(printf '%s\n' "$rows" | { seen=0
 			# (TestFoo -> TestFoo_RemoteVariant), so a row naming the old,
 			# shorter name still matched the new, longer function and the gate
 			# passed on a row that no longer points anywhere.
-			Test*)
+			(Test*)
 				pattern=${token%\*}
 				if [ "$token" != "$pattern" ]; then
 					expr="^func ${pattern}[A-Za-z0-9_]*\("
@@ -136,7 +136,7 @@ output=$(printf '%s\n' "$rows" | { seen=0
 				;;
 			# The ledger's shorthand for "same prefix as the row above":
 			# `..._WriteError_RetriedUpToLimitThenGivesUp`.
-			...*)
+			(...*)
 				suffix=${token#...}
 				if grep -rqE "^func Test[A-Za-z0-9_]*${suffix}\(" --include='*_test.go' "$repo_root"; then
 					resolved=$((resolved + 1))
