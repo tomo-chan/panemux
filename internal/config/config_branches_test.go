@@ -199,6 +199,112 @@ func TestWrite_SymlinkedConfig_WritesThroughTheLinkInsteadOfReplacingIt(t *testi
 	assert.Len(t, entries, 1, "no temp file may be left in the directory holding the link")
 }
 
+// writeTargetCase is one shape of path and the target it must resolve to.
+type writeTargetCase struct {
+	// build returns the path to resolve and what resolveWriteTarget must
+	// return for it.
+	build func(t *testing.T) (path, want string)
+	name  string
+}
+
+func writeTargetCases() []writeTargetCase {
+	return []writeTargetCase{
+		{
+			name: "no file here at all — a first run",
+			build: func(t *testing.T) (string, string) {
+				t.Helper()
+				path := filepath.Join(t.TempDir(), "config.yaml")
+				return path, path
+			},
+		},
+		{
+			name: "an ordinary file is already its own target",
+			build: func(t *testing.T) (string, string) {
+				t.Helper()
+				path := filepath.Join(t.TempDir(), "config.yaml")
+				require.NoError(t, os.WriteFile(path, []byte("server:\n"), 0600))
+				return path, path
+			},
+		},
+		{
+			name: "a link whose target exists",
+			build: func(t *testing.T) (string, string) {
+				t.Helper()
+				target := filepath.Join(t.TempDir(), "config.yaml")
+				require.NoError(t, os.WriteFile(target, []byte("server:\n"), 0600))
+				link := filepath.Join(t.TempDir(), "config.yaml")
+				require.NoError(t, os.Symlink(target, link))
+				return link, target
+			},
+		},
+		{
+			name: "a dangling link, absolute target",
+			build: func(t *testing.T) (string, string) {
+				t.Helper()
+				target := filepath.Join(t.TempDir(), "config.yaml")
+				link := filepath.Join(t.TempDir(), "config.yaml")
+				require.NoError(t, os.Symlink(target, link))
+				return link, target
+			},
+		},
+		{
+			name: "a dangling link, target relative to the link's own directory",
+			build: func(t *testing.T) (string, string) {
+				t.Helper()
+				root := t.TempDir()
+				require.NoError(t, os.Mkdir(filepath.Join(root, "cfg"), 0750))
+				require.NoError(t, os.Mkdir(filepath.Join(root, "dotfiles"), 0750))
+				link := filepath.Join(root, "cfg", "config.yaml")
+				require.NoError(t, os.Symlink(filepath.Join("..", "dotfiles", "config.yaml"), link))
+				return link, filepath.Join(root, "dotfiles", "config.yaml")
+			},
+		},
+	}
+}
+
+// EvalSymlinks fails for two different reasons and only one of them means
+// "leave this path alone". A dangling link is not an exotic state — it is a
+// dotfiles setup mid-flight: the link is in place and the repo has no
+// config.yaml in it yet, because the first save is what was supposed to create
+// one. os.WriteFile did exactly that, since O_CREATE through a dangling link
+// creates the target.
+//
+// The cases above cover both reasons the error cannot separate, and both link
+// shapes, since a relative target has to resolve against the link's own
+// directory rather than the working directory.
+func TestResolveWriteTargetFollowsALinkWhoseTargetDoesNotExistYet(t *testing.T) {
+	for _, tt := range writeTargetCases() {
+		t.Run(tt.name, func(t *testing.T) {
+			path, want := tt.build(t)
+
+			assert.Equal(t, want, resolveWriteTarget(path))
+		})
+	}
+}
+
+// The end-to-end half of the case above: the link survives the save and the
+// repo copy it points at is created, rather than the link being replaced by a
+// regular file holding the only copy.
+func TestWrite_SymlinkedConfigWithAMissingTarget_CreatesItThroughTheLink(t *testing.T) {
+	dotfiles := t.TempDir()
+	target := filepath.Join(dotfiles, "config.yaml")
+
+	link := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.Symlink(target, link))
+
+	cfg := validConfig()
+	cfg.filePath = link
+	require.NoError(t, cfg.SaveWorkspaces())
+
+	info, err := os.Lstat(link)
+	require.NoError(t, err)
+	assert.NotZero(t, info.Mode()&os.ModeSymlink, "the symlink itself must survive the save")
+
+	written, err := os.ReadFile(target)
+	require.NoError(t, err, "the save must have created the file the link points at")
+	assert.Contains(t, string(written), "workspaces:")
+}
+
 // ── Expanding ~ ──────────────────────────────────────────────────────────────
 
 // KeyFile had a test; KnownHostsFile did not, and the two are separate `if`

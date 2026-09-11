@@ -540,14 +540,36 @@ func (c *Config) write() error {
 // any of those paths redirect a write. These two are the files where following
 // it restores the behavior they already had.
 //
-// A path that cannot be resolved is returned unchanged: the ordinary case is a
-// first run, where the file does not exist yet.
+// EvalSymlinks failing is not by itself a reason to leave the path alone: it
+// fails when any component of the chain is missing, and that covers two
+// situations wanting opposite answers. Nothing at path at all is a first run,
+// and the path is right as given. A path that IS a link whose target does not
+// exist yet is a dotfiles setup mid-flight — linked into a repo that has no
+// config.yaml in it, because this save is what was meant to create one — and
+// os.WriteFile did create it, since O_CREATE through a dangling link creates
+// the target. So the second case is read off the link itself rather than
+// inferred from the error.
+//
+// One hop, not a chain: a dangling link to a dangling link is past the point
+// where guessing helps. AtomicWrite's own MkdirAll then creates the repo
+// directory if it is missing, which os.WriteFile could not do — the harmless
+// direction to differ in.
 func resolveWriteTarget(path string) string {
-	resolved, err := filepath.EvalSymlinks(path)
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return resolved
+	}
+	// Readlink alone, with no Lstat before it: it reports EINVAL for a path
+	// that is not a link and ENOENT for one that is not there, so its error is
+	// already the "leave it alone" answer for both. Checking Lstat first would
+	// add an arm that only a link deleted between the two calls could enter.
+	dest, err := os.Readlink(path)
 	if err != nil {
 		return path
 	}
-	return resolved
+	if !filepath.IsAbs(dest) {
+		dest = filepath.Join(filepath.Dir(path), dest)
+	}
+	return dest
 }
 
 func (c *Config) expandPaths() {

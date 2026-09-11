@@ -187,7 +187,10 @@ migrating off `os.WriteFile` has to think about: a symlink at the target is swap
 file, and a bind-mounted single file cannot be replaced at all. `internal/config` therefore resolves
 its two paths through `resolveWriteTarget` first — `config.yaml` symlinked into a dotfiles repo is an
 ordinary setup, and `os.WriteFile` wrote through it, so without that the first save from the
-dashboard would silently detach the file from the repo. The resolution is deliberately at those two
+dashboard would silently detach the file from the repo. That resolution reads a *dangling* link off
+the link itself rather than treating `EvalSymlinks`' error as "leave this alone": a link whose target
+does not exist yet is a dotfiles setup mid-flight, and `os.WriteFile` created the target through it,
+since `O_CREATE` follows a dangling link. The resolution is deliberately at those two
 callers rather than inside `AtomicWrite`: every other file on the seam has always been written by
 rename and so has never followed a link, and teaching the seam to follow one would newly let a link
 planted at any of those paths redirect a write.
