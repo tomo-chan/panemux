@@ -180,8 +180,17 @@ reaching the journal as metadata while the data blocks are still in page cache, 
 loss would leave the file present at its *final* path and zero-length — worse than the old contents.
 The parent directory is *not* fsynced, so a crash right after the rename may leave the previous
 contents in place; that is safe, and buying the stronger guarantee would cost a directory fsync on a
-path the relay takes every poll. One consequence of rename worth knowing: the target gets a new
-inode, so a path that is a bind-mounted single file cannot be replaced this way.
+path the relay takes every poll.
+
+**Rename replaces what is at the path rather than following it**, which is the one behavior a caller
+migrating off `os.WriteFile` has to think about: a symlink at the target is swapped for a regular
+file, and a bind-mounted single file cannot be replaced at all. `internal/config` therefore resolves
+its two paths through `resolveWriteTarget` first — `config.yaml` symlinked into a dotfiles repo is an
+ordinary setup, and `os.WriteFile` wrote through it, so without that the first save from the
+dashboard would silently detach the file from the repo. The resolution is deliberately at those two
+callers rather than inside `AtomicWrite`: every other file on the seam has always been written by
+rename and so has never followed a link, and teaching the seam to follow one would newly let a link
+planted at any of those paths redirect a write.
 
 `internal/board`'s cursor and bootstrap stores and `internal/commandcenter`'s session store each had
 their own copy of this function before; the second copy's own doc comment recorded that it was

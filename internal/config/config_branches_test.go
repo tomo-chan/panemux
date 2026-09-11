@@ -166,6 +166,39 @@ func TestWrite_NoFilePath_IsANoOp(t *testing.T) {
 	require.NoError(t, cfg.SaveWorkspaces(), "a config with nowhere to save must not fail the request")
 }
 
+// Keeping config.yaml in a dotfiles repo and symlinking it into
+// ~/.config/panemux is an ordinary thing to do, and os.WriteFile wrote
+// through the link. AtomicWrite renames onto the path it is given, and
+// rename(2) replaces a symlink rather than following it — so without
+// resolving first, the first save from the dashboard would swap the link for
+// a regular file, silently detaching the config from the repo: no error, no
+// log line, and the user's edits over there stop taking effect.
+func TestWrite_SymlinkedConfig_WritesThroughTheLinkInsteadOfReplacingIt(t *testing.T) {
+	dotfiles := t.TempDir()
+	target := filepath.Join(dotfiles, "config.yaml")
+	require.NoError(t, os.WriteFile(target, []byte("server:\n  port: 1234\n"), 0600))
+
+	link := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.Symlink(target, link))
+
+	cfg := validConfig()
+	cfg.filePath = link
+	require.NoError(t, cfg.SaveWorkspaces())
+
+	info, err := os.Lstat(link)
+	require.NoError(t, err)
+	assert.NotZero(t, info.Mode()&os.ModeSymlink, "the symlink itself must survive the save")
+
+	written, err := os.ReadFile(target)
+	require.NoError(t, err)
+	assert.Contains(t, string(written), "workspaces:",
+		"the save must land in the file the link points at, not beside it")
+
+	entries, err := os.ReadDir(filepath.Dir(link))
+	require.NoError(t, err)
+	assert.Len(t, entries, 1, "no temp file may be left in the directory holding the link")
+}
+
 // ── Expanding ~ ──────────────────────────────────────────────────────────────
 
 // KeyFile had a test; KnownHostsFile did not, and the two are separate `if`

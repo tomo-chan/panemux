@@ -77,6 +77,30 @@ func TestEnsureAuthTokenReportsAFailedWrite(t *testing.T) {
 		"the step that failed must reach the log, not just that something did")
 }
 
+// The token file has the same shape as config.yaml: os.WriteFile followed a
+// symlink, rename replaces one. Less likely to be symlinked, identically
+// broken if it is.
+func TestEnsureAuthToken_SymlinkedTokenFile_WritesThroughTheLink(t *testing.T) {
+	store := t.TempDir()
+	target := filepath.Join(store, "token")
+	require.NoError(t, os.WriteFile(target, nil, 0600))
+
+	link := filepath.Join(t.TempDir(), "token")
+	require.NoError(t, os.Symlink(target, link))
+
+	cfg := &Config{authTokenPath: link}
+	cfg.EnsureAuthToken()
+	require.NotEmpty(t, cfg.Server.AuthToken, "the token must have been minted and kept")
+
+	info, err := os.Lstat(link)
+	require.NoError(t, err)
+	assert.NotZero(t, info.Mode()&os.ModeSymlink, "the symlink itself must survive")
+
+	written, err := os.ReadFile(target)
+	require.NoError(t, err)
+	assert.Equal(t, cfg.Server.AuthToken, string(written))
+}
+
 // The same arm, reached the way it actually happens in production — a disk
 // with no room left, partway through the write — rather than through a path
 // whose shape is wrong. The token file is written once at first start, so

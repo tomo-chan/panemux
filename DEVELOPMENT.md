@@ -113,6 +113,12 @@ operation and fails only the steps it is given, so the filesystem still ends up 
 would have been in (an injected write failure is a *short* write, as a real ENOSPC is), and
 `spy.Files()` names the files it handed out so a test can assert they were cleaned up.
 
+Moving a write onto it changes one thing worth checking: `AtomicWrite` finishes with a rename, and
+rename replaces what is at the path rather than following it, so a symlinked target is swapped for a
+regular file where `os.WriteFile` would have written through it. If the path is one an operator may
+have hand-linked, resolve it first — `internal/config`'s `resolveWriteTarget` is the example, and its
+doc comment says why that resolution is at the caller rather than in the seam.
+
 Unlike the home-directory seam, nothing enforces this one — there is no `forbidigo` rule that can
 tell a legitimate `os.WriteFile` from one that should have been an `AtomicWrite`. It is true as
 written today because the writes were moved onto it, not because the build would fail otherwise, so

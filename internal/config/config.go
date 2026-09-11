@@ -519,7 +519,35 @@ func (c *Config) write() error {
 	// that fails partway leaves it truncated for the next start to read. It
 	// also creates the parent directory ("creating config directory: …") and
 	// sets the mode, which is why neither is done here.
-	return fileops.AtomicWrite(c.filePath, data, configFileMode, "config")
+	return fileops.AtomicWrite(resolveWriteTarget(c.filePath), data, configFileMode, "config")
+}
+
+// resolveWriteTarget follows path through any symlinks before it is handed to
+// fileops.AtomicWrite.
+//
+// AtomicWrite renames onto the path it is given, and rename(2) replaces a
+// symlink rather than following it — while os.WriteFile, which both of this
+// package's writes used before, wrote through one. Keeping config.yaml in a
+// dotfiles repo and symlinking it into ~/.config/panemux is an ordinary setup,
+// and without this the first save from the dashboard would swap the link for a
+// regular file: no error, no log line, and the repo copy silently frozen at its
+// old contents.
+//
+// It is here rather than inside AtomicWrite deliberately. The other files that
+// go through the seam — the relay cursor, bootstrap state, the command-center
+// session id — have always been written by rename and so have never followed a
+// symlink; teaching the seam to follow one would newly let a link planted at
+// any of those paths redirect a write. These two are the files where following
+// it restores the behavior they already had.
+//
+// A path that cannot be resolved is returned unchanged: the ordinary case is a
+// first run, where the file does not exist yet.
+func resolveWriteTarget(path string) string {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return path
+	}
+	return resolved
 }
 
 func (c *Config) expandPaths() {

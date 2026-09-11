@@ -138,8 +138,16 @@ func Chmod(name string, mode os.FileMode) error {
 // a truncated one — and buying the stronger guarantee would cost a directory
 // fsync per write on a path the relay takes on every poll.
 //
-// One consequence of rename worth knowing: the target gets a new inode. A path
-// that is a bind-mounted single file cannot be replaced this way.
+// One consequence of rename worth knowing: the target gets a new inode, and
+// rename replaces what is AT the path rather than following it. A symlink at
+// the target is therefore swapped for a regular file rather than written
+// through, and a bind-mounted single file cannot be replaced at all. A caller
+// whose path an operator may have hand-linked has to resolve it first, which
+// is what internal/config's resolveWriteTarget does for config.yaml and the
+// auth token file — the two that were written with os.WriteFile before, and so
+// did follow a link. It is not done here because the other callers' files have
+// always been written by rename, and following a link for them would newly let
+// one planted at those paths redirect a write.
 //
 // Every arm after the temp file exists removes it on the way out, including
 // the ones that cannot be reached without substituting Ops.

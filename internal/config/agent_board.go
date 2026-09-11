@@ -96,7 +96,12 @@ func (c *Config) EnsureAuthToken() {
 		log.Printf("Warning: failed to generate auth token: %v", err)
 		return
 	}
-	if err := fileops.AtomicWrite(path, []byte(token), authTokenFileMode, "auth token file"); err != nil {
+	// resolveWriteTarget for the same reason config.go's write() uses it: this
+	// file was written with os.WriteFile until this seam replaced it, and a
+	// rename onto a symlink replaces the link instead of writing through it.
+	if err := fileops.AtomicWrite(
+		resolveWriteTarget(path), []byte(token), authTokenFileMode, "auth token file",
+	); err != nil {
 		log.Printf("Warning: failed to persist auth token: %v", err)
 		return
 	}
