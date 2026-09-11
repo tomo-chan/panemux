@@ -199,6 +199,21 @@ func TestWrite_SymlinkedConfig_WritesThroughTheLinkInsteadOfReplacingIt(t *testi
 	assert.Len(t, entries, 1, "no temp file may be left in the directory holding the link")
 }
 
+// resolvedTempDir is t.TempDir() with any symlinked ancestor already followed.
+// On macOS TMPDIR lives under /var, which is a symlink to /private/var, so a
+// row asserting that EvalSymlinks returns the path it was given would compare
+// two spellings of the same file. Only the rows that reach EvalSymlinks'
+// success path need it; Readlink returns the stored target verbatim.
+//
+// Reproducible on Linux without a Mac: point TMPDIR at a path with a symlinked
+// ancestor and the two rows below fail, and only those two.
+func resolvedTempDir(t *testing.T) string {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	return resolved
+}
+
 // writeTargetCase is one shape of path and the target it must resolve to.
 type writeTargetCase struct {
 	// build returns the path to resolve and what resolveWriteTarget must
@@ -221,7 +236,7 @@ func writeTargetCases() []writeTargetCase {
 			name: "an ordinary file is already its own target",
 			build: func(t *testing.T) (string, string) {
 				t.Helper()
-				path := filepath.Join(t.TempDir(), "config.yaml")
+				path := filepath.Join(resolvedTempDir(t), "config.yaml")
 				require.NoError(t, os.WriteFile(path, []byte("server:\n"), 0600))
 				return path, path
 			},
@@ -230,8 +245,10 @@ func writeTargetCases() []writeTargetCase {
 			name: "a link whose target exists",
 			build: func(t *testing.T) (string, string) {
 				t.Helper()
-				target := filepath.Join(t.TempDir(), "config.yaml")
+				target := filepath.Join(resolvedTempDir(t), "config.yaml")
 				require.NoError(t, os.WriteFile(target, []byte("server:\n"), 0600))
+				// The link side stays an unresolved t.TempDir(): its own
+				// spelling is an input here, not what the assertion is about.
 				link := filepath.Join(t.TempDir(), "config.yaml")
 				require.NoError(t, os.Symlink(target, link))
 				return link, target
