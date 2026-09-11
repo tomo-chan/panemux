@@ -1,9 +1,11 @@
 package commandcenter
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,28 +32,31 @@ import (
 // covers the happy path; this one exists to fail exactly one seam at a time.
 type runnerFixture struct {
 	started *bool
+	// waitErr is what the fake subprocess's Wait returns. Assign it before
+	// calling query to drive the turn down its failure arm; the zero value
+	// is a subprocess that exited cleanly.
+	waitErr error
 	config  RunnerConfig
 }
 
 func newRunnerFixture(t *testing.T, stdout string) *runnerFixture {
 	t.Helper()
 	started := false
-	return &runnerFixture{
-		started: &started,
-		config: RunnerConfig{
-			ClaudeBin:   "claude",
-			SessionPath: filepath.Join(t.TempDir(), "session.json"),
-			HistoryPath: filepath.Join(t.TempDir(), "history.jsonl"),
-			BuildMCPConfig: func() (string, func(), error) {
-				return "/tmp/sample-mcp-config.json", func() {}, nil
-			},
-			NewCommand: func(_ context.Context, _, _ string, _ ...string) cmdRunner {
-				started = true
-				return &fakeCmd{stdout: io.NopCloser(strings.NewReader(stdout))}
-			},
-			Now: func() time.Time { return time.Unix(0, 0).UTC() },
+	f := &runnerFixture{started: &started}
+	f.config = RunnerConfig{
+		ClaudeBin:   "claude",
+		SessionPath: filepath.Join(t.TempDir(), "session.json"),
+		HistoryPath: filepath.Join(t.TempDir(), "history.jsonl"),
+		BuildMCPConfig: func() (string, func(), error) {
+			return "/tmp/sample-mcp-config.json", func() {}, nil
 		},
+		NewCommand: func(_ context.Context, _, _ string, _ ...string) cmdRunner {
+			started = true
+			return &fakeCmd{stdout: io.NopCloser(strings.NewReader(stdout)), waitErr: f.waitErr}
+		},
+		Now: func() time.Time { return time.Unix(0, 0).UTC() },
 	}
+	return f
 }
 
 // query runs one turn to completion and returns every event it emitted.
@@ -81,6 +86,40 @@ func hasDone(events []Event) bool {
 		}
 	}
 	return false
+}
+
+// terminalEvent returns the turn's single terminal event. It asserts there is
+// exactly one, which is the property #214 was filed about: an EventError and
+// an EventDone both claim to be the last frame, so a turn that emits both has
+// no terminal frame at all.
+func terminalEvent(t *testing.T, events []Event) Event {
+	t.Helper()
+	var terminal []Event
+	for _, ev := range events {
+		if ev.Type == EventError || ev.Type == EventDone {
+			terminal = append(terminal, ev)
+		}
+	}
+	require.Len(t, terminal, 1, "a turn emits exactly one terminal event, got %v", terminal)
+	return terminal[0]
+}
+
+// captureRunnerLog redirects the standard logger and returns what was
+// written, so a test can assert that a failure the WS stream deliberately
+// does not carry still reaches the operator's terminal. It restores the
+// previous writer rather than nil, since log.Printf against a nil writer
+// panics rather than discarding.
+func captureRunnerLog(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	prevWriter, prevFlags := log.Writer(), log.Flags()
+	log.SetOutput(&buf)
+	log.SetFlags(0)
+	t.Cleanup(func() {
+		log.SetOutput(prevWriter)
+		log.SetFlags(prevFlags)
+	})
+	return &buf
 }
 
 // brokenParentPath returns a path whose parent is a regular file, so both
@@ -205,26 +244,139 @@ func (c *noStdoutCmd) Wait() error                        { return nil }
 // turn a completed turn into a failed one — the operator has the answer on
 // screen either way. Continuing rather than returning is right.
 //
-// How it is *reported* is not, and this test pins the present shape rather
-// than endorsing it: an EventError followed by an EventDone. Both are
-// terminal — docs/behavior.md says each is "always the last frame for that
-// query", and EventDone's own doc comment in runner.go says it "is never sent
-// after an EventError on the same channel" — so this path violates both, and
-// the dashboard renders the turn as complete *and* errored because
-// applyFrame's error arm sets done and the later done frame does not clear
-// the message. Filed as #214; the fix is a frame-contract decision, and this
-// branch changes no implementation.
-func TestQueryReportsAFailedHistoryWriteWithoutFailingTheTurn(t *testing.T) {
+// How it is *reported* is what #214 fixed. It used to emit an EventError and
+// then carry on to EventDone, so a turn had two frames each documented as
+// "always the last frame for that query" (docs/behavior.md), EventDone's own
+// doc comment promising it "is never sent after an EventError" was false, and
+// the dashboard rendered the turn as complete *and* errored.
+//
+// The first fix put the warning on EventDone alone, which traded that bug for
+// a quieter one: on every failure arm the write's failure then reached nothing
+// but panemux's own log. An operator whose config directory is read-only and
+// whose queries are timing out for an unrelated reason sees a palette that has
+// silently stopped recording anything, with no route from that symptom to the
+// cause — `panemux --open` puts that log in a terminal nobody is watching.
+//
+// So the warning rides whichever terminal event ends the turn. This walks
+// every arm that emits one, because the property is "all of them", not "the
+// one the last test happened to reach".
+func TestQueryAttachesAFailedHistoryWriteToWhicheverTerminalEventEndsTheTurn(t *testing.T) {
+	for _, tt := range terminalEventArms() {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newRunnerFixture(t, tt.stdout)
+			f.config.HistoryPath = brokenParentPath(t, "history.jsonl")
+			tt.arrange(t, f)
+
+			terminal := terminalEvent(t, f.query(t))
+
+			assert.Equal(t, tt.wantType, terminal.Type)
+			assert.Contains(t, terminal.Err, tt.wantErr)
+			require.Len(t, terminal.Warnings, 1,
+				"the lost record has to reach the operator on this arm too, not only in the log")
+			assert.Contains(t, terminal.Warnings[0], "persisting command center history")
+		})
+	}
+}
+
+// terminalEventArm is one way a turn can end, and how to arrange it.
+type terminalEventArm struct {
+	arrange  func(t *testing.T, f *runnerFixture)
+	name     string
+	stdout   string
+	wantErr  string
+	wantType EventType
+}
+
+// terminalEventArms enumerates every arm of finishAfterStream that emits a
+// terminal event. Split out of the test itself only to stay under this
+// repository's function-length lint limit.
+func terminalEventArms() []terminalEventArm {
+	const answer = `{"type":"result","session_id":"s","result":"done"}` + "\n"
+
+	return []terminalEventArm{
+		{
+			name:     "the turn succeeded",
+			stdout:   answer,
+			arrange:  func(*testing.T, *runnerFixture) {},
+			wantType: EventDone,
+		},
+		{
+			name:     "the subprocess exited non-zero",
+			stdout:   answer,
+			arrange:  func(_ *testing.T, f *runnerFixture) { f.waitErr = errors.New("exit status 1") },
+			wantType: EventError,
+			wantErr:  "claude exited with error",
+		},
+		{
+			// The arm that cannot reach its terminal event by returning one:
+			// before this change the malformed-line EventError was emitted
+			// from streamOutput, so the turn had already ended by the time
+			// the history write ran and the warning had nowhere to go.
+			name:     "a stream-json line was malformed",
+			stdout:   "{not json\n",
+			arrange:  func(*testing.T, *runnerFixture) {},
+			wantType: EventError,
+			wantErr:  "malformed stream-json output",
+		},
+		{
+			name:   "the query hit its own timeout",
+			stdout: answer,
+			arrange: func(_ *testing.T, f *runnerFixture) {
+				f.config.QueryTimeout = 10 * time.Millisecond
+				f.config.NewCommand = func(context.Context, string, string, ...string) cmdRunner {
+					return &sleepingFakeCmd{
+						stdout:          io.NopCloser(strings.NewReader(answer)),
+						waitErr:         errors.New("signal: killed"),
+						sleepBeforeWait: 50 * time.Millisecond,
+					}
+				}
+			},
+			wantType: EventError,
+			wantErr:  "timed out",
+		},
+		{
+			// The dangling symlink is what lets the load succeed and only the
+			// save fail — see TestQueryReportsAFailureToPersistTheSessionID.
+			name:   "the session id could not be persisted",
+			stdout: answer,
+			arrange: func(t *testing.T, f *runnerFixture) {
+				dir := t.TempDir()
+				dangling := filepath.Join(dir, "dangling")
+				require.NoError(t, os.Symlink(filepath.Join(dir, "no-such-target"), dangling))
+				f.config.SessionPath = filepath.Join(dangling, "session.json")
+			},
+			wantType: EventError,
+			wantErr:  "persisting command center session id",
+		},
+	}
+}
+
+// The complement, without which the table above is satisfied by a Runner that
+// warns on every turn: an ordinary turn carries no warnings at all, so the
+// dashboard has nothing to render and the `warnings` key never reaches the
+// wire.
+func TestQueryReportsNoWarningsWhenTheHistoryWriteSucceeds(t *testing.T) {
 	f := newRunnerFixture(t, `{"type":"result","session_id":"s","result":"done"}`+"\n")
-	f.config.HistoryPath = brokenParentPath(t, "history.jsonl")
 
 	events := f.query(t)
 
-	require.Len(t, errorEvents(events), 1)
-	assert.Contains(t, errorEvents(events)[0], "persisting command center history")
-	assert.True(t, hasDone(events),
-		"the turn itself succeeded, so it still reports done today — see #214 for why that, "+
-			"alongside the error frame above, is the shape rather than the intent")
+	done := terminalEvent(t, events)
+	assert.Equal(t, EventDone, done.Type)
+	assert.Empty(t, done.Warnings)
+}
+
+// The failure is on the frame *and* in the log. The log is what an operator
+// reaches for when the palette is not in front of them — a bootstrap-time
+// failure, a query whose client had already disconnected — so dropping it
+// once the frame carries the same text would narrow where the evidence lives.
+func TestQueryAlsoLogsAFailedHistoryWrite(t *testing.T) {
+	f := newRunnerFixture(t, `{"type":"result","session_id":"s","result":"done"}`+"\n")
+	f.config.HistoryPath = brokenParentPath(t, "history.jsonl")
+	logged := captureRunnerLog(t)
+
+	f.query(t)
+
+	assert.Contains(t, logged.String(), "persisting command center history")
 }
 
 // The session id is the opposite case: it is what the *next* turn resumes

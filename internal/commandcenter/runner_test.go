@@ -730,10 +730,14 @@ func TestRunnerStreamOutputDrainsRemainingOutputAfterScannerError(t *testing.T) 
 	r := NewRunner(RunnerConfig{})
 	events := make(chan Event, 8)
 
-	entries, sessionID, failed := r.streamOutput(reader, events)
+	entries, sessionID, streamErr := r.streamOutput(reader, events)
 	close(events)
 
-	assert.True(t, failed)
+	// Returned, not emitted: finishAfterStream owns every terminal event, so
+	// that the one ending a turn can carry the warnings collected after this
+	// returns. See Event.Warnings.
+	require.Error(t, streamErr)
+	assert.Contains(t, streamErr.Error(), "boom")
 	assert.Equal(t, "sess-1", sessionID)
 	require.Len(t, entries, 1)
 	assert.True(t, reader.afterServed,
@@ -744,10 +748,8 @@ func TestRunnerStreamOutputDrainsRemainingOutputAfterScannerError(t *testing.T) 
 	for ev := range events {
 		got = append(got, ev)
 	}
-	require.Len(t, got, 2)
+	require.Len(t, got, 1, "only the parsed line; the failure travels as the returned error")
 	assert.Equal(t, EventLine, got[0].Type)
-	assert.Equal(t, EventError, got[1].Type)
-	assert.Contains(t, got[1].Err, "boom")
 }
 
 func indexOf(haystack []string, needle string) int {

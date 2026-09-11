@@ -120,3 +120,60 @@ func TestStreamBoardCommandEventsDrainsTheChannelAfterAFailedWrite(t *testing.T)
 	assert.Len(t, conn.deadlines, 1,
 		"and only the first write may be attempted — the rest are skipped, not retried")
 }
+
+// Warnings ride whichever terminal event ends the turn, so both terminal
+// frames have to carry them across the hop to the wire — and both have to omit
+// the key rather than serialize an empty array when there are none, or a
+// client that shows a "warnings" section whenever the key is present renders an
+// empty one on every query. See #214, and Event.Warnings for why the failure
+// does not get an error frame of its own.
+func TestBothTerminalEventsCarryTheirWarningsOntoTheFrameAndOmitThemOtherwise(t *testing.T) {
+	const warning = "persisting command center history: disk full"
+
+	const failure = "claude exited with error: exit status 1"
+
+	tests := []struct {
+		name      string
+		eventType commandcenter.EventType
+		eventErr  string
+		wantType  string
+		wantJSON  string
+		quietJSON string
+	}{
+		{
+			name:      "done",
+			eventType: commandcenter.EventDone,
+			wantType:  boardCommandFrameTypeDone,
+			wantJSON:  `{"type":"done","warnings":["` + warning + `"]}`,
+			quietJSON: `{"type":"done"}`,
+		},
+		{
+			name:      "error",
+			eventType: commandcenter.EventError,
+			eventErr:  failure,
+			wantType:  boardCommandFrameTypeError,
+			wantJSON:  `{"type":"error","message":"` + failure + `","warnings":["` + warning + `"]}`,
+			quietJSON: `{"type":"error","message":"` + failure + `"}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			quietEvent := commandcenter.Event{Type: tt.eventType, Err: tt.eventErr}
+			warnedEvent := quietEvent
+			warnedEvent.Warnings = []string{warning}
+
+			frame := eventToBoardCommandFrame(warnedEvent)
+			assert.Equal(t, tt.wantType, frame.Type)
+			assert.Equal(t, []string{warning}, frame.Warnings)
+
+			encoded, err := json.Marshal(frame)
+			require.NoError(t, err)
+			assert.JSONEq(t, tt.wantJSON, string(encoded))
+
+			quiet, err := json.Marshal(eventToBoardCommandFrame(quietEvent))
+			require.NoError(t, err)
+			assert.JSONEq(t, tt.quietJSON, string(quiet))
+		})
+	}
+}

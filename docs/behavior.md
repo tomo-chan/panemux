@@ -642,6 +642,9 @@ Once connected, the client may send any number of prompts sequentially over the 
   - `{"type":"error","message":"..."}` — the query failed (non-zero exit, malformed stream-json
     output, or a context cancellation/timeout); always the last frame for that query
   - `{"type":"done"}` — the query finished successfully; always the last frame for that query
+  - either terminal frame may also carry `"warnings":["..."]` — e.g.
+    `{"type":"done","warnings":["persisting command center history: ..."]}`. The key is omitted
+    entirely unless something around the query failed; see the paragraph below
   - `{"type":"busy"}` — a query was already in flight against the command center's single session
     (see [agent-board.md's Concurrency](agent-board.md#process-lifecycle)); the new prompt was
     rejected outright, not queued
@@ -659,6 +662,28 @@ client that stops reading without closing its TCP connection (a sleeping laptop,
 with no FIN) fails the write — and falls into the same drain-without-forwarding path described above —
 instead of blocking the server goroutine forever.
 
+**A query that starts ends with exactly one of `error` and `done`, and `warnings` is how either one
+reports a non-fatal failure.** Both frames above are documented as the last frame for a query, so
+only one of them can be sent. (A prompt answered with `busy` never becomes a query: it was rejected
+before a subprocess ran, so it receives neither of the two — `busy` is itself the last frame for
+that prompt.)
+
+The case that made this concrete is a failed history write (issue #214): the subprocess answered,
+the operator has the answer on screen, and the only thing that failed was persisting the record of
+it — genuinely not a failed query, but not something to hide either. It used to be reported as an
+`error` frame followed by a `done` frame, which left the query with no terminal frame at all and
+made the dashboard render a successful answer as failed. It now travels as a string in `warnings` on
+whichever terminal frame the query ends with, which the palette renders under the answer rather than
+in place of it.
+
+**`warnings` rides the `error` frame as well as the `done` frame, and that is deliberate rather than
+incidental.** Reporting it only on success would hide it from exactly the operator who needs it: one
+whose `~/.config/panemux/` is read-only while their queries are also failing for an unrelated reason
+sees every turn end in an `error`, the history file silently recording none of them, and the palette
+— which seeds itself from `GET /api/board/command/history` on each open — showing nothing, with no
+route from that symptom to its cause. Every warning is also written to panemux's own log, but for a
+`panemux --open` desktop run that log is a terminal nobody is watching.
+
 **A query killed by the timeout above is not treated as a `--resume` rejection.** The client sees a
 distinct `{"type":"error","message":"claude query timed out after 5m0s"}` (or whatever
 `QueryTimeout` is configured to), and the command center's persisted session id is left untouched —
@@ -669,8 +694,12 @@ isn't retried forever; a timeout on an otherwise-healthy, still-resumable conver
 
 **A malformed `--output-format=stream-json` line cancels the subprocess immediately**, rather than
 waiting for the subprocess to exit on its own (which, for a wedged or misbehaving `claude` process,
-could otherwise hold the single-query busy flag for up to the full `QueryTimeout`). The client has
-already received the corresponding `{"type":"error",...}` frame by the time this happens.
+could otherwise hold the single-query busy flag for up to the full `QueryTimeout`). The
+corresponding `{"type":"error",...}` frame is sent once the subprocess has been reaped, just after
+that cancellation rather than just before it — so that the frame ending the query is emitted from
+the one place that knows whether the history write succeeded, and can therefore carry its
+`warnings`. Nothing waits on that reordering: the cancellation, which is what releases the busy
+flag, still happens at the same moment.
 
 **The persisted `--resume` session id is validated before every use, not only when this Runner itself
 wrote it.** `--resume`'s value is optional in the claude CLI's own argument parser, so a value

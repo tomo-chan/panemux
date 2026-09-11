@@ -8,6 +8,12 @@ export interface BoardCommandTurn {
   prompt: string
   lines: unknown[]
   error: string | null
+  // warnings is deliberately not folded into error: a turn can finish
+  // successfully and still report that something around it failed (a history
+  // write that could not land). Conflating the two is the bug #214 fixed —
+  // the operator saw a successful answer rendered as a failure. The two are
+  // also not exclusive: a turn that failed can carry both.
+  warnings: string[]
   busy: boolean
   done: boolean
 }
@@ -86,7 +92,10 @@ export function useBoardCommand({ enabled, token }: UseBoardCommandOptions): Use
   const sendPrompt = useCallback((prompt: string) => {
     const ws = wsRef.current
     if (!ws || ws.readyState !== WebSocket.OPEN) return
-    setTurns((prev) => [...prev, { id: nextTurnId++, prompt, lines: [], error: null, busy: false, done: false }])
+    setTurns((prev) => [
+      ...prev,
+      { id: nextTurnId++, prompt, lines: [], error: null, warnings: [], busy: false, done: false },
+    ])
     setPending(true)
     ws.send(JSON.stringify({ prompt }))
   }, [])
@@ -114,10 +123,12 @@ function applyFrame(setTurns: Dispatch<SetStateAction<BoardCommandTurn[]>>, fram
         break
       case 'error':
         updated.error = frame.message
+        updated.warnings = frame.warnings ?? []
         updated.done = true
         break
       case 'done':
         updated.done = true
+        updated.warnings = frame.warnings ?? []
         break
       case 'busy':
         updated.busy = true
