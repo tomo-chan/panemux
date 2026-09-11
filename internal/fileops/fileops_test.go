@@ -225,19 +225,58 @@ func TestSetOpsForTestRestoresThePreviousOperations(t *testing.T) {
 	require.NoError(t, f.Close())
 }
 
-// A Spy only names the steps a test cares about; every other one has to stay
-// real, or a test injecting one failure would silently be running against a
-// stub for all the rest.
+// Only the operations a test names are substituted; every other one is filled
+// in with the real thing. A test injecting one failure would otherwise be
+// running silently against stubs for all the rest.
+//
+// Each case fails at its own substituted step *because* the steps before it
+// were the real ones — AtomicWrite never reaches Chmod unless a real
+// CreateTemp, Write and Close all succeeded first.
 func TestSetOpsForTestFillsUnsetOperationsWithTheRealOnes(t *testing.T) {
-	fileops.SetOpsForTest(t, fileops.Ops{
-		Chmod: func(string, os.FileMode) error { return errInjected },
-	})
-	dir := t.TempDir()
+	atomicWrite := func(dir string) error {
+		return fileops.AtomicWrite(filepath.Join(dir, "f"), []byte("x"), 0600, "test file")
+	}
 
-	f, err := fileops.CreateTemp(dir, "partial-*")
-	require.NoError(t, err, "CreateTemp was left unset and must still be the real one")
-	require.NoError(t, f.Close())
-	assert.FileExists(t, f.Name())
+	for _, tt := range []struct {
+		exercise func(dir string) error
+		ops      fileops.Ops
+		name     string
+	}{
+		{
+			name: "CreateTemp",
+			ops: fileops.Ops{
+				CreateTemp: func(string, string) (fileops.File, error) { return nil, errInjected },
+			},
+			exercise: func(dir string) error {
+				_, err := fileops.CreateTemp(dir, "x-*")
+				return err
+			},
+		},
+		{
+			name: "OpenFile",
+			ops: fileops.Ops{
+				OpenFile: func(string, int, os.FileMode) (fileops.File, error) { return nil, errInjected },
+			},
+			exercise: func(dir string) error {
+				_, err := fileops.OpenFile(filepath.Join(dir, "f"), os.O_CREATE|os.O_RDWR, 0600)
+				return err
+			},
+		},
+		{
+			name:     "Chmod",
+			ops:      fileops.Ops{Chmod: func(string, os.FileMode) error { return errInjected }},
+			exercise: atomicWrite,
+		},
+		{
+			name:     "Rename",
+			ops:      fileops.Ops{Rename: func(string, string) error { return errInjected }},
+			exercise: atomicWrite,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			fileops.SetOpsForTest(t, tt.ops)
 
-	assert.ErrorIs(t, fileops.Chmod(f.Name(), 0600), errInjected)
+			assert.ErrorIs(t, tt.exercise(t.TempDir()), errInjected)
+		})
+	}
 }
