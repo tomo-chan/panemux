@@ -538,15 +538,16 @@ func TestSSHShellCommandIsValidShellSyntax(t *testing.T) {
 // SSH shell request and never depended on $SHELL at all.
 func TestRemoteLoginShellExecFallsBackWhenShellIsUnset(t *testing.T) {
 	tests := []struct {
-		name  string
-		wantX string
-		env   []string
+		name       string
+		wantX      string
+		env        []string
+		unsetShell bool
 	}{
 		{name: "bash gets a login shell", env: []string{"SHELL=/bin/bash"}, wantX: "login"},
 		{name: "zsh gets a login shell", env: []string{"SHELL=/usr/bin/zsh"}, wantX: "login"},
 		{name: "fish gets a login shell", env: []string{"SHELL=/usr/local/bin/fish"}, wantX: "login"},
 		{name: "unknown shell execs plainly", env: []string{"SHELL=/bin/ksh"}, wantX: "plain"},
-		{name: "unset shell falls back", env: nil, wantX: "fallback"},
+		{name: "unset shell falls back", unsetShell: true, wantX: "fallback"},
 		{name: "empty shell falls back", env: []string{"SHELL="}, wantX: "fallback"},
 	}
 
@@ -559,7 +560,13 @@ func TestRemoteLoginShellExecFallsBackWhenShellIsUnset(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cmd := exec.Command("sh", "-c", probe) //nolint:gosec // G204: fixed script under test
+			script := probe
+			if tt.unsetShell {
+				// Some shells populate SHELL themselves even when it is absent from
+				// the process environment, so unset it inside the test shell too.
+				script = "unset SHELL; " + script
+			}
+			cmd := exec.Command("sh", "-c", script) //nolint:gosec // G204: fixed script under test
 			cmd.Env = append([]string{"PATH=/usr/bin:/bin"}, tt.env...)
 			out, err := cmd.Output()
 			if err != nil {

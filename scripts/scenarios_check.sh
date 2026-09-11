@@ -67,7 +67,8 @@ row_count=$(printf '%s\n' "$rows" | wc -l | tr -d ' ')
 # hitting an unreadable directory, a `grep` rejecting a pattern — get announced
 # under "these auto rows name something that does not exist", which is the one
 # headline guaranteed to send the reader looking in the wrong place.
-output=$(printf '%s\n' "$rows" | { seen=0
+check_rows() {
+	seen=0
 	resolved=0
 	while IFS= read -r row; do
 		seen=$((seen + 1))
@@ -82,7 +83,7 @@ output=$(printf '%s\n' "$rows" | { seen=0
 			# (/ws/board-command) and absolute or home-relative paths are not
 			# references into this repository. Excluding them by shape keeps the
 			# check free of the false positives that would make it noise.
-			auto | manual | make | -* | /* | '~'/* | *+*) continue ;;
+			auto|manual|make|-*|/*|\~/*|*+*) continue ;;
 			esac
 
 			case "$token" in
@@ -90,8 +91,8 @@ output=$(printf '%s\n' "$rows" | { seen=0
 			# a source extension. `bin/panemux` is neither — it is a build
 			# artifact, and a gate that demanded it exist would fail on a clean
 			# checkout.
-			internal/* | frontend/* | docs/* | scripts/* | .github/* | testdata/* | \
-				*.go | *.ts | *.tsx | *.yml | *.yaml | *.sh)
+			internal/*|frontend/*|docs/*|scripts/*|.github/*|testdata/*|\
+				*.go|*.ts|*.tsx|*.yml|*.yaml|*.sh)
 				case "$token" in
 				*/*) ;;
 				*) continue ;;
@@ -148,7 +149,12 @@ output=$(printf '%s\n' "$rows" | { seen=0
 		done
 	done
 	printf '__CHECKED__ %s %s\n' "$seen" "$resolved"
-})
+}
+
+# Keep case statements out of the command substitution itself. Bash 3.2,
+# which macOS still provides as /bin/sh, misparses their closing parentheses
+# when they appear directly inside $().
+output=$(printf '%s\n' "$rows" | check_rows)
 
 checked=$(printf '%s\n' "$output" | sed -n 's/^__CHECKED__ //p')
 findings=$(printf '%s\n' "$output" | grep -v '^__CHECKED__ ' || true)
