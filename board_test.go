@@ -463,7 +463,7 @@ func TestPersistBoardCursors_WritesAFileLoadCursorFileCanReadBack(t *testing.T) 
 //
 // Making these saves actually fail takes more than an absent directory, which
 // is the trap an earlier version of both tests below fell into: the persist
-// helpers go through board.atomicWriteFile, whose first statement is
+// helpers go through fileops.AtomicWrite, whose first statement is
 // os.MkdirAll, so a missing home directory is simply created on demand and
 // the write SUCCEEDS. Those tests therefore drove the happy path while claiming to cover
 // the failure branch — tautological tests of exactly the shape this
