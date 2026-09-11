@@ -215,14 +215,17 @@ export const BoardSessionTokenResponseSchema = z.object({
 
 export type BoardSessionTokenResponse = z.infer<typeof BoardSessionTokenResponseSchema>
 
-// `warnings` on the done frame carries what went wrong *around* a turn that
-// itself succeeded — today only a failed history write. It is optional
-// because the server omits the key entirely on an ordinary turn, and it lives
-// on `done` rather than on a frame of its own so that exactly one frame ends
-// a query: see docs/behavior.md's command center WS protocol, and #214.
+// `warnings` carries what went wrong *around* a query rather than to it —
+// today only a failed history write. It is optional because the server omits
+// the key entirely when there is none, and it rides whichever terminal frame
+// ends the query rather than getting a frame of its own, so that exactly one
+// frame still ends it: see docs/behavior.md's command center WS protocol, and
+// #214. It is on `error` as well as `done` because a turn that failed for its
+// own reasons can also have lost its history record, and reporting it only on
+// the successful path hides it from precisely the operator who needs it.
 export const BoardCommandFrameSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('line'), raw: z.unknown() }),
-  z.object({ type: z.literal('error'), message: z.string() }),
+  z.object({ type: z.literal('error'), message: z.string(), warnings: z.array(z.string()).optional() }),
   z.object({ type: z.literal('done'), warnings: z.array(z.string()).optional() }),
   z.object({ type: z.literal('busy') }),
 ])

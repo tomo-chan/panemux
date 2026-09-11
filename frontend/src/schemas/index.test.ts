@@ -681,6 +681,22 @@ describe('BoardCommandFrameSchema', () => {
     expect(result.success).toBe(true)
   })
 
+  // Warnings ride whichever terminal frame ends the query, so the error member
+  // accepts them too — a turn that failed for its own reasons can still have
+  // lost its history record, and that is the operator whose history has
+  // quietly stopped being written. See #214.
+  it('accepts an error frame carrying warnings', () => {
+    const result = BoardCommandFrameSchema.safeParse({
+      type: 'error',
+      message: 'claude query timed out after 5m0s',
+      warnings: ['persisting command center history: disk full'],
+    })
+    expect(result.success).toBe(true)
+    expect(result.success && result.data.type === 'error' && result.data.warnings).toEqual([
+      'persisting command center history: disk full',
+    ])
+  })
+
   it('accepts a done frame', () => {
     const result = BoardCommandFrameSchema.safeParse({ type: 'done' })
     expect(result.success).toBe(true)

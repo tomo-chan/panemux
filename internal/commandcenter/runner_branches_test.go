@@ -248,22 +248,110 @@ func (c *noStdoutCmd) Wait() error                        { return nil }
 // then carry on to EventDone, so a turn had two frames each documented as
 // "always the last frame for that query" (docs/behavior.md), EventDone's own
 // doc comment promising it "is never sent after an EventError" was false, and
-// the dashboard rendered the turn as complete *and* errored. The failure is
-// now a warning riding the one terminal frame the turn does emit.
-func TestQueryReportsAFailedHistoryWriteAsAWarningOnTheDoneFrame(t *testing.T) {
-	f := newRunnerFixture(t, `{"type":"result","session_id":"s","result":"done"}`+"\n")
-	f.config.HistoryPath = brokenParentPath(t, "history.jsonl")
+// the dashboard rendered the turn as complete *and* errored.
+//
+// The first fix put the warning on EventDone alone, which traded that bug for
+// a quieter one: on every failure arm the write's failure then reached nothing
+// but panemux's own log. An operator whose config directory is read-only and
+// whose queries are timing out for an unrelated reason sees a palette that has
+// silently stopped recording anything, with no route from that symptom to the
+// cause — `panemux --open` puts that log in a terminal nobody is watching.
+//
+// So the warning rides whichever terminal event ends the turn. This walks
+// every arm that emits one, because the property is "all of them", not "the
+// one the last test happened to reach".
+func TestQueryAttachesAFailedHistoryWriteToWhicheverTerminalEventEndsTheTurn(t *testing.T) {
+	for _, tt := range terminalEventArms() {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newRunnerFixture(t, tt.stdout)
+			f.config.HistoryPath = brokenParentPath(t, "history.jsonl")
+			tt.arrange(t, f)
 
-	events := f.query(t)
+			terminal := terminalEvent(t, f.query(t))
 
-	assert.Empty(t, errorEvents(events), "a lost record is not a failed turn")
-	done := terminalEvent(t, events)
-	assert.Equal(t, EventDone, done.Type)
-	require.Len(t, done.Warnings, 1)
-	assert.Contains(t, done.Warnings[0], "persisting command center history")
+			assert.Equal(t, tt.wantType, terminal.Type)
+			assert.Contains(t, terminal.Err, tt.wantErr)
+			require.Len(t, terminal.Warnings, 1,
+				"the lost record has to reach the operator on this arm too, not only in the log")
+			assert.Contains(t, terminal.Warnings[0], "persisting command center history")
+		})
+	}
 }
 
-// The complement, without which the test above is satisfied by a Runner that
+// terminalEventArm is one way a turn can end, and how to arrange it.
+type terminalEventArm struct {
+	arrange  func(t *testing.T, f *runnerFixture)
+	name     string
+	stdout   string
+	wantErr  string
+	wantType EventType
+}
+
+// terminalEventArms enumerates every arm of finishAfterStream that emits a
+// terminal event. Split out of the test itself only to stay under this
+// repository's function-length lint limit.
+func terminalEventArms() []terminalEventArm {
+	const answer = `{"type":"result","session_id":"s","result":"done"}` + "\n"
+
+	return []terminalEventArm{
+		{
+			name:     "the turn succeeded",
+			stdout:   answer,
+			arrange:  func(*testing.T, *runnerFixture) {},
+			wantType: EventDone,
+		},
+		{
+			name:     "the subprocess exited non-zero",
+			stdout:   answer,
+			arrange:  func(_ *testing.T, f *runnerFixture) { f.waitErr = errors.New("exit status 1") },
+			wantType: EventError,
+			wantErr:  "claude exited with error",
+		},
+		{
+			// The arm that cannot reach its terminal event by returning one:
+			// before this change the malformed-line EventError was emitted
+			// from streamOutput, so the turn had already ended by the time
+			// the history write ran and the warning had nowhere to go.
+			name:     "a stream-json line was malformed",
+			stdout:   "{not json\n",
+			arrange:  func(*testing.T, *runnerFixture) {},
+			wantType: EventError,
+			wantErr:  "malformed stream-json output",
+		},
+		{
+			name:   "the query hit its own timeout",
+			stdout: answer,
+			arrange: func(_ *testing.T, f *runnerFixture) {
+				f.config.QueryTimeout = 10 * time.Millisecond
+				f.config.NewCommand = func(context.Context, string, string, ...string) cmdRunner {
+					return &sleepingFakeCmd{
+						stdout:          io.NopCloser(strings.NewReader(answer)),
+						waitErr:         errors.New("signal: killed"),
+						sleepBeforeWait: 50 * time.Millisecond,
+					}
+				}
+			},
+			wantType: EventError,
+			wantErr:  "timed out",
+		},
+		{
+			// The dangling symlink is what lets the load succeed and only the
+			// save fail — see TestQueryReportsAFailureToPersistTheSessionID.
+			name:   "the session id could not be persisted",
+			stdout: answer,
+			arrange: func(t *testing.T, f *runnerFixture) {
+				dir := t.TempDir()
+				dangling := filepath.Join(dir, "dangling")
+				require.NoError(t, os.Symlink(filepath.Join(dir, "no-such-target"), dangling))
+				f.config.SessionPath = filepath.Join(dangling, "session.json")
+			},
+			wantType: EventError,
+			wantErr:  "persisting command center session id",
+		},
+	}
+}
+
+// The complement, without which the table above is satisfied by a Runner that
 // warns on every turn: an ordinary turn carries no warnings at all, so the
 // dashboard has nothing to render and the `warnings` key never reaches the
 // wire.
@@ -277,24 +365,17 @@ func TestQueryReportsNoWarningsWhenTheHistoryWriteSucceeds(t *testing.T) {
 	assert.Empty(t, done.Warnings)
 }
 
-// A turn that failed for its own reasons still emits exactly one terminal
-// event, and it is the error — the subprocess failure is the actionable one,
-// and a warning about the record of a turn that did not produce an answer
-// would only compete with it. The history failure is logged instead, so it is
-// not lost entirely.
-func TestQueryKeepsOneTerminalEventWhenBothTheTurnAndTheHistoryWriteFail(t *testing.T) {
+// The failure is on the frame *and* in the log. The log is what an operator
+// reaches for when the palette is not in front of them — a bootstrap-time
+// failure, a query whose client had already disconnected — so dropping it
+// once the frame carries the same text would narrow where the evidence lives.
+func TestQueryAlsoLogsAFailedHistoryWrite(t *testing.T) {
 	f := newRunnerFixture(t, `{"type":"result","session_id":"s","result":"done"}`+"\n")
 	f.config.HistoryPath = brokenParentPath(t, "history.jsonl")
-	f.waitErr = errors.New("exit status 1")
-
 	logged := captureRunnerLog(t)
 
-	events := f.query(t)
+	f.query(t)
 
-	failure := terminalEvent(t, events)
-	assert.Equal(t, EventError, failure.Type)
-	assert.Contains(t, failure.Err, "claude exited with error")
-	assert.Empty(t, failure.Warnings)
 	assert.Contains(t, logged.String(), "persisting command center history")
 }
 

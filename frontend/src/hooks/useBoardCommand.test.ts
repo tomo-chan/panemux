@@ -180,6 +180,38 @@ describe('useBoardCommand', () => {
     expect(result.current.pending).toBe(false)
   })
 
+  it('records warnings from an error frame alongside the error itself', () => {
+    const { result } = renderHook(() => useBoardCommand({ enabled: true, token: 'tok' }))
+    const ws = MockWebSocket.instances[0]
+    act(() => ws.simulateOpen())
+    act(() => result.current.sendPrompt('hello'))
+
+    act(() =>
+      ws.simulateMessage({
+        type: 'error',
+        message: 'claude query timed out after 5m0s',
+        warnings: ['persisting command center history: disk full'],
+      }),
+    )
+
+    expect(result.current.turns[0]).toMatchObject({
+      error: 'claude query timed out after 5m0s',
+      warnings: ['persisting command center history: disk full'],
+      done: true,
+    })
+  })
+
+  it('leaves warnings empty on an error frame that carries none', () => {
+    const { result } = renderHook(() => useBoardCommand({ enabled: true, token: 'tok' }))
+    const ws = MockWebSocket.instances[0]
+    act(() => ws.simulateOpen())
+    act(() => result.current.sendPrompt('hello'))
+
+    act(() => ws.simulateMessage({ type: 'error', message: 'boom' }))
+
+    expect(result.current.turns[0].warnings).toEqual([])
+  })
+
   it('records a busy frame on the turn and clears pending', () => {
     const { result } = renderHook(() => useBoardCommand({ enabled: true, token: 'tok' }))
     const ws = MockWebSocket.instances[0]

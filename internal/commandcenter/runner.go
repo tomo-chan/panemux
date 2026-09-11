@@ -58,16 +58,22 @@ const (
 
 // Event is one item streamed back from Query's channel.
 //
-// Warnings is set only on EventDone, and carries what went wrong *around* a
-// turn that itself succeeded — today, only a failed history write. It exists
-// because the failure is genuinely non-fatal (the answer is on screen; only
-// the record of it was lost) and the frame vocabulary has no non-terminal
-// channel to say so on: line, error, done and busy, and three of the four
-// end the turn. Reporting it as an EventError before the EventDone is what
-// #214 was filed about — it left a turn with two frames each documented as
-// the last one, and rendered a successful answer as failed. A turn that ends
-// in an EventError carries no warnings: the error is the actionable frame,
-// and the warning is logged instead of competing with it.
+// Warnings rides whichever terminal event ends the turn — EventDone or
+// EventError — and carries what went wrong *around* the turn rather than to
+// it: today, only a failed history write. It exists because that failure is
+// genuinely non-fatal (the answer is on screen; only the record of it was
+// lost) and the frame vocabulary has no non-terminal channel to say so on:
+// line, error, done and busy, and three of the four end the turn. Reporting
+// it as an EventError before the EventDone is what #214 was filed about — it
+// left a turn with two frames each documented as the last one, and rendered a
+// successful answer as failed.
+//
+// Attaching it to EventDone alone was the first attempt at that fix, and it
+// was wrong in the other direction: it made the failure invisible to anyone
+// whose turns were also failing for unrelated reasons, which is exactly the
+// operator whose history has quietly stopped being written. Riding the
+// terminal event keeps both properties — one terminal frame per turn, and the
+// failure visible on every path.
 //
 //nolint:govet // fieldalignment: Type/Raw/Err/Warnings order kept for readability, padding cost is negligible
 type Event struct {
@@ -276,18 +282,18 @@ func (r *Runner) run(ctx context.Context, prompt string, events chan<- Event) {
 	// trace of it — verified against a real run — so without this the
 	// history is a list of answers with nothing to attach them to.
 	historyEntries := []HistoryEntry{r.promptHistoryEntry(prompt)}
-	streamed, _, scanFailed := r.streamOutput(stdout, events)
+	streamed, _, streamErr := r.streamOutput(stdout, events)
 	historyEntries = append(historyEntries, streamed...)
 
-	if scanFailed {
-		// The client has already been told the query failed (streamOutput
-		// sent the EventError). Cancel now, before Wait(), rather than
-		// relying on the deferred cancel() at the top of this function:
-		// that one only fires once run() itself returns, which can't
-		// happen until Wait() returns — so without this, a subprocess that
-		// doesn't exit on its own after a malformed line would hold the
-		// busy flag (and this goroutine) for up to the full query timeout
-		// instead of being killed immediately.
+	if streamErr != nil {
+		// Cancel now, before Wait(), rather than relying on the deferred
+		// cancel() at the top of this function: that one only fires once
+		// run() itself returns, which can't happen until Wait() returns —
+		// so without this, a subprocess that doesn't exit on its own after
+		// a malformed line would hold the busy flag (and this goroutine)
+		// for up to the full query timeout instead of being killed
+		// immediately. finishAfterStream reports streamErr once the
+		// subprocess is reaped.
 		cancel()
 	}
 
@@ -295,7 +301,7 @@ func (r *Runner) run(ctx context.Context, prompt string, events chan<- Event) {
 		firstRun:       firstRun,
 		sessionID:      sessionID,
 		historyEntries: historyEntries,
-		scanFailed:     scanFailed,
+		streamErr:      streamErr,
 	}, events)
 }
 
@@ -320,10 +326,10 @@ func (r *Runner) loadValidatedSessionState() (state SessionState, firstRun bool,
 // finishParams bundles what finishAfterStream needs to know about the
 // streamOutput phase that already ran before cmd.Wait().
 type finishParams struct {
+	streamErr      error
 	sessionID      string
 	historyEntries []HistoryEntry
 	firstRun       bool
-	scanFailed     bool
 }
 
 // finishAfterStream waits for the subprocess to exit, persists any captured
@@ -333,11 +339,11 @@ func (r *Runner) finishAfterStream(ctx context.Context, cmd cmdRunner, p finishP
 	waitErr := cmd.Wait()
 
 	// A lost history record does not fail the turn — the operator already
-	// has the answer — so this collects a warning for the EventDone below
-	// rather than emitting an EventError of its own. Every arm that returns
-	// before that point ends the turn with an EventError instead, and drops
-	// the warning from the wire deliberately; the log line is what keeps it
-	// from being lost entirely, on that path and on the successful one alike.
+	// has the answer — so this collects a warning rather than emitting an
+	// EventError of its own. Every path out of this function below ends the
+	// turn with exactly one terminal event and hands it these warnings, so
+	// there is no arm on which the failure reaches only the log. It is
+	// logged as well, for the operator who is not looking at the palette.
 	var warnings []string
 	if len(p.historyEntries) > 0 {
 		if err := AppendHistory(r.historyPath, p.historyEntries); err != nil {
@@ -346,9 +352,19 @@ func (r *Runner) finishAfterStream(ctx context.Context, cmd cmdRunner, p finishP
 			warnings = append(warnings, warning)
 		}
 	}
+	fail := func(format string, err error) Event {
+		ev := errorEvent(format, err)
+		ev.Warnings = warnings
+		return ev
+	}
 
-	if p.scanFailed {
-		return // an EventError for the malformed line was already sent
+	// The stream failure outranks waitErr: a subprocess killed by the
+	// cancel() run() issued for a malformed line exits non-zero because of
+	// that kill, and reporting the exit status would name the consequence
+	// instead of the cause.
+	if p.streamErr != nil {
+		events <- fail("%v", p.streamErr)
+		return
 	}
 	if waitErr != nil {
 		// A query killed by this Runner's own timeout is not evidence the
@@ -361,7 +377,11 @@ func (r *Runner) finishAfterStream(ctx context.Context, cmd cmdRunner, p finishP
 		// the two would silently drop a perfectly good, still-resumable
 		// conversation just because one turn happened to run long.
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			events <- Event{Type: EventError, Err: fmt.Sprintf("claude query timed out after %s", r.queryTimeout)}
+			events <- Event{
+				Type:     EventError,
+				Err:      fmt.Sprintf("claude query timed out after %s", r.queryTimeout),
+				Warnings: warnings,
+			}
 			return
 		}
 		if !p.firstRun {
@@ -371,7 +391,7 @@ func (r *Runner) finishAfterStream(ctx context.Context, cmd cmdRunner, p finishP
 			// resume failure again.
 			_ = SaveSessionFile(r.sessionPath, SessionState{})
 		}
-		events <- errorEvent("claude exited with error: %v", waitErr)
+		events <- fail("claude exited with error: %v", waitErr)
 		return
 	}
 	// The id persisted here is the one panemux minted and passed as
@@ -379,7 +399,7 @@ func (r *Runner) finishAfterStream(ctx context.Context, cmd cmdRunner, p finishP
 	// is what used to leak an ambient session into this file.
 	if p.firstRun && p.sessionID != "" {
 		if err := SaveSessionFile(r.sessionPath, SessionState{SessionID: p.sessionID}); err != nil {
-			events <- errorEvent("persisting command center session id: %v", err)
+			events <- fail("persisting command center session id: %v", err)
 			return
 		}
 	}
@@ -467,14 +487,20 @@ func (r *Runner) buildArgs(sessionID string, firstRun bool, mcpPath, prompt stri
 // streamOutput reads stdout line by line, emitting an EventLine per parsed
 // stream-json line and collecting HistoryEntry copies for persistence. It
 // stops at the first line that fails to parse as a JSON object or the first
-// underlying read error, having already sent the corresponding EventError,
-// and — via the deferred drain below, covering every exit path uniformly —
-// always drains any remaining output so the subprocess is never left
-// blocked writing into a pipe no one is reading. Wait() must still be safe
-// to call after this returns.
+// underlying read error, and — via the deferred drain below, covering every
+// exit path uniformly — always drains any remaining output so the subprocess
+// is never left blocked writing into a pipe no one is reading. Wait() must
+// still be safe to call after this returns.
+//
+// The failure is *returned* rather than emitted, which is what lets
+// finishAfterStream own every terminal event a turn produces. Emitting it
+// here left this one turn-ending frame outside that function, and therefore
+// unable to carry the warnings collected after it — see Event.Warnings. The
+// caller still cancels the subprocess the moment this returns non-nil, so the
+// busy flag is released just as promptly as before; only the frame is later.
 func (r *Runner) streamOutput(
 	stdout io.ReadCloser, events chan<- Event,
-) (entries []HistoryEntry, sessionID string, failed bool) {
+) (entries []HistoryEntry, sessionID string, streamErr error) {
 	defer func() { _, _ = io.Copy(io.Discard, stdout) }()
 
 	scanner := bufio.NewScanner(stdout)
@@ -490,8 +516,7 @@ func (r *Runner) streamOutput(
 			SessionID string `json:"session_id"`
 		}
 		if err := json.Unmarshal(lineCopy, &probe); err != nil {
-			events <- errorEvent("malformed stream-json output: %v", err)
-			return entries, sessionID, true
+			return entries, sessionID, fmt.Errorf("malformed stream-json output: %w", err)
 		}
 		if probe.SessionID != "" {
 			sessionID = probe.SessionID
@@ -500,10 +525,9 @@ func (r *Runner) streamOutput(
 		events <- Event{Type: EventLine, Raw: json.RawMessage(lineCopy)}
 	}
 	if err := scanner.Err(); err != nil {
-		events <- errorEvent("reading claude output: %v", err)
-		return entries, sessionID, true
+		return entries, sessionID, fmt.Errorf("reading claude output: %w", err)
 	}
-	return entries, sessionID, false
+	return entries, sessionID, nil
 }
 
 func errorEvent(format string, err error) Event {

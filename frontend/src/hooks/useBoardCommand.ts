@@ -11,7 +11,8 @@ export interface BoardCommandTurn {
   // warnings is deliberately not folded into error: a turn can finish
   // successfully and still report that something around it failed (a history
   // write that could not land). Conflating the two is the bug #214 fixed —
-  // the operator saw a successful answer rendered as a failure.
+  // the operator saw a successful answer rendered as a failure. The two are
+  // also not exclusive: a turn that failed can carry both.
   warnings: string[]
   busy: boolean
   done: boolean
@@ -122,6 +123,7 @@ function applyFrame(setTurns: Dispatch<SetStateAction<BoardCommandTurn[]>>, fram
         break
       case 'error':
         updated.error = frame.message
+        updated.warnings = frame.warnings ?? []
         updated.done = true
         break
       case 'done':
