@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"panemux/internal/fileops"
 	"panemux/internal/homedir"
 )
 
@@ -95,11 +96,7 @@ func (c *Config) EnsureAuthToken() {
 		log.Printf("Warning: failed to generate auth token: %v", err)
 		return
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0750); err != nil {
-		log.Printf("Warning: failed to create auth token directory: %v", err)
-		return
-	}
-	if err := os.WriteFile(path, []byte(token), authTokenFileMode); err != nil {
+	if err := fileops.AtomicWrite(path, []byte(token), authTokenFileMode, "auth token file"); err != nil {
 		log.Printf("Warning: failed to persist auth token: %v", err)
 		return
 	}

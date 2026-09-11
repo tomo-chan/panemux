@@ -166,18 +166,31 @@ is what keeps "one seam" true rather than aspirational.
 ### `internal/fileops`
 
 The write discipline every persisted file shares, and the seam onto the operations it is made of.
-`AtomicWrite(path, data, mode, label)` creates a temp file beside the target, writes it, closes it,
-chmods it and renames it into place, so a crash or power loss mid-write can never leave a truncated
-file behind; `label` is the file kind the error messages name, since every caller writes from a
-background goroutine where a log line is all anyone sees. `CreateTemp`, `OpenFile` and `Chmod` are
-the individual operations, for the two callers that need the steps rather than the whole dance:
-`internal/commandcenter`'s MCP config file (written once per query, removed by its own `cleanup`,
-never renamed) and its history file (opened `O_APPEND`, not replaced).
+`AtomicWrite(path, data, mode, label)` creates a temp file beside the target, writes it, fsyncs it,
+closes it, chmods it and renames it into place; `label` is the file kind the error messages name,
+since most callers write from a background goroutine where a log line is all anyone sees.
+`CreateTemp`, `OpenFile` and `Chmod` are the individual operations, for the two callers that need
+the steps rather than the whole dance: `internal/commandcenter`'s MCP config file (written once per
+query, removed by its own `cleanup`, never renamed) and its history file (opened `O_APPEND`, not
+replaced).
+
+**Atomic, and durable up to a point — the two are not the same claim.** A reader never observes a
+half-written file, because the rename is atomic. The fsync before it is what keeps the rename from
+reaching the journal as metadata while the data blocks are still in page cache, which on a power
+loss would leave the file present at its *final* path and zero-length — worse than the old contents.
+The parent directory is *not* fsynced, so a crash right after the rename may leave the previous
+contents in place; that is safe, and buying the stronger guarantee would cost a directory fsync on a
+path the relay takes every poll. One consequence of rename worth knowing: the target gets a new
+inode, so a path that is a bind-mounted single file cannot be replaced this way.
 
 `internal/board`'s cursor and bootstrap stores and `internal/commandcenter`'s session store each had
 their own copy of this function before; the second copy's own doc comment recorded that it was
 deliberately duplicated because the first was unexported. A shared package removes that reason, and
-the duplication with it.
+the duplication with it. `internal/config`'s two writes — `config.yaml` itself and the auth token
+file — were plain `os.WriteFile` calls and now go through it too: `config.yaml` holds
+`server.auth_token` and the whole workspace layout, so a direct write failing partway left the next
+start parsing half a YAML document. That also retired `internal/config`'s own `chmodConfigFile`
+variable, a package-private override of one of the operations `Ops` now owns.
 
 Why it is a package rather than a set of function variables inside each caller is the same answer
 `internal/homedir` gives, for the same reason: the callers do not line up with the tests. The root

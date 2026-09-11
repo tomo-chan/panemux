@@ -103,13 +103,20 @@ at once, and the root package's tests drive `internal/commandcenter`'s default p
 a package-private variable can reach. See issue [#212](https://github.com/tomo-chan/panemux/issues/212).
 
 **Persisted files are written through one seam, and it is `internal/fileops`.** `fileops.AtomicWrite`
-is the temp-file-plus-rename write every persisted file goes through (the relay cursor, bootstrap
-state, the command-center session id); `fileops.CreateTemp` / `OpenFile` / `Chmod` are the individual
-operations for callers that need them (the MCP config file, the history file). Substitute them in a
-test with `fileops.SetOpsForTest(t, (&fileops.Spy{WriteErr: err}).Ops())` — a `Spy` performs every
-real operation and fails only the steps it is given, so the filesystem still ends up in the state it
-would have been in, and `spy.Files()` names the files it handed out so a test can assert they were
-cleaned up.
+is the temp-file-plus-rename write every file panemux persists goes through — `config.yaml`, the
+auth token file, the relay cursor, bootstrap state, and the command-center session id;
+`fileops.CreateTemp` / `OpenFile` / `Chmod` are the individual operations for the two callers that
+need the steps rather than the whole write (the MCP config file, which is never renamed, and the
+history file, which is appended to). Substitute them in a test with
+`fileops.SetOpsForTest(t, (&fileops.Spy{WriteErr: err}).Ops())` — a `Spy` performs every real
+operation and fails only the steps it is given, so the filesystem still ends up in the state it
+would have been in (an injected write failure is a *short* write, as a real ENOSPC is), and
+`spy.Files()` names the files it handed out so a test can assert they were cleaned up.
+
+Unlike the home-directory seam, nothing enforces this one — there is no `forbidigo` rule that can
+tell a legitimate `os.WriteFile` from one that should have been an `AtomicWrite`. It is true as
+written today because the writes were moved onto it, not because the build would fail otherwise, so
+a new persisted file is the reader's job to route correctly.
 
 Reach for it when a failure arm sits *after* the file was created by the function under test: a path
 whose shape can be broken (a regular file where a directory goes, a directory where a file goes,

@@ -34,6 +34,7 @@ import (
 type File interface {
 	io.WriteCloser
 	Name() string
+	Sync() error
 	Stat() (os.FileInfo, error)
 	ReadAt(p []byte, off int64) (n int, err error)
 }
@@ -51,15 +52,34 @@ type Ops struct {
 // it, and it restores the previous value when the test ends.
 var ops = realOps()
 
+// realOps is the os functions themselves.
+//
+// Each of the two openers converts explicitly rather than returning os's pair
+// straight through. os.CreateTemp and os.OpenFile return (*os.File)(nil) on
+// failure, and returning that through a (File, error) signature would box a
+// nil pointer into a NON-nil interface — so a caller checking `if f != nil`
+// would take the branch and panic in f.Name(). Spy.wrap returns an untyped
+// nil on its own failure path, so without this the double and the thing it
+// doubles would disagree about exactly the value a caller might test.
 func realOps() Ops {
 	return Ops{
-		CreateTemp: func(dir, pattern string) (File, error) { return os.CreateTemp(dir, pattern) },
+		CreateTemp: func(dir, pattern string) (File, error) { return asFile(os.CreateTemp(dir, pattern)) },
 		OpenFile: func(name string, flag int, perm os.FileMode) (File, error) {
-			return os.OpenFile(name, flag, perm) //nolint:gosec // the caller owns the path; see each call site
+			return asFile(os.OpenFile(name, flag, perm))
 		},
 		Chmod:  os.Chmod,
 		Rename: os.Rename,
 	}
+}
+
+// asFile boxes an (*os.File, error) pair into this package's own pair,
+// returning an untyped nil File when the open failed. Spy.wrap is the same
+// shape for the same reason.
+func asFile(f *os.File, err error) (File, error) {
+	if err != nil {
+		return nil, err
+	}
+	return f, nil
 }
 
 // withDefaults fills every unset field with the real operation.
@@ -97,11 +117,29 @@ func Chmod(name string, mode os.FileMode) error {
 }
 
 // AtomicWrite writes data to path via a temp file plus rename, creating the
-// parent directory if needed, so a crash or power loss mid-write can never
-// leave a truncated or half-written file on disk — a rename onto an existing
-// path is atomic on the platforms panemux targets, unlike a direct write.
-// label identifies the file kind in error messages (e.g. "relay cursor file",
-// "bootstrap state file"), so a log line names which file failed.
+// parent directory if needed, so a reader never observes a truncated or
+// half-written file — a rename onto an existing path is atomic on the
+// platforms panemux targets, unlike a direct write. label identifies the file
+// kind in error messages (e.g. "relay cursor file", "bootstrap state file"),
+// so a log line names which file failed.
+//
+// The temp file is fsynced before the rename, and that is not tidiness:
+// without it the rename can reach the journal as metadata while the data
+// blocks are still in page cache, and a power loss between the two commits
+// leaves the file present at its FINAL path and zero-length — worse than the
+// old contents, because the next read finds an empty file at the canonical
+// path rather than the previous good one. (ext4's default data=ordered has a
+// heuristic that usually covers rename-over; that is a mount option, not a
+// guarantee this function can make.)
+//
+// What it still does not promise, stated because the two are easy to conflate:
+// the parent directory is not fsynced, so a crash immediately after the rename
+// may leave the previous contents in place. That is safe — the old file, never
+// a truncated one — and buying the stronger guarantee would cost a directory
+// fsync per write on a path the relay takes on every poll.
+//
+// One consequence of rename worth knowing: the target gets a new inode. A path
+// that is a bind-mounted single file cannot be replaced this way.
 //
 // Every arm after the temp file exists removes it on the way out, including
 // the ones that cannot be reached without substituting Ops.
@@ -120,6 +158,10 @@ func AtomicWrite(path string, data []byte, mode os.FileMode, label string) error
 	if _, err := tmp.Write(data); err != nil {
 		_ = tmp.Close()
 		return fmt.Errorf("writing temp %s: %w", label, err)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("syncing temp %s: %w", label, err)
 	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("closing temp %s: %w", label, err)

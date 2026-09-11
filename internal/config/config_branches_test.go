@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"panemux/internal/fileops"
 	"panemux/internal/homedir"
 )
 
@@ -106,9 +108,11 @@ func TestTightenConfigFilePermissions_MissingFile_Errors(t *testing.T) {
 
 // ── Writing ──────────────────────────────────────────────────────────────────
 
-// The directory the config lives in is created first, so reaching the write
-// failure needs a path whose parent is fine and whose own name is taken by
-// something os.WriteFile cannot open — a directory.
+// The write goes through internal/fileops now, so the last step is a rename
+// and a directory sitting at the target path is what makes it fail. The
+// message has to name the file either way: this one is logged or returned to
+// a dashboard request, and "rename ... file exists" alone says nothing about
+// which file it was.
 func TestWrite_PathIsADirectory_ReportsAWriteFailure(t *testing.T) {
 	cfg := validConfig()
 	cfg.filePath = filepath.Join(t.TempDir(), "config.yaml")
@@ -117,7 +121,38 @@ func TestWrite_PathIsADirectory_ReportsAWriteFailure(t *testing.T) {
 	err := cfg.SaveWorkspaces()
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "writing config")
+	assert.Contains(t, err.Error(), "replacing config")
+}
+
+// The reason config.yaml stopped being written with os.WriteFile: it holds
+// server.auth_token and the whole workspace layout, and a write that fails
+// partway used to truncate it in place, leaving the next start to parse half
+// a YAML document. Now the failure happens to a temp file that is removed,
+// and the previous config is still there afterwards.
+func TestWrite_FailureMidWrite_LeavesThePreviousConfigIntact(t *testing.T) {
+	cfg := validConfig()
+	cfg.filePath = filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, cfg.SaveWorkspaces())
+	before, err := os.ReadFile(cfg.filePath)
+	require.NoError(t, err)
+	require.NotEmpty(t, before)
+
+	injected := errors.New("no space left on device")
+	fileops.SetOpsForTest(t, (&fileops.Spy{WriteErr: injected}).Ops())
+
+	err = cfg.SaveWorkspaces()
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, injected)
+	assert.Contains(t, err.Error(), "writing temp config")
+
+	after, readErr := os.ReadFile(cfg.filePath)
+	require.NoError(t, readErr, "the config must still be readable after a failed save")
+	assert.Equal(t, before, after, "a failed save must not change the config that was already there")
+
+	entries, readDirErr := os.ReadDir(filepath.Dir(cfg.filePath))
+	require.NoError(t, readDirErr)
+	assert.Len(t, entries, 1, "the temp file must not be left beside it")
 }
 
 // This retires no block — an in-memory config saves on many other paths

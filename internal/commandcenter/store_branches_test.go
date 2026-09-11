@@ -183,6 +183,39 @@ func TestAppendHistoryReportsAFailureCheckingTheExistingFile(t *testing.T) {
 	}
 }
 
+// A buffered write can report ENOSPC at close rather than at write, so a
+// discarded close error means AppendHistory returns nil having written
+// nothing — and runner.go's finishAfterStream then tells the operator the
+// history was persisted. The arm exists so that failure reaches the done
+// frame's warnings like any other.
+func TestAppendHistoryReportsAFailedClose(t *testing.T) {
+	path := filepath.Join(t.TempDir(), historyFileName)
+	fileops.SetOpsForTest(t, (&fileops.Spy{CloseErr: errInjectedWrite}).Ops())
+
+	err := AppendHistory(path, []HistoryEntry{historyEntry(`{"a":1}`)})
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, errInjectedWrite)
+	assert.Contains(t, err.Error(), "closing command center history file")
+}
+
+// A close failure must not overwrite a failure that already happened: the
+// first error is the one that explains what went wrong, and the close error
+// after it is a consequence, not the cause.
+func TestAppendHistoryKeepsTheEarlierFailureWhenTheCloseAlsoFails(t *testing.T) {
+	path := filepath.Join(t.TempDir(), historyFileName)
+	fileops.SetOpsForTest(t, (&fileops.Spy{
+		WriteErr: errInjectedWrite,
+		CloseErr: errors.New("and the close failed too"),
+	}).Ops())
+
+	err := AppendHistory(path, []HistoryEntry{historyEntry(`{"a":1}`)})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "writing command center history file")
+	assert.NotContains(t, err.Error(), "and the close failed too")
+}
+
 // The size check is the reason the ReadAt arm above needs a non-empty file: an
 // empty one is not missing a trailing newline, it has no last byte at all, and
 // reading one would fail on every first-ever append.

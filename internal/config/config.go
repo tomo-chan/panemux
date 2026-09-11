@@ -11,6 +11,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"panemux/internal/fileops"
 	"panemux/internal/homedir"
 )
 
@@ -25,8 +26,6 @@ const (
 	defaultLayoutDirection = "horizontal"
 	defaultPaneType        = "local"
 )
-
-var chmodConfigFile = os.Chmod
 
 type ServerConfig struct {
 	Host      string `yaml:"host"`
@@ -485,10 +484,6 @@ func (c *Config) write() error {
 		return nil
 	}
 
-	if err := os.MkdirAll(filepath.Dir(c.filePath), 0750); err != nil {
-		return fmt.Errorf("creating config directory: %w", err)
-	}
-
 	type configFile struct { //nolint:govet
 		Server         ServerConfig             `yaml:"server"`
 		SSHConnections map[string]SSHConnection `yaml:"ssh_connections,omitempty"`
@@ -519,10 +514,12 @@ func (c *Config) write() error {
 	if err != nil {
 		return fmt.Errorf("marshaling config: %w", err)
 	}
-	if err := os.WriteFile(c.filePath, data, configFileMode); err != nil {
-		return fmt.Errorf("writing config: %w", err)
-	}
-	return nil
+	// Through the shared seam rather than os.WriteFile: this file holds
+	// server.auth_token and the whole workspace layout, and a direct write
+	// that fails partway leaves it truncated for the next start to read. It
+	// also creates the parent directory ("creating config directory: …") and
+	// sets the mode, which is why neither is done here.
+	return fileops.AtomicWrite(c.filePath, data, configFileMode, "config")
 }
 
 func (c *Config) expandPaths() {
@@ -644,7 +641,7 @@ func tightenConfigFilePermissions(path string) error {
 	if info.Mode().Perm() == configFileMode {
 		return nil
 	}
-	if err := chmodConfigFile(path, configFileMode); err != nil {
+	if err := fileops.Chmod(path, configFileMode); err != nil {
 		return fmt.Errorf("tightening config permissions: %w", err)
 	}
 	return nil

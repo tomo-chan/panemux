@@ -93,6 +93,13 @@ func atomicWriteArms() []atomicWriteArm {
 			wantCloses:   1,
 		},
 		{
+			name:         "sync",
+			spy:          func() *fileops.Spy { return &fileops.Spy{SyncErr: errInjected} },
+			wantMsg:      "syncing temp test file",
+			wantTempFile: true,
+			wantCloses:   1,
+		},
+		{
 			name:         "close",
 			spy:          func() *fileops.Spy { return &fileops.Spy{CloseErr: errInjected} },
 			wantMsg:      "closing temp test file",
@@ -118,7 +125,7 @@ func atomicWriteArms() []atomicWriteArm {
 
 // Every failure arm has to say which step failed, and every one of them has to
 // leave the directory as it found it. Table-driven because the interesting
-// property is that all five behave the same way, and a per-arm test would let
+// property is that all six behave the same way, and a per-arm test would let
 // one of them quietly stop doing so.
 func TestAtomicWriteReportsEachFailedStepAndNeverLeavesATempFile(t *testing.T) {
 	for _, tt := range atomicWriteArms() {
@@ -208,6 +215,30 @@ func TestOpsDefaultToTheRealOperations(t *testing.T) {
 	_, err = opened.ReadAt(last, 3)
 	require.NoError(t, err)
 	assert.Equal(t, byte('l'), last[0])
+}
+
+// The real openers must report a true nil File on failure, not a nil *os.File
+// boxed into a non-nil interface. A caller written in the shape this package
+// invites — `f, err := CreateTemp(...); if f != nil { os.Remove(f.Name()) }` —
+// takes that branch on a typed nil and panics in Name().
+//
+// The Spy returns an untyped nil on its own failure path, so without this the
+// double and the thing it doubles would disagree about exactly the value a
+// caller might test — which is the one divergence a double must not have.
+func TestRealOpsReportATrueNilFileWhenTheyFail(t *testing.T) {
+	notADir := filepath.Join(t.TempDir(), "notadir")
+	require.NoError(t, os.WriteFile(notADir, []byte("a regular file\n"), 0600))
+
+	created, createErr := fileops.CreateTemp(notADir, "x-*")
+	require.Error(t, createErr)
+	// `== nil` rather than assert.Nil, deliberately: testify unwraps the
+	// interface and reports a typed-nil pointer as nil, so assert.Nil would
+	// hold for exactly the value this test exists to reject.
+	assert.True(t, created == nil, "got a non-nil interface holding %#v", created)
+
+	opened, openErr := fileops.OpenFile(filepath.Join(notADir, "f"), os.O_CREATE|os.O_RDWR, 0600)
+	require.Error(t, openErr)
+	assert.True(t, opened == nil, "got a non-nil interface holding %#v", opened)
 }
 
 // A substitution that outlived its test would poison every test after it in

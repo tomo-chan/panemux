@@ -37,18 +37,28 @@ type HistoryEntry struct {
 // a bad line further in the file is tolerated either way. Empty entries is
 // a no-op and never creates the file, so a command center that has never
 // run leaves no history file behind.
-func AppendHistory(path string, entries []HistoryEntry) error {
+func AppendHistory(path string, entries []HistoryEntry) (err error) {
 	if len(entries) == 0 {
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0750); err != nil {
-		return fmt.Errorf("creating command center history directory: %w", err)
+	if mkdirErr := os.MkdirAll(filepath.Dir(path), 0750); mkdirErr != nil {
+		return fmt.Errorf("creating command center history directory: %w", mkdirErr)
 	}
 	f, err := fileops.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, historyFileMode)
 	if err != nil {
 		return fmt.Errorf("opening command center history file: %w", err)
 	}
-	defer f.Close() //nolint:errcheck
+	// The close error is reported, not discarded: with ext4's delayed
+	// allocation an ENOSPC or EDQUOT on a buffered write commonly surfaces
+	// here rather than at Write. Swallowing it would return nil from a call
+	// that wrote nothing to disk, and the runner would then tell the operator
+	// the history was persisted — see finishAfterStream's own note that no arm
+	// may let the failure reach only the log.
+	defer func() {
+		if cerr := f.Close(); cerr != nil && err == nil {
+			err = fmt.Errorf("closing command center history file: %w", cerr)
+		}
+	}()
 
 	needsLeadingNewline, err := fileEndsWithoutTrailingNewline(f)
 	if err != nil {

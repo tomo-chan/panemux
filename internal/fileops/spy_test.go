@@ -100,9 +100,18 @@ func spyFileKnobs() []spyKnob {
 			spy:  func() *fileops.Spy { return &fileops.Spy{WriteErr: errInjected} },
 			exercise: func(t *testing.T, dir string) error {
 				return onATempFile(t, dir, func(f fileops.File) error {
-					_, err := f.Write([]byte("x"))
-					return fmt.Errorf("writing: %w", err)
+					if _, err := f.Write([]byte("x")); err != nil {
+						return fmt.Errorf("writing: %w", err)
+					}
+					return nil
 				})
+			},
+		},
+		{
+			name: "SyncErr",
+			spy:  func() *fileops.Spy { return &fileops.Spy{SyncErr: errInjected} },
+			exercise: func(t *testing.T, dir string) error {
+				return onATempFile(t, dir, func(f fileops.File) error { return f.Sync() })
 			},
 		},
 		{
@@ -178,6 +187,28 @@ func TestSpyPassesARealFailureThroughUnchanged(t *testing.T) {
 	assert.Empty(t, spy.Files(), "a file that was never created must not be recorded as one")
 }
 
+// A real ENOSPC or EDQUOT is a SHORT write: some bytes reach the file and
+// then the error is reported. A double that returned the error without writing
+// anything would leave every "the temp file was cleaned up" assertion in this
+// repository asserting about an empty file — which is the easy half of the
+// case, and not the one the temp-file discipline exists for.
+func TestSpyWriteErrIsAShortWriteNotAWriteThatNeverHappened(t *testing.T) {
+	fileops.SetOpsForTest(t, (&fileops.Spy{WriteErr: errInjected}).Ops())
+	f, err := fileops.CreateTemp(t.TempDir(), "x-*")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = f.Close() })
+
+	n, err := f.Write([]byte("abcdef"))
+
+	require.ErrorIs(t, err, errInjected)
+	assert.Equal(t, 3, n, "a short write reports how much of the payload landed")
+	require.NoError(t, f.Sync())
+	onDisk, readErr := os.ReadFile(f.Name())
+	require.NoError(t, readErr)
+	assert.Equal(t, "abc", string(onDisk),
+		"the partial payload must really be on disk, not just reported as written")
+}
+
 // The real Stat and ReadAt have to answer about the real file, since
 // AppendHistory's decision — does this file end mid-line — is made from them.
 func TestSpyReadsTheRealFileWhenNothingIsInjected(t *testing.T) {
@@ -189,6 +220,7 @@ func TestSpyReadsTheRealFileWhenNothingIsInjected(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = f.Close() })
 
+	require.NoError(t, f.Sync())
 	info, err := f.Stat()
 	require.NoError(t, err)
 	assert.Equal(t, int64(3), info.Size())

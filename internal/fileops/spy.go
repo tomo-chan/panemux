@@ -26,6 +26,7 @@ type Spy struct {
 	ChmodErr      error
 	RenameErr     error
 	WriteErr      error
+	SyncErr       error
 	CloseErr      error
 	StatErr       error
 	ReadAtErr     error
@@ -49,7 +50,7 @@ func (s *Spy) Ops() Ops {
 			if s.OpenFileErr != nil {
 				return nil, s.OpenFileErr
 			}
-			return s.wrap(os.OpenFile(name, flag, perm)) //nolint:gosec // test double; the path is the caller's own
+			return s.wrap(os.OpenFile(name, flag, perm))
 		},
 		Chmod: func(name string, mode os.FileMode) error {
 			if s.ChmodErr != nil {
@@ -92,9 +93,10 @@ func (s *Spy) wrap(f *os.File, err error) (File, error) {
 	return &spyFile{File: f, spy: s}, nil
 }
 
-// spyFile is one file handed out by a Spy. The real *os.File is always
-// operated on first, so the filesystem ends up in the state it would have been
-// in anyway, and only the reported error is substituted.
+// spyFile is one file handed out by a Spy. Where a real failure would still
+// have changed the file, the real *os.File is operated on first and only the
+// reported error is substituted — see Write, which is a short write rather
+// than a write that never happened.
 type spyFile struct {
 	*os.File
 	spy *Spy
@@ -102,9 +104,22 @@ type spyFile struct {
 
 func (f *spyFile) Write(p []byte) (int, error) {
 	if f.spy.WriteErr != nil {
-		return 0, f.spy.WriteErr
+		// A real ENOSPC is a short write, not a write that never happened:
+		// n > 0 bytes land on disk and then the error is reported. Reproduce
+		// that, or a test asserting the temp file was cleaned up would be
+		// asserting about an empty file — the easy half of the case this
+		// whole seam exists for.
+		n, _ := f.File.Write(p[:len(p)/2])
+		return n, f.spy.WriteErr
 	}
 	return f.File.Write(p)
+}
+
+func (f *spyFile) Sync() error {
+	if f.spy.SyncErr != nil {
+		return f.spy.SyncErr
+	}
+	return f.File.Sync()
 }
 
 func (f *spyFile) Close() error {
