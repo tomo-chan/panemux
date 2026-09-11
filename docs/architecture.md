@@ -163,6 +163,37 @@ linking it links the testing package.
 `.golangci.yml`'s `forbidigo` rule fails the build on `os.UserHomeDir` outside this package, which
 is what keeps "one seam" true rather than aspirational.
 
+### `internal/fileops`
+
+The write discipline every persisted file shares, and the seam onto the operations it is made of.
+`AtomicWrite(path, data, mode, label)` creates a temp file beside the target, writes it, closes it,
+chmods it and renames it into place, so a crash or power loss mid-write can never leave a truncated
+file behind; `label` is the file kind the error messages name, since every caller writes from a
+background goroutine where a log line is all anyone sees. `CreateTemp`, `OpenFile` and `Chmod` are
+the individual operations, for the two callers that need the steps rather than the whole dance:
+`internal/commandcenter`'s MCP config file (written once per query, removed by its own `cleanup`,
+never renamed) and its history file (opened `O_APPEND`, not replaced).
+
+`internal/board`'s cursor and bootstrap stores and `internal/commandcenter`'s session store each had
+their own copy of this function before; the second copy's own doc comment recorded that it was
+deliberately duplicated because the first was unexported. A shared package removes that reason, and
+the duplication with it.
+
+Why it is a package rather than a set of function variables inside each caller is the same answer
+`internal/homedir` gives, for the same reason: the callers do not line up with the tests. The root
+package's own tests drive `internal/board`'s writes through `persistBoardCursors` /
+`persistBootstrapState`, and a package-private variable is invisible from another package's test.
+It declares its own two-method `TestingT` rather than importing `testing`, so no binary linking it
+links the testing package.
+
+What the seam buys is the arms nothing could reach before: once `os.CreateTemp` has returned, the
+file being written is one the function created itself, so it exists, is writable, and is owned by
+the process — and CI runs as root, so permission bits are unavailable too. `Spy` (`spy.go`, in the
+production package for the same reason the seam is: its users are in other packages) performs each
+real operation and substitutes only the reported error, so a test asserting the temp file was
+removed is asserting about a file that genuinely existed. See issue
+[#222](https://github.com/tomo-chan/panemux/issues/222).
+
 ### `internal/portforward`
 
 Owns loopback TCP forwards and the URL parsing that decides when one is needed. `CallbackPort` extracts the loopback port an authorization URL expects its OAuth callback on; `Registry` binds that port on `127.0.0.1`, pipes each accepted connection through a `Dialer` (satisfied by `internal/session`'s `LoopbackDialer`), and owns the lifecycle: per-pane and per-port deduplication, idle expiry, and teardown when a pane goes away.

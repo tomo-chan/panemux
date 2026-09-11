@@ -849,11 +849,12 @@ depends on: `LocalAgmsgPresent(agmsgPath string) bool` (`os.Stat` on `scripts/ap
 `RemoteAgmsgPresent(ctx, executor BoardExecutor, agmsgPath string) (bool, error)`, the latter running
 a fixed, non-tainted `sh -c` probe script over the same `RunBoardCommand` channel `ResolveRemoteAgmsgPath`
 already uses (see [security.md](security.md) for why this probe is safe despite carrying no
-regex-allowlist branch of its own — it takes no caller-supplied data at all). `internal/board/atomic_write.go`
-factors the temp-file-plus-rename write discipline shared by `cursor_store.go` and
-`internal/board/bootstrap_store.go`'s `SaveBootstrapState`/`LoadBootstrapState`
-(`~/.config/panemux/board-bootstrap-state.json`, `0600`) into one helper, since both files need the
-identical atomicity guarantee for an unrelated piece of persisted state.
+regex-allowlist branch of its own — it takes no caller-supplied data at all). Both `cursor_store.go`
+and `internal/board/bootstrap_store.go`'s `SaveBootstrapState`/`LoadBootstrapState`
+(`~/.config/panemux/board-bootstrap-state.json`, `0600`) write through
+[`internal/fileops`](architecture.md)'s `AtomicWrite`, since both files need the identical atomicity
+guarantee for an unrelated piece of persisted state — as does `internal/commandcenter`'s session
+file, which is why that discipline lives in one shared package rather than a copy per caller.
 
 `bootstrap.go` (`package main`, not `internal/board` — it depends on `internal/session.Manager` the
 same way `board.go` already does) implements `bootstrapWatcher`, the poller described in [Bootstrap

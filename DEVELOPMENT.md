@@ -102,6 +102,24 @@ happens inside `internal/config`, `internal/server`'s integration tests drive co
 at once, and the root package's tests drive `internal/commandcenter`'s default paths — none of which
 a package-private variable can reach. See issue [#212](https://github.com/tomo-chan/panemux/issues/212).
 
+**Persisted files are written through one seam, and it is `internal/fileops`.** `fileops.AtomicWrite`
+is the temp-file-plus-rename write every persisted file goes through (the relay cursor, bootstrap
+state, the command-center session id); `fileops.CreateTemp` / `OpenFile` / `Chmod` are the individual
+operations for callers that need them (the MCP config file, the history file). Substitute them in a
+test with `fileops.SetOpsForTest(t, (&fileops.Spy{WriteErr: err}).Ops())` — a `Spy` performs every
+real operation and fails only the steps it is given, so the filesystem still ends up in the state it
+would have been in, and `spy.Files()` names the files it handed out so a test can assert they were
+cleaned up.
+
+Reach for it when a failure arm sits *after* the file was created by the function under test: a path
+whose shape can be broken (a regular file where a directory goes, a directory where a file goes,
+`/dev/full`) is still the better fixture and needs no seam, but that only works while the path came
+from the caller. Once `os.CreateTemp` has succeeded, the file exists, is writable and is owned by the
+process, and CI runs as root, so the `Write`/`Close`/`Chmod` arms — the disk filling partway through
+a write, which is the failure the rename discipline exists to survive — have no fixture at all. Same
+`t.Parallel` caveat as `homedir`: `fileops.ops` is one unsynchronized package variable. See issue
+[#222](https://github.com/tomo-chan/panemux/issues/222).
+
 ### Schema-first
 
 - For Go structure changes, update validation rules and tests in `internal/config/validate.go` first.

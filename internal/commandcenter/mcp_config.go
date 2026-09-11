@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+
+	"panemux/internal/fileops"
 )
 
 // BoardMCPServerSubcommand is the hidden panemux subcommand
@@ -68,7 +70,7 @@ func BuildMCPConfig(execPath, baseURL, token string) (path string, cleanup func(
 		return "", nil, fmt.Errorf("encoding mcp config: %w", err)
 	}
 
-	f, err := os.CreateTemp("", "panemux-board-mcp-*.json")
+	f, err := fileops.CreateTemp("", "panemux-board-mcp-*.json")
 	if err != nil {
 		return "", nil, fmt.Errorf("creating temp mcp config: %w", err)
 	}
@@ -84,7 +86,7 @@ func BuildMCPConfig(execPath, baseURL, token string) (path string, cleanup func(
 		cleanup()
 		return "", nil, fmt.Errorf("closing temp mcp config: %w", err)
 	}
-	if err := os.Chmod(tmpPath, 0600); err != nil {
+	if err := fileops.Chmod(tmpPath, 0600); err != nil {
 		cleanup()
 		return "", nil, fmt.Errorf("setting mcp config mode: %w", err)
 	}

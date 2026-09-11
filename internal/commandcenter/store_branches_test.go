@@ -2,6 +2,7 @@ package commandcenter
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"panemux/internal/fileops"
 	"panemux/internal/homedir"
 )
 
@@ -39,6 +41,11 @@ func directoryAt(t *testing.T, path string) string {
 	require.NoError(t, os.Mkdir(path, 0750))
 	return path
 }
+
+// errInjectedWrite stands in for a failure the real filesystem cannot be
+// talked into producing here: a write that fails after the file it targets
+// has already been created by this very function.
+var errInjectedWrite = errors.New("injected write failure")
 
 func historyEntry(raw string) HistoryEntry {
 	return HistoryEntry{At: time.Unix(0, 0).UTC(), Raw: json.RawMessage(raw)}
@@ -121,6 +128,75 @@ func requireDevFull(t *testing.T) {
 	if info.Mode()&os.ModeCharDevice == 0 {
 		t.Skipf("/dev/full is not a character device (%v)", info.Mode())
 	}
+}
+
+// AppendHistory has to know whether the file it is about to append to ends
+// mid-line, so its own entries do not concatenate onto a truncated tail. Both
+// ways of failing to find that out are unreachable against a real file the
+// caller has just opened — and both matter, because reporting the wrong
+// answer silently corrupts the next line rather than failing.
+//
+// The two arms are distinguished by their inner wrap, not just by the shared
+// caller message: folding them together would make a log line unable to say
+// whether the size or the read was the problem.
+func TestAppendHistoryReportsAFailureCheckingTheExistingFile(t *testing.T) {
+	injected := errors.New("injected failure")
+
+	for _, tt := range []struct {
+		spy     func() *fileops.Spy
+		name    string
+		wantMsg string
+	}{
+		{
+			name:    "Stat",
+			spy:     func() *fileops.Spy { return &fileops.Spy{StatErr: injected} },
+			wantMsg: "stat: ",
+		},
+		{
+			name:    "ReadAt",
+			spy:     func() *fileops.Spy { return &fileops.Spy{ReadAtErr: injected} },
+			wantMsg: "reading last byte: ",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), historyFileName)
+			// Non-empty and unterminated, so the size check passes and the
+			// read is actually attempted — otherwise the ReadAt arm is never
+			// entered and that subtest would pass for the wrong reason.
+			require.NoError(t, os.WriteFile(path, []byte(`{"truncated":`), historyFileMode))
+			fileops.SetOpsForTest(t, tt.spy().Ops())
+
+			err := AppendHistory(path, []HistoryEntry{historyEntry(`{"a":1}`)})
+
+			require.Error(t, err)
+			assert.ErrorIs(t, err, injected)
+			assert.Contains(t, err.Error(), "checking command center history file",
+				"the caller's own wrap must name the file this was about")
+			assert.Contains(t, err.Error(), tt.wantMsg,
+				"and the inner wrap must say which of the two steps failed")
+
+			data, readErr := os.ReadFile(path)
+			require.NoError(t, readErr)
+			assert.Equal(t, `{"truncated":`, string(data),
+				"a check that could not be completed must not append anyway")
+		})
+	}
+}
+
+// The size check is the reason the ReadAt arm above needs a non-empty file: an
+// empty one is not missing a trailing newline, it has no last byte at all, and
+// reading one would fail on every first-ever append.
+func TestAppendHistoryDoesNotReadTheLastByteOfAnEmptyFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), historyFileName)
+	require.NoError(t, os.WriteFile(path, nil, historyFileMode))
+	fileops.SetOpsForTest(t, (&fileops.Spy{ReadAtErr: errors.New("injected failure")}).Ops())
+
+	require.NoError(t, AppendHistory(path, []HistoryEntry{historyEntry(`{"a":1}`)}))
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, "{\"at\":\"1970-01-01T00:00:00Z\",\"raw\":{\"a\":1}}\n", string(data),
+		"no leading newline: an empty file is not an unterminated one")
 }
 
 // ── LoadHistory ──────────────────────────────────────────────────────────────
@@ -245,34 +321,60 @@ func TestLoadSessionFileReportsAReadFailureThatIsNotAMissingFile(t *testing.T) {
 	assert.Equal(t, SessionState{}, state)
 }
 
-// ── atomicWriteFile ──────────────────────────────────────────────────────────
+// ── SaveSessionFile's own write ──────────────────────────────────────────────
+//
+// The temp-file-plus-rename discipline itself now lives in internal/fileops
+// and is tested there, including the arms only its seam can reach. What is
+// still this package's own is the label it passes: a failure has to name the
+// command center session file rather than some anonymous write.
 
-func TestAtomicWriteFileReportsAnUncreatableParentDirectory(t *testing.T) {
+func TestSaveSessionFileReportsAnUncreatableParentDirectory(t *testing.T) {
 	notADir := regularFileAt(t, filepath.Join(t.TempDir(), "notadir"))
 
-	err := atomicWriteFile(filepath.Join(notADir, "nested", "file.json"), []byte("x"), 0600, "test file")
+	err := SaveSessionFile(filepath.Join(notADir, "nested", sessionFileName), SessionState{SessionID: "s-1"})
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "creating test file directory",
+	assert.Contains(t, err.Error(), "creating command center session file directory",
 		"the label the caller passed must reach the message, so the log names which file failed")
 }
 
 // The rename is the step that makes the write atomic, and it is the one that
 // can still fail after everything else succeeded. Renaming a file onto an
 // existing directory fails, which stands in for any rename failure.
-func TestAtomicWriteFileReportsAFailedRenameAndLeavesNoTempFile(t *testing.T) {
+func TestSaveSessionFileReportsAFailedRenameAndLeavesNoTempFile(t *testing.T) {
 	dir := t.TempDir()
 	path := directoryAt(t, filepath.Join(dir, "target-is-a-directory"))
 
-	err := atomicWriteFile(path, []byte("x"), 0600, "test file")
+	err := SaveSessionFile(path, SessionState{SessionID: "s-1"})
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "replacing test file")
+	assert.Contains(t, err.Error(), "replacing command center session file")
 
 	entries, readErr := os.ReadDir(dir)
 	require.NoError(t, readErr)
 	require.Len(t, entries, 1, "the deferred cleanup must remove the temp file even on the failure path")
 	assert.Equal(t, filepath.Base(path), entries[0].Name())
+}
+
+// A failure partway through the write — the disk filling, the filesystem
+// going read-only — is the one the temp file exists for, and it is reachable
+// only through the seam. What this pins is that it stays a reported error
+// naming this file, and that nothing is left in the directory afterwards.
+func TestSaveSessionFileReportsAFailureMidWrite(t *testing.T) {
+	spy := &fileops.Spy{WriteErr: errInjectedWrite}
+	fileops.SetOpsForTest(t, spy.Ops())
+	dir := t.TempDir()
+	path := filepath.Join(dir, sessionFileName)
+
+	err := SaveSessionFile(path, SessionState{SessionID: "s-1"})
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, errInjectedWrite)
+	assert.Contains(t, err.Error(), "writing temp command center session file")
+
+	entries, readErr := os.ReadDir(dir)
+	require.NoError(t, readErr)
+	assert.Empty(t, entries, "neither the target nor the temp file may survive")
 }
 
 // ── Default paths ────────────────────────────────────────────────────────────

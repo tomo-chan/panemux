@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"panemux/internal/fileops"
 	"panemux/internal/homedir"
 )
 
@@ -43,7 +44,7 @@ func AppendHistory(path string, entries []HistoryEntry) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0750); err != nil {
 		return fmt.Errorf("creating command center history directory: %w", err)
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, historyFileMode)
+	f, err := fileops.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, historyFileMode)
 	if err != nil {
 		return fmt.Errorf("opening command center history file: %w", err)
 	}
@@ -78,7 +79,12 @@ func AppendHistory(path string, entries []HistoryEntry) error {
 // Write on an O_APPEND-opened file always targets end-of-file regardless of
 // the current offset, but ReadAt avoids relying on that rather than
 // assuming it).
-func fileEndsWithoutTrailingNewline(f *os.File) (bool, error) {
+//
+// It takes a fileops.File rather than an *os.File so both of its failure
+// arms — a Stat that cannot report a size, a ReadAt that cannot serve one —
+// can be driven from a test. Neither is reachable against a real file this
+// function's own caller just opened; see internal/fileops.
+func fileEndsWithoutTrailingNewline(f fileops.File) (bool, error) {
 	info, err := f.Stat()
 	if err != nil {
 		return false, fmt.Errorf("stat: %w", err)

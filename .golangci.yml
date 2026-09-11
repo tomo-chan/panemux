@@ -65,6 +65,13 @@ linters:
       checks: ["all"]
     whitespace:
       multi-if: true
+    wrapcheck:
+      # internal/fileops' own errors already carry the caller's label — that is
+      # what its `label` parameter is for, so every message names the file that
+      # failed. Wrapping them again at each call site would only prepend a
+      # second name for the same file.
+      ignore-package-globs:
+        - panemux/internal/fileops
   exclusions:
     presets:
       # Keep standard-library edge cases from drowning out project-specific
@@ -78,6 +85,13 @@ linters:
       - path: internal/homedir/
         linters:
           - forbidigo
+      # internal/fileops' Spy is a test double: it has to report the error it
+      # was handed, and the real os error otherwise, exactly as it is. Wrapping
+      # either would break errors.Is against the sentinel a test injected, which
+      # is the only thing the double is for.
+      - path: internal/fileops/spy.go
+        linters:
+          - wrapcheck
       # Session package manages OS processes and SSH connections; Close/Wait/Kill
       # errors in teardown paths are not actionable.
       - path: internal/session/
