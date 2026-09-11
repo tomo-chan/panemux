@@ -1,5 +1,7 @@
 # panemux
 
+[English](README.md) | [日本語](README.ja.md)
+
 **Browser-based terminal multiplexer** — split your terminal into multiple panes, each connecting to a local shell, remote SSH host, or tmux session, all rendered in your browser via xterm.js.
 
 [![CI](https://github.com/tomo-chan/panemux/actions/workflows/ci.yml/badge.svg)](https://github.com/tomo-chan/panemux/actions/workflows/ci.yml)
