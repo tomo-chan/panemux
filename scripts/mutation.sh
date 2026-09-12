@@ -442,8 +442,14 @@ $above" ;;
 					for (t = 1; t <= n; t++) {
 						one = types[t]
 						gsub(/[ \t]/, "", one)
+						# An empty entry (a trailing comma) must match
+						# nothing, and a mutant whose report carried no type
+						# must be matchable by nothing but [*]. Without both
+						# guards the two empties meet and the marker waives a
+						# mutant nobody wrote a word about.
+						if (one == "") continue
 						if (one == "*") wildcard = 1
-						else if (one == want) matched = 1
+						else if (want != "" && one == want) matched = 1
 						else claimed = claimed (claimed == "" ? "" : ", ") one
 					}
 				}

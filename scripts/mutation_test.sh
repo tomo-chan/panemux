@@ -1042,6 +1042,50 @@ else
 	pass "an unclosed [ is reported as a malformed marker"
 fi
 
+# ── 29. An empty entry in the type list matches nothing ──────────────────────
+#
+# `[CONDITIONALS_BOUNDARY,]` — a trailing comma, the easiest typo in the new
+# syntax — splits into a second, empty type. The report parser accepts a
+# mutation whose `type` is absent (it requires only file, line and status), so
+# an empty type CAN reach the matcher, and an empty entry matching an empty type
+# is the one shape where this marker waives a mutant nobody wrote a word about.
+# Found by re-reading the diff, not by a failing case: it waived silently.
+#
+# Only [*] may waive a mutant whose type is unknown, and it says so.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/new.go" <<'EOF'
+package pkg
+
+func New(n int) bool {
+	//mutation:exempt[CONDITIONALS_BOUNDARY,] a trailing comma, easily typed
+	if n > 7 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/new.go","mutations":[
+   {"status":"LIVED","line":5,"column":5},
+   {"type":"CONDITIONALS_NEGATION","status":"LIVED","line":5,"column":5}]}]}'
+commit_on_branch "$repo" "add new.go"
+out=$(run_checker "$repo" --base main --report rep.json)
+if ! printf '%s' "$(findings_only "$out")" | grep -q 'pkg/new.go:5'; then
+	fail "an empty type entry does not waive a mutant with no reported type" "$out"
+elif ! printf '%s' "$out" | grep -q '2 surviving mutant'; then
+	fail "neither mutant on the line is waived" "$out"
+elif ! printf '%s' "$out" | grep -q 'names CONDITIONALS_BOUNDARY$'; then
+	# Anchored, because the empty entry must not reach the note either: without
+	# the guard the list reads "CONDITIONALS_BOUNDARY, " with a dangling
+	# separator, and a message about a typo should not contain one.
+	fail "the empty entry is left out of the list the note names" "$out"
+else
+	pass "an empty entry in the type list matches nothing and is not named"
+fi
+
 # ── Result ────────────────────────────────────────────────────────────────────
 
 echo
