@@ -536,15 +536,16 @@ func TestSSHShellCommandIsValidShellSyntax(t *testing.T) {
 // SSH shell request and never depended on $SHELL at all.
 func TestRemoteLoginShellExecFallsBackWhenShellIsUnset(t *testing.T) {
 	tests := []struct {
-		name  string
-		wantX string
-		env   []string
+		name       string
+		wantX      string
+		env        []string
+		unsetShell bool
 	}{
 		{name: "bash gets a login shell", env: []string{"SHELL=/bin/bash"}, wantX: "login"},
 		{name: "zsh gets a login shell", env: []string{"SHELL=/usr/bin/zsh"}, wantX: "login"},
 		{name: "fish gets a login shell", env: []string{"SHELL=/usr/local/bin/fish"}, wantX: "login"},
 		{name: "unknown shell execs plainly", env: []string{"SHELL=/bin/ksh"}, wantX: "plain"},
-		{name: "unset shell falls back", env: nil, wantX: "fallback"},
+		{name: "unset shell falls back", unsetShell: true, wantX: "fallback"},
 		{name: "empty shell falls back", env: []string{"SHELL="}, wantX: "fallback"},
 	}
 
@@ -557,7 +558,18 @@ func TestRemoteLoginShellExecFallsBackWhenShellIsUnset(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cmd := exec.Command("sh", "-c", probe) //nolint:gosec // G204: fixed script under test
+			script := probe
+			if tt.unsetShell {
+				// A cmd.Env with no SHELL entry isn't enough to observe the
+				// "unset" branch on a system whose /bin/sh is bash: bash
+				// populates SHELL itself from the password database when the
+				// variable is absent from its environment (unlike an
+				// explicitly empty SHELL=, which it leaves alone). Unsetting
+				// it inside the script runs after that auto-population, so
+				// the case statement sees a genuinely empty value.
+				script = "unset SHELL; " + probe
+			}
+			cmd := exec.Command("sh", "-c", script) //nolint:gosec // G204: fixed script under test
 			cmd.Env = append([]string{"PATH=/usr/bin:/bin"}, tt.env...)
 			out, err := cmd.Output()
 			if err != nil {
