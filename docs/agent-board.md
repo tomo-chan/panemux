@@ -1062,6 +1062,20 @@ board-enabled pane) must be true before the goroutine even starts.
    unreachable host, a transport error), panemux logs one warning naming the pane and retries on
    every subsequent tick — no PTY write happens, and the pane's shell session is otherwise
    unaffected.
+
+**Every bootstrap warning is logged once per failing streak, never once per tick.** The conditions
+the watcher reports — a pane ID or team outside agmsg's identifier alphabet, a detection command that
+fails, a host with no resolved `agmsg_path`, a presence probe that errors, agmsg simply not installed
+— are not transient by nature: a dead tmux server or a dropped SSH connection stays that way, and the
+watcher re-checks every pane on every tick, so logging each occurrence would mean one line per tick
+for as long as panemux runs. One broken pane would then drown out everything else panemux writes,
+which is the real cost — not the volume itself. `bootstrapWatcher.warnOnce` suppresses a warning
+while its condition persists and `clearWarning` releases it the moment the condition clears, so a
+failure that returns after a recovery is reported again: "once ever" would swallow the second outage,
+which is the one an operator least expects, having just been told the pane recovered. The suppression
+is keyed per pane **and per kind**, because the conditions are independent — a pane that cannot be
+detected this minute and is missing agmsg the next has hit two different problems, and the first must
+not silence the second.
 5. panemux writes a one-time instruction into the pane's PTY (the same `Session.Write` path already
    used for all terminal input; `buildBootstrapInstruction` in `bootstrap.go`) telling the agent to:
    1. Join agmsg's team by running `join.sh <team> <pane-id> <agmsg-type> "$(pwd)" --force` directly
@@ -1222,6 +1236,14 @@ tradeoff (see [Known limitations](#known-limitations)), not a claim of a race-fr
   individually allow-listed ahead of time, while a generic `Bash` grant cannot be scoped down to "only
   run curl against this one loopback endpoint" — granting `Bash` at all would hand the command center
   everything `Bash` can do, which is exactly the blanket-bypass outcome this design avoids.
+- **Wire shape.** That server answers with the response shape JSON-RPC 2.0 §5 requires, not merely
+  one its current client happens to accept: **exactly one** of `result`/`error` on every response,
+  and an `id` that is JSON `null` — never absent — when the request's own id could not be determined,
+  which is the parse-error case. Both used to be expressed with `omitempty`, which drops the key
+  instead: `notifications/initialized` sent as a *request* (a known method with nothing to report,
+  so neither method-not-found nor a result) was answered with neither member, and a parse error with
+  no id at all. Nothing observed today rejects either, but the client here is an LLM subprocess's own
+  MCP layer, whose strictness panemux does not control and cannot pin. See #210.
 - **Concurrency.** At most one query may be in flight against the command center's session id at a
   time. A `WS /ws/board-command` request that arrives while one is already running is rejected
   immediately with an explicit "command center busy" error rather than queued — two concurrent

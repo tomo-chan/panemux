@@ -92,28 +92,49 @@ type bootstrapWatcher struct {
 	// writeAttempts counts consecutive clean (n==0) Write failures per pane,
 	// reset on success and on giving up. Not persisted: it only needs to
 	// survive within one session object's lifetime.
-	writeAttempts    map[string]int
-	presenceWarned   map[string]bool
+	writeAttempts map[string]int
+	// warned tracks which warning kinds are currently being suppressed for a
+	// pane, keyed pane ID -> kind. An entry is added when the warning is
+	// logged and removed when the condition it reports clears, so each
+	// warning is logged once per failing streak rather than once per tick
+	// (the poll loop would otherwise repeat it for as long as the condition
+	// lasts, which for a dead tmux server or a dropped SSH connection is the
+	// life of the process) and rather than once for the life of the pane (a
+	// failure that returns after a recovery is news again). The kinds are
+	// separate keys because the conditions are independent: one firing must
+	// not silence the others. See #218.
+	warned           map[string]map[string]bool
 	team             string
 	persistedPaneIDs []string
 	seeded           bool
 }
 
+// The warning kinds bootstrapWatcher.warnOnce suppresses independently of
+// one another. Each names a distinct condition a pane can be in, so a pane
+// can hit several of them in sequence and each still gets reported once.
+const (
+	warnKindIdentifier = "identifier"
+	warnKindDetect     = "detect"
+	warnKindAgmsgPath  = "agmsg-path"
+	warnKindProbe      = "presence-probe"
+	warnKindAbsent     = "agmsg-absent"
+)
+
 // newBootstrapWatcher returns a bootstrapWatcher ready to have persisted
 // state loaded (LoadPersistedState) and then be polled or run.
 func newBootstrapWatcher(cfg bootstrapWatcherConfig) *bootstrapWatcher {
 	return &bootstrapWatcher{
-		manager:        cfg.Manager,
-		paneHosts:      cfg.PaneHosts,
-		paneModes:      cfg.PaneModes,
-		resolvedPaths:  cfg.ResolvedPaths,
-		team:           cfg.Team,
-		persist:        cfg.Persist,
-		bootstrapped:   map[string]session.Session{},
-		pending:        map[string]session.Session{},
-		givenUp:        map[string]session.Session{},
-		writeAttempts:  map[string]int{},
-		presenceWarned: map[string]bool{},
+		manager:       cfg.Manager,
+		paneHosts:     cfg.PaneHosts,
+		paneModes:     cfg.PaneModes,
+		resolvedPaths: cfg.ResolvedPaths,
+		team:          cfg.Team,
+		persist:       cfg.Persist,
+		bootstrapped:  map[string]session.Session{},
+		pending:       map[string]session.Session{},
+		givenUp:       map[string]session.Session{},
+		writeAttempts: map[string]int{},
+		warned:        map[string]map[string]bool{},
 	}
 }
 
@@ -227,13 +248,14 @@ func (b *bootstrapWatcher) checkPane(ctx context.Context, paneID, host string) {
 	// agmsg under an identity the relay can never address back. Skip and
 	// warn once rather than write a broken instruction.
 	if !board.ValidAgmsgIdentifier(paneID) || !board.ValidAgmsgIdentifier(b.team) {
-		b.warnOnce(paneID, fmt.Sprintf(
+		b.warnOnce(paneID, warnKindIdentifier, fmt.Sprintf(
 			"agent board bootstrap: pane %q or team %q is not a valid agmsg identifier, skipping bootstrap",
 			paneID, b.team,
 		))
 		delete(b.pending, paneID)
 		return
 	}
+	b.clearWarning(paneID, warnKindIdentifier)
 
 	detector, ok := sess.(session.AgentTypeDetector)
 	if !ok {
@@ -242,10 +264,18 @@ func (b *bootstrapWatcher) checkPane(ctx context.Context, paneID, host string) {
 	}
 	agmsgType, detected, err := detector.DetectInteractiveAgentType()
 	if err != nil {
-		log.Printf("Warning: agent board bootstrap: detecting agent type for pane %q: %v", paneID, err)
+		// Warned once per failing streak, not once per tick: detection runs
+		// a command inside the pane, so it keeps failing for as long as the
+		// tmux server is gone or the SSH connection is down, and dropping
+		// the pane from pending suppresses nothing — the next tick finds the
+		// same live session and checks it again. See #218.
+		b.warnOnce(paneID, warnKindDetect, fmt.Sprintf(
+			"agent board bootstrap: detecting agent type for pane %q: %v", paneID, err,
+		))
 		delete(b.pending, paneID)
 		return
 	}
+	b.clearWarning(paneID, warnKindDetect)
 	if !detected {
 		delete(b.pending, paneID)
 		return
@@ -266,11 +296,12 @@ func (b *bootstrapWatcher) checkPane(ctx context.Context, paneID, host string) {
 		return
 	}
 	if !present {
-		b.warnOnce(paneID, fmt.Sprintf(
+		b.warnOnce(paneID, warnKindAbsent, fmt.Sprintf(
 			"agent board bootstrap: agmsg not found on host %q for pane %q, skipping bootstrap", host, paneID,
 		))
 		return
 	}
+	b.clearWarning(paneID, warnKindAbsent)
 
 	instruction := buildBootstrapInstruction(b.resolvedPaths[host], b.team, paneID, agmsgType, b.modeFor(paneID))
 	b.writeInstruction(paneID, sess, instruction)
@@ -342,9 +373,11 @@ func (b *bootstrapWatcher) writeInstruction(paneID string, sess session.Session,
 func (b *bootstrapWatcher) agmsgPresent(ctx context.Context, paneID, host string) (present bool, checked bool) {
 	path, ok := b.resolvedPaths[host]
 	if !ok {
-		b.warnOnce(paneID, fmt.Sprintf("agent board bootstrap: no resolved agmsg_path for host %q (pane %q)", host, paneID))
+		b.warnOnce(paneID, warnKindAgmsgPath,
+			fmt.Sprintf("agent board bootstrap: no resolved agmsg_path for host %q (pane %q)", host, paneID))
 		return false, false
 	}
+	b.clearWarning(paneID, warnKindAgmsgPath)
 
 	if host == boardHostIDLocal {
 		return board.LocalAgmsgPresent(path), true
@@ -355,20 +388,41 @@ func (b *bootstrapWatcher) agmsgPresent(ctx context.Context, paneID, host string
 	defer cancel()
 	present, err := board.RemoteAgmsgPresent(probeCtx, executor, path)
 	if err != nil {
-		b.warnOnce(paneID, fmt.Sprintf(
+		b.warnOnce(paneID, warnKindProbe, fmt.Sprintf(
 			"agent board bootstrap: checking agmsg presence on host %q (pane %q): %v", host, paneID, err,
 		))
 		return false, false
 	}
+	b.clearWarning(paneID, warnKindProbe)
 	return present, true
 }
 
-func (b *bootstrapWatcher) warnOnce(paneID, message string) {
-	if b.presenceWarned[paneID] {
+// warnOnce logs message unless kind is already being suppressed for paneID,
+// i.e. unless this pane is already inside a failing streak of that kind.
+// clearWarning ends the streak.
+func (b *bootstrapWatcher) warnOnce(paneID, kind, message string) {
+	if b.warned[paneID][kind] {
 		return
 	}
-	b.presenceWarned[paneID] = true
+	if b.warned[paneID] == nil {
+		b.warned[paneID] = map[string]bool{}
+	}
+	b.warned[paneID][kind] = true
 	log.Printf("Warning: %s", message)
+}
+
+// clearWarning ends paneID's failing streak of this kind, so the next
+// occurrence is logged again. Called on the success side of every condition
+// warnOnce reports: a condition that clears and comes back is a new streak,
+// and by then the operator has been told the pane recovered.
+func (b *bootstrapWatcher) clearWarning(paneID, kind string) {
+	if b.warned[paneID] == nil {
+		return
+	}
+	delete(b.warned[paneID], kind)
+	if len(b.warned[paneID]) == 0 {
+		delete(b.warned, paneID)
+	}
 }
 
 // persistBootstrapped saves the current set of bootstrapped pane IDs,
