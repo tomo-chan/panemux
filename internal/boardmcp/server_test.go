@@ -179,6 +179,13 @@ func TestServerMalformedLineReturnsParseError(t *testing.T) {
 
 	require.Len(t, resp, 1)
 	require.NotNil(t, resp[0]["error"])
+	// JSON-RPC 2.0 §5: when the id cannot be determined — which is exactly
+	// the parse-error case — it MUST be Null. Omitting the key is not the
+	// same thing, and a client correlating responses by id sees a response
+	// it cannot place rather than one explicitly marked unplaceable. See
+	// #210.
+	assert.Contains(t, resp[0], "id")
+	assert.Nil(t, resp[0]["id"])
 }
 
 func TestServerProcessesMultipleLinesInOrder(t *testing.T) {

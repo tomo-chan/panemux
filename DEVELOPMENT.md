@@ -102,6 +102,30 @@ happens inside `internal/config`, `internal/server`'s integration tests drive co
 at once, and the root package's tests drive `internal/commandcenter`'s default paths — none of which
 a package-private variable can reach. See issue [#212](https://github.com/tomo-chan/panemux/issues/212).
 
+**The cache directory has its own seam, and it is `internal/cachedir`.** Same shape — `cachedir.Dir()`,
+`cachedir.SetForTest(t, dir)`, `cachedir.SetFailingForTest(t, err)`, and a `forbidigo` rule on
+`os.UserCacheDir()` outside that package — and a *separate* package rather than a second function in
+`internal/homedir`, because it is a different global with different platform behavior:
+`os.UserCacheDir` never consults `os.UserHomeDir`, reading `$XDG_CACHE_HOME` (falling back to
+`$HOME/.cache`) on non-darwin Unix but `$HOME/Library/Caches` on darwin, where `XDG_CACHE_HOME` is
+ignored outright. Substituting the home directory therefore cannot influence it, and neither
+environment variable alone covers it — `internal/server`'s integration helpers had to set **both**,
+and CI, being Linux-only, would have stayed green had one been dropped while a Mac developer's real
+`~/Library/Caches` collected files from a test run. Keeping the packages apart also keeps each
+`forbidigo` exclusion to one function, so a stray `os.UserHomeDir` inside the cache seam is still
+caught. See issue [#226](https://github.com/tomo-chan/panemux/issues/226).
+
+**Neither seam is safe under `t.Parallel`, and that is a decision rather than an oversight.** Each is
+one unsynchronized package variable, so two parallel tests substituting it race and the loser
+silently reads the other's directory — where `t.Setenv` would have panicked. A mutex would remove the
+race without making it correct (restore stays last-writer-wins, so one test's `Cleanup` can still
+restore over another's live substitution), which buys the appearance of a guarantee; the only real
+fix is per-test injection with no global at all, which means changing exported signatures across six
+packages for a suite that today has **zero** `t.Parallel` calls and runs in seconds. So: substitute
+the seams only from non-parallel tests, and if a concrete need for `t.Parallel` ever appears, take the
+per-test-injection route for the packages that need it rather than adding a lock. See issue
+[#227](https://github.com/tomo-chan/panemux/issues/227).
+
 **Persisted files are written through one seam, and it is `internal/fileops`.** `fileops.AtomicWrite`
 is the temp-file-plus-rename write every file panemux persists goes through — `config.yaml`, the
 auth token file, the relay cursor, bootstrap state, and the command-center session id;
@@ -160,7 +184,7 @@ a write, which is the failure the rename discipline exists to survive — have n
 
 ### Coverage
 
-- `make coverage-go` enforces at least 80% combined coverage across `internal/config`, `internal/api`, `internal/ws`, `internal/server`, `internal/board`, `internal/portforward`, `internal/commandcenter`, `internal/boardmcp`, `internal/homedir`, and the root package.
+- `make coverage-go` enforces at least 80% combined coverage across `internal/config`, `internal/api`, `internal/ws`, `internal/server`, `internal/board`, `internal/portforward`, `internal/commandcenter`, `internal/boardmcp`, `internal/fileops`, `internal/homedir`, `internal/cachedir`, and the root package. The `Makefile`'s `COVERAGE_PKGS` is the authority; this list follows it.
 - `make coverage-frontend` enforces at least 80% coverage across `frontend/src/hooks/`, `frontend/src/schemas/`, and `frontend/src/utils/`.
 - **The threshold stays at 80%; what gets strengthened is the scope.** Raising it works, but the cheapest way to satisfy a higher number is to generate tautological tests, which lowers both protection against regressions and resistance to refactoring. See decision D1 in [docs/quality-gateway.md](docs/quality-gateway.md).
 - The gated package set is checked against `go list ./...` by `TestCoverageScopeCoversEveryPackage`, so a package added to the repository fails the suite until it is either gated or explicitly excluded with a reason. Do not widen the exclusion list to make that failure go away.

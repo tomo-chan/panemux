@@ -112,14 +112,13 @@ func TestServeReportsAReadFailure(t *testing.T) {
 // nothing at all. A client that sends it as a request anyway gets a response,
 // not a "method not found": the method is known, it just has no result.
 //
-// The response carries neither key. `jsonrpcResponse.Result` is `omitempty`,
-// so a nil result is omitted rather than serialized as `"result": null` —
-// worth pinning by key presence rather than by value, since a lookup that
-// returns nil cannot tell an absent key from a null one. Noted rather than
-// changed: JSON-RPC 2.0 asks a response to carry exactly one of result/error,
-// and this shape carries neither, but that is an implementation question and
-// this branch changes no implementation.
-func TestInitializedSentAsARequestIsAnsweredWithoutAResultOrAnError(t *testing.T) {
+// It is answered with an empty result *object*. JSON-RPC 2.0 §5 requires every
+// response to carry exactly one of result/error, and an `omitempty` result
+// silently dropped the key instead — but MCP's own schema narrows that member
+// to an object (`Result = { _meta?: ..., [key: string]: unknown }`), so a JSON
+// null would fail a strict MCP client exactly as the absent key did. Pinned by
+// value and not only by key presence, for that reason. See #210.
+func TestInitializedSentAsARequestIsAnsweredWithAnEmptyResultObject(t *testing.T) {
 	responses := serveLines(t, &fakeBoardAPIClient{},
 		`{"jsonrpc":"2.0","id":7,"method":"notifications/initialized"}`,
 	)
@@ -128,7 +127,30 @@ func TestInitializedSentAsARequestIsAnsweredWithoutAResultOrAnError(t *testing.T
 	assert.EqualValues(t, 7, responses[0]["id"])
 	assert.Equal(t, "2.0", responses[0]["jsonrpc"])
 	assert.NotContains(t, responses[0], "error", "the method is known, so this is not method-not-found")
-	assert.NotContains(t, responses[0], "result", "and it has no result to report")
+	require.Contains(t, responses[0], "result", "§5 requires one of result/error; this one has no error")
+	assert.Equal(t, map[string]any{}, responses[0]["result"],
+		"MCP requires the result member to be an object, so nothing to report is {} — not null, not absent")
+}
+
+// The other half of §5: exactly one of the two members, so serializing a nil
+// result as null must not put a `"result": null` next to an error.
+//
+// It guards the obvious wrong fix for #210 — dropping `omitempty` from Result,
+// which would emit a `"result": null` beside every error — rather than the
+// behavior before it, so it does not go red on its own: `omitempty` already
+// kept a nil result out of an error response.
+//
+//efficacy:exempt guards the obvious wrong fix for #210, which the code it replaces cannot fail
+func TestAnErrorResponseCarriesNoResultMember(t *testing.T) {
+	responses := serveLines(t, &fakeBoardAPIClient{},
+		`{"jsonrpc":"2.0","id":8,"method":"nonexistent/method"}`,
+	)
+
+	require.Len(t, responses, 1)
+	assert.Contains(t, responses[0], "error")
+	assert.NotContains(t, responses[0], "result",
+		"a response carrying an error must not also carry a result, null or otherwise")
+	assert.EqualValues(t, 8, responses[0]["id"])
 }
 
 // ── Malformed tool calls ─────────────────────────────────────────────────────

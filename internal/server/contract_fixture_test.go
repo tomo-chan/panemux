@@ -772,8 +772,9 @@ func normalizeFixtureString(s string, literals map[string]string) string {
 	// Longest key first, and sorted at all because ranging a map is the same
 	// randomized order the `sessions` capture was fixed for, one layer down.
 	// Inert while every capture passes a single literal, and the two most
-	// likely additions already overlap by prefix: newWSEnvIn sets HOME and
-	// XDG_CACHE_HOME, and the latter is the former plus "/.cache". Replacing
+	// likely additions already overlap by prefix: newWSEnvIn substitutes both
+	// the home and the cache directory, and the latter is the former plus
+	// "/.cache". Replacing
 	// the shorter one first rewrites the longer one's prefix and leaves it
 	// unmatchable, so with placeholders that do not happen to nest the same
 	// way, one run in some fraction would write a different fixture than the
@@ -809,8 +810,8 @@ func normalizeFixtureString(s string, literals map[string]string) string {
 // The substitution order above is latent today — every capture passes one
 // literal — so it is checked directly rather than through a fixture that
 // cannot yet exercise it. The pair here is the one most likely to be added
-// next: newWSEnvIn sets HOME and XDG_CACHE_HOME, and the second is the first
-// plus "/.cache". The placeholders deliberately do NOT nest the same way the
+// next: newWSEnvIn substitutes both the home and the cache directory, and the
+// second is the first plus "/.cache". The placeholders deliberately do NOT nest the same way the
 // real paths do, which is what makes the two orders give different answers —
 // with nesting placeholders both orders agree by luck and the test would pass
 // against the unsorted code.

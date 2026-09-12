@@ -1,4 +1,4 @@
-package homedir_test
+package cachedir_test
 
 import (
 	"errors"
@@ -8,20 +8,15 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"panemux/internal/homedir"
+	"panemux/internal/cachedir"
 )
 
-// Unsubstituted, Dir is os.UserHomeDir and nothing else. A seam that quietly
+// Unsubstituted, Dir is os.UserCacheDir and nothing else. A seam that quietly
 // answered something of its own would make every caller's default wrong.
-//
-// This branch touches only the //nolint on its os.UserHomeDir call, which the
-// package-wide forbidigo waiver used to cover.
-//
-//efficacy:exempt pins pre-existing behavior; no implementation under it changed
-func TestDirDefaultsToTheOperatingSystemHomeDirectory(t *testing.T) {
-	want, wantErr := os.UserHomeDir() //nolint:forbidigo // the seam's own default is what this asserts
+func TestDirDefaultsToTheOperatingSystemCacheDirectory(t *testing.T) {
+	want, wantErr := os.UserCacheDir() //nolint:forbidigo // the seam's own default is what this asserts
 
-	got, err := homedir.Dir()
+	got, err := cachedir.Dir()
 
 	if wantErr != nil {
 		require.Error(t, err)
@@ -31,20 +26,20 @@ func TestDirDefaultsToTheOperatingSystemHomeDirectory(t *testing.T) {
 	assert.Equal(t, want, got)
 }
 
-func TestSetForTestSubstitutesTheHomeDirectory(t *testing.T) {
-	homedir.SetForTest(t, "/workspace/user/home")
+func TestSetForTestSubstitutesTheCacheDirectory(t *testing.T) {
+	cachedir.SetForTest(t, "/workspace/user/cache")
 
-	got, err := homedir.Dir()
+	got, err := cachedir.Dir()
 
 	require.NoError(t, err)
-	assert.Equal(t, "/workspace/user/home", got)
+	assert.Equal(t, "/workspace/user/cache", got)
 }
 
 func TestSetFailingForTestSubstitutesAFailure(t *testing.T) {
-	sentinel := errors.New("no home directory")
-	homedir.SetFailingForTest(t, sentinel)
+	sentinel := errors.New("no cache directory")
+	cachedir.SetFailingForTest(t, sentinel)
 
-	got, err := homedir.Dir()
+	got, err := cachedir.Dir()
 
 	require.ErrorIs(t, err, sentinel, "callers wrap this error, so it has to survive as itself")
 	assert.Empty(t, got)
@@ -54,16 +49,16 @@ func TestSetFailingForTestSubstitutesAFailure(t *testing.T) {
 // that has to put the previous value back — not the process exiting. Without
 // that, one test's substitution would leak into every test after it.
 func TestSubstitutionIsRestoredWhenTheTestEnds(t *testing.T) {
-	before, beforeErr := homedir.Dir()
+	before, beforeErr := cachedir.Dir()
 
 	t.Run("substituted", func(t *testing.T) {
-		homedir.SetForTest(t, "/workspace/user/other")
-		got, err := homedir.Dir()
+		cachedir.SetForTest(t, "/workspace/user/other-cache")
+		got, err := cachedir.Dir()
 		require.NoError(t, err)
-		assert.Equal(t, "/workspace/user/other", got)
+		assert.Equal(t, "/workspace/user/other-cache", got)
 	})
 
-	after, afterErr := homedir.Dir()
+	after, afterErr := cachedir.Dir()
 	assert.Equal(t, before, after)
 	assert.Equal(t, beforeErr == nil, afterErr == nil)
 }
@@ -71,35 +66,35 @@ func TestSubstitutionIsRestoredWhenTheTestEnds(t *testing.T) {
 // Nesting has to unwind in order: the inner substitution restores the outer
 // one, not the operating system's answer.
 func TestNestedSubstitutionsRestoreTheEnclosingValue(t *testing.T) {
-	homedir.SetForTest(t, "/workspace/user/outer")
+	cachedir.SetForTest(t, "/workspace/user/outer-cache")
 
 	t.Run("inner", func(t *testing.T) {
-		homedir.SetFailingForTest(t, errors.New("no home directory"))
-		_, err := homedir.Dir()
+		cachedir.SetFailingForTest(t, errors.New("no cache directory"))
+		_, err := cachedir.Dir()
 		require.Error(t, err)
 	})
 
-	got, err := homedir.Dir()
+	got, err := cachedir.Dir()
 	require.NoError(t, err)
-	assert.Equal(t, "/workspace/user/outer", got)
+	assert.Equal(t, "/workspace/user/outer-cache", got)
 }
 
 // SetForTest calls Helper so a failure inside a helper that wraps it is
-// reported at the caller's line rather than inside homedir.
+// reported at the caller's line rather than inside cachedir.
 func TestHelpersMarkThemselvesAsHelpers(t *testing.T) {
 	spy := &helperSpy{}
 
-	homedir.SetForTest(spy, "/workspace/user/home")
-	homedir.SetFailingForTest(spy, errors.New("no home directory"))
+	cachedir.SetForTest(spy, "/workspace/user/cache")
+	cachedir.SetFailingForTest(spy, errors.New("no cache directory"))
 
 	assert.Equal(t, 2, spy.helperCalls)
 	require.Len(t, spy.cleanups, 2)
 	// LIFO, as testing.T unwinds cleanups. Running these in registration order
 	// would end with dirFn holding SetForTest's closure — the value
 	// SetFailingForTest captured as its "original" — rather than the real
-	// os.UserHomeDir, and spy is not a *testing.T, so nothing else would put it
+	// os.UserCacheDir, and spy is not a *testing.T, so nothing else would put it
 	// back. That leaks into every later test in the binary: go test -shuffle=on
-	// then fails TestDirDefaultsToTheOperatingSystemHomeDirectory about half the
+	// then fails TestDirDefaultsToTheOperatingSystemCacheDirectory about half the
 	// time, and any test added above it in this file fails permanently.
 	for i := len(spy.cleanups) - 1; i >= 0; i-- {
 		spy.cleanups[i]()
