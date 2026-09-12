@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"panemux/internal/fileops"
 	"panemux/internal/homedir"
 )
 
@@ -95,11 +96,12 @@ func (c *Config) EnsureAuthToken() {
 		log.Printf("Warning: failed to generate auth token: %v", err)
 		return
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0750); err != nil {
-		log.Printf("Warning: failed to create auth token directory: %v", err)
-		return
-	}
-	if err := os.WriteFile(path, []byte(token), authTokenFileMode); err != nil {
+	// resolveWriteTarget for the same reason config.go's write() uses it: this
+	// file was written with os.WriteFile until this seam replaced it, and a
+	// rename onto a symlink replaces the link instead of writing through it.
+	if err := fileops.AtomicWrite(
+		resolveWriteTarget(path), []byte(token), authTokenFileMode, "auth token file",
+	); err != nil {
 		log.Printf("Warning: failed to persist auth token: %v", err)
 		return
 	}

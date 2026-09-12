@@ -12,6 +12,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"panemux/internal/fileops"
 )
 
 // agmsg's output is a stream of JSON lines written by a program panemux does
@@ -111,23 +113,91 @@ func TestStateFilesDistinguishMissingFromUnreadable(t *testing.T) {
 	assert.Nil(t, entries)
 }
 
+// The temp-file-plus-rename discipline itself lives in internal/fileops and
+// is tested there, including the arms only its seam can reach. What is still
+// this package's own is the label each save passes: a failure has to name the
+// file that failed, since both saves are called from a background goroutine
+// where a log line is all anyone will ever see.
+//
 // The rename is the step that makes the write atomic, and the one that can
 // still fail after everything before it succeeded. Renaming onto an existing
 // directory fails, which stands in for any rename failure.
-func TestAtomicWriteFileReportsAFailedRename(t *testing.T) {
-	dir := t.TempDir()
-	target := filepath.Join(dir, "target-is-a-directory")
-	require.NoError(t, os.Mkdir(target, 0750))
+func TestStateSavesNameTheFileThatFailedToBeRenamed(t *testing.T) {
+	for _, tt := range []struct {
+		save func(path string) error
+		name string
+		want string
+	}{
+		{
+			name: "relay cursors",
+			save: func(path string) error {
+				return SaveCursorFile(path, []CursorEntry{{Host: "local", Team: "panemux"}})
+			},
+			want: "replacing relay cursor file",
+		},
+		{
+			name: "bootstrap state",
+			save: func(path string) error { return SaveBootstrapState(path, []string{"pane-a"}) },
+			want: "replacing bootstrap state file",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			target := filepath.Join(dir, "target-is-a-directory")
+			require.NoError(t, os.Mkdir(target, 0750))
 
-	err := atomicWriteFile(target, []byte("x"), 0600, "relay cursor file")
+			err := tt.save(target)
 
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "replacing relay cursor file",
-		"the label the caller passed must reach the message, so the log names which file failed")
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.want,
+				"the label the caller passed must reach the message, so the log names which file failed")
 
-	entries, readErr := os.ReadDir(dir)
-	require.NoError(t, readErr)
-	assert.Len(t, entries, 1, "the deferred cleanup must remove the temp file even on the failure path")
+			entries, readErr := os.ReadDir(dir)
+			require.NoError(t, readErr)
+			assert.Len(t, entries, 1, "the deferred cleanup must remove the temp file even on the failure path")
+		})
+	}
+}
+
+// A failure partway through the write — the disk filling, the filesystem
+// going read-only — is what the temp file exists for, and is reachable only
+// through internal/fileops' seam: the file being written is one the write
+// created itself moments earlier, so no fixture can make it fail.
+func TestStateSavesReportAFailureMidWrite(t *testing.T) {
+	for _, tt := range []struct {
+		save func(path string) error
+		name string
+		want string
+	}{
+		{
+			name: "relay cursors",
+			save: func(path string) error {
+				return SaveCursorFile(path, []CursorEntry{{Host: "local", Team: "panemux"}})
+			},
+			want: "writing temp relay cursor file",
+		},
+		{
+			name: "bootstrap state",
+			save: func(path string) error { return SaveBootstrapState(path, []string{"pane-a"}) },
+			want: "writing temp bootstrap state file",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			injected := errors.New("no space left on device")
+			fileops.SetOpsForTest(t, (&fileops.Spy{WriteErr: injected}).Ops())
+			dir := t.TempDir()
+
+			err := tt.save(filepath.Join(dir, "state.json"))
+
+			require.Error(t, err)
+			assert.ErrorIs(t, err, injected)
+			assert.Contains(t, err.Error(), tt.want)
+
+			entries, readErr := os.ReadDir(dir)
+			require.NoError(t, readErr)
+			assert.Empty(t, entries, "neither the target nor the temp file may survive a failed write")
+		})
+	}
 }
 
 // ── Running agmsg's own scripts ──────────────────────────────────────────────

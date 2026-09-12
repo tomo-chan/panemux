@@ -11,6 +11,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"panemux/internal/fileops"
 	"panemux/internal/homedir"
 )
 
@@ -25,8 +26,6 @@ const (
 	defaultLayoutDirection = "horizontal"
 	defaultPaneType        = "local"
 )
-
-var chmodConfigFile = os.Chmod
 
 type ServerConfig struct {
 	Host      string `yaml:"host"`
@@ -485,10 +484,6 @@ func (c *Config) write() error {
 		return nil
 	}
 
-	if err := os.MkdirAll(filepath.Dir(c.filePath), 0750); err != nil {
-		return fmt.Errorf("creating config directory: %w", err)
-	}
-
 	type configFile struct { //nolint:govet
 		Server         ServerConfig             `yaml:"server"`
 		SSHConnections map[string]SSHConnection `yaml:"ssh_connections,omitempty"`
@@ -519,10 +514,62 @@ func (c *Config) write() error {
 	if err != nil {
 		return fmt.Errorf("marshaling config: %w", err)
 	}
-	if err := os.WriteFile(c.filePath, data, configFileMode); err != nil {
-		return fmt.Errorf("writing config: %w", err)
+	// Through the shared seam rather than os.WriteFile: this file holds
+	// server.auth_token and the whole workspace layout, and a direct write
+	// that fails partway leaves it truncated for the next start to read. It
+	// also creates the parent directory ("creating config directory: …") and
+	// sets the mode, which is why neither is done here.
+	return fileops.AtomicWrite(resolveWriteTarget(c.filePath), data, configFileMode, "config")
+}
+
+// resolveWriteTarget follows path through any symlinks before it is handed to
+// fileops.AtomicWrite.
+//
+// AtomicWrite renames onto the path it is given, and rename(2) replaces a
+// symlink rather than following it — while os.WriteFile, which both of this
+// package's writes used before, wrote through one. Keeping config.yaml in a
+// dotfiles repo and symlinking it into ~/.config/panemux is an ordinary setup,
+// and without this the first save from the dashboard would swap the link for a
+// regular file: no error, no log line, and the repo copy silently frozen at its
+// old contents.
+//
+// It is here rather than inside AtomicWrite deliberately. The other files that
+// go through the seam — the relay cursor, bootstrap state, the command-center
+// session id — have always been written by rename and so have never followed a
+// symlink; teaching the seam to follow one would newly let a link planted at
+// any of those paths redirect a write. These two are the files where following
+// it restores the behavior they already had.
+//
+// EvalSymlinks failing is not by itself a reason to leave the path alone: it
+// fails when any component of the chain is missing, and that covers two
+// situations wanting opposite answers. Nothing at path at all is a first run,
+// and the path is right as given. A path that IS a link whose target does not
+// exist yet is a dotfiles setup mid-flight — linked into a repo that has no
+// config.yaml in it, because this save is what was meant to create one — and
+// os.WriteFile did create it, since O_CREATE through a dangling link creates
+// the target. So the second case is read off the link itself rather than
+// inferred from the error.
+//
+// One hop, not a chain: a dangling link to a dangling link is past the point
+// where guessing helps. AtomicWrite's own MkdirAll then creates the repo
+// directory if it is missing, which os.WriteFile could not do — the harmless
+// direction to differ in.
+func resolveWriteTarget(path string) string {
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return resolved
 	}
-	return nil
+	// Readlink alone, with no Lstat before it: it reports EINVAL for a path
+	// that is not a link and ENOENT for one that is not there, so its error is
+	// already the "leave it alone" answer for both. Checking Lstat first would
+	// add an arm that only a link deleted between the two calls could enter.
+	dest, err := os.Readlink(path)
+	if err != nil {
+		return path
+	}
+	if !filepath.IsAbs(dest) {
+		dest = filepath.Join(filepath.Dir(path), dest)
+	}
+	return dest
 }
 
 func (c *Config) expandPaths() {
@@ -644,7 +691,7 @@ func tightenConfigFilePermissions(path string) error {
 	if info.Mode().Perm() == configFileMode {
 		return nil
 	}
-	if err := chmodConfigFile(path, configFileMode); err != nil {
+	if err := fileops.Chmod(path, configFileMode); err != nil {
 		return fmt.Errorf("tightening config permissions: %w", err)
 	}
 	return nil

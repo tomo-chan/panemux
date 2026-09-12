@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 
 	"panemux/internal/board"
 	"panemux/internal/config"
+	"panemux/internal/fileops"
 	"panemux/internal/homedir"
 	"panemux/internal/session"
 )
@@ -294,6 +296,54 @@ func TestPersistHelpers_NoHomeDirectory_LogAndGiveUp(t *testing.T) {
 			tt.persist()
 
 			assert.Contains(t, buf.String(), tt.want)
+		})
+	}
+}
+
+// A write that fails partway through — the disk filling, the filesystem going
+// read-only — is the failure the temp-file-plus-rename discipline exists to
+// survive, and it is also the one the persist helpers' second arm reports.
+// Neither is reachable against a real filesystem: the file being written is
+// one internal/fileops created itself moments earlier, and the suite runs as
+// root in CI.
+//
+// That these two arms are driven from *this* package is the reason the seam is
+// a shared package rather than a variable inside internal/board: the callers
+// and the tests do not line up, so a package-private override would have been
+// invisible from here. Same shape as internal/homedir, same reason (#212).
+func TestPersistHelpers_FailureMidWrite_LogAndGiveUp(t *testing.T) {
+	for _, tt := range []struct {
+		persist func()
+		name    string
+		want    string
+	}{
+		{
+			name:    "relay cursors",
+			persist: func() { persistBoardCursors([]board.CursorEntry{{Host: "local", Team: "panemux"}}) },
+			want:    "persisting relay cursor",
+		},
+		{
+			name:    "bootstrap state",
+			persist: func() { persistBootstrapState([]string{"pane-a"}) },
+			want:    "persisting bootstrap state",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			home := t.TempDir()
+			homedir.SetForTest(t, home)
+			fileops.SetOpsForTest(t, (&fileops.Spy{WriteErr: errors.New("no space left on device")}).Ops())
+			buf := captureBoardLog(t)
+
+			tt.persist()
+
+			assert.Contains(t, buf.String(), tt.want)
+			assert.Contains(t, buf.String(), "no space left on device",
+				"the underlying failure must survive into the log line, or an operator "+
+					"learns only that something went wrong")
+
+			entries, err := os.ReadDir(filepath.Join(home, ".config", "panemux"))
+			require.NoError(t, err, "the directory is created before the write fails")
+			assert.Empty(t, entries, "no partial or temp file may be left in the operator's config directory")
 		})
 	}
 }

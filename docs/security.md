@@ -562,14 +562,18 @@ handler-level test would not have caught this class of bug.
 
 **The command center's own MCP config file is the one place this feature writes the bearer token to
 disk, deliberately temporarily.** `internal/commandcenter.BuildMCPConfig` writes a JSON file (mode
-`0600`, created via `os.CreateTemp` then explicitly `os.Chmod`'d) embedding the token as a
+`0600`, created via `fileops.CreateTemp` then explicitly `fileops.Chmod`'d — the same operations
+behind [`internal/fileops`](architecture.md)' seam, so each arm that could leave a token-bearing file
+behind is now reachable from a test) embedding the token as a
 `PANEMUX_BOARD_TOKEN` environment variable value for the `claude -p` subprocess's own MCP server
 child process (`panemux __board-mcp-server`) to read; the caller's `cleanup` func removes it once that
 subprocess has exited. This is a strictly smaller exposure than the existing `~/.config/panemux/token`
 file the token already lives in permanently — the temp file exists only for one query's subprocess
 lifetime and is never written to `~/.config/panemux/config.yaml` — but it is still a plaintext
 token-bearing file on disk, hence the explicit `0600` rather than relying on `os.CreateTemp`'s default
-mode.
+mode. `TestBuildMCPConfigReportsEachFailedStepAndLeavesNoFileBehind` pins that every failure arm
+after the file exists calls `cleanup()` on the way out, so a failed build never leaves the token
+sitting in the temp directory.
 
 ## Opening URLs From a Pane
 

@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"panemux/internal/fileops"
 	"panemux/internal/homedir"
 )
 
@@ -602,11 +603,7 @@ layout:
 	f := writeTempFile(t, content)
 	require.NoError(t, os.Chmod(f, 0644)) //nolint:gosec // G302: legacy config permission under test
 
-	oldChmod := chmodConfigFile
-	chmodConfigFile = func(string, os.FileMode) error {
-		return errors.New("read-only filesystem")
-	}
-	t.Cleanup(func() { chmodConfigFile = oldChmod })
+	fileops.SetOpsForTest(t, (&fileops.Spy{ChmodErr: errors.New("read-only filesystem")}).Ops())
 
 	var logs bytes.Buffer
 	oldOutput := log.Writer()

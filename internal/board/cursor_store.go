@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"panemux/internal/fileops"
 	"panemux/internal/homedir"
 )
 
@@ -51,7 +52,7 @@ func SaveCursorFile(path string, entries []CursorEntry) error {
 	if err != nil {
 		return fmt.Errorf("encoding relay cursor file: %w", err)
 	}
-	return atomicWriteFile(path, data, cursorFileMode, "relay cursor file")
+	return fileops.AtomicWrite(path, data, cursorFileMode, "relay cursor file")
 }
 
 // DefaultCursorFilePath returns ~/.config/panemux/board-relay-cursor.json.

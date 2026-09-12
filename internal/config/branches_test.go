@@ -2,6 +2,7 @@ package config
 
 import (
 	"bytes"
+	"errors"
 	"log"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"panemux/internal/fileops"
 	"panemux/internal/homedir"
 )
 
@@ -53,9 +55,13 @@ func TestEnsureAuthTokenReportsAnUnresolvablePath(t *testing.T) {
 	assert.Contains(t, logs.String(), "failed to resolve auth token path")
 }
 
-// The directory is created first, so a write failing after that is its own
-// arm and its own message. Pointing the token path at an existing directory
-// reaches it: MkdirAll on the parent succeeds, the write does not.
+// A token that could not be kept must not be used for this run either:
+// authenticating one session with a value no later start can read is worse
+// than having no token, because the failure then shows up as a mysterious 401
+// after a restart rather than at the point it happened.
+//
+// Pointing the token path at an existing directory reaches the arm: the parent
+// exists, so the write gets as far as the rename and fails there.
 func TestEnsureAuthTokenReportsAFailedWrite(t *testing.T) {
 	logs := captureConfigLog(t)
 	dir := filepath.Join(t.TempDir(), "token-is-a-directory")
@@ -67,8 +73,54 @@ func TestEnsureAuthTokenReportsAFailedWrite(t *testing.T) {
 	assert.Empty(t, cfg.Server.AuthToken,
 		"a token that could not be persisted must not be used for this run either")
 	assert.Contains(t, logs.String(), "failed to persist auth token")
-	assert.NotContains(t, logs.String(), "failed to create auth token directory",
-		"the parent existed; only the write failed")
+	assert.Contains(t, logs.String(), "replacing auth token file",
+		"the step that failed must reach the log, not just that something did")
+}
+
+// The token file has the same shape as config.yaml: os.WriteFile followed a
+// symlink, rename replaces one. Less likely to be symlinked, identically
+// broken if it is.
+func TestEnsureAuthToken_SymlinkedTokenFile_WritesThroughTheLink(t *testing.T) {
+	store := t.TempDir()
+	target := filepath.Join(store, "token")
+	require.NoError(t, os.WriteFile(target, nil, 0600))
+
+	link := filepath.Join(t.TempDir(), "token")
+	require.NoError(t, os.Symlink(target, link))
+
+	cfg := &Config{authTokenPath: link}
+	cfg.EnsureAuthToken()
+	require.NotEmpty(t, cfg.Server.AuthToken, "the token must have been minted and kept")
+
+	info, err := os.Lstat(link)
+	require.NoError(t, err)
+	assert.NotZero(t, info.Mode()&os.ModeSymlink, "the symlink itself must survive")
+
+	written, err := os.ReadFile(target)
+	require.NoError(t, err)
+	assert.Equal(t, cfg.Server.AuthToken, string(written))
+}
+
+// The same arm, reached the way it actually happens in production — a disk
+// with no room left, partway through the write — rather than through a path
+// whose shape is wrong. The token file is written once at first start, so
+// this is the arm an operator meets on a full disk.
+func TestEnsureAuthTokenReportsAFailureMidWrite(t *testing.T) {
+	logs := captureConfigLog(t)
+	dir := t.TempDir()
+	cfg := &Config{authTokenPath: filepath.Join(dir, "token")}
+	fileops.SetOpsForTest(t, (&fileops.Spy{WriteErr: errors.New("no space left on device")}).Ops())
+
+	cfg.EnsureAuthToken()
+
+	assert.Empty(t, cfg.Server.AuthToken)
+	assert.Contains(t, logs.String(), "failed to persist auth token")
+	assert.Contains(t, logs.String(), "no space left on device")
+
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	assert.Empty(t, entries,
+		"no partial token file, and no temp file, may be left where the next start will read one")
 }
 
 // The complement, so the failures above are not passing for want of a working

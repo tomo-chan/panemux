@@ -102,6 +102,37 @@ happens inside `internal/config`, `internal/server`'s integration tests drive co
 at once, and the root package's tests drive `internal/commandcenter`'s default paths — none of which
 a package-private variable can reach. See issue [#212](https://github.com/tomo-chan/panemux/issues/212).
 
+**Persisted files are written through one seam, and it is `internal/fileops`.** `fileops.AtomicWrite`
+is the temp-file-plus-rename write every file panemux persists goes through — `config.yaml`, the
+auth token file, the relay cursor, bootstrap state, and the command-center session id;
+`fileops.CreateTemp` / `OpenFile` / `Chmod` are the individual operations for the two callers that
+need the steps rather than the whole write (the MCP config file, which is never renamed, and the
+history file, which is appended to). Substitute them in a test with
+`fileops.SetOpsForTest(t, (&fileops.Spy{WriteErr: err}).Ops())` — a `Spy` performs every real
+operation and fails only the steps it is given, so the filesystem still ends up in the state it
+would have been in (an injected write failure is a *short* write, as a real ENOSPC is), and
+`spy.Files()` names the files it handed out so a test can assert they were cleaned up.
+
+Moving a write onto it changes one thing worth checking: `AtomicWrite` finishes with a rename, and
+rename replaces what is at the path rather than following it, so a symlinked target is swapped for a
+regular file where `os.WriteFile` would have written through it. If the path is one an operator may
+have hand-linked, resolve it first — `internal/config`'s `resolveWriteTarget` is the example, and its
+doc comment says why that resolution is at the caller rather than in the seam.
+
+Unlike the home-directory seam, nothing enforces this one — there is no `forbidigo` rule that can
+tell a legitimate `os.WriteFile` from one that should have been an `AtomicWrite`. It is true as
+written today because the writes were moved onto it, not because the build would fail otherwise, so
+a new persisted file is the reader's job to route correctly.
+
+Reach for it when a failure arm sits *after* the file was created by the function under test: a path
+whose shape can be broken (a regular file where a directory goes, a directory where a file goes,
+`/dev/full`) is still the better fixture and needs no seam, but that only works while the path came
+from the caller. Once `os.CreateTemp` has succeeded, the file exists, is writable and is owned by the
+process, and CI runs as root, so the `Write`/`Close`/`Chmod` arms — the disk filling partway through
+a write, which is the failure the rename discipline exists to survive — have no fixture at all. Same
+`t.Parallel` caveat as `homedir`: `fileops.ops` is one unsynchronized package variable. See issue
+[#222](https://github.com/tomo-chan/panemux/issues/222).
+
 ### Schema-first
 
 - For Go structure changes, update validation rules and tests in `internal/config/validate.go` first.

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"panemux/internal/fileops"
 	"panemux/internal/homedir"
 )
 
@@ -106,9 +108,11 @@ func TestTightenConfigFilePermissions_MissingFile_Errors(t *testing.T) {
 
 // ── Writing ──────────────────────────────────────────────────────────────────
 
-// The directory the config lives in is created first, so reaching the write
-// failure needs a path whose parent is fine and whose own name is taken by
-// something os.WriteFile cannot open — a directory.
+// The write goes through internal/fileops now, so the last step is a rename
+// and a directory sitting at the target path is what makes it fail. The
+// message has to name the file either way: this one is logged or returned to
+// a dashboard request, and "rename ... file exists" alone says nothing about
+// which file it was.
 func TestWrite_PathIsADirectory_ReportsAWriteFailure(t *testing.T) {
 	cfg := validConfig()
 	cfg.filePath = filepath.Join(t.TempDir(), "config.yaml")
@@ -117,7 +121,38 @@ func TestWrite_PathIsADirectory_ReportsAWriteFailure(t *testing.T) {
 	err := cfg.SaveWorkspaces()
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "writing config")
+	assert.Contains(t, err.Error(), "replacing config")
+}
+
+// The reason config.yaml stopped being written with os.WriteFile: it holds
+// server.auth_token and the whole workspace layout, and a write that fails
+// partway used to truncate it in place, leaving the next start to parse half
+// a YAML document. Now the failure happens to a temp file that is removed,
+// and the previous config is still there afterwards.
+func TestWrite_FailureMidWrite_LeavesThePreviousConfigIntact(t *testing.T) {
+	cfg := validConfig()
+	cfg.filePath = filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, cfg.SaveWorkspaces())
+	before, err := os.ReadFile(cfg.filePath)
+	require.NoError(t, err)
+	require.NotEmpty(t, before)
+
+	injected := errors.New("no space left on device")
+	fileops.SetOpsForTest(t, (&fileops.Spy{WriteErr: injected}).Ops())
+
+	err = cfg.SaveWorkspaces()
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, injected)
+	assert.Contains(t, err.Error(), "writing temp config")
+
+	after, readErr := os.ReadFile(cfg.filePath)
+	require.NoError(t, readErr, "the config must still be readable after a failed save")
+	assert.Equal(t, before, after, "a failed save must not change the config that was already there")
+
+	entries, readDirErr := os.ReadDir(filepath.Dir(cfg.filePath))
+	require.NoError(t, readDirErr)
+	assert.Len(t, entries, 1, "the temp file must not be left beside it")
 }
 
 // This retires no block — an in-memory config saves on many other paths
@@ -129,6 +164,162 @@ func TestWrite_NoFilePath_IsANoOp(t *testing.T) {
 	cfg := validConfig()
 
 	require.NoError(t, cfg.SaveWorkspaces(), "a config with nowhere to save must not fail the request")
+}
+
+// Keeping config.yaml in a dotfiles repo and symlinking it into
+// ~/.config/panemux is an ordinary thing to do, and os.WriteFile wrote
+// through the link. AtomicWrite renames onto the path it is given, and
+// rename(2) replaces a symlink rather than following it — so without
+// resolving first, the first save from the dashboard would swap the link for
+// a regular file, silently detaching the config from the repo: no error, no
+// log line, and the user's edits over there stop taking effect.
+func TestWrite_SymlinkedConfig_WritesThroughTheLinkInsteadOfReplacingIt(t *testing.T) {
+	dotfiles := t.TempDir()
+	target := filepath.Join(dotfiles, "config.yaml")
+	require.NoError(t, os.WriteFile(target, []byte("server:\n  port: 1234\n"), 0600))
+
+	link := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.Symlink(target, link))
+
+	cfg := validConfig()
+	cfg.filePath = link
+	require.NoError(t, cfg.SaveWorkspaces())
+
+	info, err := os.Lstat(link)
+	require.NoError(t, err)
+	assert.NotZero(t, info.Mode()&os.ModeSymlink, "the symlink itself must survive the save")
+
+	written, err := os.ReadFile(target)
+	require.NoError(t, err)
+	assert.Contains(t, string(written), "workspaces:",
+		"the save must land in the file the link points at, not beside it")
+
+	entries, err := os.ReadDir(filepath.Dir(link))
+	require.NoError(t, err)
+	assert.Len(t, entries, 1, "no temp file may be left in the directory holding the link")
+}
+
+// resolvedTempDir is t.TempDir() with any symlinked ancestor already followed.
+// On macOS TMPDIR lives under /var, which is a symlink to /private/var, so a
+// row asserting that EvalSymlinks returns the path it was given would compare
+// two spellings of the same file. Only the rows that reach EvalSymlinks'
+// success path need it; Readlink returns the stored target verbatim.
+//
+// Reproducible on Linux without a Mac: point TMPDIR at a path with a symlinked
+// ancestor and the two rows below fail, and only those two.
+func resolvedTempDir(t *testing.T) string {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	return resolved
+}
+
+// writeTargetCase is one shape of path and the target it must resolve to.
+type writeTargetCase struct {
+	// build returns the path to resolve and what resolveWriteTarget must
+	// return for it.
+	build func(t *testing.T) (path, want string)
+	name  string
+}
+
+func writeTargetCases() []writeTargetCase {
+	return []writeTargetCase{
+		{
+			name: "no file here at all — a first run",
+			build: func(t *testing.T) (string, string) {
+				t.Helper()
+				path := filepath.Join(t.TempDir(), "config.yaml")
+				return path, path
+			},
+		},
+		{
+			name: "an ordinary file is already its own target",
+			build: func(t *testing.T) (string, string) {
+				t.Helper()
+				path := filepath.Join(resolvedTempDir(t), "config.yaml")
+				require.NoError(t, os.WriteFile(path, []byte("server:\n"), 0600))
+				return path, path
+			},
+		},
+		{
+			name: "a link whose target exists",
+			build: func(t *testing.T) (string, string) {
+				t.Helper()
+				target := filepath.Join(resolvedTempDir(t), "config.yaml")
+				require.NoError(t, os.WriteFile(target, []byte("server:\n"), 0600))
+				// The link side stays an unresolved t.TempDir(): its own
+				// spelling is an input here, not what the assertion is about.
+				link := filepath.Join(t.TempDir(), "config.yaml")
+				require.NoError(t, os.Symlink(target, link))
+				return link, target
+			},
+		},
+		{
+			name: "a dangling link, absolute target",
+			build: func(t *testing.T) (string, string) {
+				t.Helper()
+				target := filepath.Join(t.TempDir(), "config.yaml")
+				link := filepath.Join(t.TempDir(), "config.yaml")
+				require.NoError(t, os.Symlink(target, link))
+				return link, target
+			},
+		},
+		{
+			name: "a dangling link, target relative to the link's own directory",
+			build: func(t *testing.T) (string, string) {
+				t.Helper()
+				root := t.TempDir()
+				require.NoError(t, os.Mkdir(filepath.Join(root, "cfg"), 0750))
+				require.NoError(t, os.Mkdir(filepath.Join(root, "dotfiles"), 0750))
+				link := filepath.Join(root, "cfg", "config.yaml")
+				require.NoError(t, os.Symlink(filepath.Join("..", "dotfiles", "config.yaml"), link))
+				return link, filepath.Join(root, "dotfiles", "config.yaml")
+			},
+		},
+	}
+}
+
+// EvalSymlinks fails for two different reasons and only one of them means
+// "leave this path alone". A dangling link is not an exotic state — it is a
+// dotfiles setup mid-flight: the link is in place and the repo has no
+// config.yaml in it yet, because the first save is what was supposed to create
+// one. os.WriteFile did exactly that, since O_CREATE through a dangling link
+// creates the target.
+//
+// The cases above cover both reasons the error cannot separate, and both link
+// shapes, since a relative target has to resolve against the link's own
+// directory rather than the working directory.
+func TestResolveWriteTargetFollowsALinkWhoseTargetDoesNotExistYet(t *testing.T) {
+	for _, tt := range writeTargetCases() {
+		t.Run(tt.name, func(t *testing.T) {
+			path, want := tt.build(t)
+
+			assert.Equal(t, want, resolveWriteTarget(path))
+		})
+	}
+}
+
+// The end-to-end half of the case above: the link survives the save and the
+// repo copy it points at is created, rather than the link being replaced by a
+// regular file holding the only copy.
+func TestWrite_SymlinkedConfigWithAMissingTarget_CreatesItThroughTheLink(t *testing.T) {
+	dotfiles := t.TempDir()
+	target := filepath.Join(dotfiles, "config.yaml")
+
+	link := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.Symlink(target, link))
+
+	cfg := validConfig()
+	cfg.filePath = link
+	require.NoError(t, cfg.SaveWorkspaces())
+
+	info, err := os.Lstat(link)
+	require.NoError(t, err)
+	assert.NotZero(t, info.Mode()&os.ModeSymlink, "the symlink itself must survive the save")
+
+	written, err := os.ReadFile(target)
+	require.NoError(t, err, "the save must have created the file the link points at")
+	assert.Contains(t, string(written), "workspaces:")
 }
 
 // ── Expanding ~ ──────────────────────────────────────────────────────────────

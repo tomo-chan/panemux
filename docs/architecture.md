@@ -163,6 +163,62 @@ linking it links the testing package.
 `.golangci.yml`'s `forbidigo` rule fails the build on `os.UserHomeDir` outside this package, which
 is what keeps "one seam" true rather than aspirational.
 
+### `internal/fileops`
+
+The write discipline every persisted file shares, and the seam onto the operations it is made of.
+`AtomicWrite(path, data, mode, label)` creates a temp file beside the target, writes it, fsyncs it,
+closes it, chmods it and renames it into place; `label` is the file kind the error messages name,
+since most callers write from a background goroutine where a log line is all anyone sees.
+`CreateTemp`, `OpenFile` and `Chmod` are the individual operations, for the two callers that need
+the steps rather than the whole dance: `internal/commandcenter`'s MCP config file (written once per
+query, removed by its own `cleanup`, never renamed) and its history file (opened `O_APPEND`, not
+replaced).
+
+**Atomic, and durable up to a point — the two are not the same claim.** A reader never observes a
+half-written file, because the rename is atomic. The fsync before it is what keeps the rename from
+reaching the journal as metadata while the data blocks are still in page cache, which on a power
+loss would leave the file present at its *final* path and zero-length — worse than the old contents.
+The parent directory is *not* fsynced, so a crash right after the rename may leave the previous
+contents in place; that is safe, and buying the stronger guarantee would cost a directory fsync on a
+path the relay takes every poll.
+
+**Rename replaces what is at the path rather than following it**, which is the one behavior a caller
+migrating off `os.WriteFile` has to think about: a symlink at the target is swapped for a regular
+file, and a bind-mounted single file cannot be replaced at all. `internal/config` therefore resolves
+its two paths through `resolveWriteTarget` first — `config.yaml` symlinked into a dotfiles repo is an
+ordinary setup, and `os.WriteFile` wrote through it, so without that the first save from the
+dashboard would silently detach the file from the repo. That resolution reads a *dangling* link off
+the link itself rather than treating `EvalSymlinks`' error as "leave this alone": a link whose target
+does not exist yet is a dotfiles setup mid-flight, and `os.WriteFile` created the target through it,
+since `O_CREATE` follows a dangling link. The resolution is deliberately at those two
+callers rather than inside `AtomicWrite`: every other file on the seam has always been written by
+rename and so has never followed a link, and teaching the seam to follow one would newly let a link
+planted at any of those paths redirect a write.
+
+`internal/board`'s cursor and bootstrap stores and `internal/commandcenter`'s session store each had
+their own copy of this function before; the second copy's own doc comment recorded that it was
+deliberately duplicated because the first was unexported. A shared package removes that reason, and
+the duplication with it. `internal/config`'s two writes — `config.yaml` itself and the auth token
+file — were plain `os.WriteFile` calls and now go through it too: `config.yaml` holds
+`server.auth_token` and the whole workspace layout, so a direct write failing partway left the next
+start parsing half a YAML document. That also retired `internal/config`'s own `chmodConfigFile`
+variable, a package-private override of one of the operations `Ops` now owns.
+
+Why it is a package rather than a set of function variables inside each caller is the same answer
+`internal/homedir` gives, for the same reason: the callers do not line up with the tests. The root
+package's own tests drive `internal/board`'s writes through `persistBoardCursors` /
+`persistBootstrapState`, and a package-private variable is invisible from another package's test.
+It declares its own two-method `TestingT` rather than importing `testing`, so no binary linking it
+links the testing package.
+
+What the seam buys is the arms nothing could reach before: once `os.CreateTemp` has returned, the
+file being written is one the function created itself, so it exists, is writable, and is owned by
+the process — and CI runs as root, so permission bits are unavailable too. `Spy` (`spy.go`, in the
+production package for the same reason the seam is: its users are in other packages) performs each
+real operation and substitutes only the reported error, so a test asserting the temp file was
+removed is asserting about a file that genuinely existed. See issue
+[#222](https://github.com/tomo-chan/panemux/issues/222).
+
 ### `internal/portforward`
 
 Owns loopback TCP forwards and the URL parsing that decides when one is needed. `CallbackPort` extracts the loopback port an authorization URL expects its OAuth callback on; `Registry` binds that port on `127.0.0.1`, pipes each accepted connection through a `Dialer` (satisfied by `internal/session`'s `LoopbackDialer`), and owns the lifecycle: per-pane and per-port deduplication, idle expiry, and teardown when a pane goes away.

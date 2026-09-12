@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"panemux/internal/fileops"
 	"panemux/internal/homedir"
 )
 
@@ -42,7 +43,7 @@ func SaveBootstrapState(path string, paneIDs []string) error {
 	if err != nil {
 		return fmt.Errorf("encoding bootstrap state file: %w", err)
 	}
-	return atomicWriteFile(path, data, bootstrapStateFileMode, "bootstrap state file")
+	return fileops.AtomicWrite(path, data, bootstrapStateFileMode, "bootstrap state file")
 }
 
 // DefaultBootstrapStateFilePath returns ~/.config/panemux/board-bootstrap-state.json.

@@ -65,6 +65,19 @@ linters:
       checks: ["all"]
     whitespace:
       multi-if: true
+    wrapcheck:
+      # internal/fileops.AtomicWrite's errors already carry the caller's label —
+      # that is what its `label` parameter is for, so every message names the
+      # file that failed. Wrapping them again at each call site would only
+      # prepend a second name for the same file.
+      #
+      # The step operations (CreateTemp / OpenFile / Chmod) are deliberately NOT
+      # waived: they take no label and return the raw *fs.PathError, so their
+      # callers must still wrap. A package-wide waiver would have let the next
+      # one through unflagged, at the one choke point every persisted-file write
+      # is invited to route through.
+      extra-ignore-sigs:
+        - panemux/internal/fileops.AtomicWrite(
   exclusions:
     presets:
       # Keep standard-library edge cases from drowning out project-specific
@@ -78,6 +91,13 @@ linters:
       - path: internal/homedir/
         linters:
           - forbidigo
+      # internal/fileops' Spy is a test double: it has to report the error it
+      # was handed, and the real os error otherwise, exactly as it is. Wrapping
+      # either would break errors.Is against the sentinel a test injected, which
+      # is the only thing the double is for.
+      - path: internal/fileops/spy.go
+        linters:
+          - wrapcheck
       # Session package manages OS processes and SSH connections; Close/Wait/Kill
       # errors in teardown paths are not actionable.
       - path: internal/session/
@@ -86,10 +106,16 @@ linters:
           - wrapcheck
       # Test cleanup (defer conn.Close(), SetReadDeadline, ReadMessage) does not
       # require error handling — test failures surface through assertions.
+      #
+      # wrapcheck likewise: a test helper that hands an error to
+      # assert.ErrorIs must return it exactly as it got it. Wrapping there
+      # would only obscure which sentinel the assertion is about — the
+      # opposite of what the rule buys in production code.
       - path: _test\.go
         linters:
           - errcheck
           - goconst
+          - wrapcheck
 
 formatters:
   enable:
