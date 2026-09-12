@@ -153,14 +153,21 @@ func TestBootstrapWatcher_AgmsgNotPresent_NoWrite_WarnsOnce(t *testing.T) {
 	sess := &fakeAgentSession{id: "pane-a", detectType: "claude-code", detectOK: true}
 	manager.Add(sess)
 
+	logs := captureBootstrapLog(t)
 	w := newLocalWatcher(manager, localAgmsgDir(t, false), "panemux", nil)
 	w.pollOnce(context.Background())
 	w.pollOnce(context.Background())
 	w.pollOnce(context.Background())
 
 	assert.Empty(t, sess.writes)
-	assert.True(t, w.warned["pane-a"].kinds[warnKindAbsent],
+	// Counted, not inferred from the suppression flag: the flag being set says
+	// nothing about how many lines were written before it was, so an
+	// unconditional log.Printf beside it would keep that assertion green while
+	// three ticks produced three lines.
+	assert.Equal(t, 1, strings.Count(logs.String(), "agmsg not found on host"),
 		"three ticks against a host with no agmsg must produce one warning, not three")
+	assert.True(t, w.warned["pane-a"].kinds[warnKindAbsent],
+		"and the suppression that produced that count is the absent-agmsg kind's")
 }
 
 func TestBootstrapWatcher_RemotePresenceCheck_YesWritesNoDoesNot(t *testing.T) {
@@ -218,6 +225,7 @@ func TestBootstrapWatcher_RemotePresenceCheckTransportError_DistinctFromNo(t *te
 	}
 	manager.Add(sess)
 
+	logs := captureBootstrapLog(t)
 	w := newBootstrapWatcher(bootstrapWatcherConfig{
 		Manager:       manager,
 		PaneHosts:     map[string]string{"pane-a": "ssh:build-host"},
@@ -229,8 +237,11 @@ func TestBootstrapWatcher_RemotePresenceCheckTransportError_DistinctFromNo(t *te
 	w.pollOnce(context.Background())
 
 	assert.Empty(t, sess.writes)
-	assert.True(t, w.warned["pane-a"].kinds[warnKindProbe],
+	// Counted for the same reason as the absent-agmsg case above.
+	assert.Equal(t, 1, strings.Count(logs.String(), "checking agmsg presence on host"),
 		"a transport error that keeps recurring must be warned about once per streak, not per tick")
+	assert.True(t, w.warned["pane-a"].kinds[warnKindProbe],
+		"and the suppression that produced that count is the presence-probe kind's")
 }
 
 // TestBootstrapWatcher_ShortWrite_GivesUpImmediately_NeverRetries is the

@@ -223,9 +223,6 @@ func (b *bootstrapWatcher) pollOnce(ctx context.Context) {
 	}
 }
 
-// checkPane runs the bootstrap decision for one pane. See
-// docs/agent-board.md's Bootstrap flow section for the algorithm this
-// implements.
 // sessionFor returns the pane's live session, or false when the manager no
 // longer has one for it. It also keeps the per-pane bookkeeping that depends
 // on session identity in step: a pane the manager no longer knows about is not
@@ -256,6 +253,9 @@ func (b *bootstrapWatcher) modeFor(paneID string) string {
 	return mode
 }
 
+// checkPane runs the bootstrap decision for one pane. See
+// docs/agent-board.md's Bootstrap flow section for the algorithm this
+// implements.
 func (b *bootstrapWatcher) checkPane(ctx context.Context, paneID, host string) {
 	sess, ok := b.sessionFor(paneID)
 	if !ok {

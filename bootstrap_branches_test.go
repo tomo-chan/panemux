@@ -250,10 +250,16 @@ func TestAPaneThatDisappearsDropsItsSuppressedWarnings(t *testing.T) {
 	assert.NotContains(t, w.warned, "pane-a")
 }
 
-// Clearing one kind's streak must leave the others' suppression intact: the
-// per-pane entry is only dropped once nothing is suppressed for that pane, so
-// a recovered detection does not re-open the presence warning the operator
-// has already been shown.
+// Clearing one kind's streak must leave the others' suppression intact, so a
+// recovered detection does not re-open the presence warning the operator has
+// already been shown.
+//
+// The per-pane entry outlives its kinds — it carries the session identity
+// noteSession compares against — so clearing the last kind empties the map of
+// kinds and leaves the entry standing. sessionFor's disappeared-pane arm is
+// the only place it is dropped. Deleting it here instead would leave the next
+// warning recorded against no session, and the following tick would read that
+// as a replacement and re-warn: every tick, the behavior #218 removed.
 func TestClearingOneWarningKindLeavesTheOthersSuppressed(t *testing.T) {
 	logs := captureBootstrapLog(t)
 	w := newLocalWatcher(session.NewManager(), localAgmsgDir(t, true), "panemux", nil)
