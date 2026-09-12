@@ -1076,6 +1076,13 @@ which is the one an operator least expects, having just been told the pane recov
 is keyed per pane **and per kind**, because the conditions are independent — a pane that cannot be
 detected this minute and is missing agmsg the next has hit two different problems, and the first must
 not silence the second.
+
+It is also keyed against the pane's *session identity*, the same way `bootstrapped` and `givenUp`
+are. A restarted pane is a new `Session` object, and its failures are its own: suppression recorded
+against the session it replaced would make the one case where the operator hears nothing at all the
+strongest recovery signal there is — the pane having been torn down and recreated. A pane that
+disappears from the session manager drops its suppression outright, which is also what keeps the map
+from growing for panes that no longer exist.
 5. panemux writes a one-time instruction into the pane's PTY (the same `Session.Write` path already
    used for all terminal input; `buildBootstrapInstruction` in `bootstrap.go`) telling the agent to:
    1. Join agmsg's team by running `join.sh <team> <pane-id> <agmsg-type> "$(pwd)" --force` directly
@@ -1236,14 +1243,19 @@ tradeoff (see [Known limitations](#known-limitations)), not a claim of a race-fr
   individually allow-listed ahead of time, while a generic `Bash` grant cannot be scoped down to "only
   run curl against this one loopback endpoint" — granting `Bash` at all would hand the command center
   everything `Bash` can do, which is exactly the blanket-bypass outcome this design avoids.
-- **Wire shape.** That server answers with the response shape JSON-RPC 2.0 §5 requires, not merely
-  one its current client happens to accept: **exactly one** of `result`/`error` on every response,
-  and an `id` that is JSON `null` — never absent — when the request's own id could not be determined,
-  which is the parse-error case. Both used to be expressed with `omitempty`, which drops the key
-  instead: `notifications/initialized` sent as a *request* (a known method with nothing to report,
-  so neither method-not-found nor a result) was answered with neither member, and a parse error with
-  no id at all. Nothing observed today rejects either, but the client here is an LLM subprocess's own
-  MCP layer, whose strictness panemux does not control and cannot pin. See #210.
+- **Wire shape.** That server answers with the response shape JSON-RPC 2.0 §5 requires — and with
+  MCP's narrower reading of it — not merely one its current client happens to accept: **exactly one**
+  of `result`/`error` on every response, a `result` that is always an *object* when there is no
+  error, and an `id` that is JSON `null` — never absent — when the request's own id could not be
+  determined, which is the parse-error case. Result and id used to be expressed with `omitempty`,
+  which drops the key instead: `notifications/initialized` sent as a *request* (a known method with
+  nothing to report, so neither method-not-found nor a result) was answered with neither member, and
+  a parse error with no id at all. The empty object rather than `null` is the MCP half: its schema
+  defines a successful response's result as `{ _meta?: ..., [key: string]: unknown }`, so `null`
+  fails it exactly as an absent key does — fixing §5 alone would have moved that response from one
+  invalid shape to another. Nothing observed today rejects any of these, but the client here is an
+  LLM subprocess's own MCP layer, whose strictness panemux does not control and cannot pin.
+  See #210.
 - **Concurrency.** At most one query may be in flight against the command center's session id at a
   time. A `WS /ws/board-command` request that arrives while one is already running is rejected
   immediately with an explicit "command center busy" error rather than queued — two concurrent

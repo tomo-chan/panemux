@@ -78,11 +78,13 @@ type errorResponse struct {
 	JSONRPC string          `json:"jsonrpc"`
 }
 
-// MarshalJSON writes the response per JSON-RPC 2.0 §5: exactly one of
-// result/error, and a JSON null id when the request's own id could not be
-// determined (a parse error, where there is no id to echo back). A client
-// correlating responses by id can then see a response explicitly marked
-// unplaceable rather than one silently missing the key. See #210.
+// MarshalJSON writes the response per JSON-RPC 2.0 §5 *and* MCP's narrower
+// reading of it: exactly one of result/error, a result member that is always
+// an object when there is no error, and a JSON null id when the request's own
+// id could not be determined (a parse error, where there is no id to echo
+// back). A client correlating responses by id can then see a response
+// explicitly marked unplaceable rather than one silently missing the key.
+// See #210.
 func (r jsonrpcResponse) MarshalJSON() ([]byte, error) {
 	id := r.ID
 	if len(id) == 0 {
@@ -92,12 +94,17 @@ func (r jsonrpcResponse) MarshalJSON() ([]byte, error) {
 		//nolint:wrapcheck // an encoding detail of this type's own marshaler
 		return json.Marshal(errorResponse{JSONRPC: r.JSONRPC, Error: r.Error, ID: id})
 	}
-	// A nil Result serializes as null, which is what a known method with
-	// nothing to report (notifications/initialized sent as a request) must
-	// answer with — the method is known, so a method-not-found error would
-	// be wrong, and an absent result member is not a response at all.
+	// A known method with nothing to report (notifications/initialized sent
+	// as a request) answers with an *empty object*, not null: §5 requires a
+	// result member, and MCP narrows that member to an object
+	// (`Result = { _meta?: ..., [key: string]: unknown }`), so null would be
+	// rejected by a strict MCP client exactly as an absent key was.
+	result := r.Result
+	if result == nil {
+		result = struct{}{}
+	}
 	//nolint:wrapcheck // an encoding detail of this type's own marshaler
-	return json.Marshal(resultResponse{JSONRPC: r.JSONRPC, Result: r.Result, ID: id})
+	return json.Marshal(resultResponse{JSONRPC: r.JSONRPC, Result: result, ID: id})
 }
 
 type jsonrpcError struct {

@@ -14,7 +14,7 @@ import (
 // Unsubstituted, Dir is os.UserCacheDir and nothing else. A seam that quietly
 // answered something of its own would make every caller's default wrong.
 func TestDirDefaultsToTheOperatingSystemCacheDirectory(t *testing.T) {
-	want, wantErr := os.UserCacheDir()
+	want, wantErr := os.UserCacheDir() //nolint:forbidigo // the seam's own default is what this asserts
 
 	got, err := cachedir.Dir()
 

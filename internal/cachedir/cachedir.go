@@ -26,7 +26,11 @@ import "os"
 
 // dirFn is the seam itself. SetForTest and SetFailingForTest are the only
 // supported ways to replace it, and both restore it when the test ends.
-var dirFn = os.UserCacheDir
+//
+// The forbidigo waiver is on this line rather than on the package, so that an
+// os.UserHomeDir call added in here is still caught — see internal/homedir's
+// copy of this note.
+var dirFn = os.UserCacheDir //nolint:forbidigo // this package is the seam; every other caller goes through Dir()
 
 // Dir returns the current user's cache directory, exactly as os.UserCacheDir
 // does — including its error when there is none to resolve.

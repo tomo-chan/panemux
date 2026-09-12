@@ -157,8 +157,10 @@ func TestCheckPaneWarnsAgainAfterADetectionFailureStreakEnds(t *testing.T) {
 // per-pane flag between them would let whichever fired first silence the
 // rest for the life of the process.
 //
-// — the code this replaces logged detection failures with a bare log.Printf, so it had no per-pane
-// warning state for them to occupy and cannot fail this test.
+// It guards the single-shared-flag implementation of #218 rather than the
+// behavior before it, so it does not go red on its own: the code this replaces
+// logged detection failures with a bare log.Printf and so had no per-pane
+// warning state for them to occupy at all.
 //
 //efficacy:exempt guards the single-shared-flag implementation of #218, not the behavior before it
 func TestBootstrapWarningsOfDifferentKindsDoNotSuppressEachOther(t *testing.T) {
@@ -187,6 +189,65 @@ func TestBootstrapWarningsOfDifferentKindsDoNotSuppressEachOther(t *testing.T) {
 	assert.Contains(t, logs.String(), "agmsg not found on host",
 		"the presence warning must not be suppressed by an earlier detection warning for the same pane")
 	assert.Empty(t, sess.writes)
+}
+
+// A pane that is restarted is a new Session object — the same signal
+// bootstrapped and givenUp already compare by identity — so nothing the old
+// session's failures suppressed may carry over to it. Without this, the one
+// case where the operator hears *nothing* would be the strongest recovery
+// signal there is: the pane was torn down and recreated.
+func TestARestartedPaneWarnsAboutTheSameFailureAgain(t *testing.T) {
+	logs := captureBootstrapLog(t)
+	manager := session.NewManager()
+	first := &fakeAgentSession{
+		id:          "pane-a",
+		sessionType: session.TypeTmux,
+		detectErr:   errors.New("no server running on /tmp/sample-tmux/default"),
+	}
+	manager.Add(first)
+	t.Cleanup(manager.CloseAll)
+
+	w := newLocalWatcher(manager, localAgmsgDir(t, true), "panemux", nil)
+	w.pollOnce(context.Background())
+	w.pollOnce(context.Background())
+	require.Equal(t, 1, strings.Count(logs.String(), "detecting agent type for pane"))
+
+	require.NoError(t, manager.Remove("pane-a"))
+	restarted := &fakeAgentSession{
+		id:          "pane-a",
+		sessionType: session.TypeTmux,
+		detectErr:   errors.New("no server running on /tmp/sample-tmux/default"),
+	}
+	manager.Add(restarted)
+
+	w.pollOnce(context.Background())
+	w.pollOnce(context.Background())
+
+	assert.Equal(t, 2, strings.Count(logs.String(), "detecting agent type for pane"),
+		"the restarted pane's failure is its own, and must be reported once for it")
+}
+
+// A pane the manager no longer knows about is not in a failing streak: if it
+// comes back it starts a new one. Dropping the entry is also what keeps the
+// map from growing for panes that no longer exist.
+func TestAPaneThatDisappearsDropsItsSuppressedWarnings(t *testing.T) {
+	manager := session.NewManager()
+	sess := &fakeAgentSession{
+		id:          "pane-a",
+		sessionType: session.TypeTmux,
+		detectErr:   errors.New("no server running on /tmp/sample-tmux/default"),
+	}
+	manager.Add(sess)
+	t.Cleanup(manager.CloseAll)
+
+	w := newLocalWatcher(manager, localAgmsgDir(t, true), "panemux", nil)
+	w.pollOnce(context.Background())
+	require.NotEmpty(t, w.warned["pane-a"].kinds)
+
+	require.NoError(t, manager.Remove("pane-a"))
+	w.pollOnce(context.Background())
+
+	assert.NotContains(t, w.warned, "pane-a")
 }
 
 // Clearing one kind's streak must leave the others' suppression intact: the

@@ -14,7 +14,7 @@ import (
 // Unsubstituted, Dir is os.UserHomeDir and nothing else. A seam that quietly
 // answered something of its own would make every caller's default wrong.
 func TestDirDefaultsToTheOperatingSystemHomeDirectory(t *testing.T) {
-	want, wantErr := os.UserHomeDir()
+	want, wantErr := os.UserHomeDir() //nolint:forbidigo // the seam's own default is what this asserts
 
 	got, err := homedir.Dir()
 

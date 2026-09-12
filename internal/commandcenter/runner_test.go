@@ -446,12 +446,16 @@ func (f *ctxAwareFakeCmd) Wait() error {
 	return f.ctx.Err() //nolint:wrapcheck // test fake mirrors exec.Cmd's own unwrapped ctx.Err() propagation
 }
 
-// fake stdout reaches EOF at once, so it never reaches the drain ordering the branch changes — that
-// is TestRunnerMalformedStreamJSONDoesNotWaitOnASubprocessThatStopsWritingWithoutExiting's job. The
-// red-check sees it as changed only because the ctxBlockingStdout helper added below it falls inside
-// this test's line range.
+// This test is unmodified by this branch. The cancellation it pins predates
+// it, and its fake stdout reaches EOF at once, so it never reaches the drain
+// ordering the branch changes — that is
+// TestRunnerMalformedStreamJSONDoesNotWaitOnASubprocessThatStopsWritingWithoutExiting's
+// job. The red-check sees it as changed only because the ctxBlockingStdout
+// helper added below it falls inside this test's line range. (gofmt moves a
+// //directive comment to the end of its block, so the marker summarizes what
+// this paragraph argues rather than carrying the whole argument itself.)
 //
-//efficacy:exempt unmodified by this branch: the cancellation it pins predates it, and this test's
+//efficacy:exempt unmodified by this branch — its fake stdout never reaches the drain ordering that changed
 func TestRunnerMalformedStreamJSONCancelsQueryContextImmediately(t *testing.T) {
 	// A malformed line already tells the client the query failed (see
 	// TestRunnerMalformedStreamJSONEmitsErrorAndStops); the subprocess must
@@ -762,11 +766,15 @@ func TestRunnerAppliesConfiguredQueryTimeoutToSubprocessContext(t *testing.T) {
 	assert.WithinDuration(t, before.Add(30*time.Second), deadline, 2*time.Second)
 }
 
-// it as changed because the errThenMoreReader doc comment below it was rewritten, and that comment
-// falls inside this test's line range.
-//
-//efficacy:exempt unmodified by this branch — no implementation under it changed. The red-check sees
+//efficacy:exempt unmodified by this branch — only the doc comment below it, inside its range, changed
 func TestRunnerDefaultsQueryTimeoutWhenUnconfigured(t *testing.T) {
+	// Nothing here or under it changed. The red-check sees this test as
+	// changed because the errThenMoreReader doc comment below it was
+	// rewritten, and that comment falls inside this test's line range — the
+	// next top-level func after it is errThenMoreReader's own method. The
+	// reason lives on the marker line rather than in a paragraph above it
+	// because gofmt moves a //directive comment to the end of its block,
+	// which would put the marker after its own explanation.
 	r := NewRunner(RunnerConfig{})
 
 	assert.Equal(t, defaultQueryTimeout, r.queryTimeout)

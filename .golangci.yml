@@ -97,17 +97,6 @@ linters:
       - legacy
       - std-error-handling
     rules:
-      # internal/homedir and internal/cachedir are the seams themselves: each
-      # is the one place that is supposed to name its own os function. They
-      # stay separate packages partly for this reason — one merged package
-      # would have to be excused from both rules, so a stray os.UserHomeDir
-      # inside the cache-directory seam would no longer be caught.
-      - path: internal/homedir/
-        linters:
-          - forbidigo
-      - path: internal/cachedir/
-        linters:
-          - forbidigo
       # internal/fileops' Spy is a test double: it has to report the error it
       # was handed, and the real os error otherwise, exactly as it is. Wrapping
       # either would break errors.Is against the sentinel a test injected, which

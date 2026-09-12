@@ -159,7 +159,7 @@ func TestBootstrapWatcher_AgmsgNotPresent_NoWrite_WarnsOnce(t *testing.T) {
 	w.pollOnce(context.Background())
 
 	assert.Empty(t, sess.writes)
-	assert.True(t, w.warned["pane-a"][warnKindAbsent],
+	assert.True(t, w.warned["pane-a"].kinds[warnKindAbsent],
 		"three ticks against a host with no agmsg must produce one warning, not three")
 }
 
@@ -229,7 +229,7 @@ func TestBootstrapWatcher_RemotePresenceCheckTransportError_DistinctFromNo(t *te
 	w.pollOnce(context.Background())
 
 	assert.Empty(t, sess.writes)
-	assert.True(t, w.warned["pane-a"][warnKindProbe],
+	assert.True(t, w.warned["pane-a"].kinds[warnKindProbe],
 		"a transport error that keeps recurring must be warned about once per streak, not per tick")
 }
 

@@ -94,19 +94,32 @@ type bootstrapWatcher struct {
 	// survive within one session object's lifetime.
 	writeAttempts map[string]int
 	// warned tracks which warning kinds are currently being suppressed for a
-	// pane, keyed pane ID -> kind. An entry is added when the warning is
-	// logged and removed when the condition it reports clears, so each
-	// warning is logged once per failing streak rather than once per tick
+	// pane. A kind is added when its warning is logged and removed when the
+	// condition it reports clears, so each warning is logged once per failing
+	// streak rather than once per tick
 	// (the poll loop would otherwise repeat it for as long as the condition
 	// lasts, which for a dead tmux server or a dropped SSH connection is the
 	// life of the process) and rather than once for the life of the pane (a
 	// failure that returns after a recovery is news again). The kinds are
 	// separate keys because the conditions are independent: one firing must
 	// not silence the others. See #218.
-	warned           map[string]map[string]bool
+	warned           map[string]warnedPane
 	team             string
 	persistedPaneIDs []string
 	seeded           bool
+}
+
+// warnedPane is one pane's warning suppression: the kinds currently being
+// suppressed for it, and the session they were recorded against.
+//
+// The session is part of it because a restarted pane is a new Session object —
+// the same signal bootstrapped and givenUp compare by identity — and a new
+// session's failure is a new streak, not a continuation of the old one.
+// Without it, the one case where an operator would hear nothing at all is the
+// strongest recovery signal there is: the pane was torn down and recreated.
+type warnedPane struct {
+	sess  session.Session
+	kinds map[string]bool
 }
 
 // The warning kinds bootstrapWatcher.warnOnce suppresses independently of
@@ -134,7 +147,7 @@ func newBootstrapWatcher(cfg bootstrapWatcherConfig) *bootstrapWatcher {
 		pending:       map[string]session.Session{},
 		givenUp:       map[string]session.Session{},
 		writeAttempts: map[string]int{},
-		warned:        map[string]map[string]bool{},
+		warned:        map[string]warnedPane{},
 	}
 }
 
@@ -213,6 +226,22 @@ func (b *bootstrapWatcher) pollOnce(ctx context.Context) {
 // checkPane runs the bootstrap decision for one pane. See
 // docs/agent-board.md's Bootstrap flow section for the algorithm this
 // implements.
+// sessionFor returns the pane's live session, or false when the manager no
+// longer has one for it. It also keeps the per-pane bookkeeping that depends
+// on session identity in step: a pane the manager no longer knows about is not
+// in a failing streak — if it comes back it starts a new one — and dropping its
+// entry is what keeps warned from growing for panes that no longer exist.
+func (b *bootstrapWatcher) sessionFor(paneID string) (session.Session, bool) {
+	sess, ok := b.manager.Get(paneID)
+	if !ok {
+		delete(b.pending, paneID)
+		delete(b.warned, paneID)
+		return nil, false
+	}
+	b.noteSession(paneID, sess)
+	return sess, true
+}
+
 // modeFor reads the pane's current board mode, defaulting to monitor when
 // the pane carries no explicit value — matching internal/config's own
 // default rather than sending an empty mode into the instruction.
@@ -228,9 +257,8 @@ func (b *bootstrapWatcher) modeFor(paneID string) string {
 }
 
 func (b *bootstrapWatcher) checkPane(ctx context.Context, paneID, host string) {
-	sess, ok := b.manager.Get(paneID)
+	sess, ok := b.sessionFor(paneID)
 	if !ok {
-		delete(b.pending, paneID)
 		return
 	}
 	if existing, alreadyBootstrapped := b.bootstrapped[paneID]; alreadyBootstrapped && existing == sess {
@@ -401,14 +429,32 @@ func (b *bootstrapWatcher) agmsgPresent(ctx context.Context, paneID, host string
 // i.e. unless this pane is already inside a failing streak of that kind.
 // clearWarning ends the streak.
 func (b *bootstrapWatcher) warnOnce(paneID, kind, message string) {
-	if b.warned[paneID][kind] {
+	entry := b.warned[paneID]
+	if entry.kinds[kind] {
 		return
 	}
-	if b.warned[paneID] == nil {
-		b.warned[paneID] = map[string]bool{}
+	if entry.kinds == nil {
+		entry.kinds = map[string]bool{}
 	}
-	b.warned[paneID][kind] = true
+	entry.kinds[kind] = true
+	b.warned[paneID] = entry
 	log.Printf("Warning: %s", message)
+}
+
+// noteSession records which session paneID's warnings are being suppressed
+// against, dropping every suppression the moment that session is replaced.
+//
+// The entry is kept once created, even with no kinds suppressed, because it
+// carries that identity: dropping it when the last kind clears would leave the
+// next warning recorded against no session at all, and the following tick
+// would read that as a replacement and re-warn — every tick, which is the
+// behavior #218 exists to remove. checkPane's own "pane is gone" arm is what
+// removes the entry.
+func (b *bootstrapWatcher) noteSession(paneID string, sess session.Session) {
+	if entry, seen := b.warned[paneID]; seen && entry.sess == sess {
+		return
+	}
+	b.warned[paneID] = warnedPane{sess: sess, kinds: map[string]bool{}}
 }
 
 // clearWarning ends paneID's failing streak of this kind, so the next
@@ -418,10 +464,9 @@ func (b *bootstrapWatcher) warnOnce(paneID, kind, message string) {
 func (b *bootstrapWatcher) clearWarning(paneID, kind string) {
 	// No nil check: deleting from a nil map, or a key that is not there, is a
 	// no-op — so a pane with no suppressed warnings needs no special case.
-	delete(b.warned[paneID], kind)
-	if len(b.warned[paneID]) == 0 {
-		delete(b.warned, paneID)
-	}
+	// The entry itself stays, because it also carries the session identity
+	// noteSession compares against.
+	delete(b.warned[paneID].kinds, kind)
 }
 
 // persistBootstrapped saves the current set of bootstrapped pane IDs,

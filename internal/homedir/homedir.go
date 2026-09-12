@@ -27,7 +27,12 @@ import "os"
 
 // dirFn is the seam itself. SetForTest and SetFailingForTest are the only
 // supported ways to replace it, and both restore it when the test ends.
-var dirFn = os.UserHomeDir
+//
+// The forbidigo waiver is on this line rather than on the package: a
+// path-scoped exclusion suppresses every forbidigo diagnostic in the
+// directory, so it would also have let an os.UserCacheDir call in here pass,
+// which is exactly what keeping the two seams in separate packages is for.
+var dirFn = os.UserHomeDir //nolint:forbidigo // this package is the seam; every other caller goes through Dir()
 
 // Dir returns the current user's home directory, exactly as os.UserHomeDir
 // does — including its error when there is none to resolve.
