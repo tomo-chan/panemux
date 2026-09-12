@@ -43,12 +43,56 @@ type jsonrpcRequest struct {
 	JSONRPC string          `json:"jsonrpc"`
 }
 
+// jsonrpcResponse is the in-memory shape; what goes on the wire is decided
+// by MarshalJSON, since struct tags alone cannot express JSON-RPC 2.0 §5.
+//
 //nolint:govet // fieldalignment: field order kept grouped by meaning, padding cost is negligible
 type jsonrpcResponse struct {
-	Result  any             `json:"result,omitempty"`
-	Error   *jsonrpcError   `json:"error,omitempty"`
-	ID      json.RawMessage `json:"id,omitempty"`
+	Result  any
+	Error   *jsonrpcError
+	ID      json.RawMessage
+	JSONRPC string
+}
+
+// resultResponse and errorResponse are the two wire shapes §5 allows. They
+// exist as separate types rather than one type with `omitempty` because the
+// rule is "exactly one of result/error", which no combination of tags on a
+// single struct expresses: `omitempty` on Result drops a nil result entirely,
+// producing a response carrying *neither* member, while dropping the tag
+// emits `"result": null` alongside an error, producing one carrying *both*.
+// Being separate types also makes the id mandatory on each, which is the
+// other half of §5 — an id that could not be determined is Null, never
+// absent.
+type resultResponse struct {
+	Result  any             `json:"result"`
+	ID      json.RawMessage `json:"id"`
 	JSONRPC string          `json:"jsonrpc"`
+}
+
+type errorResponse struct {
+	Error   *jsonrpcError   `json:"error"`
+	ID      json.RawMessage `json:"id"`
+	JSONRPC string          `json:"jsonrpc"`
+}
+
+// MarshalJSON writes the response per JSON-RPC 2.0 §5: exactly one of
+// result/error, and a JSON null id when the request's own id could not be
+// determined (a parse error, where there is no id to echo back). A client
+// correlating responses by id can then see a response explicitly marked
+// unplaceable rather than one silently missing the key. See #210.
+func (r jsonrpcResponse) MarshalJSON() ([]byte, error) {
+	id := r.ID
+	if len(id) == 0 {
+		id = json.RawMessage("null")
+	}
+	if r.Error != nil {
+		return json.Marshal(errorResponse{JSONRPC: r.JSONRPC, Error: r.Error, ID: id}) //nolint:wrapcheck // encoding detail of this type's own marshaler
+	}
+	// A nil Result serializes as null, which is what a known method with
+	// nothing to report (notifications/initialized sent as a request) must
+	// answer with — the method is known, so a method-not-found error would
+	// be wrong, and an absent result member is not a response at all.
+	return json.Marshal(resultResponse{JSONRPC: r.JSONRPC, Result: r.Result, ID: id}) //nolint:wrapcheck // encoding detail of this type's own marshaler
 }
 
 type jsonrpcError struct {
