@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.21.0](https://github.com/tomo-chan/panemux/compare/v0.20.5...v0.21.0) (2026-09-12)
+
+
+### Features
+
+* add Agent Board dashboard UI and finish command palette tests (issue [#165](https://github.com/tomo-chan/panemux/issues/165) Phase 3) ([#171](https://github.com/tomo-chan/panemux/issues/171)) ([5ad3dae](https://github.com/tomo-chan/panemux/commit/5ad3dae1f1cc387e82b4671f8ac403f4d6fb011a))
+* add Agent Board foundation (config, session capabilities, internal/board) ([#166](https://github.com/tomo-chan/panemux/issues/166)) ([a65c7a0](https://github.com/tomo-chan/panemux/commit/a65c7a0902e2389e00e28cc484a703e4010299e5))
+* add agmsg compatibility contract Tier 2 CI job and fix the cursor bug it found ([#176](https://github.com/tomo-chan/panemux/issues/176)) ([ad0517b](https://github.com/tomo-chan/panemux/commit/ad0517b45edea66f8e972f78dd811d6093ec66be))
+* forward pane loopback callback ports and intercept browser opens ([#177](https://github.com/tomo-chan/panemux/issues/177)) ([b93051f](https://github.com/tomo-chan/panemux/commit/b93051ffba75d3ec5c2d9a5b4a3daabcd9d65379))
+* implement Agent Board bootstrap flow ([#169](https://github.com/tomo-chan/panemux/issues/169)) ([8fe12fc](https://github.com/tomo-chan/panemux/commit/8fe12fc061b0511e7b4fb2b8fa8879f7f08b256f))
+* implement Agent Board command center (issue [#165](https://github.com/tomo-chan/panemux/issues/165) Phase 2) ([#170](https://github.com/tomo-chan/panemux/issues/170)) ([ec713a6](https://github.com/tomo-chan/panemux/commit/ec713a65878c590e2211b979c19aaf82a0c8ed49))
+* relay agent board messages and expose REST status/messages/broadcast ([#167](https://github.com/tomo-chan/panemux/issues/167)) ([12b7241](https://github.com/tomo-chan/panemux/commit/12b724184de16f257b03c6dbb623960346f3bfec))
+
+
+### Bug Fixes
+
+* always serve a layout node the dashboard can parse ([#198](https://github.com/tomo-chan/panemux/issues/198)) ([baaa766](https://github.com/tomo-chan/panemux/commit/baaa7663d2ec24d933d2b817d95365a470c9de88))
+* exclude CJK punctuation from terminal URL link detection ([#174](https://github.com/tomo-chan/panemux/issues/174)) ([e3474c1](https://github.com/tomo-chan/panemux/commit/e3474c13425a396638c38a35b8aa83569dab53d4)), closes [#173](https://github.com/tomo-chan/panemux/issues/173)
+* four backlog items — drain ordering, warning streaks, JSON-RPC shape, cache-dir seam ([#234](https://github.com/tomo-chan/panemux/issues/234)) ([e297541](https://github.com/tomo-chan/panemux/commit/e297541cc740c56f4ef86e5f3548c660cd36d331)), closes [#230](https://github.com/tomo-chan/panemux/issues/230) [#218](https://github.com/tomo-chan/panemux/issues/218) [#210](https://github.com/tomo-chan/panemux/issues/210) [#226](https://github.com/tomo-chan/panemux/issues/226) [#227](https://github.com/tomo-chan/panemux/issues/227)
+* repair a macOS-bash-specific test and shell-script bug found while fixing it ([#233](https://github.com/tomo-chan/panemux/issues/233)) ([4384390](https://github.com/tomo-chan/panemux/commit/4384390c7ef8dbc41f6b04cc1ec4a7e68b257f64))
+* report a failed command-center history write as a warning on the done frame ([#228](https://github.com/tomo-chan/panemux/issues/228)) ([19ba7a9](https://github.com/tomo-chan/panemux/commit/19ba7a9df1ac475924f41d747795dbc6047f2b15))
+* roll back the in-memory config when a mutation cannot be saved ([#204](https://github.com/tomo-chan/panemux/issues/204)) ([#207](https://github.com/tomo-chan/panemux/issues/207)) ([1b5ec05](https://github.com/tomo-chan/panemux/commit/1b5ec05c20274c9ee582e6e68543e85113393b43))
+
 ## [0.20.5](https://github.com/tomo-chan/panemux/compare/v0.20.4...v0.20.5) (2026-07-21)
 
 
