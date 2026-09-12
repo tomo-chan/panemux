@@ -409,7 +409,7 @@ func newestKnownAgentTypeDescendantPID(processes []processInfo, rootPID int) (pi
 			// for it would have to fabricate that snapshot and then pin
 			// whichever type the traversal happens to reach first — an
 			// accident of stack order, not designed behavior. Issue #190.
-			//mutation:exempt unreachable — killable only by a fabricated snapshot with a duplicate PID
+			//mutation:exempt[CONDITIONALS_BOUNDARY] unreachable — killable only by a fabricated snapshot with a duplicate PID
 			if !ok || proc.PID > pid {
 				pid, agmsgType, ok = proc.PID, t, true
 			}
@@ -441,7 +441,7 @@ func newestMatchingDescendantPID(processes []processInfo, rootPID int, match fun
 			// only writes are `matched = proc.PID` and `ok = true`, so on an
 			// equal PID `>=` assigns the value already there. There is no
 			// second return value for it to change. Issue #190.
-			//mutation:exempt equivalent — on an equal PID the guard reassigns the same value, so >= cannot differ
+			//mutation:exempt[CONDITIONALS_BOUNDARY] equivalent — on an equal PID the guard reassigns the same value
 			if !ok || proc.PID > matched {
 				matched = proc.PID
 				ok = true
@@ -786,7 +786,7 @@ func processIDArg(pid int) (string, error) {
 	// by the regex with the identical error. TestProcessIDArg_PIDBoundary
 	// covers both sides of the boundary; the mutant on it is equivalent, not
 	// unkilled. Issue #190.
-	//mutation:exempt equivalent — validProcessIDArg rejects "0" with the same error, so < 0 cannot behave differently
+	//mutation:exempt[CONDITIONALS_BOUNDARY] equivalent — validProcessIDArg rejects "0" with the same error
 	if pid <= 0 {
 		return "", fmt.Errorf("invalid pid: %d", pid)
 	}

@@ -111,9 +111,9 @@ jobs:
       # would report on a little over half of what it claims to measure.
       #
       # The escape hatch is the `mutation-exempt` label, visible on the pull
-      # request itself. The narrower hatch is `//mutation:exempt <reason>` on
-      # the line, which is preferred: it waives one mutant, in the diff a
-      # reviewer is reading, instead of the whole branch.
+      # request itself. The narrower hatch is `//mutation:exempt[<TYPE>]
+      # <reason>` on the line, which is preferred: it waives one mutant TYPE,
+      # in the diff a reviewer is reading, instead of the whole branch.
       - name: Mutation (do the tests notice changed code behaving differently?)
         env:
           MUTATION_BASE: origin/${{ github.event.pull_request.base.ref }}

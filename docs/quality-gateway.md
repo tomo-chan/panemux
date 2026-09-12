@@ -576,20 +576,30 @@ has a test (`TestRegistryEndConnNeverDrivesTheCounterNegative`) rather than an e
 that catches this class: *if the mutant were reachable, would anything be wrong?* — "equivalent"
 survives that question, "unreachable" does not.
 
-**One property of the marker itself, which the `Kind` column above makes easy to misread.**
-`scripts/mutation.sh` decides an exemption by file and line — it records the mutant `$type` for the
-report and never compares it — so a reason written about the boundary mutant waives *every* mutant
-gremlins produces on that line, `CONDITIONALS_NEGATION` included. The reason a reader sees and the
-set it actually covers are not the same set.
+**One property of the marker itself, which the `Kind` column above made easy to misread — now
+fixed.** `scripts/mutation.sh` used to decide an exemption by file and line, recording the mutant
+`$type` for the report and never comparing it, so a reason written about the boundary mutant waived
+*every* mutant gremlins produced on that line, `CONDITIONALS_NEGATION` included. The reason a reader
+saw and the set it actually covered were not the same set.
 
-Measured on the five sites above, nothing is currently hidden by that: each one's negation mutant is
-killed by the suite independently, so the waiver covers only mutants that were dying anyway. The
-`endConn` line is the useful data point rather than a counterexample — its negation mutant (`<= 0`)
-was killed by the existing suite the whole time; what survived under the waiver was exactly the
-boundary mutant the reason was written for. So the gap is structural, not yet load-bearing. It
-matters most for stage 4, when a survivor becomes a failure: a line-scoped waiver applied to a real
-finding of a different kind would then be the difference between a red gate and a green one, with
-nothing in the diff to show for it.
+Nothing was hidden by it, and that is measured rather than assumed. Running gremlins over
+`internal/board` and `internal/session` names every mutant on each of the eleven marked lines: all
+eleven carry a `CONDITIONALS_NEGATION` as well, three also carry `ARITHMETIC_BASE`, three
+`INVERT_NEGATIVES` — **27 mutants across 11 lines, of which exactly the 11 `CONDITIONALS_BOUNDARY`
+ones survive**. Every waiver covered only mutants that were dying anyway. The `endConn` line is the
+useful data point rather than a counterexample: its negation mutant (`<= 0`) was killed by the
+existing suite the whole time, and what survived under the waiver was exactly the boundary mutant the
+reason was written for.
+
+So the gap was structural rather than live, and it mattered most for stage 4, when a survivor becomes
+a failure: a line-scoped waiver applied to a real finding of a different kind would then be the
+difference between a red gate and a green one, with nothing in the diff to show for it. **The marker
+now names the type it waives** — `//mutation:exempt[CONDITIONALS_BOUNDARY] <reason>`, with a
+comma-separated list for several and `[*]` for a deliberate, labelled line-wide waiver. An untyped
+marker exempts nothing, on the same grounds as a reasonless one; the eleven above were rewritten in
+the change that introduced it, each to the type the measurement above says it was always about. When
+a marker is present and a mutant of another type survives, the finding names the type the marker
+does claim, so the mismatch is on the screen instead of being silently absorbed.
 
 This is the first real evidence for how much of G4(c)'s noise is irreducible rather than fixable,
 which is what item 6's fourth stage — whether to make `make mutation` fail — needs before it can be

@@ -267,7 +267,7 @@ cat > "$repo/pkg/new.go" <<'EOF'
 package pkg
 
 func New(n int) bool {
-	//mutation:exempt buffer size, a test pinning it would be a tautology
+	//mutation:exempt[CONDITIONALS_BOUNDARY] buffer size, a test pinning it would be a tautology
 	if n > 7 {
 		return true
 	}
@@ -317,8 +317,13 @@ out=$(run_checker "$repo" --base main --report rep.json)
 # honoured the reasonless marker would still print the line, under "Exempt by".
 if ! printf '%s' "$(findings_only "$out")" | grep -q 'pkg/new.go:5'; then
 	fail "a bare //mutation:exempt exempts nothing" "$out"
-elif ! printf '%s' "$out" | grep -q 'exempts nothing'; then
-	fail "a bare //mutation:exempt is called out, not silently ignored" "$out"
+elif ! printf '%s' "$out" | grep -q 'no reason after it exempts nothing'; then
+	# The REASON note, specifically. A marker with neither a reason nor a type
+	# breaks two rules at once, and both notes end in "exempts nothing" — so a
+	# looser grep passes on the untyped note alone, and stops saying anything
+	# about the reason rule. Confirmed by perturbation: deleting the reason
+	# check left the looser form green.
+	fail "a bare //mutation:exempt is called out for the missing REASON" "$out"
 else
 	pass "a bare //mutation:exempt exempts nothing"
 fi
@@ -339,7 +344,7 @@ cat > "$repo/pkg/new.go" <<'EOF'
 package pkg
 
 func New(n, m int) bool {
-	if n > 7 { //mutation:exempt only the outer test is a tuning constant
+	if n > 7 { //mutation:exempt[CONDITIONALS_BOUNDARY] only the outer test is a tuning constant
 		if m > 9 {
 			return true
 		}
@@ -792,6 +797,249 @@ elif printf '%s' "$out" | grep -q '^set -u'; then
 	fail "--help stops at the header and does not print the code" "$out"
 else
 	pass "--help prints the whole header and only the header"
+fi
+
+# ── 22. A marker waives the mutant TYPE it names ─────────────────────────────
+#
+# The line-scoped waiver is what #180's judgement note 3 records as unresolved:
+# the marker matched file and line and never the type, so a reason written about
+# the boundary mutant waived every other mutant gremlins produced on that line.
+# Measured on this repository's own eleven markers, every marked line carries
+# one to three further types (CONDITIONALS_NEGATION on all eleven, plus
+# ARITHMETIC_BASE and INVERT_NEGATIVES on three) — all killed today, so nothing
+# was hidden, but all eleven were waived by a reason that describes none of them.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/new.go" <<'EOF'
+package pkg
+
+func New(n int) bool {
+	//mutation:exempt[CONDITIONALS_BOUNDARY] at n == 7 the caller cannot tell the two apart
+	if n > 7 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/new.go","mutations":[{"type":"CONDITIONALS_BOUNDARY","status":"LIVED","line":5,"column":5}]}]}'
+commit_on_branch "$repo" "add new.go"
+out=$(run_checker "$repo" --base main --report rep.json)
+if ! printf '%s' "$out" | grep -q 'no surviving mutants'; then
+	fail "a marker naming the mutant's own type waives it" "$out"
+elif ! printf '%s' "$out" | grep -q 'Exempt by'; then
+	fail "the waived mutant is still listed" "$out"
+else
+	pass "//mutation:exempt[TYPE] waives the type it names"
+fi
+
+# ── 23. A marker does NOT waive a type it does not name ──────────────────────
+#
+# The defect itself. Same line, same marker, a different mutant — and under the
+# old file+line match this was silently waived, with nothing in the diff or the
+# output to show for it. At stage 4 that is the difference between a red gate
+# and a green one.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/new.go" <<'EOF'
+package pkg
+
+func New(n int) bool {
+	//mutation:exempt[CONDITIONALS_BOUNDARY] at n == 7 the caller cannot tell the two apart
+	if n > 7 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/new.go","mutations":[
+   {"type":"CONDITIONALS_BOUNDARY","status":"LIVED","line":5,"column":5},
+   {"type":"CONDITIONALS_NEGATION","status":"LIVED","line":5,"column":5}]}]}'
+commit_on_branch "$repo" "add new.go"
+out=$(run_checker "$repo" --base main --report rep.json)
+if ! printf '%s' "$out" | grep -q '1 surviving mutant'; then
+	fail "exactly one of the two mutants on the line is waived" "$out"
+elif ! printf '%s' "$(findings_only "$out")" | grep -q 'CONDITIONALS_NEGATION'; then
+	fail "a mutant of a type the marker does not name is still a finding" "$out"
+elif printf '%s' "$(findings_only "$out")" | grep -q 'pkg/new.go:5.*CONDITIONALS_BOUNDARY'; then
+	# The finding ROW, not the explanatory note under it — the note names the
+	# waived type on purpose, and a bare grep of the section matches that too.
+	fail "the type the marker DOES name is still waived" "$out"
+elif ! printf '%s' "$out" | grep -q 'names CONDITIONALS_BOUNDARY'; then
+	fail "the finding says the line carries a marker for another type" "$out"
+else
+	pass "//mutation:exempt[TYPE] does not waive a type it does not name"
+fi
+
+# ── 24. [*] waives the whole line, and says that it did ──────────────────────
+#
+# The line-wide waiver does not disappear; it stops being the accidental default
+# and becomes something written down. A reviewer who sees `[*]` knows the claim
+# covers mutants nobody has looked at, which is exactly what the old untyped
+# form did without saying so.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/new.go" <<'EOF'
+package pkg
+
+func New(n int) bool {
+	//mutation:exempt[*] a tuning constant, every mutant here pins a number
+	if n > 7 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/new.go","mutations":[
+   {"type":"CONDITIONALS_BOUNDARY","status":"LIVED","line":5,"column":5},
+   {"type":"ARITHMETIC_BASE","status":"LIVED","line":5,"column":9}]}]}'
+commit_on_branch "$repo" "add new.go"
+out=$(run_checker "$repo" --base main --report rep.json)
+if ! printf '%s' "$out" | grep -q 'no surviving mutants'; then
+	fail "[*] waives every mutant on the line" "$out"
+elif ! printf '%s' "$out" | grep -q '2 exempt'; then
+	fail "[*] waives both mutants, not just the first" "$out"
+elif ! printf '%s' "$out" | grep -q 'line-wide'; then
+	fail "the exempt list marks a [*] waiver as line-wide" "$out"
+else
+	pass "//mutation:exempt[*] waives the line and is labelled as doing so"
+fi
+
+# ── 25. A list names several types, and only those ───────────────────────────
+
+checks=$((checks + 1))
+repo=$(new_repo)
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/new.go" <<'EOF'
+package pkg
+
+func New(n int) bool {
+	//mutation:exempt[CONDITIONALS_BOUNDARY, ARITHMETIC_BASE] both pin the same tuning constant
+	if n > 7 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/new.go","mutations":[
+   {"type":"CONDITIONALS_BOUNDARY","status":"LIVED","line":5,"column":5},
+   {"type":"ARITHMETIC_BASE","status":"LIVED","line":5,"column":9},
+   {"type":"INVERT_NEGATIVES","status":"LIVED","line":5,"column":9}]}]}'
+commit_on_branch "$repo" "add new.go"
+out=$(run_checker "$repo" --base main --report rep.json)
+if ! printf '%s' "$out" | grep -q '1 surviving mutant'; then
+	fail "a two-type list waives exactly those two" "$out"
+elif ! printf '%s' "$(findings_only "$out")" | grep -q 'INVERT_NEGATIVES'; then
+	fail "the type outside the list is still a finding" "$out"
+else
+	pass "//mutation:exempt[A, B] waives A and B and nothing else"
+fi
+
+# ── 26. An untyped marker waives nothing ─────────────────────────────────────
+#
+# Same rule the reasonless marker has always had, for the same reason: a waiver
+# whose scope nobody stated is one nobody reviewed. It is a contract change, so
+# it has to be loud — the eleven markers in this repository were all rewritten
+# in the change that introduced it.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/new.go" <<'EOF'
+package pkg
+
+func New(n int) bool {
+	//mutation:exempt a perfectly good reason, with no type to attach it to
+	if n > 7 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/new.go","mutations":[{"type":"CONDITIONALS_BOUNDARY","status":"LIVED","line":5,"column":5}]}]}'
+commit_on_branch "$repo" "add new.go"
+out=$(run_checker "$repo" --base main --report rep.json)
+if ! printf '%s' "$(findings_only "$out")" | grep -q 'pkg/new.go:5'; then
+	fail "an untyped //mutation:exempt waives nothing" "$out"
+elif ! printf '%s' "$out" | grep -q 'mutation:exempt\[' ; then
+	fail "the run says what the typed form looks like" "$out"
+else
+	pass "an untyped //mutation:exempt waives nothing, and says what to write"
+fi
+
+# ── 27. A typed marker still needs a reason ──────────────────────────────────
+#
+# The new syntax must not become a way around the older rule. `[TYPE]` says
+# WHICH mutant is waived; the reason says WHY, and neither substitutes for the
+# other.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/new.go" <<'EOF'
+package pkg
+
+func New(n int) bool {
+	//mutation:exempt[CONDITIONALS_BOUNDARY]
+	if n > 7 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/new.go","mutations":[{"type":"CONDITIONALS_BOUNDARY","status":"LIVED","line":5,"column":5}]}]}'
+commit_on_branch "$repo" "add new.go"
+out=$(run_checker "$repo" --base main --report rep.json)
+if ! printf '%s' "$(findings_only "$out")" | grep -q 'pkg/new.go:5'; then
+	fail "a typed marker with no reason exempts nothing" "$out"
+elif ! printf '%s' "$out" | grep -q 'exempts nothing'; then
+	fail "a reasonless typed marker is called out" "$out"
+else
+	pass "a typed //mutation:exempt still needs a reason"
+fi
+
+# ── 28. An unclosed [ is reported, not read as an untyped marker ─────────────
+#
+# A typo in the one part of the marker a reader skims. Read as untyped it would
+# waive nothing either, so the behaviour is the same — but the message is not,
+# and the message is the whole difference between a fixable typo and a
+# mysteriously ineffective waiver.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/new.go" <<'EOF'
+package pkg
+
+func New(n int) bool {
+	//mutation:exempt[CONDITIONALS_BOUNDARY at n == 7 nothing can tell them apart
+	if n > 7 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/new.go","mutations":[{"type":"CONDITIONALS_BOUNDARY","status":"LIVED","line":5,"column":5}]}]}'
+commit_on_branch "$repo" "add new.go"
+out=$(run_checker "$repo" --base main --report rep.json)
+if ! printf '%s' "$(findings_only "$out")" | grep -q 'pkg/new.go:5'; then
+	fail "an unclosed [ waives nothing" "$out"
+elif ! printf '%s' "$out" | grep -qi 'unclosed'; then
+	fail "an unclosed [ is named as the problem" "$out"
+else
+	pass "an unclosed [ is reported as a malformed marker"
 fi
 
 # ── Result ────────────────────────────────────────────────────────────────────

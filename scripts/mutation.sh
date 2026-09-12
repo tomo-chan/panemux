@@ -83,9 +83,18 @@
 # over half of what it claims to measure.
 #
 # Escape hatches, narrow before broad, matching //coverage:exempt:
-#   //mutation:exempt <reason>   on the mutated line, or the line directly
-#                                above it. A reason is required — a bare marker
-#                                exempts nothing.
+#   //mutation:exempt[<TYPE>] <reason>
+#                                on the mutated line, or the line directly above
+#                                it. <TYPE> is gremlins' mutant type, the third
+#                                column of this script's own output, and the
+#                                waiver covers THAT TYPE ONLY. A comma-separated
+#                                list names several; [*] waives every mutant on
+#                                the line, which is a claim about mutants nobody
+#                                has looked at and is labelled as such in the
+#                                report. A reason is required, and an untyped
+#                                marker exempts nothing — both for the same
+#                                reason, that a waiver nobody stated the scope
+#                                or the grounds of is one nobody reviewed.
 #   MUTATION_EXEMPT=1            the whole branch, from the CI label.
 #
 # Exit codes: 0 = ran (whether or not survivors were found); 1 = could not run.
@@ -315,6 +324,8 @@ touched_lines() {
 # about whether the run was mostly useless or almost complete.
 scoped_count=0
 bare_marker=0
+untyped_marker=0
+malformed_marker=0
 
 for f in $changed; do
 	touched_lines "$f" | sort -un > "$tmp/touched"
@@ -394,20 +405,89 @@ $above" ;;
 			;;
 		esac
 
-		case $window in
-		*//mutation:exempt*)
-			# A reason is required. An exemption nobody has to justify is how
-			# an exemption stops being reviewable — the rule //coverage:exempt
-			# states and this one inherits.
-			if printf '%s\n' "$window" | grep -Eq '//mutation:exempt[[:space:]]+[^[:space:]]'; then
-				printf '%s%s%s%s%s\n' "$f" "$tab" "$line" "$tab" "$type" >> "$tmp/exempt"
-			else
-				bare_marker=1
-				printf '%s%s%s%s%s\n' "$f" "$tab" "$line" "$tab" "$type" >> "$tmp/findings"
-			fi
+		# THE MARKER WAIVES A MUTANT TYPE, NOT A LINE. It used to match on
+		# file and line alone and never look at $type, so a reason written
+		# about the boundary mutant waived every other mutant gremlins produced
+		# on that line — #180's judgement note 3, and measured: all eleven
+		# markers in this repository sit on a line carrying one to three
+		# further types. None of them was hiding a survivor, so the gap was
+		# structural rather than live; at stage 4, where a survivor becomes a
+		# failure, it is the difference between a red gate and a green one with
+		# nothing in the diff to show for it.
+		#
+		# Prints one verdict word, and for a mismatch the types the line's
+		# markers DO name, so the finding can say what is there.
+		verdict=$(printf '%s\n' "$window" | MUTANT_TYPE="$type" awk -v OFS="$tab" '
+			BEGIN { want = ENVIRON["MUTANT_TYPE"]; tag = "//mutation:exempt"; taglen = length(tag) }
+			{
+				rest = $0
+				while ((i = index(rest, tag)) > 0) {
+					rest = substr(rest, i + taglen)
+					spec = ""
+					if (substr(rest, 1, 1) == "[") {
+						j = index(rest, "]")
+						if (j == 0) { malformed = 1; continue }
+						spec = substr(rest, 2, j - 2)
+						rest = substr(rest, j + 1)
+					}
+					# A second marker on the same line is not this one\047s reason.
+					reason = rest
+					k = index(reason, tag)
+					if (k > 0) reason = substr(reason, 1, k - 1)
+					sub(/^[ \t]+/, "", reason)
+					sub(/[ \t]+$/, "", reason)
+					if (reason == "") { bare = 1; continue }
+					if (spec == "") { untyped = 1; continue }
+					n = split(spec, types, ",")
+					for (t = 1; t <= n; t++) {
+						one = types[t]
+						gsub(/[ \t]/, "", one)
+						if (one == "*") wildcard = 1
+						else if (one == want) matched = 1
+						else claimed = claimed (claimed == "" ? "" : ", ") one
+					}
+				}
+			}
+			END {
+				if (matched) print "exempt"
+				else if (wildcard) print "wildcard"
+				else if (bare) print "bare"
+				else if (untyped) print "untyped"
+				else if (malformed) print "malformed"
+				else if (claimed != "") print "mismatch", claimed
+				else print "none"
+			}
+		')
+		claimed=""
+		case $verdict in
+		mismatch*)
+			claimed=${verdict#*"$tab"}
+			verdict=mismatch
+			;;
+		esac
+
+		case $verdict in
+		exempt)
+			printf '%s%s%s%s%s%s\n' "$f" "$tab" "$line" "$tab" "$type" "$tab" >> "$tmp/exempt"
+			;;
+		wildcard)
+			# Labelled, because [*] is a claim about mutants nobody looked at.
+			# That is what the untyped marker used to do silently.
+			printf '%s%s%s%s%s%s%s\n' "$f" "$tab" "$line" "$tab" "$type" "$tab" "line-wide [*]" >> "$tmp/exempt"
 			;;
 		*)
-			printf '%s%s%s%s%s\n' "$f" "$tab" "$line" "$tab" "$type" >> "$tmp/findings"
+			note=""
+			case $verdict in
+			bare) bare_marker=1 ;;
+			untyped) untyped_marker=1 ;;
+			malformed) malformed_marker=1 ;;
+			mismatch)
+				# The one that used to be invisible. Naming what IS on the line
+				# turns "why is this still reported" into a one-line answer.
+				note="//mutation:exempt on this line names $claimed"
+				;;
+			esac
+			printf '%s%s%s%s%s%s%s\n' "$f" "$tab" "$line" "$tab" "$type" "$tab" "$note" >> "$tmp/findings"
 			;;
 		esac
 	done < "$tmp/file_mutations"
@@ -434,7 +514,7 @@ exempt_list() {
 	[ -s "$tmp/exempt" ] || return 0
 	echo
 	echo "  Exempt by //mutation:exempt:"
-	awk -F"$tab" '{ printf "    %s:%s  %s\n", $1, $2, $3 }' "$tmp/exempt"
+	awk -F"$tab" '{ if ($4 == "") printf "    %s:%s  %s\n", $1, $2, $3; else printf "    %s:%s  %s  — %s\n", $1, $2, $3, $4 }' "$tmp/exempt"
 }
 
 undecided_list() {
@@ -451,6 +531,26 @@ undecided_list() {
 	echo "  recognise, which is itself worth looking at."
 }
 
+# A marker that waives nothing is worth a sentence saying so. Each of these
+# is silent unless one was actually seen, so a clean run stays clean.
+marker_notes() {
+	if [ "$bare_marker" -eq 1 ]; then
+		echo
+		echo "  Note: a //mutation:exempt with no reason after it exempts nothing."
+	fi
+	if [ "$untyped_marker" -eq 1 ]; then
+		echo
+		echo "  Note: a //mutation:exempt with no [<TYPE>] exempts nothing. The"
+		echo "  marker waives one mutant type, not a whole line — write"
+		echo "  //mutation:exempt[CONDITIONALS_BOUNDARY] <reason>, taking the type"
+		echo "  from the third column above, or [*] to waive the line knowingly."
+	fi
+	if [ "$malformed_marker" -eq 1 ]; then
+		echo
+		echo "  Note: a //mutation:exempt with an unclosed [ exempts nothing."
+	fi
+}
+
 if [ "${MUTATION_EXEMPT:-0}" = "1" ]; then
 	echo "mutation: exempt — MUTATION_EXEMPT=1 waived $kept_count finding(s)$exempt_note$undecided_note."
 	exempt_list
@@ -462,6 +562,7 @@ if [ "$kept_count" -eq 0 ]; then
 	echo "mutation: no surviving mutants on lines this branch changed$exempt_note$undecided_note."
 	exempt_list
 	undecided_list
+	marker_notes
 	exit 0
 fi
 
@@ -472,16 +573,14 @@ echo "  passes through. Either an assertion is missing, or the mutant is one"
 echo "  of the kinds worth waiving — a tuning constant, or a branch that needs"
 echo "  fault injection to reach."
 echo
-awk -F"$tab" '{ printf "    %s:%s  %s\n", $1, $2, $3 }' "$tmp/findings"
+awk -F"$tab" '{ if ($4 == "") printf "    %s:%s  %s\n", $1, $2, $3; else printf "    %s:%s  %s\n        %s\n", $1, $2, $3, $4 }' "$tmp/findings"
 exempt_list
 undecided_list
 
-if [ "$bare_marker" -eq 1 ]; then
-	echo
-	echo "  Note: a //mutation:exempt with no reason after it exempts nothing."
-fi
+marker_notes
 
 echo
 echo "  This is a warning: it does not fail the build. Add the assertion, or"
-echo "  waive it with '//mutation:exempt <reason>' on the line or above it."
+echo "  waive the one mutant with '//mutation:exempt[<TYPE>] <reason>' on the"
+echo "  line or directly above it — <TYPE> is the third column above."
 exit 0
