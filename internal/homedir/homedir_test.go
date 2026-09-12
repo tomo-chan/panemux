@@ -13,6 +13,11 @@ import (
 
 // Unsubstituted, Dir is os.UserHomeDir and nothing else. A seam that quietly
 // answered something of its own would make every caller's default wrong.
+//
+// This branch touches only the //nolint on its os.UserHomeDir call, which the
+// package-wide forbidigo waiver used to cover.
+//
+//efficacy:exempt pins pre-existing behavior; no implementation under it changed
 func TestDirDefaultsToTheOperatingSystemHomeDirectory(t *testing.T) {
 	want, wantErr := os.UserHomeDir() //nolint:forbidigo // the seam's own default is what this asserts
 
