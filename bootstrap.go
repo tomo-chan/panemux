@@ -416,9 +416,8 @@ func (b *bootstrapWatcher) warnOnce(paneID, kind, message string) {
 // warnOnce reports: a condition that clears and comes back is a new streak,
 // and by then the operator has been told the pane recovered.
 func (b *bootstrapWatcher) clearWarning(paneID, kind string) {
-	if b.warned[paneID] == nil {
-		return
-	}
+	// No nil check: deleting from a nil map, or a key that is not there, is a
+	// no-op — so a pane with no suppressed warnings needs no special case.
 	delete(b.warned[paneID], kind)
 	if len(b.warned[paneID]) == 0 {
 		delete(b.warned, paneID)

@@ -63,12 +63,15 @@ type jsonrpcResponse struct {
 // Being separate types also makes the id mandatory on each, which is the
 // other half of §5 — an id that could not be determined is Null, never
 // absent.
+//
+//nolint:govet // fieldalignment: the field order is the wire key order; padding cost is negligible
 type resultResponse struct {
 	Result  any             `json:"result"`
 	ID      json.RawMessage `json:"id"`
 	JSONRPC string          `json:"jsonrpc"`
 }
 
+//nolint:govet // fieldalignment: the field order is the wire key order; padding cost is negligible
 type errorResponse struct {
 	Error   *jsonrpcError   `json:"error"`
 	ID      json.RawMessage `json:"id"`
@@ -86,13 +89,15 @@ func (r jsonrpcResponse) MarshalJSON() ([]byte, error) {
 		id = json.RawMessage("null")
 	}
 	if r.Error != nil {
-		return json.Marshal(errorResponse{JSONRPC: r.JSONRPC, Error: r.Error, ID: id}) //nolint:wrapcheck // encoding detail of this type's own marshaler
+		//nolint:wrapcheck // an encoding detail of this type's own marshaler
+		return json.Marshal(errorResponse{JSONRPC: r.JSONRPC, Error: r.Error, ID: id})
 	}
 	// A nil Result serializes as null, which is what a known method with
 	// nothing to report (notifications/initialized sent as a request) must
 	// answer with — the method is known, so a method-not-found error would
 	// be wrong, and an absent result member is not a response at all.
-	return json.Marshal(resultResponse{JSONRPC: r.JSONRPC, Result: r.Result, ID: id}) //nolint:wrapcheck // encoding detail of this type's own marshaler
+	//nolint:wrapcheck // an encoding detail of this type's own marshaler
+	return json.Marshal(resultResponse{JSONRPC: r.JSONRPC, Result: r.Result, ID: id})
 }
 
 type jsonrpcError struct {

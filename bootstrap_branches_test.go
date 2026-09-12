@@ -189,6 +189,30 @@ func TestBootstrapWarningsOfDifferentKindsDoNotSuppressEachOther(t *testing.T) {
 	assert.Empty(t, sess.writes)
 }
 
+// Clearing one kind's streak must leave the others' suppression intact: the
+// per-pane entry is only dropped once nothing is suppressed for that pane, so
+// a recovered detection does not re-open the presence warning the operator
+// has already been shown.
+func TestClearingOneWarningKindLeavesTheOthersSuppressed(t *testing.T) {
+	logs := captureBootstrapLog(t)
+	w := newLocalWatcher(session.NewManager(), localAgmsgDir(t, true), "panemux", nil)
+
+	w.warnOnce("pane-a", warnKindDetect, "detect failed")
+	w.warnOnce("pane-a", warnKindProbe, "probe failed")
+	require.Equal(t, 1, strings.Count(logs.String(), "detect failed"))
+	require.Equal(t, 1, strings.Count(logs.String(), "probe failed"))
+
+	w.clearWarning("pane-a", warnKindDetect)
+
+	w.warnOnce("pane-a", warnKindDetect, "detect failed")
+	w.warnOnce("pane-a", warnKindProbe, "probe failed")
+
+	assert.Equal(t, 2, strings.Count(logs.String(), "detect failed"),
+		"the cleared kind starts a new streak")
+	assert.Equal(t, 1, strings.Count(logs.String(), "probe failed"),
+		"the kind that never cleared stays suppressed")
+}
+
 // A pane whose host has no resolved agmsg path is not "agmsg is absent" — it
 // is "we do not know", and the two must not be conflated: reporting absence
 // would let the watcher decide the host is ineligible on the strength of a

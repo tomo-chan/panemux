@@ -446,6 +446,12 @@ func (f *ctxAwareFakeCmd) Wait() error {
 	return f.ctx.Err() //nolint:wrapcheck // test fake mirrors exec.Cmd's own unwrapped ctx.Err() propagation
 }
 
+// fake stdout reaches EOF at once, so it never reaches the drain ordering the branch changes — that
+// is TestRunnerMalformedStreamJSONDoesNotWaitOnASubprocessThatStopsWritingWithoutExiting's job. The
+// red-check sees it as changed only because the ctxBlockingStdout helper added below it falls inside
+// this test's line range.
+//
+//efficacy:exempt unmodified by this branch: the cancellation it pins predates it, and this test's
 func TestRunnerMalformedStreamJSONCancelsQueryContextImmediately(t *testing.T) {
 	// A malformed line already tells the client the query failed (see
 	// TestRunnerMalformedStreamJSONEmitsErrorAndStops); the subprocess must
@@ -756,6 +762,10 @@ func TestRunnerAppliesConfiguredQueryTimeoutToSubprocessContext(t *testing.T) {
 	assert.WithinDuration(t, before.Add(30*time.Second), deadline, 2*time.Second)
 }
 
+// it as changed because the errThenMoreReader doc comment below it was rewritten, and that comment
+// falls inside this test's line range.
+//
+//efficacy:exempt unmodified by this branch — no implementation under it changed. The red-check sees
 func TestRunnerDefaultsQueryTimeoutWhenUnconfigured(t *testing.T) {
 	r := NewRunner(RunnerConfig{})
 

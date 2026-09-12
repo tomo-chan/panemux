@@ -132,6 +132,11 @@ func TestInitializedSentAsARequestIsAnsweredWithANullResult(t *testing.T) {
 
 // The other half of §5: exactly one of the two members, so serializing a nil
 // result as null must not put a `"result": null` next to an error.
+//
+// would emit `"result": null` beside every error — not the behavior before it. The code this
+// replaces could not fail it: `omitempty` already kept a nil result out of an error response.
+//
+//efficacy:exempt guards the obvious wrong fix for #210 — dropping `omitempty` from Result, which
 func TestAnErrorResponseCarriesNoResultMember(t *testing.T) {
 	responses := serveLines(t, &fakeBoardAPIClient{},
 		`{"jsonrpc":"2.0","id":8,"method":"nonexistent/method"}`,
