@@ -489,6 +489,85 @@ func TestRunnerMalformedStreamJSONCancelsQueryContextImmediately(t *testing.T) {
 	}
 }
 
+// ctxBlockingStdout yields its head and then blocks on Read until the query
+// context is canceled — standing in for a real subprocess that has stopped
+// writing but keeps its end of the stdout pipe open until it is killed.
+// Only the kill brings that pipe to EOF (exec.CommandContext ties it to the
+// context), so any drain of the remaining output that runs *before* the
+// cancellation waits out the whole query timeout.
+type ctxBlockingStdout struct {
+	head *strings.Reader
+	// Deliberately stored, for the same reason ctxAwareFakeCmd stores one:
+	// the pipe's real lifetime is the subprocess's, which
+	// exec.CommandContext ties to ctx.
+	ctx context.Context //nolint:containedctx
+}
+
+func (s *ctxBlockingStdout) Read(p []byte) (int, error) {
+	if s.head.Len() > 0 {
+		return s.head.Read(p) //nolint:wrapcheck // test fake mirrors an io.Reader's own unwrapped returns
+	}
+	<-s.ctx.Done()
+	return 0, io.EOF
+}
+
+func (s *ctxBlockingStdout) Close() error { return nil }
+
+func TestRunnerMalformedStreamJSONDoesNotWaitOnASubprocessThatStopsWritingWithoutExiting(t *testing.T) {
+	// The drain of the rest of stdout used to sit in streamOutput's own
+	// defer, so it ran before run() could cancel the query context. Against
+	// a subprocess that stops writing but does not exit, that drain blocks
+	// on read(2) until the query timeout kills the process — so both the
+	// busy flag and the client's error frame waited out the full timeout,
+	// which is precisely the outcome the cancel() was written to prevent.
+	//
+	// TestRunnerMalformedStreamJSONCancelsQueryContextImmediately cannot
+	// catch this: its fake stdout reaches EOF at once, so the drain in
+	// front of the cancel() returns immediately.
+	factory := func(ctx context.Context, _, _ string, _ ...string) cmdRunner {
+		return &ctxAwareFakeCmd{
+			stdout: &ctxBlockingStdout{head: strings.NewReader("not json\n"), ctx: ctx},
+			ctx:    ctx,
+		}
+	}
+	r := NewRunner(RunnerConfig{
+		SessionPath: filepath.Join(t.TempDir(), "session.json"),
+		HistoryPath: filepath.Join(t.TempDir(), "history.jsonl"),
+		BuildMCPConfig: func() (string, func(), error) {
+			return "/tmp/fake.json", func() {}, nil
+		},
+		NewCommand: factory,
+		// Deliberately far longer than the bound below: the failure this
+		// pins is the error frame arriving after the *query timeout*, so a
+		// short timeout here would hide it.
+		QueryTimeout: time.Minute,
+	})
+
+	events, err := r.Query(context.Background(), "prompt")
+	require.NoError(t, err)
+
+	got := make(chan []Event, 1)
+	go func() { got <- drain(t, events) }()
+
+	select {
+	case evs := <-got:
+		require.NotEmpty(t, evs)
+		last := evs[len(evs)-1]
+		assert.Equal(t, EventError, last.Type)
+		assert.Contains(t, last.Err, "malformed stream-json output")
+	case <-time.After(2 * time.Second):
+		t.Fatal("the malformed-line error frame did not reach the client promptly — " +
+			"the remaining output was drained before the query context was canceled")
+	}
+
+	// The busy flag is released on the same goroutine that closes the event
+	// channel, so a second query being accepted here proves it was not held
+	// for the query timeout either.
+	second, err := r.Query(context.Background(), "second")
+	require.NoError(t, err)
+	drain(t, second)
+}
+
 func TestRunnerRejectsSecondQueryWhileBusy(t *testing.T) {
 	pr, pw := io.Pipe()
 	factory := func(_ context.Context, _, _ string, _ ...string) cmdRunner {
@@ -684,9 +763,10 @@ func TestRunnerDefaultsQueryTimeoutWhenUnconfigured(t *testing.T) {
 }
 
 // errThenMoreReader emits `before` with nil errors, then `sentinel`, then
-// (only if Read is called again — proving the caller kept draining) `after`
-// followed by io.EOF. Used to test that streamOutput's scanner.Err() path
-// keeps reading stdout to completion rather than abandoning it mid-stream.
+// (only if Read is called again — proving someone kept draining) `after`
+// followed by io.EOF. Used to test that the scanner.Err() path still reads
+// stdout to completion rather than abandoning it mid-stream, and where that
+// draining now happens.
 type errThenMoreReader struct {
 	before      []byte
 	sentinel    error
@@ -721,16 +801,23 @@ func (r *errThenMoreReader) Read(p []byte) (int, error) {
 
 func (r *errThenMoreReader) Close() error { return nil }
 
-func TestRunnerStreamOutputDrainsRemainingOutputAfterScannerError(t *testing.T) {
-	reader := &errThenMoreReader{
-		before:   []byte(`{"type":"system","subtype":"init","session_id":"sess-1"}` + "\n"),
-		sentinel: errors.New("boom"),
-		after:    []byte("leftover buffered subprocess output"),
+func TestRunnerDrainsRemainingOutputAfterAScannerErrorOutsideStreamOutput(t *testing.T) {
+	newReader := func() *errThenMoreReader {
+		return &errThenMoreReader{
+			before:   []byte(`{"type":"system","subtype":"init","session_id":"sess-1"}` + "\n"),
+			sentinel: errors.New("boom"),
+			after:    []byte("leftover buffered subprocess output"),
+		}
 	}
-	r := NewRunner(RunnerConfig{})
-	events := make(chan Event, 8)
 
-	entries, sessionID, streamErr := r.streamOutput(reader, events)
+	// streamOutput stops at the error and leaves the rest of stdout unread.
+	// It used to drain it in a defer, which runs before the caller resumes
+	// and therefore before run()'s cancel() — see
+	// TestRunnerMalformedStreamJSONDoesNotWaitOnASubprocessThatStopsWritingWithoutExiting
+	// for what that ordering cost.
+	unread := newReader()
+	events := make(chan Event, 8)
+	entries, sessionID, streamErr := NewRunner(RunnerConfig{}).streamOutput(unread, events)
 	close(events)
 
 	// Returned, not emitted: finishAfterStream owns every terminal event, so
@@ -740,9 +827,9 @@ func TestRunnerStreamOutputDrainsRemainingOutputAfterScannerError(t *testing.T) 
 	assert.Contains(t, streamErr.Error(), "boom")
 	assert.Equal(t, "sess-1", sessionID)
 	require.Len(t, entries, 1)
-	assert.True(t, reader.afterServed,
-		"streamOutput must keep reading stdout after a scanner error (not just a malformed-JSON error), "+
-			"or a subprocess still writing to the pipe could block cmd.Wait() forever")
+	assert.False(t, unread.afterServed,
+		"streamOutput must leave the remaining output to its caller, which drains it only after "+
+			"canceling the subprocess")
 
 	var got []Event
 	for ev := range events {
@@ -750,6 +837,20 @@ func TestRunnerStreamOutputDrainsRemainingOutputAfterScannerError(t *testing.T) 
 	}
 	require.Len(t, got, 1, "only the parsed line; the failure travels as the returned error")
 	assert.Equal(t, EventLine, got[0].Type)
+
+	// run() is where the draining happens, so a subprocess still writing
+	// into the pipe can never block cmd.Wait() forever.
+	drained := newReader()
+	r, _, _ := newTestRunner(t, func(_ context.Context, _, _ string, _ ...string) cmdRunner {
+		return &fakeCmd{stdout: drained}
+	})
+	queryEvents, err := r.Query(context.Background(), "prompt")
+	require.NoError(t, err)
+	drain(t, queryEvents)
+
+	assert.True(t, drained.afterServed,
+		"a query must keep reading stdout after a scanner error (not just a malformed-JSON error), "+
+			"or a subprocess still writing to the pipe could block cmd.Wait() forever")
 }
 
 func indexOf(haystack []string, needle string) int {
