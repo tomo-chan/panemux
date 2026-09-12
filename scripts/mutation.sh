@@ -44,6 +44,17 @@
 # that could not run must not look like a warning that found nothing, which is
 # the rule scripts/efficacy.sh and scripts/coverage_blocks.sh both state.
 #
+# THE SAME RULE, ONE MUTANT AT A TIME. gremlins reports six statuses. This
+# script acts on one of them — LIVED, a survivor — and enumerates three more it
+# deliberately says nothing about: KILLED (the good case), NOT COVERED (G4(d)
+# owns that defect and reports it better), NOT VIABLE (the mutant did not
+# compile, so no test could have noticed it behaving differently). Everything
+# else — SKIPPED, TIMED OUT, and any status a later gremlins invents — is
+# reported as UNDECIDED, carrying the status that produced it, and counted in
+# the headline. It used to be the other way round, with a catch-all arm
+# silently dropping every status this script did not name, which let a run
+# whose mutants all timed out print "no surviving mutants".
+#
 # Usage:
 #   make mutation                                # report against origin/main
 #   MUTATION_BASE=origin/develop make mutation
@@ -108,7 +119,11 @@ while [ $# -gt 0 ]; do
 		shift 2
 		;;
 	-h | --help)
-		sed -n '2,80p' "$0" | sed 's/^#\{1,2\} \{0,1\}//'
+		# The header, however long it is. A hand-counted line range was
+		# silently wrong the moment the header grew — it had already fallen
+		# behind once, printing `set -u` as documentation.
+		awk 'NR > 1 && /^#/ { print; next } NR > 1 { exit }' "$0" |
+			sed 's/^#\{1,2\} \{0,1\}//'
 		exit 0
 		;;
 	*)
@@ -294,7 +309,11 @@ touched_lines() {
 
 : > "$tmp/findings"
 : > "$tmp/exempt"
-: > "$tmp/unanalysed"
+: > "$tmp/undecided"
+# Every mutant that survived the diff filter, whatever its status. It is the
+# denominator the counts below are reported against: "2 undecided" says nothing
+# about whether the run was mostly useless or almost complete.
+scoped_count=0
 bare_marker=0
 
 for f in $changed; do
@@ -321,19 +340,32 @@ for f in $changed; do
 		[ -n "$line" ] || continue
 		grep -qx -- "$line" "$tmp/touched" || continue
 
+		scoped_count=$((scoped_count + 1))
+
+		# THE ENUMERATION THAT HAS TO BE EXHAUSTIVE IS THE SILENCING ONE, and
+		# the catch-all used to be on the other arm. A status this script did
+		# not recognise fell through to `continue` and vanished — TIMED OUT and
+		# NOT VIABLE did exactly that, and so would any status a later gremlins
+		# invents. The default is now "nothing is known about this", which is
+		# the only honest thing to say about a verdict string nobody matched.
 		case $status in
 		LIVED) ;;
-		SKIPPED)
-			# gremlins decided this mutant was outside its own notion of the
-			# diff, but it is on a line this branch changed. Nothing ran it,
-			# so nothing can be claimed about it.
-			printf '%s%s%s%s%s\n' "$f" "$tab" "$line" "$tab" "$type" >> "$tmp/unanalysed"
+		KILLED | "NOT COVERED" | "NOT VIABLE")
+			# The three states this gate deliberately says nothing about, each
+			# for its own reason. KILLED is the good case. NOT COVERED belongs
+			# to G4(d), which fails on it with a clearer message; reporting it
+			# here too would have two gates arguing about one defect. NOT
+			# VIABLE means the mutant did not compile, so no test could ever
+			# have noticed it behaving differently — there is no hole in the
+			# suite and nothing for anyone to do.
 			continue
 			;;
 		*)
-			# KILLED is the good case. NOT COVERED belongs to G4(d), which
-			# fails on it with a clearer message; reporting it here too would
-			# have two gates arguing about one defect.
+			# SKIPPED (gremlins' own notion of the diff was narrower than this
+			# gate's), TIMED OUT (the suite never reached a verdict), and
+			# anything unrecognised. The status travels with the record so the
+			# list below can say which of those it was.
+			printf '%s%s%s%s%s%s%s\n' "$f" "$tab" "$line" "$tab" "$type" "$tab" "$status" >> "$tmp/undecided"
 			continue
 			;;
 		esac
@@ -383,10 +415,17 @@ done
 
 kept_count=$(wc -l < "$tmp/findings" | tr -d ' ')
 exempt_count=$(wc -l < "$tmp/exempt" | tr -d ' ')
-unanalysed_count=$(wc -l < "$tmp/unanalysed" | tr -d ' ')
+undecided_count=$(wc -l < "$tmp/undecided" | tr -d ' ')
 
 exempt_note=""
 [ "$exempt_count" -gt 0 ] && exempt_note=" ($exempt_count exempt)"
+
+# In the HEADLINE, not only in the section below it. "no surviving mutants on
+# lines this branch changed" is a true sentence about a run that decided nothing
+# and a false impression, and the headline is the line a reviewer reads — the
+# same rule the header states about a warning that could not run.
+undecided_note=""
+[ "$undecided_count" -gt 0 ] && undecided_note=", $undecided_count of $scoped_count mutant(s) undecided"
 
 # Listed, not counted. A count says an exemption happened; only the list says
 # WHICH, and an exemption a reviewer cannot see is one nobody reviewed. #188
@@ -398,29 +437,35 @@ exempt_list() {
 	awk -F"$tab" '{ printf "    %s:%s  %s\n", $1, $2, $3 }' "$tmp/exempt"
 }
 
-unanalysed_list() {
-	[ -s "$tmp/unanalysed" ] || return 0
+undecided_list() {
+	[ -s "$tmp/undecided" ] || return 0
 	echo
-	echo "  Not analysed — gremlins skipped these mutants although they sit on"
-	echo "  lines this branch changed, so nothing is known about them:"
-	awk -F"$tab" '{ printf "    %s:%s  %s\n", $1, $2, $3 }' "$tmp/unanalysed"
+	echo "  Undecided — these mutants sit on lines this branch changed and never"
+	echo "  reached a verdict, so nothing is known about them either way:"
+	awk -F"$tab" '{ printf "    %s:%s  %s  (%s)\n", $1, $2, $3, $4 }' "$tmp/undecided"
+	echo
+	echo "  SKIPPED means gremlins' own notion of the diff was narrower than this"
+	echo "  gate's. TIMED OUT means the suite never finished under the mutant —"
+	echo "  usually worker contention, and #180's measurement found timeouts"
+	echo "  hiding real survivors. Anything else is a status this gate does not"
+	echo "  recognise, which is itself worth looking at."
 }
 
 if [ "${MUTATION_EXEMPT:-0}" = "1" ]; then
-	echo "mutation: exempt — MUTATION_EXEMPT=1 waived $kept_count finding(s)$exempt_note."
+	echo "mutation: exempt — MUTATION_EXEMPT=1 waived $kept_count finding(s)$exempt_note$undecided_note."
 	exempt_list
-	unanalysed_list
+	undecided_list
 	exit 0
 fi
 
 if [ "$kept_count" -eq 0 ]; then
-	echo "mutation: no surviving mutants on lines this branch changed$exempt_note."
+	echo "mutation: no surviving mutants on lines this branch changed$exempt_note$undecided_note."
 	exempt_list
-	unanalysed_list
+	undecided_list
 	exit 0
 fi
 
-echo "mutation: $kept_count surviving mutant(s) on lines this branch changed$exempt_note."
+echo "mutation: $kept_count surviving mutant(s) on lines this branch changed$exempt_note$undecided_note."
 echo
 echo "  A surviving mutant is a change to your code that every test still"
 echo "  passes through. Either an assertion is missing, or the mutant is one"
@@ -429,7 +474,7 @@ echo "  fault injection to reach."
 echo
 awk -F"$tab" '{ printf "    %s:%s  %s\n", $1, $2, $3 }' "$tmp/findings"
 exempt_list
-unanalysed_list
+undecided_list
 
 if [ "$bare_marker" -eq 1 ]; then
 	echo

@@ -363,6 +363,25 @@ themselves fail is stage 4, and deliberately a separate change with its own evid
 environment variable to flip it early, since an unused switch is an invitation to enable it without
 the data that should decide it.
 
+**The same rule holds one mutant at a time, and the first version of the script did not apply it
+there.** gremlins reports six statuses, and `scripts/mutation.sh`
+matched `LIVED`, routed `SKIPPED` to an "unanalysed" list, and let a catch-all arm drop everything
+else — so a mutant whose suite never finished (`TIMED OUT`) and a mutant that did not compile
+(`NOT VIABLE`) both left no trace, and so would any status a later gremlins invents. `TIMED OUT` is
+the one that matters: it is not a near-miss, it is the status the pinned settings exist *because* of,
+and the same measurement that pinned them found timeouts hiding 51 survivors. A run reporting "no
+surviving mutants" while every mutant on the diff timed out was possible, and said nothing about the
+tests.
+
+The fix is which arm carries the catch-all. `KILLED`, `NOT COVERED` and `NOT VIABLE` are now
+enumerated as the statuses the gate deliberately says nothing about — each for a stated reason, and
+`NOT VIABLE` belongs there rather than among the unknowns, since a mutant that does not compile is
+not a hole in anyone's tests — and **everything else is reported as undecided, carrying the status
+string**, in the headline as well as in the list below it. "0 survivors" and "0 survivors, 12 of 12
+mutants undecided" are different results, and only the second one is honest about a run that decided
+nothing. Stage 4 inherits a question it did not have before: whether an undecided mutant on a changed
+line should fail, or whether the gate that measures nothing should merely say so louder.
+
 **Its settings are pinned, and that is not tuning.** With gremlins' defaults on this repository, 465
 of 1059 runnable mutants (44%) come back `TIMED OUT`. They are not infinite loops — they are worker
 contention — and they *hide survivors*: `internal/api` alone reports 0 survivors with the defaults and
@@ -481,7 +500,7 @@ Both are the same refusal to ship a gate that starts red (principle 4).
 | 3 | `.claude/settings.json` with G1/G2 hooks; a review subagent | G1, G6 | — | **Landed.** A `PostToolUse` hook checks the edited file, a `Stop` hook checks what the turn changed, and `.claude/agents/diff-reviewer.md` reviews a diff in a fresh context. `make test-hooks` tests the hooks themselves. |
 | 4 | red-check (`make efficacy`) in pull-request CI | G4(b) | — | **Landed.** `scripts/efficacy.sh` reverts the branch's implementation diff in a scratch worktree and requires each test the branch changed — Go function or vitest case — to pass at HEAD and then go red against the revert, one at a time. Exempted by the `efficacy-exempt` label. |
 | 5 | Core-feature section in `scenarios.md`, ledger cross-check, core E2E | G0, G5 | Phases 4 and 6 | **Landed.** Sections H (core multiplexer) and I (opening URLs from a pane, #177's missing rows) added; `make check-scenarios` resolves every `auto` row; `frontend/e2e/core-multiplexer.spec.ts` covers split, resize, layout restore and workspace CRUD. |
-| 6 | Diff-scoped mutation testing (warn first, gate once stable) | G4(c) | merges with #164 | **Warning landed.** `scripts/mutation.sh` runs gremlins scoped to the diff and names every mutant on a changed line that survives every test. Exits 0 on a finding — see D9. Making it fail is the remaining step. |
+| 6 | Diff-scoped mutation testing (warn first, gate once stable) | G4(c) | merges with #164 | **Warning landed.** `scripts/mutation.sh` runs gremlins scoped to the diff and names every mutant on a changed line that survives every test, plus every mutant that reached no verdict at all. Exits 0 on a finding — see D9. Making it fail is the remaining step. |
 | 7 | Performance and accessibility observation (measure only, do not gate) | — | — | **Landed.** `make bench` measures terminal throughput, replay-buffer cost and the relay's polling cost; `a11y.spec.ts` records axe violations. The performance half still only reports — its spreads are too wide for a threshold (see "First measurements"). The accessibility half now asserts: #194 froze the recorded counts as a ceiling, which is the step this row deferred until data existed. |
 | 8 | Per-block coverage on changed lines (#164, not a #180 item) | G4(d) | — | **Landed.** `scripts/coverage_blocks.sh` fails when a block covering a changed line never executed. It unblocked row 6's measurement, which is what row 6 was waiting on. |
 | 9 | Zod schema round-trips against real Go output (#191, closing G3(c)) | G3 | Phase 1 | **Landed.** `internal/server/contract_fixture_test.go` captures every response the dashboard parses, plus both WebSocket frame streams, into `testdata/api-contract/`; `frontend/src/schemas/contract.test.ts` parses each with the schema that owns it and requires the parsed value to equal the captured one, so a field Zod *strips* fails too. Decision D10 records why the fixtures are rewritten rather than diffed. |

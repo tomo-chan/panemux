@@ -18,11 +18,12 @@
 #      reported. The repository has 108 surviving mutants today (issue #180's
 #      measurement); a gate that named all of them would start red, and
 #      docs/quality-gateway.md principle 4 says what happens next.
-#   2. Reporting what gremlins SKIPPED on a changed line. `--diff` decides for
-#      itself which mutants to run, and if its notion of "changed" is narrower
-#      than the gate's, the survivors it never ran would be invisible — the
-#      gate would print "no survivors" about lines nothing analysed. A skipped
-#      mutant on a changed line is reported as unanalysed, not as passing.
+#   2. Reporting every mutant that reached no verdict on a changed line.
+#      `--diff` decides for itself which mutants to run, a mutant whose suite
+#      timed out was never judged, and a status this gate does not recognise
+#      tells it nothing at all. Counting any of those as "no survivor" states a
+#      result nothing measured, so each is reported as undecided — in the
+#      headline, not only in a section below it.
 #   3. Warning, not failing, on a survivor. Roadmap item 6 of #180 says stage 3
 #      starts as a warning, and the measurement says why: 34% of this
 #      repository's survivors are ones nobody should "fix" — buffer sizes and
@@ -119,12 +120,20 @@ run_checker() {
 	(cd "$rc_repo" && sh "$checker" "$@" 2>&1)
 }
 
-# findings_only <output> — the part of the report before the exempt list.
-# An exempt survivor is still PRINTED, under "Exempt by", so grepping the whole
-# output for its line number cannot tell "not reported as a finding" from
-# "reported". The section boundary is what carries that distinction.
+# findings_only <output> — the report down to the first trailing section.
+# A survivor that was waived, and a mutant that was never decided, are both
+# still PRINTED — under "Exempt by" and "Undecided" — so grepping the whole
+# output for a line number cannot tell "not reported as a finding" from
+# "reported". The section boundary is what carries that distinction, and BOTH
+# headers are boundaries: stopping only at "Exempt by" meant a report with no
+# exempt section returned everything, and every "is not a finding" assertion
+# against it passed for the wrong reason.
+#
+# awk rather than sed: the two-header form needs alternation, and BRE's `\|` is
+# a GNU extension that macOS's sed does not have — the portability class of bug
+# #233 fixed in scenarios_check.sh.
 findings_only() {
-	printf '%s\n' "$1" | sed -n '1,/Exempt by/p' | sed '$d'
+	printf '%s\n' "$1" | awk '/^  Exempt by/ || /^  Undecided/ { exit } { print }'
 }
 
 # ── 1. Diff scoping ───────────────────────────────────────────────────────────
@@ -183,7 +192,7 @@ else
 	pass "reports survivors on changed lines only, and warns rather than failing"
 fi
 
-# ── 2. A skipped mutant on a changed line is reported as unanalysed ───────────
+# ── 2. A skipped mutant on a changed line is reported as undecided ────────────
 #
 # The fail-open this closes: `gremlins --diff` decides for itself what changed.
 # If its answer is narrower than the gate's, the mutants it skipped were never
@@ -206,10 +215,14 @@ write_report "$repo/rep.json" '{"go_module":"example","files":[
  {"file_name":"pkg/new.go","mutations":[{"type":"CONDITIONALS_BOUNDARY","status":"SKIPPED","line":4,"column":5}]}]}'
 commit_on_branch "$repo" "add new.go"
 out=$(run_checker "$repo" --base main --report rep.json)
-if ! printf '%s' "$out" | grep -qi 'not analysed\|not analyzed'; then
-	fail "a SKIPPED mutant on a changed line is reported as unanalysed" "$out"
+if ! printf '%s' "$out" | grep -q 'Undecided'; then
+	fail "a SKIPPED mutant on a changed line is reported as undecided" "$out"
+elif ! printf '%s' "$out" | grep -q 'pkg/new.go:4'; then
+	fail "the undecided list names the mutant" "$out"
+elif ! printf '%s' "$out" | grep -q 'pkg/new.go:4.*SKIPPED'; then
+	fail "the undecided list says WHY THIS mutant has no verdict" "$out"
 else
-	pass "a SKIPPED mutant on a changed line is reported as unanalysed"
+	pass "a SKIPPED mutant on a changed line is reported as undecided"
 fi
 
 # ── 3. NOT COVERED is left to the per-block gate, not double-reported ─────────
@@ -604,6 +617,181 @@ if ! printf '%s' "$out" | grep -q '2 surviving'; then
 	fail "the summary counts surviving mutants" "$out"
 else
 	pass "the summary counts surviving mutants"
+fi
+
+# ── 17. TIMED OUT is undecided, not silently dropped ──────────────────────────
+#
+# The same fail-open case 2 closes for SKIPPED, in the status where it bites
+# hardest. A timed-out mutant was never given a verdict: the suite did not
+# finish, so nothing is known about whether it would have been caught. #180's
+# measurement is the evidence this is not hypothetical — with gremlins' default
+# settings 465 of 1059 runnable mutants on this repository came back TIMED OUT,
+# worker contention rather than infinite loops, and clearing them revealed 51
+# survivors the timed-out run had reported nothing about. The pinned settings
+# make that rare; they do not make it impossible, and a rare unknown reported as
+# a verdict is worse than a common one.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/new.go" <<'EOF'
+package pkg
+
+func New(n int) bool {
+	if n > 7 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/new.go","mutations":[{"type":"CONDITIONALS_BOUNDARY","status":"TIMED OUT","line":4,"column":5}]}]}'
+commit_on_branch "$repo" "add new.go"
+out=$(run_checker "$repo" --base main --report rep.json)
+rc=$?
+if [ "$rc" -ne 0 ]; then
+	fail "a TIMED OUT mutant still exits 0 at stage 3" "exit $rc: $out"
+elif ! printf '%s' "$out" | grep -q 'pkg/new.go:4'; then
+	fail "a TIMED OUT mutant on a changed line is reported at all" "$out"
+elif ! printf '%s' "$out" | grep -q 'pkg/new.go:4.*TIMED OUT'; then
+	fail "the undecided list says WHY THIS mutant has no verdict" "$out"
+elif printf '%s' "$(findings_only "$out")" | grep -q 'pkg/new.go:4'; then
+	fail "a TIMED OUT mutant is undecided, not claimed as a survivor" "$out"
+else
+	pass "a TIMED OUT mutant on a changed line is reported as undecided"
+fi
+
+# ── 18. NOT VIABLE is a verdict, and not this gate's business ─────────────────
+#
+# The complement of case 17, and the reason "report every status this script
+# does not act on" would be the wrong fix. A NOT VIABLE mutant did not compile,
+# so no test could ever have noticed it behaving differently — there is no hole
+# in the suite to report and nothing for a developer to do. Listing it would put
+# noise in the one section whose whole value is that everything in it is
+# genuinely unknown.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/new.go" <<'EOF'
+package pkg
+
+func New(n int) bool {
+	if n > 7 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/new.go","mutations":[{"type":"CONDITIONALS_BOUNDARY","status":"NOT VIABLE","line":4,"column":5}]}]}'
+commit_on_branch "$repo" "add new.go"
+out=$(run_checker "$repo" --base main --report rep.json)
+if ! printf '%s' "$out" | grep -q 'no surviving'; then
+	fail "a NOT VIABLE mutant leaves the gate reporting a clean branch" "$out"
+elif printf '%s' "$out" | grep -q 'pkg/new.go:4'; then
+	fail "a NOT VIABLE mutant is not reported as undecided" "$out"
+elif printf '%s' "$out" | grep -q 'undecided'; then
+	fail "a NOT VIABLE mutant does not make the branch look undecided" "$out"
+else
+	pass "a NOT VIABLE mutant is neither a survivor nor an unknown"
+fi
+
+# ── 19. A status this gate does not recognise is undecided ────────────────────
+#
+# The fail-open that outlives every status named in this file. gremlins may add
+# a status, or rename one, and the catch-all arm that used to swallow TIMED OUT
+# would swallow that one too — silently, since a status nobody matched simply
+# did not appear in the output. A gate cannot claim a mutant was killed by a
+# verdict string it has never seen.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/new.go" <<'EOF'
+package pkg
+
+func New(n int) bool {
+	if n > 7 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/new.go","mutations":[{"type":"CONDITIONALS_BOUNDARY","status":"ESCAPED IN A LATER RELEASE","line":4,"column":5}]}]}'
+commit_on_branch "$repo" "add new.go"
+out=$(run_checker "$repo" --base main --report rep.json)
+if ! printf '%s' "$out" | grep -q 'pkg/new.go:4'; then
+	fail "an unrecognised status is reported rather than silently dropped" "$out"
+elif ! printf '%s' "$out" | grep -q 'pkg/new.go:4.*ESCAPED IN A LATER RELEASE'; then
+	fail "an unrecognised status is quoted back, so a reader can act on it" "$out"
+else
+	pass "a status this gate does not recognise is reported as undecided"
+fi
+
+# ── 20. "Decided nothing" does not read as "found nothing" ────────────────────
+#
+# The headline is the line a reviewer reads; the sections below it are the line
+# they read next, if at all. "no surviving mutants on lines this branch changed"
+# is a true sentence about a run in which nothing was decided, and a false
+# impression. The count has to be in the headline itself.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/new.go" <<'EOF'
+package pkg
+
+func New(n, m int) bool {
+	if n > 7 {
+		return true
+	}
+	if m > 9 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/new.go","mutations":[
+   {"type":"CONDITIONALS_BOUNDARY","status":"TIMED OUT","line":4,"column":5},
+   {"type":"CONDITIONALS_NEGATION","status":"TIMED OUT","line":4,"column":5},
+   {"type":"CONDITIONALS_BOUNDARY","status":"KILLED","line":7,"column":5}]}]}'
+commit_on_branch "$repo" "add new.go"
+out=$(run_checker "$repo" --base main --report rep.json)
+headline=$(printf '%s\n' "$out" | head -1)
+if ! printf '%s' "$headline" | grep -q '2'; then
+	fail "the headline says how many mutants were left undecided" "$out"
+elif ! printf '%s' "$headline" | grep -q 'undecided'; then
+	fail "the headline calls them undecided, not merely counts them" "$out"
+elif ! printf '%s' "$headline" | grep -q '3'; then
+	fail "the headline gives the denominator, so 2 undecided has a scale" "$out"
+else
+	pass "the headline reports undecided mutants, not just the sections below it"
+fi
+
+# ── 21. --help prints the header, all of it and nothing else ─────────────────
+#
+# It used to print a hand-counted line range, which went stale the moment the
+# header grew: adding the paragraph case 17 documents pushed `set -u` into the
+# output as though it were documentation, and dropped nothing only by luck.
+# Both ends of the range are the assertion — a rule that prints too little is
+# the worse half, since nobody notices a missing paragraph.
+
+checks=$((checks + 1))
+out=$(sh "$checker" --help 2>&1)
+rc=$?
+if [ "$rc" -ne 0 ]; then
+	fail "--help exits 0" "exit $rc: $out"
+elif ! printf '%s' "$out" | grep -q 'Exit codes:'; then
+	fail "--help prints the header through its last line" "$out"
+elif ! printf '%s' "$out" | grep -q 'UNDECIDED'; then
+	fail "--help prints the middle of the header, not just its ends" "$out"
+elif printf '%s' "$out" | grep -q '^set -u'; then
+	fail "--help stops at the header and does not print the code" "$out"
+else
+	pass "--help prints the whole header and only the header"
 fi
 
 # ── Result ────────────────────────────────────────────────────────────────────
