@@ -18,6 +18,7 @@ import (
 
 	"panemux/internal/api"
 	"panemux/internal/board"
+	"panemux/internal/cachedir"
 	"panemux/internal/commandcenter"
 	"panemux/internal/config"
 	"panemux/internal/homedir"
@@ -92,19 +93,17 @@ const integrationToken = "integration-token"
 //     reading (or, for POST /api/ssh-config/hosts, writing) the developer's own
 //     files. It has to be set before New(), because api.NewHandler resolves
 //     sshconfig.DefaultPath() once at construction.
-//   - $HOME and XDG_CACHE_HOME point inside it too, and both are still needed
-//     even with the seam, because the directory at risk here is the *cache*
-//     directory, which os.UserCacheDir resolves without ever consulting
-//     os.UserHomeDir. Creating a local pane installs the browser shim there
-//     (see session.installLocalBrowserShim), so on a machine that exports
+//   - the cache-directory seam points inside it too, and it is a *second*
+//     seam because os.UserCacheDir never consults os.UserHomeDir. Creating a
+//     local pane installs the browser shim there (see
+//     session.installLocalBrowserShim), so on a machine that exports
 //     XDG_CACHE_HOME — a CI image, a desktop session — this suite wrote three
-//     real files into a directory the test never chose. XDG_CACHE_HOME alone
-//     does not cover it either: os.UserCacheDir ignores that variable on
-//     darwin and returns $HOME/Library/Caches, so dropping the $HOME override
-//     would put the shim in a Mac developer's real cache directory. The shape
-//     that would actually close this is promoting internal/session's own
-//     userCacheDirFn the way this package's homedir seam was promoted; until
-//     then both variables stay.
+//     real files into a directory the test never chose. This used to be held
+//     off with t.Setenv on both $HOME and XDG_CACHE_HOME, and needed both:
+//     os.UserCacheDir ignores XDG_CACHE_HOME on darwin and returns
+//     $HOME/Library/Caches, so dropping either one put the shim in a real
+//     cache directory on some platform. The seam decides the answer directly,
+//     so no environment variable is involved at all.
 //   - the config carries no file path, which makes config.write() a no-op, so
 //     the layout and workspace writes these routes perform stay in memory.
 func newAPIEnv(t *testing.T) *apiEnv {
@@ -112,8 +111,7 @@ func newAPIEnv(t *testing.T) *apiEnv {
 
 	home := t.TempDir()
 	homedir.SetForTest(t, home)
-	t.Setenv("HOME", home) // os.UserCacheDir reads $HOME directly on darwin
-	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
+	cachedir.SetForTest(t, filepath.Join(home, ".cache"))
 
 	cfg := testConfigWithToken(integrationToken)
 	mgr := session.NewManager()

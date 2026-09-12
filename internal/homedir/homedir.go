@@ -16,6 +16,11 @@
 // Callers must not name os.UserHomeDir directly; .golangci.yml's forbidigo
 // rule fails the build on any call outside this package, so the seam cannot
 // quietly stop being the single entry point.
+//
+// internal/cachedir is its sibling, for os.UserCacheDir — a separate package
+// because that is a separate global with its own platform behavior, and
+// because one merged package would have to be excused from both forbidigo
+// rules at once. See its own doc comment.
 package homedir
 
 import "os"
@@ -55,6 +60,17 @@ type TestingT interface {
 // directory. t.Setenv is in one way better here — it panics rather than
 // letting that happen. Substitute the seam only from tests that do not call
 // t.Parallel; no test in this repository does.
+//
+// That limitation is a recorded decision, not an open question (issue #227,
+// and DEVELOPMENT.md's testability rule, which must continue to agree with
+// this comment). Adding a mutex here was considered and rejected: it would
+// remove the data race without making the behavior correct, since restore
+// stays last-writer-wins and one test's Cleanup can still restore over
+// another's live substitution — the appearance of a guarantee rather than the
+// guarantee. The only shape that genuinely works under t.Parallel is per-test
+// injection with no package-level variable at all, which means changing
+// exported signatures across six packages; that is the route to take if a
+// concrete need for t.Parallel ever appears, rather than a lock here.
 func SetForTest(t TestingT, home string) {
 	t.Helper()
 	setForTest(t, func() (string, error) { return home, nil })

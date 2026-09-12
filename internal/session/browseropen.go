@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync/atomic"
+
+	"panemux/internal/cachedir"
 )
 
 // BrowserOpenOSCIdent is the private OSC identifier the browser shim uses to
@@ -82,12 +84,10 @@ func BrowserShimEnabled() bool {
 	return browserShimEnabled.Load()
 }
 
-var userCacheDirFn = os.UserCacheDir
-
 // installLocalBrowserShim writes the shim and its aliases into the user cache
 // directory and returns the directory holding them.
 func installLocalBrowserShim() (string, error) {
-	cacheDir, err := userCacheDirFn()
+	cacheDir, err := cachedir.Dir()
 	if err != nil {
 		return "", fmt.Errorf("resolving user cache directory: %w", err)
 	}

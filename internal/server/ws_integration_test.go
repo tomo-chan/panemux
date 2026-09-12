@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"panemux/internal/board"
+	"panemux/internal/cachedir"
 	"panemux/internal/commandcenter"
 	"panemux/internal/homedir"
 	"panemux/internal/session"
@@ -61,26 +62,27 @@ type wsEnv struct {
 // be nil, which is what command_center.enabled: false produces — see
 // setupCommandCenter in command_center.go.
 //
-// HOME and XDG_CACHE_HOME point into a temp directory for the same reason
-// newAPIEnv does it: nothing here may read or write the developer's own
-// files.
+// The home- and cache-directory seams point into a temp directory for the
+// same reason newAPIEnv does it: nothing here may read or write the
+// developer's own files.
 func newWSEnv(t *testing.T, runner *commandcenter.Runner) *wsEnv {
 	t.Helper()
 	return newWSEnvIn(t, t.TempDir(), runner)
 }
 
-// newWSEnvIn is newWSEnv with the HOME chosen by the caller. The contract
-// fixture for GET /api/board/command/history needs it: that route resolves
-// its file path from HOME at request time, so a second env pointing HOME
-// somewhere else would have the Runner writing one history file and the
-// route reading another — and would have captured an empty list while
-// looking like it had captured a real conversation.
+// newWSEnvIn is newWSEnv with the home directory chosen by the caller. The
+// contract fixture for GET /api/board/command/history needs it: that route
+// resolves its file path from the home directory at request time, so a second
+// env pointing it somewhere else would have the Runner writing one history
+// file and the route reading another — and would have captured an empty list
+// while looking like it had captured a real conversation.
 func newWSEnvIn(t *testing.T, home string, runner *commandcenter.Runner) *wsEnv {
 	t.Helper()
 
 	homedir.SetForTest(t, home)
-	t.Setenv("HOME", home) // os.UserCacheDir reads $HOME directly on darwin; see newAPIEnv
-	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
+	// A second seam, not a second spelling of the same one: os.UserCacheDir
+	// resolves without ever consulting os.UserHomeDir. See newAPIEnv.
+	cachedir.SetForTest(t, filepath.Join(home, ".cache"))
 
 	mgr := session.NewManager()
 	srv := New(testConfigWithToken(integrationToken), mgr, board.NewBoardCache(), nil, runner, emptyFS)
