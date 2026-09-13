@@ -761,35 +761,45 @@ write_report "$repo/rep.json" '{"go_module":"example","files":[
 commit_on_branch "$repo" "add new.go"
 out=$(run_checker "$repo" --base main --report rep.json)
 headline=$(printf '%s\n' "$out" | head -1)
-if ! printf '%s' "$headline" | grep -q '2'; then
-	fail "the headline says how many mutants were left undecided" "$out"
-elif ! printf '%s' "$headline" | grep -q 'undecided'; then
-	fail "the headline calls them undecided, not merely counts them" "$out"
-elif ! printf '%s' "$headline" | grep -q '3'; then
-	fail "the headline gives the denominator, so 2 undecided has a scale" "$out"
+# The phrasing, not the digits. `grep -q '2'` and `grep -q '3'` cannot tell the
+# numerator from the denominator, nor either from an unrelated number: a
+# regression that swapped the operands into "3 of 2 mutant(s) undecided", or
+# took the denominator from the wrong counter and wrote "23 of 3", passed all
+# three arms this replaces.
+if ! printf '%s' "$headline" | grep -q '2 of 3 mutant(s) undecided'; then
+	fail "the headline says how many mutants were undecided, of how many" "$out"
 else
 	pass "the headline reports undecided mutants, not just the sections below it"
 fi
 
 # ── 21. --help prints the header, all of it and nothing else ─────────────────
 #
-# It used to print a hand-counted line range, which went stale the moment the
-# header grew: adding the paragraph case 17 documents pushed `set -u` into the
-# output as though it were documentation, and dropped nothing only by luck.
-# Both ends of the range are the assertion — a rule that prints too little is
-# the worse half, since nobody notices a missing paragraph.
+# It used to print a hand-counted line range, and the range was exact for the
+# header it was written against — `124a64d`'s header ended at line 80 and the
+# range was `2,80p`. Growing the header is what breaks it, and it breaks in the
+# quiet direction: the range TRUNCATES. Against this branch's longer header the
+# old range stops mid-sentence in "PINNED GREMLINS SETTINGS", printing neither
+# `Exit codes:` nor any line of code.
+#
+# So the assertion is the LAST line, not the presence of a marker. It goes red
+# in both directions at once: a range that stops short ends on some other
+# sentence, and a range that overshoots ends on `set -u`. An earlier draft of
+# this case grepped for `^set -u` instead and claimed the stale range had
+# leaked it — neither the claim nor the assertion survived checking. The leak
+# had happened, but to a hand-count made WHILE writing this change, not to the
+# range in the repository.
 
 checks=$((checks + 1))
 out=$(sh "$checker" --help 2>&1)
 rc=$?
 if [ "$rc" -ne 0 ]; then
 	fail "--help exits 0" "exit $rc: $out"
-elif ! printf '%s' "$out" | grep -q 'Exit codes:'; then
-	fail "--help prints the header through its last line" "$out"
 elif ! printf '%s' "$out" | grep -q 'UNDECIDED'; then
 	fail "--help prints the middle of the header, not just its ends" "$out"
-elif printf '%s' "$out" | grep -q '^set -u'; then
-	fail "--help stops at the header and does not print the code" "$out"
+elif ! printf '%s\n' "$out" | grep -v '^[[:space:]]*$' | tail -1 | grep -q 'Exit codes:'; then
+	# The LAST line, because that one assertion carries both failure modes:
+	# stopping short ends on another sentence, overshooting ends on `set -u`.
+	fail "--help ends exactly at the header's last line" "$out"
 else
 	pass "--help prints the whole header and only the header"
 fi
