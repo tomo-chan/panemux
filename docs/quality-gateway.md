@@ -364,7 +364,8 @@ environment variable to flip it early, since an unused switch is an invitation t
 the data that should decide it.
 
 **The same rule holds one mutant at a time, and the first version of the script did not apply it
-there.** gremlins reports six statuses, and `scripts/mutation.sh`
+there.** gremlins defines seven statuses — `internal/mutator/mutator.go` lists
+NotCovered, Runnable, Skipped, Lived, Killed, NotViable and TimedOut — and `scripts/mutation.sh`
 matched `LIVED`, routed `SKIPPED` to an "unanalysed" list, and let a catch-all arm drop everything
 else — so a mutant whose suite never finished (`TIMED OUT`) and a mutant that did not compile
 (`NOT VIABLE`) both left no trace, and so would any status a later gremlins invents. `TIMED OUT` is
