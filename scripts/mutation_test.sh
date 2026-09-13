@@ -768,10 +768,13 @@ out=$(run_checker "$repo" --base main --report rep.json)
 headline=$(printf '%s\n' "$out" | head -1)
 # The phrasing, not the digits. `grep -q '2'` and `grep -q '3'` cannot tell the
 # numerator from the denominator, nor either from an unrelated number: a
-# regression that swapped the operands into "3 of 2 mutant(s) undecided", or
-# took the denominator from the wrong counter and wrote "23 of 3", passed all
-# three arms this replaces.
-if ! printf '%s' "$headline" | grep -q '2 of 3 mutant(s) undecided'; then
+# regression that swapped the operands, or took the denominator from the wrong
+# counter and wrote "23", passed the three arms this replaces.
+#
+# The denominator moved into the scope note in this change, so the two numbers
+# now sit in different clauses of the same sentence — which is why the whole
+# sentence is pinned rather than either half.
+if ! printf '%s' "$headline" | grep -q 'among 3 on lines this branch changed, 2 undecided'; then
 	fail "the headline says how many mutants were undecided, of how many" "$out"
 else
 	pass "the headline reports undecided mutants, not just the sections below it"
