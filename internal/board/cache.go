@@ -99,7 +99,7 @@ func (c *BoardCache) AppendMessage(r Row) {
 	// every input. TestBoardCache_AppendMessage_BoundedHistory_KeepsExactlyTheBound
 	// covers the boundary's behavior; the mutant on it is equivalent, not
 	// unkilled. Issue #190.
-	//mutation:exempt equivalent at the boundary — history[0:] is a no-op, so >= 0 cannot behave differently
+	//mutation:exempt[CONDITIONALS_BOUNDARY] equivalent — at overflow 0, history[0:] is a no-op
 	if overflow := len(c.history) - c.maxHistory; overflow > 0 {
 		c.history = c.history[overflow:]
 	}
