@@ -698,8 +698,17 @@ could otherwise hold the single-query busy flag for up to the full `QueryTimeout
 corresponding `{"type":"error",...}` frame is sent once the subprocess has been reaped, just after
 that cancellation rather than just before it — so that the frame ending the query is emitted from
 the one place that knows whether the history write succeeded, and can therefore carry its
-`warnings`. Nothing waits on that reordering: the cancellation, which is what releases the busy
-flag, still happens at the same moment.
+`warnings`.
+
+**The rest of the subprocess's output is drained only after that cancellation**, and this ordering is
+load-bearing rather than incidental. The remaining output has to be read — otherwise a subprocess
+still writing into a pipe no one reads can never exit, and `cmd.Wait()` never returns — but a drain
+placed *before* the cancellation blocks on `read(2)` against a process that has stopped writing
+without exiting, and nothing releases it until the `QueryTimeout` kills the process. That is the wait
+the cancellation exists to cut short, so a cancellation queued behind it cannot deliver what it
+promises: an earlier revision drained first, and both the busy flag and the client's error frame were
+subject to the full timeout. Ordered cancel-then-drain, neither is: the drain can only ever wait on a
+subprocess already being killed.
 
 **The persisted `--resume` session id is validated before every use, not only when this Runner itself
 wrote it.** `--resume`'s value is optional in the claude CLI's own argument parser, so a value

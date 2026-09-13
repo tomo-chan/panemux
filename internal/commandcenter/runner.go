@@ -286,16 +286,29 @@ func (r *Runner) run(ctx context.Context, prompt string, events chan<- Event) {
 	historyEntries = append(historyEntries, streamed...)
 
 	if streamErr != nil {
-		// Cancel now, before Wait(), rather than relying on the deferred
-		// cancel() at the top of this function: that one only fires once
-		// run() itself returns, which can't happen until Wait() returns —
-		// so without this, a subprocess that doesn't exit on its own after
-		// a malformed line would hold the busy flag (and this goroutine)
-		// for up to the full query timeout instead of being killed
-		// immediately. finishAfterStream reports streamErr once the
-		// subprocess is reaped.
+		// Cancel now, before the drain below and before Wait(), rather than
+		// relying on the deferred cancel() at the top of this function:
+		// that one only fires once run() itself returns, which can't happen
+		// until Wait() returns — so without this, a subprocess that doesn't
+		// exit on its own after a malformed line would hold the busy flag
+		// (and this goroutine) for up to the full query timeout instead of
+		// being killed immediately. finishAfterStream reports streamErr
+		// once the subprocess is reaped.
 		cancel()
 	}
+
+	// Drain whatever stdout still holds so the subprocess is never left
+	// blocked writing into a pipe no one reads, and every read completes
+	// before Wait() closes the pipe under it.
+	//
+	// This sits here rather than in a defer inside streamOutput because a
+	// deferred drain runs before the caller resumes, i.e. before the
+	// cancel() above: against a subprocess that stops writing but does not
+	// exit, it blocks on read(2) until the query timeout kills the process,
+	// so the cancellation meant to cut that wait short was itself queued
+	// behind it. Ordered this way the drain can only ever wait on a
+	// subprocess already being killed.
+	_, _ = io.Copy(io.Discard, stdout)
 
 	r.finishAfterStream(ctx, cmd, finishParams{
 		firstRun:       firstRun,
@@ -487,22 +500,20 @@ func (r *Runner) buildArgs(sessionID string, firstRun bool, mcpPath, prompt stri
 // streamOutput reads stdout line by line, emitting an EventLine per parsed
 // stream-json line and collecting HistoryEntry copies for persistence. It
 // stops at the first line that fails to parse as a JSON object or the first
-// underlying read error, and — via the deferred drain below, covering every
-// exit path uniformly — always drains any remaining output so the subprocess
-// is never left blocked writing into a pipe no one is reading. Wait() must
-// still be safe to call after this returns.
+// underlying read error, leaving the rest of stdout unread: draining it is
+// the caller's job, deliberately, because that drain has to happen after the
+// caller cancels the subprocess rather than before it (see run()).
 //
 // The failure is *returned* rather than emitted, which is what lets
 // finishAfterStream own every terminal event a turn produces. Emitting it
 // here left this one turn-ending frame outside that function, and therefore
 // unable to carry the warnings collected after it — see Event.Warnings. The
-// caller still cancels the subprocess the moment this returns non-nil, so the
-// busy flag is released just as promptly as before; only the frame is later.
+// caller cancels the subprocess the moment this returns non-nil and only then
+// drains, so neither the busy flag nor that frame waits on a subprocess that
+// has stopped writing without exiting.
 func (r *Runner) streamOutput(
 	stdout io.ReadCloser, events chan<- Event,
 ) (entries []HistoryEntry, sessionID string, streamErr error) {
-	defer func() { _, _ = io.Copy(io.Discard, stdout) }()
-
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 	for scanner.Scan() {

@@ -46,6 +46,17 @@ linters:
             homedir.SetForTest / homedir.SetFailingForTest rather than
             t.Setenv("HOME", ...). See internal/homedir and DEVELOPMENT.md's
             testability rule.
+        # The cache directory is a second global, not a second spelling of the
+        # first: os.UserCacheDir never consults os.UserHomeDir, and reads
+        # XDG_CACHE_HOME on Unix but $HOME/Library/Caches on darwin. A test
+        # that gets that pair wrong writes real files into the developer's own
+        # cache directory on one platform while CI stays green (issue #226).
+        - pattern: ^os\.UserCacheDir$
+          msg: >-
+            call cachedir.Dir() instead, and substitute it in tests with
+            cachedir.SetForTest / cachedir.SetFailingForTest rather than
+            t.Setenv("XDG_CACHE_HOME", ...) / t.Setenv("HOME", ...). See
+            internal/cachedir and DEVELOPMENT.md's testability rule.
     govet:
       enable:
         - fieldalignment
@@ -86,11 +97,6 @@ linters:
       - legacy
       - std-error-handling
     rules:
-      # internal/homedir is the seam itself: it is the one place that is
-      # supposed to name os.UserHomeDir.
-      - path: internal/homedir/
-        linters:
-          - forbidigo
       # internal/fileops' Spy is a test double: it has to report the error it
       # was handed, and the real os error otherwise, exactly as it is. Wrapping
       # either would break errors.Is against the sentinel a test injected, which

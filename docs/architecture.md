@@ -163,6 +163,30 @@ linking it links the testing package.
 `.golangci.yml`'s `forbidigo` rule fails the build on `os.UserHomeDir` outside this package, which
 is what keeps "one seam" true rather than aspirational.
 
+**What it does not buy: safety under `t.Parallel`.** `dirFn` is one unsynchronized package variable,
+so two parallel tests substituting it race and the loser silently reads the other's home directory —
+where `t.Setenv` panics instead. That is a recorded decision ([#227](https://github.com/tomo-chan/panemux/issues/227)):
+a mutex would remove the race without making restore correct (still last-writer-wins across parallel
+tests), and the only shape that genuinely works is per-test injection with no global, which means
+changing exported signatures across six packages. The suite has no `t.Parallel` calls at all, so the
+cost is paid only if that changes.
+
+### `internal/cachedir`
+
+The same shape for `os.UserCacheDir`: `cachedir.Dir()`, `cachedir.SetForTest` /
+`cachedir.SetFailingForTest`, and a `forbidigo` rule keeping it single. `internal/session`'s
+browser-shim install (`installLocalBrowserShim`) is the production caller.
+
+It is a second package rather than a second function in `internal/homedir` because it is a second
+global, not a second spelling of the first. `os.UserCacheDir` never consults `os.UserHomeDir`: on
+non-darwin Unix it reads `$XDG_CACHE_HOME` and falls back to `$HOME/.cache`, while on darwin it reads
+`$HOME/Library/Caches` and ignores `XDG_CACHE_HOME` entirely — so the home seam cannot influence it,
+and `internal/server`'s integration helpers previously had to set *both* variables, with CI (Linux
+only) unable to catch the macOS half if one were dropped. Separate packages also keep each
+`forbidigo` exclusion to one function: a merged package would be excused from both rules, so a stray
+`os.UserHomeDir` inside the cache seam would stop being caught. The `t.Parallel` caveat above applies
+here identically.
+
 ### `internal/fileops`
 
 The write discipline every persisted file shares, and the seam onto the operations it is made of.

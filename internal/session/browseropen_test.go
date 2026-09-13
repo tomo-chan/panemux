@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"panemux/internal/cachedir"
 )
 
 // installShimForTest writes the shim script under dir/<name> so the test can
@@ -206,9 +208,7 @@ func TestBrowserShimExitsQuietlyWhenNoRealOpenerExists(t *testing.T) {
 func withShimCacheDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	prev := userCacheDirFn
-	userCacheDirFn = func() (string, error) { return dir, nil }
-	t.Cleanup(func() { userCacheDirFn = prev })
+	cachedir.SetForTest(t, dir)
 	return dir
 }
 
@@ -333,9 +333,7 @@ func TestNewLocalWithoutTheBrowserShim(t *testing.T) {
 
 func TestNewLocalStartsEvenWhenTheShimCannotBeInstalled(t *testing.T) {
 	withBrowserShimEnabled(t, true)
-	prev := userCacheDirFn
-	userCacheDirFn = func() (string, error) { return "", os.ErrPermission }
-	t.Cleanup(func() { userCacheDirFn = prev })
+	cachedir.SetFailingForTest(t, os.ErrPermission)
 
 	sess, err := NewLocal("degraded-pane", "/bin/sh", "", "degraded")
 	if err != nil {
