@@ -363,6 +363,43 @@ themselves fail is stage 4, and deliberately a separate change with its own evid
 environment variable to flip it early, since an unused switch is an invitation to enable it without
 the data that should decide it.
 
+**The same rule holds one mutant at a time, and the first version of the script did not apply it
+there.** gremlins reports six statuses, and `scripts/mutation.sh`
+matched `LIVED`, routed `SKIPPED` to an "unanalysed" list, and let a catch-all arm drop everything
+else — so a mutant whose suite never finished (`TIMED OUT`) and a mutant that did not compile
+(`NOT VIABLE`) both left no trace, and so would any status a later gremlins invents. `TIMED OUT` is
+the one that matters: it is not a near-miss, it is the status the pinned settings exist *because* of,
+and the same measurement that pinned them found timeouts hiding 51 survivors. A run reporting "no
+surviving mutants" while every mutant on the diff timed out was possible, and said nothing about the
+tests.
+
+**The same conflation had one more level, and the numbers say why it matters.** `scripts/mutation.sh`
+printed "no surviving mutants on lines this branch changed" whether it had analysed fifty mutants or
+none — byte-identical output for "asked and got a clean answer" and "asked nothing". Measured on
+**#234**, the last substantial Go pull request before this was written: six non-test Go files, 35
+hunks, 317 changed lines. gremlins produced **128 mutants in those files and exactly 5 on a changed
+line**, all killed. Two of the six files (`internal/cachedir`, `internal/homedir`, 104 changed lines
+between them) produced **no mutants at all** — they are new packages of type declarations and thin
+wrappers, and gremlins mutates operator tokens in covered code. A third, `internal/commandcenter/runner.go`,
+holds 37 mutants and had **none** on its 27 changed lines.
+
+So the headline now carries the denominator (`no surviving mutants among 5 on lines this branch
+changed`), and a run with nothing on a changed line says **"nothing was measured"** in its own words,
+naming how many mutants the touched files held so that "the scope discarded everything" and "there
+was nothing to discard" stay distinguishable. **This is a stage-4 input as much as a readability
+fix: a gate that would rarely fire is not thereby a safe gate — it may be a gate that is usually
+saying nothing, and 5 questions per 317-line branch is the order of magnitude stage 4 has to decide
+against.**
+
+The fix is which arm carries the catch-all. `KILLED`, `NOT COVERED` and `NOT VIABLE` are now
+enumerated as the statuses the gate deliberately says nothing about — each for a stated reason, and
+`NOT VIABLE` belongs there rather than among the unknowns, since a mutant that does not compile is
+not a hole in anyone's tests — and **everything else is reported as undecided, carrying the status
+string**, in the headline as well as in the list below it. "0 survivors" and "0 survivors, 12 of 12
+mutants undecided" are different results, and only the second one is honest about a run that decided
+nothing. Stage 4 inherits a question it did not have before: whether an undecided mutant on a changed
+line should fail, or whether the gate that measures nothing should merely say so louder.
+
 **Its settings are pinned, and that is not tuning.** With gremlins' defaults on this repository, 465
 of 1059 runnable mutants (44%) come back `TIMED OUT`. They are not infinite loops — they are worker
 contention — and they *hide survivors*: `internal/api` alone reports 0 survivors with the defaults and
@@ -481,7 +518,7 @@ Both are the same refusal to ship a gate that starts red (principle 4).
 | 3 | `.claude/settings.json` with G1/G2 hooks; a review subagent | G1, G6 | — | **Landed.** A `PostToolUse` hook checks the edited file, a `Stop` hook checks what the turn changed, and `.claude/agents/diff-reviewer.md` reviews a diff in a fresh context. `make test-hooks` tests the hooks themselves. |
 | 4 | red-check (`make efficacy`) in pull-request CI | G4(b) | — | **Landed.** `scripts/efficacy.sh` reverts the branch's implementation diff in a scratch worktree and requires each test the branch changed — Go function or vitest case — to pass at HEAD and then go red against the revert, one at a time. Exempted by the `efficacy-exempt` label. |
 | 5 | Core-feature section in `scenarios.md`, ledger cross-check, core E2E | G0, G5 | Phases 4 and 6 | **Landed.** Sections H (core multiplexer) and I (opening URLs from a pane, #177's missing rows) added; `make check-scenarios` resolves every `auto` row; `frontend/e2e/core-multiplexer.spec.ts` covers split, resize, layout restore and workspace CRUD. |
-| 6 | Diff-scoped mutation testing (warn first, gate once stable) | G4(c) | merges with #164 | **Warning landed.** `scripts/mutation.sh` runs gremlins scoped to the diff and names every mutant on a changed line that survives every test. Exits 0 on a finding — see D9. Making it fail is the remaining step. |
+| 6 | Diff-scoped mutation testing (warn first, gate once stable) | G4(c) | merges with #164 | **Warning landed.** `scripts/mutation.sh` runs gremlins scoped to the diff and names every mutant on a changed line that survives every test, plus every mutant that reached no verdict at all. Exits 0 on a finding — see D9. Making it fail is the remaining step. |
 | 7 | Performance and accessibility observation (measure only, do not gate) | — | — | **Landed.** `make bench` measures terminal throughput, replay-buffer cost and the relay's polling cost; `a11y.spec.ts` records axe violations. The performance half still only reports — its spreads are too wide for a threshold (see "First measurements"). The accessibility half now asserts: #194 froze the recorded counts as a ceiling, which is the step this row deferred until data existed. |
 | 8 | Per-block coverage on changed lines (#164, not a #180 item) | G4(d) | — | **Landed.** `scripts/coverage_blocks.sh` fails when a block covering a changed line never executed. It unblocked row 6's measurement, which is what row 6 was waiting on. |
 | 9 | Zod schema round-trips against real Go output (#191, closing G3(c)) | G3 | Phase 1 | **Landed.** `internal/server/contract_fixture_test.go` captures every response the dashboard parses, plus both WebSocket frame streams, into `testdata/api-contract/`; `frontend/src/schemas/contract.test.ts` parses each with the schema that owns it and requires the parsed value to equal the captured one, so a field Zod *strips* fails too. Decision D10 records why the fixtures are rewritten rather than diffed. |
@@ -557,20 +594,30 @@ has a test (`TestRegistryEndConnNeverDrivesTheCounterNegative`) rather than an e
 that catches this class: *if the mutant were reachable, would anything be wrong?* — "equivalent"
 survives that question, "unreachable" does not.
 
-**One property of the marker itself, which the `Kind` column above makes easy to misread.**
-`scripts/mutation.sh` decides an exemption by file and line — it records the mutant `$type` for the
-report and never compares it — so a reason written about the boundary mutant waives *every* mutant
-gremlins produces on that line, `CONDITIONALS_NEGATION` included. The reason a reader sees and the
-set it actually covers are not the same set.
+**One property of the marker itself, which the `Kind` column above made easy to misread — now
+fixed.** `scripts/mutation.sh` used to decide an exemption by file and line, recording the mutant
+`$type` for the report and never comparing it, so a reason written about the boundary mutant waived
+*every* mutant gremlins produced on that line, `CONDITIONALS_NEGATION` included. The reason a reader
+saw and the set it actually covered were not the same set.
 
-Measured on the five sites above, nothing is currently hidden by that: each one's negation mutant is
-killed by the suite independently, so the waiver covers only mutants that were dying anyway. The
-`endConn` line is the useful data point rather than a counterexample — its negation mutant (`<= 0`)
-was killed by the existing suite the whole time; what survived under the waiver was exactly the
-boundary mutant the reason was written for. So the gap is structural, not yet load-bearing. It
-matters most for stage 4, when a survivor becomes a failure: a line-scoped waiver applied to a real
-finding of a different kind would then be the difference between a red gate and a green one, with
-nothing in the diff to show for it.
+Nothing was hidden by it, and that is measured rather than assumed. Running gremlins over
+`internal/board` and `internal/session` names every mutant on each of the eleven marked lines: all
+eleven carry a `CONDITIONALS_NEGATION` as well, three also carry `ARITHMETIC_BASE`, three
+`INVERT_NEGATIVES` — **27 mutants across 11 lines, of which exactly the 11 `CONDITIONALS_BOUNDARY`
+ones survive**. Every waiver covered only mutants that were dying anyway. The `endConn` line is the
+useful data point rather than a counterexample: its negation mutant (`<= 0`) was killed by the
+existing suite the whole time, and what survived under the waiver was exactly the boundary mutant the
+reason was written for.
+
+So the gap was structural rather than live, and it mattered most for stage 4, when a survivor becomes
+a failure: a line-scoped waiver applied to a real finding of a different kind would then be the
+difference between a red gate and a green one, with nothing in the diff to show for it. **The marker
+now names the type it waives** — `//mutation:exempt[CONDITIONALS_BOUNDARY] <reason>`, with a
+comma-separated list for several and `[*]` for a deliberate, labelled line-wide waiver. An untyped
+marker exempts nothing, on the same grounds as a reasonless one; the eleven above were rewritten in
+the change that introduced it, each to the type the measurement above says it was always about. When
+a marker is present and a mutant of another type survives, the finding names the type the marker
+does claim, so the mismatch is on the screen instead of being silently absorbed.
 
 This is the first real evidence for how much of G4(c)'s noise is irreducible rather than fixable,
 which is what item 6's fourth stage — whether to make `make mutation` fail — needs before it can be

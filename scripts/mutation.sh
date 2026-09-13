@@ -44,6 +44,17 @@
 # that could not run must not look like a warning that found nothing, which is
 # the rule scripts/efficacy.sh and scripts/coverage_blocks.sh both state.
 #
+# THE SAME RULE, ONE MUTANT AT A TIME. gremlins reports six statuses. This
+# script acts on one of them — LIVED, a survivor — and enumerates three more it
+# deliberately says nothing about: KILLED (the good case), NOT COVERED (G4(d)
+# owns that defect and reports it better), NOT VIABLE (the mutant did not
+# compile, so no test could have noticed it behaving differently). Everything
+# else — SKIPPED, TIMED OUT, and any status a later gremlins invents — is
+# reported as UNDECIDED, carrying the status that produced it, and counted in
+# the headline. It used to be the other way round, with a catch-all arm
+# silently dropping every status this script did not name, which let a run
+# whose mutants all timed out print "no surviving mutants".
+#
 # Usage:
 #   make mutation                                # report against origin/main
 #   MUTATION_BASE=origin/develop make mutation
@@ -72,9 +83,18 @@
 # over half of what it claims to measure.
 #
 # Escape hatches, narrow before broad, matching //coverage:exempt:
-#   //mutation:exempt <reason>   on the mutated line, or the line directly
-#                                above it. A reason is required — a bare marker
-#                                exempts nothing.
+#   //mutation:exempt[<TYPE>] <reason>
+#                                on the mutated line, or the line directly above
+#                                it. <TYPE> is gremlins' mutant type, the third
+#                                column of this script's own output, and the
+#                                waiver covers THAT TYPE ONLY. A comma-separated
+#                                list names several; [*] waives every mutant on
+#                                the line, which is a claim about mutants nobody
+#                                has looked at and is labelled as such in the
+#                                report. A reason is required, and an untyped
+#                                marker exempts nothing — both for the same
+#                                reason, that a waiver nobody stated the scope
+#                                or the grounds of is one nobody reviewed.
 #   MUTATION_EXEMPT=1            the whole branch, from the CI label.
 #
 # Exit codes: 0 = ran (whether or not survivors were found); 1 = could not run.
@@ -108,7 +128,13 @@ while [ $# -gt 0 ]; do
 		shift 2
 		;;
 	-h | --help)
-		sed -n '2,80p' "$0" | sed 's/^#\{1,2\} \{0,1\}//'
+		# The header, however long it is. A hand-counted line range goes
+		# stale the moment the header grows, and it fails in the quiet
+		# direction: it TRUNCATES, dropping whole paragraphs with nothing
+		# in the output to say so. Simulated against this header, the old
+		# `2,80p` stops mid-sentence in "PINNED GREMLINS SETTINGS".
+		awk 'NR > 1 && /^#/ { print; next } NR > 1 { exit }' "$0" |
+			sed 's/^#\{1,2\} \{0,1\}//'
 		exit 0
 		;;
 	*)
@@ -294,46 +320,86 @@ touched_lines() {
 
 : > "$tmp/findings"
 : > "$tmp/exempt"
-: > "$tmp/unanalysed"
+: > "$tmp/undecided"
+# Every mutant that survived the diff filter, whatever its status. It is the
+# denominator the counts below are reported against: "2 undecided" says nothing
+# about whether the run was mostly useless or almost complete.
+scoped_count=0
+# What the line filter discarded. On #234 — six non-test Go files, 35 hunks —
+# gremlins produced 128 mutants in the touched files and exactly 5 sat on a
+# changed line. Without this number a scoped_count of 0 is unreadable: it could
+# mean the files held nothing to mutate, or that the scope threw everything
+# away, and those call for different reactions.
+file_mutant_count=0
 bare_marker=0
+untyped_marker=0
+malformed_marker=0
 
 for f in $changed; do
-	touched_lines "$f" | sort -un > "$tmp/touched"
-	[ -s "$tmp/touched" ] || continue
-
 	# Both spellings of the path. gremlins reports repository-relative paths;
 	# `<module>/<path>` is what coverage.out uses, and accepting it costs one
 	# comparison. Guessing wrong would leave every finding unmatched, which is
 	# this check reporting green.
 	# Tab-separated on the way out as well as in. gremlins' statuses include
-	# "NOT COVERED", which has a space in it: with awk's default OFS the reader
-	# below would split it into status="NOT" and fold "COVERED" into the type.
-	# Today that lands in the same branch either way, so nothing visibly breaks
-	# — which is precisely why it would have survived until a status this gate
-	# does act on gained a space.
+	# "NOT COVERED", which has a space in it: under whitespace separation the
+	# reader below splits it into status="NOT" and folds "COVERED" into the
+	# type.
+	#
+	# THE STAKE ROSE WITH THE CATCH-ALL. This note used to say the hazard was
+	# invisible — every status the script did not name fell into the same
+	# `continue`, so a split "NOT" behaved exactly like "NOT COVERED". That is
+	# no longer true. The default arm now REPORTS, so a split "NOT" matches
+	# nothing, lands in the undecided list, and every NOT COVERED and NOT
+	# VIABLE mutant is announced as an unknown — loudly, immediately and
+	# wrongly. Confirmed by perturbation: dropping the reader's `IFS="$tab"`
+	# alone fails four cases. The separator went from load-bearing and silent
+	# to load-bearing and loud.
 	MOD="$module" FILE="$f" awk -F"$tab" -v OFS="$tab" '
 		BEGIN { mod = ENVIRON["MOD"]; file = ENVIRON["FILE"]; alt = (mod == "") ? "" : mod "/" file }
 		$1 == file || (alt != "" && $1 == alt) { print $2, $3, $4 }
 	' "$tmp/mutations" > "$tmp/file_mutations"
+	file_mutant_count=$((file_mutant_count + $(wc -l < "$tmp/file_mutations" | tr -d ' ')))
 	[ -s "$tmp/file_mutations" ] || continue
+
+	# AFTER the file-level count, not before it. `touched_lines` reports the
+	# lines a diff ADDS, so a file this branch only deleted from has an empty
+	# set — and with the skip ahead of the counter, such a file contributed
+	# nothing to "what the touched files held". A zero-scope run then claimed
+	# there were no mutants anywhere in those files about a file that still
+	# holds them, which is the one sentence this counter exists to get right.
+	touched_lines "$f" | sort -un > "$tmp/touched"
+	[ -s "$tmp/touched" ] || continue
 
 	while IFS="$tab" read -r line status type; do
 		[ -n "$line" ] || continue
 		grep -qx -- "$line" "$tmp/touched" || continue
 
+		scoped_count=$((scoped_count + 1))
+
+		# THE ENUMERATION THAT HAS TO BE EXHAUSTIVE IS THE SILENCING ONE, and
+		# the catch-all used to be on the other arm. A status this script did
+		# not recognise fell through to `continue` and vanished — TIMED OUT and
+		# NOT VIABLE did exactly that, and so would any status a later gremlins
+		# invents. The default is now "nothing is known about this", which is
+		# the only honest thing to say about a verdict string nobody matched.
 		case $status in
 		LIVED) ;;
-		SKIPPED)
-			# gremlins decided this mutant was outside its own notion of the
-			# diff, but it is on a line this branch changed. Nothing ran it,
-			# so nothing can be claimed about it.
-			printf '%s%s%s%s%s\n' "$f" "$tab" "$line" "$tab" "$type" >> "$tmp/unanalysed"
+		KILLED | "NOT COVERED" | "NOT VIABLE")
+			# The three states this gate deliberately says nothing about, each
+			# for its own reason. KILLED is the good case. NOT COVERED belongs
+			# to G4(d), which fails on it with a clearer message; reporting it
+			# here too would have two gates arguing about one defect. NOT
+			# VIABLE means the mutant did not compile, so no test could ever
+			# have noticed it behaving differently — there is no hole in the
+			# suite and nothing for anyone to do.
 			continue
 			;;
 		*)
-			# KILLED is the good case. NOT COVERED belongs to G4(d), which
-			# fails on it with a clearer message; reporting it here too would
-			# have two gates arguing about one defect.
+			# SKIPPED (gremlins' own notion of the diff was narrower than this
+			# gate's), TIMED OUT (the suite never reached a verdict), and
+			# anything unrecognised. The status travels with the record so the
+			# list below can say which of those it was.
+			printf '%s%s%s%s%s%s%s\n' "$f" "$tab" "$line" "$tab" "$type" "$tab" "$status" >> "$tmp/undecided"
 			continue
 			;;
 		esac
@@ -362,20 +428,95 @@ $above" ;;
 			;;
 		esac
 
-		case $window in
-		*//mutation:exempt*)
-			# A reason is required. An exemption nobody has to justify is how
-			# an exemption stops being reviewable — the rule //coverage:exempt
-			# states and this one inherits.
-			if printf '%s\n' "$window" | grep -Eq '//mutation:exempt[[:space:]]+[^[:space:]]'; then
-				printf '%s%s%s%s%s\n' "$f" "$tab" "$line" "$tab" "$type" >> "$tmp/exempt"
-			else
-				bare_marker=1
-				printf '%s%s%s%s%s\n' "$f" "$tab" "$line" "$tab" "$type" >> "$tmp/findings"
-			fi
+		# THE MARKER WAIVES A MUTANT TYPE, NOT A LINE. It used to match on
+		# file and line alone and never look at $type, so a reason written
+		# about the boundary mutant waived every other mutant gremlins produced
+		# on that line — #180's judgement note 3, and measured: all eleven
+		# markers in this repository sit on a line carrying one to three
+		# further types. None of them was hiding a survivor, so the gap was
+		# structural rather than live; at stage 4, where a survivor becomes a
+		# failure, it is the difference between a red gate and a green one with
+		# nothing in the diff to show for it.
+		#
+		# Prints one verdict word, and for a mismatch the types the line's
+		# markers DO name, so the finding can say what is there.
+		verdict=$(printf '%s\n' "$window" | MUTANT_TYPE="$type" awk -v OFS="$tab" '
+			BEGIN { want = ENVIRON["MUTANT_TYPE"]; tag = "//mutation:exempt"; taglen = length(tag) }
+			{
+				rest = $0
+				while ((i = index(rest, tag)) > 0) {
+					rest = substr(rest, i + taglen)
+					spec = ""
+					if (substr(rest, 1, 1) == "[") {
+						j = index(rest, "]")
+						if (j == 0) { malformed = 1; continue }
+						spec = substr(rest, 2, j - 2)
+						rest = substr(rest, j + 1)
+					}
+					# A second marker on the same line is not this one\047s reason.
+					reason = rest
+					k = index(reason, tag)
+					if (k > 0) reason = substr(reason, 1, k - 1)
+					sub(/^[ \t]+/, "", reason)
+					sub(/[ \t]+$/, "", reason)
+					if (reason == "") { bare = 1; continue }
+					if (spec == "") { untyped = 1; continue }
+					n = split(spec, types, ",")
+					for (t = 1; t <= n; t++) {
+						one = types[t]
+						gsub(/[ \t]/, "", one)
+						# An empty entry (a trailing comma) must match
+						# nothing, and a mutant whose report carried no type
+						# must be matchable by nothing but [*]. Without both
+						# guards the two empties meet and the marker waives a
+						# mutant nobody wrote a word about.
+						if (one == "") continue
+						if (one == "*") wildcard = 1
+						else if (want != "" && one == want) matched = 1
+						else claimed = claimed (claimed == "" ? "" : ", ") one
+					}
+				}
+			}
+			END {
+				if (matched) print "exempt"
+				else if (wildcard) print "wildcard"
+				else if (bare) print "bare"
+				else if (untyped) print "untyped"
+				else if (malformed) print "malformed"
+				else if (claimed != "") print "mismatch", claimed
+				else print "none"
+			}
+		')
+		claimed=""
+		case $verdict in
+		mismatch*)
+			claimed=${verdict#*"$tab"}
+			verdict=mismatch
+			;;
+		esac
+
+		case $verdict in
+		exempt)
+			printf '%s%s%s%s%s%s\n' "$f" "$tab" "$line" "$tab" "$type" "$tab" >> "$tmp/exempt"
+			;;
+		wildcard)
+			# Labelled, because [*] is a claim about mutants nobody looked at.
+			# That is what the untyped marker used to do silently.
+			printf '%s%s%s%s%s%s%s\n' "$f" "$tab" "$line" "$tab" "$type" "$tab" "line-wide [*]" >> "$tmp/exempt"
 			;;
 		*)
-			printf '%s%s%s%s%s\n' "$f" "$tab" "$line" "$tab" "$type" >> "$tmp/findings"
+			note=""
+			case $verdict in
+			bare) bare_marker=1 ;;
+			untyped) untyped_marker=1 ;;
+			malformed) malformed_marker=1 ;;
+			mismatch)
+				# The one that used to be invisible. Naming what IS on the line
+				# turns "why is this still reported" into a one-line answer.
+				note="//mutation:exempt on this line names $claimed"
+				;;
+			esac
+			printf '%s%s%s%s%s%s%s\n' "$f" "$tab" "$line" "$tab" "$type" "$tab" "$note" >> "$tmp/findings"
 			;;
 		esac
 	done < "$tmp/file_mutations"
@@ -383,10 +524,24 @@ done
 
 kept_count=$(wc -l < "$tmp/findings" | tr -d ' ')
 exempt_count=$(wc -l < "$tmp/exempt" | tr -d ' ')
-unanalysed_count=$(wc -l < "$tmp/unanalysed" | tr -d ' ')
+undecided_count=$(wc -l < "$tmp/undecided" | tr -d ' ')
 
 exempt_note=""
 [ "$exempt_count" -gt 0 ] && exempt_note=" ($exempt_count exempt)"
+
+# In the HEADLINE, not only in the section below it. "no surviving mutants on
+# lines this branch changed" is a true sentence about a run that decided nothing
+# and a false impression, and the headline is the line a reviewer reads — the
+# same rule the header states about a warning that could not run.
+undecided_note=""
+[ "$undecided_count" -gt 0 ] && undecided_note=", $undecided_count undecided"
+
+# THE DENOMINATOR IS PART OF THE RESULT, not context for it. "no surviving
+# mutants" rests on five mutants or on fifty, and the sentence is identical
+# either way — which is the same conflation one level up from the one above.
+# Stage 4 cannot be decided without it: a gate that would rarely fire is not
+# thereby a safe gate, it is a gate that is often saying nothing.
+scope_note=" among $scoped_count on lines this branch changed"
 
 # Listed, not counted. A count says an exemption happened; only the list says
 # WHICH, and an exemption a reviewer cannot see is one nobody reviewed. #188
@@ -395,48 +550,94 @@ exempt_list() {
 	[ -s "$tmp/exempt" ] || return 0
 	echo
 	echo "  Exempt by //mutation:exempt:"
-	awk -F"$tab" '{ printf "    %s:%s  %s\n", $1, $2, $3 }' "$tmp/exempt"
+	awk -F"$tab" '{ if ($4 == "") printf "    %s:%s  %s\n", $1, $2, $3; else printf "    %s:%s  %s  — %s\n", $1, $2, $3, $4 }' "$tmp/exempt"
 }
 
-unanalysed_list() {
-	[ -s "$tmp/unanalysed" ] || return 0
+undecided_list() {
+	[ -s "$tmp/undecided" ] || return 0
 	echo
-	echo "  Not analysed — gremlins skipped these mutants although they sit on"
-	echo "  lines this branch changed, so nothing is known about them:"
-	awk -F"$tab" '{ printf "    %s:%s  %s\n", $1, $2, $3 }' "$tmp/unanalysed"
+	echo "  Undecided — these mutants sit on lines this branch changed and never"
+	echo "  reached a verdict, so nothing is known about them either way:"
+	awk -F"$tab" '{ printf "    %s:%s  %s  (%s)\n", $1, $2, $3, $4 }' "$tmp/undecided"
+	echo
+	echo "  SKIPPED means gremlins' own notion of the diff was narrower than this"
+	echo "  gate's. TIMED OUT means the suite never finished under the mutant —"
+	echo "  usually worker contention, and #180's measurement found timeouts"
+	echo "  hiding real survivors. Anything else is a status this gate does not"
+	echo "  recognise, which is itself worth looking at."
 }
+
+# A marker that waives nothing is worth a sentence saying so. Each of these
+# is silent unless one was actually seen, so a clean run stays clean.
+marker_notes() {
+	if [ "$bare_marker" -eq 1 ]; then
+		echo
+		echo "  Note: a //mutation:exempt with no reason after it exempts nothing."
+	fi
+	if [ "$untyped_marker" -eq 1 ]; then
+		echo
+		echo "  Note: a //mutation:exempt with no [<TYPE>] exempts nothing. The"
+		echo "  marker waives one mutant type, not a whole line — write"
+		echo "  //mutation:exempt[CONDITIONALS_BOUNDARY] <reason>, taking the type"
+		echo "  from the third column above, or [*] to waive the line knowingly."
+	fi
+	if [ "$malformed_marker" -eq 1 ]; then
+		echo
+		echo "  Note: a //mutation:exempt with an unclosed [ exempts nothing."
+	fi
+}
+
+# Nothing reached a verdict because there was nothing to reach one about. Not a
+# pass and not a failure: this gate asked no question, and has to say that
+# rather than borrow the wording of a branch whose mutants were all killed.
+if [ "$scoped_count" -eq 0 ]; then
+	echo "mutation: no mutants on the lines this branch changed — nothing was measured."
+	echo
+	if [ "$file_mutant_count" -gt 0 ]; then
+		echo "  gremlins produced $file_mutant_count mutant(s) in the files this branch touched, and"
+		echo "  none of them sits on a line the diff changed. That is what the line"
+		echo "  scope is for (decision D2) and what it costs: this run says nothing"
+		echo "  about whether the change is protected."
+	else
+		echo "  gremlins produced no mutants at all in the files this branch touched."
+		echo "  It mutates operator tokens in covered code, so a diff of type"
+		echo "  declarations, struct fields, plain returns or literals has nothing"
+		echo "  for it to change."
+	fi
+	marker_notes
+	exit 0
+fi
 
 if [ "${MUTATION_EXEMPT:-0}" = "1" ]; then
-	echo "mutation: exempt — MUTATION_EXEMPT=1 waived $kept_count finding(s)$exempt_note."
+	echo "mutation: exempt — MUTATION_EXEMPT=1 waived $kept_count finding(s)$scope_note$exempt_note$undecided_note."
 	exempt_list
-	unanalysed_list
+	undecided_list
 	exit 0
 fi
 
 if [ "$kept_count" -eq 0 ]; then
-	echo "mutation: no surviving mutants on lines this branch changed$exempt_note."
+	echo "mutation: no surviving mutants$scope_note$exempt_note$undecided_note."
 	exempt_list
-	unanalysed_list
+	undecided_list
+	marker_notes
 	exit 0
 fi
 
-echo "mutation: $kept_count surviving mutant(s) on lines this branch changed$exempt_note."
+echo "mutation: $kept_count surviving mutant(s)$scope_note$exempt_note$undecided_note."
 echo
 echo "  A surviving mutant is a change to your code that every test still"
 echo "  passes through. Either an assertion is missing, or the mutant is one"
 echo "  of the kinds worth waiving — a tuning constant, or a branch that needs"
 echo "  fault injection to reach."
 echo
-awk -F"$tab" '{ printf "    %s:%s  %s\n", $1, $2, $3 }' "$tmp/findings"
+awk -F"$tab" '{ if ($4 == "") printf "    %s:%s  %s\n", $1, $2, $3; else printf "    %s:%s  %s\n        %s\n", $1, $2, $3, $4 }' "$tmp/findings"
 exempt_list
-unanalysed_list
+undecided_list
 
-if [ "$bare_marker" -eq 1 ]; then
-	echo
-	echo "  Note: a //mutation:exempt with no reason after it exempts nothing."
-fi
+marker_notes
 
 echo
 echo "  This is a warning: it does not fail the build. Add the assertion, or"
-echo "  waive it with '//mutation:exempt <reason>' on the line or above it."
+echo "  waive the one mutant with '//mutation:exempt[<TYPE>] <reason>' on the"
+echo "  line or directly above it — <TYPE> is the third column above."
 exit 0

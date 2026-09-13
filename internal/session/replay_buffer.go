@@ -50,7 +50,7 @@ func (r *replayBuffer) append(chunk []byte) {
 	// A chunk at least as large as the window makes everything already retained
 	// unreachable, so there is nothing to preserve and no wrap to compute.
 	//
-	//mutation:exempt equivalent — at len(chunk) == limit the path below keeps chunk's own bytes too
+	//mutation:exempt[CONDITIONALS_BOUNDARY] equivalent — at len(chunk) == limit the path below keeps chunk's own bytes too
 	if len(chunk) >= r.limit {
 		r.reserve(r.limit)
 		copy(r.buf, chunk[len(chunk)-r.limit:])
@@ -60,7 +60,7 @@ func (r *replayBuffer) append(chunk []byte) {
 	}
 
 	want := r.size + len(chunk)
-	//mutation:exempt equivalent — at want == limit the clamp assigns the value want already has
+	//mutation:exempt[CONDITIONALS_BOUNDARY] equivalent — at want == limit the clamp assigns the value want already has
 	if want > r.limit {
 		want = r.limit
 	}
@@ -72,7 +72,7 @@ func (r *replayBuffer) append(chunk []byte) {
 	copy(r.buf, chunk[written:])
 
 	r.size += len(chunk)
-	//mutation:exempt equivalent — at overflow == 0 both branches leave start and size where they are
+	//mutation:exempt[CONDITIONALS_BOUNDARY] equivalent — at overflow == 0 both branches leave start and size alone
 	if overflow := r.size - len(r.buf); overflow > 0 {
 		r.start = (r.start + overflow) % len(r.buf)
 		r.size = len(r.buf)
@@ -92,7 +92,7 @@ func (r *replayBuffer) snapshot() []byte {
 	if r.size == 0 {
 		return nil
 	}
-	//mutation:exempt equivalent — at end == len(buf) the wrap path below appends buf[:0], so it returns the same bytes
+	//mutation:exempt[CONDITIONALS_BOUNDARY] equivalent — at end == len(buf) the wrap path appends buf[:0], the same bytes
 	if end := r.start + r.size; end <= len(r.buf) {
 		return append([]byte(nil), r.buf[r.start:end]...)
 	}
@@ -112,7 +112,7 @@ func (r *replayBuffer) reserve(n int) {
 	}
 
 	grown := len(r.buf)
-	//mutation:exempt equivalent — at grown == replayBufferInitialBytes the floor assigns the value grown already has
+	//mutation:exempt[CONDITIONALS_BOUNDARY] equivalent — at grown == replayBufferInitialBytes the floor is a no-op
 	if grown < replayBufferInitialBytes {
 		grown = replayBufferInitialBytes
 	}
@@ -123,11 +123,11 @@ func (r *replayBuffer) reserve(n int) {
 	// actually matters, that it stops at the limit, is asserted by
 	// TestReplayBuffer_CapacityNeverExceedsLimit. A test that pinned the exact
 	// doubling sequence would restate this loop rather than check anything.
-	//mutation:exempt growth policy — an extra doubling changes slack, not retained bytes, and the limit still caps it
+	//mutation:exempt[CONDITIONALS_BOUNDARY] growth policy — an extra doubling changes slack, not retained bytes
 	for grown < n {
 		grown *= 2
 	}
-	//mutation:exempt equivalent — at grown == limit the cap assigns the value grown already has
+	//mutation:exempt[CONDITIONALS_BOUNDARY] equivalent — at grown == limit the cap assigns the value grown already has
 	if grown > r.limit {
 		grown = r.limit
 	}

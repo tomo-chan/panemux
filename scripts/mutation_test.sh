@@ -18,11 +18,12 @@
 #      reported. The repository has 108 surviving mutants today (issue #180's
 #      measurement); a gate that named all of them would start red, and
 #      docs/quality-gateway.md principle 4 says what happens next.
-#   2. Reporting what gremlins SKIPPED on a changed line. `--diff` decides for
-#      itself which mutants to run, and if its notion of "changed" is narrower
-#      than the gate's, the survivors it never ran would be invisible — the
-#      gate would print "no survivors" about lines nothing analysed. A skipped
-#      mutant on a changed line is reported as unanalysed, not as passing.
+#   2. Reporting every mutant that reached no verdict on a changed line.
+#      `--diff` decides for itself which mutants to run, a mutant whose suite
+#      timed out was never judged, and a status this gate does not recognise
+#      tells it nothing at all. Counting any of those as "no survivor" states a
+#      result nothing measured, so each is reported as undecided — in the
+#      headline, not only in a section below it.
 #   3. Warning, not failing, on a survivor. Roadmap item 6 of #180 says stage 3
 #      starts as a warning, and the measurement says why: 34% of this
 #      repository's survivors are ones nobody should "fix" — buffer sizes and
@@ -119,12 +120,20 @@ run_checker() {
 	(cd "$rc_repo" && sh "$checker" "$@" 2>&1)
 }
 
-# findings_only <output> — the part of the report before the exempt list.
-# An exempt survivor is still PRINTED, under "Exempt by", so grepping the whole
-# output for its line number cannot tell "not reported as a finding" from
-# "reported". The section boundary is what carries that distinction.
+# findings_only <output> — the report down to the first trailing section.
+# A survivor that was waived, and a mutant that was never decided, are both
+# still PRINTED — under "Exempt by" and "Undecided" — so grepping the whole
+# output for a line number cannot tell "not reported as a finding" from
+# "reported". The section boundary is what carries that distinction, and BOTH
+# headers are boundaries: stopping only at "Exempt by" meant a report with no
+# exempt section returned everything, and every "is not a finding" assertion
+# against it passed for the wrong reason.
+#
+# awk rather than sed: the two-header form needs alternation, and BRE's `\|` is
+# a GNU extension that macOS's sed does not have — the portability class of bug
+# #233 fixed in scenarios_check.sh.
 findings_only() {
-	printf '%s\n' "$1" | sed -n '1,/Exempt by/p' | sed '$d'
+	printf '%s\n' "$1" | awk '/^  Exempt by/ || /^  Undecided/ { exit } { print }'
 }
 
 # ── 1. Diff scoping ───────────────────────────────────────────────────────────
@@ -183,7 +192,7 @@ else
 	pass "reports survivors on changed lines only, and warns rather than failing"
 fi
 
-# ── 2. A skipped mutant on a changed line is reported as unanalysed ───────────
+# ── 2. A skipped mutant on a changed line is reported as undecided ────────────
 #
 # The fail-open this closes: `gremlins --diff` decides for itself what changed.
 # If its answer is narrower than the gate's, the mutants it skipped were never
@@ -206,10 +215,14 @@ write_report "$repo/rep.json" '{"go_module":"example","files":[
  {"file_name":"pkg/new.go","mutations":[{"type":"CONDITIONALS_BOUNDARY","status":"SKIPPED","line":4,"column":5}]}]}'
 commit_on_branch "$repo" "add new.go"
 out=$(run_checker "$repo" --base main --report rep.json)
-if ! printf '%s' "$out" | grep -qi 'not analysed\|not analyzed'; then
-	fail "a SKIPPED mutant on a changed line is reported as unanalysed" "$out"
+if ! printf '%s' "$out" | grep -q 'Undecided'; then
+	fail "a SKIPPED mutant on a changed line is reported as undecided" "$out"
+elif ! printf '%s' "$out" | grep -q 'pkg/new.go:4'; then
+	fail "the undecided list names the mutant" "$out"
+elif ! printf '%s' "$out" | grep -q 'pkg/new.go:4.*SKIPPED'; then
+	fail "the undecided list says WHY THIS mutant has no verdict" "$out"
 else
-	pass "a SKIPPED mutant on a changed line is reported as unanalysed"
+	pass "a SKIPPED mutant on a changed line is reported as undecided"
 fi
 
 # ── 3. NOT COVERED is left to the per-block gate, not double-reported ─────────
@@ -254,7 +267,7 @@ cat > "$repo/pkg/new.go" <<'EOF'
 package pkg
 
 func New(n int) bool {
-	//mutation:exempt buffer size, a test pinning it would be a tautology
+	//mutation:exempt[CONDITIONALS_BOUNDARY] buffer size, a test pinning it would be a tautology
 	if n > 7 {
 		return true
 	}
@@ -304,8 +317,13 @@ out=$(run_checker "$repo" --base main --report rep.json)
 # honoured the reasonless marker would still print the line, under "Exempt by".
 if ! printf '%s' "$(findings_only "$out")" | grep -q 'pkg/new.go:5'; then
 	fail "a bare //mutation:exempt exempts nothing" "$out"
-elif ! printf '%s' "$out" | grep -q 'exempts nothing'; then
-	fail "a bare //mutation:exempt is called out, not silently ignored" "$out"
+elif ! printf '%s' "$out" | grep -q 'no reason after it exempts nothing'; then
+	# The REASON note, specifically. A marker with neither a reason nor a type
+	# breaks two rules at once, and both notes end in "exempts nothing" — so a
+	# looser grep passes on the untyped note alone, and stops saying anything
+	# about the reason rule. Confirmed by perturbation: deleting the reason
+	# check left the looser form green.
+	fail "a bare //mutation:exempt is called out for the missing REASON" "$out"
 else
 	pass "a bare //mutation:exempt exempts nothing"
 fi
@@ -326,7 +344,7 @@ cat > "$repo/pkg/new.go" <<'EOF'
 package pkg
 
 func New(n, m int) bool {
-	if n > 7 { //mutation:exempt only the outer test is a tuning constant
+	if n > 7 { //mutation:exempt[CONDITIONALS_BOUNDARY] only the outer test is a tuning constant
 		if m > 9 {
 			return true
 		}
@@ -604,6 +622,678 @@ if ! printf '%s' "$out" | grep -q '2 surviving'; then
 	fail "the summary counts surviving mutants" "$out"
 else
 	pass "the summary counts surviving mutants"
+fi
+
+# ── 17. TIMED OUT is undecided, not silently dropped ──────────────────────────
+#
+# The same fail-open case 2 closes for SKIPPED, in the status where it bites
+# hardest. A timed-out mutant was never given a verdict: the suite did not
+# finish, so nothing is known about whether it would have been caught. #180's
+# measurement is the evidence this is not hypothetical — with gremlins' default
+# settings 465 of 1059 runnable mutants on this repository came back TIMED OUT,
+# worker contention rather than infinite loops, and clearing them revealed 51
+# survivors the timed-out run had reported nothing about. The pinned settings
+# make that rare; they do not make it impossible, and a rare unknown reported as
+# a verdict is worse than a common one.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/new.go" <<'EOF'
+package pkg
+
+func New(n int) bool {
+	if n > 7 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/new.go","mutations":[{"type":"CONDITIONALS_BOUNDARY","status":"TIMED OUT","line":4,"column":5}]}]}'
+commit_on_branch "$repo" "add new.go"
+out=$(run_checker "$repo" --base main --report rep.json)
+rc=$?
+if [ "$rc" -ne 0 ]; then
+	fail "a TIMED OUT mutant still exits 0 at stage 3" "exit $rc: $out"
+elif ! printf '%s' "$out" | grep -q 'pkg/new.go:4'; then
+	fail "a TIMED OUT mutant on a changed line is reported at all" "$out"
+elif ! printf '%s' "$out" | grep -q 'pkg/new.go:4.*TIMED OUT'; then
+	fail "the undecided list says WHY THIS mutant has no verdict" "$out"
+elif printf '%s' "$(findings_only "$out")" | grep -q 'pkg/new.go:4'; then
+	fail "a TIMED OUT mutant is undecided, not claimed as a survivor" "$out"
+else
+	pass "a TIMED OUT mutant on a changed line is reported as undecided"
+fi
+
+# ── 18. NOT VIABLE is a verdict, and not this gate's business ─────────────────
+#
+# The complement of case 17, and the reason "report every status this script
+# does not act on" would be the wrong fix. A NOT VIABLE mutant did not compile,
+# so no test could ever have noticed it behaving differently — there is no hole
+# in the suite to report and nothing for a developer to do. Listing it would put
+# noise in the one section whose whole value is that everything in it is
+# genuinely unknown.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/new.go" <<'EOF'
+package pkg
+
+func New(n int) bool {
+	if n > 7 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/new.go","mutations":[{"type":"CONDITIONALS_BOUNDARY","status":"NOT VIABLE","line":4,"column":5}]}]}'
+commit_on_branch "$repo" "add new.go"
+out=$(run_checker "$repo" --base main --report rep.json)
+if ! printf '%s' "$out" | grep -q 'no surviving'; then
+	fail "a NOT VIABLE mutant leaves the gate reporting a clean branch" "$out"
+elif printf '%s' "$out" | grep -q 'pkg/new.go:4'; then
+	fail "a NOT VIABLE mutant is not reported as undecided" "$out"
+elif printf '%s' "$out" | grep -q 'undecided'; then
+	fail "a NOT VIABLE mutant does not make the branch look undecided" "$out"
+else
+	pass "a NOT VIABLE mutant is neither a survivor nor an unknown"
+fi
+
+# ── 19. A status this gate does not recognise is undecided ────────────────────
+#
+# The fail-open that outlives every status named in this file. gremlins may add
+# a status, or rename one, and the catch-all arm that used to swallow TIMED OUT
+# would swallow that one too — silently, since a status nobody matched simply
+# did not appear in the output. A gate cannot claim a mutant was killed by a
+# verdict string it has never seen.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/new.go" <<'EOF'
+package pkg
+
+func New(n int) bool {
+	if n > 7 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/new.go","mutations":[{"type":"CONDITIONALS_BOUNDARY","status":"ESCAPED IN A LATER RELEASE","line":4,"column":5}]}]}'
+commit_on_branch "$repo" "add new.go"
+out=$(run_checker "$repo" --base main --report rep.json)
+if ! printf '%s' "$out" | grep -q 'pkg/new.go:4'; then
+	fail "an unrecognised status is reported rather than silently dropped" "$out"
+elif ! printf '%s' "$out" | grep -q 'pkg/new.go:4.*ESCAPED IN A LATER RELEASE'; then
+	fail "an unrecognised status is quoted back, so a reader can act on it" "$out"
+else
+	pass "a status this gate does not recognise is reported as undecided"
+fi
+
+# ── 20. "Decided nothing" does not read as "found nothing" ────────────────────
+#
+# The headline is the line a reviewer reads; the sections below it are the line
+# they read next, if at all. "no surviving mutants on lines this branch changed"
+# is a true sentence about a run in which nothing was decided, and a false
+# impression. The count has to be in the headline itself.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/new.go" <<'EOF'
+package pkg
+
+func New(n, m int) bool {
+	if n > 7 {
+		return true
+	}
+	if m > 9 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/new.go","mutations":[
+   {"type":"CONDITIONALS_BOUNDARY","status":"TIMED OUT","line":4,"column":5},
+   {"type":"CONDITIONALS_NEGATION","status":"TIMED OUT","line":4,"column":5},
+   {"type":"CONDITIONALS_BOUNDARY","status":"KILLED","line":7,"column":5}]}]}'
+commit_on_branch "$repo" "add new.go"
+out=$(run_checker "$repo" --base main --report rep.json)
+headline=$(printf '%s\n' "$out" | head -1)
+# The phrasing, not the digits. `grep -q '2'` and `grep -q '3'` cannot tell the
+# numerator from the denominator, nor either from an unrelated number: a
+# regression that swapped the operands, or took the denominator from the wrong
+# counter and wrote "23", passed the three arms this replaces.
+#
+# The denominator moved into the scope note in this change, so the two numbers
+# now sit in different clauses of the same sentence — which is why the whole
+# sentence is pinned rather than either half.
+if ! printf '%s' "$headline" | grep -q 'among 3 on lines this branch changed, 2 undecided'; then
+	fail "the headline says how many mutants were undecided, of how many" "$out"
+else
+	pass "the headline reports undecided mutants, not just the sections below it"
+fi
+
+# ── 21. --help prints the header, all of it and nothing else ─────────────────
+#
+# It used to print a hand-counted line range, and the range was exact for the
+# header it was written against — `124a64d`'s header ended at line 80 and the
+# range was `2,80p`. Growing the header is what breaks it, and it breaks in the
+# quiet direction: the range TRUNCATES. Against this branch's longer header the
+# old range stops mid-sentence in "PINNED GREMLINS SETTINGS", printing neither
+# `Exit codes:` nor any line of code.
+#
+# So the assertion is the LAST line, not the presence of a marker. It goes red
+# in both directions at once: a range that stops short ends on some other
+# sentence, and a range that overshoots ends on `set -u`. An earlier draft of
+# this case grepped for `^set -u` instead and claimed the stale range had
+# leaked it — neither the claim nor the assertion survived checking. The leak
+# had happened, but to a hand-count made WHILE writing this change, not to the
+# range in the repository.
+
+checks=$((checks + 1))
+out=$(sh "$checker" --help 2>&1)
+rc=$?
+if [ "$rc" -ne 0 ]; then
+	fail "--help exits 0" "exit $rc: $out"
+elif ! printf '%s' "$out" | grep -q 'UNDECIDED'; then
+	fail "--help prints the middle of the header, not just its ends" "$out"
+elif ! printf '%s\n' "$out" | grep -v '^[[:space:]]*$' | tail -1 | grep -q 'Exit codes:'; then
+	# The LAST line, because that one assertion carries both failure modes:
+	# stopping short ends on another sentence, overshooting ends on `set -u`.
+	fail "--help ends exactly at the header's last line" "$out"
+else
+	pass "--help prints the whole header and only the header"
+fi
+
+# ── 22. A marker waives the mutant TYPE it names ─────────────────────────────
+#
+# The line-scoped waiver is what #180's judgement note 3 records as unresolved:
+# the marker matched file and line and never the type, so a reason written about
+# the boundary mutant waived every other mutant gremlins produced on that line.
+# Measured on this repository's own eleven markers, every marked line carries
+# one to three further types (CONDITIONALS_NEGATION on all eleven, plus
+# ARITHMETIC_BASE and INVERT_NEGATIVES on three) — all killed today, so nothing
+# was hidden, but all eleven were waived by a reason that describes none of them.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/new.go" <<'EOF'
+package pkg
+
+func New(n int) bool {
+	//mutation:exempt[CONDITIONALS_BOUNDARY] at n == 7 the caller cannot tell the two apart
+	if n > 7 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/new.go","mutations":[{"type":"CONDITIONALS_BOUNDARY","status":"LIVED","line":5,"column":5}]}]}'
+commit_on_branch "$repo" "add new.go"
+out=$(run_checker "$repo" --base main --report rep.json)
+if ! printf '%s' "$out" | grep -q 'no surviving mutants'; then
+	fail "a marker naming the mutant's own type waives it" "$out"
+elif ! printf '%s' "$out" | grep -q 'Exempt by'; then
+	fail "the waived mutant is still listed" "$out"
+else
+	pass "//mutation:exempt[TYPE] waives the type it names"
+fi
+
+# ── 23. A marker does NOT waive a type it does not name ──────────────────────
+#
+# The defect itself. Same line, same marker, a different mutant — and under the
+# old file+line match this was silently waived, with nothing in the diff or the
+# output to show for it. At stage 4 that is the difference between a red gate
+# and a green one.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/new.go" <<'EOF'
+package pkg
+
+func New(n int) bool {
+	//mutation:exempt[CONDITIONALS_BOUNDARY] at n == 7 the caller cannot tell the two apart
+	if n > 7 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/new.go","mutations":[
+   {"type":"CONDITIONALS_BOUNDARY","status":"LIVED","line":5,"column":5},
+   {"type":"CONDITIONALS_NEGATION","status":"LIVED","line":5,"column":5}]}]}'
+commit_on_branch "$repo" "add new.go"
+out=$(run_checker "$repo" --base main --report rep.json)
+if ! printf '%s' "$out" | grep -q '1 surviving mutant'; then
+	fail "exactly one of the two mutants on the line is waived" "$out"
+elif ! printf '%s' "$(findings_only "$out")" | grep -q 'CONDITIONALS_NEGATION'; then
+	fail "a mutant of a type the marker does not name is still a finding" "$out"
+elif printf '%s' "$(findings_only "$out")" | grep -q 'pkg/new.go:5.*CONDITIONALS_BOUNDARY'; then
+	# The finding ROW, not the explanatory note under it — the note names the
+	# waived type on purpose, and a bare grep of the section matches that too.
+	fail "the type the marker DOES name is still waived" "$out"
+elif ! printf '%s' "$out" | grep -q 'names CONDITIONALS_BOUNDARY'; then
+	fail "the finding says the line carries a marker for another type" "$out"
+else
+	pass "//mutation:exempt[TYPE] does not waive a type it does not name"
+fi
+
+# ── 24. [*] waives the whole line, and says that it did ──────────────────────
+#
+# The line-wide waiver does not disappear; it stops being the accidental default
+# and becomes something written down. A reviewer who sees `[*]` knows the claim
+# covers mutants nobody has looked at, which is exactly what the old untyped
+# form did without saying so.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/new.go" <<'EOF'
+package pkg
+
+func New(n int) bool {
+	//mutation:exempt[*] a tuning constant, every mutant here pins a number
+	if n > 7 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/new.go","mutations":[
+   {"type":"CONDITIONALS_BOUNDARY","status":"LIVED","line":5,"column":5},
+   {"type":"ARITHMETIC_BASE","status":"LIVED","line":5,"column":9}]}]}'
+commit_on_branch "$repo" "add new.go"
+out=$(run_checker "$repo" --base main --report rep.json)
+if ! printf '%s' "$out" | grep -q 'no surviving mutants'; then
+	fail "[*] waives every mutant on the line" "$out"
+elif ! printf '%s' "$out" | grep -q '2 exempt'; then
+	fail "[*] waives both mutants, not just the first" "$out"
+elif ! printf '%s' "$out" | grep -q 'line-wide'; then
+	fail "the exempt list marks a [*] waiver as line-wide" "$out"
+else
+	pass "//mutation:exempt[*] waives the line and is labelled as doing so"
+fi
+
+# ── 25. A list names several types, and only those ───────────────────────────
+
+checks=$((checks + 1))
+repo=$(new_repo)
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/new.go" <<'EOF'
+package pkg
+
+func New(n int) bool {
+	//mutation:exempt[CONDITIONALS_BOUNDARY, ARITHMETIC_BASE] both pin the same tuning constant
+	if n > 7 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/new.go","mutations":[
+   {"type":"CONDITIONALS_BOUNDARY","status":"LIVED","line":5,"column":5},
+   {"type":"ARITHMETIC_BASE","status":"LIVED","line":5,"column":9},
+   {"type":"INVERT_NEGATIVES","status":"LIVED","line":5,"column":9}]}]}'
+commit_on_branch "$repo" "add new.go"
+out=$(run_checker "$repo" --base main --report rep.json)
+if ! printf '%s' "$out" | grep -q '1 surviving mutant'; then
+	fail "a two-type list waives exactly those two" "$out"
+elif ! printf '%s' "$(findings_only "$out")" | grep -q 'INVERT_NEGATIVES'; then
+	fail "the type outside the list is still a finding" "$out"
+else
+	pass "//mutation:exempt[A, B] waives A and B and nothing else"
+fi
+
+# ── 26. An untyped marker waives nothing ─────────────────────────────────────
+#
+# Same rule the reasonless marker has always had, for the same reason: a waiver
+# whose scope nobody stated is one nobody reviewed. It is a contract change, so
+# it has to be loud — the eleven markers in this repository were all rewritten
+# in the change that introduced it.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/new.go" <<'EOF'
+package pkg
+
+func New(n int) bool {
+	//mutation:exempt a perfectly good reason, with no type to attach it to
+	if n > 7 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/new.go","mutations":[{"type":"CONDITIONALS_BOUNDARY","status":"LIVED","line":5,"column":5}]}]}'
+commit_on_branch "$repo" "add new.go"
+out=$(run_checker "$repo" --base main --report rep.json)
+if ! printf '%s' "$(findings_only "$out")" | grep -q 'pkg/new.go:5'; then
+	fail "an untyped //mutation:exempt waives nothing" "$out"
+elif ! printf '%s' "$out" | grep -q 'mutation:exempt\[' ; then
+	fail "the run says what the typed form looks like" "$out"
+else
+	pass "an untyped //mutation:exempt waives nothing, and says what to write"
+fi
+
+# ── 27. A typed marker still needs a reason ──────────────────────────────────
+#
+# The new syntax must not become a way around the older rule. `[TYPE]` says
+# WHICH mutant is waived; the reason says WHY, and neither substitutes for the
+# other.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/new.go" <<'EOF'
+package pkg
+
+func New(n int) bool {
+	//mutation:exempt[CONDITIONALS_BOUNDARY]
+	if n > 7 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/new.go","mutations":[{"type":"CONDITIONALS_BOUNDARY","status":"LIVED","line":5,"column":5}]}]}'
+commit_on_branch "$repo" "add new.go"
+out=$(run_checker "$repo" --base main --report rep.json)
+if ! printf '%s' "$(findings_only "$out")" | grep -q 'pkg/new.go:5'; then
+	fail "a typed marker with no reason exempts nothing" "$out"
+elif ! printf '%s' "$out" | grep -q 'exempts nothing'; then
+	fail "a reasonless typed marker is called out" "$out"
+else
+	pass "a typed //mutation:exempt still needs a reason"
+fi
+
+# ── 28. An unclosed [ is reported, not read as an untyped marker ─────────────
+#
+# A typo in the one part of the marker a reader skims. Read as untyped it would
+# waive nothing either, so the behaviour is the same — but the message is not,
+# and the message is the whole difference between a fixable typo and a
+# mysteriously ineffective waiver.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/new.go" <<'EOF'
+package pkg
+
+func New(n int) bool {
+	//mutation:exempt[CONDITIONALS_BOUNDARY at n == 7 nothing can tell them apart
+	if n > 7 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/new.go","mutations":[{"type":"CONDITIONALS_BOUNDARY","status":"LIVED","line":5,"column":5}]}]}'
+commit_on_branch "$repo" "add new.go"
+out=$(run_checker "$repo" --base main --report rep.json)
+if ! printf '%s' "$(findings_only "$out")" | grep -q 'pkg/new.go:5'; then
+	fail "an unclosed [ waives nothing" "$out"
+elif ! printf '%s' "$out" | grep -qi 'unclosed'; then
+	fail "an unclosed [ is named as the problem" "$out"
+else
+	pass "an unclosed [ is reported as a malformed marker"
+fi
+
+# ── 29. An empty entry in the type list matches nothing ──────────────────────
+#
+# `[CONDITIONALS_BOUNDARY,]` — a trailing comma, the easiest typo in the new
+# syntax — splits into a second, empty type. The report parser accepts a
+# mutation whose `type` is absent (it requires only file, line and status), so
+# an empty type CAN reach the matcher, and an empty entry matching an empty type
+# is the one shape where this marker waives a mutant nobody wrote a word about.
+# Found by re-reading the diff, not by a failing case: it waived silently.
+#
+# Only [*] may waive a mutant whose type is unknown, and it says so.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/new.go" <<'EOF'
+package pkg
+
+func New(n int) bool {
+	//mutation:exempt[CONDITIONALS_BOUNDARY,] a trailing comma, easily typed
+	if n > 7 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/new.go","mutations":[
+   {"status":"LIVED","line":5,"column":5},
+   {"type":"CONDITIONALS_NEGATION","status":"LIVED","line":5,"column":5}]}]}'
+commit_on_branch "$repo" "add new.go"
+out=$(run_checker "$repo" --base main --report rep.json)
+if ! printf '%s' "$(findings_only "$out")" | grep -q 'pkg/new.go:5'; then
+	fail "an empty type entry does not waive a mutant with no reported type" "$out"
+elif ! printf '%s' "$out" | grep -q '2 surviving mutant'; then
+	fail "neither mutant on the line is waived" "$out"
+elif ! printf '%s' "$out" | grep -q 'names CONDITIONALS_BOUNDARY$'; then
+	# Anchored, because the empty entry must not reach the note either: without
+	# the guard the list reads "CONDITIONALS_BOUNDARY, " with a dangling
+	# separator, and a message about a typo should not contain one.
+	fail "the empty entry is left out of the list the note names" "$out"
+else
+	pass "an empty entry in the type list matches nothing and is not named"
+fi
+
+# ── 30. A run that analysed nothing does not read as a clean branch ──────────
+#
+# The last instance of the rule the header states, and the one #235 did not
+# reach. #235 made "could not decide" visible one mutant at a time; this is the
+# case where there was no mutant to decide about at all, and the old headline
+# for it was BYTE-IDENTICAL to a run that analysed mutants and killed them all.
+#
+# Measured, not hypothetical: #234 — six non-test Go files, 35 hunks, 317
+# changed lines — put exactly 5 mutants on a changed line out of 128 in those
+# files. A gate that cannot tell 5 from 0 cannot be given the power to fail.
+#
+# The changed file HAS mutants here; none sits on a changed line. That is the
+# shape the line-scope produces, so the message has to name both numbers.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+cat > "$repo/pkg/mixed.go" <<'EOF'
+package pkg
+
+func Old(n int) bool {
+	if n > 3 {
+		return true
+	}
+	return false
+}
+EOF
+commit_on_main "$repo" "pre-existing"
+cat > "$repo/pkg/mixed.go" <<'EOF'
+package pkg
+
+func Old(n int) bool {
+	if n > 3 {
+		return true
+	}
+	return false
+}
+
+type Added struct {
+	Name  string
+	Kinds map[string]bool
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/mixed.go","mutations":[
+   {"type":"CONDITIONALS_BOUNDARY","status":"LIVED","line":4,"column":5},
+   {"type":"CONDITIONALS_NEGATION","status":"KILLED","line":4,"column":5}]}]}'
+commit_on_branch "$repo" "append a struct declaration"
+out=$(run_checker "$repo" --base main --report rep.json)
+rc=$?
+if [ "$rc" -ne 0 ]; then
+	fail "a branch with nothing to mutate still exits 0" "exit $rc: $out"
+elif printf '%s' "$out" | grep -q 'no surviving mutants'; then
+	fail "analysing nothing does not report as 'no surviving mutants'" "$out"
+elif ! printf '%s' "$out" | grep -qi 'nothing was measured'; then
+	fail "a run that analysed nothing says so" "$out"
+elif ! printf '%s' "$out" | grep -q '2'; then
+	fail "the message names how many mutants the touched files did hold" "$out"
+elif printf '%s' "$out" | grep -q 'pkg/mixed.go:4'; then
+	fail "the mutants on untouched lines are not reported as findings" "$out"
+else
+	pass "a run that analysed nothing says so instead of reporting a clean branch"
+fi
+
+# ── 31. The headline carries the denominator ─────────────────────────────────
+#
+# "no surviving mutants" answers a question whose size the reader cannot see.
+# Five analysed and fifty analysed are different evidence for the same
+# sentence, and stage 4 — whether a survivor should fail the build — cannot be
+# decided without knowing which one a typical branch produces.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/new.go" <<'EOF'
+package pkg
+
+func New(n, m int) bool {
+	if n > 7 {
+		return true
+	}
+	if m > 9 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/new.go","mutations":[
+   {"type":"CONDITIONALS_BOUNDARY","status":"KILLED","line":4,"column":5},
+   {"type":"CONDITIONALS_NEGATION","status":"KILLED","line":4,"column":5},
+   {"type":"CONDITIONALS_BOUNDARY","status":"KILLED","line":7,"column":5}]}]}'
+commit_on_branch "$repo" "add new.go"
+out=$(run_checker "$repo" --base main --report rep.json)
+headline=$(printf '%s\n' "$out" | head -1)
+if ! printf '%s' "$headline" | grep -q 'no surviving'; then
+	fail "a branch whose mutants were all killed still says so" "$out"
+elif ! printf '%s' "$headline" | grep -q '3'; then
+	fail "the headline says how many mutants that verdict rests on" "$out"
+else
+	pass "the headline carries the denominator, not only the verdict"
+fi
+
+# ── 32. A survivor headline carries it too ───────────────────────────────────
+#
+# "2 survivors" out of 2 and out of 200 are different branches. The denominator
+# belongs on both headlines or on neither.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/new.go" <<'EOF'
+package pkg
+
+func New(n, m int) bool {
+	if n > 7 {
+		return true
+	}
+	if m > 9 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/new.go","mutations":[
+   {"type":"CONDITIONALS_BOUNDARY","status":"LIVED","line":4,"column":5},
+   {"type":"CONDITIONALS_NEGATION","status":"KILLED","line":4,"column":5},
+   {"type":"CONDITIONALS_BOUNDARY","status":"KILLED","line":7,"column":5}]}]}'
+commit_on_branch "$repo" "add new.go"
+out=$(run_checker "$repo" --base main --report rep.json)
+headline=$(printf '%s\n' "$out" | head -1)
+if ! printf '%s' "$headline" | grep -q '1 surviving mutant'; then
+	fail "the survivor count is still reported" "$out"
+elif ! printf '%s' "$headline" | grep -q '3'; then
+	fail "the survivor headline says how many mutants were analysed" "$out"
+else
+	pass "the survivor headline carries the denominator"
+fi
+
+# ── 33. A deletion-only file still counts toward what the files held ────────
+#
+# `touched_lines` reports the lines a diff ADDS, so a file this branch only
+# deleted from has an empty set and the loop skips it. The file-level counter
+# sat after that skip, so such a file contributed nothing — and a zero-scope run
+# then said "gremlins produced no mutants at all in the files this branch
+# touched" about a file that still holds plenty. The sentence names the files
+# the branch touched, and a file it deleted from is one of them.
+#
+# Reported by an automated reviewer on #237; the mechanism was confirmed by
+# reading the loop before this case was written.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+cat > "$repo/pkg/del.go" <<'EOF'
+package pkg
+
+func Keep(n int) bool {
+	if n > 7 {
+		return true
+	}
+	return false
+}
+
+func Drop(n int) bool {
+	return n > 1
+}
+EOF
+commit_on_main "$repo" "pre-existing"
+cat > "$repo/pkg/del.go" <<'EOF'
+package pkg
+
+func Keep(n int) bool {
+	if n > 7 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/del.go","mutations":[{"type":"CONDITIONALS_BOUNDARY","status":"LIVED","line":4,"column":5}]}]}'
+commit_on_branch "$repo" "drop the Drop function"
+out=$(run_checker "$repo" --base main --report rep.json)
+rc=$?
+if [ "$rc" -ne 0 ]; then
+	fail "a deletion-only branch exits 0" "exit $rc: $out"
+elif ! printf '%s' "$out" | grep -qi 'nothing was measured'; then
+	fail "a deletion-only branch measured nothing and says so" "$out"
+elif printf '%s' "$out" | grep -q 'no mutants at all'; then
+	# The distinction the whole message exists to draw: the line scope threw
+	# this file's mutants away, it did not find a file with none.
+	fail "a file the branch only deleted from still counts toward the file total" "$out"
+elif ! printf '%s' "$out" | grep -q 'produced 1 mutant'; then
+	fail "the file total names the mutant that file still holds" "$out"
+else
+	pass "a deletion-only file counts toward what the touched files held"
 fi
 
 # ── Result ────────────────────────────────────────────────────────────────────
