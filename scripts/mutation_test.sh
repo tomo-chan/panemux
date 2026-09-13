@@ -1086,6 +1086,145 @@ else
 	pass "an empty entry in the type list matches nothing and is not named"
 fi
 
+# ── 30. A run that analysed nothing does not read as a clean branch ──────────
+#
+# The last instance of the rule the header states, and the one #235 did not
+# reach. #235 made "could not decide" visible one mutant at a time; this is the
+# case where there was no mutant to decide about at all, and the old headline
+# for it was BYTE-IDENTICAL to a run that analysed mutants and killed them all.
+#
+# Measured, not hypothetical: #234 — six non-test Go files, 35 hunks, 317
+# changed lines — put exactly 5 mutants on a changed line out of 128 in those
+# files. A gate that cannot tell 5 from 0 cannot be given the power to fail.
+#
+# The changed file HAS mutants here; none sits on a changed line. That is the
+# shape the line-scope produces, so the message has to name both numbers.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+cat > "$repo/pkg/mixed.go" <<'EOF'
+package pkg
+
+func Old(n int) bool {
+	if n > 3 {
+		return true
+	}
+	return false
+}
+EOF
+commit_on_main "$repo" "pre-existing"
+cat > "$repo/pkg/mixed.go" <<'EOF'
+package pkg
+
+func Old(n int) bool {
+	if n > 3 {
+		return true
+	}
+	return false
+}
+
+type Added struct {
+	Name  string
+	Kinds map[string]bool
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/mixed.go","mutations":[
+   {"type":"CONDITIONALS_BOUNDARY","status":"LIVED","line":4,"column":5},
+   {"type":"CONDITIONALS_NEGATION","status":"KILLED","line":4,"column":5}]}]}'
+commit_on_branch "$repo" "append a struct declaration"
+out=$(run_checker "$repo" --base main --report rep.json)
+rc=$?
+if [ "$rc" -ne 0 ]; then
+	fail "a branch with nothing to mutate still exits 0" "exit $rc: $out"
+elif printf '%s' "$out" | grep -q 'no surviving mutants'; then
+	fail "analysing nothing does not report as 'no surviving mutants'" "$out"
+elif ! printf '%s' "$out" | grep -qi 'nothing was measured'; then
+	fail "a run that analysed nothing says so" "$out"
+elif ! printf '%s' "$out" | grep -q '2'; then
+	fail "the message names how many mutants the touched files did hold" "$out"
+elif printf '%s' "$out" | grep -q 'pkg/mixed.go:4'; then
+	fail "the mutants on untouched lines are not reported as findings" "$out"
+else
+	pass "a run that analysed nothing says so instead of reporting a clean branch"
+fi
+
+# ── 31. The headline carries the denominator ─────────────────────────────────
+#
+# "no surviving mutants" answers a question whose size the reader cannot see.
+# Five analysed and fifty analysed are different evidence for the same
+# sentence, and stage 4 — whether a survivor should fail the build — cannot be
+# decided without knowing which one a typical branch produces.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/new.go" <<'EOF'
+package pkg
+
+func New(n, m int) bool {
+	if n > 7 {
+		return true
+	}
+	if m > 9 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/new.go","mutations":[
+   {"type":"CONDITIONALS_BOUNDARY","status":"KILLED","line":4,"column":5},
+   {"type":"CONDITIONALS_NEGATION","status":"KILLED","line":4,"column":5},
+   {"type":"CONDITIONALS_BOUNDARY","status":"KILLED","line":7,"column":5}]}]}'
+commit_on_branch "$repo" "add new.go"
+out=$(run_checker "$repo" --base main --report rep.json)
+headline=$(printf '%s\n' "$out" | head -1)
+if ! printf '%s' "$headline" | grep -q 'no surviving'; then
+	fail "a branch whose mutants were all killed still says so" "$out"
+elif ! printf '%s' "$headline" | grep -q '3'; then
+	fail "the headline says how many mutants that verdict rests on" "$out"
+else
+	pass "the headline carries the denominator, not only the verdict"
+fi
+
+# ── 32. A survivor headline carries it too ───────────────────────────────────
+#
+# "2 survivors" out of 2 and out of 200 are different branches. The denominator
+# belongs on both headlines or on neither.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/new.go" <<'EOF'
+package pkg
+
+func New(n, m int) bool {
+	if n > 7 {
+		return true
+	}
+	if m > 9 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/new.go","mutations":[
+   {"type":"CONDITIONALS_BOUNDARY","status":"LIVED","line":4,"column":5},
+   {"type":"CONDITIONALS_NEGATION","status":"KILLED","line":4,"column":5},
+   {"type":"CONDITIONALS_BOUNDARY","status":"KILLED","line":7,"column":5}]}]}'
+commit_on_branch "$repo" "add new.go"
+out=$(run_checker "$repo" --base main --report rep.json)
+headline=$(printf '%s\n' "$out" | head -1)
+if ! printf '%s' "$headline" | grep -q '1 surviving mutant'; then
+	fail "the survivor count is still reported" "$out"
+elif ! printf '%s' "$headline" | grep -q '3'; then
+	fail "the survivor headline says how many mutants were analysed" "$out"
+else
+	pass "the survivor headline carries the denominator"
+fi
+
 # ── Result ────────────────────────────────────────────────────────────────────
 
 echo

@@ -373,6 +373,24 @@ and the same measurement that pinned them found timeouts hiding 51 survivors. A 
 surviving mutants" while every mutant on the diff timed out was possible, and said nothing about the
 tests.
 
+**The same conflation had one more level, and the numbers say why it matters.** `scripts/mutation.sh`
+printed "no surviving mutants on lines this branch changed" whether it had analysed fifty mutants or
+none — byte-identical output for "asked and got a clean answer" and "asked nothing". Measured on
+**#234**, the last substantial Go pull request before this was written: six non-test Go files, 35
+hunks, 317 changed lines. gremlins produced **128 mutants in those files and exactly 5 on a changed
+line**, all killed. Two of the six files (`internal/cachedir`, `internal/homedir`, 104 changed lines
+between them) produced **no mutants at all** — they are new packages of type declarations and thin
+wrappers, and gremlins mutates operator tokens in covered code. A third, `internal/commandcenter/runner.go`,
+holds 37 mutants and had **none** on its 27 changed lines.
+
+So the headline now carries the denominator (`no surviving mutants among 5 on lines this branch
+changed`), and a run with nothing on a changed line says **"nothing was measured"** in its own words,
+naming how many mutants the touched files held so that "the scope discarded everything" and "there
+was nothing to discard" stay distinguishable. **This is a stage-4 input as much as a readability
+fix: a gate that would rarely fire is not thereby a safe gate — it may be a gate that is usually
+saying nothing, and 5 questions per 317-line branch is the order of magnitude stage 4 has to decide
+against.**
+
 The fix is which arm carries the catch-all. `KILLED`, `NOT COVERED` and `NOT VIABLE` are now
 enumerated as the statuses the gate deliberately says nothing about — each for a stated reason, and
 `NOT VIABLE` belongs there rather than among the unknowns, since a mutant that does not compile is
