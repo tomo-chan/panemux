@@ -341,11 +341,19 @@ for f in $changed; do
 	# comparison. Guessing wrong would leave every finding unmatched, which is
 	# this check reporting green.
 	# Tab-separated on the way out as well as in. gremlins' statuses include
-	# "NOT COVERED", which has a space in it: with awk's default OFS the reader
-	# below would split it into status="NOT" and fold "COVERED" into the type.
-	# Today that lands in the same branch either way, so nothing visibly breaks
-	# — which is precisely why it would have survived until a status this gate
-	# does act on gained a space.
+	# "NOT COVERED", which has a space in it: under whitespace separation the
+	# reader below splits it into status="NOT" and folds "COVERED" into the
+	# type.
+	#
+	# THE STAKE ROSE WITH THE CATCH-ALL. This note used to say the hazard was
+	# invisible — every status the script did not name fell into the same
+	# `continue`, so a split "NOT" behaved exactly like "NOT COVERED". That is
+	# no longer true. The default arm now REPORTS, so a split "NOT" matches
+	# nothing, lands in the undecided list, and every NOT COVERED and NOT
+	# VIABLE mutant is announced as an unknown — loudly, immediately and
+	# wrongly. Confirmed by perturbation: dropping the reader's `IFS="$tab"`
+	# alone fails four cases. The separator went from load-bearing and silent
+	# to load-bearing and loud.
 	MOD="$module" FILE="$f" awk -F"$tab" -v OFS="$tab" '
 		BEGIN { mod = ENVIRON["MOD"]; file = ENVIRON["FILE"]; alt = (mod == "") ? "" : mod "/" file }
 		$1 == file || (alt != "" && $1 == alt) { print $2, $3, $4 }
