@@ -768,10 +768,13 @@ out=$(run_checker "$repo" --base main --report rep.json)
 headline=$(printf '%s\n' "$out" | head -1)
 # The phrasing, not the digits. `grep -q '2'` and `grep -q '3'` cannot tell the
 # numerator from the denominator, nor either from an unrelated number: a
-# regression that swapped the operands into "3 of 2 mutant(s) undecided", or
-# took the denominator from the wrong counter and wrote "23 of 3", passed all
-# three arms this replaces.
-if ! printf '%s' "$headline" | grep -q '2 of 3 mutant(s) undecided'; then
+# regression that swapped the operands, or took the denominator from the wrong
+# counter and wrote "23", passed the three arms this replaces.
+#
+# The denominator moved into the scope note in this change, so the two numbers
+# now sit in different clauses of the same sentence — which is why the whole
+# sentence is pinned rather than either half.
+if ! printf '%s' "$headline" | grep -q 'among 3 on lines this branch changed, 2 undecided'; then
 	fail "the headline says how many mutants were undecided, of how many" "$out"
 else
 	pass "the headline reports undecided mutants, not just the sections below it"
@@ -1096,7 +1099,204 @@ else
 	pass "an empty entry in the type list matches nothing and is not named"
 fi
 
-# ── 30. RUNNABLE is a documented status, and is named as one ─────────────────
+# ── 30. A run that analysed nothing does not read as a clean branch ──────────
+#
+# The last instance of the rule the header states, and the one #235 did not
+# reach. #235 made "could not decide" visible one mutant at a time; this is the
+# case where there was no mutant to decide about at all, and the old headline
+# for it was BYTE-IDENTICAL to a run that analysed mutants and killed them all.
+#
+# Measured, not hypothetical: #234 — six non-test Go files, 35 hunks, 317
+# changed lines — put exactly 5 mutants on a changed line out of 128 in those
+# files. A gate that cannot tell 5 from 0 cannot be given the power to fail.
+#
+# The changed file HAS mutants here; none sits on a changed line. That is the
+# shape the line-scope produces, so the message has to name both numbers.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+cat > "$repo/pkg/mixed.go" <<'EOF'
+package pkg
+
+func Old(n int) bool {
+	if n > 3 {
+		return true
+	}
+	return false
+}
+EOF
+commit_on_main "$repo" "pre-existing"
+cat > "$repo/pkg/mixed.go" <<'EOF'
+package pkg
+
+func Old(n int) bool {
+	if n > 3 {
+		return true
+	}
+	return false
+}
+
+type Added struct {
+	Name  string
+	Kinds map[string]bool
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/mixed.go","mutations":[
+   {"type":"CONDITIONALS_BOUNDARY","status":"LIVED","line":4,"column":5},
+   {"type":"CONDITIONALS_NEGATION","status":"KILLED","line":4,"column":5}]}]}'
+commit_on_branch "$repo" "append a struct declaration"
+out=$(run_checker "$repo" --base main --report rep.json)
+rc=$?
+if [ "$rc" -ne 0 ]; then
+	fail "a branch with nothing to mutate still exits 0" "exit $rc: $out"
+elif printf '%s' "$out" | grep -q 'no surviving mutants'; then
+	fail "analysing nothing does not report as 'no surviving mutants'" "$out"
+elif ! printf '%s' "$out" | grep -qi 'nothing was measured'; then
+	fail "a run that analysed nothing says so" "$out"
+elif ! printf '%s' "$out" | grep -q '2'; then
+	fail "the message names how many mutants the touched files did hold" "$out"
+elif printf '%s' "$out" | grep -q 'pkg/mixed.go:4'; then
+	fail "the mutants on untouched lines are not reported as findings" "$out"
+else
+	pass "a run that analysed nothing says so instead of reporting a clean branch"
+fi
+
+# ── 31. The headline carries the denominator ─────────────────────────────────
+#
+# "no surviving mutants" answers a question whose size the reader cannot see.
+# Five analysed and fifty analysed are different evidence for the same
+# sentence, and stage 4 — whether a survivor should fail the build — cannot be
+# decided without knowing which one a typical branch produces.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/new.go" <<'EOF'
+package pkg
+
+func New(n, m int) bool {
+	if n > 7 {
+		return true
+	}
+	if m > 9 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/new.go","mutations":[
+   {"type":"CONDITIONALS_BOUNDARY","status":"KILLED","line":4,"column":5},
+   {"type":"CONDITIONALS_NEGATION","status":"KILLED","line":4,"column":5},
+   {"type":"CONDITIONALS_BOUNDARY","status":"KILLED","line":7,"column":5}]}]}'
+commit_on_branch "$repo" "add new.go"
+out=$(run_checker "$repo" --base main --report rep.json)
+headline=$(printf '%s\n' "$out" | head -1)
+if ! printf '%s' "$headline" | grep -q 'no surviving'; then
+	fail "a branch whose mutants were all killed still says so" "$out"
+elif ! printf '%s' "$headline" | grep -q '3'; then
+	fail "the headline says how many mutants that verdict rests on" "$out"
+else
+	pass "the headline carries the denominator, not only the verdict"
+fi
+
+# ── 32. A survivor headline carries it too ───────────────────────────────────
+#
+# "2 survivors" out of 2 and out of 200 are different branches. The denominator
+# belongs on both headlines or on neither.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/new.go" <<'EOF'
+package pkg
+
+func New(n, m int) bool {
+	if n > 7 {
+		return true
+	}
+	if m > 9 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/new.go","mutations":[
+   {"type":"CONDITIONALS_BOUNDARY","status":"LIVED","line":4,"column":5},
+   {"type":"CONDITIONALS_NEGATION","status":"KILLED","line":4,"column":5},
+   {"type":"CONDITIONALS_BOUNDARY","status":"KILLED","line":7,"column":5}]}]}'
+commit_on_branch "$repo" "add new.go"
+out=$(run_checker "$repo" --base main --report rep.json)
+headline=$(printf '%s\n' "$out" | head -1)
+if ! printf '%s' "$headline" | grep -q '1 surviving mutant'; then
+	fail "the survivor count is still reported" "$out"
+elif ! printf '%s' "$headline" | grep -q '3'; then
+	fail "the survivor headline says how many mutants were analysed" "$out"
+else
+	pass "the survivor headline carries the denominator"
+fi
+
+# ── 33. A deletion-only file still counts toward what the files held ────────
+#
+# `touched_lines` reports the lines a diff ADDS, so a file this branch only
+# deleted from has an empty set and the loop skips it. The file-level counter
+# sat after that skip, so such a file contributed nothing — and a zero-scope run
+# then said "gremlins produced no mutants at all in the files this branch
+# touched" about a file that still holds plenty. The sentence names the files
+# the branch touched, and a file it deleted from is one of them.
+#
+# Reported by an automated reviewer on #237; the mechanism was confirmed by
+# reading the loop before this case was written.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+cat > "$repo/pkg/del.go" <<'EOF'
+package pkg
+
+func Keep(n int) bool {
+	if n > 7 {
+		return true
+	}
+	return false
+}
+
+func Drop(n int) bool {
+	return n > 1
+}
+EOF
+commit_on_main "$repo" "pre-existing"
+cat > "$repo/pkg/del.go" <<'EOF'
+package pkg
+
+func Keep(n int) bool {
+	if n > 7 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/del.go","mutations":[{"type":"CONDITIONALS_BOUNDARY","status":"LIVED","line":4,"column":5}]}]}'
+commit_on_branch "$repo" "drop the Drop function"
+out=$(run_checker "$repo" --base main --report rep.json)
+rc=$?
+if [ "$rc" -ne 0 ]; then
+	fail "a deletion-only branch exits 0" "exit $rc: $out"
+elif ! printf '%s' "$out" | grep -qi 'nothing was measured'; then
+	fail "a deletion-only branch measured nothing and says so" "$out"
+elif printf '%s' "$out" | grep -q 'no mutants at all'; then
+	# The distinction the whole message exists to draw: the line scope threw
+	# this file's mutants away, it did not find a file with none.
+	fail "a file the branch only deleted from still counts toward the file total" "$out"
+elif ! printf '%s' "$out" | grep -q 'produced 1 mutant'; then
+	fail "the file total names the mutant that file still holds" "$out"
+else
+	pass "a deletion-only file counts toward what the touched files held"
+fi
+
+# ── 34. RUNNABLE is a documented status, and is named as one ─────────────────
 #
 # gremlins defines SEVEN statuses, not six, and RUNNABLE is the one an earlier
 # draft of this change miscounted away: `internal/mutator/mutator.go` lists
