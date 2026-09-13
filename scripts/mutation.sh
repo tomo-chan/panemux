@@ -128,9 +128,11 @@ while [ $# -gt 0 ]; do
 		shift 2
 		;;
 	-h | --help)
-		# The header, however long it is. A hand-counted line range was
-		# silently wrong the moment the header grew — it had already fallen
-		# behind once, printing `set -u` as documentation.
+		# The header, however long it is. A hand-counted line range goes
+		# stale the moment the header grows, and it fails in the quiet
+		# direction: it TRUNCATES, dropping whole paragraphs with nothing
+		# in the output to say so. Simulated against this header, the old
+		# `2,80p` stops mid-sentence in "PINNED GREMLINS SETTINGS".
 		awk 'NR > 1 && /^#/ { print; next } NR > 1 { exit }' "$0" |
 			sed 's/^#\{1,2\} \{0,1\}//'
 		exit 0
