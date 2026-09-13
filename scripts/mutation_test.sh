@@ -1225,6 +1225,64 @@ else
 	pass "the survivor headline carries the denominator"
 fi
 
+# ── 33. A deletion-only file still counts toward what the files held ────────
+#
+# `touched_lines` reports the lines a diff ADDS, so a file this branch only
+# deleted from has an empty set and the loop skips it. The file-level counter
+# sat after that skip, so such a file contributed nothing — and a zero-scope run
+# then said "gremlins produced no mutants at all in the files this branch
+# touched" about a file that still holds plenty. The sentence names the files
+# the branch touched, and a file it deleted from is one of them.
+#
+# Reported by an automated reviewer on #237; the mechanism was confirmed by
+# reading the loop before this case was written.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+cat > "$repo/pkg/del.go" <<'EOF'
+package pkg
+
+func Keep(n int) bool {
+	if n > 7 {
+		return true
+	}
+	return false
+}
+
+func Drop(n int) bool {
+	return n > 1
+}
+EOF
+commit_on_main "$repo" "pre-existing"
+cat > "$repo/pkg/del.go" <<'EOF'
+package pkg
+
+func Keep(n int) bool {
+	if n > 7 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/del.go","mutations":[{"type":"CONDITIONALS_BOUNDARY","status":"LIVED","line":4,"column":5}]}]}'
+commit_on_branch "$repo" "drop the Drop function"
+out=$(run_checker "$repo" --base main --report rep.json)
+rc=$?
+if [ "$rc" -ne 0 ]; then
+	fail "a deletion-only branch exits 0" "exit $rc: $out"
+elif ! printf '%s' "$out" | grep -qi 'nothing was measured'; then
+	fail "a deletion-only branch measured nothing and says so" "$out"
+elif printf '%s' "$out" | grep -q 'no mutants at all'; then
+	# The distinction the whole message exists to draw: the line scope threw
+	# this file's mutants away, it did not find a file with none.
+	fail "a file the branch only deleted from still counts toward the file total" "$out"
+elif ! printf '%s' "$out" | grep -q 'produced 1 mutant'; then
+	fail "the file total names the mutant that file still holds" "$out"
+else
+	pass "a deletion-only file counts toward what the touched files held"
+fi
+
 # ── Result ────────────────────────────────────────────────────────────────────
 
 echo

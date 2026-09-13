@@ -334,9 +334,6 @@ untyped_marker=0
 malformed_marker=0
 
 for f in $changed; do
-	touched_lines "$f" | sort -un > "$tmp/touched"
-	[ -s "$tmp/touched" ] || continue
-
 	# Both spellings of the path. gremlins reports repository-relative paths;
 	# `<module>/<path>` is what coverage.out uses, and accepting it costs one
 	# comparison. Guessing wrong would leave every finding unmatched, which is
@@ -351,8 +348,17 @@ for f in $changed; do
 		BEGIN { mod = ENVIRON["MOD"]; file = ENVIRON["FILE"]; alt = (mod == "") ? "" : mod "/" file }
 		$1 == file || (alt != "" && $1 == alt) { print $2, $3, $4 }
 	' "$tmp/mutations" > "$tmp/file_mutations"
-	[ -s "$tmp/file_mutations" ] || continue
 	file_mutant_count=$((file_mutant_count + $(wc -l < "$tmp/file_mutations" | tr -d ' ')))
+	[ -s "$tmp/file_mutations" ] || continue
+
+	# AFTER the file-level count, not before it. `touched_lines` reports the
+	# lines a diff ADDS, so a file this branch only deleted from has an empty
+	# set — and with the skip ahead of the counter, such a file contributed
+	# nothing to "what the touched files held". A zero-scope run then claimed
+	# there were no mutants anywhere in those files about a file that still
+	# holds them, which is the one sentence this counter exists to get right.
+	touched_lines "$f" | sort -un > "$tmp/touched"
+	[ -s "$tmp/touched" ] || continue
 
 	while IFS="$tab" read -r line status type; do
 		[ -n "$line" ] || continue
