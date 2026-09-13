@@ -804,6 +804,52 @@ else
 	pass "--help prints the whole header and only the header"
 fi
 
+# ── 22. RUNNABLE is a documented status, and is named as one ─────────────────
+#
+# gremlins defines SEVEN statuses, not six, and RUNNABLE is the one an earlier
+# draft of this change miscounted away: `internal/mutator/mutator.go` lists
+# NotCovered, Runnable, Skipped, Lived, Killed, NotViable, TimedOut. It means
+# the mutant was identified and is covered, so it CAN be run — which is exactly
+# "never reached a verdict", so the catch-all handles it correctly.
+#
+# What the catch-all cannot do is explain it. The trailer's "anything else is a
+# status this gate does not recognise" sends a reader off to investigate a
+# documented status as though a later gremlins had invented it. RUNNABLE is
+# reachable in a real report — `--dry-run` emits every mutant without applying
+# it (`internal/engine/executor.go` returns early on `m.dryRun`), so the status
+# survives into the JSON — so this is a message a reader can actually meet.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/new.go" <<'EOF'
+package pkg
+
+func New(n int) bool {
+	if n > 7 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/new.go","mutations":[{"type":"CONDITIONALS_BOUNDARY","status":"RUNNABLE","line":4,"column":5}]}]}'
+commit_on_branch "$repo" "add new.go"
+out=$(run_checker "$repo" --base main --report rep.json)
+rc=$?
+if [ "$rc" -ne 0 ]; then
+	fail "a RUNNABLE mutant still exits 0 at stage 3" "exit $rc: $out"
+elif ! printf '%s' "$out" | grep -q 'pkg/new.go:4.*RUNNABLE'; then
+	fail "a RUNNABLE mutant on a changed line is reported as undecided" "$out"
+elif ! printf '%s\n' "$out" | grep -v 'pkg/new.go' | grep -q 'RUNNABLE'; then
+	# In the EXPLANATION, not only in the row. Naming it in the row is what the
+	# catch-all already did; what this pins is that the trailer accounts for it
+	# instead of calling it a status nobody recognises.
+	fail "the explanation names RUNNABLE rather than calling it unrecognised" "$out"
+else
+	pass "RUNNABLE is reported as undecided and explained, not treated as unknown"
+fi
+
 # ── Result ────────────────────────────────────────────────────────────────────
 
 echo

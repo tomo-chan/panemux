@@ -44,16 +44,17 @@
 # that could not run must not look like a warning that found nothing, which is
 # the rule scripts/efficacy.sh and scripts/coverage_blocks.sh both state.
 #
-# THE SAME RULE, ONE MUTANT AT A TIME. gremlins reports six statuses. This
-# script acts on one of them — LIVED, a survivor — and enumerates three more it
-# deliberately says nothing about: KILLED (the good case), NOT COVERED (G4(d)
-# owns that defect and reports it better), NOT VIABLE (the mutant did not
-# compile, so no test could have noticed it behaving differently). Everything
-# else — SKIPPED, TIMED OUT, and any status a later gremlins invents — is
-# reported as UNDECIDED, carrying the status that produced it, and counted in
-# the headline. It used to be the other way round, with a catch-all arm
-# silently dropping every status this script did not name, which let a run
-# whose mutants all timed out print "no surviving mutants".
+# THE SAME RULE, ONE MUTANT AT A TIME. gremlins defines SEVEN statuses
+# (`internal/mutator/mutator.go`: NotCovered, Runnable, Skipped, Lived, Killed,
+# NotViable, TimedOut). This script acts on one of them — LIVED, a survivor —
+# and enumerates three more it deliberately says nothing about: KILLED (the
+# good case), NOT COVERED (G4(d) owns that defect and reports it better), NOT
+# VIABLE (the mutant did not compile, so no test could have noticed it behaving
+# differently). Everything else — SKIPPED, TIMED OUT, RUNNABLE, and any status
+# a later gremlins invents — is reported as UNDECIDED, carrying the status that
+# produced it, and counted in the headline. It used to be the other way round,
+# with a catch-all arm silently dropping every status this script did not name,
+# which let a run whose mutants all timed out print "no surviving mutants".
 #
 # Usage:
 #   make mutation                                # report against origin/main
@@ -372,9 +373,10 @@ for f in $changed; do
 			;;
 		*)
 			# SKIPPED (gremlins' own notion of the diff was narrower than this
-			# gate's), TIMED OUT (the suite never reached a verdict), and
-			# anything unrecognised. The status travels with the record so the
-			# list below can say which of those it was.
+			# gate's), TIMED OUT (the suite never reached a verdict), RUNNABLE
+			# (identified and covered, but never run — what `--dry-run` leaves
+			# behind), and anything unrecognised. The status travels with the
+			# record so the list below can say which of those it was.
 			printf '%s%s%s%s%s%s%s\n' "$f" "$tab" "$line" "$tab" "$type" "$tab" "$status" >> "$tmp/undecided"
 			continue
 			;;
@@ -457,8 +459,10 @@ undecided_list() {
 	echo "  SKIPPED means gremlins' own notion of the diff was narrower than this"
 	echo "  gate's. TIMED OUT means the suite never finished under the mutant —"
 	echo "  usually worker contention, and #180's measurement found timeouts"
-	echo "  hiding real survivors. Anything else is a status this gate does not"
-	echo "  recognise, which is itself worth looking at."
+	echo "  hiding real survivors. RUNNABLE means the mutant was identified and"
+	echo "  covered but never run, which is what --dry-run leaves behind."
+	echo "  Anything else is a status this gate does not recognise, which is"
+	echo "  itself worth looking at."
 }
 
 if [ "${MUTATION_EXEMPT:-0}" = "1" ]; then
