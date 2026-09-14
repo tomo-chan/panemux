@@ -326,14 +326,17 @@ touched_lines() {
 # denominator the counts below are reported against: "2 undecided" says nothing
 # about whether the run was mostly useless or almost complete.
 scoped_count=0
+# What the line filter discarded. On #234 — six non-test Go files, 35 hunks —
+# gremlins produced 128 mutants in the touched files and exactly 5 sat on a
+# changed line. Without this number a scoped_count of 0 is unreadable: it could
+# mean the files held nothing to mutate, or that the scope threw everything
+# away, and those call for different reactions.
+file_mutant_count=0
 bare_marker=0
 untyped_marker=0
 malformed_marker=0
 
 for f in $changed; do
-	touched_lines "$f" | sort -un > "$tmp/touched"
-	[ -s "$tmp/touched" ] || continue
-
 	# Both spellings of the path. gremlins reports repository-relative paths;
 	# `<module>/<path>` is what coverage.out uses, and accepting it costs one
 	# comparison. Guessing wrong would leave every finding unmatched, which is
@@ -356,7 +359,17 @@ for f in $changed; do
 		BEGIN { mod = ENVIRON["MOD"]; file = ENVIRON["FILE"]; alt = (mod == "") ? "" : mod "/" file }
 		$1 == file || (alt != "" && $1 == alt) { print $2, $3, $4 }
 	' "$tmp/mutations" > "$tmp/file_mutations"
+	file_mutant_count=$((file_mutant_count + $(wc -l < "$tmp/file_mutations" | tr -d ' ')))
 	[ -s "$tmp/file_mutations" ] || continue
+
+	# AFTER the file-level count, not before it. `touched_lines` reports the
+	# lines a diff ADDS, so a file this branch only deleted from has an empty
+	# set — and with the skip ahead of the counter, such a file contributed
+	# nothing to "what the touched files held". A zero-scope run then claimed
+	# there were no mutants anywhere in those files about a file that still
+	# holds them, which is the one sentence this counter exists to get right.
+	touched_lines "$f" | sort -un > "$tmp/touched"
+	[ -s "$tmp/touched" ] || continue
 
 	while IFS="$tab" read -r line status type; do
 		[ -n "$line" ] || continue
@@ -523,7 +536,14 @@ exempt_note=""
 # and a false impression, and the headline is the line a reviewer reads — the
 # same rule the header states about a warning that could not run.
 undecided_note=""
-[ "$undecided_count" -gt 0 ] && undecided_note=", $undecided_count of $scoped_count mutant(s) undecided"
+[ "$undecided_count" -gt 0 ] && undecided_note=", $undecided_count undecided"
+
+# THE DENOMINATOR IS PART OF THE RESULT, not context for it. "no surviving
+# mutants" rests on five mutants or on fifty, and the sentence is identical
+# either way — which is the same conflation one level up from the one above.
+# Stage 4 cannot be decided without it: a gate that would rarely fire is not
+# thereby a safe gate, it is a gate that is often saying nothing.
+scope_note=" among $scoped_count on lines this branch changed"
 
 # Listed, not counted. A count says an exemption happened; only the list says
 # WHICH, and an exemption a reviewer cannot see is one nobody reviewed. #188
@@ -571,22 +591,43 @@ marker_notes() {
 	fi
 }
 
+# Nothing reached a verdict because there was nothing to reach one about. Not a
+# pass and not a failure: this gate asked no question, and has to say that
+# rather than borrow the wording of a branch whose mutants were all killed.
+if [ "$scoped_count" -eq 0 ]; then
+	echo "mutation: no mutants on the lines this branch changed — nothing was measured."
+	echo
+	if [ "$file_mutant_count" -gt 0 ]; then
+		echo "  gremlins produced $file_mutant_count mutant(s) in the files this branch touched, and"
+		echo "  none of them sits on a line the diff changed. That is what the line"
+		echo "  scope is for (decision D2) and what it costs: this run says nothing"
+		echo "  about whether the change is protected."
+	else
+		echo "  gremlins produced no mutants at all in the files this branch touched."
+		echo "  It mutates operator tokens in covered code, so a diff of type"
+		echo "  declarations, struct fields, plain returns or literals has nothing"
+		echo "  for it to change."
+	fi
+	marker_notes
+	exit 0
+fi
+
 if [ "${MUTATION_EXEMPT:-0}" = "1" ]; then
-	echo "mutation: exempt — MUTATION_EXEMPT=1 waived $kept_count finding(s)$exempt_note$undecided_note."
+	echo "mutation: exempt — MUTATION_EXEMPT=1 waived $kept_count finding(s)$scope_note$exempt_note$undecided_note."
 	exempt_list
 	undecided_list
 	exit 0
 fi
 
 if [ "$kept_count" -eq 0 ]; then
-	echo "mutation: no surviving mutants on lines this branch changed$exempt_note$undecided_note."
+	echo "mutation: no surviving mutants$scope_note$exempt_note$undecided_note."
 	exempt_list
 	undecided_list
 	marker_notes
 	exit 0
 fi
 
-echo "mutation: $kept_count surviving mutant(s) on lines this branch changed$exempt_note$undecided_note."
+echo "mutation: $kept_count surviving mutant(s)$scope_note$exempt_note$undecided_note."
 echo
 echo "  A surviving mutant is a change to your code that every test still"
 echo "  passes through. Either an assertion is missing, or the mutant is one"
