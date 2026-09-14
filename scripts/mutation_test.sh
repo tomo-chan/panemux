@@ -305,8 +305,15 @@ func New(n int) bool {
 	return false
 }
 EOF
+# The KILLED mutant beside it is load-bearing, and not padding. This case is
+# about NOT COVERED not being reported as a finding, which is a claim about the
+# MUTANT. A report containing nothing but the NOT COVERED one is also a run that
+# reached no verdict about anything, which fails for a different reason entirely
+# (case 43) and would make this case assert the two rules at once.
 write_report "$repo/rep.json" '{"go_module":"example","files":[
- {"file_name":"pkg/new.go","mutations":[{"type":"CONDITIONALS_BOUNDARY","status":"NOT COVERED","line":4,"column":5}]}]}'
+ {"file_name":"pkg/new.go","mutations":[
+   {"type":"CONDITIONALS_BOUNDARY","status":"NOT COVERED","line":4,"column":5},
+   {"type":"CONDITIONALS_NEGATION","status":"KILLED","line":4,"column":9}]}]}'
 commit_on_branch "$repo" "add new.go"
 out=$(run_checker "$repo" --base main --report rep.json)
 # Asserting the clean message as well as the absence: a bare "does not contain
@@ -749,8 +756,13 @@ func New(n int) bool {
 	return false
 }
 EOF
+# The KILLED mutant beside it is load-bearing, for the reason case 3 states: a
+# report of nothing but the NOT VIABLE one is also a run that decided nothing,
+# and this case is about the mutant rather than about the run.
 write_report "$repo/rep.json" '{"go_module":"example","files":[
- {"file_name":"pkg/new.go","mutations":[{"type":"CONDITIONALS_BOUNDARY","status":"NOT VIABLE","line":4,"column":5}]}]}'
+ {"file_name":"pkg/new.go","mutations":[
+   {"type":"CONDITIONALS_BOUNDARY","status":"NOT VIABLE","line":4,"column":5},
+   {"type":"CONDITIONALS_NEGATION","status":"KILLED","line":4,"column":9}]}]}'
 commit_on_branch "$repo" "add new.go"
 out=$(run_checker "$repo" --base main --report rep.json)
 if ! printf '%s' "$out" | grep -q 'no surviving'; then
@@ -1672,6 +1684,203 @@ elif printf '%s\n' "$out" | head -1 | grep -q 'FAIL'; then
 	fail "a clean branch does not say FAIL" "$out"
 else
 	pass "a clean branch says ok, in the same vocabulary as the failure"
+fi
+
+# ── 43. "Nothing was decided" is not only about SKIPPED ───────────────────────
+#
+# Review finding, reproduced against the real script before being believed. The
+# guard was keyed on `skipped_count > 0`, so a run whose every scoped mutant was
+# NOT COVERED took none of the failing arms and printed "ok — no surviving
+# mutants among 1", which is a clean verdict resting on nothing measured.
+#
+# NOT COVERED is G4(d)'s defect and this gate still does not report the mutants
+# themselves — the claim being corrected is about the RUN, not the mutant. The
+# case that makes it worth failing on: `make coverage-blocks` reports a changed
+# file in a package COVERAGE_PKGS excludes as "not measured" rather than failing,
+# so there are diffs where no other gate says anything either.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/new.go" <<'EOF'
+package pkg
+
+func New(n int) bool {
+	if n > 7 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/new.go","mutations":[{"type":"CONDITIONALS_BOUNDARY","status":"NOT COVERED","line":4,"column":5}]}]}'
+commit_on_branch "$repo" "add new.go"
+out=$(run_checker "$repo" --base main --report rep.json)
+rc=$?
+if [ "$rc" -ne 1 ]; then
+	fail "a run whose every mutant was NOT COVERED decided nothing and fails" "exit $rc: $out"
+elif printf '%s\n' "$out" | head -1 | grep -q 'no surviving mutants'; then
+	fail "it does not claim a clean verdict it never reached" "$out"
+elif ! printf '%s' "$out" | grep -qi 'nothing was decided'; then
+	fail "the headline says nothing was decided" "$out"
+elif printf '%s' "$(findings_only "$out")" | grep -q 'pkg/new.go:4'; then
+	# Still G4(d)'s mutant to report. The run failing and the mutant being
+	# listed as a finding here are different things, and only the first changed.
+	fail "the NOT COVERED mutant is still not reported as a finding" "$out"
+else
+	pass "a run that decided nothing fails even when nothing was skipped"
+fi
+
+# ── 44. …unless the author waived every one of them ───────────────────────────
+#
+# The other half of the same review finding, and the limit on 43. A marker is an
+# explicit, typed, reviewable claim that a mutant need not be killed, and it
+# does not depend on whether the mutant ran. If waiving every scoped mutant
+# still failed, the marker would be powerless in exactly the run where the
+# author has said the most about what they expect.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/new.go" <<'EOF'
+package pkg
+
+func New(n int) bool {
+	//mutation:exempt[CONDITIONALS_BOUNDARY] a tuning constant, not a boundary
+	if n > 7 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/new.go","mutations":[{"type":"CONDITIONALS_BOUNDARY","status":"SKIPPED","line":5,"column":5}]}]}'
+commit_on_branch "$repo" "add new.go"
+out=$(run_checker "$repo" --base main --report rep.json)
+rc=$?
+if [ "$rc" -ne 0 ]; then
+	fail "waiving every scoped mutant clears the nothing-decided failure" "exit $rc: $out"
+elif ! printf '%s' "$out" | grep -q 'Exempt by'; then
+	fail "the waived mutant is still listed" "$out"
+else
+	pass "a run in which every scoped mutant was waived does not fail"
+fi
+
+# ── 45. A partial waiver does not clear it ────────────────────────────────────
+#
+# What keeps 44 from swallowing 43: "every scoped mutant was waived" has to mean
+# every one. One waived mutant beside one that reached no verdict is still a run
+# that decided nothing, and the author has spoken for only half of it.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/new.go" <<'EOF'
+package pkg
+
+func New(n, m int) bool {
+	//mutation:exempt[CONDITIONALS_BOUNDARY] a tuning constant, not a boundary
+	if n > 7 {
+		return true
+	}
+	if m > 9 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/new.go","mutations":[
+   {"type":"CONDITIONALS_BOUNDARY","status":"SKIPPED","line":5,"column":5},
+   {"type":"CONDITIONALS_BOUNDARY","status":"SKIPPED","line":8,"column":5}]}]}'
+commit_on_branch "$repo" "add new.go"
+out=$(run_checker "$repo" --base main --report rep.json)
+rc=$?
+if [ "$rc" -ne 1 ]; then
+	fail "one waiver among two undecided mutants does not clear the run" "exit $rc: $out"
+elif ! printf '%s' "$out" | grep -qi 'nothing was decided'; then
+	fail "the headline still says nothing was decided" "$out"
+else
+	pass "waiving some but not all scoped mutants still fails"
+fi
+
+# ── 46. The branch-wide label says what it actually waived ────────────────────
+#
+# Review finding. MUTATION_EXEMPT=1 on a run whose only failure was an undecided
+# mutant printed "waived 0 finding(s)" — while being the only reason the run
+# exited 0. A label that reports waiving nothing, in the run it rescued, is the
+# same class of false statement this whole gate is about.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/new.go" <<'EOF'
+package pkg
+
+func New(n int) bool {
+	if n > 7 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/new.go","mutations":[{"type":"CONDITIONALS_BOUNDARY","status":"TIMED OUT","line":4,"column":5}]}]}'
+commit_on_branch "$repo" "add new.go"
+out=$(cd "$repo" && MUTATION_EXEMPT=1 sh "$checker" --base main --report rep.json 2>&1)
+rc=$?
+headline=$(printf '%s\n' "$out" | head -1)
+if [ "$rc" -ne 0 ]; then
+	fail "MUTATION_EXEMPT=1 still clears the run" "exit $rc: $out"
+elif ! printf '%s' "$headline" | grep -q '1 undecided mutant'; then
+	# The quantity that was missing. "waived 0 finding(s)" on its own was the
+	# whole sentence, so the label reported waiving nothing in the run that
+	# would have been red without it. `grep -q 'waived 0'` is NOT the assertion
+	# to write here: "waived 0 finding(s) and 1 undecided mutant(s)" contains it
+	# and is correct — there were no findings. What has to be present is the
+	# count that explains the exit code.
+	fail "the label names the undecided mutant it waived" "$out"
+elif ! printf '%s' "$out" | grep -q 'waived the failure for deciding nothing'; then
+	fail "the label says it also waived the nothing-decided failure" "$out"
+else
+	pass "MUTATION_EXEMPT=1 counts what it actually waived"
+fi
+
+# ── 47. The undecided explanation describes only what can be in that list ─────
+#
+# Review finding. SKIPPED moved to its own section and its own consequence, but
+# the undecided trailer still opened with "SKIPPED means …" — so the first thing
+# a reader saw about their timeout explained a status that cannot appear there,
+# and contradicted the section directly below it about whether it fails.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/new.go" <<'EOF'
+package pkg
+
+func New(n int) bool {
+	if n > 7 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/new.go","mutations":[
+   {"type":"INVERT_NEGATIVES","status":"TIMED OUT","line":4,"column":5},
+   {"type":"CONDITIONALS_NEGATION","status":"KILLED","line":4,"column":9}]}]}'
+commit_on_branch "$repo" "add new.go"
+out=$(run_checker "$repo" --base main --report rep.json)
+undecided_section=$(printf '%s\n' "$out" | awk '/^  Undecided/ { on = 1 } /^  Skipped by/ { on = 0 } on { print }')
+if [ -z "$undecided_section" ]; then
+	fail "the undecided section is present to check" "$out"
+elif printf '%s' "$undecided_section" | grep -q 'SKIPPED'; then
+	fail "the undecided explanation does not describe SKIPPED" "$undecided_section"
+elif ! printf '%s' "$undecided_section" | grep -q 'TIMED OUT'; then
+	fail "the undecided explanation still describes TIMED OUT" "$undecided_section"
+else
+	pass "the undecided explanation covers only statuses that can appear there"
 fi
 
 # ── Result ────────────────────────────────────────────────────────────────────

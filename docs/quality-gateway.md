@@ -413,10 +413,33 @@ So `SKIPPED` is **two diff implementations disagreeing**, not a fact about anyon
 to the line can change it. Failing on it is principle 4's exact shape: a red build for a condition the
 person reading it cannot act on. It is reported and does not fail.
 
-**One skipped mutant is a disagreement; all of them is a run that measured nothing**, so the gate
-fails when no scoped mutant reached `LIVED` or `KILLED` at all. The condition is total rather than a
-proportion deliberately — any threshold below "nothing was decided" would be a number nobody could
-defend, and principle 4 applies to arbitrary thresholds as much as to noisy findings.
+**One skipped mutant is a disagreement; a run in which nothing reached a verdict measured nothing**,
+so the gate fails when no scoped mutant reached `LIVED` or `KILLED` at all. The condition is total
+rather than a proportion deliberately — any threshold below "nothing was decided" would be a number
+nobody could defend, and principle 4 applies to arbitrary thresholds as much as to noisy findings.
+
+**That check was written keyed on `SKIPPED` first, and review caught the two holes that left.** Its
+own comment claimed `decided_count == 0` was the whole test while the code also required
+`skipped_count > 0`, and the gap between the two was reachable from both sides:
+
+- A run whose every scoped mutant was `NOT COVERED` printed `ok — no surviving mutants among 1`. The
+  reflex answer is that G4(d) fails on those instead, and it usually does — but `make coverage-blocks`
+  reports a changed file in a package `COVERAGE_PKGS` excludes as *not measured* rather than failing,
+  so there are diffs about which no gate would have said anything at all.
+- A run whose every scoped mutant was `SKIPPED` **and waived** printed the same clean sentence,
+  because the exempt arm runs before the skipped one and `skipped_count` never rose.
+
+The condition is now simply "nothing reached a verdict", whatever the cause, and the failure names the
+composition — how many were skipped, undecided, uncovered or non-viable — because the action differs
+by cause. Note what this does *not* change: a `NOT COVERED` mutant is still never reported here as a
+finding. **The claim being corrected is about the run, not about the mutant**, and those are different
+sentences.
+
+**The one exception is an explicit waiver of every scoped mutant.** A `//mutation:exempt` is a typed,
+reasoned, reviewable claim that a mutant need not be killed, and that claim does not depend on whether
+the mutant ran. Failing anyway would make the marker powerless in precisely the run where the author
+has said the most about what they expect. Partial waivers do not qualify: they speak for part of the
+run.
 
 The general lesson is the one this repository keeps relearning: **"no verdict" is not one category.**
 `TIMED OUT` is this gate trying to get an answer and failing, which the author can re-run or waive.
