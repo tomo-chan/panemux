@@ -217,14 +217,16 @@ func New(n int) bool {
 	return false
 }
 EOF
-write_report "$repo/rep.json" '{"go_module":"example","files":[
- {"file_name":"pkg/new.go","mutations":[{"type":"CONDITIONALS_BOUNDARY","status":"SKIPPED","line":4,"column":5}]}]}'
 commit_on_branch "$repo" "add new.go"
-write_report "$repo/rep2.json" '{"go_module":"example","files":[
+# The KILLED mutant beside the SKIPPED one is load-bearing, for the reason cases
+# 3 and 18 state: a report of nothing but the SKIPPED one is also a run that
+# decided nothing, which fails under case 43's rule and would make this case
+# assert two rules at once.
+write_report "$repo/rep.json" '{"go_module":"example","files":[
  {"file_name":"pkg/new.go","mutations":[
    {"type":"CONDITIONALS_BOUNDARY","status":"SKIPPED","line":4,"column":5},
    {"type":"CONDITIONALS_NEGATION","status":"KILLED","line":4,"column":5}]}]}'
-out=$(run_checker "$repo" --base main --report rep2.json)
+out=$(run_checker "$repo" --base main --report rep.json)
 rc=$?
 if ! printf '%s' "$out" | grep -q 'Skipped by gremlins'; then
 	fail "a SKIPPED mutant on a changed line is reported" "$out"
@@ -1881,6 +1883,49 @@ elif ! printf '%s' "$undecided_section" | grep -q 'TIMED OUT'; then
 	fail "the undecided explanation still describes TIMED OUT" "$undecided_section"
 else
 	pass "the undecided explanation covers only statuses that can appear there"
+fi
+
+# ── 48. Everything that names a gremlins version names the same one ───────────
+#
+# Review finding, and the one in that round worth a test rather than only a
+# correction. The version is stated in three files: the workflow installs one,
+# and the Makefile comment and this script's own "not found" message each tell a
+# developer which to install. They had drifted — CI pinned v0.6.0 while both
+# instructions said @latest.
+#
+# Pre-existing, and the gate is what made it matter. While `make mutation` only
+# warned, a developer running a different gremlins than CI got different advice.
+# Now they can get a different VERDICT: a survivor the pinned version finds and a
+# newer one does not, or the reverse, is a build that passes locally and fails in
+# CI with nothing in the diff to explain it. mutation.yml's own comment already
+# says why it is pinned — "so a new release cannot change what this job reports
+# without anyone choosing that" — and an instruction to install something else
+# defeats that for everyone who follows it.
+#
+# The workflow is the authority because it is the one that actually installs.
+# Prose is not checked here and could not usefully be; three version strings
+# agreeing is a fact, and this is the assertion that would have caught the drift.
+
+checks=$((checks + 1))
+repo_root=$(CDPATH='' cd -- "$scripts_dir/.." && pwd)
+workflow="$repo_root/.github/workflows/mutation.yml"
+ci_version=$(sed -n 's|.*gremlins/cmd/gremlins@\([^ "]*\).*|\1|p' "$workflow" | head -1)
+if [ -z "$ci_version" ]; then
+	fail "the workflow names a gremlins version to compare against" "none found in $workflow"
+else
+	drift=""
+	for f in "$repo_root/Makefile" "$scripts_dir/mutation.sh"; do
+		for v in $(sed -n 's|.*gremlins/cmd/gremlins@\([^ "]*\).*|\1|p' "$f"); do
+			[ "$v" = "$ci_version" ] && continue
+			drift="$drift
+    $(basename "$f") says @$v, the workflow installs @$ci_version"
+		done
+	done
+	if [ -n "$drift" ]; then
+		fail "every gremlins install instruction names the version CI installs" "$drift"
+	else
+		pass "every gremlins install instruction names the version CI installs"
+	fi
 fi
 
 # ── Result ────────────────────────────────────────────────────────────────────

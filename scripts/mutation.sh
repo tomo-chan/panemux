@@ -268,7 +268,7 @@ if [ -z "$report" ]; then
 	if ! command -v "$gremlins_bin" > /dev/null 2>&1; then
 		echo "mutation: ERROR — '$gremlins_bin' not found on PATH."
 		echo "  Install it, or pass a report from an earlier run:"
-		echo "    go install github.com/go-gremlins/gremlins/cmd/gremlins@latest"
+		echo "    go install github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0"
 		echo "    sh scripts/mutation.sh --base $base --report gremlins.json"
 		exit 1
 	fi

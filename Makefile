@@ -157,15 +157,30 @@ test-coverage-blocks:
 # repository that survive every test, all of them in code (d) reports as
 # covered.
 #
-# A WARNING, not a gate: a survivor prints and exits 0. Stage 3 of item 6's
-# four. 34% of the measured survivors are ones nobody should "fix" — buffer
-# sizes and timeout constants whose killing test would be a tautology — so
-# failing on them would make this wrong more often than right, which is how a
-# gate loses the credibility the working ones depend on (principle 4). Making
-# it fail is stage 4, and a deliberate separate change.
+# A GATE: a mutant on a changed line that survives, or that reaches no verdict,
+# exits 1. Stage 4 of item 6's four, and it warned through the first three.
+# 34% of the measured survivors are ones nobody should "fix" — buffer sizes and
+# timeout constants whose killing test would be a tautology — so failing on
+# them from the start would have made this wrong more often than right, which
+# is how a gate loses the credibility the working ones depend on (principle 4).
+# What changed is that those survivors now have a per-type waiver to go to
+# (#236), a mutant with no verdict can no longer be dropped silently (#235),
+# and the size of a red run is known — about 5 mutants per 317 changed lines
+# (#237). Decision D9 in docs/quality-gateway.md carries the measurements.
+#
+# SKIPPED is the exception and does not fail on its own: gremlins sets it from
+# its own diff, whose changed-line arithmetic is an approximation, so it is two
+# diff implementations disagreeing rather than anything about the tests. A run
+# in which NOTHING reached a verdict does fail.
 #
 # Needs gremlins, which `make install-deps` does not install:
-#   go install github.com/go-gremlins/gremlins/cmd/gremlins@latest
+#   go install github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0
+#
+# PINNED, to the version mutation.yml installs — scripts/mutation_test.sh fails
+# if the three places that name a version drift apart. Being a gate is what
+# raised the stakes: a developer running a different gremlins than CI can now
+# get a different VERDICT rather than merely different advice, which is a build
+# that passes locally and fails in CI with nothing in the diff to explain it.
 #
 # Outside `make check` for the reason `make efficacy` and `make coverage-blocks`
 # are: it needs the base branch. It runs as its own pull-request CI job.
