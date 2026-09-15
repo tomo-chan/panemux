@@ -129,11 +129,17 @@ run_checker() {
 # exempt section returned everything, and every "is not a finding" assertion
 # against it passed for the wrong reason.
 #
-# awk rather than sed: the two-header form needs alternation, and BRE's `\|` is
+# awk rather than sed: the multi-header form needs alternation, and BRE's `\|` is
 # a GNU extension that macOS's sed does not have — the portability class of bug
 # #233 fixed in scenarios_check.sh.
+#
+# EVERY trailing section is a boundary, and this has now been wrong twice for the
+# same reason: a header it does not know about is one whose rows leak back into
+# what this returns, and every "is not a finding" assertion against them passes
+# for the wrong reason. "Skipped by gremlins" is the third. A fourth section
+# needs a fourth arm here in the same change.
 findings_only() {
-	printf '%s\n' "$1" | awk '/^  Exempt by/ || /^  Undecided/ { exit } { print }'
+	printf '%s\n' "$1" | awk '/^  Exempt by/ || /^  Undecided/ || /^  Skipped by/ { exit } { print }'
 }
 
 # ── 1. Diff scoping ───────────────────────────────────────────────────────────
@@ -180,8 +186,8 @@ write_report "$repo/rep.json" '{"go_module":"example","files":[
 commit_on_branch "$repo" "append New to mixed.go"
 out=$(run_checker "$repo" --base main --report rep.json)
 rc=$?
-if [ "$rc" -ne 0 ]; then
-	fail "a survivor on a changed line warns rather than failing" "exit $rc: $out"
+if [ "$rc" -ne 1 ]; then
+	fail "a survivor on a changed line fails the build" "exit $rc: $out"
 elif ! printf '%s' "$out" | grep -q 'pkg/mixed.go:11'; then
 	fail "a survivor on a changed line is reported" "$out"
 elif printf '%s' "$out" | grep -q 'pkg/mixed.go:4'; then
@@ -189,7 +195,7 @@ elif printf '%s' "$out" | grep -q 'pkg/mixed.go:4'; then
 elif ! printf '%s' "$out" | grep -q '1 surviving mutant'; then
 	fail "exactly one of the two survivors is reported" "$out"
 else
-	pass "reports survivors on changed lines only, and warns rather than failing"
+	pass "reports survivors on changed lines only"
 fi
 
 # ── 2. A skipped mutant on a changed line is reported as undecided ────────────
@@ -211,18 +217,75 @@ func New(n int) bool {
 	return false
 }
 EOF
+commit_on_branch "$repo" "add new.go"
+# The KILLED mutant beside the SKIPPED one is load-bearing, for the reason cases
+# 3 and 18 state: a report of nothing but the SKIPPED one is also a run that
+# decided nothing, which fails under case 43's rule and would make this case
+# assert two rules at once.
 write_report "$repo/rep.json" '{"go_module":"example","files":[
- {"file_name":"pkg/new.go","mutations":[{"type":"CONDITIONALS_BOUNDARY","status":"SKIPPED","line":4,"column":5}]}]}'
+ {"file_name":"pkg/new.go","mutations":[
+   {"type":"CONDITIONALS_BOUNDARY","status":"SKIPPED","line":4,"column":5},
+   {"type":"CONDITIONALS_NEGATION","status":"KILLED","line":4,"column":5}]}]}'
+out=$(run_checker "$repo" --base main --report rep.json)
+rc=$?
+if ! printf '%s' "$out" | grep -q 'Skipped by gremlins'; then
+	fail "a SKIPPED mutant on a changed line is reported" "$out"
+elif ! printf '%s' "$out" | grep -q 'pkg/new.go:4.*SKIPPED'; then
+	fail "the list says WHY THIS mutant has no verdict" "$out"
+elif [ "$rc" -ne 0 ]; then
+	# NOT a failure on its own, and this is the one status where that is the
+	# answer. gremlins sets SKIPPED from its own diff alone
+	# (internal/engine/engine.go: `if !Diff.IsChanged(pos) { status = Skipped }`)
+	# and its changed-line window is an approximation — internal/diff/diff.go
+	# takes each hunk's added lines to run contiguously from the fragment's
+	# start. Measured on #231's real report: two mutants on a line that branch
+	# added came back SKIPPED because git's `@@ -50 +51,11 @@` covers line 58
+	# and gremlins' window does not. There is no edit to that line that changes
+	# it, so failing would be a red build nobody can act on.
+	fail "a SKIPPED mutant does not fail the build on its own" "exit $rc: $out"
+elif printf '%s' "$(findings_only "$out")" | grep -q 'pkg/new.go:4'; then
+	fail "a SKIPPED mutant is not claimed as a survivor" "$out"
+else
+	pass "a SKIPPED mutant is reported without failing the build"
+fi
+
+# ── 2b. …unless gremlins skipped everything ───────────────────────────────────
+#
+# The fail-open the case above would otherwise open. One skipped mutant is two
+# diff implementations disagreeing about one hunk. A run in which NOTHING
+# reached a verdict is "no surviving mutants" resting on nothing measured, which
+# is the sentence this script's header forbids. The condition is total rather
+# than a proportion on purpose: any threshold below "nothing was decided" would
+# be a number nobody could defend.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/new.go" <<'EOF'
+package pkg
+
+func New(n int) bool {
+	if n > 7 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/new.go","mutations":[
+   {"type":"CONDITIONALS_BOUNDARY","status":"SKIPPED","line":4,"column":5},
+   {"type":"CONDITIONALS_NEGATION","status":"SKIPPED","line":4,"column":5}]}]}'
 commit_on_branch "$repo" "add new.go"
 out=$(run_checker "$repo" --base main --report rep.json)
-if ! printf '%s' "$out" | grep -q 'Undecided'; then
-	fail "a SKIPPED mutant on a changed line is reported as undecided" "$out"
-elif ! printf '%s' "$out" | grep -q 'pkg/new.go:4'; then
-	fail "the undecided list names the mutant" "$out"
-elif ! printf '%s' "$out" | grep -q 'pkg/new.go:4.*SKIPPED'; then
-	fail "the undecided list says WHY THIS mutant has no verdict" "$out"
+rc=$?
+if [ "$rc" -ne 1 ]; then
+	fail "a run in which every scoped mutant was skipped fails" "exit $rc: $out"
+elif ! printf '%s\n' "$out" | head -1 | grep -q 'FAIL'; then
+	fail "the headline says the gate failed" "$out"
+elif ! printf '%s' "$out" | grep -qi 'nothing was decided'; then
+	fail "the headline says nothing was decided, not that nothing survived" "$out"
 else
-	pass "a SKIPPED mutant on a changed line is reported as undecided"
+	pass "a run in which gremlins skipped everything fails"
 fi
 
 # ── 3. NOT COVERED is left to the per-block gate, not double-reported ─────────
@@ -244,8 +307,15 @@ func New(n int) bool {
 	return false
 }
 EOF
+# The KILLED mutant beside it is load-bearing, and not padding. This case is
+# about NOT COVERED not being reported as a finding, which is a claim about the
+# MUTANT. A report containing nothing but the NOT COVERED one is also a run that
+# reached no verdict about anything, which fails for a different reason entirely
+# (case 43) and would make this case assert the two rules at once.
 write_report "$repo/rep.json" '{"go_module":"example","files":[
- {"file_name":"pkg/new.go","mutations":[{"type":"CONDITIONALS_BOUNDARY","status":"NOT COVERED","line":4,"column":5}]}]}'
+ {"file_name":"pkg/new.go","mutations":[
+   {"type":"CONDITIONALS_BOUNDARY","status":"NOT COVERED","line":4,"column":5},
+   {"type":"CONDITIONALS_NEGATION","status":"KILLED","line":4,"column":9}]}]}'
 commit_on_branch "$repo" "add new.go"
 out=$(run_checker "$repo" --base main --report rep.json)
 # Asserting the clean message as well as the absence: a bare "does not contain
@@ -654,8 +724,8 @@ write_report "$repo/rep.json" '{"go_module":"example","files":[
 commit_on_branch "$repo" "add new.go"
 out=$(run_checker "$repo" --base main --report rep.json)
 rc=$?
-if [ "$rc" -ne 0 ]; then
-	fail "a TIMED OUT mutant still exits 0 at stage 3" "exit $rc: $out"
+if [ "$rc" -ne 1 ]; then
+	fail "a TIMED OUT mutant fails the build at stage 4" "exit $rc: $out"
 elif ! printf '%s' "$out" | grep -q 'pkg/new.go:4'; then
 	fail "a TIMED OUT mutant on a changed line is reported at all" "$out"
 elif ! printf '%s' "$out" | grep -q 'pkg/new.go:4.*TIMED OUT'; then
@@ -688,8 +758,13 @@ func New(n int) bool {
 	return false
 }
 EOF
+# The KILLED mutant beside it is load-bearing, for the reason case 3 states: a
+# report of nothing but the NOT VIABLE one is also a run that decided nothing,
+# and this case is about the mutant rather than about the run.
 write_report "$repo/rep.json" '{"go_module":"example","files":[
- {"file_name":"pkg/new.go","mutations":[{"type":"CONDITIONALS_BOUNDARY","status":"NOT VIABLE","line":4,"column":5}]}]}'
+ {"file_name":"pkg/new.go","mutations":[
+   {"type":"CONDITIONALS_BOUNDARY","status":"NOT VIABLE","line":4,"column":5},
+   {"type":"CONDITIONALS_NEGATION","status":"KILLED","line":4,"column":9}]}]}'
 commit_on_branch "$repo" "add new.go"
 out=$(run_checker "$repo" --base main --report rep.json)
 if ! printf '%s' "$out" | grep -q 'no surviving'; then
@@ -804,9 +879,16 @@ if [ "$rc" -ne 0 ]; then
 	fail "--help exits 0" "exit $rc: $out"
 elif ! printf '%s' "$out" | grep -q 'UNDECIDED'; then
 	fail "--help prints the middle of the header, not just its ends" "$out"
-elif ! printf '%s\n' "$out" | grep -v '^[[:space:]]*$' | tail -1 | grep -q 'Exit codes:'; then
+elif ! printf '%s\n' "$out" | grep -v '^[[:space:]]*$' | tail -1 | grep -q 'the gate could not run\.$'; then
 	# The LAST line, because that one assertion carries both failure modes:
 	# stopping short ends on another sentence, overshooting ends on `set -u`.
+	#
+	# It anchors on the closing words rather than on "Exit codes:", which is
+	# where the same sentence began when it fitted on one line. Pinning the
+	# opening of a paragraph cannot see a header that grows a line after it; the
+	# end of the last sentence can. That this needed changing at all is the
+	# assertion working: the exit-code contract gained a clause in this change
+	# and wrapped onto a second line.
 	fail "--help ends exactly at the header's last line" "$out"
 else
 	pass "--help prints the whole header and only the header"
@@ -1329,8 +1411,8 @@ write_report "$repo/rep.json" '{"go_module":"example","files":[
 commit_on_branch "$repo" "add new.go"
 out=$(run_checker "$repo" --base main --report rep.json)
 rc=$?
-if [ "$rc" -ne 0 ]; then
-	fail "a RUNNABLE mutant still exits 0 at stage 3" "exit $rc: $out"
+if [ "$rc" -ne 1 ]; then
+	fail "a RUNNABLE mutant fails the build at stage 4" "exit $rc: $out"
 elif ! printf '%s' "$out" | grep -q 'pkg/new.go:4.*RUNNABLE'; then
 	fail "a RUNNABLE mutant on a changed line is reported as undecided" "$out"
 elif ! printf '%s\n' "$out" | grep -v 'pkg/new.go' | grep -q 'RUNNABLE'; then
@@ -1340,6 +1422,510 @@ elif ! printf '%s\n' "$out" | grep -v 'pkg/new.go' | grep -q 'RUNNABLE'; then
 	fail "the explanation names RUNNABLE rather than calling it unrecognised" "$out"
 else
 	pass "RUNNABLE is reported as undecided and explained, not treated as unknown"
+fi
+
+# ── 35. A survivor fails the build ────────────────────────────────────────────
+#
+# Stage 4 of roadmap item 6 in #180. The exit code is the whole change: stages 1
+# to 3 built a reporter nobody had to act on, and a warning nobody has to act on
+# is a gate only in the sense that it occupies the slot where one would go.
+#
+# Pinned separately from case 1 rather than by editing it, because the two
+# assert different things. Case 1 asserts WHICH mutants are reported — the line
+# scope — and would pass with any exit code. This asserts the verdict.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/new.go" <<'EOF'
+package pkg
+
+func New(n int) bool {
+	if n > 7 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/new.go","mutations":[{"type":"CONDITIONALS_BOUNDARY","status":"LIVED","line":4,"column":5}]}]}'
+commit_on_branch "$repo" "add new.go"
+out=$(run_checker "$repo" --base main --report rep.json)
+rc=$?
+if [ "$rc" -ne 1 ]; then
+	fail "a surviving mutant fails the build" "exit $rc: $out"
+elif ! printf '%s\n' "$out" | head -1 | grep -q 'FAIL'; then
+	# In the HEADLINE. An exit code is read by CI; the headline is read by the
+	# person who has to do something about it, and "1 surviving mutant(s)" on
+	# its own said the same thing when the answer was "carry on".
+	fail "the headline says the gate failed, not only the exit code" "$out"
+elif printf '%s' "$out" | grep -qi 'does not fail the build'; then
+	fail "the trailer no longer calls itself a warning" "$out"
+elif ! printf '%s' "$out" | grep -q 'mutation:exempt'; then
+	fail "the trailer still says how to waive the one mutant" "$out"
+else
+	pass "a surviving mutant fails the build"
+fi
+
+# ── 36. An undecided mutant fails the build too ───────────────────────────────
+#
+# The fail-open that gating would otherwise open, and the reason #235 exists.
+# Before stage 4 both arms exited 0, so "every mutant on the diff timed out" and
+# "every mutant was killed" differed only in wording. Once a survivor fails, a
+# run that reached no verdict would be the one remaining way to get a green tick
+# out of a gate that decided nothing — and #180's measurement found timeouts
+# hiding 51 survivors, so that is not a hypothetical.
+#
+# This follows the rule scripts/efficacy.sh states in its own header and this
+# repository already lives with: "Could not check" is a failure, never a skip.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/new.go" <<'EOF'
+package pkg
+
+func New(n int) bool {
+	if n > 7 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/new.go","mutations":[{"type":"CONDITIONALS_BOUNDARY","status":"TIMED OUT","line":4,"column":5}]}]}'
+commit_on_branch "$repo" "add new.go"
+out=$(run_checker "$repo" --base main --report rep.json)
+rc=$?
+if [ "$rc" -ne 1 ]; then
+	fail "a mutant that reached no verdict fails the build" "exit $rc: $out"
+elif ! printf '%s\n' "$out" | head -1 | grep -q 'FAIL'; then
+	fail "the undecided headline says the gate failed" "$out"
+elif printf '%s' "$(findings_only "$out")" | grep -q 'pkg/new.go:4'; then
+	# Failing is not the same as calling it a survivor. The distinction #235
+	# drew has to survive the exit code changing: this mutant is not evidence
+	# of a missing assertion, it is evidence of a run that did not finish.
+	fail "an undecided mutant fails without being claimed as a survivor" "$out"
+else
+	pass "an undecided mutant fails the build without becoming a survivor"
+fi
+
+# ── 37. The marker is what keeps a survivor green ─────────────────────────────
+#
+# The complement of 35, and the half that decides whether stage 4 is livable.
+# 34% of this repository's survivors are ones nobody should "fix"; if the marker
+# did not actually clear the exit code, the only escape would be the
+# branch-wide label and the gate would be all-or-nothing.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/new.go" <<'EOF'
+package pkg
+
+func New(n int) bool {
+	//mutation:exempt[CONDITIONALS_BOUNDARY] a tuning constant, not a boundary
+	if n > 7 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/new.go","mutations":[{"type":"CONDITIONALS_BOUNDARY","status":"LIVED","line":5,"column":5}]}]}'
+commit_on_branch "$repo" "add new.go"
+out=$(run_checker "$repo" --base main --report rep.json)
+rc=$?
+if [ "$rc" -ne 0 ]; then
+	fail "an exempted survivor does not fail the build" "exit $rc: $out"
+elif ! printf '%s' "$out" | grep -q 'Exempt by'; then
+	fail "the exempted survivor is still listed" "$out"
+else
+	pass "a waived survivor keeps the build green and is still listed"
+fi
+
+# ── 38. A waived line does not fail on a slow runner ──────────────────────────
+#
+# The false positive stage 4 introduces if the marker only ever reached the
+# LIVED arm. A mutant the author has already waived by type is one they have
+# said need not be killed; whether the runner reached a verdict about it is a
+# fact about the runner, not about the code. Failing there would fail a build
+# for a mutant nobody is asking anyone to kill — principle 4 in
+# docs/quality-gateway.md, and the exact shape that gets a gate routed around.
+#
+# TIMED OUT is the status that makes this reachable in practice: #180's
+# measurement found 44% of runnable mutants timing out under gremlins' own
+# defaults, and this repository's eleven markers all sit on lines carrying one
+# to three further types.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/new.go" <<'EOF'
+package pkg
+
+func New(n int) bool {
+	//mutation:exempt[CONDITIONALS_BOUNDARY] a tuning constant, not a boundary
+	if n > 7 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/new.go","mutations":[{"type":"CONDITIONALS_BOUNDARY","status":"TIMED OUT","line":5,"column":5}]}]}'
+commit_on_branch "$repo" "add new.go"
+out=$(run_checker "$repo" --base main --report rep.json)
+rc=$?
+if [ "$rc" -ne 0 ]; then
+	fail "a marker waives an undecided mutant of the type it names" "exit $rc: $out"
+elif ! printf '%s' "$out" | grep -q 'TIMED OUT'; then
+	# Waived is not hidden. The reader has to be able to see that the verdict
+	# behind this waiver was "no verdict", not "killed".
+	fail "the waived mutant still shows the status it reached" "$out"
+else
+	pass "a marker waives an undecided mutant of the type it names"
+fi
+
+# ── 39. A marker that names another type does not waive an undecided mutant ───
+#
+# The complement of 38, and what keeps it from being a hole: if any marker on
+# the line silenced any undecided mutant, #236's whole point — that a waiver
+# covers the type it names and not its neighbours — would hold for survivors
+# and quietly not hold here.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/new.go" <<'EOF'
+package pkg
+
+func New(n int) bool {
+	//mutation:exempt[CONDITIONALS_BOUNDARY] a tuning constant, not a boundary
+	if n > 7 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/new.go","mutations":[{"type":"CONDITIONALS_NEGATION","status":"TIMED OUT","line":5,"column":5}]}]}'
+commit_on_branch "$repo" "add new.go"
+out=$(run_checker "$repo" --base main --report rep.json)
+rc=$?
+if [ "$rc" -ne 1 ]; then
+	fail "a marker for another type leaves an undecided mutant undecided" "exit $rc: $out"
+elif ! printf '%s' "$out" | grep -q 'pkg/new.go:5.*CONDITIONALS_NEGATION'; then
+	fail "the unwaived undecided mutant is still named" "$out"
+else
+	pass "a marker for another type does not waive an undecided mutant"
+fi
+
+# ── 40. The branch-wide label still clears an undecided-only branch ───────────
+#
+# MUTATION_EXEMPT=1 is the blunter tool and has to stay blunt: once undecided
+# mutants can fail the build, a branch whose only finding is a timeout needs the
+# same escape a branch full of survivors has. Case 7 covers the survivor half.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/new.go" <<'EOF'
+package pkg
+
+func New(n int) bool {
+	if n > 7 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/new.go","mutations":[{"type":"CONDITIONALS_BOUNDARY","status":"TIMED OUT","line":4,"column":5}]}]}'
+commit_on_branch "$repo" "add new.go"
+out=$(cd "$repo" && MUTATION_EXEMPT=1 sh "$checker" --base main --report rep.json 2>&1)
+rc=$?
+if [ "$rc" -ne 0 ]; then
+	fail "MUTATION_EXEMPT=1 clears a branch whose only finding is undecided" "exit $rc: $out"
+elif ! printf '%s' "$out" | grep -q 'TIMED OUT'; then
+	fail "the waived branch still shows what was undecided" "$out"
+else
+	pass "MUTATION_EXEMPT=1 clears an undecided-only branch"
+fi
+
+# ── 41. A clean branch says so in the same vocabulary ─────────────────────────
+#
+# Symmetry with 35: once one headline says FAIL, the passing one has to say
+# something equally scannable, or "no FAIL in the output" becomes the way people
+# read the result — which is exactly how a truncated or crashed run gets read as
+# a pass. scripts/efficacy.sh already uses this pair.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/new.go" <<'EOF'
+package pkg
+
+func New(n int) bool {
+	if n > 7 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/new.go","mutations":[{"type":"CONDITIONALS_BOUNDARY","status":"KILLED","line":4,"column":5}]}]}'
+commit_on_branch "$repo" "add new.go"
+out=$(run_checker "$repo" --base main --report rep.json)
+rc=$?
+if [ "$rc" -ne 0 ]; then
+	fail "a clean branch exits 0" "exit $rc: $out"
+elif ! printf '%s\n' "$out" | head -1 | grep -q 'ok'; then
+	fail "a clean branch says ok in the headline" "$out"
+elif printf '%s\n' "$out" | head -1 | grep -q 'FAIL'; then
+	fail "a clean branch does not say FAIL" "$out"
+else
+	pass "a clean branch says ok, in the same vocabulary as the failure"
+fi
+
+# ── 43. "Nothing was decided" is not only about SKIPPED ───────────────────────
+#
+# Review finding, reproduced against the real script before being believed. The
+# guard was keyed on `skipped_count > 0`, so a run whose every scoped mutant was
+# NOT COVERED took none of the failing arms and printed "ok — no surviving
+# mutants among 1", which is a clean verdict resting on nothing measured.
+#
+# NOT COVERED is G4(d)'s defect and this gate still does not report the mutants
+# themselves — the claim being corrected is about the RUN, not the mutant. The
+# case that makes it worth failing on: `make coverage-blocks` reports a changed
+# file in a package COVERAGE_PKGS excludes as "not measured" rather than failing,
+# so there are diffs where no other gate says anything either.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/new.go" <<'EOF'
+package pkg
+
+func New(n int) bool {
+	if n > 7 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/new.go","mutations":[{"type":"CONDITIONALS_BOUNDARY","status":"NOT COVERED","line":4,"column":5}]}]}'
+commit_on_branch "$repo" "add new.go"
+out=$(run_checker "$repo" --base main --report rep.json)
+rc=$?
+if [ "$rc" -ne 1 ]; then
+	fail "a run whose every mutant was NOT COVERED decided nothing and fails" "exit $rc: $out"
+elif printf '%s\n' "$out" | head -1 | grep -q 'no surviving mutants'; then
+	fail "it does not claim a clean verdict it never reached" "$out"
+elif ! printf '%s' "$out" | grep -qi 'nothing was decided'; then
+	fail "the headline says nothing was decided" "$out"
+elif printf '%s' "$(findings_only "$out")" | grep -q 'pkg/new.go:4'; then
+	# Still G4(d)'s mutant to report. The run failing and the mutant being
+	# listed as a finding here are different things, and only the first changed.
+	fail "the NOT COVERED mutant is still not reported as a finding" "$out"
+else
+	pass "a run that decided nothing fails even when nothing was skipped"
+fi
+
+# ── 44. …unless the author waived every one of them ───────────────────────────
+#
+# The other half of the same review finding, and the limit on 43. A marker is an
+# explicit, typed, reviewable claim that a mutant need not be killed, and it
+# does not depend on whether the mutant ran. If waiving every scoped mutant
+# still failed, the marker would be powerless in exactly the run where the
+# author has said the most about what they expect.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/new.go" <<'EOF'
+package pkg
+
+func New(n int) bool {
+	//mutation:exempt[CONDITIONALS_BOUNDARY] a tuning constant, not a boundary
+	if n > 7 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/new.go","mutations":[{"type":"CONDITIONALS_BOUNDARY","status":"SKIPPED","line":5,"column":5}]}]}'
+commit_on_branch "$repo" "add new.go"
+out=$(run_checker "$repo" --base main --report rep.json)
+rc=$?
+if [ "$rc" -ne 0 ]; then
+	fail "waiving every scoped mutant clears the nothing-decided failure" "exit $rc: $out"
+elif ! printf '%s' "$out" | grep -q 'Exempt by'; then
+	fail "the waived mutant is still listed" "$out"
+else
+	pass "a run in which every scoped mutant was waived does not fail"
+fi
+
+# ── 45. A partial waiver does not clear it ────────────────────────────────────
+#
+# What keeps 44 from swallowing 43: "every scoped mutant was waived" has to mean
+# every one. One waived mutant beside one that reached no verdict is still a run
+# that decided nothing, and the author has spoken for only half of it.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/new.go" <<'EOF'
+package pkg
+
+func New(n, m int) bool {
+	//mutation:exempt[CONDITIONALS_BOUNDARY] a tuning constant, not a boundary
+	if n > 7 {
+		return true
+	}
+	if m > 9 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/new.go","mutations":[
+   {"type":"CONDITIONALS_BOUNDARY","status":"SKIPPED","line":5,"column":5},
+   {"type":"CONDITIONALS_BOUNDARY","status":"SKIPPED","line":8,"column":5}]}]}'
+commit_on_branch "$repo" "add new.go"
+out=$(run_checker "$repo" --base main --report rep.json)
+rc=$?
+if [ "$rc" -ne 1 ]; then
+	fail "one waiver among two undecided mutants does not clear the run" "exit $rc: $out"
+elif ! printf '%s' "$out" | grep -qi 'nothing was decided'; then
+	fail "the headline still says nothing was decided" "$out"
+else
+	pass "waiving some but not all scoped mutants still fails"
+fi
+
+# ── 46. The branch-wide label says what it actually waived ────────────────────
+#
+# Review finding. MUTATION_EXEMPT=1 on a run whose only failure was an undecided
+# mutant printed "waived 0 finding(s)" — while being the only reason the run
+# exited 0. A label that reports waiving nothing, in the run it rescued, is the
+# same class of false statement this whole gate is about.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/new.go" <<'EOF'
+package pkg
+
+func New(n int) bool {
+	if n > 7 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/new.go","mutations":[{"type":"CONDITIONALS_BOUNDARY","status":"TIMED OUT","line":4,"column":5}]}]}'
+commit_on_branch "$repo" "add new.go"
+out=$(cd "$repo" && MUTATION_EXEMPT=1 sh "$checker" --base main --report rep.json 2>&1)
+rc=$?
+headline=$(printf '%s\n' "$out" | head -1)
+if [ "$rc" -ne 0 ]; then
+	fail "MUTATION_EXEMPT=1 still clears the run" "exit $rc: $out"
+elif ! printf '%s' "$headline" | grep -q '1 undecided mutant'; then
+	# The quantity that was missing. "waived 0 finding(s)" on its own was the
+	# whole sentence, so the label reported waiving nothing in the run that
+	# would have been red without it. `grep -q 'waived 0'` is NOT the assertion
+	# to write here: "waived 0 finding(s) and 1 undecided mutant(s)" contains it
+	# and is correct — there were no findings. What has to be present is the
+	# count that explains the exit code.
+	fail "the label names the undecided mutant it waived" "$out"
+elif ! printf '%s' "$out" | grep -q 'waived the failure for deciding nothing'; then
+	fail "the label says it also waived the nothing-decided failure" "$out"
+else
+	pass "MUTATION_EXEMPT=1 counts what it actually waived"
+fi
+
+# ── 47. The undecided explanation describes only what can be in that list ─────
+#
+# Review finding. SKIPPED moved to its own section and its own consequence, but
+# the undecided trailer still opened with "SKIPPED means …" — so the first thing
+# a reader saw about their timeout explained a status that cannot appear there,
+# and contradicted the section directly below it about whether it fails.
+
+checks=$((checks + 1))
+repo=$(new_repo)
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/new.go" <<'EOF'
+package pkg
+
+func New(n int) bool {
+	if n > 7 {
+		return true
+	}
+	return false
+}
+EOF
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/new.go","mutations":[
+   {"type":"INVERT_NEGATIVES","status":"TIMED OUT","line":4,"column":5},
+   {"type":"CONDITIONALS_NEGATION","status":"KILLED","line":4,"column":9}]}]}'
+commit_on_branch "$repo" "add new.go"
+out=$(run_checker "$repo" --base main --report rep.json)
+undecided_section=$(printf '%s\n' "$out" | awk '/^  Undecided/ { on = 1 } /^  Skipped by/ { on = 0 } on { print }')
+if [ -z "$undecided_section" ]; then
+	fail "the undecided section is present to check" "$out"
+elif printf '%s' "$undecided_section" | grep -q 'SKIPPED'; then
+	fail "the undecided explanation does not describe SKIPPED" "$undecided_section"
+elif ! printf '%s' "$undecided_section" | grep -q 'TIMED OUT'; then
+	fail "the undecided explanation still describes TIMED OUT" "$undecided_section"
+else
+	pass "the undecided explanation covers only statuses that can appear there"
+fi
+
+# ── 48. Everything that names a gremlins version names the same one ───────────
+#
+# Review finding, and the one in that round worth a test rather than only a
+# correction. The version is stated in three files: the workflow installs one,
+# and the Makefile comment and this script's own "not found" message each tell a
+# developer which to install. They had drifted — CI pinned v0.6.0 while both
+# instructions said @latest.
+#
+# Pre-existing, and the gate is what made it matter. While `make mutation` only
+# warned, a developer running a different gremlins than CI got different advice.
+# Now they can get a different VERDICT: a survivor the pinned version finds and a
+# newer one does not, or the reverse, is a build that passes locally and fails in
+# CI with nothing in the diff to explain it. mutation.yml's own comment already
+# says why it is pinned — "so a new release cannot change what this job reports
+# without anyone choosing that" — and an instruction to install something else
+# defeats that for everyone who follows it.
+#
+# The workflow is the authority because it is the one that actually installs.
+# Prose is not checked here and could not usefully be; three version strings
+# agreeing is a fact, and this is the assertion that would have caught the drift.
+
+checks=$((checks + 1))
+repo_root=$(CDPATH='' cd -- "$scripts_dir/.." && pwd)
+workflow="$repo_root/.github/workflows/mutation.yml"
+ci_version=$(sed -n 's|.*gremlins/cmd/gremlins@\([^ "]*\).*|\1|p' "$workflow" | head -1)
+if [ -z "$ci_version" ]; then
+	fail "the workflow names a gremlins version to compare against" "none found in $workflow"
+else
+	drift=""
+	for f in "$repo_root/Makefile" "$scripts_dir/mutation.sh"; do
+		for v in $(sed -n 's|.*gremlins/cmd/gremlins@\([^ "]*\).*|\1|p' "$f"); do
+			[ "$v" = "$ci_version" ] && continue
+			drift="$drift
+    $(basename "$f") says @$v, the workflow installs @$ci_version"
+		done
+	done
+	if [ -n "$drift" ]; then
+		fail "every gremlins install instruction names the version CI installs" "$drift"
+	else
+		pass "every gremlins install instruction names the version CI installs"
+	fi
 fi
 
 # ── Result ────────────────────────────────────────────────────────────────────

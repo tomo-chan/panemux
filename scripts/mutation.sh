@@ -27,34 +27,96 @@
 # boundary, and never 65535, the boundary itself. `make coverage-blocks` lists
 # none of those lines, correctly: the blocks execute.
 #
-# THIS IS A WARNING, NOT A GATE — stage 3 of item 6's four, and the exit code
-# says so: a surviving mutant prints and exits 0. That is not timidity, it is
-# what the measurement showed. Of those 108 survivors, 37 (34%) are ones nobody
-# should "fix": buffer sizes (`64*1024`), timeout constants (`30*time.Second`),
-# and error branches unreachable without fault injection. A test that killed the
-# buffer-size mutants would pin a constant and assert nothing — a tautology, the
-# exact thing G4 exists to catch. Failing on those would make this gate wrong
-# more often than right in its first weeks, and principle 4 in
-# docs/quality-gateway.md is that a gate which cries wolf gets routed around,
-# taking the gates that do work with it. Item 6's stage 4 is to make it fail,
-# once there is data saying the noise is manageable. That is a separate,
-# deliberate change; there is no environment variable here to flip early.
+# THIS IS A GATE: A SURVIVING MUTANT ON A CHANGED LINE EXITS 1. That is stage 4
+# of item 6's four, and it was deliberately not the starting position. Stages 1
+# to 3 shipped this as a warning because the measurement said so: of the 108
+# survivors module-wide, 37 (34%) are ones nobody should "fix" — buffer sizes
+# (`64*1024`), timeout constants (`30*time.Second`), and error branches
+# unreachable without fault injection. A test that killed the buffer-size
+# mutants would pin a constant and assert nothing: a tautology, the exact thing
+# G4 exists to catch. Failing on those from day one would have made this gate
+# wrong more often than right, and principle 4 in docs/quality-gateway.md is
+# that a gate which cries wolf gets routed around, taking the gates that do work
+# with it.
 #
-# "COULD NOT RUN" IS STILL A FAILURE, and that half is not softened. A warning
-# that could not run must not look like a warning that found nothing, which is
-# the rule scripts/efficacy.sh and scripts/coverage_blocks.sh both state.
+# WHAT CHANGED BETWEEN THEN AND NOW is not patience, it is three measurements
+# and two repairs:
+#
+#   - The 34% have somewhere to go. //mutation:exempt takes a TYPE and a reason
+#     (#236), so waiving the buffer-size mutant no longer waives its neighbours
+#     on the same line. Measured over this repository's eleven markers: 27
+#     mutants on 11 lines, and exactly the 11 the markers are about survive.
+#   - A mutant that reached no verdict is no longer dropped (#235). Before that,
+#     a run whose mutants all timed out printed "no surviving mutants" — which
+#     as a warning was merely misleading and as a gate would have been the way
+#     to get a green tick out of a run that decided nothing.
+#   - The denominator is known (#237). A typical branch presents this gate with
+#     about 5 mutants per 317 changed lines, so a red gate here is a small,
+#     readable list rather than a wall.
+#
+# "COULD NOT RUN" IS STILL A FAILURE, and gating extends that rule one level
+# down rather than softening it: an UNDECIDED mutant — one that reached no
+# verdict — exits 1 as well. A check that could not check must not look like one
+# that found nothing, which is what scripts/efficacy.sh means by "'Could not
+# check' is a failure, never a skip". The escape hatches below cover it: a
+# marker waives an undecided mutant of the type it names, exactly as it waives a
+# survivor, because a mutant the author has said need not be killed should not
+# fail a build over how long the runner took.
+#
+# WHAT STILL EXITS 0, and why each is a considered answer rather than a gap:
+#
+#   - No Go implementation changed. There is no question to ask.
+#   - No mutant on any changed line ("nothing was measured"). A diff of type
+#     declarations or struct fields has nothing to mutate; so does a diff whose
+#     changed lines carry no operator tokens, even in a file full of them. This
+#     is common and benign, and failing on it would fire on most documentation-
+#     adjacent branches. The run says plainly that it measured nothing, and
+#     prints how many mutants the touched files held (#237) so "the scope threw
+#     everything away" stays distinguishable from "there was nothing to throw".
+#   - A SKIPPED mutant. See the SKIPPED arm below: it is gremlins' diff
+#     disagreeing with this gate's, which is not a fact about the tests and not
+#     something the author can edit.
+#   - A NOT COVERED or NOT VIABLE mutant, which belong to G4(d) and to nobody.
+#
+# WHAT DOES NOT EXIT 0, even though each of its parts would on its own: a run in
+# which NOTHING reached a verdict. All skipped, all timed out, all uncovered,
+# all non-viable, or any mix of them — "no surviving mutants" would then rest on
+# nothing measured. That claim is about the RUN rather than about any mutant,
+# which is why it can fail while every individual status in it stays silent.
+# The exception is an explicit //mutation:exempt on EVERY scoped mutant: that is
+# a reviewable claim about each one, and it does not depend on whether the
+# mutant ran.
 #
 # THE SAME RULE, ONE MUTANT AT A TIME. gremlins defines SEVEN statuses
 # (`internal/mutator/mutator.go`: NotCovered, Runnable, Skipped, Lived, Killed,
-# NotViable, TimedOut). This script acts on one of them — LIVED, a survivor —
-# and enumerates three more it deliberately says nothing about: KILLED (the
-# good case), NOT COVERED (G4(d) owns that defect and reports it better), NOT
-# VIABLE (the mutant did not compile, so no test could have noticed it behaving
-# differently). Everything else — SKIPPED, TIMED OUT, RUNNABLE, and any status
-# a later gremlins invents — is reported as UNDECIDED, carrying the status that
-# produced it, and counted in the headline. It used to be the other way round,
-# with a catch-all arm silently dropping every status this script did not name,
-# which let a run whose mutants all timed out print "no surviving mutants".
+# NotViable, TimedOut), and this script sorts them into four groups:
+#
+#   LIVED                      a survivor. Fails, unless waived.
+#   KILLED                     the good case, and the counter that says this run
+#                              decided something at all.
+#   NOT COVERED, NOT VIABLE    deliberately silent. G4(d) owns NOT COVERED and
+#                              reports it better; a NOT VIABLE mutant did not
+#                              compile, so no test could have noticed it
+#                              behaving differently.
+#   SKIPPED                    reported, does NOT fail on its own. See the arm
+#                              itself for why: gremlins sets it from its own
+#                              diff, whose changed-line arithmetic is an
+#                              approximation, so it is two diff implementations
+#                              disagreeing rather than anything about the tests.
+#   everything else            UNDECIDED — TIMED OUT, RUNNABLE, and any status a
+#                              later gremlins invents. Fails, unless waived.
+#
+# The catch-all sits on the UNDECIDED arm, and used to sit on the silent one:
+# every status this script did not name was dropped, which let a run whose
+# mutants all timed out print "no surviving mutants". The enumeration that has
+# to be exhaustive is the silencing one.
+#
+# SKIPPED is the only group whose treatment was decided by a real report rather
+# than by reasoning. The first draft of stage 4 failed on it along with TIMED
+# OUT; run against #231's actual gremlins output it went red over two mutants on
+# a line that branch demonstrably added, for a reason no edit to that line could
+# change. A whole run of nothing but SKIPPED is still a failure — that one is
+# "nothing was measured", not "gremlins and git disagree about one hunk".
 #
 # Usage:
 #   make mutation                                # report against origin/main
@@ -95,10 +157,13 @@
 #                                report. A reason is required, and an untyped
 #                                marker exempts nothing — both for the same
 #                                reason, that a waiver nobody stated the scope
-#                                or the grounds of is one nobody reviewed.
+#                                or the grounds of is one nobody reviewed. The
+#                                marker covers an undecided mutant of that type
+#                                too, not only a survivor.
 #   MUTATION_EXEMPT=1            the whole branch, from the CI label.
 #
-# Exit codes: 0 = ran (whether or not survivors were found); 1 = could not run.
+# Exit codes: 0 = the gate passed, or had nothing to check; 1 = a mutant on a
+# changed line survived or reached no verdict, or the gate could not run.
 
 set -u
 
@@ -203,7 +268,7 @@ if [ -z "$report" ]; then
 	if ! command -v "$gremlins_bin" > /dev/null 2>&1; then
 		echo "mutation: ERROR — '$gremlins_bin' not found on PATH."
 		echo "  Install it, or pass a report from an earlier run:"
-		echo "    go install github.com/go-gremlins/gremlins/cmd/gremlins@latest"
+		echo "    go install github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0"
 		echo "    sh scripts/mutation.sh --base $base --report gremlins.json"
 		exit 1
 	fi
@@ -322,6 +387,16 @@ touched_lines() {
 : > "$tmp/findings"
 : > "$tmp/exempt"
 : > "$tmp/undecided"
+: > "$tmp/skipped"
+# Mutants that reached a real verdict about the tests — LIVED or KILLED, and
+# nothing else. It is what separates "this run found no survivors" from "this
+# run never asked": if gremlins skipped everything it was handed, the first
+# sentence is true and worthless, and only this counter can tell them apart.
+decided_count=0
+# The two statuses this gate stays silent about, counted only so the
+# "decided nothing" check can name what a run was actually made of.
+notcovered_count=0
+notviable_count=0
 # Every mutant that survived the diff filter, whatever its status. It is the
 # denominator the counts below are reported against: "2 undecided" says nothing
 # about whether the run was mostly useless or almost complete.
@@ -384,25 +459,86 @@ for f in $changed; do
 		# invents. The default is now "nothing is known about this", which is
 		# the only honest thing to say about a verdict string nobody matched.
 		case $status in
-		LIVED) ;;
-		KILLED | "NOT COVERED" | "NOT VIABLE")
-			# The three states this gate deliberately says nothing about, each
-			# for its own reason. KILLED is the good case. NOT COVERED belongs
-			# to G4(d), which fails on it with a clearer message; reporting it
-			# here too would have two gates arguing about one defect. NOT
-			# VIABLE means the mutant did not compile, so no test could ever
-			# have noticed it behaving differently — there is no hole in the
-			# suite and nothing for anyone to do.
+		LIVED)
+			decided_count=$((decided_count + 1))
+			kind=survivor
+			;;
+		KILLED)
+			decided_count=$((decided_count + 1))
+			continue
+			;;
+		SKIPPED)
+			# NOT A FAILURE, AND THIS IS THE ONE PLACE THIS GATE DEFERS TO A
+			# TOOL'S OPINION OVER ITS OWN. gremlins sets SKIPPED from its own
+			# diff and nothing else (internal/engine/engine.go):
+			#
+			#     if Cov.IsCovered(pos)    { status = Runnable }
+			#     if !Diff.IsChanged(pos)  { status = Skipped }
+			#
+			# So it means "gremlins' diff says this line did not change", which
+			# is a claim about two diff implementations disagreeing, not about
+			# anybody's tests. The disagreement is real and reproducible rather
+			# than theoretical: internal/diff/diff.go builds each changed range
+			# as `EndLine = startLine + LinesAdded - 1`, which assumes a hunk's
+			# added lines run contiguously from the fragment's start. They do
+			# not when the hunk mixes context, deletions and additions. Measured
+			# on #231, git's `@@ -50 +51,11 @@` covers line 58 and gremlins'
+			# window does not, so two mutants on a line that branch demonstrably
+			# added came back SKIPPED.
+			#
+			# There is no edit an author can make to that line to change it.
+			# Failing here would be principle 4's exact shape: a red build for a
+			# condition the person reading it cannot act on. It is still
+			# reported, because two diff notions disagreeing is worth seeing —
+			# and the "decided nothing" check below covers the case where the
+			# disagreement is total.
+			kind=skipped
+			;;
+		"NOT COVERED" | "NOT VIABLE")
+			# Two of the states this gate deliberately says nothing about, each
+			# for its own reason. NOT COVERED belongs to G4(d), which fails on
+			# it with a clearer message; reporting it here too would have two
+			# gates arguing about one defect. NOT VIABLE means the mutant did
+			# not compile, so no test could ever have noticed it behaving
+			# differently — there is no hole in the suite and nothing for anyone
+			# to do. KILLED, the good case, is counted above rather than here,
+			# because the count of mutants that reached a real verdict is what
+			# the "decided nothing" check below is built on.
+			#
+			# Counted, though, so that check can say what a run was made of.
+			# Neither is reported as a finding — that is still G4(d)'s job for
+			# NOT COVERED and nobody's for NOT VIABLE — but a run consisting of
+			# nothing else decided nothing, and has to be able to say which.
+			case $status in
+			"NOT COVERED") notcovered_count=$((notcovered_count + 1)) ;;
+			*) notviable_count=$((notviable_count + 1)) ;;
+			esac
 			continue
 			;;
 		*)
-			# SKIPPED (gremlins' own notion of the diff was narrower than this
-			# gate's), TIMED OUT (the suite never reached a verdict), RUNNABLE
+			# TIMED OUT (the suite never reached a verdict), RUNNABLE
 			# (identified and covered, but never run — what `--dry-run` leaves
 			# behind), and anything unrecognised. The status travels with the
 			# record so the list below can say which of those it was.
-			printf '%s%s%s%s%s%s%s\n' "$f" "$tab" "$line" "$tab" "$type" "$tab" "$status" >> "$tmp/undecided"
-			continue
+			#
+			# These fail the build, and SKIPPED above does not, which is the
+			# distinction this gate got wrong on its first attempt at stage 4
+			# and #231's real report caught. The difference is whether anybody
+			# can act on it: a TIMED OUT mutant is this gate trying to get an
+			# answer and not getting one — re-run it, or waive it — while a
+			# SKIPPED mutant is a second diff implementation declining to be
+			# asked. "Could not check" is a failure; "was not asked, by a
+			# component whose mind the author cannot change" is not.
+			#
+			# It no longer skips the marker lookup below, and at stage 4 that is
+			# the difference between a usable gate and a flaky one: an undecided
+			# mutant now fails the build, so a line whose author has already
+			# written "this mutant need not be killed" would fail on a slow
+			# runner for a mutant nobody is asking anyone to kill. Whether a
+			# verdict was reached is a fact about the runner; whether the mutant
+			# is worth killing is the claim the marker makes, and only the second
+			# one is the author's.
+			kind=undecided
 			;;
 		esac
 
@@ -497,36 +633,59 @@ $above" ;;
 			;;
 		esac
 
+		# A marker that waives nothing is worth saying so about whichever arm the
+		# mutant lands in, so these are set before the routing rather than inside
+		# the survivor branch of it.
 		case $verdict in
-		exempt)
-			printf '%s%s%s%s%s%s\n' "$f" "$tab" "$line" "$tab" "$type" "$tab" >> "$tmp/exempt"
-			;;
-		wildcard)
-			# Labelled, because [*] is a claim about mutants nobody looked at.
-			# That is what the untyped marker used to do silently.
-			printf '%s%s%s%s%s%s%s\n' "$f" "$tab" "$line" "$tab" "$type" "$tab" "line-wide [*]" >> "$tmp/exempt"
-			;;
-		*)
-			note=""
-			case $verdict in
-			bare) bare_marker=1 ;;
-			untyped) untyped_marker=1 ;;
-			malformed) malformed_marker=1 ;;
-			mismatch)
-				# The one that used to be invisible. Naming what IS on the line
-				# turns "why is this still reported" into a one-line answer.
-				note="//mutation:exempt on this line names $claimed"
-				;;
-			esac
-			printf '%s%s%s%s%s%s%s\n' "$f" "$tab" "$line" "$tab" "$type" "$tab" "$note" >> "$tmp/findings"
+		bare) bare_marker=1 ;;
+		untyped) untyped_marker=1 ;;
+		malformed) malformed_marker=1 ;;
+		esac
+
+		case $verdict in
+		exempt | wildcard)
+			# [*] is labelled, because it is a claim about mutants nobody looked
+			# at — what the untyped marker used to do silently. An undecided
+			# mutant carries its status into the label for the opposite reason:
+			# waived is not hidden, and "waived a survivor" and "waived something
+			# that never reached a verdict" are different claims to have reviewed.
+			label=""
+			[ "$verdict" = wildcard ] && label="line-wide [*]"
+			if [ "$kind" != survivor ]; then
+				label="${label:+$label, }$status"
+			fi
+			printf '%s%s%s%s%s%s%s\n' "$f" "$tab" "$line" "$tab" "$type" "$tab" "$label" >> "$tmp/exempt"
+			continue
 			;;
 		esac
+
+		case $kind in
+		skipped)
+			printf '%s%s%s%s%s%s%s\n' "$f" "$tab" "$line" "$tab" "$type" "$tab" "$status" >> "$tmp/skipped"
+			continue
+			;;
+		undecided)
+			printf '%s%s%s%s%s%s%s\n' "$f" "$tab" "$line" "$tab" "$type" "$tab" "$status" >> "$tmp/undecided"
+			continue
+			;;
+		esac
+
+		note=""
+		case $verdict in
+		mismatch)
+			# The one that used to be invisible. Naming what IS on the line
+			# turns "why is this still reported" into a one-line answer.
+			note="//mutation:exempt on this line names $claimed"
+			;;
+		esac
+		printf '%s%s%s%s%s%s%s\n' "$f" "$tab" "$line" "$tab" "$type" "$tab" "$note" >> "$tmp/findings"
 	done < "$tmp/file_mutations"
 done
 
 kept_count=$(wc -l < "$tmp/findings" | tr -d ' ')
 exempt_count=$(wc -l < "$tmp/exempt" | tr -d ' ')
 undecided_count=$(wc -l < "$tmp/undecided" | tr -d ' ')
+skipped_count=$(wc -l < "$tmp/skipped" | tr -d ' ')
 
 exempt_note=""
 [ "$exempt_count" -gt 0 ] && exempt_note=" ($exempt_count exempt)"
@@ -537,6 +696,13 @@ exempt_note=""
 # same rule the header states about a warning that could not run.
 undecided_note=""
 [ "$undecided_count" -gt 0 ] && undecided_note=", $undecided_count undecided"
+
+# Reported in the headline like the rest, and separately from them, because it
+# is the one count here that does not by itself fail the build. Folding it into
+# "undecided" would put a number a reader must act on and a number they cannot
+# act on under one word.
+skipped_note=""
+[ "$skipped_count" -gt 0 ] && skipped_note=", $skipped_count skipped by gremlins"
 
 # THE DENOMINATOR IS PART OF THE RESULT, not context for it. "no surviving
 # mutants" rests on five mutants or on fifty, and the sentence is identical
@@ -562,13 +728,31 @@ undecided_list() {
 	echo "  reached a verdict, so nothing is known about them either way:"
 	awk -F"$tab" '{ printf "    %s:%s  %s  (%s)\n", $1, $2, $3, $4 }' "$tmp/undecided"
 	echo
-	echo "  SKIPPED means gremlins' own notion of the diff was narrower than this"
-	echo "  gate's. TIMED OUT means the suite never finished under the mutant —"
-	echo "  usually worker contention, and #180's measurement found timeouts"
-	echo "  hiding real survivors. RUNNABLE means the mutant was identified and"
-	echo "  covered but never run, which is what --dry-run leaves behind."
-	echo "  Anything else is a status this gate does not recognise, which is"
-	echo "  itself worth looking at."
+	# Only the statuses that can actually land in this list. SKIPPED used to be
+	# described here and now has its own section and its own consequence, so
+	# explaining it here put an answer about a status that cannot appear above
+	# the rows, and contradicted the section below about whether it fails.
+	echo "  TIMED OUT means the suite never finished under the mutant — usually"
+	echo "  worker contention, and #180's measurement found timeouts hiding real"
+	echo "  survivors. RUNNABLE means the mutant was identified and covered but"
+	echo "  never run, which is what --dry-run leaves behind. Anything else is a"
+	echo "  status this gate does not recognise, which is itself worth looking at."
+}
+
+skipped_list() {
+	[ -s "$tmp/skipped" ] || return 0
+	echo
+	echo "  Skipped by gremlins — on lines this branch changed, but gremlins' own"
+	echo "  diff disagrees and did not run them. Not a failure on its own:"
+	awk -F"$tab" '{ printf "    %s:%s  %s  (%s)\n", $1, $2, $3, $4 }' "$tmp/skipped"
+	echo
+	echo "  gremlins sets SKIPPED purely from its own diff, never from a test"
+	echo "  result, and its changed-line window is an approximation: it takes"
+	echo "  each hunk's added lines to run contiguously from the fragment's"
+	echo "  start, which is wrong whenever a hunk mixes context, deletions and"
+	echo "  additions. There is nothing to fix on the line, so this gate reports"
+	echo "  the disagreement and does not fail on it. What does fail is a run in"
+	echo "  which NOTHING reached a verdict, whatever the mix of reasons."
 }
 
 # A marker that waives nothing is worth a sentence saying so. Each of these
@@ -613,21 +797,101 @@ if [ "$scoped_count" -eq 0 ]; then
 fi
 
 if [ "${MUTATION_EXEMPT:-0}" = "1" ]; then
-	echo "mutation: exempt — MUTATION_EXEMPT=1 waived $kept_count finding(s)$scope_note$exempt_note$undecided_note."
+	# EVERYTHING THE LABEL WAIVED, not only the survivors. Once an undecided
+	# mutant fails the build, a run rescued solely by this label could report
+	# "waived 0 finding(s)" — a label claiming to have waived nothing, in the
+	# run that would have been red without it. The undecided count belongs in
+	# the same sentence for the same reason the headline carries it elsewhere.
+	echo "mutation: exempt — MUTATION_EXEMPT=1 waived $kept_count finding(s) and $undecided_count undecided mutant(s)$scope_note$exempt_note$skipped_note."
+	if [ "$decided_count" -eq 0 ] && [ "$exempt_count" -lt "$scoped_count" ]; then
+		# The third thing it waives, and the one with no count of its own:
+		# without the label this run would have failed for having decided
+		# nothing at all, which is not the same as having found something.
+		echo
+		echo "  It also waived the failure for deciding nothing: no mutant on a"
+		echo "  changed line reached a verdict in this run."
+	fi
 	exempt_list
 	undecided_list
+	skipped_list
 	exit 0
 fi
 
-if [ "$kept_count" -eq 0 ]; then
-	echo "mutation: no surviving mutants$scope_note$exempt_note$undecided_note."
+# NOT ONE MUTANT REACHED A VERDICT, so "no surviving mutants" would rest on
+# nothing measured — the one sentence this script's header forbids. Each
+# individual cause is one this gate deliberately does not fail on: a SKIPPED
+# mutant is gremlins' diff disagreeing with this gate's, a NOT COVERED one is
+# G4(d)'s defect to report, a NOT VIABLE one is nobody's. A run made of nothing
+# but those is a different claim from any of them, and it is about the RUN
+# rather than about a mutant: this gate asked, and learned nothing.
+#
+# The first version of this keyed on `skipped_count > 0` while its own comment
+# claimed `decided_count` was the whole test, and review caught the two holes
+# that opened. A run of nothing but NOT COVERED printed "ok — no surviving
+# mutants among 1"; so did a run of nothing but SKIPPED once each one was
+# waived. `make coverage-blocks` does not close the first: it reports a changed
+# file in a package COVERAGE_PKGS excludes as "not measured" rather than
+# failing, so there are diffs about which no gate would have said anything.
+#
+# The exception is an explicit waiver of EVERY scoped mutant. A marker is a
+# typed, reasoned, reviewable claim that a mutant need not be killed, and it
+# does not depend on whether that mutant ran. Failing anyway would make the
+# marker powerless in the one run where the author has said the most. Partial
+# waivers do not count: they speak for part of the run.
+if [ "$decided_count" -eq 0 ] && [ "$exempt_count" -lt "$scoped_count" ]; then
+	echo "mutation: FAIL — nothing was decided$scope_note$undecided_note$skipped_note$exempt_note."
 	exempt_list
 	undecided_list
+	skipped_list
+	marker_notes
+	echo
+	echo "  Not one mutant on a changed line reached a verdict, so this run has"
+	echo "  no evidence either way — and it must not print the sentence a clean"
+	echo "  branch gets. What it was made of:"
+	[ "$skipped_count" -gt 0 ] && echo "    $skipped_count skipped — gremlins' diff disagrees with this gate's (see above)."
+	[ "$undecided_count" -gt 0 ] && echo "    $undecided_count undecided — the suite reached no verdict. Re-run, or waive."
+	[ "$notcovered_count" -gt 0 ] && echo "    $notcovered_count not covered — no test executes the line. 'make coverage-blocks' names these."
+	[ "$notviable_count" -gt 0 ] && echo "    $notviable_count not viable — the mutant did not compile. Nothing to fix; use the label."
+	exit 1
+fi
+
+if [ "$kept_count" -eq 0 ] && [ "$undecided_count" -eq 0 ]; then
+	# "ok" rather than a bare sentence, matching scripts/efficacy.sh. Once one
+	# headline says FAIL, "no FAIL in the output" becomes how people read a
+	# result — and that is how a truncated or crashed run gets read as a pass.
+	# The passing line has to be as scannable as the failing one.
+	echo "mutation: ok — no surviving mutants$scope_note$skipped_note$exempt_note."
+	exempt_list
+	skipped_list
 	marker_notes
 	exit 0
 fi
 
-echo "mutation: $kept_count surviving mutant(s)$scope_note$exempt_note$undecided_note."
+if [ "$kept_count" -eq 0 ]; then
+	# Nothing survived, and that is not enough. The sentence is deliberately the
+	# same one stage 3 printed — the counts were already there (#235, #237) —
+	# and only the verdict in front of it and the exit code are new, because the
+	# facts were never the problem: exiting 0 on them was.
+	echo "mutation: FAIL — no surviving mutants$scope_note$undecided_note$skipped_note$exempt_note."
+	exempt_list
+	undecided_list
+	skipped_list
+	marker_notes
+	echo
+	echo "  Nothing survived, but nothing was decided about $undecided_count of them either,"
+	echo "  so this run cannot say the change is protected. A mutant that reached"
+	echo "  no verdict is the gate failing to run, one mutant at a time, and"
+	echo "  'could not check' is a failure rather than a skip here for the same"
+	echo "  reason it is in scripts/efficacy.sh."
+	echo
+	echo "  A TIMED OUT mutant is usually worker contention: re-run it. If the"
+	echo "  mutant is one you would have waived anyway, waive it — a"
+	echo "  '//mutation:exempt[<TYPE>] <reason>' covers an undecided mutant of"
+	echo "  that type exactly as it covers a survivor."
+	exit 1
+fi
+
+echo "mutation: FAIL — $kept_count surviving mutant(s)$scope_note$exempt_note$undecided_note$skipped_note."
 echo
 echo "  A surviving mutant is a change to your code that every test still"
 echo "  passes through. Either an assertion is missing, or the mutant is one"
@@ -637,11 +901,19 @@ echo
 awk -F"$tab" '{ if ($4 == "") printf "    %s:%s  %s\n", $1, $2, $3; else printf "    %s:%s  %s\n        %s\n", $1, $2, $3, $4 }' "$tmp/findings"
 exempt_list
 undecided_list
+skipped_list
 
 marker_notes
 
 echo
-echo "  This is a warning: it does not fail the build. Add the assertion, or"
-echo "  waive the one mutant with '//mutation:exempt[<TYPE>] <reason>' on the"
-echo "  line or directly above it — <TYPE> is the third column above."
-exit 0
+echo "  This fails the build. Add the assertion, or waive the one mutant with"
+echo "  '//mutation:exempt[<TYPE>] <reason>' on the line or directly above it —"
+echo "  <TYPE> is the third column above, and the reason is required. Say which"
+echo "  kind it is: EQUIVALENT means no input can tell the mutant from the"
+echo "  original; UNREACHABLE means it is killable, but only by input this"
+echo "  code's own callers cannot produce. They are not interchangeable, and"
+echo "  #190 filed a live defect as 'equivalent' when it was neither."
+echo
+echo "  The mutation-exempt label waives the whole branch and is the blunter"
+echo "  tool: it leaves nothing in the diff a reviewer can read."
+exit 1

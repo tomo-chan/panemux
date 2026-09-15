@@ -9,18 +9,35 @@ name: mutation
 # mutants in this repository, every one in code the per-block gate (G4(d))
 # correctly reports as covered.
 #
-# THIS JOB DOES NOT FAIL ON A FINDING. It is stage 3 of item 6's four, and the
-# measurement is why: 34% of those 108 survivors are ones nobody should "fix"
-# — buffer sizes and timeout constants whose killing test would be a tautology
-# itself. A job that failed on those would be wrong more often than right in
-# its first weeks, and principle 4 in docs/quality-gateway.md is that a gate
-# which cries wolf gets routed around, taking the working gates with it.
-# Stage 4 is to make it fail, once there is data saying the noise is
-# manageable; that is a separate, deliberate change.
+# THIS JOB FAILS ON A FINDING. That is stage 4 of item 6's four, and it is a
+# later position than the job started in: stages 1 to 3 ran it as a warning
+# because 34% of those 108 survivors are ones nobody should "fix" — buffer sizes
+# and timeout constants whose killing test would be a tautology itself. Failing
+# on those from day one would have been wrong more often than right, and
+# principle 4 in docs/quality-gateway.md is that a gate which cries wolf gets
+# routed around, taking the working gates with it.
 #
-# It DOES fail when it could not run — a missing base ref, a shallow clone, a
-# gremlins that exited non-zero, a truncated report. A warning that decided
-# nothing must not look like one that found nothing.
+# Three things had to be true before the exit code could change, and each was
+# measured rather than assumed — the full record is decision D9 in
+# docs/quality-gateway.md:
+#
+#   - The 34% have somewhere to go: //mutation:exempt now waives a mutant TYPE
+#     and not a whole line (#236), so a reason written about the buffer-size
+#     mutant stops silently covering its neighbours.
+#   - A mutant that reached no verdict is no longer dropped (#235). As a warning
+#     that was misleading; as a gate it would have been the way to get a green
+#     tick out of a run that decided nothing.
+#   - The size of a red run is known (#237): about 5 mutants per 317 changed
+#     lines, so a finding is a short list rather than a wall.
+#
+# It still fails when it could not run — a missing base ref, a shallow clone, a
+# gremlins that exited non-zero, a truncated report — and now also when a mutant
+# on a changed line reached no verdict, which is the same rule one level down.
+# A check that could not check must not look like one that found nothing.
+#
+# The escape hatches, narrow before broad: `//mutation:exempt[<TYPE>] <reason>`
+# on the line, and the `mutation-exempt` label for the whole branch. Prefer the
+# marker — it is the one that leaves something in the diff a reviewer can read.
 #
 # Pull requests only, and not part of `make check`: it needs the base branch,
 # which the local gate has no business fetching. Same shape as efficacy.yml and

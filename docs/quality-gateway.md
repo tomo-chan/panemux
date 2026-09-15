@@ -168,7 +168,7 @@ Ordering is meaningful: the point is to stop a defect at the cheapest gate that 
 | **G1** | Edit | Maintainability | `gofmt -s`, `tsc --noEmit`, and `go vet` on the touched packages only | Claude Code `PostToolUse` hook in `.claude/settings.json` | Present — `.claude/hooks/post-edit-check.sh` |
 | **G2** | Unit | Functional suitability, fast feedback | `make test-go`, `make test-frontend` — unchanged | Existing (`make check`, pre-push, CI) | Present |
 | **G3** | Contract | **Resistance to refactoring**, compatibility | (a) HTTP/WS integration through the real `server.New()` router; (b) exhaustiveness check on the route table (every registered route against an expected set); (c) Zod schema round-trips; (d) the agmsg contract | Always-on Go and vitest tests, in `make check` | **Present.** (a) `internal/server/api_integration_test.go` drives every `/api` route and fails when one has no case; `ws_integration_test.go` drives both `/ws` routes over a real handshake. (b) and (d) unchanged. (c) `contract_fixture_test.go` captures real responses into `testdata/api-contract/`, which `frontend/src/schemas/contract.test.ts` parses with the schema that owns each one |
-| **G4** | Efficacy | **Protection against regressions** | (a) coverage — scope tracks the implementation, threshold stays at 80%; (b) **red-check**: a changed test must fail when the implementation diff is reverted; (c) mutation score over changed lines only; (d) **per-block coverage**: no block covering a changed line may be one the suite never entered | (a) existing `make check`; (b), (c) and (d) pull-request CI jobs, `make efficacy`, `make mutation` and `make coverage-blocks` | Partial — (a) present and now scoped to every decision-holding package; (b) present (`make efficacy`, a pull-request-only CI job); (d) present (`make coverage-blocks`, likewise); (c) present as a **warning** (`make mutation`), not yet as a gate |
+| **G4** | Efficacy | **Protection against regressions** | (a) coverage — scope tracks the implementation, threshold stays at 80%; (b) **red-check**: a changed test must fail when the implementation diff is reverted; (c) mutation score over changed lines only; (d) **per-block coverage**: no block covering a changed line may be one the suite never entered | (a) existing `make check`; (b), (c) and (d) pull-request CI jobs, `make efficacy`, `make mutation` and `make coverage-blocks` | **Present** — (a) present and now scoped to every decision-holding package; (b) present (`make efficacy`, a pull-request-only CI job); (d) present (`make coverage-blocks`, likewise); (c) present **as a gate** (`make mutation`, likewise): a mutant on a changed line that survives, or that reaches no verdict, exits 1 — see D9 |
 | **G5** | Scenario | Functional suitability, interaction capability | Playwright E2E, plus a check that every test named by an `auto` row in `scenarios.md` actually exists, plus an axe-core ceiling per page state | CI, extending `make test-e2e` | Present — E2E plus `make check-scenarios`, which resolves every `auto` row, plus `a11y.spec.ts`, which fails when a violation count rises above the frozen current value (D11), its comparator unit-tested in `a11y-ceiling.test.ts` |
 | **G6** | Adversarial | All characteristics (design judgement) | A fresh-context review of the diff alone. The session that wrote the code does not grade it. Findings limited to correctness and stated requirements. | A review subagent in `.claude/agents/` plus human review. **Does not block** | Present — `.claude/agents/diff-reviewer.md`; still does not block |
 
@@ -348,20 +348,116 @@ reported as *not measured* rather than as covered — failing there would start 
 `internal/session`. The ~275 remain a backlog, listed by `make coverage-blocks`; a gate is the wrong
 instrument for a backlog.
 
-**D9 — The mutation check warns; it does not fail.**
-Stage 3 of #180's item 6, and the measurement is the argument. Of the 108 surviving mutants found at
-`d42e406`, **37 (34%) are ones nobody should act on**: buffer sizes (`64*1024` in three files),
-timeout constants (`30 * time.Second`), and error branches unreachable without fault injection. A
-test written to kill the buffer-size mutants would pin a constant and assert nothing — a tautology,
-which is the exact defect G4 exists to find. A check that failed on those would be wrong more often
-than right in its first weeks, and principle 4 says what happens to a gate that cries wolf.
+**D9 — The mutation check fails on a finding. It warned first, for three stages, and the interesting
+part of this decision is what had to be true before the exit code could change.**
 
-So `make mutation` prints its findings and exits 0. What it does **not** soften is "could not run":
-a missing base ref, a shallow clone, a gremlins that exited non-zero or a truncated report all exit 1,
-because a check that decided nothing must never look like one that found nothing. Making the findings
-themselves fail is stage 4, and deliberately a separate change with its own evidence — there is no
-environment variable to flip it early, since an unused switch is an invitation to enable it without
-the data that should decide it.
+**Why it started as a warning.** Of the 108 surviving mutants found at `d42e406`, **37 (34%) are ones
+nobody should act on**: buffer sizes (`64*1024` in three files), timeout constants
+(`30 * time.Second`), and error branches unreachable without fault injection. A test written to kill
+the buffer-size mutants would pin a constant and assert nothing — a tautology, which is the exact
+defect G4 exists to find. A check that failed on those would have been wrong more often than right in
+its first weeks, and principle 4 says what happens to a gate that cries wolf. So stages 1 to 3 printed
+findings and exited 0, with no environment variable to flip it early: an unused switch is an
+invitation to enable a gate without the data that should decide it.
+
+**What changed is not patience.** Three things the warning stages measured or repaired, each of which
+had to land before failing was defensible:
+
+1. **The 34% have somewhere to go that a reviewer can see.** `//mutation:exempt` now waives a mutant
+   *type* rather than a whole line (below, and #236). Before that, waiving the buffer-size mutant
+   silently waived every other mutant on the same line, so the escape hatch a failing gate depends on
+   was wider than anyone writing one intended.
+2. **A mutant that reached no verdict is no longer dropped** (below, and #235). As a warning that was
+   misleading. As a gate it would have been the one remaining way to get a green tick out of a run
+   that decided nothing.
+3. **The size of a red run is known** (below, and #237): roughly **5 mutants per 317 changed lines**.
+   A finding is a short list against a small denominator, not a wall — which is the difference between
+   a gate people fix and a gate people route around.
+
+**The gating change was then checked against real reports, not only fixtures.** `make mutation` was
+run with real gremlins output over the two most substantial recent Go pull requests, and both pass:
+**#234** (six files, 317 changed lines) reports `no surviving mutants among 5`, and **#231** (twelve
+files) reports `no surviving mutants among 33, 2 skipped by gremlins`. That second run is the one that
+found the `SKIPPED` defect below — under the first draft of this change it was red.
+
+**The question stage 3 left open — whether an undecided mutant should fail — is answered yes, with one
+carve-out that a real report forced and reasoning had not.** A mutant that reached no verdict is not
+evidence that the change is protected; it is this gate failing to run, one mutant at a time. Treating
+it as a pass would reinstate exactly the fail-open #235 closed, with a green tick attached. This
+repository already lives by that rule one level up, in `scripts/efficacy.sh`'s own words: *"Could not
+check" is a failure, never a skip.* The cost is a build that can go red because a runner was slow, and
+two things bound it: the pinned settings that took `internal/api` from 114 timeouts to 0, and the rule
+that **a marker waives an undecided mutant of the type it names exactly as it waives a survivor** —
+whether a verdict was reached is a fact about the runner, while whether the mutant is worth killing is
+the claim the author made, and only the second is theirs to make.
+
+**`SKIPPED` is the carve-out, and the way it was found is the point.** The first draft of this change
+treated `SKIPPED`, `TIMED OUT` and `RUNNABLE` alike: all three mean "no verdict", so all three failed.
+Run against **#231**'s real gremlins report rather than a fixture, that gate went red — not on a
+survivor, but on two `SKIPPED` mutants at `internal/commandcenter/history_store.go:58`, a line that
+branch demonstrably added. Reading gremlins' source rather than inferring from the name settles what
+the status means (`internal/engine/engine.go`):
+
+```go
+if mu.codeData.Cov.IsCovered(pos)   { status = mutator.Runnable }
+if !mu.codeData.Diff.IsChanged(pos) { status = mutator.Skipped }
+```
+
+`SKIPPED` is set from gremlins' own diff and from nothing else — never from a test result. And that
+diff is an approximation: `internal/diff/diff.go` builds each changed range as
+`EndLine = startLine + LinesAdded - 1`, which assumes a hunk's added lines run contiguously from the
+fragment's start. They do not when a hunk mixes context, deletions and additions, which is why git's
+`@@ -50 +51,11 @@` covers line 58 and gremlins' window does not.
+
+So `SKIPPED` is **two diff implementations disagreeing**, not a fact about anyone's tests, and no edit
+to the line can change it. Failing on it is principle 4's exact shape: a red build for a condition the
+person reading it cannot act on. It is reported and does not fail.
+
+**One skipped mutant is a disagreement; a run in which nothing reached a verdict measured nothing**,
+so the gate fails when no scoped mutant reached `LIVED` or `KILLED` at all. The condition is total
+rather than a proportion deliberately — any threshold below "nothing was decided" would be a number
+nobody could defend, and principle 4 applies to arbitrary thresholds as much as to noisy findings.
+
+**That check was written keyed on `SKIPPED` first, and review caught the two holes that left.** Its
+own comment claimed `decided_count == 0` was the whole test while the code also required
+`skipped_count > 0`, and the gap between the two was reachable from both sides:
+
+- A run whose every scoped mutant was `NOT COVERED` printed `ok — no surviving mutants among 1`. The
+  reflex answer is that G4(d) fails on those instead, and it usually does — but `make coverage-blocks`
+  reports a changed file in a package `COVERAGE_PKGS` excludes as *not measured* rather than failing,
+  so there are diffs about which no gate would have said anything at all.
+- A run whose every scoped mutant was `SKIPPED` **and waived** printed the same clean sentence,
+  because the exempt arm runs before the skipped one and `skipped_count` never rose.
+
+The condition is now simply "nothing reached a verdict", whatever the cause, and the failure names the
+composition — how many were skipped, undecided, uncovered or non-viable — because the action differs
+by cause. Note what this does *not* change: a `NOT COVERED` mutant is still never reported here as a
+finding. **The claim being corrected is about the run, not about the mutant**, and those are different
+sentences.
+
+**The one exception is an explicit waiver of every scoped mutant.** A `//mutation:exempt` is a typed,
+reasoned, reviewable claim that a mutant need not be killed, and that claim does not depend on whether
+the mutant ran. Failing anyway would make the marker powerless in precisely the run where the author
+has said the most about what they expect. Partial waivers do not qualify: they speak for part of the
+run.
+
+The general lesson is the one this repository keeps relearning: **"no verdict" is not one category.**
+`TIMED OUT` is this gate trying to get an answer and failing, which the author can re-run or waive.
+`SKIPPED` is another component declining to be asked. Only the first is "could not check".
+
+**What still exits 0, because a gate is also defined by what it declines to fail on:** a branch that
+changes no Go implementation, and a branch with no mutant on any changed line. The second is the one
+worth stating, since it is the fail-open shape this very decision is otherwise about. A diff of type
+declarations or struct fields has nothing to mutate, and so does a diff whose changed lines carry no
+operator tokens even inside a file full of them — `internal/commandcenter/runner.go` in the #234
+measurement below is exactly that, 37 mutants in the file and none on its 27 changed lines. Failing
+there would fire on most documentation-adjacent branches for a condition the author cannot act on.
+What the run does instead is say plainly that it measured nothing, and name how many mutants the
+touched files held.
+
+What was never softened is "could not run": a missing base ref, a shallow clone, a gremlins that
+exited non-zero or a truncated report all exit 1, because a check that decided nothing must never look
+like one that found nothing.
 
 **The same rule holds one mutant at a time, and the first version of the script did not apply it
 there.** gremlins defines seven statuses — `internal/mutator/mutator.go` lists
@@ -387,10 +483,11 @@ holds 37 mutants and had **none** on its 27 changed lines.
 So the headline now carries the denominator (`no surviving mutants among 5 on lines this branch
 changed`), and a run with nothing on a changed line says **"nothing was measured"** in its own words,
 naming how many mutants the touched files held so that "the scope discarded everything" and "there
-was nothing to discard" stay distinguishable. **This is a stage-4 input as much as a readability
+was nothing to discard" stay distinguishable. **This was a stage-4 input as much as a readability
 fix: a gate that would rarely fire is not thereby a safe gate — it may be a gate that is usually
-saying nothing, and 5 questions per 317-line branch is the order of magnitude stage 4 has to decide
-against.**
+saying nothing, and 5 questions per 317-line branch is the order of magnitude stage 4 had to decide
+against.** It is also the number that made failing defensible, since it bounds what a red run costs
+the author: a short list, not a wall.
 
 The fix is which arm carries the catch-all. `KILLED`, `NOT COVERED` and `NOT VIABLE` are now
 enumerated as the statuses the gate deliberately says nothing about — each for a stated reason, and
@@ -398,8 +495,11 @@ enumerated as the statuses the gate deliberately says nothing about — each for
 not a hole in anyone's tests — and **everything else is reported as undecided, carrying the status
 string**, in the headline as well as in the list below it. "0 survivors" and "0 survivors, 12 of 12
 mutants undecided" are different results, and only the second one is honest about a run that decided
-nothing. Stage 4 inherits a question it did not have before: whether an undecided mutant on a changed
-line should fail, or whether the gate that measures nothing should merely say so louder.
+nothing. That handed stage 4 a question it did not have before — whether an undecided mutant on a
+changed line should fail, or whether a gate that measured nothing should merely say so louder — and
+the answer, recorded in D9 above, is that it fails: a green tick on a run that reached no verdict is
+the same fail-open this paragraph closed, with the exit code now agreeing with the prose instead of
+contradicting it.
 
 **Its settings are pinned, and that is not tuning.** With gremlins' defaults on this repository, 465
 of 1059 runnable mutants (44%) come back `TIMED OUT`. They are not infinite loops — they are worker
@@ -519,7 +619,7 @@ Both are the same refusal to ship a gate that starts red (principle 4).
 | 3 | `.claude/settings.json` with G1/G2 hooks; a review subagent | G1, G6 | — | **Landed.** A `PostToolUse` hook checks the edited file, a `Stop` hook checks what the turn changed, and `.claude/agents/diff-reviewer.md` reviews a diff in a fresh context. `make test-hooks` tests the hooks themselves. |
 | 4 | red-check (`make efficacy`) in pull-request CI | G4(b) | — | **Landed.** `scripts/efficacy.sh` reverts the branch's implementation diff in a scratch worktree and requires each test the branch changed — Go function or vitest case — to pass at HEAD and then go red against the revert, one at a time. Exempted by the `efficacy-exempt` label. |
 | 5 | Core-feature section in `scenarios.md`, ledger cross-check, core E2E | G0, G5 | Phases 4 and 6 | **Landed.** Sections H (core multiplexer) and I (opening URLs from a pane, #177's missing rows) added; `make check-scenarios` resolves every `auto` row; `frontend/e2e/core-multiplexer.spec.ts` covers split, resize, layout restore and workspace CRUD. |
-| 6 | Diff-scoped mutation testing (warn first, gate once stable) | G4(c) | merges with #164 | **Warning landed.** `scripts/mutation.sh` runs gremlins scoped to the diff and names every mutant on a changed line that survives every test, plus every mutant that reached no verdict at all. Exits 0 on a finding — see D9. Making it fail is the remaining step. |
+| 6 | Diff-scoped mutation testing (warn first, gate once stable) | G4(c) | merges with #164 | **Done.** `scripts/mutation.sh` runs gremlins scoped to the diff and names every mutant on a changed line that survives every test, plus every mutant that reached no verdict at all. It warned for three stages and now **exits 1 on either** — see D9 for what had to be measured first. |
 | 7 | Performance and accessibility observation (measure only, do not gate) | — | — | **Landed.** `make bench` measures terminal throughput, replay-buffer cost and the relay's polling cost; `a11y.spec.ts` records axe violations. The performance half still only reports — its spreads are too wide for a threshold (see "First measurements"). The accessibility half now asserts: #194 froze the recorded counts as a ceiling, which is the step this row deferred until data existed. |
 | 8 | Per-block coverage on changed lines (#164, not a #180 item) | G4(d) | — | **Landed.** `scripts/coverage_blocks.sh` fails when a block covering a changed line never executed. It unblocked row 6's measurement, which is what row 6 was waiting on. |
 | 9 | Zod schema round-trips against real Go output (#191, closing G3(c)) | G3 | Phase 1 | **Landed.** `internal/server/contract_fixture_test.go` captures every response the dashboard parses, plus both WebSocket frame streams, into `testdata/api-contract/`; `frontend/src/schemas/contract.test.ts` parses each with the schema that owns it and requires the parsed value to equal the captured one, so a field Zod *strips* fails too. Decision D10 records why the fixtures are rewritten rather than diffed. |
@@ -620,9 +720,10 @@ the change that introduced it, each to the type the measurement above says it wa
 a marker is present and a mutant of another type survives, the finding names the type the marker
 does claim, so the mismatch is on the screen instead of being silently absorbed.
 
-This is the first real evidence for how much of G4(c)'s noise is irreducible rather than fixable,
-which is what item 6's fourth stage — whether to make `make mutation` fail — needs before it can be
-decided: **the "boundary value" row is not 45 missing tests.** Four of them cannot be killed by
+This was the first real evidence for how much of G4(c)'s noise is irreducible rather than fixable,
+which is what item 6's fourth stage — whether to make `make mutation` fail — needed before it could
+be decided, and D9 above records the decision it fed: **the "boundary value" row is not 45 missing
+tests.** Four of them cannot be killed by
 anyone, one only by a fabricated input, and that count is a floor rather than a census — it is what
 surfaced while working the sites #190 named, not an audit of all 45. A gate failing on that group
 would demand tautologies in the very class the measurement called most actionable. The `endConn`
