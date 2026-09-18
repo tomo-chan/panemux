@@ -220,6 +220,13 @@ only the confirm button confirms. The confirm button takes focus when the dialog
 answers are one keystroke away. A destructive confirm button uses the same subdued red as the error
 banner below (`#5a1d1d`, `#7f1d1d`, `#fca5a5`).
 
+Focus is trapped between the dialog's two buttons while it is open, and a Tab arriving from outside
+is pulled back in. The background behind an `aria-modal` dialog stays mounted and interactive, so a
+dialog that only moved focus once would let the next Tab reach the very controls the question is
+about — and once focus reaches a terminal, `Escape` is the only way back and the terminal stops the
+keystroke it travels on. That last part is why `Escape` is registered on the capture phase here, as
+it is for the other overlays.
+
 Its first user is workspace deletion, which is still offered only in edit mode; the delete request
 is sent when the dialog is confirmed and never before.
 

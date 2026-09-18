@@ -34,6 +34,10 @@ const buttonStyle: React.CSSProperties = {
  * Cancelling is deliberately the easy path: Escape, the backdrop and the
  * cancel button all reach `onCancel`, and nothing but the confirm button
  * reaches `onConfirm`.
+ *
+ * Focus is trapped between its two buttons while it is open. The background is
+ * still mounted and interactive, so a dialog that only moved focus once would
+ * let the next Tab reach the very controls the question is about.
  */
 export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   isOpen,
@@ -46,14 +50,51 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   onCancel,
 }) => {
   const confirmRef = useRef<HTMLButtonElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
 
+  // Capture phase, like the app's other overlays (see BoardDashboardPanel): a
+  // focused xterm terminal stops keydown propagation, so a bubble-phase window
+  // listener never sees the key at all.
   useEffect(() => {
     if (!isOpen) return
+
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onCancel()
+      if (event.key === 'Escape') {
+        onCancel()
+        return
+      }
+      if (event.key !== 'Tab') return
+
+      // The background behind an aria-modal dialog stays mounted and
+      // interactive, so without this a Tab walks out of the question and into
+      // the workspace controls it is asking about — and once focus reaches a
+      // terminal, the Escape above is the only way back and the terminal eats
+      // the keystroke it travels on.
+      const panel = panelRef.current
+      if (!panel) return
+      const focusable = Array.from(panel.querySelectorAll<HTMLElement>('button:not([disabled])'))
+      if (focusable.length === 0) return
+
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      const active = document.activeElement as HTMLElement | null
+
+      if (!active || !panel.contains(active)) {
+        event.preventDefault()
+        ;(event.shiftKey ? last : first).focus()
+        return
+      }
+      if (event.shiftKey && active === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault()
+        first.focus()
+      }
     }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
+
+    window.addEventListener('keydown', handleKeyDown, true)
+    return () => window.removeEventListener('keydown', handleKeyDown, true)
   }, [isOpen, onCancel])
 
   // Focus the confirm button rather than the dialog itself: it puts both
@@ -85,6 +126,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
       }}
     >
       <div
+        ref={panelRef}
         style={{
           backgroundColor: '#252526',
           border: '1px solid #444',

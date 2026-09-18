@@ -95,4 +95,80 @@ describe('ConfirmDialog', () => {
 
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Confirm' }))
   })
+
+  // The background stays mounted and interactive behind an aria-modal dialog,
+  // so without a trap a keyboard user tabs straight out of the question and
+  // into the workspace controls it is asking about.
+  describe('keyboard focus stays in the dialog', () => {
+    it('wraps Tab from the last button back to the first', () => {
+      render(<ConfirmDialog {...defaultProps} />)
+      const confirm = screen.getByRole('button', { name: 'Confirm' })
+      confirm.focus()
+
+      fireEvent.keyDown(confirm, { key: 'Tab' })
+
+      expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Cancel' }))
+    })
+
+    it('wraps Shift+Tab from the first button back to the last', () => {
+      render(<ConfirmDialog {...defaultProps} />)
+      const cancel = screen.getByRole('button', { name: 'Cancel' })
+      cancel.focus()
+
+      fireEvent.keyDown(cancel, { key: 'Tab', shiftKey: true })
+
+      expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Confirm' }))
+    })
+
+    it.each([
+      ['Tab', false, 'Cancel'],
+      ['Shift+Tab', true, 'Confirm'],
+    ])('pulls focus back into the dialog on %s when it is already outside', (_name, shiftKey, landsOn) => {
+      render(
+        <div>
+          <button type="button">Behind the dialog</button>
+          <ConfirmDialog {...defaultProps} />
+        </div>,
+      )
+      const outside = screen.getByRole('button', { name: 'Behind the dialog' })
+      outside.focus()
+
+      fireEvent.keyDown(outside, { key: 'Tab', shiftKey })
+
+      // Forwards lands on the dialog's first button, backwards on its last —
+      // the order a browser would have used had the background been inert.
+      expect(document.activeElement).toBe(screen.getByRole('button', { name: landsOn }))
+      expect(defaultProps.onConfirm).not.toHaveBeenCalled()
+      expect(defaultProps.onCancel).not.toHaveBeenCalled()
+    })
+
+    it('leaves other keys alone', () => {
+      render(<ConfirmDialog {...defaultProps} />)
+      const confirm = screen.getByRole('button', { name: 'Confirm' })
+      confirm.focus()
+
+      fireEvent.keyDown(confirm, { key: 'ArrowRight' })
+
+      expect(document.activeElement).toBe(confirm)
+    })
+  })
+
+  // A focused xterm terminal stops keydown propagation, which is why the rest
+  // of this app's overlays listen on the capture phase (see
+  // BoardDashboardPanel). A bubble-phase listener here would never see Escape
+  // in exactly the case the trap above is guarding against.
+  it('cancels on Escape even when the focused element stops the event propagating', () => {
+    render(
+      <div>
+        <button type="button" onKeyDown={(event) => event.stopPropagation()}>
+          Swallows keys
+        </button>
+        <ConfirmDialog {...defaultProps} />
+      </div>,
+    )
+
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Swallows keys' }), { key: 'Escape' })
+
+    expect(defaultProps.onCancel).toHaveBeenCalledTimes(1)
+  })
 })
