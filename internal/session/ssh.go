@@ -248,9 +248,14 @@ type handshakeOutcome struct {
 func handshakeWithTimeout(
 	conn net.Conn, addr string, sshCfg *ssh.ClientConfig, timeout time.Duration,
 ) (ssh.Conn, <-chan ssh.NewChannel, <-chan *ssh.Request, error) {
+	// Read the seam here rather than inside the goroutine: on the timeout path
+	// that goroutine outlives this call, and a test restoring the seam in its
+	// cleanup would then be writing what the goroutine is still reading.
+	handshake := newClientConnFn
+
 	done := make(chan handshakeOutcome, 1)
 	go func() {
-		sshConn, chans, reqs, err := newClientConnFn(conn, addr, sshCfg)
+		sshConn, chans, reqs, err := handshake(conn, addr, sshCfg)
 		done <- handshakeOutcome{conn: sshConn, chans: chans, reqs: reqs, err: err}
 	}()
 
