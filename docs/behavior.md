@@ -359,6 +359,17 @@ timeout shrinks to whatever of that budget remains, so a hanging/unreachable hos
 endpoint wait dramatically longer than the ceiling a single dial attempt already tolerated before
 retries were introduced.
 
+Once the transport is up, the SSH handshake (version exchange, key exchange and authentication) has
+its own 30-second bound, and it is enforced by panemux rather than by the transport. The handshake
+runs in its own goroutine and the call returns when it finishes or when that timer fires, whichever
+comes first. It has to work this way for all three transports:
+`golang.org/x/crypto/ssh`'s `NewClientConn` reads no timeout, sets no deadline and takes no context,
+and the transports disagree about deadlines anyway — a TCP conn honors them, a ProxyJump hop is an
+SSH channel whose `SetDeadline` reports "not supported", and the ProxyCommand transport's is a no-op
+because its pipes have none. The ProxyCommand case was the exposed one: a bastion command that hung
+while establishing its own tunnel used to block a pane's reconnect indefinitely. A timed-out
+handshake is reported as a `500` from this endpoint like any other handshake failure.
+
 ### `POST /api/sessions/{id}/open-url`
 
 Accepts `{ "url": "<http(s) URL>" }` and prepares the panemux host for a URL the browser is about to
