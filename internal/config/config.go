@@ -24,7 +24,6 @@ const (
 	defaultWorkspaceTitle  = "Default"
 	defaultTabPosition     = "top"
 	defaultLayoutDirection = "horizontal"
-	defaultPaneType        = "local"
 )
 
 type ServerConfig struct {
@@ -259,7 +258,7 @@ func defaultLayout() LayoutNode {
 				Size: 100.0,
 				Pane: &PaneConfig{
 					ID:    "local-main",
-					Type:  defaultPaneType,
+					Type:  PaneTypeLocal,
 					Shell: os.Getenv("SHELL"),
 					Title: "Terminal",
 				},
@@ -470,7 +469,7 @@ func singleLocalPaneLayout(paneID string) LayoutNode {
 				Size: 100.0,
 				Pane: &PaneConfig{
 					ID:    paneID,
-					Type:  defaultPaneType,
+					Type:  PaneTypeLocal,
 					Shell: os.Getenv("SHELL"),
 					Title: "Terminal",
 				},

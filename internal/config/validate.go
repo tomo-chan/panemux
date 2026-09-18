@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"regexp"
+	"slices"
 	"strings"
 
 	"panemux/internal/sshconfig"
@@ -15,10 +16,6 @@ var tmuxSessionNameRe = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`)
 const (
 	directionHorizontal          = "horizontal"
 	directionVertical            = "vertical"
-	paneTypeLocal                = "local"
-	paneTypeSSH                  = "ssh"
-	paneTypeTmux                 = "tmux"
-	paneTypeSSHTmux              = "ssh_tmux"
 	tabPositionTop               = "top"
 	tabPositionBottom            = "bottom"
 	tabPositionLeft              = "left"
@@ -215,10 +212,7 @@ func validatePane(p *PaneConfig, sshConns map[string]SSHConnection) []string {
 		errs = append(errs, fmt.Sprintf("pane id %q is reserved and cannot be used", reservedSystemID))
 	}
 
-	switch p.Type {
-	case paneTypeLocal, paneTypeSSH, paneTypeTmux, paneTypeSSHTmux:
-		// valid
-	default:
+	if !slices.Contains(PaneTypes(), p.Type) {
 		errs = append(
 			errs,
 			fmt.Sprintf(
@@ -229,7 +223,7 @@ func validatePane(p *PaneConfig, sshConns map[string]SSHConnection) []string {
 		)
 	}
 
-	if p.Type == paneTypeSSH || p.Type == paneTypeSSHTmux {
+	if p.Type == PaneTypeSSH || p.Type == PaneTypeSSHTmux {
 		if p.Connection == "" {
 			errs = append(errs, fmt.Sprintf("pane %q: ssh connection name must not be empty", p.ID))
 		} else if sshConns != nil {
@@ -245,7 +239,7 @@ func validatePane(p *PaneConfig, sshConns map[string]SSHConnection) []string {
 
 	errs = append(errs, validatePaneAgentBoardMode(p)...)
 
-	if p.Type == paneTypeTmux || p.Type == paneTypeSSHTmux {
+	if p.Type == PaneTypeTmux || p.Type == PaneTypeSSHTmux {
 		if p.TmuxSession == "" {
 			errs = append(errs, fmt.Sprintf("pane %q: tmux_session must not be empty", p.ID))
 		} else if !tmuxSessionNameRe.MatchString(p.TmuxSession) {
