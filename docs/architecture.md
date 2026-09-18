@@ -495,7 +495,7 @@ Why xterm.js:
 
 ### `usePaneUrlOpen`
 
-Owns everything that happens when a URL leaves a pane: opening the tab, asking the backend to forward the callback port, holding a pane-initiated request until the operator approves it, and surfacing a failed forward. `useTerminal` supplies the two entry points — a `WebLinksAddon` activation handler for clicked links, and an OSC handler (identifier `7373`) that consumes the browser shim's sequence so it never reaches the screen — and `PaneUrlOpenNotice` renders the approval and error strip.
+Owns everything that happens when a URL leaves a pane: opening the tab, asking the backend to forward the callback port, holding a pane-initiated request until the operator approves it, and surfacing a failed forward. `useTerminal` supplies the two entry points — the activation callback panemux's own URL link provider (`utils/terminalLinks.ts`) calls for clicked links, and an OSC handler (identifier `7373`) that consumes the browser shim's sequence so it never reaches the screen — and `PaneUrlOpenNotice` renders the approval and error strip.
 
 Why the hook owns the tab, not the backend:
 

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
-import { WebLinksAddon } from '@xterm/addon-web-links'
+import { createUrlLinkProvider } from '../utils/terminalLinks'
 import { useWebSocket } from './useWebSocket'
 import { TERMINAL_FONT_FAMILY } from '../utils/fonts'
 import { BROWSER_OPEN_OSC_IDENT, openUrlTab, parseBrowserOpenOsc } from '../utils/paneUrlOpen'
@@ -426,18 +426,15 @@ function getOrCreateTerminalEntry(sessionId: string): TerminalEntry {
   })
 
   const fitAddon = new FitAddon()
-  // The pane, not the addon, decides what activation does: opening the tab
+  // The pane, not the provider, decides what activation does: opening the tab
   // has to be paired with preparing the URL's loopback callback port.
-  const webLinksAddon = new WebLinksAddon(
-    (_event, uri) => {
-      if (entry.onLinkActivate) {
-        entry.onLinkActivate(uri)
-        return
-      }
-      openUrlTab(uri)
-    },
-    { urlRegex: TERMINAL_URL_REGEX },
-  )
+  const urlLinkProvider = createUrlLinkProvider(term, TERMINAL_URL_REGEX, (uri) => {
+    if (entry.onLinkActivate) {
+      entry.onLinkActivate(uri)
+      return
+    }
+    openUrlTab(uri)
+  })
   const entry: TerminalEntry = {
     term,
     fitAddon,
@@ -455,7 +452,10 @@ function getOrCreateTerminalEntry(sessionId: string): TerminalEntry {
   }
 
   term.loadAddon(fitAddon)
-  term.loadAddon(webLinksAddon)
+  // Registered before the pull-request provider: xterm keeps the link from the
+  // earliest-registered provider when two intersect, and a "#123" inside a URL
+  // belongs to the URL.
+  term.registerLinkProvider(urlLinkProvider)
   term.registerLinkProvider({
     provideLinks(y, callback) {
       callback(computePullRequestLinks(term, entry.repoURL, y))

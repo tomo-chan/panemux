@@ -896,11 +896,17 @@ attempt itself fails, the pane shows the manual "Reconnect Session" action inste
 
 ### Terminal link detection
 
-- `http://` and `https://` URLs printed into a pane are auto-detected and become clickable through the xterm.js web links addon.
-- The addon's default URL pattern only excludes ASCII punctuation, so panemux supplies its own pattern (`TERMINAL_URL_REGEX` in `frontend/src/hooks/useTerminal.ts`) that also excludes CJK and fullwidth punctuation. Trailing `。`, `、`, `・`, `…` and enclosing `（）`, `「」`, `【】`, `“”` are not part of the detected link.
+- `http://` and `https://` URLs printed into a pane are auto-detected and become clickable through panemux's own xterm.js link provider (`createUrlLinkProvider` in `frontend/src/utils/terminalLinks.ts`).
+- It replaced `@xterm/addon-web-links`, which joined rows only on the terminal's own `isWrapped` flag and accepted a cut-off fragment such as `https://exam` as a whole URL (issue [#175](https://github.com/tomo-chan/panemux/issues/175)). Neither is extensible from outside the addon.
+- The default URL pattern only excludes ASCII punctuation, so panemux supplies its own pattern (`TERMINAL_URL_REGEX` in `frontend/src/hooks/useTerminal.ts`) that also excludes CJK and fullwidth punctuation. Trailing `。`, `、`, `・`, `…` and enclosing `（）`, `「」`, `【】`, `“”` are not part of the detected link.
 - Non-ASCII *letters* are never excluded, so raw IRIs such as `https://ja.wikipedia.org/wiki/日本語` stay linkable in full. Fullwidth digits and fullwidth letters stay linkable for the same reason, as do the letters and numerals interleaved into the CJK symbols block itself (`々`, `〆`, `〇` and the ideographic numerals), so `https://ja.wikipedia.org/wiki/日々` is linked whole.
 - Known limitation: kana or kanji that directly follows a URL with no delimiter (for example `https://example.com/docsを参照`) is still absorbed into the link. That case cannot be distinguished from a legitimate kana IRI path by pattern matching alone. Separate the URL with whitespace or punctuation, or emit an OSC 8 hyperlink — xterm.js resolves those itself, independently of this pattern, and its built-in handler asks for confirmation before navigating.
-- `#<number>` references are linked separately to the pane's GitHub pull request (see [Pane Git and PR metadata](#pane-git-and-pr-metadata)).
+- A URL that does not fit the pane is linked whole, across every row it occupies, whether the terminal wrapped it or the program printed its own newline at the pane edge. The second case is the common one in a bordered TUI, in formatted CLI output, and wherever tmux redraws by line — none of which set `isWrapped`.
+- Two rows are read as one line when the terminal wrapped them, or when the upper row runs all the way to the pane edge and the lower row starts with something other than a blank. That heuristic can join two unrelated rows that happen to meet both conditions; the alternative is a fragment that stays clickable, and a URL cut inside its hostname opens a host the operator never saw.
+- A match that runs to the pane edge of the last row with nothing continuing it is not offered as a link at all: whether the URL ended there or the rest is off screen is unknowable, and half a URL is worse than none.
+- Known limitation: a URL broken well short of the pane edge — a program that prints `https://exam\r\nple.com/path` on an 80-column pane — is still linked as the fragment. A line that stops 60 columns early is indistinguishable from a line that simply ended there, so neither joining nor suppressing is safe.
+- Known limitation: a URL wrapped inside a drawn border (`│ … │`) is not rejoined, because the continuation row carries the border as its first characters. Stripping a shared border is tracked separately.
+- `#<number>` references are linked separately to the pane's GitHub pull request (see [Pane Git and PR metadata](#pane-git-and-pr-metadata)). The URL provider is registered first, so a `#123` inside a URL stays part of the URL.
 
 ### Resize and layout updates
 
