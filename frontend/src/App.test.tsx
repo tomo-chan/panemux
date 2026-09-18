@@ -289,23 +289,46 @@ describe('App workspace deletion', () => {
     expect(document.querySelector('[data-pane-id="side"]')).not.toHaveAttribute('data-attention')
   })
 
-  it('confirms before deleting a workspace from edit-mode tabs', () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
+  it('asks in the app\'s own dialog before deleting a workspace, and does not block on window.confirm', () => {
+    const nativeConfirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
 
     render(<App />)
     fireEvent.click(screen.getByRole('button', { name: 'Delete Dev workspace' }))
 
-    expect(window.confirm).toHaveBeenCalledWith('Delete workspace "Dev"?')
+    expect(nativeConfirm).not.toHaveBeenCalled()
+    expect(screen.getByRole('dialog', { name: 'Delete workspace' })).toBeDefined()
+    expect(screen.getByText(/Delete workspace "Dev"\?/)).toBeDefined()
+    // Nothing is deleted by the question itself.
+    expect(mockDeleteWorkspace).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
+
     expect(mockDeleteWorkspace).toHaveBeenCalledWith('dev')
+    expect(screen.queryByRole('dialog', { name: 'Delete workspace' })).toBeNull()
   })
 
-  it('keeps the workspace when delete confirmation is cancelled', () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(false)
+  it('keeps the workspace when the delete confirmation is cancelled', () => {
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Dev workspace' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
 
+    expect(mockDeleteWorkspace).not.toHaveBeenCalled()
+    expect(screen.queryByRole('dialog', { name: 'Delete workspace' })).toBeNull()
+  })
+
+  it('keeps the workspace when the delete confirmation is dismissed with Escape', () => {
     render(<App />)
     fireEvent.click(screen.getByRole('button', { name: 'Delete Dev workspace' }))
 
+    // Asserting the dialog is up before dismissing it is what makes this a
+    // test of the dialog rather than of nothing: "delete was not called" is
+    // equally true of a build that never asked in the first place.
+    expect(screen.getByRole('dialog', { name: 'Delete workspace' })).toBeDefined()
+
+    fireEvent.keyDown(window, { key: 'Escape' })
+
     expect(mockDeleteWorkspace).not.toHaveBeenCalled()
+    expect(screen.queryByRole('dialog', { name: 'Delete workspace' })).toBeNull()
   })
 
   it('creates a default local pane to the right of the current pane', async () => {

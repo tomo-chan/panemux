@@ -182,14 +182,12 @@ func dialSSHClientUntil(cfg SSHConfig, deadline time.Time) (*ssh.Client, *ssh.Cl
 		HostKeyAlgorithms: knownHostsAlgorithms(knownHostsPath, addr),
 		// Timeout is documented as bounding TCP connection establishment, but
 		// golang.org/x/crypto/ssh only reads it inside ssh.Dial(); it has no
-		// effect on ssh.NewClientConn (called below), which is what this
-		// package actually uses since it always dials its own net.Conn first.
-		// The handshake itself is therefore currently unbounded regardless of
-		// this value, for every transport (TCP, ProxyJump, and ProxyCommand
-		// alike) — retrying the dial (dialTransportWithRetry, above) does not
-		// change that. Kept here only so a future switch to ssh.Dial-style
-		// usage picks up a sane default; do not rely on it as a real timeout.
-		Timeout: 30 * time.Second,
+		// effect on ssh.NewClientConn, which is what this package actually
+		// uses since it always dials its own net.Conn first. What bounds the
+		// handshake is handshakeWithTimeout below; this is set to the same
+		// value only so a future switch to ssh.Dial-style usage picks up a
+		// sane default (see issue #147).
+		Timeout: sshHandshakeTimeout,
 	}
 
 	conn, jumpClient, err := dialTransportWithRetry(cfg, addr, port, deadline)
@@ -197,9 +195,10 @@ func dialSSHClientUntil(cfg SSHConfig, deadline time.Time) (*ssh.Client, *ssh.Cl
 		return nil, nil, err
 	}
 
-	sshConn, chans, reqs, err := ssh.NewClientConn(conn, addr, sshCfg)
+	sshConn, chans, reqs, err := handshakeWithTimeout(conn, addr, sshCfg, sshHandshakeTimeout)
 	if err != nil {
-		conn.Close()
+		// The transport is closed by handshakeWithTimeout, which owns it from
+		// the moment it is handed over.
 		if jumpClient != nil {
 			jumpClient.Close()
 		}
@@ -207,6 +206,73 @@ func dialSSHClientUntil(cfg SSHConfig, deadline time.Time) (*ssh.Client, *ssh.Cl
 	}
 
 	return ssh.NewClient(sshConn, chans, reqs), jumpClient, nil
+}
+
+// sshHandshakeTimeout bounds one SSH handshake (version exchange, key
+// exchange and authentication) once the transport is up. It is a var only so
+// tests can shorten it.
+var sshHandshakeTimeout = 30 * time.Second
+
+// newClientConnFn is the handshake step, injectable for tests. There is no
+// way to make a real handshake hang on demand without a cooperating server,
+// and the property under test is what happens when one does.
+var newClientConnFn = ssh.NewClientConn
+
+type handshakeOutcome struct {
+	conn  ssh.Conn
+	chans <-chan ssh.NewChannel
+	reqs  <-chan *ssh.Request
+	err   error
+}
+
+// handshakeWithTimeout runs the SSH handshake with a real, enforced bound,
+// and takes ownership of conn: on any failure — including the timeout — conn
+// is closed, and on success it is left open for the returned client.
+//
+// The bound cannot come from the transport (issue #147). ssh.NewClientConn
+// reads no timeout of its own, sets no deadline, and takes no context, and the
+// three transports this package dials disagree about deadlines anyway: a TCP
+// conn honors them, a ProxyJump hop is an SSH channel whose SetDeadline
+// returns "not supported", and proxyCommandConn's is a no-op by construction
+// (its pipes have no deadline support), which is why the ProxyCommand case was
+// the worst exposed — a bastion command that hangs while establishing its own
+// tunnel blocked a pane's reconnect with nothing to stop it.
+//
+// So the handshake runs in its own goroutine and this returns when it finishes
+// or when the timer fires, whichever comes first. Closing conn is what
+// eventually releases that goroutine, and it is done asynchronously on the
+// timeout path on purpose: proxyCommandConn.Close kills its subprocess and
+// then waits on it, and a bound that depends on an unbounded Close is not a
+// bound. The goroutine's channel is buffered, so it never leaks even if the
+// handshake outlives this call.
+func handshakeWithTimeout(
+	conn net.Conn, addr string, sshCfg *ssh.ClientConfig, timeout time.Duration,
+) (ssh.Conn, <-chan ssh.NewChannel, <-chan *ssh.Request, error) {
+	// Read the seam here rather than inside the goroutine: on the timeout path
+	// that goroutine outlives this call, and a test restoring the seam in its
+	// cleanup would then be writing what the goroutine is still reading.
+	handshake := newClientConnFn
+
+	done := make(chan handshakeOutcome, 1)
+	go func() {
+		sshConn, chans, reqs, err := handshake(conn, addr, sshCfg)
+		done <- handshakeOutcome{conn: sshConn, chans: chans, reqs: reqs, err: err}
+	}()
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	select {
+	case outcome := <-done:
+		if outcome.err != nil {
+			conn.Close()
+			return nil, nil, nil, outcome.err
+		}
+		return outcome.conn, outcome.chans, outcome.reqs, nil
+	case <-timer.C:
+		go conn.Close() //nolint:errcheck // best-effort release of the blocked handshake
+		return nil, nil, nil, fmt.Errorf("ssh handshake with %s timed out after %s", addr, timeout)
+	}
 }
 
 const (
@@ -1242,6 +1308,11 @@ func remoteClaudeSessionCWDs(
 		return nil, nil
 	}
 
+	// Deliberately the derived path alone, with no fallback scan: unlike the
+	// local resolver (see resolveClaudeTranscriptPath, issue #119), a miss here
+	// would cost an extra SSH round trip on every metadata refresh, and the
+	// encoding is a property of the Claude version rather than of the host — so
+	// a change shows up on a local pane first.
 	projectPath := remoteClaudeProjectPath(sessionMeta)
 
 	cwds := make([]string, 0, 1)

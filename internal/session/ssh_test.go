@@ -500,12 +500,12 @@ func TestActiveRemoteWorkdir_PrefersRemoteClaudeTranscriptWorktree(t *testing.T)
 
 func TestActiveRemoteWorkdir_PrefersRemoteClaudeTranscriptWorktree_WithDotInCWD(t *testing.T) {
 	sessionPath := "~/.claude/sessions/220.json"
-	projectCmd := "cat ~/.claude/projects/'-home-tomo-chan-repo-main/session-123.jsonl'"
+	projectCmd := "cat ~/.claude/projects/'-home-dev-user-repo-main/session-123.jsonl'"
 
 	runner := &fakeSSHRunner{
 		outputs: map[string][]byte{
 			sshListProcessesCmd:  []byte(" 100 1 sh\n 220 100 claude\n"),
-			"cat " + sessionPath: []byte(`{"pid":220,"sessionId":"session-123","cwd":"/home/tomo.chan/repo/main"}`),
+			"cat " + sessionPath: []byte(`{"pid":220,"sessionId":"session-123","cwd":"/home/dev.user/repo/main"}`),
 			projectCmd: []byte(
 				"{\"type\":\"assistant\",\"cwd\":\"/tmp/remote-claude-worktree\"," +
 					"\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}\n",

@@ -51,7 +51,7 @@ type PaneAgentBoardConfig struct {
 	Mode    string `yaml:"mode,omitempty"    json:"mode,omitempty"`
 }
 
-func (c *Config) normalizeAgentBoard() {
+func (c *Data) normalizeAgentBoard() {
 	if c.AgentBoard.Team == "" {
 		c.AgentBoard.Team = defaultAgentBoardTeam
 	}

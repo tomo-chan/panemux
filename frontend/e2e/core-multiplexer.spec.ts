@@ -195,17 +195,17 @@ test('adds, renames and deletes a workspace', async ({ page }) => {
   await expect(page.getByRole('tab', { name: 'Renamed By E2E' })).toBeVisible()
 
   // Deleting a workspace is confirmed first — it takes its panes with it.
-  // Playwright dismisses dialogs by default, so without this the delete is
-  // silently cancelled and the test reads as "delete does not work".
-  const confirmed = new Promise<string>((resolve) => {
-    page.once('dialog', (dialog) => {
-      resolve(dialog.message())
-      void dialog.accept()
-    })
-  })
-
+  // The confirmation is panemux's own dialog rather than window.confirm (issue
+  // #70), so there is no native dialog for Playwright to dismiss: the question
+  // has to be answered in the page.
   await page.getByRole('button', { name: 'Delete Renamed By E2E workspace' }).click()
-  expect(await confirmed).toContain('Renamed By E2E')
+  const confirmDelete = page.getByRole('dialog', { name: 'Delete workspace' })
+  await expect(confirmDelete).toContainText('Renamed By E2E')
+
+  // The question alone deletes nothing.
+  await expect(page.getByRole('tab', { name: 'Renamed By E2E' })).toBeVisible()
+
+  await confirmDelete.getByRole('button', { name: 'Delete' }).click()
   await expect(page.getByRole('tab', { name: 'Renamed By E2E' })).toHaveCount(0)
   await expect(page.getByRole('tab')).toHaveCount(tabsBefore)
 })

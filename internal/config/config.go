@@ -24,7 +24,6 @@ const (
 	defaultWorkspaceTitle  = "Default"
 	defaultTabPosition     = "top"
 	defaultLayoutDirection = "horizontal"
-	defaultPaneType        = "local"
 )
 
 type ServerConfig struct {
@@ -148,10 +147,18 @@ type WorkspacesConfig struct {
 	VerticalBarWidth int               `yaml:"vertical_bar_width,omitempty" json:"vertical_bar_width"`
 }
 
-// Config field order controls YAML serialization order for newly written
-// config files, so it intentionally prioritizes user-facing output over
-// fieldalignment.
-type Config struct { //nolint:govet
+// Data is config.yaml's domain model and nothing else: one field per
+// top-level section, in the order they are written out.
+//
+// Field order controls YAML serialization order for newly written config
+// files, so it intentionally prioritizes user-facing output over
+// fieldalignment. That trade-off is now this struct's alone — the persistence
+// context it used to share a struct with (see Config) can be laid out freely,
+// which is what issue #66 asked for.
+//
+// It is also what write() serializes, so a section added here is persisted
+// without a second field list having to be extended to match.
+type Data struct { //nolint:govet
 	Server         ServerConfig             `yaml:"server"`
 	SSHConnections map[string]SSHConnection `yaml:"ssh_connections,omitempty"`
 	Workspaces     WorkspacesConfig         `yaml:"workspaces,omitempty" json:"workspaces"`
@@ -160,6 +167,20 @@ type Config struct { //nolint:govet
 	AgentBoard     AgentBoardConfig         `yaml:"agent_board,omitempty" json:"agent_board"`
 	CommandCenter  CommandCenterConfig      `yaml:"command_center,omitempty" json:"command_center"`
 	URLOpen        URLOpenConfig            `yaml:"url_open,omitempty" json:"url_open"`
+}
+
+// Config is a Data together with the context needed to load and save it:
+// where the file lives, and the two path seams tests substitute.
+//
+// The embedding is inline (`yaml:",inline"`, which yaml.v3 requires for an
+// embedded struct — it does not inline anonymous fields on its own) and
+// encoding/json inlines an untagged embedded struct by itself, so config.yaml
+// and every API response keep the exact shape they had when these fields sat
+// directly on Config. Domain methods hang off Data and reach callers through
+// the same promotion; only the methods that touch the file — write, the Save*
+// pair, EnsureAuthToken, finishLoad and Validate — are Config's own.
+type Config struct {
+	Data `yaml:",inline"`
 
 	filePath          string
 	sshConfigPath     string // overridable for tests; empty = use sshconfig.DefaultPath()
@@ -224,7 +245,7 @@ func (c *Config) finishLoad() error {
 }
 
 func Default() *Config {
-	cfg := &Config{
+	cfg := &Config{Data: Data{
 		Server: ServerConfig{
 			Port: 8080,
 			Host: defaultServerHost,
@@ -246,7 +267,7 @@ func Default() *Config {
 				},
 			},
 		},
-	}
+	}}
 	cfg.normalizeAgentBoard()
 	return cfg
 }
@@ -259,7 +280,7 @@ func defaultLayout() LayoutNode {
 				Size: 100.0,
 				Pane: &PaneConfig{
 					ID:    "local-main",
-					Type:  defaultPaneType,
+					Type:  PaneTypeLocal,
 					Shell: os.Getenv("SHELL"),
 					Title: "Terminal",
 				},
@@ -268,14 +289,14 @@ func defaultLayout() LayoutNode {
 	}
 }
 
-func (c *Config) normalizeWorkspaces() {
+func (c *Data) normalizeWorkspaces() {
 	c.Workspaces = c.normalizedWorkspaces()
 	if active, ok := c.ActiveWorkspace(); ok {
 		c.Layout = active.Layout
 	}
 }
 
-func (c *Config) normalizedWorkspaces() WorkspacesConfig {
+func (c *Data) normalizedWorkspaces() WorkspacesConfig {
 	workspaces := c.Workspaces
 	if len(workspaces.Items) == 0 {
 		workspaces = WorkspacesConfig{
@@ -307,7 +328,7 @@ func (c *Config) normalizedWorkspaces() WorkspacesConfig {
 	return workspaces
 }
 
-func (c *Config) ActiveWorkspace() (WorkspaceConfig, bool) {
+func (c *Data) ActiveWorkspace() (WorkspaceConfig, bool) {
 	if len(c.Workspaces.Items) == 0 {
 		return WorkspaceConfig{}, false
 	}
@@ -319,14 +340,14 @@ func (c *Config) ActiveWorkspace() (WorkspaceConfig, bool) {
 	return WorkspaceConfig{}, false
 }
 
-func (c *Config) ActiveLayout() LayoutNode {
+func (c *Data) ActiveLayout() LayoutNode {
 	if workspace, ok := c.ActiveWorkspace(); ok {
 		return normalizeLayoutNode(workspace.Layout)
 	}
 	return normalizeLayoutNode(c.Layout)
 }
 
-func (c *Config) SetActiveWorkspace(id string) bool {
+func (c *Data) SetActiveWorkspace(id string) bool {
 	for _, workspace := range c.Workspaces.Items {
 		if workspace.ID == id {
 			c.Workspaces.Active = id
@@ -337,7 +358,7 @@ func (c *Config) SetActiveWorkspace(id string) bool {
 	return false
 }
 
-func (c *Config) UpdateWorkspaceLayout(id string, layout LayoutNode) bool {
+func (c *Data) UpdateWorkspaceLayout(id string, layout LayoutNode) bool {
 	for i := range c.Workspaces.Items {
 		if c.Workspaces.Items[i].ID == id {
 			c.Workspaces.Items[i].Layout = layout
@@ -350,7 +371,7 @@ func (c *Config) UpdateWorkspaceLayout(id string, layout LayoutNode) bool {
 	return false
 }
 
-func (c *Config) ActiveWorkspaceID() string {
+func (c *Data) ActiveWorkspaceID() string {
 	if c.Workspaces.Active != "" {
 		return c.Workspaces.Active
 	}
@@ -360,7 +381,7 @@ func (c *Config) ActiveWorkspaceID() string {
 	return defaultWorkspaceID
 }
 
-func (c *Config) WorkspacesView() WorkspacesConfig {
+func (c *Data) WorkspacesView() WorkspacesConfig {
 	return c.normalizedWorkspaces()
 }
 
@@ -369,7 +390,7 @@ func (c *Config) SaveWorkspaces() error {
 	return c.write()
 }
 
-func (c *Config) AddDefaultWorkspace() WorkspaceConfig {
+func (c *Data) AddDefaultWorkspace() WorkspaceConfig {
 	c.normalizeWorkspaces()
 	n := len(c.Workspaces.Items) + 1
 	id := c.nextWorkspaceID(n)
@@ -384,7 +405,7 @@ func (c *Config) AddDefaultWorkspace() WorkspaceConfig {
 	return workspace
 }
 
-func (c *Config) RemoveWorkspace(id string) (WorkspaceConfig, bool) {
+func (c *Data) RemoveWorkspace(id string) (WorkspaceConfig, bool) {
 	c.normalizeWorkspaces()
 	for i, workspace := range c.Workspaces.Items {
 		if workspace.ID != id {
@@ -404,7 +425,7 @@ func (c *Config) RemoveWorkspace(id string) (WorkspaceConfig, bool) {
 	return WorkspaceConfig{}, false
 }
 
-func (c *Config) RenameWorkspace(id string, title string) bool {
+func (c *Data) RenameWorkspace(id string, title string) bool {
 	c.normalizeWorkspaces()
 	for i := range c.Workspaces.Items {
 		if c.Workspaces.Items[i].ID == id {
@@ -415,7 +436,7 @@ func (c *Config) RenameWorkspace(id string, title string) bool {
 	return false
 }
 
-func (c *Config) SetWorkspaceTabPosition(position string) error {
+func (c *Data) SetWorkspaceTabPosition(position string) error {
 	if err := ValidateWorkspaceTabPosition(position); err != nil {
 		return err
 	}
@@ -424,7 +445,7 @@ func (c *Config) SetWorkspaceTabPosition(position string) error {
 	return nil
 }
 
-func (c *Config) SetWorkspaceVerticalBarWidth(width int) error {
+func (c *Data) SetWorkspaceVerticalBarWidth(width int) error {
 	if err := ValidateWorkspaceVerticalBarWidth(width); err != nil {
 		return err
 	}
@@ -433,7 +454,7 @@ func (c *Config) SetWorkspaceVerticalBarWidth(width int) error {
 	return nil
 }
 
-func (c *Config) nextWorkspaceID(start int) string {
+func (c *Data) nextWorkspaceID(start int) string {
 	seen := make(map[string]bool, len(c.Workspaces.Items))
 	for _, workspace := range c.Workspaces.Items {
 		seen[workspace.ID] = true
@@ -446,7 +467,7 @@ func (c *Config) nextWorkspaceID(start int) string {
 	}
 }
 
-func (c *Config) nextPaneID(base string) string {
+func (c *Data) nextPaneID(base string) string {
 	seen := make(map[string]bool)
 	for _, pane := range c.AllPanes() {
 		seen[pane.ID] = true
@@ -470,7 +491,7 @@ func singleLocalPaneLayout(paneID string) LayoutNode {
 				Size: 100.0,
 				Pane: &PaneConfig{
 					ID:    paneID,
-					Type:  defaultPaneType,
+					Type:  PaneTypeLocal,
 					Shell: os.Getenv("SHELL"),
 					Title: "Terminal",
 				},
@@ -484,33 +505,26 @@ func (c *Config) write() error {
 		return nil
 	}
 
-	type configFile struct { //nolint:govet
-		Server         ServerConfig             `yaml:"server"`
-		SSHConnections map[string]SSHConnection `yaml:"ssh_connections,omitempty"`
-		Workspaces     WorkspacesConfig         `yaml:"workspaces,omitempty"`
-		Display        DisplayConfig            `yaml:"display,omitempty"`
-		AgentBoard     AgentBoardConfig         `yaml:"agent_board,omitempty"`
-		CommandCenter  CommandCenterConfig      `yaml:"command_center,omitempty"`
-		URLOpen        URLOpenConfig            `yaml:"url_open,omitempty"`
-	}
+	// Serialize the domain model itself. This used to be a second struct
+	// listing the same sections, which had to be extended by hand whenever a
+	// section was added to Config — and a section left out of it was dropped
+	// on every save with nothing to notice. The two adjustments the file
+	// needs are made on a copy, so the in-memory config is untouched.
+	out := c.Data
 
-	server := c.Server
+	// The top-level layout mirrors the active workspace's layout for
+	// in-memory readers; workspaces own the persisted copy, so clearing it
+	// lets omitempty drop it rather than writing a stale second copy back.
+	out.Layout = LayoutNode{}
+
 	if c.authTokenFromFile {
 		// The token came from the token file (auto-generated or read from
 		// disk there), not from an operator-set config.yaml value — never
 		// echo it back into config.yaml.
-		server.AuthToken = ""
+		out.Server.AuthToken = ""
 	}
 
-	data, err := yaml.Marshal(configFile{
-		Server:         server,
-		SSHConnections: c.SSHConnections,
-		Workspaces:     c.Workspaces,
-		Display:        c.Display,
-		AgentBoard:     c.AgentBoard,
-		CommandCenter:  c.CommandCenter,
-		URLOpen:        c.URLOpen,
-	})
+	data, err := yaml.Marshal(out)
 	if err != nil {
 		return fmt.Errorf("marshaling config: %w", err)
 	}
@@ -572,7 +586,7 @@ func resolveWriteTarget(path string) string {
 	return dest
 }
 
-func (c *Config) expandPaths() {
+func (c *Data) expandPaths() {
 	for key, conn := range c.SSHConnections {
 		conn.KeyFile = expandTilde(conn.KeyFile)
 		conn.KnownHostsFile = expandTilde(conn.KnownHostsFile)
@@ -698,7 +712,7 @@ func tightenConfigFilePermissions(path string) error {
 }
 
 // UpdateLayout updates the in-memory layout without persisting to disk.
-func (c *Config) UpdateLayout(layout LayoutNode) {
+func (c *Data) UpdateLayout(layout LayoutNode) {
 	c.normalizeWorkspaces()
 	if !c.UpdateWorkspaceLayout(c.ActiveWorkspaceID(), layout) {
 		c.Layout = layout
@@ -706,7 +720,7 @@ func (c *Config) UpdateLayout(layout LayoutNode) {
 }
 
 // AllPanes returns a flat list of all pane configs.
-func (c *Config) AllPanes() []*PaneConfig {
+func (c *Data) AllPanes() []*PaneConfig {
 	var panes []*PaneConfig
 	workspaces := c.normalizedWorkspaces()
 	for _, workspace := range workspaces.Items {
@@ -726,7 +740,7 @@ func collectPanes(children []LayoutChild, panes *[]*PaneConfig) {
 
 // RemovePaneFromLayout removes the pane with the given ID from the layout tree
 // and normalizes sibling sizes so they still sum to 100.
-func (c *Config) RemovePaneFromLayout(paneID string) {
+func (c *Data) RemovePaneFromLayout(paneID string) {
 	c.normalizeWorkspaces()
 	for i := range c.Workspaces.Items {
 		c.Workspaces.Items[i].Layout.Children = removePaneChildren(c.Workspaces.Items[i].Layout.Children, paneID)

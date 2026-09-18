@@ -11,7 +11,7 @@ type URLOpenConfig struct {
 }
 
 // BrowserShimEnabled reports whether new panes install the browser-open shim.
-func (c *Config) BrowserShimEnabled() bool {
+func (c *Data) BrowserShimEnabled() bool {
 	if c.URLOpen.BrowserShim == nil {
 		return true
 	}

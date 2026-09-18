@@ -253,4 +253,21 @@ describe('PaneSettingsDialog agent board', () => {
     expect(onSave.mock.calls[0][0].show_header).toBe(false)
     expect(onSave.mock.calls[0][0].agent_board).toEqual({ enabled: true, mode: 'off' })
   })
+  // The trap itself is covered in useModalKeyboard.test.tsx; this is the
+  // wiring check — that this dialog actually uses it, and that its ref is on
+  // the element carrying role="dialog".
+  it('keeps Tab inside the dialog', () => {
+    render(<PaneSettingsDialog {...defaultProps} />)
+
+    const outside = document.createElement('button')
+    outside.textContent = 'Behind'
+    document.body.appendChild(outside)
+    outside.focus()
+
+    fireEvent.keyDown(outside, { key: 'Tab' })
+
+    expect(screen.getByRole('dialog', { name: 'Pane settings' }).contains(document.activeElement)).toBe(true)
+    outside.remove()
+  })
+
 })

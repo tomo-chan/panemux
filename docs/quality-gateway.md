@@ -242,6 +242,16 @@ them:
   to be told apart by looking for the test's own `--- PASS`/`--- FAIL` line rather than by exit
   status. Benchmarks are excluded at collection for the same reason: `-run` never selects them, and
   a benchmark asserts nothing that could go red.
+
+  The frontend half had the same mistake in its own dialect, and it survived until PR #240 hit it.
+  When the revert deletes an implementation file the branch *added*, the test file importing it
+  cannot be collected at all — vitest still writes a JSON report, but it holds no case results, and
+  "this case is not in the report" was being read as "it passed". That inverted the gate for every
+  new module's tests, which is most of what a feature branch writes: 36 of that branch's tests,
+  including every test of the component its review comment was about, came back as survivors while
+  the evidence in the log was an import error. A case that passed at HEAD and is absent after the
+  revert is now red, because only implementation files move between the two runs, so nothing else
+  can explain its absence.
 - **Scope is the changed test *functions* and *cases*, not the changed files.** The script maps the
   diff's touched line numbers onto the function ranges in the file, so editing an assertion inside
   an existing test brings that test into scope, and appending a new test does *not* drag the

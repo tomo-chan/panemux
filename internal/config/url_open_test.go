@@ -18,8 +18,8 @@ func TestBrowserShimEnabled_RespectsExplicitValues(t *testing.T) {
 	enabled := true
 	disabled := false
 
-	assert.True(t, (&Config{URLOpen: URLOpenConfig{BrowserShim: &enabled}}).BrowserShimEnabled())
-	assert.False(t, (&Config{URLOpen: URLOpenConfig{BrowserShim: &disabled}}).BrowserShimEnabled())
+	assert.True(t, (&Config{Data: Data{URLOpen: URLOpenConfig{BrowserShim: &enabled}}}).BrowserShimEnabled())
+	assert.False(t, (&Config{Data: Data{URLOpen: URLOpenConfig{BrowserShim: &disabled}}}).BrowserShimEnabled())
 }
 
 func TestLoad_ReadsURLOpenBrowserShim(t *testing.T) {

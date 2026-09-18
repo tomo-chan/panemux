@@ -785,6 +785,17 @@ while IFS= read -r fefile; do
 		failed)
 			echo "  red: $label"
 			;;
+		missing)
+			# Phase 1 put this case here because it PASSED at HEAD, and only
+			# implementation files were reverted since — so a case that is no
+			# longer in the report did not vanish on its own: its suite stopped
+			# collecting, which is what happens when the revert deletes a module
+			# the test file imports, i.e. an implementation file this branch
+			# added. That is the strongest red there is. Reading "not in the
+			# report" as "passed" inverted this gate for every new module's
+			# tests, which is the shape most of a feature branch's tests have.
+			echo "  red: $label (its suite no longer collects with the implementation reverted)"
+			;;
 		ambiguous)
 			echo
 			echo "SURVIVOR: $label — two cases share this name and only some went red,"

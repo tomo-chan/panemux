@@ -240,7 +240,7 @@ func TestExpandLocalAgmsgPath_AbsolutePath_Unchanged(t *testing.T) {
 func TestResolveAgmsgPathForHost_Local_ExpandsAgainstLocalHome(t *testing.T) {
 	home := "/workspace/user/home"
 	homedir.SetForTest(t, home)
-	cfg := &config.Config{AgentBoard: config.AgentBoardConfig{AgmsgPath: "~/.agents/skills/agmsg"}}
+	cfg := &config.Config{Data: config.Data{AgentBoard: config.AgentBoardConfig{AgmsgPath: "~/.agents/skills/agmsg"}}}
 
 	path, ok := resolveAgmsgPathForHost(cfg, session.NewManager(), nil, boardHostIDLocal)
 	if !ok {
@@ -253,7 +253,7 @@ func TestResolveAgmsgPathForHost_Local_ExpandsAgainstLocalHome(t *testing.T) {
 }
 
 func TestResolveAgmsgPathForHost_RemoteNoReachableSession_False(t *testing.T) {
-	cfg := &config.Config{AgentBoard: config.AgentBoardConfig{AgmsgPath: "/opt/agmsg"}}
+	cfg := &config.Config{Data: config.Data{AgentBoard: config.AgentBoardConfig{AgmsgPath: "/opt/agmsg"}}}
 	manager := session.NewManager()
 	paneHosts := map[string]string{"pane-a": "ssh:build-host"}
 
@@ -264,7 +264,7 @@ func TestResolveAgmsgPathForHost_RemoteNoReachableSession_False(t *testing.T) {
 }
 
 func TestResolveAgmsgPathForHost_Remote_ResolvesViaLiveExecutor(t *testing.T) {
-	cfg := &config.Config{AgentBoard: config.AgentBoardConfig{AgmsgPath: "/opt/agmsg"}}
+	cfg := &config.Config{Data: config.Data{AgentBoard: config.AgentBoardConfig{AgmsgPath: "/opt/agmsg"}}}
 	manager := session.NewManager()
 	paneHosts := map[string]string{"pane-a": "ssh:build-host"}
 	manager.Add(&fakeBoardSession{id: "pane-a", tag: "unused-for-absolute-paths"})
@@ -279,7 +279,7 @@ func TestResolveAgmsgPathForHost_Remote_ResolvesViaLiveExecutor(t *testing.T) {
 }
 
 func TestResolveBootstrapPaths_MixOfReachableAndUnreachableHosts(t *testing.T) {
-	cfg := &config.Config{AgentBoard: config.AgentBoardConfig{AgmsgPath: "/opt/agmsg"}}
+	cfg := &config.Config{Data: config.Data{AgentBoard: config.AgentBoardConfig{AgmsgPath: "/opt/agmsg"}}}
 	manager := session.NewManager()
 	paneHosts := map[string]string{
 		"pane-a": "ssh:reachable-host",
@@ -352,7 +352,7 @@ func configWithPanes(panes ...*config.PaneConfig) *config.Config {
 	for _, pane := range panes {
 		children = append(children, config.LayoutChild{Size: float64(100 / max(len(panes), 1)), Pane: pane})
 	}
-	return &config.Config{
+	return &config.Config{Data: config.Data{
 		Workspaces: config.WorkspacesConfig{
 			Active: "default",
 			Items: []config.WorkspaceConfig{{
@@ -361,7 +361,7 @@ func configWithPanes(panes ...*config.PaneConfig) *config.Config {
 				Layout: config.LayoutNode{Direction: "horizontal", Children: children},
 			}},
 		},
-	}
+	}}
 }
 
 func TestCurrentPaneModes(t *testing.T) {
@@ -561,7 +561,7 @@ func TestNewAgmsgClientForHost_LocalWithAgmsgInstalled_ReturnsClient(t *testing.
 	agmsgPath := installAgmsg(t, t.TempDir(), board.TestedAgmsgVersion)
 	capturePath := filepath.Join(t.TempDir(), "captured-argv")
 	installExecutableSendScript(t, agmsgPath, capturePath)
-	cfg := &config.Config{AgentBoard: config.AgentBoardConfig{AgmsgPath: agmsgPath}}
+	cfg := &config.Config{Data: config.Data{AgentBoard: config.AgentBoardConfig{AgmsgPath: agmsgPath}}}
 
 	client, ok := newAgmsgClientForHost(cfg, session.NewManager(), map[string]string{}, boardHostIDLocal)
 
@@ -595,7 +595,7 @@ func TestNewAgmsgClientForHost_LocalWithAgmsgInstalled_ReturnsClient(t *testing.
 // skipped rather than given a client that would log the same exec failure
 // every poll for the life of the process.
 func TestNewAgmsgClientForHost_LocalWithoutAgmsg_SkipsTheHost(t *testing.T) {
-	cfg := &config.Config{AgentBoard: config.AgentBoardConfig{AgmsgPath: t.TempDir()}}
+	cfg := &config.Config{Data: config.Data{AgentBoard: config.AgentBoardConfig{AgmsgPath: t.TempDir()}}}
 
 	client, ok := newAgmsgClientForHost(cfg, session.NewManager(), map[string]string{}, boardHostIDLocal)
 
@@ -611,7 +611,7 @@ func TestNewAgmsgClientForHost_LocalWithoutAgmsg_SkipsTheHost(t *testing.T) {
 // alone: no reachable session, a failed $HOME probe, and an absent agmsg
 // install. Only the line names which one this test actually reached.
 func TestNewAgmsgClientForHost_RemoteWithNoReachablePane_SkipsTheHost(t *testing.T) {
-	cfg := &config.Config{AgentBoard: config.AgentBoardConfig{AgmsgPath: "/remote/home/demo/agmsg"}}
+	cfg := &config.Config{Data: config.Data{AgentBoard: config.AgentBoardConfig{AgmsgPath: "/remote/home/demo/agmsg"}}}
 	buf := captureBoardLog(t)
 
 	client, ok := newAgmsgClientForHost(cfg, session.NewManager(), map[string]string{"pane-a": "ssh:demo"}, "ssh:demo")
