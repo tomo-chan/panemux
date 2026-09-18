@@ -2,6 +2,7 @@ import React, { useState, useCallback, useEffect, useMemo } from 'react'
 import { SplitContainer, LayoutActionsContext } from './components/SplitContainer'
 import { PaneSettingsDialog } from './components/PaneSettingsDialog'
 import { AddSSHHostDialog } from './components/AddSSHHostDialog'
+import { ConfirmDialog } from './components/ConfirmDialog'
 import { WorkspaceTabs } from './components/WorkspaceTabs'
 import { CommandPalette } from './components/CommandPalette'
 import { CommandHistoryPanel } from './components/CommandHistoryPanel'
@@ -60,6 +61,9 @@ export const App: React.FC = () => {
   const { isOpen, currentPane, sshConnectionNames, saveError, isSaving, openSettings, closeSettings, saveSettings, addSSHConfigHost, detectShell, browseDirectories } =
     usePaneSettings(layout, updateSizes)
 
+  // The workspace whose deletion is being confirmed. The title is kept
+  // alongside the id so the question survives the list changing underneath it.
+  const [workspacePendingDelete, setWorkspacePendingDelete] = useState<{ id: string; title: string } | null>(null)
   const [isAddSSHHostOpen, setIsAddSSHHostOpen] = useState(false)
   const [addSSHHostError, setAddSSHHostError] = useState<string | null>(null)
   const [isAddSSHHostSaving, setIsAddSSHHostSaving] = useState(false)
@@ -415,9 +419,7 @@ export const App: React.FC = () => {
             onDelete={(workspaceId) => {
               const workspace = workspaces.items.find((item) => item.id === workspaceId)
               if (!workspace) return
-              if (window.confirm(`Delete workspace "${workspace.title}"?`)) {
-                void deleteWorkspace(workspaceId)
-              }
+              setWorkspacePendingDelete({ id: workspace.id, title: workspace.title })
             }}
           />
         )}
@@ -531,6 +533,19 @@ export const App: React.FC = () => {
           onAddSSHHost={() => setIsAddSSHHostOpen(true)}
           onDetectShell={detectShell}
           onBrowseDirectories={browseDirectories}
+        />
+        <ConfirmDialog
+          isOpen={workspacePendingDelete !== null}
+          title="Delete workspace"
+          message={`Delete workspace "${workspacePendingDelete?.title ?? ''}"? Its panes are closed with it.`}
+          confirmLabel="Delete"
+          isDestructive
+          onConfirm={() => {
+            const pending = workspacePendingDelete
+            setWorkspacePendingDelete(null)
+            if (pending) void deleteWorkspace(pending.id)
+          }}
+          onCancel={() => setWorkspacePendingDelete(null)}
         />
         <AddSSHHostDialog
           isOpen={isAddSSHHostOpen}
