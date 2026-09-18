@@ -198,4 +198,21 @@ describe('AddSSHHostDialog', () => {
       overflowY: 'auto',
     })
   })
+  // The trap itself is covered in useModalKeyboard.test.tsx; this is the
+  // wiring check — that this dialog actually uses it, and that its ref is on
+  // the element carrying role="dialog".
+  it('keeps Tab inside the dialog', () => {
+    render(<AddSSHHostDialog {...defaultProps} />)
+
+    const outside = document.createElement('button')
+    outside.textContent = 'Behind'
+    document.body.appendChild(outside)
+    outside.focus()
+
+    fireEvent.keyDown(outside, { key: 'Tab' })
+
+    expect(screen.getByRole('dialog').contains(document.activeElement)).toBe(true)
+    outside.remove()
+  })
+
 })

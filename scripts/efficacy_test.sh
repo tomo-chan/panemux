@@ -538,6 +538,67 @@ $percase_out"
 	rm -rf "$percase"
 fi
 
+# --- a test whose module the revert deletes is red, not a survivor -----------
+#
+# The revert removes an implementation file the branch ADDED, so the test file
+# importing it cannot be collected at all. vitest still writes a report, but it
+# holds no case results, and reading "this case is not in the report" as "it
+# passed" inverted the gate for every new module's tests: the strongest red
+# there is — the code under test is gone and nothing can even load — was the
+# one verdict reported as a survivor.
+checks=$((checks + 1))
+if [ ! -d "$scripts_dir/../frontend/node_modules" ]; then
+	echo "skip frontend/node_modules missing — the deleted-module check is skipped"
+else
+	gone=$(mktemp -d)
+	(
+		cd "$gone" || exit 1
+		git_init
+		mkdir -p frontend/src
+		printf 'node_modules/\n' > .gitignore
+		printf '{"name":"efficacy-fixture","private":true,"type":"module"}\n' > frontend/package.json
+		ln -s "$(CDPATH='' cd -- "$scripts_dir/../frontend/node_modules" && pwd)" frontend/node_modules
+		printf 'export const add = (a: number, b: number) => a + b\n' > frontend/src/widget.ts
+		cat > frontend/src/widget.test.ts <<'TS'
+import { describe, it, expect } from 'vitest'
+import { add } from './widget'
+
+describe('widget', () => {
+  it('adds', () => {
+    expect(add(1, 2)).toBe(3)
+  })
+})
+TS
+		git add -A && git commit -q -m "base"
+		git checkout -q -b work
+
+		printf 'export const shout = (s: string) => `${s}!`\n' > frontend/src/shout.ts
+		cat > frontend/src/shout.test.ts <<'TS'
+import { describe, it, expect } from 'vitest'
+import { shout } from './shout'
+
+describe('shout', () => {
+  it('adds an exclamation mark', () => {
+    expect(shout('hi')).toBe('hi!')
+  })
+})
+TS
+		git add -A && git commit -q -m "add a whole new module with its test"
+	)
+	gone_out=$(run_efficacy "$gone")
+	gone_status=$?
+	if [ "$gone_status" -eq 0 ] &&
+		printf '%s' "$gone_out" | grep -q 'red: src/shout.test.ts > adds an exclamation mark' &&
+		! printf '%s' "$gone_out" | grep -q 'SURVIVOR'; then
+		pass "a test whose module the revert deletes is red, not a survivor"
+	else
+		fail "a test whose module the revert deletes is red, not a survivor" \
+			"exit $gone_status
+$gone_out"
+	fi
+	rm -rf "$gone"
+fi
+
 # --- the frontend exemption marker, in all three shapes ----------------------
 #
 # The marker is where scope and the fallback meet, and getting the meeting

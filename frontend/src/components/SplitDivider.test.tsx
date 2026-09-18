@@ -18,6 +18,8 @@ function renderDivider(direction: 'horizontal' | 'vertical', onDrag = vi.fn()) {
 }
 
 describe('SplitDivider', () => {
+  // efficacy:exempt pins pre-existing behavior — SplitDivider.tsx is
+  // unchanged on this branch; #178's G5 asked for the missing tests.
   it.each([
     ['horizontal' as const, 'col-resize', '4px', '100%'],
     ['vertical' as const, 'row-resize', '100%', '4px'],
@@ -29,6 +31,8 @@ describe('SplitDivider', () => {
     expect(divider.style.height).toBe(height)
   })
 
+  // efficacy:exempt pins pre-existing behavior — SplitDivider.tsx is
+  // unchanged on this branch; #178's G5 asked for the missing tests.
   it('reports each horizontal move as a delta from the previous position', () => {
     const { divider, onDrag } = renderDivider('horizontal')
 
@@ -39,6 +43,8 @@ describe('SplitDivider', () => {
     expect(onDrag.mock.calls).toEqual([[30], [-10]])
   })
 
+  // efficacy:exempt pins pre-existing behavior — SplitDivider.tsx is
+  // unchanged on this branch; #178's G5 asked for the missing tests.
   it('follows the other axis for a vertical split', () => {
     const { divider, onDrag } = renderDivider('vertical')
 
@@ -48,6 +54,8 @@ describe('SplitDivider', () => {
     expect(onDrag.mock.calls).toEqual([[15]])
   })
 
+  // efficacy:exempt pins pre-existing behavior — SplitDivider.tsx is
+  // unchanged on this branch; #178's G5 asked for the missing tests.
   it('reports to the latest callback, so a re-rendered parent is not dragged against stale state', () => {
     const first = vi.fn()
     const latest = vi.fn()
@@ -62,6 +70,8 @@ describe('SplitDivider', () => {
     expect(first).not.toHaveBeenCalled()
   })
 
+  // efficacy:exempt pins pre-existing behavior — SplitDivider.tsx is
+  // unchanged on this branch; #178's G5 asked for the missing tests.
   it('takes over the page cursor while dragging and gives it back on release', () => {
     const { divider } = renderDivider('horizontal')
 
@@ -74,6 +84,8 @@ describe('SplitDivider', () => {
     expect(document.body.style.userSelect).toBe('')
   })
 
+  // efficacy:exempt pins pre-existing behavior — SplitDivider.tsx is
+  // unchanged on this branch; #178's G5 asked for the missing tests.
   it('stops reporting after the button is released', () => {
     const { divider, onDrag } = renderDivider('horizontal')
 
@@ -84,6 +96,8 @@ describe('SplitDivider', () => {
     expect(onDrag).not.toHaveBeenCalled()
   })
 
+  // efficacy:exempt pins pre-existing behavior — SplitDivider.tsx is
+  // unchanged on this branch; #178's G5 asked for the missing tests.
   it('highlights on hover and returns to the chrome colour when the pointer leaves', () => {
     const { divider } = renderDivider('horizontal')
 

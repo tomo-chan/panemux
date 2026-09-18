@@ -30,10 +30,16 @@ afterEach(() => {
 })
 
 describe('attention notification state', () => {
+  // efficacy:exempt pins pre-existing behavior —
+  // attentionNotificationState.ts is unchanged on this branch; #178's G5
+  // asked for the missing tests.
   it('reports nothing for a pane that has never notified', () => {
     expect(getLastNotifiedAttentionSignature('main')).toBeNull()
   })
 
+  // efficacy:exempt pins pre-existing behavior —
+  // attentionNotificationState.ts is unchanged on this branch; #178's G5
+  // asked for the missing tests.
   it('remembers a signature per pane', () => {
     setLastNotifiedAttentionSignature('main', 'sig-a')
     setLastNotifiedAttentionSignature('side', 'sig-b')
@@ -42,6 +48,9 @@ describe('attention notification state', () => {
     expect(getLastNotifiedAttentionSignature('side')).toBe('sig-b')
   })
 
+  // efficacy:exempt pins pre-existing behavior —
+  // attentionNotificationState.ts is unchanged on this branch; #178's G5
+  // asked for the missing tests.
   it('replaces a pane signature rather than accumulating them', () => {
     setLastNotifiedAttentionSignature('main', 'sig-a')
     setLastNotifiedAttentionSignature('main', 'sig-b')
@@ -50,12 +59,18 @@ describe('attention notification state', () => {
     expect(JSON.parse(window.localStorage.getItem(KEY) ?? '{}')).toEqual({ main: 'sig-b' })
   })
 
+  // efficacy:exempt pins pre-existing behavior —
+  // attentionNotificationState.ts is unchanged on this branch; #178's G5
+  // asked for the missing tests.
   it('survives a reload, which is the whole point of persisting it', () => {
     window.localStorage.setItem(KEY, JSON.stringify({ main: 'from-a-previous-page' }))
 
     expect(getLastNotifiedAttentionSignature('main')).toBe('from-a-previous-page')
   })
 
+  // efficacy:exempt pins pre-existing behavior —
+  // attentionNotificationState.ts is unchanged on this branch; #178's G5
+  // asked for the missing tests.
   it.each([
     ['malformed json', 'not json at all'],
     ['a json scalar', '42'],
@@ -66,6 +81,9 @@ describe('attention notification state', () => {
     expect(getLastNotifiedAttentionSignature('main')).toBeNull()
   })
 
+  // efficacy:exempt pins pre-existing behavior —
+  // attentionNotificationState.ts is unchanged on this branch; #178's G5
+  // asked for the missing tests.
   it('ignores entries whose value is not a string', () => {
     window.localStorage.setItem(KEY, JSON.stringify({ main: 7, side: 'sig-b' }))
 
@@ -73,6 +91,9 @@ describe('attention notification state', () => {
     expect(getLastNotifiedAttentionSignature('side')).toBe('sig-b')
   })
 
+  // efficacy:exempt pins pre-existing behavior —
+  // attentionNotificationState.ts is unchanged on this branch; #178's G5
+  // asked for the missing tests.
   it('keeps working in memory when storage is unavailable', () => {
     useStorage(null)
 
@@ -81,6 +102,9 @@ describe('attention notification state', () => {
     expect(getLastNotifiedAttentionSignature('main')).toBe('sig-a')
   })
 
+  // efficacy:exempt pins pre-existing behavior —
+  // attentionNotificationState.ts is unchanged on this branch; #178's G5
+  // asked for the missing tests.
   it('keeps working in memory when touching storage throws', () => {
     useStorage(null, true)
 
@@ -89,6 +113,9 @@ describe('attention notification state', () => {
     expect(getLastNotifiedAttentionSignature('main')).toBe('sig-a')
   })
 
+  // efficacy:exempt pins pre-existing behavior —
+  // attentionNotificationState.ts is unchanged on this branch; #178's G5
+  // asked for the missing tests.
   it('falls back to memory when a write is refused, so the next read still dedupes', () => {
     const refusing = {
       getItem: () => null,

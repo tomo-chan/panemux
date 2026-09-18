@@ -4,6 +4,7 @@ import { BoardCommandHistoryResponseSchema } from '../schemas'
 import { TERMINAL_FONT_FAMILY } from '../utils/fonts'
 import { summarizeStreamLines } from '../utils/streamJson'
 import type { StreamSummaryLine } from '../utils/streamJson'
+import { useModalKeyboard } from '../hooks/useModalKeyboard'
 import { useRestoreFocusOnClose } from '../hooks/useRestoreFocusOnClose'
 
 interface CommandPaletteProps {
@@ -28,6 +29,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, token, o
   const transcriptRef = useRef<HTMLDivElement>(null)
 
   useRestoreFocusOnClose(isOpen)
+  const dialogRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!isOpen) {
@@ -68,18 +70,10 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, token, o
     transcript.scrollTop = transcript.scrollHeight
   }, [turns, recentHistory])
 
-  useEffect(() => {
-    if (!isOpen) return
-    // Capture phase: a focused xterm terminal stops keydown propagation, so
-    // a bubble-phase window listener never sees Escape at all. The palette
-    // opens over a terminal that usually still holds focus, which is exactly
-    // the state where a bubble-registered handler would silently do nothing.
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', handleKeyDown, true)
-    return () => window.removeEventListener('keydown', handleKeyDown, true)
-  }, [isOpen, onClose])
+  // Escape on the capture phase, plus a focus trap, both from the shared hook:
+  // a focused xterm terminal stops keydown propagation, and the background
+  // behind an aria-modal overlay stays mounted and interactive.
+  useModalKeyboard({ isOpen, dialogRef, onEscape: onClose })
 
   if (!isOpen) return null
 
@@ -93,6 +87,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, token, o
 
   return (
     <div
+      ref={dialogRef}
       role="dialog"
       aria-modal="true"
       aria-label="Command center"

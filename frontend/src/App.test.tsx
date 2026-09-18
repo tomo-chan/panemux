@@ -319,6 +319,12 @@ describe('App workspace deletion', () => {
   it('keeps the workspace when the delete confirmation is dismissed with Escape', () => {
     render(<App />)
     fireEvent.click(screen.getByRole('button', { name: 'Delete Dev workspace' }))
+
+    // Asserting the dialog is up before dismissing it is what makes this a
+    // test of the dialog rather than of nothing: "delete was not called" is
+    // equally true of a build that never asked in the first place.
+    expect(screen.getByRole('dialog', { name: 'Delete workspace' })).toBeDefined()
+
     fireEvent.keyDown(window, { key: 'Escape' })
 
     expect(mockDeleteWorkspace).not.toHaveBeenCalled()

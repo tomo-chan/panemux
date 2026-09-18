@@ -15,6 +15,8 @@ const pane = (overrides: Partial<PaneConfig> = {}): PaneConfig => ({
 })
 
 describe('PaneStatusBar', () => {
+  // efficacy:exempt pins pre-existing behavior — PaneStatusBar.tsx is
+  // unchanged on this branch; #178's G5 asked for the missing tests.
   it.each([
     ['local', 'LOCAL'],
     ['ssh', 'SSH'],
@@ -29,12 +31,16 @@ describe('PaneStatusBar', () => {
   // The cast is the point of the test: the label table's fallback is
   // unreachable through the declared union, and it is there for a response
   // that carries a type this build does not know about.
+  // efficacy:exempt pins pre-existing behavior — PaneStatusBar.tsx is
+  // unchanged on this branch; #178's G5 asked for the missing tests.
   it('falls back to the uppercased type for a pane type it does not know', () => {
     render(<PaneStatusBar pane={pane({ type: 'wayland' as PaneType })} displayConfig={shown} />)
 
     expect(screen.getByText('WAYLAND')).toBeDefined()
   })
 
+  // efficacy:exempt pins pre-existing behavior — PaneStatusBar.tsx is
+  // unchanged on this branch; #178's G5 asked for the missing tests.
   it('shows the connection name only when the pane has one', () => {
     const { rerender, container } = render(
       <PaneStatusBar pane={pane({ type: 'ssh', connection: 'host1' })} displayConfig={shown} />,
@@ -45,6 +51,8 @@ describe('PaneStatusBar', () => {
     expect(container.textContent).toBe('SSH')
   })
 
+  // efficacy:exempt pins pre-existing behavior — PaneStatusBar.tsx is
+  // unchanged on this branch; #178's G5 asked for the missing tests.
   it('shows the terminal size only when both dimensions are known', () => {
     const { rerender } = render(
       <PaneStatusBar pane={pane()} displayConfig={shown} cols={120} rows={40} />,
@@ -55,18 +63,24 @@ describe('PaneStatusBar', () => {
     expect(screen.queryByText(/120/)).toBeNull()
   })
 
+  // efficacy:exempt pins pre-existing behavior — PaneStatusBar.tsx is
+  // unchanged on this branch; #178's G5 asked for the missing tests.
   it('shows a zero size rather than treating it as absent', () => {
     render(<PaneStatusBar pane={pane()} displayConfig={shown} cols={0} rows={0} />)
 
     expect(screen.getByText('0×0')).toBeDefined()
   })
 
+  // efficacy:exempt pins pre-existing behavior — PaneStatusBar.tsx is
+  // unchanged on this branch; #178's G5 asked for the missing tests.
   it('renders nothing when the display config hides the status bar', () => {
     const { container } = render(<PaneStatusBar pane={pane()} displayConfig={hidden} />)
 
     expect(container.firstChild).toBeNull()
   })
 
+  // efficacy:exempt pins pre-existing behavior — PaneStatusBar.tsx is
+  // unchanged on this branch; #178's G5 asked for the missing tests.
   it.each([
     ['shows it against a hiding display config', true, hidden, false],
     ['hides it against a showing display config', false, shown, true],

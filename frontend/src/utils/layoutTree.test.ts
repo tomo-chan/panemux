@@ -332,6 +332,9 @@ describe('generateTmuxSessionName', () => {
     expect(name).toMatch(/^[a-zA-Z0-9_.-]+$/)
   })
 
+  // efficacy:exempt pins pre-existing behavior — generateTmuxSessionName is
+  // unchanged on this branch; this case is in scope only because the new
+  // collectLeafPanes block was appended below it.
   it('returns unique names on successive calls', () => {
     const names = new Set(Array.from({ length: 10 }, () => generateTmuxSessionName('s')))
     expect(names.size).toBe(10)

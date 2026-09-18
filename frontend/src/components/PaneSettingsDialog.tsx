@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { useModalKeyboard } from '../hooks/useModalKeyboard'
 import type { BoardMode, DirectoryBrowserResponse, PaneConfig } from '../types'
 import { TERMINAL_FONT_FAMILY } from '../utils/fonts'
 
@@ -101,6 +102,7 @@ export const PaneSettingsDialog: React.FC<PaneSettingsDialogProps> = ({
   const [validationError, setValidationError] = useState<string | null>(null)
   const [isDetecting, setIsDetecting] = useState(false)
   const [showDirectoryBrowser, setShowDirectoryBrowser] = useState(false)
+  const dialogRef = useRef<HTMLDivElement>(null)
   const [directoryResponses, setDirectoryResponses] = useState<Record<string, DirectoryBrowserResponse>>({})
   const [expandedDirectories, setExpandedDirectories] = useState<Record<string, boolean>>({})
   const [browserPath, setBrowserPath] = useState('')
@@ -141,20 +143,22 @@ export const PaneSettingsDialog: React.FC<PaneSettingsDialogProps> = ({
     }
   }, [pane, onDetectShell])
 
-  useEffect(() => {
-    if (!isOpen || !pane || isSaving) return
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        if (showDirectoryBrowser) {
-          setShowDirectoryBrowser(false)
-          return
-        }
-        onClose()
-      }
+  // Escape closes the directory browser first when it is open, and does
+  // nothing at all while a save is in flight. The focus trap applies in every
+  // one of those states, and follows the directory browser while it is up.
+  const handleEscape = useCallback(() => {
+    if (showDirectoryBrowser) {
+      setShowDirectoryBrowser(false)
+      return
     }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isOpen, isSaving, onClose, pane, showDirectoryBrowser])
+    onClose()
+  }, [onClose, showDirectoryBrowser])
+
+  useModalKeyboard({
+    isOpen: isOpen && pane !== null,
+    dialogRef,
+    onEscape: isSaving ? undefined : handleEscape,
+  })
 
   if (!isOpen || !pane) return null
 
@@ -380,6 +384,7 @@ export const PaneSettingsDialog: React.FC<PaneSettingsDialogProps> = ({
 
   return (
     <div
+      ref={dialogRef}
       role="dialog"
       aria-modal="true"
       aria-label="Pane settings"
