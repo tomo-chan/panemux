@@ -17,7 +17,7 @@ import { useGitInfoSnapshotMap } from './hooks/useGitInfo'
 import { useBoardSessionToken } from './hooks/useBoardSessionToken'
 import { DisplayConfig } from './types'
 import { TERMINAL_FONT_FAMILY } from './utils/fonts'
-import { findPaneById, generatePaneId, layoutContainsPane } from './utils/layoutTree'
+import { collectLeafPanes, findPaneById, generatePaneId, layoutContainsPane } from './utils/layoutTree'
 import type { MovePanePlacement } from './hooks/useLayout'
 import type { WorkspacePaneSummary, WorkspaceSummary } from './components/WorkspaceTabs'
 import type { Workspace, GitInfo, LayoutChild, LayoutNode, SessionInfo, SSHConfigHost } from './schemas'
@@ -641,30 +641,12 @@ function collectPaneMetadata(
   workspaceTitle: string,
   metadata: Map<string, { paneTitle: string; workspaceId: string; workspaceTitle: string }>,
 ) {
-  for (const child of layout.children) {
-    collectChildPaneMetadata(child, workspaceId, workspaceTitle, metadata)
-  }
-}
-
-function collectChildPaneMetadata(
-  child: LayoutChild,
-  workspaceId: string,
-  workspaceTitle: string,
-  metadata: Map<string, { paneTitle: string; workspaceId: string; workspaceTitle: string }>,
-) {
-  if (child.pane && (!child.children || child.children.length === 0)) {
-    metadata.set(child.pane.id, {
-      paneTitle: child.pane.title ?? child.pane.id,
+  for (const pane of collectLeafPanes(layout)) {
+    metadata.set(pane.id, {
+      paneTitle: pane.title ?? pane.id,
       workspaceId,
       workspaceTitle,
     })
-    return
-  }
-
-  if (!child.children?.length) return
-
-  for (const nestedChild of child.children) {
-    collectChildPaneMetadata(nestedChild, workspaceId, workspaceTitle, metadata)
   }
 }
 

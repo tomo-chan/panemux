@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { insertPaneAtWorkspaceEdge, insertPaneBesideTargetPane, movePaneBesideTargetPane, movePaneToWorkspaceEdge, splitPaneInTree, removePaneFromTree, generatePaneId, generateTmuxSessionName, findPaneById, replacePaneInTree, swapPanesInTree } from './layoutTree'
+import { collectLeafPanes, insertPaneAtWorkspaceEdge, insertPaneBesideTargetPane, movePaneBesideTargetPane, movePaneToWorkspaceEdge, splitPaneInTree, removePaneFromTree, generatePaneId, generateTmuxSessionName, findPaneById, replacePaneInTree, swapPanesInTree } from './layoutTree'
 import type { LayoutNode } from '../schemas'
 
 const simpleLayout: LayoutNode = {
@@ -335,5 +335,81 @@ describe('generateTmuxSessionName', () => {
   it('returns unique names on successive calls', () => {
     const names = new Set(Array.from({ length: 10 }, () => generateTmuxSessionName('s')))
     expect(names.size).toBe(10)
+  })
+})
+
+describe('collectLeafPanes', () => {
+  it('returns the panes of a flat layout in order', () => {
+    expect(collectLeafPanes(twoChildLayout).map((pane) => pane.id)).toEqual(['left', 'right'])
+  })
+
+  it('descends into nested splits', () => {
+    const nested: LayoutNode = {
+      direction: 'horizontal',
+      children: [
+        { size: 50, pane: { id: 'left', type: 'local' } },
+        {
+          size: 50,
+          direction: 'vertical',
+          children: [
+            { size: 50, pane: { id: 'top', type: 'local' } },
+            {
+              size: 50,
+              direction: 'horizontal',
+              children: [
+                { size: 50, pane: { id: 'deep-a', type: 'local' } },
+                { size: 50, pane: { id: 'deep-b', type: 'local' } },
+              ],
+            },
+          ],
+        },
+      ],
+    }
+
+    expect(collectLeafPanes(nested).map((pane) => pane.id)).toEqual(['left', 'top', 'deep-a', 'deep-b'])
+  })
+
+  it('treats a node that carries both a pane and children as a split, not a leaf', () => {
+    // A hand-written config can put a `pane` beside `children` (scenario H14b).
+    // The panes actually on screen are the children's; the node's own pane is
+    // the root pane the split grew from.
+    const rootPaneBesideChildren: LayoutNode = {
+      direction: 'horizontal',
+      children: [
+        {
+          size: 100,
+          pane: { id: 'root', type: 'local' },
+          direction: 'vertical',
+          children: [
+            { size: 50, pane: { id: 'child-a', type: 'local' } },
+            { size: 50, pane: { id: 'child-b', type: 'local' } },
+          ],
+        },
+      ],
+    }
+
+    expect(collectLeafPanes(rootPaneBesideChildren).map((pane) => pane.id)).toEqual(['child-a', 'child-b'])
+  })
+
+  it('skips a child that is neither a pane nor a split', () => {
+    const empty: LayoutNode = {
+      direction: 'horizontal',
+      children: [{ size: 50 }, { size: 50, pane: { id: 'only', type: 'local' } }],
+    }
+
+    expect(collectLeafPanes(empty).map((pane) => pane.id)).toEqual(['only'])
+  })
+
+  it('returns nothing for a layout with no children', () => {
+    expect(collectLeafPanes({ direction: 'horizontal', children: [] })).toEqual([])
+  })
+
+  it('returns the pane objects themselves, so a caller can read titles from them', () => {
+    const titled: LayoutNode = {
+      direction: 'horizontal',
+      children: [{ size: 100, pane: { id: 'main', type: 'local', title: 'Build' } }],
+    }
+
+    expect(collectLeafPanes(titled)).toEqual([{ id: 'main', type: 'local', title: 'Build' }])
   })
 })
