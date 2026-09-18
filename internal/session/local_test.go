@@ -1078,15 +1078,6 @@ func TestGetActiveWorkdir_PrefersClaudeTranscriptWorktree(t *testing.T) {
 	assert.Equal(t, []string{"/tmp/panemux-worktree"}, cwds)
 }
 
-func TestClaudeProjectDirName_NormalizesDots(t *testing.T) {
-	assert.Equal(t, "-repo-main", claudeProjectDirName("/repo/main"))
-	assert.Equal(
-		t,
-		"-Users-tomo-chan-development-panemux",
-		claudeProjectDirName("/Users/tomo.chan/development/panemux"),
-	)
-}
-
 func TestGetActiveWorkdir_PrefersClaudeTranscriptWorktree_WithDotInCWD(t *testing.T) {
 	sess := &LocalSession{pid: 100}
 
@@ -1103,14 +1094,14 @@ func TestGetActiveWorkdir_PrefersClaudeTranscriptWorktree_WithDotInCWD(t *testin
 	sessionMetaPath := filepath.Join(homeDir, ".claude", "sessions", "220.json")
 	require.NoError(t, os.MkdirAll(filepath.Dir(sessionMetaPath), 0755))
 	require.NoError(t, os.WriteFile(sessionMetaPath, []byte(
-		`{"pid":220,"sessionId":"session-123","cwd":"/Users/tomo.chan/development/panemux"}`,
+		`{"pid":220,"sessionId":"session-123","cwd":"/Users/dev.user/development/panemux"}`,
 	), 0600))
 
 	transcriptPath := filepath.Join(
 		homeDir,
 		".claude",
 		"projects",
-		"-Users-tomo-chan-development-panemux",
+		"-Users-dev-user-development-panemux",
 		"session-123.jsonl",
 	)
 	require.NoError(t, os.MkdirAll(filepath.Dir(transcriptPath), 0755))

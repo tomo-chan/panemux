@@ -1303,6 +1303,11 @@ func remoteClaudeSessionCWDs(
 		return nil, nil
 	}
 
+	// Deliberately the derived path alone, with no fallback scan: unlike the
+	// local resolver (see resolveClaudeTranscriptPath, issue #119), a miss here
+	// would cost an extra SSH round trip on every metadata refresh, and the
+	// encoding is a property of the Claude version rather than of the host — so
+	// a change shows up on a local pane first.
 	projectPath := remoteClaudeProjectPath(sessionMeta)
 
 	cwds := make([]string, 0, 1)
