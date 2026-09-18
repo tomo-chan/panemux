@@ -26,7 +26,7 @@ type Snapshot struct {
 // Nothing else a mutating route touches lives in Config — sessions belong to
 // the session manager, and rolling those back is the caller's half of the
 // same undo (see internal/api).
-func (c *Config) Snapshot() Snapshot {
+func (c *Data) Snapshot() Snapshot {
 	return Snapshot{
 		workspaces: cloneWorkspaces(c.Workspaces),
 		layout:     cloneLayoutNode(c.Layout),
@@ -39,7 +39,7 @@ func (c *Config) Snapshot() Snapshot {
 // can be restored more than once — a route with two failure branches takes one
 // snapshot and may reach either — and so a later mutation of the restored
 // config cannot reach back into the snapshot it came from.
-func (c *Config) Restore(snapshot Snapshot) {
+func (c *Data) Restore(snapshot Snapshot) {
 	c.Workspaces = cloneWorkspaces(snapshot.workspaces)
 	c.Layout = cloneLayoutNode(snapshot.layout)
 }

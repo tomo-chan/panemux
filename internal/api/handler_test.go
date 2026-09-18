@@ -101,7 +101,7 @@ func setupRouterWithHandler(h *Handler) *chi.Mux {
 }
 
 func defaultTestConfig() *config.Config {
-	return &config.Config{
+	return &config.Config{Data: config.Data{
 		Server: config.ServerConfig{Port: 8080, Host: loopbackIPv4},
 		Layout: config.LayoutNode{
 			Direction: "horizontal",
@@ -109,11 +109,11 @@ func defaultTestConfig() *config.Config {
 				{Size: 100, Pane: &config.PaneConfig{ID: "main", Type: "local"}},
 			},
 		},
-	}
+	}}
 }
 
 func workspaceTestConfig() *config.Config {
-	return &config.Config{
+	return &config.Config{Data: config.Data{
 		Server: config.ServerConfig{Port: 8080, Host: loopbackIPv4},
 		Workspaces: config.WorkspacesConfig{
 			Active:           "one",
@@ -138,7 +138,7 @@ func workspaceTestConfig() *config.Config {
 				},
 			},
 		},
-	}
+	}}
 }
 
 // workspaceTestConfigYAML is the on-disk form of workspaceTestConfig(): two
@@ -850,7 +850,7 @@ func TestPostSession_DuplicateID_409(t *testing.T) {
 }
 
 func TestRestartSession_Found_200(t *testing.T) {
-	cfg := &config.Config{
+	cfg := &config.Config{Data: config.Data{
 		Server: config.ServerConfig{Port: 8080, Host: loopbackIPv4},
 		Layout: config.LayoutNode{
 			Direction: "horizontal",
@@ -858,7 +858,7 @@ func TestRestartSession_Found_200(t *testing.T) {
 				{Size: 100, Pane: &config.PaneConfig{ID: "main", Type: "local"}},
 			},
 		},
-	}
+	}}
 	mgr := session.NewManager()
 	mgr.Add(newMockSession("main")) // pre-existing (exited) session
 	h := NewHandler(cfg, mgr, nil, nil)
@@ -879,7 +879,7 @@ func TestRestartSession_Found_200(t *testing.T) {
 }
 
 func TestRestartSession_ClearsPreferredCWD(t *testing.T) {
-	cfg := &config.Config{
+	cfg := &config.Config{Data: config.Data{
 		Server: config.ServerConfig{Port: 8080, Host: loopbackIPv4},
 		Layout: config.LayoutNode{
 			Direction: "horizontal",
@@ -887,7 +887,7 @@ func TestRestartSession_ClearsPreferredCWD(t *testing.T) {
 				{Size: 100, Pane: &config.PaneConfig{ID: "main", Type: "local"}},
 			},
 		},
-	}
+	}}
 	mgr := session.NewManager()
 	mgr.Add(newMockSession("main"))
 	h := NewHandler(cfg, mgr, nil, nil)
@@ -912,7 +912,7 @@ func TestRestartSession_ClearsPreferredCWD(t *testing.T) {
 }
 
 func TestRestartSession_ClearsGitInfoCache(t *testing.T) {
-	cfg := &config.Config{
+	cfg := &config.Config{Data: config.Data{
 		Server: config.ServerConfig{Port: 8080, Host: loopbackIPv4},
 		Layout: config.LayoutNode{
 			Direction: "horizontal",
@@ -920,7 +920,7 @@ func TestRestartSession_ClearsGitInfoCache(t *testing.T) {
 				{Size: 100, Pane: &config.PaneConfig{ID: "main", Type: "local"}},
 			},
 		},
-	}
+	}}
 	mgr := session.NewManager()
 	mgr.Add(newMockSession("main"))
 	h := NewHandler(cfg, mgr, nil, nil)
@@ -952,7 +952,7 @@ func TestRestartSession_NotFound_404(t *testing.T) {
 }
 
 func TestRestartSession_CreateFails_OldSessionStaysRegistered(t *testing.T) {
-	cfg := &config.Config{
+	cfg := &config.Config{Data: config.Data{
 		Server: config.ServerConfig{Port: 8080, Host: loopbackIPv4},
 		Layout: config.LayoutNode{
 			Direction: "horizontal",
@@ -960,7 +960,7 @@ func TestRestartSession_CreateFails_OldSessionStaysRegistered(t *testing.T) {
 				{Size: 100, Pane: &config.PaneConfig{ID: "main", Type: "local"}},
 			},
 		},
-	}
+	}}
 	mgr := session.NewManager()
 	original := newMockSession("main")
 	mgr.Add(original)
@@ -984,7 +984,7 @@ func TestRestartSession_CreateFails_OldSessionStaysRegistered(t *testing.T) {
 }
 
 func TestRestartSession_CreateFails_PreservesPreferredCWD(t *testing.T) {
-	cfg := &config.Config{
+	cfg := &config.Config{Data: config.Data{
 		Server: config.ServerConfig{Port: 8080, Host: loopbackIPv4},
 		Layout: config.LayoutNode{
 			Direction: "horizontal",
@@ -992,7 +992,7 @@ func TestRestartSession_CreateFails_PreservesPreferredCWD(t *testing.T) {
 				{Size: 100, Pane: &config.PaneConfig{ID: "main", Type: "local"}},
 			},
 		},
-	}
+	}}
 	mgr := session.NewManager()
 	mgr.Add(newMockSession("main"))
 	h := NewHandler(cfg, mgr, nil, nil)
@@ -1017,7 +1017,7 @@ func TestRestartSession_CreateFails_PreservesPreferredCWD(t *testing.T) {
 }
 
 func TestRestartSession_CreateFails_500Body(t *testing.T) {
-	cfg := &config.Config{
+	cfg := &config.Config{Data: config.Data{
 		Server: config.ServerConfig{Port: 8080, Host: loopbackIPv4},
 		Layout: config.LayoutNode{
 			Direction: "horizontal",
@@ -1025,7 +1025,7 @@ func TestRestartSession_CreateFails_500Body(t *testing.T) {
 				{Size: 100, Pane: &config.PaneConfig{ID: "main", Type: "local"}},
 			},
 		},
-	}
+	}}
 	mgr := session.NewManager()
 	mgr.Add(newMockSession("main"))
 	h := NewHandler(cfg, mgr, nil, nil)
@@ -1044,7 +1044,7 @@ func TestRestartSession_CreateFails_500Body(t *testing.T) {
 }
 
 func TestRestartSession_CreateFails_NoPanicWhenNoPriorSession(t *testing.T) {
-	cfg := &config.Config{
+	cfg := &config.Config{Data: config.Data{
 		Server: config.ServerConfig{Port: 8080, Host: loopbackIPv4},
 		Layout: config.LayoutNode{
 			Direction: "horizontal",
@@ -1052,7 +1052,7 @@ func TestRestartSession_CreateFails_NoPanicWhenNoPriorSession(t *testing.T) {
 				{Size: 100, Pane: &config.PaneConfig{ID: "main", Type: "local"}},
 			},
 		},
-	}
+	}}
 	mgr := session.NewManager()
 	h := NewHandler(cfg, mgr, nil, nil)
 	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
@@ -1080,7 +1080,7 @@ func TestRestartSession_CreateFails_NoPanicWhenNoPriorSession(t *testing.T) {
 // session is orphaned/leaked. A per-id in-flight guard rejects the second
 // concurrent call instead.
 func TestRestartSession_ConcurrentRequests_SecondReturns409(t *testing.T) {
-	cfg := &config.Config{
+	cfg := &config.Config{Data: config.Data{
 		Server: config.ServerConfig{Port: 8080, Host: loopbackIPv4},
 		Layout: config.LayoutNode{
 			Direction: "horizontal",
@@ -1088,7 +1088,7 @@ func TestRestartSession_ConcurrentRequests_SecondReturns409(t *testing.T) {
 				{Size: 100, Pane: &config.PaneConfig{ID: "main", Type: "local"}},
 			},
 		},
-	}
+	}}
 	mgr := session.NewManager()
 	mgr.Add(newMockSession("main"))
 	h := NewHandler(cfg, mgr, nil, nil)
@@ -1139,7 +1139,7 @@ func TestRestartSession_ConcurrentRequests_SecondReturns409(t *testing.T) {
 // in-flight guard is released once a restart finishes (success or failure),
 // so it never permanently locks a pane out of future restarts.
 func TestRestartSession_GuardReleasedAfterCompletion(t *testing.T) {
-	cfg := &config.Config{
+	cfg := &config.Config{Data: config.Data{
 		Server: config.ServerConfig{Port: 8080, Host: loopbackIPv4},
 		Layout: config.LayoutNode{
 			Direction: "horizontal",
@@ -1147,7 +1147,7 @@ func TestRestartSession_GuardReleasedAfterCompletion(t *testing.T) {
 				{Size: 100, Pane: &config.PaneConfig{ID: "main", Type: "local"}},
 			},
 		},
-	}
+	}}
 	mgr := session.NewManager()
 	mgr.Add(newMockSession("main"))
 	h := NewHandler(cfg, mgr, nil, nil)

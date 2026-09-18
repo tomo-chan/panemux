@@ -26,7 +26,17 @@ const (
 
 // Validate checks the configuration for correctness.
 // It collects all errors and returns them as a single combined error.
+//
+// It is Config's rather than Data's because the SSH config path it reads
+// hosts from is load context — a seam tests substitute — not part of the
+// config domain model. Config supplies it; validate does the checking.
 func (c *Config) Validate() error {
+	return c.validate(c.sshConfigPath)
+}
+
+// validate is Validate's domain half. sshConfigPath is the ~/.ssh/config file
+// whose Host aliases count as defined connections; empty means the default.
+func (c *Data) validate(sshConfigPath string) error {
 	var errs []string
 
 	if c.Server.Port < 1 || c.Server.Port > 65535 {
@@ -49,7 +59,7 @@ func (c *Config) Validate() error {
 	// Also accept hosts from ~/.ssh/config as valid connections.
 	// This allows panes to reference ssh config host aliases without
 	// duplicating connection details in ssh_connections.
-	sshCfgPath := c.sshConfigPath
+	sshCfgPath := sshConfigPath
 	if sshCfgPath == "" {
 		sshCfgPath = sshconfig.DefaultPath()
 	}

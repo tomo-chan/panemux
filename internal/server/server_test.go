@@ -21,7 +21,7 @@ import (
 var emptyFS embed.FS
 
 func testConfig() *config.Config {
-	return &config.Config{
+	return &config.Config{Data: config.Data{
 		Server: config.ServerConfig{
 			Port: 8080,
 			Host: "127.0.0.1",
@@ -43,7 +43,7 @@ func testConfig() *config.Config {
 				},
 			},
 		},
-	}
+	}}
 }
 
 func TestNew_ReturnsServer(t *testing.T) {

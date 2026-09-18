@@ -145,7 +145,7 @@ func TestParseOptions_Help_WrapsErrHelp(t *testing.T) {
 func TestLoadConfig_ExplicitPath_UsesLoad(t *testing.T) {
 	homedir.SetForTest(t, t.TempDir())
 
-	want := &config.Config{Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1"}}
+	want := &config.Config{Data: config.Data{Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1"}}}
 	var loadedPath string
 	loader := configLoader{
 		load: func(path string) (*config.Config, error) {
@@ -167,7 +167,7 @@ func TestLoadConfig_ExplicitPath_UsesLoad(t *testing.T) {
 func TestLoadConfig_NoPath_UsesLoadOrDefault(t *testing.T) {
 	homedir.SetForTest(t, t.TempDir())
 
-	want := &config.Config{Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1"}}
+	want := &config.Config{Data: config.Data{Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1"}}}
 	loader := configLoader{
 		load: func(string) (*config.Config, error) {
 			t.Fatal("load must not be called without --config")
@@ -186,7 +186,7 @@ func TestLoadConfig_PortOverride_WinsOverFile(t *testing.T) {
 
 	loader := configLoader{
 		loadOrDefault: func() (*config.Config, error) {
-			return &config.Config{Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1"}}, nil
+			return &config.Config{Data: config.Data{Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1"}}}, nil
 		},
 	}
 
@@ -202,7 +202,7 @@ func TestLoadConfig_ZeroPort_LeavesConfigPortAlone(t *testing.T) {
 
 	loader := configLoader{
 		loadOrDefault: func() (*config.Config, error) {
-			return &config.Config{Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1"}}, nil
+			return &config.Config{Data: config.Data{Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1"}}}, nil
 		},
 	}
 
@@ -235,7 +235,7 @@ func TestLoadConfig_GeneratesAuthToken(t *testing.T) {
 
 	loader := configLoader{
 		loadOrDefault: func() (*config.Config, error) {
-			return &config.Config{Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1"}}, nil
+			return &config.Config{Data: config.Data{Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1"}}}, nil
 		},
 	}
 
@@ -253,9 +253,9 @@ func TestLoadConfig_ExistingAuthToken_IsKept(t *testing.T) {
 
 	loader := configLoader{
 		loadOrDefault: func() (*config.Config, error) {
-			return &config.Config{
+			return &config.Config{Data: config.Data{
 				Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1", AuthToken: "already-set"},
-			}, nil
+			}}, nil
 		},
 	}
 
@@ -265,7 +265,7 @@ func TestLoadConfig_ExistingAuthToken_IsKept(t *testing.T) {
 }
 
 func twoPaneConfig() *config.Config {
-	return &config.Config{
+	return &config.Config{Data: config.Data{
 		Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1"},
 		Workspaces: config.WorkspacesConfig{
 			Active: "default",
@@ -281,7 +281,7 @@ func twoPaneConfig() *config.Config {
 				},
 			}},
 		},
-	}
+	}}
 }
 
 func TestStartSessionsFromConfig_AddsEveryPane(t *testing.T) {

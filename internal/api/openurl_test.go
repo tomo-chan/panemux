@@ -75,7 +75,7 @@ func freeLoopbackPort(t *testing.T) int {
 }
 
 func openURLTestConfig() *config.Config {
-	return &config.Config{
+	return &config.Config{Data: config.Data{
 		Server: config.ServerConfig{Port: 8080, Host: loopbackIPv4},
 		Layout: config.LayoutNode{
 			Direction: "horizontal",
@@ -83,7 +83,7 @@ func openURLTestConfig() *config.Config {
 				{Size: 100, Pane: &config.PaneConfig{ID: "main", Type: "local"}},
 			},
 		},
-	}
+	}}
 }
 
 func newOpenURLHandler(t *testing.T, sessions ...session.Session) (*Handler, *portforward.Registry) {

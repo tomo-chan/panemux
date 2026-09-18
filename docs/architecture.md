@@ -29,6 +29,23 @@ Why it exists as a separate package:
 - gives one source of truth for layout validation
 - makes config behavior easy to test without network/session dependencies
 
+Two types, not one (issue [#66](https://github.com/tomo-chan/panemux/issues/66)):
+
+- `Data` is the domain model — one field per `config.yaml` section, in the order they are written
+  out. Its field order is user-facing, which is why it carries the `//nolint:govet` that exempts it
+  from `fieldalignment`, and why `write()` serializes it directly instead of a second struct listing
+  the same sections: that copy had to be extended by hand whenever a section was added, and a
+  section missing from it was dropped on every save with nothing to notice.
+- `Config` is `Data` plus the context needed to load and save it: the file path, and the SSH-config
+  and auth-token path seams tests substitute. It embeds `Data` with `yaml:",inline"` (yaml.v3 does
+  not inline an embedded struct on its own; `encoding/json` does), so `config.yaml` and every API
+  response keep the shape they had when both concerns shared one struct.
+- Domain methods hang off `Data` and reach `Config`'s callers by promotion. Only the methods that
+  touch the file are `Config`'s own: `write`, `SaveLayout`, `SaveWorkspaces`, `EnsureAuthToken`,
+  `finishLoad`, and `Validate` — which is `Config`'s because the `~/.ssh/config` path it reads host
+  aliases from is load context rather than config data, and it hands that path to `Data`'s own
+  `validate`.
+
 Workspace model:
 
 - `workspaces` is the standard config shape. Each item has an `id`, `title`, and recursive `layout`.
