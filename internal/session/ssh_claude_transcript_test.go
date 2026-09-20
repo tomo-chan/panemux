@@ -2,10 +2,12 @@ package session
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -163,6 +165,7 @@ func TestActiveRemoteWorkdir_ProbedDirIsReusedRatherThanProbedAgain(t *testing.T
 // transcript anywhere, and that must not turn every refresh into a probe.
 func TestActiveRemoteWorkdir_ProbeFindsNothing_IsQuietAndBounded(t *testing.T) {
 	forgetRemoteClaudeProjectDirs(t)
+	freezeClock(t)
 	logged := captureRemoteLog(t)
 
 	derivedFingerprint, _ := transcriptCmds(remoteDerivedDir)
@@ -272,4 +275,139 @@ func TestRemoteClaudeProjectProbeCmd_QuotesTheSessionIDAndGlobsOnlyOneLevel(t *t
 	assert.Contains(t, cmd, "head -n 1", "the answer is bounded to one line")
 	assert.NotContains(t, cmd, "**", "one level down, not a recursive walk")
 	assert.True(t, strings.HasPrefix(cmd, "ls -1 "), "cmd=%q", cmd)
+}
+
+// freezeClock pins nowFn so a test decides when the probe's answer goes stale
+// rather than the wall clock deciding for it.
+func freezeClock(t *testing.T) *fakeClock {
+	t.Helper()
+	clock := newFakeClock()
+	orig := nowFn
+	nowFn = clock.now
+	t.Cleanup(func() { nowFn = orig })
+	return clock
+}
+
+// flakyProbeRunner fails the probe command its first n times, so a test can
+// separate "the host said there is nothing" from "the question never arrived".
+type flakyProbeRunner struct {
+	recordingSSHRunner
+	failProbes int
+}
+
+func (f *flakyProbeRunner) Output(cmd string) ([]byte, error) {
+	if cmd == probeCmd() && f.failProbes > 0 {
+		f.failProbes--
+		f.commands = append(f.commands, cmd)
+		return nil, errors.New("ssh: exec channel closed")
+	}
+	return f.recordingSSHRunner.Output(cmd)
+}
+
+func probedOutputs(t *testing.T) map[string][]byte {
+	t.Helper()
+	actual := remoteProjectsRoot() + "/" + remoteActualDir
+	actualFingerprint, actualRead := absTranscriptCmds(actual)
+	derivedFingerprint, _ := transcriptCmds(remoteDerivedDir)
+
+	outputs := baseRemoteOutputs()
+	outputs[derivedFingerprint] = nil
+	outputs[probeCmd()] = []byte(actual + "/" + remoteSessionID + ".jsonl\n")
+	outputs[actualFingerprint] = []byte("120 1700000000\n")
+	outputs[actualRead] = []byte(remoteTranscriptBody)
+	outputs["ls -1 "+shellQuotePath(actual+"/"+remoteSessionID+"/subagents")+" 2>/dev/null || true"] = []byte("")
+	return outputs
+}
+
+// TestActiveRemoteWorkdir_ProbeError_IsNotRememberedAsAnAnswer: a dropped exec
+// channel is not the host saying "there is nothing here". Recording it as one
+// retired the probe for the rest of the process's life, so a single network
+// blip during the first refresh cost the pane its worktree permanently.
+func TestActiveRemoteWorkdir_ProbeError_IsNotRememberedAsAnAnswer(t *testing.T) {
+	forgetRemoteClaudeProjectDirs(t)
+	freezeClock(t)
+
+	runner := &flakyProbeRunner{
+		recordingSSHRunner: recordingSSHRunner{fakeSSHRunner: fakeSSHRunner{outputs: probedOutputs(t)}},
+		failProbes:         1,
+	}
+
+	// The refresh that hits the failure learns nothing...
+	cwds, err := activeRemoteWorkdirs(runner, "test remote claude", "/repo/main", 100)
+	require.NoError(t, err)
+	assert.Empty(t, cwds)
+
+	// ...and the next one asks again, without the clock having moved.
+	cwds, err = activeRemoteWorkdirs(runner, "test remote claude", "/repo/main", 100)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"/home/dev.user/my.project/worktree"}, cwds)
+}
+
+// TestActiveRemoteWorkdir_NothingFoundYet_IsRetriedOnceItGoesStale covers the
+// ordinary startup order: the session metadata exists as soon as the remote
+// claude process does, but its transcript only appears once the session
+// produces output. The first refresh lands in that window, and a permanent
+// negative answer would mean the pane never resolves its worktree afterwards.
+func TestActiveRemoteWorkdir_NothingFoundYet_IsRetriedOnceItGoesStale(t *testing.T) {
+	forgetRemoteClaudeProjectDirs(t)
+	clock := freezeClock(t)
+
+	outputs := probedOutputs(t)
+	appeared := outputs[probeCmd()]
+	outputs[probeCmd()] = []byte("") // nothing written yet
+
+	runner := &recordingSSHRunner{fakeSSHRunner: fakeSSHRunner{outputs: outputs}}
+
+	cwds, err := activeRemoteWorkdirs(runner, "test remote claude", "/repo/main", 100)
+	require.NoError(t, err)
+	assert.Empty(t, cwds)
+
+	// The transcript appears a moment later, but the answer is still fresh.
+	outputs[probeCmd()] = appeared
+	cwds, err = activeRemoteWorkdirs(runner, "test remote claude", "/repo/main", 100)
+	require.NoError(t, err)
+	assert.Empty(t, cwds, "a fresh answer is reused rather than re-asked")
+
+	clock.advance(remoteClaudeProbeTTL + time.Second)
+
+	cwds, err = activeRemoteWorkdirs(runner, "test remote claude", "/repo/main", 100)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"/home/dev.user/my.project/worktree"}, cwds,
+		"once the answer is stale the host is asked again")
+}
+
+// TestActiveRemoteWorkdir_ProbeFindsTheDerivedDirectory_IsNotAnEncodingChange
+// is the comparison the caller makes after a probe. The probe runs whenever
+// nothing was resolved, which includes a transcript that simply has no cwd in
+// it yet — and then it finds the file exactly where panemux already looked.
+func TestActiveRemoteWorkdir_ProbeFindsTheDerivedDirectory_IsNotAnEncodingChange(t *testing.T) {
+	forgetRemoteClaudeProjectDirs(t)
+	freezeClock(t)
+	logged := captureRemoteLog(t)
+
+	derivedFingerprint, derivedRead := transcriptCmds(remoteDerivedDir)
+	derivedAbs := remoteProjectsRoot() + "/" + remoteDerivedDir
+
+	outputs := baseRemoteOutputs()
+	outputs[derivedFingerprint] = []byte("40 1700000000\n")
+	// A transcript that exists but carries no working directory yet.
+	outputs[derivedRead] = []byte(`{"type":"summary","summary":"starting"}` + "\n")
+	outputs["ls -1 "+remoteClaudeTranscriptShellPath(
+		remoteDerivedDir+"/"+remoteSessionID+"/subagents", "",
+	)+" 2>/dev/null || true"] = []byte("")
+	outputs[probeCmd()] = []byte(derivedAbs + "/" + remoteSessionID + ".jsonl\n")
+
+	runner := &recordingSSHRunner{fakeSSHRunner: fakeSSHRunner{outputs: outputs}}
+
+	cwds, err := activeRemoteWorkdirs(runner, "test remote claude", "/repo/main", 100)
+
+	require.NoError(t, err)
+	assert.Empty(t, cwds)
+	assert.NotContains(t, logged.String(), "may have changed",
+		"the transcript is where panemux looked, so nothing about the encoding changed")
+
+	absFingerprint, absRead := absTranscriptCmds(derivedAbs)
+	assert.NotContains(t, runner.commands, absFingerprint,
+		"the same directory must not be re-read under an absolute spelling of itself")
+	assert.NotContains(t, runner.commands, absRead)
 }

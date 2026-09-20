@@ -1410,17 +1410,40 @@ func remoteClaudeCWDsUnder(
 	return cwds
 }
 
+// remoteClaudeProbeTTL bounds how long a probe's answer is reused before the
+// host is asked again.
+//
+// It exists because of the order things happen in: panemux can read
+// ~/.claude/sessions/<pid>.json as soon as the remote claude process starts,
+// but the transcript itself only appears once that session produces output.
+// The first metadata refresh after a pane opens lands in that window and finds
+// nothing — and remembering *that* forever meant a pane on a host whose
+// encoding differs never resolved its worktree, which is the case this
+// fallback exists for. The same staleness covers a transcript that later
+// moves.
+//
+// 30 seconds against the dashboard's 10-second git-info poll means at most one
+// probe per three refreshes while a session has nothing to find, and a
+// transcript that appears is picked up within one TTL.
+const remoteClaudeProbeTTL = 30 * time.Second
+
 // remoteClaudeProjectDirs remembers what a probe answered for a session, so a
 // host whose encoding differs pays for one probe rather than one per metadata
 // refresh — and so does a session that has no transcript anywhere yet, which
 // is the same state from here.
 //
-// An entry is keyed by host scope and session id, and a false `found` is
-// remembered too: "there is nothing there" is an answer worth keeping, or the
-// quietest case would be the most expensive one.
+// An entry is keyed by host scope and session id. "There is nothing there" is
+// recorded like any other answer, or the quietest case would be the most
+// expensive one; what keeps that from being permanent is the TTL above. A
+// probe that *failed* is not recorded at all — see probeRemoteClaudeProjectDir.
 var remoteClaudeProjectDirs struct {
-	answered map[string]string
+	answered map[string]remoteClaudeProjectDirAnswer
 	mu       sync.Mutex
+}
+
+type remoteClaudeProjectDirAnswer struct {
+	answeredAt time.Time
+	dir        string
 }
 
 func remoteClaudeProjectDirKey(logScope string, meta *claudeSessionMeta) string {
@@ -1433,16 +1456,18 @@ func remoteClaudeProjectDir(logScope string, meta *claudeSessionMeta) string {
 	remoteClaudeProjectDirs.mu.Lock()
 	defer remoteClaudeProjectDirs.mu.Unlock()
 
-	if answered, ok := remoteClaudeProjectDirs.answered[remoteClaudeProjectDirKey(logScope, meta)]; ok && answered != "" {
-		return answered
+	// A known directory is used however old the answer is: staleness governs
+	// whether to ask again, not whether the last answer is still worth using.
+	if answer, ok := remoteClaudeProjectDirs.answered[remoteClaudeProjectDirKey(logScope, meta)]; ok && answer.dir != "" {
+		return answer.dir
 	}
 	return claudeProjectDirName(meta.CWD)
 }
 
 // probeRemoteClaudeProjectDir asks the host for the directory holding this
 // session's transcript, and reports whether the caller should try again under
-// a different one. It answers at most once per session: a second call returns
-// false without running anything.
+// a different one. It asks at most once per TTL: a call while the last answer
+// is still fresh returns false without running anything.
 func probeRemoteClaudeProjectDir(
 	run remoteOutputFunc,
 	logScope string,
@@ -1450,21 +1475,38 @@ func probeRemoteClaudeProjectDir(
 	derived string,
 ) (string, bool) {
 	key := remoteClaudeProjectDirKey(logScope, meta)
-	if remoteClaudeProjectDirAnswered(key) {
+	if remoteClaudeProjectDirAnsweredRecently(key) {
 		return "", false
 	}
 
-	dir := runRemoteClaudeProjectProbe(run, logScope, meta)
-	rememberRemoteClaudeProjectDir(key, dir)
+	dir, ok := runRemoteClaudeProjectProbe(run, logScope, meta)
+	if !ok {
+		// The question never arrived — a dropped exec channel, a connection
+		// that went away mid-refresh. That is not the host telling us there is
+		// nothing here, so nothing is recorded and the next refresh asks
+		// again; recording it would retire the probe on a network blip.
+		return "", false
+	}
 
-	if dir == "" || dir == derived {
+	// Same directory, differently spelled: the probe returns an absolute path
+	// and the derived value is a name relative to ~/.claude/projects, so
+	// comparing them directly would never match. Recording the derived form
+	// keeps later refreshes on the relative spelling — and therefore on the
+	// same read cache — while still marking the session as asked about.
+	if dir != "" && filepath.Base(dir) == filepath.Base(derived) {
+		rememberRemoteClaudeProjectDir(key, derived)
+		return "", false
+	}
+
+	rememberRemoteClaudeProjectDir(key, dir)
+	if dir == "" {
 		return "", false
 	}
 
 	log.Printf(
 		"%s claude transcript for session %s was not under the derived directory %q; "+
 			"using %q instead. Claude Code's project directory encoding may have changed.",
-		logScope, meta.SessionID, derived, filepath.Base(dir),
+		logScope, meta.SessionID, filepath.Base(derived), filepath.Base(dir),
 	)
 	return dir, true
 }
@@ -1473,12 +1515,12 @@ func probeRemoteClaudeProjectDir(
 // sections would otherwise leave the package's own mutex held forever, and
 // every later caller — including a test's cleanup — would block on it rather
 // than the failure surfacing where it happened.
-func remoteClaudeProjectDirAnswered(key string) bool {
+func remoteClaudeProjectDirAnsweredRecently(key string) bool {
 	remoteClaudeProjectDirs.mu.Lock()
 	defer remoteClaudeProjectDirs.mu.Unlock()
 
-	_, answered := remoteClaudeProjectDirs.answered[key]
-	return answered
+	answer, answered := remoteClaudeProjectDirs.answered[key]
+	return answered && nowFn().Sub(answer.answeredAt) < remoteClaudeProbeTTL
 }
 
 func rememberRemoteClaudeProjectDir(key, dir string) {
@@ -1486,23 +1528,29 @@ func rememberRemoteClaudeProjectDir(key, dir string) {
 	defer remoteClaudeProjectDirs.mu.Unlock()
 
 	if remoteClaudeProjectDirs.answered == nil {
-		remoteClaudeProjectDirs.answered = make(map[string]string)
+		remoteClaudeProjectDirs.answered = make(map[string]remoteClaudeProjectDirAnswer)
 	}
-	remoteClaudeProjectDirs.answered[key] = dir
+	remoteClaudeProjectDirs.answered[key] = remoteClaudeProjectDirAnswer{dir: dir, answeredAt: nowFn()}
 }
 
 // runRemoteClaudeProjectProbe returns the absolute project directory holding
-// <sessionID>.jsonl, or "" when the host has none.
-func runRemoteClaudeProjectProbe(run remoteOutputFunc, logScope string, meta *claudeSessionMeta) string {
+// <sessionID>.jsonl, and whether the host answered at all. A false ok means the
+// command did not run, which is not the same as an answer of "nothing here" —
+// only the latter is worth remembering.
+func runRemoteClaudeProjectProbe(
+	run remoteOutputFunc,
+	logScope string,
+	meta *claudeSessionMeta,
+) (string, bool) {
 	out, err := run(remoteClaudeProjectProbeCmd(meta.SessionID))
 	if err != nil {
 		log.Printf("%s probing for the claude transcript directory failed: %v", logScope, err)
-		return ""
+		return "", false
 	}
 
 	found := strings.TrimSpace(strings.SplitN(string(out), "\n", 2)[0])
 	if found == "" {
-		return ""
+		return "", true
 	}
 
 	// The answer came back from the host and is about to be built into further
@@ -1511,14 +1559,14 @@ func runRemoteClaudeProjectProbe(run remoteOutputFunc, logScope string, meta *cl
 	// path arguments"). Quoting alone is not what this repository accepts.
 	if !validRemotePath.MatchString(found) {
 		log.Printf("%s ignoring an unusable claude transcript path from the host: %q", logScope, found)
-		return ""
+		return "", true
 	}
 	if filepath.Base(found) != meta.SessionID+".jsonl" {
 		log.Printf("%s ignoring a claude transcript path for another session: %q", logScope, found)
-		return ""
+		return "", true
 	}
 
-	return filepath.Dir(found)
+	return filepath.Dir(found), true
 }
 
 // remoteClaudeProjectProbeCmd globs one level under ~/.claude/projects for
