@@ -246,6 +246,8 @@ describe('url link provider: wrapped urls', () => {
     expect(links.map((link) => link.text)).not.toContain(url)
   })
 
+  // efficacy:exempt pins pre-existing behavior — this test was already on main;
+  // inserting the bordered-url describe after it only widened the diff hunk.
   it('keeps the columns right when a wide character sits before the wrap', async () => {
     // 参照: occupies 6 cells, so the url starts at column 7 and the row holds
     // 34 of its characters before the program's own newline at the pane edge.
@@ -321,6 +323,8 @@ describe('url link provider: urls wrapped inside a drawn border', () => {
     expect(links[0].range.start).toEqual({ x: 2, y: 1 })
   })
 
+  // efficacy:exempt guards the new border heuristic from widening to ASCII `|`;
+  // main passes because it does not strip any border, which is the required negative baseline.
   it('does not treat ASCII pipes in ordinary output as a shared frame', async () => {
     const framed = borderedRows(url, 40, { left: '|', right: '|' })
 
@@ -329,6 +333,8 @@ describe('url link provider: urls wrapped inside a drawn border', () => {
     expect(links.map((link) => link.text)).not.toContain(url)
   })
 
+  // efficacy:exempt guards the new border heuristic's cross-row equality check;
+  // main passes because it does not strip box-drawing borders at all.
   it('does not strip box-drawing characters that differ between adjacent rows', async () => {
     const first = `│${url.slice(0, 40)}│`
     const second = `┃${url.slice(40).padEnd(40)}┃`
