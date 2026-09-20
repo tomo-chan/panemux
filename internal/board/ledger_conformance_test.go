@@ -152,7 +152,20 @@ func ledgerStepKeys(sets ...map[ownSendKey]ledgerCounts) []ownSendKey {
 			}
 		}
 	}
-	sort.Slice(keys, func(i, j int) bool { return keys[i].To < keys[j].To })
+	// A total order, so a failure names the same key first on every run.
+	sort.Slice(keys, func(i, j int) bool {
+		a, b := keys[i], keys[j]
+		if a.DestHost != b.DestHost {
+			return a.DestHost < b.DestHost
+		}
+		if a.Team != b.Team {
+			return a.Team < b.Team
+		}
+		if a.To != b.To {
+			return a.To < b.To
+		}
+		return a.BodyHash < b.BodyHash
+	})
 	return keys
 }
 
