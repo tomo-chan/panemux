@@ -38,6 +38,21 @@ It accepts only absolute Unix paths and rejects shell metacharacters and control
 
 After validation, the path is wrapped with `shellQuotePath`, which single-quotes the value and escapes any interior single quotes. This keeps paths containing spaces or unusual but allowed characters safe when embedded in a shell string.
 
+**A path the remote host itself reports goes through the same guard.** Pane-header metadata resolution
+asks a host where a Claude session's transcript directory is when the name panemux derives is wrong
+(`remoteClaudeProjectProbeCmd` in `internal/session/ssh.go`; see
+[behavior.md](behavior.md)'s "Pane Git and PR metadata"). Two values cross a trust boundary there and
+both are handled where they cross it:
+
+- **Into** the probe: the session id, which `validClaudeSessionID` (`^[a-zA-Z0-9_-]+$`) has already
+  allowlisted before this point and which is `shellQuotePath`-quoted here. The only unquoted part of
+  that command is the `*`, which has to expand; the projects root is a compile-time literal.
+- **Out of** it: the path the host prints, which is then built into the `stat`/`cat`/`ls` commands
+  that read the transcript. It is checked with `validRemotePath` before any of that — a
+  regex-allowlist branch ahead of the sink, which is the shape this repository accepts, rather than
+  quoting alone — and must additionally name this session's own `<sessionId>.jsonl`, so a host
+  answering with some other session's transcript is ignored rather than read.
+
 ### SSH private key paths and an unresolvable home directory
 
 Three SSH-adjacent paths are resolved against the user's home directory, and all three used to do it

@@ -1335,13 +1335,43 @@ func remoteClaudeSessionCWDs(
 		return nil, nil
 	}
 
-	// Deliberately the derived path alone, with no fallback scan: unlike the
-	// local resolver (see resolveClaudeTranscriptPath, issue #119), a miss here
-	// would cost an extra SSH round trip on every metadata refresh, and the
-	// encoding is a property of the Claude version rather than of the host — so
-	// a change shows up on a local pane first.
-	projectPath := remoteClaudeProjectPath(sessionMeta)
+	// The directory Claude stores this session under, which panemux derives
+	// from the session's cwd — an encoding that is observed behavior of Claude
+	// Code, not a documented interface (see claudeProjectDirName). The remote
+	// resolver falls back the same way the local one does when that derivation
+	// is wrong, because the pane loses its worktree either way and panes here
+	// are reached over SSH just as often (issue #119).
+	dir := remoteClaudeProjectDir(logScope, sessionMeta)
 
+	cwds := remoteClaudeCWDsUnder(run, logScope, sessionMeta, dir)
+	if len(cwds) > 0 {
+		return cwds, nil
+	}
+
+	// Nothing under the directory panemux expected. Ask the host where this
+	// session's transcript actually is — once per session, not once per
+	// metadata refresh, since this is the state a Claude session that has not
+	// written anything yet is also in.
+	probed, ok := probeRemoteClaudeProjectDir(run, logScope, sessionMeta, dir)
+	if !ok || probed == dir {
+		return cwds, nil
+	}
+
+	return remoteClaudeCWDsUnder(run, logScope, sessionMeta, probed), nil
+}
+
+// remoteClaudeCWDsUnder reads the session's own transcript and every subagent
+// transcript beside it, under the given project directory.
+//
+// dir is either the derived name, relative to ~/.claude/projects, or an
+// absolute path a probe resolved; remoteClaudeTranscriptShellPath tells them
+// apart so the caller does not have to.
+func remoteClaudeCWDsUnder(
+	run remoteOutputFunc,
+	logScope string,
+	meta *claudeSessionMeta,
+	dir string,
+) []string {
 	cwds := make([]string, 0, 1)
 	seen := make(map[string]bool)
 	addCandidate := func(displayPath, shellPath string) {
@@ -1361,21 +1391,130 @@ func remoteClaudeSessionCWDs(
 		cwds = append(cwds, cwd)
 	}
 
-	addCandidate(projectPath, remoteClaudeProjectShellPath(sessionMeta))
+	transcript := filepath.Join(dir, meta.SessionID+".jsonl")
+	addCandidate(transcript, remoteClaudeTranscriptShellPath(dir, meta.SessionID+".jsonl"))
 
-	subagentNames, err := remoteClaudeSubagentTranscriptNames(run, logScope, sessionMeta)
+	subagentDir := filepath.Join(dir, meta.SessionID, "subagents")
+	subagentNames, err := remoteClaudeSubagentTranscriptNames(run, logScope, subagentDir)
 	if err != nil {
 		log.Printf("%s listing claude subagent transcripts failed: %v", logScope, err)
-		return cwds, nil
+		return cwds
 	}
 	for _, name := range subagentNames {
 		addCandidate(
-			filepath.Join(filepath.Dir(projectPath), sessionMeta.SessionID, "subagents", name),
-			remoteClaudeSubagentShellPath(sessionMeta, name),
+			filepath.Join(subagentDir, name),
+			remoteClaudeTranscriptShellPath(subagentDir, name),
 		)
 	}
 
-	return cwds, nil
+	return cwds
+}
+
+// remoteClaudeProjectDirs remembers what a probe answered for a session, so a
+// host whose encoding differs pays for one probe rather than one per metadata
+// refresh — and so does a session that has no transcript anywhere yet, which
+// is the same state from here.
+//
+// An entry is keyed by host scope and session id, and a false `found` is
+// remembered too: "there is nothing there" is an answer worth keeping, or the
+// quietest case would be the most expensive one.
+var remoteClaudeProjectDirs struct {
+	answered map[string]string
+	mu       sync.Mutex
+}
+
+func remoteClaudeProjectDirKey(logScope string, meta *claudeSessionMeta) string {
+	return logScope + "\x00" + meta.SessionID
+}
+
+// remoteClaudeProjectDir returns the directory to look under: whatever a probe
+// resolved for this session earlier, or the derived name.
+func remoteClaudeProjectDir(logScope string, meta *claudeSessionMeta) string {
+	remoteClaudeProjectDirs.mu.Lock()
+	defer remoteClaudeProjectDirs.mu.Unlock()
+
+	if answered, ok := remoteClaudeProjectDirs.answered[remoteClaudeProjectDirKey(logScope, meta)]; ok && answered != "" {
+		return answered
+	}
+	return claudeProjectDirName(meta.CWD)
+}
+
+// probeRemoteClaudeProjectDir asks the host for the directory holding this
+// session's transcript, and reports whether the caller should try again under
+// a different one. It answers at most once per session: a second call returns
+// false without running anything.
+func probeRemoteClaudeProjectDir(
+	run remoteOutputFunc,
+	logScope string,
+	meta *claudeSessionMeta,
+	derived string,
+) (string, bool) {
+	key := remoteClaudeProjectDirKey(logScope, meta)
+
+	remoteClaudeProjectDirs.mu.Lock()
+	_, answered := remoteClaudeProjectDirs.answered[key]
+	remoteClaudeProjectDirs.mu.Unlock()
+	if answered {
+		return "", false
+	}
+
+	dir := runRemoteClaudeProjectProbe(run, logScope, meta)
+
+	remoteClaudeProjectDirs.mu.Lock()
+	if remoteClaudeProjectDirs.answered == nil {
+		remoteClaudeProjectDirs.answered = make(map[string]string)
+	}
+	remoteClaudeProjectDirs.answered[key] = dir
+	remoteClaudeProjectDirs.mu.Unlock()
+
+	if dir == "" || dir == derived {
+		return "", false
+	}
+
+	log.Printf(
+		"%s claude transcript for session %s was not under the derived directory %q; "+
+			"using %q instead. Claude Code's project directory encoding may have changed.",
+		logScope, meta.SessionID, derived, filepath.Base(dir),
+	)
+	return dir, true
+}
+
+// runRemoteClaudeProjectProbe returns the absolute project directory holding
+// <sessionID>.jsonl, or "" when the host has none.
+func runRemoteClaudeProjectProbe(run remoteOutputFunc, logScope string, meta *claudeSessionMeta) string {
+	out, err := run(remoteClaudeProjectProbeCmd(meta.SessionID))
+	if err != nil {
+		log.Printf("%s probing for the claude transcript directory failed: %v", logScope, err)
+		return ""
+	}
+
+	found := strings.TrimSpace(strings.SplitN(string(out), "\n", 2)[0])
+	if found == "" {
+		return ""
+	}
+
+	// The answer came back from the host and is about to be built into further
+	// commands, so it goes through the same regex allowlist every other remote
+	// path does before reaching an exec sink (see docs/security.md's "Remote
+	// path arguments"). Quoting alone is not what this repository accepts.
+	if !validRemotePath.MatchString(found) {
+		log.Printf("%s ignoring an unusable claude transcript path from the host: %q", logScope, found)
+		return ""
+	}
+	if filepath.Base(found) != meta.SessionID+".jsonl" {
+		log.Printf("%s ignoring a claude transcript path for another session: %q", logScope, found)
+		return ""
+	}
+
+	return filepath.Dir(found)
+}
+
+// remoteClaudeProjectProbeCmd globs one level under ~/.claude/projects for
+// this session's transcript and returns at most one line. The session id is
+// already regex-validated by the caller (validClaudeSessionID) and quoted
+// here; the `*` is the only unquoted part, because it has to expand.
+func remoteClaudeProjectProbeCmd(sessionID string) string {
+	return "ls -1 ~/.claude/projects/*/" + shellQuotePath(sessionID+".jsonl") + " 2>/dev/null | head -n 1"
 }
 
 // remoteClaudeSubagentTranscriptNames lists the ".jsonl" filenames in the
@@ -1385,9 +1524,9 @@ func remoteClaudeSessionCWDs(
 func remoteClaudeSubagentTranscriptNames(
 	run remoteOutputFunc,
 	logScope string,
-	meta *claudeSessionMeta,
+	subagentDir string,
 ) ([]string, error) {
-	out, err := run("ls -1 " + remoteClaudeSubagentsDirShellPath(meta) + " 2>/dev/null || true")
+	out, err := run("ls -1 " + remoteClaudeTranscriptShellPath(subagentDir, "") + " 2>/dev/null || true")
 	if err != nil {
 		return nil, err
 	}
@@ -1405,16 +1544,19 @@ func remoteClaudeSubagentTranscriptNames(
 	return names, nil
 }
 
-func remoteClaudeSubagentsDirShellPath(meta *claudeSessionMeta) string {
-	return "~/.claude/projects/" + shellQuotePath(
-		filepath.Join(claudeProjectDirName(meta.CWD), meta.SessionID, "subagents"),
-	)
-}
-
-func remoteClaudeSubagentShellPath(meta *claudeSessionMeta, name string) string {
-	return "~/.claude/projects/" + shellQuotePath(
-		filepath.Join(claudeProjectDirName(meta.CWD), meta.SessionID, "subagents", name),
-	)
+// remoteClaudeTranscriptShellPath builds the shell argument for a path under
+// a project directory, which is either an absolute path a probe resolved or a
+// name relative to ~/.claude/projects. The tilde stays outside the quotes in
+// the second case, as it must to expand.
+func remoteClaudeTranscriptShellPath(dir, name string) string {
+	path := dir
+	if name != "" {
+		path = filepath.Join(dir, name)
+	}
+	if filepath.IsAbs(dir) {
+		return shellQuotePath(path)
+	}
+	return "~/.claude/projects/" + shellQuotePath(path)
 }
 
 func remoteClaudeSessionMeta(run remoteOutputFunc, logScope string, agentPID int) (*claudeSessionMeta, error) {
@@ -1434,20 +1576,6 @@ func remoteClaudeSessionMeta(run remoteOutputFunc, logScope string, agentPID int
 		return nil, nil
 	}
 	return &meta, nil
-}
-
-func remoteClaudeProjectPath(meta *claudeSessionMeta) string {
-	return filepath.Join(
-		"~/.claude/projects",
-		claudeProjectDirName(meta.CWD),
-		meta.SessionID+".jsonl",
-	)
-}
-
-func remoteClaudeProjectShellPath(meta *claudeSessionMeta) string {
-	return "~/.claude/projects/" + shellQuotePath(
-		filepath.Join(claudeProjectDirName(meta.CWD), meta.SessionID+".jsonl"),
-	)
 }
 
 func remoteFileFingerprintCmd(shellPath string) string {
