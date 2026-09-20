@@ -6,16 +6,16 @@ import {
   __resetTerminalEntriesForTests,
   useTerminal,
 } from './useTerminal'
-import { WebLinksAddon } from '@xterm/addon-web-links'
+import { createUrlLinkProvider } from '../utils/terminalLinks'
 import { TERMINAL_FONT_FAMILY } from '../utils/fonts'
 
 // ── xterm.js mocks ───────────────────────────────────────────────────────────
 const {
-  mockWrite, mockTerm, mockFitAddon, mockTerminalCtor, mockWebLinksCtor, oscHandlers, linkHandlers,
+  mockWrite, mockTerm, mockFitAddon, mockTerminalCtor, mockUrlProviderFactory, oscHandlers, linkHandlers,
 } = vi.hoisted(() => {
   const mockWrite = vi.fn()
   const oscHandlers = new Map<number, (data: string) => boolean>()
-  const linkHandlers: ((event: MouseEvent, uri: string) => void)[] = []
+  const linkHandlers: ((uri: string) => void)[] = []
   const mockTerm = {
     options: { disableStdin: false },
     attachCustomKeyEventHandler: vi.fn(),
@@ -49,18 +49,31 @@ const {
   }
   const mockFitAddon = { fit: vi.fn() }
   const mockTerminalCtor = vi.fn(function () { return mockTerm })
-  const mockWebLinksCtor = vi.fn(function (handler?: (event: MouseEvent, uri: string) => void) {
-    if (handler) linkHandlers.push(handler)
-    return {}
+  // The url link provider is exercised against a real terminal in
+  // useTerminalLinks.test.ts; here it is a seam that captures the activation
+  // callback panemux hands it.
+  const mockUrlProviderFactory = vi.fn(function (
+    _term: unknown,
+    _regex: RegExp,
+    onActivate: (uri: string) => void,
+  ) {
+    linkHandlers.push(onActivate)
+    return { provideLinks: vi.fn() }
   })
   return {
-    mockWrite, mockTerm, mockFitAddon, mockTerminalCtor, mockWebLinksCtor, oscHandlers, linkHandlers,
+    mockWrite, mockTerm, mockFitAddon, mockTerminalCtor, mockUrlProviderFactory, oscHandlers, linkHandlers,
   }
 })
 
 vi.mock('@xterm/xterm', () => ({ Terminal: mockTerminalCtor }))
 vi.mock('@xterm/addon-fit', () => ({ FitAddon: vi.fn(function () { return mockFitAddon }) }))
-vi.mock('@xterm/addon-web-links', () => ({ WebLinksAddon: mockWebLinksCtor }))
+// Only the provider factory is stubbed: computePullRequestLinks uses this
+// module's real cell-mapping helpers, and a stub of those would make the
+// coordinate assertions below assert the stub.
+vi.mock('../utils/terminalLinks', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../utils/terminalLinks')>()),
+  createUrlLinkProvider: mockUrlProviderFactory,
+}))
 
 // ── WebSocket mock ────────────────────────────────────────────────────────────
 class MockWebSocket {
@@ -179,46 +192,54 @@ describe('useTerminal', () => {
     }))
   })
 
-  it('loads all addons on init', () => {
+  it('loads the fit addon on init', () => {
     const container = makeContainer()
     renderHook(() => useTerminal({ sessionId: 's1', container }))
-    expect(mockTerm.loadAddon).toHaveBeenCalledTimes(2)
+    expect(mockTerm.loadAddon).toHaveBeenCalledTimes(1)
   })
 
-  it('configures the web links addon with the CJK-aware url regex', () => {
+  it('builds the url link provider with the CJK-aware url regex', () => {
     const container = makeContainer()
     renderHook(() => useTerminal({ sessionId: 's1', container }))
 
-    expect(WebLinksAddon).toHaveBeenCalledTimes(1)
-    expect(vi.mocked(WebLinksAddon).mock.calls[0][1]).toEqual({ urlRegex: TERMINAL_URL_REGEX })
+    expect(createUrlLinkProvider).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(createUrlLinkProvider).mock.calls[0][1]).toBe(TERMINAL_URL_REGEX)
   })
 
-  it('registers a custom link provider for pull request numbers', () => {
+  it('registers the url provider before the pull request one, so a #123 inside a url stays part of it', () => {
     const container = makeContainer()
     renderHook(() => useTerminal({ sessionId: 's1', container, repoURL: 'https://github.com/example/panemux' }))
 
-    expect(mockTerm.registerLinkProvider).toHaveBeenCalledTimes(1)
+    expect(mockTerm.registerLinkProvider).toHaveBeenCalledTimes(2)
+    const urlProvider = vi.mocked(createUrlLinkProvider).mock.results[0].value
+    expect(mockTerm.registerLinkProvider.mock.calls[0][0]).toBe(urlProvider)
   })
 
-  it('turns visible #123 references into pull request links when repo metadata is available', () => {
-    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null)
-    const term = {
+  // A buffer line the real cell-mapping helper can read: one cell per
+  // character, which is all these two cases need.
+  function termShowing(text: string) {
+    return {
       buffer: {
         active: {
           getLine: vi.fn(() => ({
-            translateToString: vi.fn(() => 'Reviewing #123 now'),
+            length: text.length,
+            getCell: (x: number) => ({ getWidth: () => 1, getChars: () => text[x] ?? '' }),
           })),
         },
       },
     } as unknown as typeof mockTerm
+  }
+
+  it('turns visible #123 references into pull request links when repo metadata is available', () => {
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null)
+    const term = termShowing('Reviewing #123 now')
 
     const links = __computePullRequestLinksForTests(term as never, 'https://github.com/example/panemux', 1)
 
     expect(links).toHaveLength(1)
-    expect(links[0].range).toEqual({
-      start: { x: 10, y: 0 },
-      end: { x: 14, y: 0 },
-    })
+    expect(links[0].text).toBe('#123')
+    // The coordinates themselves are asserted against a real xterm buffer in
+    // useTerminalLinks.test.ts, where cell widths are real.
     links[0].activate()
     expect(openSpy).toHaveBeenCalledWith(
       'https://github.com/example/panemux/pull/123',
@@ -228,15 +249,7 @@ describe('useTerminal', () => {
   })
 
   it('skips pull request link generation when repo metadata is unavailable', () => {
-    const term = {
-      buffer: {
-        active: {
-          getLine: vi.fn(() => ({
-            translateToString: vi.fn(() => 'Reviewing #123 now'),
-          })),
-        },
-      },
-    } as unknown as typeof mockTerm
+    const term = termShowing('Reviewing #123 now')
 
     const links = __computePullRequestLinksForTests(term as never, null, 1)
 
@@ -1065,7 +1078,7 @@ describe('useTerminal URL opening', () => {
     window.open = vi.fn() as unknown as typeof window.open
     mountTerminal('url-1', { onLinkActivate })
 
-    linkHandlers[0](new MouseEvent('click'), 'https://example.com/auth')
+    linkHandlers[0]('https://example.com/auth')
 
     expect(onLinkActivate).toHaveBeenCalledWith('https://example.com/auth')
     expect(window.open).not.toHaveBeenCalled()
@@ -1075,7 +1088,7 @@ describe('useTerminal URL opening', () => {
     window.open = vi.fn() as unknown as typeof window.open
     mountTerminal('url-2')
 
-    linkHandlers[0](new MouseEvent('click'), 'https://example.com/docs')
+    linkHandlers[0]('https://example.com/docs')
 
     expect(window.open).toHaveBeenCalledWith('https://example.com/docs', '_blank', 'noopener,noreferrer')
   })
@@ -1168,7 +1181,7 @@ describe('useTerminal URL opening', () => {
     )
 
     rerender({ handler: second })
-    linkHandlers[0](new MouseEvent('click'), 'https://example.com/auth')
+    linkHandlers[0]('https://example.com/auth')
 
     expect(second).toHaveBeenCalledWith('https://example.com/auth')
     expect(first).not.toHaveBeenCalled()

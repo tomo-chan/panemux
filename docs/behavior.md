@@ -359,6 +359,20 @@ timeout shrinks to whatever of that budget remains, so a hanging/unreachable hos
 endpoint wait dramatically longer than the ceiling a single dial attempt already tolerated before
 retries were introduced.
 
+Once the transport is up, the SSH handshake (version exchange, key exchange and authentication) is
+bounded too, and by panemux rather than by the transport. Its ceiling is 30 seconds, but it gets
+whatever is left of the dial budget when that is less: the handshake shares the budget instead of
+opening a window of its own on top of it, because a ProxyJump chain reaches this step once per hop
+and unshared windows would multiply — a wedged two-hop chain would wait three times the ceiling the
+budget documents. The handshake runs in its own goroutine and the call returns when it finishes or
+when that timer fires, whichever comes first. It has to work this way for all three transports:
+`golang.org/x/crypto/ssh`'s `NewClientConn` reads no timeout, sets no deadline and takes no context,
+and the transports disagree about deadlines anyway — a TCP conn honors them, a ProxyJump hop is an
+SSH channel whose `SetDeadline` reports "not supported", and the ProxyCommand transport's is a no-op
+because its pipes have none. The ProxyCommand case was the exposed one: a bastion command that hung
+while establishing its own tunnel used to block a pane's reconnect indefinitely. A timed-out
+handshake is reported as a `500` from this endpoint like any other handshake failure.
+
 ### `POST /api/sessions/{id}/open-url`
 
 Accepts `{ "url": "<http(s) URL>" }` and prepares the panemux host for a URL the browser is about to
@@ -885,11 +899,17 @@ attempt itself fails, the pane shows the manual "Reconnect Session" action inste
 
 ### Terminal link detection
 
-- `http://` and `https://` URLs printed into a pane are auto-detected and become clickable through the xterm.js web links addon.
-- The addon's default URL pattern only excludes ASCII punctuation, so panemux supplies its own pattern (`TERMINAL_URL_REGEX` in `frontend/src/hooks/useTerminal.ts`) that also excludes CJK and fullwidth punctuation. Trailing `。`, `、`, `・`, `…` and enclosing `（）`, `「」`, `【】`, `“”` are not part of the detected link.
+- `http://` and `https://` URLs printed into a pane are auto-detected and become clickable through panemux's own xterm.js link provider (`createUrlLinkProvider` in `frontend/src/utils/terminalLinks.ts`).
+- It replaced `@xterm/addon-web-links`, which joined rows only on the terminal's own `isWrapped` flag and accepted a cut-off fragment such as `https://exam` as a whole URL (issue [#175](https://github.com/tomo-chan/panemux/issues/175)). Neither is extensible from outside the addon.
+- The default URL pattern only excludes ASCII punctuation, so panemux supplies its own pattern (`TERMINAL_URL_REGEX` in `frontend/src/hooks/useTerminal.ts`) that also excludes CJK and fullwidth punctuation. Trailing `。`, `、`, `・`, `…` and enclosing `（）`, `「」`, `【】`, `“”` are not part of the detected link.
 - Non-ASCII *letters* are never excluded, so raw IRIs such as `https://ja.wikipedia.org/wiki/日本語` stay linkable in full. Fullwidth digits and fullwidth letters stay linkable for the same reason, as do the letters and numerals interleaved into the CJK symbols block itself (`々`, `〆`, `〇` and the ideographic numerals), so `https://ja.wikipedia.org/wiki/日々` is linked whole.
 - Known limitation: kana or kanji that directly follows a URL with no delimiter (for example `https://example.com/docsを参照`) is still absorbed into the link. That case cannot be distinguished from a legitimate kana IRI path by pattern matching alone. Separate the URL with whitespace or punctuation, or emit an OSC 8 hyperlink — xterm.js resolves those itself, independently of this pattern, and its built-in handler asks for confirmation before navigating.
-- `#<number>` references are linked separately to the pane's GitHub pull request (see [Pane Git and PR metadata](#pane-git-and-pr-metadata)).
+- A URL that does not fit the pane is linked whole, across every row it occupies, whether the terminal wrapped it or the program printed its own newline at the pane edge. The second case is the common one in a bordered TUI, in formatted CLI output, and wherever tmux redraws by line — none of which set `isWrapped`.
+- Two rows are read as one line when the terminal wrapped them, or when the upper row runs all the way to the pane edge and the lower row starts with something other than a blank. A row whose last column holds the trailing half of a wide character counts as reaching the edge, since the character itself occupies it. That heuristic can join two unrelated rows that happen to meet both conditions; the alternative is a fragment that stays clickable, and a URL cut inside its hostname opens a host the operator never saw.
+- A match that runs to the pane edge of the last row with nothing continuing it is not offered as a link at all: whether the URL ended there or the rest is off screen is unknowable, and half a URL is worse than none.
+- Known limitation: a URL broken well short of the pane edge — a program that prints `https://exam\r\nple.com/path` on an 80-column pane — is still linked as the fragment. A line that stops 60 columns early is indistinguishable from a line that simply ended there, so neither joining nor suppressing is safe.
+- Known limitation: a URL wrapped inside a drawn border (`│ … │`) is not rejoined, because the continuation row carries the border as its first characters. Stripping a shared border is tracked separately.
+- `#<number>` references are linked separately to the pane's GitHub pull request (see [Pane Git and PR metadata](#pane-git-and-pr-metadata)). The URL provider is registered first, so a `#123` inside a URL stays part of the URL — which requires both providers to report ranges in the same coordinate system (1-based on both axes, and mapped through cells rather than string indices), since xterm resolves the overlap by comparing the ranges themselves.
 
 ### Resize and layout updates
 
@@ -967,6 +987,9 @@ When a pane moves to a different parent node, the component may be remounted by 
 - If future Codex versions change their session-log schema or start updating `turn_context.cwd` to the active worktree reliably, compare the three fields above before changing panemux's resolver order.
 - For interactive Claude flows across all four pane types, panemux may derive the active worktree from `~/.claude/sessions/<pid>.json` plus the matching transcript under `~/.claude/projects/...`.
 - Claude session metadata is used only to identify the matching transcript (`sessionId`) and project directory key.
+- The project directory key is derived by replacing every path separator and every dot in the session's `cwd` with a dash (`/workspace/user/my.project` → `-workspace-user-my-project`). This is observed behavior of Claude Code's own storage layout, not a documented interface; `TestClaudeProjectDirName_ObservedEncoding` in `internal/session` writes the mapping out case by case so what panemux believes is reviewable.
+- Because that rule can change with a Claude release, a local transcript that is not at the derived path is looked for with a bounded fallback: one listing of `~/.claude/projects` and at most one check per project directory, one level deep, first match in name order. The miss is logged once per session — naming both the derived path and the one used — so an encoding change is visible in the log rather than showing up only as a pane that quietly stopped reporting its worktree. A session with no transcript anywhere stays silent and behaves exactly as before.
+- The fallback is local-only. Remote (`ssh`, `ssh_tmux`) panes keep the derived path alone, because each fallback there costs an extra round trip on every metadata refresh; the encoding is a property of the Claude version, not of the host, so a change shows up on a local pane first.
 - Claude transcript resolution prefers the latest `Bash` tool `cd ... &&` target, then the latest top-level `cwd` recorded on transcript entries such as `user`, `assistant`, `attachment`, and `system`, then the latest non-auxiliary tool file path (`Read`/`Edit`/`Write`/etc) or file-history snapshot path.
 - The `Bash` `cd` target is checked first because the top-level `cwd` field reflects the interactive Claude process's own OS-level working directory, fixed at launch and never updated for that process's lifetime — it does not track directories a Bash tool call actually `cd`'d into. A real Claude Code transcript has a non-empty top-level `cwd` on nearly every record, so preferring it over the `Bash` `cd` target made that detection unreachable in practice, permanently masking sibling-worktree divergence reached via a plain `cd` (this was reproduced directly against a real transcript, independent of any `/resume` involvement). This mirrors the same reasoning already applied to Codex's `workdir` precedence above.
 - A tool file-touch path (`Read`/`Edit`/`Write`/etc) remains a weaker signal than the top-level `cwd`, since touching a single unrelated file elsewhere does not by itself indicate the agent moved its active work there.

@@ -3,16 +3,21 @@ package session
 import (
 	"context"
 	"io"
+
+	"panemux/internal/config"
 )
 
 // Type represents the type of terminal session.
 type Type string
 
+// The wire values themselves are owned by internal/config, which defines
+// PaneConfig.Type's schema; createSession converts a pane's raw string with
+// Type(pane.Type), so the two sets must agree exactly.
 const (
-	TypeLocal   Type = "local"
-	TypeSSH     Type = "ssh"
-	TypeTmux    Type = "tmux"
-	TypeSSHTmux Type = "ssh_tmux"
+	TypeLocal   Type = config.PaneTypeLocal
+	TypeSSH     Type = config.PaneTypeSSH
+	TypeTmux    Type = config.PaneTypeTmux
+	TypeSSHTmux Type = config.PaneTypeSSHTmux
 )
 
 // State represents the current state of a session.

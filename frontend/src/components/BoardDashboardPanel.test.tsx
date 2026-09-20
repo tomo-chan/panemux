@@ -360,4 +360,23 @@ describe('BoardDashboardPanel work summaries', () => {
     const tool = await screen.findByText('tool: Edit')
     expect(tool.style.whiteSpace).toBe('nowrap')
   })
+  // The trap itself is covered in useModalKeyboard.test.tsx; this is the
+  // wiring check — that this dialog actually uses it, and that its ref is on
+  // the element carrying role="dialog".
+  it('keeps Tab inside the dialog', async () => {
+    vi.stubGlobal('fetch', fetchRouter({}))
+    render(<BoardDashboardPanel isOpen token="tok" boardPanes={[]} onClose={vi.fn()} />)
+    const dialog = await screen.findByRole('dialog')
+
+    const outside = document.createElement('button')
+    outside.textContent = 'Behind'
+    document.body.appendChild(outside)
+    outside.focus()
+
+    fireEvent.keyDown(outside, { key: 'Tab' })
+
+    expect(dialog.contains(document.activeElement)).toBe(true)
+    outside.remove()
+  })
+
 })

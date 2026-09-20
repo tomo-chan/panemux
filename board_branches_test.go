@@ -372,7 +372,7 @@ func TestDistinctBoardHosts_DeduplicatesAndKeepsEachHostOnce(t *testing.T) {
 // every read and write goes to panemux's own filesystem and no board traffic
 // ever reaches the host.
 func TestNewAgmsgClientForHost_RemoteWithAgmsgPresent_BuildsARemoteClient(t *testing.T) {
-	cfg := &config.Config{AgentBoard: config.AgentBoardConfig{AgmsgPath: "/opt/agmsg"}}
+	cfg := &config.Config{Data: config.Data{AgentBoard: config.AgentBoardConfig{AgmsgPath: "/opt/agmsg"}}}
 	manager := session.NewManager()
 	sess := &fakeBoardSession{id: "pane-a", tag: "yes"}
 	manager.Add(sess)
@@ -407,7 +407,7 @@ func TestNewAgmsgClientForHost_RemoteWithAgmsgPresent_BuildsARemoteClient(t *tes
 // expand on the remote shell either, and send.sh is looked for at a path that
 // cannot exist.
 func TestNewAgmsgClientForHost_RemoteWithTildePath_ExpandsAgainstTheRemoteHome(t *testing.T) {
-	cfg := &config.Config{AgentBoard: config.AgentBoardConfig{AgmsgPath: "~/.agents/skills/agmsg"}}
+	cfg := &config.Config{Data: config.Data{AgentBoard: config.AgentBoardConfig{AgmsgPath: "~/.agents/skills/agmsg"}}}
 	manager := session.NewManager()
 	sess := &homeProbingBoardSession{
 		home:             "/remote/home/demo",
@@ -429,7 +429,7 @@ func TestNewAgmsgClientForHost_RemoteWithTildePath_ExpandsAgainstTheRemoteHome(t
 // The same host answering "no" is skipped, with the one log line that names
 // the path it looked at.
 func TestNewAgmsgClientForHost_RemoteWithoutAgmsg_SkipsTheHost(t *testing.T) {
-	cfg := &config.Config{AgentBoard: config.AgentBoardConfig{AgmsgPath: "/opt/agmsg"}}
+	cfg := &config.Config{Data: config.Data{AgentBoard: config.AgentBoardConfig{AgmsgPath: "/opt/agmsg"}}}
 	manager := session.NewManager()
 	manager.Add(&fakeBoardSession{id: "pane-a", tag: "no"})
 	paneHosts := map[string]string{"pane-a": "ssh:build-host"}
@@ -473,7 +473,7 @@ func TestAgmsgPresentOnHost_RemoteProbeAnswersNo_ReportsAbsent(t *testing.T) {
 // is skipped rather than falling back to panemux's own home, which would point
 // at a path that does not exist over there.
 func TestResolveAgmsgPathForHost_RemoteProbeFails_SkipsTheHost(t *testing.T) {
-	cfg := &config.Config{AgentBoard: config.AgentBoardConfig{AgmsgPath: "~/.agents/skills/agmsg"}}
+	cfg := &config.Config{Data: config.Data{AgentBoard: config.AgentBoardConfig{AgmsgPath: "~/.agents/skills/agmsg"}}}
 	manager := session.NewManager()
 	manager.Add(&failingBoardSession{id: "pane-a"})
 	buf := captureBoardLog(t)

@@ -7,10 +7,10 @@ import (
 )
 
 func TestSetupCommandCenterDisabledReturnsNil(t *testing.T) {
-	cfg := &config.Config{
+	cfg := &config.Config{Data: config.Data{
 		Server:        config.ServerConfig{Host: loopbackIPv4, Port: 8080, AuthToken: "tok"},
 		CommandCenter: config.CommandCenterConfig{Enabled: false},
-	}
+	}}
 
 	runner := setupCommandCenter(cfg)
 
@@ -20,10 +20,10 @@ func TestSetupCommandCenterDisabledReturnsNil(t *testing.T) {
 }
 
 func TestSetupCommandCenterEnabledWithTokenReturnsRunner(t *testing.T) {
-	cfg := &config.Config{
+	cfg := &config.Config{Data: config.Data{
 		Server:        config.ServerConfig{Host: loopbackIPv4, Port: 8080, AuthToken: "tok"},
 		CommandCenter: config.CommandCenterConfig{Enabled: true},
-	}
+	}}
 
 	runner := setupCommandCenter(cfg)
 
@@ -33,10 +33,10 @@ func TestSetupCommandCenterEnabledWithTokenReturnsRunner(t *testing.T) {
 }
 
 func TestSetupCommandCenterEnabledWithoutTokenReturnsNil(t *testing.T) {
-	cfg := &config.Config{
+	cfg := &config.Config{Data: config.Data{
 		Server:        config.ServerConfig{Host: loopbackIPv4, Port: 8080, AuthToken: ""},
 		CommandCenter: config.CommandCenterConfig{Enabled: true},
-	}
+	}}
 
 	runner := setupCommandCenter(cfg)
 
@@ -84,7 +84,7 @@ func TestCommandCenterBaseURL(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg := &config.Config{Server: config.ServerConfig{Host: tc.host, Port: 8080}}
+			cfg := &config.Config{Data: config.Data{Server: config.ServerConfig{Host: tc.host, Port: 8080}}}
 			got := commandCenterBaseURL(cfg)
 			if got != tc.want {
 				t.Fatalf("commandCenterBaseURL(host=%q) = %q, want %q", tc.host, got, tc.want)

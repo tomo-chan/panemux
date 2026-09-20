@@ -628,7 +628,7 @@ func TestLoad_Nonexistent(t *testing.T) {
 }
 
 func TestAllPanes_FlatList(t *testing.T) {
-	cfg := &Config{
+	cfg := &Config{Data: Data{
 		Layout: LayoutNode{
 			Direction: "horizontal",
 			Children: []LayoutChild{
@@ -643,13 +643,13 @@ func TestAllPanes_FlatList(t *testing.T) {
 				},
 			},
 		},
-	}
+	}}
 	panes := cfg.AllPanes()
 	assert.Len(t, panes, 3)
 }
 
 func TestAllPanes_IncludesAllWorkspaces(t *testing.T) {
-	cfg := &Config{
+	cfg := &Config{Data: Data{
 		Workspaces: WorkspacesConfig{
 			Active:      "one",
 			TabPosition: "top",
@@ -672,7 +672,7 @@ func TestAllPanes_IncludesAllWorkspaces(t *testing.T) {
 				},
 			},
 		},
-	}
+	}}
 	panes := cfg.AllPanes()
 	require.Len(t, panes, 2)
 	assert.Equal(t, "one-main", panes[0].ID)
@@ -680,7 +680,7 @@ func TestAllPanes_IncludesAllWorkspaces(t *testing.T) {
 }
 
 func TestAllPanes_Empty(t *testing.T) {
-	cfg := &Config{Layout: LayoutNode{Direction: "horizontal"}}
+	cfg := &Config{Data: Data{Layout: LayoutNode{Direction: "horizontal"}}}
 	panes := cfg.AllPanes()
 	assert.Empty(t, panes)
 }
@@ -705,7 +705,7 @@ func TestReadMethods_DoNotNormalizeConfigInPlace(t *testing.T) {
 }
 
 func TestAddDefaultWorkspace_CreatesUniqueLocalWorkspace(t *testing.T) {
-	cfg := &Config{
+	cfg := &Config{Data: Data{
 		Workspaces: WorkspacesConfig{
 			Active:      "default",
 			TabPosition: "top",
@@ -714,7 +714,7 @@ func TestAddDefaultWorkspace_CreatesUniqueLocalWorkspace(t *testing.T) {
 				{ID: "workspace-2", Title: "Existing", Layout: singlePaneLayout("workspace-2-main")},
 			},
 		},
-	}
+	}}
 
 	workspace := cfg.AddDefaultWorkspace()
 
@@ -727,7 +727,7 @@ func TestAddDefaultWorkspace_CreatesUniqueLocalWorkspace(t *testing.T) {
 }
 
 func TestRemoveWorkspace_RemovesTargetAndSelectsNextActive(t *testing.T) {
-	cfg := &Config{
+	cfg := &Config{Data: Data{
 		Workspaces: WorkspacesConfig{
 			Active:      "two",
 			TabPosition: "top",
@@ -737,7 +737,7 @@ func TestRemoveWorkspace_RemovesTargetAndSelectsNextActive(t *testing.T) {
 				{ID: "three", Title: "Three", Layout: singlePaneLayout("three-main")},
 			},
 		},
-	}
+	}}
 
 	removed, ok := cfg.RemoveWorkspace("two")
 
@@ -751,7 +751,7 @@ func TestRemoveWorkspace_RemovesTargetAndSelectsNextActive(t *testing.T) {
 }
 
 func TestRemoveWorkspace_InactiveKeepsActive(t *testing.T) {
-	cfg := &Config{
+	cfg := &Config{Data: Data{
 		Workspaces: WorkspacesConfig{
 			Active:      "one",
 			TabPosition: "top",
@@ -760,7 +760,7 @@ func TestRemoveWorkspace_InactiveKeepsActive(t *testing.T) {
 				{ID: "two", Title: "Two", Layout: singlePaneLayout("two-main")},
 			},
 		},
-	}
+	}}
 
 	_, ok := cfg.RemoveWorkspace("two")
 
@@ -811,7 +811,7 @@ layout:
 
 func TestSaveLayout_UpdatesOnlyActiveWorkspace(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	cfg := &Config{
+	cfg := &Config{Data: Data{
 		Server: ServerConfig{Port: 8080, Host: "127.0.0.1"},
 		Workspaces: WorkspacesConfig{
 			Active:      "two",
@@ -820,7 +820,7 @@ func TestSaveLayout_UpdatesOnlyActiveWorkspace(t *testing.T) {
 				{ID: "one", Title: "One", Layout: singlePaneLayout("one-main")},
 				{ID: "two", Title: "Two", Layout: singlePaneLayout("two-main")},
 			},
-		},
+		}},
 		filePath: path,
 	}
 
@@ -1098,7 +1098,7 @@ func TestUpdateLayout_UpdatesMemoryOnly(t *testing.T) {
 }
 
 func TestWorkspaceLayoutMutationHelpers(t *testing.T) {
-	cfg := &Config{
+	cfg := &Config{Data: Data{
 		Workspaces: WorkspacesConfig{
 			Active:      "one",
 			TabPosition: "top",
@@ -1107,7 +1107,7 @@ func TestWorkspaceLayoutMutationHelpers(t *testing.T) {
 				{ID: "two", Title: "Two", Layout: singlePaneLayout("two-main")},
 			},
 		},
-	}
+	}}
 	cfg.normalizeWorkspaces()
 
 	inactiveLayout := LayoutNode{
@@ -1128,7 +1128,7 @@ func TestWorkspaceLayoutMutationHelpers(t *testing.T) {
 }
 
 func TestRemovePaneFromLayout_AllWorkspaces(t *testing.T) {
-	cfg := &Config{
+	cfg := &Config{Data: Data{
 		Workspaces: WorkspacesConfig{
 			Active:      "two",
 			TabPosition: "top",
@@ -1157,7 +1157,7 @@ func TestRemovePaneFromLayout_AllWorkspaces(t *testing.T) {
 				},
 			},
 		},
-	}
+	}}
 
 	cfg.RemovePaneFromLayout("remove-one")
 	cfg.RemovePaneFromLayout("remove-two")
@@ -1193,7 +1193,7 @@ func TestValidatePane_ShellOnSSH_RelativePath_Error(t *testing.T) {
 // helpers
 
 func validConfig() *Config {
-	return &Config{
+	return &Config{Data: Data{
 		Server: ServerConfig{Port: 8080, Host: "127.0.0.1"},
 		Layout: LayoutNode{
 			Direction: "horizontal",
@@ -1201,7 +1201,7 @@ func validConfig() *Config {
 				{Size: 100.0, Pane: &PaneConfig{ID: "main", Type: "local"}},
 			},
 		},
-	}
+	}}
 }
 
 func singlePaneLayout(id string) LayoutNode {

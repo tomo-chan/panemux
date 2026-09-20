@@ -1,5 +1,6 @@
 import React from 'react'
 import { useBoardStatus } from '../hooks/useBoardStatus'
+import { useModalKeyboard } from '../hooks/useModalKeyboard'
 import { useRestoreFocusOnClose } from '../hooks/useRestoreFocusOnClose'
 import type { BoardMessage, BoardStatusEntry } from '../schemas'
 import { TERMINAL_FONT_FAMILY } from '../utils/fonts'
@@ -35,22 +36,15 @@ interface BoardDashboardPanelProps {
 export const BoardDashboardPanel: React.FC<BoardDashboardPanelProps> = ({ isOpen, token, boardPanes, onClose }) => {
   const { statuses, messages, error } = useBoardStatus({ enabled: isOpen, token })
   useRestoreFocusOnClose(isOpen)
+  const dialogRef = React.useRef<HTMLDivElement>(null)
 
-  // Registered on the capture phase for the same reason App.tsx registers
-  // this panel's own Cmd/Ctrl+Shift+B shortcut there: a focused xterm
-  // terminal stops keydown propagation, so a bubble-phase window listener
-  // never sees the key at all. That is not an edge case here — opening the
-  // panel with the keyboard shortcut leaves focus exactly where it was, on
-  // the terminal, so a bubble-registered Escape handler would do nothing in
-  // the most common way the panel gets opened.
-  React.useEffect(() => {
-    if (!isOpen) return
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', handleKeyDown, true)
-    return () => window.removeEventListener('keydown', handleKeyDown, true)
-  }, [isOpen, onClose])
+  // Escape on the capture phase, plus a focus trap, both from the shared hook.
+  // The capture phase is for the same reason App.tsx registers this panel's
+  // own Cmd/Ctrl+Shift+B shortcut there: a focused xterm terminal stops
+  // keydown propagation. That is not an edge case here — opening the panel
+  // with the keyboard shortcut leaves focus exactly where it was, on the
+  // terminal, which is the most common way the panel gets opened.
+  useModalKeyboard({ isOpen, dialogRef, onEscape: onClose })
 
   if (!isOpen) return null
 
@@ -66,6 +60,7 @@ export const BoardDashboardPanel: React.FC<BoardDashboardPanelProps> = ({ isOpen
 
   return (
     <div
+      ref={dialogRef}
       role="dialog"
       aria-modal="true"
       aria-label="Agent board"

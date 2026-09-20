@@ -1740,7 +1740,7 @@ still makes no compatibility promise for the scripts panemux's write path depend
 a silent, user-discovered failure into a specific, actionable CI signal naming exactly which
 documented behavior changed.
 
-**It has already paid for itself three times, which is worth recording as evidence rather than as a
+**It has already paid for itself four times, which is worth recording as evidence rather than as a
 claim.** Running the contract against a real install for the first time found (1) that two of its
 own pre-existing assertions described behavior agmsg does not have — `watch.sh` prints nothing at
 all naming the pairs it resolved when it skips none, so "which identities did this watcher
@@ -1762,6 +1762,20 @@ half of the same rule — a lock whose owning process has exited must be reclaim
 pane would block its own ID forever. The same run also exposed a fixed-sleep delivery probe timed at
 the watcher's own 5-second poll interval; it now sends before the watcher starts and waits on the
 delivery itself.
+
+The fourth is the canary doing exactly the job it was built for, and it is worth reading as a
+calibration of what these assertions should be made of. agmsg v1.3.1 rewrote one `watch.sh` line —
+`skipping pairs held by other sessions` became `not serving these pairs (held by another session, or
+unverified)`, because that report now folds in a pair it could not verify — and the scheduled run
+went red the morning after the release while every behavioral assertion around it passed: the
+claimed pane's messages were still withheld from the other session's watcher, and the dropped pair
+was still named. So the contract had a *sentence* in it where it meant to have a *fact*. The
+assertion now reads "the watcher names the pair it dropped" (`contract/pane-a`), which is what
+panemux's bootstrap instruction depends on being told and which is identical in both releases; if a
+release ever stops naming the pair, that is a real change and it still fails. Verified by installing
+both `v1.2.0` and `v1.3.1` and running the contract against each. The pin
+(`board.TestedAgmsgVersion`) deliberately stays at 1.2.0: a canary failure is an early warning, and
+moving the pin is its own change, made against a full run on the new version.
 
 ## Testing plan (see DEVELOPMENT.md for the TDD/coverage rules this must follow)
 

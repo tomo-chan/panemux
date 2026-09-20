@@ -207,6 +207,45 @@ This model deliberately favors spatial predictability over hidden container sele
 
 The frontend now uses modal dialogs for higher-friction configuration tasks, rather than trying to compress all editing into inline chrome.
 
+### Keyboard behaviour, shared by every modal
+
+`aria-modal="true"` promises that the rest of the page is inert, and nothing in the DOM makes that
+true on its own. `useModalKeyboard` supplies the two behaviours that attribute implies, and every
+surface that declares it uses the hook: `ConfirmDialog`, `AddSSHHostDialog`, `PaneSettingsDialog`,
+`CommandPalette`, `CommandHistoryPanel` and `BoardDashboardPanel`.
+
+- **Focus stays inside.** Tab and Shift+Tab cycle within the dialog, and a Tab arriving from outside
+  is pulled back in — forwards to the first focusable element, backwards to the last, the order a
+  browser would have used had the background been inert. Without it, a dialog that moves focus once
+  on open lets the next Tab reach the very controls it is asking about.
+- **Escape is heard.** The listener is on the capture phase, because a focused xterm terminal stops
+  keydown propagation and a bubble-phase window listener never sees the key. That is not an edge
+  case: it is the state a dialog opened by a keyboard shortcut starts in, and the state the focus
+  trap above exists to prevent the operator from reaching later.
+- A dialog that must not be dismissed — one with a save in flight — passes no Escape handler. The
+  focus trap still applies, so "you cannot leave yet" does not become "you cannot see where you are".
+- A nested modal wins: while `PaneSettingsDialog`'s directory browser is open, the trap follows it
+  and the form behind stays out of reach.
+
+### Confirmation dialog
+
+Destructive actions ask in `ConfirmDialog`, the app's own dialog, rather than in `window.confirm`
+(issue [#70](https://github.com/tomo-chan/panemux/issues/70)). The native dialog blocks the main
+thread — every terminal in the page stops rendering while it is up — and cannot carry the rest of
+the UI's styling. `ConfirmDialog` follows the same surface as the other dialogs here: `#252526`
+panel, `#444` border, backdrop click and `Escape` to dismiss.
+
+Cancelling is the easy path by design: the cancel button, the backdrop and `Escape` all cancel, and
+only the confirm button confirms. The confirm button takes focus when the dialog opens, so both
+answers are one keystroke away. A destructive confirm button uses the same subdued red as the error
+banner below (`#5a1d1d`, `#7f1d1d`, `#fca5a5`).
+
+Its keyboard behaviour is the shared one above: focus is trapped between its two buttons, and
+`Escape` reaches it from the capture phase.
+
+Its first user is workspace deletion, which is still offered only in edit mode; the delete request
+is sent when the dialog is confirmed and never before.
+
 ## Transient Error Banner
 
 Pane creation and moves are optimistic in the UI and then persisted. If persistence fails, the user needs immediate feedback because the visible layout can temporarily diverge from saved config.

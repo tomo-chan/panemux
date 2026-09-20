@@ -356,10 +356,10 @@ func TestExpandPaths_ExpandsBothSSHFileFields(t *testing.T) {
 // ── Which workspace is active ────────────────────────────────────────────────
 
 func TestActiveWorkspace_NoMatchingID_ReportsNotFound(t *testing.T) {
-	cfg := &Config{Workspaces: WorkspacesConfig{
+	cfg := &Config{Data: Data{Workspaces: WorkspacesConfig{
 		Active: "gone",
 		Items:  []WorkspaceConfig{{ID: "one", Layout: singlePaneLayout("one-main")}},
-	}}
+	}}}
 
 	workspace, ok := cfg.ActiveWorkspace()
 
@@ -371,13 +371,13 @@ func TestActiveWorkspace_NoMatchingID_ReportsNotFound(t *testing.T) {
 // names no workspace, which is what keeps a config whose `active` was
 // hand-edited to a typo rendering something rather than nothing.
 func TestActiveLayout_ActiveIDNamesNoWorkspace_UsesTheCompatibilityLayout(t *testing.T) {
-	cfg := &Config{
+	cfg := &Config{Data: Data{
 		Workspaces: WorkspacesConfig{
 			Active: "gone",
 			Items:  []WorkspaceConfig{{ID: "one", Layout: singlePaneLayout("one-main")}},
 		},
 		Layout: singlePaneLayout("fallback-main"),
-	}
+	}}
 
 	layout := cfg.ActiveLayout()
 
@@ -394,17 +394,17 @@ func TestActiveWorkspaceID_FallsBackInOrder(t *testing.T) {
 	}{
 		{
 			name: "the active id wins when it is set",
-			cfg: &Config{Workspaces: WorkspacesConfig{
+			cfg: &Config{Data: Data{Workspaces: WorkspacesConfig{
 				Active: "two",
 				Items:  []WorkspaceConfig{{ID: "one"}, {ID: "two"}},
-			}},
+			}}},
 			want: "two",
 		},
 		{
 			name: "no active id falls back to the first workspace",
-			cfg: &Config{Workspaces: WorkspacesConfig{
+			cfg: &Config{Data: Data{Workspaces: WorkspacesConfig{
 				Items: []WorkspaceConfig{{ID: "one"}, {ID: "two"}},
-			}},
+			}}},
 			want: "one",
 		},
 		{
@@ -430,13 +430,13 @@ func TestActiveWorkspaceID_FallsBackInOrder(t *testing.T) {
 // does reach it is an `active:` that names a workspace the items list does not
 // have — a hand-edited config.yaml with a typo in it.
 func TestUpdateLayout_ActiveIDNamesNoWorkspace_WritesTheCompatibilityLayout(t *testing.T) {
-	cfg := &Config{
+	cfg := &Config{Data: Data{
 		Workspaces: WorkspacesConfig{
 			Active: "gone",
 			Items:  []WorkspaceConfig{{ID: "one", Layout: singlePaneLayout("one-main")}},
 		},
 		Layout: singlePaneLayout("old-main"),
-	}
+	}}
 
 	cfg.UpdateLayout(singlePaneLayout("new-main"))
 
@@ -452,7 +452,7 @@ func TestUpdateLayout_ActiveIDNamesNoWorkspace_WritesTheCompatibilityLayout(t *t
 // A workspace whose layout is nothing but the default synthesized from the
 // compatibility layout still updates through the workspace, not the fallback.
 func TestUpdateLayout_NoWorkspaces_UpdatesTheSynthesizedDefault(t *testing.T) {
-	cfg := &Config{Layout: singlePaneLayout("old-main")}
+	cfg := &Config{Data: Data{Layout: singlePaneLayout("old-main")}}
 
 	cfg.UpdateLayout(singlePaneLayout("new-main"))
 
@@ -465,7 +465,7 @@ func TestUpdateLayout_NoWorkspaces_UpdatesTheSynthesizedDefault(t *testing.T) {
 // ── Naming a new pane ────────────────────────────────────────────────────────
 
 func TestNextPaneID_SuffixesUntilTheNameIsFree(t *testing.T) {
-	cfg := &Config{Workspaces: WorkspacesConfig{
+	cfg := &Config{Data: Data{Workspaces: WorkspacesConfig{
 		Active: "one",
 		Items: []WorkspaceConfig{{
 			ID: "one",
@@ -478,7 +478,7 @@ func TestNextPaneID_SuffixesUntilTheNameIsFree(t *testing.T) {
 				},
 			},
 		}},
-	}}
+	}}}
 
 	assert.Equal(t, "one-main-4", cfg.nextPaneID("one-main"), "the first three suffixes are taken")
 	assert.Equal(t, "free", cfg.nextPaneID("free"), "an unused base is used as-is")
@@ -513,10 +513,10 @@ func layoutWithGroup() LayoutNode {
 // workspaceWith wraps a layout in the single-workspace config the removal
 // tests below operate on.
 func workspaceWith(layout LayoutNode) *Config {
-	return &Config{Workspaces: WorkspacesConfig{
+	return &Config{Data: Data{Workspaces: WorkspacesConfig{
 		Active: "one",
 		Items:  []WorkspaceConfig{{ID: "one", Layout: layout}},
-	}}
+	}}}
 }
 
 func TestRemovePaneFromLayout_GroupLeftWithOneChild_CollapsesUpward(t *testing.T) {

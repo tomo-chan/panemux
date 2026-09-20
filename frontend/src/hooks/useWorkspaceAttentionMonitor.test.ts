@@ -158,6 +158,163 @@ describe('useWorkspaceAttentionMonitor', () => {
     expect(MockWebSocket.instances).toHaveLength(3)
   })
 
+  it('does not reconnect monitor sockets when only the attention callback identity changes', () => {
+    // App.tsx rebuilds notifyAttention whenever the workspace list or layout
+    // changes, which is on every workspace switch (issue #78).
+    const { rerender } = renderHook(
+      ({ onAttention }) =>
+        useWorkspaceAttentionMonitor({ workspaces, maximizedPaneId: null, onAttention }),
+      { initialProps: { onAttention: vi.fn() } },
+    )
+
+    expect(MockWebSocket.instances).toHaveLength(3)
+
+    rerender({ onAttention: vi.fn() })
+    rerender({ onAttention: vi.fn() })
+
+    expect(MockWebSocket.instances).toHaveLength(3)
+  })
+
+  it('reports attention to the newest callback, not the one the sockets were opened with', () => {
+    const first = vi.fn()
+    const latest = vi.fn()
+    const { rerender } = renderHook(
+      ({ onAttention }) =>
+        useWorkspaceAttentionMonitor({ workspaces, maximizedPaneId: null, onAttention }),
+      { initialProps: { onAttention: first } },
+    )
+
+    rerender({ onAttention: latest })
+
+    const socket = MockWebSocket.instances.find((instance) => instance.url.endsWith('/ops-main'))
+    act(() => socket?.simulateOpen())
+    act(() =>
+      socket?.simulateMessage(
+        new TextEncoder().encode('Agent is waiting for confirmation: proceed?').buffer,
+      ),
+    )
+
+    expect(latest).toHaveBeenCalledWith('ops-main', true)
+    expect(first).not.toHaveBeenCalled()
+  })
+
+  it('does not reconnect when the workspace list is refetched with the same pane IDs', () => {
+    const onAttention = vi.fn()
+    const { rerender } = renderHook(
+      ({ currentWorkspaces }) =>
+        useWorkspaceAttentionMonitor({
+          workspaces: currentWorkspaces,
+          maximizedPaneId: null,
+          onAttention,
+        }),
+      { initialProps: { currentWorkspaces: workspaces } },
+    )
+
+    expect(MockWebSocket.instances).toHaveLength(3)
+
+    // A switch refetches the workspaces, so every object identity changes even
+    // though the same panes are still being watched.
+    rerender({
+      currentWorkspaces: JSON.parse(JSON.stringify({ ...workspaces, active: 'ops' })) as WorkspacesResponse,
+    })
+
+    expect(MockWebSocket.instances).toHaveLength(3)
+  })
+
+  // efficacy:exempt pins behavior that already held — the complement of the
+  // two tests above, so a stable-socket fix cannot be mistaken for "never
+  // reconnects".
+  it('reconnects when the pane ID set actually changes', () => {
+    const onAttention = vi.fn()
+    const { rerender } = renderHook(
+      ({ currentWorkspaces }) =>
+        useWorkspaceAttentionMonitor({
+          workspaces: currentWorkspaces,
+          maximizedPaneId: null,
+          onAttention,
+        }),
+      { initialProps: { currentWorkspaces: workspaces } },
+    )
+
+    const withExtraPane: WorkspacesResponse = {
+      ...workspaces,
+      items: [
+        workspaces.items[0],
+        {
+          ...workspaces.items[1],
+          layout: {
+            direction: 'vertical',
+            children: [
+              { size: 50, pane: { id: 'ops-main', type: 'local' } },
+              { size: 50, pane: { id: 'ops-second', type: 'local' } },
+            ],
+          },
+        },
+      ],
+    }
+
+    rerender({ currentWorkspaces: withExtraPane })
+
+    expect(MockWebSocket.instances).toHaveLength(7)
+    expect(MockWebSocket.instances.slice(3).map((instance) => instance.url)).toEqual(
+      expect.arrayContaining(['ws://localhost:3000/ws/ops-second']),
+    )
+  })
+
+  it('decides with the current workspace membership after a pane moves, without reconnecting', () => {
+    const onAttention = vi.fn()
+    const { rerender } = renderHook(
+      ({ currentWorkspaces }) =>
+        useWorkspaceAttentionMonitor({
+          workspaces: currentWorkspaces,
+          maximizedPaneId: null,
+          onAttention,
+        }),
+      { initialProps: { currentWorkspaces: workspaces } },
+    )
+
+    // 'side' moves from the active workspace to the inactive one. The pane ID
+    // set is unchanged, so the sockets must stay; the notification decision
+    // must still use the new membership.
+    const moved: WorkspacesResponse = {
+      ...workspaces,
+      items: [
+        {
+          ...workspaces.items[0],
+          layout: {
+            direction: 'horizontal',
+            children: [{ size: 100, pane: { id: 'main', type: 'local' } }],
+          },
+        },
+        {
+          ...workspaces.items[1],
+          layout: {
+            direction: 'vertical',
+            children: [
+              { size: 50, pane: { id: 'ops-main', type: 'local' } },
+              { size: 50, pane: { id: 'side', type: 'local' } },
+            ],
+          },
+        },
+      ],
+    }
+
+    rerender({ currentWorkspaces: moved })
+
+    expect(MockWebSocket.instances).toHaveLength(3)
+
+    const socket = MockWebSocket.instances.find((instance) => instance.url.endsWith('/side'))
+    act(() => socket?.simulateOpen())
+    act(() =>
+      socket?.simulateMessage(
+        new TextEncoder().encode('Agent is waiting for confirmation: proceed?').buffer,
+      ),
+    )
+
+    // It now lives in an inactive workspace, so it is worth a browser notification.
+    expect(onAttention).toHaveBeenCalledWith('side', true)
+  })
+
   it('notifies when an inactive workspace pane emits a confirmation prompt', () => {
     const onAttention = vi.fn()
     renderHook(() => useWorkspaceAttentionMonitor({ workspaces, maximizedPaneId: null, onAttention }))

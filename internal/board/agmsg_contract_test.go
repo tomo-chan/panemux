@@ -310,7 +310,8 @@ func TestAgmsgContract_TwoAgentsInOneProjectNeedTheClaim(t *testing.T) {
 	assert.Contains(t, unclaimed, "message-for-pane-a",
 		"with no claim held, pane-b's watcher must still receive pane-a's message — the exposure this guards")
 	assert.Contains(t, unclaimed, "message-for-pane-b")
-	assert.NotContains(t, unclaimedErr, "skipping pairs held by other sessions")
+	assert.NotContains(t, unclaimedErr, "contract/pane-a",
+		"with nothing claimed there is no dropped pair to report")
 
 	// The remedy panemux's bootstrap instruction now tells the agent to run.
 	// The claim is taken by a *separate* live process, because that is what
@@ -324,9 +325,16 @@ func TestAgmsgContract_TwoAgentsInOneProjectNeedTheClaim(t *testing.T) {
 		"pane-a is claimed by another session, so pane-b's watcher must not receive its messages")
 	assert.Contains(t, claimed, "message-for-pane-b",
 		"pane-b must still receive its own messages")
-	assert.Contains(t, claimedErr, "skipping pairs held by other sessions",
-		"and the watcher must say which pair it dropped")
-	assert.Contains(t, claimedErr, "contract/pane-a")
+	// Asserted as "the watcher names the pair it dropped", not as its exact
+	// sentence. agmsg v1.3.1 rewrote this line — "skipping pairs held by other
+	// sessions" became "not serving these pairs (held by another session, or
+	// unverified)" — because it now folds an unverified pair into the same
+	// report. The pair itself is what panemux's bootstrap instruction depends
+	// on being told about, and it is unchanged in both releases; the prose
+	// around it is agmsg's UI. If a future release stops naming the pair at
+	// all, that is a real change and this must fail.
+	assert.Contains(t, claimedErr, "contract/pane-a",
+		"the watcher must say which pair it dropped")
 }
 
 // TestAgmsgContract_ClaimIsRefusedWhileAnotherSessionHoldsIt covers the

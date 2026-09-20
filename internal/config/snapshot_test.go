@@ -19,7 +19,7 @@ import (
 // stay usable after it has been restored once.
 
 func threeWorkspaceConfig() *Config {
-	return &Config{
+	return &Config{Data: Data{
 		Workspaces: WorkspacesConfig{
 			Active:           "two",
 			TabPosition:      "top",
@@ -31,7 +31,7 @@ func threeWorkspaceConfig() *Config {
 			},
 		},
 		Layout: singlePaneLayout("two-main"),
-	}
+	}}
 }
 
 func workspaceIDs(cfg *Config) []string {
@@ -102,14 +102,14 @@ func TestSnapshotRestore_UndoesRemovePaneFromLayout(t *testing.T) {
 			}},
 		},
 	}
-	cfg := &Config{
+	cfg := &Config{Data: Data{
 		Workspaces: WorkspacesConfig{
 			Active:      "one",
 			TabPosition: "top",
 			Items:       []WorkspaceConfig{{ID: "one", Title: "One", Layout: nested}},
 		},
 		Layout: nested,
-	}
+	}}
 	snapshot := cfg.Snapshot()
 
 	cfg.RemovePaneFromLayout("one-b")
@@ -207,7 +207,7 @@ func TestRestore_KeepsPaneIdentity(t *testing.T) {
 // copied only the root's own children slice would hand back a tree still
 // sharing every deeper one.
 func TestSnapshot_CopiesNestedChildrenNotJustTheRoot(t *testing.T) {
-	cfg := &Config{
+	cfg := &Config{Data: Data{
 		Workspaces: WorkspacesConfig{
 			Active:      "one",
 			TabPosition: "top",
@@ -222,7 +222,7 @@ func TestSnapshot_CopiesNestedChildrenNotJustTheRoot(t *testing.T) {
 				},
 			}}},
 		},
-	}
+	}}
 	snapshot := cfg.Snapshot()
 
 	nested := cfg.Workspaces.Items[0].Layout.Children[1].Children

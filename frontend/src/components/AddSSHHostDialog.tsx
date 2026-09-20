@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
+import { useModalKeyboard } from '../hooks/useModalKeyboard'
 import type { SSHConfigHost } from '../schemas'
 import { TERMINAL_FONT_FAMILY } from '../utils/fonts'
 
@@ -47,6 +48,7 @@ export const AddSSHHostDialog: React.FC<AddSSHHostDialogProps> = ({
   const [port, setPort] = useState('')
   const [identityFile, setIdentityFile] = useState('')
   const [validationError, setValidationError] = useState<string | null>(null)
+  const dialogRef = useRef<HTMLDivElement>(null)
 
   // Reset form to empty every time dialog opens
   useEffect(() => {
@@ -60,14 +62,9 @@ export const AddSSHHostDialog: React.FC<AddSSHHostDialogProps> = ({
     }
   }, [isOpen])
 
-  useEffect(() => {
-    if (!isOpen || isSaving) return
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isOpen, isSaving, onClose])
+  // No onEscape while saving: the dialog refuses to be dismissed out from
+  // under a request in flight. The focus trap stays either way.
+  useModalKeyboard({ isOpen, dialogRef, onEscape: isSaving ? undefined : onClose })
 
   if (!isOpen) return null
 
@@ -111,6 +108,7 @@ export const AddSSHHostDialog: React.FC<AddSSHHostDialogProps> = ({
 
   return (
     <div
+      ref={dialogRef}
       role="dialog"
       aria-modal="true"
       aria-label="Add SSH host"

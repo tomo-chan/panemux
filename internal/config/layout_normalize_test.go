@@ -124,7 +124,7 @@ func TestNormalizeLayoutNode_DoesNotRepairAnInvalidDirection(t *testing.T) {
 // workspace mutation) and ActiveLayout (GET /api/layout).
 
 func TestWorkspacesView_NormalizesEveryWorkspaceLayout(t *testing.T) {
-	cfg := &Config{
+	cfg := &Config{Data: Data{
 		Workspaces: WorkspacesConfig{
 			Active: "solo",
 			Items: []WorkspaceConfig{
@@ -132,7 +132,7 @@ func TestWorkspacesView_NormalizesEveryWorkspaceLayout(t *testing.T) {
 				{ID: "bare", Title: "Bare", Layout: LayoutNode{}},
 			},
 		},
-	}
+	}}
 
 	for _, workspace := range cfg.WorkspacesView().Items {
 		raw, hasDirection, hasChildren := serializedKeys(t, workspace.Layout)
@@ -142,12 +142,12 @@ func TestWorkspacesView_NormalizesEveryWorkspaceLayout(t *testing.T) {
 }
 
 func TestActiveLayout_NormalizesWhatItReturns(t *testing.T) {
-	cfg := &Config{
+	cfg := &Config{Data: Data{
 		Workspaces: WorkspacesConfig{
 			Active: "solo",
 			Items:  []WorkspaceConfig{{ID: "solo", Title: "Solo", Layout: LayoutNode{Pane: onePane("main")}}},
 		},
-	}
+	}}
 
 	raw, hasDirection, hasChildren := serializedKeys(t, cfg.ActiveLayout())
 	assert.True(t, hasDirection, raw)
@@ -157,7 +157,7 @@ func TestActiveLayout_NormalizesWhatItReturns(t *testing.T) {
 // ActiveLayout falls back to the legacy top-level Layout when no workspace
 // matches, and that path serializes too.
 func TestActiveLayout_NormalizesTheLegacyTopLevelLayout(t *testing.T) {
-	cfg := &Config{Layout: LayoutNode{Pane: onePane("main")}}
+	cfg := &Config{Data: Data{Layout: LayoutNode{Pane: onePane("main")}}}
 
 	raw, hasDirection, hasChildren := serializedKeys(t, cfg.ActiveLayout())
 	assert.True(t, hasDirection, raw)

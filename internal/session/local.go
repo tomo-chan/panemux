@@ -587,12 +587,10 @@ func claudeSessionCWDs(agentPID int) ([]string, error) {
 		return nil, nil
 	}
 
-	projectPath := filepath.Join(
-		homeDir,
-		".claude",
-		"projects",
-		claudeProjectDirName(sessionMeta.CWD),
-		sessionMeta.SessionID+".jsonl",
+	projectPath := resolveClaudeTranscriptPath(
+		filepath.Join(homeDir, ".claude", "projects"),
+		sessionMeta.CWD,
+		sessionMeta.SessionID,
 	)
 
 	cwds := make([]string, 0, 1)
@@ -899,9 +897,105 @@ func parseExecCommandWorkdir(raw json.RawMessage) string {
 	return args.Workdir
 }
 
+// claudeProjectDirName derives the ~/.claude/projects subdirectory Claude Code
+// stores a session's transcript in: every path separator and every dot becomes
+// a dash.
+//
+// This is observed behavior of Claude Code's own storage layout, not a
+// documented interface, and it is re-validated only by someone looking at a
+// real installation. TestClaudeProjectDirName_ObservedEncoding writes the
+// mapping out case by case so what panemux believes is reviewable, and
+// resolveClaudeTranscriptPath does not assume it stays true (issue #119).
 func claudeProjectDirName(cwd string) string {
 	name := strings.ReplaceAll(filepath.Clean(cwd), string(os.PathSeparator), "-")
 	return strings.ReplaceAll(name, ".", "-")
+}
+
+// claudeProjectDirMismatches remembers which sessions have already had a
+// derived-directory miss reported. The workdir lookup runs on every git-info
+// refresh, so without this a single mismatch would be logged every few
+// seconds for as long as the pane lives.
+var claudeProjectDirMismatches struct {
+	seen map[string]bool
+	mu   sync.Mutex
+}
+
+// resolveClaudeTranscriptPath returns the transcript file for sessionID,
+// preferring the path claudeProjectDirName derives and falling back to a scan
+// of projectsDir when that file is not there.
+//
+// The fast path stays the normal case: one Stat, no directory listing. The
+// fallback is bounded to one level — a single listing of projectsDir and at
+// most one Stat per project directory, first match wins in name order — so a
+// Claude release that changes the encoding costs a pane its worktree only if
+// the transcript is not under projectsDir at all, rather than immediately.
+//
+// A miss is logged once per session so the change is visible in a log rather
+// than only as a pane that quietly stopped reporting its worktree. When
+// nothing is found anywhere the derived path is returned unchanged, which
+// keeps "no transcript yet" silent and behaving exactly as before.
+//
+// sessionID must already have been checked against validClaudeSessionID: it is
+// joined into a path here, and the callers in this package validate it before
+// they get this far.
+func resolveClaudeTranscriptPath(projectsDir, cwd, sessionID string) string {
+	derived := filepath.Join(projectsDir, claudeProjectDirName(cwd), sessionID+".jsonl")
+	if isRegularFile(derived) {
+		return derived
+	}
+
+	found := scanClaudeProjectsForSession(projectsDir, sessionID)
+	if found == "" {
+		return derived
+	}
+
+	logClaudeProjectDirMismatchOnce(sessionID, derived, found)
+	return found
+}
+
+func isRegularFile(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.Mode().IsRegular()
+}
+
+// scanClaudeProjectsForSession looks for <sessionID>.jsonl directly inside each
+// project directory, in the order ReadDir returns them (sorted by name).
+func scanClaudeProjectsForSession(projectsDir, sessionID string) string {
+	entries, err := os.ReadDir(projectsDir)
+	if err != nil {
+		return ""
+	}
+
+	name := sessionID + ".jsonl"
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		candidate := filepath.Join(projectsDir, entry.Name(), name)
+		if isRegularFile(candidate) {
+			return candidate
+		}
+	}
+	return ""
+}
+
+func logClaudeProjectDirMismatchOnce(sessionID, derived, found string) {
+	claudeProjectDirMismatches.mu.Lock()
+	defer claudeProjectDirMismatches.mu.Unlock()
+
+	if claudeProjectDirMismatches.seen[sessionID] {
+		return
+	}
+	if claudeProjectDirMismatches.seen == nil {
+		claudeProjectDirMismatches.seen = make(map[string]bool)
+	}
+	claudeProjectDirMismatches.seen[sessionID] = true
+
+	log.Printf(
+		"Warning: claude transcript for session %s was not at the derived path %q; "+
+			"using %q instead. Claude Code's project directory encoding may have changed.",
+		sessionID, derived, found,
+	)
 }
 
 func readClaudeProjectCWD(path string) (string, error) {

@@ -164,4 +164,23 @@ describe('CommandHistoryPanel readability', () => {
 
     expect(await screen.findByText('No history yet.')).toBeDefined()
   })
+  // The trap itself is covered in useModalKeyboard.test.tsx; this is the
+  // wiring check — that this dialog actually uses it, and that its ref is on
+  // the element carrying role="dialog".
+  it('keeps Tab inside the dialog', async () => {
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ entries: [] }) } as Response)
+    render(<CommandHistoryPanel isOpen token="tok" onClose={vi.fn()} />)
+    const dialog = await screen.findByRole('dialog')
+
+    const outside = document.createElement('button')
+    outside.textContent = 'Behind'
+    document.body.appendChild(outside)
+    outside.focus()
+
+    fireEvent.keyDown(outside, { key: 'Tab' })
+
+    expect(dialog.contains(document.activeElement)).toBe(true)
+    outside.remove()
+  })
+
 })

@@ -230,7 +230,7 @@ func TestIsLoopbackHostTreatsANonIPHostAsRemote(t *testing.T) {
 // validatableConfig returns the smallest config Validate accepts, so each
 // test above can invalidate exactly one thing.
 func validatableConfig() *Config {
-	return &Config{
+	return &Config{Data: Data{
 		Server: ServerConfig{Host: "127.0.0.1", Port: 8080},
 		Workspaces: WorkspacesConfig{
 			Active:      "default",
@@ -246,5 +246,5 @@ func validatableConfig() *Config {
 				},
 			}},
 		},
-	}
+	}}
 }
