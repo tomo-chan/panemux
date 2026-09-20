@@ -351,6 +351,19 @@ func (f *fakeSSHRunner) Output(cmd string) ([]byte, error) {
 
 func (f *fakeSSHRunner) Close() error { return nil }
 
+// recordingSSHRunner remembers every command it was asked to run, so a test
+// can assert what was NOT issued — which is how the remote transcript
+// fallback's cost is pinned.
+type recordingSSHRunner struct {
+	fakeSSHRunner
+	commands []string
+}
+
+func (r *recordingSSHRunner) Output(cmd string) ([]byte, error) {
+	r.commands = append(r.commands, cmd)
+	return r.fakeSSHRunner.Output(cmd)
+}
+
 func TestActiveRemoteWorkdir_IgnoresNonInteractiveAgents(t *testing.T) {
 	runner := &fakeSSHRunner{
 		outputs: map[string][]byte{
