@@ -205,6 +205,7 @@ func dialSSHClientUntil(cfg SSHConfig, deadline time.Time) (*ssh.Client, *ssh.Cl
 	// leaves the handshake little room, which is the same trade the retry loop
 	// already makes with its own attempts.
 	handshakeTimeout := sshHandshakeTimeout
+	//mutation:exempt[CONDITIONALS_BOUNDARY] equivalent — at equality the clamp assigns the value it already holds
 	if remaining := deadline.Sub(nowFn()); remaining < handshakeTimeout {
 		handshakeTimeout = remaining
 	}

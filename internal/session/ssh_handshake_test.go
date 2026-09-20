@@ -249,20 +249,24 @@ func TestDialSSHClientUntil_HandshakeSharesTheDialBudget(t *testing.T) {
 	t.Cleanup(func() { dialTransportFn = origDial })
 	stubHandshake(t, readUntilClosed)
 
+	// Three seconds rather than the real 30: long enough that an unclamped
+	// handshake is unmistakable against the 20ms below, short enough that a
+	// mutant removing the clamp fails this in seconds instead of timing the
+	// mutation run out.
 	orig := sshHandshakeTimeout
-	sshHandshakeTimeout = time.Minute
+	sshHandshakeTimeout = 3 * time.Second
 	t.Cleanup(func() { sshHandshakeTimeout = orig })
 
 	cfg := SSHConfig{Host: "example.test", User: "demo", Password: "secret", KnownHostsFile: knownHosts}
 
 	// A transport dial that consumed all but 20ms of the budget leaves the
-	// handshake 20ms, not a fresh minute.
+	// handshake 20ms, not a fresh window.
 	start := time.Now()
 	_, _, err := dialSSHClientUntil(cfg, nowFn().Add(20*time.Millisecond))
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "ssh handshake")
-	assert.Less(t, time.Since(start), 2*time.Second,
+	assert.Less(t, time.Since(start), time.Second,
 		"the handshake must be bounded by what is left of the dial budget, not by its own window")
 }
 
