@@ -72,6 +72,7 @@ These are the checks; they do not replace reading the documents above.
 - Cross-pane Claude messaging design: [docs/agent-board.md](docs/agent-board.md)
 - Use-case scenario coverage map: [docs/scenarios.md](docs/scenarios.md)
 - Test quality characteristics and the gate design: [docs/quality-gateway.md](docs/quality-gateway.md)
+- TLA+ specifications for `internal/board`'s state machines: [spec/agentboard/README.md](spec/agentboard/README.md)
 
 ## Editing Rules
 

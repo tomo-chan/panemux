@@ -58,6 +58,30 @@ make test-agmsg-contract AGMSG_PATH=~/.agents/skills/agmsg
 
 `sqlite3` must be on `PATH` — agmsg's own scripts require it, and the test skips itself when it is missing, as it does when `AGMSG_PATH` is unset.
 
+## The Model-Checking Job
+
+`.github/workflows/model-check.yml` holds two jobs, both validating formal models and neither part of `make check`.
+
+- **`alloy`** checks every `docs/models/*.als` model and requires all of its `check` commands to come back `UNSAT`.
+- **`tlc`** runs Tier 2 of the [state-machine model checking](agent-board.md#state-machine-model-checking) split introduced by issue #168: `make model-check`, which runs TLC over `spec/agentboard/*.tla` and then diffs the transition table it exports against the copy committed under `internal/board/testdata/`.
+
+The workflow is path-filtered — it runs only when a spec, an exported table, the export scripts or the workflow itself changes — so it is deliberately **not** a candidate for a required check in branch protection, unlike `agmsg-contract / contract`. A path-filtered workflow reports no status at all on the pull requests it skips.
+
+`tla2tools.jar` is pinned to a release tag and checksummed, for the same reason the Alloy jar is: a model checker that silently changed version is a model check nobody can reproduce. Bumping it means changing both `TLA_TOOLS_VERSION` and `TLA_TOOLS_JAR_SHA256`, and re-running `make model-check` — a TLC version that explores the state space differently would show up as a table diff.
+
+### What a failure means
+
+- **TLC reports a violated invariant or property.** The spec is wrong, or the design it describes is. Read the counterexample trace TLC prints; it is a concrete sequence of actions.
+- **The transition table diff is non-empty.** The spec and the committed table have drifted. Tier 1 — `internal/board/ledger_conformance_test.go`, inside `make check` — replays the real Go implementation against the **committed** table, so a spec change that never reaches it silently weakens every hermetic run. Regenerate and commit:
+
+```sh
+curl -fsSL -o /tmp/tla2tools.jar \
+  https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar
+TLA_TOOLS_JAR=/tmp/tla2tools.jar make model-check-write
+```
+
+Never hand-edit a file under `internal/board/testdata/*-transitions.json`; the next `make model-check-write` overwrites it, and the diff it produces is the behavioral change a reviewer reads.
+
 ## Release Workflow
 
 ### release-please handling

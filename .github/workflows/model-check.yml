@@ -6,12 +6,20 @@ on:
       - main
     paths:
       - 'docs/models/**'
+      - 'spec/**'
+      - 'scripts/model_check.sh'
+      - 'scripts/tla_transitions.py'
+      - 'internal/board/testdata/*-transitions.json'
       - '.github/workflows/model-check.yml'
   pull_request:
     branches:
       - main
     paths:
       - 'docs/models/**'
+      - 'spec/**'
+      - 'scripts/model_check.sh'
+      - 'scripts/tla_transitions.py'
+      - 'internal/board/testdata/*-transitions.json'
       - '.github/workflows/model-check.yml'
 
 concurrency:
@@ -101,3 +109,37 @@ jobs:
           PY
             echo "::endgroup::"
           done
+
+  # Tier 2 of issue #168's model-checking split. Runs TLC over the TLA+ specs
+  # in spec/agentboard/, then regenerates each one's transition table and
+  # diffs it against the copy committed under internal/board/testdata/.
+  #
+  # Tier 1 -- internal/board/ledger_conformance_test.go, inside `make check`
+  # -- replays the real Go implementation against that committed table on
+  # every commit, with no JDK and no jar. This job is what keeps the table
+  # honest about the spec, and it is separate for the reason the agmsg
+  # contract job is: it needs an external toolchain, and `make check` stays
+  # hermetic.
+  tlc:
+    runs-on: ubuntu-latest
+    env:
+      # Pinned and checksummed for the same reason the Alloy jar above is: a
+      # model checker that silently changed version is a model check nobody
+      # can reproduce.
+      TLA_TOOLS_VERSION: v1.7.4
+      TLA_TOOLS_JAR_SHA256: 936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Download TLA+ tools
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/tla
+          curl -fsSL \
+            -o /tmp/tla/tla2tools.jar \
+            "https://github.com/tlaplus/tlaplus/releases/download/${TLA_TOOLS_VERSION}/tla2tools.jar"
+          echo "${TLA_TOOLS_JAR_SHA256}  /tmp/tla/tla2tools.jar" | shasum -a 256 -c -
+
+      - name: Model-check the specs and diff the exported transition tables
+        run: TLA_TOOLS_JAR=/tmp/tla/tla2tools.jar make model-check

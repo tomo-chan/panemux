@@ -2,6 +2,7 @@
         test test-go test-frontend test-e2e test-agmsg-contract test-hooks test-efficacy efficacy \
         test-scenarios-check check-scenarios coverage-blocks test-coverage-blocks \
         mutation test-mutation bench \
+        model-check model-check-write \
         fmt fmt-go fmt-check-go \
         lint lint-go lint-go-deps lint-frontend \
         coverage coverage-go coverage-frontend \
@@ -222,6 +223,35 @@ test-hooks:
 AGMSG_PATH ?=
 test-agmsg-contract:
 	PANEMUX_AGMSG_PATH="$(AGMSG_PATH)" go test ./internal/board/ -run 'TestAgmsgContract' -v -count=1
+
+# ── Model checking: TLA+ / TLC (issue #168, Tier 2) ───────────────────────────
+#
+# Tier 2 of the model-checking split. Runs TLC over spec/agentboard/*.tla,
+# checking every invariant and temporal property over the full state space,
+# then exports each state graph and diffs it against the transition table
+# committed under internal/board/testdata/.
+#
+# That table is the whole point of the split. Model checking alone proves the
+# MODEL correct, never the Go code that is supposed to implement it — so Tier 1
+# (hermetic, inside `make check`, internal/board/ledger_conformance_test.go)
+# replays the real implementation against the committed table on every commit,
+# and this target is what keeps the table honest about the spec.
+#
+# Outside `make check` for the same reason `make test-agmsg-contract` is: it
+# needs an external toolchain (a JDK and tla2tools.jar) that `make install-deps`
+# does not install, and `make check` must stay hermetic.
+#
+#   curl -fsSL -o /tmp/tla2tools.jar \
+#     https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar
+#   TLA_TOOLS_JAR=/tmp/tla2tools.jar make model-check
+model-check:
+	sh scripts/model_check.sh
+
+# Regenerate the committed transition tables from the specs. Run this whenever
+# a .tla or .cfg changes, and commit the table diff alongside it — that diff is
+# the change a reviewer reads.
+model-check-write:
+	sh scripts/model_check.sh --write
 
 # ── Coverage (≥ 80 %) ─────────────────────────────────────────────────────────
 #

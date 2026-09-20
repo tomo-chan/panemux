@@ -167,7 +167,7 @@ Ordering is meaningful: the point is to stop a defect at the cheapest gate that 
 | **G0** | Spec | Functional suitability (rework) | The change is tied to a row in [scenarios.md](scenarios.md). A user-visible change adds or updates a row in the same commit. | CI: fail when the diff touches `frontend/src`, `internal/api` or `internal/config` and `scenarios.md` is unchanged; a label grants explicit exemption | Present — `.github/workflows/scenarios.yml`, exempted by the `scenarios-exempt` label |
 | **G1** | Edit | Maintainability | `gofmt -s`, `tsc --noEmit`, and `go vet` on the touched packages only | Claude Code `PostToolUse` hook in `.claude/settings.json` | Present — `.claude/hooks/post-edit-check.sh` |
 | **G2** | Unit | Functional suitability, fast feedback | `make test-go`, `make test-frontend` — unchanged | Existing (`make check`, pre-push, CI) | Present |
-| **G3** | Contract | **Resistance to refactoring**, compatibility | (a) HTTP/WS integration through the real `server.New()` router; (b) exhaustiveness check on the route table (every registered route against an expected set); (c) Zod schema round-trips; (d) the agmsg contract | Always-on Go and vitest tests, in `make check` | **Present.** (a) `internal/server/api_integration_test.go` drives every `/api` route and fails when one has no case; `ws_integration_test.go` drives both `/ws` routes over a real handshake. (b) and (d) unchanged. (c) `contract_fixture_test.go` captures real responses into `testdata/api-contract/`, which `frontend/src/schemas/contract.test.ts` parses with the schema that owns each one |
+| **G3** | Contract | **Resistance to refactoring**, compatibility | (a) HTTP/WS integration through the real `server.New()` router; (b) exhaustiveness check on the route table (every registered route against an expected set); (c) Zod schema round-trips; (d) the agmsg contract | Always-on Go and vitest tests, in `make check` | **Present.** (a) `internal/server/api_integration_test.go` drives every `/api` route and fails when one has no case; `ws_integration_test.go` drives both `/ws` routes over a real handshake. (b) and (d) unchanged. (c) `contract_fixture_test.go` captures real responses into `testdata/api-contract/`, which `frontend/src/schemas/contract.test.ts` parses with the schema that owns each one. (e) added by #168: `internal/board/ledger_conformance_test.go` replays the real `ownSendLedger`'s own transitions against a transition table TLC exported from `spec/agentboard/OwnSendLedger.tla` — a contract between the code and a formal model rather than between two processes, but the same shape and the same tier split (see D12) |
 | **G4** | Efficacy | **Protection against regressions** | (a) coverage — scope tracks the implementation, threshold stays at 80%; (b) **red-check**: a changed test must fail when the implementation diff is reverted; (c) mutation score over changed lines only; (d) **per-block coverage**: no block covering a changed line may be one the suite never entered | (a) existing `make check`; (b), (c) and (d) pull-request CI jobs, `make efficacy`, `make mutation` and `make coverage-blocks` | **Present** — (a) present and now scoped to every decision-holding package; (b) present (`make efficacy`, a pull-request-only CI job); (d) present (`make coverage-blocks`, likewise); (c) present **as a gate** (`make mutation`, likewise): a mutant on a changed line that survives, or that reaches no verdict, exits 1 — see D9 |
 | **G5** | Scenario | Functional suitability, interaction capability | Playwright E2E, plus a check that every test named by an `auto` row in `scenarios.md` actually exists, plus an axe-core ceiling per page state | CI, extending `make test-e2e` | Present — E2E plus `make check-scenarios`, which resolves every `auto` row, plus `a11y.spec.ts`, which fails when a violation count rises above the frozen current value (D11), its comparator unit-tested in `a11y-ceiling.test.ts` |
 | **G6** | Adversarial | All characteristics (design judgement) | A fresh-context review of the diff alone. The session that wrote the code does not grade it. Findings limited to correctness and stated requirements. | A review subagent in `.claude/agents/` plus human review. **Does not block** | Present — `.claude/agents/diff-reviewer.md`; still does not block |
@@ -620,6 +620,43 @@ of 1801 and gave up the repository-wide gate for a diff-scoped one. A11y has no 
 — axe reports on a rendered page, not on changed lines — so the ceiling is what stands in for it.
 Both are the same refusal to ship a gate that starts red (principle 4).
 
+**D12 — A model checker's output is checked in; the model checker itself is not in `make check`.**
+Issue #168 pilots TLA+ over `internal/board`'s `ownSendLedger`. The obvious arrangement — run TLC as
+part of the gate — fails principle 5 outright: TLC needs a JDK and `tla2tools.jar`, which
+`make install-deps` does not install, so `make check` would stop being hermetic. The arrangement that
+does work splits it the way the agmsg contract is already split, and the split is doing more work here
+than the hermeticity argument alone suggests.
+
+*Model checking proves the model, not the code.* This is the trap the whole design is built around. A
+spec and an implementation can each be internally consistent and disagree with each other, and no
+amount of TLC says so. A repository that ran TLC in CI and stopped there would have a green formal
+method and no more protection than before. So what is checked in is TLC's **output** — the full state
+graph, exported as a flat transition table — and what runs on every commit is the real Go
+implementation being replayed against it. Tier 2 (`make model-check`, a path-filtered CI job) exists
+to keep that table honest about the spec, which is a drift problem, not a verification one.
+
+*The reference model is the table and nothing else.* The tempting alternative is a small hand-written
+Go state machine to compare against. That is a third artifact to keep in sync, and it drifts from the
+spec in precisely the way the implementation it is checking might — the failure it is supposed to
+detect. Indexing the exported table for lookup has no such failure mode.
+
+*Coverage of the model is asserted, not assumed.* The drivers require every non-Expire transition in
+the table to have been taken by the real ledger. Without that, a table permissive enough to accept
+anything passes exactly as quietly as a correct one — the same tautology problem D1 records for
+coverage, one level up.
+
+*It is bounded, and the bound is written down.* `MaxEntries` caps how many occurrences one key may
+hold (4 as committed). A defect appearing only above that is outside what this says anything about.
+That is the ordinary limitation of bounded model checking and it is stated in
+[agent-board.md](agent-board.md#state-machine-model-checking) rather than left for a reader to infer
+from the `.cfg`.
+
+*Every property was perturbed before being trusted.* Each of `Conservation`, `ConsumeNeverForges` and
+`RecordIsImmediatelyMatchable` was verified by breaking the spec until TLC caught the specific design
+bug that property exists for, and each Tier 1 check by breaking the implementation until it failed.
+A property that holds vacuously reads exactly like one that holds, which is the same reason #194's
+ceilings and #191's fixtures were both confirmed by perturbation.
+
 ### Rollout order
 
 | Order | Work | Gate | #178 phase | Effect |
@@ -633,6 +670,7 @@ Both are the same refusal to ship a gate that starts red (principle 4).
 | 7 | Performance and accessibility observation (measure only, do not gate) | — | — | **Landed.** `make bench` measures terminal throughput, replay-buffer cost and the relay's polling cost; `a11y.spec.ts` records axe violations. The performance half still only reports — its spreads are too wide for a threshold (see "First measurements"). The accessibility half now asserts: #194 froze the recorded counts as a ceiling, which is the step this row deferred until data existed. |
 | 8 | Per-block coverage on changed lines (#164, not a #180 item) | G4(d) | — | **Landed.** `scripts/coverage_blocks.sh` fails when a block covering a changed line never executed. It unblocked row 6's measurement, which is what row 6 was waiting on. |
 | 9 | Zod schema round-trips against real Go output (#191, closing G3(c)) | G3 | Phase 1 | **Landed.** `internal/server/contract_fixture_test.go` captures every response the dashboard parses, plus both WebSocket frame streams, into `testdata/api-contract/`; `frontend/src/schemas/contract.test.ts` parses each with the schema that owns it and requires the parsed value to equal the captured one, so a field Zod *strips* fails too. Decision D10 records why the fixtures are rewritten rather than diffed. |
+| 10 | TLA+ model checking of `internal/board`'s state machines, piloted on `ownSendLedger` (#168) | G3 | — | **Landed for the pilot.** `spec/agentboard/OwnSendLedger.tla` plus a checked-in transition table TLC exports; `internal/board/ledger_conformance_test.go` replays the real ledger — including through `Relay.Broadcast`/`Poll` — against it inside `make check`, and `make model-check` keeps the table honest about the spec from a path-filtered CI job. `Relay.processRow` is the next candidate now that the scaffolding is settled; `dynamicBoardExecutor` is search-and-retry rather than a state machine and is left out. See D12. |
 
 ## Surviving mutants: the first measurement
 
