@@ -122,6 +122,111 @@ interface LinkBlock {
   endsAtEdge: boolean
 }
 
+interface BorderDecoration {
+  left: { char: string; x: number }
+  right: { char: string; x: number }
+}
+
+interface BlockLine {
+  raw: LineText
+  content: LineText
+  border: BorderDecoration | null
+}
+
+function isBoxDrawing(char: string): boolean {
+  return char.length === 1 && char >= '\u2500' && char <= '\u257f'
+}
+
+/**
+ * A drawn frame is deliberately narrower than "punctuation at both ends":
+ * both ends must be Unicode box-drawing characters. In particular, ASCII `|`
+ * is ordinary command output surprisingly often, so treating it as a border
+ * would silently join unrelated lines.
+ *
+ * One inner blank on either side is treated as frame padding. The two sides do
+ * not have to use the same character or padding, and a frame with no padding
+ * works as well. Keeping the original positions alongside the slice is what
+ * preserves xterm's cell coordinates after those decorations disappear.
+ */
+function readBlockLine(term: Terminal, y: number): BlockLine | null {
+  const raw = readLine(term, y)
+  if (!raw) return null
+
+  const last = raw.text.length - 1
+  if (last <= 0 || !isBoxDrawing(raw.text[0]) || !isBoxDrawing(raw.text[last])) {
+    return { raw, content: raw, border: null }
+  }
+
+  const leftPosition = raw.positions[0]
+  const rightPosition = raw.positions[last]
+  if (!leftPosition || !rightPosition || leftPosition.x >= rightPosition.x) {
+    return { raw, content: raw, border: null }
+  }
+
+  let start = 1
+  if (raw.text[start] === ' ') start++
+  let end = last
+  if (raw.text[end - 1] === ' ') end--
+
+  const chars = raw.text.slice(start, end).split('')
+  const positions = raw.positions.slice(start, end)
+  const reachesEdge = chars.length > 0 && chars[chars.length - 1] !== ' '
+  const startsBlank = chars.length === 0 || chars[0] === ' '
+
+  let trimmedEnd = chars.length
+  while (trimmedEnd > 0 && chars[trimmedEnd - 1] === ' ') trimmedEnd--
+
+  return {
+    raw,
+    content: {
+      text: chars.slice(0, trimmedEnd).join(''),
+      positions: positions.slice(0, trimmedEnd),
+      reachesEdge,
+      startsBlank,
+    },
+    border: {
+      left: { char: raw.text[0], x: leftPosition.x },
+      right: { char: raw.text[last], x: rightPosition.x },
+    },
+  }
+}
+
+function sharesBorder(upper: BlockLine, lower: BlockLine): boolean {
+  if (!upper.border || !lower.border) return false
+  return (
+    upper.border.left.char === lower.border.left.char &&
+    upper.border.left.x === lower.border.left.x &&
+    upper.border.right.char === lower.border.right.char &&
+    upper.border.right.x === lower.border.right.x
+  )
+}
+
+type BlockMode = 'raw' | 'border'
+
+function continuationMode(
+  upper: BlockLine,
+  lower: BlockLine,
+  lowerIsWrapped: boolean,
+  mode: BlockMode | null,
+): BlockMode | null {
+  // A real terminal wrap is authoritative. It also prevents text that merely
+  // starts and ends with box-drawing glyphs from being reinterpreted as a
+  // frame when xterm says it is one physical logical line.
+  if (mode !== 'border' && lowerIsWrapped) {
+    return continuesOnNextLine(upper.raw, lower.raw, true) ? 'raw' : null
+  }
+
+  if (mode !== 'raw' && sharesBorder(upper, lower)) {
+    return continuesOnNextLine(upper.content, lower.content, false) ? 'border' : null
+  }
+
+  // Once either row looks framed, do not fall back to the old edge heuristic:
+  // its right border fills the last cell and its left border is non-blank,
+  // which is precisely the corrupt `...││...` join this path replaces.
+  if (mode === 'border' || upper.border || lower.border) return null
+  return continuesOnNextLine(upper.raw, lower.raw, false) ? 'raw' : null
+}
+
 /**
  * collectLinkBlock joins the rows around `y` that read as one continuous line.
  *
@@ -130,34 +235,42 @@ interface LinkBlock {
  * edge is probably cut off rather than complete.
  */
 function collectLinkBlock(term: Terminal, y: number): LinkBlock | null {
-  const start = readLine(term, y)
+  const start = readBlockLine(term, y)
   if (!start) return null
 
-  const lines: LineText[] = [start]
+  const lines: BlockLine[] = [start]
+  let mode: BlockMode | null = null
+
+  const selected = (line: BlockLine): LineText => (mode === 'border' ? line.content : line.raw)
+  const length = (): number => lines.reduce((total, line) => total + selected(line).text.length, 0)
 
   for (let above = y - 1; above >= 0; above--) {
-    const line = readLine(term, above)
+    const line = readBlockLine(term, above)
     if (!line) break
-    if (!continuesOnNextLine(line, lines[0], isWrapped(term, above + 1))) break
+    const nextMode = continuationMode(line, lines[0], isWrapped(term, above + 1), mode)
+    if (!nextMode) break
+    mode = nextMode
     lines.unshift(line)
-    if (lines.reduce((total, l) => total + l.text.length, 0) > MAX_BLOCK_LENGTH) break
+    if (length() > MAX_BLOCK_LENGTH) break
   }
 
   let last = lines[lines.length - 1]
-  let endsAtEdge = last.reachesEdge
+  let endsAtEdge = selected(last).reachesEdge
   for (let below = y + 1; ; below++) {
-    const line = readLine(term, below)
+    const line = readBlockLine(term, below)
     if (!line) break
-    if (!continuesOnNextLine(last, line, isWrapped(term, below))) break
+    const nextMode = continuationMode(last, line, isWrapped(term, below), mode)
+    if (!nextMode) break
+    mode = nextMode
     lines.push(line)
     last = line
-    endsAtEdge = line.reachesEdge
-    if (lines.reduce((total, l) => total + l.text.length, 0) > MAX_BLOCK_LENGTH) break
+    endsAtEdge = selected(line).reachesEdge
+    if (length() > MAX_BLOCK_LENGTH) break
   }
 
   return {
-    text: lines.map((line) => line.text).join(''),
-    positions: lines.flatMap((line) => line.positions),
+    text: lines.map((line) => selected(line).text).join(''),
+    positions: lines.flatMap((line) => selected(line).positions),
     endsAtEdge,
   }
 }

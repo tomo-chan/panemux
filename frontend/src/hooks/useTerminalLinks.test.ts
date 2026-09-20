@@ -259,6 +259,105 @@ describe('url link provider: wrapped urls', () => {
   })
 })
 
+describe('url link provider: urls wrapped inside a drawn border', () => {
+  const url = 'https://example.com/a/very/long/path/that/continues/across/the/drawn/frame'
+
+  function borderedRows(
+    value: string,
+    contentWidth: number,
+    {
+      left = '│ ',
+      right = ' │',
+    }: { left?: string; right?: string } = {},
+  ): { input: string; cols: number } {
+    const rows: string[] = []
+    for (let at = 0; at < value.length; at += contentWidth) {
+      rows.push(`${left}${value.slice(at, at + contentWidth).padEnd(contentWidth)}${right}`)
+    }
+    return { input: rows.join('\r\n'), cols: left.length + contentWidth + right.length }
+  }
+
+  it('detects a url across two bordered rows', async () => {
+    const framed = borderedRows(url, 40)
+
+    const links = await detectLinksAt(framed.input, { cols: framed.cols })
+
+    expect(links).toHaveLength(1)
+    expect(links[0].text).toBe(url)
+    expect(links[0].range).toEqual({
+      start: { x: 3, y: 1 },
+      end: { x: 2 + url.length - 40, y: 2 },
+    })
+  })
+
+  it('detects a url across three or more bordered rows from its middle row', async () => {
+    const long = `${url}/with/enough/additional/segments/to/reach/a/third/row`
+    const framed = borderedRows(long, 32)
+
+    const links = await detectLinksAt(framed.input, { cols: framed.cols, row: 2 })
+
+    expect(links).toHaveLength(1)
+    expect(links[0].text).toBe(long)
+    expect(links[0].range.end.y).toBe(Math.ceil(long.length / 32))
+  })
+
+  it('allows asymmetric border characters and padding', async () => {
+    const framed = borderedRows(url, 40, { left: '┃ ', right: '│' })
+
+    const links = await detectLinksAt(framed.input, { cols: framed.cols })
+
+    expect(links).toHaveLength(1)
+    expect(links[0].text).toBe(url)
+    expect(links[0].range.start).toEqual({ x: 3, y: 1 })
+  })
+
+  it('allows a frame with no inner padding', async () => {
+    const framed = borderedRows(url, 40, { left: '│', right: '│' })
+
+    const links = await detectLinksAt(framed.input, { cols: framed.cols })
+
+    expect(links).toHaveLength(1)
+    expect(links[0].text).toBe(url)
+    expect(links[0].range.start).toEqual({ x: 2, y: 1 })
+  })
+
+  it('does not treat ASCII pipes in ordinary output as a shared frame', async () => {
+    const framed = borderedRows(url, 40, { left: '|', right: '|' })
+
+    const links = await detectLinksAt(framed.input, { cols: framed.cols })
+
+    expect(links.map((link) => link.text)).not.toContain(url)
+  })
+
+  it('does not strip box-drawing characters that differ between adjacent rows', async () => {
+    const first = `│${url.slice(0, 40)}│`
+    const second = `┃${url.slice(40).padEnd(40)}┃`
+
+    const links = await detectLinksAt(`${first}\r\n${second}`, { cols: 42 })
+
+    expect(links.map((link) => link.text)).not.toContain(url)
+  })
+
+  it('keeps cell ranges aligned when wide and astral characters precede the url', async () => {
+    const contentWidth = 40
+    const prefix = '🎉参 '
+    // With xterm's default width table the emoji is one cell and 参 is two,
+    // so prefix + this fragment fills the 40-cell frame interior exactly.
+    const firstUrlLength = contentWidth - 4
+    const first = `│ ${prefix}${url.slice(0, firstUrlLength)} │`
+    const second = `│ ${url.slice(firstUrlLength).padEnd(contentWidth)} │`
+
+    const links = await detectLinksAt(`${first}\r\n${second}`, { cols: contentWidth + 4 })
+
+    expect(links).toHaveLength(1)
+    expect(links[0].text).toBe(url)
+    expect(links[0].range).toEqual({
+      start: { x: 7, y: 1 },
+      end: { x: 2 + url.length - firstUrlLength, y: 2 },
+    })
+  })
+})
+
 // The pull-request provider is registered alongside the url one and xterm
 // resolves an overlap between them by registration order — which only works if
 // both report ranges in the same coordinate system. xterm's own
