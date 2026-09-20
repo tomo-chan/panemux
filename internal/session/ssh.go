@@ -1450,22 +1450,12 @@ func probeRemoteClaudeProjectDir(
 	derived string,
 ) (string, bool) {
 	key := remoteClaudeProjectDirKey(logScope, meta)
-
-	remoteClaudeProjectDirs.mu.Lock()
-	_, answered := remoteClaudeProjectDirs.answered[key]
-	remoteClaudeProjectDirs.mu.Unlock()
-	if answered {
+	if remoteClaudeProjectDirAnswered(key) {
 		return "", false
 	}
 
 	dir := runRemoteClaudeProjectProbe(run, logScope, meta)
-
-	remoteClaudeProjectDirs.mu.Lock()
-	if remoteClaudeProjectDirs.answered == nil {
-		remoteClaudeProjectDirs.answered = make(map[string]string)
-	}
-	remoteClaudeProjectDirs.answered[key] = dir
-	remoteClaudeProjectDirs.mu.Unlock()
+	rememberRemoteClaudeProjectDir(key, dir)
 
 	if dir == "" || dir == derived {
 		return "", false
@@ -1477,6 +1467,28 @@ func probeRemoteClaudeProjectDir(
 		logScope, meta.SessionID, derived, filepath.Base(dir),
 	)
 	return dir, true
+}
+
+// Both accessors unlock through defer: a panic inside one of these critical
+// sections would otherwise leave the package's own mutex held forever, and
+// every later caller — including a test's cleanup — would block on it rather
+// than the failure surfacing where it happened.
+func remoteClaudeProjectDirAnswered(key string) bool {
+	remoteClaudeProjectDirs.mu.Lock()
+	defer remoteClaudeProjectDirs.mu.Unlock()
+
+	_, answered := remoteClaudeProjectDirs.answered[key]
+	return answered
+}
+
+func rememberRemoteClaudeProjectDir(key, dir string) {
+	remoteClaudeProjectDirs.mu.Lock()
+	defer remoteClaudeProjectDirs.mu.Unlock()
+
+	if remoteClaudeProjectDirs.answered == nil {
+		remoteClaudeProjectDirs.answered = make(map[string]string)
+	}
+	remoteClaudeProjectDirs.answered[key] = dir
 }
 
 // runRemoteClaudeProjectProbe returns the absolute project directory holding

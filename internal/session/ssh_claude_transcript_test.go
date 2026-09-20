@@ -178,13 +178,18 @@ func TestActiveRemoteWorkdir_ProbeFindsNothing_IsQuietAndBounded(t *testing.T) {
 		assert.Empty(t, cwds)
 	}
 
-	probes := 0
+	probes, derivedReads := 0, 0
 	for _, cmd := range runner.commands {
-		if cmd == probeCmd() {
+		switch cmd {
+		case probeCmd():
 			probes++
+		case derivedFingerprint:
+			derivedReads++
 		}
 	}
 	assert.Equal(t, 1, probes, "a session with no transcript must not pay for a probe on every refresh")
+	assert.Equal(t, 3, derivedReads,
+		"and it must keep looking under the derived directory, not under the nothing the probe answered")
 	assert.NotContains(t, logged.String(), "may have changed",
 		"nothing was found, so there is no encoding change to report")
 }
