@@ -67,7 +67,13 @@ const {
 
 vi.mock('@xterm/xterm', () => ({ Terminal: mockTerminalCtor }))
 vi.mock('@xterm/addon-fit', () => ({ FitAddon: vi.fn(function () { return mockFitAddon }) }))
-vi.mock('../utils/terminalLinks', () => ({ createUrlLinkProvider: mockUrlProviderFactory }))
+// Only the provider factory is stubbed: computePullRequestLinks uses this
+// module's real cell-mapping helpers, and a stub of those would make the
+// coordinate assertions below assert the stub.
+vi.mock('../utils/terminalLinks', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../utils/terminalLinks')>()),
+  createUrlLinkProvider: mockUrlProviderFactory,
+}))
 
 // ── WebSocket mock ────────────────────────────────────────────────────────────
 class MockWebSocket {
@@ -209,25 +215,31 @@ describe('useTerminal', () => {
     expect(mockTerm.registerLinkProvider.mock.calls[0][0]).toBe(urlProvider)
   })
 
-  it('turns visible #123 references into pull request links when repo metadata is available', () => {
-    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null)
-    const term = {
+  // A buffer line the real cell-mapping helper can read: one cell per
+  // character, which is all these two cases need.
+  function termShowing(text: string) {
+    return {
       buffer: {
         active: {
           getLine: vi.fn(() => ({
-            translateToString: vi.fn(() => 'Reviewing #123 now'),
+            length: text.length,
+            getCell: (x: number) => ({ getWidth: () => 1, getChars: () => text[x] ?? '' }),
           })),
         },
       },
     } as unknown as typeof mockTerm
+  }
+
+  it('turns visible #123 references into pull request links when repo metadata is available', () => {
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null)
+    const term = termShowing('Reviewing #123 now')
 
     const links = __computePullRequestLinksForTests(term as never, 'https://github.com/example/panemux', 1)
 
     expect(links).toHaveLength(1)
-    expect(links[0].range).toEqual({
-      start: { x: 10, y: 0 },
-      end: { x: 14, y: 0 },
-    })
+    expect(links[0].text).toBe('#123')
+    // The coordinates themselves are asserted against a real xterm buffer in
+    // useTerminalLinks.test.ts, where cell widths are real.
     links[0].activate()
     expect(openSpy).toHaveBeenCalledWith(
       'https://github.com/example/panemux/pull/123',
@@ -237,15 +249,7 @@ describe('useTerminal', () => {
   })
 
   it('skips pull request link generation when repo metadata is unavailable', () => {
-    const term = {
-      buffer: {
-        active: {
-          getLine: vi.fn(() => ({
-            translateToString: vi.fn(() => 'Reviewing #123 now'),
-          })),
-        },
-      },
-    } as unknown as typeof mockTerm
+    const term = termShowing('Reviewing #123 now')
 
     const links = __computePullRequestLinksForTests(term as never, null, 1)
 

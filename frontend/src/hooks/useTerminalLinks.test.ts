@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { Terminal } from '@xterm/xterm'
 import type { ILink } from '@xterm/xterm'
-import { TERMINAL_URL_REGEX } from './useTerminal'
+import { TERMINAL_URL_REGEX, __computePullRequestLinksForTests } from './useTerminal'
 import { createUrlLinkProvider } from '../utils/terminalLinks'
 
 // Integration check against the real xterm.js terminal. useTerminal.test.ts mocks
@@ -80,6 +80,71 @@ describe('url link provider: single line', () => {
 // program wrapped by printing its own newline at the pane edge was linked only as
 // far as its first line — and that fragment stayed clickable, so a URL cut inside
 // its hostname opened a different host.
+// Two shapes the CJK cases above cannot reach, both found in review of #175's
+// own implementation: an astral character occupies two UTF-16 code units but
+// one code point, and a wide character can occupy the pane's last column with
+// its trailing half.
+describe('url link provider: characters that are not one unit per cell', () => {
+  // The cell arithmetic below is one cell per emoji, which looks wrong until
+  // you check which width table is in play: panemux does not load
+  // @xterm/addon-unicode11, so xterm's default V6 provider is what decides,
+  // and it gives these emoji width 1. The point of these cases is the *code
+  // unit* mapping regardless of that — an emoji is one code point and two
+  // UTF-16 code units, and the regex indexes the block in code units.
+  it('keeps the range right when an astral character precedes the url', async () => {
+    const links = await detectLinks('🎉 https://example.com/docs')
+
+    expect(links).toHaveLength(1)
+    expect(links[0].text).toBe('https://example.com/docs')
+    // 1-based, right side including: the emoji holds cell 1, the space cell 2.
+    expect(links[0].range).toEqual({
+      start: { x: 3, y: 1 },
+      end: { x: 26, y: 1 },
+    })
+  })
+
+  it('still links a url that follows several astral characters', async () => {
+    // Three emoji are three cells but six code units: a per-code-point map
+    // drifts three places here, which is what used to drop the link.
+    const links = await detectLinks('🎉🎉🎉 https://example.com/docs')
+
+    expect(links).toHaveLength(1)
+    expect(links[0].text).toBe('https://example.com/docs')
+    expect(links[0].range.start).toEqual({ x: 5, y: 1 })
+  })
+
+  it('keeps the range right when the url itself ends in an astral character', async () => {
+    const links = await detectLinks('https://example.com/emoji/🎉')
+
+    expect(links).toHaveLength(1)
+    expect(links[0].text).toBe('https://example.com/emoji/🎉')
+    expect(links[0].range.start).toEqual({ x: 1, y: 1 })
+    // The match ends on the emoji's low surrogate, which maps to the same
+    // cell as its high surrogate — cell 27, one wide.
+    expect(links[0].range.end).toEqual({ x: 27, y: 1 })
+  })
+
+  it('joins a hard-wrapped row whose last column holds the back half of a wide character', async () => {
+    // 40 columns: 20 single-cell characters then 10 wide ones fills the row
+    // exactly, so its last column is the trailing half of a wide glyph.
+    const head = `https://example.com/${'参照'.repeat(5)}`
+    const tail = '/more/path'
+    const links = await detectLinksAt(`${head}\r\n${tail}`, { cols: 40 })
+
+    expect(links).toHaveLength(1)
+    expect(links[0].text).toBe(head + tail)
+    expect(links[0].range.start).toEqual({ x: 1, y: 1 })
+    expect(links[0].range.end).toEqual({ x: tail.length, y: 2 })
+  })
+
+  it('suppresses a cut-off url whose row ends in a wide character', async () => {
+    const head = `https://example.com/${'参照'.repeat(5)}`
+    const links = await detectLinksAt(`${head}\r\n  indented`, { cols: 40 })
+
+    expect(links).toEqual([])
+  })
+})
+
 describe('url link provider: wrapped urls', () => {
   const url = 'https://example.com/a/very/long/path/that/does/not/fit/in/one/row/at/all'
 
@@ -191,5 +256,70 @@ describe('url link provider: wrapped urls', () => {
     expect(links[0].text).toBe(url)
     expect(links[0].range.start).toEqual({ x: 7, y: 1 })
     expect(links[0].range.end).toEqual({ x: url.length - 34, y: 2 })
+  })
+})
+
+// The pull-request provider is registered alongside the url one and xterm
+// resolves an overlap between them by registration order — which only works if
+// both report ranges in the same coordinate system. xterm's own
+// IBufferCellPosition says 1-based, both axes.
+describe('pull request link provider', () => {
+  const REPO = 'https://github.com/example/panemux'
+
+  async function computeLinks(line: string, row = 1) {
+    const term = new Terminal({ cols: 200, rows: 10, allowProposedApi: true })
+    await new Promise<void>((resolve) => term.write(line, resolve))
+    const links = __computePullRequestLinksForTests(term, REPO, row)
+    term.dispose()
+    return links
+  }
+
+  it('reports 1-based coordinates, the same system the url provider uses', async () => {
+    const links = await computeLinks('Reviewing #123 now')
+
+    expect(links).toHaveLength(1)
+    expect(links[0].text).toBe('#123')
+    // 'Reviewing ' is 10 cells, so '#' is column 11 and '3' column 14.
+    expect(links[0].range).toEqual({
+      start: { x: 11, y: 1 },
+      end: { x: 14, y: 1 },
+    })
+  })
+
+  it('reports the row it was asked about', async () => {
+    const links = await computeLinks('first\r\nReviewing #123 now', 2)
+
+    expect(links).toHaveLength(1)
+    expect(links[0].range.start.y).toBe(2)
+    expect(links[0].range.end.y).toBe(2)
+  })
+
+  it('keeps the columns right when a wide character precedes the reference', async () => {
+    const links = await computeLinks('参照 #123')
+
+    expect(links).toHaveLength(1)
+    // 参 and 照 are two cells each, then a space: '#' is column 6.
+    expect(links[0].range).toEqual({
+      start: { x: 6, y: 1 },
+      end: { x: 9, y: 1 },
+    })
+  })
+
+  it('links every reference on the line', async () => {
+    const links = await computeLinks('#1 and #22')
+
+    expect(links.map((link) => link.text)).toEqual(['#1', '#22'])
+    expect(links[1].range).toEqual({
+      start: { x: 8, y: 1 },
+      end: { x: 10, y: 1 },
+    })
+  })
+
+  it('reports nothing without repository metadata', async () => {
+    const term = new Terminal({ cols: 80, rows: 10, allowProposedApi: true })
+    await new Promise<void>((resolve) => term.write('Reviewing #123 now', resolve))
+
+    expect(__computePullRequestLinksForTests(term, null, 1)).toEqual([])
+    term.dispose()
   })
 })

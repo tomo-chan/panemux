@@ -195,7 +195,21 @@ func dialSSHClientUntil(cfg SSHConfig, deadline time.Time) (*ssh.Client, *ssh.Cl
 		return nil, nil, err
 	}
 
-	sshConn, chans, reqs, err := handshakeWithTimeout(conn, addr, sshCfg, sshHandshakeTimeout)
+	// The handshake shares the dial's budget rather than opening a window of
+	// its own on top of it. dialTransportWithRetry may already have spent most
+	// of deadline — its own attempts are clamped to what remains precisely so
+	// the budget holds — and dialThroughJump hands the same deadline to every
+	// hop, so an unshared window would be added once per hop: a wedged
+	// two-hop chain would wait three times the ceiling dialRetryBudget
+	// documents. The trade is that a dial which nearly exhausts the budget
+	// leaves the handshake little room, which is the same trade the retry loop
+	// already makes with its own attempts.
+	handshakeTimeout := sshHandshakeTimeout
+	if remaining := deadline.Sub(nowFn()); remaining < handshakeTimeout {
+		handshakeTimeout = remaining
+	}
+
+	sshConn, chans, reqs, err := handshakeWithTimeout(conn, addr, sshCfg, handshakeTimeout)
 	if err != nil {
 		// The transport is closed by handshakeWithTimeout, which owns it from
 		// the moment it is handed over.
@@ -208,9 +222,10 @@ func dialSSHClientUntil(cfg SSHConfig, deadline time.Time) (*ssh.Client, *ssh.Cl
 	return ssh.NewClient(sshConn, chans, reqs), jumpClient, nil
 }
 
-// sshHandshakeTimeout bounds one SSH handshake (version exchange, key
-// exchange and authentication) once the transport is up. It is a var only so
-// tests can shorten it.
+// sshHandshakeTimeout is the ceiling on one SSH handshake (version exchange,
+// key exchange and authentication) once the transport is up. What a handshake
+// actually gets is this or whatever remains of the dial budget, whichever is
+// smaller — see dialSSHClientUntil. It is a var only so tests can shorten it.
 var sshHandshakeTimeout = 30 * time.Second
 
 // newClientConnFn is the handshake step, injectable for tests. There is no
@@ -252,6 +267,17 @@ func handshakeWithTimeout(
 	// that goroutine outlives this call, and a test restoring the seam in its
 	// cleanup would then be writing what the goroutine is still reading.
 	handshake := newClientConnFn
+
+	// A budget already spent before the handshake could start: fail here
+	// rather than hand time.NewTimer a non-positive duration and report it as
+	// a timeout that never had a chance to run. The close is asynchronous for
+	// the same reason as the timeout path below.
+	if timeout <= 0 {
+		go conn.Close() //nolint:errcheck // best-effort release; see below
+		return nil, nil, nil, fmt.Errorf(
+			"dial budget exhausted before the handshake with %s could start", addr,
+		)
+	}
 
 	done := make(chan handshakeOutcome, 1)
 	go func() {

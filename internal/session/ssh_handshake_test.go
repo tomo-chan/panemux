@@ -228,3 +228,70 @@ func TestDialSSHClientUntil_HangingHandshakeIsBounded(t *testing.T) {
 	assert.Contains(t, err.Error(), "timed out")
 	assert.Less(t, time.Since(start), 2*time.Second)
 }
+
+// TestDialSSHClientUntil_HandshakeSharesTheDialBudget is the second half of
+// issue #147's bound, found in review of the first: a flat handshake timeout
+// on top of a spent dial budget is not the ceiling dialRetryBudget documents.
+//
+// dialTransportWithRetry already clamps each attempt to what is left of the
+// deadline precisely so the budget holds, and dialThroughJump hands the same
+// deadline to every hop — so an unshared handshake window is added once per
+// hop, and a wedged jump chain waits several times the documented ceiling.
+func TestDialSSHClientUntil_HandshakeSharesTheDialBudget(t *testing.T) {
+	knownHosts := filepath.Join(t.TempDir(), "known_hosts")
+	require.NoError(t, os.WriteFile(knownHosts, []byte{}, 0600))
+
+	conn := newHangingConn(nil)
+	origDial := dialTransportFn
+	dialTransportFn = func(SSHConfig, string, int, time.Time) (net.Conn, *gossh.Client, error) {
+		return conn, nil, nil
+	}
+	t.Cleanup(func() { dialTransportFn = origDial })
+	stubHandshake(t, readUntilClosed)
+
+	orig := sshHandshakeTimeout
+	sshHandshakeTimeout = time.Minute
+	t.Cleanup(func() { sshHandshakeTimeout = orig })
+
+	cfg := SSHConfig{Host: "example.test", User: "demo", Password: "secret", KnownHostsFile: knownHosts}
+
+	// A transport dial that consumed all but 20ms of the budget leaves the
+	// handshake 20ms, not a fresh minute.
+	start := time.Now()
+	_, _, err := dialSSHClientUntil(cfg, nowFn().Add(20*time.Millisecond))
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ssh handshake")
+	assert.Less(t, time.Since(start), 2*time.Second,
+		"the handshake must be bounded by what is left of the dial budget, not by its own window")
+}
+
+// TestHandshakeWithTimeout_NoBudgetLeft_FailsWithoutStartingTheHandshake
+// covers the arm the clamp above creates. A non-positive timeout reaches here
+// when the dial consumed the whole budget between its own last check and this
+// call; the dial layer refuses first in the ordinary case
+// (TestDialTransport_ExhaustedBudget_NeverDials), so this is the narrow race,
+// not the common path.
+func TestHandshakeWithTimeout_NoBudgetLeft_FailsWithoutStartingTheHandshake(t *testing.T) {
+	conn := newHangingConn(nil)
+	handshakes := 0
+	stubHandshake(t, func(
+		c net.Conn, addr string, cfg *gossh.ClientConfig,
+	) (gossh.Conn, <-chan gossh.NewChannel, <-chan *gossh.Request, error) {
+		handshakes++
+		return readUntilClosed(c, addr, cfg)
+	})
+
+	_, _, _, err := handshakeWithTimeout(conn, "remote:22", &gossh.ClientConfig{}, 0)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "budget")
+	assert.NotContains(t, err.Error(), "timed out",
+		"a handshake that never started did not time out")
+	assert.Zero(t, handshakes, "with no budget left there is nothing to wait for")
+	select {
+	case <-conn.closed:
+	case <-time.After(time.Second):
+		t.Fatal("the transport must not be leaked when the budget is already spent")
+	}
+}

@@ -1,4 +1,4 @@
-import type { IBufferLine, ILink, ILinkProvider, Terminal } from '@xterm/xterm'
+import type { IBufferLine, IBufferRange, ILink, ILinkProvider, Terminal } from '@xterm/xterm'
 
 // The web-links addon stops expanding a wrapped block at 2048 characters; the
 // same ceiling is kept here so a pathological screen cannot turn one hover into
@@ -6,12 +6,12 @@ import type { IBufferLine, ILink, ILinkProvider, Terminal } from '@xterm/xterm'
 const MAX_BLOCK_LENGTH = 2048
 
 /** A buffer position, 0-based, as the buffer itself addresses cells. */
-interface CellRef {
+export interface CellRef {
   x: number
   y: number
 }
 
-interface LineText {
+export interface LineText {
   /** The line's text with trailing blanks removed. */
   text: string
   /** positions[i] is the cell that text[i] was read from. */
@@ -31,6 +31,10 @@ function isBlank(chars: string): boolean {
  * from. It reads cells rather than calling translateToString because the
  * positions are the whole point: a wide character occupies two cells but one
  * string index, and a link's range is in cells.
+ *
+ * Exported as `readLineCells` for the pull-request link provider, which needs
+ * the same mapping: it used to index `translateToString`'s output as if one
+ * character were one cell, which is only true until a wide character appears.
  */
 function readLine(term: Terminal, y: number): LineText | null {
   const line: IBufferLine | undefined = term.buffer.active.getLine(y)
@@ -45,16 +49,32 @@ function readLine(term: Terminal, y: number): LineText | null {
     const cell = line.getCell(x)
     if (!cell) continue
     const width = cell.getWidth()
-    // Width 0 is the second cell of a wide character; it carries no text.
+    const cellChars = cell.getChars()
+
+    if (x === 0) startsBlank = isBlank(cellChars)
+    // Decided before the width check below, because a width-0 cell is the
+    // trailing half of a wide character, and a wide character whose second
+    // half sits in the last column does occupy the pane's edge. Reading this
+    // after the `continue` left reachesEdge false for every row ending in a
+    // CJK glyph or an emoji — which switched off both the row joining and the
+    // cut-off-url suppression for exactly that content.
+    if (x === line.length - 1) reachesEdge = width === 0 || !isBlank(cellChars)
+
+    // Width 0 carries no text of its own; its character was recorded by the
+    // cell before it.
     if (width === 0) continue
 
-    const cellChars = cell.getChars()
-    if (x === 0) startsBlank = isBlank(cellChars)
-    if (x === line.length - 1) reachesEdge = !isBlank(cellChars)
-
     const text = cellChars === '' ? ' ' : cellChars
-    for (const char of text) {
-      chars.push(char)
+    // One entry per UTF-16 code unit, not per code point: `text` is indexed in
+    // code units downstream (the regex's match.index, and the slice below), so
+    // an astral character — an emoji, a plane-2 ideograph — must contribute
+    // two entries. Iterating with `for...of` walks code points and left
+    // `positions` one short per astral character, which shifted every later
+    // link's range and dropped the link outright once the drift ran off the
+    // end. Joining single units back together reproduces the original string
+    // exactly, surrogate pairs included.
+    for (let i = 0; i < text.length; i++) {
+      chars.push(text[i])
       positions.push({ x, y })
     }
   }
@@ -146,6 +166,34 @@ function cellWidth(term: Terminal, position: CellRef): number {
   return term.buffer.active.getLine(position.y)?.getCell(position.x)?.getWidth() ?? 1
 }
 
+export { readLine as readLineCells }
+
+/**
+ * bufferRangeFor converts a [startIndex, endIndex] span of a line's text into
+ * the range xterm wants: 1-based on both axes, with the end column inclusive
+ * of the last character's own width.
+ *
+ * Both link providers in this app go through it, because xterm decides which
+ * of two overlapping links wins by comparing their ranges — a provider using a
+ * different coordinate system does not lose that comparison, it never enters
+ * it.
+ */
+export function bufferRangeFor(
+  term: Terminal,
+  positions: CellRef[],
+  startIndex: number,
+  endIndex: number,
+): IBufferRange | null {
+  const startCell = positions[startIndex]
+  const endCell = positions[endIndex]
+  if (!startCell || !endCell) return null
+
+  return {
+    start: { x: startCell.x + 1, y: startCell.y + 1 },
+    end: { x: endCell.x + cellWidth(term, endCell), y: endCell.y + 1 },
+  }
+}
+
 /**
  * createUrlLinkProvider replaces @xterm/addon-web-links for URL detection.
  *
@@ -181,9 +229,6 @@ export function createUrlLinkProvider(
       while ((match = pattern.exec(block.text)) !== null) {
         const startIndex = match.index
         const endIndex = match.index + match[0].length - 1
-        const startCell = block.positions[startIndex]
-        const endCell = block.positions[endIndex]
-        if (!startCell || !endCell) continue
 
         // The safety net: a match that runs to the pane edge of the last row
         // in the block, with nothing continuing it, is very likely the front
@@ -191,15 +236,11 @@ export function createUrlLinkProvider(
         // different address than the one it appears to be.
         if (block.endsAtEdge && endIndex === block.text.length - 1) continue
 
+        const range = bufferRangeFor(term, block.positions, startIndex, endIndex)
+        if (!range) continue
+
         const text = match[0]
-        links.push({
-          range: {
-            start: { x: startCell.x + 1, y: startCell.y + 1 },
-            end: { x: endCell.x + cellWidth(term, endCell), y: endCell.y + 1 },
-          },
-          text,
-          activate: () => onActivate(text),
-        })
+        links.push({ range, text, activate: () => onActivate(text) })
       }
 
       callback(links.length > 0 ? links : undefined)

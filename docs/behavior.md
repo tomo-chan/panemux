@@ -359,10 +359,13 @@ timeout shrinks to whatever of that budget remains, so a hanging/unreachable hos
 endpoint wait dramatically longer than the ceiling a single dial attempt already tolerated before
 retries were introduced.
 
-Once the transport is up, the SSH handshake (version exchange, key exchange and authentication) has
-its own 30-second bound, and it is enforced by panemux rather than by the transport. The handshake
-runs in its own goroutine and the call returns when it finishes or when that timer fires, whichever
-comes first. It has to work this way for all three transports:
+Once the transport is up, the SSH handshake (version exchange, key exchange and authentication) is
+bounded too, and by panemux rather than by the transport. Its ceiling is 30 seconds, but it gets
+whatever is left of the dial budget when that is less: the handshake shares the budget instead of
+opening a window of its own on top of it, because a ProxyJump chain reaches this step once per hop
+and unshared windows would multiply — a wedged two-hop chain would wait three times the ceiling the
+budget documents. The handshake runs in its own goroutine and the call returns when it finishes or
+when that timer fires, whichever comes first. It has to work this way for all three transports:
 `golang.org/x/crypto/ssh`'s `NewClientConn` reads no timeout, sets no deadline and takes no context,
 and the transports disagree about deadlines anyway — a TCP conn honors them, a ProxyJump hop is an
 SSH channel whose `SetDeadline` reports "not supported", and the ProxyCommand transport's is a no-op
@@ -902,11 +905,11 @@ attempt itself fails, the pane shows the manual "Reconnect Session" action inste
 - Non-ASCII *letters* are never excluded, so raw IRIs such as `https://ja.wikipedia.org/wiki/日本語` stay linkable in full. Fullwidth digits and fullwidth letters stay linkable for the same reason, as do the letters and numerals interleaved into the CJK symbols block itself (`々`, `〆`, `〇` and the ideographic numerals), so `https://ja.wikipedia.org/wiki/日々` is linked whole.
 - Known limitation: kana or kanji that directly follows a URL with no delimiter (for example `https://example.com/docsを参照`) is still absorbed into the link. That case cannot be distinguished from a legitimate kana IRI path by pattern matching alone. Separate the URL with whitespace or punctuation, or emit an OSC 8 hyperlink — xterm.js resolves those itself, independently of this pattern, and its built-in handler asks for confirmation before navigating.
 - A URL that does not fit the pane is linked whole, across every row it occupies, whether the terminal wrapped it or the program printed its own newline at the pane edge. The second case is the common one in a bordered TUI, in formatted CLI output, and wherever tmux redraws by line — none of which set `isWrapped`.
-- Two rows are read as one line when the terminal wrapped them, or when the upper row runs all the way to the pane edge and the lower row starts with something other than a blank. That heuristic can join two unrelated rows that happen to meet both conditions; the alternative is a fragment that stays clickable, and a URL cut inside its hostname opens a host the operator never saw.
+- Two rows are read as one line when the terminal wrapped them, or when the upper row runs all the way to the pane edge and the lower row starts with something other than a blank. A row whose last column holds the trailing half of a wide character counts as reaching the edge, since the character itself occupies it. That heuristic can join two unrelated rows that happen to meet both conditions; the alternative is a fragment that stays clickable, and a URL cut inside its hostname opens a host the operator never saw.
 - A match that runs to the pane edge of the last row with nothing continuing it is not offered as a link at all: whether the URL ended there or the rest is off screen is unknowable, and half a URL is worse than none.
 - Known limitation: a URL broken well short of the pane edge — a program that prints `https://exam\r\nple.com/path` on an 80-column pane — is still linked as the fragment. A line that stops 60 columns early is indistinguishable from a line that simply ended there, so neither joining nor suppressing is safe.
 - Known limitation: a URL wrapped inside a drawn border (`│ … │`) is not rejoined, because the continuation row carries the border as its first characters. Stripping a shared border is tracked separately.
-- `#<number>` references are linked separately to the pane's GitHub pull request (see [Pane Git and PR metadata](#pane-git-and-pr-metadata)). The URL provider is registered first, so a `#123` inside a URL stays part of the URL.
+- `#<number>` references are linked separately to the pane's GitHub pull request (see [Pane Git and PR metadata](#pane-git-and-pr-metadata)). The URL provider is registered first, so a `#123` inside a URL stays part of the URL — which requires both providers to report ranges in the same coordinate system (1-based on both axes, and mapped through cells rather than string indices), since xterm resolves the overlap by comparing the ranges themselves.
 
 ### Resize and layout updates
 

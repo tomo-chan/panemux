@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
-import { createUrlLinkProvider } from '../utils/terminalLinks'
+import { bufferRangeFor, createUrlLinkProvider, readLineCells } from '../utils/terminalLinks'
 import { useWebSocket } from './useWebSocket'
 import { TERMINAL_FONT_FAMILY } from '../utils/fonts'
 import { BROWSER_OPEN_OSC_IDENT, openUrlTab, parseBrowserOpenOsc } from '../utils/paneUrlOpen'
@@ -499,25 +499,31 @@ function getOrCreateTerminalEntry(sessionId: string): TerminalEntry {
   return entry
 }
 
+// Ranges come from the same mapping the url provider uses (see
+// utils/terminalLinks.ts). This used to index translateToString's output as
+// though one character were one cell and report 0-based coordinates, so every
+// reference was linked one row above and one column left of where it is — and
+// a wide character earlier on the line drifted it further. That made the
+// registration order below decide nothing: two links on different rows never
+// overlap, so xterm had no conflict to resolve.
 function computePullRequestLinks(term: Terminal, repoURL: string | null, y: number) {
   if (!repoURL) return []
 
-  const line = term.buffer.active.getLine(y - 1)
+  const line = readLineCells(term, y - 1)
   if (!line) return []
 
-  const text = line.translateToString(true)
   const links = []
   const pattern = /(^|[^\w])#(\d{1,8})(?![\w/])/g
   let match: RegExpExecArray | null
-  while ((match = pattern.exec(text)) !== null) {
+  while ((match = pattern.exec(line.text)) !== null) {
     const prefix = match[1] ?? ''
     const number = match[2]
     const hashIndex = match.index + prefix.length
+    const range = bufferRangeFor(term, line.positions, hashIndex, hashIndex + number.length)
+    if (!range) continue
+
     links.push({
-      range: {
-        start: { x: hashIndex, y: y - 1 },
-        end: { x: hashIndex + number.length + 1, y: y - 1 },
-      },
+      range,
       text: `#${number}`,
       activate: () => {
         window.open(`${repoURL}/pull/${number}`, '_blank', 'noopener,noreferrer')
