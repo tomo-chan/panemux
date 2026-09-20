@@ -7,7 +7,6 @@ import (
 	"log"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -368,7 +367,9 @@ func TestActiveRemoteWorkdir_NothingFoundYet_IsRetriedOnceItGoesStale(t *testing
 	require.NoError(t, err)
 	assert.Empty(t, cwds, "a fresh answer is reused rather than re-asked")
 
-	clock.advance(remoteClaudeProbeTTL + time.Second)
+	// Exactly the TTL, not past it: an answer that old is already stale, which
+	// is the boundary this comparison is written at.
+	clock.advance(remoteClaudeProbeTTL)
 
 	cwds, err = activeRemoteWorkdirs(runner, "test remote claude", "/repo/main", 100)
 	require.NoError(t, err)
