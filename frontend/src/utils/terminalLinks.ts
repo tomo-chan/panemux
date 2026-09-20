@@ -152,18 +152,20 @@ function readBlockLine(term: Terminal, y: number): BlockLine | null {
   const raw = readLine(term, y)
   if (!raw) return null
 
+  let left = 0
+  while (raw.text[left] === ' ') left++
   const last = raw.text.length - 1
-  if (last <= 0 || !isBoxDrawing(raw.text[0]) || !isBoxDrawing(raw.text[last])) {
+  if (left >= last || !isBoxDrawing(raw.text[left]) || !isBoxDrawing(raw.text[last])) {
     return { raw, content: raw, border: null }
   }
 
-  const leftPosition = raw.positions[0]
+  const leftPosition = raw.positions[left]
   const rightPosition = raw.positions[last]
   if (!leftPosition || !rightPosition || leftPosition.x >= rightPosition.x) {
     return { raw, content: raw, border: null }
   }
 
-  let start = 1
+  let start = left + 1
   if (raw.text[start] === ' ') start++
   let end = last
   if (raw.text[end - 1] === ' ') end--
@@ -185,7 +187,7 @@ function readBlockLine(term: Terminal, y: number): BlockLine | null {
       startsBlank,
     },
     border: {
-      left: { char: raw.text[0], x: leftPosition.x },
+      left: { char: raw.text[left], x: leftPosition.x },
       right: { char: raw.text[last], x: rightPosition.x },
     },
   }

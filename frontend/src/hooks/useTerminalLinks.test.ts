@@ -323,6 +323,21 @@ describe('url link provider: urls wrapped inside a drawn border', () => {
     expect(links[0].range.start).toEqual({ x: 2, y: 1 })
   })
 
+  it('detects an indented frame using its actual border cell columns', async () => {
+    const framed = borderedRows(url, 40)
+    const indent = '   '
+    const input = framed.input
+      .split('\r\n')
+      .map((line) => indent + line)
+      .join('\r\n')
+
+    const links = await detectLinksAt(input, { cols: framed.cols + indent.length + 5 })
+
+    expect(links).toHaveLength(1)
+    expect(links[0].text).toBe(url)
+    expect(links[0].range.start).toEqual({ x: 6, y: 1 })
+  })
+
   // efficacy:exempt guards the new border heuristic from widening to ASCII `|`;
   // main passes because it does not strip any border, which is the required negative baseline.
   it('does not treat ASCII pipes in ordinary output as a shared frame', async () => {
