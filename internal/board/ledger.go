@@ -48,8 +48,91 @@ type ownSendKey struct {
 type ownSendLedger struct {
 	entries map[ownSendKey][]time.Time // value is one expiry per occurrence
 	now     func() time.Time
-	mu      sync.Mutex
-	ttl     time.Duration
+	// trace, when non-nil, is called once per Record/Consume/Forget with
+	// that call's own transition. It is nil in production — newOwnSendLedger
+	// never sets it — and exists so Tier 1 of issue #168's model-checking
+	// split can replay this ledger's real transitions against the table TLC
+	// exported from spec/agentboard/OwnSendLedger.tla. Nothing else may be
+	// hung off it: it is called with l.mu held, so a callback that reaches
+	// back into the ledger deadlocks.
+	trace func(ownSendLedgerStep)
+	mu    sync.Mutex
+	ttl   time.Duration
+}
+
+// ledgerCounts abstracts one key's occurrences the way
+// spec/agentboard/OwnSendLedger.tla does: those already past their expiry
+// that Consume has not yet dropped, and those still matchable. The struct
+// tags are there because the exported transition table decodes into this
+// type; production never marshals it.
+type ledgerCounts struct {
+	Expired int `json:"expired"`
+	Live    int `json:"live"`
+}
+
+// The action and result names spec/agentboard/OwnSendLedger.tla uses. The
+// spec splits Consume and Forget further, by which case applies; these are
+// the names the methods themselves can report.
+const (
+	ledgerActionRecord  = "Record"
+	ledgerActionConsume = "Consume"
+	ledgerActionForget  = "Forget"
+
+	ledgerResultTrue  = "TRUE"
+	ledgerResultFalse = "FALSE"
+	ledgerNoResult    = "-"
+)
+
+// ownSendLedgerStep is one ledger transition as the model sees it: which key
+// the call named, what it did, what it returned, and every key's counts on
+// either side of it. Every key rather than only the one named, because the
+// spec models a single key and assumes keys do not interfere — an assumption
+// only a snapshot of the others can check.
+type ownSendLedgerStep struct {
+	Before map[ownSendKey]ledgerCounts
+	After  map[ownSendKey]ledgerCounts
+	Action string
+	Result string
+	Key    ownSendKey
+}
+
+// countsLocked snapshots every key's counts as of now, or returns nil when
+// nothing is tracing. Callers hold l.mu.
+func (l *ownSendLedger) countsLocked(now time.Time) map[ownSendKey]ledgerCounts {
+	if l.trace == nil {
+		return nil
+	}
+	snapshot := make(map[ownSendKey]ledgerCounts, len(l.entries))
+	for key, expiries := range l.entries {
+		var counts ledgerCounts
+		for _, expiry := range expiries {
+			if now.After(expiry) {
+				counts.Expired++
+			} else {
+				counts.Live++
+			}
+		}
+		snapshot[key] = counts
+	}
+	return snapshot
+}
+
+// emitLocked reports one completed transition. `now` is the same instant the
+// operation itself used, so the two snapshots differ only by what the
+// operation did and never by the clock having moved between them.
+func (l *ownSendLedger) emitLocked(
+	now time.Time, key ownSendKey, action, result string, before map[ownSendKey]ledgerCounts,
+) {
+	if l.trace == nil {
+		return
+	}
+	l.trace(ownSendLedgerStep{
+		Key:    key,
+		Action: action,
+		Result: result,
+		Before: before,
+		After:  l.countsLocked(now),
+	})
 }
 
 func newOwnSendLedger() *ownSendLedger {
@@ -73,7 +156,10 @@ func (l *ownSendLedger) Record(destHost, team, to, body string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	key := ownSendKey{DestHost: destHost, Team: team, To: to, BodyHash: bodyHash(body)}
-	l.entries[key] = append(l.entries[key], l.now().Add(l.ttl))
+	now := l.now()
+	before := l.countsLocked(now)
+	l.entries[key] = append(l.entries[key], now.Add(l.ttl))
+	l.emitLocked(now, key, ledgerActionRecord, ledgerNoResult, before)
 }
 
 // Consume reports whether at least one unexpired occurrence exists for the
@@ -88,6 +174,7 @@ func (l *ownSendLedger) Consume(destHost, team, to, body string) bool {
 	key := ownSendKey{DestHost: destHost, Team: team, To: to, BodyHash: bodyHash(body)}
 
 	now := l.now()
+	before := l.countsLocked(now)
 	matched := false
 	live := make([]time.Time, 0, len(l.entries[key]))
 	for _, expiry := range l.entries[key] {
@@ -105,7 +192,15 @@ func (l *ownSendLedger) Consume(destHost, team, to, body string) bool {
 	} else {
 		l.entries[key] = live
 	}
+	l.emitLocked(now, key, ledgerActionConsume, ledgerResultOf(matched), before)
 	return matched
+}
+
+func ledgerResultOf(matched bool) string {
+	if matched {
+		return ledgerResultTrue
+	}
+	return ledgerResultFalse
 }
 
 // Forget removes exactly one occurrence that was Recorded for a Send that
@@ -132,13 +227,17 @@ func (l *ownSendLedger) Forget(destHost, team, to, body string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	key := ownSendKey{DestHost: destHost, Team: team, To: to, BodyHash: bodyHash(body)}
+	now := l.now()
+	before := l.countsLocked(now)
 	entries := l.entries[key]
-	if len(entries) == 0 {
-		return
-	}
-	if len(entries) == 1 {
+	switch {
+	case len(entries) == 0:
+		// Nothing recorded for this key: a no-op, but still a step the model
+		// has a case for, so it is reported like any other.
+	case len(entries) == 1:
 		delete(l.entries, key)
-		return
+	default:
+		l.entries[key] = entries[:len(entries)-1]
 	}
-	l.entries[key] = entries[:len(entries)-1]
+	l.emitLocked(now, key, ledgerActionForget, ledgerNoResult, before)
 }

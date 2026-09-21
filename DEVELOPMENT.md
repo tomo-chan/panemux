@@ -217,6 +217,49 @@ a write, which is the failure the rename discipline exists to survive — have n
 - Say which kind of survivor it is, because the two are not interchangeable. **Equivalent** means the mutant computes the same thing on every possible input — nothing can distinguish it. **Unreachable** means it *is* killable, but only by input the code's own callers cannot produce. Before writing "equivalent", ask: *if the mutant were reachable, would anything be wrong?* If the answer is yes, it is unreachable, not equivalent — and it may be a real defect behind a guard nobody tests. [#190](https://github.com/tomo-chan/panemux/issues/190) filed one such mutant as equivalent and it was neither: the guard it sat behind was load-bearing, and it got a test instead of an exemption.
 - Do not pass gremlins' own defaults: `scripts/mutation.sh` pins `--timeout-coefficient` and `--workers` because the defaults report 44% of runnable mutants as timed out on this repository, and those timeouts hide survivors.
 
+### Model checking (`make model-check`, issue #168)
+
+- `internal/board`'s `ownSendLedger` — the record of Send calls panemux itself issued, which the
+  relay consults before believing a row that claims `From == SystemID` — has a TLA+ spec at
+  `spec/agentboard/OwnSendLedger.tla`. It is the pilot subsystem for [#168](https://github.com/tomo-chan/panemux/issues/168), picked because it is small,
+  self-contained, security-critical, and the place PR #167's second review round found a real
+  multiset-vs-set bug.
+- **Model checking alone proves the model, never the code.** The split that closes that gap is two
+  tiers, mirroring [docs/agent-board.md](docs/agent-board.md)'s agmsg compatibility contract:
+  - **Tier 1 — hermetic, inside `make check`.** `internal/board/ledger_conformance_test.go` attaches
+    a tracer to the real `ownSendLedger`, drives it (directly, and through `Relay.Broadcast`/`Poll`),
+    and looks every transition it makes up in the table TLC exported to
+    `internal/board/testdata/ownsendledger-transitions.json`. No JDK, no jar, no network.
+  - **Tier 2 — `make model-check`, a pull-request CI job.** Runs TLC over the spec, regenerates the
+    table and diffs it against the committed copy. Outside `make check` because it needs a JDK and
+    `tla2tools.jar`, which `make install-deps` does not install.
+- The Tier 1 reference model is **the exported table and nothing else**. Do not hand-write a second
+  Go state machine beside it: it would be a third artifact to keep in sync, and it would drift from
+  the spec exactly the way the implementation it is checking might.
+- Never hand-edit `internal/board/testdata/*-transitions.json`. Change the `.tla`/`.cfg`, run
+  `make model-check-write`, and commit the table diff alongside — that diff is the behavioral change
+  a reviewer reads.
+- **The bound in the table comes from the `.cfg`, never from the dump.** `make test-model-check`
+  (hermetic, inside `make check`) drives `scripts/tla_transitions.py` against committed dot fixtures
+  in `scripts/testdata/model-check/` and asserts every rejection arm, the load-bearing one being
+  "a TLC run that explored less than `MaxEntries` is refused". An exporter that inferred the bound
+  instead would let an under-explored run shrink Tier 1's own drivers to match, which looks green.
+  `python3` is optional for it the way `jq` is for `make test-hooks`: absent, those checks report
+  themselves as skipped.
+- The check is **bounded**: `MaxEntries` in the `.cfg` caps how many occurrences one key may hold, so
+  Tier 1 says nothing about a ledger holding more. Raise the bound in the `.cfg` and regenerate if a
+  driver needs to go further.
+- The Tier 1 drivers assert not only that the implementation never contradicted the model, but that
+  it **took every transition the model has**. Without that, a table permissive enough to accept
+  anything would pass as quietly as a correct one.
+
+```sh
+curl -fsSL -o /tmp/tla2tools.jar \
+  https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar
+TLA_TOOLS_JAR=/tmp/tla2tools.jar make model-check        # check the spec, diff the table
+TLA_TOOLS_JAR=/tmp/tla2tools.jar make model-check-write  # regenerate the table
+```
+
 ### Red-check (`make efficacy`)
 
 - A test you change must **fail** when your implementation diff is reverted. That is the machine-checkable half of the TDD rule above: the order lines were written in cannot be recovered after the fact, but the result can.
@@ -232,9 +275,11 @@ a write, which is the failure the rename discipline exists to survive — have n
 - `make check` must pass before `make build`.
 - `make check` must pass before reporting implementation complete.
 - There are no exceptions for frontend-only, docs-adjacent, or "small" code changes.
-- Test commands: `make test-go`, `make test-frontend`, `make test-e2e`, `make test`, `make test-hooks`, `make test-efficacy`, `make test-scenarios-check`, `make test-coverage-blocks`, `make test-mutation`
+- Test commands: `make test-go`, `make test-frontend`, `make test-e2e`, `make test`, `make test-hooks`, `make test-efficacy`, `make test-scenarios-check`, `make test-coverage-blocks`, `make test-mutation`, `make test-model-check`
 - Ledger command: `make check-scenarios`
 - Pull-request-only gates: `make efficacy`, `COVERAGE_BLOCKS_BASE=origin/main make coverage-blocks`, and `MUTATION_BASE=origin/main make mutation` (all three fail the build — `make mutation` warned until #180's item 6 reached stage 4; see above)
+- Model-checking commands (outside `make check`, they need a JDK and `tla2tools.jar`): `make model-check`, `make model-check-write`
+- `make test-model-check` uses `python3` to run the transition exporter it tests. `python3` is **optional** for the same reason `jq` is below: without it those checks report themselves as skipped, so `make check` still works.
 - `make test-hooks` uses `jq` where it parses `settings.json` or a hook payload. `jq` is **optional**: without it those checks report themselves as skipped rather than passing or failing, so `make check` — and therefore `git push` — still works. Install it to actually run them.
 - Coverage commands: `make coverage-go`, `make coverage-frontend`, `make coverage-blocks`
 - Measurement (not a gate): `make bench` for terminal throughput, replay-buffer cost and relay polling. It asserts no threshold — see [docs/quality-gateway.md](docs/quality-gateway.md)'s "First measurements".
