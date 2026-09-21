@@ -239,6 +239,13 @@ a write, which is the failure the rename discipline exists to survive — have n
 - Never hand-edit `internal/board/testdata/*-transitions.json`. Change the `.tla`/`.cfg`, run
   `make model-check-write`, and commit the table diff alongside — that diff is the behavioral change
   a reviewer reads.
+- **The bound in the table comes from the `.cfg`, never from the dump.** `make test-model-check`
+  (hermetic, inside `make check`) drives `scripts/tla_transitions.py` against committed dot fixtures
+  in `scripts/testdata/model-check/` and asserts every rejection arm, the load-bearing one being
+  "a TLC run that explored less than `MaxEntries` is refused". An exporter that inferred the bound
+  instead would let an under-explored run shrink Tier 1's own drivers to match, which looks green.
+  `python3` is optional for it the way `jq` is for `make test-hooks`: absent, those checks report
+  themselves as skipped.
 - The check is **bounded**: `MaxEntries` in the `.cfg` caps how many occurrences one key may hold, so
   Tier 1 says nothing about a ledger holding more. Raise the bound in the `.cfg` and regenerate if a
   driver needs to go further.
@@ -268,10 +275,11 @@ TLA_TOOLS_JAR=/tmp/tla2tools.jar make model-check-write  # regenerate the table
 - `make check` must pass before `make build`.
 - `make check` must pass before reporting implementation complete.
 - There are no exceptions for frontend-only, docs-adjacent, or "small" code changes.
-- Test commands: `make test-go`, `make test-frontend`, `make test-e2e`, `make test`, `make test-hooks`, `make test-efficacy`, `make test-scenarios-check`, `make test-coverage-blocks`, `make test-mutation`
+- Test commands: `make test-go`, `make test-frontend`, `make test-e2e`, `make test`, `make test-hooks`, `make test-efficacy`, `make test-scenarios-check`, `make test-coverage-blocks`, `make test-mutation`, `make test-model-check`
 - Ledger command: `make check-scenarios`
 - Pull-request-only gates: `make efficacy`, `COVERAGE_BLOCKS_BASE=origin/main make coverage-blocks`, and `MUTATION_BASE=origin/main make mutation` (all three fail the build — `make mutation` warned until #180's item 6 reached stage 4; see above)
 - Model-checking commands (outside `make check`, they need a JDK and `tla2tools.jar`): `make model-check`, `make model-check-write`
+- `make test-model-check` uses `python3` to run the transition exporter it tests. `python3` is **optional** for the same reason `jq` is below: without it those checks report themselves as skipped, so `make check` still works.
 - `make test-hooks` uses `jq` where it parses `settings.json` or a hook payload. `jq` is **optional**: without it those checks report themselves as skipped rather than passing or failing, so `make check` — and therefore `git push` — still works. Install it to actually run them.
 - Coverage commands: `make coverage-go`, `make coverage-frontend`, `make coverage-blocks`
 - Measurement (not a gate): `make bench` for terminal throughput, replay-buffer cost and relay polling. It asserts no threshold — see [docs/quality-gateway.md](docs/quality-gateway.md)'s "First measurements".

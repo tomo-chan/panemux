@@ -72,11 +72,19 @@ func (c *ledgerConformance) observe(step ownSendLedgerStep) {
 	keys := ledgerStepKeys(c.prev, step.Before, step.After)
 
 	for _, key := range keys {
-		for label, counts := range map[string]ledgerCounts{"before": step.Before[key], "after": step.After[key]} {
+		// A slice rather than a map: Go randomizes map range order, so with a
+		// key out of bounds on both sides the reported side would flip between
+		// runs of the same failing test — the nondeterminism ledgerStepKeys
+		// above exists to remove.
+		for _, side := range []struct {
+			label  string
+			counts ledgerCounts
+		}{{"before", step.Before[key]}, {"after", step.After[key]}} {
+			counts := side.counts
 			require.True(c.t, c.model.knows(counts),
 				"step %d (%s %s): key %v is %s %s, which is outside the model's bound of %d occurrences; "+
 					"either the driver overshot the bound or MaxEntries in %s is too small",
-				c.steps, step.Action, step.Result, key, label, counts, c.model.file.MaxHeld, c.model.file.Config)
+				c.steps, step.Action, step.Result, key, side.label, counts, c.model.file.MaxHeld, c.model.file.Config)
 		}
 	}
 

@@ -10,6 +10,10 @@ on:
       - 'scripts/model_check.sh'
       - 'scripts/tla_transitions.py'
       - 'internal/board/testdata/*-transitions.json'
+      # The tlc job runs `make model-check`, and this is the only job that
+      # does, so a change breaking or redirecting that target has to trigger
+      # the workflow or it lands with no model-check run at all.
+      - 'Makefile'
       - '.github/workflows/model-check.yml'
   pull_request:
     branches:
@@ -20,6 +24,10 @@ on:
       - 'scripts/model_check.sh'
       - 'scripts/tla_transitions.py'
       - 'internal/board/testdata/*-transitions.json'
+      # The tlc job runs `make model-check`, and this is the only job that
+      # does, so a change breaking or redirecting that target has to trigger
+      # the workflow or it lands with no model-check run at all.
+      - 'Makefile'
       - '.github/workflows/model-check.yml'
 
 concurrency:

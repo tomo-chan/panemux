@@ -657,6 +657,20 @@ bug that property exists for, and each Tier 1 check by breaking the implementati
 A property that holds vacuously reads exactly like one that holds, which is the same reason #194's
 ceilings and #191's fixtures were both confirmed by perturbation.
 
+*The exporter is gated too, and it had to be.* `scripts/tla_transitions.py` writes the table, so it
+is the one artifact in this split whose failure mode is a hermetic gate that quietly checks less
+while staying green. Its first revision defined the bound as the largest state it happened to
+observe, which made its own completeness check unfalsifiable — the expectation was derived from the
+data it was validating, so a TLC run that explored to 2 against a `.cfg` asking for 4 exported
+`"maxHeld": 2`, and Tier 1, which reads that number back out, shrank its drivers to match. Review
+caught it; no gate would have. `make test-model-check` now drives the exporter against committed dot
+fixtures in `scripts/testdata/model-check/` — real TLC output at a tiny bound, plus one copy per way
+of breaking it — and asserts every rejection arm, so the bound now comes from the `.cfg` and a
+truncated dump is refused. The general rule: **a checker that generates the thing other checks are
+measured against needs its own tests before those checks mean anything.** Every other gate script in
+`scripts/` already had a `*_test.sh`; this one was the exception, and the exception is where the bug
+was.
+
 ### Rollout order
 
 | Order | Work | Gate | #178 phase | Effect |

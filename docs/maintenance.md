@@ -82,6 +82,10 @@ TLA_TOOLS_JAR=/tmp/tla2tools.jar make model-check-write
 
 Never hand-edit a file under `internal/board/testdata/*-transitions.json`; the next `make model-check-write` overwrites it, and the diff it produces is the behavioral change a reviewer reads.
 
+### The hermetic half
+
+`make test-model-check` (inside `make check`, so it runs on every commit and every push) tests the exporter this job depends on, against committed dot fixtures in `scripts/testdata/model-check/` — no JDK, no jar. It is what catches an exporter that would write a table smaller than the `.cfg` asked for, which is the failure that makes Tier 1 check less while still reporting green. `python3` is optional for it the way `jq` is for `make test-hooks`: without it those checks report themselves as skipped.
+
 ## Release Workflow
 
 ### release-please handling

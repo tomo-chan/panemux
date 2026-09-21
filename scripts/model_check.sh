@@ -53,6 +53,11 @@ if ! command -v java >/dev/null 2>&1; then
   exit 2
 fi
 
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "model-check: python3 not found on PATH; the transition exporter needs it" >&2
+  exit 2
+fi
+
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
@@ -74,18 +79,33 @@ for spec in "$spec_dir"/*.tla; do
   # -dump dot,actionlabels writes the whole reachable state graph with each
   # edge labelled by the action that produced it. That labelling is what makes
   # the export a TRANSITION table rather than just a set of reachable states.
-  ( cd "$spec_dir" && java -XX:+UseParallelGC -cp "$jar" tlc2.TLC \
+  #
+  # Every failure arm in this loop sets status and moves to the next spec
+  # rather than letting `set -e` abort: with more than one spec, aborting on
+  # the first violation leaves the rest UNCHECKED while the exit code says
+  # only that something failed. "One failed" and "one failed, one unknown"
+  # are different states and the gate has to be able to tell them apart.
+  if ! ( cd "$spec_dir" && java -XX:+UseParallelGC -cp "$jar" tlc2.TLC \
       -workers auto -cleanup -metadir "$work/$name-meta" \
       -dump dot,actionlabels "$dot" \
-      -config "$name.cfg" "$name.tla" )
+      -config "$name.cfg" "$name.tla" ); then
+    echo "model-check: TLC reported a violation or could not run for $name" >&2
+    status=1
+    continue
+  fi
 
   table="$table_dir/$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')-transitions.json"
   generated="$work/$name.json"
-  python3 "$repo_root/scripts/tla_transitions.py" \
+  if ! python3 "$repo_root/scripts/tla_transitions.py" \
     --dot "$dot" \
+    --cfg-path "$cfg" \
     --spec "spec/agentboard/$name.tla" \
     --config "spec/agentboard/$name.cfg" \
-    --out "$generated"
+    --out "$generated"; then
+    echo "model-check: could not export a transition table for $name" >&2
+    status=1
+    continue
+  fi
 
   if [ "$write" -eq 1 ]; then
     cp "$generated" "$table"

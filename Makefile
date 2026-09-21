@@ -2,7 +2,7 @@
         test test-go test-frontend test-e2e test-agmsg-contract test-hooks test-efficacy efficacy \
         test-scenarios-check check-scenarios coverage-blocks test-coverage-blocks \
         mutation test-mutation bench \
-        model-check model-check-write \
+        model-check model-check-write test-model-check \
         fmt fmt-go fmt-check-go \
         lint lint-go lint-go-deps lint-frontend \
         coverage coverage-go coverage-frontend \
@@ -37,7 +37,7 @@ install-hooks:
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
 test: test-go test-frontend test-hooks test-efficacy test-scenarios-check test-coverage-blocks \
-      test-mutation
+      test-mutation test-model-check
 
 test-go:
 	go test ./... -v -race
@@ -252,6 +252,28 @@ model-check:
 # the change a reviewer reads.
 model-check-write:
 	sh scripts/model_check.sh --write
+
+# The exporter's own tests, hermetic like every other checker's in scripts/:
+# they drive scripts/tla_transitions.py against committed dot fixtures under
+# scripts/testdata/model-check/, so `make check` never needs a JDK or the jar —
+# the same shape as `make test-mutation` driving its checker through fixture
+# reports rather than installing gremlins.
+#
+# It earns its place more than the others do. The table the exporter writes IS
+# the reference model every Tier 1 assertion is compared against, so an
+# exporter that quietly writes a SMALLER table than the .cfg asked for makes
+# the hermetic gate shrink to match — and a shrunken gate looks green. That is
+# not hypothetical: the first revision of the exporter derived the bound from
+# the states it was handed rather than from the .cfg, so its own completeness
+# check could not fail. One fixture asserting "a truncated dump is rejected"
+# is what catches it.
+#
+# python3 is OPTIONAL here, the way jq is for make test-hooks: without it the
+# exporter checks report themselves as skipped rather than passing or failing,
+# so `make check` — and therefore `git push` — still works without a Python
+# interpreter installed.
+test-model-check:
+	sh scripts/model_check_test.sh
 
 # ── Coverage (≥ 80 %) ─────────────────────────────────────────────────────────
 #
