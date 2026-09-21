@@ -243,7 +243,12 @@ function collectLinkBlock(term: Terminal, y: number): LinkBlock | null {
   const lines: BlockLine[] = [start]
   let mode: BlockMode | null = null
 
-  const selected = (line: BlockLine): LineText => (mode === 'border' ? line.content : line.raw)
+  // Even when a framed row cannot be joined to its neighbour (for example,
+  // because their border glyphs differ), inspect its interior on its own.
+  // Otherwise trailing padding and the right border hide that a URL fragment
+  // reaches the frame's content edge and defeat the cut-off safety net.
+  const selected = (line: BlockLine): LineText =>
+    mode === 'border' || (mode === null && line.border) ? line.content : line.raw
   const length = (): number => lines.reduce((total, line) => total + selected(line).text.length, 0)
 
   for (let above = y - 1; above >= 0; above--) {

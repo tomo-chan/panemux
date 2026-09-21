@@ -348,15 +348,11 @@ describe('url link provider: urls wrapped inside a drawn border', () => {
     expect(links.map((link) => link.text)).not.toContain(url)
   })
 
-  // efficacy:exempt guards the new border heuristic's cross-row equality check;
-  // main passes because it does not strip box-drawing borders at all.
-  it('does not strip box-drawing characters that differ between adjacent rows', async () => {
-    const first = `│${url.slice(0, 40)}│`
-    const second = `┃${url.slice(40).padEnd(40)}┃`
+  it('suppresses a cut-off fragment when adjacent border decorations differ', async () => {
+    const links = await detectLinksAt('│ https://exam │\r\n┃ ple.com/path ┃', { cols: 16 })
 
-    const links = await detectLinksAt(`${first}\r\n${second}`, { cols: 42 })
-
-    expect(links.map((link) => link.text)).not.toContain(url)
+    expect(links.map((link) => link.text)).not.toContain('https://exam')
+    expect(links.map((link) => link.text)).not.toContain('https://example.com/path')
   })
 
   it('keeps cell ranges aligned when wide and astral characters precede the url', async () => {
