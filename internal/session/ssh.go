@@ -506,7 +506,18 @@ func NewSSH(id, title string, cfg SSHConfig) (*SSHSession, error) {
 	if err != nil {
 		return nil, err
 	}
+	return newSSHSessionFromClient(id, title, cfg, client, jumpClient)
+}
 
+// newSSHSessionFromClient completes the SSH session lifecycle after transport
+// establishment. Keeping the protocol setup on this side of the seam lets
+// tests use a real in-process SSH connection without requiring a host, while
+// production still follows the exact same PTY, shell and monitor path.
+func newSSHSessionFromClient(
+	id, title string,
+	cfg SSHConfig,
+	client, jumpClient *ssh.Client,
+) (*SSHSession, error) {
 	sess, err := client.NewSession()
 	if err != nil {
 		closeSSHResources(nil, client, jumpClient)
@@ -683,7 +694,10 @@ func DetectRemoteShell(cfg SSHConfig) (string, error) {
 	if jumpClient != nil {
 		defer jumpClient.Close()
 	}
+	return detectRemoteShellFromClient(client)
+}
 
+func detectRemoteShellFromClient(client *ssh.Client) (string, error) {
 	sess, err := client.NewSession()
 	if err != nil {
 		return "", fmt.Errorf("creating session: %w", err)
@@ -720,7 +734,14 @@ func ListRemoteDirectories(cfg SSHConfig, path string, showHidden bool) ([]Direc
 	if jumpClient != nil {
 		defer jumpClient.Close()
 	}
+	return listRemoteDirectoriesFromClient(client, path, showHidden)
+}
 
+func listRemoteDirectoriesFromClient(
+	client *ssh.Client,
+	path string,
+	showHidden bool,
+) ([]DirectoryEntry, string, error) {
 	sess, err := client.NewSession()
 	if err != nil {
 		return nil, "", fmt.Errorf("creating session: %w", err)

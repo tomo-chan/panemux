@@ -315,14 +315,18 @@ test-model-check:
 #
 #     Deliberately excluded, with reasons rather than by omission:
 #
-#       internal/session   its lifecycle methods drive a real PTY (local,
-#                          tmux), a live SSH connection (ssh, ssh_tmux) and a
-#                          real tmux server. `make check` is hermetic —
-#                          principle 5 in docs/quality-gateway.md — so these
-#                          are exercised by the package's own tests and by
-#                          E2E, not gated here. The pure decisions extracted
-#                          out of them (validateShell, validRemotePath,
-#                          classifySSHWaitError …) are unit-tested in place.
+#       internal/session   its SSH/ssh_tmux protocol lifecycle (PTY, shell or
+#                          exec, resize, I/O, remote exit and close) now runs
+#                          hermetically against an in-process SSH server, and
+#                          tmux-local startup runs through an injected command
+#                          in the package tests. The package still contains
+#                          the real host-dial, local-shell PTY and OS process
+#                          inspection boundaries, so including the whole mixed
+#                          package in the 80% decision-coverage denominator
+#                          would measure environment adapters rather than the
+#                          decisions this gate is scoped to. Those decisions
+#                          (validateShell, validRemotePath,
+#                          classifySSHWaitError …) remain unit-tested in place.
 #       internal/sshconfig  a parser over the user's own ~/.ssh/config; it has
 #                          its own tests and no gate-worthy branching that the
 #                          packages above do not already drive.
