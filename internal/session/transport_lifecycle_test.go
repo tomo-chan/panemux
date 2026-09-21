@@ -1,11 +1,13 @@
 package session
 
 import (
+	"bufio"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -15,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/creack/pty"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/ssh"
@@ -201,6 +204,36 @@ func readExactly(t *testing.T, reader io.Reader, size int) string {
 	}
 }
 
+func readUntilContains(t *testing.T, reader io.Reader, marker string) string {
+	t.Helper()
+	type result struct {
+		err  error
+		data string
+	}
+	done := make(chan result, 1)
+	go func() {
+		var data string
+		buf := make([]byte, 128)
+		for !strings.Contains(data, marker) {
+			n, err := reader.Read(buf)
+			data += string(buf[:n])
+			if err != nil {
+				done <- result{data: data, err: err}
+				return
+			}
+		}
+		done <- result{data: data}
+	}()
+	select {
+	case got := <-done:
+		require.NoError(t, got.err)
+		return got.data
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for session output containing " + marker)
+		return ""
+	}
+}
+
 func waitForState(t *testing.T, state func() State, want State) {
 	t.Helper()
 	require.Eventually(
@@ -271,6 +304,17 @@ func TestTmuxSSHSessionLifecycleOverInProcessTransport(t *testing.T) {
 
 	require.NoError(t, sess.Close())
 	assert.Equal(t, StateExited, sess.State())
+}
+
+func TestTmuxSSHSessionRemoteSideClosureChangesStateToExited(t *testing.T) {
+	client, transport := startSessionTestSSHServer(t, nil)
+	sess, err := newTmuxSSHSessionFromClient(
+		"pane-tmux", "Remote tmux", "work", SSHConfig{}, client, nil,
+	)
+	require.NoError(t, err)
+
+	transport.closeConnections()
+	waitForState(t, sess.State, StateExited)
 }
 
 func TestSSHSessionExecMethodsUseRealChannelsAndParseResponses(t *testing.T) {
@@ -420,9 +464,9 @@ func TestTmuxLocalSessionLifecycleWithInjectedCommand(t *testing.T) {
 	previous := tmuxLocalCommandFn
 	tmuxLocalCommandFn = func(args []string) *exec.Cmd {
 		// os.Args[0] is the current test binary, not caller-controlled input.
-		cmd := exec.Command(os.Args[0], "-test.run=TestTmuxLocalHelperProcess", "--") //nolint:gosec
-		cmd.Env = append(os.Environ(), "GO_WANT_TMUX_HELPER=1")
-		return cmd
+		return exec.Command( //nolint:gosec
+			os.Args[0], "-test.run=^TestTmuxLocalHelperProcess$", "--", "tmux-local-helper",
+		)
 	}
 	t.Cleanup(func() { tmuxLocalCommandFn = previous })
 
@@ -433,19 +477,40 @@ func TestTmuxLocalSessionLifecycleWithInjectedCommand(t *testing.T) {
 	assert.Equal(t, "pane-local-tmux", sess.ID())
 	assert.Equal(t, "Local tmux", sess.Title())
 
-	_, err = sess.Write([]byte("local round trip\n"))
+	_, err = sess.Write([]byte("ping\n"))
 	require.NoError(t, err)
-	assert.Contains(t, readExactly(t, sess, len("local round trip\r\n")), "local round trip")
+	assert.Contains(t, readUntilContains(t, sess, "PONG"), "PONG")
+	assert.Equal(t, StateConnected, sess.State(), "the helper must remain alive before Close")
+
 	require.NoError(t, sess.Resize(120, 40))
+	_, err = sess.Write([]byte("size\n"))
+	require.NoError(t, err)
+	assert.Contains(t, readUntilContains(t, sess, "SIZE 120 40"), "SIZE 120 40")
+	assert.Equal(t, StateConnected, sess.State(), "the helper must remain alive after Resize")
+
 	require.NoError(t, sess.Close())
 	assert.Equal(t, StateExited, sess.State())
 }
 
 func TestTmuxLocalHelperProcess(t *testing.T) {
-	if os.Getenv("GO_WANT_TMUX_HELPER") != "1" {
+	if len(os.Args) == 0 || os.Args[len(os.Args)-1] != "tmux-local-helper" {
 		return
 	}
-	_, _ = io.Copy(os.Stdout, os.Stdin)
+
+	scanner := bufio.NewScanner(os.Stdin)
+	for scanner.Scan() {
+		switch scanner.Text() {
+		case "ping":
+			_, _ = fmt.Fprintln(os.Stdout, "PONG")
+		case "size":
+			size, err := pty.GetsizeFull(os.Stdout)
+			if err != nil {
+				_, _ = fmt.Fprintf(os.Stdout, "SIZE ERROR %v\n", err)
+				continue
+			}
+			_, _ = fmt.Fprintf(os.Stdout, "SIZE %d %d\n", size.Cols, size.Rows)
+		}
+	}
 	os.Exit(0)
 }
 
