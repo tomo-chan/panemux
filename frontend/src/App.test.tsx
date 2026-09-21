@@ -1,5 +1,5 @@
 import { useContext, useEffect } from 'react'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
 import { LayoutActionsContext } from './components/SplitContainer'
@@ -95,12 +95,16 @@ vi.mock('./hooks/useBoardSessionToken', () => ({
   useBoardSessionToken: mockUseBoardSessionToken,
 }))
 
-vi.mock('./hooks/usePaneSettings', () => ({
-  usePaneSettings: () => ({
+// Held in a box rather than returned literally so a test can open the settings
+// dialog, which is the only way into the add-SSH-host flow below. Everything
+// else in this file relies on the closed-dialog defaults, so each test that
+// changes it restores them afterwards.
+const paneSettings = vi.hoisted(() => {
+  const defaults = () => ({
     isOpen: false,
-    currentPane: null,
-    sshConnectionNames: [],
-    saveError: null,
+    currentPane: null as { id: string, type: string, connection?: string } | null,
+    sshConnectionNames: [] as string[],
+    saveError: null as string | null,
     isSaving: false,
     openSettings: vi.fn(),
     closeSettings: vi.fn(),
@@ -108,7 +112,12 @@ vi.mock('./hooks/usePaneSettings', () => ({
     addSSHConfigHost: vi.fn(),
     detectShell: vi.fn(),
     browseDirectories: vi.fn(),
-  }),
+  })
+  return { defaults, value: defaults() }
+})
+
+vi.mock('./hooks/usePaneSettings', () => ({
+  usePaneSettings: () => paneSettings.value,
 }))
 
 describe('App workspace deletion', () => {
@@ -727,5 +736,145 @@ describe('App workspace deletion', () => {
     fireEvent.keyDown(window, { key: 'B', shiftKey: true, ctrlKey: true })
 
     expect(screen.queryByRole('dialog', { name: 'Agent board' })).toBeNull()
+  })
+})
+
+describe('App adding an SSH host from the pane settings dialog', () => {
+  let addSSHConfigHost: ReturnType<typeof paneSettings.defaults>['addSSHConfigHost']
+
+  beforeEach(() => {
+    mockUseWorkspaceAttentionMonitor.mockImplementation(() => {})
+    mockUseBrowserNotificationPermission.mockImplementation(() => {})
+    mockUseSessionsOverview.mockReturnValue({})
+    mockUseGitInfoSnapshotMap.mockReturnValue({})
+    mockUseBoardSessionToken.mockReturnValue({ token: '', commandCenterEnabled: false, agentBoardEnabled: false })
+
+    addSSHConfigHost = vi.fn().mockResolvedValue('prod-web')
+    paneSettings.value = {
+      ...paneSettings.defaults(),
+      isOpen: true,
+      // An ssh pane is what makes the settings dialog show the connection
+      // picker the "+ Add" button lives beside.
+      currentPane: { id: 'main', type: 'ssh', connection: '' },
+      addSSHConfigHost,
+    }
+  })
+
+  afterEach(() => {
+    paneSettings.value = paneSettings.defaults()
+    mockUseWorkspaceAttentionMonitor.mockReset()
+    mockUseBrowserNotificationPermission.mockReset()
+    mockUseSessionsOverview.mockReset()
+    mockUseGitInfoSnapshotMap.mockReset()
+    mockUseBoardSessionToken.mockReset()
+    vi.restoreAllMocks()
+  })
+
+  function fillHost() {
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'prod-web' } })
+    fireEvent.change(screen.getByLabelText('Hostname'), { target: { value: 'prod.example.com' } })
+    fireEvent.change(screen.getByLabelText('User'), { target: { value: 'ubuntu' } })
+  }
+
+  it('offers no add-host dialog until it is asked for', () => {
+    render(<App />)
+
+    expect(screen.queryByLabelText('Add SSH host')).toBeNull()
+  })
+
+  it('opens the add-host dialog from the connection picker', () => {
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('button', { name: '+ Add' }))
+
+    expect(screen.getByLabelText('Add SSH host')).toBeInTheDocument()
+  })
+
+  it('writes the host to the ssh config and closes the dialog', async () => {
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: '+ Add' }))
+
+    fillHost()
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+
+    await waitFor(() => {
+      expect(addSSHConfigHost).toHaveBeenCalledWith({
+        name: 'prod-web',
+        hostname: 'prod.example.com',
+        user: 'ubuntu',
+      })
+    })
+    await waitFor(() => {
+      expect(screen.queryByLabelText('Add SSH host')).toBeNull()
+    })
+  })
+
+  it('keeps the dialog open and shows why when the write fails', async () => {
+    addSSHConfigHost.mockRejectedValue(new Error('~/.ssh/config is read-only'))
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: '+ Add' }))
+
+    fillHost()
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+
+    expect(await screen.findByText('~/.ssh/config is read-only')).toBeInTheDocument()
+    expect(screen.getByLabelText('Add SSH host')).toBeInTheDocument()
+  })
+
+  it('falls back to a generic message when the failure carries no message', async () => {
+    addSSHConfigHost.mockRejectedValue('nope')
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: '+ Add' }))
+
+    fillHost()
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+
+    expect(await screen.findByText('Failed to add host')).toBeInTheDocument()
+  })
+
+  it('marks the dialog as saving while the write is in flight, and stops when it settles', async () => {
+    let finishWrite: (name: string) => void = () => {}
+    addSSHConfigHost.mockReturnValue(new Promise<string>((resolve) => { finishWrite = resolve }))
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: '+ Add' }))
+
+    fillHost()
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+
+    expect(await screen.findByRole('button', { name: 'Saving…' })).toBeDisabled()
+
+    finishWrite('prod-web')
+
+    await waitFor(() => {
+      expect(screen.queryByLabelText('Add SSH host')).toBeNull()
+    })
+  })
+
+  it('abandons the dialog without writing anything when it is cancelled', () => {
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: '+ Add' }))
+    fillHost()
+
+    // Both dialogs are on screen, and both have a Cancel; this is the add-host
+    // one.
+    fireEvent.click(within(screen.getByLabelText('Add SSH host')).getByRole('button', { name: 'Cancel' }))
+
+    expect(addSSHConfigHost).not.toHaveBeenCalled()
+    expect(screen.queryByLabelText('Add SSH host')).toBeNull()
+  })
+
+  it('offers a host that is already configured as a connection for the pane', () => {
+    // The other half of the flow: once the hook reports the refreshed list, the
+    // name has to reach the picker the pane is actually configured from.
+    paneSettings.value = { ...paneSettings.value, sshConnectionNames: ['prod-web', 'staging'] }
+    render(<App />)
+
+    const connectionPicker = Array.from(
+      screen.getByLabelText('Pane settings').querySelectorAll('select'),
+    ).find((select) => select.querySelector('option[value=""]')?.textContent === '— select connection —')
+
+    expect(connectionPicker).toBeDefined()
+    expect(Array.from(connectionPicker!.options).map((option) => option.textContent))
+      .toEqual(['— select connection —', 'prod-web', 'staging'])
   })
 })
