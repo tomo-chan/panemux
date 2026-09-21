@@ -741,7 +741,7 @@ while IFS="$tab" read -r pkg fn; do
 		echo "SURVIVOR: $pkg $fn still passes with this branch's implementation reverted."
 		echo "      A test that passes without the code it covers protects nothing."
 		echo "      Either it asserts something the old implementation already did,"
-		echo "      or it asserts nothing at all. See decision D4 in docs/quality-gateway.md."
+		echo "      or it asserts nothing at all. See decision D4 in docs/quality-gateway/decisions.md."
 		echo
 		echo "      If instead this test's implementation is simply not part of this"
 		echo "      branch — an assertion tightened beside the change, a flake fixed"

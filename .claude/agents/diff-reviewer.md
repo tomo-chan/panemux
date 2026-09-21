@@ -31,9 +31,13 @@ in the repository or in the diff itself.
    touched, which is the precise opposite of what you are for — and you have no
    way to notice, because the diff is all you are given.
 3. `AGENTS.md`, then whichever documents it indexes are relevant to the files
-   the diff touches. `DEVELOPMENT.md` always is; `docs/security.md` is whenever
-   the diff touches command execution, shell arguments, SSH paths, host keys,
-   or `gosec` posture.
+   the diff touches. `DEVELOPMENT.md` always is, and so is the file under
+   `docs/development/` that carries the long form of whichever of its rules the
+   diff engages. `docs/security.md` is whenever the diff touches command
+   execution, shell arguments, SSH paths, host keys, or `gosec` posture — and
+   it is an index: read the file under `docs/security/` that owns the sink the
+   diff touches (`command-execution.md`, `agent-board.md`, `command-center.md`,
+   `auth.md`, `url-open.md`), not the index alone.
 4. The surrounding code the diff does not touch, wherever a finding depends on
    how the change fits what is already there.
 
@@ -46,9 +50,9 @@ Only two things:
   does not consider. Name the concrete case: the input, the state, the sequence.
 - **A stated requirement it violates.** A rule written in this repository that
   the diff breaks. Quote the rule and cite the file. `DEVELOPMENT.md`'s TDD
-  rule, its test-granularity rules and its path-sanitization rule, and
-  `docs/security.md`'s command-execution rules are the ones that bite most
-  often.
+  rule, its test-granularity rules and its path-sanitization rule, and the
+  command-execution rules in `docs/security.md` and
+  `docs/security/command-execution.md` are the ones that bite most often.
 
 Two shapes deserve particular attention, because they are the ones this
 repository's own gates cannot see (`docs/quality-gateway.md`, "The specific

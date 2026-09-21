@@ -19,7 +19,7 @@ name: mutation
 #
 # Three things had to be true before the exit code could change, and each was
 # measured rather than assumed — the full record is decision D9 in
-# docs/quality-gateway.md:
+# docs/quality-gateway/decisions.md:
 #
 #   - The 34% have somewhere to go: //mutation:exempt now waives a mutant TYPE
 #     and not a whole line (#236), so a reason written about the buffer-size
@@ -114,7 +114,7 @@ jobs:
       # must have to build or test the project. Pinned to the version #180's
       # measurement was taken with, rather than @latest, so a new release
       # cannot change what this job reports without anyone choosing that: every
-      # number in docs/quality-gateway.md's "Surviving mutants" section came
+      # number in docs/quality-gateway/mutants.md came
       # from v0.6.0.
       - name: Install gremlins
         run: go install github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0

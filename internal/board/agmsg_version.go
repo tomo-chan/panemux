@@ -11,7 +11,7 @@ import (
 
 // TestedAgmsgVersion is the agmsg release panemux's integration was checked
 // against: the script argument shapes in
-// docs/agent-board.md#integration-with-agmsg were read from this version's
+// docs/agent-board/agmsg-integration.md#integration-with-agmsg were read from this version's
 // own source, not inferred.
 //
 // docs/agent-board.md's "Version pinning" section requires a pinned tested

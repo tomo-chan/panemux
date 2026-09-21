@@ -92,3 +92,23 @@ jobs:
           echo
           echo "If this change genuinely alters no use case, apply the 'scenarios-exempt' label."
           exit 1
+
+  # Gate G0's documentation half. It lives in this workflow rather than ci.yml
+  # for the same reason the ledger check does: ci.yml runs neither `make test`
+  # nor `make check`, so without a step here the gate would be enforced only by
+  # the local pre-push hook. It needs no dependencies and takes a second.
+  #
+  # No `paths:` filter, and no diff scoping: a link breaks when the file at the
+  # OTHER end of it moves, so a check scoped to the changed files would miss
+  # exactly the case a documentation split creates.
+  links:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: The link checker's own tests
+        run: make test-docs-links
+
+      - name: Every relative link must resolve and name what it opens
+        run: make check-docs-links

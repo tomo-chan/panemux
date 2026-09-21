@@ -1,7 +1,7 @@
 # agmsg v1.2.0 fixtures — captured from a real install
 
 Tier 1 of the [agmsg compatibility
-contract](../../../../docs/agent-board.md#agmsg-compatibility-contract):
+contract](../../../../docs/agent-board/agmsg-contract.md#agmsg-compatibility-contract):
 frozen output that panemux's own parsing is asserted against, hermetically,
 on every `make check`.
 
@@ -61,6 +61,6 @@ the response's own order — see `filterRowsAfter` in `../../agmsg_parse.go`.
 
 Tier 1 cannot detect that agmsg changed; it only pins panemux against a
 fixed shape. That is [Tier
-2](../../../../docs/agent-board.md#agmsg-compatibility-contract)'s job —
+2](../../../../docs/agent-board/agmsg-contract.md#agmsg-compatibility-contract)'s job —
 `make test-agmsg-contract`, run in CI by
 `.github/workflows/agmsg-contract.yml`.

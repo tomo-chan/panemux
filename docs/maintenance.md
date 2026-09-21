@@ -24,7 +24,7 @@ Why this matters:
 
 ## The agmsg Compatibility Contract Job
 
-`.github/workflows/agmsg-contract.yml` runs Tier 2 of the [agmsg compatibility contract](agent-board.md#agmsg-compatibility-contract): `make test-agmsg-contract` against a real agmsg install, which the hermetic `make check` suite deliberately cannot do.
+`.github/workflows/agmsg-contract.yml` runs Tier 2 of the [agmsg compatibility contract](agent-board/agmsg-contract.md#agmsg-compatibility-contract): `make test-agmsg-contract` against a real agmsg install, which the hermetic `make check` suite deliberately cannot do.
 
 - **Daily (06:00 UTC / 15:00 JST)** it installs agmsg's **latest release tag** and runs the contract. This run gates nothing — a failure is an early warning that an agmsg release changed behavior panemux depends on, arriving before anyone here has chosen to bump the pin.
 
@@ -63,7 +63,7 @@ make test-agmsg-contract AGMSG_PATH=~/.agents/skills/agmsg
 `.github/workflows/model-check.yml` holds two jobs, both validating formal models and neither part of `make check`.
 
 - **`alloy`** checks every `docs/models/*.als` model and requires all of its `check` commands to come back `UNSAT`.
-- **`tlc`** runs Tier 2 of the [state-machine model checking](agent-board.md#state-machine-model-checking) split introduced by issue #168: `make model-check`, which runs TLC over `spec/agentboard/*.tla` and then diffs the transition table it exports against the copy committed under `internal/board/testdata/`.
+- **`tlc`** runs Tier 2 of the [state-machine model checking](agent-board/model-checking.md#state-machine-model-checking) split introduced by issue #168: `make model-check`, which runs TLC over `spec/agentboard/*.tla` and then diffs the transition table it exports against the copy committed under `internal/board/testdata/`.
 
 The workflow is path-filtered — it runs only when a spec, an exported table, the export scripts or the workflow itself changes — so it is deliberately **not** a candidate for a required check in branch protection, unlike `agmsg-contract / contract`. A path-filtered workflow reports no status at all on the pull requests it skips.
 

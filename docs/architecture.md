@@ -95,12 +95,12 @@ SQLite file.
 
 The package's foundational pieces are implemented and tested: `Row`/`Status` and the
 `board_status`-discriminated status-report parsing, `BoardCache` (the in-memory status/history view
-[agent-board.md's Architecture section](agent-board.md#architecture) describes), `ownSendLedger`
+[agent-board/architecture.md's Architecture section](agent-board/architecture.md#architecture) describes), `ownSendLedger`
 (the forgery-detection primitive [Security
-model](agent-board.md#security-model) describes), and the two `AgmsgClient` implementations —
+model](agent-board/security-model.md#security-model) describes), and the two `AgmsgClient` implementations —
 `LocalAgmsgClient` (plain `exec.Command`, no shell involved) and `RemoteAgmsgClient` (the SSH exec
 channel, with the base64-encode-then-allowlist body escaping and identifier allowlisting
-[security.md](security.md#agent-board-remote-writes) describes). Three new optional session capability
+[security/agent-board.md](security/agent-board.md#agent-board-remote-writes) describes). Three new optional session capability
 interfaces, `BoardHostID`, `BoardExecutor`, and `AgentTypeDetector`, extend the same pattern as
 `CWDGetter`/`ActiveWorkdirGetter` above and are implemented on all four session types
 (`BoardHostID`, `AgentTypeDetector`) and on `SSHSession`/`TmuxSSHSession` (`BoardExecutor`'s
@@ -117,7 +117,7 @@ remote `agmsg_path`'s leading `~/` against that host's own `$HOME`
 (`internal/board/agmsg_path.go`'s `ResolveRemoteAgmsgPath`); and the three REST endpoints `GET
 /api/board/status`, `GET /api/board/messages`, `POST /api/board/broadcast` (`internal/api/board.go`),
 gated by the `server.auth_token` config field's constant-time bearer auth middleware
-(`internal/server/auth.go`) — see [security.md](security.md#auth-token-and-transport-encryption).
+(`internal/server/auth.go`) — see [security/auth.md](security/auth.md#auth-token-and-transport-encryption).
 That middleware is wired **only** onto the new `/api/board/*` sub-route; every pre-existing `/api/*`
 route and `/ws/{sessionID}` remain unauthenticated, since retrofitting auth onto routes the current
 frontend already relies on is a separate, larger change.
@@ -125,8 +125,8 @@ frontend already relies on is a separate, larger change.
 Also implemented and tested: the bootstrap flow (`bootstrapWatcher` in `bootstrap.go`, `package
 main`) that polls board-enabled panes via `AgentTypeDetector` for a newly started, agmsg-detectable
 agent process and writes a one-time onboarding instruction into that pane's PTY (the same
-`Session.Write` path used for real terminal input) — see [agent-board.md's Bootstrap
-flow](agent-board.md#bootstrap-flow) for the full detection/debounce/persistence algorithm.
+`Session.Write` path used for real terminal input) — see [agent-board/bootstrap.md's Bootstrap
+flow](agent-board/bootstrap.md#bootstrap-flow) for the full detection/debounce/persistence algorithm.
 
 Also implemented: the **command center** — a single headless `claude -p --resume` subprocess,
 invoked per query by `internal/commandcenter`'s `Runner` (`SessionState`/`HistoryEntry`
@@ -147,7 +147,7 @@ above.
 
 Also implemented: the **dashboard UI** (Phase 3), which is frontend-only — it adds no new backend
 package, only the `agent_board_enabled` field on `GET /api/session-token` (`internal/api/board.go`;
-see [docs/behavior.md](behavior.md#get-apisession-token)). On the frontend, `useBoardStatus.ts`
+see [docs/behavior/board-api.md](behavior/board-api.md#get-apisession-token)). On the frontend, `useBoardStatus.ts`
 polls `GET /api/board/status` and `GET /api/board/messages?since=<seq>` (paused while the tab is
 hidden, the same `document.hidden` pattern `useSessionsOverview.ts` already uses) and filters
 `board_status`-kind rows out of the message feed client-side; `BoardDashboardPanel.tsx` renders the
@@ -333,7 +333,7 @@ This package wires middleware, WebSocket handlers, and static file serving, and 
 the API is authenticated. The `/api` route table itself lives in `internal/api` (`Handler.Mount`,
 `internal/api/routes.go`) so production wiring and that package's own handler tests cannot describe
 different routes; `registerRoutes` passes `bearerAuthMiddleware` to `Mount` as the middleware for the
-`api.BoardRoutePrefix` sub-router. See [security.md](security.md#auth-token-and-transport-encryption).
+`api.BoardRoutePrefix` sub-router. See [security/auth.md](security/auth.md#auth-token-and-transport-encryption).
 
 Why `chi`:
 
@@ -523,7 +523,7 @@ Architecture-level security summary:
 - remote shell entrypoints validate SSH working directories before interpolating them into shell commands
 - host-key handling intentionally preserves compatibility with OpenSSH hashed `known_hosts` entries
 - shipped code should structurally avoid `gosec` findings rather than suppress them
-- panemux does not terminate TLS; non-loopback exposure is expected to sit behind operator-managed infrastructure (reverse proxy, tunnel, VPN), and the `server.auth_token` config field (enforced only on `/api/board/*` today, not on pre-existing `/api/*` routes or `/ws/{sessionID}` — see this document's `internal/board` section above) is only meaningful once that transport is encrypted — see [agent-board.md](agent-board.md#security-model)
+- panemux does not terminate TLS; non-loopback exposure is expected to sit behind operator-managed infrastructure (reverse proxy, tunnel, VPN), and the `server.auth_token` config field (enforced only on `/api/board/*` today, not on pre-existing `/api/*` routes or `/ws/{sessionID}` — see this document's `internal/board` section above) is only meaningful once that transport is encrypted — see [agent-board/security-model.md](agent-board/security-model.md#security-model)
 
 ## Tradeoffs and Intentional Limits
 
@@ -532,4 +532,4 @@ Architecture-level security summary:
 - All workspace panes are started at backend startup, including panes in inactive workspaces. This keeps tab switching fast and preserves terminal state, at the cost of using resources for hidden workspaces.
 - Dynamic session creation exists, but current UI behavior mainly creates new local panes; this is not yet a full remote session orchestration product.
 - The implemented `internal/board` cross-host relay (see [agent-board.md](agent-board.md)) makes panemux a persistent relay for agent-to-agent messages between hosts it cannot make talk to each other directly, closer to a TURN server than a STUN server: panemux stays in the data path for the life of the exchange rather than helping two hosts connect directly and stepping aside, and it sees each relayed message as plaintext in process memory between the two encrypted SSH hops.
-- The command center spawns a `claude -p` subprocess per query rather than keeping one warm — simpler process lifecycle and no persistent extra process, at the cost of response latency that includes subprocess startup on every query (see [agent-board.md's Process lifecycle](agent-board.md#process-lifecycle)).
+- The command center spawns a `claude -p` subprocess per query rather than keeping one warm — simpler process lifecycle and no persistent extra process, at the cost of response latency that includes subprocess startup on every query (see [agent-board/command-center.md's Process lifecycle](agent-board/command-center.md#process-lifecycle)).
