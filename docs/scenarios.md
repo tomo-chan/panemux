@@ -176,7 +176,7 @@ tried first and made an unrelated spec fail intermittently.
 | H12d | The pane status bar | It labels every session type, shows the SSH connection and terminal size only when there is one, and the pane's own `show_status_bar` overrides the display default in both directions | `auto`: `frontend/src/components/PaneStatusBar.test.tsx` |
 | H12e | A pane's own chrome | Clicking or focusing a pane makes it the active one, clears its attention flag and refreshes its git metadata; the attention outline wins over the active one when both apply; each header action — split, add beside, close, maximize and restore, settings, open in VSCode — acts on that pane and no other; and the pane re-fits its terminal whenever its element changes size, stopping once it unmounts | `auto`: `frontend/src/components/TerminalPane.test.tsx` |
 | H13 | Terminal rendering and scrollback | The xterm viewport's scrollbar matches the terminal chrome | `auto`: `frontend/e2e/terminal-scrollbar.spec.ts` |
-| H14 | Session types | `local`, `tmux`, `ssh` and `ssh_tmux` panes are validated and constructed from config | `auto`: `internal/config` — `TestValidatePane*`; `internal/session` for the construction half. The live transports themselves are `manual` — see [Not covered](#not-covered) |
+| H14 | Session types | `local`, `tmux`, `ssh` and `ssh_tmux` panes are validated and constructed from config. SSH-backed panes complete PTY/shell or tmux exec setup, round-trip bytes, resize, run auxiliary exec channels, parse responses, transition state on remote closure, and close without a reachable host; local tmux panes exercise the same PTY I/O/resize/close lifecycle without a tmux install | `auto`: `internal/config` — `TestValidatePane*`; `internal/session` — `TestSSHSessionLifecycleOverInProcessTransport`, `TestSSHSessionRemoteSideClosureChangesStateToExited`, `TestTmuxSSHSessionLifecycleOverInProcessTransport`, `TestTmuxSSHSessionRemoteSideClosureChangesStateToExited`, `TestSSHSessionExecMethodsUseRealChannelsAndParseResponses`, `TestTmuxSSHSessionExecMethodsUseRealChannelsAndParseResponses`, `TestTmuxLocalSessionLifecycleWithInjectedCommand`. Real external hosts and tmux servers remain `manual` — see [Not covered](#not-covered) |
 | H14a | A hand-written single-pane workspace (`layout: {pane: ...}`, no children) | Loads and renders: the pane is migrated into the one child it means, so the response carries the `direction` + `children` shape the dashboard parses | `auto`: `internal/config` — `TestNormalizeLayoutNode_PaneOnlyRootBecomesItsSingleChild`, `TestNormalizeLayoutNode_AlwaysSerializesDirectionAndChildren`, `TestWorkspacesView_NormalizesEveryWorkspaceLayout`, `TestActiveLayout_NormalizesWhatItReturns` |
 | H14b | A hand-written workspace with a root `pane` beside `children` | The root pane is left where the operator wrote it and survives a dashboard round-trip, rather than being stripped by the schema and deleted from `config.yaml` on the next split | `auto`: `internal/config` — `TestNormalizeLayoutNode_KeepsARootPaneThatSitsBesideChildren`; `frontend/src/schemas/index.test.ts` — `LayoutNodeSchema root pane round-trip` |
 | H14c | A root pane that names no `type`, or an `ssh` connection that is not defined | Startup fails naming the pane, the same way the equivalent child pane always has, instead of loading into a workspace that displays nothing | `auto`: `internal/config` — `TestLoad_RelocatedRootPaneIsValidatedLikeAnyOther`, `TestLoad_WellFormedRootPaneRelocatesAndLoads` |
@@ -245,10 +245,11 @@ Stated explicitly, because an absent row reads as an oversight and these are dec
 - **Install scenarios A1/A2 are manual.** CI builds the binary on every PR, but nobody automatically
   downloads a release artifact and runs it.
 - **Every row in section F is manual.** Documentation accuracy is not mechanically checkable here.
-- **The live session transports are manual** (H14). `local` needs a real PTY, `tmux` a real tmux
-  server, and `ssh`/`ssh_tmux` a reachable host — the same exclusions the `Makefile` records next to
-  `COVERAGE_PKGS`. What is automated is everything either side of the transport: config validation,
-  construction, and the pure decisions extracted out of the lifecycle methods.
+- **Real external session endpoints are manual** (H14). The SSH protocol lifecycle is automated
+  against an in-process `x/crypto/ssh` server, and the local-tmux lifecycle uses an injected command
+  behind a real PTY, so neither needs a reachable host or tmux install in `make check`. What remains
+  manual is compatibility with an operator's actual SSH server, shell, tmux binary/server and OS PTY
+  behavior — the environment adapters the `Makefile` records next to `COVERAGE_PKGS`.
 - **An end-to-end OAuth flow against a real remote host is manual** (I14). The forward itself, the
   scheme allowlist and the limits are all unit-tested, but a real device-code login needs a real
   provider and a second host.

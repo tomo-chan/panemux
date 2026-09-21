@@ -20,6 +20,12 @@ var tmuxLocalOutputFn = func(args ...string) ([]byte, error) {
 	return exec.Command(tmuxBinary, args...).Output()
 }
 
+var tmuxLocalCommandFn = func(args []string) *exec.Cmd {
+	cmd := exec.Command(tmuxBinary)
+	cmd.Args = append([]string{tmuxBinary}, args...)
+	return cmd
+}
+
 // TmuxLocalSession attaches to an existing local tmux session via PTY.
 type TmuxLocalSession struct {
 	cmd         *exec.Cmd
@@ -48,8 +54,7 @@ func NewTmuxLocal(id, title, tmuxSession, cwd string) (*TmuxLocalSession, error)
 	// whose argument list is not a literal. The args (including cwd) are
 	// still discrete argv entries handed to the tmux binary, never a shell
 	// string, so this carries no injection risk — see docs/security.md.
-	cmd := exec.Command(tmuxBinary)
-	cmd.Args = append([]string{tmuxBinary}, tmuxLocalArgs(validatedSession, cwd)...)
+	cmd := tmuxLocalCommandFn(tmuxLocalArgs(validatedSession, cwd))
 	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 
