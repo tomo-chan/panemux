@@ -340,8 +340,11 @@ describe('LayoutRenderer resizing', () => {
 
   it('does nothing while the container is too small to hold its dividers', () => {
     // A container that has not been laid out yet reports 0, which leaves a
-    // negative usable size once the divider is subtracted. Dividing by it would
-    // produce an infinite or inverted delta.
+    // negative usable size once the divider is subtracted. Dividing by it
+    // inverts the drag: the delta is deliberately small and negative, because
+    // that is the case the `usableSize <= 0` guard is the only thing stopping.
+    // A large delta would be refused by the 5% floor further down whether the
+    // guard was there or not, which asserts nothing about this branch.
     const onChildrenChange = vi.fn()
     render(
       <LayoutActionsContext.Provider value={makeCtx(null)}>
@@ -349,7 +352,7 @@ describe('LayoutRenderer resizing', () => {
       </LayoutActionsContext.Provider>,
     )
 
-    latestDividerDrag()(40)
+    latestDividerDrag()(-1)
 
     expect(onChildrenChange).not.toHaveBeenCalled()
   })

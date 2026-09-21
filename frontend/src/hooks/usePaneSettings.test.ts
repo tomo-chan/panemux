@@ -390,4 +390,28 @@ describe('usePaneSettings restart policy', () => {
     await save({ type: 'ssh', connection: 'prod' })
     expect(restartCalls()).toHaveLength(1)
   })
+
+  it('restarts when an ssh pane is pointed at a different connection', async () => {
+    // The case above changes the type and the connection together, so it
+    // cannot tell which of the two asked for the restart. This one changes
+    // only the connection: without it, dropping `connection` from
+    // sessionFields leaves the whole suite green while a pane keeps running
+    // against the host it was moved off.
+    const sshPane = {
+      id: 'api',
+      type: 'ssh' as const,
+      connection: 'staging',
+      title: 'API',
+    }
+    const sshLayout = { direction: 'horizontal' as const, children: [{ size: 100, pane: sshPane }] }
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }))
+    const { result } = renderHook(() => usePaneSettings(sshLayout, vi.fn()))
+    act(() => result.current.openSettings(sshPane))
+    await act(async () => {
+      await result.current.saveSettings({ ...sshPane, connection: 'prod-web' })
+    })
+
+    expect(restartCalls()).toHaveLength(1)
+  })
 })
