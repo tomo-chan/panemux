@@ -108,8 +108,8 @@ Connection behavior:
 
 - `404` if the session ID does not exist. After a successful `/restart` this cannot happen for a
   pane that was previously running; if `/restart` itself fails, the pane's prior session stays
-  registered (see `POST /api/sessions/{id}/restart` below), so this 404 is limited to session IDs
-  that were never created in the first place.
+  registered (see [`POST /api/sessions/{id}/restart`](rest-api.md#post-apisessionsidrestart)), so
+  this 404 is limited to session IDs that were never created in the first place.
 - initial text frame is a JSON status message with `type: "status"` and `state: "connected"`
 - if a reconnect has buffered output, the backend sends `{"type":"replay","state":"start"}`,
   replays up to the recent per-session output buffer as a binary frame, then sends

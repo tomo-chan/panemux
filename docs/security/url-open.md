@@ -22,8 +22,9 @@ A forward binds a real listening socket on the panemux host, so its scope is del
   traffic, and all closed when the pane is deleted or restarted (`Handler.closeSessionForwards`) or
   when the server shuts down (`Server.Shutdown`).
 - **No command execution.** Forwarding runs entirely over the pane's existing SSH connection using
-  `(*ssh.Client).DialContext`. No shell is involved, so none of this document's shell-argument rules
-  apply — there is no command string for a port number to be interpolated into.
+  `(*ssh.Client).DialContext`. No shell is involved, so none of the shell-argument rules in
+  [command-execution.md](command-execution.md#security-command-execution-sinks) apply — there is no
+  command string for a port number to be interpolated into.
 
 What a forward does grant, stated plainly: while it is open, every process on the panemux host can
 reach that one port on the pane's host through `127.0.0.1:<port>`. That is the point of the feature
@@ -31,32 +32,35 @@ reach that one port on the pane's host through `127.0.0.1:<port>`. That is the p
 is why the limits above are hard-coded rather than configurable.
 
 `POST /api/sessions/{id}/open-url` is not behind `bearerAuthMiddleware`: it follows the same
-unauthenticated posture as every other `/api/*` route (see "Auth token and transport encryption"
-above). It is a stronger primitive than the routes around it — it opens listening sockets — so it is
-worth restating what bounds it in that posture: it only ever binds loopback, only ports the URL
-itself names, only for a pane that already exists, and only when that pane's shell runs on another
-host. Gating it would mean gating `/api/*` as a whole, which remains the separate, larger change
-already tracked in this document.
+unauthenticated posture as every other `/api/*` route (see
+[auth.md](auth.md#auth-token-and-transport-encryption)). It is a stronger primitive than the routes
+around it — it opens listening sockets — so it is worth restating what bounds it in that posture: it
+only ever binds loopback, only ports the URL itself names, only for a pane that already exists, and
+only when that pane's shell runs on another host. Gating it would mean gating `/api/*` as a whole,
+which remains the separate, larger change recorded in
+[auth.md](auth.md#auth-token-and-transport-encryption).
 
 ### Browser-open interception
 
-**The shim is not an `exec.Command` sink and does not fall under this document's command-execution
-rules.** `remoteBrowserShimSetup` builds a shell snippet from a fixed string literal:
-`browserShimScript` contains no caller-supplied value, and it reaches the remote command string
-through the same `shellQuotePath` quoting every other remote argument uses. The one path that varies
-per host — where the shim is written — is `"$HOME/.cache/panemux/bin"`, resolved by the remote shell
-itself rather than by panemux, so no panemux-side value is interpolated at all. Locally the shim is
-written with `os.WriteFile` under `os.UserCacheDir()`; no shell parses it.
+**The shim is not an `exec.Command` sink and does not fall under the command-execution rules in
+[security.md](../security.md#general-rules) and
+[command-execution.md](command-execution.md#security-command-execution-sinks).**
+`remoteBrowserShimSetup` builds a shell snippet from a fixed string literal: `browserShimScript`
+contains no caller-supplied value, and it reaches the remote command string through the same
+`shellQuotePath` quoting every other remote argument uses. The one path that varies per host — where
+the shim is written — is `"$HOME/.cache/panemux/bin"`, resolved by the remote shell itself rather
+than by panemux, so no panemux-side value is interpolated at all. Locally the shim is written with
+`os.WriteFile` under `os.UserCacheDir()`; no shell parses it.
 
-**panemux writes a shell script to a remote host here, which is new.** This is compatible with this
-document's existing rule that the `panemux` binary is never installed on a remote host: that rule
-exists because `panemux` is itself a server, and a stray copy could start its own HTTP/WS listener
-and command center on an SSH-reached machine. The shim has no such capability — it is a few lines of
-POSIX shell that write an escape sequence to the terminal it was invoked from, with no network
-access, no persistence beyond the file itself, and no privileges beyond the pane user's own. It is
-installed under the pane user's cache directory with mode 0700, every install step is best-effort
-(a read-only home leaves the pane working without interception), and `url_open.browser_shim: false`
-turns the whole mechanism off.
+**panemux writes a shell script to a remote host here, which is new.** This is compatible with the
+rule in [agent-board.md](agent-board.md#agent-board-remote-writes) that the `panemux` binary is
+never installed on a remote host: that rule exists because `panemux` is itself a server, and a stray
+copy could start its own HTTP/WS listener and command center on an SSH-reached machine. The shim has
+no such capability — it is a few lines of POSIX shell that write an escape sequence to the terminal
+it was invoked from, with no network access, no persistence beyond the file itself, and no
+privileges beyond the pane user's own. It is installed under the pane user's cache directory with
+mode 0700, every install step is best-effort (a read-only home leaves the pane working without
+interception), and `url_open.browser_shim: false` turns the whole mechanism off.
 
 **Terminal output is untrusted, and the OSC path treats it that way.** The shim's OSC sequence is
 just bytes on the pane's terminal stream: any process that can write to that terminal can emit it,

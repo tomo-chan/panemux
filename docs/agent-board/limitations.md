@@ -63,7 +63,8 @@
   match a known local pane ID or `_system`, but within that set there is still no proof a given
   message actually came from the pane process it claims to — any local process that can reach a
   host's agmsg installation and pick a real, currently-registered pane ID can forge a sender inside
-  that host. This is an integrity gap distinct from the transport-confidentiality concerns above and
+  that host. This is an integrity gap distinct from the transport-confidentiality concerns in
+  [Security model](security-model.md#security-model) and
   is accepted for the same reason panemux already accepts same-user process trust elsewhere.
 - **A broadcast's delivery and its appearance in dashboard history are decoupled.**
   `POST /api/board/broadcast` calls `AgmsgClient.Send` directly, so the destination pane receives it
@@ -104,12 +105,12 @@
   panemux has no way to observe a coding-agent *process* restarting inside a pane whose underlying
   `session.Session` never changed — there is no PID exposed anywhere in `internal/session`'s public
   surface for bootstrap to key off of instead (see [`internal/session` capability
-  interfaces](#internal-session-capability-interfaces)). Concretely: once a pane has been
-  bootstrapped, if the agent process inside it exits and a new one starts in the same still-open
-  pane, that new process is not re-detected and does not get a fresh onboarding instruction — only
-  closing and reopening the pane (which creates a new `session.Session`) resets bootstrap eligibility
-  for it. This mirrors, and is accepted for the same reason as, the equivalent limitation already
-  documented above for the relay's `AgmsgClient` construction.
+  interfaces](architecture.md#internalsession-capability-interfaces)). Concretely: once a pane has
+  been bootstrapped, if the agent process inside it exits and a new one starts in the same
+  still-open pane, that new process is not re-detected and does not get a fresh onboarding
+  instruction — only closing and reopening the pane (which creates a new `session.Session`) resets
+  bootstrap eligibility for it. This mirrors, and is accepted for the same reason as, the equivalent
+  limitation already documented above for the relay's `AgmsgClient` construction.
 - **A remote host with no reachable session when `setupBoard` runs never becomes bootstrap-eligible
   for the rest of that process's lifetime, even if a board-enabled pane on it becomes reachable
   later** — the same one-shot-at-startup limitation already documented above for

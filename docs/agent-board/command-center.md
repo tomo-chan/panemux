@@ -171,8 +171,8 @@ flow still applies.
   `useSessionsOverview.ts` already uses) and `GET /api/board/messages?since=<seq>` (incremental,
   capped at the most recent 500 messages client-side) and filters out `to === "_system"` /
   `kind === "board_status"` rows from the message feed client-side, since the relay also appends
-  those to history (see [Status self-report and message flow](message-flow.md#status-self-report-and-message-flow)
-  above) and the dashboard's message feed is meant to show conversation, not raw status JSON.
+  those to history (see [Status self-report and message flow](message-flow.md#status-self-report-and-message-flow))
+  and the dashboard's message feed is meant to show conversation, not raw status JSON.
 
 See [ui-design.md's Agent Board UI section](../ui-design.md#agent-board-ui) for how these
 surfaces reuse this repository's existing dialog/overlay patterns and status vocabulary instead of

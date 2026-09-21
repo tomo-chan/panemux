@@ -110,9 +110,10 @@ never been executed by a test before, because nothing could reach them.
 
 `openChrome` in `main.go` runs the platform's browser opener against panemux's own listen address
 when `--open` is given. Its first `exec.Command` argument is a **variable**, which is why it is
-recorded here: that is the shape this document's [General Rules](../security.md#general-rules) require an argument
-for, and a reader enumerating `exec.Command` sinks must find it rather than conclude from the
-section below that only two exist.
+recorded here: that is the shape the security design's [General Rules](../security.md#general-rules)
+require an argument for, and a reader enumerating `exec.Command` sinks must find it rather than
+conclude from [command-center.md](command-center.md#command-center-subprocess-execution) that only
+two exist.
 
 The argument for it is short. `browserOpenArgv(goos, url)` is the only source of both the program
 name and the arguments, it is pure, and it returns one of exactly three compile-time literals

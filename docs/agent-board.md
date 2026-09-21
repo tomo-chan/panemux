@@ -21,7 +21,7 @@
 > (`bootstrapWatcher` in `bootstrap.go`, `package main`) polls every board-enabled pane for a newly
 > started, agmsg-detectable agent process (`session.AgentTypeDetector`, covering the six agmsg agent
 > types agmsg's own `type.conf` marks as process-detectable — see [`internal/session` capability
-> interfaces](#internal-session-capability-interfaces)) and writes a one-time onboarding instruction
+> interfaces](agent-board/architecture.md#internalsession-capability-interfaces)) and writes a one-time onboarding instruction
 > into that pane's PTY; see [Bootstrap flow](agent-board/bootstrap.md#bootstrap-flow) for the full algorithm.
 >
 > **Phase 2 (Command center)** — `internal/commandcenter` (the `Runner` subprocess-per-query

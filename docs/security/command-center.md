@@ -5,18 +5,20 @@
 ### Command center subprocess execution
 
 `internal/commandcenter/runner.go`'s `Runner` is the other place in this repository, besides
-`internal/session` and `openChrome` above, that calls `exec.Command`/`exec.CommandContext` on a
-value not fully known at compile time. Per this document's own [General Rules](../security.md#general-rules): the command name
-(`r.claudeBin`) is a hardcoded literal (`"claude"`) unless an operator explicitly overrides it via
+`internal/session` and `openChrome` (see
+[command-execution.md](command-execution.md#security-command-execution-sinks)), that calls
+`exec.Command`/`exec.CommandContext` on a value not fully known at compile time. Per the security
+design's [General Rules](../security.md#general-rules): the command name (`r.claudeBin`) is a
+hardcoded literal (`"claude"`) unless an operator explicitly overrides it via
 `RunnerConfig.ClaudeBin` — there is no code path that derives it from request data, environment
 variables, or anything else CodeQL would treat as tainted. The arguments after it are a mix of fixed
 literal flags (`-p`, `--output-format=stream-json`, `--verbose`), a `--resume <session-id>` pulled
-from `SessionState` (itself only ever written by `Runner` from a value `claude` itself reported in an
-earlier run — never client-supplied), a `--mcp-config <path>` pointing at a temp file `Runner` itself
-created, an `--allowedTools=<list>` value `commandcenter.AllowedTools()` computes from fixed string
-literals, and finally the user's free-text prompt as the last argument. None of this goes through a
-shell — `exec.CommandContext` passes each argument as a discrete argv element — so there is no
-shell-injection risk from the prompt regardless of its content.
+from `SessionState` (itself only ever written by `Runner` from a value `claude` itself reported in
+an earlier run — never client-supplied), a `--mcp-config <path>` pointing at a temp file `Runner`
+itself created, an `--allowedTools=<list>` value `commandcenter.AllowedTools()` computes from fixed
+string literals, and finally the user's free-text prompt as the last argument. None of this goes
+through a shell — `exec.CommandContext` passes each argument as a discrete argv element — so there
+is no shell-injection risk from the prompt regardless of its content.
 
 **Being the final positional argument does not, by itself, make the prompt safe — this document's
 own first draft of this section claimed exactly that, and the claim was wrong.** `buildArgs` in
@@ -172,11 +174,12 @@ describe sandboxing as a per-device capability, so the reasonable reading is tha
 was tested in cannot provide it. Treat the confinement itself as unverified until someone runs it on a
 host where `/sandbox` reports the sandbox as available.
 
-The `PANEMUX_BOARD_TOKEN`/`PANEMUX_BOARD_BASE_URL` values the `claude -p` subprocess's own MCP-server
-child process reads never reach `Runner`'s own `exec.Command` argv at all — they are set in the MCP
-config file's `env` block (see "Auth token and transport encryption" below for that file's own
-handling), read by `panemux __board-mcp-server` via `os.Getenv` in `board_mcp_server.go`. This is not
-a violation of this document's "do not use `os.Getenv` values in flows that reach `exec.Command`"
-rule: `runBoardMCPServer` never calls `exec.Command` itself, it only makes outbound HTTP requests
-(`internal/boardmcp.HTTPBoardAPIClient`) — an entirely different sink with no shell/argv-reinterpretation
-risk to defend against.
+The `PANEMUX_BOARD_TOKEN`/`PANEMUX_BOARD_BASE_URL` values the `claude -p` subprocess's own
+MCP-server child process reads never reach `Runner`'s own `exec.Command` argv at all — they are set
+in the MCP config file's `env` block (see [auth.md](auth.md#auth-token-and-transport-encryption) for
+that file's own handling), read by `panemux __board-mcp-server` via `os.Getenv` in
+`board_mcp_server.go`. This is not a violation of the [General Rules](../security.md#general-rules)'
+"do not use `os.Getenv` values in flows that reach `exec.Command`" rule: `runBoardMCPServer` never
+calls `exec.Command` itself, it only makes outbound HTTP requests
+(`internal/boardmcp.HTTPBoardAPIClient`) — an entirely different sink with no
+shell/argv-reinterpretation risk to defend against.

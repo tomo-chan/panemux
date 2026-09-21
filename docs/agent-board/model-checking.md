@@ -5,13 +5,14 @@
 ## State-machine model checking
 
 Issue [#168](https://github.com/tomo-chan/panemux/issues/168) asks a different question from the
-contract above. That one keeps panemux's assumptions about an *external* dependency from drifting.
-This one asks whether panemux's *own* small, security-critical state machines are correct at all —
-because several of the real bugs PR #167's adversarial review rounds found (the duplicate-broadcast
-collision in `ownSendLedger`, the relayed-row double-counting invariant, cross-host `from`-forgery
-detection) were exactly the shape a hand-written table-driven test misses however carefully the
-cases were enumerated. A property test gives as much confidence as the cases a human thought to
-write; that is the ceiling this is trying to get above.
+[agmsg compatibility contract](agmsg-contract.md#agmsg-compatibility-contract). That contract keeps
+panemux's assumptions about an *external* dependency from drifting. This one asks whether panemux's
+*own* small, security-critical state machines are correct at all — because several of the real bugs
+PR #167's adversarial review rounds found (the duplicate-broadcast collision in `ownSendLedger`, the
+relayed-row double-counting invariant, cross-host `from`-forgery detection) were exactly the shape a
+hand-written table-driven test misses however carefully the cases were enumerated. A property test
+gives as much confidence as the cases a human thought to write; that is the ceiling this is trying
+to get above.
 
 **`ownSendLedger` is the pilot**, chosen over `Relay.processRow` and `dynamicBoardExecutor`'s
 candidate resolution. It is the smallest of the three and fully self-contained — `Record` /

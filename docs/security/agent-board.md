@@ -16,7 +16,8 @@ host could start its own HTTP/WS listener and command center.
 Message bodies are arbitrary text written by a Claude (or other agent) process, not a trusted
 value, and plain `shellQuotePath`-style quoting of that value alone does not satisfy this
 repository's `go/command-injection` CodeQL bar (a quoting transform does not itself break a taint
-chain; only a preceding regex-allowlist branch does — see `validateShell`'s explanation above).
+chain; only a preceding regex-allowlist branch does — see `validateShell`'s explanation in
+[command-execution.md](command-execution.md#shell-path-local-ssh-sessions)).
 Because a message body is free text and cannot be regex-allowlisted directly the way a path can,
 `RemoteAgmsgClient.Send` base64-encodes the body, regex-checks the *encoded* string against
 `^[A-Za-z0-9+/]*={0,2}$`, and only then places it in the `RunBoardCommand` argument list — structurally
@@ -46,46 +47,48 @@ including the wrapper script text itself, before the remote command string is bu
 `send.sh` and `api.sh` are the two agmsg scripts this design's message read/write path runs
 remotely; each runs against agmsg's own local store on that host. The only other remote commands
 panemux itself ever executes are two fixed, non-tainted `sh -c` probes, neither of which takes any
-caller-supplied data: `internal/board/agmsg_path.go`'s `remoteHomeProbeCmd`
-(`sh -c 'printf '%s' "$HOME"'`), run once per remote host to resolve `agent_board.agmsg_path`'s
-leading `~/` against that host's own home directory before it is ever placed in a `RunBoardCommand`
-argument list — see [agent-board.md](../agent-board.md)'s "`~` in `agmsg_path` is expanded by panemux"
-section — and `internal/board/agmsg_presence.go`'s `remoteAgmsgPresenceProbeScript`
-(`test -f "$1" && printf 'yes' || printf 'no'`), run by the bootstrap watcher (and, independently,
-whenever the relay resolves a host's client) to check whether `scripts/api.sh` exists at the
-already-resolved `agmsg_path` before treating that host as bootstrap-eligible. Because
-`remoteAgmsgPresenceProbeScript` takes its one variable input (the path to test) as a positional
-parameter (`$1`), not string-interpolated into the script body, it carries no taint from
-`agent_board.agmsg_path` into the script text itself — the same discipline
-`sendBase64WrapperScript` above uses, just with no caller-supplied value needing a preceding
-regex-allowlist branch at all here, since the path being tested is `agent_board.agmsg_path` already
-resolved to an absolute path by the `~` expansion step, itself derived from operator config, not
-runtime request data. panemux only ever detects an existing agmsg installation — it never installs,
-updates, or otherwise manages agmsg on the operator's behalf, locally or remotely. The relay
-goroutine that drives this on a schedule (`internal/board/relay.go`), the bootstrap watcher
-(`bootstrapWatcher` in `bootstrap.go`, `package main`), the `/api/board/*` REST surface
-(`GET /status`, `GET /messages`, `POST /broadcast`), and the command center (`internal/commandcenter`,
-`internal/boardmcp` — see "Command center subprocess execution" below) are all implemented — see
-[agent-board.md](../agent-board.md)'s status note.
+caller-supplied data: `internal/board/agmsg_path.go`'s `remoteHomeProbeCmd` (`sh -c 'printf '%s'
+"$HOME"'`), run once per remote host to resolve `agent_board.agmsg_path`'s leading `~/` against that
+host's own home directory before it is ever placed in a `RunBoardCommand` argument list — see
+[agent-board.md](../agent-board.md)'s "`~` in `agmsg_path` is expanded by panemux" section — and
+`internal/board/agmsg_presence.go`'s `remoteAgmsgPresenceProbeScript` (`test -f "$1" && printf 'yes'
+|| printf 'no'`), run by the bootstrap watcher (and, independently, whenever the relay resolves a
+host's client) to check whether `scripts/api.sh` exists at the already-resolved `agmsg_path` before
+treating that host as bootstrap-eligible. Because `remoteAgmsgPresenceProbeScript` takes its one
+variable input (the path to test) as a positional parameter (`$1`), not string-interpolated into the
+script body, it carries no taint from `agent_board.agmsg_path` into the script text itself — the
+same discipline `sendBase64WrapperScript` above uses, just with no caller-supplied value needing a
+preceding regex-allowlist branch at all here, since the path being tested is
+`agent_board.agmsg_path` already resolved to an absolute path by the `~` expansion step, itself
+derived from operator config, not runtime request data. panemux only ever detects an existing agmsg
+installation — it never installs, updates, or otherwise manages agmsg on the operator's behalf,
+locally or remotely. The relay goroutine that drives this on a schedule (`internal/board/relay.go`),
+the bootstrap watcher (`bootstrapWatcher` in `bootstrap.go`, `package main`), the `/api/board/*`
+REST surface (`GET /status`, `GET /messages`, `POST /broadcast`), and the command center
+(`internal/commandcenter`, `internal/boardmcp` — see
+[command-center.md](command-center.md#command-center-subprocess-execution)) are all implemented —
+see [agent-board.md](../agent-board.md)'s status note.
 
-**The bootstrap watcher's PTY write is not a command-execution sink and is out of scope for this
-document's `exec.Command`-focused rules above.** `bootstrapWatcher` writes a synthesized onboarding
-instruction into a pane's PTY via `Session.Write` — the same path real user keystrokes already go
-through — not via `exec.Command`, so none of the shell-argument-escaping or CodeQL taint-chain
-reasoning above applies to that write itself: there is no shell parsing panemux's own Go code
-performs on that text, and no distinction between "trusted" and "tainted" content for a PTY write
-the way there is for a command-string argument. The one identifier bootstrap itself passes into a `RunBoardCommand` call — the already-resolved
-`agmsg_path` used to build the presence probe's `$1` — is quoted with the same `shellQuotePath`-style
-discipline `RunBoardCommand` already applies uniformly to every argument, board-related or not.
-`agent_board.team`, a pane's own ID, and the agmsg-recognized type string
+**The bootstrap watcher's PTY write is not a command-execution sink and is out of scope for the
+`exec.Command`-focused rules in [security.md](../security.md#general-rules) and
+[command-execution.md](command-execution.md#security-command-execution-sinks).** `bootstrapWatcher`
+writes a synthesized onboarding instruction into a pane's PTY via `Session.Write` — the same path
+real user keystrokes already go through — not via `exec.Command`, so none of the
+shell-argument-escaping or CodeQL taint-chain reasoning those rules carry applies to that write
+itself: there is no shell parsing panemux's own Go code performs on that text, and no distinction
+between "trusted" and "tainted" content for a PTY write the way there is for a command-string
+argument. The one identifier bootstrap itself passes into a `RunBoardCommand` call — the
+already-resolved `agmsg_path` used to build the presence probe's `$1` — is quoted with the same
+`shellQuotePath`-style discipline `RunBoardCommand` already applies uniformly to every argument,
+board-related or not. `agent_board.team`, a pane's own ID, and the agmsg-recognized type string
 `session.AgentTypeDetector` returns are written only into the PTY instruction text, never into a
 `RunBoardCommand` call bootstrap itself makes; they are operator config or panemux's own fixed
 detection-table output either way, not external request data. The same holds for the
 `actas-claim.sh`/`watch.sh` invocations the instruction gained for `claude-code` panes (see
-[agent-board.md](../agent-board/agmsg-integration.md#two-panes-in-one-project-directory)): the script names and the
-`$CLAUDE_CODE_SESSION_ID` reference are compile-time literals, the value behind that variable is
-expanded by the agent's own shell and never by panemux, and no part of it reaches an
-`exec.Command` argv.
+[agent-board.md](../agent-board/agmsg-integration.md#two-panes-in-one-project-directory)): the
+script names and the `$CLAUDE_CODE_SESSION_ID` reference are compile-time literals, the value behind
+that variable is expanded by the agent's own shell and never by panemux, and no part of it reaches
+an `exec.Command` argv.
 
 ### Agent-reported values in the dashboard UI
 

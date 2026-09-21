@@ -100,14 +100,14 @@ does claim, so the mismatch is on the screen instead of being silently absorbed.
 
 This was the first real evidence for how much of G4(c)'s noise is irreducible rather than fixable,
 which is what item 6's fourth stage — whether to make `make mutation` fail — needed before it could
-be decided, and D9 above records the decision it fed: **the "boundary value" row is not 45 missing
-tests.** Four of them cannot be killed by
-anyone, one only by a fabricated input, and that count is a floor rather than a census — it is what
-surfaced while working the sites #190 named, not an audit of all 45. A gate failing on that group
-would demand tautologies in the very class the measurement called most actionable. The `endConn`
-correction is the counterweight: a reviewer who accepts an exemption's *reason* without asking which
-kind it claims will wave through real defects, so stage 4 needs the two words kept apart in the
-marker itself, not just in this table.
+be decided, and [decision D9](decisions.md) records the decision it fed: **the "boundary value" row
+is not 45 missing tests.** Four of them cannot be killed by anyone, one only by a fabricated input,
+and that count is a floor rather than a census — it is what surfaced while working the sites #190
+named, not an audit of all 45. A gate failing on that group would demand tautologies in the very
+class the measurement called most actionable. The `endConn` correction is the counterweight: a
+reviewer who accepts an exemption's *reason* without asking which kind it claims will wave through
+real defects, so stage 4 needs the two words kept apart in the marker itself, not just in this
+table.
 
 **The red-check's first live verdict on a Go diff came from here too, and it is worth reading
 carefully.** G4(b) had never judged a real pull request — #185, #186, #187 and #189 all changed no Go
