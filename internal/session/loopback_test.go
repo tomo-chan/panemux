@@ -2,8 +2,6 @@ package session
 
 import (
 	"context"
-	"crypto/ed25519"
-	"crypto/rand"
 	"io"
 	"net"
 	"sync"
@@ -73,74 +71,8 @@ func startEchoServer(t *testing.T) string {
 // channels by connecting to echoAddr, and returns a connected client.
 func startTestSSHServer(t *testing.T, echoAddr string, rec *forwardRecorder) *ssh.Client {
 	t.Helper()
-
-	_, priv, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatalf("generate host key: %v", err)
-	}
-	signer, err := ssh.NewSignerFromKey(priv)
-	if err != nil {
-		t.Fatalf("signer: %v", err)
-	}
-	serverCfg := &ssh.ServerConfig{NoClientAuth: true}
-	serverCfg.AddHostKey(signer)
-
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen ssh: %v", err)
-	}
-	t.Cleanup(func() { ln.Close() })
-
-	go func() {
-		for {
-			raw, acceptErr := ln.Accept()
-			if acceptErr != nil {
-				return
-			}
-			go serveTestSSHConn(raw, serverCfg, echoAddr, rec)
-		}
-	}()
-
-	client, err := ssh.Dial("tcp", ln.Addr().String(), &ssh.ClientConfig{
-		User:            "tester",
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), //nolint:gosec // G106: ephemeral in-process test server
-		Timeout:         5 * time.Second,
-	})
-	if err != nil {
-		t.Fatalf("ssh dial: %v", err)
-	}
-	t.Cleanup(func() { client.Close() })
+	client, _ := startTestSSHTransport(t, nil, echoAddr, rec)
 	return client
-}
-
-func serveTestSSHConn(raw net.Conn, cfg *ssh.ServerConfig, echoAddr string, rec *forwardRecorder) {
-	conn, chans, reqs, err := ssh.NewServerConn(raw, cfg)
-	if err != nil {
-		raw.Close()
-		return
-	}
-	defer conn.Close()
-	go ssh.DiscardRequests(reqs)
-
-	for newChannel := range chans {
-		if newChannel.ChannelType() != "direct-tcpip" {
-			newChannel.Reject(ssh.UnknownChannelType, "unsupported")
-			continue
-		}
-		var payload directTCPIPPayload
-		if err := ssh.Unmarshal(newChannel.ExtraData(), &payload); err != nil {
-			newChannel.Reject(ssh.ConnectionFailed, "bad payload")
-			continue
-		}
-		rec.record(payload.DestAddr, payload.DestPort)
-
-		ch, chReqs, err := newChannel.Accept()
-		if err != nil {
-			continue
-		}
-		go ssh.DiscardRequests(chReqs)
-		go pipeTestChannel(ch, echoAddr)
-	}
 }
 
 func pipeTestChannel(ch ssh.Channel, echoAddr string) {

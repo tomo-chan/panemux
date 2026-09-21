@@ -32,20 +32,32 @@ type TmuxSSHSession struct {
 
 // NewTmuxSSH creates a session that attaches to a remote tmux session.
 func NewTmuxSSH(id, title, tmuxSession string, cfg SSHConfig) (*TmuxSSHSession, error) {
-	if tmuxSession == "" {
-		tmuxSession = "0"
-	}
-	if !validTmuxSessionName.MatchString(tmuxSession) {
-		return nil, fmt.Errorf(
-			"invalid tmux session name %q: must match ^[a-zA-Z0-9_.-]+$",
-			tmuxSession,
-		)
+	validatedSession, err := validateTmuxSessionName(tmuxSession)
+	if err != nil {
+		return nil, err
 	}
 
 	client, jumpClient, err := dialSSHClient(cfg)
 	if err != nil {
 		return nil, err
 	}
+	return newTmuxSSHSessionFromClient(id, title, validatedSession, cfg, client, jumpClient)
+}
+
+// newTmuxSSHSessionFromClient completes the remote tmux lifecycle over an
+// established SSH transport. It is the host-independent seam used by the
+// protocol contract tests and the production constructor alike.
+func newTmuxSSHSessionFromClient(
+	id, title, tmuxSession string,
+	cfg SSHConfig,
+	client, jumpClient *ssh.Client,
+) (*TmuxSSHSession, error) {
+	validatedSession, err := validateTmuxSessionName(tmuxSession)
+	if err != nil {
+		closeSSHResources(nil, client, jumpClient)
+		return nil, err
+	}
+	tmuxSession = validatedSession
 
 	sess, err := client.NewSession()
 	if err != nil {
