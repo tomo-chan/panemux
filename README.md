@@ -292,7 +292,7 @@ Nothing showing up? In order of likelihood:
 It has exactly three tools: read board status, read message history, and send messages to panes. It
 has **no shell, no filesystem access, and no network access** — it cannot write code, run tests, or
 open pull requests, and it is launched in a way that enforces this rather than relying on it being
-asked nicely (see [docs/security.md](docs/security/command-center.md#command-center-subprocess-execution)).
+asked nicely (see [docs/security/command-center.md](docs/security/command-center.md#command-center-subprocess-execution)).
 
 A message it sends is an ordinary message to the receiving agent, not a pre-authorized command. That
 agent's own confirmation behavior still applies, so "sent" is not "done".

@@ -55,7 +55,7 @@ export type ScanLabel = 'dashboard' | 'pane-settings'
 // same two counts read 10 and 11. That is why the spec has its own panemux
 // process and fixture (e2e/a11y.yml, port 4178) — the alternative is a gate
 // that fails on the order of the suite, which is principle 4's false positive
-// exactly. See quality-gateway.md's "Accessibility" section.
+// exactly. See docs/quality-gateway/measurements.md.
 //
 // **Lowering a ceiling is a manual edit to this map, and the run tells you
 // exactly what to write.** When a count comes in under its ceiling the scan

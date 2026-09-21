@@ -61,11 +61,11 @@ make check
 
 Test at the smallest unit that exercises the logic, not at the outermost entry point. Before implementing or declaring a feature covered, enumerate the behavioral factors — input shapes, state, operations, boundaries, compatibility and migration, persistence and side effects, frontend runtime validation — and cover their meaningful combinations. Do not stop at one happy path plus one error path. Use table-driven tests when the factors form a matrix.
 
-**Testability rule:** if production code would reach a global singleton directly, add an injectable override instead. Three seams exist and are the only supported way in:
+**Testability rule:** if production code calls `os.UserHomeDir()`, `DefaultPath()`, or another global singleton directly, add an injectable override so a test can substitute a controlled value. A struct field is the usual form — `Config.sshConfigPath` falls back to `sshconfig.DefaultPath()` only when the override is empty. Where the caller is a package-level function with nothing to hang a field on, there is a named seam package instead, and these three are the whole set:
 
-- `internal/homedir` — `homedir.Dir()`, never `os.UserHomeDir()` (enforced by `.golangci.yml`'s `forbidigo`), and never `t.Setenv("HOME", ...)`.
-- `internal/cachedir` — `cachedir.Dir()`, never `os.UserCacheDir()` (likewise enforced).
-- `internal/fileops` — every file panemux persists is written through `fileops.AtomicWrite` (or `CreateTemp`/`OpenFile`/`Chmod`). Nothing enforces this one.
+- `internal/homedir` — call `homedir.Dir()`, substitute with `homedir.SetForTest(t, dir)` or `homedir.SetFailingForTest(t, err)`. Never `os.UserHomeDir()` (`.golangci.yml`'s `forbidigo` fails the build on it outside that package), and never `t.Setenv("HOME", ...)`.
+- `internal/cachedir` — `cachedir.Dir()`, `cachedir.SetForTest`, `cachedir.SetFailingForTest`. Never `os.UserCacheDir()` (likewise enforced).
+- `internal/fileops` — every file panemux persists is written through `fileops.AtomicWrite` (or `CreateTemp`/`OpenFile`/`Chmod`); substitute with `fileops.SetOpsForTest(t, (&fileops.Spy{WriteErr: err}).Ops())`. Nothing enforces this one.
 
 None of the three is safe under `t.Parallel`: each is one unsynchronized package variable, so substitute them only from non-parallel tests.
 
@@ -126,15 +126,16 @@ A test that genuinely should not go red without its implementation is marked `//
 - `make check` must pass before `make build`.
 - `make check` must pass before reporting implementation complete.
 - There are no exceptions for frontend-only, docs-adjacent, or "small" code changes.
-- Test commands: `make test-go`, `make test-frontend`, `make test-e2e`, `make test`, `make test-hooks`, `make test-efficacy`, `make test-scenarios-check`, `make test-coverage-blocks`, `make test-mutation`, `make test-model-check`
+- Test commands: `make test-go`, `make test-frontend`, `make test-e2e`, `make test`, `make test-hooks`, `make test-efficacy`, `make test-scenarios-check`, `make test-docs-links`, `make test-coverage-blocks`, `make test-mutation`, `make test-model-check`
 - Ledger command: `make check-scenarios`
+- Documentation-link command: `make check-docs-links`
 - Pull-request-only gates: `make efficacy`, `COVERAGE_BLOCKS_BASE=origin/main make coverage-blocks`, and `MUTATION_BASE=origin/main make mutation` (all three fail the build — `make mutation` warned until #180's item 6 reached stage 4; see above)
 - Model-checking commands (outside `make check`, they need a JDK and `tla2tools.jar`): `make model-check`, `make model-check-write`
 - `make test-model-check` uses `python3` to run the transition exporter it tests. `python3` is **optional** for the same reason `jq` is below: without it those checks report themselves as skipped, so `make check` still works.
 - `make test-hooks` uses `jq` where it parses `settings.json` or a hook payload. `jq` is **optional**: without it those checks report themselves as skipped rather than passing or failing, so `make check` — and therefore `git push` — still works. Install it to actually run them.
 - Coverage commands: `make coverage-go`, `make coverage-frontend`, `make coverage-blocks`
-- Measurement (not a gate): `make bench` for terminal throughput, replay-buffer cost and relay polling. It asserts no threshold — see [docs/quality-gateway.md](docs/quality-gateway.md)'s "First measurements".
-- Accessibility ceiling: `make test-e2e` scans the dashboard and the pane settings dialog with axe-core and **fails when a violation count rises** above the value frozen in `CEILINGS` in `frontend/e2e/a11y-ceiling.ts`. A count may fall; a rule not listed has a ceiling of zero. After fixing a violation, lower the ceiling in that map and in the "Accessibility" table in [docs/quality-gateway.md](docs/quality-gateway.md) in the same change — the run prints the exact replacement line.
+- Measurement (not a gate): `make bench` for terminal throughput, replay-buffer cost and relay polling. It asserts no threshold — see [docs/quality-gateway/measurements.md](docs/quality-gateway/measurements.md).
+- Accessibility ceiling: `make test-e2e` scans the dashboard and the pane settings dialog with axe-core and **fails when a violation count rises** above the value frozen in `CEILINGS` in `frontend/e2e/a11y-ceiling.ts`. A count may fall; a rule not listed has a ceiling of zero. After fixing a violation, lower the ceiling in that map and in the "Accessibility" table in [docs/quality-gateway/measurements.md](docs/quality-gateway/measurements.md) in the same change — the run prints the exact replacement line.
 - Lint commands: `make lint-go`, `make lint-frontend`, `make lint`
 - Go lint includes `gofmt`, `go vet`, and `golangci-lint run ./...` using `.golangci.yml`.
 - `.golangci.yml`'s `forbidigo` rule is where a repository convention is enforced rather than remembered: it fails the build on any `os.UserHomeDir()` call outside `internal/homedir`. The testability rule above had been advice for long enough to accumulate 16 violations across nine packages before anyone counted them.
@@ -157,6 +158,8 @@ A test that genuinely should not go red without its implementation is marked `//
 - Two checks enforce this rather than leaving it to memory:
   - `make check-scenarios` (part of `make check`) resolves every path and Go test name an `auto` row names, and fails when one no longer exists. A row that names a renamed or deleted test reads as coverage and is worth nothing.
   - CI fails a pull request that changes `frontend/src`, `internal/api` or `internal/config` without touching `docs/scenarios.md`. Apply the `scenarios-exempt` label to a change that genuinely alters no use case.
+- `make check-docs-links` (also part of `make check`) checks the documentation's own integrity: every relative link resolves, every `#fragment` matches a heading in the file it names, and no label names a file other than the one it opens. That last one is the rule to know when moving a section between files — rewriting the target and leaving a label that still says `security.md` while the link opens `security/auth.md` misdirects a reader as surely as a 404 does, and nothing about the rendered page looks wrong.
+- When a document outgrows one file, split it into `docs/<name>/` and leave `docs/<name>.md` as the entry point: orientation, the rules that always apply, and a document map keyed by the section names the file used to carry.
 
 ### Security-sensitive implementation
 

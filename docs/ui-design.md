@@ -314,7 +314,7 @@ Agent Board (see [agent-board.md](agent-board.md)) introduces two new UI surface
 top of the principles above rather than replacing them:
 
 - A **dashboard** answering two questions about each board-enabled pane — is it actually on the
-  board, and what is it doing right now (see [agent-board.md's Status
+  board, and what is it doing right now (see [agent-board/message-flow.md's Status
   self-report](agent-board/message-flow.md#status-self-report-and-message-flow)) — **implemented** as
   `BoardDashboardPanel.tsx`, a right-anchored overlay panel following the same structure and styling
   tokens as `CommandHistoryPanel.tsx` (dark `#252526` panel, `#444` border, 420px wide, backdrop
@@ -336,7 +336,7 @@ top of the principles above rather than replacing them:
     itself by running git, and already renders them in the pane header and the workspace bar. The
     board's copies are self-reported and go stale silently, so showing both meant the same pane
     could display two different branches in two places. Dropping them also removed the only `<a>` in
-    this component tree; see [security.md's Agent-reported values in the
+    this component tree; see [security/agent-board.md's Agent-reported values in the
     dashboard](security/agent-board.md#agent-reported-values-in-the-dashboard-ui) for what that changes.
   - It extends the existing workspace-bar/pane-card status vocabulary (**Integrated workspace
     summaries** and **Workspace pane groups**, above) rather than introduce a competing one: the same
@@ -377,7 +377,7 @@ Concrete decisions this section originally deferred to implementation time:
   many shells/readline setups a terminal pane might be running, and would be captured as literal pane
   input rather than reaching the browser as a global shortcut. Registered on the keydown capture
   phase specifically so it still fires while a terminal pane has focus.
-  See [agent-board.md's UI subsection](agent-board/command-center.md#ui) for the full rationale.
+  See [agent-board/command-center.md's UI subsection](agent-board/command-center.md#ui) for the full rationale.
 - **Color treatment**: reuses this document's existing dark palette exactly (`#252526` panels, `#444`
   borders, `#d4d4d4` body text, `#4ec9b0` for the user's own prompt echo, `#f44747` for errors) — no
   new colors were introduced for Agent Board.

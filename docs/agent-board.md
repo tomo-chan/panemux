@@ -10,7 +10,7 @@
 > /api/board/messages`, `POST /api/board/broadcast` — are implemented and tested.
 > `bearerAuthMiddleware` is wired onto the `/api/board/*` sub-route, not onto any pre-existing
 > `/api/*` route or `/ws/{sessionID}` — see [Security model](agent-board/security-model.md#security-model) and
-> [security.md](security/auth.md#auth-token-and-transport-encryption) for why those stay unauthenticated
+> [security/auth.md](security/auth.md#auth-token-and-transport-encryption) for why those stay unauthenticated
 > (tracked as a separate follow-up issue, orthogonal to both phases). `setupBoard` in `board.go`
 > (`package main`) builds the `AgmsgClient`s and pane→host map from config at startup and wires both
 > the relay goroutine and the bootstrap watcher into `main.go`'s lifecycle. A remote host's
@@ -30,7 +30,7 @@
 > `board_broadcast`, backed by an `HTTPBoardAPIClient` that calls panemux's own REST API) implement
 > the design in [Command center](agent-board/command-center.md#command-center) below as written, with one addition the original
 > design didn't anticipate: **`GET /api/session-token`** (deliberately unauthenticated, see
-> [API additions](agent-board/api-and-config.md#api-additions) and [docs/behavior.md](behavior/board-api.md#get-apisession-token)) so the
+> [API additions](agent-board/api-and-config.md#api-additions) and [docs/behavior/board-api.md](behavior/board-api.md#get-apisession-token)) so the
 > browser dashboard itself can learn the bearer token needed to authenticate `/api/board/*` and
 > `/ws/board-command` — nothing in the original design specified how the frontend, as opposed to the
 > command center subprocess, would ever learn a token that may have been randomly generated on first
@@ -50,9 +50,9 @@
 > a `-`-prefixed prompt be parsed as a CLI flag, and separately made every ordinary (non-flag) prompt
 > fail outright due to a variadic-flag argv bug — meaning the command center had never actually
 > completed a successful query before the fix.** See
-> [security.md's Command center subprocess execution](security/command-center.md#command-center-subprocess-execution)
+> [security/command-center.md's Command center subprocess execution](security/command-center.md#command-center-subprocess-execution)
 > for the full detail and how each was verified, and
-> [security.md's Auth token and transport encryption](security/auth.md#auth-token-and-transport-encryption)
+> [security/auth.md's Auth token and transport encryption](security/auth.md#auth-token-and-transport-encryption)
 > for a related fix to `GET /api/session-token`'s own guard (it does not rely on CORS, contrary to an
 > earlier revision of that section). A live, end-to-end query through the real browser → WS → Runner →
 > real `claude` subprocess stack was used to confirm the fix, not just the unit tests.
@@ -64,7 +64,7 @@
 > [ui-design.md's Agent Board UI section](ui-design.md#agent-board-ui) for the full presentation
 > detail. It required one addition the Phase 3 design didn't originally anticipate:
 > **`agent_board_enabled`** on `GET /api/session-token`'s response (see
-> [API additions](agent-board/api-and-config.md#api-additions) and [docs/behavior.md](behavior/board-api.md#get-apisession-token)), because
+> [API additions](agent-board/api-and-config.md#api-additions) and [docs/behavior/board-api.md](behavior/board-api.md#get-apisession-token)), because
 > `command_center_enabled` alone can't gate the dashboard button — a config can enable `agent_board`
 > without the command center, or vice versa, and the frontend has no other cheap way to learn whether
 > any pane has `agent_board.enabled: true` without re-fetching and walking the full layout tree.

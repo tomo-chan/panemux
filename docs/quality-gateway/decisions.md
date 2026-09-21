@@ -479,7 +479,7 @@ coverage, one level up.
 *It is bounded, and the bound is written down.* `MaxEntries` caps how many occurrences one key may
 hold (4 as committed). A defect appearing only above that is outside what this says anything about.
 That is the ordinary limitation of bounded model checking and it is stated in
-[agent-board.md](../agent-board/model-checking.md#state-machine-model-checking) rather than left for a reader to infer
+[agent-board/model-checking.md](../agent-board/model-checking.md#state-machine-model-checking) rather than left for a reader to infer
 from the `.cfg`.
 
 *Every property was perturbed before being trusted.* Each of `Conservation`, `ConsumeNeverForges` and

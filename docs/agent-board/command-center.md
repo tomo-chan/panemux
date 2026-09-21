@@ -52,7 +52,7 @@
   the real CLI, it does not: it reports the *ambient* session id of the Claude Code session the
   environment already belongs to, so the command center silently attached itself to a conversation it
   does not own — one holding full tool permissions, while the command center is launched with three.
-  See [security.md's command center section](../security/command-center.md#command-center-subprocess-execution).
+  See [security/command-center.md's command center section](../security/command-center.md#command-center-subprocess-execution).
 
   The subprocess is also isolated from the operator's own configuration: `--setting-sources` is passed
   with an empty value (no user, project or local settings, so operator hooks never fire inside it),
@@ -63,7 +63,7 @@
   `~/.config/panemux/command-center/` to refine those instructions; it is optional. No settings file is
   accepted from any source — a settings value can nullify `--allowedTools`, so panemux sends only its
   own fixed, narrowing document (currently `{"sandbox":{"enabled":true}}`). See
-  [security.md](../security/command-center.md#command-center-subprocess-execution).
+  [security/command-center.md](../security/command-center.md#command-center-subprocess-execution).
 - **Permissions.** The subprocess never receives `--dangerously-skip-permissions`. It has no PTY to
   surface an interactive approval prompt through, and this design does not substitute a blanket
   bypass for that missing prompt. Instead panemux runs a narrow, purpose-built MCP server exposing
@@ -128,7 +128,7 @@ flow still applies.
   never became a query — and a non-fatal failure around a query rides whichever of the two it ends
   with, as `"warnings":["..."]`, rather than claiming the query itself failed. Today the only such
   failure is a history write that could not land; see
-  [behavior.md](../behavior/websocket.md#command-center-websocket-protocol) for the full frame contract.
+  [behavior/websocket.md](../behavior/websocket.md#command-center-websocket-protocol) for the full frame contract.
 - `GET /api/board/command/history`: returns the command center's own turn-by-turn history. This is
   **not** re-derived from Claude Code's transcript file after the fact — per [Design
   principles](../agent-board.md#design-principles)'s "ask, don't reverse-engineer" rule, panemux persists what it

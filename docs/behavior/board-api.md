@@ -7,7 +7,7 @@
 Full design and rationale live in [agent-board.md](../agent-board.md); this section documents only the
 request/response shapes and status codes of what is actually implemented today. Every `/api/board/*`
 endpoint in this section requires `Authorization: Bearer <server.auth_token>` — see
-[security.md](../security/auth.md#auth-token-and-transport-encryption). A missing or incorrect token returns
+[security/auth.md](../security/auth.md#auth-token-and-transport-encryption). A missing or incorrect token returns
 `401` before the handler runs. The one exception is `GET /api/session-token`, documented in its own
 subsection below, which is deliberately unauthenticated.
 
@@ -16,13 +16,13 @@ subsection below, which is deliberately unauthenticated.
 Returns the bearer token the browser dashboard needs to authenticate every other `/api/board/*`
 request and the `/ws/board-command` connection — there is no other way for the frontend's own
 JavaScript to learn a token that may have been randomly generated on first run (see
-`config.Config.EnsureAuthToken`, [security.md](../security/auth.md#auth-token-and-transport-encryption)) and
+`config.Config.EnsureAuthToken`, [security/auth.md](../security/auth.md#auth-token-and-transport-encryption)) and
 is never sent to the browser any other way. **This endpoint is deliberately not behind
 `bearerAuthMiddleware`** — nothing could bootstrap the token without already knowing it otherwise.
 
 It is gated by its own, narrower check instead: the caller's `RemoteAddr` must be a loopback IP *and*
 its `Host` header must also name a loopback authority (`localhost`/`127.0.0.1`/`::1`, any port). Both
-are required — see [security.md's Auth token and transport
+are required — see [security/auth.md's Auth token and transport
 encryption](../security/auth.md#auth-token-and-transport-encryption) for why RemoteAddr alone doesn't defend
 against DNS rebinding, and why relying on CORS here (an earlier revision of this document's claim) was
 wrong. A non-loopback `server.host` deployment cannot use this endpoint at all, by design.
@@ -52,7 +52,7 @@ that path and was silently caught by the auth middleware it was supposed to bypa
 
 **Bootstrap flow** (not a REST/WS endpoint — a background behavior). For every pane with
 `agent_board.enabled: true`, panemux polls every 5s for a live, agmsg-detectable coding-agent
-process (one of six agent types; see [agent-board.md's Bootstrap
+process (one of six agent types; see [agent-board/bootstrap.md's Bootstrap
 flow](../agent-board/bootstrap.md#bootstrap-flow)) and, once detected on two consecutive polls and agmsg is
 confirmed present on that pane's host, writes a one-time onboarding instruction directly into the
 pane's terminal — visible in the browser the same way any other terminal output is. This happens

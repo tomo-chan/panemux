@@ -5,7 +5,7 @@
 ## Command Center WebSocket Protocol
 
 Endpoint: `GET /ws/board-command` — the Spotlight palette's chat connection. Full design lives in
-[agent-board.md](../agent-board/command-center.md#command-center).
+[agent-board/command-center.md](../agent-board/command-center.md#command-center).
 
 **Authentication is different from every other route on this page.** Browsers cannot set an
 `Authorization` header on a WebSocket upgrade request, so the token instead travels as a WebSocket
@@ -29,7 +29,7 @@ Once connected, the client may send any number of prompts sequentially over the 
     `{"type":"done","warnings":["persisting command center history: ..."]}`. The key is omitted
     entirely unless something around the query failed; see the paragraph below
   - `{"type":"busy"}` — a query was already in flight against the command center's single session
-    (see [agent-board.md's Concurrency](../agent-board/command-center.md#process-lifecycle)); the new prompt was
+    (see [agent-board/command-center.md's Concurrency](../agent-board/command-center.md#process-lifecycle)); the new prompt was
     rejected outright, not queued
 
 A client that disconnects mid-query does not stop the underlying subprocess or corrupt the next

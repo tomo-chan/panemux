@@ -130,7 +130,7 @@ behavior is the signal D4 was built for.
 where nothing observable distinguishes them: a reaper that ticks once a minute cannot be waited on in
 a test. Splitting the decision into the pure `resolveSweepInterval` made all three cases assertable,
 the same move `browserOpenArgv` is split out of `openChrome` for (see
-[security.md](../security/command-execution.md#launching-the-operators-browser---open)) and the same thing
+[security/command-execution.md](../security/command-execution.md#launching-the-operators-browser---open)) and the same thing
 DEVELOPMENT.md's testability rule asks for. Where a boundary is unverifiable in place, extracting the
 decision is the fix; adding a test that asserts the code's own constant back to itself is not.
 

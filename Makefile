@@ -1,6 +1,7 @@
 .PHONY: all build build-frontend build-backend dev clean run install-deps install-deps-ci install-hooks \
         test test-go test-frontend test-e2e test-agmsg-contract test-hooks test-efficacy efficacy \
-        test-scenarios-check check-scenarios coverage-blocks test-coverage-blocks \
+        test-scenarios-check check-scenarios check-docs-links test-docs-links \
+        coverage-blocks test-coverage-blocks \
         mutation test-mutation bench \
         model-check model-check-write test-model-check \
         fmt fmt-go fmt-check-go \
@@ -36,8 +37,8 @@ install-hooks:
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
-test: test-go test-frontend test-hooks test-efficacy test-scenarios-check test-coverage-blocks \
-      test-mutation test-model-check
+test: test-go test-frontend test-hooks test-efficacy test-scenarios-check test-docs-links \
+      test-coverage-blocks test-mutation test-model-check
 
 test-go:
 	go test ./... -v -race
@@ -90,6 +91,29 @@ check-scenarios:
 # directions are asserted.
 test-scenarios-check:
 	sh scripts/scenarios_check_test.sh
+
+# ── Documentation links (gate G0) ─────────────────────────────────────────────
+#
+# Every relative link in this repository's markdown must reach something that
+# exists, its `#fragment` must match a real heading, and its label must not
+# name a file other than the one it opens.
+#
+# The third is what a plain link checker leaves out and what a documentation
+# split actually breaks: the rewrite changes targets and leaves labels behind,
+# so a reader is told to open security.md and lands in security/auth.md, and
+# nothing about the rendered page looks wrong. #248 shipped 41 of those and two
+# broken anchors, in a pull request whose description said every link had been
+# checked by hand. That is the measurement this gate exists on.
+#
+# Hermetic, needs only sh/awk/find, under a second, so it sits inside
+# `make check`.
+check-docs-links:
+	sh scripts/docs_links_check.sh
+
+# The checker's own tests, including the multi-line-label case that is the
+# reason it reads whole files rather than lines.
+test-docs-links:
+	sh scripts/docs_links_check_test.sh
 
 # ── Efficacy: red-check (gate G4(b)) ──────────────────────────────────────────
 #
@@ -388,7 +412,7 @@ lint-frontend:
 
 # ── Quality gate (lint + test + coverage) ─────────────────────────────────────
 
-check: build-frontend lint test coverage check-scenarios
+check: build-frontend lint test coverage check-scenarios check-docs-links
 
 # ── Build ─────────────────────────────────────────────────────────────────────
 

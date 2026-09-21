@@ -115,7 +115,7 @@ Documentation is part of the product here: an operator cannot use Agent Board wi
 agmsg is an external tool that promises compatibility only for reading through `api.sh`, while
 panemux's write path depends on `send.sh` and its bootstrap on `join.sh`/`actas-claim.sh`/`watch.sh`.
 These rows are what turns "an agmsg release broke us" from a user-discovered outage into a CI signal.
-See [agent-board.md](agent-board/agmsg-contract.md#agmsg-compatibility-contract) for the two tiers.
+See [agent-board/agmsg-contract.md](agent-board/agmsg-contract.md#agmsg-compatibility-contract) for the two tiers.
 
 | # | Scenario | Expected | Verification |
 |---|---|---|---|
@@ -251,7 +251,7 @@ Stated explicitly, because an absent row reads as an oversight and these are dec
   replay-buffer cost and the relay's polling cost, and asserts no threshold — the `publish` rows
   move by up to 2.9× between runs of the same binary on the same machine, so a threshold chosen
   from them would fire on container noise. That is not a scenario row: there is no expected outcome
-  to state yet. See [quality-gateway.md](quality-gateway.md)'s "First measurements". The one
+  to state yet. See [quality-gateway/measurements.md](quality-gateway/measurements.md). The one
   exception is where a performance finding turned out to be about work done rather than time taken:
   the replay buffer's steady-state cost is asserted as an allocation count in `internal/session`,
   which has none of a timing's spread. H15b is the row it sits under.

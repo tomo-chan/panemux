@@ -28,7 +28,7 @@ can never actually fail for correctly-encoded input — it is a regex-allowlist 
 one that can reject real input. No CodeQL scan has been run against this code to confirm the taint
 chain is actually recognized as broken in practice; treat it as a structurally-motivated best effort,
 not a verified one, until a real scan says otherwise — see
-[agent-board.md's Security model](../agent-board/security-model.md#security-model) for the same caveat stated in more
+[agent-board/security-model.md's Security model](../agent-board/security-model.md#security-model) for the same caveat stated in more
 detail. `team`/`from`/`to`
 identifiers are regex-allowlisted directly (`^[A-Za-z0-9_.-]+$`) for the same reason, since agmsg's
 own `--agent` argument validation is not a claim panemux can rely on — it runs inside the remote
@@ -85,7 +85,7 @@ board-related or not. `agent_board.team`, a pane's own ID, and the agmsg-recogni
 `RunBoardCommand` call bootstrap itself makes; they are operator config or panemux's own fixed
 detection-table output either way, not external request data. The same holds for the
 `actas-claim.sh`/`watch.sh` invocations the instruction gained for `claude-code` panes (see
-[agent-board.md](../agent-board/agmsg-integration.md#two-panes-in-one-project-directory)): the
+[agent-board/agmsg-integration.md](../agent-board/agmsg-integration.md#two-panes-in-one-project-directory)): the
 script names and the `$CLAUDE_CODE_SESSION_ID` reference are compile-time literals, the value behind
 that variable is expanded by the agent's own shell and never by panemux, and no part of it reaches
 an `exec.Command` argv.

@@ -14,7 +14,7 @@ on later runs, and never write it into `config.yaml` itself. An auth token sent 
 non-loopback hop can be replayed and the request it authenticates can be tampered with in transit,
 so the token only provides real protection once the operator has placed a TLS-terminating reverse
 proxy, SSH tunnel, or VPN in front of the non-loopback listener. See
-[agent-board.md](../agent-board/security-model.md#security-model) for the full rationale.
+[agent-board/security-model.md](../agent-board/security-model.md#security-model) for the full rationale.
 
 `internal/server`'s constant-time bearer-token middleware (`bearerAuthMiddleware`, `internal/server/auth.go`)
 is implemented, unit-tested, and wired in `registerRoutes` — but **only** onto the
