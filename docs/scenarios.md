@@ -115,7 +115,7 @@ Documentation is part of the product here: an operator cannot use Agent Board wi
 agmsg is an external tool that promises compatibility only for reading through `api.sh`, while
 panemux's write path depends on `send.sh` and its bootstrap on `join.sh`/`actas-claim.sh`/`watch.sh`.
 These rows are what turns "an agmsg release broke us" from a user-discovered outage into a CI signal.
-See [agent-board.md](agent-board.md#agmsg-compatibility-contract) for the two tiers.
+See [agent-board.md](agent-board/agmsg-contract.md#agmsg-compatibility-contract) for the two tiers.
 
 | # | Scenario | Expected | Verification |
 |---|---|---|---|

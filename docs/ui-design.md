@@ -315,7 +315,7 @@ top of the principles above rather than replacing them:
 
 - A **dashboard** answering two questions about each board-enabled pane — is it actually on the
   board, and what is it doing right now (see [agent-board.md's Status
-  self-report](agent-board.md#status-self-report-and-message-flow)) — **implemented** as
+  self-report](agent-board/message-flow.md#status-self-report-and-message-flow)) — **implemented** as
   `BoardDashboardPanel.tsx`, a right-anchored overlay panel following the same structure and styling
   tokens as `CommandHistoryPanel.tsx` (dark `#252526` panel, `#444` border, 420px wide, backdrop
   click and `Escape` to dismiss) rather than a new visual language. It opens via an "Agent Board"
@@ -337,7 +337,7 @@ top of the principles above rather than replacing them:
     board's copies are self-reported and go stale silently, so showing both meant the same pane
     could display two different branches in two places. Dropping them also removed the only `<a>` in
     this component tree; see [security.md's Agent-reported values in the
-    dashboard](security.md#agent-reported-values-in-the-dashboard-ui) for what that changes.
+    dashboard](security/agent-board.md#agent-reported-values-in-the-dashboard-ui) for what that changes.
   - It extends the existing workspace-bar/pane-card status vocabulary (**Integrated workspace
     summaries** and **Workspace pane groups**, above) rather than introduce a competing one: the same
     8px status-dot-plus-`${color}33`-ring treatment and the same pill shapes as `WorkspaceTabs.tsx`.
@@ -360,7 +360,7 @@ top of the principles above rather than replacing them:
     information available for that pane. No new colors were introduced for the dashboard, matching
     the rest of Agent Board's UI (see below).
 - A **Spotlight-style command palette** (`CommandPalette.tsx`) and **history panel**
-  (`CommandHistoryPanel.tsx`) for the [command center](agent-board.md#command-center) —
+  (`CommandHistoryPanel.tsx`) for the [command center](agent-board/command-center.md#command-center) —
   **implemented.** The palette follows this document's existing **Modal Dialogs** pattern (a
   higher-friction, focused interaction, not compressed into inline chrome): dark `#252526` panel,
   `#444` border, backdrop click and `Escape` to dismiss, matching `AddSSHHostDialog`'s own styling
@@ -377,7 +377,7 @@ Concrete decisions this section originally deferred to implementation time:
   many shells/readline setups a terminal pane might be running, and would be captured as literal pane
   input rather than reaching the browser as a global shortcut. Registered on the keydown capture
   phase specifically so it still fires while a terminal pane has focus.
-  See [agent-board.md's UI subsection](agent-board.md#ui) for the full rationale.
+  See [agent-board.md's UI subsection](agent-board/command-center.md#ui) for the full rationale.
 - **Color treatment**: reuses this document's existing dark palette exactly (`#252526` panels, `#444`
   borders, `#d4d4d4` body text, `#4ec9b0` for the user's own prompt echo, `#f44747` for errors) — no
   new colors were introduced for Agent Board.

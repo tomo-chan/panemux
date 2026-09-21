@@ -11,7 +11,7 @@ import (
 // LocalAgmsgPresent reports whether scripts/api.sh exists under agmsgPath
 // (already ~-expanded to an absolute path) on the local filesystem. This is
 // the same "detection, not installation" check
-// docs/agent-board.md#integration-with-agmsg specifies for bootstrap
+// docs/agent-board/agmsg-integration.md#integration-with-agmsg specifies for bootstrap
 // eligibility: a false result means the operator hasn't installed agmsg
 // there, not that panemux failed to check.
 func LocalAgmsgPresent(agmsgPath string) bool {

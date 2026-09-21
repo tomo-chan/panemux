@@ -167,7 +167,8 @@ test-coverage-blocks:
 # What changed is that those survivors now have a per-type waiver to go to
 # (#236), a mutant with no verdict can no longer be dropped silently (#235),
 # and the size of a red run is known — about 5 mutants per 317 changed lines
-# (#237). Decision D9 in docs/quality-gateway.md carries the measurements.
+# (#237). Decision D9 in docs/quality-gateway/decisions.md carries the
+# measurements.
 #
 # SKIPPED is the exception and does not fail on its own: gremlins sets it from
 # its own diff, whose changed-line arithmetic is an approximation, so it is two
@@ -278,7 +279,7 @@ test-model-check:
 # ── Coverage (≥ 80 %) ─────────────────────────────────────────────────────────
 #
 # The threshold is deliberately NOT raised above 80 %: see decision D1 in
-# docs/quality-gateway.md. Coverage is only meaningful as a lower bound, and
+# docs/quality-gateway/decisions.md. Coverage is only meaningful as a lower bound, and
 # the cheapest way to satisfy a higher one is to generate tautological tests,
 # which lowers protection against regressions and resistance to refactoring at
 # the same time. What gets strengthened is the SCOPE below, never the number.
