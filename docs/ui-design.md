@@ -307,15 +307,12 @@ Using separate colors avoids mixing "this needs your attention" with "you can dr
 
 ## Agent Board UI
 
-> **Status: implemented.** The command center palette, history panel, and the status dashboard
-> (`BoardDashboardPanel.tsx`) all ship. Full design lives in [agent-board.md](agent-board.md).
-
-Agent Board (see [agent-board.md](agent-board.md)) introduces two new UI surfaces, both layered on
+Agent Board (see [agent-board.md](agent-board.md)) has two UI surfaces, both layered on
 top of the principles above rather than replacing them:
 
 - A **dashboard** answering two questions about each board-enabled pane — is it actually on the
   board, and what is it doing right now (see [agent-board/message-flow.md's Status
-  self-report](agent-board/message-flow.md#status-self-report-and-message-flow)) — **implemented** as
+  self-report](agent-board/message-flow.md#status-self-report-and-message-flow)) — rendered by
   `BoardDashboardPanel.tsx`, a right-anchored overlay panel following the same structure and styling
   tokens as `CommandHistoryPanel.tsx` (dark `#252526` panel, `#444` border, 420px wide, backdrop
   click and `Escape` to dismiss) rather than a new visual language. It opens via an "Agent Board"
@@ -346,11 +343,9 @@ top of the principles above rather than replacing them:
     `waiting` → `#f4bf4f` (deliberately reusing the existing attention-gold pill color, since
     "waiting" is the same kind of "needs a look" signal), and any other or missing value → a neutral
     `#4b5565` rather than a crash or blank dot.
-  - **The summary wraps; everything else on the card stays on one line.** Every field started out
-    sharing one nowrap-plus-ellipsis style, which clipped a real summary to roughly the first 45
-    characters in a 420px panel — so the board could report that eight panes were `working` without
-    saying what any of them was working on, which is the question a board of many panes exists to
-    answer. The summary now wraps, bounded to four lines via `-webkit-line-clamp` so one talkative
+  - **The summary wraps; everything else on the card stays on one line.** A summary needs enough
+    space to explain what a pane is working on, rather than being clipped like a short identifier.
+    It wraps and is bounded to four lines via `-webkit-line-clamp` so one talkative
     agent cannot push every other pane below the fold. `last_tool` is a bare tool name and keeps the
     single-line treatment. The pane title is shown next to the ID for the same readability reason —
     a column of raw IDs stops being scannable as soon as there are more than a couple of panes —
@@ -360,8 +355,8 @@ top of the principles above rather than replacing them:
     information available for that pane. No new colors were introduced for the dashboard, matching
     the rest of Agent Board's UI (see below).
 - A **Spotlight-style command palette** (`CommandPalette.tsx`) and **history panel**
-  (`CommandHistoryPanel.tsx`) for the [command center](agent-board/command-center.md#command-center) —
-  **implemented.** The palette follows this document's existing **Modal Dialogs** pattern (a
+  (`CommandHistoryPanel.tsx`) for the [command center](agent-board/command-center.md#command-center).
+  The palette follows this document's existing **Modal Dialogs** pattern (a
   higher-friction, focused interaction, not compressed into inline chrome): dark `#252526` panel,
   `#444` border, backdrop click and `Escape` to dismiss, matching `AddSSHHostDialog`'s own styling
   tokens rather than introducing new ones. The history panel follows the same overlay pattern as a
@@ -371,7 +366,7 @@ top of the principles above rather than replacing them:
   element had it before the overlay opened, once the overlay closes or unmounts — so dismissing any
   of them (Escape, backdrop click, or the close button) never strands focus on a removed panel.
 
-Concrete decisions this section originally deferred to implementation time:
+Concrete interaction decisions:
 
 - **Palette keybinding**: `Cmd/Ctrl+Shift+K`, not plain `Cmd/Ctrl+K` — the latter is already bound in
   many shells/readline setups a terminal pane might be running, and would be captured as literal pane

@@ -1,6 +1,6 @@
 # Agent Board: architecture and package layout
 
-> Part of the [Agent Board design](../agent-board.md). Read that document's status note first — it says which parts of this design are shipped.
+> Part of the current [Agent Board design](../agent-board.md).
 
 ## Architecture
 
@@ -235,10 +235,9 @@ was already doing.
 - `RemoteAgmsgClient` runs the same two scripts on the remote host over the SSH exec channel and
   single-quote-escapes **every** argument to **every** call — reads included, `team` and `--agent`
   included, not just writes — before building the remote command string, using the same
-  `shellQuotePath`-style discipline `internal/session/ssh.go` already applies to `cwd`. This is a
-  correction from an earlier revision of this document, which claimed `api.sh`'s arguments were
-  all digit-validated and therefore needed no escaping; that claim was wrong for `--agent` (see
-  [Integration with agmsg](agmsg-integration.md#integration-with-agmsg)), and in any case agmsg's own validation runs
+  `shellQuotePath`-style discipline `internal/session/ssh.go` already applies to `cwd`. This is
+  required because `api.sh`'s arguments are not all digit-validated: `--agent` is free text (see
+  [Integration with agmsg](agmsg-integration.md#integration-with-agmsg)). In any case agmsg's own validation runs
   *inside the already-started remote shell process*, after panemux's command string has already
   been parsed — it cannot retroactively protect the string-construction step. `send.sh` does its
   own SQL escaping internally, so panemux never needs a second, SQL-literal escaping layer of its

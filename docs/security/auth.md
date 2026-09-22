@@ -5,7 +5,7 @@
 ### Auth token and transport encryption
 
 `internal/config`'s `ServerConfig.AuthToken` (`server.auth_token` in `config.yaml`) and the
-non-loopback-requires-token validation rule are implemented: panemux does not terminate TLS itself,
+non-loopback-requires-token validation rule work as follows: panemux does not terminate TLS itself,
 `server.host` defaults to `127.0.0.1`, and if it is set to a non-loopback address,
 `server.auth_token` must also be set, or startup fails validation (`internal/config/validate.go`,
 alongside the existing `server.port` range check). When left empty, `Config.Load`/`Default`
@@ -17,18 +17,17 @@ proxy, SSH tunnel, or VPN in front of the non-loopback listener. See
 [agent-board/security-model.md](../agent-board/security-model.md#security-model) for the full rationale.
 
 `internal/server`'s constant-time bearer-token middleware (`bearerAuthMiddleware`, `internal/server/auth.go`)
-is implemented, unit-tested, and wired in `registerRoutes` — but **only** onto the
+is wired in `registerRoutes` — but **only** onto the
 `api.BoardRoutePrefix` (`/api/board`) sub-router (`GET /status`, `GET /messages`, `POST /broadcast`,
 `GET /command/history`), not onto any pre-existing `/api/*` route or `/ws/{sessionID}`. Widening it to
 those routes without a matching frontend change would break every existing, currently-unauthenticated
 request, so that remains a separate, larger change.
 
-**Which package owns which half of that sentence matters, because it changed.** The route table
+**Which package owns which half of that sentence matters.** The route table
 itself — every path, method and the `r.Route` nesting, including which routes sit under
 `BoardRoutePrefix` — lives in `internal/api`'s `Handler.Mount` (`internal/api/routes.go`), so that
 `internal/server`'s production wiring and `internal/api`'s own handler tests cannot describe
-different routes; they previously could, and had already drifted, with `/api/board/*` registered flat
-and with no middleware in the test copy. **Choosing the middleware stays with `internal/server`**:
+different routes. **Choosing the middleware stays with `internal/server`**:
 `registerRoutes` passes `bearerAuthMiddleware(authToken)` as `Mount`'s `boardAuth` argument, and the
 handler tests pass `nil`. A test that mounts the board routes unauthenticated is therefore no longer
 asserting anything about the shipped auth posture, by construction — that assertion lives only in
@@ -46,14 +45,15 @@ the list of board routes **from the router itself** with `chi.Walk` rather than 
 `/api/board/*` route added later — or, the failure this actually guards, one registered outside the
 authenticated sub-router — is covered the day it is registered, without anyone remembering to extend
 a list. It also pins the complete route table, so a route cannot silently appear, move, or be renamed.
-Both properties were confirmed by perturbation, not assumed: registering a *reachable*
+Both properties are confirmed by perturbation: registering a *reachable*
 `/api/board/leaked` outside the sub-router fails the auth test, and renaming a route fails the table
 test. One nuance is worth recording, because it bounds what the auth test alone proves: a
 `/api/board/*` route registered inside the `/api` sub-router is *shadowed* by the `/api/board/*`
 mount, so the probe still gets its `401` from the middleware and the auth test passes — what catches
 that case is the table test, which lists a route the router can never actually reach. The two tests
 are complementary, not redundant.
-See [agent-board.md](../agent-board.md)'s status note.
+The route-wiring incident and resulting single-source decision are recorded in the
+[quality-gateway design decisions](../quality-gateway/decisions.md).
 
 **`WS /ws/board-command` cannot use the `Authorization` header at all** — browsers do not allow a
 WebSocket upgrade request to carry arbitrary headers. `internal/ws/board_command.go`'s
@@ -74,9 +74,8 @@ unauthenticated probe to even find.
 to let the browser dashboard learn the token it needs for every route above — there is no other way
 for client-side JavaScript to learn a value that may have been randomly generated on first run.
 
-**This endpoint does NOT rely on `corsMiddleware`/CORS for protection, despite an earlier revision of
-this document claiming exactly that.** That claim was wrong and was caught by an adversarial review,
-not by any test: CORS only controls whether a cross-origin *script* can read a response body — it
+**This endpoint does NOT rely on `corsMiddleware`/CORS for protection.** CORS only controls whether
+a cross-origin *script* can read a response body — it
 never rejects the request from reaching the handler, and a non-browser client (`curl`, any process on
 the LAN) ignores CORS entirely. Since this token is the only thing gating every other
 `/api/board/*` route (see above) and `internal/config/validate.go`'s own non-loopback-requires-token
@@ -142,13 +141,14 @@ larger follow-up, out of scope for the command center feature this guard was add
 
 It is deliberately registered at `/api/session-token`, **not** `/api/board/session-token`: chi routes any
 path starting with `/api/board/` into the `bearerAuthMiddleware`-wrapped sub-router regardless of
-where else a handler for that literal path is registered — an earlier revision of this endpoint lived
-at that path and was silently caught by the very middleware it exists to bypass, discovered only by
-an end-to-end `curl` check against the real running server, not by any handler-level unit test (those
-construct their own flat test router and never exercise chi's actual mount-precedence behavior).
+where else a handler for that literal path is registered. A handler-level unit test with a flat test
+router does not exercise chi's actual mount-precedence behavior.
 `internal/server/board_routes_test.go`'s `TestServer_SessionTokenRoute_RemainsUnauthenticated` is a
 regression test against the real `server.New()`-constructed router specifically because a
 handler-level test would not have caught this class of bug.
+
+The endpoint's design history is recorded in
+[DECISIONLOG.md](../DECISIONLOG.md#browser-clients-obtain-the-board-token-from-a-dedicated-bootstrap-endpoint-2026-08-14-pr-170).
 
 **The command center's own MCP config file is the one place this feature writes the bearer token to
 disk, deliberately temporarily.** `internal/commandcenter.BuildMCPConfig` writes a JSON file (mode

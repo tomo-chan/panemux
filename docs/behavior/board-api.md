@@ -4,8 +4,8 @@
 
 ## Agent Board REST API
 
-Full design and rationale live in [agent-board.md](../agent-board.md); this section documents only the
-request/response shapes and status codes of what is actually implemented today. Every `/api/board/*`
+Full design and rationale live in [agent-board.md](../agent-board.md); this section documents the
+current request/response shapes and status codes. Every `/api/board/*`
 endpoint in this section requires `Authorization: Bearer <server.auth_token>` — see
 [security/auth.md](../security/auth.md#auth-token-and-transport-encryption). A missing or incorrect token returns
 `401` before the handler runs. The one exception is `GET /api/session-token`, documented in its own
@@ -23,9 +23,9 @@ is never sent to the browser any other way. **This endpoint is deliberately not 
 It is gated by its own, narrower check instead: the caller's `RemoteAddr` must be a loopback IP *and*
 its `Host` header must also name a loopback authority (`localhost`/`127.0.0.1`/`::1`, any port). Both
 are required — see [security/auth.md's Auth token and transport
-encryption](../security/auth.md#auth-token-and-transport-encryption) for why RemoteAddr alone doesn't defend
-against DNS rebinding, and why relying on CORS here (an earlier revision of this document's claim) was
-wrong. A non-loopback `server.host` deployment cannot use this endpoint at all, by design.
+encryption](../security/auth.md#auth-token-and-transport-encryption) for why RemoteAddr alone does not defend
+against DNS rebinding and CORS is not an authorization boundary. A non-loopback `server.host`
+deployment cannot use this endpoint at all, by design.
 
 Response:
 
@@ -33,7 +33,7 @@ Response:
 { "token": "a1b2c3...", "command_center_enabled": true, "agent_board_enabled": true }
 ```
 
-`agent_board_enabled` (added alongside the Phase 3 dashboard UI) is `true` when at least one
+`agent_board_enabled` is `true` when at least one
 configured pane has `agent_board.enabled: true`, computed by scanning `cfg.AllPanes()` on every
 request rather than cached at startup. It is deliberately independent of `command_center_enabled`:
 a config can enable `agent_board` without `command_center`, or vice versa, and the frontend needs
@@ -44,11 +44,10 @@ button separately.
 - `200`: otherwise, always — there is no other failure mode for this handler
 
 Note this route lives at `/api/session-token`, not under `/api/board/`, despite belonging
-conceptually to Agent Board: chi routes any path starting with `/api/board/` into the
+conceptually to Agent Board because chi routes any path starting with `/api/board/` into the
 `bearerAuthMiddleware`-wrapped sub-router regardless of where else a handler for that literal path is
 registered, so a route literally named `/api/board/session-token` would always require the token it
-exists to hand out. This is not a stylistic choice — an earlier revision of this endpoint lived at
-that path and was silently caught by the auth middleware it was supposed to bypass.
+exists to hand out.
 
 **Bootstrap flow** (not a REST/WS endpoint — a background behavior). For every pane with
 `agent_board.enabled: true`, panemux polls every 5s for a live, agmsg-detectable coding-agent

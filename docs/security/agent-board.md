@@ -6,7 +6,7 @@
 
 `internal/board`'s `RemoteAgmsgClient` (full design in [agent-board.md](../agent-board.md)) writes
 cross-pane agent messages into a remote host's message store over the SSH exec channel already used
-by `GetCWD`/`InspectGitContext` — `internal/session`'s `BoardExecutor.RunBoardCommand`, implemented
+by `GetCWD`/`InspectGitContext` — `internal/session`'s `BoardExecutor.RunBoardCommand`, provided
 on `SSHSession`/`TmuxSSHSession` — by running an operator-installed
 [agmsg](https://github.com/fujibee/agmsg) instance's own scripts. panemux owns no message schema or
 storage of its own — it is a client of agmsg only. The `panemux` binary itself is never installed
@@ -66,8 +66,8 @@ locally or remotely. The relay goroutine that drives this on a schedule (`intern
 the bootstrap watcher (`bootstrapWatcher` in `bootstrap.go`, `package main`), the `/api/board/*`
 REST surface (`GET /status`, `GET /messages`, `POST /broadcast`), and the command center
 (`internal/commandcenter`, `internal/boardmcp` — see
-[command-center.md](command-center.md#command-center-subprocess-execution)) are all implemented —
-see [agent-board.md](../agent-board.md)'s status note.
+[command-center.md](command-center.md#command-center-subprocess-execution)) make up the current board
+execution surface; see the [Agent Board guide](../agent-board.md).
 
 **The bootstrap watcher's PTY write is not a command-execution sink and is out of scope for the
 `exec.Command`-focused rules in [security.md](../security.md#general-rules) and
@@ -78,7 +78,7 @@ shell-argument-escaping or CodeQL taint-chain reasoning those rules carry applie
 itself: there is no shell parsing panemux's own Go code performs on that text, and no distinction
 between "trusted" and "tainted" content for a PTY write the way there is for a command-string
 argument. The one identifier bootstrap itself passes into a `RunBoardCommand` call — the
-already-resolved `agmsg_path` used to build the presence probe's `$1` — is quoted with the same
+already-resolved `agmsg_path` supplied as the presence probe's `$1` — is quoted with the same
 `shellQuotePath`-style discipline `RunBoardCommand` already applies uniformly to every argument,
 board-related or not. `agent_board.team`, a pane's own ID, and the agmsg-recognized type string
 `session.AgentTypeDetector` returns are written only into the PTY instruction text, never into a
@@ -104,15 +104,12 @@ anywhere in `frontend/src`. **No agent-reported value reaches a DOM attribute at
 card renders only `state`, `summary`, `last_tool` and the relative time, each as a text child, and the
 component tree now contains no `<a>` element.
 
-That is a change from an earlier design, and the reason it is worth recording here rather than
-quietly deleting: the card used to render `pr_url` as an `href`, which is the one shape where an
-agent-controlled string carries meaning of its own rather than being escaped as text. It was guarded
-by a `safeExternalURL` helper that admitted only `http:`/`https:` and fell back to plain text
-otherwise — necessarily so, because React 18, the version this app pins, merely logs *"A future
-version of React will block javascript: URLs"* and renders the attribute anyway (React 19 blocks it;
-this codebase is not on it), and `target="_blank"`/`rel="noopener noreferrer"` constrain the opened
+Keeping these values out of attributes is important because an agent-controlled `href` carries
+meaning beyond escaped text. React 18, the version this app pins, merely logs *"A future version of
+React will block javascript: URLs"* and renders the attribute anyway (React 19 blocks it; this
+codebase is not on it), and `target="_blank"`/`rel="noopener noreferrer"` constrain the opened
 document rather than whether a script-scheme URL executes. Script running in the dashboard's own
-origin would have the board bearer token, so that was a real escalation path.
+origin would have the board bearer token, so this is a real escalation path.
 
 `pr_url`, `repo` and `branch` were dropped from the card for a product reason — panemux computes
 those itself by running git, and the board's self-reported copies could contradict the pane header —

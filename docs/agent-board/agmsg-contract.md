@@ -1,6 +1,6 @@
 # Agent Board: agmsg compatibility contract
 
-> Part of the [Agent Board design](../agent-board.md). Read that document's status note first — it says which parts of this design are shipped.
+> Part of the current [Agent Board design](../agent-board.md).
 
 ## agmsg compatibility contract
 
@@ -26,7 +26,7 @@ plain table-driven Go test. So: adopt the *idea*, skip the *tool*.
 
 **Two test tiers, not one:**
 
-- **Tier 1 — fast, hermetic, part of `make check` on every commit.** Implemented. A fake
+- **Tier 1 — fast, hermetic, part of `make check` on every commit.** A fake
   `AgmsgClient`/`BoardExecutor` asserts the exact command strings panemux builds for each operation,
   and `internal/board/agmsg_fixture_test.go` parses frozen JSONL in
   `internal/board/testdata/agmsg-v1.2.0/` the way real `api.sh` output is parsed. Those fixtures are
@@ -35,7 +35,7 @@ plain table-driven Go test. So: adopt the *idea*, skip the *tool*.
   protects panemux's own code from regressing against its own documented assumptions; it cannot, by
   itself, detect that agmsg changed, since it never touches a real agmsg install at test time.
 - **Tier 2 — a separate CI job that runs the same contract against a real agmsg install.**
-  Implemented: `make test-agmsg-contract AGMSG_PATH=...` (`internal/board/agmsg_contract_test.go`),
+  `make test-agmsg-contract AGMSG_PATH=...` (`internal/board/agmsg_contract_test.go`) is
   run in CI by `.github/workflows/agmsg-contract.yml`. The job installs agmsg through its own
   documented installer (`install.sh --cmd agmsg`, the same path an operator takes) into an ephemeral
   runner, then drives `join.sh`/`identities.sh`/`actas-claim.sh`/`watch.sh` directly and

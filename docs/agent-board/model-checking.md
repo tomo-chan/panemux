@@ -1,6 +1,6 @@
 # Agent Board: state-machine model checking
 
-> Part of the [Agent Board design](../agent-board.md). Read that document's status note first — it says which parts of this design are shipped.
+> Part of the current [Agent Board design](../agent-board.md).
 
 ## State-machine model checking
 

@@ -42,9 +42,9 @@ says. `config.yaml` may omit either — and may write a single-pane workspace as
 with no children at all, which validation accepts — but `normalizeLayoutNode` fills in the direction,
 substitutes an empty array for absent children, and moves a root `pane` into the one child it means
 before anything serializes. The frontend's `LayoutNodeSchema` requires both keys and covers the whole
-response, so a node missing either used to fail the *entire* workspaces payload rather than dropping
-a key; see issue #198. A root `pane` was also rendered by nothing — every frontend call site reads
-`child.pane` off a layout *child* — so relocating it is what makes such a workspace display at all.
+response, so without normalization a node missing either fails the *entire* workspaces payload
+rather than dropping a key; see issue #198. Every frontend call site reads `child.pane` off a layout *child*, so relocating
+a root `pane` is what makes such a workspace display at all.
 
 The migration is persisted the next time the layout is saved, so a hand-written config converges on
 the `direction` + `children` form rather than being rewritten underneath the operator on read.
@@ -56,15 +56,13 @@ rendered. `LayoutNodeSchema` therefore keeps declaring `pane`: a key the schema 
 stripped by `parse()`, stored stripped, and written back on the next split, which would delete it from
 `config.yaml`.
 
-**A relocated root pane is validated like any other pane, and that can stop a config that used to
-load.** `validateLayoutNode` never inspected `LayoutNode.Pane` and `collectPanes` never walked it, so
-a root pane was previously validated by nothing — which is also why it rendered nothing. Once it
-becomes a `LayoutChild` it goes through `validatePane`, so a root pane with no `type`, or one of
+**A relocated root pane is validated like any other pane.** Once it becomes a `LayoutChild` it goes
+through `validatePane`, so a root pane with no `type`, or one of
 `type: ssh` naming a connection that `ssh_connections` does not define, now fails startup with the
 same message the equivalent child pane has always produced. This is deliberate: normalization does not
 substitute values the operator never wrote (the same reason an invalid `direction` is reported rather
 than corrected), and an error naming the pane is more actionable than the previous outcome, which was
-a workspace that started and displayed nothing.
+an invalid workspace that displays nothing.
 
 ### `PUT /api/layout`
 
@@ -165,9 +163,9 @@ when that timer fires, whichever comes first. It has to work this way for all th
 `golang.org/x/crypto/ssh`'s `NewClientConn` reads no timeout, sets no deadline and takes no context,
 and the transports disagree about deadlines anyway — a TCP conn honors them, a ProxyJump hop is an
 SSH channel whose `SetDeadline` reports "not supported", and the ProxyCommand transport's is a no-op
-because its pipes have none. The ProxyCommand case was the exposed one: a bastion command that hung
-while establishing its own tunnel used to block a pane's reconnect indefinitely. A timed-out
-handshake is reported as a `500` from this endpoint like any other handshake failure.
+because its pipes have none. The timeout prevents a ProxyCommand bastion that hangs while
+establishing its own tunnel from blocking a pane's reconnect indefinitely. A timed-out handshake is
+reported as a `500` from this endpoint like any other handshake failure.
 
 ### `POST /api/sessions/{id}/open-url`
 

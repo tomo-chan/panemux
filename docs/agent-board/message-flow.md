@@ -1,6 +1,6 @@
 # Agent Board: status self-report and message flow
 
-> Part of the [Agent Board design](../agent-board.md). Read that document's status note first — it says which parts of this design are shipped.
+> Part of the current [Agent Board design](../agent-board.md).
 
 ## Status self-report and message flow
 
@@ -51,11 +51,11 @@ a repository or there's no open PR. The dashboard does not render `branch`/`repo
 schema because the relay stores whatever a pane reports.
 
 **`summary` is the field the dashboard is built around, and the bootstrap instruction says so
-explicitly.** It used to appear in the instruction as one field name among eight with no guidance,
+explicitly.** It appears in the instruction with concrete guidance,
 alongside "send an update whenever your state changes meaningfully" — which leaves both content and
-cadence to the agent's discretion. That is survivable with two panes and useless with eight: a
+cadence to the agent's discretion. Vague summaries may be survivable with two panes but are useless with eight: a
 column of state pills tells an operator that work is happening somewhere, not which pane is doing
-what. The instruction now asks for one short sentence in plain language naming the current task
+what. The instruction asks for one short sentence in plain language naming the current task
 ("Fixing the flaky relay test"), explicitly *not* the last tool call and not a session recap, with
 what the pane is blocked on when it is blocked, sent when starting a task, finishing one, becoming
 blocked, or going idle — events an agent can recognize, rather than a timer it would have to run.

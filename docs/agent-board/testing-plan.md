@@ -1,12 +1,12 @@
 # Agent Board: testing plan
 
-> Part of the [Agent Board design](../agent-board.md). Read that document's status note first — it says which parts of this design are shipped.
+> Part of the current [Agent Board design](../agent-board.md).
 
 ## Testing plan (see DEVELOPMENT.md for the TDD/coverage rules this must follow)
 
 - `internal/board`: status JSON parsing (valid full payload with `kind: "board_status"`, missing
   optional fields, a body that isn't valid JSON falls back to being treated as a plain message, and
-  — the regression test for the shape-sniffing ambiguity this document used to have — a body that
+  — the regression test for shape-sniffing ambiguity — a body that
   *is* valid JSON, contains a `state` field, but is missing or has the wrong `kind` is also treated
   as a plain message rather than mistaken for a status update), `BoardCache.StatusSnapshot` with
   multiple status rows for one pane (only the
@@ -27,13 +27,13 @@
   including one crafted with a `to`/`body` that doesn't match any real recent send — is dropped and
   logged, never treated as legitimate on the strength of the string alone; an entry past its TTL is
   no longer matchable — this is the regression test for the cross-host `_system` impersonation
-  scenario in [Security model](security-model.md#security-model), and for why an earlier revision's blanket
+  scenario in [Security model](security-model.md#security-model), and why a blanket
   `_system` allowance was insufficient), empty team.
 - `internal/session`: for `RemoteAgmsgClient`, a body containing shell metacharacters (`'`, `;`,
   `` ` ``, `$(...)`) round-trips through the built `send.sh` command string as a single escaped
   literal argument, not as executed shell syntax — and the same for a `team`/`--agent` value
-  containing metacharacters on the **read** path (`api.sh get ...`), which is the regression test
-  for the earlier, incorrect "reads are digit-validated so don't need escaping" claim; every
+  containing metacharacters on the **read** path (`api.sh get ...`), which protects the requirement
+  that free-text read arguments are escaped; every
   `AgmsgClient.Send` call is asserted to include `--force` unconditionally, with no code path that
   omits it.
 - `internal/config`: `host != loopback && auth_token == ""` is a validation error; all other

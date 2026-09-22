@@ -1,10 +1,10 @@
 # Agent Board: bootstrap flow
 
-> Part of the [Agent Board design](../agent-board.md). Read that document's status note first — it says which parts of this design are shipped.
+> Part of the current [Agent Board design](../agent-board.md).
 
 ## Bootstrap flow
 
-Implemented in `bootstrap.go` (`package main`) as `bootstrapWatcher`, constructed in `board.go`'s
+`bootstrap.go` (`package main`) provides `bootstrapWatcher`, constructed in `board.go`'s
 `setupBoard` and polled on its own goroutine from `main.go`'s lifecycle (`defaultBootstrapPollInterval`,
 5s — the same interval as the relay), gated the same way the relay is: `HasWork()` (at least one
 board-enabled pane) must be true before the goroutine even starts.
@@ -14,7 +14,7 @@ board-enabled pane) must be true before the goroutine even starts.
    every board-enabled pane; each pane opts in individually. Per-pane `team` override does not exist
    either — every board-enabled pane on one panemux instance joins the single `agent_board.team`.)
 2. Every poll tick, for every board-enabled pane, `bootstrapWatcher.checkPane` calls that pane's
-   `session.AgentTypeDetector.DetectInteractiveAgentType()` — implemented by all four session types
+   `session.AgentTypeDetector.DetectInteractiveAgentType()` — provided by all four session types
    (`LocalSession`, `TmuxLocalSession`, `SSHSession`, `TmuxSSHSession`) — which walks the pane's
    process tree for a live descendant matching one of the six agmsg agent types agmsg's own
    `type.conf` driver files mark `detect_proc` (process-name-based auto-detection) for:

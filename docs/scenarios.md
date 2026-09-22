@@ -47,7 +47,7 @@ Verification column values:
 | B1 | No pane enables `agent_board` | No Agent Board entry point anywhere in the UI, and the shortcut does nothing | `auto`: `frontend/e2e/agent-board-disabled.spec.ts` (both tests) |
 | B2 | A pane enables `agent_board` | The Agent Board button appears and `Cmd/Ctrl+Shift+B` opens the panel | `auto`: `frontend/e2e/agent-board.spec.ts` |
 | B3 | Enabling the board through the pane settings dialog | The pane gains `agent_board.enabled`, and saving does not require a session restart | `auto`: `frontend/src/hooks/usePaneSettings.test.ts`, `frontend/src/components/PaneSettingsDialog.test.tsx` |
-| B4 | Editing the layout afterwards | A layout `PUT` does not delete the pane's `agent_board` block | `auto`: `frontend/src/schemas/index.test.ts` (the layout round-trip that used to strip it) |
+| B4 | Editing the layout afterwards | A layout `PUT` does not delete the pane's `agent_board` block | `auto`: `frontend/src/schemas/index.test.ts` (the layout round-trip preserves it) |
 | B5 | An invalid `agent_board.mode` | Startup fails validation; every valid value is accepted | `auto`: `internal/config` — `TestValidate_AgentBoardMode_InvalidValue_Error`, `TestValidate_AgentBoardMode_ValidValues_NoError` |
 | B6 | `agent_board.team` set to the reserved `_system` | Rejected | `auto`: `internal/config` — `TestValidate_AgentBoardTeam_ReservedSystemID_Error` |
 | B7 | Changing a pane's mode after startup | The next bootstrap uses the new mode, read live rather than from a startup snapshot | `auto`: root package — `TestBootstrapWatcherReadsModeLive` |
@@ -108,7 +108,8 @@ Documentation is part of the product here: an operator cannot use Agent Board wi
 | F3 | Config examples match the schema | Every key in `config.example.yaml` is accepted by validation | `manual`: `./bin/panemux --config config.example.yaml` starts without a **validation** error — warnings about missing shells or SSH keys are environmental and expected |
 | F4 | Delivery-mode documentation | Describes what each mode does and its one setup step | `manual`: read [README](../README.md#delivery-mode-and-the-one-setup-step-it-needs) |
 | F5 | Security claims are current | Every claim in [security.md](security.md) is either verified or explicitly marked unverified | `manual`: reread the sections touching whatever changed |
-| F6 | Design docs match shipped behavior | Status notes in [agent-board.md](agent-board.md) and [ui-design.md](ui-design.md) reflect what actually ships | `manual`: check the status note of any section you relied on |
+| F6 | Current-state docs match shipped behavior | Topic guides state the present contract without rollout/status narration; historical rationale is in [DECISIONLOG.md](DECISIONLOG.md) | `manual`: check the topic guide and decision-log entry for any area changed |
+| F7 | A reader can choose the right level of detail | [docs/README.md](README.md) routes from overview to concise topic guides and then to focused deep dives | `manual`: follow each route in the documentation index |
 
 ## G. The agmsg compatibility contract
 

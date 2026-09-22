@@ -1,75 +1,73 @@
 # Application Overview
 
-## Purpose
+PaneMux is a browser-based terminal workspace. One server process renders multiple local, SSH, and
+tmux sessions in a resizable split layout and serves the browser UI that controls them.
 
-`PaneMux` is a browser-based terminal workspace that displays multiple terminal sessions in a resizable split layout. A single server process hosts both the frontend UI and the backend APIs, then bridges browser input/output to local PTYs, SSH shells, local tmux sessions, or tmux sessions reached over SSH.
+Use this page for the product-level picture. Continue to [Architecture](architecture.md) for system
+structure, [Behavior specification](behavior.md) for runtime contracts, or the
+[documentation index](README.md) to choose another topic.
 
-The application is optimized for a local or trusted-network workflow where a developer wants one browser tab to act as a terminal dashboard.
+## What it provides
 
-## Core Capabilities
+- Recursive split-pane workspaces defined in YAML and editable from the browser.
+- Four terminal backends: `local`, `ssh`, `tmux`, and `ssh_tmux`.
+- Raw terminal streaming over WebSocket, including resize and lifecycle control messages.
+- Workspace tabs, layout persistence, pane creation/removal, and pane-level Git/PR context.
+- Browser notifications and attention indicators for terminal activity.
+- Loopback OAuth callback forwarding for CLI login flows running in SSH-backed panes.
+- Optional Agent Board status aggregation, cross-pane messaging, and a command center.
+- A self-contained CLI binary with the React frontend embedded at build time.
 
-- Render a recursive split-pane layout from YAML configuration.
-- Start terminal sessions from config at server startup.
-- Stream terminal bytes between browser and backend over WebSocket.
-- Persist layout edits back to the config file when the app was launched from one.
-- Support four pane backends: `local`, `ssh`, `tmux`, and `ssh_tmux`.
-- Allow limited runtime pane creation/removal from the UI.
-- Forward a pane's loopback OAuth callback port to this host so CLI login flows started on an SSH host complete in the dashboard's browser.
-- Build as a self-contained CLI binary and distribute it through GitHub Releases.
-
-## High-Level Data Flow
+## System at a glance
 
 ```text
 config.yaml
-   |
-   v
-Go server ---- REST (/api/layout, /api/display, /api/sessions)
-   |
-   +---- Session manager ---- PTY / SSH / tmux session implementations
-   |
-   +---- WebSocket (/ws/{sessionID}) ---- browser terminal pane
+    |
+    v
+Go server -------- REST APIs -------- browser workspace
+    |                                      |
+    +-- session manager                    +-- React layout and controls
+    |     +-- local PTY                    +-- xterm.js terminal panes
+    |     +-- SSH shell                    +-- Agent Board overlays
+    |     +-- local tmux
+    |     `-- tmux over SSH
+    |
+    `------------ WebSocket terminal streams ---------^
 ```
 
-Each terminal pane owns one WebSocket connection. Binary frames carry raw terminal I/O. Text frames carry control messages such as resize notifications and session status.
+Each terminal pane owns one session and one WebSocket connection. Binary frames carry terminal
+bytes; text frames carry control messages. The Go process also serves the built frontend, so the
+backend and UI are released together.
 
-## Why This Shape
+## Operating model
 
-### Single backend binary with embedded frontend
+- Configuration supplies reproducible startup state. Runtime edits are persisted when panemux was
+  launched with a writable config path.
+- Sessions are isolated behind one interface, so a pane failure does not stop other panes or the
+  server.
+- Local and SSH-backed panes expose the same browser interaction model even when process control
+  and filesystem inspection happen on different hosts.
+- Agent Board is additive. Terminal sessions continue to work when agmsg is absent or board
+  integration is disabled.
 
-Why: distribution is simpler when the app can be started with one command and does not require a separate web server.
+## Current boundaries
 
-Benefits:
+- Panemux is intended for a local machine or otherwise trusted network. Core terminal REST and
+  WebSocket routes do not implement user authentication. Agent Board routes use a bearer token, but
+  that does not turn the whole server into an Internet-facing multi-user service.
+- Panemux does not terminate TLS. Non-loopback Agent Board deployments require a TLS-terminating
+  reverse proxy; see [Auth token and transport encryption](security/auth.md).
+- Loopback URL forwarding assumes the browser and panemux server run on the same host. A browser on
+  another machine cannot receive a listener bound to the panemux host's loopback interface.
+- Chrome is the validated browser for terminal themes that depend on Powerline private-use glyphs.
+- Release archives target macOS and Linux. Windows use is through WSL2 rather than a native package.
+- Runtime pane creation is intentionally narrower than the full configuration format and is mainly
+  used by browser pane splitting.
 
-- Easier local setup and fewer moving parts.
-- Backend and frontend versions are always paired.
-- Suitable for a desktop-style local tool.
-- Fits standard CLI distribution via tarballs and shell installers.
+## Where to continue
 
-### Config-driven initial state
-
-Why: terminal workspaces are usually predictable and repeated across sessions.
-
-Benefits:
-
-- Layout and SSH aliases are reproducible.
-- Startup behavior is deterministic.
-- Config can be committed, shared, and reviewed.
-
-### Session-oriented design
-
-Why: each pane maps cleanly to one terminal session with its own lifecycle and transport.
-
-Benefits:
-
-- Failure is isolated to a single pane.
-- WebSocket handling stays simple.
-- Session backends can vary behind one shared interface.
-
-## Current Boundaries
-
-- The app assumes a trusted environment: CORS is open and WebSocket origin checks are permissive.
-- URL opening assumes the browser showing the dashboard runs on the panemux host. panemux can only bind ports on its own host, so a dashboard opened from a different machine cannot have a pane's `localhost:<port>` callback forwarded to it.
-- Authentication and authorization are not implemented.
-- Runtime session creation exists, but it is intentionally narrow and mainly used by pane splitting in the UI.
-- Terminal prompt rendering is currently validated against Chrome. In particular, oh-my-zsh themes that use Powerline glyphs, such as `agnoster`, depend on browser font behavior that is known to work in Chrome.
-- Distribution is currently planned as CLI release archives for macOS and Linux. Windows users are expected to install and run it through WSL2 rather than a native Windows package.
+- [Architecture](architecture.md) — components, ownership, and trust boundaries.
+- [Behavior specification](behavior.md) — startup, configuration, APIs, and browser behavior.
+- [Security design](security.md) — implementation requirements by sensitive sink.
+- [UI design](ui-design.md) — interaction and presentation rules.
+- [Decision log](DECISIONLOG.md) — why the present design replaced earlier approaches.
