@@ -44,9 +44,10 @@ Topic guides link to focused deep dives when the summary is not enough:
 ## Decision history
 
 [DECISIONLOG.md](DECISIONLOG.md) records why consequential choices were made, what they replaced,
-and the order in which the design changed. Topic guides and deep dives describe only the current
-state. Git history is still the authority for line-level change history; the decision log preserves
-the reasoning that would otherwise be lost when current-state documents are updated.
+and the order in which the design changed. Topic guides describe only the current state. Deep dives
+focus on current contracts but may retain dated evidence or incident detail that is necessary to
+justify a local requirement; cross-cutting chronology and superseded designs belong in the decision
+log. Git history remains the authority for line-level change history.
 
 ## Writing rules
 

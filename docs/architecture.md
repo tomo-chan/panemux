@@ -47,12 +47,12 @@ layout rendering, terminal emulation, interaction state, and presentation.
 |---|---|
 | React application shell | Load initial state, render workspace navigation and overlays, and coordinate top-level actions. |
 | `useLayout` | Own the normalized recursive layout tree, optimistic edits, and persistence requests. |
-| `TerminalPane` and `useTerminal` | Own xterm.js setup, fitting, addons, pane input, and terminal lifecycle. |
-| `useWebSocket` | Own the pane connection, reconnect behavior, outbound buffering, replay suppression, and protocol parsing. |
+| `TerminalPane` and `useTerminal` | Own xterm.js setup, fitting, addons, pane input, replay sequencing and suppression, pending terminal messages, and terminal lifecycle. |
+| `useWebSocket` | Own the pane connection, reconnect behavior, send-if-open transport, and validation of structured text control frames. |
 | `usePaneUrlOpen` | Receive validated URL-open events and coordinate browser navigation/callback forwarding. |
 | attention and notification hooks | Convert terminal activity and visibility changes into pane/workspace indicators and browser notifications. |
 | Agent Board hooks and panels | Poll status/message APIs, stream command-center output, and present dashboard, palette, and history overlays. |
-| Zod schemas | Runtime-validate every API response and WebSocket message consumed by the frontend. Generated TypeScript types derive from these schemas. |
+| Zod schemas | Runtime-validate structured success payloads and control frames for which schemas are defined. Generated TypeScript types derive from these schemas. |
 
 ## State and ownership
 
@@ -64,7 +64,8 @@ layout rendering, terminal emulation, interaction state, and presentation.
   result for the behavior-defined interval.
 - Agent Board's status/history cache is in memory. Relay cursors, bootstrap state, and command-center
   history/session state use dedicated persisted files.
-- All frontend network input is parsed through Zod before use.
+- Structured success payloads and control frames with declared schemas are parsed through Zod.
+  Terminal binary frames and some API error bodies use separate handling paths.
 
 ## Main flows
 
@@ -83,8 +84,10 @@ REST handlers and are persisted atomically when a save path is available.
 ### Agent Board flow
 
 Board-enabled agents report through agmsg. `internal/board` polls configured hosts, validates and
-relays rows, and updates `BoardCache`. The browser and command center use authenticated panemux APIs;
-only `internal/board` invokes agmsg scripts. Full detail is in
+relays rows, and updates `BoardCache`. The browser obtains the token from the loopback-only
+bootstrap endpoint and sends it to the board REST and command-center WebSocket routes; the
+command-center MCP client also uses bearer-authenticated board REST APIs. Only `internal/board`
+invokes agmsg scripts. Full detail is in
 [Agent Board architecture](agent-board/architecture.md).
 
 ### URL-open flow
@@ -97,13 +100,17 @@ and [URL-open security](security/url-open.md).
 ## Trust boundaries
 
 - Core terminal routes assume a trusted deployment and are not an authenticated multi-user surface.
-- Agent Board routes are bearer-authenticated; non-loopback use also requires transport encryption.
+- `/api/board/*` and `/ws/board-command` are bearer-authenticated. The unauthenticated
+  `GET /api/session-token` bootstrap route sits outside that subtree because it returns the bearer
+  token itself; it accepts only requests whose remote address and `Host` are loopback. Non-loopback
+  use of the authenticated routes also requires transport encryption.
 - User-controlled values never select an arbitrary executable. Shell paths, tmux names, remote
   paths, and subprocess operands follow the per-sink rules in [Security design](security.md).
 - Panemux runs no copy of itself on remote hosts. SSH-backed features use the existing SSH session
   and operator-installed remote tools.
-- The browser is untrusted input to Go handlers, and backend JSON is untrusted input to the
-  frontend until schema validation succeeds.
+- The browser is untrusted input to Go handlers. Structured backend payloads with declared frontend
+  schemas remain untrusted until validation succeeds; other input paths apply their own parsing and
+  bounds checks.
 
 ## Deep dives
 

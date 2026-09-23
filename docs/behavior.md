@@ -6,7 +6,8 @@
 2. Load config: if `--config` is given, load that file; otherwise try `~/.config/panemux/config.yaml`; if that file does not exist, use the built-in default config with `~/.config/panemux/config.yaml` as the save path.
 3. Override the configured port if `--port` is set.
 4. Create the in-memory session manager.
-5. Traverse the active workspace layouts and create each pane session.
+5. Traverse every configured workspace layout and create each pane session, including panes in
+   inactive workspaces.
 6. Start enabled Agent Board relay/bootstrap and command-center services.
 7. Start the HTTP server and serve the embedded frontend.
 8. On `SIGINT` or `SIGTERM`, shut down background services, the server, and all sessions.

@@ -53,8 +53,11 @@ backend and UI are released together.
 ## Current boundaries
 
 - Panemux is intended for a local machine or otherwise trusted network. Core terminal REST and
-  WebSocket routes do not implement user authentication. Agent Board routes use a bearer token, but
-  that does not turn the whole server into an Internet-facing multi-user service.
+  WebSocket routes do not implement user authentication. Agent Board operations under
+  `/api/board/*` and `/ws/board-command` use a bearer token; the unauthenticated
+  `GET /api/session-token` bootstrap route returns that token only after loopback remote-address and
+  `Host` checks. These controls do not turn the whole server into an Internet-facing multi-user
+  service.
 - Panemux does not terminate TLS. Non-loopback Agent Board deployments require a TLS-terminating
   reverse proxy; see [Auth token and transport encryption](security/auth.md).
 - Loopback URL forwarding assumes the browser and panemux server run on the same host. A browser on

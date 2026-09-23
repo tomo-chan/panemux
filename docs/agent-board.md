@@ -16,8 +16,9 @@ produced it.
 - An optional command center runs a headless Claude query that can read board state and broadcast
   through three narrowly scoped MCP tools.
 
-Agent Board is additive. Missing or incompatible agmsg installations disable board behavior for the
-affected host without preventing its terminal panes from running.
+Agent Board is additive. A missing or unreachable agmsg installation is skipped for the affected
+host without preventing its terminal panes from running. A detected version mismatch logs a warning
+but continues, because compatibility may still hold and refusing it would guarantee an outage.
 
 ## Responsibility boundary
 

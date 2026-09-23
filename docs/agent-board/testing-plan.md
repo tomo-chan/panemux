@@ -13,9 +13,10 @@
   newest wins, `UpdatedAt` reflects when it was recorded) and across multiple panes, `BoardCache`'s
   own `Seq` assignment giving a stable total order across rows from different hosts even when their
   agmsg-native `ID`s collide or aren't comparable, `MessagesSince(afterSeq)` ordering and bounding,
-  a row addressed to `_system` updating `status` and *not* appearing in `history`'s cross-pane
-  relay output (a plain non-status row addressed to `_system` correctly *does* appear, as an
-  ordinary message), an empty cache read (fresh start / post-restart) returning a well-defined empty
+  a `board_status` row addressed to `_system` both updating `status` and remaining in history (the
+  API marks it with `is_status`, and the dashboard filters it from the visible message feed), while a
+  plain non-status row addressed to `_system` appears as an ordinary message; an empty cache read
+  (fresh start / post-restart) returning a well-defined empty
   result rather than an error, relay cursor persistence across a simulated restart (including the
   accepted at-least-once duplicate case — assert it is delivered again, not that it's silently
   dropped or that the relay errors), the accepted truncation case (more new rows on one host than
@@ -43,8 +44,9 @@
   token succeeds; pre-existing `/api/*` routes and `/ws/{sessionID}` remain reachable with no
   `Authorization` header at all — a required regression test, since scoping the middleware to
   `/api/board` only (rather than gating the whole API) is exactly the choice that could silently
-  widen later. Once `/ws/board-command` exists, its handshake rejection is covered here too,
-  following the same pattern.
+  widen later. `/ws/board-command` follows the bearer-token rule. The unauthenticated
+  `/api/session-token` bootstrap route is covered separately: both its remote address and `Host`
+  must be loopback because the response contains the token itself.
 - `internal/api`: `GetBoardStatus`/`GetBoardMessages`/`PostBoardBroadcast` handler-level behavior —
   empty cache returns a well-formed empty response (`{"statuses":{}}` / `{"messages":[]}`, never
   `null`), `since` omitted defaults to `0`, a non-numeric `since` is `400`, `to`/`body` validation
@@ -52,7 +54,7 @@
   downstream `AgmsgClient`/relay error is `502`, success is `200`. Auth itself is not this package's
   concern — that is `internal/server`'s bullet above, since `bearerAuthMiddleware` sits in front of
   these handlers, not inside them.
-- `internal/ws`: `/ws/board-command` is new surface under the same package as the existing terminal
+- `internal/ws`: `/ws/board-command` is under the same package as the existing terminal
   WebSocket handler, so it is covered by `coverage-go`'s existing `internal/ws` gate (see
   `DEVELOPMENT.md`) — no separate coverage carve-out is introduced for it. Its handshake rejection
   and message-framing tests follow the same pattern as the terminal socket's existing tests.
@@ -82,8 +84,9 @@
   before it reaches any `RunBoardCommand` call, asserted by inspecting the built argument list
   directly rather than the final shell string — this is the regression test for a literal `~`
   reaching the remote shell inside single quotes and failing to expand.
-- Command center: `/ws/board-command` rejects an unauthenticated connection the same way the
-  terminal WebSocket does; a `POST /api/board/broadcast` call issued from the command center's own
+- Command center: `/ws/board-command` rejects a missing or incorrect bearer token and accepts the
+  configured token, while the ordinary terminal WebSocket remains outside this authentication
+  boundary; a `POST /api/board/broadcast` call issued from the command center's own
   HTTP client reaches a target pane regardless of that pane's host, using a fake `AgmsgClient` per
   host to assert routing without a real agmsg/SSH dependency, and never invokes `AgmsgClient`
   directly from the command center's own code path (it goes through the same handler a browser
@@ -91,12 +94,14 @@
   fixture `stream-json` capture containing interleaved user turns, assistant text, and tool calls,
   and returns an empty/well-defined result before the command center has ever been used; enabling
   `command_center` does not require or check for a local agmsg installation.
-- Command center [process lifecycle](command-center.md#process-lifecycle): a first query with no persisted session id
-  invokes the subprocess without `--resume` and persists the `session_id` captured from a fixture
-  stream-json response; a subsequent query reuses that persisted id with `--resume`; a second query
+- Command center [process lifecycle](command-center.md#process-lifecycle): a first query with no
+  persisted session id mints a UUID, passes it with `--session-id` and without `--resume`, ignores
+  any session id reported by the subprocess, and persists the UUID panemux supplied after the query
+  succeeds; a subsequent query reuses that persisted id with `--resume`; a second query
   arriving while one is still in flight is rejected with the "busy" error and never spawns a second
   subprocess; the invoked command line always includes `--verbose` whenever `--output-format=stream-
   json` is present; the subprocess is always launched with `--allowedTools` scoped to exactly the
   three board MCP tools and never with `--dangerously-skip-permissions`; a non-zero subprocess exit
   and a malformed `stream-json` line each surface as a distinct WS error frame rather than an empty
-  or hung response, and neither overwrites the previously persisted session id.
+  or hung response. A failed first query does not persist its newly minted id; a failed resumed query
+  clears the stale persisted id so the next query can start a fresh session.
