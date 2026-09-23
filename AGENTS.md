@@ -88,6 +88,9 @@ same name beside it, and the index's own document map routes by section name.
 
 - Keep `AGENTS.md` short and index-oriented.
 - Put day-to-day engineering workflow rules in `DEVELOPMENT.md`.
+- Treat related documentation updates as part of every code change: inspect the document map and
+  update all affected current-state documents in the same change. Follow
+  [DEVELOPMENT.md's documentation rules](DEVELOPMENT.md#documentation-updates) for scope.
 - Put enduring product, architecture, behavior, UI, and maintenance guidance under `docs/`.
 - Keep topic guides focused on the current state; put chronology and superseded approaches in
   `docs/DECISIONLOG.md`.

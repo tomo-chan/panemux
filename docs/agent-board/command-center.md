@@ -91,10 +91,11 @@
   handler's own request context comes from an already-hijacked HTTP connection, which the standard
   library never cancels on client disconnect, so this timeout is what actually bounds a hung or
   abandoned query's lifetime. A failed query never corrupts `--resume` continuity for the next one:
-  the persisted session id is replaced only by a fresh first-run capture, never derived from a failed
-  query's absent or partial output — and a `--resume`d query that itself fails clears the stale
-  session id it was resuming, so a `claude`-side session that no longer exists (e.g. the operator
-  cleared `~/.claude`) doesn't leave every future query retrying the same dead id forever.
+  a `--resume`d query that itself fails clears the stale session id it was resuming, so a
+  `claude`-side session that no longer exists (e.g. the operator cleared `~/.claude`) does not leave
+  every future query retrying the same dead id forever. The next query follows the first-run path:
+  panemux mints and persists a new v4 UUID, passes it with `--session-id`, and ignores any session id
+  reported by the subprocess.
 
 ### Authorization
 

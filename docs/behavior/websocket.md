@@ -94,8 +94,10 @@ killed, so neither the busy flag nor the client's error frame is held until the 
 wrote it.** `--resume`'s value is optional in the claude CLI's own argument parser, so a value
 beginning with `-` would be parsed as a new CLI flag rather than a `--resume` value if passed through
 as-is. A persisted id that doesn't match `^[A-Za-z0-9][A-Za-z0-9._-]*$` (the shape of every id claude
-itself has ever been observed to emit) is treated exactly like no persisted id at all: the query runs
-without `--resume`, and whatever session id that fresh run captures is persisted in its place.
+itself has ever been observed to emit) is treated exactly like no persisted id at all: panemux clears
+it, mints a new v4 UUID, and runs the query with `--session-id <uuid>` instead of `--resume`. The
+minted UUID is persisted for later queries; any session id reported by the subprocess is ignored so
+the command center cannot adopt an ambient Claude conversation.
 
 ## WebSocket Protocol
 

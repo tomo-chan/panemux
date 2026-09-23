@@ -154,6 +154,12 @@ A test that genuinely should not go red without its implementation is marked `//
 
 - Use [docs/README.md](docs/README.md) as the information-architecture guide: product overview,
   concise current-state topic guides, and focused deep dives serve different reader needs.
+- Every code change must update all related documentation in the same change. Before declaring the
+  work complete, inspect the document map in [AGENTS.md](AGENTS.md) and update every current-state
+  specification, topic guide, deep dive, operational guide, and developer rule whose contract or
+  explanation the code changed. A code change is incomplete while any related document still
+  describes the old behavior. If the change affects no documented contract, do not make a synthetic
+  documentation edit, but still perform this inspection.
 - When a behavior, operational assumption, browser requirement, rendering constraint, or user-visible rule becomes confirmed, update the relevant files in `docs/` in the same change.
 - Do not leave documentation follow-up as a separate later task once the behavior is settled.
 - Keep specifications and topic guides current-state only. Move chronology, rejected alternatives,
