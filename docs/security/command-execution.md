@@ -51,11 +51,9 @@ both are handled where they cross it:
 
 ### SSH private key paths and an unresolvable home directory
 
-Three SSH-adjacent paths are resolved against the user's home directory, and all three used to do it
-with `home, _ := os.UserHomeDir()` — discarding the error and then joining against the empty string
-it left behind. `filepath.Join("", ".ssh", "id_ed25519")` is `.ssh/id_ed25519`, a path relative to
-whatever directory panemux was started in, so what looked like "fall back to the default" was in
-fact "read this out of the current working directory".
+Three SSH-adjacent paths are resolved against the user's home directory. A home-directory lookup
+failure must never fall through to `filepath.Join("", ".ssh", "id_ed25519")`, which produces the
+working-directory-relative `.ssh/id_ed25519` and could read a project-local key.
 
 For two of them that reached a private key:
 
@@ -70,8 +68,7 @@ For two of them that reached a private key:
   OpenSSH as relative to the home directory. Both became working-directory-relative. The path is
   now left exactly as the ssh config wrote it, rather than rebuilt against an empty home.
 
-**Leaving the path alone is not by itself the safety property, and an earlier revision of this
-section claimed that it was.** That claim was wrong and was caught in review. An unexpanded
+**Leaving the path alone is not by itself the safety property.** An unexpanded
 `~/.ssh/id_ed25519` and an already-relative `.ssh/id_ed25519` are both still relative paths, and no
 syscall treats `~` as the home directory, so `os.ReadFile` resolves either against the working
 directory just as `.ssh/id_ed25519` was resolved before. The bare-relative form is the more

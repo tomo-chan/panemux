@@ -1,6 +1,6 @@
 # Agent Board: command center
 
-> Part of the [Agent Board design](../agent-board.md). Read that document's status note first — it says which parts of this design are shipped.
+> Part of the current [Agent Board design](../agent-board.md).
 
 ## Command center
 
@@ -18,16 +18,10 @@
   environment.** The LLM itself never composes the HTTP call: panemux points the subprocess at a
   narrow MCP server it provides (see [Process lifecycle](#process-lifecycle)) that exposes exactly
   those three operations as tools and makes the actual authenticated request on the model's behalf.
-  This is a correction from an earlier revision of this document, which had the
-  command center shell out to `send.sh`/`api.sh` directly. That was wrong on two counts: it made
-  the LLM itself responsible for composing safely-escaped shell invocations, a second, unaudited
-  path to the same exec sink alongside `AgmsgClient`'s own (see [Security
-  model](security-model.md#security-model)); and it meant the command center could only ever see the *local* agmsg
-  installation's status, never a remote pane's, because [Cross-host relay](relay.md#cross-host-relay)
-  intercepts `_system`-addressed status reports before they ever leave the host they were written
-  on. Reading `BoardCache` through `GET /api/board/status` (already aggregated across every host by
-  the relay) fixes both: `AgmsgClient` stays the *only* code that ever calls agmsg's scripts, and
-  the command center sees every pane's status, not just local ones.
+  This keeps the LLM away from shell composition, leaves `AgmsgClient` as the only code that calls
+  agmsg scripts, and gives the command center the relay's aggregate across every host rather than
+  one local agmsg installation. The [Decision log](../DECISIONLOG.md#command-center-uses-panemuxs-api-not-agmsg-scripts-2026-08-pr-162)
+  records the replaced design.
 - **The command center therefore needs no local agmsg installation of its own** — it never calls
   agmsg directly, so `command_center.enabled: true` is not gated on the same agmsg-presence check a
   board-enabled pane is (see [Config additions](api-and-config.md#config-additions)).
@@ -46,12 +40,10 @@
   `-p --output-format=stream-json`; the CLI refuses to stream structured output in print mode without
   it.
 
-  **The id the subprocess reports is deliberately ignored.** An earlier revision omitted
-  `--session-id` on a first run and adopted whatever `session_id` the stream reported, on the
-  assumption that a `-p` invocation without `--resume` starts a fresh conversation. Verified against
-  the real CLI, it does not: it reports the *ambient* session id of the Claude Code session the
-  environment already belongs to, so the command center silently attached itself to a conversation it
-  does not own — one holding full tool permissions, while the command center is launched with three.
+  **The id the subprocess reports is deliberately ignored.** Without an explicit `--session-id`,
+  the real CLI may report the ambient session id of the Claude Code environment it belongs to. The
+  command center must not attach to a conversation it does not own, especially one with broader tool
+  permissions.
   See [security/command-center.md's command center section](../security/command-center.md#command-center-subprocess-execution).
 
   The subprocess is also isolated from the operator's own configuration: `--setting-sources` is passed
@@ -79,10 +71,7 @@
   MCP's narrower reading of it — not merely one its current client happens to accept: **exactly one**
   of `result`/`error` on every response, a `result` that is always an *object* when there is no
   error, and an `id` that is JSON `null` — never absent — when the request's own id could not be
-  determined, which is the parse-error case. Result and id used to be expressed with `omitempty`,
-  which drops the key instead: `notifications/initialized` sent as a *request* (a known method with
-  nothing to report, so neither method-not-found nor a result) was answered with neither member, and
-  a parse error with no id at all. The empty object rather than `null` is the MCP half: its schema
+  determined, which is the parse-error case. The empty object rather than `null` is the MCP half: its schema
   defines a successful response's result as `{ _meta?: ..., [key: string]: unknown }`, so `null`
   fails it exactly as an absent key does — fixing §5 alone would have moved that response from one
   invalid shape to another. Nothing observed today rejects any of these, but the client here is an
@@ -102,10 +91,11 @@
   handler's own request context comes from an already-hijacked HTTP connection, which the standard
   library never cancels on client disconnect, so this timeout is what actually bounds a hung or
   abandoned query's lifetime. A failed query never corrupts `--resume` continuity for the next one:
-  the persisted session id is replaced only by a fresh first-run capture, never derived from a failed
-  query's absent or partial output — and a `--resume`d query that itself fails clears the stale
-  session id it was resuming, so a `claude`-side session that no longer exists (e.g. the operator
-  cleared `~/.claude`) doesn't leave every future query retrying the same dead id forever.
+  a `--resume`d query that itself fails clears the stale session id it was resuming, so a
+  `claude`-side session that no longer exists (e.g. the operator cleared `~/.claude`) does not leave
+  every future query retrying the same dead id forever. The next query follows the first-run path:
+  panemux mints and persists a new v4 UUID, passes it with `--session-id`, and ignores any session id
+  reported by the subprocess.
 
 ### Authorization
 
@@ -138,10 +128,9 @@ flow still applies.
   tool-use entries in that same captured stream, the returned history interleaves "what the command
   center did on the board" and "what it told the user" in one chronological feed.
 
-  **"What the user asked" is the one part the stream does not carry**, contrary to what this
-  paragraph claimed until the history panel was actually read against a real capture: a real run
-  emits `stream_event`, `system`, `assistant` and `result` frames, and the prompt that produced them
-  appears in none of them. panemux therefore records it itself, as the first entry of each turn,
+  **"What the user asked" is the one part the stream does not carry.** A run emits `stream_event`,
+  `system`, `assistant` and `result` frames, and the prompt that produced them appears in none of
+  them. panemux therefore records it itself, as the first entry of each turn,
   under type `panemux_prompt` — a type the CLI never emits, so a reader can always distinguish a
   panemux-written entry from a relayed subprocess line. A turn whose subprocess failed still has its
   prompt recorded; a turn whose subprocess never started does not, since there is no exchange to

@@ -1,13 +1,13 @@
 # Agent Board: API and config additions
 
-> Part of the [Agent Board design](../agent-board.md). Read that document's status note first — it says which parts of this design are shipped.
+> Part of the current [Agent Board design](../agent-board.md).
 
 ## API additions
 
-Every row is implemented; see [docs/behavior/board-api.md](../behavior/board-api.md#agent-board-rest-api) for exact
+See [docs/behavior/board-api.md](../behavior/board-api.md#agent-board-rest-api) for exact
 request/response shapes and status codes. Every `/api/board/*` endpoint requires the bearer token
-described in [Security model](security-model.md#security-model), but — a deliberate, narrower choice than an earlier
-revision of this document specified — that gate covers **only** `/api/board/*`, not the pre-existing
+described in [Security model](security-model.md#security-model). That gate covers **only**
+`/api/board/*`, not the pre-existing
 `/api/*` routes or `/ws/{sessionID}`: retrofitting auth onto the already-relied-upon unauthenticated
 routes is a separate, larger change with its own frontend work — see
 [security/auth.md](../security/auth.md#auth-token-and-transport-encryption). `GET /api/session-token` is the one
@@ -23,7 +23,7 @@ authenticated too, but via a WebSocket subprotocol rather than the `Authorizatio
 | `POST /api/board/broadcast` | `{ "to": ["pane-a","pane-b"], "body": "..." }`; sends directly to each target's own host via `AgmsgClient` (never via PTY injection, so it is safe to send to a pane mid-turn); delivery to the pane is immediate, but the message appears in `GET /api/board/messages`' history only after the relay's next poll cycle reads it back — see [Known limitations](limitations.md#known-limitations) |
 | `WS /ws/board-command` | Command center chat: client sends `{"prompt": "..."}`, server streams the headless Claude response — see [Command center](command-center.md#command-center) |
 | `GET /api/board/command/history` | Command center's own captured conversation history — see [Command center](command-center.md#command-center) |
-| `GET /api/session-token` | **Deliberately unauthenticated** — hands the browser dashboard the bearer token it needs to call every route above and open the WS connection, since there is no other way for the frontend's own JavaScript to learn a token that may have been randomly generated on first run. Not part of the original design; added because nothing in it specified how the browser itself (as opposed to the command center subprocess) would learn the token. Lives at `/api/session-token`, not `/api/board/session-token` — see [docs/behavior/board-api.md](../behavior/board-api.md#get-apisession-token) for why that distinction is load-bearing, not stylistic. Its response also carries `agent_board_enabled` (added in Phase 3, likewise not part of the original design — see the Phase 3 status note in [agent-board.md](../agent-board.md)), computed by scanning every configured pane for `agent_board.enabled: true`, so the frontend can gate the "Agent Board" dashboard button independently of `command_center_enabled`. |
+| `GET /api/session-token` | **Deliberately unauthenticated** browser bootstrap for the bearer token and the independent `command_center_enabled` / `agent_board_enabled` capability flags. It lives outside `/api/board/` so the authenticated sub-router does not require the token this endpoint exists to provide; see [docs/behavior/board-api.md](../behavior/board-api.md#get-apisession-token). |
 
 ## Config additions
 
@@ -54,9 +54,9 @@ panes:
       enabled: true
 ```
 
-A global `agent_board.enabled` default may also be supported so individual panes don't need to
-repeat it, but board features on any given host still require agmsg to already be present there —
-panemux will not install it, per [Integration with agmsg](agmsg-integration.md#integration-with-agmsg).
+Board enablement is configured per pane. Board features on a host require agmsg to already be
+present there; panemux does not install it. See
+[Integration with agmsg](agmsg-integration.md#integration-with-agmsg).
 
 **Why `command_center` is a top-level key, not nested under `agent_board`, despite both belonging to
 the same Agent Board feature.** Nesting it would imply command_center depends on agent_board/agmsg

@@ -51,11 +51,9 @@ only one of them can be sent. (A prompt answered with `busy` never becomes a que
 before a subprocess ran, so it receives neither of the two — `busy` is itself the last frame for
 that prompt.)
 
-The case that made this concrete is a failed history write (issue #214): the subprocess answered,
-the operator has the answer on screen, and the only thing that failed was persisting the record of
-it — genuinely not a failed query, but not something to hide either. It used to be reported as an
-`error` frame followed by a `done` frame, which left the query with no terminal frame at all and
-made the dashboard render a successful answer as failed. It now travels as a string in `warnings` on
+For a failed history write, the subprocess answered and the operator has the answer on screen; only
+the durable record was lost. That is not a failed query, but it must remain visible. The failure
+travels as a string in `warnings` on
 whichever terminal frame the query ends with, which the palette renders under the answer rather than
 in place of it.
 
@@ -89,16 +87,17 @@ still writing into a pipe no one reads can never exit, and `cmd.Wait()` never re
 placed *before* the cancellation blocks on `read(2)` against a process that has stopped writing
 without exiting, and nothing releases it until the `QueryTimeout` kills the process. That is the wait
 the cancellation exists to cut short, so a cancellation queued behind it cannot deliver what it
-promises: an earlier revision drained first, and both the busy flag and the client's error frame were
-subject to the full timeout. Ordered cancel-then-drain, neither is: the drain can only ever wait on a
-subprocess already being killed.
+promises. With cancel-then-drain ordering, the drain can only wait on a subprocess already being
+killed, so neither the busy flag nor the client's error frame is held until the full timeout.
 
 **The persisted `--resume` session id is validated before every use, not only when this Runner itself
 wrote it.** `--resume`'s value is optional in the claude CLI's own argument parser, so a value
 beginning with `-` would be parsed as a new CLI flag rather than a `--resume` value if passed through
 as-is. A persisted id that doesn't match `^[A-Za-z0-9][A-Za-z0-9._-]*$` (the shape of every id claude
-itself has ever been observed to emit) is treated exactly like no persisted id at all: the query runs
-without `--resume`, and whatever session id that fresh run captures is persisted in its place.
+itself has ever been observed to emit) is treated exactly like no persisted id at all: panemux clears
+it, mints a new v4 UUID, and runs the query with `--session-id <uuid>` instead of `--resume`. The
+minted UUID is persisted for later queries; any session id reported by the subprocess is ignored so
+the command center cannot adopt an ambient Claude conversation.
 
 ## WebSocket Protocol
 

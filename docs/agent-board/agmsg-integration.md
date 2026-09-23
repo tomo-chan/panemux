@@ -1,6 +1,6 @@
 # Agent Board: integration with agmsg
 
-> Part of the [Agent Board design](../agent-board.md). Read that document's status note first — it says which parts of this design are shipped.
+> Part of the current [Agent Board design](../agent-board.md).
 
 ## Integration with agmsg
 
@@ -17,12 +17,11 @@ against agmsg's source (not inferred). panemux never reads or writes agmsg's `me
 | `api.sh get teams <team> messages [--agent <name>] [--limit N] [--before-id <id>]` | `{"type":"message_sent","id","team","from","to","body","at"}` per line, JSONL, oldest-first |
 
 `id` is returned as a string (agmsg's own future-proofing against a non-integer ID scheme, per its
-source comments) — panemux must not assume it stays a bare integer forever, even though today's
-implementation is one. Only `--limit` and `--before-id` are validated as plain digits; **`--agent`
+source comments) — panemux treats it as opaque; the current event-log driver emits UUIDv7 values.
+Only `--limit` and `--before-id` are validated as plain digits; **`--agent`
 is not** — it is a free-text name protected only by agmsg's own internal `_agmsg_sqlesc` SQL
-escaping, not by any argument-shape check. An earlier revision of this document claimed all three
-were digit-validated; that was wrong, and the correction matters directly for [Security
-model](security-model.md#security-model): panemux cannot skip its own shell-escaping on reads on the theory that
+escaping, not by any argument-shape check. Panemux cannot skip its own shell-escaping on reads on
+the theory that
 agmsg has already validated the arguments for it. Unlike agmsg's own human-facing
 `inbox.sh`/`check-inbox.sh` (which mark whatever they display as read), `api.sh` never writes
 `read_at` — panemux's dashboard/relay polling through it cannot cause a joined agent to miss a
@@ -30,8 +29,8 @@ message its own inbox/`Monitor` delivery would otherwise have shown it.
 
 **There is no forward/"since" read.** `--before-id` selects `id < X` — a backwards pagination
 cursor, the opposite of what an incremental poll needs — and `api.sh` has no after/since option at
-all. The relay therefore cannot use `--before-id` for its poll loop (an earlier revision of this
-document specified exactly that mistake). Instead, each poll calls `api.sh get teams <team>
+all. The relay therefore does not use `--before-id` for its poll loop. Each poll calls
+`api.sh get teams <team>
 messages --limit <N>` with **no** `--before-id`, taking the `N` most recent rows (`N` defaults to a
 few hundred; see [Package layout](architecture.md#package-layout)), and filters client-side to the rows that
 *follow* the persisted cursor **in the order `api.sh` itself returned them**. **This has a real,
@@ -39,17 +38,12 @@ accepted truncation risk:** if more than `N` genuinely new rows land on one host
 cycles, the oldest of that overflow are silently skipped — there is no way to detect or recover
 them through `api.sh`'s documented interface.
 
-**The cursor is matched by identity, never compared** — and that distinction is not pedantry, it
-was a shipped bug. An earlier implementation compared `id` *numerically*, which held only for
-agmsg's legacy sqlite driver (integer rowids exposed as decimal strings). The event-log driver that
-1.2.0 actually writes through emits **UUIDv7**, which parses as no integer at all, so every
-comparison answered "nothing parses, everything is new": the cursor never advanced and the relay
-re-delivered its entire poll window on every tick, forever. agmsg's own `api.sh` states the rule
-this now follows — its message `id` column is TEXT because "the driver-interface spec treats every
+**The cursor is matched by identity, never compared.** agmsg's own `api.sh` states the rule: its
+message `id` column is TEXT because "the driver-interface spec treats every
 message id as opaque", and its rows are ordered by each storage source's native counter
 (`events.seq` / `messages.id`), a value the same comment says is "never compared across sources",
 while one response can `UNION` both. Ordering by the response's own order is therefore the only
-signal agmsg offers. Note that lexicographic comparison would not have rescued this either:
+signal agmsg offers. Lexicographic comparison does not satisfy this contract either:
 messages written in the same millisecond share their whole UUIDv7 time prefix and differ only in
 random bits, so sorting them as strings reorders them (the Tier 1 fixtures capture exactly such a
 set, and a test asserts that they do). Two cases treat every returned row as new: no cursor yet
@@ -62,13 +56,12 @@ relay's forward poll.
 **Writes — `scripts/send.sh`, not `api.sh`.** Signature: `send.sh <team> <from> <to> <body>
 [--force]`. Unlike `api.sh`, `send.sh` takes `body` as a **positional shell argument**, not stdin —
 there is no stdin-based write path in agmsg to delegate to. **Both `from` and `to` are checked
-against that team's roster unless `--force` is passed** — an earlier revision of this document said
-only `from` was checked, which is wrong and was load-bearing: it made every message in [Status
-self-report](message-flow.md#status-self-report-and-message-flow)'s sequence diagram fail at the source, since
+against that team's roster unless `--force` is passed**. Every message in [Status
+self-report](message-flow.md#status-self-report-and-message-flow)'s sequence diagram needs to bypass that roster check, since
 `_system` (the status-report recipient) and any pane on a *different* host (the cross-host relay
 target) are never registered in the sending pane's own local roster.
 
-**The fix this document adopts: every board-related `send.sh` call always passes `--force`,
+**Every board-related `send.sh` call always passes `--force`,
 including the ones a live Claude/Codex session makes for itself.** The bootstrap instruction (see
 [Bootstrap flow](bootstrap.md#bootstrap-flow)) tells the agent to call `send.sh <team> <from> <to> "<body>"
 --force` directly for board messages, rather than going through `/agmsg send` (which — confirmed
@@ -211,10 +204,11 @@ contract](agmsg-contract.md#agmsg-compatibility-contract).
 
 ### Two panes in one project directory
 
-Two board-enabled panes whose agents run in the **same** project directory each used to receive the
-other's messages. Board *identity* was never the problem — that is the pane ID end to end
+Two board-enabled panes whose agents run in the **same** project directory require an agmsg actas
+lock and an agent-specific watcher subscription. Board *identity* is the pane ID end to end
 (`join.sh`'s `agent_id`, the `from`/`to` on every row, `BoardCache.RecordStatus`'s key, and the
-relay's own `validFrom` check), and a repository path plays no part in it. Delivery was.
+relay's own `validFrom` check), and a repository path plays no part in it. Delivery must preserve
+that identity as well.
 
 Read from agmsg's own source at the pinned `1.2.0` (unchanged in `1.2.2`): `scripts/watch.sh`
 resolves what it subscribes to with `identities.sh <project> <type>`, which returns **every** (team,

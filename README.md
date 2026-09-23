@@ -379,6 +379,14 @@ Authentication is attempted in order: configured `key_file` → configured `pass
 
 ---
 
+## Documentation
+
+Start with the [documentation index](docs/README.md). It separates a short product
+[overview](docs/overview.md), concise current-state topic guides, focused deep dives, and the
+[decision log](docs/DECISIONLOG.md) that preserves design history and rejected alternatives.
+
+---
+
 ## Development
 
 ### Prerequisites

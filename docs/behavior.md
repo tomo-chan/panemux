@@ -6,9 +6,11 @@
 2. Load config: if `--config` is given, load that file; otherwise try `~/.config/panemux/config.yaml`; if that file does not exist, use the built-in default config with `~/.config/panemux/config.yaml` as the save path.
 3. Override the configured port if `--port` is set.
 4. Create the in-memory session manager.
-5. Traverse the configured layout and create each pane session.
-6. Start the HTTP server and serve the embedded frontend.
-7. On `SIGINT` or `SIGTERM`, shut down the server and close all sessions.
+5. Traverse every configured workspace layout and create each pane session, including panes in
+   inactive workspaces.
+6. Start enabled Agent Board relay/bootstrap and command-center services.
+7. Start the HTTP server and serve the embedded frontend.
+8. On `SIGINT` or `SIGTERM`, shut down background services, the server, and all sessions.
 
 If a configured session fails to start, the server logs a warning and continues booting other sessions.
 
@@ -16,19 +18,26 @@ If a configured session fails to start, the server logs a warning and continues 
 
 The YAML config defines:
 
-- `server.host` and `server.port`
+- `server.host`, `server.port`, and the Agent Board `server.auth_token`
 - `ssh_connections`
-- `layout`
+- `workspaces`, including the active workspace, tab position, vertical bar width, and each
+  workspace's recursive layout
 - optional `display` settings
 - optional `url_open` settings
+- optional `agent_board` and `command_center` settings
+
+Legacy top-level `layout` is accepted at load time and normalized to one `default` workspace. The
+next save writes the current `workspaces` shape.
 
 Layout rules:
 
 - `direction` must be `horizontal` or `vertical`
 - sibling `size` values must sum to `100` within a small tolerance
-- pane IDs must be unique
+- pane IDs must be globally unique across workspaces
 - `ssh` and `ssh_tmux` panes must reference a defined SSH connection
 - `tmux` and `ssh_tmux` panes must define `tmux_session`
+- workspace IDs must be unique and `workspaces.active` must name an existing workspace when set
+- `workspaces.tab_position` must be `top`, `bottom`, `left`, or `right`
 
 `url_open` rules:
 
@@ -43,8 +52,7 @@ Path behavior:
 ## Document map
 
 This document keeps the whole-process behavior: startup, configuration, operational assumptions, and
-distribution. Per-surface behavior lives in [`docs/behavior/`](behavior/), split by the section names
-this document used to carry:
+distribution. Per-surface behavior lives in [`docs/behavior/`](behavior/), grouped by area:
 
 | Sections | Document |
 |---|---|

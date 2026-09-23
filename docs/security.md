@@ -6,8 +6,8 @@ The General Rules, the `gosec` policy and the one standing exception below apply
 
 ## Document map
 
-The per-sink requirements live in [`docs/security/`](security/), split by the section names this
-document used to carry. Each is required reading before touching the code it covers.
+The per-sink requirements live in [`docs/security/`](security/), grouped by area. Each is required
+reading before touching the code it covers.
 
 | Sections | Document |
 |---|---|

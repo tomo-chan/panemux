@@ -1,6 +1,6 @@
 # Agent Board: security model
 
-> Part of the [Agent Board design](../agent-board.md). Read that document's status note first — it says which parts of this design are shipped.
+> Part of the current [Agent Board design](../agent-board.md).
 
 ## Security model
 
@@ -22,16 +22,14 @@ that shaped the design.
   unescaped.** Neither `api.sh` nor `send.sh` has a stdin-based way to receive the values panemux
   passes them, so the remote command string is the only place they can go, and it must be built
   with every argument single-quote-escaped, the same discipline already applied to `cwd` in
-  `internal/session/ssh.go` (`validRemotePath` / `shellQuotePath`). Reads are **not** exempt: an
-  earlier revision of this document claimed `api.sh`'s arguments were digit-validated and therefore
-  safe to leave unescaped, which was both factually wrong (`--agent` isn't validated at all — see
-  [Integration with agmsg](agmsg-integration.md#integration-with-agmsg)) and structurally wrong even where validation
-  does exist, because agmsg's own argument checks run *inside the remote shell process that only
+  `internal/session/ssh.go` (`validRemotePath` / `shellQuotePath`). Reads are **not** exempt:
+  `--agent` is not validated by agmsg at all (see
+  [Integration with agmsg](agmsg-integration.md#integration-with-agmsg)), and even where validation
+  exists it runs *inside the remote shell process that only
   exists because panemux's command string has already been parsed* — they cannot protect the
   construction of that string. `send.sh` does its own SQL escaping internally, so shell-escaping is
-  the only layer panemux is responsible for on the write path — there is no panemux-owned SQL text
-  to also escape, unlike an earlier draft of this design that had panemux building its own SQL.
-- **Implementation status: attempted resolution, not a verified one.** `shellQuotePath`-style
+  the only layer panemux is responsible for on the write path; panemux builds no SQL text.
+- **CodeQL status: structural mitigation, not a verified scan.** `shellQuotePath`-style
   escaping alone does not satisfy this repository's own CodeQL bar for a message body — `docs/security.md`
   is explicit that a quoting or regex-submatch transform does not, by itself, break CodeQL's
   taint-tracking; the accepted pattern (`cwd`) is a **regex allowlist** (`validRemotePath`) applied
@@ -46,7 +44,7 @@ that shaped the design.
   alone: Go's `base64.StdEncoding` output is, by construction, always a subset of the checked
   alphabet, so the `MatchString` branch that gates it can never actually fail for correctly-encoded
   input — it is a regex-allowlist branch in *shape* (mirroring `validRemotePath`'s structure), but no
-  CodeQL scan has actually been run against this code in the environment that implemented it to
+  CodeQL scan has actually been run against this code in the current environment to
   confirm it is recognized as one in *practice*. Treat the taint chain as *plausibly* broken by
   structural analogy to `validRemotePath`, not as confirmed broken by an actual scan, until a real
   CodeQL run against this code says otherwise.

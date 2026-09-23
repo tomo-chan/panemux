@@ -152,14 +152,28 @@ A test that genuinely should not go red without its implementation is marked `//
 
 ### Documentation updates
 
+- Use [docs/README.md](docs/README.md) as the information-architecture guide: product overview,
+  concise current-state topic guides, and focused deep dives serve different reader needs.
+- Every code change must update all related documentation in the same change. Before declaring the
+  work complete, inspect the document map in [AGENTS.md](AGENTS.md) and update every current-state
+  specification, topic guide, deep dive, operational guide, and developer rule whose contract or
+  explanation the code changed. A code change is incomplete while any related document still
+  describes the old behavior. If the change affects no documented contract, do not make a synthetic
+  documentation edit, but still perform this inspection.
 - When a behavior, operational assumption, browser requirement, rendering constraint, or user-visible rule becomes confirmed, update the relevant files in `docs/` in the same change.
 - Do not leave documentation follow-up as a separate later task once the behavior is settled.
+- Keep specifications and topic guides current-state only. Move chronology, rejected alternatives,
+  rollout phases, incidents, and reasons for replacing an approach to
+  [docs/DECISIONLOG.md](docs/DECISIONLOG.md); update both places in the same change when a decision
+  changes the current contract.
 - When a change adds or alters a user-facing use case, add or update its row in [docs/scenarios.md](docs/scenarios.md) in the same change, including the column naming where it is verified. `manual` is an acceptable answer there; an absent row is not.
 - Two checks enforce this rather than leaving it to memory:
   - `make check-scenarios` (part of `make check`) resolves every path and Go test name an `auto` row names, and fails when one no longer exists. A row that names a renamed or deleted test reads as coverage and is worth nothing.
   - CI fails a pull request that changes `frontend/src`, `internal/api` or `internal/config` without touching `docs/scenarios.md`. Apply the `scenarios-exempt` label to a change that genuinely alters no use case.
 - `make check-docs-links` (also part of `make check`) checks the documentation's own integrity: every relative link resolves, every `#fragment` matches a heading in the file it names, and no label names a file other than the one it opens. That last one is the rule to know when moving a section between files — rewriting the target and leaving a label that still says `security.md` while the link opens `security/auth.md` misdirects a reader as surely as a 404 does, and nothing about the rendered page looks wrong.
 - When a document outgrows one file, split it into `docs/<name>/` and leave `docs/<name>.md` as the entry point: orientation, the rules that always apply, and a document map keyed by the section names the file used to carry.
+- Put dated evidence such as coverage counts or benchmark results in a topic-specific measurements
+  document, with its commit/date, rather than presenting the number as timeless specification.
 
 ### Security-sensitive implementation
 
@@ -218,6 +232,7 @@ Long-form testing references split out of this guide live in [`docs/development/
 
 Enduring product and design documents:
 
+- Documentation index and reader routes: [docs/README.md](docs/README.md)
 - Product overview: [docs/overview.md](docs/overview.md)
 - Architecture and security design: [docs/architecture.md](docs/architecture.md)
 - Security requirements for implementation: [docs/security.md](docs/security.md)
@@ -225,3 +240,4 @@ Enduring product and design documents:
 - UI intent: [docs/ui-design.md](docs/ui-design.md)
 - CI and release maintenance: [docs/maintenance.md](docs/maintenance.md)
 - Test quality characteristics and the gate design: [docs/quality-gateway.md](docs/quality-gateway.md)
+- Design history and rejected alternatives: [docs/DECISIONLOG.md](docs/DECISIONLOG.md)

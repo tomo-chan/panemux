@@ -1,6 +1,6 @@
 # Agent Board: alternatives considered
 
-> Part of the [Agent Board design](../agent-board.md). Read that document's status note first — it says which parts of this design are shipped.
+> Part of the current [Agent Board design](../agent-board.md).
 
 ## Alternatives considered
 

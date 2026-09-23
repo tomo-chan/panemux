@@ -67,19 +67,14 @@ environment that context included the session URL. This is not reachable through
 closed by any flag above.
 
 **The subprocess's execution context is pinned by panemux, not inherited from the environment.** Three
-of `claude`'s defaults resolve from ambient state, and all three were wrong for a subprocess panemux
-spawns on an operator's behalf. Each finding below was reproduced against the real CLI (v2.1.233),
+of `claude`'s defaults resolve from ambient state and are inappropriate for a subprocess panemux
+spawns on an operator's behalf. Each property below was verified against the real CLI (v2.1.233),
 not inferred from `--help`:
 
 - **Conversation identity.** A plain `claude -p` with no `--resume` does **not** mint a fresh
   conversation — it reports the *ambient* session id of whatever Claude Code session the environment
-  already belongs to. `Runner` previously captured that reported id, persisted it, and `--resume`d it
-  on every later query, which attached the command center to a conversation it does not own. This was
-  observed live: a palette query returned a reply carrying the operator's own session context,
-  referencing a scratch file name that appeared in no prompt panemux ever sent. **The escalation is
-  the point:** the command center is deliberately launched with `--allowedTools` scoped to exactly
-  three board tools, while the session it joined held that session's full tool permissions, so palette
-  text became input to a far more capable agent than the palette's own contract admits.
+  already belongs to. The command center must never adopt that id because the ambient conversation
+  may hold broader tool permissions than the palette contract permits.
   `internal/commandcenter/context.go`'s `NewSessionID` now mints a v4 UUID, `buildArgs` pins it with
   `--session-id` on a first run, and the persisted value is always the id panemux minted — the
   subprocess's own reported id is never adopted.
@@ -113,9 +108,8 @@ center. The trust boundary is the point: host settings are written on the assump
 the request and is watching, while the command center accepts input from anyone holding the board
 bearer token, unattended.
 
-**`--allowedTools` alone is therefore not a boundary — it is a permission policy another policy layer
-can override, and an earlier revision of this document called it "the actual security boundary", which
-was wrong.** The argv the subprocess is launched with carries a second, stronger list:
+**`--allowedTools` alone is not a boundary — it is a permission policy another policy layer can
+override.** The argv the subprocess is launched with carries a second, stronger list:
 `--disallowedTools`, built by `DisallowedTools()` in `internal/commandcenter/mcp_config.go`. The
 difference is measurable, all three rows run against the real CLI with `--allowedTools` scoped to a
 single board tool and a prompt instructing the model to write a file with `Bash`:
@@ -139,10 +133,8 @@ It will drift as the CLI gains tools. That weakness is accepted because it is th
 denial that holds; `TestDisallowedToolsCoversActingTools` and `TestRunnerDeniesActingToolsByName` fail
 if the list or the flag disappears.
 
-Relatedly, `AllowedTools`'s own doc comment used to say the subprocess had "no `Bash`, no filesystem
-tools". That was imprecise in a way that mattered: those tools are *present* in the subprocess's tool
-list and refused at call time, not absent. "Refused" is exactly the property the middle row above
-defeats.
+Acting tools are *present* in the subprocess's tool list and refused at call time, not absent.
+"Refused" is exactly the property the middle row above defeats.
 
 What panemux does send is `SubprocessSettings` (`internal/commandcenter/context.go`), a fixed literal
 containing only keys that *narrow* what the subprocess may do — currently

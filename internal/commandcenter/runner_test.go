@@ -327,8 +327,8 @@ func TestRunnerResumeFailureClearsStaleSessionID(t *testing.T) {
 // argument-injection buildArgs's own "--" marker defends the prompt
 // against, except --resume's value sits before that marker and has no
 // marker of its own to rely on. The Runner must instead treat this the same
-// as no persisted id at all: query without --resume, and persist whatever
-// fresh session id this successful first-run query captures.
+// as no persisted id at all: mint a new UUID, pass it with --session-id, and
+// persist that value rather than the session id reported by the subprocess.
 func TestRunnerMalformedPersistedSessionIDFallsBackToFirstRun(t *testing.T) {
 	sessionPath := filepath.Join(t.TempDir(), "session.json")
 	require.NoError(t, SaveSessionFile(sessionPath, SessionState{SessionID: "--dangerously-skip-permissions"}))

@@ -1,6 +1,6 @@
 # Agent Board: cross-host relay
 
-> Part of the [Agent Board design](../agent-board.md). Read that document's status note first — it says which parts of this design are shipped.
+> Part of the current [Agent Board design](../agent-board.md).
 
 ## Cross-host relay
 
@@ -31,7 +31,7 @@ to reach each other). panemux is the only node with a connection to every host, 
    and logged the same as any other failed check, never relayed and never cached. Any other `from` —
    one that is neither a known local pane ID nor a ledger-matched `_system` — is dropped and logged
    too. See [Security model](security-model.md#security-model) for the forgery scenario this closes and why a
-   universal `_system` allowance (an earlier revision of this document's check) was not enough. If
+   a universal `_system` allowance is not sufficient. If
    `from` passes: when `to == "_system"`, panemux updates the
    [in-memory status cache](architecture.md#architecture) instead of relaying it — status reports never leave the
    host they were written on. Otherwise, panemux resolves `to` to its owning pane and that pane's
