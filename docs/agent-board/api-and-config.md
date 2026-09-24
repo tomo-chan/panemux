@@ -1,29 +1,24 @@
-# Agent Board: API and config additions
+# Agent Board: API and configuration
 
 > Part of the current [Agent Board design](../agent-board.md).
 
 ## API additions
 
-See [docs/behavior/board-api.md](../behavior/board-api.md#agent-board-rest-api) for exact
-request/response shapes and status codes. Every `/api/board/*` endpoint requires the bearer token
-described in [Security model](security-model.md#security-model). That gate covers **only**
-`/api/board/*`, not the pre-existing
-`/api/*` routes or `/ws/{sessionID}`: retrofitting auth onto the already-relied-upon unauthenticated
-routes is a separate, larger change with its own frontend work — see
-[security/auth.md](../security/auth.md#auth-token-and-transport-encryption). `GET /api/session-token` is the one
-deliberate exception to "every `/api/board/*` endpoint requires the token" — see its own row below
-and [docs/behavior/board-api.md](../behavior/board-api.md#get-apisession-token) for why. `WS /ws/board-command` is
-authenticated too, but via a WebSocket subprotocol rather than the `Authorization` header — see
-[docs/behavior/websocket.md](../behavior/websocket.md#command-center-websocket-protocol).
+Exact payloads and status codes live in [Agent Board REST API](../behavior/board-api.md#agent-board-rest-api).
 
-| Endpoint | Purpose |
+| Endpoint | Contract |
 |---|---|
-| `GET /api/board/status` | A snapshot of panemux's in-memory status cache — no `AgmsgClient` call happens on this request (see [Architecture](architecture.md#architecture)) |
-| `GET /api/board/messages?since=<seq>` | History feed for the dashboard UI. `<seq>` is `BoardCache`'s own panemux-local sequence number (see [Package layout](architecture.md#package-layout)), not an agmsg-native `id` — those aren't comparable across hosts |
-| `POST /api/board/broadcast` | `{ "to": ["pane-a","pane-b"], "body": "..." }`; sends directly to each target's own host via `AgmsgClient` (never via PTY injection, so it is safe to send to a pane mid-turn); delivery to the pane is immediate, but the message appears in `GET /api/board/messages`' history only after the relay's next poll cycle reads it back — see [Known limitations](limitations.md#known-limitations) |
-| `WS /ws/board-command` | Command center chat: client sends `{"prompt": "..."}`, server streams the headless Claude response — see [Command center](command-center.md#command-center) |
-| `GET /api/board/command/history` | Command center's own captured conversation history — see [Command center](command-center.md#command-center) |
-| `GET /api/session-token` | **Deliberately unauthenticated** browser bootstrap for the bearer token and the independent `command_center_enabled` / `agent_board_enabled` capability flags. It lives outside `/api/board/` so the authenticated sub-router does not require the token this endpoint exists to provide; see [docs/behavior/board-api.md](../behavior/board-api.md#get-apisession-token). |
+| `GET /api/board/status` | Read the in-memory status snapshot without contacting agmsg |
+| `GET /api/board/messages?since=<seq>` | Read cache history after a panemux-local sequence |
+| `POST /api/board/broadcast` | Send to resolved pane IDs on their owning hosts |
+| `WS /ws/board-command` | Run and stream one command-center query |
+| `GET /api/board/command/history` | Read captured command-center history |
+| `GET /api/session-token` | Loopback-only browser bootstrap for the token and capability flags |
+
+All `/api/board/*` routes require the bearer token. `/ws/board-command` carries the same token by
+WebSocket subprotocol. `/api/session-token` is deliberately outside the authenticated subtree and
+requires loopback remote address and `Host`; other existing terminal routes retain their current
+authentication model.
 
 ## Config additions
 
@@ -31,48 +26,30 @@ authenticated too, but via a WebSocket subprotocol rather than the `Authorizatio
 server:
   host: "127.0.0.1"
   port: 8080
-  auth_token: ""   # empty = auto-generate on first run, saved to ~/.config/panemux/token (0600)
+  auth_token: ""   # empty: generate and persist a private token
 
 command_center:
-  enabled: true   # default false; talks only to panemux's own REST API, no local agmsg needed
+  enabled: true     # default: false; independent of agmsg availability
 
 agent_board:
-  team: "panemux"  # default; all board-enabled panes share this agmsg team unless overridden
-  agmsg_path: "~/.agents/skills/agmsg"  # default; where scripts/api.sh is expected, per-host override possible
+  team: "panemux"
+  agmsg_path: "~/.agents/skills/agmsg"
 
 panes:
   - id: pane-a
     type: local
     agent_board:
       enabled: true
-      mode: monitor    # monitor (default) | turn (legacy) | both | off, mirrors agmsg's own /agmsg mode
-
-  - id: pane-b          # e.g. a Codex pane
-    type: ssh
-    connection: build-host
-    agent_board:
-      enabled: true
+      mode: monitor # monitor (default) | turn | both | off
 ```
 
-Board enablement is configured per pane. Board features on a host require agmsg to already be
-present there; panemux does not install it. See
-[Integration with agmsg](agmsg-integration.md#integration-with-agmsg).
+Board enablement is per pane. All enabled panes use the instance-wide team. agmsg must already be
+installed on each participating host; panemux never installs it.
 
-**Why `command_center` is a top-level key, not nested under `agent_board`, despite both belonging to
-the same Agent Board feature.** Nesting it would imply command_center depends on agent_board/agmsg
-being configured too, which is false by design: the command center never calls agmsg directly (see
-[Command center](command-center.md#command-center)) and works with every pane's `agent_board.enabled` left `false`.
-The two keys are siblings in this config because their actual dependency graph is siblings — not
-because they're unrelated features that happen to share a document.
+`command_center` is a sibling of `agent_board` because it talks only to panemux's API and can run
+without any board-enabled pane or local agmsg installation. The browser receives independent
+`command_center_enabled` and `agent_board_enabled` flags.
 
-**`_system` is reserved and validated where panemux can actually enforce it.** `internal/config/
-validate.go` rejects any pane config whose `id` is literally `_system`, the same way it already
-rejects duplicate pane IDs (see [architecture.md](../architecture.md)) — panemux will not let itself be
-configured into a collision with its own reserved sentinel. This is a real but partial guarantee:
-nothing stops an operator or a live agent from running agmsg's own `join.sh <team> _system ...`
-by hand, outside any pane panemux bootstrapped, since agmsg's roster is agmsg's own state and
-`join.sh` is not gated by panemux at all. That gap is exactly why the [own-send
-ledger](architecture.md#package-layout) check in [Cross-host relay](relay.md#cross-host-relay) does not trust the
-`_system` string by itself even after this validation — config-time reservation closes the
-"panemux accidentally misconfigures itself" case, not the "an agmsg team member deliberately
-registers the reserved name" case, which only the ledger check closes.
+`_system` is reserved. Configuration rejects it as a pane ID or team, but external processes can
+still ask agmsg to use that name; relay sender validation must therefore rely on the own-send ledger,
+not the identifier alone.

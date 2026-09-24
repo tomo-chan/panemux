@@ -6,170 +6,86 @@
 
 ### What it is
 
-- A single, persistent **headless** Claude session, not a pane and not a PTY. panemux invokes it as
-  a short-lived subprocess per query — `claude -p --resume <command-center-session-id>
-  --output-format=stream-json "<prompt>"` — rather than a long-running process, so this does not
-  introduce the "new daemon" [Design principles](../agent-board.md#design-principles) rules out. `--resume` against
-  one fixed session id is what gives the command center conversational continuity across separate
-  queries.
-- **It reads and writes the board through panemux's own authenticated REST API — `GET
-  /api/board/status`, `GET /api/board/messages`, `POST /api/board/broadcast` — the same endpoints
-  the browser dashboard uses, over loopback, with a token panemux injects into the subprocess's
-  environment.** The LLM itself never composes the HTTP call: panemux points the subprocess at a
-  narrow MCP server it provides (see [Process lifecycle](#process-lifecycle)) that exposes exactly
-  those three operations as tools and makes the actual authenticated request on the model's behalf.
-  This keeps the LLM away from shell composition, leaves `AgmsgClient` as the only code that calls
-  agmsg scripts, and gives the command center the relay's aggregate across every host rather than
-  one local agmsg installation. The [Decision log](../DECISIONLOG.md#command-center-uses-panemuxs-api-not-agmsg-scripts-2026-08-pr-162)
-  records the replaced design.
-- **The command center therefore needs no local agmsg installation of its own** — it never calls
-  agmsg directly, so `command_center.enabled: true` is not gated on the same agmsg-presence check a
-  board-enabled pane is (see [Config additions](api-and-config.md#config-additions)).
-- Sending a message is `POST /api/board/broadcast` with the command center's own reserved `from`
-  identity, `_system` — the exact same code path a human-triggered broadcast takes, which already
-  resolves the destination pane's host and calls that host's `AgmsgClient.Send` (always `--force`)
-  without the command center needing any host-routing logic of its own.
+The command center is one persistent conversation per panemux instance, executed as a short-lived
+headless Claude subprocess for each query. A panemux-owned session ID provides continuity; no
+long-running agent daemon or PTY is introduced.
+
+The model receives exactly three MCP tools:
+
+- `board_status`;
+- `board_messages`;
+- `board_broadcast`.
+
+These tools call panemux's authenticated loopback REST API. The command center never calls agmsg,
+composes shell commands, or routes hosts itself, and therefore does not require a local agmsg
+installation. Broadcasts use the reserved `_system` sender and the same relay path as browser
+broadcasts.
 
 ### Process lifecycle
 
-- **First run.** No persisted command-center session id exists yet the first time a query arrives.
-  panemux **mints its own v4 UUID** and pins the conversation to it with `--session-id <uuid>`, then
-  persists that id to a small local file (`~/.config/panemux/command-center-session.json`, the same
-  kind of local bookkeeping file as the relay cursor in [Cross-host relay](relay.md#cross-host-relay)). Every
-  later query reuses it: `claude -p --resume <id> ...`. Note `--verbose` is required alongside
-  `-p --output-format=stream-json`; the CLI refuses to stream structured output in print mode without
-  it.
+On the first successful query, panemux mints and persists a v4 UUID and supplies it explicitly to
+Claude. Later queries resume that ID. A session ID reported by the subprocess is ignored so the
+command center cannot adopt an ambient Claude conversation.
 
-  **The id the subprocess reports is deliberately ignored.** Without an explicit `--session-id`,
-  the real CLI may report the ambient session id of the Claude Code environment it belongs to. The
-  command center must not attach to a conversation it does not own, especially one with broader tool
-  permissions.
-  See [security/command-center.md's command center section](../security/command-center.md#command-center-subprocess-execution).
+Each query runs in an empty temporary directory with:
 
-  The subprocess is also isolated from the operator's own configuration: `--setting-sources` is passed
-  with an empty value (no user, project or local settings, so operator hooks never fire inside it),
-  `--strict-mcp-config` limits it to the board MCP server this query configured, and `cmd.Dir` is an
-  empty per-query temp directory rather than wherever panemux was launched. Since an empty
-  `--setting-sources` also suppresses `CLAUDE.md` discovery, panemux's own instructions are passed via
-  `--append-system-prompt`. An operator may place a `CLAUDE.md` in
-  `~/.config/panemux/command-center/` to refine those instructions; it is optional. No settings file is
-  accepted from any source — a settings value can nullify `--allowedTools`, so panemux sends only its
-  own fixed, narrowing document (currently `{"sandbox":{"enabled":true}}`). See
-  [security/command-center.md](../security/command-center.md#command-center-subprocess-execution).
-- **Permissions.** The subprocess never receives `--dangerously-skip-permissions`. It has no PTY to
-  surface an interactive approval prompt through, and this design does not substitute a blanket
-  bypass for that missing prompt. Instead panemux runs a narrow, purpose-built MCP server exposing
-  exactly three tools — `board_status`, `board_messages`, `board_broadcast`, thin wrappers around the
-  three REST endpoints in [API additions](api-and-config.md#api-additions) — and launches the command center with
-  `--allowedTools` scoped to only those three, no `Bash`, no filesystem tools, and no other MCP
-  servers an interactive Claude Code session might otherwise have configured. This is also why the
-  command center goes through an MCP server rather than a `Bash`+`curl` tool call: an MCP tool can be
-  individually allow-listed ahead of time, while a generic `Bash` grant cannot be scoped down to "only
-  run curl against this one loopback endpoint" — granting `Bash` at all would hand the command center
-  everything `Bash` can do, which is exactly the blanket-bypass outcome this design avoids.
-- **Wire shape.** That server answers with the response shape JSON-RPC 2.0 §5 requires — and with
-  MCP's narrower reading of it — not merely one its current client happens to accept: **exactly one**
-  of `result`/`error` on every response, a `result` that is always an *object* when there is no
-  error, and an `id` that is JSON `null` — never absent — when the request's own id could not be
-  determined, which is the parse-error case. The empty object rather than `null` is the MCP half: its schema
-  defines a successful response's result as `{ _meta?: ..., [key: string]: unknown }`, so `null`
-  fails it exactly as an absent key does — fixing §5 alone would have moved that response from one
-  invalid shape to another. Nothing observed today rejects any of these, but the client here is an
-  LLM subprocess's own MCP layer, whose strictness panemux does not control and cannot pin.
-  See #210.
-- **Concurrency.** At most one query may be in flight against the command center's session id at a
-  time. A `WS /ws/board-command` request that arrives while one is already running is rejected
-  immediately with an explicit "command center busy" error rather than queued — two concurrent
-  `claude -p --resume <same-id>` invocations against one session id have no ordering guarantee from
-  the CLI itself, and building a queue would add state-machine complexity this design deliberately
-  avoids for a feature kept to [one session per instance](#scope-kept-intentionally-narrow-for-now).
-- **Failure modes.** A subprocess that exits non-zero, emits malformed `stream-json`, or times out
-  surfaces as an explicit error frame on the WS connection — never a silently empty response, so the
-  frontend can distinguish "no output yet" from "the query failed." The timeout is a real, enforced
-  `context.WithTimeout` wrapping the subprocess's own context
-  (`commandcenter.RunnerConfig.QueryTimeout`, default 5 minutes) — not merely aspirational: the WS
-  handler's own request context comes from an already-hijacked HTTP connection, which the standard
-  library never cancels on client disconnect, so this timeout is what actually bounds a hung or
-  abandoned query's lifetime. A failed query never corrupts `--resume` continuity for the next one:
-  a `--resume`d query that itself fails clears the stale session id it was resuming, so a
-  `claude`-side session that no longer exists (e.g. the operator cleared `~/.claude`) does not leave
-  every future query retrying the same dead id forever. The next query follows the first-run path:
-  panemux mints and persists a new v4 UUID, passes it with `--session-id`, and ignores any session id
-  reported by the subprocess.
+- no user, project, or local setting sources;
+- strict MCP configuration containing only the board server;
+- only the three board tools allowed;
+- sandboxing enabled;
+- panemux's instructions supplied as a system-prompt addition.
+
+An optional `~/.config/panemux/command-center/CLAUDE.md` may refine those instructions. No inherited
+settings file may broaden tools or enable hooks. `--dangerously-skip-permissions`, Bash, filesystem
+tools, and unrelated MCP servers are forbidden.
+
+Only one query may run at a time. A concurrent prompt receives `busy` immediately and is not
+queued. Every started query ends with exactly one `done` or `error` frame.
+
+Queries have a five-minute default timeout. Non-zero exit, malformed stream output, and timeout are
+explicit errors. Failure while resuming clears the stale session ID so the next query starts a new
+conversation; a failed first query does not persist its newly minted ID.
+
+The stdio MCP server follows JSON-RPC 2.0 and MCP response rules: exactly one of `result` or `error`,
+object-valued successful results, and an explicit `null` ID when a request ID cannot be determined.
 
 ### Authorization
 
-The command center's privilege (it can message *any* board-enabled pane) is not granted by any
-per-pane role — there is no pane role in this design. It is granted the same way every other
-capability in panemux is: WS/REST access to the command center's own endpoints requires the global
-bearer-token auth described in [Security model](security-model.md#security-model).
+The command center uses the same bearer-token boundary as other board APIs. There is no pane-level
+role model. Anyone who can authenticate already has access to panemux's full terminal surface, so a
+second command-center-specific tier would not reduce the effective privilege.
 
-**Trust implication, stated explicitly:** a message the command center sends is an ordinary
-instruction to the receiving pane, not something pre-authorized — the same caveat already called
-out for the `SendMessage` tool in Claude Code itself. The receiving pane's own normal confirmation
-flow still applies.
+A command-center message is still an instruction, not pre-authorized action. The receiving agent's
+normal confirmation policy remains in force.
 
 ### API and streaming
 
-- `WS /ws/board-command`: the frontend sends `{"prompt": "..."}`, panemux runs `claude -p --resume
-  <id> --output-format=stream-json "<prompt>"` and streams the subprocess's output back as it
-  arrives, so the palette can show live output instead of waiting for the full response. Exactly one
-  frame ends a query that started — `error` or `done`, never both, with `busy` marking a prompt that
-  never became a query — and a non-fatal failure around a query rides whichever of the two it ends
-  with, as `"warnings":["..."]`, rather than claiming the query itself failed. Today the only such
-  failure is a history write that could not land; see
-  [behavior/websocket.md](../behavior/websocket.md#command-center-websocket-protocol) for the full frame contract.
-- `GET /api/board/command/history`: returns the command center's own turn-by-turn history. This is
-  **not** re-derived from Claude Code's transcript file after the fact — per [Design
-  principles](../agent-board.md#design-principles)'s "ask, don't reverse-engineer" rule, panemux persists what it
-  already captured directly from the `--output-format=stream-json` stream while relaying it to the
-  WS client (a documented, stable CLI output contract), appending it to a local file panemux fully
-  owns the format of. Because the board tool calls the command center makes appear as ordinary
-  tool-use entries in that same captured stream, the returned history interleaves "what the command
-  center did on the board" and "what it told the user" in one chronological feed.
+`WS /ws/board-command` accepts a prompt and streams Claude's structured output. Non-fatal problems,
+such as failure to persist history after an otherwise successful query, appear as warnings on the
+terminal `done` or `error` frame. Exact frame shapes are specified in
+[WebSocket protocols](../behavior/websocket.md#command-center-websocket-protocol).
 
-  **"What the user asked" is the one part the stream does not carry.** A run emits `stream_event`,
-  `system`, `assistant` and `result` frames, and the prompt that produced them appears in none of
-  them. panemux therefore records it itself, as the first entry of each turn,
-  under type `panemux_prompt` — a type the CLI never emits, so a reader can always distinguish a
-  panemux-written entry from a relayed subprocess line. A turn whose subprocess failed still has its
-  prompt recorded; a turn whose subprocess never started does not, since there is no exchange to
-  record.
+Panemux stores the streamed lines it already observed rather than parsing Claude's private
+transcripts. Because Claude's stream does not echo the prompt, panemux adds one `panemux_prompt`
+entry at the start of each query that actually begins. Failed queries retain that prompt; rejected
+busy requests do not.
+
+`GET /api/board/command/history` returns this chronological captured history. Tool use and model
+output remain interleaved as they occurred.
 
 ### UI
 
-- `Cmd/Ctrl+Shift+K` opens a Spotlight-style modal palette (`CommandPalette.tsx`), registered on the
-  keydown capture phase so it reaches the handler even when a terminal pane currently has focus.
-  Plain `Cmd/Ctrl+K` was deliberately not used: it's already bound in many shells/readline setups a
-  terminal pane could be running, and would be swallowed as literal pane input rather than reaching
-  the browser as a shortcut.
-- The palette shows recent history inline on open (via the history endpoint above) and streams the
-  live response turn-by-turn as it's generated, only opening its own `/ws/board-command` connection
-  while the palette itself is open.
-- A separate, persistently accessible history panel (`CommandHistoryPanel.tsx`, reachable via a small
-  "Command History" button) exposes the same history outside the quick-palette flow, for scrolling
-  back further than what the palette shows inline. It reads only the REST history endpoint — it needs
-  no WS connection of its own.
-- Both surfaces are gated on `command_center_enabled` from `GET /api/session-token`: neither the
-  keyboard shortcut nor the history button is wired up at all when the command center is disabled,
-  rather than being present but non-functional.
-- A third surface, `BoardDashboardPanel.tsx`, is gated the same way but on `agent_board_enabled`
-  instead: an "Agent Board" button next to "Command History", plus `Cmd/Ctrl+Shift+B` on the same
-  capture-phase registration. Its own `useBoardStatus` hook polls `GET /api/board/status` (full
-  snapshot every 5s, paused while the tab is hidden — the same `document.hidden` pattern
-  `useSessionsOverview.ts` already uses) and `GET /api/board/messages?since=<seq>` (incremental,
-  capped at the most recent 500 messages client-side) and filters out `to === "_system"` /
-  `kind === "board_status"` rows from the message feed client-side, since the relay also appends
-  those to history (see [Status self-report and message flow](message-flow.md#status-self-report-and-message-flow))
-  and the dashboard's message feed is meant to show conversation, not raw status JSON.
+- `Cmd/Ctrl+Shift+K` opens the command palette. The shortcut uses capture phase so it works while a
+  terminal owns focus.
+- The palette loads recent history, streams the current response, and opens its WebSocket only while
+  visible.
+- The command-history panel reads the same history through REST and needs no WebSocket.
+- Both surfaces are absent when `command_center_enabled` is false.
+- Closing either surface restores the element that previously held focus.
 
-See [ui-design.md's Agent Board UI section](../ui-design.md#agent-board-ui) for how these
-surfaces reuse this repository's existing dialog/overlay patterns and status vocabulary instead of
-introducing a parallel visual language.
+Plain `Cmd/Ctrl+K` is intentionally unused because shells and readline commonly bind it.
 
-### Scope, kept intentionally narrow for now
+### Scope kept intentionally narrow for now
 
-Exactly one command center session per panemux instance — not per-workspace, not multiple
-concurrent command centers. Nothing in this design forecloses that later, but nothing here should
-be built to anticipate it either, per this repository's own guidance against designing for
-hypothetical future requirements.
+There is exactly one command-center session per panemux instance, not per workspace, and no query
+queue or concurrent orchestrator support.

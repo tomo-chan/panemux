@@ -57,6 +57,9 @@ log. Git history remains the authority for line-level change history.
 - State current behavior and requirements in the present tense. Avoid rollout tables, "landed" or
   "previously" notes, stale measurements, and implementation status narratives in specification
   documents.
+- Document intent, invariants, external contracts, and failure semantics. Do not inventory types,
+  functions, tests, or control flow that a code reader can discover directly; name implementation
+  locations only when they identify where a rule is enforced.
 - Add a dated entry to `DECISIONLOG.md` when the reason, rejected alternative, migration sequence,
   or incident matters to future maintainers. Update the current-state document in the same change.
 - Put measurements beside the topic they measure and identify their commit/date. Measurements are
