@@ -269,6 +269,32 @@ func TestIsClaudeProcess(t *testing.T) {
 	}
 }
 
+// Observed on macOS: `/resume` keeps the process and its <pid>.json, and
+// rewrites the file's sessionId to the resumed session. The session switched
+// away from then has a log and no live file, so it is stopped; the resumed one
+// runs where the process runs.
+func TestBuildTasks_ResumeSwitchesTheTaskInPlace(t *testing.T) {
+	raw := rawSnapshot{
+		Now:        hostNow,
+		StateFiles: []stateFile{{Name: "48471.json", Data: stateJSON(48471, "resumed", "idle")}},
+		Processes:  []process{{PID: 48000, PPID: 1, Command: "-zsh"}, {PID: 48471, PPID: 48000, Command: "claude"}},
+		TmuxPanes:  []tmuxPane{{PanePID: 48000, Session: "work"}},
+		Transcripts: []transcript{
+			{ModTime: hostNow - 5, SessionID: "resumed", CWD: "/workspace/user/project"},
+			{ModTime: hostNow - 60, SessionID: "started-with", CWD: "/workspace/user/project"},
+		},
+	}
+	tasks := buildTasks("", raw, collectedAt)
+	require.Len(t, tasks, 2)
+
+	resumed := findTask(t, tasks, "local:claude:resumed")
+	assert.Equal(t, StateIdle, resumed.State)
+	assert.Equal(t, 48471, resumed.PID)
+	assert.Equal(t, Location{Kind: LocationTmux, TmuxSession: "work", Attachable: true}, resumed.Location)
+
+	assert.Equal(t, StateStop, findTask(t, tasks, "local:claude:started-with").State)
+}
+
 func TestBuildTasks_TwoLiveFilesForOneSessionKeepTheNewest(t *testing.T) {
 	older := []byte(`{"pid":10,"sessionId":"same","status":"idle","statusUpdatedAt":1000}`)
 	newer := []byte(`{"pid":11,"sessionId":"same","status":"busy","statusUpdatedAt":2000}`)

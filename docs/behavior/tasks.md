@@ -85,6 +85,10 @@ ends before its terminating marker — a connection dropped mid-run — fails th
   process has gone, or whose pid now belongs to another process (pids restart after a host
   reboot), is not listed as running; its session shows up as stopped through its conversation log
   instead. `procStart` is not used.
+- **`/resume` inside a running Claude Code switches the task in place.** The process and its
+  `<pid>.json` stay the same and the file's `sessionId` becomes the resumed session, so the session
+  switched away from is listed as stopped and the resumed one as running where the process runs.
+  A normal exit removes the state file.
 - A state file that cannot be read is shown as `unknown` while the pid in its name (`<pid>.json`)
   is a claude process, dropped when that pid is not, and kept when the name carries no pid.
 - **A running claude process that no state file names is shown as `unknown`, not `stop`**, with its

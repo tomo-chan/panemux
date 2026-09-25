@@ -113,12 +113,13 @@ while being built:
   a page on another site must not be able to trigger it with an `<img>`.
 - **A stopped task reports its repository but not its branch or PR**: git metadata is read from the
   directory as it is now, which says nothing about the branch a stopped session worked on.
-- **Not verified on a real machine yet:** whether `/resume` rewrites the running process's state
-  file to the new session ID, and whether a state file outlives its process. Neither changes what is
-  built: a leftover file is filtered out by liveness either way. If `/resume` turns out not to
-  rewrite the file, the dashboard keeps showing the session the process started with as the running
-  one, and issue #252 says the design is revisited then. Checking both needs a second, logged-in
-  Claude Code, which the environment this was built in did not have.
+- **`/resume` and exit were checked on a real machine** (macOS, 2026-09-26; the Claude Code
+  version was not recorded). `/resume` keeps the same process and the
+  same `<pid>.json`, and rewrites that file's `sessionId` to the resumed session (`updatedAt`
+  moves with it) — so the switched-from session shows as stopped and the switched-to one as running
+  in the same place, as issue #252 expected. `/exit` removes both `<pid>.json` and its `.key` file,
+  so a normal exit leaves no state file behind; the liveness check still guards against the files a
+  crash or a host restart can leave.
 - **One fixed script per host, fed on stdin.** Every host runs the same constant script through
   `sh -s`: one round trip per collection, identical parsing for local and remote, no remote value
   ever quoted into a command, and nothing that depends on the remote login shell being POSIX. The
