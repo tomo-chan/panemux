@@ -491,3 +491,19 @@ func TestTaskGitInfo_PRLookupStopsWithTheRequest(t *testing.T) {
 	assert.Equal(t, "main", info.Branch)
 	assert.Zero(t, info.PRNumber)
 }
+
+func TestTaskGitFor(t *testing.T) {
+	full := &taskGitInfo{Repo: "r", RepoURL: "https://example.invalid/r", Branch: "b", PRNumber: 1,
+		PRURL: "https://example.invalid/r/pull/1"}
+	running := tasks.Task{State: tasks.StateBusy}
+	stopped := tasks.Task{State: tasks.StateStop}
+
+	assert.Same(t, full, taskGitFor(running, full), "a running task gets everything")
+	assert.Nil(t, taskGitFor(running, nil))
+	assert.Nil(t, taskGitFor(stopped, nil))
+	assert.Equal(t, &taskGitInfo{Repo: "r", RepoURL: "https://example.invalid/r"}, taskGitFor(stopped, full))
+	assert.Equal(t, &taskGitInfo{Repo: "r"}, taskGitFor(stopped, &taskGitInfo{Repo: "r", Branch: "b"}))
+	assert.Equal(t, &taskGitInfo{RepoURL: "https://example.invalid/r"},
+		taskGitFor(stopped, &taskGitInfo{RepoURL: "https://example.invalid/r", Branch: "b"}))
+	assert.Nil(t, taskGitFor(stopped, &taskGitInfo{Branch: "b"}), "nothing left to report")
+}

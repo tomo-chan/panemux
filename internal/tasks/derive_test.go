@@ -160,19 +160,39 @@ func TestBuildTasks_UnreadableStateFileIsKeptAsUnknown(t *testing.T) {
 	}
 }
 
+// The file that loses a tie between two live files for one session still
+// describes its process, which is therefore not listed again as a claude
+// process that no state file names — even when the file is not named after
+// its pid.
+func TestBuildTasks_ALosingStateFileStillExplainsItsProcess(t *testing.T) {
+	raw := rawSnapshot{
+		Now: 2,
+		StateFiles: []stateFile{
+			{Name: "a.json", Data: []byte(`{"pid":10,"sessionId":"same","status":"idle","statusUpdatedAt":1000}`)},
+			{Name: "b.json", Data: []byte(`{"pid":11,"sessionId":"same","status":"busy","statusUpdatedAt":2000}`)},
+		},
+		Processes: []process{claudeProc(10, 1), claudeProc(11, 1)},
+	}
+	tasks := buildTasks("", raw, collectedAt)
+	require.Len(t, tasks, 1)
+	assert.Equal(t, "local:claude:same", tasks[0].ID)
+}
+
 func TestBuildTasks_UnreadableStateFileWithoutALiveProcess(t *testing.T) {
 	t.Run("a dead pid in its name is a leftover and is dropped", func(t *testing.T) {
 		raw := rawSnapshot{Now: hostNow, StateFiles: []stateFile{{Name: "5.json", Data: []byte("{")}}}
 		assert.Empty(t, buildTasks("", raw, collectedAt))
 	})
-	t.Run("a name with no pid cannot be checked and is kept", func(t *testing.T) {
-		raw := rawSnapshot{Now: hostNow, StateFiles: []stateFile{{Name: "odd.json", Data: []byte("{")}}}
-		tasks := buildTasks("", raw, collectedAt)
-		require.Len(t, tasks, 1)
-		assert.Equal(t, "local:claude:state-file:odd.json", tasks[0].ID)
-		assert.Equal(t, LocationNone, tasks[0].Location.Kind)
-		assert.Zero(t, tasks[0].PID)
-	})
+	for _, name := range []string{"odd.json", "0.json", "7.txt"} {
+		t.Run("a name with no pid cannot be checked and is kept: "+name, func(t *testing.T) {
+			raw := rawSnapshot{Now: hostNow, StateFiles: []stateFile{{Name: name, Data: []byte("{")}}}
+			tasks := buildTasks("", raw, collectedAt)
+			require.Len(t, tasks, 1)
+			assert.Equal(t, "local:claude:state-file:"+name, tasks[0].ID)
+			assert.Equal(t, LocationNone, tasks[0].Location.Kind)
+			assert.Zero(t, tasks[0].PID)
+		})
+	}
 }
 
 // A running claude process that no state file describes — the files moved
@@ -241,6 +261,7 @@ func TestIsClaudeProcess(t *testing.T) {
 		"vim claude":                         false,
 		"/usr/bin/claude-notes":              false,
 		"node /workspace/user/app/server.js": false,
+		"node":                               false,
 		"":                                   false,
 	}
 	for command, want := range cases {

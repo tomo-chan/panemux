@@ -251,6 +251,7 @@ func (b *taskBuilder) unexplainedClaudeTasks(known []Task) []Task {
 	}
 	for _, file := range b.raw.StateFiles {
 		var st claudeState
+		//mutation:exempt[CONDITIONALS_BOUNDARY] equivalent — no process has pid 0, so marking it explained changes nothing
 		if json.Unmarshal(file.Data, &st) == nil && st.PID > 0 {
 			explained[st.PID] = true
 		}
@@ -476,16 +477,15 @@ func isInteractiveCodex(command string) bool {
 	if len(fields) == 0 || strings.ToLower(filepath.Base(fields[0])) != AgentCodex {
 		return false
 	}
-	args := fields[1:]
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
+	skipValue := false
+	for _, arg := range fields[1:] {
 		switch {
+		case skipValue:
+			skipValue = false
 		case arg == "--":
 			return true
 		case strings.HasPrefix(arg, "-"):
-			if codexValueOptions[arg] {
-				i++
-			}
+			skipValue = codexValueOptions[arg]
 		default:
 			return !codexNonInteractiveCommands[arg]
 		}
