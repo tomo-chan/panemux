@@ -73,6 +73,11 @@ busy requests do not.
 `GET /api/board/command/history` returns this chronological captured history. Tool use and model
 output remain interleaved as they occurred.
 
+History is appended as private JSONL rather than atomically replaced. A crash may truncate one
+line. Loading skips any malformed line and keeps valid entries around it; a later append starts on
+a new line so it does not merge with an unterminated tail. History is best-effort conversation
+context, not authoritative state.
+
 ### UI
 
 - `Cmd/Ctrl+Shift+K` opens the command palette. The shortcut uses capture phase so it works while a

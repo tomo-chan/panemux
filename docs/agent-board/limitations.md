@@ -16,8 +16,9 @@
 
 ### Delivery guarantees
 
-- Relay delivery is at-least-once, not exactly-once. A crash between forwarding and cursor
-  persistence can produce a duplicate.
+- Cross-host forwarding is best-effort. A missing destination client or failed send is not retried:
+  the source row remains visible in history and its cursor advances.
+- A crash between a successful forward and cursor persistence can produce a duplicate.
 - Delivery is not guaranteed complete. Because agmsg has no forward cursor, a burst larger than the
   poll window can drop its oldest overflow rows.
 - There are no message claim or lease semantics.

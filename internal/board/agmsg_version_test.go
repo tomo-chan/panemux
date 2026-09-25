@@ -99,7 +99,8 @@ func TestVersionMismatchWarning(t *testing.T) {
 
 func TestTestedAgmsgVersionIsPinned(t *testing.T) {
 	// The design requires a specific pinned, tested version rather than
-	// "whatever is installed" — see docs/agent-board.md's Version pinning.
+	// "whatever is installed" — see docs/agent-board/agmsg-integration.md's
+	// Version coverage section.
 	assert.Regexp(t, `^\d+\.\d+\.\d+$`, TestedAgmsgVersion)
 }
 

@@ -14,12 +14,12 @@ import (
 // docs/agent-board/agmsg-integration.md#integration-with-agmsg were read from this version's
 // own source, not inferred.
 //
-// docs/agent-board.md's "Version pinning" section requires a pinned tested
-// version because agmsg's own compatibility promise covers reading through
-// scripts/api.sh only. Everything panemux's write and bootstrap paths
-// depend on — send.sh's argument order, join.sh, delivery.sh set, and the
-// per-type hooks_file layout — carries no such promise, so an agmsg upgrade
-// can change them without that being a bug on agmsg's side.
+// docs/agent-board/agmsg-integration.md's "Version coverage" section
+// requires a pinned tested version because agmsg's own compatibility promise
+// covers reading through scripts/api.sh only. Everything panemux's write and
+// bootstrap paths depend on — send.sh's argument order, join.sh, delivery.sh
+// set, and the per-type hooks_file layout — carries no such promise, so an
+// agmsg upgrade can change them without that being a bug on agmsg's side.
 const TestedAgmsgVersion = "1.2.0"
 
 // agmsgVersionFile is agmsg's own version marker at its install root.

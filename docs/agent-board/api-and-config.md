@@ -17,8 +17,9 @@ Exact payloads and status codes live in [Agent Board REST API](../behavior/board
 
 All `/api/board/*` routes require the bearer token. `/ws/board-command` carries the same token by
 WebSocket subprotocol. `/api/session-token` is deliberately outside the authenticated subtree and
-requires loopback remote address and `Host`; other existing terminal routes retain their current
-authentication model.
+uses the guarded unauthenticated contract in [Agent Board REST API](../behavior/board-api.md#get-apisession-token).
+All other existing `/api/*` routes and `/ws/{sessionID}` remain unauthenticated; changing that
+boundary requires a separate frontend and server change.
 
 ## Config additions
 

@@ -16,9 +16,12 @@ Returns browser bootstrap data:
 { "token": "a1b2c3...", "command_center_enabled": true, "agent_board_enabled": true }
 ```
 
-The endpoint is unauthenticated because the browser uses it to learn a generated token. It accepts
-only requests whose peer address and `Host` authority are both loopback; non-loopback requests
-return `403`. Valid requests return `200`.
+The endpoint is unauthenticated because the browser uses it to learn a generated token. It returns
+`403` when the socket peer is not loopback, when `Host` is not `localhost`, a loopback address, or
+`0.0.0.0`, or when any `X-Forwarded-For`, `X-Real-IP`, or `Forwarded` value is present. Forwarding
+headers are rejected regardless of the addresses they contain. Valid direct requests return `200`.
+The rationale and accepted reverse-proxy limitation are specified in
+[Auth token and transport encryption](../security/auth.md#auth-token-and-transport-encryption).
 
 The capability flags are independent. `agent_board_enabled` reflects the current configured panes;
 `command_center_enabled` reflects command-center configuration. The frontend uses them to expose

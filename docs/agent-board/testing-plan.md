@@ -13,8 +13,8 @@ Tests must protect these contracts rather than mirror implementation structure.
   an ordinary message.
 - Latest status wins per pane, while history preserves a stable panemux-local order across hosts.
 - agmsg IDs remain opaque and host-local.
-- Cursor loss and crash recovery preserve the documented at-least-once behavior; overflow preserves
-  the documented bounded-loss behavior.
+- Cursor loss and a crash before persistence may replay rows; failed cross-host sends are not
+  retried after the cursor advances; overflow preserves the documented bounded-loss behavior.
 - Unknown, cross-host, and unmatched `_system` senders are rejected.
 - The own-send ledger preserves duplicate occurrences, expires entries, and removes failed sends.
 - Broadcast validates all recipients before delivery and reports any partial delivery after a
@@ -28,11 +28,13 @@ Tests must protect these contracts rather than mirror implementation structure.
 - Non-loopback configuration without an explicit token is rejected.
 - Board REST and command WebSocket routes require the token; legacy terminal routes retain their
   current boundary.
-- Session-token bootstrap requires both loopback peer address and loopback `Host`.
+- Session-token bootstrap rejects forwarding headers and requires a loopback peer plus a
+  loopback-equivalent `Host`, including the documented `0.0.0.0` exception.
 
 ### Bootstrap and dependency handling
 
-- Missing or unreachable agmsg never writes to the PTY and remains retryable.
+- Once a host path is resolved, a missing installation or failed presence probe never writes to the
+  PTY and remains retryable; startup path-resolution failure requires a panemux restart.
 - Home-path expansion produces absolute local and remote paths before command construction.
 - Detection, debounce, warning suppression, write retry, partial-write abandonment, and
   tmux-only restart persistence follow [Bootstrap flow](bootstrap.md#bootstrap-flow).

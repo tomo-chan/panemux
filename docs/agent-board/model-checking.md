@@ -28,7 +28,7 @@ consume without a live occurrence would let a pane forge a panemux-originated `_
   graph, including two-key independence and relay call sites. Every modeled non-expiry transition
   must be exercised.
 - **Tier 2, `make model-check`:** run TLC against `spec/agentboard/OwnSendLedger.tla`, verify
-  invariants and deadlock freedom, regenerate the graph, and require no diff.
+  invariants, action properties, and deadlock freedom, regenerate the graph, and require no diff.
 
 Tier 2 needs a JDK and `tla2tools.jar`, so it runs separately in CI. The committed configuration
 bounds the model to four simultaneous occurrences for one key; behavior requiring a larger state is

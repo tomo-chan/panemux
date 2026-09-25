@@ -70,10 +70,13 @@ Panemux persists only operational metadata:
 
 - one relay cursor per host and team;
 - bootstrap state needed across panemux restarts;
-- command-center session and captured history.
+- the command-center session;
+- append-only command-center history.
 
-These files are local, private (`0600`), and atomically replaced. They are not a second message
-store.
+These files are local and private (`0600`). Cursor, bootstrap, and session state are atomically
+replaced. Command history is append-only JSONL: a crash may leave one malformed line, which readers
+skip without hiding valid surrounding entries. See [Command center](command-center.md#api-and-streaming).
+None of these files is a second message store.
 
 ## Package layout
 

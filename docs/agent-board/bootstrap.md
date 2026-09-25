@@ -42,7 +42,10 @@ remove it through agmsg's own workflow.
 
 ### Failure and retry rules
 
-- Missing or unreachable agmsg causes no PTY write and is retried on later polls.
+- After a host's agmsg path is resolved at startup, a missing installation or a failed presence
+  probe causes no PTY write and is retried on later polls.
+- If no remote board session is reachable while the path is resolved at startup, that host remains
+  unavailable until panemux restarts. See [Known limitations](limitations.md#availability-and-recovery).
 - Repeated warnings are emitted once per pane, session, and failure kind until that condition
   recovers. A later recurrence is logged again.
 - A zero-byte PTY write failure is retried up to three times.

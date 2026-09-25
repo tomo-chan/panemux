@@ -24,10 +24,11 @@ agmsg has backward pagination (`--before-id`) but no forward `after`/`since` ope
 poll therefore reads the newest bounded window and selects rows after the previous cursor in the
 order returned by agmsg.
 
-If the cursor is absent from that window, the whole window is treated as new. This favors bounded
-at-least-once redelivery over silently assuming an order that agmsg does not guarantee. If more
-than the configured limit arrives between polls, however, older overflow rows can be lost. This is
-an accepted limitation of the external contract.
+If the cursor is absent from that window, the whole window is treated as new instead of assuming an
+order that agmsg does not guarantee. This can replay rows. If more than the configured limit arrives
+between polls, older overflow rows can instead be lost. Both are accepted limits of the external
+contract; cross-host send failures have the separate best-effort semantics in
+[Relay](relay.md#startup-and-recovery).
 
 ### Board writes
 

@@ -81,7 +81,7 @@ Exact request/response behavior lives in [Agent Board REST API](behavior/board-a
 | How is compatibility with agmsg verified? | [agmsg contract](agent-board/agmsg-contract.md) |
 | Which state-machine property is modeled? | [Model checking](agent-board/model-checking.md) |
 | How is the subsystem tested? | [Testing plan](agent-board/testing-plan.md) |
-| What alternatives were rejected? | [Alternatives considered](agent-board/alternatives.md) |
+| Why were alternatives rejected? | [Decision log](DECISIONLOG.md#agent-board) |
 
 ## Related documents
 
