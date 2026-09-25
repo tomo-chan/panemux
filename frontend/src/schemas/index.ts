@@ -3,6 +3,11 @@ import { z } from 'zod'
 export const DisplayConfigSchema = z.object({
   show_header: z.boolean(),
   show_status_bar: z.boolean(),
+  // The effective Cmd/Ctrl+Shift letter that switches between the task
+  // dashboard and the workspaces. GET /api/display always sends it, already
+  // upper-cased and defaulted; it is optional only for the display defaults
+  // the frontend builds itself before that response arrives.
+  task_dashboard_shortcut: z.string().regex(/^[A-Z]$/).optional(),
 })
 
 export type DisplayConfig = z.infer<typeof DisplayConfigSchema>

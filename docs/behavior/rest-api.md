@@ -250,4 +250,5 @@ Request body:
 
 ### `GET /api/display`
 
-Returns display preferences such as header/status-bar visibility.
+Returns display preferences such as header/status-bar visibility, and `task_dashboard_shortcut`: the
+effective task dashboard shortcut letter, upper-cased, `S` when the config does not set one.

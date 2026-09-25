@@ -110,9 +110,13 @@ while being built:
   built; conversation logs are never deleted, so without a bound every past session would be
   listed. Open question 1 still decides retention and recording for stage 2.
 - **panemux opens on the workspaces**, as before, rather than on the dashboard the issue's mockup
-  starts on, and **no keyboard shortcut switches layers yet**: open
-  question 6 requires the key to be checked against Chrome's own shortcuts, which could not be done
-  from the environment this was built in.
+  starts on.
+- **The layers switch with `Cmd/Ctrl+Shift+S`, and the letter is configurable** as
+  `display.task_dashboard_shortcut` (open question 6). `S` was chosen after checking Chrome's own
+  shortcuts, which the environment this was built in could not reach. It is a config setting rather
+  than a per-browser one so every browser on one panemux behaves the same; `K` and `B` are refused
+  because the palette and the board already use them. `GET /api/display` reports the effective
+  letter so the default lives in one place, and an unset value is never written back.
 - **The UI text is English**, like the rest of panemux's interface, although the issue's mockup is
   written in Japanese.
 

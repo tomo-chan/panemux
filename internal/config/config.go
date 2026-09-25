@@ -42,8 +42,12 @@ type SSHConnection struct {
 }
 
 type DisplayConfig struct {
-	ShowHeader    bool `yaml:"show_header"    json:"show_header"`
-	ShowStatusBar bool `yaml:"show_status_bar" json:"show_status_bar"`
+	// TaskDashboardShortcut is the letter of the Cmd/Ctrl+Shift+<letter>
+	// shortcut that switches between the task dashboard and the workspaces.
+	// Empty means the default; see TaskDashboardShortcutKey.
+	TaskDashboardShortcut string `yaml:"task_dashboard_shortcut,omitempty" json:"task_dashboard_shortcut,omitempty"`
+	ShowHeader            bool   `yaml:"show_header"    json:"show_header"`
+	ShowStatusBar         bool   `yaml:"show_status_bar" json:"show_status_bar"`
 }
 
 type PaneConfig struct {

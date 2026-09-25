@@ -120,6 +120,9 @@ a repository, or cannot be inspected, has no `git` field.
 
 Either way the dashboard closes and the pane is briefly outlined.
 
+The dashboard and the workspaces are switched with the `← Tasks` and `Workspaces` buttons or with
+`Cmd/Ctrl+Shift+<display.task_dashboard_shortcut>` (`S` unless configured), from either layer.
+
 ### `GET /api/tasks`
 
 Collects from every host and returns:

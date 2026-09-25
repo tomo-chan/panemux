@@ -223,3 +223,18 @@ export function formatElapsed(since: string | undefined, now: number): string {
   if (hours < 24) return `${hours}h`
   return `${Math.floor(hours / 24)}d`
 }
+
+// The layer-switching key used until GET /api/display reports the configured
+// one. It matches the server's own default for display.task_dashboard_shortcut.
+export const DEFAULT_TASK_DASHBOARD_SHORTCUT = 'S'
+
+/** Whether a keydown is Cmd/Ctrl+Shift+<letter>, the form of every global shortcut. */
+export function isShortcut(event: KeyboardEvent, letter: string): boolean {
+  return (event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === letter.toLowerCase()
+}
+
+/** A shortcut as the platform writes it: ⌘⇧S on macOS, Ctrl+Shift+S elsewhere. */
+export function formatShortcut(letter: string, isMac: boolean): string {
+  const key = letter.toUpperCase()
+  return isMac ? `⌘⇧${key}` : `Ctrl+Shift+${key}`
+}

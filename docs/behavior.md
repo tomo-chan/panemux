@@ -22,7 +22,7 @@ The YAML config defines:
 - `ssh_connections`, which are also the hosts the task dashboard collects agent sessions from
 - `workspaces`, including the active workspace, tab position, vertical bar width, and each
   workspace's recursive layout
-- optional `display` settings
+- optional `display` settings, including `display.task_dashboard_shortcut`
 - optional `url_open` settings
 - optional `agent_board` and `command_center` settings
 
@@ -38,6 +38,14 @@ Layout rules:
 - `tmux` and `ssh_tmux` panes must define `tmux_session`
 - workspace IDs must be unique and `workspaces.active` must name an existing workspace when set
 - `workspaces.tab_position` must be `top`, `bottom`, `left`, or `right`
+
+`display.task_dashboard_shortcut` rules:
+
+- one letter `A`–`Z` in either case, naming the `Cmd/Ctrl+Shift+<letter>` shortcut that switches
+  between the task dashboard and the workspaces
+- `K` and `B` are refused, since the command palette and the Agent Board dashboard use them
+- omitted means `S`; `GET /api/display` always reports the effective letter in upper case, and an
+  omitted value is never written back on save
 
 `url_open` rules:
 

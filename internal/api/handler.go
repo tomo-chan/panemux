@@ -605,7 +605,9 @@ func (h *Handler) RestartSession(w http.ResponseWriter, r *http.Request) {
 
 // GetDisplay returns the display configuration.
 func (h *Handler) GetDisplay(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, h.cfg.Display)
+	display := h.cfg.Display
+	display.TaskDashboardShortcut = display.TaskDashboardShortcutKey()
+	writeJSON(w, display)
 }
 
 type sessionInfo struct {

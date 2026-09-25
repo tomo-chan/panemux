@@ -34,6 +34,10 @@ const workspaces: WorkspacesResponse = {
 }
 
 let currentWorkspaces = workspaces
+let currentDisplayConfig: { show_header: boolean; show_status_bar: boolean; task_dashboard_shortcut?: string } = {
+  show_header: false,
+  show_status_bar: false,
+}
 
 const mockDeleteWorkspace = vi.fn()
 const mockRenameWorkspace = vi.fn()
@@ -56,7 +60,7 @@ vi.mock('./hooks/useLayout', () => ({
   useLayout: () => ({
     layout: currentWorkspaces.items.find((workspace) => workspace.id === currentWorkspaces.active)?.layout ?? currentWorkspaces.items[0].layout,
     workspaces: currentWorkspaces,
-    displayConfig: { show_header: false, show_status_bar: false },
+    displayConfig: currentDisplayConfig,
     error: null,
     updateSizes: mockUpdateSizes,
     splitPane: mockSplitPane,
@@ -949,6 +953,35 @@ describe('App task dashboard layer', () => {
     expect(screen.queryByRole('region', { name: 'Task dashboard' })).not.toBeInTheDocument()
     expect(mockUseTasks).toHaveBeenLastCalledWith(false)
     expect(screen.getByTestId('workspace-layer')).not.toHaveAttribute('inert')
+  })
+
+  it('switches layers with Cmd/Ctrl+Shift+S by default, even from inside a terminal', () => {
+    render(<App />)
+    const terminal = document.querySelector<HTMLElement>('[data-pane-id="main"]')!
+    terminal.tabIndex = 0
+
+    fireEvent.keyDown(terminal, { key: 'S', ctrlKey: true, shiftKey: true })
+    expect(screen.getByRole('region', { name: 'Task dashboard' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Workspaces' })).toHaveAttribute('aria-keyshortcuts', 'Control+Shift+S')
+
+    fireEvent.keyDown(window, { key: 's', metaKey: true, shiftKey: true })
+    expect(screen.queryByRole('region', { name: 'Task dashboard' })).not.toBeInTheDocument()
+  })
+
+  it('uses the key configured in display.task_dashboard_shortcut', () => {
+    currentDisplayConfig = { show_header: false, show_status_bar: false, task_dashboard_shortcut: 'J' }
+    try {
+      render(<App />)
+      expect(screen.getByRole('button', { name: 'Tasks' })).toHaveAttribute('title', 'Task dashboard (Ctrl+Shift+J)')
+
+      fireEvent.keyDown(window, { key: 'S', ctrlKey: true, shiftKey: true })
+      expect(screen.queryByRole('region', { name: 'Task dashboard' })).not.toBeInTheDocument()
+
+      fireEvent.keyDown(window, { key: 'J', ctrlKey: true, shiftKey: true })
+      expect(screen.getByRole('region', { name: 'Task dashboard' })).toBeInTheDocument()
+    } finally {
+      currentDisplayConfig = { show_header: false, show_status_bar: false }
+    }
   })
 
   it('keeps the panes mounted while the dashboard is shown', () => {

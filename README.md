@@ -120,6 +120,7 @@ Common uses:
 ### Task dashboard
 
 - Click **← Tasks** at the start of the workspace bar to see every coding-agent session on this machine and on every host under `ssh_connections`, as columns by state: waiting for input, working, idle, running / unknown, and stopped (the last 7 days, at most 50 per host). **Workspaces** goes back; the panes keep running underneath.
+- **Cmd/Ctrl+Shift+S** switches between the dashboard and the workspaces, even while a terminal has focus. Change the letter with `display.task_dashboard_shortcut` in `config.yaml` (one letter; `K` and `B` are taken).
 - The **← Tasks** button counts the sessions waiting for input as of the last time the dashboard was shown. The dashboard collects only while it is on screen, every 10 seconds.
 - A session running inside `tmux` can be opened: **Open** adds a `tmux` (or `ssh_tmux`) pane attached to its tmux session to the current workspace, and **Go to pane** jumps to a pane already attached to it. A session running outside tmux, or stopped, cannot be opened in a pane.
 - Each SSH host gets one connection of its own for the dashboard, separate from its panes. An unreachable host shows its error and a **Reconnect** button without hiding the other hosts.

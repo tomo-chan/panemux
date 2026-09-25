@@ -1244,6 +1244,24 @@ func TestGetDisplay_ReturnsJSON(t *testing.T) {
 	assert.True(t, display.ShowStatusBar)
 }
 
+// The response always carries the effective key, so the browser never has to
+// know the default; the stored value stays as the operator wrote it.
+func TestGetDisplay_ReportsTheEffectiveTaskDashboardShortcut(t *testing.T) {
+	for configured, want := range map[string]string{"": "S", "j": "J"} {
+		cfg := defaultTestConfig()
+		cfg.Display.TaskDashboardShortcut = configured
+		r := setupRouter(cfg, session.NewManager())
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/display", nil))
+
+		require.Equal(t, http.StatusOK, rec.Code)
+		var display map[string]any
+		require.NoError(t, json.NewDecoder(rec.Body).Decode(&display))
+		assert.Equal(t, want, display["task_dashboard_shortcut"], "configured %q", configured)
+		assert.Equal(t, configured, cfg.Display.TaskDashboardShortcut)
+	}
+}
+
 func TestPutLayout_ExpandsTildeCwd(t *testing.T) {
 	cfg := defaultTestConfig()
 	r := setupRouter(cfg, session.NewManager())

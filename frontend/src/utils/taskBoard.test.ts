@@ -6,6 +6,8 @@ import {
   filterTasks,
   findTaskPane,
   formatElapsed,
+  formatShortcut,
+  isShortcut,
   groupIntoLanes,
   hostLabel,
   isLiveState,
@@ -255,5 +257,26 @@ describe('formatElapsed', () => {
   it('is empty without a time or with one that does not parse', () => {
     expect(formatElapsed(undefined, now)).toBe('')
     expect(formatElapsed('yesterday', now)).toBe('')
+  })
+})
+
+describe('shortcuts', () => {
+  const key = (init: KeyboardEventInit) => new KeyboardEvent('keydown', init)
+
+  it('matches Cmd or Ctrl with Shift and the letter, in either case', () => {
+    expect(isShortcut(key({ key: 'S', ctrlKey: true, shiftKey: true }), 'S')).toBe(true)
+    expect(isShortcut(key({ key: 's', metaKey: true, shiftKey: true }), 'S')).toBe(true)
+    expect(isShortcut(key({ key: 'J', ctrlKey: true, shiftKey: true }), 'j')).toBe(true)
+  })
+
+  it('does not match without both modifiers or with another letter', () => {
+    expect(isShortcut(key({ key: 'S', shiftKey: true }), 'S')).toBe(false)
+    expect(isShortcut(key({ key: 's', ctrlKey: true }), 'S')).toBe(false)
+    expect(isShortcut(key({ key: 'K', ctrlKey: true, shiftKey: true }), 'S')).toBe(false)
+  })
+
+  it('labels the shortcut for the platform', () => {
+    expect(formatShortcut('S', true)).toBe('⌘⇧S')
+    expect(formatShortcut('s', false)).toBe('Ctrl+Shift+S')
   })
 })

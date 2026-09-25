@@ -47,6 +47,8 @@ export interface TaskDashboardProps {
   workspaces: Workspace[]
   onOpenTask: (task: Task, action: TaskOpenAction) => void
   onShowWorkspaces: () => void
+  /** The layer-switching shortcut, as shown and as aria-keyshortcuts spells it. */
+  shortcut?: { label: string; aria: string }
   /** Clock for elapsed times; injectable for tests. */
   now?: () => number
 }
@@ -62,6 +64,7 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
   workspaces,
   onOpenTask,
   onShowWorkspaces,
+  shortcut,
   now = Date.now,
 }) => {
   const { data, error, loading, updatedAt, refresh, reconnect } = tasksState
@@ -120,8 +123,13 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
         <button type="button" className="td-btn" onClick={() => void refresh()} disabled={loading}>
           Refresh
         </button>
-        <button type="button" className="td-btn" onClick={onShowWorkspaces}>
+        <button type="button" className="td-btn" onClick={onShowWorkspaces} aria-keyshortcuts={shortcut?.aria}>
           Workspaces
+          {shortcut && (
+            <span className="td-kbd" aria-hidden="true">
+              {shortcut.label}
+            </span>
+          )}
         </button>
       </header>
 

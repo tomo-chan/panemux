@@ -28,6 +28,17 @@ test('lists running and stopped sessions and returns to the workspaces', async (
   await expect(page.locator('[data-pane-id="task-dashboard-main"]')).toBeVisible()
 })
 
+test('switches layers with Ctrl+Shift+S while a terminal pane holds focus', async ({ page }) => {
+  await page.goto('/')
+  await page.locator('[data-pane-id="task-dashboard-main"] .xterm-helper-textarea').focus()
+
+  await page.keyboard.press('Control+Shift+S')
+  await expect(page.getByRole('region', { name: 'Task dashboard' })).toBeVisible()
+
+  await page.keyboard.press('Control+Shift+S')
+  await expect(page.getByRole('region', { name: 'Task dashboard' })).toHaveCount(0)
+})
+
 test('opens a session running in tmux as a pane attached to it', async ({ page, request }) => {
   const tasks = await (await request.get('/api/tasks')).json()
   test.skip(

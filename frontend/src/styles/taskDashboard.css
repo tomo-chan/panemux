@@ -68,6 +68,15 @@
   cursor: not-allowed;
 }
 
+.td-kbd {
+  margin-left: 8px;
+  padding: 0 4px;
+  border: 1px solid var(--td-line-2);
+  border-radius: 3px;
+  color: var(--td-faint);
+  font-size: 10.5px;
+}
+
 .td-btn-primary {
   background: #2c5d8a;
   border-color: #3b73a6;

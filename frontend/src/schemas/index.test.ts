@@ -159,6 +159,15 @@ describe('GitInfoSchema', () => {
 })
 
 describe('DisplayConfigSchema', () => {
+  it('accepts the task dashboard shortcut as one upper-case letter', () => {
+    expect(DisplayConfigSchema.safeParse({ show_header: true, show_status_bar: true, task_dashboard_shortcut: 'S' }).success)
+      .toBe(true)
+    for (const bad of ['s', 'SS', '1', '']) {
+      expect(DisplayConfigSchema.safeParse({ show_header: true, show_status_bar: true, task_dashboard_shortcut: bad }).success)
+        .toBe(false)
+    }
+  })
+
   it('accepts valid display config', () => {
     const result = DisplayConfigSchema.safeParse({ show_header: true, show_status_bar: false })
     expect(result.success).toBe(true)

@@ -23,7 +23,13 @@ import { collectLeafPanes, findPaneById, generatePaneId, layoutContainsPane } fr
 import type { MovePanePlacement } from './hooks/useLayout'
 import type { WorkspacePaneSummary, WorkspaceSummary } from './components/WorkspaceTabs'
 import type { Workspace, GitInfo, LayoutChild, LayoutNode, SessionInfo, SSHConfigHost, Task } from './schemas'
-import { paneConfigForTask, waitingCount } from './utils/taskBoard'
+import {
+  DEFAULT_TASK_DASHBOARD_SHORTCUT,
+  formatShortcut,
+  isShortcut,
+  paneConfigForTask,
+  waitingCount,
+} from './utils/taskBoard'
 import type { TaskOpenAction } from './utils/taskBoard'
 
 const DEFAULT_DISPLAY: DisplayConfig = { show_header: true, show_status_bar: true }
@@ -117,6 +123,16 @@ export const App: React.FC = () => {
   const [layer, setLayer] = useState<Layer>('workspaces')
   const tasksState = useTasks(layer === 'tasks')
   const [flashPaneId, setFlashPaneId] = useState<string | null>(null)
+  // display.task_dashboard_shortcut, which GET /api/display reports already
+  // defaulted; the fallback covers only the moment before it arrives.
+  const taskShortcutKey = displayConfig?.task_dashboard_shortcut ?? DEFAULT_TASK_DASHBOARD_SHORTCUT
+  const taskShortcut = useMemo(() => {
+    const isMac = /Mac|iPhone|iPad/.test(navigator.userAgent)
+    return {
+      label: formatShortcut(taskShortcutKey, isMac),
+      aria: `${isMac ? 'Meta' : 'Control'}+Shift+${taskShortcutKey.toUpperCase()}`,
+    }
+  }, [taskShortcutKey])
   const workspaceLayerRef = React.useRef<HTMLDivElement>(null)
 
   const paneMetadataByID = useMemo(() => {
@@ -300,6 +316,20 @@ export const App: React.FC = () => {
     window.addEventListener('keydown', handleKeyDown, true)
     return () => window.removeEventListener('keydown', handleKeyDown, true)
   }, [boardDashboardAvailable])
+
+  // Layer switch: Cmd/Ctrl+Shift+<display.task_dashboard_shortcut>, on the
+  // capture phase like the palette's and the board's shortcuts above, so it
+  // still fires while a terminal pane has focus.
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (isShortcut(event, taskShortcutKey)) {
+        event.preventDefault()
+        setLayer((current) => current === 'tasks' ? 'workspaces' : 'tasks')
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown, true)
+    return () => window.removeEventListener('keydown', handleKeyDown, true)
+  }, [taskShortcutKey])
 
   const handleAddSSHHost = useCallback(async (host: SSHConfigHost) => {
     setIsAddSSHHostSaving(true)
@@ -508,7 +538,8 @@ export const App: React.FC = () => {
                   type="button"
                   onClick={() => setLayer('tasks')}
                   aria-label={tasksWaiting > 0 ? `Tasks, ${tasksWaiting} waiting for input` : 'Tasks'}
-                  title="Task dashboard"
+                  title={`Task dashboard (${taskShortcut.label})`}
+                aria-keyshortcuts={taskShortcut.aria}
                   style={tasksButtonStyle}
                 >
                   ← Tasks
@@ -713,6 +744,7 @@ export const App: React.FC = () => {
             workspaces={workspaces?.items ?? []}
             onOpenTask={handleOpenTask}
             onShowWorkspaces={() => setLayer('workspaces')}
+          shortcut={taskShortcut}
           />
         )}
       </div>
