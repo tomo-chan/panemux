@@ -7,6 +7,7 @@ import { WorkspaceTabs } from './components/WorkspaceTabs'
 import { CommandPalette } from './components/CommandPalette'
 import { CommandHistoryPanel } from './components/CommandHistoryPanel'
 import { BoardDashboardPanel } from './components/BoardDashboardPanel'
+import { TaskDashboard } from './components/TaskDashboard'
 import type { BoardPaneRef } from './components/BoardDashboardPanel'
 import { useLayout } from './hooks/useLayout'
 import { usePaneSettings } from './hooks/usePaneSettings'
@@ -15,14 +16,25 @@ import { useBrowserNotificationPermission } from './hooks/useBrowserNotification
 import { useSessionsOverview } from './hooks/useSessionsOverview'
 import { useGitInfoSnapshotMap } from './hooks/useGitInfo'
 import { useBoardSessionToken } from './hooks/useBoardSessionToken'
+import { useTasks } from './hooks/useTasks'
 import { DisplayConfig } from './types'
 import { TERMINAL_FONT_FAMILY } from './utils/fonts'
 import { collectLeafPanes, findPaneById, generatePaneId, layoutContainsPane } from './utils/layoutTree'
 import type { MovePanePlacement } from './hooks/useLayout'
 import type { WorkspacePaneSummary, WorkspaceSummary } from './components/WorkspaceTabs'
-import type { Workspace, GitInfo, LayoutChild, LayoutNode, SessionInfo, SSHConfigHost } from './schemas'
+import type { Workspace, GitInfo, LayoutChild, LayoutNode, SessionInfo, SSHConfigHost, Task } from './schemas'
+import { paneConfigForTask, waitingCount } from './utils/taskBoard'
+import type { TaskOpenAction } from './utils/taskBoard'
 
 const DEFAULT_DISPLAY: DisplayConfig = { show_header: true, show_status_bar: true }
+
+// The two layers of issue #252: the task dashboard, and the workspaces with
+// their panes. The workspaces stay mounted while the dashboard is shown, so
+// every terminal keeps its connection and scrollback.
+type Layer = 'tasks' | 'workspaces'
+
+// How long a pane opened from the dashboard stays outlined.
+const TASK_PANE_FLASH_MS = 1800
 
 const cornerButtonStyle: React.CSSProperties = {
   padding: '6px 10px',
@@ -33,6 +45,32 @@ const cornerButtonStyle: React.CSSProperties = {
   fontFamily: TERMINAL_FONT_FAMILY,
   fontSize: '11px',
   cursor: 'pointer',
+}
+
+const tasksButtonStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+  flexShrink: 0,
+  padding: '0 14px',
+  minHeight: 34,
+  backgroundColor: '#26303c',
+  color: '#dbe8f5',
+  border: 'none',
+  borderRight: '1px solid #333842',
+  fontFamily: TERMINAL_FONT_FAMILY,
+  fontSize: '12px',
+  cursor: 'pointer',
+  whiteSpace: 'nowrap',
+}
+
+const tasksBadgeStyle: React.CSSProperties = {
+  backgroundColor: '#e2b86b',
+  color: '#1b1c1f',
+  borderRadius: 999,
+  padding: '0 6px',
+  fontSize: '11px',
+  fontWeight: 600,
 }
 
 export const App: React.FC = () => {
@@ -76,6 +114,10 @@ export const App: React.FC = () => {
   const [isCommandHistoryOpen, setIsCommandHistoryOpen] = useState(false)
   const [isBoardDashboardOpen, setIsBoardDashboardOpen] = useState(false)
   const boardDashboardAvailable = agentBoardEnabled && boardToken !== ''
+  const [layer, setLayer] = useState<Layer>('workspaces')
+  const tasksState = useTasks(layer === 'tasks')
+  const [flashPaneId, setFlashPaneId] = useState<string | null>(null)
+  const workspaceLayerRef = React.useRef<HTMLDivElement>(null)
 
   const paneMetadataByID = useMemo(() => {
     const metadata = new Map<string, { paneTitle: string; workspaceId: string; workspaceTitle: string }>()
@@ -119,6 +161,9 @@ export const App: React.FC = () => {
   }, [attentionPaneIds, gitInfoById, sessionsById, workspaces])
 
   const activeWorkspaceId = workspaces?.active ?? null
+  // From the last collection: the dashboard collects only while it is shown,
+  // so this is how many tasks were waiting when it was last looked at.
+  const tasksWaiting = waitingCount(tasksState.data?.tasks ?? [])
   const maximizedPaneId = useMemo(() => {
     if (!activeWorkspaceId || !layout) return null
     const paneId = maximizedPaneIdsByWorkspace[activeWorkspaceId] ?? null
@@ -294,6 +339,56 @@ export const App: React.FC = () => {
     void setActiveWorkspace(workspaceId)
   }, [clearPaneAttention, clearWorkspaceAttention, setActiveWorkspace])
 
+  // Opening a task from the dashboard: go to the pane already attached to
+  // its tmux session, or create one in the active workspace that attaches to
+  // it (`tmux new-session -A` attaches to the running session).
+  const handleOpenTask = useCallback((task: Task, action: TaskOpenAction) => {
+    if (action.kind === 'unavailable') return
+    if (action.kind === 'goto') {
+      setLayer('workspaces')
+      setFlashPaneId(action.pane.paneId)
+      handleSelectWorkspacePaneSummary(action.pane.workspaceId, action.pane.paneId)
+      return
+    }
+
+    const pane = paneConfigForTask(task, generatePaneId())
+    if (!pane) return
+    setCreatePaneError(null)
+    setLayer('workspaces')
+    void createPane(pane, { type: 'workspace-edge', edge: 'right' })
+      .then(() => {
+        setActivePaneId(pane.id)
+        setFlashPaneId(pane.id)
+        setPendingFocusedPaneId(pane.id)
+      })
+      .catch((err) => {
+        setCreatePaneError(err instanceof Error ? err.message : 'Something went wrong')
+      })
+  }, [createPane, handleSelectWorkspacePaneSummary])
+
+  // While the dashboard covers the workspaces, nothing behind it can take
+  // focus or keystrokes: a terminal that kept focus would otherwise receive
+  // whatever is typed into the dashboard.
+  useEffect(() => {
+    const workspaceLayer = workspaceLayerRef.current
+    if (!workspaceLayer) return
+    if (layer === 'tasks') workspaceLayer.setAttribute('inert', '')
+    else workspaceLayer.removeAttribute('inert')
+  }, [layer])
+
+  useEffect(() => {
+    if (!flashPaneId) return
+    const timeoutId = window.setTimeout(() => setFlashPaneId(null), TASK_PANE_FLASH_MS)
+    return () => window.clearTimeout(timeoutId)
+  }, [flashPaneId])
+
+  useEffect(() => {
+    if (!flashPaneId) return
+    const pane = document.querySelector<HTMLElement>(`[data-pane-id="${escapeAttributeValue(flashPaneId)}"]`)
+    pane?.classList.add('panemux-pane-task-flash')
+    return () => pane?.classList.remove('panemux-pane-task-flash')
+  }, [flashPaneId, workspaces])
+
   useEffect(() => {
     if (!pendingFocusedPaneId) return
 
@@ -377,225 +472,249 @@ export const App: React.FC = () => {
       activePaneId,
       setActivePaneId,
     }}>
-      <div
-        style={{
-          position: 'relative',
-          width: '100%',
-          height: '100%',
-          display: 'flex',
-          flexDirection: workspaces?.tab_position === 'bottom'
-            ? 'column-reverse'
-            : workspaces?.tab_position === 'left'
-              ? 'row'
-              : workspaces?.tab_position === 'right'
-                ? 'row-reverse'
-                : 'column',
-          backgroundColor: '#1a1b1e',
-        }}
-      >
-        {workspaces && (
-          <WorkspaceTabs
-            workspaces={workspaces.items}
-            activeWorkspaceId={workspaces.active}
-            tabPosition={workspaces.tab_position}
-            verticalBarWidth={workspaces.vertical_bar_width}
-            dragSourcePaneId={dragSourcePaneId}
-            onMovePaneToWorkspace={(sourcePaneId, workspaceId) => {
-              handleMovePane(sourcePaneId, { type: 'workspace-tab', workspaceId })
-              setDragSourcePaneId(null)
-            }}
-            onSelect={setActiveWorkspace}
-            attentionWorkspaceIds={attentionWorkspaceIds}
-            onClearAttention={clearWorkspaceAttention}
-            workspaceSummaries={workspaceSummaries}
-            onSelectPaneFromSummary={handleSelectWorkspacePaneSummary}
-            onStartPaneDragFromSummary={setDragSourcePaneId}
-            onEndPaneDragFromSummary={() => setDragSourcePaneId(null)}
-            activePaneId={activePaneId}
-            onAdd={addWorkspace}
-            onRename={renameWorkspace}
-            onTabPositionChange={setWorkspaceTabPosition}
-            onVerticalBarWidthChange={setWorkspaceVerticalBarWidth}
-            onDelete={(workspaceId) => {
-              const workspace = workspaces.items.find((item) => item.id === workspaceId)
-              if (!workspace) return
-              setWorkspacePendingDelete({ id: workspace.id, title: workspace.title })
-            }}
-          />
-        )}
-        <div style={{ position: 'relative', flex: 1, minWidth: 0, minHeight: 0 }}>
-          <SplitContainer layout={layout} onLayoutChange={updateSizes} />
-          {createPaneError && (
-            <div
-              role="alert"
-              style={{
-                position: 'absolute',
-                top: 12,
-                right: 12,
-                zIndex: 30,
-                maxWidth: 320,
-                padding: '8px 12px',
-                border: '1px solid #7f1d1d',
-                borderRadius: 6,
-                backgroundColor: '#2f1313',
-                color: '#fca5a5',
-                fontFamily: TERMINAL_FONT_FAMILY,
-                fontSize: '12px',
-                boxShadow: '0 8px 20px rgba(0, 0, 0, 0.35)',
-              }}
-            >
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  gap: 12,
-                }}
-              >
-                <span style={{ flex: 1 }}>Failed to create terminal: {createPaneError}</span>
-                <button
-                  type="button"
-                  aria-label="Dismiss create terminal error"
-                  onClick={() => setCreatePaneError(null)}
-                  style={{
-                    appearance: 'none',
-                    border: 'none',
-                    background: 'transparent',
-                    color: '#fca5a5',
-                    cursor: 'pointer',
-                    fontFamily: TERMINAL_FONT_FAMILY,
-                    fontSize: '12px',
-                    lineHeight: 1,
-                    padding: 0,
-                  }}
-                >
-                  ×
-                </button>
-              </div>
-            </div>
-          )}
-          {movePaneError && (
-            <div
-              role="alert"
-              style={{
-                position: 'absolute',
-                top: createPaneError ? 72 : 12,
-                right: 12,
-                zIndex: 30,
-                maxWidth: 320,
-                padding: '8px 12px',
-                border: '1px solid #7f1d1d',
-                borderRadius: 6,
-                backgroundColor: '#2f1313',
-                color: '#fca5a5',
-                fontFamily: TERMINAL_FONT_FAMILY,
-                fontSize: '12px',
-                boxShadow: '0 8px 20px rgba(0, 0, 0, 0.35)',
-              }}
-            >
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  gap: 12,
-                }}
-              >
-                <span style={{ flex: 1 }}>Failed to move terminal: {movePaneError}</span>
-                <button
-                  type="button"
-                  aria-label="Dismiss move error"
-                  onClick={() => setMovePaneError(null)}
-                  style={{
-                    appearance: 'none',
-                    border: 'none',
-                    background: 'transparent',
-                    color: '#fca5a5',
-                    cursor: 'pointer',
-                    fontFamily: TERMINAL_FONT_FAMILY,
-                    fontSize: '12px',
-                    lineHeight: 1,
-                    padding: 0,
-                  }}
-                >
-                  ×
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-        <PaneSettingsDialog
-          isOpen={isOpen}
-          pane={currentPane}
-          sshConnectionNames={sshConnectionNames}
-          saveError={saveError}
-          isSaving={isSaving}
-          onSave={saveSettings}
-          onClose={closeSettings}
-          onAddSSHHost={() => setIsAddSSHHostOpen(true)}
-          onDetectShell={detectShell}
-          onBrowseDirectories={browseDirectories}
-        />
-        <ConfirmDialog
-          isOpen={workspacePendingDelete !== null}
-          title="Delete workspace"
-          message={`Delete workspace "${workspacePendingDelete?.title ?? ''}"? Its panes are closed with it.`}
-          confirmLabel="Delete"
-          isDestructive
-          onConfirm={() => {
-            const pending = workspacePendingDelete
-            setWorkspacePendingDelete(null)
-            if (pending) void deleteWorkspace(pending.id)
+      <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+        <div
+          ref={workspaceLayerRef}
+          data-testid="workspace-layer"
+          style={{
+            position: 'relative',
+            width: '100%',
+            height: '100%',
+            display: 'flex',
+            flexDirection: workspaces?.tab_position === 'bottom'
+              ? 'column-reverse'
+              : workspaces?.tab_position === 'left'
+                ? 'row'
+                : workspaces?.tab_position === 'right'
+                  ? 'row-reverse'
+                  : 'column',
+            backgroundColor: '#1a1b1e',
           }}
-          onCancel={() => setWorkspacePendingDelete(null)}
-        />
-        <AddSSHHostDialog
-          isOpen={isAddSSHHostOpen}
-          isSaving={isAddSSHHostSaving}
-          saveError={addSSHHostError}
-          onSave={handleAddSSHHost}
-          onClose={() => setIsAddSSHHostOpen(false)}
-        />
-        {(commandCenterEnabled || boardDashboardAvailable) && (
-          <div style={{ position: 'absolute', bottom: 12, right: 12, zIndex: 20, display: 'flex', gap: '8px' }}>
-            {commandCenterEnabled && (
-              <button
-                type="button"
-                aria-label="Open command center history"
-                onClick={() => setIsCommandHistoryOpen(true)}
-                title="Command center history"
-                style={cornerButtonStyle}
+        >
+          {workspaces && (
+            <WorkspaceTabs
+              workspaces={workspaces.items}
+              activeWorkspaceId={workspaces.active}
+              tabPosition={workspaces.tab_position}
+              verticalBarWidth={workspaces.vertical_bar_width}
+              dragSourcePaneId={dragSourcePaneId}
+              onMovePaneToWorkspace={(sourcePaneId, workspaceId) => {
+                handleMovePane(sourcePaneId, { type: 'workspace-tab', workspaceId })
+                setDragSourcePaneId(null)
+              }}
+              onSelect={setActiveWorkspace}
+              leading={(
+                <button
+                  type="button"
+                  onClick={() => setLayer('tasks')}
+                  aria-label={tasksWaiting > 0 ? `Tasks, ${tasksWaiting} waiting for input` : 'Tasks'}
+                  title="Task dashboard"
+                  style={tasksButtonStyle}
+                >
+                  ← Tasks
+                  {tasksWaiting > 0 && <span style={tasksBadgeStyle}>{tasksWaiting}</span>}
+                </button>
+              )}
+              attentionWorkspaceIds={attentionWorkspaceIds}
+              onClearAttention={clearWorkspaceAttention}
+              workspaceSummaries={workspaceSummaries}
+              onSelectPaneFromSummary={handleSelectWorkspacePaneSummary}
+              onStartPaneDragFromSummary={setDragSourcePaneId}
+              onEndPaneDragFromSummary={() => setDragSourcePaneId(null)}
+              activePaneId={activePaneId}
+              onAdd={addWorkspace}
+              onRename={renameWorkspace}
+              onTabPositionChange={setWorkspaceTabPosition}
+              onVerticalBarWidthChange={setWorkspaceVerticalBarWidth}
+              onDelete={(workspaceId) => {
+                const workspace = workspaces.items.find((item) => item.id === workspaceId)
+                if (!workspace) return
+                setWorkspacePendingDelete({ id: workspace.id, title: workspace.title })
+              }}
+            />
+          )}
+          <div style={{ position: 'relative', flex: 1, minWidth: 0, minHeight: 0 }}>
+            <SplitContainer layout={layout} onLayoutChange={updateSizes} />
+            {createPaneError && (
+              <div
+                role="alert"
+                style={{
+                  position: 'absolute',
+                  top: 12,
+                  right: 12,
+                  zIndex: 30,
+                  maxWidth: 320,
+                  padding: '8px 12px',
+                  border: '1px solid #7f1d1d',
+                  borderRadius: 6,
+                  backgroundColor: '#2f1313',
+                  color: '#fca5a5',
+                  fontFamily: TERMINAL_FONT_FAMILY,
+                  fontSize: '12px',
+                  boxShadow: '0 8px 20px rgba(0, 0, 0, 0.35)',
+                }}
               >
-                Command History
-              </button>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: 12,
+                  }}
+                >
+                  <span style={{ flex: 1 }}>Failed to create terminal: {createPaneError}</span>
+                  <button
+                    type="button"
+                    aria-label="Dismiss create terminal error"
+                    onClick={() => setCreatePaneError(null)}
+                    style={{
+                      appearance: 'none',
+                      border: 'none',
+                      background: 'transparent',
+                      color: '#fca5a5',
+                      cursor: 'pointer',
+                      fontFamily: TERMINAL_FONT_FAMILY,
+                      fontSize: '12px',
+                      lineHeight: 1,
+                      padding: 0,
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+              </div>
             )}
-            {boardDashboardAvailable && (
-              <button
-                type="button"
-                aria-label="Open agent board"
-                onClick={() => setIsBoardDashboardOpen(true)}
-                title="Agent board"
-                style={cornerButtonStyle}
+            {movePaneError && (
+              <div
+                role="alert"
+                style={{
+                  position: 'absolute',
+                  top: createPaneError ? 72 : 12,
+                  right: 12,
+                  zIndex: 30,
+                  maxWidth: 320,
+                  padding: '8px 12px',
+                  border: '1px solid #7f1d1d',
+                  borderRadius: 6,
+                  backgroundColor: '#2f1313',
+                  color: '#fca5a5',
+                  fontFamily: TERMINAL_FONT_FAMILY,
+                  fontSize: '12px',
+                  boxShadow: '0 8px 20px rgba(0, 0, 0, 0.35)',
+                }}
               >
-                Agent Board
-              </button>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: 12,
+                  }}
+                >
+                  <span style={{ flex: 1 }}>Failed to move terminal: {movePaneError}</span>
+                  <button
+                    type="button"
+                    aria-label="Dismiss move error"
+                    onClick={() => setMovePaneError(null)}
+                    style={{
+                      appearance: 'none',
+                      border: 'none',
+                      background: 'transparent',
+                      color: '#fca5a5',
+                      cursor: 'pointer',
+                      fontFamily: TERMINAL_FONT_FAMILY,
+                      fontSize: '12px',
+                      lineHeight: 1,
+                      padding: 0,
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+              </div>
             )}
           </div>
+          <PaneSettingsDialog
+            isOpen={isOpen}
+            pane={currentPane}
+            sshConnectionNames={sshConnectionNames}
+            saveError={saveError}
+            isSaving={isSaving}
+            onSave={saveSettings}
+            onClose={closeSettings}
+            onAddSSHHost={() => setIsAddSSHHostOpen(true)}
+            onDetectShell={detectShell}
+            onBrowseDirectories={browseDirectories}
+          />
+          <ConfirmDialog
+            isOpen={workspacePendingDelete !== null}
+            title="Delete workspace"
+            message={`Delete workspace "${workspacePendingDelete?.title ?? ''}"? Its panes are closed with it.`}
+            confirmLabel="Delete"
+            isDestructive
+            onConfirm={() => {
+              const pending = workspacePendingDelete
+              setWorkspacePendingDelete(null)
+              if (pending) void deleteWorkspace(pending.id)
+            }}
+            onCancel={() => setWorkspacePendingDelete(null)}
+          />
+          <AddSSHHostDialog
+            isOpen={isAddSSHHostOpen}
+            isSaving={isAddSSHHostSaving}
+            saveError={addSSHHostError}
+            onSave={handleAddSSHHost}
+            onClose={() => setIsAddSSHHostOpen(false)}
+          />
+          {(commandCenterEnabled || boardDashboardAvailable) && (
+            <div style={{ position: 'absolute', bottom: 12, right: 12, zIndex: 20, display: 'flex', gap: '8px' }}>
+              {commandCenterEnabled && (
+                <button
+                  type="button"
+                  aria-label="Open command center history"
+                  onClick={() => setIsCommandHistoryOpen(true)}
+                  title="Command center history"
+                  style={cornerButtonStyle}
+                >
+                  Command History
+                </button>
+              )}
+              {boardDashboardAvailable && (
+                <button
+                  type="button"
+                  aria-label="Open agent board"
+                  onClick={() => setIsBoardDashboardOpen(true)}
+                  title="Agent board"
+                  style={cornerButtonStyle}
+                >
+                  Agent Board
+                </button>
+              )}
+            </div>
+          )}
+          <CommandPalette
+            isOpen={isCommandPaletteOpen && commandCenterEnabled}
+            token={boardToken}
+            onClose={() => setIsCommandPaletteOpen(false)}
+          />
+          <CommandHistoryPanel
+            isOpen={isCommandHistoryOpen && commandCenterEnabled}
+            token={boardToken}
+            onClose={() => setIsCommandHistoryOpen(false)}
+          />
+          <BoardDashboardPanel
+            isOpen={isBoardDashboardOpen && boardDashboardAvailable}
+            token={boardToken}
+            boardPanes={boardPanes}
+            onClose={() => setIsBoardDashboardOpen(false)}
+          />
+        </div>
+        {layer === 'tasks' && (
+          <TaskDashboard
+            tasksState={tasksState}
+            workspaces={workspaces?.items ?? []}
+            onOpenTask={handleOpenTask}
+            onShowWorkspaces={() => setLayer('workspaces')}
+          />
         )}
-        <CommandPalette
-          isOpen={isCommandPaletteOpen && commandCenterEnabled}
-          token={boardToken}
-          onClose={() => setIsCommandPaletteOpen(false)}
-        />
-        <CommandHistoryPanel
-          isOpen={isCommandHistoryOpen && commandCenterEnabled}
-          token={boardToken}
-          onClose={() => setIsCommandHistoryOpen(false)}
-        />
-        <BoardDashboardPanel
-          isOpen={isBoardDashboardOpen && boardDashboardAvailable}
-          token={boardToken}
-          boardPanes={boardPanes}
-          onClose={() => setIsBoardDashboardOpen(false)}
-        />
       </div>
     </LayoutActionsContext.Provider>
   )

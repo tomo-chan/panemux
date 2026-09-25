@@ -1,6 +1,6 @@
 # UI Design
 
-This document describes the visual design decisions for the PaneMux frontend, covering always-available layout editing, drag-and-drop, the workspace bar, and modal dialogs.
+This document describes the visual design decisions for the PaneMux frontend, covering always-available layout editing, drag-and-drop, the workspace bar, modal dialogs, and the task dashboard.
 
 ## Design Principles
 
@@ -43,6 +43,7 @@ The workspace bar now also carries compact operational summaries for each worksp
 
 The bar can contain:
 
+- the `← Tasks` button to the task dashboard, always first (see [Task Dashboard](#task-dashboard))
 - workspace tabs
 - per-workspace summary text
 - `+`
@@ -302,6 +303,54 @@ Agent-attention highlighting remains visually distinct from layout-editing affor
 - move targets use blue overlays instead of gold
 
 Using separate colors avoids mixing "this needs your attention" with "you can drop here".
+
+---
+
+## Task Dashboard
+
+The task dashboard ([behavior](behavior/tasks.md)) is a second layer over the workspaces rather than
+an overlay panel: it covers the whole window, and the workspaces stay mounted beneath it so every
+terminal keeps its connection and scrollback. While it is shown the workspace layer is `inert`, so a
+terminal that had focus cannot receive what is typed into the dashboard.
+
+- **Switching layers.** The workspace bar starts with a `← Tasks` button, which carries the number
+  of tasks waiting for input from the last collection in a gold badge. The dashboard's top bar has a
+  `Workspaces` button back. panemux opens on the workspaces. A keyboard shortcut for switching is not
+  assigned yet.
+- **Top bar.** The title, one chip per host (`Local` for the panemux host) with its running count, a
+  red chip with the error and a `Reconnect` button for a host that failed, and `connecting…` for a
+  host whose connection is still coming up; then when the board was last updated, `Refresh`, and
+  `Workspaces`. A long host error is truncated in the chip and shown in full as its tooltip.
+- **Filter bar.** Text filter over directory, branch, PR number and session ID; rows split by none,
+  host, or repository; a host filter.
+- **Kanban.** Columns in the order a person should look at them: Waiting for input (highlighted in
+  gold, "Needs you"), Working, Idle, Running / unknown, Stopped. Column headers stay visible while
+  the board scrolls, and each column is split into the chosen rows, with the catch-all row ("Not in a
+  Git repository") last.
+- **Cards.** A left border in the state's color; host, agent and how long the task has been in its
+  state; the working directory's last segment as the title (there is no summary yet) with the full
+  directory under it; for a waiting task its reason and "open the pane to respond"; repository,
+  branch and PR link (new tab); and at the bottom where the task runs with its `Open` / `Go to pane`
+  button. A task that cannot be opened shows why instead of a button. The card is a pointer target
+  for selection, and its title is a button, so the card never nests its links and buttons inside
+  another interactive element.
+- **Detail panel.** Fixed to the window height at the right. Its head — state, host, agent, start,
+  title, waiting reason, and the open action or the reason there is none — stays in place, and only
+  the body below scrolls: state notes, links, the chain from task to agent to tmux session to pane
+  to workspace, and the directory and session ID. At 1000px and narrower it slides over the board
+  with a close button.
+- **After opening.** The dashboard closes, the pane takes focus, and it is outlined in the
+  interactive blue for about two seconds (a steady outline with reduced motion).
+
+State colors:
+
+| State | Color |
+|---|---|
+| Waiting for input | `#e2b86b` |
+| Working | `#4ec9b0` |
+| Idle, Running | `#8fa6c4` |
+| Unknown | `#c586c0` |
+| Stopped | `#80858d` |
 
 ---
 

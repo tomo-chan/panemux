@@ -24,7 +24,76 @@ import {
   BoardStatusResponseSchema,
   BoardMessageSchema,
   BoardMessagesResponseSchema,
+  TasksResponseSchema,
 } from './index'
+
+describe('TasksResponseSchema', () => {
+  const task = {
+    id: 'local:claude:7c21e0a4',
+    host: '',
+    agent: 'claude',
+    session_id: '7c21e0a4',
+    cwd: '/workspace/user/panemux',
+    state: 'wait',
+    waiting_for: 'input needed',
+    status_since: '2026-09-25T12:00:00Z',
+    started_at: '2026-09-25T11:00:00Z',
+    pid: 101,
+    location: { kind: 'tmux', tmux_session: 'task-7c21', attachable: true },
+    git: { repo: 'panemux', branch: 'main', repo_url: 'https://github.com/example/panemux', pr_number: 7,
+      pr_url: 'https://github.com/example/panemux/pull/7' },
+  }
+
+  it('accepts every host status and task state the server reports', () => {
+    const states = ['busy', 'wait', 'idle', 'run', 'unknown', 'stop']
+    const result = TasksResponseSchema.safeParse({
+      hosts: [
+        { name: '', status: 'ok', collected_at: '2026-09-25T12:00:00Z' },
+        { name: 'gpu-box', status: 'error', error: 'connect to gpu-box: i/o timeout' },
+        { name: 'slow-box', status: 'connecting' },
+      ],
+      tasks: states.map((state, i) => ({ ...task, id: `t${i}`, state })),
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('accepts a task with only its required fields', () => {
+    const result = TasksResponseSchema.safeParse({
+      hosts: [],
+      tasks: [{ id: 'x', host: 'build-box', agent: 'claude', state: 'unknown',
+        location: { kind: 'none', attachable: false } }],
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects a state the dashboard has no column for', () => {
+    expect(TasksResponseSchema.safeParse({ hosts: [], tasks: [{ ...task, state: 'done' }] }).success).toBe(false)
+  })
+
+  it('rejects an unknown location kind and host status', () => {
+    expect(TasksResponseSchema.safeParse({
+      hosts: [], tasks: [{ ...task, location: { kind: 'screen', attachable: false } }],
+    }).success).toBe(false)
+    expect(TasksResponseSchema.safeParse({
+      hosts: [{ name: '', status: 'maybe' }], tasks: [],
+    }).success).toBe(false)
+  })
+
+  it('accepts free text of any length from a remote host', () => {
+    const long = 'x'.repeat(10000)
+    const result = TasksResponseSchema.safeParse({
+      hosts: [{ name: 'h', status: 'error', error: long }],
+      tasks: [{ ...task, cwd: `/${long}`, waiting_for: long, location: { kind: 'tmux', tmux_session: long, attachable: false } }],
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects a git link that is not a URL', () => {
+    expect(TasksResponseSchema.safeParse({
+      hosts: [], tasks: [{ ...task, git: { pr_url: 'javascript:alert(1)' } }],
+    }).success).toBe(false)
+  })
+})
 
 describe('GitInfoSchema', () => {
   it('accepts git info with PR metadata', () => {

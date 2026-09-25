@@ -196,6 +196,11 @@ A `409` is reported rather than worked around. An OAuth provider matches the reg
 `redirect_uri` exactly, so rewriting the callback to a different local port would break the login it
 is meant to complete.
 
+### `GET /api/tasks` and `POST /api/tasks/hosts/{name}/reconnect`
+
+The task dashboard's collection and its per-host reconnect. Their responses and the collection rules
+are in [task dashboard behavior](tasks.md#get-apitasks).
+
 ### `GET /api/ssh-connections`
 
 Returns a sorted list of all known SSH connection names — the union of names defined in `ssh_connections` (YAML) and non-wildcard hosts from `~/.ssh/config`. Names present in both sources are deduplicated, with the YAML entry taking precedence.

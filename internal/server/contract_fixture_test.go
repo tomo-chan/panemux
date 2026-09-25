@@ -1,7 +1,10 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -18,6 +21,7 @@ import (
 	"panemux/internal/commandcenter"
 	"panemux/internal/config"
 	"panemux/internal/session"
+	"panemux/internal/tasks"
 )
 
 // This file is the Go half of gate G3(c) in docs/quality-gateway.md — Zod
@@ -217,6 +221,31 @@ var contractFixtures = map[string]contractFixture{
 		return rr.Body.Bytes(), nil
 	}},
 
+	// Collected through an injected collector rather than the real one: the
+	// real one reports this machine's own processes and tmux sessions, which
+	// differ between machines and between runs. The collection text is the
+	// same line protocol the real script prints, so everything from parsing
+	// onward is production code.
+	"tasks": {capture: func(t *testing.T) ([]byte, map[string]string) {
+		e := newAPIEnv(t)
+		e.srv.api.SetTaskService(tasks.New(tasks.Options{
+			Hosts: func() []string { return []string{"build-box", "gpu-box"} },
+			Dial: func(name string) (tasks.Conn, error) {
+				if name == "build-box" {
+					return fixtureTaskConn{}, nil
+				}
+				return nil, errors.New("dial tcp: i/o timeout")
+			},
+			RunLocal: func(context.Context, string) ([]byte, error) {
+				return []byte(fixtureLocalTaskCollection), nil
+			},
+		}))
+
+		rr := e.do(t, http.MethodGet, "/api/tasks", "")
+		require.Equal(t, http.StatusOK, rr.Code)
+		return rr.Body.Bytes(), nil
+	}},
+
 	"session-token": {capture: func(t *testing.T) ([]byte, map[string]string) {
 		e := newAPIEnv(t)
 
@@ -309,6 +338,66 @@ var contractFixtures = map[string]contractFixture{
 
 	"ws-board-command-frames": {capture: captureBoardCommandFrames},
 }
+
+// fixtureLocalTaskCollection is one of every task shape the panemux host can
+// report: waiting inside an attachable tmux session, busy outside tmux, a
+// codex process, a state file that cannot be read, and a stopped session.
+const fixtureLocalTaskCollection = `::panemux-tasks v1
+::now 1790000000
+::section state
+::file 101.json
+` + `{"pid":101,"sessionId":"7c21e0a4","cwd":"/workspace/user/panemux","status":"waiting",` +
+	`"waitingFor":"input needed","statusUpdatedAt":1789999820000,"startedAt":1789997300000}
+::file 102.json
+` + `{"pid":102,"sessionId":"b41f9d20","cwd":"/workspace/user/panemux-docs","status":"busy",` +
+	`"statusUpdatedAt":1789998920000,"startedAt":1789996400000}
+::file 103.json
+{"pid":
+::section ps
+100 1 -zsh
+101 100 claude
+102 1 claude
+103 1 claude
+104 1 codex
+::section tmux
+100 task-7c21
+::section cwd
+104 /workspace/user/sample-api
+::section transcripts
+1789989200	55f0c2b8.jsonl	"cwd":"/workspace/user/service-b"
+::end
+`
+
+// fixtureTaskConn is the build-box connection: one idle session in a tmux
+// session whose name a pane cannot attach to, in a repository whose branch is
+// left empty so that no ` + "`gh pr view`" + ` runs — the capture must not reach
+// the network. pr_url, pr_number and branch are therefore declared gaps in
+// frontend/src/schemas/contract.test.ts.
+type fixtureTaskConn struct{}
+
+func (fixtureTaskConn) Run(context.Context, string, io.Reader) ([]byte, error) {
+	return []byte(`::panemux-tasks v1
+::now 1790000000
+::section state
+::file 3120.json
+` + `{"pid":3120,"sessionId":"3d7702fe","cwd":"/remote/home/demo/infra","status":"idle",` +
+		`"statusUpdatedAt":1789999280000,"startedAt":1789989200000}
+::section ps
+3100 1 bash
+3120 3100 claude
+::section tmux
+3100 my work
+::section cwd
+::section transcripts
+::end
+`), nil
+}
+
+func (fixtureTaskConn) InspectGitContext(_ context.Context, cwd string) (session.GitContext, error) {
+	return session.GitContext{Root: cwd, Repo: "infra", OriginURL: "https://github.com/example-org/infra.git"}, nil
+}
+
+func (fixtureTaskConn) Close() error { return nil }
 
 // sortJSONArrayByID orders a JSON array of objects by their "id".
 //

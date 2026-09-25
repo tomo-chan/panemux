@@ -125,3 +125,28 @@ Before that split the three branches each called `exec.Command` with a literal n
 first argument existed. The `//nolint:gosec` on the call therefore keeps its reason inline rather
 than being a bare suppression: what makes it safe is where `name` comes from, and that is not
 visible at the call site.
+
+### Task dashboard collection
+
+The task dashboard ([behavior](../behavior/tasks.md)) runs commands on the panemux host and on every
+`ssh_connections` host. There are three sinks, and none of them carries a value from a request, the
+config, or a remote host into a command string:
+
+- **The collection script** (`collectScript` in `internal/tasks/collect.go`) is a compile-time
+  constant. Locally it runs as `exec.CommandContext(ctx, "sh", "-s")` — a literal program and a
+  literal argument — with the script written to stdin. Remotely the exec request is the literal
+  `sh -s` with the same script on stdin, so the remote login shell parses only `sh -s`, whatever
+  shell it is. `HOME` is the one environment value the local run sets, from `internal/homedir`, and
+  it selects which files are read, not what runs.
+- **Remote git inspection** reuses `remoteGitContext`, the command an `ssh` pane's header runs:
+  the working directory reported by the remote host passes `validRemotePath` and is quoted with
+  `shellQuotePath` before it reaches the command, exactly as a pane's does.
+- **Local git and `gh pr view`** reuse the pane header's lookups: `git` runs with the directory as
+  `cmd.Dir` after `sanitizeGitExecDir`, and `gh` receives the branch and repository as discrete
+  argv elements.
+
+Everything a host prints back is untrusted input. The parser (`parseCollectOutput`) accepts only its
+own line protocol, skips malformed rows, accepts a session ID only if it matches
+`^[a-zA-Z0-9_-]+$`, and treats a tmux session name as display text: the dashboard offers to attach a
+pane to it only when it matches the pane's own `validTmuxSessionName` rule, which the pane then
+enforces again when it starts.

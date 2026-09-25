@@ -30,6 +30,7 @@ type Server struct {
 	manager  *session.Manager
 	httpSrv  *http.Server
 	forwards *portforward.Registry
+	api      *api.Handler
 }
 
 // New creates a new server instance. commandRunner may be nil when
@@ -60,6 +61,7 @@ func New(
 		cfg:      cfg,
 		manager:  manager,
 		forwards: forwards,
+		api:      apiHandler,
 		httpSrv: &http.Server{
 			Addr:           addr,
 			Handler:        r,
@@ -136,9 +138,11 @@ func (s *Server) Start() error {
 }
 
 // Shutdown gracefully stops the server and closes every loopback port
-// forward it opened on this host.
+// forward it opened on this host and every connection the task dashboard
+// holds open.
 func (s *Server) Shutdown(ctx context.Context) error {
 	s.forwards.Close()
+	s.api.Close()
 	if err := s.httpSrv.Shutdown(ctx); err != nil {
 		return fmt.Errorf("shutting down HTTP server: %w", err)
 	}

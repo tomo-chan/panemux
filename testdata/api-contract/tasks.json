@@ -1,0 +1,108 @@
+{
+  "hosts": [
+    {
+      "collected_at": "2026-01-01T00:00:00Z",
+      "name": "",
+      "status": "ok"
+    },
+    {
+      "collected_at": "2026-01-01T00:00:00Z",
+      "name": "build-box",
+      "status": "ok"
+    },
+    {
+      "error": "connect to gpu-box: dial tcp: i/o timeout",
+      "name": "gpu-box",
+      "status": "error"
+    }
+  ],
+  "tasks": [
+    {
+      "agent": "claude",
+      "cwd": "/workspace/user/panemux",
+      "host": "",
+      "id": "local:claude:7c21e0a4",
+      "location": {
+        "attachable": true,
+        "kind": "tmux",
+        "tmux_session": "task-7c21"
+      },
+      "pid": 101,
+      "session_id": "7c21e0a4",
+      "started_at": "2026-01-01T00:00:00Z",
+      "state": "wait",
+      "status_since": "2026-01-01T00:00:00Z",
+      "waiting_for": "input needed"
+    },
+    {
+      "agent": "claude",
+      "cwd": "/workspace/user/panemux-docs",
+      "host": "",
+      "id": "local:claude:b41f9d20",
+      "location": {
+        "attachable": false,
+        "kind": "outside"
+      },
+      "pid": 102,
+      "session_id": "b41f9d20",
+      "started_at": "2026-01-01T00:00:00Z",
+      "state": "busy",
+      "status_since": "2026-01-01T00:00:00Z"
+    },
+    {
+      "agent": "claude",
+      "host": "",
+      "id": "local:claude:state-file:103.json",
+      "location": {
+        "attachable": false,
+        "kind": "none"
+      },
+      "state": "unknown"
+    },
+    {
+      "agent": "codex",
+      "cwd": "/workspace/user/sample-api",
+      "host": "",
+      "id": "local:codex:pid-104",
+      "location": {
+        "attachable": false,
+        "kind": "outside"
+      },
+      "pid": 104,
+      "state": "run"
+    },
+    {
+      "agent": "claude",
+      "cwd": "/workspace/user/service-b",
+      "host": "",
+      "id": "local:claude:55f0c2b8",
+      "location": {
+        "attachable": false,
+        "kind": "none"
+      },
+      "session_id": "55f0c2b8",
+      "state": "stop",
+      "status_since": "2026-01-01T00:00:00Z"
+    },
+    {
+      "agent": "claude",
+      "cwd": "/remote/home/demo/infra",
+      "git": {
+        "repo": "infra",
+        "repo_url": "https://github.com/example-org/infra"
+      },
+      "host": "build-box",
+      "id": "ssh:build-box:claude:3d7702fe",
+      "location": {
+        "attachable": false,
+        "kind": "tmux",
+        "tmux_session": "my work"
+      },
+      "pid": 3120,
+      "session_id": "3d7702fe",
+      "started_at": "2026-01-01T00:00:00Z",
+      "state": "idle",
+      "status_since": "2026-01-01T00:00:00Z"
+    }
+  ]
+}

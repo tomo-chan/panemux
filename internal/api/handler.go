@@ -31,6 +31,7 @@ import (
 	"panemux/internal/portforward"
 	"panemux/internal/session"
 	"panemux/internal/sshconfig"
+	"panemux/internal/tasks"
 )
 
 // Handler provides REST API endpoints.
@@ -44,6 +45,9 @@ type Handler struct {
 	commandCenterAvailable  bool
 	boardCache              *board.BoardCache
 	gitInfoCacheBySession   map[string]gitInfoCacheEntry
+	tasks                   *tasks.Service
+	taskGitLookup           func(ctx context.Context, host, cwd string) *taskGitInfo
+	taskGitCache            map[string]taskGitCacheEntry
 	createSession           func(*config.PaneConfig, map[string]config.SSHConnection) (session.Session, error)
 	detectLocalShellFn      func() (string, error)
 	detectRemoteShellFn     func(cfg session.SSHConfig) (string, error)
@@ -60,6 +64,7 @@ type Handler struct {
 	restartMu               sync.Mutex
 	preferredCWDMu          sync.Mutex
 	gitInfoCacheMu          sync.Mutex
+	taskGitCacheMu          sync.Mutex
 }
 
 type preferredCWDState struct {
@@ -169,8 +174,11 @@ func NewHandler(
 		restartInFlight:       make(map[string]struct{}),
 		nowFn:                 time.Now,
 		gitInfoCacheBySession: make(map[string]gitInfoCacheEntry),
+		taskGitCache:          make(map[string]taskGitCacheEntry),
 		boardCache:            boardCache,
 	}
+	h.tasks = newTaskService(h)
+	h.taskGitLookup = h.lookupTaskGit
 	h.createSession = session.CreateFromConfig
 	h.detectLocalShellFn = session.DetectLocalShell
 	h.detectRemoteShellFn = session.DetectRemoteShell
@@ -1343,6 +1351,15 @@ func (h *Handler) findGH() (string, error) {
 }
 
 func (h *Handler) lookupPRInfo(sess session.Session, cwd string, gitCtx session.GitContext) (string, int) {
+	_, remote := sess.(session.GitContextGetter)
+	return h.lookupPR(remote, cwd, gitCtx)
+}
+
+// lookupPR runs `gh pr view` for gitCtx's branch on the panemux host. remote
+// is whether cwd is on another host, where `gh` cannot run inside it: the
+// repository is then named from its origin URL, and without one there is no
+// lookup.
+func (h *Handler) lookupPR(remote bool, cwd string, gitCtx session.GitContext) (string, int) {
 	if gitCtx.Branch == "" {
 		return "", 0
 	}
@@ -1369,7 +1386,7 @@ func (h *Handler) lookupPRInfo(sess session.Session, cwd string, gitCtx session.
 	)
 	if repoSpec := h.repoSpecFromOriginURL(gitCtx.OriginURL); repoSpec != "" {
 		cmd.Args = append(cmd.Args, "--repo", repoSpec)
-	} else if _, ok := sess.(session.GitContextGetter); ok {
+	} else if remote {
 		// Remote SSH-backed sessions may point at repositories that do not exist
 		// on the local filesystem. Without an origin-derived repo spec, `gh`
 		// cannot resolve PR metadata for that remote-only checkout.

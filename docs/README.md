@@ -32,7 +32,8 @@ it is also the day-to-day command reference.
 
 Topic guides link to focused deep dives when the summary is not enough:
 
-- [Behavior details](behavior/) — REST, WebSocket, frontend, SSH, notifications, and URL opening.
+- [Behavior details](behavior/) — REST, WebSocket, frontend, SSH, notifications, URL opening, and the
+  task dashboard.
 - [Security details](security/) — requirements grouped by command or trust boundary.
 - [Agent Board details](agent-board/) — architecture, relay, bootstrap, command center, integration,
   limitations, and tests.

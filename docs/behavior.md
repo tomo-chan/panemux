@@ -19,7 +19,7 @@ If a configured session fails to start, the server logs a warning and continues 
 The YAML config defines:
 
 - `server.host`, `server.port`, and the Agent Board `server.auth_token`
-- `ssh_connections`
+- `ssh_connections`, which are also the hosts the task dashboard collects agent sessions from
 - `workspaces`, including the active workspace, tab position, vertical bar width, and each
   workspace's recursive layout
 - optional `display` settings
@@ -63,6 +63,7 @@ distribution. Per-surface behavior lives in [`docs/behavior/`](behavior/), group
 | WebSocket Protocol; Command Center WebSocket Protocol | [websocket.md](behavior/websocket.md) |
 | Frontend Runtime Behavior; Pane Git and PR metadata | [frontend.md](behavior/frontend.md) |
 | Opening URLs from a Pane | [url-open.md](behavior/url-open.md) |
+| Task Dashboard; `GET /api/tasks`; `POST /api/tasks/hosts/{name}/reconnect` | [tasks.md](behavior/tasks.md) |
 
 ## Operational Assumptions
 

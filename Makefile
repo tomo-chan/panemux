@@ -309,7 +309,7 @@ test-model-check:
 # the same time. What gets strengthened is the SCOPE below, never the number.
 #
 # Go: measures every package that holds a decision — config, api, ws, server,
-#     board, portforward, commandcenter, boardmcp, and the root package
+#     board, portforward, commandcenter, boardmcp, tasks, and the root package
 #     (main.go's startup path plus board.go / bootstrap.go / command_center.go
 #     / board_mcp_server.go).
 #
@@ -342,7 +342,7 @@ test-model-check:
 #           UI components (App, SplitContainer, TerminalPane …) require a real
 #           browser renderer and are covered by integration / E2E tests.
 
-COVERAGE_PKGS := ./internal/config/...,./internal/api/...,./internal/ws/...,./internal/server/...,./internal/board/...,./internal/portforward/...,./internal/commandcenter/...,./internal/boardmcp/...,./internal/fileops/...,./internal/homedir/...,./internal/cachedir/...,.
+COVERAGE_PKGS := ./internal/config/...,./internal/api/...,./internal/ws/...,./internal/server/...,./internal/board/...,./internal/portforward/...,./internal/commandcenter/...,./internal/boardmcp/...,./internal/fileops/...,./internal/homedir/...,./internal/cachedir/...,./internal/tasks/...,.
 
 coverage: coverage-go coverage-frontend
 
@@ -366,6 +366,7 @@ coverage-go: build-frontend
 	  ./internal/fileops/... \
 	  ./internal/homedir/... \
 	  ./internal/cachedir/... \
+	  ./internal/tasks/... \
 	  . \
 	  -coverprofile=coverage.out \
 	  -coverpkg=$(COVERAGE_PKGS) \

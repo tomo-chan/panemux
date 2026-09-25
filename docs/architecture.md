@@ -30,7 +30,8 @@ layout rendering, terminal emulation, interaction state, and presentation.
 |---|---|
 | `main.go` and root helpers | Parse options, load config, construct dependencies, start sessions and optional subsystems, serve, and shut down. |
 | `internal/config` | Load, normalize, validate, and persist YAML. `Data` is the serializable domain model; `Config` adds file and lookup context. |
-| `internal/session` | Provide one lifecycle interface for local PTY, SSH, local tmux, and tmux-over-SSH sessions. Optional capability interfaces expose CWD, Git context, port forwarding, and Agent Board operations only where supported. |
+| `internal/session` | Provide one lifecycle interface for local PTY, SSH, local tmux, and tmux-over-SSH sessions. Optional capability interfaces expose CWD, Git context, port forwarding, and Agent Board operations only where supported. `CommandConn` is an SSH connection for short non-interactive commands, dialed with the same dialer panes use. |
+| `internal/tasks` | Collect the task dashboard's agent sessions from the panemux host and every `ssh_connections` host with one fixed script, and own one reused `CommandConn` per host. |
 | `internal/api` | Implement REST handlers and mount the route set. It is the single source of truth for API registration. |
 | `internal/ws` | Bridge session bytes and control messages to terminal WebSockets and stream command-center events. |
 | `internal/server` | Compose middleware, API routes, WebSocket routes, static assets, and SPA fallback into the production router. |
@@ -52,6 +53,7 @@ layout rendering, terminal emulation, interaction state, and presentation.
 | `usePaneUrlOpen` | Receive validated URL-open events and coordinate browser navigation/callback forwarding. |
 | attention and notification hooks | Convert terminal activity and visibility changes into pane/workspace indicators and browser notifications. |
 | Agent Board hooks and panels | Poll status/message APIs, stream command-center output, and present dashboard, palette, and history overlays. |
+| `TaskDashboard` and `useTasks` | Poll `GET /api/tasks` while the task dashboard is shown, present tasks as a kanban by state, and match each task to the pane attached to its tmux session (`utils/taskBoard`). |
 | Zod schemas | Runtime-validate structured success payloads and control frames for which schemas are defined. Generated TypeScript types derive from these schemas. |
 
 ## State and ownership
@@ -62,6 +64,9 @@ layout rendering, terminal emulation, interaction state, and presentation.
 - Each terminal pane owns one browser-side terminal instance and WebSocket lifecycle.
 - The backend resolves live Git/PR context from the active pane work directory and caches the
   result for the behavior-defined interval.
+- The task dashboard keeps nothing but its per-host SSH connections: each collection reads the
+  agents' own files on every host again. The pane a task belongs to is derived in the browser from
+  the current workspaces.
 - Agent Board's status/history cache is in memory. Relay cursors, bootstrap state, and command-center
   history/session state use dedicated persisted files.
 - Structured success payloads and control frames with declared schemas are parsed through Zod.
@@ -90,6 +95,15 @@ command-center MCP client also uses bearer-authenticated board REST APIs. Only `
 invokes agmsg scripts. Full detail is in
 [Agent Board architecture](agent-board/architecture.md).
 
+### Task dashboard flow
+
+While the dashboard is on screen, the browser polls `GET /api/tasks`. `internal/tasks` runs one
+fixed script on every host at once — locally with `sh -s`, remotely over that host's reused
+`CommandConn` — parses what it prints, and derives each task's state and tmux location. The API
+handler adds each working directory's git and pull-request metadata. Opening a task creates or
+focuses a `tmux` / `ssh_tmux` pane through the ordinary pane APIs. Full behavior is in
+[Task dashboard](behavior/tasks.md).
+
 ### URL-open flow
 
 Pane-side URL detection or the browser shim reports a URL to panemux. Ordinary URLs open in the
@@ -107,7 +121,8 @@ and [URL-open security](security/url-open.md).
 - User-controlled values never select an arbitrary executable. Shell paths, tmux names, remote
   paths, and subprocess operands follow the per-sink rules in [Security design](security.md).
 - Panemux runs no copy of itself on remote hosts. SSH-backed features use the existing SSH session
-  and operator-installed remote tools.
+  and operator-installed remote tools; the task dashboard uses its own SSH connection per host and
+  runs only a fixed script over it.
 - The browser is untrusted input to Go handlers. Structured backend payloads with declared frontend
   schemas remain untrusted until validation succeeds; other input paths apply their own parsing and
   bounds checks.

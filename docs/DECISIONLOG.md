@@ -71,6 +71,51 @@ made each turn unreadable. Panemux now writes the prompt first as `panemux_promp
 does not emit, then appends the captured subprocess frames. A subprocess failure still records the
 prompt; a request that never starts a subprocess does not create a turn.
 
+## Task dashboard
+
+### Stage 1: a dashboard of agent sessions, independent of panes (2026-09-25, issue #252)
+
+The design, its stages and its open questions are agreed in issue #252. The choices stage 1 made
+while being built:
+
+- **Claude Code's own files are read as they are.** `~/.claude/sessions/<pid>.json` and
+  `~/.claude/projects/*/<session>.jsonl` are not a published format. They are the only record of a
+  session that does not depend on panemux having started it, which is the point of the feature, so
+  the dependency is accepted and made to fail visibly: every field is optional, an unreadable state
+  file stays on the board as `unknown` instead of disappearing, and only the first `"cwd"` of a log
+  is read. Codex has no equivalent that has been checked, so codex tasks are running processes and
+  nothing more (issue #252, open question 5).
+- **Liveness is "the pid is alive and its command line contains `claude`", and `procStart` is not
+  used.** A state file's pid alone is not enough, because pids restart after a host reboot. Claude
+  Code 2.1.282's `procStart` matched field 22 of `/proc/<pid>/stat` (clock ticks since boot) for the
+  one process checked on Linux, while the observation recorded in the issue did not match (425
+  against 419), so how it is computed is still unknown and nothing relies on it. The substring rather
+  than argv[0]'s base name is because how Claude Code shows in `ps` depends on how it was installed —
+  a native binary under `…/claude/versions/<version>`, or `node` running the npm package.
+- **Not verified on a real machine yet:** whether `/resume` rewrites the running process's state
+  file to the new session ID, and whether a state file outlives its process. Neither changes what is
+  built: a leftover file is filtered out by liveness either way. If `/resume` turns out not to
+  rewrite the file, the dashboard keeps showing the session the process started with as the running
+  one, and issue #252 says the design is revisited then. Checking both needs a second, logged-in
+  Claude Code, which the environment this was built in did not have.
+- **One fixed script per host, fed on stdin.** Every host runs the same constant script through
+  `sh -s`: one round trip per collection, identical parsing for local and remote, no remote value
+  ever quoted into a command, and nothing that depends on the remote login shell being POSIX. The
+  alternative — one exec per probe, as the pane header's lookups do — would cost several round trips
+  per host every 10 seconds.
+- **The pane a task belongs to is found in the browser, not by the API.** The browser already holds
+  the workspaces, so a pane the dashboard has just created is matched at once rather than after the
+  next collection, and the API has no layout state to keep consistent with it.
+- **Stopped sessions are the last 7 days, at most 50 per host.** Decided for stage 1 while it was
+  built; conversation logs are never deleted, so without a bound every past session would be
+  listed. Open question 1 still decides retention and recording for stage 2.
+- **panemux opens on the workspaces**, as before, rather than on the dashboard the issue's mockup
+  starts on, and **no keyboard shortcut switches layers yet**: open
+  question 6 requires the key to be checked against Chrome's own shortcuts, which could not be done
+  from the environment this was built in.
+- **The UI text is English**, like the rest of panemux's interface, although the issue's mockup is
+  written in Japanese.
+
 ## Agent Board
 
 ### Compatibility is checked against a real agmsg release (2026-08-23, PR #176)
