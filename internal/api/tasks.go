@@ -39,6 +39,9 @@ type tasksResponse struct {
 type taskGitCacheEntry struct {
 	expiresAt time.Time
 	info      *taskGitInfo
+	// withPR is whether the lookup ran `gh pr view`. An entry without it
+	// does not serve a directory a running task uses.
+	withPR bool
 }
 
 // taskGitLookupConcurrency bounds how many git/PR lookups one GET /api/tasks
@@ -194,31 +197,54 @@ func taskGitKey(host, cwd string) string {
 	return host + "\x00" + cwd
 }
 
-// taskGitInfos looks up git metadata once per (host, directory), serving
-// repeats from a cache that lives as long as a pane header's does.
-func (h *Handler) taskGitInfos(
-	ctx context.Context, list []tasks.Task, collected map[string]bool,
-) map[string]*taskGitInfo {
-	type target struct{ host, cwd string }
-	results := map[string]*taskGitInfo{}
-	var pending []target
+// taskGitTarget is one (host, directory) whose git metadata a response
+// needs, and whether it needs the pull request too.
+type taskGitTarget struct {
+	host, cwd string
+	withPR    bool
+}
 
-	now := h.nowFn()
-	h.taskGitCacheMu.Lock()
+// taskGitTargets lists each (host, directory) the tasks of hosts that were
+// collected use, once, in the order they first appear. A directory needs its
+// pull request when any running task uses it.
+func taskGitTargets(list []tasks.Task, collected map[string]bool) []taskGitTarget {
+	var targets []taskGitTarget
+	index := map[string]int{}
 	for _, task := range list {
-		key := taskGitKey(task.Host, task.CWD)
 		if task.CWD == "" || !collected[task.Host] {
 			continue
 		}
-		if _, done := results[key]; done {
-			continue
+		key := taskGitKey(task.Host, task.CWD)
+		i, seen := index[key]
+		if !seen {
+			i = len(targets)
+			index[key] = i
+			targets = append(targets, taskGitTarget{host: task.Host, cwd: task.CWD})
 		}
-		if entry, ok := h.taskGitCache[key]; ok && now.Before(entry.expiresAt) {
+		targets[i].withPR = targets[i].withPR || task.State != tasks.StateStop
+	}
+	return targets
+}
+
+// taskGitInfos looks up git metadata once per (host, directory), serving
+// repeats from a cache that lives as long as a pane header's does. The pull
+// request is looked up only for a directory a running task uses: taskGitFor
+// never reports one for a stopped task.
+func (h *Handler) taskGitInfos(
+	ctx context.Context, list []tasks.Task, collected map[string]bool,
+) map[string]*taskGitInfo {
+	targets := taskGitTargets(list, collected)
+	results := make(map[string]*taskGitInfo, len(targets))
+	var pending []taskGitTarget
+	now := h.nowFn()
+	h.taskGitCacheMu.Lock()
+	for _, t := range targets {
+		key := taskGitKey(t.host, t.cwd)
+		if entry, ok := h.taskGitCache[key]; ok && now.Before(entry.expiresAt) && (entry.withPR || !t.withPR) {
 			results[key] = entry.info
 			continue
 		}
-		results[key] = nil
-		pending = append(pending, target{task.Host, task.CWD})
+		pending = append(pending, t)
 	}
 	h.taskGitCacheMu.Unlock()
 
@@ -230,10 +256,10 @@ func (h *Handler) taskGitInfos(
 	for _, t := range pending {
 		wg.Add(1)
 		sem <- struct{}{}
-		go func(t target) {
+		go func(t taskGitTarget) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			info := h.taskGitLookup(ctx, t.host, t.cwd)
+			info := h.taskGitLookup(ctx, t.host, t.cwd, t.withPR)
 			mu.Lock()
 			results[taskGitKey(t.host, t.cwd)] = info
 			mu.Unlock()
@@ -244,7 +270,9 @@ func (h *Handler) taskGitInfos(
 	h.taskGitCacheMu.Lock()
 	for _, t := range pending {
 		key := taskGitKey(t.host, t.cwd)
-		h.taskGitCache[key] = taskGitCacheEntry{info: results[key], expiresAt: now.Add(gitInfoCacheTTL)}
+		h.taskGitCache[key] = taskGitCacheEntry{
+			info: results[key], withPR: t.withPR, expiresAt: now.Add(gitInfoCacheTTL),
+		}
 	}
 	h.taskGitCacheMu.Unlock()
 	return results
@@ -252,7 +280,8 @@ func (h *Handler) taskGitInfos(
 
 // lookupTaskGit resolves one directory's git metadata, or nil when it is not
 // in a repository or cannot be inspected. host is "" for the panemux host.
-func (h *Handler) lookupTaskGit(ctx context.Context, host, cwd string) *taskGitInfo {
+// The pull request is looked up only when withPR is set.
+func (h *Handler) lookupTaskGit(ctx context.Context, host, cwd string, withPR bool) *taskGitInfo {
 	var (
 		gitCtx session.GitContext
 		err    error
@@ -271,12 +300,13 @@ func (h *Handler) lookupTaskGit(ctx context.Context, host, cwd string) *taskGitI
 		return nil
 	}
 
-	prURL, prNumber := h.lookupPR(ctx, host != "", cwd, gitCtx)
-	return &taskGitInfo{
-		Repo:     gitCtx.Repo,
-		RepoURL:  h.repoPageURLFromOriginURL(gitCtx.OriginURL),
-		Branch:   gitCtx.Branch,
-		PRURL:    prURL,
-		PRNumber: prNumber,
+	info := &taskGitInfo{
+		Repo:    gitCtx.Repo,
+		RepoURL: h.repoPageURLFromOriginURL(gitCtx.OriginURL),
+		Branch:  gitCtx.Branch,
 	}
+	if withPR {
+		info.PRURL, info.PRNumber = h.lookupPR(ctx, host != "", cwd, gitCtx)
+	}
+	return info
 }

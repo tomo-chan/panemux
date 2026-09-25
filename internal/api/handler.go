@@ -46,7 +46,7 @@ type Handler struct {
 	boardCache              *board.BoardCache
 	gitInfoCacheBySession   map[string]gitInfoCacheEntry
 	tasks                   *tasks.Service
-	taskGitLookup           func(ctx context.Context, host, cwd string) *taskGitInfo
+	taskGitLookup           func(ctx context.Context, host, cwd string, withPR bool) *taskGitInfo
 	taskGitCache            map[string]taskGitCacheEntry
 	createSession           func(*config.PaneConfig, map[string]config.SSHConnection) (session.Session, error)
 	detectLocalShellFn      func() (string, error)

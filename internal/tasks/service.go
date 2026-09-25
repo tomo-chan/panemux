@@ -20,6 +20,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"panemux/internal/homedir"
@@ -91,6 +92,10 @@ const (
 	// pingTimeout bounds the keepalive that decides whether a connection
 	// whose collection ran out of time is still worth keeping.
 	pingTimeout = 5 * time.Second
+	// localWaitDelay bounds how long the local collection waits for its
+	// output pipe to close after its context ended and its process group
+	// was killed.
+	localWaitDelay = time.Second
 )
 
 // errConnecting reports a host whose connection is still being set up.
@@ -135,6 +140,11 @@ func New(opts Options) *Service {
 // literal and the script, itself a constant, arrives on stdin. HOME is set
 // from internal/homedir so the script reads the same home directory the rest
 // of panemux resolves.
+//
+// The script runs in a process group of its own, and the whole group is
+// killed when ctx ends: a probe the script started (lsof, a subshell) holds
+// its stdout open, and killing sh alone would leave Output waiting for that
+// probe. WaitDelay bounds the wait for anything that escaped the group.
 func runLocal(ctx context.Context, script string) ([]byte, error) {
 	home, err := homedir.Dir()
 	if err != nil {
@@ -143,6 +153,11 @@ func runLocal(ctx context.Context, script string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "sh", "-s")
 	cmd.Stdin = strings.NewReader(script)
 	cmd.Env = append(os.Environ(), "HOME="+home)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	cmd.WaitDelay = localWaitDelay
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("run task collection: %w", err)

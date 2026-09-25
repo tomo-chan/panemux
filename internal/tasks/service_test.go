@@ -9,7 +9,9 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -644,4 +646,47 @@ func TestRunLocal_Errors(t *testing.T) {
 		_, err := runLocal(context.Background(), "exit 3")
 		assert.ErrorContains(t, err, "run task collection")
 	})
+}
+
+// A probe the script starts in the background holds the script's stdout
+// open. When the collection's context ends, runLocal returns at once rather
+// than waiting for that probe to close stdout, and the probe is killed with
+// the script instead of being left running.
+func TestRunLocal_ReturnsWhenTheContextEndsWhileAChildHoldsStdout(t *testing.T) {
+	homedir.SetForTest(t, t.TempDir())
+	pidFile := filepath.Join(t.TempDir(), "child.pid")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	_, err := runLocal(ctx, "sleep 30 &\necho $! > '"+pidFile+"'\nwait\n")
+	elapsed := time.Since(started)
+
+	require.ErrorContains(t, err, "run task collection")
+	assert.Less(t, elapsed, 5*time.Second, "returned without waiting for the child's stdout")
+
+	raw, err := os.ReadFile(pidFile)
+	require.NoError(t, err)
+	childPID, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	require.NoError(t, err)
+	assert.Eventually(t, func() bool { return !processRunning(childPID) }, 5*time.Second, 20*time.Millisecond,
+		"the background child is killed with the script")
+}
+
+// processRunning reports whether pid is a process that has not exited. An
+// exited child nobody has reaped yet still answers signal 0, so on Linux its
+// state in /proc is read as well.
+func processRunning(pid int) bool {
+	if err := syscall.Kill(pid, 0); err != nil {
+		return false
+	}
+	if runtime.GOOS != "linux" {
+		return true
+	}
+	stat, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat"))
+	if err != nil {
+		return false
+	}
+	fields := strings.Fields(string(stat[strings.LastIndexByte(string(stat), ')')+1:]))
+	return len(fields) > 0 && fields[0] != "Z"
 }

@@ -40,7 +40,9 @@ and pull request of its working directory.
   continues and serves a later collection.
 - A collection that is still running after 15 seconds reports an error for that host. Its
   connection is kept when it still answers an SSH keepalive (within 5 seconds) and dropped
-  otherwise, so a slow host is not redialed every collection.
+  otherwise, so a slow host is not redialed every collection. On the panemux host the script runs
+  in a process group of its own, and the whole group — the script and every probe it started — is
+  killed when the collection's time is up or the request is abandoned.
 - A host removed from `ssh_connections` has its connection closed on the next collection. Every
   connection is closed when panemux shuts down.
 - One host failing never hides another host's tasks.
@@ -129,6 +131,10 @@ host, with a remote repository named from its origin URL. A lookup runs once per
 is cached for 30 seconds, and is skipped for a host whose collection failed. A directory that is not
 a repository, or cannot be inspected, has no `git` field. `gh` runs under the request's context, so
 an abandoned request stops it.
+
+`gh pr view` runs only for a directory a running task uses. A directory only stopped tasks use is
+looked up with `git` alone, and that cached result does not serve a running task that appears in
+the directory within the 30 seconds: the directory is looked up again, with its pull request.
 
 The metadata is the directory's **current** state. For a running task that is the branch it is
 working on; for a stopped task it is whatever has been checked out since, so a stopped task reports

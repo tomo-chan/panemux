@@ -9,6 +9,8 @@ import (
 	"net/http/httptest"
 	"os/exec"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -154,7 +156,7 @@ func TestGetTasks_ReportsEveryConfiguredHost(t *testing.T) {
 func TestGetTasks_ResponseCarriesTheWireFieldNames(t *testing.T) {
 	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
 	useTaskService(h, taskCollection("s", "/workspace/user/project"), nil)
-	h.taskGitLookup = func(context.Context, string, string) *taskGitInfo {
+	h.taskGitLookup = func(context.Context, string, string, bool) *taskGitInfo {
 		return &taskGitInfo{Repo: "project", Branch: "main", PRNumber: 12, PRURL: "https://example.invalid/pr/12"}
 	}
 
@@ -198,7 +200,7 @@ func TestTaskGitInfo_LocalRepositoryWithPR(t *testing.T) {
 	h.ghBinaryPath = writeFakeGHBinary(t,
 		"#!/bin/sh\necho '{\"url\":\"https://github.com/example/panemux/pull/253\",\"number\":253}'\n")
 
-	info := h.lookupTaskGit(context.Background(), "", dir)
+	info := h.lookupTaskGit(context.Background(), "", dir, true)
 	require.NotNil(t, info)
 	assert.Equal(t, taskGitInfo{
 		Repo: filepath.Base(dir), RepoURL: "https://github.com/example/panemux", Branch: "feature/task-dashboard",
@@ -223,11 +225,11 @@ func TestTaskGitInfo_WithoutAnOriginOnlyTheLocalHostLooksUpAPR(t *testing.T) {
 	useTaskService(h, taskCollection("l", dir), map[string]tasks.Conn{"dev-server": remote})
 	getTasks(t, h) // opens the dev-server connection
 
-	local := h.lookupTaskGit(context.Background(), "", dir)
+	local := h.lookupTaskGit(context.Background(), "", dir, true)
 	require.NotNil(t, local)
 	assert.Equal(t, 9, local.PRNumber)
 
-	onRemote := h.lookupTaskGit(context.Background(), "dev-server", dir)
+	onRemote := h.lookupTaskGit(context.Background(), "dev-server", dir, true)
 	require.NotNil(t, onRemote)
 	assert.Equal(t, "main", onRemote.Branch)
 	assert.Zero(t, onRemote.PRNumber)
@@ -245,7 +247,7 @@ func TestTaskGitInfo_NoGitBinary(t *testing.T) {
 	t.Cleanup(func() { gitExistsFn = original })
 
 	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
-	assert.Nil(t, h.lookupTaskGit(context.Background(), "", t.TempDir()))
+	assert.Nil(t, h.lookupTaskGit(context.Background(), "", t.TempDir(), true))
 }
 
 func TestTaskGitInfo_RemoteFailureIsNoGitInfo(t *testing.T) {
@@ -274,7 +276,7 @@ func TestGetTasks_GitLookupsAreSharedPerDirectoryAndCached(t *testing.T) {
 	useTaskService(h, two, nil)
 	var lookups []string
 	var mu sync.Mutex
-	h.taskGitLookup = func(_ context.Context, host, cwd string) *taskGitInfo {
+	h.taskGitLookup = func(_ context.Context, host, cwd string, _ bool) *taskGitInfo {
 		mu.Lock()
 		defer mu.Unlock()
 		lookups = append(lookups, host+"|"+cwd)
@@ -301,7 +303,7 @@ func TestGetTasks_NoGitLookupOnAHostThatFailed(t *testing.T) {
 	h := NewHandler(cfg, session.NewManager(), nil, nil)
 	useTaskService(h, []byte("garbage"), nil)
 	called := false
-	h.taskGitLookup = func(context.Context, string, string) *taskGitInfo {
+	h.taskGitLookup = func(context.Context, string, string, bool) *taskGitInfo {
 		called = true
 		return nil
 	}
@@ -347,7 +349,7 @@ func TestHandlerClose_ClosesTaskConnections(t *testing.T) {
 	h := NewHandler(cfg, session.NewManager(), nil, nil)
 	conn := &closeCountingConn{stubTaskConn: stubTaskConn{output: taskCollection("s", "")}}
 	useTaskService(h, taskCollection("l", ""), map[string]tasks.Conn{"dev-server": conn})
-	h.taskGitLookup = func(context.Context, string, string) *taskGitInfo { return nil }
+	h.taskGitLookup = func(context.Context, string, string, bool) *taskGitInfo { return nil }
 
 	getTasks(t, h)
 	h.Close()
@@ -370,7 +372,7 @@ func TestSetTaskService_ClosesTheOneItReplaces(t *testing.T) {
 	h := NewHandler(cfg, session.NewManager(), nil, nil)
 	conn := &closeCountingConn{stubTaskConn: stubTaskConn{output: taskCollection("s", "")}}
 	useTaskService(h, taskCollection("l", ""), map[string]tasks.Conn{"dev-server": conn})
-	h.taskGitLookup = func(context.Context, string, string) *taskGitInfo { return nil }
+	h.taskGitLookup = func(context.Context, string, string, bool) *taskGitInfo { return nil }
 	getTasks(t, h)
 
 	h.SetTaskService(tasks.New(tasks.Options{
@@ -460,7 +462,7 @@ func TestGetTasks_StoppedTaskReportsItsRepositoryButNotBranchOrPR(t *testing.T) 
 		"::end",
 	}, "\n") + "\n")
 	useTaskService(h, stopped, nil)
-	h.taskGitLookup = func(context.Context, string, string) *taskGitInfo {
+	h.taskGitLookup = func(context.Context, string, string, bool) *taskGitInfo {
 		return &taskGitInfo{Repo: "project", RepoURL: "https://example.invalid/project", Branch: "today",
 			PRNumber: 3, PRURL: "https://example.invalid/project/pull/3"}
 	}
@@ -486,7 +488,7 @@ func TestTaskGitInfo_PRLookupStopsWithTheRequest(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	info := h.lookupTaskGit(ctx, "", dir)
+	info := h.lookupTaskGit(ctx, "", dir, true)
 	require.NotNil(t, info)
 	assert.Equal(t, "main", info.Branch)
 	assert.Zero(t, info.PRNumber)
@@ -506,4 +508,118 @@ func TestTaskGitFor(t *testing.T) {
 	assert.Equal(t, &taskGitInfo{RepoURL: "https://example.invalid/r"},
 		taskGitFor(stopped, &taskGitInfo{RepoURL: "https://example.invalid/r", Branch: "b"}))
 	assert.Nil(t, taskGitFor(stopped, &taskGitInfo{Branch: "b"}), "nothing left to report")
+}
+
+// collectionOf renders one host's collection output with the given state
+// files (session ID → cwd, each a busy claude process) and stopped
+// conversation logs (session ID → cwd).
+func collectionOf(running, stopped map[string]string) []byte {
+	lines := []string{"::panemux-tasks v1", "::now 1000", "::section state"}
+	var ps []string
+	pid := 7
+	for _, id := range sortedKeys(running) {
+		lines = append(lines, "::file "+strconv.Itoa(pid)+".json",
+			`{"pid":`+strconv.Itoa(pid)+`,"sessionId":"`+id+`","cwd":"`+running[id]+`","status":"busy"}`)
+		ps = append(ps, strconv.Itoa(pid)+" 1 claude")
+		pid++
+	}
+	lines = append(lines, "::section ps")
+	lines = append(lines, ps...)
+	lines = append(lines, "::section transcripts")
+	for _, id := range sortedKeys(stopped) {
+		lines = append(lines, "900\t"+id+".jsonl\t\"cwd\":\""+stopped[id]+"\"")
+	}
+	return []byte(strings.Join(append(lines, "::end"), "\n") + "\n")
+}
+
+func sortedKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// A stopped task reports no pull request (taskGitFor), so a directory only
+// stopped tasks use is looked up without running `gh pr view`.
+func TestGetTasks_PRIsLookedUpOnlyForADirectoryARunningTaskUses(t *testing.T) {
+	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
+	useTaskService(h, collectionOf(
+		map[string]string{"live": "/workspace/user/live"},
+		map[string]string{"gone": "/workspace/user/live", "old": "/workspace/user/old"},
+	), nil)
+	withPR := map[string]bool{}
+	var mu sync.Mutex
+	h.taskGitLookup = func(_ context.Context, _, cwd string, pr bool) *taskGitInfo {
+		mu.Lock()
+		defer mu.Unlock()
+		withPR[cwd] = pr
+		return &taskGitInfo{Repo: "r"}
+	}
+
+	getTasks(t, h)
+	assert.Equal(t, map[string]bool{"/workspace/user/live": true, "/workspace/user/old": false}, withPR)
+}
+
+// A cached lookup made without a PR does not serve a running task that
+// needs one; a cached lookup with a PR serves a stopped task too.
+func TestGetTasks_ACachedLookupWithoutAPRIsNotEnoughForARunningTask(t *testing.T) {
+	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
+	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
+	h.nowFn = func() time.Time { return now }
+	var local []byte
+	h.tasks = tasks.New(tasks.Options{
+		Hosts:    h.taskHostNames,
+		RunLocal: func(context.Context, string) ([]byte, error) { return local, nil },
+	})
+	var lookups []bool
+	var mu sync.Mutex
+	h.taskGitLookup = func(_ context.Context, _, _ string, pr bool) *taskGitInfo {
+		mu.Lock()
+		defer mu.Unlock()
+		lookups = append(lookups, pr)
+		if pr {
+			return &taskGitInfo{Repo: "r", Branch: "b", PRNumber: 5}
+		}
+		return &taskGitInfo{Repo: "r", Branch: "b"}
+	}
+	stoppedOnly := collectionOf(nil, map[string]string{"gone": "/workspace/user/project"})
+	running := collectionOf(map[string]string{"live": "/workspace/user/project"}, nil)
+
+	local = stoppedOnly
+	getTasks(t, h)
+	assert.Equal(t, []bool{false}, lookups)
+
+	local = running
+	resp := getTasks(t, h)
+	assert.Equal(t, []bool{false, true}, lookups, "looked up again, with the PR, within gitInfoCacheTTL")
+	live := findTaskResponse(t, resp, "local:claude:live")
+	require.NotNil(t, live.Git)
+	assert.Equal(t, 5, live.Git.PRNumber)
+
+	local = stoppedOnly
+	getTasks(t, h)
+	local = running
+	getTasks(t, h)
+	assert.Equal(t, []bool{false, true}, lookups, "the lookup with the PR serves both")
+}
+
+func TestTaskGitInfo_WithoutPRDoesNotRunGH(t *testing.T) {
+	dir := initTempGitRepo(t)
+	marker := filepath.Join(t.TempDir(), "gh-ran")
+	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
+	h.ghBinaryPath = writeFakeGHBinary(t, "#!/bin/sh\ntouch '"+marker+"'\n"+
+		"echo '{\"url\":\"https://github.com/example/panemux/pull/9\",\"number\":9}'\n")
+
+	info := h.lookupTaskGit(context.Background(), "", dir, false)
+	require.NotNil(t, info)
+	assert.Equal(t, "main", info.Branch)
+	assert.Zero(t, info.PRNumber)
+	assert.NoFileExists(t, marker)
+
+	info = h.lookupTaskGit(context.Background(), "", dir, true)
+	require.NotNil(t, info)
+	assert.Equal(t, 9, info.PRNumber)
+	assert.FileExists(t, marker)
 }

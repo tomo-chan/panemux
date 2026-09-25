@@ -112,7 +112,12 @@ while being built:
   `/api/*`, but `GET /api/tasks` is the first GET with a heavy side effect — dialing every host — so
   a page on another site must not be able to trigger it with an `<img>`.
 - **A stopped task reports its repository but not its branch or PR**: git metadata is read from the
-  directory as it is now, which says nothing about the branch a stopped session worked on.
+  directory as it is now, which says nothing about the branch a stopped session worked on. So
+  `gh pr view` runs only for a directory a running task uses (review of PR #253); the first version
+  ran it for every directory and threw the stopped-only results away.
+- **The local collection is killed as a process group** (review of PR #253). The first version
+  relied on `exec.CommandContext` killing `sh` alone; a probe the script had started kept its
+  stdout open, so the collection outlived its 15 seconds until that probe finished.
 - **`/resume` and exit were checked on a real machine** (macOS, 2026-09-26; the Claude Code
   version was not recorded). `/resume` keeps the same process and the
   same `<pid>.json`, and rewrites that file's `sessionId` to the resumed session (`updatedAt`

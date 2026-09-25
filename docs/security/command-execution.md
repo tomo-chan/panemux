@@ -137,7 +137,8 @@ config, or a remote host into a command string:
   literal argument — with the script written to stdin. Remotely the exec request is the literal
   `sh -s` with the same script on stdin, so the remote login shell parses only `sh -s`, whatever
   shell it is. `HOME` is the one environment value the local run sets, from `internal/homedir`, and
-  it selects which files are read, not what runs.
+  it selects which files are read, not what runs. The local run is its own process group, killed as
+  a group when its context ends, so no probe the script started outlives the collection.
 - **Remote git inspection** reuses `remoteGitContext`, the command an `ssh` pane's header runs:
   the working directory reported by the remote host passes `validRemotePath` and is quoted with
   `shellQuotePath` before it reaches the command, exactly as a pane's does.
