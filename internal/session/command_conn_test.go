@@ -80,6 +80,23 @@ func TestCommandConnRunFailsOnAClosedConnection(t *testing.T) {
 	assert.False(t, errors.As(err, &exit), "a dead connection is not a command failure")
 }
 
+func TestCommandConnPing(t *testing.T) {
+	client, _ := startSessionTestSSHServer(t, nil)
+	conn := newCommandConn(client, nil)
+	require.NoError(t, conn.Ping(context.Background()), "any reply to the keepalive means the connection is up")
+
+	// A closed connection either fails the request outright or never
+	// answers it; production always pings with a deadline, and so does this.
+	require.NoError(t, conn.Close())
+	closedCtx, closedCancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer closedCancel()
+	assert.Error(t, conn.Ping(closedCtx))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	assert.ErrorIs(t, newCommandConn(client, nil).Ping(ctx), context.Canceled)
+}
+
 func TestCommandConnInspectGitContext(t *testing.T) {
 	client, _ := startSessionTestSSHServer(t, func(command string) testSSHResponse {
 		if strings.HasPrefix(command, "cd '/remote/home/demo/app' && root=") {

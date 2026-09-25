@@ -399,6 +399,8 @@ func (fixtureTaskConn) InspectGitContext(_ context.Context, cwd string) (session
 
 func (fixtureTaskConn) Close() error { return nil }
 
+func (fixtureTaskConn) Ping(context.Context) error { return nil }
+
 // sortJSONArrayByID orders a JSON array of objects by their "id".
 //
 // The elements stay json.RawMessage and are never decoded into a struct. That

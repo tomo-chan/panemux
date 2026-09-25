@@ -66,6 +66,8 @@ func (c *stubTaskConn) InspectGitContext(_ context.Context, cwd string) (session
 
 func (c *stubTaskConn) Close() error { return nil }
 
+func (c *stubTaskConn) Ping(context.Context) error { return nil }
+
 // useTaskService swaps the handler's collector for one whose local output
 // and remote connections the test controls.
 func useTaskService(h *Handler, local []byte, conns map[string]tasks.Conn) {
@@ -376,4 +378,116 @@ func TestSetTaskService_ClosesTheOneItReplaces(t *testing.T) {
 	}))
 	assert.Equal(t, 1, conn.closed)
 	assert.Equal(t, "local:claude:replaced", getTasks(t, h).Tasks[0].ID)
+}
+
+// GET /api/tasks makes panemux dial every host and run a script there, so a
+// page on another site must not be able to trigger it — an <img> pointing at
+// the route would otherwise collect whenever that page is open.
+func TestTaskRoutes_RefuseCrossSiteRequests(t *testing.T) {
+	cases := []struct {
+		headers map[string]string
+		name    string
+		allowed bool
+	}{
+		{name: "no browser headers (curl, the Go client)", allowed: true},
+		{name: "same-origin fetch", headers: map[string]string{"Sec-Fetch-Site": "same-origin"}, allowed: true},
+		{name: "typed into the address bar", headers: map[string]string{"Sec-Fetch-Site": "none"}, allowed: true},
+		{
+			name: "loopback origin (the Vite dev server)", headers: map[string]string{"Origin": "http://localhost:5173"},
+			allowed: true,
+		},
+		{
+			name: "the server's own origin", headers: map[string]string{"Origin": "http://panemux.test:8080"},
+			allowed: true,
+		},
+		{name: "cross-site fetch or image", headers: map[string]string{"Sec-Fetch-Site": "cross-site"}},
+		{name: "same-site but another origin", headers: map[string]string{"Sec-Fetch-Site": "same-site"}},
+		{name: "foreign origin", headers: map[string]string{"Origin": "https://evil.example"}},
+		{name: "malformed origin", headers: map[string]string{"Origin": "::"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := defaultTestConfig()
+			cfg.SSHConnections = map[string]config.SSHConnection{"gpu-box": {Host: "gpu.invalid"}}
+			h := NewHandler(cfg, session.NewManager(), nil, nil)
+			collections := 0
+			h.SetTaskService(tasks.New(tasks.Options{
+				Hosts: h.taskHostNames,
+				Dial:  func(string) (tasks.Conn, error) { return nil, errors.New("unreachable") },
+				RunLocal: func(context.Context, string) ([]byte, error) {
+					collections++
+					return taskCollection("l", ""), nil
+				},
+			}))
+			r := setupRouterWithHandler(h)
+
+			for _, req := range []*http.Request{
+				httptest.NewRequest(http.MethodGet, "/api/tasks", nil),
+				httptest.NewRequest(http.MethodPost, "/api/tasks/hosts/gpu-box/reconnect", nil),
+			} {
+				req.Host = "panemux.test:8080"
+				for k, v := range tc.headers {
+					req.Header.Set(k, v)
+				}
+				rec := httptest.NewRecorder()
+				r.ServeHTTP(rec, req)
+				if tc.allowed {
+					assert.Less(t, rec.Code, 300, "%s %s", req.Method, req.URL.Path)
+				} else {
+					assert.Equal(t, http.StatusForbidden, rec.Code, "%s %s", req.Method, req.URL.Path)
+				}
+			}
+			if tc.allowed {
+				assert.Equal(t, 1, collections)
+			} else {
+				assert.Zero(t, collections, "a refused request collects nothing")
+			}
+		})
+	}
+}
+
+// Git metadata is read from the directory as it is now. For a stopped task
+// that is not the branch it worked on, so only the repository is reported.
+func TestGetTasks_StoppedTaskReportsItsRepositoryButNotBranchOrPR(t *testing.T) {
+	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
+	stopped := []byte(strings.Join([]string{
+		"::panemux-tasks v1", "::now 1000",
+		"::section state",
+		"::file 7.json", `{"pid":7,"sessionId":"live","cwd":"/workspace/user/project","status":"busy"}`,
+		"::section ps", "7 1 claude",
+		"::section transcripts",
+		"900\tgone.jsonl\t\"cwd\":\"/workspace/user/project\"",
+		"::end",
+	}, "\n") + "\n")
+	useTaskService(h, stopped, nil)
+	h.taskGitLookup = func(context.Context, string, string) *taskGitInfo {
+		return &taskGitInfo{Repo: "project", RepoURL: "https://example.invalid/project", Branch: "today",
+			PRNumber: 3, PRURL: "https://example.invalid/project/pull/3"}
+	}
+
+	resp := getTasks(t, h)
+	live := findTaskResponse(t, resp, "local:claude:live")
+	require.NotNil(t, live.Git)
+	assert.Equal(t, "today", live.Git.Branch)
+	assert.Equal(t, 3, live.Git.PRNumber)
+
+	gone := findTaskResponse(t, resp, "local:claude:gone")
+	require.NotNil(t, gone.Git)
+	assert.Equal(t, taskGitInfo{Repo: "project", RepoURL: "https://example.invalid/project"}, *gone.Git)
+}
+
+// The PR lookup runs under the request's context, so a request the browser
+// abandoned does not keep `gh` running.
+func TestTaskGitInfo_PRLookupStopsWithTheRequest(t *testing.T) {
+	dir := initTempGitRepo(t)
+	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
+	h.ghBinaryPath = writeFakeGHBinary(t,
+		"#!/bin/sh\necho '{\"url\":\"https://github.com/example/panemux/pull/9\",\"number\":9}'\n")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	info := h.lookupTaskGit(ctx, "", dir)
+	require.NotNil(t, info)
+	assert.Equal(t, "main", info.Branch)
+	assert.Zero(t, info.PRNumber)
 }

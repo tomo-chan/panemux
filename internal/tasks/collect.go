@@ -23,9 +23,9 @@ import (
 //	::panemux-tasks v1           header; anything before it is ignored
 //	::now <unix seconds>         the host's own clock
 //	::section state              ~/.claude/sessions/*.json, each after "::file <name>"
-//	::section ps                 "<pid> <ppid> <command>"
+//	::section ps                 "<pid> <ppid> <command>", this user's processes only
 //	::section tmux               "<pane pid> <tmux session name>"
-//	::section cwd                "<pid> <cwd>" for every codex process
+//	::section cwd                "<pid> <cwd>" for this user's processes that may be claude or codex
 //	::section transcripts        "<mtime>\t<file name>\t<first "cwd":"..." in it>"
 //	::end                        the output is complete
 //
@@ -44,12 +44,13 @@ for f in "$HOME"/.claude/sessions/*.json; do
 	cat "$f" 2>/dev/null
 	echo
 done
+uid=$(id -u)
 echo '::section ps'
-ps -Ao pid=,ppid=,command= 2>/dev/null
+ps -U "$uid" -o pid=,ppid=,command= 2>/dev/null
 echo '::section tmux'
 tmux list-panes -a -F '#{pane_pid} #{session_name}' 2>/dev/null
 echo '::section cwd'
-ps -Ao pid=,command= 2>/dev/null | awk '{ n = $2; sub(/.*\//, "", n); if (n == "codex") print $1 }' |
+ps -U "$uid" -o pid=,command= 2>/dev/null | awk '($2 " " $3) ~ /claude|codex/ { print $1 }' |
 while read -r pid; do
 	c=$(readlink "/proc/$pid/cwd" 2>/dev/null ||
 		lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | awk '/^n/ { print substr($0, 2); exit }')

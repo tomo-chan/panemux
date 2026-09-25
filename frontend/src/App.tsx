@@ -287,8 +287,12 @@ export const App: React.FC = () => {
   // Agent Board UI section. Registered on the capture phase so it reaches
   // this handler even when a terminal pane (which owns its own keydown
   // handling) currently has focus.
+  //
+  // Neither this nor the board's shortcut below opens anything while the task
+  // dashboard is shown: both overlays live in the workspace layer, which is
+  // inert then, so they would be drawn over the dashboard and take no input.
   useEffect(() => {
-    if (!commandCenterEnabled) return
+    if (!commandCenterEnabled || layer === 'tasks') return
     const handleKeyDown = (event: KeyboardEvent) => {
       const modifier = event.metaKey || event.ctrlKey
       if (modifier && event.shiftKey && event.key.toLowerCase() === 'k') {
@@ -298,14 +302,14 @@ export const App: React.FC = () => {
     }
     window.addEventListener('keydown', handleKeyDown, true)
     return () => window.removeEventListener('keydown', handleKeyDown, true)
-  }, [commandCenterEnabled])
+  }, [commandCenterEnabled, layer])
 
   // Global agent board dashboard shortcut: Cmd/Ctrl+Shift+B, on the capture
   // phase for the same reason as the command palette's own Cmd/Ctrl+Shift+K
   // above — it must reach this handler even when a terminal pane currently
   // has focus. See docs/ui-design.md's Agent Board UI section.
   useEffect(() => {
-    if (!boardDashboardAvailable) return
+    if (!boardDashboardAvailable || layer === 'tasks') return
     const handleKeyDown = (event: KeyboardEvent) => {
       const modifier = event.metaKey || event.ctrlKey
       if (modifier && event.shiftKey && event.key.toLowerCase() === 'b') {
@@ -315,7 +319,16 @@ export const App: React.FC = () => {
     }
     window.addEventListener('keydown', handleKeyDown, true)
     return () => window.removeEventListener('keydown', handleKeyDown, true)
-  }, [boardDashboardAvailable])
+  }, [boardDashboardAvailable, layer])
+
+  // The same reason from the other side: an overlay already open when the
+  // dashboard appears is closed rather than left stranded above it.
+  useEffect(() => {
+    if (layer !== 'tasks') return
+    setIsCommandPaletteOpen(false)
+    setIsCommandHistoryOpen(false)
+    setIsBoardDashboardOpen(false)
+  }, [layer])
 
   // Layer switch: Cmd/Ctrl+Shift+<display.task_dashboard_shortcut>, on the
   // capture phase like the palette's and the board's shortcuts above, so it
@@ -372,6 +385,11 @@ export const App: React.FC = () => {
   // Opening a task from the dashboard: go to the pane already attached to
   // its tmux session, or create one in the active workspace that attaches to
   // it (`tmux new-session -A` attaches to the running session).
+  // The tmux sessions a pane is being created for. Until createPane resolves
+  // and the workspaces carry the new pane, the task still reads as having
+  // none, so a second Open would create a second pane attached to it.
+  const openingTaskSessionsRef = React.useRef(new Set<string>())
+
   const handleOpenTask = useCallback((task: Task, action: TaskOpenAction) => {
     if (action.kind === 'unavailable') return
     if (action.kind === 'goto') {
@@ -383,8 +401,11 @@ export const App: React.FC = () => {
 
     const pane = paneConfigForTask(task, generatePaneId())
     if (!pane) return
-    setCreatePaneError(null)
+    const sessionKey = `${task.host}\u0000${pane.tmux_session}`
     setLayer('workspaces')
+    if (openingTaskSessionsRef.current.has(sessionKey)) return
+    openingTaskSessionsRef.current.add(sessionKey)
+    setCreatePaneError(null)
     void createPane(pane, { type: 'workspace-edge', edge: 'right' })
       .then(() => {
         setActivePaneId(pane.id)
@@ -393,6 +414,9 @@ export const App: React.FC = () => {
       })
       .catch((err) => {
         setCreatePaneError(err instanceof Error ? err.message : 'Something went wrong')
+      })
+      .finally(() => {
+        openingTaskSessionsRef.current.delete(sessionKey)
       })
   }, [createPane, handleSelectWorkspacePaneSummary])
 
@@ -537,9 +561,9 @@ export const App: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setLayer('tasks')}
-                  aria-label={tasksWaiting > 0 ? `Tasks, ${tasksWaiting} waiting for input` : 'Tasks'}
+                  aria-label={tasksWaiting > 0 ? `Tasks, ${tasksWaiting} waiting for input when last checked` : 'Tasks'}
                   title={`Task dashboard (${taskShortcut.label})`}
-                aria-keyshortcuts={taskShortcut.aria}
+                  aria-keyshortcuts={taskShortcut.aria}
                   style={tasksButtonStyle}
                 >
                   ← Tasks
@@ -744,7 +768,7 @@ export const App: React.FC = () => {
             workspaces={workspaces?.items ?? []}
             onOpenTask={handleOpenTask}
             onShowWorkspaces={() => setLayer('workspaces')}
-          shortcut={taskShortcut}
+            shortcut={taskShortcut}
           />
         )}
       </div>

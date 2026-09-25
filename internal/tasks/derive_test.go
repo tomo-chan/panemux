@@ -103,8 +103,11 @@ func TestBuildTasks_StateFileNeedsALiveClaudeProcess(t *testing.T) {
 		"claude binary under versions": {
 			[]process{{PID: 121, Command: "/workspace/user/.local/share/claude/versions/2.1.282"}}, true,
 		},
-		"pid gone":                        {[]process{claudeProc(999, 1)}, false},
+		"pid gone":                        {[]process{{PID: 999, PPID: 1, Command: "bash"}}, false},
 		"pid reused by unrelated process": {[]process{{PID: 121, Command: "/usr/sbin/sshd -D"}}, false},
+		"pid reused by a process reading a file under ~/.claude": {
+			[]process{{PID: 121, Command: "less /workspace/user/.claude/projects/x/sess-a.jsonl"}}, false,
+		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -124,6 +127,9 @@ func TestBuildTasks_StateFileNeedsALiveClaudeProcess(t *testing.T) {
 	}
 }
 
+// A state file the dashboard cannot read is still evidence of a running
+// agent when the pid in its name is a live claude process: it is shown as
+// unknown, located like any running task, rather than dropped.
 func TestBuildTasks_UnreadableStateFileIsKeptAsUnknown(t *testing.T) {
 	cases := map[string][]byte{
 		"not json":           []byte("{"),
@@ -134,9 +140,11 @@ func TestBuildTasks_UnreadableStateFileIsKeptAsUnknown(t *testing.T) {
 	for name, data := range cases {
 		t.Run(name, func(t *testing.T) {
 			raw := rawSnapshot{
-				Now:        hostNow,
-				StateFiles: []stateFile{{Name: "5.json", Data: data}},
-				Processes:  []process{claudeProc(5, 1)},
+				Now:         hostNow,
+				StateFiles:  []stateFile{{Name: "5.json", Data: data}},
+				Processes:   []process{claudeProc(5, 4), {PID: 4, PPID: 1, Command: "bash"}},
+				TmuxPanes:   []tmuxPane{{PanePID: 4, Session: "work"}},
+				ProcessCWDs: map[int]string{5: "/workspace/user/project"},
 			}
 			tasks := buildTasks("build-box", raw, collectedAt)
 			require.Len(t, tasks, 1)
@@ -145,8 +153,98 @@ func TestBuildTasks_UnreadableStateFileIsKeptAsUnknown(t *testing.T) {
 			assert.Equal(t, "ssh:build-box:claude:state-file:5.json", task.ID)
 			assert.Equal(t, "build-box", task.Host)
 			assert.Empty(t, task.SessionID)
-			assert.Equal(t, LocationNone, task.Location.Kind)
+			assert.Equal(t, 5, task.PID)
+			assert.Equal(t, "/workspace/user/project", task.CWD)
+			assert.Equal(t, Location{Kind: LocationTmux, TmuxSession: "work", Attachable: true}, task.Location)
 		})
+	}
+}
+
+func TestBuildTasks_UnreadableStateFileWithoutALiveProcess(t *testing.T) {
+	t.Run("a dead pid in its name is a leftover and is dropped", func(t *testing.T) {
+		raw := rawSnapshot{Now: hostNow, StateFiles: []stateFile{{Name: "5.json", Data: []byte("{")}}}
+		assert.Empty(t, buildTasks("", raw, collectedAt))
+	})
+	t.Run("a name with no pid cannot be checked and is kept", func(t *testing.T) {
+		raw := rawSnapshot{Now: hostNow, StateFiles: []stateFile{{Name: "odd.json", Data: []byte("{")}}}
+		tasks := buildTasks("", raw, collectedAt)
+		require.Len(t, tasks, 1)
+		assert.Equal(t, "local:claude:state-file:odd.json", tasks[0].ID)
+		assert.Equal(t, LocationNone, tasks[0].Location.Kind)
+		assert.Zero(t, tasks[0].PID)
+	})
+}
+
+// A running claude process that no state file describes — the files moved
+// or stopped being written — is shown as running with an unknown state, not
+// as stopped, and the conversation log it is most likely writing (the
+// newest one in its directory) is not listed as a second, stopped card.
+func TestBuildTasks_ClaudeProcessWithoutAStateFileIsUnknownNotStopped(t *testing.T) {
+	raw := rawSnapshot{
+		Now: hostNow,
+		Processes: []process{
+			{PID: 6, PPID: 1, Command: "bash"},
+			claudeProc(7, 6),
+			{PID: 8, PPID: 6, Command: "claude -p summarize"},
+		},
+		TmuxPanes:   []tmuxPane{{PanePID: 6, Session: "work"}},
+		ProcessCWDs: map[int]string{7: "/workspace/user/project", 8: "/workspace/user/project"},
+		Transcripts: []transcript{
+			{ModTime: hostNow - 10, SessionID: "current", CWD: "/workspace/user/project"},
+			{ModTime: hostNow - 3600, SessionID: "earlier", CWD: "/workspace/user/project"},
+			{ModTime: hostNow - 20, SessionID: "elsewhere", CWD: "/workspace/user/other"},
+		},
+	}
+	tasks := buildTasks("", raw, collectedAt)
+
+	ids := []string{}
+	for _, task := range tasks {
+		ids = append(ids, task.ID+"="+string(task.State))
+	}
+	assert.Equal(t, []string{
+		"local:claude:pid-7=unknown",
+		"local:claude:elsewhere=stop",
+		"local:claude:earlier=stop",
+	}, ids, "claude -p is headless and not a task; the newest log in pid 7's directory is its own")
+
+	orphan := findTask(t, tasks, "local:claude:pid-7")
+	assert.Equal(t, 7, orphan.PID)
+	assert.Equal(t, "/workspace/user/project", orphan.CWD)
+	assert.Equal(t, Location{Kind: LocationTmux, TmuxSession: "work", Attachable: true}, orphan.Location)
+}
+
+// The review's second case: a session whose state file is corrupt is one
+// card, not an unknown card plus a stopped one.
+func TestBuildTasks_UnreadableStateFileClaimsItsNewestLog(t *testing.T) {
+	raw := rawSnapshot{
+		Now:         hostNow,
+		StateFiles:  []stateFile{{Name: "7.json", Data: []byte("{")}},
+		Processes:   []process{claudeProc(7, 1)},
+		ProcessCWDs: map[int]string{7: "/workspace/user/project"},
+		Transcripts: []transcript{{ModTime: hostNow - 10, SessionID: "abc", CWD: "/workspace/user/project"}},
+	}
+	tasks := buildTasks("", raw, collectedAt)
+	require.Len(t, tasks, 1)
+	assert.Equal(t, "local:claude:state-file:7.json", tasks[0].ID)
+}
+
+func TestIsClaudeProcess(t *testing.T) {
+	cases := map[string]bool{
+		"claude":                          true,
+		"claude --resume abc":             true,
+		"/usr/local/bin/claude --verbose": true,
+		"/workspace/user/.local/share/claude/versions/2.1.282":        true,
+		"node /usr/lib/node_modules/@anthropic-ai/claude-code/cli.js": true,
+		"/usr/bin/bun /opt/claude-code/cli.js":                        true,
+		"less /workspace/user/.claude/projects/x/abc.jsonl":           false,
+		"tail -f /workspace/user/.claude/sessions/7.json":             false,
+		"vim claude":                         false,
+		"/usr/bin/claude-notes":              false,
+		"node /workspace/user/app/server.js": false,
+		"":                                   false,
+	}
+	for command, want := range cases {
+		assert.Equal(t, want, isClaudeProcess(command), command)
 	}
 }
 
@@ -304,6 +402,37 @@ func TestBuildTasks_LocationWalksAtMostMaxParentWalkProcesses(t *testing.T) {
 	beyond := buildTasks("", chain(maxParentWalk), collectedAt)
 	require.Len(t, beyond, 1)
 	assert.Equal(t, LocationOutside, beyond[0].Location.Kind)
+}
+
+// Checked against `codex --help` of codex-cli 0.157.0: with no subcommand the
+// arguments start the interactive TUI (a prompt included), `resume` and
+// `fork` reopen an interactive session, and every other subcommand is not
+// interactive. Options that take a value are skipped with their value.
+func TestIsInteractiveCodex(t *testing.T) {
+	cases := map[string]bool{
+		"codex":                               true,
+		"/usr/local/bin/codex --model gpt-5":  true,
+		"codex please exec the migration":     true,
+		"codex resume --last":                 true,
+		"codex fork":                          true,
+		"codex -m o3 exec":                    false,
+		"codex -c model=o3 app-server":        false,
+		"codex --config=model=o3 exec":        false,
+		"codex -C /workspace/user/api resume": true,
+		"codex --search review":               false,
+		"codex -- exec":                       true,
+		"codex exec do-something":             false,
+		"codex e do-something":                false,
+		"/usr/local/bin/codex app-server":     false,
+		"codex mcp-server":                    false,
+		"codex mcp list":                      false,
+		"codex login":                         false,
+		"vim codex":                           false,
+		"node /usr/lib/node_modules/@openai/codex/bin/codex.js": false,
+	}
+	for command, want := range cases {
+		assert.Equal(t, want, isInteractiveCodex(command), command)
+	}
 }
 
 func TestBuildTasks_CodexProcessesAreRunningTasks(t *testing.T) {

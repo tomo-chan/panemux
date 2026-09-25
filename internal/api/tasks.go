@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"sort"
 	"sync"
 	"time"
@@ -106,6 +107,9 @@ func (h *Handler) Close() {
 // the dashboard polls it only while it is on screen — and reports a host
 // that failed in that host's entry rather than failing the request.
 func (h *Handler) GetTasks(w http.ResponseWriter, r *http.Request) {
+	if refuseCrossSite(w, r) {
+		return
+	}
 	snapshot := h.tasks.Collect(r.Context())
 
 	collected := make(map[string]bool, len(snapshot.Hosts))
@@ -118,7 +122,7 @@ func (h *Handler) GetTasks(w http.ResponseWriter, r *http.Request) {
 
 	resp := tasksResponse{Hosts: snapshot.Hosts, Tasks: make([]taskResponse, 0, len(snapshot.Tasks))}
 	for _, task := range snapshot.Tasks {
-		resp.Tasks = append(resp.Tasks, taskResponse{Task: task, Git: git[taskGitKey(task.Host, task.CWD)]})
+		resp.Tasks = append(resp.Tasks, taskResponse{Task: task, Git: taskGitFor(task, git[taskGitKey(task.Host, task.CWD)])})
 	}
 	writeJSON(w, resp)
 }
@@ -128,11 +132,62 @@ func (h *Handler) GetTasks(w http.ResponseWriter, r *http.Request) {
 // without waiting out the retry delay. The only way it fails is a name that
 // is not an ssh_connections key (tasks.ErrUnknownHost).
 func (h *Handler) PostTaskHostReconnect(w http.ResponseWriter, r *http.Request) {
+	if refuseCrossSite(w, r) {
+		return
+	}
 	if err := h.tasks.Reconnect(chi.URLParam(r, "name")); err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// taskGitFor is a task's share of its directory's git metadata. The metadata
+// is read from the directory as it is now, which for a running task is the
+// branch it is working on. For a stopped one it is whatever was checked out
+// since, so only the repository — which a directory keeps — is reported.
+func taskGitFor(task tasks.Task, info *taskGitInfo) *taskGitInfo {
+	if info == nil || task.State != tasks.StateStop {
+		return info
+	}
+	if info.Repo == "" && info.RepoURL == "" {
+		return nil
+	}
+	return &taskGitInfo{Repo: info.Repo, RepoURL: info.RepoURL}
+}
+
+// refuseCrossSite answers 403 to a request another site's page made. The
+// task routes are unauthenticated like the rest of /api/*, but unlike the
+// others GET /api/tasks has a heavy side effect — every host is dialed and
+// runs the collection script, and `gh pr view` runs per directory — which an
+// <img> on any page the operator has open could otherwise trigger. See
+// docs/security/command-execution.md, "Task dashboard collection".
+func refuseCrossSite(w http.ResponseWriter, r *http.Request) bool {
+	if isCrossSiteRequest(r) {
+		http.Error(w, "cross-site request refused", http.StatusForbidden)
+		return true
+	}
+	return false
+}
+
+// isCrossSiteRequest uses what a browser adds to every request it makes on a
+// page's behalf: Sec-Fetch-Site (sent on every request by current browsers,
+// images included) and Origin (sent on cross-origin requests and on POST).
+// A request carrying neither is not from a browser page and is allowed.
+func isCrossSiteRequest(r *http.Request) bool {
+	switch r.Header.Get("Sec-Fetch-Site") {
+	case "cross-site", "same-site":
+		return true
+	}
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return false
+	}
+	u, err := url.Parse(origin)
+	if err != nil || u.Host == "" {
+		return true
+	}
+	return u.Host != r.Host && !isLoopbackAuthority(u.Host)
 }
 
 func taskGitKey(host, cwd string) string {
@@ -216,7 +271,7 @@ func (h *Handler) lookupTaskGit(ctx context.Context, host, cwd string) *taskGitI
 		return nil
 	}
 
-	prURL, prNumber := h.lookupPR(host != "", cwd, gitCtx)
+	prURL, prNumber := h.lookupPR(ctx, host != "", cwd, gitCtx)
 	return &taskGitInfo{
 		Repo:     gitCtx.Repo,
 		RepoURL:  h.repoPageURLFromOriginURL(gitCtx.OriginURL),

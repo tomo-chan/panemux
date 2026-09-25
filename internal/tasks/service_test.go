@@ -5,7 +5,9 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"sync"
 	"testing"
@@ -43,15 +45,24 @@ func (e exitStatusError) ExitStatus() int { return e.status }
 type fakeConn struct {
 	runErr  error
 	gitErr  error
+	pingErr error
 	output  []byte
 	cmds    []string
 	stdins  []string
 	gitCWDs []string
 	closed  int
+	pings   int
 	mu      sync.Mutex
+	// hang makes Run block until its context ends, like a script that
+	// outlasts the collection's time budget on a healthy connection.
+	hang bool
 }
 
-func (c *fakeConn) Run(_ context.Context, cmd string, stdin io.Reader) ([]byte, error) {
+func (c *fakeConn) Run(ctx context.Context, cmd string, stdin io.Reader) ([]byte, error) {
+	if c.hang {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.cmds = append(c.cmds, cmd)
@@ -67,6 +78,19 @@ func (c *fakeConn) InspectGitContext(_ context.Context, cwd string) (session.Git
 	defer c.mu.Unlock()
 	c.gitCWDs = append(c.gitCWDs, cwd)
 	return session.GitContext{Branch: "main", Root: cwd}, c.gitErr
+}
+
+func (c *fakeConn) Ping(context.Context) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.pings++
+	return c.pingErr
+}
+
+func (c *fakeConn) pingCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.pings
 }
 
 func (c *fakeConn) Close() error {
@@ -232,6 +256,49 @@ func TestCollect_ATransportFailureDropsTheConnectionAndRedialsAtOnce(t *testing.
 
 	second := svc.Collect(context.Background())
 	assert.Equal(t, HostOK, hostResult(t, second, "build-box").Status)
+	assert.Equal(t, 2, dialer.callCount())
+}
+
+// A script that outlasts the time budget on a connection that still answers
+// keeps the connection: dropping it would redial every collection and never
+// produce a result.
+func TestCollect_ATimedOutScriptOnAHealthyConnectionKeepsIt(t *testing.T) {
+	conn := &fakeConn{hang: true}
+	dialer := &fakeDialer{conns: []*fakeConn{conn}}
+	svc := New(Options{
+		Hosts:       func() []string { return []string{"slow"} },
+		Dial:        dialer.dial,
+		RunLocal:    localOutput(minimalOutput("l"), nil),
+		HostTimeout: 30 * time.Millisecond,
+	})
+	defer svc.Close()
+
+	first := hostResult(t, svc.Collect(context.Background()), "slow")
+	assert.Equal(t, HostError, first.Status)
+	assert.Equal(t, "task collection on slow did not finish within 30ms", first.Error)
+	svc.Collect(context.Background())
+
+	assert.Equal(t, 1, dialer.callCount())
+	assert.Zero(t, conn.closeCount())
+	assert.Equal(t, 2, conn.pingCount())
+}
+
+func TestCollect_ATimedOutScriptOnADeadConnectionDropsIt(t *testing.T) {
+	dead := &fakeConn{hang: true, pingErr: errors.New("EOF")}
+	fresh := &fakeConn{output: minimalOutput("s")}
+	dialer := &fakeDialer{conns: []*fakeConn{dead, fresh}}
+	svc := New(Options{
+		Hosts:       func() []string { return []string{"slow"} },
+		Dial:        dialer.dial,
+		RunLocal:    localOutput(minimalOutput("l"), nil),
+		HostTimeout: 30 * time.Millisecond,
+	})
+	defer svc.Close()
+
+	first := hostResult(t, svc.Collect(context.Background()), "slow")
+	assert.Equal(t, HostError, first.Status)
+	assert.Equal(t, 1, dead.closeCount())
+	assert.Equal(t, HostOK, hostResult(t, svc.Collect(context.Background()), "slow").Status)
 	assert.Equal(t, 2, dialer.callCount())
 }
 
@@ -518,6 +585,42 @@ func TestRunLocal_CollectScriptRunsUnderShAndParses(t *testing.T) {
 	assert.Equal(t, "/workspace/user/project", byID["stopped-one"].CWD, "the first cwd in the log")
 	assert.Empty(t, byID["no-cwd"].CWD)
 	assert.InDelta(t, time.Now().Unix(), byID["stopped-one"].ModTime, 60)
+}
+
+// The cwd probe reports a claude process's working directory, and ps lists
+// this user's own processes. `claude` here is a symlink to sleep.
+func TestRunLocal_ReportsTheWorkingDirectoryOfAClaudeProcess(t *testing.T) {
+	homedir.SetForTest(t, t.TempDir())
+	sleepPath, err := exec.LookPath("sleep")
+	require.NoError(t, err)
+	binDir := t.TempDir()
+	fake := filepath.Join(binDir, "claude")
+	require.NoError(t, os.Symlink(sleepPath, fake))
+	workDir := t.TempDir()
+
+	cmd := exec.Command(fake, "30")
+	cmd.Dir = workDir
+	require.NoError(t, cmd.Start())
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	})
+
+	out, err := runLocal(context.Background(), collectScript)
+	require.NoError(t, err)
+	raw, err := parseCollectOutput(out)
+	require.NoError(t, err)
+
+	var listed bool
+	for _, p := range raw.Processes {
+		listed = listed || p.PID == cmd.Process.Pid
+	}
+	assert.True(t, listed, "ps lists the fake claude process")
+	if runtime.GOOS == "linux" {
+		resolved, err := filepath.EvalSymlinks(workDir)
+		require.NoError(t, err)
+		assert.Equal(t, resolved, raw.ProcessCWDs[cmd.Process.Pid])
+	}
 }
 
 func TestRunLocal_EmptyHomeStillCompletes(t *testing.T) {

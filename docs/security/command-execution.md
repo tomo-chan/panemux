@@ -145,6 +145,17 @@ config, or a remote host into a command string:
   `cmd.Dir` after `sanitizeGitExecDir`, and `gh` receives the branch and repository as discrete
   argv elements.
 
+The script lists only the collecting user's processes (`ps -U "$(id -u)"`). On a shared host,
+another user's processes are neither shown as tasks nor accepted as the live process behind a
+leftover state file whose pid they reused.
+
+`GET /api/tasks` and the reconnect route are unauthenticated like the rest of `/api/*`, but a GET
+that dials every host is a side effect another site could trigger with an `<img>`. Both routes
+therefore refuse a request whose `Sec-Fetch-Site` is `cross-site` or `same-site`, or whose `Origin`
+is neither the server's own nor a loopback origin (`refuseCrossSite` in `internal/api/tasks.go`).
+The response itself is never readable cross-site — no CORS header is sent — so this protects the
+side effect, not the data.
+
 Everything a host prints back is untrusted input. The parser (`parseCollectOutput`) accepts only its
 own line protocol, skips malformed rows, accepts a session ID only if it matches
 `^[a-zA-Z0-9_-]+$`, and treats a tmux session name as display text: the dashboard offers to attach a

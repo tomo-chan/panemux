@@ -66,6 +66,30 @@ func (c *CommandConn) Run(ctx context.Context, cmd string, stdin io.Reader) ([]b
 	return out, nil
 }
 
+// Ping reports whether the connection still answers: it sends an OpenSSH
+// keepalive request and waits for any reply. A server that does not know the
+// request still replies (with a refusal), so only a dead or stalled
+// connection makes Ping fail.
+func (c *CommandConn) Ping(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	replied := make(chan error, 1)
+	go func() {
+		_, _, err := c.client.SendRequest("keepalive@openssh.com", true, nil)
+		replied <- err
+	}()
+	select {
+	case err := <-replied:
+		if err != nil {
+			return fmt.Errorf("ssh keepalive: %w", err)
+		}
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 // InspectGitContext resolves Git metadata for cwd on the remote host, with
 // the same command and the same cwd validation an ssh pane's header uses.
 func (c *CommandConn) InspectGitContext(ctx context.Context, cwd string) (GitContext, error) {

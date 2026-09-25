@@ -15,8 +15,11 @@ The UI is described in [UI design's Task Dashboard](../ui-design.md#task-dashboa
 A task is one agent session:
 
 - **claude**: one Claude Code session, identified by its session ID.
-- **codex**: one running `codex` process (not `codex exec`), identified by its pid. Codex's own
-  session files are not read, and a codex process that has exited is not listed.
+- **codex**: one running interactive `codex` process, identified by its pid. Codex's own session
+  files are not read, and a codex process that has exited is not listed. A process is interactive
+  when its first positional argument is absent, a prompt, `resume` or `fork`; every other codex-cli
+  subcommand (`exec`, `review`, `app-server`, `mcp`, `login` and the rest listed by
+  `codex --help` of codex-cli 0.157.0) is not a task. Options that take a value are skipped with it.
 
 A task carries its host, agent, session ID, working directory, state, the time it entered that
 state, the reason it is waiting, its start time, its pid, where it runs, and the repository, branch
@@ -35,6 +38,9 @@ and pull request of its working directory.
   the host reports the failure meanwhile. `POST /api/tasks/hosts/{name}/reconnect` skips the wait.
 - A host whose connection is still being set up after 15 seconds reports `connecting`; the dial
   continues and serves a later collection.
+- A collection that is still running after 15 seconds reports an error for that host. Its
+  connection is kept when it still answers an SSH keepalive (within 5 seconds) and dropped
+  otherwise, so a slow host is not redialed every collection.
 - A host removed from `ssh_connections` has its connection closed on the next collection. Every
   connection is closed when panemux shuts down.
 - One host failing never hides another host's tasks.
@@ -52,9 +58,9 @@ reads only what the agents write themselves and what the host reports about its 
 |---|---|
 | `~/.claude/sessions/*.json` | Running Claude Code sessions: `pid`, `sessionId`, `cwd`, `status`, `waitingFor`, `statusUpdatedAt`, `updatedAt`, `startedAt` |
 | `~/.claude/projects/*/*.jsonl` changed in the last 7 days (newest 100) | Stopped sessions, and the first `"cwd"` recorded in each |
-| `ps -Ao pid=,ppid=,command=` | Whether a state file's process is alive, codex processes, and parent chains |
+| `ps -U <own uid> -o pid=,ppid=,command=` | Whether a state file's process is alive, running agents, and parent chains — the collecting user's processes only |
 | `tmux list-panes -a -F '#{pane_pid} #{session_name}'` | Which tmux session an agent runs in |
-| The working directory of each codex process | A codex task's directory |
+| The working directory of each process that may be claude or codex | A running task's directory when no state file gives one |
 
 Any probe that is missing on a host (no tmux, no `~/.claude`, BSD `stat`) prints nothing rather than
 failing the collection. Text a login shell prints before the script's output is ignored. Output that
@@ -68,13 +74,24 @@ ends before its terminating marker — a connection dropped mid-run — fails th
 | `busy` | Running and working | Live claude process, `status: "busy"` |
 | `idle` | Running and waiting for the next instruction | Live claude process, `status: "idle"` |
 | `run` | A codex process is running; no finer state is known | Live `codex` process |
-| `unknown` | Evidence of a session that cannot be interpreted | A state file that is not JSON or lacks a pid or a valid session ID, or a live claude process reporting another `status` |
+| `unknown` | A claude session is running but its state cannot be read | A live claude process that no state file describes; a state file that is not JSON or lacks a pid or a valid session ID; or a live claude process reporting another `status` |
 | `stop` | Nothing is handling the session | A conversation log with no live claude process for its session ID |
 
-- **A state file describes a running session only while its pid is alive and that process's
-  command line contains `claude`.** A file whose process has gone, or whose pid now belongs to an
-  unrelated process (pids restart after a host reboot), is not listed as running; its session shows
-  up as stopped through its conversation log instead. `procStart` is not used.
+- **A process is a claude process when its program has a path component named `claude` or
+  `claude-code`**: argv[0], or the script a `node`, `bun` or `deno` interpreter runs. A process that
+  only has a file under `~/.claude` as an argument (an editor, `tail`, a hook) is not one.
+  `claude -p` / `claude --print` is not a task.
+- **A state file describes a running session only while its pid is a claude process.** A file whose
+  process has gone, or whose pid now belongs to another process (pids restart after a host
+  reboot), is not listed as running; its session shows up as stopped through its conversation log
+  instead. `procStart` is not used.
+- A state file that cannot be read is shown as `unknown` while the pid in its name (`<pid>.json`)
+  is a claude process, dropped when that pid is not, and kept when the name carries no pid.
+- **A running claude process that no state file names is shown as `unknown`, not `stop`**, with its
+  process's working directory, so a Claude Code release that moved or stopped writing the state
+  files does not make every running agent look stopped.
+- A running `unknown` claude task is taken to be writing the newest conversation log in its working
+  directory: that log is not listed again as a stopped task.
 - Two live state files for one session ID keep the one updated most recently.
 - `stop` covers a host restart, a crash and a normal exit alike; the dashboard does not tell them
   apart. Whether a task's work is finished cannot be read off a process, so there is no "done" state.
@@ -106,7 +123,12 @@ The git metadata of each task's working directory is resolved the way a pane hea
 the task's host (locally, or over the host's dashboard connection) and `gh pr view` on the panemux
 host, with a remote repository named from its origin URL. A lookup runs once per (host, directory),
 is cached for 30 seconds, and is skipped for a host whose collection failed. A directory that is not
-a repository, or cannot be inspected, has no `git` field.
+a repository, or cannot be inspected, has no `git` field. `gh` runs under the request's context, so
+an abandoned request stops it.
+
+The metadata is the directory's **current** state. For a running task that is the branch it is
+working on; for a stopped task it is whatever has been checked out since, so a stopped task reports
+only `repo` and `repo_url`, never `branch` or a pull request.
 
 ### Opening a task
 
@@ -118,7 +140,8 @@ a repository, or cannot be inspected, has no `git` field.
 | Outside tmux | Not opened; the reason is shown |
 | Stopped or unknown | Not opened |
 
-Either way the dashboard closes and the pane is briefly outlined.
+Either way the dashboard closes and the pane is briefly outlined. Opening the same tmux session again
+while its pane is still being created does not create a second pane.
 
 The dashboard and the workspaces are switched with the `← Tasks` and `Workspaces` buttons or with
 `Cmd/Ctrl+Shift+<display.task_dashboard_shortcut>` (`S` unless configured), from either layer.
@@ -157,16 +180,19 @@ Collects from every host and returns:
 - `tasks` lists each host's running tasks in `id` order, then its stopped tasks newest first. It is
   `[]` when there are none.
 - `id` is `local:<agent>:<key>` for the panemux host and `ssh:<host>:<agent>:<key>` for an SSH host,
-  where the key is the session ID, `pid-<pid>` for codex, or `state-file:<file name>` for a state
-  file that could not be read.
+  where the key is the session ID, `pid-<pid>` for codex and for a claude process no state file
+  names, or `state-file:<file name>` for a state file that could not be read.
 - `session_id`, `cwd`, `waiting_for`, `status_since`, `started_at`, `pid` and `git` are omitted when
   unknown. `waiting_for` is present only in the `wait` state.
 - The request answers `200` even when every host failed; failures are in `hosts`.
 - Like every other route outside `/api/board/*`, it is not authenticated
-  ([Current boundaries](../overview.md#current-boundaries)).
+  ([Current boundaries](../overview.md#current-boundaries)). Because it dials every host, it
+  answers `403` to a request another site's page made: `Sec-Fetch-Site` of `cross-site` or
+  `same-site`, or an `Origin` that is neither the server's own nor a loopback origin. A request with
+  neither header (not from a browser page) is served.
 
 ### `POST /api/tasks/hosts/{name}/reconnect`
 
 Drops the named host's dashboard connection and any remembered connection failure, so the next
-`GET /api/tasks` dials it at once. `name` is an `ssh_connections` key. Returns `204`, or `404` for a
-name that is not one.
+`GET /api/tasks` dials it at once. `name` is an `ssh_connections` key. Returns `204`, `404` for a
+name that is not one, or `403` for a cross-site request as above.

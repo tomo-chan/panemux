@@ -85,13 +85,34 @@ while being built:
   file stays on the board as `unknown` instead of disappearing, and only the first `"cwd"` of a log
   is read. Codex has no equivalent that has been checked, so codex tasks are running processes and
   nothing more (issue #252, open question 5).
-- **Liveness is "the pid is alive and its command line contains `claude`", and `procStart` is not
-  used.** A state file's pid alone is not enough, because pids restart after a host reboot. Claude
+- **Liveness is "the pid is alive and its program is claude", and `procStart` is not used.** A
+  state file's pid alone is not enough, because pids restart after a host reboot. Claude
   Code 2.1.282's `procStart` matched field 22 of `/proc/<pid>/stat` (clock ticks since boot) for the
   one process checked on Linux, while the observation recorded in the issue did not match (425
-  against 419), so how it is computed is still unknown and nothing relies on it. The substring rather
-  than argv[0]'s base name is because how Claude Code shows in `ps` depends on how it was installed —
-  a native binary under `…/claude/versions/<version>`, or `node` running the npm package.
+  against 419), so how it is computed is still unknown and nothing relies on it. "Its program" is a
+  path component named `claude` or `claude-code` in argv[0], or in the script `node`/`bun`/`deno`
+  runs, because how Claude Code shows in `ps` depends on how it was installed — a native binary
+  under `…/claude/versions/<version>`, or `node` running the npm package. The first version matched
+  `claude` anywhere in the command line; review found that an editor or `tail` with a file under
+  `~/.claude` as its argument then passed for a waiting agent.
+- **A running claude process with no state file is `unknown`, not `stop`** (review of PR #253).
+  Building running tasks only from state files meant a Claude Code release that moved those files
+  would have shown every running agent as stopped. Such a process is taken to be writing the newest
+  log in its directory, so that session is not listed twice.
+- **Codex's interactive sessions are recognized by subcommand**, from `codex --help` of codex-cli
+  0.157.0: no subcommand (a prompt), `resume` and `fork` are interactive, every other subcommand is
+  not. The first version excluded any process with an `exec` token anywhere, which hid a prompt
+  containing the word and listed `codex app-server`.
+- **Only the collecting user's processes are listed** (`ps -U`), so on a shared host another
+  user's agents are not shown as one's own tasks.
+- **A slow collection keeps its connection** while the connection answers an SSH keepalive. The
+  first version dropped the connection on any timeout, so a host whose collection took longer than
+  15 seconds was redialed every 10 seconds and never showed a result.
+- **The task routes refuse cross-site requests.** They stay unauthenticated like the rest of
+  `/api/*`, but `GET /api/tasks` is the first GET with a heavy side effect — dialing every host — so
+  a page on another site must not be able to trigger it with an `<img>`.
+- **A stopped task reports its repository but not its branch or PR**: git metadata is read from the
+  directory as it is now, which says nothing about the branch a stopped session worked on.
 - **Not verified on a real machine yet:** whether `/resume` rewrites the running process's state
   file to the new session ID, and whether a state file outlives its process. Neither changes what is
   built: a leftover file is filtered out by liveness either way. If `/resume` turns out not to

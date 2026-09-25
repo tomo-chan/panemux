@@ -35,6 +35,8 @@ type Conn interface {
 	// no longer be trusted.
 	Run(ctx context.Context, cmd string, stdin io.Reader) ([]byte, error)
 	InspectGitContext(ctx context.Context, cwd string) (session.GitContext, error)
+	// Ping reports whether the connection still answers.
+	Ping(ctx context.Context) error
 	Close() error
 }
 
@@ -86,6 +88,9 @@ type Options struct {
 const (
 	defaultHostTimeout = 15 * time.Second
 	defaultRetryAfter  = time.Minute
+	// pingTimeout bounds the keepalive that decides whether a connection
+	// whose collection ran out of time is still worth keeping.
+	pingTimeout = 5 * time.Second
 )
 
 // errConnecting reports a host whose connection is still being set up.
@@ -222,13 +227,26 @@ func (s *Service) runScript(ctx context.Context, name string) ([]byte, error) {
 		return nil, err
 	}
 	out, err := conn.Run(ctx, "sh -s", strings.NewReader(collectScript))
-	if err != nil {
-		if !isExitError(err) {
+	switch {
+	case err == nil:
+		return out, nil
+	case isExitError(err):
+		return nil, fmt.Errorf("run task collection on %s: %w", name, err)
+	case ctx.Err() != nil:
+		// Out of time is not the same as a broken connection: a host that
+		// is slow to answer, or has a large ~/.claude, would otherwise be
+		// redialed every collection and never produce a result. The
+		// connection is kept as long as it still answers a keepalive.
+		pingCtx, cancel := context.WithTimeout(context.Background(), pingTimeout)
+		defer cancel()
+		if pingErr := conn.Ping(pingCtx); pingErr != nil {
 			s.drop(name, conn)
 		}
+		return nil, fmt.Errorf("task collection on %s did not finish within %s", name, s.opts.HostTimeout)
+	default:
+		s.drop(name, conn)
 		return nil, fmt.Errorf("run task collection on %s: %w", name, err)
 	}
-	return out, nil
 }
 
 // InspectGitContext resolves Git metadata for cwd on a remote host over the

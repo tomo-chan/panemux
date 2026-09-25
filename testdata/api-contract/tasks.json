@@ -55,8 +55,9 @@
       "id": "local:claude:state-file:103.json",
       "location": {
         "attachable": false,
-        "kind": "none"
+        "kind": "outside"
       },
+      "pid": 103,
       "state": "unknown"
     },
     {

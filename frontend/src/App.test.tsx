@@ -1,5 +1,5 @@
 import { useContext, useEffect } from 'react'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
 import { LayoutActionsContext } from './components/SplitContainer'
@@ -984,6 +984,52 @@ describe('App task dashboard layer', () => {
     }
   })
 
+  // The palette, the history panel and the board live in the workspace
+  // layer, which is inert while the dashboard is shown: opened there they
+  // would be drawn above the dashboard and take no input.
+  it('does not open the palette or the board over the dashboard, and closes them when it opens', () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ statuses: {}, messages: [] }) }))
+    mockUseBoardSessionToken.mockReturnValue({ token: 'tok', commandCenterEnabled: true, agentBoardEnabled: true })
+    render(<App />)
+
+    fireEvent.keyDown(window, { key: 'S', ctrlKey: true, shiftKey: true })
+    fireEvent.keyDown(window, { key: 'K', ctrlKey: true, shiftKey: true })
+    fireEvent.keyDown(window, { key: 'B', ctrlKey: true, shiftKey: true })
+    expect(screen.queryByRole('dialog', { name: 'Command center' })).toBeNull()
+    expect(screen.queryByRole('dialog', { name: 'Agent board' })).toBeNull()
+
+    fireEvent.keyDown(window, { key: 'S', ctrlKey: true, shiftKey: true })
+    fireEvent.keyDown(window, { key: 'K', ctrlKey: true, shiftKey: true })
+    fireEvent.click(screen.getByRole('button', { name: 'Open agent board' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open command center history' }))
+    expect(screen.getByRole('dialog', { name: 'Command center' })).toBeInTheDocument()
+
+    fireEvent.keyDown(window, { key: 'S', ctrlKey: true, shiftKey: true })
+    expect(screen.getByRole('region', { name: 'Task dashboard' })).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: 'Command center' })).toBeNull()
+    expect(screen.queryByRole('dialog', { name: 'Agent board' })).toBeNull()
+    expect(screen.queryByRole('dialog', { name: 'Command center history' })).toBeNull()
+    vi.unstubAllGlobals()
+  })
+
+  it('opens one pane when Open is pressed twice before the first one exists', async () => {
+    let finish: () => void = () => {}
+    mockCreatePane.mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve }))
+    mockUseTasks.mockReturnValue(tasksStateWith([waitingTask]))
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('button', { name: /^Tasks/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open: panemux' }))
+    fireEvent.click(screen.getByRole('button', { name: /^Tasks/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open: panemux' }))
+    expect(mockCreatePane).toHaveBeenCalledTimes(1)
+
+    await act(async () => finish())
+    fireEvent.click(screen.getByRole('button', { name: /^Tasks/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open: panemux' }))
+    expect(mockCreatePane).toHaveBeenCalledTimes(2)
+  })
+
   it('keeps the panes mounted while the dashboard is shown', () => {
     render(<App />)
     fireEvent.click(screen.getByRole('button', { name: 'Tasks' }))
@@ -993,7 +1039,8 @@ describe('App task dashboard layer', () => {
   it('counts waiting tasks on the back button', () => {
     mockUseTasks.mockReturnValue(tasksStateWith([waitingTask, { ...waitingTask, id: 'b', state: 'busy' }]))
     render(<App />)
-    expect(screen.getByRole('button', { name: 'Tasks, 1 waiting for input' })).toHaveTextContent('← Tasks1')
+    expect(screen.getByRole('button', { name: 'Tasks, 1 waiting for input when last checked' }))
+      .toHaveTextContent('← Tasks1')
   })
 
   it('opens a task in a new tmux pane attached to its session', async () => {

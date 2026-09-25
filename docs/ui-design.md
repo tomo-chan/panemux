@@ -314,11 +314,14 @@ terminal keeps its connection and scrollback. While it is shown the workspace la
 terminal that had focus cannot receive what is typed into the dashboard.
 
 - **Switching layers.** The workspace bar starts with a `← Tasks` button, which carries the number
-  of tasks waiting for input from the last collection in a gold badge. The dashboard's top bar has a
+  of tasks waiting for input from the last collection in a gold badge; its accessible name says the
+  count is "when last checked", since nothing collects while the workspaces are shown. The dashboard's top bar has a
   `Workspaces` button back, which shows the shortcut beside its label. `Cmd/Ctrl+Shift+S` switches
   either way; the letter is `display.task_dashboard_shortcut`. Like the palette's and the board's
   shortcuts it is registered on the keydown capture phase, so it fires while a terminal pane has
-  focus. panemux opens on the workspaces.
+  focus. panemux opens on the workspaces. While the dashboard is shown, `Cmd/Ctrl+Shift+K` and
+  `Cmd/Ctrl+Shift+B` do nothing, and the palette, history panel and Agent Board close when it
+  appears: they belong to the workspace layer, which is inert then.
 - **Top bar.** The title, one chip per host (`Local` for the panemux host) with its running count, a
   red chip with the error and a `Reconnect` button for a host that failed, and `connecting…` for a
   host whose connection is still coming up; then when the board was last updated, `Refresh`, and

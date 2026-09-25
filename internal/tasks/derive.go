@@ -119,17 +119,26 @@ func buildTasks(host string, raw rawSnapshot, collectedAt time.Time) []Task {
 	}
 
 	live := b.liveClaudeTasks()
+	live = append(live, b.unexplainedClaudeTasks(live)...)
 	live = append(live, b.codexTasks()...)
 	//mutation:exempt[CONDITIONALS_BOUNDARY] equivalent — ids are unique within a host, so no two compare equal
 	sort.Slice(live, func(i, j int) bool { return live[i].ID < live[j].ID })
 
 	liveSessions := make(map[string]bool, len(live))
+	// A running claude task with no session id (its state file is unreadable
+	// or missing) is most likely writing the newest log in its directory;
+	// that log is its own, not a second, stopped task.
+	claimedLogs := map[string]int{}
 	for _, task := range live {
-		if task.Agent == AgentClaude && task.SessionID != "" {
+		switch {
+		case task.Agent != AgentClaude:
+		case task.SessionID != "":
 			liveSessions[task.SessionID] = true
+		case task.PID > 0 && task.CWD != "":
+			claimedLogs[task.CWD]++
 		}
 	}
-	return append(live, b.stoppedTasks(liveSessions)...)
+	return append(live, b.stoppedTasks(liveSessions, claimedLogs)...)
 }
 
 type taskBuilder struct {
@@ -156,22 +165,13 @@ func (b *taskBuilder) liveClaudeTasks() []Task {
 	for _, file := range b.raw.StateFiles {
 		var st claudeState
 		if err := json.Unmarshal(file.Data, &st); err != nil || st.PID <= 0 || !validSessionID.MatchString(st.SessionID) {
-			// Kept rather than dropped: a file the dashboard cannot read
-			// is still evidence of an agent, and hiding it would make a
-			// format change look like every agent had stopped.
-			unknown = append(unknown, Task{
-				Host:     b.host,
-				ID:       b.id(AgentClaude, "state-file:"+file.Name),
-				Agent:    AgentClaude,
-				CWD:      st.CWD,
-				State:    StateUnknown,
-				Location: Location{Kind: LocationNone},
-			})
+			if task, ok := b.unreadableStateTask(file, st); ok {
+				unknown = append(unknown, task)
+			}
 			continue
 		}
 
-		proc, alive := b.procs[st.PID]
-		if !alive || !isClaudeProcess(proc.Command) {
+		if !b.isLiveClaude(st.PID) {
 			// A leftover file: its process exited, or its pid now belongs
 			// to something else. The session shows up as stopped through
 			// its transcript instead.
@@ -210,6 +210,91 @@ func (b *taskBuilder) liveClaudeTasks() []Task {
 	return append(tasks, unknown...)
 }
 
+// unreadableStateTask is the task for a state file that is not JSON or lacks
+// a pid or a valid session id. It is kept rather than dropped — a file the
+// dashboard cannot read is still evidence of an agent, and hiding it would
+// make a format change look like every agent had stopped — unless the pid in
+// its name (Claude Code names the file <pid>.json) is no longer a claude
+// process, which makes it a leftover.
+func (b *taskBuilder) unreadableStateTask(file stateFile, st claudeState) (Task, bool) {
+	task := Task{
+		Host:     b.host,
+		ID:       b.id(AgentClaude, "state-file:"+file.Name),
+		Agent:    AgentClaude,
+		CWD:      st.CWD,
+		State:    StateUnknown,
+		Location: Location{Kind: LocationNone},
+	}
+	pid, ok := stateFilePID(file.Name)
+	if !ok {
+		return task, true
+	}
+	if !b.isLiveClaude(pid) {
+		return Task{}, false
+	}
+	task.PID = pid
+	task.Location = b.locate(pid)
+	if cwd := b.raw.ProcessCWDs[pid]; cwd != "" {
+		task.CWD = cwd
+	}
+	return task, true
+}
+
+// unexplainedClaudeTasks are running interactive claude processes that no
+// state file names, by its content or by its file name. Without them, a
+// Claude Code release that moved or stopped writing ~/.claude/sessions would
+// show every running agent as stopped.
+func (b *taskBuilder) unexplainedClaudeTasks(known []Task) []Task {
+	explained := map[int]bool{}
+	for _, task := range known {
+		explained[task.PID] = true
+	}
+	for _, file := range b.raw.StateFiles {
+		var st claudeState
+		if json.Unmarshal(file.Data, &st) == nil && st.PID > 0 {
+			explained[st.PID] = true
+		}
+		if pid, ok := stateFilePID(file.Name); ok {
+			explained[pid] = true
+		}
+	}
+
+	var tasks []Task
+	for _, p := range b.raw.Processes {
+		if explained[p.PID] || !isInteractiveClaude(p.Command) {
+			continue
+		}
+		tasks = append(tasks, Task{
+			Host:     b.host,
+			ID:       b.id(AgentClaude, "pid-"+strconv.Itoa(p.PID)),
+			Agent:    AgentClaude,
+			CWD:      b.raw.ProcessCWDs[p.PID],
+			State:    StateUnknown,
+			PID:      p.PID,
+			Location: b.locate(p.PID),
+		})
+	}
+	return tasks
+}
+
+func (b *taskBuilder) isLiveClaude(pid int) bool {
+	proc, alive := b.procs[pid]
+	return alive && isClaudeProcess(proc.Command)
+}
+
+// stateFilePID reads the pid out of a state file named <pid>.json.
+func stateFilePID(name string) (int, bool) {
+	digits, ok := strings.CutSuffix(name, ".json")
+	if !ok {
+		return 0, false
+	}
+	pid, err := strconv.Atoi(digits)
+	if err != nil || pid <= 0 {
+		return 0, false
+	}
+	return pid, true
+}
+
 func (b *taskBuilder) codexTasks() []Task {
 	var tasks []Task
 	for _, p := range b.raw.Processes {
@@ -229,7 +314,7 @@ func (b *taskBuilder) codexTasks() []Task {
 	return tasks
 }
 
-func (b *taskBuilder) stoppedTasks(liveSessions map[string]bool) []Task {
+func (b *taskBuilder) stoppedTasks(liveSessions map[string]bool, claimedLogs map[string]int) []Task {
 	transcripts := append([]transcript(nil), b.raw.Transcripts...)
 	sort.SliceStable(transcripts, func(i, j int) bool { return transcripts[i].ModTime > transcripts[j].ModTime })
 
@@ -243,6 +328,10 @@ func (b *taskBuilder) stoppedTasks(liveSessions map[string]bool) []Task {
 			continue
 		}
 		seen[tr.SessionID] = true
+		if claimedLogs[tr.CWD] > 0 {
+			claimedLogs[tr.CWD]--
+			continue
+		}
 		tasks = append(tasks, Task{
 			Host:        b.host,
 			ID:          b.id(AgentClaude, tr.SessionID),
@@ -312,26 +401,93 @@ func claudeStatusState(status string) State {
 }
 
 // isClaudeProcess reports whether a `ps` command line is a Claude Code
-// process. It looks for "claude" anywhere in the line rather than only in
-// argv[0]'s base name, because how Claude Code appears in `ps` depends on how
-// it was installed: a native binary shows its own path, which may be a
-// versioned file under .../claude/versions/, and an npm install runs under
-// node with the package path as an argument. The check exists to reject a
-// pid that was reused by an unrelated process, which a substring match does.
+// process: the program itself — argv[0], or the script a node, bun or deno
+// interpreter runs — has a path component named claude or claude-code. How
+// Claude Code shows in `ps` depends on how it was installed: a native binary
+// under .../claude/versions/<version> or named claude, or node running
+// .../@anthropic-ai/claude-code/cli.js. Only the program is looked at, so a
+// process that merely has a file under ~/.claude as an argument (an editor,
+// `tail`, a hook) does not pass for one.
 func isClaudeProcess(command string) bool {
-	return strings.Contains(strings.ToLower(command), AgentClaude)
+	fields := strings.Fields(command)
+	if len(fields) == 0 {
+		return false
+	}
+	if namesClaude(fields[0]) {
+		return true
+	}
+	return len(fields) > 1 && scriptInterpreters[strings.ToLower(filepath.Base(fields[0]))] && namesClaude(fields[1])
 }
 
-// isInteractiveCodex matches internal/session's pane-side codex detection:
-// argv[0]'s base name is codex, and `codex exec` (headless) is excluded.
+var scriptInterpreters = map[string]bool{"node": true, "bun": true, "deno": true}
+
+func namesClaude(program string) bool {
+	for _, part := range strings.Split(strings.ToLower(program), "/") {
+		if part == AgentClaude || part == "claude-code" {
+			return true
+		}
+	}
+	return false
+}
+
+// isInteractiveClaude is a claude process that is not `claude -p` /
+// `claude --print`, which answer one prompt and exit.
+func isInteractiveClaude(command string) bool {
+	if !isClaudeProcess(command) {
+		return false
+	}
+	for _, field := range strings.Fields(command)[1:] {
+		if field == "-p" || field == "--print" {
+			return false
+		}
+	}
+	return true
+}
+
+// codexNonInteractiveCommands are codex-cli's subcommands that do not open
+// an interactive session, from `codex --help` of codex-cli 0.157.0, plus
+// mcp-server from earlier releases. With no subcommand codex opens the TUI
+// (the first positional argument is then a prompt), and `resume` and `fork`
+// reopen an interactive session, so neither appears here.
+var codexNonInteractiveCommands = map[string]bool{
+	"agents": true, "exec": true, "e": true, "review": true, "login": true, "logout": true,
+	"mcp": true, "mcp-server": true, "plugin": true, "app-server": true, "remote-control": true,
+	"completion": true, "update": true, "doctor": true, "sandbox": true, "debug": true,
+	"apply": true, "a": true, "queue": true, "archive": true, "delete": true,
+	"migrate-rollouts": true, "unarchive": true, "cloud": true, "exec-server": true,
+	"features": true, "help": true,
+}
+
+// codexValueOptions are the top-level options of codex-cli 0.157.0 that take
+// a value in the next argument, so the value is not mistaken for a subcommand.
+var codexValueOptions = map[string]bool{
+	"-c": true, "--config": true, "--enable": true, "--disable": true, "--remote": true,
+	"--remote-auth-token-env": true, "-i": true, "--image": true, "-m": true, "--model": true,
+	"--local-provider": true, "-p": true, "--profile": true, "-s": true, "--sandbox": true,
+	"-C": true, "--cd": true, "--add-dir": true, "-a": true, "--ask-for-approval": true,
+}
+
+// isInteractiveCodex reports whether a `ps` command line is an interactive
+// codex session: argv[0]'s base name is codex, and the first positional
+// argument is not a non-interactive subcommand. Only that argument is looked
+// at, so a prompt that happens to contain "exec" is still a session.
 func isInteractiveCodex(command string) bool {
 	fields := strings.Fields(command)
 	if len(fields) == 0 || strings.ToLower(filepath.Base(fields[0])) != AgentCodex {
 		return false
 	}
-	for _, field := range fields[1:] {
-		if field == "exec" {
-			return false
+	args := fields[1:]
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--":
+			return true
+		case strings.HasPrefix(arg, "-"):
+			if codexValueOptions[arg] {
+				i++
+			}
+		default:
+			return !codexNonInteractiveCommands[arg]
 		}
 	}
 	return true

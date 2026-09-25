@@ -1354,14 +1354,14 @@ func (h *Handler) findGH() (string, error) {
 
 func (h *Handler) lookupPRInfo(sess session.Session, cwd string, gitCtx session.GitContext) (string, int) {
 	_, remote := sess.(session.GitContextGetter)
-	return h.lookupPR(remote, cwd, gitCtx)
+	return h.lookupPR(context.Background(), remote, cwd, gitCtx)
 }
 
 // lookupPR runs `gh pr view` for gitCtx's branch on the panemux host. remote
 // is whether cwd is on another host, where `gh` cannot run inside it: the
 // repository is then named from its origin URL, and without one there is no
 // lookup.
-func (h *Handler) lookupPR(remote bool, cwd string, gitCtx session.GitContext) (string, int) {
+func (h *Handler) lookupPR(parent context.Context, remote bool, cwd string, gitCtx session.GitContext) (string, int) {
 	if gitCtx.Branch == "" {
 		return "", 0
 	}
@@ -1375,7 +1375,7 @@ func (h *Handler) lookupPR(remote bool, cwd string, gitCtx session.GitContext) (
 	if timeout <= 0 {
 		timeout = 5 * time.Second
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 	cmd := exec.CommandContext(
 		ctx,
