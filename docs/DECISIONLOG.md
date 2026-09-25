@@ -134,8 +134,10 @@ while being built:
 - **panemux opens on the workspaces**, as before, rather than on the dashboard the issue's mockup
   starts on.
 - **The layers switch with `Cmd/Ctrl+Shift+S`, and the letter is configurable** as
-  `display.task_dashboard_shortcut` (open question 6). `S` was chosen after checking Chrome's own
-  shortcuts, which the environment this was built in could not reach. It is a config setting rather
+  `display.task_dashboard_shortcut` (open question 6). `S` was chosen for stage 1 while it was
+  built; the environment it was built in could not reach a list of Chrome's own shortcuts. On a real,
+  non-headless browser on macOS (2026-09-26), `Ctrl+Shift+S` switched layers and was not taken by the
+  browser; `Cmd+Shift+S` was not checked there. It is a config setting rather
   than a per-browser one so every browser on one panemux behaves the same; `K` and `B` are refused
   because the palette and the board already use them. `GET /api/display` reports the effective
   letter so the default lives in one place, and an unset value is never written back.
