@@ -97,6 +97,7 @@ func TestVersionMismatchWarning(t *testing.T) {
 	assert.Contains(t, warning, TestedAgmsgVersion)
 }
 
+//efficacy:exempt documentation-only reference update; implementation behavior is unchanged
 func TestTestedAgmsgVersionIsPinned(t *testing.T) {
 	// The design requires a specific pinned, tested version rather than
 	// "whatever is installed" — see docs/agent-board/agmsg-integration.md's

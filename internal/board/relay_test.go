@@ -314,6 +314,7 @@ func TestRelay_CursorPersistence_AcrossSimulatedRestart(t *testing.T) {
 	assert.Equal(t, "two", rows[0].Row.Body)
 }
 
+//efficacy:exempt test-only rename to match the documented guarantee; implementation behavior is unchanged
 func TestRelay_CursorPersistence_SuccessfulForwardCanDuplicateBeforePersist(t *testing.T) {
 	// Simulates a crash between relaying and persisting the cursor: the
 	// same row is seen again on the next Poll and is delivered again, not
