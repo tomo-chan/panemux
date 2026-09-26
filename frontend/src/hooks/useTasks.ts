@@ -1,11 +1,32 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Task, TaskRecordSchema, TasksResponse, TasksResponseSchema } from '../schemas'
+import {
+  Task,
+  TaskLaunched,
+  TaskLaunchedSchema,
+  TaskLaunchResponse,
+  TaskLaunchResponseSchema,
+  TaskRecordSchema,
+  TasksResponse,
+  TasksResponseSchema,
+} from '../schemas'
 import { applyTaskRecord } from '../utils/taskBoard'
 
 // How often the dashboard re-collects while it is on screen. Collection runs
 // a script on every host, so it happens only while the dashboard is shown and
 // the page is visible — never in the background (issue #252).
 export const TASKS_POLL_INTERVAL_MS = 10000
+
+/** A new task: where it runs, and its first instruction and labels. */
+export interface TaskLaunchInput {
+  /** The ssh_connections key, or '' for the panemux host. */
+  host: string
+  cwd: string
+  prompt: string
+  labels: string[]
+}
+
+/** What starting or resuming a task came to: the task, or why not. */
+export type TaskActionResult<T> = { ok: true; launched: T } | { ok: false; error: string }
 
 export interface TasksState {
   data: TasksResponse | null
@@ -20,6 +41,38 @@ export interface TasksState {
    * applies the server's answer at once. Resolves to why it failed, or null.
    */
   saveRecord: (task: Task, record: { done: boolean; labels: string[] }) => Promise<string | null>
+  /**
+   * Starts a claude task in a tmux session of its own on its host, without a
+   * pane (issue #257), then collects again.
+   */
+  launch: (input: TaskLaunchInput) => Promise<TaskActionResult<TaskLaunchResponse>>
+  /** Runs `claude --resume` for a stopped task, then collects again. */
+  resume: (task: Task) => Promise<TaskActionResult<TaskLaunched>>
+}
+
+// postTaskAction POSTs body to path and parses the answer with schema. A
+// refusal comes back as the server's own reason.
+async function postTaskAction<T>(
+  path: string,
+  body: unknown,
+  schema: { safeParse: (value: unknown) => { success: true; data: T } | { success: false } },
+): Promise<TaskActionResult<T>> {
+  try {
+    const res = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    if (!res.ok) {
+      const reason = (await res.text()).trim()
+      return { ok: false, error: reason || `HTTP ${res.status}` }
+    }
+    const parsed = schema.safeParse(await res.json())
+    if (!parsed.success) return { ok: false, error: `Unexpected response from ${path}` }
+    return { ok: true, launched: parsed.data }
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : `Request to ${path} failed` }
+  }
 }
 
 export function useTasks(enabled: boolean): TasksState {
@@ -33,6 +86,10 @@ export function useTasks(enabled: boolean): TasksState {
   // read the records before it, so its answer is dropped rather than allowed
   // to put the old record back; the next poll brings the new one.
   const recordSaves = useRef(0)
+  // Set when a task was started or resumed while a collection was running.
+  // That collection began before the task existed, so another one runs as
+  // soon as it finishes instead of the task waiting for the next poll.
+  const collectAgain = useRef(false)
 
   const refresh = useCallback(async () => {
     if (inFlight.current) return
@@ -59,8 +116,20 @@ export function useTasks(enabled: boolean): TasksState {
     } finally {
       inFlight.current = false
       setLoading(false)
+      if (collectAgain.current) {
+        collectAgain.current = false
+        void refresh()
+      }
     }
   }, [])
+
+  const refreshAfterAction = useCallback(async () => {
+    if (inFlight.current) {
+      collectAgain.current = true
+      return
+    }
+    await refresh()
+  }, [refresh])
 
   const reconnect = useCallback(async (host: string) => {
     try {
@@ -104,6 +173,27 @@ export function useTasks(enabled: boolean): TasksState {
     }
   }, [])
 
+  const launch = useCallback(async (input: TaskLaunchInput) => {
+    const result = await postTaskAction(
+      '/api/tasks',
+      { host: input.host, agent: 'claude', cwd: input.cwd, prompt: input.prompt, labels: input.labels },
+      TaskLaunchResponseSchema,
+    )
+    if (result.ok) await refreshAfterAction()
+    return result
+  }, [refreshAfterAction])
+
+  const resume = useCallback(async (task: Task): Promise<TaskActionResult<TaskLaunched>> => {
+    if (!task.session_id) return { ok: false, error: 'This task has no session ID to resume' }
+    const result = await postTaskAction(
+      '/api/tasks/resume',
+      { host: task.host, session_id: task.session_id },
+      TaskLaunchedSchema,
+    )
+    if (result.ok) await refreshAfterAction()
+    return result
+  }, [refreshAfterAction])
+
   useEffect(() => {
     const handleVisibilityChange = () => setIsVisible(document.visibilityState === 'visible')
     document.addEventListener('visibilitychange', handleVisibilityChange)
@@ -119,5 +209,5 @@ export function useTasks(enabled: boolean): TasksState {
     return () => clearInterval(interval)
   }, [enabled, isVisible, refresh])
 
-  return { data, error, loading, updatedAt, refresh, reconnect, saveRecord }
+  return { data, error, loading, updatedAt, refresh, reconnect, saveRecord, launch, resume }
 }

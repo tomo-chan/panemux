@@ -26,6 +26,8 @@ import {
   BoardMessagesResponseSchema,
   TasksResponseSchema,
   TaskRecordSchema,
+  TaskLaunchedSchema,
+  TaskLaunchResponseSchema,
 } from './index'
 
 describe('TasksResponseSchema', () => {
@@ -131,8 +133,49 @@ describe('TaskRecordSchema', () => {
     }
   })
 
+  // efficacy:exempt unchanged by this branch; the new describe block after it falls inside its line range
   it('rejects an empty session ID', () => {
     expect(TaskRecordSchema.safeParse({ ...record, session_id: '' }).success).toBe(false)
+  })
+})
+
+describe('TaskLaunchedSchema', () => {
+  const launched = {
+    id: 'local:claude:0f0e0d0c-0b0a-4908-8706-050403020100',
+    session_id: '0f0e0d0c-0b0a-4908-8706-050403020100',
+    tmux_session: 'task-0f0e0d0c',
+  }
+
+  it('accepts a started or resumed task', () => {
+    expect(TaskLaunchedSchema.safeParse(launched).success).toBe(true)
+  })
+
+  it('requires every field, since the dashboard selects the task by id', () => {
+    for (const key of Object.keys(launched)) {
+      const partial: Record<string, unknown> = { ...launched }
+      delete partial[key]
+      expect(TaskLaunchedSchema.safeParse(partial).success, key).toBe(false)
+    }
+    expect(TaskLaunchedSchema.safeParse({ ...launched, id: '' }).success).toBe(false)
+  })
+})
+
+describe('TaskLaunchResponseSchema', () => {
+  const launched = {
+    id: 'ssh:build-box:claude:0f0e0d0c-0b0a-4908-8706-050403020100',
+    session_id: '0f0e0d0c-0b0a-4908-8706-050403020100',
+    tmux_session: 'task-0f0e0d0c',
+  }
+
+  it('accepts a launch with its recorded labels, or with why they were not recorded', () => {
+    expect(TaskLaunchResponseSchema.safeParse(launched).success).toBe(true)
+    expect(TaskLaunchResponseSchema.safeParse({ ...launched, labels: ['infra'] }).success).toBe(true)
+    const failed = TaskLaunchResponseSchema.safeParse({ ...launched, records_error: 'parse tasks.json' })
+    expect(failed.success && failed.data.records_error).toBe('parse tasks.json')
+  })
+
+  it('rejects labels that are not strings', () => {
+    expect(TaskLaunchResponseSchema.safeParse({ ...launched, labels: [1] }).success).toBe(false)
   })
 })
 

@@ -8,7 +8,8 @@ The task dashboard lists every coding-agent session on every host panemux knows 
 itself and every `ssh_connections` entry — independently of panes. A pane is only the window used to
 watch or answer a task, opened when the dashboard is asked to. The design is issue
 [#252](https://github.com/tomo-chan/panemux/issues/252); this page covers what is built (its stage 1,
-and the done and label records of [#256](https://github.com/tomo-chan/panemux/issues/256)).
+the done and label records of [#256](https://github.com/tomo-chan/panemux/issues/256), and starting
+and resuming tasks of [#257](https://github.com/tomo-chan/panemux/issues/257)).
 The UI is described in [UI design's Task Dashboard](../ui-design.md#task-dashboard).
 
 ### What a task is
@@ -169,7 +170,7 @@ set.
   file, which can be done while panemux runs (below). A host removed from `ssh_connections` keeps
   its records too; `PUT /api/tasks/records` still clears them, but adds none.
 - **A task marked done is in the Done column only while it is stopped.** One that runs again (a
-  `/resume`, or `claude --resume`) shows the state it is in, still marked done, and returns to Done
+  `/resume`, `claude --resume`, or the dashboard's `Resume`) shows the state it is in, still marked done, and returns to Done
   when it stops. The record is not cleared automatically; `Mark not done` clears it.
 - **Labels** are trimmed, repeats dropped, and kept in the order they were added. A label is at most
   32 characters, and has no control characters, no invisible format characters (zero-width spaces,
@@ -184,6 +185,90 @@ set.
   `records_error`, the tasks are listed without records, and every write fails until the file is
   fixed, so a file panemux does not understand is never replaced. A deleted file is no records.
 
+### Starting a task
+
+`New task` starts one claude session on a host, in a detached tmux session of its own. No pane is
+created: the task is opened from the dashboard like any other, when someone wants to watch it.
+
+| Field | Rule |
+|---|---|
+| Host | The panemux host or an `ssh_connections` key |
+| Working directory | An absolute path with no shell metacharacters or control characters — the rule a pane's remote `cwd` follows ([Remote path arguments](../security/command-execution.md#remote-path-arguments-ssh-working-directory)) — that exists on the host |
+| Agent | `claude` only. Codex tasks are known only by a pid, so they could carry no labels ([#264](https://github.com/tomo-chan/panemux/issues/264)) |
+| Labels | Optional, comma-separated in the form, under the rules of [Done and labels](#done-and-labels) |
+| First instruction | Required. Surrounding blank space is dropped and line endings become LF; at most 32 KiB after that, and no NUL |
+
+- **panemux mints the session ID** (a version 4 UUID) and runs
+  `claude --session-id=<id> -- <first instruction>` in the working directory, so the task — and its
+  labels — are known before claude has written anything. The instruction is claude's single
+  argument after `--`: one that begins with `-` is still the instruction. Slash commands are not
+  disabled; the session is the operator's own.
+- **claude is started in the working directory by the command inside the tmux session**, not by
+  tmux's `-c`: tmux expands `-c`'s value as a format, so a directory holding `#` (`#S`, `##`) would
+  have become a different path, and tmux starts in the home directory when that path does not
+  exist — while reporting success.
+- **The tmux session is named `task-` and the first eight characters of the session ID.** If a tmux
+  session of that name already exists on the host, the task is not started, and the existing
+  session is neither attached nor replaced.
+- **When claude exits, its tmux session ends**, and the task is listed as stopped.
+- **The labels are recorded right after the task starts**, under the host, `claude` and the new
+  session ID. They are checked before anything starts, so an invalid label refuses the whole request.
+  If the record file cannot be written the task is still running; the response says why its labels
+  were not recorded, and the dashboard shows it.
+- **The host needs tmux and claude.** tmux receives the command as separate arguments (tmux 2.0 and
+  later; verified with tmux 3.4). claude is looked up on the `PATH` of the `sh` that runs the launch,
+  and, when it is not there, through the user's login shell (`$SHELL -lc 'command -v claude'`), since
+  an SSH exec channel's `PATH` rarely includes a per-user install such as `~/.local/bin`. Only an
+  absolute path to an executable file is run.
+- **The first instruction reaches claude through a file, not a command line.** It is written to a
+  mode-`0600` temporary file on the host (`$TMPDIR`, else `/tmp`, named `panemux-task.XXXXXXXX`),
+  which the command inside the tmux session reads and deletes before claude starts; if tmux fails to
+  start the session, the launch deletes it. It is never part of the SSH command, of a string any
+  shell parses, or of tmux's arguments. A tmux server keeps the arguments of the command that started
+  it as its own process arguments for as long as it runs, so an instruction passed there would stay
+  visible in `ps`. It is claude's own argument, though, so anyone who can list claude's process
+  arguments on the host can read it while claude runs.
+- After a start, the dashboard selects the task once a collection lists it. claude writes the state
+  file the collection reads only once it is running, so that can take until the next poll (10 s).
+
+Checked against a real tmux 3.4 with a stand-in for claude: an instruction holding a leading option,
+command substitutions, quotes and newlines arrived as one argument after `--`, nothing in it ran, and
+the temporary file was gone. **Not checked against a real Claude Code**: that the first instruction is
+submitted as the first message, and that the state file names the minted session ID (the development
+environment's claude stopped at its first-run screen). Scenario J21 is the manual check.
+
+### Resuming a task
+
+`Resume` is offered on a stopped claude task whose session ID is a UUID.
+
+- **The session must be listed as a stopped claude task on its host at that moment.** The host is
+  collected again first; a session that is running, is not claude's, or is not listed there is not
+  resumed. The ID passed to claude therefore always came from the host's own conversation logs.
+- **It runs `claude --resume=<id>`** in the working directory that session's conversation log
+  records, in a new detached tmux session named like a new task's: `task-` and the first eight
+  characters of the session ID. A session whose log records no working directory, or one the
+  remote-path rule refuses, is not resumed.
+- **A tmux session of that name that no agent runs in gets claude as a new window.** A pane opened
+  on the task attaches with `tmux new-session -A`, so when that pane is recreated after claude has
+  exited — a `Reconnect`, or the automatic reconnect after an SSH drop — it creates a session of the
+  task's name holding a shell. When the collection the resume makes finds no running task (claude,
+  codex, or one whose state could not be read) inside that session, claude is started as a new window
+  of it: the shell's window is left as it is, and the attached pane shows claude. When a running task
+  is inside it, the resume is refused, as a new task is refused whenever the name is taken.
+- **Two resumes of the same task run one after the other.** A second resume of the same session on
+  the same host waits until the first has started claude, and only then collects; it then finds that
+  claude in the session and is refused, so one conversation never gets two claude processes from
+  the dashboard. This covers one panemux process: two panemux instances, or a resume typed by hand on
+  the host, are not coordinated with it. A resume whose request ends while it waits gives up.
+- **The session ID is passed in the `=` form.** `--resume` takes an optional value, and a separate
+  argument beginning with `-` would be read as an option; `--resume` also accepts a session title,
+  which is why only a UUID is accepted.
+- **The task keeps its session ID**, so its record is unchanged: a task marked done that is resumed
+  stays marked done and shows the state it runs in, and returns to Done when it stops.
+- A host restart stops tmux as well as claude, so resuming creates a new tmux session — or, when a
+  pane was reconnected first, adds claude to the session that pane created.
+- The dashboard selects the resumed task, and it shows as running once a collection finds it.
+
 ### Opening a task
 
 | Task | Result |
@@ -192,7 +277,8 @@ set.
 | In tmux, no pane yet, attachable | A `tmux` (panemux host) or `ssh_tmux` (its connection) pane attaching to the session is added at the right edge of the active workspace, through the ordinary `POST /api/sessions` and layout save; the pane's `tmux new-session -A` attaches to the running session |
 | In tmux, not attachable | Not opened; the reason is shown |
 | Outside tmux | Not opened; the reason is shown |
-| Stopped or unknown | Not opened |
+| Stopped | Not opened; a stopped claude task offers `Resume` ([Resuming a task](#resuming-a-task)) |
+| Unknown | Not opened |
 
 Either way the dashboard closes and the pane is briefly outlined. Opening the same tmux session again
 while its pane is still being created does not create a second pane.
@@ -275,3 +361,41 @@ Replaces the record of one task:
   written; nothing is changed then.
 - It does not collect: the dashboard applies the answer to the task at once, and ignores a
   `GET /api/tasks` that was already running when the record was saved.
+
+### `POST /api/tasks`
+
+Starts a task:
+
+```json
+{ "host": "", "agent": "claude", "cwd": "/workspace/user/project", "prompt": "Fix the flaky test", "labels": ["payment"] }
+```
+
+- Every field but `labels` is required in effect: `agent` must be `claude`, and `cwd` and `prompt`
+  follow [Starting a task](#starting-a-task). An unknown field is refused.
+- Answers `201`:
+
+  ```json
+  { "id": "local:claude:0f0e0d0c-0b0a-4908-8706-050403020100", "session_id": "0f0e0d0c-0b0a-4908-8706-050403020100", "tmux_session": "task-0f0e0d0c", "labels": ["payment"] }
+  ```
+
+  `id` is the one `GET /api/tasks` lists the task under. `labels` is what was recorded, omitted when
+  none were given; `records_error` is present instead when they could not be recorded.
+- `400` for a body, agent, label, directory or instruction that is not valid, `404` for a `host`
+  that is not an `ssh_connections` key, `409` when the host refused — tmux or claude missing, the
+  directory missing, a tmux session of that name existing, tmux failing, the temporary file not
+  written, each with a fixed message — `502` when the host could not be reached or did not answer,
+  and `403` for a cross-site request as for `GET /api/tasks`.
+
+### `POST /api/tasks/resume`
+
+Resumes a stopped claude task:
+
+```json
+{ "host": "", "session_id": "5d7e3a90-1b2c-4d3e-8f40-51627384a5b6" }
+```
+
+- Answers `200` with `id`, `session_id` and `tmux_session` as above.
+- `400` for a body that is not valid or a `session_id` that is not a UUID, or a stopped session whose
+  working directory is unknown or refused; `404` for an unknown `host`; `409` when the session is not
+  a stopped claude task on the host, or the host refused as above; `502` when the host could not be
+  collected or reached; `403` for a cross-site request.

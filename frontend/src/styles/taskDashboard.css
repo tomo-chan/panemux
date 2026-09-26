@@ -734,3 +734,75 @@
   background: #1a1b1e;
   font-size: 12px;
 }
+
+/* ── New task (issue #257) ───────────────────────────────────────────── */
+
+.td-notice {
+  margin: 8px 16px 0;
+  padding: 6px 10px;
+  border: 1px solid #1e3a5f;
+  border-radius: 4px;
+  background: #13212f;
+  color: #9cc3e6;
+  font-size: 12px;
+}
+
+.td-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.td-modal-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 520px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  box-sizing: border-box;
+  padding: 18px 20px;
+  border: 1px solid var(--td-line-2);
+  border-radius: 6px;
+  background: #252526;
+}
+
+.td-modal-panel h2 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.td-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--td-muted);
+}
+
+.td-field input,
+.td-field select,
+.td-field textarea {
+  padding: 4px 8px;
+  border: 1px solid var(--td-line-2);
+  border-radius: 4px;
+  background: #1a1b1e;
+  color: var(--td-text);
+  font-family: var(--td-font);
+  font-size: 12.5px;
+}
+
+.td-field textarea {
+  resize: vertical;
+}
+
+.td-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

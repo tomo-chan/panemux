@@ -206,6 +206,76 @@ built.
   names first used an object literal, which made a label named `__proto__` crash the dashboard when
   rows were split by label, and `constructor` or `toString` show as an empty catch-all row.
 
+### Stage 2: starting and resuming claude tasks from the dashboard (2026-09-26, issue #257)
+
+Issue #252's open questions 1 (what resuming does) and 2 (the security design of a new command path)
+were decided with the operator before implementation, from a proposal checked against claude 2.1.283
+and tmux 3.4 in the development environment. The operator decided:
+
+- **claude only.** Codex tasks are known only by a pid, so they cannot carry labels, and a codex
+  process that exited is not listed, so there is nothing to resume; codex could not be checked
+  either, since it was not installed. Codex support is issue #264.
+- **The tmux session ends with claude.** Keeping a login shell in it (so the last output stays
+  readable) was the alternative; ending it makes the task list as stopped again, which is what the
+  board is for.
+- **A resumed task keeps its record.** A task marked done that is resumed stays marked done and shows
+  its running column, as #256's rules already say; clearing done on resume was the alternative.
+- **Starting a task opens no pane**; the dashboard waits for the task to be listed and selects it.
+- **The working directory is typed**, not only picked from directories tasks already use.
+- **A tmux session name that already exists is an error**, not an attach or a replacement.
+- **A real Claude Code run is a manual scenario (J21)**: that the first instruction becomes the first
+  message, and that the state file names the minted ID, could not be observed here.
+
+The security design, also agreed before implementation:
+
+- **The prompt never enters a command line a shell parses.** A remote start must cross the remote
+  login shell, unlike the command center's `exec.CommandContext` argv, so the launch reuses the
+  collection's shape — a fixed script on `sh -s` stdin — and carries the directory and the prompt in
+  heredocs with a quoted, randomly tagged terminator. Escaping values into a command string was the
+  rejected alternative: it makes safety depend on a quoting routine being right for every shell.
+- **The prompt travels through a temp file, not tmux's arguments.** Found while verifying: a tmux
+  server keeps the arguments of the client that started it as its own process arguments for its
+  whole life, so a prompt passed there would stay readable in `ps` long after the task.
+- **`--` before the prompt, and `--resume=<id>` in the `=` form.** Command-center history showed a
+  prompt starting with `-` being parsed as an option; for `--resume`, verified that
+  `claude --resume --version` prints the version, because its value is optional. Session IDs are
+  therefore UUIDs only (`--resume` also accepts a title), panemux mints the ID for a new task with
+  `--session-id` (so its labels can be recorded at once), and a resume uses only an ID the host
+  lists as a stopped claude task at that moment.
+
+Chosen while it was built:
+
+- **claude is found through the login shell when `PATH` lacks it.** An SSH exec channel's `PATH`
+  rarely holds a per-user install such as `~/.local/bin`; only an absolute path to an executable is
+  run.
+- **Host refusals are fixed codes** (`no-tmux`, `no-cwd`, `no-claude`, `tmux-exists`,
+  `tmux-failed`, `prompt-file`) mapped to fixed messages, so no host output reaches the response.
+- **Labels are checked before the task starts**, and a start whose labels could not be written still
+  answers `201` with `records_error`, since the task is already running.
+- **A launch during a running collection collects again when it finishes.** That collection began
+  before the task existed, and skipping the launch's own collection left the task unlisted until the
+  next poll.
+- **The working directory is not given to tmux's `-c`** (review of PR #265). tmux expands `-c` as a
+  format, and a directory holding `#` silently became the home directory while the launch reported
+  success. The fixed `sh -c` inside the session changes to it instead; escaping `#` as `##` was the
+  alternative, rejected because it depends on tmux's format rules staying as they are.
+- **A resume adds a window to a session of the task's name that no agent runs in** (review of PR
+  #265, decided with the operator). A pane opened on the task attaches with `new-session -A`, so
+  recreating it after claude exited left a shell session of that name, and every later resume was
+  refused with no way to clear it from the dashboard. Rejected alternatives: replacing the pane's
+  window with `respawn-pane -k` (kills whatever the shell was running), a different session name
+  (the open pane would not show claude, and the shell session lingers), and changing how task panes
+  attach (a config-schema change to every `tmux`/`ssh_tmux` pane).
+- **Resumes of one (host, session) are serialized inside panemux** (review of PR #265, decided with
+  the operator). Reusing a session is decided from the collection a resume makes before launching,
+  so two overlapping resumes could both find the session free and start two `claude --resume` on one
+  conversation. Checking the session's panes for claude inside the script, just before
+  `new-window`, was the alternative; it was not taken because walking the process tree in shell is
+  fragile across `ps` implementations and still leaves a gap. Two panemux processes are not
+  coordinated.
+- **Each resume in flight is tracked per task** (review of PR #265). One tracked ID was replaced by a
+  second resume, re-enabling the first task's button while its request still ran.
+
 ## Agent Board
 
 ### Compatibility is checked against a real agmsg release (2026-08-23, PR #176)

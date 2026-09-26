@@ -641,6 +641,13 @@ func sshShellExecTail(cfg SSHConfig) (string, error) {
 	return fmt.Sprintf("cd %s && exec $SHELL", shellQuotePath(cfg.Cwd)), nil
 }
 
+// ValidateRemotePath is the remote-path guard for a caller outside this
+// package that builds a path into a shell script: the task dashboard's
+// launch script (internal/tasks).
+func ValidateRemotePath(label, path string) error {
+	return validateRemotePath(label, path)
+}
+
 func validateRemotePath(label, path string) error {
 	if validRemotePath.MatchString(path) {
 		return nil

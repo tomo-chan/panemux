@@ -267,6 +267,25 @@ var contractFixtures = map[string]contractFixture{
 		return rr.Body.Bytes(), nil
 	}},
 
+	"task-launch": {capture: func(t *testing.T) ([]byte, map[string]string) {
+		e := newAPIEnv(t)
+		e.srv.api.SetTaskService(fixtureLaunchService())
+
+		rr := e.do(t, http.MethodPost, "/api/tasks",
+			`{"host":"","agent":"claude","cwd":"/workspace/user/project","prompt":"Fix the flaky test","labels":["payment"]}`)
+		require.Equal(t, http.StatusCreated, rr.Code, rr.Body.String())
+		return rr.Body.Bytes(), nil
+	}},
+
+	"task-resume": {capture: func(t *testing.T) ([]byte, map[string]string) {
+		e := newAPIEnv(t)
+		e.srv.api.SetTaskService(fixtureLaunchService())
+
+		rr := e.do(t, http.MethodPost, "/api/tasks/resume", `{"host":"","session_id":"`+fixtureStoppedSessionID+`"}`)
+		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+		return rr.Body.Bytes(), nil
+	}},
+
 	"session-token": {capture: func(t *testing.T) ([]byte, map[string]string) {
 		e := newAPIEnv(t)
 
@@ -358,6 +377,26 @@ var contractFixtures = map[string]contractFixture{
 	}},
 
 	"ws-board-command-frames": {capture: captureBoardCommandFrames},
+}
+
+// fixtureStoppedSessionID is the stopped session fixtureLaunchService's
+// panemux host lists, which the task-resume capture resumes.
+const fixtureStoppedSessionID = "5d7e3a90-1b2c-4d3e-8f40-51627384a5b6"
+
+// fixtureLaunchService is a task service whose panemux host lists one
+// stopped session and accepts every launch, with a fixed random source so
+// the minted session ID is the same on every capture.
+func fixtureLaunchService() *tasks.Service {
+	return tasks.New(tasks.Options{
+		Rand: strings.NewReader(strings.Repeat("panemux-contract", 8)),
+		RunLocal: func(_ context.Context, script string) ([]byte, error) {
+			if strings.Contains(script, "::panemux-launch") {
+				return []byte("::panemux-launch ok\n"), nil
+			}
+			return []byte("::panemux-tasks v1\n::now 1790000000\n::section transcripts\n" +
+				"1789999000\t" + fixtureStoppedSessionID + ".jsonl\t\"cwd\":\"/workspace/user/project\"\n::end\n"), nil
+		},
+	})
 }
 
 // fixtureLocalTaskCollection is one of every task shape the panemux host can
