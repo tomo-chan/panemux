@@ -9,6 +9,7 @@ import {
   allLabels,
   canRecord,
   canResume,
+  canSummarize,
   columnForTask,
   filterTasks,
   findTaskPane,
@@ -17,6 +18,8 @@ import {
   hostLabel,
   labelColor,
   runningCount,
+  summaryNext,
+  summaryRequestOnSelect,
   taskOpenAction,
   taskTitle,
   visibleColumns,
@@ -27,7 +30,9 @@ import type { LaneMode, TaskOpenAction, TaskPaneRef } from '../utils/taskBoard'
 // state, with a detail panel on the right. Besides reading, it records what a
 // person says about a task — done, and its labels (issue #256) — through
 // tasksState.saveRecord, and starts new tasks and resumes stopped ones
-// (issue #257) through tasksState.launch and tasksState.resume. Opening a
+// (issue #257) through tasksState.launch and tasksState.resume, and shows
+// what `claude -p` made of each task's conversation (issue #258), asking for
+// a stopped task's summary through tasksState.requestSummary. Opening a
 // task is App's job (onOpenTask), because that means creating or focusing a
 // pane.
 
@@ -80,7 +85,7 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
   shortcut,
   now = Date.now,
 }) => {
-  const { data, error, loading, updatedAt, refresh, reconnect, saveRecord, launch, resume } = tasksState
+  const { data, error, loading, updatedAt, refresh, reconnect, saveRecord, launch, resume, requestSummary } = tasksState
   const [query, setQuery] = useState('')
   const [laneMode, setLaneMode] = useState<LaneMode>('none')
   const [hostFilter, setHostFilter] = useState(ALL_HOSTS)
@@ -107,6 +112,7 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
   }, [])
 
   const tasks = useMemo(() => data?.tasks ?? [], [data])
+  const summariesEnabled = data?.summaries_enabled ?? false
   const hosts = data?.hosts ?? []
   const labels = useMemo(() => allLabels(tasks), [tasks])
   // A label no task carries any more falls back to every label.
@@ -132,6 +138,11 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
     setPendingLaunch(null)
     setSelectedId(task.id)
     setDetailOpen(true)
+  }
+  // A person selecting a task: a stopped one is summarized only when asked.
+  const pick = (task: Task) => {
+    select(task)
+    if (summaryRequestOnSelect(task, summariesEnabled)) void requestSummary(task)
   }
   const launched = (result: TaskLaunchResponse, host: string) => {
     setNewTaskOpen(false)
@@ -291,7 +302,7 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
                             pane={panes.get(task.id) ?? null}
                             selected={task.id === selectedId}
                             nowMs={nowMs}
-                            onSelect={select}
+                            onSelect={pick}
                             onOpen={open}
                             onResume={(t) => void resumeTask(t)}
                             resuming={resumingIds.has(task.id)}
@@ -314,6 +325,8 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
           onResume={(t) => void resumeTask(t)}
           resuming={selected !== null && resumingIds.has(selected.id)}
           onSaveRecord={saveRecord}
+          onRequestSummary={requestSummary}
+          summariesEnabled={summariesEnabled}
           showDone={showDone}
           onClose={() => setDetailOpen(false)}
         />
@@ -405,7 +418,9 @@ const TaskCard: React.FC<TaskCardProps> = ({ task, pane, selected, nowMs, onSele
       data-selected={selected}
       style={stateStyle(task.state)}
       onClick={(event) => {
-        if ((event.target as HTMLElement).closest('a, button:not(.td-card-title)')) return
+        // The title button selects on its own; handling its click here too
+        // would select twice, and ask for a stopped task's summary twice.
+        if ((event.target as HTMLElement).closest('a, button')) return
         onSelect(task)
       }}
     >
@@ -413,6 +428,11 @@ const TaskCard: React.FC<TaskCardProps> = ({ task, pane, selected, nowMs, onSele
         <span className="td-meta-host">{hostLabel(task.host)}</span>
         <span>{task.agent}</span>
         {task.done && <span className="td-done-badge">Done</span>}
+        {!task.done && task.summary?.done_candidate && (
+          <span className="td-candidate-badge" title="The summary finds no work left">
+            Done?
+          </span>
+        )}
         {age && (
           <span className="td-meta-age" title={`${TASK_STATE_LABELS[task.state]} for ${age}`}>
             {age}
@@ -423,11 +443,18 @@ const TaskCard: React.FC<TaskCardProps> = ({ task, pane, selected, nowMs, onSele
         {taskTitle(task)}
       </button>
       {task.cwd && <div className="td-card-cwd" title={task.cwd}>{task.cwd}</div>}
-      {task.state === 'wait' && (
+      {task.state === 'wait' ? (
         <div className="td-why">
           {task.waiting_for || 'waiting'} · open the pane to respond
         </div>
+      ) : (
+        task.summary?.text && (
+          <div className="td-summary" data-outdated={task.summary.outdated ?? false}>
+            {task.summary.text}
+          </div>
+        )
       )}
+      <NextWork task={task} />
       <GitLinks task={task} />
       <LabelChips labels={task.labels ?? []} />
       <div className="td-foot">
@@ -438,6 +465,17 @@ const TaskCard: React.FC<TaskCardProps> = ({ task, pane, selected, nowMs, onSele
         <ResumeButton task={task} resuming={resuming} onResume={onResume} small />
       </div>
     </article>
+  )
+}
+
+// The first remaining item of a task's summary and how many remain in all.
+const NextWork: React.FC<{ task: Task }> = ({ task }) => {
+  const next = summaryNext(task.summary)
+  if (!next) return null
+  return (
+    <div className="td-next" data-testid="task-next" title={next.next}>
+      <span className="td-k">Next:</span> {next.next} · {next.left} left
+    </div>
   )
 }
 
@@ -559,6 +597,8 @@ interface TaskDetailProps {
   onResume: (task: Task) => void
   resuming: boolean
   onSaveRecord: TasksState['saveRecord']
+  onRequestSummary: TasksState['requestSummary']
+  summariesEnabled: boolean
   /** Whether the Done column is on screen, for what Mark done says will happen. */
   showDone: boolean
   onClose: () => void
@@ -573,6 +613,8 @@ const TaskDetail: React.FC<TaskDetailProps> = ({
   onResume,
   resuming,
   onSaveRecord,
+  onRequestSummary,
+  summariesEnabled,
   showDone,
   onClose,
 }) => {
@@ -693,9 +735,13 @@ const TaskDetail: React.FC<TaskDetailProps> = ({
             Could not save: {saveError}
           </div>
         )}
+        {recordable && !done && task.summary?.done_candidate && (
+          <p className="td-candidate">The summary finds no work left: a candidate for Mark done.</p>
+        )}
       </div>
       <div className="td-dbody">
         <StateNote task={task} />
+        <WorkSection task={task} enabled={summariesEnabled} onRequest={onRequestSummary} />
         {task.git && (task.git.repo || task.git.branch) && (
           <section className="td-sec">
             <h3>Links</h3>
@@ -831,6 +877,94 @@ const StateNote: React.FC<{ task: Task }> = ({ task }) => {
       note =
         'No running process handles this session. A host restart, a crash and a normal exit all look the same.'
       break
+  }
+  return note ? <p className="td-note">{note}</p> : null
+}
+
+interface WorkSectionProps {
+  task: Task
+  enabled: boolean
+  onRequest: TasksState['requestSummary']
+}
+
+// What the task is doing and what is left, from its summary (issue #258).
+const WorkSection: React.FC<WorkSectionProps> = ({ task, enabled, onRequest }) => {
+  // A failed request belongs to the task it was made for.
+  const [requestError, setRequestError] = useState<{ id: string; message: string } | null>(null)
+  const summary = task.summary
+  let body: React.ReactNode
+  if (!enabled) {
+    body = (
+      <p className="td-note">
+        Summaries are off. Set task_dashboard.summary.enabled in config.yaml to have claude -p on this host summarize
+        each task&apos;s conversation.
+      </p>
+    )
+  } else if (!canSummarize(task)) {
+    body = <p className="td-note">Only a claude task with a session ID can be summarized.</p>
+  } else {
+    const retry = summary?.state !== 'pending' && (!summary?.text || summary.outdated || summary.state === 'error')
+    const request = async () => {
+      const failure = await onRequest(task)
+      setRequestError(failure ? { id: task.id, message: failure } : null)
+    }
+    body = (
+      <>
+        {summary?.text && <p className="td-summary-text">{summary.text}</p>}
+        <SummaryStatus task={task} />
+        {summary?.remaining && summary.remaining.length > 0 && (
+          <>
+            <h4>Remaining</h4>
+            <ol className="td-remaining">
+              {summary.remaining.map((item, i) => (
+                <li key={i}>{item}</li>
+              ))}
+            </ol>
+          </>
+        )}
+        {summary?.state === 'ready' && summary.text && !summary.outdated && (summary.remaining ?? []).length === 0 && (
+          <p className="td-note">No remaining work found.</p>
+        )}
+        {retry && (
+          <button type="button" className="td-btn td-btn-sm" onClick={() => void request()}>
+            {summary ? 'Summarize again' : 'Summarize'}
+          </button>
+        )}
+        {requestError?.id === task.id && (
+          <div role="alert" className="td-alert td-alert-inline">
+            Could not ask for a summary: {requestError.message}
+          </div>
+        )}
+      </>
+    )
+  }
+  return (
+    <section className="td-sec" aria-label="Work">
+      <h3>Work</h3>
+      {body}
+    </section>
+  )
+}
+
+const SummaryStatus: React.FC<{ task: Task }> = ({ task }) => {
+  const summary = task.summary
+  let note: string | null = null
+  switch (summary?.state) {
+    case undefined:
+      note = task.state === 'busy' ? 'Summarized when it stops working.' : 'Not summarized yet.'
+      break
+    case 'pending':
+      note = 'Summarizing…'
+      break
+    case 'error':
+      note = `Could not summarize: ${summary.error ?? 'unknown error'}`
+      break
+    case 'unreadable':
+      note = 'The conversation log has no messages the dashboard can read; its format may have changed.'
+      break
+  }
+  if (summary?.outdated && summary.state !== 'pending') {
+    note = [note, 'The conversation has changed since this summary.'].filter(Boolean).join(' ')
   }
   return note ? <p className="td-note">{note}</p> : null
 }

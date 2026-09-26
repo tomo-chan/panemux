@@ -26,7 +26,7 @@ import (
 //	::section ps                 "<pid> <ppid> <command>", this user's processes only
 //	::section tmux               "<pane pid> <tmux session name>"
 //	::section cwd                "<pid> <cwd>" for this user's processes that may be claude or codex
-//	::section transcripts        "<mtime>\t<file name>\t<first "cwd":"..." in it>"
+//	::section transcripts        "<mtime>\t<file name>\t<first "cwd":"..." in it>\t<size in bytes>"
 //	::end                        the output is complete
 //
 // Transcripts are the conversation logs directly under ~/.claude/projects/*/
@@ -58,16 +58,16 @@ while read -r pid; do
 done
 echo '::section transcripts'
 if stat -c %Y / >/dev/null 2>&1; then
-	mtime() { stat -c %Y "$1"; }
+	mtime() { stat -c '%Y %s' "$1"; }
 else
-	mtime() { stat -f %m "$1"; }
+	mtime() { stat -f '%m %z' "$1"; }
 fi
 find "$HOME/.claude/projects" -mindepth 2 -maxdepth 2 -type f -name '*.jsonl' -mtime -7 2>/dev/null |
 while IFS= read -r p; do
 	t=$(mtime "$p" 2>/dev/null) && echo "$t $p"
-done | sort -rn | head -n 100 | while read -r t p; do
+done | sort -rn | head -n 100 | while read -r t s p; do
 	c=$(grep -m 1 -o '"cwd":"[^"]*"' "$p" 2>/dev/null | head -n 1)
-	printf '%s\t%s\t%s\n' "$t" "${p##*/}" "$c"
+	printf '%s\t%s\t%s\t%s\n' "$t" "${p##*/}" "$c" "$s"
 done
 echo '::end'
 exit 0
@@ -113,6 +113,9 @@ type transcript struct {
 	SessionID string
 	CWD       string
 	ModTime   int64
+	// Size is the log's size in bytes, 0 when the host did not report one.
+	// With ModTime it tells whether the log changed since it was summarized.
+	Size int64
 }
 
 // parseCollectOutput reads collectScript's output. It fails only when the
@@ -275,7 +278,7 @@ func parseProcessRow(line string) (process, bool) {
 }
 
 func parseTranscriptRow(line string) (transcript, bool) {
-	parts := strings.SplitN(line, "\t", 3)
+	parts := strings.SplitN(line, "\t", 4)
 	if len(parts) < 2 {
 		return transcript{}, false
 	}
@@ -288,8 +291,15 @@ func parseTranscriptRow(line string) (transcript, bool) {
 		return transcript{}, false
 	}
 	tr := transcript{ModTime: modTime, SessionID: sessionID}
-	if len(parts) == 3 {
+	if len(parts) >= 3 {
 		tr.CWD = transcriptCWD(parts[2])
+	}
+	// The cwd fragment is JSON, whose strings never hold a literal tab, so
+	// a fourth field is always the size.
+	if len(parts) == 4 {
+		if size, err := strconv.ParseInt(parts[3], 10, 64); err == nil && size > 0 {
+			tr.Size = size
+		}
 	}
 	return tr, true
 }

@@ -16,6 +16,7 @@
       "status": "error"
     }
   ],
+  "summaries_enabled": true,
   "tasks": [
     {
       "agent": "claude",
@@ -37,6 +38,15 @@
       "started_at": "2026-01-01T00:00:00Z",
       "state": "wait",
       "status_since": "2026-01-01T00:00:00Z",
+      "summary": {
+        "remaining": [
+          "Update the docs",
+          "Run make check"
+        ],
+        "state": "ready",
+        "summarized_at": "2026-01-01T00:00:00Z",
+        "text": "Adding task summaries to the dashboard."
+      },
       "waiting_for": "input needed"
     },
     {
@@ -88,7 +98,13 @@
       },
       "session_id": "55f0c2b8",
       "state": "stop",
-      "status_since": "2026-01-01T00:00:00Z"
+      "status_since": "2026-01-01T00:00:00Z",
+      "summary": {
+        "done_candidate": true,
+        "state": "ready",
+        "summarized_at": "2026-01-01T00:00:00Z",
+        "text": "service-b was released."
+      }
     },
     {
       "agent": "claude",

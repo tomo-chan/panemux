@@ -1,6 +1,7 @@
 package tasks
 
 import (
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -595,4 +596,45 @@ func TestBuildTasks_OrderIsLiveFirstThenStoppedNewestFirst(t *testing.T) {
 		"local:claude:newer-stop",
 		"local:claude:older-stop",
 	}, ids)
+}
+
+// Every claude task with a conversation log carries the log's version — its
+// modification time and size — which is what a cached summary is keyed on.
+func TestBuildTasks_ClaudeTasksCarryTheirLogVersion(t *testing.T) {
+	raw := rawSnapshot{
+		Now:        hostNow,
+		StateFiles: []stateFile{{Name: "1.json", Data: stateJSON(1, "live", "idle")}},
+		Processes:  []process{claudeProc(1, 0), {PID: 3, Command: "codex"}},
+		Transcripts: []transcript{
+			{ModTime: hostNow - 60, SessionID: "live", Size: 4096},
+			{ModTime: hostNow - 7200, SessionID: "stopped", Size: 100},
+			{ModTime: hostNow - 9000, SessionID: "stopped", Size: 50},
+		},
+	}
+	tasks := buildTasks("", raw, collectedAt)
+
+	assert.Equal(t, &LogVersion{ModTime: hostNow - 60, Size: 4096}, findTask(t, tasks, "local:claude:live").Log)
+	assert.Equal(t, &LogVersion{ModTime: hostNow - 7200, Size: 100}, findTask(t, tasks, "local:claude:stopped").Log,
+		"the newest log of a session")
+	assert.Nil(t, findTask(t, tasks, "local:codex:pid-3").Log)
+}
+
+// A running session whose log is not among the collected ones (older than 7
+// days, or beyond the newest 100) has no log version and so no summary.
+func TestBuildTasks_ALiveSessionWithoutACollectedLogHasNoLogVersion(t *testing.T) {
+	raw := rawSnapshot{
+		Now:        hostNow,
+		StateFiles: []stateFile{{Name: "1.json", Data: stateJSON(1, "live", "idle")}},
+		Processes:  []process{claudeProc(1, 0)},
+	}
+	tasks := buildTasks("", raw, collectedAt)
+	assert.Nil(t, findTask(t, tasks, "local:claude:live").Log)
+}
+
+// The log version is internal: the API reports a summary, not the log's size.
+func TestTask_LogVersionIsNotSerialized(t *testing.T) {
+	data, err := json.Marshal(Task{ID: "x", Log: &LogVersion{ModTime: 1, Size: 2}})
+	require.NoError(t, err)
+	assert.NotContains(t, string(data), "log")
+	assert.NotContains(t, string(data), "Log")
 }

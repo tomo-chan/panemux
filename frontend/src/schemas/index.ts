@@ -359,6 +359,24 @@ export const TaskGitSchema = z.object({
 
 export type TaskGit = z.infer<typeof TaskGitSchema>
 
+// What `claude -p` on the panemux host made of a task's conversation log
+// (issue #258). text, remaining and summarized_at are the last answer, when
+// there is one, whatever state says; outdated means the log changed since.
+// done_candidate is a ready, current answer with nothing remaining — a person
+// still decides whether the task is done. Like the rest of the task, the
+// text carries no .max(): the server bounds it.
+export const TaskSummarySchema = z.object({
+  state: z.enum(['pending', 'ready', 'error', 'unreadable']),
+  text: z.string().optional(),
+  remaining: z.array(z.string()).optional(),
+  summarized_at: z.string().optional(),
+  outdated: z.boolean().optional(),
+  done_candidate: z.boolean().optional(),
+  error: z.string().optional(),
+})
+
+export type TaskSummary = z.infer<typeof TaskSummarySchema>
+
 export const TaskSchema = z.object({
   id: z.string().min(1),
   // The ssh_connections key, or '' for the panemux host itself.
@@ -377,6 +395,8 @@ export const TaskSchema = z.object({
   // session_id can carry them; done does not change state.
   done: z.boolean().optional(),
   labels: z.array(z.string()).optional(),
+  // Present only while summaries are enabled and once the task has one.
+  summary: TaskSummarySchema.optional(),
 })
 
 export type Task = z.infer<typeof TaskSchema>
@@ -395,6 +415,8 @@ export const TasksResponseSchema = z.object({
   tasks: z.array(TaskSchema),
   // Why the task record file could not be read; the tasks come without records.
   records_error: z.string().optional(),
+  // task_dashboard.summary.enabled. The server always sends it; absent is off.
+  summaries_enabled: z.boolean().optional(),
 })
 
 export type TasksResponse = z.infer<typeof TasksResponseSchema>

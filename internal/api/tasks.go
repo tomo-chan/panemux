@@ -28,6 +28,10 @@ type taskGitInfo struct {
 
 type taskResponse struct {
 	Git *taskGitInfo `json:"git,omitempty"`
+	// Summary is what `claude -p` made of the task's conversation log
+	// (issue #258), present only while summaries are enabled and once the
+	// task has one.
+	Summary *tasks.SummaryView `json:"summary,omitempty"`
 	// Labels and Done are what a person recorded about the task on the
 	// dashboard (tasks.RecordStore). Done does not change State: a task
 	// marked done that is running again reports the state it is in.
@@ -42,6 +46,8 @@ type tasksResponse struct {
 	RecordsError string             `json:"records_error,omitempty"`
 	Hosts        []tasks.HostResult `json:"hosts"`
 	Tasks        []taskResponse     `json:"tasks"`
+	// SummariesEnabled is task_dashboard.summary.enabled.
+	SummariesEnabled bool `json:"summaries_enabled"`
 }
 
 type taskGitCacheEntry struct {
@@ -131,9 +137,21 @@ func (h *Handler) GetTasks(w http.ResponseWriter, r *http.Request) {
 	}
 	git := h.taskGitInfos(r.Context(), snapshot.Tasks, collected)
 
-	resp := tasksResponse{Hosts: snapshot.Hosts, Tasks: make([]taskResponse, 0, len(snapshot.Tasks))}
+	resp := tasksResponse{
+		Hosts:            snapshot.Hosts,
+		Tasks:            make([]taskResponse, 0, len(snapshot.Tasks)),
+		SummariesEnabled: h.cfg.TaskDashboard.Summary.Enabled,
+	}
+	var summaries map[string]*tasks.SummaryView
+	if resp.SummariesEnabled {
+		summaries = h.tasks.Summaries(snapshot.Tasks)
+	}
 	for _, task := range snapshot.Tasks {
-		resp.Tasks = append(resp.Tasks, taskResponse{Task: task, Git: taskGitFor(task, git[taskGitKey(task.Host, task.CWD)])})
+		resp.Tasks = append(resp.Tasks, taskResponse{
+			Task:    task,
+			Git:     taskGitFor(task, git[taskGitKey(task.Host, task.CWD)]),
+			Summary: summaries[task.ID],
+		})
 	}
 	if records, err := h.taskRecords.Records(); err != nil {
 		resp.RecordsError = err.Error()

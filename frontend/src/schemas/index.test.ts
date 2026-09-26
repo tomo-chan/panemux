@@ -28,6 +28,7 @@ import {
   TaskRecordSchema,
   TaskLaunchedSchema,
   TaskLaunchResponseSchema,
+  TaskSummarySchema,
 } from './index'
 
 describe('TasksResponseSchema', () => {
@@ -114,6 +115,37 @@ describe('TasksResponseSchema', () => {
     expect(TasksResponseSchema.safeParse({
       hosts: [], tasks: [{ ...task, git: { pr_url: 'javascript:alert(1)' } }],
     }).success).toBe(false)
+  })
+})
+
+describe('TaskSummarySchema', () => {
+  it('accepts a summary in every state, and a task and response carrying one', () => {
+    const ready = {
+      state: 'ready',
+      text: 'Fixing a flaky test.',
+      remaining: ['Run make check'],
+      summarized_at: '2026-09-25T12:00:00Z',
+      outdated: true,
+    }
+    expect(TaskSummarySchema.safeParse(ready).success).toBe(true)
+    expect(TaskSummarySchema.safeParse({ state: 'ready', text: 'Done.', done_candidate: true }).success).toBe(true)
+    expect(TaskSummarySchema.safeParse({ state: 'pending' }).success).toBe(true)
+    expect(TaskSummarySchema.safeParse({ state: 'error', error: 'claude exited with status 1' }).success).toBe(true)
+    expect(TaskSummarySchema.safeParse({ state: 'unreadable' }).success).toBe(true)
+
+    const result = TasksResponseSchema.safeParse({
+      hosts: [], summaries_enabled: true,
+      tasks: [{ id: 'a', host: '', agent: 'claude', state: 'idle', location: { kind: 'none', attachable: false }, summary: ready }],
+    })
+    expect(result.success && result.data.summaries_enabled).toBe(true)
+    expect(result.success && result.data.tasks[0].summary).toEqual(ready)
+  })
+
+  it('rejects an unknown state and fields of the wrong type', () => {
+    expect(TaskSummarySchema.safeParse({ state: 'done' }).success).toBe(false)
+    expect(TaskSummarySchema.safeParse({ state: 'ready', remaining: 'x' }).success).toBe(false)
+    expect(TaskSummarySchema.safeParse({ state: 'ready', done_candidate: 'yes' }).success).toBe(false)
+    expect(TaskSummarySchema.safeParse({ text: 'no state' }).success).toBe(false)
   })
 })
 

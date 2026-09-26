@@ -75,3 +75,30 @@ func TestSaveLayout_TaskDashboardShortcutIsWrittenOnlyWhenSet(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "J", reloaded.Display.TaskDashboardShortcutKey())
 }
+
+// Summaries send a host's conversation text to claude on the panemux host,
+// so they are off unless the operator turns them on, and an unrelated save
+// neither turns them on nor writes the key.
+func TestTaskDashboardSummary_IsOffUnlessEnabled(t *testing.T) {
+	unset := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(unset, []byte("server:\n  port: 8080\n"), 0o600))
+	cfg, err := Load(unset)
+	require.NoError(t, err)
+	assert.False(t, cfg.TaskDashboard.Summary.Enabled)
+	assert.False(t, Default().TaskDashboard.Summary.Enabled)
+	require.NoError(t, cfg.SaveLayout(cfg.Layout))
+	saved, err := os.ReadFile(unset)
+	require.NoError(t, err)
+	assert.NotContains(t, string(saved), "task_dashboard")
+
+	set := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(set,
+		[]byte("server:\n  port: 8080\ntask_dashboard:\n  summary:\n    enabled: true\n"), 0o600))
+	cfg, err = Load(set)
+	require.NoError(t, err)
+	assert.True(t, cfg.TaskDashboard.Summary.Enabled)
+	require.NoError(t, cfg.SaveLayout(cfg.Layout))
+	reloaded, err := Load(set)
+	require.NoError(t, err)
+	assert.True(t, reloaded.TaskDashboard.Summary.Enabled, "an enabled summary survives a save")
+}

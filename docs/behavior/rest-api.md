@@ -196,15 +196,16 @@ A `409` is reported rather than worked around. An OAuth provider matches the reg
 `redirect_uri` exactly, so rewriting the callback to a different local port would break the login it
 is meant to complete.
 
-### `GET /api/tasks`, `POST /api/tasks/hosts/{name}/reconnect`, `PUT /api/tasks/records`, `POST /api/tasks` and `POST /api/tasks/resume`
+### `GET /api/tasks`, `POST /api/tasks/hosts/{name}/reconnect`, `PUT /api/tasks/records`, `POST /api/tasks`, `POST /api/tasks/resume` and `POST /api/tasks/summary`
 
-The task dashboard's collection, its per-host reconnect, the done and label records, and starting
-and resuming tasks. Their responses and the collection rules are in
+The task dashboard's collection, its per-host reconnect, the done and label records, starting
+and resuming tasks, and asking for a task's summary. Their responses and the collection rules are in
 [task dashboard behavior](tasks.md#get-apitasks); the records are in
 [Done and labels](tasks.md#done-and-labels) and [`PUT /api/tasks/records`](tasks.md#put-apitasksrecords);
 starting and resuming are in [Starting a task](tasks.md#starting-a-task),
 [Resuming a task](tasks.md#resuming-a-task), [`POST /api/tasks`](tasks.md#post-apitasks) and
-[`POST /api/tasks/resume`](tasks.md#post-apitasksresume).
+[`POST /api/tasks/resume`](tasks.md#post-apitasksresume); summaries are in [Summaries](tasks.md#summaries)
+and [`POST /api/tasks/summary`](tasks.md#post-apitaskssummary).
 
 ### `GET /api/ssh-connections`
 
