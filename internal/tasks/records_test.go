@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -217,19 +218,6 @@ func TestRecordStore_ALoadFailureIsRetried(t *testing.T) {
 	assert.True(t, records[RecordKey{Agent: "claude", SessionID: "s"}].Done)
 }
 
-// Once loaded, the file is not read again: panemux is its only writer.
-func TestRecordStore_LoadsOnce(t *testing.T) {
-	path := recordsPath(t)
-	store := NewRecordStore(path)
-	_, err := store.Put(Record{Agent: "claude", SessionID: "s", Done: true})
-	require.NoError(t, err)
-
-	require.NoError(t, os.Remove(path))
-	records, err := store.Records()
-	require.NoError(t, err)
-	assert.Len(t, records, 1)
-}
-
 func TestRecordStore_AFailedWriteChangesNothing(t *testing.T) {
 	path := recordsPath(t)
 	store := NewRecordStore(path)
@@ -300,6 +288,11 @@ func TestNormalizeLabels(t *testing.T) {
 		{name: "control character", in: []string{"a\tb"}, wantErr: "control character"},
 		{name: "newline", in: []string{"a\nb"}, wantErr: "control character"},
 		{name: "control character first", in: []string{"\x01a"}, wantErr: "control character"},
+		{name: "only a zero-width space", in: []string{"\u200b"}, wantErr: "format character"},
+		{name: "zero-width space inside", in: []string{"a\u200bb"}, wantErr: "format character"},
+		{name: "right-to-left override", in: []string{"a\u202ebc"}, wantErr: "format character"},
+		{name: "line separator", in: []string{"a\u2028b"}, wantErr: "format character"},
+		{name: "paragraph separator", in: []string{"a\u2029b"}, wantErr: "format character"},
 		{name: "invalid UTF-8", in: []string{"a\xffb"}, wantErr: "not valid UTF-8"},
 		{name: "most allowed", in: tooMany[:MaxLabels], want: tooMany[:MaxLabels]},
 		{name: "too many", in: tooMany, wantErr: "more than 20 labels"},
@@ -363,5 +356,125 @@ func TestRecordStore_ReadErrorOtherThanMissing(t *testing.T) {
 	require.NoError(t, os.MkdirAll(path, 0o700), "a directory where the file should be")
 
 	_, err := NewRecordStore(path).Records()
+	require.ErrorContains(t, err, "reading task record file")
+}
+
+// writeRecordsFile replaces the record file the way a person editing it by
+// hand would, and moves its modification time on so the change is visible
+// even on a filesystem with coarse timestamps.
+func writeRecordsFile(t *testing.T, path, content string, age time.Duration) {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+	when := time.Now().Add(age)
+	require.NoError(t, os.Chtimes(path, when, when))
+}
+
+// A file edited by hand while panemux runs is read again before it is used,
+// so the edit is neither hidden nor undone by the next save.
+func TestRecordStore_AFileEditedByHandIsReadAgain(t *testing.T) {
+	path := recordsPath(t)
+	store := NewRecordStore(path)
+	_, err := store.Put(Record{Agent: "claude", SessionID: "a", Done: true})
+	require.NoError(t, err)
+
+	writeRecordsFile(t, path, `{"version":1,"records":[{"host":"","agent":"claude","session_id":"b","done":true}]}`,
+		time.Hour)
+
+	records, err := store.Records()
+	require.NoError(t, err)
+	assert.Equal(t, map[RecordKey]Record{
+		{Agent: "claude", SessionID: "b"}: {Agent: "claude", SessionID: "b", Done: true},
+	}, records, "the hand edit is what the store serves")
+
+	_, err = store.Put(Record{Agent: "claude", SessionID: "c", Labels: []string{"x"}})
+	require.NoError(t, err)
+	reloaded, err := NewRecordStore(path).Records()
+	require.NoError(t, err)
+	assert.Equal(t, map[RecordKey]Record{
+		{Agent: "claude", SessionID: "b"}: {Agent: "claude", SessionID: "b", Done: true},
+		{Agent: "claude", SessionID: "c"}: {Agent: "claude", SessionID: "c", Labels: []string{"x"}},
+	}, reloaded, "the removed record stays removed and the added one stays")
+}
+
+func TestRecordStore_AFileBrokenOrRemovedByHand(t *testing.T) {
+	t.Run("broken", func(t *testing.T) {
+		path := recordsPath(t)
+		store := NewRecordStore(path)
+		_, err := store.Put(Record{Agent: "claude", SessionID: "a", Done: true})
+		require.NoError(t, err)
+
+		writeRecordsFile(t, path, "{", time.Hour)
+
+		_, err = store.Records()
+		require.ErrorContains(t, err, "parsing task record file")
+		_, err = store.Put(Record{Agent: "claude", SessionID: "c", Done: true})
+		require.ErrorContains(t, err, "parsing task record file")
+		data, err := os.ReadFile(path)
+		require.NoError(t, err)
+		assert.Equal(t, "{", string(data), "the broken file is not overwritten")
+	})
+	t.Run("removed", func(t *testing.T) {
+		path := recordsPath(t)
+		store := NewRecordStore(path)
+		_, err := store.Put(Record{Agent: "claude", SessionID: "a", Done: true})
+		require.NoError(t, err)
+
+		require.NoError(t, os.Remove(path))
+
+		records, err := store.Records()
+		require.NoError(t, err)
+		assert.Empty(t, records)
+	})
+}
+
+// A record file symlinked into ~/.config/panemux (from a dotfiles repository,
+// say) is written through the link, as config.yaml is.
+func TestRecordStore_WritesThroughASymlink(t *testing.T) {
+	cases := []struct {
+		name   string
+		target string // relative to the link's directory
+		seed   bool
+	}{
+		{name: "existing target", target: "dotfiles-tasks.json", seed: true},
+		{name: "target not created yet", target: "dotfiles-tasks.json"},
+		{name: "relative target in another directory", target: "../repo/tasks.json", seed: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), "panemux")
+			require.NoError(t, os.MkdirAll(dir, 0o700))
+			target := filepath.Join(dir, tc.target)
+			if tc.seed {
+				writeRecordsFile(t, target, `{"version":1,"records":[]}`, 0)
+			} else {
+				require.NoError(t, os.MkdirAll(filepath.Dir(target), 0o700))
+			}
+			link := filepath.Join(dir, "tasks.json")
+			require.NoError(t, os.Symlink(tc.target, link))
+
+			_, err := NewRecordStore(link).Put(Record{Agent: "claude", SessionID: "s", Done: true})
+			require.NoError(t, err)
+
+			info, err := os.Lstat(link)
+			require.NoError(t, err)
+			assert.NotZero(t, info.Mode()&os.ModeSymlink, "the link is still a link")
+			data, err := os.ReadFile(target)
+			require.NoError(t, err)
+			assert.Contains(t, string(data), `"session_id":"s"`, "the target has the record")
+		})
+	}
+}
+
+// A path whose parent is a file cannot even be checked for changes; that is
+// reported like any other read failure.
+func TestRecordStore_AFileThatCannotBeCheckedIsReported(t *testing.T) {
+	parent := filepath.Join(t.TempDir(), "not-a-directory")
+	require.NoError(t, os.WriteFile(parent, nil, 0o600))
+	store := NewRecordStore(filepath.Join(parent, "tasks.json"))
+
+	_, err := store.Records()
+	require.ErrorContains(t, err, "reading task record file")
+	_, err = store.Put(Record{Agent: "claude", SessionID: "s", Done: true})
 	require.ErrorContains(t, err, "reading task record file")
 }
