@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,13 +19,99 @@ import (
 
 // taskGitInfo is the repository, branch and pull request of a task's working
 // directory — the same metadata a pane header shows, looked up for the
-// task's own directory instead of a pane's.
+// task's own directory instead of a pane's — with the issues the pull
+// request closes and the Jira keys its branch name and title carry.
 type taskGitInfo struct {
-	Repo     string `json:"repo,omitempty"`
-	RepoURL  string `json:"repo_url,omitempty"`
-	Branch   string `json:"branch,omitempty"`
-	PRURL    string `json:"pr_url,omitempty"`
-	PRNumber int    `json:"pr_number,omitempty"`
+	Repo     string          `json:"repo,omitempty"`
+	RepoURL  string          `json:"repo_url,omitempty"`
+	Branch   string          `json:"branch,omitempty"`
+	PRURL    string          `json:"pr_url,omitempty"`
+	Issues   []taskIssueLink `json:"issues,omitempty"`
+	Jira     []taskJiraLink  `json:"jira,omitempty"`
+	PRNumber int             `json:"pr_number,omitempty"`
+}
+
+// taskIssueLink is one GitHub issue the task's pull request closes. Repo is
+// the issue's owner/name, which can differ from the pull request's.
+type taskIssueLink struct {
+	URL    string `json:"url"`
+	Repo   string `json:"repo,omitempty"`
+	Number int    `json:"number"`
+}
+
+// taskJiraLink is one Jira key found in the task's branch name or pull
+// request title, and its page on the configured Jira site.
+type taskJiraLink struct {
+	Key string `json:"key"`
+	URL string `json:"url"`
+}
+
+// prTaskFields is what the task dashboard reads of a pull request: the
+// title for its Jira keys and the issues it closes, in the same `gh` call.
+const prTaskFields = "url,number,title,closingIssuesReferences"
+
+// jiraKeyRe is a Jira issue key: a project key of an upper-case letter and
+// one or more upper-case letters, digits or underscores, then "-" and an
+// issue number without a leading zero. jiraKeys also requires that no ASCII
+// letter or digit touches it on either side.
+var jiraKeyRe = regexp.MustCompile(`[A-Z][A-Z0-9_]+-[1-9][0-9]*`)
+
+// jiraKeys lists the Jira keys in texts, in the order they appear, each
+// once.
+func jiraKeys(texts ...string) []string {
+	var keys []string
+	seen := map[string]bool{}
+	for _, text := range texts {
+		for _, loc := range jiraKeyRe.FindAllStringIndex(text, -1) {
+			if loc[0] > 0 && isASCIIAlnum(text[loc[0]-1]) {
+				continue
+			}
+			if loc[1] < len(text) && isASCIIAlnum(text[loc[1]]) {
+				continue
+			}
+			key := text[loc[0]:loc[1]]
+			if !seen[key] {
+				seen[key] = true
+				keys = append(keys, key)
+			}
+		}
+	}
+	return keys
+}
+
+func isASCIIAlnum(b byte) bool {
+	return b >= '0' && b <= '9' || b >= 'A' && b <= 'Z' || b >= 'a' && b <= 'z'
+}
+
+// closingIssueLinks is the issues a pull request closes, keeping only those
+// with an issue number and an http(s) URL: the browser validates every link
+// in the response and would reject all of it for one bad entry.
+func closingIssueLinks(pr ghPullRequest) []taskIssueLink {
+	var links []taskIssueLink
+	for _, issue := range pr.ClosingIssues {
+		if issue.Number <= 0 || !isHTTPURL(issue.URL) {
+			continue
+		}
+		link := taskIssueLink{Number: issue.Number, URL: issue.URL}
+		if issue.Repository.Owner.Login != "" && issue.Repository.Name != "" {
+			link.Repo = issue.Repository.Owner.Login + "/" + issue.Repository.Name
+		}
+		links = append(links, link)
+	}
+	return links
+}
+
+const (
+	schemeHTTP  = "http"
+	schemeHTTPS = "https"
+)
+
+// webLinkSchemes are the schemes a link on the dashboard may have.
+var webLinkSchemes = map[string]bool{schemeHTTP: true, schemeHTTPS: true}
+
+func isHTTPURL(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && webLinkSchemes[u.Scheme] && u.Host != ""
 }
 
 type taskResponse struct {
@@ -311,8 +399,18 @@ func (h *Handler) lookupTaskGit(ctx context.Context, host, cwd string, withPR bo
 		RepoURL: h.repoPageURLFromOriginURL(gitCtx.OriginURL),
 		Branch:  gitCtx.Branch,
 	}
+	prTitle := ""
 	if withPR {
-		info.PRURL, info.PRNumber = h.lookupPR(ctx, host != "", cwd, gitCtx)
+		if pr, ok := h.lookupPullRequest(ctx, host != "", cwd, gitCtx, prTaskFields); ok {
+			info.PRURL, info.PRNumber = strings.TrimSpace(pr.URL), pr.Number
+			info.Issues = closingIssueLinks(pr)
+			prTitle = pr.Title
+		}
+	}
+	if h.cfg.TaskDashboard.JiraURL != "" {
+		for _, key := range jiraKeys(gitCtx.Branch, prTitle) {
+			info.Jira = append(info.Jira, taskJiraLink{Key: key, URL: h.cfg.TaskDashboard.JiraBrowseURL(key)})
+		}
 	}
 	return info
 }

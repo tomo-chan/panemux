@@ -93,6 +93,31 @@ describe('TasksResponseSchema', () => {
       hosts: [], tasks: [{ ...task, git: { pr_url: 'javascript:alert(1)' } }],
     }).success).toBe(false)
   })
+
+  it('accepts the issues a PR closes and the Jira keys of a task', () => {
+    const result = TasksResponseSchema.safeParse({
+      hosts: [],
+      tasks: [{ ...task, git: {
+        branch: 'PAY-418-retry',
+        issues: [
+          { number: 252, url: 'https://github.com/example/panemux/issues/252', repo: 'example/panemux' },
+          { number: 9, url: 'https://github.com/example/infra/issues/9' },
+        ],
+        jira: [{ key: 'PAY-418', url: 'https://example.atlassian.net/browse/PAY-418' }],
+      } }],
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it.each([
+    ['an issue URL that is not http(s)', { issues: [{ number: 1, url: 'javascript:alert(1)' }] }],
+    ['an issue without a number', { issues: [{ url: 'https://github.com/example/r/issues/1' }] }],
+    ['an issue number that is not positive', { issues: [{ number: 0, url: 'https://github.com/example/r/issues/0' }] }],
+    ['a Jira URL that is not http(s)', { jira: [{ key: 'PAY-1', url: 'javascript:alert(1)' }] }],
+    ['a Jira link without a key', { jira: [{ url: 'https://example.atlassian.net/browse/PAY-1' }] }],
+  ])('rejects %s', (_name, git) => {
+    expect(TasksResponseSchema.safeParse({ hosts: [], tasks: [{ ...task, git }] }).success).toBe(false)
+  })
 })
 
 describe('GitInfoSchema', () => {

@@ -24,6 +24,7 @@ The YAML config defines:
   workspace's recursive layout
 - optional `display` settings, including `display.task_dashboard_shortcut`
 - optional `url_open` settings
+- optional `task_dashboard` settings, including `task_dashboard.jira_url`
 - optional `agent_board` and `command_center` settings
 
 Legacy top-level `layout` is accepted at load time and normalized to one `default` workspace. The
@@ -52,6 +53,14 @@ Layout rules:
 - `url_open.browser_shim` gates browser-open interception (see "Opening URLs from a pane")
 - it is a tri-state: omitted means enabled, and an omitted block is never written back into an
   operator's config file on save
+
+`task_dashboard.jira_url` rules:
+
+- the Jira site a task's Jira keys link into, as `<jira_url>/browse/<key>` (see
+  [task dashboard behavior](behavior/tasks.md#repository-branch-pull-request-issues-and-jira-keys))
+- an absolute `https` URL with a host; a path is allowed, a query, a fragment, credentials,
+  whitespace and control characters are not
+- omitted means no Jira links, and an omitted block is never written back on save
 
 Path behavior:
 

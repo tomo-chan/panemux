@@ -153,6 +153,27 @@ while being built:
 - **The UI text is English**, like the rest of panemux's interface, although the issue's mockup is
   written in Japanese.
 
+### Issue and Jira links (2026-09-26, issue #255)
+
+- **An issue is one the task's pull request closes**, read from `gh pr view --json
+  closingIssuesReferences` in the same `gh` call that already found the pull request, so the
+  dashboard runs no extra command and still looks up only directories a running task uses. That
+  the field exists and what it exports (`id`, `number`, `url`, and the repository's `name` and
+  owner `login`; the query asks for the first 100) was checked in the source of gh 2.101.0
+  (`api/export_pr.go`, `api/query_builder.go`), not against a real pull request: the environment it
+  was built in had no working GitHub token. Whether an issue linked by hand in the pull request's
+  sidebar, rather than by a closing keyword, is included has not been checked either. Issue titles
+  are not shown, since that export carries none.
+- **A Jira key is `[A-Z][A-Z0-9_]+-[1-9][0-9]*` with no ASCII letter or digit touching it**, found
+  in the branch name and then the pull request title. Keys are case-sensitive, so a lower-case
+  branch such as `pay-418-retry` gives none; the form still matches words such as `UTF-8` or
+  `SHA-256` in a title. Every key found is linked, not just the first.
+- **Jira is linked, never queried.** `task_dashboard.jira_url` names the site and a key becomes
+  `<jira_url>/browse/<key>`; no Jira API is called and no ticket title is fetched, so panemux holds
+  no Jira credentials. The setting is a new top-level `task_dashboard` section rather than part of
+  `display`, since it says where links point rather than how anything looks. It must be an `https`
+  URL, because it becomes the address of a link the operator clicks.
+
 ## Agent Board
 
 ### Compatibility is checked against a real agmsg release (2026-08-23, PR #176)

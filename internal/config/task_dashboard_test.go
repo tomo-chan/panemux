@@ -75,3 +75,84 @@ func TestSaveLayout_TaskDashboardShortcutIsWrittenOnlyWhenSet(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "J", reloaded.Display.TaskDashboardShortcutKey())
 }
+
+func TestValidate_TaskDashboardJiraURL(t *testing.T) {
+	tests := []struct {
+		value string
+		ok    bool
+	}{
+		{"", true},
+		{"https://example.atlassian.net", true},
+		{"https://example.atlassian.net/", true},
+		{"https://jira.example.invalid/jira", true},
+		{"https://jira.example.invalid:8443", true},
+		{"http://jira.example.invalid", false},
+		{"javascript:alert(1)", false},
+		{"example.atlassian.net", false},
+		{"https://", false},
+		{"https:///browse", false},
+		{"https://jira.example.invalid/?a=1", false},
+		{"https://jira.example.invalid/#top", false},
+		{"https://jira.example.invalid/?", false},
+		{"https://jira.example.invalid/#", false},
+		{"https://user:pass@jira.example.invalid", false},
+		{"https://jira.example.invalid/a b", false},
+		{"https://jira.example.invalid/\n", false},
+		{" https://jira.example.invalid", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.value, func(t *testing.T) {
+			cfg := validConfig()
+			cfg.TaskDashboard.JiraURL = tt.value
+			err := cfg.Validate()
+			if tt.ok {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "task_dashboard.jira_url")
+		})
+	}
+}
+
+func TestJiraBrowseURL(t *testing.T) {
+	tests := []struct {
+		base, key, want string
+	}{
+		{"", "PAY-418", ""},
+		{"https://example.atlassian.net", "PAY-418", "https://example.atlassian.net/browse/PAY-418"},
+		{"https://example.atlassian.net/", "PAY-418", "https://example.atlassian.net/browse/PAY-418"},
+		{"https://jira.example.invalid/jira//", "OPS-7", "https://jira.example.invalid/jira/browse/OPS-7"},
+	}
+	for _, tt := range tests {
+		d := TaskDashboardConfig{JiraURL: tt.base}
+		assert.Equal(t, tt.want, d.JiraBrowseURL(tt.key), "base %q", tt.base)
+	}
+}
+
+func TestLoad_ReadsTaskDashboardJiraURL(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(path,
+		[]byte("server:\n  port: 8080\ntask_dashboard:\n  jira_url: https://example.atlassian.net\n"), 0o600))
+	cfg, err := Load(path)
+	require.NoError(t, err)
+	assert.Equal(t, "https://example.atlassian.net", cfg.TaskDashboard.JiraURL)
+
+	require.NoError(t, cfg.SaveLayout(cfg.Layout))
+	reloaded, err := Load(path)
+	require.NoError(t, err)
+	assert.Equal(t, "https://example.atlassian.net", reloaded.TaskDashboard.JiraURL)
+}
+
+// An operator who never set a Jira site must not find a task_dashboard block
+// written into their file by an unrelated save.
+func TestSaveLayout_TaskDashboardIsWrittenOnlyWhenSet(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(path, []byte("server:\n  port: 8080\n"), 0o600))
+	cfg, err := Load(path)
+	require.NoError(t, err)
+	require.NoError(t, cfg.SaveLayout(cfg.Layout))
+	saved, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.NotContains(t, string(saved), "task_dashboard:")
+}

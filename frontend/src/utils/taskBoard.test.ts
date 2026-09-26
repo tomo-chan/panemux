@@ -107,6 +107,14 @@ describe('filterTasks', () => {
     expect(ids('nothing')).toEqual([])
   })
 
+  it('matches a Jira key that only the PR title carried', () => {
+    const withJira = [
+      ...tasks,
+      task({ id: 'd', git: { branch: 'fix/retry', jira: [{ key: 'OPS-77', url: 'https://example.atlassian.net/browse/OPS-77' }] } }),
+    ]
+    expect(filterTasks(withJira, { query: 'ops-77', host: null }).map((t) => t.id)).toEqual(['d'])
+  })
+
   it('filters by host, where the empty name is the panemux host', () => {
     expect(filterTasks(tasks, { query: '', host: '' }).map((t) => t.id)).toEqual(['a'])
     expect(filterTasks(tasks, { query: '', host: 'dev-server' }).map((t) => t.id)).toEqual(['b', 'c'])

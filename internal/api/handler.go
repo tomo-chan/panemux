@@ -1357,18 +1357,53 @@ func (h *Handler) lookupPRInfo(sess session.Session, cwd string, gitCtx session.
 	return h.lookupPR(context.Background(), remote, cwd, gitCtx)
 }
 
-// lookupPR runs `gh pr view` for gitCtx's branch on the panemux host. remote
-// is whether cwd is on another host, where `gh` cannot run inside it: the
-// repository is then named from its origin URL, and without one there is no
-// lookup.
+// lookupPR runs `gh pr view` for gitCtx's branch on the panemux host and
+// returns the pull request's URL and number.
 func (h *Handler) lookupPR(parent context.Context, remote bool, cwd string, gitCtx session.GitContext) (string, int) {
-	if gitCtx.Branch == "" {
+	pr, ok := h.lookupPullRequest(parent, remote, cwd, gitCtx, prBasicFields)
+	if !ok {
 		return "", 0
+	}
+	return strings.TrimSpace(pr.URL), pr.Number
+}
+
+// prBasicFields is what a pane header shows of a pull request.
+const prBasicFields = "url,number"
+
+// ghPullRequest is the part of `gh pr view --json` output panemux reads.
+// closingIssuesReferences is shaped as gh 2.101.0 exports it
+// (api/export_pr.go): id, number, url and repository{id, name, owner{id, login}}.
+type ghPullRequest struct {
+	URL           string `json:"url"`
+	Title         string `json:"title"`
+	ClosingIssues []struct {
+		URL        string `json:"url"`
+		Repository struct {
+			Name  string `json:"name"`
+			Owner struct {
+				Login string `json:"login"`
+			} `json:"owner"`
+		} `json:"repository"`
+		Number int `json:"number"`
+	} `json:"closingIssuesReferences"`
+	Number int `json:"number"`
+}
+
+// lookupPullRequest runs `gh pr view --json <fields>` for gitCtx's branch on
+// the panemux host. remote is whether cwd is on another host, where `gh`
+// cannot run inside it: the repository is then named from its origin URL,
+// and without one there is no lookup. ok is false when there is no pull
+// request or it could not be looked up.
+func (h *Handler) lookupPullRequest(
+	parent context.Context, remote bool, cwd string, gitCtx session.GitContext, fields string,
+) (ghPullRequest, bool) {
+	if gitCtx.Branch == "" {
+		return ghPullRequest{}, false
 	}
 
 	ghPath, err := h.findGH()
 	if err != nil {
-		return "", 0
+		return ghPullRequest{}, false
 	}
 
 	timeout := prLookupTimeout
@@ -1384,7 +1419,7 @@ func (h *Handler) lookupPR(parent context.Context, remote bool, cwd string, gitC
 		"view",
 		gitCtx.Branch,
 		"--json",
-		"url,number",
+		fields,
 	)
 	if repoSpec := h.repoSpecFromOriginURL(gitCtx.OriginURL); repoSpec != "" {
 		cmd.Args = append(cmd.Args, "--repo", repoSpec)
@@ -1392,23 +1427,20 @@ func (h *Handler) lookupPR(parent context.Context, remote bool, cwd string, gitC
 		// Remote SSH-backed sessions may point at repositories that do not exist
 		// on the local filesystem. Without an origin-derived repo spec, `gh`
 		// cannot resolve PR metadata for that remote-only checkout.
-		return "", 0
+		return ghPullRequest{}, false
 	} else {
 		cmd.Dir = cwd
 	}
 	out, err := cmd.Output()
 	if err != nil {
-		return "", 0
+		return ghPullRequest{}, false
 	}
 
-	var resp struct {
-		URL    string `json:"url"`
-		Number int    `json:"number"`
-	}
+	var resp ghPullRequest
 	if err := json.Unmarshal(out, &resp); err != nil {
-		return "", 0
+		return ghPullRequest{}, false
 	}
-	return strings.TrimSpace(resp.URL), resp.Number
+	return resp, true
 }
 
 func repoSpecFromOriginURL(origin string) string {

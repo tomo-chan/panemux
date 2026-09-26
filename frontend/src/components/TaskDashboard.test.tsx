@@ -32,7 +32,17 @@ const response: TasksResponse = {
     task({
       id: 'busy-1', state: 'busy', host: 'dev-server', cwd: '/remote/home/demo/payment',
       location: { kind: 'tmux', tmux_session: 'infra', attachable: true },
-      git: { repo: 'payment', branch: 'PAY-418-retry', pr_number: 87, pr_url: 'https://github.com/example-org/payment/pull/87' },
+      git: {
+        repo: 'payment', branch: 'PAY-418-retry', pr_number: 87, pr_url: 'https://github.com/example-org/payment/pull/87',
+        issues: [
+          { number: 252, url: 'https://github.com/example-org/payment/issues/252', repo: 'example-org/payment' },
+          { number: 9, url: 'https://github.com/example-org/infra/issues/9', repo: 'example-org/infra' },
+        ],
+        jira: [
+          { key: 'PAY-418', url: 'https://example.atlassian.net/browse/PAY-418' },
+          { key: 'OPS-77', url: 'https://example.atlassian.net/browse/OPS-77' },
+        ],
+      },
     }),
     task({ id: 'idle-1', state: 'idle', cwd: '/workspace/user/docs', location: { kind: 'outside', attachable: false } }),
     task({ id: 'run-1', state: 'run', agent: 'codex', session_id: undefined, cwd: '/workspace/user/api' }),
@@ -154,6 +164,43 @@ describe('TaskDashboard', () => {
     const link = within(busy).getByRole('link', { name: 'PR #87' })
     expect(link).toHaveAttribute('href', 'https://github.com/example-org/payment/pull/87')
     expect(link).toHaveAttribute('target', '_blank')
+  })
+
+  it('links the issues the pull request closes and the Jira keys of a task in a new tab', () => {
+    renderDashboard()
+    const busy = screen.getByTestId('task-card-busy-1')
+    const expected: [string, string][] = [
+      ['Issue #252', 'https://github.com/example-org/payment/issues/252'],
+      ['Issue example-org/infra#9', 'https://github.com/example-org/infra/issues/9'],
+      ['Jira PAY-418', 'https://example.atlassian.net/browse/PAY-418'],
+      ['Jira OPS-77', 'https://example.atlassian.net/browse/OPS-77'],
+    ]
+    for (const [name, href] of expected) {
+      const link = within(busy).getByRole('link', { name })
+      expect(link).toHaveAttribute('href', href)
+      expect(link).toHaveAttribute('target', '_blank')
+      expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+    }
+
+    fireEvent.click(busy)
+    const detail = screen.getByRole('complementary', { name: 'Task details' })
+    expect(within(detail).getByRole('link', { name: '#252' })).toHaveAttribute(
+      'href', 'https://github.com/example-org/payment/issues/252',
+    )
+    expect(within(detail).getByRole('link', { name: 'example-org/infra#9' })).toHaveAttribute('target', '_blank')
+    expect(detail).toHaveTextContent('closed by the pull request')
+    expect(within(detail).getByRole('link', { name: 'PAY-418' })).toHaveAttribute(
+      'href', 'https://example.atlassian.net/browse/PAY-418',
+    )
+    expect(within(detail).getByRole('link', { name: 'OPS-77' })).toHaveAttribute('target', '_blank')
+    expect(detail).toHaveTextContent('from the branch name or pull request title')
+
+    // A task with neither shows no row for them.
+    expect(within(screen.getByTestId('task-card-wait-1')).queryByRole('link', { name: /^(Issue|Jira) / }))
+      .not.toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('task-card-stop-1'))
+    expect(detail).not.toHaveTextContent('closed by the pull request')
+    expect(detail).not.toHaveTextContent('from the branch name')
   })
 
   it('shows the selected task in the detail panel', () => {

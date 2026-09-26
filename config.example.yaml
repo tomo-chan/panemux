@@ -39,6 +39,13 @@ display:
   # command palette and the Agent Board. (default: S)
   task_dashboard_shortcut: "S"
 
+# ── Task dashboard ────────────────────────────────────────────────────────────
+# Jira site that Jira keys found in a task's branch name or PR title (such as
+# PAY-418) link into, as <jira_url>/browse/<key>. https only. Jira is never
+# queried. Omit it for no Jira links.
+# task_dashboard:
+#   jira_url: "https://example.atlassian.net"
+
 # ── Opening URLs from a pane ──────────────────────────────────────────────────
 # When a URL is opened from a pane, panemux republishes the URL's loopback
 # callback port (from `redirect_uri` and friends) at the same port on this host,

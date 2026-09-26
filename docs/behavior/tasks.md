@@ -127,7 +127,7 @@ The pane that belongs to a task is found in the browser from the current workspa
 for a task on the panemux host, or an `ssh_tmux` pane on the task's connection, whose
 `tmux_session` is the task's tmux session.
 
-### Repository, branch and pull request
+### Repository, branch, pull request, issues and Jira keys
 
 The git metadata of each task's working directory is resolved the way a pane header's is: `git` on
 the task's host (locally, or over the host's dashboard connection) and `gh pr view` on the panemux
@@ -143,7 +143,19 @@ the directory within the 30 seconds: the directory is looked up again, with its 
 
 The metadata is the directory's **current** state. For a running task that is the branch it is
 working on; for a stopped task it is whatever has been checked out since, so a stopped task reports
-only `repo` and `repo_url`, never `branch` or a pull request.
+only `repo` and `repo_url`, never `branch`, a pull request, issues or Jira keys.
+
+- **Issues** are the ones the pull request closes: the same `gh pr view` call reads
+  `closingIssuesReferences` along with the pull request's URL, number and title, so no further
+  command runs. No pull request means no issues. An issue whose URL is not `http`/`https` or whose
+  number is not positive is left out. Issue titles are not shown.
+- **Jira keys** are found in the branch name and then the pull request title: an upper-case letter,
+  one or more upper-case letters, digits or `_`, `-`, and a number without a leading zero
+  (`[A-Z][A-Z0-9_]+-[1-9][0-9]*`), with no ASCII letter or digit directly before or after it.
+  `PAY-418-retry-backoff` gives `PAY-418`; `xPAY-418`, `PAY-418a` and `pay-418` give nothing. Every
+  key is listed once, in the order found. Each links to `<task_dashboard.jira_url>/browse/<key>`
+  (a trailing `/` on the setting is dropped). Without `task_dashboard.jira_url` no key is reported.
+  Jira itself is never contacted.
 
 ### Opening a task
 
@@ -184,7 +196,17 @@ Collects from every host and returns:
       "started_at": "2026-09-25T11:15:00Z",
       "pid": 101,
       "location": { "kind": "tmux", "tmux_session": "task-7c21", "attachable": true },
-      "git": { "repo": "panemux", "repo_url": "https://github.com/example/panemux", "branch": "main" }
+      "git": {
+        "repo": "panemux",
+        "repo_url": "https://github.com/example/panemux",
+        "branch": "PAY-418-task-links",
+        "pr_url": "https://github.com/example/panemux/pull/260",
+        "pr_number": 260,
+        "issues": [
+          { "number": 255, "url": "https://github.com/example/panemux/issues/255", "repo": "example/panemux" }
+        ],
+        "jira": [{ "key": "PAY-418", "url": "https://example.atlassian.net/browse/PAY-418" }]
+      }
     }
   ]
 }
@@ -199,6 +221,8 @@ Collects from every host and returns:
   names, or `state-file:<file name>` for a state file that could not be read.
 - `session_id`, `cwd`, `waiting_for`, `status_since`, `started_at`, `pid` and `git` are omitted when
   unknown. `waiting_for` is present only in the `wait` state.
+- Within `git`, every field is omitted when empty. `issues[].repo` is the issue's `owner/name`,
+  which can differ from the pull request's repository.
 - The request answers `200` even when every host failed; failures are in `hosts`.
 - Like every other route outside `/api/board/*`, it is not authenticated
   ([Current boundaries](../overview.md#current-boundaries)). Because it dials every host, it

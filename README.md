@@ -124,6 +124,7 @@ Common uses:
 - The **← Tasks** button counts the sessions waiting for input as of the last time the dashboard was shown. The dashboard collects only while it is on screen, every 10 seconds.
 - A session running inside `tmux` can be opened: **Open** adds a `tmux` (or `ssh_tmux`) pane attached to its tmux session to the current workspace, and **Go to pane** jumps to a pane already attached to it. A session running outside tmux, or stopped, cannot be opened in a pane.
 - Each SSH host gets one connection of its own for the dashboard, separate from its panes. An unreachable host shows its error and a **Reconnect** button without hiding the other hosts.
+- A card links the repository, branch and pull request of the task's directory, the issues that pull request closes, and any Jira key (such as `PAY-418`) in the branch name or pull request title. Jira links need `task_dashboard.jira_url` in `config.yaml` (for example `https://example.atlassian.net`); a key links to `<jira_url>/browse/<key>`, and Jira itself is never queried.
 - Claude Code sessions are read from the files Claude Code keeps under `~/.claude` on each host. For codex, only whether a `codex` process is running is known.
 
 ### Choosing pane types

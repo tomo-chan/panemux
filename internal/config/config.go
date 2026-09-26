@@ -171,6 +171,7 @@ type Data struct { //nolint:govet
 	AgentBoard     AgentBoardConfig         `yaml:"agent_board,omitempty" json:"agent_board"`
 	CommandCenter  CommandCenterConfig      `yaml:"command_center,omitempty" json:"command_center"`
 	URLOpen        URLOpenConfig            `yaml:"url_open,omitempty" json:"url_open"`
+	TaskDashboard  TaskDashboardConfig      `yaml:"task_dashboard,omitempty" json:"task_dashboard"`
 }
 
 // Config is a Data together with the context needed to load and save it:

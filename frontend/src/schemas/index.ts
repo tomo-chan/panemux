@@ -349,12 +349,33 @@ export const TaskLocationSchema = z.object({
 
 export type TaskLocation = z.infer<typeof TaskLocationSchema>
 
+// An issue the task's pull request closes. repo is the issue's owner/name,
+// which can differ from the pull request's repository.
+export const TaskIssueLinkSchema = z.object({
+  number: z.number().int().positive(),
+  url: HttpUrlSchema,
+  repo: z.string().optional(),
+})
+
+export type TaskIssueLink = z.infer<typeof TaskIssueLinkSchema>
+
+// A Jira key from the task's branch name or pull request title, linked into
+// the configured Jira site (task_dashboard.jira_url).
+export const TaskJiraLinkSchema = z.object({
+  key: z.string().min(1),
+  url: HttpUrlSchema,
+})
+
+export type TaskJiraLink = z.infer<typeof TaskJiraLinkSchema>
+
 export const TaskGitSchema = z.object({
   repo: z.string().optional(),
   repo_url: HttpUrlSchema.optional(),
   branch: z.string().optional(),
   pr_url: HttpUrlSchema.optional(),
   pr_number: z.number().int().positive().optional(),
+  issues: z.array(TaskIssueLinkSchema).optional(),
+  jira: z.array(TaskJiraLinkSchema).optional(),
 })
 
 export type TaskGit = z.infer<typeof TaskGitSchema>
