@@ -413,6 +413,7 @@ describe('useTasks collection after a launch', () => {
   // A collection already running when a task was started began before the
   // task existed, so the launch's own collection runs once it finishes rather
   // than being dropped until the next poll.
+  // efficacy:exempt unchanged by this branch; the new describe block after it falls inside its line range
   it('collects again after a collection that was in flight when the task started', async () => {
     let resolveSlow: (value: Response) => void = () => {}
     const withTask = { ...payload, tasks: [...payload.tasks, { ...payload.tasks[0], id: 'local:claude:new' }] }
@@ -507,7 +508,7 @@ describe('useTasks requestSummary', () => {
     expect(result.current.data!.tasks[0].summary).toBeUndefined()
   })
 
-  it('refuses a task without a session id without asking the server', async () => {
+  it('refuses to summarize a task without a session id without asking the server', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(ok(payload))
     window.fetch = fetchMock
     const { result } = renderHook(() => useTasks(true))

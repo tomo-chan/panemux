@@ -590,6 +590,7 @@ describe('TaskDashboard new tasks and resume', () => {
     expect(within(screen.getByTestId(`task-card-${stopped.id}`)).getByRole('button', { name: /^Resume/ })).toBeEnabled()
   })
 
+  // efficacy:exempt unchanged by this branch; the new describe block after it falls inside its line range
   it('closes the New task dialog on Cancel without starting anything', () => {
     const launch = vi.fn()
     renderDashboard(tasksState({ data: base, launch }))
