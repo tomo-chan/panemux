@@ -148,7 +148,10 @@ only `repo` and `repo_url`, never `branch`, a pull request, issues or Jira keys.
 - **Issues** are the ones the pull request closes: the same `gh pr view` call reads
   `closingIssuesReferences` along with the pull request's URL, number and title, so no further
   command runs. No pull request means no issues. An issue whose URL is not `http`/`https` or whose
-  number is not positive is left out. Issue titles are not shown.
+  number is not positive is left out. Issue titles are not shown. The field needs `gh` 2.72.0 or
+  later. An older `gh` refuses the whole call (`Unknown JSON field`), so the pull request is looked
+  up again with only its URL and number, as a pane header does: the PR link stays, and the task has
+  no issues and no Jira keys from the PR title.
 - **Jira keys** are found in the branch name and then the pull request title: an upper-case letter,
   one or more upper-case letters, digits or `_`, `-`, and a number without a leading zero
   (`[A-Z][A-Z0-9_]+-[1-9][0-9]*`), with no ASCII letter or digit directly before or after it.
@@ -156,6 +159,9 @@ only `repo` and `repo_url`, never `branch`, a pull request, issues or Jira keys.
   key is listed once, in the order found. Each links to `<task_dashboard.jira_url>/browse/<key>`
   (a trailing `/` on the setting is dropped). Without `task_dashboard.jira_url` no key is reported.
   Jira itself is never contacted.
+- Nothing checks that a key names a real Jira issue, so text of the same shape is linked too:
+  `UTF-8`, `SHA-256` or `ISO-8601` in a PR title each become a key, and
+  `CVE-2024-45337` gives `CVE-2024`, because the `-` after `2024` does not stop a match.
 
 ### Opening a task
 

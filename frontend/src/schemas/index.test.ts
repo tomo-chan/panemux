@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, it, expect } from 'vitest'
 import {
   DisplayConfigSchema,
@@ -25,6 +27,7 @@ import {
   BoardMessageSchema,
   BoardMessagesResponseSchema,
   TasksResponseSchema,
+  TaskJiraLinkSchema,
 } from './index'
 
 describe('TasksResponseSchema', () => {
@@ -105,6 +108,18 @@ describe('TasksResponseSchema', () => {
     }
     const result = TasksResponseSchema.parse({ hosts: [], tasks: [{ ...task, git }] })
     expect(result.tasks[0].git).toEqual(git)
+  })
+
+  // efficacy:exempt pins that the browser accepts every Jira site internal/config accepts; it guards the
+  // agreement between the two validators rather than a behavior this branch's schema code adds.
+  it('accepts the browse URL of every Jira site the config accepts', () => {
+    const cases = JSON.parse(
+      readFileSync(resolve(process.cwd(), '..', 'testdata', 'jira-url-validation.json'), 'utf8'),
+    ) as { accepted: { jira_url: string; browse_url: string }[] }
+    expect(cases.accepted.length).toBeGreaterThan(0)
+    for (const { browse_url } of cases.accepted) {
+      expect(TaskJiraLinkSchema.safeParse({ key: 'PAY-418', url: browse_url }).success, browse_url).toBe(true)
+    }
   })
 
   it.each([

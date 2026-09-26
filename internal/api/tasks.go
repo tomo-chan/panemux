@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -401,7 +402,13 @@ func (h *Handler) lookupTaskGit(ctx context.Context, host, cwd string, withPR bo
 	}
 	prTitle := ""
 	if withPR {
-		if pr, ok := h.lookupPullRequest(ctx, host != "", cwd, gitCtx, prTaskFields); ok {
+		pr, err := h.lookupPullRequest(ctx, host != "", cwd, gitCtx, prTaskFields)
+		if errors.Is(err, errGHUnknownJSONField) {
+			// A gh older than 2.72.0: keep the PR link the pane header shows,
+			// without the issues and the title this gh cannot give.
+			pr, err = h.lookupPullRequest(ctx, host != "", cwd, gitCtx, prBasicFields)
+		}
+		if err == nil {
 			info.PRURL, info.PRNumber = strings.TrimSpace(pr.URL), pr.Number
 			info.Issues = closingIssueLinks(pr)
 			prTitle = pr.Title

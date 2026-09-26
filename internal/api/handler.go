@@ -1360,8 +1360,8 @@ func (h *Handler) lookupPRInfo(sess session.Session, cwd string, gitCtx session.
 // lookupPR runs `gh pr view` for gitCtx's branch on the panemux host and
 // returns the pull request's URL and number.
 func (h *Handler) lookupPR(parent context.Context, remote bool, cwd string, gitCtx session.GitContext) (string, int) {
-	pr, ok := h.lookupPullRequest(parent, remote, cwd, gitCtx, prBasicFields)
-	if !ok {
+	pr, err := h.lookupPullRequest(parent, remote, cwd, gitCtx, prBasicFields)
+	if err != nil {
 		return "", 0
 	}
 	return strings.TrimSpace(pr.URL), pr.Number
@@ -1389,21 +1389,29 @@ type ghPullRequest struct {
 	Number int `json:"number"`
 }
 
+// errGHUnknownJSONField is a `gh pr view` that refused a --json field this
+// gh does not have: closingIssuesReferences before gh 2.72.0. gh checks the
+// fields before it contacts GitHub, and fails the whole call.
+var errGHUnknownJSONField = errors.New("gh does not know a requested --json field")
+
+// errNoPullRequest is a lookup that found no pull request, or could not run.
+var errNoPullRequest = errors.New("no pull request")
+
 // lookupPullRequest runs `gh pr view --json <fields>` for gitCtx's branch on
 // the panemux host. remote is whether cwd is on another host, where `gh`
 // cannot run inside it: the repository is then named from its origin URL,
-// and without one there is no lookup. ok is false when there is no pull
-// request or it could not be looked up.
+// and without one there is no lookup. The error is errGHUnknownJSONField
+// when gh refused a field, and errNoPullRequest otherwise.
 func (h *Handler) lookupPullRequest(
 	parent context.Context, remote bool, cwd string, gitCtx session.GitContext, fields string,
-) (ghPullRequest, bool) {
+) (ghPullRequest, error) {
 	if gitCtx.Branch == "" {
-		return ghPullRequest{}, false
+		return ghPullRequest{}, errNoPullRequest
 	}
 
 	ghPath, err := h.findGH()
 	if err != nil {
-		return ghPullRequest{}, false
+		return ghPullRequest{}, errNoPullRequest
 	}
 
 	timeout := prLookupTimeout
@@ -1427,20 +1435,24 @@ func (h *Handler) lookupPullRequest(
 		// Remote SSH-backed sessions may point at repositories that do not exist
 		// on the local filesystem. Without an origin-derived repo spec, `gh`
 		// cannot resolve PR metadata for that remote-only checkout.
-		return ghPullRequest{}, false
+		return ghPullRequest{}, errNoPullRequest
 	} else {
 		cmd.Dir = cwd
 	}
 	out, err := cmd.Output()
 	if err != nil {
-		return ghPullRequest{}, false
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && strings.Contains(string(exitErr.Stderr), "Unknown JSON field") {
+			return ghPullRequest{}, errGHUnknownJSONField
+		}
+		return ghPullRequest{}, errNoPullRequest
 	}
 
 	var resp ghPullRequest
 	if err := json.Unmarshal(out, &resp); err != nil {
-		return ghPullRequest{}, false
+		return ghPullRequest{}, errNoPullRequest
 	}
-	return resp, true
+	return resp, nil
 }
 
 func repoSpecFromOriginURL(origin string) string {

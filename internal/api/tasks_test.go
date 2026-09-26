@@ -265,6 +265,71 @@ func TestTaskGitInfo_IssuesThePRClosesAndJiraKeys(t *testing.T) {
 	}, info.Jira)
 }
 
+// ghBefore272Script answers like gh before 2.72.0, which has no
+// closingIssuesReferences field: it refuses the whole call with the message
+// pkg/cmdutil/json_flags.go prints (checked in v2.71.2), and answers the
+// fields it knows. Every call is logged to the file in $GH_CALLS.
+const ghBefore272Script = `#!/bin/sh
+echo "$*" >> "$GH_CALLS"
+case "$*" in
+*closingIssuesReferences*)
+  printf 'Unknown JSON field: "closingIssuesReferences"\nAvailable fields:\n  number\n  title\n  url\n' >&2
+  exit 1 ;;
+esac
+echo '{"url":"https://github.com/example/payment/pull/87","number":87}'
+`
+
+// A gh too old for closingIssuesReferences refuses the whole call. The task
+// keeps its PR link — the pane header's own lookup still finds that PR —
+// and goes without issues and the title's Jira keys.
+func TestTaskGitInfo_AGHWithoutClosingIssuesStillFindsThePR(t *testing.T) {
+	dir := initTempGitRepo(t)
+	out, err := exec.Command("git", "-C", dir, "checkout", "-b", "PAY-418-retry").CombinedOutput()
+	require.NoError(t, err, string(out))
+	calls := filepath.Join(t.TempDir(), "calls")
+	t.Setenv("GH_CALLS", calls)
+
+	cfg := defaultTestConfig()
+	cfg.TaskDashboard.JiraURL = "https://example.atlassian.net"
+	h := NewHandler(cfg, session.NewManager(), nil, nil)
+	h.ghBinaryPath = writeFakeGHBinary(t, ghBefore272Script)
+
+	info := h.lookupTaskGit(context.Background(), "", dir, true)
+	require.NotNil(t, info)
+	assert.Equal(t, 87, info.PRNumber)
+	assert.Equal(t, "https://github.com/example/payment/pull/87", info.PRURL)
+	assert.Nil(t, info.Issues)
+	assert.Equal(t, []taskJiraLink{{Key: "PAY-418", URL: "https://example.atlassian.net/browse/PAY-418"}}, info.Jira)
+
+	logged, err := os.ReadFile(calls)
+	require.NoError(t, err)
+	lines := strings.Split(strings.TrimSpace(string(logged)), "\n")
+	require.Len(t, lines, 2, "the task fields, then the pane header's")
+	assert.Contains(t, lines[0], "--json "+prTaskFields)
+	assert.Contains(t, lines[1], "--json "+prBasicFields)
+}
+
+// A branch without a PR is the common case. gh fails then too, but not for
+// an unknown field, so it is not asked again.
+//
+//efficacy:exempt guards the scope of this branch's old-gh fallback; before it no second call existed
+func TestTaskGitInfo_NoPRRunsGHOnce(t *testing.T) {
+	dir := initTempGitRepo(t)
+	calls := filepath.Join(t.TempDir(), "calls")
+	t.Setenv("GH_CALLS", calls)
+	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
+	h.ghBinaryPath = writeFakeGHBinary(t, "#!/bin/sh\necho \"$*\" >> \"$GH_CALLS\"\n"+
+		"echo 'no pull requests found for branch \"main\"' >&2\nexit 1\n")
+
+	info := h.lookupTaskGit(context.Background(), "", dir, true)
+	require.NotNil(t, info)
+	assert.Zero(t, info.PRNumber)
+
+	logged, err := os.ReadFile(calls)
+	require.NoError(t, err)
+	assert.Equal(t, 1, strings.Count(string(logged), "\n"))
+}
+
 // Without a Jira site in the config there is nothing to link a key to.
 func TestTaskGitInfo_NoJiraSiteNoJiraLinks(t *testing.T) {
 	dir := initTempGitRepo(t)

@@ -164,15 +164,31 @@ while being built:
   was built in had no working GitHub token. Whether an issue linked by hand in the pull request's
   sidebar, rather than by a closing keyword, is included has not been checked either. Issue titles
   are not shown, since that export carries none.
+- **An older `gh` keeps the PR link** (review of PR #261). `closingIssuesReferences` first appears
+  in gh 2.72.0 (it is absent from `api/query_builder.go` at v2.71.2), and gh refuses a whole call
+  that names a field it does not know, before contacting GitHub. The first version therefore lost
+  the task's PR link on an older `gh` while the pane header, which asks for `url,number` only,
+  still showed it. A call refused with `Unknown JSON field` is now repeated with `url,number`. Only
+  that refusal is retried: a branch without a pull request also makes `gh` fail, and is the common
+  case, so a retry on any failure would double the `gh` runs.
 - **A Jira key is `[A-Z][A-Z0-9_]+-[1-9][0-9]*` with no ASCII letter or digit touching it**, found
   in the branch name and then the pull request title. Keys are case-sensitive, so a lower-case
   branch such as `pay-418-retry` gives none; the form still matches words such as `UTF-8` or
-  `SHA-256` in a title. Every key found is linked, not just the first.
+  `SHA-256` in a title, and cuts `CVE-2024-45337` to `CVE-2024` (review of PR #261; the current
+  behavior page lists these). Every key found is linked, not just the first.
 - **Jira is linked, never queried.** `task_dashboard.jira_url` names the site and a key becomes
   `<jira_url>/browse/<key>`; no Jira API is called and no ticket title is fetched, so panemux holds
   no Jira credentials. The setting is a new top-level `task_dashboard` section rather than part of
   `display`, since it says where links point rather than how anything looks. It must be an `https`
   URL, because it becomes the address of a link the operator clicks.
+- **The Jira site's host and port are held to what the browser parses** (review of PR #261).
+  `url.Parse` accepted `https://jira.example.invalid:99999`, `https://ex<ample.com` and
+  `https://xn--/`, which the browser's `new URL()` refuses; one such link made the browser reject
+  the whole task list. Go has no WHATWG URL parser, so the check is narrower than the browser
+  instead of equal to it: an IP or ASCII letters, digits and `-`, no punycode label (there is no
+  decoder in the module to check one with), no numeric last label unless the host is an IPv4
+  address, and a port 1–65535. `testdata/jira-url-validation.json` is read by the Go test and by
+  the frontend's schema test, so a site Go accepts that the browser does not fails a test.
 
 ## Agent Board
 

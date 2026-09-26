@@ -60,6 +60,11 @@ Layout rules:
   [task dashboard behavior](behavior/tasks.md#repository-branch-pull-request-issues-and-jira-keys))
 - an absolute `https` URL with a host; a path is allowed, a query, a fragment, credentials,
   whitespace and control characters are not
+- the host is an IP address or dot-separated labels of ASCII letters, digits and `-`; a
+  punycode (`xn--`) label is refused, so an internationalized host cannot be used, and a host whose
+  last label is a number (`example.123`) must be an IPv4 address. A port, if given, is 1–65535.
+  These keep every accepted site one the browser's URL parser also accepts, since the browser
+  rejects the whole task list for one link it cannot parse
 - omitted means no Jira links, and an omitted block is never written back on save
 
 Path behavior:
