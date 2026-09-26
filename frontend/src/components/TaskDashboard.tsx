@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import type { Task, TaskHost, Workspace } from '../schemas'
+import type { Task, TaskHost, TaskIssueLink, Workspace } from '../schemas'
 import type { TasksState } from '../hooks/useTasks'
 import { TASKS_POLL_INTERVAL_MS } from '../hooks/useTasks'
 import { TERMINAL_FONT_FAMILY } from '../utils/fonts'
@@ -339,8 +339,30 @@ const GitLinks: React.FC<{ task: Task }> = ({ task }) => {
           PR #{git.pr_number}
         </a>
       )}
+      {git.issues?.map((issue) => (
+        <a key={issue.url} href={issue.url} target="_blank" rel="noopener noreferrer">
+          Issue {issueLabel(issue, git.pr_url)}
+        </a>
+      ))}
+      {git.autolinks?.map((link) => (
+        <a key={link.text} href={link.url} target="_blank" rel="noopener noreferrer">
+          {link.text}
+        </a>
+      ))}
     </div>
   )
+}
+
+/**
+ * `#252` for an issue in the pull request's own repository, and
+ * `owner/name#9` for one in another — the pull request can close either.
+ */
+function issueLabel(issue: TaskIssueLink, prUrl: string | undefined): string {
+  const sameRepoPrefix = prUrl?.replace(/\/pull\/\d+$/, '/issues/')
+  if (sameRepoPrefix && sameRepoPrefix !== prUrl && issue.url.startsWith(sameRepoPrefix)) {
+    return `#${issue.number}`
+  }
+  return issue.repo ? `${issue.repo}#${issue.number}` : `#${issue.number}`
 }
 
 function whereLabel(task: Task, pane: TaskPaneRef | null): string {
@@ -461,6 +483,40 @@ const TaskDetail: React.FC<TaskDetailProps> = ({ task, pane, open, nowMs, onOpen
                   'none for this branch'
                 )}
               </dd>
+              {task.git.issues && task.git.issues.length > 0 && (
+                <>
+                  <dt>Issues</dt>
+                  <dd>
+                    <ul className="td-linklist">
+                      {task.git.issues.map((issue) => (
+                        <li key={issue.url}>
+                          <a href={issue.url} target="_blank" rel="noopener noreferrer">
+                            {issueLabel(issue, task.git?.pr_url)}
+                          </a>
+                        </li>
+                      ))}
+                    </ul>
+                    <span className="td-src">closed by the pull request</span>
+                  </dd>
+                </>
+              )}
+              {task.git.autolinks && task.git.autolinks.length > 0 && (
+                <>
+                  <dt>References</dt>
+                  <dd>
+                    <ul className="td-linklist">
+                      {task.git.autolinks.map((link) => (
+                        <li key={link.text}>
+                          <a href={link.url} target="_blank" rel="noopener noreferrer">
+                            {link.text}
+                          </a>
+                        </li>
+                      ))}
+                    </ul>
+                    <span className="td-src">from the branch name or pull request title</span>
+                  </dd>
+                </>
+              )}
             </dl>
           </section>
         )}

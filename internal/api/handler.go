@@ -1357,18 +1357,61 @@ func (h *Handler) lookupPRInfo(sess session.Session, cwd string, gitCtx session.
 	return h.lookupPR(context.Background(), remote, cwd, gitCtx)
 }
 
-// lookupPR runs `gh pr view` for gitCtx's branch on the panemux host. remote
-// is whether cwd is on another host, where `gh` cannot run inside it: the
-// repository is then named from its origin URL, and without one there is no
-// lookup.
+// lookupPR runs `gh pr view` for gitCtx's branch on the panemux host and
+// returns the pull request's URL and number.
 func (h *Handler) lookupPR(parent context.Context, remote bool, cwd string, gitCtx session.GitContext) (string, int) {
-	if gitCtx.Branch == "" {
+	pr, err := h.lookupPullRequest(parent, remote, cwd, gitCtx, prBasicFields)
+	if err != nil {
 		return "", 0
+	}
+	return strings.TrimSpace(pr.URL), pr.Number
+}
+
+// prBasicFields is what a pane header shows of a pull request.
+const prBasicFields = "url,number"
+
+// ghPullRequest is the part of `gh pr view --json` output panemux reads.
+// closingIssuesReferences is shaped as gh 2.101.0 exports it
+// (api/export_pr.go): id, number, url and repository{id, name, owner{id, login}}.
+type ghPullRequest struct {
+	URL           string `json:"url"`
+	Title         string `json:"title"`
+	ClosingIssues []struct {
+		URL        string `json:"url"`
+		Repository struct {
+			Name  string `json:"name"`
+			Owner struct {
+				Login string `json:"login"`
+			} `json:"owner"`
+		} `json:"repository"`
+		Number int `json:"number"`
+	} `json:"closingIssuesReferences"`
+	Number int `json:"number"`
+}
+
+// errGHUnknownJSONField is a `gh pr view` that refused a --json field this
+// gh does not have: closingIssuesReferences before gh 2.72.0. gh checks the
+// fields before it contacts GitHub, and fails the whole call.
+var errGHUnknownJSONField = errors.New("gh does not know a requested --json field")
+
+// errNoPullRequest is a lookup that found no pull request, or could not run.
+var errNoPullRequest = errors.New("no pull request")
+
+// lookupPullRequest runs `gh pr view --json <fields>` for gitCtx's branch on
+// the panemux host. remote is whether cwd is on another host, where `gh`
+// cannot run inside it: the repository is then named from its origin URL,
+// and without one there is no lookup. The error is errGHUnknownJSONField
+// when gh refused a field, and errNoPullRequest otherwise.
+func (h *Handler) lookupPullRequest(
+	parent context.Context, remote bool, cwd string, gitCtx session.GitContext, fields string,
+) (ghPullRequest, error) {
+	if gitCtx.Branch == "" {
+		return ghPullRequest{}, errNoPullRequest
 	}
 
 	ghPath, err := h.findGH()
 	if err != nil {
-		return "", 0
+		return ghPullRequest{}, errNoPullRequest
 	}
 
 	timeout := prLookupTimeout
@@ -1384,7 +1427,7 @@ func (h *Handler) lookupPR(parent context.Context, remote bool, cwd string, gitC
 		"view",
 		gitCtx.Branch,
 		"--json",
-		"url,number",
+		fields,
 	)
 	if repoSpec := h.repoSpecFromOriginURL(gitCtx.OriginURL); repoSpec != "" {
 		cmd.Args = append(cmd.Args, "--repo", repoSpec)
@@ -1392,23 +1435,24 @@ func (h *Handler) lookupPR(parent context.Context, remote bool, cwd string, gitC
 		// Remote SSH-backed sessions may point at repositories that do not exist
 		// on the local filesystem. Without an origin-derived repo spec, `gh`
 		// cannot resolve PR metadata for that remote-only checkout.
-		return "", 0
+		return ghPullRequest{}, errNoPullRequest
 	} else {
 		cmd.Dir = cwd
 	}
 	out, err := cmd.Output()
 	if err != nil {
-		return "", 0
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && strings.Contains(string(exitErr.Stderr), "Unknown JSON field") {
+			return ghPullRequest{}, errGHUnknownJSONField
+		}
+		return ghPullRequest{}, errNoPullRequest
 	}
 
-	var resp struct {
-		URL    string `json:"url"`
-		Number int    `json:"number"`
-	}
+	var resp ghPullRequest
 	if err := json.Unmarshal(out, &resp); err != nil {
-		return "", 0
+		return ghPullRequest{}, errNoPullRequest
 	}
-	return strings.TrimSpace(resp.URL), resp.Number
+	return resp, nil
 }
 
 func repoSpecFromOriginURL(origin string) string {

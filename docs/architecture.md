@@ -100,7 +100,8 @@ invokes agmsg scripts. Full detail is in
 While the dashboard is on screen, the browser polls `GET /api/tasks`. `internal/tasks` runs one
 fixed script on every host at once — locally with `sh -s`, remotely over that host's reused
 `CommandConn` — parses what it prints, and derives each task's state and tmux location. The API
-handler adds each working directory's git and pull-request metadata. Opening a task creates or
+handler adds each working directory's git and pull-request metadata, the issues the pull request
+closes, and the references `task_dashboard.autolinks` finds in the branch name and PR title. Opening a task creates or
 focuses a `tmux` / `ssh_tmux` pane through the ordinary pane APIs. Full behavior is in
 [Task dashboard](behavior/tasks.md).
 

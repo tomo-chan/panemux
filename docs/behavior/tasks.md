@@ -127,7 +127,7 @@ The pane that belongs to a task is found in the browser from the current workspa
 for a task on the panemux host, or an `ssh_tmux` pane on the task's connection, whose
 `tmux_session` is the task's tmux session.
 
-### Repository, branch and pull request
+### Repository, branch, pull request, issues and references
 
 The git metadata of each task's working directory is resolved the way a pane header's is: `git` on
 the task's host (locally, or over the host's dashboard connection) and `gh pr view` on the panemux
@@ -143,7 +143,31 @@ the directory within the 30 seconds: the directory is looked up again, with its 
 
 The metadata is the directory's **current** state. For a running task that is the branch it is
 working on; for a stopped task it is whatever has been checked out since, so a stopped task reports
-only `repo` and `repo_url`, never `branch` or a pull request.
+only `repo` and `repo_url`, never `branch`, a pull request, issues or references.
+
+- **Issues** are the ones the pull request closes: the same `gh pr view` call reads
+  `closingIssuesReferences` along with the pull request's URL, number and title, so no further
+  command runs. No pull request means no issues. An issue whose URL is not `http`/`https` or whose
+  number is not positive is left out. Issue titles are not shown. The field needs `gh` 2.72.0 or
+  later. An older `gh` refuses the whole call (`Unknown JSON field`), so the pull request is looked
+  up again with only its URL and number, as a pane header does: the PR link stays, and the task has
+  no issues and no references from the PR title.
+- **References** are what `task_dashboard.autolinks` finds in the branch name and then the pull
+  request title. Each entry works like a GitHub repository's autolink reference: its `key_prefix`
+  followed by an identifier links to its `url_template` with every `<num>` replaced by the
+  identifier. With `key_prefix: JIRA-` and `url_template: https://jira.example.com/JIRA-<num>`,
+  `JIRA-123` links to `https://jira.example.com/JIRA-123`.
+  - The identifier is digits, or with `is_alphanumeric: true` the letters `A`–`Z` in either case,
+    digits and `-`, taking as many as follow the prefix. An alphanumeric identifier therefore runs
+    on through a branch name's words: `TICKET-12-retry` gives `12-retry`.
+  - The prefix matches exactly as written, case included, and not when an ASCII letter or digit
+    comes directly before it. A numeric identifier does not match when a letter or digit follows
+    it. `JIRA-418-retry-backoff` gives `JIRA-418`; `xJIRA-418`, `JIRA-418a` and `jira-418` give
+    nothing.
+  - Every reference is listed once, in the order found, with the text that matched (`JIRA-123`).
+  - Only the configured prefixes match, so text that merely looks like a ticket key (`UTF-8`,
+    `CVE-2024-45337`) is not linked unless its prefix is configured.
+  - Without `task_dashboard.autolinks` there are no references. No issue tracker is ever contacted.
 
 ### Opening a task
 
@@ -184,7 +208,17 @@ Collects from every host and returns:
       "started_at": "2026-09-25T11:15:00Z",
       "pid": 101,
       "location": { "kind": "tmux", "tmux_session": "task-7c21", "attachable": true },
-      "git": { "repo": "panemux", "repo_url": "https://github.com/example/panemux", "branch": "main" }
+      "git": {
+        "repo": "panemux",
+        "repo_url": "https://github.com/example/panemux",
+        "branch": "PAY-418-task-links",
+        "pr_url": "https://github.com/example/panemux/pull/260",
+        "pr_number": 260,
+        "issues": [
+          { "number": 255, "url": "https://github.com/example/panemux/issues/255", "repo": "example/panemux" }
+        ],
+        "autolinks": [{ "text": "PAY-418", "url": "https://jira.example.com/browse/PAY-418" }]
+      }
     }
   ]
 }
@@ -199,6 +233,8 @@ Collects from every host and returns:
   names, or `state-file:<file name>` for a state file that could not be read.
 - `session_id`, `cwd`, `waiting_for`, `status_since`, `started_at`, `pid` and `git` are omitted when
   unknown. `waiting_for` is present only in the `wait` state.
+- Within `git`, every field is omitted when empty. `issues[].repo` is the issue's `owner/name`,
+  which can differ from the pull request's repository.
 - The request answers `200` even when every host failed; failures are in `hosts`.
 - Like every other route outside `/api/board/*`, it is not authenticated
   ([Current boundaries](../overview.md#current-boundaries)). Because it dials every host, it

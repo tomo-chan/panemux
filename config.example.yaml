@@ -39,6 +39,20 @@ display:
   # command palette and the Agent Board. (default: S)
   task_dashboard_shortcut: "S"
 
+# ── Task dashboard ────────────────────────────────────────────────────────────
+# Autolink references, shaped like a GitHub repository's: `key_prefix` followed
+# by an identifier in a task's branch name or PR title links to `url_template`
+# with <num> replaced by the identifier (JIRA-123 below links to
+# https://jira.example.com/JIRA-123). The identifier is digits unless
+# `is_alphanumeric` is true. https only; no tracker is ever queried.
+# task_dashboard:
+#   autolinks:
+#     - key_prefix: "JIRA-"
+#       url_template: "https://jira.example.com/JIRA-<num>"
+#     - key_prefix: "TICKET-"
+#       url_template: "https://tickets.example.com/ticket?id=<num>"
+#       is_alphanumeric: true
+
 # ── Opening URLs from a pane ──────────────────────────────────────────────────
 # When a URL is opened from a pane, panemux republishes the URL's loopback
 # callback port (from `redirect_uri` and friends) at the same port on this host,

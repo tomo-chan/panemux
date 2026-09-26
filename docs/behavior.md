@@ -24,6 +24,7 @@ The YAML config defines:
   workspace's recursive layout
 - optional `display` settings, including `display.task_dashboard_shortcut`
 - optional `url_open` settings
+- optional `task_dashboard` settings: `task_dashboard.autolinks`
 - optional `agent_board` and `command_center` settings
 
 Legacy top-level `layout` is accepted at load time and normalized to one `default` workspace. The
@@ -52,6 +53,24 @@ Layout rules:
 - `url_open.browser_shim` gates browser-open interception (see "Opening URLs from a pane")
 - it is a tri-state: omitted means enabled, and an omitted block is never written back into an
   operator's config file on save
+
+`task_dashboard.autolinks` rules:
+
+- a list of autolink references shaped like a GitHub repository's: `key_prefix`, `url_template`
+  and `is_alphanumeric`. A reference in a task's branch name or PR title links to `url_template`
+  with `<num>` replaced by its identifier (see
+  [task dashboard behavior](behavior/tasks.md#repository-branch-pull-request-issues-and-references))
+- `key_prefix` is required, without whitespace, and may not overlap another entry's: as on GitHub,
+  `TICKET` and `TICK` cannot both be set, since both would match `TICKET123`
+- `url_template` is an absolute `https` URL with a host, containing `<num>` after the host; a
+  query and a fragment are allowed, credentials, whitespace and control characters are not
+- the host is an IP address or dot-separated labels of ASCII letters, digits and `-`; a
+  punycode (`xn--`) label is refused, so an internationalized host cannot be used, and a host whose
+  last label is a number (`example.123`) must be an IPv4 address. A port, if given, is 1–65535.
+  These keep every accepted URL one the browser's URL parser also accepts, since the browser
+  rejects the whole task list for one link it cannot parse
+- `is_alphanumeric` omitted means the identifier is digits only
+- omitted means no references, and an omitted block is never written back on save
 
 Path behavior:
 

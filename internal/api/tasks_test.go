@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
@@ -157,7 +158,9 @@ func TestGetTasks_ResponseCarriesTheWireFieldNames(t *testing.T) {
 	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
 	useTaskService(h, taskCollection("s", "/workspace/user/project"), nil)
 	h.taskGitLookup = func(context.Context, string, string, bool) *taskGitInfo {
-		return &taskGitInfo{Repo: "project", Branch: "main", PRNumber: 12, PRURL: "https://example.invalid/pr/12"}
+		return &taskGitInfo{Repo: "project", Branch: "PAY-418", PRNumber: 12, PRURL: "https://example.invalid/pr/12",
+			Issues:    []taskIssueLink{{Number: 3, URL: "https://example.invalid/issues/3", Repo: "example/project"}},
+			Autolinks: []taskAutolink{{Text: "PAY-418", URL: "https://example.invalid/browse/PAY-418"}}}
 	}
 
 	rec := httptest.NewRecorder()
@@ -176,7 +179,11 @@ func TestGetTasks_ResponseCarriesTheWireFieldNames(t *testing.T) {
 		assert.Contains(t, task, key)
 	}
 	assert.Equal(t, map[string]any{
-		"repo": "project", "branch": "main", "pr_number": float64(12), "pr_url": "https://example.invalid/pr/12",
+		"repo": "project", "branch": "PAY-418", "pr_number": float64(12), "pr_url": "https://example.invalid/pr/12",
+		"issues": []any{map[string]any{
+			"number": float64(3), "url": "https://example.invalid/issues/3", "repo": "example/project",
+		}},
+		"autolinks": []any{map[string]any{"text": "PAY-418", "url": "https://example.invalid/browse/PAY-418"}},
 	}, task["git"])
 	assert.Contains(t, raw.Hosts[0], "collected_at")
 }
@@ -206,6 +213,277 @@ func TestTaskGitInfo_LocalRepositoryWithPR(t *testing.T) {
 		Repo: filepath.Base(dir), RepoURL: "https://github.com/example/panemux", Branch: "feature/task-dashboard",
 		PRURL: "https://github.com/example/panemux/pull/253", PRNumber: 253,
 	}, *info)
+}
+
+// withPAYAndOPSAutolinks is a config whose autolinks link PAY- and OPS-
+// references into a Jira site, as a GitHub repository's autolink references
+// would.
+func withPAYAndOPSAutolinks() *config.Config {
+	cfg := defaultTestConfig()
+	cfg.TaskDashboard.Autolinks = []config.AutolinkConfig{
+		{KeyPrefix: "PAY-", URLTemplate: "https://jira.example.com/browse/PAY-<num>"},
+		{KeyPrefix: "OPS-", URLTemplate: "https://jira.example.com/browse/OPS-<num>"},
+	}
+	return cfg
+}
+
+// ghClosingIssuesScript answers `gh pr view` the way gh 2.101.0 exports
+// closingIssuesReferences (api/export_pr.go), and only when the call asks
+// for the fields the task dashboard needs.
+const ghClosingIssuesScript = `#!/bin/sh
+case "$*" in
+*"--json url,number,title,closingIssuesReferences"*) ;;
+*) echo "unexpected arguments: $*" >&2; exit 1 ;;
+esac
+cat <<'JSON'
+{"url":"https://github.com/example/payment/pull/87","number":87,"title":"PAY-418: add retry backoff (OPS-77)",
+ "closingIssuesReferences":[
+  {"id":"I_1","number":252,"url":"https://github.com/example/payment/issues/252",
+   "repository":{"id":"R_1","name":"payment","owner":{"id":"U_1","login":"example"}}},
+  {"id":"I_2","number":9,"url":"https://github.com/example/infra/issues/9",
+   "repository":{"id":"R_2","name":"infra","owner":{"id":"U_1","login":"example"}}},
+  {"id":"I_3","number":10,"url":"javascript:alert(1)",
+   "repository":{"id":"R_2","name":"infra","owner":{"id":"U_1","login":"example"}}},
+  {"id":"I_4","number":0,"url":"https://github.com/example/infra/issues/0",
+   "repository":{"id":"R_2","name":"infra","owner":{"id":"U_1","login":"example"}}}
+ ]}
+JSON
+`
+
+// A running task's directory gets the issues its pull request closes and
+// the autolinked references in its branch name and PR title. A URL that is
+// not http(s) and a number that is not an issue number are dropped rather
+// than failing the whole response in the browser.
+func TestTaskGitInfo_IssuesThePRClosesAndAutolinks(t *testing.T) {
+	dir := initTempGitRepo(t)
+	out, err := exec.Command("git", "-C", dir, "checkout", "-b", "PAY-418-retry-backoff").CombinedOutput()
+	require.NoError(t, err, string(out))
+
+	h := NewHandler(withPAYAndOPSAutolinks(), session.NewManager(), nil, nil)
+	h.ghBinaryPath = writeFakeGHBinary(t, ghClosingIssuesScript)
+
+	info := h.lookupTaskGit(context.Background(), "", dir, true)
+	require.NotNil(t, info)
+	assert.Equal(t, 87, info.PRNumber)
+	assert.Equal(t, []taskIssueLink{
+		{Number: 252, URL: "https://github.com/example/payment/issues/252", Repo: "example/payment"},
+		{Number: 9, URL: "https://github.com/example/infra/issues/9", Repo: "example/infra"},
+	}, info.Issues)
+	assert.Equal(t, []taskAutolink{
+		{Text: "PAY-418", URL: "https://jira.example.com/browse/PAY-418"},
+		{Text: "OPS-77", URL: "https://jira.example.com/browse/OPS-77"},
+	}, info.Autolinks)
+}
+
+// ghBefore272Script answers like gh before 2.72.0, which has no
+// closingIssuesReferences field: it refuses the whole call with the message
+// pkg/cmdutil/json_flags.go prints (checked in v2.71.2), and answers the
+// fields it knows. Every call is logged to the file in $GH_CALLS.
+const ghBefore272Script = `#!/bin/sh
+echo "$*" >> "$GH_CALLS"
+case "$*" in
+*closingIssuesReferences*)
+  printf 'Unknown JSON field: "closingIssuesReferences"\nAvailable fields:\n  number\n  title\n  url\n' >&2
+  exit 1 ;;
+esac
+echo '{"url":"https://github.com/example/payment/pull/87","number":87}'
+`
+
+// A gh too old for closingIssuesReferences refuses the whole call. The task
+// keeps its PR link — the pane header's own lookup still finds that PR —
+// and goes without issues and the title's references.
+func TestTaskGitInfo_AGHWithoutClosingIssuesStillFindsThePR(t *testing.T) {
+	dir := initTempGitRepo(t)
+	out, err := exec.Command("git", "-C", dir, "checkout", "-b", "PAY-418-retry").CombinedOutput()
+	require.NoError(t, err, string(out))
+	calls := filepath.Join(t.TempDir(), "calls")
+	t.Setenv("GH_CALLS", calls)
+
+	h := NewHandler(withPAYAndOPSAutolinks(), session.NewManager(), nil, nil)
+	h.ghBinaryPath = writeFakeGHBinary(t, ghBefore272Script)
+
+	info := h.lookupTaskGit(context.Background(), "", dir, true)
+	require.NotNil(t, info)
+	assert.Equal(t, 87, info.PRNumber)
+	assert.Equal(t, "https://github.com/example/payment/pull/87", info.PRURL)
+	assert.Nil(t, info.Issues)
+	assert.Equal(t, []taskAutolink{{Text: "PAY-418", URL: "https://jira.example.com/browse/PAY-418"}}, info.Autolinks)
+
+	logged, err := os.ReadFile(calls)
+	require.NoError(t, err)
+	lines := strings.Split(strings.TrimSpace(string(logged)), "\n")
+	require.Len(t, lines, 2, "the task fields, then the pane header's")
+	assert.Contains(t, lines[0], "--json "+prTaskFields)
+	assert.Contains(t, lines[1], "--json "+prBasicFields)
+}
+
+// The repeated call finds the PR the same way the first would have: without
+// an origin, by running gh inside the directory.
+func TestTaskGitInfo_AGHWithoutClosingIssuesFindsThePRWithoutAnOrigin(t *testing.T) {
+	dir := initTempGitRepo(t)
+	out, err := exec.Command("git", "-C", dir, "remote", "remove", "origin").CombinedOutput()
+	require.NoError(t, err, string(out))
+	t.Setenv("GH_CALLS", filepath.Join(t.TempDir(), "calls"))
+
+	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
+	h.ghBinaryPath = writeFakeGHBinary(t, ghBefore272Script)
+
+	info := h.lookupTaskGit(context.Background(), "", dir, true)
+	require.NotNil(t, info)
+	assert.Equal(t, 87, info.PRNumber)
+}
+
+// A branch without a PR is the common case. gh fails then too, but not for
+// an unknown field, so it is not asked again.
+//
+//efficacy:exempt guards the scope of this branch's old-gh fallback; before it no second call existed
+func TestTaskGitInfo_NoPRRunsGHOnce(t *testing.T) {
+	dir := initTempGitRepo(t)
+	calls := filepath.Join(t.TempDir(), "calls")
+	t.Setenv("GH_CALLS", calls)
+	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
+	h.ghBinaryPath = writeFakeGHBinary(t, "#!/bin/sh\necho \"$*\" >> \"$GH_CALLS\"\n"+
+		"echo 'no pull requests found for branch \"main\"' >&2\nexit 1\n")
+
+	info := h.lookupTaskGit(context.Background(), "", dir, true)
+	require.NotNil(t, info)
+	assert.Zero(t, info.PRNumber)
+
+	logged, err := os.ReadFile(calls)
+	require.NoError(t, err)
+	assert.Equal(t, 1, strings.Count(string(logged), "\n"))
+}
+
+// Without autolinks in the config there is nothing to link a reference to.
+func TestTaskGitInfo_NoAutolinksNoLinks(t *testing.T) {
+	dir := initTempGitRepo(t)
+	out, err := exec.Command("git", "-C", dir, "checkout", "-b", "PAY-418-retry-backoff").CombinedOutput()
+	require.NoError(t, err, string(out))
+
+	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
+	h.ghBinaryPath = writeFakeGHBinary(t, ghClosingIssuesScript)
+
+	info := h.lookupTaskGit(context.Background(), "", dir, true)
+	require.NotNil(t, info)
+	assert.Len(t, info.Issues, 2)
+	assert.Nil(t, info.Autolinks)
+}
+
+// No pull request means no issues; the branch name still carries its
+// reference.
+func TestTaskGitInfo_WithoutAPROnlyTheBranchGivesAutolinks(t *testing.T) {
+	dir := initTempGitRepo(t)
+	out, err := exec.Command("git", "-C", dir, "checkout", "-b", "feature/PAY-418-retry").CombinedOutput()
+	require.NoError(t, err, string(out))
+
+	h := NewHandler(withPAYAndOPSAutolinks(), session.NewManager(), nil, nil)
+	h.ghBinaryPath = writeFakeGHBinary(t, ghNoPRScript)
+
+	info := h.lookupTaskGit(context.Background(), "", dir, true)
+	require.NotNil(t, info)
+	assert.Zero(t, info.PRNumber)
+	assert.Nil(t, info.Issues)
+	assert.Equal(t, []taskAutolink{{Text: "PAY-418", URL: "https://jira.example.com/browse/PAY-418"}}, info.Autolinks)
+}
+
+// Without `gh` on the panemux host there is no PR and so no issues, but the
+// branch name still carries its reference.
+func TestTaskGitInfo_WithoutGHTheBranchStillGivesAutolinks(t *testing.T) {
+	dir := initTempGitRepo(t)
+	out, err := exec.Command("git", "-C", dir, "checkout", "-b", "PAY-418-retry").CombinedOutput()
+	require.NoError(t, err, string(out))
+	gitPath, err := exec.LookPath("git")
+	require.NoError(t, err)
+	onlyGit := t.TempDir()
+	require.NoError(t, os.Symlink(gitPath, filepath.Join(onlyGit, "git")))
+	t.Setenv("PATH", onlyGit)
+	_, err = exec.LookPath("gh")
+	require.Error(t, err, "gh must not be on PATH")
+
+	h := NewHandler(withPAYAndOPSAutolinks(), session.NewManager(), nil, nil)
+
+	info := h.lookupTaskGit(context.Background(), "", dir, true)
+	require.NotNil(t, info)
+	assert.Zero(t, info.PRNumber)
+	assert.Nil(t, info.Issues)
+	assert.Equal(t, []taskAutolink{{Text: "PAY-418", URL: "https://jira.example.com/browse/PAY-418"}}, info.Autolinks)
+}
+
+// The edges of each range and the byte on either side of it: what decides
+// whether a character touching a reference makes it part of a longer word.
+func TestIsASCIIAlnum(t *testing.T) {
+	for _, b := range []byte("09AZaz") {
+		assert.True(t, isASCIIAlnum(b), "%q", b)
+	}
+	for _, b := range []byte("/:@[`{-_ ") {
+		assert.False(t, isASCIIAlnum(b), "%q", b)
+	}
+	assert.False(t, isASCIIAlnum(0xC3), "the first byte of a non-ASCII letter")
+}
+
+func TestAutolinkRefs(t *testing.T) {
+	numeric := config.AutolinkConfig{KeyPrefix: "JIRA-", URLTemplate: "https://jira.example.com/JIRA-<num>"}
+	alnum := config.AutolinkConfig{
+		KeyPrefix: "TICKET", URLTemplate: "https://tickets.example.com/t/<num>", IsAlphanumeric: true,
+	}
+	links := []config.AutolinkConfig{numeric, alnum}
+	jira := func(n string) taskAutolink {
+		return taskAutolink{Text: "JIRA-" + n, URL: "https://jira.example.com/JIRA-" + n}
+	}
+	ticket := func(n string) taskAutolink {
+		return taskAutolink{Text: "TICKET" + n, URL: "https://tickets.example.com/t/" + n}
+	}
+	tests := []struct {
+		name  string
+		texts []string
+		want  []taskAutolink
+	}{
+		{"GitHub's example", []string{"JIRA-123"}, []taskAutolink{jira("123")}},
+		{"none", []string{"main", "fix typo"}, nil},
+		{"only configured prefixes, so UTF-8 and CVE-2024 are not references",
+			[]string{"fix UTF-8, SHA-256 and CVE-2024-45337"}, nil},
+		{"branch prefix", []string{"JIRA-418-retry-backoff"}, []taskAutolink{jira("418")}},
+		{"after a slash", []string{"feature/JIRA-418"}, []taskAutolink{jira("418")}},
+		{"after an underscore", []string{"feature_JIRA-418"}, []taskAutolink{jira("418")}},
+		{"the prefix is case-sensitive", []string{"jira-418"}, nil},
+		{"letter before", []string{"xJIRA-418"}, nil},
+		{"digit before", []string{"1JIRA-418"}, nil},
+		{"numeric: a letter after", []string{"JIRA-418a"}, nil},
+		{"numeric: leading zeros are digits too", []string{"JIRA-0418"}, []taskAutolink{jira("0418")}},
+		{"numeric: 9 is a digit", []string{"JIRA-9"}, []taskAutolink{jira("9")}},
+		{"numeric: stops at the bytes around the digits", []string{"JIRA-1/JIRA-2:"},
+			[]taskAutolink{jira("1"), jira("2")}},
+		{"numeric: no digits", []string{"JIRA-x"}, nil},
+		{"numeric: the prefix alone at the end", []string{"see JIRA-"}, nil},
+		{"alphanumeric takes letters, digits and -",
+			[]string{"TICKET123a-b"}, []taskAutolink{ticket("123a-b")}},
+		{"alphanumeric: either case", []string{"TICKETab9"}, []taskAutolink{ticket("ab9")}},
+		{"alphanumeric: stops at other characters", []string{"(TICKETX1)."}, []taskAutolink{ticket("X1")}},
+		{"alphanumeric: nothing after the prefix", []string{"TICKET."}, nil},
+		{"punctuation around", []string{"[JIRA-418]: (JIRA-7)."}, []taskAutolink{jira("418"), jira("7")}},
+		{"branch first, then title, no repeats", []string{"JIRA-418-x", "JIRA-7 and JIRA-418"},
+			[]taskAutolink{jira("418"), jira("7")}},
+		{"a rejected match does not hide a later one", []string{"xJIRA-1 JIRA-2"}, []taskAutolink{jira("2")}},
+		{"empty texts", []string{"", ""}, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, autolinkRefs(links, tt.texts...))
+		})
+	}
+	assert.Nil(t, autolinkRefs(nil, "JIRA-1"), "no autolinks, no references")
+
+	// An alphanumeric identifier can end in "-", so a prefix that is not a
+	// letter or digit can start right where the reference before it ended.
+	hash := []config.AutolinkConfig{
+		{KeyPrefix: "#", URLTemplate: "https://tracker.example.com/<num>", IsAlphanumeric: true},
+	}
+	assert.Equal(t, []taskAutolink{
+		{Text: "#a-", URL: "https://tracker.example.com/a-"},
+		{Text: "#b", URL: "https://tracker.example.com/b"},
+	}, autolinkRefs(hash, "#a-#b"))
+	assert.Equal(t, []taskAutolink{{Text: "#1", URL: "https://tracker.example.com/1"}},
+		autolinkRefs(hash, "#1#2"), "#2 follows the digit 1, so it is not a reference")
 }
 
 // Without an origin URL there is no repository to name for `gh`, so a PR is
@@ -508,6 +786,13 @@ func TestTaskGitFor(t *testing.T) {
 	assert.Equal(t, &taskGitInfo{RepoURL: "https://example.invalid/r"},
 		taskGitFor(stopped, &taskGitInfo{RepoURL: "https://example.invalid/r", Branch: "b"}))
 	assert.Nil(t, taskGitFor(stopped, &taskGitInfo{Branch: "b"}), "nothing left to report")
+
+	linked := &taskGitInfo{Repo: "r", Branch: "PAY-1", PRNumber: 1,
+		Issues:    []taskIssueLink{{Number: 2, URL: "https://example.invalid/r/issues/2"}},
+		Autolinks: []taskAutolink{{Text: "PAY-1", URL: "https://example.invalid/browse/PAY-1"}}}
+	assert.Same(t, linked, taskGitFor(running, linked))
+	assert.Equal(t, &taskGitInfo{Repo: "r"}, taskGitFor(stopped, linked),
+		"a stopped task reports no issues or references, which come from the branch and PR it no longer has")
 }
 
 // collectionOf renders one host's collection output with the given state
