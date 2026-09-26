@@ -37,7 +37,11 @@ import (
 //
 // The env section names the pane an agent outside tmux was started from
 // (issue #254). It is read from the process's initial environment, which on
-// Linux is /proc/<pid>/environ; a host without it reports nothing. The value
+// Linux is /proc/<pid>/environ; a host without it reports nothing. Entries
+// there are NUL-separated and a value may itself hold newlines, so newlines
+// become \001 before NULs become newlines: a line inside another variable's
+// value can then never start a row, and a value carrying \001 fails
+// validPaneID. The value
 // is untrusted — any process of the user can set it — and is checked against
 // validPaneID here and against the panes it names in the browser.
 const collectScript = `LC_ALL=C
@@ -65,7 +69,7 @@ for pid in $agents; do
 done
 echo '::section env'
 for pid in $agents; do
-	v=$(tr '\000' '\n' <"/proc/$pid/environ" 2>/dev/null | grep -m 1 '^PANEMUX_PANE_ID=')
+	v=$(tr '\n\000' '\001\n' <"/proc/$pid/environ" 2>/dev/null | grep -m 1 '^PANEMUX_PANE_ID=')
 	if [ -n "$v" ]; then echo "$pid ${v#PANEMUX_PANE_ID=}"; fi
 done
 echo '::section transcripts'

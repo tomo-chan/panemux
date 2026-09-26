@@ -651,6 +651,11 @@ func TestRunLocal_ReportsThePaneIDInAnAgentsEnvironment(t *testing.T) {
 	codex := start("codex", []string{"PANEMUX_PANE_ID=pane-codex"}, "30")
 	unsafe := start("claude", []string{"PANEMUX_PANE_ID=my pane"}, "30")
 	onlyInArgs := start("claude", []string{"PATH=/usr/bin:/bin"}, "30", "PANEMUX_PANE_ID=pane-argv")
+	// Another variable's value can hold a line that looks like the variable
+	// itself; only the entry named PANEMUX_PANE_ID counts, wherever it is.
+	inAValue := start("claude",
+		[]string{"NOTES=line1\nPANEMUX_PANE_ID=pane-other", "PANEMUX_PANE_ID=pane-real"}, "30")
+	onlyInAValue := start("claude", []string{"NOTES=line1\nPANEMUX_PANE_ID=pane-other"}, "30")
 	withoutPane := start("claude", []string{"PATH=/usr/bin:/bin"}, "30")
 
 	out, err := runLocal(context.Background(), collectScript)
@@ -664,7 +669,10 @@ func TestRunLocal_ReportsThePaneIDInAnAgentsEnvironment(t *testing.T) {
 	}
 	assert.Equal(t, "pane-1790346631000-a1b2c", raw.PaneIDs[withPane])
 	assert.Equal(t, "pane-codex", raw.PaneIDs[codex])
-	for name, pid := range map[string]int{"unsafe": unsafe, "only in args": onlyInArgs, "without": withoutPane} {
+	assert.Equal(t, "pane-real", raw.PaneIDs[inAValue], "a line inside another variable's value is not the variable")
+	for name, pid := range map[string]int{
+		"unsafe": unsafe, "only in args": onlyInArgs, "without": withoutPane, "only in a value": onlyInAValue,
+	} {
 		_, ok := raw.PaneIDs[pid]
 		assert.False(t, ok, "%s: %v", name, raw.PaneIDs)
 	}
