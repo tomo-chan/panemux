@@ -266,6 +266,13 @@ Chosen while it was built:
   window with `respawn-pane -k` (kills whatever the shell was running), a different session name
   (the open pane would not show claude, and the shell session lingers), and changing how task panes
   attach (a config-schema change to every `tmux`/`ssh_tmux` pane).
+- **Resumes of one (host, session) are serialized inside panemux** (review of PR #265, decided with
+  the operator). Reusing a session is decided from the collection a resume makes before launching,
+  so two overlapping resumes could both find the session free and start two `claude --resume` on one
+  conversation. Checking the session's panes for claude inside the script, just before
+  `new-window`, was the alternative; it was not taken because walking the process tree in shell is
+  fragile across `ps` implementations and still leaves a gap. Two panemux processes are not
+  coordinated.
 - **Each resume in flight is tracked per task** (review of PR #265). One tracked ID was replaced by a
   second resume, re-enabling the first task's button while its request still ran.
 

@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -836,4 +837,111 @@ func TestResume_ReusesTheTaskSessionOnlyWhenNoAgentRunsInIt(t *testing.T) {
 			assert.Contains(t, launchScript, want)
 		})
 	}
+}
+
+// Two resumes of one task must not both decide, from collections made before
+// either started claude, that the task's tmux session is free: the second
+// would add a second `claude --resume` of the same conversation to it. The
+// collection and the launch of a resume are one step per (host, session).
+func TestResume_OverlappingResumesOfOneTaskAreSerialized(t *testing.T) {
+	var (
+		mu          sync.Mutex
+		launched    bool
+		collections int
+		scripts     []string
+	)
+	firstLaunch := make(chan struct{})
+	release := make(chan struct{})
+	svc := New(Options{
+		Now: func() time.Time { return time.Unix(1000, 0) }, Rand: launchRand(),
+		RunLocal: func(_ context.Context, script string) ([]byte, error) {
+			mu.Lock()
+			if script == collectScript {
+				collections++
+				out := inTmuxOutput(launched)
+				mu.Unlock()
+				return out, nil
+			}
+			scripts = append(scripts, script)
+			first := len(scripts) == 1
+			mu.Unlock()
+			if first {
+				close(firstLaunch)
+				<-release
+			}
+			mu.Lock()
+			launched = true
+			mu.Unlock()
+			return []byte("::panemux-launch ok\n"), nil
+		},
+	})
+	defer svc.Close()
+
+	errs := make(chan error, 2)
+	go func() { _, err := svc.Resume(context.Background(), "", testSessionID); errs <- err }()
+	<-firstLaunch
+	go func() { _, err := svc.Resume(context.Background(), "", testSessionID); errs <- err }()
+	time.Sleep(100 * time.Millisecond)
+	mu.Lock()
+	assert.Equal(t, 1, collections, "the second resume collects only once the first has launched")
+	mu.Unlock()
+	close(release)
+	require.NoError(t, <-errs)
+	require.NoError(t, <-errs)
+
+	require.Len(t, scripts, 2)
+	assert.Contains(t, scripts[0], "reuse='yes'")
+	assert.Contains(t, scripts[1], "reuse='no'", "the second resume sees the first one's claude in the session")
+}
+
+// A resume whose request ends while it waits gives up without taking the lock
+// from the resume that holds it: a third resume still waits for the holder.
+func TestResume_GivesUpWaitingForAnotherResumeWhenItsRequestEnds(t *testing.T) {
+	var (
+		mu          sync.Mutex
+		collections int
+		launches    int
+	)
+	firstLaunch := make(chan struct{})
+	release := make(chan struct{})
+	svc := New(Options{
+		Now: func() time.Time { return time.Unix(1000, 0) }, Rand: launchRand(),
+		RunLocal: func(_ context.Context, script string) ([]byte, error) {
+			mu.Lock()
+			if script == collectScript {
+				collections++
+				mu.Unlock()
+				return inTmuxOutput(false), nil
+			}
+			launches++
+			first := launches == 1
+			mu.Unlock()
+			if first {
+				close(firstLaunch)
+				<-release
+			}
+			return []byte("::panemux-launch ok\n"), nil
+		},
+	})
+	defer svc.Close()
+	done := make(chan error, 2)
+	go func() { _, err := svc.Resume(context.Background(), "", testSessionID); done <- err }()
+	<-firstLaunch
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := svc.Resume(ctx, "", testSessionID)
+	require.ErrorIs(t, err, context.Canceled)
+
+	go func() { _, err := svc.Resume(context.Background(), "", testSessionID); done <- err }()
+	time.Sleep(100 * time.Millisecond)
+	mu.Lock()
+	assert.Equal(t, 1, collections, "the third resume still waits for the one holding the lock")
+	mu.Unlock()
+	close(release)
+	require.NoError(t, <-done)
+	require.NoError(t, <-done)
+	svc.mu.Lock()
+	assert.Empty(t, svc.resumeLocks, "a lock nobody holds or waits for is dropped")
+	svc.mu.Unlock()
 }

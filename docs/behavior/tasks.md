@@ -255,6 +255,11 @@ environment's claude stopped at its first-run screen). Scenario J21 is the manua
   codex, or one whose state could not be read) inside that session, claude is started as a new window
   of it: the shell's window is left as it is, and the attached pane shows claude. When a running task
   is inside it, the resume is refused, as a new task is refused whenever the name is taken.
+- **Two resumes of the same task run one after the other.** A second resume of the same session on
+  the same host waits until the first has started claude, and only then collects; it then finds that
+  claude in the session and is refused, so one conversation never gets two claude processes from
+  the dashboard. This covers one panemux process: two panemux instances, or a resume typed by hand on
+  the host, are not coordinated with it. A resume whose request ends while it waits gives up.
 - **The session ID is passed in the `=` form.** `--resume` takes an optional value, and a separate
   argument beginning with `-` would be read as an option; `--resume` also accepts a session title,
   which is why only a UUID is accepted.

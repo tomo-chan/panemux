@@ -225,7 +225,10 @@ one is installed, and the stand-in tmux the other tests use refuses `-c` outrigh
 (`tmux new-window -t "=<name>:" -- sh -c …`), with the same arguments as a new session. The script is
 told whether it may with a fixed `yes`/`no` that `Service.Resume` sets from the collection it has
 just made: only when no running task was found inside that tmux session. Nothing already in the
-session is replaced or killed.
+session is replaced or killed. Because that decision rests on a collection made before the launch,
+the resumes of one (host, session) are serialized inside panemux (`Service.lockResume`): a second one
+collects only after the first has launched, sees its claude, and is refused rather than adding a
+second claude to the same conversation.
 
 **The first instruction reaches claude as a file, then as one argument after `--`.** The script writes
 it to a `mktemp` file created under `umask 077`, and the tmux command is a fixed

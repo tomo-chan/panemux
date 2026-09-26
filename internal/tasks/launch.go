@@ -336,6 +336,15 @@ func (s *Service) Resume(ctx context.Context, host, sessionID string) (Launched,
 	if err := s.checkHost(host); err != nil {
 		return Launched{}, err
 	}
+	// Whether the task's tmux session may be reused is decided from this
+	// collection, so a second resume of the same session must not collect
+	// until the first has launched: both would find the session free and
+	// start claude twice on one conversation.
+	unlock, err := s.lockResume(ctx, host, sessionID)
+	if err != nil {
+		return Launched{}, err
+	}
+	defer unlock()
 	result, list := s.collectHost(ctx, host)
 	if result.Status != HostOK {
 		return Launched{}, fmt.Errorf("collect %s before resuming: %s", hostName(host), resultError(result))
@@ -381,6 +390,53 @@ func (s *Service) launch(ctx context.Context, host string, p launchParams) (Laun
 		SessionID:   p.sessionID,
 		TmuxSession: p.tmuxSession,
 	}, nil
+}
+
+// resumeLock serializes the resumes of one (host, session). users counts
+// the holder and the waiters, so the lock is dropped once nobody needs it.
+type resumeLock struct {
+	held  chan struct{}
+	users int
+}
+
+// lockResume waits, as long as ctx allows, until no other resume of the same
+// session on the same host is between its collection and its launch. It only
+// covers this panemux process.
+func (s *Service) lockResume(ctx context.Context, host, sessionID string) (func(), error) {
+	key := host + "\x00" + sessionID
+	lock := s.joinResumeLock(key)
+	release := func() {
+		s.mu.Lock()
+		lock.users--
+		if lock.users == 0 {
+			delete(s.resumeLocks, key)
+		}
+		s.mu.Unlock()
+	}
+	select {
+	case lock.held <- struct{}{}:
+		return func() {
+			<-lock.held
+			release()
+		}, nil
+	case <-ctx.Done():
+		release()
+		return nil, fmt.Errorf("wait for another resume of the session: %w", ctx.Err())
+	}
+}
+
+// joinResumeLock returns the key's lock, creating it, and counts the caller
+// among its users.
+func (s *Service) joinResumeLock(key string) *resumeLock {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	lock := s.resumeLocks[key]
+	if lock == nil {
+		lock = &resumeLock{held: make(chan struct{}, 1)}
+		s.resumeLocks[key] = lock
+	}
+	lock.users++
+	return lock
 }
 
 // agentRunsInTmuxSession reports whether any running task — claude, codex,

@@ -110,10 +110,13 @@ var ErrUnknownHost = errors.New("unknown host")
 
 // Service collects tasks and owns the per-host connections.
 type Service struct {
-	hosts  map[string]*hostConn
-	opts   Options
-	mu     sync.Mutex
-	closed bool
+	hosts map[string]*hostConn
+	// resumeLocks makes each (host, session) resume's collection and launch
+	// one step; see Service.Resume.
+	resumeLocks map[string]*resumeLock
+	opts        Options
+	mu          sync.Mutex
+	closed      bool
 }
 
 type hostConn struct {
@@ -140,7 +143,7 @@ func New(opts Options) *Service {
 	if opts.Rand == nil {
 		opts.Rand = rand.Reader
 	}
-	return &Service{opts: opts, hosts: map[string]*hostConn{}}
+	return &Service{opts: opts, hosts: map[string]*hostConn{}, resumeLocks: map[string]*resumeLock{}}
 }
 
 // runLocal runs the collection script with `sh -s`. The command is a
