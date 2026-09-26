@@ -139,8 +139,7 @@ func TestClaudeSummarizer_Failures(t *testing.T) {
 	t.Run("exit status", func(t *testing.T) {
 		bin, _ := fakeClaude(t, "Not logged in", 1)
 		_, err := newClaudeSummarizer(bin, nil)(context.Background(), "x")
-		require.Error(t, err)
-		assert.NotContains(t, err.Error(), "Not logged in")
+		require.EqualError(t, err, "claude exited with status 1")
 	})
 	t.Run("missing binary", func(t *testing.T) {
 		_, err := newClaudeSummarizer(filepath.Join(t.TempDir(), "claude"), nil)(context.Background(), "x")
@@ -149,15 +148,23 @@ func TestClaudeSummarizer_Failures(t *testing.T) {
 	t.Run("context ends", func(t *testing.T) {
 		dir := t.TempDir()
 		bin := filepath.Join(dir, "claude")
+		pidFile := filepath.Join(dir, "child.pid")
 		// A child keeps stdout open, as a real claude's own children could.
-		script := []byte("#!/bin/sh\nsleep 30 &\nsleep 30\n")
+		script := []byte("#!/bin/sh\nsleep 30 &\necho $! > '" + pidFile + "'\nwait\n")
 		require.NoError(t, os.WriteFile(bin, script, 0o700)) //nolint:gosec // test fixture: an executable stand-in
-		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+		ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 		defer cancel()
 		started := time.Now()
 		_, err := newClaudeSummarizer(bin, nil)(ctx, "x")
-		require.Error(t, err)
+		require.EqualError(t, err, "claude did not finish summarizing in time")
 		assert.Less(t, time.Since(started), 5*time.Second)
+
+		raw, err := os.ReadFile(pidFile)
+		require.NoError(t, err)
+		childPID, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+		require.NoError(t, err)
+		assert.Eventually(t, func() bool { return !processRunning(childPID) }, 5*time.Second, 20*time.Millisecond,
+			"claude's own children are killed with it")
 	})
 }
 

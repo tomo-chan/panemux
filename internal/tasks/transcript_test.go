@@ -2,6 +2,7 @@ package tasks
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -66,25 +67,67 @@ func TestParseTranscriptOutput_ReadsTheBodyByLength(t *testing.T) {
 }
 
 func TestParseTranscriptOutput_Errors(t *testing.T) {
-	cases := map[string]string{
-		"no header":             "hello\n",
-		"bad size":              "::panemux-transcript v1 many\nabc\n::end\n",
-		"negative size":         "::panemux-transcript v1 -3\nabc\n::end\n",
-		"other version":         "::panemux-transcript v2 3\nabc\n::end\n",
-		"body too short":        "::panemux-transcript v1 10\nabc\n::end\n",
-		"no end":                "::panemux-transcript v1 3\nabc\n",
-		"cut off":               "::panemux-transcript v1 3\nab",
-		"text before end":       "::panemux-transcript v1 3\nabcdef\n::end\n",
-		"no header, no newline": "hello",
-		"ended in header":       "::panemux-transcript v1 3",
+	cases := []struct {
+		name, out, want string
+	}{
+		{name: "no header", out: "hello\n", want: "has no header"},
+		{name: "no header, no newline", out: "hello", want: "has no header"},
+		{name: "header not at a line start", out: "x::panemux-transcript v1 3\nabc\n::end\n", want: "has no header"},
+		{name: "ended in header", out: "::panemux-transcript v1 3", want: "ended in its header"},
+		{name: "empty header", out: "::panemux-transcript \n\n::end\n", want: "unknown header"},
+		{name: "bad size", out: "::panemux-transcript v1 many\nabc\n::end\n", want: "unknown header"},
+		{name: "negative size", out: "::panemux-transcript v1 -3\nabc\n::end\n", want: "unknown header"},
+		{name: "other version", out: "::panemux-transcript v2 3\nabc\n::end\n", want: "unknown header"},
+		{name: "body too short", out: "::panemux-transcript v1 10\nabc\n::end\n", want: "incomplete"},
+		{name: "no end", out: "::panemux-transcript v1 3\nabc\n", want: "incomplete"},
+		{name: "cut off", out: "::panemux-transcript v1 3\nab", want: "incomplete"},
+		{name: "text before end", out: "::panemux-transcript v1 3\nabcdef\n::end\n", want: "incomplete"},
 	}
-	for name, out := range cases {
-		t.Run(name, func(t *testing.T) {
-			_, err := parseTranscriptOutput([]byte(out))
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := parseTranscriptOutput([]byte(tc.out))
 			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.want)
 			assert.NotErrorIs(t, err, ErrNoTranscript)
 		})
 	}
+}
+
+// The header is found after a login banner, blank lines included, and at
+// the very start of the output.
+func TestParseTranscriptOutput_FindsTheHeaderAfterABanner(t *testing.T) {
+	body := "{}\n"
+	for name, prefix := range map[string]string{
+		"at the start":     "",
+		"after a banner":   "Welcome\n",
+		"after a blank":    "\n",
+		"after two blanks": "motd\n\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := parseTranscriptOutput(append([]byte(prefix), transcriptOutput(len(body), body)...))
+			require.NoError(t, err)
+			assert.Equal(t, body, string(got.Head))
+		})
+	}
+}
+
+// An empty log is a log, with nothing in it.
+func TestParseTranscriptOutput_AnEmptyLog(t *testing.T) {
+	got, err := parseTranscriptOutput(transcriptOutput(0, ""))
+	require.NoError(t, err)
+	assert.True(t, got.Whole)
+	assert.Empty(t, got.Head)
+}
+
+// A log exactly as large as the head and the tail together still arrives
+// whole.
+func TestParseTranscriptOutput_ALogAtTheWholeLimitIsWhole(t *testing.T) {
+	size := transcriptHeadBytes + transcriptTailBytes
+	got, err := parseTranscriptOutput(transcriptOutput(size, strings.Repeat("w", size)))
+	require.NoError(t, err)
+	assert.True(t, got.Whole)
+	assert.Len(t, got.Head, size)
+	assert.Empty(t, got.Tail)
 }
 
 func TestParseTranscriptOutput_NoLog(t *testing.T) {
@@ -254,4 +297,47 @@ func TestTruncateUTF8(t *testing.T) {
 	cut := truncateUTF8(strings.Repeat("あ", 10), 5)
 	assert.True(t, utf8.ValidString(cut), "never splits a character: %q", cut)
 	assert.Equal(t, "あ…", cut)
+}
+
+// The lines the byte limits cut are skipped even when they happen to be a
+// whole message: the head's last line and the tail's first.
+func TestBuildExcerpt_SkipsTheLinesTheLimitsCut(t *testing.T) {
+	head := []byte(assistantLine("early") + "\n" + userLine("head-last-line"))
+	tail := []byte(userLine("tail-first-line") + "\n" + userLine("kept") + "\n")
+
+	excerpt, ok := buildExcerpt(transcriptData{Head: head, Tail: tail})
+	require.True(t, ok)
+	assert.NotContains(t, excerpt, "head-last-line")
+	assert.NotContains(t, excerpt, "tail-first-line")
+	assert.Contains(t, excerpt, "[user] kept")
+}
+
+// A first instruction with no readable recent message is still an excerpt,
+// with no empty section for the recent messages.
+func TestBuildExcerpt_OnlyAFirstInstruction(t *testing.T) {
+	excerpt, ok := buildExcerpt(transcriptData{Head: lines(userLine("the goal"), "cut"), Tail: lines("cut", "not json")})
+	require.True(t, ok)
+	assert.Contains(t, excerpt, excerptFirstHeading+"\n[user] the goal")
+	assert.NotContains(t, excerpt, excerptRecentHeading)
+}
+
+// Messages that fill the budget exactly are all kept.
+func TestBuildExcerpt_MessagesThatFillTheBudgetExactlyAreKept(t *testing.T) {
+	// "[user] " + text + "\n\n" is 9 bytes more than the text, so twelve
+	// messages of excerptRecentBytes/12-9 bytes fill the budget exactly.
+	const perMessage = excerptRecentBytes/12 - 9
+	var ls []string
+	for i := 0; i < 13; i++ {
+		ls = append(ls, userLine(fmt.Sprintf("%02d", i)+strings.Repeat("x", perMessage-2)))
+	}
+	excerpt, ok := buildExcerpt(transcriptData{Head: lines(ls...), Whole: true})
+	require.True(t, ok)
+	assert.Contains(t, excerpt, excerptRecentHeading+"\n[user] 01x", "the twelfth newest message is kept")
+	assert.Contains(t, excerpt, excerptFirstHeading+"\n[user] 00x", "the oldest is the first instruction")
+}
+
+// A string that starts with continuation bytes is cut without reading
+// before its start.
+func TestTruncateUTF8_InvalidLeadingBytes(t *testing.T) {
+	assert.Equal(t, "…", truncateUTF8("\x80\x80\x80abc", 2))
 }

@@ -104,18 +104,14 @@ type transcriptData struct {
 // the length the header announces, never by looking for a marker, since the
 // log itself can hold any text.
 func parseTranscriptOutput(out []byte) (transcriptData, error) {
+	// The header starts a line; a login shell may print text before it.
 	start := -1
-	for i := 0; i < len(out); {
-		if bytes.HasPrefix(out[i:], []byte(transcriptHeader)) {
-			start = i + len(transcriptHeader)
-			break
-		}
-		next := bytes.IndexByte(out[i:], '\n')
-		if next < 0 {
-			break
-		}
-		i += next + 1
+	if bytes.HasPrefix(out, []byte(transcriptHeader)) {
+		start = len(transcriptHeader)
+	} else if i := bytes.Index(out, []byte("\n"+transcriptHeader)); i >= 0 {
+		start = i + 1 + len(transcriptHeader)
 	}
+	//mutation:exempt[CONDITIONALS_BOUNDARY] equivalent — start is -1 or at least len(transcriptHeader), never 0
 	if start < 0 {
 		return transcriptData{}, errors.New("conversation log output has no header")
 	}
@@ -139,6 +135,7 @@ func parseTranscriptOutput(out []byte) (transcriptData, error) {
 	if !data.Whole {
 		length = transcriptHeadBytes + transcriptTailBytes
 	}
+	//mutation:exempt[CONDITIONALS_BOUNDARY] equivalent — a body of exactly length bytes fails the end check too
 	if len(body) < length || !bytes.HasPrefix(body[length:], []byte(transcriptEnd)) {
 		return transcriptData{}, errors.New("conversation log output is incomplete")
 	}
@@ -174,11 +171,13 @@ type contentBlock struct {
 // parseLogMessages reads the messages in chunk. dropFirst and dropLast skip
 // a first or last line that a byte limit cut in the middle.
 func parseLogMessages(chunk []byte, dropFirst, dropLast bool) []logMessage {
+	// bytes.Split always returns at least one element, so there is always
+	// a first and a last row to drop.
 	rows := bytes.Split(chunk, []byte("\n"))
-	if dropFirst && len(rows) > 0 {
+	if dropFirst {
 		rows = rows[1:]
 	}
-	if dropLast && len(rows) > 0 {
+	if dropLast {
 		rows = rows[:len(rows)-1]
 	}
 	var messages []logMessage
