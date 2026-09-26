@@ -111,6 +111,7 @@ describe('canRecord', () => {
 describe('canResume', () => {
   const stopped = { state: 'stop' as const, session_id: '5d7e3a90-1b2c-4d3e-8f40-51627384a5b6', location: { kind: 'none' as const, attachable: false } }
 
+  // efficacy:exempt unchanged by this branch; the new describe block after it falls inside its line range
   it('offers resume only for a stopped claude task whose session id is a UUID', () => {
     expect(canResume(task(stopped))).toBe(true)
     expect(canResume(task({ ...stopped, done: true }))).toBe(true)
