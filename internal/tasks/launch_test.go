@@ -631,3 +631,18 @@ func checkResumeRefusal(t *testing.T, tt resumeRefusal) {
 		assert.ErrorContains(t, err, tt.wantText)
 	}
 }
+
+func TestResume_AHostStillConnectingIsNotResumed(t *testing.T) {
+	gate := make(chan struct{})
+	defer close(gate)
+	dialer := &fakeDialer{gate: gate, conns: []*fakeConn{{}}}
+	svc := New(Options{
+		Rand: launchRand(), Hosts: func() []string { return []string{"build-box"} }, Dial: dialer.dial,
+		HostTimeout: 10 * time.Millisecond,
+	})
+	defer svc.Close()
+
+	_, err := svc.Resume(context.Background(), "build-box", testSessionID)
+
+	assert.EqualError(t, err, "collect build-box before resuming: still connecting")
+}
