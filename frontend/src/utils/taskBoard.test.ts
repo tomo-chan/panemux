@@ -2,8 +2,13 @@ import { describe, expect, it } from 'vitest'
 import type { Task, Workspace } from '../schemas'
 import {
   TASK_COLUMNS,
+  allLabels,
+  applyTaskRecord,
+  canRecord,
   columnForState,
+  columnForTask,
   filterTasks,
+  labelColor,
   findTaskPane,
   formatElapsed,
   formatShortcut,
@@ -12,10 +17,12 @@ import {
   hostLabel,
   isLiveState,
   laneKeys,
+  laneTitle,
   paneConfigForTask,
   runningCount,
   taskOpenAction,
   taskTitle,
+  visibleColumns,
   waitingCount,
 } from './taskBoard'
 
@@ -52,15 +59,94 @@ function workspace(id: string, panes: Array<Record<string, unknown>>): Workspace
 
 describe('TASK_COLUMNS', () => {
   it('puts every state in exactly one column, in the dashboard order', () => {
-    expect(TASK_COLUMNS.map((column) => column.id)).toEqual(['wait', 'busy', 'idle', 'other', 'stop'])
+    expect(TASK_COLUMNS.map((column) => column.id)).toEqual(['wait', 'busy', 'idle', 'other', 'stop', 'done'])
     const states = TASK_COLUMNS.flatMap((column) => column.states)
     expect([...states].sort()).toEqual(['busy', 'idle', 'run', 'stop', 'unknown', 'wait'])
   })
 
+  // efficacy:exempt unchanged by this branch; the new describe block after it falls inside its line range
   it('maps codex and unreadable sessions to the same column', () => {
     expect(columnForState('run')).toBe('other')
     expect(columnForState('unknown')).toBe('other')
     expect(columnForState('wait')).toBe('wait')
+  })
+})
+
+describe('columnForTask', () => {
+  it('puts a task marked done in the Done column only while it is stopped', () => {
+    expect(columnForTask(task({ state: 'stop', done: true }))).toBe('done')
+    expect(columnForTask(task({ state: 'stop' }))).toBe('stop')
+    expect(columnForTask(task({ state: 'stop', done: false }))).toBe('stop')
+  })
+
+  it('keeps a running task marked done in the column of the state it reports', () => {
+    expect(columnForTask(task({ state: 'wait', done: true }))).toBe('wait')
+    expect(columnForTask(task({ state: 'busy', done: true }))).toBe('busy')
+    expect(columnForTask(task({ state: 'idle', done: true }))).toBe('idle')
+    expect(columnForTask(task({ state: 'unknown', done: true }))).toBe('other')
+  })
+})
+
+describe('visibleColumns', () => {
+  it('shows the Done column only when asked to', () => {
+    expect(visibleColumns(false).map((column) => column.id)).toEqual(['wait', 'busy', 'idle', 'other', 'stop'])
+    expect(visibleColumns(true).map((column) => column.id)).toEqual(['wait', 'busy', 'idle', 'other', 'stop', 'done'])
+  })
+})
+
+describe('canRecord', () => {
+  it('allows done and labels only on a task with a session id', () => {
+    expect(canRecord(task())).toBe(true)
+    expect(canRecord(task({ agent: 'codex', session_id: undefined, id: 'local:codex:pid-8' }))).toBe(false)
+    expect(canRecord(task({ session_id: '' }))).toBe(false)
+  })
+})
+
+describe('allLabels', () => {
+  it('lists every label once, sorted', () => {
+    expect(allLabels([
+      task({ labels: ['zeta', 'alpha'] }),
+      task({ labels: ['alpha', 'Beta'] }),
+      task({ labels: undefined }),
+      task({ labels: [] }),
+    ])).toEqual(['alpha', 'Beta', 'zeta'])
+    expect(allLabels([])).toEqual([])
+  })
+})
+
+describe('labelColor', () => {
+  it('gives a label the same color every time', () => {
+    expect(labelColor('payment')).toBe(labelColor('payment'))
+    expect(labelColor('payment')).toMatch(/^#[0-9a-f]{6}$/)
+  })
+
+  it('spreads different labels over the palette', () => {
+    const colors = new Set(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'docs', 'infra'].map(labelColor))
+    expect(colors.size).toBeGreaterThan(3)
+  })
+})
+
+describe('applyTaskRecord', () => {
+  it('sets done and labels on the task the record names, and only on it', () => {
+    const tasks = [
+      task({ id: 'l', host: '', session_id: 's1' }),
+      task({ id: 'r', host: 'dev-server', session_id: 's1' }),
+      task({ id: 'c', host: '', agent: 'codex', session_id: 's1' }),
+    ]
+    const next = applyTaskRecord(tasks, { host: '', agent: 'claude', session_id: 's1', done: true, labels: ['x'] })
+    expect(next.map((t) => [t.id, t.done, t.labels])).toEqual([
+      ['l', true, ['x']],
+      ['r', undefined, undefined],
+      ['c', undefined, undefined],
+    ])
+    expect(tasks[0].done).toBeUndefined()
+  })
+
+  it('clears done and labels with an empty record', () => {
+    const tasks = [task({ id: 'l', session_id: 's1', done: true, labels: ['x'] })]
+    const next = applyTaskRecord(tasks, { host: '', agent: 'claude', session_id: 's1', done: false, labels: [] })
+    expect(next[0].done).toBe(false)
+    expect(next[0].labels).toEqual([])
   })
 })
 
@@ -95,8 +181,9 @@ describe('filterTasks', () => {
     task({ id: 'c', host: 'dev-server', cwd: undefined, session_id: 'ffee0011' }),
   ]
 
+  // efficacy:exempt only the filter argument gained label: null; it pins stage 1 behavior this branch leaves as it was
   it('matches title, directory, branch, PR number and session id case-insensitively', () => {
-    const ids = (query: string) => filterTasks(tasks, { query, host: null }).map((t) => t.id)
+    const ids = (query: string) => filterTasks(tasks, { query, host: null, label: null }).map((t) => t.id)
     expect(ids('')).toEqual(['a', 'b', 'c'])
     expect(ids('PANEMUX')).toEqual(['a'])
     expect(ids('pay-418')).toEqual(['b'])
@@ -107,17 +194,84 @@ describe('filterTasks', () => {
     expect(ids('nothing')).toEqual([])
   })
 
+  // efficacy:exempt only the filter argument gained label: null; it pins stage 1 behavior this branch leaves as it was
   it('filters by host, where the empty name is the panemux host', () => {
-    expect(filterTasks(tasks, { query: '', host: '' }).map((t) => t.id)).toEqual(['a'])
-    expect(filterTasks(tasks, { query: '', host: 'dev-server' }).map((t) => t.id)).toEqual(['b', 'c'])
+    expect(filterTasks(tasks, { query: '', host: '', label: null }).map((t) => t.id)).toEqual(['a'])
+    expect(filterTasks(tasks, { query: '', host: 'dev-server', label: null }).map((t) => t.id)).toEqual(['b', 'c'])
+  })
+
+  it('filters by label, together with the host and the query', () => {
+    const labeled = [
+      task({ id: 'a', labels: ['payment', 'sprint-42'] }),
+      task({ id: 'b', host: 'dev-server', labels: ['sprint-42'] }),
+      task({ id: 'c', labels: undefined }),
+    ]
+    const ids = (filter: { query?: string; host?: string | null; label: string | null }) =>
+      filterTasks(labeled, { query: '', host: null, ...filter }).map((t) => t.id)
+    expect(ids({ label: null })).toEqual(['a', 'b', 'c'])
+    expect(ids({ label: 'sprint-42' })).toEqual(['a', 'b'])
+    expect(ids({ label: 'payment' })).toEqual(['a'])
+    expect(ids({ label: 'Payment' })).toEqual([])
+    expect(ids({ label: 'sprint-42', host: 'dev-server' })).toEqual(['b'])
+    expect(ids({ label: 'sprint-42', query: 'nothing' })).toEqual([])
   })
 })
 
 describe('lanes', () => {
+  it('keys a task by each of its labels, or No label', () => {
+    expect(laneKeys(task({ labels: ['payment', 'sprint-42'] }), 'label')).toEqual(['payment', 'sprint-42'])
+    expect(laneKeys(task({ labels: [] }), 'label').map(laneTitle)).toEqual(['No label'])
+    expect(laneKeys(task({ labels: undefined }), 'label').map(laneTitle)).toEqual(['No label'])
+  })
+
+  it('keeps a label named like a catch-all row apart from that row', () => {
+    const lanes = groupIntoLanes(
+      [task({ id: 'a', labels: ['No label'] }), task({ id: 'b' }), task({ id: 'c', labels: ['zeta'] })],
+      'label',
+    )
+    expect(lanes.map((lane) => [lane.title, lane.tasks.map((t) => t.id)])).toEqual([
+      ['No label', ['a']],
+      ['zeta', ['c']],
+      ['No label', ['b']],
+    ])
+    // Names an ordinary object inherits are ordinary names, not catch-all rows.
+    for (const name of ['__proto__', 'constructor', 'toString', 'hasOwnProperty']) {
+      const inherited = groupIntoLanes([task({ id: 'a', labels: [name] }), task({ id: 'b', labels: ['zeta'] }), task({ id: 'c' })], 'label')
+      expect(inherited.map((lane) => [lane.title, lane.tasks.map((t) => t.id)]), name).toEqual([
+        [name, ['a']],
+        ['zeta', ['b']],
+        ['No label', ['c']],
+      ])
+      expect(laneTitle(name)).toBe(name)
+    }
+    const repos = groupIntoLanes([task({ id: 'a', git: { repo: 'Not in a Git repository' } }), task({ id: 'b' })], 'repo')
+    expect(repos.map((lane) => [lane.title, lane.tasks.map((t) => t.id)])).toEqual([
+      ['Not in a Git repository', ['a']],
+      ['Not in a Git repository', ['b']],
+    ])
+  })
+
+  it('shows a task with two labels in both label lanes, and No label last', () => {
+    const lanes = groupIntoLanes(
+      [
+        task({ id: '1', labels: ['sprint-42', 'payment'] }),
+        task({ id: '2' }),
+        task({ id: '3', labels: ['infra', 'sprint-42'] }),
+      ],
+      'label',
+    )
+    expect(lanes.map((lane) => [lane.title, lane.tasks.map((t) => t.id)])).toEqual([
+      ['infra', ['3']],
+      ['payment', ['1']],
+      ['sprint-42', ['1', '3']],
+      ['No label', ['2']],
+    ])
+  })
+
   it('keys a task by host or repository', () => {
     expect(laneKeys(task({ host: '' }), 'host')).toEqual(['Local'])
     expect(laneKeys(task({ git: { repo: 'panemux' } }), 'repo')).toEqual(['panemux'])
-    expect(laneKeys(task({ git: undefined }), 'repo')).toEqual(['Not in a Git repository'])
+    expect(laneKeys(task({ git: undefined }), 'repo').map(laneTitle)).toEqual(['Not in a Git repository'])
     expect(laneKeys(task(), 'none')).toEqual([''])
   })
 
@@ -131,7 +285,7 @@ describe('lanes', () => {
       ],
       'repo',
     )
-    expect(lanes.map((lane) => [lane.key, lane.tasks.map((t) => t.id)])).toEqual([
+    expect(lanes.map((lane) => [lane.title, lane.tasks.map((t) => t.id)])).toEqual([
       ['alpha', ['3']],
       ['zeta', ['1', '4']],
       ['Not in a Git repository', ['2']],
@@ -140,7 +294,7 @@ describe('lanes', () => {
 
   it('is a single unnamed lane when not split', () => {
     const lanes = groupIntoLanes([task({ id: '1' }), task({ id: '2' })], 'none')
-    expect(lanes).toEqual([{ key: '', tasks: [task({ id: '1' }), task({ id: '2' })] }])
+    expect(lanes).toEqual([{ key: '', title: '', tasks: [task({ id: '1' }), task({ id: '2' })] }])
   })
 })
 

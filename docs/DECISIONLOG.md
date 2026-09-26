@@ -153,6 +153,59 @@ while being built:
 - **The UI text is English**, like the rest of panemux's interface, although the issue's mockup is
   written in Japanese.
 
+### Stage 2: done and labels are recorded on the panemux host (2026-09-26, issue #256)
+
+Issue #252's open question 1 left where done and labels are kept, and for how long, to this stage.
+The operator decided the four points below before implementation; the rest was chosen while it was
+built.
+
+- **One file, `~/.config/panemux/tasks.json`, beside panemux's other state files** — decided with
+  the operator. Keeping it out of `config.yaml` keeps a record save from racing a layout save and
+  keeps a dotfiles-managed config free of per-session data.
+- **Records are kept until a person clears them, and a task off the list is not shown** — decided
+  with the operator. The 7-day, 50-per-host listing bound stays as stage 1 set it; a record whose
+  session left it is neither deleted nor turned into a card built from the record alone, and applies
+  again if the session is listed again. A rejected alternative was to show such records in the Done
+  column, which would have meant cards with none of what the collection knows.
+- **A task marked done that runs again shows its real state** — decided with the operator. The
+  record is not cleared automatically: that would have made `GET /api/tasks` write, and a task that
+  stops again returns to Done without being marked a second time. Always showing it in Done was the
+  other alternative, rejected because it would hide a task that is waiting for input.
+- **Only tasks with a session ID can carry a record** — decided with the operator. A pid is reused
+  after its process exits, so a record keyed by one would move to an unrelated process.
+- **Done is a field, not a state.** Issue #252's column table gives Done a `done` state; the API
+  keeps `state` as what the host reported and adds `done`, so a running task marked done still says
+  what it is doing, and the column rule ("done and stopped") lives in one place in the browser.
+- **The record's key is host, agent and session ID.** A session ID is unique only on its own host.
+- **`PUT /api/tasks/records` replaces the whole record.** The dashboard sends what it shows. A
+  collection that was already running when a record was saved had read the records before it, so
+  the browser drops that answer rather than let it put the old record back for up to 10 seconds.
+- **A file panemux cannot read is never overwritten.** It is reported in `records_error`, tasks are
+  listed without records, and writes fail until the file is fixed, so a file from a newer panemux or
+  a broken hand edit is not silently replaced by an empty set.
+- **A file edited by hand is read again** (review of PR #262). The first version read the file once
+  and served memory afterwards, so a hand edit made while panemux ran was hidden and then undone by
+  the next save — and editing the file is the only way to clear the record of a task that has left
+  the list. The file's modification time and size are compared before each use; an edit that keeps
+  both is not seen, which was accepted over re-reading the file on every 10-second poll.
+- **A symlinked record file is written through** (review of PR #262), the way `config.yaml` is.
+  `AtomicWrite` alone replaces a link with a regular file, which would have moved the records out of
+  a dotfiles repository without saying so.
+- **Clearing a record does not need its host to be configured** (review of PR #262). The first
+  version refused every request for a host no longer in `ssh_connections`, which left that host's
+  records impossible to clear through the API. Adding a record still needs a configured host.
+  Removing the records when a host is removed from the config was the alternative; it was not taken
+  because it would tie the record file to the config's save path.
+- **Label limits** (32 characters, 20 labels, no control characters) were chosen while it was built,
+  to keep a label a short tag on a card rather than free text. Invisible format characters and line
+  and paragraph separators were added to the refused set in review of PR #262: they let a label look
+  empty, look identical to another label, or reorder the text after it. That also refuses emoji
+  joined with a zero-width joiner, which was accepted as the cost of a simple rule; invisible
+  characters outside those categories (a Hangul filler, a braille blank) still pass.
+- **The catch-all rows are keyed in a `Map`** (review of PR #262). Keying them apart from label
+  names first used an object literal, which made a label named `__proto__` crash the dashboard when
+  rows were split by label, and `constructor` or `toString` show as an empty catch-all row.
+
 ## Agent Board
 
 ### Compatibility is checked against a real agmsg release (2026-08-23, PR #176)

@@ -101,6 +101,7 @@ const roundTrips: RoundTrip[] = [
     schema: schemas.BoardCommandHistoryResponseSchema,
   },
   { fixture: 'tasks', schemaName: 'TasksResponseSchema', schema: schemas.TasksResponseSchema },
+  { fixture: 'task-record', schemaName: 'TaskRecordSchema', schema: schemas.TaskRecordSchema },
   // The two WebSocket fixtures hold one frame per element, in the order the
   // server sent them, so the schema that owns a single frame is wrapped here
   // rather than restated.
@@ -362,6 +363,10 @@ const unexercisedOptionals: Record<string, string> = {
   'tasks.tasks[].git.branch': 'a branch would make the capture run a real `gh pr view`',
   'tasks.tasks[].git.pr_number': 'needs a `gh pr view` lookup against a real PR',
   'tasks.tasks[].git.pr_url': 'needs a `gh pr view` lookup against a real PR',
+  // Set only when the task record file cannot be read. The capture writes
+  // records through the real route instead, so the same response can show
+  // them on its tasks; an unreadable file would have left them all off.
+  'tasks.records_error': 'needs an unreadable task record file, which would drop the captured records',
 }
 
 describe('optional field coverage', () => {

@@ -72,7 +72,8 @@ backend and UI are released together.
   attaching to a task's existing tmux session.
 - The task dashboard reads files Claude Code writes for itself (`~/.claude/sessions`,
   `~/.claude/projects`), which are not a published format, and knows only whether a codex process is
-  running. It collects only while it is on screen.
+  running. It collects only while it is on screen. Whether a task is done is only what a person
+  marked; only tasks with a session ID can be marked done or labeled.
 
 ## Where to continue
 

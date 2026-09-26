@@ -240,9 +240,30 @@ var contractFixtures = map[string]contractFixture{
 				return []byte(fixtureLocalTaskCollection), nil
 			},
 		}))
+		// Records on one local and one remote task, so done and labels
+		// appear in the capture (issue #256). A record's host must be an
+		// ssh_connections key.
+		e.cfg.SSHConnections = map[string]config.SSHConnection{"build-box": {Host: "build.invalid"}}
+		for _, body := range []string{
+			`{"host":"","agent":"claude","session_id":"7c21e0a4","done":true,"labels":["dashboard","enhancement"]}`,
+			`{"host":"build-box","agent":"claude","session_id":"3d7702fe","labels":["infra"]}`,
+		} {
+			rr := e.do(t, http.MethodPut, "/api/tasks/records", body)
+			require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+		}
 
 		rr := e.do(t, http.MethodGet, "/api/tasks", "")
 		require.Equal(t, http.StatusOK, rr.Code)
+		return rr.Body.Bytes(), nil
+	}},
+
+	"task-record": {capture: func(t *testing.T) ([]byte, map[string]string) {
+		e := newAPIEnv(t)
+		e.cfg.SSHConnections = map[string]config.SSHConnection{"build-box": {Host: "build.invalid"}}
+
+		rr := e.do(t, http.MethodPut, "/api/tasks/records",
+			`{"host":"build-box","agent":"claude","session_id":"3d7702fe","done":true,"labels":["infra","sprint-42"]}`)
+		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
 		return rr.Body.Bytes(), nil
 	}},
 

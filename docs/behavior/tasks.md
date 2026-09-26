@@ -7,7 +7,8 @@
 The task dashboard lists every coding-agent session on every host panemux knows — the panemux host
 itself and every `ssh_connections` entry — independently of panes. A pane is only the window used to
 watch or answer a task, opened when the dashboard is asked to. The design is issue
-[#252](https://github.com/tomo-chan/panemux/issues/252); this page covers what is built (its stage 1).
+[#252](https://github.com/tomo-chan/panemux/issues/252); this page covers what is built (its stage 1,
+and the done and label records of [#256](https://github.com/tomo-chan/panemux/issues/256)).
 The UI is described in [UI design's Task Dashboard](../ui-design.md#task-dashboard).
 
 ### What a task is
@@ -23,7 +24,8 @@ A task is one agent session:
 
 A task carries its host, agent, session ID, working directory, state, the time it entered that
 state, the reason it is waiting, its start time, its pid, where it runs, and the repository, branch
-and pull request of its working directory.
+and pull request of its working directory, and what a person recorded about it: whether it is done,
+and its labels (see [Done and labels](#done-and-labels)).
 
 ### Hosts and connections
 
@@ -104,7 +106,8 @@ ends before its terminating marker — a connection dropped mid-run — fails th
   directory: that log is not listed again as a stopped task.
 - Two live state files for one session ID keep the one updated most recently.
 - `stop` covers a host restart, a crash and a normal exit alike; the dashboard does not tell them
-  apart. Whether a task's work is finished cannot be read off a process, so there is no "done" state.
+  apart. Whether a task's work is finished cannot be read off a process, so no state means "done":
+  done is what a person records ([Done and labels](#done-and-labels)), and it never changes `state`.
 - **Stopped sessions are limited to conversation logs changed in the last 7 days, and to the 50
   newest per host.** Subagent logs (`<session>/subagents/*.jsonl`) are not sessions of their own.
 - The time a task entered its state is `statusUpdatedAt`, falling back to `updatedAt` and then
@@ -145,6 +148,42 @@ The metadata is the directory's **current** state. For a running task that is th
 working on; for a stopped task it is whatever has been checked out since, so a stopped task reports
 only `repo` and `repo_url`, never `branch` or a pull request.
 
+### Done and labels
+
+A person records two things about a task on the dashboard: that it is **done**, and its **labels**.
+Nothing about a process says whether a task's work is finished, so done is only ever what a person
+set.
+
+- **Only a task with a session ID can carry a record.** The record belongs to the host, the agent
+  and the session ID together, so the same session ID on two hosts is two tasks. A codex task and a
+  claude process no state file names are known only by a pid, which the host reuses once the process
+  exits; they cannot be marked done or labeled.
+- **The records live in `~/.config/panemux/tasks.json` on the panemux host**, for every host's
+  tasks, written through a temp file and a rename with mode `0600`. A symlink at that path is
+  written through — its target gets the new contents and the link stays a link — as `config.yaml`
+  is, including one whose target does not exist yet. The file holds only tasks that carry
+  something: a task marked not done with no labels is removed from it.
+- **Records are kept until a person clears them.** A task that leaves the list — its conversation
+  log deleted, older than 7 days, or beyond the 50 newest — keeps its record, which is not shown
+  anywhere and applies again if the session is listed again. Such a record is cleared by editing the
+  file, which can be done while panemux runs (below). A host removed from `ssh_connections` keeps
+  its records too; `PUT /api/tasks/records` still clears them, but adds none.
+- **A task marked done is in the Done column only while it is stopped.** One that runs again (a
+  `/resume`, or `claude --resume`) shows the state it is in, still marked done, and returns to Done
+  when it stops. The record is not cleared automatically; `Mark not done` clears it.
+- **Labels** are trimmed, repeats dropped, and kept in the order they were added. A label is at most
+  32 characters, and has no control characters, no invisible format characters (zero-width spaces,
+  direction overrides — Unicode category Cf) and no line or paragraph separators; a task carries at
+  most 20. Emoji joined with a zero-width joiner (a family emoji, say) are refused with them, since
+  the joiner is itself a format character. Case matters: `Docs` and `docs` are two labels.
+- The file is served from memory while its modification time and size are what panemux last read
+  or wrote, and read again when they change, so an edit made by hand while panemux runs is seen by
+  the next request and is not undone by the next save. An edit that keeps both the same (within the
+  filesystem's timestamp resolution, at the same size) is not noticed. A file that cannot be read —
+  not JSON, another format version, an invalid entry — is reported by `GET /api/tasks` as
+  `records_error`, the tasks are listed without records, and every write fails until the file is
+  fixed, so a file panemux does not understand is never replaced. A deleted file is no records.
+
 ### Opening a task
 
 | Task | Result |
@@ -184,7 +223,9 @@ Collects from every host and returns:
       "started_at": "2026-09-25T11:15:00Z",
       "pid": 101,
       "location": { "kind": "tmux", "tmux_session": "task-7c21", "attachable": true },
-      "git": { "repo": "panemux", "repo_url": "https://github.com/example/panemux", "branch": "main" }
+      "git": { "repo": "panemux", "repo_url": "https://github.com/example/panemux", "branch": "main" },
+      "labels": ["dashboard", "enhancement"],
+      "done": true
     }
   ]
 }
@@ -199,6 +240,9 @@ Collects from every host and returns:
   names, or `state-file:<file name>` for a state file that could not be read.
 - `session_id`, `cwd`, `waiting_for`, `status_since`, `started_at`, `pid` and `git` are omitted when
   unknown. `waiting_for` is present only in the `wait` state.
+- `done` and `labels` are the task's record, omitted when it is not done or has no labels.
+- `records_error` is present only when the record file could not be read; the tasks are then listed
+  without records.
 - The request answers `200` even when every host failed; failures are in `hosts`.
 - Like every other route outside `/api/board/*`, it is not authenticated
   ([Current boundaries](../overview.md#current-boundaries)). Because it dials every host, it
@@ -211,3 +255,23 @@ Collects from every host and returns:
 Drops the named host's dashboard connection and any remembered connection failure, so the next
 `GET /api/tasks` dials it at once. `name` is an `ssh_connections` key. Returns `204`, `404` for a
 name that is not one, or `403` for a cross-site request as above.
+
+### `PUT /api/tasks/records`
+
+Replaces the record of one task:
+
+```json
+{ "host": "", "agent": "claude", "session_id": "7c21e0a4", "done": true, "labels": ["dashboard"] }
+```
+
+- `host` is `""` for the panemux host or an `ssh_connections` key; `agent` is `claude` or `codex`;
+  `session_id` must match `^[a-zA-Z0-9_-]+$`. Every field is replaced: a request without `labels`
+  clears them. An unknown field is refused.
+- Answers `200` with the record as stored — labels normalized, both `done` and `labels` always
+  present. `400` for a body or record that is not valid (the reason is in the body), `404` for a
+  `host` that is not an `ssh_connections` key — except on a request that clears the record
+  (`done` false and no labels), which is accepted for any host so a removed host's records can be
+  cleared — `403` for a cross-site request as above, and `500` when the file cannot be read or
+  written; nothing is changed then.
+- It does not collect: the dashboard applies the answer to the task at once, and ignores a
+  `GET /api/tasks` that was already running when the record was saved.

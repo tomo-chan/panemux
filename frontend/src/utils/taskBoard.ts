@@ -1,14 +1,15 @@
-import type { LayoutChild, PaneConfig, Task, TaskState, Workspace } from '../schemas'
+import type { LayoutChild, PaneConfig, Task, TaskRecord, TaskState, Workspace } from '../schemas'
 
 // The task dashboard's pure logic: which column a task sits in, how the board
 // is filtered and split into lanes, and how a task maps onto a pane. Kept out
 // of the components so it can be tested without rendering anything.
 
-export type TaskColumnId = 'wait' | 'busy' | 'idle' | 'other' | 'stop'
+export type TaskColumnId = 'wait' | 'busy' | 'idle' | 'other' | 'stop' | 'done'
 
 export interface TaskColumn {
   id: TaskColumnId
   title: string
+  /** The states whose tasks sit here. Done holds none: see columnForTask. */
   states: TaskState[]
   hint?: string
 }
@@ -21,6 +22,7 @@ export const TASK_COLUMNS: TaskColumn[] = [
   { id: 'idle', title: 'Idle', states: ['idle'], hint: 'Ready for the next instruction' },
   { id: 'other', title: 'Running / unknown', states: ['run', 'unknown'], hint: 'No detailed state' },
   { id: 'stop', title: 'Stopped', states: ['stop'], hint: 'Not running' },
+  { id: 'done', title: 'Done', states: [], hint: 'Marked done' },
 ]
 
 export const TASK_STATE_LABELS: Record<TaskState, string> = {
@@ -34,6 +36,53 @@ export const TASK_STATE_LABELS: Record<TaskState, string> = {
 
 export function columnForState(state: TaskState): TaskColumnId {
   return TASK_COLUMNS.find((column) => column.states.includes(state))?.id ?? 'other'
+}
+
+/**
+ * The column a task sits in. A task marked done sits in Done only while it is
+ * stopped: one that is running again shows the state it is in (issue #256).
+ */
+export function columnForTask(task: Task): TaskColumnId {
+  if (task.done && task.state === 'stop') return 'done'
+  return columnForState(task.state)
+}
+
+/** The columns on screen. Done is shown only when asked for. */
+export function visibleColumns(showDone: boolean): TaskColumn[] {
+  return TASK_COLUMNS.filter((column) => showDone || column.id !== 'done')
+}
+
+/**
+ * Whether a task can be marked done or labeled. Records are keyed by session
+ * id; a pid is reused once its process exits, so a task known only by one
+ * (codex, an unreadable state file) has nothing stable to carry a record.
+ */
+export function canRecord(task: Task): boolean {
+  return Boolean(task.session_id)
+}
+
+/** Every label on the given tasks, once each, sorted. */
+export function allLabels(tasks: Task[]): string[] {
+  return [...new Set(tasks.flatMap((task) => task.labels ?? []))].sort((a, b) => a.localeCompare(b))
+}
+
+// Label colors, from the dashboard mock in issue #252.
+const LABEL_COLORS = ['#569cd6', '#4ec9b0', '#9cdcfe', '#d7a26b', '#b48ead', '#c678dd', '#8a9199', '#e06c6c']
+
+/** A label's color: always the same for the same label. */
+export function labelColor(label: string): string {
+  let hash = 0
+  for (const char of label) hash = (hash * 31 + (char.codePointAt(0) ?? 0)) >>> 0
+  return LABEL_COLORS[hash % LABEL_COLORS.length]
+}
+
+/** The tasks with the record a PUT /api/tasks/records answered applied to the task it names. */
+export function applyTaskRecord(tasks: Task[], record: TaskRecord): Task[] {
+  return tasks.map((task) =>
+    task.host === record.host && task.agent === record.agent && task.session_id === record.session_id
+      ? { ...task, done: record.done, labels: record.labels }
+      : task,
+  )
 }
 
 /** A task's host as shown to a person: '' is the panemux host itself. */
@@ -59,12 +108,15 @@ export interface TaskFilter {
   query: string
   /** A host name to keep, or null for every host. */
   host: string | null
+  /** A label a task must carry, or null for every task. */
+  label: string | null
 }
 
 export function filterTasks(tasks: Task[], filter: TaskFilter): Task[] {
   const query = filter.query.trim().toLowerCase().replace(/^#/, '')
   return tasks.filter((task) => {
     if (filter.host !== null && task.host !== filter.host) return false
+    if (filter.label !== null && !(task.labels ?? []).includes(filter.label)) return false
     if (!query) return true
     const haystack = [
       taskTitle(task),
@@ -77,21 +129,37 @@ export function filterTasks(tasks: Task[], filter: TaskFilter): Task[] {
   })
 }
 
-export type LaneMode = 'none' | 'host' | 'repo'
+export type LaneMode = 'none' | 'host' | 'label' | 'repo'
 
-const NO_REPO_LANE = 'Not in a Git repository'
+// The keys of the lanes that collect "everything else". A control character
+// keeps them apart from any repository or label, which cannot contain one,
+// so a label named "No label" is a lane of its own.
+const NO_REPO_LANE = '\u0000no-repo'
+const NO_LABEL_LANE = '\u0000no-label'
 
-// Lanes that collect "everything else" sort after every named lane.
-const CATCH_ALL_LANES = new Set([NO_REPO_LANE])
+// A Map rather than an object literal: a label or repository may be named
+// __proto__, constructor or toString, and an object would answer for those
+// from Object.prototype.
+const CATCH_ALL_TITLES = new Map<string, string>([
+  [NO_REPO_LANE, 'Not in a Git repository'],
+  [NO_LABEL_LANE, 'No label'],
+])
+
+/** The heading a lane is shown under. */
+export function laneTitle(key: string): string {
+  return CATCH_ALL_TITLES.get(key) ?? key
+}
 
 /**
- * The lanes a task belongs in. It is a list because a later stage splits by
- * label, and a task with two labels appears in both lanes.
+ * The lanes a task belongs in. It is a list because a task with two labels
+ * appears in both label lanes.
  */
 export function laneKeys(task: Task, mode: LaneMode): string[] {
   switch (mode) {
     case 'host':
       return [hostLabel(task.host)]
+    case 'label':
+      return task.labels && task.labels.length > 0 ? [...task.labels] : [NO_LABEL_LANE]
     case 'repo':
       return [task.git?.repo || NO_REPO_LANE]
     default:
@@ -101,6 +169,7 @@ export function laneKeys(task: Task, mode: LaneMode): string[] {
 
 export interface TaskLane {
   key: string
+  title: string
   tasks: Task[]
 }
 
@@ -115,12 +184,13 @@ export function groupIntoLanes(tasks: Task[], mode: LaneMode): TaskLane[] {
   }
   return [...lanes.entries()]
     .sort(([a], [b]) => {
-      const aLast = CATCH_ALL_LANES.has(a)
-      const bLast = CATCH_ALL_LANES.has(b)
+      // Lanes that collect "everything else" sort after every named lane.
+      const aLast = CATCH_ALL_TITLES.has(a)
+      const bLast = CATCH_ALL_TITLES.has(b)
       if (aLast !== bLast) return aLast ? 1 : -1
       return a.localeCompare(b)
     })
-    .map(([key, laneTasks]) => ({ key, tasks: laneTasks }))
+    .map(([key, laneTasks]) => ({ key, title: laneTitle(key), tasks: laneTasks }))
 }
 
 export interface TaskPaneRef {

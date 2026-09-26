@@ -25,6 +25,7 @@ import {
   BoardMessageSchema,
   BoardMessagesResponseSchema,
   TasksResponseSchema,
+  TaskRecordSchema,
 } from './index'
 
 describe('TasksResponseSchema', () => {
@@ -88,10 +89,50 @@ describe('TasksResponseSchema', () => {
     expect(result.success).toBe(true)
   })
 
+  it('accepts what a person recorded about a task, and a record file the server could not read', () => {
+    const result = TasksResponseSchema.safeParse({
+      hosts: [],
+      tasks: [{ ...task, done: true, labels: ['payment', 'sprint 42', '決済'] }],
+      records_error: 'parsing task record file: unexpected end of JSON input',
+    })
+    // Zod drops keys a schema does not name, so success alone would not show
+    // the fields reach the dashboard.
+    expect(result.success && result.data.tasks[0]).toMatchObject({ done: true, labels: ['payment', 'sprint 42', '決済'] })
+    expect(result.success && result.data.records_error).toBe('parsing task record file: unexpected end of JSON input')
+  })
+
+  it('rejects labels that are not a list of strings, and a done that is not a boolean', () => {
+    expect(TasksResponseSchema.safeParse({ hosts: [], tasks: [{ ...task, labels: 'payment' }] }).success).toBe(false)
+    expect(TasksResponseSchema.safeParse({ hosts: [], tasks: [{ ...task, labels: [1] }] }).success).toBe(false)
+    expect(TasksResponseSchema.safeParse({ hosts: [], tasks: [{ ...task, done: 'yes' }] }).success).toBe(false)
+  })
+
+  // efficacy:exempt unchanged by this branch; the new describe block after it falls inside its line range
   it('rejects a git link that is not a URL', () => {
     expect(TasksResponseSchema.safeParse({
       hosts: [], tasks: [{ ...task, git: { pr_url: 'javascript:alert(1)' } }],
     }).success).toBe(false)
+  })
+})
+
+describe('TaskRecordSchema', () => {
+  const record = { host: 'build-box', agent: 'claude', session_id: '3d7702fe', done: false, labels: [] }
+
+  it('accepts a record, including an empty one', () => {
+    expect(TaskRecordSchema.safeParse(record).success).toBe(true)
+    expect(TaskRecordSchema.safeParse({ ...record, host: '', done: true, labels: ['infra'] }).success).toBe(true)
+  })
+
+  it('requires every field, since the dashboard applies the response as it is', () => {
+    for (const key of Object.keys(record)) {
+      const partial: Record<string, unknown> = { ...record }
+      delete partial[key]
+      expect(TaskRecordSchema.safeParse(partial).success, key).toBe(false)
+    }
+  })
+
+  it('rejects an empty session ID', () => {
+    expect(TaskRecordSchema.safeParse({ ...record, session_id: '' }).success).toBe(false)
   })
 })
 
@@ -1081,7 +1122,7 @@ describe('PaneConfigSchema agent_board round-trip', () => {
     expect(result.success).toBe(false)
   })
 
-  //efficacy:exempt not a test this branch changed. The gate attributes it
+  // efficacy:exempt not a test this branch changed. The gate attributes it
   // because the describe block added at the end of this file follows it, and a
   // case's range runs to the next declaration. Its subject is agent_board
   // round-tripping, which this branch does not touch.
@@ -1114,7 +1155,7 @@ describe('LayoutNodeSchema root pane round-trip', () => {
     children: [{ size: 100, pane: { id: 'a', type: 'local' as const } }],
   }
 
-  //efficacy:exempt pins behavior main already had. This branch's earlier head
+  // efficacy:exempt pins behavior main already had. This branch's earlier head
   // removed `pane` from LayoutNodeSchema and this commit restores it, so the
   // net frontend change against main is a comment and a key reorder — there is
   // no implementation here for a revert to take away. The regression these
@@ -1124,13 +1165,13 @@ describe('LayoutNodeSchema root pane round-trip', () => {
     expect(LayoutNodeSchema.safeParse(withRootPane).success).toBe(true)
   })
 
-  //efficacy:exempt same as above — pins main's existing round-trip behavior,
+  // efficacy:exempt same as above — pins main's existing round-trip behavior,
   // which this commit restores rather than introduces.
   it('does not strip the root pane, which would delete it from config.yaml', () => {
     expect(LayoutNodeSchema.parse(withRootPane)).toEqual(withRootPane)
   })
 
-  //efficacy:exempt same as above. It is the companion positive case: without
+  // efficacy:exempt same as above. It is the companion positive case: without
   // it, the two above would be satisfied by a schema that required `pane`.
   it('still accepts a node with no root pane, the shape normalization produces', () => {
     const relocated = {

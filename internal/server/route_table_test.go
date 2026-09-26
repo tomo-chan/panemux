@@ -80,6 +80,7 @@ var expectedRoutes = []string{
 	"POST /api/tasks/hosts/{name}/reconnect",
 	"POST /api/workspaces",
 	"PUT /api/layout",
+	"PUT /api/tasks/records",
 	"PUT /api/workspaces/active",
 	"PUT /api/workspaces/tab-position",
 	"PUT /api/workspaces/vertical-bar-width",
