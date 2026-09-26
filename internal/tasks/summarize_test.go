@@ -2,6 +2,7 @@ package tasks
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -158,4 +159,21 @@ func TestClaudeSummarizer_Failures(t *testing.T) {
 		require.Error(t, err)
 		assert.Less(t, time.Since(started), 5*time.Second)
 	})
+}
+
+type failingReader struct{}
+
+func (failingReader) Read([]byte) (int, error) { return 0, errors.New("no entropy") }
+
+func TestClaudeSummarizer_SetupFailures(t *testing.T) {
+	bin, record := fakeClaude(t, `{"is_error":false,"structured_output":{"summary":"S","remaining":[]}}`, 0)
+
+	_, err := newClaudeSummarizer(bin, failingReader{})(context.Background(), "x")
+	require.Error(t, err, "no session ID can be minted")
+
+	t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "missing"))
+	_, err = newClaudeSummarizer(bin, nil)(context.Background(), "x")
+	require.Error(t, err, "no directory to run claude in")
+	_, statErr := os.Stat(record)
+	assert.True(t, os.IsNotExist(statErr), "claude never ran")
 }

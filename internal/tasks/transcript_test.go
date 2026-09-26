@@ -67,14 +67,16 @@ func TestParseTranscriptOutput_ReadsTheBodyByLength(t *testing.T) {
 
 func TestParseTranscriptOutput_Errors(t *testing.T) {
 	cases := map[string]string{
-		"no header":       "hello\n",
-		"bad size":        "::panemux-transcript v1 many\nabc\n::end\n",
-		"negative size":   "::panemux-transcript v1 -3\nabc\n::end\n",
-		"other version":   "::panemux-transcript v2 3\nabc\n::end\n",
-		"body too short":  "::panemux-transcript v1 10\nabc\n::end\n",
-		"no end":          "::panemux-transcript v1 3\nabc\n",
-		"cut off":         "::panemux-transcript v1 3\nab",
-		"text before end": "::panemux-transcript v1 3\nabcdef\n::end\n",
+		"no header":             "hello\n",
+		"bad size":              "::panemux-transcript v1 many\nabc\n::end\n",
+		"negative size":         "::panemux-transcript v1 -3\nabc\n::end\n",
+		"other version":         "::panemux-transcript v2 3\nabc\n::end\n",
+		"body too short":        "::panemux-transcript v1 10\nabc\n::end\n",
+		"no end":                "::panemux-transcript v1 3\nabc\n",
+		"cut off":               "::panemux-transcript v1 3\nab",
+		"text before end":       "::panemux-transcript v1 3\nabcdef\n::end\n",
+		"no header, no newline": "hello",
+		"ended in header":       "::panemux-transcript v1 3",
 	}
 	for name, out := range cases {
 		t.Run(name, func(t *testing.T) {
