@@ -94,19 +94,17 @@ describe('TasksResponseSchema', () => {
     }).success).toBe(false)
   })
 
-  it('accepts the issues a PR closes and the Jira keys of a task', () => {
-    const result = TasksResponseSchema.safeParse({
-      hosts: [],
-      tasks: [{ ...task, git: {
-        branch: 'PAY-418-retry',
-        issues: [
-          { number: 252, url: 'https://github.com/example/panemux/issues/252', repo: 'example/panemux' },
-          { number: 9, url: 'https://github.com/example/infra/issues/9' },
-        ],
-        jira: [{ key: 'PAY-418', url: 'https://example.atlassian.net/browse/PAY-418' }],
-      } }],
-    })
-    expect(result.success).toBe(true)
+  it('keeps the issues a PR closes and the Jira keys of a task', () => {
+    const git = {
+      branch: 'PAY-418-retry',
+      issues: [
+        { number: 252, url: 'https://github.com/example/panemux/issues/252', repo: 'example/panemux' },
+        { number: 9, url: 'https://github.com/example/infra/issues/9' },
+      ],
+      jira: [{ key: 'PAY-418', url: 'https://example.atlassian.net/browse/PAY-418' }],
+    }
+    const result = TasksResponseSchema.parse({ hosts: [], tasks: [{ ...task, git }] })
+    expect(result.tasks[0].git).toEqual(git)
   })
 
   it.each([
