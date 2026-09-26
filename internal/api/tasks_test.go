@@ -323,6 +323,18 @@ func TestTaskGitInfo_WithoutGHTheBranchStillGivesJiraKeys(t *testing.T) {
 	assert.Equal(t, []taskJiraLink{{Key: "PAY-418", URL: "https://example.atlassian.net/browse/PAY-418"}}, info.Jira)
 }
 
+// The edges of each range and the byte on either side of it: what decides
+// whether a character touching a Jira key makes it part of a longer word.
+func TestIsASCIIAlnum(t *testing.T) {
+	for _, b := range []byte("09AZaz") {
+		assert.True(t, isASCIIAlnum(b), "%q", b)
+	}
+	for _, b := range []byte("/:@[`{-_ ") {
+		assert.False(t, isASCIIAlnum(b), "%q", b)
+	}
+	assert.False(t, isASCIIAlnum(0xC3), "the first byte of a non-ASCII letter")
+}
+
 func TestJiraKeys(t *testing.T) {
 	tests := []struct {
 		name  string
