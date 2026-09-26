@@ -33,6 +33,8 @@ func TestParseCollectOutput_ReadsEverySection(t *testing.T) {
 		"90 name with spaces",
 		"::section cwd",
 		"300 /workspace/user/sample api",
+		"::section env",
+		"121 pane-1790346631000-a1b2c",
 		"::section transcripts",
 		"1790346000\t5d0b91c2.jsonl\t\"cwd\":\"/workspace/user/project\"",
 		"1790340000\told-session.jsonl\t",
@@ -57,6 +59,7 @@ func TestParseCollectOutput_ReadsEverySection(t *testing.T) {
 		{PanePID: 90, Session: "name with spaces"},
 	}, raw.TmuxPanes)
 	assert.Equal(t, map[int]string{300: "/workspace/user/sample api"}, raw.ProcessCWDs)
+	assert.Equal(t, map[int]string{121: "pane-1790346631000-a1b2c"}, raw.PaneIDs)
 	assert.Equal(t, []transcript{
 		{ModTime: 1790346000, SessionID: "5d0b91c2", CWD: "/workspace/user/project"},
 		{ModTime: 1790340000, SessionID: "old-session", CWD: ""},
@@ -87,11 +90,13 @@ func TestParseCollectOutput_EmptySectionsAreFine(t *testing.T) {
 		"::section ps",
 		"::section tmux",
 		"::section cwd",
+		"::section env",
 		"::section transcripts",
 		"::end",
 	))
 	require.NoError(t, err)
 	assert.Equal(t, int64(5), raw.Now)
+	assert.Empty(t, raw.PaneIDs)
 	assert.Empty(t, raw.StateFiles)
 	assert.Empty(t, raw.Processes)
 	assert.Empty(t, raw.TmuxPanes)
@@ -118,6 +123,11 @@ func TestParseCollectOutput_SkipsMalformedRows(t *testing.T) {
 		"x /path",
 		"17",
 		"18 /ok",
+		"::section env",
+		"x pane-1",
+		"19",
+		"0 pane-0",
+		"20 pane-ok",
 		"::section transcripts",
 		"no tab at all",
 		"bad\tname.jsonl\t",
@@ -132,6 +142,7 @@ func TestParseCollectOutput_SkipsMalformedRows(t *testing.T) {
 	assert.Equal(t, []process{{PID: 14, PPID: 1, Command: "ok"}}, raw.Processes)
 	assert.Equal(t, []tmuxPane{{PanePID: 16, Session: "good"}}, raw.TmuxPanes)
 	assert.Equal(t, map[int]string{18: "/ok"}, raw.ProcessCWDs)
+	assert.Equal(t, map[int]string{20: "pane-ok"}, raw.PaneIDs)
 	assert.Equal(t, []transcript{
 		{ModTime: 3, SessionID: "only-two-fields"},
 		{ModTime: 4, SessionID: "quoted", CWD: `/a"b`},
@@ -185,4 +196,34 @@ func TestParseCollectOutput_IgnoresCarriageReturnsAndTrailingText(t *testing.T) 
 	require.NoError(t, err)
 	assert.Equal(t, int64(7), raw.Now)
 	assert.Equal(t, []process{{PID: 1, PPID: 0, Command: "init"}}, raw.Processes)
+}
+
+// The pane ID an agent's environment names is untrusted: any process of the
+// user can set PANEMUX_PANE_ID to anything. Only a value with the shape a
+// pane is given (internal/session's validPaneEnvID) is kept; the browser then
+// matches it against the panes it knows.
+func TestParseCollectOutput_KeepsOnlyPaneIDsOfTheShapeAPaneIsGiven(t *testing.T) {
+	cases := map[string]bool{
+		"pane-1790346631000-a1b2c":  true,
+		"api_server.2":              true,
+		strings.Repeat("a", 128):    true,
+		strings.Repeat("a", 129):    false,
+		"my pane":                   false,
+		"it's":                      false,
+		"a;id":                      false,
+		"ペイン":                       false,
+		"<img src=x onerror=alert>": false,
+	}
+	for value, keep := range cases {
+		t.Run(value, func(t *testing.T) {
+			raw, err := parseCollectOutput(joinLines(
+				"::panemux-tasks v1", "::now 5", "::section env", "42 "+value, "::end"))
+			require.NoError(t, err)
+			if keep {
+				assert.Equal(t, map[int]string{42: value}, raw.PaneIDs)
+			} else {
+				assert.Empty(t, raw.PaneIDs)
+			}
+		})
+	}
 }

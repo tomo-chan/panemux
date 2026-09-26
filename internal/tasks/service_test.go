@@ -625,6 +625,59 @@ func TestRunLocal_ReportsTheWorkingDirectoryOfAClaudeProcess(t *testing.T) {
 	}
 }
 
+// The env probe reports the PANEMUX_PANE_ID a claude or codex process was
+// started with, read from its environment and not its command line. Linux
+// reads /proc/<pid>/environ; the other hosts report nothing yet (issue #254).
+func TestRunLocal_ReportsThePaneIDInAnAgentsEnvironment(t *testing.T) {
+	homedir.SetForTest(t, t.TempDir())
+	sleepPath, err := exec.LookPath("sleep")
+	require.NoError(t, err)
+	binDir := t.TempDir()
+	for _, name := range []string{"claude", "codex"} {
+		require.NoError(t, os.Symlink(sleepPath, filepath.Join(binDir, name)))
+	}
+
+	start := func(name string, env []string, args ...string) int {
+		cmd := exec.Command(filepath.Join(binDir, name), args...) //nolint:gosec // G204: fixture binary under test
+		cmd.Env = env
+		require.NoError(t, cmd.Start())
+		t.Cleanup(func() {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+		})
+		return cmd.Process.Pid
+	}
+	withPane := start("claude", []string{"PATH=/usr/bin:/bin", "PANEMUX_PANE_ID=pane-1790346631000-a1b2c"}, "30")
+	codex := start("codex", []string{"PANEMUX_PANE_ID=pane-codex"}, "30")
+	unsafe := start("claude", []string{"PANEMUX_PANE_ID=my pane"}, "30")
+	onlyInArgs := start("claude", []string{"PATH=/usr/bin:/bin"}, "30", "PANEMUX_PANE_ID=pane-argv")
+	// Another variable's value can hold a line that looks like the variable
+	// itself; only the entry named PANEMUX_PANE_ID counts, wherever it is.
+	inAValue := start("claude",
+		[]string{"NOTES=line1\nPANEMUX_PANE_ID=pane-other", "PANEMUX_PANE_ID=pane-real"}, "30")
+	onlyInAValue := start("claude", []string{"NOTES=line1\nPANEMUX_PANE_ID=pane-other"}, "30")
+	withoutPane := start("claude", []string{"PATH=/usr/bin:/bin"}, "30")
+
+	out, err := runLocal(context.Background(), collectScript)
+	require.NoError(t, err)
+	raw, err := parseCollectOutput(out)
+	require.NoError(t, err)
+
+	if runtime.GOOS != "linux" {
+		assert.Empty(t, raw.PaneIDs, "only Linux hosts are read so far")
+		return
+	}
+	assert.Equal(t, "pane-1790346631000-a1b2c", raw.PaneIDs[withPane])
+	assert.Equal(t, "pane-codex", raw.PaneIDs[codex])
+	assert.Equal(t, "pane-real", raw.PaneIDs[inAValue], "a line inside another variable's value is not the variable")
+	for name, pid := range map[string]int{
+		"unsafe": unsafe, "only in args": onlyInArgs, "without": withoutPane, "only in a value": onlyInAValue,
+	} {
+		_, ok := raw.PaneIDs[pid]
+		assert.False(t, ok, "%s: %v", name, raw.PaneIDs)
+	}
+}
+
 func TestRunLocal_EmptyHomeStillCompletes(t *testing.T) {
 	homedir.SetForTest(t, t.TempDir())
 	out, err := runLocal(context.Background(), collectScript)

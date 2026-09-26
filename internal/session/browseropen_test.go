@@ -439,7 +439,7 @@ func TestSSHShellCommandWithoutTheBrowserShim(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := sshShellCommand(tt.cfg)
+			got, err := sshShellCommand("", tt.cfg)
 			if err != nil {
 				t.Fatalf("sshShellCommand: %v", err)
 			}
@@ -482,15 +482,12 @@ func TestSSHShellCommandWithTheBrowserShim(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := sshShellCommand(tt.cfg)
+			got, err := sshShellCommand("", tt.cfg)
 			if err != nil {
 				t.Fatalf("sshShellCommand: %v", err)
 			}
-			if !strings.HasPrefix(got, setup) {
-				t.Fatalf("command does not start with the shim setup: %q", got)
-			}
-			if tail := strings.TrimPrefix(got, setup); tail != tt.wantTail {
-				t.Fatalf("command tail = %q, want %q", tail, tt.wantTail)
+			if want := shCommand(setup + tt.wantTail); got != want {
+				t.Fatalf("sshShellCommand = %q, want %q", got, want)
 			}
 		})
 	}
@@ -504,7 +501,7 @@ func TestSSHShellCommandRejectsInvalidPathsWithTheShimEnabled(t *testing.T) {
 		{Shell: "/bin/zsh; id"},
 		{Shell: "relative/shell"},
 	} {
-		if _, err := sshShellCommand(cfg); err == nil {
+		if _, err := sshShellCommand("", cfg); err == nil {
 			t.Fatalf("sshShellCommand(%+v) = nil, want a validation error", cfg)
 		}
 	}
@@ -520,7 +517,7 @@ func TestSSHShellCommandIsValidShellSyntax(t *testing.T) {
 		{Cwd: "/remote/home/demo"},
 		{Shell: "/bin/zsh", Cwd: "/remote/home/demo"},
 	} {
-		cmd, err := sshShellCommand(cfg)
+		cmd, err := sshShellCommand("", cfg)
 		if err != nil {
 			t.Fatalf("sshShellCommand: %v", err)
 		}

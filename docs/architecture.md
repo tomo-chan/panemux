@@ -53,7 +53,7 @@ layout rendering, terminal emulation, interaction state, and presentation.
 | `usePaneUrlOpen` | Receive validated URL-open events and coordinate browser navigation/callback forwarding. |
 | attention and notification hooks | Convert terminal activity and visibility changes into pane/workspace indicators and browser notifications. |
 | Agent Board hooks and panels | Poll status/message APIs, stream command-center output, and present dashboard, palette, and history overlays. |
-| `TaskDashboard` and `useTasks` | Poll `GET /api/tasks` while the task dashboard is shown, present tasks as a kanban by state, and match each task to the pane attached to its tmux session (`utils/taskBoard`). |
+| `TaskDashboard` and `useTasks` | Poll `GET /api/tasks` while the task dashboard is shown, present tasks as a kanban by state, and match each task to the pane attached to its tmux session, or to the `local` / `ssh` pane its agent's `PANEMUX_PANE_ID` names (`utils/taskBoard`). |
 | Zod schemas | Runtime-validate structured success payloads and control frames for which schemas are defined. Generated TypeScript types derive from these schemas. |
 
 ## State and ownership
@@ -99,9 +99,11 @@ invokes agmsg scripts. Full detail is in
 
 While the dashboard is on screen, the browser polls `GET /api/tasks`. `internal/tasks` runs one
 fixed script on every host at once — locally with `sh -s`, remotely over that host's reused
-`CommandConn` — parses what it prints, and derives each task's state and tmux location. The API
-handler adds each working directory's git and pull-request metadata. Opening a task creates or
-focuses a `tmux` / `ssh_tmux` pane through the ordinary pane APIs. Full behavior is in
+`CommandConn` — parses what it prints, and derives each task's state and location: its tmux session, or for an
+agent outside tmux the pane ID its environment carries, which `local` and `ssh` panes export to
+their shell as `PANEMUX_PANE_ID`. The API handler adds each working directory's git and
+pull-request metadata. Opening a task creates or focuses a `tmux` / `ssh_tmux` pane through the
+ordinary pane APIs, or focuses the `local` / `ssh` pane an agent outside tmux runs in. Full behavior is in
 [Task dashboard](behavior/tasks.md).
 
 ### URL-open flow

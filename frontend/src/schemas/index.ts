@@ -342,6 +342,9 @@ export type TaskState = z.infer<typeof TaskStateSchema>
 export const TaskLocationSchema = z.object({
   kind: z.enum(['tmux', 'outside', 'none']),
   tmux_session: z.string().optional(),
+  // The pane an agent outside tmux was started from, as its PANEMUX_PANE_ID
+  // names it. Only a claim: findTaskPane matches it against the workspaces.
+  pane_id: z.string().optional(),
   // Whether a tmux / ssh_tmux pane can attach to tmux_session: pane configs
   // accept only a restricted set of session-name characters.
   attachable: z.boolean(),

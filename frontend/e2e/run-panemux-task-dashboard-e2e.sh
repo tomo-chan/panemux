@@ -12,7 +12,13 @@
 # tmux is optional, the way jq is for make test-hooks: without it the
 # inside-tmux session is simply not created, and task-dashboard.spec.ts skips
 # the one test that needs it.
+#
+# bin/start-agent is what the spec types into the local pane: an agent
+# started from a pane's shell inherits that shell's PANEMUX_PANE_ID. The
+# variable is removed from this script's own environment, so a suite run from
+# inside a panemux pane does not hand that pane's ID to the other fakes.
 set -eu
+unset PANEMUX_PANE_ID
 
 E2E_DIR="$(cd "$(dirname "$0")" && pwd)"
 
@@ -35,6 +41,14 @@ write_state() {
 
 "$E2E_HOME/bin/claude" 900 >/dev/null 2>&1 &
 write_state "$!" e2e-outside busy
+
+cat >"$E2E_HOME/bin/start-agent" <<'AGENT'
+#!/bin/sh
+"$HOME/bin/claude" 900 >/dev/null 2>&1 &
+printf '{"pid":%s,"sessionId":"%s","cwd":"/tmp","status":"busy","statusUpdatedAt":%s000}\n' \
+    "$!" "$1" "$(date +%s)" >"$HOME/.claude/sessions/$!.json"
+AGENT
+chmod 700 "$E2E_HOME/bin/start-agent"
 
 printf '{"cwd":"/tmp/e2e-stopped"}\n' >"$E2E_HOME/.claude/projects/-tmp-e2e-stopped/e2e-stopped.jsonl"
 

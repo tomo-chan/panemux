@@ -351,7 +351,7 @@ function whereLabel(task: Task, pane: TaskPaneRef | null): string {
         ? `tmux ${task.location.tmux_session} · no pane`
         : `tmux ${task.location.tmux_session} · cannot attach`
     case 'outside':
-      return 'outside tmux · cannot open in a pane'
+      return task.location.pane_id ? 'outside tmux · its pane is in no workspace' : 'outside tmux · not in a panemux pane'
     default:
       return 'not running'
   }

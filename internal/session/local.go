@@ -73,7 +73,7 @@ func NewLocal(id, shell, cwd, title string) (*LocalSession, error) {
 	}
 
 	cmd := exec.Command(sanitizedShell)
-	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
+	cmd.Env = paneIDEnv(append(os.Environ(), "TERM=xterm-256color"), id)
 	if browserShimEnabled.Load() {
 		// Best effort: a pane must still start when the shim cannot be
 		// installed, just without browser-open interception.

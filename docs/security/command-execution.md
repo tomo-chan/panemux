@@ -162,3 +162,24 @@ own line protocol, skips malformed rows, accepts a session ID only if it matches
 `^[a-zA-Z0-9_-]+$`, and treats a tmux session name as display text: the dashboard offers to attach a
 pane to it only when it matches the pane's own `validTmuxSessionName` rule, which the pane then
 enforces again when it starts.
+
+The `PANEMUX_PANE_ID` an agent's environment carries is untrusted twice over: the host prints it, and
+any process of the user can set it to anything. The script reads it with `tr`/`grep` from
+`/proc/<pid>/environ` of the processes it already lists and prints it as data; the parser keeps it
+only if it matches `^[A-Za-z0-9_.-]{1,128}$` (`validPaneID`); and it never reaches a command. The
+browser uses it only to look up a `local` or `ssh` pane of the task's host in the workspaces it
+holds, and going to that pane only focuses it.
+
+Setting the variable is a sink of its own. A `local` pane receives it as an `exec.Cmd.Env` entry.
+An `ssh` pane receives it in its remote shell command (`remotePaneIDSetup` in
+`internal/session/paneid.go`): the pane ID is exported only when it matches the same rule
+(`validPaneEnvID`), whose characters are all inert in a shell, and it is quoted with
+`shellQuotePath` as well. A pane whose ID does not match gets no variable rather than an escaped one.
+
+That command, like any remote pane command carrying setup, is POSIX script passed whole to
+`/bin/sh`: `exec /bin/sh -c ` followed by the script quoted once more with `shellQuotePath`
+(`sshShellCommand` in `internal/session/ssh.go`), so the remote login shell — which need not be
+POSIX — parses only `exec`, a literal path and one single-quoted word. The script is kept to one line
+with no `!`, which csh-family shells expand even inside single quotes: remote paths and pane IDs are
+validated to exclude both, and the browser shim's body is written as a `printf` format of octal
+escapes (`printfOctalFormat`).

@@ -340,8 +340,9 @@ var contractFixtures = map[string]contractFixture{
 }
 
 // fixtureLocalTaskCollection is one of every task shape the panemux host can
-// report: waiting inside an attachable tmux session, busy outside tmux, a
-// codex process, a state file that cannot be read, and a stopped session.
+// report: waiting inside an attachable tmux session, busy outside tmux in the
+// pane its environment names, a codex process, a state file that cannot be
+// read, and a stopped session.
 const fixtureLocalTaskCollection = `::panemux-tasks v1
 ::now 1790000000
 ::section state
@@ -363,6 +364,8 @@ const fixtureLocalTaskCollection = `::panemux-tasks v1
 100 task-7c21
 ::section cwd
 104 /workspace/user/sample-api
+::section env
+102 pane-1790000000000-a1b2c
 ::section transcripts
 1789989200	55f0c2b8.jsonl	"cwd":"/workspace/user/service-b"
 ::end

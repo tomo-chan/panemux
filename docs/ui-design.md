@@ -336,7 +336,9 @@ terminal that had focus cannot receive what is typed into the dashboard.
   state; the working directory's last segment as the title (there is no summary yet) with the full
   directory under it; for a waiting task its reason and "open the pane to respond"; repository,
   branch and PR link (new tab); and at the bottom where the task runs with its `Open` / `Go to pane`
-  button. A task that cannot be opened shows why instead of a button. The card is a pointer target
+  button. A task that cannot be opened shows why instead of a button: for an agent outside tmux,
+  "not in a panemux pane" or, when the pane it names is in no workspace, "its pane is in no
+  workspace". The card is a pointer target
   for selection, and its title is a button, so the card never nests its links and buttons inside
   another interactive element.
 - **Detail panel.** Fixed to the window height at the right. Its head — state, host, agent, start,

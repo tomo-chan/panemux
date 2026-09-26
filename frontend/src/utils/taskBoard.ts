@@ -131,21 +131,21 @@ export interface TaskPaneRef {
 }
 
 /**
- * The pane already attached to a task's tmux session: a `tmux` pane for the
- * panemux host, an `ssh_tmux` pane on the same connection for a remote one.
+ * The pane a task runs in. For a task in tmux, the pane already attached to
+ * its tmux session: a `tmux` pane for the panemux host, an `ssh_tmux` pane on
+ * the same connection for a remote one. For a task outside tmux, the pane its
+ * agent's PANEMUX_PANE_ID names (issue #254) — a claim any process could
+ * make, so it counts only for a `local` pane on the panemux host or an `ssh`
+ * pane on the task's connection, the panes whose shell is given that variable.
  * Computed here from the workspaces the dashboard already holds, so a pane
  * the dashboard has just created is found before the next collection.
  */
 export function findTaskPane(task: Task, workspaces: Workspace[]): TaskPaneRef | null {
-  const session = task.location.kind === 'tmux' ? task.location.tmux_session : undefined
-  if (!session) return null
+  const match = taskPaneMatcher(task)
+  if (!match) return null
 
   for (const workspace of workspaces) {
-    const found = findPane(workspace.layout.children, (pane) => {
-      if (pane.tmux_session !== session) return false
-      if (task.host === '') return pane.type === 'tmux'
-      return pane.type === 'ssh_tmux' && pane.connection === task.host
-    })
+    const found = findPane(workspace.layout.children, match)
     if (found) {
       return {
         paneId: found.id,
@@ -153,6 +153,25 @@ export function findTaskPane(task: Task, workspaces: Workspace[]): TaskPaneRef |
         workspaceId: workspace.id,
         workspaceTitle: workspace.title,
       }
+    }
+  }
+  return null
+}
+
+function taskPaneMatcher(task: Task): ((pane: PaneConfig) => boolean) | null {
+  const { kind, tmux_session: session, pane_id: paneId } = task.location
+  if (kind === 'tmux' && session) {
+    return (pane) => {
+      if (pane.tmux_session !== session) return false
+      if (task.host === '') return pane.type === 'tmux'
+      return pane.type === 'ssh_tmux' && pane.connection === task.host
+    }
+  }
+  if (kind === 'outside' && paneId) {
+    return (pane) => {
+      if (pane.id !== paneId) return false
+      if (task.host === '') return pane.type === 'local'
+      return pane.type === 'ssh' && pane.connection === task.host
     }
   }
   return null
@@ -181,7 +200,9 @@ export function taskOpenAction(task: Task, pane: TaskPaneRef | null): TaskOpenAc
         ? { kind: 'open' }
         : { kind: 'unavailable', reason: 'tmux session name cannot be attached from a pane' }
     case 'outside':
-      return { kind: 'unavailable', reason: 'running outside tmux' }
+      return task.location.pane_id
+        ? { kind: 'unavailable', reason: 'running outside tmux, in a pane no workspace holds' }
+        : { kind: 'unavailable', reason: 'running outside tmux, not in a panemux pane' }
     default:
       return { kind: 'unavailable', reason: 'not running' }
   }

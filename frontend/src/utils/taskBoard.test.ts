@@ -169,10 +169,53 @@ describe('findTaskPane', () => {
     expect(findTaskPane(docsOnGpu, workspaces)?.paneId).toBe('p-other')
   })
 
-  it('never matches a task that is not in tmux', () => {
+  // efficacy:exempt pins stage-1 behavior this branch keeps — a task with
+  // neither a tmux session nor a pane id matches nothing, before and after.
+  it('never matches a task with neither a tmux session nor a pane id', () => {
     expect(findTaskPane(task({ location: { kind: 'outside', attachable: false } }), workspaces)).toBeNull()
     expect(findTaskPane(task({ location: { kind: 'none', attachable: false } }), workspaces)).toBeNull()
     expect(findTaskPane(task({ location: { kind: 'tmux', attachable: false } }), workspaces)).toBeNull()
+  })
+
+  // PANEMUX_PANE_ID is only a claim made by a process's environment: it
+  // opens a pane only when that pane is where such an agent can run.
+  describe('an agent outside tmux (issue #254)', () => {
+    const panes = [
+      workspace('main', [
+        { id: 'p-shell', type: 'local', title: 'shell' },
+        { id: 'p-docs', type: 'tmux', tmux_session: 'docs' },
+      ]),
+      workspace('remote', [
+        { id: 'p-dev', type: 'ssh', connection: 'dev-server' },
+        { id: 'p-dev-tmux', type: 'ssh_tmux', connection: 'dev-server', tmux_session: 'infra' },
+      ]),
+    ]
+    const outside = (paneId: string, host = '') =>
+      task({ host, location: { kind: 'outside', pane_id: paneId, attachable: false } })
+
+    it('finds the local pane its environment names for a task on the panemux host, and no other pane', () => {
+      expect(findTaskPane(outside('p-shell'), panes)).toEqual({
+        paneId: 'p-shell', paneTitle: 'shell', workspaceId: 'main', workspaceTitle: 'MAIN',
+      })
+      expect(findTaskPane(outside('p-dev'), panes)).toBeNull()
+      expect(findTaskPane(outside('p-docs'), panes)).toBeNull()
+      expect(findTaskPane(outside('pane-closed'), panes)).toBeNull()
+    })
+
+    it('finds the ssh pane its environment names only on the same connection as the task', () => {
+      expect(findTaskPane(outside('p-dev', 'dev-server'), panes)?.paneId).toBe('p-dev')
+      expect(findTaskPane(outside('p-dev', 'gpu-box'), panes)).toBeNull()
+      expect(findTaskPane(outside('p-shell', 'dev-server'), panes)).toBeNull()
+      expect(findTaskPane(outside('p-dev-tmux', 'dev-server'), panes)).toBeNull()
+    })
+
+    it('uses the pane id only while the agent runs outside tmux', () => {
+      expect(findTaskPane(outside('p-shell'), panes)?.paneId).toBe('p-shell')
+      const inTmux = task({ location: { kind: 'tmux', tmux_session: 'other', pane_id: 'p-shell', attachable: true } })
+      expect(findTaskPane(inTmux, panes)).toBeNull()
+      const stopped = task({ state: 'stop', location: { kind: 'none', pane_id: 'p-shell', attachable: false } })
+      expect(findTaskPane(stopped, panes)).toBeNull()
+    })
   })
 
   it('uses the pane id as the title when the pane has none', () => {
@@ -192,7 +235,11 @@ describe('taskOpenAction', () => {
     expect(taskOpenAction(task({ location: { kind: 'tmux', tmux_session: 'my work', attachable: false } }), null))
       .toEqual({ kind: 'unavailable', reason: 'tmux session name cannot be attached from a pane' })
     expect(taskOpenAction(task({ location: { kind: 'outside', attachable: false } }), null))
-      .toEqual({ kind: 'unavailable', reason: 'running outside tmux' })
+      .toEqual({ kind: 'unavailable', reason: 'running outside tmux, not in a panemux pane' })
+    expect(taskOpenAction(task({ location: { kind: 'outside', pane_id: 'pane-closed', attachable: false } }), null))
+      .toEqual({ kind: 'unavailable', reason: 'running outside tmux, in a pane no workspace holds' })
+    expect(taskOpenAction(task({ location: { kind: 'outside', pane_id: 'p', attachable: false } }), pane))
+      .toEqual({ kind: 'goto', pane })
     expect(taskOpenAction(task({ state: 'stop', location: { kind: 'none', attachable: false } }), null))
       .toEqual({ kind: 'unavailable', reason: 'not running' })
   })
