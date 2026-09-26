@@ -129,9 +129,6 @@ func TestSSHShellCommandExportsThePaneIDWhenRunByAShell(t *testing.T) {
 				if err != nil {
 					t.Fatalf("sshShellCommand: %v", err)
 				}
-				if !strings.HasPrefix(cmd, remotePaneIDSetup("pane-1790346631000-a1b2c")) {
-					t.Fatalf("command does not start with the pane ID setup: %q", cmd)
-				}
 				got := runRemoteSetup(t, cmd)
 				if got != "pane-1790346631000-a1b2c" {
 					t.Fatalf("exported %s = %q, want the pane ID", paneIDEnvName, got)
@@ -198,7 +195,7 @@ func TestSSHShellCommandWithAPaneIDStartsALoginShell(t *testing.T) {
 			if err != nil {
 				t.Fatalf("sshShellCommand: %v", err)
 			}
-			if want := remotePaneIDSetup("p1") + tt.wantTail; got != want {
+			if want := shCommand(remotePaneIDSetup("p1") + tt.wantTail); got != want {
 				t.Fatalf("sshShellCommand = %q, want %q", got, want)
 			}
 		})
@@ -214,4 +211,10 @@ func TestRemotePaneIDSetup(t *testing.T) {
 			t.Fatalf("remotePaneIDSetup(%q) = %q, want nothing", id, got)
 		}
 	}
+}
+
+// shCommand is the form every remote command with setup takes: the POSIX
+// script handed whole to /bin/sh (see sshShellCommand).
+func shCommand(script string) string {
+	return "exec /bin/sh -c " + shellQuotePath(script)
 }

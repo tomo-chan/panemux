@@ -599,6 +599,13 @@ func startSSHShell(sess *ssh.Session, paneID string, cfg SSHConfig) error {
 // installs it (see browseropen.go). A pane that would otherwise have used
 // sess.Shell() then has to run a command instead, so it execs the login
 // shell explicitly to keep the profile files an SSH login would source.
+//
+// sshd runs the command with the user's login shell, which need not be POSIX
+// (fish, tcsh). A command with setup is therefore POSIX script handed whole to
+// /bin/sh as one single-quoted argument, `exec /bin/sh -c '<script>'`, which
+// every such shell parses the same way. The script is one line and has no
+// `!`: remote paths and pane IDs are validated to exclude both, and the shim
+// is written with printfOctalFormat.
 func sshShellCommand(paneID string, cfg SSHConfig) (string, error) {
 	tail, err := sshShellExecTail(cfg)
 	if err != nil {
@@ -614,7 +621,7 @@ func sshShellCommand(paneID string, cfg SSHConfig) (string, error) {
 	if tail == "" {
 		tail = remoteLoginShellExec
 	}
-	return setup + tail, nil
+	return "exec /bin/sh -c " + shellQuotePath(setup+tail), nil
 }
 
 // sshShellExecTail builds the part of the remote command that enters the

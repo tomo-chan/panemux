@@ -169,6 +169,17 @@ collection. The choices made while building it:
   SSH shell request now runs a command that execs the login shell, the change the shim already
   made. Exporting it only with the shim would have left agents in those panes impossible to open,
   and `AcceptEnv` on the server cannot be relied on for `Setenv`.
+- **Remote commands with setup are handed to `/bin/sh`.** sshd runs an exec request with the
+  user's login shell. The first version of this change prepended `PANEMUX_PANE_ID=…; export …` to
+  the command, which `fish` rejects as a syntax error and `tcsh` half-runs, so an `ssh` pane on
+  such a host exited at once, and `url_open.browser_shim: false` no longer avoided it (review of
+  PR #260). The shim's own setup had always failed the same way on those hosts. The whole script is
+  now passed as `exec /bin/sh -c '<one line>'`, with the shim's body as octal escapes because
+  `tcsh` expands the `!` of `#!/bin/sh` even inside single quotes. Checked on Linux (2026-09-26)
+  against a real sshd with `fish` 3.7.0 and `tcsh` login shells, with and without the shim, for
+  panes with and without `cwd`. Exporting through `exec env PANEMUX_PANE_ID=… "$SHELL"` was
+  rejected because it left the shim broken, and keeping the SSH shell request when the shim is
+  disabled because those panes would have had no pane ID.
 - **The browser matches the ID against the panes it holds**, as it already did for tmux sessions,
   rather than the server checking it against the config. The value only claims a pane, so it opens
   one only when that pane is a `local` pane (panemux host) or an `ssh` pane on the task's

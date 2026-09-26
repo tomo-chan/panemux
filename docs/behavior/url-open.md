@@ -61,11 +61,16 @@ Two limitations are inherent to the mechanism:
   through to the outer terminal by default.
 - With the shim enabled, an `ssh` pane that would otherwise have used the SSH shell request runs a
   command instead, so it execs the login shell explicitly (`$SHELL -l` for `bash`, `zsh`, and
-  `fish`; a plain `exec "$SHELL"` for anything else). Panes that set `cwd` or `shell` already ran a
-  command and keep exactly the form they had before. A pane whose ID is exported as
-  `PANEMUX_PANE_ID` ([task dashboard](tasks.md#the-pane-of-an-agent-outside-tmux)) runs that same
-  command whether or not the shim is enabled; `url_open.browser_shim: false` only drops the shim
-  from it.
+  `fish`; a plain `exec "$SHELL"` for anything else). Panes that set `cwd` or `shell` keep their
+  `cd` and `exec`, after the shim's setup. A pane whose ID is exported as `PANEMUX_PANE_ID`
+  ([task dashboard](tasks.md#the-pane-of-an-agent-outside-tmux)) runs such a command whether or not
+  the shim is enabled; `url_open.browser_shim: false` only drops the shim from it. A pane with
+  neither keeps the SSH shell request, or its plain `cd` / `exec` command.
+
+A command with any setup is POSIX shell handed whole to `/bin/sh` as one line
+(`exec /bin/sh -c '…'`), because sshd runs it with the user's login shell, which need not be POSIX.
+It therefore behaves the same under `fish` and `tcsh` as under `bash`: the shim is installed, the
+variables are exported, and the login shell starts.
 
 ### Clicked links
 

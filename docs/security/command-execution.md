@@ -175,3 +175,11 @@ An `ssh` pane receives it in its remote shell command (`remotePaneIDSetup` in
 `internal/session/paneid.go`): the pane ID is exported only when it matches the same rule
 (`validPaneEnvID`), whose characters are all inert in a shell, and it is quoted with
 `shellQuotePath` as well. A pane whose ID does not match gets no variable rather than an escaped one.
+
+That command, like any remote pane command carrying setup, is POSIX script passed whole to
+`/bin/sh`: `exec /bin/sh -c ` followed by the script quoted once more with `shellQuotePath`
+(`sshShellCommand` in `internal/session/ssh.go`), so the remote login shell — which need not be
+POSIX — parses only `exec`, a literal path and one single-quoted word. The script is kept to one line
+with no `!`, which csh-family shells expand even inside single quotes: remote paths and pane IDs are
+validated to exclude both, and the browser shim's body is written as a `printf` format of octal
+escapes (`printfOctalFormat`).

@@ -151,10 +151,10 @@ func (s *testSSHTransport) serveSession(channel ssh.Channel, requests <-chan *ss
 			s.commands = append(s.commands, payload.Command)
 			s.mu.Unlock()
 			request.Reply(true, nil)
-			// A pane's interactive shell: tmux, or a login shell started
-			// after exporting the pane's ID. Both echo like the shell request.
+			// A pane's interactive shell: tmux, or a login shell /bin/sh
+			// starts after its setup. Both echo like the shell request.
 			if strings.HasPrefix(payload.Command, "tmux new-session ") ||
-				strings.HasPrefix(payload.Command, paneIDEnvName+"=") {
+				strings.HasPrefix(payload.Command, "exec /bin/sh -c ") {
 
 				go func() { _, _ = io.Copy(channel, channel) }()
 				continue
@@ -282,7 +282,7 @@ func TestSSHSessionLifecycleOverInProcessTransport(t *testing.T) {
 	assert.Equal(t, [2]uint32{132, 43}, resizes[0])
 
 	commands, _ := transport.snapshot()
-	assert.Equal(t, []string{remotePaneIDSetup("pane-ssh") + remoteLoginShellExec}, commands,
+	assert.Equal(t, []string{shCommand(remotePaneIDSetup("pane-ssh") + remoteLoginShellExec)}, commands,
 		"the pane's shell is started with its pane ID")
 
 	require.NoError(t, sess.Close())

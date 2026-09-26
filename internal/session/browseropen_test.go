@@ -486,11 +486,8 @@ func TestSSHShellCommandWithTheBrowserShim(t *testing.T) {
 			if err != nil {
 				t.Fatalf("sshShellCommand: %v", err)
 			}
-			if !strings.HasPrefix(got, setup) {
-				t.Fatalf("command does not start with the shim setup: %q", got)
-			}
-			if tail := strings.TrimPrefix(got, setup); tail != tt.wantTail {
-				t.Fatalf("command tail = %q, want %q", tail, tt.wantTail)
+			if want := shCommand(setup + tt.wantTail); got != want {
+				t.Fatalf("sshShellCommand = %q, want %q", got, want)
 			}
 		})
 	}
