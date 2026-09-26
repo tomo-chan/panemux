@@ -1,12 +1,14 @@
 package tasks
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"unicode"
@@ -148,10 +150,7 @@ func (s *RecordStore) Put(rec Record) (Record, error) {
 	if err := s.loadLocked(); err != nil {
 		return Record{}, err
 	}
-	next := make(map[RecordKey]Record, len(s.records)+1)
-	for key, existing := range s.records {
-		next[key] = existing
-	}
+	next := maps.Clone(s.records)
 	if rec.isEmpty() {
 		delete(next, rec.Key())
 	} else {
@@ -229,15 +228,10 @@ func (s *RecordStore) writeLocked(records map[RecordKey]Record) error {
 	for _, rec := range records {
 		file.Records = append(file.Records, rec)
 	}
-	sort.Slice(file.Records, func(i, j int) bool {
-		a, b := file.Records[i], file.Records[j]
-		if a.Host != b.Host {
-			return a.Host < b.Host
-		}
-		if a.Agent != b.Agent {
-			return a.Agent < b.Agent
-		}
-		return a.SessionID < b.SessionID
+	slices.SortFunc(file.Records, func(a, b Record) int {
+		return cmp.Or(
+			strings.Compare(a.Host, b.Host), strings.Compare(a.Agent, b.Agent), strings.Compare(a.SessionID, b.SessionID),
+		)
 	})
 	data, err := json.Marshal(file)
 	//coverage:exempt a struct of strings, bools and string slices always marshals

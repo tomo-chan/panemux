@@ -111,18 +111,29 @@ func TestRecordStore_AnEmptyRecordIsRemoved(t *testing.T) {
 func TestRecordStore_FileFormat(t *testing.T) {
 	path := recordsPath(t)
 	store := NewRecordStore(path)
-	_, err := store.Put(Record{Host: "b", Agent: "claude", SessionID: "s2", Labels: []string{"x"}})
-	require.NoError(t, err)
-	_, err = store.Put(Record{Host: "", Agent: "claude", SessionID: "s1", Done: true})
-	require.NoError(t, err)
+	// Put in an order that is none of host, agent or session order, with
+	// records that tie on host, and on host and agent, so each key decides.
+	for _, rec := range []Record{
+		{Host: "b", Agent: "codex", SessionID: "s1", Done: true},
+		{Host: "b", Agent: "claude", SessionID: "s3", Labels: []string{"x"}},
+		{Host: "", Agent: "claude", SessionID: "s9", Done: true},
+		{Host: "b", Agent: "claude", SessionID: "s2", Done: true},
+		{Host: "a", Agent: "codex", SessionID: "s0", Done: true},
+	} {
+		_, err := store.Put(rec)
+		require.NoError(t, err)
+	}
 
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
 	assert.JSONEq(t, `{
 		"version": 1,
 		"records": [
-			{"host": "", "agent": "claude", "session_id": "s1", "done": true},
-			{"host": "b", "agent": "claude", "session_id": "s2", "labels": ["x"]}
+			{"host": "", "agent": "claude", "session_id": "s9", "done": true},
+			{"host": "a", "agent": "codex", "session_id": "s0", "done": true},
+			{"host": "b", "agent": "claude", "session_id": "s2", "done": true},
+			{"host": "b", "agent": "claude", "session_id": "s3", "labels": ["x"]},
+			{"host": "b", "agent": "codex", "session_id": "s1", "done": true}
 		]
 	}`, string(data), "records are written in host, agent, session order")
 }
@@ -288,6 +299,7 @@ func TestNormalizeLabels(t *testing.T) {
 		{name: "too long", in: []string{strings.Repeat("x", MaxLabelLength+1)}, wantErr: "longer than 32 characters"},
 		{name: "control character", in: []string{"a\tb"}, wantErr: "control character"},
 		{name: "newline", in: []string{"a\nb"}, wantErr: "control character"},
+		{name: "control character first", in: []string{"\x01a"}, wantErr: "control character"},
 		{name: "invalid UTF-8", in: []string{"a\xffb"}, wantErr: "not valid UTF-8"},
 		{name: "most allowed", in: tooMany[:MaxLabels], want: tooMany[:MaxLabels]},
 		{name: "too many", in: tooMany, wantErr: "more than 20 labels"},
