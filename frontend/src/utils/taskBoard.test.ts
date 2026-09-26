@@ -234,6 +234,16 @@ describe('lanes', () => {
       ['zeta', ['c']],
       ['No label', ['b']],
     ])
+    // Names an ordinary object inherits are ordinary names, not catch-all rows.
+    for (const name of ['__proto__', 'constructor', 'toString', 'hasOwnProperty']) {
+      const inherited = groupIntoLanes([task({ id: 'a', labels: [name] }), task({ id: 'b', labels: ['zeta'] }), task({ id: 'c' })], 'label')
+      expect(inherited.map((lane) => [lane.title, lane.tasks.map((t) => t.id)]), name).toEqual([
+        [name, ['a']],
+        ['zeta', ['b']],
+        ['No label', ['c']],
+      ])
+      expect(laneTitle(name)).toBe(name)
+    }
     const repos = groupIntoLanes([task({ id: 'a', git: { repo: 'Not in a Git repository' } }), task({ id: 'b' })], 'repo')
     expect(repos.map((lane) => [lane.title, lane.tasks.map((t) => t.id)])).toEqual([
       ['Not in a Git repository', ['a']],

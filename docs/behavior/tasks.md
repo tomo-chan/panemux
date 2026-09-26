@@ -174,7 +174,8 @@ set.
 - **Labels** are trimmed, repeats dropped, and kept in the order they were added. A label is at most
   32 characters, and has no control characters, no invisible format characters (zero-width spaces,
   direction overrides — Unicode category Cf) and no line or paragraph separators; a task carries at
-  most 20. Case matters: `Docs` and `docs` are two labels.
+  most 20. Emoji joined with a zero-width joiner (a family emoji, say) are refused with them, since
+  the joiner is itself a format character. Case matters: `Docs` and `docs` are two labels.
 - The file is served from memory while its modification time and size are what panemux last read
   or wrote, and read again when they change, so an edit made by hand while panemux runs is seen by
   the next request and is not undone by the next save. An edit that keeps both the same (within the

@@ -411,4 +411,16 @@ describe('TaskDashboard done and labels', () => {
     expect(within(detail()).queryByRole('alert')).toBeNull()
     expect(within(detail()).getByRole('textbox', { name: 'Add a label' })).toHaveValue('typing')
   })
+
+  it('splits rows by a label named like an inherited object property', () => {
+    renderDashboard(tasksState({
+      data: { ...recorded, tasks: [task({ id: 'proto', state: 'busy', labels: ['__proto__', 'constructor'] })] },
+    }))
+    fireEvent.change(screen.getByRole('combobox', { name: 'Split rows by' }), { target: { value: 'label' } })
+    const working = screen.getByRole('region', { name: 'Working' })
+    expect(within(working).getAllByRole('heading', { level: 3 }).map((el) => el.textContent)).toEqual([
+      '__proto__',
+      'constructor',
+    ])
+  })
 })

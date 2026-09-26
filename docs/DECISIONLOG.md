@@ -199,7 +199,12 @@ built.
 - **Label limits** (32 characters, 20 labels, no control characters) were chosen while it was built,
   to keep a label a short tag on a card rather than free text. Invisible format characters and line
   and paragraph separators were added to the refused set in review of PR #262: they let a label look
-  empty, look identical to another label, or reorder the text after it.
+  empty, look identical to another label, or reorder the text after it. That also refuses emoji
+  joined with a zero-width joiner, which was accepted as the cost of a simple rule; invisible
+  characters outside those categories (a Hangul filler, a braille blank) still pass.
+- **The catch-all rows are keyed in a `Map`** (review of PR #262). Keying them apart from label
+  names first used an object literal, which made a label named `__proto__` crash the dashboard when
+  rows were split by label, and `constructor` or `toString` show as an empty catch-all row.
 
 ## Agent Board
 

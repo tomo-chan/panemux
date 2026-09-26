@@ -137,14 +137,17 @@ export type LaneMode = 'none' | 'host' | 'label' | 'repo'
 const NO_REPO_LANE = '\u0000no-repo'
 const NO_LABEL_LANE = '\u0000no-label'
 
-const CATCH_ALL_TITLES: Record<string, string> = {
-  [NO_REPO_LANE]: 'Not in a Git repository',
-  [NO_LABEL_LANE]: 'No label',
-}
+// A Map rather than an object literal: a label or repository may be named
+// __proto__, constructor or toString, and an object would answer for those
+// from Object.prototype.
+const CATCH_ALL_TITLES = new Map<string, string>([
+  [NO_REPO_LANE, 'Not in a Git repository'],
+  [NO_LABEL_LANE, 'No label'],
+])
 
 /** The heading a lane is shown under. */
 export function laneTitle(key: string): string {
-  return CATCH_ALL_TITLES[key] ?? key
+  return CATCH_ALL_TITLES.get(key) ?? key
 }
 
 /**
@@ -182,8 +185,8 @@ export function groupIntoLanes(tasks: Task[], mode: LaneMode): TaskLane[] {
   return [...lanes.entries()]
     .sort(([a], [b]) => {
       // Lanes that collect "everything else" sort after every named lane.
-      const aLast = a in CATCH_ALL_TITLES
-      const bLast = b in CATCH_ALL_TITLES
+      const aLast = CATCH_ALL_TITLES.has(a)
+      const bLast = CATCH_ALL_TITLES.has(b)
       if (aLast !== bLast) return aLast ? 1 : -1
       return a.localeCompare(b)
     })
