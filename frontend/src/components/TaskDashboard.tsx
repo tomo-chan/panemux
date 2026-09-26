@@ -94,7 +94,9 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
   // appears, unless another task was selected meanwhile.
   const [pendingLaunch, setPendingLaunch] = useState<{ id: string; message: string } | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
-  const [resumingId, setResumingId] = useState<string | null>(null)
+  // Every task whose resume is in flight. Each is tracked on its own, so
+  // resuming one task never re-enables another's Resume mid-request.
+  const [resumingIds, setResumingIds] = useState<ReadonlySet<string>>(() => new Set())
   const nowMs = useTicker(now)
   const rootRef = useRef<HTMLElement>(null)
 
@@ -142,10 +144,14 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
     })
   }
   const resumeTask = async (task: Task) => {
-    setResumingId(task.id)
+    setResumingIds((current) => new Set(current).add(task.id))
     setActionError(null)
     const result = await resume(task)
-    setResumingId((current) => (current === task.id ? null : current))
+    setResumingIds((current) => {
+      const next = new Set(current)
+      next.delete(task.id)
+      return next
+    })
     if (!result.ok) {
       setActionError(`Could not resume ${taskTitle(task)}: ${result.error}`)
       return
@@ -288,7 +294,7 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
                             onSelect={select}
                             onOpen={open}
                             onResume={(t) => void resumeTask(t)}
-                            resuming={resumingId === task.id}
+                            resuming={resumingIds.has(task.id)}
                           />
                         ))}
                       </React.Fragment>
@@ -306,7 +312,7 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
           nowMs={nowMs}
           onOpen={open}
           onResume={(t) => void resumeTask(t)}
-          resuming={selected !== null && resumingId === selected.id}
+          resuming={selected !== null && resumingIds.has(selected.id)}
           onSaveRecord={saveRecord}
           showDone={showDone}
           onClose={() => setDetailOpen(false)}

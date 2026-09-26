@@ -255,6 +255,19 @@ Chosen while it was built:
 - **A launch during a running collection collects again when it finishes.** That collection began
   before the task existed, and skipping the launch's own collection left the task unlisted until the
   next poll.
+- **The working directory is not given to tmux's `-c`** (review of PR #265). tmux expands `-c` as a
+  format, and a directory holding `#` silently became the home directory while the launch reported
+  success. The fixed `sh -c` inside the session changes to it instead; escaping `#` as `##` was the
+  alternative, rejected because it depends on tmux's format rules staying as they are.
+- **A resume adds a window to a session of the task's name that no agent runs in** (review of PR
+  #265, decided with the operator). A pane opened on the task attaches with `new-session -A`, so
+  recreating it after claude exited left a shell session of that name, and every later resume was
+  refused with no way to clear it from the dashboard. Rejected alternatives: replacing the pane's
+  window with `respawn-pane -k` (kills whatever the shell was running), a different session name
+  (the open pane would not show claude, and the shell session lingers), and changing how task panes
+  attach (a config-schema change to every `tmux`/`ssh_tmux` pane).
+- **Each resume in flight is tracked per task** (review of PR #265). One tracked ID was replaced by a
+  second resume, re-enabling the first task's button while its request still ran.
 
 ## Agent Board
 

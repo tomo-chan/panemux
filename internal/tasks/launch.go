@@ -108,6 +108,9 @@ type launchParams struct {
 	cwd         string
 	prompt      string
 	tag         string
+	// reuseSession lets a resume add its window to an existing tmux session
+	// of the task's name; see Resume.
+	reuseSession bool
 }
 
 // launchScriptTemplate starts claude in a detached tmux session. It answers
@@ -118,7 +121,14 @@ type launchParams struct {
 //     because an SSH exec channel's PATH rarely holds a per-user install
 //     (~/.local/bin). Only an absolute path to an executable is run.
 //   - tmux receives the command as separate arguments after "--", which tmux
-//     runs without a shell (tmux 2.0 and later).
+//     runs without a shell (tmux 2.0 and later). The working directory is not
+//     given to tmux's -c, which expands its value as a format ("#S", "##"),
+//     and starts in the home directory when the result does not exist: the
+//     fixed `sh -c` inside the session changes to it instead.
+//   - A resume may find a tmux session of the task's name left by a pane
+//     that was recreated after claude exited (`new-session -A`). Where Resume
+//     found no agent running in it, claude is added to it as a new window,
+//     which the pane then shows; otherwise the name refuses the resume.
 //   - A new task's prompt is written to a mode-0600 temp file and read back
 //     by a fixed `sh -c` inside the tmux session, which removes the file
 //     before running claude. It reaches claude as the single argument after
@@ -129,6 +139,7 @@ type launchParams struct {
 const launchScriptTemplate = `set -u
 say() { printf '::panemux-launch %s\n' "$1"; }
 mode='{{MODE}}'
+reuse='{{REUSE}}'
 sid='{{SESSION_ID}}'
 name='{{TMUX_SESSION}}'
 cwd=$(cat <<'PANEMUX_CWD_{{TAG}}'
@@ -147,9 +158,20 @@ case $bin in
 *) say 'error no-claude'; exit 0 ;;
 esac
 [ -f "$bin" ] && [ -x "$bin" ] || { say 'error no-claude'; exit 0; }
-if tmux has-session -t "=$name" 2>/dev/null; then say 'error tmux-exists'; exit 0; fi
+resume='cd -- "$1" || exit 1; exec "$2" "--resume=$3"'
+if tmux has-session -t "=$name" 2>/dev/null; then
+  if [ "$mode" = resume ] && [ "$reuse" = yes ]; then
+    tmux new-window -t "=$name:" -- sh -c "$resume" sh "$cwd" "$bin" "$sid" 2>/dev/null ||
+      { say 'error tmux-failed'; exit 0; }
+    say ok
+    exit 0
+  fi
+  say 'error tmux-exists'
+  exit 0
+fi
 if [ "$mode" = resume ]; then
-  tmux new-session -d -s "$name" -c "$cwd" -- "$bin" "--resume=$sid" 2>/dev/null || { say 'error tmux-failed'; exit 0; }
+  tmux new-session -d -s "$name" -- sh -c "$resume" sh "$cwd" "$bin" "$sid" 2>/dev/null ||
+    { say 'error tmux-failed'; exit 0; }
   say ok
   exit 0
 fi
@@ -158,8 +180,8 @@ f=$(mktemp "${TMPDIR:-/tmp}/panemux-task.XXXXXXXX" 2>/dev/null) || { say 'error 
 cat >"$f" <<'PANEMUX_PROMPT_{{TAG}}'
 {{PROMPT}}
 PANEMUX_PROMPT_{{TAG}}
-run='p=$(cat -- "$1"); rm -f -- "$1"; exec "$2" "--session-id=$3" -- "$p"'
-if ! tmux new-session -d -s "$name" -c "$cwd" -- sh -c "$run" sh "$f" "$bin" "$sid" 2>/dev/null; then
+run='p=$(cat -- "$1"); rm -f -- "$1"; cd -- "$4" || exit 1; exec "$2" "--session-id=$3" -- "$p"'
+if ! tmux new-session -d -s "$name" -- sh -c "$run" sh "$f" "$bin" "$sid" "$cwd" 2>/dev/null; then
   rm -f -- "$f"
   say 'error tmux-failed'
   exit 0
@@ -195,12 +217,20 @@ func buildLaunchScript(p launchParams) (string, error) {
 	}
 	return strings.NewReplacer(
 		"{{MODE}}", string(p.mode),
+		"{{REUSE}}", reuseWord(p.reuseSession),
 		"{{SESSION_ID}}", p.sessionID,
 		"{{TMUX_SESSION}}", p.tmuxSession,
 		"{{TAG}}", p.tag,
 		"{{CWD}}", p.cwd,
 		"{{PROMPT}}", p.prompt,
 	).Replace(launchScriptTemplate), nil
+}
+
+func reuseWord(reuse bool) string {
+	if reuse {
+		return "yes"
+	}
+	return "no"
 }
 
 func validatePrompt(prompt string) error {
@@ -317,7 +347,10 @@ func (s *Service) Resume(ctx context.Context, host, sessionID string) (Launched,
 		if task.CWD == "" {
 			return Launched{}, fmt.Errorf("%w: the session's working directory is not recorded", ErrInvalidLaunch)
 		}
-		return s.launch(ctx, host, launchParams{mode: launchResume, sessionID: sessionID, cwd: task.CWD})
+		return s.launch(ctx, host, launchParams{
+			mode: launchResume, sessionID: sessionID, cwd: task.CWD,
+			reuseSession: !agentRunsInTmuxSession(list, tmuxSessionForTask(sessionID)),
+		})
 	}
 	return Launched{}, ErrNoStoppedTask
 }
@@ -348,6 +381,18 @@ func (s *Service) launch(ctx context.Context, host string, p launchParams) (Laun
 		SessionID:   p.sessionID,
 		TmuxSession: p.tmuxSession,
 	}, nil
+}
+
+// agentRunsInTmuxSession reports whether any running task — claude, codex,
+// or one whose state could not be read — was collected inside the named tmux
+// session. A resume adds itself to a session of its name only when none is.
+func agentRunsInTmuxSession(list []Task, name string) bool {
+	for _, task := range list {
+		if task.Location.Kind == LocationTmux && task.Location.TmuxSession == name {
+			return true
+		}
+	}
+	return false
 }
 
 // checkHost accepts the panemux host and the configured ssh_connections keys.

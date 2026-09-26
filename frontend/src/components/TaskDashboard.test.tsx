@@ -545,6 +545,36 @@ describe('TaskDashboard new tasks and resume', () => {
     expect(resume).toHaveBeenCalledTimes(2)
   })
 
+  // Each resume in flight is its own: resuming a second task must not let
+  // the first one be resumed again while its request is still running.
+  it('keeps every resume in flight disabled until its own request finishes', async () => {
+    const other = task({
+      id: 'local:claude:6e8f4b01-2c3d-4e4f-9a51-627384a5b6c7', session_id: '6e8f4b01-2c3d-4e4f-9a51-627384a5b6c7',
+      state: 'stop', cwd: '/workspace/user/other', location: { kind: 'none', attachable: false },
+    })
+    const finishers = new Map<string, (value: unknown) => void>()
+    const resume = vi.fn().mockImplementation((t: Task) => new Promise((resolve) => { finishers.set(t.id, resolve) }))
+    renderDashboard(tasksState({ data: { ...base, tasks: [stopped, other, ...response.tasks] }, resume }))
+    const button = (t: Task) => within(screen.getByTestId(`task-card-${t.id}`)).getByRole('button', { name: /^Resume/ })
+
+    fireEvent.click(button(stopped))
+    fireEvent.click(button(other))
+    expect(button(stopped)).toBeDisabled()
+    expect(button(other)).toBeDisabled()
+
+    await act(async () => {
+      finishers.get(other.id)!({ ok: true, launched: { id: other.id, session_id: other.session_id, tmux_session: 'task-6e8f4b01' } })
+    })
+    expect(button(stopped)).toBeDisabled()
+    expect(button(other)).toBeEnabled()
+
+    await act(async () => {
+      finishers.get(stopped.id)!({ ok: true, launched: { id: stopped.id, session_id: STOPPED_SID, tmux_session: 'task-5d7e3a90' } })
+    })
+    expect(button(stopped)).toBeEnabled()
+    expect(resume).toHaveBeenCalledTimes(2)
+  })
+
   it('shows why a resume was refused', async () => {
     const resume = vi.fn().mockResolvedValue({ ok: false, error: "a tmux session with the task's name already exists on the host" })
     renderDashboard(tasksState({ data: base, resume }))

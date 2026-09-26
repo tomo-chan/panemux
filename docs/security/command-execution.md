@@ -205,15 +205,33 @@ and it reaches tmux as a discrete argument. This is the script on the host readi
 environment, not a Go `os.Getenv` value flowing into `exec.Command`, which the
 [General Rules](../security.md#general-rules) forbid.
 
-**tmux runs the command without a shell.** `tmux new-session -d -s <name> -c <dir> -- <command...>`
-with the command as separate arguments executes it directly (tmux 2.0 and later; verified on tmux 3.4
-with an argument holding `$(id)`, `; echo`, and a quote, all of which arrived unchanged). The `--`
-keeps an argument from being read as a tmux option.
+**tmux runs the command without a shell.** `tmux new-session -d -s <name> -- <command...>` with the
+command as separate arguments executes it directly (tmux 2.0 and later; verified on tmux 3.4 with an
+argument holding `$(id)`, `; echo`, and a quote, all of which arrived unchanged). The `--` keeps an
+argument from being read as a tmux option.
+
+**No request value goes to a tmux option that tmux expands.** `-c` looks like a plain directory
+argument but is a format: tmux 3.4 turned `/…/proj#Sx` and `/…/a##b` into other paths, found them
+missing, and started the command in the home directory — reported as success, with the script's own
+`cd` to the directory having succeeded. `validRemotePath` refuses `$ ( ) { } [ ]`, so `#(…)` cannot
+run a command and this was never code execution, but claude would have run in a directory nobody
+chose. The working directory therefore reaches the session only as a positional parameter of the
+fixed `sh -c`, which changes to it (`cd -- "$4"`, and `cd -- "$1"` for a resume) before `exec`.
+`TestLaunchScript_RealTmuxStartsClaudeInADirectoryHoldingAHash` runs this against the real tmux where
+one is installed, and the stand-in tmux the other tests use refuses `-c` outright. (A pane's own
+`tmux new-session -c` in `internal/session` has the same property and is outside this section.)
+
+**A resume can add a window to an existing session of the task's name**
+(`tmux new-window -t "=<name>:" -- sh -c …`), with the same arguments as a new session. The script is
+told whether it may with a fixed `yes`/`no` that `Service.Resume` sets from the collection it has
+just made: only when no running task was found inside that tmux session. Nothing already in the
+session is replaced or killed.
 
 **The first instruction reaches claude as a file, then as one argument after `--`.** The script writes
 it to a `mktemp` file created under `umask 077`, and the tmux command is a fixed
-`sh -c 'p=$(cat -- "$1"); rm -f -- "$1"; exec "$2" "--session-id=$3" -- "$p"'` whose positional
-parameters are the file, the resolved claude path and the session ID. Command substitution's result is
+`sh -c 'p=$(cat -- "$1"); rm -f -- "$1"; cd -- "$4" || exit 1; exec "$2" "--session-id=$3" -- "$p"'`
+whose positional parameters are the file, the resolved claude path, the session ID and the working
+directory. Command substitution's result is
 not parsed again, and `--` ends claude's options: [command-center.md](command-center.md#command-center-subprocess-execution)
 records that claude's parser scans all of argv for options, so a prompt beginning with `-` needs it.
 Keeping the instruction out of tmux's arguments matters beyond parsing: a tmux server's process

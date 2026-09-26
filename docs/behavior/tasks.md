@@ -203,6 +203,10 @@ created: the task is opened from the dashboard like any other, when someone want
   labels — are known before claude has written anything. The instruction is claude's single
   argument after `--`: one that begins with `-` is still the instruction. Slash commands are not
   disabled; the session is the operator's own.
+- **claude is started in the working directory by the command inside the tmux session**, not by
+  tmux's `-c`: tmux expands `-c`'s value as a format, so a directory holding `#` (`#S`, `##`) would
+  have become a different path, and tmux starts in the home directory when that path does not
+  exist — while reporting success.
 - **The tmux session is named `task-` and the first eight characters of the session ID.** If a tmux
   session of that name already exists on the host, the task is not started, and the existing
   session is neither attached nor replaced.
@@ -243,14 +247,21 @@ environment's claude stopped at its first-run screen). Scenario J21 is the manua
 - **It runs `claude --resume=<id>`** in the working directory that session's conversation log
   records, in a new detached tmux session named like a new task's: `task-` and the first eight
   characters of the session ID. A session whose log records no working directory, or one the
-  remote-path rule refuses, is not resumed. As for a new task, an existing tmux session of that name
-  refuses the resume.
+  remote-path rule refuses, is not resumed.
+- **A tmux session of that name that no agent runs in gets claude as a new window.** A pane opened
+  on the task attaches with `tmux new-session -A`, so when that pane is recreated after claude has
+  exited — a `Reconnect`, or the automatic reconnect after an SSH drop — it creates a session of the
+  task's name holding a shell. When the collection the resume makes finds no running task (claude,
+  codex, or one whose state could not be read) inside that session, claude is started as a new window
+  of it: the shell's window is left as it is, and the attached pane shows claude. When a running task
+  is inside it, the resume is refused, as a new task is refused whenever the name is taken.
 - **The session ID is passed in the `=` form.** `--resume` takes an optional value, and a separate
   argument beginning with `-` would be read as an option; `--resume` also accepts a session title,
   which is why only a UUID is accepted.
 - **The task keeps its session ID**, so its record is unchanged: a task marked done that is resumed
   stays marked done and shows the state it runs in, and returns to Done when it stops.
-- A host restart stops tmux as well as claude, so resuming always creates a new tmux session.
+- A host restart stops tmux as well as claude, so resuming creates a new tmux session — or, when a
+  pane was reconnected first, adds claude to the session that pane created.
 - The dashboard selects the resumed task, and it shows as running once a collection finds it.
 
 ### Opening a task
