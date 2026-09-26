@@ -173,9 +173,11 @@ collection. The choices made while building it:
   rather than the server checking it against the config. The value only claims a pane, so it opens
   one only when that pane is a `local` pane (panemux host) or an `ssh` pane on the task's
   connection.
-- **Only the agent's own environment is read, and only on Linux** (`/proc/<pid>/environ`). The way
-  to read another process's environment on macOS was not verified when this was built, so macOS
-  hosts report no pane ID rather than relying on an unchecked method.
+- **Only the agent's own environment is read, and only on Linux** (`/proc/<pid>/environ`). On
+  macOS (2026-09-26), a `sleep 120` started with `PANEMUX_PANE_ID=test-1` was listed by
+  `ps -E -p <pid> -o command=` and by `ps eww -p <pid> -o command=` as `sleep 120` alone, without
+  the variable. No other way to read another process's environment on macOS was verified, so
+  macOS hosts report no pane ID rather than relying on an unchecked method.
 - **Process ancestry was not used instead.** Matching an agent's parent chain against a local
   pane's shell pid would work without reading environments on the panemux host, but the pid of an
   `ssh` pane's remote shell is not known to panemux, and an agent that detached from its shell

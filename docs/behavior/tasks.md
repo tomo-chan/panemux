@@ -153,7 +153,8 @@ The pane that belongs to a task is found in the browser from the current workspa
   `PANEMUX_PANE_ID` it carries — inherited by whatever started the tmux server — is ignored.
 - Collection reads the variable from the agent's own process environment, not a parent's, and only
   on Linux hosts (`/proc/<pid>/environ`). On other hosts nothing is reported and an agent outside
-  tmux cannot be opened; macOS has not been checked yet.
+  tmux cannot be opened. On macOS, `ps -E` and `ps eww` did not show the variable (see the
+  [decision log](../DECISIONLOG.md#opening-an-agent-outside-tmux-through-panemux_pane_id-2026-09-26-issue-254)).
 - The environment is the one the process was started with: changing the variable afterwards inside
   a running agent has no effect.
 - The value is untrusted, since any process of the user can set it. Collection keeps only a value
