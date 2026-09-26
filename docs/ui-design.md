@@ -327,22 +327,32 @@ terminal that had focus cannot receive what is typed into the dashboard.
   host whose connection is still coming up; then when the board was last updated, `Refresh`, and
   `Workspaces`. A long host error is truncated in the chip and shown in full as its tooltip.
 - **Filter bar.** Text filter over directory, branch, PR number and session ID; rows split by none,
-  host, or repository; a host filter.
+  host, label, or repository; a host filter; a label filter listing every label on the board; and a
+  `Done column` checkbox, off by default.
 - **Kanban.** Columns in the order a person should look at them: Waiting for input (highlighted in
-  gold, "Needs you"), Working, Idle, Running / unknown, Stopped. Column headers stay visible while
-  the board scrolls, and each column is split into the chosen rows, with the catch-all row ("Not in a
-  Git repository") last.
+  gold, "Needs you"), Working, Idle, Running / unknown, Stopped, and Done when the checkbox asks for
+  it. A task marked done sits in Done only while it is stopped, so with the column hidden a finished
+  task leaves the board rather than crowding Stopped; one that runs again stays in its state's
+  column. Column headers stay visible while the board scrolls, and each column is split into the
+  chosen rows, with the catch-all row ("Not in a Git repository", "No label") last. Split by label, a
+  task with two labels appears in both rows.
 - **Cards.** A left border in the state's color; host, agent and how long the task has been in its
   state; the working directory's last segment as the title (there is no summary yet) with the full
   directory under it; for a waiting task its reason and "open the pane to respond"; repository,
-  branch and PR link (new tab); and at the bottom where the task runs with its `Open` / `Go to pane`
-  button. A task that cannot be opened shows why instead of a button. The card is a pointer target
+  branch and PR link (new tab); its labels as colored tags, each label always the same color; a
+  green `Done` tag in the meta line for a task marked done that is running again; and at the bottom
+  where the task runs with its `Open` / `Go to pane` button. A task that cannot be opened shows why instead of a button. The card is a pointer target
   for selection, and its title is a button, so the card never nests its links and buttons inside
   another interactive element.
 - **Detail panel.** Fixed to the window height at the right. Its head — state, host, agent, start,
-  title, waiting reason, and the open action or the reason there is none — stays in place, and only
-  the body below scrolls: state notes, links, the chain from task to agent to tmux session to pane
-  to workspace, and the directory and session ID. At 1000px and narrower it slides over the board
+  title, waiting reason, the open action or the reason there is none, and `Mark done` or
+  `Mark not done` — stays in place, and only the body below scrolls: state notes, links, labels, the
+  chain from task to agent to tmux session to pane to workspace, and the directory and session ID.
+  `Mark done` asks first, inside the panel ("It will only show in the Done column"), because the
+  task then leaves the board while the Done column is hidden; `Mark not done` does not ask. Labels
+  are removed with the `×` on each and added with a text box and `Add`. A save that fails shows its
+  reason in the head and keeps what was typed. A task without a session ID offers neither, and says
+  so. At 1000px and narrower it slides over the board
   with a close button.
 - **After opening.** The dashboard closes, the pane takes focus, and it is outlined in the
   interactive blue for about two seconds (a steady outline with reduced motion).
@@ -356,6 +366,10 @@ State colors:
 | Idle, Running | `#8fa6c4` |
 | Unknown | `#c586c0` |
 | Stopped | `#80858d` |
+| Done | `#7fae6a` |
+
+Label colors come from the mock's palette (`#569cd6`, `#4ec9b0`, `#9cdcfe`, `#d7a26b`, `#b48ead`,
+`#c678dd`, `#8a9199`, `#e06c6c`), picked by a hash of the label so a label keeps its color.
 
 ---
 

@@ -28,12 +28,20 @@ type taskGitInfo struct {
 
 type taskResponse struct {
 	Git *taskGitInfo `json:"git,omitempty"`
+	// Labels and Done are what a person recorded about the task on the
+	// dashboard (tasks.RecordStore). Done does not change State: a task
+	// marked done that is running again reports the state it is in.
+	Labels []string `json:"labels,omitempty"`
 	tasks.Task
+	Done bool `json:"done,omitempty"`
 }
 
 type tasksResponse struct {
-	Hosts []tasks.HostResult `json:"hosts"`
-	Tasks []taskResponse     `json:"tasks"`
+	// RecordsError is why the task record file could not be read. The tasks
+	// are still listed, without their records.
+	RecordsError string             `json:"records_error,omitempty"`
+	Hosts        []tasks.HostResult `json:"hosts"`
+	Tasks        []taskResponse     `json:"tasks"`
 }
 
 type taskGitCacheEntry struct {
@@ -126,6 +134,11 @@ func (h *Handler) GetTasks(w http.ResponseWriter, r *http.Request) {
 	resp := tasksResponse{Hosts: snapshot.Hosts, Tasks: make([]taskResponse, 0, len(snapshot.Tasks))}
 	for _, task := range snapshot.Tasks {
 		resp.Tasks = append(resp.Tasks, taskResponse{Task: task, Git: taskGitFor(task, git[taskGitKey(task.Host, task.CWD)])})
+	}
+	if records, err := h.taskRecords.Records(); err != nil {
+		resp.RecordsError = err.Error()
+	} else {
+		applyTaskRecords(resp.Tasks, records)
 	}
 	writeJSON(w, resp)
 }

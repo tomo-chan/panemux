@@ -373,6 +373,10 @@ export const TaskSchema = z.object({
   pid: z.number().int().positive().optional(),
   location: TaskLocationSchema,
   git: TaskGitSchema.optional(),
+  // What a person recorded on the dashboard (issue #256). Only a task with a
+  // session_id can carry them; done does not change state.
+  done: z.boolean().optional(),
+  labels: z.array(z.string()).optional(),
 })
 
 export type Task = z.infer<typeof TaskSchema>
@@ -389,6 +393,23 @@ export type TaskHost = z.infer<typeof TaskHostSchema>
 export const TasksResponseSchema = z.object({
   hosts: z.array(TaskHostSchema),
   tasks: z.array(TaskSchema),
+  // Why the task record file could not be read; the tasks come without records.
+  records_error: z.string().optional(),
 })
 
 export type TasksResponse = z.infer<typeof TasksResponseSchema>
+
+// ── Task dashboard: PUT /api/tasks/records ─────────────────────────────────
+//
+// The request body and the response have the same shape. The response always
+// carries done and labels, so the dashboard applies it to the task as it is.
+
+export const TaskRecordSchema = z.object({
+  host: z.string(),
+  agent: z.string(),
+  session_id: z.string().min(1),
+  done: z.boolean(),
+  labels: z.array(z.string()),
+})
+
+export type TaskRecord = z.infer<typeof TaskRecordSchema>

@@ -25,6 +25,7 @@ import {
   BoardMessageSchema,
   BoardMessagesResponseSchema,
   TasksResponseSchema,
+  TaskRecordSchema,
 } from './index'
 
 describe('TasksResponseSchema', () => {
@@ -88,10 +89,46 @@ describe('TasksResponseSchema', () => {
     expect(result.success).toBe(true)
   })
 
+  it('accepts what a person recorded about a task, and a record file the server could not read', () => {
+    const result = TasksResponseSchema.safeParse({
+      hosts: [],
+      tasks: [{ ...task, done: true, labels: ['payment', 'sprint 42', '決済'] }],
+      records_error: 'parsing task record file: unexpected end of JSON input',
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects labels that are not a list of strings, and a done that is not a boolean', () => {
+    expect(TasksResponseSchema.safeParse({ hosts: [], tasks: [{ ...task, labels: 'payment' }] }).success).toBe(false)
+    expect(TasksResponseSchema.safeParse({ hosts: [], tasks: [{ ...task, labels: [1] }] }).success).toBe(false)
+    expect(TasksResponseSchema.safeParse({ hosts: [], tasks: [{ ...task, done: 'yes' }] }).success).toBe(false)
+  })
+
   it('rejects a git link that is not a URL', () => {
     expect(TasksResponseSchema.safeParse({
       hosts: [], tasks: [{ ...task, git: { pr_url: 'javascript:alert(1)' } }],
     }).success).toBe(false)
+  })
+})
+
+describe('TaskRecordSchema', () => {
+  const record = { host: 'build-box', agent: 'claude', session_id: '3d7702fe', done: false, labels: [] }
+
+  it('accepts a record, including an empty one', () => {
+    expect(TaskRecordSchema.safeParse(record).success).toBe(true)
+    expect(TaskRecordSchema.safeParse({ ...record, host: '', done: true, labels: ['infra'] }).success).toBe(true)
+  })
+
+  it('requires every field, since the dashboard applies the response as it is', () => {
+    for (const key of Object.keys(record)) {
+      const partial: Record<string, unknown> = { ...record }
+      delete partial[key]
+      expect(TaskRecordSchema.safeParse(partial).success, key).toBe(false)
+    }
+  })
+
+  it('rejects an empty session ID', () => {
+    expect(TaskRecordSchema.safeParse({ ...record, session_id: '' }).success).toBe(false)
   })
 })
 

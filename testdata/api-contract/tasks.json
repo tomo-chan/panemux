@@ -20,8 +20,13 @@
     {
       "agent": "claude",
       "cwd": "/workspace/user/panemux",
+      "done": true,
       "host": "",
       "id": "local:claude:7c21e0a4",
+      "labels": [
+        "dashboard",
+        "enhancement"
+      ],
       "location": {
         "attachable": true,
         "kind": "tmux",
@@ -94,6 +99,9 @@
       },
       "host": "build-box",
       "id": "ssh:build-box:claude:3d7702fe",
+      "labels": [
+        "infra"
+      ],
       "location": {
         "attachable": false,
         "kind": "tmux",

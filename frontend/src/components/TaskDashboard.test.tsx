@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { TaskDashboard } from './TaskDashboard'
 import type { TasksState } from '../hooks/useTasks'
@@ -59,6 +59,7 @@ function tasksState(overrides: Partial<TasksState> = {}): TasksState {
     updatedAt: NOW - 8000,
     refresh: vi.fn().mockResolvedValue(undefined),
     reconnect: vi.fn().mockResolvedValue(undefined),
+    saveRecord: vi.fn().mockResolvedValue(null),
     ...overrides,
   }
 }
@@ -222,5 +223,151 @@ describe('TaskDashboard', () => {
     renderDashboard(tasksState({ data: null, loading: true, updatedAt: null }))
     expect(screen.getByText('Loading…')).toBeInTheDocument()
     expect(screen.getAllByText('None', { selector: '.td-empty' })).toHaveLength(5)
+  })
+})
+
+describe('TaskDashboard done and labels', () => {
+  const recorded: TasksResponse = {
+    hosts: [{ name: '', status: 'ok' }, { name: 'dev-server', status: 'ok' }],
+    tasks: [
+      task({ id: 'busy-done', state: 'busy', cwd: '/workspace/user/alpha', done: true, labels: ['payment', 'sprint-42'] }),
+      task({ id: 'stop-done', state: 'stop', cwd: '/workspace/user/beta', done: true,
+        location: { kind: 'none', attachable: false } }),
+      task({ id: 'stop-open', state: 'stop', host: 'dev-server', cwd: '/remote/home/demo/gamma', labels: ['sprint-42'],
+        location: { kind: 'none', attachable: false } }),
+      task({ id: 'codex', state: 'run', agent: 'codex', session_id: undefined, cwd: '/workspace/user/delta' }),
+    ],
+  }
+  const detail = () => screen.getByRole('complementary', { name: 'Task details' })
+  const cardIds = () => screen.queryAllByTestId(/^task-card-/).map((el) => el.dataset.testid?.replace('task-card-', ''))
+
+  it('hides the Done column and the tasks in it until asked to show them', () => {
+    renderDashboard(tasksState({ data: recorded }))
+    expect(screen.queryByRole('region', { name: 'Done' })).not.toBeInTheDocument()
+    expect(cardIds()).toEqual(['busy-done', 'codex', 'stop-open'])
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Show Done column' }))
+    const done = screen.getByRole('region', { name: 'Done' })
+    expect(within(done).getByTestId('task-card-stop-done')).toBeInTheDocument()
+    expect(within(done).getByRole('heading', { level: 2 })).toHaveTextContent('Done1')
+    expect(within(screen.getByRole('region', { name: 'Stopped' })).queryByTestId('task-card-stop-done')).toBeNull()
+  })
+
+  it('keeps a running task marked done in its state column, marked as done', () => {
+    renderDashboard(tasksState({ data: recorded }))
+    const card = within(screen.getByRole('region', { name: 'Working' })).getByTestId('task-card-busy-done')
+    expect(within(card).getByText('Done')).toBeInTheDocument()
+  })
+
+  it('shows labels on the card', () => {
+    renderDashboard(tasksState({ data: recorded }))
+    const labels = within(screen.getByTestId('task-card-busy-done')).getByRole('list', { name: 'Labels' })
+    expect(within(labels).getAllByRole('listitem').map((el) => el.textContent)).toEqual(['payment', 'sprint-42'])
+    expect(within(screen.getByTestId('task-card-codex')).queryByRole('list', { name: 'Labels' })).toBeNull()
+  })
+
+  it('filters by label and splits rows by label, a task with two labels in each', () => {
+    renderDashboard(tasksState({ data: recorded }))
+    const labelFilter = screen.getByRole('combobox', { name: 'Show label' })
+    expect(within(labelFilter).getAllByRole('option').map((el) => el.textContent)).toEqual(['All', 'payment', 'sprint-42'])
+
+    fireEvent.change(labelFilter, { target: { value: 'sprint-42' } })
+    expect(cardIds()).toEqual(['busy-done', 'stop-open'])
+    fireEvent.change(labelFilter, { target: { value: 'payment' } })
+    expect(cardIds()).toEqual(['busy-done'])
+
+    fireEvent.change(labelFilter, { target: { value: '\u0000all' } })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Split rows by' }), { target: { value: 'label' } })
+    const working = screen.getByRole('region', { name: 'Working' })
+    expect(within(working).getAllByRole('heading', { level: 3 }).map((el) => el.textContent)).toEqual(['payment', 'sprint-42'])
+    expect(within(working).getAllByTestId('task-card-busy-done')).toHaveLength(2)
+    expect(within(screen.getByRole('region', { name: 'Running / unknown' })).getByRole('heading', { level: 3 }))
+      .toHaveTextContent('No label')
+  })
+
+  it('marks a task done only after it is confirmed', async () => {
+    const saveRecord = vi.fn().mockResolvedValue(null)
+    renderDashboard(tasksState({ data: recorded, saveRecord }))
+    fireEvent.click(screen.getByTestId('task-card-stop-open'))
+
+    fireEvent.click(within(detail()).getByRole('button', { name: 'Mark done' }))
+    expect(saveRecord).not.toHaveBeenCalled()
+    expect(detail()).toHaveTextContent('Mark this task done? It will only show in the Done column.')
+    fireEvent.click(within(detail()).getByRole('button', { name: 'Cancel' }))
+    expect(detail()).not.toHaveTextContent('Mark this task done?')
+    expect(saveRecord).not.toHaveBeenCalled()
+
+    fireEvent.click(within(detail()).getByRole('button', { name: 'Mark done' }))
+    await act(async () => {
+      fireEvent.click(within(detail()).getByRole('button', { name: 'Confirm: mark done' }))
+    })
+    expect(saveRecord).toHaveBeenCalledWith(expect.objectContaining({ id: 'stop-open' }), { done: true, labels: ['sprint-42'] })
+    expect(detail()).not.toHaveTextContent('Mark this task done?')
+  })
+
+  it('marks a done task not done without asking', async () => {
+    const saveRecord = vi.fn().mockResolvedValue(null)
+    renderDashboard(tasksState({ data: recorded, saveRecord }))
+    fireEvent.click(screen.getByTestId('task-card-busy-done'))
+    expect(within(detail()).queryByRole('button', { name: 'Mark done' })).toBeNull()
+
+    await act(async () => {
+      fireEvent.click(within(detail()).getByRole('button', { name: 'Mark not done' }))
+    })
+    expect(saveRecord).toHaveBeenCalledWith(expect.objectContaining({ id: 'busy-done' }),
+      { done: false, labels: ['payment', 'sprint-42'] })
+  })
+
+  it('adds and removes labels in the detail panel', async () => {
+    const saveRecord = vi.fn().mockResolvedValue(null)
+    renderDashboard(tasksState({ data: recorded, saveRecord }))
+    fireEvent.click(screen.getByTestId('task-card-busy-done'))
+
+    const input = within(detail()).getByRole('textbox', { name: 'Add a label' })
+    const add = within(detail()).getByRole('button', { name: 'Add' })
+    expect(add).toBeDisabled()
+    fireEvent.change(input, { target: { value: '   ' } })
+    expect(add).toBeDisabled()
+
+    fireEvent.change(input, { target: { value: ' infra ' } })
+    await act(async () => {
+      fireEvent.click(add)
+    })
+    expect(saveRecord).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'busy-done' }),
+      { done: true, labels: ['payment', 'sprint-42', 'infra'] })
+    expect(input).toHaveValue('')
+
+    await act(async () => {
+      fireEvent.click(within(detail()).getByRole('button', { name: 'Remove label payment' }))
+    })
+    expect(saveRecord).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'busy-done' }),
+      { done: true, labels: ['sprint-42'] })
+  })
+
+  it('shows why a save failed and keeps what was typed', async () => {
+    const saveRecord = vi.fn().mockResolvedValue('invalid task record: label is longer than 32 characters')
+    renderDashboard(tasksState({ data: recorded, saveRecord }))
+    fireEvent.click(screen.getByTestId('task-card-stop-open'))
+
+    const input = within(detail()).getByRole('textbox', { name: 'Add a label' })
+    fireEvent.change(input, { target: { value: 'x'.repeat(40) } })
+    await act(async () => {
+      fireEvent.submit(input)
+    })
+    expect(within(detail()).getByRole('alert')).toHaveTextContent('Could not save: invalid task record: label is longer')
+    expect(input).toHaveValue('x'.repeat(40))
+  })
+
+  it('offers neither done nor labels for a task without a session id', () => {
+    renderDashboard(tasksState({ data: recorded }))
+    fireEvent.click(screen.getByTestId('task-card-codex'))
+    expect(within(detail()).queryByRole('button', { name: 'Mark done' })).toBeNull()
+    expect(within(detail()).queryByRole('textbox', { name: 'Add a label' })).toBeNull()
+    expect(detail()).toHaveTextContent('Only a task with a session ID can be marked done or labeled.')
+  })
+
+  it('reports a record file the server could not read', () => {
+    renderDashboard(tasksState({ data: { ...recorded, records_error: 'parsing task record file: bad' } }))
+    expect(screen.getByRole('alert')).toHaveTextContent('Done and labels could not be loaded: parsing task record file: bad')
   })
 })

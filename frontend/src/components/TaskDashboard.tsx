@@ -4,22 +4,28 @@ import type { TasksState } from '../hooks/useTasks'
 import { TASKS_POLL_INTERVAL_MS } from '../hooks/useTasks'
 import { TERMINAL_FONT_FAMILY } from '../utils/fonts'
 import {
-  TASK_COLUMNS,
   TASK_STATE_LABELS,
+  allLabels,
+  canRecord,
+  columnForTask,
   filterTasks,
   findTaskPane,
   formatElapsed,
   groupIntoLanes,
   hostLabel,
+  labelColor,
   runningCount,
   taskOpenAction,
   taskTitle,
+  visibleColumns,
 } from '../utils/taskBoard'
 import type { LaneMode, TaskOpenAction, TaskPaneRef } from '../utils/taskBoard'
 
 // Layer 1 of issue #252: every agent session on every host, as a kanban by
-// state, with a detail panel on the right. It only reads — opening a task is
-// App's job (onOpenTask), because that means creating or focusing a pane.
+// state, with a detail panel on the right. Besides reading, it records what a
+// person says about a task — done, and its labels (issue #256) — through
+// tasksState.saveRecord. Opening a task is App's job (onOpenTask), because
+// that means creating or focusing a pane.
 
 const STATE_COLORS: Record<Task['state'], string> = {
   wait: '#e2b86b',
@@ -36,11 +42,14 @@ const COLUMN_COLORS: Record<string, string> = {
   idle: STATE_COLORS.idle,
   other: STATE_COLORS.unknown,
   stop: STATE_COLORS.stop,
+  done: '#7fae6a',
 }
 
 // A host select value no ssh_connections key can collide with; '' is the
 // panemux host, so it cannot stand for "every host".
 const ALL_HOSTS = '\u0000all'
+// Likewise for the label select; a label cannot contain a control character.
+const ALL_LABELS = '\u0000all'
 
 export interface TaskDashboardProps {
   tasksState: TasksState
@@ -67,10 +76,12 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
   shortcut,
   now = Date.now,
 }) => {
-  const { data, error, loading, updatedAt, refresh, reconnect } = tasksState
+  const { data, error, loading, updatedAt, refresh, reconnect, saveRecord } = tasksState
   const [query, setQuery] = useState('')
   const [laneMode, setLaneMode] = useState<LaneMode>('none')
   const [hostFilter, setHostFilter] = useState(ALL_HOSTS)
+  const [labelFilter, setLabelFilter] = useState(ALL_LABELS)
+  const [showDone, setShowDone] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [detailOpen, setDetailOpen] = useState(false)
   const nowMs = useTicker(now)
@@ -84,9 +95,12 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
 
   const tasks = useMemo(() => data?.tasks ?? [], [data])
   const hosts = data?.hosts ?? []
+  const labels = useMemo(() => allLabels(tasks), [tasks])
+  // A label no task carries any more falls back to every label.
+  const activeLabel = labelFilter !== ALL_LABELS && labels.includes(labelFilter) ? labelFilter : null
   const visible = useMemo(
-    () => filterTasks(tasks, { query, host: hostFilter === ALL_HOSTS ? null : hostFilter }),
-    [hostFilter, query, tasks],
+    () => filterTasks(tasks, { query, host: hostFilter === ALL_HOSTS ? null : hostFilter, label: activeLabel }),
+    [activeLabel, hostFilter, query, tasks],
   )
   const panes = useMemo(() => {
     const byTask = new Map<string, TaskPaneRef | null>()
@@ -138,6 +152,11 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
           Failed to update tasks: {error}
         </div>
       )}
+      {data?.records_error && (
+        <div role="alert" className="td-alert">
+          Done and labels could not be loaded: {data.records_error}
+        </div>
+      )}
 
       <div className="td-tools">
         <input
@@ -152,6 +171,7 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
           <select aria-label="Split rows by" value={laneMode} onChange={(event) => setLaneMode(event.target.value as LaneMode)}>
             <option value="none">None</option>
             <option value="host">Host</option>
+            <option value="label">Label</option>
             <option value="repo">Repository</option>
           </select>
         </label>
@@ -166,13 +186,33 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
             ))}
           </select>
         </label>
+        <label>
+          Label
+          <select aria-label="Show label" value={activeLabel ?? ALL_LABELS} onChange={(event) => setLabelFilter(event.target.value)}>
+            <option value={ALL_LABELS}>All</option>
+            {labels.map((label) => (
+              <option key={label} value={label}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <input
+            type="checkbox"
+            aria-label="Show Done column"
+            checked={showDone}
+            onChange={(event) => setShowDone(event.target.checked)}
+          />
+          Done column
+        </label>
       </div>
 
       <div className="td-main">
         <div className="td-board">
           <div className="td-cols">
-            {TASK_COLUMNS.map((column) => {
-              const inColumn = visible.filter((task) => column.states.includes(task.state))
+            {visibleColumns(showDone).map((column) => {
+              const inColumn = visible.filter((task) => columnForTask(task) === column.id)
               return (
                 <section key={column.id} className="td-col" data-column={column.id} aria-label={column.title}>
                   <h2 className="td-colh">
@@ -211,6 +251,7 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
           open={detailOpen}
           nowMs={nowMs}
           onOpen={open}
+          onSaveRecord={saveRecord}
           onClose={() => setDetailOpen(false)}
         />
       </div>
@@ -299,6 +340,7 @@ const TaskCard: React.FC<TaskCardProps> = ({ task, pane, selected, nowMs, onSele
       <div className="td-meta">
         <span className="td-meta-host">{hostLabel(task.host)}</span>
         <span>{task.agent}</span>
+        {task.done && <span className="td-done-badge">Done</span>}
         {age && (
           <span className="td-meta-age" title={`${TASK_STATE_LABELS[task.state]} for ${age}`}>
             {age}
@@ -315,6 +357,7 @@ const TaskCard: React.FC<TaskCardProps> = ({ task, pane, selected, nowMs, onSele
         </div>
       )}
       <GitLinks task={task} />
+      <LabelChips labels={task.labels ?? []} />
       <div className="td-foot">
         <span className="td-where" data-miss={action.kind !== 'goto'}>
           {whereLabel(task, pane)}
@@ -340,6 +383,36 @@ const GitLinks: React.FC<{ task: Task }> = ({ task }) => {
         </a>
       )}
     </div>
+  )
+}
+
+interface LabelChipsProps {
+  labels: string[]
+  /** Offers a remove button on each label when given. */
+  onRemove?: (label: string) => void
+  disabled?: boolean
+}
+
+const LabelChips: React.FC<LabelChipsProps> = ({ labels, onRemove, disabled = false }) => {
+  if (labels.length === 0) return null
+  return (
+    <ul className="td-labels" aria-label="Labels">
+      {labels.map((label) => (
+        <li key={label} className="td-label" style={{ '--td-lc': labelColor(label) } as React.CSSProperties}>
+          {label}
+          {onRemove && (
+            <button
+              type="button"
+              aria-label={`Remove label ${label}`}
+              disabled={disabled}
+              onClick={() => onRemove(label)}
+            >
+              ×
+            </button>
+          )}
+        </li>
+      ))}
+    </ul>
   )
 }
 
@@ -385,10 +458,24 @@ interface TaskDetailProps {
   open: boolean
   nowMs: number
   onOpen: (task: Task) => void
+  onSaveRecord: TasksState['saveRecord']
   onClose: () => void
 }
 
-const TaskDetail: React.FC<TaskDetailProps> = ({ task, pane, open, nowMs, onOpen, onClose }) => {
+const TaskDetail: React.FC<TaskDetailProps> = ({ task, pane, open, nowMs, onOpen, onSaveRecord, onClose }) => {
+  const [confirmingDone, setConfirmingDone] = useState(false)
+  const [labelInput, setLabelInput] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  // What was typed or asked belongs to the task it was typed for.
+  const [editingId, setEditingId] = useState(task?.id)
+  if (editingId !== task?.id) {
+    setEditingId(task?.id)
+    setConfirmingDone(false)
+    setLabelInput('')
+    setSaveError(null)
+  }
+
   if (!task) {
     return (
       <aside className="td-detail" data-open={open} aria-label="Task details">
@@ -402,6 +489,27 @@ const TaskDetail: React.FC<TaskDetailProps> = ({ task, pane, open, nowMs, onOpen
   const action = taskOpenAction(task, pane)
   const age = formatElapsed(task.status_since, nowMs)
   const started = formatElapsed(task.started_at, nowMs)
+  const recordable = canRecord(task)
+  const labels = task.labels ?? []
+  const done = task.done ?? false
+
+  const save = async (record: { done: boolean; labels: string[] }): Promise<boolean> => {
+    setSaving(true)
+    const failure = await onSaveRecord(task, record)
+    setSaving(false)
+    setSaveError(failure)
+    return failure === null
+  }
+  const markDone = async () => {
+    if (await save({ done: true, labels })) setConfirmingDone(false)
+  }
+  const addLabel = async (event: React.FormEvent) => {
+    event.preventDefault()
+    const label = labelInput.trim()
+    if (!label) return
+    if (await save({ done, labels: [...labels, label] })) setLabelInput('')
+  }
+
   return (
     <aside className="td-detail" data-open={open} aria-label="Task details">
       <div className="td-dhead">
@@ -426,8 +534,40 @@ const TaskDetail: React.FC<TaskDetailProps> = ({ task, pane, open, nowMs, onOpen
         )}
         <div className="td-actions">
           <OpenButton task={task} action={action} onOpen={onOpen} />
+          {recordable && !done && (
+            <button type="button" className="td-btn" disabled={saving} onClick={() => setConfirmingDone(true)}>
+              Mark done
+            </button>
+          )}
+          {recordable && done && (
+            <button type="button" className="td-btn" disabled={saving} onClick={() => void save({ done: false, labels })}>
+              Mark not done
+            </button>
+          )}
           {action.kind === 'unavailable' && <p className="td-note">Cannot open in a pane: {action.reason}.</p>}
         </div>
+        {confirmingDone && !done && (
+          <div className="td-confirm">
+            <span>Mark this task done? It will only show in the Done column.</span>
+            <button
+              type="button"
+              className="td-btn td-btn-sm td-btn-primary"
+              aria-label="Confirm: mark done"
+              disabled={saving}
+              onClick={() => void markDone()}
+            >
+              Mark done
+            </button>
+            <button type="button" className="td-btn td-btn-sm" onClick={() => setConfirmingDone(false)}>
+              Cancel
+            </button>
+          </div>
+        )}
+        {saveError && (
+          <div role="alert" className="td-alert td-alert-inline">
+            Could not save: {saveError}
+          </div>
+        )}
       </div>
       <div className="td-dbody">
         <StateNote task={task} />
@@ -464,6 +604,35 @@ const TaskDetail: React.FC<TaskDetailProps> = ({ task, pane, open, nowMs, onOpen
             </dl>
           </section>
         )}
+        <section className="td-sec">
+          <h3>Labels</h3>
+          {recordable ? (
+            <>
+              {labels.length > 0 ? (
+                <LabelChips
+                  labels={labels}
+                  disabled={saving}
+                  onRemove={(label) => void save({ done, labels: labels.filter((l) => l !== label) })}
+                />
+              ) : (
+                <p className="td-note">No labels.</p>
+              )}
+              <form className="td-add-label" onSubmit={(event) => void addLabel(event)}>
+                <input
+                  aria-label="Add a label"
+                  placeholder="Add a label"
+                  value={labelInput}
+                  onChange={(event) => setLabelInput(event.target.value)}
+                />
+                <button type="submit" className="td-btn td-btn-sm" disabled={saving || labelInput.trim() === ''}>
+                  Add
+                </button>
+              </form>
+            </>
+          ) : (
+            <p className="td-note">Only a task with a session ID can be marked done or labeled.</p>
+          )}
+        </section>
         <section className="td-sec">
           <h3>Chain</h3>
           <ul className="td-chain">

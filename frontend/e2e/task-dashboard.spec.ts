@@ -61,3 +61,40 @@ test('opens a session running in tmux as a pane attached to it', async ({ page, 
   await expect(card).toContainText('pane e2e-task-dashboard · Default')
   await expect(card.getByRole('button', { name: /^Go to pane/ })).toBeVisible()
 })
+
+// Done and labels are written to ~/.config/panemux/tasks.json under the
+// fixture's HOME, so a reload reads them back from the file rather than from
+// the page's memory. The test clears its record at the end so the other
+// tests keep seeing e2e-stopped in the Stopped column.
+test('labels a task and marks it done, and both survive a reload', async ({ page, request }) => {
+  const clear = () =>
+    request.put('/api/tasks/records', {
+      data: { host: '', agent: 'claude', session_id: 'e2e-stopped', done: false, labels: [] },
+    })
+  try {
+    await openDashboard(page)
+    const stopped = page.getByRole('region', { name: 'Stopped' })
+    const card = stopped.getByTestId('task-card-local:claude:e2e-stopped')
+    await card.click()
+
+    const detail = page.getByRole('complementary', { name: 'Task details' })
+    await detail.getByRole('textbox', { name: 'Add a label' }).fill('e2e-label')
+    await detail.getByRole('button', { name: 'Add' }).click()
+    await expect(card.getByRole('list', { name: 'Labels' })).toHaveText('e2e-label')
+
+    await detail.getByRole('button', { name: 'Mark done' }).click()
+    await detail.getByRole('button', { name: 'Confirm: mark done' }).click()
+    await expect(card).toHaveCount(0)
+
+    await page.reload()
+    await page.getByRole('button', { name: /^Tasks/ }).click()
+    await page.getByRole('checkbox', { name: 'Show Done column' }).check()
+    const done = page.getByRole('region', { name: 'Done' }).getByTestId('task-card-local:claude:e2e-stopped')
+    await expect(done.getByRole('list', { name: 'Labels' })).toHaveText('e2e-label')
+
+    await page.getByRole('combobox', { name: 'Split rows by' }).selectOption('label')
+    await expect(page.getByRole('region', { name: 'Done' }).getByRole('heading', { level: 3 })).toHaveText('e2e-label')
+  } finally {
+    expect((await clear()).ok()).toBe(true)
+  }
+})

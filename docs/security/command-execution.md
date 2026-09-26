@@ -151,9 +151,12 @@ another user's processes are neither shown as tasks nor accepted as the live pro
 leftover state file whose pid they reused.
 
 `GET /api/tasks` and the reconnect route are unauthenticated like the rest of `/api/*`, but a GET
-that dials every host is a side effect another site could trigger with an `<img>`. Both routes
-therefore refuse a request whose `Sec-Fetch-Site` is `cross-site` or `same-site`, or whose `Origin`
-is neither the server's own nor a loopback origin (`refuseCrossSite` in `internal/api/tasks.go`).
+that dials every host is a side effect another site could trigger with an `<img>`. Both routes, and
+`PUT /api/tasks/records`, which writes the operator's record file, therefore refuse a request whose
+`Sec-Fetch-Site` is `cross-site` or `same-site`, or whose `Origin` is neither the server's own nor a
+loopback origin (`refuseCrossSite` in `internal/api/tasks.go`). The record route runs no command:
+it writes `~/.config/panemux/tasks.json` through `fileops.AtomicWrite`, and a label reaches the
+browser only as text, never as markup or a URL.
 The response itself is never readable cross-site — no CORS header is sent — so this protects the
 side effect, not the data.
 

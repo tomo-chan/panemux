@@ -153,6 +153,39 @@ while being built:
 - **The UI text is English**, like the rest of panemux's interface, although the issue's mockup is
   written in Japanese.
 
+### Stage 2: done and labels are recorded on the panemux host (2026-09-26, issue #256)
+
+Issue #252's open question 1 left where done and labels are kept, and for how long, to this stage.
+The operator decided the four points below before implementation; the rest was chosen while it was
+built.
+
+- **One file, `~/.config/panemux/tasks.json`, beside panemux's other state files** — decided with
+  the operator. Keeping it out of `config.yaml` keeps a record save from racing a layout save and
+  keeps a dotfiles-managed config free of per-session data.
+- **Records are kept until a person clears them, and a task off the list is not shown** — decided
+  with the operator. The 7-day, 50-per-host listing bound stays as stage 1 set it; a record whose
+  session left it is neither deleted nor turned into a card built from the record alone, and applies
+  again if the session is listed again. A rejected alternative was to show such records in the Done
+  column, which would have meant cards with none of what the collection knows.
+- **A task marked done that runs again shows its real state** — decided with the operator. The
+  record is not cleared automatically: that would have made `GET /api/tasks` write, and a task that
+  stops again returns to Done without being marked a second time. Always showing it in Done was the
+  other alternative, rejected because it would hide a task that is waiting for input.
+- **Only tasks with a session ID can carry a record** — decided with the operator. A pid is reused
+  after its process exits, so a record keyed by one would move to an unrelated process.
+- **Done is a field, not a state.** Issue #252's column table gives Done a `done` state; the API
+  keeps `state` as what the host reported and adds `done`, so a running task marked done still says
+  what it is doing, and the column rule ("done and stopped") lives in one place in the browser.
+- **The record's key is host, agent and session ID.** A session ID is unique only on its own host.
+- **`PUT /api/tasks/records` replaces the whole record.** The dashboard sends what it shows. A
+  collection that was already running when a record was saved had read the records before it, so
+  the browser drops that answer rather than let it put the old record back for up to 10 seconds.
+- **A file panemux cannot read is never overwritten.** It is reported in `records_error`, tasks are
+  listed without records, and writes fail until the file is fixed, so a file from a newer panemux or
+  one edited by hand is not silently replaced by an empty set.
+- **Label limits** (32 characters, 20 labels, no control characters) were chosen while it was built,
+  to keep a label a short tag on a card rather than free text.
+
 ## Agent Board
 
 ### Compatibility is checked against a real agmsg release (2026-08-23, PR #176)
