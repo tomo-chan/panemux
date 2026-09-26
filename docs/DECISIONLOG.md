@@ -112,7 +112,7 @@ documented `usage` field already stored in each pane's transcript: that is direc
 inference from private state. If added, it belongs to panemux's existing pane-inspection surface,
 not the cooperative agmsg status schema.
 
-### The own-send ledger is the model-checking pilot (2026-08, issue #168)
+### The own-send ledger is the model-checking pilot (2026-09, PR #243, issue #168)
 
 The ledger was chosen before `Relay.processRow` because it is the smallest self-contained state
 machine and had already suffered a multiset-versus-set bug. It established the TLA+, generated
