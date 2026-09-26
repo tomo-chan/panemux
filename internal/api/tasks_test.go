@@ -309,6 +309,22 @@ func TestTaskGitInfo_AGHWithoutClosingIssuesStillFindsThePR(t *testing.T) {
 	assert.Contains(t, lines[1], "--json "+prBasicFields)
 }
 
+// The repeated call finds the PR the same way the first would have: without
+// an origin, by running gh inside the directory.
+func TestTaskGitInfo_AGHWithoutClosingIssuesFindsThePRWithoutAnOrigin(t *testing.T) {
+	dir := initTempGitRepo(t)
+	out, err := exec.Command("git", "-C", dir, "remote", "remove", "origin").CombinedOutput()
+	require.NoError(t, err, string(out))
+	t.Setenv("GH_CALLS", filepath.Join(t.TempDir(), "calls"))
+
+	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
+	h.ghBinaryPath = writeFakeGHBinary(t, ghBefore272Script)
+
+	info := h.lookupTaskGit(context.Background(), "", dir, true)
+	require.NotNil(t, info)
+	assert.Equal(t, 87, info.PRNumber)
+}
+
 // A branch without a PR is the common case. gh fails then too, but not for
 // an unknown field, so it is not asked again.
 //

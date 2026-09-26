@@ -1,17 +1,50 @@
 {
   "_comment": "task_dashboard.jira_url cases shared by internal/config (TestValidate_TaskDashboardJiraURL) and frontend/src/schemas/index.test.ts. Every accepted site's browse_url must also pass the browser's HttpUrlSchema (new URL()), or one bad setting would make the browser reject the whole GET /api/tasks response. Hand-edited: add a case to both lists as needed.",
   "accepted": [
-    { "jira_url": "https://example.atlassian.net", "browse_url": "https://example.atlassian.net/browse/PAY-418" },
-    { "jira_url": "https://example.atlassian.net/", "browse_url": "https://example.atlassian.net/browse/PAY-418" },
-    { "jira_url": "https://jira.example.invalid/jira//", "browse_url": "https://jira.example.invalid/jira/browse/PAY-418" },
-    { "jira_url": "https://jira.example.invalid:8443", "browse_url": "https://jira.example.invalid:8443/browse/PAY-418" },
-    { "jira_url": "https://jira.example.invalid:1", "browse_url": "https://jira.example.invalid:1/browse/PAY-418" },
-    { "jira_url": "https://jira.example.invalid:65535", "browse_url": "https://jira.example.invalid:65535/browse/PAY-418" },
-    { "jira_url": "https://EXAMPLE.atlassian.net", "browse_url": "https://EXAMPLE.atlassian.net/browse/PAY-418" },
-    { "jira_url": "https://jira-1.example.invalid", "browse_url": "https://jira-1.example.invalid/browse/PAY-418" },
-    { "jira_url": "https://example.1a", "browse_url": "https://example.1a/browse/PAY-418" },
-    { "jira_url": "https://127.0.0.1", "browse_url": "https://127.0.0.1/browse/PAY-418" },
-    { "jira_url": "https://[::1]:8443", "browse_url": "https://[::1]:8443/browse/PAY-418" }
+    {
+      "jira_url": "https://example.atlassian.net",
+      "browse_url": "https://example.atlassian.net/browse/PAY-418"
+    },
+    {
+      "jira_url": "https://example.atlassian.net/",
+      "browse_url": "https://example.atlassian.net/browse/PAY-418"
+    },
+    {
+      "jira_url": "https://jira.example.invalid/jira//",
+      "browse_url": "https://jira.example.invalid/jira/browse/PAY-418"
+    },
+    {
+      "jira_url": "https://jira.example.invalid:8443",
+      "browse_url": "https://jira.example.invalid:8443/browse/PAY-418"
+    },
+    {
+      "jira_url": "https://jira.example.invalid:1",
+      "browse_url": "https://jira.example.invalid:1/browse/PAY-418"
+    },
+    {
+      "jira_url": "https://jira.example.invalid:65535",
+      "browse_url": "https://jira.example.invalid:65535/browse/PAY-418"
+    },
+    {
+      "jira_url": "https://EXAMPLE.atlassian.net",
+      "browse_url": "https://EXAMPLE.atlassian.net/browse/PAY-418"
+    },
+    {
+      "jira_url": "https://jira-1.example.invalid",
+      "browse_url": "https://jira-1.example.invalid/browse/PAY-418"
+    },
+    {
+      "jira_url": "https://example.1a",
+      "browse_url": "https://example.1a/browse/PAY-418"
+    },
+    {
+      "jira_url": "https://127.0.0.1",
+      "browse_url": "https://127.0.0.1/browse/PAY-418"
+    },
+    {
+      "jira_url": "https://[::1]:8443",
+      "browse_url": "https://[::1]:8443/browse/PAY-418"
+    }
   ],
   "refused": [
     "http://jira.example.invalid",
@@ -42,6 +75,7 @@
     "https://example.123",
     "https://example.0x1",
     "https://example.0X",
-    "https://[fe80::1%25eth0]"
+    "https://[fe80::1%25eth0]",
+    "https://_jira.example.invalid"
   ]
 }

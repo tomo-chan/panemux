@@ -121,6 +121,16 @@ func TestValidate_TaskDashboardJiraURL(t *testing.T) {
 	}
 }
 
+// The edges of each range a host label may use, and the byte on either side.
+func TestIsNotHostLabelRune(t *testing.T) {
+	for _, r := range "azAZ09-" {
+		assert.False(t, isNotHostLabelRune(r), "%q", r)
+	}
+	for _, r := range "`{@[/:_.é" {
+		assert.True(t, isNotHostLabelRune(r), "%q", r)
+	}
+}
+
 func TestJiraBrowseURL(t *testing.T) {
 	assert.Empty(t, TaskDashboardConfig{}.JiraBrowseURL("PAY-418"))
 }
