@@ -219,6 +219,7 @@ describe('TaskDashboard', () => {
     expect(detail).toHaveTextContent('could not be read or has an unexpected format')
   })
 
+  // efficacy:exempt unchanged by this branch; the new describe block after it falls inside its line range
   it('says it is loading before the first response', () => {
     renderDashboard(tasksState({ data: null, loading: true, updatedAt: null }))
     expect(screen.getByText('Loading…')).toBeInTheDocument()

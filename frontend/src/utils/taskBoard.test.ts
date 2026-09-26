@@ -63,6 +63,7 @@ describe('TASK_COLUMNS', () => {
     expect([...states].sort()).toEqual(['busy', 'idle', 'run', 'stop', 'unknown', 'wait'])
   })
 
+  // efficacy:exempt unchanged by this branch; the new describe block after it falls inside its line range
   it('maps codex and unreadable sessions to the same column', () => {
     expect(columnForState('run')).toBe('other')
     expect(columnForState('unknown')).toBe('other')
@@ -179,6 +180,7 @@ describe('filterTasks', () => {
     task({ id: 'c', host: 'dev-server', cwd: undefined, session_id: 'ffee0011' }),
   ]
 
+  // efficacy:exempt only the filter argument gained label: null; it pins stage 1 behavior this branch leaves as it was
   it('matches title, directory, branch, PR number and session id case-insensitively', () => {
     const ids = (query: string) => filterTasks(tasks, { query, host: null, label: null }).map((t) => t.id)
     expect(ids('')).toEqual(['a', 'b', 'c'])
@@ -191,6 +193,7 @@ describe('filterTasks', () => {
     expect(ids('nothing')).toEqual([])
   })
 
+  // efficacy:exempt only the filter argument gained label: null; it pins stage 1 behavior this branch leaves as it was
   it('filters by host, where the empty name is the panemux host', () => {
     expect(filterTasks(tasks, { query: '', host: '', label: null }).map((t) => t.id)).toEqual(['a'])
     expect(filterTasks(tasks, { query: '', host: 'dev-server', label: null }).map((t) => t.id)).toEqual(['b', 'c'])

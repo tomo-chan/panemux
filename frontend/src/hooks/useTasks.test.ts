@@ -154,6 +154,7 @@ describe('useTasks', () => {
     expect(fetchMock.mock.calls[1]).toEqual(['/api/tasks'])
   })
 
+  // efficacy:exempt unchanged by this branch; the new describe block after it falls inside its line range
   it('reports a failed reconnect', async () => {
     const fetchMock = vi.fn().mockResolvedValue(ok(payload))
     window.fetch = fetchMock
