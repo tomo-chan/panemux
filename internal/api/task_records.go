@@ -37,7 +37,11 @@ func (h *Handler) PutTaskRecord(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	if req.Host != "" {
+	// Clearing a record is allowed for any host, so the records of a host
+	// removed from ssh_connections can still be removed; only adding one
+	// needs the host to be configured.
+	clearing := !req.Done && len(req.Labels) == 0
+	if req.Host != "" && !clearing {
 		if _, ok := h.cfg.SSHConnections[req.Host]; !ok {
 			http.Error(w, tasks.ErrUnknownHost.Error(), http.StatusNotFound)
 			return

@@ -113,7 +113,8 @@ func TestPutTaskRecord_Refusals(t *testing.T) {
 		{name: "not JSON", body: `{`, wantCode: http.StatusBadRequest},
 		{name: "unknown field", body: `{"agent":"claude","session_id":"s","state":"done"}`, wantCode: http.StatusBadRequest},
 		{
-			name: "host that is not an ssh_connections key", body: `{"host":"elsewhere","agent":"claude","session_id":"s"}`,
+			name:     "host that is not an ssh_connections key",
+			body:     `{"host":"elsewhere","agent":"claude","session_id":"s","done":true}`,
 			wantCode: http.StatusNotFound, wantBody: "unknown host",
 		},
 		{
@@ -239,4 +240,25 @@ func TestGetTasks_AnUnreadableRecordFileIsReportedNotFatal(t *testing.T) {
 
 	rec := putTaskRecord(t, h, `{"host":"","agent":"claude","session_id":"run-sess","done":true}`)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code, "a file it cannot read is not overwritten")
+}
+
+// A host removed from ssh_connections keeps its records in the file. A
+// request that clears one is still accepted, so they can be removed; one
+// that adds a record is refused.
+func TestPutTaskRecord_ARemovedHostsRecordCanStillBeCleared(t *testing.T) {
+	h, path := newRecordHandler(t)
+	require.Equal(t, http.StatusOK, putTaskRecord(t, h,
+		`{"host":"dev-server","agent":"claude","session_id":"s1","done":true,"labels":["a"]}`).Code)
+	delete(h.cfg.SSHConnections, "dev-server")
+
+	rec := putTaskRecord(t, h, `{"host":"dev-server","agent":"claude","session_id":"s1","done":true}`)
+	assert.Equal(t, http.StatusNotFound, rec.Code, "a record is not added for a host that is not configured")
+
+	rec = putTaskRecord(t, h, `{"host":"dev-server","agent":"claude","session_id":"s1","done":false,"labels":[]}`)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.JSONEq(t,
+		`{"host":"dev-server","agent":"claude","session_id":"s1","done":false,"labels":[]}`, rec.Body.String())
+	stored, err := tasks.NewRecordStore(path).Records()
+	require.NoError(t, err)
+	assert.Empty(t, stored)
 }

@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -91,15 +92,37 @@ type recordsFile struct {
 	Version int      `json:"version"`
 }
 
-// RecordStore reads and writes the task record file. It reads the file once,
-// on first use, and afterwards serves from memory: panemux is the file's only
-// writer. A file it could not read is tried again on the next use, and until
-// it is read every write fails, so a file it does not understand is never
-// replaced.
+// RecordStore reads and writes the task record file. It serves from memory
+// while the file's modification time and size are what it last read or
+// wrote, and reads the file again when they are not, so an edit made by hand
+// while panemux runs is neither hidden nor undone by the next save. A file it
+// could not read is tried again on the next use, and until it is read every
+// write fails, so a file it does not understand is never replaced. A symlink
+// at the path is written through, not replaced.
 type RecordStore struct {
 	records map[RecordKey]Record
 	path    string
-	mu      sync.Mutex
+	// seen is the file as it was when records was read or last written.
+	seen recordsFileStamp
+	mu   sync.Mutex
+}
+
+// recordsFileStamp is what tells an unchanged file from one edited since.
+type recordsFileStamp struct {
+	modTime time.Time
+	size    int64
+	exists  bool
+}
+
+func statRecordsFile(path string) (recordsFileStamp, error) {
+	info, err := os.Stat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return recordsFileStamp{}, nil
+	}
+	if err != nil {
+		return recordsFileStamp{}, fmt.Errorf("reading task record file: %w", err)
+	}
+	return recordsFileStamp{modTime: info.ModTime(), size: info.Size(), exists: true}, nil
 }
 
 // NewRecordStore returns a store for the file at path, or for
@@ -175,18 +198,24 @@ func (s *RecordStore) resolvePathLocked() (string, error) {
 }
 
 func (s *RecordStore) loadLocked() error {
-	if s.records != nil {
-		return nil
-	}
 	path, err := s.resolvePathLocked()
 	if err != nil {
 		return err
 	}
-	records, err := readRecordsFile(path)
+	stamp, err := statRecordsFile(path)
 	if err != nil {
+		s.records = nil
 		return err
 	}
-	s.records = records
+	if s.records != nil && stamp == s.seen {
+		return nil
+	}
+	records, err := readRecordsFile(path)
+	if err != nil {
+		s.records = nil
+		return err
+	}
+	s.records, s.seen = records, stamp
 	return nil
 }
 
@@ -238,7 +267,35 @@ func (s *RecordStore) writeLocked(records map[RecordKey]Record) error {
 	if err != nil {
 		return fmt.Errorf("encoding task record file: %w", err)
 	}
-	return fileops.AtomicWrite(s.path, data, recordsFileMode, "task record file")
+	target := resolveRecordsWriteTarget(s.path)
+	if err = fileops.AtomicWrite(target, data, recordsFileMode, "task record file"); err != nil {
+		return err
+	}
+	stamp, err := statRecordsFile(s.path)
+	//coverage:exempt the file was written a moment ago; only a race with its removal fails here
+	if err != nil {
+		return err
+	}
+	s.seen = stamp
+	return nil
+}
+
+// resolveRecordsWriteTarget is the file a write to path should replace: the
+// target of a symlink at path, even one that does not exist yet, so the link
+// survives the rename AtomicWrite does. internal/config's resolveWriteTarget
+// does the same for config.yaml.
+func resolveRecordsWriteTarget(path string) string {
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return resolved
+	}
+	dest, err := os.Readlink(path)
+	if err != nil {
+		return path
+	}
+	if !filepath.IsAbs(dest) {
+		dest = filepath.Join(filepath.Dir(path), dest)
+	}
+	return dest
 }
 
 func validateRecordKey(key RecordKey) error {
@@ -253,8 +310,9 @@ func validateRecordKey(key RecordKey) error {
 
 // NormalizeLabels trims each label and drops repeats, keeping the order the
 // labels were given in. It refuses a label that is empty, longer than
-// MaxLabelLength characters, not UTF-8 or carrying a control character, and
-// more than MaxLabels distinct labels. No labels is nil.
+// MaxLabelLength characters, not UTF-8, or carrying a control character, an
+// invisible format character or a line or paragraph separator, and more than
+// MaxLabels distinct labels. No labels is nil.
 func NormalizeLabels(labels []string) ([]string, error) {
 	var out []string
 	seen := make(map[string]bool, len(labels))
@@ -288,5 +346,15 @@ func validateLabel(label string) error {
 	if strings.IndexFunc(label, unicode.IsControl) >= 0 {
 		return fmt.Errorf("%w: label %q contains a control character", ErrInvalidRecord, label)
 	}
+	// Format characters (zero-width spaces, direction overrides) and line or
+	// paragraph separators would make a label look empty, look like another
+	// label, or reorder the text shown after it.
+	if strings.IndexFunc(label, isInvisibleFormatting) >= 0 {
+		return fmt.Errorf("%w: label %q contains an invisible format character", ErrInvalidRecord, label)
+	}
 	return nil
+}
+
+func isInvisibleFormatting(r rune) bool {
+	return unicode.In(r, unicode.Cf, unicode.Zl, unicode.Zp)
 }

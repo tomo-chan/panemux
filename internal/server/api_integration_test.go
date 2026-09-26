@@ -458,7 +458,8 @@ var apiCases = map[string]apiCase{
 		assert.True(t, listed.Tasks[i].Done)
 		assert.Equal(t, []string{"docs"}, listed.Tasks[i].Labels)
 
-		rr = e.do(t, http.MethodPut, "/api/tasks/records", `{"host":"not-configured","agent":"claude","session_id":"s"}`)
+		rr = e.do(t, http.MethodPut, "/api/tasks/records",
+			`{"host":"not-configured","agent":"claude","session_id":"s","done":true}`)
 		assert.Equal(t, http.StatusNotFound, rr.Code)
 	}},
 

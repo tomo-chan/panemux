@@ -335,7 +335,8 @@ terminal that had focus cannot receive what is typed into the dashboard.
   task leaves the board rather than crowding Stopped; one that runs again stays in its state's
   column. Column headers stay visible while the board scrolls, and each column is split into the
   chosen rows, with the catch-all row ("Not in a Git repository", "No label") last. Split by label, a
-  task with two labels appears in both rows.
+  task with two labels appears in both rows. A catch-all row is keyed apart from every name, so a
+  label or repository that happens to be called "No label" gets a row of its own.
 - **Cards.** A left border in the state's color; host, agent and how long the task has been in its
   state; the working directory's last segment as the title (there is no summary yet) with the full
   directory under it; for a waiting task its reason and "open the pane to respond"; repository,
@@ -348,11 +349,13 @@ terminal that had focus cannot receive what is typed into the dashboard.
   title, waiting reason, the open action or the reason there is none, and `Mark done` or
   `Mark not done` — stays in place, and only the body below scrolls: state notes, links, labels, the
   chain from task to agent to tmux session to pane to workspace, and the directory and session ID.
-  `Mark done` asks first, inside the panel ("It will only show in the Done column"), because the
-  task then leaves the board while the Done column is hidden; `Mark not done` does not ask. Labels
+  `Mark done` asks first, inside the panel, and says where the task will be afterwards: a running
+  task stays in its column until it stops; a stopped one moves to Done, and the question adds that
+  the column is hidden until `Done column` is checked when it is. `Mark not done` does not ask. Labels
   are removed with the `×` on each and added with a text box and `Add`. A save that fails shows its
-  reason in the head and keeps what was typed. A task without a session ID offers neither, and says
-  so. At 1000px and narrower it slides over the board
+  reason in the head and keeps what was typed. A save belongs to the task it was made for: selecting
+  another task while it runs leaves that task's controls enabled, and the result is not shown there.
+  A task without a session ID offers neither, and says so. At 1000px and narrower it slides over the board
   with a close button.
 - **After opening.** The dashboard closes, the pane takes focus, and it is outlined in the
   interactive blue for about two seconds (a steady outline with reduced motion).

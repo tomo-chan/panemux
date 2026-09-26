@@ -145,7 +145,8 @@ func Chmod(name string, mode os.FileMode) error {
 // whose path an operator may have hand-linked has to resolve it first, which
 // is what internal/config's resolveWriteTarget does for config.yaml and the
 // auth token file — the two that were written with os.WriteFile before, and so
-// did follow a link. It is not done here because the other callers' files have
+// did follow a link — and internal/tasks does for the task record file, which
+// may be kept in a dotfiles repository beside config.yaml. It is not done here because the other callers' files have
 // always been written by rename, and following a link for them would newly let
 // one planted at those paths redirect a write.
 //

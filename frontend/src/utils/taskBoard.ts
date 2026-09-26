@@ -131,11 +131,21 @@ export function filterTasks(tasks: Task[], filter: TaskFilter): Task[] {
 
 export type LaneMode = 'none' | 'host' | 'label' | 'repo'
 
-const NO_REPO_LANE = 'Not in a Git repository'
-const NO_LABEL_LANE = 'No label'
+// The keys of the lanes that collect "everything else". A control character
+// keeps them apart from any repository or label, which cannot contain one,
+// so a label named "No label" is a lane of its own.
+const NO_REPO_LANE = '\u0000no-repo'
+const NO_LABEL_LANE = '\u0000no-label'
 
-// Lanes that collect "everything else" sort after every named lane.
-const CATCH_ALL_LANES = new Set([NO_REPO_LANE, NO_LABEL_LANE])
+const CATCH_ALL_TITLES: Record<string, string> = {
+  [NO_REPO_LANE]: 'Not in a Git repository',
+  [NO_LABEL_LANE]: 'No label',
+}
+
+/** The heading a lane is shown under. */
+export function laneTitle(key: string): string {
+  return CATCH_ALL_TITLES[key] ?? key
+}
 
 /**
  * The lanes a task belongs in. It is a list because a task with two labels
@@ -156,6 +166,7 @@ export function laneKeys(task: Task, mode: LaneMode): string[] {
 
 export interface TaskLane {
   key: string
+  title: string
   tasks: Task[]
 }
 
@@ -170,12 +181,13 @@ export function groupIntoLanes(tasks: Task[], mode: LaneMode): TaskLane[] {
   }
   return [...lanes.entries()]
     .sort(([a], [b]) => {
-      const aLast = CATCH_ALL_LANES.has(a)
-      const bLast = CATCH_ALL_LANES.has(b)
+      // Lanes that collect "everything else" sort after every named lane.
+      const aLast = a in CATCH_ALL_TITLES
+      const bLast = b in CATCH_ALL_TITLES
       if (aLast !== bLast) return aLast ? 1 : -1
       return a.localeCompare(b)
     })
-    .map(([key, laneTasks]) => ({ key, tasks: laneTasks }))
+    .map(([key, laneTasks]) => ({ key, title: laneTitle(key), tasks: laneTasks }))
 }
 
 export interface TaskPaneRef {

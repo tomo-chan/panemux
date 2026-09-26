@@ -225,7 +225,7 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
                     {inColumn.length === 0 && <div className="td-empty">None</div>}
                     {groupIntoLanes(inColumn, laneMode).map((lane) => (
                       <React.Fragment key={lane.key}>
-                        {laneMode !== 'none' && <h3 className="td-lane">{lane.key}</h3>}
+                        {laneMode !== 'none' && <h3 className="td-lane">{lane.title}</h3>}
                         {lane.tasks.map((task) => (
                           <TaskCard
                             key={task.id}
@@ -252,6 +252,7 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
           nowMs={nowMs}
           onOpen={open}
           onSaveRecord={saveRecord}
+          showDone={showDone}
           onClose={() => setDetailOpen(false)}
         />
       </div>
@@ -459,14 +460,30 @@ interface TaskDetailProps {
   nowMs: number
   onOpen: (task: Task) => void
   onSaveRecord: TasksState['saveRecord']
+  /** Whether the Done column is on screen, for what Mark done says will happen. */
+  showDone: boolean
   onClose: () => void
 }
 
-const TaskDetail: React.FC<TaskDetailProps> = ({ task, pane, open, nowMs, onOpen, onSaveRecord, onClose }) => {
+const TaskDetail: React.FC<TaskDetailProps> = ({
+  task,
+  pane,
+  open,
+  nowMs,
+  onOpen,
+  onSaveRecord,
+  showDone,
+  onClose,
+}) => {
   const [confirmingDone, setConfirmingDone] = useState(false)
   const [labelInput, setLabelInput] = useState('')
-  const [saving, setSaving] = useState(false)
+  // The task whose save is in flight. A save belongs to the task it was made
+  // for: selecting another task while it runs neither disables the other
+  // task's controls nor shows the result there.
+  const [savingId, setSavingId] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const shownId = useRef(task?.id)
+  shownId.current = task?.id
   // What was typed or asked belongs to the task it was typed for.
   const [editingId, setEditingId] = useState(task?.id)
   if (editingId !== task?.id) {
@@ -492,11 +509,15 @@ const TaskDetail: React.FC<TaskDetailProps> = ({ task, pane, open, nowMs, onOpen
   const recordable = canRecord(task)
   const labels = task.labels ?? []
   const done = task.done ?? false
+  const saving = savingId === task.id
 
+  // Resolves to whether the save succeeded and the task is still the one shown.
   const save = async (record: { done: boolean; labels: string[] }): Promise<boolean> => {
-    setSaving(true)
+    const id = task.id
+    setSavingId(id)
     const failure = await onSaveRecord(task, record)
-    setSaving(false)
+    setSavingId((current) => (current === id ? null : current))
+    if (shownId.current !== id) return false
     setSaveError(failure)
     return failure === null
   }
@@ -548,7 +569,7 @@ const TaskDetail: React.FC<TaskDetailProps> = ({ task, pane, open, nowMs, onOpen
         </div>
         {confirmingDone && !done && (
           <div className="td-confirm">
-            <span>Mark this task done? It will only show in the Done column.</span>
+            <span>{markDoneQuestion(task, showDone)}</span>
             <button
               type="button"
               className="td-btn td-btn-sm td-btn-primary"
@@ -678,6 +699,17 @@ const TaskDetail: React.FC<TaskDetailProps> = ({ task, pane, open, nowMs, onOpen
       </div>
     </aside>
   )
+}
+
+// What Mark done asks, saying where the task will be afterwards: a running
+// task stays where it is until it stops, and a stopped one leaves the board
+// while the Done column is hidden.
+function markDoneQuestion(task: Task, showDone: boolean): string {
+  if (task.state !== 'stop') {
+    return 'Mark this task done? It stays in its column while it runs, and moves to Done when it stops.'
+  }
+  if (showDone) return 'Mark this task done? It moves to the Done column.'
+  return "Mark this task done? It moves to the Done column, which is hidden until 'Done column' is checked."
 }
 
 const StateNote: React.FC<{ task: Task }> = ({ task }) => {

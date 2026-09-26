@@ -17,6 +17,7 @@ import {
   hostLabel,
   isLiveState,
   laneKeys,
+  laneTitle,
   paneConfigForTask,
   runningCount,
   taskOpenAction,
@@ -219,8 +220,25 @@ describe('filterTasks', () => {
 describe('lanes', () => {
   it('keys a task by each of its labels, or No label', () => {
     expect(laneKeys(task({ labels: ['payment', 'sprint-42'] }), 'label')).toEqual(['payment', 'sprint-42'])
-    expect(laneKeys(task({ labels: [] }), 'label')).toEqual(['No label'])
-    expect(laneKeys(task({ labels: undefined }), 'label')).toEqual(['No label'])
+    expect(laneKeys(task({ labels: [] }), 'label').map(laneTitle)).toEqual(['No label'])
+    expect(laneKeys(task({ labels: undefined }), 'label').map(laneTitle)).toEqual(['No label'])
+  })
+
+  it('keeps a label named like a catch-all row apart from that row', () => {
+    const lanes = groupIntoLanes(
+      [task({ id: 'a', labels: ['No label'] }), task({ id: 'b' }), task({ id: 'c', labels: ['zeta'] })],
+      'label',
+    )
+    expect(lanes.map((lane) => [lane.title, lane.tasks.map((t) => t.id)])).toEqual([
+      ['No label', ['a']],
+      ['zeta', ['c']],
+      ['No label', ['b']],
+    ])
+    const repos = groupIntoLanes([task({ id: 'a', git: { repo: 'Not in a Git repository' } }), task({ id: 'b' })], 'repo')
+    expect(repos.map((lane) => [lane.title, lane.tasks.map((t) => t.id)])).toEqual([
+      ['Not in a Git repository', ['a']],
+      ['Not in a Git repository', ['b']],
+    ])
   })
 
   it('shows a task with two labels in both label lanes, and No label last', () => {
@@ -232,7 +250,7 @@ describe('lanes', () => {
       ],
       'label',
     )
-    expect(lanes.map((lane) => [lane.key, lane.tasks.map((t) => t.id)])).toEqual([
+    expect(lanes.map((lane) => [lane.title, lane.tasks.map((t) => t.id)])).toEqual([
       ['infra', ['3']],
       ['payment', ['1']],
       ['sprint-42', ['1', '3']],
@@ -243,7 +261,7 @@ describe('lanes', () => {
   it('keys a task by host or repository', () => {
     expect(laneKeys(task({ host: '' }), 'host')).toEqual(['Local'])
     expect(laneKeys(task({ git: { repo: 'panemux' } }), 'repo')).toEqual(['panemux'])
-    expect(laneKeys(task({ git: undefined }), 'repo')).toEqual(['Not in a Git repository'])
+    expect(laneKeys(task({ git: undefined }), 'repo').map(laneTitle)).toEqual(['Not in a Git repository'])
     expect(laneKeys(task(), 'none')).toEqual([''])
   })
 
@@ -257,7 +275,7 @@ describe('lanes', () => {
       ],
       'repo',
     )
-    expect(lanes.map((lane) => [lane.key, lane.tasks.map((t) => t.id)])).toEqual([
+    expect(lanes.map((lane) => [lane.title, lane.tasks.map((t) => t.id)])).toEqual([
       ['alpha', ['3']],
       ['zeta', ['1', '4']],
       ['Not in a Git repository', ['2']],
@@ -266,7 +284,7 @@ describe('lanes', () => {
 
   it('is a single unnamed lane when not split', () => {
     const lanes = groupIntoLanes([task({ id: '1' }), task({ id: '2' })], 'none')
-    expect(lanes).toEqual([{ key: '', tasks: [task({ id: '1' }), task({ id: '2' })] }])
+    expect(lanes).toEqual([{ key: '', title: '', tasks: [task({ id: '1' }), task({ id: '2' })] }])
   })
 })
 

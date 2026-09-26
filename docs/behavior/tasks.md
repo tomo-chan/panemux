@@ -159,22 +159,29 @@ set.
   claude process no state file names are known only by a pid, which the host reuses once the process
   exits; they cannot be marked done or labeled.
 - **The records live in `~/.config/panemux/tasks.json` on the panemux host**, for every host's
-  tasks, written through a temp file and a rename with mode `0600`. The file holds only tasks that
-  carry something: a task marked not done with no labels is removed from it.
+  tasks, written through a temp file and a rename with mode `0600`. A symlink at that path is
+  written through — its target gets the new contents and the link stays a link — as `config.yaml`
+  is, including one whose target does not exist yet. The file holds only tasks that carry
+  something: a task marked not done with no labels is removed from it.
 - **Records are kept until a person clears them.** A task that leaves the list — its conversation
   log deleted, older than 7 days, or beyond the 50 newest — keeps its record, which is not shown
-  anywhere and applies again if the session is listed again.
+  anywhere and applies again if the session is listed again. Such a record is cleared by editing the
+  file, which can be done while panemux runs (below). A host removed from `ssh_connections` keeps
+  its records too; `PUT /api/tasks/records` still clears them, but adds none.
 - **A task marked done is in the Done column only while it is stopped.** One that runs again (a
   `/resume`, or `claude --resume`) shows the state it is in, still marked done, and returns to Done
   when it stops. The record is not cleared automatically; `Mark not done` clears it.
 - **Labels** are trimmed, repeats dropped, and kept in the order they were added. A label is at most
-  32 characters and has no control characters, and a task carries at most 20. Case matters: `Docs`
-  and `docs` are two labels.
-- The file is read once, on first use, and afterwards served from memory: panemux is its only
-  writer. A file that cannot be read — not JSON, another format version, an invalid entry — is
-  reported by `GET /api/tasks` as `records_error`, the tasks are listed without records, and every
-  write fails until the file is fixed, so a file panemux does not understand is never replaced. The
-  file is tried again on the next request.
+  32 characters, and has no control characters, no invisible format characters (zero-width spaces,
+  direction overrides — Unicode category Cf) and no line or paragraph separators; a task carries at
+  most 20. Case matters: `Docs` and `docs` are two labels.
+- The file is served from memory while its modification time and size are what panemux last read
+  or wrote, and read again when they change, so an edit made by hand while panemux runs is seen by
+  the next request and is not undone by the next save. An edit that keeps both the same (within the
+  filesystem's timestamp resolution, at the same size) is not noticed. A file that cannot be read —
+  not JSON, another format version, an invalid entry — is reported by `GET /api/tasks` as
+  `records_error`, the tasks are listed without records, and every write fails until the file is
+  fixed, so a file panemux does not understand is never replaced. A deleted file is no records.
 
 ### Opening a task
 
@@ -261,7 +268,9 @@ Replaces the record of one task:
   clears them. An unknown field is refused.
 - Answers `200` with the record as stored — labels normalized, both `done` and `labels` always
   present. `400` for a body or record that is not valid (the reason is in the body), `404` for a
-  `host` that is not an `ssh_connections` key, `403` for a cross-site request as above, and `500`
-  when the file cannot be read or written; nothing is changed then.
+  `host` that is not an `ssh_connections` key — except on a request that clears the record
+  (`done` false and no labels), which is accepted for any host so a removed host's records can be
+  cleared — `403` for a cross-site request as above, and `500` when the file cannot be read or
+  written; nothing is changed then.
 - It does not collect: the dashboard applies the answer to the task at once, and ignores a
   `GET /api/tasks` that was already running when the record was saved.

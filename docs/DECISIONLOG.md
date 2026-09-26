@@ -182,9 +182,24 @@ built.
   the browser drops that answer rather than let it put the old record back for up to 10 seconds.
 - **A file panemux cannot read is never overwritten.** It is reported in `records_error`, tasks are
   listed without records, and writes fail until the file is fixed, so a file from a newer panemux or
-  one edited by hand is not silently replaced by an empty set.
+  a broken hand edit is not silently replaced by an empty set.
+- **A file edited by hand is read again** (review of PR #262). The first version read the file once
+  and served memory afterwards, so a hand edit made while panemux ran was hidden and then undone by
+  the next save — and editing the file is the only way to clear the record of a task that has left
+  the list. The file's modification time and size are compared before each use; an edit that keeps
+  both is not seen, which was accepted over re-reading the file on every 10-second poll.
+- **A symlinked record file is written through** (review of PR #262), the way `config.yaml` is.
+  `AtomicWrite` alone replaces a link with a regular file, which would have moved the records out of
+  a dotfiles repository without saying so.
+- **Clearing a record does not need its host to be configured** (review of PR #262). The first
+  version refused every request for a host no longer in `ssh_connections`, which left that host's
+  records impossible to clear through the API. Adding a record still needs a configured host.
+  Removing the records when a host is removed from the config was the alternative; it was not taken
+  because it would tie the record file to the config's save path.
 - **Label limits** (32 characters, 20 labels, no control characters) were chosen while it was built,
-  to keep a label a short tag on a card rather than free text.
+  to keep a label a short tag on a card rather than free text. Invisible format characters and line
+  and paragraph separators were added to the refused set in review of PR #262: they let a label look
+  empty, look identical to another label, or reorder the text after it.
 
 ## Agent Board
 

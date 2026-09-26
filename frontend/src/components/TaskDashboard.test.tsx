@@ -237,6 +237,7 @@ describe('TaskDashboard done and labels', () => {
       task({ id: 'stop-open', state: 'stop', host: 'dev-server', cwd: '/remote/home/demo/gamma', labels: ['sprint-42'],
         location: { kind: 'none', attachable: false } }),
       task({ id: 'codex', state: 'run', agent: 'codex', session_id: undefined, cwd: '/workspace/user/delta' }),
+      task({ id: 'codex-with-session', state: 'idle', session_id: 'bbbbbbbb-0000', cwd: '/workspace/user/epsilon' }),
     ],
   }
   const detail = () => screen.getByRole('complementary', { name: 'Task details' })
@@ -245,7 +246,7 @@ describe('TaskDashboard done and labels', () => {
   it('hides the Done column and the tasks in it until asked to show them', () => {
     renderDashboard(tasksState({ data: recorded }))
     expect(screen.queryByRole('region', { name: 'Done' })).not.toBeInTheDocument()
-    expect(cardIds()).toEqual(['busy-done', 'codex', 'stop-open'])
+    expect(cardIds()).toEqual(['busy-done', 'codex-with-session', 'codex', 'stop-open'])
 
     fireEvent.click(screen.getByRole('checkbox', { name: 'Show Done column' }))
     const done = screen.getByRole('region', { name: 'Done' })
@@ -293,7 +294,9 @@ describe('TaskDashboard done and labels', () => {
 
     fireEvent.click(within(detail()).getByRole('button', { name: 'Mark done' }))
     expect(saveRecord).not.toHaveBeenCalled()
-    expect(detail()).toHaveTextContent('Mark this task done? It will only show in the Done column.')
+    expect(detail()).toHaveTextContent(
+      "Mark this task done? It moves to the Done column, which is hidden until 'Done column' is checked.",
+    )
     fireEvent.click(within(detail()).getByRole('button', { name: 'Cancel' }))
     expect(detail()).not.toHaveTextContent('Mark this task done?')
     expect(saveRecord).not.toHaveBeenCalled()
@@ -370,5 +373,42 @@ describe('TaskDashboard done and labels', () => {
   it('reports a record file the server could not read', () => {
     renderDashboard(tasksState({ data: { ...recorded, records_error: 'parsing task record file: bad' } }))
     expect(screen.getByRole('alert')).toHaveTextContent('Done and labels could not be loaded: parsing task record file: bad')
+  })
+
+  it('says where a task goes when it is marked done', () => {
+    renderDashboard(tasksState({ data: recorded }))
+    const confirmText = (id: string) => {
+      fireEvent.click(screen.getByTestId(`task-card-${id}`))
+      fireEvent.click(within(detail()).getByRole('button', { name: 'Mark done' }))
+      const text = detail().querySelector('.td-confirm span')?.textContent
+      fireEvent.click(within(detail()).getByRole('button', { name: 'Cancel' }))
+      return text
+    }
+
+    expect(confirmText('codex-with-session')).toBe(
+      'Mark this task done? It stays in its column while it runs, and moves to Done when it stops.',
+    )
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Show Done column' }))
+    expect(confirmText('stop-open')).toBe('Mark this task done? It moves to the Done column.')
+  })
+
+  it('keeps a save that finishes after another task is selected to the task it was for', async () => {
+    let finish: (value: string | null) => void = () => {}
+    const saveRecord = vi.fn().mockImplementation(() => new Promise<string | null>((resolve) => { finish = resolve }))
+    renderDashboard(tasksState({ data: recorded, saveRecord }))
+
+    fireEvent.click(screen.getByTestId('task-card-stop-open'))
+    fireEvent.change(within(detail()).getByRole('textbox', { name: 'Add a label' }), { target: { value: 'lbl' } })
+    fireEvent.click(within(detail()).getByRole('button', { name: 'Add' }))
+
+    fireEvent.click(screen.getByTestId('task-card-codex-with-session'))
+    expect(within(detail()).getByRole('button', { name: 'Mark done' })).toBeEnabled()
+    fireEvent.change(within(detail()).getByRole('textbox', { name: 'Add a label' }), { target: { value: 'typing' } })
+
+    await act(async () => {
+      finish('disk full')
+    })
+    expect(within(detail()).queryByRole('alert')).toBeNull()
+    expect(within(detail()).getByRole('textbox', { name: 'Add a label' })).toHaveValue('typing')
   })
 })
