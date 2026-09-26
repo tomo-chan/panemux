@@ -81,6 +81,8 @@ description: 大きめの機能や Issue を、オーケストレーターとし
   - 実行時刻を過ぎるまで、バックグラウンドの Bash（`until [ "$(date -u +%H%M)" -ge HHMM ]; do sleep 5; done`）で待つ。フォアグラウンドの sleep は使えない。
   - 実行後に `get_trigger` で `last_run.status` が `ROUTINE_RUN_STATUS_SUCCEEDED` かを確かめ、ユーザーに報告する。
   - 作業中のセッションに届いた指示は、区切りがついたところで処理される。
+  - `SUCCEEDED` は「届いた」という意味で、相手が作業を終えたことではない。相手が利用制限などで止まることがあるので、しばらくして `get_session` の `status_bucket` と `post_turn_summary`（例：`failed` / "You've hit your session limit"）も確かめる。
+  - **再送は Routine を作り直す。** 配信済みの一回限りの Routine に `fire_trigger` を使うと、指定したセッションには届かず、リポジトリも指定されていない新しいセッションが起動する（実際に起きた）。起きてしまったら `interrupt_session` で止め、ユーザーの了承を得てアーカイブする。
 - 使った Routine はユーザーの Routine 一覧に記録が残ることを、最初に伝えておく。
 
 ### 指示を出す前に、必ず状態を確かめる
