@@ -361,79 +361,31 @@ State colors:
 
 ## Agent Board UI
 
-Agent Board (see [agent-board.md](agent-board.md)) has two UI surfaces, both layered on
-top of the principles above rather than replacing them:
+Agent Board reuses the existing modal, panel, color, status, and focus-restoration patterns.
 
-- A **dashboard** answering two questions about each board-enabled pane — is it actually on the
-  board, and what is it doing right now (see [agent-board/message-flow.md's Status
-  self-report](agent-board/message-flow.md#status-self-report-and-message-flow)) — rendered by
-  `BoardDashboardPanel.tsx`, a right-anchored overlay panel following the same structure and styling
-  tokens as `CommandHistoryPanel.tsx` (dark `#252526` panel, `#444` border, 420px wide, backdrop
-  click and `Escape` to dismiss) rather than a new visual language. It opens via an "Agent Board"
-  button next to the existing "Command History" button (shown only when `agent_board_enabled` is
-  true and a token is available) or via `Cmd/Ctrl+Shift+B`, registered on the keydown capture phase
-  the same way the palette's own shortcut is, so it still fires while a terminal pane has focus.
-  - **The pane list is the union of configured and reporting panes**, not just the panes the relay
-    has heard from. Every pane with `agent_board.enabled` appears, and one that has never reported
-    carries a `not joined` pill with a line explaining it reports once its agent joins. Listing only
-    panes that had already reported made the board's first question unanswerable: "configured but
-    never joined" and "not configured at all" both rendered as absence. Panes still reporting after
-    being removed from config stay listed for the same reason — silent disappearance is the failure
-    mode being designed against.
-  - **Each card shows activity, not repository facts**: the pane ID with the operator's own pane
-    title beside it, the state pill, the agent's own `summary`, the `last_tool` it used, and how
-    long ago it reported. `repo`, `branch` and `pr_url` are
-    deliberately *not* shown even though the status report carries them — panemux computes those
-    itself by running git, and already renders them in the pane header and the workspace bar. The
-    board's copies are self-reported and go stale silently, so showing both meant the same pane
-    could display two different branches in two places. Dropping them also removed the only `<a>` in
-    this component tree; see [security/agent-board.md's Agent-reported values in the
-    dashboard](security/agent-board.md#agent-reported-values-in-the-dashboard-ui) for what that changes.
-  - It extends the existing workspace-bar/pane-card status vocabulary (**Integrated workspace
-    summaries** and **Workspace pane groups**, above) rather than introduce a competing one: the same
-    8px status-dot-plus-`${color}33`-ring treatment and the same pill shapes as `WorkspaceTabs.tsx`.
-    The self-reported `state` string is free text (an agent's own report, not a fixed enum), mapped to
-    a dot color via `utils/boardStatusColors.ts`: `working` → `#7bd88f`, `idle` → `#7aa2f7`,
-    `waiting` → `#f4bf4f` (deliberately reusing the existing attention-gold pill color, since
-    "waiting" is the same kind of "needs a look" signal), and any other or missing value → a neutral
-    `#4b5565` rather than a crash or blank dot.
-  - **The summary wraps; everything else on the card stays on one line.** A summary needs enough
-    space to explain what a pane is working on, rather than being clipped like a short identifier.
-    It wraps and is bounded to four lines via `-webkit-line-clamp` so one talkative
-    agent cannot push every other pane below the fold. `last_tool` is a bare tool name and keeps the
-    single-line treatment. The pane title is shown next to the ID for the same readability reason —
-    a column of raw IDs stops being scannable as soon as there are more than a couple of panes —
-    while the ID itself always stays visible, since it is the agmsg address every `from`/`to` uses.
-  - A status entry whose `updated_at` is older than 5 minutes gets a `stale` pill and its card
-    rendered at 60% opacity — dimmed, not hidden, since a stale report is still the most recent
-    information available for that pane. No new colors were introduced for the dashboard, matching
-    the rest of Agent Board's UI (see below).
-- A **Spotlight-style command palette** (`CommandPalette.tsx`) and **history panel**
-  (`CommandHistoryPanel.tsx`) for the [command center](agent-board/command-center.md#command-center).
-  The palette follows this document's existing **Modal Dialogs** pattern (a
-  higher-friction, focused interaction, not compressed into inline chrome): dark `#252526` panel,
-  `#444` border, backdrop click and `Escape` to dismiss, matching `AddSSHHostDialog`'s own styling
-  tokens rather than introducing new ones. The history panel follows the same overlay pattern as a
-  right-anchored sliding panel rather than a centered modal, since it's meant to stay open alongside
-  other work rather than demand focus the way the palette does. All three overlays (palette, history
-  panel, dashboard) share one `useRestoreFocusOnClose` hook that returns keyboard focus to whatever
-  element had it before the overlay opened, once the overlay closes or unmounts — so dismissing any
-  of them (Escape, backdrop click, or the close button) never strands focus on a removed panel.
+### Dashboard
 
-Concrete interaction decisions:
+- Opens from the Agent Board button or `Cmd/Ctrl+Shift+B`; both are absent when the capability is
+  disabled.
+- Appears as a right-side overlay and closes by button, backdrop, or `Escape`.
+- Lists the union of configured board panes and panes still reporting. A configured pane with no
+  report remains visible as `not joined`; a removed pane with a report does not disappear silently.
+- Shows pane ID, title, state, summary, last tool, and report age. It does not show self-reported
+  repository, branch, or PR values because the pane header already provides panemux-derived values.
+- Treats state as free text and maps known states to the existing status palette: `working` green,
+  `idle` blue, `waiting` attention gold, and everything else neutral.
+- Keeps identity and metadata on one line; summaries may wrap to four lines.
+- Marks reports older than five minutes as `stale` and dims rather than hides them.
 
-- **Palette keybinding**: `Cmd/Ctrl+Shift+K`, not plain `Cmd/Ctrl+K` — the latter is already bound in
-  many shells/readline setups a terminal pane might be running, and would be captured as literal pane
-  input rather than reaching the browser as a global shortcut. Registered on the keydown capture
-  phase specifically so it still fires while a terminal pane has focus.
-  See [agent-board/command-center.md's UI subsection](agent-board/command-center.md#ui) for the full rationale.
-- **Color treatment**: reuses this document's existing dark palette exactly (`#252526` panels, `#444`
-  borders, `#d4d4d4` body text, `#4ec9b0` for the user's own prompt echo, `#f44747` for errors) — no
-  new colors were introduced for Agent Board.
-- **Streaming-response layout**: turn-based, not a single scrolling log — each submitted prompt opens
-  a new turn block showing the prompt followed by its streamed `stream-json` lines as they arrive,
-  an ellipsis while still in flight, and either nothing further (success) or a red error/busy line at
-  the end.
-- **Error presentation**: inline within the turn that failed (red text, same treatment as this
-  document's existing form-validation error styling), not a separate banner or toast — an error is
-  scoped to the one query that produced it, and the palette stays open and usable for the next prompt.
+### Command center
+
+- `Cmd/Ctrl+Shift+K` opens a focused command palette. Plain `Cmd/Ctrl+K` remains available to common
+  shell/readline bindings.
+- Each prompt creates one turn containing the prompt, streamed output, progress state, and any
+  inline error. A failed turn does not close or disable the palette.
+- Command history uses a right-side panel for longer reading alongside terminal work.
+- Command-center entry points are absent when the capability is disabled.
+
+Global shortcuts use capture phase so terminal focus does not swallow them. Closing any Agent Board
+surface restores the previously focused element. Full data-flow rules are in
+[Command center](agent-board/command-center.md#command-center).

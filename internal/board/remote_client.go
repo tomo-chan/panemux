@@ -13,8 +13,8 @@ import (
 // a remote host over its own exec channel. internal/session's SSHSession
 // and TmuxSSHSession both implement this structurally; internal/board does
 // not import internal/session to avoid a dependency it does not otherwise
-// need — see docs/agent-board.md's internal/session capability interfaces
-// section for the canonical definition this mirrors.
+// need. This preserves the package ownership boundary described in
+// docs/agent-board/architecture.md.
 type BoardExecutor interface {
 	RunBoardCommand(ctx context.Context, args []string) ([]byte, error)
 }
