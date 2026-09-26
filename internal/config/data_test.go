@@ -54,7 +54,9 @@ func TestWritePersistsEveryDomainSection(t *testing.T) {
 	cfg.CommandCenter = CommandCenterConfig{Enabled: true}
 	shim := false
 	cfg.URLOpen = URLOpenConfig{BrowserShim: &shim}
-	cfg.TaskDashboard = TaskDashboardConfig{JiraURL: "https://example.atlassian.net"}
+	cfg.TaskDashboard = TaskDashboardConfig{Autolinks: []AutolinkConfig{
+		{KeyPrefix: "JIRA-", URLTemplate: "https://jira.example.com/JIRA-<num>"},
+	}}
 
 	require.NoError(t, cfg.write())
 

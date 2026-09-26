@@ -153,7 +153,7 @@ while being built:
 - **The UI text is English**, like the rest of panemux's interface, although the issue's mockup is
   written in Japanese.
 
-### Issue and Jira links (2026-09-26, issue #255)
+### Issue links and autolinked references (2026-09-26, issue #255)
 
 - **An issue is one the task's pull request closes**, read from `gh pr view --json
   closingIssuesReferences` in the same `gh` call that already found the pull request, so the
@@ -171,30 +171,37 @@ while being built:
   still showed it. A call refused with `Unknown JSON field` is now repeated with `url,number`. Only
   that refusal is retried: a branch without a pull request also makes `gh` fail, and is the common
   case, so a retry on any failure would double the `gh` runs.
-- **A Jira key is `[A-Z][A-Z0-9_]+-[1-9][0-9]*` with no ASCII letter or digit touching it**, found
-  in the branch name and then the pull request title. Keys are case-sensitive, so a lower-case
-  branch such as `pay-418-retry` gives none; the form still matches words such as `UTF-8` or
-  `SHA-256` in a title, and cuts `CVE-2024-45337` to `CVE-2024`. Every key found is linked, not
-  just the first.
-- **`task_dashboard.jira_projects` limits keys to the listed projects** (review of PR #261). The
-  false positives above come from the key shape alone. A project allowlist removes them without
-  calling Jira, so it keeps the "linked, never queried" rule. The alternative considered was to
-  drop a key followed by `-<digit>`: it would have removed only the `CVE-2024` case, left `UTF-8`
-  and `SHA-256`, and hidden a real key in a branch such as `PAY-418-2-retry`. The list is optional,
-  and without it every key of the right shape is linked as before.
-- **Jira is linked, never queried.** `task_dashboard.jira_url` names the site and a key becomes
-  `<jira_url>/browse/<key>`; no Jira API is called and no ticket title is fetched, so panemux holds
-  no Jira credentials. The setting is a new top-level `task_dashboard` section rather than part of
-  `display`, since it says where links point rather than how anything looks. It must be an `https`
-  URL, because it becomes the address of a link the operator clicks.
-- **The Jira site's host and port are held to what the browser parses** (review of PR #261).
+- **References use the shape of GitHub's autolink references** (`task_dashboard.autolinks`:
+  `key_prefix`, `url_template` with `<num>`, `is_alphanumeric`; review of PR #261, at the
+  author's direction). The first version had a Jira site (`task_dashboard.jira_url`) and found keys
+  by shape, `[A-Z][A-Z0-9_]+-[1-9][0-9]*`. The shape alone also matched `UTF-8` and `SHA-256` in a
+  title and cut `CVE-2024-45337` to `CVE-2024`. A `task_dashboard.jira_projects` allowlist was added
+  next and then replaced: a list of prefixes, each with its own URL template, is the allowlist and
+  the site together, is not tied to Jira or to its `/browse/` path, and is configured the way
+  GitHub already asks for it. Only the configuration's shape follows GitHub; panemux does not read
+  a repository's autolink settings, which GitHub's API ties to repository administration permission
+  (stated for GitHub Apps in its REST documentation; not checked for a user's own token).
+  Dropping a key followed by `-<digit>` was also considered, and rejected: it would have fixed only
+  the `CVE-2024` case and hidden a real key in a branch such as `PAY-418-2-retry`.
+- **Where GitHub's documentation is silent, panemux chose** (its own documentation and API
+  descriptions say what `<num>` may contain and that prefixes may not overlap, nothing more): the
+  prefix matches case included and not directly after an ASCII letter or digit, a numeric
+  identifier not directly before one, and an omitted `is_alphanumeric` means digits only. The last
+  is because an alphanumeric identifier includes `-` and so runs on through a branch name's words
+  (`TICKET-12-retry` gives `12-retry`); GitHub's own default for the field was not found.
+- **References are linked, never queried.** No tracker API is called and no ticket title is
+  fetched, so panemux holds no tracker credentials. The setting is a new top-level `task_dashboard`
+  section rather than part of `display`, since it says where links point rather than how anything
+  looks. A `url_template` must be `https`, because it becomes the address of a link the operator
+  clicks, and `<num>` must come after the host, so an identifier cannot change where a link goes.
+- **A template's host and port are held to what the browser parses** (review of PR #261).
   `url.Parse` accepted `https://jira.example.invalid:99999`, `https://ex<ample.com` and
   `https://xn--/`, which the browser's `new URL()` refuses; one such link made the browser reject
   the whole task list. Go has no WHATWG URL parser, so the check is narrower than the browser
   instead of equal to it: an IP or ASCII letters, digits and `-`, no punycode label (there is no
   decoder in the module to check one with), no numeric last label unless the host is an IPv4
-  address, and a port 1–65535. `testdata/jira-url-validation.json` is read by the Go test and by
-  the frontend's schema test, so a site Go accepts that the browser does not fails a test.
+  address, and a port 1–65535. `testdata/autolink-url-validation.json` is read by the Go test and
+  by the frontend's schema test, so a URL Go accepts that the browser does not fails a test.
 
 ## Agent Board
 

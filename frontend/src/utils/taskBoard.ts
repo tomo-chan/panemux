@@ -71,7 +71,7 @@ export function filterTasks(tasks: Task[], filter: TaskFilter): Task[] {
       task.cwd,
       task.git?.branch,
       task.git?.pr_number !== undefined ? String(task.git.pr_number) : undefined,
-      ...(task.git?.jira ?? []).map((link) => link.key),
+      ...(task.git?.autolinks ?? []).map((link) => link.text),
       task.session_id,
     ]
     return haystack.some((value) => value?.toLowerCase().includes(query))

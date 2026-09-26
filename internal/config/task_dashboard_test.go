@@ -77,46 +77,48 @@ func TestSaveLayout_TaskDashboardShortcutIsWrittenOnlyWhenSet(t *testing.T) {
 	assert.Equal(t, "J", reloaded.Display.TaskDashboardShortcutKey())
 }
 
-// jiraURLCases is testdata/jira-url-validation.json, which the frontend's
-// schema test reads too: every site accepted here has to produce a browse
-// URL the browser's HttpUrlSchema accepts, or one setting would make the
+// autolinkURLCases is testdata/autolink-url-validation.json, which the
+// frontend's schema test reads too: every template accepted here has to give
+// a URL the browser's HttpUrlSchema accepts, or one setting would make the
 // browser reject the whole GET /api/tasks response.
-type jiraURLCases struct {
+type autolinkURLCases struct {
 	Accepted []struct {
-		JiraURL   string `json:"jira_url"`
-		BrowseURL string `json:"browse_url"`
+		URLTemplate string `json:"url_template"`
+		Num         string `json:"num"`
+		URL         string `json:"url"`
 	} `json:"accepted"`
 	Refused []string `json:"refused"`
 }
 
-func readJiraURLCases(t *testing.T) jiraURLCases {
+func readAutolinkURLCases(t *testing.T) autolinkURLCases {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("..", "..", "testdata", "jira-url-validation.json"))
+	raw, err := os.ReadFile(filepath.Join("..", "..", "testdata", "autolink-url-validation.json"))
 	require.NoError(t, err)
-	var cases jiraURLCases
+	var cases autolinkURLCases
 	require.NoError(t, json.Unmarshal(raw, &cases))
 	require.NotEmpty(t, cases.Accepted)
 	require.NotEmpty(t, cases.Refused)
 	return cases
 }
 
-func TestValidate_TaskDashboardJiraURL(t *testing.T) {
-	cases := readJiraURLCases(t)
+func TestValidate_TaskDashboardAutolinkURLTemplate(t *testing.T) {
+	cases := readAutolinkURLCases(t)
 	for _, tc := range cases.Accepted {
-		t.Run(tc.JiraURL, func(t *testing.T) {
+		t.Run(tc.URLTemplate, func(t *testing.T) {
+			link := AutolinkConfig{KeyPrefix: "JIRA-", URLTemplate: tc.URLTemplate}
 			cfg := validConfig()
-			cfg.TaskDashboard.JiraURL = tc.JiraURL
+			cfg.TaskDashboard.Autolinks = []AutolinkConfig{link}
 			require.NoError(t, cfg.Validate())
-			assert.Equal(t, tc.BrowseURL, cfg.TaskDashboard.JiraBrowseURL("PAY-418"))
+			assert.Equal(t, tc.URL, link.URL(tc.Num))
 		})
 	}
-	for _, value := range cases.Refused {
-		t.Run(value, func(t *testing.T) {
+	for _, template := range cases.Refused {
+		t.Run(template, func(t *testing.T) {
 			cfg := validConfig()
-			cfg.TaskDashboard.JiraURL = value
+			cfg.TaskDashboard.Autolinks = []AutolinkConfig{{KeyPrefix: "JIRA-", URLTemplate: template}}
 			err := cfg.Validate()
 			require.Error(t, err)
-			assert.Contains(t, err.Error(), "task_dashboard.jira_url")
+			assert.Contains(t, err.Error(), "task_dashboard.autolinks[0].url_template")
 		})
 	}
 }
@@ -131,84 +133,69 @@ func TestIsNotHostLabelRune(t *testing.T) {
 	}
 }
 
-func TestJiraBrowseURL(t *testing.T) {
-	assert.Empty(t, TaskDashboardConfig{}.JiraBrowseURL("PAY-418"))
-}
-
-func TestValidate_TaskDashboardJiraProjects(t *testing.T) {
+func TestValidate_TaskDashboardAutolinkKeyPrefix(t *testing.T) {
+	const template = "https://jira.example.com/<num>"
 	tests := []struct {
 		name     string
-		projects []string
-		ok       bool
+		wantErr  string
+		prefixes []string
 	}{
-		{"unset", nil, true},
-		{"project keys", []string{"PAY", "OPS", "A1_B"}, true},
-		{"lower case", []string{"pay"}, false},
-		{"one letter", []string{"P"}, false},
-		{"a whole issue key", []string{"PAY-418"}, false},
-		{"empty", []string{""}, false},
-		{"surrounding space", []string{" PAY"}, false},
-		{"starts with a digit", []string{"1PAY"}, false},
-		{"one bad among good", []string{"PAY", "ops"}, false},
+		{"one", "", []string{"JIRA-"}},
+		{"several", "", []string{"JIRA-", "OPS-", "SUPPORT-"}},
+		{"no dash", "", []string{"TICKET"}},
+		{"empty", "task_dashboard.autolinks[0].key_prefix", []string{""}},
+		{"space", "task_dashboard.autolinks[0].key_prefix", []string{"JIRA -"}},
+		{"control character", "task_dashboard.autolinks[0].key_prefix", []string{"JIRA-\t"}},
+		{"overlapping, as GitHub refuses", "task_dashboard.autolinks[1].key_prefix", []string{"TICKET", "TICK"}},
+		{"overlapping the other way", "task_dashboard.autolinks[1].key_prefix", []string{"TICK", "TICKET"}},
+		{"the same twice", "task_dashboard.autolinks[2].key_prefix", []string{"JIRA-", "OPS-", "JIRA-"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := validConfig()
-			cfg.TaskDashboard.JiraURL = "https://example.atlassian.net"
-			cfg.TaskDashboard.JiraProjects = tt.projects
+			for _, prefix := range tt.prefixes {
+				cfg.TaskDashboard.Autolinks = append(cfg.TaskDashboard.Autolinks,
+					AutolinkConfig{KeyPrefix: prefix, URLTemplate: template})
+			}
 			err := cfg.Validate()
-			if tt.ok {
+			if tt.wantErr == "" {
 				assert.NoError(t, err)
 				return
 			}
 			require.Error(t, err)
-			assert.Contains(t, err.Error(), "task_dashboard.jira_projects")
+			assert.Contains(t, err.Error(), tt.wantErr)
 		})
 	}
 }
 
-func TestLinksJiraKey(t *testing.T) {
-	all := TaskDashboardConfig{JiraURL: "https://example.atlassian.net"}
-	assert.True(t, all.LinksJiraKey("PAY-418"), "no list links every key")
-	assert.True(t, all.LinksJiraKey("CVE-2024"))
-
-	listed := TaskDashboardConfig{JiraURL: "https://example.atlassian.net", JiraProjects: []string{"PAY", "A1_B"}}
-	assert.True(t, listed.LinksJiraKey("PAY-418"))
-	assert.True(t, listed.LinksJiraKey("A1_B-7"))
-	assert.False(t, listed.LinksJiraKey("CVE-2024"))
-	assert.False(t, listed.LinksJiraKey("PAYX-1"), "a project key is matched whole, not as a prefix")
-	assert.False(t, listed.LinksJiraKey("PA-1"))
+func TestAutolinkURL_ReplacesEveryPlaceholder(t *testing.T) {
+	link := AutolinkConfig{KeyPrefix: "JIRA-", URLTemplate: "https://jira.example.com/<num>?k=JIRA-<num>"}
+	assert.Equal(t, "https://jira.example.com/123?k=JIRA-123", link.URL("123"))
 }
 
-func TestLoad_ReadsTaskDashboardJiraProjects(t *testing.T) {
+// The example from GitHub's own autolink settings page, written the way
+// config.yaml carries it; is_alphanumeric defaults to false (numeric).
+func TestLoad_ReadsTaskDashboardAutolinks(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	require.NoError(t, os.WriteFile(path, []byte("server:\n  port: 8080\ntask_dashboard:\n"+
-		"  jira_url: https://example.atlassian.net\n  jira_projects: [PAY, OPS]\n"), 0o600))
+	require.NoError(t, os.WriteFile(path, []byte("server:\n  port: 8080\ntask_dashboard:\n  autolinks:\n"+
+		"    - key_prefix: JIRA-\n      url_template: https://jira.example.com/JIRA-<num>\n"+
+		"    - key_prefix: TICKET-\n      url_template: https://tickets.example.com/<num>\n"+
+		"      is_alphanumeric: true\n"), 0o600))
 	cfg, err := Load(path)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"PAY", "OPS"}, cfg.TaskDashboard.JiraProjects)
+	want := []AutolinkConfig{
+		{KeyPrefix: "JIRA-", URLTemplate: "https://jira.example.com/JIRA-<num>"},
+		{KeyPrefix: "TICKET-", URLTemplate: "https://tickets.example.com/<num>", IsAlphanumeric: true},
+	}
+	assert.Equal(t, want, cfg.TaskDashboard.Autolinks)
 
 	require.NoError(t, cfg.SaveLayout(cfg.Layout))
 	reloaded, err := Load(path)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"PAY", "OPS"}, reloaded.TaskDashboard.JiraProjects)
+	assert.Equal(t, want, reloaded.TaskDashboard.Autolinks)
 }
 
-func TestLoad_ReadsTaskDashboardJiraURL(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.yaml")
-	require.NoError(t, os.WriteFile(path,
-		[]byte("server:\n  port: 8080\ntask_dashboard:\n  jira_url: https://example.atlassian.net\n"), 0o600))
-	cfg, err := Load(path)
-	require.NoError(t, err)
-	assert.Equal(t, "https://example.atlassian.net", cfg.TaskDashboard.JiraURL)
-
-	require.NoError(t, cfg.SaveLayout(cfg.Layout))
-	reloaded, err := Load(path)
-	require.NoError(t, err)
-	assert.Equal(t, "https://example.atlassian.net", reloaded.TaskDashboard.JiraURL)
-}
-
-// An operator who never set a Jira site must not find a task_dashboard block
+// An operator who never set autolinks must not find a task_dashboard block
 // written into their file by an unrelated save.
 func TestSaveLayout_TaskDashboardIsWrittenOnlyWhenSet(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")

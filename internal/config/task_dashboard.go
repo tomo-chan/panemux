@@ -5,7 +5,6 @@ import (
 	"net"
 	"net/url"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 	"unicode"
@@ -51,93 +50,101 @@ func validateDisplay(d DisplayConfig) []string {
 
 // TaskDashboardConfig holds the top-level task_dashboard settings.
 type TaskDashboardConfig struct {
-	// JiraURL is the Jira site a task's Jira keys link into, as
-	// <JiraURL>/browse/<key>. Empty means no Jira links.
-	JiraURL string `yaml:"jira_url,omitempty" json:"jira_url,omitempty"`
-	// JiraProjects, when set, are the only Jira project keys linked: a key
-	// found in a branch name or PR title whose project is not listed is
-	// dropped. Empty links every key of the right shape.
-	JiraProjects []string `yaml:"jira_projects,omitempty" json:"jira_projects,omitempty"`
+	// Autolinks turn references in a task's branch name and pull request
+	// title into links, the way a GitHub repository's autolink references
+	// do. Empty means none.
+	Autolinks []AutolinkConfig `yaml:"autolinks,omitempty" json:"autolinks,omitempty"`
 }
 
-// jiraProjectKeyRe is a Jira project key, the part of an issue key before
-// its "-": the same form the task dashboard finds keys by.
-var jiraProjectKeyRe = regexp.MustCompile(`^[A-Z][A-Z0-9_]+$`)
-
-// LinksJiraKey reports whether the Jira issue key (PROJECT-123) is linked:
-// always without JiraProjects, and otherwise only when its project is listed.
-func (d TaskDashboardConfig) LinksJiraKey(key string) bool {
-	if len(d.JiraProjects) == 0 {
-		return true
-	}
-	project, _, _ := strings.Cut(key, "-")
-	return slices.Contains(d.JiraProjects, project)
+// AutolinkConfig is one autolink reference, shaped like GitHub's (the
+// key_prefix, url_template and is_alphanumeric of its REST API): KeyPrefix
+// followed by an identifier links to URLTemplate with every <num> replaced
+// by that identifier.
+type AutolinkConfig struct {
+	KeyPrefix   string `yaml:"key_prefix"  json:"key_prefix"`
+	URLTemplate string `yaml:"url_template" json:"url_template"`
+	// IsAlphanumeric makes the identifier A-Z (either case), 0-9 and "-",
+	// as GitHub defines it. Unset means digits only.
+	IsAlphanumeric bool `yaml:"is_alphanumeric,omitempty" json:"is_alphanumeric,omitempty"`
 }
 
-// JiraBrowseURL is the page of the Jira issue key on the configured site, or
-// "" when no site is configured.
-func (d TaskDashboardConfig) JiraBrowseURL(key string) string {
-	if d.JiraURL == "" {
-		return ""
-	}
-	return strings.TrimRight(d.JiraURL, "/") + "/browse/" + key
+// autolinkPlaceholder is where the identifier goes in a url_template.
+const autolinkPlaceholder = "<num>"
+
+// URL is the link for the identifier num.
+func (a AutolinkConfig) URL(num string) string {
+	return strings.ReplaceAll(a.URLTemplate, autolinkPlaceholder, num)
 }
 
-// validateTaskDashboard checks each jira_projects entry is a project key,
-// and the Jira site as validateJiraURL does.
+// validateTaskDashboard checks every autolink's key_prefix and url_template.
 func validateTaskDashboard(d TaskDashboardConfig) []string {
 	var errs []string
-	for _, project := range d.JiraProjects {
-		if !jiraProjectKeyRe.MatchString(project) {
+	for i, link := range d.Autolinks {
+		field := fmt.Sprintf("task_dashboard.autolinks[%d]", i)
+		if msg := validateAutolinkKeyPrefix(d.Autolinks[:i], link.KeyPrefix); msg != "" {
+			errs = append(errs, fmt.Sprintf("%s.key_prefix %q %s", field, link.KeyPrefix, msg))
+		}
+		if !validAutolinkURLTemplate(link.URLTemplate) {
 			errs = append(errs, fmt.Sprintf(
-				"task_dashboard.jira_projects entry %q must be a Jira project key: "+
-					"an upper-case letter, then upper-case letters, digits or _",
-				project))
+				"%s.url_template %q must be an https URL with a valid host and port, no credentials, "+
+					"and %s after the host", field, link.URLTemplate, autolinkPlaceholder))
 		}
 	}
-	return append(errs, validateJiraURL(d.JiraURL)...)
+	return errs
 }
 
-// validateJiraURL accepts only an absolute https URL with a host and
-// nothing a /browse/<key> suffix could not be appended to: no query,
-// fragment, credentials, whitespace or control characters. The URL becomes
+// validateAutolinkKeyPrefix refuses an empty prefix, one with whitespace or
+// control characters, and — as GitHub does — one that overlaps a prefix
+// before it: TICKET and TICK would both match TICKET123.
+func validateAutolinkKeyPrefix(earlier []AutolinkConfig, prefix string) string {
+	if prefix == "" || strings.IndexFunc(prefix, isSpaceOrControl) >= 0 {
+		return "must be non-empty text without whitespace"
+	}
+	for _, other := range earlier {
+		if strings.HasPrefix(prefix, other.KeyPrefix) || strings.HasPrefix(other.KeyPrefix, prefix) {
+			return fmt.Sprintf("overlaps key_prefix %q", other.KeyPrefix)
+		}
+	}
+	return ""
+}
+
+func isSpaceOrControl(r rune) bool {
+	return unicode.IsSpace(r) || unicode.IsControl(r)
+}
+
+// validAutolinkURLTemplate accepts only an absolute https URL with a host,
+// no credentials, no whitespace or control characters, and <num> after the
+// host, so an identifier never changes where the link goes. The URL becomes
 // the href of a link the dashboard opens, so nothing but https reaches it.
 //
 // The host and port are held to what the browser's URL parser (the WHATWG
 // one behind the frontend's HttpUrlSchema) also accepts, since the browser
 // rejects the whole GET /api/tasks response for one link it cannot parse.
-// testdata/jira-url-validation.json is checked by both sides.
-func validateJiraURL(jiraURL string) []string {
-	if jiraURL == "" {
-		return nil
+// testdata/autolink-url-validation.json is checked by both sides.
+func validAutolinkURLTemplate(template string) bool {
+	at := strings.Index(template, autolinkPlaceholder)
+	if at < 0 || strings.IndexFunc(template, isSpaceOrControl) >= 0 {
+		return false
 	}
-	invalid := []string{fmt.Sprintf(
-		"task_dashboard.jira_url %q must be an https URL with a valid host and port, "+
-			"and no query, fragment or credentials",
-		jiraURL)}
-	if strings.IndexFunc(jiraURL, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) >= 0 {
-		return invalid
+	authority, found := strings.CutPrefix(template[:at], "https://")
+	if !found || !strings.ContainsAny(authority, "/?#") {
+		return false
 	}
-	u, err := url.Parse(jiraURL)
-	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil ||
-		u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || strings.HasSuffix(jiraURL, "#") {
-
-		return invalid
+	u, err := url.Parse(AutolinkConfig{URLTemplate: template}.URL("0"))
+	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil {
+		return false
 	}
-	if !validJiraHost(u.Hostname()) || !validJiraPort(u.Port()) {
-		return invalid
-	}
-	return nil
+	return validLinkHost(u.Hostname()) && validLinkPort(u.Port())
 }
 
-// validJiraHost is an IP address, or dot-separated labels of ASCII letters,
+// validLinkHost is an IP address, or dot-separated labels of ASCII letters,
 // digits and hyphens. It is narrower than a browser allows, on purpose:
 //   - a label starting "xn--" is punycode, which a browser decodes and rejects
 //     when that fails; panemux has no decoder to check it with, so
 //     internationalized hosts are refused rather than guessed at;
 //   - a last label that is a number ("123", "0x1") makes a browser parse the
 //     whole host as an IPv4 address, so such a host must be one.
-func validJiraHost(host string) bool {
+func validLinkHost(host string) bool {
 	if net.ParseIP(host) != nil {
 		return true
 	}
@@ -159,7 +166,7 @@ func isNotHostLabelRune(r rune) bool {
 
 // isNumericHostLabel reports whether the WHATWG URL parser reads label as a
 // number: decimal digits, or "0x"/"0X" followed by hex digits (possibly none).
-// validJiraHost never passes it an empty label.
+// validLinkHost never passes it an empty label.
 func isNumericHostLabel(label string) bool {
 	digits, base := label, "0123456789"
 	if len(label) >= 2 && label[0] == '0' && (label[1] == 'x' || label[1] == 'X') {
@@ -173,9 +180,9 @@ func isNumericHostLabel(label string) bool {
 	return true
 }
 
-// validJiraPort is no port, or a TCP port 1-65535. url.Parse has already
+// validLinkPort is no port, or a TCP port 1-65535. url.Parse has already
 // refused anything but digits.
-func validJiraPort(port string) bool {
+func validLinkPort(port string) bool {
 	if port == "" {
 		return true
 	}

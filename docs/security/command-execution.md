@@ -165,7 +165,8 @@ enforces again when it starts.
 
 The dashboard's links are `href`s the operator clicks, so none may carry a scheme a browser would run.
 An issue URL from `gh` is kept only when it is `http` or `https` (`closingIssueLinks`), and
-`task_dashboard.jira_url` is refused at load unless it is an `https` URL whose host and port the
-browser's URL parser also accepts (`validateJiraURL`); the browser checks every link in the response again
-(`HttpUrlSchema`). A Jira key is only ever matched by `jiraKeyRe`, so the text appended after
-`/browse/` is letters, digits, `_` and `-`.
+a `task_dashboard.autolinks` `url_template` is refused at load unless it is an `https` URL whose
+host and port the browser's URL parser also accepts, with `<num>` after the host
+(`validAutolinkURLTemplate`), so an identifier cannot change where a link goes. The browser checks
+every link in the response again (`HttpUrlSchema`). The identifier put in place of `<num>` is only
+ever digits, or letters, digits and `-` (`isAutolinkIDByte`).

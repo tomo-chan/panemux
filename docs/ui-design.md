@@ -326,7 +326,7 @@ terminal that had focus cannot receive what is typed into the dashboard.
   red chip with the error and a `Reconnect` button for a host that failed, and `connecting…` for a
   host whose connection is still coming up; then when the board was last updated, `Refresh`, and
   `Workspaces`. A long host error is truncated in the chip and shown in full as its tooltip.
-- **Filter bar.** Text filter over directory, branch, PR number, Jira key and session ID; rows split by none,
+- **Filter bar.** Text filter over directory, branch, PR number, reference (such as `JIRA-123`) and session ID; rows split by none,
   host, or repository; a host filter.
 - **Kanban.** Columns in the order a person should look at them: Waiting for input (highlighted in
   gold, "Needs you"), Working, Idle, Running / unknown, Stopped. Column headers stay visible while
@@ -335,7 +335,7 @@ terminal that had focus cannot receive what is typed into the dashboard.
 - **Cards.** A left border in the state's color; host, agent and how long the task has been in its
   state; the working directory's last segment as the title (there is no summary yet) with the full
   directory under it; for a waiting task its reason and "open the pane to respond"; repository,
-  branch, and the PR, issue and Jira links (`PR #87`, `Issue #252`, `Jira PAY-418`; each opens a new
+  branch, and the PR, issue and reference links (`PR #87`, `Issue #252`, `JIRA-123`; each opens a new
   tab; an issue in another repository than the PR's is `owner/name#9`); and at the bottom where the task runs with its `Open` / `Go to pane`
   button. A task that cannot be opened shows why instead of a button. The card is a pointer target
   for selection, and its title is a button, so the card never nests its links and buttons inside
@@ -343,7 +343,7 @@ terminal that had focus cannot receive what is typed into the dashboard.
 - **Detail panel.** Fixed to the window height at the right. Its head — state, host, agent, start,
   title, waiting reason, and the open action or the reason there is none — stays in place, and only
   the body below scrolls: state notes, links (repository, branch, pull request, then issues noted
-  "closed by the pull request" and Jira keys noted "from the branch name or pull request title",
+  "closed by the pull request" and References noted "from the branch name or pull request title",
   each row only when there is something to show), the chain from task to agent to tmux session to pane
   to workspace, and the directory and session ID. At 1000px and narrower it slides over the board
   with a close button.

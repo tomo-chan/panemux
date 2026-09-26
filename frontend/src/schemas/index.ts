@@ -359,14 +359,14 @@ export const TaskIssueLinkSchema = z.object({
 
 export type TaskIssueLink = z.infer<typeof TaskIssueLinkSchema>
 
-// A Jira key from the task's branch name or pull request title, linked into
-// the configured Jira site (task_dashboard.jira_url).
-export const TaskJiraLinkSchema = z.object({
-  key: z.string().min(1),
+// A reference in the task's branch name or pull request title (JIRA-123) that
+// a task_dashboard.autolinks entry turned into a link.
+export const TaskAutolinkSchema = z.object({
+  text: z.string().min(1),
   url: HttpUrlSchema,
 })
 
-export type TaskJiraLink = z.infer<typeof TaskJiraLinkSchema>
+export type TaskAutolink = z.infer<typeof TaskAutolinkSchema>
 
 export const TaskGitSchema = z.object({
   repo: z.string().optional(),
@@ -375,7 +375,7 @@ export const TaskGitSchema = z.object({
   pr_url: HttpUrlSchema.optional(),
   pr_number: z.number().int().positive().optional(),
   issues: z.array(TaskIssueLinkSchema).optional(),
-  jira: z.array(TaskJiraLinkSchema).optional(),
+  autolinks: z.array(TaskAutolinkSchema).optional(),
 })
 
 export type TaskGit = z.infer<typeof TaskGitSchema>

@@ -38,9 +38,9 @@ const response: TasksResponse = {
           { number: 252, url: 'https://github.com/example-org/payment/issues/252', repo: 'example-org/payment' },
           { number: 9, url: 'https://github.com/example-org/infra/issues/9', repo: 'example-org/infra' },
         ],
-        jira: [
-          { key: 'PAY-418', url: 'https://example.atlassian.net/browse/PAY-418' },
-          { key: 'OPS-77', url: 'https://example.atlassian.net/browse/OPS-77' },
+        autolinks: [
+          { text: 'PAY-418', url: 'https://jira.example.com/browse/PAY-418' },
+          { text: 'OPS-77', url: 'https://jira.example.com/browse/OPS-77' },
         ],
       },
     }),
@@ -166,14 +166,14 @@ describe('TaskDashboard', () => {
     expect(link).toHaveAttribute('target', '_blank')
   })
 
-  it('links the issues the pull request closes and the Jira keys of a task in a new tab', () => {
+  it('links the issues the pull request closes and the references of a task in a new tab', () => {
     renderDashboard()
     const busy = screen.getByTestId('task-card-busy-1')
     const expected: [string, string][] = [
       ['Issue #252', 'https://github.com/example-org/payment/issues/252'],
       ['Issue example-org/infra#9', 'https://github.com/example-org/infra/issues/9'],
-      ['Jira PAY-418', 'https://example.atlassian.net/browse/PAY-418'],
-      ['Jira OPS-77', 'https://example.atlassian.net/browse/OPS-77'],
+      ['PAY-418', 'https://jira.example.com/browse/PAY-418'],
+      ['OPS-77', 'https://jira.example.com/browse/OPS-77'],
     ]
     for (const [name, href] of expected) {
       const link = within(busy).getByRole('link', { name })
@@ -189,14 +189,15 @@ describe('TaskDashboard', () => {
     )
     expect(within(detail).getByRole('link', { name: 'example-org/infra#9' })).toHaveAttribute('target', '_blank')
     expect(detail).toHaveTextContent('closed by the pull request')
+    expect(detail).toHaveTextContent('References')
     expect(within(detail).getByRole('link', { name: 'PAY-418' })).toHaveAttribute(
-      'href', 'https://example.atlassian.net/browse/PAY-418',
+      'href', 'https://jira.example.com/browse/PAY-418',
     )
     expect(within(detail).getByRole('link', { name: 'OPS-77' })).toHaveAttribute('target', '_blank')
     expect(detail).toHaveTextContent('from the branch name or pull request title')
 
     // A task with neither shows no row for them.
-    expect(within(screen.getByTestId('task-card-wait-1')).queryByRole('link', { name: /^(Issue|Jira) / }))
+    expect(within(screen.getByTestId('task-card-wait-1')).queryByRole('link', { name: /^(Issue |PAY-|OPS-)/ }))
       .not.toBeInTheDocument()
     fireEvent.click(screen.getByTestId('task-card-stop-1'))
     expect(detail).not.toHaveTextContent('closed by the pull request')

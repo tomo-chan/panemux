@@ -127,7 +127,7 @@ The pane that belongs to a task is found in the browser from the current workspa
 for a task on the panemux host, or an `ssh_tmux` pane on the task's connection, whose
 `tmux_session` is the task's tmux session.
 
-### Repository, branch, pull request, issues and Jira keys
+### Repository, branch, pull request, issues and references
 
 The git metadata of each task's working directory is resolved the way a pane header's is: `git` on
 the task's host (locally, or over the host's dashboard connection) and `gh pr view` on the panemux
@@ -143,7 +143,7 @@ the directory within the 30 seconds: the directory is looked up again, with its 
 
 The metadata is the directory's **current** state. For a running task that is the branch it is
 working on; for a stopped task it is whatever has been checked out since, so a stopped task reports
-only `repo` and `repo_url`, never `branch`, a pull request, issues or Jira keys.
+only `repo` and `repo_url`, never `branch`, a pull request, issues or references.
 
 - **Issues** are the ones the pull request closes: the same `gh pr view` call reads
   `closingIssuesReferences` along with the pull request's URL, number and title, so no further
@@ -151,19 +151,23 @@ only `repo` and `repo_url`, never `branch`, a pull request, issues or Jira keys.
   number is not positive is left out. Issue titles are not shown. The field needs `gh` 2.72.0 or
   later. An older `gh` refuses the whole call (`Unknown JSON field`), so the pull request is looked
   up again with only its URL and number, as a pane header does: the PR link stays, and the task has
-  no issues and no Jira keys from the PR title.
-- **Jira keys** are found in the branch name and then the pull request title: an upper-case letter,
-  one or more upper-case letters, digits or `_`, `-`, and a number without a leading zero
-  (`[A-Z][A-Z0-9_]+-[1-9][0-9]*`), with no ASCII letter or digit directly before or after it.
-  `PAY-418-retry-backoff` gives `PAY-418`; `xPAY-418`, `PAY-418a` and `pay-418` give nothing. Every
-  key is listed once, in the order found. Each links to `<task_dashboard.jira_url>/browse/<key>`
-  (a trailing `/` on the setting is dropped). Without `task_dashboard.jira_url` no key is reported.
-  Jira itself is never contacted.
-- With `task_dashboard.jira_projects` set, only keys of the listed projects are linked
-  (`PAY-418` for `[PAY]`, not `PAYX-1`). Without it, nothing checks that a key names a real Jira
-  issue, so text of the same shape is linked too: `UTF-8`, `SHA-256` or `ISO-8601` in a PR title
-  each become a key, and `CVE-2024-45337` gives `CVE-2024`, because the `-` after `2024` does not
-  stop a match.
+  no issues and no references from the PR title.
+- **References** are what `task_dashboard.autolinks` finds in the branch name and then the pull
+  request title. Each entry works like a GitHub repository's autolink reference: its `key_prefix`
+  followed by an identifier links to its `url_template` with every `<num>` replaced by the
+  identifier. With `key_prefix: JIRA-` and `url_template: https://jira.example.com/JIRA-<num>`,
+  `JIRA-123` links to `https://jira.example.com/JIRA-123`.
+  - The identifier is digits, or with `is_alphanumeric: true` the letters `A`–`Z` in either case,
+    digits and `-`, taking as many as follow the prefix. An alphanumeric identifier therefore runs
+    on through a branch name's words: `TICKET-12-retry` gives `12-retry`.
+  - The prefix matches exactly as written, case included, and not when an ASCII letter or digit
+    comes directly before it. A numeric identifier does not match when a letter or digit follows
+    it. `JIRA-418-retry-backoff` gives `JIRA-418`; `xJIRA-418`, `JIRA-418a` and `jira-418` give
+    nothing.
+  - Every reference is listed once, in the order found, with the text that matched (`JIRA-123`).
+  - Only the configured prefixes match, so text that merely looks like a ticket key (`UTF-8`,
+    `CVE-2024-45337`) is not linked unless its prefix is configured.
+  - Without `task_dashboard.autolinks` there are no references. No issue tracker is ever contacted.
 
 ### Opening a task
 
@@ -213,7 +217,7 @@ Collects from every host and returns:
         "issues": [
           { "number": 255, "url": "https://github.com/example/panemux/issues/255", "repo": "example/panemux" }
         ],
-        "jira": [{ "key": "PAY-418", "url": "https://example.atlassian.net/browse/PAY-418" }]
+        "autolinks": [{ "text": "PAY-418", "url": "https://jira.example.com/browse/PAY-418" }]
       }
     }
   ]

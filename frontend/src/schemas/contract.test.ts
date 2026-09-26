@@ -149,7 +149,7 @@ const fixtureless: Record<string, string> = {
   TaskLocationSchema: 'component of TaskSchema, via tasks',
   TaskGitSchema: 'component of TaskSchema, via tasks',
   TaskIssueLinkSchema: 'component of TaskGitSchema, via tasks',
-  TaskJiraLinkSchema: 'component of TaskGitSchema, via tasks',
+  TaskAutolinkSchema: 'component of TaskGitSchema, via tasks',
   TaskSchema: 'component of TasksResponseSchema',
   TaskHostSchema: 'component of TasksResponseSchema',
 }
@@ -364,10 +364,10 @@ const unexercisedOptionals: Record<string, string> = {
   'tasks.tasks[].git.branch': 'a branch would make the capture run a real `gh pr view`',
   'tasks.tasks[].git.pr_number': 'needs a `gh pr view` lookup against a real PR',
   'tasks.tasks[].git.pr_url': 'needs a `gh pr view` lookup against a real PR',
-  // Issues come from the same `gh pr view`; Jira keys from the branch name or
+  // Issues come from the same `gh pr view`; references from the branch name or
   // the PR title, both of which the capture leaves out for the reason above.
   'tasks.tasks[].git.issues': 'needs a `gh pr view` lookup against a real PR',
-  'tasks.tasks[].git.jira': 'a Jira key needs a branch or PR title, which would make the capture run `gh pr view`',
+  'tasks.tasks[].git.autolinks': 'a reference needs a branch or PR title, which would make the capture run `gh pr view`',
 }
 
 describe('optional field coverage', () => {

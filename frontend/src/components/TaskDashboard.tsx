@@ -344,9 +344,9 @@ const GitLinks: React.FC<{ task: Task }> = ({ task }) => {
           Issue {issueLabel(issue, git.pr_url)}
         </a>
       ))}
-      {git.jira?.map((link) => (
-        <a key={link.key} href={link.url} target="_blank" rel="noopener noreferrer">
-          Jira {link.key}
+      {git.autolinks?.map((link) => (
+        <a key={link.text} href={link.url} target="_blank" rel="noopener noreferrer">
+          {link.text}
         </a>
       ))}
     </div>
@@ -500,15 +500,15 @@ const TaskDetail: React.FC<TaskDetailProps> = ({ task, pane, open, nowMs, onOpen
                   </dd>
                 </>
               )}
-              {task.git.jira && task.git.jira.length > 0 && (
+              {task.git.autolinks && task.git.autolinks.length > 0 && (
                 <>
-                  <dt>Jira</dt>
+                  <dt>References</dt>
                   <dd>
                     <ul className="td-linklist">
-                      {task.git.jira.map((link) => (
-                        <li key={link.key}>
+                      {task.git.autolinks.map((link) => (
+                        <li key={link.text}>
                           <a href={link.url} target="_blank" rel="noopener noreferrer">
-                            {link.key}
+                            {link.text}
                           </a>
                         </li>
                       ))}

@@ -40,14 +40,18 @@ display:
   task_dashboard_shortcut: "S"
 
 # ── Task dashboard ────────────────────────────────────────────────────────────
-# Jira site that Jira keys found in a task's branch name or PR title (such as
-# PAY-418) link into, as <jira_url>/browse/<key>. https only. Jira is never
-# queried. Omit it for no Jira links.
-# `jira_projects` optionally limits the links to those projects' keys, so text
-# that only looks like a key (UTF-8, CVE-2024-45337) is not linked.
+# Autolink references, shaped like a GitHub repository's: `key_prefix` followed
+# by an identifier in a task's branch name or PR title links to `url_template`
+# with <num> replaced by the identifier (JIRA-123 below links to
+# https://jira.example.com/JIRA-123). The identifier is digits unless
+# `is_alphanumeric` is true. https only; no tracker is ever queried.
 # task_dashboard:
-#   jira_url: "https://example.atlassian.net"
-#   jira_projects: [PAY, OPS]
+#   autolinks:
+#     - key_prefix: "JIRA-"
+#       url_template: "https://jira.example.com/JIRA-<num>"
+#     - key_prefix: "TICKET-"
+#       url_template: "https://tickets.example.com/ticket?id=<num>"
+#       is_alphanumeric: true
 
 # ── Opening URLs from a pane ──────────────────────────────────────────────────
 # When a URL is opened from a pane, panemux republishes the URL's loopback

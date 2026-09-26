@@ -27,7 +27,7 @@ import {
   BoardMessageSchema,
   BoardMessagesResponseSchema,
   TasksResponseSchema,
-  TaskJiraLinkSchema,
+  TaskAutolinkSchema,
 } from './index'
 
 describe('TasksResponseSchema', () => {
@@ -97,28 +97,28 @@ describe('TasksResponseSchema', () => {
     }).success).toBe(false)
   })
 
-  it('keeps the issues a PR closes and the Jira keys of a task', () => {
+  it('keeps the issues a PR closes and the references of a task', () => {
     const git = {
       branch: 'PAY-418-retry',
       issues: [
         { number: 252, url: 'https://github.com/example/panemux/issues/252', repo: 'example/panemux' },
         { number: 9, url: 'https://github.com/example/infra/issues/9' },
       ],
-      jira: [{ key: 'PAY-418', url: 'https://example.atlassian.net/browse/PAY-418' }],
+      autolinks: [{ text: 'JIRA-123', url: 'https://jira.example.com/JIRA-123' }],
     }
     const result = TasksResponseSchema.parse({ hosts: [], tasks: [{ ...task, git }] })
     expect(result.tasks[0].git).toEqual(git)
   })
 
-  // efficacy:exempt pins that the browser accepts every Jira site internal/config accepts; it guards the
-  // agreement between the two validators rather than a behavior this branch's schema code adds.
-  it('accepts the browse URL of every Jira site the config accepts', () => {
+  // efficacy:exempt pins that the browser accepts every autolink URL internal/config accepts; it guards
+  // the agreement between the two validators rather than a behavior this branch's schema code adds.
+  it('accepts the URL of every autolink template the config accepts', () => {
     const cases = JSON.parse(
-      readFileSync(resolve(process.cwd(), '..', 'testdata', 'jira-url-validation.json'), 'utf8'),
-    ) as { accepted: { jira_url: string; browse_url: string }[] }
+      readFileSync(resolve(process.cwd(), '..', 'testdata', 'autolink-url-validation.json'), 'utf8'),
+    ) as { accepted: { url_template: string; url: string }[] }
     expect(cases.accepted.length).toBeGreaterThan(0)
-    for (const { browse_url } of cases.accepted) {
-      expect(TaskJiraLinkSchema.safeParse({ key: 'PAY-418', url: browse_url }).success, browse_url).toBe(true)
+    for (const { url } of cases.accepted) {
+      expect(TaskAutolinkSchema.safeParse({ text: 'JIRA-123', url }).success, url).toBe(true)
     }
   })
 
@@ -126,8 +126,8 @@ describe('TasksResponseSchema', () => {
     ['an issue URL that is not http(s)', { issues: [{ number: 1, url: 'javascript:alert(1)' }] }],
     ['an issue without a number', { issues: [{ url: 'https://github.com/example/r/issues/1' }] }],
     ['an issue number that is not positive', { issues: [{ number: 0, url: 'https://github.com/example/r/issues/0' }] }],
-    ['a Jira URL that is not http(s)', { jira: [{ key: 'PAY-1', url: 'javascript:alert(1)' }] }],
-    ['a Jira link without a key', { jira: [{ url: 'https://example.atlassian.net/browse/PAY-1' }] }],
+    ['a reference URL that is not http(s)', { autolinks: [{ text: 'JIRA-1', url: 'javascript:alert(1)' }] }],
+    ['a reference without its text', { autolinks: [{ url: 'https://jira.example.com/JIRA-1' }] }],
   ])('rejects %s', (_name, git) => {
     expect(TasksResponseSchema.safeParse({ hosts: [], tasks: [{ ...task, git }] }).success).toBe(false)
   })

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -14,6 +13,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"panemux/internal/config"
 	"panemux/internal/session"
 	"panemux/internal/tasks"
 )
@@ -21,15 +21,16 @@ import (
 // taskGitInfo is the repository, branch and pull request of a task's working
 // directory — the same metadata a pane header shows, looked up for the
 // task's own directory instead of a pane's — with the issues the pull
-// request closes and the Jira keys its branch name and title carry.
+// request closes and the references its branch name and title carry.
 type taskGitInfo struct {
-	Repo     string          `json:"repo,omitempty"`
-	RepoURL  string          `json:"repo_url,omitempty"`
-	Branch   string          `json:"branch,omitempty"`
-	PRURL    string          `json:"pr_url,omitempty"`
-	Issues   []taskIssueLink `json:"issues,omitempty"`
-	Jira     []taskJiraLink  `json:"jira,omitempty"`
-	PRNumber int             `json:"pr_number,omitempty"`
+	Repo    string          `json:"repo,omitempty"`
+	RepoURL string          `json:"repo_url,omitempty"`
+	Branch  string          `json:"branch,omitempty"`
+	PRURL   string          `json:"pr_url,omitempty"`
+	Issues  []taskIssueLink `json:"issues,omitempty"`
+	// Autolinks are the references task_dashboard.autolinks finds.
+	Autolinks []taskAutolink `json:"autolinks,omitempty"`
+	PRNumber  int            `json:"pr_number,omitempty"`
 }
 
 // taskIssueLink is one GitHub issue the task's pull request closes. Repo is
@@ -40,44 +41,75 @@ type taskIssueLink struct {
 	Number int    `json:"number"`
 }
 
-// taskJiraLink is one Jira key found in the task's branch name or pull
-// request title, and its page on the configured Jira site.
-type taskJiraLink struct {
-	Key string `json:"key"`
-	URL string `json:"url"`
+// taskAutolink is one reference found in the task's branch name or pull
+// request title by a task_dashboard.autolinks entry — such as JIRA-123 — and
+// the URL that entry makes of it.
+type taskAutolink struct {
+	Text string `json:"text"`
+	URL  string `json:"url"`
 }
 
 // prTaskFields is what the task dashboard reads of a pull request: the
-// title for its Jira keys and the issues it closes, in the same `gh` call.
+// title for its references and the issues it closes, in the same `gh` call.
 const prTaskFields = "url,number,title,closingIssuesReferences"
 
-// jiraKeyRe is a Jira issue key: a project key of an upper-case letter and
-// one or more upper-case letters, digits or underscores, then "-" and an
-// issue number without a leading zero. jiraKeys also requires that no ASCII
-// letter or digit touches it on either side.
-var jiraKeyRe = regexp.MustCompile(`[A-Z][A-Z0-9_]+-[1-9][0-9]*`)
-
-// jiraKeys lists the Jira keys in texts, in the order they appear, each
-// once.
-func jiraKeys(texts ...string) []string {
-	var keys []string
+// autolinkRefs lists the references in texts, in the order they appear,
+// each once. A reference is an autolink's key_prefix, exactly as written,
+// followed by its identifier: digits, or with is_alphanumeric letters,
+// digits and "-", as many as there are. No ASCII letter or digit may come
+// directly before the prefix or, for digits, after the identifier.
+// validateTaskDashboard refuses overlapping prefixes, so at most one
+// autolink matches at any position.
+func autolinkRefs(links []config.AutolinkConfig, texts ...string) []taskAutolink {
+	var refs []taskAutolink
 	seen := map[string]bool{}
 	for _, text := range texts {
-		for _, loc := range jiraKeyRe.FindAllStringIndex(text, -1) {
-			if loc[0] > 0 && isASCIIAlnum(text[loc[0]-1]) {
+		for i := 0; i < len(text); i++ {
+			if i > 0 && isASCIIAlnum(text[i-1]) {
 				continue
 			}
-			if loc[1] < len(text) && isASCIIAlnum(text[loc[1]]) {
-				continue
-			}
-			key := text[loc[0]:loc[1]]
-			if !seen[key] {
-				seen[key] = true
-				keys = append(keys, key)
+			for _, link := range links {
+				end, ok := autolinkRefEnd(link, text, i)
+				if !ok {
+					continue
+				}
+				ref := text[i:end]
+				if !seen[ref] {
+					seen[ref] = true
+					refs = append(refs, taskAutolink{Text: ref, URL: link.URL(text[i+len(link.KeyPrefix) : end])})
+				}
+				i = end - 1
+				break
 			}
 		}
 	}
-	return keys
+	return refs
+}
+
+// autolinkRefEnd is where link's reference starting at text[start] ends, and
+// whether there is one there.
+func autolinkRefEnd(link config.AutolinkConfig, text string, start int) (int, bool) {
+	if !strings.HasPrefix(text[start:], link.KeyPrefix) {
+		return 0, false
+	}
+	numStart := start + len(link.KeyPrefix)
+	end := numStart
+	for end < len(text) && isAutolinkIDByte(text[end], link.IsAlphanumeric) {
+		end++
+	}
+	if end == numStart || (!link.IsAlphanumeric && end < len(text) && isASCIIAlnum(text[end])) {
+		return 0, false
+	}
+	return end, true
+}
+
+// isAutolinkIDByte is what GitHub's autolinks take as the identifier:
+// digits, or with is_alphanumeric A-Z in either case, 0-9 and "-".
+func isAutolinkIDByte(b byte, alphanumeric bool) bool {
+	if alphanumeric {
+		return isASCIIAlnum(b) || b == '-'
+	}
+	return b >= '0' && b <= '9'
 }
 
 func isASCIIAlnum(b byte) bool {
@@ -414,13 +446,6 @@ func (h *Handler) lookupTaskGit(ctx context.Context, host, cwd string, withPR bo
 			prTitle = pr.Title
 		}
 	}
-	if h.cfg.TaskDashboard.JiraURL != "" {
-		for _, key := range jiraKeys(gitCtx.Branch, prTitle) {
-			if !h.cfg.TaskDashboard.LinksJiraKey(key) {
-				continue
-			}
-			info.Jira = append(info.Jira, taskJiraLink{Key: key, URL: h.cfg.TaskDashboard.JiraBrowseURL(key)})
-		}
-	}
+	info.Autolinks = autolinkRefs(h.cfg.TaskDashboard.Autolinks, gitCtx.Branch, prTitle)
 	return info
 }
