@@ -297,6 +297,7 @@ func parseTranscriptRow(line string) (transcript, bool) {
 	// The cwd fragment is JSON, whose strings never hold a literal tab, so
 	// a fourth field is always the size.
 	if len(parts) == 4 {
+		//mutation:exempt[CONDITIONALS_BOUNDARY] equivalent — a size of 0 is stored as 0 either way
 		if size, err := strconv.ParseInt(parts[3], 10, 64); err == nil && size > 0 {
 			tr.Size = size
 		}

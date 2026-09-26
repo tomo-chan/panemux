@@ -638,3 +638,15 @@ func TestTask_LogVersionIsNotSerialized(t *testing.T) {
 	assert.NotContains(t, string(data), "log")
 	assert.NotContains(t, string(data), "Log")
 }
+
+// Two logs of one session with the same modification time: the one the host
+// listed first is the version, as it is the one a stopped task is built from.
+func TestBuildTasks_LogVersionOfEqualTimesIsTheFirstListed(t *testing.T) {
+	raw := rawSnapshot{Now: hostNow, Transcripts: []transcript{
+		{ModTime: hostNow - 60, SessionID: "dup", Size: 100, CWD: "/first"},
+		{ModTime: hostNow - 60, SessionID: "dup", Size: 200, CWD: "/second"},
+	}}
+	task := findTask(t, buildTasks("", raw, collectedAt), "local:claude:dup")
+	assert.Equal(t, "/first", task.CWD)
+	assert.Equal(t, &LogVersion{ModTime: hostNow - 60, Size: 100}, task.Log)
+}
