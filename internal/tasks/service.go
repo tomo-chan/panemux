@@ -12,6 +12,7 @@ package tasks
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
@@ -77,6 +78,9 @@ type Options struct {
 	// RunLocal runs the collection script on the panemux host.
 	RunLocal func(ctx context.Context, script string) ([]byte, error)
 	Now      func() time.Time
+	// Rand is the random source for the session IDs and heredoc tags a task
+	// launch generates. It defaults to crypto/rand.
+	Rand io.Reader
 	// HostTimeout bounds one host's collection, including waiting for its
 	// connection to come up. A connection still coming up when it expires
 	// keeps dialing and serves the next collection.
@@ -132,6 +136,9 @@ func New(opts Options) *Service {
 	}
 	if opts.RetryAfter <= 0 {
 		opts.RetryAfter = defaultRetryAfter
+	}
+	if opts.Rand == nil {
+		opts.Rand = rand.Reader
 	}
 	return &Service{opts: opts, hosts: map[string]*hostConn{}}
 }
@@ -234,19 +241,26 @@ func (s *Service) collectHost(ctx context.Context, name string) (HostResult, []T
 }
 
 func (s *Service) runScript(ctx context.Context, name string) ([]byte, error) {
+	return s.runHostScript(ctx, name, collectScript, "task collection")
+}
+
+// runHostScript runs script with `sh -s` on a host: locally through
+// RunLocal, remotely over the host's connection with the literal command
+// `sh -s` and the script on stdin. what names the script in errors.
+func (s *Service) runHostScript(ctx context.Context, name, script, what string) ([]byte, error) {
 	if name == "" {
-		return s.opts.RunLocal(ctx, collectScript)
+		return s.opts.RunLocal(ctx, script)
 	}
 	conn, err := s.conn(ctx, name)
 	if err != nil {
 		return nil, err
 	}
-	out, err := conn.Run(ctx, "sh -s", strings.NewReader(collectScript))
+	out, err := conn.Run(ctx, "sh -s", strings.NewReader(script))
 	switch {
 	case err == nil:
 		return out, nil
 	case isExitError(err):
-		return nil, fmt.Errorf("run task collection on %s: %w", name, err)
+		return nil, fmt.Errorf("run %s on %s: %w", what, name, err)
 	case ctx.Err() != nil:
 		// Out of time is not the same as a broken connection: a host that
 		// is slow to answer, or has a large ~/.claude, would otherwise be
@@ -257,10 +271,10 @@ func (s *Service) runScript(ctx context.Context, name string) ([]byte, error) {
 		if pingErr := conn.Ping(pingCtx); pingErr != nil {
 			s.drop(name, conn)
 		}
-		return nil, fmt.Errorf("task collection on %s did not finish within %s", name, s.opts.HostTimeout)
+		return nil, fmt.Errorf("%s on %s did not finish within %s", what, name, s.opts.HostTimeout)
 	default:
 		s.drop(name, conn)
-		return nil, fmt.Errorf("run task collection on %s: %w", name, err)
+		return nil, fmt.Errorf("run %s on %s: %w", what, name, err)
 	}
 }
 

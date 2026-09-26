@@ -61,6 +61,23 @@ export function canRecord(task: Task): boolean {
   return Boolean(task.session_id)
 }
 
+// The only session IDs the server resumes: `claude --resume` also accepts a
+// session title, so anything else is refused there (issue #257).
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * Whether the dashboard offers Resume: a stopped claude task with a session
+ * ID. Done does not matter; a done task can be resumed and stays done.
+ */
+export function canResume(task: Task): boolean {
+  return task.agent === 'claude' && task.state === 'stop' && UUID_PATTERN.test(task.session_id ?? '')
+}
+
+/** The labels typed into the New task form, comma-separated. */
+export function parseLabelInput(text: string): string[] {
+  return [...new Set(text.split(',').map((label) => label.trim()).filter((label) => label !== ''))]
+}
+
 /** Every label on the given tasks, once each, sorted. */
 export function allLabels(tasks: Task[]): string[] {
   return [...new Set(tasks.flatMap((task) => task.labels ?? []))].sort((a, b) => a.localeCompare(b))

@@ -55,6 +55,8 @@ func (h *Handler) Mount(r chi.Router, boardAuth func(http.Handler) http.Handler)
 		r.Get("/directories", h.GetDirectories)
 		r.Get("/tasks", h.GetTasks)
 		r.Post("/tasks/hosts/{name}/reconnect", h.PostTaskHostReconnect)
+		r.Post("/tasks", h.PostTask)
+		r.Post("/tasks/resume", h.PostTaskResume)
 		r.Put("/tasks/records", h.PutTaskRecord)
 		// Deliberately NOT placed under /board/ — chi routes any path
 		// starting with /api/board/ into the BoardRoutePrefix sub-router
