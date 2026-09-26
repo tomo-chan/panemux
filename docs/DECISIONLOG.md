@@ -107,14 +107,18 @@ while being built:
   user's agents are not shown as one's own tasks.
 - **A slow collection keeps its connection** while the connection answers an SSH keepalive. The
   first version dropped the connection on any timeout, so a host whose collection took longer than
-  15 seconds was redialed every 10 seconds and never showed a result.
+  15 seconds was redialed every 10 seconds and never showed a result. Keeping the connection stops
+  the redialing only: a host whose script alone takes longer than 15 seconds every time still never
+  shows a result, and its script is started again at every collection. What the remote script does
+  once panemux closes the exec channel (no signal is sent) has not been checked.
 - **The task routes refuse cross-site requests.** They stay unauthenticated like the rest of
   `/api/*`, but `GET /api/tasks` is the first GET with a heavy side effect — dialing every host — so
   a page on another site must not be able to trigger it with an `<img>`.
 - **A stopped task reports its repository but not its branch or PR**: git metadata is read from the
   directory as it is now, which says nothing about the branch a stopped session worked on. So
   `gh pr view` runs only for a directory a running task uses (review of PR #253); the first version
-  ran it for every directory and threw the stopped-only results away.
+  ran it for every directory and threw the stopped-only results away. A lookup a request abandoned
+  is not cached, so an aborted `gh pr view` does not hide a running task's PR for 30 seconds.
 - **The local collection is killed as a process group** (review of PR #253). The first version
   relied on `exec.CommandContext` killing `sh` alone; a probe the script had started kept its
   stdout open, so the collection outlived its 15 seconds until that probe finished.

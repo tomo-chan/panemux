@@ -623,3 +623,33 @@ func TestTaskGitInfo_WithoutPRDoesNotRunGH(t *testing.T) {
 	assert.Equal(t, 9, info.PRNumber)
 	assert.FileExists(t, marker)
 }
+
+// A lookup the request abandoned is not a result: `gh` or the remote git
+// run was stopped, not answered. It is not cached, so the next request
+// looks the directory up again instead of showing no PR for 30 seconds.
+func TestTaskGitInfos_ALookupTheRequestAbandonedIsNotCached(t *testing.T) {
+	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
+	list := []tasks.Task{{Host: "", CWD: "/workspace/user/project", State: tasks.StateBusy}}
+	collected := map[string]bool{"": true}
+	var lookups int
+	ctx, cancel := context.WithCancel(context.Background())
+	h.taskGitLookup = func(context.Context, string, string, bool) *taskGitInfo {
+		lookups++
+		cancel() // the browser went away while the lookup ran
+		return &taskGitInfo{Repo: "r", Branch: "b"}
+	}
+
+	h.taskGitInfos(ctx, list, collected)
+	require.Equal(t, 1, lookups)
+
+	h.taskGitLookup = func(context.Context, string, string, bool) *taskGitInfo {
+		lookups++
+		return &taskGitInfo{Repo: "r", Branch: "b", PRNumber: 5}
+	}
+	got := h.taskGitInfos(context.Background(), list, collected)
+	assert.Equal(t, 2, lookups, "looked up again")
+	assert.Equal(t, 5, got[taskGitKey("", "/workspace/user/project")].PRNumber)
+
+	h.taskGitInfos(context.Background(), list, collected)
+	assert.Equal(t, 2, lookups, "a completed lookup is cached")
+}

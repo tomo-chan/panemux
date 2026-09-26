@@ -40,9 +40,13 @@ and pull request of its working directory.
   continues and serves a later collection.
 - A collection that is still running after 15 seconds reports an error for that host. Its
   connection is kept when it still answers an SSH keepalive (within 5 seconds) and dropped
-  otherwise, so a slow host is not redialed every collection. On the panemux host the script runs
-  in a process group of its own, and the whole group — the script and every probe it started — is
-  killed when the collection's time is up or the request is abandoned.
+  otherwise, so a slow host is not redialed every collection. A host whose script takes longer than
+  15 seconds every time therefore keeps reporting that error and never shows its tasks, and the
+  script is started on it again at every collection.
+- When a remote collection gives up, panemux closes that exec channel and sends no signal. Whether
+  the script on the host stops at that point depends on the host and has not been checked. On the
+  panemux host the script runs in a process group of its own, and the whole group — the script and
+  every probe it started — is killed when the collection's time is up or the request is abandoned.
 - A host removed from `ssh_connections` has its connection closed on the next collection. Every
   connection is closed when panemux shuts down.
 - One host failing never hides another host's tasks.
@@ -130,7 +134,8 @@ the task's host (locally, or over the host's dashboard connection) and `gh pr vi
 host, with a remote repository named from its origin URL. A lookup runs once per (host, directory),
 is cached for 30 seconds, and is skipped for a host whose collection failed. A directory that is not
 a repository, or cannot be inspected, has no `git` field. `gh` runs under the request's context, so
-an abandoned request stops it.
+an abandoned request stops it. Nothing a request looked up is cached when that request was
+abandoned, since its lookups were stopped rather than answered.
 
 `gh pr view` runs only for a directory a running task uses. A directory only stopped tasks use is
 looked up with `git` alone, and that cached result does not serve a running task that appears in

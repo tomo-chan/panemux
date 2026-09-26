@@ -267,6 +267,12 @@ func (h *Handler) taskGitInfos(
 	}
 	wg.Wait()
 
+	// A request abandoned while its lookups ran stopped `gh` and the remote
+	// git runs rather than getting their answer, so nothing it looked up is
+	// cached as the directory's metadata.
+	if ctx.Err() != nil {
+		return results
+	}
 	h.taskGitCacheMu.Lock()
 	for _, t := range pending {
 		key := taskGitKey(t.host, t.cwd)
