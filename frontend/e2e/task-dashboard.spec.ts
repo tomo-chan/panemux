@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test'
+import { existsSync } from 'node:fs'
+import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
 
 // The task dashboard against a real panemux: the real collection script, the
 // real `ps` and `tmux` of this machine, and a HOME that
@@ -97,4 +98,54 @@ test('labels a task and marks it done, and both survive a reload', async ({ page
   } finally {
     expect((await clear()).ok()).toBe(true)
   }
+})
+
+// Starting and resuming run the real launch script under real tmux; claude
+// is run-panemux-task-dashboard-e2e.sh's stand-in. Both need tmux.
+async function hasTmux(request: APIRequestContext): Promise<boolean> {
+  const tasks = await (await request.get('/api/tasks')).json()
+  return tasks.tasks.some((task: { id: string }) => task.id === 'local:claude:e2e-in-tmux')
+}
+
+test('starts a new task in a tmux session and selects it with its label', async ({ page, request }) => {
+  test.skip(!(await hasTmux(request)), 'tmux is not installed here')
+
+  await openDashboard(page)
+  await page.getByRole('button', { name: 'New task' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New task' })
+  await dialog.getByLabel('Working directory').fill('/tmp')
+  await dialog.getByLabel('Labels').fill('e2e-launch')
+  await dialog.getByLabel('First instruction').fill('--help $(touch /tmp/panemux-e2e-pwned)')
+  await dialog.getByRole('button', { name: 'Start' }).click()
+
+  await expect(dialog).toHaveCount(0)
+  const detail = page.getByRole('complementary', { name: 'Task details' })
+  // The task is listed once the stand-in has written its state file, which
+  // can land just after the collection the launch triggers; the next poll
+  // (every 10 seconds) then finds it.
+  await expect(detail.getByRole('heading', { level: 2 })).toHaveText('tmp', { timeout: 15_000 })
+  await expect(detail).toContainText(/tmux task-[0-9a-f]{8}/)
+  const selected = page.locator('[data-testid^="task-card-local:claude:"][data-selected="true"]')
+  await expect(selected).toContainText('no pane')
+  await expect(selected.getByRole('list', { name: 'Labels' })).toHaveText('e2e-launch')
+  expect(existsSync('/tmp/panemux-e2e-pwned'), 'the prompt must never reach a shell').toBe(false)
+  const sessionID = (await selected.getAttribute('data-testid'))!.replace('task-card-local:claude:', '')
+  expect(
+    (await request.put('/api/tasks/records', {
+      data: { host: '', agent: 'claude', session_id: sessionID, done: false, labels: [] },
+    })).ok(),
+  ).toBe(true)
+})
+
+test('resumes a stopped task in a tmux session named after it', async ({ page, request }) => {
+  test.skip(!(await hasTmux(request)), 'tmux is not installed here')
+
+  await openDashboard(page)
+  const id = 'task-card-local:claude:5d7e3a90-1b2c-4d3e-8f40-51627384a5b6'
+  await page.getByRole('region', { name: 'Stopped' }).getByTestId(id).getByRole('button', { name: /^Resume/ }).click()
+
+  const card = page.getByRole('region', { name: 'Idle' }).getByTestId(id)
+  // As for a new task, the resumed session may be found by the next poll.
+  await expect(card).toContainText('tmux task-5d7e3a90 · no pane', { timeout: 15_000 })
+  await expect(card).toHaveAttribute('data-selected', 'true')
 })

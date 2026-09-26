@@ -1,12 +1,14 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import type { Task, TaskHost, Workspace } from '../schemas'
+import type { Task, TaskHost, TaskLaunchResponse, Workspace } from '../schemas'
 import type { TasksState } from '../hooks/useTasks'
 import { TASKS_POLL_INTERVAL_MS } from '../hooks/useTasks'
 import { TERMINAL_FONT_FAMILY } from '../utils/fonts'
+import { NewTaskDialog } from './NewTaskDialog'
 import {
   TASK_STATE_LABELS,
   allLabels,
   canRecord,
+  canResume,
   columnForTask,
   filterTasks,
   findTaskPane,
@@ -24,8 +26,10 @@ import type { LaneMode, TaskOpenAction, TaskPaneRef } from '../utils/taskBoard'
 // Layer 1 of issue #252: every agent session on every host, as a kanban by
 // state, with a detail panel on the right. Besides reading, it records what a
 // person says about a task — done, and its labels (issue #256) — through
-// tasksState.saveRecord. Opening a task is App's job (onOpenTask), because
-// that means creating or focusing a pane.
+// tasksState.saveRecord, and starts new tasks and resumes stopped ones
+// (issue #257) through tasksState.launch and tasksState.resume. Opening a
+// task is App's job (onOpenTask), because that means creating or focusing a
+// pane.
 
 const STATE_COLORS: Record<Task['state'], string> = {
   wait: '#e2b86b',
@@ -76,7 +80,7 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
   shortcut,
   now = Date.now,
 }) => {
-  const { data, error, loading, updatedAt, refresh, reconnect, saveRecord } = tasksState
+  const { data, error, loading, updatedAt, refresh, reconnect, saveRecord, launch, resume } = tasksState
   const [query, setQuery] = useState('')
   const [laneMode, setLaneMode] = useState<LaneMode>('none')
   const [hostFilter, setHostFilter] = useState(ALL_HOSTS)
@@ -84,6 +88,13 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
   const [showDone, setShowDone] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [detailOpen, setDetailOpen] = useState(false)
+  const [newTaskOpen, setNewTaskOpen] = useState(false)
+  // A task that was started but is not listed yet: claude writes the state
+  // the collection reads only once it is running. It is selected when it
+  // appears, unless another task was selected meanwhile.
+  const [pendingLaunch, setPendingLaunch] = useState<{ id: string; message: string } | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const [resumingId, setResumingId] = useState<string | null>(null)
   const nowMs = useTicker(now)
   const rootRef = useRef<HTMLElement>(null)
 
@@ -109,9 +120,37 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
   }, [tasks, workspaces])
   const selected = tasks.find((task) => task.id === selectedId) ?? null
 
+  if (pendingLaunch && tasks.some((task) => task.id === pendingLaunch.id)) {
+    setPendingLaunch(null)
+    setSelectedId(pendingLaunch.id)
+    setDetailOpen(true)
+  }
+
   const select = (task: Task) => {
+    setPendingLaunch(null)
     setSelectedId(task.id)
     setDetailOpen(true)
+  }
+  const launched = (result: TaskLaunchResponse, host: string) => {
+    setNewTaskOpen(false)
+    setActionError(
+      result.records_error ? `The task started, but its labels could not be saved: ${result.records_error}` : null,
+    )
+    setPendingLaunch({
+      id: result.id,
+      message: `Started tmux ${result.tmux_session} on ${hostLabel(host)}. It is selected here once claude has started.`,
+    })
+  }
+  const resumeTask = async (task: Task) => {
+    setResumingId(task.id)
+    setActionError(null)
+    const result = await resume(task)
+    setResumingId((current) => (current === task.id ? null : current))
+    if (!result.ok) {
+      setActionError(`Could not resume ${taskTitle(task)}: ${result.error}`)
+      return
+    }
+    select(task)
   }
   const open = (task: Task) => onOpenTask(task, taskOpenAction(task, panes.get(task.id) ?? null))
 
@@ -137,6 +176,9 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
         <button type="button" className="td-btn" onClick={() => void refresh()} disabled={loading}>
           Refresh
         </button>
+        <button type="button" className="td-btn td-btn-primary" onClick={() => setNewTaskOpen(true)}>
+          New task
+        </button>
         <button type="button" className="td-btn" onClick={onShowWorkspaces} aria-keyshortcuts={shortcut?.aria}>
           Workspaces
           {shortcut && (
@@ -150,6 +192,16 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
       {error && (
         <div role="alert" className="td-alert">
           Failed to update tasks: {error}
+        </div>
+      )}
+      {actionError && (
+        <div role="alert" className="td-alert">
+          {actionError}
+        </div>
+      )}
+      {pendingLaunch && (
+        <div role="status" className="td-notice">
+          {pendingLaunch.message}
         </div>
       )}
       {data?.records_error && (
@@ -235,6 +287,8 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
                             nowMs={nowMs}
                             onSelect={select}
                             onOpen={open}
+                            onResume={(t) => void resumeTask(t)}
+                            resuming={resumingId === task.id}
                           />
                         ))}
                       </React.Fragment>
@@ -251,11 +305,20 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
           open={detailOpen}
           nowMs={nowMs}
           onOpen={open}
+          onResume={(t) => void resumeTask(t)}
+          resuming={selected !== null && resumingId === selected.id}
           onSaveRecord={saveRecord}
           showDone={showDone}
           onClose={() => setDetailOpen(false)}
         />
       </div>
+      <NewTaskDialog
+        isOpen={newTaskOpen}
+        hosts={hosts}
+        onLaunch={launch}
+        onLaunched={launched}
+        onClose={() => setNewTaskOpen(false)}
+      />
     </section>
   )
 }
@@ -319,9 +382,11 @@ interface TaskCardProps {
   nowMs: number
   onSelect: (task: Task) => void
   onOpen: (task: Task) => void
+  onResume: (task: Task) => void
+  resuming: boolean
 }
 
-const TaskCard: React.FC<TaskCardProps> = ({ task, pane, selected, nowMs, onSelect, onOpen }) => {
+const TaskCard: React.FC<TaskCardProps> = ({ task, pane, selected, nowMs, onSelect, onOpen, onResume, resuming }) => {
   const action = taskOpenAction(task, pane)
   const age = formatElapsed(task.status_since, nowMs)
   return (
@@ -364,6 +429,7 @@ const TaskCard: React.FC<TaskCardProps> = ({ task, pane, selected, nowMs, onSele
           {whereLabel(task, pane)}
         </span>
         <OpenButton task={task} action={action} onOpen={onOpen} small />
+        <ResumeButton task={task} resuming={resuming} onResume={onResume} small />
       </div>
     </article>
   )
@@ -453,12 +519,39 @@ const OpenButton: React.FC<OpenButtonProps> = ({ task, action, onOpen, small = f
   )
 }
 
+// Resume runs `claude --resume` for a stopped claude task in a new tmux
+// session on its host (issue #257). It opens no pane; Open does, once the
+// task is running.
+interface ResumeButtonProps {
+  task: Task
+  resuming: boolean
+  onResume: (task: Task) => void
+  small?: boolean
+}
+
+const ResumeButton: React.FC<ResumeButtonProps> = ({ task, resuming, onResume, small = false }) => {
+  if (!canResume(task)) return null
+  return (
+    <button
+      type="button"
+      className={small ? 'td-btn td-btn-sm' : 'td-btn td-btn-primary'}
+      aria-label={`Resume: ${taskTitle(task)}`}
+      disabled={resuming}
+      onClick={() => onResume(task)}
+    >
+      {resuming ? 'Resuming…' : 'Resume'}
+    </button>
+  )
+}
+
 interface TaskDetailProps {
   task: Task | null
   pane: TaskPaneRef | null
   open: boolean
   nowMs: number
   onOpen: (task: Task) => void
+  onResume: (task: Task) => void
+  resuming: boolean
   onSaveRecord: TasksState['saveRecord']
   /** Whether the Done column is on screen, for what Mark done says will happen. */
   showDone: boolean
@@ -471,6 +564,8 @@ const TaskDetail: React.FC<TaskDetailProps> = ({
   open,
   nowMs,
   onOpen,
+  onResume,
+  resuming,
   onSaveRecord,
   showDone,
   onClose,
@@ -555,6 +650,7 @@ const TaskDetail: React.FC<TaskDetailProps> = ({
         )}
         <div className="td-actions">
           <OpenButton task={task} action={action} onOpen={onOpen} />
+          <ResumeButton task={task} resuming={resuming} onResume={onResume} />
           {recordable && !done && (
             <button type="button" className="td-btn" disabled={saving} onClick={() => setConfirmingDone(true)}>
               Mark done
@@ -565,7 +661,9 @@ const TaskDetail: React.FC<TaskDetailProps> = ({
               Mark not done
             </button>
           )}
-          {action.kind === 'unavailable' && <p className="td-note">Cannot open in a pane: {action.reason}.</p>}
+          {action.kind === 'unavailable' && !canResume(task) && (
+            <p className="td-note">Cannot open in a pane: {action.reason}.</p>
+          )}
         </div>
         {confirmingDone && !done && (
           <div className="td-confirm">

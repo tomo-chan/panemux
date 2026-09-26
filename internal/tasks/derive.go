@@ -150,11 +150,7 @@ type taskBuilder struct {
 }
 
 func (b *taskBuilder) id(agent, key string) string {
-	prefix := "local"
-	if b.host != "" {
-		prefix = "ssh:" + b.host
-	}
-	return prefix + ":" + agent + ":" + key
+	return taskID(b.host, agent, key)
 }
 
 func (b *taskBuilder) liveClaudeTasks() []Task {

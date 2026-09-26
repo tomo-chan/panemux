@@ -5,6 +5,8 @@ import {
   allLabels,
   applyTaskRecord,
   canRecord,
+  canResume,
+  parseLabelInput,
   columnForState,
   columnForTask,
   filterTasks,
@@ -99,6 +101,27 @@ describe('canRecord', () => {
     expect(canRecord(task())).toBe(true)
     expect(canRecord(task({ agent: 'codex', session_id: undefined, id: 'local:codex:pid-8' }))).toBe(false)
     expect(canRecord(task({ session_id: '' }))).toBe(false)
+  })
+})
+
+describe('canResume', () => {
+  const stopped = { state: 'stop' as const, session_id: '5d7e3a90-1b2c-4d3e-8f40-51627384a5b6', location: { kind: 'none' as const, attachable: false } }
+
+  it('offers resume only for a stopped claude task whose session id is a UUID', () => {
+    expect(canResume(task(stopped))).toBe(true)
+    expect(canResume(task({ ...stopped, done: true }))).toBe(true)
+    expect(canResume(task({ ...stopped, state: 'idle' }))).toBe(false)
+    expect(canResume(task({ ...stopped, agent: 'codex' }))).toBe(false)
+    expect(canResume(task({ ...stopped, session_id: undefined }))).toBe(false)
+    expect(canResume(task({ ...stopped, session_id: 'my-session' }))).toBe(false)
+  })
+})
+
+describe('parseLabelInput', () => {
+  it('splits on commas, trims, and drops empty entries and repeats', () => {
+    expect(parseLabelInput(' payment, sprint-42 ,,payment ')).toEqual(['payment', 'sprint-42'])
+    expect(parseLabelInput('')).toEqual([])
+    expect(parseLabelInput(' , ')).toEqual([])
   })
 })
 

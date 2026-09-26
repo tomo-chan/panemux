@@ -324,8 +324,20 @@ terminal that had focus cannot receive what is typed into the dashboard.
   appears: they belong to the workspace layer, which is inert then.
 - **Top bar.** The title, one chip per host (`Local` for the panemux host) with its running count, a
   red chip with the error and a `Reconnect` button for a host that failed, and `connecting…` for a
-  host whose connection is still coming up; then when the board was last updated, `Refresh`, and
-  `Workspaces`. A long host error is truncated in the chip and shown in full as its tooltip.
+  host whose connection is still coming up; then when the board was last updated, `Refresh`,
+  `New task` (in the interactive blue), and `Workspaces`. A long host error is truncated in the chip
+  and shown in full as its tooltip.
+- **New task.** A modal form over the dashboard: Host (every host on the board, an unreachable one
+  marked "(unreachable)"), Working directory, Agent (`claude` is the only choice), Labels
+  (comma-separated, optional) and First instruction. The working directory takes focus when it
+  opens. An empty directory, a relative one, or an empty instruction is refused in the form, with
+  the reason under the fields; anything the server or the host refuses is shown there as
+  "Could not start: …", and the form keeps what was typed. While the task starts, `Start` reads
+  `Starting…`, and neither it, `Cancel`, `Escape` nor a click outside dismisses the form. Once it has
+  started the form closes, a blue notice says which tmux session was started on which host and that
+  the task is selected once claude has started, and the task is selected when a collection lists
+  it — unless another task was selected meanwhile. No pane is opened. Labels that could not be
+  recorded for a task that did start are reported in a red alert.
 - **Filter bar.** Text filter over directory, branch, PR number and session ID; rows split by none,
   host, label, or repository; a host filter; a label filter listing every label on the board; and a
   `Done column` checkbox, off by default.
@@ -342,12 +354,13 @@ terminal that had focus cannot receive what is typed into the dashboard.
   directory under it; for a waiting task its reason and "open the pane to respond"; repository,
   branch and PR link (new tab); its labels as colored tags, each label always the same color; a
   green `Done` tag in the meta line for a task marked done that is running again; and at the bottom
-  where the task runs with its `Open` / `Go to pane` button. A task that cannot be opened shows why instead of a button. The card is a pointer target
+  where the task runs with its `Open` / `Go to pane` button, or `Resume` for a stopped claude
+  task. A task that cannot be opened shows why instead of a button. The card is a pointer target
   for selection, and its title is a button, so the card never nests its links and buttons inside
   another interactive element.
 - **Detail panel.** Fixed to the window height at the right. Its head — state, host, agent, start,
-  title, waiting reason, the open action or the reason there is none, and `Mark done` or
-  `Mark not done` — stays in place, and only the body below scrolls: state notes, links, labels, the
+  title, waiting reason, the open action or the reason there is none (a stopped claude task offers
+  `Resume` instead), and `Mark done` or `Mark not done` — stays in place, and only the body below scrolls: state notes, links, labels, the
   chain from task to agent to tmux session to pane to workspace, and the directory and session ID.
   `Mark done` asks first, inside the panel, and says where the task will be afterwards: a running
   task stays in its column until it stops; a stopped one moves to Done, and the question adds that
@@ -357,6 +370,8 @@ terminal that had focus cannot receive what is typed into the dashboard.
   another task while it runs leaves that task's controls enabled, and the result is not shown there.
   A task without a session ID offers neither, and says so. At 1000px and narrower it slides over the board
   with a close button.
+- **Resume.** `Resume` reads `Resuming…` and is disabled while its request runs; a refusal is shown in
+  a red alert naming the task, and a resumed task is selected. Nothing else on the board waits for it.
 - **After opening.** The dashboard closes, the pane takes focus, and it is outlined in the
   interactive blue for about two seconds (a steady outline with reduced motion).
 

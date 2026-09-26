@@ -102,6 +102,8 @@ const roundTrips: RoundTrip[] = [
   },
   { fixture: 'tasks', schemaName: 'TasksResponseSchema', schema: schemas.TasksResponseSchema },
   { fixture: 'task-record', schemaName: 'TaskRecordSchema', schema: schemas.TaskRecordSchema },
+  { fixture: 'task-launch', schemaName: 'TaskLaunchResponseSchema', schema: schemas.TaskLaunchResponseSchema },
+  { fixture: 'task-resume', schemaName: 'TaskLaunchedSchema', schema: schemas.TaskLaunchedSchema },
   // The two WebSocket fixtures hold one frame per element, in the order the
   // server sent them, so the schema that owns a single frame is wrapped here
   // rather than restated.
@@ -367,6 +369,9 @@ const unexercisedOptionals: Record<string, string> = {
   // records through the real route instead, so the same response can show
   // them on its tasks; an unreadable file would have left them all off.
   'tasks.records_error': 'needs an unreadable task record file, which would drop the captured records',
+  // Set only when the labels could not be recorded after the task started;
+  // the capture records them, which is the path worth pinning.
+  'task-launch.records_error': 'needs an unreadable task record file, and the capture records the labels instead',
 }
 
 describe('optional field coverage', () => {

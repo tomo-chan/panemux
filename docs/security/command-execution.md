@@ -151,8 +151,9 @@ another user's processes are neither shown as tasks nor accepted as the live pro
 leftover state file whose pid they reused.
 
 `GET /api/tasks` and the reconnect route are unauthenticated like the rest of `/api/*`, but a GET
-that dials every host is a side effect another site could trigger with an `<img>`. Both routes, and
-`PUT /api/tasks/records`, which writes the operator's record file, therefore refuse a request whose
+that dials every host is a side effect another site could trigger with an `<img>`. Both routes,
+`PUT /api/tasks/records`, which writes the operator's record file, and the two routes that start and
+resume tasks ([below](#task-launch-and-resume)) therefore refuse a request whose
 `Sec-Fetch-Site` is `cross-site` or `same-site`, or whose `Origin` is neither the server's own nor a
 loopback origin (`refuseCrossSite` in `internal/api/tasks.go`). The record route runs no command:
 it writes `~/.config/panemux/tasks.json` through `fileops.AtomicWrite`, and a label reaches the
@@ -165,3 +166,87 @@ own line protocol, skips malformed rows, accepts a session ID only if it matches
 `^[a-zA-Z0-9_-]+$`, and treats a tmux session name as display text: the dashboard offers to attach a
 pane to it only when it matches the pane's own `validTmuxSessionName` rule, which the pane then
 enforces again when it starts.
+
+### Task launch and resume
+
+`POST /api/tasks` and `POST /api/tasks/resume` ([behavior](../behavior/tasks.md#starting-a-task))
+start a claude process on the panemux host or an `ssh_connections` host, from values a request
+supplies: a host, a working directory, a first instruction and a session ID. Unlike the command
+center, which hands `exec.CommandContext` an argv, a remote start has to cross the remote login
+shell, and tmux runs what it is given as its own child. The design keeps every request value out of
+anything a shell parses, rather than escaping it.
+
+**One fixed script, run as `sh -s`.** `launchScriptTemplate` in `internal/tasks/launch.go` runs
+exactly as the collection script does: locally `exec.CommandContext(ctx, "sh", "-s")`, remotely an
+exec request whose command is the literal `sh -s`, the script on stdin in both cases. The remote
+login shell parses only `sh -s`. The template is a compile-time constant; `buildLaunchScript` fills
+six placeholders, each of which is checked first and refused rather than escaped:
+
+| Placeholder | Source | Check |
+|---|---|---|
+| mode | `new` or `resume`, a Go constant | — |
+| session ID | minted by panemux (`newSessionID`, crypto/rand) for a start; for a resume, the request's value | A UUID (`validUUID`) |
+| tmux session name | `task-` and the session ID's first eight characters | `validTmuxSessionName` |
+| heredoc tag | 32 hex characters from crypto/rand | `^[0-9a-f]{32}$` |
+| working directory | the request, or for a resume the host's conversation log | `session.ValidateRemotePath`, the guard a pane's remote `cwd` passes |
+| first instruction | the request | not empty, at most 32 KiB, no NUL, and no line equal to its own heredoc terminator |
+
+The working directory and the instruction are placed in heredocs whose terminator is quoted
+(`<<'PANEMUX_CWD_<tag>'`, `<<'PANEMUX_PROMPT_<tag>'`), so the shell performs no expansion inside
+them, and read into variables that are only ever used double-quoted. The session ID and tmux name are
+single-quoted literals, and both allowlists exclude a quote.
+
+**The program is the literal name `claude`.** The script resolves it with `command -v claude`, and,
+when that finds nothing, with `"${SHELL:-/bin/sh}" -lc 'command -v claude'`, because a per-user
+install is usually on a `PATH` only a login shell sets. `$SHELL` here is the host user's own login
+shell, run with a fixed argument; it chooses where `claude` is looked up, not what is run instead of
+it. What either lookup prints is used only if it is an absolute path to an executable regular file,
+and it reaches tmux as a discrete argument. This is the script on the host reading its own
+environment, not a Go `os.Getenv` value flowing into `exec.Command`, which the
+[General Rules](../security.md#general-rules) forbid.
+
+**tmux runs the command without a shell.** `tmux new-session -d -s <name> -c <dir> -- <command...>`
+with the command as separate arguments executes it directly (tmux 2.0 and later; verified on tmux 3.4
+with an argument holding `$(id)`, `; echo`, and a quote, all of which arrived unchanged). The `--`
+keeps an argument from being read as a tmux option.
+
+**The first instruction reaches claude as a file, then as one argument after `--`.** The script writes
+it to a `mktemp` file created under `umask 077`, and the tmux command is a fixed
+`sh -c 'p=$(cat -- "$1"); rm -f -- "$1"; exec "$2" "--session-id=$3" -- "$p"'` whose positional
+parameters are the file, the resolved claude path and the session ID. Command substitution's result is
+not parsed again, and `--` ends claude's options: [command-center.md](command-center.md#command-center-subprocess-execution)
+records that claude's parser scans all of argv for options, so a prompt beginning with `-` needs it.
+Keeping the instruction out of tmux's arguments matters beyond parsing: a tmux server's process
+arguments are those of the client that started it, for as long as the server runs, so an instruction
+there would be readable in `ps` indefinitely. Measured with a real tmux 3.4, the server's arguments
+held the file name and nothing of the instruction. The instruction is still claude's own positional
+argument, the form in which the launch gives an interactive claude its first message, so a user who
+can read claude's arguments on the host can read it while claude runs.
+
+**A resume passes the ID as `--resume=<id>`, and only an ID the host listed.** Verified against claude
+2.1.283: `claude --resume --version` printed the version, so `--resume`, whose value is optional,
+lets a following argument that begins with `-` be read as an option, and `validSessionID`
+(`^[a-zA-Z0-9_-]+$`) admits `--dangerously-skip-permissions`. The `=` form keeps it a value:
+`claude -p --resume=--version x` was refused because the value is neither a UUID nor a session
+title. `--resume` also matches a session title, so only a
+UUID is accepted. Besides, `Service.Resume` collects the host again and resumes only a session listed
+there as a stopped claude task, with the working directory from that session's own log — which is
+host output and passes the same remote-path guard before use.
+
+**Slash commands are not disabled**, unlike the command center's `claude -p`: this is an interactive
+session the operator watches and types into through a pane, and disabling them would remove them from
+that pane as well.
+
+**What the host prints back** is searched only for the script's own `::panemux-launch` line; a refusal
+is one of six fixed words, each mapped to a fixed message (`LaunchError`), so no host text reaches the
+response. A host that prints no answer is a failed launch.
+
+The labels a start records go through `NormalizeLabels` before anything runs, so a refused label
+cannot leave a started task without them.
+
+`TestLaunchScript_NewTaskHandsThePromptToClaudeAsOneArgumentAfterTheEndOfOptions` runs the real script
+under `sh` against stand-ins for tmux and claude that record their arguments, with a prompt holding a
+leading option, command substitutions, quotes and a line reading `EOF`, and fails if claude's argv is
+not exactly `--session-id=<id>`, `--`, the prompt, if the prompt reaches tmux's arguments, if a
+substitution ran, or if the file is left behind. `TestBuildLaunchScript_RefusesInputBeforeAnythingRuns`
+covers every refusal above.

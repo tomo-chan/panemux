@@ -463,6 +463,31 @@ var apiCases = map[string]apiCase{
 		assert.Equal(t, http.StatusNotFound, rr.Code)
 	}},
 
+	"POST /api/tasks": {run: func(t *testing.T, e *apiEnv) {
+		// A refused request runs nothing on the real host.
+		rr := e.do(t, http.MethodPost, "/api/tasks", `{"host":"","agent":"claude","cwd":"relative","prompt":"go"}`)
+		assert.Equal(t, http.StatusBadRequest, rr.Code, rr.Body.String())
+
+		// The panemux host is stood in for, so the suite starts no tmux
+		// session; the labels land in the default record file under HOME.
+		e.srv.api.SetTaskService(fixtureLaunchService())
+		rr = e.do(t, http.MethodPost, "/api/tasks",
+			`{"host":"","agent":"claude","cwd":"/workspace/user/project","prompt":"go","labels":["docs"]}`)
+		assert.Equal(t, http.StatusCreated, rr.Code, rr.Body.String())
+		assert.Contains(t, rr.Body.String(), `"tmux_session":"task-`)
+		assert.FileExists(t, filepath.Join(e.home, ".config", "panemux", "tasks.json"))
+	}},
+
+	"POST /api/tasks/resume": {run: func(t *testing.T, e *apiEnv) {
+		rr := e.do(t, http.MethodPost, "/api/tasks/resume", `{"host":"","session_id":"--help"}`)
+		assert.Equal(t, http.StatusBadRequest, rr.Code, rr.Body.String())
+
+		e.srv.api.SetTaskService(fixtureLaunchService())
+		rr = e.do(t, http.MethodPost, "/api/tasks/resume", `{"host":"","session_id":"`+fixtureStoppedSessionID+`"}`)
+		assert.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+		assert.Contains(t, rr.Body.String(), `"tmux_session":"task-5d7e3a90"`)
+	}},
+
 	"POST /api/tasks/hosts/{name}/reconnect": {run: func(t *testing.T, e *apiEnv) {
 		e.cfg.SSHConnections = map[string]config.SSHConnection{"build-box": {Host: "build.invalid"}}
 

@@ -60,6 +60,8 @@ function tasksState(overrides: Partial<TasksState> = {}): TasksState {
     refresh: vi.fn().mockResolvedValue(undefined),
     reconnect: vi.fn().mockResolvedValue(undefined),
     saveRecord: vi.fn().mockResolvedValue(null),
+    launch: vi.fn().mockResolvedValue({ ok: false, error: 'not stubbed' }),
+    resume: vi.fn().mockResolvedValue({ ok: false, error: 'not stubbed' }),
     ...overrides,
   }
 }
@@ -422,5 +424,146 @@ describe('TaskDashboard done and labels', () => {
       '__proto__',
       'constructor',
     ])
+  })
+})
+
+describe('TaskDashboard new tasks and resume', () => {
+  const NEW_ID = 'ssh:dev-server:claude:0f0e0d0c-0b0a-4908-8706-050403020100'
+  const STOPPED_SID = '5d7e3a90-1b2c-4d3e-8f40-51627384a5b6'
+  const stopped = task({
+    id: 'local:claude:' + STOPPED_SID, session_id: STOPPED_SID, state: 'stop', cwd: '/workspace/user/old',
+    location: { kind: 'none', attachable: false },
+  })
+  const base: TasksResponse = { hosts: response.hosts, tasks: [stopped, ...response.tasks] }
+  const launchedTask = task({
+    id: NEW_ID, host: 'dev-server', session_id: '0f0e0d0c-0b0a-4908-8706-050403020100', state: 'busy',
+    cwd: '/remote/home/demo/new', location: { kind: 'tmux', tmux_session: 'task-0f0e0d0c', attachable: true },
+  })
+  const detail = () => screen.getByRole('complementary', { name: 'Task details' })
+
+  function renderWithRerender(state: TasksState) {
+    const view = (s: TasksState) => (
+      <TaskDashboard tasksState={s} workspaces={workspaces} onOpenTask={vi.fn()} onShowWorkspaces={vi.fn()} now={() => NOW} />
+    )
+    const { rerender } = render(view(state))
+    return (next: TasksState) => rerender(view(next))
+  }
+
+  async function startTask(labels = '') {
+    fireEvent.click(screen.getByRole('button', { name: 'New task' }))
+    const dialog = screen.getByRole('dialog', { name: 'New task' })
+    fireEvent.change(within(dialog).getByLabelText('Host'), { target: { value: 'dev-server' } })
+    fireEvent.change(within(dialog).getByLabelText('Working directory'), { target: { value: '/remote/home/demo/new' } })
+    fireEvent.change(within(dialog).getByLabelText('Labels'), { target: { value: labels } })
+    fireEvent.change(within(dialog).getByLabelText('First instruction'), { target: { value: 'go' } })
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Start' }))
+    })
+  }
+
+  it('starts a task, says it is waiting for it, and selects it once it is listed', async () => {
+    const launch = vi.fn().mockResolvedValue({
+      ok: true, launched: { id: NEW_ID, session_id: launchedTask.session_id, tmux_session: 'task-0f0e0d0c' },
+    })
+    const state = tasksState({ data: base, launch })
+    const rerender = renderWithRerender(state)
+
+    await startTask('infra')
+
+    expect(launch).toHaveBeenCalledWith({ host: 'dev-server', cwd: '/remote/home/demo/new', prompt: 'go', labels: ['infra'] })
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.getByRole('status').textContent).toBe(
+      'Started tmux task-0f0e0d0c on dev-server. It is selected here once claude has started.',
+    )
+    expect(screen.queryByRole('heading', { level: 2, name: 'new' })).toBeNull()
+
+    rerender({ ...state, data: { ...base, tasks: [...base.tasks, launchedTask] } })
+
+    expect(screen.getByTestId(`task-card-${NEW_ID}`).dataset.selected).toBe('true')
+    expect(within(detail()).getByText('tmux task-0f0e0d0c')).toBeTruthy()
+    expect(screen.queryByRole('status')).toBeNull()
+  })
+
+  it('stops waiting for a started task once another is selected', async () => {
+    const launch = vi.fn().mockResolvedValue({
+      ok: true, launched: { id: NEW_ID, session_id: launchedTask.session_id, tmux_session: 'task-0f0e0d0c' },
+    })
+    const state = tasksState({ data: base, launch })
+    const rerender = renderWithRerender(state)
+    await startTask()
+
+    fireEvent.click(screen.getByTestId('task-card-wait-1'))
+    rerender({ ...state, data: { ...base, tasks: [...base.tasks, launchedTask] } })
+
+    expect(screen.getByTestId('task-card-wait-1').dataset.selected).toBe('true')
+    expect(screen.getByTestId(`task-card-${NEW_ID}`).dataset.selected).toBe('false')
+  })
+
+  it('reports labels that could not be saved for a task that did start', async () => {
+    const launch = vi.fn().mockResolvedValue({
+      ok: true,
+      launched: { id: NEW_ID, session_id: launchedTask.session_id, tmux_session: 'task-0f0e0d0c', records_error: 'parse tasks.json' },
+    })
+    renderDashboard(tasksState({ data: base, launch }))
+
+    await startTask('infra')
+
+    expect(screen.getByRole('alert').textContent).toBe('The task started, but its labels could not be saved: parse tasks.json')
+  })
+
+  it('offers Resume only on a stopped claude task with a resumable session id', () => {
+    renderDashboard(tasksState({ data: base }))
+
+    expect(within(screen.getByTestId(`task-card-${stopped.id}`)).getByRole('button', { name: 'Resume: old' })).toBeTruthy()
+    // stop-1's session id is not a UUID, and the others are running.
+    for (const id of ['stop-1', 'wait-1', 'run-1']) {
+      expect(within(screen.getByTestId(`task-card-${id}`)).queryByRole('button', { name: /^Resume/ })).toBeNull()
+    }
+    fireEvent.click(screen.getByTestId('task-card-stop-1'))
+    expect(within(detail()).queryByRole('button', { name: /^Resume/ })).toBeNull()
+  })
+
+  it('resumes from the card and the detail panel, and selects the task', async () => {
+    let finish: (value: unknown) => void = () => {}
+    const resume = vi.fn().mockImplementation(() => new Promise((resolve) => { finish = resolve }))
+    renderDashboard(tasksState({ data: base, resume }))
+
+    fireEvent.click(within(screen.getByTestId(`task-card-${stopped.id}`)).getByRole('button', { name: /^Resume/ }))
+
+    expect(resume).toHaveBeenCalledWith(stopped)
+    expect(within(screen.getByTestId(`task-card-${stopped.id}`)).getByRole('button', { name: /^Resume/ })).toBeDisabled()
+    await act(async () => {
+      finish({ ok: true, launched: { id: stopped.id, session_id: STOPPED_SID, tmux_session: 'task-5d7e3a90' } })
+    })
+    expect(screen.getByTestId(`task-card-${stopped.id}`).dataset.selected).toBe('true')
+
+    resume.mockResolvedValue({ ok: true, launched: { id: stopped.id, session_id: STOPPED_SID, tmux_session: 'task-5d7e3a90' } })
+    await act(async () => {
+      fireEvent.click(within(detail()).getByRole('button', { name: /^Resume/ }))
+    })
+    expect(resume).toHaveBeenCalledTimes(2)
+  })
+
+  it('shows why a resume was refused', async () => {
+    const resume = vi.fn().mockResolvedValue({ ok: false, error: "a tmux session with the task's name already exists on the host" })
+    renderDashboard(tasksState({ data: base, resume }))
+
+    await act(async () => {
+      fireEvent.click(within(screen.getByTestId(`task-card-${stopped.id}`)).getByRole('button', { name: /^Resume/ }))
+    })
+
+    expect(screen.getByRole('alert').textContent).toBe(
+      "Could not resume old: a tmux session with the task's name already exists on the host",
+    )
+    expect(within(screen.getByTestId(`task-card-${stopped.id}`)).getByRole('button', { name: /^Resume/ })).toBeEnabled()
+  })
+
+  it('closes the New task dialog on Cancel without starting anything', () => {
+    const launch = vi.fn()
+    renderDashboard(tasksState({ data: base, launch }))
+    fireEvent.click(screen.getByRole('button', { name: 'New task' }))
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'New task' })).getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(launch).not.toHaveBeenCalled()
   })
 })
