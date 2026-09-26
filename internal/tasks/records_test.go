@@ -159,6 +159,11 @@ func TestRecordStore_UnreadableFileIsReportedAndNotOverwritten(t *testing.T) {
 			wantErr: "invalid session ID",
 		},
 		{
+			name:    "invalid label",
+			content: `{"version":1,"records":[{"agent":"claude","session_id":"s","labels":["a\u0007b"]}]}`,
+			wantErr: "control character",
+		},
+		{
 			name:    "duplicate record",
 			content: `{"version":1,"records":[{"agent":"claude","session_id":"s"},{"agent":"claude","session_id":"s"}]}`,
 			wantErr: "duplicate task record",
