@@ -368,8 +368,9 @@ task_dashboard:
   none.
 - **What is read.** The task's log, `~/.claude/projects/*/<session ID>.jsonl`, is read on its host by
   a fixed script run like the collection's ([Task summaries](../security/command-execution.md#task-summaries)).
-  The host sends the whole log when it is at most 2.25 MiB, and otherwise its first 256 KiB and its
-  last 2 MiB.
+  When the session has a log in more than one project directory, the newest is read — the one whose
+  modification time and size the summary is keyed on. The host sends the whole log when it is at most
+  2.25 MiB, and otherwise its first 256 KiB and its last 2 MiB.
 - **What claude is given.** Each line is read as a JSON object, and only the text of the user's and
   the assistant's messages is kept: a line whose `type` is `user` or `assistant` and whose
   `message.content` is a string or holds `text` blocks, and which is not a subagent's
@@ -384,12 +385,15 @@ task_dashboard:
   and are gone when it restarts.
 - **A log that cannot be read.** When no line of a log has that shape, the task's summary is
   `unreadable` and nothing is sent to claude; the raw log is never sent instead. A Claude Code release
-  that changes the log's format shows up this way rather than as a wrong summary.
+  that changes the log's format shows up this way rather than as a wrong summary. Asking again reads
+  nothing until the log changes, so the detail panel's button is disabled then.
 - **When a summary is made.**
-  - A running task that is not working — `wait`, `idle` or `unknown` — is summarized when a
+  - A running task that waits for input or is idle — `wait` or `idle` — is summarized when a
     collection finds its log at a modification time and size it was not yet summarized at.
-  - A `busy` task is not: its log changes all the time. Its last summary is shown, marked outdated.
-  - A stopped task is summarized when it is selected on the dashboard and has no current summary.
+  - A `busy` task is not: its log changes all the time. Nor is an `unknown` one, whose state could
+    not be read and which may be working. Its last summary is shown, marked outdated.
+  - A stopped or `unknown` task is summarized when it is selected on the dashboard and has no
+    current summary.
   - `Summarize` / `Summarize again` in the detail panel asks for any task that can have one.
   - A summary is reused while its log keeps the same modification time and size, so the 10-second
     poll does not summarize again. A failed summary is not retried by the poll for the same log; the

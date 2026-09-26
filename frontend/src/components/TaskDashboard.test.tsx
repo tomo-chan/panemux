@@ -791,6 +791,17 @@ describe('TaskDashboard summaries', () => {
     expect(workSection()).toHaveTextContent('has no messages the dashboard can read')
   })
 
+  it('offers no summary of a log it cannot read, and says why', () => {
+    const requestSummary = vi.fn()
+    renderDashboard(tasksState({ data: summarized, requestSummary }))
+    selectCard('unreadable')
+    const button = within(workSection()).getByRole('button', { name: 'Summarize' })
+    expect(button).toBeDisabled()
+    expect(button).toHaveAttribute('title', 'The conversation log cannot be read, so it cannot be summarized.')
+    fireEvent.click(button)
+    expect(requestSummary).not.toHaveBeenCalled()
+  })
+
   it('asks for the summary of a stopped task when it is selected, and not of a running one', () => {
     const requestSummary = vi.fn().mockResolvedValue(null)
     renderDashboard(tasksState({ data: summarized, requestSummary }))

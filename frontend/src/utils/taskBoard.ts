@@ -86,13 +86,14 @@ export function summaryNext(summary: TaskSummary | undefined): { next: string; l
 }
 
 /**
- * Whether selecting a task asks the server to summarize it. Running tasks are
- * summarized by the poll; a stopped one only when asked, which selecting it
+ * Whether selecting a task asks the server to summarize it. Tasks waiting for
+ * input or idle are summarized by the poll; a stopped one, or one in an
+ * unknown state (which may be working), only when asked, which selecting it
  * does while it has no current summary. A failure is retried with the
  * Summarize button, not by selecting the task again.
  */
 export function summaryRequestOnSelect(task: Task, summariesEnabled: boolean): boolean {
-  if (!summariesEnabled || task.state !== 'stop' || !canSummarize(task)) return false
+  if (!summariesEnabled || (task.state !== 'stop' && task.state !== 'unknown') || !canSummarize(task)) return false
   return task.summary === undefined || (task.summary.state === 'ready' && task.summary.outdated === true)
 }
 

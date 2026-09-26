@@ -157,9 +157,14 @@ describe('summaryRequestOnSelect', () => {
   })
 
   it('leaves running tasks to the poll', () => {
-    for (const state of ['busy', 'wait', 'idle', 'unknown'] as const) {
+    for (const state of ['busy', 'wait', 'idle'] as const) {
       expect(summaryRequestOnSelect(task({ state }), true)).toBe(false)
     }
+  })
+
+  it('asks for a task in an unknown state, which the poll does not summarize', () => {
+    expect(summaryRequestOnSelect(task({ state: 'unknown' }), true)).toBe(true)
+    expect(summaryRequestOnSelect(task({ state: 'unknown', summary: { state: 'ready', text: 'x' } }), true)).toBe(false)
   })
 })
 

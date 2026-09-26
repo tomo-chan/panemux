@@ -16,12 +16,13 @@ import (
 // is reused while the log keeps that version, so the dashboard's 10-second
 // poll does not summarize again. Which tasks are summarized:
 //
-//   - A running task that is not working (wait, idle, unknown) is summarized
-//     when a poll finds its log at a version not yet tried.
-//   - A busy task is not: its log changes all the time. Its last summary is
-//     shown, marked outdated.
-//   - A stopped task is summarized when the dashboard asks (RequestSummary),
-//     which it does when the task is selected.
+//   - A running task that waits for input or is idle is summarized when a
+//     poll finds its log at a version not yet tried.
+//   - A busy task is not: its log changes all the time. Nor is one in an
+//     unknown state, which may be working too. Its last summary is shown,
+//     marked outdated.
+//   - A stopped or unknown task is summarized when the dashboard asks
+//     (RequestSummary), which it does when the task is selected.
 //
 // A failed attempt is not retried by the poll for the same log version;
 // RequestSummary retries it. At most summaryConcurrency summaries run at once.
@@ -89,8 +90,10 @@ type summaryTask struct {
 }
 
 // automaticSummaryStates are the states in which a running task is
-// summarized without being asked.
-var automaticSummaryStates = map[State]bool{StateWait: true, StateIdle: true, StateUnknown: true}
+// summarized without being asked. A task in an unknown state is not one of
+// them: it may be working, its log changing at every poll, as a busy one's
+// does.
+var automaticSummaryStates = map[State]bool{StateWait: true, StateIdle: true}
 
 // rememberSummaryTasks records the tasks a host's collection listed with a
 // log, which RequestSummary may summarize, and drops the summaries of tasks

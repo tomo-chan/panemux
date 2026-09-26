@@ -55,28 +55,45 @@ const (
 // log's size, then the whole log when it is at most the head and tail
 // together, else its first transcriptHeadBytes and its last
 // transcriptTailBytes, then "::end". A missing log prints
-// "::panemux-transcript none". It is a fixed script run with `sh -s`, like
+// "::panemux-transcript none". When the session has a log in more than one
+// project directory, the newest is read: it is the one whose version the
+// collection keys the summary on (withLogVersions). It is a fixed script
+// run with `sh -s`, like
 // collectScript; the only value in it is a session ID that passed
 // validSessionID and is single-quoted.
 const transcriptScriptTemplate = `set -u
 LC_ALL=C
 export LC_ALL
 sid='{{SESSION_ID}}'
+if stat -c %Y / >/dev/null 2>&1; then
+	mtime() { stat -c %Y "$1"; }
+else
+	mtime() { stat -f %m "$1"; }
+fi
+best=
+bestt=
 for p in "$HOME"/.claude/projects/*/"$sid.jsonl"; do
 	[ -f "$p" ] || continue
-	size=$(wc -c <"$p" | tr -d ' ')
-	echo "::panemux-transcript v1 $size"
-	if [ "$size" -le {{WHOLE}} ]; then
-		head -c "$size" "$p"
-	else
-		head -c {{HEAD}} "$p"
-		tail -c {{TAIL}} "$p"
+	t=$(mtime "$p" 2>/dev/null) || t=0
+	if [ -z "$best" ] || [ "$t" -gt "$bestt" ]; then
+		best=$p
+		bestt=$t
 	fi
-	echo
-	echo '::end'
-	exit 0
 done
-echo '::panemux-transcript none'
+if [ -z "$best" ]; then
+	echo '::panemux-transcript none'
+	exit 0
+fi
+size=$(wc -c <"$best" | tr -d ' ')
+echo "::panemux-transcript v1 $size"
+if [ "$size" -le {{WHOLE}} ]; then
+	head -c "$size" "$best"
+else
+	head -c {{HEAD}} "$best"
+	tail -c {{TAIL}} "$best"
+fi
+echo
+echo '::end'
 exit 0
 `
 

@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
@@ -340,4 +341,38 @@ func TestBuildExcerpt_MessagesThatFillTheBudgetExactlyAreKept(t *testing.T) {
 // before its start.
 func TestTruncateUTF8_InvalidLeadingBytes(t *testing.T) {
 	assert.Equal(t, "…", truncateUTF8("\x80\x80\x80abc", 2))
+}
+
+// A session with a log in two project directories: the newest is read,
+// which is the one the collection keys the summary on, whatever the order
+// the shell lists the directories in.
+func TestRunLocal_TranscriptScriptReadsTheNewestOfTwoLogs(t *testing.T) {
+	home := t.TempDir()
+	homedir.SetForTest(t, home)
+	older := filepath.Join(home, ".claude", "projects", "a-old", "dup.jsonl")
+	newer := filepath.Join(home, ".claude", "projects", "z-new", "dup.jsonl")
+	for path, text := range map[string]string{older: "OLD", newer: "NEW"} {
+		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
+		require.NoError(t, os.WriteFile(path, []byte(userLine(text)+"\n"), 0o600))
+	}
+	twoDaysAgo := time.Now().Add(-48 * time.Hour)
+	require.NoError(t, os.Chtimes(older, twoDaysAgo, twoDaysAgo))
+
+	script, err := buildTranscriptScript("dup")
+	require.NoError(t, err)
+	out, err := runLocal(context.Background(), script)
+	require.NoError(t, err)
+	got, err := parseTranscriptOutput(out)
+	require.NoError(t, err)
+	assert.Contains(t, string(got.Head), "NEW")
+
+	// And the other way round, so the order of the directories is not what
+	// decides.
+	require.NoError(t, os.Chtimes(older, time.Now(), time.Now()))
+	require.NoError(t, os.Chtimes(newer, twoDaysAgo, twoDaysAgo))
+	out, err = runLocal(context.Background(), script)
+	require.NoError(t, err)
+	got, err = parseTranscriptOutput(out)
+	require.NoError(t, err)
+	assert.Contains(t, string(got.Head), "OLD")
 }

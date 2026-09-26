@@ -959,6 +959,9 @@ const WorkSection: React.FC<WorkSectionProps> = ({ task, enabled, onRequest }) =
   } else if (!canSummarize(task)) {
     body = <p className="td-note">Only a claude task with a session ID can be summarized.</p>
   } else {
+    // A log that could not be read reads the same until it changes, and the
+    // server does not read it again before then: the button stays, disabled.
+    const unreadable = summary?.state === 'unreadable'
     const retry = summary?.state !== 'pending' && (!summary?.text || summary.outdated || summary.state === 'error')
     const request = async () => {
       const failure = await onRequest(task)
@@ -982,8 +985,14 @@ const WorkSection: React.FC<WorkSectionProps> = ({ task, enabled, onRequest }) =
           <p className="td-note">No remaining work found.</p>
         )}
         {retry && (
-          <button type="button" className="td-btn td-btn-sm" onClick={() => void request()}>
-            {summary ? 'Summarize again' : 'Summarize'}
+          <button
+            type="button"
+            className="td-btn td-btn-sm"
+            disabled={unreadable}
+            title={unreadable ? 'The conversation log cannot be read, so it cannot be summarized.' : undefined}
+            onClick={() => void request()}
+          >
+            {summary?.text || summary?.state === 'error' ? 'Summarize again' : 'Summarize'}
           </button>
         )}
         {requestError?.id === task.id && (

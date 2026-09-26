@@ -482,6 +482,19 @@ Chosen while it was built:
   claude, so the candidate and the list shown under it cannot disagree.
 - **The card's title button no longer also selects through the card's click handler**, which ran for
   every click and would have asked for a stopped task's summary twice.
+- **An `unknown` task is summarized only when asked** (review of PR #268, decided with the operator).
+  The first version summarized `unknown` with `wait` and `idle` on the poll. But `unknown` includes a
+  running session reporting a status this release does not know, which may be working with its log
+  growing at every poll — so a new Claude Code status would have started `claude -p` every 10
+  seconds, the failure mode spending money exactly when the format changed. Summarizing it once and
+  then treating it like `busy` was the alternative.
+- **The newest of a session's logs is read** (review of PR #268). The collection keys a summary on the
+  newest log of a session ID, while the fetch script read the first one the shell's glob found, so a
+  session with logs in two project directories could get a summary of the older one recorded as
+  current.
+- **A log that cannot be read keeps a disabled button** (review of PR #268, decided with the operator).
+  The server does not read such a log again until it changes, so the button did nothing; hiding it
+  was the alternative, rejected so the panel still shows that summarizing is what cannot be done.
 
 ## Agent Board
 

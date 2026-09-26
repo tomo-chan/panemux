@@ -348,8 +348,10 @@ checked against the real CLI in [command-center.md](command-center.md#command-ce
 | `--output-format=json`, `--json-schema <schema>` | The answer is parsed as a structure, and bounded before it is shown |
 
 The instruction tells claude that the excerpt is data to describe and not instructions. That is not
-relied on: a conversation that talks claude into ignoring it can change only the summary text, which
-the dashboard renders as text. `--tools ""` (no tools at all) was considered; whether the CLI reads an
+relied on: a conversation that talks claude into ignoring it can change the summary text and the
+list of remaining work — and so, by emptying that list, whether the task is shown as a done
+candidate. All of it is rendered as text, and a done candidate is only a label: marking a task done
+takes a person's click, so the most such a conversation can do is mislead what the dashboard shows. `--tools ""` (no tools at all) was considered; whether the CLI reads an
 empty value as "none" could not be verified here, so the verified denial list is what ships.
 
 **What is sent is bounded and excludes tool output.** Only the text of user and assistant messages is

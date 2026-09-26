@@ -574,3 +574,32 @@ func asBusy(tasks []Task) []Task {
 	}
 	return busy
 }
+
+// A task in a state the dashboard cannot read may be working, its log
+// growing at every poll, so like a busy one it is never summarized by the
+// poll; it keeps its last summary, marked outdated, until someone asks.
+func TestSummaries_AnUnknownTaskIsSummarizedOnlyWhenAsked(t *testing.T) {
+	host := &summaryHost{}
+	summarizer := &fakeSummarizer{result: Summary{Text: "s", Remaining: []string{"x"}}}
+	svc := newSummaryService(t, host, summarizer)
+
+	for i := 1; i <= 3; i++ {
+		// "compacting" stands for a status this release does not know.
+		host.set(hostCollection(100*i, "compacting"), conversationLog("a"))
+		snap, views := collectAndSummarize(svc)
+		require.Equal(t, StateUnknown, snap.Tasks[0].State)
+		assert.Nil(t, views["local:claude:s10"])
+	}
+	assert.Zero(t, summarizer.calls())
+
+	_, err := svc.RequestSummary("", "s10")
+	require.NoError(t, err)
+	svc.waitSummaries()
+	assert.Equal(t, 1, summarizer.calls())
+
+	host.set(hostCollection(400, "compacting"), conversationLog("a", "b"))
+	_, views := collectAndSummarize(svc)
+	assert.Equal(t, 1, summarizer.calls(), "a grown log is not summarized again by the poll")
+	require.NotNil(t, views["local:claude:s10"])
+	assert.True(t, views["local:claude:s10"].Outdated)
+}
