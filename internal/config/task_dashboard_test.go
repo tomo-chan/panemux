@@ -135,6 +135,65 @@ func TestJiraBrowseURL(t *testing.T) {
 	assert.Empty(t, TaskDashboardConfig{}.JiraBrowseURL("PAY-418"))
 }
 
+func TestValidate_TaskDashboardJiraProjects(t *testing.T) {
+	tests := []struct {
+		name     string
+		projects []string
+		ok       bool
+	}{
+		{"unset", nil, true},
+		{"project keys", []string{"PAY", "OPS", "A1_B"}, true},
+		{"lower case", []string{"pay"}, false},
+		{"one letter", []string{"P"}, false},
+		{"a whole issue key", []string{"PAY-418"}, false},
+		{"empty", []string{""}, false},
+		{"surrounding space", []string{" PAY"}, false},
+		{"starts with a digit", []string{"1PAY"}, false},
+		{"one bad among good", []string{"PAY", "ops"}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := validConfig()
+			cfg.TaskDashboard.JiraURL = "https://example.atlassian.net"
+			cfg.TaskDashboard.JiraProjects = tt.projects
+			err := cfg.Validate()
+			if tt.ok {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "task_dashboard.jira_projects")
+		})
+	}
+}
+
+func TestLinksJiraKey(t *testing.T) {
+	all := TaskDashboardConfig{JiraURL: "https://example.atlassian.net"}
+	assert.True(t, all.LinksJiraKey("PAY-418"), "no list links every key")
+	assert.True(t, all.LinksJiraKey("CVE-2024"))
+
+	listed := TaskDashboardConfig{JiraURL: "https://example.atlassian.net", JiraProjects: []string{"PAY", "A1_B"}}
+	assert.True(t, listed.LinksJiraKey("PAY-418"))
+	assert.True(t, listed.LinksJiraKey("A1_B-7"))
+	assert.False(t, listed.LinksJiraKey("CVE-2024"))
+	assert.False(t, listed.LinksJiraKey("PAYX-1"), "a project key is matched whole, not as a prefix")
+	assert.False(t, listed.LinksJiraKey("PA-1"))
+}
+
+func TestLoad_ReadsTaskDashboardJiraProjects(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(path, []byte("server:\n  port: 8080\ntask_dashboard:\n"+
+		"  jira_url: https://example.atlassian.net\n  jira_projects: [PAY, OPS]\n"), 0o600))
+	cfg, err := Load(path)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"PAY", "OPS"}, cfg.TaskDashboard.JiraProjects)
+
+	require.NoError(t, cfg.SaveLayout(cfg.Layout))
+	reloaded, err := Load(path)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"PAY", "OPS"}, reloaded.TaskDashboard.JiraProjects)
+}
+
 func TestLoad_ReadsTaskDashboardJiraURL(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	require.NoError(t, os.WriteFile(path,

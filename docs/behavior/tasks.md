@@ -159,9 +159,11 @@ only `repo` and `repo_url`, never `branch`, a pull request, issues or Jira keys.
   key is listed once, in the order found. Each links to `<task_dashboard.jira_url>/browse/<key>`
   (a trailing `/` on the setting is dropped). Without `task_dashboard.jira_url` no key is reported.
   Jira itself is never contacted.
-- Nothing checks that a key names a real Jira issue, so text of the same shape is linked too:
-  `UTF-8`, `SHA-256` or `ISO-8601` in a PR title each become a key, and
-  `CVE-2024-45337` gives `CVE-2024`, because the `-` after `2024` does not stop a match.
+- With `task_dashboard.jira_projects` set, only keys of the listed projects are linked
+  (`PAY-418` for `[PAY]`, not `PAYX-1`). Without it, nothing checks that a key names a real Jira
+  issue, so text of the same shape is linked too: `UTF-8`, `SHA-256` or `ISO-8601` in a PR title
+  each become a key, and `CVE-2024-45337` gives `CVE-2024`, because the `-` after `2024` does not
+  stop a match.
 
 ### Opening a task
 

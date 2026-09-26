@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
@@ -53,6 +54,24 @@ type TaskDashboardConfig struct {
 	// JiraURL is the Jira site a task's Jira keys link into, as
 	// <JiraURL>/browse/<key>. Empty means no Jira links.
 	JiraURL string `yaml:"jira_url,omitempty" json:"jira_url,omitempty"`
+	// JiraProjects, when set, are the only Jira project keys linked: a key
+	// found in a branch name or PR title whose project is not listed is
+	// dropped. Empty links every key of the right shape.
+	JiraProjects []string `yaml:"jira_projects,omitempty" json:"jira_projects,omitempty"`
+}
+
+// jiraProjectKeyRe is a Jira project key, the part of an issue key before
+// its "-": the same form the task dashboard finds keys by.
+var jiraProjectKeyRe = regexp.MustCompile(`^[A-Z][A-Z0-9_]+$`)
+
+// LinksJiraKey reports whether the Jira issue key (PROJECT-123) is linked:
+// always without JiraProjects, and otherwise only when its project is listed.
+func (d TaskDashboardConfig) LinksJiraKey(key string) bool {
+	if len(d.JiraProjects) == 0 {
+		return true
+	}
+	project, _, _ := strings.Cut(key, "-")
+	return slices.Contains(d.JiraProjects, project)
 }
 
 // JiraBrowseURL is the page of the Jira issue key on the configured site, or
@@ -64,7 +83,22 @@ func (d TaskDashboardConfig) JiraBrowseURL(key string) string {
 	return strings.TrimRight(d.JiraURL, "/") + "/browse/" + key
 }
 
-// validateTaskDashboard accepts only an absolute https URL with a host and
+// validateTaskDashboard checks each jira_projects entry is a project key,
+// and the Jira site as validateJiraURL does.
+func validateTaskDashboard(d TaskDashboardConfig) []string {
+	var errs []string
+	for _, project := range d.JiraProjects {
+		if !jiraProjectKeyRe.MatchString(project) {
+			errs = append(errs, fmt.Sprintf(
+				"task_dashboard.jira_projects entry %q must be a Jira project key: "+
+					"an upper-case letter, then upper-case letters, digits or _",
+				project))
+		}
+	}
+	return append(errs, validateJiraURL(d.JiraURL)...)
+}
+
+// validateJiraURL accepts only an absolute https URL with a host and
 // nothing a /browse/<key> suffix could not be appended to: no query,
 // fragment, credentials, whitespace or control characters. The URL becomes
 // the href of a link the dashboard opens, so nothing but https reaches it.
@@ -73,20 +107,20 @@ func (d TaskDashboardConfig) JiraBrowseURL(key string) string {
 // one behind the frontend's HttpUrlSchema) also accepts, since the browser
 // rejects the whole GET /api/tasks response for one link it cannot parse.
 // testdata/jira-url-validation.json is checked by both sides.
-func validateTaskDashboard(d TaskDashboardConfig) []string {
-	if d.JiraURL == "" {
+func validateJiraURL(jiraURL string) []string {
+	if jiraURL == "" {
 		return nil
 	}
 	invalid := []string{fmt.Sprintf(
 		"task_dashboard.jira_url %q must be an https URL with a valid host and port, "+
 			"and no query, fragment or credentials",
-		d.JiraURL)}
-	if strings.IndexFunc(d.JiraURL, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) >= 0 {
+		jiraURL)}
+	if strings.IndexFunc(jiraURL, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) >= 0 {
 		return invalid
 	}
-	u, err := url.Parse(d.JiraURL)
+	u, err := url.Parse(jiraURL)
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil ||
-		u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || strings.HasSuffix(d.JiraURL, "#") {
+		u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || strings.HasSuffix(jiraURL, "#") {
 
 		return invalid
 	}

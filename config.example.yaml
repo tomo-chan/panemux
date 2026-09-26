@@ -43,8 +43,11 @@ display:
 # Jira site that Jira keys found in a task's branch name or PR title (such as
 # PAY-418) link into, as <jira_url>/browse/<key>. https only. Jira is never
 # queried. Omit it for no Jira links.
+# `jira_projects` optionally limits the links to those projects' keys, so text
+# that only looks like a key (UTF-8, CVE-2024-45337) is not linked.
 # task_dashboard:
 #   jira_url: "https://example.atlassian.net"
+#   jira_projects: [PAY, OPS]
 
 # ── Opening URLs from a pane ──────────────────────────────────────────────────
 # When a URL is opened from a pane, panemux republishes the URL's loopback

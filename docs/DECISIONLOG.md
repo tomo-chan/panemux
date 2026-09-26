@@ -174,8 +174,14 @@ while being built:
 - **A Jira key is `[A-Z][A-Z0-9_]+-[1-9][0-9]*` with no ASCII letter or digit touching it**, found
   in the branch name and then the pull request title. Keys are case-sensitive, so a lower-case
   branch such as `pay-418-retry` gives none; the form still matches words such as `UTF-8` or
-  `SHA-256` in a title, and cuts `CVE-2024-45337` to `CVE-2024` (review of PR #261; the current
-  behavior page lists these). Every key found is linked, not just the first.
+  `SHA-256` in a title, and cuts `CVE-2024-45337` to `CVE-2024`. Every key found is linked, not
+  just the first.
+- **`task_dashboard.jira_projects` limits keys to the listed projects** (review of PR #261). The
+  false positives above come from the key shape alone. A project allowlist removes them without
+  calling Jira, so it keeps the "linked, never queried" rule. The alternative considered was to
+  drop a key followed by `-<digit>`: it would have removed only the `CVE-2024` case, left `UTF-8`
+  and `SHA-256`, and hidden a real key in a branch such as `PAY-418-2-retry`. The list is optional,
+  and without it every key of the right shape is linked as before.
 - **Jira is linked, never queried.** `task_dashboard.jira_url` names the site and a key becomes
   `<jira_url>/browse/<key>`; no Jira API is called and no ticket title is fetched, so panemux holds
   no Jira credentials. The setting is a new top-level `task_dashboard` section rather than part of

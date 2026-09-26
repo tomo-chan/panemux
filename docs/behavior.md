@@ -24,7 +24,7 @@ The YAML config defines:
   workspace's recursive layout
 - optional `display` settings, including `display.task_dashboard_shortcut`
 - optional `url_open` settings
-- optional `task_dashboard` settings, including `task_dashboard.jira_url`
+- optional `task_dashboard` settings: `task_dashboard.jira_url` and `task_dashboard.jira_projects`
 - optional `agent_board` and `command_center` settings
 
 Legacy top-level `layout` is accepted at load time and normalized to one `default` workspace. The
@@ -66,6 +66,13 @@ Layout rules:
   These keep every accepted site one the browser's URL parser also accepts, since the browser
   rejects the whole task list for one link it cannot parse
 - omitted means no Jira links, and an omitted block is never written back on save
+
+`task_dashboard.jira_projects` rules:
+
+- optional list of Jira project keys (`[PAY, OPS]`); when set, only keys of these projects are
+  linked, which drops text that merely has a key's shape, such as `UTF-8` or `CVE-2024`
+- each entry is an upper-case letter followed by upper-case letters, digits or `_`
+- omitted links every key found
 
 Path behavior:
 

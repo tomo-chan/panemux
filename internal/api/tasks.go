@@ -416,6 +416,9 @@ func (h *Handler) lookupTaskGit(ctx context.Context, host, cwd string, withPR bo
 	}
 	if h.cfg.TaskDashboard.JiraURL != "" {
 		for _, key := range jiraKeys(gitCtx.Branch, prTitle) {
+			if !h.cfg.TaskDashboard.LinksJiraKey(key) {
+				continue
+			}
 			info.Jira = append(info.Jira, taskJiraLink{Key: key, URL: h.cfg.TaskDashboard.JiraBrowseURL(key)})
 		}
 	}

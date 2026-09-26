@@ -346,6 +346,28 @@ func TestTaskGitInfo_NoPRRunsGHOnce(t *testing.T) {
 	assert.Equal(t, 1, strings.Count(string(logged), "\n"))
 }
 
+// task_dashboard.jira_projects limits the keys to the listed projects, which
+// drops text that only has a key's shape: CVE-2024 cut from CVE-2024-45337,
+// UTF-8, SHA-256.
+func TestTaskGitInfo_JiraProjectsLimitTheKeys(t *testing.T) {
+	dir := initTempGitRepo(t)
+	out, err := exec.Command("git", "-C", dir, "checkout", "-b", "PAY-418-retry-backoff").CombinedOutput()
+	require.NoError(t, err, string(out))
+
+	cfg := defaultTestConfig()
+	cfg.TaskDashboard.JiraURL = "https://example.atlassian.net"
+	cfg.TaskDashboard.JiraProjects = []string{"PAY"}
+	h := NewHandler(cfg, session.NewManager(), nil, nil)
+	h.ghBinaryPath = writeFakeGHBinary(t, `#!/bin/sh
+echo '{"url":"https://github.com/example/payment/pull/87","number":87,`+
+		`"title":"bump x/crypto for CVE-2024-45337, UTF-8 and SHA-256 (OPS-77)","closingIssuesReferences":[]}'
+`)
+
+	info := h.lookupTaskGit(context.Background(), "", dir, true)
+	require.NotNil(t, info)
+	assert.Equal(t, []taskJiraLink{{Key: "PAY-418", URL: "https://example.atlassian.net/browse/PAY-418"}}, info.Jira)
+}
+
 // Without a Jira site in the config there is nothing to link a key to.
 func TestTaskGitInfo_NoJiraSiteNoJiraLinks(t *testing.T) {
 	dir := initTempGitRepo(t)
