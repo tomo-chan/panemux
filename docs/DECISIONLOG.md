@@ -153,6 +153,34 @@ while being built:
 - **The UI text is English**, like the rest of panemux's interface, although the issue's mockup is
   written in Japanese.
 
+### Opening an agent outside tmux through `PANEMUX_PANE_ID` (2026-09-26, issue #254)
+
+Stage 1 located an agent only through tmux, so one running directly in a `local` or `ssh` pane could
+not be opened. Issue #254 chose to have those panes export `PANEMUX_PANE_ID` to their shell, the way
+the browser shim exports `BROWSER`, and to read it back from the agent's environment at
+collection. The choices made while building it:
+
+- **Only IDs matching `^[A-Za-z0-9_.-]{1,128}$` are exported.** Pane IDs have no charset rule in the
+  config. Exporting any ID would have put arbitrary text into an SSH pane's remote command, relying
+  on quoting alone; limiting it keeps the value inert in a shell and lets collection apply the same
+  rule to what it reads back. Every ID panemux generates matches, so only a hand-written config ID
+  can lose the feature.
+- **SSH panes export it whether or not the browser shim is enabled.** An `ssh` pane that used the
+  SSH shell request now runs a command that execs the login shell, the change the shim already
+  made. Exporting it only with the shim would have left agents in those panes impossible to open,
+  and `AcceptEnv` on the server cannot be relied on for `Setenv`.
+- **The browser matches the ID against the panes it holds**, as it already did for tmux sessions,
+  rather than the server checking it against the config. The value only claims a pane, so it opens
+  one only when that pane is a `local` pane (panemux host) or an `ssh` pane on the task's
+  connection.
+- **Only the agent's own environment is read, and only on Linux** (`/proc/<pid>/environ`). The way
+  to read another process's environment on macOS was not verified when this was built, so macOS
+  hosts report no pane ID rather than relying on an unchecked method.
+- **Process ancestry was not used instead.** Matching an agent's parent chain against a local
+  pane's shell pid would work without reading environments on the panemux host, but the pid of an
+  `ssh` pane's remote shell is not known to panemux, and an agent that detached from its shell
+  would be lost; the environment survives both.
+
 ## Agent Board
 
 ### Compatibility is checked against a real agmsg release (2026-08-23, PR #176)

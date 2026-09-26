@@ -382,9 +382,11 @@ export const App: React.FC = () => {
     void setActiveWorkspace(workspaceId)
   }, [clearPaneAttention, clearWorkspaceAttention, setActiveWorkspace])
 
-  // Opening a task from the dashboard: go to the pane already attached to
-  // its tmux session, or create one in the active workspace that attaches to
-  // it (`tmux new-session -A` attaches to the running session).
+  // Opening a task from the dashboard: go to the pane it runs in (the pane
+  // attached to its tmux session, or the local / ssh pane an agent outside
+  // tmux was started from), or create one in the active workspace that
+  // attaches to its tmux session (`tmux new-session -A` attaches to the
+  // running session).
   // The tmux sessions a pane is being created for. Until createPane resolves
   // and the workspaces carry the new pane, the task still reads as having
   // none, so a second Open would create a second pane attached to it.

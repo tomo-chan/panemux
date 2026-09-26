@@ -62,8 +62,10 @@ Two limitations are inherent to the mechanism:
 - With the shim enabled, an `ssh` pane that would otherwise have used the SSH shell request runs a
   command instead, so it execs the login shell explicitly (`$SHELL -l` for `bash`, `zsh`, and
   `fish`; a plain `exec "$SHELL"` for anything else). Panes that set `cwd` or `shell` already ran a
-  command and keep exactly the form they had before. Setting `url_open.browser_shim: false` restores
-  the previous behavior everywhere.
+  command and keep exactly the form they had before. A pane whose ID is exported as
+  `PANEMUX_PANE_ID` ([task dashboard](tasks.md#the-pane-of-an-agent-outside-tmux)) runs that same
+  command whether or not the shim is enabled; `url_open.browser_shim: false` only drops the shim
+  from it.
 
 ### Clicked links
 

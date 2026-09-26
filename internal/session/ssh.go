@@ -530,7 +530,7 @@ func newSSHSessionFromClient(
 		return nil, err
 	}
 
-	if err := startSSHShell(sess, cfg); err != nil {
+	if err := startSSHShell(sess, id, cfg); err != nil {
 		closeSSHResources(sess, client, jumpClient)
 		return nil, err
 	}
@@ -575,8 +575,8 @@ func setupSSHPTY(sess *ssh.Session) (io.WriteCloser, *io.PipeReader, *io.PipeWri
 	return stdin, pr, pw, nil
 }
 
-func startSSHShell(sess *ssh.Session, cfg SSHConfig) error {
-	cmd, err := sshShellCommand(cfg)
+func startSSHShell(sess *ssh.Session, paneID string, cfg SSHConfig) error {
+	cmd, err := sshShellCommand(paneID, cfg)
 	if err != nil {
 		return err
 	}
@@ -594,22 +594,27 @@ func startSSHShell(sess *ssh.Session, cfg SSHConfig) error {
 // recommended pattern) before being embedded in the shell command.
 // sess.Shell() and sess.Start() are mutually exclusive in the SSH protocol.
 //
-// With the browser-open shim enabled, a fixed, non-tainted setup snippet is
-// prepended (see browseropen.go). A pane that would otherwise have used
+// Setup snippets are prepended: the export of the pane's ID (see paneid.go),
+// and with the browser-open shim enabled, a fixed, non-tainted snippet that
+// installs it (see browseropen.go). A pane that would otherwise have used
 // sess.Shell() then has to run a command instead, so it execs the login
 // shell explicitly to keep the profile files an SSH login would source.
-func sshShellCommand(cfg SSHConfig) (string, error) {
+func sshShellCommand(paneID string, cfg SSHConfig) (string, error) {
 	tail, err := sshShellExecTail(cfg)
 	if err != nil {
 		return "", err
 	}
-	if !browserShimEnabled.Load() {
+	setup := remotePaneIDSetup(paneID)
+	if browserShimEnabled.Load() {
+		setup += remoteBrowserShimSetup()
+	}
+	if setup == "" {
 		return tail, nil
 	}
 	if tail == "" {
 		tail = remoteLoginShellExec
 	}
-	return remoteBrowserShimSetup() + tail, nil
+	return setup + tail, nil
 }
 
 // sshShellExecTail builds the part of the remote command that enters the

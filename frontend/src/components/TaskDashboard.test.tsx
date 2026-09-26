@@ -143,8 +143,53 @@ describe('TaskDashboard', () => {
     )
 
     const idle = screen.getByTestId('task-card-idle-1')
-    expect(idle).toHaveTextContent('outside tmux · cannot open in a pane')
+    expect(idle).toHaveTextContent('outside tmux · not in a panemux pane')
     expect(within(idle).queryByRole('button', { name: /Open|Go to/ })).not.toBeInTheDocument()
+  })
+
+  // Issue #254: an agent outside tmux names its pane through PANEMUX_PANE_ID.
+  it('goes to the local or ssh pane an agent outside tmux runs in', () => {
+    const onOpenTask = vi.fn()
+    const outside = (id: string, paneId: string, host = '') =>
+      task({ id, host, state: 'busy', cwd: `/workspace/user/${id}`, location: { kind: 'outside', pane_id: paneId, attachable: false } })
+    render(
+      <TaskDashboard
+        tasksState={tasksState({
+          data: {
+            hosts: response.hosts,
+            tasks: [outside('here', 'p-shell'), outside('there', 'p-dev', 'dev-server'), outside('gone', 'pane-closed')],
+          },
+        })}
+        workspaces={[{
+          id: 'main',
+          title: 'Main',
+          layout: {
+            direction: 'horizontal',
+            children: [
+              { size: 50, pane: { id: 'p-shell', type: 'local', title: 'shell' } },
+              { size: 50, pane: { id: 'p-dev', type: 'ssh', connection: 'dev-server' } },
+            ],
+          },
+        }]}
+        onOpenTask={onOpenTask}
+        onShowWorkspaces={vi.fn()}
+        now={() => NOW}
+      />,
+    )
+
+    const here = screen.getByTestId('task-card-here')
+    expect(here).toHaveTextContent('pane shell · Main')
+    fireEvent.click(within(here).getByRole('button', { name: 'Go to pane: here' }))
+    expect(onOpenTask).toHaveBeenLastCalledWith(
+      expect.objectContaining({ id: 'here' }),
+      { kind: 'goto', pane: { paneId: 'p-shell', paneTitle: 'shell', workspaceId: 'main', workspaceTitle: 'Main' } },
+    )
+
+    expect(screen.getByTestId('task-card-there')).toHaveTextContent('pane p-dev · Main')
+
+    const gone = screen.getByTestId('task-card-gone')
+    expect(gone).toHaveTextContent('outside tmux · its pane is in no workspace')
+    expect(within(gone).queryByRole('button', { name: /Open|Go to/ })).not.toBeInTheDocument()
   })
 
   it('links the branch and pull request of a task', () => {
