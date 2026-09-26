@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
@@ -289,6 +290,31 @@ func TestTaskGitInfo_WithoutAPROnlyTheBranchGivesJiraKeys(t *testing.T) {
 	cfg.TaskDashboard.JiraURL = "https://example.atlassian.net"
 	h := NewHandler(cfg, session.NewManager(), nil, nil)
 	h.ghBinaryPath = writeFakeGHBinary(t, ghNoPRScript)
+
+	info := h.lookupTaskGit(context.Background(), "", dir, true)
+	require.NotNil(t, info)
+	assert.Zero(t, info.PRNumber)
+	assert.Nil(t, info.Issues)
+	assert.Equal(t, []taskJiraLink{{Key: "PAY-418", URL: "https://example.atlassian.net/browse/PAY-418"}}, info.Jira)
+}
+
+// Without `gh` on the panemux host there is no PR and so no issues, but the
+// branch name still carries its Jira key.
+func TestTaskGitInfo_WithoutGHTheBranchStillGivesJiraKeys(t *testing.T) {
+	dir := initTempGitRepo(t)
+	out, err := exec.Command("git", "-C", dir, "checkout", "-b", "PAY-418-retry").CombinedOutput()
+	require.NoError(t, err, string(out))
+	gitPath, err := exec.LookPath("git")
+	require.NoError(t, err)
+	onlyGit := t.TempDir()
+	require.NoError(t, os.Symlink(gitPath, filepath.Join(onlyGit, "git")))
+	t.Setenv("PATH", onlyGit)
+	_, err = exec.LookPath("gh")
+	require.Error(t, err, "gh must not be on PATH")
+
+	cfg := defaultTestConfig()
+	cfg.TaskDashboard.JiraURL = "https://example.atlassian.net"
+	h := NewHandler(cfg, session.NewManager(), nil, nil)
 
 	info := h.lookupTaskGit(context.Background(), "", dir, true)
 	require.NotNil(t, info)
