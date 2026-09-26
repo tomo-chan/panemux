@@ -24,6 +24,7 @@ import (
 	"panemux/internal/config"
 	"panemux/internal/homedir"
 	"panemux/internal/session"
+	"panemux/internal/tasks"
 )
 
 // This file is the real-router integration harness for the /api surface:
@@ -486,6 +487,27 @@ var apiCases = map[string]apiCase{
 		rr = e.do(t, http.MethodPost, "/api/tasks/resume", `{"host":"","session_id":"`+fixtureStoppedSessionID+`"}`)
 		assert.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
 		assert.Contains(t, rr.Body.String(), `"tmux_session":"task-5d7e3a90"`)
+	}},
+
+	"POST /api/tasks/summary": {run: func(t *testing.T, e *apiEnv) {
+		rr := e.do(t, http.MethodPost, "/api/tasks/summary", `{"host":"","session_id":"55f0c2b8"}`)
+		assert.Equal(t, http.StatusConflict, rr.Code, "summaries are off by default: %s", rr.Body.String())
+
+		e.cfg.TaskDashboard.Summary.Enabled = true
+		e.srv.api.SetTaskService(tasks.New(tasks.Options{
+			RunLocal: func(_ context.Context, script string) ([]byte, error) {
+				if strings.Contains(script, "sid='55f0c2b8'") {
+					return fixtureTranscript("Release service-b", "Released."), nil
+				}
+				return []byte(fixtureLocalTaskCollection), nil
+			},
+			Summarize: fixtureSummarize,
+		}))
+		rr = e.do(t, http.MethodGet, "/api/tasks", "")
+		require.Equal(t, http.StatusOK, rr.Code)
+		rr = e.do(t, http.MethodPost, "/api/tasks/summary", `{"host":"","session_id":"55f0c2b8"}`)
+		assert.Equal(t, http.StatusAccepted, rr.Code, rr.Body.String())
+		assert.Contains(t, rr.Body.String(), `"state":"pending"`)
 	}},
 
 	"POST /api/tasks/hosts/{name}/reconnect": {run: func(t *testing.T, e *apiEnv) {

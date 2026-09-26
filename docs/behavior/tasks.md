@@ -8,8 +8,9 @@ The task dashboard lists every coding-agent session on every host panemux knows 
 itself and every `ssh_connections` entry — independently of panes. A pane is only the window used to
 watch or answer a task, opened when the dashboard is asked to. The design is issue
 [#252](https://github.com/tomo-chan/panemux/issues/252); this page covers what is built (its stage 1,
-the done and label records of [#256](https://github.com/tomo-chan/panemux/issues/256), and starting
-and resuming tasks of [#257](https://github.com/tomo-chan/panemux/issues/257)).
+the done and label records of [#256](https://github.com/tomo-chan/panemux/issues/256), starting
+and resuming tasks of [#257](https://github.com/tomo-chan/panemux/issues/257), and the summaries of
+[#258](https://github.com/tomo-chan/panemux/issues/258)).
 The UI is described in [UI design's Task Dashboard](../ui-design.md#task-dashboard).
 
 ### What a task is
@@ -25,8 +26,9 @@ A task is one agent session:
 
 A task carries its host, agent, session ID, working directory, state, the time it entered that
 state, the reason it is waiting, its start time, its pid, where it runs, and the repository, branch
-and pull request of its working directory, and what a person recorded about it: whether it is done,
-and its labels (see [Done and labels](#done-and-labels)).
+and pull request of its working directory, what a person recorded about it: whether it is done,
+and its labels (see [Done and labels](#done-and-labels)), and, when summaries are enabled, a summary
+of its conversation (see [Summaries](#summaries)).
 
 ### Hosts and connections
 
@@ -66,7 +68,7 @@ reads only what the agents write themselves and what the host reports about its 
 | Read | Used for |
 |---|---|
 | `~/.claude/sessions/*.json` | Running Claude Code sessions: `pid`, `sessionId`, `cwd`, `status`, `waitingFor`, `statusUpdatedAt`, `updatedAt`, `startedAt` |
-| `~/.claude/projects/*/*.jsonl` changed in the last 7 days (newest 100) | Stopped sessions, and the first `"cwd"` recorded in each |
+| `~/.claude/projects/*/*.jsonl` changed in the last 7 days (newest 100) | Stopped sessions, the first `"cwd"` recorded in each, and each log's modification time and size (what a summary is keyed on) |
 | `ps -U <own uid> -o pid=,ppid=,command=` | Whether a state file's process is alive, running agents, and parent chains — the collecting user's processes only |
 | `tmux list-panes -a -F '#{pane_pid} #{session_name}'` | Which tmux session an agent runs in |
 | The working directory of each process that may be claude or codex | A running task's directory when no state file gives one |
@@ -269,6 +271,65 @@ environment's claude stopped at its first-run screen). Scenario J21 is the manua
   pane was reconnected first, adds claude to the session that pane created.
 - The dashboard selects the resumed task, and it shows as running once a collection finds it.
 
+### Summaries
+
+With `task_dashboard.summary.enabled: true` in `config.yaml`, each claude task gets a summary of what
+it is doing and the work left, made by `claude -p` on the panemux host. **Summaries are off by
+default**, because they send the text of every host's conversations to claude on the panemux host.
+
+```yaml
+task_dashboard:
+  summary:
+    enabled: true
+```
+
+- **Which tasks.** A claude task with a session ID whose conversation log the collection listed (the
+  last 7 days, the newest 100 per host). Codex tasks and claude processes known only by a pid have
+  none.
+- **What is read.** The task's log, `~/.claude/projects/*/<session ID>.jsonl`, is read on its host by
+  a fixed script run like the collection's ([Task summaries](../security/command-execution.md#task-summaries)).
+  The host sends the whole log when it is at most 2.25 MiB, and otherwise its first 256 KiB and its
+  last 2 MiB.
+- **What claude is given.** Each line is read as a JSON object, and only the text of the user's and
+  the assistant's messages is kept: a line whose `type` is `user` or `assistant` and whose
+  `message.content` is a string or holds `text` blocks, and which is not a subagent's
+  (`isSidechain`). Tool calls, tool results, thinking, attachments and every other kind of line are
+  never read, and a line cut by a byte limit is skipped. Of those messages claude is given the
+  session's first user message (at most 4 KiB), which says what the task is, and the newest messages
+  up to 24 KiB in all, each cut at 2 KiB, which say where it stands.
+- **Where it goes.** That text is sent to `claude -p` on the panemux host, so a remote host's
+  conversation goes to the Claude account signed in on the panemux host, not the remote host's. It is
+  not masked: a secret typed into the conversation, or quoted in a reply, is sent with it. Tool output
+  — where file contents and command output sit — is not. Summaries are kept in panemux's memory only
+  and are gone when it restarts.
+- **A log that cannot be read.** When no line of a log has that shape, the task's summary is
+  `unreadable` and nothing is sent to claude; the raw log is never sent instead. A Claude Code release
+  that changes the log's format shows up this way rather than as a wrong summary.
+- **When a summary is made.**
+  - A running task that is not working — `wait`, `idle` or `unknown` — is summarized when a
+    collection finds its log at a modification time and size it was not yet summarized at.
+  - A `busy` task is not: its log changes all the time. Its last summary is shown, marked outdated.
+  - A stopped task is summarized when it is selected on the dashboard and has no current summary.
+  - `Summarize` / `Summarize again` in the detail panel asks for any task that can have one.
+  - A summary is reused while its log keeps the same modification time and size, so the 10-second
+    poll does not summarize again. A failed summary is not retried by the poll for the same log; the
+    button retries it.
+  - At most two summaries run at once, across hosts. Reading a log is limited to 15 seconds and one
+    `claude -p` run to 2 minutes.
+  - A task that leaves the list takes its summary with it, and so does a host removed from
+    `ssh_connections`. A host whose collection failed keeps what it had.
+- **The answer.** A summary of one or two sentences (at most 1 KiB) and the remaining work, most
+  immediate first (at most 10 items of 300 bytes), in the language of the conversation. A current,
+  ready summary with nothing remaining makes the task a **done candidate**; that is only shown — done
+  is still what a person records ([Done and labels](#done-and-labels)).
+- **How claude runs.** `claude` is found on the panemux process's `PATH` and run in an empty
+  temporary directory, without a shell, as
+  `claude -p --session-id <minted UUID> --no-session-persistence --output-format=json --json-schema <schema> --strict-mcp-config --setting-sources "" --disable-slash-commands --disallowedTools=<every acting tool> -- <fixed instruction>`,
+  with the excerpt on its standard input. The instruction tells it the excerpt is data to describe,
+  not instructions. When claude fails, the task reports a fixed message (its exit status, a timeout,
+  an answer that was not JSON or had no summary); nothing claude printed is passed on, since it can
+  quote the conversation.
+
 ### Opening a task
 
 | Task | Result |
@@ -311,9 +372,16 @@ Collects from every host and returns:
       "location": { "kind": "tmux", "tmux_session": "task-7c21", "attachable": true },
       "git": { "repo": "panemux", "repo_url": "https://github.com/example/panemux", "branch": "main" },
       "labels": ["dashboard", "enhancement"],
-      "done": true
+      "done": true,
+      "summary": {
+        "state": "ready",
+        "text": "Adding task summaries to the dashboard.",
+        "remaining": ["Update the docs", "Run make check"],
+        "summarized_at": "2026-09-25T11:58:00Z"
+      }
     }
-  ]
+  ],
+  "summaries_enabled": true
 }
 ```
 
@@ -327,6 +395,13 @@ Collects from every host and returns:
 - `session_id`, `cwd`, `waiting_for`, `status_since`, `started_at`, `pid` and `git` are omitted when
   unknown. `waiting_for` is present only in the `wait` state.
 - `done` and `labels` are the task's record, omitted when it is not done or has no labels.
+- `summaries_enabled` is `task_dashboard.summary.enabled`. `summary` is present only while it is
+  true, and only for a task that has been summarized or is being summarized
+  ([Summaries](#summaries)). Its `state` is `pending` (a summary is running or waiting to run),
+  `ready`, `error` (with `error`) or `unreadable`. `text`, `remaining` and `summarized_at` are the
+  last answer whenever there is one, whatever `state` says; `outdated` is true when the log has
+  changed since that answer, and `done_candidate` when the answer is ready and current and lists
+  nothing remaining. `remaining` is omitted when empty.
 - `records_error` is present only when the record file could not be read; the tasks are then listed
   without records.
 - The request answers `200` even when every host failed; failures are in `hosts`.
@@ -399,3 +474,20 @@ Resumes a stopped claude task:
   working directory is unknown or refused; `404` for an unknown `host`; `409` when the session is not
   a stopped claude task on the host, or the host refused as above; `502` when the host could not be
   collected or reached; `403` for a cross-site request.
+
+### `POST /api/tasks/summary`
+
+Asks for one task's summary:
+
+```json
+{ "host": "", "session_id": "5d7e3a90-1b2c-4d3e-8f40-51627384a5b6" }
+```
+
+- Starts a summary unless the one for the log as it is now is ready or running; a failed one is
+  retried. It does not collect: the session must be listed with a log by the host's last collection.
+- Answers `202` at once with the task's `summary` as `GET /api/tasks` reports it (usually
+  `pending`); the summary itself arrives with a later `GET /api/tasks`.
+- `400` for a body that is not valid or a `session_id` that does not match `^[a-zA-Z0-9_-]+$`, `404`
+  for a session the host's last collection did not list with a log (an unknown host included), `409`
+  when summaries are disabled, `503` while panemux is shutting down, and `403` for a cross-site
+  request as for `GET /api/tasks`.

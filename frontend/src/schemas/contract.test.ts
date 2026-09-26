@@ -104,6 +104,7 @@ const roundTrips: RoundTrip[] = [
   { fixture: 'task-record', schemaName: 'TaskRecordSchema', schema: schemas.TaskRecordSchema },
   { fixture: 'task-launch', schemaName: 'TaskLaunchResponseSchema', schema: schemas.TaskLaunchResponseSchema },
   { fixture: 'task-resume', schemaName: 'TaskLaunchedSchema', schema: schemas.TaskLaunchedSchema },
+  { fixture: 'task-summary', schemaName: 'TaskSummarySchema', schema: schemas.TaskSummarySchema },
   // The two WebSocket fixtures hold one frame per element, in the order the
   // server sent them, so the schema that owns a single frame is wrapped here
   // rather than restated.
@@ -369,6 +370,16 @@ const unexercisedOptionals: Record<string, string> = {
   // records through the real route instead, so the same response can show
   // them on its tasks; an unreadable file would have left them all off.
   'tasks.records_error': 'needs an unreadable task record file, which would drop the captured records',
+  // A summary is outdated only once its log changed after it was made, and
+  // fails only when claude or the host does; each capture makes one summary
+  // per task from a log that does not change, through a stand-in that answers.
+  'tasks.tasks[].summary.outdated': 'needs a log that changes after its summary was made',
+  'tasks.tasks[].summary.error': 'needs a summary that fails, which would leave the ready one out of the capture',
+  'task-summary.outdated': 'needs a log that changes after its summary was made',
+  'task-summary.error': 'needs a summary that fails',
+  // The capture asks for the task whose summary has work remaining, which
+  // is the shape that pins remaining; the tasks capture pins done_candidate.
+  'task-summary.done_candidate': 'the captured summary has work remaining; tasks pins done_candidate',
   // Set only when the labels could not be recorded after the task started;
   // the capture records them, which is the path worth pinning.
   'task-launch.records_error': 'needs an unreadable task record file, and the capture records the labels instead',

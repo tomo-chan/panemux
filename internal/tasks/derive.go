@@ -55,6 +55,10 @@ type Location struct {
 type Task struct {
 	StatusSince *time.Time `json:"status_since,omitempty"`
 	StartedAt   *time.Time `json:"started_at,omitempty"`
+	// Log is the version of the session's conversation log the collection
+	// saw, nil when none was collected. It is what a summary is keyed on,
+	// and is not part of the API.
+	Log *LogVersion `json:"-"`
 	// Host is the ssh_connections key, or "" for the panemux host itself.
 	Host       string   `json:"host"`
 	ID         string   `json:"id"`
@@ -65,6 +69,15 @@ type Task struct {
 	WaitingFor string   `json:"waiting_for,omitempty"`
 	Location   Location `json:"location"`
 	PID        int      `json:"pid,omitempty"`
+}
+
+// LogVersion is one state of a conversation log, as the collection saw it:
+// its modification time on the host's clock (Unix seconds) and its size.
+// A log that has not changed keeps both, so a summary made from it is still
+// current.
+type LogVersion struct {
+	ModTime int64
+	Size    int64
 }
 
 // maxStoppedTasks caps the stopped sessions listed per host (issue #252:
@@ -138,7 +151,27 @@ func buildTasks(host string, raw rawSnapshot, collectedAt time.Time) []Task {
 			claimedLogs[task.CWD]++
 		}
 	}
-	return append(live, b.stoppedTasks(liveSessions, claimedLogs)...)
+	return b.withLogVersions(append(live, b.stoppedTasks(liveSessions, claimedLogs)...))
+}
+
+// withLogVersions gives every claude task with a session ID the version of
+// its newest collected conversation log.
+func (b *taskBuilder) withLogVersions(tasks []Task) []Task {
+	newest := make(map[string]transcript, len(b.raw.Transcripts))
+	for _, tr := range b.raw.Transcripts {
+		if prev, ok := newest[tr.SessionID]; !ok || tr.ModTime > prev.ModTime {
+			newest[tr.SessionID] = tr
+		}
+	}
+	for i := range tasks {
+		if tasks[i].Agent != AgentClaude || tasks[i].SessionID == "" {
+			continue
+		}
+		if tr, ok := newest[tasks[i].SessionID]; ok {
+			tasks[i].Log = &LogVersion{ModTime: tr.ModTime, Size: tr.Size}
+		}
+	}
+	return tasks
 }
 
 type taskBuilder struct {

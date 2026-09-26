@@ -414,6 +414,33 @@
   font-size: 12px;
 }
 
+/* Summary (issue #258): two lines on a card, dimmed while outdated. */
+.td-summary {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--td-muted);
+  font-size: 12px;
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.td-summary[data-outdated='true'] {
+  opacity: 0.7;
+}
+
+.td-next {
+  overflow: hidden;
+  color: var(--td-muted);
+  font-size: 11px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.td-next .td-k {
+  color: var(--td-faint);
+}
+
 .td-links {
   display: flex;
   flex-wrap: wrap;
@@ -662,6 +689,34 @@
 }
 
 /* ── Done and labels (issue #256) ────────────────────────────────────── */
+
+.td-candidate-badge {
+  padding: 0 5px;
+  border: 1px dashed rgba(127, 174, 106, 0.45);
+  border-radius: 3px;
+  color: var(--td-st-done);
+  white-space: nowrap;
+}
+
+.td-candidate {
+  margin: 6px 0 0;
+  color: var(--td-st-done);
+  font-size: 12px;
+}
+
+.td-summary-text {
+  margin: 0 0 6px;
+  line-height: 1.5;
+}
+
+.td-remaining {
+  margin: 0 0 8px;
+  padding-left: 20px;
+}
+
+.td-remaining li {
+  margin: 2px 0;
+}
 
 .td-done-badge {
   padding: 0 5px;

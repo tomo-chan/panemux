@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -236,10 +237,20 @@ var contractFixtures = map[string]contractFixture{
 				}
 				return nil, errors.New("dial tcp: i/o timeout")
 			},
-			RunLocal: func(context.Context, string) ([]byte, error) {
+			RunLocal: func(_ context.Context, script string) ([]byte, error) {
+				switch {
+				case strings.Contains(script, "sid='7c21e0a4'"):
+					return fixtureTranscript("Add the task summaries", "Summaries are in; docs remain."), nil
+				case strings.Contains(script, "sid='55f0c2b8'"):
+					return fixtureTranscript("Release service-b", "Released."), nil
+				}
 				return []byte(fixtureLocalTaskCollection), nil
 			},
+			Summarize: fixtureSummarize,
 		}))
+		// Summaries on (issue #258): the waiting task is summarized by the
+		// poll, and the stopped one when asked, as selecting it does.
+		e.cfg.TaskDashboard.Summary.Enabled = true
 		// Records on one local and one remote task, so done and labels
 		// appear in the capture (issue #256). A record's host must be an
 		// ssh_connections key.
@@ -254,6 +265,36 @@ var contractFixtures = map[string]contractFixture{
 
 		rr := e.do(t, http.MethodGet, "/api/tasks", "")
 		require.Equal(t, http.StatusOK, rr.Code)
+		rr = e.do(t, http.MethodPost, "/api/tasks/summary", `{"host":"","session_id":"55f0c2b8"}`)
+		require.Equal(t, http.StatusAccepted, rr.Code, rr.Body.String())
+		require.Eventually(t, func() bool {
+			rr = e.do(t, http.MethodGet, "/api/tasks", "")
+			return rr.Code == http.StatusOK && strings.Count(rr.Body.String(), `"state":"ready"`) == 2
+		}, 10*time.Second, 20*time.Millisecond, "both summaries become ready")
+		return rr.Body.Bytes(), nil
+	}},
+
+	// A summary asked for once the poll has made it: the answer for a log
+	// that has not changed is the one already made (issue #258).
+	"task-summary": {capture: func(t *testing.T) ([]byte, map[string]string) {
+		e := newAPIEnv(t)
+		e.srv.api.SetTaskService(tasks.New(tasks.Options{
+			RunLocal: func(_ context.Context, script string) ([]byte, error) {
+				if strings.Contains(script, "sid='7c21e0a4'") {
+					return fixtureTranscript("Add the task summaries", "Summaries are in; docs remain."), nil
+				}
+				return []byte(fixtureLocalTaskCollection), nil
+			},
+			Summarize: fixtureSummarize,
+		}))
+		e.cfg.TaskDashboard.Summary.Enabled = true
+		require.Eventually(t, func() bool {
+			rr := e.do(t, http.MethodGet, "/api/tasks", "")
+			return rr.Code == http.StatusOK && strings.Contains(rr.Body.String(), `"state":"ready"`)
+		}, 10*time.Second, 20*time.Millisecond, "the waiting task's summary becomes ready")
+
+		rr := e.do(t, http.MethodPost, "/api/tasks/summary", `{"host":"","session_id":"7c21e0a4"}`)
+		require.Equal(t, http.StatusAccepted, rr.Code, rr.Body.String())
 		return rr.Body.Bytes(), nil
 	}},
 
@@ -424,9 +465,31 @@ const fixtureLocalTaskCollection = `::panemux-tasks v1
 ::section cwd
 104 /workspace/user/sample-api
 ::section transcripts
-1789989200	55f0c2b8.jsonl	"cwd":"/workspace/user/service-b"
+1789999900	7c21e0a4.jsonl	"cwd":"/workspace/user/panemux"	2048
+1789989200	55f0c2b8.jsonl	"cwd":"/workspace/user/service-b"	4096
 ::end
 `
+
+// fixtureTranscript is a conversation log as the fetch script prints it: one
+// instruction and one reply.
+func fixtureTranscript(instruction, reply string) []byte {
+	body := `{"type":"user","message":{"role":"user","content":` + strconv.Quote(instruction) + `}}` + "\n" +
+		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":` +
+		strconv.Quote(reply) + `}]}}` + "\n"
+	return []byte("::panemux-transcript v1 " + strconv.Itoa(len(body)) + "\n" + body + "\n::end\n")
+}
+
+// fixtureSummarize stands in for claude: a conversation that says it is
+// released has nothing left, which makes it a done candidate.
+func fixtureSummarize(_ context.Context, excerpt string) (tasks.Summary, error) {
+	if strings.Contains(excerpt, "Released.") {
+		return tasks.Summary{Text: "service-b was released.", Remaining: []string{}}, nil
+	}
+	return tasks.Summary{
+		Text:      "Adding task summaries to the dashboard.",
+		Remaining: []string{"Update the docs", "Run make check"},
+	}, nil
+}
 
 // fixtureTaskConn is the build-box connection: one idle session in a tmux
 // session whose name a pane cannot attach to, in a repository whose branch is

@@ -125,6 +125,7 @@ Common uses:
 - A session running inside `tmux` can be opened: **Open** adds a `tmux` (or `ssh_tmux`) pane attached to its tmux session to the current workspace, and **Go to pane** jumps to a pane already attached to it. A session running outside tmux, or stopped, cannot be opened in a pane.
 - Each SSH host gets one connection of its own for the dashboard, separate from its panes. An unreachable host shows its error and a **Reconnect** button without hiding the other hosts.
 - Claude Code sessions are read from the files Claude Code keeps under `~/.claude` on each host. For codex, only whether a `codex` process is running is known.
+- Set `task_dashboard.summary.enabled: true` in `config.yaml` to have `claude -p` on this machine summarize each Claude Code session: what it is doing and the work left, on its card and in its detail panel. It sends the text of the conversation (never tool output) to Claude under this machine's account, so it is off by default.
 
 ### Choosing pane types
 

@@ -271,3 +271,58 @@ leading option, command substitutions, quotes and a line reading `EOF`, and fail
 not exactly `--session-id=<id>`, `--`, the prompt, if the prompt reaches tmux's arguments, if a
 substitution ran, or if the file is left behind. `TestBuildLaunchScript_RefusesInputBeforeAnythingRuns`
 covers every refusal above.
+
+### Task summaries
+
+When `task_dashboard.summary.enabled` is set, the dashboard summarizes each claude task
+([behavior](../behavior/tasks.md#summaries)). That adds two sinks: a script that reads a conversation
+log on a host, and a `claude -p` process on the panemux host whose input is text from that log —
+text written by whoever and whatever took part in the conversation, which panemux does not control.
+
+**The log is read by one fixed script, run as `sh -s`**, like the collection and the launch.
+`transcriptScriptTemplate` in `internal/tasks/transcript.go` is a compile-time constant with four
+placeholders: three byte counts that are Go constants, and the session ID, which must match
+`validSessionID` (`^[a-zA-Z0-9_-]+$`, no quote) and is single-quoted. It is used only inside the
+double-quoted path `"$HOME"/.claude/projects/*/"$sid.jsonl"`, so a leading `-` cannot become an
+option. A summary is only ever made for a session the host's last collection listed with a log.
+The script prints a header with the log's size and then that many bytes; `parseTranscriptOutput`
+reads the body by that length and never searches it for a marker, since the log can hold any text.
+
+**claude is given text, never tools or configuration.** `newClaudeSummarizer` in
+`internal/tasks/summarize.go` runs the literal `claude` with `exec.CommandContext` — an argv, no
+shell — in an empty temporary directory, with the excerpt on stdin and a compile-time instruction as
+the only prompt argument, after `--`. The argv follows the command center's, whose every flag was
+checked against the real CLI in [command-center.md](command-center.md#command-center-subprocess-execution):
+
+| Argument | Why |
+|---|---|
+| `--session-id <minted UUID>`, `--no-session-persistence` | A session of panemux's own, not the ambient one, and nothing written under `~/.claude` |
+| `--setting-sources ""` | None of the operator's settings, hooks or `CLAUDE.md` |
+| `--strict-mcp-config` | No MCP server |
+| `--disable-slash-commands` | A `/command` in the conversation stays text |
+| `--disallowedTools=<commandcenter.DisallowedTools()>` | Every tool that can execute, write, read files, reach the network or start another agent is refused by name — the denial the command center found survives a permissions override |
+| `--output-format=json`, `--json-schema <schema>` | The answer is parsed as a structure, and bounded before it is shown |
+
+The instruction tells claude that the excerpt is data to describe and not instructions. That is not
+relied on: a conversation that talks claude into ignoring it can change only the summary text, which
+the dashboard renders as text. `--tools ""` (no tools at all) was considered; whether the CLI reads an
+empty value as "none" could not be verified here, so the verified denial list is what ships.
+
+**What is sent is bounded and excludes tool output.** Only the text of user and assistant messages is
+extracted (`buildExcerpt`); tool calls and results, thinking and attachments — where file contents,
+command output and credentials sit, including an attachment whose kind is `credential_org` in the
+log this was built against — are never read. The first user message (4 KiB) and the newest messages
+(24 KiB, 2 KiB each) are all that reach claude. What a person typed or an assistant quoted is not
+masked; the behavior document says so, and that is why summaries are off by default.
+
+**Nothing claude prints reaches the operator's screen except the parsed answer.** A failure is one of
+a few fixed messages (an exit status, a timeout, an answer that was not JSON or had no summary),
+because claude's own text can quote the conversation. The answer is trimmed to 1 KiB of summary and
+10 items of 300 bytes.
+
+**The process is bounded.** It runs in its own process group, which is killed when its 2-minute limit
+passes or panemux shuts down; at most two run at once.
+
+`TestSummaryArgs` pins the argv, `TestBuildExcerpt_KeepsOnlyConversationText` that tool output,
+attachments and thinking never reach the excerpt, `TestParseSummaryOutput_Errors` that claude's text
+is not passed on, and `TestBuildTranscriptScript` that an unsafe session ID is refused.

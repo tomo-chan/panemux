@@ -6,6 +6,9 @@ import {
   applyTaskRecord,
   canRecord,
   canResume,
+  canSummarize,
+  summaryNext,
+  summaryRequestOnSelect,
   parseLabelInput,
   columnForState,
   columnForTask,
@@ -108,6 +111,7 @@ describe('canRecord', () => {
 describe('canResume', () => {
   const stopped = { state: 'stop' as const, session_id: '5d7e3a90-1b2c-4d3e-8f40-51627384a5b6', location: { kind: 'none' as const, attachable: false } }
 
+  // efficacy:exempt unchanged by this branch; the new describe block after it falls inside its line range
   it('offers resume only for a stopped claude task whose session id is a UUID', () => {
     expect(canResume(task(stopped))).toBe(true)
     expect(canResume(task({ ...stopped, done: true }))).toBe(true)
@@ -115,6 +119,47 @@ describe('canResume', () => {
     expect(canResume(task({ ...stopped, agent: 'codex' }))).toBe(false)
     expect(canResume(task({ ...stopped, session_id: undefined }))).toBe(false)
     expect(canResume(task({ ...stopped, session_id: 'my-session' }))).toBe(false)
+  })
+})
+
+describe('canSummarize', () => {
+  it('summarizes only a claude task with a session id', () => {
+    expect(canSummarize(task())).toBe(true)
+    expect(canSummarize(task({ state: 'stop' }))).toBe(true)
+    expect(canSummarize(task({ agent: 'codex', session_id: undefined }))).toBe(false)
+    expect(canSummarize(task({ session_id: undefined }))).toBe(false)
+  })
+})
+
+describe('summaryNext', () => {
+  it('is the first remaining item and how many remain', () => {
+    expect(summaryNext({ state: 'ready', remaining: ['Run make check', 'Update docs', 'Open a PR'] }))
+      .toEqual({ next: 'Run make check', left: 3 })
+    expect(summaryNext({ state: 'ready', remaining: [] })).toBeNull()
+    expect(summaryNext({ state: 'ready' })).toBeNull()
+    expect(summaryNext(undefined)).toBeNull()
+  })
+})
+
+describe('summaryRequestOnSelect', () => {
+  const stopped = { state: 'stop' as const, location: { kind: 'none' as const, attachable: false } }
+
+  it('asks for a stopped task that has no current summary, while summaries are on', () => {
+    expect(summaryRequestOnSelect(task(stopped), true)).toBe(true)
+    expect(summaryRequestOnSelect(task({ ...stopped, summary: { state: 'ready', text: 'x', outdated: true } }), true)).toBe(true)
+    expect(summaryRequestOnSelect(task(stopped), false)).toBe(false)
+    expect(summaryRequestOnSelect(task({ ...stopped, summary: { state: 'ready', text: 'x' } }), true)).toBe(false)
+    expect(summaryRequestOnSelect(task({ ...stopped, summary: { state: 'pending' } }), true)).toBe(false)
+    // A failure is retried by the button, not by selecting the task again.
+    expect(summaryRequestOnSelect(task({ ...stopped, summary: { state: 'error', error: 'x' } }), true)).toBe(false)
+    expect(summaryRequestOnSelect(task({ ...stopped, summary: { state: 'unreadable' } }), true)).toBe(false)
+    expect(summaryRequestOnSelect(task({ ...stopped, session_id: undefined }), true)).toBe(false)
+  })
+
+  it('leaves running tasks to the poll', () => {
+    for (const state of ['busy', 'wait', 'idle', 'unknown'] as const) {
+      expect(summaryRequestOnSelect(task({ state }), true)).toBe(false)
+    }
   })
 })
 

@@ -34,8 +34,8 @@ func TestParseCollectOutput_ReadsEverySection(t *testing.T) {
 		"::section cwd",
 		"300 /workspace/user/sample api",
 		"::section transcripts",
-		"1790346000\t5d0b91c2.jsonl\t\"cwd\":\"/workspace/user/project\"",
-		"1790340000\told-session.jsonl\t",
+		"1790346000\t5d0b91c2.jsonl\t\"cwd\":\"/workspace/user/project\"\t2048",
+		"1790340000\told-session.jsonl\t\t17",
 		"::end",
 	)
 
@@ -58,8 +58,8 @@ func TestParseCollectOutput_ReadsEverySection(t *testing.T) {
 	}, raw.TmuxPanes)
 	assert.Equal(t, map[int]string{300: "/workspace/user/sample api"}, raw.ProcessCWDs)
 	assert.Equal(t, []transcript{
-		{ModTime: 1790346000, SessionID: "5d0b91c2", CWD: "/workspace/user/project"},
-		{ModTime: 1790340000, SessionID: "old-session", CWD: ""},
+		{ModTime: 1790346000, SessionID: "5d0b91c2", CWD: "/workspace/user/project", Size: 2048},
+		{ModTime: 1790340000, SessionID: "old-session", CWD: "", Size: 17},
 	}, raw.Transcripts)
 }
 
@@ -126,6 +126,8 @@ func TestParseCollectOutput_SkipsMalformedRows(t *testing.T) {
 		"3\tonly-two-fields.jsonl",
 		"4\tquoted.jsonl\t\"cwd\":\"/a\\\"b\"",
 		"5\tbroken.jsonl\t\"cwd\":\"/unterminated",
+		"6\tbad-size.jsonl\t\"cwd\":\"/s\"\tlots",
+		"7\tnegative-size.jsonl\t\t-1",
 		"::end",
 	))
 	require.NoError(t, err)
@@ -136,6 +138,9 @@ func TestParseCollectOutput_SkipsMalformedRows(t *testing.T) {
 		{ModTime: 3, SessionID: "only-two-fields"},
 		{ModTime: 4, SessionID: "quoted", CWD: `/a"b`},
 		{ModTime: 5, SessionID: "broken"},
+		// A size that is not a count is unknown (0); the session is still listed.
+		{ModTime: 6, SessionID: "bad-size", CWD: "/s"},
+		{ModTime: 7, SessionID: "negative-size"},
 	}, raw.Transcripts)
 }
 

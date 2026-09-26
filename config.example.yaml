@@ -39,6 +39,16 @@ display:
   # command palette and the Agent Board. (default: S)
   task_dashboard_shortcut: "S"
 
+# ── Task dashboard ────────────────────────────────────────────────────────────
+task_dashboard:
+  summary:
+    # Summarize each claude task's conversation with `claude -p` on this host:
+    # what it is doing and the work left. The text of the user's and the
+    # assistant's messages (never tool output) is read from each host's
+    # conversation log and sent to claude under this host's Claude account.
+    # (default: false)
+    enabled: false
+
 # ── Opening URLs from a pane ──────────────────────────────────────────────────
 # When a URL is opened from a pane, panemux republishes the URL's loopback
 # callback port (from `redirect_uri` and friends) at the same port on this host,

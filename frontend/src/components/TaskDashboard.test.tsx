@@ -62,6 +62,7 @@ function tasksState(overrides: Partial<TasksState> = {}): TasksState {
     saveRecord: vi.fn().mockResolvedValue(null),
     launch: vi.fn().mockResolvedValue({ ok: false, error: 'not stubbed' }),
     resume: vi.fn().mockResolvedValue({ ok: false, error: 'not stubbed' }),
+    requestSummary: vi.fn().mockResolvedValue(null),
     ...overrides,
   }
 }
@@ -589,6 +590,7 @@ describe('TaskDashboard new tasks and resume', () => {
     expect(within(screen.getByTestId(`task-card-${stopped.id}`)).getByRole('button', { name: /^Resume/ })).toBeEnabled()
   })
 
+  // efficacy:exempt unchanged by this branch; the new describe block after it falls inside its line range
   it('closes the New task dialog on Cancel without starting anything', () => {
     const launch = vi.fn()
     renderDashboard(tasksState({ data: base, launch }))
@@ -596,5 +598,153 @@ describe('TaskDashboard new tasks and resume', () => {
     fireEvent.click(within(screen.getByRole('dialog', { name: 'New task' })).getByRole('button', { name: 'Cancel' }))
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(launch).not.toHaveBeenCalled()
+  })
+})
+
+describe('TaskDashboard summaries', () => {
+  const summarized: TasksResponse = {
+    hosts: [{ name: '', status: 'ok', collected_at: '2026-09-25T12:00:00Z' }],
+    summaries_enabled: true,
+    tasks: [
+      task({
+        id: 'idle-s', state: 'idle', cwd: '/workspace/user/panemux',
+        summary: {
+          state: 'ready', text: 'Adding task summaries to the dashboard.',
+          remaining: ['Update the docs', 'Run make check', 'Open a PR'], summarized_at: '2026-09-25T11:59:00Z',
+        },
+      }),
+      task({
+        id: 'wait-s', state: 'wait', waiting_for: 'permission', cwd: '/workspace/user/api',
+        summary: { state: 'ready', text: 'Migrating the API.', remaining: ['Approve the migration'] },
+      }),
+      task({
+        id: 'stop-done', state: 'stop', cwd: '/workspace/user/service-b', location: { kind: 'none', attachable: false },
+        summary: { state: 'ready', text: 'service-b was released.', remaining: [], done_candidate: true },
+      }),
+      task({ id: 'stop-new', state: 'stop', session_id: 'bbbbbbbb-0000', cwd: '/workspace/user/old', location: { kind: 'none', attachable: false } }),
+      task({ id: 'busy-old', state: 'busy', session_id: 'cccccccc-0000', cwd: '/workspace/user/busy', summary: { state: 'ready', text: 'Earlier work.', remaining: ['x'], outdated: true } }),
+      task({ id: 'failed', state: 'idle', session_id: 'dddddddd-0000', cwd: '/workspace/user/failed', summary: { state: 'error', error: 'claude exited with status 1' } }),
+      task({ id: 'unreadable', state: 'idle', session_id: 'eeeeeeee-0000', cwd: '/workspace/user/unreadable', summary: { state: 'unreadable' } }),
+      task({ id: 'pending', state: 'idle', session_id: 'ffffffff-0000', cwd: '/workspace/user/pending', summary: { state: 'pending' } }),
+    ],
+  }
+
+  function selectCard(id: string) {
+    fireEvent.click(within(screen.getByTestId(`task-card-${id}`)).getByRole('button', { pressed: false }))
+  }
+
+  function workSection() {
+    return within(screen.getByRole('complementary', { name: 'Task details' })).getByRole('region', { name: 'Work' })
+  }
+
+  it('shows the summary and what comes next on a card, and the reason on a waiting one', () => {
+    renderDashboard(tasksState({ data: summarized }))
+    const idle = screen.getByTestId('task-card-idle-s')
+    expect(idle).toHaveTextContent('Adding task summaries to the dashboard.')
+    expect(within(idle).getByTestId('task-next')).toHaveTextContent('Next: Update the docs · 3 left')
+
+    const waiting = screen.getByTestId('task-card-wait-s')
+    expect(waiting).toHaveTextContent('permission · open the pane to respond')
+    expect(waiting).not.toHaveTextContent('Migrating the API.')
+    expect(within(waiting).getByTestId('task-next')).toHaveTextContent('Next: Approve the migration · 1 left')
+  })
+
+  it('marks a task the summary found finished as a done candidate until a person marks it done', () => {
+    renderDashboard(tasksState({ data: summarized }))
+    expect(within(screen.getByTestId('task-card-stop-done')).getByText('Done?')).toBeInTheDocument()
+    expect(within(screen.getByTestId('task-card-idle-s')).queryByText('Done?')).toBeNull()
+
+    selectCard('stop-done')
+    const detail = screen.getByRole('complementary', { name: 'Task details' })
+    expect(detail).toHaveTextContent('The summary finds no work left: a candidate for Mark done.')
+    expect(within(workSection()).getByText('No remaining work found.')).toBeInTheDocument()
+  })
+
+  it('does not call a task marked done a candidate', () => {
+    const data = { ...summarized, tasks: summarized.tasks.map((t) => (t.id === 'stop-done' ? { ...t, done: true } : t)) }
+    renderDashboard(tasksState({ data }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Show Done column' }))
+    const card = screen.getByTestId('task-card-stop-done')
+    expect(card).toHaveTextContent('service-b was released.')
+    expect(within(card).queryByText('Done?')).toBeNull()
+  })
+
+  it('shows the work and what remains in the detail panel', () => {
+    renderDashboard(tasksState({ data: summarized }))
+    selectCard('idle-s')
+    const work = workSection()
+    expect(work).toHaveTextContent('Adding task summaries to the dashboard.')
+    expect(within(work).getAllByRole('listitem').map((item) => item.textContent)).toEqual([
+      'Update the docs', 'Run make check', 'Open a PR',
+    ])
+    expect(within(work).queryByRole('button', { name: /Summarize/ })).toBeNull()
+  })
+
+  it('says when a summary is outdated, pending, failed or unreadable', () => {
+    renderDashboard(tasksState({ data: summarized }))
+    selectCard('busy-old')
+    expect(workSection()).toHaveTextContent('Earlier work.')
+    expect(workSection()).toHaveTextContent('The conversation has changed since this summary.')
+    expect(within(workSection()).getByRole('button', { name: 'Summarize again' })).toBeInTheDocument()
+
+    selectCard('pending')
+    expect(workSection()).toHaveTextContent('Summarizing…')
+    expect(within(workSection()).queryByRole('button', { name: /Summarize/ })).toBeNull()
+
+    selectCard('failed')
+    expect(workSection()).toHaveTextContent('Could not summarize: claude exited with status 1')
+
+    selectCard('unreadable')
+    expect(workSection()).toHaveTextContent('has no messages the dashboard can read')
+  })
+
+  it('asks for the summary of a stopped task when it is selected, and not of a running one', () => {
+    const requestSummary = vi.fn().mockResolvedValue(null)
+    renderDashboard(tasksState({ data: summarized, requestSummary }))
+
+    selectCard('stop-new')
+    expect(requestSummary).toHaveBeenCalledTimes(1)
+    expect(requestSummary).toHaveBeenCalledWith(expect.objectContaining({ id: 'stop-new' }))
+
+    selectCard('idle-s')
+    selectCard('busy-old')
+    selectCard('stop-done')
+    expect(requestSummary).toHaveBeenCalledTimes(1)
+  })
+
+  it('retries a failed summary with the Summarize button, and shows why a request failed', async () => {
+    const requestSummary = vi.fn().mockResolvedValue('task summaries are disabled (task_dashboard.summary.enabled)')
+    renderDashboard(tasksState({ data: summarized, requestSummary }))
+    selectCard('failed')
+
+    await act(async () => {
+      fireEvent.click(within(workSection()).getByRole('button', { name: 'Summarize again' }))
+    })
+    expect(requestSummary).toHaveBeenCalledWith(expect.objectContaining({ id: 'failed' }))
+    expect(within(workSection()).getByRole('alert')).toHaveTextContent(
+      'Could not ask for a summary: task summaries are disabled (task_dashboard.summary.enabled)',
+    )
+  })
+
+  it('says summaries are off, and asks for nothing, when they are not enabled', () => {
+    const requestSummary = vi.fn()
+    renderDashboard(tasksState({ data: { ...summarized, summaries_enabled: false }, requestSummary }))
+    selectCard('stop-new')
+    expect(workSection()).toHaveTextContent('Summaries are off. Set task_dashboard.summary.enabled')
+    expect(requestSummary).not.toHaveBeenCalled()
+  })
+
+  it('says a task that is not claude cannot be summarized', () => {
+    renderDashboard(tasksState({ data: { ...response, summaries_enabled: true } }))
+    selectCard('run-1')
+    expect(workSection()).toHaveTextContent('Only a claude task with a session ID can be summarized.')
+  })
+
+  it('says a working task is summarized once it stops working', () => {
+    const data = { ...summarized, tasks: [task({ id: 'busy-new', state: 'busy', session_id: 'abababab-0000' })] }
+    renderDashboard(tasksState({ data }))
+    selectCard('busy-new')
+    expect(workSection()).toHaveTextContent('Summarized when it stops working.')
+    expect(within(workSection()).getByRole('button', { name: 'Summarize' })).toBeInTheDocument()
   })
 })

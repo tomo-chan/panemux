@@ -52,6 +52,7 @@ func TestWritePersistsEveryDomainSection(t *testing.T) {
 	cfg.filePath = path
 	cfg.SSHConnections = map[string]SSHConnection{"host1": {Host: "example.test", User: "demo"}}
 	cfg.CommandCenter = CommandCenterConfig{Enabled: true}
+	cfg.TaskDashboard = TaskDashboardConfig{Summary: TaskSummaryConfig{Enabled: true}}
 	shim := false
 	cfg.URLOpen = URLOpenConfig{BrowserShim: &shim}
 

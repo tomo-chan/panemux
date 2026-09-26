@@ -43,3 +43,18 @@ func validateDisplay(d DisplayConfig) []string {
 	}
 	return nil
 }
+
+// TaskDashboardConfig holds the top-level task_dashboard settings.
+type TaskDashboardConfig struct {
+	// Summary configures the task summaries (issue #258).
+	Summary TaskSummaryConfig `yaml:"summary,omitempty" json:"summary"`
+}
+
+// TaskSummaryConfig configures the task summaries: `claude -p` on the
+// panemux host summarizing an excerpt of each task's conversation log.
+type TaskSummaryConfig struct {
+	// Enabled turns summaries on. They are off by default because they send
+	// the text of every host's conversations to claude on the panemux host,
+	// under the panemux host's own Claude account.
+	Enabled bool `yaml:"enabled,omitempty" json:"enabled"`
+}

@@ -276,6 +276,67 @@ Chosen while it was built:
 - **Each resume in flight is tracked per task** (review of PR #265). One tracked ID was replaced by a
   second resume, re-enabling the first task's button while its request still ran.
 
+### Stage 3: summaries of a task's work and what is left (2026-09-26, issue #258)
+
+Issue #252's open questions 3 (depending on the conversation log's format) and 4 (what reaches
+`claude -p`), and when summaries are made again, were decided with the operator before
+implementation, from facts checked in the development environment (Claude Code 2.1.283, one real
+conversation log of 75 lines and 605 KB, and real `claude -p` runs):
+
+- In that log, `attachment` lines held 349 KB and tool results most of the rest; the text of the
+  user's and the assistant's messages was 3.6 KB in all. One line was 130 KB. One attachment's kind
+  was `credential_org`. The session's first instruction was at the top of the file.
+- `claude -p` with the excerpt on stdin and `--json-schema` answered in `structured_output`. One
+  summary cost about US$0.03 with the CLI's default model and with `claude-haiku-4-5` alike (most of
+  it output tokens and the CLI's own ~6k-token system prompt) and took 4.6 to 22 seconds.
+
+The operator decided:
+
+- **The log is interpreted as little as possible, and a format it does not understand is not
+  summarized** (open question 3). The Agent Board's principle is that a private transcript format is
+  not part of a contract; the dashboard already reads the log's first `"cwd"` (stage 1), and a
+  summary cannot be made without reading the conversation. So the dependency is limited to "each line
+  is a JSON object; `type` `user`/`assistant`; `message.content` a string or `text` blocks", and a
+  log in which no line has that shape reports `unreadable` rather than falling back to raw text.
+  Rejected: passing the log's raw tail without interpreting it (no format dependency, but the text
+  would have been almost all tool output and attachments, the part most likely to hold secrets), and
+  interpreting it with a raw-text fallback (a format change would silently start sending tool output).
+- **claude is given the first user message (4 KiB) and the newest 24 KiB of conversation text**
+  (open question 4); the host sends at most the log's first 256 KiB and last 2 MiB for that. Rejected:
+  the newest text alone (a summary without the task's goal) and 64 KiB (more tokens and more
+  exposure for little gain).
+- **Summaries are off unless `task_dashboard.summary.enabled` is set**, the conversation text is not
+  masked (no masking can be relied on), and summaries are kept in memory only. The behavior document
+  says what is and is not sent. Rejected: on by default.
+- **Running tasks that are not working are summarized by the poll, stopped ones when selected**, a
+  summary is reused while the log keeps its modification time and size, a busy task is not
+  summarized again until it stops working, at most two run at once, and one run is limited to 2
+  minutes. Rejected: summarizing every task automatically (up to 50 stopped tasks per host, about
+  US$1.50 at first sight of a busy host) and summarizing only on a button.
+
+Chosen while it was built:
+
+- **The log's size joins its modification time as the summary's key.** The collection reported only
+  the modification time, in whole seconds; a log written twice in one second would have kept a stale
+  summary. The size is a fourth field of the transcript rows, so an older row without it still parses.
+- **claude's tools are denied with the command center's list, not removed with `--tools ""`.**
+  Checking whether an empty `--tools` leaves the CLI with no tools needed its tool listing, which the
+  development environment's permission policy refused; the model's own claim that it still had Bash
+  was not evidence either way. `--disallowedTools` is the denial the command center verified.
+- **The argv is the command center's otherwise** — no setting sources, strict MCP config, slash
+  commands disabled, a minted session ID — plus `--no-session-persistence`, so summaries leave no
+  session files under the panemux host's `~/.claude`. The shipped argv was run once against claude
+  2.1.283: a Japanese conversation came back summarized in Japanese, and the temporary directory was
+  removed.
+- **A failure shows a fixed message.** claude's own output can quote the conversation.
+- **A failed summary is not retried by the poll for the same log.** Retrying every 10 seconds would
+  spend tokens on a failure that is likely to repeat (claude not signed in, say); the detail panel's
+  button retries it.
+- **A done candidate is an answer with an empty `remaining` list**, not a separate verdict from
+  claude, so the candidate and the list shown under it cannot disagree.
+- **The card's title button no longer also selects through the card's click handler**, which ran for
+  every click and would have asked for a stopped task's summary twice.
+
 ## Agent Board
 
 ### Compatibility is checked against a real agmsg release (2026-08-23, PR #176)

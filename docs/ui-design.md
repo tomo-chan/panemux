@@ -350,18 +350,29 @@ terminal that had focus cannot receive what is typed into the dashboard.
   task with two labels appears in both rows. A catch-all row is keyed apart from every name, so a
   label or repository that happens to be called "No label" gets a row of its own.
 - **Cards.** A left border in the state's color; host, agent and how long the task has been in its
-  state; the working directory's last segment as the title (there is no summary yet) with the full
-  directory under it; for a waiting task its reason and "open the pane to respond"; repository,
+  state; the working directory's last segment as the title with the full directory under it; for a
+  waiting task its reason and "open the pane to respond", and for any other task its summary, two
+  lines at most, dimmed while outdated; `Next: <first remaining item> · <n> left` when the summary
+  lists work remaining; repository,
   branch and PR link (new tab); its labels as colored tags, each label always the same color; a
-  green `Done` tag in the meta line for a task marked done that is running again; and at the bottom
+  green `Done` tag in the meta line for a task marked done that is running again, or a dashed green
+  `Done?` tag for a done candidate — a task not marked done whose summary finds no work left; and at the bottom
   where the task runs with its `Open` / `Go to pane` button, or `Resume` for a stopped claude
   task. A task that cannot be opened shows why instead of a button. The card is a pointer target
   for selection, and its title is a button, so the card never nests its links and buttons inside
   another interactive element.
 - **Detail panel.** Fixed to the window height at the right. Its head — state, host, agent, start,
   title, waiting reason, the open action or the reason there is none (a stopped claude task offers
-  `Resume` instead), and `Mark done` or `Mark not done` — stays in place, and only the body below scrolls: state notes, links, labels, the
-  chain from task to agent to tmux session to pane to workspace, and the directory and session ID.
+  `Resume` instead), `Mark done` or `Mark not done`, and for a done candidate the line "The summary
+  finds no work left: a candidate for Mark done." — stays in place, and only the body below scrolls:
+  state notes; **Work**, the summary and the remaining work as a numbered list ("No remaining work
+  found." when there is none); links, labels, the chain from task to agent to tmux session to pane to
+  workspace, and the directory and session ID. Work also says when a summary is running
+  ("Summarizing…"), failed (with the reason), outdated, unreadable, not made while the task works,
+  or off (naming `task_dashboard.summary.enabled`), and offers `Summarize` / `Summarize again` when
+  there is no current summary or it failed; a refused request is shown under it. Selecting a
+  stopped task asks for its summary when it has no current one; a running task's comes with the
+  poll.
   `Mark done` asks first, inside the panel, and says where the task will be afterwards: a running
   task stays in its column until it stops; a stopped one moves to Done, and the question adds that
   the column is hidden until `Done column` is checked when it is. `Mark not done` does not ask. Labels
