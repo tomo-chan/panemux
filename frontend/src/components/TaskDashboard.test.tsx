@@ -414,6 +414,7 @@ describe('TaskDashboard done and labels', () => {
     expect(within(detail()).getByRole('textbox', { name: 'Add a label' })).toHaveValue('typing')
   })
 
+  // efficacy:exempt unchanged by this branch; the new describe block after it falls inside its line range
   it('splits rows by a label named like an inherited object property', () => {
     renderDashboard(tasksState({
       data: { ...recorded, tasks: [task({ id: 'proto', state: 'busy', labels: ['__proto__', 'constructor'] })] },

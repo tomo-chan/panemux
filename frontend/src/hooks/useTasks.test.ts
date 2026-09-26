@@ -260,6 +260,7 @@ describe('useTasks saveRecord', () => {
 
   // A collection that was already running when the record was saved read the
   // records before the save, so its answer would put the old record back.
+  // efficacy:exempt unchanged by this branch; the new describe block after it falls inside its line range
   it('drops a collection that started before a save', async () => {
     let resolveSlow: (value: Response) => void = () => {}
     const fetchMock = vi.fn()
