@@ -41,29 +41,33 @@ func newParams(t *testing.T, cwd, prompt string) launchParams {
 
 // stubHost is a directory of stand-ins for tmux and claude, and the log the
 // stand-ins write, so the launch script can run for real under sh without
-// either program installed.
+// either program installed. tmuxDir is set when tmux is the real one, on a
+// server of its own (TMUX_TMPDIR).
 type stubHost struct {
-	bin, log, tmp string
+	bin, log, tmp, tmuxDir string
 }
 
+// stubTmux runs the command it is given in HOME, as a tmux started from
+// there would, and refuses -c: tmux expands -c's value as a format, so a
+// directory holding "#" would silently become the home directory.
 const stubTmux = `#!/bin/sh
 case "$1" in
 has-session)
   [ -e "$STUB_LOG/exists" ] && exit 0
   exit 1 ;;
-new-session)
+new-session|new-window)
   printf '%s\0' "$@" > "$STUB_LOG/tmux.args"
   [ -e "$STUB_LOG/fail-new" ] && exit 1
   shift
   while [ $# -gt 0 ]; do
     case "$1" in
     -d) shift ;;
-    -s|-c) [ "$1" = -c ] && dir=$2; shift 2 ;;
+    -s|-t) shift 2 ;;
     --) shift; break ;;
     *) exit 3 ;;
     esac
   done
-  cd "$dir" || exit 4
+  cd "$HOME" || exit 4
   "$@"
   exit $? ;;
 esac
@@ -118,6 +122,9 @@ func (h stubHost) run(t *testing.T, script, shell string) []byte {
 		"HOME=" + h.tmp,
 		"SHELL=" + shell,
 	}
+	if h.tmuxDir != "" {
+		cmd.Env = append(cmd.Env, "TMUX_TMPDIR="+h.tmuxDir)
+	}
 	out, err := cmd.Output()
 	require.NoError(t, err)
 	return out
@@ -163,7 +170,7 @@ func TestLaunchScript_NewTaskHandsThePromptToClaudeAsOneArgumentAfterTheEndOfOpt
 	assert.Equal(t, []string{cwd}, h.lines(t, "claude.pwd"))
 	tmuxArgs := h.args(t, "tmux.args")
 	require.GreaterOrEqual(t, len(tmuxArgs), 8)
-	assert.Equal(t, []string{"new-session", "-d", "-s", "task-0f0e0d0c", "-c", cwd, "--", "sh"}, tmuxArgs[:8])
+	assert.Equal(t, []string{"new-session", "-d", "-s", "task-0f0e0d0c", "--", "sh"}, tmuxArgs[:6])
 	assert.NotContains(t, strings.Join(tmuxArgs, "\n"), "touch pwned", "the prompt must not reach tmux's arguments")
 	assert.Empty(t, h.leftoverFiles(t), "the prompt file is removed once claude has read it")
 	assert.NoFileExists(t, filepath.Join(cwd, "pwned"))
@@ -645,4 +652,188 @@ func TestResume_AHostStillConnectingIsNotResumed(t *testing.T) {
 	_, err := svc.Resume(context.Background(), "build-box", testSessionID)
 
 	assert.EqualError(t, err, "collect build-box before resuming: still connecting")
+}
+
+// newRealTmuxHost is a stubHost whose tmux is the machine's own, run on a
+// server of its own that is killed when the test ends. It skips the test
+// where tmux is not installed.
+func newRealTmuxHost(t *testing.T) stubHost {
+	t.Helper()
+	tmux, err := exec.LookPath("tmux")
+	if err != nil {
+		t.Skip("tmux is not installed")
+	}
+	h := newStubHost(t, false, true)
+	require.NoError(t, os.Symlink(tmux, filepath.Join(h.bin, "tmux")))
+	// A socket path has a length limit, so the server directory is kept short.
+	h.tmuxDir, err = os.MkdirTemp("", "tmx")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		kill := exec.Command(tmux, "kill-server")
+		kill.Env = []string{"TMUX_TMPDIR=" + h.tmuxDir}
+		_ = kill.Run()
+		_ = os.RemoveAll(h.tmuxDir)
+	})
+	return h
+}
+
+// tmux runs the real tmux against the host's own server.
+func (h stubHost) tmux(t *testing.T, args ...string) string {
+	t.Helper()
+	cmd := exec.Command(filepath.Join(h.bin, "tmux"), args...) //nolint:gosec // this test's own tmux server
+	cmd.Env = []string{"TMUX_TMPDIR=" + h.tmuxDir, "PATH=" + h.bin, "HOME=" + h.tmp, "STUB_LOG=" + h.log}
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, string(out))
+	return string(out)
+}
+
+// waitForClaude waits for the stand-in claude, which tmux runs detached, to
+// record its arguments and directory.
+func (h stubHost) waitForClaude(t *testing.T) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		_, err := os.Stat(filepath.Join(h.log, "claude.pwd"))
+		return err == nil
+	}, 5*time.Second, 20*time.Millisecond, "claude never ran")
+}
+
+// A working directory holding "#" is a format to tmux's -c: "#S" becomes the
+// session name, "##" one "#", and a directory that then does not exist makes
+// tmux start in the home directory while reporting success. The launch must
+// start claude in the directory as typed, for a new task and a resume alike.
+func TestLaunchScript_RealTmuxStartsClaudeInADirectoryHoldingAHash(t *testing.T) {
+	for _, mode := range []launchMode{launchNew, launchResume} {
+		t.Run(string(mode), func(t *testing.T) {
+			h := newRealTmuxHost(t)
+			cwd := filepath.Join(t.TempDir(), "proj#S ##x")
+			require.NoError(t, os.Mkdir(cwd, 0o700))
+			p := newParams(t, cwd, "hello")
+			if mode == launchResume {
+				p = newParams(t, cwd, "")
+				p.mode = launchResume
+			}
+			script, err := buildLaunchScript(p)
+			require.NoError(t, err)
+
+			require.NoError(t, parseLaunchOutput(h.run(t, script, "/bin/false")))
+
+			h.waitForClaude(t)
+			assert.Equal(t, []string{cwd}, h.lines(t, "claude.pwd"))
+		})
+	}
+}
+
+// A pane that attached to a task's tmux session is recreated with
+// `new-session -A`, which leaves a session of that name holding a shell once
+// claude has exited. A resume may then add claude as a new window of that
+// session, so the pane shows it; the shell's window is left alone.
+func TestLaunchScript_RealTmuxResumeAddsAWindowToASessionLeftByAPane(t *testing.T) {
+	h := newRealTmuxHost(t)
+	cwd := t.TempDir()
+	sleep, err := exec.LookPath("sleep")
+	require.NoError(t, err)
+	h.tmux(t, "new-session", "-d", "-s", "task-0f0e0d0c", "--", sleep, "60")
+	p := newParams(t, cwd, "")
+	p.mode = launchResume
+	p.reuseSession = true
+	script, err := buildLaunchScript(p)
+	require.NoError(t, err)
+
+	require.NoError(t, parseLaunchOutput(h.run(t, script, "/bin/false")))
+
+	h.waitForClaude(t)
+	assert.Equal(t, []string{"--resume=" + testSessionID}, h.args(t, "claude.args"))
+	assert.Equal(t, []string{cwd}, h.lines(t, "claude.pwd"))
+	// The stand-in exits once it has recorded itself, closing its window; the
+	// window the session already had is still there, untouched.
+	commands := strings.Fields(h.tmux(t, "list-panes", "-s", "-t", "=task-0f0e0d0c", "-F", "#{pane_current_command}"))
+	assert.Equal(t, []string{"sleep"}, commands)
+}
+
+func TestLaunchScript_ASessionOfTheSameNameIsReusedOnlyForAPermittedResume(t *testing.T) {
+	tests := []struct {
+		name     string
+		mode     launchMode
+		wantCode string
+		reuse    bool
+	}{
+		{name: "resume permitted to reuse", mode: launchResume, reuse: true},
+		{name: "resume not permitted", mode: launchResume, wantCode: RefusedTmuxExists},
+		{name: "a new task never reuses", mode: launchNew, reuse: true, wantCode: RefusedTmuxExists},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newStubHost(t, true, true)
+			require.NoError(t, os.WriteFile(filepath.Join(h.log, "exists"), nil, 0o600))
+			cwd := t.TempDir()
+			p := newParams(t, cwd, "hello")
+			if tt.mode == launchResume {
+				p = newParams(t, cwd, "")
+			}
+			p.mode, p.reuseSession = tt.mode, tt.reuse
+			script, err := buildLaunchScript(p)
+			require.NoError(t, err)
+
+			err = parseLaunchOutput(h.run(t, script, "/bin/false"))
+
+			if tt.wantCode != "" {
+				var launchErr *LaunchError
+				require.ErrorAs(t, err, &launchErr)
+				assert.Equal(t, tt.wantCode, launchErr.Code)
+				assert.NoFileExists(t, filepath.Join(h.log, "claude.args"))
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, []string{"new-window", "-t", "=task-0f0e0d0c:", "--", "sh"}, h.args(t, "tmux.args")[:5])
+			assert.Equal(t, []string{"--resume=" + testSessionID}, h.args(t, "claude.args"))
+			assert.Equal(t, []string{cwd}, h.lines(t, "claude.pwd"))
+		})
+	}
+}
+
+// inTmuxOutput is a collection with the stopped session testSessionID and,
+// when occupant is set, a running claude session inside the tmux session
+// the resume would use.
+func inTmuxOutput(occupant bool) []byte {
+	lines := []string{"::panemux-tasks v1", "::now 1000", "::section state"}
+	if occupant {
+		lines = append(lines, "::file 7.json",
+			`{"pid":7,"sessionId":"11111111-2222-4333-8444-555555555555","status":"idle","statusUpdatedAt":999000}`)
+	}
+	lines = append(lines, "::section ps")
+	if occupant {
+		lines = append(lines, "6 1 -bash", "7 6 claude")
+	}
+	lines = append(lines, "::section tmux")
+	if occupant {
+		lines = append(lines, "6 task-0f0e0d0c")
+	}
+	lines = append(lines, "::section cwd", "::section transcripts",
+		"990\t"+testSessionID+".jsonl\t"+`"cwd":"/workspace/user/project"`, "::end")
+	return joinLines(lines...)
+}
+
+func TestResume_ReusesTheTaskSessionOnlyWhenNoAgentRunsInIt(t *testing.T) {
+	for _, occupant := range []bool{false, true} {
+		t.Run(map[bool]string{false: "empty", true: "an agent runs in it"}[occupant], func(t *testing.T) {
+			var launchScript string
+			svc := New(Options{
+				Now: func() time.Time { return time.Unix(1000, 0) }, Rand: launchRand(),
+				RunLocal: func(_ context.Context, script string) ([]byte, error) {
+					if script == collectScript {
+						return inTmuxOutput(occupant), nil
+					}
+					launchScript = script
+					return []byte("::panemux-launch ok\n"), nil
+				},
+			})
+			defer svc.Close()
+
+			_, err := svc.Resume(context.Background(), "", testSessionID)
+
+			require.NoError(t, err)
+			want := map[bool]string{false: "reuse='yes'", true: "reuse='no'"}[occupant]
+			assert.Contains(t, launchScript, want)
+		})
+	}
 }
