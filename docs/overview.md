@@ -76,7 +76,8 @@ backend and UI are released together.
   running. It collects only while it is on screen. It finds the pane of an agent outside tmux only
   on Linux and macOS hosts, where it can read the agent's environment, and on macOS not for an
   agent that is one of Apple's own binaries. The macOS reading has not yet been run on a macOS host
-  ([details](behavior/tasks.md#the-pane-of-an-agent-outside-tmux)).
+  ([details](behavior/tasks.md#the-pane-of-an-agent-outside-tmux)). Whether a task is done is only
+  what a person marked; only tasks with a session ID can be marked done or labeled.
 
 ## Where to continue
 

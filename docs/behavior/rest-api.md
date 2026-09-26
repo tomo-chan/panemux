@@ -196,10 +196,12 @@ A `409` is reported rather than worked around. An OAuth provider matches the reg
 `redirect_uri` exactly, so rewriting the callback to a different local port would break the login it
 is meant to complete.
 
-### `GET /api/tasks` and `POST /api/tasks/hosts/{name}/reconnect`
+### `GET /api/tasks`, `POST /api/tasks/hosts/{name}/reconnect` and `PUT /api/tasks/records`
 
-The task dashboard's collection and its per-host reconnect. Their responses and the collection rules
-are in [task dashboard behavior](tasks.md#get-apitasks).
+The task dashboard's collection, its per-host reconnect, and the done and label records. Their
+responses and the collection rules are in [task dashboard behavior](tasks.md#get-apitasks); the
+records are in [Done and labels](tasks.md#done-and-labels) and
+[`PUT /api/tasks/records`](tasks.md#put-apitasksrecords).
 
 ### `GET /api/ssh-connections`
 
