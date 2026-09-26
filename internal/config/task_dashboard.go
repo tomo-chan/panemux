@@ -97,7 +97,7 @@ func validateTaskDashboard(d TaskDashboardConfig) []string {
 // control characters, and — as GitHub does — one that overlaps a prefix
 // before it: TICKET and TICK would both match TICKET123.
 func validateAutolinkKeyPrefix(earlier []AutolinkConfig, prefix string) string {
-	if prefix == "" || strings.IndexFunc(prefix, isSpaceOrControl) >= 0 {
+	if prefix == "" || strings.ContainsFunc(prefix, isSpaceOrControl) {
 		return "must be non-empty text without whitespace"
 	}
 	for _, other := range earlier {
@@ -122,11 +122,11 @@ func isSpaceOrControl(r rune) bool {
 // rejects the whole GET /api/tasks response for one link it cannot parse.
 // testdata/autolink-url-validation.json is checked by both sides.
 func validAutolinkURLTemplate(template string) bool {
-	at := strings.Index(template, autolinkPlaceholder)
-	if at < 0 || strings.IndexFunc(template, isSpaceOrControl) >= 0 {
+	beforeNum, _, hasNum := strings.Cut(template, autolinkPlaceholder)
+	if !hasNum || strings.ContainsFunc(template, isSpaceOrControl) {
 		return false
 	}
-	authority, found := strings.CutPrefix(template[:at], "https://")
+	authority, found := strings.CutPrefix(beforeNum, "https://")
 	if !found || !strings.ContainsAny(authority, "/?#") {
 		return false
 	}

@@ -61,9 +61,14 @@ const prTaskFields = "url,number,title,closingIssuesReferences"
 // validateTaskDashboard refuses overlapping prefixes, so at most one
 // autolink matches at any position.
 func autolinkRefs(links []config.AutolinkConfig, texts ...string) []taskAutolink {
+	if len(links) == 0 {
+		return nil
+	}
 	var refs []taskAutolink
 	seen := map[string]bool{}
 	for _, text := range texts {
+		// At i == len(text) nothing can follow a prefix, so no reference starts there.
+		//mutation:exempt[CONDITIONALS_BOUNDARY] equivalent: i <= len(text) adds a position where no identifier fits
 		for i := 0; i < len(text); i++ {
 			if i > 0 && isASCIIAlnum(text[i-1]) {
 				continue

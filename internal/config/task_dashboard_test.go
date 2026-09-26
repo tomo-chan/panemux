@@ -145,6 +145,7 @@ func TestValidate_TaskDashboardAutolinkKeyPrefix(t *testing.T) {
 		{"no dash", "", []string{"TICKET"}},
 		{"empty", "task_dashboard.autolinks[0].key_prefix", []string{""}},
 		{"space", "task_dashboard.autolinks[0].key_prefix", []string{"JIRA -"}},
+		{"leading space", "task_dashboard.autolinks[0].key_prefix", []string{" JIRA-"}},
 		{"control character", "task_dashboard.autolinks[0].key_prefix", []string{"JIRA-\t"}},
 		{"overlapping, as GitHub refuses", "task_dashboard.autolinks[1].key_prefix", []string{"TICKET", "TICK"}},
 		{"overlapping the other way", "task_dashboard.autolinks[1].key_prefix", []string{"TICK", "TICKET"}},

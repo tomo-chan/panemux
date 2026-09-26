@@ -450,6 +450,9 @@ func TestAutolinkRefs(t *testing.T) {
 		{"digit before", []string{"1JIRA-418"}, nil},
 		{"numeric: a letter after", []string{"JIRA-418a"}, nil},
 		{"numeric: leading zeros are digits too", []string{"JIRA-0418"}, []taskAutolink{jira("0418")}},
+		{"numeric: 9 is a digit", []string{"JIRA-9"}, []taskAutolink{jira("9")}},
+		{"numeric: stops at the bytes around the digits", []string{"JIRA-1/JIRA-2:"},
+			[]taskAutolink{jira("1"), jira("2")}},
 		{"numeric: no digits", []string{"JIRA-x"}, nil},
 		{"numeric: the prefix alone at the end", []string{"see JIRA-"}, nil},
 		{"alphanumeric takes letters, digits and -",
@@ -469,6 +472,18 @@ func TestAutolinkRefs(t *testing.T) {
 		})
 	}
 	assert.Nil(t, autolinkRefs(nil, "JIRA-1"), "no autolinks, no references")
+
+	// An alphanumeric identifier can end in "-", so a prefix that is not a
+	// letter or digit can start right where the reference before it ended.
+	hash := []config.AutolinkConfig{
+		{KeyPrefix: "#", URLTemplate: "https://tracker.example.com/<num>", IsAlphanumeric: true},
+	}
+	assert.Equal(t, []taskAutolink{
+		{Text: "#a-", URL: "https://tracker.example.com/a-"},
+		{Text: "#b", URL: "https://tracker.example.com/b"},
+	}, autolinkRefs(hash, "#a-#b"))
+	assert.Equal(t, []taskAutolink{{Text: "#1", URL: "https://tracker.example.com/1"}},
+		autolinkRefs(hash, "#1#2"), "#2 follows the digit 1, so it is not a reference")
 }
 
 // Without an origin URL there is no repository to name for `gh`, so a PR is
