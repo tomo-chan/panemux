@@ -172,6 +172,7 @@ describe('TaskRecordSchema', () => {
     }
   })
 
+  // efficacy:exempt unchanged by this branch; the new describe block after it falls inside its line range
   it('rejects an empty session ID', () => {
     expect(TaskRecordSchema.safeParse({ ...record, session_id: '' }).success).toBe(false)
   })

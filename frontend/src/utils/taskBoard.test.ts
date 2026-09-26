@@ -97,6 +97,7 @@ describe('visibleColumns', () => {
 })
 
 describe('canRecord', () => {
+  // efficacy:exempt unchanged by this branch; the new describe block after it falls inside its line range
   it('allows done and labels only on a task with a session id', () => {
     expect(canRecord(task())).toBe(true)
     expect(canRecord(task({ agent: 'codex', session_id: undefined, id: 'local:codex:pid-8' }))).toBe(false)
