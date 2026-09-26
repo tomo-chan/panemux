@@ -81,6 +81,9 @@ type Options struct {
 	// Rand is the random source for the session IDs and heredoc tags a task
 	// launch generates. It defaults to crypto/rand.
 	Rand io.Reader
+	// Summarize makes a task's summary from its conversation excerpt. It
+	// defaults to `claude -p` on the panemux host.
+	Summarize SummarizeFunc
 	// HostTimeout bounds one host's collection, including waiting for its
 	// connection to come up. A connection still coming up when it expires
 	// keeps dialing and serves the next collection.
@@ -88,6 +91,8 @@ type Options struct {
 	// RetryAfter is how long a host whose connection failed is left alone
 	// before an ordinary collection dials it again. Reconnect skips the wait.
 	RetryAfter time.Duration
+	// SummaryTimeout bounds one Summarize call.
+	SummaryTimeout time.Duration
 }
 
 const (
@@ -114,9 +119,18 @@ type Service struct {
 	// resumeLocks makes each (host, session) resume's collection and launch
 	// one step; see Service.Resume.
 	resumeLocks map[string]*resumeLock
-	opts        Options
-	mu          sync.Mutex
-	closed      bool
+	// The task summaries; see summaries.go. summaryMu guards summaries and
+	// summaryTasks. summaryCtx ends when the service is closed.
+	summaries     map[summaryKey]*summaryEntry
+	summaryTasks  map[string]map[string]summaryTask
+	summarySlots  chan struct{}
+	summaryCtx    context.Context
+	summaryCancel context.CancelFunc
+	opts          Options
+	summaryWG     sync.WaitGroup
+	mu            sync.Mutex
+	summaryMu     sync.Mutex
+	closed        bool
 }
 
 type hostConn struct {
@@ -143,7 +157,23 @@ func New(opts Options) *Service {
 	if opts.Rand == nil {
 		opts.Rand = rand.Reader
 	}
-	return &Service{opts: opts, hosts: map[string]*hostConn{}, resumeLocks: map[string]*resumeLock{}}
+	if opts.Summarize == nil {
+		opts.Summarize = newClaudeSummarizer(claudeBin, nil)
+	}
+	if opts.SummaryTimeout <= 0 {
+		opts.SummaryTimeout = defaultSummaryTimeout
+	}
+	summaryCtx, summaryCancel := context.WithCancel(context.Background())
+	return &Service{
+		opts:          opts,
+		hosts:         map[string]*hostConn{},
+		resumeLocks:   map[string]*resumeLock{},
+		summaries:     map[summaryKey]*summaryEntry{},
+		summaryTasks:  map[string]map[string]summaryTask{},
+		summarySlots:  make(chan struct{}, summaryConcurrency),
+		summaryCtx:    summaryCtx,
+		summaryCancel: summaryCancel,
+	}
 }
 
 // runLocal runs the collection script with `sh -s`. The command is a
@@ -180,6 +210,7 @@ func runLocal(ctx context.Context, script string) ([]byte, error) {
 func (s *Service) Collect(ctx context.Context) Snapshot {
 	names := s.hostNames()
 	s.forgetHostsExcept(names)
+	s.forgetSummaryHostsExcept(names)
 
 	results := make([]HostResult, len(names)+1)
 	taskLists := make([][]Task, len(names)+1)
@@ -240,7 +271,9 @@ func (s *Service) collectHost(ctx context.Context, name string) (HostResult, []T
 	}
 	result.Status = HostOK
 	result.CollectedAt = &collectedAt
-	return result, buildTasks(name, raw, collectedAt)
+	tasks := buildTasks(name, raw, collectedAt)
+	s.rememberSummaryTasks(name, tasks)
+	return result, tasks
 }
 
 func (s *Service) runScript(ctx context.Context, name string) ([]byte, error) {
@@ -335,9 +368,10 @@ func (s *Service) Reconnect(name string) error {
 	return nil
 }
 
-// Close closes every connection. A dial still in flight closes its own
-// connection when it finishes.
+// Close closes every connection and stops the summaries in flight. A dial
+// still in flight closes its own connection when it finishes.
 func (s *Service) Close() {
+	s.summaryCancel()
 	s.mu.Lock()
 	s.closed = true
 	var conns []Conn

@@ -1,0 +1,9 @@
+{
+  "remaining": [
+    "Update the docs",
+    "Run make check"
+  ],
+  "state": "ready",
+  "summarized_at": "2026-01-01T00:00:00Z",
+  "text": "Adding task summaries to the dashboard."
+}

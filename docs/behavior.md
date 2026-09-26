@@ -26,6 +26,8 @@ The YAML config defines:
 - optional `url_open` settings
 - optional `task_dashboard` settings: `task_dashboard.autolinks`
 - optional `agent_board` and `command_center` settings
+- optional `task_dashboard.summary.enabled` (default `false`), which turns on the task dashboard's
+  summaries ([Summaries](behavior/tasks.md#summaries)); it is written back only when set
 
 Legacy top-level `layout` is accepted at load time and normalized to one `default` workspace. The
 next save writes the current `workspaces` shape.
@@ -90,7 +92,7 @@ distribution. Per-surface behavior lives in [`docs/behavior/`](behavior/), group
 | WebSocket Protocol; Command Center WebSocket Protocol | [websocket.md](behavior/websocket.md) |
 | Frontend Runtime Behavior; Pane Git and PR metadata | [frontend.md](behavior/frontend.md) |
 | Opening URLs from a Pane | [url-open.md](behavior/url-open.md) |
-| Task Dashboard; `GET /api/tasks`; `POST /api/tasks/hosts/{name}/reconnect`; `PUT /api/tasks/records`; `POST /api/tasks`; `POST /api/tasks/resume` | [tasks.md](behavior/tasks.md) |
+| Task Dashboard; `GET /api/tasks`; `POST /api/tasks/hosts/{name}/reconnect`; `PUT /api/tasks/records`; `POST /api/tasks`; `POST /api/tasks/resume`; `POST /api/tasks/summary` | [tasks.md](behavior/tasks.md) |
 
 ## Operational Assumptions
 

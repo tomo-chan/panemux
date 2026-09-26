@@ -8,6 +8,7 @@ import {
   TaskRecordSchema,
   TasksResponse,
   TasksResponseSchema,
+  TaskSummarySchema,
 } from '../schemas'
 import { applyTaskRecord } from '../utils/taskBoard'
 
@@ -48,6 +49,12 @@ export interface TasksState {
   launch: (input: TaskLaunchInput) => Promise<TaskActionResult<TaskLaunchResponse>>
   /** Runs `claude --resume` for a stopped task, then collects again. */
   resume: (task: Task) => Promise<TaskActionResult<TaskLaunched>>
+  /**
+   * Asks the server to summarize a task (issue #258) and shows where its
+   * summary stands at once; the summary itself arrives with a later poll.
+   * Resolves to why it failed, or null.
+   */
+  requestSummary: (task: Task) => Promise<string | null>
 }
 
 // postTaskAction POSTs body to path and parses the answer with schema. A
@@ -194,6 +201,23 @@ export function useTasks(enabled: boolean): TasksState {
     return result
   }, [refreshAfterAction])
 
+  const requestSummary = useCallback(async (task: Task) => {
+    if (!task.session_id) return 'This task has no session ID to summarize'
+    const result = await postTaskAction(
+      '/api/tasks/summary',
+      { host: task.host, session_id: task.session_id },
+      TaskSummarySchema,
+    )
+    if (!result.ok) return result.error
+    const summary = result.launched
+    setData((current) =>
+      current
+        ? { ...current, tasks: current.tasks.map((t) => (t.id === task.id ? { ...t, summary } : t)) }
+        : current,
+    )
+    return null
+  }, [])
+
   useEffect(() => {
     const handleVisibilityChange = () => setIsVisible(document.visibilityState === 'visible')
     document.addEventListener('visibilitychange', handleVisibilityChange)
@@ -209,5 +233,5 @@ export function useTasks(enabled: boolean): TasksState {
     return () => clearInterval(interval)
   }, [enabled, isVisible, refresh])
 
-  return { data, error, loading, updatedAt, refresh, reconnect, saveRecord, launch, resume }
+  return { data, error, loading, updatedAt, refresh, reconnect, saveRecord, launch, resume, requestSummary }
 }

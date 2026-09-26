@@ -587,6 +587,9 @@ func TestRunLocal_CollectScriptRunsUnderShAndParses(t *testing.T) {
 	assert.Equal(t, "/workspace/user/project", byID["stopped-one"].CWD, "the first cwd in the log")
 	assert.Empty(t, byID["no-cwd"].CWD)
 	assert.InDelta(t, time.Now().Unix(), byID["stopped-one"].ModTime, 60)
+	logBody := `{"type":"user","cwd":"/workspace/user/project","message":"x"}` + "\n" + `{"cwd":"/second"}` + "\n"
+	assert.Equal(t, int64(len(logBody)), byID["stopped-one"].Size, "the log's size in bytes")
+	assert.Equal(t, int64(3), byID["no-cwd"].Size)
 }
 
 // The cwd probe reports a claude process's working directory, and ps lists
