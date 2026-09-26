@@ -238,7 +238,7 @@ func (s *Service) runSummary(key summaryKey, log LogVersion) {
 // summarize reads the task's log on its host and has claude summarize it.
 func (s *Service) summarize(key summaryKey) (Summary, bool, error) {
 	script, err := buildTranscriptScript(key.sessionID)
-	if err != nil {
+	if err != nil { //coverage:exempt keys come from collected sessions, which passed validSessionID when parsed
 		return Summary{}, false, err
 	}
 	fetchCtx, cancel := context.WithTimeout(s.summaryCtx, s.opts.HostTimeout)

@@ -17,10 +17,11 @@ import (
 // summaryHost is a fake panemux host for summary tests: its collection lists
 // the given state files and logs, and the fetch script returns log.
 type summaryHost struct {
-	collect []byte
-	log     []byte
-	fetches []string
-	mu      sync.Mutex
+	fetchErr error
+	collect  []byte
+	log      []byte
+	fetches  []string
+	mu       sync.Mutex
 }
 
 func (h *summaryHost) run(_ context.Context, script string) ([]byte, error) {
@@ -30,7 +31,7 @@ func (h *summaryHost) run(_ context.Context, script string) ([]byte, error) {
 		return h.collect, nil
 	}
 	h.fetches = append(h.fetches, script)
-	return h.log, nil
+	return h.log, h.fetchErr
 }
 
 func (h *summaryHost) set(collect, log []byte) {
@@ -482,4 +483,94 @@ func TestSummaries_TimeOut(t *testing.T) {
 	_, views := collectAndSummarize(svc)
 	require.NotNil(t, views["local:claude:s10"])
 	assert.Equal(t, SummaryFailed, views["local:claude:s10"].State)
+}
+
+// A log the host could not be asked for is a failure too.
+func TestSummaries_ALogThatCannotBeReadIsAFailure(t *testing.T) {
+	host := &summaryHost{fetchErr: errors.New("run conversation log read: exit status 1")}
+	host.set(hostCollection(100, "idle"), nil)
+	summarizer := &fakeSummarizer{}
+	svc := newSummaryService(t, host, summarizer)
+
+	_, views := collectAndSummarize(svc)
+	assert.Zero(t, summarizer.calls())
+	assert.Equal(t, &SummaryView{State: SummaryFailed, Error: "run conversation log read: exit status 1"},
+		views["local:claude:s10"])
+}
+
+// A summary that finishes after its task left the list is dropped.
+func TestSummaries_ASummaryForATaskThatLeftIsDropped(t *testing.T) {
+	host := &summaryHost{}
+	host.set(hostCollection(100, "idle"), conversationLog("a"))
+	summarizer := &fakeSummarizer{gate: make(chan struct{}), result: Summary{Text: "late", Remaining: []string{}}}
+	svc := newSummaryService(t, host, summarizer)
+	snap := svc.Collect(context.Background())
+	svc.Summaries(snap.Tasks)
+	require.Eventually(t, func() bool { return summarizer.calls() == 1 }, 5*time.Second, 10*time.Millisecond)
+
+	host.set(joinLines("::panemux-tasks v1", "::now 1000", "::end"), nil)
+	svc.Collect(context.Background())
+	close(summarizer.gate)
+	svc.waitSummaries()
+
+	assert.Empty(t, svc.Summaries(asBusy(snap.Tasks)), "the late answer was not kept")
+}
+
+// Removing a host from ssh_connections drops its summaries.
+func TestSummaries_AHostRemovedFromTheConfigLosesItsSummaries(t *testing.T) {
+	conn := &scriptedConn{outputs: map[bool][]byte{
+		true:  hostCollection(100, "idle"),
+		false: conversationLog("remote work"),
+	}}
+	var mu sync.Mutex
+	hosts := []string{"gpu-box"}
+	summarizer := &fakeSummarizer{result: Summary{Text: "remote", Remaining: []string{"x"}}}
+	svc := New(Options{
+		Hosts: func() []string {
+			mu.Lock()
+			defer mu.Unlock()
+			return hosts
+		},
+		Dial:      func(string) (Conn, error) { return conn, nil },
+		RunLocal:  localOutput(minimalOutput("local"), nil),
+		Summarize: summarizer.summarize,
+	})
+	t.Cleanup(svc.Close)
+	snap, views := collectAndSummarize(svc)
+	require.NotNil(t, views["ssh:gpu-box:claude:s10"])
+
+	mu.Lock()
+	hosts = nil
+	mu.Unlock()
+	svc.Collect(context.Background())
+	_, err := svc.RequestSummary("gpu-box", "s10")
+	assert.ErrorIs(t, err, ErrNoSummaryTask)
+	mu.Lock()
+	hosts = []string{"gpu-box"}
+	mu.Unlock()
+	assert.Nil(t, svc.Summaries(asBusy(snap.Tasks))["ssh:gpu-box:claude:s10"], "its summary was dropped")
+}
+
+// Nothing is summarized once the service is closed.
+func TestSummaries_NothingStartsAfterClose(t *testing.T) {
+	host := &summaryHost{}
+	host.set(hostCollection(100, "idle"), conversationLog("a"))
+	summarizer := &fakeSummarizer{}
+	svc := New(Options{RunLocal: host.run, Summarize: summarizer.summarize})
+	snap := svc.Collect(context.Background())
+	svc.Close()
+
+	assert.Empty(t, svc.Summaries(snap.Tasks))
+	svc.waitSummaries()
+	assert.Zero(t, summarizer.calls())
+}
+
+// asBusy is tasks with every state set to busy, so that asking for their
+// summaries starts none.
+func asBusy(tasks []Task) []Task {
+	busy := append([]Task(nil), tasks...)
+	for i := range busy {
+		busy[i].State = StateBusy
+	}
+	return busy
 }
