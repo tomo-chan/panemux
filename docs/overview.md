@@ -13,6 +13,8 @@ structure, [Behavior specification](behavior.md) for runtime contracts, or the
 - Four terminal backends: `local`, `ssh`, `tmux`, and `ssh_tmux`.
 - Raw terminal streaming over WebSocket, including resize and lifecycle control messages.
 - Workspace tabs, layout persistence, pane creation/removal, and pane-level Git/PR context.
+- A task dashboard listing the coding-agent sessions on the panemux host and every configured SSH
+  host by state, independently of panes, and opening one in a pane attached to its tmux session.
 - Browser notifications and attention indicators for terminal activity.
 - Loopback OAuth callback forwarding for CLI login flows running in SSH-backed panes.
 - Optional Agent Board status aggregation, cross-pane messaging, and a command center.
@@ -31,6 +33,7 @@ Go server -------- REST APIs -------- browser workspace
     |     +-- SSH shell                    +-- Agent Board overlays
     |     +-- local tmux
     |     `-- tmux over SSH
+    +-- task collector (one SSH connection per host)
     |
     `------------ WebSocket terminal streams ---------^
 ```
@@ -64,8 +67,12 @@ backend and UI are released together.
   another machine cannot receive a listener bound to the panemux host's loopback interface.
 - Chrome is the validated browser for terminal themes that depend on Powerline private-use glyphs.
 - Release archives target macOS and Linux. Windows use is through WSL2 rather than a native package.
-- Runtime pane creation is intentionally narrower than the full configuration format and is mainly
-  used by browser pane splitting.
+- Runtime pane creation is intentionally narrower than the full configuration format. It is used by
+  browser pane splitting and by the task dashboard, which creates only `tmux` and `ssh_tmux` panes
+  attaching to a task's existing tmux session.
+- The task dashboard reads files Claude Code writes for itself (`~/.claude/sessions`,
+  `~/.claude/projects`), which are not a published format, and knows only whether a codex process is
+  running. It collects only while it is on screen.
 
 ## Where to continue
 

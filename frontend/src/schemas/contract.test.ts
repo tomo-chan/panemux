@@ -100,6 +100,7 @@ const roundTrips: RoundTrip[] = [
     schemaName: 'BoardCommandHistoryResponseSchema',
     schema: schemas.BoardCommandHistoryResponseSchema,
   },
+  { fixture: 'tasks', schemaName: 'TasksResponseSchema', schema: schemas.TasksResponseSchema },
   // The two WebSocket fixtures hold one frame per element, in the order the
   // server sent them, so the schema that owns a single frame is wrapped here
   // rather than restated.
@@ -144,6 +145,11 @@ const fixtureless: Record<string, string> = {
   BoardStatusEntrySchema: 'component of BoardStatusResponseSchema',
   BoardMessageSchema: 'component of BoardMessagesResponseSchema',
   BoardCommandHistoryEntrySchema: 'component of BoardCommandHistoryResponseSchema',
+  TaskStateSchema: 'component of TaskSchema, via tasks',
+  TaskLocationSchema: 'component of TaskSchema, via tasks',
+  TaskGitSchema: 'component of TaskSchema, via tasks',
+  TaskSchema: 'component of TasksResponseSchema',
+  TaskHostSchema: 'component of TasksResponseSchema',
 }
 
 function exportedSchemaNames(): string[] {
@@ -198,6 +204,8 @@ describe('API contract fixtures', () => {
   // Every captured file must be claimed by a round-trip above. Without this,
   // renaming a capture on the Go side leaves the old file behind and this
   // suite keeps happily validating a contract that no longer exists.
+  // efficacy:exempt bookkeeping — it pairs fixture files with round-trip entries, and the
+  // tasks fixture it now expects is written by the Go suite, not by the reverted implementation.
   it('reads every fixture the Go side captured', () => {
     const onDisk = readdirSync(fixtureDir)
       .filter((name) => name.endsWith('.json'))
@@ -346,6 +354,14 @@ const unexercisedOptionals: Record<string, string> = {
   // callback already resolves on this host, so the answer is always
   // forwarded:false with a reason and no port.
   'open-url.port': 'a forward is only opened for an ssh pane, which needs a second host',
+
+  // The capture's only repository is on a fake remote whose branch is left
+  // empty on purpose: a branch makes the handler run `gh pr view` on the
+  // capturing machine, and the capture must not reach the network. So neither
+  // the branch nor a PR can appear.
+  'tasks.tasks[].git.branch': 'a branch would make the capture run a real `gh pr view`',
+  'tasks.tasks[].git.pr_number': 'needs a `gh pr view` lookup against a real PR',
+  'tasks.tasks[].git.pr_url': 'needs a `gh pr view` lookup against a real PR',
 }
 
 describe('optional field coverage', () => {

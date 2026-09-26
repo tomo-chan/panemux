@@ -34,6 +34,10 @@ command_center:
 display:
   show_header: true      # show pane header with title and controls (default: true)
   show_status_bar: true  # show terminal dimensions bar at the bottom (default: true)
+  # Letter of the Cmd/Ctrl+Shift+<letter> shortcut that switches between the
+  # task dashboard and the workspaces. One letter A-Z; K and B are taken by the
+  # command palette and the Agent Board. (default: S)
+  task_dashboard_shortcut: "S"
 
 # ── Opening URLs from a pane ──────────────────────────────────────────────────
 # When a URL is opened from a pane, panemux republishes the URL's loopback

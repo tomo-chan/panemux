@@ -51,6 +51,7 @@ func (c *Data) validate(sshConfigPath string) error {
 	}
 
 	errs = append(errs, validateAgentBoard(c.AgentBoard)...)
+	errs = append(errs, validateDisplay(c.Display)...)
 
 	sshConns := c.SSHConnections
 	if sshConns == nil {

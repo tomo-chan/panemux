@@ -19,10 +19,10 @@ If a configured session fails to start, the server logs a warning and continues 
 The YAML config defines:
 
 - `server.host`, `server.port`, and the Agent Board `server.auth_token`
-- `ssh_connections`
+- `ssh_connections`, which are also the hosts the task dashboard collects agent sessions from
 - `workspaces`, including the active workspace, tab position, vertical bar width, and each
   workspace's recursive layout
-- optional `display` settings
+- optional `display` settings, including `display.task_dashboard_shortcut`
 - optional `url_open` settings
 - optional `agent_board` and `command_center` settings
 
@@ -38,6 +38,14 @@ Layout rules:
 - `tmux` and `ssh_tmux` panes must define `tmux_session`
 - workspace IDs must be unique and `workspaces.active` must name an existing workspace when set
 - `workspaces.tab_position` must be `top`, `bottom`, `left`, or `right`
+
+`display.task_dashboard_shortcut` rules:
+
+- one letter `A`–`Z` in either case, naming the `Cmd/Ctrl+Shift+<letter>` shortcut that switches
+  between the task dashboard and the workspaces
+- `K` and `B` are refused, since the command palette and the Agent Board dashboard use them
+- omitted means `S`; `GET /api/display` always reports the effective letter in upper case, and an
+  omitted value is never written back on save
 
 `url_open` rules:
 
@@ -63,6 +71,7 @@ distribution. Per-surface behavior lives in [`docs/behavior/`](behavior/), group
 | WebSocket Protocol; Command Center WebSocket Protocol | [websocket.md](behavior/websocket.md) |
 | Frontend Runtime Behavior; Pane Git and PR metadata | [frontend.md](behavior/frontend.md) |
 | Opening URLs from a Pane | [url-open.md](behavior/url-open.md) |
+| Task Dashboard; `GET /api/tasks`; `POST /api/tasks/hosts/{name}/reconnect` | [tasks.md](behavior/tasks.md) |
 
 ## Operational Assumptions
 

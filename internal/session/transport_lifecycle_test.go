@@ -35,6 +35,7 @@ type testSSHTransport struct {
 	echoAddr    string
 	connections []net.Conn
 	commands    []string
+	stdins      []string
 	resizes     [][2]uint32
 	mu          sync.Mutex
 }
@@ -153,6 +154,15 @@ func (s *testSSHTransport) serveSession(channel ssh.Channel, requests <-chan *ss
 			if strings.HasPrefix(payload.Command, "tmux new-session ") {
 				go func() { _, _ = io.Copy(channel, channel) }()
 				continue
+			}
+			if payload.Command == "sh -s" {
+				// A script fed on stdin: read all of it before answering, as a
+				// real `sh -s` does, so the client's stdin copy is not cut off
+				// by a channel this fake closed early.
+				script, _ := io.ReadAll(channel)
+				s.mu.Lock()
+				s.stdins = append(s.stdins, string(script))
+				s.mu.Unlock()
 			}
 			response := testSSHResponse{}
 			if s.handler != nil {

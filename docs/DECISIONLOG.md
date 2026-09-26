@@ -71,6 +71,88 @@ made each turn unreadable. Panemux now writes the prompt first as `panemux_promp
 does not emit, then appends the captured subprocess frames. A subprocess failure still records the
 prompt; a request that never starts a subprocess does not create a turn.
 
+## Task dashboard
+
+### Stage 1: a dashboard of agent sessions, independent of panes (2026-09-25, issue #252)
+
+The design, its stages and its open questions are agreed in issue #252. The choices stage 1 made
+while being built:
+
+- **Claude Code's own files are read as they are.** `~/.claude/sessions/<pid>.json` and
+  `~/.claude/projects/*/<session>.jsonl` are not a published format. They are the only record of a
+  session that does not depend on panemux having started it, which is the point of the feature, so
+  the dependency is accepted and made to fail visibly: every field is optional, an unreadable state
+  file stays on the board as `unknown` instead of disappearing, and only the first `"cwd"` of a log
+  is read. Codex has no equivalent that has been checked, so codex tasks are running processes and
+  nothing more (issue #252, open question 5).
+- **Liveness is "the pid is alive and its program is claude", and `procStart` is not used.** A
+  state file's pid alone is not enough, because pids restart after a host reboot. Claude
+  Code 2.1.282's `procStart` matched field 22 of `/proc/<pid>/stat` (clock ticks since boot) for the
+  one process checked on Linux, while the observation recorded in the issue did not match (425
+  against 419), so how it is computed is still unknown and nothing relies on it. "Its program" is a
+  path component named `claude` or `claude-code` in argv[0], or in the script `node`/`bun`/`deno`
+  runs, because how Claude Code shows in `ps` depends on how it was installed — a native binary
+  under `…/claude/versions/<version>`, or `node` running the npm package. The first version matched
+  `claude` anywhere in the command line; review found that an editor or `tail` with a file under
+  `~/.claude` as its argument then passed for a waiting agent.
+- **A running claude process with no state file is `unknown`, not `stop`** (review of PR #253).
+  Building running tasks only from state files meant a Claude Code release that moved those files
+  would have shown every running agent as stopped. Such a process is taken to be writing the newest
+  log in its directory, so that session is not listed twice.
+- **Codex's interactive sessions are recognized by subcommand**, from `codex --help` of codex-cli
+  0.157.0: no subcommand (a prompt), `resume` and `fork` are interactive, every other subcommand is
+  not. The first version excluded any process with an `exec` token anywhere, which hid a prompt
+  containing the word and listed `codex app-server`.
+- **Only the collecting user's processes are listed** (`ps -U`), so on a shared host another
+  user's agents are not shown as one's own tasks.
+- **A slow collection keeps its connection** while the connection answers an SSH keepalive. The
+  first version dropped the connection on any timeout, so a host whose collection took longer than
+  15 seconds was redialed every 10 seconds and never showed a result. Keeping the connection stops
+  the redialing only: a host whose script alone takes longer than 15 seconds every time still never
+  shows a result, and its script is started again at every collection. What the remote script does
+  once panemux closes the exec channel (no signal is sent) has not been checked.
+- **The task routes refuse cross-site requests.** They stay unauthenticated like the rest of
+  `/api/*`, but `GET /api/tasks` is the first GET with a heavy side effect — dialing every host — so
+  a page on another site must not be able to trigger it with an `<img>`.
+- **A stopped task reports its repository but not its branch or PR**: git metadata is read from the
+  directory as it is now, which says nothing about the branch a stopped session worked on. So
+  `gh pr view` runs only for a directory a running task uses (review of PR #253); the first version
+  ran it for every directory and threw the stopped-only results away. A lookup a request abandoned
+  is not cached, so an aborted `gh pr view` does not hide a running task's PR for 30 seconds.
+- **The local collection is killed as a process group** (review of PR #253). The first version
+  relied on `exec.CommandContext` killing `sh` alone; a probe the script had started kept its
+  stdout open, so the collection outlived its 15 seconds until that probe finished.
+- **`/resume` and exit were checked on a real machine** (macOS, 2026-09-26; the Claude Code
+  version was not recorded). `/resume` keeps the same process and the
+  same `<pid>.json`, and rewrites that file's `sessionId` to the resumed session (`updatedAt`
+  moves with it) — so the switched-from session shows as stopped and the switched-to one as running
+  in the same place, as issue #252 expected. `/exit` removes both `<pid>.json` and its `.key` file,
+  so a normal exit leaves no state file behind; the liveness check still guards against the files a
+  crash or a host restart can leave.
+- **One fixed script per host, fed on stdin.** Every host runs the same constant script through
+  `sh -s`: one round trip per collection, identical parsing for local and remote, no remote value
+  ever quoted into a command, and nothing that depends on the remote login shell being POSIX. The
+  alternative — one exec per probe, as the pane header's lookups do — would cost several round trips
+  per host every 10 seconds.
+- **The pane a task belongs to is found in the browser, not by the API.** The browser already holds
+  the workspaces, so a pane the dashboard has just created is matched at once rather than after the
+  next collection, and the API has no layout state to keep consistent with it.
+- **Stopped sessions are the last 7 days, at most 50 per host.** Decided for stage 1 while it was
+  built; conversation logs are never deleted, so without a bound every past session would be
+  listed. Open question 1 still decides retention and recording for stage 2.
+- **panemux opens on the workspaces**, as before, rather than on the dashboard the issue's mockup
+  starts on.
+- **The layers switch with `Cmd/Ctrl+Shift+S`, and the letter is configurable** as
+  `display.task_dashboard_shortcut` (open question 6). `S` was chosen for stage 1 while it was
+  built; the environment it was built in could not reach a list of Chrome's own shortcuts. On a real,
+  non-headless browser on macOS (2026-09-26), `Cmd+Shift+S` switched layers and was not taken by the
+  browser; `Ctrl+Shift+S` on Linux or Windows was not checked there. It is a config setting rather
+  than a per-browser one so every browser on one panemux behaves the same; `K` and `B` are refused
+  because the palette and the board already use them. `GET /api/display` reports the effective
+  letter so the default lives in one place, and an unset value is never written back.
+- **The UI text is English**, like the rest of panemux's interface, although the issue's mockup is
+  written in Japanese.
+
 ## Agent Board
 
 ### Compatibility is checked against a real agmsg release (2026-08-23, PR #176)

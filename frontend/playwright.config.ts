@@ -30,12 +30,16 @@ const CORE_MULTIPLEXER_BASE_URL = 'http://127.0.0.1:4177'
 // violation *nodes*, so any spec that leaves an extra pane behind changes its
 // numbers. See e2e/a11y.yml for what that measured.
 const A11Y_BASE_URL = 'http://127.0.0.1:4178'
+// task-dashboard.spec.ts runs against an isolated HOME holding fake agent
+// sessions, and opening a task adds a pane to its fixture's layout.
+const TASK_DASHBOARD_BASE_URL = 'http://127.0.0.1:4179'
 
 const AGENT_BOARD_SPEC = /agent-board\.spec\.ts$/
 const AGENT_BOARD_AGMSG_SPEC = /agent-board-agmsg\.spec\.ts$/
 const COMMAND_CENTER_SPEC = /command-center\.spec\.ts$/
 const CORE_MULTIPLEXER_SPEC = /core-multiplexer\.spec\.ts$/
 const A11Y_SPEC = /a11y\.spec\.ts$/
+const TASK_DASHBOARD_SPEC = /task-dashboard\.spec\.ts$/
 
 export default defineConfig({
   testDir: './e2e',
@@ -96,6 +100,13 @@ export default defineConfig({
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
     },
+    {
+      command: 'sh ./e2e/run-panemux-task-dashboard-e2e.sh',
+      url: TASK_DASHBOARD_BASE_URL,
+      cwd: '.',
+      reuseExistingServer: !process.env.CI,
+      timeout: 120_000,
+    },
   ],
   projects: [
     {
@@ -107,6 +118,7 @@ export default defineConfig({
         COMMAND_CENTER_SPEC,
         CORE_MULTIPLEXER_SPEC,
         A11Y_SPEC,
+        TASK_DASHBOARD_SPEC,
       ],
     },
     {
@@ -133,6 +145,11 @@ export default defineConfig({
       name: 'chromium-a11y',
       use: { ...chromium, baseURL: A11Y_BASE_URL },
       testMatch: A11Y_SPEC,
+    },
+    {
+      name: 'chromium-task-dashboard',
+      use: { ...chromium, baseURL: TASK_DASHBOARD_BASE_URL },
+      testMatch: TASK_DASHBOARD_SPEC,
     },
   ],
 })

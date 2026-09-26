@@ -3,6 +3,11 @@ import { z } from 'zod'
 export const DisplayConfigSchema = z.object({
   show_header: z.boolean(),
   show_status_bar: z.boolean(),
+  // The effective Cmd/Ctrl+Shift letter that switches between the task
+  // dashboard and the workspaces. GET /api/display always sends it, already
+  // upper-cased and defaulted; it is optional only for the display defaults
+  // the frontend builds itself before that response arrives.
+  task_dashboard_shortcut: z.string().regex(/^[A-Z]$/).optional(),
 })
 
 export type DisplayConfig = z.infer<typeof DisplayConfigSchema>
@@ -314,3 +319,76 @@ export const BoardMessagesResponseSchema = z.object({
 })
 
 export type BoardMessagesResponse = z.infer<typeof BoardMessagesResponseSchema>
+
+// ── Task dashboard: GET /api/tasks ─────────────────────────────────────────
+//
+// Free text that a remote host reports about its own processes (cwd,
+// waiting_for, tmux_session, a host's error) carries no .max(): Zod rejects
+// rather than truncates, so one long value from one host would fail the whole
+// response and blank every other host's tasks. Same reasoning as
+// BoardStatusEntrySchema.
+
+// A link the dashboard opens in a new tab. z.string().url() alone accepts
+// any scheme new URL() parses, javascript: included, so the scheme is pinned.
+const HttpUrlSchema = z
+  .string()
+  .url()
+  .refine((value) => /^https?:\/\//i.test(value), { message: 'must be an http(s) URL' })
+
+export const TaskStateSchema = z.enum(['busy', 'wait', 'idle', 'run', 'unknown', 'stop'])
+
+export type TaskState = z.infer<typeof TaskStateSchema>
+
+export const TaskLocationSchema = z.object({
+  kind: z.enum(['tmux', 'outside', 'none']),
+  tmux_session: z.string().optional(),
+  // Whether a tmux / ssh_tmux pane can attach to tmux_session: pane configs
+  // accept only a restricted set of session-name characters.
+  attachable: z.boolean(),
+})
+
+export type TaskLocation = z.infer<typeof TaskLocationSchema>
+
+export const TaskGitSchema = z.object({
+  repo: z.string().optional(),
+  repo_url: HttpUrlSchema.optional(),
+  branch: z.string().optional(),
+  pr_url: HttpUrlSchema.optional(),
+  pr_number: z.number().int().positive().optional(),
+})
+
+export type TaskGit = z.infer<typeof TaskGitSchema>
+
+export const TaskSchema = z.object({
+  id: z.string().min(1),
+  // The ssh_connections key, or '' for the panemux host itself.
+  host: z.string(),
+  agent: z.string(),
+  session_id: z.string().optional(),
+  cwd: z.string().optional(),
+  state: TaskStateSchema,
+  waiting_for: z.string().optional(),
+  status_since: z.string().optional(),
+  started_at: z.string().optional(),
+  pid: z.number().int().positive().optional(),
+  location: TaskLocationSchema,
+  git: TaskGitSchema.optional(),
+})
+
+export type Task = z.infer<typeof TaskSchema>
+
+export const TaskHostSchema = z.object({
+  name: z.string(),
+  status: z.enum(['ok', 'error', 'connecting']),
+  error: z.string().optional(),
+  collected_at: z.string().optional(),
+})
+
+export type TaskHost = z.infer<typeof TaskHostSchema>
+
+export const TasksResponseSchema = z.object({
+  hosts: z.array(TaskHostSchema),
+  tasks: z.array(TaskSchema),
+})
+
+export type TasksResponse = z.infer<typeof TasksResponseSchema>

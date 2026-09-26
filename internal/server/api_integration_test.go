@@ -410,6 +410,31 @@ var apiCases = map[string]apiCase{
 		assert.Contains(t, rr.Body.String(), `"name":"child"`)
 	}},
 
+	"GET /api/tasks": {run: func(t *testing.T, e *apiEnv) {
+		// The real collector, running the real script on this machine against
+		// the test's own HOME: what it lists is only what the test put there,
+		// a conversation log with no process behind it, i.e. a stopped task.
+		project := filepath.Join(e.home, ".claude", "projects", "-workspace-user-project")
+		require.NoError(t, os.MkdirAll(project, 0o700))
+		require.NoError(t, os.WriteFile(filepath.Join(project, "integration-session.jsonl"),
+			[]byte(`{"cwd":"/workspace/user/project"}`+"\n"), 0o600))
+
+		rr := e.do(t, http.MethodGet, "/api/tasks", "")
+		assert.Equal(t, http.StatusOK, rr.Code)
+		assert.Contains(t, rr.Body.String(), `"name":"","status":"ok"`)
+		assert.Contains(t, rr.Body.String(), `"id":"local:claude:integration-session"`)
+		assert.Contains(t, rr.Body.String(), `"state":"stop"`)
+	}},
+
+	"POST /api/tasks/hosts/{name}/reconnect": {run: func(t *testing.T, e *apiEnv) {
+		e.cfg.SSHConnections = map[string]config.SSHConnection{"build-box": {Host: "build.invalid"}}
+
+		rr := e.do(t, http.MethodPost, "/api/tasks/hosts/build-box/reconnect", "")
+		assert.Equal(t, http.StatusNoContent, rr.Code)
+		rr = e.do(t, http.MethodPost, "/api/tasks/hosts/not-configured/reconnect", "")
+		assert.Equal(t, http.StatusNotFound, rr.Code)
+	}},
+
 	"GET /api/session-token": {run: func(t *testing.T, e *apiEnv) {
 		// do() gives every request a loopback RemoteAddr and Host — NOT
 		// httptest's own defaults, which are 192.0.2.1:1234 and example.com,
