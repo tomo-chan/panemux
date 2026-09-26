@@ -80,9 +80,9 @@ func parseAgmsgMessageRows(data []byte, host string) []Row {
 // cursor scrolled out of the poll window — more than --limit new rows since
 // the last poll, or a reset store — and agmsg has no forward "since"
 // primitive to resolve it with (only backwards --before-id pagination), so
-// the window is re-delivered rather than skipped. That matches the
-// at-least-once delivery this design already documents, and self-corrects
-// on the next poll.
+// the window is re-delivered rather than skipped. This may duplicate a
+// successful forward and self-corrects on the next poll; it does not imply
+// retries for failed forwards. See docs/agent-board/relay.md.
 func filterRowsAfter(rows []Row, afterID string) []Row {
 	if afterID == "" {
 		return rows

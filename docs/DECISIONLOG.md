@@ -81,6 +81,45 @@ against the latest release. Its first live run found that treating IDs as number
 relay cursor from advancing; the current cursor contract treats IDs as opaque ordered values from
 the returned stream.
 
+The design borrows Pact's consumer-owned contract principle, but not Pact tooling: agmsg is a CLI
+dependency without an HTTP/message provider verification loop or broker. Direct Go tests against
+the installed scripts verify the actual boundary with less machinery.
+
+### Contract incidents favor behavior over environment and wording (2026-08-23 onward, PR #176)
+
+The live contract first asserted a `watch.sh` diagnostic that is absent on its successful path; it
+now observes message delivery. Its first CI run also depended on finding an agent in the test
+process ancestry, so locks looked live locally and stale on runners. Tests now set agmsg's documented
+`AGMSG_AGENT_PID` override and verify that a dead owner can be replaced.
+
+The scheduled canary later failed when agmsg v1.3.1 changed a diagnostic sentence while preserving
+the behavior Agent Board needs. The assertion was narrowed to the stable fact that the dropped pair
+is named. The canary remains daily because the measured median between 22 releases from v1.0.2
+through v1.2.2 was 2.9 days; a weekly sample could span several releases and obscure the cause.
+
+### Version coverage normalizes install provenance (2026-08, PR #176)
+
+An installed `VERSION` may be a bare release, a `v`-prefixed tag, or `git describe` provenance.
+Literal comparison to the tested pin falsely warned on supported installs. Panemux now normalizes
+those forms and treats later patches on the tested major/minor line as covered. This is a warning-noise
+policy, not a semver promise; the real-install contract remains authoritative. Patch tolerance also
+avoids forcing pin churn at agmsg's observed multi-day release cadence.
+
+### Usage remains outside the Agent Board status contract (2026-08)
+
+Account-wide usage belongs to the agent provider. Per-pane usage may still be derived by summing the
+documented `usage` field already stored in each pane's transcript: that is direct field reading, not
+inference from private state. If added, it belongs to panemux's existing pane-inspection surface,
+not the cooperative agmsg status schema.
+
+### The own-send ledger is the model-checking pilot (2026-09, PR #243, issue #168)
+
+The ledger was chosen before `Relay.processRow` because it is the smallest self-contained state
+machine and had already suffered a multiset-versus-set bug. It established the TLA+, generated
+transition graph, and Go conformance tiers at low cost. `Relay.processRow` is the intended next
+model; dynamic executor selection is a search-and-retry algorithm better suited to fuzz or property
+tests.
+
 ### Same-project panes claim an agmsg actas lock (2026-08-22, PR #171)
 
 agmsg's default watcher resolves every identity registered for one project and agent type. Two
@@ -151,7 +190,6 @@ message schema or database.
 
 Claude Code's native cross-session messaging was also evaluated and rejected: it is Claude-only,
 does not fit arbitrary SSH hosts, and exposes no documented process API that panemux can call.
-Further alternatives are recorded in [agent-board/alternatives.md](agent-board/alternatives.md).
 
 ## Quality gateway
 

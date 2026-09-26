@@ -90,9 +90,8 @@ func filterRowsAfterCases() []filterRowsAfterCase {
 		{
 			// The cursor scrolled out of the poll window (more than --limit
 			// new rows, or the store was reset). agmsg has no forward "since"
-			// primitive to resolve this with, and delivery is documented as
-			// at-least-once, so the window is re-delivered rather than
-			// silently skipped. It self-corrects on the next poll.
+			// primitive to resolve this with, so the window is re-delivered
+			// rather than silently skipped. It self-corrects on the next poll.
 			name:    "cursor absent from the window re-delivers it",
 			rows:    uuidRows,
 			afterID: unknownCursorID,
@@ -218,8 +217,10 @@ func TestRelayPollAdvancesCursorAcrossUUIDRows(t *testing.T) {
 
 // TestRelayPollCursorOutsideWindowSelfCorrects pins the bounded shape of the
 // truncation case: a cursor that scrolled out of the poll window costs one
-// re-delivery of that window, not a permanent loop. This is the tradeoff
-// docs/agent-board.md documents as at-least-once delivery.
+// replay of that window, not a permanent loop. This is the cursor tradeoff
+// documented in docs/agent-board/relay.md; failed forwards are not retried.
+//
+//efficacy:exempt documentation-only terminology update; implementation behavior is unchanged
 func TestRelayPollCursorOutsideWindowSelfCorrects(t *testing.T) {
 	hostA := &fakeAgmsgClient{hostID: "host-a", sinceRows: []Row{
 		uuidRelayRow(uuidIDs[2], "one"),
