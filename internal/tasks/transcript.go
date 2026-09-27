@@ -56,8 +56,10 @@ const (
 // together, else its first transcriptHeadBytes and its last
 // transcriptTailBytes, then "::end". A missing log prints
 // "::panemux-transcript none". When the session has a log in more than one
-// project directory, the newest is read: it is the one whose version the
-// collection keys the summary on (withLogVersions). It is a fixed script
+// project directory, the one read is chosen exactly as collectScript orders
+// them — "<mtime> <size> <path>" through `sort -rn`, first line wins — so it
+// is the log whose version the collection keys the summary on
+// (withLogVersions), same-second ties included. It is a fixed script
 // run with `sh -s`, like
 // collectScript; the only value in it is a session ID that passed
 // validSessionID and is single-quoted.
@@ -66,20 +68,16 @@ LC_ALL=C
 export LC_ALL
 sid='{{SESSION_ID}}'
 if stat -c %Y / >/dev/null 2>&1; then
-	mtime() { stat -c %Y "$1"; }
+	mtime() { stat -c '%Y %s' "$1"; }
 else
-	mtime() { stat -f %m "$1"; }
+	mtime() { stat -f '%m %z' "$1"; }
 fi
-best=
-bestt=
-for p in "$HOME"/.claude/projects/*/"$sid.jsonl"; do
+best=$(for p in "$HOME"/.claude/projects/*/"$sid.jsonl"; do
 	[ -f "$p" ] || continue
-	t=$(mtime "$p" 2>/dev/null) || t=0
-	if [ -z "$best" ] || [ "$t" -gt "$bestt" ]; then
-		best=$p
-		bestt=$t
-	fi
-done
+	t=$(mtime "$p" 2>/dev/null) && echo "$t $p"
+done | sort -rn | head -n 1)
+best=${best#* }
+best=${best#* }
 if [ -z "$best" ]; then
 	echo '::panemux-transcript none'
 	exit 0

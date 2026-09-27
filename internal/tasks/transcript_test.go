@@ -376,3 +376,38 @@ func TestRunLocal_TranscriptScriptReadsTheNewestOfTwoLogs(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(got.Head), "OLD")
 }
+
+// Two logs of one session changed in the same second: the fetch reads the
+// one whose version the collection reports, so the summary is keyed on the
+// log it was made from.
+func TestRunLocal_TranscriptScriptReadsTheLogTheCollectionKeysOn(t *testing.T) {
+	home := t.TempDir()
+	homedir.SetForTest(t, home)
+	short := filepath.Join(home, ".claude", "projects", "a-dir", "same.jsonl")
+	long := filepath.Join(home, ".claude", "projects", "z-dir", "same.jsonl")
+	for path, text := range map[string]string{short: "A-short", long: "Z-longer-text"} {
+		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
+		require.NoError(t, os.WriteFile(path, []byte(userLine(text)+"\n"), 0o600))
+	}
+	for _, order := range [][2]string{{short, long}, {long, short}} {
+		second := time.Now().Truncate(time.Second)
+		for _, path := range order {
+			require.NoError(t, os.Chtimes(path, second, second))
+		}
+
+		out, err := runLocal(context.Background(), collectScript)
+		require.NoError(t, err)
+		raw, err := parseCollectOutput(out)
+		require.NoError(t, err)
+		task := findTask(t, buildTasks("", raw, collectedAt), "local:claude:same")
+		require.NotNil(t, task.Log)
+
+		script, err := buildTranscriptScript("same")
+		require.NoError(t, err)
+		out, err = runLocal(context.Background(), script)
+		require.NoError(t, err)
+		got, err := parseTranscriptOutput(out)
+		require.NoError(t, err)
+		assert.Equal(t, task.Log.Size, int64(len(got.Head)), "the fetched log is the one the collection keyed")
+	}
+}

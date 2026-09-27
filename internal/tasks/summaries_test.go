@@ -603,3 +603,46 @@ func TestSummaries_AnUnknownTaskIsSummarizedOnlyWhenAsked(t *testing.T) {
 	require.NotNil(t, views["local:claude:s10"])
 	assert.True(t, views["local:claude:s10"].Outdated)
 }
+
+// A log that could not be read is tried again once it changes: its view says
+// the log changed since, and asking summarizes the new one.
+func TestSummaries_AnUnreadableLogThatChangedCanBeSummarized(t *testing.T) {
+	host := &summaryHost{}
+	bad := `{"type":"x"}` + "\n"
+	host.set(hostCollection(100, "compacting"), transcriptOutput(len(bad), bad))
+	summarizer := &fakeSummarizer{result: Summary{Text: "Fixing the bug.", Remaining: []string{"x"}}}
+	svc := newSummaryService(t, host, summarizer)
+	svc.Collect(context.Background())
+	_, err := svc.RequestSummary("", "s10")
+	require.NoError(t, err)
+	svc.waitSummaries()
+	_, views := collectAndSummarize(svc)
+	assert.Equal(t, &SummaryView{State: SummaryUnreadable}, views["local:claude:s10"], "the same log is not outdated")
+
+	host.set(hostCollection(500, "compacting"), conversationLog("Fix the bug", "Working on it"))
+	_, views = collectAndSummarize(svc)
+	assert.Equal(t, &SummaryView{State: SummaryUnreadable, Outdated: true}, views["local:claude:s10"],
+		"the log changed since it could not be read")
+	assert.Zero(t, summarizer.calls())
+
+	_, err = svc.RequestSummary("", "s10")
+	require.NoError(t, err)
+	svc.waitSummaries()
+	_, views = collectAndSummarize(svc)
+	assert.Equal(t, SummaryReady, views["local:claude:s10"].State)
+	assert.False(t, views["local:claude:s10"].Outdated)
+}
+
+// A failure is outdated too once the log changes after it.
+func TestSummaries_AFailureOnAnOlderLogIsOutdated(t *testing.T) {
+	host := &summaryHost{}
+	host.set(hostCollection(100, "idle"), conversationLog("a"))
+	summarizer := &fakeSummarizer{err: errors.New("claude exited with status 1")}
+	svc := newSummaryService(t, host, summarizer)
+	collectAndSummarize(svc)
+
+	host.set(hostCollection(200, "busy"), conversationLog("a", "b"))
+	_, views := collectAndSummarize(svc)
+	assert.Equal(t, &SummaryView{State: SummaryFailed, Error: "claude exited with status 1", Outdated: true},
+		views["local:claude:s10"])
+}

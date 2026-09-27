@@ -368,8 +368,9 @@ task_dashboard:
   none.
 - **What is read.** The task's log, `~/.claude/projects/*/<session ID>.jsonl`, is read on its host by
   a fixed script run like the collection's ([Task summaries](../security/command-execution.md#task-summaries)).
-  When the session has a log in more than one project directory, the newest is read — the one whose
-  modification time and size the summary is keyed on. The host sends the whole log when it is at most
+  When the session has a log in more than one project directory, the one read is chosen as the
+  collection orders them — newest first, then the larger of two changed in the same second — so it
+  is the one whose modification time and size the summary is keyed on. The host sends the whole log when it is at most
   2.25 MiB, and otherwise its first 256 KiB and its last 2 MiB.
 - **What claude is given.** Each line is read as a JSON object, and only the text of the user's and
   the assistant's messages is kept: a line whose `type` is `user` or `assistant` and whose
@@ -386,7 +387,9 @@ task_dashboard:
 - **A log that cannot be read.** When no line of a log has that shape, the task's summary is
   `unreadable` and nothing is sent to claude; the raw log is never sent instead. A Claude Code release
   that changes the log's format shows up this way rather than as a wrong summary. Asking again reads
-  nothing until the log changes, so the detail panel's button is disabled then.
+  nothing until the log changes, so the detail panel's button is disabled until then; once the log
+  has changed the summary is marked outdated, the button is enabled again, and selecting a stopped
+  or `unknown` task asks for it.
 - **When a summary is made.**
   - A running task that waits for input or is idle — `wait` or `idle` — is summarized when a
     collection finds its log at a modification time and size it was not yet summarized at.
@@ -497,7 +500,7 @@ Collects from every host and returns:
   ([Summaries](#summaries)). Its `state` is `pending` (a summary is running or waiting to run),
   `ready`, `error` (with `error`) or `unreadable`. `text`, `remaining` and `summarized_at` are the
   last answer whenever there is one, whatever `state` says; `outdated` is true when the log has
-  changed since that answer, and `done_candidate` when the answer is ready and current and lists
+  changed since that answer — or, for `unreadable` and `error`, since that attempt — and `done_candidate` when the answer is ready and current and lists
   nothing remaining. `remaining` is omitted when empty.
 - `records_error` is present only when the record file could not be read; the tasks are then listed
   without records.

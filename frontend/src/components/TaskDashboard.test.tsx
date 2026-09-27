@@ -791,6 +791,23 @@ describe('TaskDashboard summaries', () => {
     expect(workSection()).toHaveTextContent('has no messages the dashboard can read')
   })
 
+  it('offers a summary again once a log it could not read has changed', async () => {
+    const requestSummary = vi.fn().mockResolvedValue(null)
+    const data = {
+      ...summarized,
+      tasks: summarized.tasks.map((t) => (t.id === 'unreadable' ? { ...t, summary: { state: 'unreadable' as const, outdated: true } } : t)),
+    }
+    renderDashboard(tasksState({ data, requestSummary }))
+    selectCard('unreadable')
+    expect(workSection()).toHaveTextContent('The conversation has changed since it could not be read.')
+    const button = within(workSection()).getByRole('button', { name: 'Summarize' })
+    expect(button).toBeEnabled()
+    await act(async () => {
+      fireEvent.click(button)
+    })
+    expect(requestSummary).toHaveBeenCalledWith(expect.objectContaining({ id: 'unreadable' }))
+  })
+
   it('offers no summary of a log it cannot read, and says why', () => {
     const requestSummary = vi.fn()
     renderDashboard(tasksState({ data: summarized, requestSummary }))

@@ -960,8 +960,9 @@ const WorkSection: React.FC<WorkSectionProps> = ({ task, enabled, onRequest }) =
     body = <p className="td-note">Only a claude task with a session ID can be summarized.</p>
   } else {
     // A log that could not be read reads the same until it changes, and the
-    // server does not read it again before then: the button stays, disabled.
-    const unreadable = summary?.state === 'unreadable'
+    // server does not read it again before then: the button stays, disabled,
+    // until the log has changed.
+    const unreadable = summary?.state === 'unreadable' && !summary.outdated
     const retry = summary?.state !== 'pending' && (!summary?.text || summary.outdated || summary.state === 'error')
     const request = async () => {
       const failure = await onRequest(task)
@@ -1029,7 +1030,8 @@ const SummaryStatus: React.FC<{ task: Task }> = ({ task }) => {
       break
   }
   if (summary?.outdated && summary.state !== 'pending') {
-    note = [note, 'The conversation has changed since this summary.'].filter(Boolean).join(' ')
+    const since = summary.state === 'unreadable' ? 'since it could not be read.' : 'since this summary.'
+    note = [note, `The conversation has changed ${since}`].filter(Boolean).join(' ')
   }
   return note ? <p className="td-note">{note}</p> : null
 }

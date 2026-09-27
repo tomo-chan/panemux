@@ -376,8 +376,10 @@ terminal that had focus cannot receive what is typed into the dashboard.
   or off (naming `task_dashboard.summary.enabled`), and offers `Summarize` / `Summarize again` when
   there is no current summary or it failed; a refused request is shown under it. For a log it
   cannot read, the button stays but is disabled, its tooltip saying the log cannot be read, since
-  asking again reads nothing until the log changes. Selecting a stopped task, or one in an unknown
-  state, asks for its summary when it has no current one; a waiting or idle task's comes with the
+  asking again reads nothing until the log changes; once it has changed, Work says so ("The
+  conversation has changed since it could not be read.") and the button is enabled. Selecting a
+  stopped task, or one in an unknown state, asks for its summary when it has no current one —
+  including a log it could not read that has changed since; a waiting or idle task's comes with the
   poll.
   `Mark done` asks first, inside the panel, and says where the task will be afterwards: a running
   task stays in its column until it stops; a stopped one moves to Done, and the question adds that

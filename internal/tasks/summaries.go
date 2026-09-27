@@ -42,7 +42,8 @@ const (
 
 // SummaryView is a task's summary as the API reports it. Text, Remaining and
 // SummarizedAt are the last answer, when there is one, whatever State says;
-// Outdated means the log has changed since that answer was made.
+// Outdated means the log has changed since that answer was made — or, for
+// an unreadable log or a failure, since that attempt.
 type SummaryView struct {
 	SummarizedAt  *time.Time   `json:"summarized_at,omitempty"`
 	State         SummaryState `json:"state"`
@@ -290,6 +291,11 @@ func (e *summaryEntry) view(current LogVersion) *SummaryView {
 		v.SummarizedAt = &at
 		v.Outdated = e.resultLog != current
 		v.DoneCandidate = !v.Outdated && v.State == SummaryReady && len(e.result.Remaining) == 0
+	}
+	// A log that could not be read, or whose summary failed, has changed
+	// since: asking again is worth it now.
+	if (v.State == SummaryUnreadable || v.State == SummaryFailed) && e.triedLog != current {
+		v.Outdated = true
 	}
 	return v
 }

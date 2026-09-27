@@ -488,13 +488,22 @@ Chosen while it was built:
   growing at every poll — so a new Claude Code status would have started `claude -p` every 10
   seconds, the failure mode spending money exactly when the format changed. Summarizing it once and
   then treating it like `busy` was the alternative.
-- **The newest of a session's logs is read** (review of PR #268). The collection keys a summary on the
-  newest log of a session ID, while the fetch script read the first one the shell's glob found, so a
-  session with logs in two project directories could get a summary of the older one recorded as
-  current.
+- **The fetch picks a session's log the way the collection does** (review of PR #268). The collection
+  keys a summary on the first of a session's logs after `sort -rn` over `<mtime> <size> <path>`, while
+  the fetch script first read the first one the shell's glob found, and then the newest by mtime
+  alone, so a session with logs in two project directories — changed in the same second, in the
+  second version — could get a summary of the other log recorded as current. The script now orders
+  them with the same line and the same `sort`. Rejecting a fetch whose size differs from the
+  collected one was the alternative; a running task's log grows between the two, so it would have
+  failed ordinary summaries.
 - **A log that cannot be read keeps a disabled button** (review of PR #268, decided with the operator).
   The server does not read such a log again until it changes, so the button did nothing; hiding it
   was the alternative, rejected so the panel still shows that summarizing is what cannot be done.
+  The first version kept it disabled even after the log changed, and with `unknown` off the poll
+  nothing could summarize such a task again. An `unreadable` or `error` summary is now marked
+  outdated once the log changes after that attempt, which enables the button and makes selecting a
+  stopped or `unknown` task ask again (decided with the operator). Always enabling the button, with a
+  tooltip saying nothing happens until the log changes, was the alternative.
 
 ## Agent Board
 

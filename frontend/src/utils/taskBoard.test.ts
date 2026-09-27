@@ -162,6 +162,13 @@ describe('summaryRequestOnSelect', () => {
     }
   })
 
+  it('asks again for a log it could not read once the log has changed', () => {
+    const unreadable = { state: 'unreadable' as const }
+    expect(summaryRequestOnSelect(task({ ...stopped, summary: { ...unreadable, outdated: true } }), true)).toBe(true)
+    expect(summaryRequestOnSelect(task({ state: 'unknown', summary: { ...unreadable, outdated: true } }), true)).toBe(true)
+    expect(summaryRequestOnSelect(task({ state: 'unknown', summary: unreadable }), true)).toBe(false)
+  })
+
   it('asks for a task in an unknown state, which the poll does not summarize', () => {
     expect(summaryRequestOnSelect(task({ state: 'unknown' }), true)).toBe(true)
     expect(summaryRequestOnSelect(task({ state: 'unknown', summary: { state: 'ready', text: 'x' } }), true)).toBe(false)
