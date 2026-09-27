@@ -627,8 +627,16 @@ func TestRunLocal_ReportsTheWorkingDirectoryOfAClaudeProcess(t *testing.T) {
 
 // The env probe reports the PANEMUX_PANE_ID a claude or codex process was
 // started with, read from its environment and not its command line. Linux
-// reads /proc/<pid>/environ; the other hosts report nothing yet (issue #254).
+// reads /proc/<pid>/environ. macOS reads `ps -E` instead, which is covered by
+// TestRunLocal_ReadsThePaneIDFromPsEOnMacOS: these fake agents are the OS's
+// own sleep, and what macOS shows of such a binary's environment when it is
+// started through a symlink was not checked (issue #263).
+//
+//efficacy:exempt only the non-Linux skip changed; the Linux reading it pins predates this branch
 func TestRunLocal_ReportsThePaneIDInAnAgentsEnvironment(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("reads /proc/<pid>/environ, which only Linux has")
+	}
 	homedir.SetForTest(t, t.TempDir())
 	sleepPath, err := exec.LookPath("sleep")
 	require.NoError(t, err)
@@ -663,10 +671,6 @@ func TestRunLocal_ReportsThePaneIDInAnAgentsEnvironment(t *testing.T) {
 	raw, err := parseCollectOutput(out)
 	require.NoError(t, err)
 
-	if runtime.GOOS != "linux" {
-		assert.Empty(t, raw.PaneIDs, "only Linux hosts are read so far")
-		return
-	}
 	assert.Equal(t, "pane-1790346631000-a1b2c", raw.PaneIDs[withPane])
 	assert.Equal(t, "pane-codex", raw.PaneIDs[codex])
 	assert.Equal(t, "pane-real", raw.PaneIDs[inAValue], "a line inside another variable's value is not the variable")
@@ -676,6 +680,131 @@ func TestRunLocal_ReportsThePaneIDInAnAgentsEnvironment(t *testing.T) {
 		_, ok := raw.PaneIDs[pid]
 		assert.False(t, ok, "%s: %v", name, raw.PaneIDs)
 	}
+}
+
+// fakeMacOSProcess is one process as the macOS `ps` in
+// installFakeMacOSTools reports it: Args is `ps -p <pid> -o command=` and
+// Full is `ps -E -p <pid> -o command=`, which on macOS is the arguments, a
+// space, and the environment's NAME=value entries joined by spaces (issue
+// #263, checked on macOS 26.3.1).
+type fakeMacOSProcess struct {
+	Args string
+	Full string
+	PID  int
+}
+
+// installFakeMacOSTools puts a `uname` that says Darwin and a `ps` that
+// answers the four forms collectScript uses on macOS first on PATH, so the
+// script's macOS branch runs on any host. Paths in the fixtures are
+// placeholders.
+func installFakeMacOSTools(t *testing.T, procs []fakeMacOSProcess) {
+	t.Helper()
+	bin := t.TempDir()
+	data := t.TempDir()
+	var list strings.Builder
+	for _, p := range procs {
+		pid := strconv.Itoa(p.PID)
+		listed := p.Args
+		if listed == "" {
+			listed = "claude" // gone by the time its arguments are read
+		}
+		list.WriteString(pid + " 1 " + listed + "\n")
+		require.NoError(t, os.WriteFile(filepath.Join(data, pid+".args"), []byte(p.Args+"\n"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(data, pid+".full"), []byte(p.Full+"\n"), 0o600))
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(data, "list"), []byte(list.String()), 0o600))
+
+	fakePS := `#!/bin/sh
+d='` + data + `'
+case "$*" in
+"-U "*" -o pid=,ppid=,command=") cat "$d/list" ;;
+"-U "*" -o pid=,command=") awk '{ $2 = ""; print }' "$d/list" ;;
+"-p "*" -o command=") cat "$d/$2.args" 2>/dev/null ;;
+"-E -p "*" -o command=") cat "$d/$3.full" 2>/dev/null ;;
+*) exit 1 ;;
+esac
+`
+	writeExecutable(t, filepath.Join(bin, "ps"), fakePS)
+	writeExecutable(t, filepath.Join(bin, "uname"), "#!/bin/sh\necho Darwin\n")
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+func writeExecutable(t *testing.T, path, script string) {
+	t.Helper()
+	require.NoError(t, os.WriteFile(path, []byte(script), 0o700)) //nolint:gosec // G306: it has to be executable
+}
+
+// On macOS the env probe reads `ps -E` (issue #263). Its output does not
+// delimit anything, so the probe removes the arguments `ps -o command=`
+// reports from the front and takes the value only when exactly one
+// " PANEMUX_PANE_ID=" is left. The fixtures follow the output recorded on
+// macOS 26.3.1 in issue #263: claude, codex's node wrapper and native binary
+// show their environment; an Apple-signed binary shows none; a value can
+// hide in an argument or in another variable's value.
+func TestRunLocal_ReadsThePaneIDFromPsEOnMacOS(t *testing.T) {
+	homedir.SetForTest(t, t.TempDir())
+	const env = "HOME=/Users/demo SHELL=/bin/zsh"
+	codexWrapper := "node /Users/demo/.nvm/versions/node/v24.13.0/bin/codex -m gpt-5.5"
+	codexNative := "/Users/demo/.nvm/versions/node/v24.13.0/lib/node_modules/@openai/codex/bin/codex -m gpt-5.5"
+	installFakeMacOSTools(t, []fakeMacOSProcess{
+		{PID: 101, Args: "claude", Full: "claude TERM=xterm-256color PANEMUX_PANE_ID=test-1 " + env},
+		{PID: 102, Args: codexWrapper, Full: codexWrapper + " PANEMUX_PANE_ID=pane-1790346631000-a1b2c " + env},
+		{PID: 103, Args: codexNative, Full: codexNative + " " + env + " PANEMUX_PANE_ID=pane-codex"},
+		// An argument is not the environment.
+		{PID: 104, Args: "node /Users/demo/claude/cli.js PANEMUX_PANE_ID=spoofed",
+			Full: "node /Users/demo/claude/cli.js PANEMUX_PANE_ID=spoofed " + env},
+		{PID: 105, Args: "node /Users/demo/claude/cli.js PANEMUX_PANE_ID=spoofed",
+			Full: "node /Users/demo/claude/cli.js PANEMUX_PANE_ID=spoofed " + env + " PANEMUX_PANE_ID=pane-real"},
+		// Another variable's value can hold the same text; two are ambiguous.
+		{PID: 106, Args: "/tmp/scratch/claude 304",
+			Full: "/tmp/scratch/claude 304 HOME=/tmp AAA=x PANEMUX_PANE_ID=evil PANEMUX_PANE_ID=test-1"},
+		// An Apple-signed binary: the kernel returns no environment.
+		{PID: 107, Args: "/bin/zsh -c claude", Full: "/bin/zsh -c claude"},
+		// The arguments are not the front of the output (the process changed
+		// between the two calls, or the output is not what was checked).
+		{PID: 108, Args: "claude", Full: "codex PANEMUX_PANE_ID=pane-x " + env},
+		{PID: 109, Args: "claude", Full: "claude-x PANEMUX_PANE_ID=pane-x " + env},
+		{PID: 110, Args: "", Full: "claude PANEMUX_PANE_ID=pane-x " + env},
+		// Values a pane is never given.
+		{PID: 111, Args: "claude", Full: "claude PANEMUX_PANE_ID=pane/x " + env},
+		{PID: 112, Args: "claude", Full: "claude PANEMUX_PANE_ID= " + env},
+		{PID: 113, Args: "claude", Full: "claude PANEMUX_PANE_ID=" + strings.Repeat("a", 129) + " " + env},
+		// A newline in the value must not start a row of its own.
+		{PID: 114, Args: "claude", Full: "claude PANEMUX_PANE_ID=pane-a\n999 pane-evil " + env},
+		{PID: 115, Args: "claude", Full: "claude " + env},
+	})
+
+	out, err := runLocal(context.Background(), collectScript)
+	require.NoError(t, err)
+	raw, err := parseCollectOutput(out)
+	require.NoError(t, err)
+
+	assert.Equal(t, map[int]string{
+		101: "test-1",
+		102: "pane-1790346631000-a1b2c",
+		103: "pane-codex",
+		105: "pane-real",
+	}, raw.PaneIDs)
+}
+
+// The `ps -E` reading is for macOS only: on another host whose /proc has no
+// environ for the process, nothing is reported even when `ps -E` would
+// print one.
+//
+//efficacy:exempt a guard: before this branch no host read ps -E, so it also held then
+func TestRunLocal_ReadsPsEOnlyOnMacOS(t *testing.T) {
+	homedir.SetForTest(t, t.TempDir())
+	installFakeMacOSTools(t, []fakeMacOSProcess{
+		{PID: 999999999, Args: "claude", Full: "claude PANEMUX_PANE_ID=test-1"},
+	})
+	writeExecutable(t, filepath.Join(filepath.SplitList(os.Getenv("PATH"))[0], "uname"), "#!/bin/sh\necho Linux\n")
+
+	out, err := runLocal(context.Background(), collectScript)
+	require.NoError(t, err)
+	raw, err := parseCollectOutput(out)
+	require.NoError(t, err)
+
+	assert.Empty(t, raw.PaneIDs)
 }
 
 func TestRunLocal_EmptyHomeStillCompletes(t *testing.T) {
