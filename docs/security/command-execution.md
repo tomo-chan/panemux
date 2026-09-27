@@ -172,9 +172,10 @@ are removed from the front, so an argument cannot supply the value; more than on
 ` PANEMUX_PANE_ID=` in what remains — one may sit inside another variable's value — yields nothing;
 and the shell prints the value only when it consists of `A-Za-z0-9_.-`, so a newline in it cannot
 forge a row. What macOS does **not** prevent: a process with no `PANEMUX_PANE_ID` of its own but
-exactly one ` PANEMUX_PANE_ID=<id>` inside another variable's value (after a space or a newline in
-that value) reports `<id>`, because `ps -E` prints the two alike. Linux, reading NUL-separated
-entries, reports nothing for it. This is accepted
+exactly one ` PANEMUX_PANE_ID=<id>` inside another variable's value — preceded by a space in that
+value, as in `AAA='x PANEMUX_PANE_ID=<id>'`, including a space that follows a newline — reports
+`<id>`, because `ps -E` prints it and the real entry alike. Directly after a newline, with no
+space, it is not read. Linux, reading NUL-separated entries, reports nothing for either. This is accepted
 ([decision log](../DECISIONLOG.md#reading-panemux_pane_id-on-macos-through-ps--e-2026-09-27-issue-263)):
 only someone who can already start an agent as the same user outside a pane can plant such a value,
 and a process of that user can set `PANEMUX_PANE_ID` itself anyway; the result is at most a

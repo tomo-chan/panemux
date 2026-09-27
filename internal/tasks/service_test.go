@@ -780,6 +780,8 @@ func TestRunLocal_ReadsThePaneIDFromPsEOnMacOS(t *testing.T) {
 		// reads NUL-separated entries, does not read these.
 		{PID: 116, Args: "claude", Full: "claude HOME=/Users/demo AAA=x PANEMUX_PANE_ID=pane-other"},
 		{PID: 117, Args: "claude", Full: "claude MSG=a\n PANEMUX_PANE_ID=pane-evil"},
+		// Only a space directly before it counts, not a newline alone.
+		{PID: 118, Args: "claude", Full: "claude MSG=a\nPANEMUX_PANE_ID=pane-nl"},
 	})
 
 	out, err := runLocal(context.Background(), collectScript)
