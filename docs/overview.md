@@ -72,15 +72,18 @@ backend and UI are released together.
 - Runtime pane creation is intentionally narrower than the full configuration format. It is used by
   browser pane splitting and by the task dashboard, which creates only `tmux` and `ssh_tmux` panes
   attaching to a task's existing tmux session.
-- The task dashboard reads files Claude Code writes for itself (`~/.claude/sessions`,
-  `~/.claude/projects`), which are not a published format, and knows only whether a codex process is
-  running. It collects only while it is on screen. It finds the pane of an agent outside tmux only
-  on Linux and macOS hosts, where it can read the agent's environment, and on macOS not for an
-  agent that is one of Apple's own binaries. The macOS reading has not yet been run on a macOS host
+- The task dashboard reads files Claude Code and codex write for themselves (`~/.claude/sessions`,
+  `~/.claude/projects`, `~/.codex/sessions`, `~/.codex/thread_history_1.sqlite`), which are not a
+  published format, and finds a running codex's session through the rollout file it holds open. It
+  cannot tell a codex waiting for command approval from one at work. It collects only while it is on
+  screen. It finds the pane of an agent outside tmux only on Linux and macOS hosts, where it can read
+  the agent's environment, and on macOS not for an agent that is one of Apple's own binaries. The
+  macOS reading has not yet been run on a macOS host
   ([details](behavior/tasks.md#the-pane-of-an-agent-outside-tmux)). Whether a task is done is only
   what a person marked; only tasks with a session ID can be marked done or labeled.
-- The task dashboard starts and resumes only claude tasks, each as one claude process in a detached
-  tmux session of its own on the host; it opens no pane for them. Starting one creates no pane
+- The task dashboard starts and resumes claude and codex tasks, each as one agent process in a
+  detached tmux session of its own on the host; it opens no pane for them, and a codex held at a
+  start-up screen waits for a person in that pane. Starting one creates no pane
   config either, so the runtime pane creation rule above is unchanged.
 
 ## Where to continue

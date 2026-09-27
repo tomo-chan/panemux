@@ -316,7 +316,9 @@ describe('useTasks launch and resume', () => {
 
     let outcome: Awaited<ReturnType<typeof result.current.launch>> | null = null
     await act(async () => {
-      outcome = await result.current.launch({ host: 'build-box', cwd: '/workspace/user/project', prompt: 'go', labels: ['payment'] })
+      outcome = await result.current.launch({
+        host: 'build-box', agent: 'claude', cwd: '/workspace/user/project', prompt: 'go', labels: ['payment'],
+      })
     })
 
     expect(outcome).toEqual({ ok: true, launched: { ...launched, labels: ['payment'] } })
@@ -342,7 +344,7 @@ describe('useTasks launch and resume', () => {
     const outcomes: unknown[] = []
     await act(async () => {
       for (let i = 0; i < 4; i++) {
-        outcomes.push(await result.current.launch({ host: '', cwd: '/w', prompt: 'go', labels: [] }))
+        outcomes.push(await result.current.launch({ host: '', agent: 'claude', cwd: '/w', prompt: 'go', labels: [] }))
       }
     })
 
@@ -376,9 +378,53 @@ describe('useTasks launch and resume', () => {
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/tasks/resume', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ host: '', session_id: stopped.session_id }),
+      body: JSON.stringify({ host: '', agent: 'claude', session_id: stopped.session_id }),
     })
     expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/tasks')
+  })
+
+  it('starts a codex task, whose answer names only its tmux session and the labels held for it', async () => {
+    const answer = { tmux_session: 'task-0a1b2c3d', pending_labels: ['payment'] }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(ok(payload))
+      .mockResolvedValueOnce({ ...ok(answer), status: 201 } as Response)
+      .mockResolvedValueOnce(ok(payload))
+    window.fetch = fetchMock
+    const { result } = renderHook(() => useTasks(true))
+    await waitFor(() => expect(result.current.data).not.toBeNull())
+
+    let outcome: unknown = null
+    await act(async () => {
+      outcome = await result.current.launch({ host: '', agent: 'codex', cwd: '/w', prompt: 'go', labels: ['payment'] })
+    })
+
+    expect(outcome).toEqual({ ok: true, launched: answer })
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/tasks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ host: '', agent: 'codex', cwd: '/w', prompt: 'go', labels: ['payment'] }),
+    })
+  })
+
+  it('resumes a codex task as codex', async () => {
+    const codexStopped = { ...stopped, id: 'local:codex:' + stopped.session_id, agent: 'codex' }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(ok({ ...payload, tasks: [codexStopped] }))
+      .mockResolvedValueOnce(ok({ id: codexStopped.id, session_id: stopped.session_id, tmux_session: 'task-51627384' }))
+      .mockResolvedValueOnce(ok(payload))
+    window.fetch = fetchMock
+    const { result } = renderHook(() => useTasks(true))
+    await waitFor(() => expect(result.current.data).not.toBeNull())
+
+    await act(async () => {
+      await result.current.resume(result.current.data!.tasks[0])
+    })
+
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/tasks/resume', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ host: '', agent: 'codex', session_id: stopped.session_id }),
+    })
   })
 
   it('refuses to resume a task without a session id, and reports a refused resume', async () => {
@@ -432,7 +478,7 @@ describe('useTasks collection after a launch', () => {
     })
     let launching: Promise<unknown> = Promise.resolve()
     await act(async () => {
-      launching = result.current.launch({ host: '', cwd: '/w', prompt: 'go', labels: [] })
+      launching = result.current.launch({ host: '', agent: 'claude', cwd: '/w', prompt: 'go', labels: [] })
       await Promise.resolve()
     })
     await act(async () => {

@@ -1,26 +1,27 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { useModalKeyboard } from '../hooks/useModalKeyboard'
-import type { TaskActionResult, TaskLaunchInput } from '../hooks/useTasks'
+import type { TaskActionResult, TaskAgent, TaskLaunchInput } from '../hooks/useTasks'
 import type { TaskHost, TaskLaunchResponse } from '../schemas'
 import { hostLabel, parseLabelInput } from '../utils/taskBoard'
 
-// The task dashboard's New task form (issue #257): a host, a working
+// The task dashboard's New task form (issues #257 and #264): a host, a working
 // directory, an agent, labels and the first instruction. Starting a task runs
-// claude in a detached tmux session on the host; no pane is opened. The
-// server checks every field again — what this form checks is only what can
-// be told without asking it.
+// claude or codex in a detached tmux session on the host; no pane is opened.
+// The server checks every field again — what this form checks is only what
+// can be told without asking it.
 
 export interface NewTaskDialogProps {
   isOpen: boolean
   hosts: TaskHost[]
   onLaunch: (input: TaskLaunchInput) => Promise<TaskActionResult<TaskLaunchResponse>>
-  /** Called with the started task and its host; the dialog is then the caller's to close. */
-  onLaunched: (launched: TaskLaunchResponse, host: string) => void
+  /** Called with the started task, its host and agent; the dialog is then the caller's to close. */
+  onLaunched: (launched: TaskLaunchResponse, host: string, agent: TaskAgent) => void
   onClose: () => void
 }
 
 export const NewTaskDialog: React.FC<NewTaskDialogProps> = ({ isOpen, hosts, onLaunch, onLaunched, onClose }) => {
   const [host, setHost] = useState('')
+  const [agent, setAgent] = useState<TaskAgent>('claude')
   const [cwd, setCwd] = useState('')
   const [labels, setLabels] = useState('')
   const [prompt, setPrompt] = useState('')
@@ -55,13 +56,13 @@ export const NewTaskDialog: React.FC<NewTaskDialogProps> = ({ isOpen, hosts, onL
     }
     setError(null)
     setStarting(true)
-    const result = await onLaunch({ host, cwd: dir, prompt, labels: parseLabelInput(labels) })
+    const result = await onLaunch({ host, agent, cwd: dir, prompt, labels: parseLabelInput(labels) })
     setStarting(false)
     if (!result.ok) {
       setError(`Could not start: ${result.error}`)
       return
     }
-    onLaunched(result.launched, host)
+    onLaunched(result.launched, host, agent)
   }
 
   return (
@@ -107,10 +108,17 @@ export const NewTaskDialog: React.FC<NewTaskDialogProps> = ({ isOpen, hosts, onL
         </label>
         <label className="td-field">
           <span>Agent</span>
-          <select value="claude" disabled={starting} onChange={() => {}}>
+          <select value={agent} disabled={starting} onChange={(event) => setAgent(event.target.value as TaskAgent)}>
             <option value="claude">claude</option>
+            <option value="codex">codex</option>
           </select>
         </label>
+        {agent === 'codex' && (
+          <p className="td-note">
+            Codex chooses its session ID once it has started its session, so the labels are recorded once codex has
+            started its session. If it stops at a start-up screen, open the task's pane to answer it.
+          </p>
+        )}
         <label className="td-field">
           <span>Labels</span>
           <input

@@ -303,14 +303,23 @@ describe('TaskDashboard', () => {
       data: {
         hosts: [{ name: '', status: 'ok' }],
         tasks: [
-          task({ id: 'codex', state: 'run', agent: 'codex', cwd: '/workspace/user/api' }),
+          task({ id: 'codex', state: 'run', agent: 'codex', session_id: undefined, cwd: '/workspace/user/api' }),
+          task({ id: 'codex-busy', state: 'busy', agent: 'codex', session_id: '01a0e2b9-d054-7cc2-9278-a5e25ebcc524' }),
+          task({ id: 'codex-unknown', state: 'unknown', agent: 'codex', session_id: '01a0e2bc-bdf9-71b2-867a-df8302180efe' }),
           task({ id: 'unreadable', state: 'unknown', session_id: undefined, cwd: undefined, location: { kind: 'none', attachable: false } }),
         ],
       },
     }))
     const detail = screen.getByRole('complementary', { name: 'Task details' })
     fireEvent.click(screen.getByTestId('task-card-codex'))
-    expect(detail).toHaveTextContent('codex reports no detailed state')
+    expect(detail).toHaveTextContent(
+      'Codex has not started a session yet: it is waiting for its first instruction, or held at a start-up screen',
+    )
+    expect(detail).toHaveTextContent('Open the pane to answer it.')
+    fireEvent.click(screen.getByTestId('task-card-codex-busy'))
+    expect(detail).toHaveTextContent('Codex does not record approval prompts')
+    fireEvent.click(screen.getByTestId('task-card-codex-unknown'))
+    expect(detail).toHaveTextContent("Neither codex's thread history nor the end of its session log says")
     fireEvent.click(screen.getByTestId('task-card-unreadable'))
     expect(detail).toHaveTextContent('could not be read or has an unexpected format')
   })
@@ -544,10 +553,11 @@ describe('TaskDashboard new tasks and resume', () => {
     return (next: TasksState) => rerender(view(next))
   }
 
-  async function startTask(labels = '') {
+  async function startTask(labels = '', agent = 'claude') {
     fireEvent.click(screen.getByRole('button', { name: 'New task' }))
     const dialog = screen.getByRole('dialog', { name: 'New task' })
     fireEvent.change(within(dialog).getByLabelText('Host'), { target: { value: 'dev-server' } })
+    fireEvent.change(within(dialog).getByLabelText('Agent'), { target: { value: agent } })
     fireEvent.change(within(dialog).getByLabelText('Working directory'), { target: { value: '/remote/home/demo/new' } })
     fireEvent.change(within(dialog).getByLabelText('Labels'), { target: { value: labels } })
     fireEvent.change(within(dialog).getByLabelText('First instruction'), { target: { value: 'go' } })
@@ -565,7 +575,9 @@ describe('TaskDashboard new tasks and resume', () => {
 
     await startTask('infra')
 
-    expect(launch).toHaveBeenCalledWith({ host: 'dev-server', cwd: '/remote/home/demo/new', prompt: 'go', labels: ['infra'] })
+    expect(launch).toHaveBeenCalledWith({
+      host: 'dev-server', agent: 'claude', cwd: '/remote/home/demo/new', prompt: 'go', labels: ['infra'],
+    })
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(screen.getByRole('status').textContent).toBe(
       'Started tmux task-0f0e0d0c on dev-server. It is selected here once claude has started.',
@@ -576,6 +588,40 @@ describe('TaskDashboard new tasks and resume', () => {
 
     expect(screen.getByTestId(`task-card-${NEW_ID}`).dataset.selected).toBe('true')
     expect(within(detail()).getByText('tmux task-0f0e0d0c')).toBeTruthy()
+    expect(screen.queryByRole('status')).toBeNull()
+  })
+
+  it('selects a codex task by its tmux session, first before it has a session and again once it has one', async () => {
+    const launch = vi.fn().mockResolvedValue({
+      ok: true, launched: { tmux_session: 'task-0a1b2c3d', pending_labels: ['infra'] },
+    })
+    const state = tasksState({ data: base, launch })
+    const rerender = renderWithRerender(state)
+    await startTask('infra', 'codex')
+
+    expect(launch).toHaveBeenCalledWith({
+      host: 'dev-server', agent: 'codex', cwd: '/remote/home/demo/new', prompt: 'go', labels: ['infra'],
+    })
+    expect(screen.getByRole('status').textContent).toBe(
+      'Started tmux task-0a1b2c3d on dev-server. It is selected here once codex has started; ' +
+        'its labels are recorded once codex has started its session.',
+    )
+
+    const inSession = { kind: 'tmux' as const, tmux_session: 'task-0a1b2c3d', attachable: true }
+    const starting = task({
+      id: 'ssh:dev-server:codex:pid-41', host: 'dev-server', agent: 'codex', session_id: undefined, state: 'run',
+      cwd: '/remote/home/demo/new', location: inSession,
+    })
+    rerender({ ...state, data: { ...base, tasks: [...base.tasks, starting] } })
+    expect(screen.getByTestId(`task-card-${starting.id}`).dataset.selected).toBe('true')
+    expect(screen.getByRole('status')).toBeTruthy()
+
+    const started = task({
+      id: 'ssh:dev-server:codex:01a0e2b9-d054-7cc2-9278-a5e25ebcc524', host: 'dev-server', agent: 'codex',
+      session_id: '01a0e2b9-d054-7cc2-9278-a5e25ebcc524', state: 'busy', cwd: '/remote/home/demo/new', location: inSession,
+    })
+    rerender({ ...state, data: { ...base, tasks: [...base.tasks, started] } })
+    expect(screen.getByTestId(`task-card-${started.id}`).dataset.selected).toBe('true')
     expect(screen.queryByRole('status')).toBeNull()
   })
 
@@ -616,6 +662,23 @@ describe('TaskDashboard new tasks and resume', () => {
     }
     fireEvent.click(screen.getByTestId('task-card-stop-1'))
     expect(within(detail()).queryByRole('button', { name: /^Resume/ })).toBeNull()
+  })
+
+  it('offers Resume on a stopped codex task', async () => {
+    const codexStopped = task({
+      id: 'local:codex:01a0e2b9-d054-7cc2-9278-a5e25ebcc524', agent: 'codex', session_id: '01a0e2b9-d054-7cc2-9278-a5e25ebcc524',
+      state: 'stop', cwd: '/workspace/user/api', location: { kind: 'none', attachable: false },
+    })
+    const resume = vi.fn().mockResolvedValue({
+      ok: true, launched: { id: codexStopped.id, session_id: codexStopped.session_id, tmux_session: 'task-5ebcc524' },
+    })
+    renderDashboard(tasksState({ data: { ...base, tasks: [...base.tasks, codexStopped] }, resume }))
+
+    await act(async () => {
+      fireEvent.click(within(screen.getByTestId(`task-card-${codexStopped.id}`)).getByRole('button', { name: 'Resume: api' }))
+    })
+
+    expect(resume).toHaveBeenCalledWith(codexStopped)
   })
 
   it('resumes from the card and the detail panel, and selects the task', async () => {

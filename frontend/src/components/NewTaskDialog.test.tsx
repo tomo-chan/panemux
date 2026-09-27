@@ -33,12 +33,12 @@ describe('NewTaskDialog', () => {
     expect(screen.queryByRole('dialog')).toBeNull()
   })
 
-  it('offers every host, the panemux host first, and claude as the only agent', () => {
+  it('offers every host, the panemux host first, and claude or codex', () => {
     renderDialog()
     const hostOptions = Array.from((screen.getByLabelText('Host') as HTMLSelectElement).options).map((o) => [o.value, o.text])
     expect(hostOptions).toEqual([['', 'Local'], ['build-box', 'build-box'], ['gpu-box', 'gpu-box (unreachable)']])
     const agentOptions = Array.from((screen.getByLabelText('Agent') as HTMLSelectElement).options).map((o) => o.value)
-    expect(agentOptions).toEqual(['claude'])
+    expect(agentOptions).toEqual(['claude', 'codex'])
   })
 
   it('starts the task with what was entered and hands the result on', async () => {
@@ -50,9 +50,26 @@ describe('NewTaskDialog', () => {
     })
 
     expect(onLaunch).toHaveBeenCalledWith({
-      host: 'build-box', cwd: '/remote/home/demo/payment', prompt: '--fix the flaky test', labels: ['payment', 'sprint-42'],
+      host: 'build-box', agent: 'claude', cwd: '/remote/home/demo/payment', prompt: '--fix the flaky test',
+      labels: ['payment', 'sprint-42'],
     })
-    expect(onLaunched).toHaveBeenCalledWith(launched, 'build-box')
+    expect(onLaunched).toHaveBeenCalledWith(launched, 'build-box', 'claude')
+  })
+
+  it('starts codex, saying when its labels are recorded', async () => {
+    const codexLaunched = { tmux_session: 'task-0a1b2c3d', pending_labels: ['payment'] }
+    const { onLaunch, onLaunched } = renderDialog(vi.fn().mockResolvedValue({ ok: true, launched: codexLaunched }))
+    expect(screen.queryByText(/recorded once codex/)).toBeNull()
+    fireEvent.change(screen.getByLabelText('Agent'), { target: { value: 'codex' } })
+    expect(screen.getByText(/recorded once codex has started its session/)).toBeTruthy()
+    fill({ cwd: '/workspace/user/api', labels: 'payment', prompt: 'go' })
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Start' }))
+    })
+
+    expect(onLaunch).toHaveBeenCalledWith({ host: '', agent: 'codex', cwd: '/workspace/user/api', prompt: 'go', labels: ['payment'] })
+    expect(onLaunched).toHaveBeenCalledWith(codexLaunched, '', 'codex')
   })
 
   it.each([

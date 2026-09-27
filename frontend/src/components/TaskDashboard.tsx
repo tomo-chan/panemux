@@ -12,6 +12,7 @@ import {
   canSummarize,
   columnForTask,
   filterTasks,
+  findLaunchedTask,
   findTaskPane,
   formatElapsed,
   groupIntoLanes,
@@ -24,7 +25,8 @@ import {
   taskTitle,
   visibleColumns,
 } from '../utils/taskBoard'
-import type { LaneMode, TaskOpenAction, TaskPaneRef } from '../utils/taskBoard'
+import type { LaneMode, LaunchedTaskRef, TaskOpenAction, TaskPaneRef } from '../utils/taskBoard'
+import type { TaskAgent } from '../hooks/useTasks'
 
 // Layer 1 of issue #252: every agent session on every host, as a kanban by
 // state, with a detail panel on the right. Besides reading, it records what a
@@ -95,9 +97,11 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
   const [detailOpen, setDetailOpen] = useState(false)
   const [newTaskOpen, setNewTaskOpen] = useState(false)
   // A task that was started but is not listed yet: claude writes the state
-  // the collection reads only once it is running. It is selected when it
-  // appears, unless another task was selected meanwhile.
-  const [pendingLaunch, setPendingLaunch] = useState<{ id: string; message: string } | null>(null)
+  // the collection reads only once it is running, and codex has no session
+  // until it has its first instruction. It is selected when it appears,
+  // unless another task was selected meanwhile; a codex task is selected as
+  // its process first and again once its session is listed.
+  const [pendingLaunch, setPendingLaunch] = useState<{ ref: LaunchedTaskRef; message: string } | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   // Every task whose resume is in flight. Each is tracked on its own, so
   // resuming one task never re-enables another's Resume mid-request.
@@ -128,10 +132,13 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
   }, [tasks, workspaces])
   const selected = tasks.find((task) => task.id === selectedId) ?? null
 
-  if (pendingLaunch && tasks.some((task) => task.id === pendingLaunch.id)) {
-    setPendingLaunch(null)
-    setSelectedId(pendingLaunch.id)
-    setDetailOpen(true)
+  const launchedTask = pendingLaunch ? findLaunchedTask(tasks, pendingLaunch.ref) : null
+  if (launchedTask) {
+    if (launchedTask.settled) setPendingLaunch(null)
+    if (selectedId !== launchedTask.task.id) {
+      setSelectedId(launchedTask.task.id)
+      setDetailOpen(true)
+    }
   }
 
   const select = (task: Task) => {
@@ -144,14 +151,15 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
     select(task)
     if (summaryRequestOnSelect(task, summariesEnabled)) void requestSummary(task)
   }
-  const launched = (result: TaskLaunchResponse, host: string) => {
+  const launched = (result: TaskLaunchResponse, host: string, agent: TaskAgent) => {
     setNewTaskOpen(false)
     setActionError(
       result.records_error ? `The task started, but its labels could not be saved: ${result.records_error}` : null,
     )
+    const labelsNote = result.pending_labels?.length ? '; its labels are recorded once codex has started its session' : ''
     setPendingLaunch({
-      id: result.id,
-      message: `Started tmux ${result.tmux_session} on ${hostLabel(host)}. It is selected here once claude has started.`,
+      ref: { host, agent, id: result.id, tmux_session: result.tmux_session },
+      message: `Started tmux ${result.tmux_session} on ${hostLabel(host)}. It is selected here once ${agent} has started${labelsNote}.`,
     })
   }
   const resumeTask = async (task: Task) => {
@@ -585,8 +593,8 @@ const OpenButton: React.FC<OpenButtonProps> = ({ task, action, onOpen, small = f
   )
 }
 
-// Resume runs `claude --resume` for a stopped claude task in a new tmux
-// session on its host (issue #257). It opens no pane; Open does, once the
+// Resume runs `claude --resume` or `codex resume` for a stopped task in a new
+// tmux session on its host (issues #257 and #264). It opens no pane; Open does, once the
 // task is running.
 interface ResumeButtonProps {
   task: Task
@@ -922,12 +930,26 @@ const StateNote: React.FC<{ task: Task }> = ({ task }) => {
   let note: string | null = null
   switch (task.state) {
     case 'run':
-      note = `${task.agent} reports no detailed state; the dashboard only knows it is running.`
+      note =
+        task.agent === 'codex'
+          ? 'Codex has not started a session yet: it is waiting for its first instruction, or held at a start-up ' +
+            'screen (trusting the directory, a new model, a usage limit). Open the pane to answer it. Done and labels ' +
+            'become available once its session starts.'
+          : `${task.agent} reports no detailed state; the dashboard only knows it is running.`
+      break
+    case 'busy':
+      if (task.agent === 'codex') {
+        note = 'Codex does not record approval prompts: a command waiting for approval also shows as working.'
+      }
       break
     case 'unknown':
-      note = task.session_id
-        ? 'Claude Code reported a status the dashboard does not recognize.'
-        : 'The session state file under ~/.claude/sessions could not be read or has an unexpected format.'
+      if (task.agent === 'codex') {
+        note = "Neither codex's thread history nor the end of its session log says whether a turn is in progress."
+      } else {
+        note = task.session_id
+          ? 'Claude Code reported a status the dashboard does not recognize.'
+          : 'The session state file under ~/.claude/sessions could not be read or has an unexpected format.'
+      }
       break
     case 'stop':
       note =

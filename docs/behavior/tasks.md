@@ -12,8 +12,9 @@ opening an agent outside tmux from issue [#254](https://github.com/tomo-chan/pan
 on macOS hosts from issue [#263](https://github.com/tomo-chan/panemux/issues/263),
 issue and reference links from issue [#255](https://github.com/tomo-chan/panemux/issues/255),
 the done and label records of [#256](https://github.com/tomo-chan/panemux/issues/256), starting
-and resuming tasks of [#257](https://github.com/tomo-chan/panemux/issues/257), and the summaries of
-[#258](https://github.com/tomo-chan/panemux/issues/258)).
+and resuming tasks of [#257](https://github.com/tomo-chan/panemux/issues/257), the summaries of
+[#258](https://github.com/tomo-chan/panemux/issues/258), and codex sessions of
+[#264](https://github.com/tomo-chan/panemux/issues/264)).
 The UI is described in [UI design's Task Dashboard](../ui-design.md#task-dashboard).
 
 ### What a task is
@@ -21,10 +22,11 @@ The UI is described in [UI design's Task Dashboard](../ui-design.md#task-dashboa
 A task is one agent session:
 
 - **claude**: one Claude Code session, identified by its session ID.
-- **codex**: one running interactive `codex` process, identified by its pid. Codex's own session
-  files are not read, and a codex process that has exited is not listed. A process is interactive
-  when its first positional argument is absent, a prompt, `resume` or `fork`; every other codex-cli
-  subcommand (`exec`, `review`, `app-server`, `mcp`, `login` and the rest listed by
+- **codex**: one codex session, identified by its session ID — the UUID in its rollout's file name,
+  `~/.codex/sessions/YYYY/MM/DD/rollout-<time>-<session ID>.jsonl`. A running codex process that has
+  no rollout yet (see [Codex sessions](#codex-sessions)) is a task identified by its pid. A process
+  is interactive when its first positional argument is absent, a prompt, `resume` or `fork`; every
+  other codex-cli subcommand (`exec`, `review`, `app-server`, `mcp`, `login` and the rest listed by
   `codex --help` of codex-cli 0.157.0) is not a task. Options that take a value are skipped with it.
 
 A task carries its host, agent, session ID, working directory, state, the time it entered that
@@ -76,9 +78,14 @@ reads only what the agents write themselves and what the host reports about its 
 | `tmux list-panes -a -F '#{pane_pid} #{session_name}'` | Which tmux session an agent runs in |
 | The working directory of each process that may be claude or codex | A running task's directory when no state file gives one |
 | `PANEMUX_PANE_ID` in the environment of each process that may be claude or codex (`/proc/<pid>/environ` on Linux, `ps -E` on macOS) | The pane an agent outside tmux was started from ([below](#the-pane-of-an-agent-outside-tmux)) |
+| `ps -U <own uid> -o pid=,etime=,command=`, then each `codex` process's open files (`/proc/<pid>/fd`, or `lsof` where there is none) | How long each codex process has run, and the rollouts it holds open |
+| For each rollout a codex process holds open: its modification time and size, the `cwd` of its first line, the last `task_started` / `task_complete` / `turn_aborted` and the last `response_item` in its final MiB, and the newest `thread_turns` row in `~/.codex/thread_history_1.sqlite` (with `sqlite3 -readonly`, when installed) | A running codex session's state |
+| `~/.codex/sessions/*/*/*/rollout-*.jsonl` changed in the last 7 days (newest 100), and the `cwd` and `source` of each one's first line | Stopped codex sessions |
 
-Any probe that is missing on a host (no tmux, no `~/.claude`, BSD `stat`) prints nothing rather than
-failing the collection. Text a login shell prints before the script's output is ignored. Output that
+Any probe that is missing on a host (no tmux, no `~/.claude`, no `~/.codex`, no `sqlite3`, BSD
+`stat`) prints nothing rather than failing the collection. Codex's files are read under `$HOME/.codex`;
+a `CODEX_HOME` set elsewhere is not followed (its running sessions are still found through their open
+rollouts, but not their `thread_turns` or their stopped sessions). Text a login shell prints before the script's output is ignored. Output that
 ends before its terminating marker — a connection dropped mid-run — fails that host's collection.
 
 ### States
@@ -88,9 +95,9 @@ ends before its terminating marker — a connection dropped mid-run — fails th
 | `wait` | Running and waiting for a person | Live claude process, `status: "waiting"`; `waitingFor` is shown as the reason |
 | `busy` | Running and working | Live claude process, `status: "busy"` |
 | `idle` | Running and waiting for the next instruction | Live claude process, `status: "idle"` |
-| `run` | A codex process is running; no finer state is known | Live `codex` process |
-| `unknown` | A claude session is running but its state cannot be read | A live claude process that no state file describes; a state file that is not JSON or lacks a pid or a valid session ID; or a live claude process reporting another `status` |
-| `stop` | Nothing is handling the session | A conversation log with no live claude process for its session ID |
+| `run` | A codex process is running and has no session yet | A live interactive `codex` process holding no rollout ([Codex sessions](#codex-sessions)) |
+| `unknown` | A session is running but its state cannot be read | A live claude process that no state file describes; a state file that is not JSON or lacks a pid or a valid session ID; a live claude process reporting another `status`; or a codex session whose `thread_turns` and rollout tail say nothing about its newest turn |
+| `stop` | Nothing is handling the session | A conversation log with no live claude process for its session ID, or an interactive codex rollout that no live codex process holds open |
 
 - **A process is a claude process when its program has a path component named `claude` or
   `claude-code`**: argv[0], or the script a `node`, `bun` or `deno` interpreter runs. A process that
@@ -116,11 +123,63 @@ ends before its terminating marker — a connection dropped mid-run — fails th
   apart. Whether a task's work is finished cannot be read off a process, so no state means "done":
   done is what a person records ([Done and labels](#done-and-labels)), and it never changes `state`.
 - **Stopped sessions are limited to conversation logs changed in the last 7 days, and to the 50
-  newest per host.** Subagent logs (`<session>/subagents/*.jsonl`) are not sessions of their own.
+  newest per host, claude's and codex's together.** Subagent logs (`<session>/subagents/*.jsonl`) are
+  not sessions of their own.
 - The time a task entered its state is `statusUpdatedAt`, falling back to `updatedAt` and then
   `startedAt`; for a stopped task it is the log's modification time. Every host time is converted by
   its age against that host's own clock, so a host whose clock is wrong does not shift the dashboard.
   A time ahead of the host's clock is treated as "now".
+
+### Codex sessions
+
+Codex writes no file that ties a process to its session or says what it is doing (checked with
+codex-cli 0.142.2 and 0.157.1 on macOS and 0.157.1 on Linux; the results are on
+[#264](https://github.com/tomo-chan/panemux/issues/264)). The dashboard therefore reads what codex
+does write:
+
+- **A codex process's session is the rollout it holds open.** The interactive `codex` process (the
+  native binary; the node wrapper an npm install adds does not hold it) keeps its session's rollout
+  open for writing. Codex creates the rollout only when the session gets its first instruction.
+- **After `/new` or a `/resume` inside the TUI, the process holds two rollouts, and the one written
+  last is its session.** Codex appends to a rollout as soon as it switches to it, and writes nothing
+  to the other one after that. The descriptor number cannot be used: a `/resume` back to an earlier
+  session reopens its rollout at a lower number. Two rollouts written in the same second go to the
+  one created later (its file name starts with its creation time). The session switched away from is
+  listed neither as that task nor as stopped while the process holds it open. Between `/new` and the
+  new session's first instruction there is no new rollout, so the task still shows the previous
+  session.
+- **The state comes from the session's newest turn, and only while the process is alive.** When
+  `sqlite3` is installed and `~/.codex/thread_history_1.sqlite` (codex-cli 0.157 and later) has a
+  `thread_turns` row for the session, the row with the highest `rollout_ordinal` decides; otherwise
+  the last `task_started`, `task_complete` or `turn_aborted` in the rollout's final MiB does.
+
+  | Newest turn | State | Since |
+  |---|---|---|
+  | `inProgress` / `task_started`, and the last `response_item` is a `request_user_input` call | `wait`, waiting for "a question from codex" | The rollout's last write |
+  | `inProgress` / `task_started`, otherwise | `busy` | The turn's start |
+  | `completed`, `interrupted`, `failed` / `task_complete`, `turn_aborted` | `idle` | The rollout's last write |
+  | Nothing, or a `thread_turns` status this build does not know and no turn event | `unknown` | — |
+
+- **Waiting for approval shows as `busy`.** Codex records nothing when it asks to run a command: the
+  turn is in progress and the last item is the command's call, exactly as while the command runs.
+  `request_user_input` — codex's question to the person, offered only in Plan mode — is told apart,
+  because its call stays the last item until it is answered.
+- **A turn that started before its process is a leftover, and the session is `idle`.** A codex
+  killed mid-turn leaves that turn `inProgress` (and its rollout ending in `task_started`) for good,
+  and resuming the session writes no new turn until it is given an instruction. A turn that started
+  more than two seconds before the process did (from `ps`'s `etime`, to the second) is therefore not
+  in progress. Without `etime` the turn is taken as it reads.
+- **A codex process with no rollout is `run`, known by its pid.** Codex has not started a session:
+  it is waiting for its first instruction, or held at a start-up screen — trusting the directory, a
+  new-model notice, a usage-limit offer to switch models. Nothing on the host tells these apart, so
+  the dashboard says so and points at the pane. Such a task cannot be marked done or labeled. A task
+  started from the dashboard, whose first instruction is given on codex's command line, stays here
+  only while a start-up screen holds it.
+- **Stopped codex sessions are the interactive ones.** A rollout's first line (`session_meta`) says
+  where the session came from; only `"source":"cli"` (the TUI) is listed, not `codex exec`, the
+  desktop app or a subagent. Its working directory is that line's `cwd`, and the time it stopped is
+  the rollout's modification time.
+- Codex tasks are not summarized ([Summaries](#summaries)); their log is a different format.
 
 ### Where a task runs
 
@@ -238,9 +297,10 @@ Nothing about a process says whether a task's work is finished, so done is only 
 set.
 
 - **Only a task with a session ID can carry a record.** The record belongs to the host, the agent
-  and the session ID together, so the same session ID on two hosts is two tasks. A codex task and a
-  claude process no state file names are known only by a pid, which the host reuses once the process
-  exits; they cannot be marked done or labeled.
+  and the session ID together, so the same session ID on two hosts is two tasks. A codex process
+  that has not started its session yet and a claude process no state file names are known only by a
+  pid, which the host reuses once the process exits; they cannot be marked done or labeled. A codex
+  session, running or stopped, can.
 - **The records live in `~/.config/panemux/tasks.json` on the panemux host**, for every host's
   tasks, written through a temp file and a rename with mode `0600`. A symlink at that path is
   written through — its target gets the new contents and the link stays a link — as `config.yaml`
@@ -269,14 +329,15 @@ set.
 
 ### Starting a task
 
-`New task` starts one claude session on a host, in a detached tmux session of its own. No pane is
-created: the task is opened from the dashboard like any other, when someone wants to watch it.
+`New task` starts one claude or codex session on a host, in a detached tmux session of its own. No
+pane is created: the task is opened from the dashboard like any other, when someone wants to watch
+it.
 
 | Field | Rule |
 |---|---|
 | Host | The panemux host or an `ssh_connections` key |
 | Working directory | An absolute path with no shell metacharacters or control characters — the rule a pane's remote `cwd` follows ([Remote path arguments](../security/command-execution.md#remote-path-arguments-ssh-working-directory)) — that exists on the host |
-| Agent | `claude` only. Codex tasks are known only by a pid, so they could carry no labels ([#264](https://github.com/tomo-chan/panemux/issues/264)) |
+| Agent | `claude` or `codex` |
 | Labels | Optional, comma-separated in the form, under the rules of [Done and labels](#done-and-labels) |
 | First instruction | Required. Surrounding blank space is dropped and line endings become LF; at most 32 KiB after that, and no NUL |
 
@@ -313,6 +374,39 @@ created: the task is opened from the dashboard like any other, when someone want
 - After a start, the dashboard selects the task once a collection lists it. claude writes the state
   file the collection reads only once it is running, so that can take until the next poll (10 s).
 
+A **codex** task starts the same way, with these differences:
+
+- **Codex picks its own session ID**, once it has been given its first instruction; nothing on its
+  command line sets it. The tmux session is named `task-` and eight random hex digits, and the
+  response names only that tmux session.
+- **It runs `codex -c check_for_update_on_startup=false -- <first instruction>`** in the working
+  directory. The instruction follows `--`, so one that begins with `-` is still the instruction (codex
+  reads an unguarded leading `-` as an option). The update check is turned off because its prompt
+  would hold the task; codex's configuration is not otherwise touched.
+- **codex runs with its own directory first on `PATH`.** An npm install's `codex` is a
+  `#!/usr/bin/env node` script with node beside it, and a tmux server started from an SSH exec
+  channel does not have that directory on its `PATH`.
+- **Start-up screens are answered in the pane.** Codex can stop before the first instruction to ask
+  whether to trust the directory, to announce a new model, or — once a usage limit is near — to
+  offer a cheaper model. panemux does not answer them or write codex's configuration to avoid them.
+  Until they are answered the task shows as `run` in its tmux session with no session
+  ([Codex sessions](#codex-sessions)), and the detail panel says to open the pane.
+- **The labels are recorded once codex's session is known.** They are checked before anything
+  starts, held in panemux's memory under the host and the tmux session, and recorded — added to any
+  labels the session already has — by the first `GET /api/tasks` that finds a codex session in that
+  tmux session. They are dropped when panemux restarts before then, when the host is removed from
+  `ssh_connections`, or when, a minute or more after the start, a collection of the host finds no
+  task in that tmux session (codex quit at a start-up screen, or the session was killed). A record
+  file that cannot be written keeps them for the next collection.
+- **The dashboard selects the task in its tmux session**: as its process while it has no session,
+  and again as its session once it has one.
+
+Checked on Linux with a real tmux 3.4 and codex-cli 0.157.1 against a stand-in model server: a
+dashboard start from a `PATH` without node, found through the login shell, stopped at the
+directory-trust screen and was listed as `run` in its tmux session; once trusted, its instruction
+`-h hello from the dashboard` was sent as the first message and the task was listed under its session,
+`idle`, then `busy` during a command, then `wait` on a Plan-mode question.
+
 Checked against a real tmux 3.4 with a stand-in for claude: an instruction holding a leading option,
 command substitutions, quotes and newlines arrived as one argument after `--`, nothing in it ran, and
 the temporary file was gone. **Not checked against a real Claude Code**: that the first instruction is
@@ -321,11 +415,12 @@ environment's claude stopped at its first-run screen). Scenario J21 is the manua
 
 ### Resuming a task
 
-`Resume` is offered on a stopped claude task whose session ID is a UUID.
+`Resume` is offered on a stopped claude or codex task whose session ID is a UUID.
 
-- **The session must be listed as a stopped claude task on its host at that moment.** The host is
-  collected again first; a session that is running, is not claude's, or is not listed there is not
-  resumed. The ID passed to claude therefore always came from the host's own conversation logs.
+- **The session must be listed as a stopped task of that agent on its host at that moment.** The host
+  is collected again first; a session that is running, is another agent's, or is not listed there is
+  not resumed. The ID passed to the agent therefore always came from the host's own conversation logs
+  or rollouts.
 - **It runs `claude --resume=<id>`** in the working directory that session's conversation log
   records, in a new detached tmux session named like a new task's: `task-` and the first eight
   characters of the session ID. A session whose log records no working directory, or one the
@@ -350,6 +445,15 @@ environment's claude stopped at its first-run screen). Scenario J21 is the manua
 - A host restart stops tmux as well as claude, so resuming creates a new tmux session — or, when a
   pane was reconnected first, adds claude to the session that pane created.
 - The dashboard selects the resumed task, and it shows as running once a collection finds it.
+- **A codex task runs `codex -c check_for_update_on_startup=false resume -- <id>`** in the working
+  directory its rollout's first line records, with codex's directory first on `PATH` as for a new
+  task. The ID follows `--`: without it, `codex resume <id> '-h …'` prints its help and exits 0.
+  `codex resume` also accepts a session name, which is why only a UUID is accepted. The tmux session
+  is named `task-` and the **last** eight characters of the session ID: codex's IDs are version 7
+  UUIDs, which begin with their creation time, so sessions started within a minute share their first
+  eight. A resume sends no instruction; a codex session killed mid-turn is `idle` once resumed
+  ([Codex sessions](#codex-sessions)). Checked on Linux: a session killed while busy was listed as
+  stopped, resumed into `task-<last eight>`, and listed there as `idle`.
 
 ### Summaries
 
@@ -426,7 +530,7 @@ task_dashboard:
 | In tmux, not attachable | Not opened; the reason is shown |
 | Outside tmux, in a `local` / `ssh` pane the workspaces hold | That pane's workspace becomes active and the pane takes focus |
 | Outside tmux, naming a pane no workspace holds, or no pane | Not opened; the reason is shown |
-| Stopped | Not opened; a stopped claude task offers `Resume` ([Resuming a task](#resuming-a-task)) |
+| Stopped | Not opened; a stopped claude or codex task offers `Resume` ([Resuming a task](#resuming-a-task)) |
 | Unknown | Not opened |
 
 Either way the dashboard closes and the pane is briefly outlined. Opening the same tmux session again
@@ -488,8 +592,9 @@ Collects from every host and returns:
 - `tasks` lists each host's running tasks in `id` order, then its stopped tasks newest first. It is
   `[]` when there are none.
 - `id` is `local:<agent>:<key>` for the panemux host and `ssh:<host>:<agent>:<key>` for an SSH host,
-  where the key is the session ID, `pid-<pid>` for codex and for a claude process no state file
-  names, or `state-file:<file name>` for a state file that could not be read.
+  where the key is the session ID, `pid-<pid>` for a codex process with no session yet and for a
+  claude process no state file names, or `state-file:<file name>` for a state file that could not be
+  read.
 - `session_id`, `cwd`, `waiting_for`, `status_since`, `started_at`, `pid`, `git` and
   `location.pane_id` are omitted when unknown. `waiting_for` is present only in the `wait` state.
 - Within `git`, every field is omitted when empty. `issues[].repo` is the issue's `owner/name`,
@@ -545,8 +650,8 @@ Starts a task:
 { "host": "", "agent": "claude", "cwd": "/workspace/user/project", "prompt": "Fix the flaky test", "labels": ["payment"] }
 ```
 
-- Every field but `labels` is required in effect: `agent` must be `claude`, and `cwd` and `prompt`
-  follow [Starting a task](#starting-a-task). An unknown field is refused.
+- Every field but `labels` is required in effect: `agent` must be `claude` or `codex`, and `cwd` and
+  `prompt` follow [Starting a task](#starting-a-task). An unknown field is refused.
 - Answers `201`:
 
   ```json
@@ -554,25 +659,32 @@ Starts a task:
   ```
 
   `id` is the one `GET /api/tasks` lists the task under. `labels` is what was recorded, omitted when
-  none were given; `records_error` is present instead when they could not be recorded.
+  none were given; `records_error` is present instead when they could not be recorded. A codex task
+  answers with `tmux_session` only, plus `pending_labels` — the labels held until its session is
+  known — when it was given any:
+
+  ```json
+  { "tmux_session": "task-0a1b2c3d", "pending_labels": ["payment"] }
+  ```
 - `400` for a body, agent, label, directory or instruction that is not valid, `404` for a `host`
-  that is not an `ssh_connections` key, `409` when the host refused — tmux or claude missing, the
+  that is not an `ssh_connections` key, `409` when the host refused — tmux or the agent missing, the
   directory missing, a tmux session of that name existing, tmux failing, the temporary file not
   written, each with a fixed message — `502` when the host could not be reached or did not answer,
   and `403` for a cross-site request as for `GET /api/tasks`.
 
 ### `POST /api/tasks/resume`
 
-Resumes a stopped claude task:
+Resumes a stopped claude or codex task:
 
 ```json
-{ "host": "", "session_id": "5d7e3a90-1b2c-4d3e-8f40-51627384a5b6" }
+{ "host": "", "agent": "codex", "session_id": "01a0e2b9-d054-7cc2-9278-a5e25ebcc524" }
 ```
 
+- `agent` is `claude` (the default when it is omitted) or `codex`.
 - Answers `200` with `id`, `session_id` and `tmux_session` as above.
-- `400` for a body that is not valid or a `session_id` that is not a UUID, or a stopped session whose
-  working directory is unknown or refused; `404` for an unknown `host`; `409` when the session is not
-  a stopped claude task on the host, or the host refused as above; `502` when the host could not be
+- `400` for a body that is not valid, an agent that is neither, or a `session_id` that is not a UUID,
+  or a stopped session whose working directory is unknown or refused; `404` for an unknown `host`;
+  `409` when the session is not a stopped task of that agent on the host, or the host refused as above; `502` when the host could not be
   collected or reached; `403` for a cross-site request.
 
 ### `POST /api/tasks/summary`

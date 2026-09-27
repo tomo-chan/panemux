@@ -31,6 +31,7 @@ const hostilePrompt = "--dangerously-skip-permissions $(touch pwned) `touch pwne
 func newParams(t *testing.T, cwd, prompt string) launchParams {
 	t.Helper()
 	return launchParams{
+		agent:       AgentClaude,
 		mode:        launchNew,
 		sessionID:   testSessionID,
 		tmuxSession: tmuxSessionForTask(testSessionID),
@@ -549,7 +550,7 @@ func TestResume_RunsClaudeForAStoppedTaskInItsRecordedDirectory(t *testing.T) {
 	})
 	defer svc.Close()
 
-	got, err := svc.Resume(context.Background(), "", testSessionID)
+	got, err := svc.Resume(context.Background(), "", AgentClaude, testSessionID)
 
 	require.NoError(t, err)
 	assert.Equal(t, Launched{
@@ -626,7 +627,7 @@ func checkResumeRefusal(t *testing.T, tt resumeRefusal) {
 		Hosts: func() []string { return []string{"build-box"} },
 	})
 	defer svc.Close()
-	_, err := svc.Resume(context.Background(), tt.host, tt.sessionID)
+	_, err := svc.Resume(context.Background(), tt.host, AgentClaude, tt.sessionID)
 	if tt.wantIs != nil {
 		assert.ErrorIs(t, err, tt.wantIs)
 	}
@@ -645,7 +646,7 @@ func TestResume_AHostStillConnectingIsNotResumed(t *testing.T) {
 	})
 	defer svc.Close()
 
-	_, err := svc.Resume(context.Background(), "build-box", testSessionID)
+	_, err := svc.Resume(context.Background(), "build-box", AgentClaude, testSessionID)
 
 	assert.EqualError(t, err, "collect build-box before resuming: still connecting")
 }
@@ -825,7 +826,7 @@ func TestResume_ReusesTheTaskSessionOnlyWhenNoAgentRunsInIt(t *testing.T) {
 			})
 			defer svc.Close()
 
-			_, err := svc.Resume(context.Background(), "", testSessionID)
+			_, err := svc.Resume(context.Background(), "", AgentClaude, testSessionID)
 
 			require.NoError(t, err)
 			want := map[bool]string{false: "reuse='yes'", true: "reuse='no'"}[occupant]
@@ -873,9 +874,9 @@ func TestResume_OverlappingResumesOfOneTaskAreSerialized(t *testing.T) {
 	defer svc.Close()
 
 	errs := make(chan error, 2)
-	go func() { _, err := svc.Resume(context.Background(), "", testSessionID); errs <- err }()
+	go func() { _, err := svc.Resume(context.Background(), "", AgentClaude, testSessionID); errs <- err }()
 	<-firstLaunch
-	go func() { _, err := svc.Resume(context.Background(), "", testSessionID); errs <- err }()
+	go func() { _, err := svc.Resume(context.Background(), "", AgentClaude, testSessionID); errs <- err }()
 	time.Sleep(100 * time.Millisecond)
 	mu.Lock()
 	assert.Equal(t, 1, collections, "the second resume collects only once the first has launched")
@@ -920,15 +921,15 @@ func TestResume_GivesUpWaitingForAnotherResumeWhenItsRequestEnds(t *testing.T) {
 	})
 	defer svc.Close()
 	done := make(chan error, 2)
-	go func() { _, err := svc.Resume(context.Background(), "", testSessionID); done <- err }()
+	go func() { _, err := svc.Resume(context.Background(), "", AgentClaude, testSessionID); done <- err }()
 	<-firstLaunch
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err := svc.Resume(ctx, "", testSessionID)
+	_, err := svc.Resume(ctx, "", AgentClaude, testSessionID)
 	require.ErrorIs(t, err, context.Canceled)
 
-	go func() { _, err := svc.Resume(context.Background(), "", testSessionID); done <- err }()
+	go func() { _, err := svc.Resume(context.Background(), "", AgentClaude, testSessionID); done <- err }()
 	time.Sleep(100 * time.Millisecond)
 	mu.Lock()
 	assert.Equal(t, 1, collections, "the third resume still waits for the one holding the lock")

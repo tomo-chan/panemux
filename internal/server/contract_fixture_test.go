@@ -318,6 +318,18 @@ var contractFixtures = map[string]contractFixture{
 		return rr.Body.Bytes(), nil
 	}},
 
+	// A codex task has no session ID when it starts, so its labels are held
+	// until a collection finds its session (issue #264).
+	"task-launch-codex": {capture: func(t *testing.T) ([]byte, map[string]string) {
+		e := newAPIEnv(t)
+		e.srv.api.SetTaskService(fixtureLaunchService())
+
+		rr := e.do(t, http.MethodPost, "/api/tasks",
+			`{"host":"","agent":"codex","cwd":"/workspace/user/project","prompt":"Fix the flaky test","labels":["payment"]}`)
+		require.Equal(t, http.StatusCreated, rr.Code, rr.Body.String())
+		return rr.Body.Bytes(), nil
+	}},
+
 	"task-resume": {capture: func(t *testing.T) ([]byte, map[string]string) {
 		e := newAPIEnv(t)
 		e.srv.api.SetTaskService(fixtureLaunchService())
@@ -442,8 +454,9 @@ func fixtureLaunchService() *tasks.Service {
 
 // fixtureLocalTaskCollection is one of every task shape the panemux host can
 // report: waiting inside an attachable tmux session, busy outside tmux in the
-// pane its environment names, a codex process, a state file that cannot be
-// read, and a stopped session.
+// pane its environment names, a codex process that has no session yet, a
+// codex session at work in a tmux session, a state file that cannot be read,
+// and a stopped claude session and codex session.
 const fixtureLocalTaskCollection = `::panemux-tasks v1
 ::now 1790000000
 ::section state
@@ -461,8 +474,11 @@ const fixtureLocalTaskCollection = `::panemux-tasks v1
 102 1 claude
 103 1 claude
 104 1 codex
+106 1 -bash
+105 106 codex -c check_for_update_on_startup=false
 ::section tmux
 100 task-7c21
+106 task-5ebcc524
 ::section cwd
 104 /workspace/user/sample-api
 ::section env
@@ -470,8 +486,35 @@ const fixtureLocalTaskCollection = `::panemux-tasks v1
 ::section transcripts
 1789999900	7c21e0a4.jsonl	"cwd":"/workspace/user/panemux"	2048
 1789989200	55f0c2b8.jsonl	"cwd":"/workspace/user/service-b"	4096
-::end
+` + fixtureCodexRows + `::end
 `
+
+// fixtureCodexRows is the codex part of fixtureLocalTaskCollection: pid 104
+// holds no rollout, pid 105 is at work in a session, and one more session
+// is stopped.
+const fixtureCodexRows = "::section codex-open\n" +
+	"104\t00:40\n" +
+	"105\t10:00\n" +
+	"105\t10:00\t1789999950 4096\tinProgress 1789999700\t" +
+	`{"timestamp":"2026-09-21T23:48:20.000Z","type":"event_msg","payload":{"type":"task_started"}}` + "\t" +
+	`{"timestamp":"2026-09-21T23:52:30.000Z","type":"response_item",` +
+	`"payload":{"type":"function_call","id":"fc_1","name":"exec_command"}` + "\t" +
+	`"cwd":"/workspace/user/sample-web"` + "\t" +
+	"/workspace/user/.codex/sessions/2026/09/21/" + fixtureCodexRollout + "\n" +
+	"::section codex-rollouts\n" +
+	"1789999950\t4096\t" + fixtureCodexRollout + "\t" +
+	`"cwd":"/workspace/user/sample-web"` + "\t" + `"source":"cli"` + "\n" +
+	"1789980000\t2048\trollout-2026-09-21T18-00-00-" + fixtureStoppedCodexSessionID + ".jsonl\t" +
+	`"cwd":"/workspace/user/sample-api"` + "\t" + `"source":"cli"` + "\n"
+
+const fixtureCodexRollout = "rollout-2026-09-21T23-43-20-" + fixtureCodexSessionID + ".jsonl"
+
+// The codex sessions in fixtureLocalTaskCollection: one at work, one
+// stopped.
+const (
+	fixtureCodexSessionID        = "01a0e2b9-d054-7cc2-9278-a5e25ebcc524"
+	fixtureStoppedCodexSessionID = "01a0e2bc-bdf9-71b2-867a-df8302180efe"
+)
 
 // fixtureTranscript is a conversation log as the fetch script prints it: one
 // instruction and one reply.

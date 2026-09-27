@@ -73,6 +73,65 @@ prompt; a request that never starts a subprocess does not create a turn.
 
 ## Task dashboard
 
+### Codex sessions: state, starting and resuming (2026-09-27, issue #264)
+
+Stage 1 listed a codex task as a running process known only by its pid, and stage 2 started and
+resumed claude only, because codex's files had not been checked. They were checked on real codex-cli
+0.142.2 and 0.157.1 on macOS (by the operator, with a stand-in model server for the states a
+usage-limited account could not reach, and a real model on 0.157.1) and 0.157.1 on Linux (in the
+implementation session, with a stand-in model server); the results are the comments on #264. The
+operator decided the approach from them, and the design points the Linux check raised were put to
+the operator before implementation:
+
+- **A codex process's session is the rollout it holds open.** Codex writes no `<pid>.json` and no
+  state value; the TUI process (not the npm node wrapper, not the 0.157 app-server daemon) keeps its
+  rollout open, found through `lsof` on macOS and `/proc/<pid>/fd` on Linux. Reading codex's
+  `logs_2.sqlite` (whose `process_uuid` names the pid) was the alternative; it is an internal trace
+  log.
+- **The state is the newest turn — `thread_turns.status` in `thread_history_1.sqlite` where
+  available, otherwise the rollout's last turn event — and only while the process is alive.** A
+  killed turn stays `inProgress` forever, so a dead process is always `stop`. Waiting for command
+  approval is `busy`, since codex records nothing for it on either platform; a pending
+  `request_user_input` call is `wait`. The operator chose `sqlite3` as the primary source and the
+  rollout as the fallback for hosts without `sqlite3` and codex before 0.157.
+- **The rollout's last line is not its last record of interest.** On Linux 0.157.1 every waiting and
+  running turn ended with `token_usage_record` after the call (the macOS observation had the call
+  last), so the script keeps the last turn event and the last `response_item` separately rather than
+  reading the final line.
+- **A turn older than its process is a leftover.** Found in the Linux check: a session killed
+  mid-turn and resumed without an instruction still had its killed turn as the newest one, in
+  `thread_turns` and in the rollout, so it read as working while codex sat idle. A process's start
+  (from `ps`'s POSIX `etime`) now bounds which turns can be in progress. Stage 1 rejected `procStart`
+  for claude because its meaning was unknown; `etime` is ps's own elapsed time.
+- **After `/new` or a TUI `/resume`, the rollout written last is the session** (operator's choice
+  among the options raised). The Linux check switched A → B → A inside one process: the newest
+  modification time matched the current session at every step, while the highest descriptor number
+  was wrong after returning to A, which codex reopens at a lower number.
+- **A codex task held at a start-up screen is `run`, known by its pid, with a note to open the pane**
+  (operator's choice). Showing it as `wait` would also flag a codex just started from a shell and
+  sitting at its prompt, and telling the two apart by whether the command line carries a prompt was
+  the rejected third option. panemux does not answer the screens or write codex's configuration to
+  avoid them; only the update prompt is turned off, with `-c check_for_update_on_startup=false`.
+- **A new codex task's labels are held until its session is collected** (operator's choice). Codex
+  has no option to set its session ID — the Linux check found none in `codex --help` — so the ID is
+  known only after the first instruction. Holding the labels in memory keyed by tmux session was
+  chosen over hiding the labels field for codex and over waiting up to 15 seconds in the request,
+  which would lose them exactly when a start-up screen holds the task.
+- **Stopped codex sessions are the interactive ones and share the cap with claude** (operator's
+  choice): `source` `cli` only, and 50 stopped tasks per host across both agents, keeping stage 1's
+  "50 per host".
+- **`--` before codex's prompt and its resumed session ID, and UUIDs only.** Checked on both
+  platforms: without `--`, a prompt beginning with `-` is an option, and `codex resume <id> '-h …'`
+  prints help and exits 0; `codex resume` also takes a session name, which codex sets automatically
+  from the first instruction with a real model.
+- **A codex resume's tmux session is named from the ID's last eight characters.** Codex IDs are
+  version 7 UUIDs, whose first eight characters are a timestamp shared by sessions started within a
+  minute.
+- **codex runs with its own directory first on `PATH`.** Found in the Linux check: an npm install's
+  `codex` is a node script, and started from a `PATH` without node it failed with
+  `env: 'node': No such file or directory`.
+- **Codex tasks are not summarized.** The summary reads claude's log format; a rollout is another.
+
 ### Stage 1: a dashboard of agent sessions, independent of panes (2026-09-25, issue #252)
 
 The design, its stages and its open questions are agreed in issue #252. The choices stage 1 made
@@ -84,7 +143,8 @@ while being built:
   the dependency is accepted and made to fail visibly: every field is optional, an unreadable state
   file stays on the board as `unknown` instead of disappearing, and only the first `"cwd"` of a log
   is read. Codex has no equivalent that has been checked, so codex tasks are running processes and
-  nothing more (issue #252, open question 5).
+  nothing more (issue #252, open question 5). *Superseded by the issue #264 entry above: codex's
+  rollouts are read.*
 - **Liveness is "the pid is alive and its program is claude", and `procStart` is not used.** A
   state file's pid alone is not enough, because pids restart after a host reboot. Claude
   Code 2.1.282's `procStart` matched field 22 of `/proc/<pid>/stat` (clock ticks since boot) for the
@@ -360,7 +420,8 @@ and tmux 3.4 in the development environment. The operator decided:
 
 - **claude only.** Codex tasks are known only by a pid, so they cannot carry labels, and a codex
   process that exited is not listed, so there is nothing to resume; codex could not be checked
-  either, since it was not installed. Codex support is issue #264.
+  either, since it was not installed. Codex support is issue #264. *Superseded by the issue #264
+  entry above.*
 - **The tmux session ends with claude.** Keeping a login shell in it (so the last output stays
   readable) was the alternative; ending it makes the task list as stopped again, which is what the
   board is for.

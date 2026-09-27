@@ -146,7 +146,10 @@ func buildTasks(host string, raw rawSnapshot, collectedAt time.Time) []Task {
 	//mutation:exempt[CONDITIONALS_BOUNDARY] equivalent — ids are unique within a host, so no two compare equal
 	sort.Slice(live, func(i, j int) bool { return live[i].ID < live[j].ID })
 
-	liveSessions := make(map[string]bool, len(live))
+	liveSessions := map[string]map[string]bool{
+		AgentClaude: {},
+		AgentCodex:  b.heldCodexSessions(),
+	}
 	// A running claude task with no session id (its state file is unreadable
 	// or missing) is most likely writing the newest log in its directory;
 	// that log is its own, not a second, stopped task.
@@ -155,7 +158,7 @@ func buildTasks(host string, raw rawSnapshot, collectedAt time.Time) []Task {
 		switch {
 		case task.Agent != AgentClaude:
 		case task.SessionID != "":
-			liveSessions[task.SessionID] = true
+			liveSessions[AgentClaude][task.SessionID] = true
 		case task.PID > 0 && task.CWD != "":
 			claimedLogs[task.CWD]++
 		}
@@ -334,51 +337,33 @@ func stateFilePID(name string) (int, bool) {
 	return pid, true
 }
 
-func (b *taskBuilder) codexTasks() []Task {
+// stoppedTasks are the claude and codex sessions no live process handles,
+// newest first and at most maxStoppedTasks of them for the two agents
+// together. liveSessions holds, per agent, the sessions a live process
+// handles; for codex that is every session a codex process holds open.
+func (b *taskBuilder) stoppedTasks(liveSessions map[string]map[string]bool, claimedLogs map[string]int) []Task {
+	seen := map[string]map[string]bool{AgentClaude: {}, AgentCodex: {}}
 	var tasks []Task
-	for _, p := range b.raw.Processes {
-		if !isInteractiveCodex(p.Command) {
-			continue
-		}
-		tasks = append(tasks, Task{
-			Host:     b.host,
-			ID:       b.id(AgentCodex, "pid-"+strconv.Itoa(p.PID)),
-			Agent:    AgentCodex,
-			CWD:      b.raw.ProcessCWDs[p.PID],
-			State:    StateRun,
-			PID:      p.PID,
-			Location: b.locate(p.PID),
-		})
-	}
-	return tasks
-}
-
-func (b *taskBuilder) stoppedTasks(liveSessions map[string]bool, claimedLogs map[string]int) []Task {
-	transcripts := append([]transcript(nil), b.raw.Transcripts...)
-	sort.SliceStable(transcripts, func(i, j int) bool { return transcripts[i].ModTime > transcripts[j].ModTime })
-
-	seen := map[string]bool{}
-	var tasks []Task
-	for _, tr := range transcripts {
+	for _, c := range b.stoppedCandidates() {
 		if len(tasks) >= maxStoppedTasks {
 			break
 		}
-		if liveSessions[tr.SessionID] || seen[tr.SessionID] {
+		if liveSessions[c.agent][c.sessionID] || seen[c.agent][c.sessionID] {
 			continue
 		}
-		seen[tr.SessionID] = true
-		if claimedLogs[tr.CWD] > 0 {
-			claimedLogs[tr.CWD]--
+		seen[c.agent][c.sessionID] = true
+		if c.agent == AgentClaude && claimedLogs[c.cwd] > 0 {
+			claimedLogs[c.cwd]--
 			continue
 		}
 		tasks = append(tasks, Task{
 			Host:        b.host,
-			ID:          b.id(AgentClaude, tr.SessionID),
-			Agent:       AgentClaude,
-			SessionID:   tr.SessionID,
-			CWD:         tr.CWD,
+			ID:          b.id(c.agent, c.sessionID),
+			Agent:       c.agent,
+			SessionID:   c.sessionID,
+			CWD:         c.cwd,
 			State:       StateStop,
-			StatusSince: b.hostMillis(tr.ModTime * 1000),
+			StatusSince: b.hostMillis(c.modTime * 1000),
 			Location:    Location{Kind: LocationNone},
 		})
 	}

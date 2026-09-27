@@ -6,6 +6,7 @@ import {
   applyTaskRecord,
   canRecord,
   canResume,
+  findLaunchedTask,
   canSummarize,
   summaryNext,
   summaryRequestOnSelect,
@@ -111,14 +112,46 @@ describe('canRecord', () => {
 describe('canResume', () => {
   const stopped = { state: 'stop' as const, session_id: '5d7e3a90-1b2c-4d3e-8f40-51627384a5b6', location: { kind: 'none' as const, attachable: false } }
 
-  // efficacy:exempt unchanged by this branch; the new describe block after it falls inside its line range
-  it('offers resume only for a stopped claude task whose session id is a UUID', () => {
+  it('offers resume only for a stopped claude or codex task whose session id is a UUID', () => {
     expect(canResume(task(stopped))).toBe(true)
     expect(canResume(task({ ...stopped, done: true }))).toBe(true)
     expect(canResume(task({ ...stopped, state: 'idle' }))).toBe(false)
-    expect(canResume(task({ ...stopped, agent: 'codex' }))).toBe(false)
+    expect(canResume(task({ ...stopped, agent: 'codex' }))).toBe(true)
+    expect(canResume(task({ ...stopped, agent: 'aider' }))).toBe(false)
     expect(canResume(task({ ...stopped, session_id: undefined }))).toBe(false)
     expect(canResume(task({ ...stopped, session_id: 'my-session' }))).toBe(false)
+  })
+})
+
+describe('findLaunchedTask', () => {
+  const codexLaunch = { host: 'build-box', agent: 'codex', tmux_session: 'task-0a1b2c3d' }
+  const inSession = (overrides: Partial<Task>) =>
+    task({
+      host: 'build-box', agent: 'codex', location: { kind: 'tmux', tmux_session: 'task-0a1b2c3d', attachable: true },
+      ...overrides,
+    })
+
+  it('finds a claude task by the id its launch named, and is then done waiting', () => {
+    const started = task({ id: 'local:claude:new' })
+    expect(findLaunchedTask([task(), started], { host: '', agent: 'claude', id: 'local:claude:new', tmux_session: 'task-new' }))
+      .toEqual({ task: started, settled: true })
+    expect(findLaunchedTask([task()], { host: '', agent: 'claude', id: 'local:claude:new', tmux_session: 'task-new' })).toBeNull()
+  })
+
+  it('finds a codex task by its tmux session, and keeps waiting until its session is known', () => {
+    const noSession = inSession({ id: 'ssh:build-box:codex:pid-41', session_id: undefined, state: 'run' })
+    const withSession = inSession({ id: 'ssh:build-box:codex:01a0e2b9', session_id: '01a0e2b9-d054-7cc2-9278-a5e25ebcc524' })
+    expect(findLaunchedTask([noSession], codexLaunch)).toEqual({ task: noSession, settled: false })
+    expect(findLaunchedTask([noSession, withSession], codexLaunch)).toEqual({ task: withSession, settled: true })
+  })
+
+  it('ignores a task of another host, agent or tmux session', () => {
+    expect(findLaunchedTask([
+      inSession({ host: '' }),
+      inSession({ agent: 'claude' }),
+      inSession({ location: { kind: 'tmux', tmux_session: 'task-other', attachable: true } }),
+      inSession({ location: { kind: 'outside', attachable: false } }),
+    ], codexLaunch)).toBeNull()
   })
 })
 

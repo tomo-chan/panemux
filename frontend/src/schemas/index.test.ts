@@ -221,13 +221,12 @@ describe('TaskLaunchedSchema', () => {
     expect(TaskLaunchedSchema.safeParse(launched).success).toBe(true)
   })
 
-  it('requires every field, since the dashboard selects the task by id', () => {
-    for (const key of Object.keys(launched)) {
-      const partial: Record<string, unknown> = { ...launched }
-      delete partial[key]
-      expect(TaskLaunchedSchema.safeParse(partial).success, key).toBe(false)
-    }
+  it('requires the tmux session, and an id or session id that is not empty when given', () => {
+    const { id: _id, session_id: _sid, ...codex } = launched
+    expect(TaskLaunchedSchema.safeParse(codex).success, 'a new codex task has neither yet').toBe(true)
+    expect(TaskLaunchedSchema.safeParse({ ...launched, tmux_session: undefined }).success).toBe(false)
     expect(TaskLaunchedSchema.safeParse({ ...launched, id: '' }).success).toBe(false)
+    expect(TaskLaunchedSchema.safeParse({ ...launched, session_id: '' }).success).toBe(false)
   })
 })
 
@@ -245,8 +244,14 @@ describe('TaskLaunchResponseSchema', () => {
     expect(failed.success && failed.data.records_error).toBe('parse tasks.json')
   })
 
+  it('accepts a codex launch whose labels are held until its session is known', () => {
+    const parsed = TaskLaunchResponseSchema.safeParse({ tmux_session: 'task-0a1b2c3d', pending_labels: ['infra'] })
+    expect(parsed.success && parsed.data.pending_labels).toEqual(['infra'])
+  })
+
   it('rejects labels that are not strings', () => {
     expect(TaskLaunchResponseSchema.safeParse({ ...launched, labels: [1] }).success).toBe(false)
+    expect(TaskLaunchResponseSchema.safeParse({ ...launched, pending_labels: [1] }).success).toBe(false)
   })
 })
 

@@ -78,6 +78,22 @@
     },
     {
       "agent": "codex",
+      "cwd": "/workspace/user/sample-web",
+      "host": "",
+      "id": "local:codex:01a0e2b9-d054-7cc2-9278-a5e25ebcc524",
+      "location": {
+        "attachable": true,
+        "kind": "tmux",
+        "tmux_session": "task-5ebcc524"
+      },
+      "pid": 105,
+      "session_id": "01a0e2b9-d054-7cc2-9278-a5e25ebcc524",
+      "started_at": "2026-01-01T00:00:00Z",
+      "state": "busy",
+      "status_since": "2026-01-01T00:00:00Z"
+    },
+    {
+      "agent": "codex",
       "cwd": "/workspace/user/sample-api",
       "host": "",
       "id": "local:codex:pid-104",
@@ -86,6 +102,7 @@
         "kind": "outside"
       },
       "pid": 104,
+      "started_at": "2026-01-01T00:00:00Z",
       "state": "run"
     },
     {
@@ -106,6 +123,19 @@
         "summarized_at": "2026-01-01T00:00:00Z",
         "text": "service-b was released."
       }
+    },
+    {
+      "agent": "codex",
+      "cwd": "/workspace/user/sample-api",
+      "host": "",
+      "id": "local:codex:01a0e2bc-bdf9-71b2-867a-df8302180efe",
+      "location": {
+        "attachable": false,
+        "kind": "none"
+      },
+      "session_id": "01a0e2bc-bdf9-71b2-867a-df8302180efe",
+      "state": "stop",
+      "status_since": "2026-01-01T00:00:00Z"
     },
     {
       "agent": "claude",
