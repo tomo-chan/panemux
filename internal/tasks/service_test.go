@@ -764,7 +764,9 @@ func TestRunLocal_ReadsThePaneIDFromPsEOnMacOS(t *testing.T) {
 		// between the two calls, or the output is not what was checked).
 		{PID: 108, Args: "claude", Full: "codex PANEMUX_PANE_ID=pane-x " + env},
 		{PID: 109, Args: "claude", Full: "claude-x PANEMUX_PANE_ID=pane-x " + env},
-		{PID: 110, Args: "", Full: "claude PANEMUX_PANE_ID=pane-x " + env},
+		// No arguments (the process is gone): the whole output would count
+		// as its environment.
+		{PID: 110, Args: "", Full: " PANEMUX_PANE_ID=pane-x " + env},
 		// Values a pane is never given.
 		{PID: 111, Args: "claude", Full: "claude PANEMUX_PANE_ID=pane/x " + env},
 		{PID: 112, Args: "claude", Full: "claude PANEMUX_PANE_ID= " + env},

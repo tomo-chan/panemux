@@ -75,7 +75,8 @@ backend and UI are released together.
   `~/.claude/projects`), which are not a published format, and knows only whether a codex process is
   running. It collects only while it is on screen. It finds the pane of an agent outside tmux only
   on Linux and macOS hosts, where it can read the agent's environment, and on macOS not for an
-  agent that is one of Apple's own binaries.
+  agent that is one of Apple's own binaries. The macOS reading has not yet been run on a macOS host
+  ([details](behavior/tasks.md#the-pane-of-an-agent-outside-tmux)).
 
 ## Where to continue
 

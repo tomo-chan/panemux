@@ -154,6 +154,10 @@ The pane that belongs to a task is found in the browser from the current workspa
 - Collection reads the variable from the agent's own process environment, not a parent's: on Linux
   hosts from `/proc/<pid>/environ`, and on macOS hosts from `ps -E`. On other hosts nothing is
   reported and an agent outside tmux cannot be opened.
+- The macOS reading has been tested only by replaying `ps -E` output recorded on macOS 26.3.1
+  through a fake `ps`. It has not yet been run on a macOS host, over SSH to one, or on a macOS
+  release before 26 (see the
+  [decision log](../DECISIONLOG.md#reading-panemux_pane_id-on-macos-through-ps--e-2026-09-27-issue-263)).
 - On macOS, `ps -E -p <pid> -o command=` prints the process's arguments, a space, and its
   environment's `NAME=value` entries joined by spaces. Collection removes the arguments
   `ps -p <pid> -o command=` prints from the front of that output, and reads the rest only when it
