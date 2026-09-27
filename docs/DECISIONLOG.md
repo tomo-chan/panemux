@@ -226,6 +226,18 @@ The choices made from that (decided by the user in issue #263):
   `PANEMUX_PANE_ID=` (`AAA='x PANEMUX_PANE_ID=evil'`), which `ps -E` prints indistinguishably from
   the real entry. Taking the first or the last occurrence was rejected because which one is right
   cannot be told from the output; the agent then has no pane ID.
+- **One occurrence inside another variable's value is read, and this is accepted** (review of
+  PR #269, decided by the user). With no real `PANEMUX_PANE_ID`, `AAA='x PANEMUX_PANE_ID=pane-b'`
+  or a value with a newline before ` PANEMUX_PANE_ID=pane-b` is reported as pane `pane-b` on macOS,
+  where Linux reports nothing. It is accepted because only someone who can start an agent as the
+  same user outside a pane can plant it — and such a process can set `PANEMUX_PANE_ID` directly —
+  the effect is at most a `Go to pane` that focuses another existing `local`/`ssh` pane of that
+  host, and no command runs. Rejected alternatives: skipping the reading whenever the environment
+  part contains a newline would stop only the newline form, not the space form, and would lose the
+  pane of a legitimate agent whose environment holds a multi-line value; reading
+  `KERN_PROCARGS2` through `perl` or another interpreter would be exact, but reverses the decision
+  above not to go beyond the fixed `sh -s` script, and whether macOS 26 provides a usable
+  interpreter was not checked.
 - **The same rule as Linux** (`^[A-Za-z0-9_.-]{1,128}$`) is applied to the value, read up to the next
   space. The shell also prints it only when it consists of those characters, so a newline in it
   cannot start a row of the output.

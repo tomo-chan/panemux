@@ -774,6 +774,12 @@ func TestRunLocal_ReadsThePaneIDFromPsEOnMacOS(t *testing.T) {
 		// A newline in the value must not start a row of its own.
 		{PID: 114, Args: "claude", Full: "claude PANEMUX_PANE_ID=pane-a\n999 pane-evil " + env},
 		{PID: 115, Args: "claude", Full: "claude " + env},
+		// With no real variable, one occurrence inside another variable's
+		// value cannot be told from the variable, and is read: accepted in
+		// PR #269's review, since the value only claims a pane. Linux, which
+		// reads NUL-separated entries, does not read these.
+		{PID: 116, Args: "claude", Full: "claude HOME=/Users/demo AAA=x PANEMUX_PANE_ID=pane-other"},
+		{PID: 117, Args: "claude", Full: "claude MSG=a\n PANEMUX_PANE_ID=pane-evil"},
 	})
 
 	out, err := runLocal(context.Background(), collectScript)
@@ -786,6 +792,8 @@ func TestRunLocal_ReadsThePaneIDFromPsEOnMacOS(t *testing.T) {
 		102: "pane-1790346631000-a1b2c",
 		103: "pane-codex",
 		105: "pane-real",
+		116: "pane-other",
+		117: "pane-evil",
 	}, raw.PaneIDs)
 }
 

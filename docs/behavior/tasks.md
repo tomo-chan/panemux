@@ -164,6 +164,10 @@ The pane that belongs to a task is found in the browser from the current workspa
   starts with a space. It takes the value only when exactly one ` PANEMUX_PANE_ID=` is left, up to
   the next space. Two or more are not read, since one may be part of another variable's value; the
   agent then has no pane ID. An argument such as `PANEMUX_PANE_ID=…` is never read as the variable.
+- When the agent has no `PANEMUX_PANE_ID` of its own and exactly one ` PANEMUX_PANE_ID=<id>` sits
+  inside another variable's value (after a space or a newline), macOS reads `<id>` as its pane ID;
+  Linux does not. This is accepted: the value is only a claim, and the browser opens only a matching
+  pane (see [Task dashboard collection](../security/command-execution.md#task-dashboard-collection)).
 - Because `ps -E` does not delimit values, a macOS value containing a space is read up to that
   space, where Linux would reject it. Values panemux sets never contain one.
 - macOS shows no environment for Apple's own binaries (`/bin/sleep`, `/bin/zsh`) or for another

@@ -171,7 +171,15 @@ coming from the script's own `ps` listing. On macOS the arguments `ps -p <pid> -
 are removed from the front, so an argument cannot supply the value; more than one
 ` PANEMUX_PANE_ID=` in what remains — one may sit inside another variable's value — yields nothing;
 and the shell prints the value only when it consists of `A-Za-z0-9_.-`, so a newline in it cannot
-forge a row. The parser keeps it
+forge a row. What macOS does **not** prevent: a process with no `PANEMUX_PANE_ID` of its own but
+exactly one ` PANEMUX_PANE_ID=<id>` inside another variable's value (after a space or a newline in
+that value) reports `<id>`, because `ps -E` prints the two alike. Linux, reading NUL-separated
+entries, reports nothing for it. This is accepted
+([decision log](../DECISIONLOG.md#reading-panemux_pane_id-on-macos-through-ps--e-2026-09-27-issue-263)):
+only someone who can already start an agent as the same user outside a pane can plant such a value,
+and a process of that user can set `PANEMUX_PANE_ID` itself anyway; the result is at most a
+`Go to pane` that focuses another existing pane, and no command runs.
+`TestRunLocal_ReadsThePaneIDFromPsEOnMacOS` pins it. The parser keeps it
 only if it matches `^[A-Za-z0-9_.-]{1,128}$` (`validPaneID`); and it never reaches a command. The
 browser uses it only to look up a `local` or `ssh` pane of the task's host in the workspaces it
 holds, and going to that pane only focuses it.
