@@ -259,8 +259,8 @@ func (b *taskBuilder) codexTasks() []Task {
 		prev, seen := current[o.PID]
 		// An equal name at an equal time is one file held on two descriptors,
 		// whose rows are alike in every field.
-		//mutation:exempt[CONDITIONALS_BOUNDARY] equivalent — replaces a row with an identical one
 		newer := o.Rollout.ModTime > prev.Rollout.ModTime ||
+			//mutation:exempt[CONDITIONALS_BOUNDARY] equivalent — replaces a row with an identical one
 			(o.Rollout.ModTime == prev.Rollout.ModTime && o.File > prev.File)
 		if !seen || newer {
 			current[o.PID] = o
