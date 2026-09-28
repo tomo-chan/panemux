@@ -156,6 +156,14 @@ func TestLaunch_CodexTaskHasNoSessionIDYet(t *testing.T) {
 	assert.Contains(t, scripts[0], "sid=''")
 }
 
+func TestLaunch_CodexTaskWhenTheRandomSourceFails(t *testing.T) {
+	svc := New(Options{Rand: bytes.NewReader(nil)})
+	defer svc.Close()
+	_, err := svc.Launch(context.Background(), LaunchRequest{Agent: AgentCodex, CWD: "/w", Prompt: "go"})
+	require.ErrorContains(t, err, "generate tmux session name")
+	assert.NotErrorIs(t, err, ErrInvalidLaunch)
+}
+
 func TestLaunch_UnknownAgentRunsNothing(t *testing.T) {
 	svc := New(Options{Rand: launchRand(), RunLocal: func(context.Context, string) ([]byte, error) {
 		t.Fatal("ran a script for an unknown agent")

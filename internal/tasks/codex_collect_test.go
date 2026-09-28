@@ -82,6 +82,10 @@ func TestParseCollectOutput_SkipsMalformedCodexRows(t *testing.T) {
 		"::panemux-tasks v1",
 		"::now 5",
 		"::section codex-open",
+		"x\t00:10",
+		"0\t00:10",
+		"899\t00:01\t1\t\t\t\t\t/x/"+good,
+		"899\t00:01\t1 x\t\t\t\t\t/x/"+good,
 		"not-a-pid\t00:01\t1 1\t\t\t\t\t/x/"+good,
 		"0\t00:01\t1 1\t\t\t\t\t/x/"+good,
 		"899\t00:01\t1 1\t\t\t\t", // too few fields
@@ -99,6 +103,13 @@ func TestParseCollectOutput_SkipsMalformedCodexRows(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, raw.CodexOpen)
 	assert.Empty(t, raw.CodexRollouts)
+	assert.Empty(t, raw.CodexAges)
+}
+
+func TestJSONFragmentString(t *testing.T) {
+	assert.Equal(t, "cli", jsonFragmentString(`"source":"cli"`, `"source":`))
+	assert.Empty(t, jsonFragmentString(`"cwd":"cli"`, `"source":`), "another key")
+	assert.Empty(t, jsonFragmentString(`"source":"a\q"`, `"source":`), "not a string codex could have written")
 }
 
 // A row whose etime ps could not give still names the rollout; the process's

@@ -3,7 +3,11 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -11,6 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"panemux/internal/fileops"
 	"panemux/internal/tasks"
 )
 
@@ -141,4 +146,47 @@ func TestGetTasks_RecordsTheLabelsACodexTaskWasStartedWith(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []string{"payment", "older", "api"},
 		records[tasks.RecordKey{Agent: tasks.AgentCodex, SessionID: resumeCodexSessionID}].Labels)
+}
+
+// Held labels that cannot be recorded stay held, and the tasks are listed
+// all the same: the record file cannot be read, the labels would take the
+// task past tasks.MaxLabels, or the file cannot be written.
+func TestGetTasks_KeepsACodexTasksLabelsItCouldNotRecord(t *testing.T) {
+	tooMany := make([]string, tasks.MaxLabels)
+	for i := range tooMany {
+		tooMany[i] = fmt.Sprintf("l%02d", i)
+	}
+	for _, tt := range []struct {
+		setup func(t *testing.T, h *Handler, path string)
+		name  string
+	}{
+		{name: "unreadable record file", setup: func(t *testing.T, _ *Handler, path string) {
+			require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
+			require.NoError(t, os.WriteFile(path, []byte("not json"), 0o600))
+		}},
+		{name: "too many labels", setup: func(t *testing.T, h *Handler, _ string) {
+			_, err := h.taskRecords.Put(tasks.Record{Agent: tasks.AgentCodex, SessionID: resumeCodexSessionID, Labels: tooMany})
+			require.NoError(t, err)
+		}},
+		{name: "record file cannot be written", setup: func(t *testing.T, _ *Handler, _ string) {
+			fileops.SetOpsForTest(t, (&fileops.Spy{RenameErr: errors.New("disk full")}).Ops())
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			h, path := newLaunchHandler(t, &launchHost{})
+			host := &codexLaunchHost{}
+			h.SetTaskService(tasks.New(tasks.Options{
+				Hosts: func() []string { return nil }, RunLocal: host.run, Rand: launchRand(),
+			}))
+			h.taskGitLookup = func(context.Context, string, string, bool) *taskGitInfo { return nil }
+			rec := postJSON(t, h, "/api/tasks", `{"host":"","agent":"codex","cwd":"/w","prompt":"go","labels":["api"]}`, nil)
+			require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+			tt.setup(t, h, path)
+
+			resp := getTasks(t, h)
+
+			findTaskResponse(t, resp, "local:codex:"+resumeCodexSessionID)
+			assert.Equal(t, 1, h.pendingTaskLabels.Len(), "kept for the next collection")
+		})
+	}
 }

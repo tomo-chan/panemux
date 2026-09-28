@@ -115,6 +115,13 @@ func TestPendingLabels_DroppedWithTheirHost(t *testing.T) {
 	assert.Equal(t, 0, p.Len(), "a host removed from ssh_connections")
 }
 
+func TestNewPendingLabels_DefaultsToTheWallClock(t *testing.T) {
+	p := NewPendingLabels(nil)
+	p.Add("", "task-a", []string{"x"})
+	p.Apply(pendingSnapshot(okHosts), (&putLog{}).put)
+	assert.Equal(t, 1, p.Len(), "a minute has not passed on the wall clock")
+}
+
 func TestPendingLabels_AddCopiesAndIgnoresNoLabels(t *testing.T) {
 	p := NewPendingLabels((&clock{now: time.Unix(1000, 0)}).Now)
 	p.Add("", "task-a", nil)
