@@ -53,7 +53,8 @@ func launchCollection() []byte {
 		"::section transcripts",
 		"900\t" + resumeSessionID + `.jsonl	"cwd":"/workspace/user/project"`,
 		"::section codex-rollouts",
-		"950\t10\trollout-2026-09-27T11-57-03-" + resumeCodexSessionID + `.jsonl	"cwd":"/workspace/user/api"	"source":"cli"`,
+		"950\t10\trollout-2026-09-27T11-57-03-" + resumeCodexSessionID +
+			`.jsonl	"cwd":"/workspace/user/api"	"originator":"codex-tui"`,
 		"::end",
 	}, "\n") + "\n")
 }

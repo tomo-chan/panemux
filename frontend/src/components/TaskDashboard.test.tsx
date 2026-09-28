@@ -313,15 +313,34 @@ describe('TaskDashboard', () => {
     const detail = screen.getByRole('complementary', { name: 'Task details' })
     fireEvent.click(screen.getByTestId('task-card-codex'))
     expect(detail).toHaveTextContent(
-      'Codex has not started a session yet: it is waiting for its first instruction, or held at a start-up screen',
+      'Codex has no session of its own yet: it is waiting for its first instruction, held at a start-up screen',
     )
-    expect(detail).toHaveTextContent('Open the pane to answer it.')
+    expect(detail).toHaveTextContent("or running its session in codex's shared daemon")
+    expect(detail).toHaveTextContent('Open the pane to see which.')
     fireEvent.click(screen.getByTestId('task-card-codex-busy'))
     expect(detail).toHaveTextContent('Codex does not record approval prompts')
     fireEvent.click(screen.getByTestId('task-card-codex-unknown'))
     expect(detail).toHaveTextContent("Neither codex's thread history nor the end of its session log says")
     fireEvent.click(screen.getByTestId('task-card-unreadable'))
     expect(detail).toHaveTextContent('could not be read or has an unexpected format')
+  })
+
+  it("shows a session codex's shared daemon runs as one no pane can be opened for", () => {
+    renderDashboard(tasksState({
+      data: {
+        hosts: [{ name: '', status: 'ok' }],
+        tasks: [task({
+          id: 'daemon', state: 'idle', agent: 'codex', session_id: '01a0e2b9-d054-7cc2-9278-a5e25ebcc524',
+          cwd: '/workspace/user/api', location: { kind: 'daemon', attachable: false },
+        })],
+      },
+    }))
+    const card = screen.getByTestId('task-card-daemon')
+    expect(card).toHaveTextContent("codex's shared daemon · cannot open in a pane")
+    expect(within(card).queryByRole('button', { name: /^Open/ })).toBeNull()
+    fireEvent.click(card)
+    const detail = screen.getByRole('complementary', { name: 'Task details' })
+    expect(detail).toHaveTextContent('This session runs in codex\'s shared daemon')
   })
 
   // efficacy:exempt unchanged by this branch; the new describe block after it falls inside its line range

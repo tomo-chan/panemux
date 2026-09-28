@@ -356,6 +356,8 @@ export function taskOpenAction(task: Task, pane: TaskPaneRef | null): TaskOpenAc
       return task.location.pane_id
         ? { kind: 'unavailable', reason: 'running outside tmux, in a pane no workspace holds' }
         : { kind: 'unavailable', reason: 'running outside tmux, not in a panemux pane' }
+    case 'daemon':
+      return { kind: 'unavailable', reason: "run by codex's shared daemon, in a pane it cannot tell" }
     default:
       return { kind: 'unavailable', reason: 'not running' }
   }

@@ -18,14 +18,14 @@ import (
 // (macOS) and 0.157.1 (Linux); see docs/behavior/tasks.md.
 
 // codexRollout is one rollout the collection found: its session ID (from the
-// file name), the cwd and source of its session_meta line, and the file's
+// file name), the cwd and originator of its session_meta line, and the file's
 // modification time and size.
 type codexRollout struct {
-	SessionID string
-	CWD       string
-	Source    string
-	ModTime   int64
-	Size      int64
+	SessionID  string
+	CWD        string
+	Originator string
+	ModTime    int64
+	Size       int64
 }
 
 // codexOpenRollout is a rollout a codex process holds open.
@@ -56,9 +56,11 @@ type codexTurn struct {
 	EventAt      int64
 }
 
-// codexSourceInteractive is the session_meta source of a session the TUI
-// started. codex exec, the desktop app and subagents write rollouts too.
-const codexSourceInteractive = "cli"
+// codexOriginatorTUI is the session_meta originator of a session the TUI
+// started, whether the TUI wrote the rollout itself (source "cli") or through
+// codex's shared app-server daemon (source "vscode"). codex exec
+// ("codex_exec") and the desktop app write rollouts too.
+const codexOriginatorTUI = "codex-tui"
 
 // What codex records about a turn: thread_turns statuses, rollout events,
 // and the response item and tool that ask the person a question.
@@ -149,8 +151,8 @@ func parseCodexAgeRow(line string) (int, int64, bool) {
 
 // parseCodexOpenRow reads one codex-open row (see collectScript).
 func parseCodexOpenRow(line string) (codexOpenRollout, bool) {
-	parts := strings.SplitN(line, "\t", 8)
-	if len(parts) < 8 {
+	parts := strings.SplitN(line, "\t", 9)
+	if len(parts) < 9 {
 		return codexOpenRollout{}, false
 	}
 	pid, err := strconv.Atoi(parts[0])
@@ -166,7 +168,7 @@ func parseCodexOpenRow(line string) (codexOpenRollout, bool) {
 	if err1 != nil || err2 != nil {
 		return codexOpenRollout{}, false
 	}
-	path := parts[7]
+	path := parts[8]
 	name := path[strings.LastIndex(path, "/")+1:]
 	sessionID, ok := rolloutSessionID(name)
 	if !ok {
@@ -176,8 +178,11 @@ func parseCodexOpenRow(line string) (codexOpenRollout, bool) {
 		PID:     pid,
 		Elapsed: parseEtime(parts[1]),
 		File:    name,
-		Rollout: codexRollout{SessionID: sessionID, CWD: transcriptCWD(parts[6]), ModTime: modTime, Size: size},
-		Turn:    parseCodexTurn(parts[3], parts[4], parts[5]),
+		Rollout: codexRollout{
+			SessionID: sessionID, CWD: transcriptCWD(parts[6]), Originator: jsonFragmentString(parts[7], `"originator":`),
+			ModTime: modTime, Size: size,
+		},
+		Turn: parseCodexTurn(parts[3], parts[4], parts[5]),
 	}, true
 }
 
@@ -201,7 +206,7 @@ func parseCodexRolloutRow(line string) (codexRollout, bool) {
 		r.CWD = transcriptCWD(parts[3])
 	}
 	if len(parts) == 5 {
-		r.Source = jsonFragmentString(parts[4], `"source":`)
+		r.Originator = jsonFragmentString(parts[4], `"originator":`)
 	}
 	return r, true
 }
@@ -251,9 +256,56 @@ func parseCodexTurn(db, event, item string) codexTurn {
 	return turn
 }
 
-// codexTasks are the interactive codex processes: each in the session whose
-// rollout it wrote last, or known only by its pid before it has one.
+// codexTasks are the interactive codex processes — each in the session whose
+// rollout it wrote last, or known only by its pid before it has one — and
+// the TUI sessions codex's shared daemon runs.
 func (b *taskBuilder) codexTasks() []Task {
+	tasks := b.codexTUITasks()
+	return append(tasks, b.codexDaemonTasks()...)
+}
+
+// codexDaemonTasks are the TUI sessions codex's shared app-server daemon
+// holds. A TUI started without -c or --no-daemon runs its session there,
+// and nothing on the host ties the TUI's process to the session (checked
+// with codex-cli 0.157.1 on Linux): the session is a task of its own, which
+// no pane can be told to show. The daemon keeps a session's rollout open
+// after its TUI has exited, so such a session is not listed as stopped
+// while the daemon holds it. A session a TUI holds itself is that TUI's.
+func (b *taskBuilder) codexDaemonTasks() []Task {
+	listed := map[string]bool{}
+	for _, o := range b.raw.CodexOpen {
+		if proc, alive := b.procs[o.PID]; alive && isInteractiveCodex(proc.Command) {
+			listed[o.Rollout.SessionID] = true
+		}
+	}
+	var tasks []Task
+	for _, o := range b.raw.CodexOpen {
+		proc, alive := b.procs[o.PID]
+		daemonTUISession := alive && isCodexDaemon(proc.Command) && o.Rollout.Originator == codexOriginatorTUI
+		if !daemonTUISession || listed[o.Rollout.SessionID] {
+			continue
+		}
+		listed[o.Rollout.SessionID] = true
+		task := Task{
+			Host:      b.host,
+			ID:        b.id(AgentCodex, o.Rollout.SessionID),
+			Agent:     AgentCodex,
+			SessionID: o.Rollout.SessionID,
+			CWD:       o.Rollout.CWD,
+			PID:       o.PID,
+			Location:  Location{Kind: LocationDaemon},
+		}
+		if o.Elapsed >= 0 {
+			task.StartedAt = b.hostMillis((b.raw.Now - o.Elapsed) * 1000)
+		}
+		b.codexState(&task, o)
+		tasks = append(tasks, task)
+	}
+	return tasks
+}
+
+// codexTUITasks are the interactive codex processes.
+func (b *taskBuilder) codexTUITasks() []Task {
 	current := map[int]codexOpenRollout{}
 	for _, o := range b.raw.CodexOpen {
 		prev, seen := current[o.PID]
@@ -382,7 +434,7 @@ func (b *taskBuilder) stoppedCandidates() []stoppedCandidate {
 		})
 	}
 	for _, r := range b.raw.CodexRollouts {
-		if r.Source != codexSourceInteractive {
+		if r.Originator != codexOriginatorTUI {
 			continue
 		}
 		candidates = append(candidates, stoppedCandidate{
@@ -391,6 +443,17 @@ func (b *taskBuilder) stoppedCandidates() []stoppedCandidate {
 	}
 	sort.SliceStable(candidates, func(i, j int) bool { return candidates[i].modTime > candidates[j].modTime })
 	return candidates
+}
+
+// isCodexDaemon reports whether a `ps` command line is codex's app-server:
+// argv[0]'s base name is codex and its first positional argument is
+// app-server, as for the shared daemon (`codex app-server --listen unix://
+// --managed-daemon`).
+func isCodexDaemon(command string) bool {
+	if !isCodexProgram(command) {
+		return false
+	}
+	return firstCodexPositional(strings.Fields(command)[1:]) == "app-server"
 }
 
 // isCodexProgram is any codex process, interactive or not.

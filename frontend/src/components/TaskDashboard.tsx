@@ -566,6 +566,8 @@ function whereLabel(task: Task, pane: TaskPaneRef | null): string {
         : `tmux ${task.location.tmux_session} · cannot attach`
     case 'outside':
       return task.location.pane_id ? 'outside tmux · its pane is in no workspace' : 'outside tmux · not in a panemux pane'
+    case 'daemon':
+      return "codex's shared daemon · cannot open in a pane"
     default:
       return 'not running'
   }
@@ -886,7 +888,9 @@ const TaskDetail: React.FC<TaskDetailProps> = ({
                   ? `tmux ${task.location.tmux_session}`
                   : task.location.kind === 'outside'
                     ? 'outside tmux'
-                    : 'nowhere'}
+                    : task.location.kind === 'daemon'
+                      ? "codex's shared daemon"
+                      : 'nowhere'}
               </span>
             </li>
             <li data-on={pane !== null}>
@@ -927,14 +931,23 @@ function markDoneQuestion(task: Task, showDone: boolean): string {
 }
 
 const StateNote: React.FC<{ task: Task }> = ({ task }) => {
+  if (task.location.kind === 'daemon') {
+    return (
+      <p className="td-note">
+        This session runs in codex's shared daemon: codex was started without --no-daemon, and nothing on the host says
+        which pane shows it. The dashboard's own starts use --no-daemon.
+      </p>
+    )
+  }
   let note: string | null = null
   switch (task.state) {
     case 'run':
       note =
         task.agent === 'codex'
-          ? 'Codex has not started a session yet: it is waiting for its first instruction, or held at a start-up ' +
-            'screen (trusting the directory, a new model, a usage limit). Open the pane to answer it. Done and labels ' +
-            'become available once its session starts.'
+          ? 'Codex has no session of its own yet: it is waiting for its first instruction, held at a start-up ' +
+            "screen (trusting the directory, a new model, a usage limit), or running its session in codex's shared " +
+            'daemon, which the dashboard lists as a task of its own. Open the pane to see which. Done and labels ' +
+            'become available on the session.'
           : `${task.agent} reports no detailed state; the dashboard only knows it is running.`
       break
     case 'busy':

@@ -263,12 +263,16 @@ because a per-user install is usually on a `PATH` only a login shell sets. `$age
 placeholder above, one of two words. `$SHELL` here is the host user's own login shell, run with a
 fixed argument; it chooses where the agent is looked up, not what is run instead of it. What either
 lookup prints is used only if it is an absolute path to an executable regular file, and it reaches
-tmux as a discrete argument. For codex the directory of that path is put first on the `PATH` the
-agent runs with (`PATH=${2%/*}:$PATH` inside the fixed `sh -c`): an npm install's `codex` is a
-`#!/usr/bin/env node` script, and a tmux server an exec channel started does not have node's
+tmux as a discrete argument. For codex the directory of that path is added at the **end** of the
+`PATH` the agent runs with (`PATH=$PATH:${2%/*}` inside the fixed `sh -c`): an npm install's `codex`
+is a `#!/usr/bin/env node` script, and a tmux server an exec channel started does not have node's
 directory on its `PATH` — checked on Linux, where `env -i PATH=/usr/bin:/bin <npm prefix>/bin/codex`
 failed with `env: 'node': No such file or directory` and the launch with the directory added
-started codex. The directory is the one holding the executable already chosen, not a request value. This is the script on the host reading its own
+started codex. The directory is the one holding the executable already chosen, not a request value.
+It goes last so that it only fills a gap: put first (as in the first version, found in review), it
+also moved every command codex and its model run ahead to that directory — a `python3` beside
+codex won over the one the user's `PATH` names, and a directory others can write would have been
+searched before the system's. Last, it is searched only for what nothing earlier provides. This is the script on the host reading its own
 environment, not a Go `os.Getenv` value flowing into `exec.Command`, which the
 [General Rules](../security.md#general-rules) forbid.
 
@@ -311,9 +315,9 @@ held the file name and nothing of the instruction. The instruction is still clau
 argument, the form in which the launch gives an interactive claude its first message, so a user who
 can read claude's arguments on the host can read it while claude runs.
 
-**Codex gets its first instruction after `--` too, and `-c check_for_update_on_startup=false`.** The
-fixed command for a new codex task is
-`sh -c 'p=$(cat -- "$1"); rm -f -- "$1"; cd -- "$4" || exit 1; PATH=${2%/*}:$PATH; export PATH; exec "$2" -c check_for_update_on_startup=false -- "$p"'`,
+**Codex gets its first instruction after `--` too, with `--no-daemon` and
+`-c check_for_update_on_startup=false`.** The fixed command for a new codex task is
+`sh -c 'p=$(cat -- "$1"); rm -f -- "$1"; cd -- "$4" || exit 1; PATH=$PATH:${2%/*}; export PATH; exec "$2" --no-daemon -c check_for_update_on_startup=false -- "$p"'`,
 with the same positional parameters (the session ID one is empty). Verified with codex-cli 0.142.2
 and 0.157.1 on macOS and 0.157.1 on Linux: without `--`, `codex '-x hello'` is refused as an unknown
 option, and after `--` a prompt such as `-h -V --help: …` is sent as the first message. The `-c`
@@ -321,7 +325,9 @@ value is a fixed literal; it stops the update prompt, which would otherwise hold
 watching. codex's other start-up screens (trusting a directory, a new-model notice, a usage-limit
 offer) are left for a person to answer in the pane: panemux does not write codex's configuration.
 
-**A codex resume passes the ID after `--`**: `codex -c check_for_update_on_startup=false resume -- <id>`.
+**A codex resume passes the ID after `--`**: `codex --no-daemon -c check_for_update_on_startup=false resume -- <id>`.
+`--no-daemon`, a fixed flag, keeps the session in the TUI's own process: through codex's shared
+daemon nothing would tie the session to the task's tmux session.
 Without `--`, `codex resume <id> '-h …'` prints its help and exits 0 without opening the session, and
 an ID beginning with `-` would be an option. `codex resume` also accepts a session *name* (names are
 set by `/rename` and, with a real model, automatically from the first instruction, and may hold
@@ -359,8 +365,8 @@ leading option, command substitutions, quotes and a line reading `EOF`, and fail
 not exactly `--session-id=<id>`, `--`, the prompt, if the prompt reaches tmux's arguments, if a
 substitution ran, or if the file is left behind. `TestLaunchScript_NewCodexTask` and
 `TestLaunchScript_ResumeCodexTask` do the same for codex (argv exactly
-`-c check_for_update_on_startup=false -- <prompt>`, and `… resume -- <id>`, with codex's directory
-first on `PATH`). `TestBuildLaunchScript_RefusesInputBeforeAnythingRuns` and
+`--no-daemon -c check_for_update_on_startup=false -- <prompt>`, and `… resume -- <id>`, with codex's
+directory last on `PATH`). `TestBuildLaunchScript_RefusesInputBeforeAnythingRuns` and
 `TestBuildLaunchScript_AgentRules` cover every refusal above.
 
 ### Task summaries

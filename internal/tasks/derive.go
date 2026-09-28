@@ -40,6 +40,9 @@ const (
 	LocationTmux    LocationKind = "tmux"
 	LocationOutside LocationKind = "outside"
 	LocationNone    LocationKind = "none"
+	// LocationDaemon is a codex session run by codex's shared app-server
+	// daemon, which no pane can be told to show (issue #264).
+	LocationDaemon LocationKind = "daemon"
 )
 
 // Location is where a task's agent process runs on its host.
@@ -502,20 +505,27 @@ func isInteractiveCodex(command string) bool {
 	if len(fields) == 0 || strings.ToLower(filepath.Base(fields[0])) != AgentCodex {
 		return false
 	}
+	return !codexNonInteractiveCommands[firstCodexPositional(fields[1:])]
+}
+
+// firstCodexPositional is codex's first positional argument — its
+// subcommand, or a prompt — with the values of options skipped; "" when
+// there is none or it follows "--".
+func firstCodexPositional(args []string) string {
 	skipValue := false
-	for _, arg := range fields[1:] {
+	for _, arg := range args {
 		switch {
 		case skipValue:
 			skipValue = false
 		case arg == "--":
-			return true
+			return ""
 		case strings.HasPrefix(arg, "-"):
 			skipValue = codexValueOptions[arg]
 		default:
-			return !codexNonInteractiveCommands[arg]
+			return arg
 		}
 	}
-	return true
+	return ""
 }
 
 func firstNonZero(values ...int64) int64 {

@@ -80,7 +80,7 @@ reads only what the agents write themselves and what the host reports about its 
 | `PANEMUX_PANE_ID` in the environment of each process that may be claude or codex (`/proc/<pid>/environ` on Linux, `ps -E` on macOS) | The pane an agent outside tmux was started from ([below](#the-pane-of-an-agent-outside-tmux)) |
 | `ps -U <own uid> -o pid=,etime=,command=`, then each `codex` process's open files (`/proc/<pid>/fd`, or `lsof` where there is none) | How long each codex process has run, and the rollouts it holds open |
 | For each rollout a codex process holds open: its modification time and size, the `cwd` of its first line, the last `task_started` / `task_complete` / `turn_aborted` and the last `response_item` in its final MiB, and the newest `thread_turns` row in `~/.codex/thread_history_1.sqlite` (with `sqlite3 -readonly`, when installed) | A running codex session's state |
-| `~/.codex/sessions/*/*/*/rollout-*.jsonl` changed in the last 7 days (newest 100), and the `cwd` and `source` of each one's first line | Stopped codex sessions |
+| `~/.codex/sessions/*/*/*/rollout-*.jsonl` changed in the last 7 days whose first line's `originator` is `codex-tui` (the newest 100 of those), and that line's `cwd` | Stopped codex sessions |
 
 Any probe that is missing on a host (no tmux, no `~/.claude`, no `~/.codex`, no `sqlite3`, BSD
 `stat`) prints nothing rather than failing the collection. Codex's files are read under `$HOME/.codex`;
@@ -169,16 +169,31 @@ does write:
   and resuming the session writes no new turn until it is given an instruction. A turn that started
   more than two seconds before the process did (from `ps`'s `etime`, to the second) is therefore not
   in progress. Without `etime` the turn is taken as it reads.
-- **A codex process with no rollout is `run`, known by its pid.** Codex has not started a session:
-  it is waiting for its first instruction, or held at a start-up screen — trusting the directory, a
-  new-model notice, a usage-limit offer to switch models. Nothing on the host tells these apart, so
-  the dashboard says so and points at the pane. Such a task cannot be marked done or labeled. A task
-  started from the dashboard, whose first instruction is given on codex's command line, stays here
-  only while a start-up screen holds it.
-- **Stopped codex sessions are the interactive ones.** A rollout's first line (`session_meta`) says
-  where the session came from; only `"source":"cli"` (the TUI) is listed, not `codex exec`, the
-  desktop app or a subagent. Its working directory is that line's `cwd`, and the time it stopped is
-  the rollout's modification time.
+- **A codex process with no rollout is `run`, known by its pid.** Codex has no session of its own:
+  it is waiting for its first instruction, held at a start-up screen — trusting the directory, a
+  new-model notice, a usage-limit offer to switch models — or running its session in codex's shared
+  daemon (below). Nothing on the host tells these apart, so the dashboard says so and points at the
+  pane. Such a task cannot be marked done or labeled. A task started from the dashboard, whose first
+  instruction is given on codex's command line and which runs with `--no-daemon`, stays here only
+  while a start-up screen holds it.
+- **A session codex's shared daemon runs is a task of its own, which no pane can be opened for.**
+  From codex-cli 0.157 a TUI started without `-c` or `--no-daemon` starts (or joins) a shared
+  `codex app-server` daemon, and the daemon, not the TUI, holds the session's rollout. Nothing on
+  the host ties the TUI's process to that session: not its descriptors (the TUI holds only a socket
+  to the daemon), and not `~/.codex/logs_2.sqlite`, where the session's entries carry only the
+  daemon's pid (checked with codex-cli 0.157.1 on Linux). Each TUI session the daemon holds
+  (`originator` `codex-tui`) is therefore listed under its session ID, with its state read as above
+  — the leftover check using the daemon's age — its location `daemon`, and the daemon's pid; the TUI
+  itself is the `run` task above. One piece of work thus shows as two cards. The daemon keeps a
+  session's rollout, and its writer lock, open after the TUI exits (for over a minute when checked),
+  so the session stays listed there, `idle`, rather than as stopped, and is not offered `Resume`
+  while it does. Sessions the daemon holds for other clients (the desktop app) are not listed.
+- **Stopped codex sessions are the TUI's.** A rollout's first line (`session_meta`) says where the
+  session came from; only `"originator":"codex-tui"` is listed — the TUI's sessions, whether it wrote
+  the rollout itself (`"source":"cli"`) or through the daemon (`"source":"vscode"`) — not `codex exec`
+  (`codex_exec`), the desktop app or a subagent. The 100 the collection reads are counted after this
+  filter, so a host where `codex exec` writes many rollouts does not push the TUI's out. Its working
+  directory is that line's `cwd`, and the time it stopped is the rollout's modification time.
 - Codex tasks are not summarized ([Summaries](#summaries)); their log is a different format.
 
 ### Where a task runs
@@ -187,6 +202,7 @@ does write:
 |---|---|
 | `tmux` | The agent's process, or one of its ancestors, is a tmux pane's process; `tmux_session` names the session |
 | `outside` | The agent is running, but not under tmux |
+| `daemon` | A codex session run by codex's shared daemon; which pane shows it cannot be told ([Codex sessions](#codex-sessions)) |
 | `none` | No process is running for the task |
 
 `attachable` is true when a `tmux` / `ssh_tmux` pane can attach to `tmux_session`, whose name must
@@ -379,13 +395,16 @@ A **codex** task starts the same way, with these differences:
 - **Codex picks its own session ID**, once it has been given its first instruction; nothing on its
   command line sets it. The tmux session is named `task-` and eight random hex digits, and the
   response names only that tmux session.
-- **It runs `codex -c check_for_update_on_startup=false -- <first instruction>`** in the working
-  directory. The instruction follows `--`, so one that begins with `-` is still the instruction (codex
-  reads an unguarded leading `-` as an option). The update check is turned off because its prompt
-  would hold the task; codex's configuration is not otherwise touched.
-- **codex runs with its own directory first on `PATH`.** An npm install's `codex` is a
+- **It runs `codex --no-daemon -c check_for_update_on_startup=false -- <first instruction>`** in the
+  working directory. The instruction follows `--`, so one that begins with `-` is still the
+  instruction (codex reads an unguarded leading `-` as an option). `--no-daemon` keeps the session in
+  the TUI's own process, where its rollout ties it to the task's tmux session, rather than in codex's
+  shared daemon ([Codex sessions](#codex-sessions)). The update check is turned off because its
+  prompt would hold the task; codex's configuration is not otherwise touched.
+- **codex's own directory is added at the end of `PATH`.** An npm install's `codex` is a
   `#!/usr/bin/env node` script with node beside it, and a tmux server started from an SSH exec
-  channel does not have that directory on its `PATH`.
+  channel does not have that directory on its `PATH`. At the end, it supplies node when nothing
+  earlier does and changes nothing else: the commands codex runs resolve as they would without it.
 - **Start-up screens are answered in the pane.** Codex can stop before the first instruction to ask
   whether to trust the directory, to announce a new model, or — once a usage limit is near — to
   offer a cheaper model. panemux does not answer them or write codex's configuration to avoid them.
@@ -405,7 +424,12 @@ Checked on Linux with a real tmux 3.4 and codex-cli 0.157.1 against a stand-in m
 dashboard start from a `PATH` without node, found through the login shell, stopped at the
 directory-trust screen and was listed as `run` in its tmux session; once trusted, its instruction
 `-h hello from the dashboard` was sent as the first message and the task was listed under its session,
-`idle`, then `busy` during a command, then `wait` on a Plan-mode question.
+`idle`, then `busy` during a command, then `wait` on a Plan-mode question. With `--no-daemon` added
+and codex's directory at the end of `PATH`, a start from a `PATH` without node was again held by the
+TUI itself (listed in its tmux session), the `PATH` its commands saw ended with codex's directory,
+and a resume after `/exit` came back `idle` in `task-<last eight>`. A plain `codex` started in a pane
+while the daemon ran showed as a `run` task in that pane and its session as a separate `idle` task
+with location `daemon`.
 
 Checked against a real tmux 3.4 with a stand-in for claude: an instruction holding a leading option,
 command substitutions, quotes and newlines arrived as one argument after `--`, nothing in it ran, and
@@ -445,9 +469,9 @@ environment's claude stopped at its first-run screen). Scenario J21 is the manua
 - A host restart stops tmux as well as claude, so resuming creates a new tmux session — or, when a
   pane was reconnected first, adds claude to the session that pane created.
 - The dashboard selects the resumed task, and it shows as running once a collection finds it.
-- **A codex task runs `codex -c check_for_update_on_startup=false resume -- <id>`** in the working
-  directory its rollout's first line records, with codex's directory first on `PATH` as for a new
-  task. The ID follows `--`: without it, `codex resume <id> '-h …'` prints its help and exits 0.
+- **A codex task runs `codex --no-daemon -c check_for_update_on_startup=false resume -- <id>`** in the
+  working directory its rollout's first line records, with codex's directory at the end of `PATH` as
+  for a new task. The ID follows `--`: without it, `codex resume <id> '-h …'` prints its help and exits 0.
   `codex resume` also accepts a session name, which is why only a UUID is accepted. The tmux session
   is named `task-` and the **last** eight characters of the session ID: codex's IDs are version 7
   UUIDs, which begin with their creation time, so sessions started within a minute share their first

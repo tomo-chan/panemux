@@ -130,11 +130,14 @@ type launchParams struct {
 //   - The agent is looked up on PATH, then through the user's login shell,
 //     because an SSH exec channel's PATH rarely holds a per-user install
 //     (~/.local/bin). Only an absolute path to an executable is run.
-//   - codex runs with its own directory first on PATH: an npm install's
+//   - codex runs with its own directory last on PATH: an npm install's
 //     codex is a `#!/usr/bin/env node` script, and node sits next to it
 //     there, but not on the PATH of a tmux server an exec channel started.
-//     It runs with -c check_for_update_on_startup=false, since the update
-//     prompt would hold a task nobody is watching.
+//     Last, so the commands codex runs resolve as they would without it.
+//     It runs with --no-daemon, so the TUI keeps its session itself rather
+//     than in codex's shared daemon, where nothing ties the session to the
+//     tmux session it runs in, and with -c check_for_update_on_startup=false,
+//     since the update prompt would hold a task nobody is watching.
 //   - tmux receives the command as separate arguments after "--", which tmux
 //     runs without a shell (tmux 2.0 and later). The working directory is not
 //     given to tmux's -c, which expands its value as a format ("#S", "##"),
@@ -178,7 +181,7 @@ case $bin in
 esac
 [ -f "$bin" ] && [ -x "$bin" ] || { say "error no-$agent"; exit 0; }
 if [ "$agent" = codex ]; then
-  codex='PATH=${2%/*}:$PATH; export PATH; exec "$2" -c check_for_update_on_startup=false'
+  codex='PATH=$PATH:${2%/*}; export PATH; exec "$2" --no-daemon -c check_for_update_on_startup=false'
   resume='cd -- "$1" || exit 1; '"$codex"' resume -- "$3"'
   run='p=$(cat -- "$1"); rm -f -- "$1"; cd -- "$4" || exit 1; '"$codex"' -- "$p"'
 else

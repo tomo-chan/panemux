@@ -73,6 +73,14 @@ describe('TasksResponseSchema', () => {
     expect(result.success).toBe(true)
   })
 
+  it("accepts a codex session run by codex's shared daemon", () => {
+    const result = TasksResponseSchema.safeParse({
+      hosts: [],
+      tasks: [{ ...task, agent: 'codex', state: 'idle', location: { kind: 'daemon', attachable: false } }],
+    })
+    expect(result.success).toBe(true)
+  })
+
   it('rejects a state the dashboard has no column for', () => {
     expect(TasksResponseSchema.safeParse({ hosts: [], tasks: [{ ...task, state: 'done' }] }).success).toBe(false)
   })

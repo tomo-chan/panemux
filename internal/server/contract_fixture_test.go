@@ -476,6 +476,7 @@ const fixtureLocalTaskCollection = `::panemux-tasks v1
 104 1 codex
 106 1 -bash
 105 106 codex -c check_for_update_on_startup=false
+107 1 /workspace/user/.codex/packages/app-server-daemon/bin/codex app-server --listen unix:// --managed-daemon
 ::section tmux
 100 task-7c21
 106 task-5ebcc524
@@ -490,8 +491,8 @@ const fixtureLocalTaskCollection = `::panemux-tasks v1
 `
 
 // fixtureCodexRows is the codex part of fixtureLocalTaskCollection: pid 104
-// holds no rollout, pid 105 is at work in a session, and one more session
-// is stopped.
+// holds no rollout, pid 105 is at work in a session, codex's shared daemon
+// (pid 107) runs a TUI session, and one more session is stopped.
 const fixtureCodexRows = "::section codex-open\n" +
 	"104\t00:40\n" +
 	"105\t10:00\n" +
@@ -499,13 +500,17 @@ const fixtureCodexRows = "::section codex-open\n" +
 	`{"timestamp":"2026-09-21T23:48:20.000Z","type":"event_msg","payload":{"type":"task_started"}}` + "\t" +
 	`{"timestamp":"2026-09-21T23:52:30.000Z","type":"response_item",` +
 	`"payload":{"type":"function_call","id":"fc_1","name":"exec_command"}` + "\t" +
-	`"cwd":"/workspace/user/sample-web"` + "\t" +
+	`"cwd":"/workspace/user/sample-web"` + "\t" + `"originator":"codex-tui"` + "\t" +
 	"/workspace/user/.codex/sessions/2026/09/21/" + fixtureCodexRollout + "\n" +
+	"107\t2-00:00:00\n" +
+	"107\t2-00:00:00\t1789999000 1024\tcompleted 1789998000\t\t\t" + `"cwd":"/workspace/user/sample-cli"` + "\t" +
+	`"originator":"codex-tui"` + "\t/workspace/user/.codex/sessions/2026/09/21/rollout-2026-09-21T20-00-00-" +
+	fixtureDaemonCodexSessionID + ".jsonl\n" +
 	"::section codex-rollouts\n" +
 	"1789999950\t4096\t" + fixtureCodexRollout + "\t" +
-	`"cwd":"/workspace/user/sample-web"` + "\t" + `"source":"cli"` + "\n" +
+	`"cwd":"/workspace/user/sample-web"` + "\t" + `"originator":"codex-tui"` + "\n" +
 	"1789980000\t2048\trollout-2026-09-21T18-00-00-" + fixtureStoppedCodexSessionID + ".jsonl\t" +
-	`"cwd":"/workspace/user/sample-api"` + "\t" + `"source":"cli"` + "\n"
+	`"cwd":"/workspace/user/sample-api"` + "\t" + `"originator":"codex-tui"` + "\n"
 
 const fixtureCodexRollout = "rollout-2026-09-21T23-43-20-" + fixtureCodexSessionID + ".jsonl"
 
@@ -514,6 +519,7 @@ const fixtureCodexRollout = "rollout-2026-09-21T23-43-20-" + fixtureCodexSession
 const (
 	fixtureCodexSessionID        = "01a0e2b9-d054-7cc2-9278-a5e25ebcc524"
 	fixtureStoppedCodexSessionID = "01a0e2bc-bdf9-71b2-867a-df8302180efe"
+	fixtureDaemonCodexSessionID  = "01a0e2bd-ce26-7d81-a280-90c4de0d0046"
 )
 
 // fixtureTranscript is a conversation log as the fetch script prints it: one

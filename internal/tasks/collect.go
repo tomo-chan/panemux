@@ -29,7 +29,7 @@ import (
 //	::section env                "<pid> <PANEMUX_PANE_ID>" for the same processes, when set
 //	::section transcripts        "<mtime>\t<file name>\t<first "cwd":"..." in it>\t<size in bytes>"
 //	::section codex-open         one row per rollout a codex process holds open (below)
-//	::section codex-rollouts     "<mtime>\t<size>\t<file name>\t<"cwd":"..."\t<"source":"...">" of its first line
+//	::section codex-rollouts     "<mtime>\t<size>\t<file name>\t<"cwd":"...">\t<"originator":"...">" of its first line
 //	::end                        the output is complete
 //
 // Transcripts are the conversation logs directly under ~/.claude/projects/*/
@@ -37,7 +37,9 @@ import (
 // and the count are the range decided for stopped sessions (issue #252); the
 // Go side keeps the stopped ones and caps them at maxStoppedTasks. Codex
 // rollouts (~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl) are listed the same
-// way.
+// way, counting only the TUI's (originator "codex-tui"): the 100 are taken
+// after that filter, so a host where codex exec writes many rollouts does not
+// push the TUI's sessions out.
 //
 // The env section names the pane an agent outside tmux was started from
 // (issue #254). It is read from the process's initial environment, which on
@@ -67,7 +69,8 @@ import (
 // /proc/<pid>/fd, or lsof where there is no /proc. Each codex process gets a
 // "<pid>\t<etime>" row, then one row per rollout it holds open:
 //
-//	<pid>\t<etime>\t<mtime> <size>\t<status> <started_at>\t<turn event line>\t<response item line>\t<"cwd":"...">\t<path>
+//	<pid>\t<etime>\t<mtime> <size>\t<status> <started_at>\t<turn event line>\t<response item line>\t<"cwd":"...">
+//	\t<"originator":"...">\t<path>        (one line)
 //
 // where etime is how long the process has run (ps's [[dd-]hh:]mm:ss), status
 // and started_at are the session's newest thread_turns row in
@@ -170,20 +173,23 @@ while read -r pid et; do
 			/"payload":[{]"type":"(task_started|task_complete|turn_aborted)"/ { ev = substr($0, 1, 512) }
 			/"type":"response_item"/ { ri = substr($0, 1, 512) }
 			END { printf "%s\t%s", ev, ri }')
-		c=$(head -n 1 "$p" 2>/dev/null | grep -o '"cwd":"[^"]*"' | head -n 1)
-		printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$pid" "$et" "$t" "$st" "$marks" "$c" "$p"
+		l=$(head -n 1 "$p" 2>/dev/null)
+		c=$(printf '%s\n' "$l" | grep -o '"cwd":"[^"]*"' | head -n 1)
+		o=$(printf '%s\n' "$l" | grep -o '"originator":"[^"]*"' | head -n 1)
+		printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$pid" "$et" "$t" "$st" "$marks" "$c" "$o" "$p"
 	done
 done
 echo '::section codex-rollouts'
 find "$HOME/.codex/sessions" -mindepth 4 -maxdepth 4 -type f -name 'rollout-*.jsonl' -mtime -7 2>/dev/null |
 while IFS= read -r p; do
 	t=$(mtime "$p" 2>/dev/null) && echo "$t $p"
-done | sort -rn | head -n 100 | while read -r t s p; do
+done | sort -rn | while read -r t s p; do
 	l=$(head -n 1 "$p" 2>/dev/null)
+	o=$(printf '%s\n' "$l" | grep -o '"originator":"[^"]*"' | head -n 1)
+	[ "$o" = '"originator":"codex-tui"' ] || continue
 	c=$(printf '%s\n' "$l" | grep -o '"cwd":"[^"]*"' | head -n 1)
-	src=$(printf '%s\n' "$l" | grep -o '"source":"[^"]*"' | head -n 1)
-	printf '%s\t%s\t%s\t%s\t%s\n' "$t" "$s" "${p##*/}" "$c" "$src"
-done
+	printf '%s\t%s\t%s\t%s\t%s\n' "$t" "$s" "${p##*/}" "$c" "$o"
+done | head -n 100
 echo '::end'
 exit 0
 `

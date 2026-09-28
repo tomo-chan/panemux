@@ -372,13 +372,15 @@ terminal that had focus cannot receive what is typed into the dashboard.
   title, waiting reason, the open action or the reason there is none (a stopped claude or codex task
   offers `Resume` instead), `Mark done` or `Mark not done`, and for a done candidate the line "The summary
   finds no work left: a candidate for Mark done." — stays in place, and only the body below scrolls:
-  state notes (for codex: a task with no session yet is waiting for its first instruction or held at
-  a start-up screen, to be answered in the pane; a working one may be waiting for approval, which
-  codex does not record; an unknown one has no turn its history or log end reports); **Work**, the
-  summary and the remaining work as a numbered list ("No remaining work found." when there is none);
-  links (repository, branch, pull request, then issues noted "closed by the pull request" and
-  References noted "from the branch name or pull request title", each row only when there is
-  something to show), labels, the chain from task to agent to tmux session to pane to
+  state notes (for codex: a task with no session of its own is waiting for its first instruction,
+  held at a start-up screen, or running its session in codex's shared daemon, to be seen in the pane;
+  a session the daemon runs shows "codex's shared daemon · cannot open in a pane" where a card says
+  where it runs, and says why; a working one may be waiting for approval, which codex does not
+  record; an unknown one has no turn its history or log end reports); **Work**, the summary and the
+  remaining work as a numbered list ("No remaining work found." when there is none); links
+  (repository, branch, pull request, then issues noted "closed by the pull request" and References
+  noted "from the branch name or pull request title", each row only when there is something to
+  show), labels, the chain from task to agent to tmux session to pane to
   workspace, and the directory and session ID. Work also says when a summary is running
   ("Summarizing…"), failed (with the reason), outdated, unreadable, not made while the task works,
   or off (naming `task_dashboard.summary.enabled`), and offers `Summarize` / `Summarize again` when

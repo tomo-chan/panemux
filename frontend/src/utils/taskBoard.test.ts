@@ -519,6 +519,8 @@ describe('taskOpenAction', () => {
       .toEqual({ kind: 'goto', pane })
     expect(taskOpenAction(task({ state: 'stop', location: { kind: 'none', attachable: false } }), null))
       .toEqual({ kind: 'unavailable', reason: 'not running' })
+    expect(taskOpenAction(task({ agent: 'codex', location: { kind: 'daemon', attachable: false } }), null))
+      .toEqual({ kind: 'unavailable', reason: "run by codex's shared daemon, in a pane it cannot tell" })
   })
 })
 

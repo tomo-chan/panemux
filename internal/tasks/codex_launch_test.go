@@ -43,9 +43,11 @@ func codexParams(t *testing.T, mode launchMode, cwd, prompt string) launchParams
 
 // A new codex task: the first instruction is codex's single argument after
 // "--" (codex reads an unguarded leading "-" as an option), the update check
-// that would hold the TUI at a prompt is turned off, and codex starts in the
-// working directory with its own directory first on PATH — an npm install's
-// codex is a node script, and node sits next to it there.
+// that would hold the TUI at a prompt is turned off, the TUI keeps its session
+// itself rather than in codex's shared daemon, and codex starts in the working
+// directory with its own directory last on PATH — an npm install's codex is a
+// node script, and node sits next to it there — so the commands codex runs
+// resolve as they would anywhere else.
 func TestLaunchScript_NewCodexTask(t *testing.T) {
 	h := newStubHost(t, true, false)
 	codexDir := h.withCodex(t)
@@ -57,9 +59,10 @@ func TestLaunchScript_NewCodexTask(t *testing.T) {
 	writeExecutable(t, shell, "#!/bin/sh\necho '"+filepath.Join(codexDir, "codex")+"'\n")
 	require.NoError(t, parseLaunchOutput(h.run(t, script, shell)))
 
-	assert.Equal(t, []string{"-c", "check_for_update_on_startup=false", "--", hostilePrompt}, h.args(t, "codex.args"))
+	assert.Equal(t, []string{"--no-daemon", "-c", "check_for_update_on_startup=false", "--", hostilePrompt},
+		h.args(t, "codex.args"))
 	assert.Equal(t, []string{cwd}, h.lines(t, "codex.pwd"))
-	assert.Equal(t, []string{codexDir + ":" + h.bin}, h.lines(t, "codex.path"))
+	assert.Equal(t, []string{h.bin + ":" + codexDir}, h.lines(t, "codex.path"))
 	tmuxArgs := h.args(t, "tmux.args")
 	assert.Equal(t, []string{"new-session", "-d", "-s", "task-0a1b2c3d", "--", "sh"}, tmuxArgs[:6])
 	assert.NotContains(t, strings.Join(tmuxArgs, "\n"), "touch pwned")
@@ -79,7 +82,7 @@ func TestLaunchScript_ResumeCodexTask(t *testing.T) {
 
 	require.NoError(t, parseLaunchOutput(h.run(t, script, "/bin/false")))
 
-	assert.Equal(t, []string{"-c", "check_for_update_on_startup=false", "resume", "--", codexSessionA},
+	assert.Equal(t, []string{"--no-daemon", "-c", "check_for_update_on_startup=false", "resume", "--", codexSessionA},
 		h.args(t, "codex.args"))
 	assert.Equal(t, []string{cwd}, h.lines(t, "codex.pwd"))
 	assert.Equal(t, []string{h.bin + ":" + h.bin}, h.lines(t, "codex.path"),
@@ -181,10 +184,11 @@ func stoppedCodexOutput(stoppedID, cwd, runningID string) []byte {
 		"::section ps",
 		"8 1 codex",
 		"::section codex-open",
-		"8\t00:10\t995 10\tcompleted 990\t\t\t\t/h/.codex/sessions/2026/09/27/"+rolloutName("2026-09-27T12-00-15", runningID),
+		"8\t00:10\t995 10\tcompleted 990\t\t\t\t\t/h/.codex/sessions/2026/09/27/"+
+			rolloutName("2026-09-27T12-00-15", runningID),
 		"::section codex-rollouts",
-		"995\t10\t"+rolloutName("2026-09-27T12-00-15", runningID)+"\t\t"+`"source":"cli"`,
-		"990\t10\t"+rolloutName("2026-09-27T11-57-03", stoppedID)+"\t"+`"cwd":"`+cwd+`"`+"\t"+`"source":"cli"`,
+		"995\t10\t"+rolloutName("2026-09-27T12-00-15", runningID)+"\t\t"+`"originator":"codex-tui"`,
+		"990\t10\t"+rolloutName("2026-09-27T11-57-03", stoppedID)+"\t"+`"cwd":"`+cwd+`"`+"\t"+`"originator":"codex-tui"`,
 		"::end",
 	)
 }

@@ -94,6 +94,21 @@
     },
     {
       "agent": "codex",
+      "cwd": "/workspace/user/sample-cli",
+      "host": "",
+      "id": "local:codex:01a0e2bd-ce26-7d81-a280-90c4de0d0046",
+      "location": {
+        "attachable": false,
+        "kind": "daemon"
+      },
+      "pid": 107,
+      "session_id": "01a0e2bd-ce26-7d81-a280-90c4de0d0046",
+      "started_at": "2026-01-01T00:00:00Z",
+      "state": "idle",
+      "status_since": "2026-01-01T00:00:00Z"
+    },
+    {
+      "agent": "codex",
       "cwd": "/workspace/user/sample-api",
       "host": "",
       "id": "local:codex:pid-104",

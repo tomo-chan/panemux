@@ -117,9 +117,26 @@ the operator before implementation:
   known only after the first instruction. Holding the labels in memory keyed by tmux session was
   chosen over hiding the labels field for codex and over waiting up to 15 seconds in the request,
   which would lose them exactly when a start-up screen holds the task.
-- **Stopped codex sessions are the interactive ones and share the cap with claude** (operator's
-  choice): `source` `cli` only, and 50 stopped tasks per host across both agents, keeping stage 1's
-  "50 per host".
+- **Stopped codex sessions are the TUI's and share the cap with claude** (operator's choice): 50
+  stopped tasks per host across both agents, keeping stage 1's "50 per host". The first version kept
+  `source` `cli` only; review of PR #271 found that a TUI running through codex's shared daemon writes
+  `source` `vscode` (with `originator` `codex-tui`), so those sessions were never listed. The operator
+  chose `originator` `codex-tui`, which keeps `codex exec` (`codex_exec`) out, and the script now counts
+  its 100 after that filter (the first version cut at 100 first, so 100 newer `codex exec` rollouts
+  hid every TUI session).
+- **A session codex's shared daemon runs is a task of its own** (operator's choice, from review of
+  PR #271). From codex-cli 0.157, `codex` started without `-c` or `--no-daemon` runs its session in a
+  shared `codex app-server` daemon, which holds the rollout — and keeps holding it, with its writer
+  lock, after the TUI exits. The implementation session's Linux check had always passed `-c`, which
+  keeps the session in the TUI, so it never saw the daemon. Nothing ties the TUI to the session: the
+  TUI holds only a socket, and `logs_2.sqlite` records the session under the daemon's pid. The
+  alternatives were pairing a TUI with a daemon session of the same working directory when only one
+  matched (rejected: a guess that goes wrong when an exited session lingers in the daemon) and only
+  documenting the limit. The chosen form shows the session's real state under a `daemon` location
+  that offers no pane, beside the TUI's `run` card, and never offers `Resume` on a session the daemon
+  still holds.
+- **The dashboard's own starts pass `--no-daemon`** (operator's choice), so their sessions stay tied
+  to their tmux session. That `-c` alone did the same was an observation, not a documented rule.
 - **`--` before codex's prompt and its resumed session ID, and UUIDs only.** Checked on both
   platforms: without `--`, a prompt beginning with `-` is an option, and `codex resume <id> '-h …'`
   prints help and exits 0; `codex resume` also takes a session name, which codex sets automatically
@@ -127,9 +144,11 @@ the operator before implementation:
 - **A codex resume's tmux session is named from the ID's last eight characters.** Codex IDs are
   version 7 UUIDs, whose first eight characters are a timestamp shared by sessions started within a
   minute.
-- **codex runs with its own directory first on `PATH`.** Found in the Linux check: an npm install's
-  `codex` is a node script, and started from a `PATH` without node it failed with
-  `env: 'node': No such file or directory`.
+- **codex's own directory is added at the end of `PATH`.** Found in the Linux check: an npm
+  install's `codex` is a node script, and started from a `PATH` without node it failed with
+  `env: 'node': No such file or directory`. The first version put the directory first; review of PR
+  #271 showed that this also moved every command codex and its model run ahead to that directory (a
+  `python3` beside codex won). The operator chose the end, which still supplies node.
 - **Codex tasks are not summarized.** The summary reads claude's log format; a rollout is another.
 
 ### Stage 1: a dashboard of agent sessions, independent of panes (2026-09-25, issue #252)

@@ -109,7 +109,7 @@ func (c *codexLaunchHost) run(_ context.Context, script string) ([]byte, error) 
 			"40 task-0f0e0d0c",
 			"::section codex-open",
 			"41\t00:30",
-			"41\t00:30\t999 10\tcompleted 980\t\t\t\t/h/.codex/sessions/2026/09/27/"+
+			"41\t00:30\t999 10\tcompleted 980\t\t\t\t\t/h/.codex/sessions/2026/09/27/"+
 				"rollout-2026-09-27T11-57-03-"+resumeCodexSessionID+".jsonl",
 		)
 	}

@@ -340,7 +340,9 @@ export const TaskStateSchema = z.enum(['busy', 'wait', 'idle', 'run', 'unknown',
 export type TaskState = z.infer<typeof TaskStateSchema>
 
 export const TaskLocationSchema = z.object({
-  kind: z.enum(['tmux', 'outside', 'none']),
+  // daemon: a codex session run by codex's shared app-server daemon, which
+  // no pane can be told to show (issue #264).
+  kind: z.enum(['tmux', 'outside', 'daemon', 'none']),
   tmux_session: z.string().optional(),
   // The pane an agent outside tmux was started from, as its PANEMUX_PANE_ID
   // names it. Only a claim: findTaskPane matches it against the workspaces.

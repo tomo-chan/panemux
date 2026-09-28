@@ -2,6 +2,7 @@ package tasks
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -41,12 +42,12 @@ func TestParseCollectOutput_ReadsTheCodexSections(t *testing.T) {
 			`"payload":{"type":"task_started","turn_id":"x"}}`+"\t"+
 			`{"timestamp":"2026-09-27T11:59:52.794Z","ordinal":67,"type":"response_item",`+
 			`"payload":{"type":"function_call","id":"fc_1","name":"request_user_input","arguments":"{}"`+"\t"+
-			`"cwd":"/tmp/sample-project"`+"\t"+openPath,
-		"900\t1-02:03:04\t1790510000 10\t\t\t\t\t/remote/home/demo/.codex/sessions/2026/09/27/"+
+			`"cwd":"/tmp/sample-project"`+"\t"+`"originator":"codex-tui"`+"\t"+openPath,
+		"900\t1-02:03:04\t1790510000 10\t\t\t\t\t\t/remote/home/demo/.codex/sessions/2026/09/27/"+
 			rolloutName("2026-09-27T12-00-15", codexSessionB),
 		"::section codex-rollouts",
 		"1790510485\t48396\t"+rolloutName("2026-09-27T11-57-03", codexSessionA)+"\t"+
-			`"cwd":"/tmp/sample-project"`+"\t"+`"source":"cli"`,
+			`"cwd":"/tmp/sample-project"`+"\t"+`"originator":"codex-tui"`,
 		"1790500000\t17\t"+rolloutName("2026-09-27T09-00-00", codexSessionB)+"\t\t",
 		"::end",
 	)
@@ -58,7 +59,9 @@ func TestParseCollectOutput_ReadsTheCodexSections(t *testing.T) {
 	assert.Equal(t, []codexOpenRollout{
 		{
 			PID: 899, Elapsed: 125, File: rolloutName("2026-09-27T11-57-03", codexSessionA),
-			Rollout: codexRollout{SessionID: codexSessionA, CWD: "/tmp/sample-project", ModTime: 1790510485, Size: 48396},
+			Rollout: codexRollout{
+				SessionID: codexSessionA, CWD: "/tmp/sample-project", Originator: "codex-tui", ModTime: 1790510485, Size: 48396,
+			},
 			Turn: codexTurn{
 				DBStatus: "inProgress", DBStartedAt: 1790510480,
 				Event: "task_started", EventAt: 1790510310057,
@@ -71,7 +74,7 @@ func TestParseCollectOutput_ReadsTheCodexSections(t *testing.T) {
 		},
 	}, raw.CodexOpen)
 	assert.Equal(t, []codexRollout{
-		{SessionID: codexSessionA, CWD: "/tmp/sample-project", Source: "cli", ModTime: 1790510485, Size: 48396},
+		{SessionID: codexSessionA, CWD: "/tmp/sample-project", Originator: "codex-tui", ModTime: 1790510485, Size: 48396},
 		{SessionID: codexSessionB, ModTime: 1790500000, Size: 17},
 	}, raw.CodexRollouts)
 }
@@ -84,14 +87,14 @@ func TestParseCollectOutput_SkipsMalformedCodexRows(t *testing.T) {
 		"::section codex-open",
 		"x\t00:10",
 		"0\t00:10",
-		"899\t00:01\t1\t\t\t\t\t/x/"+good,
-		"899\t00:01\t1 x\t\t\t\t\t/x/"+good,
-		"not-a-pid\t00:01\t1 1\t\t\t\t\t/x/"+good,
-		"0\t00:01\t1 1\t\t\t\t\t/x/"+good,
+		"899\t00:01\t1\t\t\t\t\t\t/x/"+good,
+		"899\t00:01\t1 x\t\t\t\t\t\t/x/"+good,
+		"not-a-pid\t00:01\t1 1\t\t\t\t\t\t/x/"+good,
+		"0\t00:01\t1 1\t\t\t\t\t\t/x/"+good,
 		"899\t00:01\t1 1\t\t\t\t", // too few fields
-		"899\t00:01\tnope\t\t\t\t\t/x/"+good,
-		"899\t00:01\t1 1\t\t\t\t\t/x/rollout-2026-09-27T11-57-03-not-a-uuid.jsonl",
-		"899\t00:01\t1 1\t\t\t\t\t/x/other.jsonl",
+		"899\t00:01\tnope\t\t\t\t\t\t/x/"+good,
+		"899\t00:01\t1 1\t\t\t\t\t\t/x/rollout-2026-09-27T11-57-03-not-a-uuid.jsonl",
+		"899\t00:01\t1 1\t\t\t\t\t\t/x/other.jsonl",
 		"::section codex-rollouts",
 		"x\t1\t"+good+"\t\t",
 		"1\tx\t"+good+"\t\t",
@@ -107,9 +110,9 @@ func TestParseCollectOutput_SkipsMalformedCodexRows(t *testing.T) {
 }
 
 func TestJSONFragmentString(t *testing.T) {
-	assert.Equal(t, "cli", jsonFragmentString(`"source":"cli"`, `"source":`))
-	assert.Empty(t, jsonFragmentString(`"cwd":"cli"`, `"source":`), "another key")
-	assert.Empty(t, jsonFragmentString(`"source":"a\q"`, `"source":`), "not a string codex could have written")
+	assert.Equal(t, "codex-tui", jsonFragmentString(`"originator":"codex-tui"`, `"originator":`))
+	assert.Empty(t, jsonFragmentString(`"cwd":"codex-tui"`, `"originator":`), "another key")
+	assert.Empty(t, jsonFragmentString(`"originator":"a\q"`, `"originator":`), "not a string codex could have written")
 }
 
 // A codex-rollouts row may end after the file name (no session_meta line
@@ -139,7 +142,7 @@ func TestParseCollectOutput_CodexOpenRowWithOnlyTheRollout(t *testing.T) {
 		"::panemux-tasks v1",
 		"::now 5",
 		"::section codex-open",
-		"899\t\t1790510485 12\tgarbage\tnot json\t{\"type\":\"response_item\"}\t\t/x/"+name,
+		"899\t\t1790510485 12\tgarbage\tnot json\t{\"type\":\"response_item\"}\t\t\t/x/"+name,
 		"::end",
 	))
 	require.NoError(t, err)
@@ -238,9 +241,9 @@ func writeRollout(t *testing.T, home, day, name string, lines ...string) string 
 	return path
 }
 
-func sessionMeta(sessionID, cwd, source string) string {
+func sessionMeta(sessionID, cwd, originator string) string {
 	return `{"timestamp":"2026-09-27T11:57:20.745Z","type":"session_meta","payload":{"session_id":"` + sessionID +
-		`","id":"` + sessionID + `","cwd":"` + cwd + `","originator":"codex-tui","source":"` + source +
+		`","id":"` + sessionID + `","cwd":"` + cwd + `","originator":"` + originator + `","source":"cli` +
 		`","thread_source":"user","base_instructions":"say \"cwd\":\"/not-this\""}}`
 }
 
@@ -251,18 +254,18 @@ func sessionMeta(sessionID, cwd, source string) string {
 func writeCodexHome(t *testing.T, home string) (live, livePath string, withSQLite bool) {
 	t.Helper()
 	stopped := rolloutName("2026-09-20T08-00-00", codexSessionA)
-	writeRollout(t, home, "2026/09/20", stopped, sessionMeta(codexSessionA, "/workspace/user/api", "cli"))
+	writeRollout(t, home, "2026/09/20", stopped, sessionMeta(codexSessionA, "/workspace/user/api", "codex-tui"))
 	oldID := "01a0e2bd-ce26-7d81-a280-90c4de0d0046"
 	old := writeRollout(t, home, "2026/09/01", rolloutName("2026-09-01T08-00-00", oldID),
-		sessionMeta(oldID, "/old", "cli"))
+		sessionMeta(oldID, "/old", "codex-tui"))
 	longAgo := time.Now().Add(-10 * 24 * time.Hour)
 	require.NoError(t, os.Chtimes(old, longAgo, longAgo))
 	writeRollout(t, home, "2026", rolloutName("2026-09-01T08-00-00", codexSessionA),
-		sessionMeta(codexSessionA, "/wrong-depth", "cli"))
+		sessionMeta(codexSessionA, "/wrong-depth", "codex-tui"))
 
 	live = rolloutName("2026-09-27T11-57-03", codexSessionB)
 	livePath = writeRollout(t, home, "2026/09/27", live,
-		sessionMeta(codexSessionB, "/workspace/user/web", "cli"),
+		sessionMeta(codexSessionB, "/workspace/user/web", "codex-tui"),
 		`{"timestamp":"2026-09-27T11:59:50.000Z","ordinal":60,"type":"event_msg",`+
 			`"payload":{"type":"task_started","turn_id":"t1"}}`,
 		`{"timestamp":"2026-09-27T11:59:52.794Z","ordinal":67,"type":"response_item",`+
@@ -346,8 +349,31 @@ func TestRunLocal_CollectScriptReadsCodexRollouts(t *testing.T) {
 	assert.Len(t, byID, 2, "rollouts older than 7 days or at another depth are not listed: %+v", raw.CodexRollouts)
 	stopped := byID[codexSessionA]
 	assert.Equal(t, "/workspace/user/api", stopped.CWD)
-	assert.Equal(t, "cli", stopped.Source)
+	assert.Equal(t, "codex-tui", stopped.Originator)
 	assert.InDelta(t, time.Now().Unix(), stopped.ModTime, 60)
 	assert.Positive(t, stopped.Size)
-	assert.Equal(t, "cli", byID[codexSessionB].Source)
+	assert.Equal(t, "codex-tui", byID[codexSessionB].Originator)
+}
+
+// The 100 rollouts the script lists are the newest of the TUI's: newer
+// ones codex exec wrote, however many, do not push them out.
+func TestRunLocal_CollectScriptListsTheTUIsRolloutsPastNewerOnes(t *testing.T) {
+	home := t.TempDir()
+	homedir.SetForTest(t, home)
+	tui := writeRollout(t, home, "2026/09/28", rolloutName("2026-09-28T01-00-00", codexSessionA),
+		sessionMeta(codexSessionA, "/workspace/user/api", codexOriginatorTUI))
+	twoHoursAgo := time.Now().Add(-2 * time.Hour)
+	require.NoError(t, os.Chtimes(tui, twoHoursAgo, twoHoursAgo))
+	for i := 0; i < 101; i++ {
+		id := fmt.Sprintf("01a0e2b9-d054-7cc2-9278-%012d", i)
+		writeRollout(t, home, "2026/09/28", rolloutName("2026-09-28T02-00-00", id), sessionMeta(id, "/w", "codex_exec"))
+	}
+
+	out, err := runLocal(context.Background(), collectScript)
+	require.NoError(t, err)
+	raw, err := parseCollectOutput(out)
+	require.NoError(t, err)
+
+	require.Len(t, raw.CodexRollouts, 1, "only the TUI's rollouts are listed")
+	assert.Equal(t, codexSessionA, raw.CodexRollouts[0].SessionID)
 }

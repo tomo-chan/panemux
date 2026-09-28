@@ -197,8 +197,8 @@ func TestBuildTasks_CodexProcessWithTwoRolloutsIsInTheNewestOne(t *testing.T) {
 	newer.File = rolloutName("2026-09-27T12-00-15", codexSessionB)
 	raw := codexRaw(newer, older)
 	raw.CodexRollouts = []codexRollout{
-		{SessionID: codexSessionB, Source: "cli", ModTime: hostNow - 20},
-		{SessionID: codexSessionA, Source: "cli", ModTime: hostNow - 300},
+		{SessionID: codexSessionB, Originator: "codex-tui", ModTime: hostNow - 20},
+		{SessionID: codexSessionA, Originator: "codex-tui", ModTime: hostNow - 300},
 	}
 
 	for _, order := range [][]codexOpenRollout{{newer, older}, {older, newer}} {
@@ -252,7 +252,7 @@ func TestBuildTasks_CodexWithoutARolloutIsARunningProcess(t *testing.T) {
 func TestBuildTasks_RolloutsHeldByOtherCodexProcesses(t *testing.T) {
 	raw := codexRaw(openRollout(40, codexSessionA, 30, codexTurn{DBStatus: "inProgress"}))
 	raw.Processes = append(raw.Processes, process{PID: 40, PPID: 1, Command: "codex exec fix-it"})
-	raw.CodexRollouts = []codexRollout{{SessionID: codexSessionA, Source: "cli", ModTime: hostNow - 30}}
+	raw.CodexRollouts = []codexRollout{{SessionID: codexSessionA, Originator: "codex-tui", ModTime: hostNow - 30}}
 	tasks := buildTasks("", raw, collectedAt)
 	require.Len(t, tasks, 1)
 	assert.Equal(t, "local:codex:pid-31", tasks[0].ID)
@@ -263,7 +263,7 @@ func TestBuildTasks_RolloutsHeldByOtherCodexProcesses(t *testing.T) {
 func TestBuildTasks_RolloutOfAProcessThatIsGoneIsStopped(t *testing.T) {
 	raw := codexRaw(openRollout(99, codexSessionA, 30, codexTurn{DBStatus: "inProgress"}))
 	raw.CodexRollouts = []codexRollout{
-		{SessionID: codexSessionA, Source: "cli", CWD: "/workspace/user/api", ModTime: hostNow - 30},
+		{SessionID: codexSessionA, Originator: "codex-tui", CWD: "/workspace/user/api", ModTime: hostNow - 30},
 	}
 	tasks := buildTasks("", raw, collectedAt)
 	require.Len(t, tasks, 2)
@@ -281,16 +281,17 @@ func TestBuildTasks_TwoProcessesInOneCodexSessionAreListedOnce(t *testing.T) {
 	assert.Equal(t, 31, tasks[0].PID, "the first listed process keeps the session")
 }
 
-// Stopped codex sessions are the interactive ones (source "cli"): codex exec
+// Stopped codex sessions are the TUI's (originator "codex-tui"), whether the
+// TUI wrote its rollout itself or through codex's shared daemon: codex exec
 // and the desktop app write rollouts too.
 func TestBuildTasks_StoppedCodexSessions(t *testing.T) {
 	raw := rawSnapshot{
 		Now: hostNow,
 		CodexRollouts: []codexRollout{
-			{SessionID: codexSessionA, CWD: "/workspace/user/api", Source: "cli", ModTime: hostNow - 3600, Size: 9},
-			{SessionID: codexSessionB, Source: "exec", ModTime: hostNow - 60},
-			{SessionID: "01a0e2bd-ce26-7d81-a280-90c4de0d0046", Source: "", ModTime: hostNow - 60},
-			{SessionID: codexSessionA, CWD: "/older", Source: "cli", ModTime: hostNow - 7200},
+			{SessionID: codexSessionA, CWD: "/workspace/user/api", Originator: "codex-tui", ModTime: hostNow - 3600, Size: 9},
+			{SessionID: codexSessionB, Originator: "codex_exec", ModTime: hostNow - 60},
+			{SessionID: "01a0e2bd-ce26-7d81-a280-90c4de0d0046", Originator: "", ModTime: hostNow - 60},
+			{SessionID: codexSessionA, CWD: "/older", Originator: "codex-tui", ModTime: hostNow - 7200},
 		},
 	}
 	tasks := buildTasks("build-box", raw, collectedAt)
@@ -307,12 +308,76 @@ func TestBuildTasks_StoppedCodexSessions(t *testing.T) {
 
 // The 50 stopped tasks a host lists are the newest of claude's and codex's
 // together.
+// codexDaemon is codex's shared app-server daemon, started by the TUI with
+// pid 31, which it outlives.
+func codexDaemon(pid int) process {
+	return process{
+		PID: pid, PPID: 31,
+		Command: "/remote/home/demo/.codex/packages/app-server-daemon/releases/0.157.1/bin/codex " +
+			"app-server --listen unix:// --managed-daemon",
+	}
+}
+
+// A TUI started without -c or --no-daemon runs its session in codex's shared
+// daemon, which holds the rollout; nothing ties the TUI to it. The session is
+// a task of its own, whose state is read as any other's but which cannot be
+// opened in a pane, and the TUI stays a process with no session.
+func TestBuildTasks_ASessionTheCodexDaemonHoldsIsATaskOfItsOwn(t *testing.T) {
+	held := openRollout(50, codexSessionA, 30, codexTurn{DBStatus: "inProgress", DBStartedAt: hostNow - 60})
+	held.Rollout.Originator = codexOriginatorTUI
+	held.Elapsed = 900
+	other := openRollout(50, codexSessionB, 30, codexTurn{DBStatus: "completed"})
+	other.Rollout.Originator = "Codex Desktop"
+	raw := codexRaw(held, other)
+	raw.Processes = append(raw.Processes, codexDaemon(50))
+	raw.CodexRollouts = []codexRollout{
+		{SessionID: codexSessionA, Originator: codexOriginatorTUI, ModTime: hostNow - 30},
+		{SessionID: codexSessionB, Originator: codexOriginatorTUI, ModTime: hostNow - 30},
+	}
+
+	tasks := buildTasks("", raw, collectedAt)
+
+	require.Len(t, tasks, 2,
+		"the TUI, and the daemon's TUI session; nothing is stopped while the daemon holds it: %+v", tasks)
+	session := findTask(t, tasks, "local:codex:"+codexSessionA)
+	assert.Equal(t, StateBusy, session.State)
+	assert.Equal(t, 50, session.PID)
+	assert.Equal(t, Location{Kind: LocationDaemon}, session.Location,
+		"not the tmux pane of the TUI that started the daemon")
+	assert.Equal(t, hostAgo(900), session.StartedAt)
+	tui := findTask(t, tasks, "local:codex:pid-31")
+	assert.Equal(t, StateRun, tui.State)
+}
+
+// A session the TUI holds itself is that TUI's task, even should the daemon
+// hold it too.
+func TestBuildTasks_ATUIsOwnSessionIsNotListedAgainForTheDaemon(t *testing.T) {
+	own := openRollout(31, codexSessionA, 30, codexTurn{DBStatus: "completed"})
+	daemon := openRollout(50, codexSessionA, 30, codexTurn{DBStatus: "completed"})
+	daemon.Rollout.Originator = codexOriginatorTUI
+	for _, order := range [][]codexOpenRollout{{own, daemon}, {daemon, own}} {
+		raw := codexRaw(order...)
+		raw.Processes = append(raw.Processes, codexDaemon(50))
+		tasks := buildTasks("", raw, collectedAt)
+		require.Len(t, tasks, 1)
+		assert.Equal(t, 31, tasks[0].PID)
+	}
+}
+
+func TestIsCodexDaemon(t *testing.T) {
+	assert.True(t, isCodexDaemon(codexDaemon(1).Command))
+	assert.True(t, isCodexDaemon("codex -c x=y app-server"))
+	assert.False(t, isCodexDaemon("codex exec app-server"))
+	assert.False(t, isCodexDaemon("codex"))
+	assert.False(t, isCodexDaemon("/usr/bin/app-server codex"))
+}
+
 func TestBuildTasks_StoppedClaudeAndCodexShareTheCap(t *testing.T) {
 	raw := rawSnapshot{Now: 10_000}
 	for i := 0; i < maxStoppedTasks; i++ {
 		raw.Transcripts = append(raw.Transcripts, transcript{ModTime: int64(2 * i), SessionID: fmt.Sprintf("c%03d", i)})
 		raw.CodexRollouts = append(raw.CodexRollouts, codexRollout{
-			SessionID: fmt.Sprintf("01a0e2b9-d054-7cc2-9278-%012d", i), Source: "cli", ModTime: int64(2*i + 1),
+			SessionID: fmt.Sprintf("01a0e2b9-d054-7cc2-9278-%012d", i), Originator: "codex-tui", ModTime: int64(2*i + 1),
 		})
 	}
 	tasks := buildTasks("", raw, collectedAt)
