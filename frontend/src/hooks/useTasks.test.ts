@@ -305,6 +305,7 @@ describe('useTasks launch and resume', () => {
   beforeEach(() => setVisibility('visible'))
   afterEach(() => vi.restoreAllMocks())
 
+  // efficacy:exempt only the input's new agent field changed; a claude launch sent agent claude before this branch too
   it('POSTs a new task, answers with what was started, and collects again', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(ok(payload))
@@ -330,6 +331,7 @@ describe('useTasks launch and resume', () => {
     expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/tasks')
   })
 
+  // efficacy:exempt only the input's new agent field changed; a claude launch sent agent claude before this branch too
   it('reports a refused launch, a network failure and an unexpected answer, without collecting', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(ok(payload))
