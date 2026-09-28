@@ -318,9 +318,13 @@ can read claude's arguments on the host can read it while claude runs.
 **Codex gets its first instruction after `--` too, with `--no-daemon` and
 `-c check_for_update_on_startup=false`.** The fixed command for a new codex task is
 `sh -c 'p=$(cat -- "$1"); rm -f -- "$1"; cd -- "$4" || exit 1; PATH=$PATH:${2%/*}; export PATH; exec "$2" --no-daemon -c check_for_update_on_startup=false -- "$p"'`,
-with the same positional parameters (the session ID one is empty). Verified with codex-cli 0.142.2
-and 0.157.1 on macOS and 0.157.1 on Linux: without `--`, `codex '-x hello'` is refused as an unknown
-option, and after `--` a prompt such as `-h -V --help: …` is sent as the first message. The `-c`
+with the same positional parameters (the session ID one is empty). The handling of `--` was verified
+with codex-cli 0.142.2 and 0.157.1 on macOS and 0.157.1 on Linux, before `--no-daemon` was added:
+without `--`, `codex '-x hello'` is refused as an unknown option, and after `--` a prompt such as
+`-h -V --help: …` is sent as the first message. The whole command, `--no-daemon` included, was
+verified with 0.157.1 on Linux. codex-cli 0.142.2 has no `--no-daemon` and exits 2 on it, so the
+script first runs `"$bin" --help` (with the same `PATH` addition) and refuses with `codex-too-old`
+unless the help lists `--no-daemon`; the help's text is only searched, never shown. The `-c`
 value is a fixed literal; it stops the update prompt, which would otherwise hold a task nobody is
 watching. codex's other start-up screens (trusting a directory, a new-model notice, a usage-limit
 offer) are left for a person to answer in the pane: panemux does not write codex's configuration.
@@ -351,7 +355,7 @@ session the operator watches and types into through a pane, and disabling them w
 that pane as well.
 
 **What the host prints back** is searched only for the script's own `::panemux-launch` line; a refusal
-is one of seven fixed words, each mapped to a fixed message (`LaunchError`), so no host text reaches the
+is one of eight fixed words, each mapped to a fixed message (`LaunchError`), so no host text reaches the
 response. A host that prints no answer is a failed launch.
 
 The labels a start records go through `NormalizeLabels` before anything runs, so a refused label

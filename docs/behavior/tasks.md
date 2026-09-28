@@ -401,10 +401,22 @@ A **codex** task starts the same way, with these differences:
   the TUI's own process, where its rollout ties it to the task's tmux session, rather than in codex's
   shared daemon ([Codex sessions](#codex-sessions)). The update check is turned off because its
   prompt would hold the task; codex's configuration is not otherwise touched.
+- **A codex without `--no-daemon` is refused.** Before anything starts, the launch reads
+  `codex --help`; when it lists no `--no-daemon`, the host refuses with "codex on the host is too
+  old: it has no --no-daemon option", and no tmux session is started. codex-cli 0.142.2 has no such
+  option and exits 2 on it, so it would have ended the tmux session at once while the launch
+  reported success; 0.157.1 has it. The version that added it has not been checked, so the help,
+  not a version number, decides. A resume is refused the same way.
 - **codex's own directory is added at the end of `PATH`.** An npm install's `codex` is a
   `#!/usr/bin/env node` script with node beside it, and a tmux server started from an SSH exec
   channel does not have that directory on its `PATH`. At the end, it supplies node when nothing
   earlier does and changes nothing else: the commands codex runs resolve as they would without it.
+  The other side of that: **a `node` earlier on that `PATH` is the one that runs codex** — an old
+  system `/usr/bin/node` on a host where codex was installed with nvm's node, say. Such a codex fails
+  as it starts, and the tmux session ends; install codex with the `node` the exec channel's `PATH`
+  finds first, or put its directory before that `node` in the login shell's `PATH`. The `codex
+  --help` check above runs the same way, so a `node` that cannot run codex at all is reported as a
+  codex too old.
 - **Start-up screens are answered in the pane.** Codex can stop before the first instruction to ask
   whether to trust the directory, to announce a new model, or — once a usage limit is near — to
   offer a cheaper model. panemux does not answer them or write codex's configuration to avoid them.
@@ -691,8 +703,8 @@ Starts a task:
   { "tmux_session": "task-0a1b2c3d", "pending_labels": ["payment"] }
   ```
 - `400` for a body, agent, label, directory or instruction that is not valid, `404` for a `host`
-  that is not an `ssh_connections` key, `409` when the host refused — tmux or the agent missing, the
-  directory missing, a tmux session of that name existing, tmux failing, the temporary file not
+  that is not an `ssh_connections` key, `409` when the host refused — tmux or the agent missing, a codex
+  without `--no-daemon`, the directory missing, a tmux session of that name existing, tmux failing, the temporary file not
   written, each with a fixed message — `502` when the host could not be reached or did not answer,
   and `403` for a cross-site request as for `GET /api/tasks`.
 

@@ -44,23 +44,27 @@ type LaunchError struct {
 
 // The words the launch script refuses with, one per way a host can refuse.
 const (
-	RefusedNoTmux     = "no-tmux"
-	RefusedNoCWD      = "no-cwd"
-	RefusedNoClaude   = "no-claude"
-	RefusedNoCodex    = "no-codex"
-	RefusedTmuxExists = "tmux-exists"
-	RefusedTmuxFailed = "tmux-failed"
-	RefusedPromptFile = "prompt-file"
+	RefusedNoTmux   = "no-tmux"
+	RefusedNoCWD    = "no-cwd"
+	RefusedNoClaude = "no-claude"
+	RefusedNoCodex  = "no-codex"
+	// RefusedCodexTooOld is a codex whose help lists no --no-daemon
+	// (codex-cli 0.142.2 has none, and exits 2 on it).
+	RefusedCodexTooOld = "codex-too-old"
+	RefusedTmuxExists  = "tmux-exists"
+	RefusedTmuxFailed  = "tmux-failed"
+	RefusedPromptFile  = "prompt-file"
 )
 
 var launchErrorMessages = map[string]string{
-	RefusedNoTmux:     "tmux is not installed on the host",
-	RefusedNoCWD:      "the working directory does not exist on the host",
-	RefusedNoClaude:   "claude was not found on the host",
-	RefusedNoCodex:    "codex was not found on the host",
-	RefusedTmuxExists: "a tmux session with the task's name already exists on the host",
-	RefusedTmuxFailed: "tmux could not start the session on the host",
-	RefusedPromptFile: "the prompt could not be written to a temporary file on the host",
+	RefusedNoTmux:      "tmux is not installed on the host",
+	RefusedNoCWD:       "the working directory does not exist on the host",
+	RefusedNoClaude:    "claude was not found on the host",
+	RefusedNoCodex:     "codex was not found on the host",
+	RefusedCodexTooOld: "codex on the host is too old: it has no --no-daemon option",
+	RefusedTmuxExists:  "a tmux session with the task's name already exists on the host",
+	RefusedTmuxFailed:  "tmux could not start the session on the host",
+	RefusedPromptFile:  "the prompt could not be written to a temporary file on the host",
 }
 
 func (e *LaunchError) Error() string {
@@ -137,7 +141,10 @@ type launchParams struct {
 //     It runs with --no-daemon, so the TUI keeps its session itself rather
 //     than in codex's shared daemon, where nothing ties the session to the
 //     tmux session it runs in, and with -c check_for_update_on_startup=false,
-//     since the update prompt would hold a task nobody is watching.
+//     since the update prompt would hold a task nobody is watching. A codex
+//     whose help lists no --no-daemon is refused before anything starts: it
+//     would exit at once on the option, in a tmux session that ends with it,
+//     while the launch reported success.
 //   - tmux receives the command as separate arguments after "--", which tmux
 //     runs without a shell (tmux 2.0 and later). The working directory is not
 //     given to tmux's -c, which expands its value as a format ("#S", "##"),
@@ -180,6 +187,10 @@ case $bin in
 *) say "error no-$agent"; exit 0 ;;
 esac
 [ -f "$bin" ] && [ -x "$bin" ] || { say "error no-$agent"; exit 0; }
+if [ "$agent" = codex ]; then
+  PATH=$PATH:${bin%/*} "$bin" --help </dev/null 2>/dev/null | grep -q -e '--no-daemon' ||
+    { say 'error codex-too-old'; exit 0; }
+fi
 if [ "$agent" = codex ]; then
   codex='PATH=$PATH:${2%/*}; export PATH; exec "$2" --no-daemon -c check_for_update_on_startup=false'
   resume='cd -- "$1" || exit 1; '"$codex"' resume -- "$3"'

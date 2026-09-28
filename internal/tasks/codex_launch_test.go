@@ -13,7 +13,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// stubCodex lists --no-daemon in its help, as codex-cli 0.157.1 does.
 const stubCodex = `#!/bin/sh
+if [ "$1" = --help ]; then
+  printf 'Options:\n      --no-daemon\n'
+  exit 0
+fi
 printf '%s\0' "$@" > "$STUB_LOG/codex.args"
 pwd > "$STUB_LOG/codex.pwd"
 printf '%s\n' "$PATH" > "$STUB_LOG/codex.path"
@@ -103,6 +108,56 @@ func TestLaunchScript_NoCodexOnTheHost(t *testing.T) {
 	assert.Equal(t, "codex was not found on the host", launchErr.Error())
 	assert.NoFileExists(t, filepath.Join(h.log, "claude.args"), "claude is never run in codex's place")
 	assert.Empty(t, h.leftoverFiles(t))
+}
+
+// A codex without --no-daemon (codex-cli 0.142.2 has none, and exits 2 on
+// it) is refused before anything starts, rather than started into a tmux
+// session that ends at once while the launch reports success.
+func TestLaunchScript_RefusesACodexWithoutNoDaemon(t *testing.T) {
+	for _, mode := range []launchMode{launchNew, launchResume} {
+		t.Run(string(mode), func(t *testing.T) {
+			h := newStubHost(t, true, false)
+			writeExecutable(t, filepath.Join(h.bin, "codex"),
+				"#!/bin/sh\nif [ \"$1\" = --help ]; then printf 'Options:\\n      --no-alt-screen\\n'; exit 0; fi\n"+
+					"printf '%s\\0' \"$@\" > \"$STUB_LOG/codex.args\"\nexit 2\n")
+			prompt := "hello"
+			if mode == launchResume {
+				prompt = ""
+			}
+			script, err := buildLaunchScript(codexParams(t, mode, t.TempDir(), prompt))
+			require.NoError(t, err)
+
+			err = parseLaunchOutput(h.run(t, script, "/bin/false"))
+
+			var launchErr *LaunchError
+			require.ErrorAs(t, err, &launchErr)
+			assert.Equal(t, RefusedCodexTooOld, launchErr.Code)
+			assert.Equal(t, "codex on the host is too old: it has no --no-daemon option", launchErr.Error())
+			assert.NoFileExists(t, filepath.Join(h.log, "tmux.args"), "no tmux session is started")
+			assert.NoFileExists(t, filepath.Join(h.log, "codex.args"))
+			assert.Empty(t, h.leftoverFiles(t))
+		})
+	}
+}
+
+// codex's help runs with codex's directory at the end of PATH, as codex does:
+// an npm install's codex needs the node beside it to print anything.
+func TestLaunchScript_ReadsCodexHelpWithItsNodeFound(t *testing.T) {
+	h := newStubHost(t, true, false)
+	codexDir := h.withCodex(t)
+	writeExecutable(t, filepath.Join(codexDir, "node"), "#!/bin/sh\nexit 0\n")
+	writeExecutable(t, filepath.Join(codexDir, "codex"), "#!/bin/sh\n"+
+		"command -v node >/dev/null || exit 127\n"+
+		"if [ \"$1\" = --help ]; then printf '      --no-daemon\\n'; exit 0; fi\n"+
+		"printf '%s\\0' \"$@\" > \"$STUB_LOG/codex.args\"\n")
+	shell := filepath.Join(h.tmp, "login-shell")
+	writeExecutable(t, shell, "#!/bin/sh\necho '"+filepath.Join(codexDir, "codex")+"'\n")
+	script, err := buildLaunchScript(codexParams(t, launchNew, t.TempDir(), "hello"))
+	require.NoError(t, err)
+
+	require.NoError(t, parseLaunchOutput(h.run(t, script, shell)))
+	assert.Equal(t, []string{"--no-daemon", "-c", "check_for_update_on_startup=false", "--", "hello"},
+		h.args(t, "codex.args"))
 }
 
 func TestBuildLaunchScript_AgentRules(t *testing.T) {

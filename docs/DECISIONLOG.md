@@ -137,6 +137,12 @@ the operator before implementation:
   still holds.
 - **The dashboard's own starts pass `--no-daemon`** (operator's choice), so their sessions stay tied
   to their tmux session. That `-c` alone did the same was an observation, not a documented rule.
+- **A codex without `--no-daemon` is refused** (operator's choice, from the second review of PR
+  #271). codex-cli 0.142.2 exits 2 on the option, which left the dashboard reporting a start whose
+  tmux session had already ended. The alternatives were passing `--no-daemon` only where the help
+  lists it (older versions have no daemon to avoid) and only documenting a minimum version. The
+  check reads the help rather than comparing versions, since the version that added the option was
+  not checked.
 - **`--` before codex's prompt and its resumed session ID, and UUIDs only.** Checked on both
   platforms: without `--`, a prompt beginning with `-` is an option, and `codex resume <id> '-h …'`
   prints help and exits 0; `codex resume` also takes a session name, which codex sets automatically
@@ -148,7 +154,10 @@ the operator before implementation:
   install's `codex` is a node script, and started from a `PATH` without node it failed with
   `env: 'node': No such file or directory`. The first version put the directory first; review of PR
   #271 showed that this also moved every command codex and its model run ahead to that directory (a
-  `python3` beside codex won). The operator chose the end, which still supplies node.
+  `python3` beside codex won). The operator chose the end, which still supplies node. The second
+  review showed the other side — a `node` earlier on the `PATH` runs codex instead — and the operator
+  chose to document it rather than run codex with the `node` beside it, which would depend on how
+  the npm package is laid out and break a native codex that happens to have a `node` next to it.
 - **Codex tasks are not summarized.** The summary reads claude's log format; a rollout is another.
 
 ### Stage 1: a dashboard of agent sessions, independent of panes (2026-09-25, issue #252)

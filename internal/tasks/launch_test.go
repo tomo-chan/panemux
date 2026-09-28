@@ -91,7 +91,7 @@ func newStubHost(t *testing.T, withTmux, withClaude bool) stubHost {
 	// PATH holds only this directory, so a tmux or claude installed on the
 	// machine running the suite is never found; the few utilities the script
 	// uses are linked in.
-	for _, tool := range []string{"sh", "cat", "mktemp", "rm", "tail"} {
+	for _, tool := range []string{"sh", "cat", "mktemp", "rm", "tail", "grep"} {
 		path, err := exec.LookPath(tool)
 		require.NoError(t, err)
 		require.NoError(t, os.Symlink(path, filepath.Join(h.bin, tool)))
@@ -376,13 +376,15 @@ func TestParseLaunchOutput(t *testing.T) {
 
 func TestLaunchError_MessagesAreFixedPerCode(t *testing.T) {
 	for code, want := range map[string]string{
-		RefusedNoTmux:     "tmux is not installed on the host",
-		RefusedNoCWD:      "the working directory does not exist on the host",
-		RefusedNoClaude:   "claude was not found on the host",
-		RefusedTmuxExists: "a tmux session with the task's name already exists on the host",
-		RefusedTmuxFailed: "tmux could not start the session on the host",
-		RefusedPromptFile: "the prompt could not be written to a temporary file on the host",
-		"other":           `the host refused the launch ("other")`,
+		RefusedNoTmux:      "tmux is not installed on the host",
+		RefusedNoCWD:       "the working directory does not exist on the host",
+		RefusedNoClaude:    "claude was not found on the host",
+		RefusedNoCodex:     "codex was not found on the host",
+		RefusedCodexTooOld: "codex on the host is too old: it has no --no-daemon option",
+		RefusedTmuxExists:  "a tmux session with the task's name already exists on the host",
+		RefusedTmuxFailed:  "tmux could not start the session on the host",
+		RefusedPromptFile:  "the prompt could not be written to a temporary file on the host",
+		"other":            `the host refused the launch ("other")`,
 	} {
 		assert.Equal(t, want, (&LaunchError{Code: code}).Error(), code)
 	}
