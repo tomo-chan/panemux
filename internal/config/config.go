@@ -170,6 +170,7 @@ type Data struct { //nolint:govet
 	Display        DisplayConfig            `yaml:"display,omitempty" json:"display"`
 	AgentBoard     AgentBoardConfig         `yaml:"agent_board,omitempty" json:"agent_board"`
 	CommandCenter  CommandCenterConfig      `yaml:"command_center,omitempty" json:"command_center"`
+	TaskDashboard  TaskDashboardConfig      `yaml:"task_dashboard,omitempty" json:"task_dashboard"`
 	URLOpen        URLOpenConfig            `yaml:"url_open,omitempty" json:"url_open"`
 }
 

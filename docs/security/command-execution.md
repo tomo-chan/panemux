@@ -144,7 +144,7 @@ config, or a remote host into a command string:
   `shellQuotePath` before it reaches the command, exactly as a pane's does.
 - **Local git and `gh pr view`** reuse the pane header's lookups: `git` runs with the directory as
   `cmd.Dir` after `sanitizeGitExecDir`, and `gh` receives the branch and repository as discrete
-  argv elements.
+  argv elements. The `--json` field list is a constant (`prTaskFields`), not a value from anywhere.
 
 The script lists only the collecting user's processes (`ps -U "$(id -u)"`). On a shared host,
 another user's processes are neither shown as tasks nor accepted as the live process behind a
@@ -183,3 +183,11 @@ POSIX — parses only `exec`, a literal path and one single-quoted word. The scr
 with no `!`, which csh-family shells expand even inside single quotes: remote paths and pane IDs are
 validated to exclude both, and the browser shim's body is written as a `printf` format of octal
 escapes (`printfOctalFormat`).
+
+The dashboard's links are `href`s the operator clicks, so none may carry a scheme a browser would run.
+An issue URL from `gh` is kept only when it is `http` or `https` (`closingIssueLinks`), and
+a `task_dashboard.autolinks` `url_template` is refused at load unless it is an `https` URL whose
+host and port the browser's URL parser also accepts, with `<num>` after the host
+(`validAutolinkURLTemplate`), so an identifier cannot change where a link goes. The browser checks
+every link in the response again (`HttpUrlSchema`). The identifier put in place of `<num>` is only
+ever digits, or letters, digits and `-` (`isAutolinkIDByte`).

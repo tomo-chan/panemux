@@ -1,0 +1,108 @@
+{
+  "_comment": "task_dashboard.autolinks url_template cases shared by internal/config (TestValidate_TaskDashboardAutolinkURLTemplate) and frontend/src/schemas/index.test.ts. For every accepted template, the URL it gives for num must also pass the browser's HttpUrlSchema (new URL()), or one bad setting would make the browser reject the whole GET /api/tasks response. Hand-edited.",
+  "accepted": [
+    {
+      "url_template": "https://jira.example.com/JIRA-<num>",
+      "num": "123",
+      "url": "https://jira.example.com/JIRA-123"
+    },
+    {
+      "url_template": "https://jira.example.com/issue?query=<num>",
+      "num": "123",
+      "url": "https://jira.example.com/issue?query=123"
+    },
+    {
+      "url_template": "https://zendesk.example.com/ticket?id=<num>",
+      "num": "456",
+      "url": "https://zendesk.example.com/ticket?id=456"
+    },
+    {
+      "url_template": "https://example.atlassian.net/browse/PAY-<num>",
+      "num": "418",
+      "url": "https://example.atlassian.net/browse/PAY-418"
+    },
+    {
+      "url_template": "https://tracker.example.com/t/<num>#top",
+      "num": "A-1",
+      "url": "https://tracker.example.com/t/A-1#top"
+    },
+    {
+      "url_template": "https://tracker.example.com/<num>/<num>",
+      "num": "7",
+      "url": "https://tracker.example.com/7/7"
+    },
+    {
+      "url_template": "https://jira.example.invalid:8443/browse/<num>",
+      "num": "1",
+      "url": "https://jira.example.invalid:8443/browse/1"
+    },
+    {
+      "url_template": "https://jira.example.invalid:1/<num>",
+      "num": "1",
+      "url": "https://jira.example.invalid:1/1"
+    },
+    {
+      "url_template": "https://jira.example.invalid:65535/<num>",
+      "num": "1",
+      "url": "https://jira.example.invalid:65535/1"
+    },
+    {
+      "url_template": "https://EXAMPLE.atlassian.net/<num>",
+      "num": "1",
+      "url": "https://EXAMPLE.atlassian.net/1"
+    },
+    {
+      "url_template": "https://jira-1.example.invalid/<num>",
+      "num": "1",
+      "url": "https://jira-1.example.invalid/1"
+    },
+    {
+      "url_template": "https://example.1a/<num>",
+      "num": "1",
+      "url": "https://example.1a/1"
+    },
+    {
+      "url_template": "https://127.0.0.1/<num>",
+      "num": "1",
+      "url": "https://127.0.0.1/1"
+    },
+    {
+      "url_template": "https://[::1]:8443/<num>",
+      "num": "1",
+      "url": "https://[::1]:8443/1"
+    }
+  ],
+  "refused": [
+    "",
+    "https://jira.example.com/JIRA-",
+    "https://jira.example.com/JIRA-<NUM>",
+    "https://<num>.example.com/",
+    "https://jira.example.com<num>",
+    "https://jira.example.com:<num>/",
+    "http://jira.example.invalid/<num>",
+    "javascript:alert(<num>)",
+    "jira.example.invalid/<num>",
+    "https:///<num>",
+    "https://user:pass@jira.example.invalid/<num>",
+    "https://jira.example.invalid/a b/<num>",
+    "https://jira.example.invalid/<num>\n",
+    " https://jira.example.invalid/<num>",
+    "https://jira.example.invalid:99999/<num>",
+    "https://jira.example.invalid:0/<num>",
+    "https://jira.example.invalid:65536/<num>",
+    "https://ex<ample.com/<num>",
+    "https://ex^ample.com/<num>",
+    "https://ex%41mple.com/<num>",
+    "https://jira_x.example.invalid/<num>",
+    "https://_jira.example.invalid/<num>",
+    "https://a..b/<num>",
+    "https://xn--/<num>",
+    "https://xn--a.example/<num>",
+    "https://XN--bcher-kva.example/<num>",
+    "https://1.2.3.999/<num>",
+    "https://example.123/<num>",
+    "https://example.0x1/<num>",
+    "https://example.0X/<num>",
+    "https://[fe80::1%25eth0]/<num>"
+  ]
+}
