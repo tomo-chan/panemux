@@ -152,12 +152,24 @@ func TestClaudeSummarizer_Failures(t *testing.T) {
 		// A child keeps stdout open, as a real claude's own children could.
 		script := []byte("#!/bin/sh\nsleep 30 &\necho $! > '" + pidFile + "'\nwait\n")
 		require.NoError(t, os.WriteFile(bin, script, 0o700)) //nolint:gosec // test fixture: an executable stand-in
-		ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+		// The context ends once the child is known to exist, not after a fixed
+		// delay: a loaded machine can take longer than any short delay to start
+		// sh, which would then be killed before it wrote the child's pid.
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
+		go func() {
+			for ctx.Err() == nil {
+				if raw, err := os.ReadFile(pidFile); err == nil && strings.HasSuffix(string(raw), "\n") {
+					cancel()
+					return
+				}
+				time.Sleep(20 * time.Millisecond)
+			}
+		}()
 		started := time.Now()
 		_, err := newClaudeSummarizer(bin, nil)(ctx, "x")
 		require.EqualError(t, err, "claude did not finish summarizing in time")
-		assert.Less(t, time.Since(started), 5*time.Second)
+		assert.Less(t, time.Since(started), 5*time.Second, "the child holding stdout does not delay the return")
 
 		raw, err := os.ReadFile(pidFile)
 		require.NoError(t, err)
