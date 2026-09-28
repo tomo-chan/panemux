@@ -2,28 +2,153 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
+	"panemux/internal/config"
 	"panemux/internal/session"
 	"panemux/internal/tasks"
 )
 
 // taskGitInfo is the repository, branch and pull request of a task's working
 // directory — the same metadata a pane header shows, looked up for the
-// task's own directory instead of a pane's.
+// task's own directory instead of a pane's — with the issues the pull
+// request closes and the references its branch name and title carry.
 type taskGitInfo struct {
-	Repo     string `json:"repo,omitempty"`
-	RepoURL  string `json:"repo_url,omitempty"`
-	Branch   string `json:"branch,omitempty"`
-	PRURL    string `json:"pr_url,omitempty"`
-	PRNumber int    `json:"pr_number,omitempty"`
+	Repo    string          `json:"repo,omitempty"`
+	RepoURL string          `json:"repo_url,omitempty"`
+	Branch  string          `json:"branch,omitempty"`
+	PRURL   string          `json:"pr_url,omitempty"`
+	Issues  []taskIssueLink `json:"issues,omitempty"`
+	// Autolinks are the references task_dashboard.autolinks finds.
+	Autolinks []taskAutolink `json:"autolinks,omitempty"`
+	PRNumber  int            `json:"pr_number,omitempty"`
+}
+
+// taskIssueLink is one GitHub issue the task's pull request closes. Repo is
+// the issue's owner/name, which can differ from the pull request's.
+type taskIssueLink struct {
+	URL    string `json:"url"`
+	Repo   string `json:"repo,omitempty"`
+	Number int    `json:"number"`
+}
+
+// taskAutolink is one reference found in the task's branch name or pull
+// request title by a task_dashboard.autolinks entry — such as JIRA-123 — and
+// the URL that entry makes of it.
+type taskAutolink struct {
+	Text string `json:"text"`
+	URL  string `json:"url"`
+}
+
+// prTaskFields is what the task dashboard reads of a pull request: the
+// title for its references and the issues it closes, in the same `gh` call.
+const prTaskFields = "url,number,title,closingIssuesReferences"
+
+// autolinkRefs lists the references in texts, in the order they appear,
+// each once. A reference is an autolink's key_prefix, exactly as written,
+// followed by its identifier: digits, or with is_alphanumeric letters,
+// digits and "-", as many as there are. No ASCII letter or digit may come
+// directly before the prefix or, for digits, after the identifier.
+// validateTaskDashboard refuses overlapping prefixes, so at most one
+// autolink matches at any position.
+func autolinkRefs(links []config.AutolinkConfig, texts ...string) []taskAutolink {
+	if len(links) == 0 {
+		return nil
+	}
+	var refs []taskAutolink
+	seen := map[string]bool{}
+	for _, text := range texts {
+		next := 0 // the first byte after the last reference found in text
+		for i := range len(text) {
+			if i < next || (i > 0 && isASCIIAlnum(text[i-1])) {
+				continue
+			}
+			for _, link := range links {
+				end, ok := autolinkRefEnd(link, text, i)
+				if !ok {
+					continue
+				}
+				ref := text[i:end]
+				if !seen[ref] {
+					seen[ref] = true
+					refs = append(refs, taskAutolink{Text: ref, URL: link.URL(text[i+len(link.KeyPrefix) : end])})
+				}
+				next = end
+				break
+			}
+		}
+	}
+	return refs
+}
+
+// autolinkRefEnd is where link's reference starting at text[start] ends, and
+// whether there is one there.
+func autolinkRefEnd(link config.AutolinkConfig, text string, start int) (int, bool) {
+	if !strings.HasPrefix(text[start:], link.KeyPrefix) {
+		return 0, false
+	}
+	numStart := start + len(link.KeyPrefix)
+	end := numStart
+	for end < len(text) && isAutolinkIDByte(text[end], link.IsAlphanumeric) {
+		end++
+	}
+	if end == numStart || (!link.IsAlphanumeric && end < len(text) && isASCIIAlnum(text[end])) {
+		return 0, false
+	}
+	return end, true
+}
+
+// isAutolinkIDByte is what GitHub's autolinks take as the identifier:
+// digits, or with is_alphanumeric A-Z in either case, 0-9 and "-".
+func isAutolinkIDByte(b byte, alphanumeric bool) bool {
+	if alphanumeric {
+		return isASCIIAlnum(b) || b == '-'
+	}
+	return b >= '0' && b <= '9'
+}
+
+func isASCIIAlnum(b byte) bool {
+	return b >= '0' && b <= '9' || b >= 'A' && b <= 'Z' || b >= 'a' && b <= 'z'
+}
+
+// closingIssueLinks is the issues a pull request closes, keeping only those
+// with an issue number and an http(s) URL: the browser validates every link
+// in the response and would reject all of it for one bad entry.
+func closingIssueLinks(pr ghPullRequest) []taskIssueLink {
+	var links []taskIssueLink
+	for _, issue := range pr.ClosingIssues {
+		if issue.Number <= 0 || !isHTTPURL(issue.URL) {
+			continue
+		}
+		link := taskIssueLink{Number: issue.Number, URL: issue.URL}
+		if issue.Repository.Owner.Login != "" && issue.Repository.Name != "" {
+			link.Repo = issue.Repository.Owner.Login + "/" + issue.Repository.Name
+		}
+		links = append(links, link)
+	}
+	return links
+}
+
+const (
+	schemeHTTP  = "http"
+	schemeHTTPS = "https"
+)
+
+// webLinkSchemes are the schemes a link on the dashboard may have.
+var webLinkSchemes = map[string]bool{schemeHTTP: true, schemeHTTPS: true}
+
+func isHTTPURL(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && webLinkSchemes[u.Scheme] && u.Host != ""
 }
 
 type taskResponse struct {
@@ -311,8 +436,20 @@ func (h *Handler) lookupTaskGit(ctx context.Context, host, cwd string, withPR bo
 		RepoURL: h.repoPageURLFromOriginURL(gitCtx.OriginURL),
 		Branch:  gitCtx.Branch,
 	}
+	prTitle := ""
 	if withPR {
-		info.PRURL, info.PRNumber = h.lookupPR(ctx, host != "", cwd, gitCtx)
+		pr, err := h.lookupPullRequest(ctx, host != "", cwd, gitCtx, prTaskFields)
+		if errors.Is(err, errGHUnknownJSONField) {
+			// A gh older than 2.72.0: keep the PR link the pane header shows,
+			// without the issues and the title this gh cannot give.
+			pr, err = h.lookupPullRequest(ctx, host != "", cwd, gitCtx, prBasicFields)
+		}
+		if err == nil {
+			info.PRURL, info.PRNumber = strings.TrimSpace(pr.URL), pr.Number
+			info.Issues = closingIssueLinks(pr)
+			prTitle = pr.Title
+		}
 	}
+	info.Autolinks = autolinkRefs(h.cfg.TaskDashboard.Autolinks, gitCtx.Branch, prTitle)
 	return info
 }
