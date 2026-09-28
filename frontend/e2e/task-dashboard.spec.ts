@@ -61,3 +61,28 @@ test('opens a session running in tmux as a pane attached to it', async ({ page, 
   await expect(card).toContainText('pane e2e-task-dashboard · Default')
   await expect(card.getByRole('button', { name: /^Go to pane/ })).toBeVisible()
 })
+
+// Issue #254: an agent started from a local pane's shell, outside tmux, is
+// found through the PANEMUX_PANE_ID it inherited. The command is typed into
+// the pane, so the variable reaches the agent the way it does for a person.
+test('goes to the local pane an agent outside tmux was started from', async ({ page, request }) => {
+  test.skip(process.platform !== 'linux', 'process environments are read only on Linux hosts so far')
+
+  await page.goto('/')
+  await page.locator('[data-pane-id="task-dashboard-main"] .xterm-helper-textarea').focus()
+  await page.keyboard.type('"$HOME/bin/start-agent" e2e-in-pane')
+  await page.keyboard.press('Enter')
+  await expect.poll(async () => {
+    const tasks = await (await request.get('/api/tasks')).json()
+    const task = tasks.tasks.find((t: { id: string }) => t.id === 'local:claude:e2e-in-pane')
+    return task?.location
+  }).toEqual({ kind: 'outside', pane_id: 'task-dashboard-main', attachable: false })
+
+  await page.getByRole('button', { name: /^Tasks/ }).click()
+  const card = page.getByRole('region', { name: 'Working' }).getByTestId('task-card-local:claude:e2e-in-pane')
+  await expect(card).toContainText('pane Shell · Default')
+  await card.getByRole('button', { name: /^Go to pane/ }).click()
+
+  await expect(page.getByRole('region', { name: 'Task dashboard' })).toHaveCount(0)
+  await expect(page.locator('[data-pane-id="task-dashboard-main"]')).toBeVisible()
+})

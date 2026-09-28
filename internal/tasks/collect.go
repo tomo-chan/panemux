@@ -26,6 +26,7 @@ import (
 //	::section ps                 "<pid> <ppid> <command>", this user's processes only
 //	::section tmux               "<pane pid> <tmux session name>"
 //	::section cwd                "<pid> <cwd>" for this user's processes that may be claude or codex
+//	::section env                "<pid> <PANEMUX_PANE_ID>" for the same processes, when set
 //	::section transcripts        "<mtime>\t<file name>\t<first "cwd":"..." in it>"
 //	::end                        the output is complete
 //
@@ -33,6 +34,16 @@ import (
 // modified in the last 7 days, newest first, at most 100 of them. The window
 // and the count are the range decided for stopped sessions (issue #252); the
 // Go side keeps the stopped ones and caps them at maxStoppedTasks.
+//
+// The env section names the pane an agent outside tmux was started from
+// (issue #254). It is read from the process's initial environment, which on
+// Linux is /proc/<pid>/environ; a host without it reports nothing. Entries
+// there are NUL-separated and a value may itself hold newlines, so newlines
+// become \001 before NULs become newlines: a line inside another variable's
+// value can then never start a row, and a value carrying \001 fails
+// validPaneID. The value
+// is untrusted — any process of the user can set it — and is checked against
+// validPaneID here and against the panes it names in the browser.
 const collectScript = `LC_ALL=C
 export LC_ALL
 echo '::panemux-tasks v1'
@@ -49,12 +60,17 @@ echo '::section ps'
 ps -U "$uid" -o pid=,ppid=,command= 2>/dev/null
 echo '::section tmux'
 tmux list-panes -a -F '#{pane_pid} #{session_name}' 2>/dev/null
+agents=$(ps -U "$uid" -o pid=,command= 2>/dev/null | awk '($2 " " $3) ~ /claude|codex/ { print $1 }')
 echo '::section cwd'
-ps -U "$uid" -o pid=,command= 2>/dev/null | awk '($2 " " $3) ~ /claude|codex/ { print $1 }' |
-while read -r pid; do
+for pid in $agents; do
 	c=$(readlink "/proc/$pid/cwd" 2>/dev/null ||
 		lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | awk '/^n/ { print substr($0, 2); exit }')
 	if [ -n "$c" ]; then echo "$pid $c"; fi
+done
+echo '::section env'
+for pid in $agents; do
+	v=$(tr '\n\000' '\001\n' <"/proc/$pid/environ" 2>/dev/null | grep -m 1 '^PANEMUX_PANE_ID=')
+	if [ -n "$v" ]; then echo "$pid ${v#PANEMUX_PANE_ID=}"; fi
 done
 echo '::section transcripts'
 if stat -c %Y / >/dev/null 2>&1; then
@@ -80,12 +96,16 @@ const (
 	sectionPS        = "ps"
 	sectionTmux      = "tmux"
 	sectionCWD       = "cwd"
+	sectionEnv       = "env"
 	sectionTranscrip = "transcripts"
 )
 
 // rawSnapshot is one host's collection output, parsed but not interpreted.
 type rawSnapshot struct {
 	ProcessCWDs map[int]string
+	// PaneIDs is the PANEMUX_PANE_ID each agent process was started with,
+	// already limited to validPaneID.
+	PaneIDs     map[int]string
 	StateFiles  []stateFile
 	Processes   []process
 	TmuxPanes   []tmuxPane
@@ -135,7 +155,7 @@ func parseCollectOutput(out []byte) (rawSnapshot, error) {
 		return rawSnapshot{}, errors.New("task collection output has no header")
 	}
 
-	p := collectParser{raw: rawSnapshot{ProcessCWDs: map[int]string{}}}
+	p := collectParser{raw: rawSnapshot{ProcessCWDs: map[int]string{}, PaneIDs: map[int]string{}}}
 	for _, line := range lines[start:] {
 		var err error
 		if strings.HasPrefix(line, directivePrefix) {
@@ -182,7 +202,7 @@ func (p *collectParser) directive(line string) error {
 	case "section":
 		p.flush()
 		switch arg {
-		case sectionState, sectionPS, sectionTmux, sectionCWD, sectionTranscrip:
+		case sectionState, sectionPS, sectionTmux, sectionCWD, sectionEnv, sectionTranscrip:
 			p.section = arg
 		default:
 			return fmt.Errorf("task collection output has unknown section %q", arg)
@@ -233,6 +253,10 @@ func (raw *rawSnapshot) addRow(section string, file *stateFile, line string) err
 	case sectionCWD:
 		if pid, rest, ok := leadingPID(line); ok && rest != "" {
 			raw.ProcessCWDs[pid] = rest
+		}
+	case sectionEnv:
+		if pid, rest, ok := leadingPID(line); ok && validPaneID.MatchString(rest) {
+			raw.PaneIDs[pid] = rest
 		}
 	case sectionTranscrip:
 		if tr, ok := parseTranscriptRow(line); ok {

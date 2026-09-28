@@ -41,7 +41,8 @@
       "id": "local:claude:b41f9d20",
       "location": {
         "attachable": false,
-        "kind": "outside"
+        "kind": "outside",
+        "pane_id": "pane-1790000000000-a1b2c"
       },
       "pid": 102,
       "session_id": "b41f9d20",

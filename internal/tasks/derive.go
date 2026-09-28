@@ -46,6 +46,11 @@ const (
 type Location struct {
 	Kind        LocationKind `json:"kind"`
 	TmuxSession string       `json:"tmux_session,omitempty"`
+	// PaneID is the pane an agent outside tmux was started from, as its
+	// PANEMUX_PANE_ID names it. It is only a claim: the browser opens it only
+	// when it is a local pane (panemux host) or an ssh pane on the task's
+	// connection that the workspaces hold.
+	PaneID string `json:"pane_id,omitempty"`
 	// Attachable reports whether a tmux / ssh_tmux pane can attach to
 	// TmuxSession: pane configs accept only validTmuxSessionName.
 	Attachable bool `json:"attachable"`
@@ -84,6 +89,10 @@ var validSessionID = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 // matches internal/session's validTmuxSessionName, the guard in front of the
 // `tmux new-session -A -s <name>` a pane runs.
 var validTmuxSessionName = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`)
+
+// validPaneID is the PANEMUX_PANE_ID value collection keeps. It matches
+// internal/session's validPaneEnvID, the only IDs a pane's shell is given.
+var validPaneID = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,128}$`)
 
 // claudeState is the part of ~/.claude/sessions/<pid>.json the dashboard
 // reads. Claude Code writes this file itself; it is not a published format
@@ -348,6 +357,8 @@ func (b *taskBuilder) stoppedTasks(liveSessions map[string]bool, claimedLogs map
 }
 
 // locate walks from pid up its parents until one is a tmux pane's process.
+// An agent outside tmux carries the pane its own environment names; an
+// ancestor's is not used, as the agent is what inherited it from the pane.
 func (b *taskBuilder) locate(pid int) Location {
 	seen := map[int]bool{}
 	for current, steps := pid, 0; steps < maxParentWalk; steps++ {
@@ -369,7 +380,7 @@ func (b *taskBuilder) locate(pid int) Location {
 		}
 		current = proc.PPID
 	}
-	return Location{Kind: LocationOutside}
+	return Location{Kind: LocationOutside, PaneID: b.raw.PaneIDs[pid]}
 }
 
 // hostMillis converts a host timestamp (Unix milliseconds on the host's own

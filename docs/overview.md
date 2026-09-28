@@ -14,7 +14,8 @@ structure, [Behavior specification](behavior.md) for runtime contracts, or the
 - Raw terminal streaming over WebSocket, including resize and lifecycle control messages.
 - Workspace tabs, layout persistence, pane creation/removal, and pane-level Git/PR context.
 - A task dashboard listing the coding-agent sessions on the panemux host and every configured SSH
-  host by state, independently of panes, and opening one in a pane attached to its tmux session.
+  host by state, independently of panes, and opening one in a pane attached to its tmux session or
+  going to the `local` / `ssh` pane an agent outside tmux was started from.
 - Browser notifications and attention indicators for terminal activity.
 - Loopback OAuth callback forwarding for CLI login flows running in SSH-backed panes.
 - Optional Agent Board status aggregation, cross-pane messaging, and a command center.
@@ -72,7 +73,8 @@ backend and UI are released together.
   attaching to a task's existing tmux session.
 - The task dashboard reads files Claude Code writes for itself (`~/.claude/sessions`,
   `~/.claude/projects`), which are not a published format, and knows only whether a codex process is
-  running. It collects only while it is on screen.
+  running. It collects only while it is on screen. It finds the pane of an agent outside tmux only
+  on Linux hosts, where it can read the agent's environment.
 
 ## Where to continue
 

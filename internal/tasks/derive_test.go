@@ -423,6 +423,50 @@ func TestBuildTasks_LocationFollowsTheParentChainToATmuxPane(t *testing.T) {
 	}
 }
 
+// An agent outside tmux reports the pane its environment names (issue #254):
+// a claude task with a state file, a claude process no state file names, and
+// a codex process alike. Under tmux the tmux session identifies the pane and
+// the variable is ignored: tmux panes inherit the environment of whatever
+// started the tmux server, not of a panemux pane.
+func TestBuildTasks_LocationCarriesThePaneIDOfAnAgentOutsideTmux(t *testing.T) {
+	raw := rawSnapshot{
+		Now: hostNow,
+		StateFiles: []stateFile{
+			{Name: "50.json", Data: stateJSON(50, "outside", "busy")},
+			{Name: "60.json", Data: stateJSON(60, "inside", "busy")},
+		},
+		Processes: []process{
+			{PID: 40, PPID: 1, Command: "-zsh"},
+			claudeProc(50, 40),
+			{PID: 55, PPID: 1, Command: "bash"},
+			claudeProc(60, 55),
+			claudeProc(70, 40),
+			{PID: 80, PPID: 40, Command: "codex"},
+			claudeProc(90, 40),
+		},
+		TmuxPanes:   []tmuxPane{{PanePID: 55, Session: "work"}},
+		ProcessCWDs: map[int]string{70: "/workspace/user/project"},
+		PaneIDs: map[int]string{
+			// The shell's own variable is not the agent's: only the agent's
+			// process is read.
+			40: "pane-shell",
+			50: "pane-a",
+			60: "pane-in-tmux",
+			70: "pane-b",
+			80: "pane-c",
+		},
+	}
+	tasks := buildTasks("", raw, collectedAt)
+
+	assert.Equal(t, Location{Kind: LocationOutside, PaneID: "pane-a"}, findTask(t, tasks, "local:claude:outside").Location)
+	assert.Equal(t, Location{Kind: LocationTmux, TmuxSession: "work", Attachable: true},
+		findTask(t, tasks, "local:claude:inside").Location)
+	assert.Equal(t, Location{Kind: LocationOutside, PaneID: "pane-b"}, findTask(t, tasks, "local:claude:pid-70").Location)
+	assert.Equal(t, Location{Kind: LocationOutside, PaneID: "pane-c"}, findTask(t, tasks, "local:codex:pid-80").Location)
+	assert.Equal(t, Location{Kind: LocationOutside}, findTask(t, tasks, "local:claude:pid-90").Location,
+		"an agent whose environment names no pane")
+}
+
 // The walk up the process tree stops after maxParentWalk processes, which is
 // far deeper than any real tree; a tmux pane further up than that is not found.
 func TestBuildTasks_LocationWalksAtMostMaxParentWalkProcesses(t *testing.T) {

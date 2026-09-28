@@ -530,7 +530,7 @@ func newSSHSessionFromClient(
 		return nil, err
 	}
 
-	if err := startSSHShell(sess, cfg); err != nil {
+	if err := startSSHShell(sess, id, cfg); err != nil {
 		closeSSHResources(sess, client, jumpClient)
 		return nil, err
 	}
@@ -575,8 +575,8 @@ func setupSSHPTY(sess *ssh.Session) (io.WriteCloser, *io.PipeReader, *io.PipeWri
 	return stdin, pr, pw, nil
 }
 
-func startSSHShell(sess *ssh.Session, cfg SSHConfig) error {
-	cmd, err := sshShellCommand(cfg)
+func startSSHShell(sess *ssh.Session, paneID string, cfg SSHConfig) error {
+	cmd, err := sshShellCommand(paneID, cfg)
 	if err != nil {
 		return err
 	}
@@ -594,22 +594,34 @@ func startSSHShell(sess *ssh.Session, cfg SSHConfig) error {
 // recommended pattern) before being embedded in the shell command.
 // sess.Shell() and sess.Start() are mutually exclusive in the SSH protocol.
 //
-// With the browser-open shim enabled, a fixed, non-tainted setup snippet is
-// prepended (see browseropen.go). A pane that would otherwise have used
+// Setup snippets are prepended: the export of the pane's ID (see paneid.go),
+// and with the browser-open shim enabled, a fixed, non-tainted snippet that
+// installs it (see browseropen.go). A pane that would otherwise have used
 // sess.Shell() then has to run a command instead, so it execs the login
 // shell explicitly to keep the profile files an SSH login would source.
-func sshShellCommand(cfg SSHConfig) (string, error) {
+//
+// sshd runs the command with the user's login shell, which need not be POSIX
+// (fish, tcsh). A command with setup is therefore POSIX script handed whole to
+// /bin/sh as one single-quoted argument, `exec /bin/sh -c '<script>'`, which
+// every such shell parses the same way. The script is one line and has no
+// `!`: remote paths and pane IDs are validated to exclude both, and the shim
+// is written with printfOctalFormat.
+func sshShellCommand(paneID string, cfg SSHConfig) (string, error) {
 	tail, err := sshShellExecTail(cfg)
 	if err != nil {
 		return "", err
 	}
-	if !browserShimEnabled.Load() {
+	setup := remotePaneIDSetup(paneID)
+	if browserShimEnabled.Load() {
+		setup += remoteBrowserShimSetup()
+	}
+	if setup == "" {
 		return tail, nil
 	}
 	if tail == "" {
 		tail = remoteLoginShellExec
 	}
-	return remoteBrowserShimSetup() + tail, nil
+	return "exec /bin/sh -c " + shellQuotePath(setup+tail), nil
 }
 
 // sshShellExecTail builds the part of the remote command that enters the

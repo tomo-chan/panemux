@@ -157,7 +157,7 @@ func remoteBrowserShimSetup() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "PANEMUX_SHIM_DIR=%s; ", dir)
 	b.WriteString("{ mkdir -p \"$PANEMUX_SHIM_DIR\"")
-	fmt.Fprintf(&b, " && printf %%s %s > %s", shellQuotePath(browserShimScript), primary)
+	fmt.Fprintf(&b, " && printf '%s' > %s", printfOctalFormat(browserShimScript), primary)
 	fmt.Fprintf(&b, " && chmod 700 %s", primary)
 	for _, alias := range browserShimAliases {
 		fmt.Fprintf(&b, " && ln -sf %s \"$PANEMUX_SHIM_DIR/%s\"", browserShimPrimaryName, alias)
@@ -170,14 +170,38 @@ func remoteBrowserShimSetup() string {
 	return b.String()
 }
 
+// printfOctalFormat returns a printf format that prints s exactly. Every byte
+// outside a small set of plain characters is written as a three-digit octal
+// escape, so the result has no newline, quote, `%`, `\` escape of its own,
+// `$` or `!`: it stays one line inside single quotes, which a csh-family
+// login shell requires (it expands `!` and rejects newlines even there).
+func printfOctalFormat(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case 'a' <= c && c <= 'z', 'A' <= c && c <= 'Z', '0' <= c && c <= '9',
+			c == ' ', c == '_', c == '.', c == '/', c == ':', c == ',', c == '-':
+			b.WriteByte(c)
+		default:
+			fmt.Fprintf(&b, "\\%03o", c)
+		}
+	}
+	return b.String()
+}
+
 // remoteLoginShellExec is the tail of a remote command that starts the user's
 // login shell. `sess.Start` runs its command through `$SHELL -c`, which is
 // neither interactive nor a login shell, so the profile files an interactive
 // SSH login would source are skipped unless the replacement shell is started
 // with -l. Only shells whose -l flag is unambiguous get it; anything else
 // keeps the plain exec this codebase already uses for panes with a cwd.
-const remoteLoginShellExec = `case "${SHELL##*/}" in
-bash|zsh|fish) exec "$SHELL" -l ;;
-"") exec /bin/sh ;;
-*) exec "$SHELL" ;;
-esac`
+//
+// It is one line: the command it ends is handed to /bin/sh as a single
+// quoted argument (see sshShellCommand), and csh-family login shells reject a
+// newline inside quotes.
+const remoteLoginShellExec = `case "${SHELL##*/}" in ` +
+	`bash|zsh|fish) exec "$SHELL" -l ;; ` +
+	`"") exec /bin/sh ;; ` +
+	`*) exec "$SHELL" ;; ` +
+	`esac`
