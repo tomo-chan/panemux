@@ -271,7 +271,11 @@ func parseCollectOutput(out []byte) (rawSnapshot, error) {
 		return rawSnapshot{}, errors.New("task collection output has no header")
 	}
 
-	p := collectParser{raw: rawSnapshot{ProcessCWDs: map[int]string{}, PaneIDs: map[int]string{}, CodexAges: map[int]int64{}}}
+	p := collectParser{raw: rawSnapshot{
+		ProcessCWDs: map[int]string{},
+		PaneIDs:     map[int]string{},
+		CodexAges:   map[int]int64{},
+	}}
 	for _, line := range lines[start:] {
 		var err error
 		if strings.HasPrefix(line, directivePrefix) {
@@ -318,7 +322,8 @@ func (p *collectParser) directive(line string) error {
 	case "section":
 		p.flush()
 		switch arg {
-		case sectionState, sectionPS, sectionTmux, sectionCWD, sectionEnv, sectionTranscrip, sectionCodexOpen, sectionCodexLogs:
+		case sectionState, sectionPS, sectionTmux, sectionCWD, sectionEnv, sectionTranscrip,
+			sectionCodexOpen, sectionCodexLogs:
 			p.section = arg
 		default:
 			return fmt.Errorf("task collection output has unknown section %q", arg)
