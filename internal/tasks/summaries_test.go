@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -470,6 +471,50 @@ func TestSummaries_CloseStopsRunningSummaries(t *testing.T) {
 	}
 	_, err := svc.RequestSummary("", "s10")
 	assert.Error(t, err, "no summary starts after Close")
+}
+
+// A summary still waiting for a slot when the service closes never runs, and
+// records why rather than waiting for a slot that frees only after Close.
+func TestSummaries_CloseEndsASummaryWaitingForASlot(t *testing.T) {
+	host := &summaryHost{}
+	host.set(hostCollection(100, "idle", "idle", "idle"), conversationLog("a"))
+	// The running summaries ignore the context and hold their slots until
+	// released, so the waiting one can only see the service close.
+	release := make(chan struct{})
+	var calls atomic.Int32
+	svc := New(Options{RunLocal: host.run, Summarize: func(context.Context, string) (Summary, error) {
+		calls.Add(1)
+		<-release
+		return Summary{Text: "s", Remaining: []string{}}, nil
+	}})
+	snap := svc.Collect(context.Background())
+	svc.Summaries(snap.Tasks)
+	require.Eventually(t, func() bool { return calls.Load() == summaryConcurrency },
+		5*time.Second, 10*time.Millisecond)
+
+	svc.Close()
+	require.Eventually(t, func() bool {
+		svc.summaryMu.Lock()
+		defer svc.summaryMu.Unlock()
+		for _, entry := range svc.summaries {
+			if entry.failure == "task summaries are closed" {
+				return true
+			}
+		}
+		return false
+	}, 5*time.Second, 10*time.Millisecond, "the waiting summary gave up when the service closed")
+	close(release)
+	svc.waitSummaries()
+	assert.EqualValues(t, summaryConcurrency, calls.Load(), "the waiting summary never ran")
+	svc.summaryMu.Lock()
+	defer svc.summaryMu.Unlock()
+	var closed int
+	for _, entry := range svc.summaries {
+		if entry.failure == "task summaries are closed" {
+			closed++
+		}
+	}
+	assert.Equal(t, 1, closed)
 }
 
 // A summary that runs out of time is a failure, not a hang.
