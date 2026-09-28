@@ -226,6 +226,16 @@ func TestBuildTasks_CodexRolloutTieGoesToTheLaterCreated(t *testing.T) {
 // Before its first instruction — at the composer, or held at a start-up
 // screen (trusting the directory, a model notice) — codex has no rollout:
 // the task is the process, running, with no session.
+// A process that has run for less than a second has an age of 0, which is
+// still an age: it started now.
+func TestBuildTasks_CodexProcessStartedThisSecond(t *testing.T) {
+	justStarted := openRollout(31, codexSessionA, 0, codexTurn{DBStatus: "inProgress", DBStartedAt: hostNow})
+	justStarted.Elapsed = 0
+	task := buildTasks("", codexRaw(justStarted), collectedAt)[0]
+	assert.Equal(t, hostAgo(0), task.StartedAt)
+	assert.Equal(t, StateBusy, task.State)
+}
+
 func TestBuildTasks_CodexWithoutARolloutIsARunningProcess(t *testing.T) {
 	tasks := buildTasks("", codexRaw(), collectedAt)
 	require.Len(t, tasks, 1)

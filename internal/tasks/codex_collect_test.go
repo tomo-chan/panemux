@@ -112,6 +112,25 @@ func TestJSONFragmentString(t *testing.T) {
 	assert.Empty(t, jsonFragmentString(`"source":"a\q"`, `"source":`), "not a string codex could have written")
 }
 
+// A codex-rollouts row may end after the file name (no session_meta line
+// read) or after the cwd (no source in it).
+func TestParseCollectOutput_ShortCodexRolloutRows(t *testing.T) {
+	name := rolloutName("2026-09-27T11-57-03", codexSessionA)
+	raw, err := parseCollectOutput(joinLines(
+		"::panemux-tasks v1",
+		"::now 5",
+		"::section codex-rollouts",
+		"1\t2\t"+name,
+		"3\t4\t"+name+"\t"+`"cwd":"/workspace/user/api"`,
+		"::end",
+	))
+	require.NoError(t, err)
+	assert.Equal(t, []codexRollout{
+		{SessionID: codexSessionA, ModTime: 1, Size: 2},
+		{SessionID: codexSessionA, CWD: "/workspace/user/api", ModTime: 3, Size: 4},
+	}, raw.CodexRollouts)
+}
+
 // A row whose etime ps could not give still names the rollout; the process's
 // age is then unknown (-1), and whatever else is missing reads as empty.
 func TestParseCollectOutput_CodexOpenRowWithOnlyTheRollout(t *testing.T) {
@@ -179,6 +198,7 @@ func TestParseCodexTurn(t *testing.T) {
 		{name: "db row", db: "completed 1790510240", want: codexTurn{DBStatus: "completed", DBStartedAt: 1790510240}},
 		{name: "db row without a start", db: "failed ", want: codexTurn{DBStatus: "failed"}},
 		{name: "db row with a start that is not a number", db: "failed x", want: codexTurn{DBStatus: "failed"}},
+		{name: "db row with a start of zero", db: "inProgress 0", want: codexTurn{DBStatus: "inProgress"}},
 		{
 			name: "turn aborted",
 			event: `{"timestamp":"2026-09-27T11:58:30.5Z","type":"event_msg",` +

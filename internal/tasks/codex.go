@@ -228,7 +228,7 @@ func parseCodexTurn(db, event, item string) codexTurn {
 	// sqlite3 prints "<status> <started_at>"; anything else is not its answer.
 	if status, started, ok := strings.Cut(db, " "); ok && status != "" {
 		turn.DBStatus = status
-		if n, err := strconv.ParseInt(started, 10, 64); err == nil && n > 0 {
+		if n, err := strconv.ParseInt(started, 10, 64); err == nil {
 			turn.DBStartedAt = n
 		}
 	}
@@ -257,6 +257,9 @@ func (b *taskBuilder) codexTasks() []Task {
 	current := map[int]codexOpenRollout{}
 	for _, o := range b.raw.CodexOpen {
 		prev, seen := current[o.PID]
+		// An equal name at an equal time is one file held on two descriptors,
+		// whose rows are alike in every field.
+		//mutation:exempt[CONDITIONALS_BOUNDARY] equivalent — replaces a row with an identical one
 		newer := o.Rollout.ModTime > prev.Rollout.ModTime ||
 			(o.Rollout.ModTime == prev.Rollout.ModTime && o.File > prev.File)
 		if !seen || newer {
@@ -339,7 +342,7 @@ func codexTurnStatus(turn codexTurn) (inProgress, finished bool, startedMillis i
 	case codexTurnInProgress:
 		return true, false, turn.DBStartedAt * 1000
 	case codexTurnCompleted, codexTurnInterrupted, codexTurnFailed:
-		return false, true, turn.DBStartedAt * 1000
+		return false, true, 0
 	}
 	switch turn.Event {
 	case codexEventStarted:
@@ -393,6 +396,7 @@ func (b *taskBuilder) stoppedCandidates() []stoppedCandidate {
 // isCodexProgram is any codex process, interactive or not.
 func isCodexProgram(command string) bool {
 	fields := strings.Fields(command)
+	//mutation:exempt[CONDITIONALS_BOUNDARY] unreachable — parseProcessRow keeps only rows that have a command
 	return len(fields) > 0 && strings.ToLower(fieldBase(fields[0])) == AgentCodex
 }
 
