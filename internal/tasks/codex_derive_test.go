@@ -364,6 +364,23 @@ func TestBuildTasks_ATUIsOwnSessionIsNotListedAgainForTheDaemon(t *testing.T) {
 	}
 }
 
+// A daemon that has run for less than a second has an age of 0, and the
+// session it runs has a start time all the same; without an age it has none.
+func TestBuildTasks_ADaemonSessionsStartIsTheDaemons(t *testing.T) {
+	for _, tt := range []struct {
+		want    *time.Time
+		elapsed int64
+	}{{elapsed: 0, want: hostAgo(0)}, {elapsed: -1, want: nil}} {
+		held := openRollout(50, codexSessionA, 0, codexTurn{DBStatus: "completed"})
+		held.Rollout.Originator = codexOriginatorTUI
+		held.Elapsed = tt.elapsed
+		raw := codexRaw(held)
+		raw.Processes = append(raw.Processes, codexDaemon(50))
+		session := findTask(t, buildTasks("", raw, collectedAt), "local:codex:"+codexSessionA)
+		assert.Equal(t, tt.want, session.StartedAt, "elapsed %d", tt.elapsed)
+	}
+}
+
 func TestIsCodexDaemon(t *testing.T) {
 	assert.True(t, isCodexDaemon(codexDaemon(1).Command))
 	assert.True(t, isCodexDaemon("codex -c x=y app-server"))
