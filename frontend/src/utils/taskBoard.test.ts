@@ -194,6 +194,7 @@ describe('filterTasks', () => {
     expect(ids('nothing')).toEqual([])
   })
 
+  // efficacy:exempt only the filter argument gained label: null; it pins #255 behavior this branch does not implement
   it('matches a reference that only the PR title carried', () => {
     const withRef = [
       ...tasks,
