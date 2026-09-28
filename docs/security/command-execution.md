@@ -164,8 +164,23 @@ pane to it only when it matches the pane's own `validTmuxSessionName` rule, whic
 enforces again when it starts.
 
 The `PANEMUX_PANE_ID` an agent's environment carries is untrusted twice over: the host prints it, and
-any process of the user can set it to anything. The script reads it with `tr`/`grep` from
-`/proc/<pid>/environ` of the processes it already lists and prints it as data; the parser keeps it
+any process of the user can set it to anything. The script reads it only for the processes it
+already lists, and prints it as data: with `tr`/`grep` from `/proc/<pid>/environ` on Linux, and on
+macOS from `ps -E -p <pid> -o command=` with shell parameter expansion and `case` alone, the pid
+coming from the script's own `ps` listing. On macOS the arguments `ps -p <pid> -o command=` reports
+are removed from the front, so an argument cannot supply the value; more than one
+` PANEMUX_PANE_ID=` in what remains — one may sit inside another variable's value — yields nothing;
+and the shell prints the value only when it consists of `A-Za-z0-9_.-`, so a newline in it cannot
+forge a row. What macOS does **not** prevent: a process with no `PANEMUX_PANE_ID` of its own but
+exactly one ` PANEMUX_PANE_ID=<id>` inside another variable's value — preceded by a space in that
+value, as in `AAA='x PANEMUX_PANE_ID=<id>'`, including a space that follows a newline — reports
+`<id>`, because `ps -E` prints it and the real entry alike. Directly after a newline, with no
+space, it is not read. Linux, reading NUL-separated entries, reports nothing for either. This is accepted
+([decision log](../DECISIONLOG.md#reading-panemux_pane_id-on-macos-through-ps--e-2026-09-27-issue-263)):
+only someone who can already start an agent as the same user outside a pane can plant such a value,
+and a process of that user can set `PANEMUX_PANE_ID` itself anyway; the result is at most a
+`Go to pane` that focuses another existing pane, and no command runs.
+`TestRunLocal_ReadsThePaneIDFromPsEOnMacOS` pins it. The parser keeps it
 only if it matches `^[A-Za-z0-9_.-]{1,128}$` (`validPaneID`); and it never reaches a command. The
 browser uses it only to look up a `local` or `ssh` pane of the task's host in the workspaces it
 holds, and going to that pane only focuses it.

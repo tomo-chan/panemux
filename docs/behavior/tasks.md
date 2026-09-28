@@ -8,7 +8,8 @@ The task dashboard lists every coding-agent session on every host panemux knows 
 itself and every `ssh_connections` entry — independently of panes. A pane is only the window used to
 watch or answer a task, opened when the dashboard is asked to. The design is issue
 [#252](https://github.com/tomo-chan/panemux/issues/252); this page covers what is built (its stage 1,
-opening an agent outside tmux from issue [#254](https://github.com/tomo-chan/panemux/issues/254), and
+opening an agent outside tmux from issue [#254](https://github.com/tomo-chan/panemux/issues/254) and
+on macOS hosts from issue [#263](https://github.com/tomo-chan/panemux/issues/263), and
 issue and reference links from issue [#255](https://github.com/tomo-chan/panemux/issues/255)).
 The UI is described in [UI design's Task Dashboard](../ui-design.md#task-dashboard).
 
@@ -69,7 +70,7 @@ reads only what the agents write themselves and what the host reports about its 
 | `ps -U <own uid> -o pid=,ppid=,command=` | Whether a state file's process is alive, running agents, and parent chains — the collecting user's processes only |
 | `tmux list-panes -a -F '#{pane_pid} #{session_name}'` | Which tmux session an agent runs in |
 | The working directory of each process that may be claude or codex | A running task's directory when no state file gives one |
-| `PANEMUX_PANE_ID` in the environment of each process that may be claude or codex (`/proc/<pid>/environ`) | The pane an agent outside tmux was started from ([below](#the-pane-of-an-agent-outside-tmux)) |
+| `PANEMUX_PANE_ID` in the environment of each process that may be claude or codex (`/proc/<pid>/environ` on Linux, `ps -E` on macOS) | The pane an agent outside tmux was started from ([below](#the-pane-of-an-agent-outside-tmux)) |
 
 Any probe that is missing on a host (no tmux, no `~/.claude`, BSD `stat`) prints nothing rather than
 failing the collection. Text a login shell prints before the script's output is ignored. Output that
@@ -152,10 +153,30 @@ The pane that belongs to a task is found in the browser from the current workspa
   ([Browser-open interception](url-open.md#browser-open-interception)).
 - `tmux` and `ssh_tmux` panes do not set it. An agent under tmux is located through tmux, and a
   `PANEMUX_PANE_ID` it carries — inherited by whatever started the tmux server — is ignored.
-- Collection reads the variable from the agent's own process environment, not a parent's, and only
-  on Linux hosts (`/proc/<pid>/environ`). On other hosts nothing is reported and an agent outside
-  tmux cannot be opened. On macOS, `ps -E` and `ps eww` did not show the variable (see the
-  [decision log](../DECISIONLOG.md#opening-an-agent-outside-tmux-through-panemux_pane_id-2026-09-26-issue-254)).
+- Collection reads the variable from the agent's own process environment, not a parent's: on Linux
+  hosts from `/proc/<pid>/environ`, and on macOS hosts from `ps -E`. On other hosts nothing is
+  reported and an agent outside tmux cannot be opened.
+- The macOS reading has been tested only by replaying `ps -E` output recorded on macOS 26.3.1
+  through a fake `ps`. It has not yet been run on a macOS host, over SSH to one, or on a macOS
+  release before 26 (see the
+  [decision log](../DECISIONLOG.md#reading-panemux_pane_id-on-macos-through-ps--e-2026-09-27-issue-263)).
+- On macOS, `ps -E -p <pid> -o command=` prints the process's arguments, a space, and its
+  environment's `NAME=value` entries joined by spaces. Collection removes the arguments
+  `ps -p <pid> -o command=` prints from the front of that output, and reads the rest only when it
+  starts with a space. It takes the value only when exactly one ` PANEMUX_PANE_ID=` is left, up to
+  the next space. Two or more are not read, since one may be part of another variable's value; the
+  agent then has no pane ID. An argument such as `PANEMUX_PANE_ID=…` is never read as the variable.
+- When the agent has no `PANEMUX_PANE_ID` of its own and exactly one ` PANEMUX_PANE_ID=<id>` sits
+  inside another variable's value, preceded by a space (which may follow a newline), macOS reads
+  `<id>` as its pane ID; directly after a newline with no space it is not read. Linux reads
+  neither. This is accepted: the value is only a claim, and the browser opens only a matching
+  pane (see [Task dashboard collection](../security/command-execution.md#task-dashboard-collection)).
+- Because `ps -E` does not delimit values, a macOS value containing a space is read up to that
+  space, where Linux would reject it. Values panemux sets never contain one.
+- macOS shows no environment for Apple's own binaries (`/bin/sleep`, `/bin/zsh`) or for another
+  user's processes. An agent that is such a process reports no pane ID. claude, codex (its `node`
+  wrapper and its native binary) and `node` show theirs (see the
+  [decision log](../DECISIONLOG.md#reading-panemux_pane_id-on-macos-through-ps--e-2026-09-27-issue-263)).
 - The environment is the one the process was started with: changing the variable afterwards inside
   a running agent has no effect.
 - The value is untrusted, since any process of the user can set it. Collection keeps only a value

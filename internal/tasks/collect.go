@@ -37,13 +37,26 @@ import (
 //
 // The env section names the pane an agent outside tmux was started from
 // (issue #254). It is read from the process's initial environment, which on
-// Linux is /proc/<pid>/environ; a host without it reports nothing. Entries
-// there are NUL-separated and a value may itself hold newlines, so newlines
-// become \001 before NULs become newlines: a line inside another variable's
-// value can then never start a row, and a value carrying \001 fails
-// validPaneID. The value
-// is untrusted — any process of the user can set it — and is checked against
-// validPaneID here and against the panes it names in the browser.
+// Linux is /proc/<pid>/environ; a host that has neither it nor the macOS
+// reading below reports nothing. Entries there are NUL-separated and a value
+// may itself hold newlines, so newlines become \001 before NULs become
+// newlines: a line inside another variable's value can then never start a
+// row, and a value carrying \001 fails validPaneID.
+//
+// On macOS (issue #263) the environment is read with `ps -E`, which prints
+// the arguments, a space, and the NAME=value entries joined by spaces, with
+// nothing to tell an argument or a value from an entry. The arguments
+// `ps -o command=` reports are removed from the front — output that does not
+// start with them followed by a space is not read — and the value is taken
+// only when exactly one " PANEMUX_PANE_ID=" is left, up to the next space; two
+// or more may be another variable's value, so none is taken. The shell keeps
+// only a value of validPaneID's characters, so a newline in it cannot start a
+// row. macOS shows no environment for Apple's own binaries or another user's
+// processes; those report nothing.
+//
+// The value is untrusted — any process of the user can set it — and is
+// checked against validPaneID here and against the panes it names in the
+// browser.
 const collectScript = `LC_ALL=C
 export LC_ALL
 echo '::panemux-tasks v1'
@@ -68,10 +81,36 @@ for pid in $agents; do
 	if [ -n "$c" ]; then echo "$pid $c"; fi
 done
 echo '::section env'
-for pid in $agents; do
-	v=$(tr '\n\000' '\001\n' <"/proc/$pid/environ" 2>/dev/null | grep -m 1 '^PANEMUX_PANE_ID=')
-	if [ -n "$v" ]; then echo "$pid ${v#PANEMUX_PANE_ID=}"; fi
-done
+if [ "$(uname -s 2>/dev/null)" = Darwin ]; then
+	for pid in $agents; do
+		args=$(ps -p "$pid" -o command= 2>/dev/null)
+		[ -n "$args" ] || continue
+		full=$(ps -E -p "$pid" -o command= 2>/dev/null)
+		case $full in
+		"$args"*) rest=${full#"$args"} ;;
+		*) continue ;;
+		esac
+		case $rest in
+		" "*) ;;
+		*) continue ;;
+		esac
+		case $rest in
+		*" PANEMUX_PANE_ID="*" PANEMUX_PANE_ID="*) continue ;;
+		*" PANEMUX_PANE_ID="*) v=${rest#*" PANEMUX_PANE_ID="} ;;
+		*) continue ;;
+		esac
+		v=${v%% *}
+		case $v in
+		'' | *[!A-Za-z0-9_.-]*) continue ;;
+		esac
+		echo "$pid $v"
+	done
+else
+	for pid in $agents; do
+		v=$(tr '\n\000' '\001\n' <"/proc/$pid/environ" 2>/dev/null | grep -m 1 '^PANEMUX_PANE_ID=')
+		if [ -n "$v" ]; then echo "$pid ${v#PANEMUX_PANE_ID=}"; fi
+	done
+fi
 echo '::section transcripts'
 if stat -c %Y / >/dev/null 2>&1; then
 	mtime() { stat -c %Y "$1"; }

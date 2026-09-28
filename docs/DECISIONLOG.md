@@ -184,11 +184,12 @@ collection. The choices made while building it:
   rather than the server checking it against the config. The value only claims a pane, so it opens
   one only when that pane is a `local` pane (panemux host) or an `ssh` pane on the task's
   connection.
-- **Only the agent's own environment is read, and only on Linux** (`/proc/<pid>/environ`). On
-  macOS (2026-09-26), a `sleep 120` started with `PANEMUX_PANE_ID=test-1` was listed by
+- **Only the agent's own environment is read, and at first only on Linux** (`/proc/<pid>/environ`).
+  On macOS (2026-09-26), a `sleep 120` started with `PANEMUX_PANE_ID=test-1` was listed by
   `ps -E -p <pid> -o command=` and by `ps eww -p <pid> -o command=` as `sleep 120` alone, without
   the variable. No other way to read another process's environment on macOS was verified, so
-  macOS hosts report no pane ID rather than relying on an unchecked method.
+  macOS hosts reported no pane ID rather than relying on an unchecked method. Issue #263 later
+  found that `/bin/sleep` was an exception (below).
 - **Process ancestry was not used instead.** Matching an agent's parent chain against a local
   pane's shell pid would work without reading environments on the panemux host, but the pid of an
   `ssh` pane's remote shell is not known to panemux, and an agent that detached from its shell
@@ -243,6 +244,60 @@ collection. The choices made while building it:
   decoder in the module to check one with), no numeric last label unless the host is an IPv4
   address, and a port 1–65535. `testdata/autolink-url-validation.json` is read by the Go test and
   by the frontend's schema test, so a URL Go accepts that the browser does not fails a test.
+
+### Reading `PANEMUX_PANE_ID` on macOS through `ps -E` (2026-09-27, issue #263)
+
+Issue #254 left macOS hosts without a pane ID because `ps -E` had not shown the variable for
+`/bin/sleep`. A check on macOS 26.3.1 with SIP enabled (2026-09-27, claude 2.1.283, codex-cli
+0.142.2 and 0.157.1) found that `/bin/sleep` was the exception, not the rule:
+
+- `ps -E`, `ps eww` and `sysctl` `KERN_PROCARGS2` all showed the variable for claude (a native
+  Mach-O binary), codex's `node` wrapper and its native binary, `node -e`, and a `sleep` equivalent
+  compiled locally.
+- Apple-signed OS binaries (`/bin/sleep`, `/usr/bin/tail`, `/bin/zsh`) showed no environment at all:
+  the kernel returns none for them.
+- `KERN_PROCARGS2` refused root's processes (`EINVAL`). What the setuid-root `ps -E` shows for
+  another user's process was not checked; collection only reads the user's own processes.
+- codex 0.157's resident daemon (`codex app-server --managed-daemon`, started by launchd) has no
+  pane ID because it was not started from a pane; the process writing an interactive session is
+  the TUI, which has one.
+
+The choices made from that (decided by the user in issue #263):
+
+- **`ps -E`, read by the fixed `sh -s` script.** `KERN_PROCARGS2` delimits entries with NULs and
+  would be exact, but it needs a compiled helper or an interpreter to call `sysctl`; the macOS
+  `sysctl` command does not expose it (`unknown oid`). A helper does not fit a script that is one
+  constant run with `sh -s`, so it was rejected.
+- **The arguments are removed from the front.** `ps -E` joins the arguments and the `NAME=value`
+  entries with spaces, so a process whose argument is `PANEMUX_PANE_ID=…` would otherwise supply
+  the value. Removing what `ps -p <pid> -o command=` prints from the front was checked on macOS to
+  tell the two apart; output that does not start with the arguments is not read.
+- **Exactly one ` PANEMUX_PANE_ID=` or nothing.** Another variable's value can contain a space and
+  `PANEMUX_PANE_ID=` (`AAA='x PANEMUX_PANE_ID=evil'`), which `ps -E` prints indistinguishably from
+  the real entry. Taking the first or the last occurrence was rejected because which one is right
+  cannot be told from the output; the agent then has no pane ID.
+- **One occurrence inside another variable's value is read, and this is accepted** (review of
+  PR #269, decided by the user). With no real `PANEMUX_PANE_ID`, `AAA='x PANEMUX_PANE_ID=pane-b'`
+  or a value with a newline before ` PANEMUX_PANE_ID=pane-b` is reported as pane `pane-b` on macOS,
+  where Linux reports nothing. It is accepted because only someone who can start an agent as the
+  same user outside a pane can plant it — and such a process can set `PANEMUX_PANE_ID` directly —
+  the effect is at most a `Go to pane` that focuses another existing `local`/`ssh` pane of that
+  host, and no command runs. Rejected alternatives: skipping the reading whenever the environment
+  part contains a newline would stop only the newline form, not the space form, and would lose the
+  pane of a legitimate agent whose environment holds a multi-line value; reading
+  `KERN_PROCARGS2` through `perl` or another interpreter would be exact, but reverses the decision
+  above not to go beyond the fixed `sh -s` script, and whether macOS 26 provides a usable
+  interpreter was not checked.
+- **The same rule as Linux** (`^[A-Za-z0-9_.-]{1,128}$`) is applied to the value, read up to the next
+  space. The shell also prints it only when it consists of those characters, so a newline in it
+  cannot start a row of the output.
+- **The macOS reading is chosen by `uname -s` being `Darwin`**, not by `/proc` being absent, so
+  another system without `/proc` does not run a `ps -E` whose meaning there was not checked.
+- Apple's own binaries and other users' processes reporting no pane ID is documented as a limit
+  rather than worked around.
+
+The script's macOS branch is tested on Linux by replaying the `ps -E` output recorded in the issue
+through a fake `ps` and `uname`; it has not yet been run on a real macOS host.
 
 ## Agent Board
 
