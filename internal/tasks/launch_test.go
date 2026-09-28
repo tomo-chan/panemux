@@ -104,11 +104,6 @@ func newStubHost(t *testing.T, withTmux, withClaude bool) stubHost {
 	return h
 }
 
-func writeExecutable(t *testing.T, path, body string) {
-	t.Helper()
-	require.NoError(t, os.WriteFile(path, []byte(body), 0o700)) //nolint:gosec // test stand-in must be executable
-}
-
 // run runs script as the launch does, `sh -s` with the script on stdin, with
 // only the stubs' directory on PATH.
 func (h stubHost) run(t *testing.T, script, shell string) []byte {
