@@ -6,22 +6,51 @@
 
 ### Defining connections in `ssh_connections`
 
-Each entry under `ssh_connections` in the YAML config has the following fields:
+An entry under `ssh_connections` can be just a name. Its connection details then come from the
+`~/.ssh/config` `Host` block of the same name (see [Using `~/.ssh/config` hosts](#using-sshconfig-hosts)):
 
-| Field | Required | Description |
+```yaml
+ssh_connections:
+  gpu-box:            # connects as `Host gpu-box` in ~/.ssh/config describes
+```
+
+Every field is optional. A field set on the entry overrides the value the `Host` block gives the
+same setting, and a field left out keeps the block's value:
+
+| Field | Overrides | Description |
 |---|---|---|
-| `host` | yes | Hostname or IP address |
-| `user` | yes | Remote username |
-| `port` | no (default 22) | SSH port |
-| `key_file` | no | Absolute path to a private key, or `~/…`, which is expanded at load time. A path that is still relative when the key is read is refused — see [security/command-execution.md](../security/command-execution.md#ssh-private-key-paths-and-an-unresolvable-home-directory) |
-| `password` | no | Password for password-based authentication |
-| `known_hosts_file` | no (default `~/.ssh/known_hosts`) | Path to known\_hosts file for host-key verification. Absolute or `~/…`, refused when still relative at the read, for the same reason as `key_file` |
+| `host` | `HostName` | Hostname or IP address |
+| `user` | `User` | Remote username |
+| `port` | `Port` | SSH port (22 when neither sets one) |
+| `key_file` | `IdentityFile` | Absolute path to a private key, or `~/…`, which is expanded at load time. A path that is still relative when the key is read is refused — see [security/command-execution.md](../security/command-execution.md#ssh-private-key-paths-and-an-unresolvable-home-directory) |
+| `password` | — | Password for password-based authentication |
+| `known_hosts_file` | — | Path to known\_hosts file for host-key verification (default `~/.ssh/known_hosts`). Absolute or `~/…`, refused when still relative at the read, for the same reason as `key_file` |
+
+`ProxyJump` and `ProxyCommand` have no `ssh_connections` field. An entry that leaves `host` unset —
+a name-only entry included — takes both from the `Host` block. An entry that sets its own `host` takes
+neither: the route belongs to the host the block names, and the entry has replaced that host. Its
+`ProxyJump` is then not resolved at all, so one panemux cannot follow does not stop the entry from
+connecting ([security](../security/command-execution.md#ssh-proxycommand)).
+
+An entry needs a host from one of the two: an entry with no `host` and no `Host` block of its name
+fails when it is connected — the pane does not start, and the task dashboard reports the error on
+that host — with `ssh connection "<name>" has no host`. A `~/.ssh/config` that cannot be read counts
+as having no `Host` block, so an entry that sets its own `host` connects regardless; for an entry that
+needed the block, the error also carries why the file could not be read. The file is read only from an
+absolute path: when the home directory cannot be resolved it is treated as unreadable rather than
+looked for under the working directory.
+
+Saving the config writes a name-only entry back as `name: {}` and leaves out every field that is not
+set.
 
 Example:
 
 ```yaml
 ssh_connections:
-  prod-web:
+  gpu-box:            # everything from `Host gpu-box`
+  build:
+    user: ci          # `Host build`, logged in as ci
+  prod-web:           # no Host block needed: host is set here
     host: 192.168.1.10
     user: deploy
     key_file: ~/.ssh/id_ed25519
@@ -32,24 +61,31 @@ ssh_connections:
     known_hosts_file: ~/.ssh/known_hosts
 ```
 
+`ssh_connections` is also the list of hosts the [task dashboard](tasks.md#hosts-and-connections)
+collects agent sessions from. A host that only has a `~/.ssh/config` `Host` block — including one
+added with **Add SSH Host**, which writes `~/.ssh/config` — can be a pane's `connection` but is not
+collected from until its name is listed under `ssh_connections`.
+
 ### Using `~/.ssh/config` hosts
 
-Panes can reference host aliases from `~/.ssh/config` directly in the `connection` field without duplicating them under `ssh_connections`. The following fields are read from each non-wildcard `Host` block:
+Panes can reference host aliases from `~/.ssh/config` directly in the `connection` field without listing them under `ssh_connections`. The following fields are read from each non-wildcard `Host` block:
 
 - `HostName` — hostname or IP (defaults to the alias name if omitted)
 - `User` — remote username
 - `Port` — port number (defaults to 22 if omitted)
 - `IdentityFile` — path to private key; `~/` is expanded at session creation time
+- `ProxyJump` — another connection name to connect through, resolved the same way as a pane's `connection`. Only a single alias is supported (not `user@host`, a comma-separated list, or `none`), and a chain that comes back to a name already on it is refused as `proxy jump cycle: a -> b -> a`
+- `ProxyCommand` — a command whose stdin/stdout carries the connection
 
 Wildcard entries (`Host *`, `Host *.example.com`) are skipped.
 
-`ssh_connections` takes precedence over `~/.ssh/config` when the same name appears in both.
+When the same name appears in both, the `ssh_connections` entry's fields take precedence over the `Host` block's, field by field, as described above.
 
 ### Authentication
 
 When establishing an SSH connection, the following auth methods are attempted in order:
 
-1. Key file specified in `key_file` (if present)
+1. Key file specified in `key_file`, or the `Host` block's `IdentityFile` when `key_file` is not set (if present)
 2. Password specified in `password` (if present)
 3. Default key files in order: `~/.ssh/id_ed25519`, `~/.ssh/id_rsa`, `~/.ssh/id_ecdsa`
 

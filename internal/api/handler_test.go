@@ -3447,3 +3447,35 @@ func TestPutLayoutRoutes_ExpandARelocatedRootPaneCwd(t *testing.T) {
 		})
 	}
 }
+
+// TestPostSSHConfigHost_LineBreakInAValue_422 verifies that a value carrying a
+// line break is refused before anything is written. Each value is written as
+// the rest of one line of ~/.ssh/config, so a line break in it added a
+// directive of the caller's choosing — ProxyCommand, which runs through
+// /bin/sh, included.
+func TestPostSSHConfigHost_LineBreakInAValue_422(t *testing.T) {
+	const injected = "x.example\n    ProxyCommand touch pwned"
+	for name, req := range map[string]sshConfigHostRequest{
+		"hostname LF": {Name: "inj", Hostname: injected, User: "u"},
+		"hostname CR": {Name: "inj", Hostname: "x.example\rProxyCommand touch pwned", User: "u"},
+		"user":        {Name: "inj", Hostname: "x.example", User: "u\nProxyCommand touch pwned"},
+		"identity file": {
+			Name: "inj", Hostname: "x.example", User: "u", IdentityFile: "~/.ssh/id\nProxyCommand touch pwned",
+		},
+		"other control ch": {Name: "inj", Hostname: "x.example\x00", User: "u"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
+			h.sshConfigPath = filepath.Join(t.TempDir(), "config")
+			payload, _ := json.Marshal(req)
+			rec := httptest.NewRecorder()
+			httpReq := httptest.NewRequest(http.MethodPost, "/api/ssh-config/hosts", bytes.NewReader(payload))
+			httpReq.Header.Set("Content-Type", "application/json")
+
+			setupRouterWithHandler(h).ServeHTTP(rec, httpReq)
+
+			assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
+			assert.NoFileExists(t, h.sshConfigPath)
+		})
+	}
+}

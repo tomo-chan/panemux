@@ -1218,3 +1218,62 @@ func writeTempFile(t *testing.T, content string) string {
 	require.NoError(t, os.WriteFile(f, []byte(content), 0600))
 	return f
 }
+
+// TestValidate_LeavesSSHConnectionsUntouched pins that validation reads
+// ~/.ssh/config hosts without adding them to ssh_connections. Validate used to
+// add them to the config's own map whenever ssh_connections was non-empty, which
+// made every ~/.ssh/config host a task dashboard host and wrote it back into
+// config.yaml on the next save.
+func TestValidate_LeavesSSHConnectionsUntouched(t *testing.T) {
+	sshCfg := filepath.Join(t.TempDir(), "config")
+	require.NoError(t, os.WriteFile(sshCfg, []byte("Host only-in-ssh-config\n    HostName 192.0.2.1\n"), 0600))
+
+	cfg := validConfig()
+	cfg.SSHConnections = map[string]SSHConnection{"declared": {}}
+	cfg.sshConfigPath = sshCfg
+
+	require.NoError(t, cfg.Validate())
+	assert.Equal(t, map[string]SSHConnection{"declared": {}}, cfg.SSHConnections)
+}
+
+// TestSSHConnection_NameOnlyEntry_RoundTrips verifies that an ssh_connections
+// entry written as just its name loads as an entry with no fields and is saved
+// back without the empty fields spelled out.
+func TestSSHConnection_NameOnlyEntry_RoundTrips(t *testing.T) {
+	content := `
+server:
+  port: 8080
+  host: "127.0.0.1"
+ssh_connections:
+  name-only:
+  with-user:
+    user: deploy
+layout:
+  direction: horizontal
+  children:
+    - size: 100
+      pane:
+        id: main
+        type: local
+`
+	f := writeTempFile(t, content)
+	cfg, err := Load(f)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]SSHConnection{
+		"name-only": {},
+		"with-user": {User: "deploy"},
+	}, cfg.SSHConnections)
+
+	require.NoError(t, cfg.SaveWorkspaces())
+	saved, err := os.ReadFile(f)
+	require.NoError(t, err)
+	assert.Contains(t, string(saved), "name-only: {}")
+	assert.Contains(t, string(saved), "with-user:\n        user: deploy\n")
+	assert.NotContains(t, string(saved), "host: \"\"")
+	assert.NotContains(t, string(saved), "key_file: \"\"")
+	assert.NotContains(t, string(saved), "port: 0")
+
+	reloaded, err := Load(f)
+	require.NoError(t, err)
+	assert.Equal(t, cfg.SSHConnections, reloaded.SSHConnections)
+}

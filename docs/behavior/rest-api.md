@@ -248,11 +248,11 @@ Request body:
 
 - `400`: invalid JSON
 - `409`: a host with the same name already exists in `~/.ssh/config`
-- `422`: validation error (name, hostname, or user missing; name contains invalid characters; port out of range)
+- `422`: validation error (name, hostname, or user missing; name contains invalid characters; hostname, user, or identity_file contains a control character such as a line break; port out of range)
 - `500`: unable to read or write `~/.ssh/config`
 - `201`: host appended
 
-`name` must match `^[a-zA-Z0-9_.\-]+$`. `port` defaults to 0 (omitted from the written block) when not specified. `identity_file` is optional.
+`name` must match `^[a-zA-Z0-9_.\-]+$`. `hostname`, `user`, and `identity_file` must not contain a control character: each is written as the rest of one line, and a line break would add a directive of its own ([security](../security/command-execution.md#ssh-proxycommand)). `port` defaults to 0 (omitted from the written block) when not specified. `identity_file` is optional.
 
 ### `GET /api/display`
 
