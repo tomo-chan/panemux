@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.22.0](https://github.com/tomo-chan/panemux/compare/v0.21.0...v0.22.0) (2026-09-29)
+
+
+### Features
+
+* go to the pane an agent outside tmux runs in ([#260](https://github.com/tomo-chan/panemux/issues/260)) ([edaae60](https://github.com/tomo-chan/panemux/commit/edaae609affad2424c326b10a05172335eab615d))
+* link a task's closing issues and autolinked references on the task dashboard ([#261](https://github.com/tomo-chan/panemux/issues/261)) ([76c809a](https://github.com/tomo-chan/panemux/commit/76c809a8223bb13d8bab71ab084d613c53695f46))
+* list, start and resume codex tasks on the task dashboard ([#271](https://github.com/tomo-chan/panemux/issues/271)) ([80ddbae](https://github.com/tomo-chan/panemux/commit/80ddbae783cae96589acddf147ceca2efebb43e7))
+* read PANEMUX_PANE_ID on macOS hosts through ps -E ([#269](https://github.com/tomo-chan/panemux/issues/269)) ([7fce909](https://github.com/tomo-chan/panemux/commit/7fce909f26cb258499bb4f4cd00ec4d79dbe0cf0))
+* record tasks as done and label them on the task dashboard ([#262](https://github.com/tomo-chan/panemux/issues/262)) ([d413237](https://github.com/tomo-chan/panemux/commit/d4132370a3d49083159afee71a32f71bde5f113c))
+* start and resume claude tasks from the task dashboard ([#265](https://github.com/tomo-chan/panemux/issues/265)) ([3e84ad6](https://github.com/tomo-chan/panemux/commit/3e84ad6bf013db7a772c9a91d7a7849cefd8bdc2))
+* summarize each task's work and what is left on the task dashboard ([#268](https://github.com/tomo-chan/panemux/issues/268)) ([304fd7c](https://github.com/tomo-chan/panemux/commit/304fd7c2bb364361fd0eb164440fa15cc000af91))
+
 ## [0.21.0](https://github.com/tomo-chan/panemux/compare/v0.20.5...v0.21.0) (2026-09-26)
 
 
