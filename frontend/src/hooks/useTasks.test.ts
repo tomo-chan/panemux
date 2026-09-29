@@ -260,6 +260,7 @@ describe('useTasks saveRecord', () => {
 
   // A collection that was already running when the record was saved read the
   // records before the save, so its answer would put the old record back.
+  // efficacy:exempt unchanged by this branch; the new describe block after it falls inside its line range
   it('drops a collection that started before a save', async () => {
     let resolveSlow: (value: Response) => void = () => {}
     const fetchMock = vi.fn()
@@ -282,5 +283,164 @@ describe('useTasks saveRecord', () => {
     })
 
     expect(result.current.data!.tasks[0].done).toBe(true)
+  })
+})
+
+describe('useTasks launch and resume', () => {
+  const launched = {
+    id: 'local:claude:0f0e0d0c-0b0a-4908-8706-050403020100',
+    session_id: '0f0e0d0c-0b0a-4908-8706-050403020100',
+    tmux_session: 'task-0f0e0d0c',
+  }
+  const stopped = {
+    ...payload.tasks[0],
+    id: 'local:claude:5d7e3a90-1b2c-4d3e-8f40-51627384a5b6',
+    session_id: '5d7e3a90-1b2c-4d3e-8f40-51627384a5b6',
+    state: 'stop',
+    location: { kind: 'none', attachable: false },
+  }
+  const refused = (status: number, text: string) =>
+    ({ ok: false, status, text: () => Promise.resolve(text) }) as Response
+
+  beforeEach(() => setVisibility('visible'))
+  afterEach(() => vi.restoreAllMocks())
+
+  it('POSTs a new task, answers with what was started, and collects again', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(ok(payload))
+      .mockResolvedValueOnce({ ...ok({ ...launched, labels: ['payment'] }), status: 201 } as Response)
+      .mockResolvedValueOnce(ok(payload))
+    window.fetch = fetchMock
+    const { result } = renderHook(() => useTasks(true))
+    await waitFor(() => expect(result.current.data).not.toBeNull())
+
+    let outcome: Awaited<ReturnType<typeof result.current.launch>> | null = null
+    await act(async () => {
+      outcome = await result.current.launch({ host: 'build-box', cwd: '/workspace/user/project', prompt: 'go', labels: ['payment'] })
+    })
+
+    expect(outcome).toEqual({ ok: true, launched: { ...launched, labels: ['payment'] } })
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/tasks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ host: 'build-box', agent: 'claude', cwd: '/workspace/user/project', prompt: 'go', labels: ['payment'] }),
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/tasks')
+  })
+
+  it('reports a refused launch, a network failure and an unexpected answer, without collecting', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(ok(payload))
+      .mockResolvedValueOnce(refused(409, 'the working directory does not exist on the host\n'))
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce(ok({ unexpected: true }))
+      .mockResolvedValueOnce(refused(502, ''))
+    window.fetch = fetchMock
+    const { result } = renderHook(() => useTasks(true))
+    await waitFor(() => expect(result.current.data).not.toBeNull())
+
+    const outcomes: unknown[] = []
+    await act(async () => {
+      for (let i = 0; i < 4; i++) {
+        outcomes.push(await result.current.launch({ host: '', cwd: '/w', prompt: 'go', labels: [] }))
+      }
+    })
+
+    expect(outcomes).toEqual([
+      { ok: false, error: 'the working directory does not exist on the host' },
+      { ok: false, error: 'offline' },
+      { ok: false, error: 'Unexpected response from /api/tasks' },
+      { ok: false, error: 'HTTP 502' },
+    ])
+    expect(fetchMock).toHaveBeenCalledTimes(5)
+  })
+
+  it('POSTs a resume for a stopped task and collects again', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(ok({ ...payload, tasks: [stopped] }))
+      .mockResolvedValueOnce(ok({ ...launched, id: stopped.id, session_id: stopped.session_id, tmux_session: 'task-5d7e3a90' }))
+      .mockResolvedValueOnce(ok(payload))
+    window.fetch = fetchMock
+    const { result } = renderHook(() => useTasks(true))
+    await waitFor(() => expect(result.current.data).not.toBeNull())
+
+    let outcome: unknown = null
+    await act(async () => {
+      outcome = await result.current.resume(result.current.data!.tasks[0])
+    })
+
+    expect(outcome).toEqual({
+      ok: true,
+      launched: { id: stopped.id, session_id: stopped.session_id, tmux_session: 'task-5d7e3a90' },
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/tasks/resume', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ host: '', session_id: stopped.session_id }),
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/tasks')
+  })
+
+  it('refuses to resume a task without a session id, and reports a refused resume', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(ok(payload))
+      .mockResolvedValueOnce(refused(409, "a tmux session with the task's name already exists on the host"))
+      .mockResolvedValueOnce(ok({ id: '' }))
+    window.fetch = fetchMock
+    const { result } = renderHook(() => useTasks(true))
+    await waitFor(() => expect(result.current.data).not.toBeNull())
+
+    const outcomes: unknown[] = []
+    await act(async () => {
+      outcomes.push(await result.current.resume(payload.tasks[0] as never))
+      outcomes.push(await result.current.resume(stopped as never))
+      outcomes.push(await result.current.resume(stopped as never))
+    })
+
+    expect(outcomes).toEqual([
+      { ok: false, error: 'This task has no session ID to resume' },
+      { ok: false, error: "a tmux session with the task's name already exists on the host" },
+      { ok: false, error: 'Unexpected response from /api/tasks/resume' },
+    ])
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+  })
+})
+
+describe('useTasks collection after a launch', () => {
+  beforeEach(() => setVisibility('visible'))
+  afterEach(() => vi.restoreAllMocks())
+
+  // A collection already running when a task was started began before the
+  // task existed, so the launch's own collection runs once it finishes rather
+  // than being dropped until the next poll.
+  it('collects again after a collection that was in flight when the task started', async () => {
+    let resolveSlow: (value: Response) => void = () => {}
+    const withTask = { ...payload, tasks: [...payload.tasks, { ...payload.tasks[0], id: 'local:claude:new' }] }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(ok(payload))
+      .mockImplementationOnce(() => new Promise<Response>((resolve) => { resolveSlow = resolve }))
+      .mockResolvedValueOnce({ ...ok({ id: 'local:claude:new', session_id: 'new', tmux_session: 'task-new' }), status: 201 } as Response)
+      .mockResolvedValueOnce(ok(withTask))
+    window.fetch = fetchMock
+    const { result } = renderHook(() => useTasks(true))
+    await waitFor(() => expect(result.current.data).not.toBeNull())
+
+    let slow: Promise<void> = Promise.resolve()
+    act(() => {
+      slow = result.current.refresh()
+    })
+    let launching: Promise<unknown> = Promise.resolve()
+    await act(async () => {
+      launching = result.current.launch({ host: '', cwd: '/w', prompt: 'go', labels: [] })
+      await Promise.resolve()
+    })
+    await act(async () => {
+      resolveSlow(ok(payload))
+      await slow
+      await launching
+    })
+
+    await waitFor(() => expect(result.current.data!.tasks.map((t) => t.id)).toContain('local:claude:new'))
+    expect(fetchMock).toHaveBeenCalledTimes(4)
   })
 })
