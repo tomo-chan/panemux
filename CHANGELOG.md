@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.0](https://github.com/tomo-chan/panemux/compare/v0.22.0...v0.23.0) (2026-09-29)
+
+
+### Features
+
+* let an ssh_connections entry be just a name, taking its details from ~/.ssh/config ([#274](https://github.com/tomo-chan/panemux/issues/274)) ([a4e6d5f](https://github.com/tomo-chan/panemux/commit/a4e6d5f58a53804966224460a9b3c86c2b5680bc))
+
 ## [0.22.0](https://github.com/tomo-chan/panemux/compare/v0.21.0...v0.22.0) (2026-09-29)
 
 
