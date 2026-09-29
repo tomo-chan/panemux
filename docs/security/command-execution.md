@@ -112,7 +112,13 @@ whole string, so both the command and what is substituted into it must come from
 SSH configuration and nothing else:
 
 - The command comes only from a `ProxyCommand` directive in the SSH config file. `ssh_connections`
-  has no field for one, and no API writes one.
+  has no field for one, and no API writes one. The one API that writes the file,
+  `POST /api/ssh-config/hosts`, writes each value as the rest of a single line, so
+  `sshconfig.CheckHostValues` refuses a name, hostname, user or identity file containing a control
+  character — a line break in one used to add a directive of the caller's choosing, `ProxyCommand`
+  included. The handler answers `422` before anything is written, and `AppendHost` checks again
+  itself. `TestPostSSHConfigHost_LineBreakInAValue_422` and
+  `TestAppendHost_RefusesAControlCharacterInAValue` pin both.
 - `%h` is the `HostName` of the same `Host` block. `resolveSSHConfig` in
   `internal/session/factory.go` does not let an `ssh_connections` entry that sets its own `host`
   inherit the block's `ProxyCommand` (or its `ProxyJump`), so a `host` from `config.yaml` is never

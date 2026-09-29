@@ -95,6 +95,14 @@ name-only entry over a block whose `ProxyJump` is an alias) keep it either way. 
 that a `ProxyJump` cycle recursed until the stack overflowed, which the merge had made reachable from
 fully specified entries too; the chain is now carried along and a cycle is an error.
 
+Checking that fix, the next review found that `POST /api/ssh-config/hosts` — the **Add SSH Host**
+dialog's route — wrote `hostname`, `user` and `identity_file` into `~/.ssh/config` unchecked, so a line
+break in one added any directive, `ProxyCommand` included. The flaw predates the change, but the
+security guide it added rested on "no API writes a ProxyCommand", and a name-only entry made
+**Add SSH Host** then one line in `ssh_connections` the natural way to reach the dashboard's dialer.
+It was fixed in the same pull request rather than split out: control characters in those values are
+refused with `422`, and `AppendHost` refuses them too.
+
 The collection scope itself is unchanged: widening it to every `~/.ssh/config` host was rejected in
 issue #272, since that file commonly lists hosts that have nothing to do with agents. The same change
 fixed validation adding the `~/.ssh/config` hosts to the config's own `ssh_connections` map whenever

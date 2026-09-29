@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"panemux/internal/homedir"
 )
@@ -128,6 +129,10 @@ func applyHostDirective(host *Host, key, val string) {
 // AppendHost appends a new Host block to the SSH config file at path.
 // The file is created if it does not exist.
 func AppendHost(path string, h Host) error {
+	if err := CheckHostValues(h); err != nil {
+		return err
+	}
+
 	// Ensure the directory exists
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return fmt.Errorf("create ssh config dir: %w", err)
@@ -161,6 +166,25 @@ func AppendHost(path string, h Host) error {
 	_, err = f.WriteString(sb.String())
 	if err != nil {
 		return fmt.Errorf("write ssh config: %w", err)
+	}
+	return nil
+}
+
+// CheckHostValues refuses a Host whose name, hostname, user or identity file
+// contains a control character. AppendHost writes each of them as the rest of
+// one line, so a line break in one would end that line and start a directive
+// of the caller's choosing — a ProxyCommand, which runs through /bin/sh,
+// included. The error names the directive but not the value.
+func CheckHostValues(h Host) error {
+	for _, f := range []struct{ field, value string }{
+		{"Host", h.Name},
+		{"HostName", h.Hostname},
+		{"User", h.User},
+		{"IdentityFile", h.IdentityFile},
+	} {
+		if strings.IndexFunc(f.value, unicode.IsControl) >= 0 {
+			return fmt.Errorf("%s must not contain a control character", f.field)
+		}
 	}
 	return nil
 }

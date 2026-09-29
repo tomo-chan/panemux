@@ -267,3 +267,26 @@ func TestDefaultPath_ResolvableHomeDirectory_IsUnderTheHomeDirectory(t *testing.
 
 	assert.Equal(t, filepath.Join("/workspace/user/home", ".ssh", "config"), DefaultPath())
 }
+
+// TestAppendHost_RefusesAControlCharacterInAValue verifies that AppendHost
+// itself, not only its caller, refuses a value that would end its line early
+// and start a directive of its own, and writes nothing.
+func TestAppendHost_RefusesAControlCharacterInAValue(t *testing.T) {
+	for name, h := range map[string]Host{
+		"name":          {Name: "a\nProxyCommand x", Hostname: "h", User: "u"},
+		"hostname":      {Name: "a", Hostname: "h\nProxyCommand x", User: "u"},
+		"user":          {Name: "a", Hostname: "h", User: "u\rProxyCommand x"},
+		"identity file": {Name: "a", Hostname: "h", User: "u", IdentityFile: "k\nProxyCommand x"},
+		"leading break": {Name: "a", Hostname: "\nProxyCommand x", User: "u"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := filepath.Join(t.TempDir(), "config")
+
+			err := AppendHost(f, h)
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "control character")
+			assert.NoFileExists(t, f)
+		})
+	}
+}

@@ -697,6 +697,17 @@ func (h *Handler) PostSSHConfigHost(w http.ResponseWriter, r *http.Request) {
 		writeValidationError(w, "port must be between 0 and 65535")
 		return
 	}
+	newHost := sshconfig.Host{
+		Name:         req.Name,
+		Hostname:     req.Hostname,
+		User:         req.User,
+		Port:         req.Port,
+		IdentityFile: req.IdentityFile,
+	}
+	if err := sshconfig.CheckHostValues(newHost); err != nil {
+		writeValidationError(w, err.Error())
+		return
+	}
 
 	// Check for duplicate
 	hosts, err := sshconfig.ParseHosts(h.sshConfigPath)
@@ -714,13 +725,7 @@ func (h *Handler) PostSSHConfigHost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Append the new host
-	if err := sshconfig.AppendHost(h.sshConfigPath, sshconfig.Host{
-		Name:         req.Name,
-		Hostname:     req.Hostname,
-		User:         req.User,
-		Port:         req.Port,
-		IdentityFile: req.IdentityFile,
-	}); err != nil {
+	if err := sshconfig.AppendHost(h.sshConfigPath, newHost); err != nil {
 		http.Error(w, "failed to write ssh config", http.StatusInternalServerError)
 		return
 	}
