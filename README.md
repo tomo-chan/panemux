@@ -391,7 +391,11 @@ Connections can be defined in two ways:
 
 The task dashboard collects only from the hosts under `ssh_connections`. A host that exists only in `~/.ssh/config` — including one added from the UI with **Add SSH Host**, which writes `~/.ssh/config` — is usable in panes but is not collected from until its name is listed under `ssh_connections`.
 
-Authentication is attempted in order: configured `key_file` → configured `password` → default key files (`~/.ssh/id_ed25519`, `~/.ssh/id_rsa`, `~/.ssh/id_ecdsa`).
+An entry that sets its own `host` does not take the `Host` block's `ProxyJump` or `ProxyCommand`; leave `host` unset to connect through the route `~/.ssh/config` describes.
+
+Earlier versions added every `~/.ssh/config` host to `ssh_connections` when the config was saved, if `ssh_connections` was not empty. Those entries are not removed automatically; delete the ones you do not want on the task dashboard from `ssh_connections` by hand.
+
+Authentication is attempted in order: the key file (`key_file`, or the `Host` block's `IdentityFile` when `key_file` is not set) → configured `password` → default key files (`~/.ssh/id_ed25519`, `~/.ssh/id_rsa`, `~/.ssh/id_ecdsa`).
 
 ---
 

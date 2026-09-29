@@ -437,7 +437,10 @@ Host box
 		conn   config.SSHConnection
 	}{
 		{func(*SSHConfig) {}, "name only", config.SSHConnection{}},
-		{func(c *SSHConfig) { c.Host = "yaml.example.com" }, "host", config.SSHConnection{Host: "yaml.example.com"}},
+		{
+			func(c *SSHConfig) { c.Host, c.ProxyCommand, c.JumpHost = "yaml.example.com", "", nil },
+			"host, which also drops the block's route", config.SSHConnection{Host: "yaml.example.com"},
+		},
 		{func(c *SSHConfig) { c.User = "yamluser" }, "user", config.SSHConnection{User: "yamluser"}},
 		{func(c *SSHConfig) { c.Port = 2222 }, "port", config.SSHConnection{Port: 2222}},
 		{func(c *SSHConfig) { c.KeyFile = "/keys/yaml" }, "key file", config.SSHConnection{KeyFile: "/keys/yaml"}},
@@ -493,6 +496,7 @@ func TestResolveSSHConfig_SSHConnectionsEntryWithUnreadableSSHConfig(t *testing.
 	_, err = resolveSSHConfig("name-only", conns, unreadable)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `ssh connection "name-only" has no host`)
+	assert.Contains(t, err.Error(), "is a directory", "the read error must be reported, not taken as a missing block")
 }
 
 // TestResolveSSHConfig_NameOnlyEntry_ProxyJumpNotFound verifies that a jump
@@ -506,4 +510,91 @@ func TestResolveSSHConfig_NameOnlyEntry_ProxyJumpNotFound(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "resolving proxy jump")
+}
+
+// TestResolveSSHConfig_EntryWithItsOwnHostTakesNoRouteFromTheHostBlock pins
+// that an ssh_connections entry setting its own host neither inherits nor
+// resolves the ProxyJump and ProxyCommand of a Host block of the same name.
+// Resolving a ProxyJump panemux cannot follow (user@host here) used to fail an
+// entry that connected on its YAML values alone, and the block's ProxyCommand
+// would have run with the YAML host substituted for %h.
+func TestResolveSSHConfig_EntryWithItsOwnHostTakesNoRouteFromTheHostBlock(t *testing.T) {
+	sshCfgPath := filepath.Join(t.TempDir(), "config")
+	content := `Host prod
+    HostName prod.internal
+    User fileuser
+    Port 2200
+    ProxyJump ops@bastion.example.com
+    ProxyCommand nc %h %p
+`
+	require.NoError(t, os.WriteFile(sshCfgPath, []byte(content), 0600))
+	conns := map[string]config.SSHConnection{"prod": {Host: "10.0.0.5", User: "deploy"}}
+
+	cfg, err := resolveSSHConfig("prod", conns, sshCfgPath)
+
+	require.NoError(t, err)
+	assert.Equal(t, SSHConfig{Host: "10.0.0.5", User: "deploy", Port: 2200}, cfg)
+}
+
+// TestResolveSSHConfig_ProxyJumpCycle_IsAnError verifies that a ProxyJump
+// chain that comes back to a name already on it is refused, rather than
+// recursing until the stack overflows and takes the whole server down.
+func TestResolveSSHConfig_ProxyJumpCycle_IsAnError(t *testing.T) {
+	tests := []struct {
+		conns   map[string]config.SSHConnection
+		name    string
+		content string
+		chain   string
+	}{
+		{
+			name:    "self",
+			content: "Host a\n    HostName a.example\n    ProxyJump a\n",
+			chain:   "proxy jump cycle: a -> a",
+		},
+		{
+			name:    "mutual",
+			content: "Host a\n    HostName a.example\n    ProxyJump b\n\nHost b\n    HostName b.example\n    ProxyJump a\n",
+			chain:   "proxy jump cycle: a -> b -> a",
+		},
+		{
+			name:    "through name-only entries",
+			conns:   map[string]config.SSHConnection{"a": {}, "b": {}},
+			content: "Host a\n    HostName a.example\n    ProxyJump b\n\nHost b\n    HostName b.example\n    ProxyJump a\n",
+			chain:   "proxy jump cycle: a -> b -> a",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sshCfgPath := filepath.Join(t.TempDir(), "config")
+			require.NoError(t, os.WriteFile(sshCfgPath, []byte(tt.content), 0600))
+
+			_, err := resolveSSHConfig("a", tt.conns, sshCfgPath)
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.chain)
+		})
+	}
+}
+
+// TestResolveSSHConfig_RelativeSSHConfigPath_IsNotRead verifies that an SSH
+// config path that is not absolute — what sshconfig.DefaultPath returns when
+// the home directory cannot be resolved — is never read. Read, it would be
+// whatever .ssh/config the working directory holds, and its ProxyCommand runs
+// through /bin/sh.
+func TestResolveSSHConfig_RelativeSSHConfigPath_IsNotRead(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".ssh"), 0700))
+	content := "Host planted\n    HostName planted.example\n    ProxyCommand touch pwned\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".ssh", "config"), []byte(content), 0600))
+	t.Chdir(dir)
+	relative := filepath.Join(".ssh", "config")
+
+	_, err := resolveSSHConfig("planted", nil, relative)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `ssh connection "planted" not found`)
+
+	_, err = resolveSSHConfig("planted", map[string]config.SSHConnection{"planted": {}}, relative)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `ssh connection "planted" has no host`)
+	assert.Contains(t, err.Error(), "not absolute")
 }

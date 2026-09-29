@@ -26,12 +26,19 @@ same setting, and a field left out keeps the block's value:
 | `password` | — | Password for password-based authentication |
 | `known_hosts_file` | — | Path to known\_hosts file for host-key verification (default `~/.ssh/known_hosts`). Absolute or `~/…`, refused when still relative at the read, for the same reason as `key_file` |
 
-`ProxyJump` and `ProxyCommand` have no `ssh_connections` field and always come from the `Host` block.
+`ProxyJump` and `ProxyCommand` have no `ssh_connections` field. An entry that leaves `host` unset —
+a name-only entry included — takes both from the `Host` block. An entry that sets its own `host` takes
+neither: the route belongs to the host the block names, and the entry has replaced that host. Its
+`ProxyJump` is then not resolved at all, so one panemux cannot follow does not stop the entry from
+connecting ([security](../security/command-execution.md#ssh-proxycommand)).
 
 An entry needs a host from one of the two: an entry with no `host` and no `Host` block of its name
 fails when it is connected — the pane does not start, and the task dashboard reports the error on
 that host — with `ssh connection "<name>" has no host`. A `~/.ssh/config` that cannot be read counts
-as having no `Host` block, so an entry that sets its own `host` connects regardless.
+as having no `Host` block, so an entry that sets its own `host` connects regardless; for an entry that
+needed the block, the error also carries why the file could not be read. The file is read only from an
+absolute path: when the home directory cannot be resolved it is treated as unreadable rather than
+looked for under the working directory.
 
 Saving the config writes a name-only entry back as `name: {}` and leaves out every field that is not
 set.
@@ -67,7 +74,7 @@ Panes can reference host aliases from `~/.ssh/config` directly in the `connectio
 - `User` — remote username
 - `Port` — port number (defaults to 22 if omitted)
 - `IdentityFile` — path to private key; `~/` is expanded at session creation time
-- `ProxyJump` — another connection name to connect through, resolved the same way as a pane's `connection`
+- `ProxyJump` — another connection name to connect through, resolved the same way as a pane's `connection`. Only a single alias is supported (not `user@host`, a comma-separated list, or `none`), and a chain that comes back to a name already on it is refused as `proxy jump cycle: a -> b -> a`
 - `ProxyCommand` — a command whose stdin/stdout carries the connection
 
 Wildcard entries (`Host *`, `Host *.example.com`) are skipped.
@@ -78,7 +85,7 @@ When the same name appears in both, the `ssh_connections` entry's fields take pr
 
 When establishing an SSH connection, the following auth methods are attempted in order:
 
-1. Key file specified in `key_file` (if present)
+1. Key file specified in `key_file`, or the `Host` block's `IdentityFile` when `key_file` is not set (if present)
 2. Password specified in `password` (if present)
 3. Default key files in order: `~/.ssh/id_ed25519`, `~/.ssh/id_rsa`, `~/.ssh/id_ecdsa`
 

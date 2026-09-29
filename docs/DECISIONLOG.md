@@ -81,15 +81,26 @@ just a name: its details come from the `~/.ssh/config` `Host` block of that name
 entry does set overrides the block's value for that setting. Field-by-field merging was chosen over
 using the `Host` block only when the entry is empty, so that one setting (a different `user`, say)
 can be changed without copying the rest. The consequence is that an entry that already set `host`
-and `user` now also takes `IdentityFile`, `Port`, `ProxyJump` and `ProxyCommand` from a `Host` block
-of the same name when it leaves those unset; before, a name in both sources used only the YAML
-entry.
+and `user` now also takes `IdentityFile` and `Port` from a `Host` block of the same name when it leaves
+those unset; before, a name in both sources used only the YAML entry.
+
+The route is the exception. An entry that sets its own `host` takes neither `ProxyJump` nor
+`ProxyCommand` from the block. The first version of the merge inherited both, and review of PR #274
+found two consequences: a block's `ProxyJump` that panemux cannot follow (`user@host`, a list, `none`)
+failed an entry that had connected on its YAML values alone, and the block's `ProxyCommand` ran through
+`/bin/sh -c` with the YAML `host` substituted for `%h` — a data flow from `config.yaml` into a shell
+that had not existed. Parsing the other `ProxyJump` forms was the alternative; it was not taken because
+the route a block describes belongs to the host it names, and the setups this change is for (a
+name-only entry over a block whose `ProxyJump` is an alias) keep it either way. The same review found
+that a `ProxyJump` cycle recursed until the stack overflowed, which the merge had made reachable from
+fully specified entries too; the chain is now carried along and a cycle is an error.
 
 The collection scope itself is unchanged: widening it to every `~/.ssh/config` host was rejected in
 issue #272, since that file commonly lists hosts that have nothing to do with agents. The same change
 fixed validation adding the `~/.ssh/config` hosts to the config's own `ssh_connections` map whenever
 that map was non-empty — which made every such host a dashboard host and wrote it into config.yaml on
-the next save. Issue #272's proposal of a UI to edit `ssh_connections` was not built: listing a name
+the next save. Entries a config already had written that way are not removed by the fix: they stay
+dashboard hosts until deleted from `ssh_connections` by hand. Issue #272's proposal of a UI to edit `ssh_connections` was not built: listing a name
 is now the whole edit.
 
 ### Codex sessions: state, starting and resuming (2026-09-27, issue #264)

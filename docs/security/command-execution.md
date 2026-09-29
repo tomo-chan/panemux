@@ -103,6 +103,31 @@ alongside an error. The home directory is reached through `internal/homedir` (se
 testability rule), which is also what makes these paths testable at all — the failure arms above had
 never been executed by a test before, because nothing could reach them.
 
+### SSH `ProxyCommand`
+
+`dialViaProxyCommand` in `internal/session/ssh.go` runs a `ProxyCommand` through
+`exec.Command("/bin/sh", "-c", cmd)` after `substituteProxyCommand` has put the connection's host in
+place of `%h` and its port in place of `%p` by plain string replacement. The shell re-interprets the
+whole string, so both the command and what is substituted into it must come from the operator's own
+SSH configuration and nothing else:
+
+- The command comes only from a `ProxyCommand` directive in the SSH config file. `ssh_connections`
+  has no field for one, and no API writes one.
+- `%h` is the `HostName` of the same `Host` block. `resolveSSHConfig` in
+  `internal/session/factory.go` does not let an `ssh_connections` entry that sets its own `host`
+  inherit the block's `ProxyCommand` (or its `ProxyJump`), so a `host` from `config.yaml` is never
+  substituted into a command written for another host. `%p` is an integer.
+- The SSH config file is read only from an absolute path. `sshconfig.DefaultPath` returns the
+  relative `.ssh/config` when the home directory cannot be resolved; `lookupSSHConfigHost` refuses to
+  read it, since that would take a `Host` block — and its `ProxyCommand` — from whatever directory
+  panemux was started in, the same failure as the key paths above.
+  `TestResolveSSHConfig_RelativeSSHConfigPath_IsNotRead` plants such a block in the working
+  directory and checks it is not used.
+
+`ProxyJump` chains are resolved with the names already on the chain carried along, and one that comes
+back to a name on it is an error: a cycle used to recurse until the goroutine's stack overflowed, which
+is fatal to the whole process and reachable from any request that resolves the connection.
+
 ### Launching the operator's browser (`--open`)
 
 `openChrome` in `main.go` runs the platform's browser opener against panemux's own listen address
