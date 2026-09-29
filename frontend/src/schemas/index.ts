@@ -340,7 +340,9 @@ export const TaskStateSchema = z.enum(['busy', 'wait', 'idle', 'run', 'unknown',
 export type TaskState = z.infer<typeof TaskStateSchema>
 
 export const TaskLocationSchema = z.object({
-  kind: z.enum(['tmux', 'outside', 'none']),
+  // daemon: a codex session run by codex's shared app-server daemon, which
+  // no pane can be told to show (issue #264).
+  kind: z.enum(['tmux', 'outside', 'daemon', 'none']),
   tmux_session: z.string().optional(),
   // The pane an agent outside tmux was started from, as its PANEMUX_PANE_ID
   // names it. Only a claim: findTaskPane matches it against the workspaces.
@@ -463,21 +465,25 @@ export type TaskRecord = z.infer<typeof TaskRecordSchema>
 // ── Task dashboard: POST /api/tasks, POST /api/tasks/resume ────────────────
 //
 // A task started or resumed (issue #257). The id is the one GET /api/tasks
-// will list the task under once claude has written its state, which is how
-// the dashboard selects it.
+// will list the task under once the agent has written its state, which is how
+// the dashboard selects it. A new codex task has neither id nor session_id:
+// codex picks its session ID once it has its first instruction, so the task
+// is found by its tmux session instead (issue #264).
 
 export const TaskLaunchedSchema = z.object({
-  id: z.string().min(1),
-  session_id: z.string().min(1),
+  id: z.string().min(1).optional(),
+  session_id: z.string().min(1).optional(),
   tmux_session: z.string().min(1),
 })
 
 export type TaskLaunched = z.infer<typeof TaskLaunchedSchema>
 
 // A new task's response adds the labels recorded for it, or why they could
-// not be — the task was started either way.
+// not be — the task was started either way. A codex task's labels are held
+// until a collection finds its session, and come back as pending_labels.
 export const TaskLaunchResponseSchema = TaskLaunchedSchema.extend({
   labels: z.array(z.string()).optional(),
+  pending_labels: z.array(z.string()).optional(),
   records_error: z.string().optional(),
 })
 

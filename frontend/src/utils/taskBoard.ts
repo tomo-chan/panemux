@@ -54,23 +54,62 @@ export function visibleColumns(showDone: boolean): TaskColumn[] {
 
 /**
  * Whether a task can be marked done or labeled. Records are keyed by session
- * id; a pid is reused once its process exits, so a task known only by one
- * (codex, an unreadable state file) has nothing stable to carry a record.
+ * id; a pid is reused once its process exits, so a task known only by one (a
+ * codex that has not started its session yet, an unreadable state file) has
+ * nothing stable to carry a record.
  */
 export function canRecord(task: Task): boolean {
   return Boolean(task.session_id)
 }
 
 // The only session IDs the server resumes: `claude --resume` also accepts a
-// session title, so anything else is refused there (issue #257).
+// session title and `codex resume` a session name, so anything else is
+// refused there (issues #257 and #264).
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 /**
- * Whether the dashboard offers Resume: a stopped claude task with a session
- * ID. Done does not matter; a done task can be resumed and stays done.
+ * Whether the dashboard offers Resume: a stopped claude or codex task with a
+ * session ID. Done does not matter; a done task can be resumed and stays done.
  */
 export function canResume(task: Task): boolean {
-  return task.agent === 'claude' && task.state === 'stop' && UUID_PATTERN.test(task.session_id ?? '')
+  return (
+    (task.agent === 'claude' || task.agent === 'codex') &&
+    task.state === 'stop' &&
+    UUID_PATTERN.test(task.session_id ?? '')
+  )
+}
+
+/** A task that was started and that the dashboard selects once it is listed. */
+export interface LaunchedTaskRef {
+  host: string
+  agent: string
+  /** The id the launch named; a new codex task has none yet. */
+  id?: string
+  tmux_session: string
+}
+
+/**
+ * The listed task a launch started, and whether the dashboard is done waiting
+ * for it. A claude task is listed under the id its launch named. A new codex
+ * task is found by its tmux session: first as its process, before codex has a
+ * session — it may be held at a start-up screen — and then under its session,
+ * which is when the wait is over.
+ */
+export function findLaunchedTask(tasks: Task[], launched: LaunchedTaskRef): { task: Task; settled: boolean } | null {
+  if (launched.id) {
+    const task = tasks.find((t) => t.id === launched.id)
+    return task ? { task, settled: true } : null
+  }
+  const candidates = tasks.filter(
+    (t) =>
+      t.host === launched.host &&
+      t.agent === launched.agent &&
+      t.location.kind === 'tmux' &&
+      t.location.tmux_session === launched.tmux_session,
+  )
+  const withSession = candidates.find((t) => t.session_id)
+  if (withSession) return { task: withSession, settled: true }
+  return candidates.length > 0 ? { task: candidates[0], settled: false } : null
 }
 
 /** Whether a task can be summarized: a claude task with a session ID (issue #258). */
@@ -317,6 +356,8 @@ export function taskOpenAction(task: Task, pane: TaskPaneRef | null): TaskOpenAc
       return task.location.pane_id
         ? { kind: 'unavailable', reason: 'running outside tmux, in a pane no workspace holds' }
         : { kind: 'unavailable', reason: 'running outside tmux, not in a panemux pane' }
+    case 'daemon':
+      return { kind: 'unavailable', reason: "run by codex's shared daemon, in a pane it cannot tell" }
     default:
       return { kind: 'unavailable', reason: 'not running' }
   }

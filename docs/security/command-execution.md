@@ -150,6 +150,22 @@ The script lists only the collecting user's processes (`ps -U "$(id -u)"`). On a
 another user's processes are neither shown as tasks nor accepted as the live process behind a
 leftover state file whose pid they reused.
 
+**Codex probes** ([issue #264](https://github.com/tomo-chan/panemux/issues/264)). For each of those
+processes whose program is named `codex`, the script lists the files it holds open — `readlink` on
+`/proc/<pid>/fd/*`, or `lsof -p <pid> -Fn` where there is no `/proc` — and keeps only names of the
+form `rollout-*.jsonl`. It reads those files and the rollouts under `~/.codex/sessions` with `head`,
+`tail`, `grep` and `awk` only, and prints fixed fragments of them; nothing read from a rollout is
+executed or reaches a command line. One value is put into a command: the session ID, taken from the
+rollout's file name, goes into the fixed query
+`sqlite3 -readonly ~/.codex/thread_history_1.sqlite "select … where thread_id = '<id>' …"`. The
+script first strips the name down to the part after `rollout-YYYY-MM-DDTHH-MM-SS-` and refuses it
+(`case $id in *[!0-9a-f-]*|'') id= ;; esac`) unless it is made only of lowercase hex digits and
+dashes — the shape of the UUID codex writes there — so it can hold neither a quote to end the SQL
+literal nor anything the shell would expand; the query string is double-quoted and `sqlite3` gets it
+as one argument, with `/dev/null` on stdin. `-readonly` keeps the database, which codex itself has
+open, from being written. The Go side accepts a session ID from a rollout name only when it is a UUID
+(`rolloutSessionID`), and reads the fragments with fixed regular expressions, never as commands.
+
 `GET /api/tasks` and the reconnect route are unauthenticated like the rest of `/api/*`, but a GET
 that dials every host is a side effect another site could trigger with an `<img>`. Both routes,
 `PUT /api/tasks/records`, which writes the operator's record file, and the two routes that start and
@@ -214,8 +230,8 @@ ever digits, or letters, digits and `-` (`isAutolinkIDByte`).
 ### Task launch and resume
 
 `POST /api/tasks` and `POST /api/tasks/resume` ([behavior](../behavior/tasks.md#starting-a-task))
-start a claude process on the panemux host or an `ssh_connections` host, from values a request
-supplies: a host, a working directory, a first instruction and a session ID. Unlike the command
+start a claude or codex process on the panemux host or an `ssh_connections` host, from values a
+request supplies: a host, an agent, a working directory, a first instruction and a session ID. Unlike the command
 center, which hands `exec.CommandContext` an argv, a remote start has to cross the remote login
 shell, and tmux runs what it is given as its own child. The design keeps every request value out of
 anything a shell parses, rather than escaping it.
@@ -224,13 +240,14 @@ anything a shell parses, rather than escaping it.
 exactly as the collection script does: locally `exec.CommandContext(ctx, "sh", "-s")`, remotely an
 exec request whose command is the literal `sh -s`, the script on stdin in both cases. The remote
 login shell parses only `sh -s`. The template is a compile-time constant; `buildLaunchScript` fills
-six placeholders, each of which is checked first and refused rather than escaped:
+seven placeholders, each of which is checked first and refused rather than escaped:
 
 | Placeholder | Source | Check |
 |---|---|---|
+| agent | `claude` or `codex`, a Go constant chosen from the request's value | one of the two (`checkLaunchSessionID`) |
 | mode | `new` or `resume`, a Go constant | — |
-| session ID | minted by panemux (`newSessionID`, crypto/rand) for a start; for a resume, the request's value | A UUID (`validUUID`) |
-| tmux session name | `task-` and the session ID's first eight characters | `validTmuxSessionName` |
+| session ID | minted by panemux (`newSessionID`, crypto/rand) for a new claude task; none for a new codex task, whose ID codex picks; for a resume, the request's value | A UUID (`validUUID`); empty for a new codex task |
+| tmux session name | `task-` and the session ID's first eight characters (claude), its last eight (a codex resume), or eight hex digits from crypto/rand (a new codex task) | `validTmuxSessionName` |
 | heredoc tag | 32 hex characters from crypto/rand | `^[0-9a-f]{32}$` |
 | working directory | the request, or for a resume the host's conversation log | `session.ValidateRemotePath`, the guard a pane's remote `cwd` passes |
 | first instruction | the request | not empty, at most 32 KiB, no NUL, and no line equal to its own heredoc terminator |
@@ -240,12 +257,22 @@ The working directory and the instruction are placed in heredocs whose terminato
 them, and read into variables that are only ever used double-quoted. The session ID and tmux name are
 single-quoted literals, and both allowlists exclude a quote.
 
-**The program is the literal name `claude`.** The script resolves it with `command -v claude`, and,
-when that finds nothing, with `"${SHELL:-/bin/sh}" -lc 'command -v claude'`, because a per-user
-install is usually on a `PATH` only a login shell sets. `$SHELL` here is the host user's own login
-shell, run with a fixed argument; it chooses where `claude` is looked up, not what is run instead of
-it. What either lookup prints is used only if it is an absolute path to an executable regular file,
-and it reaches tmux as a discrete argument. This is the script on the host reading its own
+**The program is the literal name `claude` or `codex`.** The script resolves it with
+`command -v "$agent"`, and, when that finds nothing, with `"${SHELL:-/bin/sh}" -lc "command -v $agent"`,
+because a per-user install is usually on a `PATH` only a login shell sets. `$agent` is the fixed
+placeholder above, one of two words. `$SHELL` here is the host user's own login shell, run with a
+fixed argument; it chooses where the agent is looked up, not what is run instead of it. What either
+lookup prints is used only if it is an absolute path to an executable regular file, and it reaches
+tmux as a discrete argument. For codex the directory of that path is added at the **end** of the
+`PATH` the agent runs with (`PATH=$PATH:${2%/*}` inside the fixed `sh -c`): an npm install's `codex`
+is a `#!/usr/bin/env node` script, and a tmux server an exec channel started does not have node's
+directory on its `PATH` — checked on Linux, where `env -i PATH=/usr/bin:/bin <npm prefix>/bin/codex`
+failed with `env: 'node': No such file or directory` and the launch with the directory added
+started codex. The directory is the one holding the executable already chosen, not a request value.
+It goes last so that it only fills a gap: put first (as in the first version, found in review), it
+also moved every command codex and its model run ahead to that directory — a `python3` beside
+codex won over the one the user's `PATH` names, and a directory others can write would have been
+searched before the system's. Last, it is searched only for what nothing earlier provides. This is the script on the host reading its own
 environment, not a Go `os.Getenv` value flowing into `exec.Command`, which the
 [General Rules](../security.md#general-rules) forbid.
 
@@ -288,6 +315,31 @@ held the file name and nothing of the instruction. The instruction is still clau
 argument, the form in which the launch gives an interactive claude its first message, so a user who
 can read claude's arguments on the host can read it while claude runs.
 
+**Codex gets its first instruction after `--` too, with `--no-daemon` and
+`-c check_for_update_on_startup=false`.** The fixed command for a new codex task is
+`sh -c 'p=$(cat -- "$1"); rm -f -- "$1"; cd -- "$4" || exit 1; PATH=$PATH:${2%/*}; export PATH; exec "$2" --no-daemon -c check_for_update_on_startup=false -- "$p"'`,
+with the same positional parameters (the session ID one is empty). The handling of `--` was verified
+with codex-cli 0.142.2 and 0.157.1 on macOS and 0.157.1 on Linux, before `--no-daemon` was added:
+without `--`, `codex '-x hello'` is refused as an unknown option, and after `--` a prompt such as
+`-h -V --help: …` is sent as the first message. The whole command, `--no-daemon` included, was
+verified with 0.157.1 on Linux. codex-cli 0.142.2 has no `--no-daemon` and exits 2 on it, so the
+script first runs `"$bin" --help` (with the same `PATH` addition) and refuses with `codex-too-old`
+unless the help lists `--no-daemon`; the help's text is only searched, never shown. The `-c`
+value is a fixed literal; it stops the update prompt, which would otherwise hold a task nobody is
+watching. codex's other start-up screens (trusting a directory, a new-model notice, a usage-limit
+offer) are left for a person to answer in the pane: panemux does not write codex's configuration.
+
+**A codex resume passes the ID after `--`**: `codex --no-daemon -c check_for_update_on_startup=false resume -- <id>`.
+`--no-daemon`, a fixed flag, keeps the session in the TUI's own process: through codex's shared
+daemon nothing would tie the session to the task's tmux session.
+Without `--`, `codex resume <id> '-h …'` prints its help and exits 0 without opening the session, and
+an ID beginning with `-` would be an option. `codex resume` also accepts a session *name* (names are
+set by `/rename` and, with a real model, automatically from the first instruction, and may hold
+spaces); only a UUID is accepted, which codex resolves as an ID before any name ("UUIDs take
+precedence if it parses"). As for claude, `Service.Resume` resumes only a session the host's own
+collection lists as a stopped codex task, in the working directory its rollout's `session_meta`
+records, which passes the remote-path guard.
+
 **A resume passes the ID as `--resume=<id>`, and only an ID the host listed.** Verified against claude
 2.1.283: `claude --resume --version` printed the version, so `--resume`, whose value is optional,
 lets a following argument that begins with `-` be read as an option, and `validSessionID`
@@ -303,18 +355,23 @@ session the operator watches and types into through a pane, and disabling them w
 that pane as well.
 
 **What the host prints back** is searched only for the script's own `::panemux-launch` line; a refusal
-is one of six fixed words, each mapped to a fixed message (`LaunchError`), so no host text reaches the
+is one of eight fixed words, each mapped to a fixed message (`LaunchError`), so no host text reaches the
 response. A host that prints no answer is a failed launch.
 
 The labels a start records go through `NormalizeLabels` before anything runs, so a refused label
-cannot leave a started task without them.
+cannot leave a started task without them. A codex task's labels are held in panemux's memory, keyed
+by host and tmux session, and recorded by the first collection that finds a codex session in that
+tmux session; the session ID they are recorded under is one the collection read from the host.
 
 `TestLaunchScript_NewTaskHandsThePromptToClaudeAsOneArgumentAfterTheEndOfOptions` runs the real script
 under `sh` against stand-ins for tmux and claude that record their arguments, with a prompt holding a
 leading option, command substitutions, quotes and a line reading `EOF`, and fails if claude's argv is
 not exactly `--session-id=<id>`, `--`, the prompt, if the prompt reaches tmux's arguments, if a
-substitution ran, or if the file is left behind. `TestBuildLaunchScript_RefusesInputBeforeAnythingRuns`
-covers every refusal above.
+substitution ran, or if the file is left behind. `TestLaunchScript_NewCodexTask` and
+`TestLaunchScript_ResumeCodexTask` do the same for codex (argv exactly
+`--no-daemon -c check_for_update_on_startup=false -- <prompt>`, and `… resume -- <id>`, with codex's
+directory last on `PATH`). `TestBuildLaunchScript_RefusesInputBeforeAnythingRuns` and
+`TestBuildLaunchScript_AgentRules` cover every refusal above.
 
 ### Task summaries
 

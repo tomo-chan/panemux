@@ -103,6 +103,7 @@ const roundTrips: RoundTrip[] = [
   { fixture: 'tasks', schemaName: 'TasksResponseSchema', schema: schemas.TasksResponseSchema },
   { fixture: 'task-record', schemaName: 'TaskRecordSchema', schema: schemas.TaskRecordSchema },
   { fixture: 'task-launch', schemaName: 'TaskLaunchResponseSchema', schema: schemas.TaskLaunchResponseSchema },
+  { fixture: 'task-launch-codex', schemaName: 'TaskLaunchResponseSchema', schema: schemas.TaskLaunchResponseSchema },
   { fixture: 'task-resume', schemaName: 'TaskLaunchedSchema', schema: schemas.TaskLaunchedSchema },
   { fixture: 'task-summary', schemaName: 'TaskSummarySchema', schema: schemas.TaskSummarySchema },
   // The two WebSocket fixtures hold one frame per element, in the order the
@@ -389,6 +390,15 @@ const unexercisedOptionals: Record<string, string> = {
   // Set only when the labels could not be recorded after the task started;
   // the capture records them, which is the path worth pinning.
   'task-launch.records_error': 'needs an unreadable task record file, and the capture records the labels instead',
+  // A claude launch records its labels at once; the codex capture pins the
+  // held ones (issue #264).
+  'task-launch.pending_labels': 'only a codex launch holds its labels; task-launch-codex pins them',
+  // A new codex task has no session yet, so no id; and its labels are held,
+  // not recorded. task-launch pins those fields.
+  'task-launch-codex.id': 'a new codex task has no id until codex has chosen its session ID',
+  'task-launch-codex.session_id': 'a new codex task has no session ID until codex has chosen one',
+  'task-launch-codex.labels': "a codex task's labels are held (pending_labels), not recorded, at launch",
+  'task-launch-codex.records_error': 'nothing is recorded at a codex launch, so nothing can fail to be',
 }
 
 describe('optional field coverage', () => {

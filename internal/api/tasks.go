@@ -253,6 +253,7 @@ func (h *Handler) GetTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	snapshot := h.tasks.Collect(r.Context())
+	h.pendingTaskLabels.Apply(snapshot, h.addTaskLabels)
 
 	collected := make(map[string]bool, len(snapshot.Hosts))
 	for _, host := range snapshot.Hosts {
@@ -284,6 +285,27 @@ func (h *Handler) GetTasks(w http.ResponseWriter, r *http.Request) {
 		applyTaskRecords(resp.Tasks, records)
 	}
 	writeJSON(w, resp)
+}
+
+// addTaskLabels adds rec's labels to what is already recorded for its task,
+// keeping the rest of the record. It records the labels a codex task was
+// started with once its session ID is known (tasks.PendingLabels).
+func (h *Handler) addTaskLabels(rec tasks.Record) error {
+	records, err := h.taskRecords.Records()
+	if err != nil {
+		return fmt.Errorf("read task records: %w", err)
+	}
+	existing := records[rec.Key()]
+	merged, err := tasks.NormalizeLabels(append(append([]string(nil), existing.Labels...), rec.Labels...))
+	if err != nil {
+		return fmt.Errorf("merge task labels: %w", err)
+	}
+	rec.Done = existing.Done
+	rec.Labels = merged
+	if _, err := h.taskRecords.Put(rec); err != nil {
+		return fmt.Errorf("record task labels: %w", err)
+	}
+	return nil
 }
 
 // PostTaskHostReconnect drops a host's collection connection and any

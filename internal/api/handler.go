@@ -38,15 +38,18 @@ import (
 //
 //nolint:govet // keeps test injection hooks and binary-path overrides on one handler value
 type Handler struct {
-	readDirFn               func(name string) ([]os.DirEntry, error)
-	manager                 *session.Manager
-	boardBroadcastFn        func(ctx context.Context, to []string, body string) ([]string, error)
-	commandHistoryFn        func() ([]commandcenter.HistoryEntry, error)
-	commandCenterAvailable  bool
-	boardCache              *board.BoardCache
-	gitInfoCacheBySession   map[string]gitInfoCacheEntry
-	tasks                   *tasks.Service
-	taskRecords             *tasks.RecordStore
+	readDirFn              func(name string) ([]os.DirEntry, error)
+	manager                *session.Manager
+	boardBroadcastFn       func(ctx context.Context, to []string, body string) ([]string, error)
+	commandHistoryFn       func() ([]commandcenter.HistoryEntry, error)
+	commandCenterAvailable bool
+	boardCache             *board.BoardCache
+	gitInfoCacheBySession  map[string]gitInfoCacheEntry
+	tasks                  *tasks.Service
+	taskRecords            *tasks.RecordStore
+	// pendingTaskLabels holds the labels of codex tasks started before
+	// their session IDs are known (issue #264).
+	pendingTaskLabels       *tasks.PendingLabels
 	taskGitLookup           func(ctx context.Context, host, cwd string, withPR bool) *taskGitInfo
 	taskGitCache            map[string]taskGitCacheEntry
 	createSession           func(*config.PaneConfig, map[string]config.SSHConnection) (session.Session, error)
@@ -180,6 +183,7 @@ func NewHandler(
 	}
 	h.tasks = newTaskService(h)
 	h.taskRecords = tasks.NewRecordStore("")
+	h.pendingTaskLabels = tasks.NewPendingLabels(func() time.Time { return h.nowFn() })
 	h.taskGitLookup = h.lookupTaskGit
 	h.createSession = session.CreateFromConfig
 	h.detectLocalShellFn = session.DetectLocalShell

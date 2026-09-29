@@ -17,10 +17,14 @@ import { applyTaskRecord } from '../utils/taskBoard'
 // the page is visible — never in the background (issue #252).
 export const TASKS_POLL_INTERVAL_MS = 10000
 
-/** A new task: where it runs, and its first instruction and labels. */
+/** The agents a task can be started with. */
+export type TaskAgent = 'claude' | 'codex'
+
+/** A new task: where it runs, which agent, and its first instruction and labels. */
 export interface TaskLaunchInput {
   /** The ssh_connections key, or '' for the panemux host. */
   host: string
+  agent: TaskAgent
   cwd: string
   prompt: string
   labels: string[]
@@ -43,11 +47,11 @@ export interface TasksState {
    */
   saveRecord: (task: Task, record: { done: boolean; labels: string[] }) => Promise<string | null>
   /**
-   * Starts a claude task in a tmux session of its own on its host, without a
-   * pane (issue #257), then collects again.
+   * Starts a claude or codex task in a tmux session of its own on its host,
+   * without a pane (issues #257 and #264), then collects again.
    */
   launch: (input: TaskLaunchInput) => Promise<TaskActionResult<TaskLaunchResponse>>
-  /** Runs `claude --resume` for a stopped task, then collects again. */
+  /** Runs `claude --resume` or `codex resume` for a stopped task, then collects again. */
   resume: (task: Task) => Promise<TaskActionResult<TaskLaunched>>
   /**
    * Asks the server to summarize a task (issue #258) and shows where its
@@ -183,7 +187,7 @@ export function useTasks(enabled: boolean): TasksState {
   const launch = useCallback(async (input: TaskLaunchInput) => {
     const result = await postTaskAction(
       '/api/tasks',
-      { host: input.host, agent: 'claude', cwd: input.cwd, prompt: input.prompt, labels: input.labels },
+      { host: input.host, agent: input.agent, cwd: input.cwd, prompt: input.prompt, labels: input.labels },
       TaskLaunchResponseSchema,
     )
     if (result.ok) await refreshAfterAction()
@@ -194,7 +198,7 @@ export function useTasks(enabled: boolean): TasksState {
     if (!task.session_id) return { ok: false, error: 'This task has no session ID to resume' }
     const result = await postTaskAction(
       '/api/tasks/resume',
-      { host: task.host, session_id: task.session_id },
+      { host: task.host, agent: task.agent, session_id: task.session_id },
       TaskLaunchedSchema,
     )
     if (result.ok) await refreshAfterAction()

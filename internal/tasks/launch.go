@@ -14,9 +14,10 @@ import (
 	"panemux/internal/session"
 )
 
-// Launching and resuming tasks (issue #257). A task is started on its host
-// as one claude process in a tmux session of its own, detached: no pane is
-// created, and the dashboard attaches one only when the task is opened.
+// Launching and resuming tasks (issues #257 and #264). A task is started on
+// its host as one claude or codex process in a tmux session of its own,
+// detached: no pane is created, and the dashboard attaches one only when the
+// task is opened.
 //
 // Everything runs through launchScriptTemplate, a fixed script fed to the
 // literal command `sh -s` on stdin, exactly as collection runs. No value from
@@ -30,9 +31,9 @@ import (
 // ErrInvalidLaunch is a launch or resume refused before anything ran.
 var ErrInvalidLaunch = errors.New("invalid task launch")
 
-// ErrNoStoppedTask is a resume whose session is not a stopped claude task
-// on the host.
-var ErrNoStoppedTask = errors.New("no stopped claude task with that session ID")
+// ErrNoStoppedTask is a resume whose session is not a stopped task of that
+// agent on the host.
+var ErrNoStoppedTask = errors.New("no stopped task of that agent with that session ID")
 
 // LaunchError is a launch the host itself refused. Code is one of the words
 // the launch script prints; the message is fixed per code, so nothing the
@@ -43,21 +44,27 @@ type LaunchError struct {
 
 // The words the launch script refuses with, one per way a host can refuse.
 const (
-	RefusedNoTmux     = "no-tmux"
-	RefusedNoCWD      = "no-cwd"
-	RefusedNoClaude   = "no-claude"
-	RefusedTmuxExists = "tmux-exists"
-	RefusedTmuxFailed = "tmux-failed"
-	RefusedPromptFile = "prompt-file"
+	RefusedNoTmux   = "no-tmux"
+	RefusedNoCWD    = "no-cwd"
+	RefusedNoClaude = "no-claude"
+	RefusedNoCodex  = "no-codex"
+	// RefusedCodexTooOld is a codex whose help lists no --no-daemon
+	// (codex-cli 0.142.2 has none, and exits 2 on it).
+	RefusedCodexTooOld = "codex-too-old"
+	RefusedTmuxExists  = "tmux-exists"
+	RefusedTmuxFailed  = "tmux-failed"
+	RefusedPromptFile  = "prompt-file"
 )
 
 var launchErrorMessages = map[string]string{
-	RefusedNoTmux:     "tmux is not installed on the host",
-	RefusedNoCWD:      "the working directory does not exist on the host",
-	RefusedNoClaude:   "claude was not found on the host",
-	RefusedTmuxExists: "a tmux session with the task's name already exists on the host",
-	RefusedTmuxFailed: "tmux could not start the session on the host",
-	RefusedPromptFile: "the prompt could not be written to a temporary file on the host",
+	RefusedNoTmux:      "tmux is not installed on the host",
+	RefusedNoCWD:       "the working directory does not exist on the host",
+	RefusedNoClaude:    "claude was not found on the host",
+	RefusedNoCodex:     "codex was not found on the host",
+	RefusedCodexTooOld: "codex on the host is too old: it has no --no-daemon option",
+	RefusedTmuxExists:  "a tmux session with the task's name already exists on the host",
+	RefusedTmuxFailed:  "tmux could not start the session on the host",
+	RefusedPromptFile:  "the prompt could not be written to a temporary file on the host",
 }
 
 func (e *LaunchError) Error() string {
@@ -79,18 +86,23 @@ var validUUID = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4
 // validHeredocTag is the random part of the heredoc terminators.
 var validHeredocTag = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
-// LaunchRequest is a new task: the host ("" for the panemux host), the
-// directory claude starts in, and its first instruction.
+// LaunchRequest is a new task: the host ("" for the panemux host), the agent
+// (AgentClaude when empty), the directory it starts in, and its first
+// instruction.
 type LaunchRequest struct {
 	Host   string
+	Agent  string
 	CWD    string
 	Prompt string
 }
 
-// Launched is a task that was started or resumed.
+// Launched is a task that was started or resumed. A new codex task has no
+// TaskID or SessionID: codex picks its session ID itself, once it has been
+// given its first instruction, so the task is known by TmuxSession until a
+// collection finds it there.
 type Launched struct {
-	TaskID      string `json:"id"`
-	SessionID   string `json:"session_id"`
+	TaskID      string `json:"id,omitempty"`
+	SessionID   string `json:"session_id,omitempty"`
 	TmuxSession string `json:"tmux_session"`
 }
 
@@ -102,6 +114,7 @@ const (
 )
 
 type launchParams struct {
+	agent       string
 	mode        launchMode
 	sessionID   string
 	tmuxSession string
@@ -113,13 +126,25 @@ type launchParams struct {
 	reuseSession bool
 }
 
-// launchScriptTemplate starts claude in a detached tmux session. It answers
-// with one "::panemux-launch ok" or "::panemux-launch error <code>" line and
-// always exits 0, so a refusal is told apart from a broken connection.
+// launchScriptTemplate starts claude or codex in a detached tmux session. It
+// answers with one "::panemux-launch ok" or "::panemux-launch error <code>"
+// line and always exits 0, so a refusal is told apart from a broken
+// connection.
 //
-//   - claude is looked up on PATH, then through the user's login shell,
+//   - The agent is looked up on PATH, then through the user's login shell,
 //     because an SSH exec channel's PATH rarely holds a per-user install
 //     (~/.local/bin). Only an absolute path to an executable is run.
+//   - codex runs with its own directory last on PATH: an npm install's
+//     codex is a `#!/usr/bin/env node` script, and node sits next to it
+//     there, but not on the PATH of a tmux server an exec channel started.
+//     Last, so the commands codex runs resolve as they would without it.
+//     It runs with --no-daemon, so the TUI keeps its session itself rather
+//     than in codex's shared daemon, where nothing ties the session to the
+//     tmux session it runs in, and with -c check_for_update_on_startup=false,
+//     since the update prompt would hold a task nobody is watching. A codex
+//     whose help lists no --no-daemon is refused before anything starts: it
+//     would exit at once on the option, in a tmux session that ends with it,
+//     while the launch reported success.
 //   - tmux receives the command as separate arguments after "--", which tmux
 //     runs without a shell (tmux 2.0 and later). The working directory is not
 //     given to tmux's -c, which expands its value as a format ("#S", "##"),
@@ -133,11 +158,15 @@ type launchParams struct {
 //     by a fixed `sh -c` inside the tmux session, which removes the file
 //     before running claude. It reaches claude as the single argument after
 //     "--", so a prompt that looks like an option is still a prompt.
-//   - A resume passes the session ID as "--resume=<id>": `--resume` takes an
-//     optional value, and an ID given as a separate argument that began with
-//     "-" would be parsed as an option.
+//   - A claude resume passes the session ID as "--resume=<id>": `--resume`
+//     takes an optional value, and an ID given as a separate argument that
+//     began with "-" would be parsed as an option. A codex resume passes it
+//     after "--" (`codex resume -- <id>`), and a codex prompt follows "--"
+//     too: codex parses an unguarded leading "-" as an option, and
+//     `codex resume <id> '-h …'` prints its help and exits 0.
 const launchScriptTemplate = `set -u
 say() { printf '::panemux-launch %s\n' "$1"; }
+agent='{{AGENT}}'
 mode='{{MODE}}'
 reuse='{{REUSE}}'
 sid='{{SESSION_ID}}'
@@ -148,17 +177,28 @@ PANEMUX_CWD_{{TAG}}
 )
 command -v tmux >/dev/null 2>&1 || { say 'error no-tmux'; exit 0; }
 cd -- "$cwd" 2>/dev/null || { say 'error no-cwd'; exit 0; }
-bin=$(command -v claude 2>/dev/null)
+bin=$(command -v "$agent" 2>/dev/null)
 case $bin in
 /*) ;;
-*) bin=$("${SHELL:-/bin/sh}" -lc 'command -v claude' </dev/null 2>/dev/null | tail -n 1) ;;
+*) bin=$("${SHELL:-/bin/sh}" -lc "command -v $agent" </dev/null 2>/dev/null | tail -n 1) ;;
 esac
 case $bin in
 /*) ;;
-*) say 'error no-claude'; exit 0 ;;
+*) say "error no-$agent"; exit 0 ;;
 esac
-[ -f "$bin" ] && [ -x "$bin" ] || { say 'error no-claude'; exit 0; }
-resume='cd -- "$1" || exit 1; exec "$2" "--resume=$3"'
+[ -f "$bin" ] && [ -x "$bin" ] || { say "error no-$agent"; exit 0; }
+if [ "$agent" = codex ]; then
+  PATH=$PATH:${bin%/*} "$bin" --help </dev/null 2>/dev/null | grep -q -e '--no-daemon' ||
+    { say 'error codex-too-old'; exit 0; }
+fi
+if [ "$agent" = codex ]; then
+  codex='PATH=$PATH:${2%/*}; export PATH; exec "$2" --no-daemon -c check_for_update_on_startup=false'
+  resume='cd -- "$1" || exit 1; '"$codex"' resume -- "$3"'
+  run='p=$(cat -- "$1"); rm -f -- "$1"; cd -- "$4" || exit 1; '"$codex"' -- "$p"'
+else
+  resume='cd -- "$1" || exit 1; exec "$2" "--resume=$3"'
+  run='p=$(cat -- "$1"); rm -f -- "$1"; cd -- "$4" || exit 1; exec "$2" "--session-id=$3" -- "$p"'
+fi
 if tmux has-session -t "=$name" 2>/dev/null; then
   if [ "$mode" = resume ] && [ "$reuse" = yes ]; then
     tmux new-window -t "=$name:" -- sh -c "$resume" sh "$cwd" "$bin" "$sid" 2>/dev/null ||
@@ -180,7 +220,6 @@ f=$(mktemp "${TMPDIR:-/tmp}/panemux-task.XXXXXXXX" 2>/dev/null) || { say 'error 
 cat >"$f" <<'PANEMUX_PROMPT_{{TAG}}'
 {{PROMPT}}
 PANEMUX_PROMPT_{{TAG}}
-run='p=$(cat -- "$1"); rm -f -- "$1"; cd -- "$4" || exit 1; exec "$2" "--session-id=$3" -- "$p"'
 if ! tmux new-session -d -s "$name" -- sh -c "$run" sh "$f" "$bin" "$sid" "$cwd" 2>/dev/null; then
   rm -f -- "$f"
   say 'error tmux-failed'
@@ -192,8 +231,8 @@ say ok
 // buildLaunchScript checks every value that goes into the script and fills
 // the template. It refuses with ErrInvalidLaunch rather than escaping.
 func buildLaunchScript(p launchParams) (string, error) {
-	if !validUUID.MatchString(p.sessionID) {
-		return "", fmt.Errorf("%w: session ID %q is not a UUID", ErrInvalidLaunch, p.sessionID)
+	if err := checkLaunchSessionID(p); err != nil {
+		return "", err
 	}
 	if !validTmuxSessionName.MatchString(p.tmuxSession) {
 		return "", fmt.Errorf("%w: tmux session name %q", ErrInvalidLaunch, p.tmuxSession)
@@ -216,6 +255,7 @@ func buildLaunchScript(p launchParams) (string, error) {
 		}
 	}
 	return strings.NewReplacer(
+		"{{AGENT}}", p.agent,
 		"{{MODE}}", string(p.mode),
 		"{{REUSE}}", reuseWord(p.reuseSession),
 		"{{SESSION_ID}}", p.sessionID,
@@ -224,6 +264,23 @@ func buildLaunchScript(p launchParams) (string, error) {
 		"{{CWD}}", p.cwd,
 		"{{PROMPT}}", p.prompt,
 	).Replace(launchScriptTemplate), nil
+}
+
+// checkLaunchSessionID checks the agent, and the session ID it is given: the
+// minted UUID of a new claude task, the listed UUID of a resumed task, and
+// none for a new codex task, whose ID codex picks.
+func checkLaunchSessionID(p launchParams) error {
+	switch {
+	case p.agent != AgentClaude && p.agent != AgentCodex:
+		return fmt.Errorf("%w: agent %q", ErrInvalidLaunch, p.agent)
+	case p.agent == AgentCodex && p.mode == launchNew:
+		if p.sessionID != "" {
+			return fmt.Errorf("%w: a new codex task is not given a session ID", ErrInvalidLaunch)
+		}
+	case !validUUID.MatchString(p.sessionID):
+		return fmt.Errorf("%w: session ID %q is not a UUID", ErrInvalidLaunch, p.sessionID)
+	}
+	return nil
 }
 
 func reuseWord(reuse bool) string {
@@ -278,6 +335,32 @@ func tmuxSessionForTask(sessionID string) string {
 	return "task-" + sessionID[:8]
 }
 
+// tmuxSessionForCodex names the tmux session a codex resume creates: "task-"
+// and the last eight characters of the session ID. Codex's IDs are version 7
+// UUIDs, which begin with their creation time, so two sessions started within
+// a minute share their first eight characters; the last eight are random.
+func tmuxSessionForCodex(sessionID string) string {
+	return "task-" + sessionID[len(sessionID)-8:]
+}
+
+// tmuxSessionForResume is the tmux session a resume of agent's session uses.
+func tmuxSessionForResume(agent, sessionID string) string {
+	if agent == AgentCodex {
+		return tmuxSessionForCodex(sessionID)
+	}
+	return tmuxSessionForTask(sessionID)
+}
+
+// newCodexTmuxSession names a new codex task's tmux session: "task-" and
+// eight random hex digits, since codex has no session ID yet.
+func newCodexTmuxSession(r io.Reader) (string, error) {
+	var b [4]byte
+	if _, err := io.ReadFull(r, b[:]); err != nil {
+		return "", fmt.Errorf("generate tmux session name: %w", err)
+	}
+	return "task-" + hex.EncodeToString(b[:]), nil
+}
+
 // newSessionID mints a version 4 UUID for a new claude session, which the
 // launch pins with --session-id so the task — and its labels — are known
 // before claude has written anything.
@@ -308,28 +391,43 @@ func taskID(host, agent, key string) string {
 	return prefix + ":" + agent + ":" + key
 }
 
-// Launch starts a new claude task on a host.
+// Launch starts a new claude or codex task on a host.
 func (s *Service) Launch(ctx context.Context, req LaunchRequest) (Launched, error) {
+	agent := req.Agent
+	if agent == "" {
+		agent = AgentClaude
+	}
+	if agent != AgentClaude && agent != AgentCodex {
+		return Launched{}, fmt.Errorf("%w: agent %q", ErrInvalidLaunch, agent)
+	}
 	if err := s.checkHost(req.Host); err != nil {
 		return Launched{}, err
 	}
-	sessionID, err := newSessionID(s.opts.Rand)
+	p := launchParams{agent: agent, mode: launchNew, cwd: req.CWD, prompt: normalizePrompt(req.Prompt)}
+	var err error
+	if agent == AgentCodex {
+		p.tmuxSession, err = newCodexTmuxSession(s.opts.Rand)
+	} else {
+		p.sessionID, err = newSessionID(s.opts.Rand)
+	}
 	if err != nil {
 		return Launched{}, err
 	}
-	return s.launch(ctx, req.Host, launchParams{
-		mode:      launchNew,
-		sessionID: sessionID,
-		cwd:       req.CWD,
-		prompt:    normalizePrompt(req.Prompt),
-	})
+	if p.sessionID != "" {
+		p.tmuxSession = tmuxSessionForTask(p.sessionID)
+	}
+	return s.launch(ctx, req.Host, p)
 }
 
-// Resume runs `claude --resume` for a stopped claude task, in the working
-// directory its conversation log records. The session must be listed as a
-// stopped claude task on the host right now: the host is collected again
-// first, so an ID the dashboard did not list is never passed to claude.
-func (s *Service) Resume(ctx context.Context, host, sessionID string) (Launched, error) {
+// Resume runs `claude --resume` or `codex resume` for a stopped task, in the
+// working directory its conversation log or rollout records. The session
+// must be listed as a stopped task of that agent on the host right now: the
+// host is collected again first, so an ID the dashboard did not list is
+// never passed to the agent.
+func (s *Service) Resume(ctx context.Context, host, agent, sessionID string) (Launched, error) {
+	if agent != AgentClaude && agent != AgentCodex {
+		return Launched{}, fmt.Errorf("%w: agent %q", ErrInvalidLaunch, agent)
+	}
 	if !validUUID.MatchString(sessionID) {
 		return Launched{}, fmt.Errorf("%w: session ID %q is not a UUID", ErrInvalidLaunch, sessionID)
 	}
@@ -340,7 +438,7 @@ func (s *Service) Resume(ctx context.Context, host, sessionID string) (Launched,
 	// collection, so a second resume of the same session must not collect
 	// until the first has launched: both would find the session free and
 	// start claude twice on one conversation.
-	unlock, err := s.lockResume(ctx, host, sessionID)
+	unlock, err := s.lockResume(ctx, host, agent+"\x00"+sessionID)
 	if err != nil {
 		return Launched{}, err
 	}
@@ -350,15 +448,16 @@ func (s *Service) Resume(ctx context.Context, host, sessionID string) (Launched,
 		return Launched{}, fmt.Errorf("collect %s before resuming: %s", hostName(host), resultError(result))
 	}
 	for _, task := range list {
-		if task.Agent != AgentClaude || task.SessionID != sessionID || task.State != StateStop {
+		if task.Agent != agent || task.SessionID != sessionID || task.State != StateStop {
 			continue
 		}
 		if task.CWD == "" {
 			return Launched{}, fmt.Errorf("%w: the session's working directory is not recorded", ErrInvalidLaunch)
 		}
+		name := tmuxSessionForResume(agent, sessionID)
 		return s.launch(ctx, host, launchParams{
-			mode: launchResume, sessionID: sessionID, cwd: task.CWD,
-			reuseSession: !agentRunsInTmuxSession(list, tmuxSessionForTask(sessionID)),
+			agent: agent, mode: launchResume, sessionID: sessionID, cwd: task.CWD, tmuxSession: name,
+			reuseSession: !agentRunsInTmuxSession(list, name),
 		})
 	}
 	return Launched{}, ErrNoStoppedTask
@@ -370,7 +469,6 @@ func (s *Service) launch(ctx context.Context, host string, p launchParams) (Laun
 		return Launched{}, err
 	}
 	p.tag = tag
-	p.tmuxSession = tmuxSessionForTask(p.sessionID)
 	script, err := buildLaunchScript(p)
 	if err != nil {
 		return Launched{}, err
@@ -385,11 +483,11 @@ func (s *Service) launch(ctx context.Context, host string, p launchParams) (Laun
 	if err := parseLaunchOutput(out); err != nil {
 		return Launched{}, err
 	}
-	return Launched{
-		TaskID:      taskID(host, AgentClaude, p.sessionID),
-		SessionID:   p.sessionID,
-		TmuxSession: p.tmuxSession,
-	}, nil
+	launched := Launched{SessionID: p.sessionID, TmuxSession: p.tmuxSession}
+	if p.sessionID != "" {
+		launched.TaskID = taskID(host, p.agent, p.sessionID)
+	}
+	return launched, nil
 }
 
 // resumeLock serializes the resumes of one (host, session). users counts
@@ -402,8 +500,8 @@ type resumeLock struct {
 // lockResume waits, as long as ctx allows, until no other resume of the same
 // session on the same host is between its collection and its launch. It only
 // covers this panemux process.
-func (s *Service) lockResume(ctx context.Context, host, sessionID string) (func(), error) {
-	key := host + "\x00" + sessionID
+func (s *Service) lockResume(ctx context.Context, host, session string) (func(), error) {
+	key := host + "\x00" + session
 	lock := s.joinResumeLock(key)
 	release := func() {
 		s.mu.Lock()

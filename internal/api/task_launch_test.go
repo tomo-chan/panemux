@@ -24,8 +24,12 @@ import (
 // launchSessionID is the session ID launchRand makes a launch mint.
 const launchSessionID = "0f0e0d0c-0b0a-4908-8706-050403020100"
 
-// resumeSessionID is the stopped session in launchCollection.
-const resumeSessionID = "5d7e3a90-1b2c-4d3e-8f40-51627384a5b6"
+// resumeSessionID and resumeCodexSessionID are the stopped claude and codex
+// sessions in launchCollection.
+const (
+	resumeSessionID      = "5d7e3a90-1b2c-4d3e-8f40-51627384a5b6"
+	resumeCodexSessionID = "01a0e2b9-d054-7cc2-9278-a5e25ebcc524"
+)
 
 func launchRand() *bytes.Reader {
 	return bytes.NewReader(append(
@@ -48,6 +52,9 @@ func launchCollection() []byte {
 		"::section cwd",
 		"::section transcripts",
 		"900\t" + resumeSessionID + `.jsonl	"cwd":"/workspace/user/project"`,
+		"::section codex-rollouts",
+		"950\t10\trollout-2026-09-27T11-57-03-" + resumeCodexSessionID +
+			`.jsonl	"cwd":"/workspace/user/api"	"originator":"codex-tui"`,
 		"::end",
 	}, "\n") + "\n")
 }
@@ -172,8 +179,8 @@ func TestPostTask_Refusals(t *testing.T) {
 		{name: "not JSON", body: `{`, wantStatus: http.StatusBadRequest},
 		{name: "unknown field", body: `{"host":"","agent":"claude","cwd":"/w","prompt":"go","shell":"x"}`,
 			wantStatus: http.StatusBadRequest},
-		{name: "codex", body: `{"host":"","agent":"codex","cwd":"/w","prompt":"go"}`,
-			wantStatus: http.StatusBadRequest, wantBody: "only claude"},
+		{name: "unknown agent", body: `{"host":"","agent":"aider","cwd":"/w","prompt":"go"}`,
+			wantStatus: http.StatusBadRequest, wantBody: "agent"},
 		{name: "missing agent", body: `{"host":"","cwd":"/w","prompt":"go"}`, wantStatus: http.StatusBadRequest},
 		{name: "invalid label", body: `{"host":"","agent":"claude","cwd":"/w","prompt":"go","labels":["a\u0007"]}`,
 			wantStatus: http.StatusBadRequest},
@@ -241,6 +248,10 @@ func TestPostTaskResume_Refusals(t *testing.T) {
 			wantStatus: http.StatusNotFound},
 		{name: "not a stopped task", body: `{"host":"","session_id":"99999999-1b2c-4d3e-8f40-51627384a5b6"}`,
 			wantStatus: http.StatusConflict},
+		{name: "a codex session resumed as claude", body: `{"host":"","session_id":"` + resumeCodexSessionID + `"}`,
+			wantStatus: http.StatusConflict},
+		{name: "unknown agent", body: `{"host":"","agent":"aider","session_id":"` + resumeSessionID + `"}`,
+			wantStatus: http.StatusBadRequest},
 		{name: "host refuses", body: `{"host":"","session_id":"` + resumeSessionID + `"}`,
 			answer: "::panemux-launch error tmux-exists\n", wantStatus: http.StatusConflict},
 		{name: "host cannot be collected", body: `{"host":"dev-server","session_id":"` + resumeSessionID + `"}`,

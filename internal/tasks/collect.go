@@ -28,12 +28,18 @@ import (
 //	::section cwd                "<pid> <cwd>" for this user's processes that may be claude or codex
 //	::section env                "<pid> <PANEMUX_PANE_ID>" for the same processes, when set
 //	::section transcripts        "<mtime>\t<file name>\t<first "cwd":"..." in it>\t<size in bytes>"
+//	::section codex-open         one row per rollout a codex process holds open (below)
+//	::section codex-rollouts     "<mtime>\t<size>\t<file name>\t<"cwd":"...">\t<"originator":"...">" of its first line
 //	::end                        the output is complete
 //
 // Transcripts are the conversation logs directly under ~/.claude/projects/*/
 // modified in the last 7 days, newest first, at most 100 of them. The window
 // and the count are the range decided for stopped sessions (issue #252); the
-// Go side keeps the stopped ones and caps them at maxStoppedTasks.
+// Go side keeps the stopped ones and caps them at maxStoppedTasks. Codex
+// rollouts (~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl) are listed the same
+// way, counting only the TUI's (originator "codex-tui"): the 100 are taken
+// after that filter, so a host where codex exec writes many rollouts does not
+// push the TUI's sessions out.
 //
 // The env section names the pane an agent outside tmux was started from
 // (issue #254). It is read from the process's initial environment, which on
@@ -57,6 +63,22 @@ import (
 // The value is untrusted — any process of the user can set it — and is
 // checked against validPaneID here and against the panes it names in the
 // browser.
+//
+// Codex writes no file that ties a process to its session (issue #264): the
+// rollout a codex process holds open is its session, found through
+// /proc/<pid>/fd, or lsof where there is no /proc. Each codex process gets a
+// "<pid>\t<etime>" row, then one row per rollout it holds open:
+//
+//	<pid>\t<etime>\t<mtime> <size>\t<status> <started_at>\t<turn event line>\t<response item line>\t<"cwd":"...">
+//	\t<"originator":"...">\t<path>        (one line)
+//
+// where etime is how long the process has run (ps's [[dd-]hh:]mm:ss), status
+// and started_at are the session's newest thread_turns row in
+// ~/.codex/thread_history_1.sqlite when sqlite3 can read one, and the two
+// lines are the first 512 bytes of the last turn event (task_started,
+// task_complete, turn_aborted) and the last response item in the rollout's
+// final MiB. Only a session ID made of hex digits and dashes — the shape of
+// the UUID in the file name — is put into the query.
 const collectScript = `LC_ALL=C
 export LC_ALL
 echo '::panemux-tasks v1'
@@ -111,12 +133,12 @@ else
 		if [ -n "$v" ]; then echo "$pid ${v#PANEMUX_PANE_ID=}"; fi
 	done
 fi
-echo '::section transcripts'
 if stat -c %Y / >/dev/null 2>&1; then
 	mtime() { stat -c '%Y %s' "$1"; }
 else
 	mtime() { stat -f '%m %z' "$1"; }
 fi
+echo '::section transcripts'
 find "$HOME/.claude/projects" -mindepth 2 -maxdepth 2 -type f -name '*.jsonl' -mtime -7 2>/dev/null |
 while IFS= read -r p; do
 	t=$(mtime "$p" 2>/dev/null) && echo "$t $p"
@@ -124,6 +146,50 @@ done | sort -rn | head -n 100 | while read -r t s p; do
 	c=$(grep -m 1 -o '"cwd":"[^"]*"' "$p" 2>/dev/null | head -n 1)
 	printf '%s\t%s\t%s\t%s\n' "$t" "${p##*/}" "$c" "$s"
 done
+echo '::section codex-open'
+db="$HOME/.codex/thread_history_1.sqlite"
+ps -U "$uid" -o pid=,etime=,command= 2>/dev/null |
+awk '{ n = $3; sub(/.*\//, "", n); if (n == "codex") print $1, $2 }' |
+while read -r pid et; do
+	printf '%s\t%s\n' "$pid" "$et"
+	if [ -d "/proc/$pid/fd" ]; then
+		for fd in "/proc/$pid/fd"/*; do readlink "$fd"; done 2>/dev/null
+	else
+		lsof -p "$pid" -Fn 2>/dev/null | sed -n 's/^n//p'
+	fi | while IFS= read -r p; do
+		case ${p##*/} in rollout-*.jsonl) ;; *) continue ;; esac
+		t=$(mtime "$p" 2>/dev/null) || continue
+		id=${p##*/}
+		id=${id%.jsonl}
+		id=${id#rollout-????-??-??T??-??-??-}
+		case $id in *[!0-9a-f-]*|'') id= ;; esac
+		st=
+		if [ -n "$id" ] && [ -f "$db" ]; then
+			q="select status || ' ' || coalesce(started_at, '') from thread_turns"
+			q="$q where thread_id = '$id' order by rollout_ordinal desc limit 1"
+			st=$(sqlite3 -readonly "$db" "$q" </dev/null 2>/dev/null | head -n 1)
+		fi
+		marks=$(tail -c 1048576 "$p" 2>/dev/null | awk '
+			/"payload":[{]"type":"(task_started|task_complete|turn_aborted)"/ { ev = substr($0, 1, 512) }
+			/"type":"response_item"/ { ri = substr($0, 1, 512) }
+			END { printf "%s\t%s", ev, ri }')
+		l=$(head -n 1 "$p" 2>/dev/null)
+		c=$(printf '%s\n' "$l" | grep -o '"cwd":"[^"]*"' | head -n 1)
+		o=$(printf '%s\n' "$l" | grep -o '"originator":"[^"]*"' | head -n 1)
+		printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$pid" "$et" "$t" "$st" "$marks" "$c" "$o" "$p"
+	done
+done
+echo '::section codex-rollouts'
+find "$HOME/.codex/sessions" -mindepth 4 -maxdepth 4 -type f -name 'rollout-*.jsonl' -mtime -7 2>/dev/null |
+while IFS= read -r p; do
+	t=$(mtime "$p" 2>/dev/null) && echo "$t $p"
+done | sort -rn | while read -r t s p; do
+	l=$(head -n 1 "$p" 2>/dev/null)
+	o=$(printf '%s\n' "$l" | grep -o '"originator":"[^"]*"' | head -n 1)
+	[ "$o" = '"originator":"codex-tui"' ] || continue
+	c=$(printf '%s\n' "$l" | grep -o '"cwd":"[^"]*"' | head -n 1)
+	printf '%s\t%s\t%s\t%s\t%s\n' "$t" "$s" "${p##*/}" "$c" "$o"
+done | head -n 100
 echo '::end'
 exit 0
 `
@@ -137,6 +203,8 @@ const (
 	sectionCWD       = "cwd"
 	sectionEnv       = "env"
 	sectionTranscrip = "transcripts"
+	sectionCodexOpen = "codex-open"
+	sectionCodexLogs = "codex-rollouts"
 )
 
 // rawSnapshot is one host's collection output, parsed but not interpreted.
@@ -144,12 +212,18 @@ type rawSnapshot struct {
 	ProcessCWDs map[int]string
 	// PaneIDs is the PANEMUX_PANE_ID each agent process was started with,
 	// already limited to validPaneID.
-	PaneIDs     map[int]string
+	PaneIDs map[int]string
+	// CodexAges is how long each codex process has run, in seconds.
+	CodexAges   map[int]int64
 	StateFiles  []stateFile
 	Processes   []process
 	TmuxPanes   []tmuxPane
 	Transcripts []transcript
-	Now         int64
+	// CodexOpen is every rollout a codex process holds open, and
+	// CodexRollouts the rollouts under ~/.codex/sessions (issue #264).
+	CodexOpen     []codexOpenRollout
+	CodexRollouts []codexRollout
+	Now           int64
 }
 
 type stateFile struct {
@@ -197,7 +271,11 @@ func parseCollectOutput(out []byte) (rawSnapshot, error) {
 		return rawSnapshot{}, errors.New("task collection output has no header")
 	}
 
-	p := collectParser{raw: rawSnapshot{ProcessCWDs: map[int]string{}, PaneIDs: map[int]string{}}}
+	p := collectParser{raw: rawSnapshot{
+		ProcessCWDs: map[int]string{},
+		PaneIDs:     map[int]string{},
+		CodexAges:   map[int]int64{},
+	}}
 	for _, line := range lines[start:] {
 		var err error
 		if strings.HasPrefix(line, directivePrefix) {
@@ -244,7 +322,8 @@ func (p *collectParser) directive(line string) error {
 	case "section":
 		p.flush()
 		switch arg {
-		case sectionState, sectionPS, sectionTmux, sectionCWD, sectionEnv, sectionTranscrip:
+		case sectionState, sectionPS, sectionTmux, sectionCWD, sectionEnv, sectionTranscrip,
+			sectionCodexOpen, sectionCodexLogs:
 			p.section = arg
 		default:
 			return fmt.Errorf("task collection output has unknown section %q", arg)
@@ -303,6 +382,16 @@ func (raw *rawSnapshot) addRow(section string, file *stateFile, line string) err
 	case sectionTranscrip:
 		if tr, ok := parseTranscriptRow(line); ok {
 			raw.Transcripts = append(raw.Transcripts, tr)
+		}
+	case sectionCodexOpen:
+		if pid, age, ok := parseCodexAgeRow(line); ok {
+			raw.CodexAges[pid] = age
+		} else if o, ok := parseCodexOpenRow(line); ok {
+			raw.CodexOpen = append(raw.CodexOpen, o)
+		}
+	case sectionCodexLogs:
+		if r, ok := parseCodexRolloutRow(line); ok {
+			raw.CodexRollouts = append(raw.CodexRollouts, r)
 		}
 	default:
 		if strings.TrimSpace(line) != "" {

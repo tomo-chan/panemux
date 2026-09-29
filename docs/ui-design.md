@@ -328,15 +328,20 @@ terminal that had focus cannot receive what is typed into the dashboard.
   `New task` (in the interactive blue), and `Workspaces`. A long host error is truncated in the chip
   and shown in full as its tooltip.
 - **New task.** A modal form over the dashboard: Host (every host on the board, an unreachable one
-  marked "(unreachable)"), Working directory, Agent (`claude` is the only choice), Labels
-  (comma-separated, optional) and First instruction. The working directory takes focus when it
+  marked "(unreachable)"), Working directory, Agent (`claude` or `codex`), Labels
+  (comma-separated, optional) and First instruction. With `codex` chosen, a note under Agent says
+  the labels are recorded once codex has started its session, and to open the task's pane if codex
+  stops at a start-up screen. The working directory takes focus when it
   opens. An empty directory, a relative one, or an empty instruction is refused in the form, with
   the reason under the fields; anything the server or the host refuses is shown there as
   "Could not start: …", and the form keeps what was typed. While the task starts, `Start` reads
   `Starting…`, and neither it, `Cancel`, `Escape` nor a click outside dismisses the form. Once it has
   started the form closes, a blue notice says which tmux session was started on which host and that
-  the task is selected once claude has started, and the task is selected when a collection lists
-  it — unless another task was selected meanwhile. No pane is opened. Labels that could not be
+  the task is selected once the agent has started (for codex with labels, also that they are
+  recorded once codex has started its session), and the task is selected when a collection lists
+  it — unless another task was selected meanwhile. A codex task is found in its tmux session: it is
+  selected as its process while it has no session, the notice staying up, and selected again as its
+  session once one is listed, which ends the notice. No pane is opened. Labels that could not be
   recorded for a task that did start are reported in a red alert.
 - **Filter bar.** Text filter over directory, branch, PR number, reference (such as `JIRA-123`) and session ID; rows split by none,
   host, label, or repository; a host filter; a label filter listing every label on the board; and a
@@ -358,19 +363,24 @@ terminal that had focus cannot receive what is typed into the dashboard.
   `owner/name#9`); its labels as colored tags, each label always the same color; a green `Done` tag
   in the meta line for a task marked done that is running again, or a dashed green `Done?` tag for a
   done candidate — a task not marked done whose summary finds no work left; and at the bottom where
-  the task runs with its `Open` / `Go to pane` button, or `Resume` for a stopped claude task. A task
-  that cannot be opened shows why instead of a button: for an agent outside tmux, "not in a panemux
-  pane" or, when the pane it names is in no workspace, "its pane is in no workspace". The card is a
-  pointer target for selection, and its title is a button, so the card never nests its links and
-  buttons inside another interactive element.
+  the task runs with its `Open` / `Go to pane` button, or `Resume` for a stopped claude or codex
+  task. A task that cannot be opened shows why instead of a button: for an agent outside tmux, "not
+  in a panemux pane" or, when the pane it names is in no workspace, "its pane is in no workspace".
+  The card is a pointer target for selection, and its title is a button, so the card never nests its
+  links and buttons inside another interactive element.
 - **Detail panel.** Fixed to the window height at the right. Its head — state, host, agent, start,
-  title, waiting reason, the open action or the reason there is none (a stopped claude task offers
-  `Resume` instead), `Mark done` or `Mark not done`, and for a done candidate the line "The summary
+  title, waiting reason, the open action or the reason there is none (a stopped claude or codex task
+  offers `Resume` instead), `Mark done` or `Mark not done`, and for a done candidate the line "The summary
   finds no work left: a candidate for Mark done." — stays in place, and only the body below scrolls:
-  state notes; **Work**, the summary and the remaining work as a numbered list ("No remaining work
-  found." when there is none); links (repository, branch, pull request, then issues noted "closed by
-  the pull request" and References noted "from the branch name or pull request title", each row only
-  when there is something to show), labels, the chain from task to agent to tmux session to pane to
+  state notes (for codex: a task with no session of its own is waiting for its first instruction,
+  held at a start-up screen, or running its session in codex's shared daemon, to be seen in the pane;
+  a session the daemon runs shows "codex's shared daemon · cannot open in a pane" where a card says
+  where it runs, and says why; a working one may be waiting for approval, which codex does not
+  record; an unknown one has no turn its history or log end reports); **Work**, the summary and the
+  remaining work as a numbered list ("No remaining work found." when there is none); links
+  (repository, branch, pull request, then issues noted "closed by the pull request" and References
+  noted "from the branch name or pull request title", each row only when there is something to
+  show), labels, the chain from task to agent to tmux session to pane to
   workspace, and the directory and session ID. Work also says when a summary is running
   ("Summarizing…"), failed (with the reason), outdated, unreadable, not made while the task works,
   or off (naming `task_dashboard.summary.enabled`), and offers `Summarize` / `Summarize again` when
