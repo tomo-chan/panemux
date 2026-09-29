@@ -1,0 +1,10 @@
+{
+  "agent": "claude",
+  "done": true,
+  "host": "build-box",
+  "labels": [
+    "infra",
+    "sprint-42"
+  ],
+  "session_id": "3d7702fe"
+}

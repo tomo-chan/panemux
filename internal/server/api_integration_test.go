@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"net/http"
@@ -424,6 +425,42 @@ var apiCases = map[string]apiCase{
 		assert.Contains(t, rr.Body.String(), `"name":"","status":"ok"`)
 		assert.Contains(t, rr.Body.String(), `"id":"local:claude:integration-session"`)
 		assert.Contains(t, rr.Body.String(), `"state":"stop"`)
+	}},
+
+	"PUT /api/tasks/records": {run: func(t *testing.T, e *apiEnv) {
+		// The record lands in the default file under the test's HOME, and the
+		// next collection carries it on the task it names.
+		project := filepath.Join(e.home, ".claude", "projects", "-workspace-user-project")
+		require.NoError(t, os.MkdirAll(project, 0o700))
+		require.NoError(t, os.WriteFile(filepath.Join(project, "integration-session.jsonl"),
+			[]byte(`{"cwd":"/workspace/user/project"}`+"\n"), 0o600))
+
+		rr := e.do(t, http.MethodPut, "/api/tasks/records",
+			`{"host":"","agent":"claude","session_id":"integration-session","done":true,"labels":["docs"]}`)
+		assert.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+		assert.FileExists(t, filepath.Join(e.home, ".config", "panemux", "tasks.json"))
+
+		rr = e.do(t, http.MethodGet, "/api/tasks", "")
+		assert.Equal(t, http.StatusOK, rr.Code)
+		type listedTask struct {
+			ID     string   `json:"id"`
+			Labels []string `json:"labels"`
+			Done   bool     `json:"done"`
+		}
+		var listed struct {
+			Tasks []listedTask `json:"tasks"`
+		}
+		require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &listed))
+		i := slices.IndexFunc(listed.Tasks, func(task listedTask) bool {
+			return task.ID == "local:claude:integration-session"
+		})
+		require.GreaterOrEqual(t, i, 0, rr.Body.String())
+		assert.True(t, listed.Tasks[i].Done)
+		assert.Equal(t, []string{"docs"}, listed.Tasks[i].Labels)
+
+		rr = e.do(t, http.MethodPut, "/api/tasks/records",
+			`{"host":"not-configured","agent":"claude","session_id":"s","done":true}`)
+		assert.Equal(t, http.StatusNotFound, rr.Code)
 	}},
 
 	"POST /api/tasks/hosts/{name}/reconnect": {run: func(t *testing.T, e *apiEnv) {

@@ -660,6 +660,16 @@ func TestSetTaskService_ClosesTheOneItReplaces(t *testing.T) {
 	assert.Equal(t, "local:claude:replaced", getTasks(t, h).Tasks[0].ID)
 }
 
+// taskRouteRequests is one valid request to each task route.
+func taskRouteRequests() []*http.Request {
+	return []*http.Request{
+		httptest.NewRequest(http.MethodGet, "/api/tasks", nil),
+		httptest.NewRequest(http.MethodPost, "/api/tasks/hosts/gpu-box/reconnect", nil),
+		httptest.NewRequest(http.MethodPut, "/api/tasks/records",
+			strings.NewReader(`{"host":"","agent":"claude","session_id":"s","done":true}`)),
+	}
+}
+
 // GET /api/tasks makes panemux dial every host and run a script there, so a
 // page on another site must not be able to trigger it — an <img> pointing at
 // the route would otherwise collect whenever that page is open.
@@ -690,6 +700,7 @@ func TestTaskRoutes_RefuseCrossSiteRequests(t *testing.T) {
 			cfg := defaultTestConfig()
 			cfg.SSHConnections = map[string]config.SSHConnection{"gpu-box": {Host: "gpu.invalid"}}
 			h := NewHandler(cfg, session.NewManager(), nil, nil)
+			recordsPath := useTaskRecords(t, h)
 			collections := 0
 			h.SetTaskService(tasks.New(tasks.Options{
 				Hosts: h.taskHostNames,
@@ -701,10 +712,7 @@ func TestTaskRoutes_RefuseCrossSiteRequests(t *testing.T) {
 			}))
 			r := setupRouterWithHandler(h)
 
-			for _, req := range []*http.Request{
-				httptest.NewRequest(http.MethodGet, "/api/tasks", nil),
-				httptest.NewRequest(http.MethodPost, "/api/tasks/hosts/gpu-box/reconnect", nil),
-			} {
+			for _, req := range taskRouteRequests() {
 				req.Host = "panemux.test:8080"
 				for k, v := range tc.headers {
 					req.Header.Set(k, v)
@@ -717,10 +725,12 @@ func TestTaskRoutes_RefuseCrossSiteRequests(t *testing.T) {
 					assert.Equal(t, http.StatusForbidden, rec.Code, "%s %s", req.Method, req.URL.Path)
 				}
 			}
-			if tc.allowed {
+			if _, statErr := os.Stat(recordsPath); tc.allowed {
 				assert.Equal(t, 1, collections)
+				assert.NoError(t, statErr)
 			} else {
 				assert.Zero(t, collections, "a refused request collects nothing")
+				assert.True(t, os.IsNotExist(statErr), "a refused request records nothing")
 			}
 		})
 	}

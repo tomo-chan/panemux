@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { TasksResponse, TasksResponseSchema } from '../schemas'
+import { Task, TaskRecordSchema, TasksResponse, TasksResponseSchema } from '../schemas'
+import { applyTaskRecord } from '../utils/taskBoard'
 
 // How often the dashboard re-collects while it is on screen. Collection runs
 // a script on every host, so it happens only while the dashboard is shown and
@@ -14,6 +15,11 @@ export interface TasksState {
   updatedAt: number | null
   refresh: () => Promise<void>
   reconnect: (host: string) => Promise<void>
+  /**
+   * Replaces what is recorded about a task — done and its labels — and
+   * applies the server's answer at once. Resolves to why it failed, or null.
+   */
+  saveRecord: (task: Task, record: { done: boolean; labels: string[] }) => Promise<string | null>
 }
 
 export function useTasks(enabled: boolean): TasksState {
@@ -23,11 +29,16 @@ export function useTasks(enabled: boolean): TasksState {
   const [updatedAt, setUpdatedAt] = useState<number | null>(null)
   const [isVisible, setIsVisible] = useState(() => document.visibilityState === 'visible')
   const inFlight = useRef(false)
+  // Counts record saves. A collection that was running when a save landed
+  // read the records before it, so its answer is dropped rather than allowed
+  // to put the old record back; the next poll brings the new one.
+  const recordSaves = useRef(0)
 
   const refresh = useCallback(async () => {
     if (inFlight.current) return
     inFlight.current = true
     setLoading(true)
+    const savesAtStart = recordSaves.current
     try {
       const res = await fetch('/api/tasks')
       if (!res.ok) {
@@ -39,6 +50,7 @@ export function useTasks(enabled: boolean): TasksState {
         setError('Unexpected response from /api/tasks')
         return
       }
+      if (savesAtStart !== recordSaves.current) return
       setData(parsed.data)
       setError(null)
       setUpdatedAt(Date.now())
@@ -64,6 +76,34 @@ export function useTasks(enabled: boolean): TasksState {
     await refresh()
   }, [refresh])
 
+  const saveRecord = useCallback(async (task: Task, record: { done: boolean; labels: string[] }) => {
+    if (!task.session_id) return 'This task has no session ID to record against'
+    try {
+      const res = await fetch('/api/tasks/records', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          host: task.host,
+          agent: task.agent,
+          session_id: task.session_id,
+          done: record.done,
+          labels: record.labels,
+        }),
+      })
+      if (!res.ok) {
+        const reason = (await res.text()).trim()
+        return reason || `HTTP ${res.status}`
+      }
+      const parsed = TaskRecordSchema.safeParse(await res.json())
+      if (!parsed.success) return 'Unexpected response from /api/tasks/records'
+      recordSaves.current += 1
+      setData((current) => (current ? { ...current, tasks: applyTaskRecord(current.tasks, parsed.data) } : current))
+      return null
+    } catch (err) {
+      return err instanceof Error ? err.message : 'Failed to save the task record'
+    }
+  }, [])
+
   useEffect(() => {
     const handleVisibilityChange = () => setIsVisible(document.visibilityState === 'visible')
     document.addEventListener('visibilitychange', handleVisibilityChange)
@@ -79,5 +119,5 @@ export function useTasks(enabled: boolean): TasksState {
     return () => clearInterval(interval)
   }, [enabled, isVisible, refresh])
 
-  return { data, error, loading, updatedAt, refresh, reconnect }
+  return { data, error, loading, updatedAt, refresh, reconnect, saveRecord }
 }

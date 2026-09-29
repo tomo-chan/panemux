@@ -46,6 +46,7 @@ type Handler struct {
 	boardCache              *board.BoardCache
 	gitInfoCacheBySession   map[string]gitInfoCacheEntry
 	tasks                   *tasks.Service
+	taskRecords             *tasks.RecordStore
 	taskGitLookup           func(ctx context.Context, host, cwd string, withPR bool) *taskGitInfo
 	taskGitCache            map[string]taskGitCacheEntry
 	createSession           func(*config.PaneConfig, map[string]config.SSHConnection) (session.Session, error)
@@ -178,6 +179,7 @@ func NewHandler(
 		boardCache:            boardCache,
 	}
 	h.tasks = newTaskService(h)
+	h.taskRecords = tasks.NewRecordStore("")
 	h.taskGitLookup = h.lookupTaskGit
 	h.createSession = session.CreateFromConfig
 	h.detectLocalShellFn = session.DetectLocalShell
