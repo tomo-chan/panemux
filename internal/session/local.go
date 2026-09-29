@@ -572,7 +572,7 @@ func devinSessionCWD(processes []processInfo, agentPID int) (string, error) {
 		return "", nil
 	}
 
-	homeDir, err := userHomeDirFn()
+	homeDir, err := homedir.Dir()
 	if err != nil {
 		return "", fmt.Errorf("resolve home dir for devin session: %w", err)
 	}

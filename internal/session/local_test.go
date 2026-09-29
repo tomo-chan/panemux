@@ -309,14 +309,7 @@ func TestDevinSessionCWD_DBNotFoundReturnsEmpty(t *testing.T) {
 	devinDir := filepath.Join(tmpDir, ".local", "share", "devin", "cli")
 	require.NoError(t, os.MkdirAll(devinDir, 0755))
 
-	originalUserHomeDir := userHomeDirFn
-	t.Cleanup(func() {
-		userHomeDirFn = originalUserHomeDir
-	})
-
-	userHomeDirFn = func() (string, error) {
-		return tmpDir, nil
-	}
+	homedir.SetForTest(t, tmpDir)
 
 	cwd, err := devinSessionCWD(processes, 100)
 	require.NoError(t, err)
@@ -364,14 +357,7 @@ func TestDevinSessionCWD_WithValidDB(t *testing.T) {
 	`, expectedCWD)
 	require.NoError(t, err)
 
-	originalUserHomeDir := userHomeDirFn
-	t.Cleanup(func() {
-		userHomeDirFn = originalUserHomeDir
-	})
-
-	userHomeDirFn = func() (string, error) {
-		return tmpDir, nil
-	}
+	homedir.SetForTest(t, tmpDir)
 
 	cwd, err := devinSessionCWD(processes, 100)
 	require.NoError(t, err)
@@ -418,14 +404,7 @@ func TestDevinSessionCWD_WithHiddenSession(t *testing.T) {
 	`)
 	require.NoError(t, err)
 
-	originalUserHomeDir := userHomeDirFn
-	t.Cleanup(func() {
-		userHomeDirFn = originalUserHomeDir
-	})
-
-	userHomeDirFn = func() (string, error) {
-		return tmpDir, nil
-	}
+	homedir.SetForTest(t, tmpDir)
 
 	cwd, err := devinSessionCWD(processes, 100)
 	require.NoError(t, err)
@@ -473,14 +452,7 @@ func TestInteractiveAgentSessionCWDs_WithDevin(t *testing.T) {
 	`, expectedCWD)
 	require.NoError(t, err)
 
-	originalUserHomeDir := userHomeDirFn
-	t.Cleanup(func() {
-		userHomeDirFn = originalUserHomeDir
-	})
-
-	userHomeDirFn = func() (string, error) {
-		return tmpDir, nil
-	}
+	homedir.SetForTest(t, tmpDir)
 
 	cwds, err := interactiveAgentSessionCWDs(processes, 100)
 	require.NoError(t, err)
