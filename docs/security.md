@@ -11,7 +11,7 @@ reading before touching the code it covers.
 
 | Sections | Document |
 |---|---|
-| Shell path; Tmux session name; Remote path arguments; SSH private key paths and an unresolvable home directory; Launching the operator's browser (`--open`); Task dashboard collection; Task launch and resume | [command-execution.md](security/command-execution.md) |
+| Shell path; Tmux session name; Remote path arguments; SSH private key paths and an unresolvable home directory; Launching the operator's browser (`--open`); Task dashboard collection; Task launch and resume; Task summaries | [command-execution.md](security/command-execution.md) |
 | Agent board remote writes; Agent-reported values in the dashboard UI | [agent-board.md](security/agent-board.md) |
 | Command center subprocess execution | [command-center.md](security/command-center.md) |
 | Auth token and transport encryption | [auth.md](security/auth.md) |

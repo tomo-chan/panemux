@@ -1,4 +1,4 @@
-import type { LayoutChild, PaneConfig, Task, TaskRecord, TaskState, Workspace } from '../schemas'
+import type { LayoutChild, PaneConfig, Task, TaskRecord, TaskState, TaskSummary, Workspace } from '../schemas'
 
 // The task dashboard's pure logic: which column a task sits in, how the board
 // is filtered and split into lanes, and how a task maps onto a pane. Kept out
@@ -71,6 +71,32 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
  */
 export function canResume(task: Task): boolean {
   return task.agent === 'claude' && task.state === 'stop' && UUID_PATTERN.test(task.session_id ?? '')
+}
+
+/** Whether a task can be summarized: a claude task with a session ID (issue #258). */
+export function canSummarize(task: Task): boolean {
+  return task.agent === 'claude' && Boolean(task.session_id)
+}
+
+/** The work a summary says comes next, and how much remains in all. */
+export function summaryNext(summary: TaskSummary | undefined): { next: string; left: number } | null {
+  const remaining = summary?.remaining ?? []
+  if (remaining.length === 0) return null
+  return { next: remaining[0], left: remaining.length }
+}
+
+/**
+ * Whether selecting a task asks the server to summarize it. Tasks waiting for
+ * input or idle are summarized by the poll; a stopped one, or one in an
+ * unknown state (which may be working), only when asked, which selecting it
+ * does while it has no current summary — none, an outdated one, or a log it
+ * could not read that has changed since. A failure is retried with the
+ * Summarize button, not by selecting the task again.
+ */
+export function summaryRequestOnSelect(task: Task, summariesEnabled: boolean): boolean {
+  if (!summariesEnabled || (task.state !== 'stop' && task.state !== 'unknown') || !canSummarize(task)) return false
+  const { summary } = task
+  return summary === undefined || ((summary.state === 'ready' || summary.state === 'unreadable') && summary.outdated === true)
 }
 
 /** The labels typed into the New task form, comma-separated. */

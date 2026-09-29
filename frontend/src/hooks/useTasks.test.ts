@@ -413,6 +413,7 @@ describe('useTasks collection after a launch', () => {
   // A collection already running when a task was started began before the
   // task existed, so the launch's own collection runs once it finishes rather
   // than being dropped until the next poll.
+  // efficacy:exempt unchanged by this branch; the new describe block after it falls inside its line range
   it('collects again after a collection that was in flight when the task started', async () => {
     let resolveSlow: (value: Response) => void = () => {}
     const withTask = { ...payload, tasks: [...payload.tasks, { ...payload.tasks[0], id: 'local:claude:new' }] }
@@ -442,5 +443,82 @@ describe('useTasks collection after a launch', () => {
 
     await waitFor(() => expect(result.current.data!.tasks.map((t) => t.id)).toContain('local:claude:new'))
     expect(fetchMock).toHaveBeenCalledTimes(4)
+  })
+})
+
+describe('useTasks requestSummary', () => {
+  const stopped = {
+    ...payload.tasks[0],
+    id: 'local:claude:stopped-s',
+    session_id: 'stopped-s',
+    state: 'stop',
+    location: { kind: 'none', attachable: false },
+  }
+  const refused = (status: number, text: string) =>
+    ({ ok: false, status, text: () => Promise.resolve(text) }) as Response
+
+  beforeEach(() => setVisibility('visible'))
+  afterEach(() => vi.restoreAllMocks())
+
+  it('POSTs the request and shows where the summary stands at once, without collecting', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(ok({ ...payload, tasks: [stopped], summaries_enabled: true }))
+      .mockResolvedValueOnce({ ...ok({ state: 'pending' }), status: 202 } as Response)
+    window.fetch = fetchMock
+    const { result } = renderHook(() => useTasks(true))
+    await waitFor(() => expect(result.current.data).not.toBeNull())
+
+    let failure: string | null = 'not called'
+    await act(async () => {
+      failure = await result.current.requestSummary(result.current.data!.tasks[0])
+    })
+
+    expect(failure).toBeNull()
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/tasks/summary', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ host: '', session_id: 'stopped-s' }),
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(result.current.data!.tasks[0].summary).toEqual({ state: 'pending' })
+  })
+
+  it('reports a refusal, a network failure and an unexpected answer', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(ok({ ...payload, tasks: [stopped] }))
+      .mockResolvedValueOnce(refused(409, 'task summaries are disabled (task_dashboard.summary.enabled)\n'))
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce({ ...ok({ state: 'finished' }), status: 202 } as Response)
+    window.fetch = fetchMock
+    const { result } = renderHook(() => useTasks(true))
+    await waitFor(() => expect(result.current.data).not.toBeNull())
+    const task = result.current.data!.tasks[0]
+
+    const outcomes: (string | null)[] = []
+    await act(async () => {
+      outcomes.push(await result.current.requestSummary(task))
+      outcomes.push(await result.current.requestSummary(task))
+      outcomes.push(await result.current.requestSummary(task))
+    })
+    expect(outcomes).toEqual([
+      'task summaries are disabled (task_dashboard.summary.enabled)',
+      'offline',
+      'Unexpected response from /api/tasks/summary',
+    ])
+    expect(result.current.data!.tasks[0].summary).toBeUndefined()
+  })
+
+  it('refuses to summarize a task without a session id without asking the server', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(ok(payload))
+    window.fetch = fetchMock
+    const { result } = renderHook(() => useTasks(true))
+    await waitFor(() => expect(result.current.data).not.toBeNull())
+
+    let failure: string | null = null
+    await act(async () => {
+      failure = await result.current.requestSummary(result.current.data!.tasks[0])
+    })
+    expect(failure).toBe('This task has no session ID to summarize')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 })

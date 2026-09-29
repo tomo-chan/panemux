@@ -40,18 +40,25 @@ display:
   task_dashboard_shortcut: "S"
 
 # ── Task dashboard ────────────────────────────────────────────────────────────
-# Autolink references, shaped like a GitHub repository's: `key_prefix` followed
-# by an identifier in a task's branch name or PR title links to `url_template`
-# with <num> replaced by the identifier (JIRA-123 below links to
-# https://jira.example.com/JIRA-123). The identifier is digits unless
-# `is_alphanumeric` is true. https only; no tracker is ever queried.
-# task_dashboard:
-#   autolinks:
-#     - key_prefix: "JIRA-"
-#       url_template: "https://jira.example.com/JIRA-<num>"
-#     - key_prefix: "TICKET-"
-#       url_template: "https://tickets.example.com/ticket?id=<num>"
-#       is_alphanumeric: true
+task_dashboard:
+  summary:
+    # Summarize each claude task's conversation with `claude -p` on this host:
+    # what it is doing and the work left. The text of the user's and the
+    # assistant's messages (never tool output) is read from each host's
+    # conversation log and sent to claude under this host's Claude account.
+    # (default: false)
+    enabled: false
+  # Autolink references, shaped like a GitHub repository's: `key_prefix` followed
+  # by an identifier in a task's branch name or PR title links to `url_template`
+  # with <num> replaced by the identifier (JIRA-123 below links to
+  # https://jira.example.com/JIRA-123). The identifier is digits unless
+  # `is_alphanumeric` is true. https only; no tracker is ever queried.
+  # autolinks:
+  #   - key_prefix: "JIRA-"
+  #     url_template: "https://jira.example.com/JIRA-<num>"
+  #   - key_prefix: "TICKET-"
+  #     url_template: "https://tickets.example.com/ticket?id=<num>"
+  #     is_alphanumeric: true
 
 # ── Opening URLs from a pane ──────────────────────────────────────────────────
 # When a URL is opened from a pane, panemux republishes the URL's loopback

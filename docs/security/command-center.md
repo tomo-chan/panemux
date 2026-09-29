@@ -133,6 +133,10 @@ It will drift as the CLI gains tools. That weakness is accepted because it is th
 denial that holds; `TestDisallowedToolsCoversActingTools` and `TestRunnerDeniesActingToolsByName` fail
 if the list or the flag disappears.
 
+The task dashboard's summaries run `claude -p` with the same list
+([command-execution.md](command-execution.md#task-summaries)), so a change to `DisallowedTools()`
+applies to both.
+
 Acting tools are *present* in the subprocess's tool list and refused at call time, not absent.
 "Refused" is exactly the property the middle row above defeats.
 

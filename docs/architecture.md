@@ -31,7 +31,7 @@ layout rendering, terminal emulation, interaction state, and presentation.
 | `main.go` and root helpers | Parse options, load config, construct dependencies, start sessions and optional subsystems, serve, and shut down. |
 | `internal/config` | Load, normalize, validate, and persist YAML. `Data` is the serializable domain model; `Config` adds file and lookup context. |
 | `internal/session` | Provide one lifecycle interface for local PTY, SSH, local tmux, and tmux-over-SSH sessions. Optional capability interfaces expose CWD, Git context, port forwarding, and Agent Board operations only where supported. `CommandConn` is an SSH connection for short non-interactive commands, dialed with the same dialer panes use. |
-| `internal/tasks` | Collect the task dashboard's agent sessions from the panemux host and every `ssh_connections` host with one fixed script, and own one reused `CommandConn` per host; keep the done and label records in `~/.config/panemux/tasks.json` (`RecordStore`); start and resume claude tasks in detached tmux sessions with one fixed launch script over the same connection (`Launch`, `Resume`). |
+| `internal/tasks` | Collect the task dashboard's agent sessions from the panemux host and every `ssh_connections` host with one fixed script, and own one reused `CommandConn` per host; keep the done and label records in `~/.config/panemux/tasks.json` (`RecordStore`); start and resume claude tasks in detached tmux sessions with one fixed launch script over the same connection (`Launch`, `Resume`); read a task's conversation log with a third fixed script and summarize it with `claude -p` on the panemux host, keeping the summaries in memory (`Summaries`, `RequestSummary`). |
 | `internal/api` | Implement REST handlers and mount the route set. It is the single source of truth for API registration. |
 | `internal/ws` | Bridge session bytes and control messages to terminal WebSockets and stream command-center events. |
 | `internal/server` | Compose middleware, API routes, WebSocket routes, static assets, and SPA fallback into the production router. |
@@ -111,7 +111,11 @@ creates or focuses a `tmux` / `ssh_tmux` pane through the ordinary pane APIs, or
 `local` / `ssh` pane an agent outside tmux runs in. `POST /api/tasks` and `POST /api/tasks/resume`
 run a second fixed script the same way — `sh -s` with the script on stdin — which starts claude in
 a detached tmux session; a resume first collects the host again to confirm the session is stopped
-there, and a start records its labels in `tasks.RecordStore`. Full behavior is in
+there, and a start records its labels in `tasks.RecordStore`. When
+`task_dashboard.summary.enabled` is set, `GET /api/tasks` also attaches each task's summary and starts
+the ones that are due, in the background and at most two at a time: a third fixed script reads the
+task's conversation log on its host, and `claude -p` on the panemux host summarizes the conversation
+text extracted from it; `POST /api/tasks/summary` asks for one. Full behavior is in
 [Task dashboard](behavior/tasks.md).
 
 ### URL-open flow
