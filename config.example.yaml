@@ -75,7 +75,23 @@ url_open:
 
 # ── SSH connections ────────────────────────────────────────────────────────────
 # Define named SSH connections here; reference them in panes with `connection:`.
+#
+# These are also the remote hosts the task dashboard collects agent sessions
+# from. A host that exists only in ~/.ssh/config can be a pane's `connection`,
+# but the dashboard does not collect from it until its name is listed here.
+#
+# Every field is optional. An entry written as just a name takes its details
+# (HostName, User, Port, IdentityFile, ProxyJump, ProxyCommand) from the
+# ~/.ssh/config `Host` block of the same name; a field set here overrides that
+# block's value for the same setting.
 ssh_connections:
+
+  # Name only: connects as `Host gpu-box` in ~/.ssh/config describes
+  gpu-box:
+
+  # ~/.ssh/config `Host build`, but logged in as a different user
+  build:
+    user: "ci"
 
   # Key-based authentication (recommended)
   prod-web:

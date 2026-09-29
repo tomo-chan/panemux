@@ -73,6 +73,25 @@ prompt; a request that never starts a subprocess does not create a turn.
 
 ## Task dashboard
 
+### Dashboard hosts are listed by name; details come from `~/.ssh/config` (2026-09-29, issue #272)
+
+The dashboard collects only from `ssh_connections`, which kept a host that lives in `~/.ssh/config`
+off it unless every connection detail was copied into YAML. An `ssh_connections` entry can now be
+just a name: its details come from the `~/.ssh/config` `Host` block of that name, and each field the
+entry does set overrides the block's value for that setting. Field-by-field merging was chosen over
+using the `Host` block only when the entry is empty, so that one setting (a different `user`, say)
+can be changed without copying the rest. The consequence is that an entry that already set `host`
+and `user` now also takes `IdentityFile`, `Port`, `ProxyJump` and `ProxyCommand` from a `Host` block
+of the same name when it leaves those unset; before, a name in both sources used only the YAML
+entry.
+
+The collection scope itself is unchanged: widening it to every `~/.ssh/config` host was rejected in
+issue #272, since that file commonly lists hosts that have nothing to do with agents. The same change
+fixed validation adding the `~/.ssh/config` hosts to the config's own `ssh_connections` map whenever
+that map was non-empty — which made every such host a dashboard host and wrote it into config.yaml on
+the next save. Issue #272's proposal of a UI to edit `ssh_connections` was not built: listing a name
+is now the whole edit.
+
 ### Codex sessions: state, starting and resuming (2026-09-27, issue #264)
 
 Stage 1 listed a codex task as a running process known only by its pid, and stage 2 started and

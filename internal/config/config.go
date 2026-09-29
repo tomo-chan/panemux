@@ -32,13 +32,18 @@ type ServerConfig struct {
 	Port      int    `yaml:"port"`
 }
 
+// SSHConnection is one ssh_connections entry. Every field is optional: an
+// entry written as just its name takes its connection details from the
+// ~/.ssh/config Host block of the same name, and a field set here overrides
+// that block's value for the same setting. omitempty on each keeps a
+// name-only entry name-only when the config is saved back.
 type SSHConnection struct {
-	Host           string `yaml:"host"`
-	User           string `yaml:"user"`
-	KeyFile        string `yaml:"key_file"`
+	Host           string `yaml:"host,omitempty"`
+	User           string `yaml:"user,omitempty"`
+	KeyFile        string `yaml:"key_file,omitempty"`
 	Password       string `yaml:"password,omitempty"`
 	KnownHostsFile string `yaml:"known_hosts_file,omitempty" json:"known_hosts_file,omitempty"`
-	Port           int    `yaml:"port"`
+	Port           int    `yaml:"port,omitempty"`
 }
 
 type DisplayConfig struct {

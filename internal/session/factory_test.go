@@ -400,3 +400,110 @@ func TestResolveSSHConfig_UnresolvableHomeDirectory_LeavesTheIdentityFileAlone(t
 		})
 	}
 }
+
+// TestResolveSSHConfig_MergesSSHConnectionsOverSSHConfig covers an
+// ssh_connections entry whose name also has a ~/.ssh/config Host block: every
+// field the entry leaves empty comes from the block, and every field it sets
+// wins over the block's value for the same setting.
+func TestResolveSSHConfig_MergesSSHConnectionsOverSSHConfig(t *testing.T) {
+	home := t.TempDir()
+	homedir.SetForTest(t, home)
+	sshCfgPath := filepath.Join(t.TempDir(), "config")
+	content := `Host jump
+    HostName jump.example.com
+    User jumper
+
+Host box
+    HostName box.example.com
+    User fileuser
+    Port 2200
+    IdentityFile ~/.ssh/id_file
+    ProxyJump jump
+    ProxyCommand nc %h %p
+`
+	require.NoError(t, os.WriteFile(sshCfgPath, []byte(content), 0600))
+
+	fromFile := SSHConfig{
+		Host:         "box.example.com",
+		User:         "fileuser",
+		Port:         2200,
+		KeyFile:      filepath.Join(home, ".ssh", "id_file"),
+		ProxyCommand: "nc %h %p",
+		JumpHost:     &SSHConfig{Host: "jump.example.com", User: "jumper", Port: 22},
+	}
+	tests := []struct {
+		modify func(*SSHConfig)
+		name   string
+		conn   config.SSHConnection
+	}{
+		{func(*SSHConfig) {}, "name only", config.SSHConnection{}},
+		{func(c *SSHConfig) { c.Host = "yaml.example.com" }, "host", config.SSHConnection{Host: "yaml.example.com"}},
+		{func(c *SSHConfig) { c.User = "yamluser" }, "user", config.SSHConnection{User: "yamluser"}},
+		{func(c *SSHConfig) { c.Port = 2222 }, "port", config.SSHConnection{Port: 2222}},
+		{func(c *SSHConfig) { c.KeyFile = "/keys/yaml" }, "key file", config.SSHConnection{KeyFile: "/keys/yaml"}},
+		{func(c *SSHConfig) { c.Password = "secret" }, "password", config.SSHConnection{Password: "secret"}},
+		{
+			func(c *SSHConfig) { c.KnownHostsFile = "/kh/yaml" },
+			"known hosts file", config.SSHConnection{KnownHostsFile: "/kh/yaml"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			want := fromFile
+			jump := *fromFile.JumpHost
+			want.JumpHost = &jump
+			tt.modify(&want)
+
+			got, err := resolveSSHConfig("box", map[string]config.SSHConnection{"box": tt.conn}, sshCfgPath)
+
+			require.NoError(t, err)
+			assert.Equal(t, want, got)
+		})
+	}
+}
+
+// TestResolveSSHConfig_NameOnlyEntryWithoutSSHConfigHost_Errors verifies that
+// an entry with no host, and no ~/.ssh/config Host block to take one from, is
+// refused by name rather than dialed with an empty address.
+func TestResolveSSHConfig_NameOnlyEntryWithoutSSHConfigHost_Errors(t *testing.T) {
+	sshCfgPath := writeTempSSHConfig(t, "other", "other.example.com", "user", 0)
+	conns := map[string]config.SSHConnection{"lonely": {User: "deploy"}}
+
+	_, err := resolveSSHConfig("lonely", conns, sshCfgPath)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `ssh connection "lonely" has no host`)
+}
+
+// TestResolveSSHConfig_SSHConnectionsEntryWithUnreadableSSHConfig verifies
+// that an entry carrying its own host still resolves when ~/.ssh/config cannot
+// be read (here, the path is a directory), while a name-only entry reports
+// that it has no host.
+func TestResolveSSHConfig_SSHConnectionsEntryWithUnreadableSSHConfig(t *testing.T) {
+	unreadable := t.TempDir()
+	conns := map[string]config.SSHConnection{
+		"full":      {Host: "full.example.com", User: "deploy"},
+		"name-only": {},
+	}
+
+	cfg, err := resolveSSHConfig("full", conns, unreadable)
+	require.NoError(t, err)
+	assert.Equal(t, SSHConfig{Host: "full.example.com", User: "deploy"}, cfg)
+
+	_, err = resolveSSHConfig("name-only", conns, unreadable)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `ssh connection "name-only" has no host`)
+}
+
+// TestResolveSSHConfig_NameOnlyEntry_ProxyJumpNotFound verifies that a jump
+// host that cannot be resolved fails a name-only entry too.
+func TestResolveSSHConfig_NameOnlyEntry_ProxyJumpNotFound(t *testing.T) {
+	sshCfgPath := filepath.Join(t.TempDir(), "config")
+	content := "Host target\n    HostName target.internal\n    ProxyJump missing-jump\n"
+	require.NoError(t, os.WriteFile(sshCfgPath, []byte(content), 0600))
+
+	_, err := resolveSSHConfig("target", map[string]config.SSHConnection{"target": {}}, sshCfgPath)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "resolving proxy jump")
+}

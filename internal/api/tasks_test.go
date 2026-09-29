@@ -21,6 +21,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"panemux/internal/config"
+	"panemux/internal/homedir"
 	"panemux/internal/session"
 	"panemux/internal/tasks"
 )
@@ -604,6 +605,43 @@ func TestGetTasks_AHostThatCannotBeDialedReportsWhy(t *testing.T) {
 	assert.Equal(t, tasks.HostError, resp.Hosts[1].Status)
 	assert.Contains(t, resp.Hosts[1].Error, "connect to gpu-box: dial:")
 	assert.Contains(t, resp.Hosts[1].Error, "key file")
+}
+
+// TestGetTasks_ANameOnlyHostConnectsAsItsSSHConfigBlock verifies that an
+// ssh_connections entry written as just its name is collected from, dialed
+// with the connection details of the ~/.ssh/config Host block of that name.
+func TestGetTasks_ANameOnlyHostConnectsAsItsSSHConfigBlock(t *testing.T) {
+	cfg := defaultTestConfig()
+	cfg.SSHConnections = map[string]config.SSHConnection{"gpu-box": {}}
+	h := NewHandler(cfg, session.NewManager(), nil, nil)
+	h.sshConfigPath = filepath.Join(t.TempDir(), "config")
+	require.NoError(t, os.WriteFile(h.sshConfigPath,
+		[]byte("Host gpu-box\n    HostName gpu.invalid\n    User demo\n    IdentityFile relative/id_ed25519\n"), 0600))
+	homedir.SetFailingForTest(t, errors.New("no home directory"))
+	h.SetTaskService(newTaskServiceWithLocal(h, taskCollection("l", "")))
+
+	resp := getTasks(t, h)
+	require.Len(t, resp.Hosts, 2)
+	assert.Equal(t, "gpu-box", resp.Hosts[1].Name)
+	assert.Equal(t, tasks.HostError, resp.Hosts[1].Status)
+	assert.Contains(t, resp.Hosts[1].Error, "connect to gpu-box: dial:")
+	assert.Contains(t, resp.Hosts[1].Error, "key file", "the IdentityFile of the Host block was used")
+}
+
+// TestGetTasks_ANameOnlyHostWithoutSSHConfigBlockReportsWhy verifies that a
+// name-only entry with no ~/.ssh/config Host block to take its details from
+// is reported on its host instead of being dialed with an empty address.
+func TestGetTasks_ANameOnlyHostWithoutSSHConfigBlockReportsWhy(t *testing.T) {
+	cfg := defaultTestConfig()
+	cfg.SSHConnections = map[string]config.SSHConnection{"gpu-box": {}}
+	h := NewHandler(cfg, session.NewManager(), nil, nil)
+	h.sshConfigPath = filepath.Join(t.TempDir(), "config")
+	h.SetTaskService(newTaskServiceWithLocal(h, taskCollection("l", "")))
+
+	resp := getTasks(t, h)
+	require.Len(t, resp.Hosts, 2)
+	assert.Equal(t, tasks.HostError, resp.Hosts[1].Status)
+	assert.Contains(t, resp.Hosts[1].Error, `resolve ssh connection: ssh connection "gpu-box" has no host`)
 }
 
 func TestPostTaskHostReconnect(t *testing.T) {

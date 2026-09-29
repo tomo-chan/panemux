@@ -19,7 +19,9 @@ If a configured session fails to start, the server logs a warning and continues 
 The YAML config defines:
 
 - `server.host`, `server.port`, and the Agent Board `server.auth_token`
-- `ssh_connections`, which are also the hosts the task dashboard collects agent sessions from
+- `ssh_connections`, which are also the hosts the task dashboard collects agent sessions from. An
+  entry can be just a name, taking its details from the `~/.ssh/config` `Host` block of that name
+  ([SSH connections](behavior/ssh.md#defining-connections-in-ssh_connections))
 - `workspaces`, including the active workspace, tab position, vertical bar width, and each
   workspace's recursive layout
 - optional `display` settings, including `display.task_dashboard_shortcut`

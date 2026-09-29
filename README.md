@@ -120,6 +120,7 @@ Common uses:
 ### Task dashboard
 
 - Click **← Tasks** at the start of the workspace bar to see every coding-agent session on this machine and on every host under `ssh_connections`, as columns by state: waiting for input, working, idle, running / unknown, and stopped (the last 7 days, at most 50 per host). **Workspaces** goes back; the panes keep running underneath.
+- Only hosts listed under `ssh_connections` are collected from. A host that exists only in `~/.ssh/config` — including one added with **Add SSH Host** — can be opened in a pane but does not appear on the dashboard. To add it, list just its name under `ssh_connections`; the connection details are taken from `~/.ssh/config` ([SSH connections](#ssh-connections)).
 - **Cmd/Ctrl+Shift+S** switches between the dashboard and the workspaces, even while a terminal has focus. Change the letter with `display.task_dashboard_shortcut` in `config.yaml` (one letter; `K` and `B` are taken).
 - The **← Tasks** button counts the sessions waiting for input as of the last time the dashboard was shown. The dashboard collects only while it is on screen, every 10 seconds.
 - A session running inside `tmux` can be opened: **Open** adds a `tmux` (or `ssh_tmux`) pane attached to its tmux session to the current workspace, and **Go to pane** jumps to a pane already attached to it. A session running outside tmux, or stopped, cannot be opened in a pane.
@@ -138,7 +139,7 @@ Common uses:
 
 ### SSH and tmux usage
 
-- A pane with `connection: my-host` can use either a named `ssh_connections` entry or a `Host my-host` entry from `~/.ssh/config`.
+- A pane with `connection: my-host` can use either a named `ssh_connections` entry or a `Host my-host` entry from `~/.ssh/config`. Only `ssh_connections` entries are task dashboard hosts.
 - `tmux` and `ssh_tmux` panes automatically create the target tmux session if it does not already exist.
 - In `tmux` and `ssh_tmux` panes, plain drag continues to follow tmux mouse behavior. Use `Option` + drag on macOS or `Shift` + drag on Linux and Windows to force browser-side text selection.
 - Set `cwd` on `local`, `ssh`, or `ssh_tmux` panes when you want the shell to start in a specific directory.
@@ -321,8 +322,10 @@ server:
   port: 8080
   host: "127.0.0.1"
 
-# Named SSH connections (optional — hosts from ~/.ssh/config are also usable directly)
+# Named SSH connections (optional — hosts from ~/.ssh/config are also usable
+# directly in panes). These are also the hosts the task dashboard collects from.
 ssh_connections:
+  gpu-box:            # name only: connects as `Host gpu-box` in ~/.ssh/config
   prod-web:
     host: "192.168.1.10"
     port: 22
@@ -382,11 +385,11 @@ The workspace bar is always available for workspace actions. Newly added workspa
 
 Connections can be defined in two ways:
 
-**In the YAML config** under `ssh_connections` — supports `host`, `user`, `port`, `key_file`, `password`, and `known_hosts_file`.
+**In the YAML config** under `ssh_connections` — supports `host`, `user`, `port`, `key_file`, `password`, and `known_hosts_file`, all optional. An entry can be just a name (`gpu-box:`), in which case its details come from the `~/.ssh/config` `Host` block of the same name. A field set in the entry overrides that block's value for the same setting; the fields left out keep the block's values.
 
-**Via `~/.ssh/config`** — any non-wildcard `Host` entry is automatically available as a `connection` name. `HostName`, `User`, `Port`, and `IdentityFile` are read from the file. This lets you reuse your existing SSH config without duplicating it in YAML.
+**Via `~/.ssh/config`** — any non-wildcard `Host` entry is automatically available as a `connection` name. `HostName`, `User`, `Port`, `IdentityFile`, `ProxyJump`, and `ProxyCommand` are read from the file. This lets you reuse your existing SSH config without duplicating it in YAML.
 
-When the same name appears in both, `ssh_connections` takes precedence.
+The task dashboard collects only from the hosts under `ssh_connections`. A host that exists only in `~/.ssh/config` — including one added from the UI with **Add SSH Host**, which writes `~/.ssh/config` — is usable in panes but is not collected from until its name is listed under `ssh_connections`.
 
 Authentication is attempted in order: configured `key_file` → configured `password` → default key files (`~/.ssh/id_ed25519`, `~/.ssh/id_rsa`, `~/.ssh/id_ecdsa`).
 

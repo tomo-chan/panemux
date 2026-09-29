@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"regexp"
 	"slices"
@@ -54,7 +55,11 @@ func (c *Data) validate(sshConfigPath string) error {
 	errs = append(errs, validateDisplay(c.Display)...)
 	errs = append(errs, validateTaskDashboard(c.TaskDashboard)...)
 
-	sshConns := c.SSHConnections
+	// A copy, not c.SSHConnections itself: the ~/.ssh/config hosts added
+	// below count as defined connections for panes only. Adding them to the
+	// config's own map would make each one a task dashboard host and write
+	// it into config.yaml on the next save.
+	sshConns := maps.Clone(c.SSHConnections)
 	if sshConns == nil {
 		sshConns = make(map[string]SSHConnection)
 	}

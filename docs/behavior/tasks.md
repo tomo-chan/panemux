@@ -38,7 +38,11 @@ of its conversation (see [Summaries](#summaries)).
 ### Hosts and connections
 
 - The hosts are the panemux host (reported with the name `""`) and the keys of `ssh_connections`.
-  Hosts that exist only in `~/.ssh/config` are not collected from.
+  Hosts that exist only in `~/.ssh/config` are not collected from. Listing a `~/.ssh/config` host's
+  name under `ssh_connections`, with no fields, makes it a dashboard host that connects as its
+  `Host` block describes ([Defining connections](ssh.md#defining-connections-in-ssh_connections)).
+  A name-only entry with no `Host` block of that name reports `ssh connection "<name>" has no host`
+  as its error.
 - Each SSH host gets **one** connection for the dashboard, opened with the same dialer panes use
   (ProxyJump, ProxyCommand and `known_hosts` verification included) and reused by every later
   collection. It is never shared with a pane, and opening or closing panes does not affect it.
