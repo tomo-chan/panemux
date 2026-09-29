@@ -1,11 +1,21 @@
 import { renderHook, act } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { __computePullRequestLinksForTests, __resetTerminalEntriesForTests, useTerminal } from './useTerminal'
+import {
+  TERMINAL_URL_REGEX,
+  __computePullRequestLinksForTests,
+  __resetTerminalEntriesForTests,
+  useTerminal,
+} from './useTerminal'
+import { createUrlLinkProvider } from '../utils/terminalLinks'
 import { TERMINAL_FONT_FAMILY } from '../utils/fonts'
 
 // ── xterm.js mocks ───────────────────────────────────────────────────────────
-const { mockWrite, mockTerm, mockFitAddon, mockTerminalCtor } = vi.hoisted(() => {
+const {
+  mockWrite, mockTerm, mockFitAddon, mockTerminalCtor, mockUrlProviderFactory, oscHandlers, linkHandlers,
+} = vi.hoisted(() => {
   const mockWrite = vi.fn()
+  const oscHandlers = new Map<number, (data: string) => boolean>()
+  const linkHandlers: ((uri: string) => void)[] = []
   const mockTerm = {
     options: { disableStdin: false },
     attachCustomKeyEventHandler: vi.fn(),
@@ -22,6 +32,12 @@ const { mockWrite, mockTerm, mockFitAddon, mockTerminalCtor } = vi.hoisted(() =>
         getLine: vi.fn(() => null),
       },
     },
+    parser: {
+      registerOscHandler: vi.fn((ident: number, handler: (data: string) => boolean) => {
+        oscHandlers.set(ident, handler)
+        return { dispose: vi.fn() }
+      }),
+    },
     dispose: vi.fn(),
     cols: 80,
     rows: 24,
@@ -33,12 +49,31 @@ const { mockWrite, mockTerm, mockFitAddon, mockTerminalCtor } = vi.hoisted(() =>
   }
   const mockFitAddon = { fit: vi.fn() }
   const mockTerminalCtor = vi.fn(function () { return mockTerm })
-  return { mockWrite, mockTerm, mockFitAddon, mockTerminalCtor }
+  // The url link provider is exercised against a real terminal in
+  // useTerminalLinks.test.ts; here it is a seam that captures the activation
+  // callback panemux hands it.
+  const mockUrlProviderFactory = vi.fn(function (
+    _term: unknown,
+    _regex: RegExp,
+    onActivate: (uri: string) => void,
+  ) {
+    linkHandlers.push(onActivate)
+    return { provideLinks: vi.fn() }
+  })
+  return {
+    mockWrite, mockTerm, mockFitAddon, mockTerminalCtor, mockUrlProviderFactory, oscHandlers, linkHandlers,
+  }
 })
 
 vi.mock('@xterm/xterm', () => ({ Terminal: mockTerminalCtor }))
 vi.mock('@xterm/addon-fit', () => ({ FitAddon: vi.fn(function () { return mockFitAddon }) }))
-vi.mock('@xterm/addon-web-links', () => ({ WebLinksAddon: vi.fn(function () { return {} }) }))
+// Only the provider factory is stubbed: computePullRequestLinks uses this
+// module's real cell-mapping helpers, and a stub of those would make the
+// coordinate assertions below assert the stub.
+vi.mock('../utils/terminalLinks', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../utils/terminalLinks')>()),
+  createUrlLinkProvider: mockUrlProviderFactory,
+}))
 
 // ── WebSocket mock ────────────────────────────────────────────────────────────
 class MockWebSocket {
@@ -102,6 +137,8 @@ describe('useTerminal', () => {
       value: { writeText: vi.fn().mockResolvedValue(undefined) },
     })
     document.execCommand = vi.fn(() => true)
+    oscHandlers.clear()
+    linkHandlers.length = 0
     vi.clearAllMocks()
   })
 
@@ -155,38 +192,54 @@ describe('useTerminal', () => {
     }))
   })
 
-  it('loads all addons on init', () => {
+  it('loads the fit addon on init', () => {
     const container = makeContainer()
     renderHook(() => useTerminal({ sessionId: 's1', container }))
-    expect(mockTerm.loadAddon).toHaveBeenCalledTimes(2)
+    expect(mockTerm.loadAddon).toHaveBeenCalledTimes(1)
   })
 
-  it('registers a custom link provider for pull request numbers', () => {
+  it('builds the url link provider with the CJK-aware url regex', () => {
+    const container = makeContainer()
+    renderHook(() => useTerminal({ sessionId: 's1', container }))
+
+    expect(createUrlLinkProvider).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(createUrlLinkProvider).mock.calls[0][1]).toBe(TERMINAL_URL_REGEX)
+  })
+
+  it('registers the url provider before the pull request one, so a #123 inside a url stays part of it', () => {
     const container = makeContainer()
     renderHook(() => useTerminal({ sessionId: 's1', container, repoURL: 'https://github.com/example/panemux' }))
 
-    expect(mockTerm.registerLinkProvider).toHaveBeenCalledTimes(1)
+    expect(mockTerm.registerLinkProvider).toHaveBeenCalledTimes(2)
+    const urlProvider = vi.mocked(createUrlLinkProvider).mock.results[0].value
+    expect(mockTerm.registerLinkProvider.mock.calls[0][0]).toBe(urlProvider)
   })
 
-  it('turns visible #123 references into pull request links when repo metadata is available', () => {
-    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null)
-    const term = {
+  // A buffer line the real cell-mapping helper can read: one cell per
+  // character, which is all these two cases need.
+  function termShowing(text: string) {
+    return {
       buffer: {
         active: {
           getLine: vi.fn(() => ({
-            translateToString: vi.fn(() => 'Reviewing #123 now'),
+            length: text.length,
+            getCell: (x: number) => ({ getWidth: () => 1, getChars: () => text[x] ?? '' }),
           })),
         },
       },
     } as unknown as typeof mockTerm
+  }
+
+  it('turns visible #123 references into pull request links when repo metadata is available', () => {
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null)
+    const term = termShowing('Reviewing #123 now')
 
     const links = __computePullRequestLinksForTests(term as never, 'https://github.com/example/panemux', 1)
 
     expect(links).toHaveLength(1)
-    expect(links[0].range).toEqual({
-      start: { x: 10, y: 0 },
-      end: { x: 14, y: 0 },
-    })
+    expect(links[0].text).toBe('#123')
+    // The coordinates themselves are asserted against a real xterm buffer in
+    // useTerminalLinks.test.ts, where cell widths are real.
     links[0].activate()
     expect(openSpy).toHaveBeenCalledWith(
       'https://github.com/example/panemux/pull/123',
@@ -196,15 +249,7 @@ describe('useTerminal', () => {
   })
 
   it('skips pull request link generation when repo metadata is unavailable', () => {
-    const term = {
-      buffer: {
-        active: {
-          getLine: vi.fn(() => ({
-            translateToString: vi.fn(() => 'Reviewing #123 now'),
-          })),
-        },
-      },
-    } as unknown as typeof mockTerm
+    const term = termShowing('Reviewing #123 now')
 
     const links = __computePullRequestLinksForTests(term as never, null, 1)
 
@@ -988,5 +1033,248 @@ describe('useTerminal', () => {
     expect(written).not.toContain('\x1b[>1h')
     expect(written).toContain('hidden cursor')
     expect(written).toContain('text')
+  })
+})
+
+// ── URL opening from a pane ──────────────────────────────────────────────────
+describe('useTerminal URL opening', () => {
+  let originalWebSocket: typeof WebSocket
+  let originalOpen: typeof window.open
+
+  beforeEach(() => {
+    originalWebSocket = window.WebSocket
+    originalOpen = window.open
+    MockWebSocket.instances = []
+    window.WebSocket = MockWebSocket as unknown as typeof WebSocket
+    mockTerm.element = undefined
+    mockTerm.open.mockImplementation((container: HTMLElement) => {
+      const el = document.createElement('div')
+      mockTerm.element = el
+      container.appendChild(el)
+    })
+    oscHandlers.clear()
+    linkHandlers.length = 0
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    __resetTerminalEntriesForTests()
+    window.WebSocket = originalWebSocket
+    window.open = originalOpen
+    vi.restoreAllMocks()
+  })
+
+  function mountTerminal(sessionId: string, handlers: {
+    onLinkActivate?: (url: string) => void
+    onBrowserOpenRequest?: (url: string) => void
+  } = {}) {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    return renderHook(() => useTerminal({ sessionId, container, ...handlers }))
+  }
+
+  it('routes an activated link to the pane instead of opening it directly', () => {
+    const onLinkActivate = vi.fn()
+    window.open = vi.fn() as unknown as typeof window.open
+    mountTerminal('url-1', { onLinkActivate })
+
+    linkHandlers[0]('https://example.com/auth')
+
+    expect(onLinkActivate).toHaveBeenCalledWith('https://example.com/auth')
+    expect(window.open).not.toHaveBeenCalled()
+  })
+
+  it('falls back to opening a tab when the pane provides no handler', () => {
+    window.open = vi.fn() as unknown as typeof window.open
+    mountTerminal('url-2')
+
+    linkHandlers[0]('https://example.com/docs')
+
+    expect(window.open).toHaveBeenCalledWith('https://example.com/docs', '_blank', 'noopener,noreferrer')
+  })
+
+  it('hands a browser-open OSC sequence to the pane and consumes it', () => {
+    const onBrowserOpenRequest = vi.fn()
+    mountTerminal('url-3', { onBrowserOpenRequest })
+
+    const handler = oscHandlers.get(7373)
+    expect(handler).toBeDefined()
+    expect(handler!('panemux-open;https://example.com/device')).toBe(true)
+
+    expect(onBrowserOpenRequest).toHaveBeenCalledWith('https://example.com/device')
+  })
+
+  it('ignores OSC payloads that are not openable URLs', () => {
+    const onBrowserOpenRequest = vi.fn()
+    mountTerminal('url-4', { onBrowserOpenRequest })
+    const handler = oscHandlers.get(7373)!
+
+    expect(handler('panemux-open;file:///etc/passwd')).toBe(true)
+    expect(handler('unrelated;https://example.com/')).toBe(true)
+
+    expect(onBrowserOpenRequest).not.toHaveBeenCalled()
+  })
+
+  it('ignores a browser-open OSC that arrives in replayed scrollback', () => {
+    const onBrowserOpenRequest = vi.fn()
+    mountTerminal('url-6', { onBrowserOpenRequest })
+    const handler = oscHandlers.get(7373)!
+    act(() => MockWebSocket.instances[0].simulateOpen())
+
+    act(() =>
+      MockWebSocket.instances[0].simulateMessage(JSON.stringify({ type: 'replay', state: 'start' }))
+    )
+    expect(handler('panemux-open;https://example.com/stale')).toBe(true)
+    expect(onBrowserOpenRequest).not.toHaveBeenCalled()
+
+    act(() =>
+      MockWebSocket.instances[0].simulateMessage(JSON.stringify({ type: 'replay', state: 'end' }))
+    )
+    handler('panemux-open;https://example.com/live')
+
+    expect(onBrowserOpenRequest).toHaveBeenCalledTimes(1)
+    expect(onBrowserOpenRequest).toHaveBeenCalledWith('https://example.com/live')
+  })
+
+  // The replay-end control message arrives before xterm finishes parsing the
+  // replayed bytes, so the write depth is what covers the sequences still in
+  // the parser when it does.
+  it('ignores a browser-open OSC still being parsed out of a finished replay', () => {
+    const onBrowserOpenRequest = vi.fn()
+    const pendingWrites: (() => void)[] = []
+    mockTerm.write.mockImplementation((_data: string | Uint8Array, callback?: () => void) => {
+      if (callback) pendingWrites.push(callback)
+    })
+    mountTerminal('url-7', { onBrowserOpenRequest })
+    const handler = oscHandlers.get(7373)!
+    act(() => MockWebSocket.instances[0].simulateOpen())
+
+    act(() =>
+      MockWebSocket.instances[0].simulateMessage(JSON.stringify({ type: 'replay', state: 'start' }))
+    )
+    act(() =>
+      MockWebSocket.instances[0].simulateMessage(new TextEncoder().encode('replayed').buffer)
+    )
+    act(() =>
+      MockWebSocket.instances[0].simulateMessage(JSON.stringify({ type: 'replay', state: 'end' }))
+    )
+
+    expect(handler('panemux-open;https://example.com/stale')).toBe(true)
+    expect(onBrowserOpenRequest).not.toHaveBeenCalled()
+
+    act(() => pendingWrites.forEach((done) => done()))
+    handler('panemux-open;https://example.com/live')
+
+    expect(onBrowserOpenRequest).toHaveBeenCalledTimes(1)
+    expect(onBrowserOpenRequest).toHaveBeenCalledWith('https://example.com/live')
+  })
+
+  it('keeps handlers working after the pane passes new callbacks', () => {
+    const first = vi.fn()
+    const second = vi.fn()
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const { rerender } = renderHook(
+      ({ handler }: { handler: (url: string) => void }) =>
+        useTerminal({ sessionId: 'url-5', container, onLinkActivate: handler }),
+      { initialProps: { handler: first } },
+    )
+
+    rerender({ handler: second })
+    linkHandlers[0]('https://example.com/auth')
+
+    expect(second).toHaveBeenCalledWith('https://example.com/auth')
+    expect(first).not.toHaveBeenCalled()
+  })
+})
+
+// The web links addon applies the regex as `new RegExp(regex.source, regex.flags + 'g')`
+// (see LinkComputer.computeLink), so mirror that here instead of matching the regex directly.
+function detectURLs(line: string): string[] {
+  const rex = new RegExp(TERMINAL_URL_REGEX.source, `${TERMINAL_URL_REGEX.flags}g`)
+  const found: string[] = []
+  let match: RegExpExecArray | null
+  while ((match = rex.exec(line)) !== null) {
+    found.push(match[0])
+  }
+  return found
+}
+
+describe('TERMINAL_URL_REGEX', () => {
+  it('is unicode-aware and not global so the addon can safely append the g flag', () => {
+    expect(TERMINAL_URL_REGEX.flags).toContain('u')
+    expect(TERMINAL_URL_REGEX.global).toBe(false)
+  })
+
+  it.each([
+    ['ideographic full stop', 'https://example.com/docs\u3002', 'https://example.com/docs'],
+    ['ideographic comma then text', 'https://example.com/docs\u3001\u6b21\u306e\u624b\u9806\u3078', 'https://example.com/docs'],
+    ['fullwidth parentheses', '\uff08https://example.com/docs\uff09', 'https://example.com/docs'],
+    ['corner brackets', '\u300chttps://example.com/docs\u300d', 'https://example.com/docs'],
+    ['lenticular bracket', 'https://example.com/docs\u3010', 'https://example.com/docs'],
+    ['katakana middle dot', 'https://example.com/docs\u30fb', 'https://example.com/docs'],
+    ['halfwidth ideographic full stop', 'https://example.com/docs\uff61', 'https://example.com/docs'],
+    ['horizontal ellipsis', 'https://example.com/docs\u2026', 'https://example.com/docs'],
+    ['curly double quotes', '\u201chttps://example.com/docs\u201d', 'https://example.com/docs'],
+    ['wave dash', 'https://example.com/docs\u301c', 'https://example.com/docs'],
+    ['fullwidth colon', 'https://example.com/docs\uff1a', 'https://example.com/docs'],
+  ])('drops trailing CJK punctuation (%s)', (_name, line, expected) => {
+    expect(detectURLs(line)).toEqual([expected])
+  })
+
+  it.each([
+    ['full stop', 'https://example.com/a.', 'https://example.com/a'],
+    ['comma', 'https://example.com/a,', 'https://example.com/a'],
+    ['exclamation mark', 'https://example.com/a!', 'https://example.com/a'],
+    ['question mark', 'https://example.com/a?', 'https://example.com/a'],
+    ['colon', 'https://example.com/a:', 'https://example.com/a'],
+    ['closing paren', 'see https://example.com/a) here', 'https://example.com/a'],
+    ['angle brackets', '<https://example.com/a>', 'https://example.com/a'],
+    ['double quotes', '"https://example.com/a"', 'https://example.com/a'],
+  ])('keeps the existing ASCII boundary behaviour (%s)', (_name, line, expected) => {
+    expect(detectURLs(line)).toEqual([expected])
+  })
+
+  it.each([
+    ['raw IRI path', 'https://ja.wikipedia.org/wiki/\u65e5\u672c\u8a9e'],
+    ['percent-encoded path', 'https://example.com/%E6%97%A5%E6%9C%AC%E8%AA%9E'],
+    ['fullwidth alphanumerics in path', 'https://example.com/\uff46\uff55\uff4c\uff4c\uff11\uff12\uff13'],
+    ['trailing slash', 'https://example.com/'],
+    ['bare host', 'https://example.com'],
+    ['credentials, port, query and fragment', 'https://user:pw@example.com:8443/p?q=1#frag'],
+    ['loopback with port', 'http://localhost:8080/path'],
+    ['uppercase scheme', 'HTTPS://example.com/a'],
+    ['ideographic iteration mark in path', 'https://ja.wikipedia.org/wiki/\u65e5\u3005'],
+    ['ideographic closing mark in path', 'https://ja.wikipedia.org/wiki/\u3006\u5207'],
+    ['ideographic number zero in path', 'https://ja.wikipedia.org/wiki/\u3007\u3007'],
+  ])('keeps valid urls intact (%s)', (_name, line) => {
+    expect(detectURLs(line)).toEqual([line])
+  })
+
+  it('drops trailing CJK punctuation without truncating a raw IRI path', () => {
+    expect(detectURLs('https://ja.wikipedia.org/wiki/\u65e5\u672c\u8a9e\u3002')).toEqual([
+      'https://ja.wikipedia.org/wiki/\u65e5\u672c\u8a9e',
+    ])
+  })
+
+  it('detects every url on a line that mixes CJK delimiters', () => {
+    const line = '\uff08https://a.example.com/x\uff09\u3068\u300chttps://b.example.com/y\u300d'
+    expect(detectURLs(line)).toEqual(['https://a.example.com/x', 'https://b.example.com/y'])
+  })
+
+  it.each([
+    ['unsupported scheme', 'ftp://example.com/a'],
+    ['file scheme', 'file:///tmp/sample-project'],
+    ['scheme-less host', 'example.com/a'],
+    ['scheme only', 'https://'],
+  ])('does not detect a link for %s', (_name, line) => {
+    expect(detectURLs(line)).toEqual([])
+  })
+
+  // Documented limitation (see issue #173): kana directly following a url cannot be
+  // distinguished from a legitimate kana IRI path, so the whole run stays part of the link.
+  it('still absorbs kana that directly follows a url with no delimiter', () => {
+    const line = 'https://example.com/docs\u3092\u53c2\u7167\u3057\u3066\u304f\u3060\u3055\u3044'
+    expect(detectURLs(line)).toEqual([line])
   })
 })

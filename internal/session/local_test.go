@@ -15,6 +15,8 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"panemux/internal/homedir"
 )
 
 type fakeFileInfo struct {
@@ -138,15 +140,59 @@ func TestLocalSessionGetCWD(t *testing.T) {
 }
 
 func TestNewTmuxLocal_InvalidSessionName_Error(t *testing.T) {
-	_, err := NewTmuxLocal("tmux-id", "title", "bad;session")
+	_, err := NewTmuxLocal("tmux-id", "title", "bad;session", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid tmux session name")
+}
+
+func TestTmuxLocalArgs_EmptyCwd_NoDashC(t *testing.T) {
+	args := tmuxLocalArgs("mysession", "")
+	assert.Equal(t, []string{tmuxNewSessionSubcommand, "-A", "-s", "mysession"}, args)
+}
+
+func TestTmuxLocalArgs_WithCwd_AppendsDashC(t *testing.T) {
+	args := tmuxLocalArgs("mysession", "/workspace/user/project")
+	assert.Equal(t, []string{tmuxNewSessionSubcommand, "-A", "-s", "mysession", "-c", "/workspace/user/project"}, args)
 }
 
 func TestProcessIDArg_RejectsNonPositivePID(t *testing.T) {
 	_, err := processIDArg(0)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid pid")
+}
+
+// TestProcessIDArg_PIDBoundary walks both sides of the boundary. The test
+// above only pins 0; without the accepting cases nothing said the guard stops
+// at exactly the right place. Issue #190.
+// Nothing under this test changed on this branch, so the red-check could never
+// see it go red: it pins behavior that was already correct and merely
+// unasserted. See docs/quality-gateway.md's "Clearing the boundary-value class".
+//
+//efficacy:exempt pins pre-existing behavior; no implementation under it changed
+func TestProcessIDArg_PIDBoundary(t *testing.T) {
+	tests := []struct {
+		name    string
+		want    string
+		pid     int
+		wantErr bool
+	}{
+		{name: "negative", pid: -1, wantErr: true},
+		{name: "zero", pid: 0, wantErr: true},
+		{name: "the lowest usable pid", pid: 1, want: "1"},
+		{name: "an ordinary pid", pid: 4242, want: "4242"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			arg, err := processIDArg(tt.pid)
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "invalid pid")
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, arg)
+		})
+	}
 }
 
 func TestLocalDirectoryServiceUserPath_RejectsInvalidUsername(t *testing.T) {
@@ -439,6 +485,93 @@ func TestInteractiveAgentSessionCWDs_WithDevin(t *testing.T) {
 	cwds, err := interactiveAgentSessionCWDs(processes, 100)
 	require.NoError(t, err)
 	assert.Equal(t, []string{expectedCWD}, cwds)
+}
+
+func TestDetectAgmsgAgentType(t *testing.T) {
+	tests := []struct {
+		command  string
+		wantType string
+		wantOK   bool
+	}{
+		{"claude", "claude-code", true},
+		{"/usr/local/bin/claude --resume", "claude-code", true},
+		{"claude-code", "claude-code", true},
+		{"claude-code-nightly", "claude-code", true}, // matches the claude-* wildcard
+		{"claude -p", "", false},
+		{"claude --print", "", false},
+		{"codex", "codex", true},
+		{"/usr/local/bin/codex --model gpt-5", "codex", true},
+		{"codex-nightly", "codex", true}, // matches the codex-* wildcard
+		{"codex exec", "", false},
+		{"cursor-agent", "cursor", true},
+		{"gemini", "gemini", true},
+		{"grok", "grok-build", true},
+		{"opencode", "opencode", true},
+		{"python worker.py", "", false},
+		{"", "", false},
+		// Types agmsg itself does not process-detect (detect=explicit in its
+		// own type.conf) must never match here either.
+		{"agy", "", false}, // antigravity's cli
+		{"copilot", "", false},
+		{"hermes", "", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.command, func(t *testing.T) {
+			gotType, gotOK := detectAgmsgAgentType(tc.command)
+			assert.Equal(t, tc.wantOK, gotOK)
+			assert.Equal(t, tc.wantType, gotType)
+		})
+	}
+}
+
+func TestNewestKnownAgentTypeDescendantPID_FindsClaudeAmongOthers(t *testing.T) {
+	processes := []processInfo{
+		{PID: 100, PPID: 1, Command: "/bin/zsh"},
+		{PID: 120, PPID: 100, Command: "codex exec"}, // headless, excluded
+		{PID: 140, PPID: 100, Command: "claude"},
+	}
+
+	pid, agmsgType, ok := newestKnownAgentTypeDescendantPID(processes, 100)
+	require.True(t, ok)
+	assert.Equal(t, 140, pid)
+	assert.Equal(t, "claude-code", agmsgType)
+}
+
+func TestNewestKnownAgentTypeDescendantPID_FindsGemini(t *testing.T) {
+	processes := []processInfo{
+		{PID: 100, PPID: 1, Command: "/bin/zsh"},
+		{PID: 150, PPID: 100, Command: "gemini"},
+	}
+
+	pid, agmsgType, ok := newestKnownAgentTypeDescendantPID(processes, 100)
+	require.True(t, ok)
+	assert.Equal(t, 150, pid)
+	assert.Equal(t, "gemini", agmsgType)
+}
+
+func TestNewestKnownAgentTypeDescendantPID_PrefersNewestAcrossTypes(t *testing.T) {
+	processes := []processInfo{
+		{PID: 100, PPID: 1, Command: "/bin/zsh"},
+		{PID: 140, PPID: 100, Command: "claude"},
+		{PID: 160, PPID: 100, Command: "opencode"},
+	}
+
+	pid, agmsgType, ok := newestKnownAgentTypeDescendantPID(processes, 100)
+	require.True(t, ok)
+	assert.Equal(t, 160, pid)
+	assert.Equal(t, "opencode", agmsgType)
+}
+
+func TestNewestKnownAgentTypeDescendantPID_NoneFound(t *testing.T) {
+	processes := []processInfo{
+		{PID: 100, PPID: 1, Command: "/bin/zsh"},
+		{PID: 110, PPID: 100, Command: "git status"},
+	}
+
+	pid, agmsgType, ok := newestKnownAgentTypeDescendantPID(processes, 100)
+	assert.False(t, ok)
+	assert.Zero(t, pid)
+	assert.Empty(t, agmsgType)
 }
 
 func TestCodexSessionPath(t *testing.T) {
@@ -757,6 +890,73 @@ func TestParseClaudeProjectCWD_TrackedBackupTieBreakUsesAlphabeticalLastPath(t *
 	assert.Equal(t, filepath.Dir(worktreeFile), cwd)
 }
 
+func TestLocalSession_DetectInteractiveAgentType_NoPID_Error(t *testing.T) {
+	sess := &LocalSession{pid: 0}
+	_, _, err := sess.DetectInteractiveAgentType()
+	assert.Error(t, err)
+}
+
+func TestLocalSession_DetectInteractiveAgentType_Present(t *testing.T) {
+	tests := []struct {
+		command  string
+		wantType string
+	}{
+		{"claude", "claude-code"},
+		{"gemini", "gemini"},
+		{"opencode", "opencode"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.command, func(t *testing.T) {
+			sess := &LocalSession{pid: 100}
+
+			original := listProcessesFn
+			t.Cleanup(func() { listProcessesFn = original })
+			listProcessesFn = func() ([]processInfo, error) {
+				return []processInfo{
+					{PID: 100, PPID: 1, Command: "/bin/zsh"},
+					{PID: 110, PPID: 100, Command: tc.command},
+				}, nil
+			}
+
+			agmsgType, ok, err := sess.DetectInteractiveAgentType()
+			require.NoError(t, err)
+			require.True(t, ok)
+			assert.Equal(t, tc.wantType, agmsgType)
+		})
+	}
+}
+
+func TestLocalSession_DetectInteractiveAgentType_NoKnownAgent_False(t *testing.T) {
+	sess := &LocalSession{pid: 100}
+
+	original := listProcessesFn
+	t.Cleanup(func() { listProcessesFn = original })
+	listProcessesFn = func() ([]processInfo, error) {
+		return []processInfo{
+			{PID: 100, PPID: 1, Command: "/bin/zsh"},
+			{PID: 110, PPID: 100, Command: "git status"},
+		}, nil
+	}
+
+	agmsgType, ok, err := sess.DetectInteractiveAgentType()
+	require.NoError(t, err)
+	assert.False(t, ok)
+	assert.Empty(t, agmsgType)
+}
+
+func TestLocalSession_DetectInteractiveAgentType_ListProcessesError_Propagated(t *testing.T) {
+	sess := &LocalSession{pid: 100}
+	wantErr := errors.New("ps failed")
+
+	original := listProcessesFn
+	t.Cleanup(func() { listProcessesFn = original })
+	listProcessesFn = func() ([]processInfo, error) { return nil, wantErr }
+
+	_, _, err := sess.DetectInteractiveAgentType()
+	require.Error(t, err)
+	assert.ErrorIs(t, err, wantErr)
+}
+
 func TestGetActiveWorkdir_NoDescendantMatchReturnsEmpty(t *testing.T) {
 	sess := &LocalSession{pid: 100}
 
@@ -1034,15 +1234,13 @@ func TestGetActiveWorkdir_PrefersClaudeTranscriptWorktree(t *testing.T) {
 
 	originalListProcesses := listProcessesFn
 	originalGetPIDCWD := getPIDCWDFn
-	originalUserHomeDir := userHomeDirFn
 	t.Cleanup(func() {
 		listProcessesFn = originalListProcesses
 		getPIDCWDFn = originalGetPIDCWD
-		userHomeDirFn = originalUserHomeDir
 	})
 
 	homeDir := t.TempDir()
-	userHomeDirFn = func() (string, error) { return homeDir, nil }
+	homedir.SetForTest(t, homeDir)
 
 	sessionMetaPath := filepath.Join(homeDir, ".claude", "sessions", "220.json")
 	require.NoError(t, os.MkdirAll(filepath.Dir(sessionMetaPath), 0755))
@@ -1079,41 +1277,30 @@ func TestGetActiveWorkdir_PrefersClaudeTranscriptWorktree(t *testing.T) {
 	assert.Equal(t, []string{"/tmp/panemux-worktree"}, cwds)
 }
 
-func TestClaudeProjectDirName_NormalizesDots(t *testing.T) {
-	assert.Equal(t, "-repo-main", claudeProjectDirName("/repo/main"))
-	assert.Equal(
-		t,
-		"-Users-tomo-chan-development-panemux",
-		claudeProjectDirName("/Users/tomo.chan/development/panemux"),
-	)
-}
-
 func TestGetActiveWorkdir_PrefersClaudeTranscriptWorktree_WithDotInCWD(t *testing.T) {
 	sess := &LocalSession{pid: 100}
 
 	originalListProcesses := listProcessesFn
 	originalGetPIDCWD := getPIDCWDFn
-	originalUserHomeDir := userHomeDirFn
 	t.Cleanup(func() {
 		listProcessesFn = originalListProcesses
 		getPIDCWDFn = originalGetPIDCWD
-		userHomeDirFn = originalUserHomeDir
 	})
 
 	homeDir := t.TempDir()
-	userHomeDirFn = func() (string, error) { return homeDir, nil }
+	homedir.SetForTest(t, homeDir)
 
 	sessionMetaPath := filepath.Join(homeDir, ".claude", "sessions", "220.json")
 	require.NoError(t, os.MkdirAll(filepath.Dir(sessionMetaPath), 0755))
 	require.NoError(t, os.WriteFile(sessionMetaPath, []byte(
-		`{"pid":220,"sessionId":"session-123","cwd":"/Users/tomo.chan/development/panemux"}`,
+		`{"pid":220,"sessionId":"session-123","cwd":"/Users/dev.user/development/panemux"}`,
 	), 0600))
 
 	transcriptPath := filepath.Join(
 		homeDir,
 		".claude",
 		"projects",
-		"-Users-tomo-chan-development-panemux",
+		"-Users-dev-user-development-panemux",
 		"session-123.jsonl",
 	)
 	require.NoError(t, os.MkdirAll(filepath.Dir(transcriptPath), 0755))
@@ -1147,17 +1334,15 @@ func TestGetActiveWorkdir_ClaudeSessionScanSkipsUnreadableMetadata(t *testing.T)
 
 	originalListProcesses := listProcessesFn
 	originalGetPIDCWD := getPIDCWDFn
-	originalUserHomeDir := userHomeDirFn
 	originalReadFile := readFileFn
 	t.Cleanup(func() {
 		listProcessesFn = originalListProcesses
 		getPIDCWDFn = originalGetPIDCWD
-		userHomeDirFn = originalUserHomeDir
 		readFileFn = originalReadFile
 	})
 
 	homeDir := t.TempDir()
-	userHomeDirFn = func() (string, error) { return homeDir, nil }
+	homedir.SetForTest(t, homeDir)
 
 	badSessionPath := filepath.Join(homeDir, ".claude", "sessions", "100.json")
 	goodSessionPath := filepath.Join(homeDir, ".claude", "sessions", "220.json")
@@ -1209,15 +1394,13 @@ func TestGetActiveWorkdir_ClaudeSessionScanRejectsInvalidSessionID(t *testing.T)
 
 	originalListProcesses := listProcessesFn
 	originalGetPIDCWD := getPIDCWDFn
-	originalUserHomeDir := userHomeDirFn
 	t.Cleanup(func() {
 		listProcessesFn = originalListProcesses
 		getPIDCWDFn = originalGetPIDCWD
-		userHomeDirFn = originalUserHomeDir
 	})
 
 	homeDir := t.TempDir()
-	userHomeDirFn = func() (string, error) { return homeDir, nil }
+	homedir.SetForTest(t, homeDir)
 
 	sessionMetaPath := filepath.Join(homeDir, ".claude", "sessions", "220.json")
 	require.NoError(t, os.MkdirAll(filepath.Dir(sessionMetaPath), 0755))
@@ -1272,15 +1455,13 @@ func TestGetActiveWorkdirs_EmptySubagentsDirectory(t *testing.T) {
 
 	originalListProcesses := listProcessesFn
 	originalGetPIDCWD := getPIDCWDFn
-	originalUserHomeDir := userHomeDirFn
 	t.Cleanup(func() {
 		listProcessesFn = originalListProcesses
 		getPIDCWDFn = originalGetPIDCWD
-		userHomeDirFn = originalUserHomeDir
 	})
 
 	homeDir := t.TempDir()
-	userHomeDirFn = func() (string, error) { return homeDir, nil }
+	homedir.SetForTest(t, homeDir)
 
 	_, transcriptPath := setUpClaudeSessionTranscripts(t, homeDir)
 	require.NoError(t, os.WriteFile(
@@ -1316,15 +1497,13 @@ func TestGetActiveWorkdirs_IncludesSubagentTranscriptWorktree(t *testing.T) {
 
 	originalListProcesses := listProcessesFn
 	originalGetPIDCWD := getPIDCWDFn
-	originalUserHomeDir := userHomeDirFn
 	t.Cleanup(func() {
 		listProcessesFn = originalListProcesses
 		getPIDCWDFn = originalGetPIDCWD
-		userHomeDirFn = originalUserHomeDir
 	})
 
 	homeDir := t.TempDir()
-	userHomeDirFn = func() (string, error) { return homeDir, nil }
+	homedir.SetForTest(t, homeDir)
 
 	// Parent transcript never leaves the base repo; only a subagent transcript
 	// actually visited a sibling worktree, mirroring the real-world case where
@@ -1369,15 +1548,13 @@ func TestGetActiveWorkdirs_MultipleSubagentTranscripts_AllDistinctWorktreesRetur
 
 	originalListProcesses := listProcessesFn
 	originalGetPIDCWD := getPIDCWDFn
-	originalUserHomeDir := userHomeDirFn
 	t.Cleanup(func() {
 		listProcessesFn = originalListProcesses
 		getPIDCWDFn = originalGetPIDCWD
-		userHomeDirFn = originalUserHomeDir
 	})
 
 	homeDir := t.TempDir()
-	userHomeDirFn = func() (string, error) { return homeDir, nil }
+	homedir.SetForTest(t, homeDir)
 
 	_, transcriptPath := setUpClaudeSessionTranscripts(t, homeDir)
 	require.NoError(t, os.WriteFile(
@@ -1433,15 +1610,13 @@ func TestGetActiveWorkdirs_StaleSubagentTranscriptStillIncluded(t *testing.T) {
 
 	originalListProcesses := listProcessesFn
 	originalGetPIDCWD := getPIDCWDFn
-	originalUserHomeDir := userHomeDirFn
 	t.Cleanup(func() {
 		listProcessesFn = originalListProcesses
 		getPIDCWDFn = originalGetPIDCWD
-		userHomeDirFn = originalUserHomeDir
 	})
 
 	homeDir := t.TempDir()
-	userHomeDirFn = func() (string, error) { return homeDir, nil }
+	homedir.SetForTest(t, homeDir)
 
 	_, transcriptPath := setUpClaudeSessionTranscripts(t, homeDir)
 	require.NoError(t, os.WriteFile(
@@ -1486,15 +1661,13 @@ func TestGetActiveWorkdirs_NoSubagentsDirectory_BackwardCompatible(t *testing.T)
 
 	originalListProcesses := listProcessesFn
 	originalGetPIDCWD := getPIDCWDFn
-	originalUserHomeDir := userHomeDirFn
 	t.Cleanup(func() {
 		listProcessesFn = originalListProcesses
 		getPIDCWDFn = originalGetPIDCWD
-		userHomeDirFn = originalUserHomeDir
 	})
 
 	homeDir := t.TempDir()
-	userHomeDirFn = func() (string, error) { return homeDir, nil }
+	homedir.SetForTest(t, homeDir)
 
 	_, transcriptPath := setUpClaudeSessionTranscripts(t, homeDir)
 	require.NoError(t, os.WriteFile(
@@ -1529,15 +1702,13 @@ func TestGetActiveWorkdirs_CorruptSubagentTranscriptIgnored(t *testing.T) {
 
 	originalListProcesses := listProcessesFn
 	originalGetPIDCWD := getPIDCWDFn
-	originalUserHomeDir := userHomeDirFn
 	t.Cleanup(func() {
 		listProcessesFn = originalListProcesses
 		getPIDCWDFn = originalGetPIDCWD
-		userHomeDirFn = originalUserHomeDir
 	})
 
 	homeDir := t.TempDir()
-	userHomeDirFn = func() (string, error) { return homeDir, nil }
+	homedir.SetForTest(t, homeDir)
 
 	_, transcriptPath := setUpClaudeSessionTranscripts(t, homeDir)
 	require.NoError(t, os.WriteFile(
@@ -1657,6 +1828,59 @@ func TestDetectLocalShellDscl_NoUserShellLine_Error(t *testing.T) {
 	_, err := detectLocalShellDscl("tomo", runner)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "UserShell not found")
+}
+
+func TestTmuxLocalSession_DetectInteractiveAgentType_ClaudePresent(t *testing.T) {
+	prevTmuxOutput := tmuxLocalOutputFn
+	prevListProcesses := listProcessesFn
+	t.Cleanup(func() {
+		tmuxLocalOutputFn = prevTmuxOutput
+		listProcessesFn = prevListProcesses
+	})
+
+	tmuxLocalOutputFn = func(args ...string) ([]byte, error) {
+		if len(args) == 5 && args[4] == "#{pane_pid}" {
+			return []byte("220\n"), nil
+		}
+		return nil, errors.New("unexpected tmux args")
+	}
+	listProcessesFn = func() ([]processInfo, error) {
+		return []processInfo{
+			{PID: 220, PPID: 1, Command: "/bin/zsh"},
+			{PID: 230, PPID: 220, Command: "claude"},
+		}, nil
+	}
+
+	sess := &TmuxLocalSession{tmuxSession: "demo"}
+	agmsgType, ok, err := sess.DetectInteractiveAgentType()
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, "claude-code", agmsgType)
+}
+
+func TestTmuxLocalSession_DetectInteractiveAgentType_NoKnownAgent_False(t *testing.T) {
+	prevTmuxOutput := tmuxLocalOutputFn
+	prevListProcesses := listProcessesFn
+	t.Cleanup(func() {
+		tmuxLocalOutputFn = prevTmuxOutput
+		listProcessesFn = prevListProcesses
+	})
+
+	tmuxLocalOutputFn = func(args ...string) ([]byte, error) {
+		if len(args) == 5 && args[4] == "#{pane_pid}" {
+			return []byte("220\n"), nil
+		}
+		return nil, errors.New("unexpected tmux args")
+	}
+	listProcessesFn = func() ([]processInfo, error) {
+		return []processInfo{{PID: 220, PPID: 1, Command: "/bin/zsh"}}, nil
+	}
+
+	sess := &TmuxLocalSession{tmuxSession: "demo"}
+	agmsgType, ok, err := sess.DetectInteractiveAgentType()
+	require.NoError(t, err)
+	assert.False(t, ok)
+	assert.Empty(t, agmsgType)
 }
 
 func TestTmuxLocalSessionGetActiveWorkdir_UsesPanePIDAndBaseCWD(t *testing.T) {

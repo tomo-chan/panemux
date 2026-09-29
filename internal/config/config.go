@@ -10,6 +10,9 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"panemux/internal/fileops"
+	"panemux/internal/homedir"
 )
 
 const configFileMode os.FileMode = 0600
@@ -21,46 +24,116 @@ const (
 	defaultWorkspaceTitle  = "Default"
 	defaultTabPosition     = "top"
 	defaultLayoutDirection = "horizontal"
-	defaultPaneType        = "local"
 )
 
-var chmodConfigFile = os.Chmod
-
 type ServerConfig struct {
-	Host string `yaml:"host"`
-	Port int    `yaml:"port"`
+	Host      string `yaml:"host"`
+	AuthToken string `yaml:"auth_token,omitempty"`
+	Port      int    `yaml:"port"`
 }
 
+// SSHConnection is one ssh_connections entry. Every field is optional: an
+// entry written as just its name takes its connection details from the
+// ~/.ssh/config Host block of the same name, and a field set here overrides
+// that block's value for the same setting. omitempty on each keeps a
+// name-only entry name-only when the config is saved back.
 type SSHConnection struct {
-	Host           string `yaml:"host"`
-	User           string `yaml:"user"`
-	KeyFile        string `yaml:"key_file"`
+	Host           string `yaml:"host,omitempty"`
+	User           string `yaml:"user,omitempty"`
+	KeyFile        string `yaml:"key_file,omitempty"`
 	Password       string `yaml:"password,omitempty"`
 	KnownHostsFile string `yaml:"known_hosts_file,omitempty" json:"known_hosts_file,omitempty"`
-	Port           int    `yaml:"port"`
+	Port           int    `yaml:"port,omitempty"`
 }
 
 type DisplayConfig struct {
-	ShowHeader    bool `yaml:"show_header"    json:"show_header"`
-	ShowStatusBar bool `yaml:"show_status_bar" json:"show_status_bar"`
+	// TaskDashboardShortcut is the letter of the Cmd/Ctrl+Shift+<letter>
+	// shortcut that switches between the task dashboard and the workspaces.
+	// Empty means the default; see TaskDashboardShortcutKey.
+	TaskDashboardShortcut string `yaml:"task_dashboard_shortcut,omitempty" json:"task_dashboard_shortcut,omitempty"`
+	ShowHeader            bool   `yaml:"show_header"    json:"show_header"`
+	ShowStatusBar         bool   `yaml:"show_status_bar" json:"show_status_bar"`
 }
 
 type PaneConfig struct {
-	ShowHeader    *bool  `yaml:"show_header,omitempty"    json:"show_header,omitempty"`
-	ShowStatusBar *bool  `yaml:"show_status_bar,omitempty" json:"show_status_bar,omitempty"`
-	ID            string `yaml:"id"           json:"id"`
-	Type          string `yaml:"type"         json:"type"` // local | ssh | tmux | ssh_tmux
-	Shell         string `yaml:"shell,omitempty"        json:"shell,omitempty"`
-	Cwd           string `yaml:"cwd,omitempty"          json:"cwd,omitempty"`
-	Title         string `yaml:"title,omitempty"        json:"title,omitempty"`
-	Connection    string `yaml:"connection,omitempty"   json:"connection,omitempty"` // ssh_connections key
-	TmuxSession   string `yaml:"tmux_session,omitempty" json:"tmux_session,omitempty"`
+	ShowHeader    *bool                `yaml:"show_header,omitempty"    json:"show_header,omitempty"`
+	ShowStatusBar *bool                `yaml:"show_status_bar,omitempty" json:"show_status_bar,omitempty"`
+	ID            string               `yaml:"id"           json:"id"`
+	Type          string               `yaml:"type"         json:"type"` // local | ssh | tmux | ssh_tmux
+	Shell         string               `yaml:"shell,omitempty"        json:"shell,omitempty"`
+	Cwd           string               `yaml:"cwd,omitempty"          json:"cwd,omitempty"`
+	Title         string               `yaml:"title,omitempty"        json:"title,omitempty"`
+	Connection    string               `yaml:"connection,omitempty"   json:"connection,omitempty"` // ssh_connections key
+	TmuxSession   string               `yaml:"tmux_session,omitempty" json:"tmux_session,omitempty"`
+	AgentBoard    PaneAgentBoardConfig `yaml:"agent_board,omitempty" json:"agent_board,omitempty"`
 }
 
+// LayoutNode is one node of the split tree. Its `direction` and `children` are
+// omitempty in YAML but NOT in JSON, and the asymmetry is issue #198: LayoutNodeSchema requires both, so a
+// node serialized without them fails WorkspacesResponseSchema — which covers
+// the whole response, taking the workspace list down rather than dropping a
+// key. config.yaml stays free of empty keys; the wire always carries them.
+// normalizeLayoutNode is what guarantees the values are meaningful.
 type LayoutNode struct {
 	Pane      *PaneConfig   `yaml:"pane,omitempty"      json:"pane,omitempty"`
-	Direction string        `yaml:"direction,omitempty" json:"direction,omitempty"` // horizontal | vertical
-	Children  []LayoutChild `yaml:"children,omitempty"  json:"children,omitempty"`
+	Direction string        `yaml:"direction,omitempty" json:"direction"` // horizontal | vertical
+	Children  []LayoutChild `yaml:"children,omitempty"  json:"children"`
+}
+
+// normalizeLayoutNode returns node in the one shape the dashboard renders and
+// LayoutNodeSchema accepts. Four shapes reach it that Go accepts and the
+// browser cannot parse — a pane-only root, children with no direction, a
+// direction with no children, and an empty node — and validateLayoutNode
+// permits every one of them, so this is a widening of the layout the API
+// serves rather than a tightening of what a config may say.
+//
+// The root pane is relocated rather than left in place because nothing in
+// frontend/src reads it: SplitContainer, App.tsx and useWorkspaceAttentionMonitor
+// all read child.pane off LayoutChild, never the root's own. A single-pane
+// workspace written by hand as `layout: {pane: ...}` therefore rendered
+// nothing even before the schema rejected it.
+//
+// An invalid direction is deliberately left alone — validateLayoutNode owns
+// reporting that, and correcting it here would substitute a value the
+// operator never wrote for an error they need to see.
+func normalizeLayoutNode(node LayoutNode) LayoutNode {
+	if node.Pane != nil && len(node.Children) == 0 {
+		node.Children = []LayoutChild{{Size: 100.0, Pane: node.Pane}}
+		node.Pane = nil
+	}
+	if node.Direction == "" {
+		node.Direction = directionHorizontal
+	}
+	if node.Children == nil {
+		// A nil slice marshals to null, which an array schema rejects just
+		// as an absent key does.
+		node.Children = []LayoutChild{}
+	}
+	return node
+}
+
+// NormalizeLayout is normalizeLayoutNode for callers outside this package.
+// internal/api needs it because PutLayout and PutWorkspaceLayout echo the
+// layout they were given, and an echo that skipped normalization was the one
+// LayoutNode in an API response the dashboard could still fail to parse.
+func NormalizeLayout(node LayoutNode) LayoutNode {
+	return normalizeLayoutNode(node)
+}
+
+// normalizeWorkspaceLayouts applies normalizeLayoutNode to every workspace in
+// items, returning a copy so a read-only view never mutates stored config.
+//
+// A nil input returns an empty slice rather than nil, for the same reason
+// normalizeLayoutNode fills in an empty Children: WorkspacesConfig.Items is
+// not omitempty, so nil would reach the dashboard as `"items": null` against
+// a schema that wants an array.
+func normalizeWorkspaceLayouts(items []WorkspaceConfig) []WorkspaceConfig {
+	out := make([]WorkspaceConfig, len(items))
+	copy(out, items)
+	for i := range out {
+		out[i].Layout = normalizeLayoutNode(out[i].Layout)
+	}
+	return out
 }
 
 type LayoutChild struct {
@@ -83,18 +156,46 @@ type WorkspacesConfig struct {
 	VerticalBarWidth int               `yaml:"vertical_bar_width,omitempty" json:"vertical_bar_width"`
 }
 
-// Config field order controls YAML serialization order for newly written
-// config files, so it intentionally prioritizes user-facing output over
-// fieldalignment.
-type Config struct { //nolint:govet
+// Data is config.yaml's domain model and nothing else: one field per
+// top-level section, in the order they are written out.
+//
+// Field order controls YAML serialization order for newly written config
+// files, so it intentionally prioritizes user-facing output over
+// fieldalignment. That trade-off is now this struct's alone — the persistence
+// context it used to share a struct with (see Config) can be laid out freely,
+// which is what issue #66 asked for.
+//
+// It is also what write() serializes, so a section added here is persisted
+// without a second field list having to be extended to match.
+type Data struct { //nolint:govet
 	Server         ServerConfig             `yaml:"server"`
 	SSHConnections map[string]SSHConnection `yaml:"ssh_connections,omitempty"`
 	Workspaces     WorkspacesConfig         `yaml:"workspaces,omitempty" json:"workspaces"`
 	Layout         LayoutNode               `yaml:"layout,omitempty"`
 	Display        DisplayConfig            `yaml:"display,omitempty" json:"display"`
+	AgentBoard     AgentBoardConfig         `yaml:"agent_board,omitempty" json:"agent_board"`
+	CommandCenter  CommandCenterConfig      `yaml:"command_center,omitempty" json:"command_center"`
+	TaskDashboard  TaskDashboardConfig      `yaml:"task_dashboard,omitempty" json:"task_dashboard"`
+	URLOpen        URLOpenConfig            `yaml:"url_open,omitempty" json:"url_open"`
+}
 
-	filePath      string
-	sshConfigPath string // overridable for tests; empty = use sshconfig.DefaultPath()
+// Config is a Data together with the context needed to load and save it:
+// where the file lives, and the two path seams tests substitute.
+//
+// The embedding is inline (`yaml:",inline"`, which yaml.v3 requires for an
+// embedded struct — it does not inline anonymous fields on its own) and
+// encoding/json inlines an untagged embedded struct by itself, so config.yaml
+// and every API response keep the exact shape they had when these fields sat
+// directly on Config. Domain methods hang off Data and reach callers through
+// the same promotion; only the methods that touch the file — write, the Save*
+// pair, EnsureAuthToken, finishLoad and Validate — are Config's own.
+type Config struct {
+	Data `yaml:",inline"`
+
+	filePath          string
+	sshConfigPath     string // overridable for tests; empty = use sshconfig.DefaultPath()
+	authTokenPath     string // overridable for tests; empty = use ~/.config/panemux/token
+	authTokenFromFile bool   // true when AuthToken came from the token file, not from config.yaml
 }
 
 func Load(path string) (*Config, error) {
@@ -109,11 +210,8 @@ func Load(path string) (*Config, error) {
 	}
 
 	cfg.filePath = path
-	cfg.normalizeWorkspaces()
-	cfg.expandPaths()
-
-	if err := cfg.Validate(); err != nil {
-		return nil, fmt.Errorf("invalid config: %w", err)
+	if err := cfg.finishLoad(); err != nil {
+		return nil, err
 	}
 	if err := tightenConfigFilePermissions(path); err != nil {
 		//nolint:gosec // G706: local filesystem warning
@@ -123,8 +221,41 @@ func Load(path string) (*Config, error) {
 	return &cfg, nil
 }
 
+// finishLoad applies normalization, path expansion, and validation to a
+// Config whose raw fields (including any test-only overrides such as
+// authTokenPath) have already been set. Load uses this directly; tests that
+// need to set an override before validation runs call it the same way,
+// since Load itself has no way to inject an override into the Config it
+// constructs internally.
+//
+// This deliberately does NOT call EnsureAuthToken: doing so here would mean
+// every caller of Load/Default — including the many pre-existing, otherwise
+// fully hermetic tests in this package that construct a config with no
+// authTokenPath override — would write a real token file to the invoking
+// process's actual $HOME as a side effect of loading a config, which is
+// exactly what DEVELOPMENT.md's testability rule exists to prevent. It also
+// changes what Validate's non-loopback-requires-token rule actually
+// enforces: if EnsureAuthToken ran first, a non-loopback host with no
+// explicit auth_token would always have a token silently filled in before
+// Validate ever saw it, and that check would only ever fire on a token-file
+// I/O failure. Running EnsureAuthToken only in the real startup path (see
+// main.go) after Load/LoadOrDefault has already succeeded makes that rule
+// mean what its own name says: an operator who points panemux at a
+// non-loopback host must have explicitly configured a token, not rely on
+// one having been silently generated for them.
+func (c *Config) finishLoad() error {
+	c.normalizeWorkspaces()
+	c.normalizeAgentBoard()
+	c.expandPaths()
+
+	if err := c.Validate(); err != nil {
+		return fmt.Errorf("invalid config: %w", err)
+	}
+	return nil
+}
+
 func Default() *Config {
-	return &Config{
+	cfg := &Config{Data: Data{
 		Server: ServerConfig{
 			Port: 8080,
 			Host: defaultServerHost,
@@ -146,7 +277,9 @@ func Default() *Config {
 				},
 			},
 		},
-	}
+	}}
+	cfg.normalizeAgentBoard()
+	return cfg
 }
 
 func defaultLayout() LayoutNode {
@@ -157,7 +290,7 @@ func defaultLayout() LayoutNode {
 				Size: 100.0,
 				Pane: &PaneConfig{
 					ID:    "local-main",
-					Type:  defaultPaneType,
+					Type:  PaneTypeLocal,
 					Shell: os.Getenv("SHELL"),
 					Title: "Terminal",
 				},
@@ -166,14 +299,14 @@ func defaultLayout() LayoutNode {
 	}
 }
 
-func (c *Config) normalizeWorkspaces() {
+func (c *Data) normalizeWorkspaces() {
 	c.Workspaces = c.normalizedWorkspaces()
 	if active, ok := c.ActiveWorkspace(); ok {
 		c.Layout = active.Layout
 	}
 }
 
-func (c *Config) normalizedWorkspaces() WorkspacesConfig {
+func (c *Data) normalizedWorkspaces() WorkspacesConfig {
 	workspaces := c.Workspaces
 	if len(workspaces.Items) == 0 {
 		workspaces = WorkspacesConfig{
@@ -198,10 +331,14 @@ func (c *Config) normalizedWorkspaces() WorkspacesConfig {
 	if workspaces.Active == "" && len(workspaces.Items) > 0 {
 		workspaces.Active = workspaces.Items[0].ID
 	}
+	// Every JSON response carrying a LayoutNode comes from here or from
+	// ActiveLayout, so normalizing at both is what makes issue #198's
+	// guarantee hold for the wire rather than only for freshly loaded config.
+	workspaces.Items = normalizeWorkspaceLayouts(workspaces.Items)
 	return workspaces
 }
 
-func (c *Config) ActiveWorkspace() (WorkspaceConfig, bool) {
+func (c *Data) ActiveWorkspace() (WorkspaceConfig, bool) {
 	if len(c.Workspaces.Items) == 0 {
 		return WorkspaceConfig{}, false
 	}
@@ -213,14 +350,14 @@ func (c *Config) ActiveWorkspace() (WorkspaceConfig, bool) {
 	return WorkspaceConfig{}, false
 }
 
-func (c *Config) ActiveLayout() LayoutNode {
+func (c *Data) ActiveLayout() LayoutNode {
 	if workspace, ok := c.ActiveWorkspace(); ok {
-		return workspace.Layout
+		return normalizeLayoutNode(workspace.Layout)
 	}
-	return c.Layout
+	return normalizeLayoutNode(c.Layout)
 }
 
-func (c *Config) SetActiveWorkspace(id string) bool {
+func (c *Data) SetActiveWorkspace(id string) bool {
 	for _, workspace := range c.Workspaces.Items {
 		if workspace.ID == id {
 			c.Workspaces.Active = id
@@ -231,7 +368,7 @@ func (c *Config) SetActiveWorkspace(id string) bool {
 	return false
 }
 
-func (c *Config) UpdateWorkspaceLayout(id string, layout LayoutNode) bool {
+func (c *Data) UpdateWorkspaceLayout(id string, layout LayoutNode) bool {
 	for i := range c.Workspaces.Items {
 		if c.Workspaces.Items[i].ID == id {
 			c.Workspaces.Items[i].Layout = layout
@@ -244,7 +381,7 @@ func (c *Config) UpdateWorkspaceLayout(id string, layout LayoutNode) bool {
 	return false
 }
 
-func (c *Config) ActiveWorkspaceID() string {
+func (c *Data) ActiveWorkspaceID() string {
 	if c.Workspaces.Active != "" {
 		return c.Workspaces.Active
 	}
@@ -254,7 +391,7 @@ func (c *Config) ActiveWorkspaceID() string {
 	return defaultWorkspaceID
 }
 
-func (c *Config) WorkspacesView() WorkspacesConfig {
+func (c *Data) WorkspacesView() WorkspacesConfig {
 	return c.normalizedWorkspaces()
 }
 
@@ -263,7 +400,7 @@ func (c *Config) SaveWorkspaces() error {
 	return c.write()
 }
 
-func (c *Config) AddDefaultWorkspace() WorkspaceConfig {
+func (c *Data) AddDefaultWorkspace() WorkspaceConfig {
 	c.normalizeWorkspaces()
 	n := len(c.Workspaces.Items) + 1
 	id := c.nextWorkspaceID(n)
@@ -278,7 +415,7 @@ func (c *Config) AddDefaultWorkspace() WorkspaceConfig {
 	return workspace
 }
 
-func (c *Config) RemoveWorkspace(id string) (WorkspaceConfig, bool) {
+func (c *Data) RemoveWorkspace(id string) (WorkspaceConfig, bool) {
 	c.normalizeWorkspaces()
 	for i, workspace := range c.Workspaces.Items {
 		if workspace.ID != id {
@@ -298,7 +435,7 @@ func (c *Config) RemoveWorkspace(id string) (WorkspaceConfig, bool) {
 	return WorkspaceConfig{}, false
 }
 
-func (c *Config) RenameWorkspace(id string, title string) bool {
+func (c *Data) RenameWorkspace(id string, title string) bool {
 	c.normalizeWorkspaces()
 	for i := range c.Workspaces.Items {
 		if c.Workspaces.Items[i].ID == id {
@@ -309,7 +446,7 @@ func (c *Config) RenameWorkspace(id string, title string) bool {
 	return false
 }
 
-func (c *Config) SetWorkspaceTabPosition(position string) error {
+func (c *Data) SetWorkspaceTabPosition(position string) error {
 	if err := ValidateWorkspaceTabPosition(position); err != nil {
 		return err
 	}
@@ -318,7 +455,7 @@ func (c *Config) SetWorkspaceTabPosition(position string) error {
 	return nil
 }
 
-func (c *Config) SetWorkspaceVerticalBarWidth(width int) error {
+func (c *Data) SetWorkspaceVerticalBarWidth(width int) error {
 	if err := ValidateWorkspaceVerticalBarWidth(width); err != nil {
 		return err
 	}
@@ -327,7 +464,7 @@ func (c *Config) SetWorkspaceVerticalBarWidth(width int) error {
 	return nil
 }
 
-func (c *Config) nextWorkspaceID(start int) string {
+func (c *Data) nextWorkspaceID(start int) string {
 	seen := make(map[string]bool, len(c.Workspaces.Items))
 	for _, workspace := range c.Workspaces.Items {
 		seen[workspace.ID] = true
@@ -340,7 +477,7 @@ func (c *Config) nextWorkspaceID(start int) string {
 	}
 }
 
-func (c *Config) nextPaneID(base string) string {
+func (c *Data) nextPaneID(base string) string {
 	seen := make(map[string]bool)
 	for _, pane := range c.AllPanes() {
 		seen[pane.ID] = true
@@ -364,7 +501,7 @@ func singleLocalPaneLayout(paneID string) LayoutNode {
 				Size: 100.0,
 				Pane: &PaneConfig{
 					ID:    paneID,
-					Type:  defaultPaneType,
+					Type:  PaneTypeLocal,
 					Shell: os.Getenv("SHELL"),
 					Title: "Terminal",
 				},
@@ -378,40 +515,91 @@ func (c *Config) write() error {
 		return nil
 	}
 
-	if err := os.MkdirAll(filepath.Dir(c.filePath), 0750); err != nil {
-		return fmt.Errorf("creating config directory: %w", err)
+	// Serialize the domain model itself. This used to be a second struct
+	// listing the same sections, which had to be extended by hand whenever a
+	// section was added to Config — and a section left out of it was dropped
+	// on every save with nothing to notice. The two adjustments the file
+	// needs are made on a copy, so the in-memory config is untouched.
+	out := c.Data
+
+	// The top-level layout mirrors the active workspace's layout for
+	// in-memory readers; workspaces own the persisted copy, so clearing it
+	// lets omitempty drop it rather than writing a stale second copy back.
+	out.Layout = LayoutNode{}
+
+	if c.authTokenFromFile {
+		// The token came from the token file (auto-generated or read from
+		// disk there), not from an operator-set config.yaml value — never
+		// echo it back into config.yaml.
+		out.Server.AuthToken = ""
 	}
 
-	type configFile struct { //nolint:govet
-		Server         ServerConfig             `yaml:"server"`
-		SSHConnections map[string]SSHConnection `yaml:"ssh_connections,omitempty"`
-		Workspaces     WorkspacesConfig         `yaml:"workspaces,omitempty"`
-		Display        DisplayConfig            `yaml:"display,omitempty"`
-	}
-	data, err := yaml.Marshal(configFile{
-		Server:         c.Server,
-		SSHConnections: c.SSHConnections,
-		Workspaces:     c.Workspaces,
-		Display:        c.Display,
-	})
+	data, err := yaml.Marshal(out)
 	if err != nil {
 		return fmt.Errorf("marshaling config: %w", err)
 	}
-	if err := os.WriteFile(c.filePath, data, configFileMode); err != nil {
-		return fmt.Errorf("writing config: %w", err)
-	}
-	return nil
+	// Through the shared seam rather than os.WriteFile: this file holds
+	// server.auth_token and the whole workspace layout, and a direct write
+	// that fails partway leaves it truncated for the next start to read. It
+	// also creates the parent directory ("creating config directory: …") and
+	// sets the mode, which is why neither is done here.
+	return fileops.AtomicWrite(resolveWriteTarget(c.filePath), data, configFileMode, "config")
 }
 
-func (c *Config) expandPaths() {
+// resolveWriteTarget follows path through any symlinks before it is handed to
+// fileops.AtomicWrite.
+//
+// AtomicWrite renames onto the path it is given, and rename(2) replaces a
+// symlink rather than following it — while os.WriteFile, which both of this
+// package's writes used before, wrote through one. Keeping config.yaml in a
+// dotfiles repo and symlinking it into ~/.config/panemux is an ordinary setup,
+// and without this the first save from the dashboard would swap the link for a
+// regular file: no error, no log line, and the repo copy silently frozen at its
+// old contents.
+//
+// It is here rather than inside AtomicWrite deliberately. The other files that
+// go through the seam — the relay cursor, bootstrap state, the command-center
+// session id — have always been written by rename and so have never followed a
+// symlink; teaching the seam to follow one would newly let a link planted at
+// any of those paths redirect a write. These two are the files where following
+// it restores the behavior they already had.
+//
+// EvalSymlinks failing is not by itself a reason to leave the path alone: it
+// fails when any component of the chain is missing, and that covers two
+// situations wanting opposite answers. Nothing at path at all is a first run,
+// and the path is right as given. A path that IS a link whose target does not
+// exist yet is a dotfiles setup mid-flight — linked into a repo that has no
+// config.yaml in it, because this save is what was meant to create one — and
+// os.WriteFile did create it, since O_CREATE through a dangling link creates
+// the target. So the second case is read off the link itself rather than
+// inferred from the error.
+//
+// One hop, not a chain: a dangling link to a dangling link is past the point
+// where guessing helps. AtomicWrite's own MkdirAll then creates the repo
+// directory if it is missing, which os.WriteFile could not do — the harmless
+// direction to differ in.
+func resolveWriteTarget(path string) string {
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return resolved
+	}
+	// Readlink alone, with no Lstat before it: it reports EINVAL for a path
+	// that is not a link and ENOENT for one that is not there, so its error is
+	// already the "leave it alone" answer for both. Checking Lstat first would
+	// add an arm that only a link deleted between the two calls could enter.
+	dest, err := os.Readlink(path)
+	if err != nil {
+		return path
+	}
+	if !filepath.IsAbs(dest) {
+		dest = filepath.Join(filepath.Dir(path), dest)
+	}
+	return dest
+}
+
+func (c *Data) expandPaths() {
 	for key, conn := range c.SSHConnections {
-		home, _ := os.UserHomeDir()
-		if strings.HasPrefix(conn.KeyFile, "~/") {
-			conn.KeyFile = filepath.Join(home, conn.KeyFile[2:])
-		}
-		if strings.HasPrefix(conn.KnownHostsFile, "~/") {
-			conn.KnownHostsFile = filepath.Join(home, conn.KnownHostsFile[2:])
-		}
+		conn.KeyFile = expandTilde(conn.KeyFile)
+		conn.KnownHostsFile = expandTilde(conn.KnownHostsFile)
 		c.SSHConnections[key] = conn
 	}
 	for i := range c.Workspaces.Items {
@@ -420,6 +608,17 @@ func (c *Config) expandPaths() {
 	if active, ok := c.ActiveWorkspace(); ok {
 		c.Layout = active.Layout
 	}
+	// AgentBoard.AgmsgPath is deliberately NOT expanded here: it names a
+	// path on whichever host it ends up used against (local or, via SSH,
+	// any number of remote hosts), so there is no single "the" home
+	// directory to expand a leading ~/ against at config-load time — that
+	// used to expand it against panemux's own local home unconditionally,
+	// silently breaking every remote host whose home directory differs (see
+	// docs/agent-board.md's "~ in agmsg_path is expanded by panemux, never
+	// left for the remote shell to expand" section). Expansion happens per
+	// host instead, at AgmsgClient construction time in board.go: locally
+	// via homedir.Dir(), remotely via board.ResolveRemoteAgmsgPath's
+	// SSH $HOME probe.
 }
 
 func expandPanesCwd(children []LayoutChild) {
@@ -433,10 +632,31 @@ func expandPanesCwd(children []LayoutChild) {
 
 // ExpandPanePaths expands ~/  in the pane's CWD to an absolute path.
 func ExpandPanePaths(pane *PaneConfig) {
-	if strings.HasPrefix(pane.Cwd, "~/") {
-		home, _ := os.UserHomeDir()
-		pane.Cwd = filepath.Join(home, pane.Cwd[2:])
+	pane.Cwd = expandTilde(pane.Cwd)
+}
+
+// expandTilde expands a leading ~/ in path against the user's home directory,
+// and leaves path untouched when there is no ~/ to expand or no home directory
+// to expand it against.
+//
+// The unresolvable-home case does not report an error because no caller has
+// anywhere to put one: expansion happens during Load and during layout
+// updates, and a config carrying one unexpandable path is still a usable
+// config. What it must not do is join against an empty home —
+// filepath.Join("", ".ssh/id_ed25519") is ".ssh/id_ed25519", which resolves
+// against whatever directory panemux was started in and so silently names the
+// wrong file rather than failing where an operator can see it. Leaving the ~/
+// in place is the diagnosable answer, and the one board.go's
+// expandLocalAgmsgPath already describes itself as matching.
+func expandTilde(path string) string {
+	if !strings.HasPrefix(path, "~/") {
+		return path
 	}
+	home, err := homedir.Dir()
+	if err != nil {
+		return path
+	}
+	return filepath.Join(home, path[2:])
 }
 
 // ExpandLayoutPaths expands ~/  in all pane CWDs within layout, mirroring
@@ -447,7 +667,7 @@ func ExpandLayoutPaths(layout *LayoutNode) {
 
 // DefaultConfigPath returns the default config file path: ~/.config/panemux/config.yaml.
 func DefaultConfigPath() (string, error) {
-	home, err := os.UserHomeDir()
+	home, err := homedir.Dir()
 	if err != nil {
 		return "", fmt.Errorf("getting home directory: %w", err)
 	}
@@ -495,14 +715,14 @@ func tightenConfigFilePermissions(path string) error {
 	if info.Mode().Perm() == configFileMode {
 		return nil
 	}
-	if err := chmodConfigFile(path, configFileMode); err != nil {
+	if err := fileops.Chmod(path, configFileMode); err != nil {
 		return fmt.Errorf("tightening config permissions: %w", err)
 	}
 	return nil
 }
 
 // UpdateLayout updates the in-memory layout without persisting to disk.
-func (c *Config) UpdateLayout(layout LayoutNode) {
+func (c *Data) UpdateLayout(layout LayoutNode) {
 	c.normalizeWorkspaces()
 	if !c.UpdateWorkspaceLayout(c.ActiveWorkspaceID(), layout) {
 		c.Layout = layout
@@ -510,7 +730,7 @@ func (c *Config) UpdateLayout(layout LayoutNode) {
 }
 
 // AllPanes returns a flat list of all pane configs.
-func (c *Config) AllPanes() []*PaneConfig {
+func (c *Data) AllPanes() []*PaneConfig {
 	var panes []*PaneConfig
 	workspaces := c.normalizedWorkspaces()
 	for _, workspace := range workspaces.Items {
@@ -530,7 +750,7 @@ func collectPanes(children []LayoutChild, panes *[]*PaneConfig) {
 
 // RemovePaneFromLayout removes the pane with the given ID from the layout tree
 // and normalizes sibling sizes so they still sum to 100.
-func (c *Config) RemovePaneFromLayout(paneID string) {
+func (c *Data) RemovePaneFromLayout(paneID string) {
 	c.normalizeWorkspaces()
 	for i := range c.Workspaces.Items {
 		c.Workspaces.Items[i].Layout.Children = removePaneChildren(c.Workspaces.Items[i].Layout.Children, paneID)

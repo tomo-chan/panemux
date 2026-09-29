@@ -3,6 +3,8 @@
 export type {
   DisplayConfig,
   PaneConfig,
+  PaneAgentBoardConfig,
+  BoardMode,
   LayoutChild,
   LayoutNode,
   TabPosition,
@@ -14,4 +16,5 @@ export type {
   SSHConnectionsResponse,
   DirectoryEntry,
   DirectoryBrowserResponse,
+  OpenUrlResponse,
 } from '../schemas'

@@ -5,6 +5,7 @@ import { App } from './App'
 import './styles/terminal.css'
 import './styles/fonts.css'
 import './styles/attention.css'
+import './styles/taskDashboard.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

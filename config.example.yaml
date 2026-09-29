@@ -6,16 +6,92 @@
 server:
   port: 8080          # 1–65535  (default: 8080)
   host: "127.0.0.1"  # bind address (default: 127.0.0.1)
+  # Bearer token for the Agent Board API and the command center. Leave empty
+  # and panemux generates one on first run, storing it in
+  # ~/.config/panemux/token rather than writing it back here. Required (and
+  # validated at startup) when `host` is not a loopback address.
+  auth_token: ""
+
+# ── Agent Board ───────────────────────────────────────────────────────────────
+# One dashboard for what every pane's coding agent is doing, plus a command
+# palette to message them. Optional: omit this whole block and panemux behaves
+# exactly as it did without it. See the README's "Agent Board" section for the
+# setup steps, and note that agmsg must already be installed on every host
+# whose panes join — panemux never installs it.
+agent_board:
+  team: "panemux"                      # shared agmsg team for all board-enabled panes
+  agmsg_path: "~/.agents/skills/agmsg"  # ~/ is expanded per host, remote hosts included
+
+# ── Command center ────────────────────────────────────────────────────────────
+# Cmd/Ctrl+Shift+K opens a palette that asks a headless `claude` about the
+# board and can message panes. Needs the `claude` CLI on this machine and a
+# server.auth_token (generated above if left empty). Does not need agmsg.
+command_center:
+  enabled: false  # default: false
 
 # ── Display ───────────────────────────────────────────────────────────────────
 # Global defaults for all panes. Individual panes can override these values.
 display:
   show_header: true      # show pane header with title and controls (default: true)
   show_status_bar: true  # show terminal dimensions bar at the bottom (default: true)
+  # Letter of the Cmd/Ctrl+Shift+<letter> shortcut that switches between the
+  # task dashboard and the workspaces. One letter A-Z; K and B are taken by the
+  # command palette and the Agent Board. (default: S)
+  task_dashboard_shortcut: "S"
+
+# ── Task dashboard ────────────────────────────────────────────────────────────
+task_dashboard:
+  summary:
+    # Summarize each claude task's conversation with `claude -p` on this host:
+    # what it is doing and the work left. The text of the user's and the
+    # assistant's messages (never tool output) is read from each host's
+    # conversation log and sent to claude under this host's Claude account.
+    # (default: false)
+    enabled: false
+  # Autolink references, shaped like a GitHub repository's: `key_prefix` followed
+  # by an identifier in a task's branch name or PR title links to `url_template`
+  # with <num> replaced by the identifier (JIRA-123 below links to
+  # https://jira.example.com/JIRA-123). The identifier is digits unless
+  # `is_alphanumeric` is true. https only; no tracker is ever queried.
+  # autolinks:
+  #   - key_prefix: "JIRA-"
+  #     url_template: "https://jira.example.com/JIRA-<num>"
+  #   - key_prefix: "TICKET-"
+  #     url_template: "https://tickets.example.com/ticket?id=<num>"
+  #     is_alphanumeric: true
+
+# ── Opening URLs from a pane ──────────────────────────────────────────────────
+# When a URL is opened from a pane, panemux republishes the URL's loopback
+# callback port (from `redirect_uri` and friends) at the same port on this host,
+# so a CLI login flow running on an SSH host completes its OAuth callback.
+#
+# `browser_shim` additionally intercepts programs that open a browser directly
+# (`$BROWSER`, `xdg-open`, `open`) on `local` and `ssh` panes, by installing a
+# small shell shim under the pane host's `~/.cache/panemux/bin`. The pane then
+# asks before anything is opened. Set it to false to install nothing and leave
+# `ssh` panes' shell startup exactly as it was.
+url_open:
+  browser_shim: true  # default: true
 
 # ── SSH connections ────────────────────────────────────────────────────────────
 # Define named SSH connections here; reference them in panes with `connection:`.
+#
+# These are also the remote hosts the task dashboard collects agent sessions
+# from. A host that exists only in ~/.ssh/config can be a pane's `connection`,
+# but the dashboard does not collect from it until its name is listed here.
+#
+# Every field is optional. An entry written as just a name takes its details
+# (HostName, User, Port, IdentityFile, ProxyJump, ProxyCommand) from the
+# ~/.ssh/config `Host` block of the same name; a field set here overrides that
+# block's value for the same setting.
 ssh_connections:
+
+  # Name only: connects as `Host gpu-box` in ~/.ssh/config describes
+  gpu-box:
+
+  # ~/.ssh/config `Host build`, but logged in as a different user
+  build:
+    user: "ci"
 
   # Key-based authentication (recommended)
   prod-web:
@@ -147,3 +223,15 @@ workspaces:
               type: local
               shell: "/bin/zsh"
               title: "Ops Shell"
+              # ── Agent Board opt-in (per pane) ───────────────────────────
+              # The pane id doubles as this pane's board address, so prefer a
+              # name you will recognise. Also settable from Pane Settings in
+              # the UI, without editing this file.
+              agent_board:
+                enabled: true
+                # monitor (default) — status only; messages are NOT delivered
+                # turn / both      — messages delivered, but agmsg writes a
+                #                    hook file into the pane's project
+                #                    directory (see the README)
+                # off              — no automatic delivery
+                mode: monitor

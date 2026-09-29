@@ -22,6 +22,70 @@ Why this matters:
 - Renovate covers Go modules, frontend npm dependencies, GitHub Actions, and the `GOLANGCI_LINT_VERSION` pin in `Makefile`.
 - Review Renovate PRs like any other dependency bump and keep automerge disabled unless project policy changes.
 
+## The agmsg Compatibility Contract Job
+
+`.github/workflows/agmsg-contract.yml` runs Tier 2 of the [agmsg compatibility contract](agent-board/agmsg-contract.md#agmsg-compatibility-contract): `make test-agmsg-contract` against a real agmsg install, which the hermetic `make check` suite deliberately cannot do.
+
+- **Daily (06:00 UTC / 15:00 JST)** it installs agmsg's **latest release tag** and runs the contract. This run gates nothing — a failure is an early warning that an agmsg release changed behavior panemux depends on, arriving before anyone here has chosen to bump the pin.
+
+  The poll is daily because agmsg's own cadence is: across its 22 releases from `v1.0.2` (2026-06-08) to `v1.2.2` (2026-08-20), the median gap is **2.9 days**, and only 3 of 21 gaps exceeded a week. A weekly canary would usually straddle two or three releases, so a failure could not be pinned on any one of them.
+
+  Daily polling does not mean daily re-testing. The `scope` job caches a marker keyed by the tag it verified, and skips a poll whose latest tag already passed — so the effective cadence is **once per agmsg release**, and it stays right whether agmsg speeds up or goes quiet. The marker is written only after the contract passes, so a release that fails is retried on every poll until it is dealt with, rather than being recorded as done. Re-checking the cadence figures above is worthwhile if agmsg's release rhythm visibly changes; the daily poll itself does not need adjusting for it.
+- **On every pull request** a fast `scope` job checks whether the PR touches the pin, the contract test, its fixtures, or the client code the contract drives. If it does, the contract runs against the **pinned** version; if not, the job reports success without installing anything.
+
+The PR trigger has no `paths:` filter on purpose. A path-filtered workflow reports no status on the PRs it skips, and a required check that never reports blocks every one of them — hence the always-running `scope` job. The `contract` job likewise always runs and gates its expensive steps individually rather than skipping itself, so it always reports a real success or failure and never a `skipped` conclusion whose scoring branch protection would have to be trusted to get right.
+
+That is what makes **`agmsg-contract / contract`** safe to mark as a required check in branch protection — which is how the contract's "a bump of the pin cannot merge unverified" requirement is actually enforced. Marking it required is a repository setting, not something this workflow can do for itself; until someone sets it, the job still runs and still reports, it just does not block.
+
+### Bumping the pinned agmsg version
+
+The pin is `board.TestedAgmsgVersion` in `internal/board/agmsg_version.go`, and the workflow reads it from that file rather than duplicating it. To bump it:
+
+1. Update `TestedAgmsgVersion`.
+2. Recapture the Tier 1 fixtures at the new version and rename their directory to match — see `internal/board/testdata/agmsg-v1.2.0/README.md` and its `capture.sh`.
+3. Update `fixtureDir` (and the quoted fixture ids) in `internal/board/agmsg_fixture_test.go`.
+4. Push. The contract job runs against the new pin automatically, because step 1 touches a scoped path.
+
+A canary failure is a signal to investigate agmsg's changelog, not to bump the pin reflexively: the pinned version is the one panemux's prose and fixtures were verified against, and it keeps working until it is deliberately moved.
+
+### Running it locally
+
+```sh
+git clone https://github.com/fujibee/agmsg.git /tmp/agmsg-src
+cd /tmp/agmsg-src && ./install.sh --cmd agmsg
+make test-agmsg-contract AGMSG_PATH=~/.agents/skills/agmsg
+```
+
+`sqlite3` must be on `PATH` — agmsg's own scripts require it, and the test skips itself when it is missing, as it does when `AGMSG_PATH` is unset.
+
+## The Model-Checking Job
+
+`.github/workflows/model-check.yml` holds two jobs, both validating formal models and neither part of `make check`.
+
+- **`alloy`** checks every `docs/models/*.als` model and requires all of its `check` commands to come back `UNSAT`.
+- **`tlc`** runs Tier 2 of the [state-machine model checking](agent-board/model-checking.md#state-machine-model-checking) split introduced by issue #168: `make model-check`, which runs TLC over `spec/agentboard/*.tla` and then diffs the transition table it exports against the copy committed under `internal/board/testdata/`.
+
+The workflow is path-filtered — it runs only when a spec, an exported table, the export scripts or the workflow itself changes — so it is deliberately **not** a candidate for a required check in branch protection, unlike `agmsg-contract / contract`. A path-filtered workflow reports no status at all on the pull requests it skips.
+
+`tla2tools.jar` is pinned to a release tag and checksummed, for the same reason the Alloy jar is: a model checker that silently changed version is a model check nobody can reproduce. Bumping it means changing both `TLA_TOOLS_VERSION` and `TLA_TOOLS_JAR_SHA256`, and re-running `make model-check` — a TLC version that explores the state space differently would show up as a table diff.
+
+### What a failure means
+
+- **TLC reports a violated invariant or property.** The spec is wrong, or the design it describes is. Read the counterexample trace TLC prints; it is a concrete sequence of actions.
+- **The transition table diff is non-empty.** The spec and the committed table have drifted. Tier 1 — `internal/board/ledger_conformance_test.go`, inside `make check` — replays the real Go implementation against the **committed** table, so a spec change that never reaches it silently weakens every hermetic run. Regenerate and commit:
+
+```sh
+curl -fsSL -o /tmp/tla2tools.jar \
+  https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar
+TLA_TOOLS_JAR=/tmp/tla2tools.jar make model-check-write
+```
+
+Never hand-edit a file under `internal/board/testdata/*-transitions.json`; the next `make model-check-write` overwrites it, and the diff it produces is the behavioral change a reviewer reads.
+
+### The hermetic half
+
+`make test-model-check` (inside `make check`, so it runs on every commit and every push) tests the exporter this job depends on, against committed dot fixtures in `scripts/testdata/model-check/` — no JDK, no jar. It is what catches an exporter that would write a table smaller than the `.cfg` asked for, which is the failure that makes Tier 1 check less while still reporting green. `python3` is optional for it the way `jq` is for `make test-hooks`: without it those checks report themselves as skipped.
+
 ## Release Workflow
 
 ### release-please handling

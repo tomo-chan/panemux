@@ -1,18 +1,59 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
-import { WebLinksAddon } from '@xterm/addon-web-links'
+import { bufferRangeFor, createUrlLinkProvider, readLineCells } from '../utils/terminalLinks'
 import { useWebSocket } from './useWebSocket'
 import { TERMINAL_FONT_FAMILY } from '../utils/fonts'
+import { BROWSER_OPEN_OSC_IDENT, openUrlTab, parseBrowserOpenOsc } from '../utils/paneUrlOpen'
 import type { SessionState } from '../schemas'
 
 const REPAINT_SETTLE_DELAYS_MS = [50, 250]
+
+// Characters that must never be part of an auto-detected URL, on top of the ASCII
+// symbols the web links addon already excludes. The addon default only knows about
+// ASCII punctuation, so Japanese output such as `https://example.com/docs。` or
+// `（https://example.com/docs）` swallowed the trailing CJK punctuation into the link.
+//
+// Ranges (deliberately punctuation only, never letters or digits):
+//   U+2018-U+201F, U+2026   curly quotes and the horizontal ellipsis
+//   U+3000-U+3004, U+3008-U+3020, U+3030, U+303D-U+303F
+//                           CJK symbols and punctuation (、。「」【】〜 ...). The gaps skip the
+//                           letters and digits interleaved into this block: U+3005-U+3007
+//                           (々〆〇), U+3021-U+3029 and U+3038-U+303C (Hangzhou/ideographic
+//                           numerals and iteration marks), and the U+302A-U+302F combining
+//                           marks.
+//   U+30FB                  katakana middle dot (・)
+//   U+FF01-U+FF0F, U+FF1A-U+FF20, U+FF3B-U+FF40, U+FF5B-U+FF65
+//                           fullwidth ASCII punctuation and halfwidth kana punctuation
+// Fullwidth digits (U+FF10-U+FF19) and fullwidth letters are intentionally left out so
+// they stay linkable, and non-ASCII letters are not excluded at all: raw IRIs such as
+// `https://ja.wikipedia.org/wiki/日本語` must keep working. Kana directly following a URL
+// with no delimiter is therefore still absorbed — that case is indistinguishable from a
+// legitimate kana IRI path by regex alone.
+const NON_URL_CJK_PUNCTUATION =
+  '\\u2018-\\u201f\\u2026\\u3000-\\u3004\\u3008-\\u3020\\u3030\\u303d-\\u303f' +
+  '\\u30fb\\uff01-\\uff0f\\uff1a-\\uff20\\uff3b-\\uff40\\uff5b-\\uff65'
+
+// The addon default regex with the ranges above added to both character classes.
+// Kept non-global on purpose: the addon derives its own global copy via
+// `new RegExp(regex.source, regex.flags + 'g')`, which throws on a duplicate `g`.
+export const TERMINAL_URL_REGEX = new RegExp(
+  `(https?|HTTPS?):[/]{2}[^\\s"'!*(){}|\\\\\\^<>\`${NON_URL_CJK_PUNCTUATION}]*` +
+    `[^\\s"':,.!?{}|\\\\\\^~\\[\\]\`()<>${NON_URL_CJK_PUNCTUATION}]`,
+  'u',
+)
 
 interface UseTerminalOptions {
   sessionId: string
   container: HTMLElement | null
   repoURL?: string
   onInteraction?: () => void | Promise<void>
+  // Called when the operator activates a link in this pane. Without it, links
+  // open directly in a new tab and no port forward is prepared for them.
+  onLinkActivate?: (url: string) => void
+  // Called when a program inside the pane asks panemux to open a URL (see the
+  // browser shim in internal/session/browseropen.go).
+  onBrowserOpenRequest?: (url: string) => void
   // Reconnect tuning, forwarded to useWebSocket. Only overridden in tests;
   // production callers rely on useWebSocket's defaults.
   reconnectDelay?: number
@@ -32,6 +73,8 @@ interface TerminalEntry {
   replayWriteDepth: number
   awaitingReplayEnd: boolean
   repoURL: string | null
+  onLinkActivate: ((url: string) => void) | null
+  onBrowserOpen: ((url: string) => void) | null
 }
 
 interface PendingTerminalMessage {
@@ -47,6 +90,8 @@ export function useTerminal({
   container,
   repoURL,
   onInteraction,
+  onLinkActivate,
+  onBrowserOpenRequest,
   reconnectDelay,
   maxReconnectDelay,
   maxReconnectAttempts,
@@ -56,6 +101,8 @@ export function useTerminal({
   const initializedRef = useRef(false)
   const sendRef = useRef<((data: string | ArrayBuffer | Uint8Array) => void) | null>(null)
   const entryRef = useRef<TerminalEntry | null>(null)
+  const onLinkActivateRef = useRef<((url: string) => void) | null>(null)
+  const onBrowserOpenRef = useRef<((url: string) => void) | null>(null)
   const pendingMessagesRef = useRef<PendingTerminalMessage[]>([])
   const reconnectingAfterDisconnectRef = useRef(false)
   const recoverDisconnectedSessionRef = useRef<(() => Promise<void>) | null>(null)
@@ -231,6 +278,8 @@ export function useTerminal({
 
     entry.attachedContainer = container
     entry.send = sendRef.current
+    entry.onLinkActivate = onLinkActivateRef.current
+    entry.onBrowserOpen = onBrowserOpenRef.current
     entryRef.current = entry
     termRef.current = entry.term
     fitAddonRef.current = entry.fitAddon
@@ -249,6 +298,8 @@ export function useTerminal({
       clearScheduledResizes(currentEntry)
       currentEntry.attachedContainer = null
       currentEntry.send = null
+      currentEntry.onLinkActivate = null
+      currentEntry.onBrowserOpen = null
       currentEntry.disposeTimer = setTimeout(() => {
         if (currentEntry.attachedContainer) return
         clearScheduledRepaints(currentEntry)
@@ -263,6 +314,17 @@ export function useTerminal({
       initializedRef.current = false
     }
   }, [container, sessionId])
+
+  // The terminal instance outlives a pane remount, so its handlers are kept
+  // on the cached entry and refreshed whenever the pane passes new ones.
+  useEffect(() => {
+    onLinkActivateRef.current = onLinkActivate ?? null
+    onBrowserOpenRef.current = onBrowserOpenRequest ?? null
+    const entry = entryRef.current
+    if (!entry) return
+    entry.onLinkActivate = onLinkActivateRef.current
+    entry.onBrowserOpen = onBrowserOpenRef.current
+  }, [onLinkActivate, onBrowserOpenRequest])
 
   useEffect(() => {
     if (!container || !onInteraction) return
@@ -364,7 +426,15 @@ function getOrCreateTerminalEntry(sessionId: string): TerminalEntry {
   })
 
   const fitAddon = new FitAddon()
-  const webLinksAddon = new WebLinksAddon()
+  // The pane, not the provider, decides what activation does: opening the tab
+  // has to be paired with preparing the URL's loopback callback port.
+  const urlLinkProvider = createUrlLinkProvider(term, TERMINAL_URL_REGEX, (uri) => {
+    if (entry.onLinkActivate) {
+      entry.onLinkActivate(uri)
+      return
+    }
+    openUrlTab(uri)
+  })
   const entry: TerminalEntry = {
     term,
     fitAddon,
@@ -377,14 +447,30 @@ function getOrCreateTerminalEntry(sessionId: string): TerminalEntry {
     replayWriteDepth: 0,
     awaitingReplayEnd: false,
     repoURL: null,
+    onLinkActivate: null,
+    onBrowserOpen: null,
   }
 
   term.loadAddon(fitAddon)
-  term.loadAddon(webLinksAddon)
+  // Registered before the pull-request provider: xterm keeps the link from the
+  // earliest-registered provider when two intersect, and a "#123" inside a URL
+  // belongs to the URL.
+  term.registerLinkProvider(urlLinkProvider)
   term.registerLinkProvider({
     provideLinks(y, callback) {
       callback(computePullRequestLinks(term, entry.repoURL, y))
     },
+  })
+  // Consume the browser shim's private OSC sequence so it drives a URL open
+  // instead of being drawn into the terminal.
+  term.parser.registerOscHandler(BROWSER_OPEN_OSC_IDENT, (data) => {
+    // Replayed scrollback carries every sequence the pane emitted earlier, so
+    // a request that was already answered (or dismissed) would be raised again
+    // on each reconnect. A browser-open request is a live event only.
+    if (entry.replayActive || entry.replayWriteDepth > 0) return true
+    const url = parseBrowserOpenOsc(data)
+    if (url) entry.onBrowserOpen?.(url)
+    return true
   })
   term.attachCustomKeyEventHandler((event) => {
     if (!isCopyShortcut(event) || !term.hasSelection()) {
@@ -413,25 +499,31 @@ function getOrCreateTerminalEntry(sessionId: string): TerminalEntry {
   return entry
 }
 
+// Ranges come from the same mapping the url provider uses (see
+// utils/terminalLinks.ts). This used to index translateToString's output as
+// though one character were one cell and report 0-based coordinates, so every
+// reference was linked one row above and one column left of where it is — and
+// a wide character earlier on the line drifted it further. That made the
+// registration order below decide nothing: two links on different rows never
+// overlap, so xterm had no conflict to resolve.
 function computePullRequestLinks(term: Terminal, repoURL: string | null, y: number) {
   if (!repoURL) return []
 
-  const line = term.buffer.active.getLine(y - 1)
+  const line = readLineCells(term, y - 1)
   if (!line) return []
 
-  const text = line.translateToString(true)
   const links = []
   const pattern = /(^|[^\w])#(\d{1,8})(?![\w/])/g
   let match: RegExpExecArray | null
-  while ((match = pattern.exec(text)) !== null) {
+  while ((match = pattern.exec(line.text)) !== null) {
     const prefix = match[1] ?? ''
     const number = match[2]
     const hashIndex = match.index + prefix.length
+    const range = bufferRangeFor(term, line.positions, hashIndex, hashIndex + number.length)
+    if (!range) continue
+
     links.push({
-      range: {
-        start: { x: hashIndex, y: y - 1 },
-        end: { x: hashIndex + number.length + 1, y: y - 1 },
-      },
+      range,
       text: `#${number}`,
       activate: () => {
         window.open(`${repoURL}/pull/${number}`, '_blank', 'noopener,noreferrer')

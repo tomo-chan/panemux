@@ -1,0 +1,5 @@
+{
+  "forwarded": false,
+  "reason": "this pane runs on the panemux host, so its callback already resolves locally",
+  "url": "http://localhost:53682/callback"
+}

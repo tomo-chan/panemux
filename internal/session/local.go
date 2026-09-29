@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"os/user"
@@ -21,12 +22,13 @@ import (
 	"github.com/creack/pty"
 	// Register sqlite3 driver for Devin CLI session database queries
 	_ "github.com/mattn/go-sqlite3"
+
+	"panemux/internal/homedir"
 )
 
 var listProcessesFn = listProcesses
 var getPIDCWDFn = getPIDCWD
 var openFilePathsForPIDFn = openFilePathsForPID
-var userHomeDirFn = os.UserHomeDir
 var readFileFn = os.ReadFile
 
 // validShellPath matches a valid absolute shell path.
@@ -40,6 +42,16 @@ const (
 	interactiveAgentCodex  = "codex"
 	interactiveAgentClaude = "claude"
 	interactiveAgentDevin  = "devin"
+
+	// agmsgTypeClaudeCode, agmsgTypeGemini, and agmsgTypeOpencode are
+	// agmsgDetectableAgentTypes' own agmsg-recognized type/binary-name
+	// strings, factored out purely to satisfy goconst's package-wide
+	// duplicate-literal check (their many other occurrences are all in
+	// _test.go files, which goconst deliberately excludes — see
+	// .golangci.yml).
+	agmsgTypeClaudeCode = "claude-code"
+	agmsgTypeGemini     = "gemini"
+	agmsgTypeOpencode   = "opencode"
 )
 
 // LocalSession is a local PTY-based terminal session.
@@ -65,7 +77,17 @@ func NewLocal(id, shell, cwd, title string) (*LocalSession, error) {
 	}
 
 	cmd := exec.Command(sanitizedShell)
-	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
+	cmd.Env = paneIDEnv(append(os.Environ(), "TERM=xterm-256color"), id)
+	if browserShimEnabled.Load() {
+		// Best effort: a pane must still start when the shim cannot be
+		// installed, just without browser-open interception.
+		shimEnv, shimErr := browserShimEnvForLocalSession()
+		if shimErr != nil {
+			log.Printf("browser-open shim unavailable for session %s: %v", id, shimErr)
+		} else {
+			cmd.Env = append(cmd.Env, shimEnv...)
+		}
+	}
 	if cwd != "" {
 		cmd.Dir = cwd
 	}
@@ -134,6 +156,9 @@ func (s *LocalSession) Close() error {
 	return nil
 }
 
+// BoardHostID identifies this session as running on panemux's own host.
+func (s *LocalSession) BoardHostID() string { return boardHostIDLocal }
+
 // GetCWD returns the current working directory of the shell process.
 // On Linux it reads /proc/<pid>/cwd; on macOS it runs lsof.
 func (s *LocalSession) GetCWD() (string, error) {
@@ -168,6 +193,25 @@ func (s *LocalSession) GetActiveWorkdirs() ([]string, error) {
 	}
 
 	return resolveInteractiveAgentWorkdirs(processes, pid, baseCWD)
+}
+
+// DetectInteractiveAgentType reports the agmsg type name of any live agent
+// process currently running as a descendant of this pane's shell, among
+// agmsgDetectableAgentTypes. It skips the transcript/workdir resolution
+// GetActiveWorkdirs does, so it's cheap enough to poll frequently — see
+// AgentTypeDetector.
+func (s *LocalSession) DetectInteractiveAgentType() (string, bool, error) {
+	if s.pid == 0 {
+		return "", false, errors.New("session has no PID")
+	}
+
+	processes, err := listProcessesFn()
+	if err != nil {
+		return "", false, err
+	}
+
+	_, agmsgType, ok := newestKnownAgentTypeDescendantPID(processes, s.pid)
+	return agmsgType, ok, nil
 }
 
 func getPIDCWD(pid int) (string, error) {
@@ -261,12 +305,131 @@ func parsePSOutput(out []byte) ([]processInfo, error) {
 }
 
 func newestInteractiveAgentDescendantPID(processes []processInfo, rootPID int) (int, bool) {
+	return newestMatchingDescendantPID(processes, rootPID, isInteractiveAgentCommand)
+}
+
+// agmsgAgentType describes one agmsg-recognized agent type panemux can
+// detect via process name.
+type agmsgAgentType struct {
+	agmsgType string   // the exact type name agmsg's own scripts expect (join.sh/whoami.sh/delivery.sh's <type> argument)
+	patterns  []string // binary basenames; a trailing "*" matches as a prefix, mirroring agmsg's own detect_proc syntax
+	// excludeTokens: if any of these appear as an argument, this is a
+	// known headless/non-interactive invocation of the same binary and
+	// must not match — mirrors isInteractiveAgentCommand's existing
+	// claude/codex exclusions.
+	excludeTokens []string
+}
+
+// agmsgDetectableAgentTypes mirrors agmsg's own type.conf `detect_proc` key
+// for every type that declares one (verified against agmsg v1.1.13,
+// github.com/fujibee/agmsg/scripts/drivers/types/<type>/type.conf, 2026-08).
+// agmsg itself does NOT attempt process-based detection for antigravity,
+// copilot, or hermes (all three use `detect=explicit` instead — agmsg's own
+// maintainers judged process-name detection unreliable for them), and
+// agmsg-app is not a spawnable CLI at all (it's the desktop app's own
+// human-user identity). Agent Board's bootstrap flow inherits this same
+// boundary rather than inventing a wider one panemux can't independently
+// verify: an operator on one of the undetectable types can still join
+// agmsg by hand.
+//
+// The claude-code and codex exclude-token lists are independently
+// confirmed via agmsg's own template.md wording (claude -p/--print, codex
+// exec are explicitly called out as non-interactive). No equivalent
+// headless-invocation carve-out is documented for the other four types as
+// of the verified version; treat their absence here as "not documented",
+// not as a positive claim that no such flag exists.
+var agmsgDetectableAgentTypes = []agmsgAgentType{
+	{
+		agmsgType: agmsgTypeClaudeCode, patterns: []string{interactiveAgentClaude, agmsgTypeClaudeCode, "claude-*"},
+		excludeTokens: []string{"-p", "--print"},
+	},
+	{
+		agmsgType: interactiveAgentCodex, patterns: []string{interactiveAgentCodex, "codex-*"},
+		excludeTokens: []string{"exec"},
+	},
+	{agmsgType: "cursor", patterns: []string{"cursor-agent", "cursor-agent-*"}},
+	{agmsgType: agmsgTypeGemini, patterns: []string{agmsgTypeGemini, "gemini-*"}},
+	{agmsgType: "grok-build", patterns: []string{"grok", "grok-*"}},
+	{agmsgType: agmsgTypeOpencode, patterns: []string{agmsgTypeOpencode, "opencode-*"}},
+}
+
+// detectAgmsgAgentType reports the agmsg type name of command, if it
+// matches one of agmsgDetectableAgentTypes and isn't a known headless
+// invocation of that same binary.
+func detectAgmsgAgentType(command string) (string, bool) {
+	fields := strings.Fields(command)
+	if len(fields) == 0 {
+		return "", false
+	}
+	binary := strings.ToLower(filepath.Base(fields[0]))
+	for _, t := range agmsgDetectableAgentTypes {
+		if !matchesAnyAgentPattern(binary, t.patterns) {
+			continue
+		}
+		if containsAnyToken(fields[1:], t.excludeTokens...) {
+			return "", false
+		}
+		return t.agmsgType, true
+	}
+	return "", false
+}
+
+func matchesAnyAgentPattern(binary string, patterns []string) bool {
+	for _, p := range patterns {
+		if prefix, ok := strings.CutSuffix(p, "*"); ok {
+			if strings.HasPrefix(binary, prefix) {
+				return true
+			}
+		} else if binary == p {
+			return true
+		}
+	}
+	return false
+}
+
+// newestKnownAgentTypeDescendantPID is AgentTypeDetector's primitive: like
+// newestInteractiveAgentDescendantPID, but matches any of
+// agmsgDetectableAgentTypes (not just claude/codex) and reports which type
+// matched, since Agent Board's bootstrap instruction differs by type.
+func newestKnownAgentTypeDescendantPID(processes []processInfo, rootPID int) (pid int, agmsgType string, ok bool) {
+	children := childProcessMap(processes)
+	stack := append([]processInfo(nil), children[rootPID]...)
+
+	if proc, found := processByPID(processes, rootPID); found {
+		if t, matched := detectAgmsgAgentType(proc.Command); matched {
+			pid, agmsgType, ok = rootPID, t, true
+		}
+	}
+
+	for len(stack) > 0 {
+		proc := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		stack = append(stack, children[proc.PID]...)
+
+		if t, matched := detectAgmsgAgentType(proc.Command); matched {
+			// `>=` here is killable, but only by input the OS cannot
+			// produce: two matching processes sharing a PID, where the
+			// agmsgType reported would differ (the PID would not). A test
+			// for it would have to fabricate that snapshot and then pin
+			// whichever type the traversal happens to reach first — an
+			// accident of stack order, not designed behavior. Issue #190.
+			//mutation:exempt[CONDITIONALS_BOUNDARY] unreachable — killable only by a fabricated snapshot with a duplicate PID
+			if !ok || proc.PID > pid {
+				pid, agmsgType, ok = proc.PID, t, true
+			}
+		}
+	}
+
+	return pid, agmsgType, ok
+}
+
+func newestMatchingDescendantPID(processes []processInfo, rootPID int, match func(string) bool) (int, bool) {
 	children := childProcessMap(processes)
 	stack := append([]processInfo(nil), children[rootPID]...)
 	matched := 0
 	ok := false
 
-	if proc, found := processByPID(processes, rootPID); found && isInteractiveAgentCommand(proc.Command) {
+	if proc, found := processByPID(processes, rootPID); found && match(proc.Command) {
 		matched = rootPID
 		ok = true
 	}
@@ -276,7 +439,13 @@ func newestInteractiveAgentDescendantPID(processes []processInfo, rootPID int) (
 		stack = stack[:len(stack)-1]
 		stack = append(stack, children[proc.PID]...)
 
-		if isInteractiveAgentCommand(proc.Command) {
+		if match(proc.Command) {
+			// Unlike newestKnownAgentTypeDescendantPID above, this one is
+			// equivalent outright rather than merely unreachable: the guard's
+			// only writes are `matched = proc.PID` and `ok = true`, so on an
+			// equal PID `>=` assigns the value already there. There is no
+			// second return value for it to change. Issue #190.
+			//mutation:exempt[CONDITIONALS_BOUNDARY] equivalent — on an equal PID the guard reassigns the same value
 			if !ok || proc.PID > matched {
 				matched = proc.PID
 				ok = true
@@ -431,7 +600,7 @@ type claudeSessionMeta struct {
 // read those files too or the pane header silently falls back to the base
 // working directory (see docs/behavior.md "Pane Git and PR metadata").
 func claudeSessionCWDs(agentPID int) ([]string, error) {
-	homeDir, err := userHomeDirFn()
+	homeDir, err := homedir.Dir()
 	if err != nil {
 		return nil, fmt.Errorf("resolve home dir for claude session: %w", err)
 	}
@@ -447,12 +616,10 @@ func claudeSessionCWDs(agentPID int) ([]string, error) {
 		return nil, nil
 	}
 
-	projectPath := filepath.Join(
-		homeDir,
-		".claude",
-		"projects",
-		claudeProjectDirName(sessionMeta.CWD),
-		sessionMeta.SessionID+".jsonl",
+	projectPath := resolveClaudeTranscriptPath(
+		filepath.Join(homeDir, ".claude", "projects"),
+		sessionMeta.CWD,
+		sessionMeta.SessionID,
 	)
 
 	cwds := make([]string, 0, 1)
@@ -648,6 +815,12 @@ func codexSessionPath(paths []string) (string, bool) {
 }
 
 func processIDArg(pid int) (string, error) {
+	// The `<= 0` boundary cannot be pinned by a test: validProcessIDArg below
+	// is `^[1-9][0-9]*$`, so a pid of 0 that got past this guard is rejected
+	// by the regex with the identical error. TestProcessIDArg_PIDBoundary
+	// covers both sides of the boundary; the mutant on it is equivalent, not
+	// unkilled. Issue #190.
+	//mutation:exempt[CONDITIONALS_BOUNDARY] equivalent — validProcessIDArg rejects "0" with the same error
 	if pid <= 0 {
 		return "", fmt.Errorf("invalid pid: %d", pid)
 	}
@@ -760,9 +933,105 @@ func parseExecCommandWorkdir(raw json.RawMessage) string {
 	return args.Workdir
 }
 
+// claudeProjectDirName derives the ~/.claude/projects subdirectory Claude Code
+// stores a session's transcript in: every path separator and every dot becomes
+// a dash.
+//
+// This is observed behavior of Claude Code's own storage layout, not a
+// documented interface, and it is re-validated only by someone looking at a
+// real installation. TestClaudeProjectDirName_ObservedEncoding writes the
+// mapping out case by case so what panemux believes is reviewable, and
+// resolveClaudeTranscriptPath does not assume it stays true (issue #119).
 func claudeProjectDirName(cwd string) string {
 	name := strings.ReplaceAll(filepath.Clean(cwd), string(os.PathSeparator), "-")
 	return strings.ReplaceAll(name, ".", "-")
+}
+
+// claudeProjectDirMismatches remembers which sessions have already had a
+// derived-directory miss reported. The workdir lookup runs on every git-info
+// refresh, so without this a single mismatch would be logged every few
+// seconds for as long as the pane lives.
+var claudeProjectDirMismatches struct {
+	seen map[string]bool
+	mu   sync.Mutex
+}
+
+// resolveClaudeTranscriptPath returns the transcript file for sessionID,
+// preferring the path claudeProjectDirName derives and falling back to a scan
+// of projectsDir when that file is not there.
+//
+// The fast path stays the normal case: one Stat, no directory listing. The
+// fallback is bounded to one level — a single listing of projectsDir and at
+// most one Stat per project directory, first match wins in name order — so a
+// Claude release that changes the encoding costs a pane its worktree only if
+// the transcript is not under projectsDir at all, rather than immediately.
+//
+// A miss is logged once per session so the change is visible in a log rather
+// than only as a pane that quietly stopped reporting its worktree. When
+// nothing is found anywhere the derived path is returned unchanged, which
+// keeps "no transcript yet" silent and behaving exactly as before.
+//
+// sessionID must already have been checked against validClaudeSessionID: it is
+// joined into a path here, and the callers in this package validate it before
+// they get this far.
+func resolveClaudeTranscriptPath(projectsDir, cwd, sessionID string) string {
+	derived := filepath.Join(projectsDir, claudeProjectDirName(cwd), sessionID+".jsonl")
+	if isRegularFile(derived) {
+		return derived
+	}
+
+	found := scanClaudeProjectsForSession(projectsDir, sessionID)
+	if found == "" {
+		return derived
+	}
+
+	logClaudeProjectDirMismatchOnce(sessionID, derived, found)
+	return found
+}
+
+func isRegularFile(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.Mode().IsRegular()
+}
+
+// scanClaudeProjectsForSession looks for <sessionID>.jsonl directly inside each
+// project directory, in the order ReadDir returns them (sorted by name).
+func scanClaudeProjectsForSession(projectsDir, sessionID string) string {
+	entries, err := os.ReadDir(projectsDir)
+	if err != nil {
+		return ""
+	}
+
+	name := sessionID + ".jsonl"
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		candidate := filepath.Join(projectsDir, entry.Name(), name)
+		if isRegularFile(candidate) {
+			return candidate
+		}
+	}
+	return ""
+}
+
+func logClaudeProjectDirMismatchOnce(sessionID, derived, found string) {
+	claudeProjectDirMismatches.mu.Lock()
+	defer claudeProjectDirMismatches.mu.Unlock()
+
+	if claudeProjectDirMismatches.seen[sessionID] {
+		return
+	}
+	if claudeProjectDirMismatches.seen == nil {
+		claudeProjectDirMismatches.seen = make(map[string]bool)
+	}
+	claudeProjectDirMismatches.seen[sessionID] = true
+
+	log.Printf(
+		"Warning: claude transcript for session %s was not at the derived path %q; "+
+			"using %q instead. Claude Code's project directory encoding may have changed.",
+		sessionID, derived, found,
+	)
 }
 
 func readClaudeProjectCWD(path string) (string, error) {

@@ -1,15 +1,23 @@
 package session
 
-import "io"
+import (
+	"context"
+	"io"
+
+	"panemux/internal/config"
+)
 
 // Type represents the type of terminal session.
 type Type string
 
+// The wire values themselves are owned by internal/config, which defines
+// PaneConfig.Type's schema; createSession converts a pane's raw string with
+// Type(pane.Type), so the two sets must agree exactly.
 const (
-	TypeLocal   Type = "local"
-	TypeSSH     Type = "ssh"
-	TypeTmux    Type = "tmux"
-	TypeSSHTmux Type = "ssh_tmux"
+	TypeLocal   Type = config.PaneTypeLocal
+	TypeSSH     Type = config.PaneTypeSSH
+	TypeTmux    Type = config.PaneTypeTmux
+	TypeSSHTmux Type = config.PaneTypeSSHTmux
 )
 
 // State represents the current state of a session.
@@ -65,6 +73,20 @@ type ActiveWorkdirGetter interface {
 	GetActiveWorkdirs() ([]string, error)
 }
 
+// AgentTypeDetector is implemented by every session type. It reports the
+// agmsg-recognized type name (e.g. "claude-code", "codex", "gemini") of any
+// live, interactive coding-agent process currently running as a descendant
+// of this pane's shell, among the set agmsg's own type.conf `detect_proc`
+// key considers reliably process-detectable — see agmsgDetectableAgentTypes.
+// This is narrower than ActiveWorkdirGetter (which only distinguishes
+// Codex/Claude, and additionally resolves transcript-derived workdirs at
+// real I/O cost) and returns WHICH type rather than a bare bool, since
+// Agent Board's bootstrap flow writes a different onboarding instruction
+// per agent type.
+type AgentTypeDetector interface {
+	DetectInteractiveAgentType() (agmsgType string, ok bool, err error)
+}
+
 // GitContext describes the repository state for a session's working directory.
 type GitContext struct {
 	Branch    string
@@ -83,6 +105,30 @@ type GitContextGetter interface {
 // SSHConnNamer is implemented by sessions that have an SSH connection name.
 type SSHConnNamer interface {
 	ConnectionName() string
+}
+
+// boardHostIDLocal is the BoardHostID value shared by every local/tmux-local
+// session, identifying the host panemux itself runs on.
+const boardHostIDLocal = "local"
+
+// BoardHostID is implemented by every session type. It returns the
+// identifier of the host whose agmsg installation this session's pane
+// participates in: "local" for local/tmux sessions, the SSH connection
+// name for ssh/ssh_tmux sessions.
+type BoardHostID interface {
+	BoardHostID() string
+}
+
+// BoardExecutor is implemented by SSH-backed sessions. It runs an agmsg
+// script on the remote host over the session's existing exec channel, as a
+// single shell command string built from args. RunBoardCommand itself
+// single-quote-escapes every element of args (the same discipline
+// internal/session/ssh.go already applies to cwd) before building that
+// string — the caller passes raw, unescaped values, exactly like
+// exec.Command's own argv contract, so there is exactly one place this can
+// be gotten wrong rather than one per call site.
+type BoardExecutor interface {
+	RunBoardCommand(ctx context.Context, args []string) ([]byte, error)
 }
 
 // DirectoryEntry represents a browsable directory in a filesystem tree.

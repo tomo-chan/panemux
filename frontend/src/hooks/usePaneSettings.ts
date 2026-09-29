@@ -3,6 +3,16 @@ import { SSHConnectionsResponseSchema, DetectShellResponseSchema, DirectoryBrows
 import type { LayoutNode, PaneConfig, SSHConfigHost } from '../schemas'
 import { replacePaneInTree } from '../utils/layoutTree'
 
+// sessionFields are the PaneConfig fields the running session is built from.
+// A change to any of them means the session has to be recreated to take
+// effect; a change to anything else does not.
+const sessionFields = ['type', 'shell', 'connection', 'tmux_session', 'cwd'] as const
+
+function needsRestart(before: PaneConfig | null, after: PaneConfig): boolean {
+  if (!before) return true
+  return sessionFields.some((field) => before[field] !== after[field])
+}
+
 export function usePaneSettings(
   layout: LayoutNode | null,
   onLayoutChange: (layout: LayoutNode) => void,
@@ -54,8 +64,17 @@ export function usePaneSettings(
         setIsOpen(false)
         setCurrentPane(null)
         setSaveError(null)
-        // Restart is best-effort; failure is non-fatal
-        fetch(`/api/sessions/${updated.id}/restart`, { method: 'POST' }).catch(() => {})
+        // Restarting kills whatever is running in the pane, so it happens
+        // only when the session itself would come back different. Renaming a
+        // pane, toggling its chrome, or putting it on the agent board are
+        // config-only changes; restarting for those threw away the user's
+        // shell, and — because bootstrap eligibility is keyed on the session
+        // object — made every settings save re-write agmsg's onboarding
+        // instruction into the pane.
+        if (needsRestart(currentPane, updated)) {
+          // Best-effort; failure is non-fatal.
+          fetch(`/api/sessions/${updated.id}/restart`, { method: 'POST' }).catch(() => {})
+        }
       } finally {
         setIsSaving(false)
       }

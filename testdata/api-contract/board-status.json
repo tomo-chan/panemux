@@ -1,0 +1,18 @@
+{
+  "statuses": {
+    "pane-build": {
+      "state": "idle",
+      "updated_at": "2026-01-01T00:00:00Z"
+    },
+    "pane-editor": {
+      "branch": "feature/contract-fixtures",
+      "cwd": "/workspace/user/project",
+      "last_tool": "Edit",
+      "pr_url": "https://example.invalid/user/project/pull/1",
+      "repo": "user/project",
+      "state": "working",
+      "summary": "Adding the schema round-trip",
+      "updated_at": "2026-01-01T00:00:00Z"
+    }
+  }
+}

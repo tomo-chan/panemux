@@ -9,6 +9,7 @@ linters:
     - dupl
     - errcheck
     - errname
+    - forbidigo
     - goconst
     - gosec
     - govet
@@ -28,6 +29,34 @@ linters:
   settings:
     dupl:
       threshold: 100
+    forbidigo:
+      # Match the resolved identifier rather than the source text. Without this
+      # the pattern below is compared against what is written, so `import osx
+      # "os"` + `osx.UserHomeDir()` passes the gate — which would leave it as
+      # advice again for anyone who happens to write the aliased form.
+      analyze-types: true
+      # The home directory is a process-wide global, and DEVELOPMENT.md's
+      # testability rule requires an injectable override for those. Sixteen
+      # call sites across nine packages ignored it (issue #212), and nothing
+      # noticed, because "add a seam" was advice rather than a check.
+      forbid:
+        - pattern: ^os\.UserHomeDir$
+          msg: >-
+            call homedir.Dir() instead, and substitute it in tests with
+            homedir.SetForTest / homedir.SetFailingForTest rather than
+            t.Setenv("HOME", ...). See internal/homedir and DEVELOPMENT.md's
+            testability rule.
+        # The cache directory is a second global, not a second spelling of the
+        # first: os.UserCacheDir never consults os.UserHomeDir, and reads
+        # XDG_CACHE_HOME on Unix but $HOME/Library/Caches on darwin. A test
+        # that gets that pair wrong writes real files into the developer's own
+        # cache directory on one platform while CI stays green (issue #226).
+        - pattern: ^os\.UserCacheDir$
+          msg: >-
+            call cachedir.Dir() instead, and substitute it in tests with
+            cachedir.SetForTest / cachedir.SetFailingForTest rather than
+            t.Setenv("XDG_CACHE_HOME", ...) / t.Setenv("HOME", ...). See
+            internal/cachedir and DEVELOPMENT.md's testability rule.
     govet:
       enable:
         - fieldalignment
@@ -47,6 +76,19 @@ linters:
       checks: ["all"]
     whitespace:
       multi-if: true
+    wrapcheck:
+      # internal/fileops.AtomicWrite's errors already carry the caller's label —
+      # that is what its `label` parameter is for, so every message names the
+      # file that failed. Wrapping them again at each call site would only
+      # prepend a second name for the same file.
+      #
+      # The step operations (CreateTemp / OpenFile / Chmod) are deliberately NOT
+      # waived: they take no label and return the raw *fs.PathError, so their
+      # callers must still wrap. A package-wide waiver would have let the next
+      # one through unflagged, at the one choke point every persisted-file write
+      # is invited to route through.
+      extra-ignore-sigs:
+        - panemux/internal/fileops.AtomicWrite(
   exclusions:
     presets:
       # Keep standard-library edge cases from drowning out project-specific
@@ -55,6 +97,13 @@ linters:
       - legacy
       - std-error-handling
     rules:
+      # internal/fileops' Spy is a test double: it has to report the error it
+      # was handed, and the real os error otherwise, exactly as it is. Wrapping
+      # either would break errors.Is against the sentinel a test injected, which
+      # is the only thing the double is for.
+      - path: internal/fileops/spy.go
+        linters:
+          - wrapcheck
       # Session package manages OS processes and SSH connections; Close/Wait/Kill
       # errors in teardown paths are not actionable.
       - path: internal/session/
@@ -63,10 +112,16 @@ linters:
           - wrapcheck
       # Test cleanup (defer conn.Close(), SetReadDeadline, ReadMessage) does not
       # require error handling — test failures surface through assertions.
+      #
+      # wrapcheck likewise: a test helper that hands an error to
+      # assert.ErrorIs must return it exactly as it got it. Wrapping there
+      # would only obscure which sentinel the assertion is about — the
+      # opposite of what the rule buys in production code.
       - path: _test\.go
         linters:
           - errcheck
           - goconst
+          - wrapcheck
 
 formatters:
   enable:

@@ -3,10 +3,31 @@ import { z } from 'zod'
 export const DisplayConfigSchema = z.object({
   show_header: z.boolean(),
   show_status_bar: z.boolean(),
+  // The effective Cmd/Ctrl+Shift letter that switches between the task
+  // dashboard and the workspaces. GET /api/display always sends it, already
+  // upper-cased and defaulted; it is optional only for the display defaults
+  // the frontend builds itself before that response arrives.
+  task_dashboard_shortcut: z.string().regex(/^[A-Z]$/).optional(),
 })
 
 export type DisplayConfig = z.infer<typeof DisplayConfigSchema>
 
+export const BoardModeSchema = z.enum(['monitor', 'turn', 'both', 'off'])
+
+export type BoardMode = z.infer<typeof BoardModeSchema>
+
+export const PaneAgentBoardConfigSchema = z.object({
+  enabled: z.boolean().optional(),
+  mode: BoardModeSchema.optional(),
+})
+
+export type PaneAgentBoardConfig = z.infer<typeof PaneAgentBoardConfigSchema>
+
+// Every field the backend's config.PaneConfig carries must appear here.
+// Zod strips unknown keys, and the layout tree is read, parsed, and PUT back
+// wholesale on any edit — a split, a move, even a debounced resize — so a
+// field missing from this schema is silently deleted from the user's
+// config.yaml by an unrelated action. agent_board was lost exactly that way.
 export const PaneConfigSchema = z.object({
   id: z.string().min(1),
   type: z.enum(['local', 'ssh', 'tmux', 'ssh_tmux']),
@@ -17,6 +38,7 @@ export const PaneConfigSchema = z.object({
   tmux_session: z.string().max(256).optional(),
   show_header: z.boolean().optional(),
   show_status_bar: z.boolean().optional(),
+  agent_board: PaneAgentBoardConfigSchema.optional(),
 })
 
 export type PaneConfig = z.infer<typeof PaneConfigSchema>
@@ -40,10 +62,22 @@ export const LayoutChildSchema: z.ZodType<LayoutChild> = z.lazy(() =>
   })
 )
 
+// `pane` is declared even though nothing here renders it — SplitContainer,
+// App.tsx and useWorkspaceAttentionMonitor all read child.pane off a
+// LayoutChild, never the root's own. It is declared because the server can
+// still emit it: normalizeLayoutNode relocates a root pane only when the node
+// has no children, leaving the `{pane, children}` shape as the operator wrote
+// it. An undeclared key is not merely unread — parse() strips it, useLayout
+// stores the stripped tree, and the next split PUTs it back, deleting the pane
+// from config.yaml. See PaneConfigSchema's comment above: agent_board was lost
+// exactly that way.
+//
+// direction and children, by contrast, are required: normalizeLayoutNode
+// guarantees both on every response (issue #198).
 export const LayoutNodeSchema = z.object({
+  pane: PaneConfigSchema.optional(),
   direction: z.enum(['horizontal', 'vertical']),
   children: z.array(LayoutChildSchema),
-  pane: PaneConfigSchema.optional(),
 })
 
 export type LayoutNode = z.infer<typeof LayoutNodeSchema>
@@ -177,3 +211,280 @@ export const DirectoryBrowserResponseSchema = z.object({
 })
 
 export type DirectoryBrowserResponse = z.infer<typeof DirectoryBrowserResponseSchema>
+
+export const BoardSessionTokenResponseSchema = z.object({
+  token: z.string(),
+  command_center_enabled: z.boolean(),
+  agent_board_enabled: z.boolean(),
+})
+
+export type BoardSessionTokenResponse = z.infer<typeof BoardSessionTokenResponseSchema>
+
+// `warnings` carries what went wrong *around* a query rather than to it —
+// today only a failed history write. It is optional because the server omits
+// the key entirely when there is none, and it rides whichever terminal frame
+// ends the query rather than getting a frame of its own, so that exactly one
+// frame still ends it: see docs/behavior.md's command center WS protocol, and
+// #214. It is on `error` as well as `done` because a turn that failed for its
+// own reasons can also have lost its history record, and reporting it only on
+// the successful path hides it from precisely the operator who needs it.
+export const BoardCommandFrameSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('line'), raw: z.unknown() }),
+  z.object({ type: z.literal('error'), message: z.string(), warnings: z.array(z.string()).optional() }),
+  z.object({ type: z.literal('done'), warnings: z.array(z.string()).optional() }),
+  z.object({ type: z.literal('busy') }),
+])
+
+export type BoardCommandFrame = z.infer<typeof BoardCommandFrameSchema>
+
+export const BoardCommandHistoryEntrySchema = z.object({
+  at: z.string(),
+  raw: z.unknown(),
+})
+
+export type BoardCommandHistoryEntry = z.infer<typeof BoardCommandHistoryEntrySchema>
+
+export const BoardCommandHistoryResponseSchema = z.object({
+  entries: z.array(BoardCommandHistoryEntrySchema),
+})
+
+export type BoardCommandHistoryResponse = z.infer<typeof BoardCommandHistoryResponseSchema>
+
+// Response from POST /api/sessions/{id}/open-url: whether panemux published
+// the URL's loopback callback port on this host, and why not when it did not.
+export const OpenUrlResponseSchema = z.object({
+  url: z.string(),
+  forwarded: z.boolean(),
+  port: z.number().int().min(1).max(65535).optional(),
+  reason: z.string().max(512).optional(),
+})
+
+export type OpenUrlResponse = z.infer<typeof OpenUrlResponseSchema>
+// Deliberately no .max() on any field, unlike most schemas in this file.
+// Every value here is free text an agent wrote about itself, and the Go side
+// (internal/board's ParseStatus) imposes no length limit of its own, so a
+// cap here could only ever reject a payload the server considers valid. Zod
+// rejects rather than truncates, and because these entries live inside a
+// z.record, one over-long summary would fail the whole response — blanking
+// every other pane's status too, on every poll, until that one pane happened
+// to report something shorter. Same reasoning as BoardMessageSchema.body.
+export const BoardStatusEntrySchema = z.object({
+  updated_at: z.string(),
+  state: z.string().optional(),
+  cwd: z.string().optional(),
+  branch: z.string().optional(),
+  repo: z.string().optional(),
+  pr_url: z.string().optional(),
+  last_tool: z.string().optional(),
+  summary: z.string().optional(),
+})
+
+export type BoardStatusEntry = z.infer<typeof BoardStatusEntrySchema>
+
+export const BoardStatusResponseSchema = z.object({
+  statuses: z.record(z.string(), BoardStatusEntrySchema),
+})
+
+export type BoardStatusResponse = z.infer<typeof BoardStatusResponseSchema>
+
+export const BoardMessageSchema = z.object({
+  at: z.string(),
+  host: z.string(),
+  team: z.string(),
+  from: z.string(),
+  to: z.string(),
+  // body deliberately has no .max(): Zod's .max() rejects rather than
+  // truncates, so capping it would let a single oversized message fail
+  // parsing for the entire feed response. See useBoardStatus for how a
+  // single malformed row is tolerated instead of failing the whole batch.
+  body: z.string(),
+  seq: z.number().int(),
+  // Computed server-side by internal/board's IsStatusRow. Re-deriving it
+  // here by parsing body in JavaScript would be a second implementation of a
+  // rule Go already owns, and the two diverge on real inputs: Go's
+  // json.Unmarshal matches field names case-insensitively and errors on a
+  // type mismatch, JSON.parse does neither.
+  is_status: z.boolean(),
+})
+
+export type BoardMessage = z.infer<typeof BoardMessageSchema>
+
+export const BoardMessagesResponseSchema = z.object({
+  messages: z.array(BoardMessageSchema),
+  // Identifies the server-side cache these seq values were assigned by. The
+  // cache is in-memory only, so a panemux restart renumbers from 1 and a
+  // cursor held across it would never match anything again. See
+  // useBoardStatus for the reset this drives.
+  epoch: z.string(),
+})
+
+export type BoardMessagesResponse = z.infer<typeof BoardMessagesResponseSchema>
+
+// ── Task dashboard: GET /api/tasks ─────────────────────────────────────────
+//
+// Free text that a remote host reports about its own processes (cwd,
+// waiting_for, tmux_session, a host's error) carries no .max(): Zod rejects
+// rather than truncates, so one long value from one host would fail the whole
+// response and blank every other host's tasks. Same reasoning as
+// BoardStatusEntrySchema.
+
+// A link the dashboard opens in a new tab. z.string().url() alone accepts
+// any scheme new URL() parses, javascript: included, so the scheme is pinned.
+const HttpUrlSchema = z
+  .string()
+  .url()
+  .refine((value) => /^https?:\/\//i.test(value), { message: 'must be an http(s) URL' })
+
+export const TaskStateSchema = z.enum(['busy', 'wait', 'idle', 'run', 'unknown', 'stop'])
+
+export type TaskState = z.infer<typeof TaskStateSchema>
+
+export const TaskLocationSchema = z.object({
+  // daemon: a codex session run by codex's shared app-server daemon, which
+  // no pane can be told to show (issue #264).
+  kind: z.enum(['tmux', 'outside', 'daemon', 'none']),
+  tmux_session: z.string().optional(),
+  // The pane an agent outside tmux was started from, as its PANEMUX_PANE_ID
+  // names it. Only a claim: findTaskPane matches it against the workspaces.
+  pane_id: z.string().optional(),
+  // Whether a tmux / ssh_tmux pane can attach to tmux_session: pane configs
+  // accept only a restricted set of session-name characters.
+  attachable: z.boolean(),
+})
+
+export type TaskLocation = z.infer<typeof TaskLocationSchema>
+
+// An issue the task's pull request closes. repo is the issue's owner/name,
+// which can differ from the pull request's repository.
+export const TaskIssueLinkSchema = z.object({
+  number: z.number().int().positive(),
+  url: HttpUrlSchema,
+  repo: z.string().optional(),
+})
+
+export type TaskIssueLink = z.infer<typeof TaskIssueLinkSchema>
+
+// A reference in the task's branch name or pull request title (JIRA-123) that
+// a task_dashboard.autolinks entry turned into a link.
+export const TaskAutolinkSchema = z.object({
+  text: z.string().min(1),
+  url: HttpUrlSchema,
+})
+
+export type TaskAutolink = z.infer<typeof TaskAutolinkSchema>
+
+export const TaskGitSchema = z.object({
+  repo: z.string().optional(),
+  repo_url: HttpUrlSchema.optional(),
+  branch: z.string().optional(),
+  pr_url: HttpUrlSchema.optional(),
+  pr_number: z.number().int().positive().optional(),
+  issues: z.array(TaskIssueLinkSchema).optional(),
+  autolinks: z.array(TaskAutolinkSchema).optional(),
+})
+
+export type TaskGit = z.infer<typeof TaskGitSchema>
+
+// What `claude -p` on the panemux host made of a task's conversation log
+// (issue #258). text, remaining and summarized_at are the last answer, when
+// there is one, whatever state says; outdated means the log changed since.
+// done_candidate is a ready, current answer with nothing remaining — a person
+// still decides whether the task is done. Like the rest of the task, the
+// text carries no .max(): the server bounds it.
+export const TaskSummarySchema = z.object({
+  state: z.enum(['pending', 'ready', 'error', 'unreadable']),
+  text: z.string().optional(),
+  remaining: z.array(z.string()).optional(),
+  summarized_at: z.string().optional(),
+  outdated: z.boolean().optional(),
+  done_candidate: z.boolean().optional(),
+  error: z.string().optional(),
+})
+
+export type TaskSummary = z.infer<typeof TaskSummarySchema>
+
+export const TaskSchema = z.object({
+  id: z.string().min(1),
+  // The ssh_connections key, or '' for the panemux host itself.
+  host: z.string(),
+  agent: z.string(),
+  session_id: z.string().optional(),
+  cwd: z.string().optional(),
+  state: TaskStateSchema,
+  waiting_for: z.string().optional(),
+  status_since: z.string().optional(),
+  started_at: z.string().optional(),
+  pid: z.number().int().positive().optional(),
+  location: TaskLocationSchema,
+  git: TaskGitSchema.optional(),
+  // What a person recorded on the dashboard (issue #256). Only a task with a
+  // session_id can carry them; done does not change state.
+  done: z.boolean().optional(),
+  labels: z.array(z.string()).optional(),
+  // Present only while summaries are enabled and once the task has one.
+  summary: TaskSummarySchema.optional(),
+})
+
+export type Task = z.infer<typeof TaskSchema>
+
+export const TaskHostSchema = z.object({
+  name: z.string(),
+  status: z.enum(['ok', 'error', 'connecting']),
+  error: z.string().optional(),
+  collected_at: z.string().optional(),
+})
+
+export type TaskHost = z.infer<typeof TaskHostSchema>
+
+export const TasksResponseSchema = z.object({
+  hosts: z.array(TaskHostSchema),
+  tasks: z.array(TaskSchema),
+  // Why the task record file could not be read; the tasks come without records.
+  records_error: z.string().optional(),
+  // task_dashboard.summary.enabled. The server always sends it; absent is off.
+  summaries_enabled: z.boolean().optional(),
+})
+
+export type TasksResponse = z.infer<typeof TasksResponseSchema>
+
+// ── Task dashboard: PUT /api/tasks/records ─────────────────────────────────
+//
+// The request body and the response have the same shape. The response always
+// carries done and labels, so the dashboard applies it to the task as it is.
+
+export const TaskRecordSchema = z.object({
+  host: z.string(),
+  agent: z.string(),
+  session_id: z.string().min(1),
+  done: z.boolean(),
+  labels: z.array(z.string()),
+})
+
+export type TaskRecord = z.infer<typeof TaskRecordSchema>
+
+// ── Task dashboard: POST /api/tasks, POST /api/tasks/resume ────────────────
+//
+// A task started or resumed (issue #257). The id is the one GET /api/tasks
+// will list the task under once the agent has written its state, which is how
+// the dashboard selects it. A new codex task has neither id nor session_id:
+// codex picks its session ID once it has its first instruction, so the task
+// is found by its tmux session instead (issue #264).
+
+export const TaskLaunchedSchema = z.object({
+  id: z.string().min(1).optional(),
+  session_id: z.string().min(1).optional(),
+  tmux_session: z.string().min(1),
+})
+
+export type TaskLaunched = z.infer<typeof TaskLaunchedSchema>
+
+// A new task's response adds the labels recorded for it, or why they could
+// not be — the task was started either way. A codex task's labels are held
+// until a collection finds its session, and come back as pending_labels.
+export const TaskLaunchResponseSchema = TaskLaunchedSchema.extend({
+  labels: z.array(z.string()).optional(),
+  pending_labels: z.array(z.string()).optional(),
+  records_error: z.string().optional(),
+})
+
+export type TaskLaunchResponse = z.infer<typeof TaskLaunchResponseSchema>

@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -31,20 +32,32 @@ type TmuxSSHSession struct {
 
 // NewTmuxSSH creates a session that attaches to a remote tmux session.
 func NewTmuxSSH(id, title, tmuxSession string, cfg SSHConfig) (*TmuxSSHSession, error) {
-	if tmuxSession == "" {
-		tmuxSession = "0"
-	}
-	if !validTmuxSessionName.MatchString(tmuxSession) {
-		return nil, fmt.Errorf(
-			"invalid tmux session name %q: must match ^[a-zA-Z0-9_.-]+$",
-			tmuxSession,
-		)
+	validatedSession, err := validateTmuxSessionName(tmuxSession)
+	if err != nil {
+		return nil, err
 	}
 
 	client, jumpClient, err := dialSSHClient(cfg)
 	if err != nil {
 		return nil, err
 	}
+	return newTmuxSSHSessionFromClient(id, title, validatedSession, cfg, client, jumpClient)
+}
+
+// newTmuxSSHSessionFromClient completes the remote tmux lifecycle over an
+// established SSH transport. It is the host-independent seam used by the
+// protocol contract tests and the production constructor alike.
+func newTmuxSSHSessionFromClient(
+	id, title, tmuxSession string,
+	cfg SSHConfig,
+	client, jumpClient *ssh.Client,
+) (*TmuxSSHSession, error) {
+	validatedSession, err := validateTmuxSessionName(tmuxSession)
+	if err != nil {
+		closeSSHResources(nil, client, jumpClient)
+		return nil, err
+	}
+	tmuxSession = validatedSession
 
 	sess, err := client.NewSession()
 	if err != nil {
@@ -131,6 +144,18 @@ func (s *TmuxSSHSession) Resize(cols, rows uint16) error {
 // ConnectionName returns the panemux connection alias for this SSH session.
 func (s *TmuxSSHSession) ConnectionName() string { return s.connectionName }
 
+// BoardHostID identifies this session's Agent Board host as its SSH
+// connection name — the same identifier ConnectionName already returns.
+func (s *TmuxSSHSession) BoardHostID() string { return s.connectionName }
+
+// RunBoardCommand runs an agmsg script on the remote host over a new SSH
+// exec channel, matching the pattern GetCWD/InspectGitContext already use.
+func (s *TmuxSSHSession) RunBoardCommand(ctx context.Context, args []string) ([]byte, error) {
+	return runBoardCommand(ctx, func() (sshSessionRunner, error) {
+		return s.client.NewSession()
+	}, args)
+}
+
 // GetCWD runs `tmux display-message` over a new SSH exec channel to get the active pane's CWD.
 func (s *TmuxSSHSession) GetCWD() (string, error) {
 	sess, err := s.client.NewSession()
@@ -157,6 +182,44 @@ func (s *TmuxSSHSession) GetActiveWorkdirs() ([]string, error) {
 		fmt.Sprintf("session=%s type=%s tmux_session=%s", s.id, s.Type(), s.tmuxSession),
 		s.tmuxSession,
 	)
+}
+
+// DetectInteractiveAgentType reports the agmsg type name of any live agent
+// process currently running under the active remote tmux pane — see
+// AgentTypeDetector.
+func (s *TmuxSSHSession) DetectInteractiveAgentType() (string, bool, error) {
+	return tmuxSSHDetectInteractiveAgentTypeFromSessionFactory(
+		func() (sshSessionRunner, error) {
+			return s.client.NewSession()
+		},
+		s.tmuxSession,
+	)
+}
+
+func tmuxSSHDetectInteractiveAgentTypeFromSessionFactory(
+	newRunner func() (sshSessionRunner, error), tmuxSession string,
+) (string, bool, error) {
+	paneRunner, err := newRunner()
+	if err != nil {
+		return "", false, fmt.Errorf("new ssh session for active tmux pane info: %w", err)
+	}
+	defer paneRunner.Close()
+
+	out, err := paneRunner.Output(
+		fmt.Sprintf(
+			"tmux display-message -p -t '%s' '#{pane_pid}\t#{pane_current_path}'",
+			tmuxSession,
+		),
+	)
+	if err != nil {
+		return "", false, fmt.Errorf("tmux pane info over ssh: %w", err)
+	}
+	panePID, _, err := parseRemoteTmuxPaneInfo(out)
+	if err != nil {
+		return "", false, err
+	}
+
+	return detectRemoteAgentType(outputFromSessionFactory(newRunner), panePID)
 }
 
 // InspectGitContext resolves Git metadata on the remote host for the provided

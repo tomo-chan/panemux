@@ -1,0 +1,48 @@
+# Fixture for core-multiplexer.spec.ts.
+#
+# It gets its own panemux process (playwright.config.ts, port 4177) rather than
+# sharing the default one, for the reason agent-board.yml already has one: these
+# tests MUTATE the layout — splitting, closing, resizing, adding and deleting
+# workspaces — and the suite runs serially against a long-lived server, so a
+# spec that changes the layout changes it for every spec that runs afterwards.
+# Sharing was tried first and made unrelated specs (pane-url-open) fail
+# intermittently, which is the worst way for cross-test coupling to show up.
+#
+# Two workspaces, each with one pane. Two rather than one because panemux
+# renders no workspace tab bar at all for a single workspace — the CRUD test
+# needs tabs to exist before it adds a third. The CRUD test deletes the one it
+# added, so the fixture is back to two by the time it returns.
+server:
+    host: 127.0.0.1
+    port: 4177
+workspaces:
+    active: default
+    tab_position: top
+    items:
+        - id: default
+          title: Default
+          layout:
+            direction: horizontal
+            children:
+                - pane:
+                    id: core-main
+                    type: local
+                    shell: /bin/bash
+                    cwd: /tmp
+                    title: Core Shell
+                  size: 100
+        - id: core-second
+          title: Second
+          layout:
+            direction: horizontal
+            children:
+                - pane:
+                    id: core-second-main
+                    type: local
+                    shell: /bin/bash
+                    cwd: /tmp
+                    title: Second Shell
+                  size: 100
+display:
+    show_header: true
+    show_status_bar: true

@@ -16,34 +16,52 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"panemux/internal/api"
+	"panemux/internal/board"
+	"panemux/internal/commandcenter"
 	"panemux/internal/config"
+	"panemux/internal/portforward"
 	"panemux/internal/session"
 	"panemux/internal/ws"
 )
 
 // Server is the HTTP server.
 type Server struct {
-	cfg     *config.Config
-	manager *session.Manager
-	httpSrv *http.Server
+	cfg      *config.Config
+	manager  *session.Manager
+	httpSrv  *http.Server
+	forwards *portforward.Registry
+	api      *api.Handler
 }
 
-// New creates a new server instance.
-func New(cfg *config.Config, manager *session.Manager, frontendFS embed.FS) *Server {
+// New creates a new server instance. commandRunner may be nil when
+// command_center.enabled is false — the /ws/board-command route is simply
+// not registered in that case, so it 404s like any other undefined route
+// rather than panicking on a nil runner.
+func New(
+	cfg *config.Config, manager *session.Manager, boardCache *board.BoardCache, boardRelay *board.Relay,
+	commandRunner *commandcenter.Runner, frontendFS embed.FS,
+) *Server {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(corsMiddleware)
 	r.Use(securityHeadersMiddleware)
 
-	apiHandler := api.NewHandler(cfg, manager)
+	apiHandler := api.NewHandler(cfg, manager, boardCache, boardRelay)
+	apiHandler.SetCommandCenterAvailable(commandRunner != nil)
+	// Loopback forwards are process-wide state (they bind ports on this
+	// host), so the server owns the registry and closes it on shutdown.
+	forwards := portforward.New(portforward.Options{})
+	apiHandler.SetPortForwards(forwards)
 	wsHandler := ws.NewHandler(manager)
-	registerRoutes(r, apiHandler, wsHandler, frontendFS)
+	registerRoutes(r, apiHandler, wsHandler, commandRunner, frontendFS, cfg.Server.AuthToken)
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	return &Server{
-		cfg:     cfg,
-		manager: manager,
+		cfg:      cfg,
+		manager:  manager,
+		forwards: forwards,
+		api:      apiHandler,
 		httpSrv: &http.Server{
 			Addr:           addr,
 			Handler:        r,
@@ -55,32 +73,35 @@ func New(cfg *config.Config, manager *session.Manager, frontendFS embed.FS) *Ser
 	}
 }
 
-func registerRoutes(r chi.Router, apiHandler *api.Handler, wsHandler *ws.Handler, frontendFS embed.FS) {
-	r.Route("/api", func(r chi.Router) {
-		r.Get("/layout", apiHandler.GetLayout)
-		r.Put("/layout", apiHandler.PutLayout)
-		r.Get("/workspaces", apiHandler.GetWorkspaces)
-		r.Post("/workspaces", apiHandler.PostWorkspace)
-		r.Put("/workspaces/active", apiHandler.PutActiveWorkspace)
-		r.Put("/workspaces/tab-position", apiHandler.PutWorkspaceTabPosition)
-		r.Put("/workspaces/vertical-bar-width", apiHandler.PutWorkspaceVerticalBarWidth)
-		r.Put("/workspaces/{id}", apiHandler.PutWorkspace)
-		r.Delete("/workspaces/{id}", apiHandler.DeleteWorkspace)
-		r.Put("/workspaces/{id}/layout", apiHandler.PutWorkspaceLayout)
-		r.Get("/sessions", apiHandler.GetSessions)
-		r.Post("/sessions", apiHandler.PostSession)
-		r.Delete("/sessions/{id}", apiHandler.DeleteSession)
-		r.Post("/sessions/{id}/restart", apiHandler.RestartSession)
-		r.Post("/sessions/{id}/open-vscode", apiHandler.PostOpenVSCode)
-		r.Get("/sessions/{id}/git-info", apiHandler.GetGitInfo)
-		r.Get("/display", apiHandler.GetDisplay)
-		r.Get("/ssh-connections", apiHandler.GetSSHConnections)
-		r.Get("/ssh-config/hosts", apiHandler.GetSSHConfigHosts)
-		r.Post("/ssh-config/hosts", apiHandler.PostSSHConfigHost)
-		r.Get("/detect-shell", apiHandler.GetDetectShell)
-		r.Get("/directories", apiHandler.GetDirectories)
-	})
+func registerRoutes(
+	r chi.Router, apiHandler *api.Handler, wsHandler *ws.Handler, commandRunner *commandcenter.Runner,
+	frontendFS embed.FS, authToken string,
+) {
+	// The route table itself lives in internal/api (api.Handler.Mount), so
+	// this wiring and the api package's own handler tests cannot describe
+	// different routes. What stays here is the decision this package owns:
+	// which part of the table is authenticated.
+	//
+	// api.BoardRoutePrefix is the only part of the API gated behind bearer-
+	// token auth today: unlike every other /api/* route and /ws/{sessionID},
+	// these endpoints were gated from day one, before the frontend called
+	// any of them — GetBoardStatus/GetBoardMessages are now polled by the
+	// dashboard's useBoardStatus hook and GetBoardCommandHistory by the
+	// command palette/history panel (see docs/agent-board.md), but the
+	// auth gate itself was never contingent on that. Retrofitting auth
+	// onto the rest of the table, which the frontend already relies on
+	// being unauthenticated, is a separate, larger change. See
+	// docs/security.md.
+	apiHandler.Mount(r, bearerAuthMiddleware(authToken))
 	r.Get("/ws/{sessionID}", wsHandler.ServeHTTP)
+	// /ws/board-command is only registered when the command center is
+	// enabled (commandRunner != nil) — see docs/agent-board.md's Command
+	// center section. Unlike /ws/{sessionID}, this route requires the
+	// bearer token, mirroring /api/board/*.
+	if commandRunner != nil {
+		boardCommandHandler := ws.NewBoardCommandHandler(commandRunner, authToken)
+		r.Get("/ws/board-command", boardCommandHandler.ServeHTTP)
+	}
 	registerFrontend(r, frontendFS)
 }
 
@@ -116,8 +137,12 @@ func (s *Server) Start() error {
 	return nil
 }
 
-// Shutdown gracefully stops the server.
+// Shutdown gracefully stops the server and closes every loopback port
+// forward it opened on this host and every connection the task dashboard
+// holds open.
 func (s *Server) Shutdown(ctx context.Context) error {
+	s.forwards.Close()
+	s.api.Close()
 	if err := s.httpSrv.Shutdown(ctx); err != nil {
 		return fmt.Errorf("shutting down HTTP server: %w", err)
 	}

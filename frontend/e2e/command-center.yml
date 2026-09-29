@@ -1,0 +1,31 @@
+server:
+    host: 127.0.0.1
+    port: 4176
+    # The command center refuses to start without a token (its own MCP
+    # server authenticates every REST call with it), and the dashboard reads
+    # this value back through GET /api/session-token.
+    auth_token: e2e-command-center-token
+command_center:
+    enabled: true
+agent_board:
+    team: panemux-e2e-cc
+    agmsg_path: /tmp/panemux-e2e-agmsg-absent
+workspaces:
+    active: default
+    tab_position: top
+    items:
+        - id: default
+          title: Default
+          layout:
+            direction: horizontal
+            children:
+                - pane:
+                    id: cc-main
+                    type: local
+                    shell: /bin/bash
+                    cwd: /tmp
+                    title: CC Main
+                  size: 100
+display:
+    show_header: true
+    show_status_bar: true

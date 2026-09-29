@@ -1,0 +1,39 @@
+server:
+    host: 127.0.0.1
+    port: 4175
+agent_board:
+    team: panemux-e2e
+    # Points at the stub agmsg installation run-panemux-agent-board-e2e.sh
+    # creates before starting this server. panemux itself never installs
+    # agmsg (see docs/security.md), so the harness has to place it there.
+    agmsg_path: /tmp/panemux-e2e-agmsg
+workspaces:
+    active: default
+    tab_position: top
+    items:
+        - id: default
+          title: Default
+          layout:
+            direction: horizontal
+            children:
+                - pane:
+                    id: board-main
+                    type: local
+                    shell: /bin/bash
+                    cwd: /tmp
+                    title: Board Main
+                    agent_board:
+                        enabled: true
+                  size: 50
+                - pane:
+                    id: board-worker
+                    type: local
+                    shell: /bin/bash
+                    cwd: /tmp
+                    title: Board Worker
+                    agent_board:
+                        enabled: true
+                  size: 50
+display:
+    show_header: true
+    show_status_bar: true

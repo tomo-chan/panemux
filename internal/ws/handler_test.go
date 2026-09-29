@@ -28,6 +28,11 @@ type wsMockSession struct {
 	in      chan []byte // data received from WS client (session input)
 	resizes chan [2]uint16
 	readErr error
+	// writeErr and resizeErr let a test fail exactly one of the two calls
+	// the handler makes on a session; both default to nil, so every
+	// pre-existing test is unaffected.
+	writeErr  error
+	resizeErr error
 }
 
 type recordedWrite struct {
@@ -83,6 +88,9 @@ func (m *wsMockSession) Read(p []byte) (int, error) {
 }
 
 func (m *wsMockSession) Write(p []byte) (int, error) {
+	if m.writeErr != nil {
+		return 0, m.writeErr
+	}
 	cp := make([]byte, len(p))
 	copy(cp, p)
 	m.in <- cp
@@ -90,6 +98,9 @@ func (m *wsMockSession) Write(p []byte) (int, error) {
 }
 
 func (m *wsMockSession) Resize(cols, rows uint16) error {
+	if m.resizeErr != nil {
+		return m.resizeErr
+	}
 	m.resizes <- [2]uint16{cols, rows}
 	return nil
 }

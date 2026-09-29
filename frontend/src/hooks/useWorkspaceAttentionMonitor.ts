@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { createAgentAttentionDetector } from '../utils/agentAttention'
+import { collectLeafPanes } from '../utils/layoutTree'
 import { getLastNotifiedAttentionSignature, setLastNotifiedAttentionSignature } from '../utils/attentionNotificationState'
-import type { LayoutNode, WorkspacesResponse } from '../schemas'
+import type { WorkspacesResponse } from '../schemas'
 
 interface UseWorkspaceAttentionMonitorOptions {
   workspaces: WorkspacesResponse | null
@@ -18,6 +19,16 @@ export function useWorkspaceAttentionMonitor({ workspaces, maximizedPaneId, onAt
   const monitorStatesRef = useRef<Map<string, PaneMonitorState>>(new Map())
   const activeWorkspaceIdRef = useRef<string | null>(workspaces?.active ?? null)
   const maximizedPaneIdRef = useRef<string | null>(maximizedPaneId)
+  // App.tsx rebuilds its attention callback whenever the workspace list or the
+  // layout changes — which is every workspace switch — so holding it in a ref
+  // is what keeps that from tearing down and reopening every monitor socket
+  // (issue #78). The sockets read the ref when a message arrives, so they
+  // always report to the current callback.
+  const onAttentionRef = useRef(onAttention)
+
+  useEffect(() => {
+    onAttentionRef.current = onAttention
+  }, [onAttention])
 
   useEffect(() => {
     activeWorkspaceIdRef.current = workspaces?.active ?? null
@@ -32,16 +43,27 @@ export function useWorkspaceAttentionMonitor({ workspaces, maximizedPaneId, onAt
     if (!workspaces) return metadata
 
     for (const workspace of workspaces.items) {
-      for (const paneId of collectPaneIDs(workspace.layout)) {
-        metadata.set(paneId, { workspaceId: workspace.id })
+      for (const pane of collectLeafPanes(workspace.layout)) {
+        metadata.set(pane.id, { workspaceId: workspace.id })
       }
     }
 
     return metadata
   }, [workspaces?.items])
 
+  // Pane membership is read when a message arrives rather than captured by the
+  // socket effect, so a pane moving between workspaces updates the
+  // notification decision without reopening anything.
+  const paneMetadataRef = useRef(paneMetadataById)
+  paneMetadataRef.current = paneMetadataById
+
+  // The socket effect's dependency is the pane ID set itself, not the object
+  // that carries it: a refetched workspace list is all new objects even when
+  // the same panes are still being watched.
+  const paneIdsKey = useMemo(() => [...paneMetadataById.keys()].sort().join('\n'), [paneMetadataById])
+
   useEffect(() => {
-    const paneIds = [...paneMetadataById.keys()]
+    const paneIds = paneIdsKey === '' ? [] : paneIdsKey.split('\n')
     if (paneIds.length === 0) return
 
     const sockets = paneIds.map((paneId) => {
@@ -62,7 +84,7 @@ export function useWorkspaceAttentionMonitor({ workspaces, maximizedPaneId, onAt
 
         const shouldNotifyBrowser = shouldNotifyBrowserAttention({
           paneId,
-          paneWorkspaceId: paneMetadataById.get(paneId)?.workspaceId ?? null,
+          paneWorkspaceId: paneMetadataRef.current.get(paneId)?.workspaceId ?? null,
           activeWorkspaceId: activeWorkspaceIdRef.current,
           maximizedPaneId: maximizedPaneIdRef.current,
           browserIsActive: isBrowserActive(),
@@ -72,7 +94,7 @@ export function useWorkspaceAttentionMonitor({ workspaces, maximizedPaneId, onAt
         if (shouldNotifyBrowser) {
           setLastNotifiedAttentionSignature(paneId, attentionMatch.signature)
         }
-        onAttention(paneId, shouldNotifyBrowser)
+        onAttentionRef.current(paneId, shouldNotifyBrowser)
       }
 
       ws.onerror = () => {
@@ -89,28 +111,12 @@ export function useWorkspaceAttentionMonitor({ workspaces, maximizedPaneId, onAt
         socket.close()
       }
     }
-  }, [onAttention, paneMetadataById])
+  }, [paneIdsKey])
 }
 
 function buildWebSocketURL(paneId: string): string {
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
   return `${protocol}//${location.host}/ws/${paneId}`
-}
-
-function collectPaneIDs(layout: LayoutNode): string[] {
-  return layout.children.flatMap(collectChildPaneIDs)
-}
-
-function collectChildPaneIDs(child: LayoutNode['children'][number]): string[] {
-  if (child.pane && (!child.children || child.children.length === 0)) {
-    return [child.pane.id]
-  }
-
-  if (child.children?.length) {
-    return child.children.flatMap(collectChildPaneIDs)
-  }
-
-  return []
 }
 
 function getOrCreatePaneMonitorState(states: Map<string, PaneMonitorState>, paneId: string): PaneMonitorState {

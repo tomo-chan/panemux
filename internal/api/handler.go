@@ -24,33 +24,51 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"panemux/internal/board"
+	"panemux/internal/commandcenter"
 	"panemux/internal/config"
+	"panemux/internal/homedir"
+	"panemux/internal/portforward"
 	"panemux/internal/session"
 	"panemux/internal/sshconfig"
+	"panemux/internal/tasks"
 )
 
 // Handler provides REST API endpoints.
 //
 //nolint:govet // keeps test injection hooks and binary-path overrides on one handler value
 type Handler struct {
-	cfg                     *config.Config
-	manager                 *session.Manager
-	sshConfigPath           string
-	codeBinaryPath          string // empty = auto-detect; overridden in tests
-	ghBinaryPath            string // empty = auto-detect; overridden in tests
+	readDirFn              func(name string) ([]os.DirEntry, error)
+	manager                *session.Manager
+	boardBroadcastFn       func(ctx context.Context, to []string, body string) ([]string, error)
+	commandHistoryFn       func() ([]commandcenter.HistoryEntry, error)
+	commandCenterAvailable bool
+	boardCache             *board.BoardCache
+	gitInfoCacheBySession  map[string]gitInfoCacheEntry
+	tasks                  *tasks.Service
+	taskRecords            *tasks.RecordStore
+	// pendingTaskLabels holds the labels of codex tasks started before
+	// their session IDs are known (issue #264).
+	pendingTaskLabels       *tasks.PendingLabels
+	taskGitLookup           func(ctx context.Context, host, cwd string, withPR bool) *taskGitInfo
+	taskGitCache            map[string]taskGitCacheEntry
 	createSession           func(*config.PaneConfig, map[string]config.SSHConnection) (session.Session, error)
 	detectLocalShellFn      func() (string, error)
 	detectRemoteShellFn     func(cfg session.SSHConfig) (string, error)
-	listLocalDirectoriesFn  func(path string, showHidden bool) (directoryBrowserResponse, error)
 	listRemoteDirectoriesFn func(cfg session.SSHConfig, path string, showHidden bool) (directoryBrowserResponse, error)
-	readDirFn               func(name string) ([]os.DirEntry, error)
-	preferredCWDMu          sync.Mutex
+	listLocalDirectoriesFn  func(path string, showHidden bool) (directoryBrowserResponse, error)
 	preferredCWDBySession   map[string][]preferredCWDState
-	restartMu               sync.Mutex
-	restartInFlight         map[string]struct{}
 	nowFn                   func() time.Time
+	cfg                     *config.Config
+	forwards                *portforward.Registry
+	restartInFlight         map[string]struct{}
+	ghBinaryPath            string
+	codeBinaryPath          string
+	sshConfigPath           string
+	restartMu               sync.Mutex
+	preferredCWDMu          sync.Mutex
 	gitInfoCacheMu          sync.Mutex
-	gitInfoCacheBySession   map[string]gitInfoCacheEntry
+	taskGitCacheMu          sync.Mutex
 }
 
 type preferredCWDState struct {
@@ -149,7 +167,9 @@ type directoryBrowserResponse struct {
 var validHostName = regexp.MustCompile(`^[a-zA-Z0-9_.\-]+$`)
 
 // NewHandler creates a new API handler.
-func NewHandler(cfg *config.Config, manager *session.Manager) *Handler {
+func NewHandler(
+	cfg *config.Config, manager *session.Manager, boardCache *board.BoardCache, boardRelay *board.Relay,
+) *Handler {
 	h := &Handler{
 		cfg:                   cfg,
 		manager:               manager,
@@ -158,14 +178,36 @@ func NewHandler(cfg *config.Config, manager *session.Manager) *Handler {
 		restartInFlight:       make(map[string]struct{}),
 		nowFn:                 time.Now,
 		gitInfoCacheBySession: make(map[string]gitInfoCacheEntry),
+		taskGitCache:          make(map[string]taskGitCacheEntry),
+		boardCache:            boardCache,
 	}
+	h.tasks = newTaskService(h)
+	h.taskRecords = tasks.NewRecordStore("")
+	h.pendingTaskLabels = tasks.NewPendingLabels(func() time.Time { return h.nowFn() })
+	h.taskGitLookup = h.lookupTaskGit
 	h.createSession = session.CreateFromConfig
 	h.detectLocalShellFn = session.DetectLocalShell
 	h.detectRemoteShellFn = session.DetectRemoteShell
 	h.readDirFn = os.ReadDir
 	h.listLocalDirectoriesFn = h.listLocalDirectories
 	h.listRemoteDirectoriesFn = listRemoteDirectories
+	h.boardBroadcastFn = func(ctx context.Context, to []string, body string) ([]string, error) {
+		return boardRelay.Broadcast(ctx, board.SystemID, to, body)
+	}
+	h.commandHistoryFn = defaultCommandHistoryFn
 	return h
+}
+
+// SetCommandCenterAvailable records whether /ws/board-command is actually
+// registered, for GetBoardSessionToken to report. This is a separate,
+// later-set field rather than a NewHandler parameter deliberately: the
+// caller (internal/server.New) only knows whether setupCommandCenter
+// actually produced a Runner — which can differ from cfg.CommandCenter.Enabled
+// (e.g. enabled but no server.auth_token configured) — and threading that
+// decision through NewHandler's existing four-argument, ~90-call-site
+// signature was judged not worth the churn for one boolean.
+func (h *Handler) SetCommandCenterAvailable(available bool) {
+	h.commandCenterAvailable = available
 }
 
 // GetLayout returns the current layout configuration.
@@ -181,6 +223,16 @@ func (h *Handler) PutLayout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Normalize before validating, saving and echoing, so a PUT stores and
+	// returns exactly the shape a load would have produced. Without this the
+	// echo is the raw request body — the one LayoutNode in an API response
+	// that never passed through normalizeLayoutNode.
+	//
+	// Order matters, and it is finishLoad's: normalize, then expand.
+	// ExpandLayoutPaths walks Children only, so expanding first would leave a
+	// relocated root pane's `~/` cwd literal — it is still at the root when
+	// expansion runs.
+	layout = config.NormalizeLayout(layout)
 	config.ExpandLayoutPaths(&layout)
 
 	if err := config.ValidateLayout(layout); err != nil {
@@ -190,8 +242,8 @@ func (h *Handler) PutLayout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.cfg.SaveLayout(layout); err != nil {
-		http.Error(w, "failed to save layout", http.StatusInternalServerError)
+	snapshot := h.cfg.Snapshot()
+	if !h.saveLayoutOrRollback(w, layout, snapshot) {
 		return
 	}
 
@@ -210,12 +262,12 @@ func (h *Handler) PutActiveWorkspace(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
+	snapshot := h.cfg.Snapshot()
 	if !h.cfg.SetActiveWorkspace(req.ID) {
 		http.Error(w, "workspace not found", http.StatusNotFound)
 		return
 	}
-	if err := h.cfg.SaveWorkspaces(); err != nil {
-		http.Error(w, "failed to save workspaces", http.StatusInternalServerError)
+	if !h.saveWorkspacesOrRollback(w, snapshot) {
 		return
 	}
 	writeJSON(w, h.cfg.WorkspacesView())
@@ -228,7 +280,7 @@ func (h *Handler) PutWorkspaceTabPosition(w http.ResponseWriter, r *http.Request
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	h.applyWorkspaceSettingUpdate(w, h.cfg.SetWorkspaceTabPosition(req.TabPosition))
+	h.applyWorkspaceSettingUpdate(w, func() error { return h.cfg.SetWorkspaceTabPosition(req.TabPosition) })
 }
 
 // PutWorkspaceVerticalBarWidth updates the shared vertical workspace bar width.
@@ -238,41 +290,93 @@ func (h *Handler) PutWorkspaceVerticalBarWidth(w http.ResponseWriter, r *http.Re
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	h.applyWorkspaceSettingUpdate(w, h.cfg.SetWorkspaceVerticalBarWidth(req.VerticalBarWidth))
+	h.applyWorkspaceSettingUpdate(w, func() error { return h.cfg.SetWorkspaceVerticalBarWidth(req.VerticalBarWidth) })
 }
 
-func (h *Handler) applyWorkspaceSettingUpdate(w http.ResponseWriter, updateErr error) {
-	if updateErr != nil {
+// applyWorkspaceSettingUpdate takes the update as a func rather than as the
+// error it returned, so the snapshot the rollback needs is taken before the
+// setting is applied rather than after it.
+func (h *Handler) applyWorkspaceSettingUpdate(w http.ResponseWriter, update func() error) {
+	snapshot := h.cfg.Snapshot()
+	if err := update(); err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnprocessableEntity)
-		_ = json.NewEncoder(w).Encode(map[string]string{responseErrorKey: updateErr.Error()})
+		_ = json.NewEncoder(w).Encode(map[string]string{responseErrorKey: err.Error()})
 		return
 	}
-	if err := h.cfg.SaveWorkspaces(); err != nil {
-		http.Error(w, "failed to save workspaces", http.StatusInternalServerError)
+	if !h.saveWorkspacesOrRollback(w, snapshot) {
 		return
 	}
 	writeJSON(w, h.cfg.WorkspacesView())
 }
 
+// saveWorkspacesOrRollback persists a workspace change the caller has already
+// applied in memory, and puts the config back when the write fails.
+//
+// The rollback is issue #204: Config.write() serializes the whole config, so a
+// route cannot save before it mutates, and a route that answered 500 while
+// leaving its mutation in place left the operator running a config they had
+// been told was not saved — which the next successful write from any other
+// route would then persist. It reports whether the caller may go on; a false
+// result means the response has already been written.
+func (h *Handler) saveWorkspacesOrRollback(w http.ResponseWriter, snapshot config.Snapshot) bool {
+	if err := h.cfg.SaveWorkspaces(); err != nil {
+		h.cfg.Restore(snapshot)
+		http.Error(w, "failed to save workspaces", http.StatusInternalServerError)
+		return false
+	}
+	return true
+}
+
+// saveLayoutOrRollback is saveWorkspacesOrRollback for the two routes that
+// persist through SaveLayout, which reports its own failure differently to the
+// dashboard and so cannot share the message.
+func (h *Handler) saveLayoutOrRollback(w http.ResponseWriter, layout config.LayoutNode, snapshot config.Snapshot) bool {
+	if err := h.cfg.SaveLayout(layout); err != nil {
+		h.cfg.Restore(snapshot)
+		http.Error(w, "failed to save layout", http.StatusInternalServerError)
+		return false
+	}
+	return true
+}
+
 // PostWorkspace adds a new default local workspace and makes it active.
 func (h *Handler) PostWorkspace(w http.ResponseWriter, r *http.Request) {
+	snapshot := h.cfg.Snapshot()
 	workspace := h.cfg.AddDefaultWorkspace()
+	var created []string
 	for _, pane := range panesInLayout(workspace.Layout) {
 		sess, err := h.createSession(pane, h.cfg.SSHConnections)
 		if err != nil {
+			h.rollbackNewWorkspace(snapshot, created)
 			http.Error(w, fmt.Sprintf("failed to create session: %v", err), http.StatusInternalServerError)
 			return
 		}
 		h.manager.Add(sess)
+		created = append(created, sess.ID())
 	}
 	if err := h.cfg.SaveWorkspaces(); err != nil {
+		h.rollbackNewWorkspace(snapshot, created)
 		http.Error(w, "failed to save workspaces", http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(h.cfg.WorkspacesView())
+}
+
+// rollbackNewWorkspace undoes a PostWorkspace that could not be completed.
+//
+// The sessions already created for the new workspace are closed and
+// unregistered — with the workspace gone there is nothing left that lists
+// them, so leaving them running would leak a PTY per attempt and keep their
+// pane IDs taken against a retry — and the config goes back to the state it
+// had before the workspace was added.
+func (h *Handler) rollbackNewWorkspace(snapshot config.Snapshot, created []string) {
+	for _, id := range created {
+		_ = h.manager.Remove(id)
+	}
+	h.cfg.Restore(snapshot)
 }
 
 // DeleteWorkspace removes a workspace.
@@ -283,13 +387,13 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "cannot delete the last workspace", http.StatusConflict)
 		return
 	}
+	snapshot := h.cfg.Snapshot()
 	workspace, ok := h.cfg.RemoveWorkspace(id)
 	if !ok {
 		http.Error(w, "workspace not found", http.StatusNotFound)
 		return
 	}
-	if err := h.cfg.SaveWorkspaces(); err != nil {
-		http.Error(w, "failed to save workspaces", http.StatusInternalServerError)
+	if !h.saveWorkspacesOrRollback(w, snapshot) {
 		return
 	}
 	for _, pane := range panesInLayout(workspace.Layout) {
@@ -315,12 +419,12 @@ func (h *Handler) PutWorkspace(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]string{responseErrorKey: "workspace title must not be empty"})
 		return
 	}
+	snapshot := h.cfg.Snapshot()
 	if !h.cfg.RenameWorkspace(id, title) {
 		http.Error(w, "workspace not found", http.StatusNotFound)
 		return
 	}
-	if err := h.cfg.SaveWorkspaces(); err != nil {
-		http.Error(w, "failed to save workspaces", http.StatusInternalServerError)
+	if !h.saveWorkspacesOrRollback(w, snapshot) {
 		return
 	}
 	writeJSON(w, h.cfg.WorkspacesView())
@@ -335,6 +439,16 @@ func (h *Handler) PutWorkspaceLayout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Normalize before validating, saving and echoing, so a PUT stores and
+	// returns exactly the shape a load would have produced. Without this the
+	// echo is the raw request body — the one LayoutNode in an API response
+	// that never passed through normalizeLayoutNode.
+	//
+	// Order matters, and it is finishLoad's: normalize, then expand.
+	// ExpandLayoutPaths walks Children only, so expanding first would leave a
+	// relocated root pane's `~/` cwd literal — it is still at the root when
+	// expansion runs.
+	layout = config.NormalizeLayout(layout)
 	config.ExpandLayoutPaths(&layout)
 
 	if err := config.ValidateLayout(layout); err != nil {
@@ -344,12 +458,12 @@ func (h *Handler) PutWorkspaceLayout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	snapshot := h.cfg.Snapshot()
 	if !h.cfg.UpdateWorkspaceLayout(id, layout) {
 		http.Error(w, "workspace not found", http.StatusNotFound)
 		return
 	}
-	if err := h.cfg.SaveWorkspaces(); err != nil {
-		http.Error(w, "failed to save workspaces", http.StatusInternalServerError)
+	if !h.saveWorkspacesOrRollback(w, snapshot) {
 		return
 	}
 	writeJSON(w, layout)
@@ -427,17 +541,25 @@ func (h *Handler) PostSession(w http.ResponseWriter, r *http.Request) {
 // DeleteSession terminates a session by ID and removes it from the layout.
 func (h *Handler) DeleteSession(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	if err := h.manager.Remove(id); err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+	if _, ok := h.manager.Get(id); !ok {
+		http.Error(w, fmt.Sprintf("session %s not found", id), http.StatusNotFound)
 		return
 	}
+
+	// The layout change is persisted before the session is touched, which is
+	// the order DeleteWorkspace already used and the one issue #204 settled on
+	// for both. Closing the session first meant a failed write answered 500
+	// for a pane whose PTY was already gone: nothing the operator could retry.
+	snapshot := h.cfg.Snapshot()
+	h.cfg.RemovePaneFromLayout(id)
+	if !h.saveLayoutOrRollback(w, h.cfg.Layout, snapshot) {
+		return
+	}
+
+	_ = h.manager.Remove(id)
 	h.clearPreferredCWDs(id)
 	h.clearGitInfoCache(id)
-	h.cfg.RemovePaneFromLayout(id)
-	if err := h.cfg.SaveLayout(h.cfg.Layout); err != nil {
-		http.Error(w, "failed to save layout", http.StatusInternalServerError)
-		return
-	}
+	h.closeSessionForwards(id)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -482,13 +604,16 @@ func (h *Handler) RestartSession(w http.ResponseWriter, r *http.Request) {
 	h.manager.Remove(id) //nolint:errcheck // ok if already gone
 	h.clearPreferredCWDs(id)
 	h.clearGitInfoCache(id)
+	h.closeSessionForwards(id)
 	h.manager.Add(sess)
 	w.WriteHeader(http.StatusOK)
 }
 
 // GetDisplay returns the display configuration.
 func (h *Handler) GetDisplay(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, h.cfg.Display)
+	display := h.cfg.Display
+	display.TaskDashboardShortcut = display.TaskDashboardShortcutKey()
+	writeJSON(w, display)
 }
 
 type sessionInfo struct {
@@ -572,6 +697,17 @@ func (h *Handler) PostSSHConfigHost(w http.ResponseWriter, r *http.Request) {
 		writeValidationError(w, "port must be between 0 and 65535")
 		return
 	}
+	newHost := sshconfig.Host{
+		Name:         req.Name,
+		Hostname:     req.Hostname,
+		User:         req.User,
+		Port:         req.Port,
+		IdentityFile: req.IdentityFile,
+	}
+	if err := sshconfig.CheckHostValues(newHost); err != nil {
+		writeValidationError(w, err.Error())
+		return
+	}
 
 	// Check for duplicate
 	hosts, err := sshconfig.ParseHosts(h.sshConfigPath)
@@ -589,13 +725,7 @@ func (h *Handler) PostSSHConfigHost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Append the new host
-	if err := sshconfig.AppendHost(h.sshConfigPath, sshconfig.Host{
-		Name:         req.Name,
-		Hostname:     req.Hostname,
-		User:         req.User,
-		Port:         req.Port,
-		IdentityFile: req.IdentityFile,
-	}); err != nil {
+	if err := sshconfig.AppendHost(h.sshConfigPath, newHost); err != nil {
 		http.Error(w, "failed to write ssh config", http.StatusInternalServerError)
 		return
 	}
@@ -1234,20 +1364,72 @@ func (h *Handler) findGH() (string, error) {
 }
 
 func (h *Handler) lookupPRInfo(sess session.Session, cwd string, gitCtx session.GitContext) (string, int) {
-	if gitCtx.Branch == "" {
+	_, remote := sess.(session.GitContextGetter)
+	return h.lookupPR(context.Background(), remote, cwd, gitCtx)
+}
+
+// lookupPR runs `gh pr view` for gitCtx's branch on the panemux host and
+// returns the pull request's URL and number.
+func (h *Handler) lookupPR(parent context.Context, remote bool, cwd string, gitCtx session.GitContext) (string, int) {
+	pr, err := h.lookupPullRequest(parent, remote, cwd, gitCtx, prBasicFields)
+	if err != nil {
 		return "", 0
+	}
+	return strings.TrimSpace(pr.URL), pr.Number
+}
+
+// prBasicFields is what a pane header shows of a pull request.
+const prBasicFields = "url,number"
+
+// ghPullRequest is the part of `gh pr view --json` output panemux reads.
+// closingIssuesReferences is shaped as gh 2.101.0 exports it
+// (api/export_pr.go): id, number, url and repository{id, name, owner{id, login}}.
+type ghPullRequest struct {
+	URL           string `json:"url"`
+	Title         string `json:"title"`
+	ClosingIssues []struct {
+		URL        string `json:"url"`
+		Repository struct {
+			Name  string `json:"name"`
+			Owner struct {
+				Login string `json:"login"`
+			} `json:"owner"`
+		} `json:"repository"`
+		Number int `json:"number"`
+	} `json:"closingIssuesReferences"`
+	Number int `json:"number"`
+}
+
+// errGHUnknownJSONField is a `gh pr view` that refused a --json field this
+// gh does not have: closingIssuesReferences before gh 2.72.0. gh checks the
+// fields before it contacts GitHub, and fails the whole call.
+var errGHUnknownJSONField = errors.New("gh does not know a requested --json field")
+
+// errNoPullRequest is a lookup that found no pull request, or could not run.
+var errNoPullRequest = errors.New("no pull request")
+
+// lookupPullRequest runs `gh pr view --json <fields>` for gitCtx's branch on
+// the panemux host. remote is whether cwd is on another host, where `gh`
+// cannot run inside it: the repository is then named from its origin URL,
+// and without one there is no lookup. The error is errGHUnknownJSONField
+// when gh refused a field, and errNoPullRequest otherwise.
+func (h *Handler) lookupPullRequest(
+	parent context.Context, remote bool, cwd string, gitCtx session.GitContext, fields string,
+) (ghPullRequest, error) {
+	if gitCtx.Branch == "" {
+		return ghPullRequest{}, errNoPullRequest
 	}
 
 	ghPath, err := h.findGH()
 	if err != nil {
-		return "", 0
+		return ghPullRequest{}, errNoPullRequest
 	}
 
 	timeout := prLookupTimeout
 	if timeout <= 0 {
 		timeout = 5 * time.Second
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 	cmd := exec.CommandContext(
 		ctx,
@@ -1256,31 +1438,32 @@ func (h *Handler) lookupPRInfo(sess session.Session, cwd string, gitCtx session.
 		"view",
 		gitCtx.Branch,
 		"--json",
-		"url,number",
+		fields,
 	)
 	if repoSpec := h.repoSpecFromOriginURL(gitCtx.OriginURL); repoSpec != "" {
 		cmd.Args = append(cmd.Args, "--repo", repoSpec)
-	} else if _, ok := sess.(session.GitContextGetter); ok {
+	} else if remote {
 		// Remote SSH-backed sessions may point at repositories that do not exist
 		// on the local filesystem. Without an origin-derived repo spec, `gh`
 		// cannot resolve PR metadata for that remote-only checkout.
-		return "", 0
+		return ghPullRequest{}, errNoPullRequest
 	} else {
 		cmd.Dir = cwd
 	}
 	out, err := cmd.Output()
 	if err != nil {
-		return "", 0
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && strings.Contains(string(exitErr.Stderr), "Unknown JSON field") {
+			return ghPullRequest{}, errGHUnknownJSONField
+		}
+		return ghPullRequest{}, errNoPullRequest
 	}
 
-	var resp struct {
-		URL    string `json:"url"`
-		Number int    `json:"number"`
-	}
+	var resp ghPullRequest
 	if err := json.Unmarshal(out, &resp); err != nil {
-		return "", 0
+		return ghPullRequest{}, errNoPullRequest
 	}
-	return strings.TrimSpace(resp.URL), resp.Number
+	return resp, nil
 }
 
 func repoSpecFromOriginURL(origin string) string {
@@ -1462,7 +1645,7 @@ func listRemoteDirectories(cfg session.SSHConfig, path string, showHidden bool) 
 
 func resolveLocalDirectoryBrowsePath(path string) (string, error) {
 	if path == "" || path == "~" {
-		home, err := os.UserHomeDir()
+		home, err := homedir.Dir()
 		if err != nil {
 			return "", fmt.Errorf("getting home directory: %w", err)
 		}
@@ -1470,7 +1653,7 @@ func resolveLocalDirectoryBrowsePath(path string) (string, error) {
 	}
 
 	if strings.HasPrefix(path, "~/") {
-		home, err := os.UserHomeDir()
+		home, err := homedir.Dir()
 		if err != nil {
 			return "", fmt.Errorf("getting home directory: %w", err)
 		}

@@ -339,3 +339,79 @@ describe('usePaneSettings', () => {
     })
   })
 })
+
+describe('usePaneSettings restart policy', () => {
+  const pane = {
+    id: 'api',
+    type: 'local' as const,
+    shell: '/bin/bash',
+    title: 'API',
+    cwd: '/workspace/user/project',
+  }
+  const layout = { direction: 'horizontal' as const, children: [{ size: 100, pane }] }
+
+  function restartCalls() {
+    return vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes('/restart'))
+  }
+
+  async function save(updated: Record<string, unknown>) {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }))
+    const { result } = renderHook(() => usePaneSettings(layout, vi.fn()))
+    act(() => result.current.openSettings(pane))
+    await act(async () => {
+      await result.current.saveSettings({ ...pane, ...updated })
+    })
+  }
+
+  // Restarting kills the shell running in the pane, so it must happen only
+  // when something about the session itself changed. Board settings, the
+  // title and the chrome toggles do not.
+  it('does not restart when only agent_board changed', async () => {
+    await save({ agent_board: { enabled: true, mode: 'both' } })
+    expect(restartCalls()).toHaveLength(0)
+  })
+
+  it('does not restart when only the title changed', async () => {
+    await save({ title: 'Renamed' })
+    expect(restartCalls()).toHaveLength(0)
+  })
+
+  it('restarts when the shell changed', async () => {
+    await save({ shell: '/bin/zsh' })
+    expect(restartCalls()).toHaveLength(1)
+  })
+
+  it('restarts when the working directory changed', async () => {
+    await save({ cwd: '/workspace/user/other' })
+    expect(restartCalls()).toHaveLength(1)
+  })
+
+  it('restarts when the pane type changed', async () => {
+    await save({ type: 'ssh', connection: 'prod' })
+    expect(restartCalls()).toHaveLength(1)
+  })
+
+  it('restarts when an ssh pane is pointed at a different connection', async () => {
+    // The case above changes the type and the connection together, so it
+    // cannot tell which of the two asked for the restart. This one changes
+    // only the connection: without it, dropping `connection` from
+    // sessionFields leaves the whole suite green while a pane keeps running
+    // against the host it was moved off.
+    const sshPane = {
+      id: 'api',
+      type: 'ssh' as const,
+      connection: 'staging',
+      title: 'API',
+    }
+    const sshLayout = { direction: 'horizontal' as const, children: [{ size: 100, pane: sshPane }] }
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }))
+    const { result } = renderHook(() => usePaneSettings(sshLayout, vi.fn()))
+    act(() => result.current.openSettings(sshPane))
+    await act(async () => {
+      await result.current.saveSettings({ ...sshPane, connection: 'prod-web' })
+    })
+
+    expect(restartCalls()).toHaveLength(1)
+  })
+})

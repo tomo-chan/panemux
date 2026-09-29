@@ -2,21 +2,82 @@ import React, { useState, useCallback, useEffect, useMemo } from 'react'
 import { SplitContainer, LayoutActionsContext } from './components/SplitContainer'
 import { PaneSettingsDialog } from './components/PaneSettingsDialog'
 import { AddSSHHostDialog } from './components/AddSSHHostDialog'
+import { ConfirmDialog } from './components/ConfirmDialog'
 import { WorkspaceTabs } from './components/WorkspaceTabs'
+import { CommandPalette } from './components/CommandPalette'
+import { CommandHistoryPanel } from './components/CommandHistoryPanel'
+import { BoardDashboardPanel } from './components/BoardDashboardPanel'
+import { TaskDashboard } from './components/TaskDashboard'
+import type { BoardPaneRef } from './components/BoardDashboardPanel'
 import { useLayout } from './hooks/useLayout'
 import { usePaneSettings } from './hooks/usePaneSettings'
 import { useWorkspaceAttentionMonitor } from './hooks/useWorkspaceAttentionMonitor'
 import { useBrowserNotificationPermission } from './hooks/useBrowserNotificationPermission'
 import { useSessionsOverview } from './hooks/useSessionsOverview'
 import { useGitInfoSnapshotMap } from './hooks/useGitInfo'
+import { useBoardSessionToken } from './hooks/useBoardSessionToken'
+import { useTasks } from './hooks/useTasks'
 import { DisplayConfig } from './types'
 import { TERMINAL_FONT_FAMILY } from './utils/fonts'
-import { findPaneById, generatePaneId, layoutContainsPane } from './utils/layoutTree'
+import { collectLeafPanes, findPaneById, generatePaneId, layoutContainsPane } from './utils/layoutTree'
 import type { MovePanePlacement } from './hooks/useLayout'
 import type { WorkspacePaneSummary, WorkspaceSummary } from './components/WorkspaceTabs'
-import type { GitInfo, LayoutChild, LayoutNode, SessionInfo, SSHConfigHost } from './schemas'
+import type { Workspace, GitInfo, LayoutChild, LayoutNode, SessionInfo, SSHConfigHost, Task } from './schemas'
+import {
+  DEFAULT_TASK_DASHBOARD_SHORTCUT,
+  formatShortcut,
+  isShortcut,
+  paneConfigForTask,
+  waitingCount,
+} from './utils/taskBoard'
+import type { TaskOpenAction } from './utils/taskBoard'
 
 const DEFAULT_DISPLAY: DisplayConfig = { show_header: true, show_status_bar: true }
+
+// The two layers of issue #252: the task dashboard, and the workspaces with
+// their panes. The workspaces stay mounted while the dashboard is shown, so
+// every terminal keeps its connection and scrollback.
+type Layer = 'tasks' | 'workspaces'
+
+// How long a pane opened from the dashboard stays outlined.
+const TASK_PANE_FLASH_MS = 1800
+
+const cornerButtonStyle: React.CSSProperties = {
+  padding: '6px 10px',
+  backgroundColor: '#252526',
+  color: '#888',
+  border: '1px solid #444',
+  borderRadius: '4px',
+  fontFamily: TERMINAL_FONT_FAMILY,
+  fontSize: '11px',
+  cursor: 'pointer',
+}
+
+const tasksButtonStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+  flexShrink: 0,
+  padding: '0 14px',
+  minHeight: 34,
+  backgroundColor: '#26303c',
+  color: '#dbe8f5',
+  border: 'none',
+  borderRight: '1px solid #333842',
+  fontFamily: TERMINAL_FONT_FAMILY,
+  fontSize: '12px',
+  cursor: 'pointer',
+  whiteSpace: 'nowrap',
+}
+
+const tasksBadgeStyle: React.CSSProperties = {
+  backgroundColor: '#e2b86b',
+  color: '#1b1c1f',
+  borderRadius: 999,
+  padding: '0 6px',
+  fontSize: '11px',
+  fontWeight: 600,
+}
 
 export const App: React.FC = () => {
   const {
@@ -44,6 +105,9 @@ export const App: React.FC = () => {
   const { isOpen, currentPane, sshConnectionNames, saveError, isSaving, openSettings, closeSettings, saveSettings, addSSHConfigHost, detectShell, browseDirectories } =
     usePaneSettings(layout, updateSizes)
 
+  // The workspace whose deletion is being confirmed. The title is kept
+  // alongside the id so the question survives the list changing underneath it.
+  const [workspacePendingDelete, setWorkspacePendingDelete] = useState<{ id: string; title: string } | null>(null)
   const [isAddSSHHostOpen, setIsAddSSHHostOpen] = useState(false)
   const [addSSHHostError, setAddSSHHostError] = useState<string | null>(null)
   const [isAddSSHHostSaving, setIsAddSSHHostSaving] = useState(false)
@@ -51,6 +115,25 @@ export const App: React.FC = () => {
   const [movePaneError, setMovePaneError] = useState<string | null>(null)
   const [pendingFocusedPaneId, setPendingFocusedPaneId] = useState<string | null>(null)
   const sessionsById = useSessionsOverview(Boolean(workspaces))
+  const { token: boardToken, commandCenterEnabled, agentBoardEnabled } = useBoardSessionToken()
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false)
+  const [isCommandHistoryOpen, setIsCommandHistoryOpen] = useState(false)
+  const [isBoardDashboardOpen, setIsBoardDashboardOpen] = useState(false)
+  const boardDashboardAvailable = agentBoardEnabled && boardToken !== ''
+  const [layer, setLayer] = useState<Layer>('workspaces')
+  const tasksState = useTasks(layer === 'tasks')
+  const [flashPaneId, setFlashPaneId] = useState<string | null>(null)
+  // display.task_dashboard_shortcut, which GET /api/display reports already
+  // defaulted; the fallback covers only the moment before it arrives.
+  const taskShortcutKey = displayConfig?.task_dashboard_shortcut ?? DEFAULT_TASK_DASHBOARD_SHORTCUT
+  const taskShortcut = useMemo(() => {
+    const isMac = /Mac|iPhone|iPad/.test(navigator.userAgent)
+    return {
+      label: formatShortcut(taskShortcutKey, isMac),
+      aria: `${isMac ? 'Meta' : 'Control'}+Shift+${taskShortcutKey.toUpperCase()}`,
+    }
+  }, [taskShortcutKey])
+  const workspaceLayerRef = React.useRef<HTMLDivElement>(null)
 
   const paneMetadataByID = useMemo(() => {
     const metadata = new Map<string, { paneTitle: string; workspaceId: string; workspaceTitle: string }>()
@@ -64,6 +147,10 @@ export const App: React.FC = () => {
   }, [workspaces])
   const overviewPaneIds = useMemo(() => Array.from(paneMetadataByID.keys()), [paneMetadataByID])
   const gitInfoById = useGitInfoSnapshotMap(overviewPaneIds)
+
+  // Panes configured for the board, whether or not they have reported. The
+  // dashboard needs these to tell "never joined" from "not configured".
+  const boardPanes = useMemo(() => collectBoardPanes(workspaces?.items ?? []), [workspaces])
   const workspaceSummaries = useMemo(() => {
     const summaries: Record<string, WorkspaceSummary> = {}
     if (!workspaces) return summaries
@@ -90,6 +177,9 @@ export const App: React.FC = () => {
   }, [attentionPaneIds, gitInfoById, sessionsById, workspaces])
 
   const activeWorkspaceId = workspaces?.active ?? null
+  // From the last collection: the dashboard collects only while it is shown,
+  // so this is how many tasks were waiting when it was last looked at.
+  const tasksWaiting = waitingCount(tasksState.data?.tasks ?? [])
   const maximizedPaneId = useMemo(() => {
     if (!activeWorkspaceId || !layout) return null
     const paneId = maximizedPaneIdsByWorkspace[activeWorkspaceId] ?? null
@@ -191,6 +281,69 @@ export const App: React.FC = () => {
   useWorkspaceAttentionMonitor({ workspaces, maximizedPaneId, onAttention: notifyAttention })
   useBrowserNotificationPermission()
 
+  // Global command center palette shortcut: Cmd/Ctrl+Shift+K, deliberately
+  // not plain Cmd/Ctrl+K (already bound in many shells/readline setups and
+  // would collide with pane-local terminal input) — see docs/ui-design.md's
+  // Agent Board UI section. Registered on the capture phase so it reaches
+  // this handler even when a terminal pane (which owns its own keydown
+  // handling) currently has focus.
+  //
+  // Neither this nor the board's shortcut below opens anything while the task
+  // dashboard is shown: both overlays live in the workspace layer, which is
+  // inert then, so they would be drawn over the dashboard and take no input.
+  useEffect(() => {
+    if (!commandCenterEnabled || layer === 'tasks') return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const modifier = event.metaKey || event.ctrlKey
+      if (modifier && event.shiftKey && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        setIsCommandPaletteOpen((open) => !open)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown, true)
+    return () => window.removeEventListener('keydown', handleKeyDown, true)
+  }, [commandCenterEnabled, layer])
+
+  // Global agent board dashboard shortcut: Cmd/Ctrl+Shift+B, on the capture
+  // phase for the same reason as the command palette's own Cmd/Ctrl+Shift+K
+  // above — it must reach this handler even when a terminal pane currently
+  // has focus. See docs/ui-design.md's Agent Board UI section.
+  useEffect(() => {
+    if (!boardDashboardAvailable || layer === 'tasks') return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const modifier = event.metaKey || event.ctrlKey
+      if (modifier && event.shiftKey && event.key.toLowerCase() === 'b') {
+        event.preventDefault()
+        setIsBoardDashboardOpen((open) => !open)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown, true)
+    return () => window.removeEventListener('keydown', handleKeyDown, true)
+  }, [boardDashboardAvailable, layer])
+
+  // The same reason from the other side: an overlay already open when the
+  // dashboard appears is closed rather than left stranded above it.
+  useEffect(() => {
+    if (layer !== 'tasks') return
+    setIsCommandPaletteOpen(false)
+    setIsCommandHistoryOpen(false)
+    setIsBoardDashboardOpen(false)
+  }, [layer])
+
+  // Layer switch: Cmd/Ctrl+Shift+<display.task_dashboard_shortcut>, on the
+  // capture phase like the palette's and the board's shortcuts above, so it
+  // still fires while a terminal pane has focus.
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (isShortcut(event, taskShortcutKey)) {
+        event.preventDefault()
+        setLayer((current) => current === 'tasks' ? 'workspaces' : 'tasks')
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown, true)
+    return () => window.removeEventListener('keydown', handleKeyDown, true)
+  }, [taskShortcutKey])
+
   const handleAddSSHHost = useCallback(async (host: SSHConfigHost) => {
     setIsAddSSHHostSaving(true)
     setAddSSHHostError(null)
@@ -228,6 +381,69 @@ export const App: React.FC = () => {
     setPendingFocusedPaneId(paneId)
     void setActiveWorkspace(workspaceId)
   }, [clearPaneAttention, clearWorkspaceAttention, setActiveWorkspace])
+
+  // Opening a task from the dashboard: go to the pane it runs in (the pane
+  // attached to its tmux session, or the local / ssh pane an agent outside
+  // tmux was started from), or create one in the active workspace that
+  // attaches to its tmux session (`tmux new-session -A` attaches to the
+  // running session).
+  // The tmux sessions a pane is being created for. Until createPane resolves
+  // and the workspaces carry the new pane, the task still reads as having
+  // none, so a second Open would create a second pane attached to it.
+  const openingTaskSessionsRef = React.useRef(new Set<string>())
+
+  const handleOpenTask = useCallback((task: Task, action: TaskOpenAction) => {
+    if (action.kind === 'unavailable') return
+    if (action.kind === 'goto') {
+      setLayer('workspaces')
+      setFlashPaneId(action.pane.paneId)
+      handleSelectWorkspacePaneSummary(action.pane.workspaceId, action.pane.paneId)
+      return
+    }
+
+    const pane = paneConfigForTask(task, generatePaneId())
+    if (!pane) return
+    const sessionKey = `${task.host}\u0000${pane.tmux_session}`
+    setLayer('workspaces')
+    if (openingTaskSessionsRef.current.has(sessionKey)) return
+    openingTaskSessionsRef.current.add(sessionKey)
+    setCreatePaneError(null)
+    void createPane(pane, { type: 'workspace-edge', edge: 'right' })
+      .then(() => {
+        setActivePaneId(pane.id)
+        setFlashPaneId(pane.id)
+        setPendingFocusedPaneId(pane.id)
+      })
+      .catch((err) => {
+        setCreatePaneError(err instanceof Error ? err.message : 'Something went wrong')
+      })
+      .finally(() => {
+        openingTaskSessionsRef.current.delete(sessionKey)
+      })
+  }, [createPane, handleSelectWorkspacePaneSummary])
+
+  // While the dashboard covers the workspaces, nothing behind it can take
+  // focus or keystrokes: a terminal that kept focus would otherwise receive
+  // whatever is typed into the dashboard.
+  useEffect(() => {
+    const workspaceLayer = workspaceLayerRef.current
+    if (!workspaceLayer) return
+    if (layer === 'tasks') workspaceLayer.setAttribute('inert', '')
+    else workspaceLayer.removeAttribute('inert')
+  }, [layer])
+
+  useEffect(() => {
+    if (!flashPaneId) return
+    const timeoutId = window.setTimeout(() => setFlashPaneId(null), TASK_PANE_FLASH_MS)
+    return () => window.clearTimeout(timeoutId)
+  }, [flashPaneId])
+
+  useEffect(() => {
+    if (!flashPaneId) return
+    const pane = document.querySelector<HTMLElement>(`[data-pane-id="${escapeAttributeValue(flashPaneId)}"]`)
+    pane?.classList.add('panemux-pane-task-flash')
+    return () => pane?.classList.remove('panemux-pane-task-flash')
+  }, [flashPaneId, workspaces])
 
   useEffect(() => {
     if (!pendingFocusedPaneId) return
@@ -312,172 +528,251 @@ export const App: React.FC = () => {
       activePaneId,
       setActivePaneId,
     }}>
-      <div
-        style={{
-          position: 'relative',
-          width: '100%',
-          height: '100%',
-          display: 'flex',
-          flexDirection: workspaces?.tab_position === 'bottom'
-            ? 'column-reverse'
-            : workspaces?.tab_position === 'left'
-              ? 'row'
-              : workspaces?.tab_position === 'right'
-                ? 'row-reverse'
-                : 'column',
-          backgroundColor: '#1a1b1e',
-        }}
-      >
-        {workspaces && (
-          <WorkspaceTabs
-            workspaces={workspaces.items}
-            activeWorkspaceId={workspaces.active}
-            tabPosition={workspaces.tab_position}
-            verticalBarWidth={workspaces.vertical_bar_width}
-            dragSourcePaneId={dragSourcePaneId}
-            onMovePaneToWorkspace={(sourcePaneId, workspaceId) => {
-              handleMovePane(sourcePaneId, { type: 'workspace-tab', workspaceId })
-              setDragSourcePaneId(null)
+      <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+        <div
+          ref={workspaceLayerRef}
+          data-testid="workspace-layer"
+          style={{
+            position: 'relative',
+            width: '100%',
+            height: '100%',
+            display: 'flex',
+            flexDirection: workspaces?.tab_position === 'bottom'
+              ? 'column-reverse'
+              : workspaces?.tab_position === 'left'
+                ? 'row'
+                : workspaces?.tab_position === 'right'
+                  ? 'row-reverse'
+                  : 'column',
+            backgroundColor: '#1a1b1e',
+          }}
+        >
+          {workspaces && (
+            <WorkspaceTabs
+              workspaces={workspaces.items}
+              activeWorkspaceId={workspaces.active}
+              tabPosition={workspaces.tab_position}
+              verticalBarWidth={workspaces.vertical_bar_width}
+              dragSourcePaneId={dragSourcePaneId}
+              onMovePaneToWorkspace={(sourcePaneId, workspaceId) => {
+                handleMovePane(sourcePaneId, { type: 'workspace-tab', workspaceId })
+                setDragSourcePaneId(null)
+              }}
+              onSelect={setActiveWorkspace}
+              leading={(
+                <button
+                  type="button"
+                  onClick={() => setLayer('tasks')}
+                  aria-label={tasksWaiting > 0 ? `Tasks, ${tasksWaiting} waiting for input when last checked` : 'Tasks'}
+                  title={`Task dashboard (${taskShortcut.label})`}
+                  aria-keyshortcuts={taskShortcut.aria}
+                  style={tasksButtonStyle}
+                >
+                  ← Tasks
+                  {tasksWaiting > 0 && <span style={tasksBadgeStyle}>{tasksWaiting}</span>}
+                </button>
+              )}
+              attentionWorkspaceIds={attentionWorkspaceIds}
+              onClearAttention={clearWorkspaceAttention}
+              workspaceSummaries={workspaceSummaries}
+              onSelectPaneFromSummary={handleSelectWorkspacePaneSummary}
+              onStartPaneDragFromSummary={setDragSourcePaneId}
+              onEndPaneDragFromSummary={() => setDragSourcePaneId(null)}
+              activePaneId={activePaneId}
+              onAdd={addWorkspace}
+              onRename={renameWorkspace}
+              onTabPositionChange={setWorkspaceTabPosition}
+              onVerticalBarWidthChange={setWorkspaceVerticalBarWidth}
+              onDelete={(workspaceId) => {
+                const workspace = workspaces.items.find((item) => item.id === workspaceId)
+                if (!workspace) return
+                setWorkspacePendingDelete({ id: workspace.id, title: workspace.title })
+              }}
+            />
+          )}
+          <div style={{ position: 'relative', flex: 1, minWidth: 0, minHeight: 0 }}>
+            <SplitContainer layout={layout} onLayoutChange={updateSizes} />
+            {createPaneError && (
+              <div
+                role="alert"
+                style={{
+                  position: 'absolute',
+                  top: 12,
+                  right: 12,
+                  zIndex: 30,
+                  maxWidth: 320,
+                  padding: '8px 12px',
+                  border: '1px solid #7f1d1d',
+                  borderRadius: 6,
+                  backgroundColor: '#2f1313',
+                  color: '#fca5a5',
+                  fontFamily: TERMINAL_FONT_FAMILY,
+                  fontSize: '12px',
+                  boxShadow: '0 8px 20px rgba(0, 0, 0, 0.35)',
+                }}
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: 12,
+                  }}
+                >
+                  <span style={{ flex: 1 }}>Failed to create terminal: {createPaneError}</span>
+                  <button
+                    type="button"
+                    aria-label="Dismiss create terminal error"
+                    onClick={() => setCreatePaneError(null)}
+                    style={{
+                      appearance: 'none',
+                      border: 'none',
+                      background: 'transparent',
+                      color: '#fca5a5',
+                      cursor: 'pointer',
+                      fontFamily: TERMINAL_FONT_FAMILY,
+                      fontSize: '12px',
+                      lineHeight: 1,
+                      padding: 0,
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+              </div>
+            )}
+            {movePaneError && (
+              <div
+                role="alert"
+                style={{
+                  position: 'absolute',
+                  top: createPaneError ? 72 : 12,
+                  right: 12,
+                  zIndex: 30,
+                  maxWidth: 320,
+                  padding: '8px 12px',
+                  border: '1px solid #7f1d1d',
+                  borderRadius: 6,
+                  backgroundColor: '#2f1313',
+                  color: '#fca5a5',
+                  fontFamily: TERMINAL_FONT_FAMILY,
+                  fontSize: '12px',
+                  boxShadow: '0 8px 20px rgba(0, 0, 0, 0.35)',
+                }}
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: 12,
+                  }}
+                >
+                  <span style={{ flex: 1 }}>Failed to move terminal: {movePaneError}</span>
+                  <button
+                    type="button"
+                    aria-label="Dismiss move error"
+                    onClick={() => setMovePaneError(null)}
+                    style={{
+                      appearance: 'none',
+                      border: 'none',
+                      background: 'transparent',
+                      color: '#fca5a5',
+                      cursor: 'pointer',
+                      fontFamily: TERMINAL_FONT_FAMILY,
+                      fontSize: '12px',
+                      lineHeight: 1,
+                      padding: 0,
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+          <PaneSettingsDialog
+            isOpen={isOpen}
+            pane={currentPane}
+            sshConnectionNames={sshConnectionNames}
+            saveError={saveError}
+            isSaving={isSaving}
+            onSave={saveSettings}
+            onClose={closeSettings}
+            onAddSSHHost={() => setIsAddSSHHostOpen(true)}
+            onDetectShell={detectShell}
+            onBrowseDirectories={browseDirectories}
+          />
+          <ConfirmDialog
+            isOpen={workspacePendingDelete !== null}
+            title="Delete workspace"
+            message={`Delete workspace "${workspacePendingDelete?.title ?? ''}"? Its panes are closed with it.`}
+            confirmLabel="Delete"
+            isDestructive
+            onConfirm={() => {
+              const pending = workspacePendingDelete
+              setWorkspacePendingDelete(null)
+              if (pending) void deleteWorkspace(pending.id)
             }}
-            onSelect={setActiveWorkspace}
-            attentionWorkspaceIds={attentionWorkspaceIds}
-            onClearAttention={clearWorkspaceAttention}
-            workspaceSummaries={workspaceSummaries}
-            onSelectPaneFromSummary={handleSelectWorkspacePaneSummary}
-            onStartPaneDragFromSummary={setDragSourcePaneId}
-            onEndPaneDragFromSummary={() => setDragSourcePaneId(null)}
-            activePaneId={activePaneId}
-            onAdd={addWorkspace}
-            onRename={renameWorkspace}
-            onTabPositionChange={setWorkspaceTabPosition}
-            onVerticalBarWidthChange={setWorkspaceVerticalBarWidth}
-            onDelete={(workspaceId) => {
-              const workspace = workspaces.items.find((item) => item.id === workspaceId)
-              if (!workspace) return
-              if (window.confirm(`Delete workspace "${workspace.title}"?`)) {
-                void deleteWorkspace(workspaceId)
-              }
-            }}
+            onCancel={() => setWorkspacePendingDelete(null)}
+          />
+          <AddSSHHostDialog
+            isOpen={isAddSSHHostOpen}
+            isSaving={isAddSSHHostSaving}
+            saveError={addSSHHostError}
+            onSave={handleAddSSHHost}
+            onClose={() => setIsAddSSHHostOpen(false)}
+          />
+          {(commandCenterEnabled || boardDashboardAvailable) && (
+            <div style={{ position: 'absolute', bottom: 12, right: 12, zIndex: 20, display: 'flex', gap: '8px' }}>
+              {commandCenterEnabled && (
+                <button
+                  type="button"
+                  aria-label="Open command center history"
+                  onClick={() => setIsCommandHistoryOpen(true)}
+                  title="Command center history"
+                  style={cornerButtonStyle}
+                >
+                  Command History
+                </button>
+              )}
+              {boardDashboardAvailable && (
+                <button
+                  type="button"
+                  aria-label="Open agent board"
+                  onClick={() => setIsBoardDashboardOpen(true)}
+                  title="Agent board"
+                  style={cornerButtonStyle}
+                >
+                  Agent Board
+                </button>
+              )}
+            </div>
+          )}
+          <CommandPalette
+            isOpen={isCommandPaletteOpen && commandCenterEnabled}
+            token={boardToken}
+            onClose={() => setIsCommandPaletteOpen(false)}
+          />
+          <CommandHistoryPanel
+            isOpen={isCommandHistoryOpen && commandCenterEnabled}
+            token={boardToken}
+            onClose={() => setIsCommandHistoryOpen(false)}
+          />
+          <BoardDashboardPanel
+            isOpen={isBoardDashboardOpen && boardDashboardAvailable}
+            token={boardToken}
+            boardPanes={boardPanes}
+            onClose={() => setIsBoardDashboardOpen(false)}
+          />
+        </div>
+        {layer === 'tasks' && (
+          <TaskDashboard
+            tasksState={tasksState}
+            workspaces={workspaces?.items ?? []}
+            onOpenTask={handleOpenTask}
+            onShowWorkspaces={() => setLayer('workspaces')}
+            shortcut={taskShortcut}
           />
         )}
-        <div style={{ position: 'relative', flex: 1, minWidth: 0, minHeight: 0 }}>
-          <SplitContainer layout={layout} onLayoutChange={updateSizes} />
-          {createPaneError && (
-            <div
-              role="alert"
-              style={{
-                position: 'absolute',
-                top: 12,
-                right: 12,
-                zIndex: 30,
-                maxWidth: 320,
-                padding: '8px 12px',
-                border: '1px solid #7f1d1d',
-                borderRadius: 6,
-                backgroundColor: '#2f1313',
-                color: '#fca5a5',
-                fontFamily: TERMINAL_FONT_FAMILY,
-                fontSize: '12px',
-                boxShadow: '0 8px 20px rgba(0, 0, 0, 0.35)',
-              }}
-            >
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  gap: 12,
-                }}
-              >
-                <span style={{ flex: 1 }}>Failed to create terminal: {createPaneError}</span>
-                <button
-                  type="button"
-                  aria-label="Dismiss create terminal error"
-                  onClick={() => setCreatePaneError(null)}
-                  style={{
-                    appearance: 'none',
-                    border: 'none',
-                    background: 'transparent',
-                    color: '#fca5a5',
-                    cursor: 'pointer',
-                    fontFamily: TERMINAL_FONT_FAMILY,
-                    fontSize: '12px',
-                    lineHeight: 1,
-                    padding: 0,
-                  }}
-                >
-                  ×
-                </button>
-              </div>
-            </div>
-          )}
-          {movePaneError && (
-            <div
-              role="alert"
-              style={{
-                position: 'absolute',
-                top: createPaneError ? 72 : 12,
-                right: 12,
-                zIndex: 30,
-                maxWidth: 320,
-                padding: '8px 12px',
-                border: '1px solid #7f1d1d',
-                borderRadius: 6,
-                backgroundColor: '#2f1313',
-                color: '#fca5a5',
-                fontFamily: TERMINAL_FONT_FAMILY,
-                fontSize: '12px',
-                boxShadow: '0 8px 20px rgba(0, 0, 0, 0.35)',
-              }}
-            >
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  gap: 12,
-                }}
-              >
-                <span style={{ flex: 1 }}>Failed to move terminal: {movePaneError}</span>
-                <button
-                  type="button"
-                  aria-label="Dismiss move error"
-                  onClick={() => setMovePaneError(null)}
-                  style={{
-                    appearance: 'none',
-                    border: 'none',
-                    background: 'transparent',
-                    color: '#fca5a5',
-                    cursor: 'pointer',
-                    fontFamily: TERMINAL_FONT_FAMILY,
-                    fontSize: '12px',
-                    lineHeight: 1,
-                    padding: 0,
-                  }}
-                >
-                  ×
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-        <PaneSettingsDialog
-          isOpen={isOpen}
-          pane={currentPane}
-          sshConnectionNames={sshConnectionNames}
-          saveError={saveError}
-          isSaving={isSaving}
-          onSave={saveSettings}
-          onClose={closeSettings}
-          onAddSSHHost={() => setIsAddSSHHostOpen(true)}
-          onDetectShell={detectShell}
-          onBrowseDirectories={browseDirectories}
-        />
-        <AddSSHHostDialog
-          isOpen={isAddSSHHostOpen}
-          isSaving={isAddSSHHostSaving}
-          saveError={addSSHHostError}
-          onSave={handleAddSSHHost}
-          onClose={() => setIsAddSSHHostOpen(false)}
-        />
       </div>
     </LayoutActionsContext.Provider>
   )
@@ -523,31 +818,30 @@ function collectPaneMetadata(
   workspaceTitle: string,
   metadata: Map<string, { paneTitle: string; workspaceId: string; workspaceTitle: string }>,
 ) {
-  for (const child of layout.children) {
-    collectChildPaneMetadata(child, workspaceId, workspaceTitle, metadata)
-  }
-}
-
-function collectChildPaneMetadata(
-  child: LayoutChild,
-  workspaceId: string,
-  workspaceTitle: string,
-  metadata: Map<string, { paneTitle: string; workspaceId: string; workspaceTitle: string }>,
-) {
-  if (child.pane && (!child.children || child.children.length === 0)) {
-    metadata.set(child.pane.id, {
-      paneTitle: child.pane.title ?? child.pane.id,
+  for (const pane of collectLeafPanes(layout)) {
+    metadata.set(pane.id, {
+      paneTitle: pane.title ?? pane.id,
       workspaceId,
       workspaceTitle,
     })
-    return
+  }
+}
+
+// collectBoardPanes gathers every pane the config puts on the board, with
+// the operator's own title for it when there is one — a column of raw pane
+// IDs stops being readable as soon as there are more than a couple.
+function collectBoardPanes(items: Workspace[]): BoardPaneRef[] {
+  const panes: BoardPaneRef[] = []
+
+  const walk = (child: LayoutChild) => {
+    if (child.pane?.agent_board?.enabled) panes.push({ id: child.pane.id, title: child.pane.title })
+    for (const nested of child.children ?? []) walk(nested)
+  }
+  for (const workspace of items) {
+    for (const child of workspace.layout.children) walk(child)
   }
 
-  if (!child.children?.length) return
-
-  for (const nestedChild of child.children) {
-    collectChildPaneMetadata(nestedChild, workspaceId, workspaceTitle, metadata)
-  }
+  return panes
 }
 
 function collectWorkspacePaneSummaries(

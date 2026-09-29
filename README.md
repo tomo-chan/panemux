@@ -22,6 +22,8 @@
 - **xterm.js rendering** — full-featured terminal emulation with Unicode and colour support
 - **Single binary** — Go backend embeds the compiled frontend; no separate web server needed
 - **YAML config** — declare your entire layout and SSH connections in one file; defaults to `~/.config/panemux/config.yaml`
+- **Agent Board** — one dashboard for what every pane's coding agent is doing, and a command palette to message them ([setup](#agent-board))
+- **Task dashboard** — every Claude Code and codex session on this machine and on every `ssh_connections` host, by state, whether or not a pane shows it; open one in a pane attached to its tmux session ([usage](#task-dashboard))
 
 ---
 
@@ -115,6 +117,19 @@ Common uses:
 - panemux remembers the last browser-notified prompt per pane, so refreshes, reconnects, and maximize toggles do not re-notify the same prompt replay.
 - Notification permission is requested on the first browser interaction, instead of waiting for the first prompt.
 
+### Task dashboard
+
+- Click **← Tasks** at the start of the workspace bar to see every coding-agent session on this machine and on every host under `ssh_connections`, as columns by state: waiting for input, working, idle, running / unknown, and stopped (the last 7 days, at most 50 per host). **Workspaces** goes back; the panes keep running underneath.
+- Only hosts listed under `ssh_connections` are collected from. A host that exists only in `~/.ssh/config` — including one added with **Add SSH Host** — can be opened in a pane but does not appear on the dashboard. To add it, list just its name under `ssh_connections`; the connection details are taken from `~/.ssh/config` ([SSH connections](#ssh-connections)).
+- **Cmd/Ctrl+Shift+S** switches between the dashboard and the workspaces, even while a terminal has focus. Change the letter with `display.task_dashboard_shortcut` in `config.yaml` (one letter; `K` and `B` are taken).
+- The **← Tasks** button counts the sessions waiting for input as of the last time the dashboard was shown. The dashboard collects only while it is on screen, every 10 seconds.
+- A session running inside `tmux` can be opened: **Open** adds a `tmux` (or `ssh_tmux`) pane attached to its tmux session to the current workspace, and **Go to pane** jumps to a pane already attached to it. A session running outside tmux, or stopped, cannot be opened in a pane.
+- Each SSH host gets one connection of its own for the dashboard, separate from its panes. An unreachable host shows its error and a **Reconnect** button without hiding the other hosts.
+- A card links the repository, branch and pull request of the task's directory, the issues that pull request closes (needs `gh` 2.72.0 or later), and references such as `JIRA-123` in the branch name or pull request title. References are set up in `config.yaml` under `task_dashboard.autolinks`, in the same shape as a GitHub repository's autolink references: `key_prefix: JIRA-` with `url_template: https://jira.example.com/JIRA-<num>` links `JIRA-123` to `https://jira.example.com/JIRA-123`. The tracker itself is never queried.
+- Claude Code sessions are read from the files Claude Code keeps under `~/.claude` on each host, and codex sessions from `~/.codex` (the session log a running `codex` holds open, and its turn history when `sqlite3` is installed). A codex waiting for command approval shows as working, since codex records nothing for it. A `codex` started without `--no-daemon` runs its session in codex's shared daemon, which the dashboard shows as a card of its own that cannot be opened in a pane.
+- **New task** starts `claude` or `codex` in a tmux session of its own on the chosen host, and **Resume** restarts a stopped session there. If codex stops at a start-up screen (trusting the directory, a new model), open the task's pane to answer it.
+- Set `task_dashboard.summary.enabled: true` in `config.yaml` to have `claude -p` on this machine summarize each Claude Code session: what it is doing and the work left, on its card and in its detail panel. It sends the text of the conversation (never tool output) to Claude under this machine's account, so it is off by default.
+
 ### Choosing pane types
 
 - Use `local` for ordinary shells on the same machine as the panemux server.
@@ -124,12 +139,177 @@ Common uses:
 
 ### SSH and tmux usage
 
-- A pane with `connection: my-host` can use either a named `ssh_connections` entry or a `Host my-host` entry from `~/.ssh/config`.
+- A pane with `connection: my-host` can use either a named `ssh_connections` entry or a `Host my-host` entry from `~/.ssh/config`. Only `ssh_connections` entries are task dashboard hosts.
 - `tmux` and `ssh_tmux` panes automatically create the target tmux session if it does not already exist.
 - In `tmux` and `ssh_tmux` panes, plain drag continues to follow tmux mouse behavior. Use `Option` + drag on macOS or `Shift` + drag on Linux and Windows to force browser-side text selection.
 - Set `cwd` on `local`, `ssh`, or `ssh_tmux` panes when you want the shell to start in a specific directory.
 - In the pane settings dialog, `Working Directory` can be chosen from a browsable directory tree for both local and SSH-backed panes. Hidden directories are available through a toggle.
 - Pane headers resolve Git and PR metadata from the live working context, including interactive `codex` and `claude` worktrees for both local and SSH-backed panes. When a valid sibling worktree was detected recently, panemux keeps that worktree pinned after the agent exits until the pane moves to a different repository context. `tmux` and `ssh_tmux` use the currently active tmux pane only.
+
+---
+
+## Agent Board
+
+Agent Board gives you one view of what every coding agent in your panes is doing, and one place to
+message them. Two independent pieces, either of which can be used without the other:
+
+- **Dashboard** — each pane's self-reported status (state, repo, branch, PR, summary), plus the
+  cross-pane message history. Opens from the **Agent Board** button or `Cmd/Ctrl+Shift+B`.
+- **Command center** — a Spotlight-style palette (`Cmd/Ctrl+Shift+K`) where you ask in plain language:
+  *"which panes are blocked?"*, *"tell every pane the branch is frozen"*.
+
+Full design lives in [docs/agent-board.md](docs/agent-board.md).
+
+### Prerequisites
+
+**[agmsg](https://github.com/fujibee/agmsg) must already be installed** on every host whose panes join
+the board — including remote hosts for `ssh`/`ssh_tmux` panes. panemux is tested against **agmsg
+1.2.0**; it reads each host's `VERSION` at startup and logs a warning for anything else, without
+blocking. agmsg promises compatibility only for reading through `scripts/api.sh`, while panemux also
+depends on `send.sh`, `join.sh` and `delivery.sh`, so a different version may work or may misbehave. panemux never installs, updates, or
+manages agmsg; it only detects an existing installation by looking for `scripts/api.sh` under the
+configured path. If it isn't there, panemux logs one warning naming the host and the path it looked in,
+and skips that host — panes there simply stay off the board, and nothing else about them changes.
+
+The command center additionally needs the `claude` CLI on the machine running panemux. It does **not**
+need agmsg.
+
+Remote hosts run these scripts over the SSH exec channel, which does not source `.bashrc`/`.profile`.
+Whatever agmsg needs (`bash`, `node`, `sqlite3`) must be on the non-interactive `PATH` — a common
+surprise when agmsg was installed under `nvm`/`asdf` in an interactive session.
+
+### Configuration
+
+```yaml
+server:
+    host: 127.0.0.1
+    # Required for the command center. Leave empty and panemux generates one on
+    # first run, storing it in ~/.config/panemux/token (never in this file).
+    auth_token: ""
+
+command_center:
+    enabled: true            # default false
+
+agent_board:
+    team: panemux                      # shared agmsg team for all board-enabled panes
+    agmsg_path: ~/.agents/skills/agmsg # ~ is expanded per host, including remote hosts
+
+workspaces:
+    items:
+        - id: default
+          title: Default
+          layout:
+            direction: horizontal
+            children:
+                - pane:
+                    id: api          # this id becomes the pane's agmsg identity
+                    type: local
+                    agent_board:
+                        enabled: true
+                        mode: monitor  # monitor (default) | turn | both | off
+                  size: 50
+```
+
+Pane ids become board addresses, so give them names you will recognize (`api`, `web`, `infra`) rather
+than `pane-1`. `_system` is reserved and rejected at config validation.
+
+You do not have to edit YAML for this: **Pane Settings** in the pane header has a *Join the agent
+board* checkbox and, once ticked, a *Message delivery* picker for the mode. Changes there are saved
+to `config.yaml` like any other pane setting.
+
+### How a pane joins
+
+Joining is automatic — you do not run anything by hand.
+
+1. Start your agent in the pane as usual (`claude`, `codex`, `cursor-agent`, `gemini`, `grok`, or
+   `opencode`). panemux polls every 5s and needs to see it on two consecutive polls.
+2. panemux confirms agmsg exists at `agmsg_path` on that pane's host.
+3. It writes a **one-time instruction into the pane's terminal**, asking the agent to run agmsg's
+   `join.sh` using the pane id as its agmsg agent id, and from then on to send board messages with
+   `send.sh` and to self-report its status periodically.
+
+You will see that instruction appear in the pane, and the agent's replies to it. That is expected —
+it is written into the terminal the same way your own keystrokes are, so nothing happens mid-command
+that you cannot see. It is written once per pane; panemux remembers which panes are done across
+restarts.
+
+The pane id is used deliberately as the agmsg agent id: every board address assumes `from`/`to` are
+pane ids, so an agent that picks its own name breaks addressing.
+
+### Delivery mode, and the one setup step it needs
+
+`agent_board.mode` decides whether messages *reach* a pane's agent. It is worth understanding before
+you pick a value, because the default is the quiet one:
+
+| mode | Writes into your repository | Broadcasts reach the agent |
+|---|---|---|
+| `monitor` (default) | no | **no** — they sit in agmsg until the agent looks |
+| `turn` / `both` | yes, one file | yes |
+
+With `monitor`, panemux does not run agmsg's `delivery.sh` at all, so no delivery hooks exist and the
+board is effectively read-only: panes report their status and you can see it, but a broadcast is not
+pushed to anyone. Choose `turn` or `both` if you want the messaging half to work.
+
+`turn` and `both` have the agent run agmsg's `delivery.sh`, and **agmsg** — not panemux — writes a
+hook file into the pane's project directory. The path is agmsg's own per-type convention
+(`scripts/drivers/types/<type>/type.conf`, `hooks_file=`), and agmsg deliberately rejects any
+non-project-relative value, so it cannot be redirected to a user-scope location:
+
+| agent type | file agmsg writes |
+|---|---|
+| claude-code | `.claude/settings.local.json` |
+| codex | `.codex/hooks.json` |
+| gemini | `.agent/rules/agmsg.md` |
+| opencode | `.opencode/rules/agmsg.md` |
+| cursor | `.cursor/rules/agmsg.mdc` |
+| grok-build | `.grok/rules/agmsg.md` |
+
+These are local, machine-specific files — none of them belong in version control. Rather than editing
+`.gitignore` in every repository you work in, set a global exclude file once per machine:
+
+```sh
+git config --global core.excludesFile ~/.gitignore_global
+cat >> ~/.gitignore_global <<'EOF'
+.claude/settings.local.json
+.codex/hooks.json
+.agent/rules/agmsg.md
+.opencode/rules/agmsg.md
+.cursor/rules/agmsg.mdc
+.grok/rules/agmsg.md
+EOF
+```
+
+Repeat that once on each host that runs `ssh`/`ssh_tmux` panes. Writes are idempotent — each
+`delivery.sh set` strips agmsg's own hook entries before re-adding them — but they persist after the
+pane closes, and panemux never reverts them, including when a pane later sets
+`agent_board.enabled: false`. Removing them is done through agmsg (`delivery.sh set off`), outside
+panemux.
+
+### Checking that it worked
+
+Open the dashboard. A pane appears there only after its agent has actually sent a status report, so
+give it a moment after the agent starts.
+
+Nothing showing up? In order of likelihood:
+
+- **agmsg isn't where panemux looked.** The startup log carries one
+  `no agmsg installation at "<path>" on host "<host>"` warning per affected host. Confirm
+  `<agmsg_path>/scripts/api.sh` exists there.
+- **The agent wasn't detected.** Headless invocations are deliberately ignored (`claude -p`,
+  `codex exec`), so the agent must be running interactively in the pane.
+- **The agent hasn't reported yet.** Status is entirely self-reported; panemux computes nothing. A
+  card older than five minutes is dimmed and marked `stale`.
+- **Remote `PATH`.** See the prerequisites above.
+
+### What the command center can and cannot do
+
+It has exactly three tools: read board status, read message history, and send messages to panes. It
+has **no shell, no filesystem access, and no network access** — it cannot write code, run tests, or
+open pull requests, and it is launched in a way that enforces this rather than relying on it being
+asked nicely (see [docs/security/command-center.md](docs/security/command-center.md#command-center-subprocess-execution)).
+
+A message it sends is an ordinary message to the receiving agent, not a pre-authorized command. That
+agent's own confirmation behavior still applies, so "sent" is not "done".
 
 ---
 
@@ -142,8 +322,10 @@ server:
   port: 8080
   host: "127.0.0.1"
 
-# Named SSH connections (optional — hosts from ~/.ssh/config are also usable directly)
+# Named SSH connections (optional — hosts from ~/.ssh/config are also usable
+# directly in panes). These are also the hosts the task dashboard collects from.
 ssh_connections:
+  gpu-box:            # name only: connects as `Host gpu-box` in ~/.ssh/config
   prod-web:
     host: "192.168.1.10"
     port: 22
@@ -203,13 +385,25 @@ The workspace bar is always available for workspace actions. Newly added workspa
 
 Connections can be defined in two ways:
 
-**In the YAML config** under `ssh_connections` — supports `host`, `user`, `port`, `key_file`, `password`, and `known_hosts_file`.
+**In the YAML config** under `ssh_connections` — supports `host`, `user`, `port`, `key_file`, `password`, and `known_hosts_file`, all optional. An entry can be just a name (`gpu-box:`), in which case its details come from the `~/.ssh/config` `Host` block of the same name. A field set in the entry overrides that block's value for the same setting; the fields left out keep the block's values.
 
-**Via `~/.ssh/config`** — any non-wildcard `Host` entry is automatically available as a `connection` name. `HostName`, `User`, `Port`, and `IdentityFile` are read from the file. This lets you reuse your existing SSH config without duplicating it in YAML.
+**Via `~/.ssh/config`** — any non-wildcard `Host` entry is automatically available as a `connection` name. `HostName`, `User`, `Port`, `IdentityFile`, `ProxyJump`, and `ProxyCommand` are read from the file. This lets you reuse your existing SSH config without duplicating it in YAML.
 
-When the same name appears in both, `ssh_connections` takes precedence.
+The task dashboard collects only from the hosts under `ssh_connections`. A host that exists only in `~/.ssh/config` — including one added from the UI with **Add SSH Host**, which writes `~/.ssh/config` — is usable in panes but is not collected from until its name is listed under `ssh_connections`.
 
-Authentication is attempted in order: configured `key_file` → configured `password` → default key files (`~/.ssh/id_ed25519`, `~/.ssh/id_rsa`, `~/.ssh/id_ecdsa`).
+An entry that sets its own `host` does not take the `Host` block's `ProxyJump` or `ProxyCommand`; leave `host` unset to connect through the route `~/.ssh/config` describes.
+
+Earlier versions added every `~/.ssh/config` host to `ssh_connections` when the config was saved, if `ssh_connections` was not empty. Those entries are not removed automatically; delete the ones you do not want on the task dashboard from `ssh_connections` by hand.
+
+Authentication is attempted in order: the key file (`key_file`, or the `Host` block's `IdentityFile` when `key_file` is not set) → configured `password` → default key files (`~/.ssh/id_ed25519`, `~/.ssh/id_rsa`, `~/.ssh/id_ecdsa`).
+
+---
+
+## Documentation
+
+Start with the [documentation index](docs/README.md). It separates a short product
+[overview](docs/overview.md), concise current-state topic guides, focused deep dives, and the
+[decision log](docs/DECISIONLOG.md) that preserves design history and rejected alternatives.
 
 ---
 

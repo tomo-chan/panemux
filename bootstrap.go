@@ -1,0 +1,601 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"sort"
+	"strings"
+	"time"
+
+	"panemux/internal/board"
+	"panemux/internal/session"
+)
+
+// defaultBootstrapPollInterval matches defaultBoardPollInterval. The
+// bootstrap watcher's own 2-tick debounce (see checkPane) adds roughly one
+// extra interval of latency between an agent process starting and the
+// onboarding instruction actually landing in its PTY; polling every 5s
+// rather than 10s keeps that added latency from being felt twice.
+const defaultBootstrapPollInterval = 5 * time.Second
+
+// bootstrapProbeTimeout bounds an individual remote presence probe
+// checkPane makes. Deliberately shorter than boardStartupProbeTimeout
+// (10s, sized for a one-shot startup call): pollOnce runs every board pane
+// sequentially within one defaultBootstrapPollInterval-wide tick, so an
+// unreachable host's probe must not be allowed to eat most of that budget
+// and delay every other pane queued behind it in the same tick.
+const bootstrapProbeTimeout = 3 * time.Second
+
+// maxBootstrapWriteAttempts bounds how many times checkPane retries a
+// failed (but not short/partial) Session.Write before giving up on a pane
+// for the rest of that session's lifetime. A write that returns n==0 with
+// an error hasn't put anything into the pane yet, so a few retries are
+// safe; see the giveUp/writeAttempts fields for why a *short* write is
+// never retried at all.
+const maxBootstrapWriteAttempts = 3
+
+// boardModeTurn and boardModeBoth mirror internal/config's own (unexported)
+// agentBoardModeTurn/agentBoardModeBoth string values. Duplicated here
+// rather than exported from internal/config because bootstrapWatcher
+// deliberately takes no dependency on internal/config at all — see
+// bootstrapWatcherConfig's own comment.
+const (
+	boardModeMonitor = "monitor"
+	boardModeTurn    = "turn"
+	boardModeBoth    = "both"
+)
+
+// bootstrapWatcherConfig is the precomputed, static input the bootstrap
+// watcher needs. Building it (which panes are board-enabled, which host each
+// lives on, each pane's configured mode, each host's resolved agmsg_path) is
+// the caller's job (board.go's setupBoard) — bootstrapWatcher itself takes
+// no dependency on internal/config, mirroring board.RelayConfig's own
+// existing dependency direction (see relay.go's RelayConfig comment).
+type bootstrapWatcherConfig struct {
+	Manager   *session.Manager
+	PaneHosts map[string]string
+	// PaneModes is a function, not a map, because a pane's mode can change
+	// while panemux runs — the pane settings dialog writes it straight into
+	// config.yaml. A snapshot taken at startup meant a mode set to "both"
+	// never reached the instruction, so agmsg's own delivery stayed off.
+	PaneModes     func() map[string]string
+	ResolvedPaths map[string]string
+	Persist       func(paneIDs []string)
+	Team          string
+}
+
+// bootstrapWatcher polls board-enabled panes for a newly-started, agmsg-
+// detectable coding-agent process and writes a one-time onboarding
+// instruction into that pane's PTY. See docs/agent-board.md's Bootstrap flow
+// section for the full design.
+//
+// No mutex: unlike Relay, every field here is touched only from the single
+// goroutine driving runLoop — nothing else ever reads or writes this
+// watcher's state.
+type bootstrapWatcher struct {
+	manager       *session.Manager
+	paneHosts     map[string]string
+	paneModes     func() map[string]string
+	resolvedPaths map[string]string
+	persist       func(paneIDs []string)
+	bootstrapped  map[string]session.Session
+	pending       map[string]session.Session
+	// givenUp holds panes checkPane will never attempt to write to again for
+	// the life of the current session object: either a Write returned a
+	// nonzero-but-short n (any retry would type on top of an already
+	// half-written line — see checkPane), or a clean (n==0) failure recurred
+	// maxBootstrapWriteAttempts times in a row. Keyed and compared by
+	// session identity exactly like bootstrapped, so a pane that is later
+	// restarted (a new Session object) is eligible again.
+	givenUp map[string]session.Session
+	// writeAttempts counts consecutive clean (n==0) Write failures per pane,
+	// reset on success and on giving up. Not persisted: it only needs to
+	// survive within one session object's lifetime.
+	writeAttempts map[string]int
+	// warned tracks which warning kinds are currently being suppressed for a
+	// pane. A kind is added when its warning is logged and removed when the
+	// condition it reports clears, so each warning is logged once per failing
+	// streak rather than once per tick
+	// (the poll loop would otherwise repeat it for as long as the condition
+	// lasts, which for a dead tmux server or a dropped SSH connection is the
+	// life of the process) and rather than once for the life of the pane (a
+	// failure that returns after a recovery is news again). The kinds are
+	// separate keys because the conditions are independent: one firing must
+	// not silence the others. See #218.
+	warned           map[string]warnedPane
+	team             string
+	persistedPaneIDs []string
+	seeded           bool
+}
+
+// warnedPane is one pane's warning suppression: the kinds currently being
+// suppressed for it, and the session they were recorded against.
+//
+// The session is part of it because a restarted pane is a new Session object —
+// the same signal bootstrapped and givenUp compare by identity — and a new
+// session's failure is a new streak, not a continuation of the old one.
+// Without it, the one case where an operator would hear nothing at all is the
+// strongest recovery signal there is: the pane was torn down and recreated.
+type warnedPane struct {
+	sess  session.Session
+	kinds map[string]bool
+}
+
+// The warning kinds bootstrapWatcher.warnOnce suppresses independently of
+// one another. Each names a distinct condition a pane can be in, so a pane
+// can hit several of them in sequence and each still gets reported once.
+const (
+	warnKindIdentifier = "identifier"
+	warnKindDetect     = "detect"
+	warnKindAgmsgPath  = "agmsg-path"
+	warnKindProbe      = "presence-probe"
+	warnKindAbsent     = "agmsg-absent"
+)
+
+// newBootstrapWatcher returns a bootstrapWatcher ready to have persisted
+// state loaded (LoadPersistedState) and then be polled or run.
+func newBootstrapWatcher(cfg bootstrapWatcherConfig) *bootstrapWatcher {
+	return &bootstrapWatcher{
+		manager:       cfg.Manager,
+		paneHosts:     cfg.PaneHosts,
+		paneModes:     cfg.PaneModes,
+		resolvedPaths: cfg.ResolvedPaths,
+		team:          cfg.Team,
+		persist:       cfg.Persist,
+		bootstrapped:  map[string]session.Session{},
+		pending:       map[string]session.Session{},
+		givenUp:       map[string]session.Session{},
+		writeAttempts: map[string]int{},
+		warned:        map[string]warnedPane{},
+	}
+}
+
+// LoadPersistedState seeds the pane IDs that were already bootstrapped as of
+// the last save, consumed exactly once by the first pollOnce call. Call
+// before Run/pollOnce, mirroring Relay.LoadCursors.
+func (b *bootstrapWatcher) LoadPersistedState(paneIDs []string) {
+	b.persistedPaneIDs = paneIDs
+}
+
+// HasWork reports whether there is any board-enabled pane to watch at all.
+// Callers use this to skip starting the poll loop entirely, mirroring
+// Relay.HasClients.
+func (b *bootstrapWatcher) HasWork() bool {
+	return len(b.paneHosts) > 0
+}
+
+// Run polls every interval until ctx is canceled, running one immediate
+// pollOnce first. Mirrors Relay.Run.
+func (b *bootstrapWatcher) Run(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	b.runLoop(ctx, ticker.C)
+}
+
+// runLoop is Run's actual loop, factored out so tests can drive it with an
+// injected tick channel instead of real time. Mirrors Relay.runLoop.
+func (b *bootstrapWatcher) runLoop(ctx context.Context, tick <-chan time.Time) {
+	b.pollOnce(ctx)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick:
+			b.pollOnce(ctx)
+		}
+	}
+}
+
+// pollOnce checks every board-enabled pane once. On its very first call it
+// seeds bootstrapped from persistedPaneIDs — using each persisted pane ID's
+// *currently live* Session, if any, purely to give bootstrapped an identity
+// to compare future ticks against. persistedPaneIDs is never consulted
+// again after this: from here on, only bootstrapped's own session-identity
+// map governs re-bootstrap decisions. This is what makes seeding safe across
+// a panemux restart, but only for a pane whose underlying agent process can
+// actually have survived that restart: seeding only ever applies to
+// TypeTmux/TypeSSHTmux sessions, which reattach to an independently-running
+// tmux session on every panemux startup. A TypeLocal/TypeSSH pane's
+// Session.CreateFromConfig always spawns a brand-new shell with nothing
+// running in it — seeding those from persisted state would permanently
+// suppress bootstrap for that pane on every future run, mistaking "we
+// bootstrapped a previous, now-gone process" for "the current process is
+// already onboarded". A pane that restarts within this same process's
+// lifetime is unaffected either way (its new Session object won't match
+// whatever was seeded).
+func (b *bootstrapWatcher) pollOnce(ctx context.Context) {
+	if !b.seeded {
+		for _, paneID := range b.persistedPaneIDs {
+			sess, ok := b.manager.Get(paneID)
+			if !ok {
+				continue
+			}
+			if sess.Type() != session.TypeTmux && sess.Type() != session.TypeSSHTmux {
+				continue
+			}
+			b.bootstrapped[paneID] = sess
+		}
+		b.seeded = true
+	}
+	for paneID, host := range b.paneHosts {
+		b.checkPane(ctx, paneID, host)
+	}
+}
+
+// sessionFor returns the pane's live session, or false when the manager no
+// longer has one for it. It also keeps the per-pane bookkeeping that depends
+// on session identity in step: a pane the manager no longer knows about is not
+// in a failing streak — if it comes back it starts a new one — and dropping its
+// entry is what keeps warned from growing for panes that no longer exist.
+func (b *bootstrapWatcher) sessionFor(paneID string) (session.Session, bool) {
+	sess, ok := b.manager.Get(paneID)
+	if !ok {
+		delete(b.pending, paneID)
+		delete(b.warned, paneID)
+		return nil, false
+	}
+	b.noteSession(paneID, sess)
+	return sess, true
+}
+
+// modeFor reads the pane's current board mode, defaulting to monitor when
+// the pane carries no explicit value — matching internal/config's own
+// default rather than sending an empty mode into the instruction.
+func (b *bootstrapWatcher) modeFor(paneID string) string {
+	if b.paneModes == nil {
+		return boardModeMonitor
+	}
+	mode := b.paneModes()[paneID]
+	if mode == "" {
+		return boardModeMonitor
+	}
+	return mode
+}
+
+// checkPane runs the bootstrap decision for one pane. See
+// docs/agent-board.md's Bootstrap flow section for the algorithm this
+// implements.
+func (b *bootstrapWatcher) checkPane(ctx context.Context, paneID, host string) {
+	sess, ok := b.sessionFor(paneID)
+	if !ok {
+		return
+	}
+	if existing, alreadyBootstrapped := b.bootstrapped[paneID]; alreadyBootstrapped && existing == sess {
+		return
+	}
+	if existing, gaveUp := b.givenUp[paneID]; gaveUp && existing == sess {
+		return
+	}
+
+	// A pane ID or team that doesn't match agmsg's own identifier alphabet
+	// (internal/board.ValidAgmsgIdentifier — the same allowlist
+	// RemoteAgmsgClient already enforces before any RunBoardCommand call)
+	// can never be bootstrapped correctly: it would either break the shell
+	// command the onboarding instruction tells the agent to run, or join
+	// agmsg under an identity the relay can never address back. Skip and
+	// warn once rather than write a broken instruction.
+	if !board.ValidAgmsgIdentifier(paneID) || !board.ValidAgmsgIdentifier(b.team) {
+		b.warnOnce(paneID, warnKindIdentifier, fmt.Sprintf(
+			"agent board bootstrap: pane %q or team %q is not a valid agmsg identifier, skipping bootstrap",
+			paneID, b.team,
+		))
+		delete(b.pending, paneID)
+		return
+	}
+	b.clearWarning(paneID, warnKindIdentifier)
+
+	detector, ok := sess.(session.AgentTypeDetector)
+	if !ok {
+		delete(b.pending, paneID)
+		return
+	}
+	agmsgType, detected, err := detector.DetectInteractiveAgentType()
+	if err != nil {
+		// Warned once per failing streak, not once per tick: detection runs
+		// a command inside the pane, so it keeps failing for as long as the
+		// tmux server is gone or the SSH connection is down, and dropping
+		// the pane from pending suppresses nothing — the next tick finds the
+		// same live session and checks it again. See #218.
+		b.warnOnce(paneID, warnKindDetect, fmt.Sprintf(
+			"agent board bootstrap: detecting agent type for pane %q: %v", paneID, err,
+		))
+		delete(b.pending, paneID)
+		return
+	}
+	b.clearWarning(paneID, warnKindDetect)
+	if !detected {
+		delete(b.pending, paneID)
+		return
+	}
+
+	// Debounce: only proceed once the same session has been seen with an
+	// active, known agent type on two consecutive ticks. This is a partial
+	// mitigation, not a complete one, against writing into a pane the
+	// instant its shell is still settling — see docs/agent-board.md's
+	// Bootstrap flow section for the honest tradeoff this represents.
+	if pendingSess, isPending := b.pending[paneID]; !isPending || pendingSess != sess {
+		b.pending[paneID] = sess
+		return
+	}
+
+	present, checked := b.agmsgPresent(ctx, paneID, host)
+	if !checked {
+		return
+	}
+	if !present {
+		b.warnOnce(paneID, warnKindAbsent, fmt.Sprintf(
+			"agent board bootstrap: agmsg not found on host %q for pane %q, skipping bootstrap", host, paneID,
+		))
+		return
+	}
+	b.clearWarning(paneID, warnKindAbsent)
+
+	instruction := buildBootstrapInstruction(b.resolvedPaths[host], b.team, paneID, agmsgType, b.modeFor(paneID))
+	b.writeInstruction(paneID, sess, instruction)
+}
+
+// writeInstruction attempts the actual PTY write for paneID's onboarding
+// instruction and updates bootstrapped/givenUp/writeAttempts/pending based
+// on the outcome. Split out of checkPane to keep each function's branching
+// manageable on its own.
+//
+// A short write (n > 0) has already put part of the instruction into the
+// pane — retrying would type the full instruction again on top of that
+// half-written line, compounding the corruption rather than fixing it, so
+// checkPane gives up on that pane immediately. A clean failure (n == 0,
+// nothing written yet) is safe to retry, so it's retried up to
+// maxBootstrapWriteAttempts times before giving up the same way.
+func (b *bootstrapWatcher) writeInstruction(paneID string, sess session.Session, instruction string) {
+	payload := []byte(instruction + "\r")
+	n, err := sess.Write(payload)
+	if err == nil && n == len(payload) {
+		delete(b.writeAttempts, paneID)
+		b.bootstrapped[paneID] = sess
+		delete(b.pending, paneID)
+		b.persistBootstrapped()
+		return
+	}
+
+	if n > 0 {
+		log.Printf(
+			"Warning: agent board bootstrap: partial write to pane %q (%d/%d bytes); "+
+				"not retrying, since a retry would type on top of a half-written instruction",
+			paneID, n, len(payload),
+		)
+		b.givenUp[paneID] = sess
+		delete(b.pending, paneID)
+		delete(b.writeAttempts, paneID)
+		return
+	}
+
+	b.writeAttempts[paneID]++
+	if b.writeAttempts[paneID] >= maxBootstrapWriteAttempts {
+		log.Printf(
+			"Warning: agent board bootstrap: giving up writing onboarding instruction to pane %q "+
+				"after %d failed attempts: %v",
+			paneID, b.writeAttempts[paneID], err,
+		)
+		b.givenUp[paneID] = sess
+		delete(b.pending, paneID)
+		delete(b.writeAttempts, paneID)
+		return
+	}
+	log.Printf(
+		"Warning: agent board bootstrap: writing onboarding instruction to pane %q: %v (attempt %d/%d)",
+		paneID, err, b.writeAttempts[paneID], maxBootstrapWriteAttempts,
+	)
+}
+
+// agmsgPresent reports whether agmsg is present on host, and whether that
+// question could be answered at all (checked=false means "couldn't tell this
+// tick, try again next tick" — a transport error or an unreachable host, not
+// "not present"). For a remote host, the probe goes through a
+// dynamicBoardExecutor rather than a single findBoardExecutors candidate
+// directly: a session can still be registered (and report a normal State())
+// after its underlying connection has actually died, so trusting only the
+// first candidate could permanently and silently treat a bootstrap-eligible
+// host as unreachable even while some other pane on it is genuinely
+// live — see dynamicBoardExecutor's own comment in board.go for the full
+// rationale, which applies identically here.
+func (b *bootstrapWatcher) agmsgPresent(ctx context.Context, paneID, host string) (present bool, checked bool) {
+	path, ok := b.resolvedPaths[host]
+	if !ok {
+		b.warnOnce(paneID, warnKindAgmsgPath,
+			fmt.Sprintf("agent board bootstrap: no resolved agmsg_path for host %q (pane %q)", host, paneID))
+		return false, false
+	}
+	b.clearWarning(paneID, warnKindAgmsgPath)
+
+	if host == boardHostIDLocal {
+		return board.LocalAgmsgPresent(path), true
+	}
+
+	executor := &dynamicBoardExecutor{manager: b.manager, paneHosts: b.paneHosts, host: host}
+	probeCtx, cancel := context.WithTimeout(ctx, bootstrapProbeTimeout)
+	defer cancel()
+	present, err := board.RemoteAgmsgPresent(probeCtx, executor, path)
+	if err != nil {
+		b.warnOnce(paneID, warnKindProbe, fmt.Sprintf(
+			"agent board bootstrap: checking agmsg presence on host %q (pane %q): %v", host, paneID, err,
+		))
+		return false, false
+	}
+	b.clearWarning(paneID, warnKindProbe)
+	return present, true
+}
+
+// warnOnce logs message unless kind is already being suppressed for paneID,
+// i.e. unless this pane is already inside a failing streak of that kind.
+// clearWarning ends the streak.
+func (b *bootstrapWatcher) warnOnce(paneID, kind, message string) {
+	entry := b.warned[paneID]
+	if entry.kinds[kind] {
+		return
+	}
+	if entry.kinds == nil {
+		entry.kinds = map[string]bool{}
+	}
+	entry.kinds[kind] = true
+	b.warned[paneID] = entry
+	log.Printf("Warning: %s", message)
+}
+
+// noteSession records which session paneID's warnings are being suppressed
+// against, dropping every suppression the moment that session is replaced.
+//
+// The entry is kept once created, even with no kinds suppressed, because it
+// carries that identity: dropping it when the last kind clears would leave the
+// next warning recorded against no session at all, and the following tick
+// would read that as a replacement and re-warn — every tick, which is the
+// behavior #218 exists to remove. checkPane's own "pane is gone" arm is what
+// removes the entry.
+func (b *bootstrapWatcher) noteSession(paneID string, sess session.Session) {
+	if entry, seen := b.warned[paneID]; seen && entry.sess == sess {
+		return
+	}
+	b.warned[paneID] = warnedPane{sess: sess, kinds: map[string]bool{}}
+}
+
+// clearWarning ends paneID's failing streak of this kind, so the next
+// occurrence is logged again. Called on the success side of every condition
+// warnOnce reports: a condition that clears and comes back is a new streak,
+// and by then the operator has been told the pane recovered.
+func (b *bootstrapWatcher) clearWarning(paneID, kind string) {
+	// No nil check: deleting from a nil map, or a key that is not there, is a
+	// no-op — so a pane with no suppressed warnings needs no special case.
+	// The entry itself stays, because it also carries the session identity
+	// noteSession compares against.
+	delete(b.warned[paneID].kinds, kind)
+}
+
+// persistBootstrapped saves the current set of bootstrapped pane IDs,
+// mirroring cursor_store.go's "persist only what actually changed" pattern:
+// this is only ever called right after bootstrapped gains a new entry, never
+// during seeding (which reflects state already on disk, not a change to it).
+func (b *bootstrapWatcher) persistBootstrapped() {
+	if b.persist == nil {
+		return
+	}
+	ids := make([]string, 0, len(b.bootstrapped))
+	for id := range b.bootstrapped {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	b.persist(ids)
+}
+
+// claudeCodeType is the one agmsg agent type whose session-id source
+// panemux has actually verified, so it is the only type the exclusivity
+// claim below is emitted for. agmsg's own per-type `type.conf` `detect` key
+// differs per type (CLAUDE_CODE_SESSION_ID here, CODEX_THREAD_ID for codex,
+// absent entirely for opencode and cursor), and guessing one wrong would
+// hand actas-claim.sh an empty session id.
+const claudeCodeType = "claude-code"
+
+// claudeCodeSessionIDVar is that type's own session-id environment
+// variable, taken from agmsg's type.conf rather than assumed.
+const claudeCodeSessionIDVar = "$CLAUDE_CODE_SESSION_ID"
+
+// runsAgmsgMonitor reports whether a Monitor-based watcher is running for a
+// pane in this mode, and therefore whether re-arming one is the right move.
+// turn delivers through a Stop hook with no watcher to replace, and off
+// means the operator asked for no automatic delivery at all — starting one
+// would contradict the setting.
+func runsAgmsgMonitor(mode string) bool {
+	return mode == "" || mode == boardModeMonitor || mode == boardModeBoth
+}
+
+// buildBootstrapInstruction builds the one-time onboarding instruction
+// written into a pane's PTY. It tells the agent to invoke agmsg's own
+// scripts (join.sh/actas-claim.sh/watch.sh/send.sh/delivery.sh) directly
+// with their verified positional-argument signatures, rather than agmsg's
+// slash-command shorthand (`/agmsg ...` or `$agmsg ...` depending on agent
+// type — the prefix itself differs per agmsg's own per-type `cmd_prefix`
+// driver setting, so hardcoding either one would silently be wrong for the
+// other half of agmsg's supported agent types). agmsgType is the
+// agmsg-recognized type string session.AgentTypeDetector reported (e.g.
+// "claude-code", "gemini") and is passed as each script's own `<type>`
+// argument. mode is the pane's agent_board.mode config value ("" is treated
+// the same as "monitor": agmsg's own default already behaves like monitor
+// without any explicit delivery.sh call).
+//
+// Step numbers are generated rather than written literally because the
+// exclusivity step is conditional on the agent type — see
+// docs/agent-board.md's "Two panes in one project directory".
+func buildBootstrapInstruction(agmsgPath, team, paneID, agmsgType, mode string) string {
+	var b strings.Builder
+	step := 0
+	nextStep := func() int { step++; return step }
+	b.WriteString("Please set up Agent Board messaging for this session using agmsg's own scripts\n")
+	b.WriteString("directly (not the /agmsg or $agmsg slash-command, since its exact prefix differs\n")
+	b.WriteString("by agent type):\n")
+	fmt.Fprintf(&b, "%d. Join the agmsg team %q by running:\n", nextStep(), team)
+	fmt.Fprintf(&b, "   %s/scripts/join.sh %q %q %q \"$(pwd)\" --force\n", agmsgPath, team, paneID, agmsgType)
+	b.WriteString("   Use exactly that agent_id — not a name of your own choosing — since every cross-pane\n")
+	b.WriteString("   and relay address in Agent Board assumes from/to values are pane IDs.\n")
+	writeIdentityClaim(&b, agmsgPath, paneID, agmsgType, mode, nextStep)
+	fmt.Fprintf(&b, "%d. From now on, send every board-related message (status reports and messages\n", nextStep())
+	b.WriteString("   to other panes) with:\n")
+	fmt.Fprintf(&b, "   %s/scripts/send.sh %q %q \"<to>\" \"<body>\" --force\n", agmsgPath, team, paneID)
+	fmt.Fprintf(&b, "%d. Self-report your status to \"_system\" using that same send.sh invocation,\n", nextStep())
+	b.WriteString("   with a JSON body shaped exactly like:\n")
+	b.WriteString("   {\"kind\":\"board_status\",\"state\":\"working|idle|waiting\",\"cwd\":\"...\",\"branch\":\"...\",\n")
+	b.WriteString("   \"repo\":\"...\",\"pr_url\":\"...\",\"last_tool\":\"...\",\"summary\":\"...\"}\n")
+	b.WriteString("   Omit fields you don't currently have.\n")
+	b.WriteString("   \"summary\" is the field a person reads to tell your pane apart from every other\n")
+	b.WriteString("   pane on the board, so always include it: one short sentence, in plain language,\n")
+	b.WriteString("   saying what you are working on right now (e.g. \"Fixing the flaky relay test\").\n")
+	b.WriteString("   Not your last tool call, not a summary of the whole session. When you are\n")
+	b.WriteString("   blocked, say what you are blocked on.\n")
+	b.WriteString("   Send an update when starting a new task, when finishing one, and whenever you\n")
+	b.WriteString("   become blocked or go idle — not on a timer.\n")
+	if mode == boardModeTurn || mode == boardModeBoth {
+		fmt.Fprintf(&b, "%d. Also run:\n", nextStep())
+		fmt.Fprintf(&b, "   %s/scripts/delivery.sh set %q %q \"$(pwd)\"\n", agmsgPath, mode, agmsgType)
+		b.WriteString("   This prints an AGMSG-DIRECTIVE: block — read it and follow its instructions exactly;\n")
+		b.WriteString("   it configures how you receive incoming board messages from now on.\n")
+	}
+	return b.String()
+}
+
+// writeIdentityClaim emits the step that makes this pane's agmsg identity
+// exclusive to this process, and (when a watcher is running) narrows that
+// watcher to it.
+//
+// Without it, two board-enabled panes whose agents run in the SAME project
+// directory each receive the other's messages. Verified in agmsg's own
+// source (v1.2.0, unchanged in v1.2.2): scripts/watch.sh resolves its
+// subscription through identities.sh <project> <type>, which returns every
+// (team, agent) pair registered for that project and type — both pane IDs.
+// Handed no 4th <agent> argument the watcher subscribes broadly, dropping
+// only pairs another live session already holds an actas lock on and
+// claiming none itself. agmsg's scripts/lib/actas-lock.sh states the same
+// failure in its own words, and its claude-code template calls
+// actas-claim.sh directly after join.sh for exactly this reason. The call
+// order and the argument shapes here are that template's, not invented.
+//
+// The claim also covers turn mode, where there is no watcher at all:
+// check-inbox.sh resolves its pairs through the same subscription helper.
+func writeIdentityClaim(b *strings.Builder, agmsgPath, paneID, agmsgType, mode string, nextStep func() int) {
+	if agmsgType != claudeCodeType {
+		return
+	}
+	fmt.Fprintf(b, "%d. Claim that identity for this process, so a second agent running in the same\n", nextStep())
+	b.WriteString("   directory does not also receive messages addressed to this pane:\n")
+	fmt.Fprintf(b, "   %s/scripts/actas-claim.sh \"$(pwd)\" %q %q %q\n",
+		agmsgPath, agmsgType, paneID, claudeCodeSessionIDVar)
+	b.WriteString("   Expect \"status=ok\". If it prints \"status=held\", another live session already owns\n")
+	b.WriteString("   this pane ID — say so and stop here; do not touch the running inbox stream.\n")
+	if !runsAgmsgMonitor(mode) {
+		return
+	}
+	b.WriteString("   Then replace your inbox stream so it only receives messages addressed to this\n")
+	b.WriteString("   pane, since the one already running was started without that restriction:\n")
+	b.WriteString("   - Run TaskList. If a task's description starts with \"agmsg inbox stream\",\n")
+	b.WriteString("     TaskStop it. If there is none, skip this — do not guess a task id.\n")
+	b.WriteString("   - Invoke the Monitor tool with persistent: true, description\n")
+	fmt.Fprintf(b, "     \"agmsg inbox stream (acting as %s)\", and command:\n", paneID)
+	fmt.Fprintf(b, "     %s/scripts/watch.sh %q \"$(pwd)\" %q %q\n",
+		agmsgPath, claudeCodeSessionIDVar, agmsgType, paneID)
+}

@@ -12,6 +12,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"panemux/internal/fileops"
+	"panemux/internal/homedir"
 )
 
 func TestValidate_ValidConfig_NoError(t *testing.T) {
@@ -310,6 +313,109 @@ func TestValidate_ServerPortOutOfRange_Error(t *testing.T) {
 	assert.Contains(t, err.Error(), "port")
 }
 
+// TestValidate_ServerPortRangeBoundaries pins both ends of the 1-65535 range,
+// including the boundaries themselves. The out-of-range test above only ever
+// used 0 and 99999 — one and 34464 past the ends — so widening the rule to
+// `port < 2 || port > 65534` would have rejected two legal ports with the
+// suite still green. Issue #190.
+// Nothing under this test changed on this branch, so the red-check could never
+// see it go red: it pins behavior that was already correct and merely
+// unasserted. See docs/quality-gateway.md's "Clearing the boundary-value class".
+//
+//efficacy:exempt pins pre-existing behavior; no implementation under it changed
+func TestValidate_ServerPortRangeBoundaries(t *testing.T) {
+	tests := []struct {
+		name    string
+		port    int
+		wantErr bool
+	}{
+		{name: "one below the low bound", port: 0, wantErr: true},
+		{name: "the low bound itself", port: 1, wantErr: false},
+		{name: "one above the low bound", port: 2, wantErr: false},
+		{name: "one below the high bound", port: 65534, wantErr: false},
+		{name: "the high bound itself", port: 65535, wantErr: false},
+		{name: "one above the high bound", port: 65536, wantErr: true},
+		{name: "negative", port: -1, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := validConfig()
+			cfg.Server.Port = tt.port
+			err := cfg.Validate()
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "server.port")
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}
+
+// TestValidate_ChildSizeBoundary pins that a size of exactly 0 is rejected
+// while the smallest positive size a sum of 100 can be built from is accepted.
+// TestValidate_NegativeSize_Error above only used -10, so `size < 0` would
+// have accepted a zero-width pane. Issue #190.
+// Nothing under this test changed on this branch, so the red-check could never
+// see it go red: it pins behavior that was already correct and merely
+// unasserted. See docs/quality-gateway.md's "Clearing the boundary-value class".
+//
+//efficacy:exempt pins pre-existing behavior; no implementation under it changed
+func TestValidate_ChildSizeBoundary(t *testing.T) {
+	runChildSizeCases(t, []childSizeCase{
+		{name: "exactly zero is rejected", sizes: []float64{0, 100}, wantErr: "must be positive"},
+		{name: "smallest positive size is accepted", sizes: []float64{0.1, 99.9}},
+		{name: "negative is rejected", sizes: []float64{-0.1, 100.1}, wantErr: "must be positive"},
+	})
+}
+
+// TestValidate_ChildSizeSumTolerance pins both ends of the ±0.1 tolerance the
+// sum check allows. TestValidate_ChildSizesNotSumTo100_Error above sums to 150,
+// so tightening the tolerance to nothing would have rejected the rounded sizes
+// a dragged split produces with the suite still green. Issue #190.
+// Nothing under this test changed on this branch, so the red-check could never
+// see it go red: it pins behavior that was already correct and merely
+// unasserted. See docs/quality-gateway.md's "Clearing the boundary-value class".
+//
+//efficacy:exempt pins pre-existing behavior; no implementation under it changed
+func TestValidate_ChildSizeSumTolerance(t *testing.T) {
+	runChildSizeCases(t, []childSizeCase{
+		{name: "the low tolerance bound itself", sizes: []float64{49.95, 49.95}},
+		{name: "below the low tolerance bound", sizes: []float64{49.9, 49.9}, wantErr: "must be 100"},
+		{name: "exactly 100", sizes: []float64{50, 50}},
+		{name: "the high tolerance bound itself", sizes: []float64{50.05, 50.05}},
+		{name: "above the high tolerance bound", sizes: []float64{50.1, 50.1}, wantErr: "must be 100"},
+	})
+}
+
+// childSizeCase is one two-pane layout and what Validate must say about it.
+// An empty wantErr means the layout is valid.
+type childSizeCase struct {
+	name    string
+	wantErr string
+	sizes   []float64
+}
+
+func runChildSizeCases(t *testing.T, cases []childSizeCase) {
+	t.Helper()
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := validConfig()
+			cfg.Layout.Children = []LayoutChild{
+				{Size: tt.sizes[0], Pane: &PaneConfig{ID: "p1", Type: "local"}},
+				{Size: tt.sizes[1], Pane: &PaneConfig{ID: "p2", Type: "local"}},
+			}
+			err := cfg.Validate()
+			if tt.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}
+
 func TestValidate_NestedLayout_Validates(t *testing.T) {
 	cfg := validConfig()
 	cfg.Layout.Children = []LayoutChild{
@@ -497,11 +603,7 @@ layout:
 	f := writeTempFile(t, content)
 	require.NoError(t, os.Chmod(f, 0644)) //nolint:gosec // G302: legacy config permission under test
 
-	oldChmod := chmodConfigFile
-	chmodConfigFile = func(string, os.FileMode) error {
-		return errors.New("read-only filesystem")
-	}
-	t.Cleanup(func() { chmodConfigFile = oldChmod })
+	fileops.SetOpsForTest(t, (&fileops.Spy{ChmodErr: errors.New("read-only filesystem")}).Ops())
 
 	var logs bytes.Buffer
 	oldOutput := log.Writer()
@@ -526,7 +628,7 @@ func TestLoad_Nonexistent(t *testing.T) {
 }
 
 func TestAllPanes_FlatList(t *testing.T) {
-	cfg := &Config{
+	cfg := &Config{Data: Data{
 		Layout: LayoutNode{
 			Direction: "horizontal",
 			Children: []LayoutChild{
@@ -541,13 +643,13 @@ func TestAllPanes_FlatList(t *testing.T) {
 				},
 			},
 		},
-	}
+	}}
 	panes := cfg.AllPanes()
 	assert.Len(t, panes, 3)
 }
 
 func TestAllPanes_IncludesAllWorkspaces(t *testing.T) {
-	cfg := &Config{
+	cfg := &Config{Data: Data{
 		Workspaces: WorkspacesConfig{
 			Active:      "one",
 			TabPosition: "top",
@@ -570,7 +672,7 @@ func TestAllPanes_IncludesAllWorkspaces(t *testing.T) {
 				},
 			},
 		},
-	}
+	}}
 	panes := cfg.AllPanes()
 	require.Len(t, panes, 2)
 	assert.Equal(t, "one-main", panes[0].ID)
@@ -578,7 +680,7 @@ func TestAllPanes_IncludesAllWorkspaces(t *testing.T) {
 }
 
 func TestAllPanes_Empty(t *testing.T) {
-	cfg := &Config{Layout: LayoutNode{Direction: "horizontal"}}
+	cfg := &Config{Data: Data{Layout: LayoutNode{Direction: "horizontal"}}}
 	panes := cfg.AllPanes()
 	assert.Empty(t, panes)
 }
@@ -603,7 +705,7 @@ func TestReadMethods_DoNotNormalizeConfigInPlace(t *testing.T) {
 }
 
 func TestAddDefaultWorkspace_CreatesUniqueLocalWorkspace(t *testing.T) {
-	cfg := &Config{
+	cfg := &Config{Data: Data{
 		Workspaces: WorkspacesConfig{
 			Active:      "default",
 			TabPosition: "top",
@@ -612,7 +714,7 @@ func TestAddDefaultWorkspace_CreatesUniqueLocalWorkspace(t *testing.T) {
 				{ID: "workspace-2", Title: "Existing", Layout: singlePaneLayout("workspace-2-main")},
 			},
 		},
-	}
+	}}
 
 	workspace := cfg.AddDefaultWorkspace()
 
@@ -625,7 +727,7 @@ func TestAddDefaultWorkspace_CreatesUniqueLocalWorkspace(t *testing.T) {
 }
 
 func TestRemoveWorkspace_RemovesTargetAndSelectsNextActive(t *testing.T) {
-	cfg := &Config{
+	cfg := &Config{Data: Data{
 		Workspaces: WorkspacesConfig{
 			Active:      "two",
 			TabPosition: "top",
@@ -635,7 +737,7 @@ func TestRemoveWorkspace_RemovesTargetAndSelectsNextActive(t *testing.T) {
 				{ID: "three", Title: "Three", Layout: singlePaneLayout("three-main")},
 			},
 		},
-	}
+	}}
 
 	removed, ok := cfg.RemoveWorkspace("two")
 
@@ -649,7 +751,7 @@ func TestRemoveWorkspace_RemovesTargetAndSelectsNextActive(t *testing.T) {
 }
 
 func TestRemoveWorkspace_InactiveKeepsActive(t *testing.T) {
-	cfg := &Config{
+	cfg := &Config{Data: Data{
 		Workspaces: WorkspacesConfig{
 			Active:      "one",
 			TabPosition: "top",
@@ -658,7 +760,7 @@ func TestRemoveWorkspace_InactiveKeepsActive(t *testing.T) {
 				{ID: "two", Title: "Two", Layout: singlePaneLayout("two-main")},
 			},
 		},
-	}
+	}}
 
 	_, ok := cfg.RemoveWorkspace("two")
 
@@ -709,7 +811,7 @@ layout:
 
 func TestSaveLayout_UpdatesOnlyActiveWorkspace(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	cfg := &Config{
+	cfg := &Config{Data: Data{
 		Server: ServerConfig{Port: 8080, Host: "127.0.0.1"},
 		Workspaces: WorkspacesConfig{
 			Active:      "two",
@@ -718,7 +820,7 @@ func TestSaveLayout_UpdatesOnlyActiveWorkspace(t *testing.T) {
 				{ID: "one", Title: "One", Layout: singlePaneLayout("one-main")},
 				{ID: "two", Title: "Two", Layout: singlePaneLayout("two-main")},
 			},
-		},
+		}},
 		filePath: path,
 	}
 
@@ -786,8 +888,8 @@ func TestValidate_TmuxPaneEmptyTmuxSession_Error(t *testing.T) {
 }
 
 func TestExpandPaths_SSHKeyTilde(t *testing.T) {
-	home, err := os.UserHomeDir()
-	require.NoError(t, err)
+	home := "/workspace/user/home"
+	homedir.SetForTest(t, home)
 
 	content := `
 server:
@@ -818,8 +920,8 @@ layout:
 }
 
 func TestExpandPanesCwd_Tilde(t *testing.T) {
-	home, err := os.UserHomeDir()
-	require.NoError(t, err)
+	home := "/workspace/user/home"
+	homedir.SetForTest(t, home)
 
 	content := `
 server:
@@ -845,8 +947,8 @@ layout:
 }
 
 func TestExpandPanesCwd_AllWorkspaces(t *testing.T) {
-	home, err := os.UserHomeDir()
-	require.NoError(t, err)
+	home := "/workspace/user/home"
+	homedir.SetForTest(t, home)
 
 	content := `
 server:
@@ -996,7 +1098,7 @@ func TestUpdateLayout_UpdatesMemoryOnly(t *testing.T) {
 }
 
 func TestWorkspaceLayoutMutationHelpers(t *testing.T) {
-	cfg := &Config{
+	cfg := &Config{Data: Data{
 		Workspaces: WorkspacesConfig{
 			Active:      "one",
 			TabPosition: "top",
@@ -1005,7 +1107,7 @@ func TestWorkspaceLayoutMutationHelpers(t *testing.T) {
 				{ID: "two", Title: "Two", Layout: singlePaneLayout("two-main")},
 			},
 		},
-	}
+	}}
 	cfg.normalizeWorkspaces()
 
 	inactiveLayout := LayoutNode{
@@ -1026,7 +1128,7 @@ func TestWorkspaceLayoutMutationHelpers(t *testing.T) {
 }
 
 func TestRemovePaneFromLayout_AllWorkspaces(t *testing.T) {
-	cfg := &Config{
+	cfg := &Config{Data: Data{
 		Workspaces: WorkspacesConfig{
 			Active:      "two",
 			TabPosition: "top",
@@ -1055,7 +1157,7 @@ func TestRemovePaneFromLayout_AllWorkspaces(t *testing.T) {
 				},
 			},
 		},
-	}
+	}}
 
 	cfg.RemovePaneFromLayout("remove-one")
 	cfg.RemovePaneFromLayout("remove-two")
@@ -1091,7 +1193,7 @@ func TestValidatePane_ShellOnSSH_RelativePath_Error(t *testing.T) {
 // helpers
 
 func validConfig() *Config {
-	return &Config{
+	return &Config{Data: Data{
 		Server: ServerConfig{Port: 8080, Host: "127.0.0.1"},
 		Layout: LayoutNode{
 			Direction: "horizontal",
@@ -1099,7 +1201,7 @@ func validConfig() *Config {
 				{Size: 100.0, Pane: &PaneConfig{ID: "main", Type: "local"}},
 			},
 		},
-	}
+	}}
 }
 
 func singlePaneLayout(id string) LayoutNode {
@@ -1115,4 +1217,63 @@ func writeTempFile(t *testing.T, content string) string {
 	f := filepath.Join(dir, "config.yaml")
 	require.NoError(t, os.WriteFile(f, []byte(content), 0600))
 	return f
+}
+
+// TestValidate_LeavesSSHConnectionsUntouched pins that validation reads
+// ~/.ssh/config hosts without adding them to ssh_connections. Validate used to
+// add them to the config's own map whenever ssh_connections was non-empty, which
+// made every ~/.ssh/config host a task dashboard host and wrote it back into
+// config.yaml on the next save.
+func TestValidate_LeavesSSHConnectionsUntouched(t *testing.T) {
+	sshCfg := filepath.Join(t.TempDir(), "config")
+	require.NoError(t, os.WriteFile(sshCfg, []byte("Host only-in-ssh-config\n    HostName 192.0.2.1\n"), 0600))
+
+	cfg := validConfig()
+	cfg.SSHConnections = map[string]SSHConnection{"declared": {}}
+	cfg.sshConfigPath = sshCfg
+
+	require.NoError(t, cfg.Validate())
+	assert.Equal(t, map[string]SSHConnection{"declared": {}}, cfg.SSHConnections)
+}
+
+// TestSSHConnection_NameOnlyEntry_RoundTrips verifies that an ssh_connections
+// entry written as just its name loads as an entry with no fields and is saved
+// back without the empty fields spelled out.
+func TestSSHConnection_NameOnlyEntry_RoundTrips(t *testing.T) {
+	content := `
+server:
+  port: 8080
+  host: "127.0.0.1"
+ssh_connections:
+  name-only:
+  with-user:
+    user: deploy
+layout:
+  direction: horizontal
+  children:
+    - size: 100
+      pane:
+        id: main
+        type: local
+`
+	f := writeTempFile(t, content)
+	cfg, err := Load(f)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]SSHConnection{
+		"name-only": {},
+		"with-user": {User: "deploy"},
+	}, cfg.SSHConnections)
+
+	require.NoError(t, cfg.SaveWorkspaces())
+	saved, err := os.ReadFile(f)
+	require.NoError(t, err)
+	assert.Contains(t, string(saved), "name-only: {}")
+	assert.Contains(t, string(saved), "with-user:\n        user: deploy\n")
+	assert.NotContains(t, string(saved), "host: \"\"")
+	assert.NotContains(t, string(saved), "key_file: \"\"")
+	assert.NotContains(t, string(saved), "port: 0")
+
+	reloaded, err := Load(f)
+	require.NoError(t, err)
+	assert.Equal(t, cfg.SSHConnections, reloaded.SSHConnections)
 }

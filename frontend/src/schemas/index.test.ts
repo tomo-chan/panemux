@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, it, expect } from 'vitest'
 import {
   DisplayConfigSchema,
@@ -16,7 +18,250 @@ import {
   WorkspacesResponseSchema,
   DirectoryEntrySchema,
   DirectoryBrowserResponseSchema,
+  BoardSessionTokenResponseSchema,
+  BoardCommandFrameSchema,
+  BoardCommandHistoryEntrySchema,
+  BoardCommandHistoryResponseSchema,
+  BoardStatusEntrySchema,
+  BoardStatusResponseSchema,
+  BoardMessageSchema,
+  BoardMessagesResponseSchema,
+  TasksResponseSchema,
+  TaskAutolinkSchema,
+  TaskRecordSchema,
+  TaskLaunchedSchema,
+  TaskLaunchResponseSchema,
+  TaskSummarySchema,
 } from './index'
+
+describe('TasksResponseSchema', () => {
+  const task = {
+    id: 'local:claude:7c21e0a4',
+    host: '',
+    agent: 'claude',
+    session_id: '7c21e0a4',
+    cwd: '/workspace/user/panemux',
+    state: 'wait',
+    waiting_for: 'input needed',
+    status_since: '2026-09-25T12:00:00Z',
+    started_at: '2026-09-25T11:00:00Z',
+    pid: 101,
+    location: { kind: 'tmux', tmux_session: 'task-7c21', attachable: true },
+    git: { repo: 'panemux', branch: 'main', repo_url: 'https://github.com/example/panemux', pr_number: 7,
+      pr_url: 'https://github.com/example/panemux/pull/7' },
+  }
+
+  it('accepts every host status and task state the server reports', () => {
+    const states = ['busy', 'wait', 'idle', 'run', 'unknown', 'stop']
+    const result = TasksResponseSchema.safeParse({
+      hosts: [
+        { name: '', status: 'ok', collected_at: '2026-09-25T12:00:00Z' },
+        { name: 'gpu-box', status: 'error', error: 'connect to gpu-box: i/o timeout' },
+        { name: 'slow-box', status: 'connecting' },
+      ],
+      tasks: states.map((state, i) => ({ ...task, id: `t${i}`, state })),
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('accepts a task with only its required fields', () => {
+    const result = TasksResponseSchema.safeParse({
+      hosts: [],
+      tasks: [{ id: 'x', host: 'build-box', agent: 'claude', state: 'unknown',
+        location: { kind: 'none', attachable: false } }],
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it("accepts a codex session run by codex's shared daemon", () => {
+    const result = TasksResponseSchema.safeParse({
+      hosts: [],
+      tasks: [{ ...task, agent: 'codex', state: 'idle', location: { kind: 'daemon', attachable: false } }],
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects a state the dashboard has no column for', () => {
+    expect(TasksResponseSchema.safeParse({ hosts: [], tasks: [{ ...task, state: 'done' }] }).success).toBe(false)
+  })
+
+  it('rejects an unknown location kind and host status', () => {
+    expect(TasksResponseSchema.safeParse({
+      hosts: [], tasks: [{ ...task, location: { kind: 'screen', attachable: false } }],
+    }).success).toBe(false)
+    expect(TasksResponseSchema.safeParse({
+      hosts: [{ name: '', status: 'maybe' }], tasks: [],
+    }).success).toBe(false)
+  })
+
+  it('accepts free text of any length from a remote host', () => {
+    const long = 'x'.repeat(10000)
+    const result = TasksResponseSchema.safeParse({
+      hosts: [{ name: 'h', status: 'error', error: long }],
+      tasks: [{ ...task, cwd: `/${long}`, waiting_for: long, location: { kind: 'tmux', tmux_session: long, attachable: false } }],
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('accepts what a person recorded about a task, and a record file the server could not read', () => {
+    const result = TasksResponseSchema.safeParse({
+      hosts: [],
+      tasks: [{ ...task, done: true, labels: ['payment', 'sprint 42', '決済'] }],
+      records_error: 'parsing task record file: unexpected end of JSON input',
+    })
+    // Zod drops keys a schema does not name, so success alone would not show
+    // the fields reach the dashboard.
+    expect(result.success && result.data.tasks[0]).toMatchObject({ done: true, labels: ['payment', 'sprint 42', '決済'] })
+    expect(result.success && result.data.records_error).toBe('parsing task record file: unexpected end of JSON input')
+  })
+
+  it('rejects labels that are not a list of strings, and a done that is not a boolean', () => {
+    expect(TasksResponseSchema.safeParse({ hosts: [], tasks: [{ ...task, labels: 'payment' }] }).success).toBe(false)
+    expect(TasksResponseSchema.safeParse({ hosts: [], tasks: [{ ...task, labels: [1] }] }).success).toBe(false)
+    expect(TasksResponseSchema.safeParse({ hosts: [], tasks: [{ ...task, done: 'yes' }] }).success).toBe(false)
+  })
+
+  // efficacy:exempt unchanged by this branch; the new describe block after it falls inside its line range
+  it('rejects a git link that is not a URL', () => {
+    expect(TasksResponseSchema.safeParse({
+      hosts: [], tasks: [{ ...task, git: { pr_url: 'javascript:alert(1)' } }],
+    }).success).toBe(false)
+  })
+
+  it('keeps the issues a PR closes and the references of a task', () => {
+    const git = {
+      branch: 'PAY-418-retry',
+      issues: [
+        { number: 252, url: 'https://github.com/example/panemux/issues/252', repo: 'example/panemux' },
+        { number: 9, url: 'https://github.com/example/infra/issues/9' },
+      ],
+      autolinks: [{ text: 'JIRA-123', url: 'https://jira.example.com/JIRA-123' }],
+    }
+    const result = TasksResponseSchema.parse({ hosts: [], tasks: [{ ...task, git }] })
+    expect(result.tasks[0].git).toEqual(git)
+  })
+
+  // efficacy:exempt pins that the browser accepts every autolink URL internal/config accepts; it guards
+  // the agreement between the two validators rather than a behavior this branch's schema code adds.
+  it('accepts the URL of every autolink template the config accepts', () => {
+    const cases = JSON.parse(
+      readFileSync(resolve(process.cwd(), '..', 'testdata', 'autolink-url-validation.json'), 'utf8'),
+    ) as { accepted: { url_template: string; url: string }[] }
+    expect(cases.accepted.length).toBeGreaterThan(0)
+    for (const { url } of cases.accepted) {
+      expect(TaskAutolinkSchema.safeParse({ text: 'JIRA-123', url }).success, url).toBe(true)
+    }
+  })
+
+  // efficacy:exempt unchanged by this branch; the TaskRecordSchema describe block after it falls inside its line range
+  it.each([
+    ['an issue URL that is not http(s)', { issues: [{ number: 1, url: 'javascript:alert(1)' }] }],
+    ['an issue without a number', { issues: [{ url: 'https://github.com/example/r/issues/1' }] }],
+    ['an issue number that is not positive', { issues: [{ number: 0, url: 'https://github.com/example/r/issues/0' }] }],
+    ['a reference URL that is not http(s)', { autolinks: [{ text: 'JIRA-1', url: 'javascript:alert(1)' }] }],
+    ['a reference without its text', { autolinks: [{ url: 'https://jira.example.com/JIRA-1' }] }],
+  ])('rejects %s', (_name, git) => {
+    expect(TasksResponseSchema.safeParse({ hosts: [], tasks: [{ ...task, git }] }).success).toBe(false)
+  })
+})
+
+describe('TaskSummarySchema', () => {
+  it('accepts a summary in every state, and a task and response carrying one', () => {
+    const ready = {
+      state: 'ready',
+      text: 'Fixing a flaky test.',
+      remaining: ['Run make check'],
+      summarized_at: '2026-09-25T12:00:00Z',
+      outdated: true,
+    }
+    expect(TaskSummarySchema.safeParse(ready).success).toBe(true)
+    expect(TaskSummarySchema.safeParse({ state: 'ready', text: 'Done.', done_candidate: true }).success).toBe(true)
+    expect(TaskSummarySchema.safeParse({ state: 'pending' }).success).toBe(true)
+    expect(TaskSummarySchema.safeParse({ state: 'error', error: 'claude exited with status 1' }).success).toBe(true)
+    expect(TaskSummarySchema.safeParse({ state: 'unreadable' }).success).toBe(true)
+
+    const result = TasksResponseSchema.safeParse({
+      hosts: [], summaries_enabled: true,
+      tasks: [{ id: 'a', host: '', agent: 'claude', state: 'idle', location: { kind: 'none', attachable: false }, summary: ready }],
+    })
+    expect(result.success && result.data.summaries_enabled).toBe(true)
+    expect(result.success && result.data.tasks[0].summary).toEqual(ready)
+  })
+
+  it('rejects an unknown state and fields of the wrong type', () => {
+    expect(TaskSummarySchema.safeParse({ state: 'done' }).success).toBe(false)
+    expect(TaskSummarySchema.safeParse({ state: 'ready', remaining: 'x' }).success).toBe(false)
+    expect(TaskSummarySchema.safeParse({ state: 'ready', done_candidate: 'yes' }).success).toBe(false)
+    expect(TaskSummarySchema.safeParse({ text: 'no state' }).success).toBe(false)
+  })
+})
+
+describe('TaskRecordSchema', () => {
+  const record = { host: 'build-box', agent: 'claude', session_id: '3d7702fe', done: false, labels: [] }
+
+  it('accepts a record, including an empty one', () => {
+    expect(TaskRecordSchema.safeParse(record).success).toBe(true)
+    expect(TaskRecordSchema.safeParse({ ...record, host: '', done: true, labels: ['infra'] }).success).toBe(true)
+  })
+
+  it('requires every field, since the dashboard applies the response as it is', () => {
+    for (const key of Object.keys(record)) {
+      const partial: Record<string, unknown> = { ...record }
+      delete partial[key]
+      expect(TaskRecordSchema.safeParse(partial).success, key).toBe(false)
+    }
+  })
+
+  // efficacy:exempt unchanged by this branch; the new describe block after it falls inside its line range
+  it('rejects an empty session ID', () => {
+    expect(TaskRecordSchema.safeParse({ ...record, session_id: '' }).success).toBe(false)
+  })
+})
+
+describe('TaskLaunchedSchema', () => {
+  const launched = {
+    id: 'local:claude:0f0e0d0c-0b0a-4908-8706-050403020100',
+    session_id: '0f0e0d0c-0b0a-4908-8706-050403020100',
+    tmux_session: 'task-0f0e0d0c',
+  }
+
+  it('accepts a started or resumed task', () => {
+    expect(TaskLaunchedSchema.safeParse(launched).success).toBe(true)
+  })
+
+  it('requires the tmux session, and an id or session id that is not empty when given', () => {
+    const { id: _id, session_id: _sid, ...codex } = launched
+    expect(TaskLaunchedSchema.safeParse(codex).success, 'a new codex task has neither yet').toBe(true)
+    expect(TaskLaunchedSchema.safeParse({ ...launched, tmux_session: undefined }).success).toBe(false)
+    expect(TaskLaunchedSchema.safeParse({ ...launched, id: '' }).success).toBe(false)
+    expect(TaskLaunchedSchema.safeParse({ ...launched, session_id: '' }).success).toBe(false)
+  })
+})
+
+describe('TaskLaunchResponseSchema', () => {
+  const launched = {
+    id: 'ssh:build-box:claude:0f0e0d0c-0b0a-4908-8706-050403020100',
+    session_id: '0f0e0d0c-0b0a-4908-8706-050403020100',
+    tmux_session: 'task-0f0e0d0c',
+  }
+
+  it('accepts a launch with its recorded labels, or with why they were not recorded', () => {
+    expect(TaskLaunchResponseSchema.safeParse(launched).success).toBe(true)
+    expect(TaskLaunchResponseSchema.safeParse({ ...launched, labels: ['infra'] }).success).toBe(true)
+    const failed = TaskLaunchResponseSchema.safeParse({ ...launched, records_error: 'parse tasks.json' })
+    expect(failed.success && failed.data.records_error).toBe('parse tasks.json')
+  })
+
+  it('accepts a codex launch whose labels are held until its session is known', () => {
+    const parsed = TaskLaunchResponseSchema.safeParse({ tmux_session: 'task-0a1b2c3d', pending_labels: ['infra'] })
+    expect(parsed.success && parsed.data.pending_labels).toEqual(['infra'])
+  })
+
+  it('rejects labels that are not strings', () => {
+    expect(TaskLaunchResponseSchema.safeParse({ ...launched, labels: [1] }).success).toBe(false)
+    expect(TaskLaunchResponseSchema.safeParse({ ...launched, pending_labels: [1] }).success).toBe(false)
+  })
+})
 
 describe('GitInfoSchema', () => {
   it('accepts git info with PR metadata', () => {
@@ -82,6 +327,15 @@ describe('GitInfoSchema', () => {
 })
 
 describe('DisplayConfigSchema', () => {
+  it('accepts the task dashboard shortcut as one upper-case letter', () => {
+    expect(DisplayConfigSchema.safeParse({ show_header: true, show_status_bar: true, task_dashboard_shortcut: 'S' }).success)
+      .toBe(true)
+    for (const bad of ['s', 'SS', '1', '']) {
+      expect(DisplayConfigSchema.safeParse({ show_header: true, show_status_bar: true, task_dashboard_shortcut: bad }).success)
+        .toBe(false)
+    }
+  })
+
   it('accepts valid display config', () => {
     const result = DisplayConfigSchema.safeParse({ show_header: true, show_status_bar: false })
     expect(result.success).toBe(true)
@@ -615,5 +869,442 @@ describe('WSControlMessageSchema error message length limit', () => {
   it('accepts error message at the 2000 character limit', () => {
     const result = WSControlMessageSchema.safeParse({ type: 'error', message: 'x'.repeat(2000) })
     expect(result.success).toBe(true)
+  })
+})
+
+describe('BoardSessionTokenResponseSchema', () => {
+  it('accepts a full response', () => {
+    const result = BoardSessionTokenResponseSchema.safeParse({
+      token: 'sekret',
+      command_center_enabled: true,
+      agent_board_enabled: true,
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects a response missing agent_board_enabled', () => {
+    const result = BoardSessionTokenResponseSchema.safeParse({
+      token: 'sekret',
+      command_center_enabled: true,
+    })
+    expect(result.success).toBe(false)
+  })
+
+  it('rejects a response missing command_center_enabled', () => {
+    const result = BoardSessionTokenResponseSchema.safeParse({
+      token: 'sekret',
+      agent_board_enabled: true,
+    })
+    expect(result.success).toBe(false)
+  })
+
+  it('rejects a response missing token', () => {
+    const result = BoardSessionTokenResponseSchema.safeParse({
+      command_center_enabled: true,
+      agent_board_enabled: true,
+    })
+    expect(result.success).toBe(false)
+  })
+
+  it('rejects non-boolean agent_board_enabled', () => {
+    const result = BoardSessionTokenResponseSchema.safeParse({
+      token: 'sekret',
+      command_center_enabled: true,
+      agent_board_enabled: 'true',
+    })
+    expect(result.success).toBe(false)
+  })
+})
+
+describe('BoardCommandFrameSchema', () => {
+  it('accepts a line frame with arbitrary raw payload', () => {
+    const result = BoardCommandFrameSchema.safeParse({ type: 'line', raw: { type: 'result', result: 'done' } })
+    expect(result.success).toBe(true)
+  })
+
+  it('accepts an error frame', () => {
+    const result = BoardCommandFrameSchema.safeParse({ type: 'error', message: 'boom' })
+    expect(result.success).toBe(true)
+  })
+
+  // Warnings ride whichever terminal frame ends the query, so the error member
+  // accepts them too — a turn that failed for its own reasons can still have
+  // lost its history record, and that is the operator whose history has
+  // quietly stopped being written. See #214.
+  it('accepts an error frame carrying warnings', () => {
+    const result = BoardCommandFrameSchema.safeParse({
+      type: 'error',
+      message: 'claude query timed out after 5m0s',
+      warnings: ['persisting command center history: disk full'],
+    })
+    expect(result.success).toBe(true)
+    expect(result.success && result.data.type === 'error' && result.data.warnings).toEqual([
+      'persisting command center history: disk full',
+    ])
+  })
+
+  it('accepts a done frame', () => {
+    const result = BoardCommandFrameSchema.safeParse({ type: 'done' })
+    expect(result.success).toBe(true)
+  })
+
+  // A turn that succeeded but could not have its history written reports the
+  // failure on the terminal done frame rather than as an error frame of its
+  // own — see #214. The key is optional, so both shapes above and here have to
+  // parse.
+  it('accepts a done frame carrying warnings', () => {
+    const result = BoardCommandFrameSchema.safeParse({
+      type: 'done',
+      warnings: ['persisting command center history: disk full'],
+    })
+    expect(result.success).toBe(true)
+    expect(result.success && result.data.type === 'done' && result.data.warnings).toEqual([
+      'persisting command center history: disk full',
+    ])
+  })
+
+  it('rejects a done frame whose warnings are not strings', () => {
+    const result = BoardCommandFrameSchema.safeParse({ type: 'done', warnings: [{ message: 'nope' }] })
+    expect(result.success).toBe(false)
+  })
+
+  it('accepts a busy frame', () => {
+    const result = BoardCommandFrameSchema.safeParse({ type: 'busy' })
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects an error frame missing message', () => {
+    const result = BoardCommandFrameSchema.safeParse({ type: 'error' })
+    expect(result.success).toBe(false)
+  })
+
+  it('rejects an unknown frame type', () => {
+    const result = BoardCommandFrameSchema.safeParse({ type: 'ping' })
+    expect(result.success).toBe(false)
+  })
+})
+
+describe('BoardCommandHistoryEntrySchema', () => {
+  it('accepts an entry with arbitrary raw payload', () => {
+    const result = BoardCommandHistoryEntrySchema.safeParse({
+      at: '2026-08-10T12:00:00Z',
+      raw: { type: 'result', result: 'done' },
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects an entry missing at', () => {
+    const result = BoardCommandHistoryEntrySchema.safeParse({ raw: {} })
+    expect(result.success).toBe(false)
+  })
+})
+
+describe('BoardCommandHistoryResponseSchema', () => {
+  it('accepts an empty entries array', () => {
+    const result = BoardCommandHistoryResponseSchema.safeParse({ entries: [] })
+    expect(result.success).toBe(true)
+  })
+
+  it('accepts a populated entries array', () => {
+    const result = BoardCommandHistoryResponseSchema.safeParse({
+      entries: [{ at: '2026-08-10T12:00:00Z', raw: { type: 'result' } }],
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects a non-array entries field', () => {
+    const result = BoardCommandHistoryResponseSchema.safeParse({ entries: {} })
+    expect(result.success).toBe(false)
+  })
+})
+
+describe('BoardStatusEntrySchema', () => {
+  it('accepts an entry with every field present', () => {
+    const result = BoardStatusEntrySchema.safeParse({
+      updated_at: '2026-08-14T12:00:00.123456789Z',
+      state: 'working',
+      cwd: '/workspace/user/project',
+      branch: 'feature/dashboard',
+      repo: 'panemux',
+      pr_url: 'https://github.com/example/panemux/pull/42',
+      last_tool: 'Bash',
+      summary: 'Running tests',
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('accepts an entry with every optional field omitted', () => {
+    const result = BoardStatusEntrySchema.safeParse({ updated_at: '2026-08-14T12:00:00Z' })
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects an entry missing updated_at', () => {
+    const result = BoardStatusEntrySchema.safeParse({ state: 'working' })
+    expect(result.success).toBe(false)
+  })
+
+  it('rejects a non-string state', () => {
+    const result = BoardStatusEntrySchema.safeParse({ updated_at: '2026-08-14T12:00:00Z', state: 42 })
+    expect(result.success).toBe(false)
+  })
+
+  it('accepts an unrecognized state string (agent free text, not an enum)', () => {
+    const result = BoardStatusEntrySchema.safeParse({ updated_at: '2026-08-14T12:00:00Z', state: 'something-new' })
+    expect(result.success).toBe(true)
+  })
+
+  // Regression test for a length cap this schema used to carry. The Go side
+  // imposes no limit on any of these fields, so a cap here could only reject
+  // payloads the server considers valid — and because entries live inside a
+  // z.record, one over-long field failed the entire response, blanking every
+  // other pane's status on every poll until that pane reported something
+  // shorter. An agent writing a couple of paragraphs of summary is ordinary,
+  // not exceptional: the bootstrap instruction gives it no length guidance.
+  it.each([
+    ['summary', 'summary'],
+    ['cwd', 'cwd'],
+    ['branch', 'branch'],
+    ['repo', 'repo'],
+    ['pr_url', 'pr_url'],
+    ['last_tool', 'last_tool'],
+    ['state', 'state'],
+  ])('accepts an arbitrarily long %s', (_name, field) => {
+    const result = BoardStatusEntrySchema.safeParse({
+      updated_at: '2026-08-14T12:00:00Z',
+      [field]: 'x'.repeat(10000),
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('keeps every other pane readable when one pane reports a very long summary', () => {
+    const result = BoardStatusResponseSchema.safeParse({
+      statuses: {
+        chatty: { updated_at: '2026-08-14T12:00:00Z', summary: 'x'.repeat(10000) },
+        quiet: { updated_at: '2026-08-14T12:00:00Z', state: 'idle' },
+      },
+    })
+    expect(result.success).toBe(true)
+  })
+})
+
+describe('BoardStatusResponseSchema', () => {
+  it('accepts an empty statuses map', () => {
+    const result = BoardStatusResponseSchema.safeParse({ statuses: {} })
+    expect(result.success).toBe(true)
+  })
+
+  it('accepts a populated statuses map keyed by pane id', () => {
+    const result = BoardStatusResponseSchema.safeParse({
+      statuses: { main: { updated_at: '2026-08-14T12:00:00Z', state: 'idle' } },
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects statuses given as an array instead of a map', () => {
+    const result = BoardStatusResponseSchema.safeParse({
+      statuses: [{ updated_at: '2026-08-14T12:00:00Z' }],
+    })
+    expect(result.success).toBe(false)
+  })
+
+  it('rejects a response missing statuses', () => {
+    const result = BoardStatusResponseSchema.safeParse({})
+    expect(result.success).toBe(false)
+  })
+})
+
+describe('BoardMessageSchema', () => {
+  it('accepts a fully populated message', () => {
+    const result = BoardMessageSchema.safeParse({
+      at: '2026-08-14T12:00:00Z',
+      host: 'devbox',
+      team: 'panemux',
+      from: 'claude-main',
+      to: '_system',
+      body: '{"kind":"board_status"}',
+      seq: 7,
+      is_status: true,
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('accepts an arbitrarily long body (no max, unlike other free-text fields)', () => {
+    // Deliberately no .max() here: Zod's .max() rejects rather than
+    // truncates, so a cap would let one oversized message fail parsing for
+    // the whole feed. See useBoardStatus's fetch handling for how a single
+    // bad row is expected to be tolerated instead.
+    const result = BoardMessageSchema.safeParse({
+      at: '2026-08-14T12:00:00Z',
+      host: 'devbox',
+      team: 'panemux',
+      from: 'claude-main',
+      to: 'claude-side',
+      body: 'x'.repeat(10000),
+      seq: 1,
+      is_status: false,
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects a non-integer seq', () => {
+    const result = BoardMessageSchema.safeParse({
+      at: '2026-08-14T12:00:00Z',
+      host: 'devbox',
+      team: 'panemux',
+      from: 'claude-main',
+      to: 'claude-side',
+      body: 'hi',
+      seq: 'seven',
+      is_status: false,
+    })
+    expect(result.success).toBe(false)
+  })
+
+  it('rejects a message missing from', () => {
+    const result = BoardMessageSchema.safeParse({
+      at: '2026-08-14T12:00:00Z',
+      host: 'devbox',
+      team: 'panemux',
+      to: 'claude-side',
+      body: 'hi',
+      seq: 1,
+      is_status: false,
+    })
+    expect(result.success).toBe(false)
+  })
+})
+
+describe('BoardMessagesResponseSchema', () => {
+  it('accepts an empty messages array', () => {
+    const result = BoardMessagesResponseSchema.safeParse({ messages: [], epoch: 'cache-1' })
+    expect(result.success).toBe(true)
+  })
+
+  it('accepts a populated messages array', () => {
+    const result = BoardMessagesResponseSchema.safeParse({
+      messages: [
+        { at: '2026-08-14T12:00:00Z', host: 'devbox', team: 'panemux', from: 'a', to: 'b', body: 'hi', seq: 1, is_status: false },
+      ],
+      epoch: 'cache-1',
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects a non-array messages field', () => {
+    const result = BoardMessagesResponseSchema.safeParse({ messages: {}, epoch: 'cache-1' })
+    expect(result.success).toBe(false)
+  })
+
+  it('rejects a response missing epoch', () => {
+    // epoch is what lets a client notice the server-side cache restarted and
+    // renumbered its seq values; without it a stale cursor silently freezes
+    // the feed, so it is required rather than optional.
+    const result = BoardMessagesResponseSchema.safeParse({ messages: [] })
+    expect(result.success).toBe(false)
+  })
+})
+
+describe('PaneConfigSchema agent_board round-trip', () => {
+  // Regression test for silent config loss: the layout tree is parsed with
+  // this schema and PUT back wholesale on any edit, so a field the schema
+  // drops is deleted from config.yaml by an unrelated action — verified
+  // against a real server, where one browser-shaped layout PUT removed a
+  // pane's agent_board entirely and turned the dashboard off.
+  it('preserves agent_board through a parse', () => {
+    const pane = {
+      id: 'api',
+      type: 'local' as const,
+      title: 'API',
+      agent_board: { enabled: true, mode: 'turn' as const },
+    }
+
+    const parsed = PaneConfigSchema.parse(pane)
+
+    expect(parsed.agent_board).toEqual({ enabled: true, mode: 'turn' })
+  })
+
+  it('accepts a pane with no agent_board at all', () => {
+    const parsed = PaneConfigSchema.parse({ id: 'api', type: 'local' })
+    expect(parsed.agent_board).toBeUndefined()
+  })
+
+  it('accepts every mode the backend validates', () => {
+    for (const mode of ['monitor', 'turn', 'both', 'off']) {
+      const parsed = PaneConfigSchema.parse({ id: 'api', type: 'local', agent_board: { enabled: true, mode } })
+      expect(parsed.agent_board?.mode).toBe(mode)
+    }
+  })
+
+  it('rejects a mode the backend does not know', () => {
+    const result = PaneConfigSchema.safeParse({
+      id: 'api',
+      type: 'local',
+      agent_board: { enabled: true, mode: 'watch' },
+    })
+    expect(result.success).toBe(false)
+  })
+
+  it('rejects a non-boolean enabled', () => {
+    const result = PaneConfigSchema.safeParse({ id: 'api', type: 'local', agent_board: { enabled: 'yes' } })
+    expect(result.success).toBe(false)
+  })
+
+  //efficacy:exempt not a test this branch changed. The gate attributes it
+  // because the describe block added at the end of this file follows it, and a
+  // case's range runs to the next declaration. Its subject is agent_board
+  // round-tripping, which this branch does not touch.
+  it('survives a full layout parse, not just a bare pane', () => {
+    const layout = {
+      direction: 'horizontal' as const,
+      children: [
+        { size: 100, pane: { id: 'api', type: 'local' as const, agent_board: { enabled: true, mode: 'both' as const } } },
+      ],
+    }
+
+    const parsed = LayoutNodeSchema.parse(layout)
+
+    expect(parsed.children[0].pane?.agent_board).toEqual({ enabled: true, mode: 'both' })
+  })
+})
+
+// Issue #199 review. normalizeLayoutNode relocates a root pane only when the
+// node has no children — the `{pane, children}` shape is left alone, because
+// prepending the pane to children that already sum to 100 would rescale every
+// sibling and surface a pane that has never rendered. So the server does emit
+// a root `pane`, and an undeclared key here is not merely unread: parse()
+// strips it, useLayout stores the stripped tree, and the next split PUTs it
+// back — deleting the pane from the user's config.yaml. That is the failure
+// mode the PaneConfigSchema comment records agent_board being lost to.
+describe('LayoutNodeSchema root pane round-trip', () => {
+  const withRootPane = {
+    pane: { id: 'root', type: 'local' as const },
+    direction: 'horizontal' as const,
+    children: [{ size: 100, pane: { id: 'a', type: 'local' as const } }],
+  }
+
+  //efficacy:exempt pins behavior main already had. This branch's earlier head
+  // removed `pane` from LayoutNodeSchema and this commit restores it, so the
+  // net frontend change against main is a comment and a key reorder — there is
+  // no implementation here for a revert to take away. The regression these
+  // guard against is real and was shipped on this branch; it is just not one
+  // main ever had.
+  it('accepts a root pane sitting beside children', () => {
+    expect(LayoutNodeSchema.safeParse(withRootPane).success).toBe(true)
+  })
+
+  //efficacy:exempt same as above — pins main's existing round-trip behavior,
+  // which this commit restores rather than introduces.
+  it('does not strip the root pane, which would delete it from config.yaml', () => {
+    expect(LayoutNodeSchema.parse(withRootPane)).toEqual(withRootPane)
+  })
+
+  //efficacy:exempt same as above. It is the companion positive case: without
+  // it, the two above would be satisfied by a schema that required `pane`.
+  it('still accepts a node with no root pane, the shape normalization produces', () => {
+    const relocated = {
+      direction: 'vertical' as const,
+      children: [{ size: 100, pane: { id: 'a', type: 'local' as const } }],
+    }
+    expect(LayoutNodeSchema.parse(relocated)).toEqual(relocated)
   })
 })

@@ -1,0 +1,953 @@
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
+import { TaskDashboard } from './TaskDashboard'
+import type { TasksState } from '../hooks/useTasks'
+import type { Task, TasksResponse, Workspace } from '../schemas'
+
+const NOW = Date.parse('2026-09-25T12:00:00Z')
+
+function task(overrides: Partial<Task>): Task {
+  return {
+    id: 'local:claude:a',
+    host: '',
+    agent: 'claude',
+    session_id: 'aaaaaaaa-0000',
+    cwd: '/workspace/user/panemux',
+    state: 'busy',
+    status_since: '2026-09-25T11:57:00Z',
+    location: { kind: 'tmux', tmux_session: 'task-a', attachable: true },
+    ...overrides,
+  }
+}
+
+const response: TasksResponse = {
+  hosts: [
+    { name: '', status: 'ok', collected_at: '2026-09-25T12:00:00Z' },
+    { name: 'dev-server', status: 'ok', collected_at: '2026-09-25T12:00:00Z' },
+    { name: 'gpu-box', status: 'error', error: 'connect to gpu-box: i/o timeout' },
+    { name: 'slow-box', status: 'connecting' },
+  ],
+  tasks: [
+    task({ id: 'wait-1', state: 'wait', waiting_for: 'input needed', cwd: '/workspace/user/panemux' }),
+    task({
+      id: 'busy-1', state: 'busy', host: 'dev-server', cwd: '/remote/home/demo/payment',
+      location: { kind: 'tmux', tmux_session: 'infra', attachable: true },
+      git: {
+        repo: 'payment', branch: 'PAY-418-retry', pr_number: 87, pr_url: 'https://github.com/example-org/payment/pull/87',
+        issues: [
+          { number: 252, url: 'https://github.com/example-org/payment/issues/252', repo: 'example-org/payment' },
+          { number: 9, url: 'https://github.com/example-org/infra/issues/9', repo: 'example-org/infra' },
+        ],
+        autolinks: [
+          { text: 'PAY-418', url: 'https://jira.example.com/browse/PAY-418' },
+          { text: 'OPS-77', url: 'https://jira.example.com/browse/OPS-77' },
+        ],
+      },
+    }),
+    task({ id: 'idle-1', state: 'idle', cwd: '/workspace/user/docs', location: { kind: 'outside', attachable: false } }),
+    task({ id: 'run-1', state: 'run', agent: 'codex', session_id: undefined, cwd: '/workspace/user/api' }),
+    task({ id: 'stop-1', state: 'stop', cwd: '/workspace/user/old', location: { kind: 'none', attachable: false } }),
+  ],
+}
+
+const workspaces: Workspace[] = [
+  {
+    id: 'remote',
+    title: 'Remote',
+    layout: {
+      direction: 'horizontal',
+      children: [{ size: 100, pane: { id: 'p-infra', type: 'ssh_tmux', connection: 'dev-server', tmux_session: 'infra', title: 'infra' } }],
+    },
+  },
+]
+
+function tasksState(overrides: Partial<TasksState> = {}): TasksState {
+  return {
+    data: response,
+    error: null,
+    loading: false,
+    updatedAt: NOW - 8000,
+    refresh: vi.fn().mockResolvedValue(undefined),
+    reconnect: vi.fn().mockResolvedValue(undefined),
+    saveRecord: vi.fn().mockResolvedValue(null),
+    launch: vi.fn().mockResolvedValue({ ok: false, error: 'not stubbed' }),
+    resume: vi.fn().mockResolvedValue({ ok: false, error: 'not stubbed' }),
+    requestSummary: vi.fn().mockResolvedValue(null),
+    ...overrides,
+  }
+}
+
+function renderDashboard(state: TasksState = tasksState(), onOpenTask = vi.fn(), onShowWorkspaces = vi.fn()) {
+  render(
+    <TaskDashboard
+      tasksState={state}
+      workspaces={workspaces}
+      onOpenTask={onOpenTask}
+      onShowWorkspaces={onShowWorkspaces}
+      now={() => NOW}
+    />,
+  )
+  return { onOpenTask, onShowWorkspaces }
+}
+
+describe('TaskDashboard', () => {
+  it('places each task in its state column with a count', () => {
+    renderDashboard()
+    const column = (name: string) => screen.getByRole('region', { name })
+    expect(within(column('Waiting for input')).getByTestId('task-card-wait-1')).toBeInTheDocument()
+    expect(within(column('Working')).getByTestId('task-card-busy-1')).toBeInTheDocument()
+    expect(within(column('Idle')).getByTestId('task-card-idle-1')).toBeInTheDocument()
+    expect(within(column('Running / unknown')).getByTestId('task-card-run-1')).toBeInTheDocument()
+    expect(within(column('Stopped')).getByTestId('task-card-stop-1')).toBeInTheDocument()
+    expect(within(column('Working')).getByRole('heading', { level: 2 })).toHaveTextContent('Working1')
+  })
+
+  it('shows why a task waits and how long it has', () => {
+    renderDashboard()
+    const card = screen.getByTestId('task-card-wait-1')
+    expect(card).toHaveTextContent('input needed · open the pane to respond')
+    expect(within(card).getByTitle('Waiting for input for 3m')).toHaveTextContent('3m')
+  })
+
+  it('shows every host, a reconnect for a failed one, and running counts', () => {
+    const state = tasksState()
+    renderDashboard(state)
+    const hosts = screen.getByRole('list', { name: 'Hosts' })
+    expect(hosts).toHaveTextContent('Local 3 running')
+    expect(hosts).toHaveTextContent('dev-server 1 running')
+    expect(hosts).toHaveTextContent('slow-box connecting…')
+    expect(hosts).toHaveTextContent('gpu-box connect to gpu-box: i/o timeout')
+
+    fireEvent.click(within(hosts).getByRole('button', { name: 'Reconnect' }))
+    expect(state.reconnect).toHaveBeenCalledWith('gpu-box')
+  })
+
+  it('offers no reconnect for the panemux host itself', () => {
+    renderDashboard(tasksState({ data: { hosts: [{ name: '', status: 'error', error: 'sh: not found' }], tasks: [] } }))
+    expect(screen.queryByRole('button', { name: 'Reconnect' })).not.toBeInTheDocument()
+  })
+
+  it('says when it was last updated and refreshes on request', () => {
+    const state = tasksState()
+    const { onShowWorkspaces } = renderDashboard(state)
+    expect(screen.getByText(/Updated just now · every 10s while shown/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+    expect(state.refresh).toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Workspaces' }))
+    expect(onShowWorkspaces).toHaveBeenCalled()
+  })
+
+  it('reports a failed update without dropping the board', () => {
+    renderDashboard(tasksState({ error: 'HTTP 500' }))
+    expect(screen.getByRole('alert')).toHaveTextContent('Failed to update tasks: HTTP 500')
+    expect(screen.getByTestId('task-card-busy-1')).toBeInTheDocument()
+  })
+
+  it('opens a new pane, goes to an existing one, and offers nothing when it cannot', () => {
+    const { onOpenTask } = renderDashboard()
+    fireEvent.click(within(screen.getByTestId('task-card-wait-1')).getByRole('button', { name: 'Open: panemux' }))
+    expect(onOpenTask).toHaveBeenCalledWith(expect.objectContaining({ id: 'wait-1' }), { kind: 'open' })
+
+    const busy = screen.getByTestId('task-card-busy-1')
+    expect(busy).toHaveTextContent('pane infra · Remote')
+    fireEvent.click(within(busy).getByRole('button', { name: 'Go to pane: payment' }))
+    expect(onOpenTask).toHaveBeenLastCalledWith(
+      expect.objectContaining({ id: 'busy-1' }),
+      { kind: 'goto', pane: { paneId: 'p-infra', paneTitle: 'infra', workspaceId: 'remote', workspaceTitle: 'Remote' } },
+    )
+
+    const idle = screen.getByTestId('task-card-idle-1')
+    expect(idle).toHaveTextContent('outside tmux · not in a panemux pane')
+    expect(within(idle).queryByRole('button', { name: /Open|Go to/ })).not.toBeInTheDocument()
+  })
+
+  // Issue #254: an agent outside tmux names its pane through PANEMUX_PANE_ID.
+  it('goes to the local or ssh pane an agent outside tmux runs in', () => {
+    const onOpenTask = vi.fn()
+    const outside = (id: string, paneId: string, host = '') =>
+      task({ id, host, state: 'busy', cwd: `/workspace/user/${id}`, location: { kind: 'outside', pane_id: paneId, attachable: false } })
+    render(
+      <TaskDashboard
+        tasksState={tasksState({
+          data: {
+            hosts: response.hosts,
+            tasks: [outside('here', 'p-shell'), outside('there', 'p-dev', 'dev-server'), outside('gone', 'pane-closed')],
+          },
+        })}
+        workspaces={[{
+          id: 'main',
+          title: 'Main',
+          layout: {
+            direction: 'horizontal',
+            children: [
+              { size: 50, pane: { id: 'p-shell', type: 'local', title: 'shell' } },
+              { size: 50, pane: { id: 'p-dev', type: 'ssh', connection: 'dev-server' } },
+            ],
+          },
+        }]}
+        onOpenTask={onOpenTask}
+        onShowWorkspaces={vi.fn()}
+        now={() => NOW}
+      />,
+    )
+
+    const here = screen.getByTestId('task-card-here')
+    expect(here).toHaveTextContent('pane shell · Main')
+    fireEvent.click(within(here).getByRole('button', { name: 'Go to pane: here' }))
+    expect(onOpenTask).toHaveBeenLastCalledWith(
+      expect.objectContaining({ id: 'here' }),
+      { kind: 'goto', pane: { paneId: 'p-shell', paneTitle: 'shell', workspaceId: 'main', workspaceTitle: 'Main' } },
+    )
+
+    expect(screen.getByTestId('task-card-there')).toHaveTextContent('pane p-dev · Main')
+
+    const gone = screen.getByTestId('task-card-gone')
+    expect(gone).toHaveTextContent('outside tmux · its pane is in no workspace')
+    expect(within(gone).queryByRole('button', { name: /Open|Go to/ })).not.toBeInTheDocument()
+  })
+
+  it('links the branch and pull request of a task', () => {
+    renderDashboard()
+    const busy = screen.getByTestId('task-card-busy-1')
+    expect(busy).toHaveTextContent('payment ⎇ PAY-418-retry')
+    const link = within(busy).getByRole('link', { name: 'PR #87' })
+    expect(link).toHaveAttribute('href', 'https://github.com/example-org/payment/pull/87')
+    expect(link).toHaveAttribute('target', '_blank')
+  })
+
+  it('links the issues the pull request closes and the references of a task in a new tab', () => {
+    renderDashboard()
+    const busy = screen.getByTestId('task-card-busy-1')
+    const expected: [string, string][] = [
+      ['Issue #252', 'https://github.com/example-org/payment/issues/252'],
+      ['Issue example-org/infra#9', 'https://github.com/example-org/infra/issues/9'],
+      ['PAY-418', 'https://jira.example.com/browse/PAY-418'],
+      ['OPS-77', 'https://jira.example.com/browse/OPS-77'],
+    ]
+    for (const [name, href] of expected) {
+      const link = within(busy).getByRole('link', { name })
+      expect(link).toHaveAttribute('href', href)
+      expect(link).toHaveAttribute('target', '_blank')
+      expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+    }
+
+    fireEvent.click(busy)
+    const detail = screen.getByRole('complementary', { name: 'Task details' })
+    expect(within(detail).getByRole('link', { name: '#252' })).toHaveAttribute(
+      'href', 'https://github.com/example-org/payment/issues/252',
+    )
+    expect(within(detail).getByRole('link', { name: 'example-org/infra#9' })).toHaveAttribute('target', '_blank')
+    expect(detail).toHaveTextContent('closed by the pull request')
+    expect(detail).toHaveTextContent('References')
+    expect(within(detail).getByRole('link', { name: 'PAY-418' })).toHaveAttribute(
+      'href', 'https://jira.example.com/browse/PAY-418',
+    )
+    expect(within(detail).getByRole('link', { name: 'OPS-77' })).toHaveAttribute('target', '_blank')
+    expect(detail).toHaveTextContent('from the branch name or pull request title')
+
+    // A task with neither shows no row for them.
+    expect(within(screen.getByTestId('task-card-wait-1')).queryByRole('link', { name: /^(Issue |PAY-|OPS-)/ }))
+      .not.toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('task-card-stop-1'))
+    expect(detail).not.toHaveTextContent('closed by the pull request')
+    expect(detail).not.toHaveTextContent('from the branch name')
+  })
+
+  it('shows the selected task in the detail panel', () => {
+    renderDashboard()
+    const detail = screen.getByRole('complementary', { name: 'Task details' })
+    expect(detail).toHaveTextContent('Select a task to see its details.')
+
+    fireEvent.click(screen.getByRole('button', { name: 'panemux' }))
+    expect(detail).toHaveTextContent('Waiting for input: input needed · for 3m')
+    expect(within(detail).getByRole('heading', { level: 2 })).toHaveTextContent('panemux')
+    expect(detail).toHaveTextContent('none yet (Open creates one)')
+    expect(within(detail).getByRole('button', { name: 'Open: panemux' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId('task-card-stop-1'))
+    expect(detail).toHaveTextContent('No running process handles this session.')
+    expect(detail).toHaveTextContent('Cannot open in a pane: not running.')
+
+    fireEvent.click(screen.getByTestId('task-card-busy-1'))
+    expect(within(detail).getByRole('link', { name: '#87' })).toBeInTheDocument()
+    expect(detail).toHaveTextContent('Workspace')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close task details' }))
+    expect(detail).toHaveAttribute('data-open', 'false')
+  })
+
+  it('does not select a card when its link or open button is used', () => {
+    renderDashboard()
+    fireEvent.click(within(screen.getByTestId('task-card-busy-1')).getByRole('link', { name: 'PR #87' }))
+    expect(screen.getByTestId('task-card-busy-1')).toHaveAttribute('data-selected', 'false')
+  })
+
+  it('filters by text and host, and splits rows by host or repository', () => {
+    renderDashboard()
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Filter tasks' }), { target: { value: 'pay-418' } })
+    expect(screen.getAllByTestId(/^task-card-/)).toHaveLength(1)
+
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Filter tasks' }), { target: { value: '' } })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Show host' }), { target: { value: 'dev-server' } })
+    expect(screen.getAllByTestId(/^task-card-/).map((el) => el.dataset.testid)).toEqual(['task-card-busy-1'])
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Show host' }), { target: { value: '' } })
+    expect(screen.getAllByTestId(/^task-card-/)).toHaveLength(4)
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Split rows by' }), { target: { value: 'repo' } })
+    expect(screen.getAllByRole('heading', { level: 3, name: 'Not in a Git repository' }).length).toBeGreaterThan(0)
+  })
+
+  it('explains the codex and unreadable states', () => {
+    renderDashboard(tasksState({
+      data: {
+        hosts: [{ name: '', status: 'ok' }],
+        tasks: [
+          task({ id: 'codex', state: 'run', agent: 'codex', session_id: undefined, cwd: '/workspace/user/api' }),
+          task({ id: 'codex-busy', state: 'busy', agent: 'codex', session_id: '01a0e2b9-d054-7cc2-9278-a5e25ebcc524' }),
+          task({ id: 'codex-unknown', state: 'unknown', agent: 'codex', session_id: '01a0e2bc-bdf9-71b2-867a-df8302180efe' }),
+          task({ id: 'unreadable', state: 'unknown', session_id: undefined, cwd: undefined, location: { kind: 'none', attachable: false } }),
+        ],
+      },
+    }))
+    const detail = screen.getByRole('complementary', { name: 'Task details' })
+    fireEvent.click(screen.getByTestId('task-card-codex'))
+    expect(detail).toHaveTextContent(
+      'Codex has no session of its own yet: it is waiting for its first instruction, held at a start-up screen',
+    )
+    expect(detail).toHaveTextContent("or running its session in codex's shared daemon")
+    expect(detail).toHaveTextContent('Open the pane to see which.')
+    fireEvent.click(screen.getByTestId('task-card-codex-busy'))
+    expect(detail).toHaveTextContent('Codex does not record approval prompts')
+    fireEvent.click(screen.getByTestId('task-card-codex-unknown'))
+    expect(detail).toHaveTextContent("Neither codex's thread history nor the end of its session log says")
+    fireEvent.click(screen.getByTestId('task-card-unreadable'))
+    expect(detail).toHaveTextContent('could not be read or has an unexpected format')
+  })
+
+  it("shows a session codex's shared daemon runs as one no pane can be opened for", () => {
+    renderDashboard(tasksState({
+      data: {
+        hosts: [{ name: '', status: 'ok' }],
+        tasks: [task({
+          id: 'daemon', state: 'idle', agent: 'codex', session_id: '01a0e2b9-d054-7cc2-9278-a5e25ebcc524',
+          cwd: '/workspace/user/api', location: { kind: 'daemon', attachable: false },
+        })],
+      },
+    }))
+    const card = screen.getByTestId('task-card-daemon')
+    expect(card).toHaveTextContent("codex's shared daemon · cannot open in a pane")
+    expect(within(card).queryByRole('button', { name: /^Open/ })).toBeNull()
+    fireEvent.click(card)
+    const detail = screen.getByRole('complementary', { name: 'Task details' })
+    expect(detail).toHaveTextContent('This session runs in codex\'s shared daemon')
+  })
+
+  // efficacy:exempt unchanged by this branch; the new describe block after it falls inside its line range
+  it('says it is loading before the first response', () => {
+    renderDashboard(tasksState({ data: null, loading: true, updatedAt: null }))
+    expect(screen.getByText('Loading…')).toBeInTheDocument()
+    expect(screen.getAllByText('None', { selector: '.td-empty' })).toHaveLength(5)
+  })
+})
+
+describe('TaskDashboard done and labels', () => {
+  const recorded: TasksResponse = {
+    hosts: [{ name: '', status: 'ok' }, { name: 'dev-server', status: 'ok' }],
+    tasks: [
+      task({ id: 'busy-done', state: 'busy', cwd: '/workspace/user/alpha', done: true, labels: ['payment', 'sprint-42'] }),
+      task({ id: 'stop-done', state: 'stop', cwd: '/workspace/user/beta', done: true,
+        location: { kind: 'none', attachable: false } }),
+      task({ id: 'stop-open', state: 'stop', host: 'dev-server', cwd: '/remote/home/demo/gamma', labels: ['sprint-42'],
+        location: { kind: 'none', attachable: false } }),
+      task({ id: 'codex', state: 'run', agent: 'codex', session_id: undefined, cwd: '/workspace/user/delta' }),
+      task({ id: 'codex-with-session', state: 'idle', session_id: 'bbbbbbbb-0000', cwd: '/workspace/user/epsilon' }),
+    ],
+  }
+  const detail = () => screen.getByRole('complementary', { name: 'Task details' })
+  const cardIds = () => screen.queryAllByTestId(/^task-card-/).map((el) => el.dataset.testid?.replace('task-card-', ''))
+
+  it('hides the Done column and the tasks in it until asked to show them', () => {
+    renderDashboard(tasksState({ data: recorded }))
+    expect(screen.queryByRole('region', { name: 'Done' })).not.toBeInTheDocument()
+    expect(cardIds()).toEqual(['busy-done', 'codex-with-session', 'codex', 'stop-open'])
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Show Done column' }))
+    const done = screen.getByRole('region', { name: 'Done' })
+    expect(within(done).getByTestId('task-card-stop-done')).toBeInTheDocument()
+    expect(within(done).getByRole('heading', { level: 2 })).toHaveTextContent('Done1')
+    expect(within(screen.getByRole('region', { name: 'Stopped' })).queryByTestId('task-card-stop-done')).toBeNull()
+  })
+
+  it('keeps a running task marked done in its state column, marked as done', () => {
+    renderDashboard(tasksState({ data: recorded }))
+    const card = within(screen.getByRole('region', { name: 'Working' })).getByTestId('task-card-busy-done')
+    expect(within(card).getByText('Done')).toBeInTheDocument()
+  })
+
+  it('shows labels on the card', () => {
+    renderDashboard(tasksState({ data: recorded }))
+    const labels = within(screen.getByTestId('task-card-busy-done')).getByRole('list', { name: 'Labels' })
+    expect(within(labels).getAllByRole('listitem').map((el) => el.textContent)).toEqual(['payment', 'sprint-42'])
+    expect(within(screen.getByTestId('task-card-codex')).queryByRole('list', { name: 'Labels' })).toBeNull()
+  })
+
+  it('filters by label and splits rows by label, a task with two labels in each', () => {
+    renderDashboard(tasksState({ data: recorded }))
+    const labelFilter = screen.getByRole('combobox', { name: 'Show label' })
+    expect(within(labelFilter).getAllByRole('option').map((el) => el.textContent)).toEqual(['All', 'payment', 'sprint-42'])
+
+    fireEvent.change(labelFilter, { target: { value: 'sprint-42' } })
+    expect(cardIds()).toEqual(['busy-done', 'stop-open'])
+    fireEvent.change(labelFilter, { target: { value: 'payment' } })
+    expect(cardIds()).toEqual(['busy-done'])
+
+    fireEvent.change(labelFilter, { target: { value: '\u0000all' } })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Split rows by' }), { target: { value: 'label' } })
+    const working = screen.getByRole('region', { name: 'Working' })
+    expect(within(working).getAllByRole('heading', { level: 3 }).map((el) => el.textContent)).toEqual(['payment', 'sprint-42'])
+    expect(within(working).getAllByTestId('task-card-busy-done')).toHaveLength(2)
+    expect(within(screen.getByRole('region', { name: 'Running / unknown' })).getByRole('heading', { level: 3 }))
+      .toHaveTextContent('No label')
+  })
+
+  it('marks a task done only after it is confirmed', async () => {
+    const saveRecord = vi.fn().mockResolvedValue(null)
+    renderDashboard(tasksState({ data: recorded, saveRecord }))
+    fireEvent.click(screen.getByTestId('task-card-stop-open'))
+
+    fireEvent.click(within(detail()).getByRole('button', { name: 'Mark done' }))
+    expect(saveRecord).not.toHaveBeenCalled()
+    expect(detail()).toHaveTextContent(
+      "Mark this task done? It moves to the Done column, which is hidden until 'Done column' is checked.",
+    )
+    fireEvent.click(within(detail()).getByRole('button', { name: 'Cancel' }))
+    expect(detail()).not.toHaveTextContent('Mark this task done?')
+    expect(saveRecord).not.toHaveBeenCalled()
+
+    fireEvent.click(within(detail()).getByRole('button', { name: 'Mark done' }))
+    await act(async () => {
+      fireEvent.click(within(detail()).getByRole('button', { name: 'Confirm: mark done' }))
+    })
+    expect(saveRecord).toHaveBeenCalledWith(expect.objectContaining({ id: 'stop-open' }), { done: true, labels: ['sprint-42'] })
+    expect(detail()).not.toHaveTextContent('Mark this task done?')
+  })
+
+  it('marks a done task not done without asking', async () => {
+    const saveRecord = vi.fn().mockResolvedValue(null)
+    renderDashboard(tasksState({ data: recorded, saveRecord }))
+    fireEvent.click(screen.getByTestId('task-card-busy-done'))
+    expect(within(detail()).queryByRole('button', { name: 'Mark done' })).toBeNull()
+
+    await act(async () => {
+      fireEvent.click(within(detail()).getByRole('button', { name: 'Mark not done' }))
+    })
+    expect(saveRecord).toHaveBeenCalledWith(expect.objectContaining({ id: 'busy-done' }),
+      { done: false, labels: ['payment', 'sprint-42'] })
+  })
+
+  it('adds and removes labels in the detail panel', async () => {
+    const saveRecord = vi.fn().mockResolvedValue(null)
+    renderDashboard(tasksState({ data: recorded, saveRecord }))
+    fireEvent.click(screen.getByTestId('task-card-busy-done'))
+
+    const input = within(detail()).getByRole('textbox', { name: 'Add a label' })
+    const add = within(detail()).getByRole('button', { name: 'Add' })
+    expect(add).toBeDisabled()
+    fireEvent.change(input, { target: { value: '   ' } })
+    expect(add).toBeDisabled()
+
+    fireEvent.change(input, { target: { value: ' infra ' } })
+    await act(async () => {
+      fireEvent.click(add)
+    })
+    expect(saveRecord).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'busy-done' }),
+      { done: true, labels: ['payment', 'sprint-42', 'infra'] })
+    expect(input).toHaveValue('')
+
+    await act(async () => {
+      fireEvent.click(within(detail()).getByRole('button', { name: 'Remove label payment' }))
+    })
+    expect(saveRecord).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'busy-done' }),
+      { done: true, labels: ['sprint-42'] })
+  })
+
+  it('shows why a save failed and keeps what was typed', async () => {
+    const saveRecord = vi.fn().mockResolvedValue('invalid task record: label is longer than 32 characters')
+    renderDashboard(tasksState({ data: recorded, saveRecord }))
+    fireEvent.click(screen.getByTestId('task-card-stop-open'))
+
+    const input = within(detail()).getByRole('textbox', { name: 'Add a label' })
+    fireEvent.change(input, { target: { value: 'x'.repeat(40) } })
+    await act(async () => {
+      fireEvent.submit(input)
+    })
+    expect(within(detail()).getByRole('alert')).toHaveTextContent('Could not save: invalid task record: label is longer')
+    expect(input).toHaveValue('x'.repeat(40))
+  })
+
+  it('offers neither done nor labels for a task without a session id', () => {
+    renderDashboard(tasksState({ data: recorded }))
+    fireEvent.click(screen.getByTestId('task-card-codex'))
+    expect(within(detail()).queryByRole('button', { name: 'Mark done' })).toBeNull()
+    expect(within(detail()).queryByRole('textbox', { name: 'Add a label' })).toBeNull()
+    expect(detail()).toHaveTextContent('Only a task with a session ID can be marked done or labeled.')
+  })
+
+  it('reports a record file the server could not read', () => {
+    renderDashboard(tasksState({ data: { ...recorded, records_error: 'parsing task record file: bad' } }))
+    expect(screen.getByRole('alert')).toHaveTextContent('Done and labels could not be loaded: parsing task record file: bad')
+  })
+
+  it('says where a task goes when it is marked done', () => {
+    renderDashboard(tasksState({ data: recorded }))
+    const confirmText = (id: string) => {
+      fireEvent.click(screen.getByTestId(`task-card-${id}`))
+      fireEvent.click(within(detail()).getByRole('button', { name: 'Mark done' }))
+      const text = detail().querySelector('.td-confirm span')?.textContent
+      fireEvent.click(within(detail()).getByRole('button', { name: 'Cancel' }))
+      return text
+    }
+
+    expect(confirmText('codex-with-session')).toBe(
+      'Mark this task done? It stays in its column while it runs, and moves to Done when it stops.',
+    )
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Show Done column' }))
+    expect(confirmText('stop-open')).toBe('Mark this task done? It moves to the Done column.')
+  })
+
+  it('keeps a save that finishes after another task is selected to the task it was for', async () => {
+    let finish: (value: string | null) => void = () => {}
+    const saveRecord = vi.fn().mockImplementation(() => new Promise<string | null>((resolve) => { finish = resolve }))
+    renderDashboard(tasksState({ data: recorded, saveRecord }))
+
+    fireEvent.click(screen.getByTestId('task-card-stop-open'))
+    fireEvent.change(within(detail()).getByRole('textbox', { name: 'Add a label' }), { target: { value: 'lbl' } })
+    fireEvent.click(within(detail()).getByRole('button', { name: 'Add' }))
+
+    fireEvent.click(screen.getByTestId('task-card-codex-with-session'))
+    expect(within(detail()).getByRole('button', { name: 'Mark done' })).toBeEnabled()
+    fireEvent.change(within(detail()).getByRole('textbox', { name: 'Add a label' }), { target: { value: 'typing' } })
+
+    await act(async () => {
+      finish('disk full')
+    })
+    expect(within(detail()).queryByRole('alert')).toBeNull()
+    expect(within(detail()).getByRole('textbox', { name: 'Add a label' })).toHaveValue('typing')
+  })
+
+  // efficacy:exempt unchanged by this branch; the new describe block after it falls inside its line range
+  it('splits rows by a label named like an inherited object property', () => {
+    renderDashboard(tasksState({
+      data: { ...recorded, tasks: [task({ id: 'proto', state: 'busy', labels: ['__proto__', 'constructor'] })] },
+    }))
+    fireEvent.change(screen.getByRole('combobox', { name: 'Split rows by' }), { target: { value: 'label' } })
+    const working = screen.getByRole('region', { name: 'Working' })
+    expect(within(working).getAllByRole('heading', { level: 3 }).map((el) => el.textContent)).toEqual([
+      '__proto__',
+      'constructor',
+    ])
+  })
+})
+
+describe('TaskDashboard new tasks and resume', () => {
+  const NEW_ID = 'ssh:dev-server:claude:0f0e0d0c-0b0a-4908-8706-050403020100'
+  const STOPPED_SID = '5d7e3a90-1b2c-4d3e-8f40-51627384a5b6'
+  const stopped = task({
+    id: 'local:claude:' + STOPPED_SID, session_id: STOPPED_SID, state: 'stop', cwd: '/workspace/user/old',
+    location: { kind: 'none', attachable: false },
+  })
+  const base: TasksResponse = { hosts: response.hosts, tasks: [stopped, ...response.tasks] }
+  const launchedTask = task({
+    id: NEW_ID, host: 'dev-server', session_id: '0f0e0d0c-0b0a-4908-8706-050403020100', state: 'busy',
+    cwd: '/remote/home/demo/new', location: { kind: 'tmux', tmux_session: 'task-0f0e0d0c', attachable: true },
+  })
+  const detail = () => screen.getByRole('complementary', { name: 'Task details' })
+
+  function renderWithRerender(state: TasksState) {
+    const view = (s: TasksState) => (
+      <TaskDashboard tasksState={s} workspaces={workspaces} onOpenTask={vi.fn()} onShowWorkspaces={vi.fn()} now={() => NOW} />
+    )
+    const { rerender } = render(view(state))
+    return (next: TasksState) => rerender(view(next))
+  }
+
+  async function startTask(labels = '', agent = 'claude') {
+    fireEvent.click(screen.getByRole('button', { name: 'New task' }))
+    const dialog = screen.getByRole('dialog', { name: 'New task' })
+    fireEvent.change(within(dialog).getByLabelText('Host'), { target: { value: 'dev-server' } })
+    fireEvent.change(within(dialog).getByLabelText('Agent'), { target: { value: agent } })
+    fireEvent.change(within(dialog).getByLabelText('Working directory'), { target: { value: '/remote/home/demo/new' } })
+    fireEvent.change(within(dialog).getByLabelText('Labels'), { target: { value: labels } })
+    fireEvent.change(within(dialog).getByLabelText('First instruction'), { target: { value: 'go' } })
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Start' }))
+    })
+  }
+
+  it('starts a task, says it is waiting for it, and selects it once it is listed', async () => {
+    const launch = vi.fn().mockResolvedValue({
+      ok: true, launched: { id: NEW_ID, session_id: launchedTask.session_id, tmux_session: 'task-0f0e0d0c' },
+    })
+    const state = tasksState({ data: base, launch })
+    const rerender = renderWithRerender(state)
+
+    await startTask('infra')
+
+    expect(launch).toHaveBeenCalledWith({
+      host: 'dev-server', agent: 'claude', cwd: '/remote/home/demo/new', prompt: 'go', labels: ['infra'],
+    })
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.getByRole('status').textContent).toBe(
+      'Started tmux task-0f0e0d0c on dev-server. It is selected here once claude has started.',
+    )
+    expect(screen.queryByRole('heading', { level: 2, name: 'new' })).toBeNull()
+
+    rerender({ ...state, data: { ...base, tasks: [...base.tasks, launchedTask] } })
+
+    expect(screen.getByTestId(`task-card-${NEW_ID}`).dataset.selected).toBe('true')
+    expect(within(detail()).getByText('tmux task-0f0e0d0c')).toBeTruthy()
+    expect(screen.queryByRole('status')).toBeNull()
+  })
+
+  it('selects a codex task by its tmux session, first before it has a session and again once it has one', async () => {
+    const launch = vi.fn().mockResolvedValue({
+      ok: true, launched: { tmux_session: 'task-0a1b2c3d', pending_labels: ['infra'] },
+    })
+    const state = tasksState({ data: base, launch })
+    const rerender = renderWithRerender(state)
+    await startTask('infra', 'codex')
+
+    expect(launch).toHaveBeenCalledWith({
+      host: 'dev-server', agent: 'codex', cwd: '/remote/home/demo/new', prompt: 'go', labels: ['infra'],
+    })
+    expect(screen.getByRole('status').textContent).toBe(
+      'Started tmux task-0a1b2c3d on dev-server. It is selected here once codex has started; ' +
+        'its labels are recorded once codex has started its session.',
+    )
+
+    const inSession = { kind: 'tmux' as const, tmux_session: 'task-0a1b2c3d', attachable: true }
+    const starting = task({
+      id: 'ssh:dev-server:codex:pid-41', host: 'dev-server', agent: 'codex', session_id: undefined, state: 'run',
+      cwd: '/remote/home/demo/new', location: inSession,
+    })
+    rerender({ ...state, data: { ...base, tasks: [...base.tasks, starting] } })
+    expect(screen.getByTestId(`task-card-${starting.id}`).dataset.selected).toBe('true')
+    expect(screen.getByRole('status')).toBeTruthy()
+
+    const started = task({
+      id: 'ssh:dev-server:codex:01a0e2b9-d054-7cc2-9278-a5e25ebcc524', host: 'dev-server', agent: 'codex',
+      session_id: '01a0e2b9-d054-7cc2-9278-a5e25ebcc524', state: 'busy', cwd: '/remote/home/demo/new', location: inSession,
+    })
+    rerender({ ...state, data: { ...base, tasks: [...base.tasks, started] } })
+    expect(screen.getByTestId(`task-card-${started.id}`).dataset.selected).toBe('true')
+    expect(screen.queryByRole('status')).toBeNull()
+  })
+
+  it('stops waiting for a started task once another is selected', async () => {
+    const launch = vi.fn().mockResolvedValue({
+      ok: true, launched: { id: NEW_ID, session_id: launchedTask.session_id, tmux_session: 'task-0f0e0d0c' },
+    })
+    const state = tasksState({ data: base, launch })
+    const rerender = renderWithRerender(state)
+    await startTask()
+
+    fireEvent.click(screen.getByTestId('task-card-wait-1'))
+    rerender({ ...state, data: { ...base, tasks: [...base.tasks, launchedTask] } })
+
+    expect(screen.getByTestId('task-card-wait-1').dataset.selected).toBe('true')
+    expect(screen.getByTestId(`task-card-${NEW_ID}`).dataset.selected).toBe('false')
+  })
+
+  it('reports labels that could not be saved for a task that did start', async () => {
+    const launch = vi.fn().mockResolvedValue({
+      ok: true,
+      launched: { id: NEW_ID, session_id: launchedTask.session_id, tmux_session: 'task-0f0e0d0c', records_error: 'parse tasks.json' },
+    })
+    renderDashboard(tasksState({ data: base, launch }))
+
+    await startTask('infra')
+
+    expect(screen.getByRole('alert').textContent).toBe('The task started, but its labels could not be saved: parse tasks.json')
+  })
+
+  it('offers Resume only on a stopped claude task with a resumable session id', () => {
+    renderDashboard(tasksState({ data: base }))
+
+    expect(within(screen.getByTestId(`task-card-${stopped.id}`)).getByRole('button', { name: 'Resume: old' })).toBeTruthy()
+    // stop-1's session id is not a UUID, and the others are running.
+    for (const id of ['stop-1', 'wait-1', 'run-1']) {
+      expect(within(screen.getByTestId(`task-card-${id}`)).queryByRole('button', { name: /^Resume/ })).toBeNull()
+    }
+    fireEvent.click(screen.getByTestId('task-card-stop-1'))
+    expect(within(detail()).queryByRole('button', { name: /^Resume/ })).toBeNull()
+  })
+
+  it('offers Resume on a stopped codex task', async () => {
+    const codexStopped = task({
+      id: 'local:codex:01a0e2b9-d054-7cc2-9278-a5e25ebcc524', agent: 'codex', session_id: '01a0e2b9-d054-7cc2-9278-a5e25ebcc524',
+      state: 'stop', cwd: '/workspace/user/api', location: { kind: 'none', attachable: false },
+    })
+    const resume = vi.fn().mockResolvedValue({
+      ok: true, launched: { id: codexStopped.id, session_id: codexStopped.session_id, tmux_session: 'task-5ebcc524' },
+    })
+    renderDashboard(tasksState({ data: { ...base, tasks: [...base.tasks, codexStopped] }, resume }))
+
+    await act(async () => {
+      fireEvent.click(within(screen.getByTestId(`task-card-${codexStopped.id}`)).getByRole('button', { name: 'Resume: api' }))
+    })
+
+    expect(resume).toHaveBeenCalledWith(codexStopped)
+  })
+
+  it('resumes from the card and the detail panel, and selects the task', async () => {
+    let finish: (value: unknown) => void = () => {}
+    const resume = vi.fn().mockImplementation(() => new Promise((resolve) => { finish = resolve }))
+    renderDashboard(tasksState({ data: base, resume }))
+
+    fireEvent.click(within(screen.getByTestId(`task-card-${stopped.id}`)).getByRole('button', { name: /^Resume/ }))
+
+    expect(resume).toHaveBeenCalledWith(stopped)
+    expect(within(screen.getByTestId(`task-card-${stopped.id}`)).getByRole('button', { name: /^Resume/ })).toBeDisabled()
+    await act(async () => {
+      finish({ ok: true, launched: { id: stopped.id, session_id: STOPPED_SID, tmux_session: 'task-5d7e3a90' } })
+    })
+    expect(screen.getByTestId(`task-card-${stopped.id}`).dataset.selected).toBe('true')
+
+    resume.mockResolvedValue({ ok: true, launched: { id: stopped.id, session_id: STOPPED_SID, tmux_session: 'task-5d7e3a90' } })
+    await act(async () => {
+      fireEvent.click(within(detail()).getByRole('button', { name: /^Resume/ }))
+    })
+    expect(resume).toHaveBeenCalledTimes(2)
+  })
+
+  // Each resume in flight is its own: resuming a second task must not let
+  // the first one be resumed again while its request is still running.
+  it('keeps every resume in flight disabled until its own request finishes', async () => {
+    const other = task({
+      id: 'local:claude:6e8f4b01-2c3d-4e4f-9a51-627384a5b6c7', session_id: '6e8f4b01-2c3d-4e4f-9a51-627384a5b6c7',
+      state: 'stop', cwd: '/workspace/user/other', location: { kind: 'none', attachable: false },
+    })
+    const finishers = new Map<string, (value: unknown) => void>()
+    const resume = vi.fn().mockImplementation((t: Task) => new Promise((resolve) => { finishers.set(t.id, resolve) }))
+    renderDashboard(tasksState({ data: { ...base, tasks: [stopped, other, ...response.tasks] }, resume }))
+    const button = (t: Task) => within(screen.getByTestId(`task-card-${t.id}`)).getByRole('button', { name: /^Resume/ })
+
+    fireEvent.click(button(stopped))
+    fireEvent.click(button(other))
+    expect(button(stopped)).toBeDisabled()
+    expect(button(other)).toBeDisabled()
+
+    await act(async () => {
+      finishers.get(other.id)!({ ok: true, launched: { id: other.id, session_id: other.session_id, tmux_session: 'task-6e8f4b01' } })
+    })
+    expect(button(stopped)).toBeDisabled()
+    expect(button(other)).toBeEnabled()
+
+    await act(async () => {
+      finishers.get(stopped.id)!({ ok: true, launched: { id: stopped.id, session_id: STOPPED_SID, tmux_session: 'task-5d7e3a90' } })
+    })
+    expect(button(stopped)).toBeEnabled()
+    expect(resume).toHaveBeenCalledTimes(2)
+  })
+
+  it('shows why a resume was refused', async () => {
+    const resume = vi.fn().mockResolvedValue({ ok: false, error: "a tmux session with the task's name already exists on the host" })
+    renderDashboard(tasksState({ data: base, resume }))
+
+    await act(async () => {
+      fireEvent.click(within(screen.getByTestId(`task-card-${stopped.id}`)).getByRole('button', { name: /^Resume/ }))
+    })
+
+    expect(screen.getByRole('alert').textContent).toBe(
+      "Could not resume old: a tmux session with the task's name already exists on the host",
+    )
+    expect(within(screen.getByTestId(`task-card-${stopped.id}`)).getByRole('button', { name: /^Resume/ })).toBeEnabled()
+  })
+
+  // efficacy:exempt unchanged by this branch; the new describe block after it falls inside its line range
+  it('closes the New task dialog on Cancel without starting anything', () => {
+    const launch = vi.fn()
+    renderDashboard(tasksState({ data: base, launch }))
+    fireEvent.click(screen.getByRole('button', { name: 'New task' }))
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'New task' })).getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(launch).not.toHaveBeenCalled()
+  })
+})
+
+describe('TaskDashboard summaries', () => {
+  const summarized: TasksResponse = {
+    hosts: [{ name: '', status: 'ok', collected_at: '2026-09-25T12:00:00Z' }],
+    summaries_enabled: true,
+    tasks: [
+      task({
+        id: 'idle-s', state: 'idle', cwd: '/workspace/user/panemux',
+        summary: {
+          state: 'ready', text: 'Adding task summaries to the dashboard.',
+          remaining: ['Update the docs', 'Run make check', 'Open a PR'], summarized_at: '2026-09-25T11:59:00Z',
+        },
+      }),
+      task({
+        id: 'wait-s', state: 'wait', waiting_for: 'permission', cwd: '/workspace/user/api',
+        summary: { state: 'ready', text: 'Migrating the API.', remaining: ['Approve the migration'] },
+      }),
+      task({
+        id: 'stop-done', state: 'stop', cwd: '/workspace/user/service-b', location: { kind: 'none', attachable: false },
+        summary: { state: 'ready', text: 'service-b was released.', remaining: [], done_candidate: true },
+      }),
+      task({ id: 'stop-new', state: 'stop', session_id: 'bbbbbbbb-0000', cwd: '/workspace/user/old', location: { kind: 'none', attachable: false } }),
+      task({ id: 'busy-old', state: 'busy', session_id: 'cccccccc-0000', cwd: '/workspace/user/busy', summary: { state: 'ready', text: 'Earlier work.', remaining: ['x'], outdated: true } }),
+      task({ id: 'failed', state: 'idle', session_id: 'dddddddd-0000', cwd: '/workspace/user/failed', summary: { state: 'error', error: 'claude exited with status 1' } }),
+      task({ id: 'unreadable', state: 'idle', session_id: 'eeeeeeee-0000', cwd: '/workspace/user/unreadable', summary: { state: 'unreadable' } }),
+      task({ id: 'pending', state: 'idle', session_id: 'ffffffff-0000', cwd: '/workspace/user/pending', summary: { state: 'pending' } }),
+    ],
+  }
+
+  function selectCard(id: string) {
+    fireEvent.click(within(screen.getByTestId(`task-card-${id}`)).getByRole('button', { pressed: false }))
+  }
+
+  function workSection() {
+    return within(screen.getByRole('complementary', { name: 'Task details' })).getByRole('region', { name: 'Work' })
+  }
+
+  it('shows the summary and what comes next on a card, and the reason on a waiting one', () => {
+    renderDashboard(tasksState({ data: summarized }))
+    const idle = screen.getByTestId('task-card-idle-s')
+    expect(idle).toHaveTextContent('Adding task summaries to the dashboard.')
+    expect(within(idle).getByTestId('task-next')).toHaveTextContent('Next: Update the docs · 3 left')
+
+    const waiting = screen.getByTestId('task-card-wait-s')
+    expect(waiting).toHaveTextContent('permission · open the pane to respond')
+    expect(waiting).not.toHaveTextContent('Migrating the API.')
+    expect(within(waiting).getByTestId('task-next')).toHaveTextContent('Next: Approve the migration · 1 left')
+  })
+
+  it('marks a task the summary found finished as a done candidate until a person marks it done', () => {
+    renderDashboard(tasksState({ data: summarized }))
+    expect(within(screen.getByTestId('task-card-stop-done')).getByText('Done?')).toBeInTheDocument()
+    expect(within(screen.getByTestId('task-card-idle-s')).queryByText('Done?')).toBeNull()
+
+    selectCard('stop-done')
+    const detail = screen.getByRole('complementary', { name: 'Task details' })
+    expect(detail).toHaveTextContent('The summary finds no work left: a candidate for Mark done.')
+    expect(within(workSection()).getByText('No remaining work found.')).toBeInTheDocument()
+  })
+
+  it('does not call a task marked done a candidate', () => {
+    const data = { ...summarized, tasks: summarized.tasks.map((t) => (t.id === 'stop-done' ? { ...t, done: true } : t)) }
+    renderDashboard(tasksState({ data }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Show Done column' }))
+    const card = screen.getByTestId('task-card-stop-done')
+    expect(card).toHaveTextContent('service-b was released.')
+    expect(within(card).queryByText('Done?')).toBeNull()
+  })
+
+  it('shows the work and what remains in the detail panel', () => {
+    renderDashboard(tasksState({ data: summarized }))
+    selectCard('idle-s')
+    const work = workSection()
+    expect(work).toHaveTextContent('Adding task summaries to the dashboard.')
+    expect(within(work).getAllByRole('listitem').map((item) => item.textContent)).toEqual([
+      'Update the docs', 'Run make check', 'Open a PR',
+    ])
+    expect(within(work).queryByRole('button', { name: /Summarize/ })).toBeNull()
+  })
+
+  it('says when a summary is outdated, pending, failed or unreadable', () => {
+    renderDashboard(tasksState({ data: summarized }))
+    selectCard('busy-old')
+    expect(workSection()).toHaveTextContent('Earlier work.')
+    expect(workSection()).toHaveTextContent('The conversation has changed since this summary.')
+    expect(within(workSection()).getByRole('button', { name: 'Summarize again' })).toBeInTheDocument()
+
+    selectCard('pending')
+    expect(workSection()).toHaveTextContent('Summarizing…')
+    expect(within(workSection()).queryByRole('button', { name: /Summarize/ })).toBeNull()
+
+    selectCard('failed')
+    expect(workSection()).toHaveTextContent('Could not summarize: claude exited with status 1')
+
+    selectCard('unreadable')
+    expect(workSection()).toHaveTextContent('has no messages the dashboard can read')
+  })
+
+  it('offers a summary again once a log it could not read has changed', async () => {
+    const requestSummary = vi.fn().mockResolvedValue(null)
+    const data = {
+      ...summarized,
+      tasks: summarized.tasks.map((t) => (t.id === 'unreadable' ? { ...t, summary: { state: 'unreadable' as const, outdated: true } } : t)),
+    }
+    renderDashboard(tasksState({ data, requestSummary }))
+    selectCard('unreadable')
+    expect(workSection()).toHaveTextContent('The conversation has changed since it could not be read.')
+    const button = within(workSection()).getByRole('button', { name: 'Summarize' })
+    expect(button).toBeEnabled()
+    await act(async () => {
+      fireEvent.click(button)
+    })
+    expect(requestSummary).toHaveBeenCalledWith(expect.objectContaining({ id: 'unreadable' }))
+  })
+
+  it('offers no summary of a log it cannot read, and says why', () => {
+    const requestSummary = vi.fn()
+    renderDashboard(tasksState({ data: summarized, requestSummary }))
+    selectCard('unreadable')
+    const button = within(workSection()).getByRole('button', { name: 'Summarize' })
+    expect(button).toBeDisabled()
+    expect(button).toHaveAttribute('title', 'The conversation log cannot be read, so it cannot be summarized.')
+    fireEvent.click(button)
+    expect(requestSummary).not.toHaveBeenCalled()
+  })
+
+  it('asks for the summary of a stopped task when it is selected, and not of a running one', () => {
+    const requestSummary = vi.fn().mockResolvedValue(null)
+    renderDashboard(tasksState({ data: summarized, requestSummary }))
+
+    selectCard('stop-new')
+    expect(requestSummary).toHaveBeenCalledTimes(1)
+    expect(requestSummary).toHaveBeenCalledWith(expect.objectContaining({ id: 'stop-new' }))
+
+    selectCard('idle-s')
+    selectCard('busy-old')
+    selectCard('stop-done')
+    expect(requestSummary).toHaveBeenCalledTimes(1)
+  })
+
+  it('retries a failed summary with the Summarize button, and shows why a request failed', async () => {
+    const requestSummary = vi.fn().mockResolvedValue('task summaries are disabled (task_dashboard.summary.enabled)')
+    renderDashboard(tasksState({ data: summarized, requestSummary }))
+    selectCard('failed')
+
+    await act(async () => {
+      fireEvent.click(within(workSection()).getByRole('button', { name: 'Summarize again' }))
+    })
+    expect(requestSummary).toHaveBeenCalledWith(expect.objectContaining({ id: 'failed' }))
+    expect(within(workSection()).getByRole('alert')).toHaveTextContent(
+      'Could not ask for a summary: task summaries are disabled (task_dashboard.summary.enabled)',
+    )
+  })
+
+  it('says summaries are off, and asks for nothing, when they are not enabled', () => {
+    const requestSummary = vi.fn()
+    renderDashboard(tasksState({ data: { ...summarized, summaries_enabled: false }, requestSummary }))
+    selectCard('stop-new')
+    expect(workSection()).toHaveTextContent('Summaries are off. Set task_dashboard.summary.enabled')
+    expect(requestSummary).not.toHaveBeenCalled()
+  })
+
+  it('says a task that is not claude cannot be summarized', () => {
+    renderDashboard(tasksState({ data: { ...response, summaries_enabled: true } }))
+    selectCard('run-1')
+    expect(workSection()).toHaveTextContent('Only a claude task with a session ID can be summarized.')
+  })
+
+  it('says a working task is summarized once it stops working', () => {
+    const data = { ...summarized, tasks: [task({ id: 'busy-new', state: 'busy', session_id: 'abababab-0000' })] }
+    renderDashboard(tasksState({ data }))
+    selectCard('busy-new')
+    expect(workSection()).toHaveTextContent('Summarized when it stops working.')
+    expect(within(workSection()).getByRole('button', { name: 'Summarize' })).toBeInTheDocument()
+  })
+})

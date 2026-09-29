@@ -2,41 +2,24 @@
 
 This document defines the implementation-time security requirements for panemux. Treat it as required reading before changing command execution, shell argument handling, SSH path handling, host key handling, or `gosec`-sensitive code.
 
+The General Rules, the `gosec` policy and the one standing exception below apply to every change.
+
+## Document map
+
+The per-sink requirements live in [`docs/security/`](security/), grouped by area. Each is required
+reading before touching the code it covers.
+
+| Sections | Document |
+|---|---|
+| Shell path; Tmux session name; Remote path arguments; SSH private key paths and an unresolvable home directory; SSH `ProxyCommand`; Launching the operator's browser (`--open`); Task dashboard collection; Task launch and resume; Task summaries | [command-execution.md](security/command-execution.md) |
+| Agent board remote writes; Agent-reported values in the dashboard UI | [agent-board.md](security/agent-board.md) |
+| Command center subprocess execution | [command-center.md](security/command-center.md) |
+| Auth token and transport encryption | [auth.md](security/auth.md) |
+| Opening URLs From a Pane; Loopback port forwarding; Browser-open interception | [url-open.md](security/url-open.md) |
+
 ## Session Command Execution
 
-All session types that execute a local process use `exec.Command` with user-configurable values such as shell paths and tmux session names. These values must be sanitized before reaching the exec sink.
-
-### Shell path (`local`, `ssh` sessions)
-
-`validateShell` in `internal/session/local.go` applies three layers:
-
-1. **Absolute-path check**: reject relative paths outright.
-2. **Regex character allowlist**: `^(/[a-zA-Z0-9._\\-/]+)$` rejects shell metacharacters such as spaces, semicolons, and quotes.
-3. **`/etc/shells` allowlist**: iterate the system shell registry and return the key from the trusted map (`s`), not the caller-supplied value.
-
-The third point is critical for CodeQL's `go/command-injection` analysis. CodeQL tracks data flow from taint sources such as environment variables and HTTP request bodies to exec sinks. A sanitization function only breaks the taint chain if its return value has no data-flow path back to user input.
-
-Returning `m[1]` from `regexp.FindStringSubmatch(shell)` is insufficient because the submatch is still derived from `shell`. Returning the `/etc/shells` map key `s` works because CodeQL does not propagate taint through equality comparisons in a range loop: `s` originates from file I/O, not user input.
-
-For the same reason, `os.Getenv("SHELL")` is not used as a default shell. Environment variables are taint sources in CodeQL's model. The default must remain the hardcoded literal `"/bin/sh"`.
-
-### Tmux session name (`tmux`, `ssh_tmux` sessions)
-
-`validTmuxSessionName` in `internal/session/tmux_ssh.go` uses a strict regex (`^[a-zA-Z0-9_.-]+$`) validated at construction time. Arguments are passed as discrete `exec.Command` args, not via `sh -c`, so no shell interpolation occurs.
-
-### Remote path arguments (SSH working directory)
-
-When an SSH or SSH+tmux pane has `cwd` set, the path is passed as part of a remote shell command (`cd <cwd> && exec $SHELL`). User-supplied paths that flow into `sess.Start()` must be validated with `validRemotePath` in `internal/session/ssh.go` before use.
-
-`validRemotePath` is a regex guard:
-
-```text
-^(/[^;|&$\`'"<>()\[\]{}!\\\x00-\x1f\x7f]*)+$
-```
-
-It accepts only absolute Unix paths and rejects shell metacharacters and control characters. This is the CodeQL-recommended sanitization pattern for shell arguments.
-
-After validation, the path is wrapped with `shellQuotePath`, which single-quotes the value and escapes any interior single quotes. This keeps paths containing spaces or unusual but allowed characters safe when embedded in a shell string.
+All session types that execute a local process use `exec.Command` with user-configurable values such as shell paths and tmux session names. These values must be sanitized before reaching the exec sink. See [command-execution.md](security/command-execution.md) for each sink's guard, [agent-board.md](security/agent-board.md) and [command-center.md](security/command-center.md) for the board and command-center paths, and [url-open.md](security/url-open.md) for the two mechanisms behind opening a URL from a pane.
 
 ## General Rules
 
@@ -61,5 +44,6 @@ This exception is limited to matching OpenSSH `known_hosts` host patterns. It do
 ## Related Documents
 
 - Implementation structure: [architecture.md](architecture.md)
+- Agent Board design: [agent-board.md](agent-board.md)
 - Runtime behavior and SSH configuration rules: [behavior.md](behavior.md)
 - Developer workflow rules: [../DEVELOPMENT.md](../DEVELOPMENT.md)

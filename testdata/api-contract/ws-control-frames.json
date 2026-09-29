@@ -1,0 +1,18 @@
+[
+  {
+    "state": "connected",
+    "type": "status"
+  },
+  {
+    "state": "start",
+    "type": "replay"
+  },
+  {
+    "state": "end",
+    "type": "replay"
+  },
+  {
+    "state": "exited",
+    "type": "status"
+  }
+]

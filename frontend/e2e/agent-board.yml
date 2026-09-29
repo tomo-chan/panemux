@@ -1,0 +1,30 @@
+server:
+    host: 127.0.0.1
+    port: 4174
+agent_board:
+    team: panemux-e2e-empty
+    # Deliberately points at a directory that does not exist: this fixture
+    # is the "agent board is enabled but the operator has not installed
+    # agmsg" state, which is what the dashboard's empty states are for.
+    agmsg_path: /tmp/panemux-e2e-agmsg-absent
+workspaces:
+    active: default
+    tab_position: top
+    items:
+        - id: default
+          title: Default
+          layout:
+            direction: horizontal
+            children:
+                - pane:
+                    id: board-main
+                    type: local
+                    shell: /bin/bash
+                    cwd: /tmp
+                    title: Board Main
+                    agent_board:
+                        enabled: true
+                  size: 100
+display:
+    show_header: true
+    show_status_bar: true

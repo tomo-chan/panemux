@@ -1,6 +1,6 @@
 # UI Design
 
-This document describes the visual design decisions for the PaneMux frontend, covering always-available layout editing, drag-and-drop, the workspace bar, and modal dialogs.
+This document describes the visual design decisions for the PaneMux frontend, covering always-available layout editing, drag-and-drop, the workspace bar, modal dialogs, and the task dashboard.
 
 ## Design Principles
 
@@ -43,6 +43,7 @@ The workspace bar now also carries compact operational summaries for each worksp
 
 The bar can contain:
 
+- the `← Tasks` button to the task dashboard, always first (see [Task Dashboard](#task-dashboard))
 - workspace tabs
 - per-workspace summary text
 - `+`
@@ -207,6 +208,45 @@ This model deliberately favors spatial predictability over hidden container sele
 
 The frontend now uses modal dialogs for higher-friction configuration tasks, rather than trying to compress all editing into inline chrome.
 
+### Keyboard behaviour, shared by every modal
+
+`aria-modal="true"` promises that the rest of the page is inert, and nothing in the DOM makes that
+true on its own. `useModalKeyboard` supplies the two behaviours that attribute implies, and every
+surface that declares it uses the hook: `ConfirmDialog`, `AddSSHHostDialog`, `PaneSettingsDialog`,
+`CommandPalette`, `CommandHistoryPanel` and `BoardDashboardPanel`.
+
+- **Focus stays inside.** Tab and Shift+Tab cycle within the dialog, and a Tab arriving from outside
+  is pulled back in — forwards to the first focusable element, backwards to the last, the order a
+  browser would have used had the background been inert. Without it, a dialog that moves focus once
+  on open lets the next Tab reach the very controls it is asking about.
+- **Escape is heard.** The listener is on the capture phase, because a focused xterm terminal stops
+  keydown propagation and a bubble-phase window listener never sees the key. That is not an edge
+  case: it is the state a dialog opened by a keyboard shortcut starts in, and the state the focus
+  trap above exists to prevent the operator from reaching later.
+- A dialog that must not be dismissed — one with a save in flight — passes no Escape handler. The
+  focus trap still applies, so "you cannot leave yet" does not become "you cannot see where you are".
+- A nested modal wins: while `PaneSettingsDialog`'s directory browser is open, the trap follows it
+  and the form behind stays out of reach.
+
+### Confirmation dialog
+
+Destructive actions ask in `ConfirmDialog`, the app's own dialog, rather than in `window.confirm`
+(issue [#70](https://github.com/tomo-chan/panemux/issues/70)). The native dialog blocks the main
+thread — every terminal in the page stops rendering while it is up — and cannot carry the rest of
+the UI's styling. `ConfirmDialog` follows the same surface as the other dialogs here: `#252526`
+panel, `#444` border, backdrop click and `Escape` to dismiss.
+
+Cancelling is the easy path by design: the cancel button, the backdrop and `Escape` all cancel, and
+only the confirm button confirms. The confirm button takes focus when the dialog opens, so both
+answers are one keystroke away. A destructive confirm button uses the same subdued red as the error
+banner below (`#5a1d1d`, `#7f1d1d`, `#fca5a5`).
+
+Its keyboard behaviour is the shared one above: focus is trapped between its two buttons, and
+`Escape` reaches it from the capture phase.
+
+Its first user is workspace deletion, which is still offered only in edit mode; the delete request
+is sent when the dialog is confirmed and never before.
+
 ## Transient Error Banner
 
 Pane creation and moves are optimistic in the UI and then persisted. If persistence fails, the user needs immediate feedback because the visible layout can temporarily diverge from saved config.
@@ -231,6 +271,29 @@ This keeps the error noticeable without forcing it into a blocking dialog.
 
 ---
 
+## Pane URL Strip
+
+Opening a URL out of a pane can need the operator's attention twice: before anything opens, when a
+program inside the pane asked for it, and after, when the port forward it needed could not be
+established.
+
+Both use one strip pinned to the top of the pane's terminal area, inside that pane rather than at
+the workspace level, because both belong to one pane's activity:
+
+- the request state names the URL and offers `Open` and `Ignore`; it never opens anything on its own
+- the failure state reuses the transient-error palette (`#f4a9a9` on the pane's own surface with a
+  `#7f1d1d` edge) and offers `Dismiss`
+- a pending request takes precedence over an older failure, so the operator is never asked to read
+  two things before deciding one
+- the URL is truncated with an ellipsis and carries the full value as a tooltip, so a long
+  authorization URL cannot push the buttons out of a narrow pane
+
+The request state is deliberately not a modal: it belongs to one pane, and the operator should be
+able to keep working in other panes — or read the surrounding terminal output that explains what
+asked for it — before deciding.
+
+---
+
 ## Attention Indicators
 
 Agent-attention highlighting remains visually distinct from layout-editing affordances.
@@ -240,3 +303,150 @@ Agent-attention highlighting remains visually distinct from layout-editing affor
 - move targets use blue overlays instead of gold
 
 Using separate colors avoids mixing "this needs your attention" with "you can drop here".
+
+---
+
+## Task Dashboard
+
+The task dashboard ([behavior](behavior/tasks.md)) is a second layer over the workspaces rather than
+an overlay panel: it covers the whole window, and the workspaces stay mounted beneath it so every
+terminal keeps its connection and scrollback. While it is shown the workspace layer is `inert`, so a
+terminal that had focus cannot receive what is typed into the dashboard.
+
+- **Switching layers.** The workspace bar starts with a `← Tasks` button, which carries the number
+  of tasks waiting for input from the last collection in a gold badge; its accessible name says the
+  count is "when last checked", since nothing collects while the workspaces are shown. The dashboard's top bar has a
+  `Workspaces` button back, which shows the shortcut beside its label. `Cmd/Ctrl+Shift+S` switches
+  either way; the letter is `display.task_dashboard_shortcut`. Like the palette's and the board's
+  shortcuts it is registered on the keydown capture phase, so it fires while a terminal pane has
+  focus. panemux opens on the workspaces. While the dashboard is shown, `Cmd/Ctrl+Shift+K` and
+  `Cmd/Ctrl+Shift+B` do nothing, and the palette, history panel and Agent Board close when it
+  appears: they belong to the workspace layer, which is inert then.
+- **Top bar.** The title, one chip per host (`Local` for the panemux host) with its running count, a
+  red chip with the error and a `Reconnect` button for a host that failed, and `connecting…` for a
+  host whose connection is still coming up; then when the board was last updated, `Refresh`,
+  `New task` (in the interactive blue), and `Workspaces`. A long host error is truncated in the chip
+  and shown in full as its tooltip.
+- **New task.** A modal form over the dashboard: Host (every host on the board, an unreachable one
+  marked "(unreachable)"), Working directory, Agent (`claude` or `codex`), Labels
+  (comma-separated, optional) and First instruction. With `codex` chosen, a note under Agent says
+  the labels are recorded once codex has started its session, and to open the task's pane if codex
+  stops at a start-up screen. The working directory takes focus when it
+  opens. An empty directory, a relative one, or an empty instruction is refused in the form, with
+  the reason under the fields; anything the server or the host refuses is shown there as
+  "Could not start: …", and the form keeps what was typed. While the task starts, `Start` reads
+  `Starting…`, and neither it, `Cancel`, `Escape` nor a click outside dismisses the form. Once it has
+  started the form closes, a blue notice says which tmux session was started on which host and that
+  the task is selected once the agent has started (for codex with labels, also that they are
+  recorded once codex has started its session), and the task is selected when a collection lists
+  it — unless another task was selected meanwhile. A codex task is found in its tmux session: it is
+  selected as its process while it has no session, the notice staying up, and selected again as its
+  session once one is listed, which ends the notice. No pane is opened. Labels that could not be
+  recorded for a task that did start are reported in a red alert.
+- **Filter bar.** Text filter over directory, branch, PR number, reference (such as `JIRA-123`) and session ID; rows split by none,
+  host, label, or repository; a host filter; a label filter listing every label on the board; and a
+  `Done column` checkbox, off by default.
+- **Kanban.** Columns in the order a person should look at them: Waiting for input (highlighted in
+  gold, "Needs you"), Working, Idle, Running / unknown, Stopped, and Done when the checkbox asks for
+  it. A task marked done sits in Done only while it is stopped, so with the column hidden a finished
+  task leaves the board rather than crowding Stopped; one that runs again stays in its state's
+  column. Column headers stay visible while the board scrolls, and each column is split into the
+  chosen rows, with the catch-all row ("Not in a Git repository", "No label") last. Split by label, a
+  task with two labels appears in both rows. A catch-all row is keyed apart from every name, so a
+  label or repository that happens to be called "No label" gets a row of its own.
+- **Cards.** A left border in the state's color; host, agent and how long the task has been in its
+  state; the working directory's last segment as the title with the full directory under it; for a
+  waiting task its reason and "open the pane to respond", and for any other task its summary, two
+  lines at most, dimmed while outdated; `Next: <first remaining item> · <n> left` when the summary
+  lists work remaining; repository, branch, and the PR, issue and reference links (`PR #87`,
+  `Issue #252`, `JIRA-123`; each opens a new tab; an issue in another repository than the PR's is
+  `owner/name#9`); its labels as colored tags, each label always the same color; a green `Done` tag
+  in the meta line for a task marked done that is running again, or a dashed green `Done?` tag for a
+  done candidate — a task not marked done whose summary finds no work left; and at the bottom where
+  the task runs with its `Open` / `Go to pane` button, or `Resume` for a stopped claude or codex
+  task. A task that cannot be opened shows why instead of a button: for an agent outside tmux, "not
+  in a panemux pane" or, when the pane it names is in no workspace, "its pane is in no workspace".
+  The card is a pointer target for selection, and its title is a button, so the card never nests its
+  links and buttons inside another interactive element.
+- **Detail panel.** Fixed to the window height at the right. Its head — state, host, agent, start,
+  title, waiting reason, the open action or the reason there is none (a stopped claude or codex task
+  offers `Resume` instead), `Mark done` or `Mark not done`, and for a done candidate the line "The summary
+  finds no work left: a candidate for Mark done." — stays in place, and only the body below scrolls:
+  state notes (for codex: a task with no session of its own is waiting for its first instruction,
+  held at a start-up screen, or running its session in codex's shared daemon, to be seen in the pane;
+  a session the daemon runs shows "codex's shared daemon · cannot open in a pane" where a card says
+  where it runs, and says why; a working one may be waiting for approval, which codex does not
+  record; an unknown one has no turn its history or log end reports); **Work**, the summary and the
+  remaining work as a numbered list ("No remaining work found." when there is none); links
+  (repository, branch, pull request, then issues noted "closed by the pull request" and References
+  noted "from the branch name or pull request title", each row only when there is something to
+  show), labels, the chain from task to agent to tmux session to pane to
+  workspace, and the directory and session ID. Work also says when a summary is running
+  ("Summarizing…"), failed (with the reason), outdated, unreadable, not made while the task works,
+  or off (naming `task_dashboard.summary.enabled`), and offers `Summarize` / `Summarize again` when
+  there is no current summary or it failed; a refused request is shown under it. For a log it
+  cannot read, the button stays but is disabled, its tooltip saying the log cannot be read, since
+  asking again reads nothing until the log changes; once it has changed, Work says so ("The
+  conversation has changed since it could not be read.") and the button is enabled. Selecting a
+  stopped task, or one in an unknown state, asks for its summary when it has no current one —
+  including a log it could not read that has changed since; a waiting or idle task's comes with the
+  poll.
+  `Mark done` asks first, inside the panel, and says where the task will be afterwards: a running
+  task stays in its column until it stops; a stopped one moves to Done, and the question adds that
+  the column is hidden until `Done column` is checked when it is. `Mark not done` does not ask. Labels
+  are removed with the `×` on each and added with a text box and `Add`. A save that fails shows its
+  reason in the head and keeps what was typed. A save belongs to the task it was made for: selecting
+  another task while it runs leaves that task's controls enabled, and the result is not shown there.
+  A task without a session ID offers neither, and says so. At 1000px and narrower it slides over the board
+  with a close button.
+- **Resume.** `Resume` reads `Resuming…` and is disabled while its request runs; a refusal is shown in
+  a red alert naming the task, and a resumed task is selected. Nothing else on the board waits for it.
+- **After opening.** The dashboard closes, the pane takes focus, and it is outlined in the
+  interactive blue for about two seconds (a steady outline with reduced motion).
+
+State colors:
+
+| State | Color |
+|---|---|
+| Waiting for input | `#e2b86b` |
+| Working | `#4ec9b0` |
+| Idle, Running | `#8fa6c4` |
+| Unknown | `#c586c0` |
+| Stopped | `#80858d` |
+| Done | `#7fae6a` |
+
+Label colors come from the mock's palette (`#569cd6`, `#4ec9b0`, `#9cdcfe`, `#d7a26b`, `#b48ead`,
+`#c678dd`, `#8a9199`, `#e06c6c`), picked by a hash of the label so a label keeps its color.
+
+---
+
+## Agent Board UI
+
+Agent Board reuses the existing modal, panel, color, status, and focus-restoration patterns.
+
+### Dashboard
+
+- Opens from the Agent Board button or `Cmd/Ctrl+Shift+B`; both are absent when the capability is
+  disabled.
+- Appears as a right-side overlay and closes by button, backdrop, or `Escape`.
+- Lists the union of configured board panes and panes still reporting. A configured pane with no
+  report remains visible as `not joined`; a removed pane with a report does not disappear silently.
+- Shows pane ID, title, state, summary, last tool, and report age. It does not show self-reported
+  repository, branch, or PR values because the pane header already provides panemux-derived values.
+- Treats state as free text and maps known states to the existing status palette: `working` green,
+  `idle` blue, `waiting` attention gold, and everything else neutral.
+- Keeps identity and metadata on one line; summaries may wrap to four lines.
+- Marks reports older than five minutes as `stale` and dims rather than hides them.
+
+### Command center
+
+- `Cmd/Ctrl+Shift+K` opens a focused command palette. Plain `Cmd/Ctrl+K` remains available to common
+  shell/readline bindings.
+- Each prompt creates one turn containing the prompt, streamed output, progress state, and any
+  inline error. A failed turn does not close or disable the palette.
+- Command history uses a right-side panel for longer reading alongside terminal work.
+- Command-center entry points are absent when the capability is disabled.
+
+Global shortcuts use capture phase so terminal focus does not swallow them. Closing any Agent Board
+surface restores the previously focused element. Full data-flow rules are in
+[Command center](agent-board/command-center.md#command-center).

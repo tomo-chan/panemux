@@ -1,0 +1,138 @@
+name: mutation
+
+# Diff-scoped mutation testing: gate G4(c) in docs/quality-gateway.md, roadmap
+# item 6 of issue #180.
+#
+# Asks the one question the other three G4 gates cannot: would the tests NOTICE
+# if changed code behaved differently? A block can execute on every run and
+# still have nothing asserted about it — #180's measurement found 108 such
+# mutants in this repository, every one in code the per-block gate (G4(d))
+# correctly reports as covered.
+#
+# THIS JOB FAILS ON A FINDING. That is stage 4 of item 6's four, and it is a
+# later position than the job started in: stages 1 to 3 ran it as a warning
+# because 34% of those 108 survivors are ones nobody should "fix" — buffer sizes
+# and timeout constants whose killing test would be a tautology itself. Failing
+# on those from day one would have been wrong more often than right, and
+# principle 4 in docs/quality-gateway.md is that a gate which cries wolf gets
+# routed around, taking the working gates with it.
+#
+# Three things had to be true before the exit code could change, and each was
+# measured rather than assumed — the full record is decision D9 in
+# docs/quality-gateway/decisions.md:
+#
+#   - The 34% have somewhere to go: //mutation:exempt now waives a mutant TYPE
+#     and not a whole line (#236), so a reason written about the buffer-size
+#     mutant stops silently covering its neighbours.
+#   - A mutant that reached no verdict is no longer dropped (#235). As a warning
+#     that was misleading; as a gate it would have been the way to get a green
+#     tick out of a run that decided nothing.
+#   - The size of a red run is known (#237): about 5 mutants per 317 changed
+#     lines, so a finding is a short list rather than a wall.
+#
+# It still fails when it could not run — a missing base ref, a shallow clone, a
+# gremlins that exited non-zero, a truncated report — and now also when a mutant
+# on a changed line reached no verdict, which is the same rule one level down.
+# A check that could not check must not look like one that found nothing.
+#
+# The escape hatches, narrow before broad: `//mutation:exempt[<TYPE>] <reason>`
+# on the line, and the `mutation-exempt` label for the whole branch. Prefer the
+# marker — it is the one that leaves something in the diff a reviewer can read.
+#
+# Pull requests only, and not part of `make check`: it needs the base branch,
+# which the local gate has no business fetching. Same shape as efficacy.yml and
+# coverage-blocks.yml — including the absence of a `paths:` filter, since a
+# path-filtered workflow reports no status at all on the pull requests it skips.
+#
+# `labeled`/`unlabeled` are in the type list because the `mutation-exempt`
+# escape hatch is read from the event payload. Without them, applying the label
+# does not re-run this workflow, and re-running the failed job replays the
+# STORED payload — in which the label is still absent.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  mutation:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          # Scoped to the diff against the base branch, so the merge base has
+          # to be in the clone. A shallow default checkout has no history to
+          # diff against, and the script fails rather than skipping when it
+          # cannot find it.
+          fetch-depth: 0
+
+      # The reporter's own tests, before the reporter — the ordering
+      # scenarios.yml and coverage-blocks.yml both use. They drive the script
+      # through `--report` against fixture reports, so they need only sh, git
+      # and awk and run ahead of the toolchain setup. Without this step they
+      # would reach .githooks/pre-push (rung L3) and no further: ci.yml invokes
+      # the suites directly rather than through `make test`, and its `paths:`
+      # filter does not cover `scripts/`.
+      - name: The reporter's own tests
+        run: make test-mutation
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version-file: go.mod
+
+      # Node and the dependency install are here for one reason, and it is not
+      # the frontend tests — this job runs none. gremlins gathers coverage over
+      # the WHOLE module before mutating anything, so the root package has to
+      # compile, and main.go embeds frontend/dist. `make mutation` therefore
+      # depends on build-frontend, exactly as `make coverage-go` does, and
+      # coverage-blocks.yml carries these same two steps for the same reason.
+      #
+      # This job had never actually reached gremlins before #190: every earlier
+      # pull request exited at "no Go implementation changed" first, so the
+      # missing setup surfaced the first time the gate had real work to do.
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: make install-deps-ci
+
+      # gremlins is not a module dependency and `make install-deps` does not
+      # install it — it is a tool this one job needs, not something a developer
+      # must have to build or test the project. Pinned to the version #180's
+      # measurement was taken with, rather than @latest, so a new release
+      # cannot change what this job reports without anyone choosing that: every
+      # number in docs/quality-gateway/mutants.md came
+      # from v0.6.0.
+      - name: Install gremlins
+        run: go install github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0
+
+      # `--timeout-coefficient` and `--workers` are pinned inside
+      # scripts/mutation.sh, and that is not tuning. With gremlins' defaults on
+      # this repository, 465 of 1059 runnable mutants (44%) come back TIMED OUT
+      # — worker contention on a shared runner, not infinite loops — and those
+      # timeouts hide survivors: internal/api alone goes from 0 reported
+      # survivors to 7 once they are gone. A job on the default configuration
+      # would report on a little over half of what it claims to measure.
+      #
+      # The escape hatch is the `mutation-exempt` label, visible on the pull
+      # request itself. The narrower hatch is `//mutation:exempt[<TYPE>]
+      # <reason>` on the line, which is preferred: it waives one mutant TYPE,
+      # in the diff a reviewer is reading, instead of the whole branch.
+      - name: Mutation (do the tests notice changed code behaving differently?)
+        env:
+          MUTATION_BASE: origin/${{ github.event.pull_request.base.ref }}
+          MUTATION_EXEMPT: ${{ contains(github.event.pull_request.labels.*.name, 'mutation-exempt') && '1' || '0' }}
+        run: make mutation

@@ -1,5 +1,5 @@
 import { useContext, useEffect } from 'react'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
 import { LayoutActionsContext } from './components/SplitContainer'
@@ -34,6 +34,10 @@ const workspaces: WorkspacesResponse = {
 }
 
 let currentWorkspaces = workspaces
+let currentDisplayConfig: { show_header: boolean; show_status_bar: boolean; task_dashboard_shortcut?: string } = {
+  show_header: false,
+  show_status_bar: false,
+}
 
 const mockDeleteWorkspace = vi.fn()
 const mockRenameWorkspace = vi.fn()
@@ -56,7 +60,7 @@ vi.mock('./hooks/useLayout', () => ({
   useLayout: () => ({
     layout: currentWorkspaces.items.find((workspace) => workspace.id === currentWorkspaces.active)?.layout ?? currentWorkspaces.items[0].layout,
     workspaces: currentWorkspaces,
-    displayConfig: { show_header: false, show_status_bar: false },
+    displayConfig: currentDisplayConfig,
     error: null,
     updateSizes: mockUpdateSizes,
     splitPane: mockSplitPane,
@@ -89,12 +93,22 @@ vi.mock('./hooks/useGitInfo', () => ({
   useGitInfoSnapshotMap: mockUseGitInfoSnapshotMap,
 }))
 
-vi.mock('./hooks/usePaneSettings', () => ({
-  usePaneSettings: () => ({
+const mockUseBoardSessionToken = vi.hoisted(() => vi.fn())
+
+vi.mock('./hooks/useBoardSessionToken', () => ({
+  useBoardSessionToken: mockUseBoardSessionToken,
+}))
+
+// Held in a box rather than returned literally so a test can open the settings
+// dialog, which is the only way into the add-SSH-host flow below. Everything
+// else in this file relies on the closed-dialog defaults, so each test that
+// changes it restores them afterwards.
+const paneSettings = vi.hoisted(() => {
+  const defaults = () => ({
     isOpen: false,
-    currentPane: null,
-    sshConnectionNames: [],
-    saveError: null,
+    currentPane: null as { id: string, type: string, connection?: string } | null,
+    sshConnectionNames: [] as string[],
+    saveError: null as string | null,
     isSaving: false,
     openSettings: vi.fn(),
     closeSettings: vi.fn(),
@@ -102,8 +116,35 @@ vi.mock('./hooks/usePaneSettings', () => ({
     addSSHConfigHost: vi.fn(),
     detectShell: vi.fn(),
     browseDirectories: vi.fn(),
-  }),
+  })
+  return { defaults, value: defaults() }
+})
+
+vi.mock('./hooks/usePaneSettings', () => ({
+  usePaneSettings: () => paneSettings.value,
 }))
+
+const mockUseTasks = vi.hoisted(() => vi.fn())
+
+vi.mock('./hooks/useTasks', () => ({
+  TASKS_POLL_INTERVAL_MS: 10000,
+  useTasks: mockUseTasks,
+}))
+
+function tasksStateWith(tasks: unknown[]) {
+  return {
+    data: { hosts: [{ name: '', status: 'ok' }, { name: 'dev-server', status: 'ok' }], tasks },
+    error: null,
+    loading: false,
+    updatedAt: null,
+    refresh: vi.fn(),
+    reconnect: vi.fn(),
+  }
+}
+
+beforeEach(() => {
+  mockUseTasks.mockReturnValue(tasksStateWith([]))
+})
 
 describe('App workspace deletion', () => {
   let originalNotification: typeof Notification | undefined
@@ -115,6 +156,7 @@ describe('App workspace deletion', () => {
     mockUseBrowserNotificationPermission.mockImplementation(() => {})
     mockUseSessionsOverview.mockReturnValue({})
     mockUseGitInfoSnapshotMap.mockReturnValue({})
+    mockUseBoardSessionToken.mockReturnValue({ token: '', commandCenterEnabled: false, agentBoardEnabled: false })
     notificationInstance = null
     vi.stubGlobal('Notification', vi.fn(function MockNotification(this: Notification) {
       notificationInstance = {
@@ -151,8 +193,10 @@ describe('App workspace deletion', () => {
     mockUseBrowserNotificationPermission.mockReset()
     mockUseSessionsOverview.mockReset()
     mockUseGitInfoSnapshotMap.mockReset()
+    mockUseBoardSessionToken.mockReset()
     currentWorkspaces = workspaces
     vi.restoreAllMocks()
+    vi.unstubAllGlobals()
     if (originalNotification === undefined) {
       // @ts-expect-error test cleanup
       delete window.Notification
@@ -280,23 +324,46 @@ describe('App workspace deletion', () => {
     expect(document.querySelector('[data-pane-id="side"]')).not.toHaveAttribute('data-attention')
   })
 
-  it('confirms before deleting a workspace from edit-mode tabs', () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
+  it('asks in the app\'s own dialog before deleting a workspace, and does not block on window.confirm', () => {
+    const nativeConfirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
 
     render(<App />)
     fireEvent.click(screen.getByRole('button', { name: 'Delete Dev workspace' }))
 
-    expect(window.confirm).toHaveBeenCalledWith('Delete workspace "Dev"?')
+    expect(nativeConfirm).not.toHaveBeenCalled()
+    expect(screen.getByRole('dialog', { name: 'Delete workspace' })).toBeDefined()
+    expect(screen.getByText(/Delete workspace "Dev"\?/)).toBeDefined()
+    // Nothing is deleted by the question itself.
+    expect(mockDeleteWorkspace).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
+
     expect(mockDeleteWorkspace).toHaveBeenCalledWith('dev')
+    expect(screen.queryByRole('dialog', { name: 'Delete workspace' })).toBeNull()
   })
 
-  it('keeps the workspace when delete confirmation is cancelled', () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(false)
+  it('keeps the workspace when the delete confirmation is cancelled', () => {
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Dev workspace' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
 
+    expect(mockDeleteWorkspace).not.toHaveBeenCalled()
+    expect(screen.queryByRole('dialog', { name: 'Delete workspace' })).toBeNull()
+  })
+
+  it('keeps the workspace when the delete confirmation is dismissed with Escape', () => {
     render(<App />)
     fireEvent.click(screen.getByRole('button', { name: 'Delete Dev workspace' }))
 
+    // Asserting the dialog is up before dismissing it is what makes this a
+    // test of the dialog rather than of nothing: "delete was not called" is
+    // equally true of a build that never asked in the first place.
+    expect(screen.getByRole('dialog', { name: 'Delete workspace' })).toBeDefined()
+
+    fireEvent.keyDown(window, { key: 'Escape' })
+
     expect(mockDeleteWorkspace).not.toHaveBeenCalled()
+    expect(screen.queryByRole('dialog', { name: 'Delete workspace' })).toBeNull()
   })
 
   it('creates a default local pane to the right of the current pane', async () => {
@@ -638,5 +705,403 @@ describe('App workspace deletion', () => {
     render(<App />)
 
     expect(window.Notification).not.toHaveBeenCalled()
+  })
+
+  it('does not show the Agent Board button when agent_board is disabled', () => {
+    mockUseBoardSessionToken.mockReturnValue({ token: 'tok', commandCenterEnabled: false, agentBoardEnabled: false })
+
+    render(<App />)
+
+    expect(screen.queryByRole('button', { name: 'Open agent board' })).toBeNull()
+  })
+
+  it('does not show the Agent Board button when there is no token yet', () => {
+    mockUseBoardSessionToken.mockReturnValue({ token: '', commandCenterEnabled: false, agentBoardEnabled: true })
+
+    render(<App />)
+
+    expect(screen.queryByRole('button', { name: 'Open agent board' })).toBeNull()
+  })
+
+  it('shows the Agent Board button and opens the panel when agent_board is enabled with a token', () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ statuses: {}, messages: [] }),
+    }))
+    mockUseBoardSessionToken.mockReturnValue({ token: 'tok', commandCenterEnabled: false, agentBoardEnabled: true })
+
+    render(<App />)
+
+    const button = screen.getByRole('button', { name: 'Open agent board' })
+    fireEvent.click(button)
+
+    expect(screen.getByRole('dialog', { name: 'Agent board' })).toBeInTheDocument()
+  })
+
+  it('toggles the agent board panel with Cmd/Ctrl+Shift+B even while a pane has focus', () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ statuses: {}, messages: [] }),
+    }))
+    mockUseBoardSessionToken.mockReturnValue({ token: 'tok', commandCenterEnabled: false, agentBoardEnabled: true })
+
+    render(<App />)
+
+    fireEvent.keyDown(window, { key: 'B', shiftKey: true, ctrlKey: true })
+    expect(screen.getByRole('dialog', { name: 'Agent board' })).toBeInTheDocument()
+
+    fireEvent.keyDown(window, { key: 'B', shiftKey: true, ctrlKey: true })
+    expect(screen.queryByRole('dialog', { name: 'Agent board' })).toBeNull()
+  })
+
+  it('does not register the agent board shortcut when agent_board is disabled', () => {
+    mockUseBoardSessionToken.mockReturnValue({ token: 'tok', commandCenterEnabled: false, agentBoardEnabled: false })
+
+    render(<App />)
+
+    fireEvent.keyDown(window, { key: 'B', shiftKey: true, ctrlKey: true })
+
+    expect(screen.queryByRole('dialog', { name: 'Agent board' })).toBeNull()
+  })
+})
+
+describe('App adding an SSH host from the pane settings dialog', () => {
+  let addSSHConfigHost: ReturnType<typeof paneSettings.defaults>['addSSHConfigHost']
+
+  beforeEach(() => {
+    mockUseWorkspaceAttentionMonitor.mockImplementation(() => {})
+    mockUseBrowserNotificationPermission.mockImplementation(() => {})
+    mockUseSessionsOverview.mockReturnValue({})
+    mockUseGitInfoSnapshotMap.mockReturnValue({})
+    mockUseBoardSessionToken.mockReturnValue({ token: '', commandCenterEnabled: false, agentBoardEnabled: false })
+
+    addSSHConfigHost = vi.fn().mockResolvedValue('prod-web')
+    paneSettings.value = {
+      ...paneSettings.defaults(),
+      isOpen: true,
+      // An ssh pane is what makes the settings dialog show the connection
+      // picker the "+ Add" button lives beside.
+      currentPane: { id: 'main', type: 'ssh', connection: '' },
+      addSSHConfigHost,
+    }
+  })
+
+  afterEach(() => {
+    paneSettings.value = paneSettings.defaults()
+    mockUseWorkspaceAttentionMonitor.mockReset()
+    mockUseBrowserNotificationPermission.mockReset()
+    mockUseSessionsOverview.mockReset()
+    mockUseGitInfoSnapshotMap.mockReset()
+    mockUseBoardSessionToken.mockReset()
+    vi.restoreAllMocks()
+  })
+
+  function fillHost() {
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'prod-web' } })
+    fireEvent.change(screen.getByLabelText('Hostname'), { target: { value: 'prod.example.com' } })
+    fireEvent.change(screen.getByLabelText('User'), { target: { value: 'ubuntu' } })
+  }
+
+  it('offers no add-host dialog until it is asked for', () => {
+    render(<App />)
+
+    expect(screen.queryByLabelText('Add SSH host')).toBeNull()
+  })
+
+  it('opens the add-host dialog from the connection picker', () => {
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('button', { name: '+ Add' }))
+
+    expect(screen.getByLabelText('Add SSH host')).toBeInTheDocument()
+  })
+
+  it('writes the host to the ssh config and closes the dialog', async () => {
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: '+ Add' }))
+
+    fillHost()
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+
+    await waitFor(() => {
+      expect(addSSHConfigHost).toHaveBeenCalledWith({
+        name: 'prod-web',
+        hostname: 'prod.example.com',
+        user: 'ubuntu',
+      })
+    })
+    await waitFor(() => {
+      expect(screen.queryByLabelText('Add SSH host')).toBeNull()
+    })
+  })
+
+  it('keeps the dialog open and shows why when the write fails', async () => {
+    addSSHConfigHost.mockRejectedValue(new Error('~/.ssh/config is read-only'))
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: '+ Add' }))
+
+    fillHost()
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+
+    expect(await screen.findByText('~/.ssh/config is read-only')).toBeInTheDocument()
+    expect(screen.getByLabelText('Add SSH host')).toBeInTheDocument()
+  })
+
+  it('falls back to a generic message when the failure carries no message', async () => {
+    addSSHConfigHost.mockRejectedValue('nope')
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: '+ Add' }))
+
+    fillHost()
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+
+    expect(await screen.findByText('Failed to add host')).toBeInTheDocument()
+  })
+
+  it('marks the dialog as saving while the write is in flight, and stops when it settles', async () => {
+    let finishWrite: (name: string) => void = () => {}
+    addSSHConfigHost.mockReturnValue(new Promise<string>((resolve) => { finishWrite = resolve }))
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: '+ Add' }))
+
+    fillHost()
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+
+    expect(await screen.findByRole('button', { name: 'Saving…' })).toBeDisabled()
+
+    finishWrite('prod-web')
+
+    await waitFor(() => {
+      expect(screen.queryByLabelText('Add SSH host')).toBeNull()
+    })
+  })
+
+  it('abandons the dialog without writing anything when it is cancelled', () => {
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: '+ Add' }))
+    fillHost()
+
+    // Both dialogs are on screen, and both have a Cancel; this is the add-host
+    // one.
+    fireEvent.click(within(screen.getByLabelText('Add SSH host')).getByRole('button', { name: 'Cancel' }))
+
+    expect(addSSHConfigHost).not.toHaveBeenCalled()
+    expect(screen.queryByLabelText('Add SSH host')).toBeNull()
+  })
+
+  // efficacy:exempt unchanged by the task dashboard branch — the red-check maps the blank line
+  // before the describe block appended below this one onto this test.
+  it('offers a host that is already configured as a connection for the pane', () => {
+    // The other half of the flow: once the hook reports the refreshed list, the
+    // name has to reach the picker the pane is actually configured from.
+    paneSettings.value = { ...paneSettings.value, sshConnectionNames: ['prod-web', 'staging'] }
+    render(<App />)
+
+    const connectionPicker = Array.from(
+      screen.getByLabelText('Pane settings').querySelectorAll('select'),
+    ).find((select) => select.querySelector('option[value=""]')?.textContent === '— select connection —')
+
+    expect(connectionPicker).toBeDefined()
+    expect(Array.from(connectionPicker!.options).map((option) => option.textContent))
+      .toEqual(['— select connection —', 'prod-web', 'staging'])
+  })
+})
+
+describe('App task dashboard layer', () => {
+  beforeEach(() => {
+    currentWorkspaces = workspaces
+    mockUseWorkspaceAttentionMonitor.mockImplementation(() => {})
+    mockUseBrowserNotificationPermission.mockImplementation(() => {})
+    mockUseSessionsOverview.mockReturnValue({})
+    mockUseGitInfoSnapshotMap.mockReturnValue({})
+    mockUseBoardSessionToken.mockReturnValue({ token: '', commandCenterEnabled: false, agentBoardEnabled: false })
+    mockCreatePane.mockClear()
+    mockCreatePane.mockResolvedValue(undefined)
+    mockSetActiveWorkspace.mockClear()
+    mockSetActiveWorkspace.mockResolvedValue(undefined)
+    mockTerminalPane.mockImplementation(({ pane }: { pane: { id: string } }) => <div data-pane-id={pane.id} />)
+  })
+
+  afterEach(() => {
+    currentWorkspaces = workspaces
+    vi.clearAllMocks()
+  })
+
+  const waitingTask = {
+    id: 'local:claude:a',
+    host: '',
+    agent: 'claude',
+    session_id: 'aaaa',
+    cwd: '/workspace/user/panemux',
+    state: 'wait',
+    waiting_for: 'input needed',
+    location: { kind: 'tmux', tmux_session: 'task-a', attachable: true },
+  }
+
+  it('starts on the workspaces and collects tasks only while the dashboard is shown', () => {
+    render(<App />)
+
+    expect(screen.queryByRole('region', { name: 'Task dashboard' })).not.toBeInTheDocument()
+    expect(mockUseTasks).toHaveBeenLastCalledWith(false)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Tasks' }))
+    expect(screen.getByRole('region', { name: 'Task dashboard' })).toBeInTheDocument()
+    expect(mockUseTasks).toHaveBeenLastCalledWith(true)
+    expect(screen.getByTestId('workspace-layer')).toHaveAttribute('inert')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Workspaces' }))
+    expect(screen.queryByRole('region', { name: 'Task dashboard' })).not.toBeInTheDocument()
+    expect(mockUseTasks).toHaveBeenLastCalledWith(false)
+    expect(screen.getByTestId('workspace-layer')).not.toHaveAttribute('inert')
+  })
+
+  it('switches layers with Cmd/Ctrl+Shift+S by default, even from inside a terminal', () => {
+    render(<App />)
+    const terminal = document.querySelector<HTMLElement>('[data-pane-id="main"]')!
+    terminal.tabIndex = 0
+
+    fireEvent.keyDown(terminal, { key: 'S', ctrlKey: true, shiftKey: true })
+    expect(screen.getByRole('region', { name: 'Task dashboard' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Workspaces' })).toHaveAttribute('aria-keyshortcuts', 'Control+Shift+S')
+
+    fireEvent.keyDown(window, { key: 's', metaKey: true, shiftKey: true })
+    expect(screen.queryByRole('region', { name: 'Task dashboard' })).not.toBeInTheDocument()
+  })
+
+  it('uses the key configured in display.task_dashboard_shortcut', () => {
+    currentDisplayConfig = { show_header: false, show_status_bar: false, task_dashboard_shortcut: 'J' }
+    try {
+      render(<App />)
+      expect(screen.getByRole('button', { name: 'Tasks' })).toHaveAttribute('title', 'Task dashboard (Ctrl+Shift+J)')
+
+      fireEvent.keyDown(window, { key: 'S', ctrlKey: true, shiftKey: true })
+      expect(screen.queryByRole('region', { name: 'Task dashboard' })).not.toBeInTheDocument()
+
+      fireEvent.keyDown(window, { key: 'J', ctrlKey: true, shiftKey: true })
+      expect(screen.getByRole('region', { name: 'Task dashboard' })).toBeInTheDocument()
+    } finally {
+      currentDisplayConfig = { show_header: false, show_status_bar: false }
+    }
+  })
+
+  // The palette, the history panel and the board live in the workspace
+  // layer, which is inert while the dashboard is shown: opened there they
+  // would be drawn above the dashboard and take no input.
+  it('does not open the palette or the board over the dashboard, and closes them when it opens', () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ statuses: {}, messages: [] }) }))
+    mockUseBoardSessionToken.mockReturnValue({ token: 'tok', commandCenterEnabled: true, agentBoardEnabled: true })
+    render(<App />)
+
+    fireEvent.keyDown(window, { key: 'S', ctrlKey: true, shiftKey: true })
+    fireEvent.keyDown(window, { key: 'K', ctrlKey: true, shiftKey: true })
+    fireEvent.keyDown(window, { key: 'B', ctrlKey: true, shiftKey: true })
+    expect(screen.queryByRole('dialog', { name: 'Command center' })).toBeNull()
+    expect(screen.queryByRole('dialog', { name: 'Agent board' })).toBeNull()
+
+    fireEvent.keyDown(window, { key: 'S', ctrlKey: true, shiftKey: true })
+    fireEvent.keyDown(window, { key: 'K', ctrlKey: true, shiftKey: true })
+    fireEvent.click(screen.getByRole('button', { name: 'Open agent board' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open command center history' }))
+    expect(screen.getByRole('dialog', { name: 'Command center' })).toBeInTheDocument()
+
+    fireEvent.keyDown(window, { key: 'S', ctrlKey: true, shiftKey: true })
+    expect(screen.getByRole('region', { name: 'Task dashboard' })).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: 'Command center' })).toBeNull()
+    expect(screen.queryByRole('dialog', { name: 'Agent board' })).toBeNull()
+    expect(screen.queryByRole('dialog', { name: 'Command center history' })).toBeNull()
+    vi.unstubAllGlobals()
+  })
+
+  it('opens one pane when Open is pressed twice before the first one exists', async () => {
+    let finish: () => void = () => {}
+    mockCreatePane.mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve }))
+    mockUseTasks.mockReturnValue(tasksStateWith([waitingTask]))
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('button', { name: /^Tasks/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open: panemux' }))
+    fireEvent.click(screen.getByRole('button', { name: /^Tasks/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open: panemux' }))
+    expect(mockCreatePane).toHaveBeenCalledTimes(1)
+
+    await act(async () => finish())
+    fireEvent.click(screen.getByRole('button', { name: /^Tasks/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open: panemux' }))
+    expect(mockCreatePane).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps the panes mounted while the dashboard is shown', () => {
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Tasks' }))
+    expect(document.querySelector('[data-pane-id="main"]')).not.toBeNull()
+  })
+
+  it('counts waiting tasks on the back button', () => {
+    mockUseTasks.mockReturnValue(tasksStateWith([waitingTask, { ...waitingTask, id: 'b', state: 'busy' }]))
+    render(<App />)
+    expect(screen.getByRole('button', { name: 'Tasks, 1 waiting for input when last checked' }))
+      .toHaveTextContent('← Tasks1')
+  })
+
+  it('opens a task in a new tmux pane attached to its session', async () => {
+    mockUseTasks.mockReturnValue(tasksStateWith([waitingTask]))
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: /^Tasks/ }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open: panemux' }))
+
+    await waitFor(() => expect(mockCreatePane).toHaveBeenCalledTimes(1))
+    const [pane, placement] = mockCreatePane.mock.calls[0]
+    expect(pane).toEqual(expect.objectContaining({ type: 'tmux', tmux_session: 'task-a', title: 'task-a' }))
+    expect(placement).toEqual({ type: 'workspace-edge', edge: 'right' })
+    expect(screen.queryByRole('region', { name: 'Task dashboard' })).not.toBeInTheDocument()
+  })
+
+  it('opens a remote task in an ssh_tmux pane on its connection', async () => {
+    mockUseTasks.mockReturnValue(tasksStateWith([{ ...waitingTask, host: 'dev-server' }]))
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: /^Tasks/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open: panemux' }))
+
+    await waitFor(() => expect(mockCreatePane).toHaveBeenCalledTimes(1))
+    expect(mockCreatePane.mock.calls[0][0]).toEqual(
+      expect.objectContaining({ type: 'ssh_tmux', connection: 'dev-server', tmux_session: 'task-a' }),
+    )
+  })
+
+  it('reports a pane that could not be created', async () => {
+    mockUseTasks.mockReturnValue(tasksStateWith([waitingTask]))
+    mockCreatePane.mockRejectedValueOnce(new Error('HTTP 500'))
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: /^Tasks/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open: panemux' }))
+
+    expect(await screen.findByText('Failed to create terminal: HTTP 500')).toBeInTheDocument()
+  })
+
+  it('goes to the workspace of a pane already attached to the task', async () => {
+    currentWorkspaces = {
+      ...workspaces,
+      items: [
+        workspaces.items[0],
+        {
+          id: 'ops',
+          title: 'Ops',
+          layout: {
+            direction: 'vertical',
+            children: [{ size: 100, pane: { id: 'ops-tmux', type: 'tmux', tmux_session: 'task-a', title: 'agent' } }],
+          },
+        },
+      ],
+    }
+    mockUseTasks.mockReturnValue(tasksStateWith([waitingTask]))
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: /^Tasks/ }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Go to pane: panemux' }))
+
+    expect(mockSetActiveWorkspace).toHaveBeenCalledWith('ops')
+    expect(mockCreatePane).not.toHaveBeenCalled()
+    expect(screen.queryByRole('region', { name: 'Task dashboard' })).not.toBeInTheDocument()
   })
 })

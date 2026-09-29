@@ -20,6 +20,8 @@ import (
 	"github.com/stretchr/testify/require"
 	gossh "golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
+
+	"panemux/internal/homedir"
 )
 
 // generateTestKeyFile creates a real ed25519 private key file at the given path
@@ -50,8 +52,8 @@ func TestBuildAuthMethods_WithKeyFile(t *testing.T) {
 // This is the case that caused the 500 on Restart Session when ~/.ssh/config
 // entries don't specify IdentityFile.
 func TestBuildAuthMethods_NoKeyNoPassword_NoDefaultKeys_Error(t *testing.T) {
-	// Override HOME to a temp dir with no .ssh keys
-	t.Setenv("HOME", t.TempDir())
+	// Point the home-directory seam at a temp dir with no .ssh keys
+	homedir.SetForTest(t, t.TempDir())
 
 	cfg := SSHConfig{}
 	_, err := buildAuthMethods(cfg)
@@ -69,7 +71,7 @@ func TestBuildAuthMethods_NoKeyNoPassword_DefaultKeyFound(t *testing.T) {
 	require.NoError(t, os.MkdirAll(sshDir, 0700))
 
 	generateTestKeyFile(t, filepath.Join(sshDir, "id_ed25519"))
-	t.Setenv("HOME", home)
+	homedir.SetForTest(t, home)
 
 	cfg := SSHConfig{}
 	methods, err := buildAuthMethods(cfg)
@@ -349,6 +351,19 @@ func (f *fakeSSHRunner) Output(cmd string) ([]byte, error) {
 
 func (f *fakeSSHRunner) Close() error { return nil }
 
+// recordingSSHRunner remembers every command it was asked to run, so a test
+// can assert what was NOT issued — which is how the remote transcript
+// fallback's cost is pinned.
+type recordingSSHRunner struct {
+	fakeSSHRunner
+	commands []string
+}
+
+func (r *recordingSSHRunner) Output(cmd string) ([]byte, error) {
+	r.commands = append(r.commands, cmd)
+	return r.fakeSSHRunner.Output(cmd)
+}
+
 func TestActiveRemoteWorkdir_IgnoresNonInteractiveAgents(t *testing.T) {
 	runner := &fakeSSHRunner{
 		outputs: map[string][]byte{
@@ -498,12 +513,12 @@ func TestActiveRemoteWorkdir_PrefersRemoteClaudeTranscriptWorktree(t *testing.T)
 
 func TestActiveRemoteWorkdir_PrefersRemoteClaudeTranscriptWorktree_WithDotInCWD(t *testing.T) {
 	sessionPath := "~/.claude/sessions/220.json"
-	projectCmd := "cat ~/.claude/projects/'-home-tomo-chan-repo-main/session-123.jsonl'"
+	projectCmd := "cat ~/.claude/projects/'-home-dev-user-repo-main/session-123.jsonl'"
 
 	runner := &fakeSSHRunner{
 		outputs: map[string][]byte{
 			sshListProcessesCmd:  []byte(" 100 1 sh\n 220 100 claude\n"),
-			"cat " + sessionPath: []byte(`{"pid":220,"sessionId":"session-123","cwd":"/home/tomo.chan/repo/main"}`),
+			"cat " + sessionPath: []byte(`{"pid":220,"sessionId":"session-123","cwd":"/home/dev.user/repo/main"}`),
 			projectCmd: []byte(
 				"{\"type\":\"assistant\",\"cwd\":\"/tmp/remote-claude-worktree\"," +
 					"\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}\n",
@@ -742,6 +757,41 @@ func TestRemoteShellPID_ParsesShellProcess(t *testing.T) {
 	assert.Equal(t, 220, pid)
 }
 
+// TestRemoteShellPID_RejectsNonPositivePIDs pins the boundary the guard sits
+// on. The parse test above only ever feeds a healthy 220, so `pid < 0` would
+// have let a remote that printed 0 through as a valid PID — every later
+// per-PID command would then have been built around a process that cannot
+// exist. Issue #190.
+// Nothing under this test changed on this branch, so the red-check could never
+// see it go red: it pins behavior that was already correct and merely
+// unasserted. See docs/quality-gateway.md's "Clearing the boundary-value class".
+//
+//efficacy:exempt pins pre-existing behavior; no implementation under it changed
+func TestRemoteShellPID_RejectsNonPositivePIDs(t *testing.T) {
+	for _, out := range []string{"0\n", "-1\n"} {
+		runner := &fakeSSHRunner{outputs: map[string][]byte{sshShellPIDCmd: []byte(out)}}
+
+		pid, err := remoteShellPID(runner)
+		require.Error(t, err, "remoteShellPID(%q) must not report a usable PID", out)
+		assert.Zero(t, pid)
+	}
+}
+
+// TestRemoteShellPID_AcceptsTheLowestUsablePID is the other side of that
+// boundary: 1 is a real PID and must not be rejected.
+// Nothing under this test changed on this branch, so the red-check could never
+// see it go red: it pins behavior that was already correct and merely
+// unasserted. See docs/quality-gateway.md's "Clearing the boundary-value class".
+//
+//efficacy:exempt pins pre-existing behavior; no implementation under it changed
+func TestRemoteShellPID_AcceptsTheLowestUsablePID(t *testing.T) {
+	runner := &fakeSSHRunner{outputs: map[string][]byte{sshShellPIDCmd: []byte("1\n")}}
+
+	pid, err := remoteShellPID(runner)
+	require.NoError(t, err)
+	assert.Equal(t, 1, pid)
+}
+
 func TestActiveRemoteWorkdirFromSessionFactory_UsesSeparateRunners(t *testing.T) {
 	outputs := map[string][]byte{
 		sshShellPIDCmd:      []byte("220\n"),
@@ -765,6 +815,46 @@ func TestActiveRemoteWorkdirFromSessionFactory_UsesSeparateRunners(t *testing.T)
 	// Separate runners are used for: shell PID, process list, open-files probe,
 	// and PID cwd fallback.
 	assert.Equal(t, 4, index)
+}
+
+func TestDetectRemoteAgentTypeFromSessionFactory_FindsGemini(t *testing.T) {
+	outputs := map[string][]byte{
+		sshShellPIDCmd:      []byte("220\n"),
+		sshListProcessesCmd: []byte(" 220 1 zsh\n 240 220 gemini\n"),
+	}
+	factory := func() (sshSessionRunner, error) {
+		return &fakeSSHRunner{outputs: outputs}, nil
+	}
+
+	agmsgType, ok, err := detectRemoteAgentTypeFromSessionFactory(factory)
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, "gemini", agmsgType)
+}
+
+func TestDetectRemoteAgentTypeFromSessionFactory_IgnoresHeadlessCodex(t *testing.T) {
+	outputs := map[string][]byte{
+		sshShellPIDCmd:      []byte("220\n"),
+		sshListProcessesCmd: []byte(" 220 1 zsh\n 240 220 codex exec\n"),
+	}
+	factory := func() (sshSessionRunner, error) {
+		return &fakeSSHRunner{outputs: outputs}, nil
+	}
+
+	agmsgType, ok, err := detectRemoteAgentTypeFromSessionFactory(factory)
+	require.NoError(t, err)
+	assert.False(t, ok)
+	assert.Empty(t, agmsgType)
+}
+
+func TestDetectRemoteAgentTypeFromSessionFactory_ShellPIDError_Propagated(t *testing.T) {
+	factory := func() (sshSessionRunner, error) {
+		return &fakeSSHRunner{outputs: map[string][]byte{}}, nil
+	}
+
+	_, ok, err := detectRemoteAgentTypeFromSessionFactory(factory)
+	require.Error(t, err)
+	assert.False(t, ok)
 }
 
 func TestActiveRemoteWorkdir_RootPIDScopesRemoteAgents(t *testing.T) {
@@ -884,6 +974,36 @@ func TestTmuxSSHActiveWorkdirFromSessionFactory_UsesSeparateRunners(t *testing.T
 	// Separate runners are used for: tmux pane info, process list, open-files
 	// probe, and PID cwd fallback.
 	assert.Equal(t, 4, index)
+}
+
+func TestTmuxSSHDetectInteractiveAgentTypeFromSessionFactory_FindsOpencode(t *testing.T) {
+	outputs := map[string][]byte{
+		"tmux display-message -p -t 'demo' '#{pane_pid}\t#{pane_current_path}'": []byte("220\t/repo/main\n"),
+		sshListProcessesCmd: []byte(" 220 1 zsh\n 240 220 opencode\n"),
+	}
+	factory := func() (sshSessionRunner, error) {
+		return &fakeSSHRunner{outputs: outputs}, nil
+	}
+
+	agmsgType, ok, err := tmuxSSHDetectInteractiveAgentTypeFromSessionFactory(factory, "demo")
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, "opencode", agmsgType)
+}
+
+func TestTmuxSSHDetectInteractiveAgentTypeFromSessionFactory_NoKnownAgent(t *testing.T) {
+	outputs := map[string][]byte{
+		"tmux display-message -p -t 'demo' '#{pane_pid}\t#{pane_current_path}'": []byte("220\t/repo/main\n"),
+		sshListProcessesCmd: []byte(" 220 1 zsh\n 230 220 git status\n"),
+	}
+	factory := func() (sshSessionRunner, error) {
+		return &fakeSSHRunner{outputs: outputs}, nil
+	}
+
+	agmsgType, ok, err := tmuxSSHDetectInteractiveAgentTypeFromSessionFactory(factory, "demo")
+	require.NoError(t, err)
+	assert.False(t, ok)
+	assert.Empty(t, agmsgType)
 }
 
 func TestRemoteGitContext_ReturnsBranchAndRepo(t *testing.T) {
@@ -1054,6 +1174,60 @@ func TestDialWithRetry_ExhaustsAllRetries(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, dialRetryMaxAttempts, *calls)
 	assert.Equal(t, wantErr, err)
+}
+
+// TestDialTransport_ExhaustedBudget_NeverDials pins the boundary between "no
+// budget left" and "a sliver of budget left". It matters more than it looks:
+// net.DialTimeout treats a zero timeout as *no* timeout, so `timeout < 0`
+// would turn the one case that must fail fast — a deadline that has exactly
+// run out — into a dial that can block indefinitely, and every retry test in
+// this file starts with a full budget. Issue #190.
+// Nothing under this test changed on this branch, so the red-check could never
+// see it go red: it pins behavior that was already correct and merely
+// unasserted. See docs/quality-gateway.md's "Clearing the boundary-value class".
+//
+//efficacy:exempt pins pre-existing behavior; no implementation under it changed
+func TestDialTransport_ExhaustedBudget_NeverDials(t *testing.T) {
+	clock := newFakeClock()
+	origNow := nowFn
+	nowFn = clock.now
+	t.Cleanup(func() { nowFn = origNow })
+
+	// Nothing listens on port 1, so a dial that should never have happened
+	// fails with a connection error the assertion below can tell apart from
+	// the budget error.
+	const addr = "127.0.0.1:1"
+
+	for _, name := range []string{"deadline exactly now", "deadline already past"} {
+		deadline := clock.now()
+		if name == "deadline already past" {
+			deadline = deadline.Add(-time.Nanosecond)
+		}
+		conn, client, err := dialTransport(SSHConfig{}, addr, 22, deadline)
+		require.Error(t, err, name)
+		assert.Nil(t, conn, name)
+		assert.Nil(t, client, name)
+		assert.Contains(t, err.Error(), "retry budget exhausted", name)
+	}
+}
+
+// TestDialTransport_SliverOfBudget_StillDials is the other side of that
+// boundary: one nanosecond of budget is still budget, so the dial is attempted
+// and whatever the network says comes back instead of the budget error.
+// Nothing under this test changed on this branch, so the red-check could never
+// see it go red: it pins behavior that was already correct and merely
+// unasserted. See docs/quality-gateway.md's "Clearing the boundary-value class".
+//
+//efficacy:exempt pins pre-existing behavior; no implementation under it changed
+func TestDialTransport_SliverOfBudget_StillDials(t *testing.T) {
+	clock := newFakeClock()
+	origNow := nowFn
+	nowFn = clock.now
+	t.Cleanup(func() { nowFn = origNow })
+
+	_, _, err := dialTransport(SSHConfig{}, "127.0.0.1:1", 22, clock.now().Add(time.Nanosecond))
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "retry budget exhausted")
 }
 
 func TestDialWithRetry_StopsRetryingPastElapsedBudget(t *testing.T) {
@@ -1228,4 +1402,86 @@ func TestDialTransport_JumpHostSharesRetryDeadlineWithOuterCall(t *testing.T) {
 	for _, d := range gotDeadlines {
 		assert.True(t, d.Equal(deadline), "jump host dial must reuse the same deadline as the outer call, not a fresh budget")
 	}
+}
+
+// With no home directory to resolve, the default-key probe is skipped
+// entirely rather than run against an empty home: filepath.Join("", ".ssh",
+// "id_ed25519") is ".ssh/id_ed25519", so the probe would have read a private
+// key out of whatever directory panemux was started in and authenticated with
+// it. Issue #212 asked for this swallow to be decided rather than inherited;
+// the decision is that no home directory means no default keys.
+func TestBuildAuthMethods_UnresolvableHomeDirectory_DoesNotProbeTheWorkingDirectory(t *testing.T) {
+	workDir := t.TempDir()
+	sshDir := filepath.Join(workDir, ".ssh")
+	require.NoError(t, os.MkdirAll(sshDir, 0700))
+	generateTestKeyFile(t, filepath.Join(sshDir, "id_ed25519"))
+	t.Chdir(workDir)
+
+	homedir.SetFailingForTest(t, errNoHomeDir)
+
+	_, err := buildAuthMethods(SSHConfig{})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no auth methods",
+		"a key sitting in the working directory is not this user's default key")
+}
+
+// A private key path that is not absolute by the time it reaches the read is
+// refused, and the refusal names the path so an operator can see which one it
+// was. Every legitimate route produces an absolute path — an operator writing
+// one, internal/config's expandTilde, or resolveSSHConfig's expandIdentityFile
+// — so a relative one means an expansion that could not happen, never a path
+// worth trying.
+//
+// Leaving it to os.ReadFile is not equivalent, which is the whole point: this
+// test plants a readable key at each relative path first, so without the guard
+// the read SUCCEEDS and the connection authenticates with a key belonging to
+// whatever directory panemux was started in. The bare-relative form is the
+// dangerous one — ".ssh" is an ordinary directory name — and it is exactly what
+// an ssh_config `IdentityFile .ssh/id_ed25519` leaves behind when the home
+// directory cannot be resolved.
+func TestBuildAuthMethods_NonAbsoluteKeyFile_IsRefusedRatherThanReadFromTheWorkingDirectory(t *testing.T) {
+	for name, keyFile := range map[string]string{
+		"unexpanded tilde": "~/.ssh/id_ed25519",
+		"bare relative":    ".ssh/id_ed25519",
+	} {
+		t.Run(name, func(t *testing.T) {
+			workDir := t.TempDir()
+			require.NoError(t, os.MkdirAll(filepath.Join(workDir, filepath.Dir(keyFile)), 0700))
+			generateTestKeyFile(t, filepath.Join(workDir, keyFile))
+			t.Chdir(workDir)
+
+			// Proof that the guard is what refuses this, not a missing file.
+			_, readErr := os.ReadFile(keyFile)
+			require.NoError(t, readErr, "the key must be readable for this test to mean anything")
+
+			_, err := buildAuthMethods(SSHConfig{KeyFile: keyFile})
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "is not an absolute path")
+			assert.Contains(t, err.Error(), keyFile, "the operator has to be told which path was refused")
+		})
+	}
+}
+
+// The same guard on the known_hosts file. The consequence differs — this one
+// decides which host keys are trusted rather than which key authenticates —
+// but the shape is identical: a relative path is one an expansion could not
+// resolve, and reading it from the working directory would let a file planted
+// there decide host-key verification.
+func TestResolveKnownHostsFile_NonAbsolutePath_IsRefused(t *testing.T) {
+	path, err := resolveKnownHostsFile("~/.ssh/known_hosts")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "is not an absolute path")
+	assert.Empty(t, path)
+}
+
+func TestResolveKnownHostsFile_AbsolutePath_IsUsedAsGiven(t *testing.T) {
+	given := filepath.Join(t.TempDir(), "known_hosts")
+
+	path, err := resolveKnownHostsFile(given)
+
+	require.NoError(t, err)
+	assert.Equal(t, given, path)
 }

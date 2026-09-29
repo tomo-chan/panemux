@@ -1,0 +1,57 @@
+# Fixture for a11y.spec.ts.
+#
+# It gets its own panemux process (playwright.config.ts, port 4178) for a
+# reason core-multiplexer.yml already records from the other side: the suite
+# runs serially against long-lived servers, and specs that mutate the layout
+# mutate it for every spec that runs afterwards. core-multiplexer.yml was
+# separated because it is one of the mutators. This one is separated because it
+# is the spec most sensitive to them.
+#
+# The a11y scan counts axe violation *nodes*, and a node count is a property of
+# whatever happens to be rendered. Sharing the default server was tried first
+# and it does not hold: run alone the dashboard reports `region` at 7 nodes and
+# `color-contrast` at 10, and run after pane-move.spec.ts's splits the same
+# page reports 10 and 11. A ceiling measured in one of those states fails in
+# the other, and it would fail on the order of the suite rather than on
+# anything about accessibility — a false positive, which design principle 4 in
+# docs/quality-gateway.md says a gate must not have.
+#
+# So the audited page is pinned here rather than inherited. Two workspaces with
+# one pane each, matching the shape workspace-switch.yml had when issue #187
+# first recorded these counts: two because panemux renders no workspace tab bar
+# at all for a single workspace, and the tab bar is part of the chrome being
+# audited.
+server:
+    host: 127.0.0.1
+    port: 4178
+workspaces:
+    active: default
+    tab_position: top
+    items:
+        - id: default
+          title: Default
+          layout:
+            direction: horizontal
+            children:
+                - pane:
+                    id: a11y-main
+                    type: local
+                    shell: /bin/bash
+                    cwd: /tmp
+                    title: A11y Shell
+                  size: 100
+        - id: a11y-second
+          title: Second
+          layout:
+            direction: horizontal
+            children:
+                - pane:
+                    id: a11y-second-main
+                    type: local
+                    shell: /bin/bash
+                    cwd: /tmp
+                    title: Second Shell
+                  size: 100
+display:
+    show_header: true
+    show_status_bar: true

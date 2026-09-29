@@ -1,0 +1,25 @@
+{
+  "epoch": "0000000000000000",
+  "messages": [
+    {
+      "at": "2026-01-01T00:00:00Z",
+      "body": "the build is green",
+      "from": "pane-editor",
+      "host": "local",
+      "is_status": false,
+      "seq": 1,
+      "team": "panemux",
+      "to": "pane-build"
+    },
+    {
+      "at": "2026-01-01T00:00:00Z",
+      "body": "{\"kind\":\"board_status\",\"state\":\"idle\",\"summary\":\"waiting for review\"}",
+      "from": "pane-build",
+      "host": "local",
+      "is_status": true,
+      "seq": 2,
+      "team": "panemux",
+      "to": "_system"
+    }
+  ]
+}

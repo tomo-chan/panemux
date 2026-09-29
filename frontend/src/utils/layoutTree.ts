@@ -132,6 +132,31 @@ function collectPaneChildren(children: LayoutChild[], panes: PaneConfig[]) {
 }
 
 /**
+ * Collects the panes that are actually rendered as panes: the leaves of the
+ * split tree, left to right, top to bottom.
+ *
+ * This is deliberately a different question from `collectPanes` above, which
+ * returns every pane the tree mentions. A child may carry a `pane` *and*
+ * `children` — a hand-written config where a root pane sits beside the split
+ * that grew from it (scenario H14b) — and there the panes on screen are the
+ * children's. `collectPanes` counts both; this descends.
+ *
+ * It exists because the same leaf rule was written out twice, in the attention
+ * monitor's pane-ID collection and in App.tsx's pane metadata collection
+ * (issue #79), which is exactly the kind of pair that drifts.
+ */
+export function collectLeafPanes(layout: LayoutNode): PaneConfig[] {
+  return layout.children.flatMap(collectLeafPanesFromChild)
+}
+
+function collectLeafPanesFromChild(child: LayoutChild): PaneConfig[] {
+  if (child.children?.length) {
+    return child.children.flatMap(collectLeafPanesFromChild)
+  }
+  return child.pane ? [child.pane] : []
+}
+
+/**
  * Replaces the pane matching `updated.id` in the layout tree with `updated`.
  * Returns the tree unchanged if the id is not found.
  */

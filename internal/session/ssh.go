@@ -3,6 +3,7 @@ package session
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/sha1" //nolint:gosec // G505: OpenSSH hashed known_hosts entries use HMAC-SHA1
 	"encoding/base64"
@@ -24,6 +25,8 @@ import (
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
+
+	"panemux/internal/homedir"
 )
 
 // validRemotePath is the CodeQL-recommended regex guard for shell arguments.
@@ -76,12 +79,68 @@ func shellQuotePath(path string) string {
 	return "'" + strings.ReplaceAll(path, "'", `'\''`) + "'"
 }
 
+// quoteArgs joins args into a single POSIX shell command string, with every
+// argument single-quote-escaped via shellQuotePath. This is the only place
+// that builds a board command string from a caller-supplied argument list,
+// matching the discipline validRemotePath/shellQuotePath already apply to
+// cwd — callers pass raw, unescaped values, exactly like exec.Command's own
+// argv contract.
+func quoteArgs(args []string) string {
+	quoted := make([]string, len(args))
+	for i, arg := range args {
+		quoted[i] = shellQuotePath(arg)
+	}
+	return strings.Join(quoted, " ")
+}
+
+// runBoardCommand runs args as a single remote shell command over a new
+// session obtained from newSession, single-quote-escaping each argument
+// before joining them. It is shared by SSHSession and TmuxSSHSession, which
+// do not share a common embedded connection type to hang a method on.
+func runBoardCommand(
+	ctx context.Context,
+	newSession func() (sshSessionRunner, error),
+	args []string,
+) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	sess, err := newSession()
+	if err != nil {
+		return nil, fmt.Errorf("new ssh session for board command: %w", err)
+	}
+	defer sess.Close()
+
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-ctx.Done():
+			sess.Close()
+		case <-done:
+		}
+	}()
+
+	out, err := sess.Output(quoteArgs(args))
+	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+		return nil, fmt.Errorf("board command over ssh: %w", err)
+	}
+	return out, nil
+}
+
 // resolveKnownHostsFile returns the known_hosts file path, defaulting to ~/.ssh/known_hosts.
 func resolveKnownHostsFile(knownHostsFile string) (string, error) {
 	if knownHostsFile != "" {
+		if err := requireAbsolutePath("known_hosts file", knownHostsFile); err != nil {
+			return "", err
+		}
 		return knownHostsFile, nil
 	}
-	home, err := os.UserHomeDir()
+	home, err := homedir.Dir()
 	if err != nil {
 		return "", fmt.Errorf("getting home dir: %w", err)
 	}
@@ -123,14 +182,12 @@ func dialSSHClientUntil(cfg SSHConfig, deadline time.Time) (*ssh.Client, *ssh.Cl
 		HostKeyAlgorithms: knownHostsAlgorithms(knownHostsPath, addr),
 		// Timeout is documented as bounding TCP connection establishment, but
 		// golang.org/x/crypto/ssh only reads it inside ssh.Dial(); it has no
-		// effect on ssh.NewClientConn (called below), which is what this
-		// package actually uses since it always dials its own net.Conn first.
-		// The handshake itself is therefore currently unbounded regardless of
-		// this value, for every transport (TCP, ProxyJump, and ProxyCommand
-		// alike) — retrying the dial (dialTransportWithRetry, above) does not
-		// change that. Kept here only so a future switch to ssh.Dial-style
-		// usage picks up a sane default; do not rely on it as a real timeout.
-		Timeout: 30 * time.Second,
+		// effect on ssh.NewClientConn, which is what this package actually
+		// uses since it always dials its own net.Conn first. What bounds the
+		// handshake is handshakeWithTimeout below; this is set to the same
+		// value only so a future switch to ssh.Dial-style usage picks up a
+		// sane default (see issue #147).
+		Timeout: sshHandshakeTimeout,
 	}
 
 	conn, jumpClient, err := dialTransportWithRetry(cfg, addr, port, deadline)
@@ -138,9 +195,25 @@ func dialSSHClientUntil(cfg SSHConfig, deadline time.Time) (*ssh.Client, *ssh.Cl
 		return nil, nil, err
 	}
 
-	sshConn, chans, reqs, err := ssh.NewClientConn(conn, addr, sshCfg)
+	// The handshake shares the dial's budget rather than opening a window of
+	// its own on top of it. dialTransportWithRetry may already have spent most
+	// of deadline — its own attempts are clamped to what remains precisely so
+	// the budget holds — and dialThroughJump hands the same deadline to every
+	// hop, so an unshared window would be added once per hop: a wedged
+	// two-hop chain would wait three times the ceiling dialRetryBudget
+	// documents. The trade is that a dial which nearly exhausts the budget
+	// leaves the handshake little room, which is the same trade the retry loop
+	// already makes with its own attempts.
+	handshakeTimeout := sshHandshakeTimeout
+	//mutation:exempt[CONDITIONALS_BOUNDARY] equivalent — at equality the clamp assigns the value it already holds
+	if remaining := deadline.Sub(nowFn()); remaining < handshakeTimeout {
+		handshakeTimeout = remaining
+	}
+
+	sshConn, chans, reqs, err := handshakeWithTimeout(conn, addr, sshCfg, handshakeTimeout)
 	if err != nil {
-		conn.Close()
+		// The transport is closed by handshakeWithTimeout, which owns it from
+		// the moment it is handed over.
 		if jumpClient != nil {
 			jumpClient.Close()
 		}
@@ -148,6 +221,85 @@ func dialSSHClientUntil(cfg SSHConfig, deadline time.Time) (*ssh.Client, *ssh.Cl
 	}
 
 	return ssh.NewClient(sshConn, chans, reqs), jumpClient, nil
+}
+
+// sshHandshakeTimeout is the ceiling on one SSH handshake (version exchange,
+// key exchange and authentication) once the transport is up. What a handshake
+// actually gets is this or whatever remains of the dial budget, whichever is
+// smaller — see dialSSHClientUntil. It is a var only so tests can shorten it.
+var sshHandshakeTimeout = 30 * time.Second
+
+// newClientConnFn is the handshake step, injectable for tests. There is no
+// way to make a real handshake hang on demand without a cooperating server,
+// and the property under test is what happens when one does.
+var newClientConnFn = ssh.NewClientConn
+
+type handshakeOutcome struct {
+	conn  ssh.Conn
+	chans <-chan ssh.NewChannel
+	reqs  <-chan *ssh.Request
+	err   error
+}
+
+// handshakeWithTimeout runs the SSH handshake with a real, enforced bound,
+// and takes ownership of conn: on any failure — including the timeout — conn
+// is closed, and on success it is left open for the returned client.
+//
+// The bound cannot come from the transport (issue #147). ssh.NewClientConn
+// reads no timeout of its own, sets no deadline, and takes no context, and the
+// three transports this package dials disagree about deadlines anyway: a TCP
+// conn honors them, a ProxyJump hop is an SSH channel whose SetDeadline
+// returns "not supported", and proxyCommandConn's is a no-op by construction
+// (its pipes have no deadline support), which is why the ProxyCommand case was
+// the worst exposed — a bastion command that hangs while establishing its own
+// tunnel blocked a pane's reconnect with nothing to stop it.
+//
+// So the handshake runs in its own goroutine and this returns when it finishes
+// or when the timer fires, whichever comes first. Closing conn is what
+// eventually releases that goroutine, and it is done asynchronously on the
+// timeout path on purpose: proxyCommandConn.Close kills its subprocess and
+// then waits on it, and a bound that depends on an unbounded Close is not a
+// bound. The goroutine's channel is buffered, so it never leaks even if the
+// handshake outlives this call.
+func handshakeWithTimeout(
+	conn net.Conn, addr string, sshCfg *ssh.ClientConfig, timeout time.Duration,
+) (ssh.Conn, <-chan ssh.NewChannel, <-chan *ssh.Request, error) {
+	// Read the seam here rather than inside the goroutine: on the timeout path
+	// that goroutine outlives this call, and a test restoring the seam in its
+	// cleanup would then be writing what the goroutine is still reading.
+	handshake := newClientConnFn
+
+	// A budget already spent before the handshake could start: fail here
+	// rather than hand time.NewTimer a non-positive duration and report it as
+	// a timeout that never had a chance to run. The close is asynchronous for
+	// the same reason as the timeout path below.
+	if timeout <= 0 {
+		go conn.Close() //nolint:errcheck // best-effort release; see below
+		return nil, nil, nil, fmt.Errorf(
+			"dial budget exhausted before the handshake with %s could start", addr,
+		)
+	}
+
+	done := make(chan handshakeOutcome, 1)
+	go func() {
+		sshConn, chans, reqs, err := handshake(conn, addr, sshCfg)
+		done <- handshakeOutcome{conn: sshConn, chans: chans, reqs: reqs, err: err}
+	}()
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	select {
+	case outcome := <-done:
+		if outcome.err != nil {
+			conn.Close()
+			return nil, nil, nil, outcome.err
+		}
+		return outcome.conn, outcome.chans, outcome.reqs, nil
+	case <-timer.C:
+		go conn.Close() //nolint:errcheck // best-effort release of the blocked handshake
+		return nil, nil, nil, fmt.Errorf("ssh handshake with %s timed out after %s", addr, timeout)
+	}
 }
 
 const (
@@ -354,7 +506,18 @@ func NewSSH(id, title string, cfg SSHConfig) (*SSHSession, error) {
 	if err != nil {
 		return nil, err
 	}
+	return newSSHSessionFromClient(id, title, cfg, client, jumpClient)
+}
 
+// newSSHSessionFromClient completes the SSH session lifecycle after transport
+// establishment. Keeping the protocol setup on this side of the seam lets
+// tests use a real in-process SSH connection without requiring a host, while
+// production still follows the exact same PTY, shell and monitor path.
+func newSSHSessionFromClient(
+	id, title string,
+	cfg SSHConfig,
+	client, jumpClient *ssh.Client,
+) (*SSHSession, error) {
 	sess, err := client.NewSession()
 	if err != nil {
 		closeSSHResources(nil, client, jumpClient)
@@ -367,7 +530,7 @@ func NewSSH(id, title string, cfg SSHConfig) (*SSHSession, error) {
 		return nil, err
 	}
 
-	if err := startSSHShell(sess, cfg); err != nil {
+	if err := startSSHShell(sess, id, cfg); err != nil {
 		closeSSHResources(sess, client, jumpClient)
 		return nil, err
 	}
@@ -412,8 +575,8 @@ func setupSSHPTY(sess *ssh.Session) (io.WriteCloser, *io.PipeReader, *io.PipeWri
 	return stdin, pr, pw, nil
 }
 
-func startSSHShell(sess *ssh.Session, cfg SSHConfig) error {
-	cmd, err := sshShellCommand(cfg)
+func startSSHShell(sess *ssh.Session, paneID string, cfg SSHConfig) error {
+	cmd, err := sshShellCommand(paneID, cfg)
 	if err != nil {
 		return err
 	}
@@ -430,7 +593,41 @@ func startSSHShell(sess *ssh.Session, cfg SSHConfig) error {
 // sess.Shell. Paths are validated with the regex guard (CodeQL go/command-injection
 // recommended pattern) before being embedded in the shell command.
 // sess.Shell() and sess.Start() are mutually exclusive in the SSH protocol.
-func sshShellCommand(cfg SSHConfig) (string, error) {
+//
+// Setup snippets are prepended: the export of the pane's ID (see paneid.go),
+// and with the browser-open shim enabled, a fixed, non-tainted snippet that
+// installs it (see browseropen.go). A pane that would otherwise have used
+// sess.Shell() then has to run a command instead, so it execs the login
+// shell explicitly to keep the profile files an SSH login would source.
+//
+// sshd runs the command with the user's login shell, which need not be POSIX
+// (fish, tcsh). A command with setup is therefore POSIX script handed whole to
+// /bin/sh as one single-quoted argument, `exec /bin/sh -c '<script>'`, which
+// every such shell parses the same way. The script is one line and has no
+// `!`: remote paths and pane IDs are validated to exclude both, and the shim
+// is written with printfOctalFormat.
+func sshShellCommand(paneID string, cfg SSHConfig) (string, error) {
+	tail, err := sshShellExecTail(cfg)
+	if err != nil {
+		return "", err
+	}
+	setup := remotePaneIDSetup(paneID)
+	if browserShimEnabled.Load() {
+		setup += remoteBrowserShimSetup()
+	}
+	if setup == "" {
+		return tail, nil
+	}
+	if tail == "" {
+		tail = remoteLoginShellExec
+	}
+	return "exec /bin/sh -c " + shellQuotePath(setup+tail), nil
+}
+
+// sshShellExecTail builds the part of the remote command that enters the
+// working directory and starts the shell. An empty result means the pane can
+// use the SSH shell request instead of a command.
+func sshShellExecTail(cfg SSHConfig) (string, error) {
 	if cfg.Shell != "" {
 		if err := validateRemotePath("shell", cfg.Shell); err != nil {
 			return "", err
@@ -454,6 +651,13 @@ func sshShellCommand(cfg SSHConfig) (string, error) {
 		return "", err
 	}
 	return fmt.Sprintf("cd %s && exec $SHELL", shellQuotePath(cfg.Cwd)), nil
+}
+
+// ValidateRemotePath is the remote-path guard for a caller outside this
+// package that builds a path into a shell script: the task dashboard's
+// launch script (internal/tasks).
+func ValidateRemotePath(label, path string) error {
+	return validateRemotePath(label, path)
 }
 
 func validateRemotePath(label, path string) error {
@@ -509,7 +713,10 @@ func DetectRemoteShell(cfg SSHConfig) (string, error) {
 	if jumpClient != nil {
 		defer jumpClient.Close()
 	}
+	return detectRemoteShellFromClient(client)
+}
 
+func detectRemoteShellFromClient(client *ssh.Client) (string, error) {
 	sess, err := client.NewSession()
 	if err != nil {
 		return "", fmt.Errorf("creating session: %w", err)
@@ -546,7 +753,14 @@ func ListRemoteDirectories(cfg SSHConfig, path string, showHidden bool) ([]Direc
 	if jumpClient != nil {
 		defer jumpClient.Close()
 	}
+	return listRemoteDirectoriesFromClient(client, path, showHidden)
+}
 
+func listRemoteDirectoriesFromClient(
+	client *ssh.Client,
+	path string,
+	showHidden bool,
+) ([]DirectoryEntry, string, error) {
 	sess, err := client.NewSession()
 	if err != nil {
 		return nil, "", fmt.Errorf("creating session: %w", err)
@@ -710,6 +924,9 @@ func buildAuthMethods(cfg SSHConfig) ([]ssh.AuthMethod, error) {
 	var methods []ssh.AuthMethod
 
 	if cfg.KeyFile != "" {
+		if err := requireAbsolutePath("key file", cfg.KeyFile); err != nil {
+			return nil, err
+		}
 		keyData, err := os.ReadFile(cfg.KeyFile)
 		if err != nil {
 			return nil, fmt.Errorf("reading key file %s: %w", cfg.KeyFile, err)
@@ -726,19 +943,13 @@ func buildAuthMethods(cfg SSHConfig) ([]ssh.AuthMethod, error) {
 	}
 
 	// If no explicit auth method, try common default key files (mirrors OpenSSH behavior).
+	// A home directory that cannot be resolved means there are no default keys to
+	// try, not that they should be looked for under an empty home: joining against
+	// one yields ".ssh/id_ed25519", which would read a private key out of whatever
+	// directory panemux was started in and authenticate with it.
 	if len(methods) == 0 {
-		home, _ := os.UserHomeDir()
-		for _, name := range []string{"id_ed25519", "id_rsa", "id_ecdsa"} {
-			keyData, err := os.ReadFile(filepath.Join(home, ".ssh", name))
-			if err != nil {
-				continue
-			}
-			signer, err := ssh.ParsePrivateKey(keyData)
-			if err != nil {
-				continue
-			}
-			methods = append(methods, ssh.PublicKeys(signer))
-			break
+		if home, homeErr := homedir.Dir(); homeErr == nil {
+			methods = append(methods, defaultKeyAuthMethods(home)...)
 		}
 	}
 
@@ -787,6 +998,18 @@ func (s *SSHSession) Close() error {
 
 // ConnectionName returns the panemux connection alias for this SSH session.
 func (s *SSHSession) ConnectionName() string { return s.connectionName }
+
+// BoardHostID identifies this session's Agent Board host as its SSH
+// connection name — the same identifier ConnectionName already returns.
+func (s *SSHSession) BoardHostID() string { return s.connectionName }
+
+// RunBoardCommand runs an agmsg script on the remote host over a new SSH
+// exec channel, matching the pattern GetCWD/InspectGitContext already use.
+func (s *SSHSession) RunBoardCommand(ctx context.Context, args []string) ([]byte, error) {
+	return runBoardCommand(ctx, func() (sshSessionRunner, error) {
+		return s.client.NewSession()
+	}, args)
+}
 
 // sshGetCWDCmd is the shell command used by SSHSession.GetCWD to detect the
 // current working directory of the interactive shell.
@@ -859,6 +1082,14 @@ func (s *SSHSession) GetActiveWorkdirs() ([]string, error) {
 	)
 }
 
+// DetectInteractiveAgentType reports the agmsg type name of any live agent
+// process currently running on this SSH connection — see AgentTypeDetector.
+func (s *SSHSession) DetectInteractiveAgentType() (string, bool, error) {
+	return detectRemoteAgentTypeFromSessionFactory(func() (sshSessionRunner, error) {
+		return s.client.NewSession()
+	})
+}
+
 // InspectGitContext resolves Git metadata on the remote host for the provided
 // absolute working directory.
 func (s *SSHSession) InspectGitContext(cwd string) (GitContext, error) {
@@ -911,6 +1142,38 @@ func activeRemoteWorkdirsFromSessionFactory(
 
 func activeRemoteWorkdirs(runner sshSessionRunner, logScope, baseCWD string, rootPID int) ([]string, error) {
 	return activeRemoteWorkdirsWithOutput(runner.Output, logScope, baseCWD, rootPID)
+}
+
+// detectRemoteAgentTypeFromSessionFactory is AgentTypeDetector's SSH
+// primitive: it stops at "which agent type is present", skipping the
+// transcript/workdir resolution activeRemoteWorkdirsFromSessionFactory does
+// afterward — cheap enough to poll frequently.
+func detectRemoteAgentTypeFromSessionFactory(newRunner func() (sshSessionRunner, error)) (string, bool, error) {
+	rootRunner, err := newRunner()
+	if err != nil {
+		return "", false, fmt.Errorf("new ssh session for remote shell pid: %w", err)
+	}
+	defer rootRunner.Close()
+
+	rootPID, err := remoteShellPID(rootRunner)
+	if err != nil {
+		return "", false, err
+	}
+
+	return detectRemoteAgentType(outputFromSessionFactory(newRunner), rootPID)
+}
+
+func detectRemoteAgentType(run remoteOutputFunc, rootPID int) (string, bool, error) {
+	out, err := run(sshListProcessesCmd)
+	if err != nil {
+		return "", false, fmt.Errorf("list remote processes: %w", err)
+	}
+	processes, err := parsePSOutput(append([]byte("PID PPID COMMAND\n"), out...))
+	if err != nil {
+		return "", false, err
+	}
+	_, agmsgType, ok := newestKnownAgentTypeDescendantPID(processes, rootPID)
+	return agmsgType, ok, nil
 }
 
 func activeRemoteWorkdirsWithOutput(
@@ -1112,8 +1375,43 @@ func remoteClaudeSessionCWDs(
 		return nil, nil
 	}
 
-	projectPath := remoteClaudeProjectPath(sessionMeta)
+	// The directory Claude stores this session under, which panemux derives
+	// from the session's cwd — an encoding that is observed behavior of Claude
+	// Code, not a documented interface (see claudeProjectDirName). The remote
+	// resolver falls back the same way the local one does when that derivation
+	// is wrong, because the pane loses its worktree either way and panes here
+	// are reached over SSH just as often (issue #119).
+	dir := remoteClaudeProjectDir(logScope, sessionMeta)
 
+	cwds := remoteClaudeCWDsUnder(run, logScope, sessionMeta, dir)
+	if len(cwds) > 0 {
+		return cwds, nil
+	}
+
+	// Nothing under the directory panemux expected. Ask the host where this
+	// session's transcript actually is — once per session, not once per
+	// metadata refresh, since this is the state a Claude session that has not
+	// written anything yet is also in.
+	probed, ok := probeRemoteClaudeProjectDir(run, logScope, sessionMeta, dir)
+	if !ok || probed == dir {
+		return cwds, nil
+	}
+
+	return remoteClaudeCWDsUnder(run, logScope, sessionMeta, probed), nil
+}
+
+// remoteClaudeCWDsUnder reads the session's own transcript and every subagent
+// transcript beside it, under the given project directory.
+//
+// dir is either the derived name, relative to ~/.claude/projects, or an
+// absolute path a probe resolved; remoteClaudeTranscriptShellPath tells them
+// apart so the caller does not have to.
+func remoteClaudeCWDsUnder(
+	run remoteOutputFunc,
+	logScope string,
+	meta *claudeSessionMeta,
+	dir string,
+) []string {
 	cwds := make([]string, 0, 1)
 	seen := make(map[string]bool)
 	addCandidate := func(displayPath, shellPath string) {
@@ -1133,21 +1431,190 @@ func remoteClaudeSessionCWDs(
 		cwds = append(cwds, cwd)
 	}
 
-	addCandidate(projectPath, remoteClaudeProjectShellPath(sessionMeta))
+	transcript := filepath.Join(dir, meta.SessionID+".jsonl")
+	addCandidate(transcript, remoteClaudeTranscriptShellPath(dir, meta.SessionID+".jsonl"))
 
-	subagentNames, err := remoteClaudeSubagentTranscriptNames(run, logScope, sessionMeta)
+	subagentDir := filepath.Join(dir, meta.SessionID, "subagents")
+	subagentNames, err := remoteClaudeSubagentTranscriptNames(run, logScope, subagentDir)
 	if err != nil {
 		log.Printf("%s listing claude subagent transcripts failed: %v", logScope, err)
-		return cwds, nil
+		return cwds
 	}
 	for _, name := range subagentNames {
 		addCandidate(
-			filepath.Join(filepath.Dir(projectPath), sessionMeta.SessionID, "subagents", name),
-			remoteClaudeSubagentShellPath(sessionMeta, name),
+			filepath.Join(subagentDir, name),
+			remoteClaudeTranscriptShellPath(subagentDir, name),
 		)
 	}
 
-	return cwds, nil
+	return cwds
+}
+
+// remoteClaudeProbeTTL bounds how long a probe's answer is reused before the
+// host is asked again.
+//
+// It exists because of the order things happen in: panemux can read
+// ~/.claude/sessions/<pid>.json as soon as the remote claude process starts,
+// but the transcript itself only appears once that session produces output.
+// The first metadata refresh after a pane opens lands in that window and finds
+// nothing — and remembering *that* forever meant a pane on a host whose
+// encoding differs never resolved its worktree, which is the case this
+// fallback exists for. The same staleness covers a transcript that later
+// moves.
+//
+// 30 seconds against the dashboard's 10-second git-info poll means at most one
+// probe per three refreshes while a session has nothing to find, and a
+// transcript that appears is picked up within one TTL.
+const remoteClaudeProbeTTL = 30 * time.Second
+
+// remoteClaudeProjectDirs remembers what a probe answered for a session, so a
+// host whose encoding differs pays for one probe rather than one per metadata
+// refresh — and so does a session that has no transcript anywhere yet, which
+// is the same state from here.
+//
+// An entry is keyed by host scope and session id. "There is nothing there" is
+// recorded like any other answer, or the quietest case would be the most
+// expensive one; what keeps that from being permanent is the TTL above. A
+// probe that *failed* is not recorded at all — see probeRemoteClaudeProjectDir.
+var remoteClaudeProjectDirs struct {
+	answered map[string]remoteClaudeProjectDirAnswer
+	mu       sync.Mutex
+}
+
+type remoteClaudeProjectDirAnswer struct {
+	answeredAt time.Time
+	dir        string
+}
+
+func remoteClaudeProjectDirKey(logScope string, meta *claudeSessionMeta) string {
+	return logScope + "\x00" + meta.SessionID
+}
+
+// remoteClaudeProjectDir returns the directory to look under: whatever a probe
+// resolved for this session earlier, or the derived name.
+func remoteClaudeProjectDir(logScope string, meta *claudeSessionMeta) string {
+	remoteClaudeProjectDirs.mu.Lock()
+	defer remoteClaudeProjectDirs.mu.Unlock()
+
+	// A known directory is used however old the answer is: staleness governs
+	// whether to ask again, not whether the last answer is still worth using.
+	if answer, ok := remoteClaudeProjectDirs.answered[remoteClaudeProjectDirKey(logScope, meta)]; ok && answer.dir != "" {
+		return answer.dir
+	}
+	return claudeProjectDirName(meta.CWD)
+}
+
+// probeRemoteClaudeProjectDir asks the host for the directory holding this
+// session's transcript, and reports whether the caller should try again under
+// a different one. It asks at most once per TTL: a call while the last answer
+// is still fresh returns false without running anything.
+func probeRemoteClaudeProjectDir(
+	run remoteOutputFunc,
+	logScope string,
+	meta *claudeSessionMeta,
+	derived string,
+) (string, bool) {
+	key := remoteClaudeProjectDirKey(logScope, meta)
+	if remoteClaudeProjectDirAnsweredRecently(key) {
+		return "", false
+	}
+
+	dir, ok := runRemoteClaudeProjectProbe(run, logScope, meta)
+	if !ok {
+		// The question never arrived — a dropped exec channel, a connection
+		// that went away mid-refresh. That is not the host telling us there is
+		// nothing here, so nothing is recorded and the next refresh asks
+		// again; recording it would retire the probe on a network blip.
+		return "", false
+	}
+
+	// Same directory, differently spelled: the probe returns an absolute path
+	// and the derived value is a name relative to ~/.claude/projects, so
+	// comparing them directly would never match. Recording the derived form
+	// keeps later refreshes on the relative spelling — and therefore on the
+	// same read cache — while still marking the session as asked about.
+	if dir != "" && filepath.Base(dir) == filepath.Base(derived) {
+		rememberRemoteClaudeProjectDir(key, derived)
+		return "", false
+	}
+
+	rememberRemoteClaudeProjectDir(key, dir)
+	if dir == "" {
+		return "", false
+	}
+
+	log.Printf(
+		"%s claude transcript for session %s was not under the derived directory %q; "+
+			"using %q instead. Claude Code's project directory encoding may have changed.",
+		logScope, meta.SessionID, filepath.Base(derived), filepath.Base(dir),
+	)
+	return dir, true
+}
+
+// Both accessors unlock through defer: a panic inside one of these critical
+// sections would otherwise leave the package's own mutex held forever, and
+// every later caller — including a test's cleanup — would block on it rather
+// than the failure surfacing where it happened.
+func remoteClaudeProjectDirAnsweredRecently(key string) bool {
+	remoteClaudeProjectDirs.mu.Lock()
+	defer remoteClaudeProjectDirs.mu.Unlock()
+
+	answer, answered := remoteClaudeProjectDirs.answered[key]
+	return answered && nowFn().Sub(answer.answeredAt) < remoteClaudeProbeTTL
+}
+
+func rememberRemoteClaudeProjectDir(key, dir string) {
+	remoteClaudeProjectDirs.mu.Lock()
+	defer remoteClaudeProjectDirs.mu.Unlock()
+
+	if remoteClaudeProjectDirs.answered == nil {
+		remoteClaudeProjectDirs.answered = make(map[string]remoteClaudeProjectDirAnswer)
+	}
+	remoteClaudeProjectDirs.answered[key] = remoteClaudeProjectDirAnswer{dir: dir, answeredAt: nowFn()}
+}
+
+// runRemoteClaudeProjectProbe returns the absolute project directory holding
+// <sessionID>.jsonl, and whether the host answered at all. A false ok means the
+// command did not run, which is not the same as an answer of "nothing here" —
+// only the latter is worth remembering.
+func runRemoteClaudeProjectProbe(
+	run remoteOutputFunc,
+	logScope string,
+	meta *claudeSessionMeta,
+) (string, bool) {
+	out, err := run(remoteClaudeProjectProbeCmd(meta.SessionID))
+	if err != nil {
+		log.Printf("%s probing for the claude transcript directory failed: %v", logScope, err)
+		return "", false
+	}
+
+	found := strings.TrimSpace(strings.SplitN(string(out), "\n", 2)[0])
+	if found == "" {
+		return "", true
+	}
+
+	// The answer came back from the host and is about to be built into further
+	// commands, so it goes through the same regex allowlist every other remote
+	// path does before reaching an exec sink (see docs/security.md's "Remote
+	// path arguments"). Quoting alone is not what this repository accepts.
+	if !validRemotePath.MatchString(found) {
+		log.Printf("%s ignoring an unusable claude transcript path from the host: %q", logScope, found)
+		return "", true
+	}
+	if filepath.Base(found) != meta.SessionID+".jsonl" {
+		log.Printf("%s ignoring a claude transcript path for another session: %q", logScope, found)
+		return "", true
+	}
+
+	return filepath.Dir(found), true
+}
+
+// remoteClaudeProjectProbeCmd globs one level under ~/.claude/projects for
+// this session's transcript and returns at most one line. The session id is
+// already regex-validated by the caller (validClaudeSessionID) and quoted
+// here; the `*` is the only unquoted part, because it has to expand.
+func remoteClaudeProjectProbeCmd(sessionID string) string {
+	return "ls -1 ~/.claude/projects/*/" + shellQuotePath(sessionID+".jsonl") + " 2>/dev/null | head -n 1"
 }
 
 // remoteClaudeSubagentTranscriptNames lists the ".jsonl" filenames in the
@@ -1157,9 +1624,9 @@ func remoteClaudeSessionCWDs(
 func remoteClaudeSubagentTranscriptNames(
 	run remoteOutputFunc,
 	logScope string,
-	meta *claudeSessionMeta,
+	subagentDir string,
 ) ([]string, error) {
-	out, err := run("ls -1 " + remoteClaudeSubagentsDirShellPath(meta) + " 2>/dev/null || true")
+	out, err := run("ls -1 " + remoteClaudeTranscriptShellPath(subagentDir, "") + " 2>/dev/null || true")
 	if err != nil {
 		return nil, err
 	}
@@ -1177,16 +1644,19 @@ func remoteClaudeSubagentTranscriptNames(
 	return names, nil
 }
 
-func remoteClaudeSubagentsDirShellPath(meta *claudeSessionMeta) string {
-	return "~/.claude/projects/" + shellQuotePath(
-		filepath.Join(claudeProjectDirName(meta.CWD), meta.SessionID, "subagents"),
-	)
-}
-
-func remoteClaudeSubagentShellPath(meta *claudeSessionMeta, name string) string {
-	return "~/.claude/projects/" + shellQuotePath(
-		filepath.Join(claudeProjectDirName(meta.CWD), meta.SessionID, "subagents", name),
-	)
+// remoteClaudeTranscriptShellPath builds the shell argument for a path under
+// a project directory, which is either an absolute path a probe resolved or a
+// name relative to ~/.claude/projects. The tilde stays outside the quotes in
+// the second case, as it must to expand.
+func remoteClaudeTranscriptShellPath(dir, name string) string {
+	path := dir
+	if name != "" {
+		path = filepath.Join(dir, name)
+	}
+	if filepath.IsAbs(dir) {
+		return shellQuotePath(path)
+	}
+	return "~/.claude/projects/" + shellQuotePath(path)
 }
 
 func remoteClaudeSessionMeta(run remoteOutputFunc, logScope string, agentPID int) (*claudeSessionMeta, error) {
@@ -1206,20 +1676,6 @@ func remoteClaudeSessionMeta(run remoteOutputFunc, logScope string, agentPID int
 		return nil, nil
 	}
 	return &meta, nil
-}
-
-func remoteClaudeProjectPath(meta *claudeSessionMeta) string {
-	return filepath.Join(
-		"~/.claude/projects",
-		claudeProjectDirName(meta.CWD),
-		meta.SessionID+".jsonl",
-	)
-}
-
-func remoteClaudeProjectShellPath(meta *claudeSessionMeta) string {
-	return "~/.claude/projects/" + shellQuotePath(
-		filepath.Join(claudeProjectDirName(meta.CWD), meta.SessionID+".jsonl"),
-	)
 }
 
 func remoteFileFingerprintCmd(shellPath string) string {
@@ -1379,4 +1835,43 @@ func remoteOpenFiles(run remoteOutputFunc, pid int) ([]string, error) {
 		}
 	}
 	return paths, nil
+}
+
+// defaultKeyAuthMethods returns an auth method for the first of OpenSSH's
+// common default key files that exists under home and parses, or nothing when
+// none does.
+func defaultKeyAuthMethods(home string) []ssh.AuthMethod {
+	for _, name := range []string{"id_ed25519", "id_rsa", "id_ecdsa"} {
+		keyData, err := os.ReadFile(filepath.Join(home, ".ssh", name))
+		if err != nil {
+			continue
+		}
+		signer, err := ssh.ParsePrivateKey(keyData)
+		if err != nil {
+			continue
+		}
+		return []ssh.AuthMethod{ssh.PublicKeys(signer)}
+	}
+	return nil
+}
+
+// requireAbsolutePath refuses a path that has reached a read still relative.
+//
+// Every route that produces one of these paths yields an absolute path when it
+// works: an operator writing one, internal/config's expandTilde, or
+// resolveSSHConfig's expandIdentityFile. A relative path therefore means an
+// expansion that could not happen — a home directory that would not resolve —
+// and os.ReadFile would resolve it against whatever directory panemux was
+// started in instead. For a private key that means authenticating with a key
+// belonging to that directory; for known_hosts it means letting a file planted
+// there decide host-key verification. Both are refused, naming the path.
+//
+// A leading ~/ is the same case and needs no separate check: it is not
+// absolute either, and no syscall treats ~ as the home directory.
+func requireAbsolutePath(what, path string) error {
+	if !filepath.IsAbs(path) {
+		return fmt.Errorf("%s %s is not an absolute path: it could not be resolved against a home directory, "+
+			"and reading it would resolve it against the working directory", what, path)
+	}
+	return nil
 }

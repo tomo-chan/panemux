@@ -21,6 +21,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"panemux/internal/config"
+	"panemux/internal/homedir"
 	"panemux/internal/session"
 )
 
@@ -81,7 +82,7 @@ func (m *mockSession) Close() error {
 }
 
 func setupRouter(cfg *config.Config, mgr *session.Manager) *chi.Mux {
-	h := NewHandler(cfg, mgr)
+	h := NewHandler(cfg, mgr, nil, nil)
 	// Use a temp empty SSH config to avoid real ~/.ssh/config leaking into tests
 	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
 	return setupRouterWithHandler(h)
@@ -89,45 +90,31 @@ func setupRouter(cfg *config.Config, mgr *session.Manager) *chi.Mux {
 
 func setupRouterWithHandler(h *Handler) *chi.Mux {
 	r := chi.NewRouter()
-	r.Get("/api/layout", h.GetLayout)
-	r.Put("/api/layout", h.PutLayout)
-	r.Get("/api/workspaces", h.GetWorkspaces)
-	r.Post("/api/workspaces", h.PostWorkspace)
-	r.Put("/api/workspaces/active", h.PutActiveWorkspace)
-	r.Put("/api/workspaces/tab-position", h.PutWorkspaceTabPosition)
-	r.Put("/api/workspaces/vertical-bar-width", h.PutWorkspaceVerticalBarWidth)
-	r.Put("/api/workspaces/{id}", h.PutWorkspace)
-	r.Delete("/api/workspaces/{id}", h.DeleteWorkspace)
-	r.Put("/api/workspaces/{id}/layout", h.PutWorkspaceLayout)
-	r.Get("/api/sessions", h.GetSessions)
-	r.Post("/api/sessions", h.PostSession)
-	r.Delete("/api/sessions/{id}", h.DeleteSession)
-	r.Post("/api/sessions/{id}/restart", h.RestartSession)
-	r.Get("/api/sessions/{id}/git-info", h.GetGitInfo)
-	r.Get("/api/display", h.GetDisplay)
-	r.Get("/api/ssh-connections", h.GetSSHConnections)
-	r.Get("/api/ssh-config/hosts", h.GetSSHConfigHosts)
-	r.Post("/api/ssh-config/hosts", h.PostSSHConfigHost)
-	r.Get("/api/detect-shell", h.GetDetectShell)
-	r.Get("/api/directories", h.GetDirectories)
+	// Mount is the same route table internal/server wires in production, so
+	// these tests exercise the real paths, methods and mount structure
+	// rather than a hand-maintained copy of them. boardAuth is nil here:
+	// whether the bearer token is enforced is internal/server's contract,
+	// covered by its own tests against the router the binary really serves.
+	// See docs/quality-gateway.md's gate G3, and issue #178.
+	h.Mount(r, nil)
 	return r
 }
 
 func defaultTestConfig() *config.Config {
-	return &config.Config{
-		Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1"},
+	return &config.Config{Data: config.Data{
+		Server: config.ServerConfig{Port: 8080, Host: loopbackIPv4},
 		Layout: config.LayoutNode{
 			Direction: "horizontal",
 			Children: []config.LayoutChild{
 				{Size: 100, Pane: &config.PaneConfig{ID: "main", Type: "local"}},
 			},
 		},
-	}
+	}}
 }
 
 func workspaceTestConfig() *config.Config {
-	return &config.Config{
-		Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1"},
+	return &config.Config{Data: config.Data{
+		Server: config.ServerConfig{Port: 8080, Host: loopbackIPv4},
 		Workspaces: config.WorkspacesConfig{
 			Active:           "one",
 			TabPosition:      "top",
@@ -151,13 +138,14 @@ func workspaceTestConfig() *config.Config {
 				},
 			},
 		},
-	}
+	}}
 }
 
-func loadWorkspaceTestConfigFromFile(t *testing.T) (*config.Config, string) {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "config.yaml")
-	content := `
+// workspaceTestConfigYAML is the on-disk form of workspaceTestConfig(): two
+// workspaces, one local pane each. Shared with the write-failure fixture in
+// handler_error_paths_test.go so both load the same config, one from a path
+// that can still be written and one from a path that cannot.
+const workspaceTestConfigYAML = `
 server:
   port: 8080
   host: "127.0.0.1"
@@ -185,7 +173,11 @@ workspaces:
               id: two-main
               type: local
 `
-	require.NoError(t, os.WriteFile(path, []byte(content), 0600))
+
+func loadWorkspaceTestConfigFromFile(t *testing.T) (*config.Config, string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(workspaceTestConfigYAML), 0600))
 	cfg, err := config.Load(path)
 	require.NoError(t, err)
 	return cfg, path
@@ -310,7 +302,7 @@ func TestPutWorkspaceTabPosition_UpdatesEveryValidPositionAndPersists(t *testing
 	for _, position := range []string{"top", "bottom", "left", "right"} {
 		t.Run(position, func(t *testing.T) {
 			cfg, path := loadWorkspaceTestConfigFromFile(t)
-			h := NewHandler(cfg, session.NewManager())
+			h := NewHandler(cfg, session.NewManager(), nil, nil)
 			h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
 			r := setupRouterWithHandler(h)
 
@@ -336,7 +328,7 @@ func TestPutWorkspaceTabPosition_UpdatesEveryValidPositionAndPersists(t *testing
 }
 
 func TestPutWorkspaceTabPosition_InvalidBody_Returns400(t *testing.T) {
-	h := NewHandler(workspaceTestConfig(), session.NewManager())
+	h := NewHandler(workspaceTestConfig(), session.NewManager(), nil, nil)
 	r := setupRouterWithHandler(h)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/tab-position", bytes.NewBufferString("not json"))
@@ -347,7 +339,7 @@ func TestPutWorkspaceTabPosition_InvalidBody_Returns400(t *testing.T) {
 
 func TestPutWorkspaceTabPosition_InvalidPosition_Returns422AndKeepsExistingValue(t *testing.T) {
 	cfg := workspaceTestConfig()
-	h := NewHandler(cfg, session.NewManager())
+	h := NewHandler(cfg, session.NewManager(), nil, nil)
 	r := setupRouterWithHandler(h)
 	assertWorkspaceSettingRejected(
 		t,
@@ -363,7 +355,7 @@ func TestPutWorkspaceTabPosition_InvalidPosition_Returns422AndKeepsExistingValue
 
 func TestPutWorkspaceVerticalBarWidth_UpdatesAndPersists(t *testing.T) {
 	cfg, path := loadWorkspaceTestConfigFromFile(t)
-	h := NewHandler(cfg, session.NewManager())
+	h := NewHandler(cfg, session.NewManager(), nil, nil)
 	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
 	r := setupRouterWithHandler(h)
 
@@ -387,7 +379,7 @@ func TestPutWorkspaceVerticalBarWidth_UpdatesAndPersists(t *testing.T) {
 }
 
 func TestPutWorkspaceVerticalBarWidth_InvalidBody_Returns400(t *testing.T) {
-	h := NewHandler(workspaceTestConfig(), session.NewManager())
+	h := NewHandler(workspaceTestConfig(), session.NewManager(), nil, nil)
 	r := setupRouterWithHandler(h)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/vertical-bar-width", bytes.NewBufferString("not json"))
@@ -398,7 +390,7 @@ func TestPutWorkspaceVerticalBarWidth_InvalidBody_Returns400(t *testing.T) {
 
 func TestPutWorkspaceVerticalBarWidth_InvalidWidth_Returns422AndKeepsExistingValue(t *testing.T) {
 	cfg := workspaceTestConfig()
-	h := NewHandler(cfg, session.NewManager())
+	h := NewHandler(cfg, session.NewManager(), nil, nil)
 	r := setupRouterWithHandler(h)
 	assertWorkspaceSettingRejected(
 		t,
@@ -415,7 +407,7 @@ func TestPutWorkspaceVerticalBarWidth_InvalidWidth_Returns422AndKeepsExistingVal
 func TestPostWorkspace_AddsDefaultLocalWorkspaceAndPersists(t *testing.T) {
 	cfg, path := loadWorkspaceTestConfigFromFile(t)
 	mgr := session.NewManager()
-	h := NewHandler(cfg, mgr)
+	h := NewHandler(cfg, mgr, nil, nil)
 	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
 	h.createSession = func(pane *config.PaneConfig, _ map[string]config.SSHConnection) (session.Session, error) {
 		return newMockSession(pane.ID), nil
@@ -451,7 +443,7 @@ func TestPostWorkspace_AddsDefaultLocalWorkspaceAndPersists(t *testing.T) {
 
 func TestDeleteWorkspace_NotFound_Returns404(t *testing.T) {
 	cfg := workspaceTestConfig()
-	h := NewHandler(cfg, session.NewManager())
+	h := NewHandler(cfg, session.NewManager(), nil, nil)
 	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
 	r := setupRouterWithHandler(h)
 
@@ -464,7 +456,7 @@ func TestDeleteWorkspace_NotFound_Returns404(t *testing.T) {
 
 func TestDeleteWorkspace_LastWorkspace_Returns409(t *testing.T) {
 	cfg := defaultTestConfig()
-	h := NewHandler(cfg, session.NewManager())
+	h := NewHandler(cfg, session.NewManager(), nil, nil)
 	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
 	r := setupRouterWithHandler(h)
 
@@ -481,7 +473,7 @@ func TestDeleteWorkspace_RemovesWorkspaceSessionsAndPersists(t *testing.T) {
 	mgr := session.NewManager()
 	mgr.Add(newMockSession("one-main"))
 	mgr.Add(newMockSession("two-main"))
-	h := NewHandler(cfg, mgr)
+	h := NewHandler(cfg, mgr, nil, nil)
 	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
 	r := setupRouterWithHandler(h)
 
@@ -512,7 +504,7 @@ func TestDeleteWorkspace_ClearsPreferredCWDForRemovedPanes(t *testing.T) {
 	mgr := session.NewManager()
 	mgr.Add(newMockSession("one-main"))
 	mgr.Add(newMockSession("two-main"))
-	h := NewHandler(cfg, mgr)
+	h := NewHandler(cfg, mgr, nil, nil)
 	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
 	h.preferredCWDBySession["two-main"] = []preferredCWDState{{
 		CWD:       "/tmp/worktree",
@@ -536,7 +528,7 @@ func TestDeleteWorkspace_ClearsGitInfoCacheForRemovedPanes(t *testing.T) {
 	mgr := session.NewManager()
 	mgr.Add(newMockSession("one-main"))
 	mgr.Add(newMockSession("two-main"))
-	h := NewHandler(cfg, mgr)
+	h := NewHandler(cfg, mgr, nil, nil)
 	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
 	h.gitInfoCacheBySession["two-main"] = gitInfoCacheEntry{
 		expiresAt: h.nowFn().Add(gitInfoCacheTTL),
@@ -555,7 +547,7 @@ func TestDeleteWorkspace_ClearsGitInfoCacheForRemovedPanes(t *testing.T) {
 
 func TestPutWorkspace_RenamesWorkspaceAndPersists(t *testing.T) {
 	cfg, path := loadWorkspaceTestConfigFromFile(t)
-	h := NewHandler(cfg, session.NewManager())
+	h := NewHandler(cfg, session.NewManager(), nil, nil)
 	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
 	r := setupRouterWithHandler(h)
 
@@ -579,7 +571,7 @@ func TestPutWorkspace_RenamesWorkspaceAndPersists(t *testing.T) {
 }
 
 func TestPutWorkspace_InvalidBody_Returns400(t *testing.T) {
-	h := NewHandler(workspaceTestConfig(), session.NewManager())
+	h := NewHandler(workspaceTestConfig(), session.NewManager(), nil, nil)
 	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
 	r := setupRouterWithHandler(h)
 
@@ -591,7 +583,7 @@ func TestPutWorkspace_InvalidBody_Returns400(t *testing.T) {
 }
 
 func TestPutWorkspace_BlankTitle_Returns422(t *testing.T) {
-	h := NewHandler(workspaceTestConfig(), session.NewManager())
+	h := NewHandler(workspaceTestConfig(), session.NewManager(), nil, nil)
 	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
 	r := setupRouterWithHandler(h)
 
@@ -605,7 +597,7 @@ func TestPutWorkspace_BlankTitle_Returns422(t *testing.T) {
 }
 
 func TestPutWorkspace_NotFound_Returns404(t *testing.T) {
-	h := NewHandler(workspaceTestConfig(), session.NewManager())
+	h := NewHandler(workspaceTestConfig(), session.NewManager(), nil, nil)
 	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
 	r := setupRouterWithHandler(h)
 
@@ -817,7 +809,7 @@ func TestDeleteSession_NotFound_404(t *testing.T) {
 }
 
 func TestPostSession_ValidLocal_201(t *testing.T) {
-	h := NewHandler(defaultTestConfig(), session.NewManager())
+	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
 	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
 	h.createSession = func(pane *config.PaneConfig, _ map[string]config.SSHConnection) (session.Session, error) {
 		return newMockSession(pane.ID), nil
@@ -858,18 +850,18 @@ func TestPostSession_DuplicateID_409(t *testing.T) {
 }
 
 func TestRestartSession_Found_200(t *testing.T) {
-	cfg := &config.Config{
-		Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1"},
+	cfg := &config.Config{Data: config.Data{
+		Server: config.ServerConfig{Port: 8080, Host: loopbackIPv4},
 		Layout: config.LayoutNode{
 			Direction: "horizontal",
 			Children: []config.LayoutChild{
 				{Size: 100, Pane: &config.PaneConfig{ID: "main", Type: "local"}},
 			},
 		},
-	}
+	}}
 	mgr := session.NewManager()
 	mgr.Add(newMockSession("main")) // pre-existing (exited) session
-	h := NewHandler(cfg, mgr)
+	h := NewHandler(cfg, mgr, nil, nil)
 	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
 	h.createSession = func(pane *config.PaneConfig, _ map[string]config.SSHConnection) (session.Session, error) {
 		return newMockSession(pane.ID), nil
@@ -887,18 +879,18 @@ func TestRestartSession_Found_200(t *testing.T) {
 }
 
 func TestRestartSession_ClearsPreferredCWD(t *testing.T) {
-	cfg := &config.Config{
-		Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1"},
+	cfg := &config.Config{Data: config.Data{
+		Server: config.ServerConfig{Port: 8080, Host: loopbackIPv4},
 		Layout: config.LayoutNode{
 			Direction: "horizontal",
 			Children: []config.LayoutChild{
 				{Size: 100, Pane: &config.PaneConfig{ID: "main", Type: "local"}},
 			},
 		},
-	}
+	}}
 	mgr := session.NewManager()
 	mgr.Add(newMockSession("main"))
-	h := NewHandler(cfg, mgr)
+	h := NewHandler(cfg, mgr, nil, nil)
 	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
 	h.preferredCWDBySession["main"] = []preferredCWDState{{
 		CWD:       "/tmp/worktree",
@@ -920,18 +912,18 @@ func TestRestartSession_ClearsPreferredCWD(t *testing.T) {
 }
 
 func TestRestartSession_ClearsGitInfoCache(t *testing.T) {
-	cfg := &config.Config{
-		Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1"},
+	cfg := &config.Config{Data: config.Data{
+		Server: config.ServerConfig{Port: 8080, Host: loopbackIPv4},
 		Layout: config.LayoutNode{
 			Direction: "horizontal",
 			Children: []config.LayoutChild{
 				{Size: 100, Pane: &config.PaneConfig{ID: "main", Type: "local"}},
 			},
 		},
-	}
+	}}
 	mgr := session.NewManager()
 	mgr.Add(newMockSession("main"))
-	h := NewHandler(cfg, mgr)
+	h := NewHandler(cfg, mgr, nil, nil)
 	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
 	h.gitInfoCacheBySession["main"] = gitInfoCacheEntry{
 		expiresAt: h.nowFn().Add(gitInfoCacheTTL),
@@ -960,19 +952,19 @@ func TestRestartSession_NotFound_404(t *testing.T) {
 }
 
 func TestRestartSession_CreateFails_OldSessionStaysRegistered(t *testing.T) {
-	cfg := &config.Config{
-		Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1"},
+	cfg := &config.Config{Data: config.Data{
+		Server: config.ServerConfig{Port: 8080, Host: loopbackIPv4},
 		Layout: config.LayoutNode{
 			Direction: "horizontal",
 			Children: []config.LayoutChild{
 				{Size: 100, Pane: &config.PaneConfig{ID: "main", Type: "local"}},
 			},
 		},
-	}
+	}}
 	mgr := session.NewManager()
 	original := newMockSession("main")
 	mgr.Add(original)
-	h := NewHandler(cfg, mgr)
+	h := NewHandler(cfg, mgr, nil, nil)
 	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
 	h.createSession = func(*config.PaneConfig, map[string]config.SSHConnection) (session.Session, error) {
 		return nil, errors.New("dial failed")
@@ -992,18 +984,18 @@ func TestRestartSession_CreateFails_OldSessionStaysRegistered(t *testing.T) {
 }
 
 func TestRestartSession_CreateFails_PreservesPreferredCWD(t *testing.T) {
-	cfg := &config.Config{
-		Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1"},
+	cfg := &config.Config{Data: config.Data{
+		Server: config.ServerConfig{Port: 8080, Host: loopbackIPv4},
 		Layout: config.LayoutNode{
 			Direction: "horizontal",
 			Children: []config.LayoutChild{
 				{Size: 100, Pane: &config.PaneConfig{ID: "main", Type: "local"}},
 			},
 		},
-	}
+	}}
 	mgr := session.NewManager()
 	mgr.Add(newMockSession("main"))
-	h := NewHandler(cfg, mgr)
+	h := NewHandler(cfg, mgr, nil, nil)
 	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
 	h.preferredCWDBySession["main"] = []preferredCWDState{{
 		CWD:       "/remote/home/demo",
@@ -1025,18 +1017,18 @@ func TestRestartSession_CreateFails_PreservesPreferredCWD(t *testing.T) {
 }
 
 func TestRestartSession_CreateFails_500Body(t *testing.T) {
-	cfg := &config.Config{
-		Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1"},
+	cfg := &config.Config{Data: config.Data{
+		Server: config.ServerConfig{Port: 8080, Host: loopbackIPv4},
 		Layout: config.LayoutNode{
 			Direction: "horizontal",
 			Children: []config.LayoutChild{
 				{Size: 100, Pane: &config.PaneConfig{ID: "main", Type: "local"}},
 			},
 		},
-	}
+	}}
 	mgr := session.NewManager()
 	mgr.Add(newMockSession("main"))
-	h := NewHandler(cfg, mgr)
+	h := NewHandler(cfg, mgr, nil, nil)
 	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
 	h.createSession = func(*config.PaneConfig, map[string]config.SSHConnection) (session.Session, error) {
 		return nil, errors.New("dial tcp: lookup host.example: no such host")
@@ -1052,17 +1044,17 @@ func TestRestartSession_CreateFails_500Body(t *testing.T) {
 }
 
 func TestRestartSession_CreateFails_NoPanicWhenNoPriorSession(t *testing.T) {
-	cfg := &config.Config{
-		Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1"},
+	cfg := &config.Config{Data: config.Data{
+		Server: config.ServerConfig{Port: 8080, Host: loopbackIPv4},
 		Layout: config.LayoutNode{
 			Direction: "horizontal",
 			Children: []config.LayoutChild{
 				{Size: 100, Pane: &config.PaneConfig{ID: "main", Type: "local"}},
 			},
 		},
-	}
+	}}
 	mgr := session.NewManager()
-	h := NewHandler(cfg, mgr)
+	h := NewHandler(cfg, mgr, nil, nil)
 	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
 	h.createSession = func(*config.PaneConfig, map[string]config.SSHConnection) (session.Session, error) {
 		return nil, errors.New("dial failed")
@@ -1088,18 +1080,18 @@ func TestRestartSession_CreateFails_NoPanicWhenNoPriorSession(t *testing.T) {
 // session is orphaned/leaked. A per-id in-flight guard rejects the second
 // concurrent call instead.
 func TestRestartSession_ConcurrentRequests_SecondReturns409(t *testing.T) {
-	cfg := &config.Config{
-		Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1"},
+	cfg := &config.Config{Data: config.Data{
+		Server: config.ServerConfig{Port: 8080, Host: loopbackIPv4},
 		Layout: config.LayoutNode{
 			Direction: "horizontal",
 			Children: []config.LayoutChild{
 				{Size: 100, Pane: &config.PaneConfig{ID: "main", Type: "local"}},
 			},
 		},
-	}
+	}}
 	mgr := session.NewManager()
 	mgr.Add(newMockSession("main"))
-	h := NewHandler(cfg, mgr)
+	h := NewHandler(cfg, mgr, nil, nil)
 	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
 
 	started := make(chan struct{})
@@ -1147,18 +1139,18 @@ func TestRestartSession_ConcurrentRequests_SecondReturns409(t *testing.T) {
 // in-flight guard is released once a restart finishes (success or failure),
 // so it never permanently locks a pane out of future restarts.
 func TestRestartSession_GuardReleasedAfterCompletion(t *testing.T) {
-	cfg := &config.Config{
-		Server: config.ServerConfig{Port: 8080, Host: "127.0.0.1"},
+	cfg := &config.Config{Data: config.Data{
+		Server: config.ServerConfig{Port: 8080, Host: loopbackIPv4},
 		Layout: config.LayoutNode{
 			Direction: "horizontal",
 			Children: []config.LayoutChild{
 				{Size: 100, Pane: &config.PaneConfig{ID: "main", Type: "local"}},
 			},
 		},
-	}
+	}}
 	mgr := session.NewManager()
 	mgr.Add(newMockSession("main"))
-	h := NewHandler(cfg, mgr)
+	h := NewHandler(cfg, mgr, nil, nil)
 	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-ssh-config-nonexistent")
 	h.createSession = func(pane *config.PaneConfig, _ map[string]config.SSHConnection) (session.Session, error) {
 		return nil, errors.New("dial failed")
@@ -1200,7 +1192,7 @@ func TestDeleteSession_ClearsPreferredCWD(t *testing.T) {
 	mgr := session.NewManager()
 	mgr.Add(newMockSession("s1"))
 	cfg := defaultTestConfig()
-	h := NewHandler(cfg, mgr)
+	h := NewHandler(cfg, mgr, nil, nil)
 	h.preferredCWDBySession["s1"] = []preferredCWDState{{
 		CWD:       "/tmp/worktree",
 		CommonDir: "/repo/.git",
@@ -1221,7 +1213,7 @@ func TestDeleteSession_ClearsGitInfoCache(t *testing.T) {
 	mgr := session.NewManager()
 	mgr.Add(newMockSession("s1"))
 	cfg := defaultTestConfig()
-	h := NewHandler(cfg, mgr)
+	h := NewHandler(cfg, mgr, nil, nil)
 	h.gitInfoCacheBySession["s1"] = gitInfoCacheEntry{
 		expiresAt: h.nowFn().Add(gitInfoCacheTTL),
 		response:  gitInfoResponse{IsGit: true, Branch: "stale-branch"},
@@ -1252,12 +1244,30 @@ func TestGetDisplay_ReturnsJSON(t *testing.T) {
 	assert.True(t, display.ShowStatusBar)
 }
 
+// The response always carries the effective key, so the browser never has to
+// know the default; the stored value stays as the operator wrote it.
+func TestGetDisplay_ReportsTheEffectiveTaskDashboardShortcut(t *testing.T) {
+	for configured, want := range map[string]string{"": "S", "j": "J"} {
+		cfg := defaultTestConfig()
+		cfg.Display.TaskDashboardShortcut = configured
+		r := setupRouter(cfg, session.NewManager())
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/display", nil))
+
+		require.Equal(t, http.StatusOK, rec.Code)
+		var display map[string]any
+		require.NoError(t, json.NewDecoder(rec.Body).Decode(&display))
+		assert.Equal(t, want, display["task_dashboard_shortcut"], "configured %q", configured)
+		assert.Equal(t, configured, cfg.Display.TaskDashboardShortcut)
+	}
+}
+
 func TestPutLayout_ExpandsTildeCwd(t *testing.T) {
 	cfg := defaultTestConfig()
 	r := setupRouter(cfg, session.NewManager())
 
-	home, err := os.UserHomeDir()
-	require.NoError(t, err)
+	home := "/workspace/user/home"
+	homedir.SetForTest(t, home)
 
 	layout := config.LayoutNode{
 		Direction: "horizontal",
@@ -1279,8 +1289,8 @@ func TestPutLayout_NestedTildeCwd_Expanded(t *testing.T) {
 	cfg := defaultTestConfig()
 	r := setupRouter(cfg, session.NewManager())
 
-	home, err := os.UserHomeDir()
-	require.NoError(t, err)
+	home := "/workspace/user/home"
+	homedir.SetForTest(t, home)
 
 	layout := config.LayoutNode{
 		Direction: "horizontal",
@@ -1373,7 +1383,7 @@ func TestGetSSHConnections_MergesSSHConfigHosts(t *testing.T) {
 		"yaml-conn": {Host: "yaml.example.com", Port: 22, User: "bob"},
 	}
 
-	h := NewHandler(cfg, session.NewManager())
+	h := NewHandler(cfg, session.NewManager(), nil, nil)
 	h.sshConfigPath = sshConfigPath
 	r := setupRouterWithHandler(h)
 
@@ -1398,7 +1408,7 @@ func TestGetSSHConnections_SSHConfigTakesPrecedenceOnConflict(t *testing.T) {
 		"shared": {Host: "yaml.example.com", Port: 22, User: "bob"},
 	}
 
-	h := NewHandler(cfg, session.NewManager())
+	h := NewHandler(cfg, session.NewManager(), nil, nil)
 	h.sshConfigPath = sshConfigPath
 	r := setupRouterWithHandler(h)
 
@@ -1419,7 +1429,7 @@ func TestGetSSHConfigHosts_ReturnsHosts(t *testing.T) {
 		"Host myhost\n    HostName myhost.example.com\n    User ubuntu\n    Port 2222\n",
 	)
 
-	h := NewHandler(defaultTestConfig(), session.NewManager())
+	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
 	h.sshConfigPath = sshConfigPath
 	r := setupRouterWithHandler(h)
 
@@ -1440,7 +1450,7 @@ func TestGetSSHConfigHosts_ReturnsHosts(t *testing.T) {
 func TestGetSSHConfigHosts_Empty(t *testing.T) {
 	sshConfigPath := writeTempSSHConfigForAPI(t, "")
 
-	h := NewHandler(defaultTestConfig(), session.NewManager())
+	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
 	h.sshConfigPath = sshConfigPath
 	r := setupRouterWithHandler(h)
 
@@ -1458,7 +1468,7 @@ func TestPostSSHConfigHost_ValidHost_201(t *testing.T) {
 	dir := t.TempDir()
 	sshConfigPath := filepath.Join(dir, "config")
 
-	h := NewHandler(defaultTestConfig(), session.NewManager())
+	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
 	h.sshConfigPath = sshConfigPath
 	r := setupRouterWithHandler(h)
 
@@ -1490,7 +1500,7 @@ func TestPostSSHConfigHost_MissingName_422(t *testing.T) {
 func postSSHConfigHost(t *testing.T, body sshConfigHostRequest) *httptest.ResponseRecorder {
 	t.Helper()
 
-	h := NewHandler(defaultTestConfig(), session.NewManager())
+	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
 	h.sshConfigPath = filepath.Join(t.TempDir(), "config")
 	r := setupRouterWithHandler(h)
 
@@ -1503,7 +1513,7 @@ func postSSHConfigHost(t *testing.T, body sshConfigHostRequest) *httptest.Respon
 }
 
 func TestPostSSHConfigHost_InvalidNameChars_422(t *testing.T) {
-	h := NewHandler(defaultTestConfig(), session.NewManager())
+	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
 	h.sshConfigPath = filepath.Join(t.TempDir(), "config")
 	r := setupRouterWithHandler(h)
 
@@ -1529,7 +1539,7 @@ func TestPostSSHConfigHost_MissingUser_422(t *testing.T) {
 }
 
 func TestPostSSHConfigHost_PortOutOfRange_422(t *testing.T) {
-	h := NewHandler(defaultTestConfig(), session.NewManager())
+	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
 	h.sshConfigPath = filepath.Join(t.TempDir(), "config")
 	r := setupRouterWithHandler(h)
 
@@ -1547,10 +1557,47 @@ func TestPostSSHConfigHost_PortOutOfRange_422(t *testing.T) {
 	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
 }
 
+// TestPostSSHConfigHost_PortRangeBoundaries pins both ends of the accepted
+// range, including the boundaries themselves. The out-of-range test above only
+// used 70000 — 4465 past the top — so `port >= 65535` would have rejected a
+// legal port with the suite still green, and `port <= 0` would have rejected
+// the omitted-port case (0 means "leave Port out of the ssh_config entry",
+// which is why the low bound is 0 here and 1 in internal/config). Issue #190.
+// Nothing under this test changed on this branch, so the red-check could never
+// see it go red: it pins behavior that was already correct and merely
+// unasserted. See docs/quality-gateway.md's "Clearing the boundary-value class".
+//
+//efficacy:exempt pins pre-existing behavior; no implementation under it changed
+func TestPostSSHConfigHost_PortRangeBoundaries(t *testing.T) {
+	tests := []struct {
+		name     string
+		port     int
+		wantCode int
+	}{
+		{name: "one below the low bound", port: -1, wantCode: http.StatusUnprocessableEntity},
+		{name: "the low bound itself means omitted", port: 0, wantCode: http.StatusCreated},
+		{name: "one above the low bound", port: 1, wantCode: http.StatusCreated},
+		{name: "one below the high bound", port: 65534, wantCode: http.StatusCreated},
+		{name: "the high bound itself", port: 65535, wantCode: http.StatusCreated},
+		{name: "one above the high bound", port: 65536, wantCode: http.StatusUnprocessableEntity},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := postSSHConfigHost(t, sshConfigHostRequest{
+				Name:     "boundary-host",
+				Hostname: "boundary.example.com",
+				User:     "ubuntu",
+				Port:     tt.port,
+			})
+			assert.Equal(t, tt.wantCode, rec.Code)
+		})
+	}
+}
+
 func TestPostSSHConfigHost_DuplicateName_409(t *testing.T) {
 	sshConfigPath := writeTempSSHConfigForAPI(t, "Host existing\n    HostName existing.example.com\n    User ubuntu\n")
 
-	h := NewHandler(defaultTestConfig(), session.NewManager())
+	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
 	h.sshConfigPath = sshConfigPath
 	r := setupRouterWithHandler(h)
 
@@ -1564,7 +1611,7 @@ func TestPostSSHConfigHost_DuplicateName_409(t *testing.T) {
 }
 
 func TestPostSSHConfigHost_InvalidBody_400(t *testing.T) {
-	h := NewHandler(defaultTestConfig(), session.NewManager())
+	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
 	h.sshConfigPath = filepath.Join(t.TempDir(), "config")
 	r := setupRouterWithHandler(h)
 
@@ -1579,12 +1626,12 @@ func TestPostSSHConfigHost_InvalidBody_400(t *testing.T) {
 //
 //nolint:govet // test helper layout is not performance-sensitive
 type mockCWDSession struct {
-	activeErr error
-	cwdErr    error
-	cwd       string
-	mockSession
+	activeErr      error
+	cwdErr         error
+	cwd            string
 	activeWorkdirs []string
-	getCWDCalls    int
+	mockSession
+	getCWDCalls int
 }
 
 func (m *mockCWDSession) GetCWD() (string, error) {
@@ -1612,13 +1659,13 @@ func (m *mockSSHCWDSession) ConnectionName() string  { return m.connName }
 //
 //nolint:govet // test helper layout is not performance-sensitive
 type mockRemoteGitSession struct {
-	activeErr   error
-	cwdErr      error
-	gitContexts map[string]session.GitContext
-	gitErrs     map[string]error
-	cwd         string
-	mockSession
+	activeErr      error
+	cwdErr         error
+	gitContexts    map[string]session.GitContext
+	gitErrs        map[string]error
+	cwd            string
 	activeWorkdirs []string
+	mockSession
 }
 
 func (m *mockRemoteGitSession) GetCWD() (string, error) { return m.cwd, m.cwdErr }
@@ -1643,15 +1690,9 @@ func (m *mockRemoteGitSession) InspectGitContext(cwd string) (session.GitContext
 	return ctx, nil
 }
 
-func setupRouterWithVSCode(h *Handler) *chi.Mux {
-	r := setupRouterWithHandler(h)
-	r.Post("/api/sessions/{id}/open-vscode", h.PostOpenVSCode)
-	return r
-}
-
 func TestPostOpenVSCode_NotFound_404(t *testing.T) {
-	h := NewHandler(defaultTestConfig(), session.NewManager())
-	r := setupRouterWithVSCode(h)
+	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/sessions/missing/open-vscode", nil)
@@ -1663,8 +1704,8 @@ func TestPostOpenVSCode_NotFound_404(t *testing.T) {
 func TestPostOpenVSCode_NoCWDGetter_422(t *testing.T) {
 	mgr := session.NewManager()
 	mgr.Add(newMockSession("s1"))
-	h := NewHandler(defaultTestConfig(), mgr)
-	r := setupRouterWithVSCode(h)
+	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/sessions/s1/open-vscode", nil)
@@ -1721,9 +1762,9 @@ func TestPostOpenVSCode_EndedAgentKeepsLastWorktree(t *testing.T) {
 
 	mgr := session.NewManager()
 	mgr.Add(sess)
-	h := NewHandler(defaultTestConfig(), mgr)
+	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
 	h.codeBinaryPath = "/bin/echo"
-	r := setupRouterWithVSCode(h)
+	r := setupRouterWithHandler(h)
 
 	resp := postOpenVSCodeOKWithRouter(t, r, "local-sticky")
 	assert.Equal(t, worktreeDir, resp.Cwd)
@@ -1746,9 +1787,9 @@ func TestPostOpenVSCode_StaleStickyWorktreeFallsBackToPaneCWD(t *testing.T) {
 
 	mgr := session.NewManager()
 	mgr.Add(sess)
-	h := NewHandler(defaultTestConfig(), mgr)
+	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
 	h.codeBinaryPath = "/bin/echo"
-	r := setupRouterWithVSCode(h)
+	r := setupRouterWithHandler(h)
 
 	resp := postOpenVSCodeOKWithRouter(t, r, "local-open-stale")
 	assert.Equal(t, worktreeDir, resp.Cwd)
@@ -1792,7 +1833,7 @@ func TestResolveActiveGitContexts_ReusesInspectedContext(t *testing.T) {
 		},
 	}
 
-	h := NewHandler(defaultTestConfig(), session.NewManager())
+	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
 	contexts, err := h.resolveActiveGitContexts(sess, sess.cwd)
 	require.NoError(t, err)
 	require.Len(t, contexts, 1)
@@ -1805,9 +1846,9 @@ func postOpenVSCodeOK(t *testing.T, id string, sess session.Session) openVSCodeR
 
 	mgr := session.NewManager()
 	mgr.Add(sess)
-	h := NewHandler(defaultTestConfig(), mgr)
+	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
 	h.codeBinaryPath = "/bin/echo"
-	r := setupRouterWithVSCode(h)
+	r := setupRouterWithHandler(h)
 
 	return postOpenVSCodeOKWithRouter(t, r, id)
 }
@@ -1833,9 +1874,9 @@ func TestPostOpenVSCode_Local_DeletedDir_422(t *testing.T) {
 		mockSession: mockSession{id: "local-del", typ: session.TypeLocal},
 		cwd:         dir,
 	})
-	h := NewHandler(defaultTestConfig(), mgr)
+	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
 	h.codeBinaryPath = "/bin/echo"
-	r := setupRouterWithVSCode(h)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/sessions/local-del/open-vscode", nil)
@@ -1861,9 +1902,9 @@ func TestPostOpenVSCode_SSH_InvalidConnName_422(t *testing.T) {
 		cwd:         "/home/user",
 		connName:    "bad name; rm -rf /",
 	})
-	h := NewHandler(defaultTestConfig(), mgr)
+	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
 	h.codeBinaryPath = "/bin/echo"
-	r := setupRouterWithVSCode(h)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/sessions/ssh-bad/open-vscode", nil)
@@ -1893,7 +1934,7 @@ func TestPostOpenVSCode_SSHTmux_200(t *testing.T) {
 }
 
 func TestGetDetectShell_Local_Success(t *testing.T) {
-	h := NewHandler(defaultTestConfig(), session.NewManager())
+	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
 	h.sshConfigPath = filepath.Join(os.TempDir(), "nonexistent")
 	h.detectLocalShellFn = func() (string, error) { return "/usr/bin/zsh", nil }
 	h.detectRemoteShellFn = func(cfg session.SSHConfig) (string, error) {
@@ -1918,7 +1959,7 @@ func TestGetDetectShell_SSH_Success(t *testing.T) {
 	cfg.SSHConnections = map[string]config.SSHConnection{
 		"myhost": {Host: "myhost.example.com", User: "admin"},
 	}
-	h := NewHandler(cfg, session.NewManager())
+	h := NewHandler(cfg, session.NewManager(), nil, nil)
 	h.detectRemoteShellFn = func(sshCfg session.SSHConfig) (string, error) {
 		return "/bin/bash", nil
 	}
@@ -1937,7 +1978,7 @@ func TestGetDetectShell_SSH_Success(t *testing.T) {
 }
 
 func TestGetDetectShell_SSH_ConnectionNotFound(t *testing.T) {
-	h := NewHandler(defaultTestConfig(), session.NewManager())
+	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
 	h.sshConfigPath = filepath.Join(os.TempDir(), "panemux-test-empty-ssh-cfg")
 	r := setupRouterWithHandler(h)
 
@@ -1949,7 +1990,7 @@ func TestGetDetectShell_SSH_ConnectionNotFound(t *testing.T) {
 }
 
 func TestGetDetectShell_DetectFails(t *testing.T) {
-	h := NewHandler(defaultTestConfig(), session.NewManager())
+	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
 	h.detectLocalShellFn = func() (string, error) { return "", errors.New("cannot detect") }
 	r := setupRouterWithHandler(h)
 
@@ -1997,6 +2038,32 @@ func addTempGitWorktree(t *testing.T, repoDir, branchName string) string {
 	return worktreeDir
 }
 
+// ghNoPRScript stands in for a `gh` that reports no pull request for the
+// branch. Every test that resolves a git context needs a fake gh, not only
+// the ones asserting about a PR: without one, lookupPRInfo finds the
+// developer's own gh on PATH and makes a real network call, bounded only by
+// prLookupTimeout, for a repository that does not exist.
+const ghNoPRScript = "#!/bin/sh\nexit 1\n"
+
+// captureLog redirects the standard logger for the duration of the test and
+// returns the buffer it writes into. Several handlers report a recoverable
+// failure only through log output, so asserting on it is the only way to pin
+// that the failure was noticed rather than swallowed.
+func captureLog(t *testing.T) *bytes.Buffer {
+	t.Helper()
+
+	var buf bytes.Buffer
+	originalWriter := log.Writer()
+	originalFlags := log.Flags()
+	log.SetOutput(&buf)
+	log.SetFlags(0)
+	t.Cleanup(func() {
+		log.SetOutput(originalWriter)
+		log.SetFlags(originalFlags)
+	})
+	return &buf
+}
+
 func writeFakeGHBinary(t *testing.T, body string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -2006,15 +2073,9 @@ func writeFakeGHBinary(t *testing.T, body string) string {
 	return path
 }
 
-func setupRouterWithGitInfo(h *Handler) *chi.Mux {
-	r := setupRouterWithHandler(h)
-	r.Get("/api/sessions/{id}/git-info", h.GetGitInfo)
-	return r
-}
-
 func TestGetGitInfo_NotFound_404(t *testing.T) {
-	h := NewHandler(defaultTestConfig(), session.NewManager())
-	r := setupRouterWithGitInfo(h)
+	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/missing/git-info", nil)
@@ -2026,8 +2087,8 @@ func TestGetGitInfo_NotFound_404(t *testing.T) {
 func TestGetGitInfo_NoCWDGetter_IsGitFalse(t *testing.T) {
 	mgr := session.NewManager()
 	mgr.Add(newMockSession("s1"))
-	h := NewHandler(defaultTestConfig(), mgr)
-	r := setupRouterWithGitInfo(h)
+	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/s1/git-info", nil)
@@ -2046,8 +2107,8 @@ func TestGetGitInfo_NotAGitRepo_IsGitFalse(t *testing.T) {
 		mockSession: mockSession{id: "local1", typ: session.TypeLocal},
 		cwd:         dir,
 	})
-	h := NewHandler(defaultTestConfig(), mgr)
-	r := setupRouterWithGitInfo(h)
+	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/local1/git-info", nil)
@@ -2067,18 +2128,10 @@ func TestGetGitInfo_NotAGitRepo_LogsCauseAndRemediation(t *testing.T) {
 		cwd:         dir,
 	})
 
-	var buf bytes.Buffer
-	originalWriter := log.Writer()
-	originalFlags := log.Flags()
-	log.SetOutput(&buf)
-	log.SetFlags(0)
-	t.Cleanup(func() {
-		log.SetOutput(originalWriter)
-		log.SetFlags(originalFlags)
-	})
+	buf := captureLog(t)
 
-	h := NewHandler(defaultTestConfig(), mgr)
-	r := setupRouterWithGitInfo(h)
+	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/local-log/git-info", nil)
@@ -2103,8 +2156,9 @@ func TestGetGitInfo_IsGitRepo_ReturnsBranchAndRepo(t *testing.T) {
 		mockSession: mockSession{id: "local2", typ: session.TypeLocal},
 		cwd:         dir,
 	})
-	h := NewHandler(defaultTestConfig(), mgr)
-	r := setupRouterWithGitInfo(h)
+	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
+	h.ghBinaryPath = writeFakeGHBinary(t, ghNoPRScript)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/local2/git-info", nil)
@@ -2136,12 +2190,12 @@ func TestGetGitInfo_IsGitRepo_WithLinkedPR_ReturnsPRInfo(t *testing.T) {
 		mockSession: mockSession{id: "local-pr", typ: session.TypeLocal},
 		cwd:         dir,
 	})
-	h := NewHandler(defaultTestConfig(), mgr)
+	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
 	h.ghBinaryPath = writeFakeGHBinary(
 		t,
 		"#!/bin/sh\necho '{\"url\":\"https://github.com/example/panemux/pull/123\",\"number\":123}'\n",
 	)
-	r := setupRouterWithGitInfo(h)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/local-pr/git-info", nil)
@@ -2167,8 +2221,9 @@ func TestGetGitInfo_SubdirOfGitRepo_ReturnsBranchAndRepo(t *testing.T) {
 		mockSession: mockSession{id: "sub1", typ: session.TypeLocal},
 		cwd:         subdir,
 	})
-	h := NewHandler(defaultTestConfig(), mgr)
-	r := setupRouterWithGitInfo(h)
+	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
+	h.ghBinaryPath = writeFakeGHBinary(t, ghNoPRScript)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/sub1/git-info", nil)
@@ -2188,9 +2243,9 @@ func TestGetGitInfo_PRLookupFails_StillReturnsGitInfo(t *testing.T) {
 		mockSession: mockSession{id: "local-pr-miss", typ: session.TypeLocal},
 		cwd:         dir,
 	})
-	h := NewHandler(defaultTestConfig(), mgr)
-	h.ghBinaryPath = writeFakeGHBinary(t, "#!/bin/sh\nexit 1\n")
-	r := setupRouterWithGitInfo(h)
+	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
+	h.ghBinaryPath = writeFakeGHBinary(t, ghNoPRScript)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/local-pr-miss/git-info", nil)
@@ -2215,8 +2270,8 @@ func TestGetGitInfo_DetachedHead_StillReturnsGitInfo(t *testing.T) {
 		mockSession: mockSession{id: "detached", typ: session.TypeLocal},
 		cwd:         dir,
 	})
-	h := NewHandler(defaultTestConfig(), mgr)
-	r := setupRouterWithGitInfo(h)
+	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/detached/git-info", nil)
@@ -2231,7 +2286,7 @@ func TestGetGitInfo_DetachedHead_StillReturnsGitInfo(t *testing.T) {
 }
 
 func TestLookupPRInfo_TimesOutAndFallsBack(t *testing.T) {
-	h := NewHandler(defaultTestConfig(), session.NewManager())
+	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
 	h.ghBinaryPath = writeFakeGHBinary(t, "#!/bin/sh\nsleep 1\n")
 	prev := prLookupTimeout
 	prLookupTimeout = 10 * time.Millisecond
@@ -2240,6 +2295,38 @@ func TestLookupPRInfo_TimesOutAndFallsBack(t *testing.T) {
 	url, number := h.lookupPRInfo(newMockSession("s1"), t.TempDir(), session.GitContext{Branch: "feature/slow"})
 	assert.Empty(t, url)
 	assert.Zero(t, number)
+}
+
+// TestLookupPRInfo_NonPositiveTimeout_FallsBackToAWorkableBudget pins the
+// boundary the fallback sits on. The timeout test above only ever sets a
+// positive value, and prLookupTimeout's own default is positive too, so
+// `timeout < 0` would have handed context.WithTimeout a zero-length budget
+// whenever the timeout was left unset — every PR lookup failing before `gh`
+// could run — with the suite still green. Issue #190.
+// Nothing under this test changed on this branch, so the red-check could never
+// see it go red: it pins behavior that was already correct and merely
+// unasserted. See docs/quality-gateway.md's "Clearing the boundary-value class".
+//
+//efficacy:exempt pins pre-existing behavior; no implementation under it changed
+func TestLookupPRInfo_NonPositiveTimeout_FallsBackToAWorkableBudget(t *testing.T) {
+	for _, configured := range []time.Duration{0, -time.Second} {
+		t.Run(configured.String(), func(t *testing.T) {
+			h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
+			h.ghBinaryPath = writeFakeGHBinary(
+				t,
+				"#!/bin/sh\necho '{\"url\":\"https://github.com/example/panemux/pull/7\",\"number\":7}'\n",
+			)
+			prev := prLookupTimeout
+			prLookupTimeout = configured
+			t.Cleanup(func() { prLookupTimeout = prev })
+
+			url, number := h.lookupPRInfo(
+				newMockSession("s1"), t.TempDir(), session.GitContext{Branch: "feature/x"},
+			)
+			assert.Equal(t, "https://github.com/example/panemux/pull/7", url)
+			assert.Equal(t, 7, number)
+		})
+	}
 }
 
 func TestGetGitInfo_ActiveAgentWorkdir_PrefersWorktreeBranch(t *testing.T) {
@@ -2253,12 +2340,12 @@ func TestGetGitInfo_ActiveAgentWorkdir_PrefersWorktreeBranch(t *testing.T) {
 		cwd:            repoDir,
 	})
 
-	h := NewHandler(defaultTestConfig(), mgr)
+	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
 	h.ghBinaryPath = writeFakeGHBinary(
 		t,
 		"#!/bin/sh\necho '{\"url\":\"https://github.com/example/panemux/pull/456\",\"number\":456}'\n",
 	)
-	r := setupRouterWithGitInfo(h)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/local-worktree/git-info", nil)
@@ -2285,7 +2372,7 @@ func TestGetGitInfo_MultipleActiveWorktrees_ReturnsAllWorktreesWithPRs(t *testin
 		cwd:            repoDir,
 	})
 
-	h := NewHandler(defaultTestConfig(), mgr)
+	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
 	h.ghBinaryPath = writeFakeGHBinary(t, ""+
 		"#!/bin/sh\n"+
 		"case \"$3\" in\n"+
@@ -2294,7 +2381,7 @@ func TestGetGitInfo_MultipleActiveWorktrees_ReturnsAllWorktreesWithPRs(t *testin
 		"*) exit 1 ;;\n"+
 		"esac\n",
 	)
-	r := setupRouterWithGitInfo(h)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/local-multi/git-info", nil)
@@ -2334,12 +2421,12 @@ func TestGetGitInfo_MultipleActiveWorktrees_DuplicateRootDeduped(t *testing.T) {
 		cwd:            repoDir,
 	})
 
-	h := NewHandler(defaultTestConfig(), mgr)
+	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
 	h.ghBinaryPath = writeFakeGHBinary(
 		t,
 		"#!/bin/sh\necho '{\"url\":\"https://github.com/example/panemux/pull/111\",\"number\":111}'\n",
 	)
-	r := setupRouterWithGitInfo(h)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/local-dup/git-info", nil)
@@ -2364,7 +2451,7 @@ func TestGetGitInfo_MultipleActiveWorktrees_OnePRLookupFails_OthersStillReturned
 		cwd:            repoDir,
 	})
 
-	h := NewHandler(defaultTestConfig(), mgr)
+	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
 	h.ghBinaryPath = writeFakeGHBinary(t, ""+
 		"#!/bin/sh\n"+
 		"case \"$3\" in\n"+
@@ -2372,7 +2459,7 @@ func TestGetGitInfo_MultipleActiveWorktrees_OnePRLookupFails_OthersStillReturned
 		"*) exit 1 ;;\n"+
 		"esac\n",
 	)
-	r := setupRouterWithGitInfo(h)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/local-partial/git-info", nil)
@@ -2403,12 +2490,12 @@ func TestGetGitInfo_EndedAgentFallsBackToPaneCWD(t *testing.T) {
 		cwd:            repoDir,
 	})
 
-	h := NewHandler(defaultTestConfig(), mgr)
+	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
 	h.ghBinaryPath = writeFakeGHBinary(
 		t,
 		"#!/bin/sh\necho '{\"url\":\"https://github.com/example/panemux/pull/789\",\"number\":789}'\n",
 	)
-	r := setupRouterWithGitInfo(h)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/local-fallback/git-info", nil)
@@ -2433,12 +2520,12 @@ func TestGetGitInfo_EndedAgentKeepsLastWorktree(t *testing.T) {
 	mgr := session.NewManager()
 	mgr.Add(sess)
 
-	h := NewHandler(defaultTestConfig(), mgr)
+	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
 	h.ghBinaryPath = writeFakeGHBinary(
 		t,
 		"#!/bin/sh\necho '{\"url\":\"https://github.com/example/panemux/pull/999\",\"number\":999}'\n",
 	)
-	r := setupRouterWithGitInfo(h)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/local-sticky/git-info", nil)
@@ -2473,10 +2560,11 @@ func TestGetGitInfo_StaleStickyWorktreeFallsBackToPaneCWD(t *testing.T) {
 	mgr := session.NewManager()
 	mgr.Add(sess)
 
-	h := NewHandler(defaultTestConfig(), mgr)
+	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
+	h.ghBinaryPath = writeFakeGHBinary(t, ghNoPRScript)
 	now := time.Now()
 	h.nowFn = func() time.Time { return now }
-	r := setupRouterWithGitInfo(h)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/local-stale/git-info", nil)
@@ -2543,7 +2631,7 @@ func TestResolveSinglePreferredCWD_StickyWorktreeIgnoredAfterRepoChange(t *testi
 		},
 	}
 
-	h := NewHandler(defaultTestConfig(), session.NewManager())
+	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
 	assert.Equal(t, worktreeDir, h.resolveSinglePreferredCWD(sess, sess.cwd))
 
 	sess.activeWorkdirs = nil
@@ -2573,17 +2661,9 @@ func TestResolveSinglePreferredCWD_LogsPaneIdentity(t *testing.T) {
 		},
 	}
 
-	var buf bytes.Buffer
-	originalWriter := log.Writer()
-	originalFlags := log.Flags()
-	log.SetOutput(&buf)
-	log.SetFlags(0)
-	t.Cleanup(func() {
-		log.SetOutput(originalWriter)
-		log.SetFlags(originalFlags)
-	})
+	buf := captureLog(t)
 
-	h := NewHandler(defaultTestConfig(), session.NewManager())
+	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
 	assert.Equal(t, "/repo/base-worktree", h.resolveSinglePreferredCWD(sess, sess.cwd))
 	assert.Contains(t, buf.String(), `git info pane="pane-123" type="ssh_tmux" selected active workdir`)
 }
@@ -2618,12 +2698,12 @@ func TestGetGitInfo_RemoteEndedAgentKeepsLastWorktree(t *testing.T) {
 	mgr := session.NewManager()
 	mgr.Add(sess)
 
-	h := NewHandler(defaultTestConfig(), mgr)
+	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
 	h.ghBinaryPath = writeFakeGHBinary(
 		t,
 		"#!/bin/sh\necho '{\"url\":\"https://github.com/example/panemux/pull/654\",\"number\":654}'\n",
 	)
-	r := setupRouterWithGitInfo(h)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/ssh-sticky/git-info", nil)
@@ -2652,11 +2732,11 @@ func TestGetGitInfo_GitNotFound_IsGitFalse(t *testing.T) {
 		mockSession: mockSession{id: "local3", typ: session.TypeLocal},
 		cwd:         dir,
 	})
-	h := NewHandler(defaultTestConfig(), mgr)
+	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
 	prev := gitExistsFn
 	gitExistsFn = func() error { return errors.New("git not found") }
 	t.Cleanup(func() { gitExistsFn = prev })
-	r := setupRouterWithGitInfo(h)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/local3/git-info", nil)
@@ -2676,10 +2756,11 @@ func TestGetGitInfo_SecondRequestWithinTTL_ServesCachedResponseWithoutRecomputin
 	}
 	mgr := session.NewManager()
 	mgr.Add(sess)
-	h := NewHandler(defaultTestConfig(), mgr)
+	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
+	h.ghBinaryPath = writeFakeGHBinary(t, ghNoPRScript)
 	now := time.Now()
 	h.nowFn = func() time.Time { return now }
-	r := setupRouterWithGitInfo(h)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/local-cached/git-info", nil)
@@ -2712,10 +2793,11 @@ func TestGetGitInfo_RequestAfterTTLExpires_Recomputes(t *testing.T) {
 	}
 	mgr := session.NewManager()
 	mgr.Add(sess)
-	h := NewHandler(defaultTestConfig(), mgr)
+	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
+	h.ghBinaryPath = writeFakeGHBinary(t, ghNoPRScript)
 	now := time.Now()
 	h.nowFn = func() time.Time { return now }
-	r := setupRouterWithGitInfo(h)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/local-expired/git-info", nil)
@@ -2742,8 +2824,9 @@ func TestGetGitInfo_AfterSessionRecreatedWithSameID_DoesNotServeOldSessionsCache
 	oldSess.ensureBuf()
 	mgr := session.NewManager()
 	mgr.Add(oldSess)
-	h := NewHandler(defaultTestConfig(), mgr)
-	r := setupRouterWithGitInfo(h)
+	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
+	h.ghBinaryPath = writeFakeGHBinary(t, ghNoPRScript)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/local-recreated/git-info", nil)
@@ -2800,8 +2883,8 @@ func TestGetGitInfo_RemoteGitContext_ReturnsBranchAndRepo(t *testing.T) {
 		},
 	})
 
-	h := NewHandler(defaultTestConfig(), mgr)
-	r := setupRouterWithGitInfo(h)
+	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/ssh-remote/git-info", nil)
@@ -2835,18 +2918,10 @@ func TestGetGitInfo_RemoteGitContextFailure_LogsCauseAndRemediation(t *testing.T
 		},
 	})
 
-	var buf bytes.Buffer
-	originalWriter := log.Writer()
-	originalFlags := log.Flags()
-	log.SetOutput(&buf)
-	log.SetFlags(0)
-	t.Cleanup(func() {
-		log.SetOutput(originalWriter)
-		log.SetFlags(originalFlags)
-	})
+	buf := captureLog(t)
 
-	h := NewHandler(defaultTestConfig(), mgr)
-	r := setupRouterWithGitInfo(h)
+	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/ssh-log/git-info", nil)
@@ -2887,8 +2962,8 @@ func TestGetGitInfo_RemoteActiveWorkdir_PrefersRemoteWorktreeBranch(t *testing.T
 		},
 	})
 
-	h := NewHandler(defaultTestConfig(), mgr)
-	r := setupRouterWithGitInfo(h)
+	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/ssh-worktree/git-info", nil)
@@ -2921,8 +2996,9 @@ func TestGetGitInfo_RemoteGitContext_WithOrigin_ReturnsRepoURL(t *testing.T) {
 		},
 	})
 
-	h := NewHandler(defaultTestConfig(), mgr)
-	r := setupRouterWithGitInfo(h)
+	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
+	h.ghBinaryPath = writeFakeGHBinary(t, ghNoPRScript)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/ssh-remote-origin/git-info", nil)
@@ -2953,9 +3029,10 @@ func TestGetGitInfo_RemoteGitContext_WithSSHConfigAliasOrigin_ReturnsResolvedRep
 		},
 	})
 
-	h := NewHandler(defaultTestConfig(), mgr)
+	h := NewHandler(defaultTestConfig(), mgr, nil, nil)
+	h.ghBinaryPath = writeFakeGHBinary(t, ghNoPRScript)
 	h.sshConfigPath = writeTempSSHConfigForAPI(t, "Host github-work\n    HostName github.com\n    User git\n")
-	r := setupRouterWithGitInfo(h)
+	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/ssh-remote-alias-origin/git-info", nil)
@@ -2969,7 +3046,7 @@ func TestGetGitInfo_RemoteGitContext_WithSSHConfigAliasOrigin_ReturnsResolvedRep
 }
 
 func TestLookupPRInfo_RemoteSessionWithoutOriginSkipsLookup(t *testing.T) {
-	h := NewHandler(defaultTestConfig(), session.NewManager())
+	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
 	h.ghBinaryPath = writeFakeGHBinary(t, "#!/bin/sh\nexit 99\n")
 
 	url, number := h.lookupPRInfo(&mockRemoteGitSession{}, "/home/demo/panemux", session.GitContext{
@@ -2980,7 +3057,7 @@ func TestLookupPRInfo_RemoteSessionWithoutOriginSkipsLookup(t *testing.T) {
 }
 
 func TestLookupPRInfo_RemoteSessionWithSSHConfigAliasOrigin_UsesResolvedRepoSpec(t *testing.T) {
-	h := NewHandler(defaultTestConfig(), session.NewManager())
+	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
 	h.sshConfigPath = writeTempSSHConfigForAPI(t, "Host github-work\n    HostName github.com\n    User git\n")
 	h.ghBinaryPath = writeFakeGHBinary(
 		t,
@@ -3108,7 +3185,7 @@ func TestRepoPageURLFromOriginURL(t *testing.T) {
 }
 
 func TestHandlerRepoPageURLFromOriginURL_ResolvesSSHConfigAlias(t *testing.T) {
-	h := NewHandler(defaultTestConfig(), session.NewManager())
+	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
 	h.sshConfigPath = writeTempSSHConfigForAPI(t, "Host github-work\n    HostName github.com\n    User git\n")
 
 	got := h.repoPageURLFromOriginURL("git@github-work:example/panemux.git")
@@ -3117,7 +3194,7 @@ func TestHandlerRepoPageURLFromOriginURL_ResolvesSSHConfigAlias(t *testing.T) {
 }
 
 func TestHandlerRepoPageURLFromOriginURL_LeavesUnknownSCPHostUntouched(t *testing.T) {
-	h := NewHandler(defaultTestConfig(), session.NewManager())
+	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
 	h.sshConfigPath = writeTempSSHConfigForAPI(t, "Host github-work\n    HostName github.com\n    User git\n")
 
 	got := h.repoPageURLFromOriginURL("git@source:example/panemux.git")
@@ -3126,7 +3203,7 @@ func TestHandlerRepoPageURLFromOriginURL_LeavesUnknownSCPHostUntouched(t *testin
 }
 
 func TestHandlerRepoSpecFromOriginURL_ResolvesSSHConfigAlias(t *testing.T) {
-	h := NewHandler(defaultTestConfig(), session.NewManager())
+	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
 	h.sshConfigPath = writeTempSSHConfigForAPI(t, "Host github-work\n    HostName github.com\n    User git\n")
 
 	got := h.repoSpecFromOriginURL("git@github-work:example/panemux.git")
@@ -3146,7 +3223,7 @@ func TestGetDirectories_LocalPathReturnsDirectories(t *testing.T) {
 	require.NoError(t, os.Mkdir(filepath.Join(dir, ".hidden"), 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "file.txt"), []byte("x"), 0600))
 
-	h := NewHandler(defaultTestConfig(), session.NewManager())
+	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
 	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
@@ -3165,7 +3242,7 @@ func TestGetDirectories_ShowHiddenIncludesHiddenDirectories(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.Mkdir(filepath.Join(dir, ".hidden"), 0755))
 
-	h := NewHandler(defaultTestConfig(), session.NewManager())
+	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
 	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
@@ -3184,7 +3261,7 @@ func TestGetDirectories_NoVisibleChildDirectoriesReturnsEmptyArray(t *testing.T)
 	require.NoError(t, os.Mkdir(filepath.Join(dir, ".hidden"), 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"), []byte("x"), 0600))
 
-	h := NewHandler(defaultTestConfig(), session.NewManager())
+	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
 	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
@@ -3196,7 +3273,7 @@ func TestGetDirectories_NoVisibleChildDirectoriesReturnsEmptyArray(t *testing.T)
 }
 
 func TestGetDirectories_UsesRemoteConnectionWhenProvided(t *testing.T) {
-	h := NewHandler(defaultTestConfig(), session.NewManager())
+	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
 	h.listRemoteDirectoriesFn = func(
 		cfg session.SSHConfig,
 		path string,
@@ -3229,7 +3306,7 @@ func TestGetDirectories_UsesRemoteConnectionWhenProvided(t *testing.T) {
 }
 
 func TestGetDirectories_InvalidLocalPathReturns422(t *testing.T) {
-	h := NewHandler(defaultTestConfig(), session.NewManager())
+	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
 	r := setupRouterWithHandler(h)
 
 	rec := httptest.NewRecorder()
@@ -3247,11 +3324,11 @@ func TestGetDirectories_SkipsUnreadableChildDirectories(t *testing.T) {
 	require.NoError(t, os.Mkdir(filepath.Join(readableDir, "nested"), 0755))
 	require.NoError(t, os.Mkdir(unreadableDir, 0755))
 
-	h := NewHandler(defaultTestConfig(), session.NewManager())
+	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
 	originalReadDir := h.readDirFn
 	h.readDirFn = func(name string) ([]os.DirEntry, error) {
 		if name == unreadableDir {
-			return nil, &fs.PathError{Op: "readdir", Path: name, Err: fs.ErrPermission}
+			return nil, &fs.PathError{Op: readdirOp, Path: name, Err: fs.ErrPermission}
 		}
 		return originalReadDir(name)
 	}
@@ -3271,4 +3348,134 @@ func TestGetDirectories_SkipsUnreadableChildDirectories(t *testing.T) {
 	require.Len(t, resp.Entries, 1)
 	assert.Equal(t, "readable", resp.Entries[0].Name)
 	assert.True(t, resp.Entries[0].HasChildren)
+}
+
+// Issue #199 review. PutLayout and PutWorkspaceLayout echo the layout back,
+// and until now that echo was the decoded request body — the one LayoutNode
+// in an API response that never passed through normalization. ValidateLayout
+// accepts an empty direction, so a client PUTting a node without one got
+// `"direction":""` back, which LayoutNodeSchema's enum rejects. Latent only
+// because useLayout.saveLayout discards the body, but it is a hole in the
+// invariant this branch exists to establish.
+func TestPutLayoutRoutes_EchoANormalizedNode(t *testing.T) {
+	for name, tc := range map[string]struct {
+		cfg    *config.Config
+		path   string
+		paneID string
+	}{
+		"layout":           {cfg: defaultTestConfig(), path: "/api/layout", paneID: "main"},
+		"workspace layout": {cfg: workspaceTestConfig(), path: "/api/workspaces/one/layout", paneID: "one-main"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := setupRouter(tc.cfg, session.NewManager())
+
+			// No direction, which ValidateLayout accepts.
+			rec := putLayout(t, r, tc.path, config.LayoutNode{
+				Children: []config.LayoutChild{
+					{Size: 100, Pane: &config.PaneConfig{ID: tc.paneID, Type: "local"}},
+				},
+			})
+
+			require.Equal(t, http.StatusOK, rec.Code)
+			var echoed map[string]any
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &echoed))
+			assert.Equal(t, "horizontal", echoed["direction"], "body: %s", rec.Body.String())
+			assert.NotNil(t, echoed["children"], "body: %s", rec.Body.String())
+		})
+	}
+}
+
+// A pane-only root PUT is normalized the same way one loaded from disk is,
+// so a client cannot persist a shape the loader would have migrated.
+func TestPutLayout_RelocatesAPaneOnlyRoot(t *testing.T) {
+	cfg := defaultTestConfig()
+	r := setupRouter(cfg, session.NewManager())
+
+	rec := putLayout(t, r, "/api/layout", config.LayoutNode{
+		Pane: &config.PaneConfig{ID: "solo", Type: "local"},
+	})
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Nil(t, cfg.Layout.Pane, "the stored layout is normalized, not just the echo")
+	require.Len(t, cfg.Layout.Children, 1)
+	assert.Equal(t, "solo", cfg.Layout.Children[0].Pane.ID)
+}
+
+// Issue #199 review, round 2. ExpandLayoutPaths walks layout.Children and
+// never layout.Pane, so expanding before NormalizeLayout leaves a relocated
+// root pane's `~/` cwd literal — it is still at the root when expansion runs,
+// and expansion is over by the time it becomes a LayoutChild. finishLoad
+// orders these the other way (normalizeWorkspaces then expandPaths), which is
+// why the config-file path was already correct and this one was not.
+//
+// Reachable only because of this branch: before it, a root pane PUT stayed a
+// root pane, was walked by nothing, and started no session.
+func TestPutLayoutRoutes_ExpandARelocatedRootPaneCwd(t *testing.T) {
+	for name, tc := range map[string]struct {
+		cfg    *config.Config
+		stored func(*config.Config) config.LayoutNode
+		path   string
+	}{
+		"layout": {
+			cfg:    defaultTestConfig(),
+			path:   "/api/layout",
+			stored: func(c *config.Config) config.LayoutNode { return c.Layout },
+		},
+		"workspace layout": {
+			cfg:    workspaceTestConfig(),
+			path:   "/api/workspaces/one/layout",
+			stored: func(c *config.Config) config.LayoutNode { return c.Workspaces.Items[0].Layout },
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			home := t.TempDir()
+			homedir.SetForTest(t, home)
+			want := filepath.Join(home, "work")
+
+			r := setupRouter(tc.cfg, session.NewManager())
+			rec := putLayout(t, r, tc.path, config.LayoutNode{
+				Pane: &config.PaneConfig{ID: "root", Type: "local", Cwd: "~/work"},
+			})
+
+			require.Equal(t, http.StatusOK, rec.Code)
+			assert.NotContains(t, rec.Body.String(), "~/work", "the echo carries a literal ~/")
+
+			stored := tc.stored(tc.cfg)
+			require.Len(t, stored.Children, 1)
+			assert.Equal(t, want, stored.Children[0].Pane.Cwd,
+				"a literal ~/ persisted here is a relative path to whatever starts the session")
+		})
+	}
+}
+
+// TestPostSSHConfigHost_LineBreakInAValue_422 verifies that a value carrying a
+// line break is refused before anything is written. Each value is written as
+// the rest of one line of ~/.ssh/config, so a line break in it added a
+// directive of the caller's choosing — ProxyCommand, which runs through
+// /bin/sh, included.
+func TestPostSSHConfigHost_LineBreakInAValue_422(t *testing.T) {
+	const injected = "x.example\n    ProxyCommand touch pwned"
+	for name, req := range map[string]sshConfigHostRequest{
+		"hostname LF": {Name: "inj", Hostname: injected, User: "u"},
+		"hostname CR": {Name: "inj", Hostname: "x.example\rProxyCommand touch pwned", User: "u"},
+		"user":        {Name: "inj", Hostname: "x.example", User: "u\nProxyCommand touch pwned"},
+		"identity file": {
+			Name: "inj", Hostname: "x.example", User: "u", IdentityFile: "~/.ssh/id\nProxyCommand touch pwned",
+		},
+		"other control ch": {Name: "inj", Hostname: "x.example\x00", User: "u"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
+			h.sshConfigPath = filepath.Join(t.TempDir(), "config")
+			payload, _ := json.Marshal(req)
+			rec := httptest.NewRecorder()
+			httpReq := httptest.NewRequest(http.MethodPost, "/api/ssh-config/hosts", bytes.NewReader(payload))
+			httpReq.Header.Set("Content-Type", "application/json")
+
+			setupRouterWithHandler(h).ServeHTTP(rec, httpReq)
+
+			assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
+			assert.NoFileExists(t, h.sshConfigPath)
+		})
+	}
 }

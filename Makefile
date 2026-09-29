@@ -1,11 +1,25 @@
 .PHONY: all build build-frontend build-backend dev clean run install-deps install-deps-ci install-hooks \
-        test test-go test-frontend test-e2e \
+        test test-go test-frontend test-e2e test-agmsg-contract test-hooks test-efficacy efficacy \
+        test-scenarios-check check-scenarios check-docs-links test-docs-links \
+        coverage-blocks test-coverage-blocks \
+        mutation test-mutation bench \
+        model-check model-check-write test-model-check \
         fmt fmt-go fmt-check-go \
         lint lint-go lint-go-deps lint-frontend \
         coverage coverage-go coverage-frontend \
         check release-snapshot package
 
 GOLANGCI_LINT_VERSION := v2.12.2
+
+# Resolve the exact path `go install` places golangci-lint at (GOBIN if set,
+# otherwise $GOPATH/bin), and always invoke that path explicitly rather than
+# a bare `golangci-lint` from $PATH. A bare invocation can silently resolve
+# to an unrelated, unpinned golangci-lint earlier on $PATH (e.g. one
+# preinstalled system-wide) even after this file's own install step just
+# put the correct pinned version at $GOBIN/$GOPATH/bin — the install would
+# succeed and the very next lint run would still lint with the wrong
+# binary. Pinning the invocation path removes that ambiguity entirely.
+GOLANGCI_LINT_BIN := $(shell bin="$$(go env GOBIN)"; if [ -z "$$bin" ]; then bin="$$(go env GOPATH)/bin"; fi; echo "$$bin")/golangci-lint
 
 # ── Dependencies ──────────────────────────────────────────────────────────────
 
@@ -23,7 +37,8 @@ install-hooks:
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
-test: test-go test-frontend
+test: test-go test-frontend test-hooks test-efficacy test-scenarios-check test-docs-links \
+      test-coverage-blocks test-mutation test-model-check
 
 test-go:
 	go test ./... -v -race
@@ -34,33 +49,332 @@ test-frontend:
 test-e2e:
 	cd frontend && npm run test:e2e
 
+# ── Performance observation (not a gate) ──────────────────────────────────────
+#
+# Performance efficiency is one of the two ISO 25010 characteristics
+# docs/quality-gateway.md records as completely unprotected. These benchmarks
+# are the first measurement of it: terminal output throughput and replay-buffer
+# cost (internal/session), and the relay's continuous polling cost
+# (internal/board).
+#
+# Deliberately NOT in `make check` and deliberately asserting nothing. Roadmap
+# item 7 of issue #180 is explicit that this stage is measure-only — a
+# threshold guessed at now would be a number nobody trusts, and an untrusted
+# gate is worse than none. Freeze one once a few runs' worth of data exists.
+#
+# Use -count for anything you intend to read: on a shared container the publish
+# rows move by up to 2.9x between runs of the same binary, so a single run says
+# almost nothing. The whole suite is ~35s at the default benchtime and ~3min at
+# -count 5.
+#
+#   make bench
+#   make bench BENCH_ARGS='-count 5'                 # medians and a spread
+#   make bench BENCH_ARGS='-benchtime 3s -count 5'   # slower, steadier
+BENCH_ARGS ?=
+bench:
+	go test ./internal/session/ ./internal/board/ -run '^$$' -bench . -benchmem $(BENCH_ARGS)
+
+# ── Scenario ledger (gates G0 / G5) ───────────────────────────────────────────
+#
+# Resolves every path and Go test name that an `auto` row in docs/scenarios.md
+# claims, and fails when one does not exist. The ledger's own rule already says
+# a silently absent row is not a legitimate answer; this closes the failure that
+# rule never anticipated — a row naming a test that has since been renamed,
+# moved or deleted. Such a row reads as coverage and is worth nothing.
+#
+# Hermetic and fast, so it sits inside `make check`.
+check-scenarios:
+	sh scripts/scenarios_check.sh
+
+# The checker's own tests. Its value rests on its false-positive rate — it
+# reads prose, which is full of things shaped like paths that are not — so both
+# directions are asserted.
+test-scenarios-check:
+	sh scripts/scenarios_check_test.sh
+
+# ── Documentation links (gate G0) ─────────────────────────────────────────────
+#
+# Every relative link in this repository's markdown must reach something that
+# exists, its `#fragment` must match a real heading, and its label must not
+# name a file other than the one it opens.
+#
+# The third is what a plain link checker leaves out and what a documentation
+# split actually breaks: the rewrite changes targets and leaves labels behind,
+# so a reader is told to open security.md and lands in security/auth.md, and
+# nothing about the rendered page looks wrong. #248 shipped 41 of those and two
+# broken anchors, in a pull request whose description said every link had been
+# checked by hand. That is the measurement this gate exists on.
+#
+# Hermetic, needs only sh/awk/find, under a second, so it sits inside
+# `make check`.
+check-docs-links:
+	sh scripts/docs_links_check.sh
+
+# The checker's own tests, including the multi-line-label case that is the
+# reason it reads whole files rather than lines.
+test-docs-links:
+	sh scripts/docs_links_check_test.sh
+
+# ── Efficacy: red-check (gate G4(b)) ──────────────────────────────────────────
+#
+# Asserts decision D4: a test this branch changed must FAIL when this branch's
+# implementation diff is reverted. That is the strongest possible mutation —
+# remove the implementation entirely — and it catches the two shapes the other
+# gates are blind to: a tautological test, and a test written after the fact.
+#
+# Every changed test is judged on its own, in two phases: pass at HEAD, then
+# fail against the revert. One invocation over the whole set would be a weaker
+# rule, since `go test` goes red if any single member does.
+#
+# Deliberately OUTSIDE `make check`. It needs the base branch, a scratch
+# worktree and a second test run, which is a pull-request-shaped cost rather
+# than an every-turn one — the same reasoning that keeps mutation testing (D2)
+# and the agmsg contract out of the local gate. It runs as its own PR CI job.
+#
+#   make efficacy                          # against origin/main
+#   EFFICACY_BASE=origin/develop make efficacy
+#   EFFICACY_EXEMPT=1 make efficacy        # documented escape hatch; say why in the PR
+efficacy:
+	sh scripts/efficacy.sh
+
+# The red-check's own tests. Unlike `make efficacy` these are hermetic — they
+# drive the script against throwaway git repositories — so they belong in
+# `make test` alongside everything else.
+test-efficacy:
+	sh scripts/efficacy_test.sh
+
+# ── Per-block coverage (gate G4(d), issue #164) ───────────────────────────────
+#
+# The statement percentage below cannot see a whole `if err != nil { ... }`
+# body that no test ever enters: the happy path around it carries the function
+# past 80% on its own. Issue #164 found 28 such branches by hand. This reads
+# the same coverage.out and reports every block whose execution count, SUMMED
+# across the profile's duplicate entries for it, is zero.
+#
+# Two shapes, and the difference matters:
+#
+#   make coverage-blocks                                  # report, exits 0
+#   COVERAGE_BLOCKS_BASE=origin/main make coverage-blocks # gate, exits 1 on a finding
+#
+# The gate speaks only about blocks covering a line the branch changed. The
+# repository has ~275 unexecuted blocks today, so a gate over all of them would
+# start red — and docs/quality-gateway.md principle 4 is that a gate which
+# starts red gets routed around, taking the working gates with it. Diff-scoped,
+# it starts green and stays cheap. Same reasoning as decision D2.
+#
+# Outside `make check` for the reason `make efficacy` is: it needs the base
+# branch. It runs as its own pull-request CI job.
+coverage-blocks: coverage-go
+	sh scripts/coverage_blocks.sh
+
+# The reporter's own tests, hermetic like the red-check's: fixture profiles and
+# throwaway git repositories, no `go test` run needed.
+test-coverage-blocks:
+	sh scripts/coverage_blocks_test.sh
+
+# ── Mutation: would the tests notice? (gate G4(c)) ────────────────────────────
+#
+# The last of the four G4 questions, and the one the other three cannot answer.
+# (a) asks what percentage of statements ran, (d) asks whether a block on a
+# changed line ran at all, (b) asks whether a CHANGED TEST fails without its
+# implementation. This asks whether the tests would notice changed code
+# behaving differently — and #180's measurement found 108 mutants in this
+# repository that survive every test, all of them in code (d) reports as
+# covered.
+#
+# A GATE: a mutant on a changed line that survives, or that reaches no verdict,
+# exits 1. Stage 4 of item 6's four, and it warned through the first three.
+# 34% of the measured survivors are ones nobody should "fix" — buffer sizes and
+# timeout constants whose killing test would be a tautology — so failing on
+# them from the start would have made this wrong more often than right, which
+# is how a gate loses the credibility the working ones depend on (principle 4).
+# What changed is that those survivors now have a per-type waiver to go to
+# (#236), a mutant with no verdict can no longer be dropped silently (#235),
+# and the size of a red run is known — about 5 mutants per 317 changed lines
+# (#237). Decision D9 in docs/quality-gateway/decisions.md carries the
+# measurements.
+#
+# SKIPPED is the exception and does not fail on its own: gremlins sets it from
+# its own diff, whose changed-line arithmetic is an approximation, so it is two
+# diff implementations disagreeing rather than anything about the tests. A run
+# in which NOTHING reached a verdict does fail.
+#
+# Needs gremlins, which `make install-deps` does not install:
+#   go install github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0
+#
+# PINNED, to the version mutation.yml installs — scripts/mutation_test.sh fails
+# if the three places that name a version drift apart. Being a gate is what
+# raised the stakes: a developer running a different gremlins than CI can now
+# get a different VERDICT rather than merely different advice, which is a build
+# that passes locally and fails in CI with nothing in the diff to explain it.
+#
+# Outside `make check` for the reason `make efficacy` and `make coverage-blocks`
+# are: it needs the base branch. It runs as its own pull-request CI job.
+#
+#   MUTATION_BASE=origin/main make mutation
+#
+# Depends on build-frontend for the same reason coverage-go does, and the
+# reason is not obvious from here: gremlins gathers coverage over the WHOLE
+# module before it mutates anything, so the root package has to compile, and
+# main.go embeds frontend/dist. Without this, gremlins exits non-zero with
+# `pattern frontend/dist: no matching files found` and the script correctly
+# reports that it could not run. This went unnoticed until #190 because every
+# earlier branch exited at "no Go implementation changed" before gremlins was
+# ever invoked.
+mutation: build-frontend
+	sh scripts/mutation.sh
+
+# The reporter's own tests. Hermetic, and deliberately so: they drive the
+# script through `--report <file>` against fixture reports, so `make check`
+# never needs gremlins installed.
+test-mutation:
+	sh scripts/mutation_test.sh
+
+# The agent-side gates themselves (docs/quality-gateway.md's G1 and G2, run as
+# Claude Code hooks from .claude/). Included in `make test` because a hook that
+# silently stops working reports the discipline as enforced while enforcing
+# nothing — and because a hook that blocks a healthy change is worse still, so
+# both directions are asserted. Hermetic: it drives the scripts against temp
+# files and throwaway git repositories, never this checkout.
+test-hooks:
+	sh .claude/hooks/hooks_test.sh
+
+# Tier 2 of docs/agent-board.md's agmsg compatibility contract: asserts the
+# agmsg script behaviors panemux depends on against a REAL agmsg install.
+# Deliberately outside `make check`, which must stay hermetic — the tests
+# skip themselves when AGMSG_PATH is unset.
+#
+#   make test-agmsg-contract AGMSG_PATH=~/.agents/skills/agmsg
+AGMSG_PATH ?=
+test-agmsg-contract:
+	PANEMUX_AGMSG_PATH="$(AGMSG_PATH)" go test ./internal/board/ -run 'TestAgmsgContract' -v -count=1
+
+# ── Model checking: TLA+ / TLC (issue #168, Tier 2) ───────────────────────────
+#
+# Tier 2 of the model-checking split. Runs TLC over spec/agentboard/*.tla,
+# checking every invariant and temporal property over the full state space,
+# then exports each state graph and diffs it against the transition table
+# committed under internal/board/testdata/.
+#
+# That table is the whole point of the split. Model checking alone proves the
+# MODEL correct, never the Go code that is supposed to implement it — so Tier 1
+# (hermetic, inside `make check`, internal/board/ledger_conformance_test.go)
+# replays the real implementation against the committed table on every commit,
+# and this target is what keeps the table honest about the spec.
+#
+# Outside `make check` for the same reason `make test-agmsg-contract` is: it
+# needs an external toolchain (a JDK and tla2tools.jar) that `make install-deps`
+# does not install, and `make check` must stay hermetic.
+#
+#   curl -fsSL -o /tmp/tla2tools.jar \
+#     https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar
+#   TLA_TOOLS_JAR=/tmp/tla2tools.jar make model-check
+model-check:
+	sh scripts/model_check.sh
+
+# Regenerate the committed transition tables from the specs. Run this whenever
+# a .tla or .cfg changes, and commit the table diff alongside it — that diff is
+# the change a reviewer reads.
+model-check-write:
+	sh scripts/model_check.sh --write
+
+# The exporter's own tests, hermetic like every other checker's in scripts/:
+# they drive scripts/tla_transitions.py against committed dot fixtures under
+# scripts/testdata/model-check/, so `make check` never needs a JDK or the jar —
+# the same shape as `make test-mutation` driving its checker through fixture
+# reports rather than installing gremlins.
+#
+# It earns its place more than the others do. The table the exporter writes IS
+# the reference model every Tier 1 assertion is compared against, so an
+# exporter that quietly writes a SMALLER table than the .cfg asked for makes
+# the hermetic gate shrink to match — and a shrunken gate looks green. That is
+# not hypothetical: the first revision of the exporter derived the bound from
+# the states it was handed rather than from the .cfg, so its own completeness
+# check could not fail. One fixture asserting "a truncated dump is rejected"
+# is what catches it.
+#
+# python3 is OPTIONAL here, the way jq is for make test-hooks: without it the
+# exporter checks report themselves as skipped rather than passing or failing,
+# so `make check` — and therefore `git push` — still works without a Python
+# interpreter installed.
+test-model-check:
+	sh scripts/model_check_test.sh
+
 # ── Coverage (≥ 80 %) ─────────────────────────────────────────────────────────
 #
-# Go: measures config / api / ws / server (business-logic packages).
-#     session/local uses a real PTY and is covered separately.
-#     session/ssh and session/tmux* require live SSH / tmux and are
-#     integration-tested outside the unit-test suite.
+# The threshold is deliberately NOT raised above 80 %: see decision D1 in
+# docs/quality-gateway/decisions.md. Coverage is only meaningful as a lower bound, and
+# the cheapest way to satisfy a higher one is to generate tautological tests,
+# which lowers protection against regressions and resistance to refactoring at
+# the same time. What gets strengthened is the SCOPE below, never the number.
 #
-# Frontend: measured over src/hooks/ and src/schemas/ only.
+# Go: measures every package that holds a decision — config, api, ws, server,
+#     board, portforward, commandcenter, boardmcp, tasks, and the root package
+#     (main.go's startup path plus board.go / bootstrap.go / command_center.go
+#     / board_mcp_server.go).
+#
+#     Deliberately excluded, with reasons rather than by omission:
+#
+#       internal/session   its SSH/ssh_tmux protocol lifecycle (PTY, shell or
+#                          exec, resize, I/O, remote exit and close) now runs
+#                          hermetically against an in-process SSH server, and
+#                          tmux-local startup runs through an injected command
+#                          in the package tests. The package still contains
+#                          the real host-dial, local-shell PTY and OS process
+#                          inspection boundaries, so including the whole mixed
+#                          package in the 80% decision-coverage denominator
+#                          would measure environment adapters rather than the
+#                          decisions this gate is scoped to. Those decisions
+#                          (validateShell, validRemotePath,
+#                          classifySSHWaitError …) remain unit-tested in place.
+#       internal/sshconfig  a parser over the user's own ~/.ssh/config; it has
+#                          its own tests and no gate-worthy branching that the
+#                          packages above do not already drive.
+#
+#     Within the measured set, main()/runServer()/bootstrapWatcher.Run() stay
+#     uncovered for the same reason: they install signal handlers, start the
+#     listener and run poll loops for the life of the process. Every decision
+#     they used to embed has been extracted into the injectable units around
+#     them (parseOptions, loadConfig, startSessionsFromConfig,
+#     browserOpenArgv), which is where the gate applies.
+#
+# Frontend: measured over src/hooks/, src/schemas/ and src/utils/.
 #           UI components (App, SplitContainer, TerminalPane …) require a real
 #           browser renderer and are covered by integration / E2E tests.
 
-COVERAGE_PKGS := ./internal/config/...,./internal/api/...,./internal/ws/...,./internal/server/...
+COVERAGE_PKGS := ./internal/config/...,./internal/api/...,./internal/ws/...,./internal/server/...,./internal/board/...,./internal/portforward/...,./internal/commandcenter/...,./internal/boardmcp/...,./internal/fileops/...,./internal/homedir/...,./internal/cachedir/...,./internal/tasks/...,.
 
 coverage: coverage-go coverage-frontend
 
-coverage-go:
+# build-frontend is a real prerequisite, not tidiness: the root package joined
+# the gate above, and main.go carries `//go:embed frontend/dist`, so compiling
+# it needs that directory to exist. Without this, `make coverage-go` on a clean
+# tree fails with "pattern frontend/dist: no matching files found" — an error
+# that gives no hint the fix is to build the frontend first. `make check` and
+# CI already build it, so this costs them nothing and only makes the
+# standalone command DEVELOPMENT.md documents work on its own.
+coverage-go: build-frontend
 	go test \
 	  ./internal/config/... \
 	  ./internal/api/... \
 	  ./internal/ws/... \
 	  ./internal/server/... \
+	  ./internal/board/... \
+	  ./internal/portforward/... \
+	  ./internal/commandcenter/... \
+	  ./internal/boardmcp/... \
+	  ./internal/fileops/... \
+	  ./internal/homedir/... \
+	  ./internal/cachedir/... \
+	  ./internal/tasks/... \
+	  . \
 	  -coverprofile=coverage.out \
 	  -coverpkg=$(COVERAGE_PKGS) \
-	  -count=1 -timeout 30s
+	  -count=1 -timeout 60s
 	@pct=$$(go tool cover -func=coverage.out | grep "^total:" | awk '{gsub(/%/,""); print $$3}'); \
-	  printf "Go coverage (business-logic packages): %s%%\n" "$$pct"; \
+	  printf "Go coverage (gated packages): %s%%\n" "$$pct"; \
 	  awk -v p="$$pct" 'BEGIN { if (p+0 < 80) { print "FAIL: coverage "p"% is below 80%"; exit 1 } }'
+	@sh scripts/coverage_blocks.sh --summary
 
 coverage-frontend:
 	cd frontend && npm run coverage
@@ -86,24 +400,24 @@ lint: lint-go lint-frontend
 
 lint-go-deps:
 	@expected_version="$$(printf '%s' '$(GOLANGCI_LINT_VERSION)' | sed 's/^v//')"; \
-	current_version="$$(command -v golangci-lint >/dev/null 2>&1 && golangci-lint --version 2>/dev/null | awk 'NR==1 {print $$4; exit}' || true)"; \
+	current_version="$$(test -x '$(GOLANGCI_LINT_BIN)' && '$(GOLANGCI_LINT_BIN)' --version 2>/dev/null | awk 'NR==1 {print $$4; exit}' || true)"; \
 	if [ "$$current_version" = "$$expected_version" ]; then \
 	  :; \
 	else \
-	  echo "Installing golangci-lint $(GOLANGCI_LINT_VERSION)"; \
+	  echo "Installing golangci-lint $(GOLANGCI_LINT_VERSION) to $(GOLANGCI_LINT_BIN)"; \
 	  go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION); \
 	fi
 
 lint-go: fmt-check-go lint-go-deps
 	go vet ./...
-	golangci-lint run ./...
+	'$(GOLANGCI_LINT_BIN)' run ./...
 
 lint-frontend:
 	cd frontend && npx tsc --noEmit
 
 # ── Quality gate (lint + test + coverage) ─────────────────────────────────────
 
-check: build-frontend lint test coverage
+check: build-frontend lint test coverage check-scenarios check-docs-links
 
 # ── Build ─────────────────────────────────────────────────────────────────────
 

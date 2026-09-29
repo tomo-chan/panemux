@@ -1,0 +1,24 @@
+server:
+    host: 127.0.0.1
+    port: 4179
+workspaces:
+    active: default
+    tab_position: top
+    items:
+        - id: default
+          title: Default
+          layout:
+            direction: horizontal
+            children:
+                - pane:
+                    id: task-dashboard-main
+                    type: local
+                    shell: /bin/sh
+                    cwd: /tmp
+                    title: Shell
+                  size: 100
+url_open:
+    browser_shim: false
+display:
+    show_header: true
+    show_status_bar: true

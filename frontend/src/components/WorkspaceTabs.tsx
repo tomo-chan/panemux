@@ -46,6 +46,9 @@ interface WorkspaceTabsProps {
   onStartPaneDragFromSummary?: (paneId: string) => void
   onEndPaneDragFromSummary?: () => void
   activePaneId?: string | null
+  // Rendered before the tabs, at the start of the bar: the task dashboard's
+  // "back to tasks" button (issue #252).
+  leading?: React.ReactNode
 }
 
 interface InteractiveSurfaceButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
@@ -141,10 +144,11 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
   onStartPaneDragFromSummary,
   onEndPaneDragFromSummary,
   activePaneId,
+  leading,
 }) => {
   const vertical = tabPosition === 'left' || tabPosition === 'right'
   const showTabs = workspaces.length > 1
-  const showBar = showTabs || Boolean(onAdd || onDelete || onRename || onTabPositionChange)
+  const showBar = showTabs || Boolean(onAdd || onDelete || onRename || onTabPositionChange || leading)
   const [editingWorkspaceId, setEditingWorkspaceId] = useState<string | null>(null)
   const [draftTitle, setDraftTitle] = useState('')
   const [hoveredDropWorkspaceId, setHoveredDropWorkspaceId] = useState<string | null>(null)
@@ -720,6 +724,7 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
     >
       {vertical ? (
         <>
+          {leading}
           <div
             data-testid="workspace-tabs-scroll-region"
             style={{
@@ -763,6 +768,7 @@ export const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
         </>
       ) : (
         <>
+          {leading}
           {tabList}
           {horizontalActions}
         </>

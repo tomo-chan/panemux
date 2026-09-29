@@ -5,6 +5,7 @@ on:
     branches:
       - main
     paths:
+      - '.claude/**'
       - '**/*.go'
       - 'go.mod'
       - 'go.sum'
@@ -15,6 +16,7 @@ on:
     branches:
       - main
     paths:
+      - '.claude/**'
       - '**/*.go'
       - 'go.mod'
       - 'go.sum'
@@ -75,6 +77,15 @@ jobs:
 
       - name: Test (Frontend)
         run: cd frontend && npm run test:ci
+
+      # The agent-side gates' own tests. Folding test-hooks into `make test`
+      # reaches .githooks/pre-push (rung L3) and no further, because this
+      # workflow runs the Go and frontend suites directly rather than through
+      # `make test` — so without this step a change breaking the hooks merges
+      # green for anyone pushing with --no-verify or from an environment
+      # where core.hooksPath was never configured.
+      - name: Test (agent hooks)
+        run: make test-hooks
 
       - name: Install Playwright browsers
         run: cd frontend && npx playwright install --with-deps chromium

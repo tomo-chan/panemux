@@ -1,0 +1,179 @@
+package ws
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"testing"
+
+	"github.com/gorilla/websocket"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"panemux/internal/commandcenter"
+)
+
+// This socket is the command palette's only transport, and it is the one
+// route in panemux that requires the bearer token. The arms below are what
+// stands between a malformed or unexpected client and a palette that stops
+// answering — or, worse, one that answers with nothing at all.
+
+// A GET that carries the right subprotocol but not the upgrade headers gets
+// past the token check and fails at the upgrade. It has to be logged: the
+// dashboard shows a palette that never connects, and without this line there
+// is nothing on the server side saying why.
+func TestBoardCommandServeHTTPLogsAFailedUpgrade(t *testing.T) {
+	logs := captureWSLog(t)
+	srv := setupBoardCommandWSServer(&fakeBoardCommandRunner{}, "sample-token")
+	defer srv.Close()
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL+"/ws/board-command", nil)
+	require.NoError(t, err)
+	req.Header.Set("Sec-WebSocket-Protocol", "sample-token")
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close() //nolint:errcheck
+
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode,
+		"the token was accepted — this is the upgrade failing, not auth")
+	assert.Contains(t, logs.String(), "board command ws upgrade error")
+}
+
+// The protocol is text frames carrying JSON. A binary frame is skipped rather
+// than parsed or answered, and the connection stays open: a client that sends
+// one by mistake must still be able to send a prompt afterwards, which is
+// what separates skipping from closing.
+func TestBoardCommandIgnoresBinaryFramesAndKeepsTheConnection(t *testing.T) {
+	runner := &fakeBoardCommandRunner{
+		queryFn: func(_ context.Context, _ string) (<-chan commandcenter.Event, error) {
+			return closedEventsChan(commandcenter.Event{Type: commandcenter.EventDone}), nil
+		},
+	}
+	srv := setupBoardCommandWSServer(runner, "sample-token")
+	defer srv.Close()
+
+	conn, _, err := dialBoardCommand(t, srv, "sample-token")
+	require.NoError(t, err)
+	defer conn.Close() //nolint:errcheck
+
+	require.NoError(t, conn.WriteMessage(websocket.BinaryMessage, []byte("not a prompt")))
+	require.NoError(t, conn.WriteJSON(map[string]string{"prompt": "how is the board"}))
+
+	var frame boardCommandFrame
+	require.NoError(t, conn.ReadJSON(&frame),
+		"the binary frame must not have closed the socket or consumed the prompt behind it")
+	assert.Equal(t, boardCommandFrameTypeDone, frame.Type)
+}
+
+// The runner's event types and this socket's frame types are two enumerations
+// that have to stay in step. If one gains a member the other does not, the
+// default arm is what keeps the client informed rather than silently dropping
+// the event — a frame it can display beats a stream that just stops.
+func TestUnknownEventTypeBecomesAnErrorFrameNamingIt(t *testing.T) {
+	frame := eventToBoardCommandFrame(commandcenter.Event{Type: commandcenter.EventType("thinking")})
+
+	assert.Equal(t, boardCommandFrameTypeError, frame.Type)
+	assert.Contains(t, frame.Message, "thinking",
+		"the unrecognized type has to be in the message, or nobody can tell which one drifted")
+}
+
+// A frame that cannot be encoded is reported as a write failure, which stops
+// the stream rather than leaving the caller to write more frames the client
+// will never be able to interpret.
+//
+// json.RawMessage validates on marshal rather than passing bytes through, so
+// a line the subprocess emitted that is not valid JSON reaches this arm —
+// this is not a hypothetical failure of encoding/json itself.
+func TestWriteBoardCommandFrameFailsOnAnUnencodableFrame(t *testing.T) {
+	conn := &fakeBoardCommandConn{}
+
+	ok := writeBoardCommandFrame(conn, boardCommandFrame{
+		Type: boardCommandFrameTypeLine,
+		Raw:  json.RawMessage("not json"),
+	})
+
+	assert.False(t, ok)
+	assert.Empty(t, conn.writtenFrames, "nothing may be written for a frame that failed to encode")
+	assert.Empty(t, conn.deadlines,
+		"and the deadline must not be set either — the failure is before the write is attempted")
+}
+
+// Once a write fails the stream stops writing but keeps ranging over the
+// channel. That is not tidiness: the Runner's own goroutine sends into this
+// channel and holds the command center's busy flag until it drains, so
+// abandoning it would leave the palette permanently busy for every later
+// prompt — a disconnected client taking the feature down for the next one.
+func TestStreamBoardCommandEventsDrainsTheChannelAfterAFailedWrite(t *testing.T) {
+	conn := &fakeBoardCommandConn{writeErr: io.ErrClosedPipe}
+	events := make(chan commandcenter.Event, 3)
+	events <- commandcenter.Event{Type: commandcenter.EventLine, Raw: json.RawMessage(`{"n":1}`)}
+	events <- commandcenter.Event{Type: commandcenter.EventLine, Raw: json.RawMessage(`{"n":2}`)}
+	events <- commandcenter.Event{Type: commandcenter.EventDone}
+	close(events)
+
+	ok := streamBoardCommandEvents(conn, events)
+
+	assert.False(t, ok, "the caller has to learn the connection is gone")
+	assert.Empty(t, events, "every event must be consumed, or the Runner stays blocked and busy")
+	assert.Len(t, conn.deadlines, 1,
+		"and only the first write may be attempted — the rest are skipped, not retried")
+}
+
+// Warnings ride whichever terminal event ends the turn, so both terminal
+// frames have to carry them across the hop to the wire — and both have to omit
+// the key rather than serialize an empty array when there are none, or a
+// client that shows a "warnings" section whenever the key is present renders an
+// empty one on every query. See #214, and Event.Warnings for why the failure
+// does not get an error frame of its own.
+func TestBothTerminalEventsCarryTheirWarningsOntoTheFrameAndOmitThemOtherwise(t *testing.T) {
+	const warning = "persisting command center history: disk full"
+
+	const failure = "claude exited with error: exit status 1"
+
+	tests := []struct {
+		name      string
+		eventType commandcenter.EventType
+		eventErr  string
+		wantType  string
+		wantJSON  string
+		quietJSON string
+	}{
+		{
+			name:      "done",
+			eventType: commandcenter.EventDone,
+			wantType:  boardCommandFrameTypeDone,
+			wantJSON:  `{"type":"done","warnings":["` + warning + `"]}`,
+			quietJSON: `{"type":"done"}`,
+		},
+		{
+			name:      "error",
+			eventType: commandcenter.EventError,
+			eventErr:  failure,
+			wantType:  boardCommandFrameTypeError,
+			wantJSON:  `{"type":"error","message":"` + failure + `","warnings":["` + warning + `"]}`,
+			quietJSON: `{"type":"error","message":"` + failure + `"}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			quietEvent := commandcenter.Event{Type: tt.eventType, Err: tt.eventErr}
+			warnedEvent := quietEvent
+			warnedEvent.Warnings = []string{warning}
+
+			frame := eventToBoardCommandFrame(warnedEvent)
+			assert.Equal(t, tt.wantType, frame.Type)
+			assert.Equal(t, []string{warning}, frame.Warnings)
+
+			encoded, err := json.Marshal(frame)
+			require.NoError(t, err)
+			assert.JSONEq(t, tt.wantJSON, string(encoded))
+
+			quiet, err := json.Marshal(eventToBoardCommandFrame(quietEvent))
+			require.NoError(t, err)
+			assert.JSONEq(t, tt.quietJSON, string(quiet))
+		})
+	}
+}

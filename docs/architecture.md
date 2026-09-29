@@ -1,309 +1,154 @@
 # Architecture
 
-## System Structure
-
-The system is split into a Go backend and a React frontend, bundled together at build time. The Go server owns process/session management and serves the built SPA. The frontend owns layout rendering, browser terminal integration, and user interactions.
-
-## Backend
-
-### `main.go`
-
-Entrypoint responsibilities:
-
-- parse CLI flags
-- load YAML config or default config
-- create the session manager
-- start all configured sessions
-- start the HTTP server
-- shut down gracefully on signal
-
-Why this design: startup orchestration is centralized, so session boot, config loading, and HTTP serving have one clear lifecycle.
-
-### `internal/config`
-
-This package loads and validates YAML configuration, expands `~/` paths, exposes flattened pane traversal, and persists workspace/layout updates.
-
-Why it exists as a separate package:
-
-- keeps config rules out of handlers
-- gives one source of truth for layout validation
-- makes config behavior easy to test without network/session dependencies
-
-Workspace model:
-
-- `workspaces` is the standard config shape. Each item has an `id`, `title`, and recursive `layout`.
-- `workspaces.active` selects the layout shown by the UI. If it is empty, the first workspace becomes active.
-- `workspaces.tab_position` controls the tab rail position: `top`, `bottom`, `left`, or `right`.
-- Legacy top-level `layout` configs are accepted at load time and normalized into a single `default` workspace. The next save writes only `workspaces`, so old configs migrate automatically.
-- Read helpers return a normalized workspace view without mutating the in-memory config; migration is written only through save/update paths.
-- Pane IDs are validated as globally unique across all workspaces because sessions and WebSockets are keyed by pane ID.
-
-Notable design choices:
-
-- `LayoutChild.Size` is `float64` so drag-resize can preserve fractional percentages.
-- structs carry both `yaml` and `json` tags so the same shape can be read from config and served through the API.
-
-### `internal/session`
-
-This package defines the shared `Session` interface and concrete implementations for:
-
-- local shell via PTY
-- SSH shell
-- local tmux attach
-- tmux attach over SSH
-
-Why an interface-first session layer:
-
-- all pane types expose the same read/write/resize/close contract
-- WebSocket and API layers stay backend-agnostic
-- new session types can be added without reshaping frontend protocols
-
-Optional capability interfaces extend the base `Session` contract without breaking existing types:
-
-- `CWDGetter` — implemented by `LocalSession` and `SSHSession`; returns the live working directory of the running shell. `LocalSession` reads it via `lsof` (macOS) or `/proc/<pid>/cwd` (Linux). `SSHSession` runs `pwd` over a new exec channel on the existing SSH connection.
-- `SSHConnNamer` — implemented by `SSHSession`; returns the panemux connection alias used when building the `code --remote ssh-remote+<host>` command.
-
-### `internal/api`
-
-REST endpoints expose workspaces, layout compatibility, display settings, session lifecycle operations, and editor integrations.
-
-Workspace-related endpoints:
-
-- `GET /api/workspaces` returns the workspace list, active workspace ID, tab position, and each workspace layout.
-- `POST /api/workspaces` adds a single-local-pane workspace and makes it active.
-- `PUT /api/workspaces/tab-position` changes `workspaces.tab_position` and persists it.
-- `PUT /api/workspaces/{id}` renames a workspace.
-- `DELETE /api/workspaces/{id}` removes a workspace, closes that workspace's sessions after persistence succeeds, and refuses to delete the last workspace.
-- `PUT /api/workspaces/active` switches the active workspace and persists the selection.
-- `PUT /api/workspaces/{id}/layout` updates a specific workspace layout.
-- `GET/PUT /api/layout` remain as compatibility endpoints for the active workspace layout.
-
-`POST /api/sessions/{id}/open-vscode` launches VSCode pointed at the session's live working directory. Like `GET /api/sessions/{id}/git-info`, it may prefer the worktree of an active interactive `codex` or `claude` process when that worktree belongs to the same repository, and it keeps using the last valid sibling worktree after the agent exits until the pane changes repository context. For local sessions it runs `code <cwd>`; for SSH sessions it runs `code --remote ssh-remote+<connection> <cwd>`. The binary is located via `exec.LookPath("code")` with a macOS app-bundle fallback.
-
-Why REST here:
-
-- layout and display data are request/response resources, not streams
-- easier to test and inspect than pushing everything through WebSocket
-- clear separation between configuration mutations and terminal byte transport
-
-### `internal/ws`
-
-The WebSocket handler bridges browser clients to sessions. The interactive terminal uses one primary
-socket per visible pane, and the frontend attention monitor may open additional read-only
-subscribers for the same session ID while a workspace is hidden.
-
-Protocol split:
-
-- binary frames: raw terminal input/output
-- text frames: JSON control messages such as `resize`, `status`, and replay lifecycle markers
-
-Why this split:
-
-- avoids encoding terminal traffic into JSON
-- keeps control messages explicit and versionable
-- matches the low-latency needs of terminal streaming
-- works with the backend session manager's fan-out model, where one session can have multiple
-  concurrent subscribers receiving the same output stream
-- lets the frontend suppress xterm stdin only while replayed snapshot bytes are being re-applied,
-  which prevents replayed terminal queries from generating fresh replies back into the PTY
-
-Replay lifecycle contract:
-
-- the backend emits replay lifecycle only around buffered snapshot delivery, never around live output
-- `replay:start` means "all following binary frames are replay bytes until `replay:end`"
-- `replay:end` means "no more replay bytes will be sent on this connection"; the frontend may still
-  be draining already-scheduled xterm writes
-- if a replay control frame write fails, the handler stops forwarding on that connection instead of
-  risking live output after an incomplete replay transition
-- if the connection dies after `replay:start` but before the frontend observes a matching `replay:end`,
-  the frontend may temporarily retain replay suppression state until the next socket open resets it
-
-### `internal/server`
-
-This package wires chi routes, middleware, REST handlers, WebSocket handlers, and static file serving.
-
-Why `chi`:
-
-- minimal abstraction over `net/http`
-- small API surface
-- route composition is clear and cheap for a service this size
-
-## Frontend
-
-### React + Vite
-
-React renders a recursive pane tree and keeps client-side layout state manageable. Vite provides fast development startup and a simple production build pipeline.
-
-Why React:
-
-- recursive split layouts map naturally to components
-- local state transitions for resize/split/close are straightforward
-- the app needs interactive UI logic more than a large framework runtime
-
-Why Vite:
-
-- low-config setup
-- fast local dev loop
-- build output is easy to embed into the Go binary
-
-### `useLayout`
-
-Fetches `/api/workspaces` and `/api/display`, applies runtime validation, tracks the active workspace layout, and persists layout changes back to the active workspace. The workspace bar remains visible even with a single workspace so that workspace add, inline rename, delete, and tab-position controls remain available. Fast default-pane creation is exposed from the pane header so the common right/down add path does not require a dialog. Delete uses a confirmation dialog before calling the workspace delete API.
-
-Why this hook:
-
-- keeps server synchronization in one place
-- isolates debounce/persistence logic from view components
-- makes split/close behavior easier to reason about and test
-
-### Pane Git/PR resolution
-
-`GET /api/sessions/{id}/git-info` resolves repository metadata in two stages:
-
-- first, it asks the session for its live working directory
-- second, it may ask for an active interactive agent workdir override
-- local and local tmux sessions inspect Git metadata on the local filesystem; SSH and SSH+tmux sessions inspect Git metadata on the remote host over the existing SSH connection so remote-only repositories still render header Git info
-
-The override path is intentionally narrow:
-
-- only interactive `codex` and `claude` processes are considered
-- local and local tmux sessions only consider descendants of the pane's own shell process or active tmux pane process
-- SSH sessions scan the remote process list on the current SSH connection, and SSH+tmux sessions restrict that scan to the active remote tmux pane's process tree
-- only worktrees that belong to the same Git common dir as the pane's base repository are accepted
-
-When a valid override worktree is accepted, the API layer caches that sibling worktree per pane
-session. Later requests reuse it when no active agent workdir is currently detectable, but only
-while the pane still resolves to the same Git common dir and a different worktree root. This keeps
-pane headers and editor-opening behavior stable after an agent exits without allowing stale
-cross-repository reuse.
-
-For interactive Codex sessions, all four session implementations (`local`, `ssh`, `tmux`, and `ssh_tmux`) may inspect the open Codex session log under `~/.codex/sessions/...jsonl` when the Codex process has that file open. Panemux currently prefers the latest `exec_command.arguments.workdir` recorded in `response_item` / `function_call` log entries, then falls back to `turn_context.cwd`, then `session_meta.cwd`.
-
-To avoid repeatedly reparsing unchanged agent logs, panemux caches the last resolved workdir per
-session-log path fingerprint. Local sessions use file size plus modtime; SSH-backed sessions ask
-the remote host for lightweight file metadata first and only transfer the full `jsonl` contents
-again when that fingerprint changes.
-
-This ordering is intentional and reflects observed Codex behavior as of `codex-tui` `0.130.0`:
-
-- the interactive Codex process may keep its OS-level process cwd at the original pane directory
-- `session_meta.cwd` and later `turn_context.cwd` may also remain pinned to that original pane directory
-- individual tool calls still record their actual execution directory in `exec_command.arguments.workdir`
-
-Panemux treats that `workdir` field as the strongest available signal for the active worktree because it is the only one that changes when Codex executes tools inside a sibling Git worktree while the parent interactive process remains attached to the original pane directory. If a future Codex release changes this logging contract, compare new logs against these three fields before changing the resolver so behavior remains reviewable and intentional.
-
-For interactive Claude sessions, all four session implementations may inspect `~/.claude/sessions/<pid>.json` to locate the active transcript under `~/.claude/projects/...`. Panemux derives the active worktree from that transcript in priority order: the latest `Bash` tool `cd ... &&` target, then the latest top-level `cwd` field recorded on transcript entries, then the latest non-auxiliary file-touch path (`Read`/`Edit`/`Write`/etc, or file-history snapshot). The `Bash` `cd` target is checked first for the same reason Codex's `workdir` field takes priority over `session_meta.cwd`/`turn_context.cwd` above: the top-level `cwd` field reflects the interactive Claude process's own OS-level working directory, set once at launch and never updated for that process's lifetime, so it cannot by itself signal that a Bash tool call `cd`'d into a sibling Git worktree. Because a real Claude Code transcript has a non-empty top-level `cwd` on nearly every record, naively preferring it over the `Bash` `cd` target makes that detection unreachable in practice. A file-touch path remains a weaker signal than the top-level `cwd`, since touching a single unrelated file elsewhere does not by itself indicate the agent moved its active work there.
-
-A `Bash` `cd` target, once seen, remains authoritative for the rest of that transcript until a *later* `Bash` `cd` target replaces it; neither a subsequent top-level `cwd` record nor a subsequent file-touch path can displace it. This is intentional and mirrors the Codex `workdir` precedence above: an explicit `cd` is treated as a durable "the agent has moved its base of operations here" signal, and the two weaker signals below it are not reliable enough evidence that the agent moved back to justify overriding it.
-
-### `useWorkspaceAttentionMonitor`
-
-Opens lightweight background WebSocket subscriptions for every pane ID across all workspaces and
-feeds terminal output through the agent-attention detector, even when a workspace is not active and
-its xterm panes are unmounted.
-
-Why this hook:
-
-- decouples prompt notifications from visible xterm mounts
-- keeps inactive workspace attention behavior consistent with active panes
-- centralizes per-pane stream decoding, visibility gating, and last-notified dedupe
-
-The hook derives browser-notification eligibility from:
-
-- active workspace id
-- maximized pane id
-- browser activity via `document.visibilityState` and `document.hasFocus()`
-
-Each detected prompt is normalized into a stable signature. The last signature that produced a
-browser notification is persisted per pane in browser storage, so terminal replay after a refresh or
-WebSocket reconnect does not re-notify the same prompt.
-
-### `useBrowserNotificationPermission`
-
-Requests Notification API permission on the first user interaction when the browser permission state
-is still `default`, so the first detected prompt does not need to race a permission prompt.
-
-### `useWebSocket`
-
-Owns a single socket connection, reconnect behavior, and validated text-frame handling.
-
-Why this hook:
-
-- prevents reconnection logic from leaking into terminal rendering code
-- stores callbacks in refs to avoid reconnects on rerender
-- keeps transport behavior reusable and testable
-
-### `useTerminal`
-
-Owns xterm.js setup, fit behavior, byte forwarding, and resize reporting.
-
-When the backend labels buffered reconnect output with replay control frames, this hook temporarily
-sets `xterm.options.disableStdin = true` while those replay bytes are written. That keeps xterm's
-auto-generated terminal replies from being forwarded as accidental shell input during browser
-refreshes or workspace remounts.
-
-Replay state ownership in this hook:
-
-- `replayActive`: true between `replay:start` and `replay:end`
-- `replayWriteDepth`: count of replay `term.write(...)` calls whose callbacks have not fired yet
-- `awaitingReplayEnd`: true after `replay:start` and false once `replay:end` has been received for the current connection
-- `disableStdin`: derived safety switch; forced on whenever replay is active or draining, forced off
-  on reconnect reset and after the final replay write callback
-
-This gives the hook a three-phase replay lifecycle:
-
-1. `live`: no replay pending, stdin enabled
-2. `replay pending end`: replay frames still arriving, stdin disabled
-3. `replay draining`: end marker received, but queued xterm writes still draining, stdin disabled
-
-The hook resets all replay fields on each WebSocket open so an interrupted replay from a previous
-connection cannot suppress stdin for the new connection.
-
-This lifecycle is also captured as an Alloy model in
-[replay_state.als](models/replay_state.als), which treats
-reconnect, replay frame delivery, replay-control write failure, socket close, and replay write
-completion as explicit transition events and checks the stale-suppression invariants over bounded
-traces.
-
-State-transition verification rule:
-
-- Code that introduces or changes externally observable state transitions should have a matching
-  Alloy model under `docs/models/`.
-- Changes to transition logic should update that model in the same PR so the checked state machine
-  remains aligned with the implementation.
-- GitHub Actions runs Alloy checks only when the model files change, so model maintenance is the
-  mechanism that keeps transition verification on the critical path.
-
-Why xterm.js:
-
-- mature browser terminal emulator
-- supports raw byte streams and common terminal behavior
-- avoids implementing terminal emulation from scratch
-
-### Zod schemas
-
-Frontend payloads are validated with Zod before they are trusted.
-
-Why Zod:
-
-- runtime validation catches malformed server responses
-- TypeScript types are inferred from schemas, reducing drift
-- keeps API and WebSocket assumptions explicit
-
-## Security Design
-
-Security requirements that must be consulted during implementation live in [security.md](security.md).
-
-Architecture-level security summary:
-
-- local process execution is intentionally funneled through validated command paths and strict argument handling
-- remote shell entrypoints validate SSH working directories before interpolating them into shell commands
-- host-key handling intentionally preserves compatibility with OpenSSH hashed `known_hosts` entries
-- shipped code should structurally avoid `gosec` findings rather than suppress them
-
-## Tradeoffs and Intentional Limits
-
-- One WebSocket per pane is simple and isolates failures, but increases connection count with many panes.
-- Open CORS and permissive WebSocket origin checks reduce friction for local use, but are not suitable as-is for an untrusted deployment.
-- All workspace panes are started at backend startup, including panes in inactive workspaces. This keeps tab switching fast and preserves terminal state, at the cost of using resources for hidden workspaces.
-- Dynamic session creation exists, but current UI behavior mainly creates new local panes; this is not yet a full remote session orchestration product.
+This guide is the concise map of the current system. It identifies component ownership and the
+boundaries a change must preserve. Runtime contracts live in [Behavior specification](behavior.md),
+security requirements in [Security design](security.md), and historical rationale in the
+[Decision log](DECISIONLOG.md).
+
+## System structure
+
+Panemux is one Go process with an embedded React application. The Go side owns configuration,
+processes, remote connections, persistence, HTTP APIs, and WebSocket transport. The browser owns
+layout rendering, terminal emulation, interaction state, and presentation.
+
+```text
+                         Go process
+  config ---------------------------------------------------+
+    |                                                       |
+    v                                                       v
+  startup -> session manager -> PTY / SSH / tmux       embedded SPA
+                 |                                         |
+                 +------ REST + WebSocket server -----------+
+                                      |
+                                      v
+                                browser frontend
+```
+
+## Backend component map
+
+| Component | Current responsibility |
+|---|---|
+| `main.go` and root helpers | Parse options, load config, construct dependencies, start sessions and optional subsystems, serve, and shut down. |
+| `internal/config` | Load, normalize, validate, and persist YAML. `Data` is the serializable domain model; `Config` adds file and lookup context. |
+| `internal/session` | Provide one lifecycle interface for local PTY, SSH, local tmux, and tmux-over-SSH sessions. Optional capability interfaces expose CWD, Git context, port forwarding, and Agent Board operations only where supported. `CommandConn` is an SSH connection for short non-interactive commands, dialed with the same dialer panes use. |
+| `internal/tasks` | Collect the task dashboard's agent sessions from the panemux host and every `ssh_connections` host with one fixed script, and own one reused `CommandConn` per host; keep the done and label records in `~/.config/panemux/tasks.json` (`RecordStore`); start and resume claude and codex tasks in detached tmux sessions with one fixed launch script over the same connection (`Launch`, `Resume`), holding a new codex task's labels until its session is collected (`PendingLabels`); read a task's conversation log with a third fixed script and summarize it with `claude -p` on the panemux host, keeping the summaries in memory (`Summaries`, `RequestSummary`). |
+| `internal/api` | Implement REST handlers and mount the route set. It is the single source of truth for API registration. |
+| `internal/ws` | Bridge session bytes and control messages to terminal WebSockets and stream command-center events. |
+| `internal/server` | Compose middleware, API routes, WebSocket routes, static assets, and SPA fallback into the production router. |
+| `internal/portforward` | Maintain short-lived loopback listeners that forward callback traffic through a session's SSH connection. |
+| `internal/board` | Invoke agmsg through its documented scripts, relay rows across configured hosts, and maintain the in-memory status/history view. |
+| `internal/commandcenter` | Run one headless Claude query at a time, persist its session/history state, and stream structured events. |
+| `internal/boardmcp` | Expose the three board operations to the command-center subprocess through a narrow stdio MCP server backed by panemux REST APIs. |
+| `internal/homedir`, `internal/cachedir` | Centralize OS directory lookups and provide scoped test substitutions. |
+| `internal/fileops` | Centralize atomic persistent writes and injectable filesystem operations. |
+
+## Frontend component map
+
+| Component | Current responsibility |
+|---|---|
+| React application shell | Load initial state, render workspace navigation and overlays, and coordinate top-level actions. |
+| `useLayout` | Own the normalized recursive layout tree, optimistic edits, and persistence requests. |
+| `TerminalPane` and `useTerminal` | Own xterm.js setup, fitting, addons, pane input, replay sequencing and suppression, pending terminal messages, and terminal lifecycle. |
+| `useWebSocket` | Own the pane connection, reconnect behavior, send-if-open transport, and validation of structured text control frames. |
+| `usePaneUrlOpen` | Receive validated URL-open events and coordinate browser navigation/callback forwarding. |
+| attention and notification hooks | Convert terminal activity and visibility changes into pane/workspace indicators and browser notifications. |
+| Agent Board hooks and panels | Poll status/message APIs, stream command-center output, and present dashboard, palette, and history overlays. |
+| `TaskDashboard` and `useTasks` | Poll `GET /api/tasks` while the task dashboard is shown, present tasks as a kanban by state, save done and labels through `PUT /api/tasks/records`, start and resume tasks through `POST /api/tasks` and `POST /api/tasks/resume` (`NewTaskDialog`), and match each task to the pane attached to its tmux session, or to the `local` / `ssh` pane its agent's `PANEMUX_PANE_ID` names (`utils/taskBoard`). |
+| Zod schemas | Runtime-validate structured success payloads and control frames for which schemas are defined. Generated TypeScript types derive from these schemas. |
+
+## State and ownership
+
+- The YAML config is the durable source for workspace layout and connection settings.
+- The session manager owns live terminal sessions and replay buffers; the browser does not own
+  process lifetime.
+- Each terminal pane owns one browser-side terminal instance and WebSocket lifecycle.
+- The backend resolves live Git/PR context from the active pane work directory and caches the
+  result for the behavior-defined interval.
+- The task dashboard keeps its per-host SSH connections, the labels of codex tasks started but not
+  yet collected (in memory), and, on the panemux host, the done and
+  label records a person set (`~/.config/panemux/tasks.json`); everything else is read from the
+  agents' own files on every host again at each collection. The pane a task belongs to is derived in the browser from
+  the current workspaces.
+- Agent Board's status/history cache is in memory. Relay cursors, bootstrap state, command-center
+  history/session state, and the task dashboard's done and label records use dedicated persisted
+  files.
+- Structured success payloads and control frames with declared schemas are parsed through Zod.
+  Terminal binary frames and some API error bodies use separate handling paths.
+
+## Main flows
+
+### Terminal flow
+
+Browser keystrokes travel over the pane WebSocket to the session. Session output returns as binary
+frames and is written to xterm.js. Resize messages update both the terminal emulator and underlying
+PTY or remote terminal dimensions.
+
+### Configuration flow
+
+Startup loads and normalizes YAML into `config.Data`, adds runtime file context in `config.Config`,
+and validates cross-references before sessions start. Browser layout/workspace mutations go through
+REST handlers and are persisted atomically when a save path is available.
+
+### Agent Board flow
+
+Board-enabled agents report through agmsg. `internal/board` polls configured hosts, validates and
+relays rows, and updates `BoardCache`. The browser obtains the token from the loopback-only
+bootstrap endpoint and sends it to the board REST and command-center WebSocket routes; the
+command-center MCP client also uses bearer-authenticated board REST APIs. Only `internal/board`
+invokes agmsg scripts. Full detail is in
+[Agent Board architecture](agent-board/architecture.md).
+
+### Task dashboard flow
+
+While the dashboard is on screen, the browser polls `GET /api/tasks`. `internal/tasks` runs one
+fixed script on every host at once — locally with `sh -s`, remotely over that host's reused
+`CommandConn` — parses what it prints, and derives each task's state and location: its tmux
+session, or for an agent outside tmux the pane ID its environment carries, which `local` and `ssh`
+panes export to their shell as `PANEMUX_PANE_ID`. The API handler adds each working directory's git
+and pull-request metadata, the issues the pull request closes, the references
+`task_dashboard.autolinks` finds in the branch name and PR title, and each task's done and label
+record from `tasks.RecordStore`; `PUT /api/tasks/records` replaces one record. Opening a task
+creates or focuses a `tmux` / `ssh_tmux` pane through the ordinary pane APIs, or focuses the
+`local` / `ssh` pane an agent outside tmux runs in. `POST /api/tasks` and `POST /api/tasks/resume`
+run a second fixed script the same way — `sh -s` with the script on stdin — which starts claude or
+codex in a detached tmux session; a resume first collects the host again to confirm the session is
+stopped there, and a start records its labels in `tasks.RecordStore` — for codex, whose session ID
+is not known until it has started, `tasks.PendingLabels` holds them in memory and the first
+`GET /api/tasks` that finds codex's session in the task's tmux session records them. When
+`task_dashboard.summary.enabled` is set, `GET /api/tasks` also attaches each task's summary and starts
+the ones that are due, in the background and at most two at a time: a third fixed script reads the
+task's conversation log on its host, and `claude -p` on the panemux host summarizes the conversation
+text extracted from it; `POST /api/tasks/summary` asks for one. Full behavior is in
+[Task dashboard](behavior/tasks.md).
+
+### URL-open flow
+
+Pane-side URL detection or the browser shim reports a URL to panemux. Ordinary URLs open in the
+browser. Eligible loopback callback URLs may create a temporary local listener backed by SSH
+`direct-tcpip`. Full behavior and constraints are in [Opening URLs from a pane](behavior/url-open.md)
+and [URL-open security](security/url-open.md).
+
+## Trust boundaries
+
+- Core terminal routes assume a trusted deployment and are not an authenticated multi-user surface.
+- `/api/board/*` and `/ws/board-command` are bearer-authenticated. The unauthenticated
+  `GET /api/session-token` bootstrap route sits outside that subtree because it returns the bearer
+  token itself; it accepts only requests whose remote address and `Host` are loopback. Non-loopback
+  use of the authenticated routes also requires transport encryption.
+- User-controlled values never select an arbitrary executable. Shell paths, tmux names, remote
+  paths, and subprocess operands follow the per-sink rules in [Security design](security.md).
+- Panemux runs no copy of itself on remote hosts. SSH-backed features use the existing SSH session
+  and operator-installed remote tools; the task dashboard uses its own SSH connection per host and
+  runs only its two fixed scripts over it — collection, and starting or resuming a claude task.
+- The browser is untrusted input to Go handlers. Structured backend payloads with declared frontend
+  schemas remain untrusted until validation succeeds; other input paths apply their own parsing and
+  bounds checks.
+
+## Deep dives
+
+- [Behavior details](behavior/) — API, WebSocket, frontend, SSH, notifications, and URL-open contracts.
+- [Security details](security/) — requirements grouped by execution and trust boundary.
+- [Agent Board details](agent-board/) — messaging, relay, bootstrap, command center, and limitations.
+- [UI design](ui-design.md) — workspace, pane, modal, attention, and Agent Board interactions.
+- [Quality gateway](quality-gateway.md) — how architectural contracts are verified.
+- [Decision log](DECISIONLOG.md) — tradeoffs and superseded approaches removed from this guide.
