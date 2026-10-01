@@ -611,3 +611,24 @@ func TestConfigRoutes_SSHConnectionAndWorkspaceWritesAreSerialized(t *testing.T)
 		assert.Contains(t, saved, fmt.Sprintf("host-%d", i))
 	}
 }
+
+// A {name} that does not unescape is refused before anything is looked up.
+// net/http refuses such a request line itself, so the request is built with
+// the escaped path set directly, the form chi routes on.
+func TestConfigSSHConnectionRoutes_RefuseANameThatDoesNotUnescape(t *testing.T) {
+	for _, method := range []string{http.MethodPut, http.MethodDelete} {
+		t.Run(method, func(t *testing.T) {
+			e := newSSHConnectionsEnv(t, fromSSHConfigBlock)
+			before := e.reload(t)
+			req := httptest.NewRequest(method, sshConnectionsPath+"/x", bytes.NewBufferString(`{"host":"x.invalid"}`))
+			req.URL.RawPath = sshConnectionsPath + "/%zz"
+			rec := httptest.NewRecorder()
+
+			setupRouterWithHandler(e.h).ServeHTTP(rec, req)
+
+			assert.Equal(t, http.StatusBadRequest, rec.Code)
+			assert.Equal(t, "invalid ssh connection name in the path", responseError(t, rec))
+			assert.Equal(t, before, e.reload(t))
+		})
+	}
+}
