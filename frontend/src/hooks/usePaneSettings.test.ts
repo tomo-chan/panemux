@@ -64,6 +64,7 @@ describe('usePaneSettings', () => {
   it('saveSettings calls PUT /api/layout then POST restart on success', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ names: [] }) }) // GET ssh-connections
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ names: [] }) }) // GET ssh-connections again on openSettings
       .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(mockLayout) })     // PUT layout
       .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) })             // POST restart
 
@@ -103,6 +104,7 @@ describe('usePaneSettings', () => {
   it('saveSettings shows error and keeps dialog open on PUT failure', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ names: [] }) })
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ names: [] }) }) // GET ssh-connections again on openSettings
       .mockResolvedValueOnce({ ok: false, status: 422, json: () => Promise.resolve({ error: 'invalid layout' }) })
 
     vi.stubGlobal('fetch', fetchMock)
@@ -120,6 +122,7 @@ describe('usePaneSettings', () => {
   it('saveSettings does not call restart if PUT failed', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ names: [] }) })
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ names: [] }) }) // GET ssh-connections again on openSettings
       .mockResolvedValueOnce({ ok: false, status: 422, json: () => Promise.resolve({ error: 'fail' }) })
 
     vi.stubGlobal('fetch', fetchMock)
@@ -130,13 +133,14 @@ describe('usePaneSettings', () => {
       await result.current.saveSettings(mockPane)
     })
 
-    // Only 2 calls: GET ssh-connections + PUT layout (no restart)
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    // Only 3 calls: GET ssh-connections on mount and on open + PUT layout (no restart)
+    expect(fetchMock).toHaveBeenCalledTimes(3)
   })
 
   it('restart failure is non-fatal and dialog closes', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ names: [] }) })
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ names: [] }) }) // GET ssh-connections again on openSettings
       .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(mockLayout) })
       .mockRejectedValueOnce(new Error('network error')) // restart fails
 
@@ -413,5 +417,21 @@ describe('usePaneSettings restart policy', () => {
     })
 
     expect(restartCalls()).toHaveLength(1)
+  })
+})
+
+describe('usePaneSettings connection names', () => {
+  it('reads the names again each time the settings open', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ names: ['prod'] }) })
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ names: ['added', 'prod'] }) })
+    vi.stubGlobal('fetch', fetchMock)
+    const { result } = renderHook(() => usePaneSettings(mockLayout, vi.fn()))
+    await waitFor(() => expect(result.current.sshConnectionNames).toEqual(['prod']))
+
+    act(() => result.current.openSettings(mockPane))
+
+    await waitFor(() => expect(result.current.sshConnectionNames).toEqual(['added', 'prod']))
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/ssh-connections')
   })
 })

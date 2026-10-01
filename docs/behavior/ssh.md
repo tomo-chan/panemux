@@ -66,6 +66,12 @@ collects agent sessions from. A host that only has a `~/.ssh/config` `Host` bloc
 added with **Add SSH Host**, which writes `~/.ssh/config` — can be a pane's `connection` but is not
 collected from until its name is listed under `ssh_connections`.
 
+The entries can also be managed from the task dashboard's **Hosts…** dialog, which writes
+`config.yaml` ([`/api/config/ssh-connections`](rest-api.md#apiconfigssh-connections)). It never
+shows a saved password; leaving the password empty when editing keeps it. An entry cannot be renamed,
+and one a pane uses cannot be deleted unless `~/.ssh/config` has a `Host` block of that name for the
+pane to fall back to.
+
 ### Using `~/.ssh/config` hosts
 
 Panes can reference host aliases from `~/.ssh/config` directly in the `connection` field without listing them under `ssh_connections`. The following fields are read from each non-wildcard `Host` block:

@@ -73,6 +73,38 @@ prompt; a request that never starts a subprocess does not create a turn.
 
 ## Task dashboard
 
+### Dashboard hosts are managed from the dashboard (2026-10-01, issue #272)
+
+`ssh_connections` could be edited only in `config.yaml`, while the one SSH host form in the UI —
+**Add SSH Host** in the pane settings — writes `~/.ssh/config`, so a host added from the UI never
+reached the dashboard and nothing on screen said why. The task dashboard now has a **Hosts…** dialog
+over `GET`/`POST`/`PUT`/`DELETE /api/config/ssh-connections`, and **Add SSH Host** says what it
+writes and where dashboard hosts are added. The dialog lives on the dashboard rather than in the pane
+settings because what it decides is what the dashboard collects; panes can use either source.
+
+- **The password is never read back.** An entry reports `has_password` only. On an update an empty
+  `password` keeps the saved one and `clear_password` removes it; sending both is refused. Echoing
+  the saved value into the form, or a masked stand-in, was rejected: the first puts the secret in
+  every list response, and a stand-in sent back unchanged is indistinguishable from a password that
+  really is that string.
+- **Fields are replaced, not merged.** A `PUT` body is the entry's new field set, so a field the
+  form left empty is removed and falls back to the `~/.ssh/config` block, as in `config.yaml`. The
+  password is the one exception, for the reason above.
+- **No renaming.** Panes refer to an entry by name; a rename would have to rewrite every pane that
+  uses it, across workspaces, in the same save. Deleting and adding under the new name is available
+  when no pane uses it.
+- **Deleting what a pane uses** is refused only when it would break the pane: a pane whose
+  connection is also a `~/.ssh/config` `Host` block keeps working without the entry, so that delete
+  is allowed.
+- **Editing reconnects.** The dashboard's open connection for an edited host was made with the old
+  details, so it is dropped and the next collection dials with the new ones.
+- **Concurrency.** The map is replaced, never changed in place, under a lock the readers in
+  `internal/api` take too: task collection dials from goroutines of its own, which read the map
+  while a route writes it.
+- **Name rule.** A new entry's name follows the rule **Add SSH Host** applies to a `~/.ssh/config`
+  alias, so a `~/.ssh/config` host can always be added by name. An existing name in `config.yaml` is
+  not re-checked, so an entry written by hand can still be edited and deleted.
+
 ### Dashboard hosts are listed by name; details come from `~/.ssh/config` (2026-09-29, issue #272)
 
 The dashboard collects only from `ssh_connections`, which kept a host that lives in `~/.ssh/config`
@@ -108,8 +140,8 @@ issue #272, since that file commonly lists hosts that have nothing to do with ag
 fixed validation adding the `~/.ssh/config` hosts to the config's own `ssh_connections` map whenever
 that map was non-empty — which made every such host a dashboard host and wrote it into config.yaml on
 the next save. Entries a config already had written that way are not removed by the fix: they stay
-dashboard hosts until deleted from `ssh_connections` by hand. Issue #272's proposal of a UI to edit `ssh_connections` was not built: listing a name
-is now the whole edit.
+dashboard hosts until deleted from `ssh_connections` by hand. Issue #272's proposal of a UI to edit
+`ssh_connections` was not built in that change; it followed in the next one (below).
 
 ### Codex sessions: state, starting and resuming (2026-09-27, issue #264)
 

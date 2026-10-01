@@ -68,6 +68,11 @@ const roundTrips: RoundTrip[] = [
     schema: schemas.SSHConnectionsResponseSchema,
   },
   {
+    fixture: 'config-ssh-connections',
+    schemaName: 'SSHConnectionEntriesResponseSchema',
+    schema: schemas.SSHConnectionEntriesResponseSchema,
+  },
+  {
     fixture: 'ssh-config-hosts',
     schemaName: 'SSHConfigHostsResponseSchema',
     schema: schemas.SSHConfigHostsResponseSchema,
@@ -131,6 +136,7 @@ const fixtureless: Record<string, string> = {
   CreateSessionRequestSchema: 'request body sent to POST /api/sessions',
   WorkspaceTabPositionRequestSchema: 'request body sent to PUT /api/workspaces/tab-position',
   WorkspaceVerticalBarWidthRequestSchema: 'request body sent to PUT /api/workspaces/vertical-bar-width',
+  SSHConnectionRequestSchema: 'request body sent to POST and PUT /api/config/ssh-connections',
   WorkspaceVerticalBarWidthSchema: 'the bare number inside WorkspaceVerticalBarWidthRequestSchema',
 
   // Components. Each is reached, and therefore validated, through a response
@@ -145,6 +151,7 @@ const fixtureless: Record<string, string> = {
   SessionInfoSchema: 'component of SessionInfoListSchema',
   SessionStateSchema: 'component of WSControlMessageSchema',
   WorktreeInfoSchema: 'component of GitInfoSchema',
+  SSHConnectionEntrySchema: 'component of SSHConnectionEntriesResponseSchema',
   SSHConfigHostSchema: 'component of SSHConfigHostsResponseSchema',
   DirectoryEntrySchema: 'component of DirectoryBrowserResponseSchema',
   BoardStatusEntrySchema: 'component of BoardStatusResponseSchema',

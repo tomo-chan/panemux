@@ -69,6 +69,9 @@ type Handler struct {
 	preferredCWDMu          sync.Mutex
 	gitInfoCacheMu          sync.Mutex
 	taskGitCacheMu          sync.Mutex
+	// sshConnMu guards cfg.SSHConnections, which the ssh_connections routes
+	// replace while task collection dials read it.
+	sshConnMu sync.RWMutex
 }
 
 type preferredCWDState struct {
@@ -346,7 +349,7 @@ func (h *Handler) PostWorkspace(w http.ResponseWriter, r *http.Request) {
 	workspace := h.cfg.AddDefaultWorkspace()
 	var created []string
 	for _, pane := range panesInLayout(workspace.Layout) {
-		sess, err := h.createSession(pane, h.cfg.SSHConnections)
+		sess, err := h.createSession(pane, h.sshConnections())
 		if err != nil {
 			h.rollbackNewWorkspace(snapshot, created)
 			http.Error(w, fmt.Sprintf("failed to create session: %v", err), http.StatusInternalServerError)
@@ -521,7 +524,7 @@ func (h *Handler) PostSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sess, err := h.createSession(&pane, h.cfg.SSHConnections)
+	sess, err := h.createSession(&pane, h.sshConnections())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -595,7 +598,7 @@ func (h *Handler) RestartSession(w http.ResponseWriter, r *http.Request) {
 	// (e.g. a transient SSH dial error), the existing session for id stays
 	// registered instead of being orphaned, so /ws and /git-info keep working
 	// against it and the frontend's disconnected-status recovery path can retry.
-	sess, err := h.createSession(found, h.cfg.SSHConnections)
+	sess, err := h.createSession(found, h.sshConnections())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -630,7 +633,7 @@ func (h *Handler) GetSSHConnections(w http.ResponseWriter, r *http.Request) {
 	names := make([]string, 0)
 
 	// First add yaml-configured connections
-	for k := range h.cfg.SSHConnections {
+	for k := range h.sshConnections() {
 		seen[k] = struct{}{}
 		names = append(names, k)
 	}
@@ -871,7 +874,7 @@ func (h *Handler) GetDetectShell(w http.ResponseWriter, r *http.Request) {
 	if connection == "" {
 		shell, err = h.detectLocalShellFn()
 	} else {
-		cfg, cfgErr := session.ResolveSSHConfig(connection, h.cfg.SSHConnections, h.sshConfigPath)
+		cfg, cfgErr := session.ResolveSSHConfig(connection, h.sshConnections(), h.sshConfigPath)
 		if cfgErr != nil {
 			http.Error(w, cfgErr.Error(), http.StatusNotFound)
 			return
@@ -910,7 +913,7 @@ func (h *Handler) GetDirectories(w http.ResponseWriter, r *http.Request) {
 	if connection == "" {
 		resp, err = h.listLocalDirectoriesFn(path, showHidden)
 	} else {
-		cfg, cfgErr := session.ResolveSSHConfig(connection, h.cfg.SSHConnections, h.sshConfigPath)
+		cfg, cfgErr := session.ResolveSSHConfig(connection, h.sshConnections(), h.sshConfigPath)
 		if cfgErr != nil {
 			http.Error(w, cfgErr.Error(), http.StatusNotFound)
 			return

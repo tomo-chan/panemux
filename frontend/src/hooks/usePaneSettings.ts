@@ -23,20 +23,27 @@ export function usePaneSettings(
   const [saveError, setSaveError] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
 
-  useEffect(() => {
+  // Read on mount and again whenever the settings open, so a connection
+  // added since — from the task dashboard's Hosts… dialog, say — is offered.
+  const loadConnectionNames = useCallback(() => {
     fetch('/api/ssh-connections')
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((data) => setSshConnectionNames(SSHConnectionsResponseSchema.parse(data).names))
       .catch(() => {
-        // Non-fatal; dropdown will be empty
+        // Non-fatal; the dropdown keeps what it had
       })
   }, [])
 
+  useEffect(() => {
+    loadConnectionNames()
+  }, [loadConnectionNames])
+
   const openSettings = useCallback((pane: PaneConfig) => {
+    loadConnectionNames()
     setSaveError(null)
     setCurrentPane(pane)
     setIsOpen(true)
-  }, [])
+  }, [loadConnectionNames])
 
   const closeSettings = useCallback(() => {
     setIsOpen(false)

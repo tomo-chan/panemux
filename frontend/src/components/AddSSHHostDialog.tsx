@@ -143,6 +143,10 @@ export const AddSSHHostDialog: React.FC<AddSSHHostDialogProps> = ({
         <div style={{ fontSize: '14px', fontWeight: 600, marginBottom: '16px', color: '#e0e0e0' }}>
           Add SSH Host
         </div>
+        <p style={{ margin: '0 0 14px', fontSize: '12px', color: '#8a909a', lineHeight: 1.5 }}>
+          Writes a Host block to ~/.ssh/config. Panes can use it right away. To collect its tasks on the task
+          dashboard, also add its name under Tasks → Hosts….
+        </p>
 
         <div style={fieldStyle}>
           <label htmlFor="ssh-host-name" style={labelStyle}>Alias</label>

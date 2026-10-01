@@ -42,7 +42,7 @@ func (h *Handler) PutTaskRecord(w http.ResponseWriter, r *http.Request) {
 	// needs the host to be configured.
 	clearing := !req.Done && len(req.Labels) == 0
 	if req.Host != "" && !clearing {
-		if _, ok := h.cfg.SSHConnections[req.Host]; !ok {
+		if _, ok := h.sshConnections()[req.Host]; !ok {
 			http.Error(w, tasks.ErrUnknownHost.Error(), http.StatusNotFound)
 			return
 		}

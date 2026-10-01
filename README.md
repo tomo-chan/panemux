@@ -120,7 +120,8 @@ Common uses:
 ### Task dashboard
 
 - Click **← Tasks** at the start of the workspace bar to see every coding-agent session on this machine and on every host under `ssh_connections`, as columns by state: waiting for input, working, idle, running / unknown, and stopped (the last 7 days, at most 50 per host). **Workspaces** goes back; the panes keep running underneath.
-- Only hosts listed under `ssh_connections` are collected from. A host that exists only in `~/.ssh/config` — including one added with **Add SSH Host** — can be opened in a pane but does not appear on the dashboard. To add it, list just its name under `ssh_connections`; the connection details are taken from `~/.ssh/config` ([SSH connections](#ssh-connections)).
+- Only hosts listed under `ssh_connections` are collected from. A host that exists only in `~/.ssh/config` — including one added with **Add SSH Host** — can be opened in a pane but does not appear on the dashboard. To add it, open **Hosts…** on the dashboard and add just its name, or list the name under `ssh_connections` in `config.yaml`; the connection details are taken from `~/.ssh/config` ([SSH connections](#ssh-connections)).
+- **Hosts…** lists, adds, edits and deletes the dashboard's hosts (`ssh_connections` in `config.yaml`). A saved password is never shown; leave the password empty when editing to keep it. A host a pane uses cannot be deleted unless `~/.ssh/config` has a `Host` block of that name for the pane to fall back to.
 - **Cmd/Ctrl+Shift+S** switches between the dashboard and the workspaces, even while a terminal has focus. Change the letter with `display.task_dashboard_shortcut` in `config.yaml` (one letter; `K` and `B` are taken).
 - The **← Tasks** button counts the sessions waiting for input as of the last time the dashboard was shown. The dashboard collects only while it is on screen, every 10 seconds.
 - A session running inside `tmux` can be opened: **Open** adds a `tmux` (or `ssh_tmux`) pane attached to its tmux session to the current workspace, and **Go to pane** jumps to a pane already attached to it. A session running outside tmux, or stopped, cannot be opened in a pane.
@@ -389,7 +390,7 @@ Connections can be defined in two ways:
 
 **Via `~/.ssh/config`** — any non-wildcard `Host` entry is automatically available as a `connection` name. `HostName`, `User`, `Port`, `IdentityFile`, `ProxyJump`, and `ProxyCommand` are read from the file. This lets you reuse your existing SSH config without duplicating it in YAML.
 
-The task dashboard collects only from the hosts under `ssh_connections`. A host that exists only in `~/.ssh/config` — including one added from the UI with **Add SSH Host**, which writes `~/.ssh/config` — is usable in panes but is not collected from until its name is listed under `ssh_connections`.
+The task dashboard collects only from the hosts under `ssh_connections`. A host that exists only in `~/.ssh/config` — including one added from the UI with **Add SSH Host**, which writes `~/.ssh/config` — is usable in panes but is not collected from until its name is listed under `ssh_connections`, which **Hosts…** on the task dashboard does without editing the file.
 
 An entry that sets its own `host` does not take the `Host` block's `ProxyJump` or `ProxyCommand`; leave `host` unset to connect through the route `~/.ssh/config` describes.
 

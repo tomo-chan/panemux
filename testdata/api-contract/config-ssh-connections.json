@@ -1,0 +1,23 @@
+{
+  "connections": [
+    {
+      "has_password": true,
+      "host": "build.invalid",
+      "in_ssh_config": false,
+      "key_file": "/remote/home/demo/.ssh/id_ed25519",
+      "known_hosts_file": "/remote/home/demo/.ssh/known_hosts",
+      "name": "build-box",
+      "panes": [
+        "build"
+      ],
+      "port": 2222,
+      "user": "demo"
+    },
+    {
+      "has_password": false,
+      "in_ssh_config": true,
+      "name": "gpu-box",
+      "panes": []
+    }
+  ]
+}

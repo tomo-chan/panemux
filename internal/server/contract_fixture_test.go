@@ -149,6 +149,32 @@ var contractFixtures = map[string]contractFixture{
 		return rr.Body.Bytes(), nil
 	}},
 
+	"config-ssh-connections": {capture: func(t *testing.T) ([]byte, map[string]string) {
+		e := newAPIEnv(t)
+		// One entry with every optional field and a pane using it, one that
+		// is only a name taken from ~/.ssh/config, so both sides of each
+		// omitted field are captured.
+		writeSSHConfig(t, e.home, "Host gpu-box\n  HostName gpu.invalid\n")
+		e.cfg.SSHConnections = map[string]config.SSHConnection{
+			"build-box": {
+				Host: "build.invalid", User: "demo", Port: 2222, Password: "fixture-secret",
+				KeyFile:        "/remote/home/demo/.ssh/id_ed25519",
+				KnownHostsFile: "/remote/home/demo/.ssh/known_hosts",
+			},
+			"gpu-box": {},
+		}
+		e.cfg.Workspaces = config.WorkspacesConfig{Active: "main", Items: []config.WorkspaceConfig{{
+			ID: "main", Title: "Main", Layout: config.LayoutNode{Direction: "horizontal", Children: []config.LayoutChild{
+				{Size: 100, Pane: &config.PaneConfig{ID: "build", Type: config.PaneTypeSSH, Connection: "build-box"}},
+			}},
+		}}}
+
+		rr := e.do(t, http.MethodGet, "/api/config/ssh-connections", "")
+		require.Equal(t, http.StatusOK, rr.Code)
+		require.NotContains(t, rr.Body.String(), "fixture-secret")
+		return rr.Body.Bytes(), nil
+	}},
+
 	"ssh-config-hosts": {capture: func(t *testing.T) ([]byte, map[string]string) {
 		e := newAPIEnv(t)
 		// Two hosts: one with every optional field the schema allows, one
