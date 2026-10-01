@@ -63,6 +63,35 @@ func createSession(
 	}
 }
 
+// newTmuxLocalAttachFn is an injectable seam over NewTmuxLocalAttach.
+var newTmuxLocalAttachFn = NewTmuxLocalAttach
+
+// CreateTmuxAttach creates the board's temporary attach (issue #283) to the
+// running tmux session tmuxSession: on the panemux host when connection is
+// empty, otherwise on the named ssh_connections entry.
+func CreateTmuxAttach(
+	id, title, connection, tmuxSession string,
+	sshConns map[string]config.SSHConnection,
+) (Session, error) {
+	return createTmuxAttach(id, title, connection, tmuxSession, sshConns, sshconfig.DefaultPath())
+}
+
+func createTmuxAttach(
+	id, title, connection, tmuxSession string,
+	sshConns map[string]config.SSHConnection,
+	sshConfigPath string,
+) (Session, error) {
+	if connection == "" {
+		return newTmuxLocalAttachFn(id, title, tmuxSession)
+	}
+	cfg, err := resolveSSHConfig(connection, sshConns, sshConfigPath)
+	if err != nil {
+		return nil, err
+	}
+	cfg.ConnectionName = connection
+	return NewTmuxSSHAttach(id, title, tmuxSession, cfg)
+}
+
 // ResolveSSHConfig is the exported version of resolveSSHConfig for use by the API handler.
 func ResolveSSHConfig(name string, sshConns map[string]config.SSHConnection, sshConfigPath string) (SSHConfig, error) {
 	return resolveSSHConfig(name, sshConns, sshConfigPath)

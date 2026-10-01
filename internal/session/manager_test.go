@@ -333,3 +333,28 @@ func TestManagedSession_Publish_DeliversTheChunkWithAFullReplayWindow(t *testing
 		t.Fatal("subscriber received nothing after a publish onto a full replay window")
 	}
 }
+
+// The board's temporary attach (issue #283) is destroyed once no WebSocket
+// reads it, so the manager reports each change in a session's subscriber count.
+func TestManager_Watch_ReportsSubscriberCountChanges(t *testing.T) {
+	m := NewManager()
+	m.Add(newMock("board-1"))
+	t.Cleanup(m.CloseAll)
+
+	var counts []int
+	require.True(t, m.Watch("board-1", func(n int) { counts = append(counts, n) }))
+
+	_, _, unsubscribeA, ok := m.Subscribe("board-1")
+	require.True(t, ok)
+	_, _, unsubscribeB, ok := m.Subscribe("board-1")
+	require.True(t, ok)
+	unsubscribeA()
+	unsubscribeA() // a second call is a no-op and reports nothing
+	unsubscribeB()
+
+	assert.Equal(t, []int{1, 2, 1, 0}, counts)
+}
+
+func TestManager_Watch_UnknownSessionReportsFalse(t *testing.T) {
+	assert.False(t, NewManager().Watch("missing", func(int) {}))
+}

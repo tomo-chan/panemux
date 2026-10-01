@@ -44,6 +44,22 @@ func NewTmuxSSH(id, title, tmuxSession string, cfg SSHConfig) (*TmuxSSHSession, 
 	return newTmuxSSHSessionFromClient(id, title, validatedSession, cfg, client, jumpClient)
 }
 
+// NewTmuxSSHAttach attaches a new tmux client to the running session
+// tmuxSession on the remote host and never creates one; see
+// NewTmuxLocalAttach.
+func NewTmuxSSHAttach(id, title, tmuxSession string, cfg SSHConfig) (*TmuxSSHSession, error) {
+	validatedSession, err := validateTmuxAttachName(tmuxSession)
+	if err != nil {
+		return nil, err
+	}
+
+	client, jumpClient, err := dialSSHClient(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return startTmuxSSHSession(id, title, validatedSession, tmuxSSHAttachCommand(validatedSession), cfg, client, jumpClient)
+}
+
 // newTmuxSSHSessionFromClient completes the remote tmux lifecycle over an
 // established SSH transport. It is the host-independent seam used by the
 // protocol contract tests and the production constructor alike.
@@ -59,6 +75,21 @@ func newTmuxSSHSessionFromClient(
 	}
 	tmuxSession = validatedSession
 
+	tmuxCmd, err := tmuxSSHCommand(tmuxSession, cfg)
+	if err != nil {
+		closeSSHResources(nil, client, jumpClient)
+		return nil, err
+	}
+	return startTmuxSSHSession(id, title, tmuxSession, tmuxCmd, cfg, client, jumpClient)
+}
+
+// startTmuxSSHSession runs tmuxCmd on a PTY over an established SSH
+// transport. tmuxSession must already be validated.
+func startTmuxSSHSession(
+	id, title, tmuxSession, tmuxCmd string,
+	cfg SSHConfig,
+	client, jumpClient *ssh.Client,
+) (*TmuxSSHSession, error) {
 	sess, err := client.NewSession()
 	if err != nil {
 		closeSSHResources(nil, client, jumpClient)
@@ -66,12 +97,6 @@ func newTmuxSSHSessionFromClient(
 	}
 
 	stdin, pr, pw, err := setupSSHPTY(sess)
-	if err != nil {
-		closeSSHResources(sess, client, jumpClient)
-		return nil, err
-	}
-
-	tmuxCmd, err := tmuxSSHCommand(tmuxSession, cfg)
 	if err != nil {
 		closeSSHResources(sess, client, jumpClient)
 		return nil, err
@@ -102,6 +127,14 @@ func newTmuxSSHSessionFromClient(
 	})
 
 	return s, nil
+}
+
+// tmuxSSHAttachCommand builds the remote command of the board's attach: the
+// "=" prefix makes tmux match the name exactly and never create a session (see
+// tmuxLocalAttachArgs). tmuxSession has passed validateTmuxAttachName, so it
+// holds no quote and the single quotes keep it one word.
+func tmuxSSHAttachCommand(tmuxSession string) string {
+	return fmt.Sprintf("tmux %s -t '=%s'", tmuxAttachSubcommand, tmuxSession)
 }
 
 // tmuxSSHCommand builds the remote tmux command.

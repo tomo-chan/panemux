@@ -20,9 +20,11 @@ type Manager struct {
 //
 //nolint:govet // fieldalignment: clarity is preferred over splitting this tiny state holder.
 type managedSession struct {
-	session        Session
-	history        *replayBuffer
-	subscribers    map[int]chan []byte
+	session     Session
+	history     *replayBuffer
+	subscribers map[int]chan []byte
+	// watch, when set, is told the subscriber count after each change.
+	watch          func(subscribers int)
 	nextSubscriber int
 	closed         bool
 	mu             sync.Mutex
@@ -79,6 +81,23 @@ func (m *Manager) Subscribe(id string) ([]byte, <-chan []byte, func(), bool) {
 
 	snapshot, stream, unsubscribe := entry.subscribe()
 	return snapshot, stream, unsubscribe, true
+}
+
+// Watch makes fn hear the session's subscriber count each time a subscriber
+// is added or removed, so an owner can act when nothing reads the session any
+// more. It replaces any earlier watcher and reports false for an unknown ID.
+// fn runs outside the manager's locks.
+func (m *Manager) Watch(id string, fn func(subscribers int)) bool {
+	m.mu.RLock()
+	entry, ok := m.sessions[id]
+	m.mu.RUnlock()
+	if !ok {
+		return false
+	}
+	entry.mu.Lock()
+	entry.watch = fn
+	entry.mu.Unlock()
+	return true
 }
 
 // List returns all current sessions.
@@ -171,11 +190,11 @@ func (m *managedSession) publish(chunk []byte) {
 
 func (m *managedSession) subscribe() ([]byte, <-chan []byte, func()) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	snapshot := m.replay().snapshot()
 	ch := make(chan []byte, 64)
 	if m.closed {
+		m.mu.Unlock()
 		close(ch)
 		return snapshot, ch, func() {}
 	}
@@ -183,19 +202,31 @@ func (m *managedSession) subscribe() ([]byte, <-chan []byte, func()) {
 	subscriptionID := m.nextSubscriber
 	m.nextSubscriber++
 	m.subscribers[subscriptionID] = ch
+	watch, count := m.watch, len(m.subscribers)
+	m.mu.Unlock()
+	notifyWatch(watch, count)
 
 	unsubscribe := func() {
 		m.mu.Lock()
-		defer m.mu.Unlock()
 		subscriber, ok := m.subscribers[subscriptionID]
 		if !ok {
+			m.mu.Unlock()
 			return
 		}
 		delete(m.subscribers, subscriptionID)
 		close(subscriber)
+		watch, count := m.watch, len(m.subscribers)
+		m.mu.Unlock()
+		notifyWatch(watch, count)
 	}
 
 	return snapshot, ch, unsubscribe
+}
+
+func notifyWatch(watch func(int), subscribers int) {
+	if watch != nil {
+		watch(subscribers)
+	}
 }
 
 func (m *managedSession) closeSubscribers() {
