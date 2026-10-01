@@ -10,6 +10,7 @@ const buildBox: SSHConnectionEntry = {
   user: 'demo',
   port: 2222,
   key_file: '/remote/home/demo/.ssh/id_ed25519',
+  known_hosts_file: '/remote/home/demo/.ssh/known_hosts',
   has_password: false,
   in_ssh_config: false,
   panes: ['dev-build', 'dev-logs'],
@@ -131,6 +132,8 @@ describe('DashboardHostsDialog', () => {
     [{ Name: 'x' }, 'Enter a host. ~/.ssh/config has no Host block named "x"'],
     [{ Name: 'x', Host: 'h', 'Port (optional)': '0' }, 'Port must be a whole number from 1 to 65535.'],
     [{ Name: 'x', Host: 'h', 'Port (optional)': '22.5' }, 'Port must be a whole number from 1 to 65535.'],
+    [{ Name: 'x', Host: 'h', 'Port (optional)': '0x16' }, 'Port must be a whole number from 1 to 65535.'],
+    [{ Name: 'x', Host: 'h', 'Port (optional)': '1e3' }, 'Port must be a whole number from 1 to 65535.'],
     [{ Name: 'build-box', Host: 'h' }, 'A dashboard host named "build-box" already exists.'],
   ])('refuses %j before sending it', async (fields, message) => {
     const { state } = renderDialog()
@@ -172,6 +175,36 @@ describe('DashboardHostsDialog', () => {
 
     expect(state.update).toHaveBeenCalledWith('legacy-vm', { host: '10.0.0.25', user: 'admin' })
     expect(screen.getByRole('status').textContent).toContain('Saved legacy-vm')
+  })
+
+  // PUT replaces every field, so a field the form failed to fill in would be
+  // deleted by a save that never touched it.
+  it('keeps every field of an entry it edits', async () => {
+    const { state } = renderDialog()
+    await click('Edit build-box')
+
+    expect((screen.getByLabelText('Port (optional)') as HTMLInputElement).value).toBe('2222')
+    fill({ 'User (optional)': 'deploy' })
+    await click('Save host')
+
+    expect(state.update).toHaveBeenCalledWith('build-box', {
+      host: 'build.invalid',
+      user: 'deploy',
+      port: 2222,
+      key_file: '/remote/home/demo/.ssh/id_ed25519',
+      known_hosts_file: '/remote/home/demo/.ssh/known_hosts',
+    })
+  })
+
+  it('lists an entry whose port config.yaml has out of range, so it can be fixed', async () => {
+    const { state } = renderDialog(makeState({ connections: [{ ...legacy, port: 70000 }] }))
+    expect(row('legacy-vm').textContent).toContain('10.0.0.24:70000')
+
+    await click('Edit legacy-vm')
+    fill({ 'Port (optional)': '2200' })
+    await click('Save host')
+
+    expect(state.update).toHaveBeenCalledWith('legacy-vm', { host: '10.0.0.24', user: 'admin', port: 2200 })
   })
 
   it('removes a saved password when asked', async () => {

@@ -138,7 +138,8 @@ export const DashboardHostsDialog: React.FC<DashboardHostsDialogProps> = ({ isOp
     }
     let port: number | undefined
     if (v.port.trim() !== '') {
-      port = Number(v.port.trim())
+      // Digits only: Number() would also take 0x16 or 1e3.
+      port = /^\d+$/.test(v.port.trim()) ? Number(v.port.trim()) : NaN
       if (!Number.isInteger(port) || port < 1 || port > 65535) return fail('Port must be a whole number from 1 to 65535.')
     }
 

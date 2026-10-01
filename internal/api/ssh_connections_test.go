@@ -5,10 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -426,7 +428,7 @@ func TestDeleteConfigSSHConnection_RefusesToBreakAPane(t *testing.T) {
 	rec := e.do(t, http.MethodDelete, sshConnectionsPath+"/used", "")
 
 	assert.Equal(t, http.StatusConflict, rec.Code)
-	assert.Contains(t, responseError(t, rec), `ssh connection "used" is used by pane one-ssh`)
+	assert.Contains(t, responseError(t, rec), `ssh connection "used" is needed by pane one-ssh`)
 	assert.Contains(t, e.reload(t), "used")
 }
 
@@ -494,4 +496,118 @@ func responseError(t *testing.T, rec *httptest.ResponseRecorder) string {
 		return rec.Body.String()
 	}
 	return body[responseErrorKey]
+}
+
+// A name written by hand in config.yaml can carry characters the new-entry
+// rule refuses; the dialog sends it URL-escaped, and the routes still find it.
+func TestConfigSSHConnectionRoutes_FindEscapedNames(t *testing.T) {
+	for _, tt := range []struct{ name, escaped string }{
+		{"deploy@prod", "deploy%40prod"},
+		{"h:22", "h%3A22"},
+		{"a/b", "a%2Fb"},
+		{"a b", "a%20b"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newSSHConnectionsEnv(t, fromSSHConfigBlock)
+			e.cfg.SSHConnections = map[string]config.SSHConnection{
+				"used":  {Host: "used.invalid"}, // one-ssh's connection, so the config reloads
+				tt.name: {Host: "x.invalid"},
+			}
+
+			rec := e.do(t, http.MethodPut, sshConnectionsPath+"/"+tt.escaped, `{"host":"y.invalid"}`)
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			assert.Equal(t, tt.name, decodeSSHConnectionEntry(t, rec).Name)
+			assert.Equal(t, "y.invalid", e.reload(t)[tt.name].Host)
+
+			rec = e.do(t, http.MethodDelete, sshConnectionsPath+"/"+tt.escaped, "")
+			require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+			assert.NotContains(t, e.reload(t), tt.name)
+		})
+	}
+}
+
+// An entry can be needed without being named: a ~/.ssh/config Host block's
+// ProxyJump resolves through ssh_connections too. Deleting it is refused when
+// that would leave a pane or another dashboard host unable to resolve.
+func TestDeleteConfigSSHConnection_RefusesToBreakAProxyJump(t *testing.T) {
+	const jumpBlock = "Host gpu\n  HostName gpu.invalid\n  ProxyJump bastion\n"
+	tests := []struct {
+		name      string
+		prepare   func(e *sshConnectionsEnv)
+		wantError string
+	}{
+		{
+			name: "a pane connects through it",
+			prepare: func(e *sshConnectionsEnv) {
+				e.cfg.Workspaces.Items[0].Layout.Children[0].Pane.Connection = "gpu"
+				e.cfg.SSHConnections = map[string]config.SSHConnection{"bastion": {Host: "bastion.invalid"}}
+			},
+			wantError: `ssh connection "bastion" is needed by pane one-ssh`,
+		},
+		{
+			name: "another dashboard host connects through it",
+			prepare: func(e *sshConnectionsEnv) {
+				e.cfg.Workspaces.Items[0].Layout.Children[0].Pane.Type = config.PaneTypeLocal
+				e.cfg.SSHConnections = map[string]config.SSHConnection{"bastion": {Host: "bastion.invalid"}, "gpu": {}}
+			},
+			wantError: `ssh connection "bastion" is needed by dashboard host gpu`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newSSHConnectionsEnv(t, jumpBlock)
+			tt.prepare(e)
+
+			rec := e.do(t, http.MethodDelete, sshConnectionsPath+"/bastion", "")
+
+			assert.Equal(t, http.StatusConflict, rec.Code)
+			assert.Contains(t, responseError(t, rec), tt.wantError)
+			assert.Contains(t, e.cfg.SSHConnections, "bastion")
+		})
+	}
+}
+
+// The ssh_connections routes and the workspace routes write the same file
+// from the same in-memory config. Run under -race, this fails when one of
+// them changes the config or writes it while another does; without -race it
+// still checks that no route's change is lost from the file.
+func TestConfigRoutes_SSHConnectionAndWorkspaceWritesAreSerialized(t *testing.T) {
+	e := newSSHConnectionsEnv(t, fromSSHConfigBlock)
+	e.cfg.Workspaces.Items = append(e.cfg.Workspaces.Items, config.WorkspaceConfig{
+		ID: "two", Title: "Two", Layout: config.LayoutNode{Direction: "horizontal", Children: []config.LayoutChild{
+			{Size: 100, Pane: &config.PaneConfig{ID: "two-main", Type: config.PaneTypeLocal}},
+		}},
+	})
+	router := setupRouterWithHandler(e.h)
+	send := func(method, path, body string) int {
+		req := httptest.NewRequest(method, path, bytes.NewBufferString(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec.Code
+	}
+
+	const rounds = 20
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := range rounds {
+			assert.Equal(t, http.StatusCreated,
+				send(http.MethodPost, sshConnectionsPath, fmt.Sprintf(`{"name":"host-%d","host":"h%d.invalid"}`, i, i)))
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := range rounds {
+			active := []string{"one", "two"}[i%2]
+			assert.Equal(t, http.StatusOK, send(http.MethodPut, "/api/workspaces/active", fmt.Sprintf(`{"id":%q}`, active)))
+		}
+	}()
+	wg.Wait()
+
+	saved := e.reload(t)
+	for i := range rounds {
+		assert.Contains(t, saved, fmt.Sprintf("host-%d", i))
+	}
 }

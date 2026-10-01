@@ -69,9 +69,14 @@ type Handler struct {
 	preferredCWDMu          sync.Mutex
 	gitInfoCacheMu          sync.Mutex
 	taskGitCacheMu          sync.Mutex
-	// sshConnMu guards cfg.SSHConnections, which the ssh_connections routes
-	// replace while task collection dials read it.
-	sshConnMu sync.RWMutex
+	// cfgMu guards the parts of cfg the routes change — the workspaces and
+	// layout, and ssh_connections — and every write of config.yaml, which
+	// serializes all of cfg. A route that changes cfg or saves it holds it
+	// for writing from its snapshot to its save, so one route's rollback can
+	// never be persisted by another's save; readers hold it for reading. It
+	// is not reentrant: code under it reads h.cfg.SSHConnections directly
+	// rather than through sshConnections().
+	cfgMu sync.RWMutex
 }
 
 type preferredCWDState struct {
@@ -215,6 +220,8 @@ func (h *Handler) SetCommandCenterAvailable(available bool) {
 
 // GetLayout returns the current layout configuration.
 func (h *Handler) GetLayout(w http.ResponseWriter, r *http.Request) {
+	h.cfgMu.RLock()
+	defer h.cfgMu.RUnlock()
 	writeJSON(w, h.cfg.ActiveLayout())
 }
 
@@ -245,6 +252,8 @@ func (h *Handler) PutLayout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.cfgMu.Lock()
+	defer h.cfgMu.Unlock()
 	snapshot := h.cfg.Snapshot()
 	if !h.saveLayoutOrRollback(w, layout, snapshot) {
 		return
@@ -255,6 +264,8 @@ func (h *Handler) PutLayout(w http.ResponseWriter, r *http.Request) {
 
 // GetWorkspaces returns the configured workspaces and active workspace.
 func (h *Handler) GetWorkspaces(w http.ResponseWriter, r *http.Request) {
+	h.cfgMu.RLock()
+	defer h.cfgMu.RUnlock()
 	writeJSON(w, h.cfg.WorkspacesView())
 }
 
@@ -265,6 +276,8 @@ func (h *Handler) PutActiveWorkspace(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
+	h.cfgMu.Lock()
+	defer h.cfgMu.Unlock()
 	snapshot := h.cfg.Snapshot()
 	if !h.cfg.SetActiveWorkspace(req.ID) {
 		http.Error(w, "workspace not found", http.StatusNotFound)
@@ -300,6 +313,8 @@ func (h *Handler) PutWorkspaceVerticalBarWidth(w http.ResponseWriter, r *http.Re
 // error it returned, so the snapshot the rollback needs is taken before the
 // setting is applied rather than after it.
 func (h *Handler) applyWorkspaceSettingUpdate(w http.ResponseWriter, update func() error) {
+	h.cfgMu.Lock()
+	defer h.cfgMu.Unlock()
 	snapshot := h.cfg.Snapshot()
 	if err := update(); err != nil {
 		w.Header().Set("Content-Type", "application/json")
@@ -345,11 +360,13 @@ func (h *Handler) saveLayoutOrRollback(w http.ResponseWriter, layout config.Layo
 
 // PostWorkspace adds a new default local workspace and makes it active.
 func (h *Handler) PostWorkspace(w http.ResponseWriter, r *http.Request) {
+	h.cfgMu.Lock()
+	defer h.cfgMu.Unlock()
 	snapshot := h.cfg.Snapshot()
 	workspace := h.cfg.AddDefaultWorkspace()
 	var created []string
 	for _, pane := range panesInLayout(workspace.Layout) {
-		sess, err := h.createSession(pane, h.sshConnections())
+		sess, err := h.createSession(pane, h.cfg.SSHConnections)
 		if err != nil {
 			h.rollbackNewWorkspace(snapshot, created)
 			http.Error(w, fmt.Sprintf("failed to create session: %v", err), http.StatusInternalServerError)
@@ -385,6 +402,8 @@ func (h *Handler) rollbackNewWorkspace(snapshot config.Snapshot, created []strin
 // DeleteWorkspace removes a workspace.
 func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	h.cfgMu.Lock()
+	defer h.cfgMu.Unlock()
 	view := h.cfg.WorkspacesView()
 	if len(view.Items) <= 1 {
 		http.Error(w, "cannot delete the last workspace", http.StatusConflict)
@@ -422,6 +441,8 @@ func (h *Handler) PutWorkspace(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]string{responseErrorKey: "workspace title must not be empty"})
 		return
 	}
+	h.cfgMu.Lock()
+	defer h.cfgMu.Unlock()
 	snapshot := h.cfg.Snapshot()
 	if !h.cfg.RenameWorkspace(id, title) {
 		http.Error(w, "workspace not found", http.StatusNotFound)
@@ -461,6 +482,8 @@ func (h *Handler) PutWorkspaceLayout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.cfgMu.Lock()
+	defer h.cfgMu.Unlock()
 	snapshot := h.cfg.Snapshot()
 	if !h.cfg.UpdateWorkspaceLayout(id, layout) {
 		http.Error(w, "workspace not found", http.StatusNotFound)
@@ -553,9 +576,12 @@ func (h *Handler) DeleteSession(w http.ResponseWriter, r *http.Request) {
 	// the order DeleteWorkspace already used and the one issue #204 settled on
 	// for both. Closing the session first meant a failed write answered 500
 	// for a pane whose PTY was already gone: nothing the operator could retry.
+	h.cfgMu.Lock()
 	snapshot := h.cfg.Snapshot()
 	h.cfg.RemovePaneFromLayout(id)
-	if !h.saveLayoutOrRollback(w, h.cfg.Layout, snapshot) {
+	saved := h.saveLayoutOrRollback(w, h.cfg.Layout, snapshot)
+	h.cfgMu.Unlock()
+	if !saved {
 		return
 	}
 
@@ -582,13 +608,17 @@ func (h *Handler) RestartSession(w http.ResponseWriter, r *http.Request) {
 	}
 	defer h.endRestart(id)
 
+	// The pane config is read under cfgMu and used after it is released:
+	// nothing changes a stored PaneConfig in place (see config.Snapshot).
 	var found *config.PaneConfig
+	h.cfgMu.RLock()
 	for _, p := range h.cfg.AllPanes() {
 		if p.ID == id {
 			found = p
 			break
 		}
 	}
+	h.cfgMu.RUnlock()
 	if found == nil {
 		http.Error(w, "session config not found", http.StatusNotFound)
 		return

@@ -93,17 +93,33 @@ settings because what it decides is what the dashboard collects; panes can use e
 - **No renaming.** Panes refer to an entry by name; a rename would have to rewrite every pane that
   uses it, across workspaces, in the same save. Deleting and adding under the new name is available
   when no pane uses it.
-- **Deleting what a pane uses** is refused only when it would break the pane: a pane whose
-  connection is also a `~/.ssh/config` `Host` block keeps working without the entry, so that delete
-  is allowed.
-- **Editing reconnects.** The dashboard's open connection for an edited host was made with the old
-  details, so it is dropped and the next collection dials with the new ones.
-- **Concurrency.** The map is replaced, never changed in place, under a lock the readers in
-  `internal/api` take too: task collection dials from goroutines of its own, which read the map
-  while a route writes it.
+- **Deleting is refused only when it would break something.** Every `ssh`/`ssh_tmux` pane's
+  connection and every other dashboard host is resolved the way it is dialed, with and without the
+  entry, and the delete is refused when one resolves now and would not after, naming them. The first
+  version checked only panes naming the entry, with no same-named `Host` block to fall back to;
+  review found that a `~/.ssh/config` `ProxyJump` resolves through `ssh_connections` too, so
+  deleting a jump host broke every pane and dashboard host behind it.
+- **Editing reconnects, and discards a dial in flight.** The dashboard's connection for an edited
+  host was made with the old details, so it is dropped. Review found that clearing the connection
+  was not enough: a dial still in flight — the host shows `connecting…`, which is when a person goes
+  to fix it — finished afterwards and stored its old failure for 60 seconds, or its connection made
+  with the old user or key. `Reconnect` now replaces the host's entry, so that dial's result is
+  discarded, which also applies to the dashboard's own **Reconnect** button.
+- **One lock for the config, not one for the map.** The first version guarded only
+  `ssh_connections` with a lock of its own. Review showed, with `go test -race`, that it did not
+  cover the workspace and layout routes: each `config.yaml` write serializes the whole config, so a
+  workspace save could persist an `ssh_connections` change that its route then rolled back and
+  reported as failed. `internal/api` now has one `cfgMu`: every route that changes the config or
+  writes the file holds it from its snapshot to its save, and the readers of the workspaces,
+  layouts and `ssh_connections` hold it for reading. Task collection dials read the map through it
+  from goroutines of their own.
 - **Name rule.** A new entry's name follows the rule **Add SSH Host** applies to a `~/.ssh/config`
   alias, so a `~/.ssh/config` host can always be added by name. An existing name in `config.yaml` is
-  not re-checked, so an entry written by hand can still be edited and deleted.
+  not re-checked, so an entry written by hand can still be edited and deleted; the routes unescape
+  the name in the path, which chi hands back still escaped when it holds an `@`, `:` or `/`.
+- **The list carries what `config.yaml` holds.** Its `port` is not range-checked in the response
+  schema, because `config.yaml` is not checked on load: one hand-written port out of range made the
+  whole list fail to parse, leaving no entry editable. Saving it through the dialog checks it.
 
 ### Dashboard hosts are listed by name; details come from `~/.ssh/config` (2026-09-29, issue #272)
 

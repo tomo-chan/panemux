@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"maps"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
 
 	"panemux/internal/config"
+	"panemux/internal/session"
 	"panemux/internal/sshconfig"
 )
 
@@ -56,13 +58,28 @@ type sshConnectionRequest struct {
 	ClearPassword  bool   `json:"clear_password"`
 }
 
-// sshConnections is the current ssh_connections map. The map is never
-// changed in place once published — the routes below replace it — so a
-// caller may keep and range over what it got without holding the lock.
+// sshConnections is the current ssh_connections map, for a caller that does
+// not hold cfgMu. The map is never changed in place once published — the
+// routes below replace it — so a caller may keep and range over what it got
+// after the lock is released. A caller that holds cfgMu reads
+// h.cfg.SSHConnections directly: cfgMu is not reentrant.
 func (h *Handler) sshConnections() map[string]config.SSHConnection {
-	h.sshConnMu.RLock()
-	defer h.sshConnMu.RUnlock()
+	h.cfgMu.RLock()
+	defer h.cfgMu.RUnlock()
 	return h.cfg.SSHConnections
+}
+
+// connectionNameParam is the {name} path parameter, unescaped. chi matches
+// on the escaped path when there is one and hands the parameter back still
+// escaped, so a name written by hand in config.yaml with an @, : or / in it
+// would otherwise never be found.
+func connectionNameParam(w http.ResponseWriter, r *http.Request) (string, bool) {
+	name, err := url.PathUnescape(chi.URLParam(r, "name"))
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid ssh connection name in the path")
+		return "", false
+	}
+	return name, true
 }
 
 // GetConfigSSHConnections lists the ssh_connections entries, sorted by name.
@@ -70,10 +87,11 @@ func (h *Handler) GetConfigSSHConnections(w http.ResponseWriter, r *http.Request
 	if refuseCrossSite(w, r) {
 		return
 	}
-	conns := h.sshConnections()
+	h.cfgMu.RLock()
+	defer h.cfgMu.RUnlock()
 	inSSHConfig := h.sshConfigHostNames()
-	entries := make([]sshConnectionEntry, 0, len(conns))
-	for name, conn := range conns {
+	entries := make([]sshConnectionEntry, 0, len(h.cfg.SSHConnections))
+	for name, conn := range h.cfg.SSHConnections {
 		entries = append(entries, h.sshConnectionEntry(name, conn, inSSHConfig))
 	}
 	slices.SortFunc(entries, func(a, b sshConnectionEntry) int { return strings.Compare(a.Name, b.Name) })
@@ -100,8 +118,8 @@ func (h *Handler) PostConfigSSHConnection(w http.ResponseWriter, r *http.Request
 	conn := req.connection()
 	conn.Password = req.Password
 
-	h.sshConnMu.Lock()
-	defer h.sshConnMu.Unlock()
+	h.cfgMu.Lock()
+	defer h.cfgMu.Unlock()
 	if _, exists := h.cfg.SSHConnections[req.Name]; exists {
 		writeJSONError(w, http.StatusConflict, fmt.Sprintf("ssh connection %q already exists", req.Name))
 		return
@@ -121,26 +139,29 @@ func (h *Handler) PutConfigSSHConnection(w http.ResponseWriter, r *http.Request)
 	if refuseCrossSite(w, r) {
 		return
 	}
-	name := chi.URLParam(r, "name")
+	name, ok := connectionNameParam(w, r)
+	if !ok {
+		return
+	}
 	req, ok := decodeSSHConnectionRequest(w, r)
 	if !ok {
 		return
 	}
 
-	h.sshConnMu.Lock()
+	h.cfgMu.Lock()
 	existing, exists := h.cfg.SSHConnections[name]
 	if !exists {
-		h.sshConnMu.Unlock()
+		h.cfgMu.Unlock()
 		writeJSONError(w, http.StatusNotFound, fmt.Sprintf("ssh connection %q not found", name))
 		return
 	}
 	if req.Name != "" && req.Name != name {
-		h.sshConnMu.Unlock()
+		h.cfgMu.Unlock()
 		writeValidationError(w, "an ssh connection cannot be renamed; panes refer to it by name")
 		return
 	}
 	if req.ClearPassword && req.Password != "" {
-		h.sshConnMu.Unlock()
+		h.cfgMu.Unlock()
 		writeValidationError(w, "set either password or clear_password, not both")
 		return
 	}
@@ -153,7 +174,7 @@ func (h *Handler) PutConfigSSHConnection(w http.ResponseWriter, r *http.Request)
 		conn.Password = existing.Password
 	}
 	saved, ok := h.storeSSHConnection(w, name, conn)
-	h.sshConnMu.Unlock()
+	h.cfgMu.Unlock()
 	if !ok {
 		return
 	}
@@ -163,38 +184,77 @@ func (h *Handler) PutConfigSSHConnection(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, saved)
 }
 
-// DeleteConfigSSHConnection removes an entry, unless a pane uses it and
-// ~/.ssh/config has no Host block of the same name for the pane to fall back
-// to.
+// DeleteConfigSSHConnection removes an entry, unless that would leave a pane
+// or another dashboard host unable to resolve its connection: one that uses
+// the entry by name with no ~/.ssh/config Host block of that name to fall
+// back to, or one whose ~/.ssh/config ProxyJump goes through it.
 func (h *Handler) DeleteConfigSSHConnection(w http.ResponseWriter, r *http.Request) {
 	if refuseCrossSite(w, r) {
 		return
 	}
-	name := chi.URLParam(r, "name")
+	name, ok := connectionNameParam(w, r)
+	if !ok {
+		return
+	}
 
-	h.sshConnMu.Lock()
-	defer h.sshConnMu.Unlock()
+	h.cfgMu.Lock()
+	defer h.cfgMu.Unlock()
 	if _, exists := h.cfg.SSHConnections[name]; !exists {
 		writeJSONError(w, http.StatusNotFound, fmt.Sprintf("ssh connection %q not found", name))
 		return
 	}
-	if panes := h.cfg.PanesUsingConnection(name); len(panes) > 0 && !h.sshConfigHostNames()[name] {
-		writeJSONError(w, http.StatusConflict, fmt.Sprintf(
-			"ssh connection %q is used by pane %s, and ~/.ssh/config has no Host block of that name; "+
-				"change those panes' connection first",
-			name, strings.Join(panes, ", ")))
-		return
-	}
 	next := maps.Clone(h.cfg.SSHConnections)
 	delete(next, name)
+	if needed := h.brokenWithout(next); needed != "" {
+		writeJSONError(w, http.StatusConflict, fmt.Sprintf(
+			"ssh connection %q is needed by %s: without it they no longer resolve their connection; "+
+				"change them first", name, needed))
+		return
+	}
 	if !h.replaceSSHConnections(w, next) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// brokenWithout names the panes and dashboard hosts whose connection
+// resolves with the current ssh_connections and would not with next, as
+// "pane a, b and dashboard host c", or "" when there are none. It resolves
+// the way a pane is dialed (session.ResolveSSHConfig), so a ProxyJump through
+// the entry counts as much as a direct use. The caller holds cfgMu.
+func (h *Handler) brokenWithout(next map[string]config.SSHConnection) string {
+	current := h.cfg.SSHConnections
+	resolves := func(name string, conns map[string]config.SSHConnection) bool {
+		_, err := session.ResolveSSHConfig(name, conns, h.sshConfigPath)
+		return err == nil
+	}
+	breaks := func(name string) bool { return resolves(name, current) && !resolves(name, next) }
+
+	var panes, hosts []string
+	for _, pane := range h.cfg.AllPanes() {
+		if (pane.Type == config.PaneTypeSSH || pane.Type == config.PaneTypeSSHTmux) && breaks(pane.Connection) {
+			panes = append(panes, pane.ID)
+		}
+	}
+	for other := range next {
+		if breaks(other) {
+			hosts = append(hosts, other)
+		}
+	}
+	slices.Sort(panes)
+	slices.Sort(hosts)
+	var parts []string
+	if len(panes) > 0 {
+		parts = append(parts, "pane "+strings.Join(panes, ", "))
+	}
+	if len(hosts) > 0 {
+		parts = append(parts, "dashboard host "+strings.Join(hosts, ", "))
+	}
+	return strings.Join(parts, " and ")
+}
+
 // storeSSHConnection validates conn, puts it under name and saves the config.
-// The caller holds sshConnMu. On failure the response is written and the
+// The caller holds cfgMu. On failure the response is written and the
 // running config is unchanged.
 func (h *Handler) storeSSHConnection(
 	w http.ResponseWriter, name string, conn config.SSHConnection,
@@ -230,7 +290,7 @@ func (h *Handler) storeSSHConnection(
 
 // replaceSSHConnections publishes next and saves the config, putting the
 // previous map back when the save fails (issue #204). The caller holds
-// sshConnMu. The error is not echoed: it can carry nothing useful to the
+// cfgMu. The error is not echoed: it can carry nothing useful to the
 // dashboard, and the message stays free of anything the entry held.
 func (h *Handler) replaceSSHConnections(w http.ResponseWriter, next map[string]config.SSHConnection) bool {
 	previous := h.cfg.SSHConnections

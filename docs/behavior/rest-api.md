@@ -290,11 +290,15 @@ has a `Host` block of the same name, whose values fill in the fields the entry l
   one, a non-empty one replaces it, and `clear_password: true` removes it. `name` in the body, if
   sent, must be the entry's own; an entry cannot be renamed. `200` with the entry; `404` for an
   unknown name; `400`/`422` as for `POST`, and `422` for `password` together with `clear_password`.
-  The task dashboard's connection to the host is dropped, so the next collection dials it with the
-  new details.
-- `DELETE /api/config/ssh-connections/{name}` — `204`; `404` for an unknown name; `409` when a pane
-  uses the entry and `~/.ssh/config` has no `Host` block of that name for the pane to fall back to,
-  naming the panes.
+  The task dashboard's connection to the host is dropped, and a dial of it still in flight is
+  discarded, so the next collection dials it with the new details.
+- `DELETE /api/config/ssh-connections/{name}` — `204`; `404` for an unknown name; `409` when, without
+  the entry, a pane's connection or another dashboard host would no longer resolve, naming them. That
+  covers a pane that uses the entry by name with no `~/.ssh/config` `Host` block of that name to fall
+  back to, and a pane or host whose `~/.ssh/config` `ProxyJump` goes through the entry.
+
+`{name}` is URL-escaped, so an entry written by hand in `config.yaml` with a character such as `@`,
+`:` or `/` in its name can be edited and deleted.
 
 Field errors (`422`): `port` outside 1–65535 (0 or absent means unset); a control character in
 `host`, `user`, `key_file` or `known_hosts_file`; a `key_file` or `known_hosts_file` that is neither

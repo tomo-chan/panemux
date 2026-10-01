@@ -1335,9 +1335,18 @@ describe('SSHConnectionEntrySchema', () => {
     expect(result.success).toBe(true)
   })
 
-  it('rejects a port out of range', () => {
+  // config.yaml is not range-checked on load, so the list has to carry an
+  // entry written there by hand with a bad port, or no entry can be fixed.
+  it('accepts a port out of range written into config.yaml', () => {
     const result = SSHConnectionEntrySchema.safeParse({
       name: 'x', port: 70000, has_password: false, in_ssh_config: false, panes: [],
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects a non-integer port', () => {
+    const result = SSHConnectionEntrySchema.safeParse({
+      name: 'x', port: 22.5, has_password: false, in_ssh_config: false, panes: [],
     })
     expect(result.success).toBe(false)
   })

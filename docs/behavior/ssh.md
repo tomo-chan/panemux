@@ -69,8 +69,9 @@ collected from until its name is listed under `ssh_connections`.
 The entries can also be managed from the task dashboard's **Hosts…** dialog, which writes
 `config.yaml` ([`/api/config/ssh-connections`](rest-api.md#apiconfigssh-connections)). It never
 shows a saved password; leaving the password empty when editing keeps it. An entry cannot be renamed,
-and one a pane uses cannot be deleted unless `~/.ssh/config` has a `Host` block of that name for the
-pane to fall back to.
+and one cannot be deleted while a pane or another dashboard host would no longer resolve without it:
+one that uses it by name with no `Host` block of that name to fall back to, or one whose `ProxyJump`
+goes through it.
 
 ### Using `~/.ssh/config` hosts
 

@@ -340,8 +340,9 @@ terminal that had focus cannot receive what is typed into the dashboard.
   disables it. What the form can tell without the server — a missing or malformed name, a name
   already listed, a port outside 1–65535, no host and no block to take it from — is refused under the
   form; the server's refusals appear there as "Could not save: …", keeping what was typed. `Delete`
-  asks in an inline red confirmation; a host panes depend on is refused before asking, naming the
-  panes. A green notice says what was added, saved or deleted, and the board collects again.
+  asks in an inline red confirmation; a host panes use by name with no `~/.ssh/config` block to fall
+  back to is refused before asking, naming the panes, and a refusal only the server can tell — a
+  pane or host whose `ProxyJump` goes through it — appears as "Could not delete …". A green notice says what was added, saved or deleted, and the board collects again.
 - **New task.** A modal form over the dashboard: Host (every host on the board, an unreachable one
   marked "(unreachable)"), Working directory, Agent (`claude` or `codex`), Labels
   (comma-separated, optional) and First instruction. With `codex` chosen, a note under Agent says
