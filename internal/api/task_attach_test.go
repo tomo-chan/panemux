@@ -51,8 +51,8 @@ func attachCollection() []byte {
 // fakeAttachTimers stands in for time.AfterFunc so the grace period is
 // driven by the test, never by the wall clock.
 type fakeAttachTimers struct {
-	mu     sync.Mutex
 	timers []*fakeAttachTimer
+	mu     sync.Mutex
 }
 
 type fakeAttachTimer struct {
@@ -99,14 +99,14 @@ func (f *fakeAttachTimers) fire() {
 type attachCall struct{ id, title, connection, tmuxSession string }
 
 type attachEnv struct {
+	err     error
 	h       *Handler
 	timers  *fakeAttachTimers
-	mu      sync.Mutex
-	calls   []attachCall
 	created map[string]*mockSession
-	err     error
 	// gate, when set, holds every attach until it is closed.
-	gate chan struct{}
+	gate  chan struct{}
+	calls []attachCall
+	mu    sync.Mutex
 }
 
 func newAttachEnv(t *testing.T, runLocal func(context.Context, string) ([]byte, error)) *attachEnv {
@@ -121,7 +121,9 @@ func newAttachEnv(t *testing.T, runLocal func(context.Context, string) ([]byte, 
 		RunLocal: runLocal,
 	}))
 	h.boardAttaches.afterFunc = e.timers.afterFunc
-	h.createTmuxAttach = func(id, title, connection, tmuxSession string, _ map[string]config.SSHConnection) (session.Session, error) {
+	h.createTmuxAttach = func(
+		id, title, connection, tmuxSession string, _ map[string]config.SSHConnection,
+	) (session.Session, error) {
 		if e.gate != nil {
 			<-e.gate
 		}
@@ -257,11 +259,11 @@ func TestPostTaskAttach_AnExitedAttachIsReplaced(t *testing.T) {
 
 func TestPostTaskAttach_Refusals(t *testing.T) {
 	cases := []struct {
+		attach   error
+		runLocal func(context.Context, string) ([]byte, error)
+		headers  map[string]string
 		name     string
 		body     string
-		runLocal func(context.Context, string) ([]byte, error)
-		attach   error
-		headers  map[string]string
 		want     int
 	}{
 		{name: "invalid body", body: `{"id":`, want: http.StatusBadRequest},
@@ -277,7 +279,10 @@ func TestPostTaskAttach_Refusals(t *testing.T) {
 			runLocal: func(context.Context, string) ([]byte, error) { return nil, errors.New("boom") },
 			want:     http.StatusBadGateway,
 		},
-		{name: "attach fails", body: `{"id":"local:claude:in-tmux"}`, attach: errors.New("dial: refused"), want: http.StatusBadGateway},
+		{
+			name: "attach fails", body: `{"id":"local:claude:in-tmux"}`,
+			attach: errors.New("dial: refused"), want: http.StatusBadGateway,
+		},
 		{
 			name: "cross-site", body: `{"id":"local:claude:in-tmux"}`,
 			headers: map[string]string{"Sec-Fetch-Site": "cross-site"}, want: http.StatusForbidden,

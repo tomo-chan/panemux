@@ -32,6 +32,12 @@ const boardAttachIDPrefix = "board-"
 
 type boardAttachTimer interface{ Stop() bool }
 
+// TmuxAttachFactory creates a board attach's tmux client: session id, on the
+// connection ("" for the panemux host), attached to tmuxSession.
+type TmuxAttachFactory func(
+	id, title, connection, tmuxSession string, sshConns map[string]config.SSHConnection,
+) (session.Session, error)
+
 type boardAttach struct {
 	timer       boardAttachTimer // running while no WebSocket reads the session
 	taskID      string
@@ -80,15 +86,17 @@ func (b *boardAttaches) forgetLocked(attach *boardAttach) {
 	delete(b.bySession, attach.sessionID)
 }
 
-// forget drops the attach of sessionID and reports whether there was one.
-func (b *boardAttaches) forget(sessionID string) bool {
+// forget drops the attach of sessionID and returns it, or nil when there was
+// none.
+func (b *boardAttaches) forget(sessionID string) *boardAttach {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	attach, ok := b.bySession[sessionID]
-	if ok {
-		b.forgetLocked(attach)
+	if !ok {
+		return nil
 	}
-	return ok
+	b.forgetLocked(attach)
+	return attach
 }
 
 func (b *boardAttaches) close() {
@@ -193,7 +201,7 @@ func (h *Handler) reserveBoardAttach(r *http.Request, taskID string) (*taskAttac
 			case <-wait:
 				continue
 			case <-r.Context().Done():
-				return nil, nil, r.Context().Err()
+				return nil, nil, fmt.Errorf("wait for the task's attach: %w", r.Context().Err())
 			}
 		}
 		done := make(chan struct{})
@@ -288,19 +296,19 @@ func (h *Handler) DeleteTaskAttach(w http.ResponseWriter, r *http.Request) {
 	if refuseCrossSite(w, r) {
 		return
 	}
-	sessionID := chi.URLParam(r, "id")
-	if !h.boardAttaches.forget(sessionID) {
-		http.Error(w, "no board attach "+sessionID, http.StatusNotFound)
+	attach := h.boardAttaches.forget(chi.URLParam(r, "id"))
+	if attach == nil {
+		http.Error(w, "no such board attach", http.StatusNotFound)
 		return
 	}
-	h.removeBoardAttachSession(sessionID)
+	// The ID logged and removed is the registry's own, minted by
+	// newBoardAttachID, not the request's.
+	h.removeBoardAttachSession(attach.sessionID)
 	w.WriteHeader(http.StatusNoContent)
 }
 
 // SetTmuxAttachFactory replaces how a board attach's tmux client is created.
 // It is the seam the server's route tests use instead of a real tmux.
-func (h *Handler) SetTmuxAttachFactory(
-	fn func(id, title, connection, tmuxSession string, sshConns map[string]config.SSHConnection) (session.Session, error),
-) {
+func (h *Handler) SetTmuxAttachFactory(fn TmuxAttachFactory) {
 	h.createTmuxAttach = fn
 }

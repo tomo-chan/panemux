@@ -109,7 +109,11 @@ and pull-request metadata, the issues the pull request closes, the references
 `task_dashboard.autolinks` finds in the branch name and PR title, and each task's done and label
 record from `tasks.RecordStore`; `PUT /api/tasks/records` replaces one record. Opening a task
 creates or focuses a `tmux` / `ssh_tmux` pane through the ordinary pane APIs, or focuses the
-`local` / `ssh` pane an agent outside tmux runs in. `POST /api/tasks` and `POST /api/tasks/resume`
+`local` / `ssh` pane an agent outside tmux runs in. `POST /api/tasks/attach` instead opens a
+temporary tmux client on a task's session that the layout never holds: the handler finds the task
+with a fresh collection of its host (`tasks.Service.FindTask`), registers an attach-only
+`tmux attach-session -t =<name>` session with the session manager under a `board-` ID served by
+`/ws/{id}`, and removes it on `DELETE` or once no WebSocket has read it for 10s. `POST /api/tasks` and `POST /api/tasks/resume`
 run a second fixed script the same way — `sh -s` with the script on stdin — which starts claude or
 codex in a detached tmux session; a resume first collects the host again to confirm the session is
 stopped there, and a start records its labels in `tasks.RecordStore` — for codex, whose session ID

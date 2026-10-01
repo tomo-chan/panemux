@@ -105,7 +105,8 @@ Accepts `{ "vertical_bar_width": <int> }`, validates the shared vertical workspa
 
 ### `GET /api/sessions`
 
-Returns a list of active sessions with `id`, `type`, `title`, and `state`.
+Returns a list of active sessions with `id`, `type`, `title`, and `state`. The task dashboard's
+temporary attaches ([`POST /api/tasks/attach`](tasks.md#post-apitasksattach)) are not listed.
 
 ### `POST /api/sessions`
 
@@ -196,7 +197,7 @@ A `409` is reported rather than worked around. An OAuth provider matches the reg
 `redirect_uri` exactly, so rewriting the callback to a different local port would break the login it
 is meant to complete.
 
-### `GET /api/tasks`, `POST /api/tasks/hosts/{name}/reconnect`, `PUT /api/tasks/records`, `POST /api/tasks`, `POST /api/tasks/resume` and `POST /api/tasks/summary`
+### `GET /api/tasks`, `POST /api/tasks/hosts/{name}/reconnect`, `PUT /api/tasks/records`, `POST /api/tasks`, `POST /api/tasks/resume`, `POST /api/tasks/summary` and `POST`/`DELETE /api/tasks/attach`
 
 The task dashboard's collection, its per-host reconnect, the done and label records, starting
 and resuming tasks, and asking for a task's summary. Their responses and the collection rules are in
@@ -205,7 +206,8 @@ and resuming tasks, and asking for a task's summary. Their responses and the col
 starting and resuming are in [Starting a task](tasks.md#starting-a-task),
 [Resuming a task](tasks.md#resuming-a-task), [`POST /api/tasks`](tasks.md#post-apitasks) and
 [`POST /api/tasks/resume`](tasks.md#post-apitasksresume); summaries are in [Summaries](tasks.md#summaries)
-and [`POST /api/tasks/summary`](tasks.md#post-apitaskssummary).
+and [`POST /api/tasks/summary`](tasks.md#post-apitaskssummary); the board's temporary tmux attach is in
+[`POST /api/tasks/attach`](tasks.md#post-apitasksattach).
 
 ### `GET /api/ssh-connections`
 

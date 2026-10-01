@@ -53,7 +53,7 @@ type Handler struct {
 	taskGitLookup           func(ctx context.Context, host, cwd string, withPR bool) *taskGitInfo
 	taskGitCache            map[string]taskGitCacheEntry
 	createSession           func(*config.PaneConfig, map[string]config.SSHConnection) (session.Session, error)
-	createTmuxAttach        func(id, title, connection, tmuxSession string, sshConns map[string]config.SSHConnection) (session.Session, error)
+	createTmuxAttach        TmuxAttachFactory
 	boardAttaches           *boardAttaches
 	detectLocalShellFn      func() (string, error)
 	detectRemoteShellFn     func(cfg session.SSHConfig) (string, error)

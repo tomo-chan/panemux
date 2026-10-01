@@ -354,13 +354,17 @@ func refuseCrossSite(w http.ResponseWriter, r *http.Request) bool {
 	return false
 }
 
+// secFetchSiteCrossSite is the Sec-Fetch-Site value of a request another
+// site made.
+const secFetchSiteCrossSite = "cross-site"
+
 // isCrossSiteRequest uses what a browser adds to every request it makes on a
 // page's behalf: Sec-Fetch-Site (sent on every request by current browsers,
 // images included) and Origin (sent on cross-origin requests and on POST).
 // A request carrying neither is not from a browser page and is allowed.
 func isCrossSiteRequest(r *http.Request) bool {
 	switch r.Header.Get("Sec-Fetch-Site") {
-	case "cross-site", "same-site":
+	case secFetchSiteCrossSite, "same-site":
 		return true
 	}
 	origin := r.Header.Get("Origin")

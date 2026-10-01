@@ -57,7 +57,8 @@ func NewTmuxSSHAttach(id, title, tmuxSession string, cfg SSHConfig) (*TmuxSSHSes
 	if err != nil {
 		return nil, err
 	}
-	return startTmuxSSHSession(id, title, validatedSession, tmuxSSHAttachCommand(validatedSession), cfg, client, jumpClient)
+	command := tmuxSSHAttachCommand(validatedSession)
+	return startTmuxSSHSession(id, title, validatedSession, command, cfg, client, jumpClient)
 }
 
 // newTmuxSSHSessionFromClient completes the remote tmux lifecycle over an

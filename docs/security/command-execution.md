@@ -20,6 +20,23 @@ For the same reason, `os.Getenv("SHELL")` is not used as a default shell. Enviro
 
 `validTmuxSessionName` in `internal/session/tmux_ssh.go` uses a strict regex (`^[a-zA-Z0-9_.-]+$`) validated at construction time. Arguments are passed as discrete `exec.Command` args, not via `sh -c`, so no shell interpolation occurs.
 
+**The task dashboard's attach** (`POST /api/tasks/attach`, [behavior](../behavior/tasks.md#post-apitasksattach))
+passes a tmux session name that a host's collection reported, not one a person configured. It reaches
+the sink only through `NewTmuxLocalAttach` / `NewTmuxSSHAttach` in `internal/session`, and:
+
+- The request names only a task ID. The tmux session name and the host come from a fresh collection
+  of the host that ID names (`tasks.Service.FindTask`); nothing else in the request reaches tmux.
+- `validateTmuxAttachName` refuses an empty name and anything outside `^[a-zA-Z0-9_.-]+$` before
+  exec, and before the SSH dial. The allowlist excludes quotes, whitespace, shell metacharacters,
+  `:` (a tmux window target) and `=`.
+- Locally the argv is the literal `attach-session`, `-t`, `=<name>`, discrete arguments with no
+  shell. Over SSH the remote command is `tmux attach-session -t '=<name>'`; the single quotes are
+  safe because the allowlist excludes a quote.
+- The `=` prefix makes tmux match the session name exactly. Without it tmux resolves a target by
+  prefix, so `task-7c21` could attach to `task-7c21e0a4`. `attach-session` never creates a session,
+  unlike the panes' `new-session -A`: a name that no longer exists fails rather than starting a shell
+  under the task's name.
+
 ### Remote path arguments (SSH working directory)
 
 When an SSH or SSH+tmux pane has `cwd` set, the path is passed as part of a remote shell command (`cd <cwd> && exec $SHELL`). User-supplied paths that flow into `sess.Start()` must be validated with `validRemotePath` in `internal/session/ssh.go` before use.

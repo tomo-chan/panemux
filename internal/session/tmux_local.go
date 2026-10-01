@@ -297,7 +297,7 @@ func tmuxLocalAttachArgs(tmuxSession string) []string {
 // error rather than tmux's session "0".
 func validateTmuxAttachName(tmuxSession string) (string, error) {
 	if tmuxSession == "" {
-		return "", fmt.Errorf("invalid tmux session name: empty")
+		return "", errors.New("invalid tmux session name: empty")
 	}
 	return validateTmuxSessionName(tmuxSession)
 }
