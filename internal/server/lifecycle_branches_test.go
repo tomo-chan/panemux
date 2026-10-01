@@ -150,7 +150,7 @@ func TestStartWrapsAFailureToListen(t *testing.T) {
 // rather than waiting on a deadline.
 func TestShutdownWrapsAFailureToDrain(t *testing.T) {
 	srv, port, errCh, states := startListening(t)
-	drain(states) // the probe dial from startListening
+	waitForProbeClosed(t, states) // the probe dial from startListening
 
 	held, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", port))
 	require.NoError(t, err)
@@ -176,12 +176,21 @@ func TestShutdownWrapsAFailureToDrain(t *testing.T) {
 	}
 }
 
-func drain(states chan http.ConnState) {
+// waitForProbeClosed waits until net/http has reported the end of
+// startListening's probe connection. Draining what has arrived so far is not
+// enough: the probe's StateNew can still be on its way, and
+// requireConnRegistered would then take it for the held connection's.
+func waitForProbeClosed(t *testing.T, states chan http.ConnState) {
+	t.Helper()
+	deadline := time.After(5 * time.Second)
 	for {
 		select {
-		case <-states:
-		default:
-			return
+		case st := <-states:
+			if st == http.StateClosed {
+				return
+			}
+		case <-deadline:
+			t.Fatal("the probe connection was never reported closed")
 		}
 	}
 }
