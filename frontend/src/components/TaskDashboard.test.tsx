@@ -91,6 +91,20 @@ function renderDashboard(state: TasksState = tasksState(), onOpenTask = vi.fn(),
   return { onOpenTask, onShowWorkspaces }
 }
 
+function hostsState(overrides: Partial<SSHConnectionsState> = {}): SSHConnectionsState {
+  return {
+    connections: [],
+    sshConfigNames: ['gpu-box'],
+    loading: false,
+    error: null,
+    load: vi.fn().mockResolvedValue(undefined),
+    create: vi.fn().mockResolvedValue(null),
+    update: vi.fn().mockResolvedValue(null),
+    remove: vi.fn().mockResolvedValue(null),
+    ...overrides,
+  }
+}
+
 describe('TaskDashboard', () => {
   it('places each task in its state column with a count', () => {
     renderDashboard()
@@ -349,6 +363,37 @@ describe('TaskDashboard', () => {
     renderDashboard(tasksState({ data: null, loading: true, updatedAt: null }))
     expect(screen.getByText('Loading…')).toBeInTheDocument()
     expect(screen.getAllByText('None', { selector: '.td-empty' })).toHaveLength(5)
+  })
+
+  it('opens the hosts dialog and collects again after a host is added', async () => {
+    const state = tasksState()
+    const hosts = hostsState()
+    render(
+      <TaskDashboard
+        tasksState={state}
+        hostsState={hosts}
+        workspaces={workspaces}
+        onOpenTask={vi.fn()}
+        onShowWorkspaces={vi.fn()}
+        now={() => NOW}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Hosts…' }))
+    const dialog = screen.getByRole('dialog', { name: /Dashboard hosts/ })
+    expect(hosts.load).toHaveBeenCalled()
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add host' }))
+    fireEvent.change(within(dialog).getByLabelText('Name'), { target: { value: 'gpu-box' } })
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Save host' }))
+    })
+
+    expect(hosts.create).toHaveBeenCalledWith({ name: 'gpu-box' })
+    expect(state.refresh).toHaveBeenCalled()
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }))
+    expect(screen.queryByRole('dialog', { name: /Dashboard hosts/ })).toBeNull()
   })
 })
 
@@ -950,52 +995,5 @@ describe('TaskDashboard summaries', () => {
     selectCard('busy-new')
     expect(workSection()).toHaveTextContent('Summarized when it stops working.')
     expect(within(workSection()).getByRole('button', { name: 'Summarize' })).toBeInTheDocument()
-  })
-})
-
-describe('TaskDashboard hosts', () => {
-  function hostsState(overrides: Partial<SSHConnectionsState> = {}): SSHConnectionsState {
-    return {
-      connections: [],
-      sshConfigNames: ['gpu-box'],
-      loading: false,
-      error: null,
-      load: vi.fn().mockResolvedValue(undefined),
-      create: vi.fn().mockResolvedValue(null),
-      update: vi.fn().mockResolvedValue(null),
-      remove: vi.fn().mockResolvedValue(null),
-      ...overrides,
-    }
-  }
-
-  it('opens the hosts dialog and collects again after a host is added', async () => {
-    const state = tasksState()
-    const hosts = hostsState()
-    render(
-      <TaskDashboard
-        tasksState={state}
-        hostsState={hosts}
-        workspaces={workspaces}
-        onOpenTask={vi.fn()}
-        onShowWorkspaces={vi.fn()}
-        now={() => NOW}
-      />,
-    )
-
-    fireEvent.click(screen.getByRole('button', { name: 'Hosts…' }))
-    const dialog = screen.getByRole('dialog', { name: /Dashboard hosts/ })
-    expect(hosts.load).toHaveBeenCalled()
-
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Add host' }))
-    fireEvent.change(within(dialog).getByLabelText('Name'), { target: { value: 'gpu-box' } })
-    await act(async () => {
-      fireEvent.click(within(dialog).getByRole('button', { name: 'Save host' }))
-    })
-
-    expect(hosts.create).toHaveBeenCalledWith({ name: 'gpu-box' })
-    expect(state.refresh).toHaveBeenCalled()
-
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }))
-    expect(screen.queryByRole('dialog', { name: /Dashboard hosts/ })).toBeNull()
   })
 })
