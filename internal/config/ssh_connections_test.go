@@ -54,7 +54,7 @@ func TestValidateSSHConnection(t *testing.T) {
 		{name: "negative port", conn: SSHConnection{Port: -1}, wantErr: "port must be between 1 and 65535"},
 		{name: "port above range", conn: SSHConnection{Port: 65536}, wantErr: "port must be between 1 and 65535"},
 		{name: "control character in host", conn: SSHConnection{Host: "gpu\n.invalid"}, wantErr: "host must not contain"},
-		{name: "control character first in host", conn: SSHConnection{Host: "\tgpu.invalid"}, wantErr: "host must not contain"},
+		{name: "control character first", conn: SSHConnection{Host: "\tgpu.invalid"}, wantErr: "host must not contain"},
 		{name: "control character in user", conn: SSHConnection{User: "de\tmo"}, wantErr: "user must not contain"},
 		{name: "control character in key_file", conn: SSHConnection{KeyFile: "/k\x00"}, wantErr: "key_file must not contain"},
 		{
