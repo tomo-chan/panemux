@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"net/http"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -76,7 +76,7 @@ func (h *Handler) GetConfigSSHConnections(w http.ResponseWriter, r *http.Request
 	for name, conn := range conns {
 		entries = append(entries, h.sshConnectionEntry(name, conn, inSSHConfig))
 	}
-	sort.Slice(entries, func(i, j int) bool { return entries[i].Name < entries[j].Name })
+	slices.SortFunc(entries, func(a, b sshConnectionEntry) int { return strings.Compare(a.Name, b.Name) })
 	writeJSON(w, sshConnectionsListResponse{Connections: entries})
 }
 
