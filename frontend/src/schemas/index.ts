@@ -191,6 +191,49 @@ export const SSHConfigHostsResponseSchema = z.object({
 
 export type SSHConfigHostsResponse = z.infer<typeof SSHConfigHostsResponseSchema>
 
+// An ssh_connections entry in config.yaml: a host the task dashboard
+// collects from, which panes can also use (issue #272). The server never
+// sends the password, only whether one is saved. Fields left out are taken
+// from the ~/.ssh/config Host block of the same name, when there is one.
+export const SSHConnectionEntrySchema = z.object({
+  name: z.string().min(1),
+  host: z.string().optional(),
+  user: z.string().optional(),
+  // Not range-checked: config.yaml is not checked on load, and a hand-written
+  // port out of range must still list so it can be corrected here.
+  port: z.number().int().optional(),
+  key_file: z.string().optional(),
+  known_hosts_file: z.string().optional(),
+  has_password: z.boolean(),
+  in_ssh_config: z.boolean(),
+  panes: z.array(z.string()),
+})
+
+export type SSHConnectionEntry = z.infer<typeof SSHConnectionEntrySchema>
+
+export const SSHConnectionEntriesResponseSchema = z.object({
+  connections: z.array(SSHConnectionEntrySchema),
+})
+
+export type SSHConnectionEntriesResponse = z.infer<typeof SSHConnectionEntriesResponseSchema>
+
+// The body of POST /api/config/ssh-connections and of
+// PUT /api/config/ssh-connections/{name}. On an update an empty password
+// keeps the saved one, and clear_password removes it; name, when sent,
+// must be the entry's own.
+export const SSHConnectionRequestSchema = z.object({
+  name: z.string().optional(),
+  host: z.string().optional(),
+  user: z.string().optional(),
+  port: z.number().int().min(0).max(65535).optional(),
+  key_file: z.string().optional(),
+  known_hosts_file: z.string().optional(),
+  password: z.string().optional(),
+  clear_password: z.boolean().optional(),
+})
+
+export type SSHConnectionRequest = z.infer<typeof SSHConnectionRequestSchema>
+
 export const DetectShellResponseSchema = z.object({
   shell: z.string(),
 })

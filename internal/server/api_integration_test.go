@@ -377,6 +377,46 @@ var apiCases = map[string]apiCase{
 		assert.Contains(t, rr.Body.String(), `"names":["demo"]`)
 	}},
 
+	"GET /api/config/ssh-connections": {run: func(t *testing.T, e *apiEnv) {
+		e.cfg.SSHConnections = map[string]config.SSHConnection{
+			"demo": {Host: "demo.invalid", User: "demo", Password: "integration-secret"},
+		}
+
+		rr := e.do(t, http.MethodGet, "/api/config/ssh-connections", "")
+		assert.Equal(t, http.StatusOK, rr.Code)
+		assert.Contains(t, rr.Body.String(), `"name":"demo"`)
+		assert.Contains(t, rr.Body.String(), `"has_password":true`)
+		assert.NotContains(t, rr.Body.String(), "integration-secret")
+	}},
+
+	"POST /api/config/ssh-connections": {run: func(t *testing.T, e *apiEnv) {
+		rr := e.do(t, http.MethodPost, "/api/config/ssh-connections",
+			`{"name":"added","host":"added.invalid","user":"demo","password":"integration-secret"}`)
+		assert.Equal(t, http.StatusCreated, rr.Code)
+		assert.NotContains(t, rr.Body.String(), "integration-secret")
+		assert.Equal(t, "integration-secret", e.cfg.SSHConnections["added"].Password)
+	}},
+
+	"PUT /api/config/ssh-connections/{name}": {run: func(t *testing.T, e *apiEnv) {
+		e.cfg.SSHConnections = map[string]config.SSHConnection{
+			"demo": {Host: "demo.invalid", Password: "integration-secret"},
+		}
+
+		rr := e.do(t, http.MethodPut, "/api/config/ssh-connections/demo", `{"host":"moved.invalid"}`)
+		assert.Equal(t, http.StatusOK, rr.Code)
+		// An empty password keeps the saved one.
+		assert.Equal(t, config.SSHConnection{Host: "moved.invalid", Password: "integration-secret"},
+			e.cfg.SSHConnections["demo"])
+	}},
+
+	"DELETE /api/config/ssh-connections/{name}": {run: func(t *testing.T, e *apiEnv) {
+		e.cfg.SSHConnections = map[string]config.SSHConnection{"demo": {Host: "demo.invalid"}}
+
+		rr := e.do(t, http.MethodDelete, "/api/config/ssh-connections/demo", "")
+		assert.Equal(t, http.StatusNoContent, rr.Code)
+		assert.NotContains(t, e.cfg.SSHConnections, "demo")
+	}},
+
 	"GET /api/ssh-config/hosts": {run: func(t *testing.T, e *apiEnv) {
 		writeSSHConfig(t, e.home, "Host demo\n  HostName demo.invalid\n  User demo\n")
 

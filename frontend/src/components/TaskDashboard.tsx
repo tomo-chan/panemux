@@ -4,6 +4,9 @@ import type { TasksState } from '../hooks/useTasks'
 import { TASKS_POLL_INTERVAL_MS } from '../hooks/useTasks'
 import { TERMINAL_FONT_FAMILY } from '../utils/fonts'
 import { NewTaskDialog } from './NewTaskDialog'
+import { DashboardHostsDialog } from './DashboardHostsDialog'
+import { useSSHConnections } from '../hooks/useSSHConnections'
+import type { SSHConnectionsState } from '../hooks/useSSHConnections'
 import {
   TASK_STATE_LABELS,
   allLabels,
@@ -64,6 +67,11 @@ const ALL_LABELS = '\u0000all'
 
 export interface TaskDashboardProps {
   tasksState: TasksState
+  /**
+   * The hosts the dashboard collects from (ssh_connections), for the Hosts…
+   * dialog. Injectable for tests; the dashboard manages them itself otherwise.
+   */
+  hostsState?: SSHConnectionsState
   workspaces: Workspace[]
   onOpenTask: (task: Task, action: TaskOpenAction) => void
   onShowWorkspaces: () => void
@@ -81,6 +89,7 @@ function stateStyle(state: Task['state']): StateVars {
 
 export const TaskDashboard: React.FC<TaskDashboardProps> = ({
   tasksState,
+  hostsState,
   workspaces,
   onOpenTask,
   onShowWorkspaces,
@@ -96,6 +105,9 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [detailOpen, setDetailOpen] = useState(false)
   const [newTaskOpen, setNewTaskOpen] = useState(false)
+  const [hostsOpen, setHostsOpen] = useState(false)
+  const ownHostsState = useSSHConnections()
+  const hostsDialogState = hostsState ?? ownHostsState
   // A task that was started but is not listed yet: claude writes the state
   // the collection reads only once it is running, and codex has no session
   // until it has its first instruction. It is selected when it appears,
@@ -200,6 +212,9 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
         </span>
         <button type="button" className="td-btn" onClick={() => void refresh()} disabled={loading}>
           Refresh
+        </button>
+        <button type="button" className="td-btn" onClick={() => setHostsOpen(true)}>
+          Hosts…
         </button>
         <button type="button" className="td-btn td-btn-primary" onClick={() => setNewTaskOpen(true)}>
           New task
@@ -345,6 +360,12 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
         onLaunch={launch}
         onLaunched={launched}
         onClose={() => setNewTaskOpen(false)}
+      />
+      <DashboardHostsDialog
+        isOpen={hostsOpen}
+        state={hostsDialogState}
+        onChanged={() => void refresh()}
+        onClose={() => setHostsOpen(false)}
       />
     </section>
   )

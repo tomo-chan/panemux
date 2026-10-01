@@ -254,6 +254,58 @@ Request body:
 
 `name` must match `^[a-zA-Z0-9_.\-]+$`. `hostname`, `user`, and `identity_file` must not contain a control character: each is written as the rest of one line, and a line break would add a directive of its own ([security](../security/command-execution.md#ssh-proxycommand)). `port` defaults to 0 (omitted from the written block) when not specified. `identity_file` is optional.
 
+### `/api/config/ssh-connections`
+
+Lists and edits `ssh_connections` in `config.yaml`: the hosts the
+[task dashboard](tasks.md#hosts-and-connections) collects from, which panes can also use
+([SSH](ssh.md#defining-connections-in-ssh_connections)). This is not `~/.ssh/config`, which
+`POST /api/ssh-config/hosts` writes. All four routes refuse a request another site's page made with
+`403`, as the task routes do, and every change is written to `config.yaml` through the same
+whole-file atomic write as the workspace routes; a write that fails answers `500`
+`failed to save ssh_connections` and leaves the running config as it was. Error bodies are
+`{"error": "…"}` and name a field, never its value.
+
+An entry, as every route returns it:
+
+```json
+{
+  "name": "build-box", "host": "build.example.com", "user": "deploy", "port": 2222,
+  "key_file": "/home/deploy/.ssh/id_ed25519", "known_hosts_file": "/home/deploy/.ssh/known_hosts",
+  "has_password": true, "in_ssh_config": false, "panes": ["build"]
+}
+```
+
+`host`, `user`, `port`, `key_file` and `known_hosts_file` are omitted when unset. The password is
+never returned: `has_password` says whether one is saved. `in_ssh_config` is whether `~/.ssh/config`
+has a `Host` block of the same name, whose values fill in the fields the entry leaves unset.
+`panes` is the IDs of the `ssh` and `ssh_tmux` panes, in every workspace, that use the entry.
+
+- `GET /api/config/ssh-connections` — `200` `{"connections": [entry, …]}`, sorted by name.
+- `POST /api/config/ssh-connections` — adds an entry. Body: `name` and any of `host`, `user`, `port`,
+  `key_file`, `known_hosts_file`, `password`. `201` with the entry; `400` for invalid JSON or an
+  unknown field; `409` when the name is already an entry; `422` for a missing or malformed name
+  (`^[a-zA-Z0-9_.\-]+$`), `clear_password`, or a field error (below).
+- `PUT /api/config/ssh-connections/{name}` — replaces the entry's fields with the body's: a field
+  left out is removed. The password is the exception: an empty or absent `password` keeps the saved
+  one, a non-empty one replaces it, and `clear_password: true` removes it. `name` in the body, if
+  sent, must be the entry's own; an entry cannot be renamed. `200` with the entry; `404` for an
+  unknown name; `400`/`422` as for `POST`, and `422` for `password` together with `clear_password`.
+  The task dashboard's connection to the host is dropped, and a dial of it still in flight is
+  discarded, so the next collection dials it with the new details.
+- `DELETE /api/config/ssh-connections/{name}` — `204`; `404` for an unknown name; `409` when, without
+  the entry, a pane's connection or another dashboard host would no longer resolve, naming them. That
+  covers a pane that uses the entry by name with no `~/.ssh/config` `Host` block of that name to fall
+  back to, and a pane or host whose `~/.ssh/config` `ProxyJump` goes through the entry.
+
+`{name}` is URL-escaped, so an entry written by hand in `config.yaml` with a character such as `@`,
+`:` or `/` in its name can be edited and deleted.
+
+Field errors (`422`): `port` outside 1–65535 (0 or absent means unset); a control character in
+`host`, `user`, `key_file` or `known_hosts_file`; a `key_file` or `known_hosts_file` that is neither
+absolute nor `~/`-relative; and no `host` when `~/.ssh/config` has no `Host` block of the entry's
+name to take it from, or cannot be read. A leading `~/` in the two paths is expanded on save, as it
+is when `config.yaml` is loaded.
+
 ### `GET /api/display`
 
 Returns display preferences such as header/status-bar visibility, and `task_dashboard_shortcut`: the

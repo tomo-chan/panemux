@@ -53,12 +53,14 @@ func walkRoutes(t *testing.T, srv *Server) []string {
 // disabled. Keep it sorted; the comparison is order-independent but a sorted
 // literal is easier to diff by eye.
 var expectedRoutes = []string{
+	"DELETE /api/config/ssh-connections/{name}",
 	"DELETE /api/sessions/{id}",
 	"DELETE /api/workspaces/{id}",
 	"GET /*",
 	"GET /api/board/command/history",
 	"GET /api/board/messages",
 	"GET /api/board/status",
+	"GET /api/config/ssh-connections",
 	"GET /api/detect-shell",
 	"GET /api/directories",
 	"GET /api/display",
@@ -72,6 +74,7 @@ var expectedRoutes = []string{
 	"GET /api/workspaces",
 	"GET /ws/{sessionID}",
 	"POST /api/board/broadcast",
+	"POST /api/config/ssh-connections",
 	"POST /api/sessions",
 	"POST /api/sessions/{id}/open-url",
 	"POST /api/sessions/{id}/open-vscode",
@@ -82,6 +85,7 @@ var expectedRoutes = []string{
 	"POST /api/tasks/resume",
 	"POST /api/tasks/summary",
 	"POST /api/workspaces",
+	"PUT /api/config/ssh-connections/{name}",
 	"PUT /api/layout",
 	"PUT /api/tasks/records",
 	"PUT /api/workspaces/active",

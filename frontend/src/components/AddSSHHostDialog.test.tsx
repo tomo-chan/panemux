@@ -215,4 +215,10 @@ describe('AddSSHHostDialog', () => {
     outside.remove()
   })
 
+
+  it('says it writes ~/.ssh/config and how to put the host on the task dashboard', () => {
+    render(<AddSSHHostDialog isOpen isSaving={false} saveError={null} onSave={vi.fn()} onClose={vi.fn()} />)
+    const note = screen.getByText(/Writes a Host block to ~\/\.ssh\/config/)
+    expect(note.textContent).toContain('Tasks → Hosts…')
+  })
 })

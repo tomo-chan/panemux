@@ -266,10 +266,13 @@ func (h *Handler) GetBoardSessionToken(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
+	h.cfgMu.RLock()
+	agentBoardEnabled := agentBoardEnabledAnyPane(h.cfg)
+	h.cfgMu.RUnlock()
 	writeJSON(w, boardSessionTokenResponse{
 		Token:                h.cfg.Server.AuthToken,
 		CommandCenterEnabled: h.commandCenterAvailable,
-		AgentBoardEnabled:    agentBoardEnabledAnyPane(h.cfg),
+		AgentBoardEnabled:    agentBoardEnabled,
 	})
 }
 

@@ -170,6 +170,13 @@ config, or a remote host into a command string:
   shell it is. `HOME` is the one environment value the local run sets, from `internal/homedir`, and
   it selects which files are read, not what runs. The local run is its own process group, killed as
   a group when its context ends, so no probe the script started outlives the collection.
+- **The hosts** are the `ssh_connections` entries, which `/api/config/ssh-connections` can add and
+  edit ([REST API](../behavior/rest-api.md#apiconfigssh-connections)). An entry is connection data
+  handed to the pane dialer, never a command: there is no field for `ProxyCommand` or `ProxyJump`,
+  and an entry that sets its own `host` takes neither from `~/.ssh/config` (see
+  [SSH `ProxyCommand`](#ssh-proxycommand)). The routes refuse cross-site requests, refuse control
+  characters in `host`, `user` and the two paths, never return a saved password, and name fields
+  rather than values in their errors.
 - **Remote git inspection** reuses `remoteGitContext`, the command an `ssh` pane's header runs:
   the working directory reported by the remote host passes `validRemotePath` and is quoted with
   `shellQuotePath` before it reaches the command, exactly as a pane's does.

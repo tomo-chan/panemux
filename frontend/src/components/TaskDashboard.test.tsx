@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { TaskDashboard } from './TaskDashboard'
 import type { TasksState } from '../hooks/useTasks'
+import type { SSHConnectionsState } from '../hooks/useSSHConnections'
 import type { Task, TasksResponse, Workspace } from '../schemas'
 
 const NOW = Date.parse('2026-09-25T12:00:00Z')
@@ -88,6 +89,20 @@ function renderDashboard(state: TasksState = tasksState(), onOpenTask = vi.fn(),
     />,
   )
   return { onOpenTask, onShowWorkspaces }
+}
+
+function hostsState(overrides: Partial<SSHConnectionsState> = {}): SSHConnectionsState {
+  return {
+    connections: [],
+    sshConfigNames: ['gpu-box'],
+    loading: false,
+    error: null,
+    load: vi.fn().mockResolvedValue(undefined),
+    create: vi.fn().mockResolvedValue(null),
+    update: vi.fn().mockResolvedValue(null),
+    remove: vi.fn().mockResolvedValue(null),
+    ...overrides,
+  }
 }
 
 describe('TaskDashboard', () => {
@@ -348,6 +363,37 @@ describe('TaskDashboard', () => {
     renderDashboard(tasksState({ data: null, loading: true, updatedAt: null }))
     expect(screen.getByText('Loading…')).toBeInTheDocument()
     expect(screen.getAllByText('None', { selector: '.td-empty' })).toHaveLength(5)
+  })
+
+  it('opens the hosts dialog and collects again after a host is added', async () => {
+    const state = tasksState()
+    const hosts = hostsState()
+    render(
+      <TaskDashboard
+        tasksState={state}
+        hostsState={hosts}
+        workspaces={workspaces}
+        onOpenTask={vi.fn()}
+        onShowWorkspaces={vi.fn()}
+        now={() => NOW}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Hosts…' }))
+    const dialog = screen.getByRole('dialog', { name: /Dashboard hosts/ })
+    expect(hosts.load).toHaveBeenCalled()
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add host' }))
+    fireEvent.change(within(dialog).getByLabelText('Name'), { target: { value: 'gpu-box' } })
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Save host' }))
+    })
+
+    expect(hosts.create).toHaveBeenCalledWith({ name: 'gpu-box' })
+    expect(state.refresh).toHaveBeenCalled()
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }))
+    expect(screen.queryByRole('dialog', { name: /Dashboard hosts/ })).toBeNull()
   })
 })
 

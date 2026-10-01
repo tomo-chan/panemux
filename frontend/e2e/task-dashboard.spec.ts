@@ -174,3 +174,40 @@ test('resumes a stopped task in a tmux session named after it', async ({ page, r
   await expect(card).toContainText('tmux task-5d7e3a90 · no pane', { timeout: 15_000 })
   await expect(card).toHaveAttribute('data-selected', 'true')
 })
+
+// Issue #272: a host added from the Hosts… dialog is written to config.yaml's
+// ssh_connections, survives a reload, and becomes a dashboard host. The host
+// name is in .invalid, so collecting from it fails fast and it shows as a
+// host that could not be reached — still a dashboard host.
+test('adds a dashboard host, keeps it across a reload, and deletes it', async ({ page }) => {
+  await openDashboard(page)
+  await page.getByRole('button', { name: 'Hosts…' }).click()
+  let dialog = page.getByRole('dialog', { name: /Dashboard hosts/ })
+  await expect(dialog).toBeVisible()
+
+  await dialog.getByRole('button', { name: 'Add host' }).click()
+  await dialog.getByLabel('Name').fill('e2e-remote')
+  await dialog.getByLabel('Host', { exact: true }).fill('e2e-remote.invalid')
+  await dialog.getByLabel('Password (optional)').fill('e2e-secret')
+  await dialog.getByRole('button', { name: 'Save host' }).click()
+
+  await expect(dialog.getByRole('status')).toContainText('Added e2e-remote')
+  const row = dialog.getByRole('row', { name: /^e2e-remote/ })
+  await expect(row).toContainText('e2e-remote.invalid')
+  await expect(row).toContainText('password set')
+  await expect(dialog).not.toContainText('e2e-secret')
+  await expect(page.getByRole('list', { name: 'Hosts' })).toContainText('e2e-remote')
+
+  await page.reload()
+  await openDashboard(page)
+  await page.getByRole('button', { name: 'Hosts…' }).click()
+  dialog = page.getByRole('dialog', { name: /Dashboard hosts/ })
+  await expect(dialog.getByRole('row', { name: /^e2e-remote/ })).toContainText('e2e-remote.invalid')
+
+  await dialog.getByRole('button', { name: 'Delete e2e-remote' }).click()
+  await dialog.getByRole('group', { name: 'Confirm delete' }).getByRole('button', { name: 'Delete' }).click()
+  await expect(dialog.getByRole('status')).toContainText('Deleted e2e-remote')
+  await expect(dialog.getByRole('row', { name: /^e2e-remote/ })).toHaveCount(0)
+  await dialog.getByRole('button', { name: 'Close' }).click()
+  await expect(page.getByRole('list', { name: 'Hosts' })).not.toContainText('e2e-remote')
+})

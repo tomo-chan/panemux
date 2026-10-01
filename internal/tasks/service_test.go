@@ -887,3 +887,83 @@ func processRunning(pid int) bool {
 	fields := strings.Fields(string(stat[strings.LastIndexByte(string(stat), ')')+1:]))
 	return len(fields) > 0 && fields[0] != "Z"
 }
+
+// reconnectDialer's first dial waits for release and then answers with
+// first; every later dial answers with later at once. It stands for a dial
+// made with a host's old details that is still in flight when the host is
+// edited, followed by the dial made with its new ones.
+type reconnectDialer struct {
+	release   chan struct{}
+	firstDone chan struct{}
+	first     *fakeConn
+	firstErr  error
+	later     *fakeConn
+	calls     int
+	mu        sync.Mutex
+}
+
+func (d *reconnectDialer) dial(string) (Conn, error) {
+	d.mu.Lock()
+	d.calls++
+	call := d.calls
+	d.mu.Unlock()
+	if call > 1 {
+		return d.later, nil
+	}
+	<-d.release
+	defer close(d.firstDone)
+	if d.firstErr != nil {
+		return nil, d.firstErr
+	}
+	return d.first, nil
+}
+
+func (d *reconnectDialer) callCount() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.calls
+}
+
+// A dial still in flight when the host is reconnected was made with the
+// details the reconnect is meant to replace, so neither its failure nor its
+// connection is kept (issue #272: editing a host that shows connecting…).
+func TestReconnect_DiscardsTheDialInFlight(t *testing.T) {
+	for _, tt := range []struct {
+		firstErr error
+		name     string
+	}{
+		{name: "the old dial fails", firstErr: errors.New("no such host")},
+		{name: "the old dial succeeds"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			old := &fakeConn{output: minimalOutput("old")}
+			fresh := &fakeConn{output: minimalOutput("new")}
+			dialer := &reconnectDialer{
+				release: make(chan struct{}), firstDone: make(chan struct{}),
+				first: old, firstErr: tt.firstErr, later: fresh,
+			}
+			svc := New(Options{
+				Hosts:       func() []string { return []string{"gpu-box"} },
+				Dial:        dialer.dial,
+				RunLocal:    localOutput(minimalOutput("l"), nil),
+				HostTimeout: 20 * time.Millisecond,
+			})
+			defer svc.Close()
+
+			first := hostResult(t, svc.Collect(context.Background()), "gpu-box")
+			require.Equal(t, HostConnecting, first.Status)
+
+			require.NoError(t, svc.Reconnect("gpu-box"))
+			close(dialer.release)
+			<-dialer.firstDone
+
+			require.Eventually(t, func() bool {
+				return hostResult(t, svc.Collect(context.Background()), "gpu-box").Status == HostOK
+			}, 2*time.Second, 10*time.Millisecond)
+			assert.Equal(t, 2, dialer.callCount(), "the host is dialed again after the reconnect")
+			require.Eventually(t, func() bool { return old.closeCount() == 1 || tt.firstErr != nil },
+				2*time.Second, 10*time.Millisecond, "the old dial's connection is closed")
+			assert.Equal(t, 0, fresh.closeCount())
+		})
+	}
+}

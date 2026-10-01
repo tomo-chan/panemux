@@ -203,7 +203,7 @@ func taskServiceOptions(h *Handler) tasks.Options {
 		Dial: func(name string) (tasks.Conn, error) {
 			// A name-only entry with no ~/.ssh/config Host block of the same
 			// name has no host to dial, and is reported here.
-			cfg, err := session.ResolveSSHConfig(name, h.cfg.SSHConnections, h.sshConfigPath)
+			cfg, err := session.ResolveSSHConfig(name, h.sshConnections(), h.sshConfigPath)
 			if err != nil {
 				return nil, fmt.Errorf("resolve ssh connection: %w", err)
 			}
@@ -222,8 +222,8 @@ func taskServiceOptions(h *Handler) tasks.Options {
 // ~/.ssh/config are not collected from (issue #252); listing one's name under
 // ssh_connections, with no fields, makes it a dashboard host (issue #272).
 func (h *Handler) taskHostNames() []string {
-	names := make([]string, 0, len(h.cfg.SSHConnections))
-	for name := range h.cfg.SSHConnections {
+	names := make([]string, 0, len(h.sshConnections()))
+	for name := range h.sshConnections() {
 		names = append(names, name)
 	}
 	sort.Strings(names)

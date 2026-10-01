@@ -340,7 +340,10 @@ func (s *Service) openConn(host string) Conn {
 }
 
 // Reconnect discards a host's connection and any remembered failure, so the
-// next collection dials it straight away.
+// next collection dials it straight away. A dial still in flight is
+// discarded too: it was made with the details the reconnect is meant to
+// replace — the host was edited while it showed connecting — so its failure
+// is not remembered and its connection is closed when it arrives.
 func (s *Service) Reconnect(name string) error {
 	known := false
 	for _, candidate := range s.hostNames() {
@@ -354,12 +357,12 @@ func (s *Service) Reconnect(name string) error {
 	}
 
 	s.mu.Lock()
-	h := s.hosts[name]
 	var stale Conn
-	if h != nil {
+	if h := s.hosts[name]; h != nil {
 		stale = h.conn
-		h.conn = nil
-		h.err = nil
+		// A fresh entry rather than clearing this one: dial() only keeps
+		// its result while the entry it was started for is still the host's.
+		delete(s.hosts, name)
 	}
 	s.mu.Unlock()
 	if stale != nil {

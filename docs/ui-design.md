@@ -325,8 +325,27 @@ terminal that had focus cannot receive what is typed into the dashboard.
 - **Top bar.** The title, one chip per host (`Local` for the panemux host) with its running count, a
   red chip with the error and a `Reconnect` button for a host that failed, and `connecting…` for a
   host whose connection is still coming up; then when the board was last updated, `Refresh`,
-  `New task` (in the interactive blue), and `Workspaces`. A long host error is truncated in the chip
+  `Hosts…`, `New task` (in the interactive blue), and `Workspaces`. A long host error is truncated in the chip
   and shown in full as its tooltip.
+- **Hosts….** A modal over the dashboard titled "Dashboard hosts", with `ssh_connections in
+  config.yaml` beside the title and a note that a host only in `~/.ssh/config` works in panes but is
+  not collected from until its name is added here. A table lists each entry — name, where it
+  connects (`user@host:port`, or "from ~/.ssh/config" for a name-only entry), and small tags for
+  `~/.ssh/config`, `key file`, `password set` and `used by N panes` — with `Edit` and `Delete` per
+  row, and `Add host` and `Close` below it. `Add host` and `Edit` open a form under the table, and
+  while the form or a delete confirmation is open, `Add host` and `Close` are hidden so only that
+  step's own buttons show; its `Cancel` returns to the list, and `Escape` or a click outside still
+  closes the dialog. The form has Name (offering the `~/.ssh/config` host
+  names; read-only when editing, since a name cannot change), Host (marked optional, with a note
+  that empty fields use the block's values, when `~/.ssh/config` has a block of that name), User,
+  Port, Key file, Known hosts file and Password. The password field is always empty; for an entry
+  with one its placeholder says to leave it empty to keep it, and a `Remove saved password` checkbox
+  disables it. What the form can tell without the server — a missing or malformed name, a name
+  already listed, a port outside 1–65535, no host and no block to take it from — is refused under the
+  form; the server's refusals appear there as "Could not save: …", keeping what was typed. `Delete`
+  asks in an inline red confirmation; a host panes use by name with no `~/.ssh/config` block to fall
+  back to is refused before asking, naming the panes, and a refusal only the server can tell — a
+  pane or host whose `ProxyJump` goes through it — appears as "Could not delete …". A green notice says what was added, saved or deleted, and the board collects again.
 - **New task.** A modal form over the dashboard: Host (every host on the board, an unreachable one
   marked "(unreachable)"), Working directory, Agent (`claude` or `codex`), Labels
   (comma-separated, optional) and First instruction. With `codex` chosen, a note under Agent says
