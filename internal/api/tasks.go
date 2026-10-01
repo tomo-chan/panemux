@@ -243,6 +243,7 @@ func (h *Handler) SetTaskService(svc *tasks.Service) {
 // Close releases what the handler holds open across requests: the task
 // dashboard's per-host connections.
 func (h *Handler) Close() {
+	h.boardAttaches.close()
 	h.tasks.Close()
 }
 

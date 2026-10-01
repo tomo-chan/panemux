@@ -55,6 +55,7 @@ func walkRoutes(t *testing.T, srv *Server) []string {
 var expectedRoutes = []string{
 	"DELETE /api/config/ssh-connections/{name}",
 	"DELETE /api/sessions/{id}",
+	"DELETE /api/tasks/attach/{id}",
 	"DELETE /api/workspaces/{id}",
 	"GET /*",
 	"GET /api/board/command/history",
@@ -81,6 +82,7 @@ var expectedRoutes = []string{
 	"POST /api/sessions/{id}/restart",
 	"POST /api/ssh-config/hosts",
 	"POST /api/tasks",
+	"POST /api/tasks/attach",
 	"POST /api/tasks/hosts/{name}/reconnect",
 	"POST /api/tasks/resume",
 	"POST /api/tasks/summary",

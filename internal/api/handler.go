@@ -53,6 +53,8 @@ type Handler struct {
 	taskGitLookup           func(ctx context.Context, host, cwd string, withPR bool) *taskGitInfo
 	taskGitCache            map[string]taskGitCacheEntry
 	createSession           func(*config.PaneConfig, map[string]config.SSHConnection) (session.Session, error)
+	createTmuxAttach        func(id, title, connection, tmuxSession string, sshConns map[string]config.SSHConnection) (session.Session, error)
+	boardAttaches           *boardAttaches
 	detectLocalShellFn      func() (string, error)
 	detectRemoteShellFn     func(cfg session.SSHConfig) (string, error)
 	listRemoteDirectoriesFn func(cfg session.SSHConfig, path string, showHidden bool) (directoryBrowserResponse, error)
@@ -194,6 +196,8 @@ func NewHandler(
 	h.pendingTaskLabels = tasks.NewPendingLabels(func() time.Time { return h.nowFn() })
 	h.taskGitLookup = h.lookupTaskGit
 	h.createSession = session.CreateFromConfig
+	h.createTmuxAttach = session.CreateTmuxAttach
+	h.boardAttaches = newBoardAttaches()
 	h.detectLocalShellFn = session.DetectLocalShell
 	h.detectRemoteShellFn = session.DetectRemoteShell
 	h.readDirFn = os.ReadDir
@@ -515,6 +519,9 @@ func (h *Handler) GetSessions(w http.ResponseWriter, r *http.Request) {
 	sessions := h.manager.List()
 	list := make([]sessionInfo, 0, len(sessions))
 	for _, s := range sessions {
+		if h.boardAttaches.isAttach(s.ID()) {
+			continue // the board's attach is not a pane
+		}
 		list = append(list, sessionInfo{
 			ID:    s.ID(),
 			Type:  string(s.Type()),
