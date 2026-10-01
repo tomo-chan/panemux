@@ -545,6 +545,15 @@ func TestDeleteConfigSSHConnection_RefusesToBreakAProxyJump(t *testing.T) {
 			wantError: `ssh connection "bastion" is needed by pane one-ssh`,
 		},
 		{
+			name: "an ssh_tmux pane connects through it",
+			prepare: func(e *sshConnectionsEnv) {
+				pane := e.cfg.Workspaces.Items[0].Layout.Children[0].Pane
+				pane.Type, pane.Connection, pane.TmuxSession = config.PaneTypeSSHTmux, "gpu", "main"
+				e.cfg.SSHConnections = map[string]config.SSHConnection{"bastion": {Host: "bastion.invalid"}}
+			},
+			wantError: `ssh connection "bastion" is needed by pane one-ssh`,
+		},
+		{
 			name: "another dashboard host connects through it",
 			prepare: func(e *sshConnectionsEnv) {
 				e.cfg.Workspaces.Items[0].Layout.Children[0].Pane.Type = config.PaneTypeLocal
@@ -631,4 +640,17 @@ func TestConfigSSHConnectionRoutes_RefuseANameThatDoesNotUnescape(t *testing.T) 
 			assert.Equal(t, before, e.reload(t))
 		})
 	}
+}
+
+// Only ssh and ssh_tmux panes connect anywhere: a connection left on a local
+// pane is not a reason to refuse the delete.
+func TestDeleteConfigSSHConnection_IgnoresALocalPanesConnection(t *testing.T) {
+	e := newSSHConnectionsEnv(t, fromSSHConfigBlock)
+	pane := e.cfg.Workspaces.Items[0].Layout.Children[0].Pane
+	pane.Type = config.PaneTypeLocal
+
+	rec := e.do(t, http.MethodDelete, sshConnectionsPath+"/used", "")
+
+	require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+	assert.NotContains(t, e.cfg.SSHConnections, "used")
 }
