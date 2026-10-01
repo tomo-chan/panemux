@@ -73,6 +73,8 @@ describe('usePaneSettings', () => {
     const { result } = renderHook(() => usePaneSettings(mockLayout, onLayoutChange))
 
     act(() => result.current.openSettings(mockPane))
+    // Opening the settings reads the connection names again before anything is saved.
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/ssh-connections')
     await act(async () => {
       await result.current.saveSettings({ ...mockPane, type: 'local', shell: '/bin/zsh' })
     })
@@ -148,6 +150,8 @@ describe('usePaneSettings', () => {
     const { result } = renderHook(() => usePaneSettings(mockLayout, vi.fn()))
 
     act(() => result.current.openSettings(mockPane))
+    // Opening the settings reads the connection names again before anything is saved.
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/ssh-connections')
     await act(async () => {
       await result.current.saveSettings(mockPane)
     })
@@ -342,6 +346,20 @@ describe('usePaneSettings', () => {
       ).rejects.toThrow('invalid path')
     })
   })
+
+  it('reads the names again each time the settings open', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ names: ['prod'] }) })
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ names: ['added', 'prod'] }) })
+    vi.stubGlobal('fetch', fetchMock)
+    const { result } = renderHook(() => usePaneSettings(mockLayout, vi.fn()))
+    await waitFor(() => expect(result.current.sshConnectionNames).toEqual(['prod']))
+
+    act(() => result.current.openSettings(mockPane))
+
+    await waitFor(() => expect(result.current.sshConnectionNames).toEqual(['added', 'prod']))
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/ssh-connections')
+  })
 })
 
 describe('usePaneSettings restart policy', () => {
@@ -417,21 +435,5 @@ describe('usePaneSettings restart policy', () => {
     })
 
     expect(restartCalls()).toHaveLength(1)
-  })
-})
-
-describe('usePaneSettings connection names', () => {
-  it('reads the names again each time the settings open', async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ names: ['prod'] }) })
-      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ names: ['added', 'prod'] }) })
-    vi.stubGlobal('fetch', fetchMock)
-    const { result } = renderHook(() => usePaneSettings(mockLayout, vi.fn()))
-    await waitFor(() => expect(result.current.sshConnectionNames).toEqual(['prod']))
-
-    act(() => result.current.openSettings(mockPane))
-
-    await waitFor(() => expect(result.current.sshConnectionNames).toEqual(['added', 'prod']))
-    expect(fetchMock).toHaveBeenLastCalledWith('/api/ssh-connections')
   })
 })
