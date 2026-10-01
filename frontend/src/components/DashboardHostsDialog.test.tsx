@@ -269,6 +269,39 @@ describe('DashboardHostsDialog', () => {
     expect(state.remove).not.toHaveBeenCalled()
   })
 
+  // While a form or a delete confirmation is open, its own buttons are the
+  // only ones offered: the dialog's Add host and Close come back with the list.
+  it('shows only the form buttons while a host is being added or edited', async () => {
+    renderDialog()
+    await click('Add host')
+
+    expect(screen.queryByRole('button', { name: 'Add host' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Close' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Save host' })).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.getByRole('button', { name: 'Add host' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Close' })).toBeTruthy()
+
+    await click('Edit legacy-vm')
+    expect(screen.queryByRole('button', { name: 'Add host' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Close' })).toBeNull()
+  })
+
+  it('shows only the confirmation buttons while a delete is being confirmed', async () => {
+    renderDialog()
+    await click('Delete legacy-vm')
+
+    expect(screen.queryByRole('button', { name: 'Add host' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Close' })).toBeNull()
+
+    const confirm = screen.getByRole('group', { name: 'Confirm delete' })
+    fireEvent.click(within(confirm).getByRole('button', { name: 'Cancel' }))
+    expect(screen.getByRole('button', { name: 'Add host' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Close' })).toBeTruthy()
+  })
+
   it('closes from Close, from the backdrop and on Escape', () => {
     const { onClose } = renderDialog()
     fireEvent.click(screen.getByRole('button', { name: 'Close' }))

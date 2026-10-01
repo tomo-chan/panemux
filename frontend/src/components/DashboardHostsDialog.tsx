@@ -427,15 +427,20 @@ export const DashboardHostsDialog: React.FC<DashboardHostsDialogProps> = ({ isOp
           ))}
         </datalist>
 
-        <div className="td-modal-actions">
-          <button type="button" className="td-btn" disabled={saving || form !== null} onClick={startAdd}>
-            Add host
-          </button>
-          <span className="td-spacer" />
-          <button type="button" className="td-btn" disabled={saving} onClick={onClose}>
-            Close
-          </button>
-        </div>
+        {/* The dialog's own actions are offered only over the list: while a form
+            or a delete confirmation is open, its Cancel is the way back, and
+            Escape or a click outside still closes the dialog. */}
+        {!form && !confirming && (
+          <div className="td-modal-actions">
+            <button type="button" className="td-btn" disabled={saving} onClick={startAdd}>
+              Add host
+            </button>
+            <span className="td-spacer" />
+            <button type="button" className="td-btn" disabled={saving} onClick={onClose}>
+              Close
+            </button>
+          </div>
+        )}
       </div>
     </div>
   )

@@ -332,7 +332,10 @@ terminal that had focus cannot receive what is typed into the dashboard.
   not collected from until its name is added here. A table lists each entry — name, where it
   connects (`user@host:port`, or "from ~/.ssh/config" for a name-only entry), and small tags for
   `~/.ssh/config`, `key file`, `password set` and `used by N panes` — with `Edit` and `Delete` per
-  row. `Add host` and `Edit` open a form under the table: Name (offering the `~/.ssh/config` host
+  row, and `Add host` and `Close` below it. `Add host` and `Edit` open a form under the table, and
+  while the form or a delete confirmation is open, `Add host` and `Close` are hidden so only that
+  step's own buttons show; its `Cancel` returns to the list, and `Escape` or a click outside still
+  closes the dialog. The form has Name (offering the `~/.ssh/config` host
   names; read-only when editing, since a name cannot change), Host (marked optional, with a note
   that empty fields use the block's values, when `~/.ssh/config` has a block of that name), User,
   Port, Key file, Known hosts file and Password. The password field is always empty; for an entry
