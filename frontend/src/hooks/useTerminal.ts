@@ -54,6 +54,11 @@ interface UseTerminalOptions {
   // Called when a program inside the pane asks panemux to open a URL (see the
   // browser shim in internal/session/browseropen.go).
   onBrowserOpenRequest?: (url: string) => void
+  // Whether a disconnect asks POST /api/sessions/{id}/restart to recreate the
+  // session (the default). That route knows only panes, so a board attach
+  // (issue #284) turns it off and reports reconnectFailed for its caller to
+  // open the attach again.
+  recoverOnDisconnect?: boolean
   // Reconnect tuning, forwarded to useWebSocket. Only overridden in tests;
   // production callers rely on useWebSocket's defaults.
   reconnectDelay?: number
@@ -92,6 +97,7 @@ export function useTerminal({
   onInteraction,
   onLinkActivate,
   onBrowserOpenRequest,
+  recoverOnDisconnect = true,
   reconnectDelay,
   maxReconnectDelay,
   maxReconnectAttempts,
@@ -184,6 +190,10 @@ export function useTerminal({
   })
 
   const recoverDisconnectedSession = useCallback(async () => {
+    if (!recoverOnDisconnect) {
+      setReconnectFailed(true)
+      return
+    }
     if (reconnectingAfterDisconnectRef.current) return
     reconnectingAfterDisconnectRef.current = true
     setReconnectFailed(false)
@@ -200,7 +210,7 @@ export function useTerminal({
     } finally {
       reconnectingAfterDisconnectRef.current = false
     }
-  }, [reconnect, sessionId])
+  }, [reconnect, recoverOnDisconnect, sessionId])
 
   // This ref is read from an async status-frame handler that can run before an
   // effect flushes, so keep it current during render rather than one commit later.

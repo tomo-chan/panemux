@@ -383,13 +383,15 @@ terminal that had focus cannot receive what is typed into the dashboard.
   in the meta line for a task marked done that is running again, or a dashed green `Done?` tag for a
   done candidate — a task not marked done whose summary finds no work left; and at the bottom where
   the task runs with its `Open` / `Go to pane` button, or `Resume` for a stopped claude or codex
-  task. A task that cannot be opened shows why instead of a button: for an agent outside tmux, "not
+  task. A waiting or idle task in an attachable tmux session also has `Type in pane` before it, and
+  a blue `Typing` tag in the meta line while its popup is open. A task that cannot be opened shows why instead of a button: for an agent outside tmux, "not
   in a panemux pane" or, when the pane it names is in no workspace, "its pane is in no workspace".
   The card is a pointer target for selection, and its title is a button, so the card never nests its
   links and buttons inside another interactive element.
 - **Detail panel.** Fixed to the window height at the right. Its head — state, host, agent, start,
-  title, waiting reason, the open action or the reason there is none (a stopped claude or codex task
-  offers `Resume` instead), `Mark done` or `Mark not done`, and for a done candidate the line "The summary
+  title, waiting reason, `Type in pane` (in the interactive blue) or, for a waiting or idle task
+  that cannot take it, "Type in pane is not available: <reason>.", the open action or the reason
+  there is none (a stopped claude or codex task offers `Resume` instead), `Mark done` or `Mark not done`, and for a done candidate the line "The summary
   finds no work left: a candidate for Mark done." — stays in place, and only the body below scrolls:
   state notes (for codex: a task with no session of its own is waiting for its first instruction,
   held at a start-up screen, or running its session in codex's shared daemon, to be seen in the pane;
@@ -420,6 +422,31 @@ terminal that had focus cannot receive what is typed into the dashboard.
   with a close button.
 - **Resume.** `Resume` reads `Resuming…` and is disabled while its request runs; a refusal is shown in
   a red alert naming the task, and a resumed task is selected. Nothing else on the board waits for it.
+- **Type in pane.** A popup over the board ([behavior](behavior/tasks.md#opening-a-task)), centered,
+  up to 1100×760 with a 24px margin, over a dark backdrop; a click on the backdrop does not close it,
+  since a drag selecting terminal text can end there. Everything behind it — the top bar, filters,
+  board, detail panel — is `inert`. The header has the task's state pill and title, a connection
+  chip (`Connecting` grey, `Connected` green, `Disconnected` gold, `Failed` red), then `Go to pane`
+  (or `Open`), the maximize toggle and `Close`; under them host · agent · `tmux: <session>` in the
+  monospace face. Notes sit between the header and the terminal: the task having moved on the board
+  or no longer being listed, a workspace pane showing the same session (and which client sizes the
+  window), and a red "… Input is not being sent." with `Retry` or `Reconnect`. The terminal is
+  dimmed while it takes no input; before the attach answers its place says which tmux session it is
+  connecting to and that keys are not sent yet. A footer repeats the keys and that closing leaves
+  the agent and its tmux session running.
+  - **Keys.** While the terminal has focus every key is the terminal's, `Escape` and `Tab` included
+    (`Escape` is claude's interrupt and codex's cancel). `Cmd/Ctrl+Shift+Esc` closes and
+    `Cmd/Ctrl+Shift+Enter` maximizes from anywhere in the popup; both are captured before the
+    terminal sees them. With focus in the header, `Escape` closes and `Tab` / `Shift+Tab` cycle
+    within the popup. Focus starts on the popup and moves into the terminal each time it connects;
+    when the terminal stops taking input, focus stays in the popup.
+  - **Maximize.** The toggle, a double-click on the header (not on its buttons) or
+    `Cmd/Ctrl+Shift+Enter` makes the popup cover everything below the top bar, which stays in view
+    and inert. Only the terminal's size changes — its connection, input target and focus do not —
+    and restoring brings back the board exactly as it was. The choice is remembered in the browser
+    (`localStorage`) and the next popup opens the same way.
+  - **Narrow screens** (720px and narrower). The popup is a full-window sheet from the start, with no
+    maximize toggle, and its header and `Close` stay in view.
 - **After opening.** The dashboard closes, the pane takes focus, and it is outlined in the
   interactive blue for about two seconds (a steady outline with reduced motion).
 

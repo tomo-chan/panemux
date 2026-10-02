@@ -53,7 +53,7 @@ layout rendering, terminal emulation, interaction state, and presentation.
 | `usePaneUrlOpen` | Receive validated URL-open events and coordinate browser navigation/callback forwarding. |
 | attention and notification hooks | Convert terminal activity and visibility changes into pane/workspace indicators and browser notifications. |
 | Agent Board hooks and panels | Poll status/message APIs, stream command-center output, and present dashboard, palette, and history overlays. |
-| `TaskDashboard` and `useTasks` | Poll `GET /api/tasks` while the task dashboard is shown, present tasks as a kanban by state, save done and labels through `PUT /api/tasks/records`, start and resume tasks through `POST /api/tasks` and `POST /api/tasks/resume` (`NewTaskDialog`), and match each task to the pane attached to its tmux session, or to the `local` / `ssh` pane its agent's `PANEMUX_PANE_ID` names (`utils/taskBoard`). |
+| `TaskDashboard` and `useTasks` | Poll `GET /api/tasks` while the task dashboard is shown, present tasks as a kanban by state, save done and labels through `PUT /api/tasks/records`, start and resume tasks through `POST /api/tasks` and `POST /api/tasks/resume` (`NewTaskDialog`), and match each task to the pane attached to its tmux session, or to the `local` / `ssh` pane its agent's `PANEMUX_PANE_ID` names (`utils/taskBoard`). Type in pane opens and ends the board's temporary attach through `POST`/`DELETE /api/tasks/attach` (`useTaskInput`) and shows it in `TaskInputPopup` / `TaskTerminal`. |
 | Zod schemas | Runtime-validate structured success payloads and control frames for which schemas are defined. Generated TypeScript types derive from these schemas. |
 
 ## State and ownership
@@ -113,7 +113,10 @@ creates or focuses a `tmux` / `ssh_tmux` pane through the ordinary pane APIs, or
 temporary tmux client on a task's session that the layout never holds: the handler finds the task
 with a fresh collection of its host (`tasks.Service.FindTask`), registers an attach-only
 `tmux attach-session -t =<name>` session with the session manager under a `board-` ID served by
-`/ws/{id}`, and removes it on `DELETE` or once no WebSocket has read it for 10s. `POST /api/tasks` and `POST /api/tasks/resume`
+`/ws/{id}`, and removes it on `DELETE` or once no WebSocket has read it for 10s. The dashboard's
+Type in pane popup (`TaskInputPopup`) reads it through `TaskTerminal`, which uses the same
+`useTerminal` as a pane but asks for no `/api/sessions/{id}/restart` on a disconnect: it opens the
+attach again instead. `POST /api/tasks` and `POST /api/tasks/resume`
 run a second fixed script the same way — `sh -s` with the script on stdin — which starts claude or
 codex in a detached tmux session; a resume first collects the host again to confirm the session is
 stopped there, and a start records its labels in `tasks.RecordStore` — for codex, whose session ID

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { Task, TaskHost, TaskIssueLink, TaskLaunchResponse, Workspace } from '../schemas'
 import type { TasksState } from '../hooks/useTasks'
 import { TASKS_POLL_INTERVAL_MS } from '../hooks/useTasks'
@@ -7,7 +7,12 @@ import { NewTaskDialog } from './NewTaskDialog'
 import { DashboardHostsDialog } from './DashboardHostsDialog'
 import { useSSHConnections } from '../hooks/useSSHConnections'
 import type { SSHConnectionsState } from '../hooks/useSSHConnections'
+import { useTaskInput } from '../hooks/useTaskInput'
+import type { TaskInputOrigin } from '../hooks/useTaskInput'
+import { TaskInputPopup } from './TaskInputPopup'
+import { loadTaskTerminalMaximized, saveTaskTerminalMaximized } from '../utils/taskTerminalPrefs'
 import {
+  TASK_COLUMNS,
   TASK_STATE_LABELS,
   allLabels,
   canRecord,
@@ -24,11 +29,12 @@ import {
   runningCount,
   summaryNext,
   summaryRequestOnSelect,
+  taskInputAction,
   taskOpenAction,
   taskTitle,
   visibleColumns,
 } from '../utils/taskBoard'
-import type { LaneMode, LaunchedTaskRef, TaskOpenAction, TaskPaneRef } from '../utils/taskBoard'
+import type { LaneMode, LaunchedTaskRef, TaskInputAction, TaskOpenAction, TaskPaneRef } from '../utils/taskBoard'
 import type { TaskAgent } from '../hooks/useTasks'
 
 // Layer 1 of issue #252: every agent session on every host, as a kanban by
@@ -39,7 +45,8 @@ import type { TaskAgent } from '../hooks/useTasks'
 // what `claude -p` made of each task's conversation (issue #258), asking for
 // a stopped task's summary through tasksState.requestSummary. Opening a
 // task is App's job (onOpenTask), because that means creating or focusing a
-// pane.
+// pane. Typing into a task without leaving the board (issue #284) is the
+// dashboard's own: TaskInputPopup over tasksState.attach.
 
 const STATE_COLORS: Record<Task['state'], string> = {
   wait: '#e2b86b',
@@ -64,6 +71,9 @@ const COLUMN_COLORS: Record<string, string> = {
 const ALL_HOSTS = '\u0000all'
 // Likewise for the label select; a label cannot contain a control character.
 const ALL_LABELS = '\u0000all'
+
+// Below this width the Type in pane popup is a full sheet from the start.
+const NARROW_QUERY = '(max-width: 720px)'
 
 export interface TaskDashboardProps {
   tasksState: TasksState
@@ -120,6 +130,13 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
   const [resumingIds, setResumingIds] = useState<ReadonlySet<string>>(() => new Set())
   const nowMs = useTicker(now)
   const rootRef = useRef<HTMLElement>(null)
+  const topRef = useRef<HTMLElement>(null)
+  const popupRef = useRef<HTMLDivElement>(null)
+  const input = useTaskInput(tasksState.attach, tasksState.detach)
+  const [maximized, setMaximized] = useState(loadTaskTerminalMaximized)
+  const narrow = useMediaQuery(NARROW_QUERY)
+  const [topOffset, setTopOffset] = useState(0)
+  const inputOpen = input.session !== null
 
   // Focus moves into the dashboard when it appears, so typing does not keep
   // going to the terminal underneath it.
@@ -191,6 +208,75 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
   }
   const open = (task: Task) => onOpenTask(task, taskOpenAction(task, panes.get(task.id) ?? null))
 
+  const inputTaskId = input.session?.task.id ?? null
+  const inputPhase = input.session?.attach.phase ?? null
+  const typeIn = (task: Task, origin: TaskInputOrigin, element: HTMLElement) => input.open(task, origin, element)
+  const inputMark = (task: Task): TaskInputMark =>
+    task.id !== inputTaskId ? null : inputPhase === 'connecting' ? 'connecting' : 'typing'
+
+  // Focus goes back to the button the popup was opened from — or, if a poll
+  // moved its card and the button went with it, to the same task's button
+  // wherever it is now, and failing that to the dashboard.
+  const focusAfterClose = useRef<{ taskId: string; origin: TaskInputOrigin; element: HTMLElement | null } | null>(null)
+  const closeInput = useCallback(() => {
+    const closed = input.close()
+    if (closed) focusAfterClose.current = { taskId: closed.task.id, origin: closed.origin, element: closed.originElement }
+  }, [input])
+  useEffect(() => {
+    const target = focusAfterClose.current
+    if (inputOpen || !target) return
+    focusAfterClose.current = null
+    const fallback = rootRef.current?.querySelector<HTMLElement>(
+      `[data-type-in="${CSS.escape(target.taskId)}"][data-origin="${target.origin}"]`,
+    )
+    const element = target.element?.isConnected ? target.element : fallback
+    ;(element ?? rootRef.current)?.focus({ preventScroll: true })
+  }, [inputOpen])
+
+  // Everything but the popup is inert while it is open — the top bar, the
+  // filters, the board and the detail panel — so no key and no click reaches
+  // them. Their selection, filters and scroll position are left as they were.
+  useEffect(() => {
+    const root = rootRef.current
+    if (!inputOpen || !root) return
+    const made: Element[] = []
+    for (const child of Array.from(root.children)) {
+      if (child === popupRef.current || child.hasAttribute('inert')) continue
+      child.setAttribute('inert', '')
+      made.push(child)
+    }
+    return () => made.forEach((child) => child.removeAttribute('inert'))
+  }, [inputOpen])
+
+  // A maximized popup covers everything below the top bar and leaves the bar
+  // in view, so it needs to know where the bar ends.
+  useLayoutEffect(() => {
+    if (!inputOpen) return
+    const measure = () => {
+      const root = rootRef.current
+      const top = topRef.current
+      if (root && top) setTopOffset(top.getBoundingClientRect().bottom - root.getBoundingClientRect().top)
+    }
+    measure()
+    window.addEventListener('resize', measure)
+    return () => window.removeEventListener('resize', measure)
+  }, [inputOpen])
+
+  const toggleMaximized = useCallback(() => {
+    setMaximized((current) => {
+      saveTaskTerminalMaximized(!current)
+      return !current
+    })
+  }, [])
+
+  const inputTask = input.session ? tasks.find((task) => task.id === input.session!.task.id) ?? null : null
+  const shownInputTask = inputTask ?? input.session?.task ?? null
+  const inputColumn = inputTask ? columnForTask(inputTask) : null
+  const movedTo =
+    inputColumn && input.session && inputColumn !== input.session.column
+      ? TASK_COLUMNS.find((column) => column.id === inputColumn)?.title ?? null
+      : null
+
   return (
     <section
       ref={rootRef}
@@ -199,7 +285,7 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
       aria-label="Task dashboard"
       style={{ '--td-font': TERMINAL_FONT_FAMILY, '--td-mono': TERMINAL_FONT_FAMILY } as React.CSSProperties}
     >
-      <header className="td-top">
+      <header ref={topRef} className="td-top">
         <h1>Tasks</h1>
         <ul className="td-hosts" aria-label="Hosts">
           {hosts.map((host) => (
@@ -329,6 +415,8 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
                             onOpen={open}
                             onResume={(t) => void resumeTask(t)}
                             resuming={resumingIds.has(task.id)}
+                            onTypeIn={typeIn}
+                            inputMark={inputMark(task)}
                           />
                         ))}
                       </React.Fragment>
@@ -347,6 +435,8 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
           onOpen={open}
           onResume={(t) => void resumeTask(t)}
           resuming={selected !== null && resumingIds.has(selected.id)}
+          onTypeIn={typeIn}
+          inputMark={selected ? inputMark(selected) : null}
           onSaveRecord={saveRecord}
           onRequestSummary={requestSummary}
           summariesEnabled={summariesEnabled}
@@ -367,6 +457,32 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
         onChanged={() => void refresh()}
         onClose={() => setHostsOpen(false)}
       />
+      {input.session && shownInputTask && (
+        <div ref={popupRef} className="td-input-host">
+          <TaskInputPopup
+            task={shownInputTask}
+            listed={inputTask !== null}
+            movedTo={movedTo}
+            pane={panes.get(shownInputTask.id) ?? null}
+            attach={input.session.attach}
+            attempt={input.session.attempt}
+            terminal={input.session.terminal}
+            onTerminalStatus={input.setTerminal}
+            maximized={maximized}
+            sheet={narrow}
+            topOffset={topOffset}
+            onToggleMaximize={toggleMaximized}
+            onClose={closeInput}
+            onRetry={input.retry}
+            onOpenTask={(task) => {
+              focusAfterClose.current = null
+              input.close()
+              open(task)
+            }}
+            stateStyle={stateStyle(shownInputTask.state)}
+          />
+        </div>
+      )}
     </section>
   )
 }
@@ -380,6 +496,22 @@ function useTicker(now: () => number): number {
     return () => clearInterval(interval)
   }, [now])
   return nowMs
+}
+
+// Whether a media query matches, following changes. A browser (or jsdom)
+// without matchMedia counts as not matching.
+function useMediaQuery(query: string): boolean {
+  const read = () => (typeof window.matchMedia === 'function' ? window.matchMedia(query).matches : false)
+  const [matches, setMatches] = useState(read)
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return
+    const list = window.matchMedia(query)
+    const update = () => setMatches(list.matches)
+    update()
+    list.addEventListener?.('change', update)
+    return () => list.removeEventListener?.('change', update)
+  }, [query])
+  return matches
 }
 
 function updatedLabel(loading: boolean, updatedAt: number | null, nowMs: number): string {
@@ -432,10 +564,15 @@ interface TaskCardProps {
   onOpen: (task: Task) => void
   onResume: (task: Task) => void
   resuming: boolean
+  onTypeIn: TypeInHandler
+  inputMark: TaskInputMark
 }
 
-const TaskCard: React.FC<TaskCardProps> = ({ task, pane, selected, nowMs, onSelect, onOpen, onResume, resuming }) => {
+const TaskCard: React.FC<TaskCardProps> = ({
+  task, pane, selected, nowMs, onSelect, onOpen, onResume, resuming, onTypeIn, inputMark,
+}) => {
   const action = taskOpenAction(task, pane)
+  const inputAction = taskInputAction(task, pane)
   const age = formatElapsed(task.status_since, nowMs)
   return (
     // The card as a whole is a pointer target; the title button is the
@@ -462,6 +599,7 @@ const TaskCard: React.FC<TaskCardProps> = ({ task, pane, selected, nowMs, onSele
             Done?
           </span>
         )}
+        {inputMark === 'typing' && <span className="td-typing-badge">Typing</span>}
         {age && (
           <span className="td-meta-age" title={`${TASK_STATE_LABELS[task.state]} for ${age}`}>
             {age}
@@ -490,6 +628,7 @@ const TaskCard: React.FC<TaskCardProps> = ({ task, pane, selected, nowMs, onSele
         <span className="td-where" data-miss={action.kind !== 'goto'}>
           {whereLabel(task, pane)}
         </span>
+        <TypeInButton task={task} action={inputAction} mark={inputMark} origin="card" onTypeIn={onTypeIn} small />
         <OpenButton task={task} action={action} onOpen={onOpen} small />
         <ResumeButton task={task} resuming={resuming} onResume={onResume} small />
       </div>
@@ -594,6 +733,38 @@ function whereLabel(task: Task, pane: TaskPaneRef | null): string {
   }
 }
 
+// Type in pane (issue #284): a terminal on the task's tmux session in a popup
+// over the board. Pressed, it shows Connecting… and takes no second press, so
+// one press is one attach.
+type TaskInputMark = 'connecting' | 'typing' | null
+type TypeInHandler = (task: Task, origin: TaskInputOrigin, element: HTMLElement) => void
+
+interface TypeInButtonProps {
+  task: Task
+  action: TaskInputAction | null
+  mark: TaskInputMark
+  origin: TaskInputOrigin
+  onTypeIn: TypeInHandler
+  small?: boolean
+}
+
+const TypeInButton: React.FC<TypeInButtonProps> = ({ task, action, mark, origin, onTypeIn, small = false }) => {
+  if (action?.kind !== 'available') return null
+  return (
+    <button
+      type="button"
+      className={small ? 'td-btn td-btn-sm td-btn-input' : 'td-btn td-btn-primary'}
+      aria-label={`Type in pane: ${taskTitle(task)}`}
+      data-type-in={task.id}
+      data-origin={origin}
+      disabled={mark === 'connecting'}
+      onClick={(event) => onTypeIn(task, origin, event.currentTarget)}
+    >
+      {mark === 'connecting' ? 'Connecting…' : 'Type in pane'}
+    </button>
+  )
+}
+
 interface OpenButtonProps {
   task: Task
   action: TaskOpenAction
@@ -649,6 +820,8 @@ interface TaskDetailProps {
   onOpen: (task: Task) => void
   onResume: (task: Task) => void
   resuming: boolean
+  onTypeIn: TypeInHandler
+  inputMark: TaskInputMark
   onSaveRecord: TasksState['saveRecord']
   onRequestSummary: TasksState['requestSummary']
   summariesEnabled: boolean
@@ -665,6 +838,8 @@ const TaskDetail: React.FC<TaskDetailProps> = ({
   onOpen,
   onResume,
   resuming,
+  onTypeIn,
+  inputMark,
   onSaveRecord,
   onRequestSummary,
   summariesEnabled,
@@ -700,6 +875,7 @@ const TaskDetail: React.FC<TaskDetailProps> = ({
   }
 
   const action = taskOpenAction(task, pane)
+  const inputAction = taskInputAction(task, pane)
   const age = formatElapsed(task.status_since, nowMs)
   const started = formatElapsed(task.started_at, nowMs)
   const recordable = canRecord(task)
@@ -750,6 +926,7 @@ const TaskDetail: React.FC<TaskDetailProps> = ({
           </div>
         )}
         <div className="td-actions">
+          <TypeInButton task={task} action={inputAction} mark={inputMark} origin="detail" onTypeIn={onTypeIn} />
           <OpenButton task={task} action={action} onOpen={onOpen} />
           <ResumeButton task={task} resuming={resuming} onResume={onResume} />
           {recordable && !done && (
@@ -764,6 +941,9 @@ const TaskDetail: React.FC<TaskDetailProps> = ({
           )}
           {action.kind === 'unavailable' && !canResume(task) && (
             <p className="td-note">Cannot open in a pane: {action.reason}.</p>
+          )}
+          {inputAction?.kind === 'unavailable' && (
+            <p className="td-note">Type in pane is not available: {inputAction.reason}.</p>
           )}
         </div>
         {confirmingDone && !done && (

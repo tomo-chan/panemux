@@ -846,6 +846,54 @@ describe('useTerminal', () => {
     vi.useRealTimers()
   })
 
+  // A board attach (issue #284) is not a pane: /api/sessions/{id}/restart
+  // knows only panes, so its caller re-opens the attach itself.
+  it('without recoverOnDisconnect, a disconnected status asks for no restart and reports the failure', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const container = makeContainer()
+    const { result } = renderHook(() =>
+      useTerminal({ sessionId: 'board-0123456789abcdef', container, recoverOnDisconnect: false })
+    )
+    act(() => MockWebSocket.instances[0].simulateOpen())
+    const countBefore = MockWebSocket.instances.length
+
+    await act(async () => {
+      MockWebSocket.instances[0].simulateMessage(JSON.stringify({ type: 'status', state: 'disconnected' }))
+      await Promise.resolve()
+    })
+
+    expect(result.current.sessionState).toBe('disconnected')
+    expect(result.current.reconnectFailed).toBe(true)
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(MockWebSocket.instances.length).toBe(countBefore)
+  })
+
+  it('without recoverOnDisconnect, WS exhaustion asks for no restart and reports the failure', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true })
+    vi.stubGlobal('fetch', fetchMock)
+    vi.useFakeTimers()
+
+    const container = makeContainer()
+    const { result } = renderHook(() =>
+      useTerminal({
+        sessionId: 'board-0123456789abcdef', container, recoverOnDisconnect: false, reconnectDelay: 10, maxReconnectAttempts: 1,
+      })
+    )
+
+    await act(async () => {
+      MockWebSocket.instances[0].close()
+      await vi.advanceTimersByTimeAsync(20)
+    })
+
+    expect(result.current.sessionState).toBe('disconnected')
+    expect(result.current.reconnectFailed).toBe(true)
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    vi.useRealTimers()
+  })
+
   it('reuses the same terminal instance across remounts for the same session', () => {
     const firstContainer = makeContainer()
     const secondContainer = makeContainer()
