@@ -1085,6 +1085,7 @@ describe('App task dashboard layer', () => {
     expect(await screen.findByText('Failed to create terminal: HTTP 500')).toBeInTheDocument()
   })
 
+  // efficacy:exempt unchanged by this branch; the new tests after it fall inside its line range
   it('goes to the workspace of a pane already attached to the task', async () => {
     currentWorkspaces = {
       ...workspaces,

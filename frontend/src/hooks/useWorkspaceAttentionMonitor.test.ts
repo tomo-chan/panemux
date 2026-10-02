@@ -509,6 +509,7 @@ describe('useWorkspaceAttentionMonitor', () => {
     expect(MockWebSocket.instances).toHaveLength(0)
   })
 
+  // efficacy:exempt unchanged by this branch; the new tests after it fall inside its line range
   it('closes all sockets on unmount', () => {
     const closeSpy = vi.spyOn(MockWebSocket.prototype, 'close')
     const { unmount } = renderHook(() => useWorkspaceAttentionMonitor({ workspaces, maximizedPaneId: null, onAttention: vi.fn() }))
