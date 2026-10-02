@@ -304,6 +304,13 @@ Agent-attention highlighting remains visually distinct from layout-editing affor
 
 Using separate colors avoids mixing "this needs your attention" with "you can drop here".
 
+A browser notification's click takes the operator to what waits rather than only to its workspace:
+the pane is brought out from behind a maximized one, focused and given the same short blue outline
+as a pane opened from the task dashboard. A waiting task no pane shows opens the task dashboard
+instead, with any filter that would hide it cleared and its card selected and given that outline,
+so the notification never leads to a board where the task cannot be found. The notification itself
+names the agent, the host and the task, and nothing the agent wrote.
+
 ---
 
 ## Task Dashboard

@@ -73,6 +73,33 @@ prompt; a request that never starts a subprocess does not create a turn.
 
 ## Task dashboard
 
+### Task waits feed attention and browser notifications (2026-10-02, issue #279)
+
+Issue #277 makes the task dashboard's `wait` state a source of the agent attention that terminal
+prompt detection already raised; #279 is its frontend, on top of #278's collection and signature.
+Decided with the operator before implementation:
+
+- **A prompt and a task wait are the same wait by when the wait began**, on the same pane: a prompt
+  no more than 5 seconds before the wait's `status_since` (put on the browser's clock through its
+  host's `collected_at`) or later is that wait, and a prompt while the pane's task sits in a wait
+  already handled is too. Rejected: a fixed window after either notification, which both merges a
+  separate wait inside it (a codex command approval followed shortly by a question) and repeats one
+  outside it; and treating a pane as one wait until its attention is cleared, which ties
+  notification to whether the operator happened to click the pane. Kept as a known limit: the
+  task-side state is as old as the last collection, so a prompt within one interval after a wait
+  ends can be taken for it.
+- **A wait without a signature raises attention but never notifies.** Keying it on the task ID and
+  `status_since` instead was rejected: the clock conversion moves that time between collections, so
+  the same wait could notify again, and #278 deliberately makes no signature up.
+- **15 seconds between attention collections**, longer than the dashboard's 10 because it runs for as
+  long as the page is open; the dashboard's own collections replace it while it collects.
+- A wait seen while visible counts as handled, so switching away from it later does not notify a
+  wait the operator already saw — the stored signature is written whether or not a notification was
+  shown.
+- Clicking any attention notification now shows and focuses the pane (restoring a maximized pane
+  that hides it) rather than only switching workspace, since #277 asks for that for task waits and
+  one click behaviour for both sources is less surprising.
+
 ### A lightweight collection and a stable wait signature for input-wait notifications (2026-10-02, issue #278)
 
 Issue [#277](https://github.com/tomo-chan/panemux/issues/277) notifies the operator when a task starts

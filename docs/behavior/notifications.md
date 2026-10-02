@@ -13,7 +13,8 @@ detected:
 - the pane frame flashes until the pane receives focus or a click
 - the containing workspace tab flashes when that workspace is not active, and clears when selected
 - the browser Notification API is used when permission has already been granted and the prompt is not currently visible to the user
-- clicking a browser notification focuses the app window and switches to the matching workspace
+- clicking a browser notification brings the app forward, switches to the matching workspace,
+  restores a maximized pane that hides the prompt's pane, focuses that pane and outlines it briefly
 - if notification permission is undecided, the browser is asked on the first pointer or key
   interaction instead of waiting for the first prompt event
 
@@ -32,7 +33,49 @@ change, the pane and workspace attention indicators can still reappear, but the 
 notification is not shown again. When the same pane later emits a different prompt, the stored
 signature is replaced and the new prompt can notify again.
 
-Attention detection remains frontend-only. The backend still buffers recent terminal output per
+### Task dashboard waits
+
+The [task dashboard](tasks.md)'s own `wait` state is the second source of the same attention, so an
+agent that records it is waiting — Claude Code's `waiting` status, codex's `request_user_input` — is
+noticed whether or not its prompt matched a pattern, and even when no pane shows it. Terminal output
+detection stays for what that state cannot tell, such as a codex waiting for command approval.
+
+- **Collection.** While the dashboard collects (shown on a visible page) its own collections are
+  used. Otherwise the frontend polls
+  [`GET /api/tasks/attention`](tasks.md#get-apitasksattention) every 15 seconds for as long as the
+  page is open — hidden, in the background, or with the dashboard shown on a hidden page — never two
+  at once. A collection that was running when the dashboard took over is discarded, and so is a
+  snapshot older than the last one used. A failed collection reports nothing.
+- **Pane and workspace.** A waiting task is matched to its pane the way the dashboard's Open is
+  (the pane attached to its tmux session, or the pane an agent outside tmux was started from). A
+  wait new to the page flashes that pane's frame and, when its workspace is not active, the
+  workspace tab, with the same clearing as a prompt's: focusing or clicking the pane, selecting the
+  workspace. A task no pane shows raises no frame.
+- **Browser notification.** A wait is notified once, under the same rule as a prompt: the table
+  above, where the task dashboard, while shown in an active browser, counts as showing every wait.
+  A task no pane shows is notified unless that is the case. The notification is titled
+  `Agent waiting for input` and its body names only the agent, the host and the task's title
+  (`claude on Local: panemux`), never what the agent asks, its log or its prompt. Permission is
+  handled as for prompts: never requested by a wait.
+- **Clicking it** brings the app forward and, when the task has a pane, shows it as a prompt's click
+  does. Without a pane it opens the task dashboard, clears any filter that would hide the task, and
+  selects and briefly highlights the task's card.
+- **Once per wait.** A wait is known by its `wait_signature`. The signatures already handled are
+  kept in browser storage (`panemux:task-attention`, the newest 200, falling back to memory), so the
+  same wait is not notified again by a later collection, a reload or a reconnect, while a wait that
+  begins after the previous one ended has a new signature and is notified. A wait seen while it was
+  visible counts as handled. A wait without a signature raises the frame but never a notification. A
+  host that fails to answer keeps what was known about its tasks, so its recovery does not report
+  their waits again, and one host failing does not hold up another's.
+- **Prompt and wait together.** A prompt and a task wait on the same pane are one wait when the
+  prompt appeared no more than 5 seconds before the wait began or any time after: the wait's
+  `status_since` is put on the browser's clock through its host's `collected_at`. Whichever is seen
+  first notifies; the other raises attention only. The time of each pane's last fresh prompt is kept
+  in the same storage, so the order holds across a reload. A prompt on a pane whose task is in a
+  signed wait already handled is that wait, as of the last collection, so for up to one collection
+  interval after a wait ends a prompt on its pane can be taken for it and not notified.
+
+Prompt detection remains frontend-only. The backend still buffers recent terminal output per
 session and replays that snapshot when a pane reconnects after a workspace switch or browser reload,
 but prompt notifications no longer depend on the pane being visibly mounted at the time the output
 arrives.

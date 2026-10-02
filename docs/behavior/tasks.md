@@ -74,8 +74,10 @@ of its conversation (see [Summaries](#summaries)).
 
 Collection runs only when the dashboard asks for it — every 10 seconds while the dashboard is on
 screen and the page is visible, and on the Refresh button — or when the input-wait notifications ask
-for the running tasks through [`GET /api/tasks/attention`](#get-apitasksattention). Nothing collects
-in the background.
+for the running tasks through [`GET /api/tasks/attention`](#get-apitasksattention): every 15 seconds
+while a panemux page is open and the dashboard is not collecting itself
+([Task dashboard waits](notifications.md#task-dashboard-waits)). The server collects nothing on its
+own.
 
 Each collection runs one fixed script per host (`sh -s`, with the script on stdin; see
 [Task dashboard collection](../security/command-execution.md#task-dashboard-collection)). The script
