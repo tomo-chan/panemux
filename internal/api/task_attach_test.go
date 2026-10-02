@@ -1,12 +1,15 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -445,4 +448,82 @@ func TestDeleteTaskAttach_CrossSiteIsRefused(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 	_, ok := e.h.manager.Get(got.SessionID)
 	assert.True(t, ok)
+}
+
+// A request that ends while it waits for another request's creation of the
+// same task's attach gives up without creating a second one.
+func TestPostTaskAttach_ARequestEndingWhileWaitingCreatesNothing(t *testing.T) {
+	e := newAttachEnv(t, attachLocal())
+	e.gate = make(chan struct{})
+	first := make(chan *httptest.ResponseRecorder, 1)
+	go func() { first <- e.post(t, "local:claude:in-tmux") }()
+	require.Eventually(t, func() bool {
+		e.h.boardAttaches.mu.Lock()
+		defer e.h.boardAttaches.mu.Unlock()
+		return len(e.h.boardAttaches.creating) == 1
+	}, 5*time.Second, 5*time.Millisecond)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/tasks/attach",
+		strings.NewReader(`{"id":"local:claude:in-tmux"}`)).WithContext(ctx)
+	req.Header.Set("Content-Type", "application/json")
+	setupRouterWithHandler(e.h).ServeHTTP(rec, req)
+	assert.Empty(t, rec.Body.String(), "the ended request writes nothing")
+
+	close(e.gate)
+	require.Equal(t, http.StatusCreated, (<-first).Code)
+	assert.Len(t, e.attachCalls(), 1)
+}
+
+// A count that arrives for an attach already dropped from the registry —
+// the 0 its own removal reports — starts no grace period.
+func TestBoardAttach_ACountForAForgottenAttachIsIgnored(t *testing.T) {
+	e := newAttachEnv(t, attachLocal())
+	got := decodeAttach(t, e.post(t, "local:claude:in-tmux"))
+	attach := e.h.boardAttaches.forget(got.SessionID)
+	require.NotNil(t, attach)
+	require.Empty(t, e.timers.live())
+
+	e.h.boardAttachSubscribers(attach, 0)
+	assert.Empty(t, e.timers.live())
+}
+
+// A timer stopped by a reconnect but already firing must not match the
+// generation of the timer armed when that reconnect leaves.
+func TestBoardAttach_AnEarlierTimerFiringLateRemovesNothing(t *testing.T) {
+	e := newAttachEnv(t, attachLocal())
+	got := decodeAttach(t, e.post(t, "local:claude:in-tmux"))
+	first := e.timers.live()[0]
+
+	_, _, unsubscribe, ok := e.h.manager.Subscribe(got.SessionID)
+	require.True(t, ok)
+	unsubscribe() // arms the next grace period
+	require.Len(t, e.timers.live(), 1)
+
+	first.fn() // the first timer had already fired when Stop was called
+	_, ok = e.h.manager.Get(got.SessionID)
+	assert.True(t, ok, "only the current grace period may remove the attach")
+}
+
+// An attach whose session something else already removed is replaced, and
+// the failed removal is logged; removing a live one logs nothing.
+func TestBoardAttach_RemovingAnAlreadyRemovedSessionIsLogged(t *testing.T) {
+	var logs bytes.Buffer
+	log.SetOutput(&logs)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+
+	e := newAttachEnv(t, attachLocal())
+	first := decodeAttach(t, e.post(t, "local:claude:in-tmux"))
+	require.NoError(t, e.h.manager.Remove(first.SessionID))
+
+	rec := e.post(t, "local:claude:in-tmux")
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+	second := decodeAttach(t, rec)
+	assert.Contains(t, logs.String(), "board attach "+first.SessionID)
+
+	logs.Reset()
+	require.Equal(t, http.StatusNoContent, e.delete(t, second.SessionID).Code)
+	assert.Empty(t, logs.String())
 }

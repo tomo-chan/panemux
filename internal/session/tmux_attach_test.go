@@ -182,4 +182,12 @@ func TestCreateTmuxAttach_DispatchesOnConnection(t *testing.T) {
 	_, err = createTmuxAttach("board-2", "Review", "missing", "review-api",
 		map[string]config.SSHConnection{}, "/nonexistent/ssh_config")
 	require.Error(t, err, "a connection that resolves nowhere is an error, not a local attach")
+
+	// A connection that resolves goes on to the SSH attach, whose own
+	// refusal is returned rather than a missing session.
+	sess, err = createTmuxAttach("board-3", "Review", "dev-server", "bad;session",
+		map[string]config.SSHConnection{"dev-server": {Host: "dev.invalid"}}, "/nonexistent/ssh_config")
+	require.Error(t, err)
+	assert.Nil(t, sess)
+	assert.Contains(t, err.Error(), "invalid tmux session name")
 }
