@@ -254,6 +254,7 @@ func parseCodexTurn(db, event, item string) codexTurn {
 	if m := codexItemType.FindStringSubmatch(item); m != nil {
 		turn.LastItem = m[1]
 		if ts := codexLineTime.FindStringSubmatch(item); ts != nil {
+			//mutation:exempt[CONDITIONALS_BOUNDARY] equivalent — at exactly 0 it stores the 0 the field already holds
 			if at, err := time.Parse(time.RFC3339Nano, ts[1]); err == nil && at.UnixMilli() > 0 {
 				turn.LastItemAt = at.UnixMilli()
 			}
