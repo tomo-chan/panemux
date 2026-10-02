@@ -527,3 +527,24 @@ func TestBoardAttach_RemovingAnAlreadyRemovedSessionIsLogged(t *testing.T) {
 	require.Equal(t, http.StatusNoContent, e.delete(t, second.SessionID).Code)
 	assert.Empty(t, logs.String())
 }
+
+// A timer of a deleted attach that fires late must leave the task's next
+// attach alone: it is told apart only by the attach pointer, which is never
+// registered twice (PR #286 review).
+func TestBoardAttach_ATimerOfADeletedAttachLeavesTheNextOneAlone(t *testing.T) {
+	e := newAttachEnv(t, attachLocal())
+	first := decodeAttach(t, e.post(t, "local:claude:in-tmux"))
+	stale := e.timers.live()[0]
+	require.Equal(t, http.StatusNoContent, e.delete(t, first.SessionID).Code)
+
+	rec := e.post(t, "local:claude:in-tmux")
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+	second := decodeAttach(t, rec)
+
+	stale.fn() // the deleted attach's timer had already fired when Stop was called
+
+	rec = e.post(t, "local:claude:in-tmux")
+	require.Equal(t, http.StatusOK, rec.Code, "the task's attach is still the second one")
+	assert.Equal(t, second.SessionID, decodeAttach(t, rec).SessionID)
+	assert.Len(t, e.attachCalls(), 2)
+}
