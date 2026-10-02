@@ -36,9 +36,10 @@ Browser notification eligibility is determined by the current UI state:
 | inactive | any pane | yes |
 
 A wait is notified once per `wait_id` in a browser
-([Browser notifications](task-events.md#browser-notifications)): the IDs already notified are kept in
-browser storage shared by the tabs, and the notification's `tag` is the `wait_id`, so a reload, a
-reconnect or a second tab does not notify the same wait again. The pane and workspace indicators can
+([Browser notifications](task-events.md#browser-notifications)): each tab keeps the IDs it has
+notified in its session storage, so a reload or a reconnect of that tab does not notify the same wait
+again. Tabs do not coordinate: two tabs showing panemux can each notify the same wait, and the
+notification's `tag` (the `wait_id`) replaces one still shown rather than stacking it. The pane and workspace indicators can
 still reappear after a reload while the task is still waiting. A later wait of the same task has a new
 `wait_id` and notifies again. The notification shows the agent, the host and the task's directory
 name, never conversation text.

@@ -117,10 +117,15 @@ the pane/workspace attention and the browser notifications. The design is in
   `publish` does, would leave a hole in a stream of differences that the receiver cannot see; a
   receiver already recovers from any gap with a fresh snapshot, so a close needs nothing new. Sending a
   new snapshot on the same connection was rejected for needing a mid-stream snapshot on both sides.
-- **Notified waits are recorded per browser, not on the server.** Each tab claims a `wait_id` in shared
-  browser storage before notifying, and the notification's `tag` is the `wait_id`. Electing one tab
-  with the Web Locks API was rejected: the elected tab would judge visibility from its own state only.
-  Recording on the server would make the server decide how an event is handled.
+- **Each tab notifies on its own; tabs do not coordinate.** A tab records the waits it notified in its
+  session storage, which survives its own reloads, and the notification's `tag` is the `wait_id`. Two
+  tabs showing panemux may both notify one wait; that was accepted as simpler than any coordination.
+  Rejected: a claim in storage shared by the tabs (racy unless taken under a Web Lock, and a background
+  tab could claim a wait the focused tab is showing unless the focused tab is given a head start), and
+  electing one tab with the Web Locks API (the elected tab would judge visibility from its own state
+  only). Recording on the server would make the server decide how an event is handled. This relaxes
+  #277's "no duplicate across several tabs" to "no duplicate within a tab, across reloads and
+  reconnects".
 - **Attention also clears when the task leaves the wait**, besides focus, click and selecting the
   workspace, so a wait answered elsewhere does not keep flashing.
 - **Observation stops 30 seconds after the last subscriber**, so a reload does not restart it, and keeps

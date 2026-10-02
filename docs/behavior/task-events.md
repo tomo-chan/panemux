@@ -251,11 +251,15 @@ it from that store.
 - A wait the user cannot currently see is notified once per `wait_id`, under the conditions in
   [Agent attention notifications](notifications.md#agent-attention-notifications). A wait whose task
   matches no pane is never visible, so it is notified.
-- The browser records the `wait_id`s it has notified in its storage, shared by its tabs. A tab claims a
-  `wait_id` in that record before notifying, so a reload, a reconnect or a second tab does not notify the
-  same wait again; the notification's `tag` is the `wait_id`, so two tabs racing still show one. The
-  record drops the IDs no longer in a snapshot and keeps at most the 500 newest. A new `wait_id` —
-  a later wait of the same task — is notified again.
+- **Each tab decides and notifies on its own; tabs do not coordinate.** Every tab judges visibility
+  from its own screen, so two tabs showing panemux can both notify the same wait.
+- A tab records the `wait_id`s it has notified in its session storage, which survives a reload of
+  that tab and is not shared with other tabs, so a reload or a reconnect does not notify the same wait
+  again. The record drops the IDs no longer in a snapshot and keeps at most the 500 newest. Without
+  session storage the record lives in the page's memory and a reload may notify again. A new
+  `wait_id` — a later wait of the same task — is notified again.
+- The notification's `tag` is the `wait_id`, so a notification of the same wait that is still shown is
+  replaced rather than stacked.
 - The notification names the agent, the host and the task's directory name; it carries no
   conversation text, and `waiting_for` is cut to 40 characters.
 - Clicking it brings the app forward. With a matched pane, the pane's workspace is selected, a

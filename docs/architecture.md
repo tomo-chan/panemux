@@ -53,7 +53,7 @@ layout rendering, terminal emulation, interaction state, and presentation.
 | `useWebSocket` | Own the pane connection, reconnect behavior, send-if-open transport, and validation of structured text control frames. |
 | `usePaneUrlOpen` | Receive validated URL-open events and coordinate browser navigation/callback forwarding. |
 | task event store | Hold one `/ws/tasks/events` connection per tab and the tasks and hosts it reports, validated and in `seq` order; reconnect from a fresh snapshot on any gap. |
-| attention and notification hooks | Project the task event store and visibility changes into pane/workspace indicators and browser notifications, matching tasks to panes with `utils/taskBoard` and recording the notified `wait_id`s in browser storage. |
+| attention and notification hooks | Project the task event store and visibility changes into pane/workspace indicators and browser notifications, matching tasks to panes with `utils/taskBoard` and recording the `wait_id`s each tab notified in its session storage. |
 | Agent Board hooks and panels | Poll status/message APIs, stream command-center output, and present dashboard, palette, and history overlays. |
 | `TaskDashboard` and `useTasks` | Poll `GET /api/tasks` while the task dashboard is shown, present tasks as a kanban by state, save done and labels through `PUT /api/tasks/records`, start and resume tasks through `POST /api/tasks` and `POST /api/tasks/resume` (`NewTaskDialog`), and match each task to the pane attached to its tmux session, or to the `local` / `ssh` pane its agent's `PANEMUX_PANE_ID` names (`utils/taskBoard`). Type in pane opens and ends the board's temporary attach through `POST`/`DELETE /api/tasks/attach` (`useTaskInput`) and shows it in `TaskInputPopup` / `TaskTerminal`. |
 | Zod schemas | Runtime-validate structured success payloads and control frames for which schemas are defined. Generated TypeScript types derive from these schemas. |
@@ -72,8 +72,8 @@ layout rendering, terminal emulation, interaction state, and presentation.
   agents' own files on every host again at each collection. The pane a task belongs to is derived in the browser from
   the current workspaces.
 - The task event stream's last observation, `epoch`, `seq` and unsigned wait IDs are in memory and
-  last until the server restarts. Which waits a browser has already notified is in that browser's
-  storage; the server keeps no per-viewer state.
+  last until the server restarts. Which waits a tab has already notified is in that tab's
+  session storage; the server keeps no per-viewer state.
 - Agent Board's status/history cache is in memory. Relay cursors, bootstrap state, command-center
   history/session state, and the task dashboard's done and label records use dedicated persisted
   files.
