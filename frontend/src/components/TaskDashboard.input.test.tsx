@@ -261,6 +261,41 @@ describe('TaskDashboard Type in pane: opening', () => {
     expect(screen.getByTestId('task-terminal')).toHaveAttribute('data-session', 'board-000000000000000b')
     expect(state.detach).not.toHaveBeenCalledWith('board-000000000000000b')
   })
+
+  it('keeps the attach a reopened popup for the same task shares with the closed one', async () => {
+    const first = deferred()
+    const second = deferred()
+    const state = tasksState({ attach: vi.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise) })
+    renderDashboard(state)
+
+    await openPopup('wait-1')
+    fireEvent.click(within(dialog()).getByRole('button', { name: 'Close' }))
+    await openPopup('wait-1')
+
+    // The server answers both requests with the same attach.
+    await act(async () => first.resolve(attached('board-00000000000000aa')))
+    expect(state.detach).not.toHaveBeenCalled()
+    await act(async () => second.resolve(attached('board-00000000000000aa')))
+    expect(screen.getByTestId('task-terminal')).toHaveAttribute('data-session', 'board-00000000000000aa')
+    expect(state.detach).not.toHaveBeenCalled()
+  })
+
+  it('ends a shared attach when the reopened popup closes before either answer', async () => {
+    const first = deferred()
+    const second = deferred()
+    const state = tasksState({ attach: vi.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise) })
+    renderDashboard(state)
+
+    await openPopup('wait-1')
+    fireEvent.click(within(dialog()).getByRole('button', { name: 'Close' }))
+    await openPopup('wait-1')
+    await act(async () => first.resolve(attached('board-00000000000000aa')))
+    fireEvent.click(within(dialog()).getByRole('button', { name: 'Close' }))
+    await act(async () => second.resolve(attached('board-00000000000000aa')))
+
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(state.detach).toHaveBeenCalledWith('board-00000000000000aa')
+  })
 })
 
 describe('TaskDashboard Type in pane: closing', () => {
@@ -297,6 +332,15 @@ describe('TaskDashboard Type in pane: closing', () => {
     unmount()
     expect(state.detach).toHaveBeenCalledWith('board-0000000000000001')
   })
+
+  it('ends the attach when the page is left with the popup open', async () => {
+    const { state } = renderDashboard()
+    await openPopup()
+    act(() => {
+      window.dispatchEvent(new Event('pagehide'))
+    })
+    expect(state.detach).toHaveBeenCalledWith('board-0000000000000001')
+  })
 })
 
 describe('TaskDashboard Type in pane: keyboard', () => {
@@ -319,6 +363,33 @@ describe('TaskDashboard Type in pane: keyboard', () => {
     key(close, { key: 'Escape' })
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(state.detach).toHaveBeenCalled()
+  })
+
+  it('does not close on Escape while focus is on the popup itself or below the header', async () => {
+    renderDashboard(tasksState({ attach: vi.fn().mockResolvedValue({ ok: false, error: 'the tmux session has ended' }) }))
+    await openPopup()
+    // Focus starts on the popup itself, before any terminal can take it.
+    expect(document.activeElement).toBe(dialog())
+    key(dialog(), { key: 'Escape' })
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+
+    const retry = within(dialog()).getByRole('button', { name: 'Retry' })
+    retry.focus()
+    key(retry, { key: 'Escape' })
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+  })
+
+  it('does not close on Escape after a disconnect moves focus to the popup', async () => {
+    renderDashboard()
+    await openPopup()
+    setStatus('connected')
+    screen.getByLabelText('Terminal input').focus()
+    setStatus('disconnected')
+    // A browser drops focus from the now inert terminal and the popup takes
+    // it; jsdom does not, so put it where the browser would.
+    dialog().focus()
+    key(dialog(), { key: 'Escape' })
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
   })
 
   it('closes on Cmd/Ctrl+Shift+Escape even from the terminal, without sending it there', async () => {

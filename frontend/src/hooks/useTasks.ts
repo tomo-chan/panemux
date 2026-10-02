@@ -70,7 +70,8 @@ export interface TasksState {
   /**
    * Ends a board attach. Only that tmux client ends; the session and the
    * agent keep running. A failure is not reported: the server destroys an
-   * attach nobody reads after a grace period anyway.
+   * attach nobody reads after a grace period anyway. The request is
+   * keepalive, so it is still sent when the page is going away.
    */
   detach: (sessionId: string) => Promise<void>
 }
@@ -243,7 +244,7 @@ export function useTasks(enabled: boolean): TasksState {
 
   const detach = useCallback(async (sessionId: string) => {
     try {
-      await fetch(`/api/tasks/attach/${encodeURIComponent(sessionId)}`, { method: 'DELETE' })
+      await fetch(`/api/tasks/attach/${encodeURIComponent(sessionId)}`, { method: 'DELETE', keepalive: true })
     } catch {
       // See TasksState.detach.
     }

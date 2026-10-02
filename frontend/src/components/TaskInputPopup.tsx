@@ -150,7 +150,10 @@ export const TaskInputPopup: React.FC<TaskInputPopupProps> = ({
       // Escape, Tab and everything else typed into the terminal are its own.
       if (target && bodyRef.current?.contains(target)) return
 
+      // Escape closes from the header only: anywhere else it may have been
+      // meant for the terminal, which is not taking keys right now.
       if (event.key === 'Escape') {
+        if (!(target instanceof Element && target.closest('.td-input-head'))) return
         event.preventDefault()
         handlers.current.onClose()
         return

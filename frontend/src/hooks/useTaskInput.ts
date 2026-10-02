@@ -32,6 +32,10 @@ export function useTaskInput(attach: TasksState['attach'], detach: TasksState['d
   const [session, setSession] = useState<TaskInputSession | null>(null)
   const tokenRef = useRef(0)
   const sessionIdRef = useRef<string | null>(null)
+  // The task the open popup is for. The server answers every attach to one
+  // task with the same board attach, so a late answer for this task is the
+  // attach the open popup's own request receives, and must not be ended.
+  const openTaskIdRef = useRef<string | null>(null)
   const detachRef = useRef(detach)
   detachRef.current = detach
 
@@ -39,7 +43,11 @@ export function useTaskInput(attach: TasksState['attach'], detach: TasksState['d
     async (task: Task, token: number) => {
       const result = await attach(task)
       if (tokenRef.current !== token) {
-        if (result.ok && result.launched.session_id !== sessionIdRef.current) {
+        if (
+          result.ok &&
+          result.launched.session_id !== sessionIdRef.current &&
+          openTaskIdRef.current !== task.id
+        ) {
           void detachRef.current(result.launched.session_id)
         }
         return
@@ -64,6 +72,7 @@ export function useTaskInput(attach: TasksState['attach'], detach: TasksState['d
     (task: Task, origin: TaskInputOrigin, originElement: HTMLElement | null) => {
       if (sessionIdRef.current || session) return
       const token = ++tokenRef.current
+      openTaskIdRef.current = task.id
       setSession({
         task,
         column: columnForTask(task),
@@ -85,30 +94,35 @@ export function useTaskInput(attach: TasksState['attach'], detach: TasksState['d
     void request(session.task, token)
   }, [request, session])
 
-  const close = useCallback(() => {
+  const end = useCallback(() => {
     tokenRef.current++
+    openTaskIdRef.current = null
     const sessionId = sessionIdRef.current
     sessionIdRef.current = null
     if (sessionId) void detachRef.current(sessionId)
+  }, [])
+
+  const close = useCallback(() => {
+    end()
     const closed = session
     setSession(null)
     return closed
-  }, [session])
+  }, [end, session])
 
   const setTerminal = useCallback((terminal: TaskTerminalStatus) => {
     setSession((current) => (current && current.terminal !== terminal ? { ...current, terminal } : current))
   }, [])
 
-  // The dashboard going away (the layer shortcut, a reload) ends the attach too.
-  useEffect(
-    () => () => {
-      tokenRef.current++
-      const sessionId = sessionIdRef.current
-      sessionIdRef.current = null
-      if (sessionId) void detachRef.current(sessionId)
-    },
-    [],
-  )
+  // The dashboard going away ends the attach too: unmounting (the layer
+  // shortcut), and the page itself going (a reload, a closed tab), which runs
+  // no cleanup — pagehide does, and detach's keepalive outlives the page.
+  useEffect(() => {
+    window.addEventListener('pagehide', end)
+    return () => {
+      window.removeEventListener('pagehide', end)
+      end()
+    }
+  }, [end])
 
   return { session, open, retry, close, setTerminal }
 }

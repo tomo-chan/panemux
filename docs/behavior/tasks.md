@@ -596,7 +596,9 @@ switch workspaces or add a pane, and it neither starts nor resumes the agent.
 
 - **One attach per press.** The button reads `Connecting…` and is disabled from the press until the
   popup closes; the popup opens at once in `Connecting`. An attach that answers after the popup was
-  closed — or after another task's popup was opened — is ended at once and never shown.
+  closed — or after another task's popup was opened — is ended at once and never shown. The
+  exception is a popup reopened on the same task: the server answers its request with that same
+  attach, so the late answer is left for it.
 - **Connection.** The header shows `Connecting`, `Connected`, `Disconnected` or `Failed`. The terminal
   takes keys only while `Connected`: before that, and after a disconnect, a failed request, a
   WebSocket that gave up, or a tmux client that exited (a session that ended — including one that
@@ -612,8 +614,10 @@ switch workspaces or add a pane, and it neither starts nor resumes the agent.
   was used last.
 - **Closing** (`Close`, `Cmd/Ctrl+Shift+Esc`, or `Escape` while focus is outside the terminal) sends
   `DELETE /api/tasks/attach/{session_id}`, which ends only the board's tmux client; the agent and
-  its tmux session keep running. The dashboard leaving with the popup open — the layer shortcut, a
-  reload — ends it the same way. The board's selection, filters and scroll position are as they
+  its tmux session keep running. The dashboard leaving with the popup open ends it the same way:
+  the layer shortcut unmounts it, and a reload or a closed tab sends the same `DELETE` from
+  `pagehide` as a `keepalive` request, which outlives the page. Were that request lost, the server
+  still destroys the attach once its last WebSocket has been closed for the grace period. The board's selection, filters and scroll position are as they
   were, and focus returns to the button the popup was opened from (the same task's button where its
   card has moved to, or the dashboard when there is none).
 - The popup's `Go to pane` / `Open` closes it and opens the task as above.

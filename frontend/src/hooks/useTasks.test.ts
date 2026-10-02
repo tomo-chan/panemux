@@ -639,7 +639,7 @@ describe('useTasks attach and detach (issue #284)', () => {
       await result.current.detach('board-../x')
     })
 
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/tasks/attach/board-0123456789abcdef', { method: 'DELETE' })
-    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/tasks/attach/board-..%2Fx', { method: 'DELETE' })
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/tasks/attach/board-0123456789abcdef', { method: 'DELETE', keepalive: true })
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/tasks/attach/board-..%2Fx', { method: 'DELETE', keepalive: true })
   })
 })
