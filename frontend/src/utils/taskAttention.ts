@@ -86,7 +86,8 @@ export function createTaskAttentionTracker(
   const knownWaits = new Map<string, KnownWait>()
   // The signed wait each pane's task is in, as of the last snapshot, and when
   // its host last answered with it. A failed host's wait is held for holdMs
-  // past that answer and no longer.
+  // past that answer and no longer; any wait lapses 2 * holdMs after it when
+  // no collection arrives.
   let paneWaits = new Map<string, PaneWait>()
   let lastAppliedAt = -Infinity
 
@@ -184,7 +185,10 @@ export function createTaskAttentionTracker(
       state.terminal[paneId] = at
       write(state)
       const wait = paneWaits.get(paneId)
-      if (!wait || (wait.held && at - wait.seenAt > holdMs)) return false
+      // A held wait lasts holdMs past its host's last answer. Any other lasts
+      // until a collection is one interval late, so a collection that stops
+      // arriving altogether does not keep the pane's prompts quiet.
+      if (!wait || at - wait.seenAt > (wait.held ? holdMs : 2 * holdMs)) return false
       return state.signatures[wait.signature] !== undefined
     },
   }

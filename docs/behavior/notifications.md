@@ -77,7 +77,9 @@ detection stays for what that state cannot tell, such as a codex waiting for com
   signed wait already handled is that wait, as of the last collection, so for up to one collection
   interval after a wait ends a prompt on its pane can be taken for it and not notified. While the
   task's host fails to answer, the wait is held for one collection interval past the host's last
-  answer and no longer, so a prompt after that notifies even if the wait may still be going on.
+  answer and no longer; when no collection arrives at all (the request or the dashboard's
+  collection keeps failing), it lapses two intervals after the last one that did. A prompt after
+  that notifies even if the wait may still be going on.
 
 Prompt detection remains frontend-only. The backend still buffers recent terminal output per
 session and replays that snapshot when a pane reconnects after a workspace switch or browser reload,

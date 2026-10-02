@@ -91,7 +91,11 @@ Decided with the operator before implementation:
   wait indefinitely, suppressing every later prompt there (a codex command approval among them)
   until the host recovered; the wait is now held for one interval past the host's last answer,
   preferring a possible duplicate notification to a missed one. Dropping it at once was rejected
-  as needlessly giving up the same-wait match across a single failed collection.
+  as needlessly giving up the same-wait match across a single failed collection. The same review
+  found that a collection that stops arriving altogether (the request failing, or the dashboard's
+  collection while it collects) kept every pane's wait the same way; a wait now lapses two
+  intervals after the last collection that showed it, one interval of lateness being tolerated so
+  that an ordinary slow collection does not drop it.
 - **A wait without a signature raises attention but never notifies.** Keying it on the task ID and
   `status_since` instead was rejected: the clock conversion moves that time between collections, so
   the same wait could notify again, and #278 deliberately makes no signature up.

@@ -254,6 +254,17 @@ describe('createTaskAttentionTracker', () => {
       expect(tracker.noteTerminalPrompt('main', T0 + 31000)).toBe(false)
     })
 
+    it('stops taking a terminal prompt for a wait two collection intervals after the last collection arrived', () => {
+      const storage = memoryStorage()
+      const tracker = createTaskAttentionTracker(() => storage, { holdMs: 15000 })
+      tracker.applySnapshot(snapshot([waitTask('a')], T0 + 1000), T0 + 1000, paneFor({ a: paneMain }))
+      // A collection late by up to one interval still finds the wait.
+      expect(tracker.noteTerminalPrompt('main', T0 + 31000)).toBe(true)
+      // No collection arrives at all: the prompt is no longer taken for it.
+      expect(tracker.noteTerminalPrompt('main', T0 + 31001)).toBe(false)
+      expect(tracker.noteTerminalPrompt('main', T0 + 3601000)).toBe(false)
+    })
+
     it('does not count an unsigned or ended task wait as the terminal prompt’s wait', () => {
       const tracker = freshTracker()
       tracker.applySnapshot(snapshot([waitTask('a', { wait_signature: undefined })], T0 + 1000), T0 + 1000, paneFor({ a: paneMain }))
