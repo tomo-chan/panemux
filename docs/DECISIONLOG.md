@@ -118,14 +118,14 @@ the pane/workspace attention and the browser notifications. The design is in
   receiver already recovers from any gap with a fresh snapshot, so a close needs nothing new. Sending a
   new snapshot on the same connection was rejected for needing a mid-stream snapshot on both sides.
 - **Each tab notifies on its own; tabs do not coordinate.** A tab records the waits it notified in its
-  session storage, which survives its own reloads, and the notification's `tag` is the `wait_id`. Two
-  tabs showing panemux may both notify one wait; that was accepted as simpler than any coordination.
-  Rejected: a claim in storage shared by the tabs (racy unless taken under a Web Lock, and a background
-  tab could claim a wait the focused tab is showing unless the focused tab is given a head start), and
-  electing one tab with the Web Locks API (the elected tab would judge visibility from its own state
-  only). Recording on the server would make the server decide how an event is handled. This relaxes
-  #277's "no duplicate across several tabs" to "no duplicate within a tab, across reloads and
-  reconnects".
+  session storage, which survives its own reloads, and the notification's `tag` is the `wait_id`.
+  Several browser tabs are not a requirement: one page shows every workspace, so there is no use for
+  showing the same pane in two tabs, and the requirement is no duplicate within a tab across reloads
+  and reconnects. Two tabs opened anyway may both notify one wait. Coordination was therefore not
+  built: neither a claim in storage shared by the tabs (racy unless taken under a Web Lock, and a
+  background tab could claim a wait the focused tab is showing) nor electing one tab with the Web Locks
+  API (the elected tab would judge visibility from its own state only). Recording on the server would
+  make the server decide how an event is handled.
 - **Attention also clears when the task leaves the wait**, besides focus, click and selecting the
   workspace, so a wait answered elsewhere does not keep flashing.
 - **Observation stops 30 seconds after the last subscriber**, so a reload does not restart it, and keeps
