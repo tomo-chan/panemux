@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createTaskAttentionTracker, TASK_ATTENTION_STORAGE_KEY, TERMINAL_WAIT_TOLERANCE_MS } from './taskAttention'
+import { createTaskAttentionTracker, shouldNotifyTaskWait, taskWaitNotificationBody, TASK_ATTENTION_STORAGE_KEY, TERMINAL_WAIT_TOLERANCE_MS } from './taskAttention'
 import type { TaskPaneRef } from './taskBoard'
 import type { Task, TaskHost } from '../schemas'
 
@@ -256,5 +256,30 @@ describe('createTaskAttentionTracker', () => {
     corrupt.setItem(TASK_ATTENTION_STORAGE_KEY, '{not json')
     const events = createTaskAttentionTracker(() => corrupt).applySnapshot(snapshot([waitTask('a')], T0 + 1000), T0 + 1000, paneFor({}))
     expect(events.map((event) => event.notify)).toEqual([true])
+  })
+})
+
+describe('shouldNotifyTaskWait', () => {
+  const base = { dashboardShown: false, activeWorkspaceId: 'dev', maximizedPaneId: null, browserIsActive: true }
+  it.each([
+    ['inactive browser, pane visible', { ...base, browserIsActive: false, pane: paneMain }, true],
+    ['inactive browser, dashboard shown', { ...base, browserIsActive: false, dashboardShown: true, pane: null }, true],
+    ['active browser, pane visible in the active workspace', { ...base, pane: paneMain }, false],
+    ['active browser, pane in another workspace', { ...base, activeWorkspaceId: 'ops', pane: paneMain }, true],
+    ['active browser, pane hidden by another maximized pane', { ...base, maximizedPaneId: 'side', pane: paneMain }, true],
+    ['active browser, the pane itself maximized', { ...base, maximizedPaneId: 'main', pane: paneMain }, false],
+    ['active browser, no pane', { ...base, pane: null }, true],
+    ['active browser, dashboard shown, no pane', { ...base, dashboardShown: true, pane: null }, false],
+    ['active browser, dashboard shown over the pane', { ...base, dashboardShown: true, pane: paneMain }, false],
+  ])('%s', (_name, input, expected) => {
+    expect(shouldNotifyTaskWait(input)).toBe(expected)
+  })
+})
+
+describe('taskWaitNotificationBody', () => {
+  it('names only the agent, the host and the task, never why it waits', () => {
+    const body = taskWaitNotificationBody(waitTask('a', { host: 'dev-server', agent: 'codex', waiting_for: 'secret prompt text' }))
+    expect(body).toBe('codex on dev-server: a')
+    expect(taskWaitNotificationBody(waitTask('a', { cwd: undefined, session_id: 'abcdef1234' }))).toBe('claude on Local: Session abcdef12')
   })
 })

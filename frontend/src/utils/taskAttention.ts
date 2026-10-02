@@ -1,5 +1,5 @@
 import type { Task, TaskHost } from '../schemas'
-import type { TaskPaneRef } from './taskBoard'
+import { hostLabel, taskTitle, type TaskPaneRef } from './taskBoard'
 
 // Where the task-side half of agent attention (issue #279) is remembered
 // across reloads: which wait signatures have already been handled, and when a
@@ -162,6 +162,38 @@ export function createTaskAttentionTracker(
       return signature !== undefined && state.signatures[signature] !== undefined
     },
   }
+}
+
+/**
+ * Whether a task's wait should show a browser notification: the same rule as
+ * a terminal prompt's (docs/behavior/notifications.md), where the task
+ * dashboard, when shown, is what makes a wait visible.
+ */
+export function shouldNotifyTaskWait({
+  pane,
+  dashboardShown,
+  activeWorkspaceId,
+  maximizedPaneId,
+  browserIsActive,
+}: {
+  pane: TaskPaneRef | null
+  dashboardShown: boolean
+  activeWorkspaceId: string | null
+  maximizedPaneId: string | null
+  browserIsActive: boolean
+}): boolean {
+  if (!browserIsActive) return true
+  if (dashboardShown) return false
+  if (!pane || pane.workspaceId !== activeWorkspaceId) return true
+  return maximizedPaneId !== null && maximizedPaneId !== pane.paneId
+}
+
+/**
+ * A task wait's notification text. It identifies the task and nothing more:
+ * what the agent asks, its log and its prompt stay out of the notification.
+ */
+export function taskWaitNotificationBody(task: Task): string {
+  return `${task.agent} on ${hostLabel(task.host)}: ${taskTitle(task)}`
 }
 
 // waitStartInBrowserClock converts a wait's status_since, which the server

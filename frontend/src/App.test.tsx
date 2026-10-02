@@ -81,6 +81,12 @@ vi.mock('./hooks/useWorkspaceAttentionMonitor', () => ({
   useWorkspaceAttentionMonitor: mockUseWorkspaceAttentionMonitor,
 }))
 
+const mockUseTaskAttention = vi.hoisted(() => vi.fn())
+
+vi.mock('./hooks/useTaskAttention', () => ({
+  useTaskAttention: mockUseTaskAttention,
+}))
+
 vi.mock('./hooks/useBrowserNotificationPermission', () => ({
   useBrowserNotificationPermission: mockUseBrowserNotificationPermission,
 }))
@@ -1103,5 +1109,158 @@ describe('App task dashboard layer', () => {
     expect(mockSetActiveWorkspace).toHaveBeenCalledWith('ops')
     expect(mockCreatePane).not.toHaveBeenCalled()
     expect(screen.queryByRole('region', { name: 'Task dashboard' })).not.toBeInTheDocument()
+  })
+})
+
+describe('App task wait attention (issue #279)', () => {
+  let notifications: Array<{ title: string; options: NotificationOptions; onclick: (() => void) | null; close: ReturnType<typeof vi.fn> }>
+  let reportWaits: (events: unknown[]) => void
+
+  const waitTask = {
+    id: 'local:claude:a',
+    host: '',
+    agent: 'claude',
+    session_id: 'aaaa',
+    cwd: '/workspace/user/panemux',
+    state: 'wait',
+    waiting_for: 'secret question text',
+    wait_signature: 'w1-a',
+    location: { kind: 'tmux', tmux_session: 'task-a', attachable: true },
+  }
+  const mainPane = { paneId: 'main', paneTitle: 'main', workspaceId: 'dev', workspaceTitle: 'Dev' }
+
+  beforeEach(() => {
+    currentWorkspaces = workspaces
+    mockUseWorkspaceAttentionMonitor.mockImplementation(() => {})
+    mockUseBrowserNotificationPermission.mockImplementation(() => {})
+    mockUseSessionsOverview.mockReturnValue({})
+    mockUseGitInfoSnapshotMap.mockReturnValue({})
+    mockUseBoardSessionToken.mockReturnValue({ token: '', commandCenterEnabled: false, agentBoardEnabled: false })
+    mockSetActiveWorkspace.mockResolvedValue(undefined)
+    mockTerminalPane.mockImplementation(({ pane }: { pane: { id: string } }) => {
+      const ctx = useContext(LayoutActionsContext)
+      const maximized = ctx?.maximizedPaneId === pane.id
+      return (
+        <div data-pane-id={pane.id} data-maximized={maximized ? 'true' : 'false'}>
+          <button onClick={() => ctx?.onMaximize(maximized ? null : pane.id)}>Toggle maximize {pane.id}</button>
+        </div>
+      )
+    })
+    mockUseTaskAttention.mockImplementation(({ onTaskWaits }: { onTaskWaits: (events: unknown[]) => void }) => {
+      reportWaits = onTaskWaits
+    })
+    notifications = []
+    vi.stubGlobal('Notification', vi.fn(function MockNotification(title: string, options: NotificationOptions) {
+      const instance = { title, options, onclick: null, close: vi.fn() }
+      notifications.push(instance)
+      return instance as unknown as Notification
+    }) as unknown as typeof Notification)
+    Object.defineProperty(window.Notification, 'permission', { configurable: true, value: 'granted' })
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
+    vi.spyOn(document, 'hasFocus').mockReturnValue(true)
+  })
+
+  afterEach(() => {
+    currentWorkspaces = workspaces
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+    vi.clearAllMocks()
+    mockTerminalPane.mockImplementation(({ pane }: { pane: { id: string } }) => <div data-pane-id={pane.id} />)
+  })
+
+  it('feeds the dashboard’s collections to the task attention hook', () => {
+    mockUseTasks.mockReturnValue({ ...tasksStateWith([waitTask]), updatedAt: 1234 })
+    render(<App />)
+    expect(mockUseTaskAttention).toHaveBeenLastCalledWith(expect.objectContaining({
+      dashboardShown: false,
+      dashboardData: expect.objectContaining({ tasks: [waitTask] }),
+      dashboardUpdatedAt: 1234,
+      workspaces: workspaces.items,
+    }))
+    fireEvent.click(screen.getByRole('button', { name: /^Tasks\b/ }))
+    expect(mockUseTaskAttention).toHaveBeenLastCalledWith(expect.objectContaining({ dashboardShown: true }))
+  })
+
+  it('flashes the pane and its inactive workspace tab, and notifies with only the agent, host and task', () => {
+    currentWorkspaces = { ...workspaces, active: 'ops' }
+    render(<App />)
+    act(() => reportWaits([{ task: waitTask, pane: mainPane, notify: true }]))
+
+    expect(screen.getByRole('tab', { name: /^Dev\b/ })).toHaveAttribute('data-attention', 'true')
+    expect(notifications.map((n) => [n.title, n.options])).toEqual([
+      ['Agent waiting for input', { body: 'claude on Local: panemux', tag: 'w1-a' }],
+    ])
+  })
+
+  it('raises attention without a notification for a wait already handled', () => {
+    currentWorkspaces = { ...workspaces, active: 'ops' }
+    render(<App />)
+    act(() => reportWaits([{ task: waitTask, pane: mainPane, notify: false }]))
+
+    expect(screen.getByRole('tab', { name: /^Dev\b/ })).toHaveAttribute('data-attention', 'true')
+    expect(notifications).toHaveLength(0)
+  })
+
+  it('does not notify a wait whose pane is visible in the active workspace', () => {
+    render(<App />)
+    act(() => reportWaits([{ task: waitTask, pane: mainPane, notify: true }]))
+    expect(notifications).toHaveLength(0)
+  })
+
+  it('does not notify while notification permission is not granted', () => {
+    Object.defineProperty(window.Notification, 'permission', { configurable: true, value: 'default' })
+    render(<App />)
+    act(() => reportWaits([{ task: waitTask, pane: null, notify: true }]))
+    expect(notifications).toHaveLength(0)
+  })
+
+  it('shows the pane hidden by maximize when its notification is clicked', () => {
+    const focusSpy = vi.spyOn(window, 'focus').mockImplementation(() => {})
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle maximize side' }))
+    act(() => reportWaits([{ task: waitTask, pane: mainPane, notify: true }]))
+    expect(notifications).toHaveLength(1)
+
+    act(() => notifications[0].onclick?.())
+
+    expect(focusSpy).toHaveBeenCalled()
+    expect(mockSetActiveWorkspace).toHaveBeenCalledWith('dev')
+    expect(document.querySelector('[data-pane-id="side"]')).toHaveAttribute('data-maximized', 'false')
+    expect(document.querySelector('[data-pane-id="main"]')).toHaveClass('panemux-pane-task-flash')
+    expect(notifications[0].close).toHaveBeenCalled()
+  })
+
+  it('opens the task dashboard on the task when a wait no pane shows is clicked', () => {
+    vi.spyOn(window, 'focus').mockImplementation(() => {})
+    mockUseTasks.mockReturnValue(tasksStateWith([waitTask]))
+    render(<App />)
+    act(() => reportWaits([{ task: waitTask, pane: null, notify: true }]))
+    expect(notifications).toHaveLength(1)
+
+    act(() => notifications[0].onclick?.())
+
+    expect(screen.getByRole('region', { name: 'Task dashboard' })).toBeInTheDocument()
+    expect(screen.getByTestId('task-card-local:claude:a')).toHaveAttribute('data-selected', 'true')
+  })
+
+  it('does not notify a wait while the task dashboard shows it', () => {
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Tasks' }))
+    act(() => reportWaits([{ task: waitTask, pane: null, notify: true }]))
+    expect(notifications).toHaveLength(0)
+  })
+
+  it('focuses and outlines the pane when a terminal prompt’s notification is clicked', () => {
+    currentWorkspaces = { ...workspaces, active: 'ops' }
+    vi.spyOn(window, 'focus').mockImplementation(() => {})
+    mockUseWorkspaceAttentionMonitor.mockImplementation(({ onAttention }: { onAttention: (paneId: string) => void }) => {
+      useEffect(() => {
+        onAttention('main')
+      }, [onAttention])
+    })
+    render(<App />)
+    act(() => notifications[0].onclick?.())
+    expect(mockSetActiveWorkspace).toHaveBeenCalledWith('dev')
+    expect(screen.getByRole('tab', { name: /^Dev\b/ })).not.toHaveAttribute('data-attention')
   })
 })

@@ -13,6 +13,8 @@ import { useLayout } from './hooks/useLayout'
 import { usePaneSettings } from './hooks/usePaneSettings'
 import { useWorkspaceAttentionMonitor } from './hooks/useWorkspaceAttentionMonitor'
 import { useBrowserNotificationPermission } from './hooks/useBrowserNotificationPermission'
+import { useTaskAttention } from './hooks/useTaskAttention'
+import { shouldNotifyTaskWait, taskWaitNotificationBody, type TaskWaitEvent } from './utils/taskAttention'
 import { useSessionsOverview } from './hooks/useSessionsOverview'
 import { useGitInfoSnapshotMap } from './hooks/useGitInfo'
 import { useBoardSessionToken } from './hooks/useBoardSessionToken'
@@ -38,6 +40,8 @@ const DEFAULT_DISPLAY: DisplayConfig = { show_header: true, show_status_bar: tru
 // their panes. The workspaces stay mounted while the dashboard is shown, so
 // every terminal keeps its connection and scrollback.
 type Layer = 'tasks' | 'workspaces'
+
+const EMPTY_WORKSPACES: Workspace[] = []
 
 // How long a pane opened from the dashboard stays outlined.
 const TASK_PANE_FLASH_MS = 1800
@@ -258,6 +262,32 @@ export const App: React.FC = () => {
     })
   }, [])
 
+  // A notification's click: bring the app forward and show its pane — in its
+  // workspace, out from behind another maximized pane — focused and outlined.
+  const revealPane = useCallback((workspaceId: string, paneId: string) => {
+    window.focus()
+    setLayer('workspaces')
+    setMaximizedPaneIdsByWorkspace((current) => {
+      const maximized = current[workspaceId] ?? null
+      return maximized && maximized !== paneId ? { ...current, [workspaceId]: null } : current
+    })
+    clearPaneAttention(paneId)
+    clearWorkspaceAttention(workspaceId)
+    setActivePaneId(paneId)
+    setFlashPaneId(paneId)
+    setPendingFocusedPaneId(paneId)
+    setActiveWorkspace(workspaceId).catch(console.error)
+  }, [clearPaneAttention, clearWorkspaceAttention, setActiveWorkspace])
+
+  // A notification for a task no pane shows opens the dashboard on it.
+  const [taskFocusRequest, setTaskFocusRequest] = useState<{ taskId: string; seq: number } | null>(null)
+  const revealTask = useCallback((taskId: string) => {
+    window.focus()
+    setLayer('tasks')
+    setTaskFocusRequest((current) => ({ taskId, seq: (current?.seq ?? 0) + 1 }))
+  }, [])
+  const clearTaskFocusRequest = useCallback(() => setTaskFocusRequest(null), [])
+
   const notifyAttention = useCallback((paneId: string, showNotification = true) => {
     const paneMetadata = paneMetadataByID.get(paneId)
     const workspace = paneMetadata ? workspaces?.items.find((item) => item.id === paneMetadata.workspaceId) ?? null : findWorkspaceForPane(paneId)
@@ -271,14 +301,50 @@ export const App: React.FC = () => {
     showBrowserNotification(
       'Agent confirmation requested',
       workspaceTitle ? `${paneTitle} in ${workspaceTitle}` : paneTitle,
-      workspace ? () => {
-        window.focus()
-        setActiveWorkspace(workspace.id).catch(console.error)
-      } : undefined,
+      workspace ? () => revealPane(workspace.id, paneId) : undefined,
     )
-  }, [findWorkspaceForPane, layout, paneMetadataByID, setActiveWorkspace, workspaces])
+  }, [findWorkspaceForPane, layout, paneMetadataByID, revealPane, workspaces])
 
   useWorkspaceAttentionMonitor({ workspaces, maximizedPaneId, onAttention: notifyAttention })
+
+  // The task dashboard's waits (issue #279) meet the same attention: the
+  // pane's frame and its workspace tab, and a notification under the same
+  // rule as a terminal prompt's.
+  const notifyTaskWaits = useCallback((events: TaskWaitEvent[]) => {
+    const paneIds = events.flatMap((event) => (event.pane ? [event.pane.paneId] : []))
+    if (paneIds.length > 0) {
+      setAttentionPaneIds((current) => {
+        const next = new Set(current)
+        for (const paneId of paneIds) next.add(paneId)
+        return next
+      })
+    }
+    for (const { task, pane, notify } of events) {
+      if (!notify) continue
+      const visible = !shouldNotifyTaskWait({
+        pane,
+        dashboardShown: layer === 'tasks',
+        activeWorkspaceId: workspaces?.active ?? null,
+        maximizedPaneId,
+        browserIsActive: document.visibilityState === 'visible' && document.hasFocus(),
+      })
+      if (visible) continue
+      showBrowserNotification(
+        'Agent waiting for input',
+        taskWaitNotificationBody(task),
+        pane ? () => revealPane(pane.workspaceId, pane.paneId) : () => revealTask(task.id),
+        task.wait_signature,
+      )
+    }
+  }, [layer, maximizedPaneId, revealPane, revealTask, workspaces?.active])
+
+  useTaskAttention({
+    dashboardShown: layer === 'tasks',
+    dashboardData: tasksState.data,
+    dashboardUpdatedAt: tasksState.updatedAt,
+    workspaces: workspaces?.items ?? EMPTY_WORKSPACES,
+    onTaskWaits: notifyTaskWaits,
+  })
   useBrowserNotificationPermission()
 
   // Global command center palette shortcut: Cmd/Ctrl+Shift+K, deliberately
@@ -771,6 +837,8 @@ export const App: React.FC = () => {
             onOpenTask={handleOpenTask}
             onShowWorkspaces={() => setLayer('workspaces')}
             shortcut={taskShortcut}
+            focusRequest={taskFocusRequest}
+            onFocusRequestHandled={clearTaskFocusRequest}
           />
         )}
       </div>
@@ -778,12 +846,14 @@ export const App: React.FC = () => {
   )
 }
 
-function showBrowserNotification(title: string, body: string, onClick?: () => void) {
+// tag, when given, lets the system replace rather than repeat a notification
+// another panemux tab already showed for the same wait.
+function showBrowserNotification(title: string, body: string, onClick?: () => void, tag?: string) {
   if (!('Notification' in window)) return
 
   if (Notification.permission !== 'granted') return
 
-  const notification = new Notification(title, { body })
+  const notification = new Notification(title, tag ? { body, tag } : { body })
   if (onClick) {
     notification.onclick = () => {
       onClick()
