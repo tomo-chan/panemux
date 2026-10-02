@@ -60,7 +60,25 @@ func NewTmuxLocalAttach(id, title, tmuxSession string) (*TmuxLocalSession, error
 	if err != nil {
 		return nil, err
 	}
+	if err := checkTmuxLocalSession(validatedSession); err != nil {
+		return nil, err
+	}
 	return startTmuxLocal(id, title, validatedSession, tmuxLocalAttachArgs(validatedSession))
+}
+
+// checkTmuxLocalSession fails unless a tmux session named exactly tmuxSession
+// is running. attach-session reports a missing session only after its client
+// has started, so without this check a session that ended since it was
+// collected would yield an attach that exits at once rather than an error.
+func checkTmuxLocalSession(tmuxSession string) error {
+	if _, err := tmuxLocalOutputFn("has-session", "-t", "="+tmuxSession); err != nil {
+		return tmuxSessionNotRunning(tmuxSession, err)
+	}
+	return nil
+}
+
+func tmuxSessionNotRunning(tmuxSession string, err error) error {
+	return fmt.Errorf("tmux session %q is not running: %w", tmuxSession, err)
 }
 
 // startTmuxLocal runs tmux with args on a new PTY. tmuxSession must already be

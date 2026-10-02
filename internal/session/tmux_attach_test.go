@@ -1,8 +1,11 @@
 package session
 
 import (
+	"errors"
 	"os/exec"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -48,7 +51,21 @@ func TestValidateTmuxAttachName(t *testing.T) {
 	}
 }
 
+// stubTmuxLocalOutput answers the attach's has-session check with err.
+func stubTmuxLocalOutput(t *testing.T, err error) *[][]string {
+	t.Helper()
+	previous := tmuxLocalOutputFn
+	var calls [][]string
+	tmuxLocalOutputFn = func(args ...string) ([]byte, error) {
+		calls = append(calls, args)
+		return nil, err
+	}
+	t.Cleanup(func() { tmuxLocalOutputFn = previous })
+	return &calls
+}
+
 func TestNewTmuxLocalAttach_RunsAttachSessionNotNewSession(t *testing.T) {
+	checks := stubTmuxLocalOutput(t, nil)
 	previous := tmuxLocalCommandFn
 	var got []string
 	tmuxLocalCommandFn = func(args []string) *exec.Cmd {
@@ -60,6 +77,72 @@ func TestNewTmuxLocalAttach_RunsAttachSessionNotNewSession(t *testing.T) {
 	_, err := NewTmuxLocalAttach("board-1", "review-api", "review-api")
 	require.Error(t, err, "the injected command cannot start")
 	assert.Equal(t, []string{"attach-session", "-t", "=review-api"}, got)
+	assert.Equal(t, [][]string{{"has-session", "-t", "=review-api"}}, *checks)
+}
+
+// tmux reports a session that has gone only after attach-session started, so
+// the attach checks first: a session that ended between the collection and the
+// attach fails the request instead of returning a client that exits at once
+// (PR #286 review).
+func TestNewTmuxLocalAttach_AnEndedSessionFailsBeforeAttaching(t *testing.T) {
+	checks := stubTmuxLocalOutput(t, errors.New("exit status 1"))
+	previous := tmuxLocalCommandFn
+	called := false
+	tmuxLocalCommandFn = func(args []string) *exec.Cmd {
+		called = true
+		return exec.Command("/path/that/does/not/exist")
+	}
+	t.Cleanup(func() { tmuxLocalCommandFn = previous })
+
+	_, err := NewTmuxLocalAttach("board-1", "review-api", "review-api")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `tmux session "review-api" is not running`)
+	assert.False(t, called, "no tmux client is started for a session that has ended")
+	assert.Equal(t, [][]string{{"has-session", "-t", "=review-api"}}, *checks)
+}
+
+func TestTmuxSSHAttach_ChecksTheSessionBeforeAttaching(t *testing.T) {
+	cases := []struct {
+		name         string
+		status       uint32
+		wantErr      bool
+		wantCommands []string
+	}{
+		{
+			name:         "a running session is attached",
+			wantCommands: []string{"tmux has-session -t '=review-api'", "tmux attach-session -t '=review-api'"},
+		},
+		{
+			name:         "an ended session fails before attaching",
+			status:       1,
+			wantErr:      true,
+			wantCommands: []string{"tmux has-session -t '=review-api'"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			client, transport := startSessionTestSSHServer(t, func(command string) testSSHResponse {
+				if strings.HasPrefix(command, "tmux has-session ") {
+					return testSSHResponse{status: tc.status}
+				}
+				return testSSHResponse{}
+			})
+			sess, err := newTmuxSSHAttachFromClient("board-1", "t", "review-api", SSHConfig{}, client, nil)
+			if tc.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), `tmux session "review-api" is not running`)
+			} else {
+				require.NoError(t, err)
+				t.Cleanup(func() { _ = sess.Close() })
+			}
+			require.Eventually(t, func() bool {
+				commands, _ := transport.snapshot()
+				return len(commands) == len(tc.wantCommands)
+			}, 5*time.Second, 10*time.Millisecond)
+			commands, _ := transport.snapshot()
+			assert.Equal(t, tc.wantCommands, commands)
+		})
+	}
 }
 
 func TestNewTmuxLocalAttach_InvalidNameNeverReachesExec(t *testing.T) {

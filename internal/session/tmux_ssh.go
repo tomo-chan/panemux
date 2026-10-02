@@ -57,8 +57,42 @@ func NewTmuxSSHAttach(id, title, tmuxSession string, cfg SSHConfig) (*TmuxSSHSes
 	if err != nil {
 		return nil, err
 	}
-	command := tmuxSSHAttachCommand(validatedSession)
-	return startTmuxSSHSession(id, title, validatedSession, command, cfg, client, jumpClient)
+	return newTmuxSSHAttachFromClient(id, title, validatedSession, cfg, client, jumpClient)
+}
+
+// newTmuxSSHAttachFromClient checks that tmuxSession is running on an
+// established SSH transport and attaches to it. tmuxSession must already have
+// passed validateTmuxAttachName.
+func newTmuxSSHAttachFromClient(
+	id, title, tmuxSession string,
+	cfg SSHConfig,
+	client, jumpClient *ssh.Client,
+) (*TmuxSSHSession, error) {
+	if err := checkTmuxSSHSession(client, tmuxSession); err != nil {
+		closeSSHResources(nil, client, jumpClient)
+		return nil, err
+	}
+	command := tmuxSSHAttachCommand(tmuxSession)
+	return startTmuxSSHSession(id, title, tmuxSession, command, cfg, client, jumpClient)
+}
+
+// checkTmuxSSHSession fails unless a tmux session named exactly tmuxSession is
+// running on the remote host. See checkTmuxLocalSession for why.
+func checkTmuxSSHSession(client *ssh.Client, tmuxSession string) error {
+	sess, err := client.NewSession()
+	if err != nil {
+		return fmt.Errorf("new ssh session for tmux has-session: %w", err)
+	}
+	defer sess.Close()
+	if err := sess.Run(tmuxSSHHasSessionCommand(tmuxSession)); err != nil {
+		return tmuxSessionNotRunning(tmuxSession, err)
+	}
+	return nil
+}
+
+// tmuxSSHHasSessionCommand quotes the target as tmuxSSHAttachCommand does.
+func tmuxSSHHasSessionCommand(tmuxSession string) string {
+	return fmt.Sprintf("tmux has-session -t '=%s'", tmuxSession)
 }
 
 // newTmuxSSHSessionFromClient completes the remote tmux lifecycle over an
