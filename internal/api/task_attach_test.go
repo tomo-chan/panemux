@@ -409,7 +409,11 @@ func TestBoardAttach_AnExitedClientIsDestroyedAfterTheGracePeriod(t *testing.T) 
 		_ = chunk // drained until the client's exit closes the stream
 	}
 	unsubscribe() // the WebSocket's deferred unsubscribe finds nothing left
-	require.Len(t, e.timers.live(), 1, "the exited attach must not be held forever")
+	// The 0 reaches the registry on the session's pump goroutine after the
+	// stream is closed, so the grace period starts shortly after, not before
+	// the loop above ends.
+	require.Eventually(t, func() bool { return len(e.timers.live()) == 1 },
+		5*time.Second, time.Millisecond, "the exited attach must not be held forever")
 
 	e.timers.fire()
 	_, ok = e.h.manager.Get(got.SessionID)
