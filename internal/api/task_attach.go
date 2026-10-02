@@ -75,13 +75,13 @@ func (b *boardAttaches) isAttach(sessionID string) bool {
 	return ok
 }
 
-// forgetLocked drops an attach from the registry. b.mu must be held.
+// forgetLocked drops an attach from the registry. b.mu must be held. A
+// timer of the attach that fires afterwards finds it gone from bySession.
 func (b *boardAttaches) forgetLocked(attach *boardAttach) {
 	if attach.timer != nil {
 		attach.timer.Stop()
 		attach.timer = nil
 	}
-	attach.generation++
 	delete(b.byTask, attach.taskID)
 	delete(b.bySession, attach.sessionID)
 }
@@ -158,11 +158,7 @@ func (h *Handler) PostTaskAttach(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sessionID, err := h.newBoardAttachID()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
+	sessionID := h.newBoardAttachID()
 	name := task.Location.TmuxSession
 	sess, err := h.createTmuxAttach(sessionID, name, task.Host, name, h.sshConnections())
 	if err != nil {
@@ -277,15 +273,15 @@ func (h *Handler) removeBoardAttachSession(sessionID string) {
 }
 
 // newBoardAttachID returns a session ID no registered session has.
-func (h *Handler) newBoardAttachID() (string, error) {
+func (h *Handler) newBoardAttachID() string {
 	for {
 		buf := make([]byte, 8)
-		if _, err := rand.Read(buf); err != nil {
-			return "", fmt.Errorf("board attach ID: %w", err)
-		}
+		// crypto/rand.Read never returns an error (since Go 1.24 it crashes
+		// the program instead), so there is no error to handle.
+		_, _ = rand.Read(buf)
 		id := boardAttachIDPrefix + hex.EncodeToString(buf)
 		if _, taken := h.manager.Get(id); !taken {
-			return id, nil
+			return id
 		}
 	}
 }

@@ -243,6 +243,8 @@ func (m *managedSession) countChangedLocked() func() {
 		defer m.notifyMu.Unlock()
 		// Two changes read in order can reach here in either order; the
 		// older one, arriving second, would leave the watcher a stale count.
+		// Each change is delivered only by its own func, which runs once.
+		//mutation:exempt[CONDITIONALS_BOUNDARY] unreachable — change never equals m.delivered
 		if watch == nil || change <= m.delivered {
 			return
 		}
