@@ -31,7 +31,9 @@ the sink only through `NewTmuxLocalAttach` / `NewTmuxSSHAttach` in `internal/ses
   `:` (a tmux window target) and `=`.
 - Locally the argv is the literal `attach-session`, `-t`, `=<name>`, discrete arguments with no
   shell. Over SSH the remote command is `tmux attach-session -t '=<name>'`; the single quotes are
-  safe because the allowlist excludes a quote.
+  safe because the allowlist excludes a quote. The `has-session` check run before it takes the same
+  name the same way: argv `has-session`, `-t`, `=<name>` locally, `tmux has-session -t '=<name>'` over
+  SSH, after the same validation.
 - The `=` prefix makes tmux match the session name exactly. Without it tmux resolves a target by
   prefix, so `task-7c21` could attach to `task-7c21e0a4`. `attach-session` never creates a session,
   unlike the panes' `new-session -A`: a name that no longer exists fails rather than starting a shell

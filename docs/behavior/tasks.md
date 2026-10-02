@@ -588,7 +588,10 @@ never holds it. The dashboard's popup that uses it is issue
 [#280](https://github.com/tomo-chan/panemux/issues/280).
 
 - It only attaches (`tmux attach-session -t =<name>`, an exact match) and never creates a session; a
-  session that has ended fails the request.
+  session that has ended fails the request. tmux reports a missing session only after its client has
+  started, so the server first runs `tmux has-session -t =<name>` on the same host. A session that
+  ends between that check and the attach still yields `201`; its client exits at once and the
+  WebSocket shows tmux's message, and the attach is then destroyed like any other.
 - One attach per task: opening the task again while it is open returns the same session, and two
   requests at once create one.
 - It is destroyed by `DELETE /api/tasks/attach/{session_id}`, or 10s after the last WebSocket reading
