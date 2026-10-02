@@ -50,7 +50,8 @@ detection stays for what that state cannot tell, such as a codex waiting for com
   (the pane attached to its tmux session, or the pane an agent outside tmux was started from). A
   wait new to the page flashes that pane's frame and, when its workspace is not active, the
   workspace tab, with the same clearing as a prompt's: focusing or clicking the pane, selecting the
-  workspace. A task no pane shows raises no frame.
+  workspace. A task no pane shows raises no frame; when a later collection finds its pane, that
+  pane's frame flashes then, without a second notification.
 - **Browser notification.** A wait is notified once, under the same rule as a prompt: the table
   above, where the task dashboard, while shown in an active browser, counts as showing every wait.
   A task no pane shows is notified unless that is the case. The notification is titled
@@ -59,7 +60,8 @@ detection stays for what that state cannot tell, such as a codex waiting for com
   handled as for prompts: never requested by a wait.
 - **Clicking it** brings the app forward and, when the task has a pane, shows it as a prompt's click
   does. Without a pane it opens the task dashboard, clears any filter that would hide the task, and
-  selects and briefly highlights the task's card.
+  selects and briefly highlights the task's card; clicking another such notification afterwards
+  selects that task in turn.
 - **Once per wait.** A wait is known by its `wait_signature`. The signatures already handled are
   kept in browser storage (`panemux:task-attention`, the newest 200, falling back to memory), so the
   same wait is not notified again by a later collection, a reload or a reconnect, while a wait that
@@ -73,7 +75,9 @@ detection stays for what that state cannot tell, such as a codex waiting for com
   first notifies; the other raises attention only. The time of each pane's last fresh prompt is kept
   in the same storage, so the order holds across a reload. A prompt on a pane whose task is in a
   signed wait already handled is that wait, as of the last collection, so for up to one collection
-  interval after a wait ends a prompt on its pane can be taken for it and not notified.
+  interval after a wait ends a prompt on its pane can be taken for it and not notified. While the
+  task's host fails to answer, the wait is held for one collection interval past the host's last
+  answer and no longer, so a prompt after that notifies even if the wait may still be going on.
 
 Prompt detection remains frontend-only. The backend still buffers recent terminal output per
 session and replays that snapshot when a pane reconnects after a workspace switch or browser reload,

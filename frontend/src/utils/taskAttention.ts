@@ -13,6 +13,9 @@ export const TERMINAL_WAIT_TOLERANCE_MS = 5000
 
 const DEFAULT_MAX_ENTRIES = 200
 
+/** How often the page collects task waits outside the dashboard. */
+export const TASK_ATTENTION_COLLECTION_INTERVAL_MS = 15000
+
 /** A wait this page had not seen yet. */
 export interface TaskWaitEvent {
   task: Task
@@ -59,17 +62,32 @@ interface KnownWait {
   host: string
   /** The wait signature, or '' for a wait that has none. */
   signature: string
+  /** The pane last reported for it, or null while none showed it. */
+  paneId: string | null
+}
+
+interface PaneWait {
+  signature: string
+  /** When a snapshot last showed this wait from a host that answered. */
+  seenAt: number
+  /** Kept only because its host failed to answer since. */
+  held: boolean
 }
 
 export function createTaskAttentionTracker(
   getStorage: () => Storage | null,
-  { maxEntries = DEFAULT_MAX_ENTRIES }: { maxEntries?: number } = {},
+  {
+    maxEntries = DEFAULT_MAX_ENTRIES,
+    holdMs = TASK_ATTENTION_COLLECTION_INTERVAL_MS,
+  }: { maxEntries?: number; holdMs?: number } = {},
 ): TaskAttentionTracker {
   let memoryState: StoredState = { signatures: {}, terminal: {} }
   // The waits this page has reported, by task ID.
   const knownWaits = new Map<string, KnownWait>()
-  // The signed wait each pane's task is in, as of the last snapshot.
-  let paneWaits = new Map<string, string>()
+  // The signed wait each pane's task is in, as of the last snapshot, and when
+  // its host last answered with it. A failed host's wait is held for holdMs
+  // past that answer and no longer.
+  let paneWaits = new Map<string, PaneWait>()
   let lastAppliedAt = -Infinity
 
   const read = (): StoredState => {
@@ -125,13 +143,20 @@ export function createTaskAttentionTracker(
 
       const state = read()
       const events: TaskWaitEvent[] = []
-      const nextPaneWaits = new Map<string, string>()
+      const nextPaneWaits = new Map<string, PaneWait>()
       for (const task of waiting.values()) {
         const pane = findPane(task)
         const signature = task.wait_signature ?? ''
-        if (pane && signature) nextPaneWaits.set(pane.paneId, signature)
-        if (knownWaits.has(task.id)) continue
-        knownWaits.set(task.id, { host: task.host, signature })
+        if (pane && signature) nextPaneWaits.set(pane.paneId, { signature, seenAt: receivedAt, held: false })
+        const known = knownWaits.get(task.id)
+        if (known) {
+          // A wait first seen without a pane gets one once its pane is found:
+          // attention, not a second notification.
+          if (pane && pane.paneId !== known.paneId) events.push({ task, pane, notify: false })
+          if (pane) known.paneId = pane.paneId
+          continue
+        }
+        knownWaits.set(task.id, { host: task.host, signature, paneId: pane?.paneId ?? null })
 
         let notify = false
         if (signature && state.signatures[signature] === undefined) {
@@ -143,10 +168,10 @@ export function createTaskAttentionTracker(
         events.push({ task, pane, notify })
       }
       // A pane whose task sits on a failed host keeps its wait.
-      for (const [paneId, signature] of paneWaits) {
-        if (nextPaneWaits.has(paneId)) continue
-        const stillKnown = [...knownWaits.values()].some((known) => known.signature === signature && !okHost(known.host))
-        if (stillKnown) nextPaneWaits.set(paneId, signature)
+      for (const [paneId, wait] of paneWaits) {
+        if (nextPaneWaits.has(paneId) || receivedAt - wait.seenAt > holdMs) continue
+        const stillKnown = [...knownWaits.values()].some((known) => known.signature === wait.signature && !okHost(known.host))
+        if (stillKnown) nextPaneWaits.set(paneId, { ...wait, held: true })
       }
       paneWaits = nextPaneWaits
 
@@ -158,8 +183,9 @@ export function createTaskAttentionTracker(
       const state = read()
       state.terminal[paneId] = at
       write(state)
-      const signature = paneWaits.get(paneId)
-      return signature !== undefined && state.signatures[signature] !== undefined
+      const wait = paneWaits.get(paneId)
+      if (!wait || (wait.held && at - wait.seenAt > holdMs)) return false
+      return state.signatures[wait.signature] !== undefined
     },
   }
 }

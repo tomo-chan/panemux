@@ -87,7 +87,11 @@ Decided with the operator before implementation:
   outside it; and treating a pane as one wait until its attention is cleared, which ties
   notification to whether the operator happened to click the pane. Kept as a known limit: the
   task-side state is as old as the last collection, so a prompt within one interval after a wait
-  ends can be taken for it.
+  ends can be taken for it. Review of #291 found that a host failing to answer kept its pane's
+  wait indefinitely, suppressing every later prompt there (a codex command approval among them)
+  until the host recovered; the wait is now held for one interval past the host's last answer,
+  preferring a possible duplicate notification to a missed one. Dropping it at once was rejected
+  as needlessly giving up the same-wait match across a single failed collection.
 - **A wait without a signature raises attention but never notifies.** Keying it on the task ID and
   `status_since` instead was rejected: the clock conversion moves that time between collections, so
   the same wait could notify again, and #278 deliberately makes no signature up.

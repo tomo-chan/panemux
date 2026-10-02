@@ -1244,6 +1244,24 @@ describe('App task wait attention (issue #279)', () => {
     expect(screen.getByTestId('task-card-local:claude:a')).toHaveAttribute('data-selected', 'true')
   })
 
+  it('selects each task in turn when notifications for two paneless waits are clicked one after another', () => {
+    vi.spyOn(window, 'focus').mockImplementation(() => {})
+    const otherTask = { ...waitTask, id: 'local:claude:b', wait_signature: 'w2-b' }
+    mockUseTasks.mockReturnValue(tasksStateWith([waitTask, otherTask]))
+    render(<App />)
+    act(() => reportWaits([
+      { task: waitTask, pane: null, notify: true },
+      { task: otherTask, pane: null, notify: true },
+    ]))
+    expect(notifications).toHaveLength(2)
+
+    act(() => notifications[0].onclick?.())
+    expect(screen.getByTestId('task-card-local:claude:a')).toHaveAttribute('data-selected', 'true')
+
+    act(() => notifications[1].onclick?.())
+    expect(screen.getByTestId('task-card-local:claude:b')).toHaveAttribute('data-selected', 'true')
+  })
+
   it('does not notify a wait while the task dashboard shows it', () => {
     render(<App />)
     fireEvent.click(screen.getByRole('button', { name: 'Tasks' }))

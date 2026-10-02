@@ -150,6 +150,21 @@ describe('createTaskAttentionTracker', () => {
     expect(recovered).toEqual([])
   })
 
+  it('raises attention, without a notification, when a reported wait’s pane is found later', () => {
+    const tracker = freshTracker()
+    const task = waitTask('a')
+    expect(tracker.applySnapshot(snapshot([task], T0 + 1000), T0 + 1000, paneFor({}))).toEqual([
+      { task: expect.objectContaining({ id: 'a' }), pane: null, notify: true },
+    ])
+    expect(tracker.applySnapshot(snapshot([task], T0 + 16000), T0 + 16000, paneFor({ a: paneMain }))).toEqual([
+      { task: expect.objectContaining({ id: 'a' }), pane: paneMain, notify: false },
+    ])
+    // Once it is on that pane, the next snapshot has nothing new to say.
+    expect(tracker.applySnapshot(snapshot([task], T0 + 31000), T0 + 31000, paneFor({ a: paneMain }))).toEqual([])
+    // A pane that stops showing it is not news either.
+    expect(tracker.applySnapshot(snapshot([task], T0 + 46000), T0 + 46000, paneFor({}))).toEqual([])
+  })
+
   it('ignores a snapshot older than the last one applied', () => {
     const tracker = freshTracker()
     tracker.applySnapshot(snapshot([waitTask('a', { state: 'busy', wait_signature: undefined })], T0 + 5000), T0 + 5000, paneFor({}))
@@ -223,6 +238,20 @@ describe('createTaskAttentionTracker', () => {
 
       tracker.applySnapshot(snapshot([], T0 + 4000, hosts('ok', T0 + 4000)), T0 + 4000, paneFor({ r: paneMain }))
       expect(tracker.noteTerminalPrompt('main', T0 + 5000)).toBe(false)
+    })
+
+    it('stops taking a terminal prompt for a failed host’s wait one collection interval after the host last answered', () => {
+      const storage = memoryStorage()
+      const tracker = createTaskAttentionTracker(() => storage, { holdMs: 15000 })
+      const remote = waitTask('r', { host: 'dev-server' })
+      const failedHosts = (at: number) => [okHost('', at), { name: 'dev-server', status: 'error' as const, error: 'timeout' }]
+      tracker.applySnapshot(snapshot([remote], T0 + 1000, [okHost('', T0 + 1000), okHost('dev-server', T0 + 1000)]), T0 + 1000, paneFor({ r: paneMain }))
+      tracker.applySnapshot(snapshot([], T0 + 16000, failedHosts(T0 + 16000)), T0 + 16000, paneFor({ r: paneMain }))
+      expect(tracker.noteTerminalPrompt('main', T0 + 16000)).toBe(true)
+      expect(tracker.noteTerminalPrompt('main', T0 + 16001)).toBe(false)
+
+      tracker.applySnapshot(snapshot([], T0 + 31000, failedHosts(T0 + 31000)), T0 + 31000, paneFor({ r: paneMain }))
+      expect(tracker.noteTerminalPrompt('main', T0 + 31000)).toBe(false)
     })
 
     it('does not count an unsigned or ended task wait as the terminal prompt’s wait', () => {

@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useMemo } from 'react'
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { SplitContainer, LayoutActionsContext } from './components/SplitContainer'
 import { PaneSettingsDialog } from './components/PaneSettingsDialog'
 import { AddSSHHostDialog } from './components/AddSSHHostDialog'
@@ -280,11 +280,15 @@ export const App: React.FC = () => {
   }, [clearPaneAttention, clearWorkspaceAttention, setActiveWorkspace])
 
   // A notification for a task no pane shows opens the dashboard on it.
+  // The sequence outlives a handled (cleared) request, so the dashboard never
+  // sees a number it has already handled.
   const [taskFocusRequest, setTaskFocusRequest] = useState<{ taskId: string; seq: number } | null>(null)
+  const taskFocusSeq = useRef(0)
   const revealTask = useCallback((taskId: string) => {
     window.focus()
     setLayer('tasks')
-    setTaskFocusRequest((current) => ({ taskId, seq: (current?.seq ?? 0) + 1 }))
+    taskFocusSeq.current += 1
+    setTaskFocusRequest({ taskId, seq: taskFocusSeq.current })
   }, [])
   const clearTaskFocusRequest = useCallback(() => setTaskFocusRequest(null), [])
 

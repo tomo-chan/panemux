@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { TasksAttentionResponseSchema, type TasksResponse, type Workspace } from '../schemas'
 import { findTaskPane } from '../utils/taskBoard'
-import { taskAttentionTracker, type TaskAttentionSnapshot, type TaskAttentionTracker, type TaskWaitEvent } from '../utils/taskAttention'
+import { TASK_ATTENTION_COLLECTION_INTERVAL_MS, taskAttentionTracker, type TaskAttentionSnapshot, type TaskAttentionTracker, type TaskWaitEvent } from '../utils/taskAttention'
 
 // How often the running tasks are collected for attention while the task
 // dashboard is not collecting them itself (issue #279). Longer than the
 // dashboard's own 10 s: this runs for as long as the page is open.
-export const TASK_ATTENTION_POLL_INTERVAL_MS = 15000
+export const TASK_ATTENTION_POLL_INTERVAL_MS = TASK_ATTENTION_COLLECTION_INTERVAL_MS
 
 interface UseTaskAttentionOptions {
   /** Whether the task dashboard layer is shown; it collects while the page is visible. */
