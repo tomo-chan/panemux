@@ -76,7 +76,9 @@ func (b *boardAttaches) isAttach(sessionID string) bool {
 }
 
 // forgetLocked drops an attach from the registry. b.mu must be held. A
-// timer of the attach that fires afterwards finds it gone from bySession.
+// timer of the attach that fires afterwards finds it gone from bySession;
+// that holds because registerBoardAttach makes a new *boardAttach each time,
+// so a forgotten pointer is never registered again.
 func (b *boardAttaches) forgetLocked(attach *boardAttach) {
 	if attach.timer != nil {
 		attach.timer.Stop()
