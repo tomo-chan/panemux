@@ -17,7 +17,8 @@ structure, [Behavior specification](behavior.md) for runtime contracts, or the
   host by state, independently of panes, opening one in a pane attached to its tmux session or
   going to the `local` / `ssh` pane an agent outside tmux was started from, and starting a new
   claude task or resuming a stopped one in a tmux session on its host.
-- Browser notifications and attention indicators for terminal activity.
+- Browser notifications and attention indicators when a coding agent starts waiting for the
+  operator, from a stream of the agents' state changes that the server publishes.
 - Loopback OAuth callback forwarding for CLI login flows running in SSH-backed panes.
 - Optional Agent Board status aggregation, cross-pane messaging, and a command center.
 - A self-contained CLI binary with the React frontend embedded at build time.
@@ -75,9 +76,9 @@ backend and UI are released together.
 - The task dashboard reads files Claude Code and codex write for themselves (`~/.claude/sessions`,
   `~/.claude/projects`, `~/.codex/sessions`, `~/.codex/thread_history_1.sqlite`), which are not a
   published format, and finds a running codex's session through the rollout file it holds open. It
-  cannot tell a codex waiting for command approval from one at work. It collects only while it is on
-  screen, or when the input-wait notifications ask for the running tasks (`GET /api/tasks/attention`,
-  which does not search for stopped sessions). A waiting task's `wait_signature` exists only when the
+  cannot tell a codex waiting for command approval from one at work, so that wait is not notified. It
+  collects only while it is on screen, or while a browser tab subscribes to the task event stream,
+  which observes the running tasks only. A waiting task's `wait_signature` exists only when the
   agent recorded when the wait began. It finds the pane of an agent outside tmux only on Linux and macOS hosts, where it can read
   the agent's environment, and on macOS not for an agent that is one of Apple's own binaries. The
   macOS reading has not yet been run on a macOS host

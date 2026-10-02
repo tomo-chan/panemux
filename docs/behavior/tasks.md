@@ -73,9 +73,13 @@ of its conversation (see [Summaries](#summaries)).
 ### Collection
 
 Collection runs only when the dashboard asks for it — every 10 seconds while the dashboard is on
-screen and the page is visible, and on the Refresh button — or when the input-wait notifications ask
-for the running tasks through [`GET /api/tasks/attention`](#get-apitasksattention). Nothing collects
-in the background.
+screen and the page is visible, and on the Refresh button — or while the
+[task event stream](task-events.md) has a subscriber, which observes the running tasks on every host
+every 5 seconds. Nothing collects when neither asks.
+
+The dashboard shows a running task's `state`, `waiting_for` and wait from the task event stream
+whenever the stream has that task, so a change appears when it is published rather than at the
+dashboard's next collection ([Task dashboard](task-events.md#task-dashboard)).
 
 Each collection runs one fixed script per host (`sh -s`, with the script on stdin; see
 [Task dashboard collection](../security/command-execution.md#task-dashboard-collection)). The script
@@ -93,7 +97,7 @@ reads only what the agents write themselves and what the host reports about its 
 | For each rollout a codex process holds open: its modification time and size, the `cwd` of its first line, the last `task_started` / `task_complete` / `turn_aborted` and the last `response_item` (with the `timestamp` that line starts with) in its final MiB, and the newest `thread_turns` row in `~/.codex/thread_history_1.sqlite` (with `sqlite3 -readonly`, when installed) | A running codex session's state |
 | `~/.codex/sessions/*/*/*/rollout-*.jsonl` changed in the last 7 days whose first line's `originator` is `codex-tui` (the newest 100 of those), and that line's `cwd` | Stopped codex sessions |
 
-The attention collection ([`GET /api/tasks/attention`](#get-apitasksattention)) runs the same script
+The task event stream's collection ([Task events](task-events.md#lifecycle)) runs the same script
 without its two searches for stopped sessions: it reads every row above except the conversation logs
 under `~/.claude/projects` and the rollouts under `~/.codex/sessions`, and lists the running tasks
 only. The part both run is one shared constant, so a running task is found and its state decided the
@@ -152,7 +156,8 @@ ends before its terminating marker — a connection dropped mid-run — fails th
 A `wait` task carries `wait_signature`, an opaque identifier of the wait it is in, so a client can
 tell a wait it has already seen from a new one. The same wait keeps its signature across
 collections, page reloads and reconnects, and between `GET /api/tasks` and
-`GET /api/tasks/attention`; a wait that begins after the previous one ended gets another.
+the [task event stream](task-events.md#the-wait-id); a wait that begins after the previous one ended
+gets another.
 
 - It is a versioned SHA-256 (`w1-<hex>`) of the host, the agent, the session ID, when the wait began
   on the host's own clock as the agent recorded it, and the kind of wait. Clients compare it and never
@@ -753,50 +758,6 @@ Collects from every host and returns:
   answers `403` to a request another site's page made: `Sec-Fetch-Site` of `cross-site` or
   `same-site`, or an `Origin` that is neither the server's own nor a loopback origin. A request with
   neither header (not from a browser page) is served.
-
-### `GET /api/tasks/attention`
-
-The lightweight collection the input-wait notifications poll. It collects from every host and
-returns the hosts and their running tasks:
-
-```json
-{
-  "hosts": [
-    { "name": "", "status": "ok", "collected_at": "2026-09-25T12:00:00Z" },
-    { "name": "gpu-box", "status": "error", "error": "connect to gpu-box: dial tcp: i/o timeout" }
-  ],
-  "tasks": [
-    {
-      "id": "local:claude:7c21e0a4",
-      "host": "",
-      "agent": "claude",
-      "session_id": "7c21e0a4",
-      "cwd": "/workspace/user/panemux",
-      "state": "wait",
-      "waiting_for": "input needed",
-      "wait_signature": "w1-6728c5554228dcb7cc58711bbf3636eb24a57f8348e865de9855773e17b9bb47",
-      "status_since": "2026-09-25T11:57:00Z",
-      "started_at": "2026-09-25T11:15:00Z",
-      "pid": 101,
-      "location": { "kind": "tmux", "tmux_session": "task-7c21", "attachable": true }
-    }
-  ]
-}
-```
-
-- `hosts` is exactly as in [`GET /api/tasks`](#get-apitasks), and so are a task's fields: the same
-  `id`, `state`, `waiting_for`, `wait_signature`, converted `status_since` / `started_at`, and
-  `location`.
-- `tasks` lists the running tasks only (`busy`, `wait`, `idle`, `run`, `unknown`, codex daemon
-  sessions included), in `id` order per host; `[]` when there are none. Stopped tasks are not
-  searched for: the collection runs without the `~/.claude/projects` and `~/.codex/sessions` searches.
-- It makes no git or pull request lookup, reads no task records, and makes, reads and forgets no
-  summaries, so `git`, `labels`, `done`, `summary`, `summaries_enabled` and `records_error` never
-  appear. Labels a codex task was started with are recorded by `GET /api/tasks` only.
-- Every host is collected at once, each within the same per-host timeout and over the same reused
-  connection as `GET /api/tasks`; one host failing does not hold up or hide the others. The request
-  answers `200` even when every host failed.
-- It refuses a cross-site request with `403` before collecting, exactly as `GET /api/tasks` does.
 
 ### `POST /api/tasks/hosts/{name}/reconnect`
 

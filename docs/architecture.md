@@ -32,8 +32,9 @@ layout rendering, terminal emulation, interaction state, and presentation.
 | `internal/config` | Load, normalize, validate, and persist YAML. `Data` is the serializable domain model; `Config` adds file and lookup context. |
 | `internal/session` | Provide one lifecycle interface for local PTY, SSH, local tmux, and tmux-over-SSH sessions. Optional capability interfaces expose CWD, Git context, port forwarding, and Agent Board operations only where supported. `CommandConn` is an SSH connection for short non-interactive commands, dialed with the same dialer panes use. |
 | `internal/tasks` | Collect the task dashboard's agent sessions from the panemux host and every `ssh_connections` host with one fixed script, and own one reused `CommandConn` per host; keep the done and label records in `~/.config/panemux/tasks.json` (`RecordStore`); start and resume claude and codex tasks in detached tmux sessions with one fixed launch script over the same connection (`Launch`, `Resume`), holding a new codex task's labels until its session is collected (`PendingLabels`); read a task's conversation log with a third fixed script and summarize it with `claude -p` on the panemux host, keeping the summaries in memory (`Summaries`, `RequestSummary`). |
+| `internal/taskevents` | Observe the running tasks on every host through `internal/tasks`'s lightweight collection while the task event stream has a subscriber, each host on its own cycle; keep what was last observed, publish each difference as an ordered event, assign unsigned waits their `wait_id`, and fan the events out to subscribers with a bounded queue each. It decides nothing about notifications or panes. |
 | `internal/api` | Implement REST handlers and mount the route set. It is the single source of truth for API registration. |
-| `internal/ws` | Bridge session bytes and control messages to terminal WebSockets and stream command-center events. |
+| `internal/ws` | Bridge session bytes and control messages to terminal WebSockets, stream command-center events, and serve the task event stream (`/ws/tasks/events`). |
 | `internal/server` | Compose middleware, API routes, WebSocket routes, static assets, and SPA fallback into the production router. |
 | `internal/portforward` | Maintain short-lived loopback listeners that forward callback traffic through a session's SSH connection. |
 | `internal/board` | Invoke agmsg through its documented scripts, relay rows across configured hosts, and maintain the in-memory status/history view. |
@@ -51,7 +52,8 @@ layout rendering, terminal emulation, interaction state, and presentation.
 | `TerminalPane` and `useTerminal` | Own xterm.js setup, fitting, addons, pane input, replay sequencing and suppression, pending terminal messages, and terminal lifecycle. |
 | `useWebSocket` | Own the pane connection, reconnect behavior, send-if-open transport, and validation of structured text control frames. |
 | `usePaneUrlOpen` | Receive validated URL-open events and coordinate browser navigation/callback forwarding. |
-| attention and notification hooks | Convert terminal activity and visibility changes into pane/workspace indicators and browser notifications. |
+| task event store | Hold one `/ws/tasks/events` connection per tab and the tasks and hosts it reports, validated and in `seq` order; reconnect from a fresh snapshot on any gap. |
+| attention and notification hooks | Project the task event store and visibility changes into pane/workspace indicators and browser notifications, matching tasks to panes with `utils/taskBoard` and recording the notified `wait_id`s in browser storage. |
 | Agent Board hooks and panels | Poll status/message APIs, stream command-center output, and present dashboard, palette, and history overlays. |
 | `TaskDashboard` and `useTasks` | Poll `GET /api/tasks` while the task dashboard is shown, present tasks as a kanban by state, save done and labels through `PUT /api/tasks/records`, start and resume tasks through `POST /api/tasks` and `POST /api/tasks/resume` (`NewTaskDialog`), and match each task to the pane attached to its tmux session, or to the `local` / `ssh` pane its agent's `PANEMUX_PANE_ID` names (`utils/taskBoard`). Type in pane opens and ends the board's temporary attach through `POST`/`DELETE /api/tasks/attach` (`useTaskInput`) and shows it in `TaskInputPopup` / `TaskTerminal`. |
 | Zod schemas | Runtime-validate structured success payloads and control frames for which schemas are defined. Generated TypeScript types derive from these schemas. |
@@ -69,6 +71,9 @@ layout rendering, terminal emulation, interaction state, and presentation.
   label records a person set (`~/.config/panemux/tasks.json`); everything else is read from the
   agents' own files on every host again at each collection. The pane a task belongs to is derived in the browser from
   the current workspaces.
+- The task event stream's last observation, `epoch`, `seq` and unsigned wait IDs are in memory and
+  last until the server restarts. Which waits a browser has already notified is in that browser's
+  storage; the server keeps no per-viewer state.
 - Agent Board's status/history cache is in memory. Relay cursors, bootstrap state, command-center
   history/session state, and the task dashboard's done and label records use dedicated persisted
   files.
@@ -125,12 +130,33 @@ is not known until it has started, `tasks.PendingLabels` holds them in memory an
 `task_dashboard.summary.enabled` is set, `GET /api/tasks` also attaches each task's summary and starts
 the ones that are due, in the background and at most two at a time: a third fixed script reads the
 task's conversation log on its host, and `claude -p` on the panemux host summarizes the conversation
-text extracted from it; `POST /api/tasks/summary` asks for one. `GET /api/tasks/attention`
-(`Service.CollectAttention`) is the lightweight collection for the input-wait notifications: the
-same script without its searches for stopped sessions (`attentionScript`), the running tasks only,
-and none of the handler's git, record, label or summary work. Both responses give a waiting task the
-same `wait_signature`, derived from the wait start the agent recorded on its host. Full behavior is in
+text extracted from it; `POST /api/tasks/summary` asks for one.
+The task event stream observes with the lightweight collection: the same script without its
+searches for stopped sessions (`attentionScript`), the running tasks only, and none of the handler's
+git, record, label or summary work. Both give a waiting task the same `wait_signature`, derived from
+the wait start the agent recorded on its host. Full behavior is in
 [Task dashboard](behavior/tasks.md).
+
+### Task event flow
+
+While at least one browser tab holds `/ws/tasks/events`, `internal/taskevents` observes every host
+with the lightweight collection, each host 5 seconds after its previous observation finished, and
+publishes the difference from what it last observed: tasks added, changed and removed, and hosts'
+statuses, each numbered by `seq` within the server's `epoch`. A new subscriber first gets a snapshot.
+A host that fails publishes only its status; its tasks stay as last observed. Observation stops 30
+seconds after the last subscriber leaves. The server publishes every state change and decides
+nothing about it: each tab's store feeds the task dashboard's states, the pane and workspace
+attention and the browser notifications, and the tab matches tasks to panes itself. Full behavior is
+in [Task events](behavior/task-events.md).
+
+```text
+ hosts ──attentionScript──▶ internal/tasks ──▶ internal/taskevents ──▶ /ws/tasks/events
+                                               (model, diff, seq,        │ one per tab
+                                                fan-out)                 ▼
+                                                     task event store ──▶ dashboard states
+                                                                      ├─▶ pane / workspace attention
+                                                                      └─▶ browser notifications
+```
 
 ### URL-open flow
 
@@ -142,6 +168,8 @@ and [URL-open security](security/url-open.md).
 ## Trust boundaries
 
 - Core terminal routes assume a trusted deployment and are not an authenticated multi-user surface.
+- `/ws/tasks/events` is unauthenticated like `/ws/{sessionID}`. Because opening it makes every host
+  be dialed, it refuses cross-site requests before upgrading, as the task routes under `/api/tasks` do.
 - `/api/board/*` and `/ws/board-command` are bearer-authenticated. The unauthenticated
   `GET /api/session-token` bootstrap route sits outside that subtree because it returns the bearer
   token itself; it accepts only requests whose remote address and `Host` are loopback. Non-loopback

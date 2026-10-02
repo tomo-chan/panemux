@@ -19,7 +19,8 @@ proxy, SSH tunnel, or VPN in front of the non-loopback listener. See
 `internal/server`'s constant-time bearer-token middleware (`bearerAuthMiddleware`, `internal/server/auth.go`)
 is wired in `registerRoutes` — but **only** onto the
 `api.BoardRoutePrefix` (`/api/board`) sub-router (`GET /status`, `GET /messages`, `POST /broadcast`,
-`GET /command/history`), not onto any pre-existing `/api/*` route or `/ws/{sessionID}`. Widening it to
+`GET /command/history`), not onto any pre-existing `/api/*` route, `/ws/{sessionID}` or
+`/ws/tasks/events`. Widening it to
 those routes without a matching frontend change would break every existing, currently-unauthenticated
 request, so that remains a separate, larger change.
 

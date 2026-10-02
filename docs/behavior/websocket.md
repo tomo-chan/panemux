@@ -216,3 +216,12 @@ When the backend session reaches EOF, the handler emits:
 ```json
 { "type": "status", "state": "exited" }
 ```
+
+## Task Event WebSocket Protocol
+
+Endpoint: `GET /ws/tasks/events`
+
+The stream of the running agent tasks' state changes: a snapshot on connect, then one JSON text
+frame per change, ordered by `epoch` and `seq`. It is unauthenticated like `/ws/{sessionID}` and
+refuses cross-site requests like `GET /api/tasks`. The model, the frames and the lifecycle are in
+[Task events](task-events.md).

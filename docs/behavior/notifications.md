@@ -4,18 +4,26 @@
 
 ## Agent Attention Notifications
 
-The frontend watches terminal output for conservative agent confirmation prompts such as approval,
-permission, proceed requests, and Codex MCP allow menus. Detection runs in the frontend and keeps a
-lightweight background WebSocket subscription for every pane across every workspace, so hidden
-workspaces are still watched even while their xterm instances are unmounted. When a prompt is
-detected:
+panemux tells the operator when a coding agent starts waiting for them. The input is the
+[task event stream](task-events.md): the server observes the agents' own state on the panemux host
+and every `ssh_connections` host and publishes each change, and the browser decides what to show.
+Terminal output is not searched for prompts, so an agent waiting in a pane no browser has open is
+noticed as well, and a wait an agent does not record — codex asking to approve a command
+([issue #294](https://github.com/tomo-chan/panemux/issues/294)) — is not noticed at all.
 
-- the pane frame flashes until the pane receives focus or a click
+When a task starts a wait ([Pane and workspace attention](task-events.md#pane-and-workspace-attention)):
+
+- the frame of the pane the task matches flashes until the pane receives focus or a click, or the
+  task leaves the wait
 - the containing workspace tab flashes when that workspace is not active, and clears when selected
-- the browser Notification API is used when permission has already been granted and the prompt is not currently visible to the user
-- clicking a browser notification focuses the app window and switches to the matching workspace
+  or when the task leaves the wait
+- the browser Notification API is used when permission has already been granted and the wait is not
+  currently visible to the user; a task that matches no pane is never visible, so it always notifies
+- clicking a browser notification brings the app forward and goes to the task: its pane, focused and
+  briefly outlined, in its workspace with any maximized pane hiding it restored; or, when it matches no
+  pane, the task dashboard with the task selected and highlighted
 - if notification permission is undecided, the browser is asked on the first pointer or key
-  interaction instead of waiting for the first prompt event
+  interaction instead of waiting for the first wait
 
 Browser notification eligibility is determined by the current UI state:
 
@@ -24,18 +32,19 @@ Browser notification eligibility is determined by the current UI state:
 | active | visible in the active workspace | no |
 | active | hidden in another workspace | yes |
 | active | hidden by maximize in the active workspace | yes |
+| active | the task matches no pane | yes |
 | inactive | any pane | yes |
 
-To suppress redraw noise, panemux stores the last browser-notified prompt signature per pane in
-browser storage. If the same pane replays the same prompt after a refresh, reconnect, or layout
-change, the pane and workspace attention indicators can still reappear, but the browser
-notification is not shown again. When the same pane later emits a different prompt, the stored
-signature is replaced and the new prompt can notify again.
+A wait is notified once per `wait_id` in a browser
+([Browser notifications](task-events.md#browser-notifications)): the IDs already notified are kept in
+browser storage shared by the tabs, and the notification's `tag` is the `wait_id`, so a reload, a
+reconnect or a second tab does not notify the same wait again. The pane and workspace indicators can
+still reappear after a reload while the task is still waiting. A later wait of the same task has a new
+`wait_id` and notifies again. The notification shows the agent, the host and the task's directory
+name, never conversation text.
 
-Attention detection remains frontend-only. The backend still buffers recent terminal output per
-session and replays that snapshot when a pane reconnects after a workspace switch or browser reload,
-but prompt notifications no longer depend on the pane being visibly mounted at the time the output
-arrives.
+Attention detection is the server's: the browser keeps one task event connection per tab rather than a
+connection per pane.
 
 For pane-header Git status, local and local tmux panes inspect the local filesystem, while `ssh`
 and `ssh_tmux` panes run the equivalent Git inspection on the remote host. This allows headers to
