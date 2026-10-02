@@ -358,3 +358,92 @@ func TestManager_Watch_ReportsSubscriberCountChanges(t *testing.T) {
 func TestManager_Watch_UnknownSessionReportsFalse(t *testing.T) {
 	assert.False(t, NewManager().Watch("missing", func(int) {}))
 }
+
+// A count read under the session's lock must not reach the watcher after a
+// later one: an unsubscribe's 0 delivered after a reconnect's 1 would destroy
+// an attach that is still being read (PR #286 review).
+func TestManager_Watch_DeliversCountsInTheOrderTheyChanged(t *testing.T) {
+	m := NewManager()
+	m.Add(newMock("board-1"))
+	t.Cleanup(m.CloseAll)
+
+	var mu sync.Mutex
+	var counts []int
+	zeroEntered := make(chan struct{})
+	releaseZero := make(chan struct{})
+	var firstZero sync.Once
+	require.True(t, m.Watch("board-1", func(n int) {
+		if n == 0 {
+			firstZero.Do(func() {
+				close(zeroEntered)
+				<-releaseZero
+			})
+		}
+		mu.Lock()
+		counts = append(counts, n)
+		mu.Unlock()
+	}))
+
+	_, _, unsubscribeA, ok := m.Subscribe("board-1")
+	require.True(t, ok)
+	unsubscribed := make(chan struct{})
+	go func() {
+		unsubscribeA()
+		close(unsubscribed)
+	}()
+	<-zeroEntered // the 0 is read and on its way to the watcher
+
+	subscribed := make(chan func(), 1)
+	go func() {
+		_, _, unsubscribeB, _ := m.Subscribe("board-1")
+		subscribed <- unsubscribeB
+	}()
+	// Give the reconnect every chance to overtake the 0 still in flight.
+	select {
+	case unsubscribeB := <-subscribed:
+		subscribed <- unsubscribeB
+	case <-time.After(200 * time.Millisecond):
+	}
+	close(releaseZero)
+	<-unsubscribed
+	unsubscribeB := <-subscribed
+	t.Cleanup(unsubscribeB)
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.NotEmpty(t, counts)
+	assert.Equal(t, 1, counts[len(counts)-1], "the last count heard must be the current one: %v", counts)
+}
+
+// A session whose output ends drops its subscribers itself; the watcher must
+// hear that as 0, since the WebSockets' own unsubscribes then report nothing
+// (PR #286 review).
+func TestManager_Watch_ReportsZeroWhenTheSessionEnds(t *testing.T) {
+	m := NewManager()
+	mock := newMock("board-1")
+	m.Add(mock)
+	t.Cleanup(m.CloseAll)
+
+	heard := make(chan int, 8)
+	require.True(t, m.Watch("board-1", func(n int) { heard <- n }))
+	_, stream, unsubscribe, ok := m.Subscribe("board-1")
+	require.True(t, ok)
+	require.Equal(t, 1, <-heard)
+
+	require.NoError(t, mock.Close())
+	for range stream {
+	}
+	unsubscribe() // the WebSocket's deferred unsubscribe, after the end
+
+	select {
+	case n := <-heard:
+		assert.Equal(t, 0, n)
+	case <-time.After(time.Second):
+		t.Fatal("the watcher heard nothing when the session ended")
+	}
+	select {
+	case n := <-heard:
+		t.Fatalf("heard %d after the 0", n)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
