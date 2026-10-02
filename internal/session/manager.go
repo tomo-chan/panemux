@@ -20,12 +20,19 @@ type Manager struct {
 //
 //nolint:govet // fieldalignment: clarity is preferred over splitting this tiny state holder.
 type managedSession struct {
-	session        Session
-	history        *replayBuffer
-	subscribers    map[int]chan []byte
+	session     Session
+	history     *replayBuffer
+	subscribers map[int]chan []byte
+	// watch, when set, is told the subscriber count after each change.
+	watch          func(subscribers int)
 	nextSubscriber int
-	closed         bool
-	mu             sync.Mutex
+	// changes numbers each subscriber-count change under mu; delivered is
+	// the latest one handed to watch, under notifyMu.
+	changes   uint64
+	delivered uint64
+	closed    bool
+	mu        sync.Mutex
+	notifyMu  sync.Mutex
 }
 
 // NewManager creates a new session manager.
@@ -79,6 +86,27 @@ func (m *Manager) Subscribe(id string) ([]byte, <-chan []byte, func(), bool) {
 
 	snapshot, stream, unsubscribe := entry.subscribe()
 	return snapshot, stream, unsubscribe, true
+}
+
+// Watch makes fn hear the session's subscriber count each time a subscriber
+// is added or removed, so an owner can act when nothing reads the session any
+// more. It replaces any earlier watcher and reports false for an unknown ID.
+//
+// fn runs outside the lock that guards the subscribers, one call at a time,
+// and a count older than one fn has already heard is dropped rather than
+// delivered late, so the last count fn heard is the current one. fn must not
+// subscribe to or unsubscribe from the same session.
+func (m *Manager) Watch(id string, fn func(subscribers int)) bool {
+	m.mu.RLock()
+	entry, ok := m.sessions[id]
+	m.mu.RUnlock()
+	if !ok {
+		return false
+	}
+	entry.mu.Lock()
+	entry.watch = fn
+	entry.mu.Unlock()
+	return true
 }
 
 // List returns all current sessions.
@@ -171,11 +199,11 @@ func (m *managedSession) publish(chunk []byte) {
 
 func (m *managedSession) subscribe() ([]byte, <-chan []byte, func()) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	snapshot := m.replay().snapshot()
 	ch := make(chan []byte, 64)
 	if m.closed {
+		m.mu.Unlock()
 		close(ch)
 		return snapshot, ch, func() {}
 	}
@@ -183,30 +211,67 @@ func (m *managedSession) subscribe() ([]byte, <-chan []byte, func()) {
 	subscriptionID := m.nextSubscriber
 	m.nextSubscriber++
 	m.subscribers[subscriptionID] = ch
+	notify := m.countChangedLocked()
+	m.mu.Unlock()
+	notify()
 
 	unsubscribe := func() {
 		m.mu.Lock()
-		defer m.mu.Unlock()
 		subscriber, ok := m.subscribers[subscriptionID]
 		if !ok {
+			m.mu.Unlock()
 			return
 		}
 		delete(m.subscribers, subscriptionID)
 		close(subscriber)
+		notify := m.countChangedLocked()
+		m.mu.Unlock()
+		notify()
 	}
 
 	return snapshot, ch, unsubscribe
 }
 
+// countChangedLocked numbers a subscriber-count change and returns the func
+// that reports it to the watcher; the caller runs it after releasing m.mu.
+// m.mu must be held.
+func (m *managedSession) countChangedLocked() func() {
+	m.changes++
+	change, watch, count := m.changes, m.watch, len(m.subscribers)
+	return func() {
+		m.notifyMu.Lock()
+		defer m.notifyMu.Unlock()
+		// Two changes read in order can reach here in either order; the
+		// older one, arriving second, would leave the watcher a stale count.
+		// Each change is delivered only by its own func, which runs once.
+		//mutation:exempt[CONDITIONALS_BOUNDARY] unreachable — change never equals m.delivered
+		if watch == nil || change <= m.delivered {
+			return
+		}
+		m.delivered = change
+		watch(count)
+	}
+}
+
+// closeSubscribers ends every subscription once the session's output ends.
+// The subscribers' own unsubscribes then find nothing to remove and report
+// nothing, so the watcher hears the drop to 0 from here.
 func (m *managedSession) closeSubscribers() {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if m.closed {
+		m.mu.Unlock()
 		return
 	}
 	m.closed = true
+	had := len(m.subscribers)
 	for id, subscriber := range m.subscribers {
 		delete(m.subscribers, id)
 		close(subscriber)
 	}
+	notify := func() {}
+	if had > 0 {
+		notify = m.countChangedLocked()
+	}
+	m.mu.Unlock()
+	notify()
 }

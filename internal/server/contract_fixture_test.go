@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -365,6 +366,20 @@ var contractFixtures = map[string]contractFixture{
 		return rr.Body.Bytes(), nil
 	}},
 
+	// The board's attach (issue #283) to the waiting task's tmux session. Its
+	// session ID is random, so the capture stands in for it.
+	"task-attach": {capture: func(t *testing.T) ([]byte, map[string]string) {
+		e := newAPIEnv(t)
+		useFixtureTmuxAttach(e)
+
+		rr := e.do(t, http.MethodPost, "/api/tasks/attach", `{"id":"local:claude:7c21e0a4"}`)
+		require.Equal(t, http.StatusCreated, rr.Code, rr.Body.String())
+		var got map[string]string
+		require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &got))
+		require.True(t, strings.HasPrefix(got["session_id"], "board-"), got["session_id"])
+		return bytes.ReplaceAll(rr.Body.Bytes(), []byte(got["session_id"]), []byte("board-0123456789abcdef")), nil
+	}},
+
 	"session-token": {capture: func(t *testing.T) ([]byte, map[string]string) {
 		e := newAPIEnv(t)
 
@@ -465,6 +480,17 @@ const fixtureStoppedSessionID = "5d7e3a90-1b2c-4d3e-8f40-51627384a5b6"
 // fixtureLaunchService is a task service whose panemux host lists one
 // stopped session and accepts every launch, with a fixed random source so
 // the minted session ID is the same on every capture.
+// useFixtureTmuxAttach makes e's board attaches collect
+// fixtureLocalTaskCollection and attach a fake session instead of tmux.
+func useFixtureTmuxAttach(e *apiEnv) {
+	e.srv.api.SetTaskService(tasks.New(tasks.Options{
+		RunLocal: func(context.Context, string) ([]byte, error) { return []byte(fixtureLocalTaskCollection), nil },
+	}))
+	e.srv.api.SetTmuxAttachFactory(func(id, _, _, _ string, _ map[string]config.SSHConnection) (session.Session, error) {
+		return newWSFakeSession(id), nil
+	})
+}
+
 func fixtureLaunchService() *tasks.Service {
 	return tasks.New(tasks.Options{
 		Rand: strings.NewReader(strings.Repeat("panemux-contract", 8)),

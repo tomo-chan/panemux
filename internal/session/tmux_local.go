@@ -48,13 +48,48 @@ func NewTmuxLocal(id, title, tmuxSession, cwd string) (*TmuxLocalSession, error)
 	if err != nil {
 		return nil, err
 	}
+	return startTmuxLocal(id, title, validatedSession, tmuxLocalArgs(validatedSession, cwd))
+}
 
+// NewTmuxLocalAttach attaches a new tmux client to the running local session
+// tmuxSession and never creates one: tmux exits, and the session reports
+// StateExited, when no session has exactly that name. It is the board's
+// temporary attach (issue #283).
+func NewTmuxLocalAttach(id, title, tmuxSession string) (*TmuxLocalSession, error) {
+	validatedSession, err := validateTmuxAttachName(tmuxSession)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkTmuxLocalSession(validatedSession); err != nil {
+		return nil, err
+	}
+	return startTmuxLocal(id, title, validatedSession, tmuxLocalAttachArgs(validatedSession))
+}
+
+// checkTmuxLocalSession fails unless a tmux session named exactly tmuxSession
+// is running. attach-session reports a missing session only after its client
+// has started, so without this check a session that ended since it was
+// collected would yield an attach that exits at once rather than an error.
+func checkTmuxLocalSession(tmuxSession string) error {
+	if _, err := tmuxLocalOutputFn("has-session", "-t", "="+tmuxSession); err != nil {
+		return tmuxSessionNotRunning(tmuxSession, err)
+	}
+	return nil
+}
+
+func tmuxSessionNotRunning(tmuxSession string, err error) error {
+	return fmt.Errorf("tmux session %q is not running: %w", tmuxSession, err)
+}
+
+// startTmuxLocal runs tmux with args on a new PTY. tmuxSession must already be
+// validated.
+func startTmuxLocal(id, title, tmuxSession string, args []string) (*TmuxLocalSession, error) {
 	// cmd.Args is assigned after construction, rather than passed directly to
 	// exec.Command, because gosec's G204 check flags any exec.Command call
 	// whose argument list is not a literal. The args (including cwd) are
 	// still discrete argv entries handed to the tmux binary, never a shell
 	// string, so this carries no injection risk — see docs/security.md.
-	cmd := tmuxLocalCommandFn(tmuxLocalArgs(validatedSession, cwd))
+	cmd := tmuxLocalCommandFn(args)
 	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 
@@ -68,7 +103,7 @@ func NewTmuxLocal(id, title, tmuxSession, cwd string) (*TmuxLocalSession, error)
 	s := &TmuxLocalSession{
 		id:          id,
 		title:       title,
-		tmuxSession: validatedSession,
+		tmuxSession: tmuxSession,
 		state:       StateConnected,
 		cmd:         cmd,
 		ptmx:        ptmx,
@@ -262,6 +297,27 @@ func tmuxLocalArgs(tmuxSession, cwd string) []string {
 		args = append(args, "-c", cwd)
 	}
 	return args
+}
+
+// tmuxAttachSubcommand attaches a client to an existing session only.
+const tmuxAttachSubcommand = "attach-session"
+
+// tmuxLocalAttachArgs builds the "tmux attach-session" argument list. The
+// target carries tmux's "=" prefix, which makes tmux match the session name
+// exactly: without it tmux falls back to a prefix match and would attach to
+// "review-api-2" when "review-api" has gone.
+func tmuxLocalAttachArgs(tmuxSession string) []string {
+	return []string{tmuxAttachSubcommand, "-t", "=" + tmuxSession}
+}
+
+// validateTmuxAttachName is validateTmuxSessionName without the default: an
+// attach names a session that is already running, so an empty name is an
+// error rather than tmux's session "0".
+func validateTmuxAttachName(tmuxSession string) (string, error) {
+	if tmuxSession == "" {
+		return "", errors.New("invalid tmux session name: empty")
+	}
+	return validateTmuxSessionName(tmuxSession)
 }
 
 func validateTmuxSessionName(tmuxSession string) (string, error) {

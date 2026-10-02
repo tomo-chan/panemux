@@ -581,6 +581,27 @@ task_dashboard:
 Either way the dashboard closes and the pane is briefly outlined. Opening the same tmux session again
 while its pane is still being created does not create a second pane.
 
+**The board's temporary attach.** The backend also offers a terminal on a task's tmux session that
+is not a pane: [`POST /api/tasks/attach`](#post-apitasksattach) opens a tmux client on the running
+session, which the browser reads and writes over `/ws/{session_id}` like a pane's, and the layout
+never holds it. The dashboard's popup that uses it is issue
+[#280](https://github.com/tomo-chan/panemux/issues/280).
+
+- It only attaches (`tmux attach-session -t =<name>`, an exact match) and never creates a session; a
+  session that has ended fails the request. tmux reports a missing session only after its client has
+  started, so the server first runs `tmux has-session -t =<name>` on the same host. A session that
+  ends between that check and the attach still yields `201`; its client exits at once and the
+  WebSocket shows tmux's message, and the attach is then destroyed like any other.
+- One attach per task: opening the task again while it is open returns the same session, and two
+  requests at once create one.
+- It is destroyed by `DELETE /api/tasks/attach/{session_id}`, or 10s after the last WebSocket reading
+  it closes, or 10s after it was created if none connected; a reload within that time reconnects to
+  the same client. A client that has exited is replaced on the next request. Attaches are held in
+  memory only and end with panemux.
+- Destroying it ends only that tmux client; the tmux session and the agent keep running.
+- panemux sets no tmux option for it. With tmux's default `window-size latest`, the window takes the
+  size of the client that was used last and returns to the other client's size once the attach ends.
+
 The dashboard and the workspaces are switched with the `← Tasks` and `Workspaces` buttons or with
 `Cmd/Ctrl+Shift+<display.task_dashboard_shortcut>` (`S` unless configured), from either layer.
 
@@ -731,6 +752,31 @@ Resumes a stopped claude or codex task:
   or a stopped session whose working directory is unknown or refused; `404` for an unknown `host`;
   `409` when the session is not a stopped task of that agent on the host, or the host refused as above; `502` when the host could not be
   collected or reached; `403` for a cross-site request.
+
+### `POST /api/tasks/attach`
+
+Opens the board's temporary attach ([Opening a task](#opening-a-task)) to a task's tmux session:
+
+```json
+{ "id": "local:claude:7c21e0a4" }
+```
+
+- `id` is a task ID from `GET /api/tasks`. The server collects that task's host again and takes the
+  tmux session and host from it, never from the request.
+- Answers `201` with the new attach, or `200` with the one already open for the task:
+
+  ```json
+  { "session_id": "board-0123456789abcdef", "tmux_session": "task-7c21" }
+  ```
+
+  The terminal is `/ws/{session_id}`. The session is not listed by `GET /api/sessions`.
+- `400` for a body that is not valid or an empty `id`; `404` for a task the host no longer reports
+  or an ID naming no host; `409` for a task outside tmux or in a session a pane cannot attach to;
+  `502` when the host could not be collected or the attach failed (the session has ended, tmux or
+  the SSH connection failed); `403` for a cross-site request.
+
+`DELETE /api/tasks/attach/{session_id}` ends the attach at once and answers `204`; `404` for an ID
+that is not a board attach (a pane's session included), and `403` for a cross-site request.
 
 ### `POST /api/tasks/summary`
 

@@ -529,6 +529,29 @@ var apiCases = map[string]apiCase{
 		assert.Contains(t, rr.Body.String(), `"tmux_session":"task-5d7e3a90"`)
 	}},
 
+	"POST /api/tasks/attach": {run: func(t *testing.T, e *apiEnv) {
+		useFixtureTmuxAttach(e)
+		rr := e.do(t, http.MethodPost, "/api/tasks/attach", `{"id":"local:claude:gone"}`)
+		assert.Equal(t, http.StatusNotFound, rr.Code, rr.Body.String())
+
+		rr = e.do(t, http.MethodPost, "/api/tasks/attach", `{"id":"local:claude:7c21e0a4"}`)
+		assert.Equal(t, http.StatusCreated, rr.Code, rr.Body.String())
+		assert.Contains(t, rr.Body.String(), `"tmux_session":"task-7c21"`)
+	}},
+
+	"DELETE /api/tasks/attach/{id}": {run: func(t *testing.T, e *apiEnv) {
+		useFixtureTmuxAttach(e)
+		rr := e.do(t, http.MethodDelete, "/api/tasks/attach/board-missing", "")
+		assert.Equal(t, http.StatusNotFound, rr.Code, rr.Body.String())
+
+		rr = e.do(t, http.MethodPost, "/api/tasks/attach", `{"id":"local:claude:7c21e0a4"}`)
+		require.Equal(t, http.StatusCreated, rr.Code, rr.Body.String())
+		var got map[string]string
+		require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &got))
+		rr = e.do(t, http.MethodDelete, "/api/tasks/attach/"+got["session_id"], "")
+		assert.Equal(t, http.StatusNoContent, rr.Code, rr.Body.String())
+	}},
+
 	"POST /api/tasks/summary": {run: func(t *testing.T, e *apiEnv) {
 		rr := e.do(t, http.MethodPost, "/api/tasks/summary", `{"host":"","session_id":"55f0c2b8"}`)
 		assert.Equal(t, http.StatusConflict, rr.Code, "summaries are off by default: %s", rr.Body.String())

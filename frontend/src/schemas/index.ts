@@ -521,6 +521,15 @@ export const TaskLaunchedSchema = z.object({
 
 export type TaskLaunched = z.infer<typeof TaskLaunchedSchema>
 
+// POST /api/tasks/attach (issue #283): the board's temporary tmux client on a
+// task's running tmux session. `session_id` is served by `/ws/{session_id}`.
+export const TaskAttachSchema = z.object({
+  session_id: z.string().startsWith('board-'),
+  tmux_session: z.string().min(1),
+})
+
+export type TaskAttach = z.infer<typeof TaskAttachSchema>
+
 // A new task's response adds the labels recorded for it, or why they could
 // not be — the task was started either way. A codex task's labels are held
 // until a collection finds its session, and come back as pending_labels.
