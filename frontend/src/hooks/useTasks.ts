@@ -16,7 +16,8 @@ import { applyTaskRecord } from '../utils/taskBoard'
 
 // How often the dashboard re-collects while it is on screen. Collection runs
 // a script on every host, so it happens only while the dashboard is shown and
-// the page is visible — never in the background (issue #252).
+// the page is visible (issue #252). The lighter collection of running tasks
+// for attention is useTaskAttention's (issue #279).
 export const TASKS_POLL_INTERVAL_MS = 10000
 
 /** The agents a task can be started with. */
