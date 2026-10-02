@@ -87,12 +87,19 @@ export function useTaskInput(attach: TasksState['attach'], detach: TasksState['d
     [request, session],
   )
 
+  const reattach = useCallback(
+    (current: TaskInputSession) => {
+      const token = ++tokenRef.current
+      openTaskIdRef.current = current.task.id
+      setSession({ ...current, attach: { phase: 'connecting' }, attempt: current.attempt + 1, terminal: 'connecting' })
+      void request(current.task, token)
+    },
+    [request],
+  )
+
   const retry = useCallback(() => {
-    if (!session) return
-    const token = ++tokenRef.current
-    setSession({ ...session, attach: { phase: 'connecting' }, attempt: session.attempt + 1, terminal: 'connecting' })
-    void request(session.task, token)
-  }, [request, session])
+    if (session) reattach(session)
+  }, [reattach, session])
 
   const end = useCallback(() => {
     tokenRef.current++
@@ -123,6 +130,18 @@ export function useTaskInput(attach: TasksState['attach'], detach: TasksState['d
       end()
     }
   }, [end])
+
+  // A page restored from the back/forward cache comes back with the popup
+  // still open but its attach ended by pagehide: ask for it again.
+  const sessionRef = useRef(session)
+  sessionRef.current = session
+  useEffect(() => {
+    const handlePageShow = (event: PageTransitionEvent) => {
+      if (event.persisted && sessionRef.current) reattach(sessionRef.current)
+    }
+    window.addEventListener('pageshow', handlePageShow)
+    return () => window.removeEventListener('pageshow', handlePageShow)
+  }, [reattach])
 
   return { session, open, retry, close, setTerminal }
 }

@@ -612,12 +612,14 @@ switch workspaces or add a pane, and it neither starts nor resumes the agent.
 - **With a workspace pane on the same session.** The popup is a second tmux client on that session:
   input from either reaches it, and the popup says that the window takes the size of the client that
   was used last.
-- **Closing** (`Close`, `Cmd/Ctrl+Shift+Esc`, or `Escape` while focus is outside the terminal) sends
+- **Closing** (`Close`, `Cmd/Ctrl+Shift+Esc`, or `Escape` while focus is in the popup's header) sends
   `DELETE /api/tasks/attach/{session_id}`, which ends only the board's tmux client; the agent and
   its tmux session keep running. The dashboard leaving with the popup open ends it the same way:
   the layer shortcut unmounts it, and a reload or a closed tab sends the same `DELETE` from
   `pagehide` as a `keepalive` request, which outlives the page. Were that request lost, the server
-  still destroys the attach once its last WebSocket has been closed for the grace period. The board's selection, filters and scroll position are as they
+  still destroys the attach once its last WebSocket has been closed for the grace period. A page
+  that comes back from the back/forward cache with the popup open asks for the attach again, as
+  `Retry` does. The board's selection, filters and scroll position are as they
   were, and focus returns to the button the popup was opened from (the same task's button where its
   card has moved to, or the dashboard when there is none).
 - The popup's `Go to pane` / `Open` closes it and opens the task as above.

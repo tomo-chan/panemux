@@ -158,6 +158,12 @@ function key(target: Element | Window, init: KeyboardEventInit) {
   return event
 }
 
+function pageTransition(type: 'pagehide' | 'pageshow', persisted: boolean) {
+  const event = new Event(type)
+  Object.defineProperty(event, 'persisted', { value: persisted })
+  return event
+}
+
 function setNarrow(narrow: boolean) {
   Object.defineProperty(window, 'matchMedia', {
     configurable: true,
@@ -331,6 +337,57 @@ describe('TaskDashboard Type in pane: closing', () => {
     await openPopup()
     unmount()
     expect(state.detach).toHaveBeenCalledWith('board-0000000000000001')
+  })
+
+  it('asks for the attach again when the page comes back from the back/forward cache while connecting', async () => {
+    const first = deferred()
+    const state = tasksState({
+      attach: vi.fn().mockReturnValueOnce(first.promise).mockResolvedValueOnce(attached('board-00000000000000bb')),
+    })
+    renderDashboard(state)
+    await openPopup()
+    act(() => {
+      window.dispatchEvent(pageTransition('pagehide', true))
+    })
+    await act(async () => first.resolve(attached('board-00000000000000aa')))
+    expect(state.detach).toHaveBeenCalledWith('board-00000000000000aa')
+
+    await act(async () => {
+      window.dispatchEvent(pageTransition('pageshow', true))
+    })
+    expect(state.attach).toHaveBeenCalledTimes(2)
+    expect(screen.getByTestId('task-terminal')).toHaveAttribute('data-session', 'board-00000000000000bb')
+  })
+
+  it('asks for the attach again when a connected popup comes back from the back/forward cache', async () => {
+    const state = tasksState({
+      attach: vi.fn()
+        .mockResolvedValueOnce(attached('board-0000000000000001'))
+        .mockResolvedValueOnce(attached('board-0000000000000002')),
+    })
+    renderDashboard(state)
+    await openPopup()
+    setStatus('connected')
+    act(() => {
+      window.dispatchEvent(pageTransition('pagehide', true))
+    })
+    expect(state.detach).toHaveBeenCalledWith('board-0000000000000001')
+
+    await act(async () => {
+      window.dispatchEvent(pageTransition('pageshow', true))
+    })
+    expect(state.attach).toHaveBeenCalledTimes(2)
+    expect(screen.getByTestId('task-terminal')).toHaveAttribute('data-session', 'board-0000000000000002')
+  })
+
+  it('does not ask again on a first page load', async () => {
+    const state = tasksState()
+    renderDashboard(state)
+    await openPopup()
+    await act(async () => {
+      window.dispatchEvent(pageTransition('pageshow', false))
+    })
+    expect(state.attach).toHaveBeenCalledTimes(1)
   })
 
   it('ends the attach when the page is left with the popup open', async () => {
