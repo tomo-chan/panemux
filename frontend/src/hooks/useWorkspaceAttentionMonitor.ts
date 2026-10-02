@@ -2,12 +2,15 @@ import { useEffect, useMemo, useRef } from 'react'
 import { createAgentAttentionDetector } from '../utils/agentAttention'
 import { collectLeafPanes } from '../utils/layoutTree'
 import { getLastNotifiedAttentionSignature, setLastNotifiedAttentionSignature } from '../utils/attentionNotificationState'
+import { taskAttentionTracker, type TaskAttentionTracker } from '../utils/taskAttention'
 import type { WorkspacesResponse } from '../schemas'
 
 interface UseWorkspaceAttentionMonitorOptions {
   workspaces: WorkspacesResponse | null
   maximizedPaneId: string | null
   onAttention: (paneId: string, showBrowserNotification?: boolean) => void
+  /** Where prompts meet the task dashboard's waits (issue #279); injectable for tests. */
+  taskAttention?: Pick<TaskAttentionTracker, 'noteTerminalPrompt'>
 }
 
 interface PaneMonitorState {
@@ -15,7 +18,12 @@ interface PaneMonitorState {
   decoder: TextDecoder
 }
 
-export function useWorkspaceAttentionMonitor({ workspaces, maximizedPaneId, onAttention }: UseWorkspaceAttentionMonitorOptions) {
+export function useWorkspaceAttentionMonitor({
+  workspaces,
+  maximizedPaneId,
+  onAttention,
+  taskAttention = taskAttentionTracker,
+}: UseWorkspaceAttentionMonitorOptions) {
   const monitorStatesRef = useRef<Map<string, PaneMonitorState>>(new Map())
   const activeWorkspaceIdRef = useRef<string | null>(workspaces?.active ?? null)
   const maximizedPaneIdRef = useRef<string | null>(maximizedPaneId)
@@ -25,6 +33,8 @@ export function useWorkspaceAttentionMonitor({ workspaces, maximizedPaneId, onAt
   // (issue #78). The sockets read the ref when a message arrives, so they
   // always report to the current callback.
   const onAttentionRef = useRef(onAttention)
+  const taskAttentionRef = useRef(taskAttention)
+  taskAttentionRef.current = taskAttention
 
   useEffect(() => {
     onAttentionRef.current = onAttention
@@ -82,7 +92,13 @@ export function useWorkspaceAttentionMonitor({ workspaces, maximizedPaneId, onAt
         const attentionMatch = state.detector.feed(text)
         if (!attentionMatch) return
 
-        const shouldNotifyBrowser = shouldNotifyBrowserAttention({
+        // A prompt the pane has not already notified is a fresh one. When the
+        // task in this pane is in a wait the task dashboard already reported,
+        // this prompt is that same wait and does not notify a second time.
+        const isFresh = getLastNotifiedAttentionSignature(paneId) !== attentionMatch.signature
+        const isReportedTaskWait = isFresh && taskAttentionRef.current.noteTerminalPrompt(paneId, Date.now())
+
+        const shouldNotifyBrowser = !isReportedTaskWait && shouldNotifyBrowserAttention({
           paneId,
           paneWorkspaceId: paneMetadataRef.current.get(paneId)?.workspaceId ?? null,
           activeWorkspaceId: activeWorkspaceIdRef.current,
@@ -91,7 +107,7 @@ export function useWorkspaceAttentionMonitor({ workspaces, maximizedPaneId, onAt
           signature: attentionMatch.signature,
         })
 
-        if (shouldNotifyBrowser) {
+        if (shouldNotifyBrowser || isReportedTaskWait) {
           setLastNotifiedAttentionSignature(paneId, attentionMatch.signature)
         }
         onAttentionRef.current(paneId, shouldNotifyBrowser)

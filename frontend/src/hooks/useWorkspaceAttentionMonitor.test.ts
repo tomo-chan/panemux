@@ -517,4 +517,42 @@ describe('useWorkspaceAttentionMonitor', () => {
 
     expect(closeSpy).toHaveBeenCalledTimes(3)
   })
+
+  describe('with the task attention tracker (issue #279)', () => {
+    const prompt = () => new TextEncoder().encode('Agent is waiting for confirmation: proceed?').buffer
+
+    function trackerReturning(sameWait: boolean) {
+      return { applySnapshot: vi.fn(() => []), noteTerminalPrompt: vi.fn(() => sameWait) }
+    }
+
+    it('records a fresh prompt with its pane and time', () => {
+      const tracker = trackerReturning(false)
+      vi.spyOn(Date, 'now').mockReturnValue(1234)
+      const onAttention = vi.fn()
+      renderHook(() => useWorkspaceAttentionMonitor({ workspaces, maximizedPaneId: null, onAttention, taskAttention: tracker }))
+      const socket = MockWebSocket.instances.find((instance) => instance.url.endsWith('/ops-main'))
+      act(() => socket?.simulateOpen())
+      act(() => socket?.simulateMessage(prompt()))
+
+      expect(tracker.noteTerminalPrompt).toHaveBeenCalledWith('ops-main', 1234)
+      expect(onAttention).toHaveBeenCalledWith('ops-main', true)
+    })
+
+    it('raises attention without a notification for a prompt that is a wait the tasks already reported, and not again on replay', () => {
+      const tracker = trackerReturning(true)
+      const onAttention = vi.fn()
+      renderHook(() => useWorkspaceAttentionMonitor({ workspaces, maximizedPaneId: null, onAttention, taskAttention: tracker }))
+      const socket = MockWebSocket.instances.find((instance) => instance.url.endsWith('/ops-main'))
+      act(() => socket?.simulateOpen())
+      act(() => socket?.simulateMessage(prompt()))
+      tracker.noteTerminalPrompt.mockReturnValue(false)
+      act(() => socket?.simulateOpen())
+      act(() => socket?.simulateMessage(prompt()))
+
+      expect(onAttention).toHaveBeenNthCalledWith(1, 'ops-main', false)
+      expect(onAttention).toHaveBeenNthCalledWith(2, 'ops-main', false)
+      // The replay is not a fresh prompt, so it does not move the prompt's time.
+      expect(tracker.noteTerminalPrompt).toHaveBeenCalledTimes(1)
+    })
+  })
 })
