@@ -106,19 +106,17 @@ The task event stream. The server sends JSON text frames; anything the client se
 
 #### Frames
 
-Every frame has `v` (the frame format's version, `1`), `type`, `epoch` and `seq`.
+Every frame has `type`, `epoch` and `seq`.
 
 The first frame on every connection is a snapshot of everything currently known:
 
 ```json
 {
-  "v": 1,
   "type": "snapshot",
   "epoch": "9f2c41d07ab35e88",
   "seq": 120,
-  "interval_ms": 5000,
   "hosts": [
-    { "name": "", "status": "ok", "observed_at": "2026-10-02T10:00:00Z" },
+    { "name": "", "status": "ok" },
     { "name": "gpu-box", "status": "error", "error": "connect to gpu-box: dial tcp: i/o timeout" }
   ],
   "tasks": [
@@ -141,18 +139,18 @@ The first frame on every connection is a snapshot of everything currently known:
 After it, one frame per change, in order:
 
 ```json
-{ "v": 1, "type": "task", "epoch": "9f2c41d07ab35e88", "seq": 121,
+{ "type": "task", "epoch": "9f2c41d07ab35e88", "seq": 121,
   "op": "changed", "prev_state": "busy",
   "task": { "id": "ssh:gpu-box:codex:0199a6…", "host": "gpu-box", "agent": "codex", "state": "wait", "…": "…" } }
 
-{ "v": 1, "type": "host", "epoch": "9f2c41d07ab35e88", "seq": 122,
+{ "type": "host", "epoch": "9f2c41d07ab35e88", "seq": 122,
   "op": "changed",
   "host": { "name": "gpu-box", "status": "error", "error": "…" } }
 ```
 
 | `type` | `op` | Carries |
 |---|---|---|
-| `snapshot` | — | `hosts`, `tasks` (running tasks, `[]` when none), `interval_ms` |
+| `snapshot` | — | `hosts`, `tasks` (running tasks, `[]` when none) |
 | `task` | `added` | `task`: the new task's view |
 | `task` | `changed` | `task`: the new view; `prev_state`: the state before |
 | `task` | `removed` | `task`: the view last observed; `prev_state`: its state |
@@ -177,8 +175,7 @@ No frame carries conversation text, a prompt, a command line or a process ID.
 
 #### Host view
 
-`name` (`""` for the panemux host), `status` ([Hosts](#hosts)), `error` when `error`, and
-`observed_at`, when the host last answered.
+`name` (`""` for the panemux host), `status` ([Hosts](#hosts)), and `error` when `error`.
 
 #### Ordering: `epoch` and `seq`
 
@@ -249,8 +246,9 @@ it from that store.
 #### Browser notifications
 
 - A wait the user cannot currently see is notified once per `wait_id`, under the conditions in
-  [Agent attention notifications](notifications.md#agent-attention-notifications). A wait whose task
-  matches no pane is never visible, so it is notified.
+  [Agent attention notifications](notifications.md#agent-attention-notifications). A wait is visible
+  when the browser is active and either its pane is on screen, or the task dashboard is on screen and
+  lists the task. A task that matches no pane is therefore visible only on the dashboard.
 - **Each tab decides and notifies on its own; tabs do not coordinate.** Every tab judges visibility
   from its own screen, so two tabs showing panemux can both notify the same wait.
 - A tab records the `wait_id`s it has notified in its session storage, which survives a reload of
@@ -260,8 +258,8 @@ it from that store.
   `wait_id` — a later wait of the same task — is notified again.
 - The notification's `tag` is the `wait_id`, so a notification of the same wait that is still shown is
   replaced rather than stacked.
-- The notification names the agent, the host and the task's directory name; it carries no
-  conversation text, and `waiting_for` is cut to 40 characters.
+- The notification names the agent, the host and the task's directory name only: not what the task
+  waits for (`waiting_for`), and no conversation text or prompt.
 - Clicking it brings the app forward. With a matched pane, the pane's workspace is selected, a
   maximized pane hiding it is restored, and it is focused, briefly outlined and its attention cleared.
   Without one, the task dashboard opens with any filter hiding the task cleared, and the task is

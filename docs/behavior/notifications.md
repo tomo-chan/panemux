@@ -18,7 +18,7 @@ When a task starts a wait ([Pane and workspace attention](task-events.md#pane-an
 - the containing workspace tab flashes when that workspace is not active, and clears when selected
   or when the task leaves the wait
 - the browser Notification API is used when permission has already been granted and the wait is not
-  currently visible to the user; a task that matches no pane is never visible, so it always notifies
+  currently visible to the user: neither its pane nor, on the task dashboard, its task is on screen
 - clicking a browser notification brings the app forward and goes to the task: its pane, focused and
   briefly outlined, in its workspace with any maximized pane hiding it restored; or, when it matches no
   pane, the task dashboard with the task selected and highlighted
@@ -27,13 +27,12 @@ When a task starts a wait ([Pane and workspace attention](task-events.md#pane-an
 
 Browser notification eligibility is determined by the current UI state:
 
-| Browser state | Pane state | Browser notification |
+| Browser state | On screen | Browser notification |
 |---|---|---|
-| active | visible in the active workspace | no |
-| active | hidden in another workspace | yes |
-| active | hidden by maximize in the active workspace | yes |
-| active | the task matches no pane | yes |
-| inactive | any pane | yes |
+| active | the task's pane, in the active workspace and not hidden by maximize | no |
+| active | the task dashboard, listing the task | no |
+| active | anything else: the pane in another workspace or hidden by maximize, the dashboard with the task filtered out, or the workspaces for a task that matches no pane | yes |
+| inactive | anything | yes |
 
 A wait is notified once per `wait_id` in a browser
 ([Browser notifications](task-events.md#browser-notifications)): each tab keeps the IDs it has
@@ -42,7 +41,7 @@ again. Tabs do not coordinate: two tabs showing panemux can each notify the same
 notification's `tag` (the `wait_id`) replaces one still shown rather than stacking it. The pane and workspace indicators can
 still reappear after a reload while the task is still waiting. A later wait of the same task has a new
 `wait_id` and notifies again. The notification shows the agent, the host and the task's directory
-name, never conversation text.
+name, never what it waits for or conversation text.
 
 Attention detection is the server's: the browser keeps one task event connection per tab rather than a
 connection per pane.

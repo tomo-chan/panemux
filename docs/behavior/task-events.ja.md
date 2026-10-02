@@ -64,19 +64,17 @@ panemux は、panemux のホストとすべての `ssh_connections` のホスト
 
 #### フレーム
 
-すべてのフレームは `v`（フレームの形式の版、`1`）、`type`、`epoch`、`seq` を持つ。
+すべてのフレームは `type`、`epoch`、`seq` を持つ。
 
 どの接続でも、最初のフレームはいま分かっていることすべてのスナップショット。
 
 ```json
 {
-  "v": 1,
   "type": "snapshot",
   "epoch": "9f2c41d07ab35e88",
   "seq": 120,
-  "interval_ms": 5000,
   "hosts": [
-    { "name": "", "status": "ok", "observed_at": "2026-10-02T10:00:00Z" },
+    { "name": "", "status": "ok" },
     { "name": "gpu-box", "status": "error", "error": "connect to gpu-box: dial tcp: i/o timeout" }
   ],
   "tasks": [
@@ -99,18 +97,18 @@ panemux は、panemux のホストとすべての `ssh_connections` のホスト
 そのあとは、変化ごとに 1 フレームを順に送る。
 
 ```json
-{ "v": 1, "type": "task", "epoch": "9f2c41d07ab35e88", "seq": 121,
+{ "type": "task", "epoch": "9f2c41d07ab35e88", "seq": 121,
   "op": "changed", "prev_state": "busy",
   "task": { "id": "ssh:gpu-box:codex:0199a6…", "host": "gpu-box", "agent": "codex", "state": "wait", "…": "…" } }
 
-{ "v": 1, "type": "host", "epoch": "9f2c41d07ab35e88", "seq": 122,
+{ "type": "host", "epoch": "9f2c41d07ab35e88", "seq": 122,
   "op": "changed",
   "host": { "name": "gpu-box", "status": "error", "error": "…" } }
 ```
 
 | `type` | `op` | 載せるもの |
 |---|---|---|
-| `snapshot` | — | `hosts`、`tasks`（動いているタスク。ないときは `[]`）、`interval_ms` |
+| `snapshot` | — | `hosts`、`tasks`（動いているタスク。ないときは `[]`） |
 | `task` | `added` | `task`：新しいタスクの view |
 | `task` | `changed` | `task`：新しい view。`prev_state`：直前の状態 |
 | `task` | `removed` | `task`：最後に観測した view。`prev_state`：その状態 |
@@ -133,7 +131,7 @@ panemux は、panemux のホストとすべての `ssh_connections` のホスト
 
 #### ホストの view
 
-`name`（panemux のホストは `""`）、`status`（「ホスト」）、`error` のときの `error`、ホストが最後に答えた時刻 `observed_at`。
+`name`（panemux のホストは `""`）、`status`（「ホスト」）、`error` のときの `error`。
 
 #### 順序：`epoch` と `seq`
 
@@ -175,11 +173,11 @@ panemux は、panemux のホストとすべての `ssh_connections` のホスト
 
 #### ブラウザ通知
 
-- ユーザーがいま見ることのできない待ちは、[Agent attention notifications](notifications.md#agent-attention-notifications) の条件で `wait_id` ごとに 1 回通知する。どの pane にも対応しないタスクの待ちは見えることがないので、通知する。
+- ユーザーがいま見ることのできない待ちは、[Agent attention notifications](notifications.md#agent-attention-notifications) の条件で `wait_id` ごとに 1 回通知する。待ちが見えているのは、ブラウザがアクティブで、その pane が画面にあるとき、またはタスクダッシュボードが画面にあってそのタスクを表示しているとき。したがって、どの pane にも対応しないタスクの待ちは、ダッシュボードでだけ見える。
 - **タブはそれぞれ自分で判断して通知し、タブ同士で調停しない。** 各タブは自分の画面で見えているかを判断するので、panemux を開いた 2 つのタブが同じ待ちをどちらも通知することがある。
 - タブは、通知した `wait_id` をそのタブの session storage に記録する。これはそのタブの再読込では残り、ほかのタブとは共有しないので、再読込や再接続で同じ待ちを再び通知することはない。記録はスナップショットにもうない ID を捨て、新しいものから最大 500 件を保つ。session storage が使えないときは記録をページのメモリに持ち、再読込で再び通知することがある。新しい `wait_id`（同じタスクの後の待ち）はまた通知する。
 - 通知の `tag` は `wait_id` なので、同じ待ちの通知がまだ表示されていれば、重ねずに置き換える。
-- 通知にはエージェント、ホスト、タスクのディレクトリ名を出す。会話の本文は載せず、`waiting_for` は 40 文字で切る。
+- 通知に出すのはエージェント、ホスト、タスクのディレクトリ名だけ。何を待っているか（`waiting_for`）、会話の本文、プロンプトは出さない。
 - クリックするとアプリが前面に出る。対応する pane があれば、その workspace を選択し、それを隠している maximize を解除し、pane を focus して短く outline を出し、attention を解除する。なければタスクダッシュボードを開き、タスクを隠しているフィルターを外して、タスクを選択・強調する。
 
 #### タスクダッシュボード
