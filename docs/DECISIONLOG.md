@@ -113,10 +113,12 @@ the pane/workspace attention and the browser notifications. The design is in
   would let a host slow to answer delay every other host's notifications by up to the 15-second
   per-host timeout. 5 seconds rather than the dashboard's 10 keeps the delay to a notification short;
   it is not configurable until a measurement asks for it.
-- **A slow subscriber is closed (`4000`) rather than skipped.** Dropping frames, as a terminal's
-  `publish` does, would leave a hole in a stream of differences that the receiver cannot see; a
-  receiver already recovers from any gap with a fresh snapshot, so a close needs nothing new. Sending a
-  new snapshot on the same connection was rejected for needing a mid-stream snapshot on both sides.
+- **No keepalive and no slow-subscriber protocol.** The publisher and the browser normally share one
+  machine over loopback: a closed tab or a crashed browser closes its socket at once, and a sleeping
+  machine sleeps with the server, so no changes pile up. Pings, a write deadline and a dedicated close
+  code were dropped as unneeded. What remains is ordinary fan-out hygiene: publishing never waits for
+  one subscriber, and a connection that cannot take its frames is closed rather than given a stream
+  with a hole in it, since the receiver already recovers from any close with a fresh snapshot.
 - **Each tab notifies on its own; tabs do not coordinate.** A tab records the waits it notified in its
   session storage, which survives its own reloads, and the notification's `tag` is the `wait_id`.
   Several browser tabs are not a requirement: one page shows every workspace, so there is no use for

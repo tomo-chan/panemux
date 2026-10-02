@@ -206,14 +206,9 @@ no history to replay.
   and restart it. What was last observed, the epoch, `seq` and the unsigned wait IDs are kept; when
   observation starts again every host is `pending` until it answers, and the differences from what was
   kept are published.
-- The server pings every subscriber every 30 seconds and closes a connection that does not answer.
-
-#### Slow subscribers
-
-Each subscriber has a bounded queue of frames. Publishing never waits for a subscriber. A subscriber
-whose queue is full, or whose frame cannot be written within 10 seconds, is closed with code `4000`
-(`resync`); it reconnects and continues from a fresh snapshot. A frame is never dropped from the
-middle of the stream.
+- Publishing never waits for one subscriber, so a connection that stops reading cannot hold up the
+  others. A frame is never dropped from the middle of a connection's stream: a connection that cannot
+  take its frames is closed, and its tab reconnects from a fresh snapshot.
 
 ### Receiver
 
