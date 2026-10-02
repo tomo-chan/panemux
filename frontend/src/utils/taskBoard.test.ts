@@ -26,6 +26,9 @@ import {
   laneTitle,
   paneConfigForTask,
   runningCount,
+  taskInputAction,
+  isTerminalCloseShortcut,
+  isTerminalMaximizeShortcut,
   taskOpenAction,
   taskTitle,
   visibleColumns,
@@ -521,6 +524,58 @@ describe('taskOpenAction', () => {
       .toEqual({ kind: 'unavailable', reason: 'not running' })
     expect(taskOpenAction(task({ agent: 'codex', location: { kind: 'daemon', attachable: false } }), null))
       .toEqual({ kind: 'unavailable', reason: "run by codex's shared daemon, in a pane it cannot tell" })
+  })
+})
+
+describe('taskInputAction', () => {
+  const pane = { paneId: 'p', paneTitle: 'p', workspaceId: 'w', workspaceTitle: 'W' }
+
+  it('offers Type in pane for a waiting or idle task in an attachable tmux session, with or without a pane', () => {
+    expect(taskInputAction(task({ state: 'wait' }), null)).toEqual({ kind: 'available' })
+    expect(taskInputAction(task({ state: 'idle', host: 'dev-server' }), null)).toEqual({ kind: 'available' })
+    expect(taskInputAction(task({ state: 'wait' }), pane)).toEqual({ kind: 'available' })
+  })
+
+  it('offers nothing, and gives no reason, for a task that is not waiting or idle', () => {
+    for (const state of ['busy', 'run', 'unknown', 'stop'] as const) {
+      expect(taskInputAction(task({ state }), null)).toBeNull()
+    }
+  })
+
+  it('says why a waiting or idle task cannot be typed into from the board', () => {
+    expect(taskInputAction(task({ state: 'wait', location: { kind: 'tmux', tmux_session: 'my work', attachable: false } }), null))
+      .toEqual({ kind: 'unavailable', reason: 'its tmux session name cannot be attached' })
+    expect(taskInputAction(task({ state: 'idle', location: { kind: 'outside', pane_id: 'p', attachable: false } }), pane))
+      .toEqual({ kind: 'unavailable', reason: 'running outside tmux; use Go to pane' })
+    expect(taskInputAction(task({ state: 'idle', location: { kind: 'outside', pane_id: 'gone', attachable: false } }), null))
+      .toEqual({ kind: 'unavailable', reason: 'running outside tmux' })
+    expect(taskInputAction(task({ state: 'wait', agent: 'codex', location: { kind: 'daemon', attachable: false } }), null))
+      .toEqual({ kind: 'unavailable', reason: "run by codex's shared daemon" })
+    expect(taskInputAction(task({ state: 'idle', location: { kind: 'none', attachable: false } }), null))
+      .toEqual({ kind: 'unavailable', reason: 'not in a tmux session' })
+    expect(taskInputAction(task({ state: 'wait', location: { kind: 'tmux', attachable: true } }), null))
+      .toEqual({ kind: 'unavailable', reason: 'not in a tmux session' })
+  })
+})
+
+describe('terminal popup shortcuts', () => {
+  const key = (init: KeyboardEventInit) => new KeyboardEvent('keydown', init)
+
+  it('closes on Cmd/Ctrl+Shift+Escape only', () => {
+    expect(isTerminalCloseShortcut(key({ key: 'Escape', metaKey: true, shiftKey: true }))).toBe(true)
+    expect(isTerminalCloseShortcut(key({ key: 'Escape', ctrlKey: true, shiftKey: true }))).toBe(true)
+    expect(isTerminalCloseShortcut(key({ key: 'Escape' }))).toBe(false)
+    expect(isTerminalCloseShortcut(key({ key: 'Escape', shiftKey: true }))).toBe(false)
+    expect(isTerminalCloseShortcut(key({ key: 'Escape', ctrlKey: true }))).toBe(false)
+    expect(isTerminalCloseShortcut(key({ key: 'Enter', ctrlKey: true, shiftKey: true }))).toBe(false)
+  })
+
+  it('maximizes on Cmd/Ctrl+Shift+Enter only', () => {
+    expect(isTerminalMaximizeShortcut(key({ key: 'Enter', metaKey: true, shiftKey: true }))).toBe(true)
+    expect(isTerminalMaximizeShortcut(key({ key: 'Enter', ctrlKey: true, shiftKey: true }))).toBe(true)
+    expect(isTerminalMaximizeShortcut(key({ key: 'Enter', shiftKey: true }))).toBe(false)
+    expect(isTerminalMaximizeShortcut(key({ key: 'Enter', metaKey: true }))).toBe(false)
+    expect(isTerminalMaximizeShortcut(key({ key: 'Escape', metaKey: true, shiftKey: true }))).toBe(false)
   })
 })
 

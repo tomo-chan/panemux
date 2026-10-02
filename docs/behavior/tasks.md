@@ -581,11 +581,47 @@ task_dashboard:
 Either way the dashboard closes and the pane is briefly outlined. Opening the same tmux session again
 while its pane is still being created does not create a second pane.
 
-**The board's temporary attach.** The backend also offers a terminal on a task's tmux session that
-is not a pane: [`POST /api/tasks/attach`](#post-apitasksattach) opens a tmux client on the running
+**Type in pane.** A task waiting for input or idle can also be answered without leaving the
+dashboard: `Type in pane` opens a popup over the board holding a real terminal on the task's tmux
+session — the board's temporary attach below — rather than a log or a message form. It does not
+switch workspaces or add a pane, and it neither starts nor resumes the agent.
+
+| Task | Type in pane |
+|---|---|
+| Waiting for input or idle, in an attachable tmux session (a pane on it or not) | Offered on the card and in the detail panel, beside `Open` / `Go to pane` |
+| Waiting for input or idle, in a session name a pane cannot attach to | Not offered; the detail panel says why |
+| Waiting for input or idle, outside tmux | Not offered; the detail panel says why, and points to `Go to pane` when a workspace holds its pane. The board does not put a second view on a pane's PTY |
+| Waiting for input or idle, run by codex's shared daemon | Not offered; the detail panel says why |
+| Any other state | Not offered, and no reason is shown |
+
+- **One attach per press.** The button reads `Connecting…` and is disabled from the press until the
+  popup closes; the popup opens at once in `Connecting`. An attach that answers after the popup was
+  closed — or after another task's popup was opened — is ended at once and never shown.
+- **Connection.** The header shows `Connecting`, `Connected`, `Disconnected` or `Failed`. The terminal
+  takes keys only while `Connected`: before that, and after a disconnect, a failed request, a
+  WebSocket that gave up, or a tmux client that exited (a session that ended — including one that
+  ended between the server's check and the attach), it is dimmed and inert, and the popup says
+  "Input is not being sent." with `Retry` or `Reconnect`. Both send `POST /api/tasks/attach` again
+  and read its answer over a new WebSocket; a pane's `/api/sessions/{id}/restart` is never asked.
+- **Bound to the task.** The popup stays on the task ID it was opened for. When a poll moves the task
+  to another column it says "Moved to <column> on the board. This terminal stays on <task>.", and
+  when the board stops listing it, that it no longer does; the terminal, its connection and focus do
+  not change. The task's card carries a `Typing` tag while its popup is open.
+- **With a workspace pane on the same session.** The popup is a second tmux client on that session:
+  input from either reaches it, and the popup says that the window takes the size of the client that
+  was used last.
+- **Closing** (`Close`, `Cmd/Ctrl+Shift+Esc`, or `Escape` while focus is outside the terminal) sends
+  `DELETE /api/tasks/attach/{session_id}`, which ends only the board's tmux client; the agent and
+  its tmux session keep running. The dashboard leaving with the popup open — the layer shortcut, a
+  reload — ends it the same way. The board's selection, filters and scroll position are as they
+  were, and focus returns to the button the popup was opened from (the same task's button where its
+  card has moved to, or the dashboard when there is none).
+- The popup's `Go to pane` / `Open` closes it and opens the task as above.
+
+**The board's temporary attach.** What Type in pane uses: a terminal on a task's tmux session that
+is not a pane. [`POST /api/tasks/attach`](#post-apitasksattach) opens a tmux client on the running
 session, which the browser reads and writes over `/ws/{session_id}` like a pane's, and the layout
-never holds it. The dashboard's popup that uses it is issue
-[#280](https://github.com/tomo-chan/panemux/issues/280).
+never holds it.
 
 - It only attaches (`tmux attach-session -t =<name>`, an exact match) and never creates a session; a
   session that has ended fails the request. tmux reports a missing session only after its client has

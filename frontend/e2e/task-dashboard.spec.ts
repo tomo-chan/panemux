@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs'
+import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
 
 // The task dashboard against a real panemux: the real collection script, the
@@ -160,6 +161,80 @@ test('starts a new task in a tmux session and selects it with its label', async 
       data: { host: '', agent: 'claude', session_id: sessionID, done: false, labels: [] },
     })).ok(),
   ).toBe(true)
+})
+
+// Issue #284: Type in pane opens the board's temporary tmux client (#283) on
+// the task's session in a popup. The fixture's agent is `sleep` in a tmux
+// pane, so what is typed comes back only as the tty's echo — which is enough
+// to show the keys reached that session.
+test('types into a waiting tmux task from a popup on the board, and closes back to it', async ({ page, request }) => {
+  test.skip(!(await hasTmux(request)), 'tmux is not installed here')
+
+  await openDashboard(page)
+  const card = page.getByRole('region', { name: 'Waiting for input' }).getByTestId('task-card-local:claude:e2e-in-tmux')
+  const typeIn = card.getByRole('button', { name: /^Type in pane/ })
+  await typeIn.click()
+
+  const dialog = page.getByRole('dialog', { name: /^Type in pane: / })
+  await expect(dialog.getByTestId('task-input-status')).toHaveText('Connected')
+  await expect(dialog).toContainText('Local · claude · tmux: e2e-task-dashboard')
+  expect(await page.locator('.td-top').evaluate((el) => el.closest('[inert]') !== null)).toBe(true)
+  expect(await page.locator('.td-board').evaluate((el) => el.closest('[inert]') !== null)).toBe(true)
+
+  const terminalInput = dialog.locator('.xterm-helper-textarea')
+  await expect(terminalInput).toBeFocused()
+  await page.keyboard.type('pm284-typed')
+  await expect.poll(async () => (await dialog.locator('.xterm-rows').textContent()) ?? '').toContain('pm284-typed')
+
+  // Escape belongs to the terminal: the popup stays, and so does focus.
+  await page.keyboard.press('Escape')
+  await expect(dialog).toBeVisible()
+  await expect(terminalInput).toBeFocused()
+
+  const axe = await new AxeBuilder({ page }).include('[role="dialog"]').exclude('.xterm').analyze()
+  expect(axe.violations.map((v) => `${v.id}: ${v.help}`)).toEqual([])
+
+  await page.keyboard.press('Control+Shift+Enter')
+  await expect(dialog).toHaveAttribute('data-maximized', 'true')
+  await expect(terminalInput).toBeFocused()
+  const top = (await page.locator('.td-top').boundingBox())!
+  const maximized = (await dialog.boundingBox())!
+  expect(Math.abs(maximized.y - (top.y + top.height))).toBeLessThan(2)
+  expect(maximized.width).toBeGreaterThanOrEqual(page.viewportSize()!.width - 1)
+  await page.keyboard.press('Control+Shift+Enter')
+  await expect(dialog).toHaveAttribute('data-maximized', 'false')
+
+  await page.keyboard.press('Control+Shift+Escape')
+  await expect(dialog).toHaveCount(0)
+  await expect(typeIn).toBeFocused()
+
+  // Closing ended only the board's client: the agent's session is still there.
+  const tasks = await (await request.get('/api/tasks')).json()
+  expect(tasks.tasks.some((task: { id: string }) => task.id === 'local:claude:e2e-in-tmux')).toBe(true)
+})
+
+test('opens Type in pane as a full sheet with no maximize on a narrow screen', async ({ page, request }) => {
+  test.skip(!(await hasTmux(request)), 'tmux is not installed here')
+
+  await page.setViewportSize({ width: 480, height: 800 })
+  await openDashboard(page)
+  await page
+    .getByRole('region', { name: 'Waiting for input' })
+    .getByTestId('task-card-local:claude:e2e-in-tmux')
+    .getByRole('button', { name: /^Type in pane/ })
+    .click()
+
+  const dialog = page.getByRole('dialog', { name: /^Type in pane: / })
+  await expect(dialog.getByTestId('task-input-status')).toHaveText('Connected')
+  await expect(dialog).toHaveAttribute('data-sheet', 'true')
+  await expect(dialog.getByRole('button', { name: 'Maximize' })).toHaveCount(0)
+  const box = (await dialog.boundingBox())!
+  expect(box.x).toBeLessThan(1)
+  expect(box.width).toBeGreaterThanOrEqual(479)
+  await expect(dialog.getByRole('button', { name: 'Close' })).toBeInViewport()
+
+  await dialog.getByRole('button', { name: 'Close' }).click()
+  await expect(dialog).toHaveCount(0)
 })
 
 test('resumes a stopped task in a tmux session named after it', async ({ page, request }) => {

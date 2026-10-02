@@ -363,6 +363,31 @@ export function taskOpenAction(task: Task, pane: TaskPaneRef | null): TaskOpenAc
   }
 }
 
+export type TaskInputAction = { kind: 'available' } | { kind: 'unavailable'; reason: string }
+
+/**
+ * Whether a task can be typed into from the board (issue #284): a task waiting
+ * for input or idle, in a tmux session the board's temporary attach can join.
+ * Null for a task in any other state, which shows neither the button nor a
+ * reason. Outside tmux, the board does not add a second view of a pane's PTY;
+ * Go to pane is the way there.
+ */
+export function taskInputAction(task: Task, pane: TaskPaneRef | null): TaskInputAction | null {
+  if (task.state !== 'wait' && task.state !== 'idle') return null
+  const { kind, tmux_session: session, attachable } = task.location
+  switch (kind) {
+    case 'tmux':
+      if (!session) return { kind: 'unavailable', reason: 'not in a tmux session' }
+      return attachable ? { kind: 'available' } : { kind: 'unavailable', reason: 'its tmux session name cannot be attached' }
+    case 'outside':
+      return { kind: 'unavailable', reason: pane ? 'running outside tmux; use Go to pane' : 'running outside tmux' }
+    case 'daemon':
+      return { kind: 'unavailable', reason: "run by codex's shared daemon" }
+    default:
+      return { kind: 'unavailable', reason: 'not in a tmux session' }
+  }
+}
+
 /** The pane that attaches to a task's tmux session, or null if none can. */
 export function paneConfigForTask(task: Task, paneId: string): PaneConfig | null {
   const session = task.location.tmux_session
@@ -407,6 +432,20 @@ export const DEFAULT_TASK_DASHBOARD_SHORTCUT = 'S'
 /** Whether a keydown is Cmd/Ctrl+Shift+<letter>, the form of every global shortcut. */
 export function isShortcut(event: KeyboardEvent, letter: string): boolean {
   return (event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === letter.toLowerCase()
+}
+
+/**
+ * Cmd/Ctrl+Shift+Escape: closes the Type in pane popup even while its terminal
+ * has focus. Plain Escape belongs to the terminal (claude's interrupt, codex's
+ * cancel).
+ */
+export function isTerminalCloseShortcut(event: KeyboardEvent): boolean {
+  return (event.metaKey || event.ctrlKey) && event.shiftKey && event.key === 'Escape'
+}
+
+/** Cmd/Ctrl+Shift+Enter: maximizes the Type in pane popup, or restores it. */
+export function isTerminalMaximizeShortcut(event: KeyboardEvent): boolean {
+  return (event.metaKey || event.ctrlKey) && event.shiftKey && event.key === 'Enter'
 }
 
 /** A shortcut as the platform writes it: ⌘⇧S on macOS, Ctrl+Shift+S elsewhere. */

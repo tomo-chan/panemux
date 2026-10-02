@@ -570,3 +570,74 @@ describe('useTasks requestSummary', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('useTasks attach and detach (issue #284)', () => {
+  beforeEach(() => setVisibility('visible'))
+  afterEach(() => vi.restoreAllMocks())
+
+  const refused = (status: number, text: string) =>
+    ({ ok: false, status, text: () => Promise.resolve(text) }) as Response
+  const attach = { session_id: 'board-0123456789abcdef', tmux_session: 'task-a' }
+
+  it('POSTs the task ID to open the board attach, and collects nothing more', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(ok(payload))
+      .mockResolvedValueOnce({ ...ok(attach), status: 201 } as Response)
+    window.fetch = fetchMock
+    const { result } = renderHook(() => useTasks(true))
+    await waitFor(() => expect(result.current.data).not.toBeNull())
+
+    let outcome: unknown = null
+    await act(async () => {
+      outcome = await result.current.attach(result.current.data!.tasks[0])
+    })
+
+    expect(outcome).toEqual({ ok: true, launched: attach })
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/tasks/attach', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: 'local:claude:a' }),
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('reports a refused attach, and an answer that is not an attach', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(ok(payload))
+      .mockResolvedValueOnce(refused(409, 'the task is not in a tmux session'))
+      .mockResolvedValueOnce(ok({ session_id: 'p-1', tmux_session: 'task-a' }))
+      .mockRejectedValueOnce(new Error('offline'))
+    window.fetch = fetchMock
+    const { result } = renderHook(() => useTasks(true))
+    await waitFor(() => expect(result.current.data).not.toBeNull())
+
+    const outcomes: unknown[] = []
+    await act(async () => {
+      for (let i = 0; i < 3; i++) outcomes.push(await result.current.attach(payload.tasks[0] as never))
+    })
+
+    expect(outcomes).toEqual([
+      { ok: false, error: 'the task is not in a tmux session' },
+      { ok: false, error: 'Unexpected response from /api/tasks/attach' },
+      { ok: false, error: 'offline' },
+    ])
+  })
+
+  it('DELETEs the attach by its session ID, swallowing a failure', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(ok(payload))
+      .mockResolvedValueOnce({ ok: true, status: 204 } as Response)
+      .mockRejectedValueOnce(new Error('offline'))
+    window.fetch = fetchMock
+    const { result } = renderHook(() => useTasks(true))
+    await waitFor(() => expect(result.current.data).not.toBeNull())
+
+    await act(async () => {
+      await result.current.detach('board-0123456789abcdef')
+      await result.current.detach('board-../x')
+    })
+
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/tasks/attach/board-0123456789abcdef', { method: 'DELETE' })
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/tasks/attach/board-..%2Fx', { method: 'DELETE' })
+  })
+})

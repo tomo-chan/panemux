@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Task,
+  TaskAttach,
+  TaskAttachSchema,
   TaskLaunched,
   TaskLaunchedSchema,
   TaskLaunchResponse,
@@ -59,6 +61,18 @@ export interface TasksState {
    * Resolves to why it failed, or null.
    */
   requestSummary: (task: Task) => Promise<string | null>
+  /**
+   * Opens the board's temporary tmux client on a task's running tmux session
+   * (issue #283), for the Type in pane popup (issue #284). Collects nothing:
+   * attaching changes no task.
+   */
+  attach: (task: Task) => Promise<TaskActionResult<TaskAttach>>
+  /**
+   * Ends a board attach. Only that tmux client ends; the session and the
+   * agent keep running. A failure is not reported: the server destroys an
+   * attach nobody reads after a grace period anyway.
+   */
+  detach: (sessionId: string) => Promise<void>
 }
 
 // postTaskAction POSTs body to path and parses the answer with schema. A
@@ -222,6 +236,19 @@ export function useTasks(enabled: boolean): TasksState {
     return null
   }, [])
 
+  const attach = useCallback(
+    (task: Task) => postTaskAction('/api/tasks/attach', { id: task.id }, TaskAttachSchema),
+    [],
+  )
+
+  const detach = useCallback(async (sessionId: string) => {
+    try {
+      await fetch(`/api/tasks/attach/${encodeURIComponent(sessionId)}`, { method: 'DELETE' })
+    } catch {
+      // See TasksState.detach.
+    }
+  }, [])
+
   useEffect(() => {
     const handleVisibilityChange = () => setIsVisible(document.visibilityState === 'visible')
     document.addEventListener('visibilitychange', handleVisibilityChange)
@@ -237,5 +264,5 @@ export function useTasks(enabled: boolean): TasksState {
     return () => clearInterval(interval)
   }, [enabled, isVisible, refresh])
 
-  return { data, error, loading, updatedAt, refresh, reconnect, saveRecord, launch, resume, requestSummary }
+  return { data, error, loading, updatedAt, refresh, reconnect, saveRecord, launch, resume, requestSummary, attach, detach }
 }
