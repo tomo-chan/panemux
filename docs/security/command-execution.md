@@ -183,7 +183,8 @@ The task dashboard ([behavior](../behavior/tasks.md)) runs commands on the panem
 config, or a remote host into a command string:
 
 - **The collection script** (`collectScript` in `internal/tasks/collect.go`) is a compile-time
-  constant. Locally it runs as `exec.CommandContext(ctx, "sh", "-s")` — a literal program and a
+  constant, as is the attention collection's `attentionScript`: the same constant live part
+  (`collectLiveScript`) without the searches for stopped sessions, run exactly the same way. Locally it runs as `exec.CommandContext(ctx, "sh", "-s")` — a literal program and a
   literal argument — with the script written to stdin. Remotely the exec request is the literal
   `sh -s` with the same script on stdin, so the remote login shell parses only `sh -s`, whatever
   shell it is. `HOME` is the one environment value the local run sets, from `internal/homedir`, and
@@ -223,12 +224,13 @@ as one argument, with `/dev/null` on stdin. `-readonly` keeps the database, whic
 open, from being written. The Go side accepts a session ID from a rollout name only when it is a UUID
 (`rolloutSessionID`), and reads the fragments with fixed regular expressions, never as commands.
 
-`GET /api/tasks` and the reconnect route are unauthenticated like the rest of `/api/*`, but a GET
-that dials every host is a side effect another site could trigger with an `<img>`. Both routes,
+`GET /api/tasks`, `GET /api/tasks/attention` and the reconnect route are unauthenticated like the
+rest of `/api/*`, but a GET that dials every host is a side effect another site could trigger with an
+`<img>`. These three routes,
 `PUT /api/tasks/records`, which writes the operator's record file, and the two routes that start and
 resume tasks ([below](#task-launch-and-resume)) therefore refuse a request whose
 `Sec-Fetch-Site` is `cross-site` or `same-site`, or whose `Origin` is neither the server's own nor a
-loopback origin (`refuseCrossSite` in `internal/api/tasks.go`). The record route runs no command:
+loopback origin (`refuseCrossSite` in `internal/api/tasks.go`), before collecting or dialing anything. The record route runs no command:
 it writes `~/.config/panemux/tasks.json` through `fileops.AtomicWrite`, and a label reaches the
 browser only as text, never as markup or a URL.
 The response itself is never readable cross-site — no CORS header is sent — so this protects the

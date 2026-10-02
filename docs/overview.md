@@ -76,7 +76,9 @@ backend and UI are released together.
   `~/.claude/projects`, `~/.codex/sessions`, `~/.codex/thread_history_1.sqlite`), which are not a
   published format, and finds a running codex's session through the rollout file it holds open. It
   cannot tell a codex waiting for command approval from one at work. It collects only while it is on
-  screen. It finds the pane of an agent outside tmux only on Linux and macOS hosts, where it can read
+  screen, or when the input-wait notifications ask for the running tasks (`GET /api/tasks/attention`,
+  which does not search for stopped sessions). A waiting task's `wait_signature` exists only when the
+  agent recorded when the wait began. It finds the pane of an agent outside tmux only on Linux and macOS hosts, where it can read
   the agent's environment, and on macOS not for an agent that is one of Apple's own binaries. The
   macOS reading has not yet been run on a macOS host
   ([details](behavior/tasks.md#the-pane-of-an-agent-outside-tmux)). Whether a task is done is only

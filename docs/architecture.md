@@ -125,7 +125,11 @@ is not known until it has started, `tasks.PendingLabels` holds them in memory an
 `task_dashboard.summary.enabled` is set, `GET /api/tasks` also attaches each task's summary and starts
 the ones that are due, in the background and at most two at a time: a third fixed script reads the
 task's conversation log on its host, and `claude -p` on the panemux host summarizes the conversation
-text extracted from it; `POST /api/tasks/summary` asks for one. Full behavior is in
+text extracted from it; `POST /api/tasks/summary` asks for one. `GET /api/tasks/attention`
+(`Service.CollectAttention`) is the lightweight collection for the input-wait notifications: the
+same script without its searches for stopped sessions (`attentionScript`), the running tasks only,
+and none of the handler's git, record, label or summary work. Both responses give a waiting task the
+same `wait_signature`, derived from the wait start the agent recorded on its host. Full behavior is in
 [Task dashboard](behavior/tasks.md).
 
 ### URL-open flow

@@ -73,6 +73,27 @@ prompt; a request that never starts a subprocess does not create a turn.
 
 ## Task dashboard
 
+### A lightweight collection and a stable wait signature for input-wait notifications (2026-10-02, issue #278)
+
+Issue [#277](https://github.com/tomo-chan/panemux/issues/277) notifies the operator when a task starts
+waiting for input; #278 is its backend. Decided:
+
+- **A separate `GET /api/tasks/attention`, not `GET /api/tasks` polled more often.** The full route
+  runs `gh pr view` per directory, reads the record file, starts summaries and searches seven days of
+  conversation logs and rollouts — none of which a notification needs. The attention route shares the
+  script's live part (`collectLiveScript`) as a constant, so it cannot drift from how the dashboard
+  decides a running task's state, and skips only the two searches for stopped sessions. A query
+  parameter on `GET /api/tasks` was rejected: one handler would carry two response shapes.
+- **The signature comes from the wait start the agent recorded, on the host's clock.** Using the
+  converted `status_since` would change it whenever the clock conversion moved by a millisecond
+  between collections, and a rollout's mtime moves on every write while codex waits. Claude's
+  `updatedAt` and `startedAt` and codex's turn start are not the start of the wait, so a wait that
+  lacks the real one is left unsigned rather than given a value that could repeat or change. For codex
+  the question's own `timestamp` tells two questions in one turn apart.
+- **Versioned and opaque** (`w1-<sha256>`). Clients compare it only; changing its inputs changes the
+  version, so a browser's remembered signatures can never match a value made another way.
+- Devin sessions are not covered; they wait on issue #276.
+
 ### Type in pane: the popup over the board (2026-10-02, issue #284)
 
 Issue [#280](https://github.com/tomo-chan/panemux/issues/280) chose a popup (with maximize) over

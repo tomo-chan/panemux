@@ -94,7 +94,7 @@ distribution. Per-surface behavior lives in [`docs/behavior/`](behavior/), group
 | WebSocket Protocol; Command Center WebSocket Protocol | [websocket.md](behavior/websocket.md) |
 | Frontend Runtime Behavior; Pane Git and PR metadata | [frontend.md](behavior/frontend.md) |
 | Opening URLs from a Pane | [url-open.md](behavior/url-open.md) |
-| Task Dashboard; `GET /api/tasks`; `POST /api/tasks/hosts/{name}/reconnect`; `PUT /api/tasks/records`; `POST /api/tasks`; `POST /api/tasks/resume`; `POST /api/tasks/summary` | [tasks.md](behavior/tasks.md) |
+| Task Dashboard; Wait signature; `GET /api/tasks`; `GET /api/tasks/attention`; `POST /api/tasks/hosts/{name}/reconnect`; `PUT /api/tasks/records`; `POST /api/tasks`; `POST /api/tasks/resume`; `POST /api/tasks/summary` | [tasks.md](behavior/tasks.md) |
 
 ## Operational Assumptions
 

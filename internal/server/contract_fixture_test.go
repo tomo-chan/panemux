@@ -301,6 +301,28 @@ var contractFixtures = map[string]contractFixture{
 		return rr.Body.Bytes(), nil
 	}},
 
+	// The input-wait notifications' collection (issue #278) over the same
+	// hosts as "tasks": the running tasks only, with the waiting one's
+	// wait_signature, and nothing the dashboard adds.
+	"tasks-attention": {capture: func(t *testing.T) ([]byte, map[string]string) {
+		e := newAPIEnv(t)
+		e.srv.api.SetTaskService(tasks.New(tasks.Options{
+			Hosts: func() []string { return []string{"build-box", "gpu-box"} },
+			Dial: func(name string) (tasks.Conn, error) {
+				if name == "build-box" {
+					return fixtureTaskConn{}, nil
+				}
+				return nil, errors.New("dial tcp: i/o timeout")
+			},
+			RunLocal: func(context.Context, string) ([]byte, error) {
+				return []byte(fixtureLocalTaskCollection), nil
+			},
+		}))
+		rr := e.do(t, http.MethodGet, "/api/tasks/attention", "")
+		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+		return rr.Body.Bytes(), nil
+	}},
+
 	// A summary asked for once the poll has made it: the answer for a log
 	// that has not changed is the one already made (issue #258).
 	"task-summary": {capture: func(t *testing.T) ([]byte, map[string]string) {

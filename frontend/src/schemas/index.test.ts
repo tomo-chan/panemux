@@ -30,12 +30,51 @@ import {
   BoardMessageSchema,
   BoardMessagesResponseSchema,
   TasksResponseSchema,
+  TasksAttentionResponseSchema,
   TaskAutolinkSchema,
   TaskRecordSchema,
   TaskLaunchedSchema,
   TaskLaunchResponseSchema,
   TaskSummarySchema,
 } from './index'
+
+describe('TasksAttentionResponseSchema', () => {
+  const waiting = {
+    id: 'local:claude:7c21e0a4',
+    host: '',
+    agent: 'claude',
+    session_id: '7c21e0a4',
+    state: 'wait',
+    waiting_for: 'input needed',
+    wait_signature: 'w1-6728c555',
+    location: { kind: 'none', attachable: false },
+  }
+
+  it('accepts the hosts and the running tasks, a waiting one signed', () => {
+    const result = TasksAttentionResponseSchema.safeParse({
+      hosts: [{ name: '', status: 'ok', collected_at: '2026-09-25T12:00:00Z' }, { name: 'gpu-box', status: 'connecting' }],
+      tasks: [waiting, { ...waiting, id: 'b', state: 'busy', wait_signature: undefined }],
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects an empty or non-string wait_signature', () => {
+    for (const wait_signature of ['', 42]) {
+      expect(TasksAttentionResponseSchema.safeParse({ hosts: [], tasks: [{ ...waiting, wait_signature }] }).success)
+        .toBe(false)
+    }
+  })
+
+  it('needs both hosts and tasks', () => {
+    expect(TasksAttentionResponseSchema.safeParse({ hosts: [] }).success).toBe(false)
+    expect(TasksAttentionResponseSchema.safeParse({ tasks: [] }).success).toBe(false)
+  })
+
+  it('is what GET /api/tasks carries too', () => {
+    expect(TasksResponseSchema.safeParse({ hosts: [], tasks: [waiting] }).success).toBe(true)
+    expect(TasksResponseSchema.safeParse({ hosts: [], tasks: [{ ...waiting, wait_signature: '' }] }).success).toBe(false)
+  })
+})
 
 describe('TasksResponseSchema', () => {
   const task = {

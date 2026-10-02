@@ -68,15 +68,18 @@ type Task struct {
 	// and is not part of the API.
 	Log *LogVersion `json:"-"`
 	// Host is the ssh_connections key, or "" for the panemux host itself.
-	Host       string   `json:"host"`
-	ID         string   `json:"id"`
-	Agent      string   `json:"agent"`
-	SessionID  string   `json:"session_id,omitempty"`
-	CWD        string   `json:"cwd,omitempty"`
-	State      State    `json:"state"`
-	WaitingFor string   `json:"waiting_for,omitempty"`
-	Location   Location `json:"location"`
-	PID        int      `json:"pid,omitempty"`
+	Host       string `json:"host"`
+	ID         string `json:"id"`
+	Agent      string `json:"agent"`
+	SessionID  string `json:"session_id,omitempty"`
+	CWD        string `json:"cwd,omitempty"`
+	State      State  `json:"state"`
+	WaitingFor string `json:"waiting_for,omitempty"`
+	// WaitSignature identifies the wait a task in StateWait is in, when the
+	// agent recorded when it began; see waitSignature.
+	WaitSignature string   `json:"wait_signature,omitempty"`
+	Location      Location `json:"location"`
+	PID           int      `json:"pid,omitempty"`
 }
 
 // LogVersion is one state of a conversation log, as the collection saw it:
@@ -129,25 +132,8 @@ type claudeState struct {
 // every time a host reports is converted by its age against the host's own
 // clock (raw.Now), so a host whose clock is off does not shift the dashboard.
 func buildTasks(host string, raw rawSnapshot, collectedAt time.Time) []Task {
-	b := taskBuilder{
-		host:        host,
-		raw:         raw,
-		collectedAt: collectedAt,
-		procs:       make(map[int]process, len(raw.Processes)),
-		panes:       make(map[int]string, len(raw.TmuxPanes)),
-	}
-	for _, p := range raw.Processes {
-		b.procs[p.PID] = p
-	}
-	for _, p := range raw.TmuxPanes {
-		b.panes[p.PanePID] = p.Session
-	}
-
-	live := b.liveClaudeTasks()
-	live = append(live, b.unexplainedClaudeTasks(live)...)
-	live = append(live, b.codexTasks()...)
-	//mutation:exempt[CONDITIONALS_BOUNDARY] equivalent — ids are unique within a host, so no two compare equal
-	sort.Slice(live, func(i, j int) bool { return live[i].ID < live[j].ID })
+	b := newTaskBuilder(host, raw, collectedAt)
+	live := b.liveTasks()
 
 	liveSessions := map[string]map[string]bool{
 		AgentClaude: {},
@@ -167,6 +153,40 @@ func buildTasks(host string, raw rawSnapshot, collectedAt time.Time) []Task {
 		}
 	}
 	return b.withLogVersions(append(live, b.stoppedTasks(liveSessions, claimedLogs)...))
+}
+
+// buildLiveTasks is buildTasks without the stopped sessions and the log
+// versions: the running tasks alone, as the attention collection lists them.
+func buildLiveTasks(host string, raw rawSnapshot, collectedAt time.Time) []Task {
+	b := newTaskBuilder(host, raw, collectedAt)
+	return b.liveTasks()
+}
+
+func newTaskBuilder(host string, raw rawSnapshot, collectedAt time.Time) *taskBuilder {
+	b := &taskBuilder{
+		host:        host,
+		raw:         raw,
+		collectedAt: collectedAt,
+		procs:       make(map[int]process, len(raw.Processes)),
+		panes:       make(map[int]string, len(raw.TmuxPanes)),
+	}
+	for _, p := range raw.Processes {
+		b.procs[p.PID] = p
+	}
+	for _, p := range raw.TmuxPanes {
+		b.panes[p.PanePID] = p.Session
+	}
+	return b
+}
+
+// liveTasks are the running claude and codex tasks, ordered by ID.
+func (b *taskBuilder) liveTasks() []Task {
+	live := b.liveClaudeTasks()
+	live = append(live, b.unexplainedClaudeTasks(live)...)
+	live = append(live, b.codexTasks()...)
+	//mutation:exempt[CONDITIONALS_BOUNDARY] equivalent — ids are unique within a host, so no two compare equal
+	sort.Slice(live, func(i, j int) bool { return live[i].ID < live[j].ID })
+	return live
 }
 
 // withLogVersions gives every claude task with a session ID the version of
@@ -243,6 +263,9 @@ func (b *taskBuilder) liveClaudeTasks() []Task {
 		}
 		if state == StateWait {
 			task.WaitingFor = st.WaitingFor
+			// statusUpdatedAt is when the status became waiting; updatedAt
+			// and startedAt are not, so they do not stand in for it.
+			task.WaitSignature = waitSignature(b.host, AgentClaude, st.SessionID, st.StatusUpdatedAt, st.WaitingFor)
 		}
 		bySession[st.SessionID] = task
 	}
@@ -416,13 +439,20 @@ func (b *taskBuilder) hostMillis(millis int64) *time.Time {
 	return &t
 }
 
+// The statuses a Claude Code state file reports.
+const (
+	claudeStatusBusy    = "busy"
+	claudeStatusWaiting = "waiting"
+	claudeStatusIdle    = "idle"
+)
+
 func claudeStatusState(status string) State {
 	switch status {
-	case "busy":
+	case claudeStatusBusy:
 		return StateBusy
-	case "waiting":
+	case claudeStatusWaiting:
 		return StateWait
-	case "idle":
+	case claudeStatusIdle:
 		return StateIdle
 	default:
 		return StateUnknown

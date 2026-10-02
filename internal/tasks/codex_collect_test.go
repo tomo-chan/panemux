@@ -65,7 +65,7 @@ func TestParseCollectOutput_ReadsTheCodexSections(t *testing.T) {
 			Turn: codexTurn{
 				DBStatus: "inProgress", DBStartedAt: 1790510480,
 				Event: "task_started", EventAt: 1790510310057,
-				LastItem: "function_call", LastItemName: "request_user_input",
+				LastItem: "function_call", LastItemName: "request_user_input", LastItemAt: 1790510392794,
 			},
 		},
 		{
@@ -217,6 +217,28 @@ func TestParseCodexTurn(t *testing.T) {
 			name:  "event with an unreadable timestamp",
 			event: `{"timestamp":"yesterday","type":"event_msg","payload":{"type":"task_complete"}}`,
 			want:  codexTurn{Event: "task_complete"},
+		},
+		{
+			name: "an item carries its own time",
+			item: `{"timestamp":"2026-09-27T11:59:52.794Z","type":"response_item",` +
+				`"payload":{"type":"function_call","name":"request_user_input","arguments":"{}"}}`,
+			want: codexTurn{LastItem: "function_call", LastItemName: "request_user_input", LastItemAt: 1790510392794},
+		},
+		{
+			name: "an item time that is not the line's own is not read",
+			item: `{"type":"response_item","payload":{"type":"function_call","name":"request_user_input",` +
+				`"timestamp":"2026-09-27T11:59:52.794Z"}}`,
+			want: codexTurn{LastItem: "function_call", LastItemName: "request_user_input"},
+		},
+		{
+			name: "an item with an unreadable time",
+			item: `{"timestamp":"soon","type":"response_item","payload":{"type":"function_call","name":"request_user_input"}}`,
+			want: codexTurn{LastItem: "function_call", LastItemName: "request_user_input"},
+		},
+		{
+			name: "an item time before the epoch",
+			item: `{"timestamp":"1960-01-01T00:00:00Z","type":"response_item","payload":{"type":"message"}}`,
+			want: codexTurn{LastItem: "message"},
 		},
 		{
 			name: "an item that is not a call has no name",
