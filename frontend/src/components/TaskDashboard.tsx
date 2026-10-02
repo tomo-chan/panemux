@@ -89,7 +89,17 @@ export interface TaskDashboardProps {
   shortcut?: { label: string; aria: string }
   /** Clock for elapsed times; injectable for tests. */
   now?: () => number
+  /**
+   * A task to select and highlight, from a browser notification of a task
+   * no pane shows (issue #279). seq tells one request from the next.
+   */
+  focusRequest?: { taskId: string; seq: number } | null
+  /** Called once the requested task is selected, so the request is not repeated. */
+  onFocusRequestHandled?: () => void
 }
+
+// How long a task reached from a notification stays highlighted.
+const TASK_CARD_FLASH_MS = 1800
 
 type StateVars = React.CSSProperties & Record<'--td-sc', string>
 
@@ -105,6 +115,8 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
   onShowWorkspaces,
   shortcut,
   now = Date.now,
+  focusRequest = null,
+  onFocusRequestHandled,
 }) => {
   const { data, error, loading, updatedAt, refresh, reconnect, saveRecord, launch, resume, requestSummary } = tasksState
   const [query, setQuery] = useState('')
@@ -116,6 +128,7 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
   const [detailOpen, setDetailOpen] = useState(false)
   const [newTaskOpen, setNewTaskOpen] = useState(false)
   const [hostsOpen, setHostsOpen] = useState(false)
+  const [flashTaskId, setFlashTaskId] = useState<string | null>(null)
   const ownHostsState = useSSHConnections()
   const hostsDialogState = hostsState ?? ownHostsState
   // A task that was started but is not listed yet: claude writes the state
@@ -175,6 +188,36 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
     setSelectedId(task.id)
     setDetailOpen(true)
   }
+  // A notification's task is selected once it is collected, with every
+  // filter that would hide it cleared: reaching it is the point.
+  const handledFocusSeq = useRef<number | null>(null)
+  useEffect(() => {
+    if (!focusRequest || handledFocusSeq.current === focusRequest.seq) return
+    const target = tasks.find((task) => task.id === focusRequest.taskId)
+    if (!target) return
+    handledFocusSeq.current = focusRequest.seq
+    const filter = { query, host: hostFilter === ALL_HOSTS ? null : hostFilter, label: activeLabel }
+    if (filterTasks([target], filter).length === 0) {
+      setQuery('')
+      setHostFilter(ALL_HOSTS)
+      setLabelFilter(ALL_LABELS)
+    }
+    setPendingLaunch(null)
+    setSelectedId(target.id)
+    setDetailOpen(true)
+    setFlashTaskId(target.id)
+    onFocusRequestHandled?.()
+  }, [activeLabel, focusRequest, hostFilter, onFocusRequestHandled, query, tasks])
+
+  useEffect(() => {
+    if (!flashTaskId) return
+    rootRef.current
+      ?.querySelector<HTMLElement>(`[data-testid="task-card-${CSS.escape(flashTaskId)}"]`)
+      ?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+    const timeoutId = window.setTimeout(() => setFlashTaskId(null), TASK_CARD_FLASH_MS)
+    return () => window.clearTimeout(timeoutId)
+  }, [flashTaskId])
+
   // A person selecting a task: a stopped one is summarized only when asked.
   const pick = (task: Task) => {
     select(task)
@@ -410,6 +453,7 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
                             task={task}
                             pane={panes.get(task.id) ?? null}
                             selected={task.id === selectedId}
+                            flashing={task.id === flashTaskId}
                             nowMs={nowMs}
                             onSelect={pick}
                             onOpen={open}
@@ -559,6 +603,8 @@ interface TaskCardProps {
   task: Task
   pane: TaskPaneRef | null
   selected: boolean
+  /** Highlighted briefly after a notification led here. */
+  flashing?: boolean
   nowMs: number
   onSelect: (task: Task) => void
   onOpen: (task: Task) => void
@@ -569,7 +615,7 @@ interface TaskCardProps {
 }
 
 const TaskCard: React.FC<TaskCardProps> = ({
-  task, pane, selected, nowMs, onSelect, onOpen, onResume, resuming, onTypeIn, inputMark,
+  task, pane, selected, flashing = false, nowMs, onSelect, onOpen, onResume, resuming, onTypeIn, inputMark,
 }) => {
   const action = taskOpenAction(task, pane)
   const inputAction = taskInputAction(task, pane)
@@ -579,7 +625,7 @@ const TaskCard: React.FC<TaskCardProps> = ({
     // keyboard one. Making the card itself a button would nest the links and
     // the open button inside it.
     <article
-      className="td-card"
+      className={flashing ? 'td-card td-card-flash' : 'td-card'}
       data-testid={`task-card-${task.id}`}
       data-selected={selected}
       style={stateStyle(task.state)}
