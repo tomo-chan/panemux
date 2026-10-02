@@ -104,9 +104,9 @@ func TestNewTmuxLocalAttach_AnEndedSessionFailsBeforeAttaching(t *testing.T) {
 func TestTmuxSSHAttach_ChecksTheSessionBeforeAttaching(t *testing.T) {
 	cases := []struct {
 		name         string
+		wantCommands []string
 		status       uint32
 		wantErr      bool
-		wantCommands []string
 	}{
 		{
 			name:         "a running session is attached",

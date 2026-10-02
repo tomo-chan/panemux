@@ -431,7 +431,8 @@ func TestManager_Watch_ReportsZeroWhenTheSessionEnds(t *testing.T) {
 	require.Equal(t, 1, <-heard)
 
 	require.NoError(t, mock.Close())
-	for range stream {
+	for chunk := range stream {
+		_ = chunk // drained until the session's end closes the stream
 	}
 	unsubscribe() // the WebSocket's deferred unsubscribe, after the end
 
