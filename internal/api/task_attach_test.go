@@ -382,6 +382,24 @@ func TestBoardAttach_GracePeriod(t *testing.T) {
 		unsubscribe()
 	})
 
+	t.Run("a tmux client that exits while a WebSocket reads it is destroyed after the grace period", func(t *testing.T) {
+		e := newAttachEnv(t, attachLocal())
+		got := decodeAttach(t, e.post(t, "local:claude:in-tmux"))
+		_, stream, unsubscribe, ok := e.h.manager.Subscribe(got.SessionID)
+		require.True(t, ok)
+		require.Empty(t, e.timers.live())
+
+		require.NoError(t, e.created[got.SessionID].Close()) // tmux exits on its own
+		for range stream {
+		}
+		unsubscribe() // the WebSocket's deferred unsubscribe finds nothing left
+		require.Len(t, e.timers.live(), 1, "the exited attach must not be held forever")
+
+		e.timers.fire()
+		_, ok = e.h.manager.Get(got.SessionID)
+		assert.False(t, ok)
+	})
+
 	t.Run("after it expires the task opens a new attach", func(t *testing.T) {
 		e := newAttachEnv(t, attachLocal())
 		first := decodeAttach(t, e.post(t, "local:claude:in-tmux"))
