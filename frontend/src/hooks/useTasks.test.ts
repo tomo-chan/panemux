@@ -556,6 +556,8 @@ describe('useTasks requestSummary', () => {
     expect(result.current.data!.tasks[0].summary).toBeUndefined()
   })
 
+  // efficacy:exempt unchanged by the Type in pane branch (issue #284) — the red-check maps the
+  // describe block appended below this one onto this test.
   it('refuses to summarize a task without a session id without asking the server', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(ok(payload))
     window.fetch = fetchMock

@@ -508,6 +508,8 @@ describe('findTaskPane', () => {
 })
 
 describe('taskOpenAction', () => {
+  // efficacy:exempt unchanged by the Type in pane branch (issue #284) — the red-check maps the
+  // describe block appended below this one onto this test.
   it('goes to an existing pane, opens a new one, or says why it cannot', () => {
     const pane = { paneId: 'p', paneTitle: 'p', workspaceId: 'w', workspaceTitle: 'W' }
     expect(taskOpenAction(task(), pane)).toEqual({ kind: 'goto', pane })
