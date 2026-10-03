@@ -4,7 +4,7 @@ import {
   applyTaskEventFrame,
   isWaitVisible,
   taskWaitNotification,
-  attentionAfterFrame,
+  attentionFromStore,
   createWaitIdRecord,
   overlayTaskEvents,
   taskWaitStarts,
@@ -113,80 +113,82 @@ describe('taskWaitStarts', () => {
   ])('finds %s', (_name, frame, ids) => {
     const result = applyTaskEventFrame(before, frame)
     if (!result.ok) throw new Error(result.reason)
-    expect(taskWaitStarts(before, result.frame).map((task) => task.id)).toEqual(ids)
+    expect(taskWaitStarts(before, result.frame, result.store).map((task) => task.id)).toEqual(ids)
+  })
+
+  it.each(['pending', 'connecting', 'error'])('finds no wait in a snapshot whose host is %s, nor when the host answers', (status) => {
+    const snap = snapshot(1, [waiting('a', 'w1-a', { host: 'gpu' }), waiting('b', 'w1-b')], [{ name: '', status: 'ok' }, { name: 'gpu', status }])
+    const first = applyTaskEventFrame(null, snap)
+    if (!first.ok) throw new Error(first.reason)
+    expect(taskWaitStarts(null, first.frame, first.store).map((task) => task.id)).toEqual(['b'])
+
+    const answered = applyTaskEventFrame(first.store, { type: 'host', epoch: EPOCH, seq: 2, op: 'changed', host: { name: 'gpu', status: 'ok' } })
+    if (!answered.ok) throw new Error(answered.reason)
+    expect(taskWaitStarts(first.store, answered.frame, answered.store)).toEqual([])
   })
 })
 
-describe('attentionAfterFrame', () => {
+describe('attentionFromStore', () => {
   const none = new Set<string>()
+  const hostFrame = (seq: number, status: string) => ({ type: 'host', epoch: EPOCH, seq, op: 'changed', host: { name: 'gpu', status } })
+  const gpu = (status: string) => [{ name: '', status: 'ok' }, { name: 'gpu', status }]
 
-  function run(frames: unknown[], cleared: ReadonlySet<string> = none) {
+  // The attention after each frame, as task ids.
+  function attentionOf(frames: unknown[], cleared: ReadonlySet<string> = none): string[][] {
     let store: TaskEventStore | null = null
-    let flags: ReadonlyMap<string, TaskEventTask> = new Map()
+    const out: string[][] = []
     for (const raw of frames) {
       const result = applyTaskEventFrame(store, raw)
       if (!result.ok) throw new Error(result.reason)
-      flags = attentionAfterFrame(flags, store, result.frame, result.store, cleared)
       store = result.store
+      out.push([...attentionFromStore(store, cleared).keys()].sort())
     }
-    return flags
+    return out
   }
 
-  it('flags a task when its wait starts', () => {
-    const flags = run([snapshot(1, [view('a')]), taskFrame(2, 'changed', waiting('a', 'w1-a'), 'busy')])
-    expect(flags.get('a')?.wait_id).toBe('w1-a')
+  it('flags each task in wait on a host that is ok, or that the stream does not list, with its latest view', () => {
+    const store = storeOf([snapshot(1, [waiting('a', 'w1-a'), waiting('far', 'w1-f', { host: 'unlisted' }), view('b'), view('i', { state: 'idle' }), view('r', { state: 'run' }), view('u', { state: 'unknown' })])])
+    const flags = attentionFromStore(store, none)
+    expect([...flags.keys()].sort()).toEqual(['a', 'far'])
+    expect(flags.get('a')).toBe(store.tasks.get('a'))
   })
 
-  it('flags a task already waiting in a snapshot, unless that wait was cleared in this tab', () => {
-    expect([...run([snapshot(1, [waiting('a', 'w1-a'), waiting('b', 'w1-b')])], new Set(['w1-b'])).keys()]).toEqual(['a'])
+  it.each(['pending', 'connecting', 'error'])('does not flag a wait while its host is %s', (status) => {
+    expect(attentionOf([snapshot(1, [waiting('a', 'w1-a', { host: 'gpu' })], gpu(status))])).toEqual([[]])
   })
 
-  it.each([
-    ['busy', view('a')],
-    ['idle', view('a', { state: 'idle' })],
-    ['run', view('a', { state: 'run' })],
-  ])('clears the flag when the wait ends in %s', (_name, task) => {
-    const flags = run([snapshot(1, [waiting('a', 'w1-a')]), taskFrame(2, 'changed', task, 'wait')])
-    expect(flags.size).toBe(0)
+  it('does not flag a wait this tab cleared', () => {
+    expect(attentionOf([snapshot(1, [waiting('a', 'w1-a'), waiting('b', 'w1-b')])], new Set(['w1-b']))).toEqual([['a']])
   })
 
-  it('clears the flag when the task is removed', () => {
-    const flags = run([snapshot(1, [waiting('a', 'w1-a')]), taskFrame(2, 'removed', waiting('a', 'w1-a'), 'wait')])
-    expect(flags.size).toBe(0)
+  it('flags a wait kept from before once its host answers with it still there, and never one that ended meanwhile', () => {
+    expect(attentionOf([
+      snapshot(1, [waiting('kept', 'w1-k', { host: 'gpu' }), waiting('ended', 'w1-e', { host: 'gpu' })], gpu('pending')),
+      // The host's status comes first, then the difference from what was kept.
+      hostFrame(2, 'ok'),
+      taskFrame(3, 'changed', view('ended', { host: 'gpu' }), 'wait'),
+    ]).map((ids) => ids.filter((id) => id === 'kept'))).toEqual([[], ['kept'], ['kept']])
   })
 
-  it('keeps the flag through unknown, following where the task now runs', () => {
-    const moved = view('a', { state: 'unknown', location: { kind: 'tmux', tmux_session: 'moved', attachable: true } })
-    const flags = run([snapshot(1, [waiting('a', 'w1-a')]), taskFrame(2, 'changed', moved, 'wait')])
-    expect(flags.get('a')?.location.tmux_session).toBe('moved')
-    expect(flags.get('a')?.wait_id).toBe('w1-a')
+  it('follows a wait through its start and end', () => {
+    expect(attentionOf([
+      snapshot(1, [view('a')]),
+      taskFrame(2, 'changed', waiting('a', 'w1-a'), 'busy'),
+      taskFrame(3, 'changed', waiting('a', 'w1-b'), 'wait'),
+      taskFrame(4, 'changed', view('a', { state: 'idle' }), 'wait'),
+      taskFrame(5, 'changed', waiting('a', 'w1-c'), 'idle'),
+      taskFrame(6, 'removed', waiting('a', 'w1-c'), 'wait'),
+    ])).toEqual([[], ['a'], ['a'], [], ['a'], []])
   })
 
-  it('keeps the flag while the task\'s host fails', () => {
-    const flags = run([
-      snapshot(1, [waiting('a', 'w1-a', { host: 'gpu' })], [{ name: 'gpu', status: 'ok' }]),
-      { type: 'host', epoch: EPOCH, seq: 2, op: 'changed', host: { name: 'gpu', status: 'error', error: 'x' } },
-    ])
-    expect(flags.has('a')).toBe(true)
-  })
-
-  it('moves the flag to the new wait when the wait_id changes', () => {
-    const flags = run([snapshot(1, [waiting('a', 'w1-a')]), taskFrame(2, 'changed', waiting('a', 'w1-b'), 'wait')])
-    expect(flags.get('a')?.wait_id).toBe('w1-b')
-  })
-
-  it('resyncs flags from a later snapshot', () => {
-    const flags = run([
-      snapshot(1, [waiting('ended', 'w1-1'), waiting('gone', 'w1-2'), waiting('unk', 'w1-3'), waiting('failing', 'w1-4', { host: 'gpu' }), waiting('same', 'w1-5')], [{ name: '', status: 'ok' }, { name: 'gpu', status: 'ok' }]),
-      snapshot(30, [
-        view('ended', { state: 'idle' }),
-        view('unk', { state: 'unknown' }),
-        waiting('same', 'w1-5'),
-      ], [{ name: '', status: 'ok' }, { name: 'gpu', status: 'pending' }]),
-    ])
-    // Ended in idle, and gone from a host that answered: cleared. Unknown, and
-    // gone from a host that has not answered yet: kept.
-    expect([...flags.keys()].sort()).toEqual(['failing', 'same', 'unk'])
+  it('drops the flag while the host fails or the task reads unknown, and gives it back when the wait is seen again', () => {
+    expect(attentionOf([
+      snapshot(1, [waiting('a', 'w1-a', { host: 'gpu' })], gpu('ok')),
+      hostFrame(2, 'error'),
+      hostFrame(3, 'ok'),
+      taskFrame(4, 'changed', view('a', { host: 'gpu', state: 'unknown' }), 'wait'),
+      taskFrame(5, 'changed', waiting('a', 'w1-a', { host: 'gpu' }), 'unknown'),
+    ])).toEqual([['a'], [], ['a'], [], ['a']])
   })
 })
 

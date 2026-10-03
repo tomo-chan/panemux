@@ -62,12 +62,24 @@ export function applyTaskEventFrame(store: TaskEventStore | null, raw: unknown):
   return { ok: true, store: next, frame }
 }
 
+// A host the stream does not list is taken as answered.
+function isHostOk(store: TaskEventStore, name: string): boolean {
+  return (store.hosts.get(name)?.status ?? 'ok') === 'ok'
+}
+
 /**
  * The waits a frame starts: every waiting task of a snapshot, a task added
  * already waiting, a task changed into wait, and a waiting task given a new
- * wait_id. `before` is what the tab held before the frame.
+ * wait_id — each only while its host is ok in `after`. A host that is not ok
+ * keeps its tasks as last observed, so a wait there may have ended already;
+ * it is not judged again when the host answers. `before` is what the tab
+ * held before the frame.
  */
-export function taskWaitStarts(before: TaskEventStore | null, frame: TaskEventFrame): TaskEventTask[] {
+export function taskWaitStarts(before: TaskEventStore | null, frame: TaskEventFrame, after: TaskEventStore): TaskEventTask[] {
+  return frameWaitStarts(before, frame).filter((task) => isHostOk(after, task.host))
+}
+
+function frameWaitStarts(before: TaskEventStore | null, frame: TaskEventFrame): TaskEventTask[] {
   if (frame.type === 'snapshot') return frame.tasks.filter((task) => task.state === 'wait')
   if (frame.type !== 'task' || frame.task.state !== 'wait') return []
   if (frame.op === 'added') return [frame.task]
@@ -77,57 +89,22 @@ export function taskWaitStarts(before: TaskEventStore | null, frame: TaskEventFr
   return []
 }
 
-// The states that end a wait. unknown is not one: a state file being
-// rewritten can read as unknown for one observation.
-const WAIT_ENDING_STATES = new Set(['busy', 'idle', 'run'])
-
 /**
- * The tasks whose wait gives their pane attention, by task id, each with the
- * latest view of the task (so a task that moved is matched where it is now).
- * A wait flags its task when it starts, unless this tab already cleared that
- * wait_id; the flag goes when the wait ends — a change to busy, idle or run,
- * or the task's removal — wherever it was answered. A change to unknown and
- * a failing host leave it.
+ * The tasks whose wait gives their pane attention, by task id: every task the
+ * store has in wait on a host that is ok, unless this tab cleared that
+ * wait_id. It is read from the store as it is, not kept from frame to frame,
+ * so a wait shows while it is known to be current and goes when it ends,
+ * when its host stops answering, or when it reads unknown — and shows again
+ * when it is seen again.
  */
-export function attentionAfterFrame(
-  flags: ReadonlyMap<string, TaskEventTask>,
-  before: TaskEventStore | null,
-  frame: TaskEventFrame,
-  after: TaskEventStore,
-  cleared: Pick<ReadonlySet<string>, 'has'>,
-): ReadonlyMap<string, TaskEventTask> {
-  const next = new Map(flags)
-
-  if (frame.type === 'snapshot') {
-    for (const [id, flagged] of flags) {
-      const now = after.tasks.get(id)
-      if (now) {
-        if (WAIT_ENDING_STATES.has(now.state)) next.delete(id)
-        else if (now.state === 'unknown') next.set(id, { ...now, wait_id: flagged.wait_id })
-        continue
-      }
-      // Gone from a host that has answered: the task ended. Gone from one
-      // that has not answered yet, or failed: not known to have ended.
-      if (after.hosts.get(flagged.host)?.status === 'ok' || !after.hosts.has(flagged.host)) next.delete(id)
-    }
-  } else if (frame.type === 'task') {
-    const { task } = frame
-    const flagged = flags.get(task.id)
-    if (flagged) {
-      if (frame.op === 'removed' || WAIT_ENDING_STATES.has(task.state)) next.delete(task.id)
-      else if (task.state === 'unknown') next.set(task.id, { ...task, wait_id: flagged.wait_id })
-      else next.set(task.id, task)
-    }
+export function attentionFromStore(store: TaskEventStore, cleared: Pick<ReadonlySet<string>, 'has'>): ReadonlyMap<string, TaskEventTask> {
+  const flags = new Map<string, TaskEventTask>()
+  for (const task of store.tasks.values()) {
+    if (task.state !== 'wait' || !isHostOk(store, task.host)) continue
+    if (task.wait_id && cleared.has(task.wait_id)) continue
+    flags.set(task.id, task)
   }
-
-  for (const task of taskWaitStarts(before, frame)) {
-    if (task.wait_id && cleared.has(task.wait_id)) {
-      next.delete(task.id)
-      continue
-    }
-    next.set(task.id, task)
-  }
-  return next
+  return flags
 }
 
 /** At most this many wait IDs are remembered per record. */

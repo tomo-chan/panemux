@@ -24,7 +24,7 @@ import type { MovePanePlacement } from './hooks/useLayout'
 import type { WorkspacePaneSummary, WorkspaceSummary } from './components/WorkspaceTabs'
 import type { Workspace, GitInfo, LayoutChild, LayoutNode, SessionInfo, SSHConfigHost, Task, TaskEventTask } from './schemas'
 import {
-  attentionAfterFrame,
+  attentionFromStore,
   createWaitIdRecord,
   isWaitVisible,
   overlayTaskEvents,
@@ -327,7 +327,7 @@ export const App: React.FC = () => {
       notifiedWaits.retainOnly(waitIds)
       clearedWaits.retainOnly(waitIds)
     }
-    const flags = attentionAfterFrame(attentionTasksRef.current, before, frame, after, clearedWaits)
+    const flags = attentionFromStore(after, clearedWaits)
     attentionTasksRef.current = flags
     setAttentionTasks(flags)
     taskStoreRef.current = after
@@ -337,7 +337,7 @@ export const App: React.FC = () => {
     // screen, so a wait starting then is not notified, and not recorded.
     const shownWorkspaces = screen.workspaces
     if (!shownWorkspaces) return
-    for (const task of taskWaitStarts(before, frame)) {
+    for (const task of taskWaitStarts(before, frame, after)) {
       const waitId = task.wait_id
       if (!waitId || notifiedWaits.has(waitId) || clearedWaits.has(waitId)) continue
       const pane = findTaskPane(task, shownWorkspaces)

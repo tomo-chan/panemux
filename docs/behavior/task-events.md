@@ -238,20 +238,22 @@ it from that store.
   Open ([Opening a task](tasks.md#opening-a-task)): a tmux task to the `tmux` / `ssh_tmux` pane on its
   session, a task outside tmux to the `local` / `ssh` pane its `pane_id` names. Every task in one tmux
   session matches the same pane. A codex daemon task, or one outside tmux in no pane, matches none.
-- A matched pane gets attention when its task starts a wait: an `added` frame in `wait`, a `changed`
-  frame into `wait`, or a `changed` frame with a new `wait_id`. A task already waiting in a snapshot
-  gives its pane attention too, so a reload shows it again — unless that `wait_id` was already cleared
-  in this tab.
+- A matched pane has attention while its task is in `wait` on a host that is `ok`, unless that
+  `wait_id` was cleared in this tab. Attention is read from the store as it stands after each frame,
+  not kept from one frame to the next, so a reload shows a wait that is still current again.
+- **A wait on a host that is not `ok` gives no attention.** Such a host's tasks are as last observed
+  ([Hosts](#hosts)), and while observation was stopped they are what was kept from before
+  ([Lifecycle](#lifecycle)): a snapshot after a reload has every host `pending`, and a wait in it
+  may already have been answered. It shows once the host answers with the task still in `wait`. The
+  host's `ok` frame comes before the difference it found, so a wait that had ended shows for no longer
+  than the frames between the two.
 - Attention clears as described in [Agent attention notifications](notifications.md#agent-attention-notifications):
-  the pane on focus or click, the workspace tab on selecting the workspace — and, in addition, when the
-  task's wait ends, wherever it was answered: a `changed` frame to `busy`, `idle` or `run`, or
-  `removed`. A pane that shows another task still waiting keeps its attention. A change to `unknown`
-  does not clear it, since a state file being rewritten can read as `unknown` for one observation, and
-  neither does a failing host, which publishes no task change ([Hosts](#hosts)).
-- A snapshot after a reconnect is compared with the attention the tab holds, since a wait that ended
-  while it was disconnected arrives as no frame of its own. A task the snapshot has in `busy`, `idle`
-  or `run`, or no longer has while its host is `ok`, has its attention cleared; one in `unknown`, or
-  missing while its host is `pending`, `connecting` or `error`, keeps it.
+  the pane on focus or click, the workspace tab on selecting the workspace — and, in addition, whenever
+  the task is no longer in `wait` on an `ok` host, wherever it was answered: a `changed` frame to
+  `busy`, `idle`, `run` or `unknown`, `removed`, or its host turning `pending`, `connecting` or
+  `error`. A pane that shows another task still waiting keeps its attention. Attention that went
+  with `unknown` or a failing host comes back when the task is seen in `wait` with that `wait_id`
+  again, unless it was cleared in this tab meanwhile.
 - The `wait_id`s whose attention a person cleared are kept in the tab's session storage, under the
   same rules as the notified ones below, which is what keeps a reload from showing them again.
 
@@ -261,6 +263,12 @@ it from that store.
   [Agent attention notifications](notifications.md#agent-attention-notifications). A wait is visible
   when the browser is active and either its pane is on screen, or the task dashboard is on screen and
   lists the task. A task that matches no pane is therefore visible only on the dashboard.
+- A wait is notified only when it starts while its host is `ok`: a frame that starts it, or a
+  snapshot that has it with its host `ok`. A wait that a snapshot has under a host that is not `ok` is
+  not notified, and is not judged again when that host answers — its host's `ok` frame comes before
+  the difference it found, so the tab cannot tell at that point whether the wait is still current. A
+  wait that began while observation was stopped is still notified: when the host answers, it is
+  published as a change from what was kept.
 - A wait that starts before the tab has loaded its workspaces is not notified, and not recorded: the
   tab cannot yet tell whether its pane is on screen. This is the moment after a page load or reload; a
   wait started then, or still unnotified in its first snapshot, is not notified by this tab, but its

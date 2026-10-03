@@ -165,14 +165,15 @@ panemux は、panemux のホストとすべての `ssh_connections` のホスト
 #### pane と workspace の attention
 
 - タスクは `location` と `host` から、タスクダッシュボードの Open と同じ規則で pane に対応付ける（[Opening a task](tasks.md#opening-a-task)）。tmux のタスクはそのセッションの `tmux`／`ssh_tmux` の pane に、tmux の外のタスクは `pane_id` が指す `local`／`ssh` の pane に。1 つの tmux セッションの中のタスクはすべて同じ pane になる。codex の daemon のタスクや、どの pane にもない tmux の外のタスクは、どの pane にも対応しない。
-- 対応した pane は、タスクが待ちを始めたときに attention を得る。`wait` の `added` フレーム、`wait` への `changed` フレーム、新しい `wait_id` の `changed` フレームのいずれか。スナップショットですでに待っているタスクもその pane に attention を与えるので、再読込でもう一度表示される。ただし、このタブですでに解除した `wait_id` は除く。
-- attention の解除は [Agent attention notifications](notifications.md#agent-attention-notifications) のとおり。pane は focus か click で、workspace の tab はその workspace の選択で解除する。加えて、タスクの待ちが終わったとき（`busy`・`idle`・`run` への `changed` フレーム、または `removed`）も、どこで答えたかにかかわらず解除する。ほかにまだ待っているタスクを表示している pane は attention を保つ。`unknown` への変化では解除しない（state file の書き換え中は、1 回の観測だけ `unknown` に読めることがあるため）。ホストが失敗している間も解除しない（タスクの変化が配信されないため）。
-- 再接続後のスナップショットは、タブが持つ attention と照らし合わせる。切断中に終わった待ちは、それ自身のフレームとしては届かないため。スナップショットで `busy`・`idle`・`run` のタスクと、ホストが `ok` なのにスナップショットにもういないタスクは attention を解除する。`unknown` のタスクと、ホストが `pending`・`connecting`・`error` でいないタスクは保つ。
+- 対応した pane は、そのタスクが `ok` のホストで `wait` にある間、attention を持つ。ただし、このタブで解除した `wait_id` は除く。attention はフレームごとに、その時点のストアから読み取る。フレームからフレームへ持ち越さないので、まだ続いている待ちは再読込でもう一度表示される。
+- **`ok` でないホストの待ちは attention を与えない。** そのホストのタスクは最後に観測したときのままで（「ホスト」の節）、観測が止まっていた間は、前に保持していたものになる（「ライフサイクル」の節）。再読込後のスナップショットでは全ホストが `pending` で、そこにある待ちはもう答え済みかもしれない。ホストが答えて、タスクがまだ `wait` にあれば表示する。ホストの `ok` のフレームは、そのホストで見つかった差分より前に届くので、終わっていた待ちが表示されるのは、その間のフレームの分だけ。
+- attention の解除は [Agent attention notifications](notifications.md#agent-attention-notifications) のとおり。pane は focus か click で、workspace の tab はその workspace の選択で解除する。加えて、タスクが `ok` のホストで `wait` でなくなったときも、どこで答えたかにかかわらず解除する。`busy`・`idle`・`run`・`unknown` への `changed` フレーム、`removed`、またはホストが `pending`・`connecting`・`error` になったとき。ほかにまだ待っているタスクを表示している pane は attention を保つ。`unknown` やホストの失敗で消えた attention は、タスクが同じ `wait_id` でまた `wait` に見えたときに戻る。その間にこのタブで解除していれば戻らない。
 - 人が attention を解除した `wait_id` は、下の通知済みの記録と同じ規則でタブの session storage に記録する。これにより、再読込で再び表示されない。
 
 #### ブラウザ通知
 
 - ユーザーがいま見ることのできない待ちは、[Agent attention notifications](notifications.md#agent-attention-notifications) の条件で `wait_id` ごとに 1 回通知する。待ちが見えているのは、ブラウザがアクティブで、その pane が画面にあるとき、またはタスクダッシュボードが画面にあってそのタスクを表示しているとき。したがって、どの pane にも対応しないタスクの待ちは、ダッシュボードでだけ見える。
+- 待ちを通知するのは、ホストが `ok` の間に始まったときだけ。待ちを始めるフレームか、ホストが `ok` でその待ちを持つスナップショット。ホストが `ok` でないスナップショットにある待ちは通知せず、そのホストが答えたときにも判断し直さない。ホストの `ok` のフレームはそのホストで見つかった差分より前に届くので、その時点では待ちがまだ続いているかをタブは判断できない。観測が止まっていた間に始まった待ちは通知される。ホストが答えたとき、保持していたものからの変化として配信されるため。
 - タブがワークスペースを読み込む前に始まった待ちは、通知も記録もしない。その pane が画面に出ているかをまだ判断できないため。ページの読み込み・再読込の直後がこれにあたり、そのとき始まった待ちや、最初のスナップショットにある未通知の待ちを、このタブは通知しない。pane と workspace の attention は付ける。
 - **タブはそれぞれ自分で判断して通知し、タブ同士で調停しない。** 各タブは自分の画面で見えているかを判断するので、panemux を開いた 2 つのタブが同じ待ちをどちらも通知することがある。
 - タブは、通知した `wait_id` をそのタブの session storage に記録する。これはそのタブの再読込では残り、ほかのタブとは共有しないので、再読込や再接続で同じ待ちを再び通知することはない。記録はスナップショットにもうない ID を捨て、新しいものから最大 500 件を保つ。session storage が使えないときは記録をページのメモリに持ち、再読込で再び通知することがある。新しい `wait_id`（同じタスクの後の待ち）はまた通知する。

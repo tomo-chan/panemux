@@ -735,6 +735,30 @@ describe('App workspace deletion', () => {
     expect(document.querySelector('[data-pane-id="main"]')).toHaveAttribute('data-attention', 'true')
   })
 
+  it('neither notifies nor marks a wait its host has not answered for, and marks the one still there once it does', () => {
+    vi.spyOn(document, 'hasFocus').mockReturnValue(false)
+    mockTerminalPane.mockImplementation(({ pane }: { pane: { id: string } }) => {
+      const ctx = useContext(LayoutActionsContext)
+      return <div data-pane-id={pane.id} data-attention={ctx?.hasPaneAttention(pane.id) ? 'true' : undefined} />
+    })
+
+    render(<App />)
+    // Observation resumed: the snapshot keeps what was last observed, with
+    // the host not answered yet.
+    emitTaskSnapshot([waitingTask('a', 'main', 'w1-stale'), waitingTask('b', 'side', 'w1-b')], [{ name: '', status: 'pending' }])
+    expect(document.querySelector('[data-pane-id="main"]')).not.toHaveAttribute('data-attention')
+    expect(document.querySelector('[data-pane-id="side"]')).not.toHaveAttribute('data-attention')
+
+    // The host answers: its status first, then that the stale wait had ended.
+    taskFrameSeq += 1
+    emitTaskFrame({ type: 'host', epoch: 'e0', seq: taskFrameSeq, op: 'changed', host: { name: '', status: 'ok' } })
+    emitTaskChange('changed', paneTask('a', 'main'), 'wait')
+
+    expect(window.Notification).not.toHaveBeenCalled()
+    expect(document.querySelector('[data-pane-id="main"]')).not.toHaveAttribute('data-attention')
+    expect(document.querySelector('[data-pane-id="side"]')).toHaveAttribute('data-attention', 'true')
+  })
+
   it('resolves a notification click against where the task is shown at the click', () => {
     vi.spyOn(window, 'focus').mockImplementation(() => {})
     vi.spyOn(document, 'hasFocus').mockReturnValue(false)
@@ -772,7 +796,7 @@ describe('App workspace deletion', () => {
     expect(screen.getByRole('tab', { name: /^Dev\b/ })).toHaveAttribute('data-attention', 'true')
   })
 
-  it('clears the attention when the wait ends wherever it was answered, but not on unknown', () => {
+  it('clears the attention when the wait ends wherever it was answered, and while it reads unknown', () => {
     currentWorkspaces = { ...workspaces, active: 'ops' }
     render(<App />)
     emitTaskSnapshot([waitingTask('a', 'main', 'w1-a')])
@@ -780,9 +804,11 @@ describe('App workspace deletion', () => {
     expect(dev()).toHaveAttribute('data-attention', 'true')
 
     emitTaskChange('changed', paneTask('a', 'main', 'unknown'), 'wait')
+    expect(dev()).not.toHaveAttribute('data-attention')
+    emitTaskChange('changed', waitingTask('a', 'main', 'w1-a'), 'unknown')
     expect(dev()).toHaveAttribute('data-attention', 'true')
 
-    emitTaskChange('changed', paneTask('a', 'main', 'busy'), 'unknown')
+    emitTaskChange('changed', paneTask('a', 'main', 'busy'), 'wait')
     expect(dev()).not.toHaveAttribute('data-attention')
 
     emitTaskChange('changed', waitingTask('a', 'main', 'w1-b'), 'busy')
