@@ -165,7 +165,7 @@ panemux は、panemux のホストとすべての `ssh_connections` のホスト
 
 - タスクは `location` と `host` から、タスクダッシュボードの Open と同じ規則で pane に対応付ける（[Opening a task](tasks.md#opening-a-task)）。tmux のタスクはそのセッションの `tmux`／`ssh_tmux` の pane に、tmux の外のタスクは `pane_id` が指す `local`／`ssh` の pane に。1 つの tmux セッションの中のタスクはすべて同じ pane になる。codex の daemon のタスクや、どの pane にもない tmux の外のタスクは、どの pane にも対応しない。
 - 対応した pane は、タスクが待ちを始めたときに attention を得る。`wait` の `added` フレーム、`wait` への `changed` フレーム、新しい `wait_id` の `changed` フレームのいずれか。スナップショットですでに待っているタスクもその pane に attention を与えるので、再読込でもう一度表示される。ただし、このタブですでに解除した `wait_id` は除く。
-- attention の解除は [Agent attention notifications](notifications.md#agent-attention-notifications) のとおり。pane は focus か click で、workspace の tab はその workspace の選択で解除する。加えて、タスクが待ちを抜けたとき（`wait` から出る `changed` フレーム、または `removed`）も、どこで答えたかにかかわらず解除する。
+- attention の解除は [Agent attention notifications](notifications.md#agent-attention-notifications) のとおり。pane は focus か click で、workspace の tab はその workspace の選択で解除する。加えて、タスクの待ちが終わったとき（`busy`・`idle`・`run` への `changed` フレーム、または `removed`）も、どこで答えたかにかかわらず解除する。ほかにまだ待っているタスクを表示している pane は attention を保つ。`unknown` への変化では解除しない（state file の書き換え中は、1 回の観測だけ `unknown` に読めることがあるため）。ホストが失敗している間も解除しない（タスクの変化が配信されないため）。
 
 #### ブラウザ通知
 

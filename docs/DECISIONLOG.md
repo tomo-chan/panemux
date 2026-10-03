@@ -128,8 +128,11 @@ the pane/workspace attention and the browser notifications. The design is in
   background tab could claim a wait the focused tab is showing) nor electing one tab with the Web Locks
   API (the elected tab would judge visibility from its own state only). Recording on the server would
   make the server decide how an event is handled.
-- **Attention also clears when the task leaves the wait**, besides focus, click and selecting the
-  workspace, so a wait answered elsewhere does not keep flashing.
+- **Attention also clears when the task's wait ends**, besides focus, click and selecting the
+  workspace, so a wait answered elsewhere — from the dashboard's Type in pane popup, another terminal,
+  or by the agent exiting — does not keep flashing. Terminal-output detection could not see a prompt
+  end, so it had no such rule. A change to `unknown` does not clear it: a state file read mid-write can
+  look `unknown` for one observation. Closing a browser notification already shown was not added.
 - **Observation stops 30 seconds after the last subscriber**, so a reload does not restart it, and keeps
   its model so an unsigned wait keeps its ID across the pause.
 - **The dashboard takes states from the stream but still collects every 10 seconds** for what the

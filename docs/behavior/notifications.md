@@ -14,9 +14,9 @@ noticed as well, and a wait an agent does not record — codex asking to approve
 When a task starts a wait ([Pane and workspace attention](task-events.md#pane-and-workspace-attention)):
 
 - the frame of the pane the task matches flashes until the pane receives focus or a click, or the
-  task leaves the wait
+  task's wait ends (it goes to `busy`, `idle` or `run`, or stops running)
 - the containing workspace tab flashes when that workspace is not active, and clears when selected
-  or when the task leaves the wait
+  or when the task's wait ends
 - the browser Notification API is used when permission has already been granted and the wait is not
   currently visible to the user: neither its pane nor, on the task dashboard, its task is on screen
 - clicking a browser notification brings the app forward and goes to the task: its pane, focused and

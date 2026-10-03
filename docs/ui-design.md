@@ -308,8 +308,8 @@ Attention marks an agent that is waiting for the operator, never terminal activi
 from the [task event stream](behavior/task-events.md#pane-and-workspace-attention): a pane flashes when
 a task it shows starts a wait, and a workspace tab when such a pane is in an inactive workspace. The
 operator clears a pane's attention by focusing or clicking it and a tab's by selecting its workspace;
-both also clear by themselves once the task leaves the wait, so a wait answered in another tab or
-terminal leaves nothing flashing. A browser notification leads to the same place the flash does: its
+both also clear by themselves once the task's wait ends, so a wait answered from the task dashboard's
+popup or another terminal leaves nothing flashing. A browser notification leads to the same place the flash does: its
 pane, focused and briefly outlined, or — for a task no pane shows — the task selected and highlighted
 on the task dashboard.
 

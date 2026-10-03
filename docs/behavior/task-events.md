@@ -236,7 +236,10 @@ it from that store.
   in this tab.
 - Attention clears as described in [Agent attention notifications](notifications.md#agent-attention-notifications):
   the pane on focus or click, the workspace tab on selecting the workspace — and, in addition, when the
-  task leaves the wait (a `changed` frame out of `wait`, or `removed`), wherever it was answered.
+  task's wait ends, wherever it was answered: a `changed` frame to `busy`, `idle` or `run`, or
+  `removed`. A pane that shows another task still waiting keeps its attention. A change to `unknown`
+  does not clear it, since a state file being rewritten can read as `unknown` for one observation, and
+  neither does a failing host, which publishes no task change ([Hosts](#hosts)).
 
 #### Browser notifications
 
