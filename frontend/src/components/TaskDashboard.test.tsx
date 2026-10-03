@@ -991,6 +991,7 @@ describe('TaskDashboard summaries', () => {
     expect(workSection()).toHaveTextContent('Only a claude task with a session ID can be summarized.')
   })
 
+  // efficacy:exempt unchanged by this branch; the tests appended after it fall inside its line range
   it('says a working task is summarized once it stops working', () => {
     const data = { ...summarized, tasks: [task({ id: 'busy-new', state: 'busy', session_id: 'abababab-0000' })] }
     renderDashboard(tasksState({ data }))
