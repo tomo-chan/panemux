@@ -73,6 +73,77 @@ prompt; a request that never starts a subprocess does not create a turn.
 
 ## Task dashboard
 
+### Input-wait notifications come from server-published task events (2026-10-02, issue #277)
+
+Issue [#277](https://github.com/tomo-chan/panemux/issues/277) feeds the task dashboard's `wait` into
+the pane/workspace attention and the browser notifications. The design is in
+[Task events](behavior/task-events.md); the architecture review is on the issue
+([design](https://github.com/tomo-chan/panemux/issues/277#issuecomment-5952558159)). Decided:
+
+- **The server publishes every task state change; receivers decide what to do with it.** The first
+  attempt (PR #291, closed) had each tab poll `GET /api/tasks/attention` every 15 seconds and join the
+  result with the frontend's terminal-output detector inside a time window; every choice of window
+  traded missed notifications for duplicates, and review went back and forth on it. Two other designs
+  were investigated and rejected: running the same regular expressions on the backend's PTY stream
+  (it would still need a rule for joining a terminal match with a task's wait, and still notices only
+  what an attached client's screen shows), and having browsers report their detections to the server
+  (no detection without an open tab, and the browser's claim becomes trusted input).
+- **Terminal-output detection is removed, not kept as a fallback.** A state no agent records — codex
+  waiting for command approval — is therefore not notified until it can be observed as state
+  ([issue #294](https://github.com/tomo-chan/panemux/issues/294)); a pattern on output is not added
+  for it.
+- **Matching a task to a pane stays in the browser** (`utils/taskBoard`), which already does it for the
+  dashboard's Open from the same workspaces it renders. The server sends the location only.
+- **`GET /api/tasks/attention` (issue #278) is removed.** Nothing but the closed PR #291 used it, and
+  keeping it beside the stream would leave two answers to "what is running": the stream's last
+  observation and a fresh collection. The lightweight collection and the wait signature it introduced
+  are what the stream observes with.
+- **`GET /ws/tasks/events`, not `/ws/tasks`.** Pane IDs may be any string but `_system`, and
+  chi prefers a static route, so a one-segment path would shadow the terminal socket of a pane named
+  `tasks` (as `/ws/board-command` does for a pane of that name). It is unauthenticated like the other
+  task routes and refuses cross-site requests like them, in addition to the upgrade's Origin check.
+- **Unsigned waits get a `wait_id` from the stream position at which they were first observed.** Not
+  giving them one would leave a receiver unable to tell a reload from a new wait, so they could flash
+  but never notify; deriving one from `status_since` is impossible because the clock conversion moves
+  it. The cost is one possible repeat notification after a server restart.
+- **A failing host publishes only its status.** Removing its tasks would make attention flicker on
+  every transient failure and come back on recovery; keeping them is not a guess, because the host's
+  status says how old they are.
+- **Each host is observed on its own 5-second cycle.** One round across all hosts (`CollectAttention`)
+  would let a host slow to answer delay every other host's notifications by up to the 15-second
+  per-host timeout. 5 seconds rather than the dashboard's 10 keeps the delay to a notification short;
+  it is not configurable until a measurement asks for it.
+- **No keepalive and no slow-subscriber protocol.** The publisher and the browser normally share one
+  machine over loopback: a closed tab or a crashed browser closes its socket at once, and a sleeping
+  machine sleeps with the server, so no changes pile up. Pings, a write deadline and a dedicated close
+  code were dropped as unneeded. What remains is ordinary fan-out hygiene: publishing never waits for
+  one subscriber, and a connection that cannot take its frames is closed rather than given a stream
+  with a hole in it, since the receiver already recovers from any close with a fresh snapshot.
+- **Each tab notifies on its own; tabs do not coordinate.** A tab records the waits it notified in its
+  session storage, which survives its own reloads, and the notification's `tag` is the `wait_id`.
+  Several browser tabs are not a requirement: one page shows every workspace, so there is no use for
+  showing the same pane in two tabs, and the requirement is no duplicate within a tab across reloads
+  and reconnects. Two tabs opened anyway may both notify one wait. Coordination was therefore not
+  built: neither a claim in storage shared by the tabs (racy unless taken under a Web Lock, and a
+  background tab could claim a wait the focused tab is showing) nor electing one tab with the Web Locks
+  API (the elected tab would judge visibility from its own state only). Recording on the server would
+  make the server decide how an event is handled.
+- **Attention also clears when the task's wait ends**, besides focus, click and selecting the
+  workspace, so a wait answered elsewhere — from the dashboard's Type in pane popup, another terminal,
+  or by the agent exiting — does not keep flashing. Terminal-output detection could not see a prompt
+  end, so it had no such rule. A change to `unknown` does not clear it: a state file read mid-write can
+  look `unknown` for one observation. Closing a browser notification already shown was not added.
+- **Observation stops as soon as the last subscriber leaves, and keeps its model.** A grace period (30
+  seconds was considered) would only spare a reload one extra observation per host and a moment of
+  `pending`; it was not worth a timer. Keeping the model is what matters: discarding it would give an
+  unsigned wait a new ID, and so a new notification, on every reload.
+- **The dashboard takes states from the stream but still collects every 10 seconds** for what the
+  stream does not carry: stopped sessions, git and pull requests, records and summaries. Without the
+  overlay a task reached from a notification could show `busy` for up to 10 seconds. Replacing the poll
+  with a collection the stream triggers was not taken up: it is an optimization #277 does not ask for,
+  the poll runs only while the dashboard is on screen, and pull-request changes would still need a
+  slower poll of their own. It is reconsidered only if the poll's load becomes a problem.
+
 ### A lightweight collection and a stable wait signature for input-wait notifications (2026-10-02, issue #278)
 
 Issue [#277](https://github.com/tomo-chan/panemux/issues/277) notifies the operator when a task starts
@@ -84,6 +155,8 @@ waiting for input; #278 is its backend. Decided:
   script's live part (`collectLiveScript`) as a constant, so it cannot drift from how the dashboard
   decides a running task's state, and skips only the two searches for stopped sessions. A query
   parameter on `GET /api/tasks` was rejected: one handler would carry two response shapes.
+  *Superseded in part:* the route was removed when the task event stream took its place (issue
+  #277, above); the lightweight collection it introduced remains.
 - **The signature comes from the wait start the agent recorded, on the host's clock.** Using the
   converted `status_since` would change it whenever the clock conversion moved by a millisecond
   between collections, and a rollout's mtime moves on every write while codex waits. Claude's
