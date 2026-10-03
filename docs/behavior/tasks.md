@@ -77,8 +77,8 @@ screen and the page is visible, and on the Refresh button — or while the
 [task event stream](task-events.md) has a subscriber, which observes the running tasks on every host
 every 5 seconds. Nothing collects when neither asks.
 
-The dashboard shows a running task's `state`, `waiting_for` and wait from the task event stream
-whenever the stream has that task, so a change appears when it is published rather than at the
+The dashboard shows a running task's `state`, `waiting_for`, wait and `status_since` from the task
+event stream whenever the stream is live and has that task, so a change appears when it is published rather than at the
 dashboard's next collection ([Task dashboard](task-events.md#task-dashboard)).
 
 Each collection runs one fixed script per host (`sh -s`, with the script on stdin; see

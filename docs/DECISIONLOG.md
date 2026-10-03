@@ -153,6 +153,18 @@ the pane/workspace attention and the browser notifications. The design is in
   with a collection the stream triggers was not taken up: it is an optimization #277 does not ask for,
   the poll runs only while the dashboard is on screen, and pull-request changes would still need a
   slower poll of their own. It is reconsidered only if the poll's load becomes a problem.
+- **Three receiver details were settled while implementing it** (2026-10-03, issue #279). The
+  dashboard takes `status_since` from the stream along with the state, since a `wait` shown with the
+  time since the collection's earlier `busy` misreads how long the task has been waiting. A snapshot
+  after a reconnect clears the attention of a wait that ended while the tab was disconnected — a task
+  now `busy`, `idle` or `run`, or gone from a host that answered — rather than leaving it until someone
+  focuses the pane; `unknown` and a host not answering keep it, for the reasons above. A wait is
+  recorded as notified only once a notification is shown: recording it while permission was not
+  granted would keep it from ever being notified after permission is given. The waits whose
+  attention a person cleared are recorded in session storage like the notified ones, so a reload does
+  not bring that attention back. PR #291's time window (`paneWaits`, `holdMs`) and its 15-second poll
+  were not carried over; its notification click, the dashboard's highlighted task and the minimal
+  notification text were.
 
 ### A lightweight collection and a stable wait signature for input-wait notifications (2026-10-02, issue #278)
 

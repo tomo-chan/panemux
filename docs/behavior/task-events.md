@@ -248,6 +248,12 @@ it from that store.
   `removed`. A pane that shows another task still waiting keeps its attention. A change to `unknown`
   does not clear it, since a state file being rewritten can read as `unknown` for one observation, and
   neither does a failing host, which publishes no task change ([Hosts](#hosts)).
+- A snapshot after a reconnect is compared with the attention the tab holds, since a wait that ended
+  while it was disconnected arrives as no frame of its own. A task the snapshot has in `busy`, `idle`
+  or `run`, or no longer has while its host is `ok`, has its attention cleared; one in `unknown`, or
+  missing while its host is `pending`, `connecting` or `error`, keeps it.
+- The `wait_id`s whose attention a person cleared are kept in the tab's session storage, under the
+  same rules as the notified ones below, which is what keeps a reload from showing them again.
 
 #### Browser notifications
 
@@ -262,6 +268,9 @@ it from that store.
   again. The record drops the IDs no longer in a snapshot and keeps at most the 500 newest. Without
   session storage the record lives in the page's memory and a reload may notify again. A new
   `wait_id` — a later wait of the same task — is notified again.
+- A wait is recorded only once its notification is shown. While permission is not granted nothing is
+  shown and nothing is recorded, so a wait still in a snapshot after permission is granted — on a
+  reload or a reconnect — is notified then.
 - The notification's `tag` is the `wait_id`, so a notification of the same wait that is still shown is
   replaced rather than stacked.
 - The notification names the agent, the host and the task's directory name only: not what the task
@@ -275,8 +284,9 @@ it from that store.
 
 The dashboard lists tasks from [`GET /api/tasks`](tasks.md#get-apitasks), which adds what the stream
 does not carry: stopped sessions, git and pull request details, records and summaries. A task's
-`state`, `waiting_for` and wait come from the stream whenever the stream has that task, so a change
-shows as soon as it is published rather than at the dashboard's next collection.
+`state`, `waiting_for`, wait and `status_since` come from the stream whenever the stream is live and
+has that task, so a change, and the time spent in the new state, shows as soon as it is published
+rather than at the dashboard's next collection.
 
 ## Related Documents
 
