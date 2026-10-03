@@ -261,6 +261,10 @@ it from that store.
   [Agent attention notifications](notifications.md#agent-attention-notifications). A wait is visible
   when the browser is active and either its pane is on screen, or the task dashboard is on screen and
   lists the task. A task that matches no pane is therefore visible only on the dashboard.
+- A wait that starts before the tab has loaded its workspaces is not notified, and not recorded: the
+  tab cannot yet tell whether its pane is on screen. This is the moment after a page load or reload; a
+  wait started then, or still unnotified in its first snapshot, is not notified by this tab, but its
+  pane and workspace keep their attention.
 - **Each tab decides and notifies on its own; tabs do not coordinate.** Every tab judges visibility
   from its own screen, so two tabs showing panemux can both notify the same wait.
 - A tab records the `wait_id`s it has notified in its session storage, which survives a reload of
@@ -275,7 +279,8 @@ it from that store.
   replaced rather than stacked.
 - The notification names the agent, the host and the task's directory name only: not what the task
   waits for (`waiting_for`), and no conversation text or prompt.
-- Clicking it brings the app forward. With a matched pane, the pane's workspace is selected, a
+- Clicking it brings the app forward. The task is matched where the stream last placed it, at the
+  click rather than when it was notified. With a matched pane, the pane's workspace is selected, a
   maximized pane hiding it is restored, and it is focused, briefly outlined and its attention cleared.
   Without one, the task dashboard opens with any filter hiding the task cleared, and the task is
   selected and highlighted.
@@ -286,7 +291,8 @@ The dashboard lists tasks from [`GET /api/tasks`](tasks.md#get-apitasks), which 
 does not carry: stopped sessions, git and pull request details, records and summaries. A task's
 `state`, `waiting_for`, wait and `status_since` come from the stream whenever the stream is live and
 has that task, so a change, and the time spent in the new state, shows as soon as it is published
-rather than at the dashboard's next collection.
+rather than at the dashboard's next collection. A frame that omits `status_since` means the time is
+not known, so the dashboard shows none rather than the collected time of an earlier state.
 
 ## Related Documents
 

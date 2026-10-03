@@ -279,6 +279,12 @@ describe('overlayTaskEvents', () => {
     expect(task.wait_signature).toBeUndefined()
   })
 
+  it('drops the collected status_since when the stream omits it', () => {
+    const [task] = overlayTaskEvents([collected], new Map([['a', view('a', { state: 'unknown' })]]))
+    expect(task.state).toBe('unknown')
+    expect(task.status_since).toBeUndefined()
+  })
+
   it('leaves a task the stream does not have as collected', () => {
     const stopped: Task = { ...collected, id: 's', state: 'stop' }
     const tasks = [collected, stopped]

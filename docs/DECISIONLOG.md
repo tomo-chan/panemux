@@ -165,6 +165,14 @@ the pane/workspace attention and the browser notifications. The design is in
   not bring that attention back. PR #291's time window (`paneWaits`, `holdMs`) and its 15-second poll
   were not carried over; its notification click, the dashboard's highlighted task and the minimal
   notification text were.
+- **Three review findings on the receiver were settled** (2026-10-03, PR #300). A wait that starts
+  before the tab has its workspaces is not notified rather than held until they load: holding it
+  would need a rule for a load that fails (the tab then shows only an error). The cost is that a wait
+  starting during a page load, or still unnotified in the first snapshot, is not notified by that tab;
+  its attention is still shown. (PR #291 was reviewed for the same race.) A notification's click resolves the task against the latest store rather than the one
+  the notification was created from, so a task that moved since lands on its current pane. A frame
+  without `status_since` clears the collected one: the stream is authoritative for the state, and the
+  collected time belongs to an earlier state.
 
 ### A lightweight collection and a stable wait signature for input-wait notifications (2026-10-02, issue #278)
 

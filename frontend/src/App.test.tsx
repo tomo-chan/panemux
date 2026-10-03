@@ -34,7 +34,7 @@ const workspaces: WorkspacesResponse = {
   ],
 }
 
-let currentWorkspaces = workspaces
+let currentWorkspaces: WorkspacesResponse | null = workspaces
 let currentDisplayConfig: { show_header: boolean; show_status_bar: boolean; task_dashboard_shortcut?: string } = {
   show_header: false,
   show_status_bar: false,
@@ -62,7 +62,9 @@ const mockUseGitInfoSnapshotMap = vi.hoisted(() => vi.fn())
 
 vi.mock('./hooks/useLayout', () => ({
   useLayout: () => ({
-    layout: currentWorkspaces.items.find((workspace) => workspace.id === currentWorkspaces.active)?.layout ?? currentWorkspaces.items[0].layout,
+    layout: currentWorkspaces
+      ? currentWorkspaces.items.find((workspace) => workspace.id === currentWorkspaces?.active)?.layout ?? currentWorkspaces.items[0].layout
+      : null,
     workspaces: currentWorkspaces,
     displayConfig: currentDisplayConfig,
     error: null,
@@ -714,6 +716,38 @@ describe('App workspace deletion', () => {
     expect(window.Notification).not.toHaveBeenCalled()
     expect(document.querySelector('[data-pane-id="main"]')).toHaveAttribute('data-attention', 'true')
     expect(screen.getByRole('tab', { name: /^Dev\b/ })).not.toHaveAttribute('data-attention')
+  })
+
+  it('does not notify a wait that starts before the workspaces are loaded, even once they are', () => {
+    vi.spyOn(document, 'hasFocus').mockReturnValue(true)
+    mockTerminalPane.mockImplementation(({ pane }: { pane: { id: string } }) => {
+      const ctx = useContext(LayoutActionsContext)
+      return <div data-pane-id={pane.id} data-attention={ctx?.hasPaneAttention(pane.id) ? 'true' : undefined} />
+    })
+    currentWorkspaces = null
+
+    const { rerender } = render(<App />)
+    emitTaskSnapshot([waitingTask('a', 'main', 'w1-a')])
+    currentWorkspaces = workspaces
+    rerender(<App />)
+
+    expect(window.Notification).not.toHaveBeenCalled()
+    expect(document.querySelector('[data-pane-id="main"]')).toHaveAttribute('data-attention', 'true')
+  })
+
+  it('resolves a notification click against where the task is shown at the click', () => {
+    vi.spyOn(window, 'focus').mockImplementation(() => {})
+    vi.spyOn(document, 'hasFocus').mockReturnValue(false)
+
+    render(<App />)
+    emitTaskSnapshot([waitingTask('a', 'nowhere', 'w1-a')])
+    expect(window.Notification).toHaveBeenCalledTimes(1)
+    emitTaskChange('changed', waitingTask('a', 'side', 'w1-a'), 'wait')
+
+    act(() => notificationInstance?.onclick?.())
+
+    expect(mockSetActiveWorkspace).toHaveBeenCalledWith('dev')
+    expect(screen.queryByTestId('task-card-a')).not.toBeInTheDocument()
   })
 
   it('notifies a wait whose pane is on screen when the browser is not active', () => {

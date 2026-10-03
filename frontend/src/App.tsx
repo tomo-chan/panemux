@@ -312,8 +312,11 @@ export const App: React.FC = () => {
   // What the screen shows, read when a frame arrives rather than captured, so
   // the stream is not reopened as it changes.
   const dashboardTaskIdsRef = useRef<ReadonlySet<string>>(new Set())
-  const screenRef = useRef({ layer, workspaces: workspaces?.items ?? [], activeWorkspaceId: workspaces?.active ?? null, maximizedPaneId, revealPane, revealTask })
-  screenRef.current = { layer, workspaces: workspaces?.items ?? [], activeWorkspaceId: workspaces?.active ?? null, maximizedPaneId, revealPane, revealTask }
+  // workspaces is null until GET /api/workspaces answers.
+  const screenRef = useRef({ layer, workspaces: workspaces?.items ?? null, activeWorkspaceId: workspaces?.active ?? null, maximizedPaneId, revealPane, revealTask })
+  screenRef.current = { layer, workspaces: workspaces?.items ?? null, activeWorkspaceId: workspaces?.active ?? null, maximizedPaneId, revealPane, revealTask }
+  // The latest applied store, so a notification's click finds the task where it is then.
+  const taskStoreRef = useRef<TaskEventChange['after'] | null>(null)
 
   // The task event stream (docs/behavior/task-events.md#receiver): every
   // applied frame updates the attention and notifies the waits it starts that
@@ -327,12 +330,17 @@ export const App: React.FC = () => {
     const flags = attentionAfterFrame(attentionTasksRef.current, before, frame, after, clearedWaits)
     attentionTasksRef.current = flags
     setAttentionTasks(flags)
+    taskStoreRef.current = after
 
     const screen = screenRef.current
+    // Until the workspaces are loaded nothing can tell whether a wait is on
+    // screen, so a wait starting then is not notified, and not recorded.
+    const shownWorkspaces = screen.workspaces
+    if (!shownWorkspaces) return
     for (const task of taskWaitStarts(before, frame)) {
       const waitId = task.wait_id
       if (!waitId || notifiedWaits.has(waitId) || clearedWaits.has(waitId)) continue
-      const pane = findTaskPane(task, screen.workspaces)
+      const pane = findTaskPane(task, shownWorkspaces)
       const visible = isWaitVisible(task.id, pane, {
         browserActive: document.visibilityState === 'visible' && document.hasFocus(),
         layer: screen.layer,
@@ -344,7 +352,7 @@ export const App: React.FC = () => {
       const { title, body } = taskWaitNotification(task)
       const shown = showBrowserNotification(title, body, waitId, () => {
         // Where the task is shown now, not where it was when notified.
-        const current = findTaskPane(after.tasks.get(task.id) ?? task, screenRef.current.workspaces)
+        const current = findTaskPane(taskStoreRef.current?.tasks.get(task.id) ?? task, screenRef.current.workspaces ?? [])
         if (current) screenRef.current.revealPane(current.workspaceId, current.paneId)
         else screenRef.current.revealTask(task.id)
       })

@@ -180,8 +180,8 @@ export function createWaitIdRecord(key: string, storage: () => Storage = () => w
 
 /**
  * The dashboard's collected tasks with the state, waiting_for, wait and
- * status_since of every task the stream has, so a change shows as soon as it
- * is published. Everything else stays as collected.
+ * status_since of every task the stream has — an omitted one included — so a
+ * change shows as soon as it is published. Everything else stays as collected.
  */
 export function overlayTaskEvents(tasks: Task[], live: ReadonlyMap<string, TaskEventTask>): Task[] {
   if (live.size === 0) return tasks
@@ -194,7 +194,8 @@ export function overlayTaskEvents(tasks: Task[], live: ReadonlyMap<string, TaskE
       waiting_for: event.waiting_for,
       // A wait panemux only observed (e1-…) has no signature.
       wait_signature: event.wait_id?.startsWith('w1-') ? event.wait_id : undefined,
-      status_since: event.status_since ?? task.status_since,
+      // An omitted status_since is the stream's own: the time is not known.
+      status_since: event.status_since,
     }
   })
 }
