@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -193,13 +194,21 @@ func TestTaskEvents_ClosedSubscriptionClosesTheConnection(t *testing.T) {
 
 // churningTaskSource answers every observation with a task whose large
 // field changes each time, so each observation is one large frame.
+// With next set, each observation first waits for a value from it.
 type churningTaskSource struct {
+	next         chan struct{}
 	observations atomic.Int32
 }
 
 func (s *churningTaskSource) Hosts() []string { return nil }
 
-func (s *churningTaskSource) CollectHostLive(context.Context, string) (tasks.HostResult, []tasks.Task) {
+func (s *churningTaskSource) CollectHostLive(ctx context.Context, _ string) (tasks.HostResult, []tasks.Task) {
+	if s.next != nil {
+		select {
+		case <-s.next:
+		case <-ctx.Done():
+		}
+	}
 	n := s.observations.Add(1)
 	return tasks.HostResult{Status: tasks.HostOK}, []tasks.Task{{
 		ID: "local:claude:local-sess", Agent: "claude", SessionID: "local-sess",
@@ -208,32 +217,78 @@ func (s *churningTaskSource) CollectHostLive(context.Context, string) (tasks.Hos
 	}}
 }
 
+// handlerGoroutines counts the goroutines running a task event handler: two
+// per open connection, the handler and its reader.
+func handlerGoroutines() int {
+	buf := make([]byte, 1<<22)
+	buf = buf[:runtime.Stack(buf, true)]
+	n := 0
+	for _, g := range strings.Split(string(buf), "\n\n") {
+		if strings.Contains(g, "(*TaskEventsHandler).ServeHTTP") {
+			n++
+		}
+	}
+	return n
+}
+
 // A client that completes the handshake and then never reads stalls only
-// its own connection: the publisher drops its subscription instead of
-// waiting for it, and every other subscriber keeps receiving (decision G
-// in docs/behavior/task-events.md).
+// its own connection: once its subscription's buffer fills the publisher
+// drops it instead of waiting, every other subscriber keeps receiving and
+// observation goes on, and closing the stalled connection leaves none of
+// its goroutines behind (decision G in docs/DECISIONLOG.md).
 func TestTaskEvents_ClientThatStopsReadingStallsOnlyItsOwnConnection(t *testing.T) {
-	src := &churningTaskSource{}
-	publisher := taskevents.New(src, taskevents.Options{Interval: time.Millisecond, Buffer: 4096})
+	// The test steps observation one at a time, so the reader never falls
+	// behind however slowly it runs.
+	src := &churningTaskSource{next: make(chan struct{})}
+	publisher := taskevents.New(src, taskevents.Options{Interval: time.Millisecond, Buffer: 4})
 	ts := httptest.NewServer(NewTaskEventsHandler(publisher, refuseMarked))
 	t.Cleanup(func() {
 		ts.Close()
 		publisher.Close()
 	})
-	stalled, _, err := dialTaskEvents(t, ts, nil)
+	// drained never reads until the end; closed never reads at all.
+	drained, _, err := dialTaskEvents(t, ts, nil)
 	require.NoError(t, err)
-	_ = stalled // never read
+	closed, _, err := dialTaskEvents(t, ts, nil)
+	require.NoError(t, err)
 	reader, _, err := dialTaskEvents(t, ts, nil)
 	require.NoError(t, err)
 
-	// 300 frames of 64 KiB each is far more than the stalled connection's
-	// socket buffers hold, so its handler is blocked writing long before
-	// the reader is done.
-	readTaskFrame(t, reader)
-	for range 300 {
+	// 300 frames of 64 KiB each is far more than a stalled connection's
+	// socket buffers and its subscription's buffer of 4 hold together, so
+	// both stalled handlers are blocked writing and both subscriptions
+	// overflow long before the reader is done. The reader still receives
+	// each observation's frame, and observation goes on.
+	readTaskFrame(t, reader) // snapshot
+	src.next <- struct{}{}
+	assert.Equal(t, "host", readTaskFrame(t, reader)["type"])
+	for i := range 300 {
+		if i > 0 {
+			src.next <- struct{}{}
+		}
 		readTaskFrame(t, reader)
 	}
-	before := src.observations.Load()
-	assert.Eventually(t, func() bool { return src.observations.Load() > before+10 }, 5*time.Second,
-		time.Millisecond, "observation goes on")
+
+	// The publisher dropped drained's subscription: reading now yields what
+	// was already in flight, then the server closes the connection, while
+	// observation keeps producing frames it is no longer sent.
+	require.NoError(t, drained.SetReadDeadline(time.Now().Add(10*time.Second)))
+	got := 0
+	for {
+		if _, _, err = drained.ReadMessage(); err != nil {
+			break
+		}
+		got++
+	}
+	var netErr net.Error
+	require.False(t, errors.As(err, &netErr) && netErr.Timeout(), "closed by the server: %v", err)
+	assert.Less(t, got, 300, "the dropped connection was sent no frame after its subscription closed")
+
+	// Closing the connection that never read unblocks its handler's write.
+	require.NoError(t, closed.Close())
+	assert.Eventually(t, func() bool { return handlerGoroutines() == 2 }, 5*time.Second,
+		10*time.Millisecond, "only the reader's handler and its reader goroutine remain")
+	require.NoError(t, reader.Close())
+	assert.Eventually(t, func() bool { return handlerGoroutines() == 0 }, 5*time.Second,
+		10*time.Millisecond, "no handler goroutine outlives its connection")
 }
