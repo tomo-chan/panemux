@@ -21,6 +21,16 @@ shot_isolate_env() {
     export GIT_CONFIG_NOSYSTEM=1
 }
 
+# The panes' shell, which they inherit from panemux's environment. macOS's
+# /bin/bash prints a notice that the default shell is now zsh on every
+# interactive start unless BASH_SILENCE_DEPRECATION_WARNING is set, and the
+# notice would land in every local pane of the images.
+shot_shell_env() {
+    export SHELL=/bin/bash
+    export LANG=C.UTF-8
+    export BASH_SILENCE_DEPRECATION_WARNING=1
+}
+
 # Starts the tmux server on TMUX_TMPDIR's private socket with the fake
 # HOME's .tmux.conf as its only configuration (-f replaces the system and
 # XDG config files as well as ~/.tmux.conf).

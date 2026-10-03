@@ -11,7 +11,8 @@
 #   nothing reads the developer's own configuration through them. bash reads
 #   the fake HOME's .bashrc, whose prompt names no real user or host; tmux
 #   reads only its .tmux.conf, whose status line drops the default hostname;
-#   git reads only its .gitconfig.
+#   git reads only its .gitconfig. macOS's bash is told not to print its
+#   zsh notice (shot_shell_env).
 # - The panes' working directory is /tmp/sample-project, a git repository
 #   created here with placeholder commits and a github.com/example remote.
 # - tmux runs on a private socket (TMUX_TMPDIR), so a tmux server the
@@ -60,8 +61,7 @@ chmod 700 "$TMUX_TMPDIR"
 cp "$SHOT_DIR/showcase.yml" "$SHOT_ROOT/showcase.yml"
 
 shot_isolate_env "$SHOT_HOME"
-export SHELL=/bin/bash
-export LANG=C.UTF-8
+shot_shell_env
 
 cat >"$HOME/.bashrc" <<'RC'
 PS1='\[\e[32m\]demo@panemux\[\e[0m\]:\[\e[34m\]\w\[\e[0m\]$ '

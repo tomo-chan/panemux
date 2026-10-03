@@ -28,7 +28,12 @@ skip() { echo "skip $1"; }
 check() { checks=$((checks + 1)); }
 
 work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT
+# tmux's socket lives under these directories, and a socket path has a
+# hard limit (104 bytes on macOS, 108 on Linux) that macOS's long
+# per-user $TMPDIR, plus the run's own subdirectories, overruns. /tmp
+# keeps it short on both.
+short=$(mktemp -d /tmp/pmx-shot.XXXXXX)
+trap 'rm -rf "$work" "$short"' EXIT
 
 # ── shot_isolate_env: the developer's XDG and git configuration stay out ────
 
@@ -54,10 +59,15 @@ case $output in
 *) fail 'XDG and git config variables are cleared: HOME or GIT_CONFIG_NOSYSTEM missing' "$output" ;;
 esac
 
+# git runs outside any repository, so the answer depends only on the global
+# and system files shot_isolate_env is responsible for, not on the local
+# configuration of whatever repository this test happens to run from.
 check
+mkdir -p "$work/norepo"
 output=$(
-	XDG_CONFIG_HOME="$real" GIT_CONFIG_GLOBAL="$work/global-gitconfig" \
-		sh -c '. "$1"; shot_isolate_env "$2"; git config --get commit.gpgsign' sh "$lib" "$work/fakehome" 2>&1
+	cd "$work/norepo" &&
+		XDG_CONFIG_HOME="$real" GIT_CONFIG_GLOBAL="$work/global-gitconfig" GIT_CEILING_DIRECTORIES="$work" \
+			sh -c '. "$1"; shot_isolate_env "$2"; git config --get commit.gpgsign' sh "$lib" "$work/fakehome" 2>&1
 )
 if [ -z "$output" ]; then
 	pass 'git reads none of the developer configuration'
@@ -67,8 +77,11 @@ fi
 
 # ── shot_start_tmux / shot_stop_tmux ────────────────────────────────────────
 
+# Each stop check first proves the server it is about to stop is running:
+# without that, a server that never started (a socket path too long, say)
+# reads as one the helper stopped.
 if command -v tmux >/dev/null 2>&1; then
-	tmuxdir="$work/tmux"
+	tmuxdir="$short/tmux"
 	mkdir -p "$tmuxdir" && chmod 700 "$tmuxdir"
 	echo "set -g status-left '[sample-server] '" >"$work/fakehome/.tmux.conf"
 
@@ -84,12 +97,16 @@ if command -v tmux >/dev/null 2>&1; then
 	esac
 
 	check
-	TMUX_TMPDIR="$tmuxdir" sh -c '. "$1"; shot_stop_tmux' sh "$lib"
-	if TMUX_TMPDIR="$tmuxdir" tmux has-session 2>/dev/null; then
-		fail 'shot_stop_tmux stops the private tmux server'
-		TMUX_TMPDIR="$tmuxdir" tmux kill-server 2>/dev/null
+	if ! TMUX_TMPDIR="$tmuxdir" tmux has-session 2>/dev/null; then
+		fail 'shot_stop_tmux stops the private tmux server: no server was running to stop'
 	else
-		pass 'shot_stop_tmux stops the private tmux server'
+		TMUX_TMPDIR="$tmuxdir" sh -c '. "$1"; shot_stop_tmux' sh "$lib"
+		if TMUX_TMPDIR="$tmuxdir" tmux has-session 2>/dev/null; then
+			fail 'shot_stop_tmux stops the private tmux server'
+			TMUX_TMPDIR="$tmuxdir" tmux kill-server 2>/dev/null
+		else
+			pass 'shot_stop_tmux stops the private tmux server'
+		fi
 	fi
 
 	check
@@ -100,17 +117,41 @@ if command -v tmux >/dev/null 2>&1; then
 	fi
 
 	check
-	mkdir -p "$work/tmp/panemux-screenshots/tmux" && chmod 700 "$work/tmp/panemux-screenshots/tmux"
-	TMUX_TMPDIR="$work/tmp/panemux-screenshots/tmux" tmux -f /dev/null new-session -d -s t 'sleep 30'
-	TMPDIR="$work/tmp" sh -c '. "$1"; shot_teardown' sh "$lib"
-	if TMUX_TMPDIR="$work/tmp/panemux-screenshots/tmux" tmux has-session 2>/dev/null; then
-		fail 'shot_teardown stops the server under the run root'
-		TMUX_TMPDIR="$work/tmp/panemux-screenshots/tmux" tmux kill-server 2>/dev/null
+	rundir="$short/tmp/panemux-screenshots/tmux"
+	mkdir -p "$rundir" && chmod 700 "$rundir"
+	if ! output=$(TMUX_TMPDIR="$rundir" tmux -f /dev/null new-session -d -s t 'sleep 30' 2>&1) ||
+		! TMUX_TMPDIR="$rundir" tmux has-session 2>/dev/null; then
+		fail 'shot_teardown stops the server under the run root: the server did not start' "$output"
 	else
-		pass 'shot_teardown stops the server under the run root'
+		TMPDIR="$short/tmp" sh -c '. "$1"; shot_teardown' sh "$lib"
+		if TMUX_TMPDIR="$rundir" tmux has-session 2>/dev/null; then
+			fail 'shot_teardown stops the server under the run root'
+			TMUX_TMPDIR="$rundir" tmux kill-server 2>/dev/null
+		else
+			pass 'shot_teardown stops the server under the run root'
+		fi
 	fi
 else
 	skip 'tmux checks: tmux is not installed'
+fi
+
+# ── shot_shell_env: the panes' shell prints only what the images expect ────
+
+# macOS's /bin/bash announces on every interactive start that the default
+# shell is now zsh unless BASH_SILENCE_DEPRECATION_WARNING is set; the
+# panes inherit panemux's environment, so the variable has to be set here.
+check
+output=$(sh -c '. "$1"; shot_shell_env; env' sh "$lib" 2>&1)
+case $output in
+*BASH_SILENCE_DEPRECATION_WARNING=1*) pass 'the bash deprecation notice is silenced' ;;
+*) fail 'the bash deprecation notice is silenced' "$output" ;;
+esac
+
+check
+if printf '%s\n' "$output" | grep -qx 'SHELL=/bin/bash' && printf '%s\n' "$output" | grep -qx 'LANG=C.UTF-8'; then
+	pass 'the panes run bash in C.UTF-8'
+else
+	fail 'the panes run bash in C.UTF-8' "$output"
 fi
 
 # ── shot_claim_dir: only a directory this script created is emptied ────────

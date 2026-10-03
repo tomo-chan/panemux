@@ -49,6 +49,11 @@ as for `make test-e2e` when the installed Chromium is not the one Playwright exp
   (`/tmp/panemux-screenshots.lock`) refuses a second run while one is in progress.
 - The tmux server the run starts is stopped by the capture's teardown
   (`frontend/screenshots/global-teardown.ts`), so nothing the run started outlives it.
+- On macOS the panes' `/bin/bash` would announce that the default shell is now zsh; the run sets
+  `BASH_SILENCE_DEPRECATION_WARNING=1` so the images read the same on every OS. The private tmux socket
+  lives under `$TMPDIR/panemux-screenshots/tmux`, and a socket path is limited to 104 bytes on macOS
+  (108 on Linux): macOS's default per-user `$TMPDIR` fits, but one longer than about 60 characters
+  makes tmux fail with `File name too long` and stops the run — set `TMPDIR=/tmp` for it.
 - `make test-screenshots-check` tests these staging helpers (`frontend/screenshots/screenshots-env.sh`).
 
 - Any change that alters what those images show must retake them in the same change: run
