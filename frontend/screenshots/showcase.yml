@@ -13,7 +13,7 @@ agent_board:
     agmsg_path: /tmp/panemux-screenshots-agmsg
 workspaces:
     active: dev
-    tab_position: top
+    tab_position: left
     items:
         - id: dev
           title: Development
@@ -28,7 +28,7 @@ workspaces:
                     title: Project
                     agent_board:
                         enabled: true
-                  size: 55
+                  size: 50
                 - direction: vertical
                   children:
                     - pane:
@@ -46,7 +46,7 @@ workspaces:
                         agent_board:
                             enabled: true
                       size: 50
-                  size: 45
+                  size: 50
         - id: review
           title: Review
           layout:

@@ -7,7 +7,7 @@
 [![Go 1.24](https://img.shields.io/badge/Go-1.24-00ADD8?logo=go)](https://golang.org)
 [![Releases](https://img.shields.io/github/v/release/tomo-chan/panemux)](https://github.com/tomo-chan/panemux/releases)
 
-![panemux in the browser: a "Development" workspace tab split into a local shell showing git log on the left, and on the right a tmux pane running a dev server above a local shell that ran the tests. Each pane header shows its type, title, repository and branch. "Review" and "Ops" workspace tabs sit beside it.](docs/images/workspace.png)
+![panemux in the browser: on the left, the workspace bar lists the "Development", "Review" and "Ops" workspaces with a card per pane showing its repository and branch. The "Development" workspace is split into a local shell showing git log, and on the right a tmux pane running a dev server above a local shell that ran the tests. Each pane header shows its type, title, repository and branch.](docs/images/workspace.png)
 
 ---
 
@@ -168,7 +168,7 @@ message them. Two independent pieces, either of which can be used without the ot
 
 Full design lives in [docs/agent-board.md](docs/agent-board.md).
 
-![The Agent Board dashboard open on the right of a workspace: under Panes, a working "editor" pane and a waiting "tests" pane each report a summary of what they are doing and their last tool; under Messages, the two panes' latest messages to each other.](docs/images/agent-board.png)
+![The Agent Board dashboard open on the right of the workspace: under Panes, a working "editor" pane and a waiting "tests" pane each report a summary of what they are doing and their last tool; under Messages, the two panes' latest messages to each other.](docs/images/agent-board.png)
 
 ### Prerequisites
 

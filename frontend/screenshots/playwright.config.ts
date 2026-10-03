@@ -20,7 +20,7 @@ export default defineConfig({
     ...devices['Desktop Chrome'],
     ...(chromiumExecutablePath ? { launchOptions: { executablePath: chromiumExecutablePath } } : {}),
     baseURL: BASE_URL,
-    viewport: { width: 1440, height: 860 },
+    viewport: { width: 1600, height: 860 },
     deviceScaleFactor: 1,
     colorScheme: 'dark',
   },
