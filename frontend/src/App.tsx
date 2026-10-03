@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useMemo } from 'react'
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { SplitContainer, LayoutActionsContext } from './components/SplitContainer'
 import { PaneSettingsDialog } from './components/PaneSettingsDialog'
 import { AddSSHHostDialog } from './components/AddSSHHostDialog'
@@ -11,7 +11,7 @@ import { TaskDashboard } from './components/TaskDashboard'
 import type { BoardPaneRef } from './components/BoardDashboardPanel'
 import { useLayout } from './hooks/useLayout'
 import { usePaneSettings } from './hooks/usePaneSettings'
-import { useWorkspaceAttentionMonitor } from './hooks/useWorkspaceAttentionMonitor'
+import { useTaskEvents, type TaskEventChange } from './hooks/useTaskEvents'
 import { useBrowserNotificationPermission } from './hooks/useBrowserNotificationPermission'
 import { useSessionsOverview } from './hooks/useSessionsOverview'
 import { useGitInfoSnapshotMap } from './hooks/useGitInfo'
@@ -22,9 +22,18 @@ import { TERMINAL_FONT_FAMILY } from './utils/fonts'
 import { collectLeafPanes, findPaneById, generatePaneId, layoutContainsPane } from './utils/layoutTree'
 import type { MovePanePlacement } from './hooks/useLayout'
 import type { WorkspacePaneSummary, WorkspaceSummary } from './components/WorkspaceTabs'
-import type { Workspace, GitInfo, LayoutChild, LayoutNode, SessionInfo, SSHConfigHost, Task } from './schemas'
+import type { Workspace, GitInfo, LayoutChild, LayoutNode, SessionInfo, SSHConfigHost, Task, TaskEventTask } from './schemas'
+import {
+  attentionAfterFrame,
+  createWaitIdRecord,
+  isWaitVisible,
+  overlayTaskEvents,
+  taskWaitNotification,
+  taskWaitStarts,
+} from './utils/taskEvents'
 import {
   DEFAULT_TASK_DASHBOARD_SHORTCUT,
+  findTaskPane,
   formatShortcut,
   isShortcut,
   paneConfigForTask,
@@ -101,7 +110,24 @@ export const App: React.FC = () => {
   const [maximizedPaneIdsByWorkspace, setMaximizedPaneIdsByWorkspace] = useState<Record<string, string | null>>({})
   const [dragSourcePaneId, setDragSourcePaneId] = useState<string | null>(null)
   const [activePaneId, setActivePaneId] = useState<string | null>(null)
-  const [attentionPaneIds, setAttentionPaneIds] = useState<Set<string>>(() => new Set())
+  // The tasks whose wait gives their pane attention (issue #279), by task id.
+  // A pane, and the workspace holding it, has attention while one of these
+  // tasks matches it.
+  const [attentionTasks, setAttentionTasks] = useState<ReadonlyMap<string, TaskEventTask>>(() => new Map())
+  const attentionTasksRef = useRef(attentionTasks)
+  attentionTasksRef.current = attentionTasks
+  // The wait IDs this tab has notified, and those whose attention a person
+  // cleared here, kept in session storage so a reload repeats neither.
+  const [notifiedWaits] = useState(() => createWaitIdRecord('panemux.taskWaits.notified'))
+  const [clearedWaits] = useState(() => createWaitIdRecord('panemux.taskWaits.cleared'))
+  const attentionPaneIds = useMemo(() => {
+    const paneIds = new Set<string>()
+    for (const task of attentionTasks.values()) {
+      const pane = findTaskPane(task, workspaces?.items ?? [])
+      if (pane) paneIds.add(pane.paneId)
+    }
+    return paneIds
+  }, [attentionTasks, workspaces?.items])
   const { isOpen, currentPane, sshConnectionNames, saveError, isSaving, openSettings, closeSettings, saveSettings, addSSHConfigHost, detectShell, browseDirectories } =
     usePaneSettings(layout, updateSizes)
 
@@ -179,7 +205,6 @@ export const App: React.FC = () => {
   const activeWorkspaceId = workspaces?.active ?? null
   // From the last collection: the dashboard collects only while it is shown,
   // so this is how many tasks were waiting when it was last looked at.
-  const tasksWaiting = waitingCount(tasksState.data?.tasks ?? [])
   const maximizedPaneId = useMemo(() => {
     if (!activeWorkspaceId || !layout) return null
     const paneId = maximizedPaneIdsByWorkspace[activeWorkspaceId] ?? null
@@ -215,10 +240,6 @@ export const App: React.FC = () => {
     })
   }, [activeWorkspaceId])
 
-  const findWorkspaceForPane = useCallback((paneId: string) => {
-    return workspaces?.items.find((workspace) => layoutContainsPane(workspace.layout, paneId)) ?? null
-  }, [workspaces])
-
   const attentionWorkspaceIds = useMemo(() => {
     const workspaceIds = new Set<string>()
     if (!workspaces) return workspaceIds
@@ -231,54 +252,120 @@ export const App: React.FC = () => {
     return workspaceIds
   }, [attentionPaneIds, workspaces])
 
-  const clearWorkspaceAttention = useCallback((workspaceId: string) => {
-    const workspace = workspaces?.items.find((item) => item.id === workspaceId)
-    if (!workspace) return
+  // Clearing attention by hand — focusing or clicking a pane, selecting a
+  // workspace — clears it for the waits that gave it, and records them so a
+  // reload's snapshot does not bring it back.
+  const clearAttentionWhere = useCallback((matches: (paneId: string, workspaceId: string) => boolean) => {
+    const current = attentionTasksRef.current
+    let next: Map<string, TaskEventTask> | null = null
+    for (const [taskId, task] of current) {
+      const pane = findTaskPane(task, workspaces?.items ?? [])
+      if (!pane || !matches(pane.paneId, pane.workspaceId)) continue
+      next ??= new Map(current)
+      next.delete(taskId)
+      if (task.wait_id) clearedWaits.add(task.wait_id)
+    }
+    if (!next) return
+    attentionTasksRef.current = next
+    setAttentionTasks(next)
+  }, [clearedWaits, workspaces?.items])
 
-    setAttentionPaneIds((current) => {
-      const next = new Set<string>()
-      let removed = false
-      for (const paneId of current) {
-        if (layoutContainsPane(workspace.layout, paneId)) {
-          removed = true
-        } else {
-          next.add(paneId)
-        }
-      }
-      return removed ? next : current
-    })
-  }, [workspaces])
+  const clearWorkspaceAttention = useCallback((workspaceId: string) => {
+    clearAttentionWhere((_paneId, paneWorkspaceId) => paneWorkspaceId === workspaceId)
+  }, [clearAttentionWhere])
 
   const clearPaneAttention = useCallback((paneId: string) => {
-    setAttentionPaneIds((current) => {
-      if (!current.has(paneId)) return current
-      const next = new Set(current)
-      next.delete(paneId)
-      return next
+    if (!attentionPaneIds.has(paneId)) return
+    clearAttentionWhere((attentionPaneId) => attentionPaneId === paneId)
+  }, [attentionPaneIds, clearAttentionWhere])
+
+  // A notification's click: bring the app forward and show its pane — in its
+  // workspace, out from behind another maximized pane — focused and outlined.
+  const revealPane = useCallback((workspaceId: string, paneId: string) => {
+    window.focus()
+    setLayer('workspaces')
+    setMaximizedPaneIdsByWorkspace((current) => {
+      const maximized = current[workspaceId] ?? null
+      return maximized && maximized !== paneId ? { ...current, [workspaceId]: null } : current
     })
+    clearPaneAttention(paneId)
+    clearWorkspaceAttention(workspaceId)
+    setActivePaneId(paneId)
+    setFlashPaneId(paneId)
+    setPendingFocusedPaneId(paneId)
+    setActiveWorkspace(workspaceId).catch(console.error)
+  }, [clearPaneAttention, clearWorkspaceAttention, setActiveWorkspace])
+
+  // A notification for a task no pane shows opens the dashboard on it. The
+  // sequence outlives a handled (cleared) request, so the dashboard never
+  // sees a number it has already handled.
+  const [taskFocusRequest, setTaskFocusRequest] = useState<{ taskId: string; seq: number } | null>(null)
+  const taskFocusSeq = useRef(0)
+  const revealTask = useCallback((taskId: string) => {
+    window.focus()
+    setLayer('tasks')
+    taskFocusSeq.current += 1
+    setTaskFocusRequest({ taskId, seq: taskFocusSeq.current })
   }, [])
+  const clearTaskFocusRequest = useCallback(() => setTaskFocusRequest(null), [])
 
-  const notifyAttention = useCallback((paneId: string, showNotification = true) => {
-    const paneMetadata = paneMetadataByID.get(paneId)
-    const workspace = paneMetadata ? workspaces?.items.find((item) => item.id === paneMetadata.workspaceId) ?? null : findWorkspaceForPane(paneId)
-    const pane = workspace ? findPaneById(workspace.layout, paneId) : layout ? findPaneById(layout, paneId) : null
-    const paneTitle = paneMetadata?.paneTitle ?? pane?.title ?? paneId
-    const workspaceTitle = paneMetadata?.workspaceTitle ?? workspace?.title
+  // What the screen shows, read when a frame arrives rather than captured, so
+  // the stream is not reopened as it changes.
+  const dashboardTaskIdsRef = useRef<ReadonlySet<string>>(new Set())
+  const screenRef = useRef({ layer, workspaces: workspaces?.items ?? [], activeWorkspaceId: workspaces?.active ?? null, maximizedPaneId, revealPane, revealTask })
+  screenRef.current = { layer, workspaces: workspaces?.items ?? [], activeWorkspaceId: workspaces?.active ?? null, maximizedPaneId, revealPane, revealTask }
 
-    setAttentionPaneIds((current) => new Set(current).add(paneId))
-    if (!showNotification) return
+  // The task event stream (docs/behavior/task-events.md#receiver): every
+  // applied frame updates the attention and notifies the waits it starts that
+  // the person cannot see, each wait_id once.
+  const handleTaskEvent = useCallback(({ before, frame, after }: TaskEventChange) => {
+    if (frame.type === 'snapshot') {
+      const waitIds = new Set(frame.tasks.flatMap((task) => (task.wait_id ? [task.wait_id] : [])))
+      notifiedWaits.retainOnly(waitIds)
+      clearedWaits.retainOnly(waitIds)
+    }
+    const flags = attentionAfterFrame(attentionTasksRef.current, before, frame, after, clearedWaits)
+    attentionTasksRef.current = flags
+    setAttentionTasks(flags)
 
-    showBrowserNotification(
-      'Agent confirmation requested',
-      workspaceTitle ? `${paneTitle} in ${workspaceTitle}` : paneTitle,
-      workspace ? () => {
-        window.focus()
-        setActiveWorkspace(workspace.id).catch(console.error)
-      } : undefined,
-    )
-  }, [findWorkspaceForPane, layout, paneMetadataByID, setActiveWorkspace, workspaces])
+    const screen = screenRef.current
+    for (const task of taskWaitStarts(before, frame)) {
+      const waitId = task.wait_id
+      if (!waitId || notifiedWaits.has(waitId) || clearedWaits.has(waitId)) continue
+      const pane = findTaskPane(task, screen.workspaces)
+      const visible = isWaitVisible(task.id, pane, {
+        browserActive: document.visibilityState === 'visible' && document.hasFocus(),
+        layer: screen.layer,
+        activeWorkspaceId: screen.activeWorkspaceId,
+        maximizedPaneId: screen.maximizedPaneId,
+        dashboardTaskIds: dashboardTaskIdsRef.current,
+      })
+      if (visible) continue
+      const { title, body } = taskWaitNotification(task)
+      const shown = showBrowserNotification(title, body, waitId, () => {
+        // Where the task is shown now, not where it was when notified.
+        const current = findTaskPane(after.tasks.get(task.id) ?? task, screenRef.current.workspaces)
+        if (current) screenRef.current.revealPane(current.workspaceId, current.paneId)
+        else screenRef.current.revealTask(task.id)
+      })
+      if (shown) notifiedWaits.add(waitId)
+    }
+  }, [clearedWaits, notifiedWaits])
 
-  useWorkspaceAttentionMonitor({ workspaces, maximizedPaneId, onAttention: notifyAttention })
+  const taskEvents = useTaskEvents(handleTaskEvent)
+
+  // The dashboard's state column comes from the stream for every task the
+  // stream has, so a change shows as soon as it is published; the rest of a
+  // task, and the stopped ones, come from the dashboard's own collection.
+  const dashboardTasksState = useMemo(() => {
+    const { store } = taskEvents
+    if (taskEvents.status !== 'live' || !store || !tasksState.data) return tasksState
+    return { ...tasksState, data: { ...tasksState.data, tasks: overlayTaskEvents(tasksState.data.tasks, store.tasks) } }
+  }, [tasksState, taskEvents])
+  const tasksWaiting = waitingCount(dashboardTasksState.data?.tasks ?? [])
+  const handleListedTasksChange = useCallback((taskIds: ReadonlySet<string>) => {
+    dashboardTaskIdsRef.current = taskIds
+  }, [])
   useBrowserNotificationPermission()
 
   // Global command center palette shortcut: Cmd/Ctrl+Shift+K, deliberately
@@ -522,7 +609,6 @@ export const App: React.FC = () => {
       dragSourcePaneId,
       setDragSourcePaneId,
       displayConfig: displayConfig ?? DEFAULT_DISPLAY,
-      onPaneAttention: notifyAttention,
       clearPaneAttention,
       hasPaneAttention: (paneId: string) => attentionPaneIds.has(paneId),
       activePaneId,
@@ -766,11 +852,14 @@ export const App: React.FC = () => {
         </div>
         {layer === 'tasks' && (
           <TaskDashboard
-            tasksState={tasksState}
+            tasksState={dashboardTasksState}
             workspaces={workspaces?.items ?? []}
             onOpenTask={handleOpenTask}
             onShowWorkspaces={() => setLayer('workspaces')}
             shortcut={taskShortcut}
+            focusRequest={taskFocusRequest}
+            onFocusRequestHandled={clearTaskFocusRequest}
+            onListedTasksChange={handleListedTasksChange}
           />
         )}
       </div>
@@ -778,18 +867,19 @@ export const App: React.FC = () => {
   )
 }
 
-function showBrowserNotification(title: string, body: string, onClick?: () => void) {
-  if (!('Notification' in window)) return
+// tag is the wait_id, so a notification of the same wait still shown is
+// replaced rather than stacked. Reports whether one was shown.
+function showBrowserNotification(title: string, body: string, tag: string, onClick: () => void): boolean {
+  if (!('Notification' in window)) return false
 
-  if (Notification.permission !== 'granted') return
+  if (Notification.permission !== 'granted') return false
 
-  const notification = new Notification(title, { body })
-  if (onClick) {
-    notification.onclick = () => {
-      onClick()
-      notification.close()
-    }
+  const notification = new Notification(title, { body, tag })
+  notification.onclick = () => {
+    onClick()
+    notification.close()
   }
+  return true
 }
 
 function focusPaneSurface(paneId: string): boolean {

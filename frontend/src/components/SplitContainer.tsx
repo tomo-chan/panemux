@@ -21,7 +21,6 @@ export interface LayoutActionsContextValue {
   dragSourcePaneId: string | null
   setDragSourcePaneId: (id: string | null) => void
   displayConfig: DisplayConfig
-  onPaneAttention: (paneId: string) => void
   clearPaneAttention: (paneId: string) => void
   hasPaneAttention: (paneId: string) => boolean
   activePaneId: string | null

@@ -88,7 +88,7 @@ type LayoutNode struct {
 // serves rather than a tightening of what a config may say.
 //
 // The root pane is relocated rather than left in place because nothing in
-// frontend/src reads it: SplitContainer, App.tsx and useWorkspaceAttentionMonitor
+// frontend/src reads it: SplitContainer, App.tsx and taskBoard.ts
 // all read child.pane off LayoutChild, never the root's own. A single-pane
 // workspace written by hand as `layout: {pane: ...}` therefore rendered
 // nothing even before the schema rejected it.

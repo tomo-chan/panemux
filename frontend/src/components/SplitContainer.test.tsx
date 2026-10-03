@@ -82,7 +82,6 @@ function makeCtx(maximizedPaneId: string | null): LayoutActionsContextValue {
     dragSourcePaneId: null,
     setDragSourcePaneId: vi.fn(),
     displayConfig: { show_header: false, show_status_bar: false },
-    onPaneAttention: vi.fn(),
     clearPaneAttention: vi.fn(),
     hasPaneAttention: vi.fn(() => false),
     activePaneId: null,
