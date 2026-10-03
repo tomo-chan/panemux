@@ -50,6 +50,8 @@ describe('TaskSchema wait_signature', () => {
     location: { kind: 'none', attachable: false },
   }
 
+  // efficacy:exempt moved from the removed TasksAttentionResponseSchema tests; it pins TaskSchema,
+  // which this branch does not change
   it('accepts a signed wait and rejects an empty or non-string signature', () => {
     expect(TasksResponseSchema.safeParse({ hosts: [], tasks: [waiting] }).success).toBe(true)
     for (const wait_signature of ['', 42]) {

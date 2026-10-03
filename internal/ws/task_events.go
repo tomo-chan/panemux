@@ -68,6 +68,9 @@ func (h *TaskEventsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
+	// A write fails only once the client dropped the connection, which the
+	// reader goroutine races to notice first; no test can order the two.
+	//coverage:exempt a dropped client's failed write races the reader noticing the drop
 	if !writeTaskEventFrame(conn, snapshot) {
 		return
 	}
@@ -81,6 +84,7 @@ func (h *TaskEventsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				// reconnects from a fresh snapshot.
 				return
 			}
+			//coverage:exempt a dropped client's failed write races the reader noticing the drop
 			if !writeTaskEventFrame(conn, frame) {
 				return
 			}
@@ -90,8 +94,8 @@ func (h *TaskEventsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func writeTaskEventFrame(conn *websocket.Conn, frame taskevents.Frame) bool {
 	data, err := json.Marshal(frame)
+	//coverage:exempt Frame.MarshalJSON fails only where its own json.Marshal does, marked so there
 	if err != nil {
-		//coverage:exempt Frame.MarshalJSON marshals only strings, numbers and times
 		log.Printf("task events: %v", err)
 		return false
 	}

@@ -9,7 +9,9 @@ package taskevents
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	"panemux/internal/tasks"
@@ -117,8 +119,10 @@ func (f Frame) MarshalJSON() ([]byte, error) {
 			PrevState: f.PrevState, Task: f.Task, Host: f.Host}
 	}
 	out, err := json.Marshal(v)
+	// Every field is a string, a number, a time.Time from a Unix-seconds
+	// clock, or a struct of them.
+	//coverage:exempt nothing in a frame can fail to marshal
 	if err != nil {
-		//coverage:exempt every field is a string, number, time or nested struct of them
 		return nil, fmt.Errorf("marshal task event frame: %w", err)
 	}
 	return out, nil
@@ -302,7 +306,7 @@ func (m *eventModel) view(task tasks.Task, prev TaskView, known bool) TaskView {
 }
 
 func isUnsignedWaitID(id string) bool {
-	return len(id) > 3 && id[:3] == "e1-"
+	return strings.HasPrefix(id, "e1-")
 }
 
 // sameView compares two views without StatusSince.
@@ -320,7 +324,7 @@ func (m *eventModel) snapshot() Frame {
 			f.Tasks = append(f.Tasks, h.tasks[id])
 		}
 	}
-	sort.Slice(f.Tasks, func(i, j int) bool { return f.Tasks[i].ID < f.Tasks[j].ID })
+	slices.SortFunc(f.Tasks, func(a, b TaskView) int { return strings.Compare(a.ID, b.ID) })
 	return f
 }
 

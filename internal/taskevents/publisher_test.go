@@ -291,6 +291,7 @@ func TestPublisher_CloseEndsSubscriptionsAndCancelsObservation(t *testing.T) {
 	src.awaitStart(t, "")
 
 	p.Close()
+	p.Close()
 	cancel()
 
 	_, open := <-frames
@@ -341,4 +342,17 @@ func TestFrame_MarshalJSONWritesOnlyItsTypesFields(t *testing.T) {
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"type":"host","epoch":"`+testEpoch+`","seq":6,"op":"added",
 		"host":{"name":"gpu-box","status":"pending"}}`, string(host))
+}
+
+func TestNew_DefaultsAnUnsetOrInvalidIntervalAndBuffer(t *testing.T) {
+	for _, opts := range []Options{{}, {Interval: -time.Second, Buffer: -1}} {
+		p := New(newFakeSource(), opts)
+		assert.Equal(t, 5*time.Second, p.opts.Interval)
+		assert.Equal(t, 256, p.opts.Buffer)
+		p.Close()
+	}
+	p := New(newFakeSource(), Options{Interval: time.Nanosecond, Buffer: 1})
+	defer p.Close()
+	assert.Equal(t, time.Nanosecond, p.opts.Interval, "a set interval is kept")
+	assert.Equal(t, 1, p.opts.Buffer)
 }
