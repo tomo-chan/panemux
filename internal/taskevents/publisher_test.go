@@ -356,3 +356,51 @@ func TestNew_DefaultsAnUnsetOrInvalidIntervalAndBuffer(t *testing.T) {
 	assert.Equal(t, time.Nanosecond, p.opts.Interval, "a set interval is kept")
 	assert.Equal(t, 1, p.opts.Buffer)
 }
+
+func TestPublisher_SubscriberReturningBeforeAnObservationEndsTakesItOver(t *testing.T) {
+	src := newFakeSource()
+	p := newTestPublisher(t, src)
+	_, frames, cancel := p.Subscribe()
+	src.answer(t, "", okHost(""), liveTask("", "local:claude:a", tasks.StateBusy))
+	nextFrame(t, frames)
+	nextFrame(t, frames)
+
+	// The last subscriber leaves while the next observation is in flight,
+	// and a reload subscribes again before it ends.
+	src.awaitStart(t, "")
+	cancel()
+	_, frames, cancel = p.Subscribe()
+	defer cancel()
+	time.Sleep(20 * time.Millisecond)
+	assert.Equal(t, 2, src.callCount(""), "no second observation overlaps the one in flight")
+
+	src.answerChan("") <- hostAnswer{
+		result: okHost(""), tasks: []tasks.Task{liveTask("", "local:claude:a", tasks.StateIdle)},
+	}
+	assert.Equal(t, FrameHost, nextFrame(t, frames).Type)
+	assert.Equal(t, tasks.StateIdle, nextFrame(t, frames).Task.State,
+		"the observation in flight serves the returning subscriber")
+	src.awaitStart(t, "")
+	assert.Equal(t, 3, src.callCount(""), "its loop goes on observing")
+}
+
+func TestPublisher_HostAddedAsTheLastSubscriberIsDroppedIsNotObserved(t *testing.T) {
+	src := newFakeSource()
+	p := New(src, Options{Interval: time.Millisecond, Buffer: 1})
+	t.Cleanup(p.Close)
+	_, frames, cancel := p.Subscribe()
+	defer cancel()
+	// pending→ok fills the buffer; the frame announcing gpu-box then drops
+	// the only subscriber, which stops observation.
+	src.answer(t, "", okHost(""))
+	src.setHosts("gpu-box")
+	assert.Eventually(t, func() bool {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		return !p.observing
+	}, 2*time.Second, time.Millisecond)
+	_ = frames
+
+	time.Sleep(20 * time.Millisecond)
+	assert.Equal(t, 0, src.callCount("gpu-box"), "nobody is left to observe gpu-box for")
+}

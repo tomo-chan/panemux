@@ -190,3 +190,50 @@ func TestTaskEvents_ClosedSubscriptionClosesTheConnection(t *testing.T) {
 	var netErr net.Error
 	assert.False(t, errors.As(err, &netErr) && netErr.Timeout(), "closed by the server: %v", err)
 }
+
+// churningTaskSource answers every observation with a task whose large
+// field changes each time, so each observation is one large frame.
+type churningTaskSource struct {
+	observations atomic.Int32
+}
+
+func (s *churningTaskSource) Hosts() []string { return nil }
+
+func (s *churningTaskSource) CollectHostLive(context.Context, string) (tasks.HostResult, []tasks.Task) {
+	n := s.observations.Add(1)
+	return tasks.HostResult{Status: tasks.HostOK}, []tasks.Task{{
+		ID: "local:claude:local-sess", Agent: "claude", SessionID: "local-sess",
+		CWD:   "/workspace/user/project/" + strings.Repeat(string(rune('a'+n%2)), 64<<10),
+		State: tasks.StateBusy, PID: 7, Location: tasks.Location{Kind: tasks.LocationNone},
+	}}
+}
+
+// A client that completes the handshake and then never reads stalls only
+// its own connection: the publisher drops its subscription instead of
+// waiting for it, and every other subscriber keeps receiving (decision G
+// in docs/behavior/task-events.md).
+func TestTaskEvents_ClientThatStopsReadingStallsOnlyItsOwnConnection(t *testing.T) {
+	src := &churningTaskSource{}
+	publisher := taskevents.New(src, taskevents.Options{Interval: time.Millisecond, Buffer: 4096})
+	ts := httptest.NewServer(NewTaskEventsHandler(publisher, refuseMarked))
+	t.Cleanup(func() {
+		ts.Close()
+		publisher.Close()
+	})
+	stalled, _, err := dialTaskEvents(t, ts, nil)
+	require.NoError(t, err)
+	_ = stalled // never read
+	reader, _, err := dialTaskEvents(t, ts, nil)
+	require.NoError(t, err)
+
+	// 300 frames of 64 KiB each is far more than the stalled connection's
+	// socket buffers hold, so its handler is blocked writing long before
+	// the reader is done.
+	readTaskFrame(t, reader)
+	for range 300 {
+		readTaskFrame(t, reader)
+	}
+	before := src.observations.Load()
+	assert.Eventually(t, func() bool { return src.observations.Load() > before+10 }, 5*time.Second,
+		time.Millisecond, "observation goes on")
+}

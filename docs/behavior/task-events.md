@@ -214,7 +214,9 @@ no history to replay.
   second, overlapping observation of the host.
 - Publishing never waits for one subscriber, so a connection that stops reading cannot hold up the
   others. A frame is never dropped from the middle of a connection's stream: a connection that cannot
-  take its frames is closed, and its tab reconnects from a fresh snapshot.
+  take its frames is closed, and its tab reconnects from a fresh snapshot. Writes have no deadline,
+  so closing that subscription does not interrupt a write already blocked on the connection: the
+  connection's own handler waits until its socket closes, and nothing else waits with it.
 
 ### Receiver
 

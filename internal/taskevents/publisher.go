@@ -163,6 +163,11 @@ func (p *Publisher) startLocked() {
 func (p *Publisher) syncHostsLocked() {
 	names := append([]string{""}, p.src.Hosts()...)
 	p.publishLocked(p.model.syncHosts(names))
+	if !p.observing {
+		// Publishing dropped the last subscriber: nobody is left to
+		// observe a host just added for.
+		return
+	}
 	for _, name := range names {
 		if !p.looping[name] {
 			p.looping[name] = true

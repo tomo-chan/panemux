@@ -119,6 +119,10 @@ the pane/workspace attention and the browser notifications. The design is in
   code were dropped as unneeded. What remains is ordinary fan-out hygiene: publishing never waits for
   one subscriber, and a connection that cannot take its frames is closed rather than given a stream
   with a hole in it, since the receiver already recovers from any close with a fresh snapshot.
+  A review of the implementation (issue #293) asked again for a write deadline, since a client that
+  stops reading after the handshake leaves its handler blocked in a write. It was not added: a test
+  showed that this holds only that connection's goroutines, while the publisher keeps observing and
+  every other subscriber keeps receiving, which is the case this decision accepts over loopback.
 - **Each tab notifies on its own; tabs do not coordinate.** A tab records the waits it notified in its
   session storage, which survives its own reloads, and the notification's `tag` is the `wait_id`.
   Several browser tabs are not a requirement: one page shows every workspace, so there is no use for
