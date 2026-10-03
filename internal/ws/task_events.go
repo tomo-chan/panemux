@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"time"
 
 	"github.com/gorilla/websocket"
 
@@ -15,11 +14,6 @@ import (
 // nothing from the client; the limit only keeps a client from making the
 // server buffer a large one.
 const taskEventsReadLimit = 512
-
-// taskEventsWriteTimeout bounds one frame's write, so a client that stops
-// reading without closing its connection does not hold its handler forever.
-// The publisher closes that client's subscription once it falls behind.
-const taskEventsWriteTimeout = 10 * time.Second
 
 var taskEventsUpgrader = websocket.Upgrader{
 	ReadBufferSize:  taskEventsReadLimit,
@@ -101,9 +95,9 @@ func writeTaskEventFrame(conn *websocket.Conn, frame taskevents.Frame) bool {
 		log.Printf("task events: %v", err)
 		return false
 	}
-	if err := conn.SetWriteDeadline(time.Now().Add(taskEventsWriteTimeout)); err != nil {
-		//coverage:exempt setting a deadline fails only on a connection already closed
-		return false
-	}
+	// No write deadline: the stream is meant for a browser on the same
+	// machine, whose closed tab closes the socket at once. A connection that
+	// stops reading only falls behind, and the publisher closes its
+	// subscription (docs/DECISIONLOG.md, issue #277).
 	return conn.WriteMessage(websocket.TextMessage, data) == nil
 }

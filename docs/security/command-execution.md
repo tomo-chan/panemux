@@ -233,7 +233,8 @@ side effect another site could trigger with an `<img>` or a `WebSocket`. These t
 `PUT /api/tasks/records`, which writes the operator's record file, and the two routes that start and
 resume tasks ([below](#task-launch-and-resume)) therefore refuse a request whose
 `Sec-Fetch-Site` is `cross-site` or `same-site`, or whose `Origin` is neither the server's own nor a
-loopback origin (`refuseCrossSite` in `internal/api/tasks.go`), before collecting or dialing anything. The record route runs no command:
+loopback origin (`refuseCrossSite` in `internal/api/tasks.go`, which `internal/ws`'s stream handler
+is given as `api.RefuseCrossSite`), before collecting or dialing anything. The record route runs no command:
 it writes `~/.config/panemux/tasks.json` through `fileops.AtomicWrite`, and a label reaches the
 browser only as text, never as markup or a URL.
 The response itself is never readable cross-site — no CORS header is sent — so this protects the

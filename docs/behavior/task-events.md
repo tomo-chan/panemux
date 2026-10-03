@@ -207,6 +207,11 @@ no history to replay.
   wait IDs are kept, so a reload does not give a still-unsigned wait a new ID; when observation starts
   again every host is `pending` until it answers, and the differences from what was kept are
   published.
+- **Stopping does not interrupt an observation in flight.** It runs to the collection's per-host
+  timeout and its result is discarded: closing a host's command channel is not known to stop the
+  script it runs there, so cutting it short would only leave that script running unwatched. A
+  subscriber that arrives before it finishes resumes observation with it rather than starting a
+  second, overlapping observation of the host.
 - Publishing never waits for one subscriber, so a connection that stops reading cannot hold up the
   others. A frame is never dropped from the middle of a connection's stream: a connection that cannot
   take its frames is closed, and its tab reconnects from a fresh snapshot.

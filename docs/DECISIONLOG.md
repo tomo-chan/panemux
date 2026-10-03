@@ -137,6 +137,12 @@ the pane/workspace attention and the browser notifications. The design is in
   seconds was considered) would only spare a reload one extra observation per host and a moment of
   `pending`; it was not worth a timer. Keeping the model is what matters: discarding it would give an
   unsigned wait a new ID, and so a new notification, on every reload.
+- **Stopping does not interrupt an observation in flight** (decided in the design review, settled in
+  the implementation, issue #293). Cancelling it would close the host's SSH channel, and whether the
+  `sh -s` running the script without a terminal then stops is not established; a channel closed early
+  could leave it running with nobody reading it. Letting it finish costs at most one per-host timeout
+  of work, and its result is discarded, so a stopped stream publishes nothing. Server shutdown is the
+  exception: it cancels everything, as every other collection does then.
 - **The dashboard takes states from the stream but still collects every 10 seconds** for what the
   stream does not carry: stopped sessions, git and pull requests, records and summaries. Without the
   overlay a task reached from a notification could show `busy` for up to 10 seconds. Replacing the poll
