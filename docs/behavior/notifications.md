@@ -13,10 +13,12 @@ noticed as well, and a wait an agent does not record — codex asking to approve
 
 When a task starts a wait ([Pane and workspace attention](task-events.md#pane-and-workspace-attention)):
 
-- the frame of the pane the task matches flashes until the pane receives focus or a click, or the
-  task's wait ends (it goes to `busy`, `idle` or `run`, or stops running)
+- the frame of the pane the task matches flashes while the task is in `wait` on a host that is `ok`,
+  until the pane receives focus or a click; it goes when the task leaves `wait` (`busy`, `idle`,
+  `run` or `unknown`, or it stops running) or its host stops being `ok`, and comes back when the
+  same wait is seen again on an `ok` host, unless it was cleared in this tab meanwhile
 - the containing workspace tab flashes when that workspace is not active, and clears when selected
-  or when the task's wait ends
+  or when the pane's flash goes
 - the browser Notification API is used when permission has already been granted and the wait is not
   currently visible to the user: neither its pane nor, on the task dashboard, its task is on screen
 - clicking a browser notification brings the app forward and goes to the task: its pane, focused and
@@ -41,8 +43,10 @@ again. Tabs do not coordinate: two tabs showing panemux can each notify the same
 notification's `tag` (the `wait_id`) replaces one still shown rather than stacking it. The pane and workspace indicators
 reappear after a reload while the task is still waiting, unless this tab already cleared that wait,
 which it records in its session storage the same way. A wait is recorded as notified only once a
-notification is shown, so one that arrived while permission was not granted is notified on a later
-reload or reconnect if it is still going on. A later wait of the same task has a new
+notification is shown. One that arrived while permission was not granted is notified on a later
+reconnect whose snapshot has it with its host still `ok`; after a reload that stopped observation
+(the only tab), its host is `pending` in the snapshot and the wait is not notified by that tab, though
+its pane flashes. A wait that starts after permission is granted is notified as usual. A later wait of the same task has a new
 `wait_id` and notifies again. The notification shows the agent, the host and the task's directory
 name, never what it waits for or conversation text.
 

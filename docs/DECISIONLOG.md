@@ -186,6 +186,14 @@ the pane/workspace attention and the browser notifications. The design is in
   no marker for the end of one host's differences; publishing the `ok` after the differences instead
   — the publisher sends events as they happen and carries no ordering rule for a receiver's sake;
   and judging after a short delay, which is a guess about timing.
+- **A wait that began before notification permission was granted may go unnotified** (2026-10-03,
+  PR #300). Under the rule above, a reload of the only tab stops observation, so its snapshot has every
+  host `pending` and a wait still going on is never judged as a start; the pane flashes, but no
+  notification is shown. A reconnect while observation kept running still notifies such a wait, since
+  its host stays `ok`. The behavior was accepted and the documents corrected (option A). Rejected
+  (option B): judging waits not yet recorded as notified again when their host turns `ok` — that is
+  the frame at which an answered wait still looks current, so it would bring back the stale
+  notifications the rule removed.
 
 ### A lightweight collection and a stable wait signature for input-wait notifications (2026-10-02, issue #278)
 

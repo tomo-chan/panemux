@@ -281,8 +281,12 @@ it from that store.
   session storage the record lives in the page's memory and a reload may notify again. A new
   `wait_id` — a later wait of the same task — is notified again.
 - A wait is recorded only once its notification is shown. While permission is not granted nothing is
-  shown and nothing is recorded, so a wait still in a snapshot after permission is granted — on a
-  reload or a reconnect — is notified then.
+  shown and nothing is recorded, so a wait still going on after permission is granted is notified by
+  a reconnect's snapshot that has it with its host still `ok` (observation kept running). A snapshot
+  after observation stopped — a reload of the only tab — has its host `pending` and does not notify
+  it, nor does the host's answer: a wait that began before permission was granted is then not
+  notified by that tab, though its pane flashes. A wait that begins after permission is granted is
+  notified as usual.
 - The notification's `tag` is the `wait_id`, so a notification of the same wait that is still shown is
   replaced rather than stacked.
 - The notification names the agent, the host and the task's directory name only: not what the task
