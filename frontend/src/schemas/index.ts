@@ -63,7 +63,7 @@ export const LayoutChildSchema: z.ZodType<LayoutChild> = z.lazy(() =>
 )
 
 // `pane` is declared even though nothing here renders it — SplitContainer,
-// App.tsx and useWorkspaceAttentionMonitor all read child.pane off a
+// App.tsx and taskBoard.ts all read child.pane off a
 // LayoutChild, never the root's own. It is declared because the server can
 // still emit it: normalizeLayoutNode relocates a root pane only when the node
 // has no children, leaving the `{pane, children}` shape as the operator wrote

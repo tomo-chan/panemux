@@ -71,7 +71,11 @@ test('goes to the local pane an agent outside tmux was started from', async ({ p
   test.skip(process.platform !== 'linux', 'process environments are read only on Linux hosts so far')
 
   await page.goto('/')
-  await page.locator('[data-pane-id="task-dashboard-main"] .xterm-helper-textarea').focus()
+  // Keys typed before the pane's terminal stream is open are dropped, so wait
+  // for the shell's prompt: output arriving means the stream is open.
+  const main = page.locator('[data-pane-id="task-dashboard-main"]')
+  await expect.poll(async () => (await main.locator('.xterm-rows').textContent()) ?? '').toMatch(/\S/)
+  await main.locator('.xterm-helper-textarea').focus()
   await page.keyboard.type('"$HOME/bin/start-agent" e2e-in-pane')
   await page.keyboard.press('Enter')
   await expect.poll(async () => {

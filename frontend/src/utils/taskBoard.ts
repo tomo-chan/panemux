@@ -293,7 +293,7 @@ export interface TaskPaneRef {
  * Computed here from the workspaces the dashboard already holds, so a pane
  * the dashboard has just created is found before the next collection.
  */
-export function findTaskPane(task: Task, workspaces: Workspace[]): TaskPaneRef | null {
+export function findTaskPane(task: Pick<Task, 'host' | 'location'>, workspaces: Workspace[]): TaskPaneRef | null {
   const match = taskPaneMatcher(task)
   if (!match) return null
 
@@ -311,7 +311,7 @@ export function findTaskPane(task: Task, workspaces: Workspace[]): TaskPaneRef |
   return null
 }
 
-function taskPaneMatcher(task: Task): ((pane: PaneConfig) => boolean) | null {
+function taskPaneMatcher(task: Pick<Task, 'host' | 'location'>): ((pane: PaneConfig) => boolean) | null {
   const { kind, tmux_session: session, pane_id: paneId } = task.location
   if (kind === 'tmux' && session) {
     return (pane) => {

@@ -991,11 +991,108 @@ describe('TaskDashboard summaries', () => {
     expect(workSection()).toHaveTextContent('Only a claude task with a session ID can be summarized.')
   })
 
+  // efficacy:exempt unchanged by this branch; the tests appended after it fall inside its line range
   it('says a working task is summarized once it stops working', () => {
     const data = { ...summarized, tasks: [task({ id: 'busy-new', state: 'busy', session_id: 'abababab-0000' })] }
     renderDashboard(tasksState({ data }))
     selectCard('busy-new')
     expect(workSection()).toHaveTextContent('Summarized when it stops working.')
     expect(within(workSection()).getByRole('button', { name: 'Summarize' })).toBeInTheDocument()
+  })
+})
+describe('TaskDashboard focus request (issue #279)', () => {
+  function renderWithFocus(focusRequest: { taskId: string; seq: number } | null, state = tasksState()) {
+    const onFocusRequestHandled = vi.fn()
+    const view = render(
+      <TaskDashboard
+        tasksState={state}
+        workspaces={workspaces}
+        onOpenTask={vi.fn()}
+        onShowWorkspaces={vi.fn()}
+        now={() => NOW}
+        focusRequest={focusRequest}
+        onFocusRequestHandled={onFocusRequestHandled}
+      />,
+    )
+    return { ...view, onFocusRequestHandled }
+  }
+
+  it('selects and highlights the requested task, and says it handled the request', () => {
+    const { onFocusRequestHandled } = renderWithFocus({ taskId: 'wait-1', seq: 1 })
+    const card = screen.getByTestId('task-card-wait-1')
+    expect(card).toHaveAttribute('data-selected', 'true')
+    expect(card).toHaveClass('td-card-flash')
+    expect(onFocusRequestHandled).toHaveBeenCalledTimes(1)
+  })
+
+  it('clears the filters that would hide the requested task', () => {
+    const { rerender } = renderWithFocus(null)
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Filter tasks' }), { target: { value: 'payment' } })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Show host' }), { target: { value: 'dev-server' } })
+    expect(screen.queryByTestId('task-card-wait-1')).toBeNull()
+
+    rerender(
+      <TaskDashboard
+        tasksState={tasksState()}
+        workspaces={workspaces}
+        onOpenTask={vi.fn()}
+        onShowWorkspaces={vi.fn()}
+        now={() => NOW}
+        focusRequest={{ taskId: 'wait-1', seq: 1 }}
+        onFocusRequestHandled={vi.fn()}
+      />,
+    )
+    expect(screen.getByTestId('task-card-wait-1')).toHaveAttribute('data-selected', 'true')
+    expect(screen.getByRole('searchbox', { name: 'Filter tasks' })).toHaveValue('')
+  })
+
+  it('reaches a waiting task recorded as done, which stays in its state column', () => {
+    const doneState = tasksState({
+      data: { ...response, tasks: [...response.tasks, task({ id: 'wait-done', state: 'wait', done: true })] },
+    })
+    renderWithFocus({ taskId: 'wait-done', seq: 1 }, doneState)
+    expect(screen.getByRole('checkbox', { name: 'Show Done column' })).not.toBeChecked()
+    expect(screen.getByTestId('task-card-wait-done')).toHaveAttribute('data-selected', 'true')
+  })
+
+  it('waits for the requested task to arrive with a later collection', () => {
+    const empty = tasksState({ data: { ...response, tasks: [] } })
+    const { rerender, onFocusRequestHandled } = renderWithFocus({ taskId: 'wait-1', seq: 1 }, empty)
+    expect(onFocusRequestHandled).not.toHaveBeenCalled()
+
+    rerender(
+      <TaskDashboard
+        tasksState={tasksState()}
+        workspaces={workspaces}
+        onOpenTask={vi.fn()}
+        onShowWorkspaces={vi.fn()}
+        now={() => NOW}
+        focusRequest={{ taskId: 'wait-1', seq: 1 }}
+        onFocusRequestHandled={onFocusRequestHandled}
+      />,
+    )
+    expect(screen.getByTestId('task-card-wait-1')).toHaveAttribute('data-selected', 'true')
+    expect(onFocusRequestHandled).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('TaskDashboard listed tasks (issue #279)', () => {
+  it('reports the tasks it lists after its filters, for deciding whether a wait is visible', () => {
+    const onListedTasksChange = vi.fn()
+    render(
+      <TaskDashboard
+        tasksState={tasksState()}
+        workspaces={workspaces}
+        onOpenTask={vi.fn()}
+        onShowWorkspaces={vi.fn()}
+        now={() => NOW}
+        onListedTasksChange={onListedTasksChange}
+      />,
+    )
+    const listed = onListedTasksChange.mock.lastCall?.[0] as ReadonlySet<string>
+    expect(listed.has('wait-1')).toBe(true)
+
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Filter tasks' }), { target: { value: 'no task matches this' } })
+    expect((onListedTasksChange.mock.lastCall?.[0] as ReadonlySet<string>).size).toBe(0)
   })
 })

@@ -153,6 +153,47 @@ the pane/workspace attention and the browser notifications. The design is in
   with a collection the stream triggers was not taken up: it is an optimization #277 does not ask for,
   the poll runs only while the dashboard is on screen, and pull-request changes would still need a
   slower poll of their own. It is reconsidered only if the poll's load becomes a problem.
+- **Three receiver details were settled while implementing it** (2026-10-03, issue #279). The
+  dashboard takes `status_since` from the stream along with the state, since a `wait` shown with the
+  time since the collection's earlier `busy` misreads how long the task has been waiting. A snapshot
+  after a reconnect clears the attention of a wait that ended while the tab was disconnected — a task
+  now `busy`, `idle` or `run`, or gone from a host that answered — rather than leaving it until someone
+  focuses the pane; `unknown` and a host not answering keep it, for the reasons above. A wait is
+  recorded as notified only once a notification is shown: recording it while permission was not
+  granted would keep it from ever being notified after permission is given. The waits whose
+  attention a person cleared are recorded in session storage like the notified ones, so a reload does
+  not bring that attention back. PR #291's time window (`paneWaits`, `holdMs`) and its 15-second poll
+  were not carried over; its notification click, the dashboard's highlighted task and the minimal
+  notification text were.
+- **Three review findings on the receiver were settled** (2026-10-03, PR #300). A wait that starts
+  before the tab has its workspaces is not notified rather than held until they load: holding it
+  would need a rule for a load that fails (the tab then shows only an error). The cost is that a wait
+  starting during a page load, or still unnotified in the first snapshot, is not notified by that tab;
+  its attention is still shown. (PR #291 was reviewed for the same race.) A notification's click resolves the task against the latest store rather than the one
+  the notification was created from, so a task that moved since lands on its current pane. A frame
+  without `status_since` clears the collected one: the stream is authoritative for the state, and the
+  collected time belongs to an earlier state.
+- **A wait on a host that is not `ok` neither flashes nor notifies** (2026-10-03, PR #300, from a
+  PR #295 review). Observation stops with its model kept (decision J), so a reload's snapshot carries
+  waits answered meanwhile under a `pending` host; the receiver flashed and notified them, and the
+  flash stayed until the host answered, or for good on `error`. Attention is now read from the store
+  after each frame — a task in `wait` on an `ok` host whose `wait_id` this tab has not cleared —
+  instead of being set on a wait's start and removed on its end. That replaced the rule that `unknown`
+  and a failing host keep attention: both now hide it until the wait is seen again. A notification
+  still needs a wait start, and a start is taken only under an `ok` host. Rejected: holding such waits
+  and judging them when the host turns `ok` — the publisher sends a host's `ok` before the
+  differences it found, so at that frame an answered wait still looks current, and the receiver has
+  no marker for the end of one host's differences; publishing the `ok` after the differences instead
+  — the publisher sends events as they happen and carries no ordering rule for a receiver's sake;
+  and judging after a short delay, which is a guess about timing.
+- **A wait that began before notification permission was granted may go unnotified** (2026-10-03,
+  PR #300). Under the rule above, a reload of the only tab stops observation, so its snapshot has every
+  host `pending` and a wait still going on is never judged as a start; the pane flashes, but no
+  notification is shown. A reconnect while observation kept running still notifies such a wait, since
+  its host stays `ok`. The behavior was accepted and the documents corrected (option A). Rejected
+  (option B): judging waits not yet recorded as notified again when their host turns `ok` — that is
+  the frame at which an answered wait still looks current, so it would bring back the stale
+  notifications the rule removed.
 
 ### A lightweight collection and a stable wait signature for input-wait notifications (2026-10-02, issue #278)
 

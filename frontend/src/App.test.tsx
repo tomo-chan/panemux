@@ -1,9 +1,10 @@
-import { useContext, useEffect } from 'react'
+import { useContext } from 'react'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
 import { LayoutActionsContext } from './components/SplitContainer'
 import type { LayoutNode, WorkspacesResponse } from './schemas'
+import { applyTaskEventFrame, type TaskEventStore } from './utils/taskEvents'
 
 const mockTerminalPane = vi.hoisted(() => vi.fn(({ pane }: { pane: { id: string } }) => <div data-pane-id={pane.id} />))
 
@@ -33,7 +34,7 @@ const workspaces: WorkspacesResponse = {
   ],
 }
 
-let currentWorkspaces = workspaces
+let currentWorkspaces: WorkspacesResponse | null = workspaces
 let currentDisplayConfig: { show_header: boolean; show_status_bar: boolean; task_dashboard_shortcut?: string } = {
   show_header: false,
   show_status_bar: false,
@@ -51,14 +52,19 @@ const mockSwapPanes = vi.fn()
 const mockCreatePane = vi.fn().mockResolvedValue(undefined)
 const mockMovePane = vi.fn().mockResolvedValue(undefined)
 const mockAddWorkspace = vi.fn()
-const mockUseWorkspaceAttentionMonitor = vi.hoisted(() => vi.fn())
+const taskEventsMock = vi.hoisted(() => ({
+  onChange: null as null | ((change: unknown) => void),
+  state: { store: null as unknown, status: 'connecting' as string },
+}))
 const mockUseBrowserNotificationPermission = vi.hoisted(() => vi.fn())
 const mockUseSessionsOverview = vi.hoisted(() => vi.fn())
 const mockUseGitInfoSnapshotMap = vi.hoisted(() => vi.fn())
 
 vi.mock('./hooks/useLayout', () => ({
   useLayout: () => ({
-    layout: currentWorkspaces.items.find((workspace) => workspace.id === currentWorkspaces.active)?.layout ?? currentWorkspaces.items[0].layout,
+    layout: currentWorkspaces
+      ? currentWorkspaces.items.find((workspace) => workspace.id === currentWorkspaces?.active)?.layout ?? currentWorkspaces.items[0].layout
+      : null,
     workspaces: currentWorkspaces,
     displayConfig: currentDisplayConfig,
     error: null,
@@ -77,9 +83,53 @@ vi.mock('./hooks/useLayout', () => ({
   }),
 }))
 
-vi.mock('./hooks/useWorkspaceAttentionMonitor', () => ({
-  useWorkspaceAttentionMonitor: mockUseWorkspaceAttentionMonitor,
+vi.mock('./hooks/useTaskEvents', () => ({
+  useTaskEvents: (onChange: (change: unknown) => void) => {
+    taskEventsMock.onChange = onChange
+    return taskEventsMock.state
+  },
 }))
+
+// Delivers one frame of /ws/tasks/events to the App, through the same
+// reducer the real hook uses.
+function emitTaskFrame(frame: unknown) {
+  const before = taskEventsMock.state.store as TaskEventStore | null
+  const result = applyTaskEventFrame(before, frame)
+  if (!result.ok) throw new Error(result.reason)
+  taskEventsMock.state = { store: result.store, status: 'live' }
+  act(() => {
+    taskEventsMock.onChange?.({ before, frame: result.frame, after: result.store })
+  })
+}
+
+let taskFrameSeq = 0
+
+function emitTaskSnapshot(tasks: unknown[], hosts: unknown[] = [{ name: '', status: 'ok' }]) {
+  taskFrameSeq += 10
+  emitTaskFrame({ type: 'snapshot', epoch: 'e0', seq: taskFrameSeq, hosts, tasks })
+}
+
+function emitTaskChange(op: 'added' | 'changed' | 'removed', task: unknown, prevState?: string) {
+  taskFrameSeq += 1
+  emitTaskFrame({ type: 'task', epoch: 'e0', seq: taskFrameSeq, op, task, ...(prevState ? { prev_state: prevState } : {}) })
+}
+
+function paneTask(id: string, paneId: string, state = 'busy', extra: Record<string, unknown> = {}) {
+  return {
+    id,
+    host: '',
+    agent: 'claude',
+    session_id: id,
+    cwd: '/workspace/user/project',
+    state,
+    location: { kind: 'outside', pane_id: paneId, attachable: false },
+    ...extra,
+  }
+}
+
+function waitingTask(id: string, paneId: string, waitId: string) {
+  return paneTask(id, paneId, 'wait', { waiting_for: 'input needed', wait_id: waitId })
+}
 
 vi.mock('./hooks/useBrowserNotificationPermission', () => ({
   useBrowserNotificationPermission: mockUseBrowserNotificationPermission,
@@ -144,6 +194,9 @@ function tasksStateWith(tasks: unknown[]) {
 
 beforeEach(() => {
   mockUseTasks.mockReturnValue(tasksStateWith([]))
+  taskEventsMock.state = { store: null, status: 'connecting' }
+  taskEventsMock.onChange = null
+  window.sessionStorage.clear()
 })
 
 describe('App workspace deletion', () => {
@@ -152,7 +205,6 @@ describe('App workspace deletion', () => {
 
   beforeEach(() => {
     originalNotification = window.Notification
-    mockUseWorkspaceAttentionMonitor.mockImplementation(() => {})
     mockUseBrowserNotificationPermission.mockImplementation(() => {})
     mockUseSessionsOverview.mockReturnValue({})
     mockUseGitInfoSnapshotMap.mockReturnValue({})
@@ -189,7 +241,6 @@ describe('App workspace deletion', () => {
     mockMovePane.mockClear()
     mockAddWorkspace.mockClear()
     mockTerminalPane.mockClear()
-    mockUseWorkspaceAttentionMonitor.mockReset()
     mockUseBrowserNotificationPermission.mockReset()
     mockUseSessionsOverview.mockReset()
     mockUseGitInfoSnapshotMap.mockReset()
@@ -285,43 +336,6 @@ describe('App workspace deletion', () => {
     await waitFor(() => {
       expect(screen.getByLabelText('Terminal focus main')).toHaveFocus()
     })
-  })
-
-  it('keeps workspace attention while another pane in that workspace still needs attention', () => {
-    currentWorkspaces = { ...workspaces, active: 'ops' }
-    mockTerminalPane.mockImplementation(({ pane }: { pane: { id: string } }) => {
-      const ctx = useContext(LayoutActionsContext)
-      return (
-        <div data-pane-id={pane.id} data-attention={ctx?.hasPaneAttention(pane.id) ? 'true' : undefined}>
-          <button onClick={() => ctx?.onPaneAttention('main')}>Notify main</button>
-          <button onClick={() => ctx?.onPaneAttention('side')}>Notify side</button>
-          <button onClick={() => ctx?.clearPaneAttention('main')}>Clear main</button>
-          <button onClick={() => ctx?.clearPaneAttention('side')}>Clear side</button>
-        </div>
-      )
-    })
-
-    const { rerender } = render(<App />)
-    fireEvent.click(screen.getByRole('button', { name: 'Notify main' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Notify side' }))
-
-    expect(screen.getByRole('tab', { name: /^Dev\b/ })).toHaveAttribute('data-attention', 'true')
-
-    currentWorkspaces = workspaces
-    rerender(<App />)
-
-    expect(document.querySelector('[data-pane-id="main"]')).toHaveAttribute('data-attention', 'true')
-    expect(document.querySelector('[data-pane-id="side"]')).toHaveAttribute('data-attention', 'true')
-
-    // Both visible panes render the same mock controls, so target the first one.
-    fireEvent.click(screen.getAllByRole('button', { name: 'Clear main' })[0])
-
-    expect(document.querySelector('[data-pane-id="main"]')).not.toHaveAttribute('data-attention')
-    expect(document.querySelector('[data-pane-id="side"]')).toHaveAttribute('data-attention', 'true')
-
-    fireEvent.click(screen.getAllByRole('button', { name: 'Clear side' })[0])
-
-    expect(document.querySelector('[data-pane-id="side"]')).not.toHaveAttribute('data-attention')
   })
 
   it('asks in the app\'s own dialog before deleting a workspace, and does not block on window.confirm', () => {
@@ -595,52 +609,83 @@ describe('App workspace deletion', () => {
     expect(await screen.findByText('Failed to move terminal: Something went wrong')).toBeInTheDocument()
   })
 
-  it('marks an inactive workspace when the attention monitor reports one of its panes', () => {
+  it('marks an inactive workspace when a task in one of its panes starts waiting', () => {
     currentWorkspaces = { ...workspaces, active: 'ops' }
-    mockUseWorkspaceAttentionMonitor.mockImplementation(({ onAttention }: { onAttention: (paneId: string) => void }) => {
-      useEffect(() => {
-        onAttention('main')
-      }, [onAttention])
-    })
-
     render(<App />)
+    emitTaskSnapshot([paneTask('a', 'main')])
+    expect(screen.getByRole('tab', { name: /^Dev\b/ })).not.toHaveAttribute('data-attention')
+
+    emitTaskChange('changed', waitingTask('a', 'main', 'w1-a'), 'busy')
 
     expect(screen.getByRole('tab', { name: /^Dev\b/ })).toHaveAttribute('data-attention', 'true')
     expect(screen.getByRole('tab', { name: /^Ops\b/ })).not.toHaveAttribute('data-attention')
   })
 
-  it('shows a browser notification with pane and workspace titles for inactive workspace attention', () => {
+  it('notifies a hidden wait once, tagged with its wait ID and without what it waits for', () => {
     currentWorkspaces = { ...workspaces, active: 'ops' }
-    mockUseWorkspaceAttentionMonitor.mockImplementation(({ onAttention }: { onAttention: (paneId: string) => void }) => {
-      useEffect(() => {
-        onAttention('main')
-      }, [onAttention])
-    })
-
     render(<App />)
+    emitTaskSnapshot([paneTask('a', 'main')])
+    emitTaskChange('changed', waitingTask('a', 'main', 'w1-a'), 'busy')
 
-    expect(window.Notification).toHaveBeenCalledWith('Agent confirmation requested', {
-      body: 'main in Dev',
-    })
+    expect(window.Notification).toHaveBeenCalledTimes(1)
+    expect(window.Notification).toHaveBeenCalledWith('Agent waiting', { body: 'claude on Local: project', tag: 'w1-a' })
+
+    // A reconnect's snapshot carries the same wait: not notified again.
+    emitTaskSnapshot([waitingTask('a', 'main', 'w1-a')])
+    expect(window.Notification).toHaveBeenCalledTimes(1)
+
+    // A later wait of the same task is.
+    emitTaskChange('changed', paneTask('a', 'main'), 'wait')
+    emitTaskChange('changed', waitingTask('a', 'main', 'w1-b'), 'busy')
+    expect(window.Notification).toHaveBeenCalledTimes(2)
+    expect(window.Notification).toHaveBeenLastCalledWith('Agent waiting', { body: 'claude on Local: project', tag: 'w1-b' })
   })
 
-  it('switches to the relevant workspace when the browser notification is clicked', () => {
+  it('does not notify a wait again after the tab reloads', () => {
     currentWorkspaces = { ...workspaces, active: 'ops' }
+    const { unmount } = render(<App />)
+    emitTaskSnapshot([waitingTask('a', 'main', 'w1-a')])
+    expect(window.Notification).toHaveBeenCalledTimes(1)
+    unmount()
+
+    taskEventsMock.state = { store: null, status: 'connecting' }
+    render(<App />)
+    emitTaskSnapshot([waitingTask('a', 'main', 'w1-a'), waitingTask('b', 'side', 'w1-b')])
+    expect(window.Notification).toHaveBeenCalledTimes(2)
+    expect(window.Notification).toHaveBeenLastCalledWith('Agent waiting', expect.objectContaining({ tag: 'w1-b' }))
+  })
+
+  it('reveals the pane when the notification is clicked: its workspace, out from behind a maximized pane', () => {
     const focusSpy = vi.spyOn(window, 'focus').mockImplementation(() => {})
     mockSetActiveWorkspace.mockResolvedValue(undefined)
-
-    mockUseWorkspaceAttentionMonitor.mockImplementation(({ onAttention }: { onAttention: (paneId: string) => void }) => {
-      useEffect(() => {
-        onAttention('main')
-      }, [onAttention])
+    mockTerminalPane.mockImplementation(({ pane }: { pane: { id: string } }) => {
+      const ctx = useContext(LayoutActionsContext)
+      return (
+        <div
+          data-pane-id={pane.id}
+          data-maximized={ctx?.maximizedPaneId === pane.id ? 'true' : 'false'}
+          data-attention={ctx?.hasPaneAttention(pane.id) ? 'true' : undefined}
+        >
+          <button onClick={() => ctx?.onMaximize(pane.id)}>Maximize {pane.id}</button>
+        </div>
+      )
     })
+    vi.spyOn(document, 'hasFocus').mockReturnValue(true)
 
     render(<App />)
-    notificationInstance?.onclick?.()
+    fireEvent.click(screen.getByRole('button', { name: 'Maximize side' }))
+    emitTaskSnapshot([waitingTask('a', 'main', 'w1-a')])
+    expect(window.Notification).toHaveBeenCalledTimes(1)
+    expect(document.querySelector('[data-pane-id="main"]')).toHaveAttribute('data-attention', 'true')
+
+    act(() => notificationInstance?.onclick?.())
 
     expect(focusSpy).toHaveBeenCalled()
     expect(mockSetActiveWorkspace).toHaveBeenCalledWith('dev')
     expect(notificationInstance?.close).toHaveBeenCalled()
+    expect(document.querySelector('[data-pane-id="side"]')).toHaveAttribute('data-maximized', 'false')
+    expect(document.querySelector('[data-pane-id="main"]')).not.toHaveAttribute('data-attention')
+    expect(document.querySelector('[data-pane-id="main"]')).toHaveClass('panemux-pane-task-flash')
   })
 
   it('logs workspace switch failures from notification clicks', async () => {
@@ -650,61 +695,207 @@ describe('App workspace deletion', () => {
     vi.spyOn(window, 'focus').mockImplementation(() => {})
     mockSetActiveWorkspace.mockRejectedValueOnce(switchError)
 
-    mockUseWorkspaceAttentionMonitor.mockImplementation(({ onAttention }: { onAttention: (paneId: string) => void }) => {
-      useEffect(() => {
-        onAttention('main')
-      }, [onAttention])
-    })
-
     render(<App />)
-    notificationInstance?.onclick?.()
+    emitTaskSnapshot([waitingTask('a', 'main', 'w1-a')])
+    act(() => notificationInstance?.onclick?.())
     await Promise.resolve()
 
     expect(consoleErrorSpy).toHaveBeenCalledWith(switchError)
   })
 
-  it('does not mark the active workspace tab when attention comes from the active workspace', () => {
-    currentWorkspaces = { ...workspaces, active: 'dev' }
-    mockUseWorkspaceAttentionMonitor.mockImplementation(({ onAttention }: { onAttention: (paneId: string) => void }) => {
-      useEffect(() => {
-        onAttention('main')
-      }, [onAttention])
+  it('does not notify a wait whose pane is on screen while the browser is active, but still marks the pane', () => {
+    vi.spyOn(document, 'hasFocus').mockReturnValue(true)
+    mockTerminalPane.mockImplementation(({ pane }: { pane: { id: string } }) => {
+      const ctx = useContext(LayoutActionsContext)
+      return <div data-pane-id={pane.id} data-attention={ctx?.hasPaneAttention(pane.id) ? 'true' : undefined} />
     })
 
     render(<App />)
+    emitTaskSnapshot([waitingTask('a', 'main', 'w1-a')])
 
+    expect(window.Notification).not.toHaveBeenCalled()
+    expect(document.querySelector('[data-pane-id="main"]')).toHaveAttribute('data-attention', 'true')
     expect(screen.getByRole('tab', { name: /^Dev\b/ })).not.toHaveAttribute('data-attention')
-    expect(screen.getByRole('tab', { name: /^Ops\b/ })).not.toHaveAttribute('data-attention')
   })
 
-  it('does not request browser notification permission when attention is reported', () => {
+  it('does not notify a wait that starts before the workspaces are loaded, even once they are', () => {
+    vi.spyOn(document, 'hasFocus').mockReturnValue(true)
+    mockTerminalPane.mockImplementation(({ pane }: { pane: { id: string } }) => {
+      const ctx = useContext(LayoutActionsContext)
+      return <div data-pane-id={pane.id} data-attention={ctx?.hasPaneAttention(pane.id) ? 'true' : undefined} />
+    })
+    currentWorkspaces = null
+
+    const { rerender } = render(<App />)
+    emitTaskSnapshot([waitingTask('a', 'main', 'w1-a')])
+    currentWorkspaces = workspaces
+    rerender(<App />)
+
+    expect(window.Notification).not.toHaveBeenCalled()
+    expect(document.querySelector('[data-pane-id="main"]')).toHaveAttribute('data-attention', 'true')
+  })
+
+  it('neither notifies nor marks a wait its host has not answered for, and marks the one still there once it does', () => {
+    vi.spyOn(document, 'hasFocus').mockReturnValue(false)
+    mockTerminalPane.mockImplementation(({ pane }: { pane: { id: string } }) => {
+      const ctx = useContext(LayoutActionsContext)
+      return <div data-pane-id={pane.id} data-attention={ctx?.hasPaneAttention(pane.id) ? 'true' : undefined} />
+    })
+
+    render(<App />)
+    // Observation resumed: the snapshot keeps what was last observed, with
+    // the host not answered yet.
+    emitTaskSnapshot([waitingTask('a', 'main', 'w1-stale'), waitingTask('b', 'side', 'w1-b')], [{ name: '', status: 'pending' }])
+    expect(document.querySelector('[data-pane-id="main"]')).not.toHaveAttribute('data-attention')
+    expect(document.querySelector('[data-pane-id="side"]')).not.toHaveAttribute('data-attention')
+
+    // The host answers: its status first, then that the stale wait had ended.
+    taskFrameSeq += 1
+    emitTaskFrame({ type: 'host', epoch: 'e0', seq: taskFrameSeq, op: 'changed', host: { name: '', status: 'ok' } })
+    emitTaskChange('changed', paneTask('a', 'main'), 'wait')
+
+    expect(window.Notification).not.toHaveBeenCalled()
+    expect(document.querySelector('[data-pane-id="main"]')).not.toHaveAttribute('data-attention')
+    expect(document.querySelector('[data-pane-id="side"]')).toHaveAttribute('data-attention', 'true')
+  })
+
+  it('resolves a notification click against where the task is shown at the click', () => {
+    vi.spyOn(window, 'focus').mockImplementation(() => {})
+    vi.spyOn(document, 'hasFocus').mockReturnValue(false)
+
+    render(<App />)
+    emitTaskSnapshot([waitingTask('a', 'nowhere', 'w1-a')])
+    expect(window.Notification).toHaveBeenCalledTimes(1)
+    emitTaskChange('changed', waitingTask('a', 'side', 'w1-a'), 'wait')
+
+    act(() => notificationInstance?.onclick?.())
+
+    expect(mockSetActiveWorkspace).toHaveBeenCalledWith('dev')
+    expect(screen.queryByTestId('task-card-a')).not.toBeInTheDocument()
+  })
+
+  it('notifies a wait whose pane is on screen when the browser is not active', () => {
+    vi.spyOn(document, 'hasFocus').mockReturnValue(false)
+    render(<App />)
+    emitTaskSnapshot([waitingTask('a', 'main', 'w1-a')])
+    expect(window.Notification).toHaveBeenCalledTimes(1)
+  })
+
+  it('marks the pane but neither notifies nor asks for permission when it is not granted', () => {
+    currentWorkspaces = { ...workspaces, active: 'ops' }
     Object.defineProperty(window.Notification, 'permission', {
       configurable: true,
       value: 'default',
     })
-    mockUseWorkspaceAttentionMonitor.mockImplementation(({ onAttention }: { onAttention: (paneId: string) => void }) => {
-      useEffect(() => {
-        onAttention('main')
-      }, [onAttention])
-    })
 
     render(<App />)
+    emitTaskSnapshot([waitingTask('a', 'main', 'w1-a')])
 
     expect(window.Notification.requestPermission).not.toHaveBeenCalled()
     expect(window.Notification).not.toHaveBeenCalled()
+    expect(screen.getByRole('tab', { name: /^Dev\b/ })).toHaveAttribute('data-attention', 'true')
   })
 
-  it('does not show a browser notification when attention is already visible', () => {
-    currentWorkspaces = { ...workspaces, active: 'dev' }
-    mockUseWorkspaceAttentionMonitor.mockImplementation(({ onAttention }: { onAttention: (paneId: string, showBrowserNotification?: boolean) => void }) => {
-      useEffect(() => {
-        onAttention('main', false)
-      }, [onAttention])
-    })
+  it('clears the attention when the wait ends wherever it was answered, and while it reads unknown', () => {
+    currentWorkspaces = { ...workspaces, active: 'ops' }
+    render(<App />)
+    emitTaskSnapshot([waitingTask('a', 'main', 'w1-a')])
+    const dev = () => screen.getByRole('tab', { name: /^Dev\b/ })
+    expect(dev()).toHaveAttribute('data-attention', 'true')
+
+    emitTaskChange('changed', paneTask('a', 'main', 'unknown'), 'wait')
+    expect(dev()).not.toHaveAttribute('data-attention')
+    emitTaskChange('changed', waitingTask('a', 'main', 'w1-a'), 'unknown')
+    expect(dev()).toHaveAttribute('data-attention', 'true')
+
+    emitTaskChange('changed', paneTask('a', 'main', 'busy'), 'wait')
+    expect(dev()).not.toHaveAttribute('data-attention')
+
+    emitTaskChange('changed', waitingTask('a', 'main', 'w1-b'), 'busy')
+    expect(dev()).toHaveAttribute('data-attention', 'true')
+    emitTaskChange('removed', waitingTask('a', 'main', 'w1-b'), 'wait')
+    expect(dev()).not.toHaveAttribute('data-attention')
+  })
+
+  it('keeps a pane marked while another task in it still waits', () => {
+    currentWorkspaces = { ...workspaces, active: 'ops' }
+    render(<App />)
+    emitTaskSnapshot([waitingTask('a', 'main', 'w1-a'), waitingTask('b', 'main', 'w1-b')])
+
+    emitTaskChange('changed', paneTask('a', 'main', 'idle'), 'wait')
+    expect(screen.getByRole('tab', { name: /^Dev\b/ })).toHaveAttribute('data-attention', 'true')
+
+    emitTaskChange('changed', paneTask('b', 'main', 'idle'), 'wait')
+    expect(screen.getByRole('tab', { name: /^Dev\b/ })).not.toHaveAttribute('data-attention')
+  })
+
+  it('notifies a waiting task no pane shows, and opens the dashboard on it when clicked', async () => {
+    vi.spyOn(window, 'focus').mockImplementation(() => {})
+    const daemonTask = {
+      id: 'local:codex:d1', host: '', agent: 'codex', session_id: 'd1', cwd: '/workspace/user/other',
+      state: 'wait', waiting_for: 'input needed', wait_id: 'e1-e0-3',
+      location: { kind: 'daemon', attachable: false },
+    }
+    mockUseTasks.mockReturnValue(tasksStateWith([{ ...daemonTask, state: 'busy', waiting_for: undefined, wait_id: undefined }]))
 
     render(<App />)
+    emitTaskSnapshot([daemonTask])
+    expect(window.Notification).toHaveBeenCalledWith('Agent waiting', { body: 'codex on Local: other', tag: 'e1-e0-3' })
 
-    expect(window.Notification).not.toHaveBeenCalled()
+    act(() => notificationInstance?.onclick?.())
+
+    const card = await screen.findByTestId('task-card-local:codex:d1')
+    await waitFor(() => expect(card).toHaveAttribute('data-selected', 'true'))
+    expect(card).toHaveClass('td-card-flash')
+  })
+
+  it('does not notify a wait the dashboard on screen lists, and notifies one it does not', () => {
+    vi.spyOn(document, 'hasFocus').mockReturnValue(true)
+    mockUseTasks.mockReturnValue(tasksStateWith([paneTask('listed', 'nowhere')]))
+
+    render(<App />)
+    fireEvent.keyDown(window, { key: 's', shiftKey: true, ctrlKey: true, metaKey: true })
+    expect(screen.getByTestId('task-card-listed')).toBeInTheDocument()
+
+    emitTaskSnapshot([waitingTask('listed', 'nowhere', 'w1-l'), waitingTask('unlisted', 'main', 'w1-u')])
+
+    expect(window.Notification).toHaveBeenCalledTimes(1)
+    expect(window.Notification).toHaveBeenCalledWith('Agent waiting', expect.objectContaining({ tag: 'w1-u' }))
+  })
+
+  it('does not mark a pane again for a wait already cleared in this tab', () => {
+    mockTerminalPane.mockImplementation(({ pane }: { pane: { id: string } }) => {
+      const ctx = useContext(LayoutActionsContext)
+      return (
+        <div data-pane-id={pane.id} data-attention={ctx?.hasPaneAttention(pane.id) ? 'true' : undefined}>
+          <button onClick={() => ctx?.clearPaneAttention(pane.id)}>Clear {pane.id}</button>
+        </div>
+      )
+    })
+
+    const { unmount } = render(<App />)
+    emitTaskSnapshot([waitingTask('a', 'main', 'w1-a'), waitingTask('b', 'side', 'w1-b')])
+    fireEvent.click(screen.getByRole('button', { name: 'Clear main' }))
+    expect(document.querySelector('[data-pane-id="main"]')).not.toHaveAttribute('data-attention')
+    expect(document.querySelector('[data-pane-id="side"]')).toHaveAttribute('data-attention', 'true')
+
+    unmount()
+    taskEventsMock.state = { store: null, status: 'connecting' }
+    render(<App />)
+    emitTaskSnapshot([waitingTask('a', 'main', 'w1-a'), waitingTask('b', 'side', 'w1-b')])
+    expect(document.querySelector('[data-pane-id="main"]')).not.toHaveAttribute('data-attention')
+    expect(document.querySelector('[data-pane-id="side"]')).toHaveAttribute('data-attention', 'true')
+  })
+
+  it('clears a workspace\'s attention when the workspace is selected', () => {
+    currentWorkspaces = { ...workspaces, active: 'ops' }
+    render(<App />)
+    emitTaskSnapshot([waitingTask('a', 'main', 'w1-a'), waitingTask('b', 'ops-main', 'w1-b')])
+    expect(screen.getByRole('tab', { name: /^Dev\b/ })).toHaveAttribute('data-attention', 'true')
+
+    fireEvent.click(screen.getByRole('tab', { name: /^Dev\b/ }))
+
+    expect(screen.getByRole('tab', { name: /^Dev\b/ })).not.toHaveAttribute('data-attention')
   })
 
   it('does not show the Agent Board button when agent_board is disabled', () => {
@@ -769,7 +960,6 @@ describe('App adding an SSH host from the pane settings dialog', () => {
   let addSSHConfigHost: ReturnType<typeof paneSettings.defaults>['addSSHConfigHost']
 
   beforeEach(() => {
-    mockUseWorkspaceAttentionMonitor.mockImplementation(() => {})
     mockUseBrowserNotificationPermission.mockImplementation(() => {})
     mockUseSessionsOverview.mockReturnValue({})
     mockUseGitInfoSnapshotMap.mockReturnValue({})
@@ -788,7 +978,6 @@ describe('App adding an SSH host from the pane settings dialog', () => {
 
   afterEach(() => {
     paneSettings.value = paneSettings.defaults()
-    mockUseWorkspaceAttentionMonitor.mockReset()
     mockUseBrowserNotificationPermission.mockReset()
     mockUseSessionsOverview.mockReset()
     mockUseGitInfoSnapshotMap.mockReset()
@@ -910,7 +1099,6 @@ describe('App adding an SSH host from the pane settings dialog', () => {
 describe('App task dashboard layer', () => {
   beforeEach(() => {
     currentWorkspaces = workspaces
-    mockUseWorkspaceAttentionMonitor.mockImplementation(() => {})
     mockUseBrowserNotificationPermission.mockImplementation(() => {})
     mockUseSessionsOverview.mockReturnValue({})
     mockUseGitInfoSnapshotMap.mockReturnValue({})

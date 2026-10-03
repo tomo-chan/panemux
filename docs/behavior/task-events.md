@@ -238,16 +238,24 @@ it from that store.
   Open ([Opening a task](tasks.md#opening-a-task)): a tmux task to the `tmux` / `ssh_tmux` pane on its
   session, a task outside tmux to the `local` / `ssh` pane its `pane_id` names. Every task in one tmux
   session matches the same pane. A codex daemon task, or one outside tmux in no pane, matches none.
-- A matched pane gets attention when its task starts a wait: an `added` frame in `wait`, a `changed`
-  frame into `wait`, or a `changed` frame with a new `wait_id`. A task already waiting in a snapshot
-  gives its pane attention too, so a reload shows it again — unless that `wait_id` was already cleared
-  in this tab.
+- A matched pane has attention while its task is in `wait` on a host that is `ok`, unless that
+  `wait_id` was cleared in this tab. Attention is read from the store as it stands after each frame,
+  not kept from one frame to the next, so a reload shows a wait that is still current again.
+- **A wait on a host that is not `ok` gives no attention.** Such a host's tasks are as last observed
+  ([Hosts](#hosts)), and while observation was stopped they are what was kept from before
+  ([Lifecycle](#lifecycle)): a snapshot after a reload has every host `pending`, and a wait in it
+  may already have been answered. It shows once the host answers with the task still in `wait`. The
+  host's `ok` frame comes before the difference it found, so a wait that had ended shows for no longer
+  than the frames between the two.
 - Attention clears as described in [Agent attention notifications](notifications.md#agent-attention-notifications):
-  the pane on focus or click, the workspace tab on selecting the workspace — and, in addition, when the
-  task's wait ends, wherever it was answered: a `changed` frame to `busy`, `idle` or `run`, or
-  `removed`. A pane that shows another task still waiting keeps its attention. A change to `unknown`
-  does not clear it, since a state file being rewritten can read as `unknown` for one observation, and
-  neither does a failing host, which publishes no task change ([Hosts](#hosts)).
+  the pane on focus or click, the workspace tab on selecting the workspace — and, in addition, whenever
+  the task is no longer in `wait` on an `ok` host, wherever it was answered: a `changed` frame to
+  `busy`, `idle`, `run` or `unknown`, `removed`, or its host turning `pending`, `connecting` or
+  `error`. A pane that shows another task still waiting keeps its attention. Attention that went
+  with `unknown` or a failing host comes back when the task is seen in `wait` with that `wait_id`
+  again, unless it was cleared in this tab meanwhile.
+- The `wait_id`s whose attention a person cleared are kept in the tab's session storage, under the
+  same rules as the notified ones below, which is what keeps a reload from showing them again.
 
 #### Browser notifications
 
@@ -255,6 +263,16 @@ it from that store.
   [Agent attention notifications](notifications.md#agent-attention-notifications). A wait is visible
   when the browser is active and either its pane is on screen, or the task dashboard is on screen and
   lists the task. A task that matches no pane is therefore visible only on the dashboard.
+- A wait is notified only when it starts while its host is `ok`: a frame that starts it, or a
+  snapshot that has it with its host `ok`. A wait that a snapshot has under a host that is not `ok` is
+  not notified, and is not judged again when that host answers — its host's `ok` frame comes before
+  the difference it found, so the tab cannot tell at that point whether the wait is still current. A
+  wait that began while observation was stopped is still notified: when the host answers, it is
+  published as a change from what was kept.
+- A wait that starts before the tab has loaded its workspaces is not notified, and not recorded: the
+  tab cannot yet tell whether its pane is on screen. This is the moment after a page load or reload; a
+  wait started then, or still unnotified in its first snapshot, is not notified by this tab, but its
+  pane and workspace keep their attention.
 - **Each tab decides and notifies on its own; tabs do not coordinate.** Every tab judges visibility
   from its own screen, so two tabs showing panemux can both notify the same wait.
 - A tab records the `wait_id`s it has notified in its session storage, which survives a reload of
@@ -262,11 +280,19 @@ it from that store.
   again. The record drops the IDs no longer in a snapshot and keeps at most the 500 newest. Without
   session storage the record lives in the page's memory and a reload may notify again. A new
   `wait_id` — a later wait of the same task — is notified again.
+- A wait is recorded only once its notification is shown. While permission is not granted nothing is
+  shown and nothing is recorded, so a wait still going on after permission is granted is notified by
+  a reconnect's snapshot that has it with its host still `ok` (observation kept running). A snapshot
+  after observation stopped — a reload of the only tab — has its host `pending` and does not notify
+  it, nor does the host's answer: a wait that began before permission was granted is then not
+  notified by that tab, though its pane flashes. A wait that begins after permission is granted is
+  notified as usual.
 - The notification's `tag` is the `wait_id`, so a notification of the same wait that is still shown is
   replaced rather than stacked.
 - The notification names the agent, the host and the task's directory name only: not what the task
   waits for (`waiting_for`), and no conversation text or prompt.
-- Clicking it brings the app forward. With a matched pane, the pane's workspace is selected, a
+- Clicking it brings the app forward. The task is matched where the stream last placed it, at the
+  click rather than when it was notified. With a matched pane, the pane's workspace is selected, a
   maximized pane hiding it is restored, and it is focused, briefly outlined and its attention cleared.
   Without one, the task dashboard opens with any filter hiding the task cleared, and the task is
   selected and highlighted.
@@ -275,8 +301,10 @@ it from that store.
 
 The dashboard lists tasks from [`GET /api/tasks`](tasks.md#get-apitasks), which adds what the stream
 does not carry: stopped sessions, git and pull request details, records and summaries. A task's
-`state`, `waiting_for` and wait come from the stream whenever the stream has that task, so a change
-shows as soon as it is published rather than at the dashboard's next collection.
+`state`, `waiting_for`, wait and `status_since` come from the stream whenever the stream is live and
+has that task, so a change, and the time spent in the new state, shows as soon as it is published
+rather than at the dashboard's next collection. A frame that omits `status_since` means the time is
+not known, so the dashboard shows none rather than the collected time of an earlier state.
 
 ## Related Documents
 

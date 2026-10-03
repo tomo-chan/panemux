@@ -3,7 +3,7 @@
 // statusDotStyle/pillStyle) and formats the status snapshot's updated_at
 // timestamp for BoardDashboardPanel. Kept as pure functions in utils/ (not
 // coverage-gated, unlike hooks/ and schemas/, but still worth testing
-// directly per the existing agentAttention.ts precedent).
+// directly like the other pure modules there).
 
 const STATE_COLORS: Record<string, string> = {
   working: '#7bd88f',

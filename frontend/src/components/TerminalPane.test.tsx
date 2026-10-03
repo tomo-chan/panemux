@@ -195,7 +195,6 @@ function makeCtx(overrides: Partial<LayoutActionsContextValue> = {}): LayoutActi
     dragSourcePaneId: null,
     setDragSourcePaneId: vi.fn(),
     displayConfig: { show_header: true, show_status_bar: false },
-    onPaneAttention: vi.fn(),
     clearPaneAttention: vi.fn(),
     hasPaneAttention: vi.fn(() => false),
     activePaneId: null,
