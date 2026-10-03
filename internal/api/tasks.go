@@ -15,6 +15,7 @@ import (
 
 	"panemux/internal/config"
 	"panemux/internal/session"
+	"panemux/internal/taskevents"
 	"panemux/internal/tasks"
 )
 
@@ -240,6 +241,23 @@ func (h *Handler) SetTaskService(svc *tasks.Service) {
 	previous.Close()
 }
 
+// taskEventSource is what the task event publisher observes: the handler's
+// task collector, as it is at each observation, so SetTaskService reaches
+// it too.
+type taskEventSource struct{ h *Handler }
+
+func (s taskEventSource) Hosts() []string { return s.h.tasks.Hosts() }
+
+func (s taskEventSource) CollectHostLive(ctx context.Context, name string) (tasks.HostResult, []tasks.Task) {
+	return s.h.tasks.CollectHostLive(ctx, name)
+}
+
+// TaskEventSource is the task collector as the task event publisher
+// (internal/taskevents) observes it.
+func (h *Handler) TaskEventSource() taskevents.Source {
+	return taskEventSource{h}
+}
+
 // Close releases what the handler holds open across requests: the task
 // dashboard's per-host connections.
 func (h *Handler) Close() {
@@ -288,27 +306,6 @@ func (h *Handler) GetTasks(w http.ResponseWriter, r *http.Request) {
 		applyTaskRecords(resp.Tasks, records)
 	}
 	writeJSON(w, resp)
-}
-
-// tasksAttentionResponse answers GET /api/tasks/attention: the hosts and
-// their running tasks, without anything GetTasks adds to them.
-type tasksAttentionResponse struct {
-	Hosts []tasks.HostResult `json:"hosts"`
-	Tasks []tasks.Task       `json:"tasks"`
-}
-
-// GetTasksAttention is the lightweight collection the input-wait
-// notifications poll (issue #278): the running tasks on every host, each
-// waiting one with its wait signature. It looks up no git or pull request,
-// reads no task records, makes no summaries and lists no stopped sessions,
-// and like GetTasks collects only when asked and refuses a cross-site
-// request before collecting.
-func (h *Handler) GetTasksAttention(w http.ResponseWriter, r *http.Request) {
-	if refuseCrossSite(w, r) {
-		return
-	}
-	snapshot := h.tasks.CollectAttention(r.Context())
-	writeJSON(w, tasksAttentionResponse{Hosts: snapshot.Hosts, Tasks: snapshot.Tasks})
 }
 
 // addTaskLabels adds rec's labels to what is already recorded for its task,
@@ -368,6 +365,12 @@ func taskGitFor(task tasks.Task, info *taskGitInfo) *taskGitInfo {
 // <img> on any page the operator has open could otherwise trigger. See
 // docs/security/command-execution.md, "Task dashboard collection".
 func refuseCrossSite(w http.ResponseWriter, r *http.Request) bool {
+	return RefuseCrossSite(w, r)
+}
+
+// RefuseCrossSite is refuseCrossSite for the task event stream, which
+// internal/ws serves: opening it starts observing every host.
+func RefuseCrossSite(w http.ResponseWriter, r *http.Request) bool {
 	if isCrossSiteRequest(r) {
 		http.Error(w, "cross-site request refused", http.StatusForbidden)
 		return true
@@ -379,13 +382,17 @@ func refuseCrossSite(w http.ResponseWriter, r *http.Request) bool {
 // site made.
 const secFetchSiteCrossSite = "cross-site"
 
+// secFetchSiteSameSite is the Sec-Fetch-Site value of a request another
+// origin of the same site made: another port on the same host, for one.
+const secFetchSiteSameSite = "same-site"
+
 // isCrossSiteRequest uses what a browser adds to every request it makes on a
 // page's behalf: Sec-Fetch-Site (sent on every request by current browsers,
 // images included) and Origin (sent on cross-origin requests and on POST).
 // A request carrying neither is not from a browser page and is allowed.
 func isCrossSiteRequest(r *http.Request) bool {
 	switch r.Header.Get("Sec-Fetch-Site") {
-	case secFetchSiteCrossSite, "same-site":
+	case secFetchSiteCrossSite, secFetchSiteSameSite:
 		return true
 	}
 	origin := r.Header.Get("Origin")

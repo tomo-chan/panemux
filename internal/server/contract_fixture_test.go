@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 	"panemux/internal/commandcenter"
 	"panemux/internal/config"
 	"panemux/internal/session"
+	"panemux/internal/taskevents"
 	"panemux/internal/tasks"
 )
 
@@ -301,28 +303,6 @@ var contractFixtures = map[string]contractFixture{
 		return rr.Body.Bytes(), nil
 	}},
 
-	// The input-wait notifications' collection (issue #278) over the same
-	// hosts as "tasks": the running tasks only, with the waiting one's
-	// wait_signature, and nothing the dashboard adds.
-	"tasks-attention": {capture: func(t *testing.T) ([]byte, map[string]string) {
-		e := newAPIEnv(t)
-		e.srv.api.SetTaskService(tasks.New(tasks.Options{
-			Hosts: func() []string { return []string{"build-box", "gpu-box"} },
-			Dial: func(name string) (tasks.Conn, error) {
-				if name == "build-box" {
-					return fixtureTaskConn{}, nil
-				}
-				return nil, errors.New("dial tcp: i/o timeout")
-			},
-			RunLocal: func(context.Context, string) ([]byte, error) {
-				return []byte(fixtureLocalTaskCollection), nil
-			},
-		}))
-		rr := e.do(t, http.MethodGet, "/api/tasks/attention", "")
-		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
-		return rr.Body.Bytes(), nil
-	}},
-
 	// A summary asked for once the poll has made it: the answer for a log
 	// that has not changed is the one already made (issue #258).
 	"task-summary": {capture: func(t *testing.T) ([]byte, map[string]string) {
@@ -493,6 +473,8 @@ var contractFixtures = map[string]contractFixture{
 	}},
 
 	"ws-board-command-frames": {capture: captureBoardCommandFrames},
+
+	"ws-task-events-frames": {capture: captureTaskEventFrames},
 }
 
 // fixtureStoppedSessionID is the stopped session fixtureLaunchService's
@@ -1210,4 +1192,128 @@ func TestAPIContractFixtures_ContainNoMachinePaths(t *testing.T) {
 			}
 		})
 	}
+}
+
+// captureTaskEventFrames records GET /ws/tasks/events (issue #293): a
+// snapshot, and each kind of task and host frame. The panemux host answers
+// fixtureLocalTaskCollection first and then the same collection with its
+// waiting task busy, its outside-tmux task waiting and its codex process 104
+// gone; gpu-box fails to dial. The second subscriber's snapshot therefore
+// carries a waiting task outside tmux.
+//
+// The hosts are observed concurrently, so which frame comes when, and so
+// each frame's seq, differs between runs. The frames are picked by what they
+// say rather than by position, and their seq is renumbered in the order they
+// are recorded: a normalization of a value, like the epoch's.
+func captureTaskEventFrames(t *testing.T) ([]byte, map[string]string) {
+	t.Helper()
+
+	previous := taskEventOptions
+	taskEventOptions = taskevents.Options{Interval: 10 * time.Millisecond}
+	t.Cleanup(func() { taskEventOptions = previous })
+	e := newWSEnv(t, nil)
+	var observations atomic.Int32
+	later := strings.Replace(fixtureLocalTaskCollection, `"status":"waiting"`, `"status":"busy"`, 1)
+	later = strings.Replace(later, `"cwd":"/workspace/user/panemux-docs","status":"busy"`,
+		`"cwd":"/workspace/user/panemux-docs","status":"waiting","waitingFor":"permission"`, 1)
+	later = strings.Replace(later, "104 1 codex\n", "", 1)
+	e.srv.api.SetTaskService(tasks.New(tasks.Options{
+		Hosts: func() []string { return []string{"gpu-box"} },
+		Dial:  func(string) (tasks.Conn, error) { return nil, errors.New("dial tcp: i/o timeout") },
+		RunLocal: func(context.Context, string) ([]byte, error) {
+			if observations.Add(1) == 1 {
+				return []byte(fixtureLocalTaskCollection), nil
+			}
+			return []byte(later), nil
+		},
+	}))
+
+	conn, _ := e.dial(t, "/ws/tasks/events")
+	require.NotNil(t, conn)
+	first := readRawControl(t, conn)
+
+	picked, epoch := pickTaskEventFrames(t, conn)
+
+	// A second subscriber's snapshot, once every host has answered.
+	second, _ := e.dial(t, "/ws/tasks/events")
+	require.NotNil(t, second)
+	snapshot := readRawControl(t, second)
+
+	frames := append([]json.RawMessage{first, snapshot}, picked...)
+	return renumberTaskEventFrames(t, frames), map[string]string{epoch: fixtureEpoch}
+}
+
+// renumberTaskEventFrames sets each frame's seq to its position, and
+// returns the frames as one JSON array.
+func renumberTaskEventFrames(t *testing.T, frames []json.RawMessage) []byte {
+	t.Helper()
+	renumbered := make([]map[string]any, len(frames))
+	for i, raw := range frames {
+		require.NoError(t, json.Unmarshal(raw, &renumbered[i]))
+		renumbered[i]["seq"] = i
+	}
+	out, err := json.Marshal(renumbered)
+	require.NoError(t, err)
+	return out
+}
+
+// taskEventFrameShape is what pickTaskEventFrames reads of a frame to pick it.
+type taskEventFrameShape struct {
+	Host *struct {
+		Name   string `json:"name"`
+		Status string `json:"status"`
+	} `json:"host"`
+	Task *struct {
+		ID    string `json:"id"`
+		State string `json:"state"`
+	} `json:"task"`
+	Type      string `json:"type"`
+	Epoch     string `json:"epoch"`
+	Op        string `json:"op"`
+	PrevState string `json:"prev_state"`
+}
+
+// pickTaskEventFrames reads conn until it has seen one frame of each kind
+// captureTaskEventFrames records, and returns them in that order with the
+// stream's epoch.
+func pickTaskEventFrames(t *testing.T, conn *websocket.Conn) ([]json.RawMessage, string) {
+	t.Helper()
+	const waitingTask = "local:claude:7c21e0a4"
+	const outsideTask = "local:claude:b41f9d20"
+	const goneTask = "local:codex:pid-104"
+	wanted := []func(f taskEventFrameShape) bool{
+		func(f taskEventFrameShape) bool {
+			return f.Type == "host" && f.Host.Name == "" && f.Host.Status == "ok"
+		},
+		func(f taskEventFrameShape) bool {
+			return f.Type == "host" && f.Host.Name == "gpu-box" && f.Host.Status == "error"
+		},
+		func(f taskEventFrameShape) bool {
+			return f.Type == "task" && f.Op == "added" && f.Task.ID == waitingTask && f.Task.State == "wait"
+		},
+		func(f taskEventFrameShape) bool {
+			return f.Type == "task" && f.Op == "added" && f.Task.ID == outsideTask
+		},
+		func(f taskEventFrameShape) bool {
+			return f.Type == "task" && f.Op == "changed" && f.Task.ID == waitingTask && f.PrevState == "wait"
+		},
+		func(f taskEventFrameShape) bool {
+			return f.Type == "task" && f.Op == "removed" && f.Task.ID == goneTask
+		},
+	}
+	picked := make([]json.RawMessage, len(wanted))
+	epoch := ""
+	for remaining := len(wanted); remaining > 0; {
+		raw := readRawControl(t, conn)
+		var f taskEventFrameShape
+		require.NoError(t, json.Unmarshal(raw, &f))
+		epoch = f.Epoch
+		for i, match := range wanted {
+			if picked[i] == nil && match(f) {
+				picked[i] = raw
+				remaining--
+			}
+		}
+	}
+	return picked, epoch
 }

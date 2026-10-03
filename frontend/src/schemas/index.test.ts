@@ -30,7 +30,7 @@ import {
   BoardMessageSchema,
   BoardMessagesResponseSchema,
   TasksResponseSchema,
-  TasksAttentionResponseSchema,
+  TaskEventFrameSchema,
   TaskAutolinkSchema,
   TaskRecordSchema,
   TaskLaunchedSchema,
@@ -38,7 +38,7 @@ import {
   TaskSummarySchema,
 } from './index'
 
-describe('TasksAttentionResponseSchema', () => {
+describe('TaskSchema wait_signature', () => {
   const waiting = {
     id: 'local:claude:7c21e0a4',
     host: '',
@@ -50,29 +50,85 @@ describe('TasksAttentionResponseSchema', () => {
     location: { kind: 'none', attachable: false },
   }
 
-  it('accepts the hosts and the running tasks, a waiting one signed', () => {
-    const result = TasksAttentionResponseSchema.safeParse({
-      hosts: [{ name: '', status: 'ok', collected_at: '2026-09-25T12:00:00Z' }, { name: 'gpu-box', status: 'connecting' }],
-      tasks: [waiting, { ...waiting, id: 'b', state: 'busy', wait_signature: undefined }],
-    })
-    expect(result.success).toBe(true)
+  // efficacy:exempt moved from the removed TasksAttentionResponseSchema tests; it pins TaskSchema,
+  // which this branch does not change
+  it('accepts a signed wait and rejects an empty or non-string signature', () => {
+    expect(TasksResponseSchema.safeParse({ hosts: [], tasks: [waiting] }).success).toBe(true)
+    for (const wait_signature of ['', 42]) {
+      expect(TasksResponseSchema.safeParse({ hosts: [], tasks: [{ ...waiting, wait_signature }] }).success).toBe(false)
+    }
+  })
+})
+
+describe('TaskEventFrameSchema', () => {
+  const position = { epoch: '9f2c41d07ab35e88', seq: 121 }
+  const view = {
+    id: 'ssh:gpu-box:codex:0199a6',
+    host: 'gpu-box',
+    agent: 'codex',
+    session_id: '0199a6',
+    cwd: '/workspace/user/project',
+    state: 'wait',
+    waiting_for: 'input needed',
+    wait_id: 'e1-9f2c41d07ab35e88-121',
+    status_since: '2026-10-02T09:59:58Z',
+    location: { kind: 'tmux', tmux_session: 'task-0199', attachable: true },
+  }
+
+  it('accepts a snapshot, with or without tasks, and every host status', () => {
+    for (const status of ['pending', 'ok', 'connecting']) {
+      expect(TaskEventFrameSchema.safeParse({ type: 'snapshot', ...position, hosts: [{ name: '', status }], tasks: [] }).success)
+        .toBe(true)
+    }
+    expect(TaskEventFrameSchema.safeParse({
+      type: 'snapshot',
+      ...position,
+      hosts: [{ name: 'gpu-box', status: 'error', error: 'dial tcp: i/o timeout' }],
+      tasks: [view],
+    }).success).toBe(true)
   })
 
-  it('rejects an empty or non-string wait_signature', () => {
-    for (const wait_signature of ['', 42]) {
-      expect(TasksAttentionResponseSchema.safeParse({ hosts: [], tasks: [{ ...waiting, wait_signature }] }).success)
-        .toBe(false)
+  it('needs a snapshot to carry hosts and tasks', () => {
+    expect(TaskEventFrameSchema.safeParse({ type: 'snapshot', ...position, hosts: [] }).success).toBe(false)
+    expect(TaskEventFrameSchema.safeParse({ type: 'snapshot', ...position, tasks: [] }).success).toBe(false)
+  })
+
+  it('accepts each task op, with prev_state on changed and removed', () => {
+    expect(TaskEventFrameSchema.safeParse({ type: 'task', ...position, op: 'added', task: view }).success).toBe(true)
+    for (const op of ['changed', 'removed']) {
+      expect(TaskEventFrameSchema.safeParse({ type: 'task', ...position, op, prev_state: 'busy', task: view }).success)
+        .toBe(true)
     }
   })
 
-  it('needs both hosts and tasks', () => {
-    expect(TasksAttentionResponseSchema.safeParse({ hosts: [] }).success).toBe(false)
-    expect(TasksAttentionResponseSchema.safeParse({ tasks: [] }).success).toBe(false)
+  it('rejects a stopped task, an unknown op and a task frame without its task', () => {
+    expect(TaskEventFrameSchema.safeParse({ type: 'task', ...position, op: 'added', task: { ...view, state: 'stop' } })
+      .success).toBe(false)
+    expect(TaskEventFrameSchema.safeParse({ type: 'task', ...position, op: 'changed', prev_state: 'stop', task: view })
+      .success).toBe(false)
+    expect(TaskEventFrameSchema.safeParse({ type: 'task', ...position, op: 'moved', task: view }).success).toBe(false)
+    expect(TaskEventFrameSchema.safeParse({ type: 'task', ...position, op: 'added' }).success).toBe(false)
   })
 
-  it('is what GET /api/tasks carries too', () => {
-    expect(TasksResponseSchema.safeParse({ hosts: [], tasks: [waiting] }).success).toBe(true)
-    expect(TasksResponseSchema.safeParse({ hosts: [], tasks: [{ ...waiting, wait_signature: '' }] }).success).toBe(false)
+  it('accepts each host op', () => {
+    for (const op of ['added', 'changed', 'removed']) {
+      expect(TaskEventFrameSchema.safeParse({ type: 'host', ...position, op, host: { name: 'gpu-box', status: 'pending' } })
+        .success).toBe(true)
+    }
+  })
+
+  it('rejects an unknown type, a missing epoch and a negative or fractional seq', () => {
+    expect(TaskEventFrameSchema.safeParse({ type: 'history', ...position }).success).toBe(false)
+    const host = { type: 'host', op: 'changed', host: { name: '', status: 'ok' } }
+    expect(TaskEventFrameSchema.safeParse({ ...host, seq: 1 }).success).toBe(false)
+    for (const seq of [-1, 1.5]) {
+      expect(TaskEventFrameSchema.safeParse({ ...host, epoch: position.epoch, seq }).success).toBe(false)
+    }
+  })
+
+  it('rejects an empty wait_id', () => {
+    expect(TaskEventFrameSchema.safeParse({ type: 'task', ...position, op: 'added', task: { ...view, wait_id: '' } })
+      .success).toBe(false)
   })
 })
 

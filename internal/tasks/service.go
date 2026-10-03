@@ -224,6 +224,21 @@ func (s *Service) CollectAttention(ctx context.Context) Snapshot {
 	return s.collectHosts(ctx, names, s.collectHostAttention)
 }
 
+// Hosts is the ssh_connections hosts collected from, besides the panemux
+// host, sorted. A connection to a host no longer listed is closed, as a
+// collection across every host would.
+func (s *Service) Hosts() []string {
+	names := s.hostNames()
+	s.forgetHostsExcept(names)
+	return names
+}
+
+// CollectHostLive is CollectAttention for one host ("" is the panemux
+// host): the task event publisher observes each host on a cycle of its own.
+func (s *Service) CollectHostLive(ctx context.Context, name string) (HostResult, []Task) {
+	return s.collectHostAttention(ctx, name)
+}
+
 // collectHosts runs collect for the panemux host and each of names at once.
 func (s *Service) collectHosts(ctx context.Context, names []string,
 	collect func(ctx context.Context, name string) (HostResult, []Task),

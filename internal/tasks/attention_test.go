@@ -176,3 +176,56 @@ func TestRunLocal_AttentionScriptSkipsStoppedSessions(t *testing.T) {
 	assert.Empty(t, raw.Transcripts)
 	assert.Empty(t, raw.CodexRollouts)
 }
+
+// The task event publisher observes each host on its own cycle, so it
+// collects one host at a time; it reads the same live part of the collection.
+func TestCollectHostLive_IsOneHostOfTheAttentionCollection(t *testing.T) {
+	good := &fakeConn{output: attentionOutput()}
+	dialer := &fakeDialer{conns: []*fakeConn{good}}
+	var scripts []string
+	svc := New(Options{
+		Hosts: func() []string { return []string{"alpha", ""} },
+		Dial:  func(name string) (Conn, error) { return dialByName(name, dialer) },
+		RunLocal: func(_ context.Context, script string) ([]byte, error) {
+			scripts = append(scripts, script)
+			return attentionOutput(), nil
+		},
+		Now: (&clock{now: collectedAt}).Now,
+	})
+	defer svc.Close()
+
+	assert.Equal(t, []string{"alpha"}, svc.Hosts(), "the panemux host is not a configured host")
+
+	result, live := svc.CollectHostLive(context.Background(), "")
+	assert.Equal(t, HostOK, result.Status)
+	assert.Equal(t, []string{attentionScript}, scripts)
+	require.Len(t, live, 1)
+	assert.Equal(t, "local:claude:live-sess", live[0].ID)
+
+	result, live = svc.CollectHostLive(context.Background(), "alpha")
+	assert.Equal(t, "alpha", result.Name)
+	assert.Equal(t, HostOK, result.Status)
+	require.Len(t, live, 1)
+	assert.Equal(t, "ssh:alpha:claude:live-sess", live[0].ID)
+	assert.Equal(t, []string{attentionScript}, good.stdins)
+}
+
+// Reading the hosts forgets the connection of one no longer configured.
+func TestServiceHosts_ForgetsRemovedHosts(t *testing.T) {
+	conn := &fakeConn{output: attentionOutput()}
+	dialer := &fakeDialer{conns: []*fakeConn{conn}}
+	hosts := []string{"alpha"}
+	svc := New(Options{
+		Hosts:    func() []string { return hosts },
+		Dial:     func(name string) (Conn, error) { return dialByName(name, dialer) },
+		RunLocal: localOutput(attentionOutput(), nil),
+		Now:      (&clock{now: collectedAt}).Now,
+	})
+	defer svc.Close()
+	svc.CollectHostLive(context.Background(), "alpha")
+	require.NotNil(t, svc.openConn("alpha"))
+
+	hosts = nil
+	assert.Empty(t, svc.Hosts())
+	assert.Nil(t, svc.openConn("alpha"))
+}

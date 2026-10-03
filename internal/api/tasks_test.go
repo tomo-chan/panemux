@@ -702,7 +702,6 @@ func TestSetTaskService_ClosesTheOneItReplaces(t *testing.T) {
 func taskRouteRequests() []*http.Request {
 	return []*http.Request{
 		httptest.NewRequest(http.MethodGet, "/api/tasks", nil),
-		httptest.NewRequest(http.MethodGet, "/api/tasks/attention", nil),
 		httptest.NewRequest(http.MethodPost, "/api/tasks/hosts/gpu-box/reconnect", nil),
 		httptest.NewRequest(http.MethodPut, "/api/tasks/records",
 			strings.NewReader(`{"host":"","agent":"claude","session_id":"s","done":true}`)),
@@ -765,7 +764,7 @@ func TestTaskRoutes_RefuseCrossSiteRequests(t *testing.T) {
 				}
 			}
 			if _, statErr := os.Stat(recordsPath); tc.allowed {
-				assert.Equal(t, 2, collections, "GET /api/tasks and GET /api/tasks/attention")
+				assert.Equal(t, 1, collections, "GET /api/tasks")
 				assert.NoError(t, statErr)
 			} else {
 				assert.Zero(t, collections, "a refused request collects nothing")
@@ -986,4 +985,25 @@ func TestTaskGitInfos_ALookupTheRequestAbandonedIsNotCached(t *testing.T) {
 
 	h.taskGitInfos(context.Background(), list, collected)
 	assert.Equal(t, 2, lookups, "a completed lookup is cached")
+}
+
+// The task event publisher observes the handler's collector as it is at each
+// observation: the ssh_connections hosts, and one host's running tasks.
+func TestTaskEventSource_ObservesTheCurrentCollector(t *testing.T) {
+	cfg := defaultTestConfig()
+	cfg.SSHConnections = map[string]config.SSHConnection{"gpu-box": {Host: "gpu.invalid"}}
+	h := NewHandler(cfg, session.NewManager(), nil, nil)
+	defer h.Close()
+	src := h.TaskEventSource()
+
+	h.SetTaskService(tasks.New(tasks.Options{
+		Hosts:    h.taskHostNames,
+		RunLocal: func(context.Context, string) ([]byte, error) { return taskCollection("replaced", ""), nil },
+	}))
+
+	assert.Equal(t, []string{"gpu-box"}, src.Hosts())
+	result, live := src.CollectHostLive(context.Background(), "")
+	assert.Equal(t, tasks.HostOK, result.Status)
+	require.Len(t, live, 1)
+	assert.Equal(t, "local:claude:replaced", live[0].ID)
 }
