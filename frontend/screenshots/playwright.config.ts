@@ -16,6 +16,9 @@ export default defineConfig({
   workers: 1,
   reporter: 'list',
   outputDir: '../../test-results/screenshots',
+  // Stops the tmux server the runner started: it daemonizes, so stopping
+  // the web server below leaves it running.
+  globalTeardown: './global-teardown.ts',
   use: {
     ...devices['Desktop Chrome'],
     ...(chromiumExecutablePath ? { launchOptions: { executablePath: chromiumExecutablePath } } : {}),

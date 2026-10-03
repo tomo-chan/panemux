@@ -90,6 +90,40 @@ expect 0 'a path that only contains a trigger as a substring' \
 	"docs/frontend/src/components/note.md${nl}vendor/frontend/index.html${nl}"
 
 
+# ── A rename is read as both of its paths ───────────────────────────────────
+
+expect 1 'a component moved out of components/ lists its old path' \
+	"frontend/src/components/PaneHeader.tsx${nl}frontend/src/panes/PaneHeader.tsx${nl}" \
+	'frontend/src/components/PaneHeader.tsx'
+
+# Given a base revision, the checker reads the diff itself, and must do so
+# with rename detection off: `git diff --name-only` otherwise prints only a
+# moved file's new path, and a component moved out of components/ and
+# restyled in the same pull request would pass unseen.
+checks=$((checks + 1))
+repo=$(mktemp -d)
+(
+	set -e
+	cd "$repo"
+	git init -q
+	git -c user.name=t -c user.email=t@example.com commit -q --allow-empty -m base
+	mkdir -p frontend/src/components
+	printf 'export const Foo = () => null\n%.0s' 1 2 3 4 5 6 7 8 >frontend/src/components/Foo.tsx
+	git add . && git -c user.name=t -c user.email=t@example.com commit -q -m add
+	mkdir -p frontend/src/panes
+	git mv frontend/src/components/Foo.tsx frontend/src/panes/Foo.tsx
+	echo '// color: red' >>frontend/src/panes/Foo.tsx
+	git -c user.name=t -c user.email=t@example.com commit -qam move
+) >/dev/null 2>&1
+output=$(cd "$repo" && sh "$checker" HEAD~1 </dev/null 2>&1)
+got=$?
+rm -rf "$repo"
+case "$got:$output" in
+1:*frontend/src/components/Foo.tsx*) pass 'a base revision diffs without rename detection' ;;
+*) fail "a base revision diffs without rename detection: wanted exit 1 naming the old path, got $got" "$output" ;;
+esac
+
+
 if [ "$failures" -ne 0 ]; then
 	echo "screenshots-check tests: $failures of $checks failed"
 	exit 1

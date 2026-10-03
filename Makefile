@@ -61,9 +61,11 @@ screenshots:
 
 # Whether a pull request that changes what the screenshots show retook them is
 # decided in CI (.github/workflows/screenshots.yml) from the pull request's
-# diff, by scripts/screenshots_check.sh. These are that checker's own tests.
+# diff, by scripts/screenshots_check.sh. These are that checker's own tests,
+# and those of the capture's staging helpers (frontend/screenshots/).
 test-screenshots-check:
 	sh scripts/screenshots_check_test.sh
+	sh frontend/screenshots/screenshots-env_test.sh
 
 # ── Performance observation (not a gate) ──────────────────────────────────────
 #

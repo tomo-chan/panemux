@@ -6,15 +6,24 @@
 # from the machine that generates them (DEVELOPMENT.md's path-sanitization
 # rule):
 #
-# - HOME is a throwaway directory. bash reads its .bashrc, whose prompt names
-#   no real user or host; tmux reads its .tmux.conf, whose status line drops
-#   the default hostname; git reads its .gitconfig.
+# - HOME is a throwaway directory, and the XDG and git configuration
+#   variables are cleared (screenshots-env.sh's shot_isolate_env), so
+#   nothing reads the developer's own configuration through them. bash reads
+#   the fake HOME's .bashrc, whose prompt names no real user or host; tmux
+#   reads only its .tmux.conf, whose status line drops the default hostname;
+#   git reads only its .gitconfig.
 # - The panes' working directory is /tmp/sample-project, a git repository
 #   created here with placeholder commits and a github.com/example remote.
 # - tmux runs on a private socket (TMUX_TMPDIR), so a tmux server the
-#   developer already has is neither shown nor touched.
+#   developer already has is neither shown nor touched. The server
+#   daemonizes and so outlives panemux; global-teardown.ts stops it.
 # - The Agent Board reads a stub agmsg installation (the e2e suite's own
 #   fixture scripts) seeded with placeholder messages.
+#
+# /tmp/sample-project is a fixed path because the images show it. It, and
+# the other directories below, are emptied only when they carry the marker
+# this script leaves in them; anything else at those paths stops the run
+# untouched. A lock keeps two runs from emptying each other's.
 #
 # The task dashboard is not staged here: the collection lists every claude
 # process of the user running this script, a developer's real sessions
@@ -25,18 +34,23 @@ unset PANEMUX_PANE_ID TMUX
 SHOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 E2E_DIR="$SHOT_DIR/../e2e"
 
-SHOT_ROOT="${TMPDIR:-/tmp}/panemux-screenshots"
+. "$SHOT_DIR/screenshots-env.sh"
+
+SHOT_ROOT="$(shot_root)"
 SHOT_HOME="$SHOT_ROOT/home"
 SHOT_PROJECT=/tmp/sample-project
 # Must match showcase.yml's agent_board.agmsg_path.
 SHOT_AGMSG_DIR=/tmp/panemux-screenshots-agmsg
 
+# Held until panemux, which this shell execs into, exits.
+shot_lock /tmp/panemux-screenshots.lock $$
+
 export TMUX_TMPDIR="$SHOT_ROOT/tmux"
-if command -v tmux >/dev/null 2>&1; then
-    tmux kill-server 2>/dev/null || true
-fi
-rm -rf "$SHOT_ROOT" "$SHOT_PROJECT" "$SHOT_AGMSG_DIR"
-mkdir -p "$SHOT_HOME" "$TMUX_TMPDIR" "$SHOT_PROJECT"
+shot_stop_tmux
+shot_claim_dir "$SHOT_ROOT"
+shot_claim_dir "$SHOT_PROJECT"
+shot_claim_dir "$SHOT_AGMSG_DIR"
+mkdir -p "$SHOT_HOME" "$TMUX_TMPDIR"
 chmod 700 "$TMUX_TMPDIR"
 
 # Built while HOME is still the real one, so npm and go use their usual
@@ -45,7 +59,7 @@ chmod 700 "$TMUX_TMPDIR"
 (cd "$SHOT_DIR/../.." && make build-frontend >/dev/null && go build -o "$SHOT_ROOT/panemux" .)
 cp "$SHOT_DIR/showcase.yml" "$SHOT_ROOT/showcase.yml"
 
-export HOME="$SHOT_HOME"
+shot_isolate_env "$SHOT_HOME"
 export SHELL=/bin/bash
 export LANG=C.UTF-8
 
@@ -75,6 +89,8 @@ GIT
 # on every run.
 cd "$SHOT_PROJECT"
 git init -q
+# The ownership marker stays out of the repository's status.
+echo "$SHOT_MARKER" >>.git/info/exclude
 git remote add origin https://github.com/example/sample-project.git
 commit() {
     GIT_AUTHOR_DATE="$1" GIT_COMMITTER_DATE="$1" git commit -q --allow-empty -m "$2"
@@ -121,7 +137,7 @@ exec sleep 900
 SERVER
 chmod +x "$HOME/dev-server"
 if command -v tmux >/dev/null 2>&1; then
-    tmux new-session -d -s sample-server -n server -c "$SHOT_PROJECT" "$HOME/dev-server"
+    shot_start_tmux -s sample-server -n server -c "$SHOT_PROJECT" "$HOME/dev-server"
 fi
 
 # The Agent Board's message store.

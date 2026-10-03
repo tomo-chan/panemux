@@ -3,8 +3,12 @@
 # Fails when a pull request changes something the documentation screenshots
 # show but does not retake them.
 #
-# Reads the changed files, one path per line, on stdin (the CI job pipes
-# `git diff --name-only <merge-base> HEAD`). A change "the images show" is a
+# Given a base revision, it reads the changed files from
+# `git diff --name-only --no-renames <base> HEAD` (what the CI job does);
+# without one, from stdin, one path per line. Rename detection stays off
+# because `--name-only` would otherwise print only a moved file's new path,
+# and a component moved out of components/ and restyled in the same pull
+# request would pass unseen. A change "the images show" is a
 # non-test file under the paths below; "retaking them" is any change under
 # docs/images/, which is where `make screenshots` writes.
 #
@@ -14,11 +18,15 @@
 # not, and a gate that fires on changes it has no opinion about gets bypassed
 # (design principle 4). DEVELOPMENT.md's rule still applies to them.
 #
-# Run with: git diff --name-only <base> HEAD | sh scripts/screenshots_check.sh
+# Run with: sh scripts/screenshots_check.sh <base>
 
 set -eu
 
-changed=$(cat)
+if [ $# -gt 0 ]; then
+	changed=$(git diff --name-only --no-renames "$1" HEAD)
+else
+	changed=$(cat)
+fi
 
 shown=$(printf '%s\n' "$changed" \
 	| grep -E '^(frontend/src/components/|frontend/src/styles/|frontend/src/App\.tsx$|frontend/index\.html$|frontend/screenshots/)' \

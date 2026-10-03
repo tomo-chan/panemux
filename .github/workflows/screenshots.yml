@@ -47,4 +47,4 @@ jobs:
         run: |
           set -eu
           merge_base=$(git merge-base "$BASE_REF" HEAD)
-          git diff --name-only "$merge_base" HEAD | sh scripts/screenshots_check.sh
+          sh scripts/screenshots_check.sh "$merge_base"

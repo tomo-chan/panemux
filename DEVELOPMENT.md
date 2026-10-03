@@ -35,18 +35,29 @@ make screenshots   # regenerates docs/images/*.png
 ```
 
 The images in `README.md` and `docs/` are captured by Playwright from a real panemux run
-(`frontend/screenshots/`) with placeholder content only: a fake `HOME`, a throwaway git repository at
-`/tmp/sample-project`, a private tmux socket, a stub agmsg store, and a fixed task list served to the
-task dashboard in place of the real collection, which would list the developer's own agent sessions.
-It needs `tmux` for the tmux pane; set `PLAYWRIGHT_CHROMIUM_EXECUTABLE` as for `make test-e2e` when
-the installed Chromium is not the one Playwright expects. It is not part of `make check`.
+(`frontend/screenshots/`) with placeholder content only: a fake `HOME` with the `XDG_*` and git
+configuration variables cleared (so neither tmux nor git reads the developer's own configuration), a
+throwaway git repository at `/tmp/sample-project`, a private tmux socket, a stub agmsg store, and a
+fixed task list served to the task dashboard in place of the real collection, which would list the
+developer's own agent sessions. It needs `tmux` for the tmux pane; set `PLAYWRIGHT_CHROMIUM_EXECUTABLE`
+as for `make test-e2e` when the installed Chromium is not the one Playwright expects. It is not part of
+`make check`.
+
+- The run empties `/tmp/sample-project`, `/tmp/panemux-screenshots-agmsg` and
+  `$TMPDIR/panemux-screenshots` only when they carry the `.panemux-screenshots` marker it leaves in
+  them; anything else at those paths stops the run untouched — move it away and run again. A lock
+  (`/tmp/panemux-screenshots.lock`) refuses a second run while one is in progress.
+- The tmux server the run starts is stopped by the capture's teardown
+  (`frontend/screenshots/global-teardown.ts`), so nothing the run started outlives it.
+- `make test-screenshots-check` tests these staging helpers (`frontend/screenshots/screenshots-env.sh`).
 
 - Any change that alters what those images show must retake them in the same change: run
   `make screenshots`, look at every image it rewrote, and commit them. This covers changes to the
   UI's components, layout, styles and text, and to the capture itself (`frontend/screenshots/`).
 - CI enforces it (`.github/workflows/screenshots.yml`): a pull request that changes
   `frontend/src/components/`, `frontend/src/App.tsx`, `frontend/src/styles/`, `frontend/index.html`
-  or `frontend/screenshots/` (test files aside) without touching `docs/images/` fails. Apply the
+  or `frontend/screenshots/` (test files aside; a file moved out of them counts under its old path)
+  without touching `docs/images/` fails. Apply the
   `screenshots-exempt` label to a change that genuinely alters nothing the images show.
 - The rule does not stop at those paths: a change under `frontend/src/hooks/`, `schemas/` or `utils/`
   that changes what is on screen needs new images too, though CI does not ask for them.
