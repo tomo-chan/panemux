@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.24.0](https://github.com/tomo-chan/panemux/compare/v0.23.0...v0.24.0) (2026-10-03)
+
+
+### Features
+
+* lightweight running-task collection and stable wait signatures for input-wait notifications ([#290](https://github.com/tomo-chan/panemux/issues/290)) ([1c706bb](https://github.com/tomo-chan/panemux/commit/1c706bbd88965cfc23d7705a042e7fe2a953bdec))
+* manage the task dashboard's hosts (ssh_connections) from the dashboard ([#282](https://github.com/tomo-chan/panemux/issues/282)) ([043a619](https://github.com/tomo-chan/panemux/commit/043a619488bd5abb8967f4dcabd70e0ab459bbfb))
+* open a temporary tmux attach for a task from the task dashboard (backend) ([#286](https://github.com/tomo-chan/panemux/issues/286)) ([c8f7b81](https://github.com/tomo-chan/panemux/commit/c8f7b8164972904b532796b44afed95c82808add))
+* project task events onto attention, notifications and the task dashboard ([#300](https://github.com/tomo-chan/panemux/issues/300)) ([f42741f](https://github.com/tomo-chan/panemux/commit/f42741f456a4a1376d8be3c30b7aaf4a9afddfe0))
+* publish task state changes from the server over /ws/tasks/events ([#299](https://github.com/tomo-chan/panemux/issues/299)) ([cb98ede](https://github.com/tomo-chan/panemux/commit/cb98ede39892f8e81416afb36ebf7d8dddeebbd6))
+* type into a waiting or idle task from a popup on the task dashboard ([#287](https://github.com/tomo-chan/panemux/issues/287)) ([01606bc](https://github.com/tomo-chan/panemux/commit/01606bcf70df7e104e268afd1c97d198aafc91b8))
+
 ## [0.23.0](https://github.com/tomo-chan/panemux/compare/v0.22.0...v0.23.0) (2026-09-29)
 
 
