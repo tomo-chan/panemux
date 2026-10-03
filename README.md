@@ -7,6 +7,8 @@
 [![Go 1.24](https://img.shields.io/badge/Go-1.24-00ADD8?logo=go)](https://golang.org)
 [![Releases](https://img.shields.io/github/v/release/tomo-chan/panemux)](https://github.com/tomo-chan/panemux/releases)
 
+![panemux in the browser: on the left, the workspace bar lists the "Development", "Review" and "Ops" workspaces with a card per pane showing its repository and branch. The "Development" workspace is split into a local shell showing git log, and on the right a tmux pane running a dev server above a local shell that ran the tests. Each pane header shows its type, title, repository and branch.](docs/images/workspace.png)
+
 ---
 
 ## Features
@@ -103,9 +105,12 @@ Common uses:
 - **Add a terminal** from the workspace bar to create a blank local pane or clone an existing pane's settings before choosing where it should be inserted.
 - **Move a pane** by dragging the handle in its header; drop it on a workspace edge to create a new outer split, or on another pane edge / divider to insert it there.
 - **Close a pane** from its header controls; the layout collapses automatically.
+- **Change a pane's settings** — type, shell, working directory, title, and whether it joins the Agent Board — with the **Pane settings** button in its header.
 - **Restart a pane** with the on-screen button if the underlying session exits.
 - **Open a linked PR** from the pane header when the current Git branch already has a GitHub pull request. For local panes, panemux can prefer the live worktree of an interactive `codex` or `claude` session, including resumed Codex sessions, and keeps the last valid sibling worktree pinned after the agent exits until a newer valid context is detected.
 - **Open VS Code** from supported panes using the pane header action. Like pane Git/PR metadata, this can prefer the live worktree of an interactive `codex` or `claude` session and keeps the last valid sibling worktree pinned after the agent exits until a newer valid context is detected.
+
+![The Pane Settings dialog open over the workspace for a local pane, with fields for type, shell, working directory and title, a "Join the agent board" checkbox, and a message delivery mode.](docs/images/pane-settings.png)
 
 ### Notifications and attention prompts
 
@@ -118,6 +123,8 @@ Common uses:
 - Notification permission is requested on the first browser interaction, instead of waiting for the first prompt.
 
 ### Task dashboard
+
+![The task dashboard: columns for waiting for input, working, idle, running / unknown and stopped, holding Claude Code and codex session cards from the local machine and an SSH host named build-box. Each card shows its directory, repository, branch, pull request and labels. The selected waiting session's detail panel shows what it is waiting for, a summary of its work, the steps remaining, and its links.](docs/images/task-dashboard.png)
 
 - Click **← Tasks** at the start of the workspace bar to see every coding-agent session on this machine and on every host under `ssh_connections`, as columns by state: waiting for input, working, idle, running / unknown, and stopped (the last 7 days, at most 50 per host). **Workspaces** goes back; the panes keep running underneath.
 - Only hosts listed under `ssh_connections` are collected from. A host that exists only in `~/.ssh/config` — including one added with **Add SSH Host** — can be opened in a pane but does not appear on the dashboard. To add it, open **Hosts…** on the dashboard and add just its name, or list the name under `ssh_connections` in `config.yaml`; the connection details are taken from `~/.ssh/config` ([SSH connections](#ssh-connections)).
@@ -160,6 +167,8 @@ message them. Two independent pieces, either of which can be used without the ot
   *"which panes are blocked?"*, *"tell every pane the branch is frozen"*.
 
 Full design lives in [docs/agent-board.md](docs/agent-board.md).
+
+![The Agent Board dashboard open on the right of the workspace: under Panes, a working "editor" pane and a waiting "tests" pane each report a summary of what they are doing and their last tool; under Messages, the two panes' latest messages to each other.](docs/images/agent-board.png)
 
 ### Prerequisites
 

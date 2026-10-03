@@ -1,0 +1,50 @@
+name: screenshots
+
+# A pull request that changes what the documentation screenshots show must
+# retake them (`make screenshots`) in the same pull request. The images are
+# not compared pixel by pixel — relative times and font rendering differ
+# between runs and machines — so this checks only that docs/images/ changed
+# alongside. Which paths count is scripts/screenshots_check.sh's decision.
+#
+# No `paths:` filter on the workflow itself, for the reason scenarios.yml
+# records: a path-filtered workflow reports no status at all on the pull
+# requests it skips. The job decides in seconds instead.
+#
+# `labeled`/`unlabeled` are in the type list because the `screenshots-exempt`
+# escape hatch below is read from the event payload; scenarios.yml explains
+# why a re-run alone would never see a newly applied label.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  retaken:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          fetch-depth: 0
+
+      # ci.yml runs neither `make test` nor `make check`, so without this step
+      # the checker's tests would be enforced only by the local pre-push hook.
+      - name: The checker's own tests
+        run: make test-screenshots-check
+
+      - name: A change the screenshots show must retake them
+        if: ${{ !contains(github.event.pull_request.labels.*.name, 'screenshots-exempt') }}
+        env:
+          BASE_REF: origin/${{ github.event.pull_request.base.ref }}
+        run: |
+          set -eu
+          merge_base=$(git merge-base "$BASE_REF" HEAD)
+          sh scripts/screenshots_check.sh "$merge_base"

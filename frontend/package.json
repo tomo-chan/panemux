@@ -11,7 +11,8 @@
     "test:watch": "vitest",
     "test:ci": "vitest run --reporter=default --reporter=junit --outputFile=../test-results/vitest.xml",
     "coverage": "vitest run --coverage",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "screenshots": "playwright test -c screenshots/playwright.config.ts"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",

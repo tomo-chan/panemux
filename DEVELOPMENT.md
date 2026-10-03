@@ -28,6 +28,45 @@ make dev-frontend   # Vite dev server on :5173
 make dev-backend    # run backend separately while the frontend proxies /api and /ws
 ```
 
+**Documentation screenshots**:
+
+```sh
+make screenshots   # regenerates docs/images/*.png
+```
+
+The images in `README.md` and `docs/` are captured by Playwright from a real panemux run
+(`frontend/screenshots/`) with placeholder content only: a fake `HOME` with the `XDG_*` and git
+configuration variables cleared (so neither tmux nor git reads the developer's own configuration), a
+throwaway git repository at `/tmp/sample-project`, a private tmux socket, a stub agmsg store, and a
+fixed task list served to the task dashboard in place of the real collection, which would list the
+developer's own agent sessions. It needs `tmux` for the tmux pane; set `PLAYWRIGHT_CHROMIUM_EXECUTABLE`
+as for `make test-e2e` when the installed Chromium is not the one Playwright expects. It is not part of
+`make check`.
+
+- The run empties `/tmp/sample-project`, `/tmp/panemux-screenshots-agmsg` and
+  `$TMPDIR/panemux-screenshots` only when they carry the `.panemux-screenshots` marker it leaves in
+  them; anything else at those paths stops the run untouched — move it away and run again. A lock
+  (`/tmp/panemux-screenshots.lock`) refuses a second run while one is in progress.
+- The tmux server the run starts is stopped by the capture's teardown
+  (`frontend/screenshots/global-teardown.ts`), so nothing the run started outlives it.
+- On macOS the panes' `/bin/bash` would announce that the default shell is now zsh; the run sets
+  `BASH_SILENCE_DEPRECATION_WARNING=1` so the images read the same on every OS. The private tmux socket
+  lives under `$TMPDIR/panemux-screenshots/tmux`, and a socket path is limited to 104 bytes on macOS
+  (108 on Linux): macOS's default per-user `$TMPDIR` fits, but one longer than about 60 characters
+  makes tmux fail with `File name too long` and stops the run — set `TMPDIR=/tmp` for it.
+- `make test-screenshots-check` tests these staging helpers (`frontend/screenshots/screenshots-env.sh`).
+
+- Any change that alters what those images show must retake them in the same change: run
+  `make screenshots`, look at every image it rewrote, and commit them. This covers changes to the
+  UI's components, layout, styles and text, and to the capture itself (`frontend/screenshots/`).
+- CI enforces it (`.github/workflows/screenshots.yml`): a pull request that changes
+  `frontend/src/components/`, `frontend/src/App.tsx`, `frontend/src/styles/`, `frontend/index.html`
+  or `frontend/screenshots/` (test files aside; a file moved out of them counts under its old path)
+  without touching `docs/images/` fails. Apply the
+  `screenshots-exempt` label to a change that genuinely alters nothing the images show.
+- The rule does not stop at those paths: a change under `frontend/src/hooks/`, `schemas/` or `utils/`
+  that changes what is on screen needs new images too, though CI does not ask for them.
+
 **Format**:
 
 ```sh
@@ -126,7 +165,7 @@ A test that genuinely should not go red without its implementation is marked `//
 - `make check` must pass before `make build`.
 - `make check` must pass before reporting implementation complete.
 - There are no exceptions for frontend-only, docs-adjacent, or "small" code changes.
-- Test commands: `make test-go`, `make test-frontend`, `make test-e2e`, `make test`, `make test-hooks`, `make test-efficacy`, `make test-scenarios-check`, `make test-docs-links`, `make test-coverage-blocks`, `make test-mutation`, `make test-model-check`
+- Test commands: `make test-go`, `make test-frontend`, `make test-e2e`, `make test`, `make test-hooks`, `make test-efficacy`, `make test-scenarios-check`, `make test-docs-links`, `make test-screenshots-check`, `make test-coverage-blocks`, `make test-mutation`, `make test-model-check`
 - Ledger command: `make check-scenarios`
 - Documentation-link command: `make check-docs-links`
 - Pull-request-only gates: `make efficacy`, `COVERAGE_BLOCKS_BASE=origin/main make coverage-blocks`, and `MUTATION_BASE=origin/main make mutation` (all three fail the build — `make mutation` warned until #180's item 6 reached stage 4; see above)
