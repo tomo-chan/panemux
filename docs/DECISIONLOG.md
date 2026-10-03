@@ -133,8 +133,10 @@ the pane/workspace attention and the browser notifications. The design is in
   or by the agent exiting — does not keep flashing. Terminal-output detection could not see a prompt
   end, so it had no such rule. A change to `unknown` does not clear it: a state file read mid-write can
   look `unknown` for one observation. Closing a browser notification already shown was not added.
-- **Observation stops 30 seconds after the last subscriber**, so a reload does not restart it, and keeps
-  its model so an unsigned wait keeps its ID across the pause.
+- **Observation stops as soon as the last subscriber leaves, and keeps its model.** A grace period (30
+  seconds was considered) would only spare a reload one extra observation per host and a moment of
+  `pending`; it was not worth a timer. Keeping the model is what matters: discarding it would give an
+  unsigned wait a new ID, and so a new notification, on every reload.
 - **The dashboard takes states from the stream but still collects every 10 seconds** for what the
   stream does not carry: stopped sessions, git and pull requests, records and summaries. Without the
   overlay a task reached from a notification could show `busy` for up to 10 seconds. Replacing the poll

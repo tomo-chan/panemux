@@ -143,8 +143,8 @@ While at least one browser tab holds `/ws/tasks/events`, `internal/taskevents` o
 with the lightweight collection, each host 5 seconds after its previous observation finished, and
 publishes the difference from what it last observed: tasks added, changed and removed, and hosts'
 statuses, each numbered by `seq` within the server's `epoch`. A new subscriber first gets a snapshot.
-A host that fails publishes only its status; its tasks stay as last observed. Observation stops 30
-seconds after the last subscriber leaves. The server publishes every state change and decides
+A host that fails publishes only its status; its tasks stay as last observed. Observation stops
+when the last subscriber leaves, keeping what it observed. The server publishes every state change and decides
 nothing about it: each tab's store feeds the task dashboard's states, the pane and workspace
 attention and the browser notifications, and the tab matches tasks to panes itself. Full behavior is
 in [Task events](behavior/task-events.md).

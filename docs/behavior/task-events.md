@@ -191,7 +191,7 @@ no history to replay.
 
 ```text
  subscribers: 0 ──open──▶ 1..n ──last close──▶ 0
- observation:  stopped ──▶ running ──30 s with none──▶ stopped (model kept)
+ observation:  stopped ──▶ running ──none left──▶ stopped (model kept)
 ```
 
 - **Observation runs only while the stream has a subscriber**, and once however many there are. The
@@ -202,10 +202,11 @@ no history to replay.
   per-host timeout ([Hosts and connections](tasks.md#hosts-and-connections)) — lengthens only its own
   cycle. The hosts are read again on every cycle, so a host added to or removed from
   `ssh_connections` is picked up.
-- **Observation stops 30 seconds after the last subscriber leaves**, so a page reload does not stop
-  and restart it. What was last observed, the epoch, `seq` and the unsigned wait IDs are kept; when
-  observation starts again every host is `pending` until it answers, and the differences from what was
-  kept are published.
+- **Observation stops when the last subscriber leaves.** A page reload therefore stops it and starts
+  it again, observing every host once more. What was last observed, the epoch, `seq` and the unsigned
+  wait IDs are kept, so a reload does not give a still-unsigned wait a new ID; when observation starts
+  again every host is `pending` until it answers, and the differences from what was kept are
+  published.
 - Publishing never waits for one subscriber, so a connection that stops reading cannot hold up the
   others. A frame is never dropped from the middle of a connection's stream: a connection that cannot
   take its frames is closed, and its tab reconnects from a fresh snapshot.
