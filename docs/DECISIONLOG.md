@@ -136,8 +136,11 @@ the pane/workspace attention and the browser notifications. The design is in
 - **Observation stops 30 seconds after the last subscriber**, so a reload does not restart it, and keeps
   its model so an unsigned wait keeps its ID across the pause.
 - **The dashboard takes states from the stream but still collects every 10 seconds** for what the
-  stream does not carry. Replacing that poll with a collection triggered by the stream is left to a
-  later change.
+  stream does not carry: stopped sessions, git and pull requests, records and summaries. Without the
+  overlay a task reached from a notification could show `busy` for up to 10 seconds. Replacing the poll
+  with a collection the stream triggers was not taken up: it is an optimization #277 does not ask for,
+  the poll runs only while the dashboard is on screen, and pull-request changes would still need a
+  slower poll of their own. It is reconsidered only if the poll's load becomes a problem.
 
 ### A lightweight collection and a stable wait signature for input-wait notifications (2026-10-02, issue #278)
 
