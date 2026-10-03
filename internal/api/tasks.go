@@ -240,10 +240,20 @@ func (h *Handler) SetTaskService(svc *tasks.Service) {
 	previous.Close()
 }
 
+// SetTaskEventOptions replaces the task event publisher with one using
+// opts, closing the one it replaces and its subscriptions. internal/server's
+// contract fixture uses it to observe more often than every 5 seconds.
+func (h *Handler) SetTaskEventOptions(opts tasks.PublisherOptions) {
+	previous := h.taskEvents
+	h.taskEvents = tasks.NewPublisher(taskEventSource{h}, opts)
+	previous.Close()
+}
+
 // Close releases what the handler holds open across requests: the task
-// dashboard's per-host connections.
+// event stream and the task dashboard's per-host connections.
 func (h *Handler) Close() {
 	h.boardAttaches.close()
+	h.taskEvents.Close()
 	h.tasks.Close()
 }
 
@@ -288,27 +298,6 @@ func (h *Handler) GetTasks(w http.ResponseWriter, r *http.Request) {
 		applyTaskRecords(resp.Tasks, records)
 	}
 	writeJSON(w, resp)
-}
-
-// tasksAttentionResponse answers GET /api/tasks/attention: the hosts and
-// their running tasks, without anything GetTasks adds to them.
-type tasksAttentionResponse struct {
-	Hosts []tasks.HostResult `json:"hosts"`
-	Tasks []tasks.Task       `json:"tasks"`
-}
-
-// GetTasksAttention is the lightweight collection the input-wait
-// notifications poll (issue #278): the running tasks on every host, each
-// waiting one with its wait signature. It looks up no git or pull request,
-// reads no task records, makes no summaries and lists no stopped sessions,
-// and like GetTasks collects only when asked and refuses a cross-site
-// request before collecting.
-func (h *Handler) GetTasksAttention(w http.ResponseWriter, r *http.Request) {
-	if refuseCrossSite(w, r) {
-		return
-	}
-	snapshot := h.tasks.CollectAttention(r.Context())
-	writeJSON(w, tasksAttentionResponse{Hosts: snapshot.Hosts, Tasks: snapshot.Tasks})
 }
 
 // addTaskLabels adds rec's labels to what is already recorded for its task,
@@ -379,13 +368,17 @@ func refuseCrossSite(w http.ResponseWriter, r *http.Request) bool {
 // site made.
 const secFetchSiteCrossSite = "cross-site"
 
+// secFetchSiteSameSite is the Sec-Fetch-Site value of a request another
+// origin of the same site made: another port on the same host, for one.
+const secFetchSiteSameSite = "same-site"
+
 // isCrossSiteRequest uses what a browser adds to every request it makes on a
 // page's behalf: Sec-Fetch-Site (sent on every request by current browsers,
 // images included) and Origin (sent on cross-origin requests and on POST).
 // A request carrying neither is not from a browser page and is allowed.
 func isCrossSiteRequest(r *http.Request) bool {
 	switch r.Header.Get("Sec-Fetch-Site") {
-	case secFetchSiteCrossSite, "same-site":
+	case secFetchSiteCrossSite, secFetchSiteSameSite:
 		return true
 	}
 	origin := r.Header.Get("Origin")

@@ -94,6 +94,11 @@ func registerRoutes(
 	// docs/security.md.
 	apiHandler.Mount(r, bearerAuthMiddleware(authToken))
 	r.Get("/ws/{sessionID}", wsHandler.ServeHTTP)
+	// The task event stream is unauthenticated like /ws/{sessionID} and
+	// GET /api/tasks, and refuses a cross-site request itself. Its two
+	// segments cannot be taken by a pane id, which /ws/{sessionID} matches
+	// as one segment. See docs/behavior/task-events.md.
+	r.Get("/ws/tasks/events", apiHandler.GetTaskEvents)
 	// /ws/board-command is only registered when the command center is
 	// enabled (commandRunner != nil) — see docs/agent-board.md's Command
 	// center section. Unlike /ws/{sessionID}, this route requires the

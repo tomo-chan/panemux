@@ -1,0 +1,205 @@
+[
+  {
+    "epoch": "0000000000000000",
+    "hosts": [
+      {
+        "name": "",
+        "status": "pending"
+      },
+      {
+        "name": "gpu-box",
+        "status": "pending"
+      }
+    ],
+    "seq": 0,
+    "tasks": [],
+    "type": "snapshot"
+  },
+  {
+    "epoch": "0000000000000000",
+    "hosts": [
+      {
+        "name": "",
+        "status": "ok"
+      },
+      {
+        "error": "connect to gpu-box: dial tcp: i/o timeout",
+        "name": "gpu-box",
+        "status": "error"
+      }
+    ],
+    "seq": 1,
+    "tasks": [
+      {
+        "agent": "claude",
+        "cwd": "/workspace/user/panemux",
+        "host": "",
+        "id": "local:claude:7c21e0a4",
+        "location": {
+          "attachable": true,
+          "kind": "tmux",
+          "tmux_session": "task-7c21"
+        },
+        "session_id": "7c21e0a4",
+        "state": "busy",
+        "status_since": "2026-01-01T00:00:00Z"
+      },
+      {
+        "agent": "claude",
+        "cwd": "/workspace/user/panemux-docs",
+        "host": "",
+        "id": "local:claude:b41f9d20",
+        "location": {
+          "attachable": false,
+          "kind": "outside",
+          "pane_id": "pane-1790000000000-a1b2c"
+        },
+        "session_id": "b41f9d20",
+        "state": "wait",
+        "status_since": "2026-01-01T00:00:00Z",
+        "wait_id": "w1-77e962da89dae067546071418c4591ff22f312ab129964fdc3f49a6e078cde77",
+        "waiting_for": "permission"
+      },
+      {
+        "agent": "claude",
+        "host": "",
+        "id": "local:claude:state-file:103.json",
+        "location": {
+          "attachable": false,
+          "kind": "outside"
+        },
+        "state": "unknown"
+      },
+      {
+        "agent": "codex",
+        "cwd": "/workspace/user/sample-web",
+        "host": "",
+        "id": "local:codex:01a0e2b9-d054-7cc2-9278-a5e25ebcc524",
+        "location": {
+          "attachable": true,
+          "kind": "tmux",
+          "tmux_session": "task-5ebcc524"
+        },
+        "session_id": "01a0e2b9-d054-7cc2-9278-a5e25ebcc524",
+        "state": "busy",
+        "status_since": "2026-01-01T00:00:00Z"
+      },
+      {
+        "agent": "codex",
+        "cwd": "/workspace/user/sample-cli",
+        "host": "",
+        "id": "local:codex:01a0e2bd-ce26-7d81-a280-90c4de0d0046",
+        "location": {
+          "attachable": false,
+          "kind": "daemon"
+        },
+        "session_id": "01a0e2bd-ce26-7d81-a280-90c4de0d0046",
+        "state": "idle",
+        "status_since": "2026-01-01T00:00:00Z"
+      }
+    ],
+    "type": "snapshot"
+  },
+  {
+    "epoch": "0000000000000000",
+    "host": {
+      "name": "",
+      "status": "ok"
+    },
+    "op": "changed",
+    "seq": 2,
+    "type": "host"
+  },
+  {
+    "epoch": "0000000000000000",
+    "host": {
+      "error": "connect to gpu-box: dial tcp: i/o timeout",
+      "name": "gpu-box",
+      "status": "error"
+    },
+    "op": "changed",
+    "seq": 3,
+    "type": "host"
+  },
+  {
+    "epoch": "0000000000000000",
+    "op": "added",
+    "seq": 4,
+    "task": {
+      "agent": "claude",
+      "cwd": "/workspace/user/panemux",
+      "host": "",
+      "id": "local:claude:7c21e0a4",
+      "location": {
+        "attachable": true,
+        "kind": "tmux",
+        "tmux_session": "task-7c21"
+      },
+      "session_id": "7c21e0a4",
+      "state": "wait",
+      "status_since": "2026-01-01T00:00:00Z",
+      "wait_id": "w1-6728c5554228dcb7cc58711bbf3636eb24a57f8348e865de9855773e17b9bb47",
+      "waiting_for": "input needed"
+    },
+    "type": "task"
+  },
+  {
+    "epoch": "0000000000000000",
+    "op": "added",
+    "seq": 5,
+    "task": {
+      "agent": "claude",
+      "cwd": "/workspace/user/panemux-docs",
+      "host": "",
+      "id": "local:claude:b41f9d20",
+      "location": {
+        "attachable": false,
+        "kind": "outside",
+        "pane_id": "pane-1790000000000-a1b2c"
+      },
+      "session_id": "b41f9d20",
+      "state": "busy",
+      "status_since": "2026-01-01T00:00:00Z"
+    },
+    "type": "task"
+  },
+  {
+    "epoch": "0000000000000000",
+    "op": "changed",
+    "prev_state": "wait",
+    "seq": 6,
+    "task": {
+      "agent": "claude",
+      "cwd": "/workspace/user/panemux",
+      "host": "",
+      "id": "local:claude:7c21e0a4",
+      "location": {
+        "attachable": true,
+        "kind": "tmux",
+        "tmux_session": "task-7c21"
+      },
+      "session_id": "7c21e0a4",
+      "state": "busy",
+      "status_since": "2026-01-01T00:00:00Z"
+    },
+    "type": "task"
+  },
+  {
+    "epoch": "0000000000000000",
+    "op": "removed",
+    "prev_state": "run",
+    "seq": 7,
+    "task": {
+      "agent": "codex",
+      "cwd": "/workspace/user/sample-api",
+      "host": "",
+      "id": "local:codex:pid-104",
+      "location": {
+        "attachable": false,
+        "kind": "outside"
+      },
+      "state": "run"
+    },
+    "type": "task"
+  }
+]

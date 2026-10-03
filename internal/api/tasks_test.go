@@ -702,7 +702,6 @@ func TestSetTaskService_ClosesTheOneItReplaces(t *testing.T) {
 func taskRouteRequests() []*http.Request {
 	return []*http.Request{
 		httptest.NewRequest(http.MethodGet, "/api/tasks", nil),
-		httptest.NewRequest(http.MethodGet, "/api/tasks/attention", nil),
 		httptest.NewRequest(http.MethodPost, "/api/tasks/hosts/gpu-box/reconnect", nil),
 		httptest.NewRequest(http.MethodPut, "/api/tasks/records",
 			strings.NewReader(`{"host":"","agent":"claude","session_id":"s","done":true}`)),
@@ -765,7 +764,7 @@ func TestTaskRoutes_RefuseCrossSiteRequests(t *testing.T) {
 				}
 			}
 			if _, statErr := os.Stat(recordsPath); tc.allowed {
-				assert.Equal(t, 2, collections, "GET /api/tasks and GET /api/tasks/attention")
+				assert.Equal(t, 1, collections, "GET /api/tasks")
 				assert.NoError(t, statErr)
 			} else {
 				assert.Zero(t, collections, "a refused request collects nothing")

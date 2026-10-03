@@ -21,6 +21,7 @@ import (
 	"panemux/internal/commandcenter"
 	"panemux/internal/homedir"
 	"panemux/internal/session"
+	"panemux/internal/tasks"
 )
 
 // This file is the /ws half of gate G3(a) in docs/quality-gateway.md, and
@@ -569,4 +570,49 @@ func newFixtureRunner(t *testing.T, claudeBin string) *commandcenter.Runner {
 			return mcpPath, func() {}, nil
 		},
 	})
+}
+
+// ── /ws/tasks/events ──────────────────────────────────────────────────────
+
+// useLocalTaskCollection points the server's task collector at a canned
+// panemux-host collection, so the stream does not read the machine running
+// the suite.
+func (e *wsEnv) useLocalTaskCollection(out string) {
+	e.srv.api.SetTaskService(tasks.New(tasks.Options{
+		RunLocal: func(context.Context, string) ([]byte, error) { return []byte(out), nil },
+	}))
+}
+
+// The stream is reachable through the real router and starts with a
+// snapshot. A pane whose id is "tasks" cannot take it: /ws/{sessionID}
+// matches one segment, and the stream's path has two.
+func TestWSIntegration_TaskEventsRoute_StreamsASnapshotBesideAPaneNamedTasks(t *testing.T) {
+	e := newWSEnv(t, nil)
+	e.useLocalTaskCollection(fixtureLocalTaskCollection)
+	e.addFakePane(t, "tasks")
+
+	conn, _ := e.dial(t, "/ws/tasks/events")
+	require.NotNil(t, conn)
+	snap := readControl(t, conn)
+	assert.Equal(t, "snapshot", snap["type"])
+
+	pane, _ := e.dial(t, "/ws/tasks")
+	require.NotNil(t, pane, "the pane route still serves the pane named tasks")
+}
+
+// Cross-site requests are refused before upgrading, through the real router.
+func TestWSIntegration_TaskEventsRoute_RefusesCrossSite(t *testing.T) {
+	e := newWSEnv(t, nil)
+	e.useLocalTaskCollection(fixtureLocalTaskCollection)
+
+	dialer := websocket.Dialer{HandshakeTimeout: wsReadTimeout}
+	for _, header := range []http.Header{
+		{"Origin": {"https://evil.example"}},
+		{"Sec-Fetch-Site": {"cross-site"}},
+	} {
+		conn, resp, err := dialer.Dial(e.wsURL("/ws/tasks/events"), header)
+		require.Error(t, err)
+		require.Nil(t, conn)
+		assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+	}
 }

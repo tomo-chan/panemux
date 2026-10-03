@@ -494,16 +494,76 @@ export const TasksResponseSchema = z.object({
 
 export type TasksResponse = z.infer<typeof TasksResponseSchema>
 
-// ── Task dashboard: GET /api/tasks/attention ───────────────────────────────
+// ── Task events: GET /ws/tasks/events ──────────────────────────────────────
 //
-// The input-wait notifications' collection (issue #278): the same hosts and
-// the running tasks only, without git, records, labels or summaries.
-export const TasksAttentionResponseSchema = z.object({
-  hosts: z.array(TaskHostSchema),
-  tasks: z.array(TaskSchema),
+// The task event stream (docs/behavior/task-events.md): a snapshot, then one
+// frame per change. A frame that fails these schemas is treated like a gap
+// in seq: the receiver discards what it holds and reconnects.
+
+// A running task's state: `stop` is never published.
+export const TaskEventStateSchema = z.enum(['busy', 'wait', 'idle', 'run', 'unknown'])
+
+export type TaskEventState = z.infer<typeof TaskEventStateSchema>
+
+export const TaskEventTaskSchema = z.object({
+  id: z.string(),
+  host: z.string(),
+  agent: z.string(),
+  session_id: z.string().optional(),
+  cwd: z.string().optional(),
+  state: TaskEventStateSchema,
+  // Only on `wait`.
+  waiting_for: z.string().optional(),
+  // Only on `wait`: the wait signature (`w1-…`), or `e1-<epoch>-<seq>` for a
+  // wait the agent did not record the start of.
+  wait_id: z.string().min(1).optional(),
+  // As of this frame; never compared.
+  status_since: z.string().optional(),
+  location: TaskLocationSchema,
 })
 
-export type TasksAttentionResponse = z.infer<typeof TasksAttentionResponseSchema>
+export type TaskEventTask = z.infer<typeof TaskEventTaskSchema>
+
+export const TaskEventHostSchema = z.object({
+  name: z.string(),
+  status: z.enum(['pending', 'ok', 'connecting', 'error']),
+  error: z.string().optional(),
+})
+
+export type TaskEventHost = z.infer<typeof TaskEventHostSchema>
+
+const TaskEventOpSchema = z.enum(['added', 'changed', 'removed'])
+
+const taskEventPosition = {
+  epoch: z.string(),
+  seq: z.number().int().nonnegative(),
+}
+
+export const TaskEventFrameSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('snapshot'),
+    ...taskEventPosition,
+    hosts: z.array(TaskEventHostSchema),
+    tasks: z.array(TaskEventTaskSchema),
+  }),
+  z.object({
+    type: z.literal('task'),
+    ...taskEventPosition,
+    op: TaskEventOpSchema,
+    // The state before a `changed` frame, or the last observed one of a
+    // `removed` task.
+    prev_state: TaskEventStateSchema.optional(),
+    task: TaskEventTaskSchema,
+  }),
+  z.object({
+    type: z.literal('host'),
+    ...taskEventPosition,
+    op: TaskEventOpSchema,
+    host: TaskEventHostSchema,
+  }),
+])
+
+export type TaskEventFrame = z.infer<typeof TaskEventFrameSchema>
 
 // ── Task dashboard: PUT /api/tasks/records ─────────────────────────────────
 //
