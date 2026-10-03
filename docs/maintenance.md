@@ -112,6 +112,18 @@ git push origin origin/main:refs/heads/release-please--branches--main --force
 
 Close the incorrect PR first, then reset the tracking branch.
 
+## E2E Failure Traces
+
+CI runs Playwright with one retry, and `playwright.config.ts` records a trace on that first retry
+(`trace: 'on-first-retry'`). When the `Test (E2E)` step of `ci.yml` fails, the next step uploads
+`frontend/test-results/` (the traces) and `frontend/playwright-report/` (the HTML report) as the
+`e2e-traces` artifact, kept for 7 days. Nothing is uploaded when the step passes.
+
+- Download it from the failed run's summary page, or with `gh run download <run-id> -n e2e-traces`.
+- Open a trace with `npx playwright show-trace <path>/trace.zip` from `frontend/`.
+- A test that failed only on its first attempt and passed on the retry fails nothing, so it leaves no
+  artifact; a retry that also failed is what a trace exists for.
+
 ## Related Documents
 
 - Developer workflow and PR rules: [../DEVELOPMENT.md](../DEVELOPMENT.md)

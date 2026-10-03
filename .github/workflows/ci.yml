@@ -91,7 +91,23 @@ jobs:
         run: cd frontend && npx playwright install --with-deps chromium
 
       - name: Test (E2E)
+        id: e2e
         run: make test-e2e
+
+      # Keep what Playwright wrote when the E2E step failed: the retry's trace
+      # (playwright.config.ts records one on the first retry) and the HTML
+      # report. Without them a failure that does not reproduce locally leaves
+      # nothing to read but the log (issue #289).
+      - name: Upload E2E traces
+        if: failure() && steps.e2e.outcome == 'failure'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: e2e-traces
+          path: |
+            frontend/test-results/
+            frontend/playwright-report/
+          retention-days: 7
+          if-no-files-found: ignore
 
       - name: Coverage (Go)
         run: make coverage-go
