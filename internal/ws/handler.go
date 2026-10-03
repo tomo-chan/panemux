@@ -252,9 +252,3 @@ func writeControlMessage(conn messageWriter, msg ControlMessage) bool {
 	data, _ := json.Marshal(msg)
 	return conn.WriteMessage(websocket.TextMessage, data) == nil
 }
-
-// CheckOrigin is the Origin check every panemux WebSocket upgrade makes,
-// for an upgrader outside this package (GET /ws/tasks/events).
-func CheckOrigin(r *http.Request) bool {
-	return checkOrigin(r)
-}

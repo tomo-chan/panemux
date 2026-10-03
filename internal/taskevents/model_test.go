@@ -1,4 +1,4 @@
-package tasks
+package taskevents
 
 import (
 	"testing"
@@ -6,26 +6,28 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"panemux/internal/tasks"
 )
 
 const testEpoch = "0123456789abcdef"
 
-func okHost(name string) HostResult {
+func okHost(name string) tasks.HostResult {
 	at := time.Unix(100, 0)
-	return HostResult{Name: name, Status: HostOK, CollectedAt: &at}
+	return tasks.HostResult{Name: name, Status: tasks.HostOK, CollectedAt: &at}
 }
 
-func liveTask(host, id string, state State) Task {
+func liveTask(host, id string, state tasks.State) tasks.Task {
 	since := time.Unix(50, 0).UTC()
-	return Task{
+	return tasks.Task{
 		ID: id, Host: host, Agent: "claude", SessionID: "s-" + id, CWD: "/workspace/user/project",
 		State: state, StatusSince: &since, PID: 4242,
-		Location: Location{Kind: LocationTmux, TmuxSession: "work", Attachable: true},
+		Location: tasks.Location{Kind: tasks.LocationTmux, TmuxSession: "work", Attachable: true},
 	}
 }
 
-func waitTask(host, id, waitingFor, signature string) Task {
-	t := liveTask(host, id, StateWait)
+func waitTask(host, id, waitingFor, signature string) tasks.Task {
+	t := liveTask(host, id, tasks.StateWait)
 	t.WaitingFor = waitingFor
 	t.WaitSignature = signature
 	return t
@@ -33,11 +35,11 @@ func waitTask(host, id, waitingFor, signature string) Task {
 
 // startedModel is a model observing the panemux host only, whose first
 // answer has been applied with tasks.
-func startedModel(t *testing.T, tasks ...Task) *eventModel {
+func startedModel(t *testing.T, observed ...tasks.Task) *eventModel {
 	t.Helper()
 	m := newEventModel(testEpoch)
 	m.syncHosts([]string{""})
-	m.applyHost("", okHost(""), tasks)
+	m.applyHost("", okHost(""), observed)
 	return m
 }
 
@@ -54,7 +56,7 @@ func TestEventModel_NewHostIsAddedPendingThenOK(t *testing.T) {
 	frames = m.applyHost("gpu-box", okHost("gpu-box"), nil)
 	require.Len(t, frames, 1)
 	assert.Equal(t, Frame{Type: FrameHost, Epoch: testEpoch, Seq: 3, Op: OpChanged,
-		Host: &HostView{Name: "gpu-box", Status: HostOK}}, frames[0])
+		Host: &HostView{Name: "gpu-box", Status: tasks.HostOK}}, frames[0])
 
 	assert.Empty(t, m.syncHosts([]string{"", "gpu-box"}), "a known host is not added again")
 	assert.Empty(t, m.applyHost("gpu-box", okHost("gpu-box"), nil), "an unchanged host publishes nothing")
@@ -63,31 +65,31 @@ func TestEventModel_NewHostIsAddedPendingThenOK(t *testing.T) {
 func TestEventModel_TaskAddedCarriesItsViewOnly(t *testing.T) {
 	m := newEventModel(testEpoch)
 	m.syncHosts([]string{""})
-	task := liveTask("", "local:claude:a", StateBusy)
+	task := liveTask("", "local:claude:a", tasks.StateBusy)
 	task.StartedAt = &time.Time{}
-	task.Log = &LogVersion{ModTime: 1, Size: 2}
+	task.Log = &tasks.LogVersion{ModTime: 1, Size: 2}
 	task.WaitingFor = "stale text from a previous wait"
 
-	frames := m.applyHost("", okHost(""), []Task{task})
+	frames := m.applyHost("", okHost(""), []tasks.Task{task})
 
 	require.Len(t, frames, 2)
 	assert.Equal(t, OpChanged, frames[0].Op)
 	assert.Equal(t, Frame{Type: FrameTask, Epoch: testEpoch, Seq: 3, Op: OpAdded, Task: &TaskView{
 		ID: "local:claude:a", Host: "", Agent: "claude", SessionID: "s-local:claude:a",
-		CWD: "/workspace/user/project", State: StateBusy, StatusSince: task.StatusSince,
-		Location: Location{Kind: LocationTmux, TmuxSession: "work", Attachable: true},
+		CWD: "/workspace/user/project", State: tasks.StateBusy, StatusSince: task.StatusSince,
+		Location: tasks.Location{Kind: tasks.LocationTmux, TmuxSession: "work", Attachable: true},
 	}}, frames[1], "waiting_for is dropped outside wait; pid, start and log are not part of the view")
 }
 
 func TestEventModel_RecollectionWithoutChangePublishesNothing(t *testing.T) {
-	m := startedModel(t, liveTask("", "local:claude:a", StateBusy))
-	again := liveTask("", "local:claude:a", StateBusy)
+	m := startedModel(t, liveTask("", "local:claude:a", tasks.StateBusy))
+	again := liveTask("", "local:claude:a", tasks.StateBusy)
 	later := time.Unix(51, 0).UTC()
 	again.StatusSince = &later
 	again.PID = 9999
-	again.Log = &LogVersion{ModTime: 5, Size: 6}
+	again.Log = &tasks.LogVersion{ModTime: 5, Size: 6}
 
-	assert.Empty(t, m.applyHost("", okHost(""), []Task{again}))
+	assert.Empty(t, m.applyHost("", okHost(""), []tasks.Task{again}))
 
 	snap := m.snapshot()
 	require.Len(t, snap.Tasks, 1)
@@ -96,47 +98,47 @@ func TestEventModel_RecollectionWithoutChangePublishesNothing(t *testing.T) {
 }
 
 func TestEventModel_StateTransitionIsOneChangedFrame(t *testing.T) {
-	m := startedModel(t, liveTask("", "local:claude:a", StateBusy))
+	m := startedModel(t, liveTask("", "local:claude:a", tasks.StateBusy))
 
-	frames := m.applyHost("", okHost(""), []Task{waitTask("", "local:claude:a", "input needed", "w1-abc")})
+	frames := m.applyHost("", okHost(""), []tasks.Task{waitTask("", "local:claude:a", "input needed", "w1-abc")})
 
 	require.Len(t, frames, 1)
 	f := frames[0]
 	assert.Equal(t, FrameTask, f.Type)
 	assert.Equal(t, OpChanged, f.Op)
 	assert.Equal(t, uint64(4), f.Seq)
-	assert.Equal(t, StateBusy, f.PrevState)
-	assert.Equal(t, StateWait, f.Task.State)
+	assert.Equal(t, tasks.StateBusy, f.PrevState)
+	assert.Equal(t, tasks.StateWait, f.Task.State)
 	assert.Equal(t, "input needed", f.Task.WaitingFor)
 	assert.Equal(t, "w1-abc", f.Task.WaitID)
 
-	assert.Empty(t, m.applyHost("", okHost(""), []Task{waitTask("", "local:claude:a", "input needed", "w1-abc")}),
+	assert.Empty(t, m.applyHost("", okHost(""), []tasks.Task{waitTask("", "local:claude:a", "input needed", "w1-abc")}),
 		"the same signed wait observed again is not a change")
 
-	frames = m.applyHost("", okHost(""), []Task{liveTask("", "local:claude:a", StateBusy)})
+	frames = m.applyHost("", okHost(""), []tasks.Task{liveTask("", "local:claude:a", tasks.StateBusy)})
 	require.Len(t, frames, 1)
-	assert.Equal(t, StateWait, frames[0].PrevState)
+	assert.Equal(t, tasks.StateWait, frames[0].PrevState)
 	assert.Empty(t, frames[0].Task.WaitID)
 	assert.Empty(t, frames[0].Task.WaitingFor)
 }
 
 func TestEventModel_UnsignedWaitID(t *testing.T) {
-	m := startedModel(t, liveTask("", "local:claude:a", StateBusy))
+	m := startedModel(t, liveTask("", "local:claude:a", tasks.StateBusy))
 
-	frames := m.applyHost("", okHost(""), []Task{waitTask("", "local:claude:a", "input needed", "")})
+	frames := m.applyHost("", okHost(""), []tasks.Task{waitTask("", "local:claude:a", "input needed", "")})
 	require.Len(t, frames, 1)
 	assert.Equal(t, "e1-"+testEpoch+"-4", frames[0].Task.WaitID, "the stream position the wait was first observed at")
 
-	assert.Empty(t, m.applyHost("", okHost(""), []Task{waitTask("", "local:claude:a", "input needed", "")}),
+	assert.Empty(t, m.applyHost("", okHost(""), []tasks.Task{waitTask("", "local:claude:a", "input needed", "")}),
 		"staying in the same wait keeps the id")
 
-	frames = m.applyHost("", okHost(""), []Task{waitTask("", "local:claude:a", "permission", "")})
+	frames = m.applyHost("", okHost(""), []tasks.Task{waitTask("", "local:claude:a", "permission", "")})
 	require.Len(t, frames, 1, "a different waiting_for is another wait")
-	assert.Equal(t, StateWait, frames[0].PrevState)
+	assert.Equal(t, tasks.StateWait, frames[0].PrevState)
 	assert.Equal(t, "e1-"+testEpoch+"-5", frames[0].Task.WaitID)
 
-	m.applyHost("", okHost(""), []Task{liveTask("", "local:claude:a", StateBusy)})
-	frames = m.applyHost("", okHost(""), []Task{waitTask("", "local:claude:a", "permission", "")})
+	m.applyHost("", okHost(""), []tasks.Task{liveTask("", "local:claude:a", tasks.StateBusy)})
+	frames = m.applyHost("", okHost(""), []tasks.Task{waitTask("", "local:claude:a", "permission", "")})
 	require.Len(t, frames, 1)
 	assert.Equal(t, "e1-"+testEpoch+"-7", frames[0].Task.WaitID, "a wait left and entered again gets a new id")
 }
@@ -146,41 +148,41 @@ func TestEventModel_SignedAndUnsignedWaitIDsDoNotMix(t *testing.T) {
 	unsigned := m.snapshot().Tasks[0].WaitID
 	require.Equal(t, "e1-"+testEpoch+"-3", unsigned)
 
-	frames := m.applyHost("", okHost(""), []Task{waitTask("", "local:claude:a", "input needed", "w1-x")})
+	frames := m.applyHost("", okHost(""), []tasks.Task{waitTask("", "local:claude:a", "input needed", "w1-x")})
 	require.Len(t, frames, 1)
 	assert.Equal(t, "w1-x", frames[0].Task.WaitID)
 
-	frames = m.applyHost("", okHost(""), []Task{waitTask("", "local:claude:a", "input needed", "")})
+	frames = m.applyHost("", okHost(""), []tasks.Task{waitTask("", "local:claude:a", "input needed", "")})
 	require.Len(t, frames, 1, "losing the signature never brings a signature back as an unsigned id")
 	assert.Equal(t, "e1-"+testEpoch+"-5", frames[0].Task.WaitID)
 }
 
 func TestEventModel_ChangeOtherThanStateIsChangedWithSameState(t *testing.T) {
-	m := startedModel(t, liveTask("", "local:claude:a", StateIdle))
-	moved := liveTask("", "local:claude:a", StateIdle)
+	m := startedModel(t, liveTask("", "local:claude:a", tasks.StateIdle))
+	moved := liveTask("", "local:claude:a", tasks.StateIdle)
 	moved.CWD = "/workspace/user/other"
 
-	frames := m.applyHost("", okHost(""), []Task{moved})
+	frames := m.applyHost("", okHost(""), []tasks.Task{moved})
 
 	require.Len(t, frames, 1)
 	assert.Equal(t, OpChanged, frames[0].Op)
-	assert.Equal(t, StateIdle, frames[0].PrevState)
+	assert.Equal(t, tasks.StateIdle, frames[0].PrevState)
 	assert.Equal(t, "/workspace/user/other", frames[0].Task.CWD)
 }
 
 func TestEventModel_RemovedAndAddedFramesAreOrdered(t *testing.T) {
-	m := startedModel(t, liveTask("", "local:claude:b", StateBusy), liveTask("", "local:claude:d", StateIdle))
+	m := startedModel(t, liveTask("", "local:claude:b", tasks.StateBusy), liveTask("", "local:claude:d", tasks.StateIdle))
 
-	frames := m.applyHost("", okHost(""), []Task{
-		liveTask("", "local:claude:c", StateBusy),
-		liveTask("", "local:claude:a", StateRun),
-		liveTask("", "local:claude:d", StateBusy),
+	frames := m.applyHost("", okHost(""), []tasks.Task{
+		liveTask("", "local:claude:c", tasks.StateBusy),
+		liveTask("", "local:claude:a", tasks.StateRun),
+		liveTask("", "local:claude:d", tasks.StateBusy),
 	})
 
 	require.Len(t, frames, 4)
 	assert.Equal(t, OpRemoved, frames[0].Op)
 	assert.Equal(t, "local:claude:b", frames[0].Task.ID)
-	assert.Equal(t, StateBusy, frames[0].PrevState, "removed carries the state last observed")
+	assert.Equal(t, tasks.StateBusy, frames[0].PrevState, "removed carries the state last observed")
 	assert.Equal(t, OpAdded, frames[1].Op)
 	assert.Equal(t, "local:claude:a", frames[1].Task.ID)
 	assert.Equal(t, OpAdded, frames[2].Op)
@@ -195,40 +197,42 @@ func TestEventModel_RemovedAndAddedFramesAreOrdered(t *testing.T) {
 func TestEventModel_StoppedTaskIsNeverPublished(t *testing.T) {
 	m := startedModel(t)
 
-	assert.Empty(t, m.applyHost("", okHost(""), []Task{liveTask("", "local:claude:a", StateStop)}))
+	assert.Empty(t, m.applyHost("", okHost(""), []tasks.Task{liveTask("", "local:claude:a", tasks.StateStop)}))
 	assert.Empty(t, m.snapshot().Tasks)
 }
 
 func TestEventModel_FailingHostKeepsItsTasksAndPublishesOnlyItsStatus(t *testing.T) {
 	m := newEventModel(testEpoch)
 	m.syncHosts([]string{"", "gpu-box"})
-	m.applyHost("gpu-box", okHost("gpu-box"), []Task{waitTask("gpu-box", "ssh:gpu-box:claude:a", "input needed", "")})
-	m.applyHost("", okHost(""), []Task{liveTask("", "local:claude:z", StateBusy)})
+	m.applyHost("gpu-box", okHost("gpu-box"),
+		[]tasks.Task{waitTask("gpu-box", "ssh:gpu-box:claude:a", "input needed", "")})
+	m.applyHost("", okHost(""), []tasks.Task{liveTask("", "local:claude:z", tasks.StateBusy)})
 	before := m.snapshot()
 
-	frames := m.applyHost("gpu-box", HostResult{Name: "gpu-box", Status: HostError, Error: "dial: timeout"}, nil)
+	failed := tasks.HostResult{Name: "gpu-box", Status: tasks.HostError, Error: "dial: timeout"}
+	frames := m.applyHost("gpu-box", failed, nil)
 	require.Len(t, frames, 1)
 	assert.Equal(t, Frame{Type: FrameHost, Epoch: testEpoch, Seq: before.Seq + 1, Op: OpChanged,
-		Host: &HostView{Name: "gpu-box", Status: HostError, Error: "dial: timeout"}}, frames[0])
-	assert.Empty(t, m.applyHost("gpu-box", HostResult{Name: "gpu-box", Status: HostError, Error: "dial: timeout"}, nil),
+		Host: &HostView{Name: "gpu-box", Status: tasks.HostError, Error: "dial: timeout"}}, frames[0])
+	assert.Empty(t, m.applyHost("gpu-box", failed, nil),
 		"the same failure again is not a change")
 
-	frames = m.applyHost("gpu-box", HostResult{Name: "gpu-box", Status: HostConnecting}, nil)
+	frames = m.applyHost("gpu-box", tasks.HostResult{Name: "gpu-box", Status: tasks.HostConnecting}, nil)
 	require.Len(t, frames, 1)
-	assert.Equal(t, &HostView{Name: "gpu-box", Status: HostConnecting}, frames[0].Host)
+	assert.Equal(t, &HostView{Name: "gpu-box", Status: tasks.HostConnecting}, frames[0].Host)
 
 	snap := m.snapshot()
 	assert.Equal(t, before.Tasks, snap.Tasks, "tasks stay as last observed while their host fails")
 
 	// The host answers again: the difference from what was kept is published,
 	// and the still-unsigned wait keeps its id.
-	frames = m.applyHost("gpu-box", okHost("gpu-box"), []Task{
+	frames = m.applyHost("gpu-box", okHost("gpu-box"), []tasks.Task{
 		waitTask("gpu-box", "ssh:gpu-box:claude:a", "input needed", ""),
-		liveTask("gpu-box", "ssh:gpu-box:claude:b", StateIdle),
+		liveTask("gpu-box", "ssh:gpu-box:claude:b", tasks.StateIdle),
 	})
 	require.Len(t, frames, 2)
 	assert.Equal(t, FrameHost, frames[0].Type)
-	assert.Equal(t, HostOK, frames[0].Host.Status)
+	assert.Equal(t, tasks.HostOK, frames[0].Host.Status)
 	assert.Equal(t, OpAdded, frames[1].Op)
 	assert.Equal(t, "ssh:gpu-box:claude:b", frames[1].Task.ID)
 	assert.Equal(t, before.Tasks[0].WaitID, m.snapshot().Tasks[0].WaitID)
@@ -237,11 +241,11 @@ func TestEventModel_FailingHostKeepsItsTasksAndPublishesOnlyItsStatus(t *testing
 func TestEventModel_RemovedHostRemovesItsTasksThenItself(t *testing.T) {
 	m := newEventModel(testEpoch)
 	m.syncHosts([]string{"", "gpu-box"})
-	m.applyHost("gpu-box", okHost("gpu-box"), []Task{
-		liveTask("gpu-box", "ssh:gpu-box:claude:a", StateBusy),
-		liveTask("gpu-box", "ssh:gpu-box:claude:b", StateIdle),
+	m.applyHost("gpu-box", okHost("gpu-box"), []tasks.Task{
+		liveTask("gpu-box", "ssh:gpu-box:claude:a", tasks.StateBusy),
+		liveTask("gpu-box", "ssh:gpu-box:claude:b", tasks.StateIdle),
 	})
-	m.applyHost("", okHost(""), []Task{liveTask("", "local:claude:z", StateBusy)})
+	m.applyHost("", okHost(""), []tasks.Task{liveTask("", "local:claude:z", tasks.StateBusy)})
 
 	frames := m.syncHosts([]string{""})
 
@@ -250,11 +254,11 @@ func TestEventModel_RemovedHostRemovesItsTasksThenItself(t *testing.T) {
 	assert.Equal(t, "ssh:gpu-box:claude:a", frames[0].Task.ID)
 	assert.Equal(t, "ssh:gpu-box:claude:b", frames[1].Task.ID)
 	assert.Equal(t, Frame{Type: FrameHost, Epoch: testEpoch, Seq: frames[1].Seq + 1, Op: OpRemoved,
-		Host: &HostView{Name: "gpu-box", Status: HostOK}}, frames[2])
+		Host: &HostView{Name: "gpu-box", Status: tasks.HostOK}}, frames[2])
 	assert.Empty(t, m.applyHost("gpu-box", okHost("gpu-box"), nil), "a result for a removed host is dropped")
 
 	snap := m.snapshot()
-	assert.Equal(t, []HostView{{Name: "", Status: HostOK}}, snap.Hosts)
+	assert.Equal(t, []HostView{{Name: "", Status: tasks.HostOK}}, snap.Hosts)
 	require.Len(t, snap.Tasks, 1)
 	assert.Equal(t, "local:claude:z", snap.Tasks[0].ID)
 }
@@ -262,7 +266,7 @@ func TestEventModel_RemovedHostRemovesItsTasksThenItself(t *testing.T) {
 func TestEventModel_MarkPendingOnlyChangesHostsNotAlreadyPending(t *testing.T) {
 	m := newEventModel(testEpoch)
 	m.syncHosts([]string{"", "gpu-box"})
-	m.applyHost("", okHost(""), []Task{waitTask("", "local:claude:a", "input needed", "")})
+	m.applyHost("", okHost(""), []tasks.Task{waitTask("", "local:claude:a", "input needed", "")})
 
 	frames := m.markPending()
 
@@ -280,12 +284,12 @@ func TestEventModel_SnapshotOrdersHostsAndTasks(t *testing.T) {
 	assert.NotNil(t, empty.Tasks)
 
 	m.syncHosts([]string{"b-host", "", "a-host"})
-	m.applyHost("b-host", okHost("b-host"), []Task{liveTask("b-host", "ssh:b-host:claude:a", StateBusy)})
-	m.applyHost("", okHost(""), []Task{liveTask("", "local:claude:z", StateBusy)})
+	m.applyHost("b-host", okHost("b-host"), []tasks.Task{liveTask("b-host", "ssh:b-host:claude:a", tasks.StateBusy)})
+	m.applyHost("", okHost(""), []tasks.Task{liveTask("", "local:claude:z", tasks.StateBusy)})
 
 	snap := m.snapshot()
 	assert.Equal(t, []HostView{
-		{Name: "", Status: HostOK}, {Name: "a-host", Status: HostPending}, {Name: "b-host", Status: HostOK},
+		{Name: "", Status: tasks.HostOK}, {Name: "a-host", Status: HostPending}, {Name: "b-host", Status: tasks.HostOK},
 	}, snap.Hosts)
 	require.Len(t, snap.Tasks, 2)
 	assert.Equal(t, "local:claude:z", snap.Tasks[0].ID)

@@ -24,6 +24,7 @@ import (
 	"panemux/internal/commandcenter"
 	"panemux/internal/config"
 	"panemux/internal/session"
+	"panemux/internal/taskevents"
 	"panemux/internal/tasks"
 )
 
@@ -1207,6 +1208,9 @@ func TestAPIContractFixtures_ContainNoMachinePaths(t *testing.T) {
 func captureTaskEventFrames(t *testing.T) ([]byte, map[string]string) {
 	t.Helper()
 
+	previous := taskEventOptions
+	taskEventOptions = taskevents.Options{Interval: 10 * time.Millisecond}
+	t.Cleanup(func() { taskEventOptions = previous })
 	e := newWSEnv(t, nil)
 	var observations atomic.Int32
 	later := strings.Replace(fixtureLocalTaskCollection, `"status":"waiting"`, `"status":"busy"`, 1)
@@ -1223,7 +1227,6 @@ func captureTaskEventFrames(t *testing.T) ([]byte, map[string]string) {
 			return []byte(later), nil
 		},
 	}))
-	e.srv.api.SetTaskEventOptions(tasks.PublisherOptions{Interval: 10 * time.Millisecond})
 
 	conn, _ := e.dial(t, "/ws/tasks/events")
 	require.NotNil(t, conn)

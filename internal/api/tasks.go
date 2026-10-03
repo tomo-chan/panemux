@@ -15,6 +15,7 @@ import (
 
 	"panemux/internal/config"
 	"panemux/internal/session"
+	"panemux/internal/taskevents"
 	"panemux/internal/tasks"
 )
 
@@ -240,20 +241,27 @@ func (h *Handler) SetTaskService(svc *tasks.Service) {
 	previous.Close()
 }
 
-// SetTaskEventOptions replaces the task event publisher with one using
-// opts, closing the one it replaces and its subscriptions. internal/server's
-// contract fixture uses it to observe more often than every 5 seconds.
-func (h *Handler) SetTaskEventOptions(opts tasks.PublisherOptions) {
-	previous := h.taskEvents
-	h.taskEvents = tasks.NewPublisher(taskEventSource{h}, opts)
-	previous.Close()
+// taskEventSource is what the task event publisher observes: the handler's
+// task collector, as it is at each observation, so SetTaskService reaches
+// it too.
+type taskEventSource struct{ h *Handler }
+
+func (s taskEventSource) Hosts() []string { return s.h.tasks.Hosts() }
+
+func (s taskEventSource) CollectHostLive(ctx context.Context, name string) (tasks.HostResult, []tasks.Task) {
+	return s.h.tasks.CollectHostLive(ctx, name)
+}
+
+// TaskEventSource is the task collector as the task event publisher
+// (internal/taskevents) observes it.
+func (h *Handler) TaskEventSource() taskevents.Source {
+	return taskEventSource{h}
 }
 
 // Close releases what the handler holds open across requests: the task
-// event stream and the task dashboard's per-host connections.
+// dashboard's per-host connections.
 func (h *Handler) Close() {
 	h.boardAttaches.close()
-	h.taskEvents.Close()
 	h.tasks.Close()
 }
 
@@ -357,6 +365,12 @@ func taskGitFor(task tasks.Task, info *taskGitInfo) *taskGitInfo {
 // <img> on any page the operator has open could otherwise trigger. See
 // docs/security/command-execution.md, "Task dashboard collection".
 func refuseCrossSite(w http.ResponseWriter, r *http.Request) bool {
+	return RefuseCrossSite(w, r)
+}
+
+// RefuseCrossSite is refuseCrossSite for the task event stream, which
+// internal/ws serves: opening it starts observing every host.
+func RefuseCrossSite(w http.ResponseWriter, r *http.Request) bool {
 	if isCrossSiteRequest(r) {
 		http.Error(w, "cross-site request refused", http.StatusForbidden)
 		return true

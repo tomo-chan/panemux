@@ -986,3 +986,24 @@ func TestTaskGitInfos_ALookupTheRequestAbandonedIsNotCached(t *testing.T) {
 	h.taskGitInfos(context.Background(), list, collected)
 	assert.Equal(t, 2, lookups, "a completed lookup is cached")
 }
+
+// The task event publisher observes the handler's collector as it is at each
+// observation: the ssh_connections hosts, and one host's running tasks.
+func TestTaskEventSource_ObservesTheCurrentCollector(t *testing.T) {
+	cfg := defaultTestConfig()
+	cfg.SSHConnections = map[string]config.SSHConnection{"gpu-box": {Host: "gpu.invalid"}}
+	h := NewHandler(cfg, session.NewManager(), nil, nil)
+	defer h.Close()
+	src := h.TaskEventSource()
+
+	h.SetTaskService(tasks.New(tasks.Options{
+		Hosts:    h.taskHostNames,
+		RunLocal: func(context.Context, string) ([]byte, error) { return taskCollection("replaced", ""), nil },
+	}))
+
+	assert.Equal(t, []string{"gpu-box"}, src.Hosts())
+	result, live := src.CollectHostLive(context.Background(), "")
+	assert.Equal(t, tasks.HostOK, result.Status)
+	require.Len(t, live, 1)
+	assert.Equal(t, "local:claude:replaced", live[0].ID)
+}

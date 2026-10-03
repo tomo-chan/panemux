@@ -46,11 +46,7 @@ type Handler struct {
 	boardCache             *board.BoardCache
 	gitInfoCacheBySession  map[string]gitInfoCacheEntry
 	tasks                  *tasks.Service
-	// taskEvents publishes the tasks' state changes to GET /ws/tasks/events.
-	// It observes h.tasks as it is at each observation, so SetTaskService
-	// and the tests that replace h.tasks reach it too.
-	taskEvents  *tasks.Publisher
-	taskRecords *tasks.RecordStore
+	taskRecords            *tasks.RecordStore
 	// pendingTaskLabels holds the labels of codex tasks started before
 	// their session IDs are known (issue #264).
 	pendingTaskLabels       *tasks.PendingLabels
@@ -196,7 +192,6 @@ func NewHandler(
 		boardCache:            boardCache,
 	}
 	h.tasks = newTaskService(h)
-	h.taskEvents = tasks.NewPublisher(taskEventSource{h}, tasks.PublisherOptions{})
 	h.taskRecords = tasks.NewRecordStore("")
 	h.pendingTaskLabels = tasks.NewPendingLabels(func() time.Time { return h.nowFn() })
 	h.taskGitLookup = h.lookupTaskGit

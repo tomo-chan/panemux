@@ -1,7 +1,6 @@
-package api
+package ws
 
 import (
-	"context"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -9,8 +8,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"panemux/internal/tasks"
-	"panemux/internal/ws"
+	"panemux/internal/taskevents"
 )
 
 // taskEventsReadLimit bounds a frame the client sends. The stream reads
@@ -26,27 +24,33 @@ const taskEventsWriteTimeout = 10 * time.Second
 var taskEventsUpgrader = websocket.Upgrader{
 	ReadBufferSize:  taskEventsReadLimit,
 	WriteBufferSize: 4096,
-	CheckOrigin:     ws.CheckOrigin,
+	CheckOrigin:     checkOrigin,
 }
 
-// taskEventSource is what the task event publisher observes: the handler's
-// task collector, as it is at each observation.
-type taskEventSource struct{ h *Handler }
-
-func (s taskEventSource) Hosts() []string { return s.h.tasks.Hosts() }
-
-func (s taskEventSource) CollectHostLive(ctx context.Context, name string) (tasks.HostResult, []tasks.Task) {
-	return s.h.tasks.CollectHostLive(ctx, name)
+// TaskEventsHandler serves the task event stream, GET /ws/tasks/events
+// (issue #293): a snapshot of the running tasks on every host, then a frame
+// per change. See docs/behavior/task-events.md.
+type TaskEventsHandler struct {
+	publisher *taskevents.Publisher
+	// refuseCrossSite answers 403 to a request another site's page made and
+	// reports whether it did; it is internal/api's rule for the task routes.
+	refuseCrossSite func(http.ResponseWriter, *http.Request) bool
 }
 
-// GetTaskEvents serves the task event stream (issue #293): a snapshot of the
-// running tasks on every host, then a frame per change. It is not
-// authenticated, like GET /api/tasks, and like it refuses a cross-site
-// request before anything is collected: subscribing starts observing every
-// host. The upgrade makes the same Origin check as /ws/{sessionID}. See
-// docs/behavior/task-events.md.
-func (h *Handler) GetTaskEvents(w http.ResponseWriter, r *http.Request) {
-	if refuseCrossSite(w, r) {
+// NewTaskEventsHandler serves publisher's stream, refusing what
+// refuseCrossSite refuses.
+func NewTaskEventsHandler(
+	publisher *taskevents.Publisher, refuseCrossSite func(http.ResponseWriter, *http.Request) bool,
+) *TaskEventsHandler {
+	return &TaskEventsHandler{publisher: publisher, refuseCrossSite: refuseCrossSite}
+}
+
+// ServeHTTP is not authenticated, like /ws/{sessionID} and GET /api/tasks,
+// and like GET /api/tasks refuses a cross-site request before anything is
+// collected: subscribing starts observing every host. The upgrade then makes
+// the same Origin check as /ws/{sessionID}.
+func (h *TaskEventsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if h.refuseCrossSite(w, r) {
 		return
 	}
 	conn, err := taskEventsUpgrader.Upgrade(w, r, nil)
@@ -57,7 +61,7 @@ func (h *Handler) GetTaskEvents(w http.ResponseWriter, r *http.Request) {
 	defer func() { _ = conn.Close() }()
 	conn.SetReadLimit(taskEventsReadLimit)
 
-	snapshot, frames, cancel := h.taskEvents.Subscribe()
+	snapshot, frames, cancel := h.publisher.Subscribe()
 	defer cancel()
 
 	closed := make(chan struct{})
@@ -90,7 +94,7 @@ func (h *Handler) GetTaskEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func writeTaskEventFrame(conn *websocket.Conn, frame tasks.Frame) bool {
+func writeTaskEventFrame(conn *websocket.Conn, frame taskevents.Frame) bool {
 	data, err := json.Marshal(frame)
 	if err != nil {
 		//coverage:exempt Frame.MarshalJSON marshals only strings, numbers and times

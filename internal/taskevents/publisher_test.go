@@ -1,4 +1,4 @@
-package tasks
+package taskevents
 
 import (
 	"context"
@@ -9,11 +9,13 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"panemux/internal/tasks"
 )
 
-// fakeEventSource answers each host's collection only when the test hands
+// fakeSource answers each host's collection only when the test hands
 // it a result, so a test decides exactly when every observation finishes.
-type fakeEventSource struct {
+type fakeSource struct {
 	answers map[string]chan hostAnswer
 	calls   map[string]int
 	// started receives a host name each time an observation of it begins.
@@ -25,12 +27,12 @@ type fakeEventSource struct {
 }
 
 type hostAnswer struct {
-	result HostResult
-	tasks  []Task
+	result tasks.HostResult
+	tasks  []tasks.Task
 }
 
-func newFakeEventSource(hosts ...string) *fakeEventSource {
-	return &fakeEventSource{
+func newFakeSource(hosts ...string) *fakeSource {
+	return &fakeSource{
 		hosts:   hosts,
 		answers: map[string]chan hostAnswer{},
 		calls:   map[string]int{},
@@ -38,19 +40,19 @@ func newFakeEventSource(hosts ...string) *fakeEventSource {
 	}
 }
 
-func (f *fakeEventSource) Hosts() []string {
+func (f *fakeSource) Hosts() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string(nil), f.hosts...)
 }
 
-func (f *fakeEventSource) setHosts(hosts ...string) {
+func (f *fakeSource) setHosts(hosts ...string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.hosts = hosts
 }
 
-func (f *fakeEventSource) answerChan(name string) chan hostAnswer {
+func (f *fakeSource) answerChan(name string) chan hostAnswer {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	ch := f.answers[name]
@@ -61,7 +63,7 @@ func (f *fakeEventSource) answerChan(name string) chan hostAnswer {
 	return ch
 }
 
-func (f *fakeEventSource) CollectHostLive(ctx context.Context, name string) (HostResult, []Task) {
+func (f *fakeSource) CollectHostLive(ctx context.Context, name string) (tasks.HostResult, []tasks.Task) {
 	ch := f.answerChan(name)
 	f.mu.Lock()
 	f.calls[name]++
@@ -72,20 +74,20 @@ func (f *fakeEventSource) CollectHostLive(ctx context.Context, name string) (Hos
 	return a.result, a.tasks
 }
 
-func (f *fakeEventSource) callCount(name string) int {
+func (f *fakeSource) callCount(name string) int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.calls[name]
 }
 
 // answer waits for an observation of name to begin and finishes it.
-func (f *fakeEventSource) answer(t *testing.T, name string, result HostResult, tasks ...Task) {
+func (f *fakeSource) answer(t *testing.T, name string, result tasks.HostResult, observed ...tasks.Task) {
 	t.Helper()
 	f.awaitStart(t, name)
-	f.answerChan(name) <- hostAnswer{result: result, tasks: tasks}
+	f.answerChan(name) <- hostAnswer{result: result, tasks: observed}
 }
 
-func (f *fakeEventSource) awaitStart(t *testing.T, name string) {
+func (f *fakeSource) awaitStart(t *testing.T, name string) {
 	t.Helper()
 	deadline := time.After(5 * time.Second)
 	for {
@@ -103,9 +105,9 @@ func (f *fakeEventSource) awaitStart(t *testing.T, name string) {
 	}
 }
 
-func newTestPublisher(t *testing.T, src EventSource) *Publisher {
+func newTestPublisher(t *testing.T, src Source) *Publisher {
 	t.Helper()
-	p := NewPublisher(src, PublisherOptions{Interval: time.Millisecond, Buffer: 16})
+	p := New(src, Options{Interval: time.Millisecond, Buffer: 16})
 	t.Cleanup(p.Close)
 	return p
 }
@@ -132,7 +134,7 @@ func assertNoFrame(t *testing.T, frames <-chan Frame) {
 }
 
 func TestPublisher_FirstSubscriberStartsObservationWithPendingHosts(t *testing.T) {
-	src := newFakeEventSource("gpu-box")
+	src := newFakeSource("gpu-box")
 	p := newTestPublisher(t, src)
 
 	snap, frames, cancel := p.Subscribe()
@@ -143,17 +145,17 @@ func TestPublisher_FirstSubscriberStartsObservationWithPendingHosts(t *testing.T
 	assert.Equal(t, []HostView{{Name: "", Status: HostPending}, {Name: "gpu-box", Status: HostPending}}, snap.Hosts)
 	assert.Empty(t, snap.Tasks)
 
-	src.answer(t, "gpu-box", okHost("gpu-box"), liveTask("gpu-box", "ssh:gpu-box:claude:a", StateBusy))
+	src.answer(t, "gpu-box", okHost("gpu-box"), liveTask("gpu-box", "ssh:gpu-box:claude:a", tasks.StateBusy))
 	f := nextFrame(t, frames)
 	assert.Equal(t, snap.Seq+1, f.Seq, "the first frame after a snapshot is seq + 1")
-	assert.Equal(t, &HostView{Name: "gpu-box", Status: HostOK}, f.Host)
+	assert.Equal(t, &HostView{Name: "gpu-box", Status: tasks.HostOK}, f.Host)
 	f = nextFrame(t, frames)
 	assert.Equal(t, OpAdded, f.Op)
 	assert.Equal(t, snap.Epoch, f.Epoch)
 }
 
 func TestPublisher_OneObservationServesEverySubscriber(t *testing.T) {
-	src := newFakeEventSource()
+	src := newFakeSource()
 	p := newTestPublisher(t, src)
 	_, a, cancelA := p.Subscribe()
 	defer cancelA()
@@ -173,7 +175,7 @@ func TestPublisher_OneObservationServesEverySubscriber(t *testing.T) {
 }
 
 func TestPublisher_SlowHostDoesNotHoldUpOthers(t *testing.T) {
-	src := newFakeEventSource("slow")
+	src := newFakeSource("slow")
 	p := newTestPublisher(t, src)
 	_, frames, cancel := p.Subscribe()
 	defer cancel()
@@ -181,17 +183,17 @@ func TestPublisher_SlowHostDoesNotHoldUpOthers(t *testing.T) {
 	src.awaitStart(t, "slow")
 	src.answer(t, "", okHost(""))
 	assert.Equal(t, "", nextFrame(t, frames).Host.Name)
-	src.answer(t, "", okHost(""), liveTask("", "local:claude:a", StateBusy))
+	src.answer(t, "", okHost(""), liveTask("", "local:claude:a", tasks.StateBusy))
 	assert.Equal(t, "local:claude:a", nextFrame(t, frames).Task.ID)
 
 	// The slow host finally answers, with a failure.
-	src.answerChan("slow") <- hostAnswer{result: HostResult{Name: "slow", Status: HostError, Error: "timeout"}}
+	src.answerChan("slow") <- hostAnswer{result: tasks.HostResult{Name: "slow", Status: tasks.HostError, Error: "timeout"}}
 	f := nextFrame(t, frames)
-	assert.Equal(t, &HostView{Name: "slow", Status: HostError, Error: "timeout"}, f.Host)
+	assert.Equal(t, &HostView{Name: "slow", Status: tasks.HostError, Error: "timeout"}, f.Host)
 }
 
 func TestPublisher_LastSubscriberLeavingStopsWithoutInterruptingAndKeepsModel(t *testing.T) {
-	src := newFakeEventSource()
+	src := newFakeSource()
 	p := newTestPublisher(t, src)
 	_, frames, cancel := p.Subscribe()
 	src.answer(t, "", okHost(""), waitTask("", "local:claude:a", "input needed", ""))
@@ -209,7 +211,9 @@ func TestPublisher_LastSubscriberLeavingStopsWithoutInterruptingAndKeepsModel(t 
 	inFlight := src.ctxs[len(src.ctxs)-1]
 	src.mu.Unlock()
 	assert.NoError(t, inFlight.Err(), "stopping does not interrupt an observation in flight")
-	src.answerChan("") <- hostAnswer{result: okHost(""), tasks: []Task{liveTask("", "local:claude:a", StateBusy)}}
+	src.answerChan("") <- hostAnswer{
+		result: okHost(""), tasks: []tasks.Task{liveTask("", "local:claude:a", tasks.StateBusy)},
+	}
 	time.Sleep(20 * time.Millisecond)
 	assert.Equal(t, 2, src.callCount(""), "no observation starts without a subscriber")
 
@@ -223,16 +227,16 @@ func TestPublisher_LastSubscriberLeavingStopsWithoutInterruptingAndKeepsModel(t 
 	assert.Equal(t, waitID, snap.Tasks[0].WaitID)
 
 	src.answer(t, "", okHost(""), waitTask("", "local:claude:a", "input needed", ""))
-	assert.Equal(t, HostOK, nextFrame(t, frames).Host.Status)
+	assert.Equal(t, tasks.HostOK, nextFrame(t, frames).Host.Status)
 	assertNoFrame(t, frames)
 }
 
 func TestPublisher_HostsAddedAndRemovedFromConfigArePickedUp(t *testing.T) {
-	src := newFakeEventSource("old")
+	src := newFakeSource("old")
 	p := newTestPublisher(t, src)
 	_, frames, cancel := p.Subscribe()
 	defer cancel()
-	src.answer(t, "old", okHost("old"), liveTask("old", "ssh:old:claude:a", StateBusy))
+	src.answer(t, "old", okHost("old"), liveTask("old", "ssh:old:claude:a", tasks.StateBusy))
 	nextFrame(t, frames)
 	nextFrame(t, frames)
 
@@ -245,30 +249,32 @@ func TestPublisher_HostsAddedAndRemovedFromConfigArePickedUp(t *testing.T) {
 	assert.Equal(t, OpRemoved, got[0].Op)
 	assert.Equal(t, "ssh:old:claude:a", got[0].Task.ID)
 	assert.Equal(t, Frame{Type: FrameHost, Epoch: got[0].Epoch, Seq: got[0].Seq + 1, Op: OpRemoved,
-		Host: &HostView{Name: "old", Status: HostOK}}, got[1])
+		Host: &HostView{Name: "old", Status: tasks.HostOK}}, got[1])
 	assert.Equal(t, &HostView{Name: "new", Status: HostPending}, got[2].Host)
 	assert.Equal(t, OpAdded, got[2].Op)
 
 	src.answer(t, "new", okHost("new"))
-	assert.Equal(t, &HostView{Name: "new", Status: HostOK}, nextFrame(t, frames).Host)
+	assert.Equal(t, &HostView{Name: "new", Status: tasks.HostOK}, nextFrame(t, frames).Host)
 }
 
 func TestPublisher_SubscriberThatCannotKeepUpIsClosedNotStalled(t *testing.T) {
-	src := newFakeEventSource()
-	p := NewPublisher(src, PublisherOptions{Interval: time.Millisecond, Buffer: 3})
+	src := newFakeSource()
+	p := New(src, Options{Interval: time.Millisecond, Buffer: 3})
 	t.Cleanup(p.Close)
 	_, slow, cancelSlow := p.Subscribe()
 	defer cancelSlow()
 	_, fast, cancelFast := p.Subscribe()
 	defer cancelFast()
 
-	src.answer(t, "", okHost(""), liveTask("", "local:claude:a", StateBusy), liveTask("", "local:claude:b", StateBusy))
+	src.answer(t, "", okHost(""),
+		liveTask("", "local:claude:a", tasks.StateBusy), liveTask("", "local:claude:b", tasks.StateBusy))
 	for i := 0; i < 3; i++ {
 		nextFrame(t, fast)
 	}
-	src.answer(t, "", okHost(""), liveTask("", "local:claude:a", StateIdle), liveTask("", "local:claude:b", StateIdle))
+	src.answer(t, "", okHost(""),
+		liveTask("", "local:claude:a", tasks.StateIdle), liveTask("", "local:claude:b", tasks.StateIdle))
 	for i := 0; i < 2; i++ {
-		assert.Equal(t, StateIdle, nextFrame(t, fast).Task.State, "the subscriber keeping up is not held back")
+		assert.Equal(t, tasks.StateIdle, nextFrame(t, fast).Task.State, "the subscriber keeping up is not held back")
 	}
 
 	for i := 0; i < 3; i++ {
@@ -279,8 +285,8 @@ func TestPublisher_SubscriberThatCannotKeepUpIsClosedNotStalled(t *testing.T) {
 }
 
 func TestPublisher_CloseEndsSubscriptionsAndCancelsObservation(t *testing.T) {
-	src := newFakeEventSource()
-	p := NewPublisher(src, PublisherOptions{Interval: time.Millisecond})
+	src := newFakeSource()
+	p := New(src, Options{Interval: time.Millisecond})
 	_, frames, cancel := p.Subscribe()
 	src.awaitStart(t, "")
 
@@ -300,13 +306,13 @@ func TestPublisher_CloseEndsSubscriptionsAndCancelsObservation(t *testing.T) {
 }
 
 func TestPublisher_DroppingTheLastSubscriberStopsObservation(t *testing.T) {
-	src := newFakeEventSource()
-	p := NewPublisher(src, PublisherOptions{Interval: time.Millisecond, Buffer: 1})
+	src := newFakeSource()
+	p := New(src, Options{Interval: time.Millisecond, Buffer: 1})
 	t.Cleanup(p.Close)
 	_, frames, cancel := p.Subscribe()
 	defer cancel()
 
-	src.answer(t, "", okHost(""), liveTask("", "local:claude:a", StateBusy))
+	src.answer(t, "", okHost(""), liveTask("", "local:claude:a", tasks.StateBusy))
 
 	time.Sleep(20 * time.Millisecond)
 	assert.Equal(t, 1, src.callCount(""), "nobody is left to observe for")
@@ -321,9 +327,9 @@ func TestFrame_MarshalJSONWritesOnlyItsTypesFields(t *testing.T) {
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"type":"snapshot","epoch":"`+testEpoch+`","seq":0,"hosts":[],"tasks":[]}`, string(snap))
 
-	task, err := json.Marshal(Frame{Type: FrameTask, Epoch: testEpoch, Seq: 5, Op: OpChanged, PrevState: StateBusy,
-		Task: &TaskView{ID: "local:claude:a", Agent: "claude", State: StateWait, WaitingFor: "input needed",
-			WaitID: "w1-x", StatusSince: &since, Location: Location{Kind: LocationOutside, PaneID: "pane-1"}}})
+	task, err := json.Marshal(Frame{Type: FrameTask, Epoch: testEpoch, Seq: 5, Op: OpChanged, PrevState: tasks.StateBusy,
+		Task: &TaskView{ID: "local:claude:a", Agent: "claude", State: tasks.StateWait, WaitingFor: "input needed",
+			WaitID: "w1-x", StatusSince: &since, Location: tasks.Location{Kind: tasks.LocationOutside, PaneID: "pane-1"}}})
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"type":"task","epoch":"`+testEpoch+`","seq":5,"op":"changed","prev_state":"busy",
 		"task":{"id":"local:claude:a","host":"","agent":"claude","state":"wait","waiting_for":"input needed",

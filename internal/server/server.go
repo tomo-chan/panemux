@@ -21,6 +21,7 @@ import (
 	"panemux/internal/config"
 	"panemux/internal/portforward"
 	"panemux/internal/session"
+	"panemux/internal/taskevents"
 	"panemux/internal/ws"
 )
 
@@ -30,8 +31,14 @@ type Server struct {
 	manager  *session.Manager
 	httpSrv  *http.Server
 	forwards *portforward.Registry
-	api      *api.Handler
+	// taskEvents publishes the task event stream, /ws/tasks/events.
+	taskEvents *taskevents.Publisher
+	api        *api.Handler
 }
+
+// taskEventOptions configures the task event publisher New builds. The
+// contract fixture shortens its cycle; nothing else changes it.
+var taskEventOptions = taskevents.Options{}
 
 // New creates a new server instance. commandRunner may be nil when
 // command_center.enabled is false — the /ws/board-command route is simply
@@ -54,14 +61,19 @@ func New(
 	forwards := portforward.New(portforward.Options{})
 	apiHandler.SetPortForwards(forwards)
 	wsHandler := ws.NewHandler(manager)
-	registerRoutes(r, apiHandler, wsHandler, commandRunner, frontendFS, cfg.Server.AuthToken)
+	// The task event publisher observes nothing until the stream has a
+	// subscriber; the server owns it and closes it on shutdown.
+	taskEvents := taskevents.New(apiHandler.TaskEventSource(), taskEventOptions)
+	taskEventsHandler := ws.NewTaskEventsHandler(taskEvents, api.RefuseCrossSite)
+	registerRoutes(r, apiHandler, wsHandler, taskEventsHandler, commandRunner, frontendFS, cfg.Server.AuthToken)
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	return &Server{
-		cfg:      cfg,
-		manager:  manager,
-		forwards: forwards,
-		api:      apiHandler,
+		cfg:        cfg,
+		manager:    manager,
+		forwards:   forwards,
+		taskEvents: taskEvents,
+		api:        apiHandler,
 		httpSrv: &http.Server{
 			Addr:           addr,
 			Handler:        r,
@@ -74,8 +86,8 @@ func New(
 }
 
 func registerRoutes(
-	r chi.Router, apiHandler *api.Handler, wsHandler *ws.Handler, commandRunner *commandcenter.Runner,
-	frontendFS embed.FS, authToken string,
+	r chi.Router, apiHandler *api.Handler, wsHandler *ws.Handler, taskEventsHandler *ws.TaskEventsHandler,
+	commandRunner *commandcenter.Runner, frontendFS embed.FS, authToken string,
 ) {
 	// The route table itself lives in internal/api (api.Handler.Mount), so
 	// this wiring and the api package's own handler tests cannot describe
@@ -98,7 +110,7 @@ func registerRoutes(
 	// GET /api/tasks, and refuses a cross-site request itself. Its two
 	// segments cannot be taken by a pane id, which /ws/{sessionID} matches
 	// as one segment. See docs/behavior/task-events.md.
-	r.Get("/ws/tasks/events", apiHandler.GetTaskEvents)
+	r.Get("/ws/tasks/events", taskEventsHandler.ServeHTTP)
 	// /ws/board-command is only registered when the command center is
 	// enabled (commandRunner != nil) — see docs/agent-board.md's Command
 	// center section. Unlike /ws/{sessionID}, this route requires the
@@ -147,6 +159,7 @@ func (s *Server) Start() error {
 // holds open.
 func (s *Server) Shutdown(ctx context.Context) error {
 	s.forwards.Close()
+	s.taskEvents.Close()
 	s.api.Close()
 	if err := s.httpSrv.Shutdown(ctx); err != nil {
 		return fmt.Errorf("shutting down HTTP server: %w", err)
