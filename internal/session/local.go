@@ -2,6 +2,7 @@ package session
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +20,8 @@ import (
 	"syscall"
 
 	"github.com/creack/pty"
+	// Register sqlite3 driver for Devin CLI session database queries
+	_ "github.com/mattn/go-sqlite3"
 
 	"panemux/internal/homedir"
 )
@@ -38,6 +41,7 @@ var validClaudeSessionID = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 const (
 	interactiveAgentCodex  = "codex"
 	interactiveAgentClaude = "claude"
+	interactiveAgentDevin  = "devin"
 
 	// agmsgTypeClaudeCode, agmsgTypeGemini, and agmsgTypeOpencode are
 	// agmsgDetectableAgentTypes' own agmsg-recognized type/binary-name
@@ -532,6 +536,12 @@ func interactiveAgentSessionCWDs(processes []processInfo, agentPID int) ([]strin
 		return []string{cwd}, nil
 	case isClaudeCommand(proc.Command):
 		return claudeSessionCWDs(agentPID)
+	case isDevinCommand(proc.Command):
+		cwd, err := devinSessionCWD(processes, agentPID)
+		if err != nil || cwd == "" {
+			return nil, err
+		}
+		return []string{cwd}, nil
 	default:
 		return nil, nil
 	}
@@ -554,6 +564,25 @@ func codexSessionCWD(processes []processInfo, agentPID int) (string, error) {
 	}
 
 	return readCodexSessionCWD(sessionPath)
+}
+
+func devinSessionCWD(processes []processInfo, agentPID int) (string, error) {
+	proc, ok := processByPID(processes, agentPID)
+	if !ok || !isDevinCommand(proc.Command) {
+		return "", nil
+	}
+
+	homeDir, err := homedir.Dir()
+	if err != nil {
+		return "", fmt.Errorf("resolve home dir for devin session: %w", err)
+	}
+
+	sessionDBPath := filepath.Join(homeDir, ".local", "share", "devin", "cli", "sessions.db")
+	cwd, err := readDevinSessionCWD(sessionDBPath)
+	if err != nil {
+		return "", err
+	}
+	return cwd, nil
 }
 
 type claudeSessionMeta struct {
@@ -689,6 +718,8 @@ func isInteractiveAgentCommand(command string) bool {
 		return !containsToken(fields[1:], "exec")
 	case interactiveAgentClaude:
 		return !containsAnyToken(fields[1:], "-p", "--print")
+	case interactiveAgentDevin:
+		return !containsAnyToken(fields[1:], "-p", "--print")
 	default:
 		return false
 	}
@@ -702,6 +733,11 @@ func isCodexCommand(command string) bool {
 func isClaudeCommand(command string) bool {
 	fields := strings.Fields(command)
 	return len(fields) > 0 && strings.ToLower(filepath.Base(fields[0])) == interactiveAgentClaude
+}
+
+func isDevinCommand(command string) bool {
+	fields := strings.Fields(command)
+	return len(fields) > 0 && strings.ToLower(filepath.Base(fields[0])) == interactiveAgentDevin
 }
 
 func containsToken(tokens []string, target string) bool {
@@ -1017,6 +1053,49 @@ func readClaudeProjectCWD(path string) (string, error) {
 		}
 		return parseClaudeProjectCWD(data)
 	})
+}
+
+func readDevinSessionCWD(dbPath string) (string, error) {
+	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+		return "", nil
+	}
+
+	fingerprint, err := localFileFingerprint(dbPath)
+	if err != nil {
+		return "", fmt.Errorf("stat devin sessions db %q: %w", dbPath, err)
+	}
+
+	return cachedAgentLogCWD("local:devin:"+dbPath, fingerprint, func() (string, error) {
+		return queryDevinActiveSessionCWD(dbPath)
+	})
+}
+
+func queryDevinActiveSessionCWD(dbPath string) (string, error) {
+	db, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		return "", fmt.Errorf("open devin sessions db: %w", err)
+	}
+	defer db.Close()
+
+	// Query the most recently active session's working directory
+	// We order by last_activity_at DESC to get the most recent session
+	var cwd string
+	err = db.QueryRow(`
+		SELECT working_directory 
+		FROM sessions 
+		WHERE hidden = 0 
+		ORDER BY last_activity_at DESC 
+		LIMIT 1
+	`).Scan(&cwd)
+
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", nil
+		}
+		return "", fmt.Errorf("query devin sessions db: %w", err)
+	}
+
+	return cwd, nil
 }
 
 // parseClaudeProjectCWD resolves the effective working directory for a
