@@ -1,6 +1,6 @@
 .PHONY: all build build-frontend build-backend dev clean run install-deps install-deps-ci install-hooks \
         test test-go test-frontend test-e2e test-agmsg-contract test-hooks test-efficacy efficacy \
-        test-scenarios-check check-scenarios check-docs-links test-docs-links screenshots \
+        test-scenarios-check check-scenarios check-docs-links test-docs-links screenshots test-screenshots-check \
         coverage-blocks test-coverage-blocks \
         mutation test-mutation bench \
         model-check model-check-write test-model-check \
@@ -37,7 +37,7 @@ install-hooks:
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
-test: test-go test-frontend test-hooks test-efficacy test-scenarios-check test-docs-links \
+test: test-go test-frontend test-hooks test-efficacy test-scenarios-check test-docs-links test-screenshots-check \
       test-coverage-blocks test-mutation test-model-check
 
 test-go:
@@ -58,6 +58,12 @@ test-e2e:
 # images it writes.
 screenshots:
 	cd frontend && npm run screenshots
+
+# Whether a pull request that changes what the screenshots show retook them is
+# decided in CI (.github/workflows/screenshots.yml) from the pull request's
+# diff, by scripts/screenshots_check.sh. These are that checker's own tests.
+test-screenshots-check:
+	sh scripts/screenshots_check_test.sh
 
 # ── Performance observation (not a gate) ──────────────────────────────────────
 #

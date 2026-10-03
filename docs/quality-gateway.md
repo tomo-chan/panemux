@@ -43,7 +43,7 @@ The order is intentional: cheaper checks should reject a defect before expensive
 
 | # | Gate | Checks | Enforcement |
 |---|---|---|---|
-| **G0** | Spec | User-visible changes update `scenarios.md`; documentation links and fragments resolve | Scenario CI plus `make check-docs-links` |
+| **G0** | Spec | User-visible changes update `scenarios.md`; changes the documentation screenshots show retake them; documentation links and fragments resolve | Scenario and screenshots CI plus `make check-docs-links` |
 | **G1** | Edit | `gofmt -s`, targeted `go vet`, or `tsc --noEmit` for an edited file | `.claude` post-edit hook |
 | **G2** | Unit | Go and frontend unit/integration suites | `make check`, pre-push, and CI |
 | **G3** | Contract | Real-router HTTP/WS tests, exhaustive route expectations, Go-produced Zod fixtures, agmsg contract, and model-to-code transition replay | Always-on tests in `make check`; real agmsg and TLC in dedicated CI/opt-in jobs |
