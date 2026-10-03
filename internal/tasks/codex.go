@@ -32,8 +32,8 @@ type codexRollout struct {
 type codexOpenRollout struct {
 	// File is the rollout's base name, which starts with its creation time.
 	File    string
-	Turn    codexTurn
 	Rollout codexRollout
+	Turn    codexTurn
 	PID     int
 	// Elapsed is how long the process has run, in seconds; -1 when ps did
 	// not say.
@@ -54,6 +54,9 @@ type codexTurn struct {
 	LastItemName string
 	DBStartedAt  int64
 	EventAt      int64
+	// LastItemAt is the time the last response_item carries itself (Unix
+	// milliseconds, 0 unknown).
+	LastItemAt int64
 }
 
 // codexOriginatorTUI is the session_meta originator of a session the TUI
@@ -91,6 +94,9 @@ var (
 	codexItemType   = regexp.MustCompile(`"payload":\{"type":"([a-z_]+)"`)
 	codexItemName   = regexp.MustCompile(`"name":"([A-Za-z0-9_.-]+)"`)
 	codexTimestamp  = regexp.MustCompile(`"timestamp":"([^"]+)"`)
+	// codexLineTime is the timestamp a rollout line starts with: its own,
+	// not one quoted further in.
+	codexLineTime = regexp.MustCompile(`^\{"timestamp":"([^"]+)"`)
 )
 
 // rolloutSessionID reads the session ID out of a rollout's file name. Only a
@@ -247,6 +253,12 @@ func parseCodexTurn(db, event, item string) codexTurn {
 	}
 	if m := codexItemType.FindStringSubmatch(item); m != nil {
 		turn.LastItem = m[1]
+		if ts := codexLineTime.FindStringSubmatch(item); ts != nil {
+			//mutation:exempt[CONDITIONALS_BOUNDARY] equivalent — at exactly 0 it stores the 0 the field already holds
+			if at, err := time.Parse(time.RFC3339Nano, ts[1]); err == nil && at.UnixMilli() > 0 {
+				turn.LastItemAt = at.UnixMilli()
+			}
+		}
 		if strings.HasSuffix(m[1], "_call") {
 			if name := codexItemName.FindStringSubmatch(item); name != nil {
 				turn.LastItemName = name[1]
@@ -377,6 +389,9 @@ func (b *taskBuilder) codexState(task *Task, o codexOpenRollout) {
 	case inProgress && o.Turn.LastItem == codexItemFunctionCall && o.Turn.LastItemName == codexToolAskUser:
 		task.State, task.StatusSince = StateWait, modTime
 		task.WaitingFor = codexWaitingForQuestion
+		// The question's own time, which a second question in the same
+		// turn does not share; the rollout's mtime moves with every write.
+		task.WaitSignature = waitSignature(b.host, AgentCodex, task.SessionID, o.Turn.LastItemAt, codexToolAskUser)
 	case inProgress:
 		task.State, task.StatusSince = StateBusy, b.hostMillis(startedMillis)
 	case finished:

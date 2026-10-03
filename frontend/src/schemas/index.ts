@@ -455,6 +455,10 @@ export const TaskSchema = z.object({
   cwd: z.string().optional(),
   state: TaskStateSchema,
   waiting_for: z.string().optional(),
+  // Identifies the wait a 'wait' task is in (issue #278): the same wait keeps
+  // it across collections, a new wait gets another. Opaque — compare it, do
+  // not parse it. Absent when the agent did not record when the wait began.
+  wait_signature: z.string().min(1).optional(),
   status_since: z.string().optional(),
   started_at: z.string().optional(),
   pid: z.number().int().positive().optional(),
@@ -489,6 +493,17 @@ export const TasksResponseSchema = z.object({
 })
 
 export type TasksResponse = z.infer<typeof TasksResponseSchema>
+
+// ── Task dashboard: GET /api/tasks/attention ───────────────────────────────
+//
+// The input-wait notifications' collection (issue #278): the same hosts and
+// the running tasks only, without git, records, labels or summaries.
+export const TasksAttentionResponseSchema = z.object({
+  hosts: z.array(TaskHostSchema),
+  tasks: z.array(TaskSchema),
+})
+
+export type TasksAttentionResponse = z.infer<typeof TasksAttentionResponseSchema>
 
 // ── Task dashboard: PUT /api/tasks/records ─────────────────────────────────
 //

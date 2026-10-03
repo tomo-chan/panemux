@@ -452,6 +452,21 @@ var apiCases = map[string]apiCase{
 		assert.Contains(t, rr.Body.String(), `"name":"child"`)
 	}},
 
+	"GET /api/tasks/attention": {run: func(t *testing.T, e *apiEnv) {
+		// The real lightweight collector against the test's own HOME: a
+		// conversation log with no process behind it is a stopped task,
+		// which this collection neither searches for nor lists.
+		project := filepath.Join(e.home, ".claude", "projects", "-workspace-user-project")
+		require.NoError(t, os.MkdirAll(project, 0o700))
+		require.NoError(t, os.WriteFile(filepath.Join(project, "integration-session.jsonl"),
+			[]byte(`{"cwd":"/workspace/user/project"}`+"\n"), 0o600))
+
+		rr := e.do(t, http.MethodGet, "/api/tasks/attention", "")
+		assert.Equal(t, http.StatusOK, rr.Code)
+		assert.Contains(t, rr.Body.String(), `"name":"","status":"ok"`)
+		assert.NotContains(t, rr.Body.String(), "integration-session")
+	}},
+
 	"GET /api/tasks": {run: func(t *testing.T, e *apiEnv) {
 		// The real collector, running the real script on this machine against
 		// the test's own HOME: what it lists is only what the test put there,

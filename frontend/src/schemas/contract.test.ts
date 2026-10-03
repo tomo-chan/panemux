@@ -106,6 +106,11 @@ const roundTrips: RoundTrip[] = [
     schema: schemas.BoardCommandHistoryResponseSchema,
   },
   { fixture: 'tasks', schemaName: 'TasksResponseSchema', schema: schemas.TasksResponseSchema },
+  {
+    fixture: 'tasks-attention',
+    schemaName: 'TasksAttentionResponseSchema',
+    schema: schemas.TasksAttentionResponseSchema,
+  },
   { fixture: 'task-record', schemaName: 'TaskRecordSchema', schema: schemas.TaskRecordSchema },
   { fixture: 'task-launch', schemaName: 'TaskLaunchResponseSchema', schema: schemas.TaskLaunchResponseSchema },
   { fixture: 'task-launch-codex', schemaName: 'TaskLaunchResponseSchema', schema: schemas.TaskLaunchResponseSchema },
@@ -381,6 +386,13 @@ const unexercisedOptionals: Record<string, string> = {
   // the PR title, both of which the capture leaves out for the reason above.
   'tasks.tasks[].git.issues': 'needs a `gh pr view` lookup against a real PR',
   'tasks.tasks[].git.autolinks': 'a reference needs a branch or PR title, which would make the capture run `gh pr view`',
+  // GET /api/tasks/attention shares TaskSchema but adds nothing the dashboard
+  // does (issue #278): these are absent from it by contract, and the tasks
+  // capture pins each of them.
+  'tasks-attention.tasks[].git': 'the attention collection makes no git or pull request lookup',
+  'tasks-attention.tasks[].done': 'the attention collection reads no task records',
+  'tasks-attention.tasks[].labels': 'the attention collection reads no task records',
+  'tasks-attention.tasks[].summary': 'the attention collection makes and reads no summaries',
   // Set only when the task record file cannot be read. The capture writes
   // records through the real route instead, so the same response can show
   // them on its tasks; an unreadable file would have left them all off.

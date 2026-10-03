@@ -27,8 +27,8 @@ import (
 //	::section tmux               "<pane pid> <tmux session name>"
 //	::section cwd                "<pid> <cwd>" for this user's processes that may be claude or codex
 //	::section env                "<pid> <PANEMUX_PANE_ID>" for the same processes, when set
-//	::section transcripts        "<mtime>\t<file name>\t<first "cwd":"..." in it>\t<size in bytes>"
 //	::section codex-open         one row per rollout a codex process holds open (below)
+//	::section transcripts        "<mtime>\t<file name>\t<first "cwd":"..." in it>\t<size in bytes>"
 //	::section codex-rollouts     "<mtime>\t<size>\t<file name>\t<"cwd":"...">\t<"originator":"...">" of its first line
 //	::end                        the output is complete
 //
@@ -79,7 +79,16 @@ import (
 // task_complete, turn_aborted) and the last response item in the rollout's
 // final MiB. Only a session ID made of hex digits and dashes — the shape of
 // the UUID in the file name — is put into the query.
-const collectScript = `LC_ALL=C
+const collectScript = collectLiveScript + collectStoppedScript + collectEnd
+
+// attentionScript is collectScript without collectStoppedScript: what the
+// input-wait notifications run (issue #278). It lists the running sessions
+// only, so it never searches ~/.claude/projects or ~/.codex/sessions.
+const attentionScript = collectLiveScript + collectEnd
+
+// collectLiveScript is the part of the collection that finds the running
+// sessions: state files, processes, panes, and the rollouts codex holds open.
+const collectLiveScript = `LC_ALL=C
 export LC_ALL
 echo '::panemux-tasks v1'
 echo "::now $(date +%s)"
@@ -138,14 +147,6 @@ if stat -c %Y / >/dev/null 2>&1; then
 else
 	mtime() { stat -f '%m %z' "$1"; }
 fi
-echo '::section transcripts'
-find "$HOME/.claude/projects" -mindepth 2 -maxdepth 2 -type f -name '*.jsonl' -mtime -7 2>/dev/null |
-while IFS= read -r p; do
-	t=$(mtime "$p" 2>/dev/null) && echo "$t $p"
-done | sort -rn | head -n 100 | while read -r t s p; do
-	c=$(grep -m 1 -o '"cwd":"[^"]*"' "$p" 2>/dev/null | head -n 1)
-	printf '%s\t%s\t%s\t%s\n' "$t" "${p##*/}" "$c" "$s"
-done
 echo '::section codex-open'
 db="$HOME/.codex/thread_history_1.sqlite"
 ps -U "$uid" -o pid=,etime=,command= 2>/dev/null |
@@ -179,6 +180,18 @@ while read -r pid et; do
 		printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$pid" "$et" "$t" "$st" "$marks" "$c" "$o" "$p"
 	done
 done
+`
+
+// collectStoppedScript lists the conversation logs and rollouts the stopped
+// sessions are found from. It uses mtime, which collectLiveScript defines.
+const collectStoppedScript = `echo '::section transcripts'
+find "$HOME/.claude/projects" -mindepth 2 -maxdepth 2 -type f -name '*.jsonl' -mtime -7 2>/dev/null |
+while IFS= read -r p; do
+	t=$(mtime "$p" 2>/dev/null) && echo "$t $p"
+done | sort -rn | head -n 100 | while read -r t s p; do
+	c=$(grep -m 1 -o '"cwd":"[^"]*"' "$p" 2>/dev/null | head -n 1)
+	printf '%s\t%s\t%s\t%s\n' "$t" "${p##*/}" "$c" "$s"
+done
 echo '::section codex-rollouts'
 find "$HOME/.codex/sessions" -mindepth 4 -maxdepth 4 -type f -name 'rollout-*.jsonl' -mtime -7 2>/dev/null |
 while IFS= read -r p; do
@@ -190,7 +203,9 @@ done | sort -rn | while read -r t s p; do
 	c=$(printf '%s\n' "$l" | grep -o '"cwd":"[^"]*"' | head -n 1)
 	printf '%s\t%s\t%s\t%s\t%s\n' "$t" "$s" "${p##*/}" "$c" "$o"
 done | head -n 100
-echo '::end'
+`
+
+const collectEnd = `echo '::end'
 exit 0
 `
 

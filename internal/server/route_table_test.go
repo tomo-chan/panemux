@@ -72,6 +72,7 @@ var expectedRoutes = []string{
 	"GET /api/ssh-config/hosts",
 	"GET /api/ssh-connections",
 	"GET /api/tasks",
+	"GET /api/tasks/attention",
 	"GET /api/workspaces",
 	"GET /ws/{sessionID}",
 	"POST /api/board/broadcast",

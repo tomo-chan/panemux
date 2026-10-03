@@ -211,18 +211,34 @@ func (s *Service) Collect(ctx context.Context) Snapshot {
 	names := s.hostNames()
 	s.forgetHostsExcept(names)
 	s.forgetSummaryHostsExcept(names)
+	return s.collectHosts(ctx, names, s.collectHost)
+}
 
+// CollectAttention is Collect for the input-wait notifications (issue
+// #278): every host, concurrently and each on its own, but running
+// attentionScript and listing the running tasks only. It reads nothing the
+// summaries use and leaves what they know alone.
+func (s *Service) CollectAttention(ctx context.Context) Snapshot {
+	names := s.hostNames()
+	s.forgetHostsExcept(names)
+	return s.collectHosts(ctx, names, s.collectHostAttention)
+}
+
+// collectHosts runs collect for the panemux host and each of names at once.
+func (s *Service) collectHosts(ctx context.Context, names []string,
+	collect func(ctx context.Context, name string) (HostResult, []Task),
+) Snapshot {
 	results := make([]HostResult, len(names)+1)
 	taskLists := make([][]Task, len(names)+1)
 	var wg sync.WaitGroup
-	collect := func(i int, name string) {
+	run := func(i int, name string) {
 		defer wg.Done()
-		results[i], taskLists[i] = s.collectHost(ctx, name)
+		results[i], taskLists[i] = collect(ctx, name)
 	}
 	wg.Add(len(names) + 1)
-	go collect(0, "")
+	go run(0, "")
 	for i, name := range names {
-		go collect(i+1, name)
+		go run(i+1, name)
 	}
 	wg.Wait()
 
@@ -247,11 +263,33 @@ func (s *Service) hostNames() []string {
 }
 
 func (s *Service) collectHost(ctx context.Context, name string) (HostResult, []Task) {
+	result, raw, collectedAt, ok := s.collectRaw(ctx, name, collectScript)
+	if !ok {
+		return result, nil
+	}
+	tasks := buildTasks(name, raw, collectedAt)
+	s.rememberSummaryTasks(name, tasks)
+	return result, tasks
+}
+
+func (s *Service) collectHostAttention(ctx context.Context, name string) (HostResult, []Task) {
+	result, raw, collectedAt, ok := s.collectRaw(ctx, name, attentionScript)
+	if !ok {
+		return result, nil
+	}
+	return result, buildLiveTasks(name, raw, collectedAt)
+}
+
+// collectRaw runs script on one host within HostTimeout and parses what it
+// printed. ok is false when the host failed, which result then reports.
+func (s *Service) collectRaw(
+	ctx context.Context, name, script string,
+) (result HostResult, raw rawSnapshot, collectedAt time.Time, ok bool) {
 	ctx, cancel := context.WithTimeout(ctx, s.opts.HostTimeout)
 	defer cancel()
 
-	result := HostResult{Name: name}
-	out, err := s.runScript(ctx, name)
+	result = HostResult{Name: name}
+	out, err := s.runHostScript(ctx, name, script, "task collection")
 	if err != nil {
 		result.Status = HostError
 		if errors.Is(err, errConnecting) {
@@ -259,25 +297,19 @@ func (s *Service) collectHost(ctx context.Context, name string) (HostResult, []T
 		} else {
 			result.Error = err.Error()
 		}
-		return result, nil
+		return result, rawSnapshot{}, time.Time{}, false
 	}
 
-	collectedAt := s.opts.Now()
-	raw, err := parseCollectOutput(out)
+	collectedAt = s.opts.Now()
+	raw, err = parseCollectOutput(out)
 	if err != nil {
 		result.Status = HostError
 		result.Error = err.Error()
-		return result, nil
+		return result, rawSnapshot{}, time.Time{}, false
 	}
 	result.Status = HostOK
 	result.CollectedAt = &collectedAt
-	tasks := buildTasks(name, raw, collectedAt)
-	s.rememberSummaryTasks(name, tasks)
-	return result, tasks
-}
-
-func (s *Service) runScript(ctx context.Context, name string) ([]byte, error) {
-	return s.runHostScript(ctx, name, collectScript, "task collection")
+	return result, raw, collectedAt, true
 }
 
 // runHostScript runs script with `sh -s` on a host: locally through

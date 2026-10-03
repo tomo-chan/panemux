@@ -73,7 +73,9 @@ of its conversation (see [Summaries](#summaries)).
 ### Collection
 
 Collection runs only when the dashboard asks for it — every 10 seconds while the dashboard is on
-screen and the page is visible, and on the Refresh button. Nothing collects in the background.
+screen and the page is visible, and on the Refresh button — or when the input-wait notifications ask
+for the running tasks through [`GET /api/tasks/attention`](#get-apitasksattention). Nothing collects
+in the background.
 
 Each collection runs one fixed script per host (`sh -s`, with the script on stdin; see
 [Task dashboard collection](../security/command-execution.md#task-dashboard-collection)). The script
@@ -88,8 +90,14 @@ reads only what the agents write themselves and what the host reports about its 
 | The working directory of each process that may be claude or codex | A running task's directory when no state file gives one |
 | `PANEMUX_PANE_ID` in the environment of each process that may be claude or codex (`/proc/<pid>/environ` on Linux, `ps -E` on macOS) | The pane an agent outside tmux was started from ([below](#the-pane-of-an-agent-outside-tmux)) |
 | `ps -U <own uid> -o pid=,etime=,command=`, then each `codex` process's open files (`/proc/<pid>/fd`, or `lsof` where there is none) | How long each codex process has run, and the rollouts it holds open |
-| For each rollout a codex process holds open: its modification time and size, the `cwd` of its first line, the last `task_started` / `task_complete` / `turn_aborted` and the last `response_item` in its final MiB, and the newest `thread_turns` row in `~/.codex/thread_history_1.sqlite` (with `sqlite3 -readonly`, when installed) | A running codex session's state |
+| For each rollout a codex process holds open: its modification time and size, the `cwd` of its first line, the last `task_started` / `task_complete` / `turn_aborted` and the last `response_item` (with the `timestamp` that line starts with) in its final MiB, and the newest `thread_turns` row in `~/.codex/thread_history_1.sqlite` (with `sqlite3 -readonly`, when installed) | A running codex session's state |
 | `~/.codex/sessions/*/*/*/rollout-*.jsonl` changed in the last 7 days whose first line's `originator` is `codex-tui` (the newest 100 of those), and that line's `cwd` | Stopped codex sessions |
+
+The attention collection ([`GET /api/tasks/attention`](#get-apitasksattention)) runs the same script
+without its two searches for stopped sessions: it reads every row above except the conversation logs
+under `~/.claude/projects` and the rollouts under `~/.codex/sessions`, and lists the running tasks
+only. The part both run is one shared constant, so a running task is found and its state decided the
+same way by both.
 
 Any probe that is missing on a host (no tmux, no `~/.claude`, no `~/.codex`, no `sqlite3`, BSD
 `stat`) prints nothing rather than failing the collection. Codex's files are read under `$HOME/.codex`;
@@ -138,6 +146,25 @@ ends before its terminating marker — a connection dropped mid-run — fails th
   `startedAt`; for a stopped task it is the log's modification time. Every host time is converted by
   its age against that host's own clock, so a host whose clock is wrong does not shift the dashboard.
   A time ahead of the host's clock is treated as "now".
+
+### Wait signature
+
+A `wait` task carries `wait_signature`, an opaque identifier of the wait it is in, so a client can
+tell a wait it has already seen from a new one. The same wait keeps its signature across
+collections, page reloads and reconnects, and between `GET /api/tasks` and
+`GET /api/tasks/attention`; a wait that begins after the previous one ended gets another.
+
+- It is a versioned SHA-256 (`w1-<hex>`) of the host, the agent, the session ID, when the wait began
+  on the host's own clock as the agent recorded it, and the kind of wait. Clients compare it and never
+  parse it.
+- **Claude Code**: the state file's `statusUpdatedAt` (positive) and `waitingFor`. `updatedAt` and
+  `startedAt` do not stand in for a missing `statusUpdatedAt`.
+- **codex**: the `timestamp` the last `request_user_input` `response_item` line starts with, so a
+  second question in the same turn is a new wait.
+- It never comes from panemux's clock, the collection time, the clock conversion, a rollout's
+  modification time or a turn's start alone. A `wait` task without a valid wait start has no
+  signature; one is never made up. Unknown or unreadable state is `unknown` or `run` as above, never a
+  signed wait.
 
 ### Codex sessions
 
@@ -705,6 +732,9 @@ Collects from every host and returns:
   read.
 - `session_id`, `cwd`, `waiting_for`, `status_since`, `started_at`, `pid`, `git` and
   `location.pane_id` are omitted when unknown. `waiting_for` is present only in the `wait` state.
+- `wait_signature` is present only in the `wait` state, and only when the agent recorded when the
+  wait began ([Wait signature](#wait-signature)).
+
 - Within `git`, every field is omitted when empty. `issues[].repo` is the issue's `owner/name`,
   which can differ from the pull request's repository.
 - `done` and `labels` are the task's record, omitted when it is not done or has no labels.
@@ -723,6 +753,50 @@ Collects from every host and returns:
   answers `403` to a request another site's page made: `Sec-Fetch-Site` of `cross-site` or
   `same-site`, or an `Origin` that is neither the server's own nor a loopback origin. A request with
   neither header (not from a browser page) is served.
+
+### `GET /api/tasks/attention`
+
+The lightweight collection the input-wait notifications poll. It collects from every host and
+returns the hosts and their running tasks:
+
+```json
+{
+  "hosts": [
+    { "name": "", "status": "ok", "collected_at": "2026-09-25T12:00:00Z" },
+    { "name": "gpu-box", "status": "error", "error": "connect to gpu-box: dial tcp: i/o timeout" }
+  ],
+  "tasks": [
+    {
+      "id": "local:claude:7c21e0a4",
+      "host": "",
+      "agent": "claude",
+      "session_id": "7c21e0a4",
+      "cwd": "/workspace/user/panemux",
+      "state": "wait",
+      "waiting_for": "input needed",
+      "wait_signature": "w1-6728c5554228dcb7cc58711bbf3636eb24a57f8348e865de9855773e17b9bb47",
+      "status_since": "2026-09-25T11:57:00Z",
+      "started_at": "2026-09-25T11:15:00Z",
+      "pid": 101,
+      "location": { "kind": "tmux", "tmux_session": "task-7c21", "attachable": true }
+    }
+  ]
+}
+```
+
+- `hosts` is exactly as in [`GET /api/tasks`](#get-apitasks), and so are a task's fields: the same
+  `id`, `state`, `waiting_for`, `wait_signature`, converted `status_since` / `started_at`, and
+  `location`.
+- `tasks` lists the running tasks only (`busy`, `wait`, `idle`, `run`, `unknown`, codex daemon
+  sessions included), in `id` order per host; `[]` when there are none. Stopped tasks are not
+  searched for: the collection runs without the `~/.claude/projects` and `~/.codex/sessions` searches.
+- It makes no git or pull request lookup, reads no task records, and makes, reads and forgets no
+  summaries, so `git`, `labels`, `done`, `summary`, `summaries_enabled` and `records_error` never
+  appear. Labels a codex task was started with are recorded by `GET /api/tasks` only.
+- Every host is collected at once, each within the same per-host timeout and over the same reused
+  connection as `GET /api/tasks`; one host failing does not hold up or hide the others. The request
+  answers `200` even when every host failed.
+- It refuses a cross-site request with `403` before collecting, exactly as `GET /api/tasks` does.
 
 ### `POST /api/tasks/hosts/{name}/reconnect`
 

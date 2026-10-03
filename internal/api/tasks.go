@@ -290,6 +290,27 @@ func (h *Handler) GetTasks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, resp)
 }
 
+// tasksAttentionResponse answers GET /api/tasks/attention: the hosts and
+// their running tasks, without anything GetTasks adds to them.
+type tasksAttentionResponse struct {
+	Hosts []tasks.HostResult `json:"hosts"`
+	Tasks []tasks.Task       `json:"tasks"`
+}
+
+// GetTasksAttention is the lightweight collection the input-wait
+// notifications poll (issue #278): the running tasks on every host, each
+// waiting one with its wait signature. It looks up no git or pull request,
+// reads no task records, makes no summaries and lists no stopped sessions,
+// and like GetTasks collects only when asked and refuses a cross-site
+// request before collecting.
+func (h *Handler) GetTasksAttention(w http.ResponseWriter, r *http.Request) {
+	if refuseCrossSite(w, r) {
+		return
+	}
+	snapshot := h.tasks.CollectAttention(r.Context())
+	writeJSON(w, tasksAttentionResponse{Hosts: snapshot.Hosts, Tasks: snapshot.Tasks})
+}
+
 // addTaskLabels adds rec's labels to what is already recorded for its task,
 // keeping the rest of the record. It records the labels a codex task was
 // started with once its session ID is known (tasks.PendingLabels).

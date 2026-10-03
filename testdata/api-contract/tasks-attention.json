@@ -16,18 +16,12 @@
       "status": "error"
     }
   ],
-  "summaries_enabled": true,
   "tasks": [
     {
       "agent": "claude",
       "cwd": "/workspace/user/panemux",
-      "done": true,
       "host": "",
       "id": "local:claude:7c21e0a4",
-      "labels": [
-        "dashboard",
-        "enhancement"
-      ],
       "location": {
         "attachable": true,
         "kind": "tmux",
@@ -38,15 +32,6 @@
       "started_at": "2026-01-01T00:00:00Z",
       "state": "wait",
       "status_since": "2026-01-01T00:00:00Z",
-      "summary": {
-        "remaining": [
-          "Update the docs",
-          "Run make check"
-        ],
-        "state": "ready",
-        "summarized_at": "2026-01-01T00:00:00Z",
-        "text": "Adding task summaries to the dashboard."
-      },
       "wait_signature": "w1-6728c5554228dcb7cc58711bbf3636eb24a57f8348e865de9855773e17b9bb47",
       "waiting_for": "input needed"
     },
@@ -123,48 +108,9 @@
     },
     {
       "agent": "claude",
-      "cwd": "/workspace/user/service-b",
-      "host": "",
-      "id": "local:claude:55f0c2b8",
-      "location": {
-        "attachable": false,
-        "kind": "none"
-      },
-      "session_id": "55f0c2b8",
-      "state": "stop",
-      "status_since": "2026-01-01T00:00:00Z",
-      "summary": {
-        "done_candidate": true,
-        "state": "ready",
-        "summarized_at": "2026-01-01T00:00:00Z",
-        "text": "service-b was released."
-      }
-    },
-    {
-      "agent": "codex",
-      "cwd": "/workspace/user/sample-api",
-      "host": "",
-      "id": "local:codex:01a0e2bc-bdf9-71b2-867a-df8302180efe",
-      "location": {
-        "attachable": false,
-        "kind": "none"
-      },
-      "session_id": "01a0e2bc-bdf9-71b2-867a-df8302180efe",
-      "state": "stop",
-      "status_since": "2026-01-01T00:00:00Z"
-    },
-    {
-      "agent": "claude",
       "cwd": "/remote/home/demo/infra",
-      "git": {
-        "repo": "infra",
-        "repo_url": "https://github.com/example-org/infra"
-      },
       "host": "build-box",
       "id": "ssh:build-box:claude:3d7702fe",
-      "labels": [
-        "infra"
-      ],
       "location": {
         "attachable": false,
         "kind": "tmux",
