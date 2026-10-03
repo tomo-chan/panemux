@@ -28,6 +28,20 @@ make dev-frontend   # Vite dev server on :5173
 make dev-backend    # run backend separately while the frontend proxies /api and /ws
 ```
 
+**Documentation screenshots** (not a gate):
+
+```sh
+make screenshots   # regenerates docs/images/*.png
+```
+
+The images in `README.md` and `docs/` are captured by Playwright from a real panemux run
+(`frontend/screenshots/`) with placeholder content only: a fake `HOME`, a throwaway git repository at
+`/tmp/sample-project`, a private tmux socket, a stub agmsg store, and a fixed task list served to the
+task dashboard in place of the real collection, which would list the developer's own agent sessions.
+Run it after a UI change those images show, look at the result, and commit the images. It needs
+`tmux` for the tmux pane; set `PLAYWRIGHT_CHROMIUM_EXECUTABLE` as for `make test-e2e` when the
+installed Chromium is not the one Playwright expects.
+
 **Format**:
 
 ```sh

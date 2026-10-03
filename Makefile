@@ -1,6 +1,6 @@
 .PHONY: all build build-frontend build-backend dev clean run install-deps install-deps-ci install-hooks \
         test test-go test-frontend test-e2e test-agmsg-contract test-hooks test-efficacy efficacy \
-        test-scenarios-check check-scenarios check-docs-links test-docs-links \
+        test-scenarios-check check-scenarios check-docs-links test-docs-links screenshots \
         coverage-blocks test-coverage-blocks \
         mutation test-mutation bench \
         model-check model-check-write test-model-check \
@@ -48,6 +48,16 @@ test-frontend:
 
 test-e2e:
 	cd frontend && npm run test:e2e
+
+# ── Documentation screenshots (not a gate) ────────────────────────────────────
+#
+# Regenerates docs/images/*.png from a real panemux run with placeholder
+# content (frontend/screenshots/). Not part of `make check`: it rewrites
+# tracked images, and a pixel diff caused by a font or browser update is not
+# a failure. Run it after a UI change the README images show, and commit the
+# images it writes.
+screenshots:
+	cd frontend && npm run screenshots
 
 # ── Performance observation (not a gate) ──────────────────────────────────────
 #

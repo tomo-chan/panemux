@@ -208,6 +208,8 @@ This model deliberately favors spatial predictability over hidden container sele
 
 The frontend now uses modal dialogs for higher-friction configuration tasks, rather than trying to compress all editing into inline chrome.
 
+![The Pane Settings modal centred over a dimmed workspace, with type, shell, working directory and title fields, the Agent Board options, and Cancel and Save buttons.](images/pane-settings.png)
+
 ### Keyboard behaviour, shared by every modal
 
 `aria-modal="true"` promises that the rest of the page is inert, and nothing in the DOM makes that
@@ -316,6 +318,8 @@ on the task dashboard.
 ---
 
 ## Task Dashboard
+
+![The task dashboard layer: the top bar with host chips and its buttons, the filter row, one column per state with session cards, and the detail panel of the selected waiting session on the right.](images/task-dashboard.png)
 
 The task dashboard ([behavior](behavior/tasks.md)) is a second layer over the workspaces rather than
 an overlay panel: it covers the whole window, and the workspaces stay mounted beneath it so every
@@ -480,6 +484,8 @@ Label colors come from the mock's palette (`#569cd6`, `#4ec9b0`, `#9cdcfe`, `#d7
 Agent Board reuses the existing modal, panel, color, status, and focus-restoration patterns.
 
 ### Dashboard
+
+![The Agent Board dashboard as a right-side overlay on a workspace, listing two panes' status cards and their latest messages.](images/agent-board.png)
 
 - Opens from the Agent Board button or `Cmd/Ctrl+Shift+B`; both are absent when the capability is
   disabled.

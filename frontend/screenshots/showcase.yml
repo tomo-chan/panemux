@@ -1,0 +1,78 @@
+# Fixture for the documentation screenshots (screenshots.spec.ts, port 4180).
+#
+# Every path and name here is a placeholder: run-panemux-screenshots.sh
+# creates /tmp/sample-project as a throwaway git repository and gives the
+# server a fake HOME, so nothing from the machine generating the images ends
+# up in them (DEVELOPMENT.md's path-sanitization rule).
+server:
+    host: 127.0.0.1
+    port: 4180
+agent_board:
+    team: panemux-screenshots
+    # Must match run-panemux-screenshots.sh's SHOT_AGMSG_DIR.
+    agmsg_path: /tmp/panemux-screenshots-agmsg
+workspaces:
+    active: dev
+    tab_position: top
+    items:
+        - id: dev
+          title: Development
+          layout:
+            direction: horizontal
+            children:
+                - pane:
+                    id: editor
+                    type: local
+                    shell: /bin/bash
+                    cwd: /tmp/sample-project
+                    title: Project
+                    agent_board:
+                        enabled: true
+                  size: 55
+                - direction: vertical
+                  children:
+                    - pane:
+                        id: server
+                        type: tmux
+                        tmux_session: sample-server
+                        title: Dev server
+                      size: 50
+                    - pane:
+                        id: tests
+                        type: local
+                        shell: /bin/bash
+                        cwd: /tmp/sample-project
+                        title: Tests
+                        agent_board:
+                            enabled: true
+                      size: 50
+                  size: 45
+        - id: review
+          title: Review
+          layout:
+            direction: horizontal
+            children:
+                - pane:
+                    id: review-main
+                    type: local
+                    shell: /bin/bash
+                    cwd: /tmp/sample-project
+                    title: Review
+                  size: 100
+        - id: ops
+          title: Ops
+          layout:
+            direction: horizontal
+            children:
+                - pane:
+                    id: ops-main
+                    type: local
+                    shell: /bin/bash
+                    cwd: /tmp/sample-project
+                    title: Ops
+                  size: 100
+url_open:
+    browser_shim: false
+display:
+    show_header: true
+    show_status_bar: true
