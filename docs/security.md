@@ -27,6 +27,15 @@ All session types that execute a local process use `exec.Command` with user-conf
 - Arguments after the command may be user-supplied only when the target binary cannot reinterpret them as commands.
 - Do not use `os.Getenv` values in flows that reach `exec.Command` unless the security model for that path is explicitly reworked and documented.
 
+## Development sandbox permissions
+
+The shared Claude Code settings grant macOS sandboxed commands local port binding and access to
+all localhost services, including services outside the sandbox. Treat unauthenticated local
+services as a potential route to actions outside the sandbox, and non-loopback listeners as
+reachable from other machines. This is a development-tool permission; it does not authenticate
+panemux routes or change their runtime trust boundaries. Platform differences and managed-policy
+limits are documented in [Claude Code sandbox](../DEVELOPMENT.md#claude-code-sandbox).
+
 ## `gosec` Policy
 
 - Fix `gosec` findings structurally in the implementation rather than suppressing them in shipped code.

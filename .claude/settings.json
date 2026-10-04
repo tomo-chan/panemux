@@ -1,5 +1,10 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "sandbox": {
+    "network": {
+      "allowLocalBinding": true
+    }
+  },
   "hooks": {
     "PostToolUse": [
       {

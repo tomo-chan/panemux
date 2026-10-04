@@ -45,7 +45,10 @@ This installs npm packages, downloads Go modules, and configures the repo-local 
 Some of the rules in the documents above are checked automatically rather than
 being left to memory. `.claude/` holds the agent-side half:
 
-- `.claude/settings.json` wires two hooks. A `PostToolUse` hook checks the file
+- `.claude/settings.json` enables local port binding and localhost connections in the macOS
+  Claude Code sandbox. See [Claude Code sandbox](DEVELOPMENT.md#claude-code-sandbox) for its
+  security scope, Linux/WSL2 behavior, and managed-setting limitations. It also wires two hooks.
+  A `PostToolUse` hook checks the file
   you just edited (`gofmt -s`, and `go vet` on its package, or `tsc --noEmit`
   for frontend files). A `Stop` hook checks what the whole turn changed
   (formatting, plus the tests for the touched Go packages and the frontend
