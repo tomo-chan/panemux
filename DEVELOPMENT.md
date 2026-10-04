@@ -60,7 +60,8 @@ as for `make test-e2e` when the installed Chromium is not the one Playwright exp
   separate caller server that startup, stop and teardown never touch that server.
 - The task-dashboard E2E fixture clears `TMUX` and exports a short, unique `TMUX_TMPDIR` to
   panemux and its children. It starts tmux with `-f /dev/null` and stops its private server on exit,
-  including sessions started or resumed through the dashboard. It never uses the caller's server.
+  including sessions started or resumed through the dashboard. Playwright sends `SIGTERM` to this
+  fixture so its cleanup trap runs. It never uses the caller's server.
 - `make test-screenshots-check` tests both fixtures' tmux isolation and these staging helpers
   (`frontend/screenshots/screenshots-env.sh`).
 
