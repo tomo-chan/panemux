@@ -33,18 +33,21 @@ shot_shell_env() {
 
 # Starts the tmux server on TMUX_TMPDIR's private socket with the fake
 # HOME's .tmux.conf as its only configuration (-f replaces the system and
-# XDG config files as well as ~/.tmux.conf).
-shot_start_tmux() {
+# XDG config files as well as ~/.tmux.conf). Inherited TMUX would override
+# TMUX_TMPDIR; clear it in a subshell for every start and stop.
+shot_start_tmux() (
+    unset TMUX
     tmux -f "$HOME/.tmux.conf" new-session -d "$@"
-}
+)
 
 # Stops the server shot_start_tmux started. The server daemonizes, so
 # stopping panemux leaves it, and the command its session runs, behind.
-shot_stop_tmux() {
+shot_stop_tmux() (
+    unset TMUX
     if command -v tmux >/dev/null 2>&1; then
         tmux kill-server 2>/dev/null || true
     fi
-}
+)
 
 # The capture's teardown (global-teardown.ts): stops the run's tmux server
 # by the same socket directory the runner gave it.

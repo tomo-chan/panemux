@@ -102,6 +102,8 @@ export default defineConfig({
     },
     {
       command: 'sh ./e2e/run-panemux-task-dashboard-e2e.sh',
+      // Let the fixture's EXIT trap stop its daemonized private tmux server.
+      gracefulShutdown: { signal: 'SIGTERM', timeout: 5000 },
       url: TASK_DASHBOARD_BASE_URL,
       cwd: '.',
       reuseExistingServer: !process.env.CI,

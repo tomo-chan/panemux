@@ -54,7 +54,16 @@ as for `make test-e2e` when the installed Chromium is not the one Playwright exp
   lives under `$TMPDIR/panemux-screenshots/tmux`, and a socket path is limited to 104 bytes on macOS
   (108 on Linux): macOS's default per-user `$TMPDIR` fits, but one longer than about 60 characters
   makes tmux fail with `File name too long` and stops the run — set `TMPDIR=/tmp` for it.
-- `make test-screenshots-check` tests these staging helpers (`frontend/screenshots/screenshots-env.sh`).
+- Screenshot tmux helpers clear inherited `TMUX` for both startup and teardown: `TMUX` takes
+  precedence over `TMUX_TMPDIR`, so changing the socket directory alone does not isolate a run
+  started inside tmux. Their tests also clear it before any fixture commands, and verify with a
+  separate caller server that startup, stop and teardown never touch that server.
+- The task-dashboard E2E fixture clears `TMUX` and exports a short, unique `TMUX_TMPDIR` to
+  panemux and its children. It starts tmux with `-f /dev/null` and stops its private server on exit,
+  including sessions started or resumed through the dashboard. Playwright sends `SIGTERM` to this
+  fixture so its cleanup trap runs. It never uses the caller's server.
+- `make test-screenshots-check` tests both fixtures' tmux isolation and these staging helpers
+  (`frontend/screenshots/screenshots-env.sh`).
 
 - Any change that alters what those images show must retake them in the same change: run
   `make screenshots`, look at every image it rewrote, and commit them. This covers changes to the

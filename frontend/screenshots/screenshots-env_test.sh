@@ -33,6 +33,7 @@ work=$(mktemp -d)
 # per-user $TMPDIR, plus the run's own subdirectories, overruns. /tmp
 # keeps it short on both.
 short=$(mktemp -d /tmp/pmx-shot.XXXXXX)
+unset TMUX
 trap 'rm -rf "$work" "$short"' EXIT
 
 # ── shot_isolate_env: the developer's XDG and git configuration stay out ────
@@ -133,6 +134,70 @@ if command -v tmux >/dev/null 2>&1; then
 	fi
 else
 	skip 'tmux checks: tmux is not installed'
+fi
+
+# An inherited TMUX must never route start, stop or teardown to the caller.
+# Every probe and cleanup uses -S explicitly, even when testing broken code.
+if command -v tmux >/dev/null 2>&1; then
+	caller="$short/caller"
+	if ! tmux -S "$caller" -f /dev/null new-session -d -s caller 'sleep 120' ||
+		! tmux -S "$caller" has-session -t '=caller'; then
+		fail 'inherited TMUX checks: the caller fixture did not start'
+		exit 1
+	fi
+	for operation in start stop teardown; do
+		check
+		private="$short/$operation"
+		mkdir -p "$private/panemux-screenshots/tmux/tmux-$(id -u)"
+		chmod 700 "$private/panemux-screenshots/tmux/tmux-$(id -u)"
+		socket="$private/panemux-screenshots/tmux/tmux-$(id -u)/default"
+		if [ "$operation" != start ]; then
+			if ! tmux -S "$socket" -f /dev/null new-session -d -s private 'sleep 120' ||
+				! tmux -S "$socket" has-session -t '=private'; then
+				fail "$operation: the private fixture did not start"
+				continue
+			fi
+		fi
+		HOME="$work/fakehome" TMUX="$caller,1,0" TMUX_TMPDIR="$private/panemux-screenshots/tmux" TMPDIR="$private" \
+			sh -c '. "$1"; case $2 in start) shot_start_tmux -s private "sleep 120";; stop) shot_stop_tmux;; teardown) shot_teardown;; esac' \
+			sh "$lib" "$operation"
+		if ! tmux -S "$caller" has-session -t '=caller' 2>/dev/null; then
+			fail "$operation preserves the caller server"
+			tmux -S "$caller" -f /dev/null new-session -d -s caller 'sleep 120'
+		elif [ "$operation" = start ]; then
+			if tmux -S "$socket" has-session -t '=private' 2>/dev/null &&
+				! tmux -S "$caller" has-session -t '=private' 2>/dev/null; then
+				pass 'start uses the private server with inherited TMUX'
+			else
+				fail 'start uses the private server with inherited TMUX'
+			fi
+		elif tmux -S "$socket" has-session 2>/dev/null; then
+			fail "$operation stops the private server with inherited TMUX"
+		else
+			pass "$operation stops only the private server with inherited TMUX"
+		fi
+		tmux -S "$socket" kill-server 2>/dev/null || true
+	done
+	check
+	if HOME="$work/fakehome" TMUX="$caller,1,0" TMUX_TMPDIR="$short/ambient" \
+		sh -eu -c '
+			. "$1"
+			e2e_tmux_env
+			trap e2e_tmux_cleanup EXIT
+			[ -z "${TMUX:-}" ] || exit 1
+			[ "$TMUX_TMPDIR" != "$2" ] || exit 1
+			tmux -f /dev/null new-session -d -s fixture "sleep 120"
+			tmux display-message -p "#{socket_path}" >"$3"
+			printf '%s\n' "$TMUX_TMPDIR" >"$3-root"
+		' sh "$here/../e2e/tmux-env.sh" "$short/ambient" "$short/e2e-socket" &&
+		tmux -S "$caller" has-session -t '=caller' 2>/dev/null &&
+		! tmux -S "$(cat "$short/e2e-socket")" has-session 2>/dev/null &&
+		[ ! -e "$(cat "$short/e2e-socket-root")" ]; then
+		pass 'E2E isolates its server and cleans it up without touching the caller'
+	else
+		fail 'E2E isolates its server and cleans it up without touching the caller'
+	fi
+	tmux -S "$caller" kill-server 2>/dev/null || true
 fi
 
 # ── shot_shell_env: the panes' shell prints only what the images expect ────
