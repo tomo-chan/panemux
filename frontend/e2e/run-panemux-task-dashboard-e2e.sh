@@ -7,7 +7,8 @@
 # what an agent would have written and the agent process itself — `claude`
 # here is a symlink to `sleep`, so `ps` lists a process named claude that
 # does nothing. Each one lives for 15 minutes, which outlasts the suite and
-# takes the tmux session down with it afterwards.
+# takes the tmux session down with it afterwards. The fixture also stops its
+# private server on exit, including tasks started or resumed by the suite.
 #
 # Starting and resuming a task (issue #257) runs the real launch script and
 # real tmux, with `claude` resolved from launch-bin, which is put first on
@@ -27,6 +28,12 @@ set -eu
 unset PANEMUX_PANE_ID
 
 E2E_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+. "$E2E_DIR/tmux-env.sh"
+e2e_tmux_env
+trap e2e_tmux_cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 GOPATH="$(go env GOPATH)"
 GOMODCACHE="$(go env GOMODCACHE)"
@@ -89,11 +96,9 @@ chmod +x "$E2E_HOME/launch-bin/claude"
 export PATH="$E2E_HOME/launch-bin:$PATH"
 
 if command -v tmux >/dev/null 2>&1; then
-    tmux kill-session -t e2e-task-dashboard 2>/dev/null || true
-    # A previous run's resumed session would make this run's resume refuse.
-    tmux kill-session -t "=task-${E2E_RESUMABLE%%-*}" 2>/dev/null || true
-    tmux new-session -d -s e2e-task-dashboard "exec '$E2E_HOME/bin/claude' 900"
+    tmux -f /dev/null new-session -d -s e2e-task-dashboard "exec '$E2E_HOME/bin/claude' 900"
     write_state "$(tmux list-panes -t e2e-task-dashboard -F '#{pane_pid}')" e2e-in-tmux waiting
 fi
 
-exec sh "$E2E_DIR/run-panemux-e2e.sh" task-dashboard.yml 4179
+# Keep this wrapper alive so its EXIT trap stops the private tmux server.
+sh "$E2E_DIR/run-panemux-e2e.sh" task-dashboard.yml 4179
