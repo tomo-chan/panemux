@@ -82,6 +82,20 @@ make test-e2e
 make check
 ```
 
+### Claude Code sandbox
+
+The shared `.claude/settings.json` sets `sandbox.network.allowLocalBinding: true` so
+HTTP/WebSocket tests and Playwright web servers can bind local ports inside the Claude Code
+sandbox. Keep this in the shared settings rather than requiring each contributor to configure
+`.claude/settings.local.json`. This setting does not grant outbound network access or filesystem
+writes; dependency downloads, Git configuration, and shared tool caches still follow the active
+sandbox permissions.
+
+After changing sandbox settings, verify `make check`, `make test-e2e`, and `make test-hooks`
+from Claude Code with sandboxing active. Runs from another agent or outside the sandbox verify
+the suites but do not establish that Claude Code sandbox permissions work. Record any remaining
+filesystem or cache restrictions separately from local port binding.
+
 ## Development Rules
 
 ### Path sanitization
