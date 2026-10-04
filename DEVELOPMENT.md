@@ -84,12 +84,28 @@ make check
 
 ### Claude Code sandbox
 
-The shared `.claude/settings.json` sets `sandbox.network.allowLocalBinding: true` so
-HTTP/WebSocket tests and Playwright web servers can bind local ports inside the Claude Code
-sandbox. Keep this in the shared settings rather than requiring each contributor to configure
-`.claude/settings.local.json`. This setting does not grant outbound network access or filesystem
-writes; dependency downloads, Git configuration, and shared tool caches still follow the active
-sandbox permissions.
+The shared `.claude/settings.json` sets `sandbox.network.allowLocalBinding: true` for **macOS**
+so HTTP/WebSocket tests and Playwright web servers can bind ports inside the Claude Code sandbox.
+Keep this in the shared settings rather than requiring each contributor to configure
+`.claude/settings.local.json`.
+
+On macOS this also lets sandboxed commands connect to **any localhost port**, including services
+started outside the sandbox. An unauthenticated local service, such as a debugger, can act for
+the command outside the sandbox; a command listening on a non-loopback address can accept
+connections from other machines. Every macOS contributor using these shared settings receives
+this broader local network access. The setting does not edit domain allowlists or filesystem
+permissions; dependency downloads, Git configuration, and shared tool caches still follow the
+applicable sandbox permissions.
+
+On **Linux and WSL2**, including Linux cloud containers, a sandboxed command already has its own
+private localhost: it can bind ports and reach servers it starts itself, but cannot directly
+reach host services there. `allowLocalBinding` has no effect and is not needed on those platforms.
+
+When the sandbox is **admin-required**, Claude Code ignores this permission-loosening key in
+repository settings, including `.claude/settings.json` and `.claude/settings.local.json`.
+Configure it through user, CLI, or managed settings as permitted by the organization's policy;
+managed settings may still prevent it from taking effect. See the official
+[Claude Code sandboxing documentation](https://code.claude.com/docs/en/sandboxing#a-command-fails-to-reach-a-server-on-localhost).
 
 After changing sandbox settings, verify `make check`, `make test-e2e`, and `make test-hooks`
 from Claude Code with sandboxing active. Runs from another agent or outside the sandbox verify
