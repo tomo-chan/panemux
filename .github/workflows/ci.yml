@@ -107,7 +107,7 @@ jobs:
             frontend/test-results/
             frontend/playwright-report/
           retention-days: 7
-          if-no-files-found: ignore
+          if-no-files-found: warn
 
       - name: Coverage (Go)
         run: make coverage-go

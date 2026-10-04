@@ -120,7 +120,14 @@ CI runs Playwright with one retry, and `playwright.config.ts` records a trace on
 `e2e-traces` artifact, kept for 7 days. Nothing is uploaded when the step passes.
 
 - Download it from the failed run's summary page, or with `gh run download <run-id> -n e2e-traces`.
-- Open a trace with `npx playwright show-trace <path>/trace.zip` from `frontend/`.
+  The upload drops the common `frontend/` prefix, so the download holds `test-results/` and
+  `playwright-report/` at its top level.
+- Open the HTML report with `npx playwright show-report <download-dir>/playwright-report` from
+  `frontend/`; a failed test's entry links its retry's trace.
+- Open one trace directly with
+  `npx playwright show-trace <download-dir>/test-results/<test>-retry1/trace.zip` from `frontend/`.
+- If neither directory exists when the step fails (for example, the web server never started), the
+  upload step leaves a warning annotation on the run rather than failing the job.
 - A test that failed only on its first attempt and passed on the retry fails nothing, so it leaves no
   artifact; a retry that also failed is what a trace exists for.
 
