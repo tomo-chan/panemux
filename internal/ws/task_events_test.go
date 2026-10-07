@@ -38,21 +38,11 @@ func (s *stubTaskSource) CollectHostLive(context.Context, string) (tasks.HostRes
 	}}
 }
 
-// refuseMarked stands in for internal/api's cross-site rule: it refuses a
-// request carrying X-Test-Cross-Site.
-func refuseMarked(w http.ResponseWriter, r *http.Request) bool {
-	if r.Header.Get("X-Test-Cross-Site") != "" {
-		http.Error(w, "cross-site request refused", http.StatusForbidden)
-		return true
-	}
-	return false
-}
-
 // taskEventsServer serves the stream of a publisher over src.
 func taskEventsServer(t *testing.T, src *stubTaskSource) *httptest.Server {
 	t.Helper()
 	publisher := taskevents.New(src, taskevents.Options{Interval: time.Hour})
-	ts := httptest.NewServer(NewTaskEventsHandler(publisher, refuseMarked))
+	ts := httptest.NewServer(NewTaskEventsHandler(publisher))
 	t.Cleanup(func() {
 		ts.Close()
 		publisher.Close()
@@ -118,7 +108,7 @@ func TestTaskEvents_SnapshotThenChanges(t *testing.T) {
 // observed, whichever of the two checks refuses it.
 func TestTaskEvents_RefusesBeforeObserving(t *testing.T) {
 	for name, header := range map[string]http.Header{
-		"cross-site rule":    {"X-Test-Cross-Site": {"1"}},
+		"cross-site rule":    {"Sec-Fetch-Site": {"same-site"}},
 		"foreign origin":     {"Origin": {"https://evil.example"}},
 		"unparseable origin": {"Origin": {"://"}},
 	} {
@@ -137,10 +127,10 @@ func TestTaskEvents_RefusesBeforeObserving(t *testing.T) {
 }
 
 // The upgrade's Origin check is /ws/{sessionID}'s: the server's own origin
-// and a loopback one, as the Vite dev server's proxy sends, are accepted.
-func TestTaskEvents_AcceptsOwnAndLoopbackOrigins(t *testing.T) {
+// is accepted; another loopback authority is not.
+func TestTaskEvents_AcceptsOwnOrigin(t *testing.T) {
 	ts := taskEventsServer(t, &stubTaskSource{})
-	for _, origin := range []string{ts.URL, "http://localhost:5173"} {
+	for _, origin := range []string{ts.URL} {
 		conn, _, err := dialTaskEvents(t, ts, http.Header{"Origin": {origin}})
 		require.NoError(t, err, origin)
 		assert.Equal(t, "snapshot", readTaskFrame(t, conn)["type"])
@@ -174,7 +164,7 @@ func TestTaskEvents_ClientFramesAreIgnoredAndBounded(t *testing.T) {
 func TestTaskEvents_ClosedSubscriptionClosesTheConnection(t *testing.T) {
 	src := &stubTaskSource{}
 	publisher := taskevents.New(src, taskevents.Options{Interval: time.Hour})
-	ts := httptest.NewServer(NewTaskEventsHandler(publisher, refuseMarked))
+	ts := httptest.NewServer(NewTaskEventsHandler(publisher))
 	t.Cleanup(ts.Close)
 	conn, _, err := dialTaskEvents(t, ts, nil)
 	require.NoError(t, err)
@@ -241,7 +231,7 @@ func TestTaskEvents_ClientThatStopsReadingStallsOnlyItsOwnConnection(t *testing.
 	// behind however slowly it runs.
 	src := &churningTaskSource{next: make(chan struct{})}
 	publisher := taskevents.New(src, taskevents.Options{Interval: time.Millisecond, Buffer: 4})
-	ts := httptest.NewServer(NewTaskEventsHandler(publisher, refuseMarked))
+	ts := httptest.NewServer(NewTaskEventsHandler(publisher))
 	t.Cleanup(func() {
 		ts.Close()
 		publisher.Close()

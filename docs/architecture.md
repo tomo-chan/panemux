@@ -35,6 +35,7 @@ layout rendering, terminal emulation, interaction state, and presentation.
 | `internal/taskevents` | Observe the running tasks on every host through `internal/tasks`'s lightweight collection while the task event stream has a subscriber, each host on its own cycle; keep what was last observed, publish each difference as an ordered event, assign unsigned waits their `wait_id`, and fan the events out to subscribers without waiting on any one of them. It decides nothing about notifications or panes. |
 | `internal/api` | Implement REST handlers and mount the route set. It is the single source of truth for API registration. |
 | `internal/ws` | Bridge session bytes and control messages to terminal WebSockets, stream command-center events, and serve the task event stream (`/ws/tasks/events`). |
+| `internal/requestsecurity` | Share browser Origin hostname/effective-port and Fetch Metadata checks across WebSockets and already-guarded task/SSH APIs. |
 | `internal/server` | Compose middleware, API routes, WebSocket routes, static assets, and SPA fallback into the production router. |
 | `internal/portforward` | Maintain short-lived loopback listeners that forward callback traffic through a session's SSH connection. |
 | `internal/board` | Invoke agmsg through its documented scripts, relay rows across configured hosts, and maintain the in-memory status/history view. |
@@ -170,7 +171,7 @@ and [URL-open security](security/url-open.md).
 - Core terminal routes assume a trusted deployment and are not an authenticated multi-user surface.
 - `/ws/tasks/events` is unauthenticated like `/ws/{sessionID}`. Because opening it makes every host
   be dialed, it refuses cross-site requests before upgrading, as the task routes under `/api/tasks` do.
-- `/api/board/*` and `/ws/board-command` are bearer-authenticated. The unauthenticated
+- `/api/board/*` and `/ws/board/command` are bearer-authenticated. The unauthenticated
   `GET /api/session-token` bootstrap route sits outside that subtree because it returns the bearer
   token itself; it accepts only requests whose remote address and `Host` are loopback. Non-loopback
   use of the authenticated routes also requires transport encryption.

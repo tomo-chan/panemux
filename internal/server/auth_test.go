@@ -99,11 +99,13 @@ func TestBearerAuthMiddleware_CorrectToken_PassesThrough(t *testing.T) {
 // handler that simulates ws.Handler's own upgrade attempt, an
 // unauthenticated request carrying the standard WS upgrade headers is
 // rejected before that handler — and therefore before any upgrade — runs.
+//
+//efficacy:exempt Existing token/availability behavior is unchanged; only the documented or fixture command URL moved.
 func TestBearerAuthMiddleware_WSHandshakeStyleRequest_RejectedBeforeUpgrade(t *testing.T) {
 	inner, called := okHandler()
 	handler := bearerAuthMiddleware("secret-token")(inner)
 
-	req := httptest.NewRequest(http.MethodGet, "/ws/board-command", nil)
+	req := httptest.NewRequest(http.MethodGet, "/ws/board/command", nil)
 	req.Header.Set("Connection", "Upgrade")
 	req.Header.Set("Upgrade", "websocket")
 	rr := httptest.NewRecorder()
@@ -113,11 +115,12 @@ func TestBearerAuthMiddleware_WSHandshakeStyleRequest_RejectedBeforeUpgrade(t *t
 	assert.False(t, *called, "the WS handler must never see the request, so no upgrade can happen")
 }
 
+//efficacy:exempt Existing token/availability behavior is unchanged; only the documented or fixture command URL moved.
 func TestBearerAuthMiddleware_WSHandshakeStyleRequest_CorrectToken_PassesThrough(t *testing.T) {
 	inner, called := okHandler()
 	handler := bearerAuthMiddleware("secret-token")(inner)
 
-	req := httptest.NewRequest(http.MethodGet, "/ws/board-command", nil)
+	req := httptest.NewRequest(http.MethodGet, "/ws/board/command", nil)
 	req.Header.Set("Connection", "Upgrade")
 	req.Header.Set("Upgrade", "websocket")
 	req.Header.Set("Authorization", "Bearer secret-token")

@@ -51,12 +51,12 @@ func (f *fakeBoardCommandRunner) Query(ctx context.Context, prompt string) (<-ch
 func setupBoardCommandWSServer(runner boardCommandRunner, token string) *httptest.Server {
 	h := NewBoardCommandHandler(runner, token)
 	r := chi.NewRouter()
-	r.Get("/ws/board-command", h.ServeHTTP)
+	r.Get("/ws/board/command", h.ServeHTTP)
 	return httptest.NewServer(r)
 }
 
 func boardCommandWSURL(srv *httptest.Server) string {
-	return "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws/board-command"
+	return "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws/board/command"
 }
 
 //nolint:wrapcheck // test helper, callers assert on err directly

@@ -756,7 +756,7 @@ Collects from every host and returns:
 - Like every other route outside `/api/board/*`, it is not authenticated
   ([Current boundaries](../overview.md#current-boundaries)). Because it dials every host, it
   answers `403` to a request another site's page made: `Sec-Fetch-Site` of `cross-site` or
-  `same-site`, or an `Origin` that is neither the server's own nor a loopback origin. A request with
+  `same-site`, or an `Origin` whose hostname and effective port differ from request Host. A request with
   neither header (not from a browser page) is served.
 
 ### `POST /api/tasks/hosts/{name}/reconnect`

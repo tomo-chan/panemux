@@ -99,7 +99,7 @@ The task event stream. The server sends JSON text frames; anything the client se
   [`GET /api/tasks`](tasks.md#get-apitasks): no bearer token.
 - **Cross-site requests are refused with `403` before upgrading and before any collection starts**:
   the same rule as `GET /api/tasks` (a `Sec-Fetch-Site` of `cross-site` or `same-site`, or an `Origin`
-  that is neither the server's own nor a loopback origin), and the upgrade's own Origin check as on
+  whose hostname or effective port differs from the request Host), and the upgrade's own Origin check as on
   `/ws/{sessionID}`. Opening the stream makes every host be dialed, so the refusal protects that side
   effect ([Task dashboard collection](../security/command-execution.md#task-dashboard-collection)).
 - A frame the client sends is limited to 512 bytes; a larger one closes the connection.

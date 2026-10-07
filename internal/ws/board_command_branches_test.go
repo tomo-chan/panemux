@@ -28,7 +28,7 @@ func TestBoardCommandServeHTTPLogsAFailedUpgrade(t *testing.T) {
 	srv := setupBoardCommandWSServer(&fakeBoardCommandRunner{}, "sample-token")
 	defer srv.Close()
 
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL+"/ws/board-command", nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL+"/ws/board/command", nil)
 	require.NoError(t, err)
 	req.Header.Set("Sec-WebSocket-Protocol", "sample-token")
 
