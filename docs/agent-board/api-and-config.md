@@ -11,11 +11,11 @@ Exact payloads and status codes live in [Agent Board REST API](../behavior/board
 | `GET /api/board/status` | Read the in-memory status snapshot without contacting agmsg |
 | `GET /api/board/messages?since=<seq>` | Read cache history after a panemux-local sequence |
 | `POST /api/board/broadcast` | Send to resolved pane IDs on their owning hosts |
-| `WS /ws/board-command` | Run and stream one command-center query |
+| `WS /ws/board/command` | Run and stream one command-center query |
 | `GET /api/board/command/history` | Read captured command-center history |
 | `GET /api/session-token` | Loopback-only browser bootstrap for the token and capability flags |
 
-All `/api/board/*` routes require the bearer token. `/ws/board-command` carries the same token by
+All `/api/board/*` routes require the bearer token. `/ws/board/command` carries the same token by
 WebSocket subprotocol. `/api/session-token` is deliberately outside the authenticated subtree and
 uses the guarded unauthenticated contract in [Agent Board REST API](../behavior/board-api.md#get-apisession-token).
 All other existing `/api/*` routes and `/ws/{sessionID}` remain unauthenticated; changing that

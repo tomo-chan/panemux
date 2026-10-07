@@ -59,7 +59,7 @@ agmsg's scripts; it never reads agmsg's database or team files directly.
 | Command palette | one-at-a-time command-center queries with streamed output |
 | Command history | persisted command-center conversation view |
 | `/api/board/*` | authenticated status, messages, broadcast, and history API |
-| `/ws/board-command` | authenticated command-center stream |
+| `/ws/board/command` | authenticated command-center stream |
 | `/api/session-token` | loopback-only browser bootstrap for authentication and feature flags |
 
 Exact request/response behavior lives in [Agent Board REST API](behavior/board-api.md) and

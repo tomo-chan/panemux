@@ -7,6 +7,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"panemux/internal/requestsecurity"
 	"panemux/internal/taskevents"
 )
 
@@ -26,17 +27,11 @@ var taskEventsUpgrader = websocket.Upgrader{
 // per change. See docs/behavior/task-events.md.
 type TaskEventsHandler struct {
 	publisher *taskevents.Publisher
-	// refuseCrossSite answers 403 to a request another site's page made and
-	// reports whether it did; it is internal/api's rule for the task routes.
-	refuseCrossSite func(http.ResponseWriter, *http.Request) bool
 }
 
-// NewTaskEventsHandler serves publisher's stream, refusing what
-// refuseCrossSite refuses.
-func NewTaskEventsHandler(
-	publisher *taskevents.Publisher, refuseCrossSite func(http.ResponseWriter, *http.Request) bool,
-) *TaskEventsHandler {
-	return &TaskEventsHandler{publisher: publisher, refuseCrossSite: refuseCrossSite}
+// NewTaskEventsHandler serves the publisher with the shared browser guard.
+func NewTaskEventsHandler(publisher *taskevents.Publisher) *TaskEventsHandler {
+	return &TaskEventsHandler{publisher: publisher}
 }
 
 // ServeHTTP is not authenticated, like /ws/{sessionID} and GET /api/tasks,
@@ -44,7 +39,7 @@ func NewTaskEventsHandler(
 // collected: subscribing starts observing every host. The upgrade then makes
 // the same Origin check as /ws/{sessionID}.
 func (h *TaskEventsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if h.refuseCrossSite(w, r) {
+	if requestsecurity.Refuse(w, r) {
 		return
 	}
 	conn, err := taskEventsUpgrader.Upgrade(w, r, nil)

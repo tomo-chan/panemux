@@ -11,7 +11,7 @@ const DEFAULT_BOARD_SESSION: BoardSession = { token: '', commandCenterEnabled: f
 
 // useBoardSessionToken fetches the bearer token panemux generated or was
 // configured with, so the dashboard can authenticate its own
-// /api/board/* requests and the /ws/board-command connection. See
+// /api/board/* requests and the /ws/board/command connection. See
 // GetBoardSessionToken's own doc comment (internal/api/board.go) for why
 // this endpoint exists and is deliberately unauthenticated itself.
 export function useBoardSessionToken(): BoardSession {

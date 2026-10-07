@@ -2,9 +2,21 @@
 
 > Part of the [behavior specification](../behavior.md). That document carries startup, configuration, and operational assumptions.
 
+## Browser connection policy
+
+All WebSockets apply the [shared browser request guard](../security/auth.md#shared-browser-request-guard)
+before upgrading. Another hostname or port in Origin is refused with `403`, including another
+loopback port without Fetch Metadata. `Sec-Fetch-Site: same-site` and `cross-site` are refused;
+Origin-free CLI requests remain supported. TLS termination is supported by comparing hostname
+and effective port, not transport scheme; another scheme on the same explicit port remains a
+limitation. Development HTTP and WS proxies preserve Host and Origin.
+
 ## Command Center WebSocket Protocol
 
-Endpoint: `GET /ws/board-command` — the Spotlight palette's chat connection. Full design lives in
+Endpoint: `GET /ws/board/command` — the Spotlight palette's chat connection.
+The old `/ws/board-command` is an ordinary terminal URL for a pane named `board-command`;
+there is no command alias or redirect. Existing command clients must update their URL and
+old browser tabs must reload. The pane ID remains allowed. Full design lives in
 [agent-board/command-center.md](../agent-board/command-center.md#command-center).
 
 **Authentication is different from every other route on this page.** Browsers cannot set an

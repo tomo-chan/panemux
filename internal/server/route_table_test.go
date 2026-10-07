@@ -111,7 +111,7 @@ func TestServer_RouteTable_CommandCenterEnabled_AddsOnlyBoardCommandWS(t *testin
 	runner := commandcenter.NewRunner(commandcenter.RunnerConfig{})
 	srv := New(testConfigWithToken("secret-token"), session.NewManager(), nil, nil, runner, emptyFS)
 
-	want := append(append([]string{}, expectedRoutes...), "GET /ws/board-command")
+	want := append(append([]string{}, expectedRoutes...), "GET /ws/board/command")
 	sort.Strings(want)
 
 	assert.Equal(t, want, walkRoutes(t, srv))

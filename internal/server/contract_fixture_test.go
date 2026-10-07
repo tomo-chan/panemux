@@ -745,7 +745,7 @@ func seedRichLayout(cfg *config.Config) {
 }
 
 // runQueryThroughWS drives one full command center query over
-// /ws/board-command, with the Runner persisting into the same history file
+// /ws/board/command, with the Runner persisting into the same history file
 // GET /api/board/command/history reads. home must be the HOME the caller
 // already set, since that is what DefaultHistoryFilePath resolves against.
 func runQueryThroughWS(t *testing.T, home string) {
@@ -757,7 +757,7 @@ func runQueryThroughWS(t *testing.T, home string) {
 		"the history file must resolve inside the test's own HOME, never the developer's")
 
 	e := newWSEnvIn(t, home, newFixtureRunnerAt(t, fixtureClaudeScript(t, ""), historyPath))
-	conn, _ := e.dial(t, "/ws/board-command", integrationToken)
+	conn, _ := e.dial(t, "/ws/board/command", integrationToken)
 	require.NotNil(t, conn)
 
 	require.NoError(t, conn.WriteMessage(websocket.TextMessage, []byte(`{"prompt":"which panes are working?"}`)))
@@ -799,7 +799,7 @@ func captureWSControlFrames(t *testing.T) []byte {
 }
 
 // captureBoardCommandFrames returns one of every server->client frame
-// /ws/board-command emits: error, busy, line and done — plus the second shape
+// /ws/board/command emits: error, busy, line and done — plus the second shape
 // `done` has, the one carrying `warnings`. The gate file is what makes `busy`
 // reachable without a timing assumption — see
 // TestWSIntegration_BoardCommandRoute_SecondConcurrentQueryIsBusy.
@@ -820,9 +820,9 @@ func captureBoardCommandFrames(t *testing.T) ([]byte, map[string]string) {
 		"while [ ! -f " + shellQuote(release) + " ]; do sleep 0.02; done\n"
 
 	e := newWSEnv(t, newFixtureRunner(t, fixtureClaudeScript(t, gate)))
-	first, _ := e.dial(t, "/ws/board-command", integrationToken)
+	first, _ := e.dial(t, "/ws/board/command", integrationToken)
 	require.NotNil(t, first)
-	second, _ := e.dial(t, "/ws/board-command", integrationToken)
+	second, _ := e.dial(t, "/ws/board/command", integrationToken)
 	require.NotNil(t, second)
 
 	require.NoError(t, second.WriteMessage(websocket.TextMessage, []byte("{not json")))
@@ -877,7 +877,7 @@ func captureBoardCommandDoneWithWarnings(t *testing.T) (json.RawMessage, string)
 	})
 
 	e := newWSEnv(t, runner)
-	conn, _ := e.dial(t, "/ws/board-command", integrationToken)
+	conn, _ := e.dial(t, "/ws/board/command", integrationToken)
 	require.NotNil(t, conn)
 
 	require.NoError(t, conn.WriteMessage(websocket.TextMessage, []byte(`{"prompt":"which panes are working?"}`)))

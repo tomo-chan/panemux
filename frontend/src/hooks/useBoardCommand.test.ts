@@ -71,7 +71,7 @@ describe('useBoardCommand', () => {
 
     expect(MockWebSocket.instances).toHaveLength(1)
     expect(MockWebSocket.instances[0].protocols).toEqual(['sekret'])
-    expect(MockWebSocket.instances[0].url).toContain('/ws/board-command')
+    expect(MockWebSocket.instances[0].url).toContain('/ws/board/command')
   })
 
   it('reflects connected state from ws open/close', () => {
