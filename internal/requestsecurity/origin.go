@@ -62,9 +62,6 @@ func authority(raw string, defaultPort int) (string, int, bool) {
 		return "", 0, false
 	}
 	host := strings.ToLower(u.Hostname())
-	if strings.ContainsAny(host, " /\\?#@") {
-		return "", 0, false
-	}
 	if ip, parseErr := netip.ParseAddr(host); parseErr == nil {
 		host = ip.String()
 	} else if strings.Contains(host, ":") {

@@ -414,6 +414,8 @@ func TestWSIntegration_BoardCommandPane_DoesNotCollide(t *testing.T) {
 // runner is configured — see docs/security.md's "Auth token and transport
 // encryption". A 404 here and a 401 in the tests below is the difference
 // between "there is nothing to probe" and "there is something here".
+//
+//efficacy:exempt Both absent new command and unknown legacy pane return 404; enabled separation is tested separately.
 func TestWSIntegration_BoardCommandRoute_AbsentWhenCommandCenterDisabled(t *testing.T) {
 	e := newWSEnv(t, nil)
 

@@ -31,6 +31,11 @@ func TestAllowedOriginPolicy(t *testing.T) {
 		{"zero port", "http://example.test:0", "example.test:0", false},
 		{"large port", "http://example.test:65536", "example.test:65536", false},
 		{"host empty port", "http://example.test", "example.test:", false},
+		{"minimum port", "http://example.test:1", "example.test:1", true},
+		{"maximum port", "http://example.test:65535", "example.test:65535", true},
+		{"bad host", "http://example.test", "example.test/path", false},
+		{"invalid IP literal", "http://[not:ip]", "[not:ip]", false},
+		{"non-IP brackets", "http://[example.test]", "[example.test]", false},
 		{"origin absent", "", "localhost:8080", true},
 	}
 	for _, tc := range cases {
