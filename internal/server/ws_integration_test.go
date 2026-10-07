@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -28,16 +29,15 @@ import (
 // issue #191's item (a). api_integration_test.go closed the /api half: every
 // HTTP route is driven through the router server.New() actually builds. The
 // two WebSocket routes had nothing equivalent — route_table_test.go reported
-// that /ws/{sessionID} and /ws/board-command were *registered*, but no test
+// that /ws/{sessionID} and /ws/board/command were *registered*, but no test
 // ever completed a handshake or exchanged a frame through the production
 // wiring.
 //
 // internal/ws has handler tests, and they are good ones, but they mount the
 // handler on a router they build themselves. That is exactly the shape issue
 // #178 found: 161 tests passing against a router that does not exist in
-// production. A handler test cannot see the middleware stack, the mount
-// precedence between /ws/board-command and /ws/{sessionID} (chi resolves the
-// literal segment first — asserted below, because nothing else does), or the
+// production. A handler test cannot see the middleware stack, the separation
+// between /ws/board/command and /ws/{sessionID}, or the
 // `if commandRunner != nil` block that decides whether the second route
 // exists at all.
 //
@@ -379,24 +379,36 @@ func TestWSIntegration_TerminalRoute_ReportsFinalStateWhenThePaneExits(t *testin
 	assert.Equal(t, map[string]any{"type": "status", "state": "exited"}, readControl(t, conn))
 }
 
-// The terminal route takes its pane id from the URL, so it would happily
-// match "board-command" as a pane id. chi resolves the literal segment
-// first, and nothing else in the suite says so — a reordering that broke it
-// would turn every command palette connection into a 404 for a pane that
-// does not exist.
-func TestWSIntegration_BoardCommandRoute_TakesPrecedenceOverThePaneRoute(t *testing.T) {
-	e := newWSEnv(t, newFixtureRunner(t, fixtureClaudeScript(t, "")))
-	e.addFakePane(t, "board-command")
-
-	_, resp := e.dial(t, "/ws/board-command")
-
-	// No subprotocol was offered, so the board-command handler rejects it.
-	// Reaching the pane route instead would have upgraded successfully,
-	// because a pane with that id exists.
-	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+// A configured board-command pane remains a terminal regardless of the command center.
+func TestWSIntegration_BoardCommandPane_DoesNotCollide(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		t.Run(strconv.FormatBool(enabled), func(t *testing.T) {
+			var runner *commandcenter.Runner
+			if enabled {
+				runner = newFixtureRunner(t, fixtureClaudeScript(t, ""))
+			}
+			e := newWSEnv(t, runner)
+			sess := e.addFakePane(t, "board-command")
+			conn, resp := e.dial(t, "/ws/board-command")
+			require.NotNil(t, conn)
+			assert.Equal(t, http.StatusSwitchingProtocols, resp.StatusCode)
+			assert.Equal(t, "connected", readControl(t, conn)["state"])
+			require.NoError(t, conn.WriteMessage(websocket.BinaryMessage, []byte("input")))
+			select {
+			case input := <-sess.in:
+				assert.Equal(t, []byte("input"), input)
+			case <-time.After(wsReadTimeout):
+				t.Fatal("terminal input not delivered")
+			}
+			sess.out <- []byte("output")
+			kind, data := readFrame(t, conn)
+			assert.Equal(t, websocket.BinaryMessage, kind)
+			assert.Equal(t, []byte("output"), data)
+		})
+	}
 }
 
-// ── /ws/board-command ─────────────────────────────────────────────────────
+// ── /ws/board/command ─────────────────────────────────────────────────────
 
 // The command center's route is absent, not present-and-rejecting, when no
 // runner is configured — see docs/security.md's "Auth token and transport
@@ -405,7 +417,7 @@ func TestWSIntegration_BoardCommandRoute_TakesPrecedenceOverThePaneRoute(t *test
 func TestWSIntegration_BoardCommandRoute_AbsentWhenCommandCenterDisabled(t *testing.T) {
 	e := newWSEnv(t, nil)
 
-	resp, err := http.Get(e.http.URL + "/ws/board-command") //nolint:noctx // httptest server, test-local
+	resp, err := http.Get(e.http.URL + "/ws/board/command") //nolint:noctx // httptest server, test-local
 	require.NoError(t, err)
 	defer resp.Body.Close() //nolint:errcheck
 
@@ -413,7 +425,7 @@ func TestWSIntegration_BoardCommandRoute_AbsentWhenCommandCenterDisabled(t *test
 
 	// Not the handler's own 401 body, and not an upgrade: the route simply
 	// is not there. registerFrontend's SPA catch-all only claims GET /*,
-	// which /ws/board-command does not match.
+	// which /ws/board/command does not match.
 	body, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
 	assert.NotContains(t, string(body), "unauthorized")
@@ -428,7 +440,7 @@ func TestWSIntegration_BoardCommandRoute_RejectsWrongOrMissingToken(t *testing.T
 		"empty token":           {""},
 	} {
 		t.Run(name, func(t *testing.T) {
-			conn, resp := e.dial(t, "/ws/board-command", subprotocols...)
+			conn, resp := e.dial(t, "/ws/board/command", subprotocols...)
 			assert.Nil(t, conn, "the handshake must not complete")
 			assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 		})
@@ -438,7 +450,7 @@ func TestWSIntegration_BoardCommandRoute_RejectsWrongOrMissingToken(t *testing.T
 func TestWSIntegration_BoardCommandRoute_AcceptsTheTokenAsASubprotocol(t *testing.T) {
 	e := newWSEnv(t, newFixtureRunner(t, fixtureClaudeScript(t, "")))
 
-	conn, resp := e.dial(t, "/ws/board-command", integrationToken)
+	conn, resp := e.dial(t, "/ws/board/command", integrationToken)
 	require.NotNil(t, conn)
 
 	assert.Equal(t, http.StatusSwitchingProtocols, resp.StatusCode)
@@ -453,7 +465,7 @@ func TestWSIntegration_BoardCommandRoute_AcceptsTheTokenAsASubprotocol(t *testin
 func TestWSIntegration_BoardCommandRoute_MalformedPromptGetsAnErrorFrame(t *testing.T) {
 	e := newWSEnv(t, newFixtureRunner(t, fixtureClaudeScript(t, "")))
 
-	conn, _ := e.dial(t, "/ws/board-command", integrationToken)
+	conn, _ := e.dial(t, "/ws/board/command", integrationToken)
 	require.NotNil(t, conn)
 
 	require.NoError(t, conn.WriteMessage(websocket.TextMessage, []byte("{not json")))
@@ -466,7 +478,7 @@ func TestWSIntegration_BoardCommandRoute_MalformedPromptGetsAnErrorFrame(t *test
 func TestWSIntegration_BoardCommandRoute_StreamsAQueryToCompletion(t *testing.T) {
 	e := newWSEnv(t, newFixtureRunner(t, fixtureClaudeScript(t, "")))
 
-	conn, _ := e.dial(t, "/ws/board-command", integrationToken)
+	conn, _ := e.dial(t, "/ws/board/command", integrationToken)
 	require.NotNil(t, conn)
 
 	require.NoError(t, conn.WriteMessage(websocket.TextMessage, []byte(`{"prompt":"which panes are working?"}`)))
@@ -493,9 +505,9 @@ func TestWSIntegration_BoardCommandRoute_SecondConcurrentQueryIsBusy(t *testing.
 		"while [ ! -f " + shellQuote(release) + " ]; do sleep 0.02; done\n"
 	e := newWSEnv(t, newFixtureRunner(t, fixtureClaudeScript(t, gate)))
 
-	first, _ := e.dial(t, "/ws/board-command", integrationToken)
+	first, _ := e.dial(t, "/ws/board/command", integrationToken)
 	require.NotNil(t, first)
-	second, _ := e.dial(t, "/ws/board-command", integrationToken)
+	second, _ := e.dial(t, "/ws/board/command", integrationToken)
 	require.NotNil(t, second)
 
 	require.NoError(t, first.WriteMessage(websocket.TextMessage, []byte(`{"prompt":"the slow one"}`)))
@@ -615,4 +627,41 @@ func TestWSIntegration_TaskEventsRoute_RefusesCrossSite(t *testing.T) {
 		require.Nil(t, conn)
 		assert.Equal(t, http.StatusForbidden, resp.StatusCode)
 	}
+}
+
+func TestWSIntegration_AllStreams_OriginGuard(t *testing.T) {
+	e := newWSEnv(t, newFixtureRunner(t, fixtureClaudeScript(t, "")))
+	e.addFakePane(t, "pane-demo")
+	e.useLocalTaskCollection(fixtureLocalTaskCollection)
+	for _, path := range []string{"/ws/pane-demo", "/ws/board/command", "/ws/tasks/events"} {
+		for name, headers := range map[string]http.Header{
+			"own":                               {"Origin": {e.http.URL}},
+			"CLI":                               {},
+			"other port":                        {"Origin": {"http://127.0.0.1:1"}},
+			"same-site":                         {"Origin": {e.http.URL}, "Sec-Fetch-Site": {"same-site"}},
+			"cross-site":                        {"Sec-Fetch-Site": {"cross-site"}},
+			"metadata does not override origin": {"Origin": {"http://127.0.0.1:1"}, "Sec-Fetch-Site": {"same-origin"}},
+		} {
+			t.Run(path+"/"+name, func(t *testing.T) {
+				dialer := websocket.Dialer{HandshakeTimeout: wsReadTimeout, Subprotocols: []string{integrationToken}}
+				conn, resp, err := dialer.Dial(e.wsURL(path), headers)
+				if name == "own" || name == "CLI" {
+					require.NoError(t, err)
+					require.NotNil(t, conn)
+					_ = conn.Close()
+				} else {
+					require.Error(t, err)
+					require.Nil(t, conn)
+					require.NotNil(t, resp)
+					assert.Equal(t, 403, resp.StatusCode)
+				}
+			})
+		}
+	}
+	// The guard runs even before a missing session can be looked up.
+	req := httptest.NewRequest("GET", "/ws/missing", nil)
+	req.Header.Set("Origin", "http://other.test")
+	rec := httptest.NewRecorder()
+	e.srv.httpSrv.Handler.ServeHTTP(rec, req)
+	assert.Equal(t, 403, rec.Code)
 }

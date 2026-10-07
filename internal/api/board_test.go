@@ -63,7 +63,7 @@ func TestGetBoardSessionToken_ReturnsConfiguredTokenAndCommandCenterState(t *tes
 func TestGetBoardSessionToken_CommandCenterUnavailable_ReportsFalse(t *testing.T) {
 	// cfg.CommandCenter.Enabled alone must not drive this response field:
 	// setup can fail after the config check (e.g. no auth token, or a path
-	// resolution error in setupCommandCenter), leaving /ws/board-command
+	// resolution error in setupCommandCenter), leaving /ws/board/command
 	// unregistered even though the operator's config says "enabled". The
 	// frontend must be told the route doesn't actually exist, not shown a
 	// working-looking palette that 404s on every request.

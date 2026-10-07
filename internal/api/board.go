@@ -220,7 +220,7 @@ func agentBoardEnabledAnyPane(cfg *config.Config) bool {
 
 // GetBoardSessionToken lets the same-origin dashboard learn the bearer
 // token panemux generated or was configured with, so its own JavaScript can
-// authenticate the /api/board/* requests and the /ws/board-command
+// authenticate the /api/board/* requests and the /ws/board/command
 // WebSocket connection it makes on the user's behalf. There is no other way
 // for the frontend to learn a token that may have been randomly generated
 // on first run (see config.Config.EnsureAuthToken) and is never sent to the

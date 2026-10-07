@@ -103,7 +103,7 @@ func TestBearerAuthMiddleware_WSHandshakeStyleRequest_RejectedBeforeUpgrade(t *t
 	inner, called := okHandler()
 	handler := bearerAuthMiddleware("secret-token")(inner)
 
-	req := httptest.NewRequest(http.MethodGet, "/ws/board-command", nil)
+	req := httptest.NewRequest(http.MethodGet, "/ws/board/command", nil)
 	req.Header.Set("Connection", "Upgrade")
 	req.Header.Set("Upgrade", "websocket")
 	rr := httptest.NewRecorder()
@@ -117,7 +117,7 @@ func TestBearerAuthMiddleware_WSHandshakeStyleRequest_CorrectToken_PassesThrough
 	inner, called := okHandler()
 	handler := bearerAuthMiddleware("secret-token")(inner)
 
-	req := httptest.NewRequest(http.MethodGet, "/ws/board-command", nil)
+	req := httptest.NewRequest(http.MethodGet, "/ws/board/command", nil)
 	req.Header.Set("Connection", "Upgrade")
 	req.Header.Set("Upgrade", "websocket")
 	req.Header.Set("Authorization", "Bearer secret-token")

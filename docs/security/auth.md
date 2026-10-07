@@ -56,7 +56,7 @@ are complementary, not redundant.
 The route-wiring incident and resulting single-source decision are recorded in the
 [quality-gateway design decisions](../quality-gateway/decisions.md).
 
-**`WS /ws/board-command` cannot use the `Authorization` header at all** — browsers do not allow a
+**`WS /ws/board/command` cannot use the `Authorization` header at all** — browsers do not allow a
 WebSocket upgrade request to carry arbitrary headers. `internal/ws/board_command.go`'s
 `BoardCommandHandler` instead reads the token from the `Sec-WebSocket-Protocol` request header (the
 client dials with `new WebSocket(url, [token])`), validated with the same
@@ -165,3 +165,26 @@ token-bearing file on disk, hence the explicit `0600` rather than relying on `os
 mode. `TestBuildMCPConfigReportsEachFailedStepAndLeavesNoFileBehind` pins that every failure arm
 after the file exists calls `cleanup()` on the way out, so a failed build never leaves the token
 sitting in the temp directory.
+
+### Shared browser request guard
+
+`internal/requestsecurity` guards all three WebSockets (`/ws/{sessionID}`,
+`/ws/board/command`, `/ws/tasks/events`) and the existing guarded task and SSH-connection
+APIs. `Sec-Fetch-Site: same-site` and `cross-site` return `403`. When Origin is present,
+it must be one http/https origin without credentials, path, query or fragment, and its
+hostname and effective port must match the request Host. Hostnames are case-insensitive;
+IPv6 representations are normalized. Different loopback hostnames are not interchangeable,
+and another loopback port is refused even without Fetch Metadata. The browser guard runs
+before terminal subscription, command execution or task observation.
+
+An omitted Origin remains permitted for CLI clients unless Fetch Metadata explicitly refuses
+it. Origin's default port is 80 for http and 443 for https; a Host without a port uses that
+same default. Scheme is not compared to the backend connection, preserving TLS termination
+at a proxy. Consequently, another scheme at the same hostname and explicit port is not
+reliably refused. Forwarded headers do not override this policy. This guard is neither
+client authentication nor DNS rebinding protection, and it does not add protection to every
+other API route.
+
+Development proxies must preserve the browser Host and Origin. Vite configures both `/api`
+and `/ws` with `changeOrigin: false`; it never rewrites Origin. Fetch Metadata alone is
+insufficient: Chrome WebSocket upgrades may omit it, so Origin is always checked when present.

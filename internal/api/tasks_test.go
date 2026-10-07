@@ -721,8 +721,8 @@ func TestTaskRoutes_RefuseCrossSiteRequests(t *testing.T) {
 		{name: "same-origin fetch", headers: map[string]string{"Sec-Fetch-Site": "same-origin"}, allowed: true},
 		{name: "typed into the address bar", headers: map[string]string{"Sec-Fetch-Site": "none"}, allowed: true},
 		{
-			name: "loopback origin (the Vite dev server)", headers: map[string]string{"Origin": "http://localhost:5173"},
-			allowed: true,
+			name: "another loopback authority", headers: map[string]string{"Origin": "http://localhost:5173"},
+			allowed: false,
 		},
 		{
 			name: "the server's own origin", headers: map[string]string{"Origin": "http://panemux.test:8080"},

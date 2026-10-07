@@ -59,7 +59,7 @@ panemux は、panemux のホストとすべての `ssh_connections` のホスト
 タスクのイベントストリーム。サーバーは JSON の text フレームを送る。クライアントから送られたものは無視する。
 
 - **認証しない。** [`/ws/{sessionID}`](websocket.md#websocket-protocol) や [`GET /api/tasks`](tasks.md#get-apitasks) と同じく bearer トークンは要らない。
-- **cross-site の要求は、upgrade の前、収集を始める前に `403` で拒否する。** `GET /api/tasks` と同じ規則（`Sec-Fetch-Site` が `cross-site` か `same-site`、または `Origin` がサーバー自身でも loopback でもない）に加え、`/ws/{sessionID}` と同じ upgrade 自身の Origin 検査を行う。ストリームを開くとすべてのホストに接続するので、この拒否はその副作用を守る（[Task dashboard collection](../security/command-execution.md#task-dashboard-collection)）。
+- **cross-site の要求は、upgrade の前、収集を始める前に `403` で拒否する。** `GET /api/tasks` と同じ規則（`Sec-Fetch-Site` が `cross-site` か `same-site`、または `Origin` のホスト名・実効ポートが要求の Host と一致しない）に加え、`/ws/{sessionID}` と同じ upgrade 自身の Origin 検査を行う。ストリームを開くとすべてのホストに接続するので、この拒否はその副作用を守る（[Task dashboard collection](../security/command-execution.md#task-dashboard-collection)）。
 - クライアントが送るフレームは 512 バイトまで。超えたら接続を閉じる。
 
 #### フレーム

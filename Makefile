@@ -360,7 +360,7 @@ test-model-check:
 #           UI components (App, SplitContainer, TerminalPane …) require a real
 #           browser renderer and are covered by integration / E2E tests.
 
-COVERAGE_PKGS := ./internal/config/...,./internal/api/...,./internal/ws/...,./internal/server/...,./internal/board/...,./internal/portforward/...,./internal/commandcenter/...,./internal/boardmcp/...,./internal/fileops/...,./internal/homedir/...,./internal/cachedir/...,./internal/tasks/...,./internal/taskevents/...,.
+COVERAGE_PKGS := ./internal/config/...,./internal/api/...,./internal/ws/...,./internal/server/...,./internal/board/...,./internal/portforward/...,./internal/commandcenter/...,./internal/boardmcp/...,./internal/fileops/...,./internal/homedir/...,./internal/cachedir/...,./internal/tasks/...,./internal/taskevents/...,./internal/requestsecurity/...,.
 
 coverage: coverage-go coverage-frontend
 
@@ -386,6 +386,7 @@ coverage-go: build-frontend
 	  ./internal/cachedir/... \
 	  ./internal/tasks/... \
 	  ./internal/taskevents/... \
+	  ./internal/requestsecurity/... \
 	  . \
 	  -coverprofile=coverage.out \
 	  -coverpkg=$(COVERAGE_PKGS) \

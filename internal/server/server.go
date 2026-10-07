@@ -41,7 +41,7 @@ type Server struct {
 var taskEventOptions = taskevents.Options{}
 
 // New creates a new server instance. commandRunner may be nil when
-// command_center.enabled is false — the /ws/board-command route is simply
+// command_center.enabled is false — the /ws/board/command route is simply
 // not registered in that case, so it 404s like any other undefined route
 // rather than panicking on a nil runner.
 func New(
@@ -64,7 +64,7 @@ func New(
 	// The task event publisher observes nothing until the stream has a
 	// subscriber; the server owns it and closes it on shutdown.
 	taskEvents := taskevents.New(apiHandler.TaskEventSource(), taskEventOptions)
-	taskEventsHandler := ws.NewTaskEventsHandler(taskEvents, api.RefuseCrossSite)
+	taskEventsHandler := ws.NewTaskEventsHandler(taskEvents)
 	registerRoutes(r, apiHandler, wsHandler, taskEventsHandler, commandRunner, frontendFS, cfg.Server.AuthToken)
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
@@ -111,13 +111,13 @@ func registerRoutes(
 	// segments cannot be taken by a pane id, which /ws/{sessionID} matches
 	// as one segment. See docs/behavior/task-events.md.
 	r.Get("/ws/tasks/events", taskEventsHandler.ServeHTTP)
-	// /ws/board-command is only registered when the command center is
+	// /ws/board/command is only registered when the command center is
 	// enabled (commandRunner != nil) — see docs/agent-board.md's Command
 	// center section. Unlike /ws/{sessionID}, this route requires the
 	// bearer token, mirroring /api/board/*.
 	if commandRunner != nil {
 		boardCommandHandler := ws.NewBoardCommandHandler(commandRunner, authToken)
-		r.Get("/ws/board-command", boardCommandHandler.ServeHTTP)
+		r.Get("/ws/board/command", boardCommandHandler.ServeHTTP)
 	}
 	registerFrontend(r, frontendFS)
 }
