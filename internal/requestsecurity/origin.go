@@ -59,7 +59,7 @@ func authority(raw string, defaultPort int) (string, int, bool) {
 	// Validate the raw authority before it can be interpreted as a DNS host.
 	if strings.HasPrefix(raw, "[") {
 		end := strings.IndexByte(raw, ']')
-		if end < 0 {
+		if end == -1 {
 			return "", 0, false
 		}
 		ip, err := netip.ParseAddr(raw[1:end])
