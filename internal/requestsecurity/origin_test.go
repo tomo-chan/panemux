@@ -33,6 +33,7 @@ func TestAllowedOriginPolicy(t *testing.T) {
 		{"host empty port", "http://example.test", "example.test:", false},
 		{"minimum port", "http://example.test:1", "example.test:1", true},
 		{"maximum port", "http://example.test:65535", "example.test:65535", true},
+		{"unbracketed invalid authority", "http://example.test:80", "not:an:ip:80", false},
 		{"bad host", "http://example.test", "example.test/path", false},
 		{"invalid IP literal", "http://[not:ip]", "[not:ip]", false},
 		{"non-IP brackets", "http://[example.test]", "[example.test]", false},
