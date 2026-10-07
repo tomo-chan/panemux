@@ -55,6 +55,21 @@ func Refuse(w http.ResponseWriter, r *http.Request) bool {
 }
 
 func authority(raw string, defaultPort int) (string, int, bool) {
+	// net/url's IP-literal checks differ across supported Go releases.
+	// Validate the raw authority before it can be interpreted as a DNS host.
+	if strings.HasPrefix(raw, "[") {
+		end := strings.IndexByte(raw, ']')
+		if end < 0 {
+			return "", 0, false
+		}
+		ip, err := netip.ParseAddr(raw[1:end])
+		if err != nil || !ip.Is6() || ip.Zone() != "" {
+			return "", 0, false
+		}
+	} else if strings.Count(raw, ":") > 1 {
+		return "", 0, false
+	}
+
 	u, err := url.Parse("http://" + raw)
 	if err != nil || u.Host != raw || u.User != nil || u.Path != "" || u.RawQuery != "" ||
 		u.Fragment != "" || u.Hostname() == "" {
@@ -64,8 +79,6 @@ func authority(raw string, defaultPort int) (string, int, bool) {
 	host := strings.ToLower(u.Hostname())
 	if ip, parseErr := netip.ParseAddr(host); parseErr == nil {
 		host = ip.String()
-	} else if strings.Contains(host, ":") {
-		return "", 0, false
 	}
 	port := defaultPort
 	if strings.HasSuffix(raw, ":") {

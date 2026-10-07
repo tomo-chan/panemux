@@ -173,7 +173,8 @@ sitting in the temp directory.
 APIs. `Sec-Fetch-Site: same-site` and `cross-site` return `403`. When Origin is present,
 it must be one http/https origin without credentials, path, query or fragment, and its
 hostname and effective port must match the request Host. Hostnames are case-insensitive;
-IPv6 representations are normalized. Different loopback hostnames are not interchangeable,
+IPv6 representations are normalized; brackets require a valid IPv6 literal, and
+unbracketed IPv6 and zone identifiers are refused independently of the Go URL parser. Different loopback hostnames are not interchangeable,
 and another loopback port is refused even without Fetch Metadata. The browser guard runs
 before terminal subscription, command execution or task observation.
 

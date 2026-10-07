@@ -18,6 +18,16 @@ func TestAllowedOriginPolicy(t *testing.T) {
 		{"default https", "https://example.test:443", "example.test", true},
 		{"wrong default", "https://example.test", "example.test:80", false},
 		{"case", "http://EXAMPLE.test:80", "example.TEST", true},
+		{"ipv6 default http", "http://[::1]", "[::1]:80", true},
+		{"ipv6 default https", "https://[::1]:443", "[0:0:0:0:0:0:0:1]", true},
+		{"ipv6 different address", "http://[::1]:80", "[::2]:80", false},
+		{"DNS bracket request host", "http://example.test:80", "[example.test]:80", false},
+		{"IPv4 bracket", "http://127.0.0.1:80", "[127.0.0.1]:80", false},
+		{"unclosed bracket", "http://example.test:80", "[::1", false},
+		{"invalid bracket literal host", "http://example.test:80", "[not:ip]:80", false},
+		{"unbracketed IPv6", "http://[::1]:8080", "::1:8080", false},
+		{"IPv6 zone host", "http://[fe80::1]:80", "[fe80::1%25eth0]:80", false},
+		{"IPv6 zone origin", "http://[fe80::1%25eth0]:80", "[fe80::1%25eth0]:80", false},
 		{"ipv6", "http://[0:0:0:0:0:0:0:1]:8080", "[::1]:8080", true},
 		{"scheme limitation", "https://example.test:8080", "example.test:8080", true},
 		{"null", "null", "example.test", false},
@@ -53,13 +63,14 @@ func TestAllowedOriginPolicy(t *testing.T) {
 			})
 		}
 	}
-	t.Run("duplicate origin", func(t *testing.T) {
-		r := httptest.NewRequest("GET", "/ws/pane", nil)
-		r.Host = "example.test"
-		r.Header.Add("Origin", "http://example.test")
-		r.Header.Add("Origin", "http://example.test")
-		assert.False(t, Allowed(r))
-	})
+}
+
+func TestAllowedRejectsDuplicateOrigin(t *testing.T) {
+	r := httptest.NewRequest("GET", "/ws/pane", nil)
+	r.Host = "example.test"
+	r.Header.Add("Origin", "http://example.test")
+	r.Header.Add("Origin", "http://example.test")
+	assert.False(t, Allowed(r))
 }
 
 func TestRefuse(t *testing.T) {
