@@ -47,6 +47,11 @@
 
 set -u
 
+# Pin direct execution and every Go subprocess to this checkout's go.mod.
+panemux_toolchain_root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+. "$panemux_toolchain_root/scripts/go-toolchain.sh"
+panemux_go_toolchain "$panemux_toolchain_root" || exit 1
+
 base=${EFFICACY_BASE:-origin/main}
 repo_root=$(git rev-parse --show-toplevel)
 mode=${1:-run}

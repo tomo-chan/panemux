@@ -51,6 +51,15 @@ The order is intentional: cheaper checks should reject a defect before expensive
 | **G5** | Scenario | Playwright workflows, scenario-reference validation, and accessibility ceilings | `make test-e2e`, `make check-scenarios`, and CI |
 | **G6** | Adversarial review | Fresh-context review of the diff for correctness and stated requirements | Review agent plus human review; advisory, not a merge gate |
 
+### Toolchain consistency
+
+Gate results use the exact Go version in `go.mod` locally and in CI. The common development
+shell selects and verifies it before Makefile initialization and recipes; direct Go-based
+agent hooks, efficacy/mutation scripts, and browser fixture launchers use the same selector.
+Unavailable or mismatched SDKs fail before the check runs. `make test-go-toolchain`, included
+in `make check` and run explicitly in CI, protects version selection and failure behavior.
+See [the Go contract](../DEVELOPMENT.md#go-version-contract).
+
 ### Gate details
 
 - Coverage thresholds stay at 80%; newly added decision-holding packages join the measured scope

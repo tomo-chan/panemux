@@ -2,6 +2,19 @@
 
 This document captures repository maintenance rules that belong in durable project documentation rather than in the agent index.
 
+## Go toolchain
+
+Keep `go.mod` as the sole Go version source. Go workflows use `setup-go` with
+`go-version-file: go.mod`; local Makefile initialization, recipes, agent hooks, and direct
+Go-based fixture/gate scripts use the same exact version through the common toolchain shell.
+Inherited `GOTOOLCHAIN` settings cannot change this selection. Do not add a second version pin
+or require contributors to pass a version environment variable. Update the exact Go directive
+and verify `make test-go-toolchain` and `make check` when changing the contract.
+
+CI runs the toolchain contract tests explicitly because its unit suites do not use `make test`.
+See [the development contract](../DEVELOPMENT.md#go-version-contract) for SDK acquisition and
+failure behavior.
+
 ## GitHub Actions Pinning
 
 - Pin GitHub Actions to full commit SHAs, not floating tags such as `@v4` or `@v5`.

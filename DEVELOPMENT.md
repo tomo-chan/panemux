@@ -2,6 +2,27 @@
 
 This document is the developer workflow reference for building, testing, changing, and shipping this repository.
 
+## Go version contract
+
+`go.mod`'s `go` directive is the exact Go version used locally and in CI. Run ordinary
+`make` commands without setting `GOTOOLCHAIN`: the common shell selects that version before
+Makefile initialization, recipes, and their child processes. It overrides inherited
+`GOTOOLCHAIN` settings and puts the selected SDK's `go` and `gofmt` first on `PATH`.
+A newer Go installation does not change the version used by the repository.
+
+Install a Go launcher supporting toolchain selection (Go 1.21 or later). Go downloads the
+required SDK through its normal module cache when needed; initial setup can require network
+access. Missing, malformed, unavailable, or mismatched toolchains stop the command before its
+work begins. An exact `major.minor.patch` directive is required. Update it to change the
+contract; a `toolchain` directive alone is insufficient to force a newer local Go to downgrade.
+
+Direct efficacy/mutation scripts, agent hooks, and browser fixture launchers select the same
+contract from the checkout containing the script, including when checking scratch repositories.
+For an ad hoc Go command, use `scripts/go-shell.sh -c 'go version'` (replace the shell command
+as needed). A bare `go` command in an interactive shell follows that shell's configuration.
+`make test-go-toolchain` checks selection, inheritance, Makefile initialization, and failure
+behavior. Node versions and diff-gate comparison refs have separate contracts.
+
 ## Build And Run
 
 **Full build**:

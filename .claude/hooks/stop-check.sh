@@ -22,6 +22,11 @@
 
 set -u
 
+# Pin direct execution and every Go subprocess to this checkout's go.mod.
+panemux_toolchain_root=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
+. "$panemux_toolchain_root/scripts/go-toolchain.sh"
+panemux_go_toolchain "$panemux_toolchain_root" || exit 2
+
 # Claude Code sets stop_hook_active when it is ALREADY continuing because of a
 # previous Stop-hook block. Without this, a condition the turn cannot fix — a
 # pre-existing dirty file, a test the user deliberately left red, or the

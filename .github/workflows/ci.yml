@@ -11,6 +11,9 @@ on:
       - 'go.sum'
       - 'frontend/**'
       - 'Makefile'
+      - 'scripts/go-toolchain.sh'
+      - 'scripts/go-shell.sh'
+      - 'scripts/go_toolchain_test.sh'
       - '.github/workflows/ci.yml'
   pull_request:
     branches:
@@ -22,6 +25,9 @@ on:
       - 'go.sum'
       - 'frontend/**'
       - 'Makefile'
+      - 'scripts/go-toolchain.sh'
+      - 'scripts/go-shell.sh'
+      - 'scripts/go_toolchain_test.sh'
       - '.github/workflows/ci.yml'
       - '.github/workflows/**'
       - '.goreleaser.yaml'
@@ -77,6 +83,9 @@ jobs:
 
       - name: Test (Frontend)
         run: cd frontend && npm run test:ci
+
+      - name: Test (Go toolchain contract)
+        run: make test-go-toolchain
 
       # The agent-side gates' own tests. Folding test-hooks into `make test`
       # reaches .githooks/pre-push (rung L3) and no further, because this
