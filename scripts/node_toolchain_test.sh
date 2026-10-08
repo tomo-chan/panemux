@@ -4,7 +4,7 @@ initial_path=$PATH
 initial_node_options=${NODE_OPTIONS:-}
 initial_node_options_set=${NODE_OPTIONS+x}
 scripts_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
-work=$(mktemp -d)
+work=$(mktemp -d "${TMPDIR:-/tmp}/panemux-node-toolchain-test.XXXXXX") || exit 1
 trap 'rm -rf "$work"' EXIT HUP INT TERM
 mkdir -p "$work/mock" "$work/repo" "$work/archive/node-v24.21.0-linux-x64/bin"
 printf '24.21.0\n' > "$work/repo/.node-version"
