@@ -167,7 +167,7 @@ denies pseudo-terminals, Unix sockets (tmux cannot start a server), `ps`, `dscl`
 
 | Command | Inside the macOS sandbox |
 |---|---|
-| `make install-deps` | Passes once the hooks are installed: `install-hooks` writes `.git/config` only when `core.hooksPath` does not already lead to an identical `pre-push`. In a fresh clone run `make install-hooks` once outside the sandbox. `npm install` may warn `EPERM` on `.idea/` files inside packages; those warnings are harmless. |
+| `make install-deps` | Passes once the hooks are installed: `install-hooks` writes `.git/config` only when `core.hooksPath` does not already lead to an identical, executable `pre-push` (git silently skips one without the executable bit). In a fresh clone run `make install-hooks` once outside the sandbox. `npm install` may warn `EPERM` on `.idea/` files inside packages; those warnings are harmless. |
 | `make check` | Passes. A Go test that needs a pty, tmux, `ps` or `dscl` calls `internal/testcap`'s `RequirePTY`/`RequireTmux`/`RequirePS`/`RequireDscl`, and the screenshot fixtures' tmux checks probe the same way: each reports itself **skipped** where the probe fails. `golangci-lint` caches under `$TMPDIR` when the user cache directory is not writable (`scripts/golangci_lint_cache.sh`). |
 | `make test-e2e` | Reports itself skipped: every pane needs a pty (`scripts/require_pty.sh`). |
 | `make screenshots` | Fails, saying to run it outside the sandbox. It writes tracked images, so it is never skipped. |
@@ -180,8 +180,10 @@ the `testcap` helper first, never let it fail on the sandbox's error.
 Every script makes its temporary files under `$TMPDIR` with an explicit `mktemp` template, and stops
 when it cannot: macOS's bare `mktemp -d` ignores `$TMPDIR`, and a test script that carried on with an
 empty work directory once committed its fixtures in the caller's own worktree.
-`scripts/tmpdir_guard_test.sh` (`make test-tmpdir-guard`) runs each script with a failing `mktemp`
-and asserts the repository it ran from is untouched, and fails on any `mktemp` call without a template.
+`scripts/tmpdir_guard_test.sh` (`make test-tmpdir-guard`) runs each script with a failing `mktemp` —
+its first call, and also its second where it has more than one call site, the first a fixture helper
+makes — and asserts the repository it ran from is untouched. It fails on any `mktemp` call without a
+template, and on any `x=$(mktemp ...)` assignment that does not handle a failure on the same line.
 
 After changing sandbox settings, verify `make check`, `make test-e2e`, and `make test-hooks`
 from Claude Code with sandboxing active. Runs from another agent or outside the sandbox verify

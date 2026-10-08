@@ -10,9 +10,18 @@
 # switched branches, in the caller's own worktree (issue #315).
 #
 # Each script runs from a throwaway copy of the scripts, committed into a
-# throwaway git repository, with a `mktemp` on PATH that always fails. The
-# script must exit non-zero, and that repository must be exactly as it was:
-# same branch, same commit, same branch list, no new or changed files.
+# throwaway git repository, with a `mktemp` on PATH that fails on its N-th
+# call and runs the real one before that. The script must exit non-zero, and
+# that repository must be exactly as it was: same branch, same commit, same
+# branch list, no new or changed files.
+#
+# N is 1 for every script, and also 2 for a test script with more than one
+# mktemp call site: the second call is the first one a fixture helper makes
+# (`new_repo`, `fixture`, ...) after the work directory exists, and an
+# unchecked helper call once committed into the caller's repository even
+# though the first call was guarded (PR #326). Every later call is not run
+# dynamically — that would replay each suite once per call — so the static
+# half below requires every `x=$(mktemp ...)` assignment to handle failure.
 #
 # Run with: make test-tmpdir-guard
 
@@ -35,10 +44,14 @@ pass() { echo "ok   $1"; }
 # The repository's hook-time environment would point git at this checkout.
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
 
+real_mktemp=$(command -v mktemp) || exit 1
 mkdir -p "$work/bin" "$work/tmpdir"
 cat > "$work/bin/mktemp" <<'SH'
 #!/bin/sh
 printf '%s\n' "$*" >> "$MKTEMP_LOG"
+if [ "$(wc -l < "$MKTEMP_LOG")" -lt "$MKTEMP_FAIL_AT" ]; then
+	exec "$REAL_MKTEMP" "$@"
+fi
 echo "mktemp: simulated failure" >&2
 exit 1
 SH
@@ -54,7 +67,8 @@ repo_state() {
 }
 
 n=0
-# check_script <path> <must-reach-mktemp>
+# check_script <path> <must-reach-mktemp> [fail-at]
+#   fail-at (default 1) is the mktemp call that fails.
 #   must-reach-mktemp is "yes" for the test scripts, which create their work
 #   directory before anything else. The production scripts may stop earlier
 #   for want of a tool (gremlins, a JDK); that is still a pass for the
@@ -63,6 +77,7 @@ n=0
 check_script() {
 	script=$1
 	must_reach=$2
+	fail_at=${3:-1}
 	n=$((n + 1))
 	checks=$((checks + 1))
 	copy="$work/case$n"
@@ -84,34 +99,39 @@ check_script() {
 	: > "$log"
 	(
 		cd "$copy" || exit 1
-		PATH="$work/bin:$PATH" MKTEMP_LOG="$log" TMPDIR="$work/tmpdir" \
+		PATH="$work/bin:$PATH" MKTEMP_LOG="$log" MKTEMP_FAIL_AT="$fail_at" \
+			REAL_MKTEMP="$real_mktemp" TMPDIR="$work/tmpdir" \
 			sh "$script" < /dev/null > "$work/out$n" 2>&1
 	)
 	status=$?
 	after=$(repo_state "$copy")
 
+	label="$script (mktemp call $fail_at fails)"
 	if [ "$status" -eq 0 ]; then
-		fail "$script: exited 0 although mktemp failed"
+		fail "$label: exited 0 although mktemp failed"
 		return
 	fi
 	if [ "$before" != "$after" ]; then
-		fail "$script: changed the repository it ran from:
+		fail "$label: changed the repository it ran from:
 $(printf '%s\n' "$before" > "$work/before$n"; printf '%s\n' "$after" > "$work/after$n"; diff "$work/before$n" "$work/after$n")"
 		return
 	fi
-	if [ "$must_reach" = yes ] && [ ! -s "$log" ]; then
-		fail "$script: never called mktemp, so this case proves nothing"
+	if [ "$must_reach" = yes ] && [ "$(wc -l < "$log")" -lt "$fail_at" ]; then
+		fail "$label: never reached that mktemp call, so this case proves nothing"
 		return
 	fi
 	if [ -s "$log" ] && ! head -n 1 "$log" | grep -q -- "$work/tmpdir/"; then
-		fail "$script: first mktemp call was not under \$TMPDIR: $(head -n 1 "$log")"
+		fail "$label: first mktemp call was not under \$TMPDIR: $(head -n 1 "$log")"
 		return
 	fi
-	if [ "$(wc -l < "$log")" -gt 1 ]; then
-		fail "$script: carried on after mktemp failed (called it $(wc -l < "$log" | tr -d ' ') times)"
+	# A later failure only has to fail the run: a case that runs inside a
+	# command substitution (hooks_test.sh's expect_status) cannot stop the
+	# script, and the repository check above is what matters there.
+	if [ "$fail_at" -eq 1 ] && [ "$(wc -l < "$log")" -gt 1 ]; then
+		fail "$label: carried on after mktemp failed (called it $(wc -l < "$log" | tr -d ' ') times)"
 		return
 	fi
-	pass "$script stops at the first failed mktemp and leaves the repository alone"
+	pass "$label: stops and leaves the repository alone"
 }
 
 for t in scripts/coverage_blocks_test.sh scripts/docs_links_check_test.sh \
@@ -121,6 +141,10 @@ for t in scripts/coverage_blocks_test.sh scripts/docs_links_check_test.sh \
 	scripts/go_toolchain_test.sh scripts/node_toolchain_test.sh \
 	frontend/screenshots/screenshots-env_test.sh .claude/hooks/hooks_test.sh; do
 	check_script "$t" yes
+	# More than one call site: fail the second call too (see the header).
+	if [ "$(grep -vE '^[[:space:]]*#' "$root/$t" | grep -cE '(\$\(|^[[:space:]]*)mktemp[[:space:]]')" -gt 1 ]; then
+		check_script "$t" yes 2
+	fi
 done
 for s in scripts/coverage_blocks.sh scripts/docs_links_check.sh scripts/efficacy.sh \
 	scripts/model_check.sh scripts/mutation.sh; do
@@ -143,6 +167,22 @@ if [ -n "$bad" ]; then
 $bad"
 else
 	pass "every mktemp call names a template under \$TMPDIR"
+fi
+
+# And every `x=$(mktemp ...)` assignment handles a failure on the same line
+# (`|| exit 1`, `|| return`, or inside an `if`): an empty path makes `cd ""` a
+# no-op and the next git command run in the caller's repository.
+checks=$((checks + 1))
+unchecked=$(cd "$root" && grep -nE '=\$\(mktemp[[:space:]]' \
+	scripts/*.sh frontend/e2e/*.sh frontend/screenshots/*.sh .claude/hooks/*.sh |
+	grep -vE '^[^:]+:[0-9]+:[[:space:]]*#' |
+	grep -vE "^scripts/tmpdir_guard_test\.sh:" |
+	grep -vE '\|\||^[^:]+:[0-9]+:[[:space:]]*(if|elif)[[:space:]]')
+if [ -n "$unchecked" ]; then
+	fail "mktemp assignments that ignore a failure:
+$unchecked"
+else
+	pass "every mktemp assignment handles a failure"
 fi
 
 echo

@@ -58,6 +58,8 @@ pass() { echo "ok   $1"; }
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/panemux-mutation-test.XXXXXX") || exit 1
 trap 'rm -rf "$work"' EXIT
+# An empty path must never mean the caller's worktree: `cd ""` is a no-op.
+cd "$work" || exit 1
 
 # new_repo — an empty git repository with a go.mod and one commit on `main`, so
 # there is always a base ref to diff against. Prints its path.
@@ -65,7 +67,7 @@ trap 'rm -rf "$work"' EXIT
 # `mktemp -d`, not a counter: this runs in a command substitution, so a counter
 # would be incremented in a subshell and never seen by the caller.
 new_repo() {
-	repo=$(mktemp -d "$work/repoXXXXXX")
+	repo=$(mktemp -d "$work/repoXXXXXX") || exit 1
 	mkdir -p "$repo/pkg"
 	(
 		cd "$repo" || exit 1
@@ -150,7 +152,7 @@ findings_only() {
 # the line-level check entirely would still pass such a case, since an untouched
 # file never enters the loop at all. Confirmed by perturbation.
 checks=$((checks + 1))
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 cat > "$repo/pkg/mixed.go" <<'EOF'
 package pkg
 
@@ -205,7 +207,7 @@ fi
 # run, and counting them as "no survivor" states a result nothing measured.
 
 checks=$((checks + 1))
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 commit_on_main "$repo" "empty base"
 cat > "$repo/pkg/new.go" <<'EOF'
 package pkg
@@ -259,7 +261,7 @@ fi
 # be a number nobody could defend.
 
 checks=$((checks + 1))
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 commit_on_main "$repo" "empty base"
 cat > "$repo/pkg/new.go" <<'EOF'
 package pkg
@@ -295,7 +297,7 @@ fi
 # argue about one defect, and the one with the clearer message is the other one.
 
 checks=$((checks + 1))
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 commit_on_main "$repo" "empty base"
 cat > "$repo/pkg/new.go" <<'EOF'
 package pkg
@@ -331,7 +333,7 @@ fi
 # ── 4. //mutation:exempt ──────────────────────────────────────────────────────
 
 checks=$((checks + 1))
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 commit_on_main "$repo" "empty base"
 cat > "$repo/pkg/new.go" <<'EOF'
 package pkg
@@ -366,7 +368,7 @@ fi
 # exemption stops being reviewable."
 
 checks=$((checks + 1))
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 commit_on_main "$repo" "empty base"
 cat > "$repo/pkg/new.go" <<'EOF'
 package pkg
@@ -408,7 +410,7 @@ fi
 # fixture in that shape passes either way. Confirmed by perturbation.
 
 checks=$((checks + 1))
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 commit_on_main "$repo" "empty base"
 cat > "$repo/pkg/new.go" <<'EOF'
 package pkg
@@ -441,7 +443,7 @@ fi
 # ── 7. MUTATION_EXEMPT waives the branch, and says how many ───────────────────
 
 checks=$((checks + 1))
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 commit_on_main "$repo" "empty base"
 cat > "$repo/pkg/new.go" <<'EOF'
 package pkg
@@ -468,7 +470,7 @@ fi
 # ── 8. No Go implementation changed ───────────────────────────────────────────
 
 checks=$((checks + 1))
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 commit_on_main "$repo" "empty base"
 printf 'docs only\n' > "$repo/README.md"
 write_report "$repo/rep.json" '{"go_module":"example","files":[]}'
@@ -489,7 +491,7 @@ fi
 # (G4(b)) is what judges changed tests; this gate judges changed implementation.
 
 checks=$((checks + 1))
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 commit_on_main "$repo" "empty base"
 cat > "$repo/pkg/new_test.go" <<'EOF'
 package pkg
@@ -518,7 +520,7 @@ fi
 # nothing must not look like one that passed.
 
 checks=$((checks + 1))
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 commit_on_main "$repo" "empty base"
 printf 'package pkg\n\nfunc F() {}\n' > "$repo/pkg/new.go"
 write_report "$repo/rep.json" '{"go_module":"example","files":[]}'
@@ -536,7 +538,7 @@ fi
 # ── 11. Could not run: missing report ─────────────────────────────────────────
 
 checks=$((checks + 1))
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 commit_on_main "$repo" "empty base"
 printf 'package pkg\n\nfunc F(n int) bool { return n > 1 }\n' > "$repo/pkg/new.go"
 commit_on_branch "$repo" "add"
@@ -559,7 +561,7 @@ fi
 # has no `files` key, which must not read as "no survivors".
 
 checks=$((checks + 1))
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 commit_on_main "$repo" "empty base"
 printf 'package pkg\n\nfunc F(n int) bool { return n > 1 }\n' > "$repo/pkg/new.go"
 write_report "$repo/rep.json" 'not json at all'
@@ -577,7 +579,7 @@ fi
 # ── 13. A clean branch says so ────────────────────────────────────────────────
 
 checks=$((checks + 1))
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 commit_on_main "$repo" "empty base"
 cat > "$repo/pkg/new.go" <<'EOF'
 package pkg
@@ -610,7 +612,7 @@ fi
 # every finding silently unmatched, which is this gate reporting green.
 
 checks=$((checks + 1))
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 commit_on_main "$repo" "empty base"
 cat > "$repo/pkg/new.go" <<'EOF'
 package pkg
@@ -641,7 +643,7 @@ fi
 # measured nothing. No root-only case can see this.
 
 checks=$((checks + 1))
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 commit_on_main "$repo" "empty base"
 cat > "$repo/pkg/new.go" <<'EOF'
 package pkg
@@ -666,7 +668,7 @@ fi
 # ── 16. The summary counts survivors, not mutations ───────────────────────────
 
 checks=$((checks + 1))
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 commit_on_main "$repo" "empty base"
 cat > "$repo/pkg/new.go" <<'EOF'
 package pkg
@@ -707,7 +709,7 @@ fi
 # a verdict is worse than a common one.
 
 checks=$((checks + 1))
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 commit_on_main "$repo" "empty base"
 cat > "$repo/pkg/new.go" <<'EOF'
 package pkg
@@ -746,7 +748,7 @@ fi
 # genuinely unknown.
 
 checks=$((checks + 1))
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 commit_on_main "$repo" "empty base"
 cat > "$repo/pkg/new.go" <<'EOF'
 package pkg
@@ -786,7 +788,7 @@ fi
 # verdict string it has never seen.
 
 checks=$((checks + 1))
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 commit_on_main "$repo" "empty base"
 cat > "$repo/pkg/new.go" <<'EOF'
 package pkg
@@ -818,7 +820,7 @@ fi
 # impression. The count has to be in the headline itself.
 
 checks=$((checks + 1))
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 commit_on_main "$repo" "empty base"
 cat > "$repo/pkg/new.go" <<'EOF'
 package pkg
@@ -905,7 +907,7 @@ fi
 # was hidden, but all eleven were waived by a reason that describes none of them.
 
 checks=$((checks + 1))
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 commit_on_main "$repo" "empty base"
 cat > "$repo/pkg/new.go" <<'EOF'
 package pkg
@@ -938,7 +940,7 @@ fi
 # and a green one.
 
 checks=$((checks + 1))
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 commit_on_main "$repo" "empty base"
 cat > "$repo/pkg/new.go" <<'EOF'
 package pkg
@@ -979,7 +981,7 @@ fi
 # form did without saying so.
 
 checks=$((checks + 1))
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 commit_on_main "$repo" "empty base"
 cat > "$repo/pkg/new.go" <<'EOF'
 package pkg
@@ -1011,7 +1013,7 @@ fi
 # ── 25. A list names several types, and only those ───────────────────────────
 
 checks=$((checks + 1))
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 commit_on_main "$repo" "empty base"
 cat > "$repo/pkg/new.go" <<'EOF'
 package pkg
@@ -1047,7 +1049,7 @@ fi
 # in the change that introduced it.
 
 checks=$((checks + 1))
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 commit_on_main "$repo" "empty base"
 cat > "$repo/pkg/new.go" <<'EOF'
 package pkg
@@ -1079,7 +1081,7 @@ fi
 # other.
 
 checks=$((checks + 1))
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 commit_on_main "$repo" "empty base"
 cat > "$repo/pkg/new.go" <<'EOF'
 package pkg
@@ -1112,7 +1114,7 @@ fi
 # mysteriously ineffective waiver.
 
 checks=$((checks + 1))
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 commit_on_main "$repo" "empty base"
 cat > "$repo/pkg/new.go" <<'EOF'
 package pkg
@@ -1149,7 +1151,7 @@ fi
 # Only [*] may waive a mutant whose type is unknown, and it says so.
 
 checks=$((checks + 1))
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 commit_on_main "$repo" "empty base"
 cat > "$repo/pkg/new.go" <<'EOF'
 package pkg
@@ -1196,7 +1198,7 @@ fi
 # shape the line-scope produces, so the message has to name both numbers.
 
 checks=$((checks + 1))
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 cat > "$repo/pkg/mixed.go" <<'EOF'
 package pkg
 
@@ -1252,7 +1254,7 @@ fi
 # decided without knowing which one a typical branch produces.
 
 checks=$((checks + 1))
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 commit_on_main "$repo" "empty base"
 cat > "$repo/pkg/new.go" <<'EOF'
 package pkg
@@ -1289,7 +1291,7 @@ fi
 # belongs on both headlines or on neither.
 
 checks=$((checks + 1))
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 commit_on_main "$repo" "empty base"
 cat > "$repo/pkg/new.go" <<'EOF'
 package pkg
@@ -1333,7 +1335,7 @@ fi
 # reading the loop before this case was written.
 
 checks=$((checks + 1))
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 cat > "$repo/pkg/del.go" <<'EOF'
 package pkg
 
@@ -1394,7 +1396,7 @@ fi
 # survives into the JSON — so this is a message a reader can actually meet.
 
 checks=$((checks + 1))
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 commit_on_main "$repo" "empty base"
 cat > "$repo/pkg/new.go" <<'EOF'
 package pkg
@@ -1435,7 +1437,7 @@ fi
 # scope — and would pass with any exit code. This asserts the verdict.
 
 checks=$((checks + 1))
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 commit_on_main "$repo" "empty base"
 cat > "$repo/pkg/new.go" <<'EOF'
 package pkg
@@ -1480,7 +1482,7 @@ fi
 # repository already lives with: "Could not check" is a failure, never a skip.
 
 checks=$((checks + 1))
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 commit_on_main "$repo" "empty base"
 cat > "$repo/pkg/new.go" <<'EOF'
 package pkg
@@ -1518,7 +1520,7 @@ fi
 # branch-wide label and the gate would be all-or-nothing.
 
 checks=$((checks + 1))
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 commit_on_main "$repo" "empty base"
 cat > "$repo/pkg/new.go" <<'EOF'
 package pkg
@@ -1559,7 +1561,7 @@ fi
 # to three further types.
 
 checks=$((checks + 1))
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 commit_on_main "$repo" "empty base"
 cat > "$repo/pkg/new.go" <<'EOF'
 package pkg
@@ -1595,7 +1597,7 @@ fi
 # and quietly not hold here.
 
 checks=$((checks + 1))
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 commit_on_main "$repo" "empty base"
 cat > "$repo/pkg/new.go" <<'EOF'
 package pkg
@@ -1628,7 +1630,7 @@ fi
 # same escape a branch full of survivors has. Case 7 covers the survivor half.
 
 checks=$((checks + 1))
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 commit_on_main "$repo" "empty base"
 cat > "$repo/pkg/new.go" <<'EOF'
 package pkg
@@ -1661,7 +1663,7 @@ fi
 # a pass. scripts/efficacy.sh already uses this pair.
 
 checks=$((checks + 1))
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 commit_on_main "$repo" "empty base"
 cat > "$repo/pkg/new.go" <<'EOF'
 package pkg
@@ -1702,7 +1704,7 @@ fi
 # so there are diffs where no other gate says anything either.
 
 checks=$((checks + 1))
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 commit_on_main "$repo" "empty base"
 cat > "$repo/pkg/new.go" <<'EOF'
 package pkg
@@ -1742,7 +1744,7 @@ fi
 # author has said the most about what they expect.
 
 checks=$((checks + 1))
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 commit_on_main "$repo" "empty base"
 cat > "$repo/pkg/new.go" <<'EOF'
 package pkg
@@ -1775,7 +1777,7 @@ fi
 # that decided nothing, and the author has spoken for only half of it.
 
 checks=$((checks + 1))
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 commit_on_main "$repo" "empty base"
 cat > "$repo/pkg/new.go" <<'EOF'
 package pkg
@@ -1814,7 +1816,7 @@ fi
 # same class of false statement this whole gate is about.
 
 checks=$((checks + 1))
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 commit_on_main "$repo" "empty base"
 cat > "$repo/pkg/new.go" <<'EOF'
 package pkg
@@ -1856,7 +1858,7 @@ fi
 # and contradicted the section directly below it about whether it fails.
 
 checks=$((checks + 1))
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 commit_on_main "$repo" "empty base"
 cat > "$repo/pkg/new.go" <<'EOF'
 package pkg

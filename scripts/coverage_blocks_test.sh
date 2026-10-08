@@ -64,6 +64,8 @@ rewrite() {
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/panemux-coverage-blocks-test.XXXXXX") || exit 1
 trap 'rm -rf "$work"' EXIT
+# An empty path must never mean the caller's worktree: `cd ""` is a no-op.
+cd "$work" || exit 1
 
 # new_repo — an empty git repository with a go.mod, and one commit on `main`
 # so there is always a base ref to diff against. Prints its path.
@@ -73,7 +75,7 @@ trap 'rm -rf "$work"' EXIT
 # caller — every repository would be the same directory, and the second test
 # onwards would run against the first one's history.
 new_repo() {
-	repo=$(mktemp -d "$work/repoXXXXXX")
+	repo=$(mktemp -d "$work/repoXXXXXX") || exit 1
 	mkdir -p "$repo/pkg"
 	(
 		cd "$repo" || exit 1
@@ -198,7 +200,7 @@ EOF
 
 # ── Report mode ───────────────────────────────────────────────────────────────
 
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 cat > "$repo/coverage.out" << 'EOF'
 mode: set
 example/pkg/a.go:10.20,12.3 2 1
@@ -207,7 +209,7 @@ EOF
 expect_status 0 "a profile with every block executed passes" "$repo"
 expect_output "0 of 2 blocks never executed" "a fully covered profile reports zero unexecuted blocks"
 
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 cat > "$repo/coverage.out" << 'EOF'
 mode: set
 example/pkg/a.go:10.20,12.3 2 1
@@ -218,7 +220,7 @@ expect_output "pkg/a.go:14" "report mode names the unexecuted block"
 
 # The correctness core: the same block from several test binaries, summing to
 # a nonzero count. Reading each raw line on its own would flag this.
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 cat > "$repo/coverage.out" << 'EOF'
 mode: set
 example/pkg/a.go:10.20,12.3 2 0
@@ -229,7 +231,7 @@ expect_status 0 "duplicate entries summing to nonzero pass" "$repo"
 expect_output "0 of 1 blocks never executed" "a block executed by one package's tests is not flagged"
 
 # ... and the same block summing to zero is one finding, not three.
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 cat > "$repo/coverage.out" << 'EOF'
 mode: set
 example/pkg/a.go:10.20,12.3 2 0
@@ -240,7 +242,7 @@ expect_status 0 "duplicate entries summing to zero pass in report mode" "$repo"
 expect_output "1 of 1 blocks never executed" "a duplicated unexecuted block is counted once"
 
 # `-covermode=count` profiles carry real counts, not just 0/1.
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 cat > "$repo/coverage.out" << 'EOF'
 mode: count
 example/pkg/a.go:10.20,12.3 2 47
@@ -249,7 +251,7 @@ EOF
 expect_status 0 "a count-mode profile is read the same way" "$repo"
 expect_output "1 of 2 blocks never executed" "count mode: only the zero-count block is reported"
 
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 cat > "$repo/coverage.out" << 'EOF'
 mode: set
 example/pkg/a.go:10.20,12.3 2 1
@@ -265,7 +267,7 @@ expect_no_output "pkg/a.go:14" "--summary does not list individual blocks"
 # `--summary`: with the base winning, that line runs the gate a second time,
 # and on a branch with a finding it aborts coverage-go, so the failure is
 # reported against the coverage-percentage target instead of this one.
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 write_pkg "$repo"
 cat > "$repo/coverage.out" << 'EOF'
 mode: set
@@ -289,18 +291,18 @@ expect_no_output "changed" "--summary with a base ref does not run the gate"
 # check that reports green having measured nothing is the failure mode being a
 # required check exists to rule out.
 
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 expect_status 1 "a missing profile fails rather than passing quietly" "$repo"
 expect_output "coverage.out" "the missing-profile message names the file"
 
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 printf 'mode: set\n' > "$repo/coverage.out"
 expect_status 1 "a profile with no blocks at all fails" "$repo"
 
 # ── Gate mode ─────────────────────────────────────────────────────────────────
 
 # A block that never executed, on a line this branch changed.
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 write_pkg "$repo"
 cat > "$repo/coverage.out" << 'EOF'
 mode: set
@@ -316,7 +318,7 @@ expect_output "pkg/a.go:6" "the gate names the file and line of the finding"
 # is resolved against the caller's cwd, so a mismatch there makes every file's
 # touched-line set come back empty and the gate report "nothing" having measured
 # nothing.
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 write_pkg "$repo"
 cat > "$repo/coverage.out" << 'EOF'
 mode: set
@@ -329,7 +331,7 @@ expect_status_in pkg 1 "the same finding is reported when run from a subdirector
 expect_output "pkg/a.go:6" "the subdirectory run names the same block"
 
 # The same profile, with the change confined to a file the block is not in.
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 write_pkg "$repo"
 commit_on_main "$repo" add-source
 cat > "$repo/coverage.out" << 'EOF'
@@ -342,7 +344,7 @@ expect_status 0 "a pre-existing gap in an untouched file does not fail the gate"
 expect_output "nothing to report" "the gate says it had nothing to report"
 
 # A changed line inside a block that DID execute.
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 write_pkg "$repo"
 cat > "$repo/coverage.out" << 'EOF'
 mode: set
@@ -353,7 +355,7 @@ EOF
 expect_status 0 "a covered block on a changed line passes" "$repo" --base main
 
 # The changed line is in the MIDDLE of an unexecuted block, not at its start.
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 write_pkg "$repo"
 commit_on_main "$repo" add-source
 cat > "$repo/coverage.out" << 'EOF'
@@ -366,7 +368,7 @@ expect_status 1 "a changed line inside an unexecuted block fails the gate" "$rep
 
 # Test files are not implementation: changing one is not a reason to demand
 # coverage of a block elsewhere, and test files never appear in a profile.
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 write_pkg "$repo"
 commit_on_main "$repo" add-source
 cat > "$repo/coverage.out" << 'EOF'
@@ -381,7 +383,7 @@ expect_output "nothing to check" "a test-only branch is told apart from a clean 
 # SSH / tmux transports among them), so a changed file can be absent from the
 # profile entirely. Reporting that as "every block was executed" is a claim the
 # tool has no basis for — the gate measured nothing about that file.
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 mkdir -p "$repo/unmeasured"
 cat > "$repo/unmeasured/a.go" << 'EOF'
 package unmeasured
@@ -424,7 +426,7 @@ marked_pkg() {
 }
 
 # Marker on the block's own opening line.
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 marked_pkg "$repo" '	if fail { //coverage:exempt errors.New cannot fail' '		return errors.New("boom")'
 cat > "$repo/coverage.out" << 'EOF'
 mode: set
@@ -437,7 +439,7 @@ expect_output "Exempt by //coverage:exempt:" "the gate lists the exemptions it a
 expect_output "pkg/a.go:6-8" "the exemption list names the block"
 
 # Marker on the line directly above.
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 marked_pkg "$repo" '	//coverage:exempt errors.New cannot fail' '	if fail {'
 cat > "$repo/coverage.out" << 'EOF'
 mode: set
@@ -450,7 +452,7 @@ expect_status 0 "a marker on the line above exempts the block" "$repo" --base ma
 # the NEXT line — which is what a nested `if`, an `else` on the following line,
 # or a second statement inside a one-line body all look like. The inner block
 # there was never exempted by anyone and no reason was ever written for it.
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 cat > "$repo/pkg/a.go" << 'EOF'
 package pkg
 
@@ -475,7 +477,7 @@ expect_output "1 block(s) this branch changed never executed" "the nested block 
 # A marker with no reason is not a marker. The repository's rule for the
 # coverage exclusion list in the Makefile is the same one: an exclusion carries
 # a reason or it does not exist.
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 marked_pkg "$repo" '	if fail { //coverage:exempt' '		return errors.New("boom")'
 cat > "$repo/coverage.out" << 'EOF'
 mode: set
@@ -486,7 +488,7 @@ expect_status 1 "a marker with no reason does not exempt anything" "$repo" --bas
 expect_output "reason" "the gate says the marker needs a reason"
 
 # The branch-wide hatch, matching efficacy's EFFICACY_EXEMPT / label pair.
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 write_pkg "$repo"
 cat > "$repo/coverage.out" << 'EOF'
 mode: set
@@ -505,7 +507,7 @@ expect_output "exempt" "the branch-wide exemption says so in the output"
 
 # ── Gate mode: could not check ────────────────────────────────────────────────
 
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 write_pkg "$repo"
 cat > "$repo/coverage.out" << 'EOF'
 mode: set
@@ -520,7 +522,7 @@ expect_output "does not exist" "the missing-base message says what is wrong"
 # an orphan branch but a clone whose history does not reach the merge base,
 # which is the same lost `fetch-depth: 0` that check exists for. Failing open
 # here would report green having measured nothing.
-repo=$(new_repo)
+repo=$(new_repo) || exit 1
 write_pkg "$repo"
 cat > "$repo/coverage.out" << 'EOF'
 mode: set

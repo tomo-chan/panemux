@@ -34,6 +34,8 @@ pass() { echo "ok   $1"; }
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/panemux-docs-links-check-test.XXXXXX") || exit 1
 trap 'rm -rf "$work"' EXIT
+# An empty path must never mean the caller's worktree: `cd ""` is a no-op.
+cd "$work" || exit 1
 
 # fixture — a fresh empty directory for one case.
 #
@@ -74,7 +76,7 @@ expect() {
 
 # ── The happy path ────────────────────────────────────────────────────────────
 
-root=$(fixture)
+root=$(fixture) || exit 1
 cat > "$root/index.md" <<'MD'
 # Index
 
@@ -91,7 +93,7 @@ expect 0 "$root" "a resolvable file link and anchor pass" "ok —"
 
 # ── Broken targets ────────────────────────────────────────────────────────────
 
-root=$(fixture)
+root=$(fixture) || exit 1
 cat > "$root/index.md" <<'MD'
 # Index
 
@@ -99,7 +101,7 @@ See [gone.md](gone.md).
 MD
 expect 1 "$root" "a link to a file that does not exist fails" "gone.md"
 
-root=$(fixture)
+root=$(fixture) || exit 1
 cat > "$root/index.md" <<'MD'
 # Index
 
@@ -111,7 +113,7 @@ expect 1 "$root" "a link to an anchor that does not exist fails" "no-such-headin
 
 # The regression this gate was built for: the link's label wraps, so a
 # line-by-line matcher never sees the link at all and reports all clear.
-root=$(fixture)
+root=$(fixture) || exit 1
 cat > "$root/index.md" <<'MD'
 # Index
 
@@ -126,7 +128,7 @@ expect 1 "$root" "a broken anchor in a link whose label wraps fails" "internal-s
 
 # The same link, spelled the way GitHub actually slugs it, passes — so the case
 # above is a verdict on the anchor, not on the line break.
-root=$(fixture)
+root=$(fixture) || exit 1
 cat > "$root/index.md" <<'MD'
 # Index
 
@@ -141,7 +143,7 @@ expect 0 "$root" "a slash in a heading is deleted, not hyphenated" "ok —"
 
 # ── Slugging ──────────────────────────────────────────────────────────────────
 
-root=$(fixture)
+root=$(fixture) || exit 1
 cat > "$root/index.md" <<'MD'
 # Index
 
@@ -154,7 +156,7 @@ cat > "$root/index.md" <<'MD'
 MD
 expect 0 "$root" "punctuation is dropped and spaces become hyphens" "ok —"
 
-root=$(fixture)
+root=$(fixture) || exit 1
 cat > "$root/index.md" <<'MD'
 # Index
 
@@ -168,7 +170,7 @@ expect 0 "$root" "a repeated heading gets the -1 suffix GitHub gives it" "ok —
 
 # ── What must NOT be resolved ─────────────────────────────────────────────────
 
-root=$(fixture)
+root=$(fixture) || exit 1
 cat > "$root/index.md" <<'MD'
 # Index
 
@@ -187,7 +189,7 @@ MD
 : > "$root/real.md"
 expect 0 "$root" "fenced code and external URLs are left alone" "ok —"
 
-root=$(fixture)
+root=$(fixture) || exit 1
 mkdir -p "$root/sub"
 cat > "$root/index.md" <<'MD'
 # Index
@@ -200,7 +202,7 @@ expect 0 "$root" "directories and non-markdown targets resolve by path alone" "o
 
 # ── Labels that name a file ───────────────────────────────────────────────────
 
-root=$(fixture)
+root=$(fixture) || exit 1
 cat > "$root/index.md" <<'MD'
 # Index
 
@@ -209,7 +211,7 @@ MD
 : > "$root/detail.md"
 expect 0 "$root" "a label naming its own destination passes" "ok —"
 
-root=$(fixture)
+root=$(fixture) || exit 1
 mkdir -p "$root/sub"
 cat > "$root/index.md" <<'MD'
 # Index
@@ -220,7 +222,7 @@ MD
 expect 1 "$root" "a label naming a file other than the destination fails" "detail.md"
 
 # A label that merely mentions the word is not a filename claim.
-root=$(fixture)
+root=$(fixture) || exit 1
 cat > "$root/index.md" <<'MD'
 # Index
 
@@ -230,14 +232,14 @@ MD
 expect 0 "$root" "a prose label is not read as a filename claim" "ok —"
 
 # Runtime archives contain third-party documentation, outside the repo contract.
-root=$(fixture)
+root=$(fixture) || exit 1
 printf '# Index\n\n[detail](detail.md)\n' > "$root/index.md"
 printf '# Detail\n' > "$root/detail.md"
 mkdir -p "$root/.cache/runtimes/node-sample"
 printf '[missing](absent.md)\n' > "$root/.cache/runtimes/node-sample/README.md"
 expect 0 "$root" "ignored runtime SDK documentation is not checked" "ok —"
 
-root=$(fixture)
+root=$(fixture) || exit 1
 printf '# Index\n\n[detail](detail.md)\n' > "$root/index.md"
 printf '# Detail\n' > "$root/detail.md"
 mkdir -p "$root/.cache"
@@ -246,10 +248,10 @@ expect 1 "$root" "other cache paths are still checked" "absent.md"
 
 # ── Fail-closed ───────────────────────────────────────────────────────────────
 
-root=$(fixture)
+root=$(fixture) || exit 1
 expect 1 "$root" "a tree with no markdown at all is a failure, not a pass" "did NOT run"
 
-root=$(fixture)
+root=$(fixture) || exit 1
 cat > "$root/index.md" <<'MD'
 # Index
 
