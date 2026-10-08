@@ -17,9 +17,12 @@ export interface RecentWorkdir {
 
 // The server's rule for a task's working directory (session.validRemotePath):
 // an absolute path with no shell metacharacters and no control characters. A
-// directory it would refuse is not suggested.
+// directory it would refuse is not suggested. The server's (\/[^…]*)+ is
+// written here as \/[^…]*: the class holds '/', so both match the same
+// paths, and JavaScript's backtracking engine would take exponential time on
+// the nested form where Go's RE2 does not.
 // eslint-disable-next-line no-control-regex
-const VALID_WORKDIR = /^(\/[^;|&$`'"<>()[\]{}!\\\x00-\x1f\x7f]*)+$/
+const VALID_WORKDIR = /^\/[^;|&$`'"<>()[\]{}!\\\x00-\x1f\x7f]*$/
 
 export function isValidWorkdir(path: string): boolean {
   return VALID_WORKDIR.test(path)

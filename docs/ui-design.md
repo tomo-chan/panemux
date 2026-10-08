@@ -520,10 +520,14 @@ tasks' directories come first, then the rest, most recently used first.
 - `↓`/`↑` move the highlighted row (wrapping), `Enter` puts its path in the field and closes the
   list — with no row highlighted `Enter` submits the form as before — and `Escape` closes only the
   list; a second `Escape` closes the form. A click on a row does what `Enter` does. Leaving the
-  field closes the list.
+  field closes the list; `▾` moves the focus into the field, so this holds for a list it opened
+  from another field too. Keys that belong to an IME composition (`Enter` confirming a conversion)
+  are left to the IME. The highlighted row follows its directory when a board update reorders the
+  rows.
 - The input has `role="combobox"`, `aria-autocomplete="list"`, `aria-expanded`, `aria-controls` and
-  `aria-activedescendant`; the list is a `listbox` named by its heading, each row an `option` with
-  `aria-selected`. The `▾` button is skipped by Tab.
+  `aria-activedescendant`; `aria-expanded` is true whenever the list is shown, and `aria-controls`
+  names the `listbox` — named by its heading, each row an `option` with `aria-selected` — or, when it
+  has no row, the message below. The `▾` button is skipped by Tab.
 - When nothing matches what is typed the list says "No recent directory matches. Starting will use
   the path as typed."; when the host has no task with a directory, "No directory used on this host
   yet. Type an absolute path."

@@ -49,7 +49,7 @@ export const NewTaskDialog: React.FC<NewTaskDialogProps> = ({
   // The focus the dialog gives the field on opening does not open its list,
   // so Escape still closes the dialog straight away.
   const focusingOnOpen = useRef(false)
-  const workdirs = useMemo(() => recentWorkdirs(tasks ?? [], host), [tasks, host])
+  const workdirs = useMemo(() => (isOpen ? recentWorkdirs(tasks ?? [], host) : []), [isOpen, tasks, host])
 
   useEffect(() => {
     if (!isOpen) {

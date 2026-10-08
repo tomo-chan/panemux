@@ -226,6 +226,7 @@ describe('NewTaskDialog label suggestions', () => {
     expect(screen.getByRole('group', { name: 'Used before:' })).not.toHaveTextContent('No label used before')
   })
 
+  // efficacy:exempt unchanged by this branch (from #310); the new describe block after it falls inside its line range
   it('says nothing about a typed label that is a known one', () => {
     renderWithLabels()
     fill({ labels: 'bug' })
@@ -383,7 +384,61 @@ describe('NewTaskDialog working directory suggestions', () => {
     fill({ host: 'gpu-box' })
     fireEvent.click(cwdInput())
     expect(screen.queryByRole('listbox')).toBeNull()
-    expect(screen.getByText('No directory used on this host yet. Type an absolute path.')).toBeInTheDocument()
+    const empty = screen.getByText('No directory used on this host yet. Type an absolute path.')
+    expect(cwdInput()).toHaveAttribute('aria-expanded', 'true')
+    expect(cwdInput().getAttribute('aria-controls')).toBe(empty.id)
+  })
+
+  it('reports an open list with no match as expanded and controlling the message', () => {
+    renderWithTasks()
+    fireEvent.change(cwdInput(), { target: { value: '/workspace/user/elsewhere' } })
+    const empty = screen.getByText('No recent directory matches. Starting will use the path as typed.')
+    expect(cwdInput()).toHaveAttribute('aria-expanded', 'true')
+    expect(cwdInput().getAttribute('aria-controls')).toBe(empty.id)
+  })
+
+  it('moves focus into the field when ▾ opens the list from another field, so leaving it closes the list', () => {
+    renderWithTasks()
+    const prompt = screen.getByLabelText('First instruction')
+    act(() => prompt.focus())
+    fireEvent.click(screen.getByRole('button', { name: 'Show recent directories' }))
+    expect(document.activeElement).toBe(cwdInput())
+    fireEvent.keyDown(cwdInput(), { key: 'ArrowDown' })
+    fireEvent.keyDown(cwdInput(), { key: 'Enter' })
+    expect(cwdInput().value).toBe('/workspace/user/notes')
+    fireEvent.click(screen.getByRole('button', { name: 'Show recent directories' }))
+    expect(screen.getByRole('listbox')).toBeInTheDocument()
+    act(() => prompt.focus())
+    expect(screen.queryByRole('listbox')).toBeNull()
+  })
+
+  it('ignores Enter and arrows that belong to an IME composition', () => {
+    renderWithTasks()
+    fireEvent.click(cwdInput())
+    fireEvent.keyDown(cwdInput(), { key: 'ArrowDown' })
+    fireEvent.keyDown(cwdInput(), { key: 'ArrowDown', isComposing: true, keyCode: 229 })
+    fireEvent.keyDown(cwdInput(), { key: 'Enter', isComposing: true, keyCode: 229 })
+    expect(cwdInput().value).toBe('')
+    expect(screen.getByRole('listbox')).toBeInTheDocument()
+    expect(within(screen.getByRole('listbox')).getAllByRole('option')[0]).toHaveAttribute('aria-selected', 'true')
+  })
+
+  it('keeps the highlighted directory when a board update reorders the list', () => {
+    const before = [
+      task({ id: 'a', host: '', cwd: '/workspace/user/alpha', state: 'busy' }),
+      task({ id: 'b', host: '', cwd: '/workspace/user/beta', status_since: '2026-10-09T10:00:00Z' }),
+    ]
+    const props = { isOpen: true, hosts, onLaunch: vi.fn(), onLaunched: vi.fn(), onClose: vi.fn() }
+    const { rerender } = render(<NewTaskDialog {...props} tasks={before} />)
+    fireEvent.click(cwdInput())
+    fireEvent.keyDown(cwdInput(), { key: 'ArrowDown' })
+    const after = [
+      task({ id: 'a', host: '', cwd: '/workspace/user/alpha', status_since: '2026-10-09T11:00:00Z' }),
+      task({ id: 'b', host: '', cwd: '/workspace/user/beta', state: 'busy' }),
+    ]
+    rerender(<NewTaskDialog {...props} tasks={after} />)
+    fireEvent.keyDown(cwdInput(), { key: 'Enter' })
+    expect(cwdInput().value).toBe('/workspace/user/alpha')
   })
 
   it('says when nothing matches, and starts with the path as typed', async () => {

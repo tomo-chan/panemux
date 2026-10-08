@@ -44,6 +44,18 @@ describe('isValidWorkdir', () => {
   ])('%j is %s', (path, want) => {
     expect(isValidWorkdir(path)).toBe(want)
   })
+
+  // A cwd comes from a host's conversation log and is checked on every board
+  // update: a deep path the rule refuses must not backtrack exponentially. A
+  // backtracking rule takes about a second on these; each further '/' doubles it.
+  it.each([
+    '/'.repeat(27) + ';',
+    '/workspace/user/' + 'a/'.repeat(22) + 'notes (copy)',
+  ])('refuses %j in linear time', (path) => {
+    const started = performance.now()
+    expect(isValidWorkdir(path)).toBe(false)
+    expect(performance.now() - started).toBeLessThan(100)
+  }, 1000)
 })
 
 describe('recentWorkdirs', () => {

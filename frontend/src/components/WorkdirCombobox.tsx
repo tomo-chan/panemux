@@ -1,4 +1,4 @@
-import React, { useEffect, useId, useState } from 'react'
+import React, { useEffect, useId, useRef, useState } from 'react'
 import { filterWorkdirs, highlightMatch, lastUsedLabel, type RecentWorkdir } from '../utils/workdirSuggestions'
 
 // The New task form's Working directory field (issue #311): a text input with
@@ -35,12 +35,22 @@ export const WorkdirCombobox: React.FC<WorkdirComboboxProps> = ({
   const id = useId()
   const inputId = `${id}-input`
   const listId = `${id}-list`
+  const emptyId = `${id}-empty`
   const optionId = (index: number) => `${id}-option-${index}`
-  const [active, setActive] = useState(-1)
+  // The highlighted row is kept by its path, so a board update that reorders
+  // the rows leaves the same directory highlighted (or none, once it is gone).
+  const [activePath, setActivePath] = useState<string | null>(null)
+  const ownInputRef = useRef<HTMLInputElement | null>(null)
+  const setInputRef = (el: HTMLInputElement | null) => {
+    ownInputRef.current = el
+    if (typeof inputRef === 'function') inputRef(el)
+    else if (inputRef) (inputRef as React.MutableRefObject<HTMLInputElement | null>).current = el
+  }
 
   const shown = filterWorkdirs(suggestions, value)
-  const current = open && active < shown.length ? active : -1
+  const current = open ? shown.findIndex((w) => w.path === activePath) : -1
   const listed = open && shown.length > 0
+  const setActive = (index: number) => setActivePath(index >= 0 ? shown[index].path : null)
 
   useEffect(() => {
     if (current >= 0) document.getElementById(`${id}-option-${current}`)?.scrollIntoView?.({ block: 'nearest' })
@@ -57,6 +67,8 @@ export const WorkdirCombobox: React.FC<WorkdirComboboxProps> = ({
   }
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    // Keys that confirm or move within an IME composition are the IME's.
+    if (event.nativeEvent.isComposing || event.keyCode === 229) return
     if (event.key === 'ArrowDown') {
       event.preventDefault()
       if (!open) onOpenChange(true)
@@ -82,15 +94,15 @@ export const WorkdirCombobox: React.FC<WorkdirComboboxProps> = ({
       <label htmlFor={inputId}>Working directory</label>
       <div className="td-workdir-row">
         <input
-          ref={inputRef}
+          ref={setInputRef}
           id={inputId}
           className="td-mono"
           value={value}
           placeholder="/workspace/user/project"
           role="combobox"
           aria-autocomplete="list"
-          aria-expanded={listed}
-          aria-controls={listed ? listId : undefined}
+          aria-expanded={open}
+          aria-controls={open ? (listed ? listId : emptyId) : undefined}
           aria-activedescendant={current >= 0 ? optionId(current) : undefined}
           onChange={(event) => {
             onChange(event.target.value)
@@ -116,7 +128,12 @@ export const WorkdirCombobox: React.FC<WorkdirComboboxProps> = ({
           tabIndex={-1}
           disabled={disabled}
           onMouseDown={(event) => event.preventDefault()}
-          onClick={() => setOpen(!open)}
+          onClick={() => {
+            // The button takes no focus, so the field takes it: the keys and
+            // leaving the field then act on the list the button opened.
+            ownInputRef.current?.focus()
+            setOpen(!open)
+          }}
         >
           <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
             <path d="M2.5 4.5 6 8l3.5-3.5" strokeLinecap="round" strokeLinejoin="round" />
@@ -155,7 +172,7 @@ export const WorkdirCombobox: React.FC<WorkdirComboboxProps> = ({
               })}
             </ul>
           ) : (
-            <p className="td-workdir-empty">
+            <p id={emptyId} className="td-workdir-empty">
               {suggestions.length === 0
                 ? 'No directory used on this host yet. Type an absolute path.'
                 : 'No recent directory matches. Starting will use the path as typed.'}
