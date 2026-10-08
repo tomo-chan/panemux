@@ -71,6 +71,7 @@ main=$(fixture '#!/bin/sh
 make check') || exit 1
 r=$(fixture '#!/bin/sh
 make check') || exit 1
+chmod +x "$main/.githooks/pre-push"
 git -C "$r" config core.hooksPath "$main/.githooks"
 chmod a-w "$r/.git" "$r/.git/config"
 if out=$(run "$r") && [ "$(git -C "$r" config --get core.hooksPath)" = "$main/.githooks" ]; then
@@ -79,6 +80,22 @@ else
 	fail 'an identical pre-push elsewhere leaves a read-only .git/config alone' "$out"
 fi
 chmod u+w "$r/.git" "$r/.git/config"
+
+# An identical pre-push without the executable bit is replaced: git skips a
+# hook it cannot execute, printing only a hint, so pushes would bypass it.
+checks=$((checks + 1))
+main=$(fixture '#!/bin/sh
+make check') || exit 1
+r=$(fixture '#!/bin/sh
+make check') || exit 1
+chmod a-x "$main/.githooks/pre-push"
+git -C "$r" config core.hooksPath "$main/.githooks"
+out=$(run "$r")
+if [ "$(git -C "$r" config --get core.hooksPath)" = .githooks ]; then
+	pass 'an identical but non-executable pre-push is replaced'
+else
+	fail 'an identical but non-executable pre-push is replaced' "$out"
+fi
 
 # A path to a different pre-push is replaced.
 checks=$((checks + 1))
