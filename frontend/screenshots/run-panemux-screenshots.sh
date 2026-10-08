@@ -30,6 +30,12 @@
 # process of the user running this script, a developer's real sessions
 # included, so screenshots.spec.ts serves /api/tasks itself.
 set -eu
+
+# Pin direct execution and every Go subprocess to this checkout's go.mod.
+panemux_toolchain_root=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
+panemux_runtime_scripts="$panemux_toolchain_root/scripts"
+. "$panemux_runtime_scripts/runtime-env.sh"
+panemux_runtime "$panemux_toolchain_root" || exit 1
 unset PANEMUX_PANE_ID TMUX
 
 SHOT_DIR="$(cd "$(dirname "$0")" && pwd)"

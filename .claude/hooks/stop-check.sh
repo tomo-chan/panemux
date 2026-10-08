@@ -51,6 +51,12 @@ if command -v jq > /dev/null 2>&1; then
 	fi
 fi
 
+# Retry payloads must escape before SDK selection can block again.
+panemux_toolchain_root=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
+panemux_runtime_scripts="$panemux_toolchain_root/scripts"
+. "$panemux_runtime_scripts/runtime-env.sh"
+panemux_runtime "$panemux_toolchain_root" || exit 2
+
 # git status --porcelain always prints paths relative to the REPOSITORY ROOT,
 # whatever the cwd is. Without this the [ -f ] test below missed every file
 # when the session's cwd was a subdirectory, and the gate passed everything

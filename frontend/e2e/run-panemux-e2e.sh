@@ -11,6 +11,12 @@
 # mutated by a test run.
 set -eu
 
+# Pin direct execution and every Go subprocess to this checkout's go.mod.
+panemux_toolchain_root=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
+panemux_runtime_scripts="$panemux_toolchain_root/scripts"
+. "$panemux_runtime_scripts/runtime-env.sh"
+panemux_runtime "$panemux_toolchain_root" || exit 1
+
 cd "$(dirname "$0")/../.."
 
 E2E_CONFIG_NAME="${1:-workspace-switch.yml}"

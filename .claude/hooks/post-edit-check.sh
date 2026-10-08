@@ -21,6 +21,12 @@
 
 set -u
 
+# Pin direct execution and every Go subprocess to this checkout's go.mod.
+panemux_toolchain_root=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
+panemux_runtime_scripts="$panemux_toolchain_root/scripts"
+. "$panemux_runtime_scripts/runtime-env.sh"
+panemux_runtime "$panemux_toolchain_root" || exit 2
+
 hooks_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(CDPATH='' cd -- "$hooks_dir/../.." && pwd)
 

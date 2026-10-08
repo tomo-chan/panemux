@@ -8,6 +8,11 @@
 # broadcast-written row does.
 set -eu
 
+panemux_toolchain_root=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
+panemux_runtime_scripts="$panemux_toolchain_root/scripts"
+. "$panemux_runtime_scripts/runtime-env.sh"
+panemux_runtime "$panemux_toolchain_root" || exit 1
+
 E2E_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # Must match agent-board-agmsg.yml's agent_board.agmsg_path.
