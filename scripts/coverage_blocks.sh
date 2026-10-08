@@ -113,7 +113,7 @@ if [ ! -f "$profile" ]; then
 	exit 1
 fi
 
-tmp=$(mktemp -d)
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/panemux-coverage-blocks.XXXXXX") || exit 1
 trap 'rm -rf "$tmp"' EXIT
 
 tab=$(printf '\t')

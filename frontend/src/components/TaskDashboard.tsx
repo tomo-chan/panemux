@@ -4,6 +4,7 @@ import type { TasksState } from '../hooks/useTasks'
 import { TASKS_POLL_INTERVAL_MS } from '../hooks/useTasks'
 import { TERMINAL_FONT_FAMILY } from '../utils/fonts'
 import { NewTaskDialog } from './NewTaskDialog'
+import { LabelSuggestions } from './LabelSuggestions'
 import { DashboardHostsDialog } from './DashboardHostsDialog'
 import { useSSHConnections } from '../hooks/useSSHConnections'
 import type { SSHConnectionsState } from '../hooks/useSSHConnections'
@@ -35,6 +36,7 @@ import {
   visibleColumns,
 } from '../utils/taskBoard'
 import type { LaneMode, LaunchedTaskRef, TaskInputAction, TaskOpenAction, TaskPaneRef } from '../utils/taskBoard'
+import { matchLabelSuggestions } from '../utils/labelSuggestions'
 import type { TaskAgent } from '../hooks/useTasks'
 
 // Layer 1 of issue #252: every agent session on every host, as a kanban by
@@ -167,6 +169,10 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
   const summariesEnabled = data?.summaries_enabled ?? false
   const hosts = data?.hosts ?? []
   const labels = useMemo(() => allLabels(tasks), [tasks])
+  // The labels used before, for the label inputs only: the label filter
+  // offers the labels on the board. None are offered while the record file
+  // cannot be read; a label can still be typed.
+  const knownLabels = useMemo(() => (data?.records_error ? [] : data?.known_labels ?? []), [data])
   // A label no task carries any more falls back to every label.
   const activeLabel = labelFilter !== ALL_LABELS && labels.includes(labelFilter) ? labelFilter : null
   const visible = useMemo(
@@ -494,6 +500,7 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
           onTypeIn={typeIn}
           inputMark={selected ? inputMark(selected) : null}
           onSaveRecord={saveRecord}
+          knownLabels={knownLabels}
           onRequestSummary={requestSummary}
           summariesEnabled={summariesEnabled}
           showDone={showDone}
@@ -503,6 +510,7 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
       <NewTaskDialog
         isOpen={newTaskOpen}
         hosts={hosts}
+        knownLabels={knownLabels}
         onLaunch={launch}
         onLaunched={launched}
         onClose={() => setNewTaskOpen(false)}
@@ -881,6 +889,8 @@ interface TaskDetailProps {
   onTypeIn: TypeInHandler
   inputMark: TaskInputMark
   onSaveRecord: TasksState['saveRecord']
+  /** The labels used before (known_labels), offered under Add a label. */
+  knownLabels: string[]
   onRequestSummary: TasksState['requestSummary']
   summariesEnabled: boolean
   /** Whether the Done column is on screen, for what Mark done says will happen. */
@@ -899,6 +909,7 @@ const TaskDetail: React.FC<TaskDetailProps> = ({
   onTypeIn,
   inputMark,
   onSaveRecord,
+  knownLabels,
   onRequestSummary,
   summariesEnabled,
   showDone,
@@ -954,11 +965,21 @@ const TaskDetail: React.FC<TaskDetailProps> = ({
   const markDone = async () => {
     if (await save({ done: true, labels })) setConfirmingDone(false)
   }
-  const addLabel = async (event: React.FormEvent) => {
+  const addLabel = async (label: string) => {
+    if (await save({ done, labels: [...labels, label] })) setLabelInput('')
+  }
+  const submitLabel = (event: React.FormEvent) => {
     event.preventDefault()
     const label = labelInput.trim()
-    if (!label) return
-    if (await save({ done, labels: [...labels, label] })) setLabelInput('')
+    if (label) void addLabel(label)
+  }
+  const unusedLabels = knownLabels.filter((label) => !labels.includes(label))
+  const suggestedLabels = matchLabelSuggestions(unusedLabels, labelInput)
+  let suggestionMessage: string | null = null
+  if (knownLabels.length > 0 && unusedLabels.length === 0) {
+    suggestionMessage = 'Every label used before is on this task.'
+  } else if (labelInput.trim() !== '' && suggestedLabels.length === 0) {
+    suggestionMessage = `No label used before contains “${labelInput.trim()}”. Add records it as a new label.`
   }
 
   return (
@@ -1113,7 +1134,7 @@ const TaskDetail: React.FC<TaskDetailProps> = ({
               ) : (
                 <p className="td-note">No labels.</p>
               )}
-              <form className="td-add-label" onSubmit={(event) => void addLabel(event)}>
+              <form className="td-add-label" onSubmit={submitLabel}>
                 <input
                   aria-label="Add a label"
                   placeholder="Add a label"
@@ -1124,6 +1145,13 @@ const TaskDetail: React.FC<TaskDetailProps> = ({
                   Add
                 </button>
               </form>
+              <LabelSuggestions
+                key={task.id}
+                labels={suggestedLabels}
+                onPick={(label) => void addLabel(label)}
+                message={suggestionMessage}
+                disabled={saving}
+              />
             </>
           ) : (
             <p className="td-note">Only a task with a session ID can be marked done or labeled.</p>

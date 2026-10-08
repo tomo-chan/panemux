@@ -3,6 +3,8 @@ import { useModalKeyboard } from '../hooks/useModalKeyboard'
 import type { TaskActionResult, TaskAgent, TaskLaunchInput } from '../hooks/useTasks'
 import type { TaskHost, TaskLaunchResponse } from '../schemas'
 import { hostLabel, parseLabelInput } from '../utils/taskBoard'
+import { lastLabelToken, matchLabelSuggestions, toggleLabelInput } from '../utils/labelSuggestions'
+import { LabelSuggestions } from './LabelSuggestions'
 
 // The task dashboard's New task form (issues #257 and #264): a host, a working
 // directory, an agent, labels and the first instruction. Starting a task runs
@@ -13,13 +15,22 @@ import { hostLabel, parseLabelInput } from '../utils/taskBoard'
 export interface NewTaskDialogProps {
   isOpen: boolean
   hosts: TaskHost[]
+  /** The labels used before (known_labels), offered under the Labels field. */
+  knownLabels?: string[]
   onLaunch: (input: TaskLaunchInput) => Promise<TaskActionResult<TaskLaunchResponse>>
   /** Called with the started task, its host and agent; the dialog is then the caller's to close. */
   onLaunched: (launched: TaskLaunchResponse, host: string, agent: TaskAgent) => void
   onClose: () => void
 }
 
-export const NewTaskDialog: React.FC<NewTaskDialogProps> = ({ isOpen, hosts, onLaunch, onLaunched, onClose }) => {
+export const NewTaskDialog: React.FC<NewTaskDialogProps> = ({
+  isOpen,
+  hosts,
+  knownLabels = [],
+  onLaunch,
+  onLaunched,
+  onClose,
+}) => {
   const [host, setHost] = useState('')
   const [agent, setAgent] = useState<TaskAgent>('claude')
   const [cwd, setCwd] = useState('')
@@ -38,6 +49,15 @@ export const NewTaskDialog: React.FC<NewTaskDialogProps> = ({ isOpen, hosts, onL
   useModalKeyboard({ isOpen, dialogRef, onEscape: starting ? undefined : onClose })
 
   if (!isOpen) return null
+
+  // Filtered by what is typed after the last comma; an entered label stays.
+  const enteredLabels = parseLabelInput(labels)
+  const typedLabel = lastLabelToken(labels)
+  const suggestedLabels = matchLabelSuggestions(knownLabels, typedLabel, { keep: enteredLabels })
+  // "No match" only when no known label contains the typed text, whether or
+  // not the ones that do are already entered.
+  const noSuggestion =
+    typedLabel !== '' && knownLabels.length > 0 && matchLabelSuggestions(knownLabels, typedLabel).length === 0
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault()
@@ -129,6 +149,13 @@ export const NewTaskDialog: React.FC<NewTaskDialogProps> = ({ isOpen, hosts, onL
             autoComplete="off"
           />
         </label>
+        <LabelSuggestions
+          labels={suggestedLabels}
+          pressed={enteredLabels}
+          onPick={(label) => setLabels((current) => toggleLabelInput(current, label, knownLabels))}
+          message={noSuggestion ? `No label used before contains “${typedLabel}”. It is added as a new label.` : null}
+          disabled={starting}
+        />
         <label className="td-field">
           <span>First instruction</span>
           <textarea

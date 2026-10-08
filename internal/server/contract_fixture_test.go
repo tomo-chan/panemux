@@ -26,6 +26,8 @@ import (
 	"panemux/internal/session"
 	"panemux/internal/taskevents"
 	"panemux/internal/tasks"
+
+	"panemux/internal/testcap"
 )
 
 // This file is the Go half of gate G3(c) in docs/quality-gateway.md — Zod
@@ -128,6 +130,7 @@ var contractFixtures = map[string]contractFixture{
 	}},
 
 	"detect-shell": {capture: func(t *testing.T) ([]byte, map[string]string) {
+		testcap.RequireDscl(t)
 		e := newAPIEnv(t)
 
 		rr := e.do(t, http.MethodGet, "/api/detect-shell", "")
@@ -290,6 +293,10 @@ var contractFixtures = map[string]contractFixture{
 		for _, body := range []string{
 			`{"host":"","agent":"claude","session_id":"7c21e0a4","done":true,"labels":["dashboard","enhancement"]}`,
 			`{"host":"build-box","agent":"claude","session_id":"3d7702fe","labels":["infra"]}`,
+			// A record whose task is not listed: its labels are still
+			// suggestions (known_labels, issue #310), and labels that
+			// differ only in case are both kept.
+			`{"host":"","agent":"claude","session_id":"0b9e41aa","labels":["Docs","docs"]}`,
 		} {
 			rr := e.do(t, http.MethodPut, "/api/tasks/records", body)
 			require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
@@ -398,6 +405,7 @@ var contractFixtures = map[string]contractFixture{
 	}},
 
 	"open-url": {capture: func(t *testing.T) ([]byte, map[string]string) {
+		testcap.RequirePTY(t)
 		e := newAPIEnv(t)
 		e.createPane(t, "pane-url")
 

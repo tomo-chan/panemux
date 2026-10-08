@@ -44,7 +44,7 @@ fi
 
 root=$(CDPATH='' cd -- "$root" && pwd)
 
-tmp=$(mktemp -d)
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/panemux-docs-links-check.XXXXXX") || exit 1
 trap 'rm -rf "$tmp"' EXIT
 
 # Everything that exists, so the awk program can answer "does this path

@@ -199,7 +199,8 @@ is meant to complete.
 
 ### `GET /api/tasks`, `POST /api/tasks/hosts/{name}/reconnect`, `PUT /api/tasks/records`, `POST /api/tasks`, `POST /api/tasks/resume`, `POST /api/tasks/summary` and `POST`/`DELETE /api/tasks/attach`
 
-The task dashboard's collection, its per-host reconnect, the done and label records, starting
+The task dashboard's collection, its per-host reconnect, the done and label records (and the labels
+used before, `known_labels` on `GET /api/tasks`), starting
 and resuming tasks, and asking for a task's summary. Their responses and the collection rules are in
 [task dashboard behavior](tasks.md#get-apitasks); the records are in
 [Done and labels](tasks.md#done-and-labels) and [`PUT /api/tasks/records`](tasks.md#put-apitasksrecords);

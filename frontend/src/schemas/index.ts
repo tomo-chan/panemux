@@ -488,6 +488,10 @@ export const TasksResponseSchema = z.object({
   tasks: z.array(TaskSchema),
   // Why the task record file could not be read; the tasks come without records.
   records_error: z.string().optional(),
+  // Every label the task record file holds, once each, in case-insensitive
+  // alphabetical order: the label suggestions (issue #310). Absent when there
+  // are none or the file could not be read.
+  known_labels: z.array(z.string()).optional(),
   // task_dashboard.summary.enabled. The server always sends it; absent is off.
   summaries_enabled: z.boolean().optional(),
 })

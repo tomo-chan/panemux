@@ -42,8 +42,12 @@ SHOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 E2E_DIR="$SHOT_DIR/../e2e"
 
 . "$SHOT_DIR/screenshots-env.sh"
+. "$E2E_DIR/tmux-env.sh"
 
 SHOT_ROOT="$(shot_root)"
+# Before anything is staged: a $TMPDIR too long for tmux's socket fails here,
+# saying so, rather than as a tmux error after the build.
+tmux_socket_path_check "$SHOT_ROOT/tmux"
 SHOT_HOME="$SHOT_ROOT/home"
 SHOT_PROJECT=/tmp/sample-project
 # Must match showcase.yml's agent_board.agmsg_path.

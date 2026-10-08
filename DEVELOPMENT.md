@@ -90,8 +90,13 @@ as for `make test-e2e` when the installed Chromium is not the one Playwright exp
 - On macOS the panes' `/bin/bash` would announce that the default shell is now zsh; the run sets
   `BASH_SILENCE_DEPRECATION_WARNING=1` so the images read the same on every OS. The private tmux socket
   lives under `$TMPDIR/panemux-screenshots/tmux`, and a socket path is limited to 104 bytes on macOS
-  (108 on Linux): macOS's default per-user `$TMPDIR` fits, but one longer than about 60 characters
-  makes tmux fail with `File name too long` and stops the run — set `TMPDIR=/tmp` for it.
+  (108 on Linux), counting the terminating NUL: macOS's default per-user `$TMPDIR` fits, but one longer
+  than about 60 characters does not. The run checks this before staging anything
+  (`tmux_socket_path_check` in `frontend/e2e/tmux-env.sh`, which the task-dashboard E2E fixture runs
+  too) and stops, saying so — set a shorter `TMPDIR`, such as `TMPDIR=/tmp`, for it.
+- `make screenshots` needs a pseudo-terminal and tmux, which the Claude Code sandbox denies: run it
+  outside the sandbox. Its fixed paths (`/tmp/sample-project`, the agmsg store and the lock) stay
+  where they are for the same reason, and `/tmp/sample-project` is the path the images show.
 - Screenshot tmux helpers clear inherited `TMUX` for both startup and teardown: `TMUX` takes
   precedence over `TMUX_TMPDIR`, so changing the socket directory alone does not isolate a run
   started inside tmux. Their tests also clear it before any fixture commands, and verify with a
@@ -153,6 +158,32 @@ repository settings, including `.claude/settings.json` and `.claude/settings.loc
 Configure it through user, CLI, or managed settings as permitted by the organization's policy;
 managed settings may still prevent it from taking effect. See the official
 [Claude Code sandboxing documentation](https://code.claude.com/docs/en/sandboxing#a-command-fails-to-reach-a-server-on-localhost).
+
+The shared settings grant nothing else. `sandbox.allowPty`, `sandbox.network.allowUnixSockets` and
+`sandbox.filesystem.allowGitConfig` are deliberately left out — why is decision D13 in
+[docs/quality-gateway/decisions.md](docs/quality-gateway/decisions.md) — so on macOS the sandbox still
+denies pseudo-terminals, Unix sockets (tmux cannot start a server), `ps`, `dscl`, and writes to
+`.git/config` and to the user cache directory. The make targets work within that:
+
+| Command | Inside the macOS sandbox |
+|---|---|
+| `make install-deps` | Passes once the hooks are installed: `install-hooks` writes `.git/config` only when `core.hooksPath` does not already lead to an identical, executable `pre-push` (git silently skips one without the executable bit). In a fresh clone run `make install-hooks` once outside the sandbox. `npm install` may warn `EPERM` on `.idea/` files inside packages; those warnings are harmless. |
+| `make check` | Passes. A Go test that needs a pty, tmux, `ps` or `dscl` calls `internal/testcap`'s `RequirePTY`/`RequireTmux`/`RequirePS`/`RequireDscl`, and the screenshot fixtures' tmux checks probe the same way: each reports itself **skipped** where the probe fails. `golangci-lint` caches in the checkout's own `.cache/golangci-lint/`, never in the user cache directory (`scripts/golangci_lint_cache.sh`). |
+| `make test-e2e` | Reports itself skipped: every pane needs a pty (`scripts/require_pty.sh`). |
+| `make screenshots` | Fails, saying to run it outside the sandbox. It writes tracked images, so it is never skipped. |
+| `git push -u` | Pushes the branch, then cannot record its upstream in `.git/config`. Name the remote and branch on every push instead: `git push origin <branch>`. |
+
+With `CI` set, every one of those probes that fails **fails** instead of skipping, so CI is where the
+skipped tests are verified. Write a new test that needs one of these capabilities the same way: call
+the `testcap` helper first, never let it fail on the sandbox's error.
+
+Every script makes its temporary files under `$TMPDIR` with an explicit `mktemp` template, and stops
+when it cannot: macOS's bare `mktemp -d` ignores `$TMPDIR`, and a test script that carried on with an
+empty work directory once committed its fixtures in the caller's own worktree.
+`scripts/tmpdir_guard_test.sh` (`make test-tmpdir-guard`) runs each script with a failing `mktemp` —
+its first call, and also its second where it has more than one call site, the first a fixture helper
+makes — and asserts the repository it ran from is untouched. It fails on any `mktemp` call without a
+template, and on any `x=$(mktemp ...)` assignment that does not handle a failure on the same line.
 
 After changing sandbox settings, verify `make check`, `make test-e2e`, and `make test-hooks`
 from Claude Code with sandboxing active. Runs from another agent or outside the sandbox verify
@@ -242,7 +273,7 @@ A test that genuinely should not go red without its implementation is marked `//
 - `make check` must pass before `make build`.
 - `make check` must pass before reporting implementation complete.
 - There are no exceptions for frontend-only, docs-adjacent, or "small" code changes.
-- Test commands: `make test-go`, `make test-frontend`, `make test-e2e`, `make test`, `make test-hooks`, `make test-efficacy`, `make test-scenarios-check`, `make test-docs-links`, `make test-screenshots-check`, `make test-coverage-blocks`, `make test-mutation`, `make test-model-check`
+- Test commands: `make test-go`, `make test-frontend`, `make test-e2e`, `make test`, `make test-hooks`, `make test-tmpdir-guard`, `make test-install-hooks`, `make test-golangci-lint-cache`, `make test-require-pty`, `make test-efficacy`, `make test-scenarios-check`, `make test-docs-links`, `make test-screenshots-check`, `make test-coverage-blocks`, `make test-mutation`, `make test-model-check`
 - Ledger command: `make check-scenarios`
 - Documentation-link command: `make check-docs-links`
 - Pull-request-only gates: `make efficacy`, `COVERAGE_BLOCKS_BASE=origin/main make coverage-blocks`, and `MUTATION_BASE=origin/main make mutation` (all three fail the build — `make mutation` warned until #180's item 6 reached stage 4; see above)
@@ -255,6 +286,7 @@ A test that genuinely should not go red without its implementation is marked `//
 - Lint commands: `make lint-go`, `make lint-frontend`, `make lint`
 - Go lint includes `gofmt`, `go vet`, and `golangci-lint run ./...` using `.golangci.yml`.
 - `.golangci.yml`'s `forbidigo` rule is where a repository convention is enforced rather than remembered: it fails the build on any `os.UserHomeDir()` call outside `internal/homedir`. The testability rule above had been advice for long enough to accumulate 16 violations across nine packages before anyone counted them.
+- `make lint-go` hands golangci-lint `.cache/golangci-lint/` inside the checkout it runs from as its cache (`scripts/golangci_lint_cache.sh`, Git-ignored). The main checkout and every worktree each keep their own, whatever the working directory, and an inherited `GOLANGCI_LINT_CACHE` is overridden — it may have been exported for another checkout. Existing caches in the user cache directory are left in place, unused; remove them yourself if you want the space back.
 - `lint-go-deps` refreshes the pinned `golangci-lint` binary when the local version does not match `GOLANGCI_LINT_VERSION`, so local lint matches CI.
 - Run `make lint-go` or `make lint` after every Go code change before committing.
 - [docs/quality-gateway.md](docs/quality-gateway.md) explains what these gates are responsible for and which further gates are designed but not yet built. Read it before changing the gate set itself.

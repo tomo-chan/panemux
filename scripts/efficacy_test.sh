@@ -20,6 +20,13 @@ set -u
 scripts_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 efficacy="$scripts_dir/efficacy.sh"
 
+# Every fixture lives under one directory made here, and the script runs from
+# inside it: a fixture path that somehow came back empty then means `cd ""`
+# stays in this scratch directory, never in the checkout the test was run from.
+work=$(mktemp -d "${TMPDIR:-/tmp}/panemux-efficacy-test.XXXXXX") || exit 1
+trap 'rm -rf "$work"' EXIT
+cd "$work" || exit 1
+
 failures=0
 checks=0
 
@@ -59,7 +66,7 @@ git_init() {
 # new_fixture — a git repository with a base commit carrying one function and
 # one passing test. Prints its path.
 new_fixture() {
-	dir=$(mktemp -d)
+	dir=$(mktemp -d "$work/dir.XXXXXX") || exit 1
 	(
 		cd "$dir" || exit 1
 		git_init
@@ -138,7 +145,7 @@ expect_output() {
 #
 # TestMul calls Mul. Revert sample.go and Mul is gone, so the package does not
 # even build: the strongest possible red.
-good=$(new_fixture)
+good=$(new_fixture) || exit 1
 (
 	cd "$good" || exit 1
 	cat >> sample.go <<'GO'
@@ -165,7 +172,7 @@ expect 0 "a test that needs its implementation passes the gate" "$good"
 # still passes — it asserts nothing about the change it claims to cover. This
 # is the exact shape docs/quality-gateway.md says the current gates cannot see,
 # and it compiles and passes cleanly under `make check`.
-tauto=$(new_fixture)
+tauto=$(new_fixture) || exit 1
 (
 	cd "$tauto" || exit 1
 	cat >> sample.go <<'GO'
@@ -196,7 +203,7 @@ expect_output 1 "SURVIVOR: ./. TestSub" "a tautological test is caught" "$tauto"
 #
 # Package a gets a real test; package b gets a pure tautology. The gate must
 # still name b.
-masking=$(mktemp -d)
+masking=$(mktemp -d "$work/masking.XXXXXX") || exit 1
 (
 	cd "$masking" || exit 1
 	git_init
@@ -249,7 +256,7 @@ expect_output 1 "SURVIVOR: ./b TestBye" \
 # The fixture reproduces that exact shape, with a tautology inside it. The
 # assertion is that the tautology is *named*: a build failure would also exit 1,
 # so exit status alone would not tell the fix from the bug.
-embedded=$(mktemp -d)
+embedded=$(mktemp -d "$work/embedded.XXXXXX") || exit 1
 (
 	cd "$embedded" || exit 1
 	git_init
@@ -291,7 +298,7 @@ expect_output 1 "SURVIVOR: ./. TestSub" \
 # "It failed after the revert" only means something if it passed before. A test
 # that was already failing would otherwise be reported as protecting code it
 # has never once agreed with.
-alreadyred=$(new_fixture)
+alreadyred=$(new_fixture) || exit 1
 (
 	cd "$alreadyred" || exit 1
 	cat >> sample.go <<'GO'
@@ -318,7 +325,7 @@ expect_output 1 "already fails at HEAD" \
 # The mapping is by touched LINE, not by "+func Test": strengthening an
 # assertion inside an existing test must bring that test into scope, or the
 # gate would be trivially avoided by never adding a new test function.
-edited=$(new_fixture)
+edited=$(new_fixture) || exit 1
 (
 	cd "$edited" || exit 1
 	# Add a bug-fix to Add, and tighten the existing test to notice it.
@@ -340,7 +347,7 @@ rm -rf "$edited"
 # one. If that line were attributed to the function above, every append would
 # drag an untouched test into scope — and the gate would then spend its verdict
 # on a test this branch never wrote.
-appended=$(new_fixture)
+appended=$(new_fixture) || exit 1
 (
 	cd "$appended" || exit 1
 	cat >> sample.go <<'GO'
@@ -376,7 +383,7 @@ rm -rf "$appended"
 # Same reasoning as the Go half: running the whole file means the pre-existing
 # cases in it go red for their own reasons and report as evidence about the new
 # one.
-fescope=$(mktemp -d)
+fescope=$(mktemp -d "$work/fescope.XXXXXX") || exit 1
 (
 	cd "$fescope" || exit 1
 	git_init
@@ -433,7 +440,7 @@ rm -rf "$fescope"
 # whose only frontend test change is a `beforeEach` gaining a mock used to run
 # the file whole and pass. It now ends in "could not check", which is where the
 # unresolvable row of the table puts it.
-fefallback=$(mktemp -d)
+fefallback=$(mktemp -d "$work/fefallback.XXXXXX") || exit 1
 (
 	cd "$fefallback" || exit 1
 	git_init
@@ -481,7 +488,7 @@ checks=$((checks + 1))
 if [ ! -d "$scripts_dir/../frontend/node_modules" ]; then
 	echo "skip frontend/node_modules missing — the per-case frontend check is skipped"
 else
-	percase=$(mktemp -d)
+	percase=$(mktemp -d "$work/percase.XXXXXX") || exit 1
 	(
 		cd "$percase" || exit 1
 		git_init
@@ -550,7 +557,7 @@ checks=$((checks + 1))
 if [ ! -d "$scripts_dir/../frontend/node_modules" ]; then
 	echo "skip frontend/node_modules missing — the deleted-module check is skipped"
 else
-	gone=$(mktemp -d)
+	gone=$(mktemp -d "$work/gone.XXXXXX") || exit 1
 	(
 		cd "$gone" || exit 1
 		git_init
@@ -607,7 +614,7 @@ fi
 # file and the exempted case runs anyway — leaving the branch worse off than
 # without it. These drive `--changed-tests`, which is where scope is decided.
 fe_scope() {
-	fs_dir=$(mktemp -d)
+	fs_dir=$(mktemp -d "$work/fs_dir.XXXXXX") || exit 1
 	(
 		cd "$fs_dir" || exit 1
 		git_init
@@ -683,7 +690,7 @@ checks=$((checks + 1))
 if [ ! -d "$scripts_dir/../frontend/node_modules" ]; then
 	echo "skip frontend/node_modules missing — the location-resolution check is skipped"
 else
-	byloc=$(mktemp -d)
+	byloc=$(mktemp -d "$work/byloc.XXXXXX") || exit 1
 	(
 		cd "$byloc" || exit 1
 		git_init
@@ -743,7 +750,7 @@ checks=$((checks + 1))
 if [ ! -d "$scripts_dir/../frontend/node_modules" ]; then
 	echo "skip frontend/node_modules missing — the unresolvable-outcome check is skipped"
 else
-	setuponly=$(mktemp -d)
+	setuponly=$(mktemp -d "$work/setuponly.XXXXXX") || exit 1
 	(
 		cd "$setuponly" || exit 1
 		git_init
@@ -794,7 +801,7 @@ checks=$((checks + 1))
 if [ ! -d "$scripts_dir/../frontend/node_modules" ]; then
 	echo "skip frontend/node_modules missing — the multi-line it.each check is skipped"
 else
-	multiline=$(mktemp -d)
+	multiline=$(mktemp -d "$work/multiline.XXXXXX") || exit 1
 	(
 		cd "$multiline" || exit 1
 		git_init
@@ -860,7 +867,7 @@ fi
 # Principle 4: a gate that fires on a change it has no opinion about gets
 # bypassed, and takes the other gates with it.
 
-docs=$(new_fixture)
+docs=$(new_fixture) || exit 1
 (
 	cd "$docs" || exit 1
 	echo "# notes" > README.md
@@ -868,7 +875,7 @@ docs=$(new_fixture)
 )
 expect 0 "a docs-only branch is skipped" "$docs"
 
-testonly=$(new_fixture)
+testonly=$(new_fixture) || exit 1
 (
 	cd "$testonly" || exit 1
 	cat >> sample_test.go <<'GO'
@@ -883,7 +890,7 @@ GO
 )
 expect 0 "a test-only branch is skipped (no implementation to revert)" "$testonly"
 
-implonly=$(new_fixture)
+implonly=$(new_fixture) || exit 1
 (
 	cd "$implonly" || exit 1
 	cat >> sample.go <<'GO'
@@ -901,7 +908,7 @@ expect_output 0 "WARNING" \
 #
 # Nothing Go-side is reverted when only frontend implementation changed, so
 # failing a Go test there would be a verdict on a mutation that never happened.
-crossstack=$(mktemp -d)
+crossstack=$(mktemp -d "$work/crossstack.XXXXXX") || exit 1
 (
 	cd "$crossstack" || exit 1
 	git_init
@@ -930,7 +937,7 @@ expect_output 0 "WARNING" \
 # The mirror: Go implementation changed, a frontend test touched, no frontend
 # implementation. The frontend half must be skipped rather than failed — and
 # skipped without needing node_modules, since there is nothing to run.
-mirror=$(mktemp -d)
+mirror=$(mktemp -d "$work/mirror.XXXXXX") || exit 1
 (
 	cd "$mirror" || exit 1
 	git_init
@@ -972,7 +979,7 @@ expect_output 0 "red: ./. TestMul" \
 # and "the tests passed" are different statements. Benchmarks are the common
 # case: -run never selects them, so a branch whose only new test function is a
 # benchmark used to be failed with `[no tests to run]` quoted as the evidence.
-benchonly=$(new_fixture)
+benchonly=$(new_fixture) || exit 1
 (
 	cd "$benchonly" || exit 1
 	cat >> sample.go <<'GO'
@@ -997,7 +1004,7 @@ expect_output 0 "WARNING" \
 # A test skipped at HEAD cannot be red-checked — that is a reason to say so,
 # not to call it red. Beside a test that CAN be checked, the branch still
 # passes.
-skipped=$(new_fixture)
+skipped=$(new_fixture) || exit 1
 (
 	cd "$skipped" || exit 1
 	cat >> sample.go <<'GO'
@@ -1029,7 +1036,7 @@ expect_output 0 "skipped at HEAD" \
 # ...but a branch where EVERY changed test is unrunnable has been checked
 # against nothing, which is "could not check", not "nothing to check". Same
 # argument as the missing base ref and the missing node_modules.
-allskipped=$(new_fixture)
+allskipped=$(new_fixture) || exit 1
 (
 	cd "$allskipped" || exit 1
 	cat >> sample.go <<'GO'
@@ -1056,7 +1063,7 @@ expect_output 1 "nothing was red-checked" \
 # never touched was never going to go red, and the PR-wide label is too blunt
 # for it — applying it to get past one unrelated test also exempts a genuine
 # tautology elsewhere in the same branch.
-marked=$(mktemp -d)
+marked=$(mktemp -d "$work/marked.XXXXXX") || exit 1
 (
 	cd "$marked" || exit 1
 	git_init
@@ -1120,7 +1127,7 @@ rm -rf "$marked"
 # first, which is a poor time for it to be the only one of the three that
 # cannot be asked to justify itself.
 checks=$((checks + 1))
-bare=$(mktemp -d)
+bare=$(mktemp -d "$work/bare.XXXXXX") || exit 1
 (
 	cd "$bare" || exit 1
 	git_init
@@ -1182,7 +1189,7 @@ fi
 # The two fail-open paths. A required check that goes green having checked
 # nothing is the one failure mode a required check exists to rule out.
 checks=$((checks + 1))
-noref=$(new_fixture)
+noref=$(new_fixture) || exit 1
 (
 	cd "$noref" || exit 1
 	cat >> sample.go <<'GO'
@@ -1203,7 +1210,7 @@ rm -rf "$noref"
 
 # Missing node_modules used to drop the entire frontend red-check with no
 # output at all: green, having checked nothing.
-nodeps=$(mktemp -d)
+nodeps=$(mktemp -d "$work/nodeps.XXXXXX") || exit 1
 (
 	cd "$nodeps" || exit 1
 	git_init
@@ -1234,7 +1241,7 @@ expect_output 1 "node_modules is missing" \
 
 # The documented escape hatch for a change whose tests genuinely should not go
 # red — a pure refactor. It must work, and it must say what it is for.
-exempt=$(new_fixture)
+exempt=$(new_fixture) || exit 1
 (
 	cd "$exempt" || exit 1
 	cat >> sample.go <<'GO'
@@ -1266,7 +1273,7 @@ rm -rf "$exempt"
 
 # The gate must never leave the real checkout half-reverted.
 checks=$((checks + 1))
-dirty=$(new_fixture)
+dirty=$(new_fixture) || exit 1
 (
 	cd "$dirty" || exit 1
 	cat >> sample.go <<'GO'

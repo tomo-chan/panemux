@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 scripts_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
-work=$(mktemp -d)
+work=$(mktemp -d "${TMPDIR:-/tmp}/panemux-go-toolchain-test.XXXXXX") || exit 1
 trap 'rm -rf "$work"' EXIT HUP INT TERM
 mkdir -p "$work/bin" "$work/sdk/bin" "$work/repo/scripts"
 cp "$scripts_dir/../Makefile" "$work/repo/Makefile"

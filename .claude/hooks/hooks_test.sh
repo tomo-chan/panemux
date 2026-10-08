@@ -47,8 +47,11 @@ expect_status() {
 	[ -n "$output" ] && printf '     output: %s\n' "$output"
 }
 
-work=$(mktemp -d)
+# Run from inside the scratch directory: a fixture path that somehow came back
+# empty then means `cd ""` stays here, never in the checkout under test.
+work=$(mktemp -d "${TMPDIR:-/tmp}/panemux-hooks-test.XXXXXX") || exit 1
 trap 'rm -rf "$work"' EXIT
+cd "$work" || exit 1
 
 # A Go file gofmt -s would rewrite: the indentation is spaces, not a tab.
 cat > "$work/unformatted.go" <<'GO'
@@ -149,7 +152,7 @@ write_sub_go() {
 # formatted Go package, and prints its path. Every stop-gate case below builds
 # on it so the "before" state is always healthy.
 fixture_repo() {
-	dir=$(mktemp -d)
+	dir=$(mktemp -d "$work/repo.XXXXXX") || exit 1
 	(
 		cd "$dir" || exit 1
 		git init -q .

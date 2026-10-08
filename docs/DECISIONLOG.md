@@ -98,6 +98,36 @@ prompt; a request that never starts a subprocess does not create a turn.
 
 ## Task dashboard
 
+### Labels used before come from the record file, as tags on `GET /api/tasks` (2026-10-07, issue #310)
+
+Issue [#310](https://github.com/tomo-chan/panemux/issues/310) offers the labels already used when a
+task is labeled. They are read from `~/.config/panemux/tasks.json`, the records themselves, rather
+than kept in a list of their own: a label nobody's record holds any more stops being offered without
+a second file to keep in step, at the cost that a label cleared from its last task is gone.
+
+- **Tags rather than a dropdown.** The suggestions are a `Used before:` row of tags under the input
+  (the issue's option B). An autocomplete dropdown was not chosen: it shows nothing until something
+  is typed, and the comma-separated New task field would need a combobox that completes one part of
+  its value.
+- **On `GET /api/tasks`, not an endpoint of its own.** The handler already reads the record file to
+  attach each task's record, so `known_labels` costs no further read, follows the poll, and goes away
+  with `records_error` under the same condition. A `GET /api/tasks/labels` fetched when a label input
+  opens was the alternative; it would have added a request, a failure state and its own cross-site
+  rule for the same data. A save adds its labels in the browser at once; a label that went from the
+  file goes with the next poll.
+- **Folding at eight.** More than eight suggestions after filtering fold behind `+<n> more`, which
+  keeps the detail panel's row to about two lines at 360px.
+- **A label typed in full is kept when a tag is clicked** (review of PR #329). A click first
+  replaced everything after the last comma, so with `bug, frontend` typed, `✓ bug` emptied the field
+  and `+ docs` dropped `frontend`, though both showed `✓`. Now taking a label out keeps every other,
+  and adding one replaces the text after the last comma only while that is not a label used before
+  in full, that is, only while it is not shown `✓`. The "no match" note follows the same reading: it
+  shows when no label used before contains the typed text, whether or not those that do are entered.
+- **Ordered by code point, on both sides** (review of PR #329). The server compares UTF-8 bytes,
+  which is code point order; the browser compared UTF-16 code units, which differs once a label holds
+  a character beyond the Basic Multilingual Plane. The browser now compares code points, so a label
+  it adds after a save lands where the next poll puts it.
+
 ### Input-wait notifications come from server-published task events (2026-10-02, issue #277)
 
 Issue [#277](https://github.com/tomo-chan/panemux/issues/277) feeds the task dashboard's `wait` into
@@ -1027,7 +1057,7 @@ does not fit arbitrary SSH hosts, and exposes no documented process API that pan
 ## Quality gateway
 
 The quality gateway has a denser numbered record. [quality-gateway/decisions.md](quality-gateway/decisions.md)
-contains decisions D1–D12 in decision order, including evidence and rejected alternatives. The
+contains decisions D1–D13 in decision order, including evidence and rejected alternatives. The
 rollout sequence is retained there rather than in the current [quality-gateway guide](quality-gateway.md).
 
 Key milestones were:
@@ -1039,6 +1069,19 @@ Key milestones were:
 | 2026-09-03 | Go-produced contract fixtures and accessibility ceilings | D10–D11 |
 | 2026-09-15 | Mutation findings became a blocking gate | D9 |
 | 2026-09-21 | TLA+ transition export plus Go conformance replay | D12 |
+| 2026-10-08 | Tests needing a pty, tmux, `ps` or `dscl` skip inside the Claude Code sandbox and fail in CI | D13 |
+
+### golangci-lint caches inside each checkout (2026-10-09, issue #325)
+
+`make lint-go` sets `GOLANGCI_LINT_CACHE` to the checkout's own ignored `.cache/golangci-lint/`.
+It had used golangci-lint's default under the user cache directory, falling back to `$TMPDIR` where
+that was not writable (#315). Both locations are shared by every checkout on the machine, so one
+worktree could report issues cached for another, and the sandbox fallback depended on a write probe.
+The location is derived from the script's own path rather than the working directory, and an
+inherited `GOLANGCI_LINT_CACHE` is overridden rather than honoured: honouring it would let a value
+exported in one worktree leak into another, which is the sharing this replaces. Creating the
+directory failing is an error, not a fallback. The Go build and module caches were left where they
+are; old user-directory lint caches are not moved or deleted.
 
 ## WebSocket route separation and browser authority guard (#297, #298)
 

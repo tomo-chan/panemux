@@ -11,9 +11,12 @@ import (
 
 	"panemux/internal/config"
 	"panemux/internal/homedir"
+
+	"panemux/internal/testcap"
 )
 
 func TestCreateFromConfig_Local(t *testing.T) {
+	testcap.RequirePTY(t)
 	pane := &config.PaneConfig{
 		ID:    "test-local",
 		Type:  "local",

@@ -58,7 +58,7 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 2
 fi
 
-work=$(mktemp -d)
+work=$(mktemp -d "${TMPDIR:-/tmp}/panemux-model-check.XXXXXX") || exit 1
 trap 'rm -rf "$work"' EXIT
 
 status=0

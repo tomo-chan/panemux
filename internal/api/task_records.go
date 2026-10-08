@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
+	"strings"
 
 	"panemux/internal/tasks"
 )
@@ -84,4 +86,28 @@ func applyTaskRecords(list []taskResponse, records map[tasks.RecordKey]tasks.Rec
 		task.Done = rec.Done
 		task.Labels = rec.Labels
 	}
+}
+
+// knownTaskLabels is every label in records, once each, in case-insensitive
+// alphabetical order. Labels that differ only in case are different labels;
+// between those the byte order decides, so the order does not depend on the
+// map's.
+func knownTaskLabels(records map[tasks.RecordKey]tasks.Record) []string {
+	seen := make(map[string]bool)
+	var labels []string
+	for _, rec := range records {
+		for _, label := range rec.Labels {
+			if !seen[label] {
+				seen[label] = true
+				labels = append(labels, label)
+			}
+		}
+	}
+	slices.SortFunc(labels, func(a, b string) int {
+		if c := strings.Compare(strings.ToLower(a), strings.ToLower(b)); c != 0 {
+			return c
+		}
+		return strings.Compare(a, b)
+	})
+	return labels
 }
