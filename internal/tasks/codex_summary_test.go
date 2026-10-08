@@ -273,3 +273,40 @@ func TestParseCodexSummaryOutput(t *testing.T) {
 	assert.LessOrEqual(t, len(got.Remaining[0]), maxSummaryItemBytes+len("…"))
 	assert.Len(t, got.Remaining, maxSummaryRemaining)
 }
+
+func TestCodexSummarizer_DirectoryFailuresStopBeforeExecution(t *testing.T) {
+	for _, stage := range []string{"temporary root", "private cwd"} {
+		t.Run(stage, func(t *testing.T) {
+			record := fakeCodex(t, "exit 99")
+			root := filepath.Join(t.TempDir(), "private-summary")
+			dirs := codexSummaryDirs{
+				mkdirTemp: func(_, _ string) (string, error) {
+					if stage == "temporary root" {
+						return "", &os.PathError{Op: "mkdir", Path: "/workspace/private/secret", Err: os.ErrPermission}
+					}
+					return root, os.Mkdir(root, 0o700)
+				},
+				mkdir: func(_ string, _ os.FileMode) error {
+					return &os.PathError{Op: "mkdir", Path: "/workspace/private/secret", Err: os.ErrPermission}
+				},
+			}
+			got, err := newCodexSummarizerWithDirs(dirs)(context.Background(), "[user] hello")
+			require.EqualError(t, err, "codex summary directory could not be created")
+			assert.Equal(t, Summary{}, got)
+			_, err = os.Stat(record)
+			assert.True(t, os.IsNotExist(err), "CLI must not start when private directory setup fails")
+			_, err = os.Stat(root)
+			assert.True(t, os.IsNotExist(err), "any partially prepared directory must be removed")
+		})
+	}
+}
+
+func TestBuildCodexTranscriptScriptForLog_InvalidIDStopsBeforeScript(t *testing.T) {
+	for _, id := range []string{"", "not-a-uuid", "../escape", "a'$(touch x)"} {
+		for _, log := range []LogVersion{{}, {File: "rollout-2026-10-08T01-00-00-" + summarySessionID + ".jsonl"}} {
+			script, err := buildCodexTranscriptScriptForLog(id, log)
+			require.ErrorIs(t, err, ErrInvalidSummary)
+			assert.Empty(t, script, "invalid IDs must never yield an executable script")
+		}
+	}
+}

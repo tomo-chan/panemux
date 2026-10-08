@@ -28,11 +28,22 @@ const (
 // bypass, automatic approval, custom profile, model, or config override is added.
 // The prompt asks only for a summary; this is not an enforced tool-free runtime.
 func newCodexSummarizer() SummarizeFunc {
+	return newCodexSummarizerWithDirs(codexSummaryDirs{mkdirTemp: os.MkdirTemp, mkdir: os.Mkdir})
+}
+
+// codexSummaryDirs keeps private-directory setup injectable without changing
+// process execution, authentication, or cleanup in the production runner.
+type codexSummaryDirs struct {
+	mkdirTemp func(string, string) (string, error)
+	mkdir     func(string, os.FileMode) error
+}
+
+func newCodexSummarizerWithDirs(dirs codexSummaryDirs) SummarizeFunc {
 	return func(ctx context.Context, excerpt string) (Summary, error) {
 		if len(excerpt) > maxCodexExcerptBytes {
 			return Summary{}, errors.New("codex summary excerpt is too large")
 		}
-		dir, err := os.MkdirTemp("", "panemux-codex-summary-")
+		dir, err := dirs.mkdirTemp("", "panemux-codex-summary-")
 		if err != nil {
 			return Summary{}, errors.New("codex summary directory could not be created")
 		}
@@ -40,7 +51,7 @@ func newCodexSummarizer() SummarizeFunc {
 		cwd := filepath.Join(dir, "cwd")
 		schema := filepath.Join(dir, "schema.json")
 		answer := filepath.Join(dir, "answer.json")
-		if err = os.Mkdir(cwd, 0o700); err != nil {
+		if err = dirs.mkdir(cwd, 0o700); err != nil {
 			return Summary{}, errors.New("codex summary directory could not be created")
 		}
 		if err = fileops.AtomicWrite(schema, []byte(summarySchema), 0o600, "summary schema"); err != nil {
