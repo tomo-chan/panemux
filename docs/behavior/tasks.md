@@ -598,6 +598,27 @@ task_dashboard:
   an answer that was not JSON or had no summary); nothing claude printed is passed on, since it can
   quote the conversation.
 
+#### Codex summary primitives
+
+The backend also has a separate `codex exec` summary runner and standard rollout reader;
+dashboard scheduling still uses the Claude path described above. The Codex runner retains the
+panemux host operator's authentication, default model and user/global/managed configuration.
+It adds no profile or permission bypass and runs in an empty temporary working directory with
+an ephemeral session. The bounded excerpt and a fixed summary-only instruction go on stdin,
+and only the schema-checked final answer is read. CLI text on failure is discarded.
+Inherited instructions, MCP and hooks may add model input, cost or permitted actions; the
+summary-only prompt does not enforce a tool-free runtime. The runner uses Codex's non-interactive
+exec behavior and reports a fixed error if the run cannot finish without intervention.
+Flags were checked against Codex 0.160.0; older CLIs without those flags fail rather than receive
+a different model or a permissions override.
+
+The rollout reader keeps canonical user/assistant text from `response_item` messages, skipping
+tool calls/results, reasoning, developer instructions, event mirrors and leading injected
+AGENTS/environment wrappers. Message IDs prevent replay duplicates; identical distinct messages
+remain. The first/recent budgets are the same as Claude's. The runner inherits its own global
+instructions even though the source log's injected instructions are excluded from the excerpt.
+See [Codex summary runner and rollout reader](../security/command-execution.md#codex-summary-runner-and-rollout-reader).
+
 ### Opening a task
 
 | Task | Result |
