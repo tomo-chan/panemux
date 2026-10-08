@@ -166,6 +166,36 @@ test('offers a label recorded on an unlisted task and adds it from the keyboard'
   }
 })
 
+// Working directory suggestions (issue #311): a directory a listed task ran
+// in is offered on its host, filtered by what is typed and picked from the
+// keyboard; Escape closes the list before the dialog.
+test('suggests the working directory of a listed task and picks it from the keyboard', async ({ page }) => {
+  await openDashboard(page)
+  await page.getByRole('button', { name: 'New task' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New task' })
+  const cwd = dialog.getByRole('combobox', { name: 'Working directory' })
+  await expect(cwd).toBeFocused()
+  await expect(cwd).toHaveAttribute('aria-expanded', 'false')
+
+  await cwd.fill('E2E-STOP')
+  const list = dialog.getByRole('listbox', { name: 'Recent on Local' })
+  await expect(list.getByRole('option')).toHaveCount(1)
+  await expect(list.getByRole('option')).toContainText('/tmp/e2e-stopped')
+  await expect(list.locator('mark')).toHaveText('e2e-stop')
+  await page.keyboard.press('ArrowDown')
+  await page.keyboard.press('Enter')
+  await expect(cwd).toHaveValue('/tmp/e2e-stopped')
+  await expect(list).toHaveCount(0)
+
+  await page.keyboard.press('ArrowDown')
+  await expect(list).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(list).toHaveCount(0)
+  await expect(dialog).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(dialog).toHaveCount(0)
+})
+
 // Starting and resuming run the real launch script under real tmux; claude
 // is run-panemux-task-dashboard-e2e.sh's stand-in. Both need tmux.
 async function hasTmux(request: APIRequestContext): Promise<boolean> {

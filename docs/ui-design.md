@@ -369,7 +369,8 @@ terminal that had focus cannot receive what is typed into the dashboard.
   replacing what is typed after the last comma unless that is a label used before in full (shown
   `✓`, so kept), and ending with `, `; on a `✓` tag it takes the label out and keeps every other. The text after
   the last comma filters the `+` tags; the `✓` tags always show, filtered or folded. The working directory takes focus when it
-  opens. An empty directory, a relative one, or an empty instruction is refused in the form, with
+  opens, without opening its list ([Working directory suggestions](#working-directory-suggestions)),
+  so `Escape` still closes the form at once; changing Host empties it. An empty directory, a relative one, or an empty instruction is refused in the form, with
   the reason under the fields; anything the server or the host refuses is shown there as
   "Could not start: …", and the form keeps what was typed. While the task starts, `Start` reads
   `Starting…`, and neither it, `Cancel`, `Escape` nor a click outside dismisses the form. Once it has
@@ -504,6 +505,30 @@ them.
 - Every tag and the fold button are buttons, reached with Tab and pressed with Enter or Space.
 - None are offered when there are none, or while the record file cannot be read; the inputs work as
   before.
+
+### Working directory suggestions
+
+New task's Working directory is a combobox: under the field, a list headed `Recent on <host>`
+offers the directories the chosen host's tasks on the board ran in
+([Starting a task](behavior/tasks.md#starting-a-task)), one per row — the path in monospace, then
+the agent and when it was last used (`claude · 2h ago`, `codex · now` for a running task). Running
+tasks' directories come first, then the rest, most recently used first.
+
+- A click in the field, the `▾` button beside it, `↓`/`↑`, or typing opens the list; the focus the
+  form gives the field on opening does not. Typing filters the rows by a case-insensitive part of the
+  path and marks the matching part in the accent color.
+- `↓`/`↑` move the highlighted row (wrapping), `Enter` puts its path in the field and closes the
+  list — with no row highlighted `Enter` submits the form as before — and `Escape` closes only the
+  list; a second `Escape` closes the form. A click on a row does what `Enter` does. Leaving the
+  field closes the list.
+- The input has `role="combobox"`, `aria-autocomplete="list"`, `aria-expanded`, `aria-controls` and
+  `aria-activedescendant`; the list is a `listbox` named by its heading, each row an `option` with
+  `aria-selected`. The `▾` button is skipped by Tab.
+- When nothing matches what is typed the list says "No recent directory matches. Starting will use
+  the path as typed."; when the host has no task with a directory, "No directory used on this host
+  yet. Type an absolute path."
+- Nothing is stored, so there is no way to remove a row, and no limit beyond the tasks on the board;
+  the list scrolls past about seven rows.
 
 ---
 

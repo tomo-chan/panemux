@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { NewTaskDialog } from './NewTaskDialog'
-import type { TaskHost } from '../schemas'
+import type { Task, TaskHost } from '../schemas'
 
 const hosts: TaskHost[] = [
   { name: '', status: 'ok' },
@@ -231,5 +231,176 @@ describe('NewTaskDialog label suggestions', () => {
     fill({ labels: 'bug' })
     expect(tags()).toEqual([['✓ bug', 'true']])
     expect(screen.getByRole('group', { name: 'Used before:' })).not.toHaveTextContent('No label used before')
+  })
+})
+
+// Working directory suggestions (issue #311): the directories the chosen
+// host's tasks on the board ran in, in a list under the Working directory
+// field. Nothing is stored.
+describe('NewTaskDialog working directory suggestions', () => {
+  const now = Date.parse('2026-10-09T12:00:00Z')
+  const tasks: Task[] = [
+    task({ id: 'l1', host: '', cwd: '/workspace/user/panemux-docs', agent: 'codex', status_since: '2026-10-08T12:00:00Z' }),
+    task({ id: 'l2', host: '', cwd: '/workspace/user/panemux', status_since: '2026-10-09T10:00:00Z' }),
+    task({ id: 'l3', host: '', cwd: '/workspace/user/notes', state: 'busy', status_since: '2026-10-01T00:00:00Z' }),
+    task({ id: 'l4', host: '', cwd: '/workspace/user/$(evil)', status_since: '2026-10-09T11:00:00Z' }),
+    task({ id: 'b1', host: 'build-box', cwd: '/remote/home/demo/api-server', status_since: '2026-10-09T11:20:00Z' }),
+  ]
+
+  function task(fields: Partial<Task> & Pick<Task, 'id'>): Task {
+    return { host: '', agent: 'claude', state: 'stop', location: { kind: 'none', attachable: false }, ...fields }
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(now)
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  function renderWithTasks(
+    list: Task[] = tasks,
+    onLaunch = vi.fn().mockResolvedValue({ ok: true, launched }),
+    onClose = vi.fn(),
+  ) {
+    render(
+      <NewTaskDialog isOpen hosts={hosts} tasks={list} onLaunch={onLaunch} onLaunched={vi.fn()} onClose={onClose} />,
+    )
+    return { onLaunch, onClose }
+  }
+
+  const cwdInput = () => screen.getByRole('combobox', { name: 'Working directory' }) as HTMLInputElement
+  const rows = () =>
+    within(screen.getByRole('listbox')).getAllByRole('option').map((o) => o.textContent ?? '')
+
+  it('does not open the list when the dialog focuses the field on opening', () => {
+    renderWithTasks()
+    expect(document.activeElement).toBe(cwdInput())
+    expect(cwdInput()).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByRole('listbox')).toBeNull()
+  })
+
+  it('opens on a click with the chosen host’s directories, running first, then most recently used', () => {
+    renderWithTasks()
+    fireEvent.click(cwdInput())
+    expect(cwdInput()).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('listbox', { name: 'Recent on Local' })).toBeInTheDocument()
+    expect(rows()).toEqual([
+      '/workspace/user/notesclaude · now',
+      '/workspace/user/panemuxclaude · 2h ago',
+      '/workspace/user/panemux-docscodex · 1d ago',
+    ])
+  })
+
+  it('opens and closes on the ▾ button', () => {
+    renderWithTasks()
+    const toggle = screen.getByRole('button', { name: 'Show recent directories' })
+    fireEvent.click(toggle)
+    expect(screen.getByRole('listbox')).toBeInTheDocument()
+    fireEvent.click(toggle)
+    expect(screen.queryByRole('listbox')).toBeNull()
+  })
+
+  it('filters by what is typed anywhere in the path and marks the match', () => {
+    renderWithTasks()
+    fireEvent.change(cwdInput(), { target: { value: 'MUX' } })
+    expect(rows()).toEqual(['/workspace/user/panemuxclaude · 2h ago', '/workspace/user/panemux-docscodex · 1d ago'])
+    const marks = within(screen.getByRole('listbox')).getAllByText('mux', { selector: 'mark' })
+    expect(marks).toHaveLength(2)
+  })
+
+  it('fills the field with a picked directory, closes the list, and starts there', async () => {
+    const { onLaunch } = renderWithTasks()
+    fireEvent.click(cwdInput())
+    fireEvent.click(screen.getByRole('option', { name: /panemux-docs/ }))
+    expect(cwdInput().value).toBe('/workspace/user/panemux-docs')
+    expect(screen.queryByRole('listbox')).toBeNull()
+    fill({ prompt: 'write the docs' })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Start' }))
+    })
+    expect(onLaunch).toHaveBeenCalledWith(expect.objectContaining({ host: '', cwd: '/workspace/user/panemux-docs' }))
+  })
+
+  it('moves with the arrow keys, picks with Enter without starting, and Escape closes only the list', () => {
+    const { onLaunch, onClose } = renderWithTasks()
+    fireEvent.keyDown(cwdInput(), { key: 'ArrowDown' })
+    const options = within(screen.getByRole('listbox')).getAllByRole('option')
+    expect(cwdInput()).toHaveAttribute('aria-activedescendant', options[0].id)
+    expect(options[0]).toHaveAttribute('aria-selected', 'true')
+    fireEvent.keyDown(cwdInput(), { key: 'ArrowDown' })
+    expect(cwdInput()).toHaveAttribute('aria-activedescendant', options[1].id)
+    fireEvent.keyDown(cwdInput(), { key: 'ArrowUp' })
+    fireEvent.keyDown(cwdInput(), { key: 'ArrowUp' })
+    expect(cwdInput()).toHaveAttribute('aria-activedescendant', within(screen.getByRole('listbox')).getAllByRole('option')[2].id)
+    fireEvent.keyDown(cwdInput(), { key: 'ArrowDown' })
+    expect(cwdInput()).toHaveAttribute('aria-activedescendant', within(screen.getByRole('listbox')).getAllByRole('option')[0].id)
+    // The browser's own Enter would submit the form; picking prevents it.
+    expect(fireEvent.keyDown(cwdInput(), { key: 'Enter' })).toBe(false)
+    expect(cwdInput().value).toBe('/workspace/user/notes')
+    expect(screen.queryByRole('listbox')).toBeNull()
+    expect(onLaunch).not.toHaveBeenCalled()
+
+    fireEvent.keyDown(cwdInput(), { key: 'ArrowDown' })
+    expect(screen.getByRole('listbox')).toBeInTheDocument()
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByRole('listbox')).toBeNull()
+    expect(onClose).not.toHaveBeenCalled()
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('submits the form on Enter when no suggestion is highlighted', () => {
+    const { onLaunch } = renderWithTasks()
+    fill({ prompt: 'go' })
+    fireEvent.change(cwdInput(), { target: { value: '/workspace/user/typed' } })
+    expect(fireEvent.keyDown(cwdInput(), { key: 'Enter' })).toBe(true)
+    fireEvent.submit(cwdInput().form!)
+    expect(onLaunch).toHaveBeenCalledWith(expect.objectContaining({ cwd: '/workspace/user/typed' }))
+    expect(cwdInput()).not.toHaveAttribute('aria-activedescendant')
+  })
+
+  it('closes the list when focus leaves the field', () => {
+    renderWithTasks()
+    fireEvent.click(cwdInput())
+    fireEvent.blur(cwdInput(), { relatedTarget: screen.getByLabelText('Agent') })
+    expect(screen.queryByRole('listbox')).toBeNull()
+  })
+
+  it('clears the field and offers the new host’s directories when the host changes', () => {
+    renderWithTasks()
+    fireEvent.change(cwdInput(), { target: { value: '/workspace/user/panemux' } })
+    fill({ host: 'build-box' })
+    expect(cwdInput().value).toBe('')
+    fireEvent.click(cwdInput())
+    expect(screen.getByRole('listbox', { name: 'Recent on build-box' })).toBeInTheDocument()
+    expect(rows()).toEqual(['/remote/home/demo/api-server' + 'claude · 40m ago'])
+  })
+
+  it('says when the host has no directory yet', () => {
+    renderWithTasks()
+    fill({ host: 'gpu-box' })
+    fireEvent.click(cwdInput())
+    expect(screen.queryByRole('listbox')).toBeNull()
+    expect(screen.getByText('No directory used on this host yet. Type an absolute path.')).toBeInTheDocument()
+  })
+
+  it('says when nothing matches, and starts with the path as typed', async () => {
+    const { onLaunch } = renderWithTasks()
+    fireEvent.change(cwdInput(), { target: { value: '/workspace/user/elsewhere' } })
+    expect(screen.queryByRole('listbox')).toBeNull()
+    expect(screen.getByText('No recent directory matches. Starting will use the path as typed.')).toBeInTheDocument()
+    fill({ prompt: 'go' })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Start' }))
+    })
+    expect(onLaunch).toHaveBeenCalledWith(expect.objectContaining({ cwd: '/workspace/user/elsewhere' }))
+  })
+
+  it('never offers a directory the server would refuse', () => {
+    renderWithTasks()
+    fireEvent.click(cwdInput())
+    expect(screen.getByRole('listbox')).not.toHaveTextContent('evil')
   })
 })
