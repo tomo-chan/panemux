@@ -376,6 +376,15 @@ set.
   direction overrides — Unicode category Cf) and no line or paragraph separators; a task carries at
   most 20. Emoji joined with a zero-width joiner (a family emoji, say) are refused with them, since
   the joiner is itself a format character. Case matters: `Docs` and `docs` are two labels.
+- **Labels used before are every label in the file**, the records of tasks off the list included,
+  each once, in case-insensitive alphabetical order by code point (`Docs` before `docs` when only
+  case differs). The server and the dashboard order them the same way, characters beyond the Basic
+  Multilingual Plane included.
+  They are what `GET /api/tasks` offers as `known_labels` and the dashboard offers as suggestions
+  when a task is labeled; there is no separate list of them. A label goes from them when the last
+  record holding it does — cleared on the dashboard or edited out of the file. They are not offered
+  while the file cannot be read, and the label filter does not use them: it lists the labels on the
+  board.
 - The file is served from memory while its modification time and size are what panemux last read
   or wrote, and read again when they change, so an edit made by hand while panemux runs is seen by
   the next request and is not undone by the next save. An edit that keeps both the same (within the
@@ -723,6 +732,7 @@ Collects from every host and returns:
       }
     }
   ],
+  "known_labels": ["dashboard", "Docs", "docs", "enhancement"],
   "summaries_enabled": true
 }
 ```
@@ -752,6 +762,9 @@ Collects from every host and returns:
   nothing remaining. `remaining` is omitted when empty.
 - `records_error` is present only when the record file could not be read; the tasks are then listed
   without records.
+- `known_labels` is every label in the record file, listed task or not, once each, in
+  case-insensitive alphabetical order ([Done and labels](#done-and-labels)). It is omitted when the
+  file holds no labels and when `records_error` is present.
 - The request answers `200` even when every host failed; failures are in `hosts`.
 - Like every other route outside `/api/board/*`, it is not authenticated
   ([Current boundaries](../overview.md#current-boundaries)). Because it dials every host, it

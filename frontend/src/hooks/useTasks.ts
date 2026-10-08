@@ -12,6 +12,7 @@ import {
   TasksResponseSchema,
   TaskSummarySchema,
 } from '../schemas'
+import { mergeKnownLabels } from '../utils/labelSuggestions'
 import { applyTaskRecord } from '../utils/taskBoard'
 
 // How often the dashboard re-collects while it is on screen. Collection runs
@@ -192,7 +193,15 @@ export function useTasks(enabled: boolean): TasksState {
       const parsed = TaskRecordSchema.safeParse(await res.json())
       if (!parsed.success) return 'Unexpected response from /api/tasks/records'
       recordSaves.current += 1
-      setData((current) => (current ? { ...current, tasks: applyTaskRecord(current.tasks, parsed.data) } : current))
+      setData((current) =>
+        current
+          ? {
+              ...current,
+              tasks: applyTaskRecord(current.tasks, parsed.data),
+              known_labels: mergeKnownLabels(current.known_labels ?? [], parsed.data.labels),
+            }
+          : current,
+      )
       return null
     } catch (err) {
       return err instanceof Error ? err.message : 'Failed to save the task record'

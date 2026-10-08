@@ -16,6 +16,13 @@
       "status": "error"
     }
   ],
+  "known_labels": [
+    "dashboard",
+    "Docs",
+    "docs",
+    "enhancement",
+    "infra"
+  ],
   "summaries_enabled": true,
   "tasks": [
     {
