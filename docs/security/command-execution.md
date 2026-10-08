@@ -291,6 +291,14 @@ host and port the browser's URL parser also accepts, with `<num>` after the host
 every link in the response again (`HttpUrlSchema`). The identifier put in place of `<num>` is only
 ever digits, or letters, digits and `-` (`isAutolinkIDByte`).
 
+**Unreadable state files** ([behavior](../behavior/tasks.md#unreadable-state-files)) carry two values
+from the host to the API, the browser and the server log: the file name and a detail that may quote
+what the file holds. Neither reaches a command. Both are made valid UTF-8 with every control and
+invisible format character replaced by U+FFFD and cut to 128 and 120 characters
+(`boundedText` in `internal/tasks/state_file.go`) before they leave `internal/tasks`; the log
+quotes them with `%q` as well, and the dashboard renders them as text only, never as markup or a
+link. The details never carry a file's whole content.
+
 ### Task launch and resume
 
 `POST /api/tasks` and `POST /api/tasks/resume` ([behavior](../behavior/tasks.md#starting-a-task))

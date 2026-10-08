@@ -3,8 +3,10 @@ package tasks
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -128,15 +130,20 @@ func TestBuildTasks_StateFileNeedsALiveClaudeProcess(t *testing.T) {
 	}
 }
 
-// A state file the dashboard cannot read is still evidence of a running
-// agent when the pid in its name is a live claude process: it is shown as
-// unknown, located like any running task, rather than dropped.
-func TestBuildTasks_UnreadableStateFileIsKeptAsUnknown(t *testing.T) {
+// A state file the dashboard cannot read is not a task of its own (issue
+// #313). The live claude process the pid in its name points to is shown as
+// any claude process no state file describes would be: unknown, by its pid,
+// located like any running task. A pid in the unreadable content does not
+// count as describing a process either.
+func TestBuildTasks_UnreadableStateFileLeavesItsProcessAsAPidTask(t *testing.T) {
 	cases := map[string][]byte{
-		"not json":           []byte("{"),
-		"no session id":      []byte(`{"pid":5}`),
-		"invalid session id": []byte(`{"pid":5,"sessionId":"../x"}`),
-		"no pid":             []byte(`{"sessionId":"abc"}`),
+		"not json":              []byte("{"),
+		"not an object":         []byte("[5]"),
+		"no session id":         []byte(`{"pid":5}`),
+		"invalid session id":    []byte(`{"pid":5,"sessionId":"../x"}`),
+		"session id not string": []byte(`{"pid":5,"sessionId":7}`),
+		"no pid":                []byte(`{"sessionId":"abc"}`),
+		"pid not a number":      []byte(`{"pid":"5","sessionId":"abc"}`),
 	}
 	for name, data := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -151,7 +158,7 @@ func TestBuildTasks_UnreadableStateFileIsKeptAsUnknown(t *testing.T) {
 			require.Len(t, tasks, 1)
 			task := tasks[0]
 			assert.Equal(t, StateUnknown, task.State)
-			assert.Equal(t, "ssh:build-box:claude:state-file:5.json", task.ID)
+			assert.Equal(t, "ssh:build-box:claude:pid-5", task.ID)
 			assert.Equal(t, "build-box", task.Host)
 			assert.Empty(t, task.SessionID)
 			assert.Equal(t, 5, task.PID)
@@ -159,6 +166,120 @@ func TestBuildTasks_UnreadableStateFileIsKeptAsUnknown(t *testing.T) {
 			assert.Equal(t, Location{Kind: LocationTmux, TmuxSession: "work", Attachable: true}, task.Location)
 		})
 	}
+}
+
+// Every field is optional (issue #252), so a field of an unexpected type is
+// read as absent rather than making the whole file unreadable. Only pid and
+// sessionId decide whether a file can be read (issue #313).
+func TestBuildTasks_AFieldOfAnUnexpectedTypeIsReadAsAbsent(t *testing.T) {
+	raw := rawSnapshot{
+		Now: hostNow,
+		StateFiles: []stateFile{{Name: "5.json", Data: []byte(
+			`{"pid":5,"sessionId":"sess-a","cwd":7,"status":["busy"],"waitingFor":{},"statusUpdatedAt":"x"}`)}},
+		Processes: []process{claudeProc(5, 1)},
+	}
+	tasks, unreadable := buildTasksWithDiagnostics("", raw, collectedAt)
+	assert.Empty(t, unreadable)
+	require.Len(t, tasks, 1)
+	assert.Equal(t, "local:claude:sess-a", tasks[0].ID)
+	assert.Equal(t, StateUnknown, tasks[0].State)
+	assert.Empty(t, tasks[0].CWD)
+	assert.Nil(t, tasks[0].StatusSince)
+}
+
+// Each unreadable state file is reported with why it could not be read and
+// what was found, so the operator can compare it with what panemux reads.
+func TestBuildTasks_UnreadableStateFilesAreReportedWithTheirReason(t *testing.T) {
+	long := strings.Repeat("a", 300)
+	cases := []struct {
+		name       string
+		data       string
+		wantReason UnreadableReason
+		wantDetail string
+	}{
+		{"truncated", "{", UnreadableNotJSON, "unexpected end of JSON input"},
+		{"garbage", "x", UnreadableNotJSON, "invalid character 'x' looking for beginning of value"},
+		{"an array", "[5]", UnreadableNotJSON, "not a JSON object"},
+		{"null", "null", UnreadableInvalidPID, detailPIDMissing},
+		{"no pid", `{"sessionId":"abc"}`, UnreadableInvalidPID, detailPIDMissing},
+		{"pid zero", `{"pid":0,"sessionId":"abc"}`, UnreadableInvalidPID, "pid: 0"},
+		{"pid negative", `{"pid":-3,"sessionId":"abc"}`, UnreadableInvalidPID, "pid: -3"},
+		{"pid null", `{"pid":null,"sessionId":"abc"}`, UnreadableInvalidPID, "pid: null"},
+		{"pid a string", `{"pid":"5","sessionId":"abc"}`, UnreadableInvalidPID, `pid: "5"`},
+		{"pid a fraction", `{"pid":5.5,"sessionId":"abc"}`, UnreadableInvalidPID, "pid: 5.5"},
+		{"both bad reports the pid", `{"sessionId":"../x"}`, UnreadableInvalidPID, detailPIDMissing},
+		{"no session id", `{"pid":5}`, UnreadableInvalidSessionID, "sessionId is missing"},
+		{"empty session id", `{"pid":5,"sessionId":""}`, UnreadableInvalidSessionID, `sessionId: ""`},
+		{"session id a path", `{"pid":5,"sessionId":"../x"}`, UnreadableInvalidSessionID, `sessionId: "../x"`},
+		{"session id a number", `{"pid":5,"sessionId":7}`, UnreadableInvalidSessionID, "sessionId: 7"},
+		{"session id too long is cut", `{"pid":5,"sessionId":"` + long + `/"}`, UnreadableInvalidSessionID,
+			`sessionId: "` + strings.Repeat("a", maxUnreadableDetail-len(`sessionId: "`)-1) + "…"},
+		{"a newline in the value is not passed on", "{\"pid\":5,\"sessionId\":{\"a\":\n1}}", UnreadableInvalidSessionID,
+			"sessionId: {\"a\":\ufffd1}"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := rawSnapshot{
+				Now:        hostNow,
+				StateFiles: []stateFile{{Name: "5.json", Data: []byte(tc.data)}},
+				Processes:  []process{claudeProc(5, 1)},
+			}
+			_, unreadable := buildTasksWithDiagnostics("", raw, collectedAt)
+			require.Len(t, unreadable, 1)
+			assert.Equal(t, "5.json", unreadable[0].File)
+			assert.Equal(t, tc.wantReason, unreadable[0].Reason)
+			assert.Equal(t, tc.wantDetail, unreadable[0].Detail)
+			assert.LessOrEqual(t, utf8.RuneCountInString(unreadable[0].Detail), maxUnreadableDetail)
+		})
+	}
+}
+
+// The process column of the diagnostics: the pid in the file name and where
+// it runs, or nothing when the name carries no pid. A file whose pid is no
+// longer a claude process is a leftover, as before, and is not reported.
+func TestBuildTasks_UnreadableStateFileProcess(t *testing.T) {
+	raw := rawSnapshot{
+		Now: hostNow,
+		StateFiles: []stateFile{
+			{Name: "5.json", Data: []byte("{")},
+			{Name: "6.json", Data: []byte("{")},
+			{Name: "8.json", Data: []byte("{")},
+			{Name: "9.json", Data: []byte("{")},
+			{Name: "odd.json", Data: []byte("{")},
+			{Name: "0.json", Data: []byte("{")},
+		},
+		Processes: []process{
+			claudeProc(5, 4), {PID: 4, PPID: 1, Command: "bash"},
+			claudeProc(6, 1),
+			{PID: 8, PPID: 1, Command: "vim"},
+		},
+		TmuxPanes: []tmuxPane{{PanePID: 4, Session: "work"}},
+	}
+	_, unreadable := buildTasksWithDiagnostics("gpu-1", raw, collectedAt)
+	tmux := Location{Kind: LocationTmux, TmuxSession: "work", Attachable: true}
+	outside := Location{Kind: LocationOutside}
+	assert.Equal(t, []UnreadableStateFile{
+		{File: "0.json", Reason: UnreadableNotJSON, Detail: "unexpected end of JSON input"},
+		{File: "5.json", Reason: UnreadableNotJSON, Detail: "unexpected end of JSON input", PID: 5, Location: &tmux},
+		{File: "6.json", Reason: UnreadableNotJSON, Detail: "unexpected end of JSON input", PID: 6, Location: &outside},
+		{File: "odd.json", Reason: UnreadableNotJSON, Detail: "unexpected end of JSON input"},
+	}, unreadable, "8 is not claude and 9 is gone: both are leftovers")
+}
+
+// A file name is a value from the host: it reaches the API and the log only
+// without control characters and within a bound.
+func TestBuildTasks_UnreadableStateFileNameIsBounded(t *testing.T) {
+	raw := rawSnapshot{
+		Now: hostNow,
+		StateFiles: []stateFile{
+			{Name: "a\x1b[31m\u202e.json", Data: []byte("{")},
+			{Name: strings.Repeat("b", 300) + ".json", Data: []byte("{")},
+		},
+	}
+	_, unreadable := buildTasksWithDiagnostics("", raw, collectedAt)
+	require.Len(t, unreadable, 2)
+	assert.Equal(t, "a\ufffd[31m\ufffd.json", unreadable[0].File)
+	assert.Equal(t, strings.Repeat("b", maxUnreadableFileName-1)+"…", unreadable[1].File)
 }
 
 // The file that loses a tie between two live files for one session still
@@ -180,18 +301,10 @@ func TestBuildTasks_ALosingStateFileStillExplainsItsProcess(t *testing.T) {
 }
 
 func TestBuildTasks_UnreadableStateFileWithoutALiveProcess(t *testing.T) {
-	t.Run("a dead pid in its name is a leftover and is dropped", func(t *testing.T) {
-		raw := rawSnapshot{Now: hostNow, StateFiles: []stateFile{{Name: "5.json", Data: []byte("{")}}}
-		assert.Empty(t, buildTasks("", raw, collectedAt))
-	})
-	for _, name := range []string{"odd.json", "0.json", "7.txt"} {
-		t.Run("a name with no pid cannot be checked and is kept: "+name, func(t *testing.T) {
+	for _, name := range []string{"5.json", "odd.json", "0.json", "7.txt"} {
+		t.Run(name+" is not a task", func(t *testing.T) {
 			raw := rawSnapshot{Now: hostNow, StateFiles: []stateFile{{Name: name, Data: []byte("{")}}}
-			tasks := buildTasks("", raw, collectedAt)
-			require.Len(t, tasks, 1)
-			assert.Equal(t, "local:claude:state-file:"+name, tasks[0].ID)
-			assert.Equal(t, LocationNone, tasks[0].Location.Kind)
-			assert.Zero(t, tasks[0].PID)
+			assert.Empty(t, buildTasks("", raw, collectedAt))
 		})
 	}
 }
@@ -246,7 +359,7 @@ func TestBuildTasks_UnreadableStateFileClaimsItsNewestLog(t *testing.T) {
 	}
 	tasks := buildTasks("", raw, collectedAt)
 	require.Len(t, tasks, 1)
-	assert.Equal(t, "local:claude:state-file:7.json", tasks[0].ID)
+	assert.Equal(t, "local:claude:pid-7", tasks[0].ID)
 }
 
 func TestIsClaudeProcess(t *testing.T) {

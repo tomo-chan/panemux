@@ -3,12 +3,43 @@
     {
       "collected_at": "2026-01-01T00:00:00Z",
       "name": "",
-      "status": "ok"
+      "status": "ok",
+      "unreadable_state_files": [
+        {
+          "detail": "unexpected end of JSON input",
+          "file": "103.json",
+          "location": {
+            "attachable": false,
+            "kind": "outside",
+            "pane_id": "pane-1790000000000-d3e4f"
+          },
+          "pid": 103,
+          "reason": "not_json"
+        },
+        {
+          "detail": "pid: \"108\"",
+          "file": "legacy.json",
+          "reason": "invalid_pid"
+        }
+      ]
     },
     {
       "collected_at": "2026-01-01T00:00:00Z",
       "name": "build-box",
-      "status": "ok"
+      "status": "ok",
+      "unreadable_state_files": [
+        {
+          "detail": "sessionId: \"session 2\"",
+          "file": "3130.json",
+          "location": {
+            "attachable": false,
+            "kind": "tmux",
+            "tmux_session": "my work"
+          },
+          "pid": 3130,
+          "reason": "invalid_session_id"
+        }
+      ]
     },
     {
       "error": "connect to gpu-box: dial tcp: i/o timeout",
@@ -76,10 +107,11 @@
     {
       "agent": "claude",
       "host": "",
-      "id": "local:claude:state-file:103.json",
+      "id": "local:claude:pid-103",
       "location": {
         "attachable": false,
-        "kind": "outside"
+        "kind": "outside",
+        "pane_id": "pane-1790000000000-d3e4f"
       },
       "pid": 103,
       "state": "unknown"
@@ -182,6 +214,18 @@
       "started_at": "2026-01-01T00:00:00Z",
       "state": "idle",
       "status_since": "2026-01-01T00:00:00Z"
+    },
+    {
+      "agent": "claude",
+      "host": "build-box",
+      "id": "ssh:build-box:claude:pid-3130",
+      "location": {
+        "attachable": false,
+        "kind": "tmux",
+        "tmux_session": "my work"
+      },
+      "pid": 3130,
+      "state": "unknown"
     }
   ]
 }

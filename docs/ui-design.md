@@ -337,9 +337,19 @@ terminal that had focus cannot receive what is typed into the dashboard.
   appears: they belong to the workspace layer, which is inert then.
 - **Top bar.** The title, one chip per host (`Local` for the panemux host) with its running count, a
   red chip with the error and a `Reconnect` button for a host that failed, and `connecting…` for a
-  host whose connection is still coming up; then when the board was last updated, `Refresh`,
-  `Hosts…`, `New task` (in the interactive blue), and `Workspaces`. A long host error is truncated in the chip
-  and shown in full as its tooltip.
+  host whose connection is still coming up; then, at the right, the actions as one group: a warning
+  `⚠ <n> unreadable` while any host has a state file it could not read, when the board was last
+  updated, `Refresh`, `Hosts…`, `New task` (in the interactive blue), and `Workspaces`. A long host
+  error is truncated in the chip and shown in full as its tooltip. With more hosts than fit on one
+  line, the actions wrap to the next line as a whole, flush right, rather than one by one.
+- **Unreadable state.** The warning is amber, one for every host together, and never beside a host
+  chip, where it would crowd them as hosts are added. It opens a modal anchored below the top bar at
+  the right, titled "Unreadable session state · <n> files on <m> hosts": a table with one row per
+  file — host, file name, reason with what was found beneath it, and the process (`claude · pid
+  <pid>` with where it runs, or `unknown` when the file name carries no pid) — and a footer naming
+  the fields panemux reads, a link to the steps to fix it in `docs/behavior/tasks.md`, and *Copy
+  details*, disabled where the clipboard is not available. The files are not cards on the board
+  ([Unreadable state files](behavior/tasks.md#unreadable-state-files)).
 - **Hosts….** A modal over the dashboard titled "Dashboard hosts", with `ssh_connections in
   config.yaml` beside the title and a note that a host only in `~/.ssh/config` works in panes but is
   not collected from until its name is added here. A table lists each entry — name, where it

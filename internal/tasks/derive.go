@@ -1,7 +1,6 @@
 package tasks
 
 import (
-	"encoding/json"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -127,11 +126,52 @@ type claudeState struct {
 	StartedAt       int64  `json:"startedAt"`
 }
 
+// UnreadableReason is why a Claude Code state file could not be read.
+type UnreadableReason string
+
+// Unreadable reasons: the file is not a JSON object, its pid is missing or
+// not a positive integer, or its sessionId is missing or not a session ID.
+const (
+	UnreadableNotJSON          UnreadableReason = "not_json"
+	UnreadableInvalidPID       UnreadableReason = "invalid_pid"
+	UnreadableInvalidSessionID UnreadableReason = "invalid_session_id"
+)
+
+// Bounds, in runes, on the host-supplied text an unreadable state file
+// carries to the API and the log.
+const (
+	maxUnreadableFileName = 128
+	maxUnreadableDetail   = 120
+)
+
+// UnreadableStateFile is a state file under ~/.claude/sessions that could
+// not be read (issue #313). It is not a task; the dashboard shows it as a
+// diagnostic so the operator can compare it with what panemux reads.
+type UnreadableStateFile struct {
+	// Location is where PID runs, present with PID.
+	Location *Location        `json:"location,omitempty"`
+	File     string           `json:"file"`
+	Reason   UnreadableReason `json:"reason"`
+	// Detail is what was found: the JSON error, or the offending field's
+	// value as written, bounded and without control characters.
+	Detail string `json:"detail,omitempty"`
+	// PID is the live claude process the file name (<pid>.json) names;
+	// omitted when the name carries no pid.
+	PID int `json:"pid,omitempty"`
+}
+
 // buildTasks turns one host's raw collection into tasks. host is "" for the
 // panemux host. collectedAt is panemux's own clock when the output arrived:
 // every time a host reports is converted by its age against the host's own
 // clock (raw.Now), so a host whose clock is off does not shift the dashboard.
 func buildTasks(host string, raw rawSnapshot, collectedAt time.Time) []Task {
+	tasks, _ := buildTasksWithDiagnostics(host, raw, collectedAt)
+	return tasks
+}
+
+// buildTasksWithDiagnostics is buildTasks with the host's unreadable state
+// files, ordered by file name.
+func buildTasksWithDiagnostics(host string, raw rawSnapshot, collectedAt time.Time) ([]Task, []UnreadableStateFile) {
 	b := newTaskBuilder(host, raw, collectedAt)
 	live := b.liveTasks()
 
@@ -152,7 +192,7 @@ func buildTasks(host string, raw rawSnapshot, collectedAt time.Time) []Task {
 			claimedLogs[task.CWD]++
 		}
 	}
-	return b.withLogVersions(append(live, b.stoppedTasks(liveSessions, claimedLogs)...))
+	return b.withLogVersions(append(live, b.stoppedTasks(liveSessions, claimedLogs)...)), b.unreadableStateFiles()
 }
 
 // buildLiveTasks is buildTasks without the stopped sessions and the log
@@ -172,6 +212,9 @@ func newTaskBuilder(host string, raw rawSnapshot, collectedAt time.Time) *taskBu
 	}
 	for _, p := range raw.Processes {
 		b.procs[p.PID] = p
+	}
+	for _, file := range raw.StateFiles {
+		b.states = append(b.states, readStateFile(file))
 	}
 	for _, p := range raw.TmuxPanes {
 		b.panes[p.PanePID] = p.Session
@@ -211,6 +254,7 @@ func (b *taskBuilder) withLogVersions(tasks []Task) []Task {
 
 type taskBuilder struct {
 	collectedAt time.Time
+	states      []readState
 	procs       map[int]process
 	panes       map[int]string
 	host        string
@@ -224,16 +268,12 @@ func (b *taskBuilder) id(agent, key string) string {
 func (b *taskBuilder) liveClaudeTasks() []Task {
 	bySession := map[string]Task{}
 	sinceMillis := map[string]int64{}
-	var unknown []Task
 
-	for _, file := range b.raw.StateFiles {
-		var st claudeState
-		if err := json.Unmarshal(file.Data, &st); err != nil || st.PID <= 0 || !validSessionID.MatchString(st.SessionID) {
-			if task, ok := b.unreadableStateTask(file, st); ok {
-				unknown = append(unknown, task)
-			}
+	for _, state := range b.states {
+		if state.reason != "" {
 			continue
 		}
+		st := state.st
 
 		if !b.isLiveClaude(st.PID) {
 			// A leftover file: its process exited, or its pid now belongs
@@ -270,59 +310,56 @@ func (b *taskBuilder) liveClaudeTasks() []Task {
 		bySession[st.SessionID] = task
 	}
 
-	tasks := make([]Task, 0, len(bySession)+len(unknown))
+	tasks := make([]Task, 0, len(bySession))
 	for _, task := range bySession {
 		tasks = append(tasks, task)
 	}
-	return append(tasks, unknown...)
+	return tasks
 }
 
-// unreadableStateTask is the task for a state file that is not JSON or lacks
-// a pid or a valid session id. It is kept rather than dropped — a file the
-// dashboard cannot read is still evidence of an agent, and hiding it would
-// make a format change look like every agent had stopped — unless the pid in
-// its name (Claude Code names the file <pid>.json) is no longer a claude
-// process, which makes it a leftover.
-func (b *taskBuilder) unreadableStateTask(file stateFile, st claudeState) (Task, bool) {
-	task := Task{
-		Host:     b.host,
-		ID:       b.id(AgentClaude, "state-file:"+file.Name),
-		Agent:    AgentClaude,
-		CWD:      st.CWD,
-		State:    StateUnknown,
-		Location: Location{Kind: LocationNone},
+// unreadableStateFiles are the state files that could not be read, unless
+// the pid in the file's name (Claude Code names it <pid>.json) is no longer
+// a claude process, which makes the file a leftover. A file whose name
+// carries no pid cannot be checked and is kept.
+func (b *taskBuilder) unreadableStateFiles() []UnreadableStateFile {
+	var files []UnreadableStateFile
+	for _, state := range b.states {
+		if state.reason == "" {
+			continue
+		}
+		file := UnreadableStateFile{
+			File:   boundedText(state.name, maxUnreadableFileName),
+			Reason: state.reason,
+			Detail: boundedText(state.detail, maxUnreadableDetail),
+		}
+		if pid, ok := stateFilePID(state.name); ok {
+			if !b.isLiveClaude(pid) {
+				continue
+			}
+			loc := b.locate(pid)
+			file.PID, file.Location = pid, &loc
+		}
+		files = append(files, file)
 	}
-	pid, ok := stateFilePID(file.Name)
-	if !ok {
-		return task, true
-	}
-	if !b.isLiveClaude(pid) {
-		return Task{}, false
-	}
-	task.PID = pid
-	task.Location = b.locate(pid)
-	if cwd := b.raw.ProcessCWDs[pid]; cwd != "" {
-		task.CWD = cwd
-	}
-	return task, true
+	sort.Slice(files, func(i, j int) bool { return files[i].File < files[j].File })
+	return files
 }
 
 // unexplainedClaudeTasks are running interactive claude processes that no
-// state file names, by its content or by its file name. Without them, a
-// Claude Code release that moved or stopped writing ~/.claude/sessions would
-// show every running agent as stopped.
+// readable state file names, by its content or by its file name. Without
+// them, a Claude Code release that moved, stopped writing or changed
+// ~/.claude/sessions would show every running agent as stopped.
 func (b *taskBuilder) unexplainedClaudeTasks(known []Task) []Task {
 	explained := map[int]bool{}
 	for _, task := range known {
 		explained[task.PID] = true
 	}
-	for _, file := range b.raw.StateFiles {
-		var st claudeState
-		//mutation:exempt[CONDITIONALS_BOUNDARY] equivalent — no process has pid 0, so marking it explained changes nothing
-		if json.Unmarshal(file.Data, &st) == nil && st.PID > 0 {
-			explained[st.PID] = true
+	for _, state := range b.states {
+		if state.reason != "" {
+			continue
 		}
-		if pid, ok := stateFilePID(file.Name); ok {
+		explained[state.st.PID] = true
+		if pid, ok := stateFilePID(state.name); ok {
 			explained[pid] = true
 		}
 	}

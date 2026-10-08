@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"sort"
@@ -60,6 +61,9 @@ type HostResult struct {
 	Name   string     `json:"name"`
 	Status HostStatus `json:"status"`
 	Error  string     `json:"error,omitempty"`
+	// UnreadableStateFiles are the host's Claude Code state files that could
+	// not be read (issue #313). Only a full collection reports them.
+	UnreadableStateFiles []UnreadableStateFile `json:"unreadable_state_files,omitempty"`
 }
 
 // Snapshot is one collection across every host.
@@ -84,6 +88,8 @@ type Options struct {
 	// Summarize makes a task's summary from its conversation excerpt. It
 	// defaults to `claude -p` on the panemux host.
 	Summarize SummarizeFunc
+	// Logf writes a server log line. It defaults to log.Printf.
+	Logf func(format string, args ...any)
 	// HostTimeout bounds one host's collection, including waiting for its
 	// connection to come up. A connection still coming up when it expires
 	// keeps dialing and serves the next collection.
@@ -119,6 +125,9 @@ type Service struct {
 	// resumeLocks makes each (host, session) resume's collection and launch
 	// one step; see Service.Resume.
 	resumeLocks map[string]*resumeLock
+	// unreadableLogged is, per host, the unreadable state files last logged
+	// and why; guarded by mu.
+	unreadableLogged map[string]map[string]UnreadableReason
 	// The task summaries; see summaries.go. summaryMu guards summaries and
 	// summaryTasks. summaryCtx ends when the service is closed.
 	summaries     map[summaryKey]*summaryEntry
@@ -142,6 +151,9 @@ type hostConn struct {
 
 // New returns a Service. Close it to release its connections.
 func New(opts Options) *Service {
+	if opts.Logf == nil {
+		opts.Logf = log.Printf
+	}
 	if opts.RunLocal == nil {
 		opts.RunLocal = runLocal
 	}
@@ -282,9 +294,46 @@ func (s *Service) collectHost(ctx context.Context, name string) (HostResult, []T
 	if !ok {
 		return result, nil
 	}
-	tasks := buildTasks(name, raw, collectedAt)
+	tasks, unreadable := buildTasksWithDiagnostics(name, raw, collectedAt)
+	result.UnreadableStateFiles = unreadable
+	s.logUnreadableStateFiles(name, unreadable)
 	s.rememberSummaryTasks(name, tasks)
 	return result, tasks
+}
+
+// logUnreadableStateFiles logs a host's unreadable state files when one
+// appears or its reason changes, and when one can be read again or is gone —
+// not on every collection, which runs every few seconds while the dashboard
+// is shown.
+func (s *Service) logUnreadableStateFiles(host string, files []UnreadableStateFile) {
+	current := make(map[string]UnreadableReason, len(files))
+	for _, f := range files {
+		current[f.File] = f.Reason
+	}
+	s.mu.Lock()
+	if s.unreadableLogged == nil {
+		s.unreadableLogged = map[string]map[string]UnreadableReason{}
+	}
+	previous := s.unreadableLogged[host]
+	s.unreadableLogged[host] = current
+	s.mu.Unlock()
+
+	where := hostName(host)
+	for _, f := range files {
+		if previous[f.File] != f.Reason {
+			s.opts.Logf("task collection on %s: state file %q cannot be read: %s: %q", where, f.File, f.Reason, f.Detail)
+		}
+	}
+	var gone []string
+	for name := range previous {
+		if _, ok := current[name]; !ok {
+			gone = append(gone, name)
+		}
+	}
+	sort.Strings(gone)
+	for _, name := range gone {
+		s.opts.Logf("task collection on %s: state file %q can be read again or is gone", where, name)
+	}
 }
 
 func (s *Service) collectHostAttention(ctx context.Context, name string) (HostResult, []Task) {
@@ -525,6 +574,11 @@ func (s *Service) forgetHostsExcept(names []string) {
 		keep[name] = true
 	}
 	s.mu.Lock()
+	for name := range s.unreadableLogged {
+		if name != "" && !keep[name] {
+			delete(s.unreadableLogged, name)
+		}
+	}
 	var stale []Conn
 	for name, h := range s.hosts {
 		if keep[name] {
