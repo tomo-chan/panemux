@@ -67,23 +67,50 @@ esac
 # configuration of whatever repository this test happens to run from.
 check
 mkdir -p "$work/norepo"
+# Exit status 1 is git's "key not set"; stdout alone is the value. stderr is
+# kept out of the comparison because macOS's /usr/bin/git shim (xcrun) warns
+# there when, under the fake HOME, it cannot write its cache outside the
+# Claude Code sandbox — noise that says nothing about the configuration read.
 output=$(
 	cd "$work/norepo" &&
 		XDG_CONFIG_HOME="$real" GIT_CONFIG_GLOBAL="$work/global-gitconfig" GIT_CEILING_DIRECTORIES="$work" \
-			sh -c '. "$1"; shot_isolate_env "$2"; git config --get commit.gpgsign' sh "$lib" "$work/fakehome" 2>&1
+			sh -c '. "$1"; shot_isolate_env "$2"; git config --get commit.gpgsign' sh "$lib" "$work/fakehome" 2>"$work/git-stderr"
 )
-if [ -z "$output" ]; then
+status=$?
+if [ "$status" -eq 1 ] && [ -z "$output" ]; then
 	pass 'git reads none of the developer configuration'
 else
-	fail 'git reads none of the developer configuration' "$output"
+	fail 'git reads none of the developer configuration' "exit $status: $output $(cat "$work/git-stderr")"
 fi
 
 # ── shot_start_tmux / shot_stop_tmux ────────────────────────────────────────
 
+# tmux_unusable prints why the tmux checks cannot run here, or nothing. Being
+# installed is not enough: the Claude Code sandbox lets tmux run but denies the
+# Unix socket its server listens on. Those checks are skipped there and left to
+# CI, which never skips them — a server that fails to start in CI is a failure.
+tmux_unusable() {
+	command -v tmux >/dev/null 2>&1 || { echo "tmux is not installed"; return; }
+	{ tmux -S "$short/probe" -f /dev/null new-session -d -s probe "sleep 5" &&
+		tmux -S "$short/probe" has-session -t "=probe"; } >/dev/null 2>&1 || {
+		tmux -S "$short/probe" kill-server >/dev/null 2>&1
+		echo "tmux cannot create a socket under \$TMPDIR (the Claude Code sandbox denies Unix sockets; CI runs these checks)"
+		return
+	}
+	tmux -S "$short/probe" kill-server 2>/dev/null
+	rm -f "$short/probe"
+}
+tmux_skip=$(tmux_unusable)
+if [ -n "$tmux_skip" ] && [ -n "${CI:-}" ] && command -v tmux >/dev/null 2>&1; then
+	check
+	fail "tmux checks cannot run in CI: $tmux_skip"
+	tmux_skip="CI failure reported above"
+fi
+
 # Each stop check first proves the server it is about to stop is running:
 # without that, a server that never started (a socket path too long, say)
 # reads as one the helper stopped.
-if command -v tmux >/dev/null 2>&1; then
+if [ -z "$tmux_skip" ]; then
 	tmuxdir="$short/tmux"
 	mkdir -p "$tmuxdir" && chmod 700 "$tmuxdir"
 	echo "set -g status-left '[sample-server] '" >"$work/fakehome/.tmux.conf"
@@ -135,12 +162,12 @@ if command -v tmux >/dev/null 2>&1; then
 		fi
 	fi
 else
-	skip 'tmux checks: tmux is not installed'
+	skip "tmux checks: $tmux_skip"
 fi
 
 # An inherited TMUX must never route start, stop or teardown to the caller.
 # Every probe and cleanup uses -S explicitly, even when testing broken code.
-if command -v tmux >/dev/null 2>&1; then
+if [ -z "$tmux_skip" ]; then
 	caller="$short/caller"
 	if ! tmux -S "$caller" -f /dev/null new-session -d -s caller 'sleep 120' ||
 		! tmux -S "$caller" has-session -t '=caller'; then
