@@ -271,15 +271,15 @@ A test that genuinely should not go red without its implementation is marked `//
 ### Quality gate
 
 - `make check` must pass before `make build`.
-- `make check` must pass before reporting implementation complete.
+- Before reporting implementation complete, `make check` must pass when run by hand, or the pull request's CI must pass. The pre-push hook no longer runs it (see [Push protection](#push-protection)).
 - There are no exceptions for frontend-only, docs-adjacent, or "small" code changes.
-- Test commands: `make test-go`, `make test-frontend`, `make test-e2e`, `make test`, `make test-hooks`, `make test-tmpdir-guard`, `make test-install-hooks`, `make test-golangci-lint-cache`, `make test-require-pty`, `make test-efficacy`, `make test-scenarios-check`, `make test-docs-links`, `make test-screenshots-check`, `make test-coverage-blocks`, `make test-mutation`, `make test-model-check`
+- Test commands: `make test-go`, `make test-frontend`, `make test-e2e`, `make test`, `make test-hooks`, `make test-pre-push`, `make test-tmpdir-guard`, `make test-install-hooks`, `make test-golangci-lint-cache`, `make test-require-pty`, `make test-efficacy`, `make test-scenarios-check`, `make test-docs-links`, `make test-screenshots-check`, `make test-coverage-blocks`, `make test-mutation`, `make test-model-check`
 - Ledger command: `make check-scenarios`
 - Documentation-link command: `make check-docs-links`
 - Pull-request-only gates: `make efficacy`, `COVERAGE_BLOCKS_BASE=origin/main make coverage-blocks`, and `MUTATION_BASE=origin/main make mutation` (all three fail the build — `make mutation` warned until #180's item 6 reached stage 4; see above)
 - Model-checking commands (outside `make check`, they need a JDK and `tla2tools.jar`): `make model-check`, `make model-check-write`
 - `make test-model-check` uses `python3` to run the transition exporter it tests. `python3` is **optional** for the same reason `jq` is below: without it those checks report themselves as skipped, so `make check` still works.
-- `make test-hooks` uses `jq` where it parses `settings.json` or a hook payload. `jq` is **optional**: without it those checks report themselves as skipped rather than passing or failing, so `make check` — and therefore `git push` — still works. Install it to actually run them.
+- `make test-hooks` uses `jq` where it parses `settings.json` or a hook payload. `jq` is **optional**: without it those checks report themselves as skipped rather than passing or failing, so `make check` still works. Install it to actually run them.
 - Coverage commands: `make coverage-go`, `make coverage-frontend`, `make coverage-blocks`
 - Measurement (not a gate): `make bench` for terminal throughput, replay-buffer cost and relay polling. It asserts no threshold — see [docs/quality-gateway/measurements.md](docs/quality-gateway/measurements.md).
 - Accessibility ceiling: `make test-e2e` scans the dashboard and the pane settings dialog with axe-core and **fails when a violation count rises** above the value frozen in `CEILINGS` in `frontend/e2e/a11y-ceiling.ts`. A count may fall; a rule not listed has a ceiling of zero. After fixing a violation, lower the ceiling in that map and in the "Accessibility" table in [docs/quality-gateway/measurements.md](docs/quality-gateway/measurements.md) in the same change — the run prints the exact replacement line.
@@ -294,8 +294,16 @@ A test that genuinely should not go red without its implementation is marked `//
 ### Push protection
 
 - `make install-deps` configures the repo-local Git hooks path to `.githooks`.
-- The tracked `pre-push` hook runs `make check` and blocks `git push` when it fails.
-- The hook clears Git's repository-scoped hook environment variables before running `make check` so nested test Git repositories behave the same way they do outside hook execution.
+- The tracked `pre-push` hook runs only the checks the pushed change touches (`scripts/pre_push_check.sh`), and blocks `git push` when one fails. The whole suite is CI's job; run `make check` yourself to run all of it locally.
+- The change is the difference between each pushed branch and the same branch on the remote. A branch the remote does not have yet is measured from its merge base with `origin/main`, so a first push checks what the branch adds and nothing `main` gained since. Deleting a branch checks nothing.
+- What the changed files select:
+  - `.go` files: `gofmt -s` on each, then `go vet` and `go test` on the packages that hold them — without `-race`, and not on the packages that import them. A file under a package's `testdata/` selects that package.
+  - `frontend/src` TypeScript: `tsc --noEmit` and `vitest related` on the changed modules. A file under `testdata/api-contract/` selects the frontend contract test.
+  - Shell scripts: `scripts/<name>.sh` selects `scripts/<name>_test.sh`, and any `.sh` selects the `$TMPDIR` guard. `.claude/` selects the hook tests; `frontend/screenshots/` and `frontend/e2e/*.sh` select the screenshot fixtures' tests.
+  - Markdown selects `make check-docs-links`; `docs/scenarios.md` also selects `make check-scenarios`.
+- It falls back to `make check` when the change cannot be narrowed — `go.mod`/`go.sum`, the `Makefile`, `.golangci.yml`, `.node-version`, the frontend's package and build configuration, the runtime selection scripts, `.githooks/` — and when the range cannot be worked out: a remote commit this clone does not have, no `origin/main`, or an unreadable pre-push line.
+- `make test-pre-push` tests the selection, and CI runs it.
+- The hook clears Git's repository-scoped hook environment variables first so nested test Git repositories behave the same way they do outside hook execution.
 - Do not bypass the hook for ordinary development. Fix the failing checks instead.
 
 ### Documentation updates

@@ -1057,7 +1057,7 @@ does not fit arbitrary SSH hosts, and exposes no documented process API that pan
 ## Quality gateway
 
 The quality gateway has a denser numbered record. [quality-gateway/decisions.md](quality-gateway/decisions.md)
-contains decisions D1–D13 in decision order, including evidence and rejected alternatives. The
+contains decisions D1–D14 in decision order, including evidence and rejected alternatives. The
 rollout sequence is retained there rather than in the current [quality-gateway guide](quality-gateway.md).
 
 Key milestones were:
@@ -1070,6 +1070,7 @@ Key milestones were:
 | 2026-09-15 | Mutation findings became a blocking gate | D9 |
 | 2026-09-21 | TLA+ transition export plus Go conformance replay | D12 |
 | 2026-10-08 | Tests needing a pty, tmux, `ps` or `dscl` skip inside the Claude Code sandbox and fail in CI | D13 |
+| 2026-10-09 | The pre-push hook checks only the pushed change; CI runs the whole suite | D14 |
 
 ### golangci-lint caches inside each checkout (2026-10-09, issue #325)
 
