@@ -177,6 +177,29 @@ printf '%s' '{"summary":" Done ","remaining":[" Check ",""]}' > "$answer"`)
 	}
 	_, err = newCodexSummarizer()(context.Background(), strings.Repeat("s", maxCodexExcerptBytes+1))
 	require.EqualError(t, err, "codex summary excerpt is too large")
+	excerpt := strings.Repeat("s", maxCodexExcerptBytes)
+	_, err = newCodexSummarizer()(context.Background(), excerpt)
+	require.NoError(t, err, "the exact excerpt limit is accepted")
+	raw, err = os.ReadFile(record)
+	require.NoError(t, err)
+	assert.True(t, strings.HasSuffix(string(raw), "Conversation excerpt:\n"+excerpt))
+}
+
+func TestCodexSummarizer_AnswerByteBoundary(t *testing.T) {
+	const answer = `{"summary":"Done","remaining":[]}`
+	for _, size := range []int{maxCodexAnswerBytes - 1, maxCodexAnswerBytes, maxCodexAnswerBytes + 1} {
+		t.Run(strconv.Itoa(size), func(t *testing.T) {
+			fakeCodex(t, "printf '%s' '"+answer+"' > \"$answer\"\n"+
+				"printf '%"+strconv.Itoa(size-len(answer))+"s' '' >> \"$answer\"")
+			got, err := newCodexSummarizer()(context.Background(), "x")
+			if size > maxCodexAnswerBytes {
+				require.EqualError(t, err, "codex's answer could not be read")
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, Summary{Text: "Done", Remaining: []string{}}, got)
+		})
+	}
 }
 
 func TestCodexSummarizer_FixedFailures(t *testing.T) {

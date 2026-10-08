@@ -490,10 +490,13 @@ func codexLogVersion(r codexRollout) *LogVersion {
 
 func newerCodexRollout(a, b codexRollout) bool {
 	if a.ModTime != b.ModTime {
+		//mutation:exempt[CONDITIONALS_BOUNDARY] equivalent — the guard excludes equal modification times
 		return a.ModTime > b.ModTime
 	}
 	if a.Size != b.Size {
+		//mutation:exempt[CONDITIONALS_BOUNDARY] equivalent — the guard excludes equal sizes
 		return a.Size > b.Size
 	}
+	//mutation:exempt[CONDITIONALS_BOUNDARY] unreachable — equal file/version keys are identical collected rows
 	return a.File > b.File
 }
