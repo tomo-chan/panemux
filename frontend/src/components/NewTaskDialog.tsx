@@ -54,11 +54,10 @@ export const NewTaskDialog: React.FC<NewTaskDialogProps> = ({
   const enteredLabels = parseLabelInput(labels)
   const typedLabel = lastLabelToken(labels)
   const suggestedLabels = matchLabelSuggestions(knownLabels, typedLabel, { keep: enteredLabels })
+  // "No match" only when no known label contains the typed text, whether or
+  // not the ones that do are already entered.
   const noSuggestion =
-    typedLabel !== '' &&
-    knownLabels.length > 0 &&
-    !knownLabels.includes(typedLabel) &&
-    suggestedLabels.every((label) => enteredLabels.includes(label))
+    typedLabel !== '' && knownLabels.length > 0 && matchLabelSuggestions(knownLabels, typedLabel).length === 0
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault()
@@ -153,7 +152,7 @@ export const NewTaskDialog: React.FC<NewTaskDialogProps> = ({
         <LabelSuggestions
           labels={suggestedLabels}
           pressed={enteredLabels}
-          onPick={(label) => setLabels((current) => toggleLabelInput(current, label))}
+          onPick={(label) => setLabels((current) => toggleLabelInput(current, label, knownLabels))}
           message={noSuggestion ? `No label used before contains “${typedLabel}”. It is added as a new label.` : null}
           disabled={starting}
         />

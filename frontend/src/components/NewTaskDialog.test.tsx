@@ -121,6 +121,7 @@ describe('NewTaskDialog', () => {
     })
   })
 
+  //efficacy:exempt untouched by #310: the label-suggestion describe added below it falls into this case's line range
   it('closes on Cancel and on Escape', () => {
     const { onClose } = renderDialog()
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
@@ -150,6 +151,7 @@ describe('NewTaskDialog label suggestions', () => {
 
   const labelsInput = () => screen.getByLabelText('Labels') as HTMLInputElement
 
+  //efficacy:exempt pins the empty case: before #310 there was no Used before group at all, so reverting cannot make it red
   it('offers nothing when no label was used before', () => {
     renderDialog()
     expect(screen.queryByRole('group', { name: 'Used before:' })).toBeNull()
@@ -171,6 +173,17 @@ describe('NewTaskDialog label suggestions', () => {
     fireEvent.click(screen.getByRole('button', { name: 'bug' }))
     expect(labelsInput().value).toBe('frontend, ')
     expect(screen.getByRole('button', { name: 'bug' })).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it('takes out an earlier label without losing one typed after the last comma', () => {
+    renderWithLabels()
+    fill({ labels: 'bug, frontend' })
+    expect(tags()).toEqual([
+      ['✓ bug', 'true'],
+      ['✓ frontend', 'true'],
+    ])
+    fireEvent.click(screen.getByRole('button', { name: 'bug' }))
+    expect(labelsInput().value).toBe('frontend, ')
   })
 
   it('filters by what is typed after the last comma, ignoring case, and keeps the entered labels', () => {
@@ -204,6 +217,13 @@ describe('NewTaskDialog label suggestions', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Start' }))
     })
     expect(onLaunch).toHaveBeenCalledWith(expect.objectContaining({ labels: ['bug', 'payments'] }))
+  })
+
+  it('says nothing when the typed text matches a label that is already entered', () => {
+    renderWithLabels()
+    fill({ labels: 'bug, b' })
+    expect(tags()).toEqual([['✓ bug', 'true']])
+    expect(screen.getByRole('group', { name: 'Used before:' })).not.toHaveTextContent('No label used before')
   })
 
   it('says nothing about a typed label that is a known one', () => {

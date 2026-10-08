@@ -117,6 +117,16 @@ a second file to keep in step, at the cost that a label cleared from its last ta
   file goes with the next poll.
 - **Folding at eight.** More than eight suggestions after filtering fold behind `+<n> more`, which
   keeps the detail panel's row to about two lines at 360px.
+- **A label typed in full is kept when a tag is clicked** (review of PR #329). A click first
+  replaced everything after the last comma, so with `bug, frontend` typed, `✓ bug` emptied the field
+  and `+ docs` dropped `frontend`, though both showed `✓`. Now taking a label out keeps every other,
+  and adding one replaces the text after the last comma only while that is not a label used before
+  in full, that is, only while it is not shown `✓`. The "no match" note follows the same reading: it
+  shows when no label used before contains the typed text, whether or not those that do are entered.
+- **Ordered by code point, on both sides** (review of PR #329). The server compares UTF-8 bytes,
+  which is code point order; the browser compared UTF-16 code units, which differs once a label holds
+  a character beyond the Basic Multilingual Plane. The browser now compares code points, so a label
+  it adds after a save lands where the next poll puts it.
 
 ### Input-wait notifications come from server-published task events (2026-10-02, issue #277)
 

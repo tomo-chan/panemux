@@ -494,6 +494,7 @@ describe('TaskDashboard done and labels', () => {
       { done: false, labels: ['payment', 'sprint-42'] })
   })
 
+  //efficacy:exempt untouched by #310: the label-suggestion helpers added below it fall into this case's line range
   it('adds and removes labels in the detail panel', async () => {
     const saveRecord = vi.fn().mockResolvedValue(null)
     renderDashboard(tasksState({ data: recorded, saveRecord }))

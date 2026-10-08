@@ -377,7 +377,9 @@ set.
   most 20. Emoji joined with a zero-width joiner (a family emoji, say) are refused with them, since
   the joiner is itself a format character. Case matters: `Docs` and `docs` are two labels.
 - **Labels used before are every label in the file**, the records of tasks off the list included,
-  each once, in case-insensitive alphabetical order (`Docs` before `docs` when only case differs).
+  each once, in case-insensitive alphabetical order by code point (`Docs` before `docs` when only
+  case differs). The server and the dashboard order them the same way, characters beyond the Basic
+  Multilingual Plane included.
   They are what `GET /api/tasks` offers as `known_labels` and the dashboard offers as suggestions
   when a task is labeled; there is no separate list of them. A label goes from them when the last
   record holding it does — cleared on the dashboard or edited out of the file. They are not offered

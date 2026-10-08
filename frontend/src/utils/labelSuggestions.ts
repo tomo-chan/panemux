@@ -6,15 +6,23 @@ import { parseLabelInput } from './taskBoard'
 
 /**
  * Case-insensitive alphabetical order. Labels are case-sensitive, so two that
- * differ only in case are both kept; between those the byte order decides,
- * as it does on the server (known_labels).
+ * differ only in case are both kept; between those the code point order
+ * decides. Comparing by code point, not by UTF-16 code unit, matches the
+ * server's byte order on UTF-8 (known_labels) beyond the Basic Multilingual
+ * Plane too.
  */
 export function compareLabels(a: string, b: string): number {
-  const la = a.toLowerCase()
-  const lb = b.toLowerCase()
-  if (la !== lb) return la < lb ? -1 : 1
-  if (a === b) return 0
-  return a < b ? -1 : 1
+  return compareCodePoints(a.toLowerCase(), b.toLowerCase()) || compareCodePoints(a, b)
+}
+
+function compareCodePoints(a: string, b: string): number {
+  const ca = Array.from(a)
+  const cb = Array.from(b)
+  for (let i = 0; i < Math.min(ca.length, cb.length); i++) {
+    const d = (ca[i].codePointAt(0) ?? 0) - (cb[i].codePointAt(0) ?? 0)
+    if (d !== 0) return d < 0 ? -1 : 1
+  }
+  return ca.length === cb.length ? 0 : ca.length < cb.length ? -1 : 1
 }
 
 /** The known labels with the given ones added, once each, in order. */
@@ -30,13 +38,20 @@ export function lastLabelToken(text: string): string {
 
 /**
  * The comma-separated label input with the label taken out if it is entered,
- * or added if it is not. Adding replaces what is being typed after the last
- * comma, and the input ends with ", " so the next label can be typed.
+ * or added if it is not; the input then ends with ", " so the next label can
+ * be typed. Adding replaces what is being typed after the last comma, unless
+ * that is a known label in full: that one is entered (shown ✓) and is kept.
  */
-export function toggleLabelInput(text: string, label: string): string {
+export function toggleLabelInput(text: string, label: string, known: string[]): string {
   const entered = parseLabelInput(text)
-  const kept = parseLabelInput(text.split(',').slice(0, -1).join(','))
-  const next = entered.includes(label) ? kept.filter((l) => l !== label) : [...kept, label]
+  let next: string[]
+  if (entered.includes(label)) {
+    next = entered.filter((l) => l !== label)
+  } else {
+    const typed = lastLabelToken(text)
+    const before = typed === '' || known.includes(typed) ? text : text.split(',').slice(0, -1).join(',')
+    next = [...parseLabelInput(before), label]
+  }
   return next.length > 0 ? `${next.join(', ')}, ` : ''
 }
 

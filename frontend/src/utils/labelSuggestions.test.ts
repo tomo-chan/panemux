@@ -14,6 +14,12 @@ describe('compareLabels', () => {
   it('orders case-insensitively, and labels that differ only in case by byte order', () => {
     expect(['docs', 'Research', 'api', 'Docs', 'bug'].sort(compareLabels)).toEqual(['api', 'bug', 'Docs', 'docs', 'Research'])
   })
+
+  it('orders by code point, as the server orders UTF-8 bytes, past the Basic Multilingual Plane too', () => {
+    // U+FF61 sorts before U+1F600 by code point and by UTF-8 bytes, though
+    // not by UTF-16 code units.
+    expect(['\u{1F600}', '\u{FF61}', 'a'].sort(compareLabels)).toEqual(['a', '\u{FF61}', '\u{1F600}'])
+  })
 })
 
 describe('mergeKnownLabels', () => {
@@ -51,8 +57,13 @@ describe('toggleLabelInput', () => {
     ['removes the last label, leaving the input empty', 'bug, ', 'bug', ''],
     ['tidies spacing and empty entries', ' bug ,, api,', 'docs', 'bug, api, docs, '],
     ['matches the label exactly, case included', 'Docs, ', 'docs', 'Docs, docs, '],
+    ['keeps a known label typed after the last comma when removing another', 'bug, frontend', 'bug', 'frontend, '],
+    ['keeps a known label typed after the last comma when adding another', 'bug, frontend', 'docs', 'bug, frontend, docs, '],
+    ['keeps a lone known label when adding another', 'bug', 'docs', 'bug, docs, '],
+    ['replaces a typed label that differs from a known one only in case', 'bug, Frontend', 'frontend', 'bug, frontend, '],
+    ['replaces only the text after the last comma when it repeats an earlier label', 're, bug, re', 'refactor', 're, bug, refactor, '],
   ])('%s', (_name, text, label, want) => {
-    expect(toggleLabelInput(text, label)).toBe(want)
+    expect(toggleLabelInput(text, label, known)).toBe(want)
   })
 })
 

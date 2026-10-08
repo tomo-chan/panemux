@@ -366,7 +366,8 @@ terminal that had focus cannot receive what is typed into the dashboard.
   stops at a start-up screen. Under Labels, `Used before:` offers the labels used before
   ([Labels used before](#labels-used-before)) as toggle tags: one in the field shows solid with `✓`
   (`aria-pressed` true), one not dashed with `+`. A click adds the label at the end of the field,
-  replacing what is typed after the last comma and ending with `, `, or takes it out. The text after
+  replacing what is typed after the last comma unless that is a label used before in full (shown
+  `✓`, so kept), and ending with `, `; on a `✓` tag it takes the label out and keeps every other. The text after
   the last comma filters the `+` tags; the `✓` tags always show, filtered or folded. The working directory takes focus when it
   opens. An empty directory, a relative one, or an empty instruction is refused in the form, with
   the reason under the fields; anything the server or the host refuses is shown there as
@@ -495,7 +496,7 @@ them.
 
 - They are in case-insensitive alphabetical order, each in its label's color.
 - What is typed filters them by a case-insensitive part of the label; an empty field shows them all.
-  When nothing matches, the row says so ("No label used before contains “…”.") and what was typed is
+  When no label used before matches, entered or not, the row says so ("No label used before contains “…”.") and what was typed is
   still added as a new label.
 - More than eight after filtering are folded: the first eight show with `+<rest> more`, which shows
   them all and becomes `Show less` (`aria-expanded`, `aria-controls` the row). Eight or fewer offer
