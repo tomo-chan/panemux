@@ -1,4 +1,4 @@
-.PHONY: all build build-frontend build-backend dev clean run install-deps install-deps-ci install-hooks test-install-hooks test-tmpdir-guard \
+.PHONY: all build build-frontend build-backend dev clean run install-deps install-deps-ci install-hooks test-install-hooks test-tmpdir-guard test-golangci-lint-cache \
         test test-go test-frontend test-e2e test-agmsg-contract test-hooks test-efficacy efficacy \
         test-scenarios-check check-scenarios check-docs-links test-docs-links screenshots test-screenshots-check \
         coverage-blocks test-coverage-blocks \
@@ -36,7 +36,7 @@ install-hooks:
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
-test: test-go test-frontend test-hooks test-tmpdir-guard test-install-hooks test-efficacy test-scenarios-check test-docs-links test-screenshots-check \
+test: test-go test-frontend test-hooks test-tmpdir-guard test-install-hooks test-golangci-lint-cache test-efficacy test-scenarios-check test-docs-links test-screenshots-check \
       test-coverage-blocks test-mutation test-model-check
 
 test-go:
@@ -261,6 +261,9 @@ test-tmpdir-guard:
 test-install-hooks:
 	sh scripts/install_hooks_test.sh
 
+test-golangci-lint-cache:
+	sh scripts/golangci_lint_cache_test.sh
+
 # both directions are asserted. Hermetic: it drives the scripts against temp
 # files and throwaway git repositories, never this checkout.
 test-hooks:
@@ -437,9 +440,11 @@ lint-go-deps:
 	  go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION); \
 	fi
 
+# GOLANGCI_LINT_CACHE moves under $TMPDIR only where the user cache directory
+# is not writable, as inside the Claude Code sandbox (issue #315).
 lint-go: fmt-check-go lint-go-deps
 	go vet ./...
-	'$(GOLANGCI_LINT_BIN)' run ./...
+	GOLANGCI_LINT_CACHE="$$(sh scripts/golangci_lint_cache.sh)" '$(GOLANGCI_LINT_BIN)' run ./...
 
 lint-frontend:
 	cd frontend && npx tsc --noEmit

@@ -13,10 +13,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"os/user"
-	"path/filepath"
 	"runtime"
-	"strconv"
 	"sync"
 
 	"github.com/creack/pty"
@@ -84,58 +81,61 @@ var (
 func probePTY() error {
 	ptmx, tty, err := pty.Open()
 	if err != nil {
-		return err
+		return fmt.Errorf("opening a pty: %w", err)
 	}
 	_ = tty.Close()
-	return ptmx.Close()
+	if err := ptmx.Close(); err != nil {
+		return fmt.Errorf("closing the pty: %w", err)
+	}
+	return nil
 }
 
 func probeTmux() error {
-	bin, err := exec.LookPath("tmux")
-	if err != nil {
-		return err
+	if _, err := exec.LookPath("tmux"); err != nil {
+		return fmt.Errorf("finding tmux: %w", err)
 	}
 	dir, err := os.MkdirTemp("", "pmx-cap-")
 	if err != nil {
-		return err
+		return fmt.Errorf("making the probe's socket directory: %w", err)
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
-	return probeTmuxAt(bin, filepath.Join(dir, "s"))
+	return probeTmuxIn(dir)
 }
 
-// probeTmuxAt starts a server on socket, confirms it answers, and stops it.
-// The socket is always named explicitly, so an inherited TMUX can never route
-// the probe to the caller's own server.
-func probeTmuxAt(bin, socket string) error {
-	defer func() { _ = exec.Command(bin, "-S", socket, "kill-server").Run() }()                                                    // #nosec G204 -- bin is from LookPath("tmux"), socket is under a fresh temp dir
-	out, err := exec.Command(bin, "-S", socket, "-f", "/dev/null", "new-session", "-d", "-s", "probe", "sleep 5").CombinedOutput() // #nosec G204 -- as above
+// probeTmuxIn starts a server on the socket "s" in dir, confirms it answers,
+// and stops it. The socket is always named explicitly, so an inherited TMUX
+// can never route the probe to the caller's own server; it is relative to the
+// command's working directory so every argument stays a constant.
+func probeTmuxIn(dir string) error {
+	tmux := func(cmd *exec.Cmd) ([]byte, error) {
+		cmd.Dir = dir
+		return cmd.CombinedOutput()
+	}
+	defer func() { _, _ = tmux(exec.Command("tmux", "-S", "s", "kill-server")) }()
+	out, err := tmux(exec.Command("tmux", "-S", "s", "-f", "/dev/null", "new-session", "-d", "-s", "probe", "sleep 5"))
 	if err != nil {
 		return fmt.Errorf("tmux new-session: %w: %s", err, out)
 	}
-	if out, err := exec.Command(bin, "-S", socket, "has-session", "-t", "=probe").CombinedOutput(); err != nil { // #nosec G204 -- as above
+	if out, err := tmux(exec.Command("tmux", "-S", "s", "has-session", "-t", "=probe")); err != nil {
 		return fmt.Errorf("tmux has-session: %w: %s", err, out)
 	}
 	return nil
 }
 
 func probePS() error {
-	out, err := exec.Command("ps", "-p", strconv.Itoa(os.Getpid()), "-o", "pid=").CombinedOutput()
-	if err != nil {
+	if out, err := exec.Command("ps", "-A", "-o", "pid=").CombinedOutput(); err != nil {
 		return fmt.Errorf("ps: %w: %s", err, out)
 	}
 	return nil
 }
 
+// probeDscl lists every user's shell: the same Directory Services query
+// DetectLocalShell makes for one user, with no argument that varies.
 func probeDscl() error {
 	if runtime.GOOS != "darwin" {
 		return nil
 	}
-	u, err := user.Current()
-	if err != nil {
-		return err
-	}
-	out, err := exec.Command("/usr/bin/dscl", ".", "-read", "/Users/"+u.Username, "UserShell").CombinedOutput() // #nosec G204 -- fixed binary; the name is the current user's own
-	if err != nil {
+	if out, err := exec.Command("/usr/bin/dscl", ".", "-list", "/Users", "UserShell").CombinedOutput(); err != nil {
 		return fmt.Errorf("dscl: %w: %s", err, out)
 	}
 	return nil

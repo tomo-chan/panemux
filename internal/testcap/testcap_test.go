@@ -3,7 +3,6 @@ package testcap
 import (
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -27,9 +26,9 @@ func withCI(t *testing.T, ci bool) {
 func TestRequire(t *testing.T) {
 	denied := errors.New("operation not permitted")
 	tests := []struct {
+		err         error
 		name        string
 		ci          bool
-		err         error
 		wantSkipped bool
 		wantFatal   bool
 	}{
@@ -69,10 +68,11 @@ func TestInCIReadsTheCIVariable(t *testing.T) {
 	}
 }
 
-func TestProbeTmuxAtReportsAServerThatCannotStart(t *testing.T) {
-	err := probeTmuxAt(filepath.Join(t.TempDir(), "no-such-tmux"), filepath.Join(t.TempDir(), "s"))
+func TestProbeTmuxInReportsAServerThatCannotStart(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	err := probeTmuxIn(t.TempDir())
 	if err == nil || !strings.Contains(err.Error(), "new-session") {
-		t.Fatalf("probeTmuxAt with a missing binary = %v, want a new-session error", err)
+		t.Fatalf("probeTmuxIn with no tmux on PATH = %v, want a new-session error", err)
 	}
 }
 
@@ -81,7 +81,10 @@ func TestProbeTmuxAtReportsAServerThatCannotStart(t *testing.T) {
 // answer: they must not fail outside CI whatever the answer is.
 func TestRequireHelpersNeverFailOutsideCI(t *testing.T) {
 	withCI(t, false)
-	for name, req := range map[string]func(TB){"pty": RequirePTY, "tmux": RequireTmux, "ps": RequirePS, "dscl": RequireDscl} {
+	requirements := map[string]func(TB){
+		"pty": RequirePTY, "tmux": RequireTmux, "ps": RequirePS, "dscl": RequireDscl,
+	}
+	for name, req := range requirements {
 		var r recorder
 		req(&r)
 		if r.fatal != "" {
