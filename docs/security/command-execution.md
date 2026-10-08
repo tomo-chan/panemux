@@ -512,7 +512,12 @@ approval behavior. A failed non-interactive run or unsupported CLI becomes a fix
 does not approve requests or relax permissions. Authentication is neither copied nor rewritten.
 `--ephemeral` avoids persisting the summary session, not every CLI cache or runtime file.
 
-CLI stdout/stderr are discarded. Only the final answer file is read, up to 64 KiB, and its required
+CLI stdout/stderr are discarded. The answer is opened without following a final symlink and with
+nonblocking open flags; the opened descriptor must be a regular file before any bytes are read.
+Path replacement cannot turn a prior pathname check into a blocking FIFO open or special-file read.
+The open/stat/read operation stays within the summary context deadline, including after the CLI
+exits; a late filesystem operation closes its own handle without retaining a summary slot.
+Only the final answer file is read, up to 64 KiB even if it grows during the read, and its required
 JSON fields/types are checked before applying the same 1 KiB/10 items/300 bytes display limits.
 Setup, execution, timeout and parse errors expose no CLI text or local paths. Cancellation kills
 the runner's process group, as for Claude.

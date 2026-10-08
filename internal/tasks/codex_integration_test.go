@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -142,4 +144,77 @@ func TestCodexTranscriptReader_PinsFileAndRejectsChanges(t *testing.T) {
 	require.NoError(t, err)
 	_, err = parseCodexTranscriptOutput(out, summarySessionID)
 	require.Error(t, err, "never silently choose the other file")
+}
+
+func TestSummaries_CodexFIFOReleasesSlots(t *testing.T) {
+	fakeCodex(t, `printf x > "$answer"; rm "$answer"; mkfifo "$answer"`)
+	root := t.TempDir()
+	var mu sync.Mutex
+	var dirs []string
+	runner := newCodexSummarizerWithDirs(codexSummaryDirs{
+		mkdir: os.Mkdir,
+		mkdirTemp: func(string, string) (string, error) {
+			dir, err := os.MkdirTemp(root, "job-")
+			mu.Lock()
+			dirs = append(dirs, dir)
+			mu.Unlock()
+			return dir, err
+		},
+	})
+	s := New(Options{RunLocal: codexTestTranscriptForScript, SummarizeCodex: runner, SummaryTimeout: 2 * time.Second})
+	t.Cleanup(func() {
+		s.Close()
+		// A red test against the old reader releases its FIFO waits before returning.
+		mu.Lock()
+		created := append([]string(nil), dirs...)
+		mu.Unlock()
+		for _, dir := range created {
+			fd, err := syscall.Open(filepath.Join(dir, "answer.json"), syscall.O_WRONLY|syscall.O_NONBLOCK, 0)
+			if err == nil {
+				_ = syscall.Close(fd)
+			}
+		}
+		s.waitSummaries()
+	})
+	var list []Task
+	for i := range summaryConcurrency + 1 {
+		list = append(list, Task{ID: strconv.Itoa(i), Agent: AgentCodex, State: StateIdle,
+			SessionID: "12345678-1234-1234-1234-123456789ab" + strconv.Itoa(i),
+			Log:       &LogVersion{ModTime: 1, Size: 2}})
+	}
+	s.rememberSummaryTasks("", list)
+	s.Summaries(list)
+	done := make(chan struct{})
+	go func() { s.waitSummaries(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("FIFO answers retained all summary slots past their deadlines")
+	}
+	for _, view := range s.Summaries(list) {
+		require.Equal(t, SummaryFailed, view.State)
+		require.Equal(t, "codex's answer could not be read", view.Error)
+	}
+	assert.Empty(t, s.summarySlots)
+	for _, dir := range dirs {
+		_, err := os.Stat(dir)
+		assert.True(t, os.IsNotExist(err), "failed answers leave no private directory")
+	}
+	fakeCodex(t, `printf '%s' '{"summary":"Recovered","remaining":[]}' > "$answer"`)
+	_, err := s.RequestAgentSummary("", AgentCodex, list[0].SessionID)
+	require.NoError(t, err)
+	s.waitSummaries()
+	view := s.Summaries(list)[list[0].ID]
+	require.Equal(t, SummaryReady, view.State)
+	assert.Equal(t, "Recovered", view.Text)
+	assert.Empty(t, s.summarySlots)
+}
+
+func codexTestTranscriptForScript(_ context.Context, script string) ([]byte, error) {
+	_, tail, ok := strings.Cut(script, "sid='")
+	if !ok {
+		return nil, os.ErrInvalid
+	}
+	id, _, _ := strings.Cut(tail, "'")
+	return []byte(strings.ReplaceAll(string(codexTranscript("request")), summarySessionID, id)), nil
 }

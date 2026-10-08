@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -351,5 +352,138 @@ func TestBuildCodexTranscriptScriptForLog_InvalidIDStopsBeforeScript(t *testing.
 			require.ErrorIs(t, err, ErrInvalidSummary)
 			assert.Empty(t, script, "invalid IDs must never yield an executable script")
 		}
+	}
+}
+
+// The successful CLI can leave an answer FIFO with no writer. It must not
+// hold the runner past its context deadline, even when the pathname changed.
+func TestCodexSummarizer_RejectsSpecialAnswersWithoutWaiting(t *testing.T) {
+	for name, action := range map[string]string{
+		"fifo replacement": `printf x > "$answer"; rm "$answer"; mkfifo "$answer"`,
+		"directory":        `mkdir "$answer"`,
+		"device symlink":   `ln -s /dev/zero "$answer"`,
+		"regular symlink":  `printf '%s' '{"summary":"secret","remaining":[]}' > target; ln -s "$PWD/target" "$answer"`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			fakeCodex(t, action)
+			dir := t.TempDir()
+			runner := newCodexSummarizerWithDirs(codexSummaryDirs{
+				mkdirTemp: func(string, string) (string, error) { return dir, nil }, mkdir: os.Mkdir,
+			})
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			done := make(chan error, 1)
+			go func() { _, err := runner(ctx, "x"); done <- err }()
+			select {
+			case err := <-done:
+				require.EqualError(t, err, "codex's answer could not be read")
+			case <-time.After(3 * time.Second):
+				// Release the old blocking-open implementation so a red test leaves no goroutine behind.
+				fd, err := syscall.Open(filepath.Join(dir, "answer.json"), syscall.O_WRONLY|syscall.O_NONBLOCK, 0)
+				if err == nil {
+					require.NoError(t, syscall.Close(fd))
+				}
+				<-done
+				t.Fatal("answer read outlived the summary context deadline")
+			}
+			_, err := os.Stat(dir)
+			assert.True(t, os.IsNotExist(err), "private directory is removed on rejection")
+		})
+	}
+}
+
+func TestAwaitCodexAnswer_Cancellation(t *testing.T) {
+	for _, before := range []bool{true, false} {
+		t.Run(strconv.FormatBool(before), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			started, release, finished := make(chan struct{}), make(chan struct{}), make(chan struct{})
+			if before {
+				cancel()
+			}
+			done := make(chan error, 1)
+			go func() {
+				_, err := awaitCodexAnswer(ctx, func() ([]byte, error) {
+					close(started)
+					<-release
+					defer close(finished)
+					return []byte("secret"), nil
+				})
+				done <- err
+			}()
+			if !before {
+				<-started
+				cancel()
+			}
+			select {
+			case err := <-done:
+				assert.EqualError(t, err, "codex did not finish summarizing in time")
+			case <-time.After(time.Second):
+				t.Error("a stalled filesystem read retained the summary caller")
+			}
+			close(release)
+			if !before {
+				<-finished
+			} else {
+				select {
+				case <-started:
+					t.Error("canceled read started work")
+				default:
+				}
+			}
+		})
+	}
+}
+
+func TestReadCodexAnswerFile_FileFactors(t *testing.T) {
+	for name, setup := range map[string]func(*testing.T, string){
+		"empty":       func(t *testing.T, path string) { require.NoError(t, os.WriteFile(path, nil, 0o600)) },
+		"non JSON":    func(t *testing.T, path string) { require.NoError(t, os.WriteFile(path, []byte("secret"), 0o600)) },
+		"permissions": func(t *testing.T, path string) { require.NoError(t, os.WriteFile(path, []byte("secret"), 0)) },
+		"missing":     func(*testing.T, string) {},
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "answer.json")
+			setup(t, path)
+			out, err := readCodexAnswerFile(path)
+			if name == "missing" || (name == "permissions" && os.Geteuid() != 0) {
+				require.EqualError(t, err, "codex's answer could not be read")
+				assert.Nil(t, out)
+				return
+			}
+			require.NoError(t, err)
+			_, err = parseCodexSummaryOutput(out)
+			require.EqualError(t, err, "codex's answer was not a summary")
+		})
+	}
+	t.Run("device", func(t *testing.T) {
+		out, err := readCodexAnswerFile("/dev/null")
+		require.EqualError(t, err, "codex's answer could not be read")
+		assert.Nil(t, out)
+	})
+}
+
+func TestReadCodexAnswerFile_FIFOWithWriter(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "answer.json")
+	require.NoError(t, syscall.Mkfifo(path, 0o600))
+	fd, err := syscall.Open(path, syscall.O_RDWR|syscall.O_NONBLOCK, 0)
+	require.NoError(t, err)
+	defer syscall.Close(fd) //nolint:errcheck // controlled test FIFO
+	_, err = syscall.Write(fd, []byte(`{"summary":"secret","remaining":[]}`))
+	require.NoError(t, err)
+	out, err := readCodexAnswerFile(path)
+	require.EqualError(t, err, "codex's answer could not be read")
+	assert.Nil(t, out, "a readable FIFO must not supply summary JSON")
+}
+
+func TestAwaitCodexAnswer_CompletedReadAfterCancellation(t *testing.T) {
+	for range 100 {
+		ctx, cancel := context.WithCancel(context.Background())
+		out, err := awaitCodexAnswer(ctx, func() ([]byte, error) {
+			cancel()
+			return []byte("secret"), nil
+		})
+		require.EqualError(t, err, "codex did not finish summarizing in time")
+		assert.Nil(t, out)
 	}
 }

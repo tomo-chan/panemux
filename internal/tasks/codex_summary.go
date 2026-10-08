@@ -74,17 +74,57 @@ func newCodexSummarizerWithDirs(dirs codexSummaryDirs) SummarizeFunc {
 			}
 			return Summary{}, errors.New("codex could not run while summarizing")
 		}
-		f, err := os.Open(answer)
+		out, err := awaitCodexAnswer(ctx, func() ([]byte, error) { return readCodexAnswerFile(answer) })
 		if err != nil {
-			return Summary{}, errors.New("codex's answer could not be read")
-		}
-		defer f.Close() //nolint:errcheck // read-only handle, contents/errors checked below
-		out, err := io.ReadAll(io.LimitReader(f, maxCodexAnswerBytes+1))
-		if err != nil || len(out) > maxCodexAnswerBytes {
-			return Summary{}, errors.New("codex's answer could not be read")
+			return Summary{}, err
 		}
 		return parseCodexSummaryOutput(out)
 	}
+}
+
+// awaitCodexAnswer keeps filesystem latency within the caller's deadline too.
+// The buffered result lets a late read finish and close its handle after the
+// caller has returned; no worker can be stuck sending to an abandoned caller.
+func awaitCodexAnswer(ctx context.Context, read func() ([]byte, error)) ([]byte, error) {
+	if ctx.Err() != nil {
+		return nil, errors.New("codex did not finish summarizing in time")
+	}
+	type result struct {
+		err error
+		out []byte
+	}
+	done := make(chan result, 1)
+	go func() { out, err := read(); done <- result{out: out, err: err} }()
+	var r result
+	select {
+	case <-ctx.Done():
+	case r = <-done:
+	}
+	if ctx.Err() != nil {
+		return nil, errors.New("codex did not finish summarizing in time")
+	}
+	return r.out, r.err
+}
+
+func readCodexAnswerFile(path string) ([]byte, error) {
+	// NONBLOCK prevents a substituted FIFO from waiting for a writer at open.
+	// NOFOLLOW rejects a final symlink; f.Stat checks the opened descriptor, not
+	// a pathname that the CLI could replace between a check and open/read.
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return nil, errors.New("codex's answer could not be read")
+	}
+	defer f.Close() //nolint:errcheck // read-only handle, contents/errors checked below
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		return nil, errors.New("codex's answer could not be read")
+	}
+	// Keep the read bounded even if the regular file grows after descriptor stat.
+	out, err := io.ReadAll(io.LimitReader(f, maxCodexAnswerBytes+1))
+	if err != nil || len(out) > maxCodexAnswerBytes {
+		return nil, errors.New("codex's answer could not be read")
+	}
+	return out, nil
 }
 
 func parseCodexSummaryOutput(out []byte) (Summary, error) {
