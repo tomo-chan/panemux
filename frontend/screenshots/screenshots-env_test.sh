@@ -6,7 +6,7 @@
 # What they protect: nothing from the developer's own configuration reaches
 # the images, nothing the developer owns is deleted, and nothing the run
 # started outlives it. The tmux checks report themselves as skipped where
-# tmux is not installed.
+# tmux is not installed or cannot start a server, and fail instead in CI.
 #
 # Run with: make test-screenshots-check
 
@@ -101,7 +101,38 @@ tmux_unusable() {
 	rm -f "$short/probe"
 }
 tmux_skip=$(tmux_unusable)
-if [ -n "$tmux_skip" ] && [ -n "${CI:-}" ] && command -v tmux >/dev/null 2>&1; then
+
+# CI never skips them, whatever the reason — tmux missing included, as
+# internal/testcap.RequireTmux has it: a runner image that stops shipping tmux
+# must fail here rather than turn every tmux check into a skip. Run this script
+# again with CI set and every tmux on PATH hidden.
+if [ -z "${SCREENSHOTS_ENV_TEST_NESTED:-}" ]; then
+	check
+	notmux_path=""
+	i=0
+	old_ifs=$IFS
+	IFS=:
+	for d in $PATH; do
+		i=$((i + 1))
+		if [ -x "$d/tmux" ]; then
+			mkdir -p "$work/notmux/$i"
+			for f in "$d"/*; do
+				[ "$(basename "$f")" = tmux ] || ln -s "$f" "$work/notmux/$i/" 2>/dev/null
+			done
+			d="$work/notmux/$i"
+		fi
+		notmux_path="${notmux_path:+$notmux_path:}$d"
+	done
+	IFS=$old_ifs
+	if out=$(PATH="$notmux_path" CI=true SCREENSHOTS_ENV_TEST_NESTED=1 sh "$0" 2>&1); then
+		fail 'CI without tmux fails the tmux checks' "$out"
+	elif ! printf '%s\n' "$out" | grep -q 'tmux checks cannot run in CI: tmux is not installed'; then
+		fail 'CI without tmux fails the tmux checks, saying tmux is missing' "$out"
+	else
+		pass 'CI without tmux fails the tmux checks'
+	fi
+fi
+if [ -n "$tmux_skip" ] && [ -n "${CI:-}" ]; then
 	check
 	fail "tmux checks cannot run in CI: $tmux_skip"
 	tmux_skip="CI failure reported above"
