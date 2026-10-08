@@ -22,12 +22,6 @@
 
 set -u
 
-# Pin direct execution and every Go subprocess to this checkout's go.mod.
-panemux_toolchain_root=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
-panemux_runtime_scripts="$panemux_toolchain_root/scripts"
-. "$panemux_runtime_scripts/runtime-env.sh"
-panemux_runtime "$panemux_toolchain_root" || exit 2
-
 # Claude Code sets stop_hook_active when it is ALREADY continuing because of a
 # previous Stop-hook block. Without this, a condition the turn cannot fix — a
 # pre-existing dirty file, a test the user deliberately left red, or the
@@ -56,6 +50,12 @@ if command -v jq > /dev/null 2>&1; then
 		exit 0
 	fi
 fi
+
+# Retry payloads must escape before SDK selection can block again.
+panemux_toolchain_root=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
+panemux_runtime_scripts="$panemux_toolchain_root/scripts"
+. "$panemux_runtime_scripts/runtime-env.sh"
+panemux_runtime "$panemux_toolchain_root" || exit 2
 
 # git status --porcelain always prints paths relative to the REPOSITORY ROOT,
 # whatever the cwd is. Without this the [ -f ] test below missed every file

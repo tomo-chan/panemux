@@ -29,6 +29,9 @@ select the same contract from their checkout. For ad hoc commands use
 its own dependency preparation before that guard, so use the wrapper or `make install-deps`
 for dependency setup. `npm run` scripts select the contract for their actual tooling commands.
 Interactive bare `node` and `go` still follow the caller's shell.
+Browser fixture launchers validate SDKs before changing fixture state. The Stop hook
+handles `stop_hook_active` retries before SDK selection so a failed SDK cannot cause
+repeated blocks; the initial invocation still validates both SDKs.
 
 `make test-go-toolchain` and `make test-node-toolchain` protect selection and bootstrap
 failure behavior. Update the single-source pins to change versions; a Go `toolchain` directive

@@ -64,11 +64,44 @@ done
 
 # Direct entrypoints must stop before checking, building, or launching anything.
 export FAIL_GO=1
-for entry in scripts/efficacy.sh scripts/mutation.sh .claude/hooks/post-edit-check.sh .claude/hooks/stop-check.sh frontend/e2e/run-panemux-e2e.sh frontend/e2e/run-panemux-command-center-e2e.sh frontend/e2e/run-panemux-task-dashboard-e2e.sh frontend/screenshots/run-panemux-screenshots.sh; do
+mkdir -p "$work/sideeffects"
+for command in rm mkdir cp chmod date; do
+ printf '#!/bin/sh\necho side-effect >> "$SIDE_EFFECT_TRACE"\nexit 99\n' > "$work/sideeffects/$command"
+ chmod +x "$work/sideeffects/$command"
+done
+export SIDE_EFFECT_TRACE="$work/sideeffects.trace"
+for entry in scripts/efficacy.sh scripts/mutation.sh .claude/hooks/post-edit-check.sh .claude/hooks/stop-check.sh frontend/e2e/run-panemux-e2e.sh frontend/e2e/run-panemux-agent-board-e2e.sh frontend/e2e/run-panemux-command-center-e2e.sh frontend/e2e/run-panemux-task-dashboard-e2e.sh frontend/screenshots/run-panemux-screenshots.sh; do
  status=0
- sh "$scripts_dir/../$entry" > "$work/output" 2>&1 || status=$?
+ PATH="$work/sideeffects:$PATH" sh "$scripts_dir/../$entry" > "$work/output" 2>&1 || status=$?
  case "$entry" in .claude/hooks/*) expected=2 ;; *) expected=1 ;; esac
  [ "$status" -eq "$expected" ] || { echo "FAIL $entry returned $status, expected $expected"; exit 1; }
  grep -q 'go-toolchain: cannot start required' "$work/output"
  echo "ok direct $entry fails before side effects"
 done
+[ ! -e "$SIDE_EFFECT_TRACE" ]
+
+# The Stop retry guard must precede both acquisition and cached-SDK startup.
+if command -v jq >/dev/null 2>&1; then
+ mkdir -p "$work/repo/.claude/hooks"
+ cp "$scripts_dir/../.claude/hooks/stop-check.sh" "$work/repo/.claude/hooks/"
+ printf 'module sample\n\ngo 1.25.0\n' > "$work/repo/go.mod"
+ case "$(uname -s)" in Darwin) os=darwin ;; Linux) os=linux ;; esac
+ case "$(uname -m)" in arm64|aarch64) arch=arm64 ;; *) arch=x64 ;; esac
+ cached="$work/repo/.cache/runtimes/node-v24.21.0-$os-$arch/bin"
+ mkdir -p "$cached"
+ printf '#!/bin/sh\necho node-probe >> "$TRACE"\necho v26.8.1\n' > "$cached/node"
+ cp "$work/sdk/bin/npm" "$cached/npm"
+ cp "$work/sdk/bin/npx" "$cached/npx"
+ chmod +x "$cached/node"
+ for failure in unavailable corrupt-cache; do
+  case "$failure" in unavailable) export FAIL_GO=1 ;; *) export FAIL_GO=0 ACTUAL_VERSION=go1.25.0 ;; esac
+  : > "$TRACE"
+  status=0
+  printf '{"stop_hook_active":true}' | "$work/repo/.claude/hooks/stop-check.sh" > "$work/output" 2>&1 || status=$?
+  [ "$status" -eq 0 ] && [ ! -s "$TRACE" ] || { echo "FAIL retry $failure probed SDK or blocked"; exit 1; }
+  status=0
+  printf '{"stop_hook_active":false}' | "$work/repo/.claude/hooks/stop-check.sh" > "$work/output" 2>&1 || status=$?
+  [ "$status" -eq 2 ] && [ -s "$TRACE" ] || { echo "FAIL initial $failure did not block"; exit 1; }
+  echo "ok Stop retry skips $failure while first invocation blocks"
+ done
+fi
