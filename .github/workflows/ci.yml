@@ -87,6 +87,13 @@ jobs:
       - name: Test (agent hooks)
         run: make test-hooks
 
+      # The same reasoning as the step above, for the scripts that keep the
+      # gates safe and runnable inside the Claude Code sandbox (issue #315):
+      # every temporary directory under $TMPDIR, stopping when one cannot be
+      # made; install-hooks, golangci-lint's cache and the pty gate.
+      - name: Test (sandbox-safe scripts)
+        run: make test-tmpdir-guard test-install-hooks test-golangci-lint-cache test-require-pty
+
       - name: Install Playwright browsers
         run: cd frontend && npx playwright install --with-deps chromium
 
