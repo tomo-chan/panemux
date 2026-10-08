@@ -2,18 +2,23 @@
 
 This document captures repository maintenance rules that belong in durable project documentation rather than in the agent index.
 
-## Go toolchain
+## Runtime toolchains
 
-Keep `go.mod` as the sole Go version source. Go workflows use `setup-go` with
-`go-version-file: go.mod`; local Makefile initialization, recipes, agent hooks, and direct
-Go-based fixture/gate scripts use the same exact version through the common toolchain shell.
-Inherited `GOTOOLCHAIN` settings cannot change this selection. Do not add a second version pin
-or require contributors to pass a version environment variable. Update the exact Go directive
-and verify `make test-go-toolchain` and `make check` when changing the contract.
+Keep `go.mod` and `.node-version` as the sole exact Go and Node version sources.
+Go workflows use `go-version-file: go.mod`; Node workflows use
+`node-version-file: .node-version`. Local Makefile initialization, recipes, hooks, npm tasks,
+and fixture/gate scripts use the common runtime shell, including the selected SDK's bundled
+npm. Node 24.21.0 LTS ships npm 11.19.0 according to the
+[official release metadata](https://nodejs.org/dist/index.json). It has official support through
+2028-04-30 according to the [release schedule](https://github.com/nodejs/Release/blob/main/schedule.json).
+Node 20's support ended on 2026-04-30; upgrading the runtime does not change npm dependencies.
 
-CI runs the toolchain contract tests explicitly because its unit suites do not use `make test`.
-See [the development contract](../DEVELOPMENT.md#go-version-contract) for SDK acquisition and
-failure behavior.
+Do not add parallel version pins or require per-command environment overrides. The Node
+selector uses existing exact SDKs or bootstraps a verified official archive; its local cache
+is excluded from source control. CI runs both runtime regression suites explicitly because
+its unit suites do not use `make test`. Verify those suites and `make check` when changing
+pins. See [the development contract](../DEVELOPMENT.md#runtime-version-contract) for supported
+platforms, installation, direct npm behavior, and failure semantics.
 
 ## GitHub Actions Pinning
 

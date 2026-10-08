@@ -2,26 +2,40 @@
 
 This document is the developer workflow reference for building, testing, changing, and shipping this repository.
 
-## Go version contract
+## Runtime version contract
 
-`go.mod`'s `go` directive is the exact Go version used locally and in CI. Run ordinary
-`make` commands without setting `GOTOOLCHAIN`: the common shell selects that version before
-Makefile initialization, recipes, and their child processes. It overrides inherited
-`GOTOOLCHAIN` settings and puts the selected SDK's `go` and `gofmt` first on `PATH`.
-A newer Go installation does not change the version used by the repository.
+`go.mod`'s Go directive and the root `.node-version` are the exact Go and Node versions
+used locally and in CI. Node is 24 LTS. Run ordinary `make` commands without setting
+`GOTOOLCHAIN`, `PATH`, or a web-storage `NODE_OPTIONS` workaround: the common shell selects
+both SDKs before Makefile initialization, recipes, and child processes. It overrides inherited
+`GOTOOLCHAIN`, selects the SDK's `go`/`gofmt` and Node's bundled `npm`/`npx`, and preserves
+user `NODE_OPTIONS`. A newer installed runtime does not change the selected version.
 
-Install a Go launcher supporting toolchain selection (Go 1.21 or later). Go downloads the
-required SDK through its normal module cache when needed; initial setup can require network
-access. Missing, malformed, unavailable, or mismatched toolchains stop the command before its
-work begins. An exact `major.minor.patch` directive is required. Update it to change the
-contract; a `toolchain` directive alone is insufficient to force a newer local Go to downgrade.
+Install a Go launcher supporting toolchain selection (Go 1.21 or later). Go uses its normal
+module cache. Node reuses a matching SDK on PATH or in nvm; otherwise the first normal command,
+including `make install-deps`, fetches the exact official SDK into the ignored checkout-local
+`.cache/runtimes/` directory. This bootstrap needs `curl`, `tar`, and `sha256sum` or `shasum`.
+It supports macOS/Linux x64 and arm64; Windows uses WSL2. Acquisition uses HTTPS and official
+SHA256 checksums, a bounded install lock, and atomic publication after startup/version checks.
+Offline commands reuse an installed SDK. Invalid pins, unavailable SDKs, corrupted cache or
+archives, and unsupported systems fail before the command proceeds. Inspect a stale lock or
+bad cache before removing it; the selector never overwrites a bad published SDK.
 
-Direct efficacy/mutation scripts, agent hooks, and browser fixture launchers select the same
-contract from the checkout containing the script, including when checking scratch repositories.
-For an ad hoc Go command, use `scripts/go-shell.sh -c 'go version'` (replace the shell command
-as needed). A bare `go` command in an interactive shell follows that shell's configuration.
-`make test-go-toolchain` checks selection, inheritance, Makefile initialization, and failure
-behavior. Node versions and diff-gate comparison refs have separate contracts.
+Direct hooks, efficacy/mutation scripts, browser fixture launchers, and frontend npm scripts
+select the same contract from their checkout. For ad hoc commands use
+`scripts/runtime-shell.sh -c 'node --version; go version'`. From `frontend`, use
+`../scripts/npm.sh install` or `../scripts/npm.sh ci` for the selected npm CLI; bare
+`npm install/ci` rejects a mismatched Node via the root lifecycle guard. Bare npm may perform
+its own dependency preparation before that guard, so use the wrapper or `make install-deps`
+for dependency setup. `npm run` scripts select the contract for their actual tooling commands.
+Interactive bare `node` and `go` still follow the caller's shell.
+
+`make test-go-toolchain` and `make test-node-toolchain` protect selection and bootstrap
+failure behavior. Update the single-source pins to change versions; a Go `toolchain` directive
+alone does not force a newer local launcher to downgrade. Diff-gate comparison refs have a
+separate contract. Node release and bundled npm metadata come from the
+[official release index](https://nodejs.org/dist/index.json); support dates come from the
+[official release schedule](https://github.com/nodejs/Release/blob/main/schedule.json).
 
 ## Build And Run
 

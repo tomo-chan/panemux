@@ -5,7 +5,8 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT HUP INT TERM
 mkdir -p "$work/bin" "$work/sdk/bin" "$work/repo/scripts"
 cp "$scripts_dir/../Makefile" "$work/repo/Makefile"
-cp "$scripts_dir/go-toolchain.sh" "$scripts_dir/go-shell.sh" "$work/repo/scripts/"
+cp "$scripts_dir/go-toolchain.sh" "$scripts_dir/go-shell.sh" "$scripts_dir/runtime-shell.sh" "$scripts_dir/runtime-env.sh" "$scripts_dir/node-toolchain.sh" "$work/repo/scripts/"
+printf '24.21.0\n' > "$work/repo/.node-version"
 printf 'module sample\n\ngo 1.25.0\n' > "$work/repo/go.mod"
 cat > "$work/bin/go" <<'MOCK'
 #!/bin/sh
@@ -24,6 +25,13 @@ printf 'selected %s %s\n' "$GOTOOLCHAIN" "$*" >> "$TRACE"
 printf '%s\n' "$GOTOOLCHAIN"
 MOCK
 chmod +x "$work/bin/go" "$work/sdk/bin/go"
+cat > "$work/sdk/bin/node" <<'MOCK'
+#!/bin/sh
+case "$*" in --version) echo v24.21.0 ;; *) echo 11.19.0 ;; esac
+MOCK
+printf '#!/bin/sh\necho 11.19.0\n' > "$work/sdk/bin/npm"
+cp "$work/sdk/bin/npm" "$work/sdk/bin/npx"
+chmod +x "$work/sdk/bin/node" "$work/sdk/bin/npm" "$work/sdk/bin/npx"
 export SDK="$work/sdk" TRACE="$work/trace"
 export PATH="$work/bin:$PATH"
 run_env() {

@@ -53,12 +53,14 @@ The order is intentional: cheaper checks should reject a defect before expensive
 
 ### Toolchain consistency
 
-Gate results use the exact Go version in `go.mod` locally and in CI. The common development
-shell selects and verifies it before Makefile initialization and recipes; direct Go-based
-agent hooks, efficacy/mutation scripts, and browser fixture launchers use the same selector.
-Unavailable or mismatched SDKs fail before the check runs. `make test-go-toolchain`, included
-in `make check` and run explicitly in CI, protects version selection and failure behavior.
-See [the Go contract](../DEVELOPMENT.md#go-version-contract).
+Gate results use the exact Go and Node versions in `go.mod` and `.node-version` locally and
+in CI. The common runtime shell selects and verifies them before Makefile initialization and
+recipes; direct hooks, npm tasks, efficacy/mutation scripts, and browser fixture launchers
+use the same selector. Required SDK acquisition and startup failures stop the check. Node's
+verified cache install is locked and published atomically; damaged SDKs fail closed.
+`make test-go-toolchain` and `make test-node-toolchain`, included in `make check` and run
+explicitly in CI, protect selection, inheritance, and bootstrap failure behavior.
+See [the runtime contract](../DEVELOPMENT.md#runtime-version-contract).
 
 ### Gate details
 
