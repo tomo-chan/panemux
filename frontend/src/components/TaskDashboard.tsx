@@ -1274,12 +1274,12 @@ const WorkSection: React.FC<WorkSectionProps> = ({ task, enabled, onRequest }) =
   if (!enabled) {
     body = (
       <p className="td-note">
-        Summaries are off. Set task_dashboard.summary.enabled in config.yaml to have claude -p on this host summarize
+        Summaries are off. Set task_dashboard.summary.enabled in config.yaml to have each agent on this host summarize
         each task&apos;s conversation.
       </p>
     )
   } else if (!canSummarize(task)) {
-    body = <p className="td-note">Only a claude task with a session ID can be summarized.</p>
+    body = <p className="td-note">Only a Claude or Codex task with a session ID can be summarized.</p>
   } else {
     // A log that could not be read reads the same until it changes, and the
     // server does not read it again before then: the button stays, disabled,

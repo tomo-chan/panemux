@@ -196,7 +196,7 @@ echo '::section codex-rollouts'
 find "$HOME/.codex/sessions" -mindepth 4 -maxdepth 4 -type f -name 'rollout-*.jsonl' -mtime -7 2>/dev/null |
 while IFS= read -r p; do
 	t=$(mtime "$p" 2>/dev/null) && echo "$t $p"
-done | sort -rn | while read -r t s p; do
+done | sort -k1,1nr -k2,2nr -k3r | while read -r t s p; do
 	l=$(head -n 1 "$p" 2>/dev/null)
 	o=$(printf '%s\n' "$l" | grep -o '"originator":"[^"]*"' | head -n 1)
 	[ "$o" = '"originator":"codex-tui"' ] || continue

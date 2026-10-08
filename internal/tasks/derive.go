@@ -87,6 +87,8 @@ type Task struct {
 // A log that has not changed keeps both, so a summary made from it is still
 // current.
 type LogVersion struct {
+	// File is a validated Codex rollout basename, never a caller-supplied path.
+	File    string
 	ModTime int64
 	Size    int64
 }
@@ -163,6 +165,17 @@ func buildLiveTasks(host string, raw rawSnapshot, collectedAt time.Time) []Task 
 }
 
 func newTaskBuilder(host string, raw rawSnapshot, collectedAt time.Time) *taskBuilder {
+	raw.CodexRollouts = append([]codexRollout(nil), raw.CodexRollouts...)
+	sort.SliceStable(raw.CodexRollouts, func(i, j int) bool {
+		return newerCodexRollout(raw.CodexRollouts[i], raw.CodexRollouts[j])
+	})
+	raw.CodexOpen = append([]codexOpenRollout(nil), raw.CodexOpen...)
+	for i := range raw.CodexOpen {
+		raw.CodexOpen[i].Rollout.File = raw.CodexOpen[i].File
+	}
+	sort.SliceStable(raw.CodexOpen, func(i, j int) bool {
+		return newerCodexRollout(raw.CodexOpen[i].Rollout, raw.CodexOpen[j].Rollout)
+	})
 	b := &taskBuilder{
 		host:        host,
 		raw:         raw,
@@ -189,8 +202,8 @@ func (b *taskBuilder) liveTasks() []Task {
 	return live
 }
 
-// withLogVersions gives every claude task with a session ID the version of
-// its newest collected conversation log.
+// withLogVersions supplies Claude transcript versions and stopped Codex rollout
+// versions; live Codex tasks already carry the exact open rollout they selected.
 func (b *taskBuilder) withLogVersions(tasks []Task) []Task {
 	newest := make(map[string]transcript, len(b.raw.Transcripts))
 	for _, tr := range b.raw.Transcripts {
@@ -199,6 +212,14 @@ func (b *taskBuilder) withLogVersions(tasks []Task) []Task {
 		}
 	}
 	for i := range tasks {
+		if tasks[i].Agent == AgentCodex && tasks[i].Log == nil {
+			for _, r := range b.raw.CodexRollouts {
+				if r.SessionID == tasks[i].SessionID && r.Originator == codexOriginatorTUI {
+					tasks[i].Log = codexLogVersion(r)
+					break
+				}
+			}
+		}
 		if tasks[i].Agent != AgentClaude || tasks[i].SessionID == "" {
 			continue
 		}

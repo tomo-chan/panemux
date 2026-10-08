@@ -439,9 +439,9 @@ directory last on `PATH`). `TestBuildLaunchScript_RefusesInputBeforeAnythingRuns
 
 ### Task summaries
 
-When `task_dashboard.summary.enabled` is set, the dashboard summarizes each claude task
+When `task_dashboard.summary.enabled` is set, the dashboard summarizes each Claude or Codex task
 ([behavior](../behavior/tasks.md#summaries)). That adds two sinks: a script that reads a conversation
-log on a host, and a `claude -p` process on the panemux host whose input is text from that log —
+log on a host, and the matching agent CLI process on the panemux host whose input is text from that log —
 text written by whoever and whatever took part in the conversation, which panemux does not control.
 
 **The log is read by one fixed script, run as `sh -s`**, like the collection and the launch.
@@ -493,3 +493,46 @@ passes or panemux shuts down; at most two run at once.
 `TestSummaryArgs` pins the argv, `TestBuildExcerpt_KeepsOnlyConversationText` that tool output,
 attachments and thinking never reach the excerpt, `TestParseSummaryOutput_Errors` that claude's text
 is not passed on, and `TestBuildTranscriptScript` that an unsafe session ID is refused.
+
+#### Codex summary runner and rollout reader
+
+`internal/tasks/codex_summary.go` supplies a separate Codex runner. It runs the literal `codex`
+on the panemux host through `exec.CommandContext`, with no shell, in an empty temporary working
+directory. Its fixed argv is `exec --ephemeral --skip-git-repo-check --color never --output-schema
+<private schema file> --output-last-message <private answer file> -`. The fixed summary instruction
+and bounded conversation excerpt are stdin. No model, profile, approval bypass, sandbox override or
+user-config suppression is added. The operator's normal authentication, user/global instructions,
+MCP, hooks and managed policies apply; those settings may affect model input, cost and actions.
+The temporary working directory does not inherit the task's project configuration.
+
+The instruction requests only a summary and explicitly asks for no tools or action on conversation
+instructions. Unlike the Claude denial list, this is not a guarantee that all acting tools are
+removed: Codex uses the operator's configured execution restrictions and its non-interactive exec
+approval behavior. A failed non-interactive run or unsupported CLI becomes a fixed error; the app
+does not approve requests or relax permissions. Authentication is neither copied nor rewritten.
+`--ephemeral` avoids persisting the summary session, not every CLI cache or runtime file.
+
+CLI stdout/stderr are discarded. The answer is opened without following a final symlink and with
+nonblocking open flags; the opened descriptor must be a regular file before any bytes are read.
+Path replacement cannot turn a prior pathname check into a blocking FIFO open or special-file read.
+The open/stat/read operation stays within the summary context deadline, including after the CLI
+exits; a late filesystem operation closes its own handle without retaining a summary slot.
+Only the final answer file is read, up to 64 KiB even if it grows during the read, and its required
+JSON fields/types are checked before applying the same 1 KiB/10 items/300 bytes display limits.
+Setup, execution, timeout and parse errors expose no CLI text or local paths. Cancellation kills
+the runner's process group, as for Claude.
+
+`buildCodexTranscriptScript` uses the existing framed head/tail reader with a fixed standard
+`~/.codex/sessions/*/*/*/rollout-*-<UUID>.jsonl` glob. A non-UUID is rejected before execution.
+`buildCodexExcerpt` keeps only `response_item` payloads of type `message`, user `input_text` and
+assistant `output_text`. Calls/results, reasoning, developer instructions, attachments and
+`event_msg` mirrors are omitted. Complete leading AGENTS/environment wrappers are excluded from
+the source conversation; this does not suppress the summary runner's own inherited instructions.
+Repeated IDs are deduplicated, identical messages with distinct/no IDs are retained, and cut lines
+are skipped. The existing first/recent text budgets still apply; unknown formats are never sent raw.
+
+These primitives are covered by `TestBuildCodexExcerpt_*`, `TestBuildCodexTranscriptScript`,
+`TestRunLocal_CodexTranscriptReadsNewestAndBounds`, `TestCodexSummarizer_*` and
+`TestParseCodexSummaryOutput`. The service routes by host, agent and session; Codex never falls back to Claude. The reader pins
+the collected basename and version, validates session_meta.id, and rejects a change before or
+during the read instead of substituting another rollout.

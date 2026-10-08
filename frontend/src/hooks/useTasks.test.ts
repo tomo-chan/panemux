@@ -522,9 +522,9 @@ describe('useTasks requestSummary', () => {
   beforeEach(() => setVisibility('visible'))
   afterEach(() => vi.restoreAllMocks())
 
-  it('POSTs the request and shows where the summary stands at once, without collecting', async () => {
+  it.each(['claude', 'codex'])('POSTs the %s summary identity without collecting', async (agent) => {
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(ok({ ...payload, tasks: [stopped], summaries_enabled: true }))
+      .mockResolvedValueOnce(ok({ ...payload, tasks: [{ ...stopped, agent }], summaries_enabled: true }))
       .mockResolvedValueOnce({ ...ok({ state: 'pending' }), status: 202 } as Response)
     window.fetch = fetchMock
     const { result } = renderHook(() => useTasks(true))
@@ -539,7 +539,7 @@ describe('useTasks requestSummary', () => {
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/tasks/summary', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ host: '', session_id: 'stopped-s' }),
+      body: JSON.stringify({ host: '', agent, session_id: 'stopped-s' }),
     })
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(result.current.data!.tasks[0].summary).toEqual({ state: 'pending' })

@@ -235,7 +235,7 @@ does write:
   (`codex_exec`), the desktop app or a subagent. The 100 the collection reads are counted after this
   filter, so a host where `codex exec` writes many rollouts does not push the TUI's out. Its working
   directory is that line's `cwd`, and the time it stopped is the rollout's modification time.
-- Codex tasks are not summarized ([Summaries](#summaries)); their log is a different format.
+- Codex tasks with a collected rollout can be summarized by Codex ([Summaries](#summaries)).
 
 ### Where a task runs
 
@@ -543,9 +543,9 @@ environment's claude stopped at its first-run screen). Scenario J21 is the manua
 
 ### Summaries
 
-With `task_dashboard.summary.enabled: true` in `config.yaml`, each claude task gets a summary of what
-it is doing and the work left, made by `claude -p` on the panemux host. **Summaries are off by
-default**, because they send the text of every host's conversations to claude on the panemux host.
+With `task_dashboard.summary.enabled: true` in `config.yaml`, each Claude or Codex task with a collected log gets a summary of what
+it is doing and the work left, made by its own CLI on the panemux host. **Summaries are off by
+default**, because they send conversation excerpts to the corresponding agent account on the panemux host.
 
 ```yaml
 task_dashboard:
@@ -553,29 +553,28 @@ task_dashboard:
     enabled: true
 ```
 
-- **Which tasks.** A claude task with a session ID whose conversation log the collection listed (the
-  last 7 days, the newest 100 per host). Codex tasks and claude processes known only by a pid have
-  none.
+- **Which tasks.** A Claude or Codex task with a session ID whose conversation log the collection listed (the
+  last 7 days, the newest 100 per host). Processes known only by a pid have no summary.
 - **What is read.** The task's log, `~/.claude/projects/*/<session ID>.jsonl`, is read on its host by
   a fixed script run like the collection's ([Task summaries](../security/command-execution.md#task-summaries)).
   When the session has a log in more than one project directory, the one read is chosen as the
   collection orders them — newest first, then the larger of two changed in the same second — so it
   is the one whose modification time and size the summary is keyed on. The host sends the whole log when it is at most
   2.25 MiB, and otherwise its first 256 KiB and its last 2 MiB.
-- **What claude is given.** Each line is read as a JSON object, and only the text of the user's and
+- **What Claude is given.** Each line is read as a JSON object, and only the text of the user's and
   the assistant's messages is kept: a line whose `type` is `user` or `assistant` and whose
   `message.content` is a string or holds `text` blocks, and which is not a subagent's
   (`isSidechain`). Tool calls, tool results, thinking, attachments and every other kind of line are
   never read, and a line cut by a byte limit is skipped. Of those messages claude is given the
   session's first user message (at most 4 KiB), which says what the task is, and the newest messages
   up to 24 KiB in all, each cut at 2 KiB, which say where it stands.
-- **Where it goes.** That text is sent to `claude -p` on the panemux host, so a remote host's
+- **Where Claude text goes.** That text is sent to `claude -p` on the panemux host, so a remote host's
   conversation goes to the Claude account signed in on the panemux host, not the remote host's. It is
   not masked: a secret typed into the conversation, or quoted in a reply, is sent with it. Tool output
   — where file contents and command output sit — is not. Summaries are kept in panemux's memory only
   and are gone when it restarts.
-- **A log that cannot be read.** When no line of a log has that shape, the task's summary is
-  `unreadable` and nothing is sent to claude; the raw log is never sent instead. A Claude Code release
+- **A log that cannot be read.** When no line of a log has the supported conversation shape, the task's summary is
+  `unreadable` and nothing is sent to its agent; the raw log is never sent instead. An agent release
   that changes the log's format shows up this way rather than as a wrong summary. Asking again reads
   nothing until the log changes, so the detail panel's button is disabled until then; once the log
   has changed the summary is marked outdated, the button is enabled again, and selecting a stopped
@@ -588,11 +587,11 @@ task_dashboard:
   - A stopped or `unknown` task is summarized when it is selected on the dashboard and has no
     current summary.
   - `Summarize` / `Summarize again` in the detail panel asks for any task that can have one.
-  - A summary is reused while its log keeps the same modification time and size, so the 10-second
+  - A summary is cached separately by host, agent and session and reused while its log keeps the same modification time, size and (for Codex) rollout name, so the 10-second
     poll does not summarize again. A failed summary is not retried by the poll for the same log; the
     button retries it.
   - At most two summaries run at once, across hosts. Reading a log is limited to 15 seconds and one
-    `claude -p` run to 2 minutes.
+    agent CLI run to 2 minutes.
   - A task that leaves the list takes its summary with it, and so does a host removed from
     `ssh_connections`. A host whose collection failed keeps what it had.
 - **The answer.** A summary of one or two sentences (at most 1 KiB) and the remaining work, most
@@ -606,6 +605,38 @@ task_dashboard:
   not instructions. When claude fails, the task reports a fixed message (its exit status, a timeout,
   an answer that was not JSON or had no summary); nothing claude printed is passed on, since it can
   quote the conversation.
+
+#### Codex summaries
+
+Codex tasks use a separate `codex exec` summary runner and standard rollout reader;
+Claude tasks retain the `claude -p` path described above. The Codex runner retains the
+panemux host operator's authentication, default model and user/global/managed configuration.
+It adds no profile or permission bypass and runs in an empty temporary working directory with
+an ephemeral session. The bounded excerpt and a fixed summary-only instruction go on stdin,
+and only a regular, non-symlink final answer of at most 64 KiB is read and schema-checked.
+FIFO, device and directory answers are refused. Reading remains within the summary deadline
+after the CLI exits, so a bad answer releases its concurrency slot. CLI text on failure is discarded.
+Inherited instructions, MCP and hooks may add model input, cost or permitted actions; the
+summary-only prompt does not enforce a tool-free runtime. The runner uses Codex's non-interactive
+exec behavior and reports a fixed error if the run cannot finish without intervention.
+Flags were checked against Codex 0.160.0; older CLIs without those flags fail rather than receive
+a different model or a permissions override.
+
+The rollout reader keeps canonical user/assistant text from `response_item` messages, skipping
+tool calls/results, reasoning, developer instructions, event mirrors and leading injected
+AGENTS/environment wrappers. Empty or fully stripped messages do not consume an ID, so a
+later message with that ID can supply conversation text. Message IDs prevent replay duplicates;
+identical distinct messages remain. The first/recent budgets are the same as Claude's. The runner inherits its own global
+instructions even though the source log's injected instructions are excluded from the excerpt.
+The collection chooses a Codex rollout by modification time, numeric size, then descending
+filename. Its collected filename and version are pinned for the read, and the reader checks that
+version before and after reading and verifies session_meta.id. A changed or missing log fails
+without substituting another file. Reading is limited to the standard `~/.codex/sessions` root;
+an open rollout under a custom root can be collected, but its summary reports a read error
+when the collected basename cannot be found under the standard root. PID-only tasks have no log and are excluded. Codex summaries
+use the same wait/idle automatic, stop/unknown selected and busy manual-only rules as Claude.
+Remote excerpts go to Codex on the panemux host, not to Claude or the remote account.
+See [Codex summary runner and rollout reader](../security/command-execution.md#codex-summary-runner-and-rollout-reader).
 
 ### Opening a task
 
@@ -873,9 +904,10 @@ that is not a board attach (a pane's session included), and `403` for a cross-si
 Asks for one task's summary:
 
 ```json
-{ "host": "", "session_id": "5d7e3a90-1b2c-4d3e-8f40-51627384a5b6" }
+{ "host": "", "agent": "codex", "session_id": "5d7e3a90-1b2c-4d3e-8f40-51627384a5b6" }
 ```
 
+- `agent` accepts `claude` or `codex`; omitted means `claude` for older clients. Codex IDs must be UUIDs.
 - Starts a summary unless the one for the log as it is now is ready or running; a failed one is
   retried. It does not collect: the session must be listed with a log by the host's last collection.
 - Answers `202` at once with the task's `summary` as `GET /api/tasks` reports it (usually

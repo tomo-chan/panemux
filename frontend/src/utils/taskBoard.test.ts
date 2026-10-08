@@ -159,9 +159,10 @@ describe('findLaunchedTask', () => {
 })
 
 describe('canSummarize', () => {
-  it('summarizes only a claude task with a session id', () => {
+  it('summarizes either supported agent with a session id', () => {
     expect(canSummarize(task())).toBe(true)
     expect(canSummarize(task({ state: 'stop' }))).toBe(true)
+    expect(canSummarize(task({ agent: 'codex' }))).toBe(true)
     expect(canSummarize(task({ agent: 'codex', session_id: undefined }))).toBe(false)
     expect(canSummarize(task({ session_id: undefined }))).toBe(false)
   })
@@ -179,6 +180,13 @@ describe('summaryNext', () => {
 
 describe('summaryRequestOnSelect', () => {
   const stopped = { state: 'stop' as const, location: { kind: 'none' as const, attachable: false } }
+
+  it('requests stopped and unknown Codex summaries while leaving busy tasks to manual requests', () => {
+    for (const state of ['stop', 'unknown'] as const) {
+      expect(summaryRequestOnSelect(task({ agent: 'codex', state }), true)).toBe(true)
+    }
+    expect(summaryRequestOnSelect(task({ agent: 'codex', state: 'busy' }), true)).toBe(false)
+  })
 
   it('asks for a stopped task that has no current summary, while summaries are on', () => {
     expect(summaryRequestOnSelect(task(stopped), true)).toBe(true)

@@ -113,7 +113,16 @@
       "session_id": "01a0e2bd-ce26-7d81-a280-90c4de0d0046",
       "started_at": "2026-01-01T00:00:00Z",
       "state": "idle",
-      "status_since": "2026-01-01T00:00:00Z"
+      "status_since": "2026-01-01T00:00:00Z",
+      "summary": {
+        "remaining": [
+          "Update the docs",
+          "Run make check"
+        ],
+        "state": "ready",
+        "summarized_at": "2026-01-01T00:00:00Z",
+        "text": "Adding task summaries to the dashboard."
+      }
     },
     {
       "agent": "codex",
