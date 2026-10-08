@@ -363,7 +363,11 @@ terminal that had focus cannot receive what is typed into the dashboard.
   marked "(unreachable)"), Working directory, Agent (`claude` or `codex`), Labels
   (comma-separated, optional) and First instruction. With `codex` chosen, a note under Agent says
   the labels are recorded once codex has started its session, and to open the task's pane if codex
-  stops at a start-up screen. The working directory takes focus when it
+  stops at a start-up screen. Under Labels, `Used before:` offers the labels used before
+  ([Labels used before](#labels-used-before)) as toggle tags: one in the field shows solid with `✓`
+  (`aria-pressed` true), one not dashed with `+`. A click adds the label at the end of the field,
+  replacing what is typed after the last comma and ending with `, `, or takes it out. The text after
+  the last comma filters the `+` tags; the `✓` tags always show, filtered or folded. The working directory takes focus when it
   opens. An empty directory, a relative one, or an empty instruction is refused in the form, with
   the reason under the fields; anything the server or the host refuses is shown there as
   "Could not start: …", and the form keeps what was typed. While the task starts, `Start` reads
@@ -428,7 +432,11 @@ terminal that had focus cannot receive what is typed into the dashboard.
   `Mark done` asks first, inside the panel, and says where the task will be afterwards: a running
   task stays in its column until it stops; a stopped one moves to Done, and the question adds that
   the column is hidden until `Done column` is checked when it is. `Mark not done` does not ask. Labels
-  are removed with the `×` on each and added with a text box and `Add`. A save that fails shows its
+  are removed with the `×` on each and added with a text box and `Add`. Under the box, `Used before:`
+  offers the labels used before that the task does not have
+  ([Labels used before](#labels-used-before)); a click adds one at once, as `Add` does, and what is
+  typed in the box filters them. When the task has all of them it says "Every label used before is on
+  this task." A save that fails shows its
   reason in the head and keeps what was typed. A save belongs to the task it was made for: selecting
   another task while it runs leaves that task's controls enabled, and the result is not shown there.
   A task without a session ID offers neither, and says so. At 1000px and narrower it slides over the board
@@ -476,6 +484,25 @@ State colors:
 
 Label colors come from the mock's palette (`#569cd6`, `#4ec9b0`, `#9cdcfe`, `#d7a26b`, `#b48ead`,
 `#c678dd`, `#8a9199`, `#e06c6c`), picked by a hash of the label so a label keeps its color.
+
+### Labels used before
+
+The labels the record file holds (`known_labels`,
+[Done and labels](behavior/tasks.md#done-and-labels)) are offered as tags in a `Used before:` row
+under both label inputs — New task's Labels field and the detail panel's `Add a label` box — rather
+than as a dropdown, so they can be seen and picked without typing. The label filter does not offer
+them.
+
+- They are in case-insensitive alphabetical order, each in its label's color.
+- What is typed filters them by a case-insensitive part of the label; an empty field shows them all.
+  When nothing matches, the row says so ("No label used before contains “…”.") and what was typed is
+  still added as a new label.
+- More than eight after filtering are folded: the first eight show with `+<rest> more`, which shows
+  them all and becomes `Show less` (`aria-expanded`, `aria-controls` the row). Eight or fewer offer
+  no button. Eight keeps the detail panel's row to about two lines at its 360px width.
+- Every tag and the fold button are buttons, reached with Tab and pressed with Enter or Space.
+- None are offered when there are none, or while the record file cannot be read; the inputs work as
+  before.
 
 ---
 

@@ -98,6 +98,26 @@ prompt; a request that never starts a subprocess does not create a turn.
 
 ## Task dashboard
 
+### Labels used before come from the record file, as tags on `GET /api/tasks` (2026-10-07, issue #310)
+
+Issue [#310](https://github.com/tomo-chan/panemux/issues/310) offers the labels already used when a
+task is labeled. They are read from `~/.config/panemux/tasks.json`, the records themselves, rather
+than kept in a list of their own: a label nobody's record holds any more stops being offered without
+a second file to keep in step, at the cost that a label cleared from its last task is gone.
+
+- **Tags rather than a dropdown.** The suggestions are a `Used before:` row of tags under the input
+  (the issue's option B). An autocomplete dropdown was not chosen: it shows nothing until something
+  is typed, and the comma-separated New task field would need a combobox that completes one part of
+  its value.
+- **On `GET /api/tasks`, not an endpoint of its own.** The handler already reads the record file to
+  attach each task's record, so `known_labels` costs no further read, follows the poll, and goes away
+  with `records_error` under the same condition. A `GET /api/tasks/labels` fetched when a label input
+  opens was the alternative; it would have added a request, a failure state and its own cross-site
+  rule for the same data. A save adds its labels in the browser at once; a label that went from the
+  file goes with the next poll.
+- **Folding at eight.** More than eight suggestions after filtering fold behind `+<n> more`, which
+  keeps the detail panel's row to about two lines at 360px.
+
 ### Input-wait notifications come from server-published task events (2026-10-02, issue #277)
 
 Issue [#277](https://github.com/tomo-chan/panemux/issues/277) feeds the task dashboard's `wait` into

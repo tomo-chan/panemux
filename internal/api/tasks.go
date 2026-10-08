@@ -175,7 +175,7 @@ type tasksResponse struct {
 	Tasks        []taskResponse     `json:"tasks"`
 	// KnownLabels is every label the record file holds, listed task or not,
 	// once each in case-insensitive alphabetical order: the suggestions the
-	// dashboard offers when labelling a task (issue #310). Absent when there
+	// dashboard offers when labeling a task (issue #310). Absent when there
 	// are none, and when the file could not be read.
 	KnownLabels []string `json:"known_labels,omitempty"`
 	// SummariesEnabled is task_dashboard.summary.enabled.

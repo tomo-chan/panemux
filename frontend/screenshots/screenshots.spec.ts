@@ -195,6 +195,11 @@ async function serveTasks(page: Page) {
           { name: 'build-box', status: 'ok', collected_at: ago(0) },
         ],
         tasks,
+        // Labels used before (issue #310), offered under Add a label.
+        known_labels: [
+          'api', 'backend', 'bug', 'ci', 'Docs', 'docs', 'e2e', 'frontend', 'infra', 'perf',
+          'refactor', 'release-1.4', 'release-1.5', 'research', 'review', 'security', 'spike', 'tests', 'ui', 'ux',
+        ],
         summaries_enabled: true,
       },
     }),

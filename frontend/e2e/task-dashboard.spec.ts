@@ -130,6 +130,42 @@ test('labels a task and marks it done, and both survive a reload', async ({ page
   }
 })
 
+// Labels used before (issue #310): a label on a record whose task is not
+// listed is still offered, in the detail panel and in New task, and a tag is
+// picked from the keyboard. Both records are cleared at the end.
+test('offers a label recorded on an unlisted task and adds it from the keyboard', async ({ page, request }) => {
+  const put = (sessionID: string, labels: string[]) =>
+    request.put('/api/tasks/records', {
+      data: { host: '', agent: 'claude', session_id: sessionID, done: false, labels },
+    })
+  try {
+    expect((await put('e2e-unlisted', ['e2e-used-before'])).ok()).toBe(true)
+    await openDashboard(page)
+    const card = page.getByRole('region', { name: 'Stopped' }).getByTestId('task-card-local:claude:e2e-stopped')
+    await card.click()
+
+    const detail = page.getByRole('complementary', { name: 'Task details' })
+    const usedBefore = detail.getByRole('group', { name: 'Used before:' })
+    await detail.getByRole('textbox', { name: 'Add a label' }).fill('USED')
+    await usedBefore.getByRole('button', { name: 'Add label e2e-used-before' }).focus()
+    await page.keyboard.press('Enter')
+    await expect(card.getByRole('list', { name: 'Labels' })).toHaveText('e2e-used-before')
+    await expect(usedBefore.getByRole('button', { name: 'Add label e2e-used-before' })).toHaveCount(0)
+
+    await page.getByRole('button', { name: 'New task' }).click()
+    const dialog = page.getByRole('dialog', { name: 'New task' })
+    const tag = dialog.getByRole('group', { name: 'Used before:' }).getByRole('button', { name: 'e2e-used-before' })
+    await tag.focus()
+    await page.keyboard.press('Space')
+    await expect(dialog.getByLabel('Labels')).toHaveValue('e2e-used-before, ')
+    await expect(tag).toHaveAttribute('aria-pressed', 'true')
+    await dialog.getByRole('button', { name: 'Cancel' }).click()
+  } finally {
+    expect((await put('e2e-unlisted', [])).ok()).toBe(true)
+    expect((await put('e2e-stopped', [])).ok()).toBe(true)
+  }
+})
+
 // Starting and resuming run the real launch script under real tmux; claude
 // is run-panemux-task-dashboard-e2e.sh's stand-in. Both need tmux.
 async function hasTmux(request: APIRequestContext): Promise<boolean> {
