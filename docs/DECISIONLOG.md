@@ -1041,6 +1041,18 @@ Key milestones were:
 | 2026-09-21 | TLA+ transition export plus Go conformance replay | D12 |
 | 2026-10-08 | Tests needing a pty, tmux, `ps` or `dscl` skip inside the Claude Code sandbox and fail in CI | D13 |
 
+### golangci-lint caches inside each checkout (2026-10-09, issue #325)
+
+`make lint-go` sets `GOLANGCI_LINT_CACHE` to the checkout's own ignored `.cache/golangci-lint/`.
+It had used golangci-lint's default under the user cache directory, falling back to `$TMPDIR` where
+that was not writable (#315). Both locations are shared by every checkout on the machine, so one
+worktree could report issues cached for another, and the sandbox fallback depended on a write probe.
+The location is derived from the script's own path rather than the working directory, and an
+inherited `GOLANGCI_LINT_CACHE` is overridden rather than honoured: honouring it would let a value
+exported in one worktree leak into another, which is the sharing this replaces. Creating the
+directory failing is an error, not a fallback. The Go build and module caches were left where they
+are; old user-directory lint caches are not moved or deleted.
+
 ## WebSocket route separation and browser authority guard (#297, #298)
 
 The command stream moved from `/ws/board-command` to `/ws/board/command` so the valid

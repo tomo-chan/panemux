@@ -279,6 +279,8 @@ test-tmpdir-guard:
 test-install-hooks:
 	sh scripts/install_hooks_test.sh
 
+# Each checkout keeps its own golangci-lint cache, whatever the cwd or an
+# inherited GOLANGCI_LINT_CACHE says (issue #325).
 test-golangci-lint-cache:
 	sh scripts/golangci_lint_cache_test.sh
 
@@ -462,11 +464,13 @@ lint-go-deps:
 	  go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION); \
 	fi
 
-# GOLANGCI_LINT_CACHE moves under $TMPDIR only where the user cache directory
-# is not writable, as inside the Claude Code sandbox (issue #315).
+# golangci-lint caches in this checkout's own ignored .cache/golangci-lint/,
+# never in the user cache directory or another worktree's; an inherited
+# GOLANGCI_LINT_CACHE is overridden (issue #325).
 lint-go: fmt-check-go lint-go-deps
 	go vet ./...
-	GOLANGCI_LINT_CACHE="$$(sh scripts/golangci_lint_cache.sh)" '$(GOLANGCI_LINT_BIN)' run ./...
+	cache="$$(sh '$(CURDIR)/scripts/golangci_lint_cache.sh')" && \
+	GOLANGCI_LINT_CACHE="$$cache" '$(GOLANGCI_LINT_BIN)' run ./...
 
 lint-frontend:
 	cd frontend && npx tsc --noEmit

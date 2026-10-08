@@ -168,7 +168,7 @@ denies pseudo-terminals, Unix sockets (tmux cannot start a server), `ps`, `dscl`
 | Command | Inside the macOS sandbox |
 |---|---|
 | `make install-deps` | Passes once the hooks are installed: `install-hooks` writes `.git/config` only when `core.hooksPath` does not already lead to an identical, executable `pre-push` (git silently skips one without the executable bit). In a fresh clone run `make install-hooks` once outside the sandbox. `npm install` may warn `EPERM` on `.idea/` files inside packages; those warnings are harmless. |
-| `make check` | Passes. A Go test that needs a pty, tmux, `ps` or `dscl` calls `internal/testcap`'s `RequirePTY`/`RequireTmux`/`RequirePS`/`RequireDscl`, and the screenshot fixtures' tmux checks probe the same way: each reports itself **skipped** where the probe fails. `golangci-lint` caches under `$TMPDIR` when the user cache directory is not writable (`scripts/golangci_lint_cache.sh`). |
+| `make check` | Passes. A Go test that needs a pty, tmux, `ps` or `dscl` calls `internal/testcap`'s `RequirePTY`/`RequireTmux`/`RequirePS`/`RequireDscl`, and the screenshot fixtures' tmux checks probe the same way: each reports itself **skipped** where the probe fails. `golangci-lint` caches in the checkout's own `.cache/golangci-lint/`, never in the user cache directory (`scripts/golangci_lint_cache.sh`). |
 | `make test-e2e` | Reports itself skipped: every pane needs a pty (`scripts/require_pty.sh`). |
 | `make screenshots` | Fails, saying to run it outside the sandbox. It writes tracked images, so it is never skipped. |
 | `git push -u` | Pushes the branch, then cannot record its upstream in `.git/config`. Name the remote and branch on every push instead: `git push origin <branch>`. |
@@ -286,6 +286,7 @@ A test that genuinely should not go red without its implementation is marked `//
 - Lint commands: `make lint-go`, `make lint-frontend`, `make lint`
 - Go lint includes `gofmt`, `go vet`, and `golangci-lint run ./...` using `.golangci.yml`.
 - `.golangci.yml`'s `forbidigo` rule is where a repository convention is enforced rather than remembered: it fails the build on any `os.UserHomeDir()` call outside `internal/homedir`. The testability rule above had been advice for long enough to accumulate 16 violations across nine packages before anyone counted them.
+- `make lint-go` hands golangci-lint `.cache/golangci-lint/` inside the checkout it runs from as its cache (`scripts/golangci_lint_cache.sh`, Git-ignored). The main checkout and every worktree each keep their own, whatever the working directory, and an inherited `GOLANGCI_LINT_CACHE` is overridden — it may have been exported for another checkout. Existing caches in the user cache directory are left in place, unused; remove them yourself if you want the space back.
 - `lint-go-deps` refreshes the pinned `golangci-lint` binary when the local version does not match `GOLANGCI_LINT_VERSION`, so local lint matches CI.
 - Run `make lint-go` or `make lint` after every Go code change before committing.
 - [docs/quality-gateway.md](docs/quality-gateway.md) explains what these gates are responsible for and which further gates are designed but not yet built. Read it before changing the gate set itself.
