@@ -1,4 +1,4 @@
-.PHONY: all build build-frontend build-backend dev clean run install-deps install-deps-ci install-hooks \
+.PHONY: all build build-frontend build-backend dev clean run install-deps install-deps-ci install-hooks test-install-hooks test-tmpdir-guard \
         test test-go test-frontend test-e2e test-agmsg-contract test-hooks test-efficacy efficacy \
         test-scenarios-check check-scenarios check-docs-links test-docs-links screenshots test-screenshots-check \
         coverage-blocks test-coverage-blocks \
@@ -32,12 +32,11 @@ install-deps-ci: lint-go-deps
 	go mod download
 
 install-hooks:
-	chmod +x .githooks/pre-push
-	git config core.hooksPath .githooks
+	sh scripts/install_hooks.sh
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
-test: test-go test-frontend test-hooks test-tmpdir-guard test-efficacy test-scenarios-check test-docs-links test-screenshots-check \
+test: test-go test-frontend test-hooks test-tmpdir-guard test-install-hooks test-efficacy test-scenarios-check test-docs-links test-screenshots-check \
       test-coverage-blocks test-mutation test-model-check
 
 test-go:
@@ -256,6 +255,11 @@ test-mutation:
 # touching nothing, when it cannot (issue #315).
 test-tmpdir-guard:
 	sh scripts/tmpdir_guard_test.sh
+
+# install-hooks writes .git/config only when the installed pre-push differs
+# (issue #315: the Claude Code sandbox refuses that write).
+test-install-hooks:
+	sh scripts/install_hooks_test.sh
 
 # both directions are asserted. Hermetic: it drives the scripts against temp
 # files and throwaway git repositories, never this checkout.
