@@ -2,6 +2,44 @@
 
 This document is the developer workflow reference for building, testing, changing, and shipping this repository.
 
+## Runtime version contract
+
+`go.mod`'s Go directive and the root `.node-version` are the exact Go and Node versions
+used locally and in CI. Node is 24 LTS. Run ordinary `make` commands without setting
+`GOTOOLCHAIN`, `PATH`, or a web-storage `NODE_OPTIONS` workaround: the common shell selects
+both SDKs before Makefile initialization, recipes, and child processes. It overrides inherited
+`GOTOOLCHAIN`, selects the SDK's `go`/`gofmt` and Node's bundled `npm`/`npx`, and preserves
+user `NODE_OPTIONS`. A newer installed runtime does not change the selected version.
+
+Install a Go launcher supporting toolchain selection (Go 1.21 or later). Go uses its normal
+module cache. Node reuses a matching SDK on PATH or in nvm; otherwise the first normal command,
+including `make install-deps`, fetches the exact official SDK into the ignored checkout-local
+`.cache/runtimes/` directory. This bootstrap needs `curl`, `tar`, and `sha256sum` or `shasum`.
+It supports macOS/Linux x64 and arm64; Windows uses WSL2. Acquisition uses HTTPS and official
+SHA256 checksums, a bounded install lock, and atomic publication after startup/version checks.
+Offline commands reuse an installed SDK. Invalid pins, unavailable SDKs, corrupted cache or
+archives, and unsupported systems fail before the command proceeds. Inspect a stale lock or
+bad cache before removing it; the selector never overwrites a bad published SDK.
+
+Direct hooks, efficacy/mutation scripts, browser fixture launchers, and frontend npm scripts
+select the same contract from their checkout. For ad hoc commands use
+`scripts/runtime-shell.sh -c 'node --version; go version'`. From `frontend`, use
+`../scripts/npm.sh install` or `../scripts/npm.sh ci` for the selected npm CLI; bare
+`npm install/ci` rejects a mismatched Node via the root lifecycle guard. Bare npm may perform
+its own dependency preparation before that guard, so use the wrapper or `make install-deps`
+for dependency setup. `npm run` scripts select the contract for their actual tooling commands.
+Interactive bare `node` and `go` still follow the caller's shell.
+Browser fixture launchers validate SDKs before changing fixture state. The Stop hook
+handles `stop_hook_active` retries before SDK selection so a failed SDK cannot cause
+repeated blocks; the initial invocation still validates both SDKs.
+
+`make test-go-toolchain` and `make test-node-toolchain` protect selection and bootstrap
+failure behavior. Update the single-source pins to change versions; a Go `toolchain` directive
+alone does not force a newer local launcher to downgrade. Diff-gate comparison refs have a
+separate contract. Node release and bundled npm metadata come from the
+[official release index](https://nodejs.org/dist/index.json); support dates come from the
+[official release schedule](https://github.com/nodejs/Release/blob/main/schedule.json).
+
 ## Build And Run
 
 **Full build**:

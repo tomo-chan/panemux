@@ -210,7 +210,7 @@ func NewHandler(
 	return h
 }
 
-// SetCommandCenterAvailable records whether /ws/board-command is actually
+// SetCommandCenterAvailable records whether /ws/board/command is actually
 // registered, for GetBoardSessionToken to report. This is a separate,
 // later-set field rather than a NewHandler parameter deliberately: the
 // caller (internal/server.New) only knows whether setupCommandCenter

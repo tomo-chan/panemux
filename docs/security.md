@@ -53,6 +53,17 @@ Tests must not write to the developer's own configuration or cache directories. 
 violation fail loudly, but the rule holds outside it too: substitute `internal/cachedir` and
 `internal/homedir` as [DEVELOPMENT.md's testability rule](../DEVELOPMENT.md#test-granularity) says.
 
+## Development runtime bootstrap
+
+The development runtime selector reads exact versions from tracked repository pins. Node
+bootstrap downloads only an allowlisted platform/architecture archive from the official HTTPS
+release origin, verifies its official SHA256 checksum before extraction, checks its startup
+version and bundled npm, and publishes the SDK atomically under an install lock. Cached and
+preinstalled local SDKs are trusted developer tools; they must still start with the exact version
+and provide npm/npx. A bad published cache is an error, not a reason to silently use another
+runtime. This is development tooling, with no product/user-input route into its commands.
+See [the runtime contract](../DEVELOPMENT.md#runtime-version-contract).
+
 ## `gosec` Policy
 
 - Fix `gosec` findings structurally in the implementation rather than suppressing them in shipped code.

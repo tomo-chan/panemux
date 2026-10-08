@@ -51,6 +51,17 @@ The order is intentional: cheaper checks should reject a defect before expensive
 | **G5** | Scenario | Playwright workflows, scenario-reference validation, and accessibility ceilings | `make test-e2e`, `make check-scenarios`, and CI |
 | **G6** | Adversarial review | Fresh-context review of the diff for correctness and stated requirements | Review agent plus human review; advisory, not a merge gate |
 
+### Toolchain consistency
+
+Gate results use the exact Go and Node versions in `go.mod` and `.node-version` locally and
+in CI. The common runtime shell selects and verifies them before Makefile initialization and
+recipes; direct hooks, npm tasks, efficacy/mutation scripts, and browser fixture launchers
+use the same selector. Required SDK acquisition and startup failures stop the check. Node's
+verified cache install is locked and published atomically; damaged SDKs fail closed.
+`make test-go-toolchain` and `make test-node-toolchain`, included in `make check` and run
+explicitly in CI, protect selection, inheritance, and bootstrap failure behavior.
+See [the runtime contract](../DEVELOPMENT.md#runtime-version-contract).
+
 ### Gate details
 
 - Coverage thresholds stay at 80%; newly added decision-holding packages join the measured scope

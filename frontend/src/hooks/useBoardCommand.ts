@@ -33,7 +33,7 @@ export interface UseBoardCommandResult {
 let nextTurnId = 1
 
 // useBoardCommand drives the command center chat used by the Spotlight
-// palette: one WS /ws/board-command connection per mount, open only while
+// palette: one WS /ws/board/command connection per mount, open only while
 // enabled (the palette is expected to pass its own open/closed state), the
 // bearer token as a WebSocket subprotocol per BoardCommandHandler's own
 // contract (internal/ws/board_command.go) since browsers cannot set an
@@ -141,5 +141,5 @@ function applyFrame(setTurns: Dispatch<SetStateAction<BoardCommandTurn[]>>, fram
 
 function buildBoardCommandWSURL(): string {
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${protocol}//${location.host}/ws/board-command`
+  return `${protocol}//${location.host}/ws/board/command`
 }

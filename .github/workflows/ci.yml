@@ -11,6 +11,14 @@ on:
       - 'go.sum'
       - 'frontend/**'
       - 'Makefile'
+      - 'scripts/go-toolchain.sh'
+      - 'scripts/go-shell.sh'
+      - 'scripts/go_toolchain_test.sh'
+      - '.node-version'
+      - 'scripts/node*'
+      - 'scripts/runtime*'
+      - 'scripts/npm.sh'
+      - 'scripts/check-node.sh'
       - '.github/workflows/ci.yml'
   pull_request:
     branches:
@@ -22,6 +30,14 @@ on:
       - 'go.sum'
       - 'frontend/**'
       - 'Makefile'
+      - 'scripts/go-toolchain.sh'
+      - 'scripts/go-shell.sh'
+      - 'scripts/go_toolchain_test.sh'
+      - '.node-version'
+      - 'scripts/node*'
+      - 'scripts/runtime*'
+      - 'scripts/npm.sh'
+      - 'scripts/check-node.sh'
       - '.github/workflows/ci.yml'
       - '.github/workflows/**'
       - '.goreleaser.yaml'
@@ -51,7 +67,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: 20
+          node-version-file: .node-version
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
@@ -77,6 +93,9 @@ jobs:
 
       - name: Test (Frontend)
         run: cd frontend && npm run test:ci
+
+      - name: Test (runtime contracts)
+        run: make test-go-toolchain test-node-toolchain
 
       # The agent-side gates' own tests. Folding test-hooks into `make test`
       # reaches .githooks/pre-push (rung L3) and no further, because this

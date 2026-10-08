@@ -229,6 +229,21 @@ MD
 : > "$root/detail.md"
 expect 0 "$root" "a prose label is not read as a filename claim" "ok —"
 
+# Runtime archives contain third-party documentation, outside the repo contract.
+root=$(fixture)
+printf '# Index\n\n[detail](detail.md)\n' > "$root/index.md"
+printf '# Detail\n' > "$root/detail.md"
+mkdir -p "$root/.cache/runtimes/node-sample"
+printf '[missing](absent.md)\n' > "$root/.cache/runtimes/node-sample/README.md"
+expect 0 "$root" "ignored runtime SDK documentation is not checked" "ok —"
+
+root=$(fixture)
+printf '# Index\n\n[detail](detail.md)\n' > "$root/index.md"
+printf '# Detail\n' > "$root/detail.md"
+mkdir -p "$root/.cache"
+printf '[missing](absent.md)\n' > "$root/.cache/project-notes.md"
+expect 1 "$root" "other cache paths are still checked" "absent.md"
+
 # ── Fail-closed ───────────────────────────────────────────────────────────────
 
 root=$(fixture)

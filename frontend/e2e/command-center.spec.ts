@@ -131,7 +131,7 @@ test('refuses a command WebSocket that presents the wrong token', async ({ page 
   const outcome = await page.evaluate(
     () =>
       new Promise<string>((resolve) => {
-        const ws = new WebSocket(`ws://${location.host}/ws/board-command`, ['not-the-real-token'])
+        const ws = new WebSocket(`ws://${location.host}/ws/board/command`, ['not-the-real-token'])
         ws.onopen = () => {
           ws.close()
           resolve('open')
@@ -154,7 +154,7 @@ test('accepts the command WebSocket that presents the configured token', async (
   const outcome = await page.evaluate(
     (realToken) =>
       new Promise<string>((resolve) => {
-        const ws = new WebSocket(`ws://${location.host}/ws/board-command`, [realToken])
+        const ws = new WebSocket(`ws://${location.host}/ws/board/command`, [realToken])
         ws.onopen = () => {
           ws.close()
           resolve('open')

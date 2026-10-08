@@ -540,10 +540,10 @@ func TestCheckOrigin(t *testing.T) {
 			want:   true,
 		},
 		{
-			name:   "cross-port loopback allowed (Vite dev server proxy)",
+			name:   "cross-port loopback rejected",
 			origin: "http://localhost:5173",
 			host:   "localhost:8080",
-			want:   true,
+			want:   false,
 		},
 	}
 

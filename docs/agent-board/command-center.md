@@ -60,7 +60,7 @@ normal confirmation policy remains in force.
 
 ### API and streaming
 
-`WS /ws/board-command` accepts a prompt and streams Claude's structured output. Non-fatal problems,
+`WS /ws/board/command` accepts a prompt and streams Claude's structured output. Non-fatal problems,
 such as failure to persist history after an otherwise successful query, appear as warnings on the
 terminal `done` or `error` frame. Exact frame shapes are specified in
 [WebSocket protocols](../behavior/websocket.md#command-center-websocket-protocol).

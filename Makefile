@@ -1,5 +1,8 @@
+# Applies before $(shell go env ...) as well as recipes and their children.
+override SHELL := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))/scripts/runtime-shell.sh
+
 .PHONY: all build build-frontend build-backend dev clean run install-deps install-deps-ci install-hooks test-install-hooks test-tmpdir-guard test-golangci-lint-cache test-require-pty \
-        test test-go test-frontend test-e2e test-agmsg-contract test-hooks test-efficacy efficacy \
+        test-node-toolchain test-go-toolchain test test-go test-frontend test-e2e test-agmsg-contract test-hooks test-efficacy efficacy \
         test-scenarios-check check-scenarios check-docs-links test-docs-links screenshots test-screenshots-check \
         coverage-blocks test-coverage-blocks \
         mutation test-mutation bench \
@@ -20,6 +23,9 @@ GOLANGCI_LINT_VERSION := v2.12.2
 # succeed and the very next lint run would still lint with the wrong
 # binary. Pinning the invocation path removes that ambiguity entirely.
 GOLANGCI_LINT_BIN := $(shell bin="$$(go env GOBIN)"; if [ -z "$$bin" ]; then bin="$$(go env GOPATH)/bin"; fi; echo "$$bin")/golangci-lint
+ifeq ($(GOLANGCI_LINT_BIN),/golangci-lint)
+$(error Runtime initialization failed; see runtime diagnostic above)
+endif
 
 # ── Dependencies ──────────────────────────────────────────────────────────────
 
@@ -36,8 +42,14 @@ install-hooks:
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
-test: test-go test-frontend test-hooks test-tmpdir-guard test-install-hooks test-golangci-lint-cache test-require-pty test-efficacy test-scenarios-check test-docs-links test-screenshots-check \
+test: test-node-toolchain test-go-toolchain test-go test-frontend test-hooks test-tmpdir-guard test-install-hooks test-golangci-lint-cache test-require-pty test-efficacy test-scenarios-check test-docs-links test-screenshots-check \
       test-coverage-blocks test-mutation test-model-check
+
+test-node-toolchain:
+	sh scripts/node_toolchain_test.sh
+
+test-go-toolchain:
+	sh scripts/go_toolchain_test.sh
 
 test-go:
 	go test ./... -v -race
@@ -381,7 +393,7 @@ test-model-check:
 #           UI components (App, SplitContainer, TerminalPane …) require a real
 #           browser renderer and are covered by integration / E2E tests.
 
-COVERAGE_PKGS := ./internal/config/...,./internal/api/...,./internal/ws/...,./internal/server/...,./internal/board/...,./internal/portforward/...,./internal/commandcenter/...,./internal/boardmcp/...,./internal/fileops/...,./internal/homedir/...,./internal/cachedir/...,./internal/tasks/...,./internal/taskevents/...,./internal/testcap/...,.
+COVERAGE_PKGS := ./internal/config/...,./internal/api/...,./internal/ws/...,./internal/server/...,./internal/board/...,./internal/portforward/...,./internal/commandcenter/...,./internal/boardmcp/...,./internal/fileops/...,./internal/homedir/...,./internal/cachedir/...,./internal/tasks/...,./internal/taskevents/...,./internal/requestsecurity/...,./internal/testcap/...,.
 
 coverage: coverage-go coverage-frontend
 
@@ -407,6 +419,7 @@ coverage-go: build-frontend
 	  ./internal/cachedir/... \
 	  ./internal/tasks/... \
 	  ./internal/taskevents/... \
+	  ./internal/requestsecurity/... \
 	  ./internal/testcap/... \
 	  . \
 	  -coverprofile=coverage.out \

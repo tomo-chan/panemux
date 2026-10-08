@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"panemux/internal/config"
+	"panemux/internal/requestsecurity"
 	"panemux/internal/session"
 	"panemux/internal/taskevents"
 	"panemux/internal/tasks"
@@ -368,42 +369,9 @@ func refuseCrossSite(w http.ResponseWriter, r *http.Request) bool {
 	return RefuseCrossSite(w, r)
 }
 
-// RefuseCrossSite is refuseCrossSite for the task event stream, which
-// internal/ws serves: opening it starts observing every host.
+// RefuseCrossSite applies the shared browser authority policy.
 func RefuseCrossSite(w http.ResponseWriter, r *http.Request) bool {
-	if isCrossSiteRequest(r) {
-		http.Error(w, "cross-site request refused", http.StatusForbidden)
-		return true
-	}
-	return false
-}
-
-// secFetchSiteCrossSite is the Sec-Fetch-Site value of a request another
-// site made.
-const secFetchSiteCrossSite = "cross-site"
-
-// secFetchSiteSameSite is the Sec-Fetch-Site value of a request another
-// origin of the same site made: another port on the same host, for one.
-const secFetchSiteSameSite = "same-site"
-
-// isCrossSiteRequest uses what a browser adds to every request it makes on a
-// page's behalf: Sec-Fetch-Site (sent on every request by current browsers,
-// images included) and Origin (sent on cross-origin requests and on POST).
-// A request carrying neither is not from a browser page and is allowed.
-func isCrossSiteRequest(r *http.Request) bool {
-	switch r.Header.Get("Sec-Fetch-Site") {
-	case secFetchSiteCrossSite, secFetchSiteSameSite:
-		return true
-	}
-	origin := r.Header.Get("Origin")
-	if origin == "" {
-		return false
-	}
-	u, err := url.Parse(origin)
-	if err != nil || u.Host == "" {
-		return true
-	}
-	return u.Host != r.Host && !isLoopbackAuthority(u.Host)
+	return requestsecurity.Refuse(w, r)
 }
 
 func taskGitKey(host, cwd string) string {

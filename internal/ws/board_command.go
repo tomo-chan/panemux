@@ -12,6 +12,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"panemux/internal/commandcenter"
+	"panemux/internal/requestsecurity"
 )
 
 var boardCommandUpgrader = websocket.Upgrader{
@@ -77,7 +78,7 @@ type boardCommandFrame struct {
 	Warnings []string        `json:"warnings,omitempty"`
 }
 
-// BoardCommandHandler serves WS /ws/board-command: the command center chat
+// BoardCommandHandler serves WS /ws/board/command: the command center chat
 // used by the Spotlight palette. Unlike /ws/{sessionID}, this route
 // requires the bearer token, matching every other /api/board/* endpoint —
 // see docs/security.md. Browsers cannot set an Authorization header on a
@@ -96,8 +97,11 @@ func NewBoardCommandHandler(runner boardCommandRunner, token string) *BoardComma
 	return &BoardCommandHandler{runner: runner, token: token}
 }
 
-// ServeHTTP handles GET /ws/board-command.
+// ServeHTTP handles GET /ws/board/command.
 func (h *BoardCommandHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if requestsecurity.Refuse(w, r) {
+		return
+	}
 	proto := r.Header.Get("Sec-WebSocket-Protocol")
 	if !validSubprotocolToken(proto, h.token) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)

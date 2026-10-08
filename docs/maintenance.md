@@ -2,6 +2,24 @@
 
 This document captures repository maintenance rules that belong in durable project documentation rather than in the agent index.
 
+## Runtime toolchains
+
+Keep `go.mod` and `.node-version` as the sole exact Go and Node version sources.
+Go workflows use `go-version-file: go.mod`; Node workflows use
+`node-version-file: .node-version`. Local Makefile initialization, recipes, hooks, npm tasks,
+and fixture/gate scripts use the common runtime shell, including the selected SDK's bundled
+npm. Node 24.21.0 LTS ships npm 11.19.0 according to the
+[official release metadata](https://nodejs.org/dist/index.json). It has official support through
+2028-04-30 according to the [release schedule](https://github.com/nodejs/Release/blob/main/schedule.json).
+Node 20's support ended on 2026-04-30; upgrading the runtime does not change npm dependencies.
+
+Do not add parallel version pins or require per-command environment overrides. The Node
+selector uses existing exact SDKs or bootstraps a verified official archive; its local cache
+is excluded from source control. CI runs both runtime regression suites explicitly because
+its unit suites do not use `make test`. Verify those suites and `make check` when changing
+pins. See [the development contract](../DEVELOPMENT.md#runtime-version-contract) for supported
+platforms, installation, direct npm behavior, and failure semantics.
+
 ## GitHub Actions Pinning
 
 - Pin GitHub Actions to full commit SHAs, not floating tags such as `@v4` or `@v5`.

@@ -4,15 +4,16 @@
   "version": "0.24.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
-    "preview": "vite preview",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "test:ci": "vitest run --reporter=default --reporter=junit --outputFile=../test-results/vitest.xml",
-    "coverage": "vitest run --coverage",
-    "test:e2e": "playwright test",
-    "screenshots": "playwright test -c screenshots/playwright.config.ts"
+    "dev": "../scripts/runtime-shell.sh --run vite",
+    "build": "../scripts/runtime-shell.sh -c 'tsc && vite build \"$@\"' --",
+    "preview": "../scripts/runtime-shell.sh --run vite preview",
+    "test": "../scripts/runtime-shell.sh --run vitest run",
+    "test:watch": "../scripts/runtime-shell.sh --run vitest",
+    "test:ci": "../scripts/runtime-shell.sh --run vitest run --reporter=default --reporter=junit --outputFile=../test-results/vitest.xml",
+    "coverage": "../scripts/runtime-shell.sh --run vitest run --coverage",
+    "test:e2e": "../scripts/runtime-shell.sh --run playwright test",
+    "screenshots": "../scripts/runtime-shell.sh --run playwright test -c screenshots/playwright.config.ts",
+    "preinstall": "sh ../scripts/check-node.sh"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",
@@ -36,5 +37,8 @@
     "typescript": "^5.6.3",
     "vite": "^8.0.16",
     "vitest": "^4.1.11"
+  },
+  "engines": {
+    "node": ">=24.0.0 <25"
   }
 }

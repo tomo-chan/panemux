@@ -594,7 +594,7 @@ var apiCases = map[string]apiCase{
 		rr := e.do(t, http.MethodGet, "/api/session-token", "")
 		assert.Equal(t, http.StatusOK, rr.Code)
 		assert.Contains(t, rr.Body.String(), integrationToken)
-		// This route also reports whether /ws/board-command is actually
+		// This route also reports whether /ws/board/command is actually
 		// registered, which only New() knows — it calls
 		// SetCommandCenterAvailable(commandRunner != nil). Driving both
 		// states is what makes that a wiring assertion rather than a

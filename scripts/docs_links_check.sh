@@ -55,7 +55,7 @@ trap 'rm -rf "$tmp"' EXIT
 # which is tens of thousands of stat calls in a target that runs on every push.
 (
 	cd "$root" || exit 1
-	find . \( -name node_modules -o -name .git -o -name dist \) -prune -o -print
+	find . \( -name node_modules -o -name .git -o -name dist -o -path ./.cache/runtimes \) -prune -o -print
 ) | sed 's|^\./||' > "$tmp/exists"
 
 grep '\.md$' "$tmp/exists" > "$tmp/md" || :
