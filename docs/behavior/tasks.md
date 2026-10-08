@@ -613,8 +613,9 @@ a different model or a permissions override.
 
 The rollout reader keeps canonical user/assistant text from `response_item` messages, skipping
 tool calls/results, reasoning, developer instructions, event mirrors and leading injected
-AGENTS/environment wrappers. Message IDs prevent replay duplicates; identical distinct messages
-remain. The first/recent budgets are the same as Claude's. The runner inherits its own global
+AGENTS/environment wrappers. Empty or fully stripped messages do not consume an ID, so a
+later message with that ID can supply conversation text. Message IDs prevent replay duplicates;
+identical distinct messages remain. The first/recent budgets are the same as Claude's. The runner inherits its own global
 instructions even though the source log's injected instructions are excluded from the excerpt.
 The collection chooses a Codex rollout by modification time, numeric size, then descending
 filename. Its collected filename and version are pinned for the read, and the reader checks that

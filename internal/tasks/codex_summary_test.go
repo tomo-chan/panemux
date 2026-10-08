@@ -93,6 +93,49 @@ func TestBuildCodexExcerpt_ScaffoldingAndIDlessMessages(t *testing.T) {
 	assert.Contains(t, got, "Please explain `<environment_context>`")
 }
 
+func TestBuildCodexExcerpt_EmptyMessageDoesNotConsumeID(t *testing.T) {
+	for _, role := range []string{"user", "assistant"} {
+		for _, empty := range []string{"", " \n\t"} {
+			t.Run(role+strconv.Quote(empty), func(t *testing.T) {
+				got, ok := buildCodexExcerpt(transcriptData{Head: lines(
+					codexMessage("replayed", role, empty),
+					codexMessage("replayed", role, "Actual conversation"),
+					codexMessage("replayed", role, "Actual conversation"),
+				), Whole: true})
+				require.True(t, ok)
+				assert.Equal(t, 1, strings.Count(got, "Actual conversation"))
+			})
+		}
+	}
+	got, ok := buildCodexExcerpt(transcriptData{Head: lines(
+		codexMessage("request", "user", "<environment_context>cwd</environment_context>"),
+		codexMessage("request", "user", "Actual request"),
+	), Whole: true})
+	require.True(t, ok)
+	assert.Contains(t, got, "Actual request")
+}
+
+func TestBuildCodexTranscriptScriptForLog_VersionBoundaries(t *testing.T) {
+	for _, mtime := range []int64{-1, 0, 1} {
+		for _, size := range []int64{-1, 0, 1} {
+			t.Run(strconv.FormatInt(mtime, 10)+"/"+strconv.FormatInt(size, 10), func(t *testing.T) {
+				log := LogVersion{File: "rollout-2026-10-08T01-00-00-" + summarySessionID + ".jsonl",
+					ModTime: mtime, Size: size}
+				script, err := buildCodexTranscriptScriptForLog(summarySessionID, log)
+				if mtime < 0 || size < 0 {
+					require.ErrorIs(t, err, ErrInvalidSummary)
+					assert.Empty(t, script)
+					return
+				}
+				require.NoError(t, err)
+				assert.Contains(t, script, log.File)
+				assert.Equal(t, 2, strings.Count(script, "= '"+strconv.FormatInt(mtime, 10)+" "+
+					strconv.FormatInt(size, 10)+"' ]"), "pin the version before and after reading")
+			})
+		}
+	}
+}
+
 func TestBuildCodexTranscriptScript(t *testing.T) {
 	script, err := buildCodexTranscriptScript(summarySessionID)
 	require.NoError(t, err)
