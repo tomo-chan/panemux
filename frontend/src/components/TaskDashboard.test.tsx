@@ -520,6 +520,77 @@ describe('TaskDashboard done and labels', () => {
       { done: true, labels: ['sprint-42'] })
   })
 
+  // Labels used before (issue #310): the record file's labels, offered under
+  // Add a label without the ones the task already has.
+  const withKnown: TasksResponse = { ...recorded, known_labels: ['infra', 'payment', 'Release-1.4', 'research', 'sprint-42'] }
+  const usedBefore = () => within(detail()).queryByRole('group', { name: 'Used before:' })
+  const suggested = () =>
+    within(usedBefore() as HTMLElement).getAllByRole('button').map((b) => b.getAttribute('aria-label'))
+
+  it('offers the labels used before that the task does not have, and adds one on a click', async () => {
+    const saveRecord = vi.fn().mockResolvedValue(null)
+    renderDashboard(tasksState({ data: withKnown, saveRecord }))
+    fireEvent.click(screen.getByTestId('task-card-busy-done'))
+    expect(suggested()).toEqual(['Add label infra', 'Add label Release-1.4', 'Add label research'])
+
+    const input = within(detail()).getByRole('textbox', { name: 'Add a label' })
+    fireEvent.change(input, { target: { value: 'rE' } })
+    expect(suggested()).toEqual(['Add label Release-1.4', 'Add label research'])
+
+    await act(async () => {
+      fireEvent.click(within(detail()).getByRole('button', { name: 'Add label research' }))
+    })
+    expect(saveRecord).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'busy-done' }),
+      { done: true, labels: ['payment', 'sprint-42', 'research'] })
+    expect(input).toHaveValue('')
+  })
+
+  it('says when no label used before matches what was typed', () => {
+    renderDashboard(tasksState({ data: withKnown }))
+    fireEvent.click(screen.getByTestId('task-card-busy-done'))
+    fireEvent.change(within(detail()).getByRole('textbox', { name: 'Add a label' }), { target: { value: ' zzz ' } })
+    expect(usedBefore()).toHaveTextContent('No label used before contains “zzz”. Add records it as a new label.')
+    expect(within(detail()).getByRole('button', { name: 'Add' })).toBeEnabled()
+  })
+
+  it('says when every label used before is on the task', () => {
+    renderDashboard(tasksState({ data: { ...recorded, known_labels: ['payment', 'sprint-42'] } }))
+    fireEvent.click(screen.getByTestId('task-card-busy-done'))
+    expect(usedBefore()).toHaveTextContent('Every label used before is on this task.')
+    expect(within(usedBefore() as HTMLElement).queryAllByRole('button')).toEqual([])
+  })
+
+  //efficacy:exempt pins that nothing new appears without known_labels, as before this branch
+  it('offers no labels used before when there are none', () => {
+    renderDashboard(tasksState({ data: recorded }))
+    fireEvent.click(screen.getByTestId('task-card-busy-done'))
+    expect(usedBefore()).toBeNull()
+  })
+
+  //efficacy:exempt pins that a records_error dashboard keeps the input it had before this branch
+  it('offers no labels used before when the record file could not be read, and still takes a label', () => {
+    renderDashboard(tasksState({ data: { ...withKnown, records_error: 'parsing task record file: bad' } }))
+    fireEvent.click(screen.getByTestId('task-card-busy-done'))
+    expect(usedBefore()).toBeNull()
+    expect(within(detail()).getByRole('textbox', { name: 'Add a label' })).toBeEnabled()
+  })
+
+  //efficacy:exempt pins that the label filter is unchanged by known_labels
+  it('keeps the label filter to the labels on the board', () => {
+    renderDashboard(tasksState({ data: withKnown }))
+    const options = Array.from((screen.getByRole('combobox', { name: 'Show label' }) as HTMLSelectElement).options)
+    expect(options.map((o) => o.value)).not.toContain('research')
+    expect(options.map((o) => o.value)).not.toContain('infra')
+  })
+
+  it('offers the labels used before in the New task dialog', () => {
+    renderDashboard(tasksState({ data: withKnown }))
+    fireEvent.click(screen.getByRole('button', { name: 'New task' }))
+    const dialog = screen.getByRole('dialog', { name: 'New task' })
+    expect(within(within(dialog).getByRole('group', { name: 'Used before:' })).getAllByRole('button')
+      .map((b) => b.textContent)).toEqual(['+ infra', '+ payment', '+ Release-1.4', '+ research', '+ sprint-42'])
+  })
+
   it('shows why a save failed and keeps what was typed', async () => {
     const saveRecord = vi.fn().mockResolvedValue('invalid task record: label is longer than 32 characters')
     renderDashboard(tasksState({ data: recorded, saveRecord }))

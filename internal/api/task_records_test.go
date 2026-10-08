@@ -262,3 +262,90 @@ func TestPutTaskRecord_ARemovedHostsRecordCanStillBeCleared(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, stored)
 }
+
+// GET /api/tasks offers every label the record file holds as a suggestion
+// (issue #310), including those of records whose task is no longer listed.
+// Each label appears once, in case-insensitive alphabetical order; labels
+// that differ only in case are different labels and both appear.
+func TestGetTasks_KnownLabelsAreEveryRecordedLabel(t *testing.T) {
+	h, _ := newRecordHandler(t)
+	for _, body := range []string{
+		`{"host":"","agent":"claude","session_id":"run-sess","labels":["frontend","bug"]}`,
+		`{"host":"","agent":"claude","session_id":"stop-sess","done":true,"labels":["docs","bug"]}`,
+		`{"host":"dev-server","agent":"claude","session_id":"stop-sess","done":true}`,
+		// Not listed: past the window, or its log is gone.
+		`{"host":"","agent":"claude","session_id":"gone-sess","labels":["Docs","api","Release-1.5"]}`,
+	} {
+		require.Equal(t, http.StatusOK, putTaskRecord(t, h, body).Code)
+	}
+
+	resp := getTasks(t, h)
+
+	assert.Equal(t, []string{"api", "bug", "Docs", "docs", "frontend", "Release-1.5"}, resp.KnownLabels)
+}
+
+// A label goes when the last record holding it does.
+func TestGetTasks_KnownLabelsFollowTheRecords(t *testing.T) {
+	h, _ := newRecordHandler(t)
+	require.Equal(t, http.StatusOK,
+		putTaskRecord(t, h, `{"host":"","agent":"claude","session_id":"gone-sess","labels":["old","kept"]}`).Code)
+	require.Equal(t, http.StatusOK,
+		putTaskRecord(t, h, `{"host":"","agent":"claude","session_id":"run-sess","labels":["kept"]}`).Code)
+	require.Equal(t, []string{"kept", "old"}, getTasks(t, h).KnownLabels)
+
+	require.Equal(t, http.StatusOK,
+		putTaskRecord(t, h, `{"host":"","agent":"claude","session_id":"gone-sess","labels":[]}`).Code)
+
+	assert.Equal(t, []string{"kept"}, getTasks(t, h).KnownLabels)
+}
+
+func TestGetTasks_KnownLabelsOnTheWire(t *testing.T) {
+	cases := []struct {
+		name     string
+		setup    func(t *testing.T, h *Handler, path string)
+		contains string
+		omitted  bool
+	}{
+		{name: "no record file", omitted: true},
+		{
+			name: "records without labels",
+			setup: func(t *testing.T, h *Handler, _ string) {
+				require.Equal(t, http.StatusOK,
+					putTaskRecord(t, h, `{"host":"","agent":"claude","session_id":"run-sess","done":true}`).Code)
+			},
+			omitted: true,
+		},
+		{
+			name: "an unreadable record file",
+			setup: func(t *testing.T, _ *Handler, path string) {
+				require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
+				require.NoError(t, os.WriteFile(path, []byte("{"), 0o600))
+			},
+			omitted: true,
+		},
+		{
+			name: "recorded labels",
+			setup: func(t *testing.T, h *Handler, _ string) {
+				require.Equal(t, http.StatusOK,
+					putTaskRecord(t, h, `{"host":"","agent":"claude","session_id":"gone-sess","labels":["b","a"]}`).Code)
+			},
+			contains: `"known_labels":["a","b"]`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h, path := newRecordHandler(t)
+			if tc.setup != nil {
+				tc.setup(t, h, path)
+			}
+			rec := httptest.NewRecorder()
+			setupRouterWithHandler(h).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/tasks", nil))
+			require.Equal(t, http.StatusOK, rec.Code)
+			if tc.omitted {
+				assert.NotContains(t, rec.Body.String(), "known_labels")
+				return
+			}
+			assert.Contains(t, rec.Body.String(), tc.contains)
+		})
+	}
+}

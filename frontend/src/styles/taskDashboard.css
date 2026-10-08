@@ -809,6 +809,66 @@
   font-size: 12px;
 }
 
+/* Labels used before (issue #310): solid and ✓ for a label entered, dashed
+   and + for one that is not; each in its label's color. */
+.td-suggest {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.td-suggest-caption {
+  margin-right: 2px;
+  color: var(--td-faint);
+  font-size: 10.5px;
+}
+
+.td-suggest-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 100%;
+  min-height: 24px;
+  padding: 0 7px;
+  border: 1px dashed var(--td-lc, #666);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--td-muted);
+  font: inherit;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.td-suggest-tag[aria-pressed='true'] {
+  border-style: solid;
+  background: color-mix(in srgb, var(--td-lc, #666) 16%, transparent);
+  color: var(--td-text);
+}
+
+.td-suggest-tag:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.td-suggest-more {
+  min-height: 24px;
+  padding: 0 6px;
+  border: 0;
+  background: none;
+  color: var(--td-accent);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.td-suggest-note {
+  color: var(--td-faint);
+  font-size: 11px;
+}
+
 /* ── New task (issue #257) ───────────────────────────────────────────── */
 
 .td-notice {

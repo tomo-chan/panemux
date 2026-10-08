@@ -290,6 +290,10 @@ var contractFixtures = map[string]contractFixture{
 		for _, body := range []string{
 			`{"host":"","agent":"claude","session_id":"7c21e0a4","done":true,"labels":["dashboard","enhancement"]}`,
 			`{"host":"build-box","agent":"claude","session_id":"3d7702fe","labels":["infra"]}`,
+			// A record whose task is not listed: its labels are still
+			// suggestions (known_labels, issue #310), and labels that
+			// differ only in case are both kept.
+			`{"host":"","agent":"claude","session_id":"0b9e41aa","labels":["Docs","docs"]}`,
 		} {
 			rr := e.do(t, http.MethodPut, "/api/tasks/records", body)
 			require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())

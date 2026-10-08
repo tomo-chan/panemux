@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { NewTaskDialog } from './NewTaskDialog'
 import type { TaskHost } from '../schemas'
@@ -127,5 +127,89 @@ describe('NewTaskDialog', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
     fireEvent.keyDown(document, { key: 'Escape' })
     expect(onClose).toHaveBeenCalledTimes(2)
+  })
+})
+
+// Labels used before (issue #310): the known labels as toggle tags under the
+// Labels field, filtered by what is typed after the last comma.
+describe('NewTaskDialog label suggestions', () => {
+  const knownLabels = ['bug', 'Docs', 'docs', 'frontend', 'refactor', 'release-1.4', 'research']
+
+  function renderWithLabels(onLaunch = vi.fn().mockResolvedValue({ ok: true, launched })) {
+    render(
+      <NewTaskDialog isOpen hosts={hosts} knownLabels={knownLabels} onLaunch={onLaunch} onLaunched={vi.fn()} onClose={vi.fn()} />,
+    )
+    return { onLaunch }
+  }
+
+  function tags(): [string, string | null][] {
+    return within(screen.getByRole('group', { name: 'Used before:' }))
+      .getAllByRole('button')
+      .map((b) => [b.textContent ?? '', b.getAttribute('aria-pressed')])
+  }
+
+  const labelsInput = () => screen.getByLabelText('Labels') as HTMLInputElement
+
+  it('offers nothing when no label was used before', () => {
+    renderDialog()
+    expect(screen.queryByRole('group', { name: 'Used before:' })).toBeNull()
+  })
+
+  it('offers every known label, in order, none entered', () => {
+    renderWithLabels()
+    expect(tags()).toEqual(knownLabels.map((l) => [`+ ${l}`, 'false']))
+  })
+
+  it('adds a label on a click and takes it out on another', () => {
+    renderWithLabels()
+    fireEvent.click(screen.getByRole('button', { name: 'bug' }))
+    expect(labelsInput().value).toBe('bug, ')
+    fireEvent.click(screen.getByRole('button', { name: 'frontend' }))
+    expect(labelsInput().value).toBe('bug, frontend, ')
+    expect(screen.getByRole('button', { name: 'bug' })).toHaveAttribute('aria-pressed', 'true')
+
+    fireEvent.click(screen.getByRole('button', { name: 'bug' }))
+    expect(labelsInput().value).toBe('frontend, ')
+    expect(screen.getByRole('button', { name: 'bug' })).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it('filters by what is typed after the last comma, ignoring case, and keeps the entered labels', () => {
+    renderWithLabels()
+    fill({ labels: 'bug, frontend, RE' })
+    expect(tags()).toEqual([
+      ['✓ bug', 'true'],
+      ['✓ frontend', 'true'],
+      ['+ refactor', 'false'],
+      ['+ release-1.4', 'false'],
+      ['+ research', 'false'],
+    ])
+
+    fireEvent.click(screen.getByRole('button', { name: 'research' }))
+    expect(labelsInput().value).toBe('bug, frontend, research, ')
+    expect(tags()).toHaveLength(knownLabels.length)
+
+    fill({ labels: '' })
+    expect(tags()).toEqual(knownLabels.map((l) => [`+ ${l}`, 'false']))
+  })
+
+  it('says when no label used before matches, and still starts with the new label', async () => {
+    const { onLaunch } = renderWithLabels()
+    fill({ cwd: '/workspace/user/project', labels: 'bug, payments', prompt: 'go' })
+    expect(tags()).toEqual([['✓ bug', 'true']])
+    expect(screen.getByRole('group', { name: 'Used before:' })).toHaveTextContent(
+      'No label used before contains “payments”. It is added as a new label.',
+    )
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Start' }))
+    })
+    expect(onLaunch).toHaveBeenCalledWith(expect.objectContaining({ labels: ['bug', 'payments'] }))
+  })
+
+  it('says nothing about a typed label that is a known one', () => {
+    renderWithLabels()
+    fill({ labels: 'bug' })
+    expect(tags()).toEqual([['✓ bug', 'true']])
+    expect(screen.getByRole('group', { name: 'Used before:' })).not.toHaveTextContent('No label used before')
   })
 })

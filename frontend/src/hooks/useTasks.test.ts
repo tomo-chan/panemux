@@ -209,6 +209,20 @@ describe('useTasks saveRecord', () => {
     expect(result.current.data!.tasks[1].done).toBeUndefined()
   })
 
+  // A label saved is a label used before (issue #310): it is offered at once,
+  // not from the next poll. One no record holds any more goes with that poll.
+  it('adds the saved labels to the labels used before', async () => {
+    window.fetch = vi.fn().mockResolvedValueOnce(ok({ ...recordPayload, known_labels: ['api', 'payment'] }))
+      .mockResolvedValueOnce(ok({ host: '', agent: 'claude', session_id: 's1', done: false, labels: ['Docs', 'payment'] }))
+    const { result } = await loaded()
+
+    await act(async () => {
+      await result.current.saveRecord(result.current.data!.tasks[0], { done: false, labels: ['Docs', 'payment'] })
+    })
+
+    expect(result.current.data!.known_labels).toEqual(['api', 'Docs', 'payment'])
+  })
+
   it('reports what the server refused, and changes nothing', async () => {
     window.fetch = vi.fn().mockResolvedValueOnce(ok(recordPayload)).mockResolvedValueOnce({
       ok: false,
