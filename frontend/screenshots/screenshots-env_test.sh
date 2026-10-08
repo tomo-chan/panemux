@@ -27,12 +27,14 @@ pass() { echo "ok   $1"; }
 skip() { echo "skip $1"; }
 check() { checks=$((checks + 1)); }
 
-work=$(mktemp -d)
+work=$(mktemp -d "${TMPDIR:-/tmp}/panemux-screenshots-env-test.XXXXXX") || exit 1
 # tmux's socket lives under these directories, and a socket path has a
 # hard limit (104 bytes on macOS, 108 on Linux) that macOS's long
-# per-user $TMPDIR, plus the run's own subdirectories, overruns. /tmp
-# keeps it short on both.
-short=$(mktemp -d /tmp/pmx-shot.XXXXXX)
+# per-user $TMPDIR (about 49 bytes) leaves little room for. A one-letter
+# name, with the run root directly under it, keeps the deepest socket here
+# under the limit there — and inside $TMPDIR, the only place the Claude Code
+# sandbox can write.
+short=$(mktemp -d "${TMPDIR:-/tmp}/p.XXXXXX") || exit 1
 unset TMUX
 trap 'rm -rf "$work" "$short"' EXIT
 
@@ -118,13 +120,13 @@ if command -v tmux >/dev/null 2>&1; then
 	fi
 
 	check
-	rundir="$short/tmp/panemux-screenshots/tmux"
+	rundir="$short/panemux-screenshots/tmux"
 	mkdir -p "$rundir" && chmod 700 "$rundir"
 	if ! output=$(TMUX_TMPDIR="$rundir" tmux -f /dev/null new-session -d -s t 'sleep 30' 2>&1) ||
 		! TMUX_TMPDIR="$rundir" tmux has-session 2>/dev/null; then
 		fail 'shot_teardown stops the server under the run root: the server did not start' "$output"
 	else
-		TMPDIR="$short/tmp" sh -c '. "$1"; shot_teardown' sh "$lib"
+		TMPDIR="$short" sh -c '. "$1"; shot_teardown' sh "$lib"
 		if TMUX_TMPDIR="$rundir" tmux has-session 2>/dev/null; then
 			fail 'shot_teardown stops the server under the run root'
 			TMUX_TMPDIR="$rundir" tmux kill-server 2>/dev/null

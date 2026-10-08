@@ -37,7 +37,7 @@ install-hooks:
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
-test: test-go test-frontend test-hooks test-efficacy test-scenarios-check test-docs-links test-screenshots-check \
+test: test-go test-frontend test-hooks test-tmpdir-guard test-efficacy test-scenarios-check test-docs-links test-screenshots-check \
       test-coverage-blocks test-mutation test-model-check
 
 test-go:
@@ -252,6 +252,11 @@ test-mutation:
 # Claude Code hooks from .claude/). Included in `make test` because a hook that
 # silently stops working reports the discipline as enforced while enforcing
 # nothing — and because a hook that blocks a healthy change is worse still, so
+# Every script that makes a temporary directory makes it under $TMPDIR and stops,
+# touching nothing, when it cannot (issue #315).
+test-tmpdir-guard:
+	sh scripts/tmpdir_guard_test.sh
+
 # both directions are asserted. Hermetic: it drives the scripts against temp
 # files and throwaway git repositories, never this checkout.
 test-hooks:

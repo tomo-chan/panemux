@@ -32,7 +32,7 @@ fail() {
 }
 pass() { echo "ok   $1"; }
 
-work=$(mktemp -d)
+work=$(mktemp -d "${TMPDIR:-/tmp}/panemux-docs-links-check-test.XXXXXX") || exit 1
 trap 'rm -rf "$work"' EXIT
 
 # fixture — a fresh empty directory for one case.

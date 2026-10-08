@@ -56,7 +56,7 @@ fail() {
 }
 pass() { echo "ok   $1"; }
 
-work=$(mktemp -d)
+work=$(mktemp -d "${TMPDIR:-/tmp}/panemux-mutation-test.XXXXXX") || exit 1
 trap 'rm -rf "$work"' EXIT
 
 # new_repo — an empty git repository with a go.mod and one commit on `main`, so

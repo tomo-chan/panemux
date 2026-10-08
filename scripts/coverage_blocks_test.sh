@@ -62,7 +62,7 @@ rewrite() {
 	' "$rw_file" > "$rw_file.tmp" && mv "$rw_file.tmp" "$rw_file"
 }
 
-work=$(mktemp -d)
+work=$(mktemp -d "${TMPDIR:-/tmp}/panemux-coverage-blocks-test.XXXXXX") || exit 1
 trap 'rm -rf "$work"' EXIT
 
 # new_repo — an empty git repository with a go.mod, and one commit on `main`

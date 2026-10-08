@@ -240,7 +240,7 @@ if [ -z "$merge_base" ]; then
 	exit 1
 fi
 
-tmp=$(mktemp -d)
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/panemux-mutation.XXXXXX") || exit 1
 trap 'rm -rf "$tmp"' EXIT
 
 tab=$(printf '\t')

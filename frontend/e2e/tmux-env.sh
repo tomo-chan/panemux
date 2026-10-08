@@ -2,7 +2,7 @@
 # A short, unique directory avoids the Unix socket path limit on macOS.
 e2e_tmux_env() {
     unset TMUX
-    E2E_TMUX_ROOT=$(mktemp -d /tmp/pmx-e2e-tmux.XXXXXX) || return
+    E2E_TMUX_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/pmx-e2e-tmux.XXXXXX") || return
     TMUX_TMPDIR=$E2E_TMUX_ROOT
     export TMUX_TMPDIR
 }

@@ -83,7 +83,7 @@ for f in $changed; do
 	esac
 done
 
-tmp=$(mktemp -d)
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/panemux-efficacy.XXXXXX") || exit 1
 worktree=""
 cleanup() {
 	[ -n "$worktree" ] && git -C "$repo_root" worktree remove --force "$worktree" > /dev/null 2>&1
@@ -392,7 +392,7 @@ fi
 # The real checkout is never touched: this runs on a pull request, where a
 # half-reverted working tree would be a nasty thing to leave behind on a
 # failure.
-worktree=$(mktemp -d)
+worktree=$(mktemp -d "${TMPDIR:-/tmp}/panemux-efficacy-worktree.XXXXXX") || exit 1
 rm -rf "$worktree"
 if ! git worktree add --detach "$worktree" HEAD > /dev/null 2>&1; then
 	worktree=""

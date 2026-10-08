@@ -60,7 +60,7 @@ case "$file" in
 	# them reported a file that does not PARSE as a formatting problem, and
 	# advised `make fmt`, which runs gofmt and fails identically — swallowing
 	# the one diagnostic that would have helped.
-	gofmt_err=$(mktemp)
+	gofmt_err=$(mktemp "${TMPDIR:-/tmp}/panemux-gofmt-err.XXXXXX") || block "G1: could not create a temporary file for gofmt's stderr"
 	unformatted=$(gofmt -s -l "$file" 2> "$gofmt_err")
 	parse_error=$(cat "$gofmt_err")
 	rm -f "$gofmt_err"
