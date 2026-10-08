@@ -14,6 +14,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"panemux/internal/testcap"
 )
 
 const (
@@ -331,6 +333,7 @@ func startStandInCodex(t *testing.T, path string) int {
 // (/proc/<pid>/fd, or lsof), with the last turn event and response item of
 // its tail and, where sqlite3 is installed, its newest thread_turns row.
 func TestRunLocal_CollectScriptReadsCodexRollouts(t *testing.T) {
+	testcap.RequirePS(t)
 	home := t.TempDir()
 	homedir.SetForTest(t, home)
 	live, livePath, withSQLite := writeCodexHome(t, home)

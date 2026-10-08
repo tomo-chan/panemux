@@ -21,6 +21,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/ssh"
+
+	"panemux/internal/testcap"
 )
 
 type testSSHResponse struct {
@@ -479,6 +481,7 @@ func TestTmuxSSHSessionExecMethodsUseRealChannelsAndParseResponses(t *testing.T)
 }
 
 func TestTmuxLocalSessionLifecycleWithInjectedCommand(t *testing.T) {
+	testcap.RequirePTY(t)
 	previous := tmuxLocalCommandFn
 	tmuxLocalCommandFn = func(args []string) *exec.Cmd {
 		// os.Args[0] is the current test binary, not caller-controlled input.
@@ -533,6 +536,7 @@ func TestTmuxLocalHelperProcess(t *testing.T) {
 }
 
 func TestTmuxLocalSessionStartFailureIsReturned(t *testing.T) {
+	testcap.RequirePTY(t)
 	previous := tmuxLocalCommandFn
 	tmuxLocalCommandFn = func(args []string) *exec.Cmd {
 		return exec.Command("/path/that/does/not/exist")

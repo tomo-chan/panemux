@@ -25,6 +25,8 @@ import (
 	"panemux/internal/homedir"
 	"panemux/internal/session"
 	"panemux/internal/tasks"
+
+	"panemux/internal/testcap"
 )
 
 // This file is the real-router integration harness for the /api surface:
@@ -661,6 +663,7 @@ func writeSSHConfig(t *testing.T, home, contents string) {
 // a route added to api.Handler.Mount is unreachable from the frontend until
 // someone proves, here, that it answers through the production wiring.
 func TestServer_APIIntegration(t *testing.T) {
+	testcap.RequirePTY(t)
 	registered := registeredAPIRoutes(t)
 
 	var missing []string

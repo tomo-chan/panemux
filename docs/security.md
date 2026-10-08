@@ -36,6 +36,23 @@ reachable from other machines. This is a development-tool permission; it does no
 panemux routes or change their runtime trust boundaries. Platform differences and managed-policy
 limits are documented in [Claude Code sandbox](../DEVELOPMENT.md#claude-code-sandbox).
 
+That is the only permission they grant. Do not add `sandbox.allowPty`,
+`sandbox.network.allowUnixSockets`, `sandbox.network.allowAllUnixSockets` or
+`sandbox.filesystem.allowGitConfig` to the shared settings to make a test pass:
+
+- `allowGitConfig` lets a sandboxed command rewrite `.git/config`, and `core.hooksPath` there decides
+  what runs, outside the sandbox, on the next `git push`.
+- `allowAllUnixSockets` opens every local socket — docker's, ssh-agent's — to every sandboxed command.
+- `allowUnixSockets` takes absolute paths, and the directory tmux would need is per user
+  (`/tmp/claude-<uid>`), so a shared file cannot name it.
+
+Tests that need these capabilities skip inside the sandbox and are verified in CI instead
+(decision D13 in [quality-gateway/decisions.md](quality-gateway/decisions.md)).
+
+Tests must not write to the developer's own configuration or cache directories. The sandbox makes a
+violation fail loudly, but the rule holds outside it too: substitute `internal/cachedir` and
+`internal/homedir` as [DEVELOPMENT.md's testability rule](../DEVELOPMENT.md#test-granularity) says.
+
 ## Development runtime bootstrap
 
 The development runtime selector reads exact versions from tracked repository pins. Node

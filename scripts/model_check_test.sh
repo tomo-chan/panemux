@@ -42,7 +42,7 @@ skip() {
 	echo "skip $1 ($2)"
 }
 
-work=$(mktemp -d)
+work=$(mktemp -d "${TMPDIR:-/tmp}/panemux-model-check-test.XXXXXX") || exit 1
 trap 'rm -rf "$work"' EXIT
 
 have_python=1

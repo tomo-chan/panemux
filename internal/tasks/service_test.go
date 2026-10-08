@@ -20,6 +20,8 @@ import (
 
 	"panemux/internal/homedir"
 	"panemux/internal/session"
+
+	"panemux/internal/testcap"
 )
 
 // minimalOutput is a complete collection with one busy claude session.
@@ -542,6 +544,7 @@ func TestInspectGitContext_UsesTheOpenConnectionOnly(t *testing.T) {
 // the test controls. `ps` and `tmux` report whatever this machine has, so the
 // assertions stay on what the test put there.
 func TestRunLocal_CollectScriptRunsUnderShAndParses(t *testing.T) {
+	testcap.RequirePS(t)
 	home := t.TempDir()
 	homedir.SetForTest(t, home)
 
@@ -595,6 +598,7 @@ func TestRunLocal_CollectScriptRunsUnderShAndParses(t *testing.T) {
 // The cwd probe reports a claude process's working directory, and ps lists
 // this user's own processes. `claude` here is a symlink to sleep.
 func TestRunLocal_ReportsTheWorkingDirectoryOfAClaudeProcess(t *testing.T) {
+	testcap.RequirePS(t)
 	homedir.SetForTest(t, t.TempDir())
 	sleepPath, err := exec.LookPath("sleep")
 	require.NoError(t, err)

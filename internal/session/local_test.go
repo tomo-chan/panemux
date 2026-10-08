@@ -15,6 +15,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"panemux/internal/homedir"
+
+	"panemux/internal/testcap"
 )
 
 type fakeFileInfo struct {
@@ -31,6 +33,7 @@ func (f fakeFileInfo) IsDir() bool        { return false }
 func (f fakeFileInfo) Sys() any           { return nil }
 
 func TestNewLocal_Default(t *testing.T) {
+	testcap.RequirePTY(t)
 	sess, err := NewLocal("test-id", "", "", "Test Title")
 	require.NoError(t, err)
 	defer sess.Close()
@@ -42,6 +45,7 @@ func TestNewLocal_Default(t *testing.T) {
 }
 
 func TestNewLocal_ExplicitShell(t *testing.T) {
+	testcap.RequirePTY(t)
 	sess, err := NewLocal("test-id", "/bin/sh", "", "shell test")
 	require.NoError(t, err)
 	defer sess.Close()
@@ -55,6 +59,7 @@ func TestNewLocal_InvalidShell_Error(t *testing.T) {
 }
 
 func TestNewLocal_State(t *testing.T) {
+	testcap.RequirePTY(t)
 	sess, err := NewLocal("state-test", "/bin/sh", "", "state")
 	require.NoError(t, err)
 	defer sess.Close()
@@ -63,6 +68,7 @@ func TestNewLocal_State(t *testing.T) {
 }
 
 func TestNewLocal_Write_Read(t *testing.T) {
+	testcap.RequirePTY(t)
 	sess, err := NewLocal("rw-test", "/bin/sh", "", "rw")
 	require.NoError(t, err)
 	defer sess.Close()
@@ -91,6 +97,7 @@ func TestNewLocal_Write_Read(t *testing.T) {
 }
 
 func TestNewLocal_Resize(t *testing.T) {
+	testcap.RequirePTY(t)
 	sess, err := NewLocal("resize-test", "/bin/sh", "", "resize")
 	require.NoError(t, err)
 	defer sess.Close()
@@ -100,6 +107,7 @@ func TestNewLocal_Resize(t *testing.T) {
 }
 
 func TestNewLocal_Close(t *testing.T) {
+	testcap.RequirePTY(t)
 	sess, err := NewLocal("close-test", "/bin/sh", "", "close")
 	require.NoError(t, err)
 
@@ -118,6 +126,7 @@ func TestNewLocal_RelativeShell_Error(t *testing.T) {
 }
 
 func TestNewLocal_WithCwd(t *testing.T) {
+	testcap.RequirePTY(t)
 	tmpDir := os.TempDir()
 	sess, err := NewLocal("cwd-test", "/bin/sh", tmpDir, "cwd")
 	require.NoError(t, err)
@@ -127,6 +136,7 @@ func TestNewLocal_WithCwd(t *testing.T) {
 }
 
 func TestLocalSessionGetCWD(t *testing.T) {
+	testcap.RequirePTY(t)
 	tmpDir := os.TempDir()
 	sess, err := NewLocal("cwd-live-test", "/bin/sh", tmpDir, "cwd-live")
 	require.NoError(t, err)
@@ -1578,6 +1588,7 @@ func TestValidateShell_InvalidChars_Error(t *testing.T) {
 }
 
 func TestDetectLocalShell_ReturnsAbsolutePath(t *testing.T) {
+	testcap.RequireDscl(t)
 	shell, err := DetectLocalShell()
 	require.NoError(t, err)
 	assert.True(t, filepath.IsAbs(shell), "expected absolute shell path, got %q", shell)

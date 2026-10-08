@@ -6,7 +6,7 @@
 # What they protect: nothing from the developer's own configuration reaches
 # the images, nothing the developer owns is deleted, and nothing the run
 # started outlives it. The tmux checks report themselves as skipped where
-# tmux is not installed.
+# tmux is not installed or cannot start a server, and fail instead in CI.
 #
 # Run with: make test-screenshots-check
 
@@ -27,12 +27,14 @@ pass() { echo "ok   $1"; }
 skip() { echo "skip $1"; }
 check() { checks=$((checks + 1)); }
 
-work=$(mktemp -d)
+work=$(mktemp -d "${TMPDIR:-/tmp}/panemux-screenshots-env-test.XXXXXX") || exit 1
 # tmux's socket lives under these directories, and a socket path has a
 # hard limit (104 bytes on macOS, 108 on Linux) that macOS's long
-# per-user $TMPDIR, plus the run's own subdirectories, overruns. /tmp
-# keeps it short on both.
-short=$(mktemp -d /tmp/pmx-shot.XXXXXX)
+# per-user $TMPDIR (about 49 bytes) leaves little room for. A one-letter
+# name, with the run root directly under it, keeps the deepest socket here
+# under the limit there — and inside $TMPDIR, the only place the Claude Code
+# sandbox can write.
+short=$(mktemp -d "${TMPDIR:-/tmp}/p.XXXXXX") || exit 1
 unset TMUX
 trap 'rm -rf "$work" "$short"' EXIT
 
@@ -65,23 +67,81 @@ esac
 # configuration of whatever repository this test happens to run from.
 check
 mkdir -p "$work/norepo"
+# Exit status 1 is git's "key not set"; stdout alone is the value. stderr is
+# kept out of the comparison because macOS's /usr/bin/git shim (xcrun) warns
+# there when, under the fake HOME, it cannot write its cache outside the
+# Claude Code sandbox — noise that says nothing about the configuration read.
 output=$(
 	cd "$work/norepo" &&
 		XDG_CONFIG_HOME="$real" GIT_CONFIG_GLOBAL="$work/global-gitconfig" GIT_CEILING_DIRECTORIES="$work" \
-			sh -c '. "$1"; shot_isolate_env "$2"; git config --get commit.gpgsign' sh "$lib" "$work/fakehome" 2>&1
+			sh -c '. "$1"; shot_isolate_env "$2"; git config --get commit.gpgsign' sh "$lib" "$work/fakehome" 2>"$work/git-stderr"
 )
-if [ -z "$output" ]; then
+status=$?
+if [ "$status" -eq 1 ] && [ -z "$output" ]; then
 	pass 'git reads none of the developer configuration'
 else
-	fail 'git reads none of the developer configuration' "$output"
+	fail 'git reads none of the developer configuration' "exit $status: $output $(cat "$work/git-stderr")"
 fi
 
 # ── shot_start_tmux / shot_stop_tmux ────────────────────────────────────────
 
+# tmux_unusable prints why the tmux checks cannot run here, or nothing. Being
+# installed is not enough: the Claude Code sandbox lets tmux run but denies the
+# Unix socket its server listens on. Those checks are skipped there and left to
+# CI, which never skips them — a server that fails to start in CI is a failure.
+tmux_unusable() {
+	command -v tmux >/dev/null 2>&1 || { echo "tmux is not installed"; return; }
+	{ tmux -S "$short/probe" -f /dev/null new-session -d -s probe "sleep 5" &&
+		tmux -S "$short/probe" has-session -t "=probe"; } >/dev/null 2>&1 || {
+		tmux -S "$short/probe" kill-server >/dev/null 2>&1
+		echo "tmux cannot create a socket under \$TMPDIR (the Claude Code sandbox denies Unix sockets; CI runs these checks)"
+		return
+	}
+	tmux -S "$short/probe" kill-server 2>/dev/null
+	rm -f "$short/probe"
+}
+tmux_skip=$(tmux_unusable)
+
+# CI never skips them, whatever the reason — tmux missing included, as
+# internal/testcap.RequireTmux has it: a runner image that stops shipping tmux
+# must fail here rather than turn every tmux check into a skip. Run this script
+# again with CI set and every tmux on PATH hidden.
+if [ -z "${SCREENSHOTS_ENV_TEST_NESTED:-}" ]; then
+	check
+	notmux_path=""
+	i=0
+	old_ifs=$IFS
+	IFS=:
+	for d in $PATH; do
+		i=$((i + 1))
+		if [ -x "$d/tmux" ]; then
+			mkdir -p "$work/notmux/$i"
+			for f in "$d"/*; do
+				[ "$(basename "$f")" = tmux ] || ln -s "$f" "$work/notmux/$i/" 2>/dev/null
+			done
+			d="$work/notmux/$i"
+		fi
+		notmux_path="${notmux_path:+$notmux_path:}$d"
+	done
+	IFS=$old_ifs
+	if out=$(PATH="$notmux_path" CI=true SCREENSHOTS_ENV_TEST_NESTED=1 sh "$0" 2>&1); then
+		fail 'CI without tmux fails the tmux checks' "$out"
+	elif ! printf '%s\n' "$out" | grep -q 'tmux checks cannot run in CI: tmux is not installed'; then
+		fail 'CI without tmux fails the tmux checks, saying tmux is missing' "$out"
+	else
+		pass 'CI without tmux fails the tmux checks'
+	fi
+fi
+if [ -n "$tmux_skip" ] && [ -n "${CI:-}" ]; then
+	check
+	fail "tmux checks cannot run in CI: $tmux_skip"
+	tmux_skip="CI failure reported above"
+fi
+
 # Each stop check first proves the server it is about to stop is running:
 # without that, a server that never started (a socket path too long, say)
 # reads as one the helper stopped.
-if command -v tmux >/dev/null 2>&1; then
+if [ -z "$tmux_skip" ]; then
 	tmuxdir="$short/tmux"
 	mkdir -p "$tmuxdir" && chmod 700 "$tmuxdir"
 	echo "set -g status-left '[sample-server] '" >"$work/fakehome/.tmux.conf"
@@ -118,13 +178,13 @@ if command -v tmux >/dev/null 2>&1; then
 	fi
 
 	check
-	rundir="$short/tmp/panemux-screenshots/tmux"
+	rundir="$short/panemux-screenshots/tmux"
 	mkdir -p "$rundir" && chmod 700 "$rundir"
 	if ! output=$(TMUX_TMPDIR="$rundir" tmux -f /dev/null new-session -d -s t 'sleep 30' 2>&1) ||
 		! TMUX_TMPDIR="$rundir" tmux has-session 2>/dev/null; then
 		fail 'shot_teardown stops the server under the run root: the server did not start' "$output"
 	else
-		TMPDIR="$short/tmp" sh -c '. "$1"; shot_teardown' sh "$lib"
+		TMPDIR="$short" sh -c '. "$1"; shot_teardown' sh "$lib"
 		if TMUX_TMPDIR="$rundir" tmux has-session 2>/dev/null; then
 			fail 'shot_teardown stops the server under the run root'
 			TMUX_TMPDIR="$rundir" tmux kill-server 2>/dev/null
@@ -133,12 +193,12 @@ if command -v tmux >/dev/null 2>&1; then
 		fi
 	fi
 else
-	skip 'tmux checks: tmux is not installed'
+	skip "tmux checks: $tmux_skip"
 fi
 
 # An inherited TMUX must never route start, stop or teardown to the caller.
 # Every probe and cleanup uses -S explicitly, even when testing broken code.
-if command -v tmux >/dev/null 2>&1; then
+if [ -z "$tmux_skip" ]; then
 	caller="$short/caller"
 	if ! tmux -S "$caller" -f /dev/null new-session -d -s caller 'sleep 120' ||
 		! tmux -S "$caller" has-session -t '=caller'; then
@@ -297,6 +357,43 @@ if lock "$l" 4444 >/dev/null && [ "$(cat "$l/pid")" = 4444 ]; then
 	pass 'a stale lock is taken over'
 else
 	fail 'a stale lock is taken over'
+fi
+
+# ── tmux_socket_path_check: a socket path too long fails before the run ────
+
+# A Unix socket path is limited to 104 bytes on macOS and 108 on Linux,
+# counting the terminating NUL. tmux fails late and obscurely past it, so the
+# fixtures check first. Run in a subshell: the helper only prints and returns.
+case $(uname -s) in
+Darwin) max=103 ;;
+*) max=107 ;;
+esac
+suffix="/tmux-$(id -u)/default"
+fits=$(printf '%*s' $((max - ${#suffix})) '' | tr ' ' a)
+check
+if output=$(sh -c '. "$1"; tmux_socket_path_check "/$2"' sh "$here/../e2e/tmux-env.sh" "${fits#?}" 2>&1); then
+	pass 'a socket path at the limit is accepted'
+else
+	fail 'a socket path at the limit is accepted' "$output"
+fi
+check
+if output=$(sh -c '. "$1"; tmux_socket_path_check "/$2"' sh "$here/../e2e/tmux-env.sh" "$fits" 2>&1); then
+	fail 'a socket path one byte over the limit is refused'
+else
+	case $output in
+	*TMPDIR*) pass 'a socket path one byte over the limit is refused' ;;
+	*) fail 'a socket path one byte over the limit is refused: the message does not say what to change' "$output" ;;
+	esac
+fi
+check
+long="$work/$(printf '%*s' 120 '' | tr ' ' l)"
+mkdir -p "$long"
+if output=$(TMPDIR="$long" sh -c '. "$1"; e2e_tmux_env' sh "$here/../e2e/tmux-env.sh" 2>&1); then
+	fail 'e2e_tmux_env refuses a $TMPDIR too long for the socket'
+elif [ -n "$(ls -A "$long")" ]; then
+	fail 'e2e_tmux_env refuses a $TMPDIR too long for the socket: it left its directory behind'
+else
+	pass 'e2e_tmux_env refuses a $TMPDIR too long for the socket'
 fi
 
 if [ "$failures" -ne 0 ]; then

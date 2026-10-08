@@ -101,7 +101,7 @@ expect 1 'a component moved out of components/ lists its old path' \
 # moved file's new path, and a component moved out of components/ and
 # restyled in the same pull request would pass unseen.
 checks=$((checks + 1))
-repo=$(mktemp -d)
+repo=$(mktemp -d "${TMPDIR:-/tmp}/panemux-screenshots-check-test.XXXXXX") || exit 1
 (
 	set -e
 	cd "$repo"

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"panemux/internal/testcap"
 )
 
 // The pane IDs a pane's shell is told about: only ones the task dashboard's
@@ -79,6 +81,7 @@ func countEnv(env []string, key string) int {
 }
 
 func TestNewLocalExportsThePaneID(t *testing.T) {
+	testcap.RequirePTY(t)
 	for _, shim := range []bool{true, false} {
 		t.Run("browser shim "+map[bool]string{true: "on", false: "off"}[shim], func(t *testing.T) {
 			withBrowserShimEnabled(t, shim)
@@ -98,6 +101,7 @@ func TestNewLocalExportsThePaneID(t *testing.T) {
 }
 
 func TestNewLocalWithAnUnsafePaneIDStartsWithoutIt(t *testing.T) {
+	testcap.RequirePTY(t)
 	withBrowserShimEnabled(t, false)
 
 	sess, err := NewLocal("my pane", "/bin/sh", "", "pane")

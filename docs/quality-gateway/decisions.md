@@ -20,6 +20,7 @@ D6.
 | D10 | The contract fixtures are rewritten on every run, not diffed against |
 | D11 | The accessibility ceiling is per rule, counts nodes, and is lowered by hand |
 | D12 | A model checker's output is checked in; the model checker itself is not in `make check` |
+| D13 | Inside the Claude Code sandbox, tests needing a pty, tmux, `ps` or `dscl` skip; CI never does |
 
 **D1 — Do not raise the coverage threshold above 80%.**
 Raising it works: the threshold gets met. But the cheapest way to meet it is to generate tautological
@@ -501,3 +502,39 @@ truncated dump is refused. The general rule: **a checker that generates the thin
 measured against needs its own tests before those checks mean anything.** Every other gate script in
 `scripts/` already had a `*_test.sh`; this one was the exception, and the exception is where the bug
 was.
+
+**D13 — Inside the Claude Code sandbox, tests that need a pty, tmux, `ps` or `dscl` skip; CI never
+does. (2026-10-08, issue #315)**
+
+The macOS Claude Code sandbox denies four things some tests need: opening a pseudo-terminal, creating
+a Unix socket (so tmux cannot start a server), running `ps`, and Directory Services lookups through
+`dscl`. An agent working there could not pass `make check`, so it could not run the pre-push hook or
+report its work complete without asking for a run outside the sandbox.
+
+*What was rejected.* Loosening the shared `.claude/settings.json`: `sandbox.allowPty` would cover only
+the first, and `sandbox.network.allowUnixSockets` takes absolute paths, which here would have to name
+a per-user directory (`/tmp/claude-<uid>`) that no shared file can know. `allowAllUnixSockets` would
+also open docker's and ssh-agent's sockets to every sandboxed command. `sandbox.filesystem.allowGitConfig`
+was rejected for the same reason the sandbox protects `.git/config`: `core.hooksPath` is code
+execution outside the sandbox.
+
+*What was chosen.* Each such test asks `internal/testcap` for the capability, which probes it once
+and skips the test where the probe fails — **unless `CI` is set, where the same failure fails the
+test.** The shell gates do the same: the screenshot fixtures' tmux checks, and `make test-e2e` through
+`scripts/require_pty.sh`. CI is therefore where these tests are verified, and the guarantee CI gives
+is unchanged: a runner that lost its pty would turn every pane test red, not into a column of skips.
+The cost is that the agent's local `make check` verifies less than CI does, and says so on every
+skipped line.
+
+*Probe, never infer.* Nothing looks for an environment variable naming the sandbox. A probe that
+cannot open a pty skips whether the reason is the sandbox or anything else, and the skip message
+carries the probe's own error.
+
+*`make screenshots` is not skipped.* It writes tracked images, so a run that silently did nothing
+would read as images that needed no change. It fails, saying to run it outside the sandbox.
+
+*The rest of #315 was not a capability question.* Scripts now make every temporary directory under
+`$TMPDIR` with a template and stop when they cannot — macOS's `mktemp -d` ignores `$TMPDIR`, and the
+test scripts that carried on with an empty work directory committed fixtures in the caller's own
+worktree. `scripts/tmpdir_guard_test.sh` runs each with a failing `mktemp` and asserts the repository
+it ran from is untouched.

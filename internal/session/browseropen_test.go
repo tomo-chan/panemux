@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"panemux/internal/cachedir"
+
+	"panemux/internal/testcap"
 )
 
 // installShimForTest writes the shim script under dir/<name> so the test can
@@ -294,6 +296,7 @@ func TestLocalBrowserShimEnvWithEmptyPath(t *testing.T) {
 }
 
 func TestNewLocalExportsTheBrowserShim(t *testing.T) {
+	testcap.RequirePTY(t)
 	withBrowserShimEnabled(t, true)
 	cacheDir := withShimCacheDir(t)
 
@@ -315,6 +318,7 @@ func TestNewLocalExportsTheBrowserShim(t *testing.T) {
 }
 
 func TestNewLocalWithoutTheBrowserShim(t *testing.T) {
+	testcap.RequirePTY(t)
 	withBrowserShimEnabled(t, false)
 	withShimCacheDir(t)
 
@@ -332,6 +336,7 @@ func TestNewLocalWithoutTheBrowserShim(t *testing.T) {
 }
 
 func TestNewLocalStartsEvenWhenTheShimCannotBeInstalled(t *testing.T) {
+	testcap.RequirePTY(t)
 	withBrowserShimEnabled(t, true)
 	cachedir.SetFailingForTest(t, os.ErrPermission)
 

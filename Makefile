@@ -1,7 +1,7 @@
 # Applies before $(shell go env ...) as well as recipes and their children.
 override SHELL := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))/scripts/runtime-shell.sh
 
-.PHONY: all build build-frontend build-backend dev clean run install-deps install-deps-ci install-hooks \
+.PHONY: all build build-frontend build-backend dev clean run install-deps install-deps-ci install-hooks test-install-hooks test-tmpdir-guard test-golangci-lint-cache test-require-pty \
         test-node-toolchain test-go-toolchain test test-go test-frontend test-e2e test-agmsg-contract test-hooks test-efficacy efficacy \
         test-scenarios-check check-scenarios check-docs-links test-docs-links screenshots test-screenshots-check \
         coverage-blocks test-coverage-blocks \
@@ -38,12 +38,11 @@ install-deps-ci: lint-go-deps
 	go mod download
 
 install-hooks:
-	chmod +x .githooks/pre-push
-	git config core.hooksPath .githooks
+	sh scripts/install_hooks.sh
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
-test: test-node-toolchain test-go-toolchain test-go test-frontend test-hooks test-efficacy test-scenarios-check test-docs-links test-screenshots-check \
+test: test-node-toolchain test-go-toolchain test-go test-frontend test-hooks test-tmpdir-guard test-install-hooks test-golangci-lint-cache test-require-pty test-efficacy test-scenarios-check test-docs-links test-screenshots-check \
       test-coverage-blocks test-mutation test-model-check
 
 test-node-toolchain:
@@ -58,7 +57,11 @@ test-go:
 test-frontend:
 	cd frontend && npm test
 
+# Skipped, with a message, where no pseudo-terminal can be opened (the Claude
+# Code sandbox): every pane panemux starts needs one. CI never skips it.
 test-e2e:
+	@status=0; sh scripts/require_pty.sh skip 'make test-e2e' || status=$$?; \
+	if [ "$$status" -eq 3 ]; then exit 0; elif [ "$$status" -ne 0 ]; then exit "$$status"; fi; \
 	cd frontend && npm run test:e2e
 
 # ── Documentation screenshots (not a gate) ────────────────────────────────────
@@ -67,8 +70,10 @@ test-e2e:
 # content (frontend/screenshots/). Not part of `make check`: it rewrites
 # tracked images, and a pixel diff caused by a font or browser update is not
 # a failure. Run it after a UI change the README images show, and commit the
-# images it writes.
+# images it writes. It needs a pseudo-terminal and tmux, which the Claude Code
+# sandbox denies, so it is run outside the sandbox.
 screenshots:
+	sh scripts/require_pty.sh fail 'make screenshots'
 	cd frontend && npm run screenshots
 
 # Whether a pull request that changes what the screenshots show retook them is
@@ -264,6 +269,22 @@ test-mutation:
 # Claude Code hooks from .claude/). Included in `make test` because a hook that
 # silently stops working reports the discipline as enforced while enforcing
 # nothing — and because a hook that blocks a healthy change is worse still, so
+# Every script that makes a temporary directory makes it under $TMPDIR and stops,
+# touching nothing, when it cannot (issue #315).
+test-tmpdir-guard:
+	sh scripts/tmpdir_guard_test.sh
+
+# install-hooks writes .git/config only when the installed pre-push differs
+# (issue #315: the Claude Code sandbox refuses that write).
+test-install-hooks:
+	sh scripts/install_hooks_test.sh
+
+test-golangci-lint-cache:
+	sh scripts/golangci_lint_cache_test.sh
+
+test-require-pty:
+	sh scripts/require_pty_test.sh
+
 # both directions are asserted. Hermetic: it drives the scripts against temp
 # files and throwaway git repositories, never this checkout.
 test-hooks:
@@ -372,7 +393,7 @@ test-model-check:
 #           UI components (App, SplitContainer, TerminalPane …) require a real
 #           browser renderer and are covered by integration / E2E tests.
 
-COVERAGE_PKGS := ./internal/config/...,./internal/api/...,./internal/ws/...,./internal/server/...,./internal/board/...,./internal/portforward/...,./internal/commandcenter/...,./internal/boardmcp/...,./internal/fileops/...,./internal/homedir/...,./internal/cachedir/...,./internal/tasks/...,./internal/taskevents/...,./internal/requestsecurity/...,.
+COVERAGE_PKGS := ./internal/config/...,./internal/api/...,./internal/ws/...,./internal/server/...,./internal/board/...,./internal/portforward/...,./internal/commandcenter/...,./internal/boardmcp/...,./internal/fileops/...,./internal/homedir/...,./internal/cachedir/...,./internal/tasks/...,./internal/taskevents/...,./internal/requestsecurity/...,./internal/testcap/...,.
 
 coverage: coverage-go coverage-frontend
 
@@ -399,6 +420,7 @@ coverage-go: build-frontend
 	  ./internal/tasks/... \
 	  ./internal/taskevents/... \
 	  ./internal/requestsecurity/... \
+	  ./internal/testcap/... \
 	  . \
 	  -coverprofile=coverage.out \
 	  -coverpkg=$(COVERAGE_PKGS) \
@@ -440,9 +462,11 @@ lint-go-deps:
 	  go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION); \
 	fi
 
+# GOLANGCI_LINT_CACHE moves under $TMPDIR only where the user cache directory
+# is not writable, as inside the Claude Code sandbox (issue #315).
 lint-go: fmt-check-go lint-go-deps
 	go vet ./...
-	'$(GOLANGCI_LINT_BIN)' run ./...
+	GOLANGCI_LINT_CACHE="$$(sh scripts/golangci_lint_cache.sh)" '$(GOLANGCI_LINT_BIN)' run ./...
 
 lint-frontend:
 	cd frontend && npx tsc --noEmit

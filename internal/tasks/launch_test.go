@@ -15,6 +15,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"panemux/internal/testcap"
 )
 
 const (
@@ -662,6 +664,7 @@ func newRealTmuxHost(t *testing.T) stubHost {
 	if err != nil {
 		t.Skip("tmux is not installed")
 	}
+	testcap.RequireTmux(t)
 	h := newStubHost(t, false, true)
 	require.NoError(t, os.Symlink(tmux, filepath.Join(h.bin, "tmux")))
 	// A socket path has a length limit, so the server directory is kept short.
