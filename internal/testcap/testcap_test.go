@@ -3,6 +3,9 @@ package testcap
 import (
 	"errors"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -90,5 +93,132 @@ func TestRequireHelpersNeverFailOutsideCI(t *testing.T) {
 		if r.fatal != "" {
 			t.Errorf("Require %s outside CI failed: %s", name, r.fatal)
 		}
+	}
+}
+
+// fakeOutput makes output answer by the command's verb: an error for each verb
+// in failing, success for the rest. It records every command it saw.
+func fakeOutput(t *testing.T, failing ...string) *[]string {
+	t.Helper()
+	var seen []string
+	original := output
+	output = func(cmd *exec.Cmd) ([]byte, error) {
+		line := strings.Join(cmd.Args, " ")
+		seen = append(seen, line)
+		for _, verb := range failing {
+			if strings.Contains(line, verb) {
+				return []byte("denied"), errors.New("exit status 1")
+			}
+		}
+		return nil, nil
+	}
+	t.Cleanup(func() { output = original })
+	return &seen
+}
+
+func TestProbePTY(t *testing.T) {
+	original := openPTY
+	t.Cleanup(func() { openPTY = original })
+	pipe := func(t *testing.T) (*os.File, *os.File) {
+		t.Helper()
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r, w
+	}
+
+	openPTY = func() (*os.File, *os.File, error) { return nil, nil, errors.New("operation not permitted") }
+	if err := probePTY(); err == nil || !strings.Contains(err.Error(), "opening a pty") {
+		t.Errorf("probePTY with open failing = %v", err)
+	}
+
+	openPTY = func() (*os.File, *os.File, error) { r, w := pipe(t); return r, w, nil }
+	if err := probePTY(); err != nil {
+		t.Errorf("probePTY with a pty = %v", err)
+	}
+
+	openPTY = func() (*os.File, *os.File, error) {
+		r, w := pipe(t)
+		_ = r.Close()
+		return r, w, nil
+	}
+	if err := probePTY(); err == nil || !strings.Contains(err.Error(), "closing the pty") {
+		t.Errorf("probePTY with close failing = %v", err)
+	}
+}
+
+func TestProbeTmux(t *testing.T) {
+	bin := t.TempDir()
+	// The stand-in tmux must be executable for LookPath to find it.
+	stub := filepath.Join(bin, "tmux")
+	if err := os.WriteFile(stub, []byte("#!/bin/sh\n"), 0o700); err != nil { //nolint:gosec // see above
+		t.Fatal(err)
+	}
+
+	t.Run("not installed", func(t *testing.T) {
+		t.Setenv("PATH", t.TempDir())
+		if err := probeTmux(); err == nil || !strings.Contains(err.Error(), "finding tmux") {
+			t.Errorf("probeTmux = %v", err)
+		}
+	})
+	t.Run("no temporary directory", func(t *testing.T) {
+		t.Setenv("PATH", bin)
+		t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "missing"))
+		if err := probeTmux(); err == nil || !strings.Contains(err.Error(), "socket directory") {
+			t.Errorf("probeTmux = %v", err)
+		}
+	})
+	t.Run("server starts and answers", func(t *testing.T) {
+		t.Setenv("PATH", bin)
+		seen := fakeOutput(t)
+		if err := probeTmux(); err != nil {
+			t.Errorf("probeTmux = %v", err)
+		}
+		if got := strings.Join(*seen, "\n"); !strings.Contains(got, "has-session") || !strings.Contains(got, "kill-server") {
+			t.Errorf("commands = %q, want has-session and the kill-server cleanup", got)
+		}
+		for _, line := range *seen {
+			if !strings.HasPrefix(line, "tmux -S s ") {
+				t.Errorf("%q does not name the probe's own socket", line)
+			}
+		}
+	})
+	t.Run("server does not answer", func(t *testing.T) {
+		fakeOutput(t, "has-session")
+		if err := probeTmuxIn(t.TempDir()); err == nil || !strings.Contains(err.Error(), "has-session") {
+			t.Errorf("probeTmuxIn = %v", err)
+		}
+	})
+}
+
+func TestProbePS(t *testing.T) {
+	fakeOutput(t)
+	if err := probePS(); err != nil {
+		t.Errorf("probePS with ps working = %v", err)
+	}
+	fakeOutput(t, "ps")
+	if err := probePS(); err == nil || !strings.Contains(err.Error(), "denied") {
+		t.Errorf("probePS with ps denied = %v", err)
+	}
+}
+
+func TestProbeDscl(t *testing.T) {
+	original := goos
+	t.Cleanup(func() { goos = original })
+
+	goos = "linux"
+	seen := fakeOutput(t, "dscl")
+	if err := probeDscl(); err != nil || len(*seen) != 0 {
+		t.Errorf("probeDscl on linux = %v after %q; want nil without running dscl", err, *seen)
+	}
+
+	goos = "darwin"
+	if err := probeDscl(); err == nil || !strings.Contains(err.Error(), "dscl") {
+		t.Errorf("probeDscl with dscl denied = %v", err)
+	}
+	fakeOutput(t)
+	if err := probeDscl(); err != nil {
+		t.Errorf("probeDscl with dscl working = %v", err)
 	}
 }

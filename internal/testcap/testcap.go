@@ -78,8 +78,16 @@ var (
 	dsclOnce = sync.OnceValue(probeDscl)
 )
 
+// The probes' effects, as variables so the package's tests can drive every
+// branch: whether a capability exists is the machine's answer, not theirs.
+var (
+	openPTY = pty.Open
+	output  = (*exec.Cmd).CombinedOutput
+	goos    = runtime.GOOS
+)
+
 func probePTY() error {
-	ptmx, tty, err := pty.Open()
+	ptmx, tty, err := openPTY()
 	if err != nil {
 		return fmt.Errorf("opening a pty: %w", err)
 	}
@@ -109,7 +117,7 @@ func probeTmux() error {
 func probeTmuxIn(dir string) error {
 	tmux := func(cmd *exec.Cmd) ([]byte, error) {
 		cmd.Dir = dir
-		return cmd.CombinedOutput()
+		return output(cmd)
 	}
 	defer func() { _, _ = tmux(exec.Command("tmux", "-S", "s", "kill-server")) }()
 	out, err := tmux(exec.Command("tmux", "-S", "s", "-f", "/dev/null", "new-session", "-d", "-s", "probe", "sleep 5"))
@@ -123,7 +131,7 @@ func probeTmuxIn(dir string) error {
 }
 
 func probePS() error {
-	if out, err := exec.Command("ps", "-A", "-o", "pid=").CombinedOutput(); err != nil {
+	if out, err := output(exec.Command("ps", "-A", "-o", "pid=")); err != nil {
 		return fmt.Errorf("ps: %w: %s", err, out)
 	}
 	return nil
@@ -132,10 +140,10 @@ func probePS() error {
 // probeDscl lists every user's shell: the same Directory Services query
 // DetectLocalShell makes for one user, with no argument that varies.
 func probeDscl() error {
-	if runtime.GOOS != "darwin" {
+	if goos != "darwin" {
 		return nil
 	}
-	if out, err := exec.Command("/usr/bin/dscl", ".", "-list", "/Users", "UserShell").CombinedOutput(); err != nil {
+	if out, err := output(exec.Command("/usr/bin/dscl", ".", "-list", "/Users", "UserShell")); err != nil {
 		return fmt.Errorf("dscl: %w: %s", err, out)
 	}
 	return nil
