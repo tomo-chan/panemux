@@ -433,6 +433,8 @@ terminal that had focus cannot receive what is typed into the dashboard.
   another task while it runs leaves that task's controls enabled, and the result is not shown there.
   A task without a session ID offers neither, and says so. At 1000px and narrower it slides over the board
   with a close button.
+- **Summary agent.** Claude and Codex tasks with session IDs offer the same summary controls.
+  Each uses its own agent account on the panemux host; PID-only tasks cannot be summarized.
 - **Resume.** `Resume` reads `Resuming…` and is disabled while its request runs; a refusal is shown in
   a red alert naming the task, and a resumed task is selected. Nothing else on the board waits for it.
 - **Type in pane.** A popup over the board ([behavior](behavior/tasks.md#opening-a-task)), centered,

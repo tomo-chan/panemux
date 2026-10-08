@@ -3,7 +3,9 @@ package tasks
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -21,8 +23,48 @@ func buildCodexTranscriptScript(sessionID string) (string, error) {
 	if err != nil { //coverage:exempt a valid UUID also passes validSessionID
 		return "", err
 	}
-	return strings.Replace(script, `"$HOME"/.claude/projects/*/"$sid.jsonl"`,
-		`"$HOME"/.codex/sessions/*/*/*/"rollout-"*-"$sid.jsonl"`, 1), nil
+	script = strings.Replace(script, `"$HOME"/.claude/projects/*/"$sid.jsonl"`,
+		`"$HOME"/.codex/sessions/*/*/*/"rollout-"*-"$sid.jsonl"`, 1)
+	return strings.ReplaceAll(script, "sort -rn", "sort -k1,1nr -k2,2nr -k3r"), nil
+}
+
+func buildCodexTranscriptScriptForLog(sessionID string, log LogVersion) (string, error) {
+	script, err := buildCodexTranscriptScript(sessionID)
+	if err != nil {
+		return "", err
+	}
+	if log.File == "" {
+		return script, nil
+	}
+	id, ok := rolloutSessionID(log.File)
+	if !ok || id != sessionID || log.ModTime < 0 || log.Size < 0 {
+		return "", ErrInvalidSummary
+	}
+	script = strings.Replace(script, `"rollout-"*-"$sid.jsonl"`, "'"+log.File+"'", 1)
+	version := strconv.FormatInt(log.ModTime, 10) + " " + strconv.FormatInt(log.Size, 10)
+	check := `[ "$(mtime "$best" 2>/dev/null)" = '` + version + `' ] || { echo '::panemux-transcript changed'; exit 0; }
+`
+	script = strings.Replace(script, `size=$(wc -c`, check+`size=$(wc -c`, 1)
+	script = strings.Replace(script, "echo '::end'", check+"echo '::end'", 1)
+	return script, nil
+}
+
+func parseCodexTranscriptOutput(out []byte, sessionID string) (transcriptData, error) {
+	data, err := parseTranscriptOutput(out)
+	if err != nil {
+		return transcriptData{}, errors.New("codex conversation log could not be read")
+	}
+	first, _, _ := bytes.Cut(data.Head, []byte("\n"))
+	var meta struct {
+		Type    string `json:"type"`
+		Payload struct {
+			ID string `json:"id"`
+		} `json:"payload"`
+	}
+	if json.Unmarshal(first, &meta) != nil || meta.Type != "session_meta" || meta.Payload.ID != sessionID {
+		return transcriptData{}, errors.New("codex conversation log has an invalid session header")
+	}
+	return data, nil
 }
 
 // Codex rollouts are an unpublished format. Read only canonical response_item

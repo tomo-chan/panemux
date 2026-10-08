@@ -112,9 +112,9 @@ export function findLaunchedTask(tasks: Task[], launched: LaunchedTaskRef): { ta
   return candidates.length > 0 ? { task: candidates[0], settled: false } : null
 }
 
-/** Whether a task can be summarized: a claude task with a session ID (issue #258). */
+/** Whether a task can be summarized: a Claude or Codex task with a session ID. */
 export function canSummarize(task: Task): boolean {
-  return task.agent === 'claude' && Boolean(task.session_id)
+  return (task.agent === 'claude' || task.agent === 'codex') && Boolean(task.session_id)
 }
 
 /** The work a summary says comes next, and how much remains in all. */

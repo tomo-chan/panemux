@@ -182,6 +182,34 @@ func TestPostTaskSummary(t *testing.T) {
 	assert.Equal(t, 2, summarizer.count(), "the idle task by the poll, the stopped one on request")
 }
 
+func TestPostTaskSummary_CodexIdentityAndRouting(t *testing.T) {
+	const sid = "0f0e0d0c-0b0a-4908-8706-050403020100"
+	h, _ := summaryHandler(t, true)
+	codex, claude := &countingSummarizer{}, &countingSummarizer{}
+	body := `{"type":"session_meta","payload":{"id":"` + sid + `"}}` + "\n" +
+		`{"type":"response_item","payload":{"type":"message","role":"user","content":[` +
+		`{"type":"input_text","text":"request"}]}}` + "\n"
+	h.SetTaskService(tasks.New(tasks.Options{
+		Hosts: h.taskHostNames,
+		RunLocal: func(_ context.Context, script string) ([]byte, error) {
+			if strings.Contains(script, "::panemux-transcript") {
+				return []byte("::panemux-transcript v1 " + strconv.Itoa(len(body)) + "\n" + body + "\n::end\n"), nil
+			}
+			return []byte("::panemux-tasks v1\n::now 1000\n::section codex-rollouts\n" +
+				"999\t120\trollout-2026-10-08T01-00-00-" + sid + ".jsonl\t\t\"originator\":\"codex-tui\"\n::end\n"), nil
+		}, Summarize: claude.summarize, SummarizeCodex: codex.summarize,
+	}))
+	getTasks(t, h)
+	rec := postTaskSummary(t, h, `{"host":"","agent":"codex","session_id":"`+sid+`"}`)
+	require.Equal(t, http.StatusAccepted, rec.Code, rec.Body.String())
+	require.Eventually(t, func() bool { return codex.count() == 1 }, 5*time.Second, 20*time.Millisecond)
+	assert.Zero(t, claude.count())
+	assert.Equal(t, http.StatusNotFound, postTaskSummary(t, h, `{"host":"","session_id":"`+sid+`"}`).Code)
+	bad := postTaskSummary(t, h, `{"host":"","agent":"other","session_id":"`+sid+`"}`)
+	assert.Equal(t, http.StatusBadRequest, bad.Code)
+	assert.Equal(t, http.StatusBadRequest, postTaskSummary(t, h, `{"host":"","agent":"codex","session_id":"abc"}`).Code)
+}
+
 func TestPostTaskSummary_Refusals(t *testing.T) {
 	cases := []struct {
 		name    string

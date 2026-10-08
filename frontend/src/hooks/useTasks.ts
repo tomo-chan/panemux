@@ -224,7 +224,7 @@ export function useTasks(enabled: boolean): TasksState {
     if (!task.session_id) return 'This task has no session ID to summarize'
     const result = await postTaskAction(
       '/api/tasks/summary',
-      { host: task.host, session_id: task.session_id },
+      { host: task.host, agent: task.agent, session_id: task.session_id },
       TaskSummarySchema,
     )
     if (!result.ok) return result.error

@@ -80,7 +80,7 @@ func TestBuildTasks_CodexStateFromThreadTurns(t *testing.T) {
 			assert.Equal(t, hostAgo(codexProcElapsed), task.StartedAt)
 			assert.Equal(t, Location{Kind: LocationTmux, TmuxSession: "task-a5e25ebc", Attachable: true}, task.Location)
 			assert.Empty(t, task.WaitingFor)
-			assert.Nil(t, task.Log, "codex tasks are not summarized")
+			assert.NotNil(t, task.Log, "codex tasks carry their rollout version")
 		})
 	}
 }
@@ -303,7 +303,7 @@ func TestBuildTasks_StoppedCodexSessions(t *testing.T) {
 	assert.Equal(t, "/workspace/user/api", task.CWD)
 	assert.Equal(t, hostAgo(3600), task.StatusSince)
 	assert.Equal(t, Location{Kind: LocationNone}, task.Location)
-	assert.Nil(t, task.Log)
+	assert.NotNil(t, task.Log)
 }
 
 // The 50 stopped tasks a host lists are the newest of claude's and codex's

@@ -988,7 +988,7 @@ describe('TaskDashboard summaries', () => {
   it('says a task that is not claude cannot be summarized', () => {
     renderDashboard(tasksState({ data: { ...response, summaries_enabled: true } }))
     selectCard('run-1')
-    expect(workSection()).toHaveTextContent('Only a claude task with a session ID can be summarized.')
+    expect(workSection()).toHaveTextContent('Only a Claude or Codex task with a session ID can be summarized.')
   })
 
   // efficacy:exempt unchanged by this branch; the tests appended after it fall inside its line range

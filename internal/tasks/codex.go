@@ -21,6 +21,7 @@ import (
 // file name), the cwd and originator of its session_meta line, and the file's
 // modification time and size.
 type codexRollout struct {
+	File       string
 	SessionID  string
 	CWD        string
 	Originator string
@@ -185,8 +186,9 @@ func parseCodexOpenRow(line string) (codexOpenRollout, bool) {
 		Elapsed: parseEtime(parts[1]),
 		File:    name,
 		Rollout: codexRollout{
-			SessionID: sessionID, CWD: transcriptCWD(parts[6]), Originator: jsonFragmentString(parts[7], `"originator":`),
-			ModTime: modTime, Size: size,
+			File: name, SessionID: sessionID, CWD: transcriptCWD(parts[6]),
+			Originator: jsonFragmentString(parts[7], `"originator":`),
+			ModTime:    modTime, Size: size,
 		},
 		Turn: parseCodexTurn(parts[3], parts[4], parts[5]),
 	}, true
@@ -207,7 +209,7 @@ func parseCodexRolloutRow(line string) (codexRollout, bool) {
 	if !ok {
 		return codexRollout{}, false
 	}
-	r := codexRollout{SessionID: sessionID, ModTime: modTime, Size: size}
+	r := codexRollout{File: parts[2], SessionID: sessionID, ModTime: modTime, Size: size}
 	if len(parts) >= 4 {
 		r.CWD = transcriptCWD(parts[3])
 	}
@@ -303,6 +305,7 @@ func (b *taskBuilder) codexDaemonTasks() []Task {
 			ID:        b.id(AgentCodex, o.Rollout.SessionID),
 			Agent:     AgentCodex,
 			SessionID: o.Rollout.SessionID,
+			Log:       codexLogVersion(o.Rollout),
 			CWD:       o.Rollout.CWD,
 			PID:       o.PID,
 			Location:  Location{Kind: LocationDaemon},
@@ -323,9 +326,7 @@ func (b *taskBuilder) codexTUITasks() []Task {
 		prev, seen := current[o.PID]
 		// An equal name at an equal time is one file held on two descriptors,
 		// whose rows are alike in every field.
-		newer := o.Rollout.ModTime > prev.Rollout.ModTime ||
-			//mutation:exempt[CONDITIONALS_BOUNDARY] equivalent — replaces a row with an identical one
-			(o.Rollout.ModTime == prev.Rollout.ModTime && o.File > prev.File)
+		newer := newerCodexRollout(o.Rollout, prev.Rollout)
 		if !seen || newer {
 			current[o.PID] = o
 		}
@@ -364,6 +365,7 @@ func (b *taskBuilder) codexTUITasks() []Task {
 		sessions[o.Rollout.SessionID] = true
 		task.ID = b.id(AgentCodex, o.Rollout.SessionID)
 		task.SessionID = o.Rollout.SessionID
+		task.Log = codexLogVersion(o.Rollout)
 		if o.Rollout.CWD != "" {
 			task.CWD = o.Rollout.CWD
 		}
@@ -480,4 +482,18 @@ func isCodexProgram(command string) bool {
 
 func fieldBase(program string) string {
 	return program[strings.LastIndex(program, "/")+1:]
+}
+
+func codexLogVersion(r codexRollout) *LogVersion {
+	return &LogVersion{File: r.File, ModTime: r.ModTime, Size: r.Size}
+}
+
+func newerCodexRollout(a, b codexRollout) bool {
+	if a.ModTime != b.ModTime {
+		return a.ModTime > b.ModTime
+	}
+	if a.Size != b.Size {
+		return a.Size > b.Size
+	}
+	return a.File > b.File
 }

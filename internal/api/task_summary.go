@@ -10,6 +10,7 @@ import (
 
 // taskSummaryRequest is the body of POST /api/tasks/summary.
 type taskSummaryRequest struct {
+	Agent     string `json:"agent,omitempty"`
 	Host      string `json:"host"`
 	SessionID string `json:"session_id"`
 }
@@ -31,7 +32,10 @@ func (h *Handler) PostTaskSummary(w http.ResponseWriter, r *http.Request) {
 	if !decodeStrict(w, r, taskRecordBodyLimit, &req) {
 		return
 	}
-	view, err := h.tasks.RequestSummary(req.Host, req.SessionID)
+	if req.Agent == "" {
+		req.Agent = tasks.AgentClaude
+	}
+	view, err := h.tasks.RequestAgentSummary(req.Host, req.Agent, req.SessionID)
 	switch {
 	case errors.Is(err, tasks.ErrInvalidSummary):
 		http.Error(w, err.Error(), http.StatusBadRequest)

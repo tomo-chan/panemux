@@ -439,9 +439,9 @@ directory last on `PATH`). `TestBuildLaunchScript_RefusesInputBeforeAnythingRuns
 
 ### Task summaries
 
-When `task_dashboard.summary.enabled` is set, the dashboard summarizes each claude task
+When `task_dashboard.summary.enabled` is set, the dashboard summarizes each Claude or Codex task
 ([behavior](../behavior/tasks.md#summaries)). That adds two sinks: a script that reads a conversation
-log on a host, and a `claude -p` process on the panemux host whose input is text from that log —
+log on a host, and the matching agent CLI process on the panemux host whose input is text from that log —
 text written by whoever and whatever took part in the conversation, which panemux does not control.
 
 **The log is read by one fixed script, run as `sh -s`**, like the collection and the launch.
@@ -528,4 +528,6 @@ are skipped. The existing first/recent text budgets still apply; unknown formats
 
 These primitives are covered by `TestBuildCodexExcerpt_*`, `TestBuildCodexTranscriptScript`,
 `TestRunLocal_CodexTranscriptReadsNewestAndBounds`, `TestCodexSummarizer_*` and
-`TestParseCodexSummaryOutput`. They are not yet connected to dashboard summary scheduling.
+`TestParseCodexSummaryOutput`. The service routes by host, agent and session; Codex never falls back to Claude. The reader pins
+the collected basename and version, validates session_meta.id, and rejects a change before or
+during the read instead of substituting another rollout.
