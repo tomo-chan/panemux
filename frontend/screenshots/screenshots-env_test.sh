@@ -328,6 +328,43 @@ else
 	fail 'a stale lock is taken over'
 fi
 
+# ── tmux_socket_path_check: a socket path too long fails before the run ────
+
+# A Unix socket path is limited to 104 bytes on macOS and 108 on Linux,
+# counting the terminating NUL. tmux fails late and obscurely past it, so the
+# fixtures check first. Run in a subshell: the helper only prints and returns.
+case $(uname -s) in
+Darwin) max=103 ;;
+*) max=107 ;;
+esac
+suffix="/tmux-$(id -u)/default"
+fits=$(printf '%*s' $((max - ${#suffix})) '' | tr ' ' a)
+check
+if output=$(sh -c '. "$1"; tmux_socket_path_check "/$2"' sh "$here/../e2e/tmux-env.sh" "${fits#?}" 2>&1); then
+	pass 'a socket path at the limit is accepted'
+else
+	fail 'a socket path at the limit is accepted' "$output"
+fi
+check
+if output=$(sh -c '. "$1"; tmux_socket_path_check "/$2"' sh "$here/../e2e/tmux-env.sh" "$fits" 2>&1); then
+	fail 'a socket path one byte over the limit is refused'
+else
+	case $output in
+	*TMPDIR*) pass 'a socket path one byte over the limit is refused' ;;
+	*) fail 'a socket path one byte over the limit is refused: the message does not say what to change' "$output" ;;
+	esac
+fi
+check
+long="$work/$(printf '%*s' 120 '' | tr ' ' l)"
+mkdir -p "$long"
+if output=$(TMPDIR="$long" sh -c '. "$1"; e2e_tmux_env' sh "$here/../e2e/tmux-env.sh" 2>&1); then
+	fail 'e2e_tmux_env refuses a $TMPDIR too long for the socket'
+elif [ -n "$(ls -A "$long")" ]; then
+	fail 'e2e_tmux_env refuses a $TMPDIR too long for the socket: it left its directory behind'
+else
+	pass 'e2e_tmux_env refuses a $TMPDIR too long for the socket'
+fi
+
 if [ "$failures" -ne 0 ]; then
 	echo "screenshots-env tests: $failures of $checks failed"
 	exit 1

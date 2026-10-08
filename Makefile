@@ -1,4 +1,4 @@
-.PHONY: all build build-frontend build-backend dev clean run install-deps install-deps-ci install-hooks test-install-hooks test-tmpdir-guard test-golangci-lint-cache \
+.PHONY: all build build-frontend build-backend dev clean run install-deps install-deps-ci install-hooks test-install-hooks test-tmpdir-guard test-golangci-lint-cache test-require-pty \
         test test-go test-frontend test-e2e test-agmsg-contract test-hooks test-efficacy efficacy \
         test-scenarios-check check-scenarios check-docs-links test-docs-links screenshots test-screenshots-check \
         coverage-blocks test-coverage-blocks \
@@ -36,7 +36,7 @@ install-hooks:
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
-test: test-go test-frontend test-hooks test-tmpdir-guard test-install-hooks test-golangci-lint-cache test-efficacy test-scenarios-check test-docs-links test-screenshots-check \
+test: test-go test-frontend test-hooks test-tmpdir-guard test-install-hooks test-golangci-lint-cache test-require-pty test-efficacy test-scenarios-check test-docs-links test-screenshots-check \
       test-coverage-blocks test-mutation test-model-check
 
 test-go:
@@ -45,7 +45,11 @@ test-go:
 test-frontend:
 	cd frontend && npm test
 
+# Skipped, with a message, where no pseudo-terminal can be opened (the Claude
+# Code sandbox): every pane panemux starts needs one. CI never skips it.
 test-e2e:
+	@status=0; sh scripts/require_pty.sh skip 'make test-e2e' || status=$$?; \
+	if [ "$$status" -eq 3 ]; then exit 0; elif [ "$$status" -ne 0 ]; then exit "$$status"; fi; \
 	cd frontend && npm run test:e2e
 
 # ── Documentation screenshots (not a gate) ────────────────────────────────────
@@ -54,8 +58,10 @@ test-e2e:
 # content (frontend/screenshots/). Not part of `make check`: it rewrites
 # tracked images, and a pixel diff caused by a font or browser update is not
 # a failure. Run it after a UI change the README images show, and commit the
-# images it writes.
+# images it writes. It needs a pseudo-terminal and tmux, which the Claude Code
+# sandbox denies, so it is run outside the sandbox.
 screenshots:
+	sh scripts/require_pty.sh fail 'make screenshots'
 	cd frontend && npm run screenshots
 
 # Whether a pull request that changes what the screenshots show retook them is
@@ -263,6 +269,9 @@ test-install-hooks:
 
 test-golangci-lint-cache:
 	sh scripts/golangci_lint_cache_test.sh
+
+test-require-pty:
+	sh scripts/require_pty_test.sh
 
 # both directions are asserted. Hermetic: it drives the scripts against temp
 # files and throwaway git repositories, never this checkout.
