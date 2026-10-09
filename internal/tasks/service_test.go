@@ -3,6 +3,7 @@ package tasks
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -970,4 +971,125 @@ func TestReconnect_DiscardsTheDialInFlight(t *testing.T) {
 			assert.Equal(t, 0, fresh.closeCount())
 		})
 	}
+}
+
+// stateOutput is a complete collection whose state section holds the given
+// name and content pairs, with pid 5 running claude.
+func stateOutput(files ...string) []byte {
+	lines := []string{"::panemux-tasks v1", "::now 1000", "::section state"}
+	for i := 0; i+1 < len(files); i += 2 {
+		lines = append(lines, "::file "+files[i], files[i+1])
+	}
+	lines = append(lines, "::section ps", "5 1 claude",
+		"::section tmux", "::section cwd", "::section transcripts", "::end")
+	return joinLines(lines...)
+}
+
+// An unreadable state file is reported on its host's result, and logged when
+// it appears, when its reason changes and when it can be read again — not on
+// every collection, which runs every few seconds while the dashboard is
+// shown (issue #313).
+func TestCollect_ReportsAndLogsUnreadableStateFilesWhenTheyChange(t *testing.T) {
+	var (
+		out    []byte
+		runErr error
+		logs   []string
+	)
+	svc := New(Options{
+		RunLocal: func(context.Context, string) ([]byte, error) { return out, runErr },
+		Now:      (&clock{now: collectedAt}).Now,
+		Logf:     func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) },
+	})
+	defer svc.Close()
+	collect := func(o []byte, err error) (HostResult, []string) {
+		out, runErr, logs = o, err, nil
+		return hostResult(t, svc.Collect(context.Background()), ""), logs
+	}
+
+	host, logged := collect(stateOutput("5.json", "{", "odd\x1b.json", "{"), nil)
+	assert.Equal(t, []UnreadableStateFile{
+		{
+			name: "5.json", File: "5.json", Reason: UnreadableNotJSON, Detail: "unexpected end of JSON input",
+			PID: 5, Location: &Location{Kind: LocationOutside},
+		},
+		{name: "odd\x1b.json", File: "odd�.json", Reason: UnreadableNotJSON, Detail: "unexpected end of JSON input"},
+	}, host.UnreadableStateFiles)
+	const prefix = "task collection on the panemux host: state file "
+	assert.Equal(t, []string{
+		prefix + `"5.json" cannot be read: not_json: "unexpected end of JSON input"`,
+		prefix + `"odd�.json" cannot be read: not_json: "unexpected end of JSON input"`,
+	}, logged)
+
+	_, logged = collect(stateOutput("5.json", "{", "odd\x1b.json", "{"), nil)
+	assert.Empty(t, logged, "nothing changed")
+
+	host, logged = collect(nil, errors.New("sh: not found"))
+	assert.Empty(t, host.UnreadableStateFiles)
+	assert.Empty(t, logged, "a failed collection says nothing about the files")
+
+	_, logged = collect(stateOutput("5.json", `{"pid":5}`, "odd\x1b.json", "{"), nil)
+	assert.Equal(t, []string{
+		`task collection on the panemux host: state file "5.json" cannot be read: invalid_session_id: "sessionId is missing"`,
+	}, logged)
+
+	host, logged = collect(stateOutput("5.json", `{"pid":5,"sessionId":"sess-a"}`), nil)
+	assert.Empty(t, host.UnreadableStateFiles)
+	assert.Equal(t, []string{
+		`task collection on the panemux host: state file "5.json" can be read again or is gone`,
+		`task collection on the panemux host: state file "odd�.json" can be read again or is gone`,
+	}, logged)
+}
+
+// Two file names that differ only after the bound show the same bounded
+// name, but they are still two files: each is logged once, not on every
+// collection, and each is logged again when it alone can be read again.
+func TestCollect_LogsUnreadableStateFilesByTheirFullName(t *testing.T) {
+	var (
+		out  []byte
+		logs []string
+	)
+	svc := New(Options{
+		RunLocal: func(context.Context, string) ([]byte, error) { return out, nil },
+		Now:      (&clock{now: collectedAt}).Now,
+		Logf:     func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) },
+	})
+	defer svc.Close()
+	collect := func(o []byte) (HostResult, []string) {
+		out, logs = o, nil
+		return hostResult(t, svc.Collect(context.Background()), ""), logs
+	}
+	long := strings.Repeat("a", 140)
+	both := stateOutput(long+"-one.json", "not json", long+"-two.json", `{"pid":0}`)
+
+	host, logged := collect(both)
+	require.Len(t, host.UnreadableStateFiles, 2)
+	assert.Equal(t, host.UnreadableStateFiles[0].File, host.UnreadableStateFiles[1].File, "the bounded names collide")
+	assert.Len(t, logged, 2)
+	for range 4 {
+		_, logged = collect(both)
+		assert.Empty(t, logged, "nothing changed")
+	}
+
+	_, logged = collect(stateOutput(long+"-two.json", `{"pid":0}`))
+	bounded := strings.Repeat("a", maxUnreadableFileName-1) + "…"
+	assert.Equal(t, []string{
+		`task collection on the panemux host: state file "` + bounded + `" can be read again or is gone`,
+	}, logged)
+}
+
+// The attention collection lists running tasks only; the diagnostics come
+// with the full collection, and the attention one does not log them twice.
+func TestCollectAttention_DoesNotReportUnreadableStateFiles(t *testing.T) {
+	var logs []string
+	svc := New(Options{
+		RunLocal: localOutput(stateOutput("5.json", "{"), nil),
+		Now:      (&clock{now: collectedAt}).Now,
+		Logf:     func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) },
+	})
+	defer svc.Close()
+	snap := svc.CollectAttention(context.Background())
+	assert.Empty(t, hostResult(t, snap, "").UnreadableStateFiles)
+	assert.Empty(t, logs)
+	require.Len(t, snap.Tasks, 1)
+	assert.Equal(t, "local:claude:pid-5", snap.Tasks[0].ID)
 }

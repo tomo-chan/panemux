@@ -98,6 +98,37 @@ prompt; a request that never starts a subprocess does not create a turn.
 
 ## Task dashboard
 
+### Unreadable state files are diagnostics, not tasks (2026-10-09, issue #313)
+
+Stage 1 of issue #252 kept a state file it could not read on the board as an `unknown` task
+(`state-file:<file name>`), so that a Claude Code format change would not look like every agent had
+stopped. The card did signal that, but nothing could be done with it: with no session ID it could not
+be marked done, labelled or resumed, its file name sat only inside its task ID, and why it failed —
+not JSON, no positive `pid`, no valid `sessionId` — was neither shown nor logged.
+Issue [#313](https://github.com/tomo-chan/panemux/issues/313) replaces it:
+
+- **The file is not a task; its process is.** The live claude process the file name names is listed
+  as `pid-<pid>`, as any claude process with no readable state file is. Showing it only in the
+  details, as the design mock first proposed, was rejected because the running task is what claims
+  the newest conversation log in its directory: without it, that log would appear a second time as
+  a stopped task. A pid inside an unreadable file no longer counts as describing a process.
+- **Only `pid` and `sessionId` make a file unreadable.** Decoding the whole file into one struct
+  had also failed it for a `cwd` or `status` of another type, a fourth reason the issue did not
+  list. Every field being optional, such a field is now read as absent instead.
+- **One warning for all hosts, among the bar's actions.** A warning per host chip would crowd the
+  chips as hosts are added. With too many hosts for one line, the actions wrap as one group, so the
+  warning keeps its place at the head of them, rather than a separate place for narrow bars. The
+  first version kept the group on one line whatever the width, which cut off its last buttons on a
+  screen narrower than the group (review of PR #337); the group now wraps inside only then.
+- **Logged on change, not per collection.** A collection runs every few seconds while the dashboard
+  is shown; a line per collection would bury everything else. A file is logged when it appears, when
+  its reason changes, and when it is readable again or gone.
+- **Leftovers stay ignored.** An unreadable file whose pid is no longer claude is not reported, as
+  before (confirmed with the user, 2026-10-09). Claude Code appeared to remove its file on a normal
+  exit where this was checked; whether a crash leaves one is not confirmed.
+- **Only `GET /api/tasks` reports them.** The task event stream's host status is not extended, so the
+  attention collection neither reports nor logs them a second time.
+
 ### Working directory suggestions come from the board's tasks, stored nowhere (2026-10-09, issue #311)
 
 Issue [#311](https://github.com/tomo-chan/panemux/issues/311) offers New task's working directory
@@ -536,7 +567,7 @@ while being built:
   file stays on the board as `unknown` instead of disappearing, and only the first `"cwd"` of a log
   is read. Codex has no equivalent that has been checked, so codex tasks are running processes and
   nothing more (issue #252, open question 5). *Superseded by the issue #264 entry above: codex's
-  rollouts are read.*
+  rollouts are read.* *The unreadable state file as a task on the board is superseded by the issue #313 entry above.*
 - **Liveness is "the pid is alive and its program is claude", and `procStart` is not used.** A
   state file's pid alone is not enough, because pids restart after a host reboot. Claude
   Code 2.1.282's `procStart` matched field 22 of `/proc/<pid>/stat` (clock ticks since boot) for the

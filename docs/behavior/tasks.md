@@ -117,7 +117,7 @@ ends before its terminating marker — a connection dropped mid-run — fails th
 | `busy` | Running and working | Live claude process, `status: "busy"` |
 | `idle` | Running and waiting for the next instruction | Live claude process, `status: "idle"` |
 | `run` | A codex process is running and has no session yet | A live interactive `codex` process holding no rollout ([Codex sessions](#codex-sessions)) |
-| `unknown` | A session is running but its state cannot be read | A live claude process that no state file describes; a state file that is not JSON or lacks a pid or a valid session ID; a live claude process reporting another `status`; or a codex session whose `thread_turns` and rollout tail say nothing about its newest turn |
+| `unknown` | A session is running but its state cannot be read | A live claude process that no readable state file describes — its file is missing or [could not be read](#unreadable-state-files); a live claude process reporting another `status`; or a codex session whose `thread_turns` and rollout tail say nothing about its newest turn |
 | `stop` | Nothing is handling the session | A conversation log with no live claude process for its session ID, or an interactive codex rollout that no live codex process holds open |
 
 - **A process is a claude process when its program has a path component named `claude` or
@@ -132,9 +132,10 @@ ends before its terminating marker — a connection dropped mid-run — fails th
   `<pid>.json` stay the same and the file's `sessionId` becomes the resumed session, so the session
   switched away from is listed as stopped and the resumed one as running where the process runs.
   A normal exit removes the state file.
-- A state file that cannot be read is shown as `unknown` while the pid in its name (`<pid>.json`)
-  is a claude process, dropped when that pid is not, and kept when the name carries no pid.
-- **A running claude process that no state file names is shown as `unknown`, not `stop`**, with its
+- **A state file that cannot be read is not a task.** It is reported as a diagnostic instead
+  ([Unreadable state files](#unreadable-state-files)); the claude process its name (`<pid>.json`)
+  points to is listed as any claude process no state file describes is, below.
+- **A running claude process that no readable state file names is shown as `unknown`, not `stop`**, with its
   process's working directory, so a Claude Code release that moved or stopped writing the state
   files does not make every running agent look stopped.
 - A running `unknown` claude task is taken to be writing the newest conversation log in its working
@@ -150,6 +151,57 @@ ends before its terminating marker — a connection dropped mid-run — fails th
   `startedAt`; for a stopped task it is the log's modification time. Every host time is converted by
   its age against that host's own clock, so a host whose clock is wrong does not shift the dashboard.
   A time ahead of the host's clock is treated as "now".
+
+### Unreadable state files
+
+A state file under `~/.claude/sessions` can be read when it is a JSON object with a positive integer
+`pid` and a `sessionId` made of letters, digits, `-` and `_`. Every other field is optional: one that
+is absent or of another type (a `cwd` that is a number, say) is read as absent, and the file is read.
+A file that fails is unreadable for one of three reasons, checked in this order:
+
+| Reason (`reason`) | Shown as | Detail |
+|---|---|---|
+| `not_json` | Not valid JSON | The JSON parser's error, or `not a JSON object` for an array, a scalar or `null` |
+| `invalid_pid` | pid missing or not positive | `pid is missing`, or `pid: ` and the value as written |
+| `invalid_session_id` | sessionId missing or not a session ID | `sessionId is missing`, or `sessionId: ` and the value as written |
+
+- An unreadable file whose name is `<pid>.json` is reported only while that pid is a claude process;
+  once it is not, the file is a leftover and is ignored, as a readable leftover is. Claude Code
+  appeared to remove its own file on a normal exit where this was checked; whether a crash or a
+  forced kill leaves one behind is not confirmed. A file whose name carries no pid cannot be checked
+  and is always reported.
+- **Not on the board.** The file is not a task. The live claude process its name points to is listed
+  as `unknown` under `pid-<pid>`, located like any running task, and the newest conversation log in
+  its working directory is taken to be its own.
+- **In the server log**, once per host, file and reason: when a file becomes unreadable, when its
+  reason changes, and when it can be read again or is gone. A file is told apart by its full name,
+  so two names that differ only after the cut below are two files. The file name and detail are
+  quoted.
+- **On the dashboard**, a warning at the right of the top bar carries the count across every host
+  and opens the details: per file, the host, the file name, the reason and its detail, and the
+  process (the pid in the name and where it runs, or `unknown` when the name carries no pid). *Copy
+  details* copies the same as tab-separated text. The details close by themselves when no file is
+  left, and do not reopen when one becomes unreadable again.
+- File names and details come from the host: they reach the API and the log without control or
+  invisible format characters (each replaced by U+FFFD) and cut to 128 and 120 characters.
+
+How to fix one:
+
+1. Open the file the details name on that host: `~/.claude/sessions/<file>`.
+2. Compare it with what panemux reads: `pid` (the claude process, a positive integer), `sessionId`
+   (the conversation log `~/.claude/projects/*/<sessionId>.jsonl`), `cwd`, `status` (`busy`,
+   `waiting`, `idle`), `waitingFor`, `statusUpdatedAt`, `updatedAt` and `startedAt`
+   (`claudeState` in `internal/tasks/derive.go`).
+3. What to change depends on what differs:
+   - **A file a running claude is still writing** (`not_json` with `unexpected end of JSON input`)
+     usually reads on the next collection. Wait a few seconds.
+   - **A leftover from a claude that is gone** — its pid is not running, or the details show no
+     pid — can be moved out of `~/.claude/sessions`. Its session still shows as stopped through its
+     conversation log.
+   - **Every file on a host failing the same way** after a Claude Code update means the format
+     changed: `pid` or `sessionId` was renamed, moved or retyped. Do not edit the files, which
+     Claude Code rewrites; report it with *Copy details* so `readStateFile` in
+     `internal/tasks/state_file.go` can follow the new format.
 
 ### Wait signature
 
@@ -733,7 +785,15 @@ Collects from every host and returns:
 ```json
 {
   "hosts": [
-    { "name": "", "status": "ok", "collected_at": "2026-09-25T12:00:00Z" },
+    {
+      "name": "", "status": "ok", "collected_at": "2026-09-25T12:00:00Z",
+      "unreadable_state_files": [
+        {
+          "file": "48213.json", "reason": "not_json", "detail": "unexpected end of JSON input",
+          "pid": 48213, "location": { "kind": "outside", "attachable": false }
+        }
+      ]
+    },
     { "name": "gpu-box", "status": "error", "error": "connect to gpu-box: dial tcp: i/o timeout" }
   ],
   "tasks": [
@@ -777,12 +837,16 @@ Collects from every host and returns:
 
 - `hosts` lists the panemux host first, then `ssh_connections` keys in name order. `status` is `ok`,
   `error` (with `error`) or `connecting`; `collected_at` is present when `status` is `ok`.
+- `unreadable_state_files` lists the host's state files that could not be read, by file name, and is
+  omitted when there are none ([Unreadable state files](#unreadable-state-files)). `reason` is
+  `not_json`, `invalid_pid` or `invalid_session_id`; `detail` is omitted when empty; `pid` and
+  `location` are the live claude process the file name names, omitted when it names none. Only
+  this route reports them: the task event stream does not.
 - `tasks` lists each host's running tasks in `id` order, then its stopped tasks newest first. It is
   `[]` when there are none.
 - `id` is `local:<agent>:<key>` for the panemux host and `ssh:<host>:<agent>:<key>` for an SSH host,
   where the key is the session ID, `pid-<pid>` for a codex process with no session yet and for a
-  claude process no state file names, or `state-file:<file name>` for a state file that could not be
-  read.
+  claude process no readable state file names.
 - `session_id`, `cwd`, `waiting_for`, `status_since`, `started_at`, `pid`, `git` and
   `location.pane_id` are omitted when unknown. `waiting_for` is present only in the `wait` state.
 - `wait_signature` is present only in the `wait` state, and only when the agent recorded when the

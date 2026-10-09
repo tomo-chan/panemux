@@ -474,11 +474,25 @@ export const TaskSchema = z.object({
 
 export type Task = z.infer<typeof TaskSchema>
 
+// A Claude Code state file the host could not read (issue #313). It is not a
+// task; the dashboard shows it as a diagnostic. pid and location are the live
+// claude process the file name (<pid>.json) names, absent when it names none.
+export const TaskUnreadableStateFileSchema = z.object({
+  file: z.string(),
+  reason: z.enum(['not_json', 'invalid_pid', 'invalid_session_id']),
+  detail: z.string().optional(),
+  pid: z.number().int().positive().optional(),
+  location: TaskLocationSchema.optional(),
+})
+
+export type TaskUnreadableStateFile = z.infer<typeof TaskUnreadableStateFileSchema>
+
 export const TaskHostSchema = z.object({
   name: z.string(),
   status: z.enum(['ok', 'error', 'connecting']),
   error: z.string().optional(),
   collected_at: z.string().optional(),
+  unreadable_state_files: z.array(TaskUnreadableStateFileSchema).optional(),
 })
 
 export type TaskHost = z.infer<typeof TaskHostSchema>

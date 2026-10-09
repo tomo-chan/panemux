@@ -37,6 +37,8 @@ import {
 } from '../utils/taskBoard'
 import type { LaneMode, LaunchedTaskRef, TaskInputAction, TaskOpenAction, TaskPaneRef } from '../utils/taskBoard'
 import { matchLabelSuggestions } from '../utils/labelSuggestions'
+import { unreadableRows } from '../utils/unreadableState'
+import UnreadableStateDialog from './UnreadableStateDialog'
 import type { TaskAgent } from '../hooks/useTasks'
 
 // Layer 1 of issue #252: every agent session on every host, as a kanban by
@@ -136,6 +138,7 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
   const [detailOpen, setDetailOpen] = useState(false)
   const [newTaskOpen, setNewTaskOpen] = useState(false)
   const [hostsOpen, setHostsOpen] = useState(false)
+  const [unreadableOpen, setUnreadableOpen] = useState(false)
   const [flashTaskId, setFlashTaskId] = useState<string | null>(null)
   const ownHostsState = useSSHConnections()
   const hostsDialogState = hostsState ?? ownHostsState
@@ -168,6 +171,10 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
   const tasks = useMemo(() => data?.tasks ?? [], [data])
   const summariesEnabled = data?.summaries_enabled ?? false
   const hosts = data?.hosts ?? []
+  const unreadableCount = unreadableRows(hosts).length
+  // Once the files are gone the details are closed, so they do not open by
+  // themselves when a file becomes unreadable again.
+  if (unreadableOpen && unreadableCount === 0) setUnreadableOpen(false)
   const labels = useMemo(() => allLabels(tasks), [tasks])
   // The labels used before, for the label inputs only: the label filter
   // offers the labels on the board. None are offered while the record file
@@ -354,26 +361,45 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
           ))}
         </ul>
         <span className="td-spacer" />
-        <span className="td-updated" aria-live="polite">
-          {updatedLabel(loading, updatedAt, nowMs)}
-        </span>
-        <button type="button" className="td-btn" onClick={() => void refresh()} disabled={loading}>
-          Refresh
-        </button>
-        <button type="button" className="td-btn" onClick={() => setHostsOpen(true)}>
-          Hosts…
-        </button>
-        <button type="button" className="td-btn td-btn-primary" onClick={() => setNewTaskOpen(true)}>
-          New task
-        </button>
-        <button type="button" className="td-btn" onClick={onShowWorkspaces} aria-keyshortcuts={shortcut?.aria}>
-          Workspaces
-          {shortcut && (
-            <span className="td-kbd" aria-hidden="true">
-              {shortcut.label}
-            </span>
+        <div className="td-top-actions">
+          {unreadableCount > 0 && (
+            <button
+              type="button"
+              className="td-btn td-btn-warn"
+              aria-expanded={unreadableOpen}
+              aria-controls="td-unreadable-dialog"
+              aria-label={`${unreadableCount} unreadable session state file${unreadableCount === 1 ? '' : 's'} — ${unreadableOpen ? 'hide' : 'show'} details`}
+              onClick={() => setUnreadableOpen((open) => !open)}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M12 3 2 21h20L12 3z" />
+                <path d="M12 10v5" />
+                <path d="M12 18h.01" />
+              </svg>
+              {unreadableCount} unreadable
+            </button>
           )}
-        </button>
+          <span className="td-updated" aria-live="polite">
+            {updatedLabel(loading, updatedAt, nowMs)}
+          </span>
+          <button type="button" className="td-btn" onClick={() => void refresh()} disabled={loading}>
+            Refresh
+          </button>
+          <button type="button" className="td-btn" onClick={() => setHostsOpen(true)}>
+            Hosts…
+          </button>
+          <button type="button" className="td-btn td-btn-primary" onClick={() => setNewTaskOpen(true)}>
+            New task
+          </button>
+          <button type="button" className="td-btn" onClick={onShowWorkspaces} aria-keyshortcuts={shortcut?.aria}>
+            Workspaces
+            {shortcut && (
+              <span className="td-kbd" aria-hidden="true">
+                {shortcut.label}
+              </span>
+            )}
+          </button>
+        </div>
       </header>
 
       {error && (
@@ -515,6 +541,11 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
         onLaunch={launch}
         onLaunched={launched}
         onClose={() => setNewTaskOpen(false)}
+      />
+      <UnreadableStateDialog
+        isOpen={unreadableOpen}
+        hosts={hosts}
+        onClose={() => setUnreadableOpen(false)}
       />
       <DashboardHostsDialog
         isOpen={hostsOpen}

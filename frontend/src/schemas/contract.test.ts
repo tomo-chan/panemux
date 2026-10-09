@@ -170,6 +170,7 @@ const fixtureless: Record<string, string> = {
   TaskAutolinkSchema: 'component of TaskGitSchema, via tasks',
   TaskSchema: 'component of TasksResponseSchema',
   TaskHostSchema: 'component of TasksResponseSchema',
+  TaskUnreadableStateFileSchema: 'component of TaskHostSchema, via tasks',
   TaskEventStateSchema: 'component of TaskEventFrameSchema, via ws-task-events-frames',
   TaskEventTaskSchema: 'component of TaskEventFrameSchema, via ws-task-events-frames',
   TaskEventHostSchema: 'component of TaskEventFrameSchema, via ws-task-events-frames',

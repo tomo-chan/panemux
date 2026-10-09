@@ -290,9 +290,7 @@ describe('taskTitle', () => {
 
   it('falls back to the session id, then to what kind of task it is', () => {
     expect(taskTitle(task({ cwd: undefined }))).toBe('Session 7c21e0a4')
-    expect(taskTitle(task({ cwd: undefined, session_id: undefined, state: 'unknown' }))).toBe(
-      'Unreadable session state',
-    )
+    expect(taskTitle(task({ cwd: undefined, session_id: undefined, state: 'unknown' }))).toBe('claude session')
     expect(taskTitle(task({ cwd: undefined, session_id: undefined, agent: 'codex', state: 'run' }))).toBe(
       'codex session',
     )

@@ -1162,6 +1162,8 @@ describe('TaskDashboard focus request (issue #279)', () => {
 })
 
 describe('TaskDashboard listed tasks (issue #279)', () => {
+  // efficacy:exempt unchanged by this branch — the red-check maps the blank line before the describe
+  // block appended below this one onto this test.
   it('reports the tasks it lists after its filters, for deciding whether a wait is visible', () => {
     const onListedTasksChange = vi.fn()
     render(
@@ -1179,5 +1181,84 @@ describe('TaskDashboard listed tasks (issue #279)', () => {
 
     fireEvent.change(screen.getByRole('searchbox', { name: 'Filter tasks' }), { target: { value: 'no task matches this' } })
     expect((onListedTasksChange.mock.lastCall?.[0] as ReadonlySet<string>).size).toBe(0)
+  })
+})
+
+describe('TaskDashboard unreadable session state (issue #313)', () => {
+  const unreadableHosts: TasksState['data'] = {
+    hosts: [
+      {
+        name: '',
+        status: 'ok',
+        unreadable_state_files: [
+          { file: '5.json', reason: 'not_json', detail: 'unexpected end of JSON input', pid: 5, location: { kind: 'outside', attachable: false } },
+          { file: 'odd.json', reason: 'invalid_pid' },
+        ],
+      },
+      { name: 'gpu-1', status: 'ok', unreadable_state_files: [{ file: '9.json', reason: 'invalid_session_id' }] },
+      { name: 'build-box', status: 'ok' },
+    ],
+    tasks: [],
+  }
+
+  // efficacy:exempt the absence the reverted implementation also has: it guards the warning's
+  // condition, which the tests below make go red.
+  it('shows no warning while every state file can be read', () => {
+    renderDashboard()
+    expect(screen.queryByRole('button', { name: /unreadable/ })).not.toBeInTheDocument()
+  })
+
+  it('shows one warning with the count across every host, among the actions rather than the hosts', () => {
+    renderDashboard(tasksState({ data: unreadableHosts }))
+    const warning = screen.getByRole('button', { name: '3 unreadable session state files — show details' })
+    expect(warning).toHaveTextContent('3 unreadable')
+    expect(warning).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.getByRole('list', { name: 'Hosts' })).not.toContainElement(warning)
+    const actions = warning.closest('.td-top-actions')
+    expect(actions).not.toBeNull()
+    expect(actions?.firstElementChild).toBe(warning)
+    expect(actions).toContainElement(screen.getByRole('button', { name: 'Refresh' }))
+  })
+
+  it('opens and closes the details', () => {
+    renderDashboard(tasksState({ data: unreadableHosts }))
+    fireEvent.click(screen.getByRole('button', { name: /show details/ }))
+    const dialog = screen.getByRole('dialog', { name: 'Unreadable session state · 3 files on 2 hosts' })
+    expect(within(dialog).getAllByRole('row')).toHaveLength(4)
+    expect(screen.getByRole('button', { name: /unreadable session state files/, hidden: true })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    )
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('stays closed when the files are gone and come back', () => {
+    const dashboard = (state: TasksState) => (
+      <TaskDashboard
+        tasksState={state}
+        workspaces={workspaces}
+        onOpenTask={vi.fn()}
+        onShowWorkspaces={vi.fn()}
+        now={() => NOW}
+      />
+    )
+    const { rerender } = render(dashboard(tasksState({ data: unreadableHosts })))
+    fireEvent.click(screen.getByRole('button', { name: /show details/ }))
+    expect(screen.getByRole('dialog', { name: /Unreadable/ })).toBeInTheDocument()
+    rerender(dashboard(tasksState({ data: { hosts: [{ name: '', status: 'ok' }], tasks: [] } })))
+    expect(screen.queryByRole('dialog', { name: /Unreadable/ })).not.toBeInTheDocument()
+    rerender(dashboard(tasksState({ data: unreadableHosts })))
+    expect(screen.queryByRole('dialog', { name: /Unreadable/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /show details/ })).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('says file, not files, for one', () => {
+    renderDashboard(
+      tasksState({
+        data: { hosts: [{ name: '', status: 'ok', unreadable_state_files: [{ file: 'a.json', reason: 'not_json' }] }], tasks: [] },
+      }),
+    )
+    expect(screen.getByRole('button', { name: '1 unreadable session state file — show details' })).toBeInTheDocument()
   })
 })

@@ -63,10 +63,11 @@
       {
         "agent": "claude",
         "host": "",
-        "id": "local:claude:state-file:103.json",
+        "id": "local:claude:pid-103",
         "location": {
           "attachable": false,
-          "kind": "outside"
+          "kind": "outside",
+          "pane_id": "pane-1790000000000-d3e4f"
         },
         "state": "unknown"
       },

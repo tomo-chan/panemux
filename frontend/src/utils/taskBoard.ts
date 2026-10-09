@@ -182,7 +182,6 @@ export function taskTitle(task: Task): string {
     return segments.length > 0 ? segments[segments.length - 1] : task.cwd
   }
   if (task.session_id) return `Session ${task.session_id.slice(0, 8)}`
-  if (task.state === 'unknown') return 'Unreadable session state'
   return `${task.agent} session`
 }
 

@@ -307,6 +307,33 @@ test('opens Type in pane as a full sheet with no maximize on a narrow screen', a
   await expect(dialog).toHaveCount(0)
 })
 
+test('keeps every top-bar action on screen on a narrow screen, the unreadable warning first', async ({ page }) => {
+  await page.setViewportSize({ width: 480, height: 800 })
+  await openDashboard(page)
+  const bar = page.locator('.td-top')
+  const warning = bar.getByRole('button', { name: '1 unreadable session state file — show details' })
+  await expect(warning).toBeVisible()
+  for (const button of [warning, ...['Refresh', 'Hosts…', 'New task', 'Workspaces'].map((name) => bar.getByRole('button', { name, exact: false }))]) {
+    await expect(button).toBeInViewport({ ratio: 1 })
+  }
+  const warningBox = (await warning.boundingBox())!
+  const refreshBox = (await bar.getByRole('button', { name: 'Refresh' }).boundingBox())!
+  expect(warningBox.y <= refreshBox.y || warningBox.x < refreshBox.x).toBe(true)
+})
+
+test('keeps the unreadable state details within a short screen', async ({ page }) => {
+  await page.setViewportSize({ width: 1000, height: 300 })
+  await openDashboard(page)
+  await page.getByRole('button', { name: /unreadable session state file — show details/ }).click()
+  const dialog = page.getByRole('dialog', { name: 'Unreadable session state · 1 file on 1 host' })
+  await expect(dialog.getByRole('row')).toHaveCount(2)
+  await expect(dialog.getByRole('cell', { name: 'legacy.json' })).toBeVisible()
+  const panel = (await dialog.locator('.td-unreadable-panel').boundingBox())!
+  expect(panel.y + panel.height).toBeLessThanOrEqual(300)
+  await dialog.getByRole('button', { name: 'Copy details' }).scrollIntoViewIfNeeded()
+  await expect(dialog.getByRole('button', { name: 'Copy details' })).toBeInViewport({ ratio: 1 })
+})
+
 test('resumes a stopped task in a tmux session named after it', async ({ page, request }) => {
   test.skip(!(await hasTmux(request)), 'tmux is not installed here')
 

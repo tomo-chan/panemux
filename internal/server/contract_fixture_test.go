@@ -526,8 +526,9 @@ func fixtureLaunchService() *tasks.Service {
 // fixtureLocalTaskCollection is one of every task shape the panemux host can
 // report: waiting inside an attachable tmux session, busy outside tmux in the
 // pane its environment names, a codex process that has no session yet, a
-// codex session at work in a tmux session, a state file that cannot be read,
-// and a stopped claude session and codex session.
+// codex session at work in a tmux session, a state file that cannot be read
+// (its claude process is listed by its pid) and one whose name carries no
+// pid, and a stopped claude session and codex session.
 const fixtureLocalTaskCollection = `::panemux-tasks v1
 ::now 1790000000
 ::section state
@@ -539,6 +540,8 @@ const fixtureLocalTaskCollection = `::panemux-tasks v1
 	`"statusUpdatedAt":1789998920000,"startedAt":1789996400000}
 ::file 103.json
 {"pid":
+::file legacy.json
+{"pid":"108"}
 ::section ps
 100 1 -zsh
 101 100 claude
@@ -555,6 +558,7 @@ const fixtureLocalTaskCollection = `::panemux-tasks v1
 104 /workspace/user/sample-api
 ::section env
 102 pane-1790000000000-a1b2c
+103 pane-1790000000000-d3e4f
 ::section transcripts
 1789999900	7c21e0a4.jsonl	"cwd":"/workspace/user/panemux"	2048
 1789989200	55f0c2b8.jsonl	"cwd":"/workspace/user/service-b"	4096
@@ -628,9 +632,12 @@ func (fixtureTaskConn) Run(context.Context, string, io.Reader) ([]byte, error) {
 ::file 3120.json
 ` + `{"pid":3120,"sessionId":"3d7702fe","cwd":"/remote/home/demo/infra","status":"idle",` +
 		`"statusUpdatedAt":1789999280000,"startedAt":1789989200000}
+::file 3130.json
+{"pid":3130,"sessionId":"session 2"}
 ::section ps
 3100 1 bash
 3120 3100 claude
+3130 3100 claude
 ::section tmux
 3100 my work
 ::section cwd
