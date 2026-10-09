@@ -56,9 +56,9 @@ tab, so the approval step is both a safety and a functional requirement.
 
 Two limitations are inherent to the mechanism:
 
-- `tmux` and `ssh_tmux` panes are not covered. Their shell environment is inherited from a tmux
-  server that was started independently of panemux, and tmux does not pass unknown OSC sequences
-  through to the outer terminal by default.
+- Local `tmux` panes and already-existing remote tmux sessions are not configured for interception.
+  Reattaching does not change a running shell or Claude process's environment. URLs printed into
+  these panes remain clickable and can still prepare an SSH forward.
 - With the shim enabled, an `ssh` pane that would otherwise have used the SSH shell request runs a
   command instead, so it execs the login shell explicitly (`$SHELL -l` for `bash`, `zsh`, and
   `fish`; a plain `exec "$SHELL"` for anything else). Panes that set `cwd` or `shell` keep their
@@ -71,6 +71,28 @@ A command with any setup is POSIX shell handed whole to `/bin/sh` as one line
 (`exec /bin/sh -c '…'`), because sshd runs it with the user's login shell, which need not be POSIX.
 It therefore behaves the same under `fish` and `tcsh` as under `bash`: the shim is installed, the
 variables are exported, and the login shell starts.
+
+### New remote tmux sessions
+
+With the shim enabled, an `ssh_tmux` pane that **creates a new remote tmux session** installs the
+same shim and supplies `BROWSER` and a tmux opt-in marker using `tmux new-session -e`.
+A fixed bootstrap in the initial pane prepends the shim to that pane's effective `PATH`, saves the
+original path for non-URL fallback, then invokes the configured `default-command` or login shell.
+tmux normally overrides the initial pane's `PATH` with its client's path, so setting `PATH` with
+`-e` alone is insufficient. The server's global environment, existing sessions and configured
+`default-shell`/`default-command` options are preserved. Later windows inherit the session's
+`BROWSER` and marker; the initial pane's PATH bootstrap does not run in later windows.
+The task dashboard's attach to a session created elsewhere does not add this setup.
+
+This requires tmux **3.3 or newer**. Older or unrecognized versions, disabled interception and
+failed shim installation keep ordinary tmux attach/create behavior without interception.
+
+When a program in an opted-in session requests a URL, the shim enables `allow-passthrough` on
+**that tmux pane only** and wraps OSC 7373 in tmux's DCS passthrough sequence. The frontend receives
+the same live event as an `ssh` pane and shows `Open` / `Ignore`; neither a tab nor a forward is
+created before approval. No server-wide or window-wide tmux option is changed. Nested tmux sessions
+are not covered. Shell startup files that replace `BROWSER` or remove the shim from `PATH` can
+disable interception, as they can in an ordinary `ssh` pane.
 
 ### Clicked links
 

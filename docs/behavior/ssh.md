@@ -114,6 +114,10 @@ Pane settings in the frontend expose a directory browser for `cwd`. Local and lo
 
 For local `tmux` panes, `cwd` is passed to `tmux new-session` via `-c` and, like `ssh_tmux`, only takes effect when tmux creates a brand-new session; attaching to an already-running session of the same name keeps that session's existing working directory.
 
+New sessions created by `ssh_tmux` panes on tmux 3.3 or newer receive the browser-open shim
+environment when enabled. Existing sessions and the task dashboard's attach are left as they are;
+see [New remote tmux sessions](url-open.md#new-remote-tmux-sessions).
+
 Persistence behavior:
 
 - layout and workspace changes are persisted immediately when a save path is available

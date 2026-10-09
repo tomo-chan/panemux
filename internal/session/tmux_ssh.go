@@ -178,14 +178,43 @@ func tmuxSSHAttachCommand(tmuxSession string) string {
 // effect when attaching to an existing session.
 func tmuxSSHCommand(tmuxSession string, cfg SSHConfig) (string, error) {
 	cmd := fmt.Sprintf("tmux new-session -As '%s'", tmuxSession)
-	if cfg.Cwd == "" {
+	if cfg.Cwd != "" {
+		if err := validateRemotePath("working directory", cfg.Cwd); err != nil {
+			return "", err
+		}
+		cmd += " -c " + shellQuotePath(cfg.Cwd)
+	}
+	if !browserShimEnabled.Load() {
 		return cmd, nil
 	}
-	if err := validateRemotePath("working directory", cfg.Cwd); err != nil {
-		return "", err
-	}
-	return cmd + " -c " + shellQuotePath(cfg.Cwd), nil
+	// -e and the shell-command apply only when -A creates a session; they leave
+	// existing sessions and already-running shells alone. The bootstrap starts
+	// tmux's configured default shell/command after setting the opener PATH.
+	// tmux 3.3 introduced the pane-scoped allow-passthrough option. Older tmux
+	// and failed installs keep their ordinary attach/create behavior.
+	setup := `if tmux -V 2>/dev/null | awk '{ split($2,v,"."); ` +
+		`supported=(v[1]+0>3 || (v[1]+0==3 && v[2]+0>=3)) } END { exit (supported==0) }'; then ` +
+		remoteBrowserShimInstall() +
+		`if [ -x "$PANEMUX_SHIM_DIR/panemux-open" ]; then exec ` + cmd +
+		` -e "BROWSER=$PANEMUX_SHIM_DIR/panemux-open"` +
+		` -e PANEMUX_SHIM_TMUX=1 ` +
+		shellQuotePath("exec /bin/sh -c "+shellQuotePath(remoteTmuxBrowserShell)) +
+		`; fi; fi; exec ` + cmd
+	// sshd's login shell can be fish or tcsh; the setup is POSIX, one line,
+	// quoted into /bin/sh just like the ordinary SSH pane's setup.
+	return "exec /bin/sh -c " + shellQuotePath(setup), nil
 }
+
+// tmux takes a new pane's PATH from its attaching client, overriding even
+// new-session -e PATH. Set it inside the pane before its configured command
+// runs instead. The command is operator-owned tmux configuration, handed as
+// one argument to the same default shell tmux would otherwise have invoked.
+const remoteTmuxBrowserShell = `PANEMUX_SHIM_FALLBACK_PATH="$PATH"; export PANEMUX_SHIM_FALLBACK_PATH; ` +
+	`PATH="${BROWSER%/*}:$PATH"; export PATH; ` +
+	`PANEMUX_SHIM_COMMAND=$(tmux display-message -p -t "$TMUX_PANE" '#{default-command}'); ` +
+	`if [ -n "$PANEMUX_SHIM_COMMAND" ]; then ` +
+	`exec "$SHELL" -c "$PANEMUX_SHIM_COMMAND"; fi; ` +
+	`case "${SHELL##*/}" in bash|zsh|fish|sh|dash|ksh|csh|tcsh) exec "$SHELL" -l;; *) exec "$SHELL";; esac`
 
 func (s *TmuxSSHSession) ID() string    { return s.id }
 func (s *TmuxSSHSession) Type() Type    { return TypeSSHTmux }

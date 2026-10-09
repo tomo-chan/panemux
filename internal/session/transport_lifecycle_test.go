@@ -302,6 +302,7 @@ func TestSSHSessionRemoteSideClosureChangesStateToExited(t *testing.T) {
 }
 
 func TestTmuxSSHSessionLifecycleOverInProcessTransport(t *testing.T) {
+	withBrowserShimEnabled(t, true)
 	client, transport := startSessionTestSSHServer(t, nil)
 	sess, err := newTmuxSSHSessionFromClient(
 		"pane-tmux", "Remote tmux", "work", SSHConfig{ConnectionName: "demo"}, client, nil,
@@ -319,7 +320,9 @@ func TestTmuxSSHSessionLifecycleOverInProcessTransport(t *testing.T) {
 		return len(commands) >= 1 && len(resizes) == 1
 	}, 5*time.Second, 10*time.Millisecond)
 	commands, resizes := transport.snapshot()
-	assert.Equal(t, "tmux new-session -As 'work'", commands[0])
+	assert.True(t, strings.HasPrefix(commands[0], "exec /bin/sh -c "))
+	assert.Contains(t, commands[0], ` -e "BROWSER=$PANEMUX_SHIM_DIR/panemux-open"`,
+		"the real SSH exec channel must receive the new-session browser setup")
 	assert.Equal(t, [2]uint32{100, 31}, resizes[0])
 
 	require.NoError(t, sess.Close())

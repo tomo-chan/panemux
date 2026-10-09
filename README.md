@@ -149,6 +149,7 @@ Common uses:
 
 - A pane with `connection: my-host` can use either a named `ssh_connections` entry or a `Host my-host` entry from `~/.ssh/config`. Only `ssh_connections` entries are task dashboard hosts.
 - `tmux` and `ssh_tmux` panes automatically create the target tmux session if it does not already exist.
+- New sessions created by `ssh_tmux` panes on tmux 3.3 or newer can show `Open` / `Ignore` for CLI browser requests, including Claude MCP authentication. Existing tmux sessions are not reconfigured; see [URL opening](docs/behavior/url-open.md#new-remote-tmux-sessions).
 - In `tmux` and `ssh_tmux` panes, plain drag continues to follow tmux mouse behavior. Use `Option` + drag on macOS or `Shift` + drag on Linux and Windows to force browser-side text selection.
 - Set `cwd` on `local`, `ssh`, or `ssh_tmux` panes when you want the shell to start in a specific directory.
 - In the pane settings dialog, `Working Directory` can be chosen from a browsable directory tree for both local and SSH-backed panes. Hidden directories are available through a toggle.

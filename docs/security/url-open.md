@@ -82,3 +82,24 @@ The shim's fall-through path (`xdg-open report.pdf`, `open -a Safari …`) execs
 resolved from the pane's original `PATH`, exported as `PANEMUX_SHIM_FALLBACK_PATH` before the shim
 directory is prepended. The script refuses to exec a target that resolves back into its own
 directory, so a `PATH` that still contains the shim directory cannot make it recurse into itself.
+
+### New `ssh_tmux` sessions
+
+Remote tmux creation uses the same fixed shim installation, without exporting its settings into
+the tmux client. On tmux 3.3 or newer, `new-session -e` supplies the shim environment only to a
+new session; `-A` attaching to an existing session ignores those operands. Session names and `cwd`
+retain their existing validation and quoting. The POSIX setup is one line quoted into `/bin/sh`,
+so a non-POSIX SSH login shell never parses its assignments or version check. Host environment
+values in `-e` are double-quoted operands, not executable source. A fixed initial-pane bootstrap
+sets PATH after tmux's client-path override. It retrieves the configured default command literally
+with `display-message` and passes it as one `-c` argument to tmux's configured `$SHELL`; it does not
+evaluate it in the bootstrap or apply another format expansion. An empty command starts the
+configured shell, using `-l` for common shell families. API values never become bootstrap source.
+
+Only the opted-in session's shim wraps its notification in tmux DCS passthrough and sets
+`allow-passthrough` using `set-option -p -t "$TMUX_PANE"`. It does not set a global or window option
+or retrofit existing sessions. This option allows **all** passthrough sequences from processes in
+that tmux pane, not just OSC 7373, to reach attached clients; it is not an allowlist for the private
+notification. The scope is the new pane, and the HTTP/HTTPS validation, frontend approval and replay
+suppression above still apply to every browser-open event. tmux 3.3 introduced this pane-scoped
+option; older/unrecognized versions leave interception disabled without preventing attachment.

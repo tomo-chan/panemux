@@ -18,7 +18,12 @@ For the same reason, `os.Getenv("SHELL")` is not used as a default shell. Enviro
 
 ### Tmux session name (`tmux`, `ssh_tmux` sessions)
 
-`validTmuxSessionName` in `internal/session/tmux_ssh.go` uses a strict regex (`^[a-zA-Z0-9_.-]+$`) validated at construction time. Arguments are passed as discrete `exec.Command` args, not via `sh -c`, so no shell interpolation occurs.
+`validTmuxSessionName` in `internal/session/tmux_ssh.go` uses a strict regex (`^[a-zA-Z0-9_.-]+$`)
+validated at construction time. Local tmux arguments are discrete `exec.Command` args. Remote tmux
+commands single-quote the validated name; when browser interception is enabled the fixed POSIX
+setup and quoted operands are passed as one line to `/bin/sh`, just as for an ordinary SSH pane.
+See [new remote tmux interception](url-open.md#new-ssh_tmux-sessions) for its session-local
+environment and pane-local passthrough scope.
 
 **The task dashboard's attach** (`POST /api/tasks/attach`, [behavior](../behavior/tasks.md#post-apitasksattach))
 passes a tmux session name that a host's collection reported, not one a person configured. It reaches
