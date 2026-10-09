@@ -414,3 +414,61 @@ func TestPostHostTerminal_CapPerConnection(t *testing.T) {
 		assert.Len(t, open(e), maxHostTerminalsPerConnection)
 	})
 }
+
+// A reservation released by a request that failed leaves the others still
+// being opened counted, so requests overlapping them cannot pass the cap.
+func TestPostHostTerminal_CapCountsTerminalsBeingOpened(t *testing.T) {
+	const body = `{"connection":"gpu-box","type":"ssh"}`
+	e := newHostTerminalEnv(t)
+	entered := make(chan struct{}, 2*maxHostTerminalsPerConnection)
+	abort := make(chan struct{})
+	t.Cleanup(func() { close(abort) }) // a session still being made ends with the test
+	var mu sync.Mutex
+	outcomes := []chan error{}
+	e.h.createSession = func(pane *config.PaneConfig, _ map[string]config.SSHConnection) (session.Session, error) {
+		outcome := make(chan error, 1)
+		mu.Lock()
+		outcomes = append(outcomes, outcome)
+		mu.Unlock()
+		entered <- struct{}{}
+		select {
+		case err := <-outcome:
+			if err != nil {
+				return nil, err
+			}
+			return newMockSession(pane.ID), nil
+		case <-abort:
+			return nil, errors.New("test ended")
+		}
+	}
+	finish := func(call int, err error) {
+		mu.Lock()
+		defer mu.Unlock()
+		outcomes[call] <- err
+	}
+	codes := make(chan int, 2*maxHostTerminalsPerConnection)
+	start := func() {
+		go func() { codes <- e.post(t, body).Code }()
+		<-entered
+	}
+
+	for range maxHostTerminalsPerConnection {
+		start()
+	}
+	finish(0, errors.New("dial failed"))
+	require.Equal(t, http.StatusBadGateway, <-codes)
+	start() // the failed request's place is free again
+
+	go func() { codes <- e.post(t, body).Code }()
+	select {
+	case code := <-codes:
+		assert.Equal(t, http.StatusTooManyRequests, code, "the requests still being opened fill the cap")
+	case <-entered:
+		t.Fatal("a request past the cap started a session while the others were still being opened")
+	}
+
+	for call := 1; call <= maxHostTerminalsPerConnection; call++ {
+		finish(call, nil)
+		assert.Equal(t, http.StatusCreated, <-codes)
+	}
+}
