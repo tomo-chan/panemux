@@ -350,6 +350,12 @@ describe('filterTasks', () => {
     expect(ids('billing', 'dev-server')).toEqual([])
     expect(ids('nothing')).toEqual([])
     expect(ids('')).toEqual(['session', 'summary', 'pending', 'bare', 'remote'])
+
+    const labeled = described.map((t) => (t.id === 'session' || t.id === 'pending' ? { ...t, labels: ['ops'] } : t))
+    const withLabel = (query: string) => filterTasks(labeled, { query, host: null, label: 'ops' }).map((t) => t.id)
+    expect(withLabel('infra')).toEqual(['session'])
+    expect(withLabel('billing')).toEqual(['pending'])
+    expect(withLabel('リトライ')).toEqual([])
   })
 
   // efficacy:exempt only the filter argument gained label: null; it pins stage 1 behavior this branch leaves as it was
