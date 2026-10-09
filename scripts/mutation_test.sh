@@ -3,9 +3,10 @@
 # Tests for scripts/mutation.sh.
 #
 # The suite never runs gremlins. That is deliberate, not a shortcut: `make test`
-# runs this, `make check` runs `make test`, and `.githooks/pre-push` runs
-# `make check` — so a suite that needed a tool `make install-deps` does not
-# install would block every push on every machine that lacks it. scripts/
+# runs this, `make check` runs `make test`, and `.githooks/pre-push` runs it
+# when scripts/mutation*.sh changes — so a suite that needed a tool
+# `make install-deps` does not install would fail `make check`, and such a
+# push, on every machine that lacks it. scripts/
 # mutation.sh takes `--report <file>` for exactly this reason, the way
 # scripts/coverage_blocks.sh takes `--profile`: the half that runs the external
 # tool and the half that decides what the results MEAN are separable, and only

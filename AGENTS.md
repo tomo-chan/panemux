@@ -54,7 +54,8 @@ being left to memory. `.claude/` holds the agent-side half:
   (formatting, plus the tests for the touched Go packages and the frontend
   tests related to the touched modules) and refuses to end the turn while any
   of it fails.
-- Neither hook runs `make check` — that stays with `.githooks/pre-push` and CI.
+- Neither hook runs `make check`, and neither does `.githooks/pre-push`, which runs only the checks
+  the pushed change touches. The whole suite is CI's, and `make check` run by hand.
   See decision D6 in [docs/quality-gateway/decisions.md](docs/quality-gateway/decisions.md).
 - `.claude/agents/diff-reviewer.md` reviews a branch's diff in a fresh context.
   It does not block, and it is not meant to: see decision D5.

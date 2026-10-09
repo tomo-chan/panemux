@@ -392,8 +392,8 @@ fi
 settings="$repo_root/.claude/settings.json"
 
 # jq is not installed by `make install-deps`, and this suite runs inside
-# `make test` -> `make check` -> the pre-push hook. Without the guard, a
-# contributor without jq could not push at all, and the failures blamed a
+# `make test` -> `make check`, and the pre-push hook runs it whenever .claude/
+# changes. Without the guard, a contributor without jq could not pass either, and the failures blamed a
 # perfectly healthy settings.json and claimed the hooks were unwired — a false
 # positive of exactly the shape principle 4 warns about, landing in the suite
 # that exists to guard against it. Skipped is reported as skipped, never as

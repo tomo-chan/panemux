@@ -444,8 +444,8 @@ make dev-frontend   # Vite dev server on :5173 (proxies /api and /ws to :8080)
 make check   # lint + test + coverage (must pass before build)
 ```
 
-`make install-deps` also configures the tracked `.githooks/pre-push` hook, which runs `make check`
-before every `git push`.
+`make install-deps` also configures the tracked `.githooks/pre-push` hook, which runs the checks the
+pushed change touches before every `git push`. CI runs the whole suite on every pull request.
 
 Individual commands:
 
@@ -465,7 +465,7 @@ cd frontend && npx tsc --noEmit  # TypeScript type check
 
 1. Fork the repository and create a feature branch.
 2. Make your changes — write tests first, confirm they fail, then implement.
-3. Run `make check` and ensure all checks pass.
+3. Run `make check` and ensure all checks pass (or let the pull request's CI run it).
 4. Push only after the local `pre-push` hook passes.
 5. Open a pull request against `main` with a description of what and why.
 

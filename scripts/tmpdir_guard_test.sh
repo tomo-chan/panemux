@@ -137,7 +137,7 @@ $(printf '%s\n' "$before" > "$work/before$n"; printf '%s\n' "$after" > "$work/af
 for t in scripts/coverage_blocks_test.sh scripts/docs_links_check_test.sh \
 	scripts/efficacy_test.sh scripts/model_check_test.sh scripts/mutation_test.sh \
 	scripts/scenarios_check_test.sh scripts/screenshots_check_test.sh \
-	scripts/install_hooks_test.sh scripts/golangci_lint_cache_test.sh scripts/require_pty_test.sh \
+	scripts/install_hooks_test.sh scripts/pre_push_check_test.sh scripts/golangci_lint_cache_test.sh scripts/require_pty_test.sh \
 	scripts/go_toolchain_test.sh scripts/node_toolchain_test.sh \
 	frontend/screenshots/screenshots-env_test.sh .claude/hooks/hooks_test.sh; do
 	check_script "$t" yes
@@ -147,7 +147,7 @@ for t in scripts/coverage_blocks_test.sh scripts/docs_links_check_test.sh \
 	fi
 done
 for s in scripts/coverage_blocks.sh scripts/docs_links_check.sh scripts/efficacy.sh \
-	scripts/model_check.sh scripts/mutation.sh; do
+	scripts/model_check.sh scripts/mutation.sh scripts/pre_push_check.sh; do
 	check_script "$s" no
 done
 

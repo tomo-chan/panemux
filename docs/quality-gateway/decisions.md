@@ -21,6 +21,7 @@ D6.
 | D11 | The accessibility ceiling is per rule, counts nodes, and is lowered by hand |
 | D12 | A model checker's output is checked in; the model checker itself is not in `make check` |
 | D13 | Inside the Claude Code sandbox, tests needing a pty, tmux, `ps` or `dscl` skip; CI never does |
+| D14 | The pre-push hook checks only the pushed change; CI runs the whole suite |
 
 **D1 — Do not raise the coverage threshold above 80%.**
 Raising it works: the threshold gets met. But the cheapest way to meet it is to generate tautological
@@ -172,6 +173,9 @@ are now regression-tested, because principle 4 applies hardest to a gate that re
 Claude Code's `Stop` hook can deterministically block a turn from ending, but putting all of
 `make check` there would run E2E on every turn. Put G1 and G2 (seconds) there and leave G3 onward to
 pre-push and CI. A gate that sacrifices fast feedback gets bypassed.
+
+*Amended by D14.* Pre-push no longer runs G3 onward either: it runs the pushed change's own checks,
+and the whole suite is CI's.
 
 **D8 — Per-block coverage gates the diff, not a baseline.**
 Two measurements decide the shape. **275 to 278 blocks of 1801 have never executed** at `d0e88ee`
@@ -538,3 +542,34 @@ would read as images that needed no change. It fails, saying to run it outside t
 test scripts that carried on with an empty work directory committed fixtures in the caller's own
 worktree. `scripts/tmpdir_guard_test.sh` runs each with a failing `mktemp` and asserts the repository
 it ran from is untouched.
+
+**D14 — The pre-push hook checks only the pushed change; CI runs the whole suite. (2026-10-09,
+issue #335)**
+
+`make check` in the pre-push hook had grown slow enough to set the pace of development: every push
+waited for the full suite, however small the change. CI runs every suite on the pull request, and a
+change reaches `main` only through one, so `main`'s quality is held there. The local hook therefore
+answers a narrower question — do the checks for what this push changes pass — and answers it fast.
+
+*The range is the branch against the same branch on the remote.* That is what the push changes on
+origin. A branch origin does not have yet is measured from its merge base with `origin/main`: every
+branch's first push is that case, and falling back to `make check` there would have kept the cost on
+every branch.
+
+*Narrow on purpose.* Changed Go packages are tested, not the packages importing them, and without
+`-race`; the race detector and the importers are CI's. `golangci-lint` does run on the changed
+packages: it is where most CI failures come from, and on a few packages it costs seconds. Running every package that could be affected
+would bring back most of the cost this removes.
+
+*Never narrower than nothing.* A change that cannot be narrowed — the Go module, the Makefile, the
+runtime pins, the hook itself — or a range that cannot be worked out falls back to `make check`. A
+selector that silently checked nothing would report the push as verified, the failure D6's Stop hook
+was hardened against.
+
+*CI had to grow to match.* Two suites `make check` held had no CI step at all — the red-check's
+own tests and the model-check exporter's — and `ci.yml` did not trigger on `scripts/`. While
+pre-push ran `make check`, that gap was covered locally; it no longer is, so `ci.yml` now runs them
+with the selector's own tests and triggers on `scripts/**` and `.githooks/**`.
+
+*What it costs.* "`make check` passed" is no longer enforced before a push. The completion rule in
+DEVELOPMENT.md became "`make check` run by hand, or the pull request's CI".
