@@ -40,7 +40,14 @@ const browserShimScript = `#!/bin/sh
 if [ "$#" -eq 1 ]; then
 	case "$1" in
 	http://*|https://*)
-		if printf '\033]7373;panemux-open;%s\a' "$1" 2>/dev/null >"${PANEMUX_SHIM_TTY:-/dev/tty}"; then
+		if [ "${PANEMUX_SHIM_TMUX:-}" = 1 ] && [ -n "${TMUX:-}" ] && [ -n "${TMUX_PANE:-}" ]; then
+			# Only panes in sessions created with panemux's opt-in inherit
+			# this marker. Do not change a server or window-wide default.
+			tmux set-option -p -t "$TMUX_PANE" allow-passthrough on >/dev/null 2>&1 || :
+			if printf '\033Ptmux;\033\033]7373;panemux-open;%s\a\033\\' "$1" 2>/dev/null >"${PANEMUX_SHIM_TTY:-/dev/tty}"; then
+				exit 0
+			fi
+		elif printf '\033]7373;panemux-open;%s\a' "$1" 2>/dev/null >"${PANEMUX_SHIM_TTY:-/dev/tty}"; then
 			exit 0
 		fi
 		;;
@@ -151,6 +158,17 @@ func browserShimEnvForLocalSession() ([]string, error) {
 // interception. The script text is a fixed literal, quoted with the same
 // discipline every other remote argument uses.
 func remoteBrowserShimSetup() string {
+	return `PANEMUX_SHIM_TMUX=; export PANEMUX_SHIM_TMUX; ` + remoteBrowserShimInstall() +
+		`if [ -x "$PANEMUX_SHIM_DIR/panemux-open" ]; then ` +
+		`PANEMUX_SHIM_FALLBACK_PATH="$PATH"; export PANEMUX_SHIM_FALLBACK_PATH; ` +
+		`BROWSER="$PANEMUX_SHIM_DIR/panemux-open"; export BROWSER; ` +
+		`PATH="$PANEMUX_SHIM_DIR:$PATH"; export PATH; fi; `
+}
+
+// remoteBrowserShimInstall writes the shared shim without exporting anything
+// into a tmux client's environment: a new server must not inherit the shim as
+// its global default. ssh_tmux sets only the new session's environment with -e.
+func remoteBrowserShimInstall() string {
 	dir := `"$HOME/.cache/` + browserShimCacheSubdir + `"`
 	primary := `"$PANEMUX_SHIM_DIR/` + browserShimPrimaryName + `"`
 
@@ -163,10 +181,6 @@ func remoteBrowserShimSetup() string {
 		fmt.Fprintf(&b, " && ln -sf %s \"$PANEMUX_SHIM_DIR/%s\"", browserShimPrimaryName, alias)
 	}
 	b.WriteString("; } >/dev/null 2>&1; ")
-	fmt.Fprintf(&b, "if [ -x %s ]; then ", primary)
-	b.WriteString("PANEMUX_SHIM_FALLBACK_PATH=\"$PATH\"; export PANEMUX_SHIM_FALLBACK_PATH; ")
-	fmt.Fprintf(&b, "BROWSER=%s; export BROWSER; ", primary)
-	b.WriteString("PATH=\"$PANEMUX_SHIM_DIR:$PATH\"; export PATH; fi; ")
 	return b.String()
 }
 

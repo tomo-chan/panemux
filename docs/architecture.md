@@ -166,6 +166,11 @@ browser. Eligible loopback callback URLs may create a temporary local listener b
 `direct-tcpip`. Full behavior and constraints are in [Opening URLs from a pane](behavior/url-open.md)
 and [URL-open security](security/url-open.md).
 
+New `ssh_tmux` sessions on tmux 3.3 or newer receive shim settings through session-local `-e`
+operands, with a fixed initial-pane bootstrap for PATH and the configured shell/command. Their shim
+uses pane-local tmux passthrough to deliver the same OSC event as an ordinary
+SSH pane; existing sessions and the tmux server's environment are not reconfigured.
+
 ## Trust boundaries
 
 - Core terminal routes assume a trusted deployment and are not an authenticated multi-user surface.
