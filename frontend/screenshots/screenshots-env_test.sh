@@ -28,15 +28,20 @@ skip() { echo "skip $1"; }
 check() { checks=$((checks + 1)); }
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/panemux-screenshots-env-test.XXXXXX") || exit 1
-# tmux's socket lives under these directories, and a socket path has a
-# hard limit (104 bytes on macOS, 108 on Linux) that macOS's long
-# per-user $TMPDIR (about 49 bytes) leaves little room for. A one-letter
-# name, with the run root directly under it, keeps the deepest socket here
-# under the limit there — and inside $TMPDIR, the only place the Claude Code
-# sandbox can write.
-short=$(mktemp -d "${TMPDIR:-/tmp}/p.XXXXXX") || exit 1
+short=""
 unset TMUX
-trap 'rm -rf "$work" "$short"' EXIT
+trap 'rm -rf "$work" ${short:+"$short"}' EXIT
+. "$here/../e2e/tmux-env.sh"
+
+# tmux's sockets live under $short, the deepest at
+# $short/teardown/panemux-screenshots/tmux/tmux-<uid>/default, and a socket
+# path has a hard limit (104 bytes on macOS, 108 on Linux). Inside the Claude
+# Code sandbox $TMPDIR is short and the only place it can write; outside it,
+# macOS's per-user $TMPDIR (/private/var/folders/.../T, about 57 bytes once
+# tmux resolves it) leaves no room, and /tmp does. Where neither fits, the tmux
+# checks fail saying so rather than with tmux's "File name too long".
+short_err=$(tmux_short_dir /teardown/panemux-screenshots/tmux "${TMPDIR:-/tmp}" /tmp 2>&1 >"$work/short") &&
+	short=$(cat "$work/short")
 
 # ── shot_isolate_env: the developer's XDG and git configuration stay out ────
 
@@ -100,7 +105,13 @@ tmux_unusable() {
 	tmux -S "$short/probe" kill-server 2>/dev/null
 	rm -f "$short/probe"
 }
-tmux_skip=$(tmux_unusable)
+if [ -n "$short" ]; then
+	tmux_skip=$(tmux_unusable)
+else
+	check
+	fail 'tmux checks: no directory leaves room for the tmux socket' "$short_err"
+	tmux_skip="failure reported above"
+fi
 
 # CI never skips them, whatever the reason — tmux missing included, as
 # internal/testcap.RequireTmux has it: a runner image that stops shipping tmux
@@ -314,6 +325,15 @@ else
 fi
 
 check
+d="$work/emptied"
+mkdir -p "$d/home" "$d/tmux/tmux-0"
+if claim "$d" >/dev/null && [ -f "$d/.panemux-screenshots" ] && [ ! -e "$d/home" ]; then
+	pass 'a directory holding only empty directories is claimed'
+else
+	fail 'a directory holding only empty directories is claimed'
+fi
+
+check
 f="$work/a-file"
 echo keep >"$f"
 if output=$(claim "$f"); then
@@ -394,6 +414,186 @@ elif [ -n "$(ls -A "$long")" ]; then
 	fail 'e2e_tmux_env refuses a $TMPDIR too long for the socket: it left its directory behind'
 else
 	pass 'e2e_tmux_env refuses a $TMPDIR too long for the socket'
+fi
+
+# tmux resolves its socket directory before it binds (realpath), so a link
+# in the path — macOS's /tmp and /var are links into /private — counts at the
+# length of its target. A path that fits as given but not as resolved fails.
+# Under $short, the one directory known to leave room for a socket.
+check
+if [ -z "$short" ]; then
+	skip 'the socket directory is measured as tmux resolves it: no short directory to test with'
+else
+	mkdir -p "$short/len"
+	deep="$(cd -P "$short/len" && pwd -P)/dddddddddd"
+	mkdir -p "$deep"
+	ln -s "$deep" "$short/len/s"
+	phys=$(sh -c '. "$1"; tmux_physical_path "$2"' sh "$here/../e2e/tmux-env.sh" "$short/len/s/not-yet/tmux")
+	if [ "$phys" != "$deep/not-yet/tmux" ]; then
+		fail 'the socket directory is measured as tmux resolves it' "got $phys, want $deep/not-yet/tmux"
+	else
+		# As long as the limit allows when measured as given, and so past it
+		# once the link is followed.
+		name=$(printf '%*s' $((max - ${#suffix} - ${#short} - 7)) '' | tr ' ' n)
+		if output=$(sh -c '. "$1"; tmux_socket_path_check "$2"' sh "$here/../e2e/tmux-env.sh" "$short/len/s/$name" 2>&1); then
+			fail 'the socket directory is measured as tmux resolves it: a link that resolves past the limit was accepted' "$output"
+		else
+			case $output in
+			*"$deep/$name"*) pass 'the socket directory is measured as tmux resolves it' ;;
+			*) fail 'the socket directory is measured as tmux resolves it: the message does not name the resolved path' "$output" ;;
+			esac
+		fi
+	fi
+fi
+
+# tmux_short_dir: the first candidate with room for the socket is used, and
+# none having room fails, saying what to change, without creating anything.
+too_long="$work/$(printf '%*s' 110 '' | tr ' ' l)"
+mkdir -p "$too_long"
+short_dir() { sh -c '. "$1"; shift; tmux_short_dir "$@"' sh "$here/../e2e/tmux-env.sh" "$@"; }
+check
+if [ -z "$short" ]; then
+	skip 'tmux_short_dir: no short directory to test with'
+elif got=$(short_dir /s "$short" "$too_long" 2>&1) && [ "${got%/p.*}" = "$short" ] && [ -d "$got" ]; then
+	pass 'tmux_short_dir uses the first candidate with room'
+else
+	fail 'tmux_short_dir uses the first candidate with room' "$got"
+fi
+check
+if [ -z "$short" ]; then
+	skip 'tmux_short_dir: no short directory to test with'
+elif got=$(short_dir /s "$too_long" "$work/missing" "$short" 2>&1) && [ "${got%/p.*}" = "$short" ] && [ -d "$got" ] &&
+	[ -z "$(ls -A "$too_long")" ]; then
+	pass 'tmux_short_dir passes over a candidate too long or missing'
+else
+	fail 'tmux_short_dir passes over a candidate too long or missing' "$got"
+fi
+check
+if got=$(short_dir /s "$too_long" "$work/missing" 2>&1); then
+	fail 'tmux_short_dir fails when no candidate has room' "$got"
+elif [ -n "$(ls -A "$too_long")" ]; then
+	fail 'tmux_short_dir fails when no candidate has room: it left a directory behind'
+else
+	case $got in
+	*TMPDIR*) pass 'tmux_short_dir fails when no candidate has room' ;;
+	*) fail 'tmux_short_dir fails when no candidate has room: the message does not say what to change' "$got" ;;
+	esac
+fi
+
+# ── shot_link_dir: the fixed paths the images show are links into the run ──
+
+# /tmp/sample-project and the agmsg store are links to directories inside the
+# run's own root. A link this script made (its target is
+# <...>/panemux-screenshots/<the link's own name>) is replaced; so is a
+# directory an older version of this script left — marked, or emptied of
+# every file by something that kept the directories. Anything else is refused
+# untouched.
+link_dir() { sh -c '. "$1"; shot_link_dir "$2" "$3"' sh "$lib" "$1" "$2" 2>&1; }
+mkdir -p "$work/fixed"
+target="$work/run/panemux-screenshots/sample-project"
+is_link_to() { [ -L "$1" ] && [ "$(readlink "$1")" = "$2" ] && [ -d "$2" ]; }
+refused() {
+	# refused <label> <path> <output>: the output names the path.
+	case $3 in
+	*"$2"*) pass "$1" ;;
+	*) fail "$1: the message does not name the path" "$3" ;;
+	esac
+}
+
+check
+l="$work/fixed/sample-project"
+if output=$(link_dir "$l" "$target") && is_link_to "$l" "$target"; then
+	pass 'a missing fixed path becomes a link to the run'
+else
+	fail 'a missing fixed path becomes a link to the run' "$output"
+fi
+
+check
+rm -f "$l"
+ln -s "$work/old-run/panemux-screenshots/sample-project" "$l"
+if output=$(link_dir "$l" "$target") && is_link_to "$l" "$target"; then
+	pass 'a dangling link from an earlier run is replaced'
+else
+	fail 'a dangling link from an earlier run is replaced' "$output"
+fi
+
+check
+rm -f "$l"
+mkdir -p "$work/live-run/panemux-screenshots/sample-project"
+echo keep >"$work/live-run/panemux-screenshots/sample-project/file"
+ln -s "$work/live-run/panemux-screenshots/sample-project" "$l"
+if output=$(link_dir "$l" "$target") && is_link_to "$l" "$target" &&
+	[ "$(cat "$work/live-run/panemux-screenshots/sample-project/file")" = keep ]; then
+	pass 'replacing an earlier link leaves what it pointed to alone'
+else
+	fail 'replacing an earlier link leaves what it pointed to alone' "$output"
+fi
+
+for case in elsewhere other-name; do
+	check
+	rm -f "$l"
+	case $case in
+	elsewhere) dest="$work/mine" ;;
+	other-name) dest="$work/mine/panemux-screenshots/other-project" ;;
+	esac
+	mkdir -p "$dest" && echo keep >"$dest/work.txt"
+	ln -s "$dest" "$l"
+	if output=$(link_dir "$l" "$target"); then
+		fail "a link to $case is refused" "$output"
+	elif [ "$(readlink "$l")" != "$dest" ] || [ "$(cat "$dest/work.txt")" != keep ]; then
+		fail "a link to $case is refused: it was touched" "$output"
+	else
+		refused "a link to $case is refused" "$l" "$output"
+	fi
+done
+
+check
+rm -f "$l"
+mkdir -p "$l/cmd" "$l/internal/api" "$l/.git/objects"
+if output=$(link_dir "$l" "$target") && is_link_to "$l" "$target"; then
+	pass 'a directory holding only empty directories is replaced'
+else
+	fail 'a directory holding only empty directories is replaced' "$output"
+fi
+
+check
+rm -f "$l"
+mkdir -p "$l/cmd" "$l/internal/api"
+echo old >"$l/internal/api/items.go"
+echo "$l" >"$l/.panemux-screenshots"
+if output=$(link_dir "$l" "$target") && is_link_to "$l" "$target"; then
+	pass 'a marked directory from an older run is replaced'
+else
+	fail 'a marked directory from an older run is replaced' "$output"
+fi
+
+for case in file link; do
+	check
+	rm -f "$l"
+	mkdir -p "$l/cmd" "$l/internal/api"
+	kept="$l/internal/api/work"
+	case $case in
+	file) echo keep >"$kept" ;;
+	link) ln -s "$work/mine" "$kept" ;;
+	esac
+	if output=$(link_dir "$l" "$target"); then
+		fail "a directory with a $case deep inside is refused" "$output"
+	elif [ -L "$l" ] || { [ ! -e "$kept" ] && [ ! -L "$kept" ]; }; then
+		fail "a directory with a $case deep inside is refused: it was touched" "$output"
+	else
+		refused "a directory with a $case deep inside is refused" "$l" "$output"
+	fi
+	mv "$l" "$work/fixed/kept-$case"
+done
+
+check
+echo keep >"$l"
+if output=$(link_dir "$l" "$target"); then
+	fail 'a file at a fixed path is refused' "$output"
+elif [ "$(cat "$l")" != keep ]; then
+	fail 'a file at a fixed path is refused: it was touched' "$output"
+else
+	refused 'a file at a fixed path is refused' "$l" "$output"
 fi
 
 if [ "$failures" -ne 0 ]; then

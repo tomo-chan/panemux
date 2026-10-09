@@ -1,8 +1,8 @@
 # Fixture for the documentation screenshots (screenshots.spec.ts, port 4180).
 #
 # Every path and name here is a placeholder: run-panemux-screenshots.sh
-# creates /tmp/sample-project as a throwaway git repository and gives the
-# server a fake HOME, so nothing from the machine generating the images ends
+# creates /tmp/sample-project as a link to a throwaway git repository and
+# gives the server a fake HOME, so nothing from the machine generating the images ends
 # up in them (DEVELOPMENT.md's path-sanitization rule).
 server:
     host: 127.0.0.1

@@ -2,10 +2,12 @@
 # teardown. Sourced, not run. Tested by screenshots-env_test.sh.
 
 SHOT_MARKER=.panemux-screenshots
+SHOT_ROOT_NAME=panemux-screenshots
 
-# The run's private root: the fake HOME, the tmux socket and the build.
+# The run's private root: the fake HOME, the tmux socket, the build, and the
+# directories the fixed paths link to.
 shot_root() {
-    printf '%s/panemux-screenshots' "${TMPDIR:-/tmp}"
+    printf '%s/%s' "${TMPDIR:-/tmp}" "$SHOT_ROOT_NAME"
 }
 
 # Points HOME at a throwaway directory and clears every variable through
@@ -55,20 +57,63 @@ shot_teardown() {
     TMUX_TMPDIR="$(shot_root)/tmux" shot_stop_tmux
 }
 
-# Makes $1 an empty directory this script owns. A directory the script
-# created carries a marker file and is emptied; anything else already at
-# the path is refused untouched, since these are fixed, generic paths
-# (/tmp/sample-project) a developer may use for their own work.
+# Makes $1 an empty directory this script owns, carrying the marker. See
+# shot_clear for what already at the path it replaces and what it refuses.
 shot_claim_dir() {
-    if [ -e "$1" ] || [ -L "$1" ]; then
-        if [ ! -d "$1" ] || [ -L "$1" ] || [ ! -f "$1/$SHOT_MARKER" ]; then
-            echo "run-panemux-screenshots: $1 exists and was not created by this script; move it away and run again" >&2
-            return 1
-        fi
-        rm -rf "$1"
-    fi
+    shot_clear "$1" || return 1
     mkdir -p "$1"
     : >"$1/$SHOT_MARKER"
+}
+
+# Makes the fixed path $1, which the images show (/tmp/sample-project), a
+# link to $2, a directory inside the run's own root. Nothing this script
+# keeps lives at the fixed path itself, so nothing there needs a marker that
+# can be lost while the directories stay (issue #328). A link this script
+# made is one whose target is <...>/panemux-screenshots/<the link's own
+# name>; it is replaced, and what it pointed to is left alone. Anything else
+# already at the path goes through shot_clear.
+shot_link_dir() {
+    if [ -L "$1" ]; then
+        case $(readlink "$1") in
+        */"$SHOT_ROOT_NAME/${1##*/}") rm -f "$1" ;;
+        *)
+            shot_refuse "$1"
+            return 1
+            ;;
+        esac
+    else
+        shot_clear "$1" || return 1
+    fi
+    mkdir -p "$2"
+    ln -s "$2" "$1"
+}
+
+# Removes $1 when this script left it: a directory carrying the marker, or a
+# directory holding nothing but empty directories — what a run's directory
+# becomes when something deletes its files, the marker included, and keeps
+# the directories; rmdir can remove nothing else. Anything else is refused
+# untouched, since these are fixed, generic paths (/tmp/sample-project) a
+# developer may use for their own work.
+shot_clear() {
+    if [ ! -e "$1" ] && [ ! -L "$1" ]; then
+        return 0
+    fi
+    if [ -d "$1" ] && [ ! -L "$1" ]; then
+        if [ -f "$1/$SHOT_MARKER" ]; then
+            rm -rf "$1"
+            return
+        fi
+        if shot_clear_entries=$(find "$1" ! -type d -print 2>/dev/null) && [ -z "$shot_clear_entries" ]; then
+            find "$1" -depth -type d -exec rmdir {} \;
+            return
+        fi
+    fi
+    shot_refuse "$1"
+    return 1
+}
+
+shot_refuse() {
+    echo "run-panemux-screenshots: $1 exists and was not created by this script; move it away and run again" >&2
 }
 
 # Takes the lock directory $1 for process $2. Two runs would otherwise

@@ -21,10 +21,13 @@
 # - The Agent Board reads a stub agmsg installation (the e2e suite's own
 #   fixture scripts) seeded with placeholder messages.
 #
-# /tmp/sample-project is a fixed path because the images show it. It, and
-# the other directories below, are emptied only when they carry the marker
-# this script leaves in them; anything else at those paths stops the run
-# untouched. A lock keeps two runs from emptying each other's.
+# /tmp/sample-project is a fixed path because the images show it, and
+# /tmp/panemux-screenshots-agmsg because showcase.yml names it. Both are
+# links into the run's root, $TMPDIR/panemux-screenshots, which is emptied
+# only when it carries the marker this script leaves in it; anything at those
+# paths this script did not leave stops the run untouched (screenshots-env.sh's
+# shot_link_dir and shot_clear). A lock keeps two runs from emptying each
+# other's.
 #
 # The task dashboard is not staged here: the collection lists every claude
 # process of the user running this script, a developer's real sessions
@@ -59,8 +62,8 @@ shot_lock /tmp/panemux-screenshots.lock $$
 export TMUX_TMPDIR="$SHOT_ROOT/tmux"
 shot_stop_tmux
 shot_claim_dir "$SHOT_ROOT"
-shot_claim_dir "$SHOT_PROJECT"
-shot_claim_dir "$SHOT_AGMSG_DIR"
+shot_link_dir "$SHOT_PROJECT" "$SHOT_ROOT/${SHOT_PROJECT##*/}"
+shot_link_dir "$SHOT_AGMSG_DIR" "$SHOT_ROOT/${SHOT_AGMSG_DIR##*/}"
 mkdir -p "$SHOT_HOME" "$TMUX_TMPDIR"
 chmod 700 "$TMUX_TMPDIR"
 
@@ -96,11 +99,11 @@ cat >"$HOME/.gitconfig" <<'GIT'
 GIT
 
 # The sample repository. Commit dates are fixed so `git log` reads the same
-# on every run.
+# on every run. `cd` keeps the link's path in PWD, which panemux and so the
+# panes' bash inherit: bash's prompt shows PWD, not the directory it resolves
+# to, as long as both name the same directory.
 cd "$SHOT_PROJECT"
 git init -q
-# The ownership marker stays out of the repository's status.
-echo "$SHOT_MARKER" >>.git/info/exclude
 git remote add origin https://github.com/example/sample-project.git
 commit() {
     GIT_AUTHOR_DATE="$1" GIT_COMMITTER_DATE="$1" git commit -q --allow-empty -m "$2"
