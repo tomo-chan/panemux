@@ -62,6 +62,7 @@ func TestParseCollectOutput_ReadsTheCodexSections(t *testing.T) {
 		{
 			PID: 899, Elapsed: 125, File: rolloutName("2026-09-27T11-57-03", codexSessionA),
 			Rollout: codexRollout{
+				File:      rolloutName("2026-09-27T11-57-03", codexSessionA),
 				SessionID: codexSessionA, CWD: "/tmp/sample-project", Originator: "codex-tui", ModTime: 1790510485, Size: 48396,
 			},
 			Turn: codexTurn{
@@ -72,12 +73,16 @@ func TestParseCollectOutput_ReadsTheCodexSections(t *testing.T) {
 		},
 		{
 			PID: 900, Elapsed: 93784, File: rolloutName("2026-09-27T12-00-15", codexSessionB),
-			Rollout: codexRollout{SessionID: codexSessionB, ModTime: 1790510000, Size: 10},
+			Rollout: codexRollout{
+				File:      rolloutName("2026-09-27T12-00-15", codexSessionB),
+				SessionID: codexSessionB, ModTime: 1790510000, Size: 10,
+			},
 		},
 	}, raw.CodexOpen)
 	assert.Equal(t, []codexRollout{
-		{SessionID: codexSessionA, CWD: "/tmp/sample-project", Originator: "codex-tui", ModTime: 1790510485, Size: 48396},
-		{SessionID: codexSessionB, ModTime: 1790500000, Size: 17},
+		{File: rolloutName("2026-09-27T11-57-03", codexSessionA),
+			SessionID: codexSessionA, CWD: "/tmp/sample-project", Originator: "codex-tui", ModTime: 1790510485, Size: 48396},
+		{File: rolloutName("2026-09-27T09-00-00", codexSessionB), SessionID: codexSessionB, ModTime: 1790500000, Size: 17},
 	}, raw.CodexRollouts)
 }
 
@@ -131,8 +136,8 @@ func TestParseCollectOutput_ShortCodexRolloutRows(t *testing.T) {
 	))
 	require.NoError(t, err)
 	assert.Equal(t, []codexRollout{
-		{SessionID: codexSessionA, ModTime: 1, Size: 2},
-		{SessionID: codexSessionA, CWD: "/workspace/user/api", ModTime: 3, Size: 4},
+		{File: name, SessionID: codexSessionA, ModTime: 1, Size: 2},
+		{File: name, SessionID: codexSessionA, CWD: "/workspace/user/api", ModTime: 3, Size: 4},
 	}, raw.CodexRollouts)
 }
 

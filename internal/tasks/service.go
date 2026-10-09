@@ -88,6 +88,8 @@ type Options struct {
 	// Summarize makes a task's summary from its conversation excerpt. It
 	// defaults to `claude -p` on the panemux host.
 	Summarize SummarizeFunc
+	// SummarizeCodex uses the operator's Codex settings; never falls back to Claude.
+	SummarizeCodex SummarizeFunc
 	// Logf writes a server log line. It defaults to log.Printf.
 	Logf func(format string, args ...any)
 	// HostTimeout bounds one host's collection, including waiting for its
@@ -131,7 +133,7 @@ type Service struct {
 	// The task summaries; see summaries.go. summaryMu guards summaries and
 	// summaryTasks. summaryCtx ends when the service is closed.
 	summaries     map[summaryKey]*summaryEntry
-	summaryTasks  map[string]map[string]summaryTask
+	summaryTasks  map[string]map[summaryKey]summaryTask
 	summarySlots  chan struct{}
 	summaryCtx    context.Context
 	summaryCancel context.CancelFunc
@@ -172,6 +174,9 @@ func New(opts Options) *Service {
 	if opts.Summarize == nil {
 		opts.Summarize = newClaudeSummarizer(claudeBin, nil)
 	}
+	if opts.SummarizeCodex == nil {
+		opts.SummarizeCodex = newCodexSummarizer()
+	}
 	if opts.SummaryTimeout <= 0 {
 		opts.SummaryTimeout = defaultSummaryTimeout
 	}
@@ -181,7 +186,7 @@ func New(opts Options) *Service {
 		hosts:         map[string]*hostConn{},
 		resumeLocks:   map[string]*resumeLock{},
 		summaries:     map[summaryKey]*summaryEntry{},
-		summaryTasks:  map[string]map[string]summaryTask{},
+		summaryTasks:  map[string]map[summaryKey]summaryTask{},
 		summarySlots:  make(chan struct{}, summaryConcurrency),
 		summaryCtx:    summaryCtx,
 		summaryCancel: summaryCancel,

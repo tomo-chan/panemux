@@ -8,10 +8,10 @@ import (
 )
 
 // Task summaries (issue #258): what a task is doing and what is left, made
-// by `claude -p` on the panemux host from an excerpt of the task's
+// by its matching agent CLI on the panemux host from an excerpt of the task's
 // conversation log.
 //
-// A summary is kept in memory, keyed by (host, session ID), together with
+// A summary is kept in memory, keyed by (host, agent, session ID), together with
 // the version of the log (modification time and size) it was made from. It
 // is reused while the log keeps that version, so the dashboard's 10-second
 // poll does not summarize again. Which tasks are summarized:
@@ -56,7 +56,7 @@ type SummaryView struct {
 
 // ErrNoSummaryTask is a summary request for a session the host's last
 // collection did not list with a conversation log.
-var ErrNoSummaryTask = errors.New("no claude task with a conversation log for that session ID")
+var ErrNoSummaryTask = errors.New("no task with a conversation log for that agent and session ID")
 
 const (
 	// summaryConcurrency bounds the summaries running at once, across hosts.
@@ -67,6 +67,7 @@ const (
 )
 
 type summaryKey struct {
+	agent     string
 	host      string
 	sessionID string
 }
@@ -100,17 +101,18 @@ var automaticSummaryStates = map[State]bool{StateWait: true, StateIdle: true}
 // log, which RequestSummary may summarize, and drops the summaries of tasks
 // no longer listed.
 func (s *Service) rememberSummaryTasks(host string, tasks []Task) {
-	listed := map[string]summaryTask{}
+	listed := map[summaryKey]summaryTask{}
 	for _, task := range tasks {
-		if task.Agent == AgentClaude && task.SessionID != "" && task.Log != nil {
-			listed[task.SessionID] = summaryTask{host: host, sessionID: task.SessionID, log: *task.Log}
+		if (task.Agent == AgentClaude || task.Agent == AgentCodex) && task.SessionID != "" && task.Log != nil {
+			key := summaryKey{host: host, agent: task.Agent, sessionID: task.SessionID}
+			listed[key] = summaryTask{host: host, sessionID: task.SessionID, log: *task.Log}
 		}
 	}
 	s.summaryMu.Lock()
 	defer s.summaryMu.Unlock()
 	s.summaryTasks[host] = listed
 	for key := range s.summaries {
-		if _, ok := listed[key.sessionID]; key.host == host && !ok {
+		if _, ok := listed[key]; key.host == host && !ok {
 			delete(s.summaries, key)
 		}
 	}
@@ -143,10 +145,10 @@ func (s *Service) Summaries(tasks []Task) map[string]*SummaryView {
 	s.summaryMu.Lock()
 	defer s.summaryMu.Unlock()
 	for _, task := range tasks {
-		if task.Agent != AgentClaude || task.SessionID == "" || task.Log == nil {
+		if (task.Agent != AgentClaude && task.Agent != AgentCodex) || task.SessionID == "" || task.Log == nil {
 			continue
 		}
-		key := summaryKey{host: task.Host, sessionID: task.SessionID}
+		key := summaryKey{host: task.Host, agent: task.Agent, sessionID: task.SessionID}
 		if automaticSummaryStates[task.State] {
 			s.startSummaryLocked(key, *task.Log, false)
 		}
@@ -161,19 +163,27 @@ func (s *Service) Summaries(tasks []Task) map[string]*SummaryView {
 // current log is ready or running, retrying a failed one, and returns where
 // its summary stands.
 func (s *Service) RequestSummary(host, sessionID string) (*SummaryView, error) {
-	if !validSessionID.MatchString(sessionID) {
+	return s.RequestAgentSummary(host, AgentClaude, sessionID)
+}
+
+// RequestAgentSummary identifies a task by host, agent and session, preserving
+// RequestSummary as the legacy Claude-only entry point.
+func (s *Service) RequestAgentSummary(host, agent, sessionID string) (*SummaryView, error) {
+	if (agent != AgentClaude && agent != AgentCodex) ||
+		!validSessionID.MatchString(sessionID) || (agent == AgentCodex && !validUUID.MatchString(sessionID)) {
+
 		return nil, fmt.Errorf("%w: session ID %q", ErrInvalidSummary, sessionID)
 	}
 	s.summaryMu.Lock()
 	defer s.summaryMu.Unlock()
-	task, ok := s.summaryTasks[host][sessionID]
+	key := summaryKey{host: host, agent: agent, sessionID: sessionID}
+	task, ok := s.summaryTasks[host][key]
 	if !ok {
 		return nil, ErrNoSummaryTask
 	}
 	if s.summaryCtx.Err() != nil {
 		return nil, errors.New("task summaries are closed")
 	}
-	key := summaryKey{host: host, sessionID: sessionID}
 	s.startSummaryLocked(key, task.log, true)
 	return s.summaries[key].view(task.log), nil
 }
@@ -212,7 +222,7 @@ func (s *Service) runSummary(key summaryKey, log LogVersion) {
 	)
 	select {
 	case s.summarySlots <- struct{}{}:
-		summary, unreadable, err = s.summarize(key)
+		summary, unreadable, err = s.summarize(key, log)
 		<-s.summarySlots
 	case <-s.summaryCtx.Done():
 		err = errors.New("task summaries are closed")
@@ -239,9 +249,12 @@ func (s *Service) runSummary(key summaryKey, log LogVersion) {
 	}
 }
 
-// summarize reads the task's log on its host and has claude summarize it.
-func (s *Service) summarize(key summaryKey) (Summary, bool, error) {
+// summarize reads the task's log and uses the matching CLI on the panemux host.
+func (s *Service) summarize(key summaryKey, log LogVersion) (Summary, bool, error) {
 	script, err := buildTranscriptScript(key.sessionID)
+	if key.agent == AgentCodex {
+		script, err = buildCodexTranscriptScriptForLog(key.sessionID, log)
+	}
 	if err != nil { //coverage:exempt keys come from collected sessions, which passed validSessionID when parsed
 		return Summary{}, false, err
 	}
@@ -252,16 +265,26 @@ func (s *Service) summarize(key summaryKey) (Summary, bool, error) {
 		return Summary{}, false, err
 	}
 	data, err := parseTranscriptOutput(out)
+	if key.agent == AgentCodex {
+		data, err = parseCodexTranscriptOutput(out, key.sessionID)
+	}
 	if err != nil {
 		return Summary{}, false, err
 	}
 	excerpt, ok := buildExcerpt(data)
+	if key.agent == AgentCodex {
+		excerpt, ok = buildCodexExcerpt(data)
+	}
 	if !ok {
 		return Summary{}, true, nil
 	}
 	summaryCtx, cancel := context.WithTimeout(s.summaryCtx, s.opts.SummaryTimeout)
 	defer cancel()
-	summary, err := s.opts.Summarize(summaryCtx, excerpt)
+	runner := s.opts.Summarize
+	if key.agent == AgentCodex {
+		runner = s.opts.SummarizeCodex
+	}
+	summary, err := runner(summaryCtx, excerpt)
 	if err != nil {
 		return Summary{}, false, err
 	}

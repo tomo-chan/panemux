@@ -271,6 +271,8 @@ var contractFixtures = map[string]contractFixture{
 			},
 			RunLocal: func(_ context.Context, script string) ([]byte, error) {
 				switch {
+				case strings.Contains(script, "sid='"+fixtureDaemonCodexSessionID+"'"):
+					return fixtureCodexTranscript(), nil
 				case strings.Contains(script, "sid='7c21e0a4'"):
 					return fixtureTranscript("Add the task summaries", "Summaries are in; docs remain."), nil
 				case strings.Contains(script, "sid='55f0c2b8'"):
@@ -278,7 +280,8 @@ var contractFixtures = map[string]contractFixture{
 				}
 				return []byte(fixtureLocalTaskCollection), nil
 			},
-			Summarize: fixtureSummarize,
+			Summarize:      fixtureSummarize,
+			SummarizeCodex: fixtureSummarize,
 		}))
 		// Summaries on (issue #258): the waiting task is summarized by the
 		// poll, and the stopped one when asked, as selecting it does.
@@ -305,8 +308,8 @@ var contractFixtures = map[string]contractFixture{
 		require.Equal(t, http.StatusAccepted, rr.Code, rr.Body.String())
 		require.Eventually(t, func() bool {
 			rr = e.do(t, http.MethodGet, "/api/tasks", "")
-			return rr.Code == http.StatusOK && strings.Count(rr.Body.String(), `"state":"ready"`) == 2
-		}, 10*time.Second, 20*time.Millisecond, "both summaries become ready")
+			return rr.Code == http.StatusOK && strings.Count(rr.Body.String(), `"state":"ready"`) == 3
+		}, 10*time.Second, 20*time.Millisecond, "Claude and Codex summaries become ready")
 		return rr.Body.Bytes(), nil
 	}},
 
@@ -316,12 +319,16 @@ var contractFixtures = map[string]contractFixture{
 		e := newAPIEnv(t)
 		e.srv.api.SetTaskService(tasks.New(tasks.Options{
 			RunLocal: func(_ context.Context, script string) ([]byte, error) {
+				if strings.Contains(script, "sid='"+fixtureDaemonCodexSessionID+"'") {
+					return fixtureCodexTranscript(), nil
+				}
 				if strings.Contains(script, "sid='7c21e0a4'") {
 					return fixtureTranscript("Add the task summaries", "Summaries are in; docs remain."), nil
 				}
 				return []byte(fixtureLocalTaskCollection), nil
 			},
-			Summarize: fixtureSummarize,
+			Summarize:      fixtureSummarize,
+			SummarizeCodex: fixtureSummarize,
 		}))
 		e.cfg.TaskDashboard.Summary.Enabled = true
 		require.Eventually(t, func() bool {
@@ -1331,4 +1338,11 @@ func pickTaskEventFrames(t *testing.T, conn *websocket.Conn) ([]json.RawMessage,
 		}
 	}
 	return picked, epoch
+}
+
+func fixtureCodexTranscript() []byte {
+	body := `{"type":"session_meta","payload":{"id":"` + fixtureDaemonCodexSessionID + `"}}` + "\n" +
+		`{"type":"response_item","payload":{"type":"message","role":"user","content":[` +
+		`{"type":"input_text","text":"Add task summaries"}]}}` + "\n"
+	return []byte("::panemux-transcript v1 " + strconv.Itoa(len(body)) + "\n" + body + "\n::end\n")
 }

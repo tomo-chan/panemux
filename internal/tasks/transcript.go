@@ -49,6 +49,8 @@ const (
 	transcriptEnd        = "\n::end"
 	excerptFirstHeading  = "The session's first instruction:"
 	excerptRecentHeading = "The session's most recent messages, oldest first:"
+	logRoleUser          = "user"
+	logRoleAssistant     = "assistant"
 )
 
 // transcriptScriptTemplate prints one conversation log: a header with the
@@ -201,7 +203,7 @@ func parseLogMessages(chunk []byte, dropFirst, dropLast bool) []logMessage {
 		if json.Unmarshal(row, &line) != nil || line.IsSidechain {
 			continue
 		}
-		if line.Type != "user" && line.Type != "assistant" {
+		if line.Type != logRoleUser && line.Type != logRoleAssistant {
 			continue
 		}
 		if text := strings.TrimSpace(messageText(line.Message.Content)); text != "" {
@@ -245,10 +247,15 @@ func buildExcerpt(data transcriptData) (string, bool) {
 		early = parseLogMessages(data.Head, false, true)
 		recent = parseLogMessages(data.Tail, true, false)
 	}
+	return formatExcerpt(data.Whole, early, recent)
+}
 
+// formatExcerpt applies the shared text budgets after an agent-specific reader
+// has selected conversation messages.
+func formatExcerpt(whole bool, early, recent []logMessage) (string, bool) {
 	firstIndex := -1
 	for i, message := range early {
-		if message.Role == "user" {
+		if message.Role == logRoleUser {
 			firstIndex = i
 			break
 		}
@@ -271,7 +278,7 @@ func buildExcerpt(data transcriptData) (string, bool) {
 	var b strings.Builder
 	// In a whole log the first instruction is also a recent message when it
 	// falls inside the kept range; it is not repeated then.
-	if firstIndex >= 0 && (!data.Whole || firstIndex < keptFrom) {
+	if firstIndex >= 0 && (!whole || firstIndex < keptFrom) {
 		b.WriteString(excerptFirstHeading + "\n")
 		b.WriteString(formatMessage(early[firstIndex], excerptFirstBytes))
 		b.WriteString("\n")

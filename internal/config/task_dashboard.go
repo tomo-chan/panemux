@@ -192,11 +192,10 @@ func validLinkPort(port string) bool {
 	return err == nil && n >= 1 && n <= 65535
 }
 
-// TaskSummaryConfig configures the task summaries: `claude -p` on the
+// TaskSummaryConfig configures agent-specific task summaries on the
 // panemux host summarizing an excerpt of each task's conversation log.
 type TaskSummaryConfig struct {
 	// Enabled turns summaries on. They are off by default because they send
-	// the text of every host's conversations to claude on the panemux host,
-	// under the panemux host's own Claude account.
+	// conversation text to the matching agent account on the panemux host.
 	Enabled bool `yaml:"enabled,omitempty" json:"enabled"`
 }
