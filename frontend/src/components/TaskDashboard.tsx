@@ -511,6 +511,7 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
         isOpen={newTaskOpen}
         hosts={hosts}
         knownLabels={knownLabels}
+        tasks={tasks}
         onLaunch={launch}
         onLaunched={launched}
         onClose={() => setNewTaskOpen(false)}

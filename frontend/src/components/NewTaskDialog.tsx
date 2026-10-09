@@ -1,10 +1,12 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useModalKeyboard } from '../hooks/useModalKeyboard'
 import type { TaskActionResult, TaskAgent, TaskLaunchInput } from '../hooks/useTasks'
-import type { TaskHost, TaskLaunchResponse } from '../schemas'
+import type { Task, TaskHost, TaskLaunchResponse } from '../schemas'
 import { hostLabel, parseLabelInput } from '../utils/taskBoard'
 import { lastLabelToken, matchLabelSuggestions, toggleLabelInput } from '../utils/labelSuggestions'
 import { LabelSuggestions } from './LabelSuggestions'
+import { recentWorkdirs } from '../utils/workdirSuggestions'
+import { WorkdirCombobox } from './WorkdirCombobox'
 
 // The task dashboard's New task form (issues #257 and #264): a host, a working
 // directory, an agent, labels and the first instruction. Starting a task runs
@@ -17,6 +19,8 @@ export interface NewTaskDialogProps {
   hosts: TaskHost[]
   /** The labels used before (known_labels), offered under the Labels field. */
   knownLabels?: string[]
+  /** The tasks on the board: the directories they ran in are offered under Working directory. */
+  tasks?: Task[]
   onLaunch: (input: TaskLaunchInput) => Promise<TaskActionResult<TaskLaunchResponse>>
   /** Called with the started task, its host and agent; the dialog is then the caller's to close. */
   onLaunched: (launched: TaskLaunchResponse, host: string, agent: TaskAgent) => void
@@ -27,6 +31,7 @@ export const NewTaskDialog: React.FC<NewTaskDialogProps> = ({
   isOpen,
   hosts,
   knownLabels = [],
+  tasks,
   onLaunch,
   onLaunched,
   onClose,
@@ -34,19 +39,32 @@ export const NewTaskDialog: React.FC<NewTaskDialogProps> = ({
   const [host, setHost] = useState('')
   const [agent, setAgent] = useState<TaskAgent>('claude')
   const [cwd, setCwd] = useState('')
+  const [cwdListOpen, setCwdListOpen] = useState(false)
   const [labels, setLabels] = useState('')
   const [prompt, setPrompt] = useState('')
   const [starting, setStarting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const dialogRef = useRef<HTMLDivElement>(null)
   const cwdRef = useRef<HTMLInputElement>(null)
+  // The focus the dialog gives the field on opening does not open its list,
+  // so Escape still closes the dialog straight away.
+  const focusingOnOpen = useRef(false)
+  const workdirs = useMemo(() => (isOpen ? recentWorkdirs(tasks ?? [], host) : []), [isOpen, tasks, host])
 
   useEffect(() => {
-    if (isOpen) cwdRef.current?.focus()
+    if (!isOpen) {
+      setCwdListOpen(false)
+      return
+    }
+    focusingOnOpen.current = true
+    cwdRef.current?.focus()
+    focusingOnOpen.current = false
   }, [isOpen])
 
-  // A launch in flight cannot be dismissed out from under itself.
-  useModalKeyboard({ isOpen, dialogRef, onEscape: starting ? undefined : onClose })
+  // A launch in flight cannot be dismissed out from under itself. Escape
+  // closes the directory list first, when it is open.
+  const escape = cwdListOpen ? () => setCwdListOpen(false) : onClose
+  useModalKeyboard({ isOpen, dialogRef, onEscape: starting ? undefined : escape })
 
   if (!isOpen) return null
 
@@ -104,7 +122,15 @@ export const NewTaskDialog: React.FC<NewTaskDialogProps> = ({
         </p>
         <label className="td-field">
           <span>Host</span>
-          <select value={host} onChange={(event) => setHost(event.target.value)} disabled={starting}>
+          <select
+            value={host}
+            onChange={(event) => {
+              // A directory means something else on another host.
+              setHost(event.target.value)
+              setCwd('')
+            }}
+            disabled={starting}
+          >
             {hosts.map((h) => (
               <option key={h.name} value={h.name}>
                 {hostLabel(h.name)}
@@ -113,19 +139,17 @@ export const NewTaskDialog: React.FC<NewTaskDialogProps> = ({
             ))}
           </select>
         </label>
-        <label className="td-field">
-          <span>Working directory</span>
-          <input
-            ref={cwdRef}
-            className="td-mono"
-            value={cwd}
-            placeholder="/workspace/user/project"
-            onChange={(event) => setCwd(event.target.value)}
-            disabled={starting}
-            spellCheck={false}
-            autoComplete="off"
-          />
-        </label>
+        <WorkdirCombobox
+          inputRef={cwdRef}
+          value={cwd}
+          onChange={setCwd}
+          hostName={hostLabel(host)}
+          suggestions={workdirs}
+          open={cwdListOpen && !starting}
+          onOpenChange={setCwdListOpen}
+          openOnFocus={() => !focusingOnOpen.current}
+          disabled={starting}
+        />
         <label className="td-field">
           <span>Agent</span>
           <select value={agent} disabled={starting} onChange={(event) => setAgent(event.target.value as TaskAgent)}>

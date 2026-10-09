@@ -592,6 +592,19 @@ describe('TaskDashboard done and labels', () => {
       .map((b) => b.textContent)).toEqual(['+ infra', '+ payment', '+ Release-1.4', '+ research', '+ sprint-42'])
   })
 
+  // Working directory suggestions (issue #311): the directories the board's
+  // tasks on the chosen host ran in.
+  it('offers the directories the chosen host’s tasks ran in, in the New task dialog', () => {
+    renderDashboard(tasksState())
+    fireEvent.click(screen.getByRole('button', { name: 'New task' }))
+    const dialog = screen.getByRole('dialog', { name: 'New task' })
+    fireEvent.click(within(dialog).getByRole('combobox', { name: 'Working directory' }))
+    const paths = within(within(dialog).getByRole('listbox', { name: 'Recent on Local' }))
+      .getAllByRole('option').map((o) => o.querySelector('.td-workdir-path')?.textContent)
+    expect(paths).toEqual(expect.arrayContaining(['/workspace/user/panemux', '/workspace/user/old']))
+    expect(paths).not.toContain('/remote/home/demo/payment')
+  })
+
   it('shows why a save failed and keeps what was typed', async () => {
     const saveRecord = vi.fn().mockResolvedValue('invalid task record: label is longer than 32 characters')
     renderDashboard(tasksState({ data: recorded, saveRecord }))

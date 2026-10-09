@@ -98,6 +98,30 @@ prompt; a request that never starts a subprocess does not create a turn.
 
 ## Task dashboard
 
+### Working directory suggestions come from the board's tasks, stored nowhere (2026-10-09, issue #311)
+
+Issue [#311](https://github.com/tomo-chan/panemux/issues/311) offers New task's working directory
+from the directories used before on the chosen host. They are the `cwd` of that host's tasks in
+`GET /api/tasks`, which the browser already holds, so the API, its schemas and contract fixtures
+are unchanged.
+
+- **Derived, not stored.** A list of its own — a file beside `tasks.json`, a field added to it, or
+  the browser's `localStorage` — was considered and not chosen: the board already says which
+  directories were used, by which agent and when, and a separate list would have to be kept in step
+  with it. The cost is that a directory goes once its last task leaves the board (the running tasks
+  and the 50 newest stopped per host within 7 days). Adding a field to `tasks.json` would also have
+  been dropped by an older build's write, since that file's reader ignores unknown fields.
+- **No `×` to remove a row**, though the design mock had one: with nothing stored, a removed row
+  would come back with the next collection.
+- **A dropdown, unlike #310's tags.** A directory is the whole value of a one-line field, so a
+  combobox completes it without the partial-value problem that kept labels out of one; tags of full
+  paths would have taken the form's space and been hard to tell apart (the issue's option B).
+- **The server's path rule on the suggestions, not a check that they exist.** A `cwd` with shell
+  metacharacters or control characters would only be refused on start, so it is not offered; a
+  directory removed since is left to the start's own refusal rather than probed on every collection.
+- **The form's own focus does not open the list.** Opening it there would make the first `Escape`
+  close the list instead of the form.
+
 ### Labels used before come from the record file, as tags on `GET /api/tasks` (2026-10-07, issue #310)
 
 Issue [#310](https://github.com/tomo-chan/panemux/issues/310) offers the labels already used when a

@@ -437,6 +437,13 @@ it.
   it as its own process arguments for as long as it runs, so an instruction passed there would stay
   visible in `ps`. It is claude's own argument, though, so anyone who can list claude's process
   arguments on the host can read it while claude runs.
+- **The dashboard suggests working directories used before on the chosen host.** They are the
+  `cwd` of that host's tasks in `GET /api/tasks`, once each — nothing else is stored, so a directory
+  leaves the suggestions when its last task leaves the list ([Collection](#collection)). Each shows
+  the agent and when it was last used of the newest task there: a running task's directory reads
+  `now` and comes first, then stopped ones by `status_since` (the log's modification time), newest
+  first. A `cwd` the rule above refuses is not suggested; whether it still exists on the host is
+  left to the start, which refuses one that does not. Any other absolute path can still be typed.
 - After a start, the dashboard selects the task once a collection lists it. claude writes the state
   file the collection reads only once it is running, so that can take until the next poll (10 s).
 
