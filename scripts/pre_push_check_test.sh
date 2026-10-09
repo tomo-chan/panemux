@@ -354,6 +354,40 @@ else
 	echo "skip go not installed — the checks that run the plan are skipped"
 fi
 
+# --- falling back to make check -----------------------------------------------
+#
+# The fallback must report make check's own status, and leave nothing behind:
+# `exec make check` once replaced the shell before its EXIT trap ran, leaving a
+# scratch directory under $TMPDIR on every such push.
+
+# fallback_run <recipe> — pushes a Makefile change whose `check` target runs
+# <recipe>, with a fresh $TMPDIR. Prints that $TMPDIR; the status is the hook's.
+fallback_run() {
+	r=$(fixture) || exit 1
+	git -C "$r" switch -q -c feature
+	printf 'check:\n\t@%s\n' "$1" > "$r/Makefile"
+	git -C "$r" add -A && git -C "$r" commit -q -m makefile
+	tmp=$(mktemp -d "$work/tmp.XXXXXX") || exit 1
+	echo "$tmp"
+	(cd "$r" && printf '%s\n' "refs/heads/feature $(sha "$r" HEAD) refs/heads/feature $zero" |
+		TMPDIR="$tmp" sh "$script" origin > "$work/run.out" 2>&1)
+}
+
+for recipe in true false; do
+	checks=$((checks + 1))
+	tmp=$(fallback_run "$recipe")
+	status=$?
+	if [ "$recipe" = true ] && [ "$status" -ne 0 ]; then
+		fail "a passing make check fallback passes" "$(cat "$work/run.out")"
+	elif [ "$recipe" = false ] && [ "$status" -eq 0 ]; then
+		fail "a failing make check fallback blocks the push" "$(cat "$work/run.out")"
+	elif [ -n "$(ls -A "$tmp")" ]; then
+		fail "the make check fallback ($recipe) leaves its scratch directory behind" "$(ls -A "$tmp")"
+	else
+		pass "the make check fallback ($recipe) reports its status and cleans up"
+	fi
+done
+
 # --- the hook itself ----------------------------------------------------------
 
 hook="$here/../.githooks/pre-push"

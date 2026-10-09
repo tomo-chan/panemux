@@ -191,7 +191,10 @@ fi
 
 if [ -n "$full" ]; then
 	echo "pre-push: $full; running make check"
-	exec make check
+	# Not exec: that would replace this shell before its EXIT trap removes
+	# $work, leaving a scratch directory behind on every such push.
+	make check
+	exit $?
 fi
 if grep -qx nothing "$plan.sorted"; then
 	echo "pre-push: nothing to check"
