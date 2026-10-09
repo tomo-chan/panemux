@@ -20,6 +20,8 @@ on:
       - 'scripts/npm.sh'
       - 'scripts/check-node.sh'
       - '.github/workflows/ci.yml'
+      - 'scripts/**'
+      - '.githooks/**'
   pull_request:
     branches:
       - main
@@ -39,6 +41,8 @@ on:
       - 'scripts/npm.sh'
       - 'scripts/check-node.sh'
       - '.github/workflows/ci.yml'
+      - 'scripts/**'
+      - '.githooks/**'
       - '.github/workflows/**'
       - '.goreleaser.yaml'
       - 'docs/**'
@@ -112,6 +116,13 @@ jobs:
       # made; install-hooks, golangci-lint's cache and the pty gate.
       - name: Test (sandbox-safe scripts)
         run: make test-tmpdir-guard test-install-hooks test-golangci-lint-cache test-require-pty
+
+      # The pre-push hook checks only what a push touches (issue #335), so CI is
+      # where every suite `make check` holds has to run. These three had no
+      # step anywhere: the pre-push selector's own tests, the red-check's and
+      # the TLA+ transition exporter's.
+      - name: Test (pre-push selector, red-check, model-check exporter)
+        run: make test-pre-push test-efficacy test-model-check
 
       - name: Install Playwright browsers
         run: cd frontend && npx playwright install --with-deps chromium
