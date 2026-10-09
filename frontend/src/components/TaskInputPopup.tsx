@@ -1,15 +1,14 @@
-import React, { useEffect, useRef } from 'react'
+import React, { useRef } from 'react'
 import type { Task } from '../schemas'
 import {
   TASK_STATE_LABELS,
   hostLabel,
-  isTerminalCloseShortcut,
-  isTerminalMaximizeShortcut,
   taskOpenAction,
   taskTitle,
 } from '../utils/taskBoard'
 import type { TaskPaneRef } from '../utils/taskBoard'
 import { TaskTerminal } from './TaskTerminal'
+import { useTerminalPopupKeyboard } from '../hooks/useTerminalPopupKeyboard'
 import type { TaskTerminalStatus } from './TaskTerminal'
 
 // The task dashboard's Type in pane popup (issue #284): a real terminal on a
@@ -26,7 +25,7 @@ export type TaskAttachPhase =
 
 export type TaskInputChip = 'connecting' | 'connected' | 'disconnected' | 'failed'
 
-const CHIP_LABELS: Record<TaskInputChip, string> = {
+export const TASK_INPUT_CHIP_LABELS: Record<TaskInputChip, string> = {
   connecting: 'Connecting',
   connected: 'Connected',
   disconnected: 'Disconnected',
@@ -49,17 +48,6 @@ export function taskInputChip(attach: TaskAttachPhase, terminal: TaskTerminalSta
       return 'connecting'
   }
 }
-
-// What a browser moves focus between, minus anything inert: a terminal that
-// takes no input (connecting, disconnected) is skipped as the browser would.
-const FOCUSABLE_SELECTOR = [
-  'a[href]',
-  'button:not([disabled])',
-  'input:not([disabled])',
-  'select:not([disabled])',
-  'textarea:not([disabled])',
-  '[tabindex]:not([tabindex="-1"])',
-].join(',')
 
 export interface TaskInputPopupProps {
   /** The task as last listed, or as it was when the popup opened if it is listed no more. */
@@ -113,76 +101,15 @@ export const TaskInputPopup: React.FC<TaskInputPopupProps> = ({
   const openAction = taskOpenAction(task, pane)
   const isMaximized = maximized && !sheet
 
-  const handlers = useRef({ onClose, onToggleMaximize, sheet })
-  handlers.current = { onClose, onToggleMaximize, sheet }
-
-  // Focus starts on the popup itself; the terminal takes it once connected.
-  useEffect(() => {
-    dialogRef.current?.focus({ preventScroll: true })
-  }, [])
-
-  // A terminal that stops taking input becomes inert, which drops its focus
-  // on the floor; catch it here so keys still land inside the popup.
-  useEffect(() => {
-    const dialog = dialogRef.current
-    if (!dialog || chip === 'connected') return
-    if (!dialog.contains(document.activeElement)) dialog.focus({ preventScroll: true })
-  }, [chip])
-
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      const dialog = dialogRef.current
-      if (!dialog) return
-      const target = event.target instanceof Node ? event.target : null
-      // Captured on the window, so a focused terminal never sees these keys.
-      if (isTerminalCloseShortcut(event)) {
-        event.preventDefault()
-        event.stopPropagation()
-        handlers.current.onClose()
-        return
-      }
-      if (isTerminalMaximizeShortcut(event)) {
-        event.preventDefault()
-        event.stopPropagation()
-        if (!handlers.current.sheet) handlers.current.onToggleMaximize()
-        return
-      }
-      // Escape, Tab and everything else typed into the terminal are its own.
-      if (target && bodyRef.current?.contains(target)) return
-
-      // Escape closes from the header only: anywhere else it may have been
-      // meant for the terminal, which is not taking keys right now.
-      if (event.key === 'Escape') {
-        if (!(target instanceof Element && target.closest('.td-input-head'))) return
-        event.preventDefault()
-        handlers.current.onClose()
-        return
-      }
-      if (event.key !== 'Tab') return
-      const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
-        (element) => !element.closest('[inert]'),
-      )
-      if (focusable.length === 0) {
-        event.preventDefault()
-        return
-      }
-      const first = focusable[0]
-      const last = focusable[focusable.length - 1]
-      const active = document.activeElement
-      if (!active || !dialog.contains(active) || active === dialog) {
-        event.preventDefault()
-        ;(event.shiftKey ? last : first).focus()
-      } else if (event.shiftKey && active === first) {
-        event.preventDefault()
-        last.focus()
-      } else if (!event.shiftKey && active === last) {
-        event.preventDefault()
-        first.focus()
-      }
-    }
-    window.addEventListener('keydown', handleKeyDown, true)
-    return () => window.removeEventListener('keydown', handleKeyDown, true)
-  }, [])
+  useTerminalPopupKeyboard({
+    dialogRef,
+    bodyRef,
+    headSelector: '.td-input-head',
+    connected: chip === 'connected',
+    sheet,
+    onClose,
+    onToggleMaximize,
+  })
 
   const notSent = (() => {
     if (attach.phase === 'failed') {
@@ -236,7 +163,7 @@ export const TaskInputPopup: React.FC<TaskInputPopupProps> = ({
             <h2 className="td-input-title">{title}</h2>
             <span className="td-input-chip" data-status={chip} data-testid="task-input-status" aria-live="polite">
               <span className="td-input-chip-dot" aria-hidden="true" />
-              {CHIP_LABELS[chip]}
+              {TASK_INPUT_CHIP_LABELS[chip]}
             </span>
             <span className="td-spacer" />
             {openAction.kind !== 'unavailable' && (
