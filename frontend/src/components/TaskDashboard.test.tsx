@@ -1162,6 +1162,8 @@ describe('TaskDashboard focus request (issue #279)', () => {
 })
 
 describe('TaskDashboard listed tasks (issue #279)', () => {
+  // efficacy:exempt unchanged by this branch — the red-check maps the blank line before the describe
+  // block appended below this one onto this test.
   it('reports the tasks it lists after its filters, for deciding whether a wait is visible', () => {
     const onListedTasksChange = vi.fn()
     render(
@@ -1199,6 +1201,8 @@ describe('TaskDashboard unreadable session state (issue #313)', () => {
     tasks: [],
   }
 
+  // efficacy:exempt the absence the reverted implementation also has: it guards the warning's
+  // condition, which the tests below make go red.
   it('shows no warning while every state file can be read', () => {
     renderDashboard()
     expect(screen.queryByRole('button', { name: /unreadable/ })).not.toBeInTheDocument()
