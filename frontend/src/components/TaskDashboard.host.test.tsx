@@ -177,4 +177,79 @@ describe('TaskDashboard host Type in pane (issue #314)', () => {
     expect(screen.queryByRole('dialog', { name: 'Terminal on dev-server' })).toBeNull()
     expect(state.closeHostTerminal).toHaveBeenCalledWith('board-0000000000000001')
   })
+
+  // The dashboard re-rendered as a poll that saw dev-server in status.
+  function withDevServer(state: TasksState, status: 'ok' | 'connecting' | 'error'): TasksState {
+    return {
+      ...state,
+      data: { ...response, hosts: [{ name: '', status: 'ok' }, { name: 'dev-server', status, error: status === 'error' ? 'refused' : undefined }] },
+    }
+  }
+
+  function dashboard(state: TasksState) {
+    return (
+      <TaskDashboard
+        tasksState={state}
+        hostsState={hostsState()}
+        workspaces={[]}
+        onOpenTask={vi.fn()}
+        onOpenHost={vi.fn()}
+        onShowWorkspaces={vi.fn()}
+        now={() => NOW}
+      />
+    )
+  }
+
+  it('drops the connection menu when its host stops being reachable, and does not reopen it later', () => {
+    const state = tasksState()
+    const { rerender } = render(dashboard(state))
+    fireEvent.click(screen.getByRole('button', { name: 'Open a terminal on dev-server' }))
+    expect(screen.getByRole('button', { name: 'Type in pane: dev-server' })).toHaveFocus()
+
+    rerender(dashboard(withDevServer(state, 'error')))
+    expect(screen.queryByRole('button', { name: 'Type in pane: dev-server' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Reconnect' })).toHaveFocus()
+
+    rerender(dashboard(withDevServer(state, 'ok')))
+    expect(screen.queryByRole('button', { name: 'Type in pane: dev-server' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Open a terminal on dev-server' })).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('moves focus to the dashboard when the menu goes with a host that is connecting', () => {
+    const state = tasksState()
+    const { rerender, container } = render(dashboard(state))
+    fireEvent.click(screen.getByRole('button', { name: 'Open a terminal on dev-server' }))
+
+    rerender(dashboard(withDevServer(state, 'connecting')))
+    expect(screen.queryByRole('button', { name: 'Type in pane: dev-server' })).toBeNull()
+    expect(container.querySelector('.td-root')).toHaveFocus()
+  })
+
+  it('returns focus to the dashboard when the chip went away while the terminal was open', async () => {
+    const state = tasksState()
+    const { rerender, container } = render(dashboard(state))
+    fireEvent.click(screen.getByRole('button', { name: 'Open a terminal on dev-server' }))
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Type in pane: dev-server' }))
+    })
+
+    rerender(dashboard(withDevServer(state, 'connecting')))
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+    expect(screen.queryByRole('dialog', { name: 'Terminal on dev-server' })).toBeNull()
+    expect(container.querySelector('.td-root')).toHaveFocus()
+  })
+
+  it('returns focus to the host chip as it is now when the old one was replaced', async () => {
+    const state = tasksState()
+    const { rerender } = render(dashboard(state))
+    fireEvent.click(screen.getByRole('button', { name: 'Open a terminal on dev-server' }))
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Type in pane: dev-server' }))
+    })
+
+    rerender(dashboard(withDevServer(state, 'error')))
+    rerender(dashboard(withDevServer(state, 'ok')))
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+    expect(screen.getByRole('button', { name: 'Open a terminal on dev-server' })).toHaveFocus()
+  })
 })

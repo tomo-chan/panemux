@@ -169,9 +169,16 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
   const popupRef = useRef<HTMLDivElement>(null)
   const input = useTaskInput(tasksState.attach, tasksState.detach)
   const hostInput = useHostTerminal(tasksState.hostTerminal, tasksState.closeHostTerminal)
+  // Focus goes back to the chip the popup was opened from — or, if a poll
+  // replaced it, to that host's chip as it is now, and failing that to the
+  // dashboard.
   const closeHostInput = () => {
     const closed = hostInput.close()
-    closed?.originElement?.focus()
+    if (!closed) return
+    const element = closed.originElement?.isConnected
+      ? closed.originElement
+      : rootRef.current?.querySelector<HTMLElement>(`[data-host-chip="${CSS.escape(closed.host)}"]`)
+    ;(element ?? rootRef.current)?.focus({ preventScroll: true })
   }
   const [maximized, setMaximized] = useState(loadTaskTerminalMaximized)
   const narrow = useMediaQuery(NARROW_QUERY)
@@ -188,6 +195,20 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
   const summariesEnabled = data?.summaries_enabled ?? false
   const hosts = data?.hosts ?? []
   const unreadableCount = unreadableRows(hosts).length
+
+  // The connection menu goes with its host when a poll finds the host gone
+  // or no longer reachable, so it never reopens by itself when the host
+  // comes back. Focus that was in the menu moves to the host's Reconnect
+  // button, or to the dashboard while the host is connecting.
+  const menuHost = hostMenu === null ? undefined : hosts.find((host) => host.name === hostMenu)
+  const menuGone = hostMenu !== null && !(menuHost && hostOpensTerminal(menuHost))
+  useEffect(() => {
+    if (!menuGone || hostMenu === null) return
+    setHostMenu(null)
+    if (document.activeElement && document.activeElement !== document.body) return
+    const reconnect = rootRef.current?.querySelector<HTMLElement>(`[data-reconnect="${CSS.escape(hostMenu)}"]`)
+    ;(reconnect ?? rootRef.current)?.focus({ preventScroll: true })
+  }, [menuGone, hostMenu])
   // Once the files are gone the details are closed, so they do not open by
   // themselves when a file becomes unreadable again.
   if (unreadableOpen && unreadableCount === 0) setUnreadableOpen(false)
@@ -724,6 +745,7 @@ const HostChip: React.FC<HostChipProps> = ({ host, running, onReconnect, menu })
           type="button"
           className="td-host td-host-button"
           data-status={host.status}
+          data-host-chip={host.name}
           aria-haspopup="dialog"
           aria-expanded={menu.open}
           aria-label={`Open a terminal on ${host.name}`}
@@ -751,7 +773,12 @@ const HostChip: React.FC<HostChipProps> = ({ host, running, onReconnect, menu })
     <li className="td-host" data-status={host.status} title={host.error}>
       {content}
       {host.status === 'error' && host.name !== '' && (
-        <button type="button" className="td-btn td-btn-sm" onClick={() => void onReconnect(host.name)}>
+        <button
+          type="button"
+          className="td-btn td-btn-sm"
+          data-reconnect={host.name}
+          onClick={() => void onReconnect(host.name)}
+        >
           Reconnect
         </button>
       )}
