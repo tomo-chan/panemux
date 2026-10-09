@@ -557,7 +557,8 @@ branch's first push is that case, and falling back to `make check` there would h
 every branch.
 
 *Narrow on purpose.* Changed Go packages are tested, not the packages importing them, and without
-`-race`; the race detector and the importers are CI's. Running every package that could be affected
+`-race`; the race detector and the importers are CI's. `golangci-lint` does run on the changed
+packages: it is where most CI failures come from, and on a few packages it costs seconds. Running every package that could be affected
 would bring back most of the cost this removes.
 
 *Never narrower than nothing.* A change that cannot be narrowed — the Go module, the Makefile, the

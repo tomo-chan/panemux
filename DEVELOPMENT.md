@@ -297,7 +297,7 @@ A test that genuinely should not go red without its implementation is marked `//
 - The tracked `pre-push` hook runs only the checks the pushed change touches (`scripts/pre_push_check.sh`), and blocks `git push` when one fails. The whole suite is CI's job; run `make check` yourself to run all of it locally.
 - The change is the difference between each pushed branch and the same branch on the remote. A branch the remote does not have yet is measured from its merge base with `origin/main`, so a first push checks what the branch adds and nothing `main` gained since. Deleting a branch checks nothing.
 - What the changed files select:
-  - `.go` files: `gofmt -s` on each, then `go vet` and `go test` on the packages that hold them — without `-race`, and not on the packages that import them. A file under a package's `testdata/` selects that package.
+  - `.go` files: `gofmt -s` on each, then `go vet`, `golangci-lint` (the pinned binary and this checkout's cache, as `make lint-go` uses) and `go test` on the packages that hold them — without `-race`, and not on the packages that import them. A file under a package's `testdata/` selects that package.
   - `frontend/src` TypeScript: `tsc --noEmit` and `vitest related` on the changed modules. A file under `testdata/api-contract/` selects the frontend contract test.
   - Shell scripts: `scripts/<name>.sh` selects `scripts/<name>_test.sh`, and any `.sh` selects the `$TMPDIR` guard. `.claude/` selects the hook tests; `frontend/screenshots/` and `frontend/e2e/*.sh` select the screenshot fixtures' tests.
   - Markdown selects `make check-docs-links`; `docs/scenarios.md` also selects `make check-scenarios`.

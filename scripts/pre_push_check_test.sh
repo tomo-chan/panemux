@@ -142,7 +142,7 @@ func B() int {
 }'
 out=$(plan "$r" "refs/heads/feature $(sha "$r" HEAD) refs/heads/feature $pushed")
 expect "an existing branch checks only what origin lacks" "$out" \
-	"go-test ./b" "go-vet ./b" "gofmt b/b.go" "!go-test ./a" "!full"
+	"go-test ./b" "go-vet ./b" "golangci-lint ./b" "gofmt b/b.go" "!go-test ./a" "!golangci-lint ./a" "!full"
 
 # A branch origin does not have: everything since it left origin's main, and
 # nothing main gained after it branched: only the merge base counts.
@@ -349,6 +349,25 @@ func B() int {
 		pass "an unformatted Go file blocks the push"
 	else
 		fail "an unformatted Go file blocks the push: blocked for another reason" "$(cat "$work/run.out")"
+	fi
+
+	# golangci-lint runs on the changed packages: an unchecked error is
+	# something neither gofmt, go vet nor go test reports.
+	r=$(fixture) || exit 1
+	git -C "$r" switch -q -c feature
+	commit "$r" unchecked a/e.go 'package a
+
+import "os"
+
+// E drops the error os.Remove returns.
+func E() { os.Remove("x") }'
+	checks=$((checks + 1))
+	if run_push "$r" "refs/heads/feature $(sha "$r" HEAD) refs/heads/feature $zero"; then
+		fail "a golangci-lint finding blocks the push" "$(cat "$work/run.out")"
+	elif grep -q 'errcheck' "$work/run.out"; then
+		pass "a golangci-lint finding blocks the push"
+	else
+		fail "a golangci-lint finding blocks the push: blocked for another reason" "$(cat "$work/run.out")"
 	fi
 else
 	echo "skip go not installed — the checks that run the plan are skipped"

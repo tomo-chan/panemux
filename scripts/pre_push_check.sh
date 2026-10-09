@@ -12,9 +12,10 @@
 #
 # What the changed files select:
 #
-#   .go files           gofmt -s on each, go vet and go test (no -race) on the
-#                       packages that hold them; never their importers
-#   <pkg>/testdata/...  that package's go vet and go test
+#   .go files           gofmt -s on each; go vet, golangci-lint and go test
+#                       (no -race) on the packages that hold them, never on
+#                       their importers
+#   <pkg>/testdata/...  that package's go vet, golangci-lint and go test
 #   frontend/src TS     tsc --noEmit, vitest related on the changed modules
 #   testdata/api-contract  the frontend contract test that parses those fixtures
 #   scripts/<x>.sh      scripts/<x>_test.sh, and the tmpdir guard for any .sh
@@ -124,6 +125,7 @@ is_go_pkg() {
 add_go_pkg() {
 	is_go_pkg "$1" || return 0
 	add "go-vet ./$1"
+	add "golangci-lint ./$1"
 	add "go-test ./$1"
 	[ "$1" = . ] && add build-frontend
 	return 0
@@ -226,7 +228,18 @@ gofmt_check() {
 	return 1
 }
 
+# golangci_lint <pkg>... — the pinned golangci-lint `make lint-go` runs, with
+# this checkout's own cache, over the given packages only.
+golangci_lint() {
+	make -s -C "$toolchain_root" lint-go-deps || return 1
+	lint_bin=$(go env GOBIN)
+	[ -n "$lint_bin" ] || lint_bin="$(go env GOPATH)/bin"
+	lint_cache=$(sh "$toolchain_root/scripts/golangci_lint_cache.sh") || return 1
+	GOLANGCI_LINT_CACHE="$lint_cache" "$lint_bin/golangci-lint" run "$@"
+}
+
 go_pkgs=$(args go-test | tr '\n' ' ')
+lint_pkgs=$(args golangci-lint | tr '\n' ' ')
 frontend_tests=$(args vitest | tr '\n' ' ')
 
 if grep -qx build-frontend "$plan.sorted" && [ ! -f frontend/dist/index.html ]; then
@@ -238,6 +251,8 @@ fi
 if [ -n "$go_pkgs" ]; then
 	# shellcheck disable=SC2086 # one argument per package
 	run "go vet $go_pkgs" go vet $go_pkgs
+	# shellcheck disable=SC2086 # one argument per package
+	run "golangci-lint run $lint_pkgs" golangci_lint $lint_pkgs
 	# shellcheck disable=SC2086 # one argument per package
 	run "go test $go_pkgs" go test $go_pkgs
 fi
