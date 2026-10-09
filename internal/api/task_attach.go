@@ -316,6 +316,8 @@ func (h *Handler) SetTmuxAttachFactory(fn TmuxAttachFactory) {
 
 // SetSessionFactory replaces how a host terminal's session is created. It is
 // the seam the server's route tests use instead of a real ssh connection.
-func (h *Handler) SetSessionFactory(fn func(*config.PaneConfig, map[string]config.SSHConnection) (session.Session, error)) {
+func (h *Handler) SetSessionFactory(
+	fn func(*config.PaneConfig, map[string]config.SSHConnection) (session.Session, error),
+) {
 	h.createSession = fn
 }

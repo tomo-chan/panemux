@@ -39,7 +39,8 @@ func hostTmuxSessionName(connection string) (string, error) {
 	// program instead), so there is no error to handle.
 	_, _ = rand.Read(buf)
 	name := tmuxSessionNameUnsafe.ReplaceAllString(connection, "-") + "-" + hex.EncodeToString(buf)
-	if !session.IsValidTmuxSessionName(name) { //coverage:exempt the replacement above leaves only characters the guard accepts
+	//coverage:exempt the replacement above leaves only characters the guard accepts
+	if !session.IsValidTmuxSessionName(name) {
 		return "", fmt.Errorf("generated tmux session name %q is not valid", name)
 	}
 	return name, nil

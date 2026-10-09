@@ -543,15 +543,32 @@ var apiCases = map[string]apiCase{
 
 	"DELETE /api/tasks/attach/{id}": {run: func(t *testing.T, e *apiEnv) {
 		useFixtureTmuxAttach(e)
-		rr := e.do(t, http.MethodDelete, "/api/tasks/attach/board-missing", "")
+		assertBoardSessionDeletes(t, e, "/api/tasks/attach", `{"id":"local:claude:7c21e0a4"}`)
+	}},
+
+	"POST /api/hosts/session-name": {run: func(t *testing.T, e *apiEnv) {
+		e.cfg.SSHConnections = map[string]config.SSHConnection{"build-box": {Host: "build.invalid"}}
+		rr := e.do(t, http.MethodPost, "/api/hosts/session-name", `{"connection":""}`)
+		assert.Equal(t, http.StatusBadRequest, rr.Code, rr.Body.String())
+
+		rr = e.do(t, http.MethodPost, "/api/hosts/session-name", `{"connection":"build-box"}`)
+		assert.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+		assert.Contains(t, rr.Body.String(), `"tmux_session":"build-box-`)
+	}},
+
+	"POST /api/hosts/terminal": {run: func(t *testing.T, e *apiEnv) {
+		useFixtureHostTerminal(e)
+		rr := e.do(t, http.MethodPost, "/api/hosts/terminal", `{"connection":"elsewhere","type":"ssh"}`)
 		assert.Equal(t, http.StatusNotFound, rr.Code, rr.Body.String())
 
-		rr = e.do(t, http.MethodPost, "/api/tasks/attach", `{"id":"local:claude:7c21e0a4"}`)
-		require.Equal(t, http.StatusCreated, rr.Code, rr.Body.String())
-		var got map[string]string
-		require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &got))
-		rr = e.do(t, http.MethodDelete, "/api/tasks/attach/"+got["session_id"], "")
-		assert.Equal(t, http.StatusNoContent, rr.Code, rr.Body.String())
+		rr = e.do(t, http.MethodPost, "/api/hosts/terminal", `{"connection":"build-box","type":"ssh"}`)
+		assert.Equal(t, http.StatusCreated, rr.Code, rr.Body.String())
+		assert.Contains(t, rr.Body.String(), `"session_id":"board-`)
+	}},
+
+	"DELETE /api/hosts/terminal/{id}": {run: func(t *testing.T, e *apiEnv) {
+		useFixtureHostTerminal(e)
+		assertBoardSessionDeletes(t, e, "/api/hosts/terminal", `{"connection":"build-box","type":"ssh_tmux"}`)
 	}},
 
 	"POST /api/tasks/summary": {run: func(t *testing.T, e *apiEnv) {
@@ -767,4 +784,19 @@ func registeredAPIRoutes(t *testing.T) []string {
 	sort.Strings(out)
 	require.Positive(t, len(out), "no /api routes were found — the router changed")
 	return out
+}
+
+// assertBoardSessionDeletes checks that DELETE path/{id} refuses an unknown
+// ID and destroys the board session a POST of body to path opened.
+func assertBoardSessionDeletes(t *testing.T, e *apiEnv, path, body string) {
+	t.Helper()
+	rr := e.do(t, http.MethodDelete, path+"/board-missing", "")
+	assert.Equal(t, http.StatusNotFound, rr.Code, rr.Body.String())
+
+	rr = e.do(t, http.MethodPost, path, body)
+	require.Equal(t, http.StatusCreated, rr.Code, rr.Body.String())
+	var got map[string]string
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &got))
+	rr = e.do(t, http.MethodDelete, path+"/"+got["session_id"], "")
+	assert.Equal(t, http.StatusNoContent, rr.Code, rr.Body.String())
 }

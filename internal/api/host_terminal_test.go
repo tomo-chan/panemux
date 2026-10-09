@@ -57,8 +57,8 @@ type hostTerminalEnv struct {
 	err    error
 	h      *Handler
 	timers *fakeAttachTimers
-	panes  []config.PaneConfig
 	byID   map[string]*mockSession
+	panes  []config.PaneConfig
 	mu     sync.Mutex
 }
 
@@ -329,7 +329,8 @@ func TestHostTerminalAndTaskAttach_EachRouteDeletesOnlyItsOwnKind(t *testing.T) 
 		return newMockSession(pane.ID), nil
 	}
 	attach := decodeAttach(t, e.post(t, "local:claude:in-tmux"))
-	terminal := decodeHostTerminal(t, postJSON(t, e.h, "/api/hosts/terminal", `{"connection":"gpu-box","type":"ssh"}`, nil))
+	terminal := decodeHostTerminal(t,
+		postJSON(t, e.h, "/api/hosts/terminal", `{"connection":"gpu-box","type":"ssh"}`, nil))
 
 	assert.Equal(t, http.StatusNotFound, e.delete(t, terminal.SessionID).Code,
 		"the task route leaves a host terminal alone")

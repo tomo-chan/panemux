@@ -388,12 +388,7 @@ var contractFixtures = map[string]contractFixture{
 		e := newAPIEnv(t)
 		useFixtureTmuxAttach(e)
 
-		rr := e.do(t, http.MethodPost, "/api/tasks/attach", `{"id":"local:claude:7c21e0a4"}`)
-		require.Equal(t, http.StatusCreated, rr.Code, rr.Body.String())
-		var got map[string]string
-		require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &got))
-		require.True(t, strings.HasPrefix(got["session_id"], "board-"), got["session_id"])
-		return bytes.ReplaceAll(rr.Body.Bytes(), []byte(got["session_id"]), []byte("board-0123456789abcdef")), nil
+		return captureBoardSession(t, e, "/api/tasks/attach", `{"id":"local:claude:7c21e0a4"}`), nil
 	}},
 
 	// A host's tmux session name (issue #314). Its random suffix is stood in
@@ -414,18 +409,10 @@ var contractFixtures = map[string]contractFixture{
 	// is random, so the capture stands in for it.
 	"host-terminal": {capture: func(t *testing.T) ([]byte, map[string]string) {
 		e := newAPIEnv(t)
-		e.cfg.SSHConnections = map[string]config.SSHConnection{"build-box": {Host: "build.invalid"}}
-		e.srv.api.SetSessionFactory(func(pane *config.PaneConfig, _ map[string]config.SSHConnection) (session.Session, error) {
-			return newWSFakeSession(pane.ID), nil
-		})
+		useFixtureHostTerminal(e)
 
-		rr := e.do(t, http.MethodPost, "/api/hosts/terminal",
-			`{"connection":"build-box","type":"ssh_tmux","tmux_session":"build-box-0123abcd"}`)
-		require.Equal(t, http.StatusCreated, rr.Code, rr.Body.String())
-		var got map[string]string
-		require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &got))
-		require.True(t, strings.HasPrefix(got["session_id"], "board-"), got["session_id"])
-		return bytes.ReplaceAll(rr.Body.Bytes(), []byte(got["session_id"]), []byte("board-0123456789abcdef")), nil
+		return captureBoardSession(t, e, "/api/hosts/terminal",
+			`{"connection":"build-box","type":"ssh_tmux","tmux_session":"build-box-0123abcd"}`), nil
 	}},
 
 	"session-token": {capture: func(t *testing.T) ([]byte, map[string]string) {
@@ -540,6 +527,28 @@ func useFixtureTmuxAttach(e *apiEnv) {
 	e.srv.api.SetTmuxAttachFactory(func(id, _, _, _ string, _ map[string]config.SSHConnection) (session.Session, error) {
 		return newWSFakeSession(id), nil
 	})
+}
+
+// captureBoardSession posts body to path, which opens a board session, and
+// returns the response with its random session ID stood in for.
+func captureBoardSession(t *testing.T, e *apiEnv, path, body string) []byte {
+	t.Helper()
+	rr := e.do(t, http.MethodPost, path, body)
+	require.Equal(t, http.StatusCreated, rr.Code, rr.Body.String())
+	var got map[string]string
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &got))
+	require.True(t, strings.HasPrefix(got["session_id"], "board-"), got["session_id"])
+	return bytes.ReplaceAll(rr.Body.Bytes(), []byte(got["session_id"]), []byte("board-0123456789abcdef"))
+}
+
+// useFixtureHostTerminal gives e the ssh connection "build-box" and makes its
+// host terminals fake sessions instead of ssh connections.
+func useFixtureHostTerminal(e *apiEnv) {
+	e.cfg.SSHConnections = map[string]config.SSHConnection{"build-box": {Host: "build.invalid"}}
+	e.srv.api.SetSessionFactory(
+		func(pane *config.PaneConfig, _ map[string]config.SSHConnection) (session.Session, error) {
+			return newWSFakeSession(pane.ID), nil
+		})
 }
 
 func fixtureLaunchService() *tasks.Service {
