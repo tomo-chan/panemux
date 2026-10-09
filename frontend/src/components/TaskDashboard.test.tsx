@@ -111,6 +111,16 @@ function hostsState(overrides: Partial<SSHConnectionsState> = {}): SSHConnection
 }
 
 describe('TaskDashboard', () => {
+  // A board wider than the space beside the detail panel scrolls sideways;
+  // with no task card in it nothing else takes focus, so the board itself does.
+  it('lets the keyboard reach and scroll the board, empty or not', () => {
+    renderDashboard(tasksState({ data: { hosts: [{ name: '', status: 'ok' }], tasks: [] } }))
+    const board = screen.getByRole('region', { name: 'Task board' })
+    expect(board).toHaveAttribute('tabindex', '0')
+    board.focus()
+    expect(board).toHaveFocus()
+  })
+
   it('places each task in its state column with a count', () => {
     renderDashboard()
     const column = (name: string) => screen.getByRole('region', { name })

@@ -530,7 +530,10 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
       </div>
 
       <div className="td-main">
-        <div className="td-board">
+        {/* The board scrolls sideways when its columns are wider than the
+            space left, and with no task card nothing in it takes focus, so the
+            board is a tab stop of its own for scrolling it from the keyboard. */}
+        <div className="td-board" role="region" aria-label="Task board" tabIndex={0}>
           <div className="td-cols">
             {visibleColumns(showDone).map((column) => {
               const inColumn = visible.filter((task) => columnForTask(task) === column.id)

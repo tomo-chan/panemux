@@ -351,7 +351,8 @@ terminal that had focus cannot receive what is typed into the dashboard.
   checked), the tmux session name the server generated in the monospace face once `ssh_tmux` is
   chosen (or "Could not name the tmux session: …" in red), and `Cancel`, `Open` and `Type in pane`
   in the interactive blue, labelled `Open: <host>` and `Type in pane: <host>` like a task's
-  buttons. A press outside it closes it; focus returns to the chip.
+  buttons. A press outside it closes it; focus returns to the chip. A host that stops being
+  reachable takes its menu with it, and focus goes to its `Reconnect`.
 - **Unreadable state.** The warning is amber, one for every host together, and never beside a host
   chip, where it would crowd them as hosts are added. It opens a modal anchored below the top bar at
   the right and kept within the screen's height, titled "Unreadable session state · <n> files on <m> hosts": a table with one row per
@@ -408,7 +409,8 @@ terminal that had focus cannot receive what is typed into the dashboard.
   gold, "Needs you"), Working, Idle, Running / unknown, Stopped, and Done when the checkbox asks for
   it. A task marked done sits in Done only while it is stopped, so with the column hidden a finished
   task leaves the board rather than crowding Stopped; one that runs again stays in its state's
-  column. Column headers stay visible while the board scrolls, and each column is split into the
+  column. Column headers stay visible while the board scrolls; the board is a tab stop of its own
+  ("Task board") so the keyboard can scroll it sideways even with no card in it. Each column is split into the
   chosen rows, with the catch-all row ("Not in a Git repository", "No label") last. Split by label, a
   task with two labels appears in both rows. A catch-all row is keyed apart from every name, so a
   label or repository that happens to be called "No label" gets a row of its own.

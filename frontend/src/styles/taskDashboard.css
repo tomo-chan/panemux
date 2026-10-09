@@ -388,6 +388,11 @@
   padding: 12px 12px 16px;
 }
 
+/* Inside the board's edge, which its parent clips. */
+.td-board:focus-visible {
+  outline-offset: -2px;
+}
+
 .td-cols {
   display: grid;
   grid-template-columns: repeat(5, minmax(215px, 1fr));
