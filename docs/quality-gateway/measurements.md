@@ -142,6 +142,13 @@ load-bearing rather than tidiness. Excluding `.xterm` (xterm.js owns that canvas
 | Pane settings dialog open | `color-contrast` | serious | 10 |
 | Pane settings dialog open | `region` | moderate | 7 |
 
+The task dashboard and its host connection menu open (issue #314) are scanned too, with the host
+list stubbed to one reachable remote host since the fixture has no SSH server. They have no rows:
+every rule is held at zero there. Their first CI measurement found one `scrollable-region-focusable`
+(serious) node in each — the board, which at 1280px scrolls sideways and, with the fixture's empty
+task list, held nothing focusable. The board was made a tab stop of its own rather than given a
+ceiling.
+
 **Every row is a violation this repository still has.** Listing it here is not approval of it; it is
 the refusal to ship a gate that starts red, which is what turning axe on over an existing UI would
 otherwise mean (principle 4). A count may fall and must not rise, and a rule absent from the table

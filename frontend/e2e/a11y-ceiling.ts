@@ -14,7 +14,7 @@
 // The page states a11y.spec.ts scans. Naming them as a union rather than a
 // bare string keeps a typo in a ceiling key from silently becoming an
 // unenforced entry — `CEILINGS` would no longer typecheck.
-export type ScanLabel = 'dashboard' | 'pane-settings'
+export type ScanLabel = 'dashboard' | 'pane-settings' | 'task-dashboard' | 'host-connect-menu'
 
 // **This is a ceiling, not a target.** Roadmap item 7 of issue #180 took the
 // measurement without gating on it, deliberately: turning axe on over an
@@ -81,6 +81,10 @@ export const CEILINGS: Record<ScanLabel, Record<string, number>> = {
     'color-contrast': 10,
     region: 7,
   },
+  // Issue #314. Measured by CI's first run of these scans; until then every
+  // rule is held at zero.
+  'task-dashboard': {},
+  'host-connect-menu': {},
 }
 
 // The shape this needs from axe's `Result`, and no more: taking the structural

@@ -43,12 +43,17 @@ type boardAttach struct {
 	taskID      string
 	sessionID   string
 	tmuxSession string
+	// connection is a host terminal's ssh_connections entry.
+	connection string
 	// generation tells a timer that fired after it was stopped that it no
 	// longer counts.
 	generation int
+	// host marks a host terminal (issue #314) rather than a task's attach.
+	host bool
 }
 
-// boardAttaches holds the board's attaches, one per task.
+// boardAttaches holds the board's attaches, one per task, and its host
+// terminals, each under a key of its own.
 type boardAttaches struct {
 	afterFunc func(time.Duration, func()) boardAttachTimer
 	byTask    map[string]*boardAttach
@@ -56,7 +61,9 @@ type boardAttaches struct {
 	// creating holds a channel per task whose attach is being created; it
 	// is closed when the creation ends either way.
 	creating map[string]chan struct{}
-	mu       sync.Mutex
+	// hostOpening counts, per connection, the host terminals being opened.
+	hostOpening map[string]int
+	mu          sync.Mutex
 }
 
 func newBoardAttaches() *boardAttaches {
@@ -65,6 +72,8 @@ func newBoardAttaches() *boardAttaches {
 		byTask:    map[string]*boardAttach{},
 		bySession: map[string]*boardAttach{},
 		creating:  map[string]chan struct{}{},
+
+		hostOpening: map[string]int{},
 	}
 }
 
@@ -89,12 +98,13 @@ func (b *boardAttaches) forgetLocked(attach *boardAttach) {
 }
 
 // forget drops the attach of sessionID and returns it, or nil when there was
-// none.
-func (b *boardAttaches) forget(sessionID string) *boardAttach {
+// none of that kind: a host terminal when host is set, a task's attach
+// otherwise.
+func (b *boardAttaches) forget(sessionID string, host bool) *boardAttach {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	attach, ok := b.bySession[sessionID]
-	if !ok {
+	if !ok || attach.host != host {
 		return nil
 	}
 	b.forgetLocked(attach)
@@ -167,7 +177,7 @@ func (h *Handler) PostTaskAttach(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("attach to tmux session %q: %v", name, err), http.StatusBadGateway)
 		return
 	}
-	h.registerBoardAttach(req.ID, name, sess)
+	h.registerBoardAttach(&boardAttach{taskID: req.ID, sessionID: sess.ID(), tmuxSession: name}, sess)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(taskAttachResponse{SessionID: sessionID, TmuxSession: name})
@@ -177,12 +187,13 @@ func (h *Handler) PostTaskAttach(w http.ResponseWriter, r *http.Request) {
 // creation and returns the func that releases it. A request for a task whose
 // attach is being created waits for that creation rather than starting a
 // second one. An attach whose tmux client has exited is removed so a new one
-// can be made.
+// can be made. A host terminal's entry counts as absent: this route serves
+// and removes only a task's attach.
 func (h *Handler) reserveBoardAttach(r *http.Request, taskID string) (*taskAttachResponse, func(), error) {
 	b := h.boardAttaches
 	for {
 		b.mu.Lock()
-		if attach, ok := b.byTask[taskID]; ok {
+		if attach, ok := b.byTask[taskID]; ok && !attach.host {
 			sess, live := h.manager.Get(attach.sessionID)
 			if live && sess.State() != session.StateExited {
 				b.mu.Unlock()
@@ -214,13 +225,12 @@ func (h *Handler) reserveBoardAttach(r *http.Request, taskID string) (*taskAttac
 	}
 }
 
-// registerBoardAttach serves sess and starts its grace period: until a
-// WebSocket subscribes, nothing reads it.
-func (h *Handler) registerBoardAttach(taskID, tmuxSession string, sess session.Session) {
+// registerBoardAttach serves sess as attach, which must be new, and starts
+// its grace period: until a WebSocket subscribes, nothing reads it.
+func (h *Handler) registerBoardAttach(attach *boardAttach, sess session.Session) {
 	b := h.boardAttaches
-	attach := &boardAttach{taskID: taskID, sessionID: sess.ID(), tmuxSession: tmuxSession}
 	b.mu.Lock()
-	b.byTask[taskID] = attach
+	b.byTask[attach.taskID] = attach
 	b.bySession[attach.sessionID] = attach
 	h.armBoardAttachLocked(attach)
 	b.mu.Unlock()
@@ -294,7 +304,7 @@ func (h *Handler) DeleteTaskAttach(w http.ResponseWriter, r *http.Request) {
 	if refuseCrossSite(w, r) {
 		return
 	}
-	attach := h.boardAttaches.forget(chi.URLParam(r, "id"))
+	attach := h.boardAttaches.forget(chi.URLParam(r, "id"), false)
 	if attach == nil {
 		http.Error(w, "no such board attach", http.StatusNotFound)
 		return
@@ -309,4 +319,12 @@ func (h *Handler) DeleteTaskAttach(w http.ResponseWriter, r *http.Request) {
 // It is the seam the server's route tests use instead of a real tmux.
 func (h *Handler) SetTmuxAttachFactory(fn TmuxAttachFactory) {
 	h.createTmuxAttach = fn
+}
+
+// SetSessionFactory replaces how a host terminal's session is created. It is
+// the seam the server's route tests use instead of a real ssh connection.
+func (h *Handler) SetSessionFactory(
+	fn func(*config.PaneConfig, map[string]config.SSHConnection) (session.Session, error),
+) {
+	h.createSession = fn
 }

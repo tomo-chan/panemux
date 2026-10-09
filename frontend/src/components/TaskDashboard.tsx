@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { Task, TaskHost, TaskIssueLink, TaskLaunchResponse, Workspace } from '../schemas'
-import type { TasksState } from '../hooks/useTasks'
+import type { HostTerminalType, TasksState } from '../hooks/useTasks'
 import { TASKS_POLL_INTERVAL_MS } from '../hooks/useTasks'
 import { TERMINAL_FONT_FAMILY } from '../utils/fonts'
 import { NewTaskDialog } from './NewTaskDialog'
@@ -11,6 +11,9 @@ import type { SSHConnectionsState } from '../hooks/useSSHConnections'
 import { useTaskInput } from '../hooks/useTaskInput'
 import type { TaskInputOrigin } from '../hooks/useTaskInput'
 import { TaskInputPopup } from './TaskInputPopup'
+import { HostConnectDialog } from './HostConnectDialog'
+import { HostTerminalPopup } from './HostTerminalPopup'
+import { useHostTerminal } from '../hooks/useHostTerminal'
 import { loadTaskTerminalMaximized, saveTaskTerminalMaximized } from '../utils/taskTerminalPrefs'
 import {
   TASK_COLUMNS,
@@ -88,6 +91,11 @@ export interface TaskDashboardProps {
   hostsState?: SSHConnectionsState
   workspaces: Workspace[]
   onOpenTask: (task: Task, action: TaskOpenAction) => void
+  /**
+   * Adds a new pane on a host (issue #314): App's job, like onOpenTask. Every
+   * call is a new pane, whatever panes the host already has.
+   */
+  onOpenHost?: (host: string, type: HostTerminalType, tmuxSession: string | undefined) => void
   onShowWorkspaces: () => void
   /** The layer-switching shortcut, as shown and as aria-keyshortcuts spells it. */
   shortcut?: { label: string; aria: string }
@@ -121,6 +129,7 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
   hostsState,
   workspaces,
   onOpenTask,
+  onOpenHost,
   onShowWorkspaces,
   shortcut,
   now = Date.now,
@@ -138,6 +147,8 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
   const [detailOpen, setDetailOpen] = useState(false)
   const [newTaskOpen, setNewTaskOpen] = useState(false)
   const [hostsOpen, setHostsOpen] = useState(false)
+  // The host whose connection menu is open (issue #314), one at a time.
+  const [hostMenu, setHostMenu] = useState<string | null>(null)
   const [unreadableOpen, setUnreadableOpen] = useState(false)
   const [flashTaskId, setFlashTaskId] = useState<string | null>(null)
   const ownHostsState = useSSHConnections()
@@ -157,6 +168,18 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
   const topRef = useRef<HTMLElement>(null)
   const popupRef = useRef<HTMLDivElement>(null)
   const input = useTaskInput(tasksState.attach, tasksState.detach)
+  const hostInput = useHostTerminal(tasksState.hostTerminal, tasksState.closeHostTerminal)
+  // Focus goes back to the chip the popup was opened from — or, if a poll
+  // replaced it, to that host's chip as it is now, and failing that to the
+  // dashboard.
+  const closeHostInput = () => {
+    const closed = hostInput.close()
+    if (!closed) return
+    const element = closed.originElement?.isConnected
+      ? closed.originElement
+      : rootRef.current?.querySelector<HTMLElement>(`[data-host-chip="${CSS.escape(closed.host)}"]`)
+    ;(element ?? rootRef.current)?.focus({ preventScroll: true })
+  }
   const [maximized, setMaximized] = useState(loadTaskTerminalMaximized)
   const narrow = useMediaQuery(NARROW_QUERY)
   const [topOffset, setTopOffset] = useState(0)
@@ -172,6 +195,20 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
   const summariesEnabled = data?.summaries_enabled ?? false
   const hosts = data?.hosts ?? []
   const unreadableCount = unreadableRows(hosts).length
+
+  // The connection menu goes with its host when a poll finds the host gone
+  // or no longer reachable, so it never reopens by itself when the host
+  // comes back. Focus that was in the menu moves to the host's Reconnect
+  // button, or to the dashboard while the host is connecting.
+  const menuHost = hostMenu === null ? undefined : hosts.find((host) => host.name === hostMenu)
+  const menuGone = hostMenu !== null && !(menuHost && hostOpensTerminal(menuHost))
+  useEffect(() => {
+    if (!menuGone || hostMenu === null) return
+    setHostMenu(null)
+    if (document.activeElement && document.activeElement !== document.body) return
+    const reconnect = rootRef.current?.querySelector<HTMLElement>(`[data-reconnect="${CSS.escape(hostMenu)}"]`)
+    ;(reconnect ?? rootRef.current)?.focus({ preventScroll: true })
+  }, [menuGone, hostMenu])
   // Once the files are gone the details are closed, so they do not open by
   // themselves when a file becomes unreadable again.
   if (unreadableOpen && unreadableCount === 0) setUnreadableOpen(false)
@@ -357,7 +394,26 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
         <h1>Tasks</h1>
         <ul className="td-hosts" aria-label="Hosts">
           {hosts.map((host) => (
-            <HostChip key={host.name} host={host} running={runningCount(tasks, host.name)} onReconnect={reconnect} />
+            <HostChip
+              key={host.name}
+              host={host}
+              running={runningCount(tasks, host.name)}
+              onReconnect={reconnect}
+              menu={{
+                open: hostMenu === host.name,
+                onToggle: () => setHostMenu((current) => (current === host.name ? null : host.name)),
+                onCancel: () => setHostMenu(null),
+                onOpen: (type, tmuxSession) => {
+                  setHostMenu(null)
+                  onOpenHost?.(host.name, type, tmuxSession)
+                },
+                onTypeIn: (type, tmuxSession, chip) => {
+                  setHostMenu(null)
+                  hostInput.open(host.name, type, tmuxSession, chip)
+                },
+                sessionName: tasksState.hostSessionName,
+              }}
+            />
           ))}
         </ul>
         <span className="td-spacer" />
@@ -474,7 +530,10 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
       </div>
 
       <div className="td-main">
-        <div className="td-board">
+        {/* The board scrolls sideways when its columns are wider than the
+            space left, and with no task card nothing in it takes focus, so the
+            board is a tab stop of its own for scrolling it from the keyboard. */}
+        <div className="td-board" role="region" aria-label="Task board" tabIndex={0}>
           <div className="td-cols">
             {visibleColumns(showDone).map((column) => {
               const inColumn = visible.filter((task) => columnForTask(task) === column.id)
@@ -579,6 +638,20 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
           />
         </div>
       )}
+      {hostInput.session && (
+        <div className="td-input-host">
+          <HostTerminalPopup
+            session={hostInput.session}
+            onTerminalStatus={hostInput.setTerminal}
+            maximized={maximized}
+            sheet={narrow}
+            topOffset={topOffset}
+            onToggleMaximize={toggleMaximized}
+            onClose={closeHostInput}
+            onRetry={() => void hostInput.retry()}
+          />
+        </div>
+      )}
     </section>
   )
 }
@@ -622,9 +695,28 @@ interface HostChipProps {
   host: TaskHost
   running: number
   onReconnect: (host: string) => Promise<void>
+  /** Opens the connection menu (issue #314); absent, the chip opens nothing. */
+  menu?: HostChipMenu
 }
 
-const HostChip: React.FC<HostChipProps> = ({ host, running, onReconnect }) => {
+interface HostChipMenu {
+  open: boolean
+  onToggle: () => void
+  /** Closed without opening anything: focus goes back to the chip. */
+  onCancel: () => void
+  onOpen: (type: HostTerminalType, tmuxSession: string | undefined) => void
+  onTypeIn: (type: HostTerminalType, tmuxSession: string | undefined, chip: HTMLElement | null) => void
+  sessionName: TasksState['hostSessionName']
+}
+
+// Only a reachable remote host opens a terminal: the panemux host is not a
+// connection, and one that is connecting or failing has nothing to open yet.
+function hostOpensTerminal(host: TaskHost): boolean {
+  return host.status === 'ok' && host.name !== ''
+}
+
+const HostChip: React.FC<HostChipProps> = ({ host, running, onReconnect, menu }) => {
+  const chipRef = useRef<HTMLButtonElement>(null)
   const label = hostLabel(host.name)
   let detail: string
   switch (host.status) {
@@ -637,13 +729,59 @@ const HostChip: React.FC<HostChipProps> = ({ host, running, onReconnect }) => {
     default:
       detail = host.error ?? 'unreachable'
   }
-  return (
-    <li className="td-host" data-status={host.status} title={host.error}>
+  const content = (
+    <>
       <span className="td-host-dot" aria-hidden="true" />
       <b>{label}</b>{' '}
       <span className="td-host-detail">{detail}</span>
+    </>
+  )
+  if (menu && hostOpensTerminal(host)) {
+    const cancel = () => {
+      menu.onCancel()
+      chipRef.current?.focus()
+    }
+    return (
+      <li className="td-host-item">
+        <button
+          ref={chipRef}
+          type="button"
+          className="td-host td-host-button"
+          data-status={host.status}
+          data-host-chip={host.name}
+          aria-haspopup="dialog"
+          aria-expanded={menu.open}
+          aria-label={`Open a terminal on ${host.name}`}
+          onClick={menu.onToggle}
+        >
+          {content}
+          <svg className="td-host-icon" width="12" height="12" viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M2.5 4.5l4 3.5-4 3.5M8 12h5.5" />
+          </svg>
+        </button>
+        {menu.open && (
+          <HostConnectDialog
+            host={host.name}
+            sessionName={menu.sessionName}
+            anchorRef={chipRef}
+            onCancel={cancel}
+            onOpen={menu.onOpen}
+            onTypeIn={(type, tmuxSession) => menu.onTypeIn(type, tmuxSession, chipRef.current)}
+          />
+        )}
+      </li>
+    )
+  }
+  return (
+    <li className="td-host" data-status={host.status} title={host.error}>
+      {content}
       {host.status === 'error' && host.name !== '' && (
-        <button type="button" className="td-btn td-btn-sm" onClick={() => void onReconnect(host.name)}>
+        <button
+          type="button"
+          className="td-btn td-btn-sm"
+          data-reconnect={host.name}
+          onClick={() => void onReconnect(host.name)}
+        >
           Reconnect
         </button>
       )}

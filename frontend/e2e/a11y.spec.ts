@@ -7,7 +7,7 @@ import { checkAgainstCeiling, type ScanLabel } from './a11y-ceiling'
 // docs/quality-gateway.md records as thinly protected: three focus-restoration
 // E2E tests and, before this file, no accessibility checks at all.
 //
-// This file drives the two page states and reports what it found. The ceiling
+// This file drives the four page states and reports what it found. The ceiling
 // it holds them to, and the comparator that applies it, live in
 // ./a11y-ceiling.ts — separated so the comparator can be unit tested, because
 // a green run exercises none of its interesting branches. Read that file for
@@ -85,6 +85,51 @@ test('holds the pane settings dialog at or below its accessibility ceiling', asy
   // A modal dialog is where accessibility problems are both most likely and
   // most consequential — focus trapping, labelling, escape handling — so it
   // gets its own ceiling rather than being folded into the dashboard's.
+  expect(results.passes.length + results.violations.length).toBeGreaterThan(0)
+  expect(failures, failures.join('\n')).toEqual([])
+})
+
+// The task dashboard, with the host list a remote host makes. The fixture has
+// no SSH server, so the task collection is stubbed: one remote host the
+// collection reached, which is what makes its chip a button.
+async function showTaskDashboard(page: Page) {
+  await page.route(/\/api\/tasks$/, (route) => {
+    if (route.request().method() !== 'GET') return route.fallback()
+    return route.fulfill({
+      json: {
+        hosts: [
+          { name: '', status: 'ok', collected_at: '2026-01-01T00:00:00Z' },
+          { name: 'gpu-box', status: 'ok', collected_at: '2026-01-01T00:00:00Z' },
+        ],
+        tasks: [],
+        known_labels: [],
+        summaries_enabled: false,
+      },
+    })
+  })
+  await page.goto('/')
+  await expect(page.locator('[data-pane-id]').first()).toBeVisible()
+  await page.getByRole('button', { name: /^Tasks/ }).click()
+  await expect(page.getByRole('button', { name: 'Open a terminal on gpu-box' })).toBeVisible()
+}
+
+test('holds the task dashboard at or below its accessibility ceiling', async ({ page }, testInfo) => {
+  await showTaskDashboard(page)
+
+  const { results, failures } = await scan(page, testInfo, 'task-dashboard')
+
+  expect(results.passes.length + results.violations.length).toBeGreaterThan(0)
+  expect(failures, failures.join('\n')).toEqual([])
+})
+
+test('holds the host connection menu at or below its accessibility ceiling', async ({ page }, testInfo) => {
+  await showTaskDashboard(page)
+
+  await page.getByRole('button', { name: 'Open a terminal on gpu-box' }).click()
+  await expect(page.getByRole('dialog', { name: 'Open a terminal on gpu-box' })).toBeVisible()
+
+  const { results, failures } = await scan(page, testInfo, 'host-connect-menu')
+
   expect(results.passes.length + results.violations.length).toBeGreaterThan(0)
   expect(failures, failures.join('\n')).toEqual([])
 })

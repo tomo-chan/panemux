@@ -486,7 +486,7 @@ func TestPostTaskAttach_ARequestEndingWhileWaitingCreatesNothing(t *testing.T) {
 func TestBoardAttach_ACountForAForgottenAttachIsIgnored(t *testing.T) {
 	e := newAttachEnv(t, attachLocal())
 	got := decodeAttach(t, e.post(t, "local:claude:in-tmux"))
-	attach := e.h.boardAttaches.forget(got.SessionID)
+	attach := e.h.boardAttaches.forget(got.SessionID, false)
 	require.NotNil(t, attach)
 	require.Empty(t, e.timers.live())
 

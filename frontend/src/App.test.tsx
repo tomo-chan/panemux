@@ -1257,6 +1257,41 @@ describe('App task dashboard layer', () => {
     )
   })
 
+  it('opens a host in a new ssh pane from its connection menu', async () => {
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: /^Tasks/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open a terminal on dev-server' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open: dev-server' }))
+
+    await waitFor(() => expect(mockCreatePane).toHaveBeenCalledTimes(1))
+    const [pane, placement] = mockCreatePane.mock.calls[0]
+    expect(pane).toEqual(expect.objectContaining({ type: 'ssh', connection: 'dev-server', title: 'dev-server' }))
+    expect(pane).not.toHaveProperty('tmux_session')
+    expect(placement).toEqual({ type: 'workspace-edge', edge: 'right' })
+    expect(screen.queryByRole('region', { name: 'Task dashboard' })).not.toBeInTheDocument()
+  })
+
+  it('opens a host in an ssh_tmux pane on the session the server named, every time anew', async () => {
+    const hostSessionName = vi.fn().mockResolvedValue({ ok: true, launched: { tmux_session: 'dev-server-1a2b3c4d' } })
+    mockUseTasks.mockReturnValue({ ...tasksStateWith([]), hostSessionName })
+    render(<App />)
+    for (let i = 0; i < 2; i++) {
+      fireEvent.click(screen.getByRole('button', { name: /^Tasks/ }))
+      fireEvent.click(screen.getByRole('button', { name: 'Open a terminal on dev-server' }))
+      fireEvent.click(screen.getByRole('radio', { name: /ssh_tmux/ }))
+      const open = screen.getByRole('button', { name: 'Open: dev-server' })
+      await waitFor(() => expect(open).toBeEnabled())
+      fireEvent.click(open)
+      await waitFor(() => expect(mockCreatePane).toHaveBeenCalledTimes(i + 1))
+    }
+    for (const [pane] of mockCreatePane.mock.calls) {
+      expect(pane).toEqual(expect.objectContaining({
+        type: 'ssh_tmux', connection: 'dev-server', tmux_session: 'dev-server-1a2b3c4d',
+      }))
+    }
+    expect(mockCreatePane.mock.calls[0][0].id).not.toBe(mockCreatePane.mock.calls[1][0].id)
+  })
+
   it('reports a pane that could not be created', async () => {
     mockUseTasks.mockReturnValue(tasksStateWith([waitingTask]))
     mockCreatePane.mockRejectedValueOnce(new Error('HTTP 500'))

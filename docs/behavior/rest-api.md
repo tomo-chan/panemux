@@ -106,7 +106,8 @@ Accepts `{ "vertical_bar_width": <int> }`, validates the shared vertical workspa
 ### `GET /api/sessions`
 
 Returns a list of active sessions with `id`, `type`, `title`, and `state`. The task dashboard's
-temporary attaches ([`POST /api/tasks/attach`](tasks.md#post-apitasksattach)) are not listed.
+temporary attaches ([`POST /api/tasks/attach`](tasks.md#post-apitasksattach)) and host terminals
+([`POST /api/hosts/terminal`](tasks.md#post-apihoststerminal)) are not listed.
 
 ### `POST /api/sessions`
 
@@ -209,6 +210,13 @@ starting and resuming are in [Starting a task](tasks.md#starting-a-task),
 [`POST /api/tasks/resume`](tasks.md#post-apitasksresume); summaries are in [Summaries](tasks.md#summaries)
 and [`POST /api/tasks/summary`](tasks.md#post-apitaskssummary); the board's temporary tmux attach is in
 [`POST /api/tasks/attach`](tasks.md#post-apitasksattach).
+
+### `POST /api/hosts/session-name` and `POST`/`DELETE /api/hosts/terminal`
+
+Opening a host from its chip on the task dashboard: a generated tmux session name for an
+`ssh_tmux` terminal, and the host terminal Type in pane shows. They are in
+[Opening a host](tasks.md#opening-a-host), [`POST /api/hosts/session-name`](tasks.md#post-apihostssession-name)
+and [`POST /api/hosts/terminal`](tasks.md#post-apihoststerminal).
 
 ### `GET /api/ssh-connections`
 

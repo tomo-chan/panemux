@@ -639,6 +639,8 @@ describe('useTasks attach and detach (issue #284)', () => {
     ])
   })
 
+  // efficacy:exempt unchanged by this branch; the red-check maps the blank line before the
+  // describe block appended below this one onto this test.
   it('DELETEs the attach by its session ID, swallowing a failure', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(ok(payload))
@@ -655,5 +657,118 @@ describe('useTasks attach and detach (issue #284)', () => {
 
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/tasks/attach/board-0123456789abcdef', { method: 'DELETE', keepalive: true })
     expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/tasks/attach/board-..%2Fx', { method: 'DELETE', keepalive: true })
+  })
+})
+
+describe('useTasks host terminals (issue #314)', () => {
+  beforeEach(() => setVisibility('visible'))
+  afterEach(() => vi.restoreAllMocks())
+
+  const refused = (status: number, text: string) =>
+    ({ ok: false, status, text: () => Promise.resolve(text) }) as Response
+  const post = (body: unknown) => ({
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+
+  it('asks the server for a host tmux session name, refusing a name the guard would not take', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(ok(payload))
+      .mockResolvedValueOnce(ok({ tmux_session: 'gpu-box-0123abcd' }))
+      .mockResolvedValueOnce(ok({ tmux_session: 'gpu box;x' }))
+      .mockResolvedValueOnce(refused(400, 'connection "x" is not in ssh_connections'))
+    window.fetch = fetchMock
+    const { result } = renderHook(() => useTasks(true))
+    await waitFor(() => expect(result.current.data).not.toBeNull())
+
+    const outcomes: unknown[] = []
+    await act(async () => {
+      for (let i = 0; i < 3; i++) outcomes.push(await result.current.hostSessionName('gpu-box'))
+    })
+
+    expect(outcomes).toEqual([
+      { ok: true, launched: { tmux_session: 'gpu-box-0123abcd' } },
+      { ok: false, error: 'Unexpected response from /api/hosts/session-name' },
+      { ok: false, error: 'connection "x" is not in ssh_connections' },
+    ])
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/hosts/session-name', post({ connection: 'gpu-box' }))
+  })
+
+  async function opensAHostTerminal(
+    type: 'ssh' | 'ssh_tmux',
+    tmuxSession: string | undefined,
+    body: Record<string, string>,
+    answered: string,
+  ) {
+    const terminal = { session_id: 'board-0123456789abcdef', tmux_session: answered }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(ok(payload))
+      .mockResolvedValueOnce({ ...ok(terminal), status: 201 } as Response)
+    window.fetch = fetchMock
+    const { result } = renderHook(() => useTasks(true))
+    await waitFor(() => expect(result.current.data).not.toBeNull())
+
+    let outcome: unknown = null
+    await act(async () => {
+      outcome = await result.current.hostTerminal('gpu-box', type, tmuxSession)
+    })
+
+    expect(outcome).toEqual({ ok: true, launched: terminal })
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/hosts/terminal', post(body))
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  }
+
+  // Two literal cases rather than it.each, so the red-check can name them
+  // from the source and keep the exemption on the case above this block.
+  it('opens a ssh host terminal', async () => {
+    await opensAHostTerminal('ssh', undefined, { connection: 'gpu-box', type: 'ssh' }, '')
+  })
+
+  it('opens a ssh_tmux host terminal', async () => {
+    await opensAHostTerminal(
+      'ssh_tmux',
+      'gpu-box-0123abcd',
+      { connection: 'gpu-box', type: 'ssh_tmux', tmux_session: 'gpu-box-0123abcd' },
+      'gpu-box-0123abcd',
+    )
+  })
+
+  it('reports a refused host terminal, and an answer that is not one', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(ok(payload))
+      .mockResolvedValueOnce(refused(400, 'connection is required'))
+      .mockResolvedValueOnce(ok({ session_id: 'p-1', tmux_session: '' }))
+    window.fetch = fetchMock
+    const { result } = renderHook(() => useTasks(true))
+    await waitFor(() => expect(result.current.data).not.toBeNull())
+
+    const outcomes: unknown[] = []
+    await act(async () => {
+      for (let i = 0; i < 2; i++) outcomes.push(await result.current.hostTerminal('gpu-box', 'ssh'))
+    })
+
+    expect(outcomes).toEqual([
+      { ok: false, error: 'connection is required' },
+      { ok: false, error: 'Unexpected response from /api/hosts/terminal' },
+    ])
+  })
+
+  it('DELETEs a host terminal by its session ID, swallowing a failure', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(ok(payload))
+      .mockResolvedValueOnce({ ok: true, status: 204 } as Response)
+      .mockRejectedValueOnce(new Error('offline'))
+    window.fetch = fetchMock
+    const { result } = renderHook(() => useTasks(true))
+    await waitFor(() => expect(result.current.data).not.toBeNull())
+
+    await act(async () => {
+      await result.current.closeHostTerminal('board-0123456789abcdef')
+      await result.current.closeHostTerminal('board-../x')
+    })
+
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/hosts/terminal/board-0123456789abcdef', { method: 'DELETE', keepalive: true })
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/hosts/terminal/board-..%2Fx', { method: 'DELETE', keepalive: true })
   })
 })

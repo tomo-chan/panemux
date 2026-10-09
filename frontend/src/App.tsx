@@ -16,7 +16,7 @@ import { useBrowserNotificationPermission } from './hooks/useBrowserNotification
 import { useSessionsOverview } from './hooks/useSessionsOverview'
 import { useGitInfoSnapshotMap } from './hooks/useGitInfo'
 import { useBoardSessionToken } from './hooks/useBoardSessionToken'
-import { useTasks } from './hooks/useTasks'
+import { useTasks, type HostTerminalType } from './hooks/useTasks'
 import { DisplayConfig } from './types'
 import { TERMINAL_FONT_FAMILY } from './utils/fonts'
 import { collectLeafPanes, findPaneById, generatePaneId, layoutContainsPane } from './utils/layoutTree'
@@ -36,6 +36,7 @@ import {
   findTaskPane,
   formatShortcut,
   isShortcut,
+  paneConfigForHost,
   paneConfigForTask,
   waitingCount,
 } from './utils/taskBoard'
@@ -517,6 +518,24 @@ export const App: React.FC = () => {
       })
   }, [createPane, handleSelectWorkspacePaneSummary])
 
+  // Opening a host from the dashboard (issue #314): always a new ssh or
+  // ssh_tmux pane, even when one on that host already exists.
+  const handleOpenHost = useCallback((host: string, type: HostTerminalType, tmuxSession: string | undefined) => {
+    const pane = paneConfigForHost(host, type, tmuxSession, generatePaneId())
+    if (!pane) return
+    setLayer('workspaces')
+    setCreatePaneError(null)
+    void createPane(pane, { type: 'workspace-edge', edge: 'right' })
+      .then(() => {
+        setActivePaneId(pane.id)
+        setFlashPaneId(pane.id)
+        setPendingFocusedPaneId(pane.id)
+      })
+      .catch((err) => {
+        setCreatePaneError(err instanceof Error ? err.message : 'Something went wrong')
+      })
+  }, [createPane])
+
   // While the dashboard covers the workspaces, nothing behind it can take
   // focus or keystrokes: a terminal that kept focus would otherwise receive
   // whatever is typed into the dashboard.
@@ -863,6 +882,7 @@ export const App: React.FC = () => {
             tasksState={dashboardTasksState}
             workspaces={workspaces?.items ?? []}
             onOpenTask={handleOpenTask}
+            onOpenHost={handleOpenHost}
             onShowWorkspaces={() => setLayer('workspaces')}
             shortcut={taskShortcut}
             focusRequest={taskFocusRequest}

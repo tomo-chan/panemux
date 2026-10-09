@@ -15,6 +15,12 @@ import (
 
 var validTmuxSessionName = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`)
 
+// IsValidTmuxSessionName reports whether name passes the guard every tmux
+// session name meets before it reaches a tmux command line.
+func IsValidTmuxSessionName(name string) bool {
+	return validTmuxSessionName.MatchString(name)
+}
+
 // TmuxSSHSession attaches to a tmux session on a remote host via SSH.
 type TmuxSSHSession struct {
 	client         *ssh.Client

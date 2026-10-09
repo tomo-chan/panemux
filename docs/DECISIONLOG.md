@@ -98,6 +98,30 @@ prompt; a request that never starts a subprocess does not create a turn.
 
 ## Task dashboard
 
+### Opening a host from its chip on the dashboard (2026-10-09, issue #314)
+
+A host chip opens a terminal on that host, with the task's two destinations: `Type in pane` (the
+default) in a popup over the board, and `Open` as a new workspace pane.
+
+- **A popover dialog, not two buttons on the chip.** The connection type (`ssh` / `ssh_tmux`) has to
+  be chosen before either destination, so the chip opens a menu that follows the shared modal rules
+  (`useModalKeyboard`) rather than growing buttons that would crowd the host list as hosts are
+  added.
+- **Only reachable remote hosts.** The panemux host is opened from a pane, not from here; a
+  `connecting`, failed or not-yet-collected host would fail to open, so its chip is not a button.
+- **Always a new terminal.** Unlike a task, a host has no one session to go to: an existing pane on
+  the host may be in any directory or tmux session, so moving to it would guess.
+- **The tmux session name is made on the server, in one place.** Generating it in the browser would
+  put a second copy of the name rule beside `validTmuxSessionName`; the server replaces each
+  character the rule refuses with `-` and appends random hex, so any connection name yields a valid
+  and fresh session, and both destinations show the name before it is used.
+- **Type in pane reuses the board's attach.** A host terminal is held, served and destroyed like a
+  task's board attach, so the popup, the `pagehide` cleanup and the grace period needed no second
+  mechanism. Each kind's `DELETE` ends only its own kind, so a task attach cannot be closed through
+  the host route or the reverse.
+- Rejected: an `ssh_tmux` popup that attached to an existing session (it would need a session
+  picker), and skipping the menu for `ssh` (the type choice would then be a second gesture).
+
 ### Unreadable state files are diagnostics, not tasks (2026-10-09, issue #313)
 
 Stage 1 of issue #252 kept a state file it could not read on the board as an `unknown` task

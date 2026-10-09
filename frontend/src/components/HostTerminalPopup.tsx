@@ -1,66 +1,17 @@
 import React, { useRef } from 'react'
-import type { Task } from '../schemas'
-import {
-  TASK_STATE_LABELS,
-  hostLabel,
-  taskOpenAction,
-  taskTitle,
-} from '../utils/taskBoard'
-import type { TaskPaneRef } from '../utils/taskBoard'
-import { TaskTerminal } from './TaskTerminal'
+import type { HostTerminalSession } from '../hooks/useHostTerminal'
 import { useTerminalPopupKeyboard } from '../hooks/useTerminalPopupKeyboard'
+import { TaskTerminal } from './TaskTerminal'
 import type { TaskTerminalStatus } from './TaskTerminal'
+import { TASK_INPUT_CHIP_LABELS, taskInputChip } from './TaskInputPopup'
 
-// The task dashboard's Type in pane popup (issue #284): a real terminal on a
-// task's tmux session over the board's temporary attach (issue #283), so a
-// waiting task can be answered and an idle one given its next instruction
-// without leaving the board. TaskDashboard owns the attach's lifecycle; this
-// draws it and owns the popup's keyboard rules.
+// A host chip's Type in pane popup (issue #314): a real terminal on a host,
+// over a host terminal the server opens for it (POST /api/hosts/terminal) and
+// keeps out of the layout. It looks and behaves like a task's popup
+// (TaskInputPopup); TaskDashboard owns the terminal's lifecycle.
 
-/** Where the board's attach request stands. */
-export type TaskAttachPhase =
-  | { phase: 'connecting' }
-  | { phase: 'ready'; sessionId: string; tmuxSession: string }
-  | { phase: 'failed'; error: string }
-
-export type TaskInputChip = 'connecting' | 'connected' | 'disconnected' | 'failed'
-
-export const TASK_INPUT_CHIP_LABELS: Record<TaskInputChip, string> = {
-  connecting: 'Connecting',
-  connected: 'Connected',
-  disconnected: 'Disconnected',
-  failed: 'Failed',
-}
-
-/** The connection state the header shows, from the attach request and then its terminal. */
-export function taskInputChip(attach: TaskAttachPhase, terminal: TaskTerminalStatus): TaskInputChip {
-  if (attach.phase === 'connecting') return 'connecting'
-  if (attach.phase === 'failed') return 'failed'
-  switch (terminal) {
-    case 'connected':
-      return 'connected'
-    case 'failed':
-      return 'failed'
-    case 'disconnected':
-    case 'ended':
-      return 'disconnected'
-    default:
-      return 'connecting'
-  }
-}
-
-export interface TaskInputPopupProps {
-  /** The task as last listed, or as it was when the popup opened if it is listed no more. */
-  task: Task
-  listed: boolean
-  /** The column the task has moved to since the popup opened, by title, or null. */
-  movedTo: string | null
-  /** The workspace pane already showing the task, if any. */
-  pane: TaskPaneRef | null
-  attach: TaskAttachPhase
-  /** Bumped by each retry, so a reconnect to the same attach opens a new WebSocket. */
-  attempt: number
-  terminal: TaskTerminalStatus
+export interface HostTerminalPopupProps {
+  session: HostTerminalSession
   onTerminalStatus: (status: TaskTerminalStatus) => void
   maximized: boolean
   /** A narrow screen: the popup is a full sheet from the start and has no maximize. */
@@ -69,20 +20,12 @@ export interface TaskInputPopupProps {
   topOffset: number
   onToggleMaximize: () => void
   onClose: () => void
+  /** Opens a new terminal in place of this one. */
   onRetry: () => void
-  onOpenTask: (task: Task) => void
-  /** The state pill's colors, as the dashboard's cards use them. */
-  stateStyle: React.CSSProperties
 }
 
-export const TaskInputPopup: React.FC<TaskInputPopupProps> = ({
-  task,
-  listed,
-  movedTo,
-  pane,
-  attach,
-  attempt,
-  terminal,
+export const HostTerminalPopup: React.FC<HostTerminalPopupProps> = ({
+  session,
   onTerminalStatus,
   maximized,
   sheet,
@@ -90,16 +33,13 @@ export const TaskInputPopup: React.FC<TaskInputPopupProps> = ({
   onToggleMaximize,
   onClose,
   onRetry,
-  onOpenTask,
-  stateStyle,
 }) => {
   const dialogRef = useRef<HTMLDivElement>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
+  const { host, type, attach, attempt, terminal } = session
   const chip = taskInputChip(attach, terminal)
-  const title = taskTitle(task)
-  const tmuxSession = attach.phase === 'ready' ? attach.tmuxSession : task.location.tmux_session ?? ''
-  const openAction = taskOpenAction(task, pane)
   const isMaximized = maximized && !sheet
+  const tmuxSession = attach.phase === 'ready' ? attach.tmuxSession : session.tmuxSession ?? ''
 
   useTerminalPopupKeyboard({
     dialogRef,
@@ -122,17 +62,11 @@ export const TaskInputPopup: React.FC<TaskInputPopupProps> = ({
       case 'disconnected':
         return { text: 'Disconnected.', action: 'Reconnect' }
       case 'ended':
-        return { text: 'The tmux client ended.', action: 'Reconnect' }
+        return { text: 'The connection ended.', action: 'Reconnect' }
       default:
         return null
     }
   })()
-
-  const notice = !listed
-    ? `The board no longer lists this task. This terminal stays on ${title}.`
-    : movedTo
-      ? `Moved to ${movedTo} on the board. This terminal stays on ${title}.`
-      : null
 
   return (
     <div className="td-input-layer" data-maximized={isMaximized} data-sheet={sheet}>
@@ -141,7 +75,7 @@ export const TaskInputPopup: React.FC<TaskInputPopupProps> = ({
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-label={`Type in pane: ${title}`}
+        aria-label={`Terminal on ${host}`}
         tabIndex={-1}
         className="td-input"
         data-maximized={isMaximized}
@@ -150,32 +84,19 @@ export const TaskInputPopup: React.FC<TaskInputPopupProps> = ({
       >
         <header
           className="td-input-head"
-          data-testid="task-input-header"
           onDoubleClick={(event) => {
             if (sheet || (event.target as HTMLElement).closest('button, a')) return
             onToggleMaximize()
           }}
         >
           <div className="td-input-titlebar">
-            <span className="td-pill" style={stateStyle}>
-              {TASK_STATE_LABELS[task.state]}
-            </span>
-            <h2 className="td-input-title">{title}</h2>
+            <span className="td-pill">{type}</span>
+            <h2 className="td-input-title">{host}</h2>
             <span className="td-input-chip" data-status={chip} data-testid="task-input-status" aria-live="polite">
               <span className="td-input-chip-dot" aria-hidden="true" />
               {TASK_INPUT_CHIP_LABELS[chip]}
             </span>
             <span className="td-spacer" />
-            {openAction.kind !== 'unavailable' && (
-              <button
-                type="button"
-                className="td-btn td-btn-sm"
-                aria-label={`${openAction.kind === 'goto' ? 'Go to pane' : 'Open'}: ${title}`}
-                onClick={() => onOpenTask(task)}
-              >
-                {openAction.kind === 'goto' ? 'Go to pane' : 'Open'}
-              </button>
-            )}
             {!sheet && (
               <button
                 type="button"
@@ -198,22 +119,8 @@ export const TaskInputPopup: React.FC<TaskInputPopupProps> = ({
               Close
             </button>
           </div>
-          <div className="td-input-meta td-mono">
-            {hostLabel(task.host)} · {task.agent} · tmux: {tmuxSession}
-          </div>
+          {type === 'ssh_tmux' && <div className="td-input-meta td-mono">tmux: {tmuxSession}</div>}
         </header>
-
-        {notice && (
-          <div role="status" className="td-input-note">
-            {notice}
-          </div>
-        )}
-        {pane && (
-          <p className="td-input-note">
-            Pane {pane.paneTitle} shows this tmux session too. Input from either reaches the same session, and
-            the window takes the size of the client that was used last.
-          </p>
-        )}
         {notSent && (
           <div role="alert" className="td-input-note" data-tone="error">
             {notSent.text} Input is not being sent.
@@ -222,7 +129,6 @@ export const TaskInputPopup: React.FC<TaskInputPopupProps> = ({
             </button>
           </div>
         )}
-
         <div ref={bodyRef} className="td-input-body" data-input={chip === 'connected' ? 'on' : 'off'}>
           {attach.phase === 'ready' ? (
             <TaskTerminal key={`${attach.sessionId}:${attempt}`} sessionId={attach.sessionId} onStatus={onTerminalStatus} />
@@ -230,7 +136,7 @@ export const TaskInputPopup: React.FC<TaskInputPopupProps> = ({
             <div className="td-input-blank">
               {attach.phase === 'connecting' ? (
                 <>
-                  <strong>Connecting to tmux {tmuxSession}…</strong>
+                  <strong>Connecting to {host}…</strong>
                   <span>Keys are not sent until it connects.</span>
                 </>
               ) : (
@@ -239,10 +145,10 @@ export const TaskInputPopup: React.FC<TaskInputPopupProps> = ({
             </div>
           )}
         </div>
-
         <footer className="td-input-foot">
           Esc goes to the terminal · Cmd/Ctrl+Shift+Esc closes
-          {!sheet && ' · Cmd/Ctrl+Shift+Enter maximizes'} · Closing leaves the agent and its tmux session running
+          {!sheet && ' · Cmd/Ctrl+Shift+Enter maximizes'} ·{' '}
+          {type === 'ssh_tmux' ? 'Closing leaves the tmux session running' : `Closing logs out of ${host}`}
         </footer>
       </div>
     </div>
