@@ -317,6 +317,56 @@ func TestNewLocalExportsTheBrowserShim(t *testing.T) {
 	}
 }
 
+func TestNewLocalClearsInheritedTmuxBrowserOptIn(t *testing.T) {
+	testcap.RequirePTY(t)
+	for _, tc := range []struct {
+		name                 string
+		enabled, failInstall bool
+	}{
+		{"enabled", true, false}, {"disabled", false, false}, {"failed install", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			withBrowserShimEnabled(t, tc.enabled)
+			withShimCacheDir(t)
+			if tc.failInstall {
+				cachedir.SetFailingForTest(t, os.ErrPermission)
+			}
+			t.Setenv("PANEMUX_SHIM_TMUX", "1")
+			t.Setenv("TMUX", "private-socket,123,0")
+			t.Setenv("TMUX_PANE", "%7")
+			sess, err := NewLocal("local-pane", "/bin/sh", "", "local")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer sess.Close()
+			if marker, _ := envValue(sess.cmd.Env, "PANEMUX_SHIM_TMUX"); marker != "" {
+				t.Fatalf("local pane inherited tmux opt-in: %q", marker)
+			}
+			if tc.enabled && !tc.failInstall {
+				browser, _ := envValue(sess.cmd.Env, "BROWSER")
+				tty := filepath.Join(t.TempDir(), "tty")
+				run := exec.Command(browser, "https://example.com/auth") //nolint:gosec // G204: installed test shim
+				run.Env = append(sess.cmd.Env, "PANEMUX_SHIM_TTY="+tty)
+				if out, err := run.CombinedOutput(); err != nil || len(out) != 0 {
+					t.Fatalf("local opener failed: %v: %s", err, out)
+				}
+				if got := readFileString(t, tty); got != "\x1b]7373;panemux-open;https://example.com/auth\a" {
+					t.Fatalf("local notification = %q", got)
+				}
+			}
+		})
+	}
+}
+
+func TestRemoteBrowserShimSetupClearsInheritedTmuxOptIn(t *testing.T) {
+	script := remoteBrowserShimSetup() + `printf '%s' "$PANEMUX_SHIM_TMUX"`
+	run := exec.Command("sh", "-c", script) //nolint:gosec // G204: generated setup under test
+	run.Env = []string{"HOME=" + t.TempDir(), "PATH=/usr/bin:/bin", "PANEMUX_SHIM_TMUX=1"}
+	if out, err := run.CombinedOutput(); err != nil || len(out) != 0 {
+		t.Fatalf("ordinary SSH retained tmux opt-in: %v: %q", err, out)
+	}
+}
+
 func TestNewLocalWithoutTheBrowserShim(t *testing.T) {
 	testcap.RequirePTY(t)
 	withBrowserShimEnabled(t, false)

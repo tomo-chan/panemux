@@ -158,7 +158,7 @@ func browserShimEnvForLocalSession() ([]string, error) {
 // interception. The script text is a fixed literal, quoted with the same
 // discipline every other remote argument uses.
 func remoteBrowserShimSetup() string {
-	return remoteBrowserShimInstall() +
+	return `PANEMUX_SHIM_TMUX=; export PANEMUX_SHIM_TMUX; ` + remoteBrowserShimInstall() +
 		`if [ -x "$PANEMUX_SHIM_DIR/panemux-open" ]; then ` +
 		`PANEMUX_SHIM_FALLBACK_PATH="$PATH"; export PANEMUX_SHIM_FALLBACK_PATH; ` +
 		`BROWSER="$PANEMUX_SHIM_DIR/panemux-open"; export BROWSER; ` +

@@ -73,7 +73,9 @@ func NewLocal(id, shell, cwd, title string) (*LocalSession, error) {
 	}
 
 	cmd := exec.Command(sanitizedShell)
-	cmd.Env = paneIDEnv(append(os.Environ(), "TERM=xterm-256color"), id)
+	// A fresh local PTY is outside the parent's tmux transport, even if
+	// panemux itself inherited the opt-in from a remote tmux session.
+	cmd.Env = paneIDEnv(append(os.Environ(), "TERM=xterm-256color", "PANEMUX_SHIM_TMUX="), id)
 	if browserShimEnabled.Load() {
 		// Best effort: a pane must still start when the shim cannot be
 		// installed, just without browser-open interception.

@@ -103,3 +103,7 @@ that tmux pane, not just OSC 7373, to reach attached clients; it is not an allow
 notification. The scope is the new pane, and the HTTP/HTTPS validation, frontend approval and replay
 suppression above still apply to every browser-open event. tmux 3.3 introduced this pane-scoped
 option; older/unrecognized versions leave interception disabled without preventing attachment.
+
+Local PTYs clear the inherited opt-in even with the shim disabled or installation unavailable.
+Ordinary SSH shim setup also clears the marker. Inherited `TMUX`/`TMUX_PANE` alone cannot cause
+a fresh non-tmux pane to emit a wrapper or change its parent's passthrough option.

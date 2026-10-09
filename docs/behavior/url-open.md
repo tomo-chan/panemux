@@ -94,6 +94,9 @@ created before approval. No server-wide or window-wide tmux option is changed. N
 are not covered. Shell startup files that replace `BROWSER` or remove the shim from `PATH` can
 disable interception, as they can in an ordinary `ssh` pane.
 
+Fresh local panes and ordinary SSH shim setup clear an inherited tmux opt-in marker so a panemux
+process launched inside tmux cannot wrap those panes' notifications for an unrelated parent pane.
+
 ### Clicked links
 
 Links in the terminal are opened by the frontend in a new tab. A link that is itself a loopback URL
