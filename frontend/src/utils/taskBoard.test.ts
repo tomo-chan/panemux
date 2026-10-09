@@ -327,6 +327,37 @@ describe('filterTasks', () => {
     expect(filterTasks(withRef, { query: 'ops-77', host: null, label: null }).map((t) => t.id)).toEqual(['d'])
   })
 
+  it('matches the tmux session name and the summary text, ignoring case', () => {
+    const described = [
+      task({ id: 'session', location: { kind: 'tmux', tmux_session: 'Infra-Night', attachable: true } }),
+      task({ id: 'summary', location: { kind: 'outside', attachable: false }, summary: { state: 'ready', text: '決済のリトライ処理を Refactor している' } }),
+      task({
+        id: 'pending',
+        location: { kind: 'none', attachable: false },
+        summary: { state: 'pending', text: 'Migrating the billing API', outdated: true },
+      }),
+      task({ id: 'bare', location: { kind: 'none', attachable: false }, summary: { state: 'pending' } }),
+      task({ id: 'remote', host: 'dev-server', location: { kind: 'tmux', tmux_session: 'infra-day', attachable: true } }),
+    ]
+    const ids = (query: string, host: string | null = null) =>
+      filterTasks(described, { query, host, label: null }).map((t) => t.id)
+    expect(ids('infra-night')).toEqual(['session'])
+    expect(ids('INFRA')).toEqual(['session', 'remote'])
+    expect(ids('リトライ')).toEqual(['summary'])
+    expect(ids('refactor')).toEqual(['summary'])
+    expect(ids('billing')).toEqual(['pending'])
+    expect(ids('infra', 'dev-server')).toEqual(['remote'])
+    expect(ids('billing', 'dev-server')).toEqual([])
+    expect(ids('nothing')).toEqual([])
+    expect(ids('')).toEqual(['session', 'summary', 'pending', 'bare', 'remote'])
+
+    const labeled = described.map((t) => (t.id === 'session' || t.id === 'pending' ? { ...t, labels: ['ops'] } : t))
+    const withLabel = (query: string) => filterTasks(labeled, { query, host: null, label: 'ops' }).map((t) => t.id)
+    expect(withLabel('infra')).toEqual(['session'])
+    expect(withLabel('billing')).toEqual(['pending'])
+    expect(withLabel('リトライ')).toEqual([])
+  })
+
   // efficacy:exempt only the filter argument gained label: null; it pins stage 1 behavior this branch leaves as it was
   it('filters by host, where the empty name is the panemux host', () => {
     expect(filterTasks(tasks, { query: '', host: '', label: null }).map((t) => t.id)).toEqual(['a'])
