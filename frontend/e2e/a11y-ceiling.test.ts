@@ -14,6 +14,8 @@ import { CEILINGS, checkAgainstCeiling, type ObservedViolation, type ScanLabel }
 const FIXTURE: Record<ScanLabel, Record<string, number>> = {
   dashboard: { 'color-contrast': 2, region: 7 },
   'pane-settings': { 'select-name': 1 },
+  'task-dashboard': {},
+  'host-connect-menu': {},
 }
 
 function violation(id: string, nodes: number, impact?: string | null): ObservedViolation {
@@ -159,11 +161,11 @@ describe('checkAgainstCeiling', () => {
 })
 
 describe('CEILINGS', () => {
-  it('covers both scanned page states', () => {
-    // a11y.spec.ts scans two states; a label with no entry would make every
+  it('covers every scanned page state', () => {
+    // a11y.spec.ts scans four states; a label with no entry would make every
     // violation on that page read as new, which is a different failure from
     // the one intended and would be blamed on the page.
-    expect(Object.keys(CEILINGS).sort()).toEqual(['dashboard', 'pane-settings'])
+    expect(Object.keys(CEILINGS).sort()).toEqual(['dashboard', 'host-connect-menu', 'pane-settings', 'task-dashboard'])
   })
 
   it('carries no zero or negative entry', () => {
