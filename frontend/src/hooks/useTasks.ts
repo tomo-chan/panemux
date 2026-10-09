@@ -3,6 +3,10 @@ import {
   Task,
   TaskAttach,
   TaskAttachSchema,
+  HostSessionName,
+  HostSessionNameSchema,
+  HostTerminal,
+  HostTerminalSchema,
   TaskLaunched,
   TaskLaunchedSchema,
   TaskLaunchResponse,
@@ -75,7 +79,25 @@ export interface TasksState {
    * keepalive, so it is still sent when the page is going away.
    */
   detach: (sessionId: string) => Promise<void>
+  /**
+   * Asks the server for a new tmux session name for an ssh_tmux terminal on
+   * host (issue #314). The server generates it for both Open and Type in pane.
+   */
+  hostSessionName: (host: string) => Promise<TaskActionResult<HostSessionName>>
+  /**
+   * Opens a host terminal for the Type in pane popup (issue #314): a new one
+   * on every call, never in the layout. tmuxSession names the ssh_tmux
+   * session, from hostSessionName.
+   */
+  hostTerminal: (host: string, type: HostTerminalType, tmuxSession?: string) => Promise<TaskActionResult<HostTerminal>>
+  /**
+   * Ends a host terminal. An ssh terminal logs out; an ssh_tmux one ends only
+   * its tmux client. A failure is not reported, as with detach.
+   */
+  closeHostTerminal: (sessionId: string) => Promise<void>
 }
+
+export type HostTerminalType = 'ssh' | 'ssh_tmux'
 
 // postTaskAction POSTs body to path and parses the answer with schema. A
 // refusal comes back as the server's own reason.
@@ -259,6 +281,29 @@ export function useTasks(enabled: boolean): TasksState {
     }
   }, [])
 
+  const hostSessionName = useCallback(
+    (host: string) => postTaskAction('/api/hosts/session-name', { connection: host }, HostSessionNameSchema),
+    [],
+  )
+
+  const hostTerminal = useCallback(
+    (host: string, type: HostTerminalType, tmuxSession?: string) =>
+      postTaskAction(
+        '/api/hosts/terminal',
+        tmuxSession === undefined ? { connection: host, type } : { connection: host, type, tmux_session: tmuxSession },
+        HostTerminalSchema,
+      ),
+    [],
+  )
+
+  const closeHostTerminal = useCallback(async (sessionId: string) => {
+    try {
+      await fetch(`/api/hosts/terminal/${encodeURIComponent(sessionId)}`, { method: 'DELETE', keepalive: true })
+    } catch {
+      // See TasksState.closeHostTerminal.
+    }
+  }, [])
+
   useEffect(() => {
     const handleVisibilityChange = () => setIsVisible(document.visibilityState === 'visible')
     document.addEventListener('visibilitychange', handleVisibilityChange)
@@ -274,5 +319,21 @@ export function useTasks(enabled: boolean): TasksState {
     return () => clearInterval(interval)
   }, [enabled, isVisible, refresh])
 
-  return { data, error, loading, updatedAt, refresh, reconnect, saveRecord, launch, resume, requestSummary, attach, detach }
+  return {
+    data,
+    error,
+    loading,
+    updatedAt,
+    refresh,
+    reconnect,
+    saveRecord,
+    launch,
+    resume,
+    requestSummary,
+    attach,
+    detach,
+    hostSessionName,
+    hostTerminal,
+    closeHostTerminal,
+  }
 }

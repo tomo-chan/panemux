@@ -113,6 +113,9 @@ function tasksState(overrides: Partial<TasksState> = {}, tasks: Task[] = ALL): T
     requestSummary: vi.fn().mockResolvedValue(null),
     attach: vi.fn().mockResolvedValue(attached('board-0000000000000001')),
     detach: vi.fn().mockResolvedValue(undefined),
+    hostSessionName: vi.fn().mockResolvedValue({ ok: false, error: 'not stubbed' }),
+    hostTerminal: vi.fn().mockResolvedValue({ ok: false, error: 'not stubbed' }),
+    closeHostTerminal: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   }
 }
