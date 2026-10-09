@@ -3,6 +3,8 @@ import { resolve } from 'node:path'
 import { describe, it, expect } from 'vitest'
 import {
   DisplayConfigSchema,
+  HostSessionNameSchema,
+  HostTerminalSchema,
   GitInfoSchema,
   PaneConfigSchema,
   LayoutNodeSchema,
@@ -333,6 +335,30 @@ describe('TaskLaunchedSchema', () => {
     expect(TaskLaunchedSchema.safeParse({ ...launched, tmux_session: undefined }).success).toBe(false)
     expect(TaskLaunchedSchema.safeParse({ ...launched, id: '' }).success).toBe(false)
     expect(TaskLaunchedSchema.safeParse({ ...launched, session_id: '' }).success).toBe(false)
+  })
+})
+
+describe('HostSessionNameSchema', () => {
+  it('accepts only a name a tmux session can take', () => {
+    expect(HostSessionNameSchema.safeParse({ tmux_session: 'gpu-box-0123abcd' }).success).toBe(true)
+    expect(HostSessionNameSchema.safeParse({ tmux_session: '' }).success).toBe(false)
+    expect(HostSessionNameSchema.safeParse({ tmux_session: 'a b' }).success).toBe(false)
+    expect(HostSessionNameSchema.safeParse({ tmux_session: "a'b" }).success).toBe(false)
+  })
+})
+
+describe('HostTerminalSchema', () => {
+  it('accepts an ssh terminal with no tmux session and an ssh_tmux one with its name', () => {
+    expect(HostTerminalSchema.safeParse({ session_id: 'board-0123', tmux_session: '' }).success).toBe(true)
+    expect(HostTerminalSchema.safeParse({ session_id: 'board-0123', tmux_session: 'gpu-box-0123abcd' }).success).toBe(
+      true,
+    )
+  })
+
+  it('requires a board session ID and a tmux session name a tmux session can take when given', () => {
+    expect(HostTerminalSchema.safeParse({ session_id: 'pane-1', tmux_session: '' }).success).toBe(false)
+    expect(HostTerminalSchema.safeParse({ session_id: 'board-0123' }).success).toBe(false)
+    expect(HostTerminalSchema.safeParse({ session_id: 'board-0123', tmux_session: 'a b' }).success).toBe(false)
   })
 })
 
