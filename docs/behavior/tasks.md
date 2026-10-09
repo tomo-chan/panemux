@@ -778,6 +778,41 @@ never holds it.
 The dashboard and the workspaces are switched with the `← Tasks` and `Workspaces` buttons or with
 `Cmd/Ctrl+Shift+<display.task_dashboard_shortcut>` (`S` unless configured), from either layer.
 
+### Opening a host
+
+A host chip in the dashboard's host list opens a terminal on that host:
+
+| Host | Chip |
+|---|---|
+| A host of `ssh_connections` whose last collection succeeded (`ok`) | A button (`Open a terminal on <host>`) that opens the connection menu |
+| The panemux host (`""`) | Not a button; the panemux host is not opened from here |
+| `connecting`, `error` or not yet collected | Not a button; an `error` host keeps its `Reconnect` button |
+
+The connection menu is a dialog under the chip ([UI](../ui-design.md#task-dashboard)). It offers
+`ssh` (the default) or `ssh_tmux`, and three actions:
+
+- **`ssh_tmux` session name.** Choosing `ssh_tmux` asks the server for a new tmux session name
+  ([`POST /api/hosts/session-name`](#post-apihostssession-name)) once per menu, and shows it; `Open`
+  and `Type in pane` stay disabled until it arrives. The name is the connection name with every
+  character outside `[a-zA-Z0-9_.-]` replaced by `-`, then `-` and 8 random hex digits
+  (`gpu-box-1a2b3c4d`). A failed request is shown in the menu.
+- **`Open`** adds a new `ssh` or `ssh_tmux` pane on that connection at the right edge of the active
+  workspace, through the ordinary `POST /api/sessions`, closes the dashboard and outlines the pane.
+  It never moves to a pane the host already has; every press adds one. An `ssh_tmux` pane creates
+  the named session (`tmux new-session -A`).
+- **`Type in pane`** (the emphasised action) opens a popup over the board holding a host terminal
+  ([`POST /api/hosts/terminal`](#post-apihoststerminal)), like a task's Type in pane: it does not
+  switch workspaces or add a pane, and every press opens a new terminal. Closing it (`Close`,
+  `Cmd/Ctrl+Shift+Esc`, the dashboard leaving, or a reload's `pagehide`) sends
+  `DELETE /api/hosts/terminal/{session_id}`: an `ssh` terminal logs out; an `ssh_tmux` terminal ends
+  only its tmux client, and the tmux session it created stays on the host.
+- **`Cancel`**, `Escape`, or a press outside the menu closes it; focus returns to the chip.
+
+A host terminal is a board attach in every respect but its creation: served by `/ws/{session_id}`,
+never in the layout or `GET /api/sessions`, destroyed by its `DELETE` or 10s after its last
+WebSocket closed (or after creation if none connected), and held in memory only.
+`DELETE /api/tasks/attach/{id}` and `DELETE /api/hosts/terminal/{id}` each end only their own kind.
+
 ### `GET /api/tasks`
 
 Collects from every host and returns:
@@ -987,3 +1022,37 @@ Asks for one task's summary:
   for a session the host's last collection did not list with a log (an unknown host included), `409`
   when summaries are disabled, `503` while panemux is shutting down, and `403` for a cross-site
   request as for `GET /api/tasks`.
+
+### `POST /api/hosts/session-name`
+
+Generates a tmux session name for an `ssh_tmux` terminal on a host ([Opening a host](#opening-a-host)):
+
+```json
+{ "connection": "gpu-box" }
+```
+
+- Answers `200` with `{ "tmux_session": "gpu-box-1a2b3c4d" }`. Each request returns a new name; the
+  server keeps none of them.
+- `400` for a body that is not valid or an empty `connection` (the panemux host); `404` for a
+  connection that is not in `ssh_connections`; `403` for a cross-site request.
+
+### `POST /api/hosts/terminal`
+
+Opens a new host terminal ([Opening a host](#opening-a-host)):
+
+```json
+{ "connection": "gpu-box", "type": "ssh_tmux", "tmux_session": "gpu-box-1a2b3c4d" }
+```
+
+- `type` is `ssh` or `ssh_tmux`. `tmux_session` is for `ssh_tmux` only and must pass the tmux
+  session name rule ([security](../security/command-execution.md#tmux-session-name-tmux-ssh_tmux-sessions)); without one
+  the server generates it as `POST /api/hosts/session-name` does.
+- Answers `201` with `{ "session_id": "board-…", "tmux_session": "gpu-box-1a2b3c4d" }`
+  (`tmux_session` is `""` for `ssh`). The terminal is `/ws/{session_id}`.
+- `400` for a body that is not valid, an empty `connection`, another `type`, a `tmux_session` on
+  `ssh` or one the rule refuses; `404` for a connection that is not in `ssh_connections`; `502` when
+  the terminal could not be started; `403` for a cross-site request.
+
+`DELETE /api/hosts/terminal/{session_id}` ends it at once and answers `204`; `404` for an ID that is
+not a host terminal (a task's board attach and a pane's session included), and `403` for a
+cross-site request.

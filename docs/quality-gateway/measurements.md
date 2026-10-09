@@ -142,6 +142,10 @@ load-bearing rather than tidiness. Excluding `.xterm` (xterm.js owns that canvas
 | Pane settings dialog open | `color-contrast` | serious | 10 |
 | Pane settings dialog open | `region` | moderate | 7 |
 
+The task dashboard and its host connection menu open (issue #314) are scanned too, with the host
+list stubbed to one reachable remote host since the fixture has no SSH server. They have no rows
+yet, so every rule is held at zero there until their first CI measurement is frozen here.
+
 **Every row is a violation this repository still has.** Listing it here is not approval of it; it is
 the refusal to ship a gate that starts red, which is what turning axe on over an existing UI would
 otherwise mean (principle 4). A count may fall and must not rise, and a rule absent from the table

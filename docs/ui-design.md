@@ -214,7 +214,7 @@ The frontend now uses modal dialogs for higher-friction configuration tasks, rat
 
 `aria-modal="true"` promises that the rest of the page is inert, and nothing in the DOM makes that
 true on its own. `useModalKeyboard` supplies the two behaviours that attribute implies, and every
-surface that declares it uses the hook: `ConfirmDialog`, `AddSSHHostDialog`, `PaneSettingsDialog`,
+surface that declares it uses the hook: `ConfirmDialog`, `AddSSHHostDialog`, `HostConnectDialog`, `PaneSettingsDialog`,
 `CommandPalette`, `CommandHistoryPanel` and `BoardDashboardPanel`.
 
 - **Focus stays inside.** Tab and Shift+Tab cycle within the dialog, and a Tab arriving from outside
@@ -343,6 +343,15 @@ terminal that had focus cannot receive what is typed into the dashboard.
   error is truncated in the chip and shown in full as its tooltip. With more hosts than fit on one
   line, the actions wrap to the next line as a whole, flush right, rather than one by one; only a
   screen too narrow for the group on a line of its own wraps it inside, so no action is cut off.
+- **Host connection menu.** The chip of a remote host whose collection succeeded is a button
+  (`aria-haspopup="dialog"`, `aria-expanded`) with a small terminal icon; the panemux host's chip and
+  a `connecting`, failed or not-yet-collected chip are plain text
+  ([behavior](behavior/tasks.md#opening-a-host)). Pressing it opens a small popover dialog anchored
+  under the chip, titled after the host: a `Connection` group of `ssh` / `ssh_tmux` radios (`ssh`
+  checked), the tmux session name the server generated in the monospace face once `ssh_tmux` is
+  chosen (or "Could not name the tmux session: …" in red), and `Cancel`, `Open` and `Type in pane`
+  in the interactive blue, labelled `Open: <host>` and `Type in pane: <host>` like a task's
+  buttons. A press outside it closes it; focus returns to the chip.
 - **Unreadable state.** The warning is amber, one for every host together, and never beside a host
   chip, where it would crowd them as hosts are added. It opens a modal anchored below the top bar at
   the right and kept within the screen's height, titled "Unreadable session state · <n> files on <m> hosts": a table with one row per
@@ -483,6 +492,11 @@ terminal that had focus cannot receive what is typed into the dashboard.
     (`localStorage`) and the next popup opens the same way.
   - **Narrow screens** (720px and narrower). The popup is a full-window sheet from the start, with no
     maximize toggle, and its header and `Close` stay in view.
+- **Host terminal.** `Type in pane` from the host connection menu opens the same popup on a host
+  terminal: the header has the connection type as its pill and the host as its title, the
+  connection chip, the maximize toggle and `Close`, and `tmux: <session>` under them for
+  `ssh_tmux`. It has no `Go to pane` / `Open`, and its keys and focus are the task popup's
+  (`useTerminalPopupKeyboard`).
 - **After opening.** The dashboard closes, the pane takes focus, and it is outlined in the
   interactive blue for about two seconds (a steady outline with reduced motion).
 
