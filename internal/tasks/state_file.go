@@ -8,8 +8,12 @@ import (
 	"unicode/utf8"
 )
 
-// detailPIDMissing is the detail of a state file with no pid at all.
-const detailPIDMissing = "pid is missing"
+// Details that name no value from the file: one with no pid at all, and
+// JSON that is not an object (an array, a scalar or null).
+const (
+	detailPIDMissing = "pid is missing"
+	detailNotObject  = "not a JSON object"
+)
 
 // readState is one state file as read: the fields the dashboard uses, or
 // why the file could not be read.
@@ -30,8 +34,12 @@ func readStateFile(file stateFile) readState {
 		state.reason, state.detail = UnreadableNotJSON, err.Error()
 		var typeErr *json.UnmarshalTypeError
 		if errors.As(err, &typeErr) {
-			state.detail = "not a JSON object"
+			state.detail = detailNotObject
 		}
+		return state
+	}
+	if fields == nil { // the JSON literal null
+		state.reason, state.detail = UnreadableNotJSON, detailNotObject
 		return state
 	}
 

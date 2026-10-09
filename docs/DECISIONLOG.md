@@ -117,7 +117,9 @@ Issue [#313](https://github.com/tomo-chan/panemux/issues/313) replaces it:
   list. Every field being optional, such a field is now read as absent instead.
 - **One warning for all hosts, among the bar's actions.** A warning per host chip would crowd the
   chips as hosts are added. With too many hosts for one line, the actions wrap as one group, so the
-  warning keeps its place at the head of them, rather than a separate place for narrow bars.
+  warning keeps its place at the head of them, rather than a separate place for narrow bars. The
+  first version kept the group on one line whatever the width, which cut off its last buttons on a
+  screen narrower than the group (review of PR #337); the group now wraps inside only then.
 - **Logged on change, not per collection.** A collection runs every few seconds while the dashboard
   is shown; a line per collection would bury everything else. A file is logged when it appears, when
   its reason changes, and when it is readable again or gone.

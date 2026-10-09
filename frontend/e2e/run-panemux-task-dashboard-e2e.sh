@@ -57,6 +57,9 @@ mkdir -p "$E2E_HOME/.claude/sessions" "$E2E_HOME/.claude/projects/-tmp-e2e-stopp
     "$E2E_HOME/.claude/projects/-e2e-resumable" "$E2E_HOME/bin" "$E2E_HOME/launch-bin" "$E2E_HOME/fake/claude" \
     "$E2E_HOME/resumable"
 export HOME="$E2E_HOME"
+# A state file the dashboard cannot read, whose name carries no pid: it is
+# reported as unreadable on every collection, never shown as a task (#313).
+printf '{"pid":"not-a-number"}\n' >"$E2E_HOME/.claude/sessions/legacy.json"
 
 ln -s "$(command -v sleep)" "$E2E_HOME/bin/claude"
 now_ms="$(date +%s)000"

@@ -185,13 +185,19 @@
 }
 
 /* The bar's actions stay one group: with too many hosts for one line, the
-   group wraps to the next line as a whole, flush right (issue #313). */
+   group wraps to the next line as a whole, flush right (issue #313). Only a
+   screen too narrow for the group on a line of its own wraps it inside. */
 .td-top-actions {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   align-items: center;
-  gap: 16px;
+  gap: 8px 16px;
+  min-width: 0;
   margin-left: auto;
+}
+
+.td-top-actions > * {
   white-space: nowrap;
 }
 
@@ -1098,6 +1104,8 @@
 
 .td-unreadable-panel {
   width: 940px;
+  /* The overlay's padding, 80px above and 16px below, is not the panel's. */
+  max-height: calc(100vh - 96px);
 }
 
 .td-unreadable-head {

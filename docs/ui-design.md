@@ -341,10 +341,11 @@ terminal that had focus cannot receive what is typed into the dashboard.
   `⚠ <n> unreadable` while any host has a state file it could not read, when the board was last
   updated, `Refresh`, `Hosts…`, `New task` (in the interactive blue), and `Workspaces`. A long host
   error is truncated in the chip and shown in full as its tooltip. With more hosts than fit on one
-  line, the actions wrap to the next line as a whole, flush right, rather than one by one.
+  line, the actions wrap to the next line as a whole, flush right, rather than one by one; only a
+  screen too narrow for the group on a line of its own wraps it inside, so no action is cut off.
 - **Unreadable state.** The warning is amber, one for every host together, and never beside a host
   chip, where it would crowd them as hosts are added. It opens a modal anchored below the top bar at
-  the right, titled "Unreadable session state · <n> files on <m> hosts": a table with one row per
+  the right and kept within the screen's height, titled "Unreadable session state · <n> files on <m> hosts": a table with one row per
   file — host, file name, reason with what was found beneath it, and the process (`claude · pid
   <pid>` with where it runs, or `unknown` when the file name carries no pid) — and a footer naming
   the fields panemux reads, a link to the steps to fix it in `docs/behavior/tasks.md`, and *Copy

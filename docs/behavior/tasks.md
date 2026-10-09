@@ -161,7 +161,7 @@ A file that fails is unreadable for one of three reasons, checked in this order:
 
 | Reason (`reason`) | Shown as | Detail |
 |---|---|---|
-| `not_json` | Not valid JSON | The JSON parser's error, or `not a JSON object` |
+| `not_json` | Not valid JSON | The JSON parser's error, or `not a JSON object` for an array, a scalar or `null` |
 | `invalid_pid` | pid missing or not positive | `pid is missing`, or `pid: ` and the value as written |
 | `invalid_session_id` | sessionId missing or not a session ID | `sessionId is missing`, or `sessionId: ` and the value as written |
 

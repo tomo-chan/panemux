@@ -200,7 +200,7 @@ func TestBuildTasks_UnreadableStateFilesAreReportedWithTheirReason(t *testing.T)
 		{"truncated", "{", UnreadableNotJSON, "unexpected end of JSON input"},
 		{"garbage", "x", UnreadableNotJSON, "invalid character 'x' looking for beginning of value"},
 		{"an array", "[5]", UnreadableNotJSON, "not a JSON object"},
-		{"null", "null", UnreadableInvalidPID, detailPIDMissing},
+		{"null", "null", UnreadableNotJSON, "not a JSON object"},
 		{"no pid", `{"sessionId":"abc"}`, UnreadableInvalidPID, detailPIDMissing},
 		{"pid zero", `{"pid":0,"sessionId":"abc"}`, UnreadableInvalidPID, "pid: 0"},
 		{"pid negative", `{"pid":-3,"sessionId":"abc"}`, UnreadableInvalidPID, "pid: -3"},
