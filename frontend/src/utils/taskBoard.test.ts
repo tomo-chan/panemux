@@ -24,6 +24,7 @@ import {
   isLiveState,
   laneKeys,
   laneTitle,
+  paneConfigForHost,
   paneConfigForTask,
   runningCount,
   taskInputAction,
@@ -601,6 +602,27 @@ describe('paneConfigForTask', () => {
     expect(paneConfigForTask(task({ location: { kind: 'outside', attachable: false } }), 'x')).toBeNull()
     expect(paneConfigForTask(task({ location: { kind: 'tmux', tmux_session: 'a b', attachable: false } }), 'x'))
       .toBeNull()
+  })
+})
+
+describe('paneConfigForHost', () => {
+  it('builds an ssh pane titled after the host', () => {
+    expect(paneConfigForHost('gpu-box', 'ssh', undefined, 'pane-1')).toEqual({
+      id: 'pane-1', type: 'ssh', connection: 'gpu-box', title: 'gpu-box',
+    })
+  })
+
+  it('builds an ssh_tmux pane on the session the server named', () => {
+    expect(paneConfigForHost('gpu-box', 'ssh_tmux', 'gpu-box-1a2b3c4d', 'pane-2')).toEqual({
+      id: 'pane-2', type: 'ssh_tmux', connection: 'gpu-box', tmux_session: 'gpu-box-1a2b3c4d', title: 'gpu-box-1a2b3c4d',
+    })
+  })
+
+  it('refuses the panemux host, an ssh_tmux pane without a session, and an ssh pane with one', () => {
+    expect(paneConfigForHost('', 'ssh', undefined, 'x')).toBeNull()
+    expect(paneConfigForHost('gpu-box', 'ssh_tmux', undefined, 'x')).toBeNull()
+    expect(paneConfigForHost('gpu-box', 'ssh_tmux', '', 'x')).toBeNull()
+    expect(paneConfigForHost('gpu-box', 'ssh', 'gpu-box-1a2b3c4d', 'x')).toBeNull()
   })
 })
 

@@ -397,6 +397,24 @@ export function paneConfigForTask(task: Task, paneId: string): PaneConfig | null
   return { id: paneId, type: 'ssh_tmux', connection: task.host, tmux_session: session, title: session }
 }
 
+/**
+ * The new pane Open adds for a host from the dashboard (issue #314): an ssh
+ * pane, or an ssh_tmux pane on the tmux session the server named. Null for
+ * the panemux host, which the dashboard does not open, and for a session
+ * that does not match the type.
+ */
+export function paneConfigForHost(
+  host: string, type: 'ssh' | 'ssh_tmux', tmuxSession: string | undefined, paneId: string,
+): PaneConfig | null {
+  if (host === '') return null
+  if (type === 'ssh') {
+    if (tmuxSession !== undefined) return null
+    return { id: paneId, type: 'ssh', connection: host, title: host }
+  }
+  if (!tmuxSession) return null
+  return { id: paneId, type: 'ssh_tmux', connection: host, tmux_session: tmuxSession, title: tmuxSession }
+}
+
 /** Whether a state comes from a running process. */
 export function isLiveState(state: TaskState): boolean {
   return state === 'busy' || state === 'wait' || state === 'idle' || state === 'run'
