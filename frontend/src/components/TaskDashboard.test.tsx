@@ -1017,6 +1017,43 @@ describe('TaskDashboard summaries', () => {
     return within(screen.getByRole('complementary', { name: 'Task details' })).getByRole('region', { name: 'Work' })
   }
 
+  it('filters by the summary text and the session name, again when a summary arrives or is being redone', () => {
+    const view = (data: TasksResponse) => (
+      <TaskDashboard tasksState={tasksState({ data })} workspaces={workspaces} onOpenTask={vi.fn()} onShowWorkspaces={vi.fn()} now={() => NOW} />
+    )
+    const { rerender } = render(view(summarized))
+    const cards = () => screen.queryAllByTestId(/^task-card-/).map((el) => el.dataset.testid)
+    const search = screen.getByRole('searchbox', { name: 'Filter tasks' })
+
+    fireEvent.change(search, { target: { value: 'migrating THE api' } })
+    expect(cards()).toEqual(['task-card-wait-s'])
+
+    // The summary of a task still being worked on is redone: the text shown
+    // while it is pending stays searchable.
+    const redoing = (text: string): TasksResponse => ({
+      ...summarized,
+      tasks: summarized.tasks.map((t) =>
+        t.id === 'pending' ? { ...t, summary: { state: 'pending', text, outdated: true } } : t,
+      ),
+    })
+    fireEvent.change(search, { target: { value: '請求' } })
+    expect(cards()).toEqual([])
+    rerender(view(redoing('請求書の再送を実装中。')))
+    expect(cards()).toEqual(['task-card-pending'])
+    rerender(view(redoing('Something else now.')))
+    expect(cards()).toEqual([])
+
+    fireEvent.change(search, { target: { value: 'night-shift' } })
+    expect(cards()).toEqual([])
+    rerender(view({
+      ...summarized,
+      tasks: summarized.tasks.map((t) =>
+        t.id === 'failed' ? { ...t, location: { kind: 'tmux', tmux_session: 'night-shift', attachable: true } } : t,
+      ),
+    }))
+    expect(cards()).toEqual(['task-card-failed'])
+  })
+
   it('shows the summary and what comes next on a card, and the reason on a waiting one', () => {
     renderDashboard(tasksState({ data: summarized }))
     const idle = screen.getByTestId('task-card-idle-s')
