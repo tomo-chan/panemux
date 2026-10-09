@@ -181,12 +181,13 @@ func (h *Handler) PostTaskAttach(w http.ResponseWriter, r *http.Request) {
 // creation and returns the func that releases it. A request for a task whose
 // attach is being created waits for that creation rather than starting a
 // second one. An attach whose tmux client has exited is removed so a new one
-// can be made.
+// can be made. A host terminal's entry counts as absent: this route serves
+// and removes only a task's attach.
 func (h *Handler) reserveBoardAttach(r *http.Request, taskID string) (*taskAttachResponse, func(), error) {
 	b := h.boardAttaches
 	for {
 		b.mu.Lock()
-		if attach, ok := b.byTask[taskID]; ok {
+		if attach, ok := b.byTask[taskID]; ok && !attach.host {
 			sess, live := h.manager.Get(attach.sessionID)
 			if live && sess.State() != session.StateExited {
 				b.mu.Unlock()

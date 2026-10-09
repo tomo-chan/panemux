@@ -344,3 +344,22 @@ func TestHostTerminalAndTaskAttach_EachRouteDeletesOnlyItsOwnKind(t *testing.T) 
 		assert.True(t, ok, id)
 	}
 }
+
+// The task attach route never hands out or removes a host terminal, even when
+// asked for one by its registry key, live or exited.
+func TestPostTaskAttach_HostTerminalKeyIsNotATask(t *testing.T) {
+	for _, state := range []session.State{session.StateConnected, session.StateExited} {
+		t.Run(string(state), func(t *testing.T) {
+			e := newHostTerminalEnv(t)
+			got := decodeHostTerminal(t, e.post(t, `{"connection":"gpu-box","type":"ssh"}`))
+			e.byID[got.SessionID].state = state
+
+			rec := postJSON(t, e.h, "/api/tasks/attach",
+				`{"id":"`+hostTerminalKeyPrefix+got.SessionID+`"}`, nil)
+			assert.Equal(t, http.StatusNotFound, rec.Code, rec.Body.String())
+			_, ok := e.h.manager.Get(got.SessionID)
+			assert.True(t, ok, "the host terminal is left alone")
+			assert.False(t, e.byID[got.SessionID].closed)
+		})
+	}
+}

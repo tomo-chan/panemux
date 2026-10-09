@@ -23,7 +23,8 @@ import (
 // opens a new one.
 
 // hostTerminalKeyPrefix starts a host terminal's key in boardAttaches.byTask,
-// where no task ID can start with it.
+// where no task ID can start with it. The task attach route skips an entry
+// marked host, so a request naming this key reaches no host terminal.
 const hostTerminalKeyPrefix = "host-terminal:"
 
 // tmuxSessionNameUnsafe matches one character a tmux session name may not
