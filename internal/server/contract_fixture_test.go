@@ -396,6 +396,38 @@ var contractFixtures = map[string]contractFixture{
 		return bytes.ReplaceAll(rr.Body.Bytes(), []byte(got["session_id"]), []byte("board-0123456789abcdef")), nil
 	}},
 
+	// A host's tmux session name (issue #314). Its random suffix is stood in
+	// for.
+	"host-session-name": {capture: func(t *testing.T) ([]byte, map[string]string) {
+		e := newAPIEnv(t)
+		e.cfg.SSHConnections = map[string]config.SSHConnection{"build-box": {Host: "build.invalid"}}
+
+		rr := e.do(t, http.MethodPost, "/api/hosts/session-name", `{"connection":"build-box"}`)
+		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+		var got map[string]string
+		require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &got))
+		require.Regexp(t, `^build-box-[0-9a-f]{8}$`, got["tmux_session"])
+		return bytes.ReplaceAll(rr.Body.Bytes(), []byte(got["tmux_session"]), []byte("build-box-0123abcd")), nil
+	}},
+
+	// A host terminal (issue #314) on an ssh_tmux connection. Its session ID
+	// is random, so the capture stands in for it.
+	"host-terminal": {capture: func(t *testing.T) ([]byte, map[string]string) {
+		e := newAPIEnv(t)
+		e.cfg.SSHConnections = map[string]config.SSHConnection{"build-box": {Host: "build.invalid"}}
+		e.srv.api.SetSessionFactory(func(pane *config.PaneConfig, _ map[string]config.SSHConnection) (session.Session, error) {
+			return newWSFakeSession(pane.ID), nil
+		})
+
+		rr := e.do(t, http.MethodPost, "/api/hosts/terminal",
+			`{"connection":"build-box","type":"ssh_tmux","tmux_session":"build-box-0123abcd"}`)
+		require.Equal(t, http.StatusCreated, rr.Code, rr.Body.String())
+		var got map[string]string
+		require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &got))
+		require.True(t, strings.HasPrefix(got["session_id"], "board-"), got["session_id"])
+		return bytes.ReplaceAll(rr.Body.Bytes(), []byte(got["session_id"]), []byte("board-0123456789abcdef")), nil
+	}},
+
 	"session-token": {capture: func(t *testing.T) ([]byte, map[string]string) {
 		e := newAPIEnv(t)
 
