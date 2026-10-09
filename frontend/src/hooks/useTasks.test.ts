@@ -695,10 +695,12 @@ describe('useTasks host terminals (issue #314)', () => {
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/hosts/session-name', post({ connection: 'gpu-box' }))
   })
 
-  it.each([
-    ['ssh', undefined, { connection: 'gpu-box', type: 'ssh' }, ''],
-    ['ssh_tmux', 'gpu-box-0123abcd', { connection: 'gpu-box', type: 'ssh_tmux', tmux_session: 'gpu-box-0123abcd' }, 'gpu-box-0123abcd'],
-  ] as const)('opens a %s host terminal', async (type, tmuxSession, body, answered) => {
+  async function opensAHostTerminal(
+    type: 'ssh' | 'ssh_tmux',
+    tmuxSession: string | undefined,
+    body: Record<string, string>,
+    answered: string,
+  ) {
     const terminal = { session_id: 'board-0123456789abcdef', tmux_session: answered }
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(ok(payload))
@@ -715,6 +717,21 @@ describe('useTasks host terminals (issue #314)', () => {
     expect(outcome).toEqual({ ok: true, launched: terminal })
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/hosts/terminal', post(body))
     expect(fetchMock).toHaveBeenCalledTimes(2)
+  }
+
+  // Two literal cases rather than it.each, so the red-check can name them
+  // from the source and keep the exemption on the case above this block.
+  it('opens a ssh host terminal', async () => {
+    await opensAHostTerminal('ssh', undefined, { connection: 'gpu-box', type: 'ssh' }, '')
+  })
+
+  it('opens a ssh_tmux host terminal', async () => {
+    await opensAHostTerminal(
+      'ssh_tmux',
+      'gpu-box-0123abcd',
+      { connection: 'gpu-box', type: 'ssh_tmux', tmux_session: 'gpu-box-0123abcd' },
+      'gpu-box-0123abcd',
+    )
   })
 
   it('reports a refused host terminal, and an answer that is not one', async () => {
