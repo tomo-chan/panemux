@@ -1233,6 +1233,26 @@ describe('TaskDashboard unreadable session state (issue #313)', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
+  it('stays closed when the files are gone and come back', () => {
+    const dashboard = (state: TasksState) => (
+      <TaskDashboard
+        tasksState={state}
+        workspaces={workspaces}
+        onOpenTask={vi.fn()}
+        onShowWorkspaces={vi.fn()}
+        now={() => NOW}
+      />
+    )
+    const { rerender } = render(dashboard(tasksState({ data: unreadableHosts })))
+    fireEvent.click(screen.getByRole('button', { name: /show details/ }))
+    expect(screen.getByRole('dialog', { name: /Unreadable/ })).toBeInTheDocument()
+    rerender(dashboard(tasksState({ data: { hosts: [{ name: '', status: 'ok' }], tasks: [] } })))
+    expect(screen.queryByRole('dialog', { name: /Unreadable/ })).not.toBeInTheDocument()
+    rerender(dashboard(tasksState({ data: unreadableHosts })))
+    expect(screen.queryByRole('dialog', { name: /Unreadable/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /show details/ })).toHaveAttribute('aria-expanded', 'false')
+  })
+
   it('says file, not files, for one', () => {
     renderDashboard(
       tasksState({

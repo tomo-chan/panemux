@@ -172,6 +172,9 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
   const summariesEnabled = data?.summaries_enabled ?? false
   const hosts = data?.hosts ?? []
   const unreadableCount = unreadableRows(hosts).length
+  // Once the files are gone the details are closed, so they do not open by
+  // themselves when a file becomes unreadable again.
+  if (unreadableOpen && unreadableCount === 0) setUnreadableOpen(false)
   const labels = useMemo(() => allLabels(tasks), [tasks])
   // The labels used before, for the label inputs only: the label filter
   // offers the labels on the board. None are offered while the record file
@@ -540,7 +543,7 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
         onClose={() => setNewTaskOpen(false)}
       />
       <UnreadableStateDialog
-        isOpen={unreadableOpen && unreadableCount > 0}
+        isOpen={unreadableOpen}
         hosts={hosts}
         onClose={() => setUnreadableOpen(false)}
       />
