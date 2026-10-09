@@ -207,8 +207,8 @@ export function filterTasks(tasks: Task[], filter: TaskFilter): Task[] {
       ...(task.git?.autolinks ?? []).map((link) => link.text),
       task.session_id,
       task.location.tmux_session,
-      // The text on the card, also while a newer summary is pending or the
-      // shown one is outdated.
+      // The summary text, on the card or (for a waiting task) only in the
+      // details; also while a newer summary is pending or it is outdated.
       task.summary?.text,
     ]
     return haystack.some((value) => value?.toLowerCase().includes(query))
