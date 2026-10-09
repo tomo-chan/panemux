@@ -147,6 +147,65 @@ describe('TaskDashboard', () => {
     expect(screen.queryByRole('button', { name: 'Reconnect' })).not.toBeInTheDocument()
   })
 
+  it('makes only a reachable remote host a button that opens its connection menu (issue #314)', () => {
+    renderDashboard()
+    const hosts = screen.getByRole('list', { name: 'Hosts' })
+    const chips = within(hosts).getAllByRole('button', { name: /^Open a terminal on / })
+    expect(chips.map((chip) => chip.getAttribute('aria-label'))).toEqual(['Open a terminal on dev-server'])
+    expect(chips[0]).toHaveAttribute('aria-haspopup', 'dialog')
+    expect(chips[0]).toHaveAttribute('aria-expanded', 'false')
+    expect(chips[0]).toHaveTextContent('dev-server 1 running')
+  })
+
+  it('opens and closes the connection menu from the chip, returning focus to it (issue #314)', () => {
+    renderDashboard()
+    const chip = screen.getByRole('button', { name: 'Open a terminal on dev-server' })
+
+    fireEvent.click(chip)
+    expect(chip).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('dialog', { name: 'Open a terminal on dev-server' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('dialog', { name: 'Open a terminal on dev-server' })).toBeNull()
+    expect(chip).toHaveAttribute('aria-expanded', 'false')
+    expect(chip).toHaveFocus()
+
+    fireEvent.click(chip)
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(screen.queryByRole('dialog', { name: 'Open a terminal on dev-server' })).toBeNull()
+    expect(chip).toHaveFocus()
+
+    // A second press on the chip closes the menu it opened.
+    fireEvent.click(chip)
+    fireEvent.pointerDown(chip)
+    fireEvent.click(chip)
+    expect(screen.queryByRole('dialog', { name: 'Open a terminal on dev-server' })).toBeNull()
+  })
+
+  it('hands Open to App with the chosen connection, every time anew (issue #314)', () => {
+    const onOpenHost = vi.fn()
+    render(
+      <TaskDashboard
+        tasksState={tasksState()}
+        workspaces={workspaces}
+        onOpenTask={vi.fn()}
+        onOpenHost={onOpenHost}
+        onShowWorkspaces={vi.fn()}
+        now={() => NOW}
+      />,
+    )
+    const chip = screen.getByRole('button', { name: 'Open a terminal on dev-server' })
+
+    fireEvent.click(chip)
+    fireEvent.click(screen.getByRole('button', { name: 'Open: dev-server' }))
+    expect(screen.queryByRole('dialog', { name: 'Open a terminal on dev-server' })).toBeNull()
+    fireEvent.click(chip)
+    fireEvent.click(screen.getByRole('button', { name: 'Open: dev-server' }))
+
+    expect(onOpenHost).toHaveBeenCalledTimes(2)
+    expect(onOpenHost).toHaveBeenNthCalledWith(1, 'dev-server', 'ssh', undefined)
+  })
+
   it('says when it was last updated and refreshes on request', () => {
     const state = tasksState()
     const { onShowWorkspaces } = renderDashboard(state)
