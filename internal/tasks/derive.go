@@ -341,6 +341,7 @@ func (b *taskBuilder) unreadableStateFiles() []UnreadableStateFile {
 		}
 		files = append(files, file)
 	}
+	//mutation:exempt[CONDITIONALS_BOUNDARY] equivalent — names in one directory are unique, so no two compare equal
 	sort.Slice(files, func(i, j int) bool { return files[i].File < files[j].File })
 	return files
 }

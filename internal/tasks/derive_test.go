@@ -274,12 +274,15 @@ func TestBuildTasks_UnreadableStateFileNameIsBounded(t *testing.T) {
 		StateFiles: []stateFile{
 			{Name: "a\x1b[31m\u202e.json", Data: []byte("{")},
 			{Name: strings.Repeat("b", 300) + ".json", Data: []byte("{")},
+			{Name: strings.Repeat("c", maxUnreadableFileName-len(".json")) + ".json", Data: []byte("{")},
 		},
 	}
 	_, unreadable := buildTasksWithDiagnostics("", raw, collectedAt)
-	require.Len(t, unreadable, 2)
+	require.Len(t, unreadable, 3)
 	assert.Equal(t, "a\ufffd[31m\ufffd.json", unreadable[0].File)
 	assert.Equal(t, strings.Repeat("b", maxUnreadableFileName-1)+"…", unreadable[1].File)
+	assert.Equal(t, strings.Repeat("c", maxUnreadableFileName-len(".json"))+".json", unreadable[2].File,
+		"a name exactly at the bound is kept whole")
 }
 
 // The file that loses a tie between two live files for one session still
