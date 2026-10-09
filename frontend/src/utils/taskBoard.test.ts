@@ -598,6 +598,7 @@ describe('paneConfigForTask', () => {
     })
   })
 
+  // efficacy:exempt unchanged by this branch; the new describe block after it falls inside its line range
   it('refuses a task that has no attachable tmux session', () => {
     expect(paneConfigForTask(task({ location: { kind: 'outside', attachable: false } }), 'x')).toBeNull()
     expect(paneConfigForTask(task({ location: { kind: 'tmux', tmux_session: 'a b', attachable: false } }), 'x'))

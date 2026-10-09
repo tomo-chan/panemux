@@ -639,6 +639,8 @@ describe('useTasks attach and detach (issue #284)', () => {
     ])
   })
 
+  // efficacy:exempt unchanged by this branch; the red-check maps the blank line before the
+  // describe block appended below this one onto this test.
   it('DELETEs the attach by its session ID, swallowing a failure', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(ok(payload))

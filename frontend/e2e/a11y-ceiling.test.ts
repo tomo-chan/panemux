@@ -161,6 +161,8 @@ describe('checkAgainstCeiling', () => {
 })
 
 describe('CEILINGS', () => {
+  // efficacy:exempt its implementation, CEILINGS in frontend/e2e/a11y-ceiling.ts, lies outside
+  // frontend/src, so the red-check never reverts it and this test cannot go red there.
   it('covers every scanned page state', () => {
     // a11y.spec.ts scans four states; a label with no entry would make every
     // violation on that page read as new, which is a different failure from

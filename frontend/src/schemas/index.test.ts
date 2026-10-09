@@ -329,6 +329,8 @@ describe('TaskLaunchedSchema', () => {
     expect(TaskLaunchedSchema.safeParse(launched).success).toBe(true)
   })
 
+  // efficacy:exempt unchanged by this branch; the red-check maps the closing line of the describe
+  // block appended below this one onto this test.
   it('requires the tmux session, and an id or session id that is not empty when given', () => {
     const { id: _id, session_id: _sid, ...codex } = launched
     expect(TaskLaunchedSchema.safeParse(codex).success, 'a new codex task has neither yet').toBe(true)
