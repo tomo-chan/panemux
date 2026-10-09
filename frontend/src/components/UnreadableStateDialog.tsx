@@ -78,10 +78,11 @@ export default function UnreadableStateDialog({ isOpen, hosts, onClose }: Unread
               </tr>
             </thead>
             <tbody>
-              {rows.map(({ host, file }) => {
+              {/* Two files can share a bounded name, so the row's place is its key. */}
+              {rows.map(({ host, file }, index) => {
                 const process = unreadableProcess(file)
                 return (
-                  <tr key={`${host}\u0000${file.file}`}>
+                  <tr key={index}>
                     <td>{hostLabel(host)}</td>
                     <td className="td-unreadable-file">{file.file}</td>
                     <td>

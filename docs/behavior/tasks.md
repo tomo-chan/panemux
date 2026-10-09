@@ -174,11 +174,14 @@ A file that fails is unreadable for one of three reasons, checked in this order:
   as `unknown` under `pid-<pid>`, located like any running task, and the newest conversation log in
   its working directory is taken to be its own.
 - **In the server log**, once per host, file and reason: when a file becomes unreadable, when its
-  reason changes, and when it can be read again or is gone. The file name and detail are quoted.
+  reason changes, and when it can be read again or is gone. A file is told apart by its full name,
+  so two names that differ only after the cut below are two files. The file name and detail are
+  quoted.
 - **On the dashboard**, a warning at the right of the top bar carries the count across every host
   and opens the details: per file, the host, the file name, the reason and its detail, and the
   process (the pid in the name and where it runs, or `unknown` when the name carries no pid). *Copy
-  details* copies the same as tab-separated text.
+  details* copies the same as tab-separated text. The details close by themselves when no file is
+  left, and do not reopen when one becomes unreadable again.
 - File names and details come from the host: they reach the API and the log without control or
   invisible format characters (each replaced by U+FFFD) and cut to 128 and 120 characters.
 

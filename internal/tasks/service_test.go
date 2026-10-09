@@ -1009,10 +1009,10 @@ func TestCollect_ReportsAndLogsUnreadableStateFilesWhenTheyChange(t *testing.T) 
 	host, logged := collect(stateOutput("5.json", "{", "odd\x1b.json", "{"), nil)
 	assert.Equal(t, []UnreadableStateFile{
 		{
-			File: "5.json", Reason: UnreadableNotJSON, Detail: "unexpected end of JSON input",
+			name: "5.json", File: "5.json", Reason: UnreadableNotJSON, Detail: "unexpected end of JSON input",
 			PID: 5, Location: &Location{Kind: LocationOutside},
 		},
-		{File: "odd�.json", Reason: UnreadableNotJSON, Detail: "unexpected end of JSON input"},
+		{name: "odd\x1b.json", File: "odd�.json", Reason: UnreadableNotJSON, Detail: "unexpected end of JSON input"},
 	}, host.UnreadableStateFiles)
 	const prefix = "task collection on the panemux host: state file "
 	assert.Equal(t, []string{
@@ -1037,6 +1037,43 @@ func TestCollect_ReportsAndLogsUnreadableStateFilesWhenTheyChange(t *testing.T) 
 	assert.Equal(t, []string{
 		`task collection on the panemux host: state file "5.json" can be read again or is gone`,
 		`task collection on the panemux host: state file "odd�.json" can be read again or is gone`,
+	}, logged)
+}
+
+// Two file names that differ only after the bound show the same bounded
+// name, but they are still two files: each is logged once, not on every
+// collection, and each is logged again when it alone can be read again.
+func TestCollect_LogsUnreadableStateFilesByTheirFullName(t *testing.T) {
+	var (
+		out  []byte
+		logs []string
+	)
+	svc := New(Options{
+		RunLocal: func(context.Context, string) ([]byte, error) { return out, nil },
+		Now:      (&clock{now: collectedAt}).Now,
+		Logf:     func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) },
+	})
+	defer svc.Close()
+	collect := func(o []byte) (HostResult, []string) {
+		out, logs = o, nil
+		return hostResult(t, svc.Collect(context.Background()), ""), logs
+	}
+	long := strings.Repeat("a", 140)
+	both := stateOutput(long+"-one.json", "not json", long+"-two.json", `{"pid":0}`)
+
+	host, logged := collect(both)
+	require.Len(t, host.UnreadableStateFiles, 2)
+	assert.Equal(t, host.UnreadableStateFiles[0].File, host.UnreadableStateFiles[1].File, "the bounded names collide")
+	assert.Len(t, logged, 2)
+	for range 4 {
+		_, logged = collect(both)
+		assert.Empty(t, logged, "nothing changed")
+	}
+
+	_, logged = collect(stateOutput(long+"-two.json", `{"pid":0}`))
+	bounded := strings.Repeat("a", maxUnreadableFileName-1) + "…"
+	assert.Equal(t, []string{
+		`task collection on the panemux host: state file "` + bounded + `" can be read again or is gone`,
 	}, logged)
 }
 

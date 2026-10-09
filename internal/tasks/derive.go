@@ -155,6 +155,9 @@ type UnreadableStateFile struct {
 	// Detail is what was found: the JSON error, or the offending field's
 	// value as written, bounded and without control characters.
 	Detail string `json:"detail,omitempty"`
+	// name is the file's full name, which tells two files apart when
+	// their bounded File is the same.
+	name string
 	// PID is the live claude process the file name (<pid>.json) names;
 	// omitted when the name carries no pid.
 	PID int `json:"pid,omitempty"`
@@ -328,6 +331,7 @@ func (b *taskBuilder) unreadableStateFiles() []UnreadableStateFile {
 			continue
 		}
 		file := UnreadableStateFile{
+			name:   state.name,
 			File:   boundedText(state.name, maxUnreadableFileName),
 			Reason: state.reason,
 			Detail: boundedText(state.detail, maxUnreadableDetail),
@@ -342,7 +346,7 @@ func (b *taskBuilder) unreadableStateFiles() []UnreadableStateFile {
 		files = append(files, file)
 	}
 	//mutation:exempt[CONDITIONALS_BOUNDARY] equivalent — names in one directory are unique, so no two compare equal
-	sort.Slice(files, func(i, j int) bool { return files[i].File < files[j].File })
+	sort.Slice(files, func(i, j int) bool { return files[i].name < files[j].name })
 	return files
 }
 

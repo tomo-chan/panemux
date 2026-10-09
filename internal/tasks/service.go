@@ -125,9 +125,9 @@ type Service struct {
 	// resumeLocks makes each (host, session) resume's collection and launch
 	// one step; see Service.Resume.
 	resumeLocks map[string]*resumeLock
-	// unreadableLogged is, per host, the unreadable state files last logged
-	// and why; guarded by mu.
-	unreadableLogged map[string]map[string]UnreadableReason
+	// unreadableLogged is, per host, the unreadable state files last logged,
+	// keyed by their full name; guarded by mu.
+	unreadableLogged map[string]map[string]UnreadableStateFile
 	// The task summaries; see summaries.go. summaryMu guards summaries and
 	// summaryTasks. summaryCtx ends when the service is closed.
 	summaries     map[summaryKey]*summaryEntry
@@ -306,13 +306,15 @@ func (s *Service) collectHost(ctx context.Context, name string) (HostResult, []T
 // not on every collection, which runs every few seconds while the dashboard
 // is shown.
 func (s *Service) logUnreadableStateFiles(host string, files []UnreadableStateFile) {
-	current := make(map[string]UnreadableReason, len(files))
+	// Keyed by the full name: two names that differ only after the bound
+	// share their bounded File.
+	current := make(map[string]UnreadableStateFile, len(files))
 	for _, f := range files {
-		current[f.File] = f.Reason
+		current[f.name] = f
 	}
 	s.mu.Lock()
 	if s.unreadableLogged == nil {
-		s.unreadableLogged = map[string]map[string]UnreadableReason{}
+		s.unreadableLogged = map[string]map[string]UnreadableStateFile{}
 	}
 	previous := s.unreadableLogged[host]
 	s.unreadableLogged[host] = current
@@ -320,7 +322,7 @@ func (s *Service) logUnreadableStateFiles(host string, files []UnreadableStateFi
 
 	where := hostName(host)
 	for _, f := range files {
-		if previous[f.File] != f.Reason {
+		if previous[f.name].Reason != f.Reason {
 			s.opts.Logf("task collection on %s: state file %q cannot be read: %s: %q", where, f.File, f.Reason, f.Detail)
 		}
 	}
@@ -332,7 +334,7 @@ func (s *Service) logUnreadableStateFiles(host string, files []UnreadableStateFi
 	}
 	sort.Strings(gone)
 	for _, name := range gone {
-		s.opts.Logf("task collection on %s: state file %q can be read again or is gone", where, name)
+		s.opts.Logf("task collection on %s: state file %q can be read again or is gone", where, previous[name].File)
 	}
 }
 

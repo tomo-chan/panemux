@@ -259,10 +259,16 @@ func TestBuildTasks_UnreadableStateFileProcess(t *testing.T) {
 	tmux := Location{Kind: LocationTmux, TmuxSession: "work", Attachable: true}
 	outside := Location{Kind: LocationOutside}
 	assert.Equal(t, []UnreadableStateFile{
-		{File: "0.json", Reason: UnreadableNotJSON, Detail: "unexpected end of JSON input"},
-		{File: "5.json", Reason: UnreadableNotJSON, Detail: "unexpected end of JSON input", PID: 5, Location: &tmux},
-		{File: "6.json", Reason: UnreadableNotJSON, Detail: "unexpected end of JSON input", PID: 6, Location: &outside},
-		{File: "odd.json", Reason: UnreadableNotJSON, Detail: "unexpected end of JSON input"},
+		{name: "0.json", File: "0.json", Reason: UnreadableNotJSON, Detail: "unexpected end of JSON input"},
+		{
+			name: "5.json", File: "5.json", Reason: UnreadableNotJSON, Detail: "unexpected end of JSON input",
+			PID: 5, Location: &tmux,
+		},
+		{
+			name: "6.json", File: "6.json", Reason: UnreadableNotJSON, Detail: "unexpected end of JSON input",
+			PID: 6, Location: &outside,
+		},
+		{name: "odd.json", File: "odd.json", Reason: UnreadableNotJSON, Detail: "unexpected end of JSON input"},
 	}, unreadable, "8 is not claude and 9 is gone: both are leftovers")
 }
 

@@ -40,6 +40,26 @@ describe('UnreadableStateDialog', () => {
     expect(dialog.querySelector('img, b')).toBeNull()
   })
 
+  it('lists two files whose bounded names are the same as two rows', () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const long = 'a'.repeat(127) + '…'
+    const same: TaskHost[] = [
+      {
+        name: '',
+        status: 'ok',
+        unreadable_state_files: [
+          { file: long, reason: 'not_json' },
+          { file: long, reason: 'invalid_pid' },
+        ],
+      },
+    ]
+    render(<UnreadableStateDialog isOpen hosts={same} onClose={vi.fn()} />)
+    const rows = within(screen.getByRole('dialog')).getAllByRole('row').slice(1)
+    expect(rows).toHaveLength(2)
+    expect(consoleError).not.toHaveBeenCalled()
+    consoleError.mockRestore()
+  })
+
   it('names the fields panemux reads and links the steps to fix it', () => {
     render(<UnreadableStateDialog isOpen hosts={hosts} onClose={vi.fn()} />)
     for (const field of ['sessionId', 'pid', 'cwd', 'status']) {
