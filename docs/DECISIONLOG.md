@@ -13,9 +13,13 @@ current specification; superseded decisions are retained and labelled as such.
 
 `/tmp/sample-project` was a real directory the run claimed through a marker file inside it. On
 2026-10-08 a run stopped because the directory was still there with its directories but none of
-its files, marker included; `/tmp/panemux-screenshots-agmsg` was found the same way. What deleted
-them is not known. As long as the marker lived at the fixed path, losing it alone stopped every
-later run until the developer moved the directory away. The fixed paths became symbolic links into
+its files, marker included; `/tmp/panemux-screenshots-agmsg` was found the same way. macOS's
+`com.apple.tmp_cleaner` (`/usr/libexec/tmp_cleaner`, daily at 00:00) deletes files under `/tmp`
+whose access, modification and change times are all more than three days old, and empty
+directories more than three days old; a directory a file was just deleted from is newly modified,
+so the directories outlast their files. The marker is never read after it is written, so it went
+while a file read since stayed. As long as the marker lived at the fixed path, losing it alone
+stopped every later run until the developer moved the directory away. The fixed paths became symbolic links into
 `$TMPDIR/panemux-screenshots`, so the marker that decides what may be emptied sits only at the
 run's root. A directory holding nothing but empty directories is removed as left over, with
 `rmdir`, rather than refused: nothing a developer keeps can be lost that way. Recognising a link
