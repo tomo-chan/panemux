@@ -6,10 +6,12 @@ repo_root=$(git rev-parse --show-toplevel)
 git_local_env_vars=$(git rev-parse --local-env-vars)
 
 # Git exports repository-scoped environment variables into hooks. Clear them so
-# nested git commands during make check can target their own test repositories.
+# nested git commands in the checks can target their own test repositories.
 # shellcheck disable=SC2086
 unset $git_local_env_vars
 
-echo "pre-push: running make check"
+# Only the checks the pushed change touches (issue #335); CI runs the whole
+# suite, and `make check` runs it locally. The refs being pushed arrive on
+# stdin, which the selector reads.
 cd "$repo_root"
-make check
+exec sh scripts/pre_push_check.sh "$1"

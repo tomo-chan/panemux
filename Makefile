@@ -1,7 +1,7 @@
 # Applies before $(shell go env ...) as well as recipes and their children.
 override SHELL := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))/scripts/runtime-shell.sh
 
-.PHONY: all build build-frontend build-backend dev clean run install-deps install-deps-ci install-hooks test-install-hooks test-tmpdir-guard test-golangci-lint-cache test-require-pty \
+.PHONY: all build build-frontend build-backend dev clean run install-deps install-deps-ci install-hooks test-install-hooks test-pre-push test-tmpdir-guard test-golangci-lint-cache test-require-pty \
         test-node-toolchain test-go-toolchain test test-go test-frontend test-e2e test-agmsg-contract test-hooks test-efficacy efficacy \
         test-scenarios-check check-scenarios check-docs-links test-docs-links screenshots test-screenshots-check \
         coverage-blocks test-coverage-blocks \
@@ -42,7 +42,7 @@ install-hooks:
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
-test: test-node-toolchain test-go-toolchain test-go test-frontend test-hooks test-tmpdir-guard test-install-hooks test-golangci-lint-cache test-require-pty test-efficacy test-scenarios-check test-docs-links test-screenshots-check \
+test: test-node-toolchain test-go-toolchain test-go test-frontend test-hooks test-pre-push test-tmpdir-guard test-install-hooks test-golangci-lint-cache test-require-pty test-efficacy test-scenarios-check test-docs-links test-screenshots-check \
       test-coverage-blocks test-mutation test-model-check
 
 test-node-toolchain:
@@ -279,6 +279,11 @@ test-tmpdir-guard:
 test-install-hooks:
 	sh scripts/install_hooks_test.sh
 
+# The pre-push hook runs only the checks the pushed change touches, falling
+# back to `make check` when it cannot narrow them (issue #335).
+test-pre-push:
+	sh scripts/pre_push_check_test.sh
+
 # Each checkout keeps its own golangci-lint cache, whatever the cwd or an
 # inherited GOLANGCI_LINT_CACHE says (issue #325).
 test-golangci-lint-cache:
@@ -348,7 +353,7 @@ model-check-write:
 #
 # python3 is OPTIONAL here, the way jq is for make test-hooks: without it the
 # exporter checks report themselves as skipped rather than passing or failing,
-# so `make check` — and therefore `git push` — still works without a Python
+# so `make check` still works without a Python
 # interpreter installed.
 test-model-check:
 	sh scripts/model_check_test.sh

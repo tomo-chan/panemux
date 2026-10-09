@@ -343,6 +343,31 @@ func TestRequestSummary(t *testing.T) {
 	assert.Equal(t, 2, summarizer.calls())
 }
 
+// Asking for a summary of a log that has moved on answers pending with the
+// text already shown: the dashboard replaces the task's summary with this
+// answer, and the text stays on the card and searchable by the board's
+// filter until the new summary arrives (issue #324).
+//
+//efficacy:exempt pins behavior #324's filter relies on; this branch does not change the server
+func TestRequestSummary_KeepsTheShownTextWhilePending(t *testing.T) {
+	host := &summaryHost{}
+	host.set(hostCollection(100, "idle"), conversationLog("a"))
+	summarizer := &fakeSummarizer{result: Summary{Text: "old", Remaining: []string{"x"}}}
+	svc := newSummaryService(t, host, summarizer)
+	collectAndSummarize(svc)
+
+	summarizer.gate = make(chan struct{})
+	host.set(hostCollection(200, "idle"), conversationLog("a", "b"))
+	svc.Collect(context.Background())
+	view, err := svc.RequestSummary("", "s10")
+	require.NoError(t, err)
+	assert.Equal(t, SummaryPending, view.State)
+	assert.Equal(t, "old", view.Text)
+	assert.True(t, view.Outdated)
+	close(summarizer.gate)
+	svc.waitSummaries()
+}
+
 // A session the collection listed without a log (older than the collected
 // ones) cannot be summarized.
 func TestRequestSummary_NeedsACollectedLog(t *testing.T) {

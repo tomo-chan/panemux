@@ -1,6 +1,7 @@
 #!/bin/sh
-# Points core.hooksPath at this checkout's .githooks, so pre-push runs
-# `make check`. Run by `make install-hooks`, from the repository root.
+# Points core.hooksPath at this checkout's .githooks, so pre-push runs the
+# checks the pushed change touches (scripts/pre_push_check.sh). Run by
+# `make install-hooks`, from the repository root.
 #
 # Writes .git/config only when it has to: when core.hooksPath already leads to
 # an executable pre-push identical to ours — `.githooks` itself, or the main

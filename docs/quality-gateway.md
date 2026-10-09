@@ -3,7 +3,7 @@
 This guide defines the current quality model and the gates that enforce it. Use
 [DEVELOPMENT.md](../DEVELOPMENT.md) for commands and workflow, [Scenario coverage](scenarios.md) for
 the user-facing acceptance ledger, and [quality-gateway/decisions.md](quality-gateway/decisions.md)
-for the rollout history and rationale behind decisions D1–D13.
+for the rollout history and rationale behind decisions D1–D14.
 
 ## What the tests protect
 
@@ -45,7 +45,7 @@ The order is intentional: cheaper checks should reject a defect before expensive
 |---|---|---|---|
 | **G0** | Spec | User-visible changes update `scenarios.md`; changes the documentation screenshots show retake them; documentation links and fragments resolve | Scenario and screenshots CI plus `make check-docs-links` |
 | **G1** | Edit | `gofmt -s`, targeted `go vet`, or `tsc --noEmit` for an edited file | `.claude` post-edit hook |
-| **G2** | Unit | Go and frontend unit/integration suites | `make check`, pre-push, and CI |
+| **G2** | Unit | Go and frontend unit/integration suites | `make check` and CI; pre-push runs the changed packages and modules only (D14) |
 | **G3** | Contract | Real-router HTTP/WS tests, exhaustive route expectations, Go-produced Zod fixtures, agmsg contract, and model-to-code transition replay | Always-on tests in `make check`; real agmsg and TLC in dedicated CI/opt-in jobs |
 | **G4** | Efficacy | Coverage scope and threshold, changed-test red-check, diff-scoped mutation, and changed-block coverage | `make check` plus pull-request CI jobs |
 | **G5** | Scenario | Playwright workflows, scenario-reference validation, and accessibility ceilings | `make test-e2e`, `make check-scenarios`, and CI |
@@ -104,7 +104,7 @@ so CI (L4) is where they are verified. See D13 in
 
 | Topic | Document |
 |---|---|
-| Why the gates have this shape; decisions D1–D13 | [Design decisions](quality-gateway/decisions.md) |
+| Why the gates have this shape; decisions D1–D14 | [Design decisions](quality-gateway/decisions.md) |
 | First mutation findings and their classification | [Mutation findings](quality-gateway/mutants.md) |
 | Versioned benchmark and accessibility evidence | [Measurements](quality-gateway/measurements.md) |
 | Commands and exemptions for each mechanism | [Development deep dives](development/) |

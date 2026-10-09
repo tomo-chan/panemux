@@ -7,7 +7,7 @@
 # seconds; this runs on the file that was just touched and its package, so it
 # answers in the time it takes to read the next line of the diff. Gate G2
 # (the tests) belongs to stop-check.sh, and everything from G3 onward stays
-# with .githooks/pre-push and CI — decision D6.
+# with CI and `make check` — decisions D6 and D14.
 #
 # Exit codes are the Claude Code hook contract: 0 = fine, 2 = blocking error,
 # with the reason on stderr. Anything this script cannot check (an unknown file

@@ -6,8 +6,9 @@
 # **This is deliberately not `make check`** — decision D6. Putting the whole
 # gate here would run the frontend build, the -race suite and eventually E2E on
 # every single turn, and a gate that sacrifices fast feedback is a gate that
-# gets bypassed. G3 onward stays with .githooks/pre-push and CI, which is where
-# the expensive checks belong and where they cannot be skipped anyway.
+# gets bypassed. G3 onward stays with CI and `make check` run by hand, which is
+# where the expensive checks belong; .githooks/pre-push runs only the pushed
+# change's own checks (decision D14).
 #
 # Exit codes are the Claude Code hook contract: 0 = the turn may end, 2 =
 # blocking, reason on stderr. Anything that cannot be checked exits 0 (design
@@ -132,7 +133,7 @@ $unformatted"
 	if [ -n "$go_pkgs" ] && command -v go > /dev/null 2>&1; then
 		pkgs=$(printf '%s' "$go_pkgs" | tr '|' ' ')
 		# Only the packages this turn touched. `go test` without -race here on
-		# purpose: pre-push and CI run the race detector over everything, and
+		# purpose: CI runs the race detector over everything, and
 		# the point of this gate is a fast answer, not a second full suite.
 		# shellcheck disable=SC2086 # word splitting is the intent: one arg per package
 		if ! test_output=$(go test $pkgs 2>&1); then

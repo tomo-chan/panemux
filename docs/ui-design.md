@@ -402,9 +402,13 @@ terminal that had focus cannot receive what is typed into the dashboard.
   selected as its process while it has no session, the notice staying up, and selected again as its
   session once one is listed, which ends the notice. No pane is opened. Labels that could not be
   recorded for a task that did start are reported in a red alert.
-- **Filter bar.** Text filter over directory, branch, PR number, reference (such as `JIRA-123`) and session ID; rows split by none,
-  host, label, or repository; a host filter; a label filter listing every label on the board; and a
-  `Done column` checkbox, off by default.
+- **Filter bar.** Text filter over the card title, directory, branch, PR number, reference (such as `JIRA-123`), session ID,
+  tmux session name and summary text, matching any part of one ignoring case. The summary text matches whether the card
+  shows it or, for a task waiting for input, only the details do; it stays searchable while a newer summary is pending
+  or it is outdated, and a summary that arrives re-filters the board at once. Every session the dashboard starts is
+  named `task-<8 hex>`, so `task` matches all of them, and a short number can match the hex of one. Rows split by none,
+  host, label, or repository; a host filter; a label filter listing every label on the board; and a `Done column`
+  checkbox, off by default.
 - **Kanban.** Columns in the order a person should look at them: Waiting for input (highlighted in
   gold, "Needs you"), Working, Idle, Running / unknown, Stopped, and Done when the checkbox asks for
   it. A task marked done sits in Done only while it is stopped, so with the column hidden a finished

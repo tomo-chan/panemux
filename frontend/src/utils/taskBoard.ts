@@ -206,6 +206,10 @@ export function filterTasks(tasks: Task[], filter: TaskFilter): Task[] {
       task.git?.pr_number !== undefined ? String(task.git.pr_number) : undefined,
       ...(task.git?.autolinks ?? []).map((link) => link.text),
       task.session_id,
+      task.location.tmux_session,
+      // The summary text, on the card or (for a waiting task) only in the
+      // details; also while a newer summary is pending or it is outdated.
+      task.summary?.text,
     ]
     return haystack.some((value) => value?.toLowerCase().includes(query))
   })
