@@ -807,11 +807,17 @@ The connection menu is a dialog under the chip ([UI](../ui-design.md#task-dashbo
   `DELETE /api/hosts/terminal/{session_id}`: an `ssh` terminal logs out; an `ssh_tmux` terminal ends
   only its tmux client, and the tmux session it created stays on the host.
 - **`Cancel`**, `Escape`, or a press outside the menu closes it; focus returns to the chip.
+- When a poll finds the host no longer `ok` while its menu is open, the menu closes and stays closed
+  when the host comes back; focus moves to the host's `Reconnect` button, or to the dashboard while
+  it is connecting. Closing a host terminal whose chip a poll replaced returns focus to the host's
+  chip as it is now, or to the dashboard.
 
 A host terminal is a board attach in every respect but its creation: served by `/ws/{session_id}`,
 never in the layout or `GET /api/sessions`, destroyed by its `DELETE` or 10s after its last
 WebSocket closed (or after creation if none connected), and held in memory only.
-`DELETE /api/tasks/attach/{id}` and `DELETE /api/hosts/terminal/{id}` each end only their own kind.
+`DELETE /api/tasks/attach/{id}` and `DELETE /api/hosts/terminal/{id}` each end only their own kind,
+and `POST /api/tasks/attach` never returns or removes a host terminal. At most 4 are open on one
+connection at a time.
 
 ### `GET /api/tasks`
 
@@ -1051,7 +1057,8 @@ Opens a new host terminal ([Opening a host](#opening-a-host)):
   (`tmux_session` is `""` for `ssh`). The terminal is `/ws/{session_id}`.
 - `400` for a body that is not valid, an empty `connection`, another `type`, a `tmux_session` on
   `ssh` or one the rule refuses; `404` for a connection that is not in `ssh_connections`; `502` when
-  the terminal could not be started; `403` for a cross-site request.
+  the terminal could not be started; `403` for a cross-site request; `429` when 4 host terminals
+  are already open on that connection (one whose shell has exited does not count).
 
 `DELETE /api/hosts/terminal/{session_id}` ends it at once and answers `204`; `404` for an ID that is
 not a host terminal (a task's board attach and a pane's session included), and `403` for a

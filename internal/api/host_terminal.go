@@ -27,6 +27,11 @@ import (
 // marked host, so a request naming this key reaches no host terminal.
 const hostTerminalKeyPrefix = "host-terminal:"
 
+// maxHostTerminalsPerConnection bounds the host terminals open on one
+// connection, each its own SSH connection. The dashboard shows one at a time,
+// so the cap only stops a client that opens them in a loop.
+const maxHostTerminalsPerConnection = 4
+
 // tmuxSessionNameUnsafe matches one character a tmux session name may not
 // hold; see session.IsValidTmuxSessionName.
 var tmuxSessionNameUnsafe = regexp.MustCompile(`[^a-zA-Z0-9_.-]`)
@@ -145,6 +150,13 @@ func (h *Handler) PostHostTerminal(w http.ResponseWriter, r *http.Request) {
 	if !h.knownConnection(w, req.Connection) {
 		return
 	}
+	release, ok := h.reserveHostTerminal(req.Connection)
+	if !ok {
+		http.Error(w, fmt.Sprintf("%d terminals are already open on %q; close one first",
+			maxHostTerminalsPerConnection, req.Connection), http.StatusTooManyRequests)
+		return
+	}
+	defer release()
 	pane, err := hostTerminalPane(req, h.newBoardAttachID())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -156,11 +168,42 @@ func (h *Handler) PostHostTerminal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.registerBoardAttach(&boardAttach{
-		taskID: hostTerminalKeyPrefix + pane.ID, sessionID: pane.ID, tmuxSession: pane.TmuxSession, host: true,
+		taskID: hostTerminalKeyPrefix + pane.ID, sessionID: pane.ID, tmuxSession: pane.TmuxSession,
+		host: true, connection: req.Connection,
 	}, sess)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(hostTerminalResponse{SessionID: pane.ID, TmuxSession: pane.TmuxSession})
+}
+
+// reserveHostTerminal takes one of connection's maxHostTerminalsPerConnection
+// places for a host terminal being opened, and returns the func that gives it
+// back once the terminal is registered or failed to open. Open host terminals
+// on connection count against the cap, except those whose shell has exited.
+func (h *Handler) reserveHostTerminal(connection string) (func(), bool) {
+	b := h.boardAttaches
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	n := b.hostOpening[connection]
+	for _, attach := range b.bySession {
+		if !attach.host || attach.connection != connection {
+			continue
+		}
+		if sess, live := h.manager.Get(attach.sessionID); live && sess.State() != session.StateExited {
+			n++
+		}
+	}
+	if n >= maxHostTerminalsPerConnection {
+		return nil, false
+	}
+	b.hostOpening[connection]++
+	return func() {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		if b.hostOpening[connection]--; b.hostOpening[connection] == 0 {
+			delete(b.hostOpening, connection)
+		}
+	}, true
 }
 
 // DeleteHostTerminal destroys a host terminal: an ssh terminal's shell

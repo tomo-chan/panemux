@@ -48,6 +48,8 @@ type boardAttach struct {
 	generation int
 	// host marks a host terminal (issue #314) rather than a task's attach.
 	host bool
+	// connection is a host terminal's ssh_connections entry.
+	connection string
 }
 
 // boardAttaches holds the board's attaches, one per task, and its host
@@ -59,7 +61,9 @@ type boardAttaches struct {
 	// creating holds a channel per task whose attach is being created; it
 	// is closed when the creation ends either way.
 	creating map[string]chan struct{}
-	mu       sync.Mutex
+	// hostOpening counts, per connection, the host terminals being opened.
+	hostOpening map[string]int
+	mu          sync.Mutex
 }
 
 func newBoardAttaches() *boardAttaches {
@@ -68,6 +72,8 @@ func newBoardAttaches() *boardAttaches {
 		byTask:    map[string]*boardAttach{},
 		bySession: map[string]*boardAttach{},
 		creating:  map[string]chan struct{}{},
+
+		hostOpening: map[string]int{},
 	}
 }
 

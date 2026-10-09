@@ -55,6 +55,12 @@ connection a browser names:
   `new-session -A` argv and its quoting are the panes' own.
 - Both routes refuse a cross-site request and decode the body strictly (unknown fields refused,
   bounded size), as `POST /api/tasks/attach` does.
+- At most 4 host terminals are open on one connection at a time (`maxHostTerminalsPerConnection`);
+  past that the request is answered `429` before any SSH connection is made. A terminal that failed
+  to open, was deleted, expired or whose shell has exited does not count. This bounds the SSH
+  connections, and the `ssh_tmux` sessions left on the host, that a looping client can open.
+- Host terminals share the board's attach registry, under `host-terminal:<session id>`, but
+  `POST /api/tasks/attach` skips their entries, so the task route neither returns nor removes one.
 
 ### Remote path arguments (SSH working directory)
 

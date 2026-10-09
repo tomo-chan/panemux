@@ -363,3 +363,54 @@ func TestPostTaskAttach_HostTerminalKeyIsNotATask(t *testing.T) {
 		})
 	}
 }
+
+// At most maxHostTerminalsPerConnection host terminals are open on one
+// connection; past that a request is refused before any session is made.
+func TestPostHostTerminal_CapPerConnection(t *testing.T) {
+	const body = `{"connection":"gpu-box","type":"ssh"}`
+	open := func(e *hostTerminalEnv) []hostTerminalResponse {
+		var got []hostTerminalResponse
+		for range maxHostTerminalsPerConnection {
+			got = append(got, decodeHostTerminal(t, e.post(t, body)))
+		}
+		return got
+	}
+
+	t.Run("refused past the cap, before a session is made", func(t *testing.T) {
+		e := newHostTerminalEnv(t)
+		open(e)
+		made := len(e.created())
+		rec := e.post(t, body)
+		assert.Equal(t, http.StatusTooManyRequests, rec.Code, rec.Body.String())
+		assert.Len(t, e.created(), made)
+		assert.Equal(t, http.StatusCreated, e.post(t, `{"connection":"user@host:22","type":"ssh"}`).Code,
+			"another connection has a cap of its own")
+	})
+	t.Run("a deleted terminal frees its place", func(t *testing.T) {
+		e := newHostTerminalEnv(t)
+		got := open(e)
+		require.Equal(t, http.StatusNoContent, e.delete(t, "/api/hosts/terminal/"+got[0].SessionID, nil).Code)
+		assert.Equal(t, http.StatusCreated, e.post(t, body).Code)
+	})
+	t.Run("an expired terminal frees its place", func(t *testing.T) {
+		e := newHostTerminalEnv(t)
+		open(e)
+		e.timers.fire()
+		assert.Equal(t, http.StatusCreated, e.post(t, body).Code)
+	})
+	t.Run("a terminal whose shell has exited does not count", func(t *testing.T) {
+		e := newHostTerminalEnv(t)
+		got := open(e)
+		e.byID[got[0].SessionID].state = session.StateExited
+		assert.Equal(t, http.StatusCreated, e.post(t, body).Code)
+	})
+	t.Run("a terminal that failed to open does not count", func(t *testing.T) {
+		e := newHostTerminalEnv(t)
+		e.err = errors.New("dial failed")
+		for range maxHostTerminalsPerConnection + 1 {
+			require.Equal(t, http.StatusBadGateway, e.post(t, body).Code)
+		}
+		e.err = nil
+		assert.Len(t, open(e), maxHostTerminalsPerConnection)
+	})
+}
