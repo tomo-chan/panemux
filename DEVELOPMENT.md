@@ -81,10 +81,16 @@ developer's own agent sessions. It needs `tmux` for the tmux pane; set `PLAYWRIG
 as for `make test-e2e` when the installed Chromium is not the one Playwright expects. It is not part of
 `make check`.
 
-- The run stages everything under its root, `$TMPDIR/panemux-screenshots`, which it empties only
-  when it carries the `.panemux-screenshots` marker the run leaves in it. `/tmp/sample-project` and
-  `/tmp/panemux-screenshots-agmsg` are symbolic links into that root, so no marker sits at those
-  fixed paths to be lost.
+- The run stages everything under its root, `$TMPDIR/panemux-screenshots`, which it empties when it
+  carries the `.panemux-screenshots` marker the run leaves in it, or when every entry in it is a
+  name the run creates there (`home`, `tmux`, `panemux`, `showcase.yml`, `sample-project`,
+  `panemux-screenshots-agmsg`). `/tmp/sample-project` and `/tmp/panemux-screenshots-agmsg` are
+  symbolic links into that root, so no marker sits at those fixed paths to be lost.
+  - Why markers get lost: macOS deletes old temporary files on its own. `com.apple.tmp_cleaner`
+    deletes files under `/tmp` whose access, modification and change times are all over three days
+    old, then empty directories over three days old, daily at 00:00; `com.apple.bsd.dirhelper`
+    cleans `$TMPDIR` (`/var/folders/...`) of files over three days old. The marker is never read
+    after it is written, so it can go while files read since stay.
   - A link the run made — its target is `<...>/panemux-screenshots/<the link's own name>` — is
     replaced, and what it pointed to is left alone.
   - A directory an earlier version of the run left there is removed: one carrying the marker, or one

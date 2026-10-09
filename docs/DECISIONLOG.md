@@ -22,7 +22,12 @@ while a file read since stayed. As long as the marker lived at the fixed path, l
 stopped every later run until the developer moved the directory away. The fixed paths became symbolic links into
 `$TMPDIR/panemux-screenshots`, so the marker that decides what may be emptied sits only at the
 run's root. A directory holding nothing but empty directories is removed as left over, with
-`rmdir`, rather than refused: nothing a developer keeps can be lost that way. Recognising a link
+`rmdir`, rather than refused: nothing a developer keeps can be lost that way. The root itself,
+under the developer's own `$TMPDIR`, is cleaned the same way by `com.apple.bsd.dirhelper`, so it is
+also claimed without the marker when every entry in it is a name the run creates there. A fresh
+`mktemp` root per run, which would need no claiming at all, was not chosen: its longer name puts
+the tmux socket past macOS's 104-byte limit under the default `$TMPDIR`, and the capture's teardown
+would have to find a root that changes every run. Recognising a link
 the run made by its target's name, `<...>/panemux-screenshots/<the link's own name>`, was chosen
 over recording its target in a file, which could be lost the same way; replacing a link never
 touches what it points to.

@@ -333,6 +333,47 @@ else
 	fail 'a directory holding only empty directories is claimed'
 fi
 
+# The run root, $TMPDIR/panemux-screenshots, is also cleaned by the OS
+# (macOS's dirhelper), which can take the never-read marker and leave files
+# read since. A root whose every entry is a name the run itself creates is
+# claimed without the marker; one other entry and it is refused untouched.
+claim_root() { sh -c '. "$1"; shift; shot_claim_dir "$@"' sh "$lib" "$@" 2>&1; }
+
+check
+d="$work/root-shaped"
+mkdir -p "$d/home" "$d/tmux"
+echo old >"$d/home/.bashrc"
+echo old >"$d/panemux"
+if claim_root "$d" home tmux panemux >/dev/null && [ -f "$d/.panemux-screenshots" ] && [ ! -e "$d/panemux" ]; then
+	pass 'an unmarked directory holding only the names the run creates is claimed'
+else
+	fail 'an unmarked directory holding only the names the run creates is claimed'
+fi
+
+check
+d="$work/root-plus-one"
+mkdir -p "$d/home"
+echo keep >"$d/notes.txt"
+if output=$(claim_root "$d" home tmux panemux); then
+	fail 'an unmarked directory with a name the run does not create is refused' "$output"
+elif [ "$(cat "$d/notes.txt" 2>/dev/null)" != keep ] || [ ! -d "$d/home" ]; then
+	fail 'an unmarked directory with a name the run does not create is refused: it was touched' "$output"
+else
+	pass 'an unmarked directory with a name the run does not create is refused'
+fi
+
+check
+d="$work/root-hidden"
+mkdir -p "$d/home"
+echo keep >"$d/.hidden"
+if output=$(claim_root "$d" home tmux panemux); then
+	fail 'a hidden entry the run does not create is refused' "$output"
+elif [ "$(cat "$d/.hidden" 2>/dev/null)" != keep ]; then
+	fail 'a hidden entry the run does not create is refused: it was touched' "$output"
+else
+	pass 'a hidden entry the run does not create is refused'
+fi
+
 check
 f="$work/a-file"
 echo keep >"$f"

@@ -58,9 +58,10 @@ shot_teardown() {
 }
 
 # Makes $1 an empty directory this script owns, carrying the marker. See
-# shot_clear for what already at the path it replaces and what it refuses.
+# shot_clear for what already at the path it replaces and what it refuses,
+# and for the names $2... .
 shot_claim_dir() {
-    shot_clear "$1" || return 1
+    shot_clear "$@" || return 1
     mkdir -p "$1"
     : >"$1/$SHOT_MARKER"
 }
@@ -91,9 +92,13 @@ shot_link_dir() {
 # Removes $1 when this script left it: a directory carrying the marker, or a
 # directory holding nothing but empty directories — what a run's directory
 # becomes when something deletes its files, the marker included, and keeps
-# the directories; rmdir can remove nothing else. Anything else is refused
-# untouched, since these are fixed, generic paths (/tmp/sample-project) a
-# developer may use for their own work.
+# the directories; rmdir can remove nothing else. macOS's cleaners do that:
+# tmp_cleaner deletes files under /tmp unread for three days, and the marker
+# is never read. With names $2... given, a directory whose every entry is one
+# of them is removed too: the run root, under the user's own $TMPDIR, which
+# dirhelper cleans the same way, can lose the marker and keep files read
+# since. Anything else is refused untouched, since these are fixed paths
+# (/tmp/sample-project) a developer may use for their own work.
 shot_clear() {
     if [ ! -e "$1" ] && [ ! -L "$1" ]; then
         return 0
@@ -107,9 +112,27 @@ shot_clear() {
             find "$1" -depth -type d -exec rmdir {} \;
             return
         fi
+        if [ $# -gt 1 ] && shot_only_names "$@"; then
+            rm -rf "$1"
+            return
+        fi
     fi
     shot_refuse "$1"
     return 1
+}
+
+# Succeeds when every entry of directory $1 is named one of $2... .
+shot_only_names() {
+    shot_on_dir=$1
+    shift
+    for shot_on_entry in "$shot_on_dir"/* "$shot_on_dir"/.[!.]* "$shot_on_dir"/..?*; do
+        [ -e "$shot_on_entry" ] || [ -L "$shot_on_entry" ] || continue
+        shot_on_known=
+        for shot_on_name in "$@"; do
+            [ "${shot_on_entry##*/}" = "$shot_on_name" ] && shot_on_known=1
+        done
+        [ -n "$shot_on_known" ] || return 1
+    done
 }
 
 shot_refuse() {

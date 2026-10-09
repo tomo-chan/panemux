@@ -61,7 +61,9 @@ shot_lock /tmp/panemux-screenshots.lock $$
 
 export TMUX_TMPDIR="$SHOT_ROOT/tmux"
 shot_stop_tmux
-shot_claim_dir "$SHOT_ROOT"
+# Every name the run creates in its root; see shot_clear.
+shot_claim_dir "$SHOT_ROOT" home tmux panemux showcase.yml \
+    "${SHOT_PROJECT##*/}" "${SHOT_AGMSG_DIR##*/}"
 shot_link_dir "$SHOT_PROJECT" "$SHOT_ROOT/${SHOT_PROJECT##*/}"
 shot_link_dir "$SHOT_AGMSG_DIR" "$SHOT_ROOT/${SHOT_AGMSG_DIR##*/}"
 mkdir -p "$SHOT_HOME" "$TMUX_TMPDIR"
