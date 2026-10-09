@@ -43,13 +43,13 @@ type boardAttach struct {
 	taskID      string
 	sessionID   string
 	tmuxSession string
+	// connection is a host terminal's ssh_connections entry.
+	connection string
 	// generation tells a timer that fired after it was stopped that it no
 	// longer counts.
 	generation int
 	// host marks a host terminal (issue #314) rather than a task's attach.
 	host bool
-	// connection is a host terminal's ssh_connections entry.
-	connection string
 }
 
 // boardAttaches holds the board's attaches, one per task, and its host
