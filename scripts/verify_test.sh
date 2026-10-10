@@ -31,6 +31,7 @@ expect_status() {
 for target in install-deps test-go lint-go check; do
  expect_status 0 "$target"
  grep -q "verify: $target exit=0" "$work/output"
+ grep -Fq "$work/repo|$target|$work/repo/.cache/go-build|$work/repo/.cache/npm|" "$TRACE"
  [ "$(wc -l < "$work/output")" -le 5 ]
 done
 [ "$(find "$work/repo/.cache/verify" -name output.log | wc -l)" -eq 4 ]
