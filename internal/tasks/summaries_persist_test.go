@@ -71,7 +71,12 @@ func (f *persistedSummaryFixture) start(t *testing.T) *Service {
 			f.logs = append(f.logs, fmt.Sprintf(format, args...))
 		},
 	})
-	t.Cleanup(svc.Close)
+	// Close stops the summaries without waiting for them; one that saves
+	// after it must still finish before the temporary directory is removed.
+	t.Cleanup(func() {
+		svc.Close()
+		svc.waitSummaries()
+	})
 	return svc
 }
 
