@@ -101,6 +101,9 @@ type Options struct {
 	RetryAfter time.Duration
 	// SummaryTimeout bounds one Summarize call.
 	SummaryTimeout time.Duration
+	// SummaryStore keeps the summaries across restarts. Without one they
+	// are kept in memory only.
+	SummaryStore *SummaryStore
 }
 
 const (
@@ -132,16 +135,24 @@ type Service struct {
 	unreadableLogged map[string]map[string]UnreadableStateFile
 	// The task summaries; see summaries.go. summaryMu guards summaries and
 	// summaryTasks. summaryCtx ends when the service is closed.
-	summaries     map[summaryKey]*summaryEntry
-	summaryTasks  map[string]map[summaryKey]summaryTask
-	summarySlots  chan struct{}
-	summaryCtx    context.Context
-	summaryCancel context.CancelFunc
-	opts          Options
-	summaryWG     sync.WaitGroup
-	mu            sync.Mutex
-	summaryMu     sync.Mutex
-	closed        bool
+	summaries    map[summaryKey]*summaryEntry
+	summaryTasks map[string]map[summaryKey]summaryTask
+	// summaryHosts are the hosts configured at the last collection, nil
+	// before it. summaryLoaded is whether opts.SummaryStore was read,
+	// summaryLoadErr the last error reading it, and summaryGen the
+	// generation of the last set of summaries handed to it.
+	summaryHosts   map[string]bool
+	summaryLoadErr string
+	summaryGen     uint64
+	summaryLoaded  bool
+	summarySlots   chan struct{}
+	summaryCtx     context.Context
+	summaryCancel  context.CancelFunc
+	opts           Options
+	summaryWG      sync.WaitGroup
+	mu             sync.Mutex
+	summaryMu      sync.Mutex
+	closed         bool
 }
 
 type hostConn struct {
