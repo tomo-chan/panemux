@@ -1118,10 +1118,10 @@ the cost, and Haiku cost about the same — no longer held: Haiku 5.5 cost about
 The operator decided, from those measurements:
 
 - **The CLI's system prompt is replaced by a fixed one, and no tool is offered** (`--system-prompt`,
-  `--tools ""`): about −45 to −55% on the default model, with no loss of quality seen. The denial list,
+  `--tools ""`): about −40% (warm cache) to −56% (cold) on the default model, with no loss of quality seen. The denial list,
   `--setting-sources ""`, `--strict-mcp-config` and `--disable-slash-commands` stay as they are; stage
   3 had kept `--tools ""` out only because its effect had not been verified, and it was verified here.
-- **Haiku answers, by the CLI's `haiku` alias** (about −97 to −98% with the fixed prompt). A pinned
+- **Haiku answers, by the CLI's `haiku` alias** (about −98 to −99% with the fixed prompt). A pinned
   model ID was the alternative, rejected because a retired ID would make every summary fail; with the
   alias, a newer Haiku can answer without the summarizer version changing, so summaries made by the
   older one stay current.
