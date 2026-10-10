@@ -126,6 +126,7 @@ func TestSummaryStore_MovesAsideAFileItCannotUse(t *testing.T) {
 			e.Text = strings.Repeat("a", maxSummaryTextBytes+len(truncationMark)+1)
 		}),
 		"empty text":     entry(func(e *storedSummary) { e.Text = "" }),
+		"bad model":      entry(func(e *storedSummary) { e.UnexpectedModel = "not a model ID" }),
 		"blank text":     entry(func(e *storedSummary) { e.Text = " \n\t" }),
 		"too many items": entry(func(e *storedSummary) { e.Remaining = slices.Repeat([]string{"x"}, maxSummaryRemaining+1) }),
 		"item too long": entry(func(e *storedSummary) {

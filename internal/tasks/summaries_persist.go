@@ -55,7 +55,7 @@ func (s *Service) loadSummariesLocked() bool {
 			continue
 		}
 		entry := &summaryEntry{
-			result:     &Summary{Text: stored.Text, Remaining: stored.Remaining},
+			result:     &Summary{Text: stored.Text, Remaining: stored.Remaining, UnexpectedModel: stored.UnexpectedModel},
 			resultAt:   stored.SummarizedAt,
 			inputHash:  stored.InputHash,
 			summarizer: stored.Summarizer,
@@ -120,16 +120,17 @@ func (s *Service) summarySaveLocked(dirty bool) func() {
 		}
 		entry.savedSeen = entry.lastSeen
 		entries = append(entries, storedSummary{
-			Host:         key.host,
-			Agent:        key.agent,
-			SessionID:    key.sessionID,
-			Text:         entry.result.Text,
-			Remaining:    entry.result.Remaining,
-			SummarizedAt: entry.resultAt,
-			LastSeen:     entry.lastSeen,
-			InputHash:    entry.inputHash,
-			Summarizer:   entry.summarizer,
-			Log:          storedLog{File: entry.resultLog.File, ModTime: entry.resultLog.ModTime, Size: entry.resultLog.Size},
+			Host:            key.host,
+			Agent:           key.agent,
+			SessionID:       key.sessionID,
+			Text:            entry.result.Text,
+			Remaining:       entry.result.Remaining,
+			UnexpectedModel: entry.result.UnexpectedModel,
+			SummarizedAt:    entry.resultAt,
+			LastSeen:        entry.lastSeen,
+			InputHash:       entry.inputHash,
+			Summarizer:      entry.summarizer,
+			Log:             storedLog{File: entry.resultLog.File, ModTime: entry.resultLog.ModTime, Size: entry.resultLog.Size},
 		})
 	}
 	return func() {

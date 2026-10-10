@@ -1125,6 +1125,12 @@ The operator decided, from those measurements:
   model ID was the alternative, rejected because a retired ID would make every summary fail; with the
   alias, a newer Haiku can answer without the summarizer version changing, so summaries made by the
   older one stay current.
+- **A summary that Haiku did not make says so** (review of PR #356). When an organization's
+  `availableModels` leaves Haiku out, the CLI answers with its default model without failing, at
+  around 30 times the cost. The summarizer reads the model names in `modelUsage` from the CLI's
+  answer, and when one is not a Haiku it logs that once per model and the detail panel names the
+  model. The summary is kept rather than failed: the call has already been paid for. Only the model
+  ID is logged or shown, and a name that is not shaped like one is reported as `unknown`.
 - **The system prompt tells claude to describe only the excerpt.** The first Haiku run with the fixed
   prompt listed "check whether the directory is a git repository" as remaining work: the CLI still
   tells the model about the empty directory it runs in. That sentence removed it in the next run.

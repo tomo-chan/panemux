@@ -290,6 +290,8 @@ describe('TaskSummarySchema', () => {
     expect(TaskSummarySchema.safeParse({ state: 'pending' }).success).toBe(true)
     expect(TaskSummarySchema.safeParse({ state: 'error', error: 'claude exited with status 1' }).success).toBe(true)
     expect(TaskSummarySchema.safeParse({ state: 'unreadable' }).success).toBe(true)
+    const otherModel = { state: 'ready', text: 'Done.', unexpected_model: 'claude-opus-5-5' }
+    expect(TaskSummarySchema.parse(otherModel)).toEqual(otherModel)
 
     const result = TasksResponseSchema.safeParse({
       hosts: [], summaries_enabled: true,

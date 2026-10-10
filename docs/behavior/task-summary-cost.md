@@ -83,3 +83,11 @@ reported TSV, BOM and tax-excluded amounts — the correction — rather than th
 On the 24 KiB excerpt the shipped summarizer added "run the tests after the TSV change" to the
 screen test and README, which the conversation does not say were run after it. Haiku's summaries are
 somewhat longer than the default model's, within the same bounds.
+
+## When Haiku is not allowed
+
+An organization's managed `availableModels` can leave Haiku out. The CLI then answers with its
+default model and does not fail, so one summary costs about what the default-model rows above show:
+around 30 times Haiku's cost. The summarizer reads the model names in `modelUsage` from the CLI's
+answer. When one is not a Haiku, the summary records it, the detail panel names it, and the server
+logs it once per model ([tasks.md](tasks.md#summaries)).

@@ -433,7 +433,8 @@ export type TaskGit = z.infer<typeof TaskGitSchema>
 // there is one, whatever state says; outdated means the log changed since.
 // done_candidate is a ready, current answer with nothing remaining — a person
 // still decides whether the task is done. Like the rest of the task, the
-// text carries no .max(): the server bounds it.
+// text carries no .max(): the server bounds it. unexpected_model is the model
+// that made the answer when it was not the Haiku asked for (issue #353).
 export const TaskSummarySchema = z.object({
   state: z.enum(['pending', 'ready', 'error', 'unreadable']),
   text: z.string().optional(),
@@ -442,6 +443,7 @@ export const TaskSummarySchema = z.object({
   outdated: z.boolean().optional(),
   done_candidate: z.boolean().optional(),
   error: z.string().optional(),
+  unexpected_model: z.string().optional(),
 })
 
 export type TaskSummary = z.infer<typeof TaskSummarySchema>

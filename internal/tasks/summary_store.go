@@ -90,10 +90,12 @@ type storedSummary struct {
 	Text      string    `json:"text"`
 	// InputHash is summaryInputHash of the excerpt the answer was made from,
 	// and Summarizer the summarizerVersion that made it.
-	InputHash  string    `json:"input_hash"`
-	Summarizer string    `json:"summarizer"`
-	Remaining  []string  `json:"remaining"`
-	Log        storedLog `json:"log"`
+	InputHash  string   `json:"input_hash"`
+	Summarizer string   `json:"summarizer"`
+	Remaining  []string `json:"remaining"`
+	// UnexpectedModel is Summary.UnexpectedModel.
+	UnexpectedModel string    `json:"unexpected_model,omitempty"`
+	Log             storedLog `json:"log"`
 }
 
 // storedLog is the log version the answer was last found current for.
@@ -126,6 +128,8 @@ func (s storedSummary) validate() error {
 		return errors.New("empty summary")
 	case len(s.Text) > maxStoredTextBytes || len(s.Remaining) > maxSummaryRemaining:
 		return errors.New("summary longer than a summary can be")
+	case s.UnexpectedModel != "" && !validModelIDString(s.UnexpectedModel):
+		return errors.New("invalid model")
 	}
 	for _, item := range s.Remaining {
 		switch {

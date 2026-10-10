@@ -7,8 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
+	"regexp"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -32,8 +35,12 @@ import (
 // Summary is what claude made of a conversation: what the task is and where
 // it stands, and the work left, most immediate first.
 type Summary struct {
-	Text      string   `json:"text"`
-	Remaining []string `json:"remaining"`
+	Text string `json:"text"`
+	// UnexpectedModel is the model that answered when it was not the Haiku
+	// asked for: the CLI answers with its default model, at many times the
+	// cost, when the account may not use Haiku (issue #353).
+	UnexpectedModel string   `json:"unexpected_model,omitempty"`
+	Remaining       []string `json:"remaining"`
 }
 
 // SummarizeFunc turns a conversation excerpt into a Summary.
@@ -76,6 +83,16 @@ const summarySystemPrompt = "You summarize excerpts of coding-agent conversation
 // current Haiku, which answered as well as the default model at a small
 // fraction of its cost (issue #353).
 const summaryModel = "haiku"
+
+// maxModelIDBytes bounds a model ID read from claude's answer, and
+// validModelID is the shape one has; a name that is not one is reported as
+// unknownModel, since it could be any text.
+const (
+	maxModelIDBytes = 100
+	unknownModel    = "unknown"
+)
+
+var validModelID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:@/\[\]-]*$`)
 
 // summarySchema is the structured answer --json-schema asks for.
 const summarySchema = `{"type":"object","properties":{"summary":{"type":"string"},` +
@@ -159,8 +176,9 @@ type summaryResult struct {
 		Summary   string   `json:"summary"`
 		Remaining []string `json:"remaining"`
 	} `json:"structured_output"`
-	Subtype string `json:"subtype"`
-	IsError bool   `json:"is_error"`
+	ModelUsage map[string]json.RawMessage `json:"modelUsage"`
+	Subtype    string                     `json:"subtype"`
+	IsError    bool                       `json:"is_error"`
 }
 
 // parseSummaryOutput reads claude's answer. Its errors are fixed messages:
@@ -191,5 +209,27 @@ func parseSummaryOutput(out []byte) (Summary, error) {
 			summary.Remaining = append(summary.Remaining, truncateUTF8(item, maxSummaryItemBytes))
 		}
 	}
+	summary.UnexpectedModel = unexpectedModel(result.ModelUsage)
 	return summary, nil
+}
+
+// unexpectedModel is the first model, by name, in claude's modelUsage that
+// is not a Haiku, or "" when every one is.
+func unexpectedModel(usage map[string]json.RawMessage) string {
+	models := slices.Sorted(maps.Keys(usage))
+	for _, model := range models {
+		if strings.Contains(strings.ToLower(model), "haiku") {
+			continue
+		}
+		if !validModelIDString(model) {
+			return unknownModel
+		}
+		return model
+	}
+	return ""
+}
+
+// validModelIDString reports whether s can be shown and logged as a model ID.
+func validModelIDString(s string) bool {
+	return len(s) <= maxModelIDBytes && validModelID.MatchString(s)
 }

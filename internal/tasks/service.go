@@ -141,7 +141,10 @@ type Service struct {
 	// before it. summaryLoaded is whether opts.SummaryStore was read,
 	// summaryLoadErr the last error reading it, and summaryGen the
 	// generation of the last set of summaries handed to it.
-	summaryHosts   map[string]bool
+	summaryHosts map[string]bool
+	// warnedModels are the unexpected models already logged; summaryMu
+	// guards it.
+	warnedModels   map[string]bool
 	summaryLoadErr string
 	summarySlots   chan struct{}
 	summaryCtx     context.Context
