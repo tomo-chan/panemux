@@ -507,3 +507,61 @@ func TestPersistedSummaries_CodexIsStoredAndReused(t *testing.T) {
 }
 
 const codexRolloutName = "rollout-2026-10-08T01-00-00-" + summarySessionID + ".jsonl"
+
+// A summary made while the file could not be read stays when the file comes
+// back holding an older answer for the same task: the one in memory is newer.
+func TestPersistedSummaries_ASummaryMadeMeanwhileWinsOverTheFile(t *testing.T) {
+	f := newPersistedSummaryFixture(t)
+	require.NoError(t, os.Mkdir(f.path, 0o700))
+	f.host.set(hostCollection(100, "idle"), conversationLog("a"))
+	svc := f.start(t)
+	_, views := collectAndSummarize(svc)
+	require.Equal(t, "Fixing a race.", views["local:claude:s10"].Text)
+
+	require.NoError(t, os.Remove(f.path))
+	stale := sampleStoredSummary("", AgentClaude, "s10")
+	stale.Text = "An older answer."
+	f.writeStored(t, stale)
+	_, views = collectAndSummarize(svc)
+	assert.Equal(t, "Fixing a race.", views["local:claude:s10"].Text)
+	stored := f.stored(t)
+	require.Len(t, stored, 1)
+	assert.Equal(t, "Fixing a race.", stored[0].Text)
+}
+
+// A summary that finishes after its host left the config is dropped, not
+// saved: the task it belonged to is forgotten.
+func TestPersistedSummaries_ASummaryFinishingAfterItsHostLeftIsDropped(t *testing.T) {
+	f := newPersistedSummaryFixture(t)
+	f.summarizer.gate = make(chan struct{})
+	var mu sync.Mutex
+	hosts := []string{"gpu-box"}
+	conn := &scriptedConn{outputs: map[bool][]byte{true: hostCollection(100, "idle"), false: conversationLog("a")}}
+	svc := New(Options{
+		Hosts: func() []string {
+			mu.Lock()
+			defer mu.Unlock()
+			return hosts
+		},
+		Dial:         func(string) (Conn, error) { return conn, nil },
+		RunLocal:     localOutput(minimalOutput("local"), nil),
+		Summarize:    f.summarizer.summarize,
+		Now:          f.clock.Now,
+		SummaryStore: NewSummaryStore(f.path),
+	})
+	t.Cleanup(svc.Close)
+	snap := svc.Collect(context.Background())
+	views := svc.Summaries(snap.Tasks)
+	require.Equal(t, SummaryPending, views["ssh:gpu-box:claude:s10"].State)
+
+	mu.Lock()
+	hosts = nil
+	mu.Unlock()
+	svc.Collect(context.Background())
+	close(f.summarizer.gate)
+	svc.waitSummaries()
+
+	assert.Equal(t, 1, f.summarizer.calls())
+	_, err := os.Stat(f.path)
+	assert.ErrorIs(t, err, os.ErrNotExist, "nothing is saved for the forgotten task")
+}

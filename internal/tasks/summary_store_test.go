@@ -263,6 +263,18 @@ func TestSummaryStore_AFailedWriteIsReportedUntilOneSucceeds(t *testing.T) {
 	assert.NoError(t, store.Err())
 }
 
+func TestSummaryStore_AFailedDirectoryCreationIsReported(t *testing.T) {
+	parent := filepath.Join(t.TempDir(), "config")
+	store := NewSummaryStore(filepath.Join(parent, "task-summaries.json"))
+	_, _, err := store.load(storeNow)
+	require.NoError(t, err, "a missing directory is an empty store")
+	writeStoreFile(t, parent, "")
+
+	err = store.save(1, nil)
+	assert.ErrorContains(t, err, "creating task summary directory")
+	assert.Equal(t, err, store.Err())
+}
+
 // A symlink at the path is written through, as tasks.json's is.
 func TestSummaryStore_WritesThroughASymlink(t *testing.T) {
 	dir := t.TempDir()
