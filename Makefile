@@ -42,7 +42,7 @@ install-hooks:
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
-test: test-node-toolchain test-go-toolchain test-go test-frontend test-hooks test-pre-push test-tmpdir-guard test-install-hooks test-golangci-lint-cache test-require-pty test-efficacy test-scenarios-check test-docs-links test-screenshots-check \
+test: test-verify test-node-toolchain test-go-toolchain test-go test-frontend test-hooks test-pre-push test-tmpdir-guard test-install-hooks test-golangci-lint-cache test-require-pty test-efficacy test-scenarios-check test-docs-links test-screenshots-check \
       test-coverage-blocks test-mutation test-model-check
 
 test-node-toolchain:
@@ -531,3 +531,11 @@ run-config: build
 
 clean:
 	rm -rf bin/ frontend/dist/ coverage.out
+
+# Stable command shapes for Codex approvals; the child keeps the original gates.
+.PHONY: verify-install-deps verify-test-go verify-lint-go verify-check verify-efficacy verify-coverage-blocks verify-mutation test-verify
+verify-install-deps verify-test-go verify-lint-go verify-check verify-efficacy verify-coverage-blocks verify-mutation:
+	@sh scripts/verify.sh $(@:verify-%=%)
+
+test-verify:
+	sh scripts/verify_test.sh

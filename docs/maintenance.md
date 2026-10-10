@@ -20,6 +20,14 @@ its unit suites do not use `make test`. Verify those suites and `make check` whe
 pins. See [the development contract](../DEVELOPMENT.md#runtime-version-contract) for supported
 platforms, installation, direct npm behavior, and failure semantics.
 
+## Local verification scripts
+
+CI runs `make test-verify` with the sandbox-safe script suites, because its Go
+and frontend jobs do not invoke `make test`. Keep the fixed verification entry
+points and original gates aligned; their saved local base must never replace
+CI's pull-request base. User-managed approval setup and remaining capability
+limits are documented in [Codex verification](development/codex-verification.md).
+
 ## GitHub Actions Pinning
 
 - Pin GitHub Actions to full commit SHAs, not floating tags such as `@v4` or `@v5`.

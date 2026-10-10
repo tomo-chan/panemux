@@ -14,3 +14,7 @@ test-results/
 
 .cache/runtimes/
 .cache/golangci-lint/
+
+.cache/verify/
+.cache/go-build/
+.cache/npm/
