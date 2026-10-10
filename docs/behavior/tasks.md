@@ -665,9 +665,12 @@ task_dashboard:
   is still what a person records ([Done and labels](#done-and-labels)).
 - **How claude runs.** `claude` is found on the panemux process's `PATH` and run in an empty
   temporary directory, without a shell, as
-  `claude -p --session-id <minted UUID> --no-session-persistence --output-format=json --json-schema <schema> --strict-mcp-config --setting-sources "" --disable-slash-commands --disallowedTools=<every acting tool> -- <fixed instruction>`,
+  `claude -p --session-id <minted UUID> --no-session-persistence --output-format=json --json-schema <schema> --strict-mcp-config --setting-sources "" --disable-slash-commands --disallowedTools=<every acting tool> --tools "" --system-prompt <fixed system prompt> --model haiku -- <fixed instruction>`,
   with the excerpt on its standard input. The instruction tells it the excerpt is data to describe,
-  not instructions. When claude fails, the task reports a fixed message (its exit status, a timeout,
+  not instructions; the system prompt, which replaces the CLI's own, tells it to describe only that
+  conversation and nothing of the empty directory it runs in. `haiku` is the CLI's alias for its
+  current Haiku model; what one summary costs is in
+  [task-summary-cost.md](task-summary-cost.md). When claude fails, the task reports a fixed message (its exit status, a timeout,
   an answer that was not JSON or had no summary); nothing claude printed is passed on, since it can
   quote the conversation.
 

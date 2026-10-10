@@ -95,6 +95,7 @@ distribution. Per-surface behavior lives in [`docs/behavior/`](behavior/), group
 | Frontend Runtime Behavior; Pane Git and PR metadata | [frontend.md](behavior/frontend.md) |
 | Opening URLs from a Pane | [url-open.md](behavior/url-open.md) |
 | Task Dashboard; Wait signature; `GET /api/tasks`; `POST /api/tasks/hosts/{name}/reconnect`; `PUT /api/tasks/records`; `POST /api/tasks`; `POST /api/tasks/resume`; `POST /api/tasks/summary` | [tasks.md](behavior/tasks.md) |
+| Task summaries: what they cost (measurements) | [task-summary-cost.md](behavior/task-summary-cost.md) |
 | Task Events; `GET /ws/tasks/events` | [task-events.md](behavior/task-events.md) (Japanese: [task-events.ja.md](behavior/task-events.ja.md)) |
 
 ## Operational Assumptions
