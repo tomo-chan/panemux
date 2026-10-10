@@ -1027,6 +1027,49 @@ Chosen while it was built:
   stopped or `unknown` task ask again (decided with the operator). Always enabling the button, with a
   tooltip saying nothing happens until the log changes, was the alternative.
 
+### Summaries kept across restarts and reused by their input (2026-10-10, issue #352)
+
+Summaries were kept in memory only (stage 3), so a restart lost every one and the next poll paid for
+them again, and a summary was reused only while the log kept its modification time and size — a tool
+result appended to the log, which the excerpt leaves out, made the same excerpt go to the agent again.
+Parent issue #321 agreed, before implementation, to save them and to reuse them by what is actually
+sent:
+
+- **Summaries are saved in `~/.config/panemux/task-summaries.json`**, a file of their own beside
+  `tasks.json`, written the same way (`fileops.AtomicWrite`, 0600, a format version, a symlink written
+  through). Only what a card shows and what decides whether it is current are saved — the answer,
+  when it was made, the excerpt's SHA-256 and the log version it was last found current for — never
+  the log or the excerpt. A summary still running, a failure and an unreadable log are not saved.
+  Rejected: adding them to `tasks.json`, which holds what a person recorded and refuses to be
+  written while it cannot be read; a cache's failure should not block that file, nor the reverse.
+- **A summary is reused when the hash of the excerpt it would send is the one the answer was made
+  from.** The hash covers the excerpt, the agent and the summarizer's version (the instruction, the
+  schema and `summaryPipelineVersion`, raised by hand when the excerpt or the CLI's arguments change),
+  so an answer made by another version is never current. The log is still read again only when its
+  version changes, and only where a summary would have been made — a `wait` or `idle` task on the
+  poll, any task when asked — so a `busy` task keeps its last summary marked outdated, as before.
+  Rejected: comparing the excerpt itself (it would have to be saved) and reading the log of every
+  listed task at every change (a host round trip per busy task per poll).
+- **A restart restores and asks nothing.** A restored answer whose log has not changed is current;
+  one whose log changed is outdated and follows the usual conditions.
+- **Kept 30 days after the task was last listed, 1000 at most** (the operator chose 1000), the least
+  recently listed dropped first; a host removed from `ssh_connections` loses its summaries. A task
+  that leaves the list no longer takes its summary with it: a task listed again — a log just past the
+  7-day window, a host that was briefly down — would otherwise be paid for again. When a task was
+  last listed is saved at most once a day per summary, so the 10-second poll does not rewrite the file.
+- **A file that cannot be used is moved aside and saving starts again at once** (decided with the
+  operator). Not JSON, another format version, or an entry this build would not have written is
+  renamed to `task-summaries.json.bad-<UTC time>`, unchanged, and logged. Parent issue #321 had
+  proposed refusing an unknown version without overwriting it, as `tasks.json` does; the operator
+  chose not to leave summaries unsaved until someone repairs the file, since everything in it can be
+  made again — and moving it aside still overwrites nothing. Only a file that cannot be read or moved
+  stops saving, which the dashboard then reports. Rejected: stopping saves until the operator moves
+  the file (how long that takes is up to the operator noticing), and moving aside only a broken file
+  while refusing an unknown version (the operator preferred one rule).
+- **With summaries off the file is neither read nor written**, and is left as it is (decided with the
+  operator); turning them on again restores it. Rejected: deleting it when they are off, which would
+  pay for every summary again.
+
 ## Agent Board
 
 ### Compatibility is checked against a real agmsg release (2026-08-23, PR #176)

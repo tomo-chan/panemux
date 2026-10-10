@@ -630,8 +630,8 @@ task_dashboard:
 - **Where Claude text goes.** That text is sent to `claude -p` on the panemux host, so a remote host's
   conversation goes to the Claude account signed in on the panemux host, not the remote host's. It is
   not masked: a secret typed into the conversation, or quoted in a reply, is sent with it. Tool output
-  — where file contents and command output sit — is not. Summaries are kept in panemux's memory only
-  and are gone when it restarts.
+  — where file contents and command output sit — is not. The answers are saved on the panemux host
+  ([Saved summaries](#saved-summaries)); the conversation and the excerpt are not.
 - **A log that cannot be read.** When no line of a log has the supported conversation shape, the task's summary is
   `unreadable` and nothing is sent to its agent; the raw log is never sent instead. An agent release
   that changes the log's format shows up this way rather than as a wrong summary. Asking again reads
@@ -646,13 +646,19 @@ task_dashboard:
   - A stopped or `unknown` task is summarized when it is selected on the dashboard and has no
     current summary.
   - `Summarize` / `Summarize again` in the detail panel asks for any task that can have one.
-  - A summary is cached separately by host, agent and session and reused while its log keeps the same modification time, size and (for Codex) rollout name, so the 10-second
-    poll does not summarize again. A failed summary is not retried by the poll for the same log; the
-    button retries it.
+  - A summary is kept separately by host, agent and session and reused while its log keeps the same
+    modification time, size and (for Codex) rollout name, so the 10-second poll does not summarize
+    again. When the log changes, a summary that is due by the rules above reads the log again, and
+    when the excerpt it would send — with the agent and the summarizer's version — hashes to the one
+    the summary was made from, that summary is current again and the agent is not asked: a tool
+    result appended to the log changes nothing the agent would be given. A summary made by another
+    version of the summarizer (its instruction, schema or excerpt rules) is shown but never current.
+    A failed summary is not retried by the poll for the same log; the button retries it.
   - At most two summaries run at once, across hosts. Reading a log is limited to 15 seconds and one
     agent CLI run to 2 minutes.
-  - A task that leaves the list takes its summary with it, and so does a host removed from
-    `ssh_connections`. A host whose collection failed keeps what it had.
+  - A task that leaves the list keeps its summary, which comes back if it is listed again. A summary
+    is dropped 30 days after its task was last listed, and beyond 1000 summaries the least recently
+    listed go first. A host removed from `ssh_connections` takes its summaries with it.
 - **The answer.** A summary of one or two sentences (at most 1 KiB) and the remaining work, most
   immediate first (at most 10 items of 300 bytes), in the language of the conversation. A current,
   ready summary with nothing remaining makes the task a **done candidate**; that is only shown — done
@@ -664,6 +670,31 @@ task_dashboard:
   not instructions. When claude fails, the task reports a fixed message (its exit status, a timeout,
   an answer that was not JSON or had no summary); nothing claude printed is passed on, since it can
   quote the conversation.
+
+#### Saved summaries
+
+Summaries are saved in `~/.config/panemux/task-summaries.json` on the panemux host (mode `0600`,
+replaced atomically, a symlink written through), so a restart shows them again without reading a log
+or asking an agent.
+
+- **What is saved.** For each summary: its host, agent and session ID, the text, the remaining work
+  and when it was made, when its task was last listed (saved at most once a day), the SHA-256 of the
+  excerpt it was made from with the summarizer's version, and the log's modification time, size and
+  Codex rollout name it was last found current for. Never the log or the excerpt. A summary still
+  running, a failure and an unreadable log are not saved, so a restart shows neither `pending` nor
+  `error`: a task summarizing when panemux stopped shows the summary before it.
+- **After a restart.** A saved summary whose log is unchanged is current; one whose log changed is
+  outdated and is made again, or found current by its hash, under the usual rules.
+- **When summaries are off** the file is neither read nor written, and is left as it is.
+- **A file that cannot be used** — not JSON, a format version other than `1`, or an entry panemux would
+  not have written — is renamed to `task-summaries.json.bad-<UTC time>`, unchanged, the server log says
+  so, and saving starts again from an empty file. Edits made to the file while panemux runs are
+  overwritten by its next save.
+- **A file that cannot be read or moved aside** is not written over. Summaries are made and shown from
+  memory, the server log says why once, and `GET /api/tasks` reports it in `summaries_error`, which
+  the dashboard shows above the task list. The file is tried again at the next poll.
+- **A save that fails** keeps the summaries in memory, is logged and reported in `summaries_error`
+  until a save succeeds.
 
 #### Codex summaries
 
@@ -896,6 +927,8 @@ Collects from every host and returns:
 - Within `git`, every field is omitted when empty. `issues[].repo` is the issue's `owner/name`,
   which can differ from the pull request's repository.
 - `done` and `labels` are the task's record, omitted when it is not done or has no labels.
+- `summaries_error` is why summaries are not being saved ([Saved summaries](#saved-summaries)); they
+  are still made and shown. It is present only while summaries are enabled and saving fails.
 - `summaries_enabled` is `task_dashboard.summary.enabled`. `summary` is present only while it is
   true, and only for a task that has been summarized or is being summarized
   ([Summaries](#summaries)). Its `state` is `pending` (a summary is running or waiting to run),

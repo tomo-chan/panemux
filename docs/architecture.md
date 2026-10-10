@@ -31,7 +31,7 @@ layout rendering, terminal emulation, interaction state, and presentation.
 | `main.go` and root helpers | Parse options, load config, construct dependencies, start sessions and optional subsystems, serve, and shut down. |
 | `internal/config` | Load, normalize, validate, and persist YAML. `Data` is the serializable domain model; `Config` adds file and lookup context. |
 | `internal/session` | Provide one lifecycle interface for local PTY, SSH, local tmux, and tmux-over-SSH sessions. Optional capability interfaces expose CWD, Git context, port forwarding, and Agent Board operations only where supported. `CommandConn` is an SSH connection for short non-interactive commands, dialed with the same dialer panes use. |
-| `internal/tasks` | Collect the task dashboard's agent sessions from the panemux host and every `ssh_connections` host with one fixed script, and own one reused `CommandConn` per host; keep the done and label records in `~/.config/panemux/tasks.json` (`RecordStore`); start and resume claude and codex tasks in detached tmux sessions with one fixed launch script over the same connection (`Launch`, `Resume`), holding a new codex task's labels until its session is collected (`PendingLabels`); read a task's conversation log with a third fixed script and summarize it with its own agent CLI on the panemux host, keeping the summaries in memory (`Summaries`, `RequestSummary`). |
+| `internal/tasks` | Collect the task dashboard's agent sessions from the panemux host and every `ssh_connections` host with one fixed script, and own one reused `CommandConn` per host; keep the done and label records in `~/.config/panemux/tasks.json` (`RecordStore`); start and resume claude and codex tasks in detached tmux sessions with one fixed launch script over the same connection (`Launch`, `Resume`), holding a new codex task's labels until its session is collected (`PendingLabels`); read a task's conversation log with a third fixed script and summarize it with its own agent CLI on the panemux host, keeping the summaries in `~/.config/panemux/task-summaries.json` (`SummaryStore`) and reusing one while the excerpt it was made from is unchanged (`Summaries`, `RequestSummary`). |
 | `internal/taskevents` | Observe the running tasks on every host through `internal/tasks`'s lightweight collection while the task event stream has a subscriber, each host on its own cycle; keep what was last observed, publish each difference as an ordered event, assign unsigned waits their `wait_id`, and fan the events out to subscribers without waiting on any one of them. It decides nothing about notifications or panes. |
 | `internal/api` | Implement REST handlers and mount the route set. It is the single source of truth for API registration. |
 | `internal/ws` | Bridge session bytes and control messages to terminal WebSockets, stream command-center events, and serve the task event stream (`/ws/tasks/events`). |
@@ -69,15 +69,16 @@ layout rendering, terminal emulation, interaction state, and presentation.
   result for the behavior-defined interval.
 - The task dashboard keeps its per-host SSH connections, the labels of codex tasks started but not
   yet collected (in memory), and, on the panemux host, the done and
-  label records a person set (`~/.config/panemux/tasks.json`); everything else is read from the
-  agents' own files on every host again at each collection. The pane a task belongs to is derived in the browser from
+  label records a person set (`~/.config/panemux/tasks.json`) and, while summaries are enabled, the
+  task summaries (`~/.config/panemux/task-summaries.json`, kept 30 days after a task was last listed);
+  everything else is read from the agents' own files on every host again at each collection. The pane a task belongs to is derived in the browser from
   the current workspaces.
 - The task event stream's last observation, `epoch`, `seq` and unsigned wait IDs are in memory and
   last until the server restarts. Which waits a tab has already notified is in that tab's
   session storage; the server keeps no per-viewer state.
 - Agent Board's status/history cache is in memory. Relay cursors, bootstrap state, command-center
-  history/session state, and the task dashboard's done and label records use dedicated persisted
-  files.
+  history/session state, and the task dashboard's done and label records and summaries use dedicated
+  persisted files.
 - Structured success payloads and control frames with declared schemas are parsed through Zod.
   Terminal binary frames and some API error bodies use separate handling paths.
 
