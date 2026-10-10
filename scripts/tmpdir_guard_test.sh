@@ -138,7 +138,7 @@ for t in scripts/coverage_blocks_test.sh scripts/docs_links_check_test.sh \
 	scripts/efficacy_test.sh scripts/model_check_test.sh scripts/mutation_test.sh \
 	scripts/scenarios_check_test.sh scripts/screenshots_check_test.sh \
 	scripts/install_hooks_test.sh scripts/pre_push_check_test.sh scripts/golangci_lint_cache_test.sh scripts/require_pty_test.sh \
-	scripts/go_toolchain_test.sh scripts/node_toolchain_test.sh \
+	scripts/go_toolchain_test.sh scripts/node_toolchain_test.sh scripts/verify_test.sh \
 	frontend/screenshots/screenshots-env_test.sh .claude/hooks/hooks_test.sh; do
 	check_script "$t" yes
 	# More than one call site: fail the second call too (see the header).

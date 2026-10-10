@@ -159,6 +159,12 @@ make test-e2e
 make check
 ```
 
+### Codex verification
+
+Use the fixed `make verify-*` entry points for checkout-local logs/build caches
+and saved PR bases. See [Codex verification](docs/development/codex-verification.md)
+for first-time user approval setup, supported scope, and remaining sandbox limits.
+
 ### Claude Code sandbox
 
 The shared `.claude/settings.json` sets `sandbox.network.allowLocalBinding: true` for **macOS**
@@ -298,7 +304,7 @@ A test that genuinely should not go red without its implementation is marked `//
 - `make check` must pass before `make build`.
 - Before reporting implementation complete, `make check` must pass when run by hand, or the pull request's CI must pass. The pre-push hook no longer runs it (see [Push protection](#push-protection)).
 - There are no exceptions for frontend-only, docs-adjacent, or "small" code changes.
-- Test commands: `make test-go`, `make test-frontend`, `make test-e2e`, `make test`, `make test-hooks`, `make test-pre-push`, `make test-tmpdir-guard`, `make test-install-hooks`, `make test-golangci-lint-cache`, `make test-require-pty`, `make test-efficacy`, `make test-scenarios-check`, `make test-docs-links`, `make test-screenshots-check`, `make test-coverage-blocks`, `make test-mutation`, `make test-model-check`
+- Test commands: `make test-verify`, `make test-go`, `make test-frontend`, `make test-e2e`, `make test`, `make test-hooks`, `make test-pre-push`, `make test-tmpdir-guard`, `make test-install-hooks`, `make test-golangci-lint-cache`, `make test-require-pty`, `make test-efficacy`, `make test-scenarios-check`, `make test-docs-links`, `make test-screenshots-check`, `make test-coverage-blocks`, `make test-mutation`, `make test-model-check`
 - Ledger command: `make check-scenarios`
 - Documentation-link command: `make check-docs-links`
 - Pull-request-only gates: `make efficacy`, `COVERAGE_BLOCKS_BASE=origin/main make coverage-blocks`, and `MUTATION_BASE=origin/main make mutation` (all three fail the build — `make mutation` warned until #180's item 6 reached stage 4; see above)
@@ -410,6 +416,7 @@ Long-form testing references split out of this guide live in [`docs/development/
 - Mutation testing: [docs/development/mutation.md](docs/development/mutation.md)
 - Model checking: [docs/development/model-checking.md](docs/development/model-checking.md)
 - Red-check: [docs/development/red-check.md](docs/development/red-check.md)
+- Codex verification: [docs/development/codex-verification.md](docs/development/codex-verification.md)
 
 Enduring product and design documents:
 

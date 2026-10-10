@@ -62,6 +62,16 @@ verified cache install is locked and published atomically; damaged SDKs fail clo
 explicitly in CI, protect selection, inheritance, and bootstrap failure behavior.
 See [the runtime contract](../DEVELOPMENT.md#runtime-version-contract).
 
+### Local verification execution
+
+`make verify-*` preserves the original gate results while saving checkout-local
+logs and accepting a once-per-checkout PR base for diff gates. The wrapper never
+turns coverage reporting into evidence of a passed diff gate: its coverage entry
+requires a valid base. CI continues to use the actual PR base. See
+[Codex verification](development/codex-verification.md) for policy and capability
+limits; `make test-verify` protects logs, statuses, scope and worktree isolation
+inside `make check`.
+
 ### Gate details
 
 - Coverage thresholds stay at 80%; newly added decision-holding packages join the measured scope

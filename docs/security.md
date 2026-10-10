@@ -29,6 +29,11 @@ All session types that execute a local process use `exec.Command` with user-conf
 
 ## Development sandbox permissions
 
+Codex verification uses fixed targets and checkout-local expendable caches/logs;
+it does not install permission rules, alter managed policy, or authorize external
+operations. User approval of trusted verification code retains the scope and
+limitations in [Codex verification](development/codex-verification.md).
+
 The shared Claude Code settings grant macOS sandboxed commands local port binding and access to
 all localhost services, including services outside the sandbox. Treat unauthenticated local
 services as a potential route to actions outside the sandbox, and non-loopback listeners as

@@ -74,6 +74,7 @@ These are the checks; they do not replace reading the documents above.
 Each entry below is an index. Where a topic outgrew one file, the detail sits in a directory of the
 same name beside it, and the index's own document map routes by section name.
 
+- Codex verification and approval setup: [docs/development/codex-verification.md](docs/development/codex-verification.md)
 - Development workflow: [DEVELOPMENT.md](DEVELOPMENT.md) → [docs/development/](docs/development/)
 - Documentation index and reader routes: [docs/README.md](docs/README.md)
 - Product overview: [docs/overview.md](docs/overview.md)

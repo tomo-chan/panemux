@@ -115,7 +115,7 @@ jobs:
       # every temporary directory under $TMPDIR, stopping when one cannot be
       # made; install-hooks, golangci-lint's cache and the pty gate.
       - name: Test (sandbox-safe scripts)
-        run: make test-tmpdir-guard test-install-hooks test-golangci-lint-cache test-require-pty
+        run: make test-tmpdir-guard test-install-hooks test-golangci-lint-cache test-require-pty test-verify
 
       # The pre-push hook checks only what a push touches (issue #335), so CI is
       # where every suite `make check` holds has to run. These three had no
