@@ -81,19 +81,40 @@ developer's own agent sessions. It needs `tmux` for the tmux pane; set `PLAYWRIG
 as for `make test-e2e` when the installed Chromium is not the one Playwright expects. It is not part of
 `make check`.
 
-- The run empties `/tmp/sample-project`, `/tmp/panemux-screenshots-agmsg` and
-  `$TMPDIR/panemux-screenshots` only when they carry the `.panemux-screenshots` marker it leaves in
-  them; anything else at those paths stops the run untouched — move it away and run again. A lock
-  (`/tmp/panemux-screenshots.lock`) refuses a second run while one is in progress.
+- The run stages everything under its root, `$TMPDIR/panemux-screenshots`, which it empties when it
+  carries the `.panemux-screenshots` marker the run leaves in it, or when every entry in it is a
+  name the run creates there (`home`, `tmux`, `panemux`, `showcase.yml`, `sample-project`,
+  `panemux-screenshots-agmsg`). `/tmp/sample-project` and `/tmp/panemux-screenshots-agmsg` are
+  symbolic links into that root, so no marker sits at those fixed paths to be lost.
+  - Why markers get lost: macOS deletes old temporary files on its own. `com.apple.tmp_cleaner`
+    deletes files under `/tmp` whose access, modification and change times are all over three days
+    old, then empty directories over three days old, daily at 00:00; `com.apple.bsd.dirhelper`
+    cleans `$TMPDIR` (`/var/folders/...`) of files over three days old. The marker is never read
+    after it is written, so it can go while files read since stay.
+  - A link the run made — its target is `<...>/panemux-screenshots/<the link's own name>` — is
+    replaced, and what it pointed to is left alone.
+  - A directory an earlier version of the run left there is removed: one carrying the marker, or one
+    holding nothing but empty directories (what remains when its files, marker included, are
+    deleted and the directories kept; it is removed with `rmdir`, which removes nothing else).
+  - Anything else at those paths — a directory with any file or link in it, a file, a link to
+    anywhere else — stops the run untouched: move it away and run again.
+  - The links and the root are left in place after the run; the next run replaces them.
+  - A lock (`/tmp/panemux-screenshots.lock`) refuses a second run while one is in progress. A lock
+    whose process is gone, or whose `pid` file is missing, is taken over.
+  - The panes' prompt shows `/tmp/sample-project`, not where the link leads: the run `cd`s through
+    the link, panemux and the panes' bash inherit that `PWD`, and bash shows `PWD` while it names
+    the directory bash is in.
 - The tmux server the run starts is stopped by the capture's teardown
   (`frontend/screenshots/global-teardown.ts`), so nothing the run started outlives it.
 - On macOS the panes' `/bin/bash` would announce that the default shell is now zsh; the run sets
   `BASH_SILENCE_DEPRECATION_WARNING=1` so the images read the same on every OS. The private tmux socket
   lives under `$TMPDIR/panemux-screenshots/tmux`, and a socket path is limited to 104 bytes on macOS
-  (108 on Linux), counting the terminating NUL: macOS's default per-user `$TMPDIR` fits, but one longer
-  than about 60 characters does not. The run checks this before staging anything
-  (`tmux_socket_path_check` in `frontend/e2e/tmux-env.sh`, which the task-dashboard E2E fixture runs
-  too) and stops, saying so — set a shorter `TMPDIR`, such as `TMPDIR=/tmp`, for it.
+  (108 on Linux), counting the terminating NUL. tmux binds the socket under the directory's resolved
+  path, and macOS's `/tmp` and `/var/folders` are links into `/private`, so the length counts there:
+  macOS's default per-user `$TMPDIR` (about 57 bytes resolved) fits, but one much longer does not.
+  The run checks this before staging anything (`tmux_socket_path_check` in
+  `frontend/e2e/tmux-env.sh`, which the task-dashboard E2E fixture runs too) and stops, saying so —
+  set a shorter `TMPDIR`, such as `TMPDIR=/tmp`, for it.
 - `make screenshots` needs a pseudo-terminal and tmux, which the Claude Code sandbox denies: run it
   outside the sandbox. Its fixed paths (`/tmp/sample-project`, the agmsg store and the lock) stay
   where they are for the same reason, and `/tmp/sample-project` is the path the images show.
@@ -106,7 +127,11 @@ as for `make test-e2e` when the installed Chromium is not the one Playwright exp
   including sessions started or resumed through the dashboard. Playwright sends `SIGTERM` to this
   fixture so its cleanup trap runs. It never uses the caller's server.
 - `make test-screenshots-check` tests both fixtures' tmux isolation and these staging helpers
-  (`frontend/screenshots/screenshots-env.sh`).
+  (`frontend/screenshots/screenshots-env.sh`). Its tmux sockets sit deeper than either fixture's, so
+  it makes their directory with `tmux_short_dir`: under `$TMPDIR` when the socket fits there (inside
+  the Claude Code sandbox, where `/tmp` is not writable), otherwise under `/tmp` (outside the sandbox
+  on macOS, whose per-user `$TMPDIR` leaves no room). Where neither fits it fails, naming the path,
+  rather than with tmux's `File name too long` — in CI as everywhere else.
 
 - Any change that alters what those images show must retake them in the same change: run
   `make screenshots`, look at every image it rewrote, and commit them. This covers changes to the
