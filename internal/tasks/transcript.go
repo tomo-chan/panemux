@@ -296,8 +296,11 @@ func formatMessage(message logMessage, limit int) string {
 	return "[" + message.Role + "] " + truncateUTF8(message.Text, limit) + "\n\n"
 }
 
+// truncationMark marks where truncateUTF8 cut a string.
+const truncationMark = "…"
+
 // truncateUTF8 cuts s to at most limit bytes, on a character boundary, and
-// marks the cut with an ellipsis.
+// marks the cut with truncationMark, which it adds past the limit.
 func truncateUTF8(s string, limit int) string {
 	if len(s) <= limit {
 		return s
@@ -306,5 +309,5 @@ func truncateUTF8(s string, limit int) string {
 	for cut > 0 && !utf8.RuneStart(s[cut]) {
 		cut--
 	}
-	return s[:cut] + "…"
+	return s[:cut] + truncationMark
 }

@@ -660,7 +660,7 @@ task_dashboard:
     is dropped 30 days after its task was last listed, and beyond 1000 summaries the least recently
     listed go first. A host removed from `ssh_connections` takes its summaries with it.
 - **The answer.** A summary of one or two sentences (at most 1 KiB) and the remaining work, most
-  immediate first (at most 10 items of 300 bytes), in the language of the conversation. A current,
+  immediate first (at most 10 items of 300 bytes; a longer one is cut there and ends in `…`), in the language of the conversation. A current,
   ready summary with nothing remaining makes the task a **done candidate**; that is only shown — done
   is still what a person records ([Done and labels](#done-and-labels)).
 - **How claude runs.** `claude` is found on the panemux process's `PATH` and run in an empty
@@ -687,14 +687,16 @@ or asking an agent.
   outdated and is made again, or found current by its hash, under the usual rules.
 - **When summaries are off** the file is neither read nor written, and is left as it is.
 - **A file that cannot be used** — not JSON, a format version other than `1`, or an entry panemux would
-  not have written — is renamed to `task-summaries.json.bad-<UTC time>`, unchanged, the server log says
-  so, and saving starts again from an empty file. Edits made to the file while panemux runs are
+  not have written, such as an empty summary — is renamed to `task-summaries.json.bad-<UTC time>`
+  (with `-1`, `-2`, … added when an earlier file moved aside in the same second holds that name),
+  unchanged, the server log says so, and saving starts again from an empty file. Edits made to the file while panemux runs are
   overwritten by its next save.
 - **A file that cannot be read or moved aside** is not written over. Summaries are made and shown from
   memory, the server log says why once, and `GET /api/tasks` reports it in `summaries_error`, which
   the dashboard shows above the task list. The file is tried again at the next poll.
 - **A save that fails** keeps the summaries in memory, is logged and reported in `summaries_error`
-  until a save succeeds.
+  until a later save succeeds. A save of an older set that finishes after it is dropped, so the file
+  never goes back to lacking the newer summaries while reporting itself healthy.
 
 #### Codex summaries
 

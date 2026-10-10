@@ -101,6 +101,13 @@ func (s storedSummary) key() summaryKey {
 	return summaryKey{host: s.Host, agent: s.Agent, sessionID: s.SessionID}
 }
 
+// maxStoredTextBytes and maxStoredItemBytes are the longest text and
+// remaining item a summary can hold: truncateUTF8 adds its mark past the limit.
+const (
+	maxStoredTextBytes = maxSummaryTextBytes + len(truncationMark)
+	maxStoredItemBytes = maxSummaryItemBytes + len(truncationMark)
+)
+
 func (s storedSummary) validate() error {
 	switch {
 	case !recordAgents[s.Agent]:
@@ -109,11 +116,16 @@ func (s storedSummary) validate() error {
 		return fmt.Errorf("invalid session ID %q", s.SessionID)
 	case !validInputHash.MatchString(s.InputHash):
 		return errors.New("invalid input hash")
-	case len(s.Text) > maxSummaryTextBytes || len(s.Remaining) > maxSummaryRemaining:
+	case strings.TrimSpace(s.Text) == "":
+		return errors.New("empty summary")
+	case len(s.Text) > maxStoredTextBytes || len(s.Remaining) > maxSummaryRemaining:
 		return errors.New("summary longer than a summary can be")
 	}
 	for _, item := range s.Remaining {
-		if len(item) > maxSummaryItemBytes {
+		switch {
+		case strings.TrimSpace(item) == "":
+			return errors.New("empty remaining item")
+		case len(item) > maxStoredItemBytes:
 			return errors.New("remaining item longer than one can be")
 		}
 	}
@@ -132,11 +144,12 @@ type summaryStoreFile struct {
 type SummaryStore struct {
 	err  error
 	path string
-	// written is the generation of the last set saved; an older one that
-	// arrives later is dropped.
-	written uint64
-	loaded  bool
-	mu      sync.Mutex
+	// attempted is the generation of the last set a save was tried for,
+	// whether or not it was written; an older one that arrives later is
+	// dropped, so it cannot replace a newer set or clear the newer one's error.
+	attempted uint64
+	loaded    bool
+	mu        sync.Mutex
 }
 
 // NewSummaryStore returns a store for the file at path, or for
@@ -183,14 +196,27 @@ func (s *SummaryStore) load(now time.Time) (entries []storedSummary, moved strin
 	}
 	entries, problem := parseSummaryStoreFile(data)
 	if problem != nil {
-		moved = s.path + summaryStoreBadSuffix + now.UTC().Format(summaryStoreBadTime)
-		if err := os.Rename(s.path, moved); err != nil {
+		if moved, err = moveAside(s.path, s.path+summaryStoreBadSuffix+now.UTC().Format(summaryStoreBadTime)); err != nil {
 			return nil, "", fmt.Errorf("moving aside task summary file (%v): %w", problem, err)
 		}
 		entries = nil
 	}
 	s.loaded = true
 	return entries, moved, nil
+}
+
+// moveAside renames path to base, or to base-1, base-2, ... when an earlier
+// file moved aside in the same second holds that name, and returns the name
+// used. A name it cannot check is tried, and the rename reports why not.
+func moveAside(path, base string) (string, error) {
+	target := base
+	for n := 1; ; n++ {
+		if _, err := os.Lstat(target); err != nil {
+			break
+		}
+		target = fmt.Sprintf("%s-%d", base, n)
+	}
+	return target, os.Rename(path, target)
 }
 
 func parseSummaryStoreFile(data []byte) ([]storedSummary, error) {
@@ -222,9 +248,10 @@ func (s *SummaryStore) save(gen uint64, entries []storedSummary) error {
 	if !s.loaded {
 		return errors.New("task summary file not loaded; not saving over it")
 	}
-	if gen < s.written {
+	if gen < s.attempted {
 		return nil
 	}
+	s.attempted = gen
 	file := summaryStoreFile{Version: summaryStoreFileVersion, Summaries: slices.Clone(entries)}
 	if file.Summaries == nil {
 		file.Summaries = []storedSummary{}
@@ -247,6 +274,6 @@ func (s *SummaryStore) save(gen uint64, entries []storedSummary) error {
 		s.err = err
 		return err
 	}
-	s.written, s.err = gen, nil
+	s.err = nil
 	return nil
 }

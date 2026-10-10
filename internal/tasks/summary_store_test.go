@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -118,11 +119,16 @@ func TestSummaryStore_MovesAsideAFileItCannotUse(t *testing.T) {
 		"bad session ID": entry(func(e *storedSummary) { e.SessionID = "../x" }),
 		"codex non-UUID": entry(func(e *storedSummary) { e.Agent = AgentCodex }),
 		"bad input hash": entry(func(e *storedSummary) { e.InputHash = "zz" }),
-		"text too long":  entry(func(e *storedSummary) { e.Text = strings.Repeat("a", maxSummaryTextBytes+1) }),
-		"too many items": entry(func(e *storedSummary) { e.Remaining = make([]string, maxSummaryRemaining+1) }),
-		"item too long": entry(func(e *storedSummary) {
-			e.Remaining = []string{strings.Repeat("a", maxSummaryItemBytes+1)}
+		"text too long": entry(func(e *storedSummary) {
+			e.Text = strings.Repeat("a", maxSummaryTextBytes+len(truncationMark)+1)
 		}),
+		"empty text":     entry(func(e *storedSummary) { e.Text = "" }),
+		"blank text":     entry(func(e *storedSummary) { e.Text = " \n\t" }),
+		"too many items": entry(func(e *storedSummary) { e.Remaining = slices.Repeat([]string{"x"}, maxSummaryRemaining+1) }),
+		"item too long": entry(func(e *storedSummary) {
+			e.Remaining = []string{strings.Repeat("a", maxSummaryItemBytes+len(truncationMark)+1)}
+		}),
+		"blank item":      entry(func(e *storedSummary) { e.Remaining = []string{"ok", "  "} }),
 		"duplicate entry": string(duplicate),
 	}
 	for name, content := range cases {
@@ -146,6 +152,76 @@ func TestSummaryStore_MovesAsideAFileItCannotUse(t *testing.T) {
 			assert.Equal(t, []storedSummary{valid}, loaded)
 		})
 	}
+}
+
+// A summary cut at its limit carries the cut's mark past the limit, and the
+// file keeps it: loading it again neither moves the file aside nor drops it.
+func TestSummaryStore_KeepsASummaryCutAtItsLimit(t *testing.T) {
+	out, err := json.Marshal(map[string]any{"structured_output": map[string]any{
+		"summary":   strings.Repeat("a", maxSummaryTextBytes+50),
+		"remaining": slices.Repeat([]string{strings.Repeat("b", maxSummaryItemBytes+50)}, maxSummaryRemaining),
+	}})
+	require.NoError(t, err)
+	summary, err := parseSummaryOutput(out)
+	require.NoError(t, err)
+	require.Len(t, summary.Text, maxSummaryTextBytes+len(truncationMark))
+	entry := sampleStoredSummary("", AgentClaude, "s10")
+	entry.Text, entry.Remaining = summary.Text, summary.Remaining
+
+	path := filepath.Join(t.TempDir(), "task-summaries.json")
+	store := NewSummaryStore(path)
+	_, _, err = store.load(storeNow)
+	require.NoError(t, err)
+	require.NoError(t, store.save(1, []storedSummary{entry}))
+	loaded, moved, err := NewSummaryStore(path).load(storeNow)
+	require.NoError(t, err)
+	assert.Empty(t, moved)
+	assert.Equal(t, []storedSummary{entry}, loaded)
+}
+
+// Two files moved aside in the same second both survive.
+func TestSummaryStore_MovingAsideNeverReplacesAnEarlierBadFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "task-summaries.json")
+	var moved []string
+	for i, content := range []string{"{first", "{second", "{third"} {
+		writeStoreFile(t, path, content)
+		_, m, err := NewSummaryStore(path).load(storeNow)
+		require.NoError(t, err, "move %d", i)
+		moved = append(moved, m)
+	}
+	assert.Equal(t, []string{
+		path + ".bad-20261010T120000Z", path + ".bad-20261010T120000Z-1", path + ".bad-20261010T120000Z-2",
+	}, moved)
+	for i, content := range []string{"{first", "{second", "{third"} {
+		kept, err := os.ReadFile(moved[i])
+		require.NoError(t, err)
+		assert.Equal(t, content, string(kept))
+	}
+}
+
+// A save that fails does not let an older generation, arriving after it,
+// write a set that lacks the newer summaries and report saving as healthy.
+func TestSummaryStore_AnOlderSaveAfterAFailedNewerOneIsDropped(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "task-summaries.json")
+	store := NewSummaryStore(path)
+	_, _, err := store.load(storeNow)
+	require.NoError(t, err)
+
+	fileops.SetOpsForTest(t, (&fileops.Spy{WriteErr: errors.New("disk full")}).Ops())
+	require.Error(t, store.save(2, []storedSummary{sampleStoredSummary("", AgentClaude, "newer")}))
+	fileops.SetOpsForTest(t, (&fileops.Spy{}).Ops())
+	require.NoError(t, store.save(1, []storedSummary{sampleStoredSummary("", AgentClaude, "older")}))
+
+	assert.ErrorContains(t, store.Err(), "disk full", "the newest summaries are still unsaved")
+	_, err = os.Stat(path)
+	assert.ErrorIs(t, err, os.ErrNotExist, "the older set is not written")
+
+	newest := []storedSummary{sampleStoredSummary("", AgentClaude, "newest")}
+	require.NoError(t, store.save(3, newest))
+	assert.NoError(t, store.Err())
+	loaded, _, err := NewSummaryStore(path).load(storeNow)
+	require.NoError(t, err)
+	assert.Equal(t, newest, loaded)
 }
 
 // When the file cannot be moved aside, or cannot be read at all, nothing is
