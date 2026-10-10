@@ -1,6 +1,7 @@
 package session
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	_ "github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -292,10 +294,179 @@ func TestIsInteractiveAgentCommand(t *testing.T) {
 	assert.True(t, isInteractiveAgentCommand("codex"))
 	assert.True(t, isInteractiveAgentCommand("/usr/local/bin/codex --model gpt-5"))
 	assert.True(t, isInteractiveAgentCommand("claude"))
+	assert.True(t, isInteractiveAgentCommand("devin"))
+	assert.True(t, isInteractiveAgentCommand("/opt/homebrew/bin/devin"))
 	assert.False(t, isInteractiveAgentCommand("codex exec"))
 	assert.False(t, isInteractiveAgentCommand("claude -p"))
 	assert.False(t, isInteractiveAgentCommand("claude --print"))
+	assert.False(t, isInteractiveAgentCommand("devin -p"))
+	assert.False(t, isInteractiveAgentCommand("devin --print"))
 	assert.False(t, isInteractiveAgentCommand("python worker.py"))
+}
+
+func TestIsDevinCommand(t *testing.T) {
+	assert.True(t, isDevinCommand("devin"))
+	assert.True(t, isDevinCommand("/opt/homebrew/bin/devin"))
+	assert.True(t, isDevinCommand("/usr/local/bin/devin --help"))
+	assert.False(t, isDevinCommand("python"))
+	assert.False(t, isDevinCommand("codex"))
+	assert.False(t, isDevinCommand("claude"))
+}
+
+func TestDevinSessionCWD_DBNotFoundReturnsEmpty(t *testing.T) {
+	processes := []processInfo{{PID: 100, PPID: 1, Command: "devin"}}
+	tmpDir := t.TempDir()
+	devinDir := filepath.Join(tmpDir, ".local", "share", "devin", "cli")
+	require.NoError(t, os.MkdirAll(devinDir, 0755))
+
+	homedir.SetForTest(t, tmpDir)
+
+	cwd, err := devinSessionCWD(processes, 100)
+	require.NoError(t, err)
+	assert.Empty(t, cwd)
+}
+
+func TestDevinSessionCWD_WithValidDB(t *testing.T) {
+	processes := []processInfo{{PID: 100, PPID: 1, Command: "devin"}}
+	tmpDir := t.TempDir()
+	devinDir := filepath.Join(tmpDir, ".local", "share", "devin", "cli")
+	require.NoError(t, os.MkdirAll(devinDir, 0755))
+	dbPath := filepath.Join(devinDir, "sessions.db")
+
+	// Create a mock SQLite database with the expected schema
+	db, err := sql.Open("sqlite3", dbPath)
+	require.NoError(t, err)
+	defer db.Close()
+
+	// Create the sessions table
+	_, err = db.Exec(`
+		CREATE TABLE sessions (
+			id TEXT PRIMARY KEY,
+			working_directory TEXT NOT NULL,
+			backend_type TEXT NOT NULL,
+			model TEXT NOT NULL,
+			agent_mode TEXT NOT NULL,
+			created_at INTEGER NOT NULL,
+			last_activity_at INTEGER NOT NULL,
+			title TEXT,
+			main_chain_id INTEGER,
+			shell_last_seen_index INTEGER DEFAULT 0,
+			cogs_json TEXT,
+			workspace_dirs TEXT,
+			hidden INTEGER NOT NULL DEFAULT 0,
+			metadata TEXT
+		)
+	`)
+	require.NoError(t, err)
+
+	// Insert a test session
+	expectedCWD := "/tmp/test-worktree"
+	_, err = db.Exec(`
+		INSERT INTO sessions (id, working_directory, backend_type, model, agent_mode, created_at, last_activity_at, hidden)
+		VALUES ('test-session-id', ?, 'openai', 'gpt-4', 'agent', 1234567890, 1234567900, 0)
+	`, expectedCWD)
+	require.NoError(t, err)
+
+	homedir.SetForTest(t, tmpDir)
+
+	cwd, err := devinSessionCWD(processes, 100)
+	require.NoError(t, err)
+	assert.Equal(t, expectedCWD, cwd)
+}
+
+func TestDevinSessionCWD_WithHiddenSession(t *testing.T) {
+	processes := []processInfo{{PID: 100, PPID: 1, Command: "devin"}}
+	tmpDir := t.TempDir()
+	devinDir := filepath.Join(tmpDir, ".local", "share", "devin", "cli")
+	require.NoError(t, os.MkdirAll(devinDir, 0755))
+	dbPath := filepath.Join(devinDir, "sessions.db")
+
+	// Create a mock SQLite database
+	db, err := sql.Open("sqlite3", dbPath)
+	require.NoError(t, err)
+	defer db.Close()
+
+	// Create the sessions table
+	_, err = db.Exec(`
+		CREATE TABLE sessions (
+			id TEXT PRIMARY KEY,
+			working_directory TEXT NOT NULL,
+			backend_type TEXT NOT NULL,
+			model TEXT NOT NULL,
+			agent_mode TEXT NOT NULL,
+			created_at INTEGER NOT NULL,
+			last_activity_at INTEGER NOT NULL,
+			title TEXT,
+			main_chain_id INTEGER,
+			shell_last_seen_index INTEGER DEFAULT 0,
+			cogs_json TEXT,
+			workspace_dirs TEXT,
+			hidden INTEGER NOT NULL DEFAULT 0,
+			metadata TEXT
+		)
+	`)
+	require.NoError(t, err)
+
+	// Insert a hidden session only
+	_, err = db.Exec(`
+		INSERT INTO sessions (id, working_directory, backend_type, model, agent_mode, created_at, last_activity_at, hidden)
+		VALUES ('hidden-session-id', '/tmp/hidden-worktree', 'openai', 'gpt-4', 'agent', 1234567890, 1234567900, 1)
+	`)
+	require.NoError(t, err)
+
+	homedir.SetForTest(t, tmpDir)
+
+	cwd, err := devinSessionCWD(processes, 100)
+	require.NoError(t, err)
+	assert.Empty(t, cwd) // Should return empty since only hidden session exists
+}
+
+func TestInteractiveAgentSessionCWDs_WithDevin(t *testing.T) {
+	processes := []processInfo{{PID: 100, PPID: 1, Command: "devin"}}
+	tmpDir := t.TempDir()
+	devinDir := filepath.Join(tmpDir, ".local", "share", "devin", "cli")
+	require.NoError(t, os.MkdirAll(devinDir, 0755))
+	dbPath := filepath.Join(devinDir, "sessions.db")
+
+	// Create a mock SQLite database
+	db, err := sql.Open("sqlite3", dbPath)
+	require.NoError(t, err)
+	defer db.Close()
+
+	// Create the sessions table
+	_, err = db.Exec(`
+		CREATE TABLE sessions (
+			id TEXT PRIMARY KEY,
+			working_directory TEXT NOT NULL,
+			backend_type TEXT NOT NULL,
+			model TEXT NOT NULL,
+			agent_mode TEXT NOT NULL,
+			created_at INTEGER NOT NULL,
+			last_activity_at INTEGER NOT NULL,
+			title TEXT,
+			main_chain_id INTEGER,
+			shell_last_seen_index INTEGER DEFAULT 0,
+			cogs_json TEXT,
+			workspace_dirs TEXT,
+			hidden INTEGER NOT NULL DEFAULT 0,
+			metadata TEXT
+		)
+	`)
+	require.NoError(t, err)
+
+	// Insert a test session
+	expectedCWD := "/tmp/devin-worktree"
+	_, err = db.Exec(`
+		INSERT INTO sessions (id, working_directory, backend_type, model, agent_mode, created_at, last_activity_at, hidden)
+		VALUES ('test-session-id', ?, 'openai', 'gpt-4', 'agent', 1234567890, 1234567900, 0)
+	`, expectedCWD)
+	require.NoError(t, err)
+
+	homedir.SetForTest(t, tmpDir)
+
+	cwds, err := interactiveAgentSessionCWDs(processes, 100)
+	require.NoError(t, err)
+	assert.Equal(t, []string{expectedCWD}, cwds)
 }
 
 func TestDetectAgmsgAgentType(t *testing.T) {
