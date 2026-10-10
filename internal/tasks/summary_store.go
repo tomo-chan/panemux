@@ -215,7 +215,10 @@ func moveAside(path, base string) (string, error) {
 	target := base
 	for n := 1; n <= summaryStoreBadLimit; n++ {
 		if _, err := os.Lstat(target); err != nil {
-			return target, os.Rename(path, target)
+			if err := os.Rename(path, target); err != nil {
+				return "", fmt.Errorf("renaming to %s: %w", target, err)
+			}
+			return target, nil
 		}
 		target = fmt.Sprintf("%s-%d", base, n)
 	}
@@ -251,7 +254,7 @@ func (s *SummaryStore) save(gen uint64, entries []storedSummary) error {
 	if !s.loaded {
 		return errors.New("task summary file not loaded; not saving over it")
 	}
-	//mutation:exempt[CONDITIONALS_BOUNDARY] unreachable — summarySaveLocked raises the generation for every save, so no generation is saved twice
+	//mutation:exempt[CONDITIONALS_BOUNDARY] unreachable — each save gets a new, higher generation
 	if gen < s.attempted {
 		return nil
 	}
