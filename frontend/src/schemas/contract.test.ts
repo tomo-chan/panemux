@@ -406,6 +406,8 @@ const unexercisedOptionals: Record<string, string> = {
   'tasks.tasks[].summary.error': 'needs a summary that fails, which would leave the ready one out of the capture',
   'task-summary.outdated': 'needs a log that changes after its summary was made',
   'task-summary.error': 'needs a summary that fails',
+  'tasks.tasks[].summary.unexpected_model': 'needs a summary made by a model other than Haiku',
+  'task-summary.unexpected_model': 'needs a summary made by a model other than Haiku',
   // The capture asks for the task whose summary has work remaining, which
   // is the shape that pins remaining; the tasks capture pins done_candidate.
   'task-summary.done_candidate': 'the captured summary has work remaining; tasks pins done_candidate',
