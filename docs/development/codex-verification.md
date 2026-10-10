@@ -146,20 +146,27 @@ uses TMPDIR for its build cache, config staging and build lock without forcing
 `/tmp`; these are separate from the socket length calculation.
 
 The short-path requirement concerns tmux sockets, not all temporary files.
-`frontend/e2e/tmux-env.sh` computes `<root>/tmux-<uid>/default` and checks the
-OS limit (103 usable bytes on macOS, 107 on Linux). Its E2E root is unique under
-TMPDIR; screenshots use `$TMPDIR/panemux-screenshots/tmux`. The usual macOS
-TMPDIR fits the production fixture, but nested test isolation directories or a
-longer configured path can exceed the limit. Screenshot helper tests exercise
-root calculation separately and give the real tmux start/stop/teardown helpers
-short private fixture roots inside the original TMPDIR; ordinary temporary
-files retain their original location. For that explicit
-E2E/screenshots run only, select a shorter permitted TMPDIR before launching the
-fixture; do not apply it to unit checks. Fixed screenshot staging paths
-`/tmp/sample-project`, `/tmp/panemux-screenshots-agmsg`, and the screenshot lock
-are a separate capture contract, protected by markers and a lock. Keep issue
-#315's isolation and fail-fast behavior; no new fixed shared socket root or
-permission fallback is introduced here.
+`frontend/e2e/tmux-env.sh` checks the resolved socket path, including macOS's
+`/private` prefix behind `/tmp` and `/var/folders`, against the OS limit (103
+usable bytes on macOS, 107 on Linux). The E2E root is unique under TMPDIR;
+screenshots use `$TMPDIR/panemux-screenshots/tmux`. The usual macOS TMPDIR fits
+the production fixture, but nested test isolation directories or a longer
+configured path can exceed the limit.
+
+The screenshot helper tests already use `tmux_short_dir` (issue #343 / PR #351):
+it tries a unique socket directory under TMPDIR, then under `/tmp` only if that
+candidate is writable and fits, and fails when neither fits. The rest of the
+tests' temporary files stay under the original TMPDIR. Reuse this helper;
+do not prepend `TMPDIR=/tmp` to the whole unit check. A production E2E/screenshots
+run with a custom long TMPDIR still needs a shorter permitted TMPDIR chosen
+before launching that fixture. Its path check happens before staging.
+
+Fixed screenshot paths `/tmp/sample-project` and `/tmp/panemux-screenshots-agmsg`
+are links into the capture's own root; the screenshot lock is separate. Their
+ownership checks and cleanup rules live in
+[documentation screenshots](../../DEVELOPMENT.md#build-and-run). Verification
+introduces no shared socket root, permission fallback, or duplicate capture
+staging implementation.
 
 ## Acceptance on a local client
 

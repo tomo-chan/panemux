@@ -43,24 +43,6 @@ trap 'rm -rf "$work" ${short:+"$short"}' EXIT
 short_err=$(tmux_short_dir /teardown/panemux-screenshots/tmux "${TMPDIR:-/tmp}" /tmp 2>&1 >"$work/short") &&
 	short=$(cat "$work/short")
 
-# Keep the production root contract separate from the stop helper tests.
-# Nested isolation directories add enough bytes to overflow macOS sockets;
-# teardown tests substitute only shot_root, and exercise the real tmux stop.
-check
-output=$(TMPDIR="$work/root with spaces" sh -c '. "$1"; shot_root' sh "$lib")
-if [ "$output" = "$work/root with spaces/panemux-screenshots" ]; then
-	pass 'shot_root uses TMPDIR and preserves spaces'
-else
-	fail 'shot_root uses TMPDIR and preserves spaces' "$output"
-fi
-check
-output=$(env -u TMPDIR sh -c '. "$1"; shot_root' sh "$lib")
-if [ "$output" = /tmp/panemux-screenshots ]; then
-	pass 'shot_root uses /tmp only when TMPDIR is unset'
-else
-	fail 'shot_root uses /tmp only when TMPDIR is unset' "$output"
-fi
-
 # ── shot_isolate_env: the developer's XDG and git configuration stay out ────
 
 # A developer configuration under XDG_CONFIG_HOME that, if read, both leaks
@@ -207,13 +189,13 @@ if [ -z "$tmux_skip" ]; then
 	fi
 
 	check
-	rundir="$short/r/tmux"
+	rundir="$short/panemux-screenshots/tmux"
 	mkdir -p "$rundir" && chmod 700 "$rundir"
 	if ! output=$(TMUX_TMPDIR="$rundir" tmux -f /dev/null new-session -d -s t 'sleep 30' 2>&1) ||
 		! TMUX_TMPDIR="$rundir" tmux has-session 2>/dev/null; then
 		fail 'shot_teardown stops the server under the run root: the server did not start' "$output"
 	else
-		sh -c '. "$1"; shot_root() { printf "%s" "$test_root"; }; test_root=$2; shot_teardown' sh "$lib" "$short/r"
+		TMPDIR="$short" sh -c '. "$1"; shot_teardown' sh "$lib"
 		if TMUX_TMPDIR="$rundir" tmux has-session 2>/dev/null; then
 			fail 'shot_teardown stops the server under the run root'
 			TMUX_TMPDIR="$rundir" tmux kill-server 2>/dev/null
@@ -236,10 +218,10 @@ if [ -z "$tmux_skip" ]; then
 	fi
 	for operation in start stop teardown; do
 		check
-		private="$short/p"
-		mkdir -p "$private/tmux/tmux-$(id -u)"
-		chmod 700 "$private/tmux/tmux-$(id -u)"
-		socket="$private/tmux/tmux-$(id -u)/default"
+		private="$short/$operation"
+		mkdir -p "$private/panemux-screenshots/tmux/tmux-$(id -u)"
+		chmod 700 "$private/panemux-screenshots/tmux/tmux-$(id -u)"
+		socket="$private/panemux-screenshots/tmux/tmux-$(id -u)/default"
 		if [ "$operation" != start ]; then
 			if ! tmux -S "$socket" -f /dev/null new-session -d -s private 'sleep 120' ||
 				! tmux -S "$socket" has-session -t '=private'; then
@@ -247,9 +229,9 @@ if [ -z "$tmux_skip" ]; then
 				continue
 			fi
 		fi
-		HOME="$work/fakehome" TMUX="$caller,1,0" TMUX_TMPDIR="$private/tmux" TMPDIR="$private" \
-			sh -c '. "$1"; shot_root() { printf "%s" "$test_root"; }; test_root=$3; case $2 in start) shot_start_tmux -s private "sleep 120";; stop) shot_stop_tmux;; teardown) shot_teardown;; esac' \
-			sh "$lib" "$operation" "$private"
+		HOME="$work/fakehome" TMUX="$caller,1,0" TMUX_TMPDIR="$private/panemux-screenshots/tmux" TMPDIR="$private" \
+			sh -c '. "$1"; case $2 in start) shot_start_tmux -s private "sleep 120";; stop) shot_stop_tmux;; teardown) shot_teardown;; esac' \
+			sh "$lib" "$operation"
 		if ! tmux -S "$caller" has-session -t '=caller' 2>/dev/null; then
 			fail "$operation preserves the caller server"
 			tmux -S "$caller" -f /dev/null new-session -d -s caller 'sleep 120'
