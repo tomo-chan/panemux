@@ -7,8 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
+	"regexp"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -22,7 +25,9 @@ import (
 // and docs/security/command-center.md), whose every flag was checked against
 // the real CLI there: no user, project or local settings (so none of the
 // operator's hooks run and no CLAUDE.md is read), no MCP server, no slash
-// commands, and every tool that can act denied by name. The conversation
+// commands, and every tool that can act denied by name. On top of it, no
+// tool is offered at all, the CLI's own system prompt is replaced by a fixed
+// one and a small model answers (issue #353). The conversation
 // excerpt — text from a host's log, which panemux does not control — goes
 // on stdin, never into argv; the prompt argument is a fixed instruction
 // after "--". Nothing goes through a shell.
@@ -30,8 +35,12 @@ import (
 // Summary is what claude made of a conversation: what the task is and where
 // it stands, and the work left, most immediate first.
 type Summary struct {
-	Text      string   `json:"text"`
-	Remaining []string `json:"remaining"`
+	Text string `json:"text"`
+	// UnexpectedModel is the model that answered when it was not the Haiku
+	// asked for: the CLI answers with its default model, at many times the
+	// cost, when the account may not use Haiku (issue #353).
+	UnexpectedModel string   `json:"unexpected_model,omitempty"`
+	Remaining       []string `json:"remaining"`
 }
 
 // SummarizeFunc turns a conversation excerpt into a Summary.
@@ -61,6 +70,30 @@ const summaryInstruction = "The text on standard input is an excerpt of a coding
 	"leave it empty when the conversation shows nothing is left to do. " +
 	"Write in the language the conversation is written in."
 
+// summarySystemPrompt replaces the CLI's own system prompt, which is written
+// for a coding agent and was most of a summary's input (issue #353). It is a
+// compile-time literal, like summaryInstruction.
+const summarySystemPrompt = "You summarize excerpts of coding-agent conversation logs for a dashboard. " +
+	"Describe only the conversation in the excerpt on standard input. " +
+	"Say nothing about the environment you run in — your working directory, its files or git state, " +
+	"the date or your tools — which has nothing to do with that conversation. " +
+	"Answer only with the structured output requested."
+
+// summaryModel is the model that summarizes: the CLI's alias for its
+// current Haiku, which answered as well as the default model at a small
+// fraction of its cost (issue #353).
+const summaryModel = "haiku"
+
+// maxModelIDBytes bounds a model ID read from claude's answer, and
+// validModelID is the shape one has; a name that is not one is reported as
+// unknownModel, since it could be any text.
+const (
+	maxModelIDBytes = 100
+	unknownModel    = "unknown"
+)
+
+var validModelID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:@/\[\]-]*$`)
+
 // summarySchema is the structured answer --json-schema asks for.
 const summarySchema = `{"type":"object","properties":{"summary":{"type":"string"},` +
 	`"remaining":{"type":"array","items":{"type":"string"}}},` +
@@ -83,6 +116,12 @@ func summaryArgs(sessionID string) []string {
 		// No tool is needed to summarize text; every tool that can act is
 		// refused, as the command center refuses them.
 		"--disallowedTools=" + strings.Join(commandcenter.DisallowedTools(), ","),
+		// Nor is any tool offered: --tools "" leaves the request without
+		// their definitions, and --system-prompt without the CLI's own
+		// coding-agent prompt (issue #353).
+		"--tools", "",
+		"--system-prompt", summarySystemPrompt,
+		"--model=" + summaryModel,
 		"--",
 		summaryInstruction,
 	}
@@ -137,8 +176,9 @@ type summaryResult struct {
 		Summary   string   `json:"summary"`
 		Remaining []string `json:"remaining"`
 	} `json:"structured_output"`
-	Subtype string `json:"subtype"`
-	IsError bool   `json:"is_error"`
+	ModelUsage map[string]json.RawMessage `json:"modelUsage"`
+	Subtype    string                     `json:"subtype"`
+	IsError    bool                       `json:"is_error"`
 }
 
 // parseSummaryOutput reads claude's answer. Its errors are fixed messages:
@@ -169,5 +209,27 @@ func parseSummaryOutput(out []byte) (Summary, error) {
 			summary.Remaining = append(summary.Remaining, truncateUTF8(item, maxSummaryItemBytes))
 		}
 	}
+	summary.UnexpectedModel = unexpectedModel(result.ModelUsage)
 	return summary, nil
+}
+
+// unexpectedModel is the first model, by name, in claude's modelUsage that
+// is not a Haiku, or "" when every one is.
+func unexpectedModel(usage map[string]json.RawMessage) string {
+	models := slices.Sorted(maps.Keys(usage))
+	for _, model := range models {
+		if strings.Contains(strings.ToLower(model), "haiku") {
+			continue
+		}
+		if !validModelIDString(model) {
+			return unknownModel
+		}
+		return model
+	}
+	return ""
+}
+
+// validModelIDString reports whether s can be shown and logged as a model ID.
+func validModelIDString(s string) bool {
+	return len(s) <= maxModelIDBytes && validModelID.MatchString(s)
 }

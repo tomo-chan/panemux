@@ -1104,6 +1104,52 @@ sent:
   operator); turning them on again restores it. Rejected: deleting it when they are off, which would
   pay for every summary again.
 
+### Summaries cost less: a fixed system prompt, no tools and Haiku (2026-10-10, issue #353)
+
+Issue #321 asked for the cost of a summary to be measured and cut further once #352 had stopped
+asking again for an unchanged excerpt. The measurements, on a synthetic conversation and update
+sequence with Claude Code 2.1.294, are in
+[behavior/task-summary-cost.md](behavior/task-summary-cost.md). The sequence made five calls before
+#352 and two after it; one call cost US$0.035–0.056 for a 3 KB excerpt and US$0.092 for the 24 KiB
+budget, and the CLI's own system prompt and tool definitions were about 3,900 of a short excerpt's
+6,400 input tokens. Stage 3's finding — the CLI's ~6k-token system prompt and the output are most of
+the cost, and Haiku cost about the same — no longer held: Haiku 5.5 cost about 2% of Opus 5.5.
+
+The operator decided, from those measurements:
+
+- **The CLI's system prompt is replaced by a fixed one, and no tool is offered** (`--system-prompt`,
+  `--tools ""`): about −40% (warm cache) to −56% (cold) on the default model, with no loss of quality seen. The denial list,
+  `--setting-sources ""`, `--strict-mcp-config` and `--disable-slash-commands` stay as they are; stage
+  3 had kept `--tools ""` out only because its effect had not been verified, and it was verified here.
+- **Haiku answers, by the CLI's `haiku` alias** (about −98 to −99% with the fixed prompt). A pinned
+  model ID was the alternative, rejected because a retired ID would make every summary fail; with the
+  alias, a newer Haiku can answer without the summarizer version changing, so summaries made by the
+  older one stay current.
+- **A summary that Haiku did not make says so** (review of PR #356). When an organization's
+  `availableModels` leaves Haiku out, the CLI answers with its default model without failing, at
+  around 30 times the cost. The summarizer reads the model names in `modelUsage` from the CLI's
+  answer, and when one is not a Haiku it logs that once per model and the detail panel names the
+  model. The summary is kept rather than failed: the call has already been paid for. Only the model
+  ID is logged or shown, and a name that is not shaped like one is reported as `unknown`.
+- **The system prompt tells claude to describe only the excerpt.** The first Haiku run with the fixed
+  prompt listed "check whether the directory is a git repository" as remaining work: the CLI still
+  tells the model about the empty directory it runs in. That sentence removed it in the next run.
+- **The system prompt and model are part of Claude's summarizer version**, not a raised
+  `summaryPipelineVersion`: Claude's saved summaries become outdated, and Codex's, whose summarizer
+  did not change, stay current.
+
+Rejected for now:
+
+- **Updating from the previous summary and the new messages** (−32% more on the default model): the
+  summary would drift over successive updates unless it were made again from the whole excerpt now
+  and then, and the saved file would have to keep more; with Haiku the saving is a fraction of a cent.
+- **Collecting updates that follow one another closely (debounce)**: in the measured sequence it saves
+  nothing, since a busy task is not summarized and an unchanged excerpt is not sent again.
+- **Smaller input or output limits**: a long conversation would lose context for a saving Haiku
+  already makes; output was a minor part of the cost.
+- **`--bare`**: it authenticates with `ANTHROPIC_API_KEY` alone rather than the operator's signed-in
+  CLI, a change of authentication the issue left out of scope.
+
 ## Agent Board
 
 ### Compatibility is checked against a real agmsg release (2026-08-23, PR #176)

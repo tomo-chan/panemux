@@ -48,16 +48,19 @@ const (
 )
 
 // summaryPipelineVersion names how an excerpt is made and summarized. Raise
-// it when a change to the excerpt, the CLI's arguments or model, or the
-// answer's handling would make an earlier summary of the same conversation
-// differ; the instruction and the schema are folded in on their own. A
+// it when a change to the excerpt, the CLI's arguments, or the answer's
+// handling would make an earlier summary of the same conversation differ;
+// the instruction and the schema, and Claude's system prompt and model, are
+// folded in on their own. A
 // summary made by another version is shown but never current.
 const summaryPipelineVersion = 1
 
 // summarizerVersion identifies agent's summarizer: what, besides the
 // excerpt, decides its answer.
 func summarizerVersion(agent string) string {
-	instruction := summaryInstruction
+	// Claude's system prompt and model decide its answer too (issue #353);
+	// they are part of its instruction here, so Codex's version is unchanged.
+	instruction := summaryInstruction + "\x00" + summarySystemPrompt + "\x00" + summaryModel
 	if agent == AgentCodex {
 		instruction = codexSummaryInstruction
 	}
@@ -87,10 +90,12 @@ type storedSummary struct {
 	Text      string    `json:"text"`
 	// InputHash is summaryInputHash of the excerpt the answer was made from,
 	// and Summarizer the summarizerVersion that made it.
-	InputHash  string    `json:"input_hash"`
-	Summarizer string    `json:"summarizer"`
-	Remaining  []string  `json:"remaining"`
-	Log        storedLog `json:"log"`
+	InputHash  string   `json:"input_hash"`
+	Summarizer string   `json:"summarizer"`
+	Remaining  []string `json:"remaining"`
+	// UnexpectedModel is Summary.UnexpectedModel.
+	UnexpectedModel string    `json:"unexpected_model,omitempty"`
+	Log             storedLog `json:"log"`
 }
 
 // storedLog is the log version the answer was last found current for.
@@ -123,6 +128,8 @@ func (s storedSummary) validate() error {
 		return errors.New("empty summary")
 	case len(s.Text) > maxStoredTextBytes || len(s.Remaining) > maxSummaryRemaining:
 		return errors.New("summary longer than a summary can be")
+	case s.UnexpectedModel != "" && !validModelIDString(s.UnexpectedModel):
+		return errors.New("invalid model")
 	}
 	for _, item := range s.Remaining {
 		switch {

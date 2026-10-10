@@ -1086,6 +1086,22 @@ describe('TaskDashboard summaries', () => {
     expect(within(workSection()).getByText('No remaining work found.')).toBeInTheDocument()
   })
 
+  it('says when a model other than Haiku made the summary, and says nothing when Haiku did', () => {
+    const data = {
+      ...summarized,
+      tasks: summarized.tasks.map((t) => (t.id === 'idle-s' && t.summary
+        ? { ...t, summary: { ...t.summary, unexpected_model: 'claude-opus-5-5' } }
+        : t)),
+    }
+    renderDashboard(tasksState({ data }))
+    selectCard('idle-s')
+    expect(within(workSection()).getByTestId('task-summary-model')).toHaveTextContent(
+      'Summarized by claude-opus-5-5, not Haiku, at many times the cost: this account may not use Haiku.',
+    )
+    selectCard('wait-s')
+    expect(within(workSection()).queryByTestId('task-summary-model')).toBeNull()
+  })
+
   it('does not call a task marked done a candidate', () => {
     const data = { ...summarized, tasks: summarized.tasks.map((t) => (t.id === 'stop-done' ? { ...t, done: true } : t)) }
     renderDashboard(tasksState({ data }))

@@ -609,3 +609,43 @@ func TestPersistedSummaries_ASummaryMadeMeanwhileIsSavedAfterItsTaskLeft(t *test
 	require.Len(t, stored, 1)
 	assert.Equal(t, "s10", stored[0].SessionID)
 }
+
+// A summary Haiku did not make says which model made it, over a restart too,
+// and the server log says so once — naming the model and nothing of the
+// conversation (issue #353).
+func TestPersistedSummaries_AModelOtherThanHaikuIsShownAndLoggedOnce(t *testing.T) {
+	f := newPersistedSummaryFixture(t)
+	f.summarizer.result.UnexpectedModel = "claude-opus-5-5"
+	f.host.set(hostCollection(100, "idle"), conversationLog("Fix the flaky test", "Found the race"))
+	first := f.start(t)
+	_, views := collectAndSummarize(first)
+	require.Equal(t, SummaryReady, views["local:claude:s10"].State)
+	assert.Equal(t, "claude-opus-5-5", views["local:claude:s10"].UnexpectedModel)
+
+	f.host.set(hostCollection(200, "idle"), conversationLog("Fix the flaky test", "Fixed the race"))
+	_, views = collectAndSummarize(first)
+	require.Equal(t, 2, f.summarizer.calls())
+	assert.Equal(t, "claude-opus-5-5", views["local:claude:s10"].UnexpectedModel)
+	first.Close()
+	first.waitSummaries()
+
+	logged := f.logged()
+	assert.Equal(t, 1, strings.Count(logged, "claude-opus-5-5"), "logged once per model: %s", logged)
+	assert.Contains(t, logged, summaryModel)
+	assert.NotContains(t, logged, "race", "the conversation is never logged")
+
+	second := f.start(t)
+	_, views = collectAndSummarize(second)
+	assert.Equal(t, "claude-opus-5-5", views["local:claude:s10"].UnexpectedModel)
+}
+
+// A summary Haiku made says nothing of its model, and nothing is logged.
+func TestPersistedSummaries_HaikusSummaryNamesNoModel(t *testing.T) {
+	f := newPersistedSummaryFixture(t)
+	f.host.set(hostCollection(100, "idle"), conversationLog("Fix the flaky test", "Found the race"))
+	svc := f.start(t)
+	_, views := collectAndSummarize(svc)
+	require.Equal(t, SummaryReady, views["local:claude:s10"].State)
+	assert.Empty(t, views["local:claude:s10"].UnexpectedModel)
+	assert.NotContains(t, f.logged(), "model")
+}

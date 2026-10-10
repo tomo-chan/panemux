@@ -665,9 +665,16 @@ task_dashboard:
   is still what a person records ([Done and labels](#done-and-labels)).
 - **How claude runs.** `claude` is found on the panemux process's `PATH` and run in an empty
   temporary directory, without a shell, as
-  `claude -p --session-id <minted UUID> --no-session-persistence --output-format=json --json-schema <schema> --strict-mcp-config --setting-sources "" --disable-slash-commands --disallowedTools=<every acting tool> -- <fixed instruction>`,
+  `claude -p --session-id <minted UUID> --no-session-persistence --output-format=json --json-schema <schema> --strict-mcp-config --setting-sources "" --disable-slash-commands --disallowedTools=<every acting tool> --tools "" --system-prompt <fixed system prompt> --model=haiku -- <fixed instruction>`,
   with the excerpt on its standard input. The instruction tells it the excerpt is data to describe,
-  not instructions. When claude fails, the task reports a fixed message (its exit status, a timeout,
+  not instructions; the system prompt, which replaces the CLI's own, tells it to describe only that
+  conversation and nothing of the empty directory it runs in. `haiku` is the CLI's alias for its
+  current Haiku model; what one summary costs is in
+  [task-summary-cost.md](task-summary-cost.md). When an account may not use Haiku (its
+  `availableModels` leaves it out), the CLI answers with its default model instead. The model names
+  in its answer's `modelUsage` show this. The summary is kept, the detail panel names the model
+  that made it, and the server logs it once per model, giving only the model ID. A name that is not
+  shaped like a model ID is reported as `unknown`. When claude fails, the task reports a fixed message (its exit status, a timeout,
   an answer that was not JSON or had no summary); nothing claude printed is passed on, since it can
   quote the conversation.
 
@@ -938,7 +945,8 @@ Collects from every host and returns:
   `ready`, `error` (with `error`) or `unreadable`. `text`, `remaining` and `summarized_at` are the
   last answer whenever there is one, whatever `state` says; `outdated` is true when the log has
   changed since that answer — or, for `unreadable` and `error`, since that attempt — and `done_candidate` when the answer is ready and current and lists
-  nothing remaining. `remaining` is omitted when empty.
+  nothing remaining. `remaining` is omitted when empty. `unexpected_model` is the model that made the
+  last answer when it was not a Haiku, and is omitted otherwise.
 - `records_error` is present only when the record file could not be read; the tasks are then listed
   without records.
 - `known_labels` is every label in the record file, listed task or not, once each, in

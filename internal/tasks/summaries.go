@@ -55,13 +55,16 @@ const (
 // Outdated means the log has changed since that answer was made — or, for
 // an unreadable log or a failure, since that attempt.
 type SummaryView struct {
-	SummarizedAt  *time.Time   `json:"summarized_at,omitempty"`
-	State         SummaryState `json:"state"`
-	Text          string       `json:"text,omitempty"`
-	Error         string       `json:"error,omitempty"`
-	Remaining     []string     `json:"remaining,omitempty"`
-	Outdated      bool         `json:"outdated,omitempty"`
-	DoneCandidate bool         `json:"done_candidate,omitempty"`
+	SummarizedAt *time.Time   `json:"summarized_at,omitempty"`
+	State        SummaryState `json:"state"`
+	Text         string       `json:"text,omitempty"`
+	Error        string       `json:"error,omitempty"`
+	// UnexpectedModel is the model that made the last answer when it was not
+	// the one asked for (Summary.UnexpectedModel).
+	UnexpectedModel string   `json:"unexpected_model,omitempty"`
+	Remaining       []string `json:"remaining,omitempty"`
+	Outdated        bool     `json:"outdated,omitempty"`
+	DoneCandidate   bool     `json:"done_candidate,omitempty"`
 }
 
 // ErrNoSummaryTask is a summary request for a session the host's last
@@ -303,8 +306,10 @@ func (s *Service) runSummary(key summaryKey, log LogVersion, reuse string) {
 		entry.summarizer = summarizerVersion(key.agent)
 		changed = true
 	}
+	warn := s.unexpectedModelWarningLocked(outcome)
 	save := s.summarySaveLocked(changed)
 	s.summaryMu.Unlock()
+	warn()
 	save()
 }
 
@@ -375,6 +380,7 @@ func (e *summaryEntry) view(current LogVersion) *SummaryView {
 		at := e.resultAt
 		v.Text = e.result.Text
 		v.Remaining = e.result.Remaining
+		v.UnexpectedModel = e.result.UnexpectedModel
 		v.SummarizedAt = &at
 		v.Outdated = e.resultLog != current
 		v.DoneCandidate = !v.Outdated && v.State == SummaryReady && len(e.result.Remaining) == 0
@@ -390,4 +396,22 @@ func (e *summaryEntry) view(current LogVersion) *SummaryView {
 // waitSummaries waits for every summary started so far. Tests use it.
 func (s *Service) waitSummaries() {
 	s.summaryWG.Wait()
+}
+
+// unexpectedModelWarningLocked returns what logs, once for each model, that
+// a new answer came from a model other than the one asked for. The line names
+// the model and nothing that claude said.
+func (s *Service) unexpectedModelWarningLocked(outcome summaryOutcome) func() {
+	model := outcome.summary.UnexpectedModel
+	if outcome.reused || outcome.unreadable || model == "" || s.warnedModels[model] {
+		return func() {}
+	}
+	if s.warnedModels == nil {
+		s.warnedModels = map[string]bool{}
+	}
+	s.warnedModels[model] = true
+	return func() {
+		s.opts.Logf("task summaries: claude answered with %s, not %s, which costs many times more; "+
+			"the account's availableModels setting may not allow %s", model, summaryModel, summaryModel)
+	}
 }

@@ -35,6 +35,15 @@ func TestSummaryArgs(t *testing.T) {
 	assertFollowedBy(t, args, "--setting-sources", "")
 	assertFollowedBy(t, args, "--session-id", summarySessionID)
 	assertFollowedBy(t, args, "--json-schema", summarySchema)
+	// Issue #353: the CLI's own system prompt is replaced, no tool is
+	// offered, and a small model answers. The flags above stay.
+	assertFollowedBy(t, args, "--system-prompt", summarySystemPrompt)
+	assertFollowedBy(t, args, "--tools", "")
+	assert.Contains(t, args, "--model=haiku")
+	// The CLI still tells the model about the empty directory it runs in;
+	// Haiku put that in a summary's remaining work until told not to.
+	assert.Contains(t, summarySystemPrompt, "Say nothing about the environment you run in")
+	assert.NotContains(t, args, "--bare", "--bare would take the CLI off the operator's login")
 
 	for _, arg := range args[:len(args)-2] {
 		assert.False(t, strings.HasPrefix(arg, "--allowedTools"), "no tool is allowed: %q", arg)
@@ -195,4 +204,45 @@ func TestClaudeSummarizer_SetupFailures(t *testing.T) {
 	require.Error(t, err, "no directory to run claude in")
 	_, statErr := os.Stat(record)
 	assert.True(t, os.IsNotExist(statErr), "claude never ran")
+}
+
+// Claude answers with its default model, and says nothing, when Haiku is not
+// among the models the account may use (issue #353): modelUsage names the
+// model that answered, and that is reported — never anything else claude said.
+func TestParseSummaryOutput_ReportsAModelOtherThanHaiku(t *testing.T) {
+	cases := map[string]struct {
+		usage string
+		want  string
+	}{
+		"no model usage":        {usage: ``, want: ""},
+		"empty model usage":     {usage: `,"modelUsage":{}`, want: ""},
+		"haiku":                 {usage: `,"modelUsage":{"claude-haiku-5-5":{"costUSD":0.001}}`, want: ""},
+		"haiku in another case": {usage: `,"modelUsage":{"Claude-HAIKU-6":{}}`, want: ""},
+		"the default model":     {usage: `,"modelUsage":{"claude-opus-5-5":{"costUSD":0.05}}`, want: "claude-opus-5-5"},
+		"haiku and another": {
+			usage: `,"modelUsage":{"claude-haiku-5-5":{},"claude-sonnet-5-5":{}}`, want: "claude-sonnet-5-5",
+		},
+		"two others, the first": {
+			usage: `,"modelUsage":{"claude-sonnet-5-5":{},"claude-opus-5-5":{}}`, want: "claude-opus-5-5",
+		},
+		"a context window alias": {usage: `,"modelUsage":{"claude-opus-5-5[1m]":{}}`, want: "claude-opus-5-5[1m]"},
+		"a name that is no ID": {
+			usage: `,"modelUsage":{"Fix the race; see /workspace/user/project":{}}`, want: unknownModel,
+		},
+		"a name too long": {
+			usage: `,"modelUsage":{"` + strings.Repeat("a", maxModelIDBytes+1) + `":{}}`, want: unknownModel,
+		},
+		"a name at the limit": {
+			usage: `,"modelUsage":{"` + strings.Repeat("a", maxModelIDBytes) + `":{}}`,
+			want:  strings.Repeat("a", maxModelIDBytes),
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			out := `{"is_error":false,"structured_output":{"summary":"Done.","remaining":[]}` + tc.usage + `}`
+			got, err := parseSummaryOutput([]byte(out))
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got.UnexpectedModel)
+		})
+	}
 }

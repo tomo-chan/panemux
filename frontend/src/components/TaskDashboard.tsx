@@ -1479,6 +1479,11 @@ const WorkSection: React.FC<WorkSectionProps> = ({ task, enabled, onRequest }) =
             </ol>
           </>
         )}
+        {summary?.text && summary.unexpected_model && (
+          <p className="td-note" data-testid="task-summary-model">
+            Summarized by {summary.unexpected_model}, not Haiku, at many times the cost: this account may not use Haiku.
+          </p>
+        )}
         {summary?.state === 'ready' && summary.text && !summary.outdated && (summary.remaining ?? []).length === 0 && (
           <p className="td-note">No remaining work found.</p>
         )}

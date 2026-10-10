@@ -503,13 +503,17 @@ checked against the real CLI in [command-center.md](command-center.md#command-ce
 | `--disable-slash-commands` | A `/command` in the conversation stays text |
 | `--disallowedTools=<commandcenter.DisallowedTools()>` | Every tool that can execute, write, read files, reach the network or start another agent is refused by name — the denial the command center found survives a permissions override |
 | `--output-format=json`, `--json-schema <schema>` | The answer is parsed as a structure, and bounded before it is shown |
+| `--tools ""` | No tool is offered at all; the structured answer still arrives (checked with Claude Code 2.1.294) |
+| `--system-prompt <compile-time literal>` | The CLI's own coding-agent system prompt is replaced by a fixed one, which tells claude to describe only the excerpt |
+| `--model=haiku` | A compile-time literal; it chooses the model, not where the request goes or how it is authenticated. A model other than Haiku that answers is logged and shown by its ID from `modelUsage`; a name not shaped like a model ID becomes `unknown`, so nothing else from the answer reaches the log |
 
 The instruction tells claude that the excerpt is data to describe and not instructions. That is not
 relied on: a conversation that talks claude into ignoring it can change the summary text and the
 list of remaining work — and so, by emptying that list, whether the task is shown as a done
 candidate. All of it is rendered as text, and a done candidate is only a label: marking a task done
-takes a person's click, so the most such a conversation can do is mislead what the dashboard shows. `--tools ""` (no tools at all) was considered; whether the CLI reads an
-empty value as "none" could not be verified here, so the verified denial list is what ships.
+takes a person's click, so the most such a conversation can do is mislead what the dashboard shows. `--tools ""` is passed on top of the denial list, not instead of it: the
+denial list is the one checked against a permissions override. `--bare` is not used: it would
+authenticate with `ANTHROPIC_API_KEY` alone instead of the operator's signed-in CLI.
 
 **What is sent is bounded and excludes tool output.** Only the text of user and assistant messages is
 extracted (`buildExcerpt`); tool calls and results, thinking and attachments — where file contents,
