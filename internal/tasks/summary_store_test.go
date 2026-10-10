@@ -111,16 +111,18 @@ func TestSummaryStore_MovesAsideAFileItCannotUse(t *testing.T) {
 	duplicate, err := json.Marshal(summaryStoreFile{Version: 1, Summaries: []storedSummary{valid, valid}})
 	require.NoError(t, err)
 	cases := map[string]string{
-		"not JSON":        "{broken",
-		"newer version":   `{"version":2,"summaries":[]}`,
-		"no version":      `{"summaries":[]}`,
-		"unknown agent":   entry(func(e *storedSummary) { e.Agent = "gemini" }),
-		"bad session ID":  entry(func(e *storedSummary) { e.SessionID = "../x" }),
-		"codex non-UUID":  entry(func(e *storedSummary) { e.Agent = AgentCodex }),
-		"bad input hash":  entry(func(e *storedSummary) { e.InputHash = "zz" }),
-		"text too long":   entry(func(e *storedSummary) { e.Text = strings.Repeat("a", maxSummaryTextBytes+1) }),
-		"too many items":  entry(func(e *storedSummary) { e.Remaining = make([]string, maxSummaryRemaining+1) }),
-		"item too long":   entry(func(e *storedSummary) { e.Remaining = []string{strings.Repeat("a", maxSummaryItemBytes+1)} }),
+		"not JSON":       "{broken",
+		"newer version":  `{"version":2,"summaries":[]}`,
+		"no version":     `{"summaries":[]}`,
+		"unknown agent":  entry(func(e *storedSummary) { e.Agent = "gemini" }),
+		"bad session ID": entry(func(e *storedSummary) { e.SessionID = "../x" }),
+		"codex non-UUID": entry(func(e *storedSummary) { e.Agent = AgentCodex }),
+		"bad input hash": entry(func(e *storedSummary) { e.InputHash = "zz" }),
+		"text too long":  entry(func(e *storedSummary) { e.Text = strings.Repeat("a", maxSummaryTextBytes+1) }),
+		"too many items": entry(func(e *storedSummary) { e.Remaining = make([]string, maxSummaryRemaining+1) }),
+		"item too long": entry(func(e *storedSummary) {
+			e.Remaining = []string{strings.Repeat("a", maxSummaryItemBytes+1)}
+		}),
 		"duplicate entry": string(duplicate),
 	}
 	for name, content := range cases {

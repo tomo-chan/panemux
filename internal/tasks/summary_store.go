@@ -58,7 +58,8 @@ func summarizerVersion(agent string) string {
 	if agent == AgentCodex {
 		instruction = codexSummaryInstruction
 	}
-	sum := sha256.Sum256(fmt.Appendf(nil, "%d\x00%s\x00%s\x00%s", summaryPipelineVersion, agent, instruction, summarySchema))
+	sum := sha256.Sum256(fmt.Appendf(nil, "%d\x00%s\x00%s\x00%s",
+		summaryPipelineVersion, agent, instruction, summarySchema))
 	return hex.EncodeToString(sum[:])
 }
 
@@ -229,7 +230,8 @@ func (s *SummaryStore) save(gen uint64, entries []storedSummary) error {
 		file.Summaries = []storedSummary{}
 	}
 	slices.SortFunc(file.Summaries, func(a, b storedSummary) int {
-		return cmp.Or(strings.Compare(a.Host, b.Host), strings.Compare(a.Agent, b.Agent), strings.Compare(a.SessionID, b.SessionID))
+		return cmp.Or(strings.Compare(a.Host, b.Host), strings.Compare(a.Agent, b.Agent),
+			strings.Compare(a.SessionID, b.SessionID))
 	})
 	data, err := json.Marshal(file)
 	//coverage:exempt a struct of strings, times and integers always marshals
@@ -240,7 +242,8 @@ func (s *SummaryStore) save(gen uint64, entries []storedSummary) error {
 		s.err = fmt.Errorf("creating task summary directory: %w", err)
 		return s.err
 	}
-	if err := fileops.AtomicWrite(resolveRecordsWriteTarget(s.path), data, summaryStoreFileMode, "task summary file"); err != nil {
+	target := resolveRecordsWriteTarget(s.path)
+	if err := fileops.AtomicWrite(target, data, summaryStoreFileMode, "task summary file"); err != nil {
 		s.err = err
 		return err
 	}

@@ -257,8 +257,8 @@ func (s *Service) startSummaryLocked(key summaryKey, log LogVersion, retryFailed
 // of the excerpt it is for, or none when the log was unreadable or the
 // excerpt was the one the last answer was made from (reused).
 type summaryOutcome struct {
-	summary    Summary
 	hash       string
+	summary    Summary
 	reused     bool
 	unreadable bool
 }

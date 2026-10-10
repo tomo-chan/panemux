@@ -92,6 +92,9 @@ type Options struct {
 	SummarizeCodex SummarizeFunc
 	// Logf writes a server log line. It defaults to log.Printf.
 	Logf func(format string, args ...any)
+	// SummaryStore keeps the summaries across restarts. Without one they
+	// are kept in memory only.
+	SummaryStore *SummaryStore
 	// HostTimeout bounds one host's collection, including waiting for its
 	// connection to come up. A connection still coming up when it expires
 	// keeps dialing and serves the next collection.
@@ -101,9 +104,6 @@ type Options struct {
 	RetryAfter time.Duration
 	// SummaryTimeout bounds one Summarize call.
 	SummaryTimeout time.Duration
-	// SummaryStore keeps the summaries across restarts. Without one they
-	// are kept in memory only.
-	SummaryStore *SummaryStore
 }
 
 const (
@@ -143,8 +143,6 @@ type Service struct {
 	// generation of the last set of summaries handed to it.
 	summaryHosts   map[string]bool
 	summaryLoadErr string
-	summaryGen     uint64
-	summaryLoaded  bool
 	summarySlots   chan struct{}
 	summaryCtx     context.Context
 	summaryCancel  context.CancelFunc
@@ -152,7 +150,9 @@ type Service struct {
 	summaryWG      sync.WaitGroup
 	mu             sync.Mutex
 	summaryMu      sync.Mutex
+	summaryGen     uint64
 	closed         bool
+	summaryLoaded  bool
 }
 
 type hostConn struct {

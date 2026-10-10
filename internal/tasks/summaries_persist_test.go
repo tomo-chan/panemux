@@ -104,7 +104,8 @@ func logWithLines(lines ...string) []byte {
 }
 
 func toolResultLine(text string) string {
-	return `{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":` + fmt.Sprintf("%q", text) + `}]}}`
+	return `{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":` +
+		fmt.Sprintf("%q", text) + `}]}}`
 }
 
 // After a restart the summary comes back — text, remaining work and when it
