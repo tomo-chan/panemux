@@ -215,6 +215,17 @@ describe('TasksResponseSchema', () => {
     expect(result.success && result.data.records_error).toBe('parsing task record file: unexpected end of JSON input')
   })
 
+  it('accepts why summaries are not being saved', () => {
+    const result = TasksResponseSchema.safeParse({
+      hosts: [],
+      tasks: [],
+      summaries_enabled: true,
+      summaries_error: 'reading task summary file: permission denied',
+    })
+    expect(result.success && result.data.summaries_error).toBe('reading task summary file: permission denied')
+    expect(TasksResponseSchema.safeParse({ hosts: [], tasks: [], summaries_error: 1 }).success).toBe(false)
+  })
+
   it('rejects labels that are not a list of strings, and a done that is not a boolean', () => {
     expect(TasksResponseSchema.safeParse({ hosts: [], tasks: [{ ...task, labels: 'payment' }] }).success).toBe(false)
     expect(TasksResponseSchema.safeParse({ hosts: [], tasks: [{ ...task, labels: [1] }] }).success).toBe(false)

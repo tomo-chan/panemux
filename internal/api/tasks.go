@@ -178,6 +178,10 @@ type tasksResponse struct {
 	// dashboard offers when labeling a task (issue #310). Absent when there
 	// are none, and when the file could not be read.
 	KnownLabels []string `json:"known_labels,omitempty"`
+	// SummariesError is why summaries are not being saved across restarts
+	// (issue #352). They are still made and shown. Present only while
+	// summaries are enabled.
+	SummariesError string `json:"summaries_error,omitempty"`
 	// SummariesEnabled is task_dashboard.summary.enabled.
 	SummariesEnabled bool `json:"summaries_enabled"`
 }
@@ -221,6 +225,7 @@ func taskServiceOptions(h *Handler) tasks.Options {
 			//coverage:exempt a connection needs a reachable SSH server; internal/session tests CommandConn against one
 			return conn, nil
 		},
+		SummaryStore: tasks.NewSummaryStore(""),
 	}
 }
 
@@ -298,6 +303,9 @@ func (h *Handler) GetTasks(w http.ResponseWriter, r *http.Request) {
 	var summaries map[string]*tasks.SummaryView
 	if resp.SummariesEnabled {
 		summaries = h.tasks.Summaries(snapshot.Tasks)
+		if err := h.tasks.SummaryStoreError(); err != nil {
+			resp.SummariesError = err.Error()
+		}
 	}
 	for _, task := range snapshot.Tasks {
 		resp.Tasks = append(resp.Tasks, taskResponse{

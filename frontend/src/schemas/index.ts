@@ -508,6 +508,9 @@ export const TasksResponseSchema = z.object({
   known_labels: z.array(z.string()).optional(),
   // task_dashboard.summary.enabled. The server always sends it; absent is off.
   summaries_enabled: z.boolean().optional(),
+  // Why summaries are not being saved across restarts (issue #352); they are
+  // still made and shown. Present only while summaries are enabled.
+  summaries_error: z.string().optional(),
 })
 
 export type TasksResponse = z.infer<typeof TasksResponseSchema>
