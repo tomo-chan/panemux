@@ -48,16 +48,19 @@ const (
 )
 
 // summaryPipelineVersion names how an excerpt is made and summarized. Raise
-// it when a change to the excerpt, the CLI's arguments or model, or the
-// answer's handling would make an earlier summary of the same conversation
-// differ; the instruction and the schema are folded in on their own. A
+// it when a change to the excerpt, the CLI's arguments, or the answer's
+// handling would make an earlier summary of the same conversation differ;
+// the instruction and the schema, and Claude's system prompt and model, are
+// folded in on their own. A
 // summary made by another version is shown but never current.
 const summaryPipelineVersion = 1
 
 // summarizerVersion identifies agent's summarizer: what, besides the
 // excerpt, decides its answer.
 func summarizerVersion(agent string) string {
-	instruction := summaryInstruction
+	// Claude's system prompt and model decide its answer too (issue #353);
+	// they are part of its instruction here, so Codex's version is unchanged.
+	instruction := summaryInstruction + "\x00" + summarySystemPrompt + "\x00" + summaryModel
 	if agent == AgentCodex {
 		instruction = codexSummaryInstruction
 	}

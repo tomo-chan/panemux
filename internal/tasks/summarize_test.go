@@ -35,6 +35,12 @@ func TestSummaryArgs(t *testing.T) {
 	assertFollowedBy(t, args, "--setting-sources", "")
 	assertFollowedBy(t, args, "--session-id", summarySessionID)
 	assertFollowedBy(t, args, "--json-schema", summarySchema)
+	// Issue #353: the CLI's own system prompt is replaced, no tool is
+	// offered, and a small model answers. The flags above stay.
+	assertFollowedBy(t, args, "--system-prompt", summarySystemPrompt)
+	assertFollowedBy(t, args, "--tools", "")
+	assertFollowedBy(t, args, "--model", "haiku")
+	assert.NotContains(t, args, "--bare", "--bare would take the CLI off the operator's login")
 
 	for _, arg := range args[:len(args)-2] {
 		assert.False(t, strings.HasPrefix(arg, "--allowedTools"), "no tool is allowed: %q", arg)

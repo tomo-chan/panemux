@@ -321,14 +321,16 @@ func TestSummaryStore_WritesThroughASymlink(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-// Each agent's summarizer version is made from the instruction that agent's
-// summarizer is given.
+// Each agent's summarizer version is made from what that agent's summarizer
+// is given besides the excerpt: for Claude the instruction, the system
+// prompt and the model (issue #353), for Codex the instruction.
 func TestSummarizerVersion_FollowsTheAgentsInstruction(t *testing.T) {
 	version := func(agent, instruction string) string {
 		sum := sha256.Sum256(fmt.Appendf(nil, "%d\x00%s\x00%s\x00%s",
 			summaryPipelineVersion, agent, instruction, summarySchema))
 		return hex.EncodeToString(sum[:])
 	}
-	assert.Equal(t, version(AgentClaude, summaryInstruction), summarizerVersion(AgentClaude))
+	assert.Equal(t, version(AgentClaude, summaryInstruction+"\x00"+summarySystemPrompt+"\x00"+summaryModel),
+		summarizerVersion(AgentClaude))
 	assert.Equal(t, version(AgentCodex, codexSummaryInstruction), summarizerVersion(AgentCodex))
 }

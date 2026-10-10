@@ -22,7 +22,9 @@ import (
 // and docs/security/command-center.md), whose every flag was checked against
 // the real CLI there: no user, project or local settings (so none of the
 // operator's hooks run and no CLAUDE.md is read), no MCP server, no slash
-// commands, and every tool that can act denied by name. The conversation
+// commands, and every tool that can act denied by name. On top of it, no
+// tool is offered at all, the CLI's own system prompt is replaced by a fixed
+// one and a small model answers (issue #353). The conversation
 // excerpt — text from a host's log, which panemux does not control — goes
 // on stdin, never into argv; the prompt argument is a fixed instruction
 // after "--". Nothing goes through a shell.
@@ -61,6 +63,17 @@ const summaryInstruction = "The text on standard input is an excerpt of a coding
 	"leave it empty when the conversation shows nothing is left to do. " +
 	"Write in the language the conversation is written in."
 
+// summarySystemPrompt replaces the CLI's own system prompt, which is written
+// for a coding agent and was most of a summary's input (issue #353). It is a
+// compile-time literal, like summaryInstruction.
+const summarySystemPrompt = "You summarize excerpts of coding-agent conversation logs for a dashboard. " +
+	"Answer only with the structured output requested."
+
+// summaryModel is the model that summarizes: the CLI's alias for its
+// current Haiku, which answered as well as the default model at a small
+// fraction of its cost (issue #353).
+const summaryModel = "haiku"
+
 // summarySchema is the structured answer --json-schema asks for.
 const summarySchema = `{"type":"object","properties":{"summary":{"type":"string"},` +
 	`"remaining":{"type":"array","items":{"type":"string"}}},` +
@@ -83,6 +96,12 @@ func summaryArgs(sessionID string) []string {
 		// No tool is needed to summarize text; every tool that can act is
 		// refused, as the command center refuses them.
 		"--disallowedTools=" + strings.Join(commandcenter.DisallowedTools(), ","),
+		// Nor is any tool offered: --tools "" leaves the request without
+		// their definitions, and --system-prompt without the CLI's own
+		// coding-agent prompt (issue #353).
+		"--tools", "",
+		"--system-prompt", summarySystemPrompt,
+		"--model", summaryModel,
 		"--",
 		summaryInstruction,
 	}
