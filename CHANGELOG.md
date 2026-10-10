@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.25.0](https://github.com/tomo-chan/panemux/compare/v0.24.0...v0.25.0) (2026-10-10)
+
+
+### Features
+
+* add Codex task summaries to dashboard ([#331](https://github.com/tomo-chan/panemux/issues/331)) ([e78dfac](https://github.com/tomo-chan/panemux/commit/e78dfac11a49cdc84ffa8e44bf9898036e304430))
+* cut the cost of task summaries with a fixed system prompt and Haiku ([#356](https://github.com/tomo-chan/panemux/issues/356)) ([62021a2](https://github.com/tomo-chan/panemux/commit/62021a2c4aaf89cee8b9a3af10ecda74e4d7ee75))
+* open a terminal on a host from its chip on the task dashboard ([#340](https://github.com/tomo-chan/panemux/issues/340)) ([d3c0a0f](https://github.com/tomo-chan/panemux/commit/d3c0a0f2c30aa240a124c568f3d19a0747dc8c9e))
+* persist task summaries and reuse them by input hash ([#354](https://github.com/tomo-chan/panemux/issues/354)) ([ee48b61](https://github.com/tomo-chan/panemux/commit/ee48b61ffd50e58d17ce60c72b88e3c1113000ce))
+* search the tmux session name and summary text in the task board filter ([#344](https://github.com/tomo-chan/panemux/issues/344)) ([35dc94a](https://github.com/tomo-chan/panemux/commit/35dc94ae3363aa125fc76b92e6ea5563896d7e8b))
+* show unreadable Claude Code state files as diagnostics, not tasks ([#337](https://github.com/tomo-chan/panemux/issues/337)) ([b455f8f](https://github.com/tomo-chan/panemux/commit/b455f8fa8760f02489695c15efc562c52dd4640a))
+* suggest labels used before when labelling a task ([#329](https://github.com/tomo-chan/panemux/issues/329)) ([276cb45](https://github.com/tomo-chan/panemux/commit/276cb4546ea59abf7ecad3d5c530c5acbc36f475))
+* suggest working directories used on the host in New task ([#333](https://github.com/tomo-chan/panemux/issues/333)) ([c9f0bae](https://github.com/tomo-chan/panemux/commit/c9f0bae1b4295ed60c623a634980d85b21bd5590))
+
+
+### Bug Fixes
+
+* keep make screenshots and its helper tests working outside the sandbox ([#351](https://github.com/tomo-chan/panemux/issues/351)) ([e557907](https://github.com/tomo-chan/panemux/commit/e557907b278bcb2c60873d5746f9aeb58033c81e))
+* separate WebSocket routes and enforce browser authority checks ([#317](https://github.com/tomo-chan/panemux/issues/317)) ([6d396f2](https://github.com/tomo-chan/panemux/commit/6d396f261a9922b8a118fbe0b26771cfd5d7d575))
+* show browser approval in new ssh_tmux sessions ([#341](https://github.com/tomo-chan/panemux/issues/341)) ([f96e3af](https://github.com/tomo-chan/panemux/commit/f96e3afc6a7d6c384d237ff1a5e13202f1c46e93))
+
 ## [0.24.0](https://github.com/tomo-chan/panemux/compare/v0.23.0...v0.24.0) (2026-10-04)
 
 
