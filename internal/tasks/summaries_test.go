@@ -454,9 +454,9 @@ func (c *scriptedConn) calls() ([]string, []string) {
 	return append([]string(nil), c.cmds...), append([]string(nil), c.stdins...)
 }
 
-// A task that leaves a host's list takes its summary with it; a host that
-// failed to collect keeps what it had.
-func TestSummaries_AreForgottenWithTheirTask(t *testing.T) {
+// A task that leaves the list keeps its summary (issue #352), as a host that
+// failed to collect does: listed again, it is not summarized again.
+func TestSummaries_AreKeptWhileTheirTaskIsAway(t *testing.T) {
 	host := &summaryHost{}
 	host.set(hostCollection(100, "idle"), conversationLog("a"))
 	summarizer := &fakeSummarizer{result: Summary{Text: "s", Remaining: []string{"x"}}}
@@ -473,7 +473,7 @@ func TestSummaries_AreForgottenWithTheirTask(t *testing.T) {
 	svc.Collect(context.Background())
 	host.set(hostCollection(100, "idle"), conversationLog("a"))
 	collectAndSummarize(svc)
-	assert.Equal(t, 2, summarizer.calls(), "the task left the list, so its summary was dropped")
+	assert.Equal(t, 1, summarizer.calls(), "the task left the list and kept its summary")
 }
 
 // Closing the service stops the summaries in flight.
@@ -568,8 +568,9 @@ func TestSummaries_ALogThatCannotBeReadIsAFailure(t *testing.T) {
 		views["local:claude:s10"])
 }
 
-// A summary that finishes after its task left the list is dropped.
-func TestSummaries_ASummaryForATaskThatLeftIsDropped(t *testing.T) {
+// An answer that arrives after its task left the list is kept for when it
+// comes back.
+func TestSummaries_ASummaryForATaskThatLeftIsKept(t *testing.T) {
 	host := &summaryHost{}
 	host.set(hostCollection(100, "idle"), conversationLog("a"))
 	summarizer := &fakeSummarizer{gate: make(chan struct{}), result: Summary{Text: "late", Remaining: []string{}}}
@@ -583,7 +584,7 @@ func TestSummaries_ASummaryForATaskThatLeftIsDropped(t *testing.T) {
 	close(summarizer.gate)
 	svc.waitSummaries()
 
-	assert.Empty(t, svc.Summaries(asBusy(snap.Tasks)), "the late answer was not kept")
+	assert.Equal(t, "late", svc.Summaries(asBusy(snap.Tasks))["local:claude:s10"].Text, "the late answer was kept")
 }
 
 // Removing a host from ssh_connections drops its summaries.

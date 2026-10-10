@@ -92,6 +92,9 @@ type Options struct {
 	SummarizeCodex SummarizeFunc
 	// Logf writes a server log line. It defaults to log.Printf.
 	Logf func(format string, args ...any)
+	// SummaryStore keeps the summaries across restarts. Without one they
+	// are kept in memory only.
+	SummaryStore *SummaryStore
 	// HostTimeout bounds one host's collection, including waiting for its
 	// connection to come up. A connection still coming up when it expires
 	// keeps dialing and serves the next collection.
@@ -132,16 +135,24 @@ type Service struct {
 	unreadableLogged map[string]map[string]UnreadableStateFile
 	// The task summaries; see summaries.go. summaryMu guards summaries and
 	// summaryTasks. summaryCtx ends when the service is closed.
-	summaries     map[summaryKey]*summaryEntry
-	summaryTasks  map[string]map[summaryKey]summaryTask
-	summarySlots  chan struct{}
-	summaryCtx    context.Context
-	summaryCancel context.CancelFunc
-	opts          Options
-	summaryWG     sync.WaitGroup
-	mu            sync.Mutex
-	summaryMu     sync.Mutex
-	closed        bool
+	summaries    map[summaryKey]*summaryEntry
+	summaryTasks map[string]map[summaryKey]summaryTask
+	// summaryHosts are the hosts configured at the last collection, nil
+	// before it. summaryLoaded is whether opts.SummaryStore was read,
+	// summaryLoadErr the last error reading it, and summaryGen the
+	// generation of the last set of summaries handed to it.
+	summaryHosts   map[string]bool
+	summaryLoadErr string
+	summarySlots   chan struct{}
+	summaryCtx     context.Context
+	summaryCancel  context.CancelFunc
+	opts           Options
+	summaryWG      sync.WaitGroup
+	mu             sync.Mutex
+	summaryMu      sync.Mutex
+	summaryGen     uint64
+	closed         bool
+	summaryLoaded  bool
 }
 
 type hostConn struct {

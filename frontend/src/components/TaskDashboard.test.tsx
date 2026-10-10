@@ -704,6 +704,15 @@ describe('TaskDashboard done and labels', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('Done and labels could not be loaded: parsing task record file: bad')
   })
 
+  it('reports summaries the server could not save', () => {
+    renderDashboard(
+      tasksState({ data: { ...recorded, summaries_enabled: true, summaries_error: 'reading task summary file: denied' } }),
+    )
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Summaries will not be kept after panemux restarts: reading task summary file: denied',
+    )
+  })
+
   it('says where a task goes when it is marked done', () => {
     renderDashboard(tasksState({ data: recorded }))
     const confirmText = (id: string) => {

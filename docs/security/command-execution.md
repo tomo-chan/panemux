@@ -518,6 +518,18 @@ log this was built against — are never read. The first user message (4 KiB) an
 (24 KiB, 2 KiB each) are all that reach claude. What a person typed or an assistant quoted is not
 masked; the behavior document says so, and that is why summaries are off by default.
 
+**What is kept on disk is the answer, never the conversation.** `SummaryStore` in
+`internal/tasks/summary_store.go` saves each summary's text, remaining work and when it was made in
+`~/.config/panemux/task-summaries.json` (mode 0600, written with `fileops.AtomicWrite`), with the
+SHA-256 of the excerpt it was made from and the log's modification time, size and Codex rollout name.
+Neither the log nor the excerpt is written. A summary is the agent's paraphrase of the conversation and
+can repeat what was typed in it, so the file is as private as the dashboard: it stays on the panemux
+host, nothing outside panemux reads it, and with summaries off it is neither read nor written. Nothing
+from it reaches a command: a stored log version is only compared with the collected one, and the
+scripts are always built from the collection. A file that does not parse, has another format version,
+or holds an entry panemux would not have written (an unknown agent, a session ID failing
+`validSessionID`, a malformed hash, a summary longer than the bounds above) is renamed aside unread.
+
 **Nothing claude prints reaches the operator's screen except the parsed answer.** A failure is one of
 a few fixed messages (an exit status, a timeout, an answer that was not JSON or had no summary),
 because claude's own text can quote the conversation. The answer is trimmed to 1 KiB of summary and

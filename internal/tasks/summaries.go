@@ -11,10 +11,16 @@ import (
 // by its matching agent CLI on the panemux host from an excerpt of the task's
 // conversation log.
 //
-// A summary is kept in memory, keyed by (host, agent, session ID), together with
-// the version of the log (modification time and size) it was made from. It
-// is reused while the log keeps that version, so the dashboard's 10-second
-// poll does not summarize again. Which tasks are summarized:
+// A summary is kept keyed by (host, agent, session ID), together with the
+// version of the log (modification time and size) it was last found current
+// for and the hash of the excerpt it was made from (issue #352). It is reused
+// while the log keeps that version, so the dashboard's 10-second poll does
+// not summarize again. When the log changes, a summary that is due reads the
+// log again, and when the excerpt's hash is the one the answer was made from
+// — a tool result appended, which the excerpt leaves out — the answer is
+// current again without asking the agent. With a SummaryStore the answers are
+// saved (summary_store.go) and restored after a restart, which by itself
+// asks nothing. Which tasks are summarized:
 //
 //   - A running task that waits for input or is idle is summarized when a
 //     poll finds its log at a version not yet tried.
@@ -26,6 +32,10 @@ import (
 //
 // A failed attempt is not retried by the poll for the same log version;
 // RequestSummary retries it. At most summaryConcurrency summaries run at once.
+//
+// A summary is kept while its task is listed and for summaryRetention after
+// it was last, at most maxStoredSummaries in all, the least recently listed
+// dropped first; a host removed from the config takes its summaries with it.
 
 // SummaryState is where a task's summary stands.
 type SummaryState string
@@ -64,6 +74,13 @@ const (
 	// defaultSummaryTimeout bounds one `claude -p` run. The runs measured
 	// while this was built took 4.6 to 22 seconds.
 	defaultSummaryTimeout = 2 * time.Minute
+	// summaryRetention is how long a summary is kept after its task was
+	// last listed, and maxStoredSummaries how many are kept in all.
+	summaryRetention   = 30 * 24 * time.Hour
+	maxStoredSummaries = 1000
+	// summarySeenSaveInterval is how stale the saved time a task was last
+	// listed may be, so that a poll does not rewrite the file each time.
+	summarySeenSaveInterval = 24 * time.Hour
 )
 
 type summaryKey struct {
@@ -74,7 +91,15 @@ type summaryKey struct {
 
 type summaryEntry struct {
 	resultAt time.Time
-	result   *Summary
+	// lastSeen is when the task was last listed, and savedSeen the lastSeen
+	// last handed to the store.
+	lastSeen  time.Time
+	savedSeen time.Time
+	result    *Summary
+	// inputHash and summarizer are summaryInputHash of the excerpt result
+	// was made from, and the summarizerVersion that made it.
+	inputHash  string
+	summarizer string
 	// triedLog is the log version of the last attempt that finished, and
 	// failure and unreadable its outcome when it made no summary.
 	failure    string
@@ -98,8 +123,8 @@ type summaryTask struct {
 var automaticSummaryStates = map[State]bool{StateWait: true, StateIdle: true}
 
 // rememberSummaryTasks records the tasks a host's collection listed with a
-// log, which RequestSummary may summarize, and drops the summaries of tasks
-// no longer listed.
+// log, which RequestSummary may summarize. The summaries of tasks no longer
+// listed are kept for summaryRetention.
 func (s *Service) rememberSummaryTasks(host string, tasks []Task) {
 	listed := map[summaryKey]summaryTask{}
 	for _, task := range tasks {
@@ -111,11 +136,6 @@ func (s *Service) rememberSummaryTasks(host string, tasks []Task) {
 	s.summaryMu.Lock()
 	defer s.summaryMu.Unlock()
 	s.summaryTasks[host] = listed
-	for key := range s.summaries {
-		if _, ok := listed[key]; key.host == host && !ok {
-			delete(s.summaries, key)
-		}
-	}
 }
 
 // forgetSummaryHostsExcept drops what is known of hosts no longer configured.
@@ -125,17 +145,22 @@ func (s *Service) forgetSummaryHostsExcept(names []string) {
 		keep[name] = true
 	}
 	s.summaryMu.Lock()
-	defer s.summaryMu.Unlock()
+	s.summaryHosts = keep
 	for host := range s.summaryTasks {
 		if !keep[host] {
 			delete(s.summaryTasks, host)
 		}
 	}
-	for key := range s.summaries {
+	dropped := false
+	for key, entry := range s.summaries {
 		if !keep[key.host] {
+			dropped = dropped || entry.result != nil
 			delete(s.summaries, key)
 		}
 	}
+	save := s.summarySaveLocked(dropped)
+	s.summaryMu.Unlock()
+	save()
 }
 
 // Summaries returns the summary of each of tasks that has one, by task ID,
@@ -143,7 +168,8 @@ func (s *Service) forgetSummaryHostsExcept(names []string) {
 func (s *Service) Summaries(tasks []Task) map[string]*SummaryView {
 	views := map[string]*SummaryView{}
 	s.summaryMu.Lock()
-	defer s.summaryMu.Unlock()
+	dirty := s.loadSummariesLocked()
+	now := s.opts.Now()
 	for _, task := range tasks {
 		if (task.Agent != AgentClaude && task.Agent != AgentCodex) || task.SessionID == "" || task.Log == nil {
 			continue
@@ -152,10 +178,16 @@ func (s *Service) Summaries(tasks []Task) map[string]*SummaryView {
 		if automaticSummaryStates[task.State] {
 			s.startSummaryLocked(key, *task.Log, false)
 		}
-		if view := s.summaries[key].view(*task.Log); view != nil {
-			views[task.ID] = view
+		if entry := s.summaries[key]; entry != nil {
+			entry.lastSeen = now
+			dirty = dirty || (entry.result != nil && now.Sub(entry.savedSeen) >= summarySeenSaveInterval)
+			views[task.ID] = entry.view(*task.Log)
 		}
 	}
+	dirty = s.pruneSummariesLocked(now) || dirty
+	save := s.summarySaveLocked(dirty)
+	s.summaryMu.Unlock()
+	save()
 	return views
 }
 
@@ -175,7 +207,11 @@ func (s *Service) RequestAgentSummary(host, agent, sessionID string) (*SummaryVi
 		return nil, fmt.Errorf("%w: session ID %q", ErrInvalidSummary, sessionID)
 	}
 	s.summaryMu.Lock()
-	defer s.summaryMu.Unlock()
+	save := s.summarySaveLocked(s.loadSummariesLocked())
+	defer func() {
+		s.summaryMu.Unlock()
+		save()
+	}()
 	key := summaryKey{host: host, agent: agent, sessionID: sessionID}
 	task, ok := s.summaryTasks[host][key]
 	if !ok {
@@ -197,7 +233,7 @@ func (s *Service) startSummaryLocked(key summaryKey, log LogVersion, retryFailed
 	}
 	entry := s.summaries[key]
 	if entry == nil {
-		entry = &summaryEntry{}
+		entry = &summaryEntry{lastSeen: s.opts.Now()}
 		s.summaries[key] = entry
 	} else {
 		if entry.running {
@@ -209,74 +245,102 @@ func (s *Service) startSummaryLocked(key summaryKey, log LogVersion, retryFailed
 		}
 	}
 	entry.running = true
+	reuse := ""
+	if entry.result != nil {
+		reuse = entry.inputHash
+	}
 	s.summaryWG.Add(1)
-	go s.runSummary(key, log)
+	go s.runSummary(key, log, reuse)
 }
 
-func (s *Service) runSummary(key summaryKey, log LogVersion) {
+// summaryOutcome is what one attempt made of a log: an answer and the hash
+// of the excerpt it is for, or none when the log was unreadable or the
+// excerpt was the one the last answer was made from (reused).
+type summaryOutcome struct {
+	hash       string
+	summary    Summary
+	reused     bool
+	unreadable bool
+}
+
+func (s *Service) runSummary(key summaryKey, log LogVersion, reuse string) {
 	defer s.summaryWG.Done()
 	var (
-		summary    Summary
-		unreadable bool
-		err        error
+		outcome summaryOutcome
+		err     error
 	)
 	select {
 	case s.summarySlots <- struct{}{}:
-		summary, unreadable, err = s.summarize(key, log)
+		outcome, err = s.summarize(key, log, reuse)
 		<-s.summarySlots
 	case <-s.summaryCtx.Done():
 		err = errors.New("task summaries are closed")
 	}
 
 	s.summaryMu.Lock()
-	defer s.summaryMu.Unlock()
 	entry := s.summaries[key]
 	if entry == nil {
-		// Forgotten while it ran: the task left the list.
+		// Forgotten while it ran: its host left the config.
+		s.summaryMu.Unlock()
 		return
 	}
 	entry.running = false
 	entry.triedLog = log
 	entry.failure = ""
-	entry.unreadable = unreadable
+	entry.unreadable = outcome.unreadable
+	changed := false
 	switch {
 	case err != nil:
 		entry.failure = err.Error()
-	case !unreadable:
-		entry.result = &summary
+	case outcome.reused:
+		entry.resultLog = log
+		changed = true
+	case !outcome.unreadable:
+		entry.result = &outcome.summary
 		entry.resultAt = s.opts.Now()
 		entry.resultLog = log
+		entry.inputHash = outcome.hash
+		entry.summarizer = summarizerVersion(key.agent)
+		changed = true
 	}
+	save := s.summarySaveLocked(changed)
+	s.summaryMu.Unlock()
+	save()
 }
 
-// summarize reads the task's log and uses the matching CLI on the panemux host.
-func (s *Service) summarize(key summaryKey, log LogVersion) (Summary, bool, error) {
+// summarize reads the task's log and uses the matching CLI on the panemux
+// host, unless the excerpt's hash is reuse.
+func (s *Service) summarize(key summaryKey, log LogVersion, reuse string) (summaryOutcome, error) {
 	script, err := buildTranscriptScript(key.sessionID)
 	if key.agent == AgentCodex {
 		script, err = buildCodexTranscriptScriptForLog(key.sessionID, log)
 	}
 	if err != nil { //coverage:exempt keys come from collected sessions, which passed validSessionID when parsed
-		return Summary{}, false, err
+		return summaryOutcome{}, err
 	}
 	fetchCtx, cancel := context.WithTimeout(s.summaryCtx, s.opts.HostTimeout)
 	out, err := s.runHostScript(fetchCtx, key.host, script, "conversation log read")
 	cancel()
 	if err != nil {
-		return Summary{}, false, err
+		return summaryOutcome{}, err
 	}
 	data, err := parseTranscriptOutput(out)
 	if key.agent == AgentCodex {
 		data, err = parseCodexTranscriptOutput(out, key.sessionID)
 	}
 	if err != nil {
-		return Summary{}, false, err
+		return summaryOutcome{}, err
 	}
 	excerpt, ok := buildExcerpt(data)
 	if key.agent == AgentCodex {
 		excerpt, ok = buildCodexExcerpt(data)
 	}
 	if !ok {
-		return Summary{}, true, nil
+		return summaryOutcome{unreadable: true}, nil
+	}
+	hash := summaryInputHash(key.agent, excerpt)
+	if hash == reuse {
+		return summaryOutcome{hash: hash, reused: true}, nil
 	}
 	summaryCtx, cancel := context.WithTimeout(s.summaryCtx, s.opts.SummaryTimeout)
 	defer cancel()
@@ -286,9 +350,9 @@ func (s *Service) summarize(key summaryKey, log LogVersion) (Summary, bool, erro
 	}
 	summary, err := runner(summaryCtx, excerpt)
 	if err != nil {
-		return Summary{}, false, err
+		return summaryOutcome{}, err
 	}
-	return summary, false, nil
+	return summaryOutcome{summary: summary, hash: hash}, nil
 }
 
 // view is the entry as the API reports it for a task whose log is at

@@ -396,6 +396,9 @@ const unexercisedOptionals: Record<string, string> = {
   // records through the real route instead, so the same response can show
   // them on its tasks; an unreadable file would have left them all off.
   'tasks.records_error': 'needs an unreadable task record file, which would drop the captured records',
+  // Set only when the task summary file cannot be read or written; the
+  // capture's collector keeps its summaries in memory (issue #352).
+  'tasks.summaries_error': 'needs a task summary file that cannot be read or written, and the capture saves none',
   // A summary is outdated only once its log changed after it was made, and
   // fails only when claude or the host does; each capture makes one summary
   // per task from a log that does not change, through a stand-in that answers.

@@ -478,6 +478,11 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
           Done and labels could not be loaded: {data.records_error}
         </div>
       )}
+      {data?.summaries_error && (
+        <div role="alert" className="td-alert">
+          Summaries will not be kept after panemux restarts: {data.summaries_error}
+        </div>
+      )}
 
       <div className="td-tools">
         <input

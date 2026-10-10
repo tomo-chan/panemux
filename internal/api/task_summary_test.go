@@ -269,3 +269,37 @@ func TestPostTaskSummary_AfterCloseIsUnavailable(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 	assert.Equal(t, 1, summarizer.count())
 }
+
+// The production collector saves its summaries (issue #352) in
+// ~/.config/panemux/task-summaries.json.
+func TestTaskServiceOptions_SavesSummaries(t *testing.T) {
+	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
+	t.Cleanup(h.Close)
+	assert.NotNil(t, taskServiceOptions(h).SummaryStore)
+}
+
+// When summaries cannot be saved the dashboard says why, and only while
+// summaries are on.
+func TestGetTasks_ReportsWhySummariesAreNotSaved(t *testing.T) {
+	for _, enabled := range []bool{true, false} {
+		t.Run(strconv.FormatBool(enabled), func(t *testing.T) {
+			h, summarizer := summaryHandler(t, enabled)
+			// A directory where the file should be cannot be read.
+			path := t.TempDir()
+			h.SetTaskService(tasks.New(tasks.Options{
+				Hosts:        h.taskHostNames,
+				Dial:         func(string) (tasks.Conn, error) { return nil, errors.New("unreachable") },
+				RunLocal:     func(context.Context, string) ([]byte, error) { return summaryCollection(), nil },
+				Summarize:    summarizer.summarize,
+				SummaryStore: tasks.NewSummaryStore(path),
+				Logf:         func(string, ...any) {},
+			}))
+			resp := getTasks(t, h)
+			if enabled {
+				assert.Contains(t, resp.SummariesError, "task summary file")
+			} else {
+				assert.Empty(t, resp.SummariesError)
+			}
+		})
+	}
+}

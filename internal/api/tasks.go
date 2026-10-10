@@ -170,9 +170,13 @@ type taskResponse struct {
 type tasksResponse struct {
 	// RecordsError is why the task record file could not be read. The tasks
 	// are still listed, without their records.
-	RecordsError string             `json:"records_error,omitempty"`
-	Hosts        []tasks.HostResult `json:"hosts"`
-	Tasks        []taskResponse     `json:"tasks"`
+	RecordsError string `json:"records_error,omitempty"`
+	// SummariesError is why summaries are not being saved across restarts
+	// (issue #352). They are still made and shown. Present only while
+	// summaries are enabled.
+	SummariesError string             `json:"summaries_error,omitempty"`
+	Hosts          []tasks.HostResult `json:"hosts"`
+	Tasks          []taskResponse     `json:"tasks"`
 	// KnownLabels is every label the record file holds, listed task or not,
 	// once each in case-insensitive alphabetical order: the suggestions the
 	// dashboard offers when labeling a task (issue #310). Absent when there
@@ -221,6 +225,7 @@ func taskServiceOptions(h *Handler) tasks.Options {
 			//coverage:exempt a connection needs a reachable SSH server; internal/session tests CommandConn against one
 			return conn, nil
 		},
+		SummaryStore: tasks.NewSummaryStore(""),
 	}
 }
 
@@ -298,6 +303,9 @@ func (h *Handler) GetTasks(w http.ResponseWriter, r *http.Request) {
 	var summaries map[string]*tasks.SummaryView
 	if resp.SummariesEnabled {
 		summaries = h.tasks.Summaries(snapshot.Tasks)
+		if err := h.tasks.SummaryStoreError(); err != nil {
+			resp.SummariesError = err.Error()
+		}
 	}
 	for _, task := range snapshot.Tasks {
 		resp.Tasks = append(resp.Tasks, taskResponse{
