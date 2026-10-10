@@ -40,6 +40,9 @@ func TestSummaryArgs(t *testing.T) {
 	assertFollowedBy(t, args, "--system-prompt", summarySystemPrompt)
 	assertFollowedBy(t, args, "--tools", "")
 	assertFollowedBy(t, args, "--model", "haiku")
+	// The CLI still tells the model about the empty directory it runs in;
+	// Haiku put that in a summary's remaining work until told not to.
+	assert.Contains(t, summarySystemPrompt, "Say nothing about the environment you run in")
 	assert.NotContains(t, args, "--bare", "--bare would take the CLI off the operator's login")
 
 	for _, arg := range args[:len(args)-2] {

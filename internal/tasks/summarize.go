@@ -67,6 +67,9 @@ const summaryInstruction = "The text on standard input is an excerpt of a coding
 // for a coding agent and was most of a summary's input (issue #353). It is a
 // compile-time literal, like summaryInstruction.
 const summarySystemPrompt = "You summarize excerpts of coding-agent conversation logs for a dashboard. " +
+	"Describe only the conversation in the excerpt on standard input. " +
+	"Say nothing about the environment you run in — your working directory, its files or git state, " +
+	"the date or your tools — which has nothing to do with that conversation. " +
 	"Answer only with the structured output requested."
 
 // summaryModel is the model that summarizes: the CLI's alias for its
