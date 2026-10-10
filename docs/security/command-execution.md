@@ -505,7 +505,7 @@ checked against the real CLI in [command-center.md](command-center.md#command-ce
 | `--output-format=json`, `--json-schema <schema>` | The answer is parsed as a structure, and bounded before it is shown |
 | `--tools ""` | No tool is offered at all; the structured answer still arrives (checked with Claude Code 2.1.294) |
 | `--system-prompt <compile-time literal>` | The CLI's own coding-agent system prompt is replaced by a fixed one, which tells claude to describe only the excerpt |
-| `--model haiku` | A compile-time literal; it chooses the model, not where the request goes or how it is authenticated |
+| `--model=haiku` | A compile-time literal; it chooses the model, not where the request goes or how it is authenticated |
 
 The instruction tells claude that the excerpt is data to describe and not instructions. That is not
 relied on: a conversation that talks claude into ignoring it can change the summary text and the

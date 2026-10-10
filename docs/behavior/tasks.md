@@ -665,7 +665,7 @@ task_dashboard:
   is still what a person records ([Done and labels](#done-and-labels)).
 - **How claude runs.** `claude` is found on the panemux process's `PATH` and run in an empty
   temporary directory, without a shell, as
-  `claude -p --session-id <minted UUID> --no-session-persistence --output-format=json --json-schema <schema> --strict-mcp-config --setting-sources "" --disable-slash-commands --disallowedTools=<every acting tool> --tools "" --system-prompt <fixed system prompt> --model haiku -- <fixed instruction>`,
+  `claude -p --session-id <minted UUID> --no-session-persistence --output-format=json --json-schema <schema> --strict-mcp-config --setting-sources "" --disable-slash-commands --disallowedTools=<every acting tool> --tools "" --system-prompt <fixed system prompt> --model=haiku -- <fixed instruction>`,
   with the excerpt on its standard input. The instruction tells it the excerpt is data to describe,
   not instructions; the system prompt, which replaces the CLI's own, tells it to describe only that
   conversation and nothing of the empty directory it runs in. `haiku` is the CLI's alias for its

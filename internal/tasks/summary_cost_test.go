@@ -78,7 +78,8 @@ func TestSummaryCost_TheMeasuredSequence(t *testing.T) {
 	if dir := os.Getenv("PANEMUX_SUMMARY_COST_DIR"); dir != "" {
 		for i, excerpt := range f.summarizer.excerpts {
 			name := filepath.Join(dir, "excerpt-"+strconv.Itoa(i+1)+".txt")
-			require.NoError(t, os.WriteFile(name, []byte(excerpt), 0o600))
+			// G703: dir is the one the person running the test named.
+			require.NoError(t, os.WriteFile(name, []byte(excerpt), 0o600)) //nolint:gosec // see above
 		}
 	}
 }

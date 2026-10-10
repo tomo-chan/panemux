@@ -39,7 +39,7 @@ func TestSummaryArgs(t *testing.T) {
 	// offered, and a small model answers. The flags above stay.
 	assertFollowedBy(t, args, "--system-prompt", summarySystemPrompt)
 	assertFollowedBy(t, args, "--tools", "")
-	assertFollowedBy(t, args, "--model", "haiku")
+	assert.Contains(t, args, "--model=haiku")
 	// The CLI still tells the model about the empty directory it runs in;
 	// Haiku put that in a summary's remaining work until told not to.
 	assert.Contains(t, summarySystemPrompt, "Say nothing about the environment you run in")

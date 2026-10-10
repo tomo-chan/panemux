@@ -104,7 +104,7 @@ func summaryArgs(sessionID string) []string {
 		// coding-agent prompt (issue #353).
 		"--tools", "",
 		"--system-prompt", summarySystemPrompt,
-		"--model", summaryModel,
+		"--model=" + summaryModel,
 		"--",
 		summaryInstruction,
 	}
