@@ -248,6 +248,7 @@ func (s *SummaryStore) save(gen uint64, entries []storedSummary) error {
 	if !s.loaded {
 		return errors.New("task summary file not loaded; not saving over it")
 	}
+	//mutation:exempt[CONDITIONALS_BOUNDARY] unreachable: summarySaveLocked raises the generation for every save, so no generation is saved twice
 	if gen < s.attempted {
 		return nil
 	}

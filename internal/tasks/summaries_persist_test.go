@@ -570,3 +570,23 @@ func TestPersistedSummaries_ASummaryFinishingAfterItsHostLeftIsDropped(t *testin
 	_, err := os.Stat(f.path)
 	assert.ErrorIs(t, err, os.ErrNotExist, "nothing is saved for the forgotten task")
 }
+
+// Exactly as many summaries as are kept is not over the cap: nothing is
+// dropped, so the file is not written again.
+func TestPersistedSummaries_AtTheCapNothingIsDropped(t *testing.T) {
+	f := newPersistedSummaryFixture(t)
+	entries := make([]storedSummary, 0, maxStoredSummaries)
+	for i := range maxStoredSummaries {
+		e := sampleStoredSummary("", AgentClaude, fmt.Sprintf("old%04d", i))
+		e.LastSeen = collectedAt
+		entries = append(entries, e)
+	}
+	data, err := json.MarshalIndent(summaryStoreFile{Version: summaryStoreFileVersion, Summaries: entries}, "", "  ")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(f.path, data, 0o600))
+	f.host.set(hostCollection(100, "busy"), conversationLog("a"))
+	svc := f.start(t)
+	collectAndSummarize(svc)
+
+	assert.Equal(t, string(data), string(must(os.ReadFile(f.path))), "the file is left as it was")
+}

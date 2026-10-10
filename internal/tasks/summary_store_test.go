@@ -1,7 +1,10 @@
 package tasks
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"errors"
 	"os"
 	"path/filepath"
@@ -291,4 +294,16 @@ func TestSummaryStore_WritesThroughASymlink(t *testing.T) {
 	assert.NotZero(t, info.Mode()&os.ModeSymlink, "the link survives")
 	_, err = os.Stat(target)
 	assert.NoError(t, err)
+}
+
+// Each agent's summarizer version is made from the instruction that agent's
+// summarizer is given.
+func TestSummarizerVersion_FollowsTheAgentsInstruction(t *testing.T) {
+	version := func(agent, instruction string) string {
+		sum := sha256.Sum256(fmt.Appendf(nil, "%d\x00%s\x00%s\x00%s",
+			summaryPipelineVersion, agent, instruction, summarySchema))
+		return hex.EncodeToString(sum[:])
+	}
+	assert.Equal(t, version(AgentClaude, summaryInstruction), summarizerVersion(AgentClaude))
+	assert.Equal(t, version(AgentCodex, codexSummaryInstruction), summarizerVersion(AgentCodex))
 }
