@@ -688,7 +688,8 @@ or asking an agent.
 - **When summaries are off** the file is neither read nor written, and is left as it is.
 - **A file that cannot be used** — not JSON, a format version other than `1`, or an entry panemux would
   not have written, such as an empty summary — is renamed to `task-summaries.json.bad-<UTC time>`
-  (with `-1`, `-2`, … added when an earlier file moved aside in the same second holds that name),
+  (with `-1`, `-2`, … added when an earlier file moved aside in the same second holds that name;
+  once 100 names in one second are taken, the file is treated as one that cannot be moved aside),
   unchanged, the server log says so, and saving starts again from an empty file. Edits made to the file while panemux runs are
   overwritten by its next save.
 - **A file that cannot be read or moved aside** is not written over. Summaries are made and shown from
