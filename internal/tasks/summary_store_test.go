@@ -4,8 +4,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -200,6 +200,31 @@ func TestSummaryStore_MovingAsideNeverReplacesAnEarlierBadFile(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, content, string(kept))
 	}
+}
+
+// A file takes the last of the names it can be moved aside to in one second;
+// once every one is taken, the next file is left where it is and nothing is
+// written over it.
+func TestSummaryStore_GivesUpMovingAsideWhenEveryNameIsTaken(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "task-summaries.json")
+	base := path + ".bad-20261010T120000Z"
+	writeStoreFile(t, base, "")
+	for n := 1; n < summaryStoreBadLimit-1; n++ {
+		writeStoreFile(t, fmt.Sprintf("%s-%d", base, n), "")
+	}
+	writeStoreFile(t, path, "{broken")
+	_, moved, err := NewSummaryStore(path).load(storeNow)
+	require.NoError(t, err)
+	assert.Equal(t, fmt.Sprintf("%s-%d", base, summaryStoreBadLimit-1), moved)
+
+	writeStoreFile(t, path, "{broken")
+	store := NewSummaryStore(path)
+	_, _, err = store.load(storeNow)
+	assert.ErrorContains(t, err, "moving aside task summary file")
+	kept, readErr := os.ReadFile(path)
+	require.NoError(t, readErr)
+	assert.Equal(t, "{broken", string(kept))
+	assert.ErrorContains(t, store.save(1, nil), "not loaded")
 }
 
 // A save that fails does not let an older generation, arriving after it,

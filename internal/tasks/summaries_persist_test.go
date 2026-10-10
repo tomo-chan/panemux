@@ -590,3 +590,22 @@ func TestPersistedSummaries_AtTheCapNothingIsDropped(t *testing.T) {
 
 	assert.Equal(t, string(data), string(must(os.ReadFile(f.path))), "the file is left as it was")
 }
+
+// A summary made while the file could not be read is saved once the file
+// can be, even when its task is no longer listed by then.
+func TestPersistedSummaries_ASummaryMadeMeanwhileIsSavedAfterItsTaskLeft(t *testing.T) {
+	f := newPersistedSummaryFixture(t)
+	require.NoError(t, os.Mkdir(f.path, 0o700))
+	f.host.set(hostCollection(100, "idle"), conversationLog("a"))
+	svc := f.start(t)
+	collectAndSummarize(svc)
+	require.Error(t, svc.SummaryStoreError())
+
+	require.NoError(t, os.Remove(f.path))
+	f.host.set(minimalOutput("local"), conversationLog("a"))
+	collectAndSummarize(svc)
+	require.NoError(t, svc.SummaryStoreError())
+	stored := f.stored(t)
+	require.Len(t, stored, 1)
+	assert.Equal(t, "s10", stored[0].SessionID)
+}

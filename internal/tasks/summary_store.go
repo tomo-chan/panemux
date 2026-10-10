@@ -42,6 +42,9 @@ const (
 	// summaryStoreBadSuffix and summaryStoreBadTime name a file moved aside.
 	summaryStoreBadSuffix = ".bad-"
 	summaryStoreBadTime   = "20060102T150405Z"
+	// summaryStoreBadLimit is how many files can be moved aside in one
+	// second before another is refused.
+	summaryStoreBadLimit = 100
 )
 
 // summaryPipelineVersion names how an excerpt is made and summarized. Raise
@@ -210,13 +213,13 @@ func (s *SummaryStore) load(now time.Time) (entries []storedSummary, moved strin
 // used. A name it cannot check is tried, and the rename reports why not.
 func moveAside(path, base string) (string, error) {
 	target := base
-	for n := 1; ; n++ {
+	for n := 1; n <= summaryStoreBadLimit; n++ {
 		if _, err := os.Lstat(target); err != nil {
-			break
+			return target, os.Rename(path, target)
 		}
 		target = fmt.Sprintf("%s-%d", base, n)
 	}
-	return target, os.Rename(path, target)
+	return "", fmt.Errorf("%d files already moved aside this second", summaryStoreBadLimit)
 }
 
 func parseSummaryStoreFile(data []byte) ([]storedSummary, error) {
