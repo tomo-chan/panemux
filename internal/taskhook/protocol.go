@@ -19,6 +19,7 @@ const (
 	// Revisions remain exactly representable by future JSON/browser consumers.
 	MaxRevision         uint64 = 1<<53 - 1
 	Pending                    = "pending"
+	Provisional                = "provisional"
 	ProvidedDisposition        = "provided"
 	Resolved                   = "resolved"
 	ToolBash                   = "bash"
@@ -72,6 +73,9 @@ type Record struct {
 	Owner     Owner     `json:"owner"`
 	Version   int       `json:"version"`
 	Revision  uint64    `json:"revision"`
+	// ClosedRevision fences slow ingress scans across an acknowledgement or
+	// terminal transition without invalidating other concurrent reservations.
+	ClosedRevision uint64 `json:"closed_revision,omitempty"`
 }
 
 // Binding must come from the host's process/session/turn verifier. Accepting a
@@ -204,7 +208,8 @@ func validateRecord(r Record) error {
 		return ErrUnsupported
 	}
 	if !uuid.MatchString(r.SessionID) || !validOwner(r.Owner) || r.Revision == 0 || r.Revision > MaxRevision ||
-		!noticeID.MatchString(r.NoticeID) || len(r.Episodes) == 0 || len(r.Episodes) > MaxPending {
+		r.ClosedRevision > r.Revision || !noticeID.MatchString(r.NoticeID) ||
+		len(r.Episodes) == 0 || len(r.Episodes) > MaxPending {
 
 		return ErrCorrupt
 	}
@@ -219,14 +224,17 @@ func validateRecord(r Record) error {
 			return ErrCorrupt
 		}
 		switch ep.Disposition {
-		case Pending, ProvidedDisposition, Resolved:
+		case Pending, Provisional, ProvidedDisposition, Resolved:
 		default:
+			return ErrCorrupt
+		}
+		if ep.Disposition == Provisional && ep.Anchor != nil {
 			return ErrCorrupt
 		}
 		seen[ep.ID] = ep.Disposition
 	}
 	if p := r.Receipt; p != nil {
-		if r.Revision <= 1 || p.Revision != r.Revision-1 || len(PendingIDs(r)) != 0 || !validSet(p.EpisodeIDs) {
+		if r.Revision <= 1 || p.Revision != r.Revision-1 || liveEpisodes(r) != 0 || !validSet(p.EpisodeIDs) {
 			return ErrCorrupt
 		}
 		for _, id := range p.EpisodeIDs {

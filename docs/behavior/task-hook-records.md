@@ -15,7 +15,7 @@ separate records. The library never repairs, migrates or overwrites a corrupt or
 
 Each start adds a random `ep1-` episode and changes the stable `h1-` notice ID. These are panemux
 notification identities, not Codex request or tool-use IDs. Repeated reads and restarts preserve
-them. At most 16 pending episodes are retained; overflow fails without dropping any pending notice.
+them. At most 16 pending or provisional episodes are retained; overflow fails without dropping any pending notice.
 Settled episodes are compacted when another start is added. Revisions increase on changes and
 remain within the exact integer range used by JSON/browser consumers.
 
@@ -39,10 +39,39 @@ The owner, session and expected revision must match. For this transition, eviden
 same file identity and a complete terminal line ending strictly after the start anchor. A missing
 anchor, another turn or rotation supplies no resolution evidence. Partial scans and elapsed time
 must not be represented as terminal evidence. Detecting an already-ended turn before creating a
-start is the ingress verifier's responsibility; this library has no log scanner.
+start is the ingress verifier's responsibility. The metadata scanner below supplies a pre-start veto;
+it does not establish live ownership or all routing eligibility.
 
 Resolving a subset preserves the existing notice ID for remaining pending episodes. Neither
 resolution nor a claim changes a task's ordinary state, since task collection owns that state.
+
+## Provisional ingress and metadata evidence
+
+After verifying the process owner, a caller can reserve an inactive episode before reading slow
+eligibility evidence. Reservation increases the record revision without changing an existing active
+notice ID. It contains no verified anchor and never appears in the pending set. Finishing requires
+the exact reservation owner/session/turn, a verified anchor, and an unchanged `closed_revision`.
+Concurrent reservations can finish in either order and preserve both episodes. Input provided or
+a verified terminal transition advances this closing fence and settles unfinished reservations;
+a delayed scan cannot reactivate them after a restart. An old displayed revision conflicts when
+ingress has reserved a concurrent request. A fresh claim of the current pending set also closes
+the provisional ingress it raced with.
+
+A positive pre-start veto closes the reservation and advances the same fence. Replay of a finished
+or vetoed token fails. Unknown eligibility leaves an inactive slot; a crashed verifier can exhaust
+the bounded slot limit, causing fallback rather than evicting known pending notices. This library
+does not expire reservations or infer that a hook starting after a claim is the same Codex request:
+the fixed payload has no request ID to prove that identity.
+
+`ScanRollout` reads at most 4 MiB with lines below 64 KiB. It requires a complete snapshot, one
+matching `session_meta` with main CLI source, and explicit `approvals_reviewer=user` on the exact
+turn. It returns only file identity, complete-line end offset and a veto. An exact-turn terminal
+anywhere in the snapshot, including before the start watermark, or a later turn context vetoes a
+new notice. Missing/null reviewer, partial or corrupt lines, duplicate JSON keys and budget overflow
+are unknown. Commands, conversation and paths are discarded. The caller must verify the held
+regular no-follow file identity and owner before and after the scan. Exact-turn user metadata alone
+does not prove the absence of dynamic settings, strict/Guardian routing or deciding related hooks;
+live recorder integration remains absent.
 
 ## Persistence and failure
 

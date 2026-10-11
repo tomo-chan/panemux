@@ -21,7 +21,7 @@ func AppendEpisode(r Record, b Binding, id, notice string) (Record, error) {
 	if r.SessionID != b.SessionID || r.Owner != b.Owner {
 		return r, ErrConflict
 	}
-	if r.Revision == MaxRevision || len(PendingIDs(r)) == MaxPending {
+	if r.Revision == MaxRevision || liveEpisodes(r) == MaxPending {
 		return r, ErrLimit
 	}
 	for _, ep := range r.Episodes {
@@ -35,7 +35,7 @@ func AppendEpisode(r Record, b Binding, id, notice string) (Record, error) {
 	next := cloneRecord(r)
 	next.Episodes = nil
 	for _, ep := range r.Episodes {
-		if ep.Disposition == Pending {
+		if ep.Disposition == Pending || ep.Disposition == Provisional {
 			next.Episodes = append(next.Episodes, ep)
 		}
 	}
@@ -78,11 +78,15 @@ func MarkProvided(r Record, p Provided) (Record, error) {
 	}
 	next := cloneRecord(r)
 	for i := range next.Episodes {
-		if next.Episodes[i].Disposition == Pending {
+		switch next.Episodes[i].Disposition {
+		case Pending:
 			next.Episodes[i].Disposition = ProvidedDisposition
+		case Provisional:
+			next.Episodes[i].Disposition = Resolved
 		}
 	}
 	next.Revision++
+	next.ClosedRevision = next.Revision
 	next.Receipt = &Receipt{Revision: p.Revision, EpisodeIDs: append([]string(nil), p.EpisodeIDs...)}
 	return next, nil
 }
@@ -114,8 +118,24 @@ func ResolveTurn(r Record, p Terminal) (Record, error) {
 		return r, ErrLimit
 	}
 	next.Revision++
+	next.ClosedRevision = next.Revision
 	next.Receipt = nil
+	for i := range next.Episodes {
+		if next.Episodes[i].Disposition == Provisional {
+			next.Episodes[i].Disposition = Resolved
+		}
+	}
 	return next, nil
+}
+
+func liveEpisodes(r Record) int {
+	n := 0
+	for _, ep := range r.Episodes {
+		if ep.Disposition == Pending || ep.Disposition == Provisional {
+			n++
+		}
+	}
+	return n
 }
 
 func equalSet(a, b []string) bool {
