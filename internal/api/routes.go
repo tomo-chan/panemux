@@ -4,6 +4,8 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+
+	"panemux/internal/requestsecurity"
 )
 
 // BoardRoutePrefix is the path prefix for the only part of the HTTP API that
@@ -24,12 +26,13 @@ const BoardRoutePrefix = "/api/board"
 // docs/quality-gateway.md's gate G3, and issue #178.
 //
 // boardAuth wraps the BoardRoutePrefix sub-router. Production passes the
-// bearer-token middleware. A nil value mounts those routes with no
+// bearer-token middleware. A nil value mounts those routes without bearer-token
 // middleware, which is what handler-level tests want: whether the token is
 // actually enforced is internal/server's contract and is tested there,
 // against the router this repository really serves.
 func (h *Handler) Mount(r chi.Router, boardAuth func(http.Handler) http.Handler) {
 	r.Route("/api", func(r chi.Router) {
+		r.Use(requestsecurity.Middleware)
 		r.Get("/layout", h.GetLayout)
 		r.Put("/layout", h.PutLayout)
 		r.Get("/workspaces", h.GetWorkspaces)
@@ -78,6 +81,7 @@ func (h *Handler) Mount(r chi.Router, boardAuth func(http.Handler) http.Handler)
 		r.Get("/session-token", h.GetBoardSessionToken)
 	})
 	r.Route(BoardRoutePrefix, func(r chi.Router) {
+		r.Use(requestsecurity.Middleware)
 		if boardAuth != nil {
 			r.Use(boardAuth)
 		}

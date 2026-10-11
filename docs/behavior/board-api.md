@@ -5,7 +5,9 @@
 ## Agent Board REST API
 
 Every `/api/board/*` route requires `Authorization: Bearer <server.auth_token>`; invalid or missing
-credentials return `401` before handler processing. `GET /api/session-token` is the deliberate
+credentials return `401` before handler processing. The
+[shared browser request guard](../security/auth.md#shared-browser-request-guard) runs first,
+returning `403` for refused browser authority/evidence even with a valid token. `GET /api/session-token` is the deliberate
 exception described below.
 
 ### `GET /api/session-token`
@@ -16,7 +18,8 @@ Returns browser bootstrap data:
 { "token": "a1b2c3...", "command_center_enabled": true, "agent_board_enabled": true }
 ```
 
-The endpoint is unauthenticated because the browser uses it to learn a generated token. It returns
+The endpoint is unauthenticated because the browser uses it to learn a generated token. The
+shared browser request guard also applies before token disclosure. It returns
 `403` when the socket peer is not loopback, when `Host` is not `localhost`, a loopback address, or
 `0.0.0.0`, or when any `X-Forwarded-For`, `X-Real-IP`, or `Forwarded` value is present. Forwarding
 headers are rejected regardless of the addresses they contain. Valid direct requests return `200`.

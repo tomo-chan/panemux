@@ -60,6 +60,7 @@ panemux は、panemux のホストとすべての `ssh_connections` のホスト
 
 - **認証しない。** [`/ws/{sessionID}`](websocket.md#websocket-protocol) や [`GET /api/tasks`](tasks.md#get-apitasks) と同じく bearer トークンは要らない。
 - **cross-site の要求は、upgrade の前、収集を始める前に `403` で拒否する。** `GET /api/tasks` と同じ規則（`Sec-Fetch-Site` が `cross-site` か `same-site`、または `Origin` のホスト名・実効ポートが要求の Host と一致しない）に加え、`/ws/{sessionID}` と同じ upgrade 自身の Origin 検査を行う。ストリームを開くとすべてのホストに接続するので、この拒否はその副作用を守る（[Task dashboard collection](../security/command-execution.md#task-dashboard-collection)）。
+- Origin のない browser 要求には、Host と一致する Referer と整合する Fetch Metadata が必要。browser header のない CLI 要求は維持する（[共有 browser request guard](../security/auth.md#shared-browser-request-guard)）。
 - クライアントが送るフレームは 512 バイトまで。超えたら接続を閉じる。
 
 #### フレーム

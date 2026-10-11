@@ -957,7 +957,9 @@ Collects from every host and returns:
   ([Current boundaries](../overview.md#current-boundaries)). Because it dials every host, it
   answers `403` to a request another site's page made: `Sec-Fetch-Site` of `cross-site` or
   `same-site`, or an `Origin` whose hostname and effective port differ from request Host. A request with
-  neither header (not from a browser page) is served.
+  no browser headers is served for CLI compatibility. Origin-free browser requests require
+  a matching Referer and consistent Fetch Metadata under the
+  [shared browser request guard](../security/auth.md#shared-browser-request-guard).
 
 ### `POST /api/tasks/hosts/{name}/reconnect`
 

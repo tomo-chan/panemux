@@ -261,7 +261,9 @@ side effect another site could trigger with an `<img>` or a `WebSocket`. These t
 `PUT /api/tasks/records`, which writes the operator's record file, and the two routes that start and
 resume tasks ([below](#task-launch-and-resume)) therefore refuse a request whose
 `Sec-Fetch-Site` is `cross-site` or `same-site`, or whose `Origin` hostname and effective port
-do not match the request Host (the shared `internal/requestsecurity` guard), before collecting or dialing anything. The record route runs no command:
+do not match the request Host, before collecting or dialing anything. Like every other API,
+Origin-free browser requests require a matching Referer and consistent Fetch Metadata
+under the [shared browser request guard](auth.md#shared-browser-request-guard). The record route runs no command:
 it writes `~/.config/panemux/tasks.json` through `fileops.AtomicWrite`, and a label reaches the
 browser only as text, never as markup or a URL.
 The response itself is never readable cross-site — no CORS header is sent — so this protects the

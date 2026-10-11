@@ -63,7 +63,8 @@ backend and UI are released together.
   `/api/board/*` and `/ws/board/command` use a bearer token; the unauthenticated
   `GET /api/session-token` bootstrap route returns that token only after loopback remote-address and
   `Host` checks. These controls do not turn the whole server into an Internet-facing multi-user
-  service.
+  service. All API and WebSocket routes refuse another browser authority before side effects
+  under the [shared browser request guard](security/auth.md#shared-browser-request-guard).
 - Panemux does not terminate TLS. Non-loopback Agent Board deployments require a TLS-terminating
   reverse proxy; see [Auth token and transport encryption](security/auth.md).
 - Loopback URL forwarding assumes the browser and panemux server run on the same host. A browser on

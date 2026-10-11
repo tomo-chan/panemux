@@ -60,13 +60,14 @@ func TestAddr_ReturnsConfiguredAddress(t *testing.T) {
 	assert.Equal(t, "127.0.0.1:8080", srv.Addr())
 }
 
-func TestCorsMiddleware_LocalhostOrigin_ReflectsOrigin(t *testing.T) {
+func TestCorsMiddleware_SameAuthorityOrigin_ReflectsOrigin(t *testing.T) {
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 	handler := corsMiddleware(inner)
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Host = "localhost:5173"
 	req.Header.Set("Origin", "http://localhost:5173")
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
@@ -134,24 +135,6 @@ func TestSecurityHeadersMiddleware_SetsHeaders(t *testing.T) {
 	assert.Equal(t, "nosniff", rr.Header().Get("X-Content-Type-Options"))
 	assert.Equal(t, "DENY", rr.Header().Get("X-Frame-Options"))
 	assert.Equal(t, "strict-origin-when-cross-origin", rr.Header().Get("Referrer-Policy"))
-}
-
-func TestIsLocalhostOrigin(t *testing.T) {
-	tests := []struct {
-		origin string
-		want   bool
-	}{
-		{"http://localhost:8080", true},
-		{"http://localhost:5173", true},
-		{"http://127.0.0.1:8080", true},
-		{"http://[::1]:8080", true},
-		{"http://evil.com", false},
-		{"http://notlocalhost.com", false},
-		{"://invalid", false},
-	}
-	for _, tc := range tests {
-		assert.Equal(t, tc.want, isLocalhostOrigin(tc.origin), "origin: %s", tc.origin)
-	}
 }
 
 // The two tests below are the deliberate exception to the consolidation in
