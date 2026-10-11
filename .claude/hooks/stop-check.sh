@@ -116,10 +116,17 @@ $1"; }
 		# list of unformatted files to stdout. Merging them reported a file
 		# that does not parse as a formatting problem, and told the agent to
 		# run `make fmt`, which runs gofmt and fails the same way.
+		#
+		# gofmt runs twice, once per stream, rather than sending stderr to a
+		# file. The file used to live in "$repo_root/.git/", which in a
+		# worktree is a FILE, so gofmt never ran and an unformatted file
+		# passed (issue #350); one under $TMPDIR could still fail to be
+		# created, and blocking on that is a finding about the machine, not
+		# the change (principle 4). Two runs need no file at all.
 		# shellcheck disable=SC2086 # word splitting is the intent: one arg per file
-		unformatted=$(gofmt -s -l $go_files 2> "$repo_root/.git/stop-check-gofmt-err")
-		gofmt_err=$(cat "$repo_root/.git/stop-check-gofmt-err" 2> /dev/null)
-		rm -f "$repo_root/.git/stop-check-gofmt-err"
+		unformatted=$(gofmt -s -l $go_files 2> /dev/null)
+		# shellcheck disable=SC2086 # word splitting is the intent: one arg per file
+		gofmt_err=$(gofmt -s -l $go_files 2>&1 > /dev/null)
 
 		if [ -n "$gofmt_err" ]; then
 			note "G1: these files do not parse:
