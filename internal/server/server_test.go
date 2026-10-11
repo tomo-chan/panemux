@@ -60,6 +60,7 @@ func TestAddr_ReturnsConfiguredAddress(t *testing.T) {
 	assert.Equal(t, "127.0.0.1:8080", srv.Addr())
 }
 
+//efficacy:exempt Preserves accepted same-authority CORS; refusal is covered by TestServer_OriginGuardRealRouter.
 func TestCorsMiddleware_SameAuthorityOrigin_ReflectsOrigin(t *testing.T) {
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

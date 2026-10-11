@@ -48,6 +48,7 @@ func TestAllowedOriginPolicy(t *testing.T) {
 		{"bad host", "http://example.test", "example.test/path", false},
 		{"invalid IP literal", "http://[not:ip]", "[not:ip]", false},
 		{"non-IP brackets", "http://[example.test]", "[example.test]", false},
+		{"origin absent", "", "localhost:8080", true},
 	}
 	for _, tc := range cases {
 		for _, site := range []string{"", "same-origin", "none", "same-site", "cross-site"} {
@@ -60,12 +61,35 @@ func TestAllowedOriginPolicy(t *testing.T) {
 				if site != "" {
 					r.Header.Set("Sec-Fetch-Site", site)
 				}
-				want := tc.want && site != "same-site" && site != "cross-site"
-				if tc.origin == "" && site != "" {
-					want = false
-				}
+				want := tc.want && site != "same-site" && site != "cross-site" && (tc.origin != "" || site == "")
 				assert.Equal(t, want, Allowed(r))
 			})
+		}
+	}
+}
+
+func TestAllowedRejectsDuplicateOrigin(t *testing.T) {
+	r := httptest.NewRequest("GET", "/ws/pane", nil)
+	r.Host = "example.test"
+	r.Header.Add("Origin", "http://example.test")
+	r.Header.Add("Origin", "http://example.test")
+	assert.False(t, Allowed(r))
+}
+
+func TestRefuse(t *testing.T) {
+	for _, origin := range []string{"", "http://other.test"} {
+		r := httptest.NewRequest("POST", "/api/tasks", nil)
+		r.Header.Set("Origin", origin)
+		if origin == "" {
+			r.Header.Del("Origin")
+		}
+		w := httptest.NewRecorder()
+		refused := Refuse(w, r)
+		assert.Equal(t, origin != "", refused)
+		if refused {
+			assert.Equal(t, 403, w.Code)
+		} else {
+			assert.Equal(t, 200, w.Code)
 		}
 	}
 }
@@ -109,31 +133,5 @@ func TestAllowedOriginlessBrowserEvidence(t *testing.T) {
 			}
 			assert.Equal(t, tc.want, Allowed(r))
 		})
-	}
-}
-
-func TestAllowedRejectsDuplicateOrigin(t *testing.T) {
-	r := httptest.NewRequest("GET", "/ws/pane", nil)
-	r.Host = "example.test"
-	r.Header.Add("Origin", "http://example.test")
-	r.Header.Add("Origin", "http://example.test")
-	assert.False(t, Allowed(r))
-}
-
-func TestRefuse(t *testing.T) {
-	for _, origin := range []string{"", "http://other.test"} {
-		r := httptest.NewRequest("POST", "/api/tasks", nil)
-		r.Header.Set("Origin", origin)
-		if origin == "" {
-			r.Header.Del("Origin")
-		}
-		w := httptest.NewRecorder()
-		refused := Refuse(w, r)
-		assert.Equal(t, origin != "", refused)
-		if refused {
-			assert.Equal(t, 403, w.Code)
-		} else {
-			assert.Equal(t, 200, w.Code)
-		}
 	}
 }
