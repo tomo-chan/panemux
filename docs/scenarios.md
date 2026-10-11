@@ -363,8 +363,8 @@ Stated explicitly, because an absent row reads as an oversight and these are dec
 
 ## Host-local notice library
 
-These rows verify the record contract. They do not assert live hook registration, owner verification
-or dashboard input-notice support.
+These rows verify records, helper commands and native ownership boundaries. They do not assert
+automatic launch routing attestation, hook installation or dashboard input-notice support.
 
 | ID | Scenario | Expected outcome | Verification |
 |---|---|---|---|
@@ -373,6 +373,9 @@ or dashboard input-notice support.
 | N3 | Resolving a turn and reading unsafe or corrupt records | Same-turn/owner/file evidence resolves only that turn; incomplete or stale evidence does not; unsafe links, shared permissions, oversize and unknown data are refused without overwrite | `auto`: `internal/taskhook` — `TestTerminalEvidenceOnlyClosesItsTurn`, `TestStoreRefusesCorruptionAndUnsafePaths`; `internal/fileops` — `TestPrivateRecordSafetyAndBounds`, `TestPrivateRecordRefusesLinksAndSharedModes`, `TestPrivateAtomicFailuresPreserveOldRecord`, `TestPrivateDirectoryFDDoesNotFollowRootReplacement`, `TestPrivateLockDeadlineAndRelease` |
 | N4 | Eligibility scan finishes after Input provided | Inactive ingress reserves a revision; concurrent eligible episodes survive; a claim or pre-start veto prevents stale publication and token replay | `auto`: `internal/taskhook` — `TestIngressCannotPublishAcrossProvided`, `TestConcurrentIngressPreservesEveryEligibleEpisode`, `TestIngressVetoAndBindingConflict` |
 | N5 | Reading exact-turn metadata before starting a notice | Explicit main CLI session and exact-turn user reviewer are required; an earlier terminal or later turn vetoes; incomplete, corrupt and oversized snapshots stay unknown | `auto`: `internal/taskhook` — `TestRolloutExactTurnReviewerAndTerminalVeto`, `TestRolloutUnknownNeverCreatesEligibility` |
+| N6 | Recovering an exhausted provisional set after verifier crashes | Exact full-set/revision recovery restores capacity, preserves active episodes/notice ID and prevents old token revival | `auto`: `internal/taskhook` — `TestRecoveryReleasesOnlyInactiveCapacityAfterCrash` |
+| N7 | Native ancestry and explicit session binding | Immutable launch identity, exact birth/UID/executable and unique matching session file are required; multiple other sessions and duplicate descriptors are allowed; unknown scope and changed bindings cannot publish | `auto`: `internal/taskhook` — `TestPrivateRegistryCannotRelabelOwnerOrScope`, `TestBindingRequiresVerifiedAncestorAndUniqueExplicitSession`, `TestVerifierRechecksBeforePublishAndCancelsUnknownIngress`, `TestNativeProcessIdentityAndHeldFileChecks`, `TestCommandRegistersKernelParentWithUnknownScope` |
+| N8 | Helper failures and control-plane reconciliation | Hook errors and blocked stdin stay silent exit 0; explicit claims and terminal evidence use complete CAS; selfcheck certifies only protocol/process probe | `auto`: `internal/taskhook` — `TestHookCommandIsSilentAndBoundedOnEveryFailure`, `TestCommandInspectClaimRecoveryAndSelfcheck`, `TestCommandTerminalUsesFullRevisionAndFileEvidence`; `cmd/panemux-task-hook` — `TestHookProcessDeadlineAndEmptyOutput` |
 
 ## Checking this ledger
 

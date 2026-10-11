@@ -400,7 +400,7 @@ test-model-check:
 #           UI components (App, SplitContainer, TerminalPane …) require a real
 #           browser renderer and are covered by integration / E2E tests.
 
-COVERAGE_PKGS := ./internal/config/...,./internal/api/...,./internal/ws/...,./internal/server/...,./internal/board/...,./internal/portforward/...,./internal/commandcenter/...,./internal/boardmcp/...,./internal/fileops/...,./internal/homedir/...,./internal/cachedir/...,./internal/tasks/...,./internal/taskevents/...,./internal/requestsecurity/...,./internal/testcap/...,./internal/taskhook/...,.
+COVERAGE_PKGS := ./internal/config/...,./internal/api/...,./internal/ws/...,./internal/server/...,./internal/board/...,./internal/portforward/...,./internal/commandcenter/...,./internal/boardmcp/...,./internal/fileops/...,./internal/homedir/...,./internal/cachedir/...,./internal/tasks/...,./internal/taskevents/...,./internal/requestsecurity/...,./internal/testcap/...,./internal/taskhook/...,./cmd/panemux-task-hook/...,.
 
 coverage: coverage-go coverage-frontend
 
@@ -429,6 +429,7 @@ coverage-go: build-frontend
 	  ./internal/requestsecurity/... \
 	  ./internal/testcap/... \
 	  ./internal/taskhook/... \
+	  ./cmd/panemux-task-hook/... \
 	  . \
 	  -coverprofile=coverage.out \
 	  -coverpkg=$(COVERAGE_PKGS) \

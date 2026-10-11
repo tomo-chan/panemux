@@ -105,12 +105,12 @@ type Provided struct {
 // Partial lines, rotation, truncation, scan gaps and unknown events are not
 // evidence and must never be passed here by a reader.
 type Terminal struct {
-	SessionID string
-	TurnID    string
-	FileID    string
-	Owner     Owner
-	Revision  uint64
-	Offset    int64
+	SessionID string `json:"session_id"`
+	TurnID    string `json:"turn_id"`
+	FileID    string `json:"file_id"`
+	Owner     Owner  `json:"owner"`
+	Revision  uint64 `json:"revision"`
+	Offset    int64  `json:"offset"`
 }
 
 func ParsePermission(data []byte) (Permission, error) {

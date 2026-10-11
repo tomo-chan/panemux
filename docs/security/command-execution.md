@@ -477,8 +477,9 @@ directory last on `PATH`). `TestBuildLaunchScript_RefusesInputBeforeAnythingRuns
 
 The host-local notice library accepts process/session/turn bindings only from a trusted verifier;
 the hook's session/turn fields or an inherited generation variable alone are not owner proof.
-It has no live process verifier or hook registration, and does not change task collection or
-Codex settings. Its parsing and storage boundary must keep these properties:
+The standalone helper verifies native processes and owned open rollouts when supplied with a
+trusted launch registration. It does not install hooks or change task collection or Codex settings.
+Its parsing and storage boundary must keep these properties:
 
 - Hook JSON is bounded to 64 KiB and rejects duplicate/unknown keys, excessive nesting and
   trailing values. Only the fixed PermissionRequest/main-task/Bash input shape is extracted.
@@ -497,6 +498,23 @@ Codex settings. Its parsing and storage boundary must keep these properties:
 - The shared lock is an advisory file lock with a 100 ms acquisition budget for notice mutations.
   A process exit releases it. The lock file is never deleted as stale, which would let contenders
   lock different inodes. Pending is bounded to 16 notices and is never overwritten on overflow.
+- Registry records are immutable, bounded to 8 KiB and use the same private descriptor-relative
+  storage. The generation environment variable is only a lookup candidate. Verify a finite same-UID
+  parent chain, exact kernel PID/birth, native executable identity and explicit session/file identity.
+  macOS birth microseconds must not be rounded; Linux birth includes boot ID and start ticks.
+- Native rollout reads open the trusted canonical root and each nested component with no-follow
+  directory descriptors, then check regular type, UID, nonshared-write mode, one link and the
+  kernel-held file identity. Read complete bounded snapshots; reject truncation or modification.
+  macOS `lsof` uses a literal `/bin/sh -c` script with a numeric PID on stdin, validated again in
+  the fixed script; no dynamic command string or payload value enters argv. Output is bounded to
+  256 KiB and 2048 file entries. Linux uses generated numeric `/proc` paths, not arbitrary stdin paths.
+- Hook mode always exits 0 with empty stdout/stderr and no allow/deny output. A 500 ms process
+  deadline bounds blocked input and I/O; an interrupted write remains unknown, never acknowledged.
+  Failed proof cleanup and explicit full-set provisional recovery never settle active notices by age.
+- Launch routing attestations are trusted control-plane evidence, not claims accepted from hook
+  input. Exact-turn user reviewer alone cannot prove no-strict or passive related hooks. Unknown
+  attestations stay false and cannot activate the recorder. The current helper does not certify
+  all config/rules/plugin sources or dynamic routing; automatic managed launch attestation is absent.
 
 The record and state contract is in [Task notice records](../behavior/task-hook-records.md).
 
