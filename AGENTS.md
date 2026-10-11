@@ -50,8 +50,9 @@ being left to memory. `.claude/` holds the agent-side half:
   security scope, Linux/WSL2 behavior, and managed-setting limitations. It also wires two hooks.
   A `PostToolUse` hook checks the file
   you just edited (`gofmt -s`, and `go vet` on its package, or `tsc --noEmit`
-  for frontend files), in the checkout that holds that file — the main checkout
-  or a worktree nested in it, whichever checkout's hook ran. A `Stop` hook checks what the whole turn changed
+  for frontend files), in the git checkout that holds that file when it is a checkout of this
+  repository — the main checkout or any of its worktrees, whichever checkout's hooks Claude Code
+  ran. A file in another repository gets `gofmt -s` only. A `Stop` hook checks what the whole turn changed
   (formatting, plus the tests for the touched Go packages and the frontend
   tests related to the touched modules) in the checkout of the session's working
   directory, and refuses to end the turn while any

@@ -1308,11 +1308,21 @@ derived its repository from its own path, so it vetted `./.claude/worktrees/<nam
 main module and failed every Go edit. It now asks git for the top level and the prefix of the edited
 file's directory, and runs `gofmt`, `go vet` and `tsc --noEmit` there; the prefix rather than
 stripping the top level off the path, because git resolves symbolic links such as macOS's `/tmp`.
-The Stop hook already took its repository from the working directory, but wrote gofmt's stderr to
-`$repo_root/.git/`, which in a worktree is a file, so gofmt never ran there; the file now comes
-from `mktemp` under `$TMPDIR`. Delegating to the hooks on the worktree's own branch was rejected:
-the main checkout's hooks checking the worktree's module is enough, and running branch code from a
-hook would make what runs depend on the branch under edit.
+Only checkouts of the hook's own repository are vetted and type-checked: the file's git common
+directory must equal the hook checkout's, compared with symbolic links resolved. Taking any git top
+level instead blocked edits in unrelated throwaway repositories (no `go.mod`, or a `go` directive
+newer than the pinned toolchain) and ran their own `node_modules/.bin/tsc`; such files get `gofmt`
+only, as before. A `go: ` load error in a worktree of this repository, such as a toolchain-bump
+branch's newer `go` directive, is reported without blocking. The Stop hook already took its
+repository from the working directory, but wrote gofmt's stderr to `$repo_root/.git/`, which in a
+worktree is a file, so gofmt never ran there. It now runs gofmt once per stream and needs no
+temporary file; a `mktemp` under `$TMPDIR` was tried first, and blocked the turn when it could not
+create the file, a fault of the machine rather than the change. Delegating to the hooks on the
+worktree's own branch was rejected: the main checkout's hooks checking the worktree's module is
+enough, and running the branch's hook scripts would make which checks run depend on the branch
+under edit. What those checks invoke is the worktree's own: `go vet` loads the worktree's module
+and `tsc` comes from the worktree's `frontend/node_modules`, the same dependencies `make check`
+there uses.
 
 ## WebSocket route separation and browser authority guard (#297, #298)
 

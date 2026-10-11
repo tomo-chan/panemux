@@ -18,6 +18,8 @@
 # Usage:
 #   post-edit-check.sh              # reads Claude Code's hook JSON on stdin
 #   post-edit-check.sh --file PATH  # same checks against PATH (used by the tests)
+#   post-edit-check.sh --file PATH --repo DIR
+#                                   # ...treating DIR's repository as this hook's own
 
 set -u
 
@@ -28,8 +30,10 @@ panemux_runtime_scripts="$panemux_toolchain_root/scripts"
 panemux_runtime "$panemux_toolchain_root" || exit 2
 
 file=""
+own_repo=$panemux_toolchain_root
 if [ "${1:-}" = "--file" ]; then
 	file=${2:-}
+	[ "${3:-}" != "--repo" ] || own_repo=${4:-}
 else
 	# Claude Code reports the written path under tool_input.file_path for Edit
 	# and under tool_response.filePath for some other tools. Read both, and
@@ -67,8 +71,25 @@ block() {
 # directory relative to the top level, with a trailing slash, or empty at the
 # top level itself. A file outside any git checkout leaves both empty, and the
 # vet and tsc steps below are skipped rather than guessed at.
+#
+# Only checkouts of this hook's own repository are checked: the main checkout
+# and any worktree of it, which share one git common directory. A file in any
+# other repository (an agent's throwaway reproduction under $TMPDIR) gets
+# gofmt and nothing else. Vetting it blocked on errors that say nothing about
+# the change, such as a missing go.mod, and the tsc step ran that repository's
+# own node_modules/.bin/tsc. The common directories are compared after
+# resolving symbolic links, for the same reason as --show-prefix.
+common_dir() {
+	d=$(git -C "$1" rev-parse --path-format=absolute --git-common-dir 2> /dev/null) || return 1
+	[ -n "$d" ] && CDPATH='' cd -- "$d" 2> /dev/null && pwd -P
+}
 file_dir=$(dirname "$file")
 repo_root=$(git -C "$file_dir" rev-parse --show-toplevel 2> /dev/null) || repo_root=""
+if [ -n "$repo_root" ]; then
+	file_common=$(common_dir "$file_dir") || file_common=""
+	own_common=$(common_dir "$own_repo") || own_common=""
+	{ [ -n "$own_common" ] && [ "$file_common" = "$own_common" ]; } || repo_root=""
+fi
 rel=""
 [ -z "$repo_root" ] || rel=$(git -C "$file_dir" rev-parse --show-prefix 2> /dev/null) || repo_root=""
 rel=${rel%/}
@@ -118,6 +139,15 @@ $parse_error"
 			#   sub/bad.go:5:26: fmt.Printf format %d has ... <- real, block
 			if printf '%s' "$vet_output" | grep -q '^vet: '; then
 				printf 'G1: ./%s does not compile yet, so go vet was skipped:\n%s\n' \
+					"$rel" "$vet_output" >&2
+				exit 0
+			fi
+			# The go command itself could not load the module: a worktree
+			# whose go.mod asks for a newer Go than this hook's pinned
+			# toolchain, say. That is not a finding about the edit
+			# (principle 4), so it is reported and not blocked on.
+			if printf '%s' "$vet_output" | head -n 1 | grep -q '^go: '; then
+				printf 'G1: go could not load ./%s, so go vet was skipped:\n%s\n' \
 					"$rel" "$vet_output" >&2
 				exit 0
 			fi

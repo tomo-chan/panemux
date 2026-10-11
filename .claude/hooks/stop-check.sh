@@ -117,14 +117,16 @@ $1"; }
 		# that does not parse as a formatting problem, and told the agent to
 		# run `make fmt`, which runs gofmt and fails the same way.
 		#
-		# The stderr file lives under $TMPDIR, not "$repo_root/.git/": in a
-		# worktree .git is a FILE, so redirecting there failed, gofmt never
-		# ran, and an unformatted file passed (issue #350).
-		gofmt_err_file=$(mktemp "${TMPDIR:-/tmp}/panemux-stop-gofmt-err.XXXXXX") || { printf '%s\n' "G1: could not create a temporary file for gofmt's stderr" >&2; exit 2; }
+		# gofmt runs twice, once per stream, rather than sending stderr to a
+		# file. The file used to live in "$repo_root/.git/", which in a
+		# worktree is a FILE, so gofmt never ran and an unformatted file
+		# passed (issue #350); one under $TMPDIR could still fail to be
+		# created, and blocking on that is a finding about the machine, not
+		# the change (principle 4). Two runs need no file at all.
 		# shellcheck disable=SC2086 # word splitting is the intent: one arg per file
-		unformatted=$(gofmt -s -l $go_files 2> "$gofmt_err_file")
-		gofmt_err=$(cat "$gofmt_err_file" 2> /dev/null)
-		rm -f "$gofmt_err_file"
+		unformatted=$(gofmt -s -l $go_files 2> /dev/null)
+		# shellcheck disable=SC2086 # word splitting is the intent: one arg per file
+		gofmt_err=$(gofmt -s -l $go_files 2>&1 > /dev/null)
 
 		if [ -n "$gofmt_err" ]; then
 			note "G1: these files do not parse:

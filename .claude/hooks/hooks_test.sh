@@ -312,7 +312,7 @@ if command -v go > /dev/null 2>&1; then
 	nested_vet_run() {
 		d=$(fixture_nested_worktree)
 		write_vet_bad "$d/.claude/worktrees/wt/sub/bad.go"
-		"$edit_hook" --file "$d/.claude/worktrees/wt/sub/bad.go" 2>&1
+		"$edit_hook" --file "$d/.claude/worktrees/wt/sub/bad.go" --repo "$d" 2>&1
 		status=$?; rm -rf "$d"; return $status
 	}
 	expect_block_reason "go vet ./sub failed" \
@@ -321,7 +321,7 @@ if command -v go > /dev/null 2>&1; then
 	nested_clean_status() {
 		d=$(fixture_nested_worktree)
 		write_sub_go "$d/.claude/worktrees/wt/sub/t.go" T formatted
-		"$edit_hook" --file "$d/.claude/worktrees/wt/sub/t.go"
+		"$edit_hook" --file "$d/.claude/worktrees/wt/sub/t.go" --repo "$d"
 		status=$?; rm -rf "$d"; return $status
 	}
 	expect_status 0 "a healthy file in a nested worktree passes the edit gate" nested_clean_status
@@ -330,11 +330,102 @@ if command -v go > /dev/null 2>&1; then
 	main_checkout_vet_run() {
 		d=$(fixture_nested_worktree)
 		write_vet_bad "$d/sub/bad.go"
-		"$edit_hook" --file "$d/sub/bad.go" 2>&1
+		"$edit_hook" --file "$d/sub/bad.go" --repo "$d" 2>&1
 		status=$?; rm -rf "$d"; return $status
 	}
 	expect_block_reason "go vet ./sub failed" \
 		"a vet diagnostic in the main checkout is vetted there" main_checkout_vet_run
+fi
+
+# --- checkouts of other repositories ------------------------------------------
+#
+# The edit gate checks only checkouts of the repository its own hooks belong
+# to: the main checkout and any worktree of it. A file in an unrelated git
+# repository — an agent's throwaway reproduction under $TMPDIR — is not this
+# repository's to vet or type-check. Vetting it blocked on errors that say
+# nothing about the change (no go.mod; a go directive newer than the pinned
+# toolchain), and the tsc step ran that repository's own node_modules/.bin/tsc.
+# --repo is not passed here: the fixtures are compared with the hook's real
+# checkout, exactly as Claude Code runs it.
+
+# fixture_foreign_repo makes a git repository unrelated to this one.
+fixture_foreign_repo() {
+	dir=$(mktemp -d "$work/foreign.XXXXXX") || exit 1
+	git -C "$dir" init -q . || exit 1
+	echo "$dir"
+}
+
+if command -v go > /dev/null 2>&1; then
+	foreign_no_module_status() {
+		d=$(fixture_foreign_repo)
+		printf 'package main\n\nfunc main() {}\n' > "$d/main.go"
+		"$edit_hook" --file "$d/main.go"
+		status=$?; rm -rf "$d"; return $status
+	}
+	expect_status 0 "a Go file in an unrelated repository without go.mod is not vetted" \
+		foreign_no_module_status
+
+	foreign_new_go_status() {
+		d=$(fixture_foreign_repo)
+		printf 'module sample\n\ngo 1.99\n' > "$d/go.mod"
+		printf 'package main\n\nfunc main() {}\n' > "$d/main.go"
+		"$edit_hook" --file "$d/main.go"
+		status=$?; rm -rf "$d"; return $status
+	}
+	expect_status 0 "a Go file in an unrelated module needing a newer Go is not vetted" \
+		foreign_new_go_status
+
+	# A worktree of this repository whose go.mod asks for a newer Go than
+	# the pinned toolchain (a toolchain-bump branch) cannot be loaded at all;
+	# that is reported, not blocked on.
+	newer_go_worktree_status() {
+		d=$(fixture_repo)
+		printf 'module sample\n\ngo 1.99\n' > "$d/go.mod"
+		"$edit_hook" --file "$d/sub/s.go" --repo "$d"
+		status=$?; rm -rf "$d"; return $status
+	}
+	expect_status 0 "a module the pinned Go cannot load is not blocked on" \
+		newer_go_worktree_status
+fi
+
+# gofmt needs no repository, so it still runs on a foreign file.
+foreign_unformatted_run() {
+	d=$(fixture_foreign_repo)
+	printf 'package main\n\nfunc main() {\n    println()\n}\n' > "$d/main.go"
+	"$edit_hook" --file "$d/main.go" 2>&1
+	status=$?; rm -rf "$d"; return $status
+}
+expect_block_reason "not gofmt -s clean" \
+	"gofmt still checks a file in an unrelated repository" foreign_unformatted_run
+
+foreign_tsc_status() {
+	d=$(fixture_foreign_repo)
+	mkdir -p "$d/frontend/node_modules/.bin"
+	printf '#!/bin/sh\necho FOREIGN_TSC_RAN >&2\nexit 1\n' > "$d/frontend/node_modules/.bin/tsc"
+	chmod +x "$d/frontend/node_modules/.bin/tsc"
+	printf '{"name":"sample"}\n' > "$d/frontend/package.json"
+	printf 'export const a = 1\n' > "$d/frontend/x.ts"
+	output=$("$edit_hook" --file "$d/frontend/x.ts" 2>&1)
+	status=$?; rm -rf "$d"
+	case "$output" in *FOREIGN_TSC_RAN*) return 3 ;; esac
+	return $status
+}
+expect_status 0 "an unrelated repository's own tsc is never run" foreign_tsc_status
+
+# A worktree of the hook's repository is still checked through --repo, and a
+# file outside it is not: the same guard, seen from the fixture side.
+if command -v go > /dev/null 2>&1; then
+	other_repo_vet_status() {
+		d=$(fixture_repo)
+		o=$(fixture_foreign_repo)
+		cp "$d/go.mod" "$o/go.mod"
+		mkdir -p "$o/sub"
+		write_vet_bad "$o/sub/bad.go"
+		"$edit_hook" --file "$o/sub/bad.go" --repo "$d"
+		status=$?; rm -rf "$d" "$o"; return $status
+	}
+	expect_status 0 "a vet diagnostic outside the hook's repository is not reported" \
+		other_repo_vet_status
 fi
 
 nested_stop_unformatted_run() {
@@ -352,6 +443,22 @@ nested_stop_parse_run() {
 }
 expect_block_reason "do not parse" \
 	"the stop gate reports a parse error in a nested worktree" nested_stop_parse_run
+
+# A $TMPDIR that cannot hold a temporary file is a problem with the machine,
+# not with the change (principle 4). The gofmt check must still run, and the
+# turn is blocked only for what it finds.
+stop_no_tmpdir_run() {
+	d=$(fixture_repo)
+	write_sub_go "$d/sub/s.go" S unformatted
+	# A regular file, not a missing directory: the toolchain setup creates a
+	# missing $TMPDIR, so only a path that cannot become a directory makes
+	# mktemp fail.
+	: > "$work/tmpdir-is-a-file"
+	( cd "$d" || exit 1; TMPDIR="$work/tmpdir-is-a-file" "$stop_hook" < /dev/null 2>&1 )
+	status=$?; rm -rf "$d"; return $status
+}
+expect_block_reason "not gofmt -s clean" \
+	"the stop gate still runs gofmt when TMPDIR is unusable" stop_no_tmpdir_run
 
 # --- the loop bound ----------------------------------------------------------
 #
