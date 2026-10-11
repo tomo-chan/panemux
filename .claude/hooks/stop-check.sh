@@ -40,22 +40,29 @@ set -u
 # names it `gtimeout`), and falling back to an unbounded `cat` there hung
 # `make check` (#349). A background `cat` gets five seconds before a watcher
 # kills it. A non-interactive shell points a background job's stdin at
-# /dev/null, so the payload reaches it through fd 3. The watcher's output goes
-# to /dev/null so neither the caller's $(...) nor Claude Code's stderr pipe
-# waits for its leftover `sleep`.
+# /dev/null, so the payload reaches it through fd 3. The watcher holds none of
+# the caller's descriptors, so neither the caller's $(...), Claude Code's
+# stderr pipe nor whoever writes stdin waits on it. When `cat` ends first, the
+# watcher stops its own `sleep` and reaps it before exiting, and this shell
+# reaps the watcher: no timer outlives the hook, even as a zombie where PID 1
+# does not collect orphans.
 read_hook_payload() {
 	[ -t 0 ] && return 0
 	exec 3<&0
 	cat <&3 2> /dev/null &
 	reader=$!
+	exec 3<&-
 	(
-		sleep 5
-		kill "$reader"
-	) > /dev/null 2>&1 &
+		timer=
+		trap 'kill "$timer" 2> /dev/null; wait "$timer"; exit 0' TERM
+		sleep 5 &
+		timer=$!
+		wait "$timer" && kill "$reader"
+	) < /dev/null > /dev/null 2>&1 &
 	watcher=$!
 	wait "$reader" 2> /dev/null || true
 	kill "$watcher" 2> /dev/null || true
-	exec 3<&-
+	wait "$watcher" 2> /dev/null || true
 }
 
 if command -v jq > /dev/null 2>&1; then
