@@ -284,6 +284,75 @@ spaced_path_status() {
 }
 expect_status 2 "a path containing a space is not silently skipped" spaced_path_status
 
+# --- nested worktrees (issue #350) -------------------------------------------
+#
+# A session can run in a worktree nested inside the main checkout
+# (<repo>/.claude/worktrees/<name>), while Claude Code still runs the MAIN
+# checkout's hooks. Both gates must then check the worktree the edited file
+# belongs to: the edit gate used to vet ./.claude/worktrees/<name>/<pkg> in
+# the main module, and the stop gate wrote gofmt's stderr to
+# "$repo_root/.git/...", which in a worktree is a file, not a directory — so
+# gofmt never ran and an unformatted file passed.
+
+# fixture_nested_worktree makes a fixture repo with a worktree at
+# .claude/worktrees/wt inside it, and prints the repo's path.
+fixture_nested_worktree() {
+	d=$(fixture_repo)
+	git -C "$d" worktree add -q "$d/.claude/worktrees/wt" -b wt > /dev/null 2>&1 || exit 1
+	echo "$d"
+}
+
+write_vet_bad() {
+	printf 'package sub\n\nimport "fmt"\n\n// Bad has a vet diagnostic on purpose.\nfunc Bad() { fmt.Printf("%%%%d\\n", "not an int") }\n' > "$1"
+}
+
+if command -v go > /dev/null 2>&1; then
+	# The edit gate vets the package in the module the file belongs to, and
+	# names it relative to that module — not relative to the hook's checkout.
+	nested_vet_run() {
+		d=$(fixture_nested_worktree)
+		write_vet_bad "$d/.claude/worktrees/wt/sub/bad.go"
+		"$edit_hook" --file "$d/.claude/worktrees/wt/sub/bad.go" 2>&1
+		status=$?; rm -rf "$d"; return $status
+	}
+	expect_block_reason "go vet ./sub failed" \
+		"a vet diagnostic in a nested worktree is vetted in that worktree" nested_vet_run
+
+	nested_clean_status() {
+		d=$(fixture_nested_worktree)
+		write_sub_go "$d/.claude/worktrees/wt/sub/t.go" T formatted
+		"$edit_hook" --file "$d/.claude/worktrees/wt/sub/t.go"
+		status=$?; rm -rf "$d"; return $status
+	}
+	expect_status 0 "a healthy file in a nested worktree passes the edit gate" nested_clean_status
+
+	# The same, for the main checkout that holds the worktree.
+	main_checkout_vet_run() {
+		d=$(fixture_nested_worktree)
+		write_vet_bad "$d/sub/bad.go"
+		"$edit_hook" --file "$d/sub/bad.go" 2>&1
+		status=$?; rm -rf "$d"; return $status
+	}
+	expect_block_reason "go vet ./sub failed" \
+		"a vet diagnostic in the main checkout is vetted there" main_checkout_vet_run
+fi
+
+nested_stop_unformatted_run() {
+	d=$(fixture_nested_worktree)
+	write_sub_go "$d/.claude/worktrees/wt/sub/s.go" S unformatted
+	run_stop_verbose "$d/.claude/worktrees/wt"; status=$?; rm -rf "$d"; return $status
+}
+expect_block_reason "not gofmt -s clean" \
+	"the stop gate runs gofmt in a nested worktree" nested_stop_unformatted_run
+
+nested_stop_parse_run() {
+	d=$(fixture_nested_worktree)
+	printf 'package sub\n\nfunc Broken( {\n' > "$d/.claude/worktrees/wt/sub/broken.go"
+	run_stop_verbose "$d/.claude/worktrees/wt"; status=$?; rm -rf "$d"; return $status
+}
+expect_block_reason "do not parse" \
+	"the stop gate reports a parse error in a nested worktree" nested_stop_parse_run
+
 # --- the loop bound ----------------------------------------------------------
 #
 # Claude Code sets stop_hook_active when it is already continuing BECAUSE of a

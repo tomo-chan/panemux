@@ -1300,6 +1300,20 @@ exported in one worktree leak into another, which is the sharing this replaces. 
 directory failing is an error, not a fallback. The Go build and module caches were left where they
 are; old user-directory lint caches are not moved or deleted.
 
+### Agent hooks check the checkout that holds the change (2026-10-11, issue #350)
+
+Claude Code runs the hooks under `$CLAUDE_PROJECT_DIR`, which can be the main checkout while the
+session works in a worktree nested inside it (`<repo>/.claude/worktrees/<name>`). The edit hook
+derived its repository from its own path, so it vetted `./.claude/worktrees/<name>/<pkg>` in the
+main module and failed every Go edit. It now asks git for the top level and the prefix of the edited
+file's directory, and runs `gofmt`, `go vet` and `tsc --noEmit` there; the prefix rather than
+stripping the top level off the path, because git resolves symbolic links such as macOS's `/tmp`.
+The Stop hook already took its repository from the working directory, but wrote gofmt's stderr to
+`$repo_root/.git/`, which in a worktree is a file, so gofmt never ran there; the file now comes
+from `mktemp` under `$TMPDIR`. Delegating to the hooks on the worktree's own branch was rejected:
+the main checkout's hooks checking the worktree's module is enough, and running branch code from a
+hook would make what runs depend on the branch under edit.
+
 ## WebSocket route separation and browser authority guard (#297, #298)
 
 The command stream moved from `/ws/board-command` to `/ws/board/command` so the valid

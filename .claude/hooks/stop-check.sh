@@ -116,10 +116,15 @@ $1"; }
 		# list of unformatted files to stdout. Merging them reported a file
 		# that does not parse as a formatting problem, and told the agent to
 		# run `make fmt`, which runs gofmt and fails the same way.
+		#
+		# The stderr file lives under $TMPDIR, not "$repo_root/.git/": in a
+		# worktree .git is a FILE, so redirecting there failed, gofmt never
+		# ran, and an unformatted file passed (issue #350).
+		gofmt_err_file=$(mktemp "${TMPDIR:-/tmp}/panemux-stop-gofmt-err.XXXXXX") || { printf '%s\n' "G1: could not create a temporary file for gofmt's stderr" >&2; exit 2; }
 		# shellcheck disable=SC2086 # word splitting is the intent: one arg per file
-		unformatted=$(gofmt -s -l $go_files 2> "$repo_root/.git/stop-check-gofmt-err")
-		gofmt_err=$(cat "$repo_root/.git/stop-check-gofmt-err" 2> /dev/null)
-		rm -f "$repo_root/.git/stop-check-gofmt-err"
+		unformatted=$(gofmt -s -l $go_files 2> "$gofmt_err_file")
+		gofmt_err=$(cat "$gofmt_err_file" 2> /dev/null)
+		rm -f "$gofmt_err_file"
 
 		if [ -n "$gofmt_err" ]; then
 			note "G1: these files do not parse:

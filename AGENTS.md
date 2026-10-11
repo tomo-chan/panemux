@@ -50,9 +50,11 @@ being left to memory. `.claude/` holds the agent-side half:
   security scope, Linux/WSL2 behavior, and managed-setting limitations. It also wires two hooks.
   A `PostToolUse` hook checks the file
   you just edited (`gofmt -s`, and `go vet` on its package, or `tsc --noEmit`
-  for frontend files). A `Stop` hook checks what the whole turn changed
+  for frontend files), in the checkout that holds that file — the main checkout
+  or a worktree nested in it, whichever checkout's hook ran. A `Stop` hook checks what the whole turn changed
   (formatting, plus the tests for the touched Go packages and the frontend
-  tests related to the touched modules) and refuses to end the turn while any
+  tests related to the touched modules) in the checkout of the session's working
+  directory, and refuses to end the turn while any
   of it fails.
 - Neither hook runs `make check`, and neither does `.githooks/pre-push`, which runs only the checks
   the pushed change touches. The whole suite is CI's, and `make check` run by hand.

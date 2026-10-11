@@ -27,9 +27,6 @@ panemux_runtime_scripts="$panemux_toolchain_root/scripts"
 . "$panemux_runtime_scripts/runtime-env.sh"
 panemux_runtime "$panemux_toolchain_root" || exit 2
 
-hooks_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
-repo_root=$(CDPATH='' cd -- "$hooks_dir/../.." && pwd)
-
 file=""
 if [ "${1:-}" = "--file" ]; then
 	file=${2:-}
@@ -58,6 +55,24 @@ block() {
 	exit 2
 }
 
+# The checkout to check in is the one that holds the edited file, not the one
+# that holds this hook. Claude Code runs "$CLAUDE_PROJECT_DIR"/.claude/hooks/,
+# which is the MAIN checkout even for a session in a worktree nested inside it
+# (<repo>/.claude/worktrees/<name>), and vetting that worktree's package from
+# the main module fails on every edit (issue #350).
+#
+# --show-prefix, not stripping --show-toplevel off the path: git prints the
+# top level with symbolic links resolved (macOS's /tmp and $TMPDIR are links
+# into /private), so the edited path need not start with it. The prefix is the
+# directory relative to the top level, with a trailing slash, or empty at the
+# top level itself. A file outside any git checkout leaves both empty, and the
+# vet and tsc steps below are skipped rather than guessed at.
+file_dir=$(dirname "$file")
+repo_root=$(git -C "$file_dir" rev-parse --show-toplevel 2> /dev/null) || repo_root=""
+rel=""
+[ -z "$repo_root" ] || rel=$(git -C "$file_dir" rev-parse --show-prefix 2> /dev/null) || repo_root=""
+rel=${rel%/}
+
 case "$file" in
 *.go)
 	command -v gofmt > /dev/null 2>&1 || exit 0
@@ -80,14 +95,10 @@ $parse_error"
 	fi
 
 	# go vet needs a package, not a file, and needs to run inside the module.
-	# A file outside this repository (the tests use temp files) has no package
-	# here, so the vet step is skipped rather than guessed at.
-	case "$file" in
-	"$repo_root"/*)
+	# A file outside any git checkout (the tests use temp files) has no
+	# package to name, so the vet step is skipped rather than guessed at.
+	if [ -n "$repo_root" ]; then
 		command -v go > /dev/null 2>&1 || exit 0
-		pkg_dir=$(dirname "$file")
-		rel=${pkg_dir#"$repo_root"}
-		rel=${rel#/}
 		[ -n "$rel" ] || rel="."
 
 		if ! vet_output=$(cd "$repo_root" && go vet "./$rel" 2>&1); then
@@ -113,16 +124,16 @@ $parse_error"
 			block "G1: go vet ./$rel failed:
 $vet_output"
 		fi
-		;;
-	esac
+	fi
 	;;
 *.ts | *.tsx)
 	# tsc is configured per project, not per file: frontend/tsconfig.json
 	# decides what "type-checks" even means here, so the whole project is
 	# checked. It is still seconds, and it is the same command make
 	# lint-frontend runs.
-	case "$file" in
-	"$repo_root"/frontend/*) ;;
+	[ -n "$repo_root" ] || exit 0
+	case "$rel/" in
+	frontend/*) ;;
 	*) exit 0 ;;
 	esac
 	[ -d "$repo_root/frontend/node_modules" ] || exit 0
