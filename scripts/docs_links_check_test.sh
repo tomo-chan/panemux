@@ -246,6 +246,39 @@ mkdir -p "$root/.cache"
 printf '[missing](absent.md)\n' > "$root/.cache/project-notes.md"
 expect 1 "$root" "other cache paths are still checked" "absent.md"
 
+# A worktree nested in the checkout (Claude Code puts them under
+# .claude/worktrees/) is another checkout: its markdown, and its own ignored
+# .cache/runtimes/, are not this one's to check. A worktree holds a .git file,
+# a nested clone a .git directory; both mark the boundary.
+root=$(fixture) || exit 1
+printf '# Index\n\n[detail](detail.md)\n' > "$root/index.md"
+printf '# Detail\n' > "$root/detail.md"
+mkdir -p "$root/.claude/worktrees/feature/.cache/runtimes/node-sample"
+printf 'gitdir: /nonexistent\n' > "$root/.claude/worktrees/feature/.git"
+printf '[missing](absent.md)\n' > "$root/.claude/worktrees/feature/.cache/runtimes/node-sample/README.md"
+printf '[missing](gone.md)\n' > "$root/.claude/worktrees/feature/notes.md"
+expect 0 "$root" "a nested worktree (a .git file) is not checked" "ok —"
+
+root=$(fixture) || exit 1
+printf '# Index\n\n[detail](detail.md)\n' > "$root/index.md"
+printf '# Detail\n' > "$root/detail.md"
+mkdir -p "$root/vendor/clone/.git"
+printf '[missing](absent.md)\n' > "$root/vendor/clone/README.md"
+expect 0 "$root" "a nested clone (a .git directory) is not checked" "ok —"
+
+# The boundary is the nested checkout itself, not its siblings: a link into a
+# nested checkout does not resolve, because its files are not this one's.
+root=$(fixture) || exit 1
+printf '# Index\n\n[detail](detail.md)\n' > "$root/index.md"
+printf '# Detail\n' > "$root/detail.md"
+mkdir -p "$root/.claude/worktrees/feature" "$root/.claude/notes"
+printf 'gitdir: /nonexistent\n' > "$root/.claude/worktrees/feature/.git"
+printf '# Inner\n' > "$root/.claude/worktrees/feature/inner.md"
+printf '[missing](absent.md)\n' > "$root/.claude/notes/todo.md"
+printf '[inner](../worktrees/feature/inner.md)\n' >> "$root/.claude/notes/todo.md"
+expect 1 "$root" "files beside a nested checkout are still checked" "absent.md"
+expect 1 "$root" "a link into a nested checkout does not resolve" "inner.md"
+
 # ── Fail-closed ───────────────────────────────────────────────────────────────
 
 root=$(fixture) || exit 1
