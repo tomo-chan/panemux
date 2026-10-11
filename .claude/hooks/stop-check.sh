@@ -35,13 +35,27 @@ set -u
 # make `cat` block forever, and a Stop hook that HANGS is worse than one that
 # answers wrongly: the turn cannot end at all. That is not hypothetical; it
 # hung this repository's own test suite before the timeout was added.
+#
+# The bound is plain sh, not `timeout`: stock macOS has no `timeout` (coreutils
+# names it `gtimeout`), and falling back to an unbounded `cat` there hung
+# `make check` (#349). A background `cat` gets five seconds before a watcher
+# kills it. A non-interactive shell points a background job's stdin at
+# /dev/null, so the payload reaches it through fd 3. The watcher's output goes
+# to /dev/null so neither the caller's $(...) nor Claude Code's stderr pipe
+# waits for its leftover `sleep`.
 read_hook_payload() {
 	[ -t 0 ] && return 0
-	if command -v timeout > /dev/null 2>&1; then
-		timeout 5 cat 2> /dev/null || true
-	else
-		cat 2> /dev/null || true
-	fi
+	exec 3<&0
+	cat <&3 2> /dev/null &
+	reader=$!
+	(
+		sleep 5
+		kill "$reader"
+	) > /dev/null 2>&1 &
+	watcher=$!
+	wait "$reader" 2> /dev/null || true
+	kill "$watcher" 2> /dev/null || true
+	exec 3<&-
 }
 
 if command -v jq > /dev/null 2>&1; then

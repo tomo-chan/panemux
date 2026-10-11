@@ -309,17 +309,20 @@ if command -v jq > /dev/null 2>&1; then
 fi
 
 # A hook that hangs is worse than one that answers wrongly: the turn cannot end
-# at all. An inherited, idle stdin must not do that.
-if command -v timeout > /dev/null 2>&1; then
-	no_hang_status() {
-		d=$(fixture_repo)
-		( cd "$d" || exit 1; sleep 30 | timeout 20 "$stop_hook" > /dev/null 2>&1 )
-		status=$?; rm -rf "$d"
-		[ "$status" -eq 124 ] && return 1 # 124 = timeout killed it, i.e. it hung
-		return 0
-	}
-	expect_status 0 "an idle inherited stdin does not hang the hook" no_hang_status
-fi
+# at all. An inherited, idle stdin must not do that. The writer holds the pipe
+# for 30s and is the test's own bound, so this runs where `timeout` does not
+# exist (stock macOS) — scripts/go_toolchain_test.sh also strips it from PATH.
+no_hang_status() {
+	d=$(fixture_repo)
+	pidfile=$(mktemp "${TMPDIR:-/tmp}/hooks-idle-pid.XXXXXX") || return 1
+	start=$(date +%s)
+	( cd "$d" || exit 1; { sleep 30 & echo $! > "$pidfile"; } | "$stop_hook" > /dev/null 2>&1 )
+	elapsed=$(($(date +%s) - start))
+	kill "$(cat "$pidfile")" 2> /dev/null
+	rm -rf "$d" "$pidfile"
+	[ "$elapsed" -lt 20 ]
+}
+expect_status 0 "an idle inherited stdin does not hang the hook" no_hang_status
 
 # --- the edit gate's in-repo branches ----------------------------------------
 #
