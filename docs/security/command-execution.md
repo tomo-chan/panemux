@@ -473,6 +473,33 @@ substitution ran, or if the file is left behind. `TestLaunchScript_NewCodexTask`
 directory last on `PATH`). `TestBuildLaunchScript_RefusesInputBeforeAnythingRuns` and
 `TestBuildLaunchScript_AgentRules` cover every refusal above.
 
+### Private task notice records
+
+The host-local notice library accepts process/session/turn bindings only from a trusted verifier;
+the hook's session/turn fields or an inherited generation variable alone are not owner proof.
+It has no live process verifier or hook registration, and does not change task collection or
+Codex settings. Its parsing and storage boundary must keep these properties:
+
+- Hook JSON is bounded to 64 KiB and rejects duplicate/unknown keys, excessive nesting and
+  trailing values. Only the fixed PermissionRequest/main-task/Bash input shape is extracted.
+  Tool input, command, arguments, model, directory and transcript path are discarded. Fixed errors
+  contain none of the input text. Shape acceptance alone does not establish routing eligibility.
+- The private root must already exist, be owned by the effective user and have mode `0700`.
+  Opening it refuses a symlink and checks the opened directory descriptor. Every record operation
+  is relative to that descriptor, so substituting the root path cannot redirect an in-flight write.
+- Each file is opened with no-follow and nonblocking flags and checked with `fstat` for ownership,
+  regular type, mode `0600` and one hard link. Symlinks, hard links, FIFOs and shared permissions
+  are refused, including at replacement targets. Names contain only verified internal generation
+  and session IDs; no hook or browser path is opened.
+- Reads are bounded to 16 KiB. Writes use exclusive random temporary files in the same directory,
+  file sync, atomic descriptor-relative rename and directory sync. A failed commit is never
+  acknowledged; a failure after rename has an unknown durability result and requires a reread.
+- The shared lock is an advisory file lock with a 100 ms acquisition budget for notice mutations.
+  A process exit releases it. The lock file is never deleted as stale, which would let contenders
+  lock different inodes. Pending is bounded to 16 notices and is never overwritten on overflow.
+
+The record and state contract is in [Task notice records](../behavior/task-hook-records.md).
+
 ### Task summaries
 
 When `task_dashboard.summary.enabled` is set, the dashboard summarizes each Claude or Codex task

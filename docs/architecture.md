@@ -36,13 +36,14 @@ layout rendering, terminal emulation, interaction state, and presentation.
 | `internal/api` | Implement REST handlers and mount the route set. It is the single source of truth for API registration. |
 | `internal/ws` | Bridge session bytes and control messages to terminal WebSockets, stream command-center events, and serve the task event stream (`/ws/tasks/events`). |
 | `internal/requestsecurity` | Share browser Origin hostname/effective-port and Fetch Metadata checks across WebSockets and already-guarded task/SSH APIs. |
+| `internal/taskhook` | Define bounded host-local input-notice records and their owner/session-scoped compare-and-update transitions. This library does not verify a live process binding, register hooks, or feed task collection. |
 | `internal/server` | Compose middleware, API routes, WebSocket routes, static assets, and SPA fallback into the production router. |
 | `internal/portforward` | Maintain short-lived loopback listeners that forward callback traffic through a session's SSH connection. |
 | `internal/board` | Invoke agmsg through its documented scripts, relay rows across configured hosts, and maintain the in-memory status/history view. |
 | `internal/commandcenter` | Run one headless Claude query at a time, persist its session/history state, and stream structured events. |
 | `internal/boardmcp` | Expose the three board operations to the command-center subprocess through a narrow stdio MCP server backed by panemux REST APIs. |
 | `internal/homedir`, `internal/cachedir` | Centralize OS directory lookups and provide scoped test substitutions. |
-| `internal/fileops` | Centralize atomic persistent writes and injectable filesystem operations. |
+| `internal/fileops` | Centralize atomic persistent writes and injectable filesystem operations; provide descriptor-relative, no-follow private record storage and bounded process-safe locking. |
 
 ## Frontend component map
 

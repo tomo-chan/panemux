@@ -361,6 +361,17 @@ Stated explicitly, because an absent row reads as an oversight and these are dec
   use case's. See [quality-gateway.md](quality-gateway.md)'s "Accessibility" for the ceiling and
   for how to lower it after a fix.
 
+## Host-local notice library
+
+These rows verify the record contract. They do not assert live hook registration, owner verification
+or dashboard input-notice support.
+
+| ID | Scenario | Expected outcome | Verification |
+|---|---|---|---|
+| N1 | Multiple input notices and concurrent starts | Every start is retained up to the pending limit; stable notice IDs survive reads/restarts; generations and sessions are separate | `auto`: `internal/taskhook` — `TestStoreConcurrentAppendsKeepEveryNotice`, `TestStorePersistsStableNoticeAndDisposition`, `TestStoreSeparatesOwnerGenerationsAndSessions`, `TestPendingLimitAndCompaction` |
+| N2 | Claiming displayed notices while another start arrives | Only an exact owner/revision/set match clears all displayed notices; the same unchanged retry is idempotent; stale claims clear nothing | `auto`: `internal/taskhook` — `TestNoticeSetCompareAndUpdate`, `TestStoreWriteFailureDoesNotAcknowledgeOrClear` |
+| N3 | Resolving a turn and reading unsafe or corrupt records | Same-turn/owner/file evidence resolves only that turn; incomplete or stale evidence does not; unsafe links, shared permissions, oversize and unknown data are refused without overwrite | `auto`: `internal/taskhook` — `TestTerminalEvidenceOnlyClosesItsTurn`, `TestStoreRefusesCorruptionAndUnsafePaths`; `internal/fileops` — `TestPrivateRecordSafetyAndBounds`, `TestPrivateRecordRefusesLinksAndSharedModes`, `TestPrivateAtomicFailuresPreserveOldRecord`, `TestPrivateDirectoryFDDoesNotFollowRootReplacement`, `TestPrivateLockDeadlineAndRelease` |
+
 ## Checking this ledger
 
 `make check-scenarios` (part of `make check`) resolves every path and Go test name an `auto` row

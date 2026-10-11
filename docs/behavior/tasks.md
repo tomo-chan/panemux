@@ -289,6 +289,12 @@ does write:
   directory is that line's `cwd`, and the time it stopped is the rollout's modification time.
 - Codex tasks with a collected rollout can be summarized by Codex ([Summaries](#summaries)).
 
+### Host-local notice records
+
+Host-local notice state is a separate library contract described in
+[Task notice records](task-hook-records.md). It does not currently register a hook or modify
+the dashboard's normal collection and state rules above.
+
 ### Where a task runs
 
 | `location.kind` | Meaning |
