@@ -520,16 +520,75 @@ if command -v jq > /dev/null 2>&1; then
 fi
 
 # A hook that hangs is worse than one that answers wrongly: the turn cannot end
-# at all. An inherited, idle stdin must not do that.
-if command -v timeout > /dev/null 2>&1; then
+# at all. An inherited, idle stdin must not do that. The writer holds the pipe
+# for 30s and is the test's own bound, so this runs where `timeout` does not
+# exist (stock macOS) — scripts/go_toolchain_test.sh also strips it from PATH.
+#
+# The payload is only read when jq exists, so without it these would pass
+# while checking nothing: they are reported as skipped instead.
+if command -v jq > /dev/null 2>&1; then
 	no_hang_status() {
 		d=$(fixture_repo)
-		( cd "$d" || exit 1; sleep 30 | timeout 20 "$stop_hook" > /dev/null 2>&1 )
-		status=$?; rm -rf "$d"
-		[ "$status" -eq 124 ] && return 1 # 124 = timeout killed it, i.e. it hung
-		return 0
+		pidfile=$(mktemp "${TMPDIR:-/tmp}/hooks-idle-pid.XXXXXX") || return 1
+		start=$(date +%s)
+		( cd "$d" || exit 1; { sleep 30 & echo $! > "$pidfile"; } | "$stop_hook" > /dev/null 2>&1 )
+		elapsed=$(($(date +%s) - start))
+		kill "$(cat "$pidfile")" 2> /dev/null
+		rm -rf "$d" "$pidfile"
+		[ "$elapsed" -lt 20 ]
 	}
 	expect_status 0 "an idle inherited stdin does not hang the hook" no_hang_status
+
+	# The read's timer must not outlive the hook: a leftover `sleep` kept
+	# stdin open after the hook exited, and an unreaped one is a zombie
+	# wherever PID 1 does not collect orphans.
+	real_sleep=$(command -v sleep)
+	mkdir -p "$work/sleepstub"
+	cat > "$work/sleepstub/sleep" <<-STUB
+		#!/bin/sh
+		echo start >> "\$SLEEP_TRACE"
+		trap 'kill "\$child" 2> /dev/null; echo stopped >> "\$SLEEP_TRACE"; exit 143' TERM
+		"$real_sleep" "\$@" &
+		child=\$!
+		wait "\$child"
+		echo ended >> "\$SLEEP_TRACE"
+	STUB
+	chmod +x "$work/sleepstub/sleep"
+
+	timer_stopped_status() {
+		trace="$work/sleep.trace"
+		: > "$trace"
+		# The payload arrives a second late, so the timer is already running.
+		{ sleep 1; printf '{"stop_hook_active":true}'; } |
+			SLEEP_TRACE="$trace" PATH="$work/sleepstub:$PATH" "$stop_hook" > /dev/null 2>&1
+		grep -q start "$trace" && grep -qE 'stopped|ended' "$trace"
+	}
+	expect_status 0 "the payload timer is stopped before the hook returns" timer_stopped_status
+
+	stdin_released_status() {
+		fifo="$work/payload.fifo"
+		held="$work/payload.held"
+		rm -f "$fifo" "$held"
+		mkfifo "$fifo" || return 1
+		"$stop_hook" < "$fifo" > /dev/null 2>&1 &
+		hook=$!
+		printf '{"stop_hook_active":true}' > "$fifo"
+		wait "$hook"
+		# Opening a FIFO for writing completes only while something still has
+		# it open for reading; the read-write open releases a probe that waits.
+		( exec 4> "$fifo"; echo held > "$held" ) &
+		probe=$!
+		sleep 1
+		status=0
+		[ -e "$held" ] && status=1
+		exec 5<> "$fifo"
+		wait "$probe"
+		exec 5<&-
+		return $status
+	}
+	expect_status 0 "nothing holds stdin once the hook has returned" stdin_released_status
+else
+	echo "skip jq not installed — the idle-stdin checks are skipped"
 fi
 
 # --- the edit gate's in-repo branches ----------------------------------------
