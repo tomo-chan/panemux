@@ -146,7 +146,17 @@ $parse_error"
 			# whose go.mod asks for a newer Go than this hook's pinned
 			# toolchain, say. That is not a finding about the edit
 			# (principle 4), so it is reported and not blocked on.
-			if printf '%s' "$vet_output" | head -n 1 | grep -q '^go: '; then
+			#
+			# The go command also prints progress with the same prefix
+			# ("go: downloading ...") and then runs vet, so those lines are
+			# dropped first, and the output counts as a load error only when
+			# every remaining line is "go: ..." or its indented continuation.
+			# A "# pkg" header or a file:line diagnostic anywhere means vet
+			# ran, and it blocks.
+			load_output=$(printf '%s\n' "$vet_output" |
+				grep -vE '^go: (downloading|finding|found|extracting) ')
+			if printf '%s\n' "$load_output" | grep -q '^go: ' &&
+				! printf '%s\n' "$load_output" | grep -qvE '^(go: |[[:space:]]|$)'; then
 				printf 'G1: go could not load ./%s, so go vet was skipped:\n%s\n' \
 					"$rel" "$vet_output" >&2
 				exit 0

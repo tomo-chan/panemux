@@ -1313,7 +1313,9 @@ directory must equal the hook checkout's, compared with symbolic links resolved.
 level instead blocked edits in unrelated throwaway repositories (no `go.mod`, or a `go` directive
 newer than the pinned toolchain) and ran their own `node_modules/.bin/tsc`; such files get `gofmt`
 only, as before. A `go: ` load error in a worktree of this repository, such as a toolchain-bump
-branch's newer `go` directive, is reported without blocking. The Stop hook already took its
+branch's newer `go` directive, is reported without blocking; the go command's own progress lines
+(`go: downloading ...`) carry the same prefix and are dropped first, so a diagnostic printed after
+them still blocks. The Stop hook already took its
 repository from the working directory, but wrote gofmt's stderr to `$repo_root/.git/`, which in a
 worktree is a file, so gofmt never ran there. It now runs gofmt once per stream and needs no
 temporary file; a `mktemp` under `$TMPDIR` was tried first, and blocked the turn when it could not

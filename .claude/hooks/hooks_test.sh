@@ -386,6 +386,41 @@ if command -v go > /dev/null 2>&1; then
 	}
 	expect_status 0 "a module the pinned Go cannot load is not blocked on" \
 		newer_go_worktree_status
+
+	# The go command prints progress lines with the same "go: " prefix —
+	# "go: downloading ..." on the first vet after a dependency change — and
+	# then runs vet normally. A genuine diagnostic behind them must still
+	# block. A file:// module proxy and an empty module cache make the
+	# download real without the network; python3 builds the module zip.
+	if command -v python3 > /dev/null 2>&1; then
+		download_then_vet_run() {
+			d=$(fixture_repo)
+			proxy="$work/proxy"
+			modcache=$(mktemp -d "$work/modcache.XXXXXX") || exit 1
+			mkdir -p "$proxy/example.com/dep/@v"
+			printf 'v1.0.0\n' > "$proxy/example.com/dep/@v/list"
+			printf '{"Version":"v1.0.0"}\n' > "$proxy/example.com/dep/@v/v1.0.0.info"
+			printf 'module example.com/dep\n\ngo 1.25\n' > "$proxy/example.com/dep/@v/v1.0.0.mod"
+			python3 -c 'import sys, zipfile
+z = zipfile.ZipFile(sys.argv[1], "w")
+z.writestr("example.com/dep@v1.0.0/go.mod", "module example.com/dep\n\ngo 1.25\n")
+z.writestr("example.com/dep@v1.0.0/dep.go", "package dep\n\nfunc Name() string { return \"dep\" }\n")
+z.close()' "$proxy/example.com/dep/@v/v1.0.0.zip"
+			printf 'module sample\n\ngo 1.25\n\nrequire example.com/dep v1.0.0\n' > "$d/go.mod"
+			printf 'package sub\n\nimport (\n\t"fmt"\n\n\t"example.com/dep"\n)\n\n// Bad has a vet diagnostic on purpose.\nfunc Bad() { fmt.Printf("%%%%d\\n", dep.Name()) }\n' > "$d/sub/bad.go"
+			GOFLAGS=-mod=mod GOPROXY="file://$proxy" GOSUMDB=off GOMODCACHE="$modcache" \
+				"$edit_hook" --file "$d/sub/bad.go" --repo "$d" 2>&1
+			status=$?
+			# The module cache is read-only; only go can remove it.
+			GOMODCACHE="$modcache" go clean -modcache > /dev/null 2>&1
+			rm -rf "$d" "$proxy" "$modcache"
+			return $status
+		}
+		expect_block_reason "go vet ./sub failed" \
+			"a vet diagnostic after go: downloading lines still blocks" download_then_vet_run
+	else
+		echo "skip python3 not installed — the go: downloading case is skipped"
+	fi
 fi
 
 # gofmt needs no repository, so it still runs on a foreign file.
