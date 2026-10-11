@@ -61,9 +61,15 @@ trap 'rm -rf "$tmp"' EXIT
 # pruned so the second pass can drop everything under its parent: find lists a
 # directory's entries in no particular order, so a single pass cannot know a
 # sibling is inside a nested checkout until it has seen that `.git`.
+#
+# That pass is the correctness mechanism; the `*/.cache/...` prunes are only
+# speed. Each nested worktree carries its own ignored runtime SDK and lint
+# cache, thousands of entries apiece, which find would otherwise list for the
+# awk pass to throw away — a cost that grows with every worktree in a checkout
+# that runs this on every push.
 (
 	cd "$root" || exit 1
-	find . \( -name node_modules -o -name dist -o -path ./.cache/runtimes \) -prune -o -name .git -print -prune -o -print
+	find . \( -name node_modules -o -name dist -o -path '*/.cache/runtimes' -o -path '*/.cache/golangci-lint' \) -prune -o -name .git -print -prune -o -print
 ) | sed 's|^\./||' > "$tmp/all"
 
 awk '

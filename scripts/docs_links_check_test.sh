@@ -268,6 +268,8 @@ expect 0 "$root" "a nested clone (a .git directory) is not checked" "ok —"
 
 # The boundary is the nested checkout itself, not its siblings: a link into a
 # nested checkout does not resolve, because its files are not this one's.
+# The first case passes without the exclusion too; it guards against the
+# boundary growing wider (say, all of .claude/) rather than testing the fix.
 root=$(fixture) || exit 1
 printf '# Index\n\n[detail](detail.md)\n' > "$root/index.md"
 printf '# Detail\n' > "$root/detail.md"
