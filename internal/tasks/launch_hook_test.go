@@ -96,7 +96,8 @@ printf '%s' "${PANEMUX_TASK_OWNER_GENERATION:-}" > "$STUB_LOG/codex.generation"
 				}
 				script, err := buildLaunchScript(codexParams(t, mode, t.TempDir(), hostilePrompt))
 				require.NoError(t, err)
-				script = "PANEMUX_TASK_OWNER_GENERATION=g1-00000000000000000000000000000002\nexport PANEMUX_TASK_OWNER_GENERATION\n" + script
+				script = "PANEMUX_TASK_OWNER_GENERATION=g1-00000000000000000000000000000002\n" +
+					"export PANEMUX_TASK_OWNER_GENERATION\n" + script
 				started := time.Now()
 				require.NoError(t, parseLaunchOutput(h.run(t, script, "/bin/false")))
 				assert.Less(t, time.Since(started), 2500*time.Millisecond, "optional registration delayed ordinary exec")
@@ -141,7 +142,10 @@ printf '%s' "$$" > "$STUB_LOG/codex.pid"
 }
 
 func TestLaunchScriptUnsafeOrUnavailableHookFallsBack(t *testing.T) {
-	failures := []string{"missing-helper", "wrong-protocol", "symlink", "shared-helper", "missing-state", "no-account", "missing-group-bootstrap"}
+	failures := []string{
+		"missing-helper", "wrong-protocol", "symlink", "shared-helper", "missing-state", "no-account",
+		"missing-group-bootstrap",
+	}
 	for _, failure := range failures {
 		t.Run(failure, func(t *testing.T) {
 			h := newStubHost(t, true, false)
