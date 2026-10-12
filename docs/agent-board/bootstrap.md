@@ -8,7 +8,8 @@ Each pane opts in with `agent_board.enabled: true`. The team and agmsg path are 
 settings; pane-level team overrides do not exist.
 
 Panemux polls opted-in panes for an interactive agent type that agmsg itself marks as reliably
-process-detectable: `claude-code`, `codex`, `cursor`, `gemini`, `grok-build`, or `opencode`.
+process-detectable: `claude-code`, `codex`, `cursor`, `gemini`, `grok-build`, or `opencode`. The
+process rules are the Board rules in the [agent registry](../agent-registry.md#detection-rules).
 Explicit-only and desktop agent types are not guessed.
 
 A pane is bootstrapped only when:

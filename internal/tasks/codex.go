@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"panemux/internal/agent"
 )
 
 // Codex tasks (issue #264). Codex writes no file that says which process
@@ -470,18 +472,7 @@ func isCodexDaemon(command string) bool {
 	if !isCodexProgram(command) {
 		return false
 	}
-	return firstCodexPositional(strings.Fields(command)[1:]) == "app-server"
-}
-
-// isCodexProgram is any codex process, interactive or not.
-func isCodexProgram(command string) bool {
-	fields := strings.Fields(command)
-	//mutation:exempt[CONDITIONALS_BOUNDARY] unreachable — parseProcessRow keeps only rows that have a command
-	return len(fields) > 0 && strings.ToLower(fieldBase(fields[0])) == AgentCodex
-}
-
-func fieldBase(program string) string {
-	return program[strings.LastIndex(program, "/")+1:]
+	return agent.CodexSubcommand(command) == "app-server"
 }
 
 func codexLogVersion(r codexRollout) *LogVersion {
