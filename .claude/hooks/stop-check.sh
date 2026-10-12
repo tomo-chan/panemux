@@ -35,13 +35,34 @@ set -u
 # make `cat` block forever, and a Stop hook that HANGS is worse than one that
 # answers wrongly: the turn cannot end at all. That is not hypothetical; it
 # hung this repository's own test suite before the timeout was added.
+#
+# The bound is plain sh, not `timeout`: stock macOS has no `timeout` (coreutils
+# names it `gtimeout`), and falling back to an unbounded `cat` there hung
+# `make check` (#349). A background `cat` gets five seconds before a watcher
+# kills it. A non-interactive shell points a background job's stdin at
+# /dev/null, so the payload reaches it through fd 3. The watcher holds none of
+# the caller's descriptors, so neither the caller's $(...), Claude Code's
+# stderr pipe nor whoever writes stdin waits on it. When `cat` ends first, the
+# watcher stops its own `sleep` and reaps it before exiting, and this shell
+# reaps the watcher: no timer outlives the hook, even as a zombie where PID 1
+# does not collect orphans.
 read_hook_payload() {
 	[ -t 0 ] && return 0
-	if command -v timeout > /dev/null 2>&1; then
-		timeout 5 cat 2> /dev/null || true
-	else
-		cat 2> /dev/null || true
-	fi
+	exec 3<&0
+	cat <&3 2> /dev/null &
+	reader=$!
+	exec 3<&-
+	(
+		timer=
+		trap 'kill "$timer" 2> /dev/null; wait "$timer"; exit 0' TERM
+		sleep 5 &
+		timer=$!
+		wait "$timer" && kill "$reader"
+	) < /dev/null > /dev/null 2>&1 &
+	watcher=$!
+	wait "$reader" 2> /dev/null || true
+	kill "$watcher" 2> /dev/null || true
+	wait "$watcher" 2> /dev/null || true
 }
 
 if command -v jq > /dev/null 2>&1; then
@@ -116,10 +137,17 @@ $1"; }
 		# list of unformatted files to stdout. Merging them reported a file
 		# that does not parse as a formatting problem, and told the agent to
 		# run `make fmt`, which runs gofmt and fails the same way.
+		#
+		# gofmt runs twice, once per stream, rather than sending stderr to a
+		# file. The file used to live in "$repo_root/.git/", which in a
+		# worktree is a FILE, so gofmt never ran and an unformatted file
+		# passed (issue #350); one under $TMPDIR could still fail to be
+		# created, and blocking on that is a finding about the machine, not
+		# the change (principle 4). Two runs need no file at all.
 		# shellcheck disable=SC2086 # word splitting is the intent: one arg per file
-		unformatted=$(gofmt -s -l $go_files 2> "$repo_root/.git/stop-check-gofmt-err")
-		gofmt_err=$(cat "$repo_root/.git/stop-check-gofmt-err" 2> /dev/null)
-		rm -f "$repo_root/.git/stop-check-gofmt-err"
+		unformatted=$(gofmt -s -l $go_files 2> /dev/null)
+		# shellcheck disable=SC2086 # word splitting is the intent: one arg per file
+		gofmt_err=$(gofmt -s -l $go_files 2>&1 > /dev/null)
 
 		if [ -n "$gofmt_err" ]; then
 			note "G1: these files do not parse:

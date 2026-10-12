@@ -284,6 +284,217 @@ spaced_path_status() {
 }
 expect_status 2 "a path containing a space is not silently skipped" spaced_path_status
 
+# --- nested worktrees (issue #350) -------------------------------------------
+#
+# A session can run in a worktree nested inside the main checkout
+# (<repo>/.claude/worktrees/<name>), while Claude Code still runs the MAIN
+# checkout's hooks. Both gates must then check the worktree the edited file
+# belongs to: the edit gate used to vet ./.claude/worktrees/<name>/<pkg> in
+# the main module, and the stop gate wrote gofmt's stderr to
+# "$repo_root/.git/...", which in a worktree is a file, not a directory — so
+# gofmt never ran and an unformatted file passed.
+
+# fixture_nested_worktree makes a fixture repo with a worktree at
+# .claude/worktrees/wt inside it, and prints the repo's path.
+fixture_nested_worktree() {
+	d=$(fixture_repo)
+	git -C "$d" worktree add -q "$d/.claude/worktrees/wt" -b wt > /dev/null 2>&1 || exit 1
+	echo "$d"
+}
+
+write_vet_bad() {
+	printf 'package sub\n\nimport "fmt"\n\n// Bad has a vet diagnostic on purpose.\nfunc Bad() { fmt.Printf("%%%%d\\n", "not an int") }\n' > "$1"
+}
+
+if command -v go > /dev/null 2>&1; then
+	# The edit gate vets the package in the module the file belongs to, and
+	# names it relative to that module — not relative to the hook's checkout.
+	nested_vet_run() {
+		d=$(fixture_nested_worktree)
+		write_vet_bad "$d/.claude/worktrees/wt/sub/bad.go"
+		"$edit_hook" --file "$d/.claude/worktrees/wt/sub/bad.go" --repo "$d" 2>&1
+		status=$?; rm -rf "$d"; return $status
+	}
+	expect_block_reason "go vet ./sub failed" \
+		"a vet diagnostic in a nested worktree is vetted in that worktree" nested_vet_run
+
+	nested_clean_status() {
+		d=$(fixture_nested_worktree)
+		write_sub_go "$d/.claude/worktrees/wt/sub/t.go" T formatted
+		"$edit_hook" --file "$d/.claude/worktrees/wt/sub/t.go" --repo "$d"
+		status=$?; rm -rf "$d"; return $status
+	}
+	expect_status 0 "a healthy file in a nested worktree passes the edit gate" nested_clean_status
+
+	# The same, for the main checkout that holds the worktree.
+	main_checkout_vet_run() {
+		d=$(fixture_nested_worktree)
+		write_vet_bad "$d/sub/bad.go"
+		"$edit_hook" --file "$d/sub/bad.go" --repo "$d" 2>&1
+		status=$?; rm -rf "$d"; return $status
+	}
+	expect_block_reason "go vet ./sub failed" \
+		"a vet diagnostic in the main checkout is vetted there" main_checkout_vet_run
+fi
+
+# --- checkouts of other repositories ------------------------------------------
+#
+# The edit gate checks only checkouts of the repository its own hooks belong
+# to: the main checkout and any worktree of it. A file in an unrelated git
+# repository — an agent's throwaway reproduction under $TMPDIR — is not this
+# repository's to vet or type-check. Vetting it blocked on errors that say
+# nothing about the change (no go.mod; a go directive newer than the pinned
+# toolchain), and the tsc step ran that repository's own node_modules/.bin/tsc.
+# --repo is not passed here: the fixtures are compared with the hook's real
+# checkout, exactly as Claude Code runs it.
+
+# fixture_foreign_repo makes a git repository unrelated to this one.
+fixture_foreign_repo() {
+	dir=$(mktemp -d "$work/foreign.XXXXXX") || exit 1
+	git -C "$dir" init -q . || exit 1
+	echo "$dir"
+}
+
+if command -v go > /dev/null 2>&1; then
+	foreign_no_module_status() {
+		d=$(fixture_foreign_repo)
+		printf 'package main\n\nfunc main() {}\n' > "$d/main.go"
+		"$edit_hook" --file "$d/main.go"
+		status=$?; rm -rf "$d"; return $status
+	}
+	expect_status 0 "a Go file in an unrelated repository without go.mod is not vetted" \
+		foreign_no_module_status
+
+	foreign_new_go_status() {
+		d=$(fixture_foreign_repo)
+		printf 'module sample\n\ngo 1.99\n' > "$d/go.mod"
+		printf 'package main\n\nfunc main() {}\n' > "$d/main.go"
+		"$edit_hook" --file "$d/main.go"
+		status=$?; rm -rf "$d"; return $status
+	}
+	expect_status 0 "a Go file in an unrelated module needing a newer Go is not vetted" \
+		foreign_new_go_status
+
+	# A worktree of this repository whose go.mod asks for a newer Go than
+	# the pinned toolchain (a toolchain-bump branch) cannot be loaded at all;
+	# that is reported, not blocked on.
+	newer_go_worktree_status() {
+		d=$(fixture_repo)
+		printf 'module sample\n\ngo 1.99\n' > "$d/go.mod"
+		"$edit_hook" --file "$d/sub/s.go" --repo "$d"
+		status=$?; rm -rf "$d"; return $status
+	}
+	expect_status 0 "a module the pinned Go cannot load is not blocked on" \
+		newer_go_worktree_status
+
+	# The go command prints progress lines with the same "go: " prefix —
+	# "go: downloading ..." on the first vet after a dependency change — and
+	# then runs vet normally. A genuine diagnostic behind them must still
+	# block. A file:// module proxy and an empty module cache make the
+	# download real without the network; python3 builds the module zip.
+	if command -v python3 > /dev/null 2>&1; then
+		download_then_vet_run() {
+			d=$(fixture_repo)
+			proxy="$work/proxy"
+			modcache=$(mktemp -d "$work/modcache.XXXXXX") || exit 1
+			mkdir -p "$proxy/example.com/dep/@v"
+			printf 'v1.0.0\n' > "$proxy/example.com/dep/@v/list"
+			printf '{"Version":"v1.0.0"}\n' > "$proxy/example.com/dep/@v/v1.0.0.info"
+			printf 'module example.com/dep\n\ngo 1.25\n' > "$proxy/example.com/dep/@v/v1.0.0.mod"
+			python3 -c 'import sys, zipfile
+z = zipfile.ZipFile(sys.argv[1], "w")
+z.writestr("example.com/dep@v1.0.0/go.mod", "module example.com/dep\n\ngo 1.25\n")
+z.writestr("example.com/dep@v1.0.0/dep.go", "package dep\n\nfunc Name() string { return \"dep\" }\n")
+z.close()' "$proxy/example.com/dep/@v/v1.0.0.zip"
+			printf 'module sample\n\ngo 1.25\n\nrequire example.com/dep v1.0.0\n' > "$d/go.mod"
+			printf 'package sub\n\nimport (\n\t"fmt"\n\n\t"example.com/dep"\n)\n\n// Bad has a vet diagnostic on purpose.\nfunc Bad() { fmt.Printf("%%%%d\\n", dep.Name()) }\n' > "$d/sub/bad.go"
+			GOFLAGS=-mod=mod GOPROXY="file://$proxy" GOSUMDB=off GOMODCACHE="$modcache" \
+				"$edit_hook" --file "$d/sub/bad.go" --repo "$d" 2>&1
+			status=$?
+			# The module cache is read-only; only go can remove it.
+			GOMODCACHE="$modcache" go clean -modcache > /dev/null 2>&1
+			rm -rf "$d" "$proxy" "$modcache"
+			return $status
+		}
+		expect_block_reason "go vet ./sub failed" \
+			"a vet diagnostic after go: downloading lines still blocks" download_then_vet_run
+	else
+		echo "skip python3 not installed — the go: downloading case is skipped"
+	fi
+fi
+
+# gofmt needs no repository, so it still runs on a foreign file.
+foreign_unformatted_run() {
+	d=$(fixture_foreign_repo)
+	printf 'package main\n\nfunc main() {\n    println()\n}\n' > "$d/main.go"
+	"$edit_hook" --file "$d/main.go" 2>&1
+	status=$?; rm -rf "$d"; return $status
+}
+expect_block_reason "not gofmt -s clean" \
+	"gofmt still checks a file in an unrelated repository" foreign_unformatted_run
+
+foreign_tsc_status() {
+	d=$(fixture_foreign_repo)
+	mkdir -p "$d/frontend/node_modules/.bin"
+	printf '#!/bin/sh\necho FOREIGN_TSC_RAN >&2\nexit 1\n' > "$d/frontend/node_modules/.bin/tsc"
+	chmod +x "$d/frontend/node_modules/.bin/tsc"
+	printf '{"name":"sample"}\n' > "$d/frontend/package.json"
+	printf 'export const a = 1\n' > "$d/frontend/x.ts"
+	output=$("$edit_hook" --file "$d/frontend/x.ts" 2>&1)
+	status=$?; rm -rf "$d"
+	case "$output" in *FOREIGN_TSC_RAN*) return 3 ;; esac
+	return $status
+}
+expect_status 0 "an unrelated repository's own tsc is never run" foreign_tsc_status
+
+# A worktree of the hook's repository is still checked through --repo, and a
+# file outside it is not: the same guard, seen from the fixture side.
+if command -v go > /dev/null 2>&1; then
+	other_repo_vet_status() {
+		d=$(fixture_repo)
+		o=$(fixture_foreign_repo)
+		cp "$d/go.mod" "$o/go.mod"
+		mkdir -p "$o/sub"
+		write_vet_bad "$o/sub/bad.go"
+		"$edit_hook" --file "$o/sub/bad.go" --repo "$d"
+		status=$?; rm -rf "$d" "$o"; return $status
+	}
+	expect_status 0 "a vet diagnostic outside the hook's repository is not reported" \
+		other_repo_vet_status
+fi
+
+nested_stop_unformatted_run() {
+	d=$(fixture_nested_worktree)
+	write_sub_go "$d/.claude/worktrees/wt/sub/s.go" S unformatted
+	run_stop_verbose "$d/.claude/worktrees/wt"; status=$?; rm -rf "$d"; return $status
+}
+expect_block_reason "not gofmt -s clean" \
+	"the stop gate runs gofmt in a nested worktree" nested_stop_unformatted_run
+
+nested_stop_parse_run() {
+	d=$(fixture_nested_worktree)
+	printf 'package sub\n\nfunc Broken( {\n' > "$d/.claude/worktrees/wt/sub/broken.go"
+	run_stop_verbose "$d/.claude/worktrees/wt"; status=$?; rm -rf "$d"; return $status
+}
+expect_block_reason "do not parse" \
+	"the stop gate reports a parse error in a nested worktree" nested_stop_parse_run
+
+# A $TMPDIR that cannot hold a temporary file is a problem with the machine,
+# not with the change (principle 4). The gofmt check must still run, and the
+# turn is blocked only for what it finds.
+stop_no_tmpdir_run() {
+	d=$(fixture_repo)
+	write_sub_go "$d/sub/s.go" S unformatted
+	# A regular file, not a missing directory: the toolchain setup creates a
+	# missing $TMPDIR, so only a path that cannot become a directory makes
+	# mktemp fail.
+	: > "$work/tmpdir-is-a-file"
+	( cd "$d" || exit 1; TMPDIR="$work/tmpdir-is-a-file" "$stop_hook" < /dev/null 2>&1 )
+	status=$?; rm -rf "$d"; return $status
+}
+expect_block_reason "not gofmt -s clean" \
+	"the stop gate still runs gofmt when TMPDIR is unusable" stop_no_tmpdir_run
+
 # --- the loop bound ----------------------------------------------------------
 #
 # Claude Code sets stop_hook_active when it is already continuing BECAUSE of a
@@ -309,16 +520,75 @@ if command -v jq > /dev/null 2>&1; then
 fi
 
 # A hook that hangs is worse than one that answers wrongly: the turn cannot end
-# at all. An inherited, idle stdin must not do that.
-if command -v timeout > /dev/null 2>&1; then
+# at all. An inherited, idle stdin must not do that. The writer holds the pipe
+# for 30s and is the test's own bound, so this runs where `timeout` does not
+# exist (stock macOS) — scripts/go_toolchain_test.sh also strips it from PATH.
+#
+# The payload is only read when jq exists, so without it these would pass
+# while checking nothing: they are reported as skipped instead.
+if command -v jq > /dev/null 2>&1; then
 	no_hang_status() {
 		d=$(fixture_repo)
-		( cd "$d" || exit 1; sleep 30 | timeout 20 "$stop_hook" > /dev/null 2>&1 )
-		status=$?; rm -rf "$d"
-		[ "$status" -eq 124 ] && return 1 # 124 = timeout killed it, i.e. it hung
-		return 0
+		pidfile=$(mktemp "${TMPDIR:-/tmp}/hooks-idle-pid.XXXXXX") || return 1
+		start=$(date +%s)
+		( cd "$d" || exit 1; { sleep 30 & echo $! > "$pidfile"; } | "$stop_hook" > /dev/null 2>&1 )
+		elapsed=$(($(date +%s) - start))
+		kill "$(cat "$pidfile")" 2> /dev/null
+		rm -rf "$d" "$pidfile"
+		[ "$elapsed" -lt 20 ]
 	}
 	expect_status 0 "an idle inherited stdin does not hang the hook" no_hang_status
+
+	# The read's timer must not outlive the hook: a leftover `sleep` kept
+	# stdin open after the hook exited, and an unreaped one is a zombie
+	# wherever PID 1 does not collect orphans.
+	real_sleep=$(command -v sleep)
+	mkdir -p "$work/sleepstub"
+	cat > "$work/sleepstub/sleep" <<-STUB
+		#!/bin/sh
+		echo start >> "\$SLEEP_TRACE"
+		trap 'kill "\$child" 2> /dev/null; echo stopped >> "\$SLEEP_TRACE"; exit 143' TERM
+		"$real_sleep" "\$@" &
+		child=\$!
+		wait "\$child"
+		echo ended >> "\$SLEEP_TRACE"
+	STUB
+	chmod +x "$work/sleepstub/sleep"
+
+	timer_stopped_status() {
+		trace="$work/sleep.trace"
+		: > "$trace"
+		# The payload arrives a second late, so the timer is already running.
+		{ sleep 1; printf '{"stop_hook_active":true}'; } |
+			SLEEP_TRACE="$trace" PATH="$work/sleepstub:$PATH" "$stop_hook" > /dev/null 2>&1
+		grep -q start "$trace" && grep -qE 'stopped|ended' "$trace"
+	}
+	expect_status 0 "the payload timer is stopped before the hook returns" timer_stopped_status
+
+	stdin_released_status() {
+		fifo="$work/payload.fifo"
+		held="$work/payload.held"
+		rm -f "$fifo" "$held"
+		mkfifo "$fifo" || return 1
+		"$stop_hook" < "$fifo" > /dev/null 2>&1 &
+		hook=$!
+		printf '{"stop_hook_active":true}' > "$fifo"
+		wait "$hook"
+		# Opening a FIFO for writing completes only while something still has
+		# it open for reading; the read-write open releases a probe that waits.
+		( exec 4> "$fifo"; echo held > "$held" ) &
+		probe=$!
+		sleep 1
+		status=0
+		[ -e "$held" ] && status=1
+		exec 5<> "$fifo"
+		wait "$probe"
+		exec 5<&-
+		return $status
+	}
+	expect_status 0 "nothing holds stdin once the hook has returned" stdin_released_status
+else
+	echo "skip jq not installed — the idle-stdin checks are skipped"
 fi
 
 # --- the edit gate's in-repo branches ----------------------------------------

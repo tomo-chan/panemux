@@ -53,10 +53,42 @@ trap 'rm -rf "$tmp"' EXIT
 #
 # -prune, not -not -path: a filter still descends into frontend/node_modules,
 # which is tens of thousands of stat calls in a target that runs on every push.
+#
+# A directory below the root holding a `.git` entry is another checkout — a
+# worktree (`.git` file; Claude Code puts them under .claude/worktrees/) or a
+# nested clone (`.git` directory) — whose markdown, and whose own ignored
+# .cache/runtimes/, are not this checkout's. `.git` is printed rather than only
+# pruned so the second pass can drop everything under its parent: find lists a
+# directory's entries in no particular order, so a single pass cannot know a
+# sibling is inside a nested checkout until it has seen that `.git`.
+#
+# That pass is the correctness mechanism; the `*/.cache/...` prunes are only
+# speed. Each nested worktree carries its own ignored runtime SDK and lint
+# cache, thousands of entries apiece, which find would otherwise list for the
+# awk pass to throw away — a cost that grows with every worktree in a checkout
+# that runs this on every push.
 (
 	cd "$root" || exit 1
-	find . \( -name node_modules -o -name .git -o -name dist -o -path ./.cache/runtimes \) -prune -o -print
-) | sed 's|^\./||' > "$tmp/exists"
+	find . \( -name node_modules -o -name dist -o -path '*/.cache/runtimes' -o -path '*/.cache/golangci-lint' \) -prune -o -name .git -print -prune -o -print
+) | sed 's|^\./||' > "$tmp/all"
+
+awk '
+NR == FNR {
+	if ($0 ~ /\/\.git$/) nested[substr($0, 1, length($0) - 5)] = 1
+	next
+}
+$0 == ".git" || $0 ~ /\/\.git$/ { next }
+{
+	p = $0
+	while (p != "") {
+		if (p in nested) next
+		i = length(p)
+		while (i > 0 && substr(p, i, 1) != "/") i--
+		p = i > 0 ? substr(p, 1, i - 1) : ""
+	}
+	print
+}
+' "$tmp/all" "$tmp/all" > "$tmp/exists"
 
 grep '\.md$' "$tmp/exists" > "$tmp/md" || :
 

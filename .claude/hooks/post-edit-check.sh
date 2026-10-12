@@ -18,6 +18,8 @@
 # Usage:
 #   post-edit-check.sh              # reads Claude Code's hook JSON on stdin
 #   post-edit-check.sh --file PATH  # same checks against PATH (used by the tests)
+#   post-edit-check.sh --file PATH --repo DIR
+#                                   # ...treating DIR's repository as this hook's own
 
 set -u
 
@@ -27,12 +29,11 @@ panemux_runtime_scripts="$panemux_toolchain_root/scripts"
 . "$panemux_runtime_scripts/runtime-env.sh"
 panemux_runtime "$panemux_toolchain_root" || exit 2
 
-hooks_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
-repo_root=$(CDPATH='' cd -- "$hooks_dir/../.." && pwd)
-
 file=""
+own_repo=$panemux_toolchain_root
 if [ "${1:-}" = "--file" ]; then
 	file=${2:-}
+	[ "${3:-}" != "--repo" ] || own_repo=${4:-}
 else
 	# Claude Code reports the written path under tool_input.file_path for Edit
 	# and under tool_response.filePath for some other tools. Read both, and
@@ -58,6 +59,41 @@ block() {
 	exit 2
 }
 
+# The checkout to check in is the one that holds the edited file, not the one
+# that holds this hook. Claude Code runs "$CLAUDE_PROJECT_DIR"/.claude/hooks/,
+# which is the MAIN checkout even for a session in a worktree nested inside it
+# (<repo>/.claude/worktrees/<name>), and vetting that worktree's package from
+# the main module fails on every edit (issue #350).
+#
+# --show-prefix, not stripping --show-toplevel off the path: git prints the
+# top level with symbolic links resolved (macOS's /tmp and $TMPDIR are links
+# into /private), so the edited path need not start with it. The prefix is the
+# directory relative to the top level, with a trailing slash, or empty at the
+# top level itself. A file outside any git checkout leaves both empty, and the
+# vet and tsc steps below are skipped rather than guessed at.
+#
+# Only checkouts of this hook's own repository are checked: the main checkout
+# and any worktree of it, which share one git common directory. A file in any
+# other repository (an agent's throwaway reproduction under $TMPDIR) gets
+# gofmt and nothing else. Vetting it blocked on errors that say nothing about
+# the change, such as a missing go.mod, and the tsc step ran that repository's
+# own node_modules/.bin/tsc. The common directories are compared after
+# resolving symbolic links, for the same reason as --show-prefix.
+common_dir() {
+	d=$(git -C "$1" rev-parse --path-format=absolute --git-common-dir 2> /dev/null) || return 1
+	[ -n "$d" ] && CDPATH='' cd -- "$d" 2> /dev/null && pwd -P
+}
+file_dir=$(dirname "$file")
+repo_root=$(git -C "$file_dir" rev-parse --show-toplevel 2> /dev/null) || repo_root=""
+if [ -n "$repo_root" ]; then
+	file_common=$(common_dir "$file_dir") || file_common=""
+	own_common=$(common_dir "$own_repo") || own_common=""
+	{ [ -n "$own_common" ] && [ "$file_common" = "$own_common" ]; } || repo_root=""
+fi
+rel=""
+[ -z "$repo_root" ] || rel=$(git -C "$file_dir" rev-parse --show-prefix 2> /dev/null) || repo_root=""
+rel=${rel%/}
+
 case "$file" in
 *.go)
 	command -v gofmt > /dev/null 2>&1 || exit 0
@@ -80,14 +116,10 @@ $parse_error"
 	fi
 
 	# go vet needs a package, not a file, and needs to run inside the module.
-	# A file outside this repository (the tests use temp files) has no package
-	# here, so the vet step is skipped rather than guessed at.
-	case "$file" in
-	"$repo_root"/*)
+	# A file outside any git checkout (the tests use temp files) has no
+	# package to name, so the vet step is skipped rather than guessed at.
+	if [ -n "$repo_root" ]; then
 		command -v go > /dev/null 2>&1 || exit 0
-		pkg_dir=$(dirname "$file")
-		rel=${pkg_dir#"$repo_root"}
-		rel=${rel#/}
 		[ -n "$rel" ] || rel="."
 
 		if ! vet_output=$(cd "$repo_root" && go vet "./$rel" 2>&1); then
@@ -110,19 +142,38 @@ $parse_error"
 					"$rel" "$vet_output" >&2
 				exit 0
 			fi
+			# The go command itself could not load the module: a worktree
+			# whose go.mod asks for a newer Go than this hook's pinned
+			# toolchain, say. That is not a finding about the edit
+			# (principle 4), so it is reported and not blocked on.
+			#
+			# The go command also prints progress with the same prefix
+			# ("go: downloading ...") and then runs vet, so those lines are
+			# dropped first, and the output counts as a load error only when
+			# every remaining line is "go: ..." or its indented continuation.
+			# A "# pkg" header or a file:line diagnostic anywhere means vet
+			# ran, and it blocks.
+			load_output=$(printf '%s\n' "$vet_output" |
+				grep -vE '^go: (downloading|finding|found|extracting) ')
+			if printf '%s\n' "$load_output" | grep -q '^go: ' &&
+				! printf '%s\n' "$load_output" | grep -qvE '^(go: |[[:space:]]|$)'; then
+				printf 'G1: go could not load ./%s, so go vet was skipped:\n%s\n' \
+					"$rel" "$vet_output" >&2
+				exit 0
+			fi
 			block "G1: go vet ./$rel failed:
 $vet_output"
 		fi
-		;;
-	esac
+	fi
 	;;
 *.ts | *.tsx)
 	# tsc is configured per project, not per file: frontend/tsconfig.json
 	# decides what "type-checks" even means here, so the whole project is
 	# checked. It is still seconds, and it is the same command make
 	# lint-frontend runs.
-	case "$file" in
-	"$repo_root"/frontend/*) ;;
+	[ -n "$repo_root" ] || exit 0
+	case "$rel/" in
+	frontend/*) ;;
 	*) exit 0 ;;
 	esac
 	[ -d "$repo_root/frontend/node_modules" ] || exit 0

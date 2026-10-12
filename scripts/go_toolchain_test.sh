@@ -72,13 +72,41 @@ done
 export SIDE_EFFECT_TRACE="$work/sideeffects.trace"
 for entry in scripts/efficacy.sh scripts/mutation.sh .claude/hooks/post-edit-check.sh .claude/hooks/stop-check.sh frontend/e2e/run-panemux-e2e.sh frontend/e2e/run-panemux-agent-board-e2e.sh frontend/e2e/run-panemux-command-center-e2e.sh frontend/e2e/run-panemux-task-dashboard-e2e.sh frontend/screenshots/run-panemux-screenshots.sh; do
  status=0
- PATH="$work/sideeffects:$PATH" sh "$scripts_dir/../$entry" > "$work/output" 2>&1 || status=$?
+ PATH="$work/sideeffects:$PATH" sh "$scripts_dir/../$entry" < /dev/null > "$work/output" 2>&1 || status=$?
  case "$entry" in .claude/hooks/*) expected=2 ;; *) expected=1 ;; esac
  [ "$status" -eq "$expected" ] || { echo "FAIL $entry returned $status, expected $expected"; exit 1; }
  grep -q 'go-toolchain: cannot start required' "$work/output"
  echo "ok direct $entry fails before side effects"
 done
 [ ! -e "$SIDE_EFFECT_TRACE" ]
+
+# The Stop hook's payload read must stay bounded where neither timeout nor
+# gtimeout exists (stock macOS): an idle inherited stdin once hung make check.
+# The writer holds the pipe for 30s, so a regression still ends the test.
+if command -v jq >/dev/null 2>&1; then
+ mkdir -p "$work/notimeout"
+ old_ifs=$IFS; IFS=:
+ for dir in $PATH; do
+  [ -d "$dir" ] || continue
+  for tool in "$dir"/*; do
+   name=${tool##*/}
+   case "$name" in timeout|gtimeout) continue ;; esac
+   if [ -x "$tool" ] && [ ! -e "$work/notimeout/$name" ]; then ln -s "$tool" "$work/notimeout/$name"; fi
+  done
+ done
+ IFS=$old_ifs
+ if PATH="$work/notimeout" command -v timeout >/dev/null 2>&1 || PATH="$work/notimeout" command -v gtimeout >/dev/null 2>&1; then
+  echo "FAIL timeout is still on the stripped PATH"; exit 1
+ fi
+ start=$(date +%s)
+ status=0
+ { sleep 30 & echo $! > "$work/idle.pid"; } | PATH="$work/notimeout" sh "$scripts_dir/../.claude/hooks/stop-check.sh" > "$work/output" 2>&1 || status=$?
+ elapsed=$(($(date +%s) - start))
+ kill "$(cat "$work/idle.pid")" 2>/dev/null || true
+ [ "$elapsed" -lt 20 ] || { echo "FAIL stop-check.sh waited ${elapsed}s on an idle stdin without timeout"; exit 1; }
+ [ "$status" -eq 2 ] || { echo "FAIL stop-check.sh returned $status on an idle stdin, expected 2"; exit 1; }
+ echo "ok stop-check.sh bounds an idle stdin without timeout or gtimeout"
+fi
 
 # The Stop retry guard must precede both acquisition and cached-SDK startup.
 if command -v jq >/dev/null 2>&1; then
