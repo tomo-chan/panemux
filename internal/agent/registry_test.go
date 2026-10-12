@@ -210,7 +210,11 @@ func TestValidateAccepts(t *testing.T) {
 	c := validDef("c")
 	c.Capabilities = []Capability{Detect, Collect, Workdir}
 	c.Detection.Task = &TaskRule{Process: anyProcess, UnknownArgs: Reject}
-	assert.NoError(t, Validate([]Definition{a, b, c}))
+	taskOnly := Definition{
+		ID: "d", DisplayName: "d", Capabilities: []Capability{Detect, Collect},
+		Detection: Detection{Task: &TaskRule{Process: anyProcess, UnknownArgs: Accept}},
+	}
+	assert.NoError(t, Validate([]Definition{a, b, c, taskOnly}))
 }
 
 func TestNewRegistryPanicsOnInvalidDefinitions(t *testing.T) {
