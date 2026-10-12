@@ -155,6 +155,12 @@ unsafe installation, unavailable host probes and failed registration leave the o
 running without a generation. An inherited generation is cleared. No directory is created or
 repaired, and installation does not establish routing eligibility.
 
+The caller gives discovery, selfcheck and registration one shared one-second wait budget
+(20 waits of 50 ms, plus host scheduling). Discovery runs in a private process group and execs
+the helper in place, so the registrar remains a direct child of the shell that will exec Codex.
+On timeout the group is killed and ordinary launch continues without a generation. The small
+group bootstrap uses Perl's core `setpgrp`; absent Perl or sleep skips optional registration.
+
 The host account database supplies the effective user's account home. Machine identity is the
 Linux machine ID or macOS platform UUID. The actual exec environment supplies custom `CODEX_HOME`;
 otherwise `HOME` must agree with the account home and the context defaults to its `.codex` directory.

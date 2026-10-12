@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -17,7 +18,7 @@ import (
 
 func installedHookHost(t *testing.T, h stubHost, customHome ...string) string {
 	t.Helper()
-	for _, name := range []string{"id", "stat", "uname", "sed", "tr"} {
+	for _, name := range []string{"id", "stat", "uname", "sed", "tr", "perl", "sleep"} {
 		path, err := exec.LookPath(name)
 		require.NoError(t, err)
 		require.NoError(t, os.Symlink(path, filepath.Join(h.bin, name)))
@@ -67,6 +68,46 @@ esac
 	return paths.Helper
 }
 
+func TestLaunchScriptOptionalRegistrationHasOuterBudget(t *testing.T) {
+	for _, mode := range []launchMode{launchNew, launchResume} {
+		for _, stage := range []string{"account", "selfcheck", "register"} {
+			t.Run(string(mode)+"/"+stage, func(t *testing.T) {
+				h := newStubHost(t, true, false)
+				codexDir := h.withCodex(t)
+				require.NoError(t, os.Symlink(filepath.Join(codexDir, "codex"), filepath.Join(h.bin, "codex")))
+				writeExecutable(t, filepath.Join(codexDir, "codex"), stubCodex+`
+printf '%s' "${PANEMUX_TASK_OWNER_GENERATION:-}" > "$STUB_LOG/codex.generation"
+`)
+				helper := installedHookHost(t, h)
+				if stage == "account" {
+					probe := "getent"
+					if runtime.GOOS == "darwin" {
+						probe = "dscacheutil"
+					}
+					writeExecutable(t, filepath.Join(h.bin, probe), "#!/bin/sh\nexec sleep 3\n")
+				} else {
+					body, err := os.ReadFile(helper)
+					require.NoError(t, err)
+					blocked := "selfcheck"
+					if stage == "register" {
+						blocked = "register-managed-launch"
+					}
+					writeExecutable(t, helper, strings.Replace(string(body), blocked+")", blocked+") exec sleep 3;", 1))
+				}
+				script, err := buildLaunchScript(codexParams(t, mode, t.TempDir(), hostilePrompt))
+				require.NoError(t, err)
+				script = "PANEMUX_TASK_OWNER_GENERATION=g1-00000000000000000000000000000002\nexport PANEMUX_TASK_OWNER_GENERATION\n" + script
+				started := time.Now()
+				require.NoError(t, parseLaunchOutput(h.run(t, script, "/bin/false")))
+				assert.Less(t, time.Since(started), 2500*time.Millisecond, "optional registration delayed ordinary exec")
+				generation, err := os.ReadFile(filepath.Join(h.log, "codex.generation"))
+				require.NoError(t, err)
+				assert.Empty(t, string(generation), "timed out launch inherited stale ownership")
+			})
+		}
+	}
+}
+
 func TestLaunchScriptOptionalHookRegistrationPreservesCodexExec(t *testing.T) {
 	for _, mode := range []launchMode{launchNew, launchResume} {
 		t.Run(string(mode), func(t *testing.T) {
@@ -100,7 +141,7 @@ printf '%s' "$$" > "$STUB_LOG/codex.pid"
 }
 
 func TestLaunchScriptUnsafeOrUnavailableHookFallsBack(t *testing.T) {
-	failures := []string{"missing-helper", "wrong-protocol", "symlink", "shared-helper", "missing-state", "no-account"}
+	failures := []string{"missing-helper", "wrong-protocol", "symlink", "shared-helper", "missing-state", "no-account", "missing-group-bootstrap"}
 	for _, failure := range failures {
 		t.Run(failure, func(t *testing.T) {
 			h := newStubHost(t, true, false)
@@ -111,6 +152,8 @@ printf '%s' "${PANEMUX_TASK_OWNER_GENERATION:-}" > "$STUB_LOG/codex.generation"
 `)
 			helper := installedHookHost(t, h)
 			switch failure {
+			case "missing-group-bootstrap":
+				require.NoError(t, os.Remove(filepath.Join(h.bin, "perl")))
 			case "missing-helper":
 				require.NoError(t, os.Remove(helper))
 			case "wrong-protocol":

@@ -3,9 +3,16 @@ package taskhook
 // ManagedLaunchScript is compiled code prepended to the Codex exec in the
 // existing fixed tmux command. Account/machine tools are host metadata probes,
 // not browser input. Failure is optional registration failure, never task exit.
-// The registrar runs directly under the shell that will exec, not in $(...).
+// Discovery execs the registrar as the exec shell's direct child. Its private
+// process group can be stopped without signaling the shell or Codex.
 const ManagedLaunchScript = `
 unset PANEMUX_TASK_OWNER_GENERATION
+pm_old_umask=$(umask); umask 077
+if command -v perl >/dev/null 2>&1 && command -v sleep >/dev/null 2>&1; then
+  pm_output=$(mktemp "${TMPDIR:-/tmp}/panemux-owner.XXXXXXXX" 2>/dev/null) || pm_output=
+  if [ -n "$pm_output" ]; then
+    perl -e 'setpgrp(0, 0) or exit 1; exec "/bin/sh", "-s", "--", @ARGV; exit 1' "$2" \
+        >"$pm_output" 2>/dev/null <<'PANEMUX_OWNER_DISCOVERY' &
 panemux_register_owner() {
   pm_uid=$(id -u 2>/dev/null) || return
   case "$pm_uid" in ''|*[!0-9]*) return;; esac
@@ -99,22 +106,34 @@ EOF
   [ $((0$pm_mode & 07022)) = 0 ] && [ $((0$pm_mode & 0100)) != 0 ] || return
   pm_health=$("$pm_helper" selfcheck --root "$pm_root" </dev/null 2>/dev/null) || return
   [ "$pm_health" = '{"helper_version":"0.1.0","process_probe":"available","protocol_version":1}' ] || return
-  pm_output=$(mktemp "${TMPDIR:-/tmp}/panemux-owner.XXXXXXXX" 2>/dev/null) || return
-  if "$pm_helper" register-managed-launch --root "$pm_root" --account-home "$pm_home" \
+  exec "$pm_helper" register-managed-launch --root "$pm_root" --account-home "$pm_home" \
       --codex-home "$pm_codex_home" --machine-identity "$pm_machine" --uid "$pm_uid" \
-      --executable "$1" >"$pm_output" 2>/dev/null; then
-    IFS= read -r pm_generation <"$pm_output" || :
-    case "$pm_generation" in g1-*)
-      pm_hex=${pm_generation#g1-}
-      case "$pm_hex" in *[!0-9a-f]*) ;; *)
-        if [ "${#pm_hex}" = 32 ]; then
-          PANEMUX_TASK_OWNER_GENERATION=$pm_generation; export PANEMUX_TASK_OWNER_GENERATION
-        fi;; esac;;
-    esac
-  fi
-  rm -f -- "$pm_output"
+      --executable "$1"
 }
-pm_old_umask=$(umask); umask 077
-panemux_register_owner "$2" >/dev/null 2>&1 || :
+panemux_register_owner "$1"
+PANEMUX_OWNER_DISCOVERY
+    pm_pid=$!; pm_ticks=0
+    while kill -0 "$pm_pid" 2>/dev/null && [ "$pm_ticks" -lt 20 ]; do
+      sleep 0.05 || break
+      pm_ticks=$((pm_ticks + 1))
+    done
+    if ! kill -0 "$pm_pid" 2>/dev/null; then
+      if wait "$pm_pid"; then
+        IFS= read -r pm_generation <"$pm_output" || :
+        case "$pm_generation" in g1-*)
+          pm_hex=${pm_generation#g1-}
+          case "$pm_hex" in *[!0-9a-f]*) ;; *)
+            if [ "${#pm_hex}" = 32 ]; then
+              PANEMUX_TASK_OWNER_GENERATION=$pm_generation; export PANEMUX_TASK_OWNER_GENERATION
+            fi;; esac;;
+        esac
+      fi
+    else
+      kill -KILL "-$pm_pid" 2>/dev/null || :
+      kill -KILL "$pm_pid" 2>/dev/null || :
+    fi
+    rm -f -- "$pm_output"
+  fi
+fi
 umask "$pm_old_umask"
 `

@@ -523,6 +523,9 @@ Its parsing and storage boundary must keep these properties:
   mismatching private installation metadata. The registrar is a direct child of the exec shell.
   Missing installation preserves launch, clears inherited generation and creates no directories.
   Installation facts cannot turn any routing-scope flag true.
+  Discovery execs the helper in its own process group, keeping the registrar a direct child of
+  the Codex exec shell. The caller caps its wait at one second and kills only that group on
+  timeout; missing group-bootstrap tools skip registration and preserve ordinary launch.
 
 The record and state contract is in [Task notice records](../behavior/task-hook-records.md).
 
