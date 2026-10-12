@@ -32,6 +32,9 @@ func TestRegisteredAgents(t *testing.T) {
 		w := want[d.ID]
 		assert.Equal(t, w.agmsg, d.AgmsgType, d.ID)
 		assert.Equal(t, w.caps, d.Capabilities, d.ID)
+		for _, c := range w.caps {
+			assert.True(t, d.Has(c), "%s declares %s", d.ID, c)
+		}
 		assert.False(t, d.Has(Usage), "%s: no agent declares the usage capability yet (#345)", d.ID)
 	}
 }

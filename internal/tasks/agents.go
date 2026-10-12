@@ -11,6 +11,7 @@ var (
 
 func taskRule(id agent.ID) agent.TaskRule {
 	d, ok := agent.Lookup(id)
+	//coverage:exempt runs only if registry.go drops claude or codex, which TestRegisteredAgents forbids
 	if !ok || d.Detection.Task == nil {
 		panic("tasks: agent " + string(id) + " has no task rule")
 	}
