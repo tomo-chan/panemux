@@ -19,8 +19,8 @@ type Reservation struct {
 }
 
 // Reserve commits before the slow eligibility scan. Other ingress reservations
-// may finish in either order, but an intervening Input provided or terminal
-// transition invalidates older scans. A crash leaves a bounded, inactive slot.
+// may finish in either order. Input provided invalidates all older scans;
+// terminal evidence invalidates only its turn. A crash leaves an inactive slot.
 func (s *Store) Reserve(ctx context.Context, b Binding) (Reservation, Record, error) {
 	if !validBinding(b) {
 		return Reservation{}, Record{}, ErrInput
@@ -89,9 +89,8 @@ func (s *Store) Finish(ctx context.Context, token Reservation, b Binding, veto b
 			next.Episodes[i].Anchor = b.Anchor
 			if veto {
 				next.Episodes[i].Disposition = Resolved
-				next.ClosedRevision = next.Revision
 				for j := range next.Episodes {
-					if next.Episodes[j].Disposition == Provisional {
+					if next.Episodes[j].Disposition == Provisional && next.Episodes[j].TurnID == token.TurnID {
 						next.Episodes[j].Disposition = Resolved
 					}
 				}

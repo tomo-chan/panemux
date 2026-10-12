@@ -37,10 +37,13 @@ to `provided`. Repeating that same claim against the unchanged resulting revisio
 another write. A later start invalidates the retry receipt and prevents an old claim from clearing
 new pending episodes. This is a user declaration, independent of Done, labels and approval outcome.
 
-Verified same-turn terminal evidence changes only that turn's pending episodes to `resolved`.
+Verified same-turn terminal evidence changes only that turn's eligible pending episodes and
+provisional slots to `resolved`.
 The owner, session and expected revision must match. For this transition, evidence must name the
-same file identity and a complete terminal line ending strictly after the start anchor. A missing
-anchor, another turn or rotation supplies no resolution evidence. Partial scans and elapsed time
+same file identity and a complete terminal line ending strictly after the start anchor for pending
+episodes. A pending episode's missing anchor, another turn or rotation supplies no resolution
+evidence. Provisional slots have no anchor yet and are closed by verified same-turn evidence.
+Partial scans and elapsed time
 must not be represented as terminal evidence. Detecting an already-ended turn before creating a
 start is the ingress verifier's responsibility. The metadata scanner below supplies a pre-start veto;
 it does not establish live ownership or all routing eligibility.
@@ -54,13 +57,16 @@ After verifying the process owner, a caller can reserve an inactive episode befo
 eligibility evidence. Reservation increases the record revision without changing an existing active
 notice ID. It contains no verified anchor and never appears in the pending set. Finishing requires
 the exact reservation owner/session/turn, a verified anchor, and an unchanged `closed_revision`.
-Concurrent reservations can finish in either order and preserve both episodes. Input provided or
-a verified terminal transition advances this closing fence and settles unfinished reservations;
-a delayed scan cannot reactivate them after a restart. An old displayed revision conflicts when
+Concurrent reservations can finish in either order and preserve both episodes. Input provided
+advances this closing fence and settles all unfinished reservations. Verified terminal evidence
+settles only the matching turn's provisional slots, even if it has no pending episode yet;
+a delayed scan cannot reactivate them after a restart. Other turns retain their reservations.
+An old displayed revision conflicts when
 ingress has reserved a concurrent request. A fresh claim of the current pending set also closes
 the provisional ingress it raced with.
 
-A positive pre-start veto closes the reservation and advances the same fence. Replay of a finished
+A positive pre-start veto closes the reservation and other provisional slots of the same turn,
+preserving reservations of different turns without advancing the full-set fence. Replay of a finished
 or vetoed token fails. Unknown eligibility leaves an inactive slot; a crashed verifier can exhaust
 the bounded slot limit, causing fallback rather than evicting known pending notices. This library
 does not expire reservations or infer that a hook starting after a claim is the same Codex request:

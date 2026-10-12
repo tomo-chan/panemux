@@ -73,8 +73,8 @@ type Record struct {
 	Owner     Owner     `json:"owner"`
 	Version   int       `json:"version"`
 	Revision  uint64    `json:"revision"`
-	// ClosedRevision fences slow ingress scans across an acknowledgement or
-	// terminal transition without invalidating other concurrent reservations.
+	// ClosedRevision fences slow ingress scans across full-set acknowledgement
+	// or recovery. Turn-specific closing evidence settles only that turn's slots.
 	ClosedRevision uint64 `json:"closed_revision,omitempty"`
 }
 
@@ -101,7 +101,8 @@ type Provided struct {
 }
 
 // Terminal is evidence supplied after a complete, bounded scan of a verified
-// rollout. Offset is the end of the terminal line, strictly after the anchor.
+// rollout. Offset is the end of the terminal line, strictly after a pending
+// episode's anchor. Same-turn provisional slots are closed before publication.
 // Partial lines, rotation, truncation, scan gaps and unknown events are not
 // evidence and must never be passed here by a reader.
 type Terminal struct {

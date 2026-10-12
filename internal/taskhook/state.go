@@ -104,6 +104,12 @@ func ResolveTurn(r Record, p Terminal) (Record, error) {
 	next := cloneRecord(r)
 	changed := false
 	for i, ep := range next.Episodes {
+		// A provisional slot has no anchor yet. Verified same-turn evidence
+		// must settle it before its slow pre-terminal scan can publish.
+		if ep.Disposition == Provisional && ep.TurnID == p.TurnID {
+			next.Episodes[i].Disposition = Resolved
+			changed = true
+		}
 		if ep.Disposition == Pending && ep.TurnID == p.TurnID && ep.Anchor != nil &&
 			ep.Anchor.FileID == p.FileID && p.Offset > ep.Anchor.Offset {
 
@@ -118,13 +124,7 @@ func ResolveTurn(r Record, p Terminal) (Record, error) {
 		return r, ErrLimit
 	}
 	next.Revision++
-	next.ClosedRevision = next.Revision
 	next.Receipt = nil
-	for i := range next.Episodes {
-		if next.Episodes[i].Disposition == Provisional {
-			next.Episodes[i].Disposition = Resolved
-		}
-	}
 	return next, nil
 }
 

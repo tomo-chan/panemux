@@ -6,6 +6,55 @@ import (
 	"testing"
 )
 
+func TestIngressClosingEvidenceIsTurnScoped(t *testing.T) {
+	for _, mode := range []string{"veto", "terminal provisional", "terminal pending"} {
+		t.Run(mode, func(t *testing.T) {
+			s, root := newStore(t)
+			ctx := context.Background()
+			a, _, err := s.Reserve(ctx, binding(testTurn))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if mode == "terminal pending" {
+				if _, err = s.Finish(ctx, a, binding(testTurn), false); err != nil {
+					t.Fatal(err)
+				}
+			}
+			sameTurn, _, err := s.Reserve(ctx, binding(testTurn))
+			if err != nil {
+				t.Fatal(err)
+			}
+			otherTurn, before, err := s.Reserve(ctx, binding("turn-2"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var closed Record
+			if mode == "veto" {
+				closed, err = s.Finish(ctx, a, binding(testTurn), true)
+			} else {
+				closed, err = s.ResolveTurn(ctx, Terminal{SessionID: before.SessionID, Owner: before.Owner,
+					Revision: before.Revision, TurnID: testTurn, FileID: "file-1", Offset: 200})
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if closed.Revision != before.Revision+1 || len(PendingIDs(closed)) != 0 {
+				t.Fatal("closing evidence did not durably settle its turn")
+			}
+			s = NewStore(root)
+			for _, token := range []Reservation{a, sameTurn} {
+				if _, err = s.Finish(ctx, token, binding(testTurn), false); !errors.Is(err, ErrConflict) {
+					t.Fatal("delayed scan revived a closed turn after restart", err)
+				}
+			}
+			got, err := s.Finish(ctx, otherTurn, binding("turn-2"), false)
+			if err != nil || len(PendingIDs(got)) != 1 || PendingIDs(got)[0] != otherTurn.EpisodeID {
+				t.Fatal("old turn discarded a different turn's eligible notice", err)
+			}
+		})
+	}
+}
+
 func TestIngressCannotPublishAcrossProvided(t *testing.T) {
 	s, root := newStore(t)
 	ctx := context.Background()
