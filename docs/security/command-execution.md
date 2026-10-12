@@ -519,12 +519,12 @@ Its parsing and storage boundary must keep these properties:
 - Optional managed launch registration uses compiled shell code and discrete helper arguments.
   Effective UID/account database and machine identity select a fixed context under verified account
   home; the actual exec environment selects canonical Codex home. No browser or hook path supplies
-  an installation location. Reject symlink/shared helper and directories, incompatible health and
+  an installation location. Reject symlink/shared helper and directories, incompatible registration and
   mismatching private installation metadata. The registrar is a direct child of the exec shell.
   Missing installation preserves launch, clears inherited generation and creates no directories.
   Installation facts cannot turn any routing-scope flag true.
   Discovery execs the helper in its own process group, keeping the registrar a direct child of
-  the Codex exec shell. The caller caps its wait at one second and kills only that group on
+  the Codex exec shell. The caller caps its wait at two seconds and kills only that group on
   timeout; missing group-bootstrap tools skip registration and preserve ordinary launch.
 
 The record and state contract is in [Task notice records](../behavior/task-hook-records.md).

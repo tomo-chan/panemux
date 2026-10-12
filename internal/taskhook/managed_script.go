@@ -104,8 +104,6 @@ EOF
   [ "$pm_owner" = "$pm_uid" ] && [ "$pm_links" = 1 ] || return
   case "$pm_mode" in ''|*[!0-7]*) return;; esac
   [ $((0$pm_mode & 07022)) = 0 ] && [ $((0$pm_mode & 0100)) != 0 ] || return
-  pm_health=$("$pm_helper" selfcheck --root "$pm_root" </dev/null 2>/dev/null) || return
-  [ "$pm_health" = '{"helper_version":"0.1.0","process_probe":"available","protocol_version":1}' ] || return
   exec "$pm_helper" register-managed-launch --root "$pm_root" --account-home "$pm_home" \
       --codex-home "$pm_codex_home" --machine-identity "$pm_machine" --uid "$pm_uid" \
       --executable "$1"
@@ -113,7 +111,7 @@ EOF
 panemux_register_owner "$1"
 PANEMUX_OWNER_DISCOVERY
     pm_pid=$!; pm_ticks=0
-    while kill -0 "$pm_pid" 2>/dev/null && [ "$pm_ticks" -lt 20 ]; do
+    while kill -0 "$pm_pid" 2>/dev/null && [ "$pm_ticks" -lt 40 ]; do
       sleep 0.05 || break
       pm_ticks=$((pm_ticks + 1))
     done

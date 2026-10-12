@@ -84,7 +84,7 @@ printf '%s' "${PANEMUX_TASK_OWNER_GENERATION:-}" > "$STUB_LOG/codex.generation"
 					if runtime.GOOS == "darwin" {
 						probe = "dscacheutil"
 					}
-					writeExecutable(t, filepath.Join(h.bin, probe), "#!/bin/sh\nexec sleep 3\n")
+					writeExecutable(t, filepath.Join(h.bin, probe), "#!/bin/sh\nexec sleep 5\n")
 				} else {
 					body, err := os.ReadFile(helper)
 					require.NoError(t, err)
@@ -92,18 +92,31 @@ printf '%s' "${PANEMUX_TASK_OWNER_GENERATION:-}" > "$STUB_LOG/codex.generation"
 					if stage == "register" {
 						blocked = "register-managed-launch"
 					}
-					writeExecutable(t, helper, strings.Replace(string(body), blocked+")", blocked+") exec sleep 3;", 1))
+					writeExecutable(t, helper, strings.Replace(string(body), blocked+")", blocked+") exec sleep 5;", 1))
 				}
-				script, err := buildLaunchScript(codexParams(t, mode, t.TempDir(), hostilePrompt))
-				require.NoError(t, err)
-				script = "PANEMUX_TASK_OWNER_GENERATION=g1-00000000000000000000000000000002\n" +
-					"export PANEMUX_TASK_OWNER_GENERATION\n" + script
+				// Measure the actual compiled exec boundary. tmux setup and help
+				// discovery precede optional registration and have separate contracts.
+				script := codexManagedExec + ` -- fixture-prompt`
+				if mode == launchResume {
+					script = codexManagedExec + ` resume -- "$3"`
+				}
+				//nolint:gosec // compiled script executes only this test's own Codex stand-in
+				cmd := exec.Command("sh", "-s", "--", "unused", filepath.Join(codexDir, "codex"), testSessionID)
+				cmd.Stdin = strings.NewReader(script)
+				cmd.Dir = h.tmp
+				cmd.Env = []string{"PATH=" + h.bin, "STUB_LOG=" + h.log, "TMPDIR=" + h.tmp, "HOME=" + h.tmp,
+					"PANEMUX_TASK_OWNER_GENERATION=g1-00000000000000000000000000000002"}
 				started := time.Now()
-				require.NoError(t, parseLaunchOutput(h.run(t, script, "/bin/false")))
-				assert.Less(t, time.Since(started), 2500*time.Millisecond, "optional registration delayed ordinary exec")
+				_, err := cmd.Output()
+				require.NoError(t, err)
+				assert.Less(t, time.Since(started), 3500*time.Millisecond, "optional registration delayed ordinary exec")
 				generation, err := os.ReadFile(filepath.Join(h.log, "codex.generation"))
 				require.NoError(t, err)
-				assert.Empty(t, string(generation), "timed out launch inherited stale ownership")
+				if stage == "selfcheck" {
+					assert.Equal(t, "g1-00000000000000000000000000000001", string(generation))
+				} else {
+					assert.Empty(t, string(generation), "timed out launch inherited stale ownership")
+				}
 			})
 		}
 	}

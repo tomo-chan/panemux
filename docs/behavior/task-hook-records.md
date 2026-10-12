@@ -155,8 +155,9 @@ unsafe installation, unavailable host probes and failed registration leave the o
 running without a generation. An inherited generation is cleared. No directory is created or
 repaired, and installation does not establish routing eligibility.
 
-The caller gives discovery, selfcheck and registration one shared one-second wait budget
-(20 waits of 50 ms, plus host scheduling). Discovery runs in a private process group and execs
+The caller gives discovery and registration one shared two-second wait budget
+(40 waits of 50 ms, plus host scheduling). The helper's registration validates installation
+protocol and identity, so launch does not run a separate selfcheck. Discovery runs in a private process group and execs
 the helper in place, so the registrar remains a direct child of the shell that will exec Codex.
 On timeout the group is killed and ordinary launch continues without a generation. The small
 group bootstrap uses Perl's core `setpgrp`; absent Perl or sleep skips optional registration.
