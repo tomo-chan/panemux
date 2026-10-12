@@ -40,6 +40,19 @@ only when that pane's shell runs on another host. Gating it would mean gating `/
 which remains the separate, larger change recorded in
 [auth.md](auth.md#auth-token-and-transport-encryption).
 
+### Internal preview connection contract
+
+The internal preview connection contract is separate from OAuth callback forwarding. It owns a
+fresh SSH client using the existing authentication, known_hosts and ProxyJump/ProxyCommand
+resolution; it borrows neither the terminal's client nor the task collector's connection. Its
+only network destination capability is a literal `127.0.0.1` or `::1` and a valid TCP port, without
+DNS or arbitrary host input. It starts no remote shell or helper and installs no listener or
+HTTP route. Source host/workdir come from server-resolved panes/tasks. Cancelling creation returns
+promptly; an SSH dial already in progress retains the existing dialer's bounded retry behavior
+and closes its result when it returns. Close releases all opened channels and the SSH client,
+including its jump connection. Future preview routes must preserve the shared browser request
+guard and isolate served content from the main application origin.
+
 ### Browser-open interception
 
 **The shim is not an `exec.Command` sink and does not fall under the command-execution rules in

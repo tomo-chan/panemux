@@ -100,6 +100,15 @@ distribution. Per-surface behavior lives in [`docs/behavior/`](behavior/), group
 
 ## Operational Assumptions
 
+The internal preview source/connection contract captures host, connection settings, and workdir
+once at creation. Pane capture reads the live workdir; task capture uses a fresh collection.
+Changing the pane, task, or host configuration does not retarget an existing connection. A pane
+or popup releases only its own reference when it disconnects or closes; an independently retained
+tab reference continues until released or server shutdown. There is no idle timeout, tab quota,
+task lifetime observer, or permanent request history in this contract. Replaced creation requests
+must be cancelled and their request identity checked by the future UI/API caller before applying
+the result; late cancelled connections are closed. This contract exposes no preview UI or route.
+
 - The app is designed for local or otherwise trusted usage.
 - Long-lived WebSocket connections are expected, so HTTP write timeout is disabled.
 - The server serves the SPA with fallback to `index.html` for non-asset routes.

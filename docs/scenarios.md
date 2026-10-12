@@ -309,6 +309,12 @@ written (`frontend/e2e/run-panemux-task-dashboard-e2e.sh`).
 
 ## Not covered
 
+The preview source/connection contract is internal; there is no preview UI or HTTP route to walk
+yet. `internal/preview` — `TestCaptureSourceFreshAndFixed` and
+`TestCaptureAndConnectKeepsTabAfterPaneRelease` — verify creation-time capture and independent
+pane/tab release. `internal/session` — `TestPreviewTransportLocalClose` — verifies local channel
+cleanup. Real SSH preview acceptance and browser behavior require the relay and UI integration.
+
 Stated explicitly, because an absent row reads as an oversight and these are decisions:
 
 - **Remote (`ssh` / `ssh_tmux`) board panes have no e2e scenario.** All three board fixtures use

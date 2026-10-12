@@ -38,6 +38,7 @@ layout rendering, terminal emulation, interaction state, and presentation.
 | `internal/requestsecurity` | Guard every API and WebSocket before side effects using browser Origin, Referer and Fetch Metadata evidence. |
 | `internal/server` | Compose middleware, API routes, WebSocket routes, static assets, and SPA fallback into the production router. |
 | `internal/portforward` | Maintain short-lived loopback listeners that forward callback traffic through a session's SSH connection. |
+| `internal/preview` | Capture a pane's live host/workdir or a freshly collected task's host/workdir and own a separate local/SSH transport for that fixed source. Pane and tab references release independently; this internal contract installs no route, listener, UI, or task observer. |
 | `internal/board` | Invoke agmsg through its documented scripts, relay rows across configured hosts, and maintain the in-memory status/history view. |
 | `internal/commandcenter` | Run one headless Claude query at a time, persist its session/history state, and stream structured events. |
 | `internal/boardmcp` | Expose the three board operations to the command-center subprocess through a narrow stdio MCP server backed by panemux REST APIs. |
