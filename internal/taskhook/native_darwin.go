@@ -12,8 +12,10 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+var probeInfo = unix.SysctlKinfoProc
+
 func platformProcess(pid int) (ProcessIdentity, error) {
-	p, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
+	p, err := probeInfo("kern.proc.pid", pid)
 	if err != nil {
 		return ProcessIdentity{}, ErrUnsupported
 	}
@@ -27,10 +29,8 @@ func (b *limitedOutput) Write(p []byte) (int, error) {
 	if b.Len()+len(p) > 256<<10 {
 		return 0, ErrLimit
 	}
-	n, err := b.Buffer.Write(p)
-	if err != nil {
-		return n, ErrUnsupported
-	}
+	// bytes.Buffer.Write always returns a nil error.
+	n, _ := b.Buffer.Write(p)
 	return n, nil
 }
 

@@ -11,6 +11,11 @@ import (
 )
 
 const HelperVersion = "0.1.0"
+const (
+	resolveMode  = "resolve-turn"
+	providedMode = "mark-provided"
+	recoveryMode = "recover-provisional"
+)
 
 type Lookup struct {
 	SessionID string `json:"session_id"`
@@ -88,7 +93,7 @@ func (c *Command) run(ctx context.Context, mode string, input io.Reader, output 
 		return c.register(ctx, input, output)
 	case "register-managed-launch":
 		return c.registerManaged(ctx, output)
-	case "resolve-turn":
+	case resolveMode:
 		return c.resolve(ctx, input, output)
 	case "inspect":
 		var p Lookup
@@ -100,14 +105,14 @@ func (c *Command) run(ctx context.Context, mode string, input io.Reader, output 
 			return err
 		}
 		return emitRecord(output, r)
-	case "mark-provided", "recover-provisional":
+	case providedMode, recoveryMode:
 		var p Provided
 		if err := readCommand(input, &p); err != nil {
 			return err
 		}
 		var r Record
 		var err error
-		if mode == "mark-provided" {
+		if mode == providedMode {
 			r, err = c.Verifier.Store.MarkProvided(ctx, p)
 		} else {
 			r, err = c.Verifier.Store.RecoverProvisional(ctx, p)

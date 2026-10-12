@@ -28,6 +28,11 @@ var (
 // already exist, belong to the effective user, and have exactly mode 0700.
 // It is not a configuration-file writer: operator symlinks are not supported.
 type PrivateDir struct {
+	read      func(io.Reader) ([]byte, error)
+	stat      func(*os.File) (os.FileInfo, error)
+	flock     func(int, int) error
+	openFile  func(string, int) (*os.File, error)
+	random    io.Reader
 	write     func(io.Writer, []byte) (int, error)
 	sync      func(*os.File) error
 	closeFile func(*os.File) error
@@ -49,10 +54,13 @@ func OpenPrivateDir(root string) (*PrivateDir, error) {
 		_ = unix.Close(fd)
 		return nil, ErrPrivate
 	}
-	return &PrivateDir{
-		fd: fd, write: func(w io.Writer, b []byte) (int, error) { return w.Write(b) },
-		sync: (*os.File).Sync, closeFile: (*os.File).Close, rename: unix.Renameat, syncDir: unix.Fsync,
-	}, nil
+	d := &PrivateDir{
+		fd: fd, read: io.ReadAll, stat: (*os.File).Stat, flock: unix.Flock, random: rand.Reader,
+		write: func(w io.Writer, b []byte) (int, error) { return w.Write(b) },
+		sync:  (*os.File).Sync, closeFile: (*os.File).Close, rename: unix.Renameat, syncDir: unix.Fsync,
+	}
+	d.openFile = d.openRegular
+	return d, nil
 }
 
 func (d *PrivateDir) Close() error {
@@ -94,19 +102,19 @@ func (d *PrivateDir) Read(name string, limit int) ([]byte, error) {
 	if limit < 1 || limit > 1<<20 {
 		return nil, ErrPrivateLimit
 	}
-	f, err := d.openRegular(name, unix.O_RDONLY)
+	f, err := d.openFile(name, unix.O_RDONLY)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = f.Close() }()
-	info, err := f.Stat()
+	info, err := d.stat(f)
 	if err != nil {
 		return nil, ErrPrivate
 	}
 	if info.Size() > int64(limit) {
 		return nil, ErrPrivateLimit
 	}
-	data, err := io.ReadAll(io.LimitReader(f, int64(limit)+1))
+	data, err := d.read(io.LimitReader(f, int64(limit)+1))
 	if err != nil {
 		return nil, ErrPrivate
 	}
@@ -117,7 +125,7 @@ func (d *PrivateDir) Read(name string, limit int) ([]byte, error) {
 }
 
 func (d *PrivateDir) checkTarget(name string) error {
-	f, err := d.openRegular(name, unix.O_RDONLY)
+	f, err := d.openFile(name, unix.O_RDONLY)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
@@ -139,11 +147,11 @@ func (d *PrivateDir) Replace(name string, data []byte) error {
 		return err
 	}
 	var random [16]byte
-	if _, err := rand.Read(random[:]); err != nil {
+	if _, err := io.ReadFull(d.random, random[:]); err != nil {
 		return ErrPrivate
 	}
 	temp := ".tmp-" + hex.EncodeToString(random[:])
-	f, err := d.openRegular(temp, unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL)
+	f, err := d.openFile(temp, unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL)
 	if err != nil {
 		return ErrPrivate
 	}
@@ -195,7 +203,7 @@ func (d *PrivateDir) Lock(ctx context.Context, budget time.Duration) (func(), er
 	// Retry only that transient condition, under the same finite deadline.
 	for {
 		var err error
-		f, err = d.openRegular(".lock", unix.O_CREAT|unix.O_RDWR)
+		f, err = d.openFile(".lock", unix.O_CREAT|unix.O_RDWR)
 		if err == nil {
 			break
 		}
@@ -216,7 +224,7 @@ func (d *PrivateDir) Lock(ctx context.Context, budget time.Duration) (func(), er
 			_ = f.Close()
 			return nil, fmt.Errorf("private lock canceled: %w", err)
 		}
-		err := unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB)
+		err := d.flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB)
 		if err == nil {
 			if ctxErr := ctx.Err(); ctxErr != nil {
 				_ = f.Close()

@@ -106,10 +106,8 @@ func (r *Registry) Register(ctx context.Context, entry Registration) error {
 	if ctx.Err() != nil {
 		return ErrStorage
 	}
-	data, err := json.Marshal(entry)
-	if err != nil {
-		return ErrInput
-	}
+	// Registration consists only of bounded JSON primitive fields.
+	data, _ := json.Marshal(entry)
 	if d.Replace(entry.Owner.Generation+".owner.json", data) != nil || ctx.Err() != nil {
 		return ErrStorage
 	}

@@ -67,10 +67,10 @@ func TestManagedRegistrationRejectsTargetCollisionAndNeverAttestsScope(t *testin
 }
 
 func TestManagedArgsDoNotAcceptScopeClaims(t *testing.T) {
-	args := []string{"--uid", strconv.Itoa(os.Geteuid()), "--account-home", "/workspace/account",
-		"--codex-home", "/workspace/account/.codex",
-		"--machine-identity", "linux-machine-id:0123456789abcdef0123456789abcdef",
-		"--executable", "/workspace/bin/codex"}
+	args := []string{uidFlag, strconv.Itoa(os.Geteuid()), accountHomeFlag, "/workspace/account",
+		codexHomeFlag, "/workspace/account/.codex",
+		machineFlag, "linux-machine-id:0123456789abcdef0123456789abcdef",
+		executableFlag, "/workspace/bin/codex"}
 	if _, err := ParseManagedArgs(args); err != nil {
 		t.Fatal(err)
 	}

@@ -7,9 +7,10 @@ import (
 )
 
 type bindingHost struct {
-	processes map[int]ProcessIdentity
-	files     map[int]NativeFiles
-	scan      func(context.Context, HeldSession, Permission) (RolloutEvidence, error)
+	filesError error
+	processes  map[int]ProcessIdentity
+	files      map[int]NativeFiles
+	scan       func(context.Context, HeldSession, Permission) (RolloutEvidence, error)
 }
 
 func (h *bindingHost) Process(_ context.Context, pid int) (ProcessIdentity, error) {
@@ -20,7 +21,7 @@ func (h *bindingHost) Process(_ context.Context, pid int) (ProcessIdentity, erro
 	return p, nil
 }
 func (h *bindingHost) Files(_ context.Context, pid int, _ string, _ string) (NativeFiles, error) {
-	return h.files[pid], nil
+	return h.files[pid], h.filesError
 }
 func (h *bindingHost) Scan(ctx context.Context, f HeldSession, p Permission) (RolloutEvidence, error) {
 	if h.scan != nil {

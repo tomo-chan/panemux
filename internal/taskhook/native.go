@@ -14,9 +14,16 @@ import (
 
 const MaxHeldFiles = 2048
 
-type NativeHost struct{ uid int }
+type NativeHost struct {
+	process      func(int) (ProcessIdentity, error)
+	files        func(context.Context, int) ([]heldFile, error)
+	scanSnapshot func(io.Reader, Permission, string) (RolloutEvidence, error)
+	uid          int
+}
 
-func NewNativeHost(uid int) *NativeHost { return &NativeHost{uid: uid} }
+func NewNativeHost(uid int) *NativeHost {
+	return &NativeHost{uid: uid, files: platformFiles, scanSnapshot: ScanRollout, process: platformProcess}
+}
 
 func statIdentity(st unix.Stat_t) string { return fmt.Sprintf("%x:%x", st.Dev, st.Ino) }
 
@@ -39,18 +46,20 @@ func (h *NativeHost) Process(ctx context.Context, pid int) (ProcessIdentity, err
 	if ctx.Err() != nil || pid <= 1 || h.uid != os.Geteuid() || os.Getuid() != os.Geteuid() {
 		return ProcessIdentity{}, ErrUnsupported
 	}
-	p, err := platformProcess(pid)
+	p, err := h.process(pid)
 	if err != nil || p.UID != h.uid || p.PID != pid || !opaque.MatchString(p.Birth) {
 		return ProcessIdentity{}, ErrUnsupported
 	}
 	return p, nil
 }
 
+var openNative = unix.Open
+
 func openRoot(root string) (int, error) {
 	if !filepath.IsAbs(root) || filepath.Clean(root) != root {
 		return -1, ErrUnsupported
 	}
-	fd, err := unix.Open("/", unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+	fd, err := openNative("/", unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
 	if err != nil {
 		return -1, ErrUnsupported
 	}
@@ -149,7 +158,7 @@ func (h *NativeHost) Scan(ctx context.Context, f HeldSession, p Permission) (Rol
 	if err != nil || before.Size() > MaxRolloutBytes {
 		return RolloutEvidence{}, ErrUnsupported
 	}
-	e, err := ScanRollout(io.NewSectionReader(opened, 0, before.Size()), p, f.FileID)
+	e, err := h.scanSnapshot(io.NewSectionReader(opened, 0, before.Size()), p, f.FileID)
 	if err != nil {
 		return RolloutEvidence{}, err
 	}

@@ -18,7 +18,9 @@ Each start adds a random `ep1-` episode and changes the stable `h1-` notice ID. 
 notification identities, not Codex request or tool-use IDs. Repeated reads and restarts preserve
 them. At most 16 pending or provisional episodes are retained; overflow fails without dropping any pending notice.
 Settled episodes are compacted when another start is added. Revisions increase on changes and
-remain within the exact integer range used by JSON/browser consumers.
+remain within the exact integer range used by JSON/browser consumers. The validated maximum
+record shape, including anchors and a full receipt, fits below the 16 KiB persistence budget.
+Mutations at the revision ceiling fail without changing the durable record.
 
 Records contain session/turn, owner, notification IDs, dispositions and an optional log anchor.
 They contain no command, arguments, conversation, directory or transcript path. An anchor is an

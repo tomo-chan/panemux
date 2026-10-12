@@ -9,6 +9,14 @@ import (
 	"strconv"
 )
 
+const (
+	accountHomeFlag = "--account-home"
+	codexHomeFlag   = "--codex-home"
+	machineFlag     = "--machine-identity"
+	uidFlag         = "--uid"
+	executableFlag  = "--executable"
+)
+
 type ManagedLaunch struct {
 	Executable string
 	Target     TargetIdentity
@@ -21,23 +29,24 @@ func ParseManagedArgs(args []string) (*ManagedLaunch, error) {
 		return nil, ErrInput
 	}
 	values := map[string]string{}
-	for i := 0; i+1 < len(args); i += 2 {
-		if _, exists := values[args[i]]; exists {
+	for len(args) >= 2 {
+		if _, exists := values[args[0]]; exists {
 			return nil, ErrInput
 		}
-		values[args[i]] = args[i+1]
+		values[args[0]] = args[1]
+		args = args[2:]
 	}
-	for _, key := range []string{"--account-home", "--codex-home", "--machine-identity", "--uid", "--executable"} {
+	for _, key := range []string{accountHomeFlag, codexHomeFlag, machineFlag, uidFlag, executableFlag} {
 		if values[key] == "" {
 			return nil, ErrInput
 		}
 	}
-	uid, err := strconv.Atoi(values["--uid"])
-	if err != nil || strconv.Itoa(uid) != values["--uid"] {
+	uid, err := strconv.Atoi(values[uidFlag])
+	if err != nil || uid < 0 || strconv.Itoa(uid) != values[uidFlag] {
 		return nil, ErrInput
 	}
-	return &ManagedLaunch{Executable: values["--executable"], Target: TargetIdentity{Version: 1, UID: uid,
-		AccountHome: values["--account-home"], CodexHome: values["--codex-home"], Machine: values["--machine-identity"]}}, nil
+	return &ManagedLaunch{Executable: values[executableFlag], Target: TargetIdentity{Version: 1, UID: uid,
+		AccountHome: values[accountHomeFlag], CodexHome: values[codexHomeFlag], Machine: values[machineFlag]}}, nil
 }
 
 func (c *Command) registerManaged(ctx context.Context, output io.Writer) error {
@@ -47,10 +56,7 @@ func (c *Command) registerManaged(ctx context.Context, output io.Writer) error {
 	if err := validateInstalledTarget(c.Verifier.Store.root, c.Managed.Target); err != nil {
 		return err
 	}
-	data, err := json.Marshal(LaunchRegistration{SessionsRoot: c.Managed.Target.CodexHome + "/sessions",
+	data, _ := json.Marshal(LaunchRegistration{SessionsRoot: c.Managed.Target.CodexHome + "/sessions",
 		ExecutablePath: c.Managed.Executable, Scope: LaunchScope{CodexVersion: UnknownScopeVersion, NoDaemon: true}})
-	if err != nil {
-		return ErrInput
-	}
 	return c.register(ctx, bytes.NewReader(data), output)
 }

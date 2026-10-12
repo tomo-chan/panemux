@@ -16,7 +16,7 @@ func (h *NativeHost) Files(ctx context.Context, pid int, root, executableID stri
 	if _, err := h.Process(ctx, pid); err != nil {
 		return NativeFiles{}, err
 	}
-	files, err := platformFiles(ctx, pid)
+	files, err := h.files(ctx, pid)
 	if err != nil || len(files) > MaxHeldFiles {
 		return NativeFiles{}, ErrUnsupported
 	}

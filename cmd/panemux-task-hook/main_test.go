@@ -36,7 +36,7 @@ func TestHookProcessDeadlineAndEmptyOutput(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
-			args := []string{"record-permission", "--root", t.TempDir()}
+			args := []string{hookMode, rootFlag, t.TempDir()}
 			if name == "invalid hook arguments" {
 				args = args[:1]
 			}

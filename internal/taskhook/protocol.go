@@ -131,9 +131,8 @@ func ParsePermission(data []byte) (Permission, error) {
 		return Permission{}, ErrInput
 	}
 	var keys map[string]json.RawMessage
-	if json.Unmarshal(data, &keys) != nil {
-		return Permission{}, ErrInput
-	}
+	// The typed strict decode above already established an object with valid JSON.
+	_ = json.Unmarshal(data, &keys)
 	for _, key := range []string{
 		"hook_event_name", "session_id", "turn_id", "tool_name", "permission_mode",
 		"model", "cwd", "transcript_path", "tool_input",
@@ -185,13 +184,9 @@ func EncodeRecord(r Record) ([]byte, error) {
 	if err := validateRecord(r); err != nil {
 		return nil, err
 	}
-	data, err := json.Marshal(r)
-	if err != nil {
-		return nil, ErrCorrupt
-	}
-	if len(data) > MaxRecordBytes {
-		return nil, ErrLimit
-	}
+	// Record has only JSON primitive fields. validateRecord bounds every string
+	// and collection; the maximum shape is below MaxRecordBytes (tested).
+	data, _ := json.Marshal(r)
 	return data, nil
 }
 

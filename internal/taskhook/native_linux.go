@@ -11,6 +11,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+var procRoot = "/proc"
+
 func smallProcFile(path string) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -25,7 +27,7 @@ func smallProcFile(path string) (string, error) {
 }
 
 func platformProcess(pid int) (ProcessIdentity, error) {
-	root := "/proc/" + strconv.Itoa(pid)
+	root := procRoot + "/" + strconv.Itoa(pid)
 	var st unix.Stat_t
 	if unix.Stat(root, &st) != nil {
 		return ProcessIdentity{}, ErrUnsupported
@@ -35,7 +37,7 @@ func platformProcess(pid int) (ProcessIdentity, error) {
 		return ProcessIdentity{}, err
 	}
 	end := strings.LastIndex(data, ") ")
-	if end < 0 {
+	if end == -1 {
 		return ProcessIdentity{}, ErrUnsupported
 	}
 	fields := strings.Fields(data[end+2:])
@@ -50,15 +52,16 @@ func platformProcess(pid int) (ProcessIdentity, error) {
 	if err != nil {
 		return ProcessIdentity{}, ErrUnsupported
 	}
-	boot, err := smallProcFile("/proc/sys/kernel/random/boot_id")
+	boot, err := smallProcFile(procRoot + "/sys/kernel/random/boot_id")
 	if err != nil || !uuid.MatchString(strings.TrimSpace(boot)) {
 		return ProcessIdentity{}, ErrUnsupported
 	}
-	return ProcessIdentity{PID: pid, PPID: parent, UID: int(st.Uid), Birth: fmt.Sprintf("%s:%d", strings.TrimSpace(boot), start)}, nil
+	return ProcessIdentity{PID: pid, PPID: parent, UID: int(st.Uid),
+		Birth: fmt.Sprintf("%s:%d", strings.TrimSpace(boot), start)}, nil
 }
 
 func platformFiles(ctx context.Context, pid int) ([]heldFile, error) {
-	root := "/proc/" + strconv.Itoa(pid)
+	root := procRoot + "/" + strconv.Itoa(pid)
 	var files []heldFile
 	var st unix.Stat_t
 	if unix.Stat(root+"/exe", &st) != nil {
