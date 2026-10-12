@@ -217,3 +217,17 @@ func TestSessionKey(t *testing.T) {
 	assert.False(t, seen[remote], "the same session ID on another host is another session")
 	assert.False(t, seen[other], "the same session ID under another agent is another session")
 }
+
+func TestTaskRuleIsInteractive(t *testing.T) {
+	no := func(string) bool { return false }
+	assert.True(t, TaskRule{Process: anyProcess}.IsInteractive("x"), "nil Interactive: every process is a session")
+	assert.False(t, TaskRule{Process: no}.IsInteractive("x"))
+	assert.False(t, TaskRule{Process: anyProcess, Interactive: no}.IsInteractive("x"))
+	assert.True(t, TaskRule{Process: no, Interactive: anyProcess}.IsInteractive("x"))
+}
+
+func TestCodexSubcommandOfEmptyCommand(t *testing.T) {
+	assert.Equal(t, "", CodexSubcommand(""))
+	assert.Equal(t, "", CodexSubcommand("   "))
+	assert.Equal(t, "", CodexSubcommand("codex"))
+}

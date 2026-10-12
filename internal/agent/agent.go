@@ -3,10 +3,8 @@
 // it, and the capabilities it declares. Every other package asks this one
 // rather than naming an agent itself.
 //
-// The registry declares; it does not implement. A capability's behavior is a
-// port the consuming package defines in its own types and fills per agent ID,
-// and that port's adapter is where an agent's formats and versions are
-// absorbed. See docs/agent-registry.md.
+// The registry declares; it does not implement. The code behind each
+// capability lives in the packages that use it. See docs/agent-registry.md.
 //
 // This package imports nothing else from panemux, so every package can import
 // it.
@@ -170,6 +168,15 @@ type TaskRule struct {
 	Interactive  func(command string) bool
 	VerifiedWith string
 	UnknownArgs  UnknownPolicy
+}
+
+// IsInteractive reports whether command is a process of the agent that is a
+// session: Interactive's answer, or Process's when Interactive is nil.
+func (r TaskRule) IsInteractive(command string) bool {
+	if r.Interactive == nil {
+		return r.Process(command)
+	}
+	return r.Interactive(command)
 }
 
 // SessionKey identifies one agent session: a session ID is unique only

@@ -220,3 +220,57 @@ func TestValidateAccepts(t *testing.T) {
 func TestNewRegistryPanicsOnInvalidDefinitions(t *testing.T) {
 	assert.Panics(t, func() { newRegistry([]Definition{validDef("a"), validDef("a")}) })
 }
+
+// A process whose program matches one agent's rule belongs to that agent:
+// an exclude token makes it no agent's, rather than handing it to a later
+// agent whose patterns overlap.
+func TestMatchStopsAtFirstMatchingProgram(t *testing.T) {
+	first := boardDef("a", "a")
+	first.Detection.Board.Patterns = []string{"a-*"}
+	first.Detection.Board.ExcludeTokens = []string{"-p"}
+	first.Detection.Workdir.Patterns = []string{"a-x"}
+	first.Detection.Workdir.ExcludeTokens = []string{"-p"}
+	second := boardDef("b", "b")
+	second.Detection.Board.Patterns = []string{"a-*"}
+	second.Detection.Workdir.Patterns = []string{"a-x"}
+	r := newRegistry([]Definition{first, second})
+
+	for _, rule := range []func(Detection) *ProcessRule{
+		func(d Detection) *ProcessRule { return d.Board },
+		func(d Detection) *ProcessRule { return d.Workdir },
+	} {
+		_, ok := r.match("a-x -p", rule)
+		assert.False(t, ok, "excluded by the first matching program's rule")
+		d, ok := r.match("a-x", rule)
+		assert.True(t, ok)
+		assert.Equal(t, ID("a"), d.ID)
+	}
+}
+
+// What All and Lookup return shares nothing with the registry, rules
+// included.
+func TestDefinitionsAreDeepCopies(t *testing.T) {
+	for _, d := range []Definition{All()[0], must(Lookup(Claude)), must(ByAgmsgType("claude-code"))} {
+		d.Detection.Board.Patterns[0] = "mutated"
+		d.Detection.Board.ExcludeTokens[0] = "mutated"
+		d.Detection.Workdir.Patterns[0] = "mutated"
+		d.Detection.Task.Process = func(string) bool { return false }
+		d.Detection.Board = nil
+	}
+	d, ok := MatchBoardProcess("claude -p")
+	assert.False(t, ok, "%+v", d)
+	d, ok = MatchBoardProcess("claude")
+	require.True(t, ok)
+	assert.Equal(t, Claude, d.ID)
+	_, ok = MatchWorkdirProcess("claude")
+	assert.True(t, ok)
+	claude := must(Lookup(Claude))
+	assert.True(t, claude.Detection.Task.Process("claude"))
+}
+
+func must(d Definition, ok bool) Definition {
+	if !ok {
+		panic("not registered")
+	}
+	return d
+}

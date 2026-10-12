@@ -151,17 +151,43 @@ func MatchWorkdirProcess(command string) (Definition, bool) {
 }
 
 func matchRule(command string, rule func(Detection) *ProcessRule) (Definition, bool) {
-	for _, d := range defaultRegistry.defs {
-		if r := rule(d.Detection); r != nil && r.Match(command) {
+	return defaultRegistry.match(command, rule)
+}
+
+func (r *registry) match(command string, rule func(Detection) *ProcessRule) (Definition, bool) {
+	for _, d := range r.defs {
+		// The first agent whose program matches decides: an exclude token
+		// makes the process no agent's, rather than a later agent's whose
+		// patterns overlap.
+		if pr := rule(d.Detection); pr != nil && pr.MatchBinary(command) {
+			if !pr.Match(command) {
+				return Definition{}, false
+			}
 			return d.clone(), true
 		}
 	}
 	return Definition{}, false
 }
 
-// clone copies d's slices; the rules are shared, and nothing changes them.
+// clone copies d deeply, so nothing a caller does to it reaches the registry.
 func (d Definition) clone() Definition {
 	d.Aliases = append([]string(nil), d.Aliases...)
 	d.Capabilities = append([]Capability(nil), d.Capabilities...)
+	d.Detection.Board = d.Detection.Board.clone()
+	d.Detection.Workdir = d.Detection.Workdir.clone()
+	if d.Detection.Task != nil {
+		task := *d.Detection.Task
+		d.Detection.Task = &task
+	}
 	return d
+}
+
+func (r *ProcessRule) clone() *ProcessRule {
+	if r == nil {
+		return nil
+	}
+	c := *r
+	c.Patterns = append([]string(nil), r.Patterns...)
+	c.ExcludeTokens = append([]string(nil), r.ExcludeTokens...)
+	return &c
 }

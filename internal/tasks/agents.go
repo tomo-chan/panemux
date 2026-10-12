@@ -22,10 +22,10 @@ func taskRule(id agent.ID) agent.TaskRule {
 func isClaudeProcess(command string) bool { return claudeTask.Process(command) }
 
 // isInteractiveClaude is a Claude Code process that is a session.
-func isInteractiveClaude(command string) bool { return claudeTask.Interactive(command) }
+func isInteractiveClaude(command string) bool { return claudeTask.IsInteractive(command) }
 
 // isCodexProgram is any codex process, interactive or not.
 func isCodexProgram(command string) bool { return codexTask.Process(command) }
 
 // isInteractiveCodex is a codex process that is a session.
-func isInteractiveCodex(command string) bool { return codexTask.Interactive(command) }
+func isInteractiveCodex(command string) bool { return codexTask.IsInteractive(command) }

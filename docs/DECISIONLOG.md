@@ -1377,7 +1377,7 @@ on.
   `internal/tasks`'s types before any adapter needed them, and fixing method signatures stages
   ahead of their first implementation. A single interface probed by type assertion was rejected as
   implicit and impossible to list. The registry holds a capability set; the consuming package
-  defines the port in its own types.
+  is to define the port in its own types when its capability moves behind one (#373 onward).
 - **A struct session key.** `{Host, Agent, SessionID}` is comparable and needs no escaping, unlike
   a joined `host/agent/session` string. A PID is not part of it, since codex's shared app-server
   daemon serves several sessions.

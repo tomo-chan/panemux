@@ -64,16 +64,14 @@ the agent, not a statement that it works on a given host right now.
 | `usage` | Its usage limits and spend can be read; declared by no agent yet (#345) | — |
 | `board` | It can join Agent Board through agmsg | an agmsg type and a Board rule |
 
-The registry holds declarations only. The code behind a capability lives in the package that uses
-it: that package defines a port — an interface in its own types — and fills it per agent ID. The
-consuming code in `internal/tasks` and `internal/session` still branches on the claude and codex
-IDs; it reads those IDs and their process rules from the registry.
+The registry holds declarations only; nothing reads a declaration to decide what to do yet. The
+code behind each capability is in `internal/tasks` and `internal/session`, which branch on the
+claude and codex IDs and read those IDs and their process rules from the registry.
 
 ### Formats and versions
 
-Agents change faster than panemux follows them. Their formats — command-line arguments, state and
-log files — are read only inside the code for that agent, which hands the rest of panemux
-panemux's own types. The registry itself carries no versions: no ID or capability is per release.
+Agents change faster than panemux follows them. The registry carries no versions: no ID or
+capability is per release.
 
 Each detection rule records:
 
@@ -87,7 +85,9 @@ Each detection rule records:
 ## Detection rules
 
 Three rule sets exist because each consumer has always matched slightly differently; the registry
-keeps each exactly.
+keeps each exactly. Within one rule set the agents are tried in registration order, and the first
+whose patterns match the program decides: when one of its exclude tokens is among the arguments the
+process is no agent's, even if a later agent's patterns would also match the program.
 
 | Rule | Used by | Matches |
 |---|---|---|

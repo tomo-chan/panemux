@@ -140,5 +140,9 @@ func fieldBase(program string) string {
 // its subcommand, or a prompt — with option values skipped; "" when there is
 // none.
 func CodexSubcommand(command string) string {
-	return firstCodexPositional(strings.Fields(command)[1:])
+	fields := strings.Fields(command)
+	if len(fields) == 0 {
+		return ""
+	}
+	return firstCodexPositional(fields[1:])
 }
