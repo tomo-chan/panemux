@@ -516,6 +516,11 @@ A **codex** task starts the same way, with these differences:
   the TUI's own process, where its rollout ties it to the task's tmux session, rather than in codex's
   shared daemon ([Codex sessions](#codex-sessions)). The update check is turned off because its
   prompt would hold the task; codex's configuration is not otherwise touched.
+- **An installed task-hook context may register the exec shell before launch/resume.** The helper
+  receives verified host identity and returns an owner generation, exported to Codex. Missing or
+  unsafe deployment preserves ordinary launch. Registration keeps routing scope unknown, so it
+  does not activate notices; installation and activation are separate contracts. See
+  [Optional managed launch registration](task-hook-records.md#optional-managed-launch-registration).
 - **A codex without `--no-daemon` is refused.** Before anything starts, the launch reads
   `codex --help`; when it lists no `--no-daemon`, the host refuses with "codex on the host is too
   old: it has no --no-daemon option", and no tmux session is started. codex-cli 0.142.2 has no such

@@ -3,8 +3,8 @@
 The `internal/taskhook` library describes input-needed notices. It does not decide approvals,
 send terminal input, establish that an answer was accepted, install Codex hooks,
 or connect records to the task dashboard. A standalone helper and native verifier are available,
-but normal launch/resume does not yet register owners or attest routing scope. Task collection retains its existing
-behavior, including reporting Codex command approvals as busy.
+and managed launch/resume optionally registers owners with unknown routing scope. Task collection
+retains its existing behavior, including reporting Codex command approvals as busy.
 
 ## Record identity and limits
 
@@ -135,9 +135,38 @@ on failure, without reflecting input, command text, private paths or decoder err
 `scope` is a trusted launcher's declaration for fixed 0.160.0/no-daemon/main-task/Bash/user/no-strict/
 passive-related-hook operation. Unknown `NoStrict` or `PassiveHooks` evidence must remain false.
 The helper does not inspect all config/rules/plugin sources or prove dynamic routing. Normal
-managed launch integration and its scope-evidence source remain unconnected; the isolated native
-fixture used an explicit declaration of its own settings. Registering `unknown` scope is allowed
+managed launch uses `unknown` scope; its activation evidence remains a separate contract. The isolated
+native fixture used an explicit declaration of its own settings. Registering `unknown` scope is allowed
 but cannot publish a notice. Existing user settings and hook trust are never rewritten.
+
+## Optional managed launch registration
+
+New and resumed Codex tasks use the same fixed exec shell. Before exec, it may call an already
+installed compatible helper as a direct child, then export the returned generation. Missing or
+unsafe installation, unavailable host probes and failed registration leave the ordinary launch
+running without a generation. An inherited generation is cleared. No directory is created or
+repaired, and installation does not establish routing eligibility.
+
+The host account database supplies the effective user's account home. Machine identity is the
+Linux machine ID or macOS platform UUID. The actual exec environment supplies custom `CODEX_HOME`;
+otherwise `HOME` must agree with the account home and the context defaults to its `.codex` directory.
+Homes are canonicalized on that host. Browser paths, SSH aliases and XDG overrides do not select
+installation contexts. Context IDs are `ctx1-` plus SHA-256 over NUL-terminated UTF-8 values:
+`panemux.task-hooks.context/v1`, machine identity, canonical decimal UID and canonical Codex home.
+
+The fixed location is `ACCOUNT_HOME/.local/state/panemux/task-hooks/contexts/CONTEXT_ID/`.
+Its `bin/panemux-task-hook` is an owner-executable regular file with one link; `state/` is the
+existing private record root. Context directories and records use the private ownership checks.
+The installer-owned private `install.json` must contain `helper_protocol: 1` and a `target` object
+with `version: 1`, `context_id`, `machine_identity`, `account_home`, `codex_home` and `uid` exactly
+matching this launch. Other installation fields are accepted but never interpreted as scope facts.
+A mismatch or incompatible helper fails registration. Deployment and stock Codex scope activation
+remain separate work; registration always records unknown/default-false eligibility.
+
+`register-managed-launch` takes discrete `--account-home`, `--codex-home`, `--machine-identity`,
+`--uid` and `--executable` arguments after `--root`. It accepts no scope flags, checks installation
+identity, and derives the kernel parent identity as `register-launch` does. Helper health reports
+protocol/process availability only. Registration must run directly under the shell that execs Codex.
 
 ## Persistence and failure
 

@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"panemux/internal/session"
+	"panemux/internal/taskhook"
 )
 
 // Launching and resuming tasks (issues #257 and #264). A task is started on
@@ -192,7 +193,7 @@ if [ "$agent" = codex ]; then
     { say 'error codex-too-old'; exit 0; }
 fi
 if [ "$agent" = codex ]; then
-  codex='PATH=$PATH:${2%/*}; export PATH; exec "$2" --no-daemon -c check_for_update_on_startup=false'
+  codex={{CODEX_EXEC}}
   resume='cd -- "$1" || exit 1; '"$codex"' resume -- "$3"'
   run='p=$(cat -- "$1"); rm -f -- "$1"; cd -- "$4" || exit 1; '"$codex"' -- "$p"'
 else
@@ -255,6 +256,7 @@ func buildLaunchScript(p launchParams) (string, error) {
 		}
 	}
 	return strings.NewReplacer(
+		"{{CODEX_EXEC}}", "'"+strings.ReplaceAll(codexManagedExec, "'", "'\"'\"'")+"'",
 		"{{AGENT}}", p.agent,
 		"{{MODE}}", string(p.mode),
 		"{{REUSE}}", reuseWord(p.reuseSession),
@@ -265,6 +267,11 @@ func buildLaunchScript(p launchParams) (string, error) {
 		"{{PROMPT}}", p.prompt,
 	).Replace(launchScriptTemplate), nil
 }
+
+// Only compiled code is quoted into the shell variable. Request values still
+// travel in the original heredocs and discrete tmux argv, never this source.
+const codexManagedExec = `PATH=$PATH:${2%/*}; export PATH; ` + taskhook.ManagedLaunchScript +
+	`exec "$2" --no-daemon -c check_for_update_on_startup=false`
 
 // checkLaunchSessionID checks the agent, and the session ID it is given: the
 // minted UUID of a new claude task, the listed UUID of a resumed task, and

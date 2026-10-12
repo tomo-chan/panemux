@@ -516,6 +516,14 @@ Its parsing and storage boundary must keep these properties:
   attestations stay false and cannot activate the recorder. The current helper does not certify
   all config/rules/plugin sources or dynamic routing; automatic managed launch attestation is absent.
 
+- Optional managed launch registration uses compiled shell code and discrete helper arguments.
+  Effective UID/account database and machine identity select a fixed context under verified account
+  home; the actual exec environment selects canonical Codex home. No browser or hook path supplies
+  an installation location. Reject symlink/shared helper and directories, incompatible health and
+  mismatching private installation metadata. The registrar is a direct child of the exec shell.
+  Missing installation preserves launch, clears inherited generation and creates no directories.
+  Installation facts cannot turn any routing-scope flag true.
+
 The record and state contract is in [Task notice records](../behavior/task-hook-records.md).
 
 ### Task summaries

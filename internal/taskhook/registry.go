@@ -10,6 +10,8 @@ import (
 	"time"
 )
 
+const UnknownScopeVersion = "unknown"
+
 // LaunchScope is evidence supplied by the trusted managed launcher, not claims
 // accepted from PermissionRequest. A user turn's reviewer field alone cannot
 // establish this scope. Unknown routing must leave these attestations false.

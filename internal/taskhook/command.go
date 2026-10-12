@@ -28,6 +28,7 @@ type LaunchRegistration struct {
 
 type Command struct {
 	Verifier   *Verifier
+	Managed    *ManagedLaunch
 	Generation string
 	PID        int
 }
@@ -85,6 +86,8 @@ func (c *Command) run(ctx context.Context, mode string, input io.Reader, output 
 		return err
 	case "register-launch":
 		return c.register(ctx, input, output)
+	case "register-managed-launch":
+		return c.registerManaged(ctx, output)
 	case "resolve-turn":
 		return c.resolve(ctx, input, output)
 	case "inspect":
