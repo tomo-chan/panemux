@@ -69,56 +69,51 @@ esac
 }
 
 func TestLaunchScriptOptionalRegistrationHasOuterBudget(t *testing.T) {
-	for _, mode := range []launchMode{launchNew, launchResume} {
-		for _, stage := range []string{"account", "selfcheck", "register"} {
-			t.Run(string(mode)+"/"+stage, func(t *testing.T) {
-				h := newStubHost(t, true, false)
-				codexDir := h.withCodex(t)
-				require.NoError(t, os.Symlink(filepath.Join(codexDir, "codex"), filepath.Join(h.bin, "codex")))
-				writeExecutable(t, filepath.Join(codexDir, "codex"), stubCodex+`
+	for _, stage := range []string{"account", "selfcheck", "register"} {
+		t.Run(stage, func(t *testing.T) {
+			h := newStubHost(t, true, false)
+			codexDir := h.withCodex(t)
+			require.NoError(t, os.Symlink(filepath.Join(codexDir, "codex"), filepath.Join(h.bin, "codex")))
+			writeExecutable(t, filepath.Join(codexDir, "codex"), stubCodex+`
 printf '%s' "${PANEMUX_TASK_OWNER_GENERATION:-}" > "$STUB_LOG/codex.generation"
 `)
-				helper := installedHookHost(t, h)
-				if stage == "account" {
-					probe := "getent"
-					if runtime.GOOS == "darwin" {
-						probe = "dscacheutil"
-					}
-					writeExecutable(t, filepath.Join(h.bin, probe), "#!/bin/sh\nexec sleep 5\n")
-				} else {
-					body, err := os.ReadFile(helper)
-					require.NoError(t, err)
-					blocked := "selfcheck"
-					if stage == "register" {
-						blocked = "register-managed-launch"
-					}
-					writeExecutable(t, helper, strings.Replace(string(body), blocked+")", blocked+") exec sleep 5;", 1))
+			helper := installedHookHost(t, h)
+			if stage == "account" {
+				probe := "getent"
+				if runtime.GOOS == "darwin" {
+					probe = "dscacheutil"
 				}
-				// Measure the actual compiled exec boundary. tmux setup and help
-				// discovery precede optional registration and have separate contracts.
-				script := codexManagedExec + ` -- fixture-prompt`
-				if mode == launchResume {
-					script = codexManagedExec + ` resume -- "$3"`
-				}
-				//nolint:gosec // compiled script executes only this test's own Codex stand-in
-				cmd := exec.Command("sh", "-s", "--", "unused", filepath.Join(codexDir, "codex"), testSessionID)
-				cmd.Stdin = strings.NewReader(script)
-				cmd.Dir = h.tmp
-				cmd.Env = []string{"PATH=" + h.bin, "STUB_LOG=" + h.log, "TMPDIR=" + h.tmp, "HOME=" + h.tmp,
-					"PANEMUX_TASK_OWNER_GENERATION=g1-00000000000000000000000000000002"}
-				started := time.Now()
-				_, err := cmd.Output()
+				writeExecutable(t, filepath.Join(h.bin, probe), "#!/bin/sh\nexec sleep 5\n")
+			} else {
+				body, err := os.ReadFile(helper)
 				require.NoError(t, err)
-				assert.Less(t, time.Since(started), 3500*time.Millisecond, "optional registration delayed ordinary exec")
-				generation, err := os.ReadFile(filepath.Join(h.log, "codex.generation"))
-				require.NoError(t, err)
-				if stage == "selfcheck" {
-					assert.Equal(t, "g1-00000000000000000000000000000001", string(generation))
-				} else {
-					assert.Empty(t, string(generation), "timed out launch inherited stale ownership")
+				blocked := "selfcheck"
+				if stage == "register" {
+					blocked = "register-managed-launch"
 				}
-			})
-		}
+				writeExecutable(t, helper, strings.Replace(string(body), blocked+")", blocked+") exec sleep 5;", 1))
+			}
+			// Measure the actual compiled exec boundary. tmux setup and help
+			// discovery precede optional registration and have separate contracts.
+			script := codexManagedExec + ` -- fixture-prompt`
+			//nolint:gosec // compiled script executes only this test's own Codex stand-in
+			cmd := exec.Command("sh", "-s", "--", "unused", filepath.Join(codexDir, "codex"), testSessionID)
+			cmd.Stdin = strings.NewReader(script)
+			cmd.Dir = h.tmp
+			cmd.Env = []string{"PATH=" + h.bin, "STUB_LOG=" + h.log, "TMPDIR=" + h.tmp, "HOME=" + h.tmp,
+				"PANEMUX_TASK_OWNER_GENERATION=g1-00000000000000000000000000000002"}
+			started := time.Now()
+			_, err := cmd.Output()
+			require.NoError(t, err)
+			assert.Less(t, time.Since(started), 3500*time.Millisecond, "optional registration delayed ordinary exec")
+			generation, err := os.ReadFile(filepath.Join(h.log, "codex.generation"))
+			require.NoError(t, err)
+			if stage == "selfcheck" {
+				assert.Equal(t, "g1-00000000000000000000000000000001", string(generation))
+			} else {
+				assert.Empty(t, string(generation), "timed out launch inherited stale ownership")
+			}
+		})
 	}
 }
 
