@@ -45,9 +45,11 @@ func CaptureTask(
 
 // CapturePane reads the live pane's work directory and host. Callers look up the
 // pane by server-owned ID; they never accept browser-supplied host/root values.
+// SSH settings come from the live pane. Configuration arguments are retained
+// for caller compatibility and are used only by CaptureTask.
 func CapturePane(
 	ctx context.Context, pane session.Session,
-	connections map[string]config.SSHConnection, sshConfigPath string,
+	_ map[string]config.SSHConnection, _ string,
 ) (Source, error) {
 	if err := ctx.Err(); err != nil {
 		return Source{}, fmt.Errorf("capture preview: %w", err)
@@ -56,7 +58,13 @@ func CapturePane(
 	if !ok {
 		return Source{}, errors.New("pane cannot report its working directory")
 	}
-	workdir, err := getter.GetCWD()
+	var workdir string
+	var err error
+	if contextual, ok := pane.(session.CWDContextGetter); ok {
+		workdir, err = contextual.GetCWDContext(ctx)
+	} else {
+		workdir, err = getter.GetCWD()
+	}
 	if err != nil {
 		return Source{}, fmt.Errorf("capture preview workdir: %w", err)
 	}
@@ -68,7 +76,13 @@ func CapturePane(
 		}
 		host = namer.ConnectionName()
 	}
-	return capture(ctx, host, workdir, connections, sshConfigPath)
+	return captureResolved(ctx, host, workdir, func() (session.SSHConfig, error) {
+		snapshot, ok := pane.(session.SSHConfigGetter)
+		if !ok {
+			return session.SSHConfig{}, errors.New("pane cannot report its live SSH settings")
+		}
+		return snapshot.SSHConfigSnapshot(), nil
+	})
 }
 
 func capture(

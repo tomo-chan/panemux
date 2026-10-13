@@ -71,7 +71,10 @@ func TestDefaultFactoryReportsSSHSetupFailure(t *testing.T) {
 	connections := map[string]config.SSHConnection{
 		"dev": {Host: "host.test", KnownHostsFile: "relative/known_hosts", Password: "fixture"},
 	}
-	pane := &paneStub{kind: session.TypeSSH, host: "dev"}
+	pane := &paneStub{kind: session.TypeSSH, host: "dev", cfg: session.SSHConfig{
+		Host: connections["dev"].Host, KnownHostsFile: connections["dev"].KnownHostsFile,
+		Password: connections["dev"].Password,
+	}}
 	source, err := CapturePane(context.Background(), pane, connections, "/missing/config")
 	if err != nil {
 		t.Fatal(err)

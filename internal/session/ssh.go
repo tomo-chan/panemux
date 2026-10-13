@@ -50,6 +50,7 @@ type SSHSession struct {
 	title          string
 	connectionName string
 	state          State
+	sshConfig      SSHConfig
 	mu             sync.RWMutex
 }
 
@@ -544,6 +545,7 @@ func newSSHSessionFromClient(
 		stdin:          stdin,
 		reader:         pr,
 		connectionName: cfg.ConnectionName,
+		sshConfig:      cloneSSHConfig(cfg),
 		jumpClient:     jumpClient,
 	}
 
@@ -1051,16 +1053,19 @@ const sshGitContextCmdTemplate = `cd %[1]s && ` +
 // GetCWD returns the current working directory of the interactive shell by
 // inspecting the sshd process tree. See sshGetCWDCmd for the full rationale.
 func (s *SSHSession) GetCWD() (string, error) {
-	sess, err := s.client.NewSession()
-	if err != nil {
-		return "", fmt.Errorf("new ssh session for cwd: %w", err)
-	}
-	defer sess.Close()
-	out, err := sess.Output(sshGetCWDCmd)
+	return s.GetCWDContext(context.Background())
+}
+
+// SSHConfigSnapshot preserves the live connection's routing and authentication.
+func (s *SSHSession) SSHConfigSnapshot() SSHConfig { return cloneSSHConfig(s.sshConfig) }
+
+// GetCWDContext cancels only the directory lookup's SSH channel.
+func (s *SSHSession) GetCWDContext(ctx context.Context) (string, error) {
+	cwd, err := remoteCWD(ctx, func() (sshSessionRunner, error) { return s.client.NewSession() }, sshGetCWDCmd)
 	if err != nil {
 		return "", fmt.Errorf("cwd over ssh: %w", err)
 	}
-	return strings.TrimSpace(string(out)), nil
+	return cwd, nil
 }
 
 // GetActiveWorkdirs returns every distinct working directory currently in

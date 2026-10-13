@@ -15,11 +15,19 @@ type paneStub struct {
 	err       error
 	kind      session.Type
 	host, cwd string
+	cfg       session.SSHConfig
 }
 
 func (p *paneStub) Type() session.Type      { return p.kind }
 func (p *paneStub) ConnectionName() string  { return p.host }
 func (p *paneStub) GetCWD() (string, error) { return p.cwd, p.err }
+
+func (p *paneStub) SSHConfigSnapshot() session.SSHConfig {
+	if p.cfg.Host != "" {
+		return p.cfg
+	}
+	return session.SSHConfig{Host: "host.test", User: "demo"}
+}
 
 type taskStub struct {
 	err   error
@@ -71,10 +79,7 @@ func TestCaptureSourceErrors(t *testing.T) {
 	if _, err := CaptureTask(context.Background(), finder, "task", nil, ""); !errors.Is(err, tasks.ErrTaskNotFound) {
 		t.Fatalf("not found: %v", err)
 	}
-	pane := &paneStub{kind: session.TypeSSH, host: "missing", cwd: "/workspace/project"}
-	if _, err := CapturePane(context.Background(), pane, nil, "/missing/ssh-config"); err == nil {
-		t.Fatal("missing host accepted")
-	}
+	pane := &paneStub{kind: session.TypeLocal, cwd: "/workspace/project"}
 	pane.kind = session.TypeLocal
 	pane.err = errors.New("cwd unavailable")
 	if _, err := CapturePane(context.Background(), pane, nil, ""); !errors.Is(err, pane.err) {

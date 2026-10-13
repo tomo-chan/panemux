@@ -88,6 +88,11 @@ Wildcard entries (`Host *`, `Host *.example.com`) are skipped.
 
 When the same name appears in both, the `ssh_connections` entry's fields take precedence over the `Host` block's, field by field, as described above.
 
+Live panes retain an independent copy of the resolved connection settings, including ProxyJump.
+A preview sourced from a live pane uses that copy for its own connection even after **Hosts…** or
+the SSH config is edited. Canceling its workdir lookup closes only the lookup channel; the terminal
+and any existing preview tab connection continue.
+
 ### Authentication
 
 When establishing an SSH connection, the following auth methods are attempted in order:

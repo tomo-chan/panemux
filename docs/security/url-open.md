@@ -47,7 +47,10 @@ fresh SSH client using the existing authentication, known_hosts and ProxyJump/Pr
 resolution; it borrows neither the terminal's client nor the task collector's connection. Its
 only network destination capability is a literal `127.0.0.1` or `::1` and a valid TCP port, without
 DNS or arbitrary host input. It starts no remote shell or helper and installs no listener or
-HTTP route. Source host/workdir come from server-resolved panes/tasks. Cancelling creation returns
+HTTP route. Source host/workdir come from server-resolved panes/tasks. Live panes supply their
+saved connection settings, including a copied jump chain, so edited aliases cannot select another
+host for that pane. A canceled remote CWD lookup closes only its lookup channel and reclaims late
+channel creation without closing the terminal or an existing preview transport. Cancelling creation returns
 promptly; an SSH dial already in progress retains the existing dialer's bounded retry behavior
 and closes its result when it returns. Close releases all opened channels and the SSH client,
 including its jump connection. Future preview routes must preserve the shared browser request

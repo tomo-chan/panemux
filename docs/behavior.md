@@ -101,7 +101,10 @@ distribution. Per-surface behavior lives in [`docs/behavior/`](behavior/), group
 ## Operational Assumptions
 
 The internal preview source/connection contract captures host, connection settings, and workdir
-once at creation. Pane capture reads the live workdir; task capture uses a fresh collection.
+once at creation. Pane capture reads the live workdir and copies the connection settings used to establish that
+pane, including its jump chain, rather than resolving its alias against edited configuration.
+Task capture uses a fresh collection. Canceling a remote workdir lookup returns without waiting
+for its reply or channel creation; only that lookup channel is closed, including a late result.
 Changing the pane, task, or host configuration does not retarget an existing connection. A pane
 or popup releases only its own reference when it disconnects or closes; an independently retained
 tab reference continues until released or server shutdown. There is no idle timeout, tab quota,

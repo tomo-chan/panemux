@@ -33,6 +33,7 @@ type TmuxSSHSession struct {
 	tmuxSession    string
 	connectionName string
 	state          State
+	sshConfig      SSHConfig
 	mu             sync.RWMutex
 }
 
@@ -158,6 +159,7 @@ func startTmuxSSHSession(
 		stdin:          stdin,
 		reader:         pr,
 		connectionName: cfg.ConnectionName,
+		sshConfig:      cloneSSHConfig(cfg),
 		jumpClient:     jumpClient,
 	}
 
@@ -261,16 +263,20 @@ func (s *TmuxSSHSession) RunBoardCommand(ctx context.Context, args []string) ([]
 
 // GetCWD runs `tmux display-message` over a new SSH exec channel to get the active pane's CWD.
 func (s *TmuxSSHSession) GetCWD() (string, error) {
-	sess, err := s.client.NewSession()
+	return s.GetCWDContext(context.Background())
+}
+
+// SSHConfigSnapshot preserves the live connection's routing and authentication.
+func (s *TmuxSSHSession) SSHConfigSnapshot() SSHConfig { return cloneSSHConfig(s.sshConfig) }
+
+// GetCWDContext cancels only the directory lookup's SSH channel.
+func (s *TmuxSSHSession) GetCWDContext(ctx context.Context) (string, error) {
+	command := fmt.Sprintf("tmux display-message -p -t '%s' '#{pane_current_path}'", s.tmuxSession)
+	cwd, err := remoteCWD(ctx, func() (sshSessionRunner, error) { return s.client.NewSession() }, command)
 	if err != nil {
-		return "", fmt.Errorf("new ssh session for tmux cwd: %w", err)
+		return "", fmt.Errorf("cwd over ssh: %w", err)
 	}
-	defer sess.Close()
-	out, err := sess.Output(fmt.Sprintf("tmux display-message -p -t '%s' '#{pane_current_path}'", s.tmuxSession))
-	if err != nil {
-		return "", fmt.Errorf("tmux display-message over ssh: %w", err)
-	}
-	return strings.TrimSpace(string(out)), nil
+	return cwd, nil
 }
 
 // GetActiveWorkdirs returns every distinct working directory currently in

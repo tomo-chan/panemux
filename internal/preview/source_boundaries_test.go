@@ -22,6 +22,14 @@ type namedWorkdirPane struct{ workdirPane }
 
 func (p namedWorkdirPane) ConnectionName() string { return "dev" }
 
+func (p namedWorkdirPane) SSHConfigSnapshot() session.SSHConfig {
+	return session.SSHConfig{Host: "host.test"}
+}
+
+type configlessPane struct{ workdirPane }
+
+func (p configlessPane) ConnectionName() string { return "dev" }
+
 type findingTask func(context.Context, string) (tasks.Task, error)
 
 func (f findingTask) FindTask(ctx context.Context, id string) (tasks.Task, error) { return f(ctx, id) }
@@ -31,6 +39,7 @@ func TestCapturePaneRequiresServerCapabilities(t *testing.T) {
 		&struct{ session.Session }{},
 		workdirPane{workdir: func() (string, error) { return "/workspace/project", nil }},
 		&paneStub{kind: session.TypeSSH, host: "", cwd: "/workspace/project"},
+		configlessPane{workdirPane{workdir: func() (string, error) { return "/workspace/project", nil }}},
 	} {
 		if _, err := CapturePane(context.Background(), pane, nil, ""); err == nil {
 			t.Fatal("missing capability silently became a local source")
