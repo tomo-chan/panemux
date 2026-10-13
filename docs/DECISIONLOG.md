@@ -1354,3 +1354,35 @@ instead to respect existing Codex configuration and permissions. The runner ther
 authentication, default model and global/managed settings in a dedicated ephemeral exec invocation.
 It requests no tools and never approves or relaxes permissions, but does not promise a tool-free
 runtime. Inherited instructions, MCP and hooks may affect input, actions and cost.
+
+## Agent registry
+
+### One registry declares agents; capabilities are ports in their consumers (2026-10-12, issue #372)
+
+Agent names, aliases and process rules were spread over three places that each matched a little
+differently: Agent Board's six-type table in `internal/session`, the same package's claude/codex
+check for a pane's working directory, and `internal/tasks`'s own claude and codex predicates,
+which alone knew `claude-code` as another name for Claude Code. Adding an agent meant finding all
+of them. They moved, unchanged, into `internal/agent`; unifying the three rule sets is left to the
+change that makes collection per agent (#373), because each difference is behavior someone relies
+on.
+
+- **Static, explicit registration.** One function lists every definition. `init()` registration
+  was rejected: the set would be whatever happened to be linked, and the order — which decides the
+  first matching Board rule — would follow file names. Declaring agents in configuration was
+  rejected too: a pattern or script from a file would reach process matching and, later, the
+  collection script on every host.
+- **Declarations in the registry, implementations in their consumers.** Defining each capability's
+  interface inside `internal/agent` would have meant inventing agent-neutral copies of
+  `internal/tasks`'s types before any adapter needed them, and fixing method signatures stages
+  ahead of their first implementation. A single interface probed by type assertion was rejected as
+  implicit and impossible to list. The registry holds a capability set; the consuming package
+  is to define the port in its own types when its capability moves behind one (#373 onward).
+- **A struct session key.** `{Host, Agent, SessionID}` is comparable and needs no escaping, unlike
+  a joined `host/agent/session` string. A PID is not part of it, since codex's shared app-server
+  daemon serves several sessions.
+- **Forward compatibility over backward compatibility.** Agents release faster than panemux
+  follows, so the layer that reads their formats exists mainly to notice a format it does not know
+  and stop rather than guess. Each rule records the release it was verified against and what it
+  does with an unknown argument; versions are told from the data rather than by running
+  `<agent> --version` on every host, which would add a command per collection.
