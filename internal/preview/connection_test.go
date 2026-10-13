@@ -35,7 +35,7 @@ func TestCaptureAndConnectKeepsTabAfterPaneRelease(t *testing.T) {
 	transport := &transportStub{closedCh: make(chan struct{})}
 	connection, err := Open(context.Background(), source, func(_ context.Context, fixed Source) (Transport, error) {
 		if fixed.Workdir() != "/workspace/project" {
-			t.Fatal("wrong source")
+			return nil, errors.New("wrong source")
 		}
 		return transport, nil
 	})
@@ -76,7 +76,7 @@ func TestCaptureAndConnectKeepsTabAfterPaneRelease(t *testing.T) {
 func TestOpenCancellationClosesLateResult(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	started := make(chan struct{})
-	finish := make(chan struct{})
+	finish, release := previewBarrier(t)
 	returned := make(chan error, 1)
 	transport := &transportStub{closedCh: make(chan struct{})}
 	go func() {
@@ -87,14 +87,12 @@ func TestOpenCancellationClosesLateResult(t *testing.T) {
 		})
 		returned <- err
 	}()
-	<-started
+	awaitPreviewEvent(t, started)
 	cancel()
-	if err := <-returned; !errors.Is(err, context.Canceled) {
+	if err := awaitPreviewError(t, returned); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancel: %v", err)
 	}
-	close(finish)
-	// The factory signals completion only after the late result is reclaimed.
-	// Wait through a channel in a second factory result, not a wall-clock delay.
+	release()
 	select {
 	case <-transport.closedCh:
 	case <-time.After(2 * time.Second):

@@ -75,12 +75,22 @@ func capture(
 	ctx context.Context, host, workdir string,
 	connections map[string]config.SSHConnection, sshConfigPath string,
 ) (Source, error) {
+	return captureResolved(ctx, host, workdir, func() (session.SSHConfig, error) {
+		return session.ResolveSSHConfig(host, connections, sshConfigPath)
+	})
+}
+
+// captureResolved keeps cancellation on both sides of SSH settings resolution.
+// The resolver is the same one used by panes, without borrowing a live client.
+func captureResolved(
+	ctx context.Context, host, workdir string, resolve func() (session.SSHConfig, error),
+) (Source, error) {
 	if err := ctx.Err(); err != nil {
 		return Source{}, fmt.Errorf("capture preview: %w", err)
 	}
 	source := Source{host: host, workdir: workdir}
 	if host != "" {
-		cfg, err := session.ResolveSSHConfig(host, connections, sshConfigPath)
+		cfg, err := resolve()
 		if err != nil {
 			return Source{}, fmt.Errorf("capture preview SSH settings: %w", err)
 		}

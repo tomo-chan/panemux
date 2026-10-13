@@ -28,7 +28,10 @@ func TestLeasePendingDialClosesLateResultAfterShutdown(t *testing.T) {
 			left, right := net.Pipe()
 			defer left.Close()
 			defer right.Close()
-			transport := &pendingTransport{conn: left, entered: make(chan struct{}), release: make(chan struct{})}
+			assertPreviewDeadline(t, left)
+			observed := &observedPreviewConn{Conn: left, closed: make(chan struct{})}
+			barrier, release := previewBarrier(t)
+			transport := &pendingTransport{conn: observed, entered: make(chan struct{}), release: barrier}
 			connection, err := Open(context.Background(), Source{}, func(context.Context, Source) (Transport, error) {
 				return transport, nil
 			})
@@ -38,15 +41,20 @@ func TestLeasePendingDialClosesLateResultAfterShutdown(t *testing.T) {
 			lease, _ := connection.Acquire()
 			done := make(chan error, 1)
 			go func() { _, err := lease.Dial(context.Background(), session.PreviewLoopback{}); done <- err }()
-			<-transport.entered
+			awaitPreviewEvent(t, transport.entered)
 			if releaseLease {
 				_ = lease.Close()
 			} else {
 				_ = connection.Close()
 			}
-			close(transport.release)
-			if err := <-done; !errors.Is(err, net.ErrClosed) {
+			release()
+			if err := awaitPreviewError(t, done); !errors.Is(err, net.ErrClosed) {
 				t.Fatalf("late dial returned after close: %v", err)
+			}
+			select {
+			case <-observed.closed:
+			default:
+				t.Fatal("late channel was not closed before dial returned")
 			}
 			if _, err := left.Write([]byte("closed")); !errors.Is(err, io.ErrClosedPipe) {
 				t.Fatalf("late channel leaked: %v", err)

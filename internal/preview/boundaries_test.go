@@ -83,18 +83,19 @@ func TestDefaultFactoryReportsSSHSetupFailure(t *testing.T) {
 
 func TestReplacedRequestCannotReturnAnOldTarget(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	entered, release := make(chan struct{}), make(chan struct{})
+	entered := make(chan struct{})
+	barrier, release := previewBarrier(t)
 	oldTransport := &transportStub{closedCh: make(chan struct{})}
 	oldResult := make(chan error, 1)
 	go func() {
 		_, err := Open(ctx, Source{workdir: "/workspace/old"}, func(context.Context, Source) (Transport, error) {
 			close(entered)
-			<-release
+			<-barrier
 			return oldTransport, nil
 		})
 		oldResult <- err
 	}()
-	<-entered
+	awaitPreviewEvent(t, entered)
 	cancel()
 	newSource := Source{workdir: "/workspace/new"}
 	newTransport := &transportStub{}
@@ -108,8 +109,8 @@ func TestReplacedRequestCannotReturnAnOldTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer current.Close()
-	close(release)
-	if err := <-oldResult; !errors.Is(err, context.Canceled) {
+	release()
+	if err := awaitPreviewError(t, oldResult); !errors.Is(err, context.Canceled) {
 		t.Fatalf("old response: %v", err)
 	}
 	select {

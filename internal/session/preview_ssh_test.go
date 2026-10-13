@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -104,6 +105,9 @@ func TestPreviewSSHIndependentConnectionAndProxyJump(t *testing.T) {
 func TestPreviewSSHCancelReclaimsLateSuccess(t *testing.T) {
 	cfg, closed := previewSSHFixture(t, startEchoServer(t), &forwardRecorder{})
 	entered, release := make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(unblock)
 	original := dialTransportFn
 	dialTransportFn = func(cfg SSHConfig, addr string, port int, deadline time.Time) (net.Conn, *ssh.Client, error) {
 		close(entered)
@@ -114,7 +118,11 @@ func TestPreviewSSHCancelReclaimsLateSuccess(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { _, err := OpenPreviewTransport(ctx, &cfg); done <- err }()
-	<-entered
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("SSH dial did not reach its barrier")
+	}
 	cancel()
 	select {
 	case err := <-done:
@@ -124,7 +132,7 @@ func TestPreviewSSHCancelReclaimsLateSuccess(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("cancel waited for dial")
 	}
-	close(release)
+	unblock()
 	awaitPreviewSSHClose(t, closed)
 }
 

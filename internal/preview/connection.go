@@ -58,23 +58,29 @@ func Open(ctx context.Context, source Source, factory Factory) (*Connection, err
 	case <-ctx.Done():
 		return nil, fmt.Errorf("open preview: %w", ctx.Err())
 	case result := <-results:
-		if err := ctx.Err(); err != nil {
-			if result.transport != nil {
-				_ = result.transport.Close()
-			}
-			return nil, fmt.Errorf("open preview: %w", err)
-		}
-		if result.err != nil {
-			if result.transport != nil {
-				_ = result.transport.Close()
-			}
-			return nil, result.err
-		}
-		if result.transport == nil {
-			return nil, errors.New("preview factory returned no transport")
-		}
-		return &Connection{transport: result.transport}, nil
+		return finishOpen(ctx, result.transport, result.err)
 	}
+}
+
+// finishOpen applies a delivered result only while its creation request is
+// current. Delivery and application are separate cancellation boundaries.
+func finishOpen(ctx context.Context, transport Transport, err error) (*Connection, error) {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		if transport != nil {
+			_ = transport.Close()
+		}
+		return nil, fmt.Errorf("open preview: %w", ctxErr)
+	}
+	if err != nil {
+		if transport != nil {
+			_ = transport.Close()
+		}
+		return nil, err
+	}
+	if transport == nil {
+		return nil, errors.New("preview factory returned no transport")
+	}
+	return &Connection{transport: transport}, nil
 }
 
 func openTransport(ctx context.Context, source Source) (Transport, error) {
