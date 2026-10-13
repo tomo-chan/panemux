@@ -240,9 +240,8 @@ func (d *PrivateDir) Lock(ctx context.Context, budget time.Duration) (func(), er
 		timer := time.NewTimer(5 * time.Millisecond)
 		select {
 		case <-ctx.Done():
-			if !timer.Stop() {
-				<-timer.C
-			}
+			// This timer is discarded, never reset or read again; no drain is needed.
+			timer.Stop()
 		case <-timer.C:
 		}
 	}
