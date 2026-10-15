@@ -29,10 +29,10 @@ import (
 // taskCollection renders one host's collection output with a single busy
 // claude session in cwd.
 func taskCollection(sessionID, cwd string) []byte {
-	return []byte(strings.Join([]string{
-		"::panemux-tasks v1",
+	return withAllSections([]byte(strings.Join([]string{
+		"::panemux-tasks v2",
 		"::now 1000",
-		"::section state",
+		"::section claude/state",
 		"::file 7.json",
 		`{"pid":7,"sessionId":"` + sessionID + `","cwd":"` + cwd + `","status":"waiting",` +
 			`"waitingFor":"input needed","statusUpdatedAt":990000}`,
@@ -41,9 +41,9 @@ func taskCollection(sessionID, cwd string) []byte {
 		"::section tmux",
 		"1 task-7c21",
 		"::section cwd",
-		"::section transcripts",
+		"::section claude/transcripts",
 		"::end",
-	}, "\n") + "\n")
+	}, "\n") + "\n"))
 }
 
 type stubTaskConn struct {
@@ -191,7 +191,7 @@ func TestGetTasks_ResponseCarriesTheWireFieldNames(t *testing.T) {
 
 func TestGetTasks_NoTasksIsAnEmptyList(t *testing.T) {
 	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
-	useTaskService(h, []byte("::panemux-tasks v1\n::now 1\n::end\n"), nil)
+	useTaskService(h, withAllSections([]byte("::panemux-tasks v2\n::now 1\n::end\n")), nil)
 
 	rec := httptest.NewRecorder()
 	setupRouterWithHandler(h).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/tasks", nil))
@@ -544,14 +544,14 @@ func TestGetTasks_GitLookupsAreSharedPerDirectoryAndCached(t *testing.T) {
 	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
 	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
 	h.nowFn = func() time.Time { return now }
-	two := []byte(strings.Join([]string{
-		"::panemux-tasks v1", "::now 1000", "::section state",
+	two := withAllSections([]byte(strings.Join([]string{
+		"::panemux-tasks v2", "::now 1000", "::section claude/state",
 		"::file 7.json", `{"pid":7,"sessionId":"a","cwd":"/workspace/user/project","status":"busy"}`,
 		"::file 8.json", `{"pid":8,"sessionId":"b","cwd":"/workspace/user/project","status":"idle"}`,
 		"::file 9.json", `{"pid":9,"sessionId":"c","status":"idle"}`,
 		"::section ps", "7 1 claude", "8 1 claude", "9 1 claude",
 		"::end",
-	}, "\n") + "\n")
+	}, "\n") + "\n"))
 	useTaskService(h, two, nil)
 	var lookups []string
 	var mu sync.Mutex
@@ -778,15 +778,15 @@ func TestTaskRoutes_RefuseCrossSiteRequests(t *testing.T) {
 // that is not the branch it worked on, so only the repository is reported.
 func TestGetTasks_StoppedTaskReportsItsRepositoryButNotBranchOrPR(t *testing.T) {
 	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
-	stopped := []byte(strings.Join([]string{
-		"::panemux-tasks v1", "::now 1000",
-		"::section state",
+	stopped := withAllSections([]byte(strings.Join([]string{
+		"::panemux-tasks v2", "::now 1000",
+		"::section claude/state",
 		"::file 7.json", `{"pid":7,"sessionId":"live","cwd":"/workspace/user/project","status":"busy"}`,
 		"::section ps", "7 1 claude",
-		"::section transcripts",
+		"::section claude/transcripts",
 		"900\tgone.jsonl\t\"cwd\":\"/workspace/user/project\"",
 		"::end",
-	}, "\n") + "\n")
+	}, "\n") + "\n"))
 	useTaskService(h, stopped, nil)
 	h.taskGitLookup = func(context.Context, string, string, bool) *taskGitInfo {
 		return &taskGitInfo{Repo: "project", RepoURL: "https://example.invalid/project", Branch: "today",
@@ -847,7 +847,7 @@ func TestTaskGitFor(t *testing.T) {
 // files (session ID → cwd, each a busy claude process) and stopped
 // conversation logs (session ID → cwd).
 func collectionOf(running, stopped map[string]string) []byte {
-	lines := []string{"::panemux-tasks v1", "::now 1000", "::section state"}
+	lines := []string{"::panemux-tasks v2", "::now 1000", "::section claude/state"}
 	var ps []string
 	pid := 7
 	for _, id := range sortedKeys(running) {
@@ -858,11 +858,11 @@ func collectionOf(running, stopped map[string]string) []byte {
 	}
 	lines = append(lines, "::section ps")
 	lines = append(lines, ps...)
-	lines = append(lines, "::section transcripts")
+	lines = append(lines, "::section claude/transcripts")
 	for _, id := range sortedKeys(stopped) {
 		lines = append(lines, "900\t"+id+".jsonl\t\"cwd\":\""+stopped[id]+"\"")
 	}
-	return []byte(strings.Join(append(lines, "::end"), "\n") + "\n")
+	return withAllSections([]byte(strings.Join(append(lines, "::end"), "\n") + "\n"))
 }
 
 func sortedKeys(m map[string]string) []string {
@@ -1006,4 +1006,38 @@ func TestTaskEventSource_ObservesTheCurrentCollector(t *testing.T) {
 	assert.Equal(t, tasks.HostOK, result.Status)
 	require.Len(t, live, 1)
 	assert.Equal(t, "local:claude:replaced", live[0].ID)
+}
+
+// collectionSections are the sections internal/tasks's full collection
+// asks every host for (::panemux-tasks v2).
+var collectionSections = []string{
+	"claude/state", "codex/open", "ps", "tmux", "cwd", "env", "claude/transcripts", "codex/rollouts",
+}
+
+// withAllSections adds, empty and before "::end", every section of the
+// collection a fixture leaves out: a host's output must carry them all, and
+// a fixture names only the ones it is about.
+func withAllSections(out []byte) []byte {
+	lines := strings.Split(string(out), "\n")
+	end := -1
+	present := map[string]bool{}
+	for i, line := range lines {
+		if line == "::end" {
+			end = i
+			break
+		}
+		if name, ok := strings.CutPrefix(line, "::section "); ok {
+			present[name] = true
+		}
+	}
+	if end < 0 {
+		return out
+	}
+	var missing []string
+	for _, name := range collectionSections {
+		if !present[name] {
+			missing = append(missing, "::section "+name)
+		}
+	}
+	return []byte(strings.Join(append(append(lines[:end:end], missing...), lines[end:]...), "\n"))
 }

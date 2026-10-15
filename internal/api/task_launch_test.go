@@ -40,23 +40,23 @@ func launchRand() *bytes.Reader {
 
 // launchCollection holds one running claude session and one stopped one.
 func launchCollection() []byte {
-	return []byte(strings.Join([]string{
-		"::panemux-tasks v1",
+	return withAllSections([]byte(strings.Join([]string{
+		"::panemux-tasks v2",
 		"::now 1000",
-		"::section state",
+		"::section claude/state",
 		"::file 7.json",
 		`{"pid":7,"sessionId":"run-sess","cwd":"/workspace/user/project","status":"busy","statusUpdatedAt":990000}`,
 		"::section ps",
 		"7 1 claude",
 		"::section tmux",
 		"::section cwd",
-		"::section transcripts",
+		"::section claude/transcripts",
 		"900\t" + resumeSessionID + `.jsonl	"cwd":"/workspace/user/project"`,
-		"::section codex-rollouts",
+		"::section codex/rollouts",
 		"950\t10\trollout-2026-09-27T11-57-03-" + resumeCodexSessionID +
 			`.jsonl	"cwd":"/workspace/user/api"	"originator":"codex-tui"`,
 		"::end",
-	}, "\n") + "\n")
+	}, "\n") + "\n"))
 }
 
 // launchHost stands in for the panemux host: it answers the collection

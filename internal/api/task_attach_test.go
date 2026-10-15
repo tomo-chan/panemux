@@ -26,10 +26,10 @@ import (
 // attachCollection holds a claude task in the tmux session "review-api", one
 // in a tmux session whose name a pane cannot attach to, and one outside tmux.
 func attachCollection() []byte {
-	return []byte(strings.Join([]string{
-		"::panemux-tasks v1",
+	return withAllSections([]byte(strings.Join([]string{
+		"::panemux-tasks v2",
 		"::now 1000",
-		"::section state",
+		"::section claude/state",
 		"::file 7.json",
 		`{"pid":7,"sessionId":"in-tmux","cwd":"/workspace/user/project","status":"waiting","statusUpdatedAt":990000}`,
 		"::file 9.json",
@@ -46,9 +46,9 @@ func attachCollection() []byte {
 		"6 review-api",
 		"8 name with spaces",
 		"::section cwd",
-		"::section transcripts",
+		"::section claude/transcripts",
 		"::end",
-	}, "\n") + "\n")
+	}, "\n") + "\n"))
 }
 
 // fakeAttachTimers stands in for time.AfterFunc so the grace period is
