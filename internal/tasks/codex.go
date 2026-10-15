@@ -100,7 +100,8 @@ done
 // modified in the last 7 days, newest first, counting only the TUI's
 // (originator "codex-tui"): the 100 are taken after that filter, so a host
 // where codex exec writes many rollouts does not push the TUI's sessions out.
-const codexRolloutsScript = `find "$HOME/.codex/sessions" -mindepth 4 -maxdepth 4 -type f -name 'rollout-*.jsonl' -mtime -7 2>/dev/null |
+const codexRolloutsScript = `find "$HOME/.codex/sessions" -mindepth 4 -maxdepth 4 \
+	-type f -name 'rollout-*.jsonl' -mtime -7 2>/dev/null |
 while IFS= read -r p; do
 	t=$(mtime "$p" 2>/dev/null) && echo "$t $p"
 done | sort -k1,1nr -k2,2nr -k3r | while read -r t s p; do

@@ -196,8 +196,9 @@ func TestParseCollectOutput_SkipsTextBeforeTheHeader(t *testing.T) {
 }
 
 func TestParseCollectOutput_IgnoresCarriageReturnsAndTrailingText(t *testing.T) {
-	out := strings.ReplaceAll(string(fullOutput("::panemux-tasks v2", "::now 7", "::section ps", "1 0 init", "::end")), "\n", "\r\n")
-	raw, err := parseCollectOutput([]byte(out+"ignored after end\n"), collectPlan.full)
+	out := fullOutput("::panemux-tasks v2", "::now 7", "::section ps", "1 0 init", "::end")
+	out = []byte(strings.ReplaceAll(string(out), "\n", "\r\n"))
+	raw, err := parseCollectOutput(append(out, "ignored after end\n"...), collectPlan.full)
 	require.NoError(t, err)
 	assert.Equal(t, int64(7), raw.Now)
 	assert.Equal(t, []process{{PID: 1, PPID: 0, Command: "init"}}, raw.Processes)

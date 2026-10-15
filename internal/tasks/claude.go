@@ -46,7 +46,8 @@ done
 // 7 days, newest first, at most 100 of them. The window and the count are the
 // range decided for stopped sessions (issue #252); the Go side keeps the
 // stopped ones and caps them at maxStoppedTasks.
-const claudeTranscriptsScript = `find "$HOME/.claude/projects" -mindepth 2 -maxdepth 2 -type f -name '*.jsonl' -mtime -7 2>/dev/null |
+const claudeTranscriptsScript = `find "$HOME/.claude/projects" -mindepth 2 -maxdepth 2 \
+	-type f -name '*.jsonl' -mtime -7 2>/dev/null |
 while IFS= read -r p; do
 	t=$(mtime "$p" 2>/dev/null) && echo "$t $p"
 done | sort -rn | head -n 100 | while read -r t s p; do

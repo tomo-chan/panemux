@@ -22,8 +22,8 @@ func collectAdapters() []registeredCollect {
 
 // registeredCollect is one entry of collectAdapters.
 type registeredCollect struct {
-	id      agent.ID
 	adapter collectAdapter
+	id      agent.ID
 }
 
 // collectAdapter is an agent's part of the collection: the script sections
@@ -123,7 +123,7 @@ var (
 
 func mustComposeCollect(defs []agent.Definition, adapters []registeredCollect) collectPlans {
 	plans, err := composeCollect(defs, adapters)
-	//coverage:exempt runs only if collectAdapters disagrees with the registry, which TestCollectAdapters_MatchTheRegistry forbids
+	//coverage:exempt runs only if collectAdapters disagrees with the registry, which a test forbids
 	if err != nil {
 		panic("tasks: " + err.Error())
 	}
@@ -144,16 +144,16 @@ func composeCollect(defs []agent.Definition, adapters []registeredCollect) (coll
 	plans := collectPlans{prefilter: strings.Join(hints, "|")}
 
 	type part struct {
-		section collectSection
 		owner   agent.ID
+		section collectSection
 	}
 	var live, stopped []part
 	for _, r := range adapters {
 		for _, s := range r.adapter.sections() {
 			if s.stage == stageStopped {
-				stopped = append(stopped, part{s, r.id})
+				stopped = append(stopped, part{section: s, owner: r.id})
 			} else {
-				live = append(live, part{s, r.id})
+				live = append(live, part{section: s, owner: r.id})
 			}
 		}
 	}

@@ -267,6 +267,7 @@ func (b *taskBuilder) stoppedTasks(live []Task) []Task {
 		candidates = append(candidates, a.collected.stoppedCandidates(b, own)...)
 	}
 	sort.SliceStable(candidates, func(i, j int) bool { return candidates[i].modTime > candidates[j].modTime })
+	//mutation:exempt[CONDITIONALS_BOUNDARY] equivalent — at exactly the cap the slice keeps every candidate
 	if len(candidates) > maxStoppedTasks {
 		candidates = candidates[:maxStoppedTasks]
 	}

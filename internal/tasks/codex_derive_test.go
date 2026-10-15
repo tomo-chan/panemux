@@ -392,7 +392,8 @@ func TestIsCodexDaemon(t *testing.T) {
 func TestBuildTasks_StoppedClaudeAndCodexShareTheCap(t *testing.T) {
 	raw := fixtureRaw{Now: 10_000}.snapshot()
 	for i := 0; i < maxStoppedTasks; i++ {
-		claudeOf(raw).Transcripts = append(claudeOf(raw).Transcripts, transcript{ModTime: int64(2 * i), SessionID: fmt.Sprintf("c%03d", i)})
+		claude := claudeOf(raw)
+		claude.Transcripts = append(claude.Transcripts, transcript{ModTime: int64(2 * i), SessionID: fmt.Sprintf("c%03d", i)})
 		codexOf(raw).Rollouts = append(codexOf(raw).Rollouts, codexRollout{
 			SessionID: fmt.Sprintf("01a0e2b9-d054-7cc2-9278-%012d", i), Originator: "codex-tui", ModTime: int64(2*i + 1),
 		})
