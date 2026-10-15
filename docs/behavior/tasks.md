@@ -315,11 +315,13 @@ and trust it in codex's `/hooks` review:
 - **What the hook writes.** It reads the hook's JSON on stdin and keeps only `session_id`, `turn_id`
   (hex digits and dashes) and the time, as `<session ID> <turn ID> <unix seconds>` in
   `~/.local/state/panemux/codex-permission/<session ID>` — one file per session, replaced by the next
-  request. Nothing of the command or the conversation is kept. It prints nothing and exits 0, so codex
-  decides as it would without it.
-- **What the collection reads.** The live collection reads those files modified in the last 7 days.
-  A session waits when its newest turn is in progress, the rollout's `task_started` for that turn
-  carries the record's turn ID, and the record is not marked answered. A turn that has ended, or any
+  request. Nothing of the command or the conversation is kept. It removes records older than 7 days as
+  it writes. It prints nothing and exits 0, so codex decides as it would without it.
+- **What the collection reads.** The live collection reads every record with one `cat`. A session
+  waits when its newest turn is in progress, the record is of that turn, and it is not marked
+  answered. The record is of the turn when the rollout's `task_started` for the turn carries the
+  record's turn ID; when that line is out of the rollout's final MiB (a turn that has written more),
+  when the record was made at or after the turn's start. A turn that has ended, or any
   other turn, ignores the record: the wait clears by itself when the turn is over.
 - **`Input given`.** The detail panel of such a task offers `Input given`, which
   [`POST /api/tasks/input-given`](#post-apitasksinput-given) sends. panemux keeps the answered

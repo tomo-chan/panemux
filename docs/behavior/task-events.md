@@ -17,7 +17,8 @@ the same stream ([Receiver](#receiver)).
   ([Collection](tasks.md#collection)). Terminal output is not read for prompts; a state an agent does
   not record — codex waiting for command approval
   ([issue #294](https://github.com/tomo-chan/panemux/issues/294)) — is not observed and shows as the
-  state the agent's files do give (`busy`).
+  state the agent's files do give (`busy`), unless the permission hook is registered and records it
+  ([Codex permission requests](tasks.md#codex-permission-requests)).
 - **Only agents are covered.** An agent is supported by adding its observation to the collection,
   not by a pattern on its output. Devin is not covered yet
   ([issue #276](https://github.com/tomo-chan/panemux/issues/276)); a program that is not an agent is
