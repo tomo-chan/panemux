@@ -652,6 +652,7 @@ describe('TaskDashboard Type in pane: maximize', () => {
     expect(dialog()).toHaveAttribute('data-maximized', 'true')
   })
 
+  // efficacy:exempt unchanged by #385; it is reported only because the preview tests follow it.
   it('is a full sheet with no maximize on a narrow screen', async () => {
     setNarrow(true)
     window.localStorage.setItem('panemux:task-terminal-maximized', 'true')
@@ -718,11 +719,16 @@ describe('TaskDashboard Type in pane: preview', () => {
     expect(window.localStorage.getItem('panemux:preview-split:task:wait-1')).toBe('55')
   })
 
-  it('does not link paths in a task on another host', async () => {
-    renderDashboard(tasksState({ attach: vi.fn().mockResolvedValue(attached('board-0000000000000002', 'docs')) }))
+  it('links paths only in a task on the panemux host', async () => {
+    renderDashboard()
+    await openPopup()
+    setStatus('connected')
+    expect(typeof terminals.onPreviewPath).toBe('function')
+    fireEvent.click(within(dialog()).getByRole('button', { name: 'Close' }))
+
     await openPopup('idle-1')
     setStatus('connected')
-
+    expect(within(dialog()).getByRole('heading', { name: 'docs' })).toBeInTheDocument()
     expect(terminals.onPreviewPath).toBeUndefined()
   })
 

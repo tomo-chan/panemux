@@ -235,6 +235,7 @@ describe('TerminalPane URL opening', () => {
     expect(typeof options.onBrowserOpenRequest).toBe('function')
   })
 
+  // efficacy:exempt unchanged by #385; it is reported only because the preview tests follow it.
   it('asks for approval when the pane requests a browser open, then opens it', async () => {
     const openSpy = vi.fn()
     window.open = openSpy as unknown as typeof window.open
@@ -281,14 +282,14 @@ describe('TerminalPane preview', () => {
     return options.onPreviewPath
   }
 
-  it.each(['local', 'tmux'])('links paths in a %s pane', (type) => {
-    render(<TerminalPane pane={{ id: 'p1', type: type as 'local' }} />)
-    expect(typeof previewPath()).toBe('function')
-  })
-
-  it.each(['ssh', 'ssh_tmux'])('does not link paths in an %s pane', (type) => {
-    render(<TerminalPane pane={{ id: 'p1', type: type as 'ssh' }} />)
-    expect(previewPath()).toBeUndefined()
+  it('links paths only in panes on the panemux host', () => {
+    const linked = (['local', 'tmux', 'ssh', 'ssh_tmux'] as const).filter((type) => {
+      const { unmount } = render(<TerminalPane pane={{ id: `p-${type}`, type }} />)
+      const result = typeof previewPath() === 'function'
+      unmount()
+      return result
+    })
+    expect(linked).toEqual(['local', 'tmux'])
   })
 
   it('opens a clicked path beside the terminal, keeping the terminal in place', async () => {

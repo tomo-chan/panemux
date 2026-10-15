@@ -101,16 +101,21 @@ func TestServer_PreviewIsIsolatedFromTheDashboardOrigin(t *testing.T) {
 	}
 }
 
-// The request that opens a preview is an API call like any other, and a page
-// on another site cannot make it.
+// The request that opens a preview is an API call like any other: the
+// dashboard's own page can make it, and a page on another site cannot.
 func TestServer_PreviewOpenRefusesCrossSite(t *testing.T) {
 	e := newAPIEnv(t)
+	require.NoError(t, os.WriteFile(filepath.Join(e.home, "index.html"), []byte("<p>x</p>"), 0o600))
 	e.mgr.Add(&previewFakeSession{wsFakeSession: newWSFakeSession("pane-preview"), cwd: e.home})
 
-	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:8080/api/sessions/pane-preview/preview",
-		strings.NewReader(`{"path":"index.html"}`))
-	req.Header.Set("Origin", "http://attacker.example")
-	rr := httptest.NewRecorder()
-	e.srv.httpSrv.Handler.ServeHTTP(rr, req)
-	assert.Equal(t, http.StatusForbidden, rr.Code)
+	open := func(origin string) int {
+		req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:8080/api/sessions/pane-preview/preview",
+			strings.NewReader(`{"path":"index.html"}`))
+		req.Header.Set("Origin", origin)
+		rr := httptest.NewRecorder()
+		e.srv.httpSrv.Handler.ServeHTTP(rr, req)
+		return rr.Code
+	}
+	assert.Equal(t, http.StatusOK, open("http://127.0.0.1:8080"))
+	assert.Equal(t, http.StatusForbidden, open("http://attacker.example"))
 }
