@@ -84,9 +84,11 @@ export const PreviewSplit: React.FC<PreviewSplitProps> = ({ splitKey, view, term
 
   return (
     <div ref={splitRef} className="pm-preview-split" data-dragging={dragPointer !== null ? 'true' : undefined}>
+      {/* The terminal's share may shrink, down to its own minimum, so the
+          preview keeps its 160 px when the ratio would leave it less. */}
       <div
         className="pm-preview-terminal"
-        style={view ? { flex: `0 0 ${ratio}%`, minWidth } : { flex: '1 1 100%' }}
+        style={view ? { flex: `0 1 ${ratio}%`, minWidth } : { flex: '1 1 100%' }}
       >
         {terminal}
       </div>

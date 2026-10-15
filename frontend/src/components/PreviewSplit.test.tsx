@@ -76,7 +76,7 @@ describe('PreviewSplit', () => {
   it('splits 50:50 and shows the file in an isolated frame', () => {
     renderSplit(ready)
 
-    expect(terminalSide().style.flex).toBe('0 0 50%')
+    expect(terminalSide().style.flex).toBe('0 1 50%')
     const frame = screen.getByTitle('Preview of /workspace/user/project/mockups/index.html') as HTMLIFrameElement
     expect(frame.getAttribute('src')).toBe('/preview/ab/mockups/index.html')
     expect(frame.getAttribute('sandbox')).toBe('allow-scripts')
@@ -88,7 +88,7 @@ describe('PreviewSplit', () => {
   it('starts from the ratio stored for this pane', () => {
     savePreviewSplit(paneSplitKey('pane-1'), 35)
     renderSplit(ready)
-    expect(terminalSide().style.flex).toBe('0 0 35%')
+    expect(terminalSide().style.flex).toBe('0 1 35%')
   })
 
   it('keeps both sides at their minimum width', () => {
@@ -114,7 +114,7 @@ describe('PreviewSplit', () => {
     expect(divider).toHaveAttribute('aria-valuenow', '20')
     for (let i = 0; i < 20; i++) fireEvent.keyDown(divider, { key: 'ArrowRight' })
     expect(divider).toHaveAttribute('aria-valuenow', '80')
-    expect(terminalSide().style.flex).toBe('0 0 80%')
+    expect(terminalSide().style.flex).toBe('0 1 80%')
   })
 
   it('leaves other keys alone', () => {
