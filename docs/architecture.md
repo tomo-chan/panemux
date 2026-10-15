@@ -30,6 +30,7 @@ layout rendering, terminal emulation, interaction state, and presentation.
 |---|---|
 | `main.go` and root helpers | Parse options, load config, construct dependencies, start sessions and optional subsystems, serve, and shut down. |
 | `internal/config` | Load, normalize, validate, and persist YAML. `Data` is the serializable domain model; `Config` adds file and lookup context. |
+| `internal/agent` | Register every coding agent panemux knows: its stable ID, display name, aliases, agmsg type name, the process rules that detect it, and the capabilities it declares. Imports nothing else from panemux. It declares; the packages that use a capability implement it. See [Agent registry](agent-registry.md). |
 | `internal/session` | Provide one lifecycle interface for local PTY, SSH, local tmux, and tmux-over-SSH sessions. Optional capability interfaces expose CWD, Git context, port forwarding, and Agent Board operations only where supported. `CommandConn` is an SSH connection for short non-interactive commands, dialed with the same dialer panes use. |
 | `internal/tasks` | Collect the task dashboard's agent sessions from the panemux host and every `ssh_connections` host with one fixed script, and own one reused `CommandConn` per host; keep the done and label records in `~/.config/panemux/tasks.json` (`RecordStore`); start and resume claude and codex tasks in detached tmux sessions with one fixed launch script over the same connection (`Launch`, `Resume`), holding a new codex task's labels until its session is collected (`PendingLabels`); read a task's conversation log with a third fixed script and summarize it with its own agent CLI on the panemux host, keeping the summaries in `~/.config/panemux/task-summaries.json` (`SummaryStore`) and reusing one while the excerpt it was made from is unchanged (`Summaries`, `RequestSummary`). |
 | `internal/taskevents` | Observe the running tasks on every host through `internal/tasks`'s lightweight collection while the task event stream has a subscriber, each host on its own cycle; keep what was last observed, publish each difference as an ordered event, assign unsigned waits their `wait_id`, and fan the events out to subscribers without waiting on any one of them. It decides nothing about notifications or panes. |
@@ -198,6 +199,7 @@ SSH pane; existing sessions and the tmux server's environment are not reconfigur
 
 - [Behavior details](behavior/) — API, WebSocket, frontend, SSH, notifications, and URL-open contracts.
 - [Security details](security/) — requirements grouped by execution and trust boundary.
+- [Agent registry](agent-registry.md) — agent IDs, aliases, detection rules, capabilities, and session keys.
 - [Agent Board details](agent-board/) — messaging, relay, bootstrap, command center, and limitations.
 - [UI design](ui-design.md) — workspace, pane, modal, attention, and Agent Board interactions.
 - [Quality gateway](quality-gateway.md) — how architectural contracts are verified.

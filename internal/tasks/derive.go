@@ -1,12 +1,13 @@
 package tasks
 
 import (
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"panemux/internal/agent"
 )
 
 // State is a task's column on the dashboard.
@@ -27,8 +28,8 @@ const (
 
 // Agent kinds.
 const (
-	AgentClaude = "claude"
-	AgentCodex  = "codex"
+	AgentClaude = string(agent.Claude)
+	AgentCodex  = string(agent.Codex)
 )
 
 // LocationKind says where a task's agent runs.
@@ -520,105 +521,6 @@ func claudeStatusState(status string) State {
 	default:
 		return StateUnknown
 	}
-}
-
-// isClaudeProcess reports whether a `ps` command line is a Claude Code
-// process: the program itself — argv[0], or the script a node, bun or deno
-// interpreter runs — has a path component named claude or claude-code. How
-// Claude Code shows in `ps` depends on how it was installed: a native binary
-// under .../claude/versions/<version> or named claude, or node running
-// .../@anthropic-ai/claude-code/cli.js. Only the program is looked at, so a
-// process that merely has a file under ~/.claude as an argument (an editor,
-// `tail`, a hook) does not pass for one.
-func isClaudeProcess(command string) bool {
-	fields := strings.Fields(command)
-	if len(fields) == 0 {
-		return false
-	}
-	if namesClaude(fields[0]) {
-		return true
-	}
-	return len(fields) > 1 && scriptInterpreters[strings.ToLower(filepath.Base(fields[0]))] && namesClaude(fields[1])
-}
-
-var scriptInterpreters = map[string]bool{"node": true, "bun": true, "deno": true}
-
-func namesClaude(program string) bool {
-	for _, part := range strings.Split(strings.ToLower(program), "/") {
-		if part == AgentClaude || part == "claude-code" {
-			return true
-		}
-	}
-	return false
-}
-
-// isInteractiveClaude is a claude process that is not `claude -p` /
-// `claude --print`, which answer one prompt and exit.
-func isInteractiveClaude(command string) bool {
-	if !isClaudeProcess(command) {
-		return false
-	}
-	for _, field := range strings.Fields(command)[1:] {
-		if field == "-p" || field == "--print" {
-			return false
-		}
-	}
-	return true
-}
-
-// codexNonInteractiveCommands are codex-cli's subcommands that do not open
-// an interactive session, from `codex --help` of codex-cli 0.157.0, plus
-// mcp-server from earlier releases. With no subcommand codex opens the TUI
-// (the first positional argument is then a prompt), and `resume` and `fork`
-// reopen an interactive session, so neither appears here.
-var codexNonInteractiveCommands = map[string]bool{
-	"agents": true, "exec": true, "e": true, "review": true, "login": true, "logout": true,
-	"mcp": true, "mcp-server": true, "plugin": true, "app-server": true, "remote-control": true,
-	"completion": true, "update": true, "doctor": true, "sandbox": true, "debug": true,
-	"apply": true, "a": true, "queue": true, "archive": true, "delete": true,
-	"migrate-rollouts": true, "unarchive": true, "cloud": true, "exec-server": true,
-	"features": true, "help": true,
-}
-
-// codexValueOptions are the top-level options of codex-cli 0.157.0 that take
-// a value in the next argument, so the value is not mistaken for a subcommand.
-var codexValueOptions = map[string]bool{
-	"-c": true, "--config": true, "--enable": true, "--disable": true, "--remote": true,
-	"--remote-auth-token-env": true, "-i": true, "--image": true, "-m": true, "--model": true,
-	"--local-provider": true, "-p": true, "--profile": true, "-s": true, "--sandbox": true,
-	"-C": true, "--cd": true, "--add-dir": true, "-a": true, "--ask-for-approval": true,
-}
-
-// isInteractiveCodex reports whether a `ps` command line is an interactive
-// codex session: argv[0]'s base name is codex, and the first positional
-// argument is not a non-interactive subcommand. Only that argument is looked
-// at, so a prompt that happens to contain "exec" is still a session.
-func isInteractiveCodex(command string) bool {
-	fields := strings.Fields(command)
-	if len(fields) == 0 || strings.ToLower(filepath.Base(fields[0])) != AgentCodex {
-		return false
-	}
-	return !codexNonInteractiveCommands[firstCodexPositional(fields[1:])]
-}
-
-// firstCodexPositional is codex's first positional argument — its
-// subcommand, or a prompt — with the values of options skipped; "" when
-// there is none or it follows "--".
-func firstCodexPositional(args []string) string {
-	skipValue := false
-	for _, arg := range args {
-		switch {
-		case skipValue:
-			skipValue = false
-		case arg == "--":
-			return ""
-		case strings.HasPrefix(arg, "-"):
-			skipValue = codexValueOptions[arg]
-		default:
-			return arg
-		}
-	}
-	return ""
 }
 
 func firstNonZero(values ...int64) int64 {

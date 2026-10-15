@@ -400,7 +400,7 @@ test-model-check:
 #           UI components (App, SplitContainer, TerminalPane …) require a real
 #           browser renderer and are covered by integration / E2E tests.
 
-COVERAGE_PKGS := ./internal/config/...,./internal/api/...,./internal/ws/...,./internal/server/...,./internal/board/...,./internal/portforward/...,./internal/commandcenter/...,./internal/boardmcp/...,./internal/fileops/...,./internal/homedir/...,./internal/cachedir/...,./internal/tasks/...,./internal/taskevents/...,./internal/requestsecurity/...,./internal/testcap/...,.
+COVERAGE_PKGS := ./internal/agent/...,./internal/config/...,./internal/api/...,./internal/ws/...,./internal/server/...,./internal/board/...,./internal/portforward/...,./internal/commandcenter/...,./internal/boardmcp/...,./internal/fileops/...,./internal/homedir/...,./internal/cachedir/...,./internal/tasks/...,./internal/taskevents/...,./internal/requestsecurity/...,./internal/testcap/...,.
 
 coverage: coverage-go coverage-frontend
 
@@ -413,6 +413,7 @@ coverage: coverage-go coverage-frontend
 # standalone command DEVELOPMENT.md documents work on its own.
 coverage-go: build-frontend
 	go test \
+	  ./internal/agent/... \
 	  ./internal/config/... \
 	  ./internal/api/... \
 	  ./internal/ws/... \
