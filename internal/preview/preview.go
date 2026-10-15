@@ -212,7 +212,7 @@ func (r *Registry) Open(root, file string) (string, error) {
 	}
 	e := entry{root: root, file: filepath.ToSlash(rel)}
 	token, err := r.tokenFor(e)
-	if err != nil {
+	if err != nil { //coverage:exempt tokenFor fails only when crypto/rand does
 		return "", err
 	}
 	segments := strings.Split(e.file, "/")
@@ -314,7 +314,7 @@ func serveMarkdown(w http.ResponseWriter, name string, f io.Reader) {
 		return
 	}
 	page, err := renderMarkdown(name, source)
-	if err != nil {
+	if err != nil { //coverage:exempt renderMarkdown fails only where its own exempt branch does
 		http.Error(w, "rendering the file failed", http.StatusInternalServerError)
 		return
 	}

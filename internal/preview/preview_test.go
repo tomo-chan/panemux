@@ -74,6 +74,10 @@ func TestResolve(t *testing.T) {
 			want:     []string{filepath.Join(cwd, "docs", "design.md"), filepath.Join(other, "docs", "design.md")},
 		},
 		{
+			name: "an empty working directory is skipped", path: "docs/design.md",
+			workdirs: []string{"", cwd}, want: []string{filepath.Join(cwd, "docs", "design.md")},
+		},
+		{
 			name: "a working directory listed twice counts once", path: "docs/design.md",
 			workdirs: []string{cwd, cwd + "/"}, want: []string{filepath.Join(cwd, "docs", "design.md")},
 		},
@@ -173,6 +177,45 @@ func TestRegistryOpenRefuses(t *testing.T) {
 
 	_, err = reg.Open(root, writeFile(t, filepath.Join(root, "notes.txt"), "x"))
 	require.ErrorIs(t, err, ErrNotPreviewable)
+
+	missingRoot := filepath.Join(root, "missing")
+	_, err = reg.Open(missingRoot, filepath.Join(missingRoot, "index.html"))
+	require.ErrorIs(t, err, ErrNotFound, "a root that does not exist")
+}
+
+func TestServeAfterTheRootIsGone(t *testing.T) {
+	parent := realDir(t)
+	root := filepath.Join(parent, "site")
+	file := writeFile(t, filepath.Join(root, "index.html"), "<p>x</p>")
+
+	reg := NewRegistry()
+	url, err := reg.Open(root, file)
+	require.NoError(t, err)
+	require.NoError(t, os.Rename(root, filepath.Join(parent, "moved")))
+
+	assert.Equal(t, http.StatusNotFound, serve(t, reg, url).code)
+}
+
+type failingReader struct{}
+
+func (failingReader) Read([]byte) (int, error) { return 0, errors.New("disk gone") }
+
+// serveMarkdown reads through a bounded reader, so a file that fails or
+// grows after it was checked is answered rather than read without end.
+func TestServeMarkdownReading(t *testing.T) {
+	rr := httptest.NewRecorder()
+	serveMarkdown(rr, "notes.md", failingReader{})
+	assert.Equal(t, http.StatusInternalServerError, rr.Code)
+	assert.NotContains(t, rr.Header().Get("Content-Type"), "text/html")
+
+	rr = httptest.NewRecorder()
+	serveMarkdown(rr, "notes.md", strings.NewReader(strings.Repeat("a", int(MaxDocumentBytes)+1)))
+	assert.Equal(t, http.StatusRequestEntityTooLarge, rr.Code)
+
+	rr = httptest.NewRecorder()
+	serveMarkdown(rr, "notes.md", strings.NewReader("# ok"))
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.Contains(t, rr.Body.String(), "<h1>ok</h1>")
 }
 
 type served struct {
