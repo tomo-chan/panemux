@@ -434,6 +434,33 @@ var contractFixtures = map[string]contractFixture{
 		return rr.Body.Bytes(), map[string]string{e.home: fixtureHomePath}
 	}},
 
+	// A clicked path that names one file (issue #385). The fake pane's
+	// working directory and the random token are stood in for.
+	"preview": {capture: func(t *testing.T) ([]byte, map[string]string) {
+		e := newAPIEnv(t)
+		dir := fixturePreviewDir(t, e, "pane-preview")
+
+		rr := e.do(t, http.MethodPost, "/api/sessions/pane-preview/preview", `{"path":"mockups/index.html"}`)
+		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+		var got struct {
+			URL string `json:"url"`
+		}
+		require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &got))
+		token := strings.Split(got.URL, "/")[2]
+		require.Regexp(t, `^[0-9a-f]{32}$`, token)
+		return rr.Body.Bytes(), map[string]string{dir: fixtureHomePath, token: "0123456789abcdef0123456789abcdef"}
+	}},
+
+	// A clicked path that two worktrees hold (issue #385).
+	"preview-choose": {capture: func(t *testing.T) ([]byte, map[string]string) {
+		e := newAPIEnv(t)
+		dir := fixturePreviewDir(t, e, "pane-preview")
+
+		rr := e.do(t, http.MethodPost, "/api/sessions/pane-preview/preview", `{"path":"docs/design.md"}`)
+		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+		return rr.Body.Bytes(), map[string]string{dir: fixtureHomePath}
+	}},
+
 	"board-status": {capture: func(t *testing.T) ([]byte, map[string]string) {
 		e := newAPIEnv(t)
 		// One pane reporting everything an agent can report, one reporting
@@ -1386,4 +1413,33 @@ func fixtureCodexTranscript() []byte {
 		`{"type":"response_item","payload":{"type":"message","role":"user","content":[` +
 		`{"type":"input_text","text":"Add task summaries"}]}}` + "\n"
 	return []byte("::panemux-transcript v1 " + strconv.Itoa(len(body)) + "\n" + body + "\n::end\n")
+}
+
+// fixturePreviewDir registers a fake local pane working in a fresh directory
+// that holds mockups/index.html and docs/design.md, with a second worktree,
+// <dir>/worktree, holding docs/design.md too.
+func fixturePreviewDir(t *testing.T, e *apiEnv, id string) string {
+	t.Helper()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	for _, name := range []string{"mockups/index.html", "docs/design.md", "worktree/docs/design.md"} {
+		path := filepath.Join(dir, filepath.FromSlash(name))
+		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+		require.NoError(t, os.WriteFile(path, []byte("x"), 0o600))
+	}
+	e.mgr.Add(&fixturePreviewSession{
+		wsFakeSession: newWSFakeSession(id), cwd: dir, worktree: filepath.Join(dir, "worktree"),
+	})
+	return dir
+}
+
+type fixturePreviewSession struct {
+	*wsFakeSession
+	cwd, worktree string
+}
+
+func (s *fixturePreviewSession) GetCWD() (string, error) { return s.cwd, nil }
+
+func (s *fixturePreviewSession) GetActiveWorkdirs() ([]string, error) {
+	return []string{s.worktree}, nil
 }

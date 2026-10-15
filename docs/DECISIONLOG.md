@@ -1368,6 +1368,28 @@ navigation to protected APIs fail closed. Authority comparison preserves the exi
 termination contract and its documented scheme limitation; authentication and broader DNS
 rebinding protection remain separate work.
 
+## 2026-10-15: The split preview's isolation and bounds (#385)
+
+The #360 entry above anticipated isolated preview pages on another loopback port. #385 isolates them
+on the dashboard's own port instead: every preview response is sandboxed by Content-Security-Policy
+without `allow-same-origin`, so the page runs in an opaque origin, framed or in a tab, and its
+requests to `/api` and `/ws` reach the shared request guard as cross-site and are refused. A second
+listener would have been the same isolation with a port to choose, bind and close, and the remote
+relays of #386/#387 decide their own ports. The frame repeats `sandbox` so the isolation does not
+rest on the header alone.
+
+Previews are served under a random token rather than by path behind the request guard, because a
+sandboxed page's own stylesheets and images are cross-site requests the guard would refuse. Tokens
+are kept for the server's lifetime: #359's lifetime rule is that a tab opened on a preview outlives
+the pane, popup and session it came from, and no expiry was asked for.
+
+A file is served from the innermost working directory holding it (else its own directory), resolved
+through symbolic links at registration and opened through `os.Root` on every request, so "path and
+symlink escape" has one boundary that relative stylesheets can still use. #359 requires a size limit
+without a value; 10 MiB bounds the HTML or Markdown document — the file read whole for rendering —
+and not the files it loads. Markdown is rendered on the server by goldmark with raw HTML omitted, so
+the page needs no script.
+
 ## Agent registry
 
 ### One registry declares agents; capabilities are ports in their consumers (2026-10-12, issue #372)

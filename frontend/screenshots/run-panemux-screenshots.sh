@@ -135,6 +135,41 @@ printf 'ok  	sample-project/internal/search	0.637s
 '
 TEST
 chmod +x scripts/test
+# The HTML mock the split preview shows (docs/images/preview.png).
+mkdir -p mockups
+cat >mockups/index.html <<'MOCK'
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sample search</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header><strong>sample-project</strong><nav>Search · Items · Docs</nav></header>
+<main>
+<p class="eyebrow">Search preview</p>
+<h1>Find anything in your items.</h1>
+<p>Results update as you type, and every page is paginated.</p>
+<form><input value="tmux" aria-label="Search"><button type="button">Search</button></form>
+<ol class="results"><li>tmux sessions <span>items/42</span></li><li>tmux key bindings <span>items/57</span></li></ol>
+</main>
+</body>
+</html>
+MOCK
+cat >mockups/style.css <<'CSS'
+body { margin: 0; font: 15px/1.5 Georgia, serif; background: #f2efe8; color: #22332b; }
+header { display: flex; justify-content: space-between; padding: 18px 28px; border-bottom: 1px solid #cfc8b8; }
+nav { font: 13px sans-serif; }
+main { padding: 28px; }
+.eyebrow { font: 12px sans-serif; letter-spacing: 0.12em; text-transform: uppercase; }
+h1 { font-size: 34px; font-weight: normal; margin: 8px 0 12px; }
+form { display: flex; gap: 8px; margin: 20px 0; }
+input { flex: 1; padding: 8px 10px; border: 1px solid #b9b19f; background: #fff; font: inherit; }
+button { padding: 8px 16px; border: 0; background: #22332b; color: #fff; font: 13px sans-serif; }
+.results { padding-left: 20px; }
+.results span { color: #7a7363; font: 12px monospace; margin-left: 8px; }
+CSS
 
 # What the tmux pane shows: a dev server's log, printed once and then left
 # running so the session stays up for the whole run.

@@ -18,6 +18,7 @@ import {
   SSHConnectionEntriesResponseSchema,
   SSHConnectionRequestSchema,
   DetectShellResponseSchema,
+  PreviewResponseSchema,
   WorkspaceTabPositionRequestSchema,
   WorkspaceVerticalBarWidthRequestSchema,
   WorkspacesResponseSchema,
@@ -1516,5 +1517,31 @@ describe('SSHConnectionRequestSchema', () => {
 
   it('rejects a non-integer port', () => {
     expect(SSHConnectionRequestSchema.safeParse({ name: 'x', port: 22.5 }).success).toBe(false)
+  })
+})
+
+describe('PreviewResponseSchema', () => {
+  const ready = { status: 'ready', url: '/preview/0123/index.html', path: '/workspace/user/project/index.html', host: '' }
+
+  it('accepts a preview to show', () => {
+    expect(PreviewResponseSchema.safeParse(ready).success).toBe(true)
+  })
+
+  it('accepts candidates to choose from', () => {
+    const choose = { status: 'choose', candidates: ['/a/docs/x.md', '/b/docs/x.md'], host: '' }
+    expect(PreviewResponseSchema.safeParse(choose).success).toBe(true)
+  })
+
+  it('rejects an address outside the preview route', () => {
+    expect(PreviewResponseSchema.safeParse({ ...ready, url: 'https://example.com/' }).success).toBe(false)
+    expect(PreviewResponseSchema.safeParse({ ...ready, url: '/api/layout' }).success).toBe(false)
+  })
+
+  it('rejects a choice of fewer than two files', () => {
+    expect(PreviewResponseSchema.safeParse({ status: 'choose', candidates: ['/a/x.md'], host: '' }).success).toBe(false)
+  })
+
+  it('rejects an unknown status', () => {
+    expect(PreviewResponseSchema.safeParse({ ...ready, status: 'other' }).success).toBe(false)
   })
 })

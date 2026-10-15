@@ -154,3 +154,22 @@ export function CloseIcon() {
     </BaseIcon>
   )
 }
+
+export function ReloadIcon() {
+  return (
+    <BaseIcon>
+      <path d="M13 8a5 5 0 1 1-1.5-3.55" />
+      <path d="M13 2.5v3h-3" />
+    </BaseIcon>
+  )
+}
+
+export function OpenInNewTabIcon() {
+  return (
+    <BaseIcon>
+      <path d="M9.5 2.5h4v4" />
+      <path d="m13.5 2.5-6 6" />
+      <path d="M12 9.5v3a1 1 0 0 1-1 1H3.5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h3" />
+    </BaseIcon>
+  )
+}

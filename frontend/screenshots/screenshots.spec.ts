@@ -80,7 +80,44 @@ test('documentation screenshots', async ({ page }) => {
     ).toBeVisible()
     await page.screenshot({ path: imagePath('task-dashboard.png') })
   })
+
+  // Last, so the command it types shows in no other image.
+  await test.step('split preview', async () => {
+    await page.getByRole('button', { name: 'Workspaces' }).click()
+    const editor = pane(page, 'editor')
+    // An absolute path, so the header names the link the run made rather
+    // than the temporary directory it resolves to.
+    await run(page, 'editor', `echo "Mock ready: ${MOCK_PATH}"`, /Mock ready[\s\S]*Mock ready: \/tmp\/sample-project\/mockups/)
+    await clickTerminalText(page, editor, MOCK_PATH)
+    const frame = editor.frameLocator('iframe.pm-preview-frame')
+    await expect(frame.getByRole('heading', { name: 'Find anything in your items.' })).toBeVisible()
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+    await page.mouse.move(0, 0)
+    await page.screenshot({ path: imagePath('preview.png') })
+  })
 })
+
+const MOCK_PATH = '/tmp/sample-project/mockups/index.html'
+
+// Clicks a link in a pane's terminal at the cells its text occupies, on the
+// last row that shows it.
+async function clickTerminalText(page: Page, target: Locator, text: string) {
+  const point = await target.evaluate((root, wanted) => {
+    const measure = root.querySelector('.xterm-char-measure-element') as HTMLElement
+    const cell = measure.getBoundingClientRect().width / (measure.textContent ?? ' ').length
+    const rows = Array.from(root.querySelectorAll('.xterm-rows > div')).reverse()
+    for (const row of rows) {
+      const column = (row.textContent ?? '').indexOf(wanted)
+      if (column < 0 || (row.textContent ?? '').includes('echo')) continue
+      const box = row.getBoundingClientRect()
+      return { x: box.left + (column + wanted.length / 2) * cell, y: box.top + box.height / 2 }
+    }
+    return null
+  }, text)
+  if (!point) throw new Error(`no "${text}" on screen`)
+  await page.mouse.move(point.x, point.y)
+  await page.mouse.click(point.x, point.y)
+}
 
 // The real collection lists every claude process of the user generating the
 // images, so the dashboard is given a fixed set of placeholder tasks

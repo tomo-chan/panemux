@@ -3,10 +3,13 @@ import { DisplayConfig, PaneConfig } from '../types'
 import { useTerminal } from '../hooks/useTerminal'
 import { useGitInfo } from '../hooks/useGitInfo'
 import { usePaneUrlOpen } from '../hooks/usePaneUrlOpen'
+import { usePreview } from '../hooks/usePreview'
+import { paneSplitKey } from '../utils/preview'
 import type { PaneEdge } from '../utils/layoutTree'
 import { PaneHeader } from './PaneHeader'
 import { PaneStatusBar } from './PaneStatusBar'
 import { PaneUrlOpenNotice } from './PaneUrlOpenNotice'
+import { PreviewSplit } from './PreviewSplit'
 import { LayoutActionsContext } from './SplitContainer'
 
 const DEFAULT_DISPLAY: DisplayConfig = { show_header: true, show_status_bar: true }
@@ -17,12 +20,13 @@ interface TerminalPaneProps {
 }
 
 export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
-  const containerRef = useRef<HTMLDivElement | null>(null)
+  // The body holds the terminal and, when one is open, its preview; it is
+  // what a dragged pane drops onto. The terminal's own container is xterm's.
+  const bodyRef = useRef<HTMLDivElement | null>(null)
   const [containerEl, setContainerEl] = React.useState<HTMLElement | null>(null)
   const [hoverEdge, setHoverEdge] = useState<PaneEdge | null>(null)
 
   const setRef = useCallback((el: HTMLDivElement | null) => {
-    containerRef.current = el
     setContainerEl(el)
   }, [])
 
@@ -37,6 +41,13 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
   const { gitInfo, refreshIfStale, refreshNow } = useGitInfo(pane.id, gitInfoEnabled)
   const urlOpen = usePaneUrlOpen(pane.id)
 
+  // Paths in a pane on the panemux host open in the split preview (issue
+  // #385). usePreview needs the terminal's connection, so the terminal is
+  // handed a stable callback that reaches it through a ref.
+  const previewOpenRef = useRef<((path: string) => void) | null>(null)
+  const previewable = pane.type === 'local' || pane.type === 'tmux'
+  const openPreviewPath = useCallback((path: string) => previewOpenRef.current?.(path), [])
+
   const { handleResize, connected, dims, sessionState, reconnectFailed, restartSession } = useTerminal({
     sessionId: pane.id,
     container: containerEl,
@@ -44,7 +55,10 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
     onInteraction: refreshIfStale,
     onLinkActivate: urlOpen.openUrl,
     onBrowserOpenRequest: urlOpen.requestOpen,
+    onPreviewPath: previewable ? openPreviewPath : undefined,
   })
+  const preview = usePreview(pane.id, connected && sessionState === 'running')
+  previewOpenRef.current = preview.open
 
   // Observe resize events for this pane
   useEffect(() => {
@@ -106,8 +120,8 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
   }, [ctx, pane.id])
 
   const updateHoverEdge = useCallback((clientX: number, clientY: number) => {
-    if (!containerRef.current || !ctx?.dragSourcePaneId || ctx.dragSourcePaneId === pane.id) return
-    const rect = containerRef.current.getBoundingClientRect()
+    if (!bodyRef.current || !ctx?.dragSourcePaneId || ctx.dragSourcePaneId === pane.id) return
+    const rect = bodyRef.current.getBoundingClientRect()
     setHoverEdge(resolvePaneDropEdge(rect, clientX, clientY))
   }, [ctx?.dragSourcePaneId, pane.id])
 
@@ -166,11 +180,13 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
         moveHandleProps={{ onDragStart: handleDragStart, onDragEnd: handleDragEnd, onMouseDown: handleMoveHandleMouseDown }}
       />
       <div
-        ref={setRef}
+        ref={bodyRef}
+        data-pane-body=""
         style={{
           flex: 1,
+          minHeight: 0,
+          display: 'flex',
           overflow: 'hidden',
-          padding: '4px',
           position: 'relative',
         }}
         onDragOver={(e) => {
@@ -182,7 +198,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
         onDragLeave={() => setHoverEdge(null)}
         onDrop={(e) => {
           e.preventDefault()
-          const rect = containerRef.current?.getBoundingClientRect()
+          const rect = bodyRef.current?.getBoundingClientRect()
           const edge = rect ? resolvePaneDropEdge(rect, e.clientX, e.clientY) : hoverEdge
           if (edge) handleEdgeDrop(edge)
         }}
@@ -197,6 +213,14 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
           handleEdgeDrop(edge)
         }}
       >
+        <PreviewSplit
+          splitKey={paneSplitKey(pane.id)}
+          view={preview.view}
+          terminal={<div ref={setRef} style={{ overflow: 'hidden', padding: '4px' }} />}
+          onChoose={preview.open}
+          onReload={preview.reload}
+          onClose={preview.close}
+        />
         <PaneUrlOpenNotice
           pendingUrl={urlOpen.pendingUrl}
           error={urlOpen.error}
