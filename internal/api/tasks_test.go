@@ -189,6 +189,7 @@ func TestGetTasks_ResponseCarriesTheWireFieldNames(t *testing.T) {
 	assert.Contains(t, raw.Hosts[0], "collected_at")
 }
 
+//efficacy:exempt only its fixture moved to the v2 collection protocol; an empty list is the answer either way
 func TestGetTasks_NoTasksIsAnEmptyList(t *testing.T) {
 	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
 	useTaskService(h, withAllSections([]byte("::panemux-tasks v2\n::now 1\n::end\n")), nil)
