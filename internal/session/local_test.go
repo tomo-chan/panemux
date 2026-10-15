@@ -1850,3 +1850,35 @@ func TestTmuxLocalSessionGetActiveWorkdir_WhenPanePIDIsCodex_PrefersCodexExecCom
 	require.NoError(t, err)
 	assert.Equal(t, []string{"/tmp/tmux-root-codex-worktree"}, cwds)
 }
+
+// A shell that exits ends its subscription in the exited state, so the
+// WebSocket handler sends the "exited" status the dashboard hides a pane's
+// preview on (issue #385), not the "connected" it read while the process
+// monitor had yet to record the exit.
+func TestNewLocal_ExitEndsTheSubscription(t *testing.T) {
+	testcap.RequirePTY(t)
+	sess, err := NewLocal("exit-test", "/bin/sh", "", "exit")
+	require.NoError(t, err)
+	mgr := NewManager()
+	mgr.Add(sess)
+	t.Cleanup(func() { _ = mgr.Remove("exit-test") })
+	_, updates, unsubscribe, ok := mgr.Subscribe("exit-test")
+	require.True(t, ok)
+	defer unsubscribe()
+
+	_, err = sess.Write([]byte("exit\n"))
+	require.NoError(t, err)
+
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case _, open := <-updates:
+			if !open {
+				assert.Equal(t, StateExited, sess.State())
+				return
+			}
+		case <-deadline:
+			t.Fatalf("the subscription did not end after the shell exited (state %s)", sess.State())
+		}
+	}
+}
