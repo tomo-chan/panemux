@@ -1383,9 +1383,9 @@ sandboxed page's own stylesheets and images are cross-site requests the guard wo
 are kept for the server's lifetime: #359's lifetime rule is that a tab opened on a preview outlives
 the pane, popup and session it came from, and no expiry was asked for.
 
-A file is served from the innermost working directory holding it (else its own directory), resolved
-through symbolic links at registration and opened through `os.Root` on every request, so "path and
-symlink escape" has one boundary that relative stylesheets can still use. #359 requires a size limit
+A file is served from the innermost working directory holding it, looked up through that
+directory's `os.Root` when it is opened and on every request, so "path and symlink escape" has one
+boundary that relative stylesheets can still use. #359 requires a size limit
 without a value; 10 MiB bounds the HTML or Markdown document — the file read whole for rendering —
 and not the files it loads. Markdown is rendered on the server by goldmark with raw HTML omitted, so
 the page needs no script.

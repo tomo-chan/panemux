@@ -178,6 +178,8 @@ func statIn(root, file string) (string, fs.FileInfo, error) {
 		return rel, info, nil
 	case err == nil, errors.Is(err, fs.ErrNotExist), errors.Is(err, syscall.ENOTDIR):
 		return "", nil, fmt.Errorf("%w: %s", ErrNotFound, file)
+	case errors.Is(err, fs.ErrPermission):
+		return "", nil, fmt.Errorf("%w: %s: permission denied", ErrNotFound, file)
 	}
 	// os.Root refuses a symbolic link, or a "..", that leads outside it.
 	return "", nil, fmt.Errorf("%w: %s", ErrEscapes, file)

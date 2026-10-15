@@ -278,6 +278,14 @@ func TestRegistryOpenRefuses(t *testing.T) {
 	_, err = reg.Open(root, writeFile(t, filepath.Join(root, "notes.txt"), "x"))
 	require.ErrorIs(t, err, ErrNotPreviewable)
 
+	locked := filepath.Join(root, "locked")
+	writeFile(t, filepath.Join(locked, "index.html"), "x")
+	require.NoError(t, os.Chmod(locked, 0o000))
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+	_, err = reg.Open(root, filepath.Join(locked, "index.html"))
+	require.ErrorIs(t, err, ErrNotFound, "an unreadable directory is not an escape")
+	assert.Contains(t, err.Error(), "permission denied")
+
 	missingRoot := filepath.Join(root, "missing")
 	_, err = reg.Open(missingRoot, filepath.Join(missingRoot, "index.html"))
 	require.ErrorIs(t, err, ErrNotFound, "a root that does not exist")

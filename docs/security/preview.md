@@ -76,6 +76,8 @@ Each opened file is registered with a **root**, the innermost of those directori
   registration is refused too. The request path is also refused unless `fs.ValidPath` accepts it,
   and a backslash is refused outright;
 - directories are never listed, and anything but a regular file answers `404`.
+- a file that cannot be read for lack of permission is reported as not found, not as outside the
+  working directories: only a path or symbolic link that leaves them is an escape.
 
 ### Tokens
 

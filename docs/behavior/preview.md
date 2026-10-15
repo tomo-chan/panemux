@@ -31,7 +31,7 @@ Clicking one opens the split. A relative path is resolved on the server
 When exactly one of them holds the file, it opens. When several do — the same relative path in two
 worktrees — the preview lists the files found and opens the one chosen. When none does, or the path
 cannot be previewed, the preview shows the reason instead, naming the directories looked in. An
-absolute path names its own file.
+absolute path names its own file, which must lie inside one of them.
 
 Only files inside those directories — the shell's working directory and the agent's worktrees — can
 be previewed (#359's "path and symlink escape"). An absolute path elsewhere, a `../` that leaves
