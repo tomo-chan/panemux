@@ -120,6 +120,9 @@ func Resolve(name string, workdirs []string) ([]string, error) {
 func RootFor(file string, workdirs []string) string {
 	root := ""
 	for _, dir := range cleanDirs(workdirs) {
+		// Two different directories that both hold file and have the same
+		// length cannot exist once cleanDirs has removed duplicates.
+		//mutation:exempt[CONDITIONALS_BOUNDARY] EQUIVALENT: ancestors of one file differ in length
 		if within(dir, file) && len(dir) > len(root) {
 			root = dir
 		}

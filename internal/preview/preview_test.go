@@ -213,6 +213,10 @@ func TestServeMarkdownReading(t *testing.T) {
 	assert.Equal(t, http.StatusRequestEntityTooLarge, rr.Code)
 
 	rr = httptest.NewRecorder()
+	serveMarkdown(rr, "notes.md", strings.NewReader(strings.Repeat("a", int(MaxDocumentBytes))))
+	assert.Equal(t, http.StatusOK, rr.Code, "a file of exactly the limit")
+
+	rr = httptest.NewRecorder()
 	serveMarkdown(rr, "notes.md", strings.NewReader("# ok"))
 	assert.Equal(t, http.StatusOK, rr.Code)
 	assert.Contains(t, rr.Body.String(), "<h1>ok</h1>")
@@ -375,6 +379,10 @@ func TestServeRechecksTheSizeLimit(t *testing.T) {
 
 	assert.Equal(t, http.StatusRequestEntityTooLarge, serve(t, reg, htmlURL).code)
 	assert.Equal(t, http.StatusRequestEntityTooLarge, serve(t, reg, mdURL).code)
+
+	exact := strings.Repeat("a", int(MaxDocumentBytes))
+	writeFile(t, html, exact)
+	assert.Equal(t, http.StatusOK, serve(t, reg, htmlURL).code, "a file of exactly the limit")
 
 	// A sibling resource is not a document: the limit is the previewed
 	// page's, not every file it loads.
