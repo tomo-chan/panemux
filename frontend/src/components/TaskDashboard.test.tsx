@@ -1388,6 +1388,7 @@ describe('TaskDashboard unreadable session state (issue #313)', () => {
     expect(screen.getByRole('button', { name: /show details/ })).toHaveAttribute('aria-expanded', 'false')
   })
 
+  //efficacy:exempt unchanged by #384: the Input given describe block after it falls inside its line range
   it('says file, not files, for one', () => {
     renderDashboard(
       tasksState({
@@ -1431,6 +1432,8 @@ describe('TaskDashboard Input given', () => {
 
   it('offers Input given only for a permission request', () => {
     renderDashboard(tasksState({ data }))
+    fireEvent.click(screen.getByTestId('task-card-approval'))
+    expect(within(detail()).getByRole('button', { name: 'Input given' })).toBeInTheDocument()
     fireEvent.click(screen.getByTestId('task-card-question'))
     expect(within(detail()).queryByRole('button', { name: 'Input given' })).toBeNull()
   })

@@ -754,6 +754,7 @@ describe('useTasks host terminals (issue #314)', () => {
     ])
   })
 
+  //efficacy:exempt unchanged by #384: the inputGiven describe block after it falls inside its line range
   it('DELETEs a host terminal by its session ID, swallowing a failure', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(ok(payload))
