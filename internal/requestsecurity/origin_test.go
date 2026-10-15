@@ -2,6 +2,7 @@ package requestsecurity
 
 import (
 	"github.com/stretchr/testify/assert"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 )
@@ -57,8 +58,10 @@ func TestAllowedOriginPolicy(t *testing.T) {
 				if tc.origin != "" {
 					r.Header.Set("Origin", tc.origin)
 				}
-				r.Header.Set("Sec-Fetch-Site", site)
-				want := tc.want && site != "same-site" && site != "cross-site"
+				if site != "" {
+					r.Header.Set("Sec-Fetch-Site", site)
+				}
+				want := tc.want && site != "same-site" && site != "cross-site" && (tc.origin != "" || site == "")
 				assert.Equal(t, want, Allowed(r))
 			})
 		}
@@ -88,5 +91,47 @@ func TestRefuse(t *testing.T) {
 		} else {
 			assert.Equal(t, 200, w.Code)
 		}
+	}
+}
+
+func TestAllowedOriginlessBrowserEvidence(t *testing.T) {
+	const own = "http://localhost:8080/"
+	const other = "http://localhost:3000/"
+	cases := []struct {
+		headers http.Header
+		name    string
+		want    bool
+	}{
+		{nil, "CLI", true},
+		{http.Header{"Referer": {"http://localhost:8080/tasks?q=1"}}, "same origin referer", true},
+		{http.Header{"Sec-Fetch-Site": {"same-origin"}, "Referer": {own}}, "fetch with referer", true},
+		{http.Header{"Sec-Fetch-Site": {"same-origin"}, "Referer": {"https://localhost:8080/"}}, "TLS termination", true},
+		{http.Header{"Sec-Fetch-Site": {"same-origin"}}, "missing referer", false},
+		{http.Header{"Sec-Fetch-Site": {"none"}}, "direct navigation", false},
+		{http.Header{"Sec-Fetch-Site": {"none"}, "Referer": {own}}, "inconsistent navigation", false},
+		{http.Header{"Sec-Fetch-Site": {"same-origin"}, "Referer": {other}}, "other port", false},
+		{http.Header{"Referer": {"http://127.0.0.1:8080/"}}, "other host", false},
+		{http.Header{"Referer": {"::"}}, "malformed referer", false},
+		{http.Header{"Referer": {"http://user@localhost:8080/"}}, "credential referer", false},
+		{http.Header{"Referer": {"http://localhost:8080/#fragment"}}, "fragment referer", false},
+		{http.Header{"Referer": {own, own}}, "duplicate referer", false},
+		{http.Header{"Sec-Fetch-Site": {"same-origin", "same-origin"}, "Referer": {own}}, "duplicate fetch", false},
+		{http.Header{"Sec-Fetch-Site": {"bogus"}, "Referer": {own}}, "unknown fetch", false},
+		{http.Header{"Sec-Fetch-Site": {""}}, "empty fetch", false},
+		{http.Header{"Sec-Fetch-Mode": {"cors"}}, "mode only", false},
+		{http.Header{"Sec-Fetch-Dest": {"empty"}}, "dest only", false},
+		{http.Header{"Sec-Fetch-User": {"?1"}}, "user only", false},
+		{http.Header{"Origin": {"http://localhost:8080"}, "Referer": {other}}, "origin and foreign referer", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest("GET", "http://localhost:8080/api/layout", nil)
+			for key, values := range tc.headers {
+				for _, value := range values {
+					r.Header.Add(key, value)
+				}
+			}
+			assert.Equal(t, tc.want, Allowed(r))
+		})
 	}
 }

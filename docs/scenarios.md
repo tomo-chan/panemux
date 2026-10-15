@@ -32,6 +32,7 @@ Verification column values:
 
 | # | Scenario | Expected | Verification |
 |---|---|---|---|
+| O360 | Browser authority isolation | All API methods and WebSockets reject another hostname or loopback port before handler side effects; Origin-free browser requests require matching Referer and consistent Fetch Metadata; CLI without browser headers, Vite same-origin proxy and TLS termination remain supported | `auto`: `internal/requestsecurity` — `TestAllowedOriginPolicy`, `TestAllowedOriginlessBrowserEvidence`; `internal/server` — `TestServer_AllAPIRoutesGuardBeforeHandler`, `TestServer_OriginGuardRealRouter`, `TestServer_OriginGuardProxyAndCLI`, `TestWSIntegration_AllStreams_OriginGuard` |
 | A1 | Install from a pre-built binary | `panemux` runs with no config file present | `manual`: download per [README](../README.md#pre-built-binary), run `./panemux --port 9090`, expect a default single-pane workspace |
 | A2 | Build from source | `make install-deps && make build` produces `bin/panemux` with the frontend embedded | `manual`, and partly `auto` — CI builds on every PR (`.github/workflows/ci.yml`) |
 | A3 | First run with no config | A config file and an auth token are created, and the token is **not** written into `config.yaml` | `auto`: `internal/config` — `TestEnsureAuthToken_GeneratesAndPersists_WhenAbsent`, `TestFinishLoad_NeverCallsEnsureAuthToken` |

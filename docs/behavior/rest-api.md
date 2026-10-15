@@ -4,6 +4,13 @@
 
 ## REST API
 
+Every API route uses the [shared browser request guard](../security/auth.md#shared-browser-request-guard)
+before authentication or handler side effects, including GET, mutations and OPTIONS. Another
+loopback port or hostname is refused with `403`; browser requests without Origin require
+a matching Referer and consistent Fetch Metadata. Requests without browser headers remain
+supported for CLI clients. Vite uses its same-origin proxy, preserving Host and Origin;
+direct cross-port browser requests to the backend are refused.
+
 ### A mutation that fails changes nothing
 
 Every route that changes the config persists it before answering, and each one applies the same rule

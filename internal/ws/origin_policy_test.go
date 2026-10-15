@@ -41,8 +41,13 @@ func TestOriginPolicy(t *testing.T) {
 				if tc.origin != "" {
 					r.Header.Set("Origin", tc.origin)
 				}
-				r.Header.Set("Sec-Fetch-Site", site)
+				if site != "" {
+					r.Header.Set("Sec-Fetch-Site", site)
+				}
 				want := tc.want && site != "same-site" && site != "cross-site"
+				if tc.origin == "" && site != "" {
+					want = false
+				}
 				assert.Equal(t, want, checkOrigin(r))
 			})
 		}

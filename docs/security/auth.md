@@ -168,9 +168,10 @@ sitting in the temp directory.
 
 ### Shared browser request guard
 
-`internal/requestsecurity` guards all three WebSockets (`/ws/{sessionID}`,
-`/ws/board/command`, `/ws/tasks/events`) and the existing guarded task and SSH-connection
-APIs. `Sec-Fetch-Site: same-site` and `cross-site` return `403`. When Origin is present,
+`internal/requestsecurity` guards every `/api` route, including `/api/board/*` and
+`/api/session-token`, and all three WebSockets (`/ws/{sessionID}`, `/ws/board/command`,
+`/ws/tasks/events`). The server checks these path subtrees before CORS, OPTIONS responses
+and routing; API mounts also apply the same guard before authentication and handlers. `Sec-Fetch-Site: same-site` and `cross-site` return `403`. When Origin is present,
 it must be one http/https origin without credentials, path, query or fragment, and its
 hostname and effective port must match the request Host. Hostnames are case-insensitive;
 IPv6 representations are normalized; brackets require a valid IPv6 literal, and
@@ -178,13 +179,19 @@ unbracketed IPv6 and zone identifiers are refused independently of the Go URL pa
 and another loopback port is refused even without Fetch Metadata. The browser guard runs
 before terminal subscription, command execution or task observation.
 
-An omitted Origin remains permitted for CLI clients unless Fetch Metadata explicitly refuses
-it. Origin's default port is 80 for http and 443 for https; a Host without a port uses that
+An omitted Origin is permitted for CLI clients only when no Referer or Fetch Metadata is
+present. An Origin-free browser request requires one valid http/https Referer with matching
+hostname and effective port; if Sec-Fetch-Site is present it must be `same-origin`. Direct
+navigation (`none`), missing Referer, malformed/duplicate Referer or Sec-Fetch-Site, and
+unknown Sec-Fetch-Site values are refused. Referer may include a path and query but not
+credentials or a fragment. When both Origin and Referer are present, both must match Host.
+A rejected request returns `403` before disk writes, PTY/SSH creation, task collection or
+listener binding. CORS reflects only an Origin that passes this same policy; arbitrary
+loopback ports are never allowed. Allowed OPTIONS requests return `204`. Origin's default port is 80 for http and 443 for https; a Host without a port uses that
 same default. Scheme is not compared to the backend connection, preserving TLS termination
 at a proxy. Consequently, another scheme at the same hostname and explicit port is not
 reliably refused. Forwarded headers do not override this policy. This guard is neither
-client authentication nor DNS rebinding protection, and it does not add protection to every
-other API route.
+client authentication nor DNS rebinding protection.
 
 Development proxies must preserve the browser Host and Origin. Vite configures both `/api`
 and `/ws` with `changeOrigin: false`; it never rewrites Origin. Fetch Metadata alone is

@@ -7,7 +7,8 @@
 All WebSockets apply the [shared browser request guard](../security/auth.md#shared-browser-request-guard)
 before upgrading. Another hostname or port in Origin is refused with `403`, including another
 loopback port without Fetch Metadata. `Sec-Fetch-Site: same-site` and `cross-site` are refused;
-Origin-free CLI requests remain supported. TLS termination is supported by comparing hostname
+Origin-free CLI requests without browser headers remain supported; an Origin-free browser
+request requires a matching Referer and consistent Fetch Metadata. TLS termination is supported by comparing hostname
 and effective port, not transport scheme; another scheme on the same explicit port remains a
 limitation. Development HTTP and WS proxies preserve Host and Origin.
 

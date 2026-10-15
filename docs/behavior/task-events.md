@@ -102,6 +102,8 @@ The task event stream. The server sends JSON text frames; anything the client se
   whose hostname or effective port differs from the request Host), and the upgrade's own Origin check as on
   `/ws/{sessionID}`. Opening the stream makes every host be dialed, so the refusal protects that side
   effect ([Task dashboard collection](../security/command-execution.md#task-dashboard-collection)).
+  Origin-free browser requests also require a matching Referer and consistent Fetch Metadata
+  under the [shared browser request guard](../security/auth.md#shared-browser-request-guard).
 - A frame the client sends is limited to 512 bytes; a larger one closes the connection.
 
 #### Frames

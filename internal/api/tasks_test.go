@@ -718,8 +718,9 @@ func TestTaskRoutes_RefuseCrossSiteRequests(t *testing.T) {
 		allowed bool
 	}{
 		{name: "no browser headers (curl, the Go client)", allowed: true},
-		{name: "same-origin fetch", headers: map[string]string{"Sec-Fetch-Site": "same-origin"}, allowed: true},
-		{name: "typed into the address bar", headers: map[string]string{"Sec-Fetch-Site": "none"}, allowed: true},
+		{name: "same-origin fetch",
+			headers: map[string]string{"Sec-Fetch-Site": "same-origin", "Referer": "http://panemux.test:8080/"}, allowed: true},
+		{name: "typed into the address bar", headers: map[string]string{"Sec-Fetch-Site": "none"}, allowed: false},
 		{
 			name: "another loopback authority", headers: map[string]string{"Origin": "http://localhost:5173"},
 			allowed: false,
@@ -731,7 +732,6 @@ func TestTaskRoutes_RefuseCrossSiteRequests(t *testing.T) {
 		{name: "cross-site fetch or image", headers: map[string]string{"Sec-Fetch-Site": "cross-site"}},
 		{name: "same-site but another origin", headers: map[string]string{"Sec-Fetch-Site": "same-site"}},
 		{name: "foreign origin", headers: map[string]string{"Origin": "https://evil.example"}},
-		{name: "malformed origin", headers: map[string]string{"Origin": "::"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

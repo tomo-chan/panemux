@@ -7,9 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"net"
 	"net/http"
-	"net/url"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -20,6 +19,7 @@ import (
 	"panemux/internal/commandcenter"
 	"panemux/internal/config"
 	"panemux/internal/portforward"
+	"panemux/internal/requestsecurity"
 	"panemux/internal/session"
 	"panemux/internal/taskevents"
 	"panemux/internal/ws"
@@ -169,8 +169,15 @@ func (s *Server) Shutdown(ctx context.Context) error {
 
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Guard the entire protected path before CORS/preflight or route dispatch,
+		// including unsupported methods and routes not yet registered.
+		protected := r.URL.Path == "/api" || strings.HasPrefix(r.URL.Path, "/api/") ||
+			r.URL.Path == "/ws" || strings.HasPrefix(r.URL.Path, "/ws/")
+		if protected && requestsecurity.Refuse(w, r) {
+			return
+		}
 		origin := r.Header.Get("Origin")
-		if origin != "" && isLocalhostOrigin(origin) {
+		if origin != "" && requestsecurity.Allowed(r) {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Vary", "Origin")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
@@ -182,20 +189,6 @@ func corsMiddleware(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
-}
-
-// isLocalhostOrigin returns true when the given origin URL's host is a loopback address,
-// allowing cross-port requests from the Vite dev server while blocking external sites.
-func isLocalhostOrigin(origin string) bool {
-	u, err := url.Parse(origin)
-	if err != nil {
-		return false
-	}
-	host, _, err := net.SplitHostPort(u.Host)
-	if err != nil {
-		host = u.Host
-	}
-	return host == "localhost" || host == "127.0.0.1" || host == "::1"
 }
 
 func securityHeadersMiddleware(next http.Handler) http.Handler {

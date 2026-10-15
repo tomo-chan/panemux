@@ -639,6 +639,12 @@ func TestWSIntegration_AllStreams_OriginGuard(t *testing.T) {
 		for name, headers := range map[string]http.Header{
 			"own":                               {"Origin": {e.http.URL}},
 			"CLI":                               {},
+			"browser without origin":            {"Sec-Fetch-Site": {"same-origin"}, "Referer": {e.http.URL + "/tasks"}},
+			"browser missing referer":           {"Sec-Fetch-Site": {"same-origin"}},
+			"browser foreign referer":           {"Referer": {"http://127.0.0.1:1/"}},
+			"direct navigation":                 {"Sec-Fetch-Site": {"none"}},
+			"null":                              {"Origin": {"null"}},
+			"duplicate":                         {"Origin": {e.http.URL, e.http.URL}},
 			"other port":                        {"Origin": {"http://127.0.0.1:1"}},
 			"same-site":                         {"Origin": {e.http.URL}, "Sec-Fetch-Site": {"same-site"}},
 			"cross-site":                        {"Sec-Fetch-Site": {"cross-site"}},
@@ -647,7 +653,7 @@ func TestWSIntegration_AllStreams_OriginGuard(t *testing.T) {
 			t.Run(path+"/"+name, func(t *testing.T) {
 				dialer := websocket.Dialer{HandshakeTimeout: wsReadTimeout, Subprotocols: []string{integrationToken}}
 				conn, resp, err := dialer.Dial(e.wsURL(path), headers)
-				if name == "own" || name == "CLI" {
+				if name == "own" || name == "CLI" || name == "browser without origin" {
 					require.NoError(t, err)
 					require.NotNil(t, conn)
 					_ = conn.Close()

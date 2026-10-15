@@ -10,30 +10,47 @@ import (
 )
 
 const (
-	crossSite = "cross-site"
-	sameSite  = "same-site"
+	fetchNone       = "none"
+	fetchSameOrigin = "same-origin"
 )
 
-// Allowed permits CLI requests without Origin, but refuses another browser authority.
+// Allowed permits CLI requests without browser headers, but refuses another browser authority.
 // Scheme is intentionally not compared to r.TLS: TLS may terminate at a proxy.
 func Allowed(r *http.Request) bool {
-	for _, site := range r.Header.Values("Sec-Fetch-Site") {
-		if site == sameSite || site == crossSite {
-			return false
-		}
+	sites := r.Header.Values("Sec-Fetch-Site")
+	if len(sites) > 1 || (len(sites) == 1 && sites[0] != fetchSameOrigin && sites[0] != fetchNone) {
+		return false
+	}
+	referers := r.Header.Values("Referer")
+	if len(referers) > 1 || (len(referers) == 1 && !matchesAuthority(r, referers[0], false)) {
+		return false
 	}
 	origins := r.Header.Values("Origin")
 	if len(origins) == 0 {
+		if len(sites) == 1 && sites[0] == fetchNone {
+			return false
+		}
+		if len(referers) == 1 {
+			return true
+		}
+		for key := range r.Header {
+			if strings.HasPrefix(strings.ToLower(key), "sec-fetch-") {
+				return false
+			}
+		}
 		return true
 	}
-	if len(origins) != 1 || origins[0] == "" {
+	return len(origins) == 1 && matchesAuthority(r, origins[0], true)
+}
+
+func matchesAuthority(r *http.Request, raw string, origin bool) bool {
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.Host == "" ||
+		u.Opaque != "" || u.Fragment != "" || strings.Contains(raw, "#") {
+
 		return false
 	}
-	u, err := url.Parse(origins[0])
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.Host == "" ||
-		u.Opaque != "" || u.Path != "" || u.RawQuery != "" || u.ForceQuery ||
-		u.Fragment != "" || strings.Contains(origins[0], "#") {
-
+	if origin && (u.Path != "" || u.RawQuery != "" || u.ForceQuery) {
 		return false
 	}
 	defaultPort := 80
@@ -43,6 +60,15 @@ func Allowed(r *http.Request) bool {
 	host, port, ok := authority(u.Host, defaultPort)
 	requestHost, requestPort, requestOK := authority(r.Host, defaultPort)
 	return ok && requestOK && host == requestHost && port == requestPort
+}
+
+// Middleware checks browser evidence before any handler side effects.
+func Middleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !Refuse(w, r) {
+			next.ServeHTTP(w, r)
+		}
+	})
 }
 
 // Refuse answers 403 and reports whether the browser request was refused.
