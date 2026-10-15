@@ -45,7 +45,13 @@ dashboard's origin and could call every unauthenticated route, including those t
 ### Markdown rendering
 
 Markdown is rendered on the server by goldmark with its defaults left in place: raw HTML is omitted
-and links with a script scheme (`javascript:` and the like) are dropped. Do not enable goldmark's
+and links with a script scheme (`javascript:` and the like) are dropped. goldmark checks a
+destination before decoding its character references, so `jav&#x61;script:` would pass that check
+and be written out as `javascript:`; an AST transformer (`dangerousLinks`) therefore checks every
+link and image destination again with goldmark's own `IsDangerousURL`, as the browser will read it —
+references decoded, tabs and newlines removed, leading spaces and control characters trimmed — and
+empties the ones it refuses. It refuses nothing goldmark's check would let through as written. Do
+not enable goldmark's
 `WithUnsafe`; the page's policy forbids scripts besides, but the renderer is the first guard, not the
 policy.
 
@@ -62,15 +68,19 @@ decides which directories it may reach — never the path itself.
 Each opened file is registered with a **root**, the innermost of those directories holding it (see
 [behavior](../behavior/preview.md#what-is-shown)):
 
-- the clicked path is made absolute against each directory and must lie lexically inside one of
-  them; an absolute path elsewhere or a `../` that leaves them is refused (`403`) before anything is
-  read;
+- the clicked path is made absolute against each directory and must lie inside one of them; an
+  absolute path elsewhere or a `../` that leaves them is refused (`403`). The working directories
+  are reported resolved while a shell prints the path it was given, so a path that is not inside one
+  as written is compared by the identity of the directories above it: each is resolved through its
+  symbolic links, looked up through an `os.Root` for `/` by its path relative to `/`, and compared
+  with `os.SameFile`. A path whose prefix leads into a working directory through a symbolic link,
+  or in another letter case on a case-insensitive filesystem, is therefore inside it; only the
+  directory is decided this way, never the file;
 - the file is then looked up, and at registration checked again, only through `os.Root` for its
-  root, by the path relative to that root (`filepath.Rel`, required to be `filepath.IsLocal`). No
-  request-derived path is ever passed to `os.Stat`, `os.Open` or `filepath.EvalSymlinks`; `os.Root`
-  refuses a `..` or a symbolic link that leaves the root, and any symbolic link with an absolute
-  target, so a link out of the working directory is refused (`403`) and a link with a relative
-  target that stays inside works;
+  root, by the path relative to that root (`filepath.Rel`). No request-derived path is ever passed
+  to `os.Stat` or `os.Open`; `os.Root` refuses a `..` or a symbolic link that leaves the root, and
+  any symbolic link with an absolute target, so a link out of the working directory is refused
+  (`403`) and a link with a relative target that stays inside works;
 - every request below the token is opened through `os.Root` for that root, which refuses `..`
   components and symbolic links that leave the root at open time, so a link added after
   registration is refused too. The request path is also refused unless `fs.ValidPath` accepts it,
@@ -91,5 +101,8 @@ to outlive the pane it came from ([lifetime](../behavior/preview.md#lifetime)).
 
 The previewed HTML or Markdown file is at most `preview.MaxDocumentBytes` (10 MiB), checked when it is
 opened and again on every request, and Markdown is read through a reader bounded to that size, so a
-file that grew does not turn rendering into an unbounded read. Other files are streamed with
+file that grew does not turn rendering into an unbounded read. HTML is served through an
+`io.SectionReader` of the size that request checked, since `http.ServeContent` seeks to the end of
+what it is given to learn the length: a file that grows past the limit while it is being served is
+cut at the checked size. Other files are streamed with
 `http.ServeContent` and are not bounded.

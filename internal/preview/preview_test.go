@@ -525,3 +525,126 @@ func TestErrorsAreDistinct(t *testing.T) {
 		}
 	}
 }
+
+type grownInfo struct {
+	os.FileInfo
+	size int64
+}
+
+func (g grownInfo) Size() int64 { return g.size }
+
+// The size an HTML file was checked at is the size served: a file that grows
+// after the check is cut there, rather than served past the limit because
+// http.ServeContent seeks to the end again to learn its length.
+func TestServeHTMLStopsAtTheCheckedSize(t *testing.T) {
+	root := realDir(t)
+	file := writeFile(t, filepath.Join(root, "index.html"), "<p>small</p><p>grown since</p>")
+	f, err := os.Open(file)
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	require.NoError(t, err)
+
+	rr := httptest.NewRecorder()
+	serveHTML(rr, httptest.NewRequest(http.MethodGet, "/preview/x/index.html", nil),
+		grownInfo{FileInfo: info, size: int64(len("<p>small</p>"))}, f)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.Equal(t, "<p>small</p>", rr.Body.String())
+	assert.Equal(t, htmlPolicy, rr.Header().Get("Content-Security-Policy"))
+	assert.Equal(t, "text/html; charset=utf-8", rr.Header().Get("Content-Type"))
+}
+
+// goldmark checks a link's scheme before it decodes character references,
+// so a script scheme spelled with one survived as a live link. Every link and
+// image destination is checked again as the browser will read it.
+func TestRenderMarkdownDropsEncodedScriptLinks(t *testing.T) {
+	for name, line := range map[string]string{
+		"hex reference":     "[a](jav&#x61;script:alert(1))",
+		"decimal reference": "[a](&#106;avascript:alert(1))",
+		"named reference":   "[a](javascript&colon;alert(1))",
+		"tab inside":        "[a](java&#9;script:alert(1))",
+		"leading control":   "[a](&#1;javascript:alert(1))",
+		"leading space":     "[a](&#32;javascript:alert(1))",
+		"newline inside":    "[a](java&#10;script:alert(1))",
+		"return inside":     "[a](java&#13;script:alert(1))",
+		"vbscript":          "[a](vb&#x73;cript:msgbox(1))",
+		"image":             "![a](jav&#x61;script:alert(1))",
+		"reference link":    "[a][r]\n\n[r]: jav&#x61;script:alert(1)",
+	} {
+		t.Run(name, func(t *testing.T) {
+			page, err := renderMarkdown("x.md", []byte(line))
+			require.NoError(t, err)
+			assert.NotContains(t, strings.ToLower(string(page)), "script:", string(page))
+		})
+	}
+
+	for name, line := range map[string]string{
+		"https":          `[a](https://example.com/x?y=1&amp;z=2)`,
+		"relative":       `[a](other.md)`,
+		"fragment":       `[a](#section)`,
+		"mailto":         `[a](mailto:demo@example.com)`,
+		"encoded letter": `[a](&#x6f;ther.md)`,
+	} {
+		t.Run("keeps "+name, func(t *testing.T) {
+			page, err := renderMarkdown("x.md", []byte(line))
+			require.NoError(t, err)
+			assert.NotContains(t, string(page), `href=""`, string(page))
+		})
+	}
+}
+
+// A pane's working directory is reported resolved (/private/tmp/...), while
+// the shell and its agents print the path they were given (/tmp/...). A path
+// that leads into a working directory through a symbolic link in its prefix,
+// or in another letter case on a case-insensitive filesystem, names a file
+// inside it.
+func TestResolveThroughAnotherSpellingOfTheWorkingDirectory(t *testing.T) {
+	base := realDir(t)
+	cwd := filepath.Join(base, "real", "proj")
+	page := writeFile(t, filepath.Join(cwd, "index.html"), "<p>x</p>")
+	outside := filepath.Join(base, "outside")
+	writeFile(t, filepath.Join(outside, "secret.html"), "<p>secret</p>")
+	require.NoError(t, os.Symlink("real", filepath.Join(base, "alias")))
+	require.NoError(t, os.Symlink("outside", filepath.Join(base, "away")))
+	require.NoError(t, os.Symlink(filepath.Join(base, "real"), filepath.Join(base, "absolute")))
+	aliased := filepath.Join(base, "alias", "proj", "index.html")
+
+	got, err := Resolve(aliased, []string{cwd})
+	require.NoError(t, err, "a symbolic link in the path's prefix")
+	assert.Equal(t, []Found{{Root: cwd, File: aliased}}, got)
+
+	got, err = Resolve(page, []string{filepath.Join(base, "alias", "proj")})
+	require.NoError(t, err, "a symbolic link in the working directory's own path")
+	assert.Equal(t, []Found{{Root: filepath.Join(base, "alias", "proj"), File: page}}, got)
+
+	reg := NewRegistry()
+	url, err := reg.Open(got[0].Root, got[0].File)
+	require.NoError(t, err)
+	assert.Equal(t, "<p>x</p>", serve(t, reg, url).body)
+	url, err = reg.Open(cwd, aliased)
+	require.NoError(t, err, "Open accepts what Resolve found")
+	assert.Equal(t, "<p>x</p>", serve(t, reg, url).body)
+
+	viaAbsolute := filepath.Join(base, "absolute", "proj", "index.html")
+	got, err = Resolve(viaAbsolute, []string{cwd})
+	require.NoError(t, err, "a link in the prefix with an absolute target")
+	assert.Equal(t, []Found{{Root: cwd, File: viaAbsolute}}, got)
+
+	_, err = Resolve(filepath.Join(base, "away", "secret.html"), []string{cwd})
+	require.ErrorIs(t, err, ErrEscapes, "a link in the prefix that leads elsewhere")
+	_, err = Resolve(filepath.Join(base, "alias", "proj", "..", "..", "outside", "secret.html"), []string{cwd})
+	require.ErrorIs(t, err, ErrEscapes, "../ out of it after the link")
+	_, err = Resolve(filepath.Join(base, "alias", "missing", "index.html"), []string{cwd})
+	require.ErrorIs(t, err, ErrEscapes, "a prefix that names nothing is not inside")
+
+	upper := filepath.Join(base, "real", "PROJ", "index.html")
+	if _, statErr := os.Stat(upper); statErr == nil {
+		got, err = Resolve(upper, []string{cwd})
+		require.NoError(t, err, "another letter case on a case-insensitive filesystem")
+		assert.Equal(t, []Found{{Root: cwd, File: upper}}, got)
+	} else {
+		_, err = Resolve(upper, []string{cwd})
+		require.ErrorIs(t, err, ErrEscapes, "another letter case names another directory here")
+	}
+}

@@ -30,7 +30,12 @@ import (
 	"syscall"
 
 	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
+	"github.com/yuin/goldmark/parser"
+	goldmarkhtml "github.com/yuin/goldmark/renderer/html"
+	"github.com/yuin/goldmark/text"
+	"github.com/yuin/goldmark/util"
 )
 
 // RoutePrefix is where previewed files are served.
@@ -120,12 +125,12 @@ func Resolve(name string, workdirs []string) ([]Found, error) {
 	escaped := false
 	seen := map[string]bool{}
 	for _, file := range paths {
-		root := rootOf(file, dirs)
+		root, rel := locate(file, dirs)
 		if root == "" {
 			escaped = true
 			continue
 		}
-		_, _, err := statIn(root, file)
+		_, err := statIn(root, rel, file)
 		switch {
 		case errors.Is(err, ErrEscapes):
 			escaped = true
@@ -143,6 +148,62 @@ func Resolve(name string, workdirs []string) ([]Found, error) {
 	return nil, fmt.Errorf("%w: %s (looked in %s)", ErrNotFound, name, strings.Join(dirs, ", "))
 }
 
+// locate finds the innermost of dirs holding file, and file's path relative
+// to it, or "" when none does. A path is compared as written first, then by
+// the identity of the directories above it: the working directories are
+// reported resolved, while a shell prints the path it was given, which may
+// lead in through a symbolic link (macOS's /tmp is /private/tmp) or, on a
+// case-insensitive filesystem, in another letter case.
+func locate(file string, dirs []string) (root, rel string) {
+	if root = rootOf(file, dirs); root != "" {
+		rel, _ = filepath.Rel(root, file)
+		return root, rel
+	}
+	return locateByIdentity(file, dirs)
+}
+
+// locateByIdentity walks up from file's directory and stops at the first
+// directory that is one of dirs. Each is resolved through its symbolic links
+// and looked up through an os.Root for the filesystem's root, by a path
+// relative to it, and compared by identity, which also matches another letter
+// case on a case-insensitive filesystem. Only the directory is compared; the
+// file itself is then reached only through its root's os.Root, which a link
+// out of it cannot leave.
+func locateByIdentity(file string, dirs []string) (string, string) {
+	var known []string
+	var ids []fs.FileInfo
+	for _, dir := range dirs {
+		if info, err := os.Stat(dir); err == nil {
+			known = append(known, dir)
+			ids = append(ids, info)
+		}
+	}
+	host, err := os.OpenRoot(string(filepath.Separator))
+	if err != nil { //coverage:exempt the filesystem's root can always be opened
+		return "", ""
+	}
+	defer func() { _ = host.Close() }()
+	for dir := filepath.Dir(file); ; dir = filepath.Dir(dir) {
+		// Resolved first, as os.Root follows no link with an absolute
+		// target, and the resolved path holds no link left to follow.
+		// A directory that does not resolve leaves resolved empty, which names
+		// nothing below the root.
+		resolved, _ := filepath.EvalSymlinks(dir)
+		fromRoot, _ := filepath.Rel(string(filepath.Separator), resolved)
+		if info, err := host.Stat(fromRoot); err == nil {
+			for i, id := range ids {
+				if os.SameFile(info, id) {
+					rel, _ := filepath.Rel(dir, file)
+					return known[i], rel
+				}
+			}
+		}
+		if dir == filepath.Dir(dir) {
+			return "", ""
+		}
+	}
+}
+
 // rootOf is the innermost of dirs that holds file, or "" when none does.
 func rootOf(file string, dirs []string) string {
 	root := ""
@@ -157,32 +218,29 @@ func rootOf(file string, dirs []string) string {
 	return root
 }
 
-// statIn describes the regular file at file, which must lie inside root,
-// looking it up through root's os.Root: the file is reached only from the
-// root, by a relative path, and a symbolic link that leaves the root is not
-// followed. A path that leaves the root reports ErrEscapes; one naming
-// nothing, or anything but a regular file, reports ErrNotFound.
-func statIn(root, file string) (string, fs.FileInfo, error) {
-	rel, err := filepath.Rel(root, file)
-	if err != nil || !filepath.IsLocal(rel) {
-		return "", nil, fmt.Errorf("%w: %s", ErrEscapes, file)
-	}
+// statIn describes the regular file at rel, a path relative to root, looking
+// it up through root's os.Root: the file is reached only from the root, and
+// a "..", or a symbolic link, that leaves the root is not followed. A path
+// that leaves the root reports ErrEscapes; one naming nothing, or anything
+// but a regular file, reports ErrNotFound. file is the path as clicked, for
+// the reason shown.
+func statIn(root, rel, file string) (fs.FileInfo, error) {
 	r, err := os.OpenRoot(root)
 	if err != nil {
-		return "", nil, fmt.Errorf("%w: %s", ErrNotFound, root)
+		return nil, fmt.Errorf("%w: %s", ErrNotFound, root)
 	}
 	defer func() { _ = r.Close() }()
 	info, err := r.Stat(rel)
 	switch {
 	case err == nil && info.Mode().IsRegular():
-		return rel, info, nil
+		return info, nil
 	case err == nil, errors.Is(err, fs.ErrNotExist), errors.Is(err, syscall.ENOTDIR):
-		return "", nil, fmt.Errorf("%w: %s", ErrNotFound, file)
+		return nil, fmt.Errorf("%w: %s", ErrNotFound, file)
 	case errors.Is(err, fs.ErrPermission):
-		return "", nil, fmt.Errorf("%w: %s: permission denied", ErrNotFound, file)
+		return nil, fmt.Errorf("%w: %s: permission denied", ErrNotFound, file)
 	}
 	// os.Root refuses a symbolic link, or a "..", that leads outside it.
-	return "", nil, fmt.Errorf("%w: %s", ErrEscapes, file)
+	return nil, fmt.Errorf("%w: %s", ErrEscapes, file)
 }
 
 func cleanDirs(dirs []string) []string {
@@ -228,13 +286,18 @@ func NewRegistry() *Registry {
 
 // Open registers file, served from root, and returns the address it is
 // served at. The file must be an HTML or Markdown file within the size
-// limit, reached from root without leaving it (see statIn).
+// limit, inside root (see locate) and reached from it without leaving it
+// (see statIn).
 func (r *Registry) Open(root, file string) (string, error) {
 	if !IsPreviewable(file) {
 		return "", ErrNotPreviewable
 	}
 	root, file = filepath.Clean(root), filepath.Clean(file)
-	rel, info, err := statIn(root, file)
+	_, rel := locate(file, []string{root})
+	if rel == "" {
+		return "", fmt.Errorf("%w: %s", ErrEscapes, file)
+	}
+	info, err := statIn(root, rel, file)
 	if err != nil {
 		return "", err
 	}
@@ -302,14 +365,22 @@ func (r *Registry) Serve(w http.ResponseWriter, req *http.Request, token, rest s
 	}
 	switch kind {
 	case kindHTML:
-		header.Set("Content-Security-Policy", htmlPolicy)
-		header.Set("Content-Type", "text/html; charset=utf-8")
-		http.ServeContent(w, req, info.Name(), info.ModTime(), f)
+		serveHTML(w, req, info, f)
 	case kindMarkdown:
 		serveMarkdown(w, info.Name(), f)
 	default:
 		http.ServeContent(w, req, info.Name(), info.ModTime(), f)
 	}
+}
+
+// serveHTML serves an HTML document at the size it was checked at. A file
+// that grows after that check is cut there: http.ServeContent seeks to the
+// end of what it is given to learn the length, and the file's own end may
+// since lie past the limit.
+func serveHTML(w http.ResponseWriter, req *http.Request, info fs.FileInfo, f io.ReaderAt) {
+	w.Header().Set("Content-Security-Policy", htmlPolicy)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	http.ServeContent(w, req, info.Name(), info.ModTime(), io.NewSectionReader(f, 0, info.Size()))
 }
 
 // open opens a regular file below a registered root, or reports false.
@@ -357,8 +428,47 @@ func serveMarkdown(w http.ResponseWriter, name string, f io.Reader) {
 
 // markdown renders GitHub-flavored Markdown. Raw HTML in the source is
 // omitted and links with a script scheme are dropped (goldmark's defaults,
-// left unchanged on purpose); the page's policy forbids scripts besides.
-var markdown = goldmark.New(goldmark.WithExtensions(extension.GFM))
+// left unchanged on purpose, and dangerousLinks for the schemes they miss);
+// the page's policy forbids scripts besides.
+var markdown = goldmark.New(
+	goldmark.WithExtensions(extension.GFM),
+	goldmark.WithParserOptions(parser.WithASTTransformers(util.Prioritized(dangerousLinks{}, 1000))),
+)
+
+// dangerousLinks empties a link or image destination that goldmark's own
+// check lets through only because it looks before character references are
+// decoded: "jav&#x61;script:" is rendered as "javascript:". Each destination
+// is checked again as the browser will read it — references decoded, tabs
+// and newlines removed, and leading spaces and control characters trimmed.
+type dangerousLinks struct{}
+
+func (dangerousLinks) Transform(doc *ast.Document, _ text.Reader, _ parser.Context) {
+	// Each node is visited entering and leaving; emptying twice is harmless.
+	_ = ast.Walk(doc, func(n ast.Node, _ bool) (ast.WalkStatus, error) {
+		switch node := n.(type) {
+		case *ast.Link:
+			if isDangerousDestination(node.Destination) {
+				node.Destination = nil
+			}
+		case *ast.Image:
+			if isDangerousDestination(node.Destination) {
+				node.Destination = nil
+			}
+		}
+		return ast.WalkContinue, nil
+	})
+}
+
+func isDangerousDestination(destination []byte) bool {
+	decoded := strings.Map(func(r rune) rune {
+		if r == '\t' || r == '\n' || r == '\r' {
+			return -1
+		}
+		return r
+	}, html.UnescapeString(string(destination)))
+	decoded = strings.TrimLeftFunc(decoded, func(r rune) bool { return r <= ' ' })
+	return goldmarkhtml.IsDangerousURL([]byte(decoded))
+}
 
 const markdownStyle = `body{margin:0;background:#fff;color:#1f2328;` +
 	`font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}` +

@@ -1401,6 +1401,15 @@ serving also refuses symbolic links with an absolute target; the first cut regis
 when it pointed inside the root and then answered `404` for it, since serving already went through
 `os.Root`.
 
+Comparing the clicked path with the working directories as strings then refused files that are
+inside them: a pane's working directory is reported resolved (`/private/tmp/...` on macOS), while
+the shell and its agents print the path they were given (`/tmp/...`), and a case-insensitive
+filesystem accepts another letter case. A path that is not inside a working directory as written is
+now compared by the identity of the directories above it, each resolved and looked up through an
+`os.Root` for `/`; the scope is unchanged, only how a path is recognized as inside it. Matching a
+resolved form of each working directory instead would have missed the logical form the shell prints,
+which cannot be derived from the resolved one.
+
 ## Agent registry
 
 ### One registry declares agents; capabilities are ports in their consumers (2026-10-12, issue #372)
