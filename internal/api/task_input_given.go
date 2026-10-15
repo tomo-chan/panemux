@@ -15,10 +15,8 @@ type taskInputGivenRequest struct {
 // PostTaskInputGiven marks a codex approval request answered ("Input
 // given", issue #384), naming it by the wait signature GET /api/tasks gave.
 // The task is shown busy again from the next collection; it answers 204.
+// Cross-site requests are refused by the /api middleware.
 func (h *Handler) PostTaskInputGiven(w http.ResponseWriter, r *http.Request) {
-	if refuseCrossSite(w, r) {
-		return
-	}
 	var req taskInputGivenRequest
 	if !decodeStrict(w, r, taskRecordBodyLimit, &req) {
 		return
