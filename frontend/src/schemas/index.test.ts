@@ -1481,7 +1481,6 @@ describe('SSHConnectionEntrySchema', () => {
     expect(result.success).toBe(true)
   })
 
-  // efficacy:exempt unchanged by #385; it is reported only because the preview schema tests follow it.
   it('rejects a non-integer port', () => {
     const result = SSHConnectionEntrySchema.safeParse({
       name: 'x', port: 22.5, has_password: false, in_ssh_config: false, panes: [],
@@ -1516,6 +1515,7 @@ describe('SSHConnectionRequestSchema', () => {
     expect(SSHConnectionRequestSchema.safeParse({ host: 'h.invalid', clear_password: true }).success).toBe(true)
   })
 
+  // efficacy:exempt unchanged by #385; it is reported only because the preview schema tests follow it.
   it('rejects a non-integer port', () => {
     expect(SSHConnectionRequestSchema.safeParse({ name: 'x', port: 22.5 }).success).toBe(false)
   })
