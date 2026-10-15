@@ -20,19 +20,19 @@ import (
 // never asks for the last two; they are here to show they are not listed
 // when a host prints them anyway.
 func attentionOutput() []byte {
-	return joinLines(
-		"::panemux-tasks v1",
+	return fullOutput(
+		"::panemux-tasks v2",
 		"::now 1000",
-		"::section state",
+		"::section claude/state",
 		"::file 7.json",
 		`{"pid":7,"sessionId":"live-sess","status":"waiting","waitingFor":"approve Bash","statusUpdatedAt":990000}`,
 		"::section ps",
 		"7 1 claude",
 		"::section tmux",
 		"::section cwd",
-		"::section transcripts",
+		"::section claude/transcripts",
 		"990\tstopped-sess.jsonl\t\"cwd\":\"/workspace/user/project\"\t10",
-		"::section codex-rollouts",
+		"::section codex/rollouts",
 		"990\t10\t"+rolloutName("2026-09-27T09-00-00", codexSessionB)+"\t\t\"originator\":\"codex-tui\"",
 		"::end",
 	)
@@ -69,15 +69,15 @@ func TestCollectAttention_ListsLiveTasksWithTheSameSignature(t *testing.T) {
 // The attention collection leaves what the summaries know alone: replacing
 // a host's summary tasks with a list that has no logs would drop them.
 func TestCollectAttention_LeavesTheSummaryTasksAlone(t *testing.T) {
-	out := joinLines(
-		"::panemux-tasks v1",
+	out := fullOutput(
+		"::panemux-tasks v2",
 		"::now 1000",
-		"::section state",
+		"::section claude/state",
 		"::file 7.json",
 		`{"pid":7,"sessionId":"live-sess","status":"busy","statusUpdatedAt":990000}`,
 		"::section ps",
 		"7 1 claude",
-		"::section transcripts",
+		"::section claude/transcripts",
 		"990\tlive-sess.jsonl\t\t10",
 		"::end",
 	)
@@ -139,13 +139,12 @@ func TestCollectAttention_AllHostsFailing(t *testing.T) {
 // stopped sessions: the live part is shared, not copied.
 func TestAttentionScript_IsTheLivePartOfTheCollection(t *testing.T) {
 	for _, stopped := range []string{
-		".claude/projects", ".codex/sessions", "::section transcripts", "::section codex-rollouts", "find ",
+		".claude/projects", ".codex/sessions", "::section claude/transcripts", "::section codex/rollouts", "find ",
 	} {
 		assert.NotContains(t, attentionScript, stopped)
 		assert.Contains(t, collectScript, stopped)
 	}
-	assert.True(t, strings.HasPrefix(collectScript, collectLiveScript))
-	assert.True(t, strings.HasPrefix(attentionScript, collectLiveScript))
+	assert.True(t, strings.HasPrefix(collectScript, strings.TrimSuffix(attentionScript, collectEnd)))
 	assert.True(t, strings.HasSuffix(attentionScript, "echo '::end'\nexit 0\n"))
 }
 
@@ -170,11 +169,11 @@ func TestRunLocal_AttentionScriptSkipsStoppedSessions(t *testing.T) {
 
 	out, err := runLocal(context.Background(), attentionScript)
 	require.NoError(t, err)
-	raw, err := parseCollectOutput(out)
+	raw, err := parseCollectOutput(out, collectPlan.live)
 	require.NoError(t, err)
-	require.Len(t, raw.StateFiles, 1)
-	assert.Empty(t, raw.Transcripts)
-	assert.Empty(t, raw.CodexRollouts)
+	require.Len(t, claudeOf(raw).StateFiles, 1)
+	assert.Empty(t, claudeOf(raw).Transcripts)
+	assert.Empty(t, codexOf(raw).Rollouts)
 }
 
 // The task event publisher observes each host on its own cycle, so it

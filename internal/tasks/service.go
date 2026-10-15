@@ -309,7 +309,7 @@ func (s *Service) hostNames() []string {
 }
 
 func (s *Service) collectHost(ctx context.Context, name string) (HostResult, []Task) {
-	result, raw, collectedAt, ok := s.collectRaw(ctx, name, collectScript)
+	result, raw, collectedAt, ok := s.collectRaw(ctx, name, collectPlan.full)
 	if !ok {
 		return result, nil
 	}
@@ -358,23 +358,23 @@ func (s *Service) logUnreadableStateFiles(host string, files []UnreadableStateFi
 }
 
 func (s *Service) collectHostAttention(ctx context.Context, name string) (HostResult, []Task) {
-	result, raw, collectedAt, ok := s.collectRaw(ctx, name, attentionScript)
+	result, raw, collectedAt, ok := s.collectRaw(ctx, name, collectPlan.live)
 	if !ok {
 		return result, nil
 	}
 	return result, buildLiveTasks(name, raw, collectedAt)
 }
 
-// collectRaw runs script on one host within HostTimeout and parses what it
+// collectRaw runs run's script on one host within HostTimeout and parses what it
 // printed. ok is false when the host failed, which result then reports.
 func (s *Service) collectRaw(
-	ctx context.Context, name, script string,
+	ctx context.Context, name string, run collectRun,
 ) (result HostResult, raw rawSnapshot, collectedAt time.Time, ok bool) {
 	ctx, cancel := context.WithTimeout(ctx, s.opts.HostTimeout)
 	defer cancel()
 
 	result = HostResult{Name: name}
-	out, err := s.runHostScript(ctx, name, script, "task collection")
+	out, err := s.runHostScript(ctx, name, run.script, "task collection")
 	if err != nil {
 		result.Status = HostError
 		if errors.Is(err, errConnecting) {
@@ -386,7 +386,7 @@ func (s *Service) collectRaw(
 	}
 
 	collectedAt = s.opts.Now()
-	raw, err = parseCollectOutput(out)
+	raw, err = parseCollectOutput(out, run)
 	if err != nil {
 		result.Status = HostError
 		result.Error = err.Error()

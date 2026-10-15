@@ -27,17 +27,17 @@ import (
 
 // minimalOutput is a complete collection with one busy claude session.
 func minimalOutput(sessionID string) []byte {
-	return joinLines(
-		"::panemux-tasks v1",
+	return fullOutput(
+		"::panemux-tasks v2",
 		"::now 1000",
-		"::section state",
+		"::section claude/state",
 		"::file 7.json",
 		`{"pid":7,"sessionId":"`+sessionID+`","status":"busy","statusUpdatedAt":999000}`,
 		"::section ps",
 		"7 1 claude",
 		"::section tmux",
 		"::section cwd",
-		"::section transcripts",
+		"::section claude/transcripts",
 		"::end",
 	)
 }
@@ -325,7 +325,7 @@ func TestCollect_ACommandFailureKeepsTheConnection(t *testing.T) {
 }
 
 func TestCollect_UnparseableOutputIsAHostError(t *testing.T) {
-	conn := &fakeConn{output: []byte("::panemux-tasks v1\n::now 1\n")}
+	conn := &fakeConn{output: []byte("::panemux-tasks v2\n::now 1\n")}
 	svc := New(Options{
 		Hosts:    func() []string { return []string{"build-box"} },
 		Dial:     (&fakeDialer{conns: []*fakeConn{conn}}).dial,
@@ -570,12 +570,12 @@ func TestRunLocal_CollectScriptRunsUnderShAndParses(t *testing.T) {
 
 	out, err := runLocal(context.Background(), collectScript)
 	require.NoError(t, err)
-	raw, err := parseCollectOutput(out)
+	raw, err := parseCollectOutput(out, collectPlan.full)
 	require.NoError(t, err)
 
 	assert.InDelta(t, time.Now().Unix(), raw.Now, 5)
-	require.Len(t, raw.StateFiles, 1)
-	assert.Equal(t, strconv.Itoa(selfPID)+".json", raw.StateFiles[0].Name)
+	require.Len(t, claudeOf(raw).StateFiles, 1)
+	assert.Equal(t, strconv.Itoa(selfPID)+".json", claudeOf(raw).StateFiles[0].Name)
 
 	var sawSelf bool
 	for _, p := range raw.Processes {
@@ -584,10 +584,10 @@ func TestRunLocal_CollectScriptRunsUnderShAndParses(t *testing.T) {
 	assert.True(t, sawSelf, "ps lists this test process")
 
 	byID := map[string]transcript{}
-	for _, tr := range raw.Transcripts {
+	for _, tr := range claudeOf(raw).Transcripts {
 		byID[tr.SessionID] = tr
 	}
-	assert.Len(t, byID, 2, "subagent logs and logs older than 7 days are not listed: %+v", raw.Transcripts)
+	assert.Len(t, byID, 2, "subagent logs and logs older than 7 days are not listed: %+v", claudeOf(raw).Transcripts)
 	assert.Equal(t, "/workspace/user/project", byID["stopped-one"].CWD, "the first cwd in the log")
 	assert.Empty(t, byID["no-cwd"].CWD)
 	assert.InDelta(t, time.Now().Unix(), byID["stopped-one"].ModTime, 60)
@@ -618,7 +618,7 @@ func TestRunLocal_ReportsTheWorkingDirectoryOfAClaudeProcess(t *testing.T) {
 
 	out, err := runLocal(context.Background(), collectScript)
 	require.NoError(t, err)
-	raw, err := parseCollectOutput(out)
+	raw, err := parseCollectOutput(out, collectPlan.full)
 	require.NoError(t, err)
 
 	var listed bool
@@ -676,7 +676,7 @@ func TestRunLocal_ReportsThePaneIDInAnAgentsEnvironment(t *testing.T) {
 
 	out, err := runLocal(context.Background(), collectScript)
 	require.NoError(t, err)
-	raw, err := parseCollectOutput(out)
+	raw, err := parseCollectOutput(out, collectPlan.full)
 	require.NoError(t, err)
 
 	assert.Equal(t, "pane-1790346631000-a1b2c", raw.PaneIDs[withPane])
@@ -794,7 +794,7 @@ func TestRunLocal_ReadsThePaneIDFromPsEOnMacOS(t *testing.T) {
 
 	out, err := runLocal(context.Background(), collectScript)
 	require.NoError(t, err)
-	raw, err := parseCollectOutput(out)
+	raw, err := parseCollectOutput(out, collectPlan.full)
 	require.NoError(t, err)
 
 	assert.Equal(t, map[int]string{
@@ -821,7 +821,7 @@ func TestRunLocal_ReadsPsEOnlyOnMacOS(t *testing.T) {
 
 	out, err := runLocal(context.Background(), collectScript)
 	require.NoError(t, err)
-	raw, err := parseCollectOutput(out)
+	raw, err := parseCollectOutput(out, collectPlan.full)
 	require.NoError(t, err)
 
 	assert.Empty(t, raw.PaneIDs)
@@ -831,10 +831,10 @@ func TestRunLocal_EmptyHomeStillCompletes(t *testing.T) {
 	homedir.SetForTest(t, t.TempDir())
 	out, err := runLocal(context.Background(), collectScript)
 	require.NoError(t, err)
-	raw, err := parseCollectOutput(out)
+	raw, err := parseCollectOutput(out, collectPlan.full)
 	require.NoError(t, err)
-	assert.Empty(t, raw.StateFiles)
-	assert.Empty(t, raw.Transcripts)
+	assert.Empty(t, claudeOf(raw).StateFiles)
+	assert.Empty(t, claudeOf(raw).Transcripts)
 }
 
 func TestRunLocal_Errors(t *testing.T) {
@@ -976,13 +976,13 @@ func TestReconnect_DiscardsTheDialInFlight(t *testing.T) {
 // stateOutput is a complete collection whose state section holds the given
 // name and content pairs, with pid 5 running claude.
 func stateOutput(files ...string) []byte {
-	lines := []string{"::panemux-tasks v1", "::now 1000", "::section state"}
+	lines := []string{"::panemux-tasks v2", "::now 1000", "::section claude/state"}
 	for i := 0; i+1 < len(files); i += 2 {
 		lines = append(lines, "::file "+files[i], files[i+1])
 	}
 	lines = append(lines, "::section ps", "5 1 claude",
-		"::section tmux", "::section cwd", "::section transcripts", "::end")
-	return joinLines(lines...)
+		"::section tmux", "::section cwd", "::section claude/transcripts", "::end")
+	return fullOutput(lines...)
 }
 
 // An unreadable state file is reported on its host's result, and logged when

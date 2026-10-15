@@ -233,15 +233,15 @@ func TestLaunch_UnknownAgentRunsNothing(t *testing.T) {
 }
 
 func stoppedCodexOutput(stoppedID, cwd, runningID string) []byte {
-	return joinLines(
-		"::panemux-tasks v1",
+	return fullOutput(
+		"::panemux-tasks v2",
 		"::now 1000",
 		"::section ps",
 		"8 1 codex",
-		"::section codex-open",
+		"::section codex/open",
 		"8\t00:10\t995 10\tcompleted 990\t\t\t\t\t/h/.codex/sessions/2026/09/27/"+
 			rolloutName("2026-09-27T12-00-15", runningID),
-		"::section codex-rollouts",
+		"::section codex/rollouts",
 		"995\t10\t"+rolloutName("2026-09-27T12-00-15", runningID)+"\t\t"+`"originator":"codex-tui"`,
 		"990\t10\t"+rolloutName("2026-09-27T11-57-03", stoppedID)+"\t"+`"cwd":"`+cwd+`"`+"\t"+`"originator":"codex-tui"`,
 		"::end",

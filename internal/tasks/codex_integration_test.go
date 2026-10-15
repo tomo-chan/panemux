@@ -77,10 +77,10 @@ func TestBuildTasks_CodexLogSelection(t *testing.T) {
 	b.Size = 10
 	for _, running := range []bool{false, true} {
 		t.Run(strconv.FormatBool(running), func(t *testing.T) {
-			raw := rawSnapshot{Now: 1000, CodexRollouts: []codexRollout{a, b}}
+			raw := fixtureRaw{Now: 1000, CodexRollouts: []codexRollout{a, b}}.snapshot()
 			if running {
 				raw.Processes = []process{{PID: 10, Command: "codex"}}
-				raw.CodexOpen = []codexOpenRollout{
+				codexOf(raw).Open = []codexOpenRollout{
 					{PID: 10, File: a.File, Rollout: a}, {PID: 10, File: b.File, Rollout: b},
 				}
 			}

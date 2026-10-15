@@ -30,14 +30,14 @@ func openRollout(pid int, sessionID string, age int64, turn codexTurn) codexOpen
 }
 
 func codexRaw(open ...codexOpenRollout) rawSnapshot {
-	return rawSnapshot{
+	return fixtureRaw{
 		Now:         hostNow,
 		Processes:   []process{{PID: 30, PPID: 1, Command: "bash"}, codexProc(31)},
 		TmuxPanes:   []tmuxPane{{PanePID: 30, Session: "task-a5e25ebc"}},
 		ProcessCWDs: map[int]string{31: "/workspace/user/process-cwd"},
 		CodexAges:   map[int]int64{31: codexProcElapsed},
 		CodexOpen:   open,
-	}
+	}.snapshot()
 }
 
 func inProgressAt(startedAt int64) codexTurn {
@@ -196,13 +196,13 @@ func TestBuildTasks_CodexProcessWithTwoRolloutsIsInTheNewestOne(t *testing.T) {
 	newer := openRollout(31, codexSessionB, 20, codexTurn{DBStatus: "inProgress", DBStartedAt: hostNow - 20})
 	newer.File = rolloutName("2026-09-27T12-00-15", codexSessionB)
 	raw := codexRaw(newer, older)
-	raw.CodexRollouts = []codexRollout{
+	codexOf(raw).Rollouts = []codexRollout{
 		{SessionID: codexSessionB, Originator: "codex-tui", ModTime: hostNow - 20},
 		{SessionID: codexSessionA, Originator: "codex-tui", ModTime: hostNow - 300},
 	}
 
 	for _, order := range [][]codexOpenRollout{{newer, older}, {older, newer}} {
-		raw.CodexOpen = order
+		codexOf(raw).Open = order
 		tasks := buildTasks("", raw, collectedAt)
 		require.Len(t, tasks, 1, "the session switched away from is not listed as stopped: %+v", tasks)
 		assert.Equal(t, codexSessionB, tasks[0].SessionID)
@@ -252,7 +252,7 @@ func TestBuildTasks_CodexWithoutARolloutIsARunningProcess(t *testing.T) {
 func TestBuildTasks_RolloutsHeldByOtherCodexProcesses(t *testing.T) {
 	raw := codexRaw(openRollout(40, codexSessionA, 30, codexTurn{DBStatus: "inProgress"}))
 	raw.Processes = append(raw.Processes, process{PID: 40, PPID: 1, Command: "codex exec fix-it"})
-	raw.CodexRollouts = []codexRollout{{SessionID: codexSessionA, Originator: "codex-tui", ModTime: hostNow - 30}}
+	codexOf(raw).Rollouts = []codexRollout{{SessionID: codexSessionA, Originator: "codex-tui", ModTime: hostNow - 30}}
 	tasks := buildTasks("", raw, collectedAt)
 	require.Len(t, tasks, 1)
 	assert.Equal(t, "local:codex:pid-31", tasks[0].ID)
@@ -262,7 +262,7 @@ func TestBuildTasks_RolloutsHeldByOtherCodexProcesses(t *testing.T) {
 // the fd probe and ps) belongs to no task, and its session is stopped.
 func TestBuildTasks_RolloutOfAProcessThatIsGoneIsStopped(t *testing.T) {
 	raw := codexRaw(openRollout(99, codexSessionA, 30, codexTurn{DBStatus: "inProgress"}))
-	raw.CodexRollouts = []codexRollout{
+	codexOf(raw).Rollouts = []codexRollout{
 		{SessionID: codexSessionA, Originator: "codex-tui", CWD: "/workspace/user/api", ModTime: hostNow - 30},
 	}
 	tasks := buildTasks("", raw, collectedAt)
@@ -285,7 +285,7 @@ func TestBuildTasks_TwoProcessesInOneCodexSessionAreListedOnce(t *testing.T) {
 // TUI wrote its rollout itself or through codex's shared daemon: codex exec
 // and the desktop app write rollouts too.
 func TestBuildTasks_StoppedCodexSessions(t *testing.T) {
-	raw := rawSnapshot{
+	raw := fixtureRaw{
 		Now: hostNow,
 		CodexRollouts: []codexRollout{
 			{SessionID: codexSessionA, CWD: "/workspace/user/api", Originator: "codex-tui", ModTime: hostNow - 3600, Size: 9},
@@ -293,7 +293,7 @@ func TestBuildTasks_StoppedCodexSessions(t *testing.T) {
 			{SessionID: "01a0e2bd-ce26-7d81-a280-90c4de0d0046", Originator: "", ModTime: hostNow - 60},
 			{SessionID: codexSessionA, CWD: "/older", Originator: "codex-tui", ModTime: hostNow - 7200},
 		},
-	}
+	}.snapshot()
 	tasks := buildTasks("build-box", raw, collectedAt)
 	require.Len(t, tasks, 1)
 	task := tasks[0]
@@ -330,7 +330,7 @@ func TestBuildTasks_ASessionTheCodexDaemonHoldsIsATaskOfItsOwn(t *testing.T) {
 	other.Rollout.Originator = "Codex Desktop"
 	raw := codexRaw(held, other)
 	raw.Processes = append(raw.Processes, codexDaemon(50))
-	raw.CodexRollouts = []codexRollout{
+	codexOf(raw).Rollouts = []codexRollout{
 		{SessionID: codexSessionA, Originator: codexOriginatorTUI, ModTime: hostNow - 30},
 		{SessionID: codexSessionB, Originator: codexOriginatorTUI, ModTime: hostNow - 30},
 	}
@@ -390,10 +390,10 @@ func TestIsCodexDaemon(t *testing.T) {
 }
 
 func TestBuildTasks_StoppedClaudeAndCodexShareTheCap(t *testing.T) {
-	raw := rawSnapshot{Now: 10_000}
+	raw := fixtureRaw{Now: 10_000}.snapshot()
 	for i := 0; i < maxStoppedTasks; i++ {
-		raw.Transcripts = append(raw.Transcripts, transcript{ModTime: int64(2 * i), SessionID: fmt.Sprintf("c%03d", i)})
-		raw.CodexRollouts = append(raw.CodexRollouts, codexRollout{
+		claudeOf(raw).Transcripts = append(claudeOf(raw).Transcripts, transcript{ModTime: int64(2 * i), SessionID: fmt.Sprintf("c%03d", i)})
+		codexOf(raw).Rollouts = append(codexOf(raw).Rollouts, codexRollout{
 			SessionID: fmt.Sprintf("01a0e2b9-d054-7cc2-9278-%012d", i), Originator: "codex-tui", ModTime: int64(2*i + 1),
 		})
 	}

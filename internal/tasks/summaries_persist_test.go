@@ -372,7 +372,7 @@ func TestPersistedSummaries_AreKeptThirtyDaysAfterLastListed(t *testing.T) {
 	svc := f.start(t)
 	collectAndSummarize(svc)
 
-	f.host.set(joinLines("::panemux-tasks v1", "::now 1000", "::end"), nil)
+	f.host.set(fullOutput("::panemux-tasks v2", "::now 1000", "::end"), nil)
 	f.clock.advance(29 * 24 * time.Hour)
 	collectAndSummarize(svc)
 	assert.Len(t, f.stored(t), 1, "kept within 30 days")
@@ -381,7 +381,7 @@ func TestPersistedSummaries_AreKeptThirtyDaysAfterLastListed(t *testing.T) {
 	assert.Equal(t, "Fixing a race.", views["local:claude:s10"].Text, "a task listed again has its summary")
 	assert.Equal(t, 1, f.summarizer.calls())
 
-	f.host.set(joinLines("::panemux-tasks v1", "::now 1000", "::end"), nil)
+	f.host.set(fullOutput("::panemux-tasks v2", "::now 1000", "::end"), nil)
 	f.clock.advance(30*24*time.Hour + time.Second)
 	collectAndSummarize(svc)
 	assert.Empty(t, f.stored(t), "dropped 30 days after it was last listed")

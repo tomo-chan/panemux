@@ -51,7 +51,7 @@ func (h *summaryHost) fetchCount() int {
 // 10, session IDs "s<pid>") and a stopped session "stopped", each with a log
 // of the given size.
 func hostCollection(logSize int, statuses ...string) []byte {
-	ls := []string{"::panemux-tasks v1", "::now 1000", "::section state"}
+	ls := []string{"::panemux-tasks v2", "::now 1000", "::section claude/state"}
 	var ps, transcripts []string
 	for i, status := range statuses {
 		pid := strconv.Itoa(10 + i)
@@ -63,10 +63,10 @@ func hostCollection(logSize int, statuses ...string) []byte {
 	transcripts = append(transcripts, "900\tstopped.jsonl\t\t"+strconv.Itoa(logSize))
 	ls = append(ls, "::section ps")
 	ls = append(ls, ps...)
-	ls = append(ls, "::section tmux", "::section cwd", "::section transcripts")
+	ls = append(ls, "::section tmux", "::section cwd", "::section claude/transcripts")
 	ls = append(ls, transcripts...)
 	ls = append(ls, "::end")
-	return joinLines(ls...)
+	return fullOutput(ls...)
 }
 
 func conversationLog(texts ...string) []byte {
@@ -372,10 +372,10 @@ func TestRequestSummary_KeepsTheShownTextWhilePending(t *testing.T) {
 // ones) cannot be summarized.
 func TestRequestSummary_NeedsACollectedLog(t *testing.T) {
 	host := &summaryHost{}
-	host.set(joinLines(
-		"::panemux-tasks v1", "::now 1000", "::section state",
+	host.set(fullOutput(
+		"::panemux-tasks v2", "::now 1000", "::section claude/state",
 		"::file 10.json", `{"pid":10,"sessionId":"s10","status":"idle"}`,
-		"::section ps", "10 1 claude", "::section tmux", "::section cwd", "::section transcripts", "::end",
+		"::section ps", "10 1 claude", "::section tmux", "::section cwd", "::section claude/transcripts", "::end",
 	), conversationLog("a"))
 	summarizer := &fakeSummarizer{}
 	svc := newSummaryService(t, host, summarizer)
@@ -469,7 +469,7 @@ func TestSummaries_AreKeptWhileTheirTaskIsAway(t *testing.T) {
 	collectAndSummarize(svc)
 	assert.Equal(t, 1, summarizer.calls(), "a failed collection does not forget summaries")
 
-	host.set(joinLines("::panemux-tasks v1", "::now 1000", "::end"), nil)
+	host.set(fullOutput("::panemux-tasks v2", "::now 1000", "::end"), nil)
 	svc.Collect(context.Background())
 	host.set(hostCollection(100, "idle"), conversationLog("a"))
 	collectAndSummarize(svc)
@@ -579,7 +579,7 @@ func TestSummaries_ASummaryForATaskThatLeftIsKept(t *testing.T) {
 	svc.Summaries(snap.Tasks)
 	require.Eventually(t, func() bool { return summarizer.calls() == 1 }, 5*time.Second, 10*time.Millisecond)
 
-	host.set(joinLines("::panemux-tasks v1", "::now 1000", "::end"), nil)
+	host.set(fullOutput("::panemux-tasks v2", "::now 1000", "::end"), nil)
 	svc.Collect(context.Background())
 	close(summarizer.gate)
 	svc.waitSummaries()

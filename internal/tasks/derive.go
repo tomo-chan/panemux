@@ -3,8 +3,6 @@ package tasks
 import (
 	"regexp"
 	"sort"
-	"strconv"
-	"strings"
 	"time"
 
 	"panemux/internal/agent"
@@ -180,46 +178,45 @@ func buildTasks(host string, raw rawSnapshot, collectedAt time.Time) []Task {
 func buildTasksWithDiagnostics(host string, raw rawSnapshot, collectedAt time.Time) ([]Task, []UnreadableStateFile) {
 	b := newTaskBuilder(host, raw, collectedAt)
 	live := b.liveTasks()
-
-	liveSessions := map[string]map[string]bool{
-		AgentClaude: {},
-		AgentCodex:  b.heldCodexSessions(),
-	}
-	// A running claude task with no session id (its state file is unreadable
-	// or missing) is most likely writing the newest log in its directory;
-	// that log is its own, not a second, stopped task.
-	claimedLogs := map[string]int{}
-	for _, task := range live {
-		switch {
-		case task.Agent != AgentClaude:
-		case task.SessionID != "":
-			liveSessions[AgentClaude][task.SessionID] = true
-		case task.PID > 0 && task.CWD != "":
-			claimedLogs[task.CWD]++
+	tasks := b.withLogVersions(append(live, b.stoppedTasks(live)...))
+	var unreadable []UnreadableStateFile
+	for _, a := range b.agents {
+		if d, ok := a.collected.(stateDiagnostics); ok {
+			unreadable = append(unreadable, d.unreadableStateFiles(b)...)
 		}
 	}
-	return b.withLogVersions(append(live, b.stoppedTasks(liveSessions, claimedLogs)...)), b.unreadableStateFiles()
+	return tasks, unreadable
 }
 
 // buildLiveTasks is buildTasks without the stopped sessions and the log
 // versions: the running tasks alone, as the attention collection lists them.
 func buildLiveTasks(host string, raw rawSnapshot, collectedAt time.Time) []Task {
-	b := newTaskBuilder(host, raw, collectedAt)
-	return b.liveTasks()
+	return newTaskBuilder(host, raw, collectedAt).liveTasks()
+}
+
+// stateDiagnostics is an adapter part that reports the session files it
+// could not read.
+type stateDiagnostics interface {
+	unreadableStateFiles(b *taskBuilder) []UnreadableStateFile
+}
+
+type taskBuilder struct {
+	collectedAt time.Time
+	procs       map[int]process
+	panes       map[int]string
+	host        string
+	// agents are the adapters' prepared parts, in registration order. An
+	// adapter the output has no part for gets an empty one.
+	agents []builderAgent
+	raw    rawSnapshot
+}
+
+type builderAgent struct {
+	collected agentCollected
+	id        agent.ID
 }
 
 func newTaskBuilder(host string, raw rawSnapshot, collectedAt time.Time) *taskBuilder {
-	raw.CodexRollouts = append([]codexRollout(nil), raw.CodexRollouts...)
-	sort.SliceStable(raw.CodexRollouts, func(i, j int) bool {
-		return newerCodexRollout(raw.CodexRollouts[i], raw.CodexRollouts[j])
-	})
-	raw.CodexOpen = append([]codexOpenRollout(nil), raw.CodexOpen...)
-	for i := range raw.CodexOpen {
-		raw.CodexOpen[i].Rollout.File = raw.CodexOpen[i].File
-	}
-	sort.SliceStable(raw.CodexOpen, func(i, j int) bool {
-		return newerCodexRollout(raw.CodexOpen[i].Rollout, raw.CodexOpen[j].Rollout)
-	})
 	b := &taskBuilder{
 		host:        host,
 		raw:         raw,
@@ -230,222 +227,51 @@ func newTaskBuilder(host string, raw rawSnapshot, collectedAt time.Time) *taskBu
 	for _, p := range raw.Processes {
 		b.procs[p.PID] = p
 	}
-	for _, file := range raw.StateFiles {
-		b.states = append(b.states, readStateFile(file))
-	}
 	for _, p := range raw.TmuxPanes {
 		b.panes[p.PanePID] = p.Session
+	}
+	for _, r := range collectPlan.full.adapters {
+		collected, ok := raw.Agents[r.id]
+		if !ok {
+			collected = r.adapter.newCollected()
+		}
+		b.agents = append(b.agents, builderAgent{id: r.id, collected: collected.prepared()})
 	}
 	return b
 }
 
-// liveTasks are the running claude and codex tasks, ordered by ID.
+// liveTasks are every adapter's running tasks, ordered by ID.
 func (b *taskBuilder) liveTasks() []Task {
-	live := b.liveClaudeTasks()
-	live = append(live, b.unexplainedClaudeTasks(live)...)
-	live = append(live, b.codexTasks()...)
+	var live []Task
+	for _, a := range b.agents {
+		live = append(live, a.collected.liveTasks(b)...)
+	}
 	//mutation:exempt[CONDITIONALS_BOUNDARY] equivalent — ids are unique within a host, so no two compare equal
 	sort.Slice(live, func(i, j int) bool { return live[i].ID < live[j].ID })
 	return live
 }
 
-// withLogVersions supplies Claude transcript versions and stopped Codex rollout
-// versions; live Codex tasks already carry the exact open rollout they selected.
-func (b *taskBuilder) withLogVersions(tasks []Task) []Task {
-	newest := make(map[string]transcript, len(b.raw.Transcripts))
-	for _, tr := range b.raw.Transcripts {
-		if prev, ok := newest[tr.SessionID]; !ok || tr.ModTime > prev.ModTime {
-			newest[tr.SessionID] = tr
-		}
-	}
-	for i := range tasks {
-		if tasks[i].Agent == AgentCodex && tasks[i].Log == nil {
-			for _, r := range b.raw.CodexRollouts {
-				if r.SessionID == tasks[i].SessionID && r.Originator == codexOriginatorTUI {
-					tasks[i].Log = codexLogVersion(r)
-					break
-				}
+// stoppedTasks are the sessions no live task handles, newest first across
+// the agents and at most maxStoppedTasks of them together. Each adapter
+// narrows its own logs; among equal times the adapters' registration order,
+// and each adapter's own order, are kept.
+func (b *taskBuilder) stoppedTasks(live []Task) []Task {
+	var candidates []stoppedCandidate
+	for _, a := range b.agents {
+		var own []Task
+		for _, task := range live {
+			if task.Agent == string(a.id) {
+				own = append(own, task)
 			}
 		}
-		if tasks[i].Agent != AgentClaude || tasks[i].SessionID == "" {
-			continue
-		}
-		if tr, ok := newest[tasks[i].SessionID]; ok {
-			tasks[i].Log = &LogVersion{ModTime: tr.ModTime, Size: tr.Size}
-		}
+		candidates = append(candidates, a.collected.stoppedCandidates(b, own)...)
 	}
-	return tasks
-}
-
-type taskBuilder struct {
-	collectedAt time.Time
-	states      []readState
-	procs       map[int]process
-	panes       map[int]string
-	host        string
-	raw         rawSnapshot
-}
-
-func (b *taskBuilder) id(agent, key string) string {
-	return taskID(b.host, agent, key)
-}
-
-func (b *taskBuilder) liveClaudeTasks() []Task {
-	bySession := map[string]Task{}
-	sinceMillis := map[string]int64{}
-
-	for _, state := range b.states {
-		if state.reason != "" {
-			continue
-		}
-		st := state.st
-
-		if !b.isLiveClaude(st.PID) {
-			// A leftover file: its process exited, or its pid now belongs
-			// to something else. The session shows up as stopped through
-			// its transcript instead.
-			continue
-		}
-
-		since := firstNonZero(st.StatusUpdatedAt, st.UpdatedAt, st.StartedAt)
-		if prev, ok := sinceMillis[st.SessionID]; ok && prev >= since {
-			continue
-		}
-		sinceMillis[st.SessionID] = since
-
-		state := claudeStatusState(st.Status)
-		task := Task{
-			Host:        b.host,
-			ID:          b.id(AgentClaude, st.SessionID),
-			Agent:       AgentClaude,
-			SessionID:   st.SessionID,
-			CWD:         st.CWD,
-			State:       state,
-			PID:         st.PID,
-			StatusSince: b.hostMillis(since),
-			StartedAt:   b.hostMillis(st.StartedAt),
-			Location:    b.locate(st.PID),
-		}
-		if state == StateWait {
-			task.WaitingFor = st.WaitingFor
-			// statusUpdatedAt is when the status became waiting; updatedAt
-			// and startedAt are not, so they do not stand in for it.
-			task.WaitSignature = waitSignature(b.host, AgentClaude, st.SessionID, st.StatusUpdatedAt, st.WaitingFor)
-		}
-		bySession[st.SessionID] = task
+	sort.SliceStable(candidates, func(i, j int) bool { return candidates[i].modTime > candidates[j].modTime })
+	if len(candidates) > maxStoppedTasks {
+		candidates = candidates[:maxStoppedTasks]
 	}
-
-	tasks := make([]Task, 0, len(bySession))
-	for _, task := range bySession {
-		tasks = append(tasks, task)
-	}
-	return tasks
-}
-
-// unreadableStateFiles are the state files that could not be read, unless
-// the pid in the file's name (Claude Code names it <pid>.json) is no longer
-// a claude process, which makes the file a leftover. A file whose name
-// carries no pid cannot be checked and is kept.
-func (b *taskBuilder) unreadableStateFiles() []UnreadableStateFile {
-	var files []UnreadableStateFile
-	for _, state := range b.states {
-		if state.reason == "" {
-			continue
-		}
-		file := UnreadableStateFile{
-			name:   state.name,
-			File:   boundedText(state.name, maxUnreadableFileName),
-			Reason: state.reason,
-			Detail: boundedText(state.detail, maxUnreadableDetail),
-		}
-		if pid, ok := stateFilePID(state.name); ok {
-			if !b.isLiveClaude(pid) {
-				continue
-			}
-			loc := b.locate(pid)
-			file.PID, file.Location = pid, &loc
-		}
-		files = append(files, file)
-	}
-	//mutation:exempt[CONDITIONALS_BOUNDARY] equivalent — names in one directory are unique, so no two compare equal
-	sort.Slice(files, func(i, j int) bool { return files[i].name < files[j].name })
-	return files
-}
-
-// unexplainedClaudeTasks are running interactive claude processes that no
-// readable state file names, by its content or by its file name. Without
-// them, a Claude Code release that moved, stopped writing or changed
-// ~/.claude/sessions would show every running agent as stopped.
-func (b *taskBuilder) unexplainedClaudeTasks(known []Task) []Task {
-	explained := map[int]bool{}
-	for _, task := range known {
-		explained[task.PID] = true
-	}
-	for _, state := range b.states {
-		if state.reason != "" {
-			continue
-		}
-		explained[state.st.PID] = true
-		if pid, ok := stateFilePID(state.name); ok {
-			explained[pid] = true
-		}
-	}
-
-	var tasks []Task
-	for _, p := range b.raw.Processes {
-		if explained[p.PID] || !isInteractiveClaude(p.Command) {
-			continue
-		}
-		tasks = append(tasks, Task{
-			Host:     b.host,
-			ID:       b.id(AgentClaude, "pid-"+strconv.Itoa(p.PID)),
-			Agent:    AgentClaude,
-			CWD:      b.raw.ProcessCWDs[p.PID],
-			State:    StateUnknown,
-			PID:      p.PID,
-			Location: b.locate(p.PID),
-		})
-	}
-	return tasks
-}
-
-func (b *taskBuilder) isLiveClaude(pid int) bool {
-	proc, alive := b.procs[pid]
-	return alive && isClaudeProcess(proc.Command)
-}
-
-// stateFilePID reads the pid out of a state file named <pid>.json.
-func stateFilePID(name string) (int, bool) {
-	digits, ok := strings.CutSuffix(name, ".json")
-	if !ok {
-		return 0, false
-	}
-	pid, err := strconv.Atoi(digits)
-	if err != nil || pid <= 0 {
-		return 0, false
-	}
-	return pid, true
-}
-
-// stoppedTasks are the claude and codex sessions no live process handles,
-// newest first and at most maxStoppedTasks of them for the two agents
-// together. liveSessions holds, per agent, the sessions a live process
-// handles; for codex that is every session a codex process holds open.
-func (b *taskBuilder) stoppedTasks(liveSessions map[string]map[string]bool, claimedLogs map[string]int) []Task {
-	seen := map[string]map[string]bool{AgentClaude: {}, AgentCodex: {}}
-	var tasks []Task
-	for _, c := range b.stoppedCandidates() {
-		if len(tasks) >= maxStoppedTasks {
-			break
-		}
-		if liveSessions[c.agent][c.sessionID] || seen[c.agent][c.sessionID] {
-			continue
-		}
-		seen[c.agent][c.sessionID] = true
-		if c.agent == AgentClaude && claimedLogs[c.cwd] > 0 {
-			claimedLogs[c.cwd]--
-			continue
-		}
+	tasks := make([]Task, 0, len(candidates))
+	for _, c := range candidates {
 		tasks = append(tasks, Task{
 			Host:        b.host,
 			ID:          b.id(c.agent, c.sessionID),
@@ -458,6 +284,35 @@ func (b *taskBuilder) stoppedTasks(liveSessions map[string]map[string]bool, clai
 		})
 	}
 	return tasks
+}
+
+// stoppedCandidate is a conversation log that may be listed as a stopped
+// task.
+type stoppedCandidate struct {
+	agent, sessionID, cwd string
+	modTime               int64
+}
+
+// withLogVersions lets each task's adapter supply the version of its log.
+func (b *taskBuilder) withLogVersions(tasks []Task) []Task {
+	for i := range tasks {
+		for _, a := range b.agents {
+			if tasks[i].Agent == string(a.id) {
+				a.collected.addLogVersion(&tasks[i])
+			}
+		}
+	}
+	return tasks
+}
+
+// Key is the task's session key; it is not Valid while the session ID is
+// unknown.
+func (t Task) Key() agent.SessionKey {
+	return agent.SessionKey{Host: t.Host, Agent: agent.ID(t.Agent), SessionID: t.SessionID}
+}
+
+func (b *taskBuilder) id(agent, key string) string {
+	return taskID(b.host, agent, key)
 }
 
 // locate walks from pid up its parents until one is a tmux pane's process.
@@ -501,26 +356,6 @@ func (b *taskBuilder) hostMillis(millis int64) *time.Time {
 	}
 	t := b.collectedAt.Add(-age)
 	return &t
-}
-
-// The statuses a Claude Code state file reports.
-const (
-	claudeStatusBusy    = "busy"
-	claudeStatusWaiting = "waiting"
-	claudeStatusIdle    = "idle"
-)
-
-func claudeStatusState(status string) State {
-	switch status {
-	case claudeStatusBusy:
-		return StateBusy
-	case claudeStatusWaiting:
-		return StateWait
-	case claudeStatusIdle:
-		return StateIdle
-	default:
-		return StateUnknown
-	}
 }
 
 func firstNonZero(values ...int64) int64 {

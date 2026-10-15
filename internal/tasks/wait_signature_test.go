@@ -18,11 +18,11 @@ func claudeWaitRaw(sessionID, status, waitingFor string, statusUpdatedAt int64) 
 	if statusUpdatedAt != 0 {
 		file += fmt.Sprintf(`,"statusUpdatedAt":%d`, statusUpdatedAt)
 	}
-	return rawSnapshot{
+	return fixtureRaw{
 		Now:        hostNow,
 		StateFiles: []stateFile{{Name: "41.json", Data: []byte(file + "}")}},
 		Processes:  []process{claudeProc(41, 1)},
-	}
+	}.snapshot()
 }
 
 func claudeSignature(t *testing.T, host string, raw rawSnapshot, at time.Time) string {
@@ -87,11 +87,11 @@ func TestBuildTasks_ClaudeWaitSignatureNeedsAWaitStart(t *testing.T) {
 
 // An unreadable state file is unknown, never a signed wait.
 func TestBuildTasks_UnreadableStateFileHasNoWaitSignature(t *testing.T) {
-	raw := rawSnapshot{
+	raw := fixtureRaw{
 		Now:        hostNow,
 		StateFiles: []stateFile{{Name: "41.json", Data: []byte(`{"pid":41,"status":claudeStatusWaiting,"statusUpdatedAt`)}},
 		Processes:  []process{claudeProc(41, 1)},
-	}
+	}.snapshot()
 	task := buildTasks("", raw, collectedAt)[0]
 	assert.Equal(t, StateUnknown, task.State)
 	assert.Empty(t, task.WaitSignature)

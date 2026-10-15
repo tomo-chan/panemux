@@ -13,10 +13,10 @@ func joinLines(lines ...string) []byte {
 }
 
 func TestParseCollectOutput_ReadsEverySection(t *testing.T) {
-	out := joinLines(
-		"::panemux-tasks v1",
+	out := fullOutput(
+		"::panemux-tasks v2",
 		"::now 1790346631",
-		"::section state",
+		"::section claude/state",
 		"::file 121.json",
 		`{"pid":121,"sessionId":"5d0b91c2","cwd":"/workspace/user/project","status":"busy"}`,
 		"",
@@ -35,21 +35,21 @@ func TestParseCollectOutput_ReadsEverySection(t *testing.T) {
 		"300 /workspace/user/sample api",
 		"::section env",
 		"121 pane-1790346631000-a1b2c",
-		"::section transcripts",
+		"::section claude/transcripts",
 		"1790346000\t5d0b91c2.jsonl\t\"cwd\":\"/workspace/user/project\"\t2048",
 		"1790340000\told-session.jsonl\t\t17",
 		"::end",
 	)
 
-	raw, err := parseCollectOutput(out)
+	raw, err := parseCollectOutput(out, collectPlan.full)
 	require.NoError(t, err)
 
 	assert.Equal(t, int64(1790346631), raw.Now)
-	require.Len(t, raw.StateFiles, 2)
-	assert.Equal(t, "121.json", raw.StateFiles[0].Name)
+	require.Len(t, claudeOf(raw).StateFiles, 2)
+	assert.Equal(t, "121.json", claudeOf(raw).StateFiles[0].Name)
 	assert.JSONEq(t, `{"pid":121,"sessionId":"5d0b91c2","cwd":"/workspace/user/project","status":"busy"}`,
-		string(raw.StateFiles[0].Data))
-	assert.JSONEq(t, `{"pid":200}`, string(raw.StateFiles[1].Data), "a multi-line file is kept whole")
+		string(claudeOf(raw).StateFiles[0].Data))
+	assert.JSONEq(t, `{"pid":200}`, string(claudeOf(raw).StateFiles[1].Data), "a multi-line file is kept whole")
 	assert.Equal(t, []process{
 		{PID: 1, PPID: 0, Command: "/sbin/init"},
 		{PID: 121, PPID: 89, Command: "/usr/local/bin/claude --verbose"},
@@ -63,50 +63,50 @@ func TestParseCollectOutput_ReadsEverySection(t *testing.T) {
 	assert.Equal(t, []transcript{
 		{ModTime: 1790346000, SessionID: "5d0b91c2", CWD: "/workspace/user/project", Size: 2048},
 		{ModTime: 1790340000, SessionID: "old-session", CWD: "", Size: 17},
-	}, raw.Transcripts)
+	}, claudeOf(raw).Transcripts)
 }
 
 func TestParseCollectOutput_BlankLinesBetweenStateFilesAreIgnored(t *testing.T) {
-	raw, err := parseCollectOutput(joinLines(
-		"::panemux-tasks v1",
+	raw, err := parseCollectOutput(fullOutput(
+		"::panemux-tasks v2",
 		"::now 5",
-		"::section state",
+		"::section claude/state",
 		"",
 		"::file 1.json",
 		`{"pid":1}`,
 		"",
 		"::end",
-	))
+	), collectPlan.full)
 	require.NoError(t, err)
-	require.Len(t, raw.StateFiles, 1)
-	assert.JSONEq(t, `{"pid":1}`, string(raw.StateFiles[0].Data))
+	require.Len(t, claudeOf(raw).StateFiles, 1)
+	assert.JSONEq(t, `{"pid":1}`, string(claudeOf(raw).StateFiles[0].Data))
 }
 
 func TestParseCollectOutput_EmptySectionsAreFine(t *testing.T) {
-	raw, err := parseCollectOutput(joinLines(
-		"::panemux-tasks v1",
+	raw, err := parseCollectOutput(fullOutput(
+		"::panemux-tasks v2",
 		"::now 5",
-		"::section state",
+		"::section claude/state",
 		"::section ps",
 		"::section tmux",
 		"::section cwd",
 		"::section env",
-		"::section transcripts",
+		"::section claude/transcripts",
 		"::end",
-	))
+	), collectPlan.full)
 	require.NoError(t, err)
 	assert.Equal(t, int64(5), raw.Now)
 	assert.Empty(t, raw.PaneIDs)
-	assert.Empty(t, raw.StateFiles)
+	assert.Empty(t, claudeOf(raw).StateFiles)
 	assert.Empty(t, raw.Processes)
 	assert.Empty(t, raw.TmuxPanes)
 	assert.Empty(t, raw.ProcessCWDs)
-	assert.Empty(t, raw.Transcripts)
+	assert.Empty(t, claudeOf(raw).Transcripts)
 }
 
 func TestParseCollectOutput_SkipsMalformedRows(t *testing.T) {
-	raw, err := parseCollectOutput(joinLines(
-		"::panemux-tasks v1",
+	raw, err := parseCollectOutput(fullOutput(
+		"::panemux-tasks v2",
 		"::now 5",
 		"::section ps",
 		"not-a-pid 1 cmd",
@@ -128,7 +128,7 @@ func TestParseCollectOutput_SkipsMalformedRows(t *testing.T) {
 		"19",
 		"0 pane-0",
 		"20 pane-ok",
-		"::section transcripts",
+		"::section claude/transcripts",
 		"no tab at all",
 		"bad\tname.jsonl\t",
 		"1\tno-suffix\t",
@@ -139,7 +139,7 @@ func TestParseCollectOutput_SkipsMalformedRows(t *testing.T) {
 		"6\tbad-size.jsonl\t\"cwd\":\"/s\"\tlots",
 		"7\tnegative-size.jsonl\t\t-1",
 		"::end",
-	))
+	), collectPlan.full)
 	require.NoError(t, err)
 	assert.Equal(t, []process{{PID: 14, PPID: 1, Command: "ok"}}, raw.Processes)
 	assert.Equal(t, []tmuxPane{{PanePID: 16, Session: "good"}}, raw.TmuxPanes)
@@ -152,29 +152,29 @@ func TestParseCollectOutput_SkipsMalformedRows(t *testing.T) {
 		// A size that is not a count is unknown (0); the session is still listed.
 		{ModTime: 6, SessionID: "bad-size", CWD: "/s"},
 		{ModTime: 7, SessionID: "negative-size"},
-	}, raw.Transcripts)
+	}, claudeOf(raw).Transcripts)
 }
 
 func TestParseCollectOutput_RejectsIncompleteOutput(t *testing.T) {
 	cases := map[string][]byte{
 		"empty":             nil,
-		"no header":         joinLines("::now 5", "::end"),
-		"wrong version":     joinLines("::panemux-tasks v2", "::now 5", "::end"),
-		"truncated":         joinLines("::panemux-tasks v1", "::now 5", "::section ps", "1 0 init"),
-		"missing clock":     joinLines("::panemux-tasks v1", "::end"),
-		"unparseable clock": joinLines("::panemux-tasks v1", "::now soon", "::end"),
-		"unknown section":   joinLines("::panemux-tasks v1", "::now 5", "::section other", "::end"),
-		"file outside state": joinLines(
-			"::panemux-tasks v1", "::now 5", "::section ps", "::file 1.json", "::end"),
-		"unknown directive": joinLines("::panemux-tasks v1", "::now 5", "::what", "::end"),
-		"row before section": joinLines(
-			"::panemux-tasks v1", "::now 5", "1 0 init", "::end"),
-		"state row before file": joinLines(
-			"::panemux-tasks v1", "::now 5", "::section state", "{}", "::end"),
+		"no header":         fullOutput("::now 5", "::end"),
+		"wrong version":     fullOutput("::panemux-tasks v3", "::now 5", "::end"),
+		"truncated":         joinLines("::panemux-tasks v2", "::now 5", "::section ps", "1 0 init"),
+		"missing clock":     fullOutput("::panemux-tasks v2", "::end"),
+		"unparseable clock": fullOutput("::panemux-tasks v2", "::now soon", "::end"),
+		"unknown section":   fullOutput("::panemux-tasks v2", "::now 5", "::section other", "::end"),
+		"file outside state": fullOutput(
+			"::panemux-tasks v2", "::now 5", "::section ps", "::file 1.json", "::end"),
+		"unknown directive": fullOutput("::panemux-tasks v2", "::now 5", "::what", "::end"),
+		"row before section": fullOutput(
+			"::panemux-tasks v2", "::now 5", "1 0 init", "::end"),
+		"state row before file": fullOutput(
+			"::panemux-tasks v2", "::now 5", "::section claude/state", "{}", "::end"),
 	}
 	for name, out := range cases {
 		t.Run(name, func(t *testing.T) {
-			_, err := parseCollectOutput(out)
+			_, err := parseCollectOutput(out, collectPlan.full)
 			assert.Error(t, err)
 		})
 	}
@@ -184,20 +184,20 @@ func TestParseCollectOutput_RejectsIncompleteOutput(t *testing.T) {
 // sources ~/.bashrc even for a non-interactive ssh command, and a greeting
 // there lands on stdout ahead of the header.
 func TestParseCollectOutput_SkipsTextBeforeTheHeader(t *testing.T) {
-	raw, err := parseCollectOutput(joinLines(
+	raw, err := parseCollectOutput(fullOutput(
 		"Welcome to the build host",
 		"::now 1",
-		"::panemux-tasks v1",
+		"::panemux-tasks v2",
 		"::now 9",
 		"::end",
-	))
+	), collectPlan.full)
 	require.NoError(t, err)
 	assert.Equal(t, int64(9), raw.Now)
 }
 
 func TestParseCollectOutput_IgnoresCarriageReturnsAndTrailingText(t *testing.T) {
-	raw, err := parseCollectOutput([]byte(
-		"::panemux-tasks v1\r\n::now 7\r\n::section ps\r\n1 0 init\r\n::end\r\nignored after end\n"))
+	out := strings.ReplaceAll(string(fullOutput("::panemux-tasks v2", "::now 7", "::section ps", "1 0 init", "::end")), "\n", "\r\n")
+	raw, err := parseCollectOutput([]byte(out+"ignored after end\n"), collectPlan.full)
 	require.NoError(t, err)
 	assert.Equal(t, int64(7), raw.Now)
 	assert.Equal(t, []process{{PID: 1, PPID: 0, Command: "init"}}, raw.Processes)
@@ -221,8 +221,8 @@ func TestParseCollectOutput_KeepsOnlyPaneIDsOfTheShapeAPaneIsGiven(t *testing.T)
 	}
 	for value, keep := range cases {
 		t.Run(value, func(t *testing.T) {
-			raw, err := parseCollectOutput(joinLines(
-				"::panemux-tasks v1", "::now 5", "::section env", "42 "+value, "::end"))
+			raw, err := parseCollectOutput(fullOutput(
+				"::panemux-tasks v2", "::now 5", "::section env", "42 "+value, "::end"), collectPlan.full)
 			require.NoError(t, err)
 			if keep {
 				assert.Equal(t, map[int]string{42: value}, raw.PaneIDs)
