@@ -89,15 +89,18 @@ func TestCodexPermissionHook_IgnoresInputWithoutASessionOrTurn(t *testing.T) {
 	}
 }
 
-// What the hook wrote is what the live collection reads; a record older
-// than 7 days is not read.
+// What the hook wrote is what the live collection reads. The hook removes
+// records older than 7 days when it writes, so the collection reads them all
+// with one process.
 func TestRunLocal_CollectScriptReadsCodexPermissionRecords(t *testing.T) {
 	home := t.TempDir()
 	homedir.SetForTest(t, home)
-	runPermissionHook(t, home, permissionHookInput(codexSessionA, codexTurnA))
 	runPermissionHook(t, home, permissionHookInput(codexSessionB, codexTurnB))
 	old := time.Now().Add(-8 * 24 * time.Hour)
 	require.NoError(t, os.Chtimes(permissionRecordPath(home, codexSessionB), old, old))
+	runPermissionHook(t, home, permissionHookInput(codexSessionA, codexTurnA))
+	_, err := os.Stat(permissionRecordPath(home, codexSessionB))
+	assert.True(t, os.IsNotExist(err), "the 8-day-old record is removed")
 
 	out, err := runLocal(context.Background(), attentionScript)
 	require.NoError(t, err)
@@ -165,6 +168,14 @@ func TestBuildTasks_CodexWaitsOnAPermissionRequestOfItsTurn(t *testing.T) {
 	assert.NotEqual(t, task.WaitSignature, buildTasks("", permissionRaw(inTurnA, later), collectedAt)[0].WaitSignature,
 		"a later request in the same turn is a new wait")
 
+	// A turn whose task_started is out of the rollout's tail has no ID: a
+	// record made since the turn started is taken as the turn's.
+	noID := codexTurn{DBStatus: "inProgress", DBStartedAt: hostNow - 120}
+	assert.Equal(t, StateWait, buildTasks("", permissionRaw(noID, record), collectedAt)[0].State)
+	noID.DBStartedAt = hostNow - 40
+	assert.Equal(t, StateWait, buildTasks("", permissionRaw(noID, record), collectedAt)[0].State,
+		"a record made in the second the turn started")
+
 	inTurnB := inTurnA
 	inTurnB.TurnID = codexTurnB
 	finished := codexTurn{DBStatus: "completed", Event: "task_complete", EventAt: (hostNow - 10) * 1000}
@@ -181,8 +192,12 @@ func TestBuildTasks_CodexWaitsOnAPermissionRequestOfItsTurn(t *testing.T) {
 		"another session": {
 			turn: inTurnA, records: map[string]codexPermission{codexSessionB: record[codexSessionA]}, want: StateBusy,
 		},
-		"a turn with no ID": {
-			turn: codexTurn{DBStatus: "inProgress", DBStartedAt: hostNow - 120}, records: record, want: StateBusy,
+		"a turn with neither ID nor start": {
+			turn: codexTurn{DBStatus: "inProgress"}, records: record, want: StateBusy,
+		},
+		"a turn with no ID, and a record from before it started": {
+			turn:    codexTurn{DBStatus: "inProgress", DBStartedAt: hostNow - 30},
+			records: record, want: StateBusy,
 		},
 	} {
 		t.Run(name, func(t *testing.T) {

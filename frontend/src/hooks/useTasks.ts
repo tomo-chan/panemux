@@ -72,6 +72,12 @@ export interface TasksState {
    */
   inputGiven: (task: Task) => Promise<string | null>
   /**
+   * The wait signatures marked Input given in this tab, which the live task
+   * events must not show as waits again before the stream publishes the
+   * change.
+   */
+  inputGivenWaits?: ReadonlySet<string>
+  /**
    * Opens the board's temporary tmux client on a task's running tmux session
    * (issue #283), for the Type in pane popup (issue #284). Collects nothing:
    * attaching changes no task.
@@ -273,18 +279,21 @@ export function useTasks(enabled: boolean): TasksState {
     return null
   }, [])
 
+  const [inputGivenWaits, setInputGivenWaits] = useState<ReadonlySet<string>>(() => new Set())
   const inputGiven = useCallback(async (task: Task) => {
-    if (!task.wait_signature) return 'This task is not waiting'
+    const signature = task.wait_signature
+    if (!signature) return 'This task is not waiting'
     try {
       const res = await fetch('/api/tasks/input-given', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ wait_signature: task.wait_signature }),
+        body: JSON.stringify({ wait_signature: signature }),
       })
       if (!res.ok) return (await res.text()).trim() || `HTTP ${res.status}`
     } catch (err) {
       return err instanceof Error ? err.message : 'Failed to mark the input given'
     }
+    setInputGivenWaits((current) => new Set(current).add(signature))
     await refreshAfterAction()
     return null
   }, [refreshAfterAction])
@@ -352,6 +361,7 @@ export function useTasks(enabled: boolean): TasksState {
     resume,
     requestSummary,
     inputGiven,
+    inputGivenWaits,
     attach,
     detach,
     hostSessionName,

@@ -3,7 +3,8 @@
 # that the session's turn asked for an approval, for the task dashboard to
 # show the session as waiting. It keeps the session ID, the turn ID and the
 # time, nothing of the command or the conversation, answers nothing (codex
-# decides as it would without the hook), and always exits 0.
+# decides as it would without the hook), and always exits 0. Records older
+# than 7 days are removed as it writes.
 #
 # Register it in ~/.codex/hooks.json; see docs/behavior/tasks.md.
 in=$(cat)
@@ -18,5 +19,6 @@ if [ -n "$sid" ] && [ -n "$tid" ]; then
 	mkdir -p "$dir" &&
 		printf '%s %s %s\n' "$sid" "$tid" "$(date +%s)" >"$dir/.$sid.$$" &&
 		mv -f "$dir/.$sid.$$" "$dir/$sid"
+	find "$dir" -type f -mtime +7 -exec rm -f {} +
 fi >/dev/null 2>&1
 exit 0

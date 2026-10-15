@@ -794,6 +794,7 @@ describe('useTasks inputGiven', () => {
     })
 
     expect(failure).toBeNull()
+    expect(result.current.inputGivenWaits).toEqual(new Set(['w1-abc']))
     expect(fetchMock.mock.calls[0]).toEqual(['/api/tasks/input-given', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -825,6 +826,7 @@ describe('useTasks inputGiven', () => {
     })
 
     expect(outcomes).toEqual(['no wait signature', 'This task is not waiting', 'offline', 'HTTP 500'])
+    expect(result.current.inputGivenWaits).toEqual(new Set())
     expect(fetchMock).toHaveBeenCalledTimes(3)
   })
 })

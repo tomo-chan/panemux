@@ -84,8 +84,9 @@ import (
 // The codex-permission rows are the records codex_permission_hook.sh, a
 // PermissionRequest hook the user registers, writes under
 // ~/.local/state/panemux/codex-permission/ (issue #384): one file per
-// session, the session's latest request. Records older than 7 days are not
-// read; a host without the hook has none.
+// session, the session's latest request, one line each. The hook removes
+// records older than 7 days, so they are read with a single cat; a host
+// without the hook has none.
 const collectScript = collectLiveScript + collectStoppedScript + collectEnd
 
 // attentionScript is collectScript without collectStoppedScript: what the
@@ -188,12 +189,7 @@ while read -r pid et; do
 	done
 done
 echo '::section codex-permission'
-now=$(date +%s)
-for f in "$HOME"/.local/state/panemux/codex-permission/*; do
-	[ -f "$f" ] || continue
-	t=$(mtime "$f" 2>/dev/null) || continue
-	[ $((now - ${t%% *})) -lt 604800 ] && head -n 1 "$f" 2>/dev/null
-done
+cat "$HOME"/.local/state/panemux/codex-permission/* 2>/dev/null
 `
 
 // collectStoppedScript lists the conversation logs and rollouts the stopped

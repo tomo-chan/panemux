@@ -256,6 +256,12 @@ describe('overlayTaskEvents', () => {
     labels: ['x'],
   }
 
+  it('keeps the collected task over a wait marked Input given', () => {
+    const live = new Map([['a', waiting('a', 'w1-a')]])
+    expect(overlayTaskEvents([collected], live, new Set(['w1-a']))).toEqual([collected])
+    expect(overlayTaskEvents([collected], live, new Set(['w1-b']))[0].state).toBe('wait')
+  })
+
   it('takes the state, waiting_for, wait and status_since from the stream', () => {
     const live = new Map([['a', waiting('a', 'w1-a', { status_since: '2026-10-02T10:00:00Z' })]])
     const [task] = overlayTaskEvents([collected], live)

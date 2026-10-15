@@ -433,7 +433,7 @@ func (b *taskBuilder) codexState(task *Task, o codexOpenRollout) {
 		// The question's own time, which a second question in the same
 		// turn does not share; the rollout's mtime moves with every write.
 		task.WaitSignature = waitSignature(b.host, AgentCodex, task.SessionID, o.Turn.LastItemAt, codexToolAskUser)
-	case inProgress && o.Turn.TurnID != "" && b.raw.CodexPermissions[task.SessionID].TurnID == o.Turn.TurnID:
+	case inProgress && codexPermissionOfTurn(b.raw.CodexPermissions[task.SessionID], o.Turn.TurnID, startedMillis):
 		at := b.raw.CodexPermissions[task.SessionID].At
 		task.State, task.StatusSince = StateWait, b.hostMillis(at)
 		task.WaitingFor = codexWaitingForPermission
@@ -445,6 +445,16 @@ func (b *taskBuilder) codexState(task *Task, o codexOpenRollout) {
 	default:
 		task.State = StateUnknown
 	}
+}
+
+// codexPermissionOfTurn reports whether record is a request of the turn in
+// progress: by its ID, or, when the turn's task_started is out of the
+// rollout's tail and the ID unknown, by being made since the turn started.
+func codexPermissionOfTurn(record codexPermission, turnID string, startedMillis int64) bool {
+	if turnID != "" {
+		return record.TurnID == turnID
+	}
+	return startedMillis > 0 && record.At >= startedMillis
 }
 
 // codexPermissionSignature is the wait signature of a session's approval
