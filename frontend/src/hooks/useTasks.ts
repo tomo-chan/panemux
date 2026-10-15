@@ -67,6 +67,11 @@ export interface TasksState {
    */
   requestSummary: (task: Task) => Promise<string | null>
   /**
+   * Marks the codex permission request a task waits on as answered (issue
+   * #384), then collects again. Resolves to why it failed, or null.
+   */
+  inputGiven: (task: Task) => Promise<string | null>
+  /**
    * Opens the board's temporary tmux client on a task's running tmux session
    * (issue #283), for the Type in pane popup (issue #284). Collects nothing:
    * attaching changes no task.
@@ -268,6 +273,22 @@ export function useTasks(enabled: boolean): TasksState {
     return null
   }, [])
 
+  const inputGiven = useCallback(async (task: Task) => {
+    if (!task.wait_signature) return 'This task is not waiting'
+    try {
+      const res = await fetch('/api/tasks/input-given', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wait_signature: task.wait_signature }),
+      })
+      if (!res.ok) return (await res.text()).trim() || `HTTP ${res.status}`
+    } catch (err) {
+      return err instanceof Error ? err.message : 'Failed to mark the input given'
+    }
+    await refreshAfterAction()
+    return null
+  }, [refreshAfterAction])
+
   const attach = useCallback(
     (task: Task) => postTaskAction('/api/tasks/attach', { id: task.id }, TaskAttachSchema),
     [],
@@ -330,6 +351,7 @@ export function useTasks(enabled: boolean): TasksState {
     launch,
     resume,
     requestSummary,
+    inputGiven,
     attach,
     detach,
     hostSessionName,

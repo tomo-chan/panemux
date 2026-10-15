@@ -217,7 +217,9 @@ gets another.
 - **Claude Code**: the state file's `statusUpdatedAt` (positive) and `waitingFor`. `updatedAt` and
   `startedAt` do not stand in for a missing `statusUpdatedAt`.
 - **codex**: the `timestamp` the last `request_user_input` `response_item` line starts with, so a
-  second question in the same turn is a new wait.
+  second question in the same turn is a new wait; for a permission request, the time the hook
+  recorded it ([Codex permission requests](#codex-permission-requests)), so the next request in the
+  same turn is a new wait.
 - It never comes from panemux's clock, the collection time, the clock conversion, a rollout's
   modification time or a turn's start alone. A `wait` task without a valid wait start has no
   signature; one is never made up. Unknown or unreadable state is `unknown` or `run` as above, never a
@@ -249,14 +251,17 @@ does write:
   | Newest turn | State | Since |
   |---|---|---|
   | `inProgress` / `task_started`, and the last `response_item` is a `request_user_input` call | `wait`, waiting for "a question from codex" | The rollout's last write |
+  | `inProgress` / `task_started`, and the hook recorded a permission request of this turn that is not marked answered | `wait`, waiting for "a permission request from codex" | The record's time |
   | `inProgress` / `task_started`, otherwise | `busy` | The turn's start |
   | `completed`, `interrupted`, `failed` / `task_complete`, `turn_aborted` | `idle` | The rollout's last write |
   | Nothing, or a `thread_turns` status this build does not know and no turn event | `unknown` | — |
 
-- **Waiting for approval shows as `busy`.** Codex records nothing when it asks to run a command: the
-  turn is in progress and the last item is the command's call, exactly as while the command runs.
-  `request_user_input` — codex's question to the person, offered only in Plan mode — is told apart,
-  because its call stays the last item until it is answered.
+- **Waiting for approval shows as `busy` unless the permission hook is registered.** Codex's own
+  files record nothing when it asks to run a command: the turn is in progress and the last item is
+  the command's call, exactly as while the command runs. With the hook registered, the request is
+  `wait` ([Codex permission requests](#codex-permission-requests)). `request_user_input` — codex's
+  question to the person, offered only in Plan mode — is told apart without it, because its call
+  stays the last item until it is answered.
 - **A turn that started before its process is a leftover, and the session is `idle`.** A codex
   killed mid-turn leaves that turn `inProgress` (and its rollout ending in `task_started`) for good,
   and resuming the session writes no new turn until it is given an instruction. A turn that started
@@ -288,6 +293,41 @@ does write:
   filter, so a host where `codex exec` writes many rollouts does not push the TUI's out. Its working
   directory is that line's `cwd`, and the time it stopped is the rollout's modification time.
 - Codex tasks with a collected rollout can be summarized by Codex ([Summaries](#summaries)).
+
+### Codex permission requests
+
+A codex `PermissionRequest` command hook (`internal/tasks/codex_permission_hook.sh`, a POSIX `sh`
+script) records each approval request, so the session shows as `wait` and the
+[input-wait notification](task-events.md) fires. It is registered by hand, on the panemux host only
+for now: copy the script somewhere of the user's, make it executable, add it to `~/.codex/hooks.json`,
+and trust it in codex's `/hooks` review:
+
+```json
+{
+  "hooks": {
+    "PermissionRequest": [
+      { "hooks": [{ "type": "command", "command": "/workspace/user/bin/codex_permission_hook.sh", "timeout": 1 }] }
+    ]
+  }
+}
+```
+
+- **What the hook writes.** It reads the hook's JSON on stdin and keeps only `session_id`, `turn_id`
+  (hex digits and dashes) and the time, as `<session ID> <turn ID> <unix seconds>` in
+  `~/.local/state/panemux/codex-permission/<session ID>` — one file per session, replaced by the next
+  request. Nothing of the command or the conversation is kept. It prints nothing and exits 0, so codex
+  decides as it would without it.
+- **What the collection reads.** The live collection reads those files modified in the last 7 days.
+  A session waits when its newest turn is in progress, the rollout's `task_started` for that turn
+  carries the record's turn ID, and the record is not marked answered. A turn that has ended, or any
+  other turn, ignores the record: the wait clears by itself when the turn is over.
+- **`Input given`.** The detail panel of such a task offers `Input given`, which
+  [`POST /api/tasks/input-given`](#post-apitasksinput-given) sends. panemux keeps the answered
+  requests in memory only; the next request in the same turn waits again.
+- **Known limits.** Codex runs the hook before it approves a request on its own too, so a request
+  that needed no person can show as a wait until its turn ends or `Input given` is pressed. Codex
+  records nothing when the person answers in the pane, so the wait stays until one of those.
+  Without the hook nothing changes.
 
 ### Where a task runs
 
@@ -1074,6 +1114,21 @@ Asks for one task's summary:
   for a session the host's last collection did not list with a log (an unknown host included), `409`
   when summaries are disabled, `503` while panemux is shutting down, and `403` for a cross-site
   request as for `GET /api/tasks`.
+
+### `POST /api/tasks/input-given`
+
+Marks the codex permission request a task waits on as answered ([Codex permission
+requests](#codex-permission-requests)):
+
+```json
+{ "wait_signature": "w1-<hex>" }
+```
+
+- `wait_signature` is the task's from `GET /api/tasks`. From the next collection that task is shown as
+  its turn reads without the request (usually `busy`). A signature that names no permission request
+  changes nothing.
+- Answers `204`; `400` for a body that is not valid or an empty `wait_signature`; `403` for a
+  cross-site request.
 
 ### `POST /api/hosts/session-name`
 

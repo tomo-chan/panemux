@@ -137,7 +137,8 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
   onFocusRequestHandled,
   onListedTasksChange,
 }) => {
-  const { data, error, loading, updatedAt, refresh, reconnect, saveRecord, launch, resume, requestSummary } = tasksState
+  const { data, error, loading, updatedAt, refresh, reconnect, saveRecord, launch, resume, requestSummary, inputGiven } =
+    tasksState
   const [query, setQuery] = useState('')
   const [laneMode, setLaneMode] = useState<LaneMode>('none')
   const [hostFilter, setHostFilter] = useState(ALL_HOSTS)
@@ -592,6 +593,7 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
           onSaveRecord={saveRecord}
           knownLabels={knownLabels}
           onRequestSummary={requestSummary}
+          onInputGiven={inputGiven}
           summariesEnabled={summariesEnabled}
           showDone={showDone}
           onClose={() => setDetailOpen(false)}
@@ -1067,6 +1069,7 @@ interface TaskDetailProps {
   /** The labels used before (known_labels), offered under Add a label. */
   knownLabels: string[]
   onRequestSummary: TasksState['requestSummary']
+  onInputGiven: TasksState['inputGiven']
   summariesEnabled: boolean
   /** Whether the Done column is on screen, for what Mark done says will happen. */
   showDone: boolean
@@ -1086,6 +1089,7 @@ const TaskDetail: React.FC<TaskDetailProps> = ({
   onSaveRecord,
   knownLabels,
   onRequestSummary,
+  onInputGiven,
   summariesEnabled,
   showDone,
   onClose,
@@ -1097,6 +1101,7 @@ const TaskDetail: React.FC<TaskDetailProps> = ({
   // task's controls nor shows the result there.
   const [savingId, setSavingId] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [inputError, setInputError] = useState<string | null>(null)
   const shownId = useRef(task?.id)
   shownId.current = task?.id
   // What was typed or asked belongs to the task it was typed for.
@@ -1106,6 +1111,7 @@ const TaskDetail: React.FC<TaskDetailProps> = ({
     setConfirmingDone(false)
     setLabelInput('')
     setSaveError(null)
+    setInputError(null)
   }
 
   if (!task) {
@@ -1136,6 +1142,13 @@ const TaskDetail: React.FC<TaskDetailProps> = ({
     if (shownId.current !== id) return false
     setSaveError(failure)
     return failure === null
+  }
+  const giveInput = async () => {
+    const id = task.id
+    setSavingId(id)
+    const failure = await onInputGiven(task)
+    setSavingId((current) => (current === id ? null : current))
+    if (shownId.current === id) setInputError(failure)
   }
   const markDone = async () => {
     if (await save({ done: true, labels })) setConfirmingDone(false)
@@ -1183,6 +1196,11 @@ const TaskDetail: React.FC<TaskDetailProps> = ({
           <TypeInButton task={task} action={inputAction} mark={inputMark} origin="detail" onTypeIn={onTypeIn} />
           <OpenButton task={task} action={action} onOpen={onOpen} />
           <ResumeButton task={task} resuming={resuming} onResume={onResume} />
+          {isPermissionWait(task) && (
+            <button type="button" className="td-btn" disabled={saving} onClick={() => void giveInput()}>
+              Input given
+            </button>
+          )}
           {recordable && !done && (
             <button type="button" className="td-btn" disabled={saving} onClick={() => setConfirmingDone(true)}>
               Mark done
@@ -1215,6 +1233,11 @@ const TaskDetail: React.FC<TaskDetailProps> = ({
             <button type="button" className="td-btn td-btn-sm" onClick={() => setConfirmingDone(false)}>
               Cancel
             </button>
+          </div>
+        )}
+        {inputError && (
+          <div role="alert" className="td-alert td-alert-inline">
+            Could not mark the input given: {inputError}
           </div>
         )}
         {saveError && (
@@ -1384,6 +1407,15 @@ const TaskDetail: React.FC<TaskDetailProps> = ({
 // What Mark done asks, saying where the task will be afterwards: a running
 // task stays where it is until it stops, and a stopped one leaves the board
 // while the Done column is hidden.
+// Whether a task waits on a codex permission request its hook recorded
+// (issue #384), the one wait Input given clears. The reason is the server's
+// codexWaitingForPermission.
+function isPermissionWait(task: Task): boolean {
+  return task.state === 'wait' && task.agent === 'codex' && task.waiting_for === CODEX_PERMISSION_WAIT && !!task.wait_signature
+}
+
+const CODEX_PERMISSION_WAIT = 'a permission request from codex'
+
 function markDoneQuestion(task: Task, showDone: boolean): string {
   if (task.state !== 'stop') {
     return 'Mark this task done? It stays in its column while it runs, and moves to Done when it stops.'

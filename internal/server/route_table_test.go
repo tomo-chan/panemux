@@ -88,6 +88,7 @@ var expectedRoutes = []string{
 	"POST /api/tasks",
 	"POST /api/tasks/attach",
 	"POST /api/tasks/hosts/{name}/reconnect",
+	"POST /api/tasks/input-given",
 	"POST /api/tasks/resume",
 	"POST /api/tasks/summary",
 	"POST /api/workspaces",

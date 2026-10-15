@@ -205,7 +205,7 @@ A `409` is reported rather than worked around. An OAuth provider matches the reg
 `redirect_uri` exactly, so rewriting the callback to a different local port would break the login it
 is meant to complete.
 
-### `GET /api/tasks`, `POST /api/tasks/hosts/{name}/reconnect`, `PUT /api/tasks/records`, `POST /api/tasks`, `POST /api/tasks/resume`, `POST /api/tasks/summary` and `POST`/`DELETE /api/tasks/attach`
+### `GET /api/tasks`, `POST /api/tasks/hosts/{name}/reconnect`, `PUT /api/tasks/records`, `POST /api/tasks`, `POST /api/tasks/resume`, `POST /api/tasks/summary`, `POST /api/tasks/input-given` and `POST`/`DELETE /api/tasks/attach`
 
 The task dashboard's collection, its per-host reconnect, the done and label records (and the labels
 used before, `known_labels` on `GET /api/tasks`), starting
@@ -215,7 +215,8 @@ and resuming tasks, and asking for a task's summary. Their responses and the col
 starting and resuming are in [Starting a task](tasks.md#starting-a-task),
 [Resuming a task](tasks.md#resuming-a-task), [`POST /api/tasks`](tasks.md#post-apitasks) and
 [`POST /api/tasks/resume`](tasks.md#post-apitasksresume); summaries are in [Summaries](tasks.md#summaries)
-and [`POST /api/tasks/summary`](tasks.md#post-apitaskssummary); the board's temporary tmux attach is in
+and [`POST /api/tasks/summary`](tasks.md#post-apitaskssummary); marking a codex permission request
+answered is in [`POST /api/tasks/input-given`](tasks.md#post-apitasksinput-given); the board's temporary tmux attach is in
 [`POST /api/tasks/attach`](tasks.md#post-apitasksattach).
 
 ### `POST /api/hosts/session-name` and `POST`/`DELETE /api/hosts/terminal`
