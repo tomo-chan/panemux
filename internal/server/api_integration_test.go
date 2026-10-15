@@ -327,12 +327,13 @@ var apiCases = map[string]apiCase{
 	},
 
 	"POST /api/sessions/{id}/preview": {run: func(t *testing.T, e *apiEnv) {
-		e.createPane(t, "pane-preview")
-		file := filepath.Join(e.home, "index.html")
+		// A session whose working directory is known, since only files
+		// inside it can be previewed and reading a live shell's working
+		// directory may be denied by the sandbox.
+		dir := fixturePreviewDir(t, e, "pane-preview")
+		file := filepath.Join(dir, "index.html")
 		require.NoError(t, os.WriteFile(file, []byte("<p>mock</p>"), 0o600))
 
-		// Absolute, so the case does not depend on reading a live shell's
-		// working directory, which the sandbox may deny.
 		rr := e.do(t, http.MethodPost, "/api/sessions/pane-preview/preview", fmt.Sprintf(`{"path":%q}`, file))
 		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
 		var resp struct {
