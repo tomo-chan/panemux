@@ -213,10 +213,12 @@ directory and its agent's worktrees, and registers the HTML or Markdown file it 
 
 - `400`: invalid JSON body; a path that is not `.html`, `.htm`, `.md` or `.markdown`; or a session
   whose shell runs on another host
-- `403`: the file, after its symbolic links, is outside the directory it would be served from
+- `403`: the file is outside the session's working directory and its agent's worktrees — an absolute
+  path elsewhere, a `../` that leaves them, or a symbolic link that leads out of them (the reason names
+  the directories allowed)
 - `404`: no session exists for `id`, or no file exists at the path (the reason names where it looked)
 - `413`: the file is larger than 10 MiB
-- `422`: the path is relative and the session's working directory is unknown
+- `422`: the session's working directory and its agent's worktrees are all unknown
 - `200`: the preview to show, or the files to choose from
 
 Errors carry their reason as plain text, which the preview shows. A file to show:

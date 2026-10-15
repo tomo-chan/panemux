@@ -33,6 +33,13 @@ worktrees — the preview lists the files found and opens the one chosen. When n
 cannot be previewed, the preview shows the reason instead, naming the directories looked in. An
 absolute path names its own file.
 
+Only files inside those directories — the shell's working directory and the agent's worktrees — can
+be previewed (#359's "path and symlink escape"). An absolute path elsewhere, a `../` that leaves
+them, and a symbolic link that leads out of them do not open; the preview shows that the file is
+outside them and names the directories allowed. A `../` that stays inside one of them, such as from
+a subdirectory of a worktree up to its root, opens. When the working directory and the worktrees are
+all unknown, no path opens.
+
 ### What is shown
 
 - **HTML** is shown as written, with its scripts running, and loads the stylesheets, scripts and
@@ -41,10 +48,11 @@ absolute path names its own file.
   autolinks). Raw HTML inside it is left out, and the page runs no scripts. Relative links and
   images resolve beside the file, so a link to another `.md` or `.html` opens it in the preview.
 
-A file is served from its **root**: the innermost working directory that holds it, or, for a file
-outside every working directory, its own directory. Files beside it are reachable only within that
-root. A path, or a symbolic link, that leads outside the root is refused, and a symbolic link that
-stays inside it works.
+A file is served from its **root**: the innermost working directory that holds it. Files beside it
+are reachable only within that root. A path, or a symbolic link, that leads outside the root is
+refused. A symbolic link with a relative target that stays inside the root works; one with an
+absolute target is refused even when it points inside, as is a link from one working directory into
+another (the file is then found, if at all, under the directory it really lives in).
 
 The HTML or Markdown file itself may be at most **10 MiB**; a larger one shows the reason instead.
 The files it loads beside it are not bounded.

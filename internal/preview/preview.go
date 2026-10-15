@@ -27,6 +27,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
@@ -42,9 +43,9 @@ const MaxDocumentBytes int64 = 10 << 20
 // The reasons a path cannot be previewed. They are shown to the operator.
 var (
 	ErrNotPreviewable = errors.New("only .html, .htm, .md and .markdown files can be previewed")
-	ErrNoWorkdir      = errors.New("the pane's working directory is unknown, so a relative path cannot be resolved")
+	ErrNoWorkdir      = errors.New("the pane's working directory is unknown, so no file can be previewed")
 	ErrNotFound       = errors.New("file not found")
-	ErrEscapes        = errors.New("the file resolves outside the directory it is served from")
+	ErrEscapes        = errors.New("the file is outside the pane's working directory and its agent's worktrees")
 	ErrTooLarge       = fmt.Errorf("the file is larger than the %d MiB preview limit", MaxDocumentBytes>>20)
 )
 
@@ -84,42 +85,68 @@ func IsPreviewable(name string) bool {
 	return kindOf(name) != kindOther
 }
 
-// Resolve finds the files a clicked path may name. An absolute path names
-// itself; a relative one is looked for in each working directory, so a path
+// Found is a file a clicked path names, with the working directory it is
+// served from.
+type Found struct {
+	Root string
+	File string
+}
+
+// Resolve finds the files a clicked path may name. Only files inside the
+// pane's working directories can be previewed: an absolute path must lie
+// inside one of them, and a relative one is looked for from each, so a path
 // that exists in two worktrees returns both for the operator to choose from.
-func Resolve(name string, workdirs []string) ([]string, error) {
+// Each file is served from the innermost working directory holding it, and
+// is found through that directory's os.Root, so neither "..", an absolute
+// path nor a symbolic link reaches a file outside it.
+func Resolve(name string, workdirs []string) ([]Found, error) {
 	if !IsPreviewable(name) {
 		return nil, ErrNotPreviewable
 	}
-	if filepath.IsAbs(name) {
-		file := filepath.Clean(name)
-		if !isRegularFile(file) {
-			return nil, fmt.Errorf("%w: %s", ErrNotFound, name)
-		}
-		return []string{file}, nil
-	}
-
 	dirs := cleanDirs(workdirs)
 	if len(dirs) == 0 {
 		return nil, ErrNoWorkdir
 	}
-	var found []string
-	for _, dir := range dirs {
-		if file := filepath.Join(dir, name); isRegularFile(file) {
-			found = append(found, file)
+	var paths []string
+	if filepath.IsAbs(name) {
+		paths = []string{filepath.Clean(name)}
+	} else {
+		for _, dir := range dirs {
+			paths = append(paths, filepath.Join(dir, name))
 		}
 	}
-	if len(found) == 0 {
-		return nil, fmt.Errorf("%w: %s (looked in %s)", ErrNotFound, name, strings.Join(dirs, ", "))
+
+	var found []Found
+	escaped := false
+	seen := map[string]bool{}
+	for _, file := range paths {
+		root := rootOf(file, dirs)
+		if root == "" {
+			escaped = true
+			continue
+		}
+		_, _, err := statIn(root, file)
+		switch {
+		case errors.Is(err, ErrEscapes):
+			escaped = true
+		case err == nil && !seen[file]:
+			seen[file] = true
+			found = append(found, Found{Root: root, File: file})
+		}
 	}
-	return found, nil
+	if len(found) > 0 {
+		return found, nil
+	}
+	if escaped {
+		return nil, fmt.Errorf("%w: %s (allowed: %s)", ErrEscapes, name, strings.Join(dirs, ", "))
+	}
+	return nil, fmt.Errorf("%w: %s (looked in %s)", ErrNotFound, name, strings.Join(dirs, ", "))
 }
 
-// RootFor is the directory a file is served from: the innermost working
-// directory holding it, or else its own directory.
-func RootFor(file string, workdirs []string) string {
+// rootOf is the innermost of dirs that holds file, or "" when none does.
+func rootOf(file string, dirs []string) string {
 	root := ""
-	for _, dir := range cleanDirs(workdirs) {
+	for _, dir := range dirs {
 		// Two different directories that both hold file and have the same
 		// length cannot exist once cleanDirs has removed duplicates.
 		//mutation:exempt[CONDITIONALS_BOUNDARY] EQUIVALENT: ancestors of one file differ in length
@@ -127,10 +154,33 @@ func RootFor(file string, workdirs []string) string {
 			root = dir
 		}
 	}
-	if root == "" {
-		return filepath.Dir(file)
-	}
 	return root
+}
+
+// statIn describes the regular file at file, which must lie inside root,
+// looking it up through root's os.Root: the file is reached only from the
+// root, by a relative path, and a symbolic link that leaves the root is not
+// followed. A path that leaves the root reports ErrEscapes; one naming
+// nothing, or anything but a regular file, reports ErrNotFound.
+func statIn(root, file string) (string, fs.FileInfo, error) {
+	rel, err := filepath.Rel(root, file)
+	if err != nil || !filepath.IsLocal(rel) {
+		return "", nil, fmt.Errorf("%w: %s", ErrEscapes, file)
+	}
+	r, err := os.OpenRoot(root)
+	if err != nil {
+		return "", nil, fmt.Errorf("%w: %s", ErrNotFound, root)
+	}
+	defer func() { _ = r.Close() }()
+	info, err := r.Stat(rel)
+	switch {
+	case err == nil && info.Mode().IsRegular():
+		return rel, info, nil
+	case err == nil, errors.Is(err, fs.ErrNotExist), errors.Is(err, syscall.ENOTDIR):
+		return "", nil, fmt.Errorf("%w: %s", ErrNotFound, file)
+	}
+	// os.Root refuses a symbolic link, or a "..", that leads outside it.
+	return "", nil, fmt.Errorf("%w: %s", ErrEscapes, file)
 }
 
 func cleanDirs(dirs []string) []string {
@@ -155,11 +205,6 @@ func within(dir, file string) bool {
 		!filepath.IsAbs(rel)
 }
 
-func isRegularFile(name string) bool {
-	info, err := os.Stat(name)
-	return err == nil && info.Mode().IsRegular()
-}
-
 type entry struct {
 	root string
 	file string // slash-separated, relative to root
@@ -181,38 +226,20 @@ func NewRegistry() *Registry {
 
 // Open registers file, served from root, and returns the address it is
 // served at. The file must be an HTML or Markdown file within the size
-// limit, and must resolve inside root after symbolic links.
+// limit, reached from root without leaving it (see statIn).
 func (r *Registry) Open(root, file string) (string, error) {
 	if !IsPreviewable(file) {
 		return "", ErrNotPreviewable
 	}
 	root, file = filepath.Clean(root), filepath.Clean(file)
-	if !within(root, file) {
-		return "", ErrEscapes
-	}
-	realRoot, err := filepath.EvalSymlinks(root)
+	rel, info, err := statIn(root, file)
 	if err != nil {
-		return "", fmt.Errorf("%w: %s", ErrNotFound, root)
-	}
-	realFile, err := filepath.EvalSymlinks(file)
-	if err != nil {
-		return "", fmt.Errorf("%w: %s", ErrNotFound, file)
-	}
-	if !within(realRoot, realFile) {
-		return "", ErrEscapes
-	}
-	info, err := os.Stat(realFile)
-	if err != nil || !info.Mode().IsRegular() {
-		return "", fmt.Errorf("%w: %s", ErrNotFound, file)
+		return "", err
 	}
 	if info.Size() > MaxDocumentBytes {
 		return "", ErrTooLarge
 	}
 
-	rel, err := filepath.Rel(root, file)
-	if err != nil { //coverage:exempt within() already proved file is below root
-		return "", ErrEscapes
-	}
 	e := entry{root: root, file: filepath.ToSlash(rel)}
 	token, err := r.tokenFor(e)
 	if err != nil { //coverage:exempt tokenFor fails only when crypto/rand does

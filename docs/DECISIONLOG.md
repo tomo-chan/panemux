@@ -1390,6 +1390,17 @@ without a value; 10 MiB bounds the HTML or Markdown document — the file read w
 and not the files it loads. Markdown is rendered on the server by goldmark with raw HTML omitted, so
 the page needs no script.
 
+The first cut let an absolute path name any file on the host, served from its own directory, and
+checked symbolic links with `filepath.EvalSymlinks` and `os.Stat` on the clicked path. CodeQL flagged
+both as uncontrolled data in a path expression, and the operator chose to bound previews instead of
+dismissing the alerts: only files inside the session's working directory and its agent's worktrees
+open, and a file is found and checked only through `os.Root` for one of them. A path elsewhere is
+refused with the directories allowed, rather than opened, because an agent-printed path is the input
+and #359's "path and symlink escape" names the boundary. Using `os.Root` for lookup as well as
+serving also refuses symbolic links with an absolute target; the first cut registered such a link
+when it pointed inside the root and then answered `404` for it, since serving already went through
+`os.Root`.
+
 ## Agent registry
 
 ### One registry declares agents; capabilities are ports in their consumers (2026-10-12, issue #372)

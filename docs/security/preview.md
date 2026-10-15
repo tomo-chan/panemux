@@ -55,11 +55,22 @@ policy.
 site cannot ask for a file. It resolves only for `local` and `tmux` sessions, whose files are on this
 host, and only HTML and Markdown names.
 
-Each opened file is registered with a **root** (see
+Only files inside the session's working directory and its agent's worktrees can be previewed. That
+is the boundary #359's "path and symlink escape" asks for: the request names a path, and the server
+decides which directories it may reach — never the path itself.
+
+Each opened file is registered with a **root**, the innermost of those directories holding it (see
 [behavior](../behavior/preview.md#what-is-shown)):
 
-- registration resolves both the root and the file through their symbolic links and refuses a file
-  whose real path is outside the root's real path;
+- the clicked path is made absolute against each directory and must lie lexically inside one of
+  them; an absolute path elsewhere or a `../` that leaves them is refused (`403`) before anything is
+  read;
+- the file is then looked up, and at registration checked again, only through `os.Root` for its
+  root, by the path relative to that root (`filepath.Rel`, required to be `filepath.IsLocal`). No
+  request-derived path is ever passed to `os.Stat`, `os.Open` or `filepath.EvalSymlinks`; `os.Root`
+  refuses a `..` or a symbolic link that leaves the root, and any symbolic link with an absolute
+  target, so a link out of the working directory is refused (`403`) and a link with a relative
+  target that stays inside works;
 - every request below the token is opened through `os.Root` for that root, which refuses `..`
   components and symbolic links that leave the root at open time, so a link added after
   registration is refused too. The request path is also refused unless `fs.ValidPath` accepts it,

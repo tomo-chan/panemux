@@ -38,7 +38,7 @@ layout rendering, terminal emulation, interaction state, and presentation.
 | `internal/ws` | Bridge session bytes and control messages to terminal WebSockets, stream command-center events, and serve the task event stream (`/ws/tasks/events`). |
 | `internal/requestsecurity` | Guard every API and WebSocket before side effects using browser Origin, Referer and Fetch Metadata evidence. |
 | `internal/server` | Compose middleware, API routes, WebSocket routes, static assets, and SPA fallback into the production router. |
-| `internal/preview` | Resolve a clicked HTML or Markdown path against a session's working directories, register the file under a random token for the server's lifetime, and serve it and the files under its root sandboxed in an opaque origin, rendering Markdown. |
+| `internal/preview` | Resolve a clicked HTML or Markdown path against a session's working directories, refusing any file outside them, register the file under a random token for the server's lifetime, and serve it and the files under its root sandboxed in an opaque origin, rendering Markdown. |
 | `internal/portforward` | Maintain short-lived loopback listeners that forward callback traffic through a session's SSH connection. |
 | `internal/board` | Invoke agmsg through its documented scripts, relay rows across configured hosts, and maintain the in-memory status/history view. |
 | `internal/commandcenter` | Run one headless Claude query at a time, persist its session/history state, and stream structured events. |

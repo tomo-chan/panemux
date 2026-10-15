@@ -37,8 +37,9 @@ type previewResponse struct {
 
 // PostSessionPreview resolves a path the operator clicked in a pane's
 // terminal and registers the HTML or Markdown file it names for the split
-// preview. A relative path is looked for in the pane's working directory and
-// in the worktrees its agent is working in. See docs/behavior/preview.md.
+// preview. Only files inside the pane's working directory and the worktrees
+// its agent is working in can be previewed; a relative path is looked for
+// in each of them. See docs/behavior/preview.md.
 func (h *Handler) PostSessionPreview(w http.ResponseWriter, r *http.Request) {
 	var req previewRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -55,22 +56,25 @@ func (h *Handler) PostSessionPreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	workdirs := sessionWorkdirs(sess)
-	files, err := preview.Resolve(req.Path, workdirs)
+	found, err := preview.Resolve(req.Path, sessionWorkdirs(sess))
 	if err != nil {
 		writePreviewError(w, err)
 		return
 	}
-	if len(files) > 1 {
-		writeJSON(w, previewResponse{Status: previewStatusChoose, Candidates: files})
+	if len(found) > 1 {
+		candidates := make([]string, len(found))
+		for i, f := range found {
+			candidates[i] = f.File
+		}
+		writeJSON(w, previewResponse{Status: previewStatusChoose, Candidates: candidates})
 		return
 	}
-	url, err := h.previews.Open(preview.RootFor(files[0], workdirs), files[0])
+	url, err := h.previews.Open(found[0].Root, found[0].File)
 	if err != nil {
 		writePreviewError(w, err)
 		return
 	}
-	writeJSON(w, previewResponse{Status: previewStatusReady, URL: url, Path: files[0]})
+	writeJSON(w, previewResponse{Status: previewStatusReady, URL: url, Path: found[0].File})
 }
 
 // ServePreview serves a registered preview and the files beside it.

@@ -21,8 +21,8 @@ func writeFile(t *testing.T, path, content string) string {
 }
 
 // realDir resolves t.TempDir through its symbolic links: macOS's temporary
-// directory sits behind /var -> /private/var, and the symlink checks compare
-// resolved paths.
+// directory sits behind /var -> /private/var, and a pane reports its working
+// directory resolved.
 func realDir(t *testing.T) string {
 	t.Helper()
 	dir, err := filepath.EvalSymlinks(t.TempDir())
@@ -49,59 +49,145 @@ func TestIsPreviewable(t *testing.T) {
 	}
 }
 
-func TestResolve(t *testing.T) {
+// resolveFixture lays out a working directory, a worktree with a
+// subdirectory, and a directory outside both, with links between them.
+type resolveFixture struct{ cwd, other, outside, sub, sub2 string }
+
+func newResolveFixture(t *testing.T) resolveFixture {
+	t.Helper()
 	cwd := realDir(t)
 	other := realDir(t)
+	outside := realDir(t)
 	writeFile(t, filepath.Join(cwd, "mockups", "index.html"), "<p>cwd</p>")
 	writeFile(t, filepath.Join(cwd, "docs", "design.md"), "# cwd")
 	writeFile(t, filepath.Join(other, "docs", "design.md"), "# other")
+	writeFile(t, filepath.Join(other, "sub", "page.html"), "<p>sub</p>")
+	writeFile(t, filepath.Join(outside, "secret.html"), "<p>secret</p>")
 	require.NoError(t, os.MkdirAll(filepath.Join(cwd, "folder.md"), 0o755))
+	writeFile(t, filepath.Join(cwd, "plain"), "x")
+	require.NoError(t, os.Symlink(filepath.Join(outside, "secret.html"), filepath.Join(cwd, "link.html")))
+	require.NoError(t, os.Symlink(outside, filepath.Join(cwd, "linkdir")))
+	require.NoError(t, os.Symlink(filepath.Join("docs", "design.md"), filepath.Join(cwd, "inside.md")))
+	require.NoError(t, os.Symlink(filepath.Join(cwd, "docs", "design.md"), filepath.Join(cwd, "absolute.md")))
+	sub := filepath.Join(other, "sub")
+	sub2 := filepath.Join(other, "sub2")
+	require.NoError(t, os.MkdirAll(sub2, 0o755))
 
+	return resolveFixture{cwd: cwd, other: other, outside: outside, sub: sub, sub2: sub2}
+}
+
+func TestResolve(t *testing.T) {
+	f := newResolveFixture(t)
+	cwd, other, sub, sub2 := f.cwd, f.other, f.sub, f.sub2
+	cases := []struct {
+		name     string
+		path     string
+		workdirs []string
+		want     []Found
+	}{
+		{
+			name: "relative path in the working directory", path: "./mockups/index.html",
+			workdirs: []string{cwd, other},
+			want:     []Found{{Root: cwd, File: filepath.Join(cwd, "mockups", "index.html")}},
+		},
+		{
+			name: "relative path in two worktrees", path: "docs/design.md",
+			workdirs: []string{cwd, other},
+			want: []Found{
+				{Root: cwd, File: filepath.Join(cwd, "docs", "design.md")},
+				{Root: other, File: filepath.Join(other, "docs", "design.md")},
+			},
+		},
+		{
+			name: "an empty working directory is skipped", path: "docs/design.md",
+			workdirs: []string{"", cwd}, want: []Found{{Root: cwd, File: filepath.Join(cwd, "docs", "design.md")}},
+		},
+		{
+			name: "a working directory listed twice counts once", path: "docs/design.md",
+			workdirs: []string{cwd, cwd + "/"}, want: []Found{{Root: cwd, File: filepath.Join(cwd, "docs", "design.md")}},
+		},
+		{
+			name: "absolute path inside a worktree", path: filepath.Join(other, "docs", "design.md"),
+			workdirs: []string{cwd, other},
+			want:     []Found{{Root: other, File: filepath.Join(other, "docs", "design.md")}},
+		},
+		{
+			name: "served from the innermost working directory holding it", path: filepath.Join(sub, "page.html"),
+			workdirs: []string{other, sub}, want: []Found{{Root: sub, File: filepath.Join(sub, "page.html")}},
+		},
+		{
+			name: "../ that stays inside a worktree", path: "../docs/design.md",
+			workdirs: []string{sub, other},
+			want:     []Found{{Root: other, File: filepath.Join(other, "docs", "design.md")}},
+		},
+		{
+			name: "two paths naming the same file count once", path: "../sub/page.html",
+			workdirs: []string{sub, sub2},
+			want:     []Found{{Root: sub, File: filepath.Join(sub, "page.html")}},
+		},
+		{
+			name: "a symbolic link that stays inside", path: "inside.md", workdirs: []string{cwd},
+			want: []Found{{Root: cwd, File: filepath.Join(cwd, "inside.md")}},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := Resolve(tc.path, tc.workdirs)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestResolveRefuses(t *testing.T) {
+	f := newResolveFixture(t)
+	cwd, other, outside := f.cwd, f.other, f.outside
 	cases := []struct {
 		err      error
 		name     string
 		path     string
 		workdirs []string
-		want     []string
 	}{
-		{
-			name: "relative path in the working directory", path: "./mockups/index.html",
-			workdirs: []string{cwd, other}, want: []string{filepath.Join(cwd, "mockups", "index.html")},
-		},
-		{
-			name: "relative path in two worktrees", path: "docs/design.md",
-			workdirs: []string{cwd, other},
-			want:     []string{filepath.Join(cwd, "docs", "design.md"), filepath.Join(other, "docs", "design.md")},
-		},
-		{
-			name: "an empty working directory is skipped", path: "docs/design.md",
-			workdirs: []string{"", cwd}, want: []string{filepath.Join(cwd, "docs", "design.md")},
-		},
-		{
-			name: "a working directory listed twice counts once", path: "docs/design.md",
-			workdirs: []string{cwd, cwd + "/"}, want: []string{filepath.Join(cwd, "docs", "design.md")},
-		},
-		{
-			name: "absolute path needs no working directory", path: filepath.Join(other, "docs", "design.md"),
-			want: []string{filepath.Join(other, "docs", "design.md")},
-		},
+		{name: "absolute path outside every working directory", path: filepath.Join(outside, "secret.html"),
+			workdirs: []string{cwd, other}, err: ErrEscapes},
+		{name: "../ out of the working directory", path: "../" + filepath.Base(outside) + "/secret.html",
+			workdirs: []string{cwd}, err: ErrEscapes},
+		{name: "a symbolic link out of the working directory", path: "link.html", workdirs: []string{cwd},
+			err: ErrEscapes},
+		{name: "a symbolic link to an absolute path, even inside", path: "absolute.md", workdirs: []string{cwd},
+			err: ErrEscapes},
+		{name: "a directory link out of the working directory", path: "linkdir/secret.html",
+			workdirs: []string{cwd}, err: ErrEscapes},
+		{name: "absolute path with no working directory", path: filepath.Join(other, "docs", "design.md"),
+			err: ErrNoWorkdir},
 		{name: "relative path with no working directory", path: "docs/design.md", err: ErrNoWorkdir},
 		{name: "relative path found nowhere", path: "missing.md", workdirs: []string{cwd}, err: ErrNotFound},
-		{name: "absolute path that does not exist", path: filepath.Join(cwd, "missing.html"), err: ErrNotFound},
+		{name: "absolute path that does not exist", path: filepath.Join(cwd, "missing.html"),
+			workdirs: []string{cwd}, err: ErrNotFound},
+		{name: "a file used as a directory", path: "plain/index.html", workdirs: []string{cwd}, err: ErrNotFound},
 		{name: "a directory is not a file", path: "folder.md", workdirs: []string{cwd}, err: ErrNotFound},
+		{name: "a working directory that does not exist", path: "a.md",
+			workdirs: []string{filepath.Join(cwd, "gone")}, err: ErrNotFound},
 		{name: "not a previewable type", path: "notes.txt", workdirs: []string{cwd}, err: ErrNotPreviewable},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := Resolve(tc.path, tc.workdirs)
-			if tc.err != nil {
-				require.ErrorIs(t, err, tc.err)
-				return
-			}
-			require.NoError(t, err)
-			assert.Equal(t, tc.want, got)
+			_, err := Resolve(tc.path, tc.workdirs)
+			require.ErrorIs(t, err, tc.err)
 		})
 	}
+}
+
+func TestResolveFoundAndEscapedReportsTheFound(t *testing.T) {
+	cwd := realDir(t)
+	worktree := realDir(t)
+	writeFile(t, filepath.Join(worktree, "notes.md"), "# notes")
+	require.NoError(t, os.Symlink(filepath.Join(worktree, "notes.md"), filepath.Join(cwd, "notes.md")))
+
+	got, err := Resolve("notes.md", []string{cwd, worktree})
+	require.NoError(t, err)
+	assert.Equal(t, []Found{{Root: worktree, File: filepath.Join(worktree, "notes.md")}}, got,
+		"a link from one working directory into another is refused; the worktree's own file is not")
 }
 
 func TestResolveNotFoundNamesWhereItLooked(t *testing.T) {
@@ -112,14 +198,24 @@ func TestResolveNotFoundNamesWhereItLooked(t *testing.T) {
 	assert.Contains(t, err.Error(), cwd)
 }
 
-func TestRootFor(t *testing.T) {
+func TestResolveEscapeNamesTheAllowedDirectories(t *testing.T) {
+	cwd := realDir(t)
+	worktree := realDir(t)
+	_, err := Resolve("/tmp/sample-project/index.html", []string{cwd, worktree})
+	require.ErrorIs(t, err, ErrEscapes)
+	assert.Contains(t, err.Error(), "/tmp/sample-project/index.html")
+	assert.Contains(t, err.Error(), cwd)
+	assert.Contains(t, err.Error(), worktree)
+}
+
+func TestRootOf(t *testing.T) {
 	workdirs := []string{"/workspace/user/project", "/workspace/user/project/sub"}
-	assert.Equal(t, "/workspace/user/project/sub", RootFor("/workspace/user/project/sub/a/index.html", workdirs))
-	assert.Equal(t, "/workspace/user/project", RootFor("/workspace/user/project/docs/design.md", workdirs))
-	assert.Equal(t, "/tmp/sample-project/docs",
-		RootFor("/tmp/sample-project/docs/design.md", workdirs), "outside every working directory")
-	assert.Equal(t, "/workspace/user", RootFor("/workspace/user/project-other.md", workdirs),
+	assert.Equal(t, "/workspace/user/project/sub", rootOf("/workspace/user/project/sub/a/index.html", workdirs))
+	assert.Equal(t, "/workspace/user/project", rootOf("/workspace/user/project/docs/design.md", workdirs))
+	assert.Empty(t, rootOf("/tmp/sample-project/docs/design.md", workdirs), "outside every working directory")
+	assert.Empty(t, rootOf("/workspace/user/project-other.md", workdirs),
 		"a sibling sharing the prefix is not inside the working directory")
+	assert.Empty(t, rootOf("/workspace/user/project", workdirs), "a working directory is not inside itself")
 }
 
 func TestRegistryOpen(t *testing.T) {
@@ -148,7 +244,7 @@ func TestRegistryOpenRefuses(t *testing.T) {
 	writeFile(t, filepath.Join(outside, "secret.html"), "<p>secret</p>")
 	require.NoError(t, os.Symlink(filepath.Join(outside, "secret.html"), filepath.Join(root, "link.html")))
 	writeFile(t, filepath.Join(root, "real.html"), "<p>real</p>")
-	require.NoError(t, os.Symlink(filepath.Join(root, "real.html"), filepath.Join(root, "inside.html")))
+	require.NoError(t, os.Symlink("real.html", filepath.Join(root, "inside.html")))
 	big := writeFile(t, filepath.Join(root, "big.md"), strings.Repeat("a", int(MaxDocumentBytes)+1))
 	exact := writeFile(t, filepath.Join(root, "exact.md"), strings.Repeat("a", int(MaxDocumentBytes)))
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "dir.html"), 0o755))
@@ -159,6 +255,10 @@ func TestRegistryOpenRefuses(t *testing.T) {
 
 	_, err = reg.Open(root, filepath.Join(outside, "secret.html"))
 	require.ErrorIs(t, err, ErrEscapes, "a file outside the root")
+
+	require.NoError(t, os.Symlink(outside, filepath.Join(root, "linkdir")))
+	_, err = reg.Open(root, filepath.Join(root, "linkdir", "secret.html"))
+	require.ErrorIs(t, err, ErrEscapes, "a directory link out of the root")
 
 	_, err = reg.Open(root, filepath.Join(root, "inside.html"))
 	require.NoError(t, err, "a symbolic link that stays inside the root")
