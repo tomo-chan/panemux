@@ -235,6 +235,16 @@ config, or a remote host into a command string:
   `cmd.Dir` after `sanitizeGitExecDir`, and `gh` receives the branch and repository as discrete
   argv elements. The `--json` field list is a constant (`prTaskFields`), not a value from anywhere.
 
+The codex permission hook (`internal/tasks/codex_permission_hook.sh`,
+[behavior](../behavior/tasks.md#codex-permission-requests)) is a constant script the user registers
+by hand; panemux never runs or installs it. It takes from codex's stdin only `session_id` and
+`turn_id`, and only when they are hex digits and dashes, so neither can name a path outside
+`~/.local/state/panemux/codex-permission/` or carry the command codex asked about. It writes the
+record through a temporary file and a rename, with umask 077, removes files older than 7 days from that
+directory only (`find "$dir" -type f -mtime +7 -exec rm -f {} +`), prints nothing and exits 0: it never
+answers allow or deny. The collection only prints the records with `cat`, and the Go side accepts a row
+only when both IDs are UUIDs.
+
 The script lists only the collecting user's processes (`ps -U "$(id -u)"`). On a shared host,
 another user's processes are neither shown as tasks nor accepted as the live process behind a
 leftover state file whose pid they reused.

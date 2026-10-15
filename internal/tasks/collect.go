@@ -28,6 +28,7 @@ import (
 //	::section cwd                "<pid> <cwd>" for this user's processes that may be claude or codex
 //	::section env                "<pid> <PANEMUX_PANE_ID>" for the same processes, when set
 //	::section codex-open         one row per rollout a codex process holds open (below)
+//	::section codex-permission   "<session ID> <turn ID> <unix seconds>", the approval requests codex's hook recorded
 //	::section transcripts        "<mtime>\t<file name>\t<first "cwd":"..." in it>\t<size in bytes>"
 //	::section codex-rollouts     "<mtime>\t<size>\t<file name>\t<"cwd":"...">\t<"originator":"...">" of its first line
 //	::end                        the output is complete
@@ -79,6 +80,13 @@ import (
 // task_complete, turn_aborted) and the last response item in the rollout's
 // final MiB. Only a session ID made of hex digits and dashes — the shape of
 // the UUID in the file name — is put into the query.
+//
+// The codex-permission rows are the records codex_permission_hook.sh, a
+// PermissionRequest hook the user registers, writes under
+// ~/.local/state/panemux/codex-permission/ (issue #384): one file per
+// session, the session's latest request, one line each. The hook removes
+// records older than 7 days, so they are read with a single cat; a host
+// without the hook has none.
 const collectScript = collectLiveScript + collectStoppedScript + collectEnd
 
 // attentionScript is collectScript without collectStoppedScript: what the
@@ -180,6 +188,8 @@ while read -r pid et; do
 		printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$pid" "$et" "$t" "$st" "$marks" "$c" "$o" "$p"
 	done
 done
+echo '::section codex-permission'
+cat "$HOME"/.local/state/panemux/codex-permission/* 2>/dev/null
 `
 
 // collectStoppedScript lists the conversation logs and rollouts the stopped
@@ -220,11 +230,15 @@ const (
 	sectionTranscrip = "transcripts"
 	sectionCodexOpen = "codex-open"
 	sectionCodexLogs = "codex-rollouts"
+	sectionCodexPerm = "codex-permission"
 )
 
 // rawSnapshot is one host's collection output, parsed but not interpreted.
 type rawSnapshot struct {
 	ProcessCWDs map[int]string
+	// CodexPermissions is each session's latest approval request (issue
+	// #384), by session ID.
+	CodexPermissions map[string]codexPermission
 	// PaneIDs is the PANEMUX_PANE_ID each agent process was started with,
 	// already limited to validPaneID.
 	PaneIDs map[int]string
@@ -287,9 +301,10 @@ func parseCollectOutput(out []byte) (rawSnapshot, error) {
 	}
 
 	p := collectParser{raw: rawSnapshot{
-		ProcessCWDs: map[int]string{},
-		PaneIDs:     map[int]string{},
-		CodexAges:   map[int]int64{},
+		ProcessCWDs:      map[int]string{},
+		PaneIDs:          map[int]string{},
+		CodexAges:        map[int]int64{},
+		CodexPermissions: map[string]codexPermission{},
 	}}
 	for _, line := range lines[start:] {
 		var err error
@@ -338,7 +353,7 @@ func (p *collectParser) directive(line string) error {
 		p.flush()
 		switch arg {
 		case sectionState, sectionPS, sectionTmux, sectionCWD, sectionEnv, sectionTranscrip,
-			sectionCodexOpen, sectionCodexLogs:
+			sectionCodexOpen, sectionCodexLogs, sectionCodexPerm:
 			p.section = arg
 		default:
 			return fmt.Errorf("task collection output has unknown section %q", arg)
@@ -407,6 +422,10 @@ func (raw *rawSnapshot) addRow(section string, file *stateFile, line string) err
 	case sectionCodexLogs:
 		if r, ok := parseCodexRolloutRow(line); ok {
 			raw.CodexRollouts = append(raw.CodexRollouts, r)
+		}
+	case sectionCodexPerm:
+		if sessionID, record, ok := parseCodexPermissionRow(line); ok {
+			raw.CodexPermissions[sessionID] = record
 		}
 	default:
 		if strings.TrimSpace(line) != "" {

@@ -74,6 +74,7 @@ function tasksState(overrides: Partial<TasksState> = {}): TasksState {
     launch: vi.fn().mockResolvedValue({ ok: false, error: 'not stubbed' }),
     resume: vi.fn().mockResolvedValue({ ok: false, error: 'not stubbed' }),
     requestSummary: vi.fn().mockResolvedValue(null),
+    inputGiven: vi.fn().mockResolvedValue(null),
     attach: vi.fn().mockResolvedValue({ ok: false, error: 'not stubbed' }),
     detach: vi.fn().mockResolvedValue(undefined),
     hostSessionName: vi.fn().mockResolvedValue({ ok: false, error: 'not stubbed' }),
@@ -1387,6 +1388,7 @@ describe('TaskDashboard unreadable session state (issue #313)', () => {
     expect(screen.getByRole('button', { name: /show details/ })).toHaveAttribute('aria-expanded', 'false')
   })
 
+  //efficacy:exempt unchanged by #384: the Input given describe block after it falls inside its line range
   it('says file, not files, for one', () => {
     renderDashboard(
       tasksState({
@@ -1394,5 +1396,45 @@ describe('TaskDashboard unreadable session state (issue #313)', () => {
       }),
     )
     expect(screen.getByRole('button', { name: '1 unreadable session state file — show details' })).toBeInTheDocument()
+  })
+})
+
+describe('TaskDashboard Input given', () => {
+  const detail = () => screen.getByRole('complementary', { name: 'Task details' })
+  const approval = task({
+    id: 'approval', agent: 'codex', state: 'wait', waiting_for: 'a permission request from codex', wait_signature: 'w1-abc',
+  })
+  const question = task({
+    id: 'question', agent: 'codex', state: 'wait', waiting_for: 'a question from codex', wait_signature: 'w1-def',
+  })
+  const data = { ...response, tasks: [approval, question] }
+
+  it('marks a codex permission request answered', async () => {
+    const inputGiven = vi.fn().mockResolvedValue(null)
+    renderDashboard(tasksState({ data, inputGiven }))
+    fireEvent.click(screen.getByTestId('task-card-approval'))
+
+    await act(async () => {
+      fireEvent.click(within(detail()).getByRole('button', { name: 'Input given' }))
+    })
+    expect(inputGiven).toHaveBeenCalledWith(expect.objectContaining({ id: 'approval' }))
+  })
+
+  it('shows why Input given failed', async () => {
+    renderDashboard(tasksState({ data, inputGiven: vi.fn().mockResolvedValue('no wait signature') }))
+    fireEvent.click(screen.getByTestId('task-card-approval'))
+
+    await act(async () => {
+      fireEvent.click(within(detail()).getByRole('button', { name: 'Input given' }))
+    })
+    expect(detail()).toHaveTextContent('Could not mark the input given: no wait signature')
+  })
+
+  it('offers Input given only for a permission request', () => {
+    renderDashboard(tasksState({ data }))
+    fireEvent.click(screen.getByTestId('task-card-approval'))
+    expect(within(detail()).getByRole('button', { name: 'Input given' })).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('task-card-question'))
+    expect(within(detail()).queryByRole('button', { name: 'Input given' })).toBeNull()
   })
 })

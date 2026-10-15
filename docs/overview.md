@@ -77,7 +77,9 @@ backend and UI are released together.
 - The task dashboard reads files Claude Code and codex write for themselves (`~/.claude/sessions`,
   `~/.claude/projects`, `~/.codex/sessions`, `~/.codex/thread_history_1.sqlite`), which are not a
   published format, and finds a running codex's session through the rollout file it holds open. It
-  cannot tell a codex waiting for command approval from one at work, so that wait is not notified. It
+  cannot tell a codex waiting for command approval from one at work, so that wait is not notified,
+  unless a hand-registered codex hook records the request
+  ([Codex permission requests](behavior/tasks.md#codex-permission-requests)). It
   collects only while it is on screen, or while a browser tab subscribes to the task event stream,
   which observes the running tasks only. A waiting task's `wait_signature` exists only when the
   agent recorded when the wait began. It finds the pane of an agent outside tmux only on Linux and macOS hosts, where it can read
