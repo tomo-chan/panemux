@@ -724,6 +724,8 @@ func countingCollections(n *int) func(context.Context, string) ([]byte, error) {
 // GET /api/tasks makes panemux dial every host and run a script there, so a
 // page on another site must not be able to trigger it — an <img> pointing at
 // the route would otherwise collect whenever that page is open.
+//
+//efficacy:exempt only its collection count changed, to leave out the agent probe this branch adds
 func TestTaskRoutes_RefuseCrossSiteRequests(t *testing.T) {
 	cases := []struct {
 		headers map[string]string
