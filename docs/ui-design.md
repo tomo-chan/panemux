@@ -462,7 +462,8 @@ terminal that had focus cannot receive what is typed into the dashboard.
 - **Detail panel.** Fixed to the window height at the right. Its head — state, host, agent, start,
   title, waiting reason, `Type in pane` (in the interactive blue) or, for a waiting or idle task
   that cannot take it, "Type in pane is not available: <reason>.", the open action or the reason
-  there is none (a stopped claude or codex task offers `Resume` instead), `Mark done` or `Mark not done`, and for a done candidate the line "The summary
+  there is none (a stopped claude or codex task offers `Resume` instead), `Input given` for a codex
+  task waiting on a permission request its hook recorded, `Mark done` or `Mark not done`, and for a done candidate the line "The summary
   finds no work left: a candidate for Mark done." — stays in place, and only the body below scrolls:
   state notes (for codex: a task with no session of its own is waiting for its first instruction,
   held at a start-up screen, or running its session in codex's shared daemon, to be seen in the pane;
@@ -485,7 +486,10 @@ terminal that had focus cannot receive what is typed into the dashboard.
   poll.
   `Mark done` asks first, inside the panel, and says where the task will be afterwards: a running
   task stays in its column until it stops; a stopped one moves to Done, and the question adds that
-  the column is hidden until `Done column` is checked when it is. `Mark not done` does not ask. Labels
+  the column is hidden until `Done column` is checked when it is. `Mark not done` does not ask.
+  `Input given` does not ask either: the task shows as its turn reads (usually Working) at once, also
+  while the task event stream still has the wait, and a failure is shown under the actions as
+  "Could not mark the input given: <reason>" ([behavior](behavior/tasks.md#codex-permission-requests)). Labels
   are removed with the `×` on each and added with a text box and `Add`. Under the box, `Used before:`
   offers the labels used before that the task does not have
   ([Labels used before](#labels-used-before)); a click adds one at once, as `Add` does, and what is

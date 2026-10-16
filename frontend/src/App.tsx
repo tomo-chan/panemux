@@ -369,7 +369,7 @@ export const App: React.FC = () => {
   const dashboardTasksState = useMemo(() => {
     const { store } = taskEvents
     if (taskEvents.status !== 'live' || !store || !tasksState.data) return tasksState
-    return { ...tasksState, data: { ...tasksState.data, tasks: overlayTaskEvents(tasksState.data.tasks, store.tasks) } }
+    return { ...tasksState, data: { ...tasksState.data, tasks: overlayTaskEvents(tasksState.data.tasks, store.tasks, tasksState.inputGivenWaits) } }
   }, [tasksState, taskEvents])
   const tasksWaiting = waitingCount(dashboardTasksState.data?.tasks ?? [])
   const handleListedTasksChange = useCallback((taskIds: ReadonlySet<string>) => {

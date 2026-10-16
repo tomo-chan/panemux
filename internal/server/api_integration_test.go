@@ -612,6 +612,13 @@ var apiCases = map[string]apiCase{
 		assert.Contains(t, rr.Body.String(), `"state":"pending"`)
 	}},
 
+	"POST /api/tasks/input-given": {run: func(t *testing.T, e *apiEnv) {
+		rr := e.do(t, http.MethodPost, "/api/tasks/input-given", `{"wait_signature":""}`)
+		assert.Equal(t, http.StatusBadRequest, rr.Code, rr.Body.String())
+		rr = e.do(t, http.MethodPost, "/api/tasks/input-given", `{"wait_signature":"w1-0"}`)
+		assert.Equal(t, http.StatusNoContent, rr.Code, rr.Body.String())
+	}},
+
 	"POST /api/tasks/hosts/{name}/reconnect": {run: func(t *testing.T, e *apiEnv) {
 		e.cfg.SSHConnections = map[string]config.SSHConnection{"build-box": {Host: "build.invalid"}}
 

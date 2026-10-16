@@ -58,6 +58,7 @@ function tasksState(overrides: Partial<TasksState> = {}): TasksState {
     launch: vi.fn().mockResolvedValue({ ok: false, error: 'not stubbed' }),
     resume: vi.fn().mockResolvedValue({ ok: false, error: 'not stubbed' }),
     requestSummary: vi.fn().mockResolvedValue(null),
+    inputGiven: vi.fn().mockResolvedValue(null),
     attach: vi.fn().mockResolvedValue({ ok: false, error: 'not stubbed' }),
     detach: vi.fn().mockResolvedValue(undefined),
     hostSessionName: vi.fn().mockResolvedValue({ ok: true, launched: { tmux_session: 'dev-server-0123abcd' } }),

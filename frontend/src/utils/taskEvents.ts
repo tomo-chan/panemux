@@ -160,11 +160,16 @@ export function createWaitIdRecord(key: string, storage: () => Storage = () => w
  * status_since of every task the stream has — an omitted one included — so a
  * change shows as soon as it is published. Everything else stays as collected.
  */
-export function overlayTaskEvents(tasks: Task[], live: ReadonlyMap<string, TaskEventTask>): Task[] {
+export function overlayTaskEvents(
+  tasks: Task[],
+  live: ReadonlyMap<string, TaskEventTask>,
+  inputGiven: ReadonlySet<string> = new Set(),
+): Task[] {
   if (live.size === 0) return tasks
   return tasks.map((task) => {
     const event = live.get(task.id)
-    if (!event) return task
+    // A wait marked Input given stays as collected until the stream moves on.
+    if (!event || (event.wait_id !== undefined && inputGiven.has(event.wait_id))) return task
     return {
       ...task,
       state: event.state,

@@ -67,6 +67,17 @@ export interface TasksState {
    */
   requestSummary: (task: Task) => Promise<string | null>
   /**
+   * Marks the codex permission request a task waits on as answered (issue
+   * #384), then collects again. Resolves to why it failed, or null.
+   */
+  inputGiven: (task: Task) => Promise<string | null>
+  /**
+   * The wait signatures marked Input given in this tab, which the live task
+   * events must not show as waits again before the stream publishes the
+   * change.
+   */
+  inputGivenWaits?: ReadonlySet<string>
+  /**
    * Opens the board's temporary tmux client on a task's running tmux session
    * (issue #283), for the Type in pane popup (issue #284). Collects nothing:
    * attaching changes no task.
@@ -268,6 +279,25 @@ export function useTasks(enabled: boolean): TasksState {
     return null
   }, [])
 
+  const [inputGivenWaits, setInputGivenWaits] = useState<ReadonlySet<string>>(() => new Set())
+  const inputGiven = useCallback(async (task: Task) => {
+    const signature = task.wait_signature
+    if (!signature) return 'This task is not waiting'
+    try {
+      const res = await fetch('/api/tasks/input-given', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wait_signature: signature }),
+      })
+      if (!res.ok) return (await res.text()).trim() || `HTTP ${res.status}`
+    } catch (err) {
+      return err instanceof Error ? err.message : 'Failed to mark the input given'
+    }
+    setInputGivenWaits((current) => new Set(current).add(signature))
+    await refreshAfterAction()
+    return null
+  }, [refreshAfterAction])
+
   const attach = useCallback(
     (task: Task) => postTaskAction('/api/tasks/attach', { id: task.id }, TaskAttachSchema),
     [],
@@ -330,6 +360,8 @@ export function useTasks(enabled: boolean): TasksState {
     launch,
     resume,
     requestSummary,
+    inputGiven,
+    inputGivenWaits,
     attach,
     detach,
     hostSessionName,
