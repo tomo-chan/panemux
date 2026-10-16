@@ -87,15 +87,15 @@ reads only what the agents write themselves and what the host reports about its 
 
 | Read | Used for |
 |---|---|
-| `~/.claude/sessions/*.json` | Running Claude Code sessions: `pid`, `sessionId`, `cwd`, `status`, `waitingFor`, `statusUpdatedAt`, `updatedAt`, `startedAt` |
+| `~/.claude/sessions/*.json` | Running Claude Code sessions: `pid`, `sessionId`, `cwd`, `status`, `waitingFor`, `statusUpdatedAt`, `updatedAt`, `startedAt`, and the `version` that wrote it ([Agent availability](#agent-availability)) |
 | `~/.claude/projects/*/*.jsonl` changed in the last 7 days (newest 100) | Stopped sessions, the first `"cwd"` recorded in each, and each log's modification time and size (what a summary is keyed on) |
 | `ps -U <own uid> -o pid=,ppid=,command=` | Whether a state file's process is alive, running agents, and parent chains — the collecting user's processes only |
 | `tmux list-panes -a -F '#{pane_pid} #{session_name}'` | Which tmux session an agent runs in |
 | The working directory of each process that may be claude or codex | A running task's directory when no state file gives one |
 | `PANEMUX_PANE_ID` in the environment of each process that may be claude or codex (`/proc/<pid>/environ` on Linux, `ps -E` on macOS) | The pane an agent outside tmux was started from ([below](#the-pane-of-an-agent-outside-tmux)) |
 | `ps -U <own uid> -o pid=,etime=,command=`, then each `codex` process's open files (`/proc/<pid>/fd`, or `lsof` where there is none) | How long each codex process has run, and the rollouts it holds open |
-| For each rollout a codex process holds open: its modification time and size, the `cwd` of its first line, the last `task_started` / `task_complete` / `turn_aborted` and the last `response_item` (with the `timestamp` that line starts with) in its final MiB, and the newest `thread_turns` row in `~/.codex/thread_history_1.sqlite` (with `sqlite3 -readonly`, when installed) | A running codex session's state |
-| `~/.codex/sessions/*/*/*/rollout-*.jsonl` changed in the last 7 days whose first line's `originator` is `codex-tui` (the newest 100 of those), and that line's `cwd` | Stopped codex sessions |
+| For each rollout a codex process holds open: its modification time and size, the `cwd` of its first line, the last `task_*` or `turn_*` event other than `turn_diff` (the ones read are `task_started` / `task_complete` / `turn_aborted`) and the last `response_item` (with the `timestamp` that line starts with) in its final MiB, and the newest `thread_turns` row in `~/.codex/thread_history_1.sqlite` (with `sqlite3 -readonly`, when installed) | A running codex session's state |
+| `~/.codex/sessions/*/*/*/rollout-*.jsonl` changed in the last 7 days whose first line's `originator` is `codex-tui` (the newest 100 of those), and that line's `cwd` and `cli_version` | Stopped codex sessions, and the codex version recorded ([Agent availability](#agent-availability)) |
 
 The task event stream's collection ([Task events](task-events.md#lifecycle)) runs the same script
 without its two searches for stopped sessions: it reads every row above except the conversation logs
@@ -127,7 +127,7 @@ ends before its terminating marker — a connection dropped mid-run — fails th
 | `busy` | Running and working | Live claude process, `status: "busy"` |
 | `idle` | Running and waiting for the next instruction | Live claude process, `status: "idle"` |
 | `run` | A codex process is running and has no session yet | A live interactive `codex` process holding no rollout ([Codex sessions](#codex-sessions)) |
-| `unknown` | A session is running but its state cannot be read | A live claude process that no readable state file describes — its file is missing or [could not be read](#unreadable-state-files); a live claude process reporting another `status`; or a codex session whose `thread_turns` and rollout tail say nothing about its newest turn |
+| `unknown` | A session is running but its state cannot be read | A live claude process that no readable state file describes — its file is missing or [could not be read](#unreadable-state-files); a live claude process reporting another `status`; or a codex session whose `thread_turns` and rollout tail say nothing about its newest turn, or whose newest `thread_turns` status or last turn event is one this build does not know ([Agent availability](#agent-availability)) |
 | `stop` | Nothing is handling the session | A conversation log with no live claude process for its session ID, or an interactive codex rollout that no live codex process holds open |
 
 - **A process is a claude process when its program has a path component named `claude` or
@@ -213,6 +213,58 @@ How to fix one:
      Claude Code rewrites; report it with *Copy details* so `readStateFile` in
      `internal/tasks/state_file.go` can follow the new format.
 
+### Agent availability
+
+Whether each agent's capabilities can be used on a host is kept per host inside `internal/tasks`
+(`Service.Availability`, issue [#373](https://github.com/tomo-chan/panemux/issues/373)). It is not in
+`GET /api/tasks` or the dashboard yet, and nothing refuses a launch or resume on it yet; the server log
+carries what changes. Each entry is an agent, a capability (`collect`, `launch`, `resume`), a status
+(`available`, `degraded`, `unavailable`, `unknown`), a reason, a detail and the version the agent's
+newest session recorded.
+
+| Capability | Status / reason | When |
+|---|---|---|
+| any | `unknown` / `not_probed` | Nothing found out yet: no full collection of the host, or, for `launch` and `resume`, no probe over its current connection |
+| `launch`, `resume` | `available` | The probe found the agent's CLI |
+| `launch`, `resume` | `unavailable` / `cli_missing` | The probe found no CLI on `PATH` or a login shell's `PATH`; `collect` is left as it is |
+| `launch`, `resume` | `unknown` / `probe_failed` | The probe failed, timed out or printed something else; the detail says what |
+| `collect` | `available` | The last full collection read everything the agent wrote |
+| `collect` | `degraded` / `unknown_format` | The last full collection found something of the agent's in a format this build does not know (below) |
+
+`auth_missing` and `session_info_missing` are defined and reported by nothing yet.
+
+**The probe** is a fixed script of its own ([Task agent probe](../security/command-execution.md#task-agent-probe)),
+run over the host's collection connection (or locally) after a full collection of the host that
+succeeded: the dashboard's `GET /api/tasks`, not the task event stream's collection, a resume's or
+a lookup's. It looks for each agent that declares `launch` or `resume` the way
+[Starting a task](#starting-a-task) does — `command -v`, then a login shell's — and keeps only an
+absolute path to an executable file. A host's result, a failure included, is used for 5 minutes,
+then the next full collection probes again; a new connection (a [reconnect](#post-apitaskshostsnamereconnect),
+or a redial after the connection dropped) probes at its first full collection. One probe has 5
+seconds of its own. A failed probe changes nothing about the host's collection or its tasks, and one
+cut short because the request was abandoned is not kept.
+
+**An unknown format** is what an agent wrote that this build cannot read:
+
+- **Structure that cannot be read**: a Claude Code state file that is not a JSON object or has no
+  usable `pid` or `sessionId` ([Unreadable state files](#unreadable-state-files); a leftover of a
+  process that is gone is not counted), and a `codex/open` or `codex/rollouts` row that cannot be
+  read — a rollout name without a UUID, a time or size that is not a number, a row cut short.
+  `ps`'s own `<pid>	<etime>` rows and blank lines are not counted.
+- **A value outside the known set**: a Claude Code `status` other than `busy`, `waiting` and `idle`
+  (a missing one is read as an older release's, not counted), a `thread_turns` status other than
+  `inProgress`, `completed`, `interrupted` and `failed`, and a last turn event as above, each once
+  per live session.
+
+Such a session is still listed, with its state `unknown`: no state, wait or wait signature is guessed
+from it, so it notifies nothing. The agent's `collect` becomes `degraded` / `unknown_format`, with
+a detail such as `unknown_status 1, malformed_row 2; e.g. status "paused" | …; versions 0.160.1`:
+how many of each kind, the first 3 examples (each at most 120 characters, control characters
+replaced), and up to 3 versions recorded, newest first. The version is Claude Code's state file
+`version` and codex's `session_meta` `cli_version`; it is recorded, never compared with anything.
+The server log says so when an agent's `collect` becomes degraded or its detail changes, and when it
+is available again — not on every collection.
+
 ### Wait signature
 
 A `wait` task carries `wait_signature`, an opaque identifier of the wait it is in, so a client can
@@ -256,7 +308,12 @@ does write:
 - **The state comes from the session's newest turn, and only while the process is alive.** When
   `sqlite3` is installed and `~/.codex/thread_history_1.sqlite` (codex-cli 0.157 and later) has a
   `thread_turns` row for the session, the row with the highest `rollout_ordinal` decides; otherwise
-  the last `task_started`, `task_complete` or `turn_aborted` in the rollout's final MiB does.
+  the last `task_started`, `task_complete` or `turn_aborted` in the rollout's final MiB does. A
+  `thread_turns` status this build does not know is not read past: the rollout's event does not stand
+  in for it. Nor is a `task_*` or `turn_*` event other than those three and `turn_diff` that comes
+  after them in the tail. Either makes the session `unknown` and is counted as an
+  [unknown format](#agent-availability); a known `thread_turns` status still decides past an unknown
+  event.
 
   | Newest turn | State | Since |
   |---|---|---|
@@ -264,7 +321,7 @@ does write:
   | `inProgress` / `task_started`, and the hook recorded a permission request of this turn that is not marked answered | `wait`, waiting for "a permission request from codex" | The record's time |
   | `inProgress` / `task_started`, otherwise | `busy` | The turn's start |
   | `completed`, `interrupted`, `failed` / `task_complete`, `turn_aborted` | `idle` | The rollout's last write |
-  | Nothing, or a `thread_turns` status this build does not know and no turn event | `unknown` | — |
+  | Nothing, or a `thread_turns` status or last turn event this build does not know | `unknown` | — |
 
 - **Waiting for approval shows as `busy` unless the permission hook is registered.** Codex's own
   files record nothing when it asks to run a command: the turn is in progress and the last item is

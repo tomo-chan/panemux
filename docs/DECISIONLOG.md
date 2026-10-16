@@ -1439,6 +1439,42 @@ agent's sections and their reading into a collect adapter, without changing what
   (#384, below) are read as the codex adapter's live section `codex/permission`. It is an adapter
   section added, so the protocol stays v2; a host without the hook prints the heading with no rows.
 
+### Agent availability: a separate probe and an anti-corruption layer for formats (2026-10-16, issue #373)
+
+The second step of #373 finds out, per host, whether an agent's capabilities can be used, and stops
+the collection from guessing past a format it does not know. Nothing reads the result yet: the API
+(#376) and refusing a launch or resume (#374) come later.
+
+- **A probe of its own, not a collection section.** Looking for the CLI needs a login shell, which
+  can be slow and print anything; inside the collection script it would hold up every collection and
+  could break the line protocol. It is a second fixed script with its own header, run after a full
+  collection that succeeded, with 5 seconds of its own, never in the task event stream's collection
+  or a resume's (which would wait on it before launching).
+- **Cached per host and connection for 5 minutes, failures too.** A host whose login shell is slow
+  would otherwise cost up to 5 seconds on every 10-second poll. The entry remembers the connection it
+  ran over, so a reconnect or a redial probes again. A probe cut short because the request was
+  abandoned is not kept, so leaving the dashboard does not poison the cache.
+- **The probe never runs the CLI.** `<agent> --version` would put a CLI's own start-up (an update
+  check, a first-run screen) on every host every 5 minutes; the version is read from what the agent
+  writes instead, and recorded only.
+- **Unknown is not guessed past.** A `thread_turns` status codex added used to fall back to the
+  rollout's last turn event. The two need not agree — the event may be from an earlier turn — so a
+  status nobody has read could show a finished turn as `busy` or the reverse; the session is now `unknown`, notifies nothing, and makes
+  codex's `collect` degraded. The same holds for a turn event: the script used to keep only the three
+  known ones, so a new one was invisible and an older known one decided. It now hands over the last
+  `task_*` or `turn_*` event but `turn_diff` (the only such event that neither starts nor ends a turn),
+  and one it does not know makes the session `unknown`. A known `thread_turns` status still decides
+  past it. A Claude Code `status` was already `unknown` when not known; a missing one stays an older
+  release's, not a new format.
+- **What is counted.** Structure that cannot be read (Claude Code's unreadable state files, codex rows
+  that cannot be parsed — but not `ps`'s own rows) and values outside the known sets, for live
+  sessions. The detail carries counts by kind, the first 3 examples and up to 3 versions, each bounded,
+  so a host with many sessions in a new format does not grow the log line or the future API field.
+  It is logged when it changes, like unreadable state files.
+- **The codex version comes from the stopped rollouts' section.** Adding a column to `codex/open`
+  would have changed every fixture of that row; `codex/rollouts` already took optional trailing
+  columns, and its rollouts include the live ones written in the last 7 days.
+
 ## 2026-10-15: Codex approval waits from a PermissionRequest hook (#294, #384)
 
 Codex's own files record nothing when it asks to run a command, so approval waits showed as `busy`.

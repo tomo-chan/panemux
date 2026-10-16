@@ -344,6 +344,34 @@ invisible format character replaced by U+FFFD and cut to 128 and 120 characters
 quotes them with `%q` as well, and the dashboard renders them as text only, never as markup or a
 link. The details never carry a file's whole content.
 
+### Task agent probe
+
+The agent probe ([behavior](../behavior/tasks.md#agent-availability)) runs one more fixed script per
+host, `probeScript` in `internal/tasks/availability.go`, apart from the collection script. It is
+composed once at startup from Go constants alone: a fixed `probe_cli` function and one
+`probe_cli <id>` line for each registry ID that declares `launch` or `resume`. Composition accepts an
+ID only as a `[a-z0-9-]` word (the registry's own rule is narrower still), so the ID can neither end
+the word nor add a command. Nothing from a request, the config or a host reaches the script, and it
+runs exactly as the collection does: locally `exec.CommandContext(ctx, "sh", "-s")` with the script
+on stdin and `HOME` from `internal/homedir`, remotely the literal `sh -s` over the host's collection
+connection with the script on stdin, under a 5-second context of its own.
+
+The lookup is the one [Task launch and resume](#task-launch-and-resume) makes, with the same
+safety: `command -v "$1"`, and when that finds nothing `"${SHELL:-/bin/sh}" -lc "command -v $1"`
+with `/dev/null` on stdin. `$1` is the fixed ID above, and `$SHELL` is the host user's own login
+shell run with a fixed argument; it chooses where the CLI is looked up, not what is run. What
+either prints is believed only when it is an absolute path to an executable regular file, and the
+probe never runs that file: it prints only `cli <id> found` or `cli <id> missing`. The parser
+(`parseProbeOutput`) skips text before its `::panemux-probe v1` header (a login shell's greeting),
+accepts only those two answers for an ID it asked about, once each, and fails the probe on
+anything else, on a missing answer and on output without `::end`. A probe that fails changes
+nothing about the host's collection; its error reaches only the internal availability detail and
+the log, made valid UTF-8 with control characters replaced and bounded (`boundedText`).
+
+What the collection reads in a format this build does not know is reported the same way: the
+examples and versions in an availability detail are host text, each bounded to 120 and 32
+characters by `boundedText`, at most 3 of each, and never reach a command.
+
 ### Task launch and resume
 
 `POST /api/tasks` and `POST /api/tasks/resume` ([behavior](../behavior/tasks.md#starting-a-task))
