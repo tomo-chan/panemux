@@ -335,4 +335,30 @@ func TestFormatReport_Detail(t *testing.T) {
 	assert.NotContains(t, detail, "| c", "three examples at most")
 	assert.True(t, strings.HasSuffix(detail, "; versions 0.5.0, 0.4.0, 0.3.0"), detail)
 	assert.Equal(t, "0.5.0", r.newestVersion())
+
+	var tie formatReport
+	tie.observeVersion("first", 5)
+	tie.observeVersion("second", 5)
+	assert.Equal(t, "first", tie.newestVersion(), "of two sessions written at once, the first seen")
+}
+
+// A probe cut short because the caller gave up is not kept: the next full
+// collection probes again rather than reporting a failure for five minutes.
+func TestAvailability_AnAbandonedProbeIsNotCached(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	host := &probeHost{collection: minimalOutput("s")}
+	svc := New(Options{RunLocal: func(c context.Context, script string) ([]byte, error) {
+		if script == probeScript {
+			cancel()
+			<-c.Done()
+			host.probes++
+			return nil, c.Err()
+		}
+		return host.run(c, script)
+	}})
+	defer svc.Close()
+
+	svc.Collect(ctx)
+	assert.Equal(t, 1, host.probes)
+	assert.Equal(t, ReasonNotProbed, availabilityOf(svc.Availability(""), agent.Claude, agent.Launch).Reason)
 }

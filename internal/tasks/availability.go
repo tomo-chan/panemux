@@ -409,14 +409,10 @@ func (r *formatReport) detail() string {
 	for i, kind := range kinds {
 		parts[i] = fmt.Sprintf("%s %d", kind, r.counts[kind])
 	}
-	detail := strings.Join(parts, ", ")
-	if len(r.examples) > 0 {
-		detail += "; e.g. " + strings.Join(r.examples, " | ")
-	}
+	// add keeps an example of the first things it counts, so there is one.
+	detail := strings.Join(parts, ", ") + "; e.g. " + strings.Join(r.examples, " | ")
 	if versions := r.distinctVersions(); len(versions) > 0 {
-		if len(versions) > maxObservedVersions {
-			versions = versions[:maxObservedVersions]
-		}
+		versions = versions[:min(len(versions), maxObservedVersions)]
 		detail += "; versions " + strings.Join(versions, ", ")
 	}
 	return detail
