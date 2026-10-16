@@ -1,8 +1,10 @@
 package tasks
 
 import (
+	"os/exec"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -131,25 +133,30 @@ func TestComposeCollect_OrdersSectionsByStage(t *testing.T) {
 // The cwd and env prefilter is composed from the adapters' hints, and lets
 // through every process a task rule lists: a process it dropped would be
 // listed without its working directory or pane.
+// taskRuleSampleCommands are command lines the agents' Task rules are
+// checked against, lower case: the prefilters compare case-sensitively while
+// the rules do not, a gap left to #375.
+var taskRuleSampleCommands = []string{
+	"claude", "/usr/local/bin/claude --verbose", "claude -p hello", "claude-code",
+	"/home/user/.local/share/claude/versions/2.1.0", "claude --resume 5d0b91c2",
+	"node /usr/lib/node_modules/@anthropic-ai/claude-code/cli.js",
+	"bun /opt/claude-code/cli.js --continue", "deno run claude/cli.ts",
+	"codex", "/usr/local/bin/codex --yolo", "codex exec 'fix it'", "codex app-server --listen unix://",
+	"/opt/homebrew/bin/codex resume 01a0e2b9-d054-7cc2-9278-000000000001", "codex -c model=o3 review",
+	"codex-helper", "/usr/local/bin/codexx", "node /opt/codex/cli.js",
+}
+
 func TestCollectPrefilter_CoversEveryTaskRule(t *testing.T) {
 	assert.Equal(t, "claude|codex", collectPlan.prefilter)
 	assert.Contains(t, collectScript, `awk '($2 " " $3) ~ /claude|codex/ { print $1 }'`)
 	prefilter := regexp.MustCompile(collectPlan.prefilter)
 
-	commands := []string{
-		"claude", "/usr/local/bin/claude --verbose", "claude -p hello", "claude-code",
-		"/home/user/.local/share/claude/versions/2.1.0", "claude --resume 5d0b91c2",
-		"node /usr/lib/node_modules/@anthropic-ai/claude-code/cli.js",
-		"bun /opt/claude-code/cli.js --continue", "deno run claude/cli.ts",
-		"codex", "/usr/local/bin/codex --yolo", "codex exec 'fix it'", "codex app-server --listen unix://",
-		"/opt/homebrew/bin/codex resume 01a0e2b9-d054-7cc2-9278-000000000001", "codex -c model=o3 review",
-	}
 	for _, d := range agent.All() {
 		if d.Detection.Task == nil {
 			continue
 		}
 		matched := 0
-		for _, command := range commands {
+		for _, command := range taskRuleSampleCommands {
 			if !d.Detection.Task.Process(command) {
 				continue
 			}
@@ -163,6 +170,38 @@ func TestCollectPrefilter_CoversEveryTaskRule(t *testing.T) {
 		}
 		assert.Positive(t, matched, "%s matched none of the sample commands", d.ID)
 	}
+}
+
+// The codex/open section's own filter — the base name of a process's
+// program — passes every process codex's Task rule takes, and nothing else:
+// a process it drops is never matched to its open rollout.
+func TestCodexOpenFilter_PassesEveryProcessTheTaskRuleTakes(t *testing.T) {
+	m := regexp.MustCompile(`(?m)^awk '([^']*)'`).FindStringSubmatch(codexOpenScript)
+	require.NotNil(t, m, "codex/open's first awk program")
+	var rows []string
+	want := map[string]bool{}
+	for i, command := range taskRuleSampleCommands {
+		pid := strconv.Itoa(1000 + i)
+		rows = append(rows, "  "+pid+" 05:00 "+command)
+		want[pid] = agent.IsCodexProgram(command)
+	}
+	cmd := exec.Command("awk", m[1]) //nolint:gosec // the program is codexOpenScript's own constant
+	cmd.Stdin = strings.NewReader(strings.Join(rows, "\n") + "\n")
+	out, err := cmd.Output()
+	require.NoError(t, err)
+
+	got := map[string]bool{}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		pid, etime, ok := strings.Cut(line, " ")
+		require.True(t, ok, "%q", line)
+		assert.Equal(t, "05:00", etime, "%q", line)
+		got[pid] = true
+	}
+	for i, command := range taskRuleSampleCommands {
+		pid := strconv.Itoa(1000 + i)
+		assert.Equal(t, want[pid], got[pid], "%q", command)
+	}
+	assert.True(t, slices.ContainsFunc(taskRuleSampleCommands, agent.IsCodexProgram))
 }
 
 func TestParseCollectOutput_FailsWhenADeclaredSectionIsMissing(t *testing.T) {
