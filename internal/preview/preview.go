@@ -190,7 +190,7 @@ func locateByIdentity(file string, dirs []string) (string, string) {
 	// The filesystem's root always resolves, so this stops there at most.
 	dir := filepath.Dir(file)
 	resolved, err := filepath.EvalSymlinks(dir)
-	for err != nil {
+	for err != nil && dir != filepath.Dir(dir) {
 		dir = filepath.Dir(dir)
 		resolved, err = filepath.EvalSymlinks(dir)
 	}
