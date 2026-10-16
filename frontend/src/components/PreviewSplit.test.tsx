@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { PreviewSplit } from './PreviewSplit'
 import type { PreviewView } from '../hooks/usePreview'
@@ -212,5 +212,47 @@ describe('PreviewSplit', () => {
     expect(screen.getByRole('region', { name: 'Preview' })).toHaveTextContent('docs/design.md is in more than one place')
     fireEvent.click(screen.getByRole('button', { name: '/workspace/user/project-wt/docs/design.md' }))
     expect(props.onChoose).toHaveBeenCalledWith('/workspace/user/project-wt/docs/design.md')
+  })
+})
+
+describe('PreviewSplit keys in the page', () => {
+  // A key typed in the sandboxed page never reaches the dashboard's window,
+  // so panemux's shortcuts (the popup's Ctrl/Cmd+Shift+Esc and Enter among
+  // them) do nothing while the page has focus. The preview says so.
+  const hint = /Keys go to the page/
+
+  it('says so while the page has focus, and not once focus is back', () => {
+    const { rerender, props } = renderSplit(ready)
+    expect(screen.queryByText(hint)).toBeNull()
+
+    const frame = screen.getByTitle(`Preview of ${ready.path}`)
+    act(() => {
+      frame.focus()
+      window.dispatchEvent(new Event('blur'))
+    })
+    expect(screen.getByRole('status')).toHaveTextContent(hint)
+
+    act(() => {
+      screen.getByRole('button', { name: 'Close preview' }).focus()
+      window.dispatchEvent(new Event('focus'))
+    })
+    expect(screen.queryByText(hint)).toBeNull()
+
+    act(() => {
+      frame.focus()
+      window.dispatchEvent(new Event('blur'))
+    })
+    expect(screen.getByText(hint)).toBeInTheDocument()
+    // A reload replaces the frame, which takes its focus with it.
+    rerender(<PreviewSplit {...props} view={{ ...ready, generation: 1 }} />)
+    expect(screen.queryByText(hint)).toBeNull()
+  })
+
+  it('says nothing when the window loses focus to something else', () => {
+    renderSplit(ready)
+    act(() => {
+      window.dispatchEvent(new Event('blur'))
+    })
+    expect(screen.queryByText(hint)).toBeNull()
   })
 })

@@ -309,6 +309,10 @@ rules.
   absolute path, truncated with the full value as a tooltip; below it Reload, an outlined
   `Open in new tab`, and Close. Opening larger is a new tab — the preview has no full screen of its
   own, so the terminal is never hidden behind it.
+- While the previewed page has focus, a one-line note under the header says that keys go to the
+  page and the terminal takes them back: the page is sandboxed in another origin, so panemux's
+  shortcuts cannot hear keys typed in it, and the note keeps them from failing silently. It is a
+  status, not an alert, and goes as soon as focus leaves the page.
 - The divider is a 6 px bar with a centered grip. It highlights in the accent blue on hover, focus
   and while dragged; it is a focusable `separator` that the arrow keys move and a double-click
   returns to 50:50. Neither side gets narrower than 160 px.

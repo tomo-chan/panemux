@@ -128,6 +128,8 @@ interface PreviewPanelProps {
 
 const PreviewPanel: React.FC<PreviewPanelProps> = ({ view, minWidth, onChoose, onReload, onClose }) => {
   const ready = view.kind === 'ready' ? view : null
+  const frameRef = useRef<HTMLIFrameElement>(null)
+  const pageFocused = usePageFocus(frameRef, view)
   const target = view.kind === 'ready' ? view.path : view.request
   const host = view.kind === 'ready' || view.kind === 'choose' ? previewHostLabel(view.host) : null
 
@@ -166,9 +168,15 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ view, minWidth, onChoose, o
           </button>
         </div>
       </header>
+      {pageFocused && (
+        <p role="status" className="pm-preview-keys">
+          Keys go to the page. Click the terminal to use panemux&apos;s shortcuts.
+        </p>
+      )}
       <div className="pm-preview-body">
         {view.kind === 'ready' && (
           <iframe
+            ref={frameRef}
             key={view.generation}
             className="pm-preview-frame"
             src={view.url}
@@ -202,4 +210,24 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ view, minWidth, onChoose, o
       </div>
     </section>
   )
+}
+
+// Whether the previewed page holds the keyboard. Its keys never reach this
+// window — it is sandboxed in another origin — so panemux's shortcuts do
+// nothing until focus is back. The window loses focus as the page takes it,
+// and regains it as focus returns; a reload replaces the frame, and its focus
+// with it.
+function usePageFocus(frameRef: React.RefObject<HTMLIFrameElement | null>, view: PreviewView): boolean {
+  const [focused, setFocused] = useState(false)
+  useEffect(() => {
+    const check = () => setFocused(frameRef.current !== null && document.activeElement === frameRef.current)
+    check()
+    window.addEventListener('blur', check)
+    window.addEventListener('focus', check)
+    return () => {
+      window.removeEventListener('blur', check)
+      window.removeEventListener('focus', check)
+    }
+  }, [frameRef, view])
+  return focused
 }

@@ -174,3 +174,12 @@
   border-color: #569cd6;
   outline: none;
 }
+
+/* Shown while the previewed page holds the keyboard. */
+.pm-preview-keys {
+  margin: 0;
+  padding: 4px 8px;
+  border-bottom: 1px solid #2f3136;
+  color: #c9d1d9;
+  font-size: 12px;
+}

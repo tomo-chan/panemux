@@ -55,8 +55,10 @@ fi
 rm -rf "$E2E_HOME"
 mkdir -p "$E2E_HOME/.claude/sessions" "$E2E_HOME/.claude/projects/-tmp-e2e-stopped" \
     "$E2E_HOME/.claude/projects/-e2e-resumable" "$E2E_HOME/bin" "$E2E_HOME/launch-bin" "$E2E_HOME/fake/claude" \
-    "$E2E_HOME/resumable"
+    "$E2E_HOME/resumable" "$E2E_HOME/work"
 export HOME="$E2E_HOME"
+# The tmux task's directory, holding a page its Type in pane popup previews.
+printf '<p>pm385-popup</p>\n' >"$E2E_HOME/work/pm385-popup.html"
 # A state file the dashboard cannot read, whose name carries no pid: it is
 # reported as unreadable on every collection, never shown as a task (#313).
 printf '{"pid":"not-a-number"}\n' >"$E2E_HOME/.claude/sessions/legacy.json"
@@ -105,7 +107,7 @@ chmod +x "$E2E_HOME/launch-bin/claude"
 export PATH="$E2E_HOME/launch-bin:$PATH"
 
 if command -v tmux >/dev/null 2>&1; then
-    tmux -f /dev/null new-session -d -s e2e-task-dashboard "exec '$E2E_HOME/bin/claude' 900"
+    tmux -f /dev/null new-session -d -s e2e-task-dashboard -c "$E2E_HOME/work" "exec '$E2E_HOME/bin/claude' 900"
     write_state "$(tmux list-panes -t e2e-task-dashboard -F '#{pane_pid}')" e2e-in-tmux waiting
 fi
 

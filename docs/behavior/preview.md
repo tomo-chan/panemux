@@ -96,6 +96,14 @@ In the Type in pane popup, the preview sits beside the terminal's area, not insi
 the terminal are the terminal's, and Tab cycles through the preview's controls within the popup as
 through the rest of the popup.
 
+Once the previewed page itself has focus — it was clicked, to scroll it or to type in one of its
+fields — the keys typed are the page's. The page runs sandboxed in another origin, so they never
+reach the dashboard, and panemux's own shortcuts do nothing until focus is back: in the popup,
+Ctrl/Cmd+Shift+Esc and Ctrl/Cmd+Shift+Enter. Meanwhile the preview shows **Keys go to the page.
+Click the terminal to use panemux's shortcuts.** under its header; clicking the terminal, or
+anything else outside the page, returns focus and removes the note. Reloading the page also returns
+focus. This holds in a workspace pane as in the popup.
+
 ### Lifetime
 
 The preview inside a pane or the popup is hidden when its terminal is not connected — its WebSocket
