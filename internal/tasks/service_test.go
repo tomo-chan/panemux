@@ -243,8 +243,8 @@ func TestCollect_ReusesOneConnectionAndSendsTheScriptOnStdin(t *testing.T) {
 	})
 	defer svc.Close()
 
-	svc.Collect(context.Background())
-	svc.Collect(context.Background())
+	collectAndProbe(svc)
+	collectAndProbe(svc)
 
 	assert.Equal(t, 1, dialer.callCount())
 	assert.Equal(t, []string{"sh -s", "sh -s", "sh -s"}, conn.cmds)
