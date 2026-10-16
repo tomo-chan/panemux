@@ -3,6 +3,7 @@ package preview
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/pkg/sftp"
 	"github.com/stretchr/testify/assert"
@@ -192,10 +194,44 @@ func TestRealPathStopsALinkLoop(t *testing.T) {
 	files, err := remote.files()
 	require.NoError(t, err)
 
-	_, err = realPath(files, filepath.Join(dir, "a"))
+	// A loop must end, and quickly: a count that never reaches its bound
+	// would spin here instead of failing.
+	done := make(chan error, 1)
+	go func() {
+		_, loopErr := realPath(files, filepath.Join(dir, "a"))
+		done <- loopErr
+	}()
+	select {
+	case err = <-done:
+	case <-time.After(time.Second):
+		t.Fatal("realPath did not stop following the loop")
+	}
 	require.ErrorIs(t, err, errRemoteLinkLoop)
 	_, err = ResolveRemote(remote.Remote, "a.md", []string{dir})
 	require.ErrorIs(t, err, ErrNotFound)
+}
+
+func TestRealPathFollowsUpToFortyLinks(t *testing.T) {
+	dir := realDir(t)
+	writeFile(t, filepath.Join(dir, "page.html"), "x")
+	// l0 -> l1 -> ... -> l39 -> page.html: forty links, the most followed.
+	for i := 0; i < maxRemoteLinks; i++ {
+		target := fmt.Sprintf("l%d", i+1)
+		if i == maxRemoteLinks-1 {
+			target = "page.html"
+		}
+		require.NoError(t, os.Symlink(target, filepath.Join(dir, fmt.Sprintf("l%d", i))))
+	}
+	require.NoError(t, os.Symlink("l0", filepath.Join(dir, "more")))
+	remote := newFakeRemote(t, nil)
+	files, err := remote.files()
+	require.NoError(t, err)
+
+	got, err := realPath(files, filepath.Join(dir, "l0"))
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(dir, "page.html"), got)
+	_, err = realPath(files, filepath.Join(dir, "more"))
+	require.ErrorIs(t, err, errRemoteLinkLoop, "a forty-first link is one too many")
 }
 
 func TestRealPathFollowsDotDotPhysically(t *testing.T) {
@@ -279,8 +315,11 @@ func TestRegistryOpenRemoteServesTheFileAndItsNeighbours(t *testing.T) {
 func TestRegistryOpenRemoteRefuses(t *testing.T) {
 	f := newResolveFixture(t)
 	writeFile(t, filepath.Join(f.cwd, "large.html"), strings.Repeat("x", int(MaxDocumentBytes)+1))
+	writeFile(t, filepath.Join(f.cwd, "limit.html"), strings.Repeat("x", int(MaxDocumentBytes)))
 	remote := newFakeRemote(t, nil)
 	r := NewRegistry()
+	_, err := r.OpenRemote(remote.Remote, f.cwd, filepath.Join(f.cwd, "limit.html"))
+	require.NoError(t, err, "a file of exactly the limit opens")
 
 	for _, tc := range []struct {
 		want             error
@@ -301,7 +340,7 @@ func TestRegistryOpenRemoteRefuses(t *testing.T) {
 
 	remote.fail = errors.New("no route to host")
 	remote.Close()
-	_, err := r.OpenRemote(remote.Remote, f.cwd, filepath.Join(f.cwd, "mockups", "index.html"))
+	_, err = r.OpenRemote(remote.Remote, f.cwd, filepath.Join(f.cwd, "mockups", "index.html"))
 	require.ErrorIs(t, err, ErrRemote)
 }
 

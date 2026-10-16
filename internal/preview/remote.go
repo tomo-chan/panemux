@@ -227,6 +227,9 @@ func realPath(files *sftp.Client, name string) (string, error) {
 func remoteRootOf(file string, roots []string) string {
 	root := ""
 	for _, dir := range roots {
+		// Two roots holding one file differ in length unless they are the
+		// same path, which two working directories resolving alike give.
+		//mutation:exempt[CONDITIONALS_BOUNDARY] EQUIVALENT: equal-length ancestors of one file are the same path
 		if remoteWithin(dir, file) && len(dir) > len(root) {
 			root = dir
 		}

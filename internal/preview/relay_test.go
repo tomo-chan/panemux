@@ -33,6 +33,8 @@ func TestParseLoopbackURL(t *testing.T) {
 		{"https://localhost/", "localhost", 443},
 		{"https://localhost:8443/", "localhost", 8443},
 		{"http://localhost:80/", "localhost", 80},
+		{"http://localhost:1/", "localhost", 1},
+		{"http://localhost:65535/", "localhost", 65535},
 	} {
 		t.Run(tc.raw, func(t *testing.T) {
 			_, host, port, err := ParseLoopbackURL(tc.raw)
