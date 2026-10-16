@@ -17,7 +17,7 @@ import (
 func TestCollectScripts_NameEverySectionInItsNamespace(t *testing.T) {
 	assert.True(t, strings.Contains(collectScript, "echo '"+collectHeader+"'"))
 	assert.Equal(t, "::panemux-tasks v2", collectHeader)
-	for _, name := range []string{"ps", "tmux", sectionCWD, "env", "claude/state", "codex/open"} {
+	for _, name := range []string{"ps", "tmux", sectionCWD, "env", "claude/state", "codex/open", "codex/permission"} {
 		assert.Contains(t, collectScript, "echo '::section "+name+"'", name)
 		assert.Contains(t, attentionScript, "echo '::section "+name+"'", name)
 	}
@@ -26,9 +26,9 @@ func TestCollectScripts_NameEverySectionInItsNamespace(t *testing.T) {
 		assert.NotContains(t, attentionScript, "::section "+name, name)
 	}
 	assert.Equal(t,
-		[]string{"claude/state", "codex/open", "ps", "tmux", sectionCWD, "env", "claude/transcripts", "codex/rollouts"},
+		[]string{"claude/state", "codex/open", "codex/permission", "ps", "tmux", sectionCWD, "env", "claude/transcripts", "codex/rollouts"},
 		collectPlan.full.sections)
-	assert.Equal(t, []string{"claude/state", "codex/open", "ps", "tmux", sectionCWD, "env"}, collectPlan.live.sections)
+	assert.Equal(t, []string{"claude/state", "codex/open", "codex/permission", "ps", "tmux", sectionCWD, "env"}, collectPlan.live.sections)
 }
 
 // Every agent the registry says collects has an adapter registered under
@@ -245,6 +245,7 @@ func parityOutput() (live, stopped []string) {
 			`{"timestamp":"2026-10-16T00:01:00.000Z","type":"response_item",` +
 			`"payload":{"type":"function_call","name":"request_user_input"}}` +
 			"\t\"cwd\":\"/workspace/user/api\"\t\"originator\":\"codex-tui\"\t" + rollout,
+		"::section codex/permission",
 		"::section ps",
 		"  89     1 bash",
 		"  121    89 claude",

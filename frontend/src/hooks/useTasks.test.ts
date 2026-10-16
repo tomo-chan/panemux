@@ -754,6 +754,7 @@ describe('useTasks host terminals (issue #314)', () => {
     ])
   })
 
+  //efficacy:exempt unchanged by #384: the inputGiven describe block after it falls inside its line range
   it('DELETEs a host terminal by its session ID, swallowing a failure', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(ok(payload))
@@ -770,5 +771,62 @@ describe('useTasks host terminals (issue #314)', () => {
 
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/hosts/terminal/board-0123456789abcdef', { method: 'DELETE', keepalive: true })
     expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/hosts/terminal/board-..%2Fx', { method: 'DELETE', keepalive: true })
+  })
+})
+
+describe('useTasks inputGiven', () => {
+  const waiting = { ...payload.tasks[0], agent: 'codex', state: 'wait', wait_signature: 'w1-abc' }
+
+  beforeEach(() => setVisibility('visible'))
+  afterEach(() => vi.restoreAllMocks())
+
+  it('POSTs the wait signature and then collects again', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(ok({ ...payload, tasks: [waiting] }))
+    window.fetch = fetchMock
+    const { result } = renderHook(() => useTasks(true))
+    await waitFor(() => expect(result.current.data).not.toBeNull())
+    fetchMock.mockClear()
+
+    fetchMock.mockResolvedValueOnce({ ok: true, status: 204 } as Response)
+    let failure: string | null = 'not called'
+    await act(async () => {
+      failure = await result.current.inputGiven(result.current.data!.tasks[0])
+    })
+
+    expect(failure).toBeNull()
+    expect(result.current.inputGivenWaits).toEqual(new Set(['w1-abc']))
+    expect(fetchMock.mock.calls[0]).toEqual(['/api/tasks/input-given', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ wait_signature: 'w1-abc' }),
+    }])
+    expect(fetchMock.mock.calls[1]).toEqual(['/api/tasks'])
+  })
+
+  it('reports why it was refused, and a task with no wait signature', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(ok({ ...payload, tasks: [waiting] }))
+    window.fetch = fetchMock
+    const { result } = renderHook(() => useTasks(true))
+    await waitFor(() => expect(result.current.data).not.toBeNull())
+    fetchMock.mockClear()
+
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 400, text: () => Promise.resolve('no wait signature\n') } as Response)
+    const outcomes: (string | null)[] = []
+    await act(async () => {
+      outcomes.push(await result.current.inputGiven(result.current.data!.tasks[0]))
+      outcomes.push(await result.current.inputGiven({ ...result.current.data!.tasks[0], wait_signature: undefined }))
+    })
+    fetchMock.mockRejectedValueOnce(new Error('offline'))
+    await act(async () => {
+      outcomes.push(await result.current.inputGiven(result.current.data!.tasks[0]))
+    })
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 500, text: () => Promise.resolve('') } as Response)
+    await act(async () => {
+      outcomes.push(await result.current.inputGiven(result.current.data!.tasks[0]))
+    })
+
+    expect(outcomes).toEqual(['no wait signature', 'This task is not waiting', 'offline', 'HTTP 500'])
+    expect(result.current.inputGivenWaits).toEqual(new Set())
+    expect(fetchMock).toHaveBeenCalledTimes(3)
   })
 })

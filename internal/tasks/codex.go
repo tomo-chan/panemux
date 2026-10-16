@@ -19,15 +19,17 @@ import (
 // with the process being alive. Checked on real codex-cli 0.142.2 and 0.157.1
 // (macOS) and 0.157.1 (Linux); see docs/behavior/tasks.md.
 
-// codexCollect is Codex's collect adapter. Its live section is the rollouts
-// codex processes hold open, and its stopped section the rollouts under
-// ~/.codex/sessions (issue #264).
+// codexCollect is Codex's collect adapter. Its live sections are the
+// rollouts codex processes hold open and the approval requests its
+// PermissionRequest hook recorded (issue #384), and its stopped section the
+// rollouts under ~/.codex/sessions (issue #264).
 type codexCollect struct{}
 
 // Codex's sections, within the "codex" namespace.
 const (
-	codexSectionOpen     = "open"
-	codexSectionRollouts = "rollouts"
+	codexSectionOpen       = "open"
+	codexSectionPermission = "permission"
+	codexSectionRollouts   = "rollouts"
 )
 
 // codexProgram is the base name of codex's executable, which the open
@@ -37,6 +39,7 @@ const codexProgram = string(agent.Codex)
 func (codexCollect) sections() []collectSection {
 	return []collectSection{
 		{name: codexSectionOpen, stage: stageLive, script: codexOpenScript},
+		{name: codexSectionPermission, stage: stageLive, script: codexPermissionScript},
 		{name: codexSectionRollouts, stage: stageStopped, script: codexRolloutsScript},
 	}
 }
@@ -94,6 +97,15 @@ while read -r pid et; do
 done
 `
 
+// codexPermissionScript prints "<session ID> <turn ID> <unix seconds>" for
+// each approval request codex_permission_hook.sh, a PermissionRequest hook
+// the user registers, recorded under ~/.local/state/panemux/codex-permission/
+// (issue #384): one file per session, the session's latest request, one line
+// each. The hook removes records older than 7 days, so they are read with a
+// single cat; a host without the hook prints the heading and no rows.
+const codexPermissionScript = `cat "$HOME"/.local/state/panemux/codex-permission/* 2>/dev/null
+`
+
 // codexRolloutsScript prints
 // "<mtime>\t<size>\t<file name>\t<"cwd":"...">\t<"originator":"...">" of
 // its first line for the rollouts (~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl)
@@ -121,6 +133,9 @@ type codexCollected struct {
 	// rollouts under ~/.codex/sessions.
 	Open     []codexOpenRollout
 	Rollouts []codexRollout
+	// Permissions is each session's latest approval request (issue #384),
+	// by session ID.
+	Permissions map[string]codexPermission
 }
 
 func (c *codexCollected) addRow(section, line string) {
@@ -133,6 +148,13 @@ func (c *codexCollected) addRow(section, line string) {
 			c.Ages[pid] = age
 		} else if o, ok := parseCodexOpenRow(line); ok {
 			c.Open = append(c.Open, o)
+		}
+	case codexSectionPermission:
+		if sessionID, record, ok := parseCodexPermissionRow(line); ok {
+			if c.Permissions == nil {
+				c.Permissions = map[string]codexPermission{}
+			}
+			c.Permissions[sessionID] = record
 		}
 	case codexSectionRollouts:
 		if r, ok := parseCodexRolloutRow(line); ok {
@@ -150,9 +172,10 @@ func (c *codexCollected) addFile(string, string, []byte) {}
 // file name it was found under.
 func (c *codexCollected) prepared() agentCollected {
 	p := &codexCollected{
-		Ages:     c.Ages,
-		Open:     append([]codexOpenRollout(nil), c.Open...),
-		Rollouts: append([]codexRollout(nil), c.Rollouts...),
+		Ages:        c.Ages,
+		Open:        append([]codexOpenRollout(nil), c.Open...),
+		Rollouts:    append([]codexRollout(nil), c.Rollouts...),
+		Permissions: c.Permissions,
 	}
 	sort.SliceStable(p.Rollouts, func(i, j int) bool { return newerCodexRollout(p.Rollouts[i], p.Rollouts[j]) })
 	for i := range p.Open {
@@ -230,11 +253,21 @@ type codexTurn struct {
 	// and LastItemName the name it calls, for a call.
 	LastItem     string
 	LastItemName string
-	DBStartedAt  int64
-	EventAt      int64
+	// TurnID is the turn Event started, when Event is task_started.
+	TurnID      string
+	DBStartedAt int64
+	EventAt     int64
 	// LastItemAt is the time the last response_item carries itself (Unix
 	// milliseconds, 0 unknown).
 	LastItemAt int64
+}
+
+// codexPermission is the approval request codex's PermissionRequest hook
+// last recorded for a session (issue #384): its turn, and when (Unix
+// milliseconds, on the host's clock).
+type codexPermission struct {
+	TurnID string
+	At     int64
 }
 
 // codexOriginatorTUI is the session_meta originator of a session the TUI
@@ -261,6 +294,15 @@ const (
 // request_user_input, codex's tool for asking the person a question.
 const codexWaitingForQuestion = "a question from codex"
 
+// codexWaitingForPermission is the reason shown for a turn whose approval
+// request the PermissionRequest hook recorded. The hook runs before codex
+// approves a request on its own too, so it is not proof that the person is
+// asked.
+const codexWaitingForPermission = "a permission request from codex"
+
+// codexWaitPermission is the wait signature's kind for such a request.
+const codexWaitPermission = "permission_request"
+
 // codexLeftoverMargin is how much earlier than its process's start (which
 // ps gives to the second) a turn must have started to be taken as a leftover
 // of a process that no longer runs.
@@ -271,6 +313,7 @@ var (
 	codexTurnEvent  = regexp.MustCompile(`"payload":\{"type":"(task_started|task_complete|turn_aborted)"`)
 	codexItemType   = regexp.MustCompile(`"payload":\{"type":"([a-z_]+)"`)
 	codexItemName   = regexp.MustCompile(`"name":"([A-Za-z0-9_.-]+)"`)
+	codexTurnID     = regexp.MustCompile(`"turn_id":"([^"]+)"`)
 	codexTimestamp  = regexp.MustCompile(`"timestamp":"([^"]+)"`)
 	// codexLineTime is the timestamp a rollout line starts with: its own,
 	// not one quoted further in.
@@ -319,7 +362,7 @@ func nonNegative(s string) (int64, bool) {
 	return n, err == nil && n >= 0 && !strings.HasPrefix(s, "+")
 }
 
-// parseCodexAgeRow reads a codex-open row that gives only a process's age.
+// parseCodexAgeRow reads a codex/open row that gives only a process's age.
 func parseCodexAgeRow(line string) (int, int64, bool) {
 	parts := strings.Split(line, "\t")
 	if len(parts) != 2 {
@@ -371,6 +414,20 @@ func parseCodexOpenRow(line string) (codexOpenRollout, bool) {
 	}, true
 }
 
+// parseCodexPermissionRow reads one codex/permission row (see
+// codexPermissionScript).
+func parseCodexPermissionRow(line string) (string, codexPermission, bool) {
+	fields := strings.Fields(line)
+	if len(fields) != 3 || !validUUID.MatchString(fields[0]) || !validUUID.MatchString(fields[1]) {
+		return "", codexPermission{}, false
+	}
+	at, err := strconv.ParseInt(fields[2], 10, 64)
+	if err != nil || at <= 0 {
+		return "", codexPermission{}, false
+	}
+	return fields[0], codexPermission{TurnID: fields[1], At: at * 1000}, true
+}
+
 // parseCodexRolloutRow reads one codex/rollouts row (see codexRolloutsScript).
 func parseCodexRolloutRow(line string) (codexRollout, bool) {
 	parts := strings.SplitN(line, "\t", 5)
@@ -411,7 +468,7 @@ func jsonFragmentString(fragment, prefix string) string {
 }
 
 // parseCodexTurn reads the thread_turns row ("<status> <started_at>") and the
-// two rollout lines of a codex-open row. The lines are cut at 512 bytes, so
+// two rollout lines of a codex/open row. The lines are cut at 512 bytes, so
 // they are searched, not decoded.
 func parseCodexTurn(db, event, item string) codexTurn {
 	var turn codexTurn
@@ -424,6 +481,10 @@ func parseCodexTurn(db, event, item string) codexTurn {
 	}
 	if m := codexTurnEvent.FindStringSubmatch(event); m != nil {
 		turn.Event = m[1]
+		id := codexTurnID.FindStringSubmatch(event)
+		if id != nil && m[1] == codexEventStarted && validUUID.MatchString(id[1]) {
+			turn.TurnID = id[1]
+		}
 		if ts := codexTimestamp.FindStringSubmatch(event); ts != nil {
 			if at, err := time.Parse(time.RFC3339Nano, ts[1]); err == nil {
 				turn.EventAt = at.UnixMilli()
@@ -490,7 +551,7 @@ func (c *codexCollected) daemonTasks(b *taskBuilder) []Task {
 		if o.Elapsed >= 0 {
 			task.StartedAt = b.hostMillis((b.raw.Now - o.Elapsed) * 1000)
 		}
-		b.codexState(&task, o)
+		c.codexState(b, &task, o)
 		tasks = append(tasks, task)
 	}
 	return tasks
@@ -546,7 +607,7 @@ func (c *codexCollected) tuiTasks(b *taskBuilder) []Task {
 		if o.Rollout.CWD != "" {
 			task.CWD = o.Rollout.CWD
 		}
-		b.codexState(&task, o)
+		c.codexState(b, &task, o)
 		tasks = append(tasks, task)
 	}
 	return tasks
@@ -558,7 +619,7 @@ func (c *codexCollected) tuiTasks(b *taskBuilder) []Task {
 // left over from a codex that was killed mid-turn — such a turn stays
 // inProgress for good, and resuming the session writes no new turn until it
 // is given one — so the session is idle.
-func (b *taskBuilder) codexState(task *Task, o codexOpenRollout) {
+func (c *codexCollected) codexState(b *taskBuilder, task *Task, o codexOpenRollout) {
 	inProgress, finished, startedMillis := codexTurnStatus(o.Turn)
 	modTime := b.hostMillis(o.Rollout.ModTime * 1000)
 	switch {
@@ -571,6 +632,11 @@ func (b *taskBuilder) codexState(task *Task, o codexOpenRollout) {
 		// The question's own time, which a second question in the same
 		// turn does not share; the rollout's mtime moves with every write.
 		task.WaitSignature = waitSignature(b.host, AgentCodex, task.SessionID, o.Turn.LastItemAt, codexToolAskUser)
+	case inProgress && codexPermissionOfTurn(c.Permissions[task.SessionID], o.Turn.TurnID, startedMillis):
+		at := c.Permissions[task.SessionID].At
+		task.State, task.StatusSince = StateWait, b.hostMillis(at)
+		task.WaitingFor = codexWaitingForPermission
+		task.WaitSignature = codexPermissionSignature(b.host, task.SessionID, at)
 	case inProgress:
 		task.State, task.StatusSince = StateBusy, b.hostMillis(startedMillis)
 	case finished:
@@ -578,6 +644,23 @@ func (b *taskBuilder) codexState(task *Task, o codexOpenRollout) {
 	default:
 		task.State = StateUnknown
 	}
+}
+
+// codexPermissionOfTurn reports whether record is a request of the turn in
+// progress: by its ID, or, when the turn's task_started is out of the
+// rollout's tail and the ID unknown, by being made since the turn started.
+func codexPermissionOfTurn(record codexPermission, turnID string, startedMillis int64) bool {
+	if turnID != "" {
+		return record.TurnID == turnID
+	}
+	return startedMillis > 0 && record.At >= startedMillis
+}
+
+// codexPermissionSignature is the wait signature of a session's approval
+// request recorded at at (Unix milliseconds): the same record signs the
+// same, and a newer one differently.
+func codexPermissionSignature(host, sessionID string, at int64) string {
+	return waitSignature(host, AgentCodex, sessionID, at, codexWaitPermission)
 }
 
 // codexTurnStatus reads whether the newest turn is in progress or finished,

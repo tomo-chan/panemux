@@ -559,7 +559,7 @@ func fixtureLaunchService() *tasks.Service {
 				return []byte("::panemux-launch ok\n"), nil
 			}
 			return []byte("::panemux-tasks v2\n::now 1790000000\n" +
-				"::section claude/state\n::section codex/open\n::section ps\n::section tmux\n" +
+				"::section claude/state\n::section codex/open\n::section codex/permission\n::section ps\n::section tmux\n" +
 				"::section cwd\n::section env\n::section codex/rollouts\n::section claude/transcripts\n" +
 				"1789999000\t" + fixtureStoppedSessionID + ".jsonl\t\"cwd\":\"/workspace/user/project\"\n::end\n"), nil
 		},
@@ -624,6 +624,7 @@ const fixtureCodexRows = "::section codex/open\n" +
 	"107\t2-00:00:00\t1789999000 1024\tcompleted 1789998000\t\t\t" + `"cwd":"/workspace/user/sample-cli"` + "\t" +
 	`"originator":"codex-tui"` + "\t/workspace/user/.codex/sessions/2026/09/21/rollout-2026-09-21T20-00-00-" +
 	fixtureDaemonCodexSessionID + ".jsonl\n" +
+	"::section codex/permission\n" +
 	"::section codex/rollouts\n" +
 	"1789999950\t4096\t" + fixtureCodexRollout + "\t" +
 	`"cwd":"/workspace/user/sample-web"` + "\t" + `"originator":"codex-tui"` + "\n" +
@@ -686,6 +687,7 @@ func (fixtureTaskConn) Run(context.Context, string, io.Reader) ([]byte, error) {
 ::section cwd
 ::section env
 ::section codex/open
+::section codex/permission
 ::section claude/transcripts
 ::section codex/rollouts
 ::end

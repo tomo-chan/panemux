@@ -25,6 +25,7 @@ import (
 	"syscall"
 	"time"
 
+	"panemux/internal/agent"
 	"panemux/internal/homedir"
 	"panemux/internal/session"
 )
@@ -133,6 +134,11 @@ type Service struct {
 	// unreadableLogged is, per host, the unreadable state files last logged,
 	// keyed by their full name; guarded by mu.
 	unreadableLogged map[string]map[string]UnreadableStateFile
+	// dismissedWaits are the wait signatures of the codex approval requests
+	// marked "Input given" (issue #384); guarded by mu. They live in memory
+	// only: after a restart a request whose turn has finished is not shown
+	// anyway.
+	dismissedWaits map[string]bool
 	// The task summaries; see summaries.go. summaryMu guards summaries and
 	// summaryTasks. summaryCtx ends when the service is closed.
 	summaries    map[summaryKey]*summaryEntry
@@ -196,14 +202,15 @@ func New(opts Options) *Service {
 	}
 	summaryCtx, summaryCancel := context.WithCancel(context.Background())
 	return &Service{
-		opts:          opts,
-		hosts:         map[string]*hostConn{},
-		resumeLocks:   map[string]*resumeLock{},
-		summaries:     map[summaryKey]*summaryEntry{},
-		summaryTasks:  map[string]map[summaryKey]summaryTask{},
-		summarySlots:  make(chan struct{}, summaryConcurrency),
-		summaryCtx:    summaryCtx,
-		summaryCancel: summaryCancel,
+		opts:           opts,
+		hosts:          map[string]*hostConn{},
+		resumeLocks:    map[string]*resumeLock{},
+		dismissedWaits: map[string]bool{},
+		summaries:      map[summaryKey]*summaryEntry{},
+		summaryTasks:   map[string]map[summaryKey]summaryTask{},
+		summarySlots:   make(chan struct{}, summaryConcurrency),
+		summaryCtx:     summaryCtx,
+		summaryCancel:  summaryCancel,
 	}
 }
 
@@ -392,9 +399,43 @@ func (s *Service) collectRaw(
 		result.Error = err.Error()
 		return result, rawSnapshot{}, time.Time{}, false
 	}
+	s.dropDismissedPermissions(name, &raw)
 	result.Status = HostOK
 	result.CollectedAt = &collectedAt
 	return result, raw, collectedAt, true
+}
+
+// ErrInvalidWait is returned by DismissWait for a request with no wait
+// signature.
+var ErrInvalidWait = errors.New("no wait signature")
+
+// DismissWait marks the codex approval request whose wait signature this is
+// as answered ("Input given", issue #384): the session is no longer shown
+// waiting on it. A newer request of the session signs differently and waits
+// again. A signature that names no such request changes nothing.
+func (s *Service) DismissWait(signature string) error {
+	if signature == "" {
+		return ErrInvalidWait
+	}
+	s.mu.Lock()
+	s.dismissedWaits[signature] = true
+	s.mu.Unlock()
+	return nil
+}
+
+// dropDismissedPermissions removes from a host's collection the approval
+// requests marked answered.
+func (s *Service) dropDismissedPermissions(host string, raw *rawSnapshot) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// A parsed collection carries every registered adapter's part, and
+	// composeCollect requires codex's.
+	codex := raw.Agents[agent.Codex].(*codexCollected)
+	for sessionID, record := range codex.Permissions {
+		if s.dismissedWaits[codexPermissionSignature(host, sessionID, record.At)] {
+			delete(codex.Permissions, sessionID)
+		}
+	}
 }
 
 // runHostScript runs script with `sh -s` on a host: locally through

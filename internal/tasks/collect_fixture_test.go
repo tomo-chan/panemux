@@ -20,7 +20,9 @@ type fixtureRaw struct {
 	Transcripts   []transcript
 	CodexOpen     []codexOpenRollout
 	CodexRollouts []codexRollout
-	Now           int64
+	// CodexPermissions is the codex/permission records, by session ID.
+	CodexPermissions map[string]codexPermission
+	Now              int64
 }
 
 func (f fixtureRaw) snapshot() rawSnapshot {
@@ -32,7 +34,9 @@ func (f fixtureRaw) snapshot() rawSnapshot {
 		Now:         f.Now,
 		Agents: map[agent.ID]agentCollected{
 			agent.Claude: &claudeCollected{StateFiles: f.StateFiles, Transcripts: f.Transcripts},
-			agent.Codex:  &codexCollected{Ages: f.CodexAges, Open: f.CodexOpen, Rollouts: f.CodexRollouts},
+			agent.Codex: &codexCollected{
+				Ages: f.CodexAges, Open: f.CodexOpen, Rollouts: f.CodexRollouts, Permissions: f.CodexPermissions,
+			},
 		},
 	}
 }
