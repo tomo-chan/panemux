@@ -354,3 +354,13 @@ func TestBuildTasks_LogVersionIsTheNewestTranscript(t *testing.T) {
 	require.Len(t, tasks, 1)
 	assert.Equal(t, &LogVersion{ModTime: hostNow - 60, Size: 10}, tasks[0].Log)
 }
+
+// A snapshot with no part for an adapter is read as that adapter having
+// reported nothing: a running claude no state file explains is still listed.
+func TestBuildTasks_AnAdapterWithoutAPartReportsNothing(t *testing.T) {
+	raw := rawSnapshot{Now: hostNow, Processes: []process{claudeProc(121, 1)}}
+	tasks := buildTasks("", raw, collectedAt)
+	require.Len(t, tasks, 1)
+	assert.Equal(t, "local:claude:pid-121", tasks[0].ID)
+	assert.Equal(t, StateUnknown, tasks[0].State)
+}

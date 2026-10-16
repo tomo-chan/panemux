@@ -64,10 +64,9 @@ type claudeCollected struct {
 	states []readState
 }
 
-func (c *claudeCollected) addRow(section, line string) {
-	if section != claudeSectionTranscripts {
-		return
-	}
+// addRow reads a transcripts row: the state section declares files, so its
+// lines reach addFile instead.
+func (c *claudeCollected) addRow(_, line string) {
 	if tr, ok := parseTranscriptRow(line); ok {
 		c.Transcripts = append(c.Transcripts, tr)
 	}

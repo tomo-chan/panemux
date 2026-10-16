@@ -142,6 +142,8 @@ func (c *codexCollected) addRow(section, line string) {
 }
 
 // addFile is never called: no codex section declares files.
+//
+//coverage:exempt the parser calls addFile only for a section that declares files, and none of codex's does
 func (c *codexCollected) addFile(string, string, []byte) {}
 
 // prepared orders the rollouts newest first, each open one carrying the
