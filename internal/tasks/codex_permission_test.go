@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"panemux/internal/agent"
 	"panemux/internal/homedir"
 )
 
@@ -259,4 +260,15 @@ func TestService_DismissWaitRefusesAnEmptySignature(t *testing.T) {
 	svc := New(Options{})
 	defer svc.Close()
 	assert.ErrorIs(t, svc.DismissWait(""), ErrInvalidWait)
+}
+
+// A collection without codex's part — codex not collected — has no approval
+// requests to drop, and dropping them does not fail.
+func TestService_DropDismissedPermissionsWithoutACodexPart(t *testing.T) {
+	svc := New(Options{})
+	defer svc.Close()
+	require.NoError(t, svc.DismissWait(codexPermissionSignature("h", codexSessionA, 1000)))
+	raw := rawSnapshot{Agents: map[agent.ID]agentCollected{agent.Claude: &claudeCollected{}}}
+	assert.NotPanics(t, func() { svc.dropDismissedPermissions("h", &raw) })
+	assert.Len(t, raw.Agents, 1)
 }

@@ -428,9 +428,13 @@ func (s *Service) DismissWait(signature string) error {
 func (s *Service) dropDismissedPermissions(host string, raw *rawSnapshot) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	// A parsed collection carries every registered adapter's part, and
-	// composeCollect requires codex's.
-	codex := raw.Agents[agent.Codex].(*codexCollected)
+	// A parsed collection carries a part for each collect adapter; codex's
+	// is missing only when codex is not collected, and then there is no
+	// request to drop.
+	codex, ok := raw.Agents[agent.Codex].(*codexCollected)
+	if !ok {
+		return
+	}
 	for sessionID, record := range codex.Permissions {
 		if s.dismissedWaits[codexPermissionSignature(host, sessionID, record.At)] {
 			delete(codex.Permissions, sessionID)
