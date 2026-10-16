@@ -38,7 +38,7 @@ layout rendering, terminal emulation, interaction state, and presentation.
 | `internal/ws` | Bridge session bytes and control messages to terminal WebSockets, stream command-center events, and serve the task event stream (`/ws/tasks/events`). |
 | `internal/requestsecurity` | Guard every API and WebSocket before side effects using browser Origin, Referer and Fetch Metadata evidence. |
 | `internal/server` | Compose middleware, API routes, WebSocket routes, static assets, and SPA fallback into the production router. |
-| `internal/preview` | Resolve a clicked HTML or Markdown path against a session's working directories, refusing any file outside them, register the file under a random token for the server's lifetime, and serve it and the files under its root sandboxed in an opaque origin, rendering Markdown. |
+| `internal/preview` | Resolve a clicked HTML or Markdown path against a session's working directories, refusing any file outside them, register the file under a random token for the server's lifetime, and serve it and the files under its root sandboxed in an opaque origin, rendering Markdown. For an SSH session the same is done on the host over SFTP (`Remote`, `ResolveRemote`, `Registry.OpenRemote`), and a clicked localhost URL of the host is relayed to a port of its own on `127.0.0.1` (`Relays`). |
 | `internal/portforward` | Maintain short-lived loopback listeners that forward callback traffic through a session's SSH connection. |
 | `internal/board` | Invoke agmsg through its documented scripts, relay rows across configured hosts, and maintain the in-memory status/history view. |
 | `internal/commandcenter` | Run one headless Claude query at a time, persist its session/history state, and stream structured events. |
@@ -178,9 +178,14 @@ SSH pane; existing sessions and the tmux server's environment are not reconfigur
 ### Preview flow
 
 A path the terminal shows as an HTML or Markdown link is sent to
-`POST /api/sessions/{id}/preview`, which resolves it on the panemux host and returns a
+`POST /api/sessions/{id}/preview`, which resolves it on the session's host and returns a
 `/preview/<token>/…` address. `PreviewSplit` frames that address beside the terminal; Open in new tab
-opens the same address. Behavior is in [the split preview](behavior/preview.md), and the isolation in
+opens the same address. For an `ssh` or `ssh_tmux` session the API's `previewHosts` keeps one
+`preview.Remote` per `ssh_connections` entry as it resolved, connected with
+`session.DialPreviewConn` — the pane dialer, its own connection — and files are read over its SFTP
+subsystem. A localhost URL clicked in such a session is sent as `url`; `preview.Relays` gives the
+host's address and port a listener on `127.0.0.1:0` and returns that address, which `PreviewSplit`
+frames in the page's own origin. Behavior is in [the split preview](behavior/preview.md), and the isolation in
 [preview security](security/preview.md).
 
 ## Trust boundaries
@@ -200,11 +205,14 @@ opens the same address. Behavior is in [the split preview](behavior/preview.md),
   paths, and subprocess operands follow the per-sink rules in [Security design](security.md).
 - Panemux runs no copy of itself on remote hosts. SSH-backed features use the existing SSH session
   and operator-installed remote tools; the task dashboard uses its own SSH connection per host and
-  runs only its two fixed scripts over it — collection, and starting or resuming a claude task.
+  runs only its two fixed scripts over it — collection, and starting or resuming a claude task. The
+  split preview keeps its own SSH connection per host too, and runs no command over it: it reads files
+  over SFTP and opens direct-tcpip channels to the host's loopback.
 - Previewed HTML and Markdown are untrusted content. They are served under `/preview/<token>/` in a
   sandboxed opaque origin, so their requests to `/api/*` and `/ws/*` are cross-site and refused; the
   token, issued only by the guarded API, is what grants access to a file
-  ([preview security](security/preview.md)).
+  ([preview security](security/preview.md)). A relayed localhost page of an SSH host runs in the
+  origin of its relay port on `127.0.0.1`, another loopback port, which the request guard refuses.
 - The browser is untrusted input to Go handlers. Structured backend payloads with declared frontend
   schemas remain untrusted until validation succeeds; other input paths apply their own parsing and
   bounds checks.

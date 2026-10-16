@@ -270,7 +270,8 @@ describe('TerminalPane preview', () => {
     mockUseTerminal.mockReturnValue(running)
     mockUseGitInfo.mockReturnValue({ gitInfo: { is_git: false }, refreshIfStale: vi.fn(), refreshNow: vi.fn() })
     window.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      status: 'ready', url: '/preview/ab/mockups/index.html', path: '/workspace/user/project/mockups/index.html', host: '',
+      status: 'ready', kind: 'file', url: '/preview/ab/mockups/index.html', path: '/workspace/user/project/mockups/index.html',
+      host: '',
     })))
     window.localStorage.clear()
   })
@@ -282,14 +283,58 @@ describe('TerminalPane preview', () => {
     return options.onPreviewPath
   }
 
-  it('links paths only in panes on the panemux host', () => {
+  it('links paths in every pane, local or on an SSH host (issue #387)', () => {
     const linked = (['local', 'tmux', 'ssh', 'ssh_tmux'] as const).filter((type) => {
       const { unmount } = render(<TerminalPane pane={{ id: `p-${type}`, type }} />)
       const result = typeof previewPath() === 'function'
       unmount()
       return result
     })
-    expect(linked).toEqual(['local', 'tmux'])
+    expect(linked).toEqual(['local', 'tmux', 'ssh', 'ssh_tmux'])
+  })
+
+  function activateLink(url: string) {
+    const options = mockUseTerminal.mock.calls[mockUseTerminal.mock.calls.length - 1][0] as {
+      onLinkActivate: (url: string) => void
+    }
+    act(() => options.onLinkActivate(url))
+  }
+
+  it.each(['ssh', 'ssh_tmux'] as const)('opens a clicked localhost URL of an %s pane through its relay', async (type) => {
+    window.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      status: 'ready', kind: 'url', url: 'http://127.0.0.1:49152/app', path: 'http://localhost:5173/app', host: 'devbox',
+    })))
+    const openSpy = vi.fn()
+    window.open = openSpy as unknown as typeof window.open
+    const { findByTitle } = render(<TerminalPane pane={{ id: 'p-ssh', type }} />)
+
+    activateLink('http://localhost:5173/app')
+
+    const frame = await findByTitle('Preview of http://localhost:5173/app')
+    expect(frame).toHaveAttribute('src', 'http://127.0.0.1:49152/app')
+    expect(window.fetch).toHaveBeenCalledWith('/api/sessions/p-ssh/preview', expect.objectContaining({
+      body: JSON.stringify({ url: 'http://localhost:5173/app' }),
+    }))
+    expect(openSpy).not.toHaveBeenCalled()
+  })
+
+  it('opens other URLs of an SSH pane, and every URL of a local pane, as before', () => {
+    const openSpy = vi.fn().mockReturnValue(null)
+    window.open = openSpy as unknown as typeof window.open
+    window.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ url: 'x', forwarded: false })))
+
+    const { unmount } = render(<TerminalPane pane={{ id: 'p-ssh', type: 'ssh' }} />)
+    activateLink('https://example.com/login?redirect_uri=http%3A%2F%2Flocalhost%3A8085%2F')
+    expect(openSpy).toHaveBeenCalledWith(
+      'https://example.com/login?redirect_uri=http%3A%2F%2Flocalhost%3A8085%2F', '_blank', 'noopener,noreferrer',
+    )
+    expect(window.fetch).toHaveBeenCalledWith('/api/sessions/p-ssh/open-url', expect.anything())
+    unmount()
+
+    render(<TerminalPane pane={{ id: 'p-local', type: 'local' }} />)
+    activateLink('http://localhost:5173/')
+    expect(window.fetch).not.toHaveBeenCalledWith('/api/sessions/p-local/preview', expect.anything())
+    expect(window.fetch).toHaveBeenCalledWith('/api/sessions/p-local/open-url', expect.anything())
   })
 
   it('opens a clicked path beside the terminal, keeping the terminal in place', async () => {

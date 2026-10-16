@@ -66,7 +66,12 @@ type Handler struct {
 	forwards                *portforward.Registry
 	// previews holds the files opened in the split preview. It lives as
 	// long as the server: a preview's tab outlives its pane.
-	previews        *preview.Registry
+	previews *preview.Registry
+	// previewRelays and previewHosts relay the loopback URLs of SSH hosts
+	// and hold the connections previews of those hosts use; both live as
+	// long as the server, for the same reason.
+	previewRelays   *preview.Relays
+	previewHosts    *previewHosts
 	restartInFlight map[string]struct{}
 	ghBinaryPath    string
 	codeBinaryPath  string
@@ -195,6 +200,8 @@ func NewHandler(
 		taskGitCache:          make(map[string]taskGitCacheEntry),
 		boardCache:            boardCache,
 		previews:              preview.NewRegistry(),
+		previewRelays:         preview.NewRelays(),
+		previewHosts:          newPreviewHosts(),
 	}
 	h.tasks = newTaskService(h)
 	h.taskRecords = tasks.NewRecordStore("")

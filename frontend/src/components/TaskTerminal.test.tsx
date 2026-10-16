@@ -80,6 +80,35 @@ describe('TaskTerminal', () => {
     )
   })
 
+  function activateLink(url: string) {
+    const calls = useTerminalMock.mock.calls as unknown as Array<[{ onLinkActivate: (url: string) => void }]>
+    calls[calls.length - 1][0].onLinkActivate(url)
+  }
+
+  it('previews a localhost URL of a task on an SSH host, and opens every other URL in a tab (issue #387)', () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    const onPreviewUrl = vi.fn()
+    render(<TaskTerminal sessionId="board-0123456789abcdef" onStatus={vi.fn()} onPreviewUrl={onPreviewUrl} />)
+
+    activateLink('http://localhost:5173/app')
+    expect(onPreviewUrl).toHaveBeenCalledWith('http://localhost:5173/app')
+    expect(open).not.toHaveBeenCalled()
+
+    activateLink('https://example.com/')
+    expect(open).toHaveBeenCalledWith('https://example.com/', '_blank', 'noopener,noreferrer')
+    expect(onPreviewUrl).toHaveBeenCalledTimes(1)
+    open.mockRestore()
+  })
+
+  it('opens a localhost URL in a tab when the popup previews none', () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    render(<TaskTerminal sessionId="board-0123456789abcdef" onStatus={vi.fn()} />)
+
+    activateLink('http://localhost:5173/')
+    expect(open).toHaveBeenCalledWith('http://localhost:5173/', '_blank', 'noopener,noreferrer')
+    open.mockRestore()
+  })
+
   it('takes no input and reports connecting until connected', () => {
     const onStatus = vi.fn()
     const { getByTestId } = render(<TaskTerminal sessionId="board-0123456789abcdef" onStatus={onStatus} />)

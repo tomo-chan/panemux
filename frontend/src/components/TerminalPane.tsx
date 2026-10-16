@@ -4,7 +4,7 @@ import { useTerminal } from '../hooks/useTerminal'
 import { useGitInfo } from '../hooks/useGitInfo'
 import { usePaneUrlOpen } from '../hooks/usePaneUrlOpen'
 import { usePreview } from '../hooks/usePreview'
-import { paneSplitKey } from '../utils/preview'
+import { isPreviewableUrl, paneSplitKey } from '../utils/preview'
 import type { PaneEdge } from '../utils/layoutTree'
 import { PaneHeader } from './PaneHeader'
 import { PaneStatusBar } from './PaneStatusBar'
@@ -41,24 +41,36 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
   const { gitInfo, refreshIfStale, refreshNow } = useGitInfo(pane.id, gitInfoEnabled)
   const urlOpen = usePaneUrlOpen(pane.id)
 
-  // Paths in a pane on the panemux host open in the split preview (issue
-  // #385). usePreview needs the terminal's connection, so the terminal is
-  // handed a stable callback that reaches it through a ref.
+  // Paths open in the split preview (issue #385), read from the pane's host
+  // when it is an SSH host (issue #387), and a localhost URL of a pane on an
+  // SSH host opens there through its relay. usePreview needs the terminal's
+  // connection, so the terminal is handed stable callbacks that reach it
+  // through refs.
   const previewOpenRef = useRef<((path: string) => void) | null>(null)
-  const previewable = pane.type === 'local' || pane.type === 'tmux'
+  const previewUrlRef = useRef<((url: string) => void) | null>(null)
+  const remote = pane.type === 'ssh' || pane.type === 'ssh_tmux'
   const openPreviewPath = useCallback((path: string) => previewOpenRef.current?.(path), [])
+  const { openUrl } = urlOpen
+  const activateLink = useCallback((url: string) => {
+    if (remote && isPreviewableUrl(url)) {
+      previewUrlRef.current?.(url)
+      return
+    }
+    openUrl(url)
+  }, [remote, openUrl])
 
   const { handleResize, connected, dims, sessionState, reconnectFailed, restartSession } = useTerminal({
     sessionId: pane.id,
     container: containerEl,
     repoURL: gitInfo.repo_url,
     onInteraction: refreshIfStale,
-    onLinkActivate: urlOpen.openUrl,
+    onLinkActivate: activateLink,
     onBrowserOpenRequest: urlOpen.requestOpen,
-    onPreviewPath: previewable ? openPreviewPath : undefined,
+    onPreviewPath: openPreviewPath,
   })
   const preview = usePreview(pane.id, connected && sessionState === 'running')
   previewOpenRef.current = preview.open
+  previewUrlRef.current = preview.openUrl
 
   // Observe resize events for this pane
   useEffect(() => {

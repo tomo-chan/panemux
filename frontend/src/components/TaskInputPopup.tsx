@@ -103,8 +103,10 @@ export const TaskInputPopup: React.FC<TaskInputPopupProps> = ({
   const tmuxSession = attach.phase === 'ready' ? attach.tmuxSession : task.location.tmux_session ?? ''
   const openAction = taskOpenAction(task, pane)
   const isMaximized = maximized && !sheet
-  // Paths in a task on the panemux host open beside the terminal (issue
-  // #385); the preview is hidden whenever the terminal is not connected.
+  // Paths open beside the terminal (issue #385), read from the task's host
+  // when it is an SSH host, and a localhost URL of a task on an SSH host
+  // opens there through its relay (issue #387); the preview is hidden
+  // whenever the terminal is not connected.
   const preview = usePreview(attach.phase === 'ready' ? attach.sessionId : '', chip === 'connected')
 
   useTerminalPopupKeyboard({
@@ -149,7 +151,8 @@ export const TaskInputPopup: React.FC<TaskInputPopupProps> = ({
           key={`${attach.sessionId}:${attempt}`}
           sessionId={attach.sessionId}
           onStatus={onTerminalStatus}
-          onPreviewPath={task.host === '' ? preview.open : undefined}
+          onPreviewPath={preview.open}
+          onPreviewUrl={task.host === '' ? undefined : preview.openUrl}
         />
       ) : (
         <div className="td-input-blank">

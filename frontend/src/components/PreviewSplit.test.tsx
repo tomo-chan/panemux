@@ -26,7 +26,7 @@ afterEach(() => {
 })
 
 const ready: PreviewView = {
-  kind: 'ready', url: '/preview/ab/mockups/index.html', path: '/workspace/user/project/mockups/index.html', host: '',
+  kind: 'ready', source: 'file', url: '/preview/ab/mockups/index.html', path: '/workspace/user/project/mockups/index.html', host: '',
   generation: 0,
 }
 
@@ -83,6 +83,23 @@ describe('PreviewSplit', () => {
     const region = screen.getByRole('region', { name: 'Preview' })
     expect(region).toHaveTextContent('local')
     expect(region).toHaveTextContent('/workspace/user/project/mockups/index.html')
+  })
+
+  it('shows a relayed localhost URL in its own origin, naming its host (issue #387)', () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    renderSplit({
+      kind: 'ready', source: 'url', url: 'http://127.0.0.1:49152/app', path: 'http://localhost:5173/app', host: 'devbox',
+      generation: 0,
+    })
+
+    const frame = screen.getByTitle('Preview of http://localhost:5173/app') as HTMLIFrameElement
+    expect(frame.getAttribute('src')).toBe('http://127.0.0.1:49152/app')
+    expect(frame.getAttribute('sandbox')).toBe('allow-scripts allow-same-origin allow-forms')
+    const region = screen.getByRole('region', { name: 'Preview' })
+    expect(region).toHaveTextContent('devbox')
+    expect(region).toHaveTextContent('http://localhost:5173/app')
+    fireEvent.click(screen.getByRole('button', { name: 'Open in new tab' }))
+    expect(open).toHaveBeenCalledWith('http://127.0.0.1:49152/app', '_blank', 'noopener,noreferrer')
   })
 
   it('starts from the ratio stored for this pane', () => {

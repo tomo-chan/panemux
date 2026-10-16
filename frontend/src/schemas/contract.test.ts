@@ -92,6 +92,7 @@ const roundTrips: RoundTrip[] = [
   { fixture: 'open-url', schemaName: 'OpenUrlResponseSchema', schema: schemas.OpenUrlResponseSchema },
   { fixture: 'preview', schemaName: 'PreviewResponseSchema', schema: schemas.PreviewResponseSchema },
   { fixture: 'preview-choose', schemaName: 'PreviewResponseSchema', schema: schemas.PreviewResponseSchema },
+  { fixture: 'preview-url', schemaName: 'PreviewResponseSchema', schema: schemas.PreviewResponseSchema },
   {
     fixture: 'board-status',
     schemaName: 'BoardStatusResponseSchema',

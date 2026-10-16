@@ -1,0 +1,7 @@
+{
+  "host": "devbox",
+  "kind": "url",
+  "path": "http://localhost:5173/app",
+  "status": "ready",
+  "url": "http://127.0.0.1:49152/app"
+}

@@ -16,17 +16,20 @@ const { terminals } = vi.hoisted(() => ({
     mounts: [] as string[],
     onStatus: null as ((status: TaskTerminalStatus) => void) | null,
     onPreviewPath: undefined as ((path: string) => void) | undefined,
+    onPreviewUrl: undefined as ((url: string) => void) | undefined,
   },
 }))
 
 vi.mock('./TaskTerminal', () => ({
-  TaskTerminal: ({ sessionId, onStatus, onPreviewPath }: {
+  TaskTerminal: ({ sessionId, onStatus, onPreviewPath, onPreviewUrl }: {
     sessionId: string
     onStatus: (status: TaskTerminalStatus) => void
     onPreviewPath?: (path: string) => void
+    onPreviewUrl?: (url: string) => void
   }) => {
     terminals.onStatus = onStatus
     terminals.onPreviewPath = onPreviewPath
+    terminals.onPreviewUrl = onPreviewUrl
     useEffect(() => {
       terminals.mounts.push(sessionId)
     }, [sessionId])
@@ -193,6 +196,7 @@ beforeEach(() => {
   terminals.mounts = []
   terminals.onStatus = null
   terminals.onPreviewPath = undefined
+  terminals.onPreviewUrl = undefined
   window.localStorage.clear()
   setNarrow(false)
 })
@@ -676,7 +680,8 @@ void React
 describe('TaskDashboard Type in pane: preview', () => {
   beforeEach(() => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(JSON.stringify({
-      status: 'ready', url: '/preview/ab/mockups/index.html', path: '/workspace/user/review-api/mockups/index.html', host: '',
+      status: 'ready', kind: 'file', url: '/preview/ab/mockups/index.html',
+      path: '/workspace/user/review-api/mockups/index.html', host: '',
     })))
   })
 
@@ -720,17 +725,31 @@ describe('TaskDashboard Type in pane: preview', () => {
     expect(window.localStorage.getItem('panemux:preview-split:task:wait-1')).toBe('55')
   })
 
-  it('links paths only in a task on the panemux host', async () => {
+  it('links paths in every task, and previews localhost URLs only of a task on an SSH host (issue #387)', async () => {
     renderDashboard()
     await openPopup()
     setStatus('connected')
     expect(typeof terminals.onPreviewPath).toBe('function')
+    expect(terminals.onPreviewUrl).toBeUndefined()
     fireEvent.click(within(dialog()).getByRole('button', { name: 'Close' }))
 
     await openPopup('idle-1')
     setStatus('connected')
     expect(within(dialog()).getByRole('heading', { name: 'docs' })).toBeInTheDocument()
-    expect(terminals.onPreviewPath).toBeUndefined()
+    expect(typeof terminals.onPreviewPath).toBe('function')
+    expect(typeof terminals.onPreviewUrl).toBe('function')
+
+    vi.mocked(globalThis.fetch).mockImplementation(async () => new Response(JSON.stringify({
+      status: 'ready', kind: 'url', url: 'http://127.0.0.1:49152/', path: 'http://localhost:5173/', host: 'build-box',
+    })))
+    await act(async () => {
+      terminals.onPreviewUrl!('http://localhost:5173/')
+    })
+    const frame = within(dialog()).getByTitle('Preview of http://localhost:5173/')
+    expect(frame).toHaveAttribute('src', 'http://127.0.0.1:49152/')
+    expect(within(dialog()).getByRole('region', { name: 'Preview' })).toHaveTextContent('build-box')
+    expect(globalThis.fetch).toHaveBeenCalledWith(expect.stringMatching(/^\/api\/sessions\/board-.*\/preview$/),
+      expect.objectContaining({ body: JSON.stringify({ url: 'http://localhost:5173/' }) }))
   })
 
   it('hides the preview when the terminal disconnects', async () => {

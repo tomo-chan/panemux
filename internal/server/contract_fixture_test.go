@@ -6,7 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -17,12 +20,14 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/pkg/sftp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"panemux/internal/board"
 	"panemux/internal/commandcenter"
 	"panemux/internal/config"
+	"panemux/internal/preview"
 	"panemux/internal/session"
 	"panemux/internal/taskevents"
 	"panemux/internal/tasks"
@@ -459,6 +464,29 @@ var contractFixtures = map[string]contractFixture{
 		rr := e.do(t, http.MethodPost, "/api/sessions/pane-preview/preview", `{"path":"docs/design.md"}`)
 		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
 		return rr.Body.Bytes(), map[string]string{dir: fixtureHomePath}
+	}},
+
+	// A clicked localhost URL of a pane on an SSH host, relayed to a port
+	// of its own (issue #387). The relay's random port is stood in for.
+	"preview-url": {capture: func(t *testing.T) ([]byte, map[string]string) {
+		e := newAPIEnv(t)
+		dev := httptest.NewServer(http.NotFoundHandler())
+		t.Cleanup(dev.Close)
+		e.cfg.SSHConnections = map[string]config.SSHConnection{"devbox": {Host: "devbox.example.invalid", User: "demo"}}
+		e.srv.api.SetPreviewDialer(func(session.SSHConfig) (preview.RemoteConn, error) {
+			return fixturePreviewConn{addr: dev.Listener.Addr().String()}, nil
+		})
+		e.mgr.Add(&fixtureSSHPreviewSession{wsFakeSession: newWSFakeSession("pane-ssh")})
+
+		rr := e.do(t, http.MethodPost, "/api/sessions/pane-ssh/preview", `{"url":"http://localhost:5173/app"}`)
+		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+		var got struct {
+			URL string `json:"url"`
+		}
+		require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &got))
+		relayed, err := url.Parse(got.URL)
+		require.NoError(t, err)
+		return rr.Body.Bytes(), map[string]string{":" + relayed.Port() + "/": ":49152/"}
 	}},
 
 	"board-status": {capture: func(t *testing.T) ([]byte, map[string]string) {
@@ -1439,6 +1467,24 @@ func fixturePreviewDir(t *testing.T, e *apiEnv, id string) string {
 	})
 	return dir
 }
+
+// fixtureSSHPreviewSession is an ssh pane made from the devbox entry.
+type fixtureSSHPreviewSession struct{ *wsFakeSession }
+
+func (s *fixtureSSHPreviewSession) Type() session.Type     { return session.TypeSSH }
+func (s *fixtureSSHPreviewSession) ConnectionName() string { return "devbox" }
+
+// fixturePreviewConn is the preview's connection to devbox: its loopback
+// dials reach addr on this machine.
+type fixturePreviewConn struct{ addr string }
+
+func (c fixturePreviewConn) Dial(ctx context.Context, _ string) (net.Conn, error) {
+	var d net.Dialer
+	return d.DialContext(ctx, "tcp", c.addr)
+}
+func (fixturePreviewConn) SFTP() *sftp.Client    { return nil }
+func (fixturePreviewConn) Done() <-chan struct{} { return nil }
+func (fixturePreviewConn) Close() error          { return nil }
 
 type fixturePreviewSession struct {
 	*wsFakeSession

@@ -191,9 +191,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ view, minWidth, onChoose, o
             className="pm-preview-frame"
             src={view.url}
             title={`Preview of ${view.path}`}
-            // The server's policy sandboxes the page too; this keeps it out of
-            // the dashboard's origin even if that header were lost.
-            sandbox="allow-scripts"
+            sandbox={frameSandbox(view.source)}
             referrerPolicy="no-referrer"
           />
         )}
@@ -220,6 +218,16 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ view, minWidth, onChoose, o
       </div>
     </section>
   )
+}
+
+// A file is served from the dashboard's own origin, so its frame keeps it in
+// an opaque origin of its own: the server's policy sandboxes it too, and this
+// keeps it out of the dashboard's origin even if that header were lost. A
+// relayed localhost URL (issue #387) is already in an origin of its own, its
+// relay's port on 127.0.0.1, and keeps it: a development server's module
+// scripts, storage and HMR WebSocket need the page's own origin.
+export function frameSandbox(source: 'file' | 'url'): string {
+  return source === 'url' ? 'allow-scripts allow-same-origin allow-forms' : 'allow-scripts'
 }
 
 // Whether the previewed page holds the keyboard. Its keys never reach this

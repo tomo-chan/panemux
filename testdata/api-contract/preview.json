@@ -1,5 +1,6 @@
 {
   "host": "",
+  "kind": "file",
   "path": "/tmp/sample-project/mockups/index.html",
   "status": "ready",
   "url": "/preview/0123456789abcdef0123456789abcdef/mockups/index.html"

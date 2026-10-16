@@ -160,7 +160,7 @@ func TestPostSessionPreview_Refusals(t *testing.T) {
 		{"no working directory", "no-cwd", `{"path":"a.md"}`, "working directory", http.StatusUnprocessableEntity},
 		{"session with no working directory at all", "plain", `{"path":"a.md"}`, "working directory",
 			http.StatusUnprocessableEntity},
-		{"remote pane", "remote", `{"path":"a.md"}`, "panemux host", http.StatusBadRequest},
+		{"remote pane naming no connection", "remote", `{"path":"a.md"}`, "SSH connection", http.StatusBadRequest},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

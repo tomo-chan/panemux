@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useTerminal } from '../hooks/useTerminal'
+import { openUrlTab } from '../utils/paneUrlOpen'
+import { isPreviewableUrl } from '../utils/preview'
 
 // The terminal of the task dashboard's Type in pane popup (issue #284): the
 // board's temporary attach (`/ws/{session_id}`, issue #283) drawn by the same
@@ -34,16 +36,27 @@ interface TaskTerminalProps {
   onStatus: (status: TaskTerminalStatus) => void
   /** Opens a clicked HTML or Markdown path in the popup's preview (issue #385). */
   onPreviewPath?: (path: string) => void
+  /**
+   * Opens a clicked localhost URL in the popup's preview, for a task on an
+   * SSH host (issue #387). Without it, and for every other URL, a link opens
+   * in a new tab.
+   */
+  onPreviewUrl?: (url: string) => void
 }
 
-export const TaskTerminal: React.FC<TaskTerminalProps> = ({ sessionId, onStatus, onPreviewPath }) => {
+export const TaskTerminal: React.FC<TaskTerminalProps> = ({ sessionId, onStatus, onPreviewPath, onPreviewUrl }) => {
   const [container, setContainer] = useState<HTMLDivElement | null>(null)
   const [everConnected, setEverConnected] = useState(false)
+  const activateLink = useCallback((url: string) => {
+    if (onPreviewUrl && isPreviewableUrl(url)) onPreviewUrl(url)
+    else openUrlTab(url)
+  }, [onPreviewUrl])
   const { connected, sessionState, reconnectFailed, handleResize } = useTerminal({
     sessionId,
     container,
     // /api/sessions/{id}/restart knows only panes; the popup opens the attach again instead.
     recoverOnDisconnect: false,
+    onLinkActivate: activateLink,
     onPreviewPath,
   })
 

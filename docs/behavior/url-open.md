@@ -99,7 +99,11 @@ process launched inside tmux cannot wrap those panes' notifications for an unrel
 
 ### Clicked links
 
-Links in the terminal are opened by the frontend in a new tab. A link that is itself a loopback URL
+Links in the terminal are opened by the frontend in a new tab. In an `ssh` or `ssh_tmux` pane, and
+in the Type in pane popup of a task on an SSH host, a link that is itself a localhost URL opens in
+the split preview instead, through a relay of its own rather than a forward
+([Localhost URLs of an SSH host](preview.md#localhost-urls-of-an-ssh-host)); the preview's Open in
+new tab opens the relayed page. Elsewhere, a link that is itself a loopback URL
 is opened into a blank tab that is navigated once the forward is ready, because the browser would
 otherwise reach the port before it exists; every other URL opens immediately and the forward is
 prepared alongside it, since its callback only fires after the operator has logged in. A forward

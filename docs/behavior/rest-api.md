@@ -209,22 +209,36 @@ is meant to complete.
 
 Accepts `{ "path": "<the path as the terminal showed it>" }`, resolves it from the session's working
 directory and its agent's worktrees, and registers the HTML or Markdown file it names for the
-[split preview](preview.md). Only `local` and `tmux` sessions resolve paths.
+[split preview](preview.md). For an `ssh` or `ssh_tmux` session — a pane, or a task's attach — the
+path is resolved on, and the file read from, the session's SSH host.
 
-- `400`: invalid JSON body; a path that is not `.html`, `.htm`, `.md` or `.markdown`; or a session
-  whose shell runs on another host
+Accepts `{ "url": "<a localhost URL>" }` instead for an `ssh` or `ssh_tmux` session: the URL's address
+and port on the session's host are relayed to a port of their own on `127.0.0.1` of the panemux host
+([Localhost URLs of an SSH host](preview.md#localhost-urls-of-an-ssh-host)).
+
+- `400`: invalid JSON body; a path that is not `.html`, `.htm`, `.md` or `.markdown`; a URL that is
+  not an http or https URL of `localhost`, `127.0.0.1` or `[::1]`; a URL for a session on the panemux
+  host; or an `ssh`/`ssh_tmux` session that names no SSH connection
 - `403`: the file is outside the session's working directory and its agent's worktrees — an absolute
   path elsewhere, a `../` that leaves them, or a symbolic link that leads out of them (the reason names
   the directories allowed)
 - `404`: no session exists for `id`, or no file exists at the path (the reason names where it looked)
 - `413`: the file is larger than 10 MiB
 - `422`: the session's working directory and its agent's worktrees are all unknown
+- `502`: the session's SSH host cannot be reached (or its `ssh_connections` entry no longer
+  resolves), or nothing answers at the URL's address on it
 - `200`: the preview to show, or the files to choose from
 
 Errors carry their reason as plain text, which the preview shows. A file to show:
 
 ```json
-{ "status": "ready", "url": "/preview/<token>/mockups/index.html", "path": "/workspace/user/project/mockups/index.html", "host": "" }
+{ "status": "ready", "kind": "file", "url": "/preview/<token>/mockups/index.html", "path": "/workspace/user/project/mockups/index.html", "host": "" }
+```
+
+A relayed URL, with `path` the URL as clicked:
+
+```json
+{ "status": "ready", "kind": "url", "url": "http://127.0.0.1:<relay port>/app", "path": "http://localhost:5173/app", "host": "devbox" }
 ```
 
 Several files a relative path may name, absolute, in the order the directories were searched; the
@@ -234,7 +248,7 @@ chosen one is sent back as `path`:
 { "status": "choose", "candidates": ["/workspace/user/project/docs/design.md", "/workspace/user/project-wt/docs/design.md"], "host": "" }
 ```
 
-`host` is `""` for the panemux host.
+`host` is `""` for the panemux host, otherwise the session's `ssh_connections` name.
 
 ### `GET /preview/{token}/*`
 
