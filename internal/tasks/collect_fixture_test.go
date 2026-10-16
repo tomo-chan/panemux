@@ -11,17 +11,17 @@ import (
 // sections and every adapter's sections side by side. snapshot hands each
 // adapter its own part.
 type fixtureRaw struct {
-	ProcessCWDs   map[int]string
-	PaneIDs       map[int]string
-	CodexAges     map[int]int64
-	StateFiles    []stateFile
-	Processes     []process
-	TmuxPanes     []tmuxPane
-	Transcripts   []transcript
-	CodexOpen     []codexOpenRollout
-	CodexRollouts []codexRollout
+	ProcessCWDs map[int]string
+	PaneIDs     map[int]string
+	CodexAges   map[int]int64
 	// CodexPermissions is the codex/permission records, by session ID.
 	CodexPermissions map[string]codexPermission
+	StateFiles       []stateFile
+	Processes        []process
+	TmuxPanes        []tmuxPane
+	Transcripts      []transcript
+	CodexOpen        []codexOpenRollout
+	CodexRollouts    []codexRollout
 	Now              int64
 }
 

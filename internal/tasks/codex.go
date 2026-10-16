@@ -129,13 +129,13 @@ done | head -n 100
 type codexCollected struct {
 	// Ages is how long each codex process has run, in seconds.
 	Ages map[int]int64
+	// Permissions is each session's latest approval request (issue #384),
+	// by session ID.
+	Permissions map[string]codexPermission
 	// Open is every rollout a codex process holds open, and Rollouts the
 	// rollouts under ~/.codex/sessions.
 	Open     []codexOpenRollout
 	Rollouts []codexRollout
-	// Permissions is each session's latest approval request (issue #384),
-	// by session ID.
-	Permissions map[string]codexPermission
 }
 
 func (c *codexCollected) addRow(section, line string) {

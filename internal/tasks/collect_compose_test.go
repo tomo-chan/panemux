@@ -26,9 +26,14 @@ func TestCollectScripts_NameEverySectionInItsNamespace(t *testing.T) {
 		assert.NotContains(t, attentionScript, "::section "+name, name)
 	}
 	assert.Equal(t,
-		[]string{"claude/state", "codex/open", "codex/permission", "ps", "tmux", sectionCWD, "env", "claude/transcripts", "codex/rollouts"},
+		[]string{
+			"claude/state", "codex/open", "codex/permission", "ps", "tmux", sectionCWD, "env",
+			"claude/transcripts", "codex/rollouts",
+		},
 		collectPlan.full.sections)
-	assert.Equal(t, []string{"claude/state", "codex/open", "codex/permission", "ps", "tmux", sectionCWD, "env"}, collectPlan.live.sections)
+	assert.Equal(t,
+		[]string{"claude/state", "codex/open", "codex/permission", "ps", "tmux", sectionCWD, "env"},
+		collectPlan.live.sections)
 }
 
 // Every agent the registry says collects has an adapter registered under
