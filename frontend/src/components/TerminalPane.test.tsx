@@ -300,7 +300,7 @@ describe('TerminalPane preview', () => {
     act(() => options.onLinkActivate(url))
   }
 
-  it.each(['ssh', 'ssh_tmux'] as const)('opens a clicked localhost URL of an %s pane through its relay', async (type) => {
+  async function expectRelayedPreview(type: 'ssh' | 'ssh_tmux') {
     window.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       status: 'ready', kind: 'url', url: 'http://127.0.0.1:49152/app', path: 'http://localhost:5173/app', host: 'devbox',
     })))
@@ -316,8 +316,13 @@ describe('TerminalPane preview', () => {
       body: JSON.stringify({ url: 'http://localhost:5173/app' }),
     }))
     expect(openSpy).not.toHaveBeenCalled()
-  })
+  }
 
+  it('opens a clicked localhost URL of an ssh pane through its relay', () => expectRelayedPreview('ssh'))
+
+  it('opens a clicked localhost URL of an ssh_tmux pane through its relay', () => expectRelayedPreview('ssh_tmux'))
+
+  // efficacy:exempt pins the link behavior #387 keeps for every other URL and for local panes
   it('opens other URLs of an SSH pane, and every URL of a local pane, as before', () => {
     const openSpy = vi.fn().mockReturnValue(null)
     window.open = openSpy as unknown as typeof window.open

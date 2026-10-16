@@ -73,6 +73,7 @@ describe('TaskTerminal', () => {
     globalThis.ResizeObserver = originalResizeObserver
   })
 
+  // efficacy:exempt unchanged by #387; the link tests added after it fall inside its line range
   it('reads the board attach without asking for a pane restart', () => {
     render(<TaskTerminal sessionId="board-0123456789abcdef" onStatus={vi.fn()} />)
     expect(useTerminalMock).toHaveBeenLastCalledWith(

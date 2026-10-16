@@ -159,16 +159,19 @@ describe('requestPreview', () => {
     }))
   })
 
+  // efficacy:exempt only the call's argument took #387's target shape; it pins #385 error handling
   it("rejects with the server's reason", async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('file not found: x.md\n', { status: 404 }))
     await expect(requestPreview('pane-1', { path: 'x.md' })).rejects.toThrow('file not found: x.md')
   })
 
+  // efficacy:exempt only the call's argument took #387's target shape; it pins #385 error handling
   it('rejects with the status when the server gives no reason', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('', { status: 500 }))
     await expect(requestPreview('pane-1', { path: 'x.md' })).rejects.toThrow('preview failed (500)')
   })
 
+  // efficacy:exempt only the call's argument took #387's target shape; it pins #385 error handling
   it('rejects an answer that does not match the schema', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({ status: 'ready', kind: 'file', url: 'https://example.com/', path: '/x', host: '' })),
