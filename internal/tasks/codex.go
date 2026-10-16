@@ -19,6 +19,204 @@ import (
 // with the process being alive. Checked on real codex-cli 0.142.2 and 0.157.1
 // (macOS) and 0.157.1 (Linux); see docs/behavior/tasks.md.
 
+// codexCollect is Codex's collect adapter. Its live sections are the
+// rollouts codex processes hold open and the approval requests its
+// PermissionRequest hook recorded (issue #384), and its stopped section the
+// rollouts under ~/.codex/sessions (issue #264).
+type codexCollect struct{}
+
+// Codex's sections, within the "codex" namespace.
+const (
+	codexSectionOpen       = "open"
+	codexSectionPermission = "permission"
+	codexSectionRollouts   = "rollouts"
+)
+
+// codexProgram is the base name of codex's executable, which the open
+// section looks for among the processes.
+const codexProgram = string(agent.Codex)
+
+func (codexCollect) sections() []collectSection {
+	return []collectSection{
+		{name: codexSectionOpen, stage: stageLive, script: codexOpenScript},
+		{name: codexSectionPermission, stage: stageLive, script: codexPermissionScript},
+		{name: codexSectionRollouts, stage: stageStopped, script: codexRolloutsScript},
+	}
+}
+
+func (codexCollect) processHints() []string { return []string{codexProgram} }
+
+func (codexCollect) newCollected() agentCollected { return &codexCollected{} }
+
+// codexOpenScript lists the open rollouts. Codex writes no file that ties a process to its session (issue #264): the
+// rollout a codex process holds open is its session, found through
+// /proc/<pid>/fd, or lsof where there is no /proc. Each codex process gets a
+// "<pid>\t<etime>" row, then one row per rollout it holds open:
+//
+//	<pid>\t<etime>\t<mtime> <size>\t<status> <started_at>\t<turn event line>\t<response item line>\t<"cwd":"...">
+//	\t<"originator":"...">\t<path>        (one line)
+//
+// where etime is how long the process has run (ps's [[dd-]hh:]mm:ss), status
+// and started_at are the session's newest thread_turns row in
+// ~/.codex/thread_history_1.sqlite when sqlite3 can read one, and the two
+// lines are the first 512 bytes of the last turn event (task_started,
+// task_complete, turn_aborted) and the last response item in the rollout's
+// final MiB. Only a session ID made of hex digits and dashes — the shape of
+// the UUID in the file name — is put into the query.
+const codexOpenScript = `db="$HOME/.codex/thread_history_1.sqlite"
+ps -U "$uid" -o pid=,etime=,command= 2>/dev/null |
+awk '{ n = $3; sub(/.*\//, "", n); if (n == "` + codexProgram + `") print $1, $2 }' |
+while read -r pid et; do
+	printf '%s\t%s\n' "$pid" "$et"
+	if [ -d "/proc/$pid/fd" ]; then
+		for fd in "/proc/$pid/fd"/*; do readlink "$fd"; done 2>/dev/null
+	else
+		lsof -p "$pid" -Fn 2>/dev/null | sed -n 's/^n//p'
+	fi | while IFS= read -r p; do
+		case ${p##*/} in rollout-*.jsonl) ;; *) continue ;; esac
+		t=$(mtime "$p" 2>/dev/null) || continue
+		id=${p##*/}
+		id=${id%.jsonl}
+		id=${id#rollout-????-??-??T??-??-??-}
+		case $id in *[!0-9a-f-]*|'') id= ;; esac
+		st=
+		if [ -n "$id" ] && [ -f "$db" ]; then
+			q="select status || ' ' || coalesce(started_at, '') from thread_turns"
+			q="$q where thread_id = '$id' order by rollout_ordinal desc limit 1"
+			st=$(sqlite3 -readonly "$db" "$q" </dev/null 2>/dev/null | head -n 1)
+		fi
+		marks=$(tail -c 1048576 "$p" 2>/dev/null | awk '
+			/"payload":[{]"type":"(task_started|task_complete|turn_aborted)"/ { ev = substr($0, 1, 512) }
+			/"type":"response_item"/ { ri = substr($0, 1, 512) }
+			END { printf "%s\t%s", ev, ri }')
+		l=$(head -n 1 "$p" 2>/dev/null)
+		c=$(printf '%s\n' "$l" | grep -o '"cwd":"[^"]*"' | head -n 1)
+		o=$(printf '%s\n' "$l" | grep -o '"originator":"[^"]*"' | head -n 1)
+		printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$pid" "$et" "$t" "$st" "$marks" "$c" "$o" "$p"
+	done
+done
+`
+
+// codexPermissionScript prints "<session ID> <turn ID> <unix seconds>" for
+// each approval request codex_permission_hook.sh, a PermissionRequest hook
+// the user registers, recorded under ~/.local/state/panemux/codex-permission/
+// (issue #384): one file per session, the session's latest request, one line
+// each. The hook removes records older than 7 days, so they are read with a
+// single cat; a host without the hook prints the heading and no rows.
+const codexPermissionScript = `cat "$HOME"/.local/state/panemux/codex-permission/* 2>/dev/null
+`
+
+// codexRolloutsScript prints
+// "<mtime>\t<size>\t<file name>\t<"cwd":"...">\t<"originator":"...">" of
+// its first line for the rollouts (~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl)
+// modified in the last 7 days, newest first, counting only the TUI's
+// (originator "codex-tui"): the 100 are taken after that filter, so a host
+// where codex exec writes many rollouts does not push the TUI's sessions out.
+const codexRolloutsScript = `find "$HOME/.codex/sessions" -mindepth 4 -maxdepth 4 \
+	-type f -name 'rollout-*.jsonl' -mtime -7 2>/dev/null |
+while IFS= read -r p; do
+	t=$(mtime "$p" 2>/dev/null) && echo "$t $p"
+done | sort -k1,1nr -k2,2nr -k3r | while read -r t s p; do
+	l=$(head -n 1 "$p" 2>/dev/null)
+	o=$(printf '%s\n' "$l" | grep -o '"originator":"[^"]*"' | head -n 1)
+	[ "$o" = '"originator":"codex-tui"' ] || continue
+	c=$(printf '%s\n' "$l" | grep -o '"cwd":"[^"]*"' | head -n 1)
+	printf '%s\t%s\t%s\t%s\t%s\n' "$t" "$s" "${p##*/}" "$c" "$o"
+done | head -n 100
+`
+
+// codexCollected is Codex's part of one host's output.
+type codexCollected struct {
+	// Ages is how long each codex process has run, in seconds.
+	Ages map[int]int64
+	// Permissions is each session's latest approval request (issue #384),
+	// by session ID.
+	Permissions map[string]codexPermission
+	// Open is every rollout a codex process holds open, and Rollouts the
+	// rollouts under ~/.codex/sessions.
+	Open     []codexOpenRollout
+	Rollouts []codexRollout
+}
+
+func (c *codexCollected) addRow(section, line string) {
+	switch section {
+	case codexSectionOpen:
+		if pid, age, ok := parseCodexAgeRow(line); ok {
+			if c.Ages == nil {
+				c.Ages = map[int]int64{}
+			}
+			c.Ages[pid] = age
+		} else if o, ok := parseCodexOpenRow(line); ok {
+			c.Open = append(c.Open, o)
+		}
+	case codexSectionPermission:
+		if sessionID, record, ok := parseCodexPermissionRow(line); ok {
+			if c.Permissions == nil {
+				c.Permissions = map[string]codexPermission{}
+			}
+			c.Permissions[sessionID] = record
+		}
+	case codexSectionRollouts:
+		if r, ok := parseCodexRolloutRow(line); ok {
+			c.Rollouts = append(c.Rollouts, r)
+		}
+	}
+}
+
+// addFile is never called: no codex section declares files.
+//
+//coverage:exempt the parser calls addFile only for a section that declares files, and none of codex's does
+func (c *codexCollected) addFile(string, string, []byte) {}
+
+// prepared orders the rollouts newest first, each open one carrying the
+// file name it was found under.
+func (c *codexCollected) prepared() agentCollected {
+	p := &codexCollected{
+		Ages:        c.Ages,
+		Open:        append([]codexOpenRollout(nil), c.Open...),
+		Rollouts:    append([]codexRollout(nil), c.Rollouts...),
+		Permissions: c.Permissions,
+	}
+	sort.SliceStable(p.Rollouts, func(i, j int) bool { return newerCodexRollout(p.Rollouts[i], p.Rollouts[j]) })
+	for i := range p.Open {
+		p.Open[i].Rollout.File = p.Open[i].File
+	}
+	sort.SliceStable(p.Open, func(i, j int) bool { return newerCodexRollout(p.Open[i].Rollout, p.Open[j].Rollout) })
+	return p
+}
+
+// stoppedCandidates are the interactive rollouts no live codex process
+// holds open, newest first.
+func (c *codexCollected) stoppedCandidates(b *taskBuilder, _ []Task) []stoppedCandidate {
+	held := c.heldSessions(b)
+	seen := map[string]bool{}
+	var candidates []stoppedCandidate
+	for _, r := range c.Rollouts {
+		if r.Originator != codexOriginatorTUI || held[r.SessionID] || seen[r.SessionID] {
+			continue
+		}
+		seen[r.SessionID] = true
+		candidates = append(candidates, stoppedCandidate{
+			agent: AgentCodex, sessionID: r.SessionID, cwd: r.CWD, modTime: r.ModTime,
+		})
+	}
+	return candidates
+}
+
+// addLogVersion sets a stopped task's rollout version; a live task already
+// carries the exact open rollout it was found from.
+func (c *codexCollected) addLogVersion(task *Task) {
+	if task.Log != nil {
+		return
+	}
+	for _, r := range c.Rollouts {
+		if r.SessionID == task.SessionID && r.Originator == codexOriginatorTUI {
+			task.Log = codexLogVersion(r)
+			return
+		}
+	}
+}
+
 // codexRollout is one rollout the collection found: its session ID (from the
 // file name), the cwd and originator of its session_meta line, and the file's
 // modification time and size.
@@ -164,7 +362,7 @@ func nonNegative(s string) (int64, bool) {
 	return n, err == nil && n >= 0 && !strings.HasPrefix(s, "+")
 }
 
-// parseCodexAgeRow reads a codex-open row that gives only a process's age.
+// parseCodexAgeRow reads a codex/open row that gives only a process's age.
 func parseCodexAgeRow(line string) (int, int64, bool) {
 	parts := strings.Split(line, "\t")
 	if len(parts) != 2 {
@@ -178,7 +376,7 @@ func parseCodexAgeRow(line string) (int, int64, bool) {
 	return pid, age, age >= 0
 }
 
-// parseCodexOpenRow reads one codex-open row (see collectScript).
+// parseCodexOpenRow reads one codex/open row (see codexOpenScript).
 func parseCodexOpenRow(line string) (codexOpenRollout, bool) {
 	parts := strings.SplitN(line, "\t", 9)
 	if len(parts) < 9 {
@@ -216,7 +414,8 @@ func parseCodexOpenRow(line string) (codexOpenRollout, bool) {
 	}, true
 }
 
-// parseCodexPermissionRow reads one codex-permission row (see collectScript).
+// parseCodexPermissionRow reads one codex/permission row (see
+// codexPermissionScript).
 func parseCodexPermissionRow(line string) (string, codexPermission, bool) {
 	fields := strings.Fields(line)
 	if len(fields) != 3 || !validUUID.MatchString(fields[0]) || !validUUID.MatchString(fields[1]) {
@@ -229,7 +428,7 @@ func parseCodexPermissionRow(line string) (string, codexPermission, bool) {
 	return fields[0], codexPermission{TurnID: fields[1], At: at * 1000}, true
 }
 
-// parseCodexRolloutRow reads one codex-rollouts row (see collectScript).
+// parseCodexRolloutRow reads one codex/rollouts row (see codexRolloutsScript).
 func parseCodexRolloutRow(line string) (codexRollout, bool) {
 	parts := strings.SplitN(line, "\t", 5)
 	if len(parts) < 3 {
@@ -269,7 +468,7 @@ func jsonFragmentString(fragment, prefix string) string {
 }
 
 // parseCodexTurn reads the thread_turns row ("<status> <started_at>") and the
-// two rollout lines of a codex-open row. The lines are cut at 512 bytes, so
+// two rollout lines of a codex/open row. The lines are cut at 512 bytes, so
 // they are searched, not decoded.
 func parseCodexTurn(db, event, item string) codexTurn {
 	var turn codexTurn
@@ -309,30 +508,30 @@ func parseCodexTurn(db, event, item string) codexTurn {
 	return turn
 }
 
-// codexTasks are the interactive codex processes — each in the session whose
+// liveTasks are the interactive codex processes — each in the session whose
 // rollout it wrote last, or known only by its pid before it has one — and
 // the TUI sessions codex's shared daemon runs.
-func (b *taskBuilder) codexTasks() []Task {
-	tasks := b.codexTUITasks()
-	return append(tasks, b.codexDaemonTasks()...)
+func (c *codexCollected) liveTasks(b *taskBuilder) []Task {
+	tasks := c.tuiTasks(b)
+	return append(tasks, c.daemonTasks(b)...)
 }
 
-// codexDaemonTasks are the TUI sessions codex's shared app-server daemon
+// daemonTasks are the TUI sessions codex's shared app-server daemon
 // holds. A TUI started without -c or --no-daemon runs its session there,
 // and nothing on the host ties the TUI's process to the session (checked
 // with codex-cli 0.157.1 on Linux): the session is a task of its own, which
 // no pane can be told to show. The daemon keeps a session's rollout open
 // after its TUI has exited, so such a session is not listed as stopped
 // while the daemon holds it. A session a TUI holds itself is that TUI's.
-func (b *taskBuilder) codexDaemonTasks() []Task {
+func (c *codexCollected) daemonTasks(b *taskBuilder) []Task {
 	listed := map[string]bool{}
-	for _, o := range b.raw.CodexOpen {
+	for _, o := range c.Open {
 		if proc, alive := b.procs[o.PID]; alive && isInteractiveCodex(proc.Command) {
 			listed[o.Rollout.SessionID] = true
 		}
 	}
 	var tasks []Task
-	for _, o := range b.raw.CodexOpen {
+	for _, o := range c.Open {
 		proc, alive := b.procs[o.PID]
 		daemonTUISession := alive && isCodexDaemon(proc.Command) && o.Rollout.Originator == codexOriginatorTUI
 		if !daemonTUISession || listed[o.Rollout.SessionID] {
@@ -352,16 +551,16 @@ func (b *taskBuilder) codexDaemonTasks() []Task {
 		if o.Elapsed >= 0 {
 			task.StartedAt = b.hostMillis((b.raw.Now - o.Elapsed) * 1000)
 		}
-		b.codexState(&task, o)
+		c.codexState(b, &task, o)
 		tasks = append(tasks, task)
 	}
 	return tasks
 }
 
-// codexTUITasks are the interactive codex processes.
-func (b *taskBuilder) codexTUITasks() []Task {
+// tuiTasks are the interactive codex processes.
+func (c *codexCollected) tuiTasks(b *taskBuilder) []Task {
 	current := map[int]codexOpenRollout{}
-	for _, o := range b.raw.CodexOpen {
+	for _, o := range c.Open {
 		prev, seen := current[o.PID]
 		// An equal name at an equal time is one file held on two descriptors,
 		// whose rows are alike in every field.
@@ -388,7 +587,7 @@ func (b *taskBuilder) codexTUITasks() []Task {
 			PID:      p.PID,
 			Location: b.locate(p.PID),
 		}
-		elapsed, known := b.raw.CodexAges[p.PID]
+		elapsed, known := c.Ages[p.PID]
 		if ok {
 			elapsed, known = o.Elapsed, o.Elapsed >= 0
 		}
@@ -408,7 +607,7 @@ func (b *taskBuilder) codexTUITasks() []Task {
 		if o.Rollout.CWD != "" {
 			task.CWD = o.Rollout.CWD
 		}
-		b.codexState(&task, o)
+		c.codexState(b, &task, o)
 		tasks = append(tasks, task)
 	}
 	return tasks
@@ -420,7 +619,7 @@ func (b *taskBuilder) codexTUITasks() []Task {
 // left over from a codex that was killed mid-turn — such a turn stays
 // inProgress for good, and resuming the session writes no new turn until it
 // is given one — so the session is idle.
-func (b *taskBuilder) codexState(task *Task, o codexOpenRollout) {
+func (c *codexCollected) codexState(b *taskBuilder, task *Task, o codexOpenRollout) {
 	inProgress, finished, startedMillis := codexTurnStatus(o.Turn)
 	modTime := b.hostMillis(o.Rollout.ModTime * 1000)
 	switch {
@@ -433,8 +632,8 @@ func (b *taskBuilder) codexState(task *Task, o codexOpenRollout) {
 		// The question's own time, which a second question in the same
 		// turn does not share; the rollout's mtime moves with every write.
 		task.WaitSignature = waitSignature(b.host, AgentCodex, task.SessionID, o.Turn.LastItemAt, codexToolAskUser)
-	case inProgress && codexPermissionOfTurn(b.raw.CodexPermissions[task.SessionID], o.Turn.TurnID, startedMillis):
-		at := b.raw.CodexPermissions[task.SessionID].At
+	case inProgress && codexPermissionOfTurn(c.Permissions[task.SessionID], o.Turn.TurnID, startedMillis):
+		at := c.Permissions[task.SessionID].At
 		task.State, task.StatusSince = StateWait, b.hostMillis(at)
 		task.WaitingFor = codexWaitingForPermission
 		task.WaitSignature = codexPermissionSignature(b.host, task.SessionID, at)
@@ -483,44 +682,16 @@ func codexTurnStatus(turn codexTurn) (inProgress, finished bool, startedMillis i
 	return false, false, 0
 }
 
-// heldCodexSessions is every session whose rollout a live codex process
+// heldSessions is every session whose rollout a live codex process
 // holds open, current or not: none of them is stopped.
-func (b *taskBuilder) heldCodexSessions() map[string]bool {
+func (c *codexCollected) heldSessions(b *taskBuilder) map[string]bool {
 	held := map[string]bool{}
-	for _, o := range b.raw.CodexOpen {
+	for _, o := range c.Open {
 		if proc, alive := b.procs[o.PID]; alive && isCodexProgram(proc.Command) {
 			held[o.Rollout.SessionID] = true
 		}
 	}
 	return held
-}
-
-// stoppedCandidate is a conversation log that may be listed as a stopped
-// task: a claude transcript or an interactive codex rollout.
-type stoppedCandidate struct {
-	agent, sessionID, cwd string
-	modTime               int64
-}
-
-// stoppedCandidates merges claude's transcripts and codex's interactive
-// rollouts, newest first, keeping the host's order among equal times.
-func (b *taskBuilder) stoppedCandidates() []stoppedCandidate {
-	candidates := make([]stoppedCandidate, 0, len(b.raw.Transcripts)+len(b.raw.CodexRollouts))
-	for _, tr := range b.raw.Transcripts {
-		candidates = append(candidates, stoppedCandidate{
-			agent: AgentClaude, sessionID: tr.SessionID, cwd: tr.CWD, modTime: tr.ModTime,
-		})
-	}
-	for _, r := range b.raw.CodexRollouts {
-		if r.Originator != codexOriginatorTUI {
-			continue
-		}
-		candidates = append(candidates, stoppedCandidate{
-			agent: AgentCodex, sessionID: r.SessionID, cwd: r.CWD, modTime: r.ModTime,
-		})
-	}
-	sort.SliceStable(candidates, func(i, j int) bool { return candidates[i].modTime > candidates[j].modTime })
-	return candidates
 }
 
 // isCodexDaemon reports whether a `ps` command line is codex's app-server:

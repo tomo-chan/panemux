@@ -22,21 +22,21 @@ import (
 // summaryCollection is a panemux host with an idle claude session "idle-s"
 // and a stopped session "stopped-s", each with a conversation log.
 func summaryCollection() []byte {
-	return []byte(strings.Join([]string{
-		"::panemux-tasks v1",
+	return withAllSections([]byte(strings.Join([]string{
+		"::panemux-tasks v2",
 		"::now 1000",
-		"::section state",
+		"::section claude/state",
 		"::file 7.json",
 		`{"pid":7,"sessionId":"idle-s","cwd":"/workspace/user/project","status":"idle","statusUpdatedAt":990000}`,
 		"::section ps",
 		"7 1 claude",
 		"::section tmux",
 		"::section cwd",
-		"::section transcripts",
+		"::section claude/transcripts",
 		"995\tidle-s.jsonl\t\t120",
 		"900\tstopped-s.jsonl\t\t80",
 		"::end",
-	}, "\n") + "\n")
+	}, "\n") + "\n"))
 }
 
 func summaryLog() []byte {
@@ -195,8 +195,8 @@ func TestPostTaskSummary_CodexIdentityAndRouting(t *testing.T) {
 			if strings.Contains(script, "::panemux-transcript") {
 				return []byte("::panemux-transcript v1 " + strconv.Itoa(len(body)) + "\n" + body + "\n::end\n"), nil
 			}
-			return []byte("::panemux-tasks v1\n::now 1000\n::section codex-rollouts\n" +
-				"999\t120\trollout-2026-10-08T01-00-00-" + sid + ".jsonl\t\t\"originator\":\"codex-tui\"\n::end\n"), nil
+			return withAllSections([]byte("::panemux-tasks v2\n::now 1000\n::section codex/rollouts\n" +
+				"999\t120\trollout-2026-10-08T01-00-00-" + sid + ".jsonl\t\t\"originator\":\"codex-tui\"\n::end\n")), nil
 		}, Summarize: claude.summarize, SummarizeCodex: codex.summarize,
 	}))
 	getTasks(t, h)

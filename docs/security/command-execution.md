@@ -210,9 +210,13 @@ The task dashboard ([behavior](../behavior/tasks.md)) runs commands on the panem
 `ssh_connections` host. There are three sinks, and none of them carries a value from a request, the
 config, or a remote host into a command string:
 
-- **The collection script** (`collectScript` in `internal/tasks/collect.go`) is a compile-time
-  constant, as is `attentionScript`, which the task event stream observes with: the same constant
-  live part (`collectLiveScript`) without the searches for stopped sessions, run exactly the same way.
+- **The collection script** (`collectScript` in `internal/tasks/collect.go`) is composed once, when
+  panemux starts, from Go constants alone: the common sections and the script fragment each collect
+  adapter (`internal/tasks/collect_adapters.go`) declares, with a `cwd`/`env` prefilter joined from
+  the adapters' process hints, which composition accepts only as `[a-z0-9-]` words. So is
+  `attentionScript`, which the task event stream observes with: the same composition without the
+  sections for stopped sessions, run exactly the same way. Neither changes after startup, and nothing
+  from a request, the config or a host reaches either.
   The stream runs it only while it has a subscriber, at most once at a time per host, and no more often
   than every 5 seconds per host ([Task events](../behavior/task-events.md#lifecycle)); how many tabs
   subscribe does not change that. Locally it runs as `exec.CommandContext(ctx, "sh", "-s")` — a literal program and a
@@ -242,7 +246,8 @@ by hand; panemux never runs or installs it. It takes from codex's stdin only `se
 `~/.local/state/panemux/codex-permission/` or carry the command codex asked about. It writes the
 record through a temporary file and a rename, with umask 077, removes files older than 7 days from that
 directory only (`find "$dir" -type f -mtime +7 -exec rm -f {} +`), prints nothing and exits 0: it never
-answers allow or deny. The collection only prints the records with `cat`, and the Go side accepts a row
+answers allow or deny. The collection only prints the records with `cat` (codex's live section `codex/permission`, a
+constant fragment of its collect adapter like the others), and the Go side accepts a row
 only when both IDs are UUIDs.
 
 The script lists only the collecting user's processes (`ps -U "$(id -u)"`). On a shared host,

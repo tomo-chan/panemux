@@ -521,17 +521,17 @@ func TestLaunch_Errors(t *testing.T) {
 // stoppedOutput is a collection holding one stopped session, whose
 // transcript records cwd, and one running one.
 func stoppedOutput(stoppedID, cwd, runningID string) []byte {
-	return joinLines(
-		"::panemux-tasks v1",
+	return fullOutput(
+		"::panemux-tasks v2",
 		"::now 1000",
-		"::section state",
+		"::section claude/state",
 		"::file 7.json",
 		`{"pid":7,"sessionId":"`+runningID+`","status":"busy","statusUpdatedAt":999000}`,
 		"::section ps",
 		"7 1 claude",
 		"::section tmux",
 		"::section cwd",
-		"::section transcripts",
+		"::section claude/transcripts",
 		"990\t"+stoppedID+".jsonl\t"+`"cwd":"`+cwd+`"`,
 		"995\t"+runningID+".jsonl\t"+`"cwd":"/workspace/user/other"`,
 		"::end",
@@ -604,8 +604,8 @@ func TestResume_Refusals(t *testing.T) {
 		},
 		{
 			name: "stopped task with no recorded directory", sessionID: testSessionID,
-			runLocal: collection(joinLines(
-				"::panemux-tasks v1", "::now 1000", "::section transcripts",
+			runLocal: collection(fullOutput(
+				"::panemux-tasks v2", "::now 1000", "::section claude/transcripts",
 				"990\t"+testSessionID+".jsonl", "::end",
 			), nil),
 			wantIs: ErrInvalidLaunch,
@@ -797,7 +797,7 @@ func TestLaunchScript_ASessionOfTheSameNameIsReusedOnlyForAPermittedResume(t *te
 // when occupant is set, a running claude session inside the tmux session
 // the resume would use.
 func inTmuxOutput(occupant bool) []byte {
-	lines := []string{"::panemux-tasks v1", "::now 1000", "::section state"}
+	lines := []string{"::panemux-tasks v2", "::now 1000", "::section claude/state"}
 	if occupant {
 		lines = append(lines, "::file 7.json",
 			`{"pid":7,"sessionId":"11111111-2222-4333-8444-555555555555","status":"idle","statusUpdatedAt":999000}`)
@@ -810,9 +810,9 @@ func inTmuxOutput(occupant bool) []byte {
 	if occupant {
 		lines = append(lines, "6 task-0f0e0d0c")
 	}
-	lines = append(lines, "::section cwd", "::section transcripts",
+	lines = append(lines, "::section cwd", "::section claude/transcripts",
 		"990\t"+testSessionID+".jsonl\t"+`"cwd":"/workspace/user/project"`, "::end")
-	return joinLines(lines...)
+	return fullOutput(lines...)
 }
 
 func TestResume_ReusesTheTaskSessionOnlyWhenNoAgentRunsInIt(t *testing.T) {

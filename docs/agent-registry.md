@@ -64,9 +64,18 @@ the agent, not a statement that it works on a given host right now.
 | `usage` | Its usage limits and spend can be read; declared by no agent yet (#345) | — |
 | `board` | It can join Agent Board through agmsg | an agmsg type and a Board rule |
 
-The registry holds declarations only; nothing reads a declaration to decide what to do yet. The
-code behind each capability is in `internal/tasks` and `internal/session`, which branch on the
-claude and codex IDs and read those IDs and their process rules from the registry.
+The registry holds declarations; the code behind each capability is in its consumer. `collect` is
+implemented by a collect adapter per agent, which `internal/tasks` defines in its own types and lists
+explicitly by ID in `collectAdapters` (`internal/tasks/collect_adapters.go`): each adapter declares
+its collection script sections, named `<agent ID>/<name>`, and turns their rows into tasks. When
+panemux starts, the adapters are checked against the registry — an agent that declares `collect`
+has exactly one adapter and no other agent has one — and an invalid set stops it. The other
+capabilities are still in `internal/tasks` and `internal/session`, which branch on the claude and
+codex IDs and read those IDs and their process rules from the registry.
+
+A running task carries what a later capability needs to find its working directories without
+collecting again: its session key (`Task.Key`), its pid, its working directory and, for codex, the
+rollout it was found from.
 
 ### Formats and versions
 
@@ -113,6 +122,10 @@ hand ([bootstrap](agent-board/bootstrap.md)).
    capability whose rule is missing (or a rule whose capability is). The package builds its
    registry when it loads, so an invalid registration also stops panemux at startup.
 4. `TestRegisteredAgents` pins the registered set and order; update it in the same change.
+5. An agent that declares `collect` needs a collect adapter in `internal/tasks`, added to
+   `collectAdapters`: its sections, its process hints (words the collection's `cwd`/`env` prefilter
+   must find in every process its Task rule lists), and the code that turns its rows into tasks.
+   `TestCollectAdapters_MatchTheRegistry` and `TestCollectPrefilter_CoversEveryTaskRule` check it.
 
 ## Command Center boundary
 

@@ -24,10 +24,10 @@ import (
 // ("run-sess"), a stopped one ("stop-sess") and a codex process, which has no
 // session ID.
 func recordTaskCollection() []byte {
-	return []byte(strings.Join([]string{
-		"::panemux-tasks v1",
+	return withAllSections([]byte(strings.Join([]string{
+		"::panemux-tasks v2",
 		"::now 1000",
-		"::section state",
+		"::section claude/state",
 		"::file 7.json",
 		`{"pid":7,"sessionId":"run-sess","cwd":"/workspace/user/project","status":"busy","statusUpdatedAt":990000}`,
 		"::section ps",
@@ -36,10 +36,10 @@ func recordTaskCollection() []byte {
 		"::section tmux",
 		"::section cwd",
 		"8 /workspace/user/project",
-		"::section transcripts",
+		"::section claude/transcripts",
 		`900	stop-sess.jsonl	"cwd":"/workspace/user/project"`,
 		"::end",
-	}, "\n") + "\n")
+	}, "\n") + "\n"))
 }
 
 // useTaskRecords points the handler's record store at a file under a test

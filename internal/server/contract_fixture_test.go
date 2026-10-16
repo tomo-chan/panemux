@@ -558,7 +558,9 @@ func fixtureLaunchService() *tasks.Service {
 			if strings.Contains(script, "::panemux-launch") {
 				return []byte("::panemux-launch ok\n"), nil
 			}
-			return []byte("::panemux-tasks v1\n::now 1790000000\n::section transcripts\n" +
+			return []byte("::panemux-tasks v2\n::now 1790000000\n" +
+				"::section claude/state\n::section codex/open\n::section codex/permission\n::section ps\n::section tmux\n" +
+				"::section cwd\n::section env\n::section codex/rollouts\n::section claude/transcripts\n" +
 				"1789999000\t" + fixtureStoppedSessionID + ".jsonl\t\"cwd\":\"/workspace/user/project\"\n::end\n"), nil
 		},
 	})
@@ -570,9 +572,9 @@ func fixtureLaunchService() *tasks.Service {
 // codex session at work in a tmux session, a state file that cannot be read
 // (its claude process is listed by its pid) and one whose name carries no
 // pid, and a stopped claude session and codex session.
-const fixtureLocalTaskCollection = `::panemux-tasks v1
+const fixtureLocalTaskCollection = `::panemux-tasks v2
 ::now 1790000000
-::section state
+::section claude/state
 ::file 101.json
 ` + `{"pid":101,"sessionId":"7c21e0a4","cwd":"/workspace/user/panemux","status":"waiting",` +
 	`"waitingFor":"input needed","statusUpdatedAt":1789999820000,"startedAt":1789997300000}
@@ -600,7 +602,7 @@ const fixtureLocalTaskCollection = `::panemux-tasks v1
 ::section env
 102 pane-1790000000000-a1b2c
 103 pane-1790000000000-d3e4f
-::section transcripts
+::section claude/transcripts
 1789999900	7c21e0a4.jsonl	"cwd":"/workspace/user/panemux"	2048
 1789989200	55f0c2b8.jsonl	"cwd":"/workspace/user/service-b"	4096
 ` + fixtureCodexRows + `::end
@@ -609,7 +611,7 @@ const fixtureLocalTaskCollection = `::panemux-tasks v1
 // fixtureCodexRows is the codex part of fixtureLocalTaskCollection: pid 104
 // holds no rollout, pid 105 is at work in a session, codex's shared daemon
 // (pid 107) runs a TUI session, and one more session is stopped.
-const fixtureCodexRows = "::section codex-open\n" +
+const fixtureCodexRows = "::section codex/open\n" +
 	"104\t00:40\n" +
 	"105\t10:00\n" +
 	"105\t10:00\t1789999950 4096\tinProgress 1789999700\t" +
@@ -622,7 +624,8 @@ const fixtureCodexRows = "::section codex-open\n" +
 	"107\t2-00:00:00\t1789999000 1024\tcompleted 1789998000\t\t\t" + `"cwd":"/workspace/user/sample-cli"` + "\t" +
 	`"originator":"codex-tui"` + "\t/workspace/user/.codex/sessions/2026/09/21/rollout-2026-09-21T20-00-00-" +
 	fixtureDaemonCodexSessionID + ".jsonl\n" +
-	"::section codex-rollouts\n" +
+	"::section codex/permission\n" +
+	"::section codex/rollouts\n" +
 	"1789999950\t4096\t" + fixtureCodexRollout + "\t" +
 	`"cwd":"/workspace/user/sample-web"` + "\t" + `"originator":"codex-tui"` + "\n" +
 	"1789980000\t2048\trollout-2026-09-21T18-00-00-" + fixtureStoppedCodexSessionID + ".jsonl\t" +
@@ -667,9 +670,9 @@ func fixtureSummarize(_ context.Context, excerpt string) (tasks.Summary, error) 
 type fixtureTaskConn struct{}
 
 func (fixtureTaskConn) Run(context.Context, string, io.Reader) ([]byte, error) {
-	return []byte(`::panemux-tasks v1
+	return []byte(`::panemux-tasks v2
 ::now 1790000000
-::section state
+::section claude/state
 ::file 3120.json
 ` + `{"pid":3120,"sessionId":"3d7702fe","cwd":"/remote/home/demo/infra","status":"idle",` +
 		`"statusUpdatedAt":1789999280000,"startedAt":1789989200000}
@@ -682,7 +685,11 @@ func (fixtureTaskConn) Run(context.Context, string, io.Reader) ([]byte, error) {
 ::section tmux
 3100 my work
 ::section cwd
-::section transcripts
+::section env
+::section codex/open
+::section codex/permission
+::section claude/transcripts
+::section codex/rollouts
 ::end
 `), nil
 }
