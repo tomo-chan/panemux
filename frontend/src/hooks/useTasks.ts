@@ -5,6 +5,8 @@ import {
   TaskAttachSchema,
   HostSessionName,
   HostSessionNameSchema,
+  CodexHook,
+  CodexHookSchema,
   HostTerminal,
   HostTerminalSchema,
   TaskLaunched,
@@ -101,6 +103,10 @@ export interface TasksState {
    * session, from hostSessionName.
    */
   hostTerminal: (host: string, type: HostTerminalType, tmuxSession?: string) => Promise<TaskActionResult<HostTerminal>>
+  /** Whether host's codex has panemux's permission hook (issue #396). */
+  codexHook: (host: string) => Promise<TaskActionResult<CodexHook>>
+  /** Installs or updates host's codex permission hook, answering the status read back. */
+  installCodexHook: (host: string) => Promise<TaskActionResult<CodexHook>>
   /**
    * Ends a host terminal. An ssh terminal logs out; an ssh_tmux one ends only
    * its tmux client. A failure is not reported, as with detach.
@@ -112,17 +118,23 @@ export type HostTerminalType = 'ssh' | 'ssh_tmux'
 
 // postTaskAction POSTs body to path and parses the answer with schema. A
 // refusal comes back as the server's own reason.
-async function postTaskAction<T>(
+function postTaskAction<T>(path: string, body: unknown, schema: ResponseSchema<T>): Promise<TaskActionResult<T>> {
+  return requestTaskAction(
+    path,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+    schema,
+  )
+}
+
+type ResponseSchema<T> = { safeParse: (value: unknown) => { success: true; data: T } | { success: false } }
+
+async function requestTaskAction<T>(
   path: string,
-  body: unknown,
-  schema: { safeParse: (value: unknown) => { success: true; data: T } | { success: false } },
+  init: RequestInit | undefined,
+  schema: ResponseSchema<T>,
 ): Promise<TaskActionResult<T>> {
   try {
-    const res = await fetch(path, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
+    const res = await fetch(path, init)
     if (!res.ok) {
       const reason = (await res.text()).trim()
       return { ok: false, error: reason || `HTTP ${res.status}` }
@@ -326,6 +338,17 @@ export function useTasks(enabled: boolean): TasksState {
     [],
   )
 
+  const codexHook = useCallback(
+    (host: string) =>
+      requestTaskAction(`/api/tasks/codex-hook?host=${encodeURIComponent(host)}`, undefined, CodexHookSchema),
+    [],
+  )
+
+  const installCodexHook = useCallback(
+    (host: string) => postTaskAction('/api/tasks/codex-hook', { host }, CodexHookSchema),
+    [],
+  )
+
   const closeHostTerminal = useCallback(async (sessionId: string) => {
     try {
       await fetch(`/api/hosts/terminal/${encodeURIComponent(sessionId)}`, { method: 'DELETE', keepalive: true })
@@ -367,5 +390,7 @@ export function useTasks(enabled: boolean): TasksState {
     hostSessionName,
     hostTerminal,
     closeHostTerminal,
+    codexHook,
+    installCodexHook,
   }
 }

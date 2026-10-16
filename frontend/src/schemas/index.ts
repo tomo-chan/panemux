@@ -660,6 +660,15 @@ export const HostSessionNameSchema = z.object({
 
 export type HostSessionName = z.infer<typeof HostSessionNameSchema>
 
+// GET and POST /api/tasks/codex-hook (issue #396): whether a host's codex
+// has panemux's permission hook. `error` says why for invalid and unknown.
+export const CodexHookSchema = z.object({
+  status: z.enum(['absent', 'missing', 'installed', 'outdated', 'invalid', 'unknown']),
+  error: z.string().optional(),
+})
+
+export type CodexHook = z.infer<typeof CodexHookSchema>
+
 // POST /api/hosts/terminal (issue #314): a host terminal the task dashboard
 // opens, served by `/ws/{session_id}` like a board attach. `tmux_session` is
 // empty for an ssh terminal.

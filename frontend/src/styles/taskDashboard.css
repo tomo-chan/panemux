@@ -259,6 +259,33 @@
   border-top: 1px solid var(--td-line);
 }
 
+.td-host-menu-codex {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 10px 0 0;
+  border: 0;
+  border-top: 1px solid var(--td-line);
+  font-size: 12px;
+}
+
+.td-host-menu-codex-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.td-host-menu-installed {
+  color: var(--td-st-busy);
+}
+
+.td-host-menu-codex [data-tone='error'] {
+  color: #fca5a5;
+}
+
 .td-host-detail {
   min-width: 0;
   overflow: hidden;

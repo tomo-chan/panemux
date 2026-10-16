@@ -695,6 +695,35 @@ describe('useTasks host terminals (issue #314)', () => {
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/hosts/session-name', post({ connection: 'gpu-box' }))
   })
 
+  it("reads and installs a host's codex hook, refusing an unknown status (issue #396)", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(ok(payload))
+      .mockResolvedValueOnce(ok({ status: 'missing' }))
+      .mockResolvedValueOnce(ok({ status: 'trusted' }))
+      .mockResolvedValueOnce(ok({ status: 'installed' }))
+      .mockResolvedValueOnce(refused(502, '~/.codex/hooks.json is not valid JSON'))
+    window.fetch = fetchMock
+    const { result } = renderHook(() => useTasks(true))
+    await waitFor(() => expect(result.current.data).not.toBeNull())
+
+    const outcomes: unknown[] = []
+    await act(async () => {
+      outcomes.push(await result.current.codexHook(''))
+      outcomes.push(await result.current.codexHook('gpu box'))
+      outcomes.push(await result.current.installCodexHook('gpu-box'))
+      outcomes.push(await result.current.installCodexHook(''))
+    })
+
+    expect(outcomes).toEqual([
+      { ok: true, launched: { status: 'missing' } },
+      { ok: false, error: 'Unexpected response from /api/tasks/codex-hook?host=gpu%20box' },
+      { ok: true, launched: { status: 'installed' } },
+      { ok: false, error: '~/.codex/hooks.json is not valid JSON' },
+    ])
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/tasks/codex-hook?host=', undefined)
+    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/tasks/codex-hook', post({ host: 'gpu-box' }))
+  })
+
   async function opensAHostTerminal(
     type: 'ssh' | 'ssh_tmux',
     tmuxSession: string | undefined,

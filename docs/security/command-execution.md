@@ -240,8 +240,8 @@ config, or a remote host into a command string:
   argv elements. The `--json` field list is a constant (`prTaskFields`), not a value from anywhere.
 
 The codex permission hook (`internal/tasks/codex_permission_hook.sh`,
-[behavior](../behavior/tasks.md#codex-permission-requests)) is a constant script the user registers
-by hand; panemux never runs or installs it. It takes from codex's stdin only `session_id` and
+[behavior](../behavior/tasks.md#codex-permission-requests)) is a constant script panemux embeds;
+panemux never runs it. It takes from codex's stdin only `session_id` and
 `turn_id`, and only when they are hex digits and dashes, so neither can name a path outside
 `~/.local/state/panemux/codex-permission/` or carry the command codex asked about. It writes the
 record through a temporary file and a rename, with umask 077, removes files older than 7 days from that
@@ -249,6 +249,26 @@ directory only (`find "$dir" -type f -mtime +7 -exec rm -f {} +`), prints nothin
 answers allow or deny. The collection only prints the records with `cat` (codex's live section `codex/permission`, a
 constant fragment of its collect adapter like the others), and the Go side accepts a row
 only when both IDs are UUIDs.
+
+**Installing the hook** (`internal/tasks/codex_hook.go`, issue #396). `GET` and
+`POST /api/tasks/codex-hook` take only a host name, which must be the panemux host or an
+`ssh_connections` key (`checkHost`); the browser supplies no path, command or content. Both run
+through `runHostScript`, exactly as the collection does: locally `sh -s`, remotely the literal
+`sh -s`, the script on stdin.
+
+- **The check** is the constant `codexHookReadScript`. It tests for `~/.codex` and `codex` on the
+  `PATH`, and prints `$HOME` and the hook file and `~/.codex/hooks.json` with their byte counts.
+- **The install** is the constant `codexHookWriteScript` with four values filled in: a heredoc tag
+  of 32 hex digits from crypto/rand (`newHeredocTag`, as a task launch's), the word `yes` or `no`, the
+  embedded hook script, and the new `hooks.json`. Both contents travel in heredocs whose terminator
+  is quoted, so the shell expands nothing in them. The new `hooks.json` is Go's two-space indented
+  encoding (`registerCodexHook`), in which every line is indented or holds a bracket or a quoted
+  string, so no line can equal a terminator; when the hook is already registered the host's own file
+  is not sent back at all. The file paths are constants under `$HOME`.
+- **The host's `$HOME`** goes into `hooks.json` as the hook's `command`, as a JSON string. It is the
+  host user's own value in the host user's own file, which codex runs as that user.
+- **A `hooks.json` panemux cannot read** as codex does is never written, and the hook is not written
+  either. panemux never edits codex's trust of the hook; the person reviews it in `/hooks`.
 
 The script lists only the collecting user's processes (`ps -U "$(id -u)"`). On a shared host,
 another user's processes are neither shown as tasks nor accepted as the live process behind a

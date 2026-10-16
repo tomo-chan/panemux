@@ -1,0 +1,4 @@
+{
+  "error": "~/.codex/hooks.json is not as codex reads it: \"hooks\" is not an object",
+  "status": "invalid"
+}

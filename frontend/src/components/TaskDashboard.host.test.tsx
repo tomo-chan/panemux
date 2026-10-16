@@ -64,6 +64,8 @@ function tasksState(overrides: Partial<TasksState> = {}): TasksState {
     hostSessionName: vi.fn().mockResolvedValue({ ok: true, launched: { tmux_session: 'dev-server-0123abcd' } }),
     hostTerminal: vi.fn().mockResolvedValue({ ok: true, launched: { session_id: 'board-0000000000000001', tmux_session: '' } }),
     closeHostTerminal: vi.fn().mockResolvedValue(undefined),
+    codexHook: vi.fn().mockResolvedValue({ ok: true, launched: { status: 'absent' } }),
+    installCodexHook: vi.fn().mockResolvedValue({ ok: false, error: 'not stubbed' }),
     ...overrides,
   }
 }
@@ -252,5 +254,45 @@ describe('TaskDashboard host Type in pane (issue #314)', () => {
     rerender(dashboard(withDevServer(state, 'ok')))
     fireEvent.click(screen.getByRole('button', { name: 'Close' }))
     expect(screen.getByRole('button', { name: 'Open a terminal on dev-server' })).toHaveFocus()
+  })
+})
+
+describe('TaskDashboard host menu Codex input notifications (issue #396)', () => {
+  it('offers the panemux host the hook alone, and installs it there', async () => {
+    const state = tasksState({
+      codexHook: vi.fn().mockResolvedValue({ ok: true, launched: { status: 'missing' } }),
+      installCodexHook: vi.fn().mockResolvedValue({ ok: true, launched: { status: 'installed' } }),
+    })
+    renderDashboard(state)
+
+    const chip = screen.getByRole('button', { name: 'Codex input notifications on Local' })
+    await act(async () => {
+      fireEvent.click(chip)
+    })
+    const menu = screen.getByRole('dialog', { name: 'Codex input notifications on Local' })
+    expect(state.codexHook).toHaveBeenCalledWith('')
+    expect(menu).not.toHaveTextContent('Open a terminal')
+    expect(screen.queryByRole('button', { name: /^Type in pane/ })).toBeNull()
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Install Codex input notifications on Local' }))
+    })
+    expect(state.installCodexHook).toHaveBeenCalledWith('')
+    expect(screen.getByRole('status')).toHaveTextContent("Trust it in codex's /hooks")
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+    expect(screen.queryByRole('dialog', { name: 'Codex input notifications on Local' })).toBeNull()
+    expect(chip).toHaveFocus()
+  })
+
+  it("lists the hook in a remote host's terminal menu", async () => {
+    const state = tasksState({ codexHook: vi.fn().mockResolvedValue({ ok: true, launched: { status: 'outdated' } }) })
+    const chip = renderDashboard(state)
+
+    await act(async () => {
+      fireEvent.click(chip)
+    })
+    expect(state.codexHook).toHaveBeenCalledWith('dev-server')
+    expect(screen.getByRole('button', { name: 'Update Codex input notifications on dev-server' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Type in pane: dev-server' })).toHaveFocus()
   })
 })
