@@ -1,0 +1,8 @@
+{
+  "candidates": [
+    "/tmp/sample-project/docs/design.md",
+    "/tmp/sample-project/worktree/docs/design.md"
+  ],
+  "host": "",
+  "status": "choose"
+}

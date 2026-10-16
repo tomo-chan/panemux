@@ -1,0 +1,185 @@
+/* The split preview (issue #385): terminal on the left, preview on the right. */
+.pm-preview-split {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.pm-preview-terminal {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+.pm-preview-terminal > * {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.pm-preview-divider {
+  position: relative;
+  flex: 0 0 6px;
+  cursor: col-resize;
+  touch-action: none;
+  background: #2b2d31;
+  outline: none;
+}
+
+/* A grip in the middle, as the mock draws it. */
+.pm-preview-divider::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 2px;
+  width: 2px;
+  height: 28px;
+  margin-top: -14px;
+  border-radius: 1px;
+  background: #6b7280;
+}
+
+.pm-preview-divider:hover,
+.pm-preview-divider:focus-visible,
+.pm-preview-split[data-dragging='true'] .pm-preview-divider {
+  background: #569cd6;
+}
+
+/* The frame would otherwise swallow the pointer while the divider is dragged. */
+.pm-preview-split[data-dragging='true'] .pm-preview-frame {
+  pointer-events: none;
+}
+
+.pm-preview {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-height: 0;
+  background: #1f2023;
+}
+
+.pm-preview-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px;
+  border-bottom: 1px solid #2f3136;
+  font-family: var(--panemux-mono-font, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  color: #c9d1d9;
+}
+
+.pm-preview-target {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.pm-preview-host {
+  color: #89c4f4;
+}
+
+.pm-preview-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pm-preview-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: #c9d1d9;
+  font: inherit;
+  cursor: pointer;
+}
+
+.pm-preview-btn-text {
+  border-color: #3f4249;
+  background: #26282c;
+}
+
+.pm-preview-btn:hover:not(:disabled),
+.pm-preview-btn:focus-visible {
+  border-color: #569cd6;
+  outline: none;
+}
+
+.pm-preview-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.pm-preview-body {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.pm-preview-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #fff;
+}
+
+.pm-preview-note {
+  margin: 0;
+  padding: 12px;
+  color: #c9d1d9;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.pm-preview-note p {
+  margin: 0 0 8px;
+}
+
+.pm-preview-note[data-tone='error'] {
+  color: #f48771;
+}
+
+.pm-preview-choices {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pm-preview-choice {
+  display: block;
+  width: 100%;
+  margin-bottom: 6px;
+  padding: 6px 8px;
+  border: 1px solid #3f4249;
+  border-radius: 4px;
+  background: #26282c;
+  color: #89c4f4;
+  font: 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.pm-preview-choice:hover,
+.pm-preview-choice:focus-visible {
+  border-color: #569cd6;
+  outline: none;
+}
+
+/* Shown while the previewed page holds the keyboard. */
+.pm-preview-keys {
+  margin: 0;
+  padding: 4px 8px;
+  border-bottom: 1px solid #2f3136;
+  color: #c9d1d9;
+  font-size: 12px;
+}

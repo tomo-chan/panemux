@@ -16,6 +16,7 @@ reading before touching the code it covers.
 | Command center subprocess execution | [command-center.md](security/command-center.md) |
 | Auth token and transport encryption | [auth.md](security/auth.md) |
 | Opening URLs From a Pane; Loopback port forwarding; Browser-open interception | [url-open.md](security/url-open.md) |
+| Previewing Local Files; isolation, paths and symbolic links, tokens, size | [preview.md](security/preview.md) |
 
 ## Session Command Execution
 

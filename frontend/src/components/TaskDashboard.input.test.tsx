@@ -12,12 +12,21 @@ import type { TaskTerminalStatus } from './TaskTerminal'
 // drives, and whose mounts are counted so a resize or a poll that remounted it
 // — a new WebSocket, a lost input target — would show.
 const { terminals } = vi.hoisted(() => ({
-  terminals: { mounts: [] as string[], onStatus: null as ((status: TaskTerminalStatus) => void) | null },
+  terminals: {
+    mounts: [] as string[],
+    onStatus: null as ((status: TaskTerminalStatus) => void) | null,
+    onPreviewPath: undefined as ((path: string) => void) | undefined,
+  },
 }))
 
 vi.mock('./TaskTerminal', () => ({
-  TaskTerminal: ({ sessionId, onStatus }: { sessionId: string; onStatus: (status: TaskTerminalStatus) => void }) => {
+  TaskTerminal: ({ sessionId, onStatus, onPreviewPath }: {
+    sessionId: string
+    onStatus: (status: TaskTerminalStatus) => void
+    onPreviewPath?: (path: string) => void
+  }) => {
     terminals.onStatus = onStatus
+    terminals.onPreviewPath = onPreviewPath
     useEffect(() => {
       terminals.mounts.push(sessionId)
     }, [sessionId])
@@ -183,6 +192,7 @@ function setNarrow(narrow: boolean) {
 beforeEach(() => {
   terminals.mounts = []
   terminals.onStatus = null
+  terminals.onPreviewPath = undefined
   window.localStorage.clear()
   setNarrow(false)
 })
@@ -643,6 +653,7 @@ describe('TaskDashboard Type in pane: maximize', () => {
     expect(dialog()).toHaveAttribute('data-maximized', 'true')
   })
 
+  // efficacy:exempt unchanged by #385; it is reported only because the preview tests follow it.
   it('is a full sheet with no maximize on a narrow screen', async () => {
     setNarrow(true)
     window.localStorage.setItem('panemux:task-terminal-maximized', 'true')
@@ -661,3 +672,93 @@ describe('TaskDashboard Type in pane: maximize', () => {
 
 // Keep React in scope for the JSX in the mock factory above.
 void React
+
+describe('TaskDashboard Type in pane: preview', () => {
+  beforeEach(() => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(JSON.stringify({
+      status: 'ready', url: '/preview/ab/mockups/index.html', path: '/workspace/user/review-api/mockups/index.html', host: '',
+    })))
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  async function openPreview() {
+    await act(async () => {
+      terminals.onPreviewPath!('./mockups/index.html')
+    })
+  }
+
+  it('opens a clicked path beside the terminal, through the attach, without remounting the terminal', async () => {
+    renderDashboard()
+    await openPopup()
+    setStatus('connected')
+
+    await openPreview()
+
+    const frame = within(dialog()).getByTitle('Preview of /workspace/user/review-api/mockups/index.html')
+    expect(frame).toHaveAttribute('src', '/preview/ab/mockups/index.html')
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      '/api/sessions/board-0000000000000001/preview', expect.objectContaining({ method: 'POST' }),
+    )
+    expect(terminals.mounts).toEqual(['board-0000000000000001'])
+    expect(within(dialog()).getByRole('separator', { name: 'Resize terminal and preview' })).toBeInTheDocument()
+
+    fireEvent.click(within(dialog()).getByRole('button', { name: 'Close preview' }))
+    expect(within(dialog()).queryByRole('region', { name: 'Preview' })).toBeNull()
+    expect(terminals.mounts).toEqual(['board-0000000000000001'])
+  })
+
+  it('keeps the ratio per task', async () => {
+    renderDashboard()
+    await openPopup()
+    setStatus('connected')
+    await openPreview()
+
+    fireEvent.keyDown(within(dialog()).getByRole('separator'), { key: 'ArrowRight' })
+    expect(window.localStorage.getItem('panemux:preview-split:task:wait-1')).toBe('55')
+  })
+
+  it('links paths only in a task on the panemux host', async () => {
+    renderDashboard()
+    await openPopup()
+    setStatus('connected')
+    expect(typeof terminals.onPreviewPath).toBe('function')
+    fireEvent.click(within(dialog()).getByRole('button', { name: 'Close' }))
+
+    await openPopup('idle-1')
+    setStatus('connected')
+    expect(within(dialog()).getByRole('heading', { name: 'docs' })).toBeInTheDocument()
+    expect(terminals.onPreviewPath).toBeUndefined()
+  })
+
+  it('hides the preview when the terminal disconnects', async () => {
+    renderDashboard()
+    await openPopup()
+    setStatus('connected')
+    await openPreview()
+
+    setStatus('disconnected')
+    expect(within(dialog()).queryByRole('region', { name: 'Preview' })).toBeNull()
+  })
+
+  it('keeps Tab inside the popup past the preview, and Escape there does not close it', async () => {
+    renderDashboard()
+    await openPopup()
+    setStatus('connected')
+    await openPreview()
+
+    const close = within(dialog()).getByRole('button', { name: 'Close preview' })
+    close.focus()
+    expect(key(close, { key: 'Escape' }).defaultPrevented).toBe(false)
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+
+    const buttons = within(dialog()).getAllByRole('button')
+    const last = buttons[buttons.length - 1]
+    last.focus()
+    const wrapped = key(last, { key: 'Tab' })
+    expect(wrapped.defaultPrevented).toBe(true)
+    expect(dialog().contains(document.activeElement)).toBe(true)
+  })
+})

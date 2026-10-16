@@ -33,6 +33,8 @@ const A11Y_BASE_URL = 'http://127.0.0.1:4178'
 // task-dashboard.spec.ts runs against an isolated HOME holding fake agent
 // sessions, and opening a task adds a pane to its fixture's layout.
 const TASK_DASHBOARD_BASE_URL = 'http://127.0.0.1:4179'
+// preview-split.spec.ts ends a pane's shell and keeps a preview ratio.
+const PREVIEW_BASE_URL = 'http://127.0.0.1:4180'
 
 const AGENT_BOARD_SPEC = /agent-board\.spec\.ts$/
 const AGENT_BOARD_AGMSG_SPEC = /agent-board-agmsg\.spec\.ts$/
@@ -40,6 +42,7 @@ const COMMAND_CENTER_SPEC = /command-center\.spec\.ts$/
 const CORE_MULTIPLEXER_SPEC = /core-multiplexer\.spec\.ts$/
 const A11Y_SPEC = /a11y\.spec\.ts$/
 const TASK_DASHBOARD_SPEC = /task-dashboard\.spec\.ts$/
+const PREVIEW_SPEC = /preview-split\.spec\.ts$/
 
 export default defineConfig({
   testDir: './e2e',
@@ -109,6 +112,13 @@ export default defineConfig({
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
     },
+    {
+      command: 'sh ./e2e/run-panemux-e2e.sh preview.yml 4180',
+      url: PREVIEW_BASE_URL,
+      cwd: '.',
+      reuseExistingServer: !process.env.CI,
+      timeout: 120_000,
+    },
   ],
   projects: [
     {
@@ -121,6 +131,7 @@ export default defineConfig({
         CORE_MULTIPLEXER_SPEC,
         A11Y_SPEC,
         TASK_DASHBOARD_SPEC,
+        PREVIEW_SPEC,
       ],
     },
     {
@@ -152,6 +163,11 @@ export default defineConfig({
       name: 'chromium-task-dashboard',
       use: { ...chromium, baseURL: TASK_DASHBOARD_BASE_URL },
       testMatch: TASK_DASHBOARD_SPEC,
+    },
+    {
+      name: 'chromium-preview',
+      use: { ...chromium, baseURL: PREVIEW_BASE_URL },
+      testMatch: PREVIEW_SPEC,
     },
   ],
 })

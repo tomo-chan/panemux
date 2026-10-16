@@ -1,0 +1,36 @@
+# Fixture for preview-split.spec.ts.
+#
+# Its own panemux process (playwright.config.ts, port 4180), as the spec ends
+# a pane's shell and leaves a preview ratio behind, which would change what
+# other specs see. Two panes side by side, so each is half the window: the
+# width at which the split preview's 160 px minimums were first seen not to
+# hold (issue #385).
+server:
+    host: 127.0.0.1
+    port: 4180
+workspaces:
+    active: default
+    tab_position: top
+    items:
+        - id: default
+          title: Default
+          layout:
+            direction: horizontal
+            children:
+                - pane:
+                    id: preview-left
+                    type: local
+                    shell: /bin/bash
+                    cwd: /tmp
+                    title: Left Shell
+                  size: 50
+                - pane:
+                    id: preview-right
+                    type: local
+                    shell: /bin/bash
+                    cwd: /tmp
+                    title: Right Shell
+                  size: 50
+display:
+    show_header: true
+    show_status_bar: true

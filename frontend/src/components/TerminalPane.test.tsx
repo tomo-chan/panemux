@@ -235,6 +235,7 @@ describe('TerminalPane URL opening', () => {
     expect(typeof options.onBrowserOpenRequest).toBe('function')
   })
 
+  // efficacy:exempt unchanged by #385; it is reported only because the preview tests follow it.
   it('asks for approval when the pane requests a browser open, then opens it', async () => {
     const openSpy = vi.fn()
     window.open = openSpy as unknown as typeof window.open
@@ -252,6 +253,80 @@ describe('TerminalPane URL opening', () => {
     fireEvent.click(getByRole('button', { name: 'Open' }))
 
     expect(openSpy).toHaveBeenCalledWith('https://example.com/device', '_blank', 'noopener,noreferrer')
+  })
+})
+
+describe('TerminalPane preview', () => {
+  const running = {
+    handleResize: vi.fn(),
+    connected: true,
+    dims: null,
+    sessionState: 'running',
+    reconnectFailed: false,
+    restartSession: vi.fn(),
+  }
+
+  beforeEach(() => {
+    mockUseTerminal.mockReturnValue(running)
+    mockUseGitInfo.mockReturnValue({ gitInfo: { is_git: false }, refreshIfStale: vi.fn(), refreshNow: vi.fn() })
+    window.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      status: 'ready', url: '/preview/ab/mockups/index.html', path: '/workspace/user/project/mockups/index.html', host: '',
+    })))
+    window.localStorage.clear()
+  })
+
+  function previewPath(): ((path: string) => void) | undefined {
+    const options = mockUseTerminal.mock.calls[mockUseTerminal.mock.calls.length - 1][0] as {
+      onPreviewPath?: (path: string) => void
+    }
+    return options.onPreviewPath
+  }
+
+  it('links paths only in panes on the panemux host', () => {
+    const linked = (['local', 'tmux', 'ssh', 'ssh_tmux'] as const).filter((type) => {
+      const { unmount } = render(<TerminalPane pane={{ id: `p-${type}`, type }} />)
+      const result = typeof previewPath() === 'function'
+      unmount()
+      return result
+    })
+    expect(linked).toEqual(['local', 'tmux'])
+  })
+
+  it('opens a clicked path beside the terminal, keeping the terminal in place', async () => {
+    const { container, findByTitle, getByRole } = render(<TerminalPane pane={{ id: 'p1', type: 'local' }} />)
+    const terminal = mockUseTerminal.mock.calls[mockUseTerminal.mock.calls.length - 1][0].container as HTMLElement
+    expect(terminal).toBeInstanceOf(HTMLElement)
+
+    act(() => previewPath()!('./mockups/index.html'))
+
+    const frame = await findByTitle('Preview of /workspace/user/project/mockups/index.html')
+    expect(frame).toHaveAttribute('src', '/preview/ab/mockups/index.html')
+    expect(window.fetch).toHaveBeenCalledWith('/api/sessions/p1/preview', expect.objectContaining({ method: 'POST' }))
+    expect(mockUseTerminal.mock.calls[mockUseTerminal.mock.calls.length - 1][0].container).toBe(terminal)
+    expect(container.querySelector('[data-pane-body] .pm-preview-split')).not.toBeNull()
+
+    fireEvent.click(getByRole('button', { name: 'Close preview' }))
+    expect(container.querySelector('.pm-preview')).toBeNull()
+  })
+
+  it('hides the preview when the terminal disconnects', async () => {
+    const { findByTitle, queryByRole, rerender } = render(<TerminalPane pane={{ id: 'p1', type: 'local' }} />)
+    act(() => previewPath()!('./mockups/index.html'))
+    await findByTitle(/^Preview of/)
+
+    mockUseTerminal.mockReturnValue({ ...running, connected: false })
+    rerender(<TerminalPane pane={{ id: 'p1', type: 'local' }} />)
+    expect(queryByRole('region', { name: 'Preview' })).toBeNull()
+  })
+
+  it('hides the preview when the session ends', async () => {
+    const { findByTitle, queryByRole, rerender } = render(<TerminalPane pane={{ id: 'p1', type: 'local' }} />)
+    act(() => previewPath()!('./mockups/index.html'))
+    await findByTitle(/^Preview of/)
+
+    mockUseTerminal.mockReturnValue({ ...running, sessionState: 'exited' })
+    rerender(<TerminalPane pane={{ id: 'p1', type: 'local' }} />)
+    expect(queryByRole('region', { name: 'Preview' })).toBeNull()
   })
 })
 

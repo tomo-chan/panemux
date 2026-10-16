@@ -383,3 +383,59 @@ test('adds a dashboard host, keeps it across a reload, and deletes it', async ({
   await dialog.getByRole('button', { name: 'Close' }).click()
   await expect(page.getByRole('list', { name: 'Hosts' })).not.toContainText('e2e-remote')
 })
+
+// Issue #385: the popup previews a page beside its terminal. A key typed in
+// the page never reaches the dashboard's window — the page is sandboxed in
+// another origin — so the popup's shortcuts wait until focus is back, and
+// the preview says so meanwhile.
+test('previews a page from the popup, and says where its keys go while the page has them', async ({ page, request }) => {
+  test.skip(!(await hasTmux(request)), 'tmux is not installed here')
+
+  await openDashboard(page)
+  await page
+    .getByRole('region', { name: 'Waiting for input' })
+    .getByTestId('task-card-local:claude:e2e-in-tmux')
+    .getByRole('button', { name: /^Type in pane/ })
+    .click()
+  const dialog = page.getByRole('dialog', { name: /^Type in pane: / })
+  await expect(dialog.getByTestId('task-input-status')).toHaveText('Connected')
+
+  // The task's agent is `sleep`, so the tty's echo is what prints the path;
+  // the run's fixture put the page in the task's directory. A fresh line
+  // first, as an earlier test may have left its own echo on this one.
+  await page.keyboard.press('Enter')
+  await page.keyboard.type('pm385-popup.html ')
+  const rows = dialog.locator('.xterm-rows')
+  await expect.poll(async () => (await rows.textContent()) ?? '').toContain('pm385-popup.html')
+  const link = await rows.evaluate((el) => {
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const at = node.textContent?.indexOf('pm385-popup.html') ?? -1
+      if (at < 0) continue
+      const range = document.createRange()
+      range.setStart(node, at)
+      range.setEnd(node, at + 1)
+      const box = range.getBoundingClientRect()
+      return { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+    }
+    return null
+  })
+  expect(link).not.toBeNull()
+  await page.mouse.move(link!.x, link!.y)
+  await page.mouse.click(link!.x, link!.y)
+  const preview = dialog.locator('.pm-preview')
+  const pageText = dialog.frameLocator('.pm-preview-frame').locator('p')
+  await expect(pageText).toHaveText('pm385-popup')
+
+  const hint = preview.getByRole('status')
+  await expect(hint).toHaveCount(0)
+  await pageText.click()
+  await expect(hint).toHaveText(/Keys go to the page/)
+  await page.keyboard.press('Control+Shift+Escape')
+  await expect(dialog).toBeVisible()
+
+  await rows.click()
+  await expect(hint).toHaveCount(0)
+  await page.keyboard.press('Control+Shift+Escape')
+  await expect(dialog).toHaveCount(0)
+})

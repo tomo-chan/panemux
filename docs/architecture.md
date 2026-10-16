@@ -38,6 +38,7 @@ layout rendering, terminal emulation, interaction state, and presentation.
 | `internal/ws` | Bridge session bytes and control messages to terminal WebSockets, stream command-center events, and serve the task event stream (`/ws/tasks/events`). |
 | `internal/requestsecurity` | Guard every API and WebSocket before side effects using browser Origin, Referer and Fetch Metadata evidence. |
 | `internal/server` | Compose middleware, API routes, WebSocket routes, static assets, and SPA fallback into the production router. |
+| `internal/preview` | Resolve a clicked HTML or Markdown path against a session's working directories, refusing any file outside them, register the file under a random token for the server's lifetime, and serve it and the files under its root sandboxed in an opaque origin, rendering Markdown. |
 | `internal/portforward` | Maintain short-lived loopback listeners that forward callback traffic through a session's SSH connection. |
 | `internal/board` | Invoke agmsg through its documented scripts, relay rows across configured hosts, and maintain the in-memory status/history view. |
 | `internal/commandcenter` | Run one headless Claude query at a time, persist its session/history state, and stream structured events. |
@@ -53,6 +54,7 @@ layout rendering, terminal emulation, interaction state, and presentation.
 | `useLayout` | Own the normalized recursive layout tree, optimistic edits, and persistence requests. |
 | `TerminalPane` and `useTerminal` | Own xterm.js setup, fitting, addons, pane input, replay sequencing and suppression, pending terminal messages, and terminal lifecycle. |
 | `useWebSocket` | Own the pane connection, reconnect behavior, send-if-open transport, and validation of structured text control frames. |
+| `PreviewSplit` and `usePreview` | Split a workspace pane's or the Type in pane popup's body into the terminal and a preview of a clicked HTML or Markdown path (`utils/preview`), own the divider and its per-pane / per-task ratio, and hide the preview when the terminal disconnects. |
 | `usePaneUrlOpen` | Receive validated URL-open events and coordinate browser navigation/callback forwarding. |
 | task event store (`useTaskEvents`, `utils/taskEvents`) | Hold one `/ws/tasks/events` connection per tab and the tasks and hosts it reports, validated and in `seq` order; reconnect from a fresh snapshot on any gap or close, 2 to 30 seconds apart with no limit. |
 | attention and notifications (`App`, `utils/taskEvents`) | Project the task event store and visibility changes into pane/workspace indicators, browser notifications and the task dashboard's state column, matching tasks to panes with `utils/taskBoard` and recording the `wait_id`s each tab notified, and those whose attention a person cleared, in its session storage. |
@@ -173,6 +175,14 @@ operands, with a fixed initial-pane bootstrap for PATH and the configured shell/
 uses pane-local tmux passthrough to deliver the same OSC event as an ordinary
 SSH pane; existing sessions and the tmux server's environment are not reconfigured.
 
+### Preview flow
+
+A path the terminal shows as an HTML or Markdown link is sent to
+`POST /api/sessions/{id}/preview`, which resolves it on the panemux host and returns a
+`/preview/<token>/…` address. `PreviewSplit` frames that address beside the terminal; Open in new tab
+opens the same address. Behavior is in [the split preview](behavior/preview.md), and the isolation in
+[preview security](security/preview.md).
+
 ## Trust boundaries
 
 - Core terminal routes assume a trusted deployment and are not an authenticated multi-user surface.
@@ -191,6 +201,10 @@ SSH pane; existing sessions and the tmux server's environment are not reconfigur
 - Panemux runs no copy of itself on remote hosts. SSH-backed features use the existing SSH session
   and operator-installed remote tools; the task dashboard uses its own SSH connection per host and
   runs only its two fixed scripts over it — collection, and starting or resuming a claude task.
+- Previewed HTML and Markdown are untrusted content. They are served under `/preview/<token>/` in a
+  sandboxed opaque origin, so their requests to `/api/*` and `/ws/*` are cross-site and refused; the
+  token, issued only by the guarded API, is what grants access to a file
+  ([preview security](security/preview.md)).
 - The browser is untrusted input to Go handlers. Structured backend payloads with declared frontend
   schemas remain untrusted until validation succeeds; other input paths apply their own parsing and
   bounds checks.

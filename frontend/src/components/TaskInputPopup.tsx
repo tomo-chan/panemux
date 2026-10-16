@@ -9,6 +9,9 @@ import {
 import type { TaskPaneRef } from '../utils/taskBoard'
 import { TaskTerminal } from './TaskTerminal'
 import { useTerminalPopupKeyboard } from '../hooks/useTerminalPopupKeyboard'
+import { usePreview } from '../hooks/usePreview'
+import { taskSplitKey } from '../utils/preview'
+import { PreviewSplit } from './PreviewSplit'
 import type { TaskTerminalStatus } from './TaskTerminal'
 
 // The task dashboard's Type in pane popup (issue #284): a real terminal on a
@@ -100,6 +103,9 @@ export const TaskInputPopup: React.FC<TaskInputPopupProps> = ({
   const tmuxSession = attach.phase === 'ready' ? attach.tmuxSession : task.location.tmux_session ?? ''
   const openAction = taskOpenAction(task, pane)
   const isMaximized = maximized && !sheet
+  // Paths in a task on the panemux host open beside the terminal (issue
+  // #385); the preview is hidden whenever the terminal is not connected.
+  const preview = usePreview(attach.phase === 'ready' ? attach.sessionId : '', chip === 'connected')
 
   useTerminalPopupKeyboard({
     dialogRef,
@@ -133,6 +139,32 @@ export const TaskInputPopup: React.FC<TaskInputPopupProps> = ({
     : movedTo
       ? `Moved to ${movedTo} on the board. This terminal stays on ${title}.`
       : null
+
+  // The terminal's area: the popup's keyboard rules treat every key typed in
+  // it as the terminal's own, so the preview sits beside it, not inside.
+  const terminalBody = (
+    <div ref={bodyRef} className="td-input-body" data-input={chip === 'connected' ? 'on' : 'off'}>
+      {attach.phase === 'ready' ? (
+        <TaskTerminal
+          key={`${attach.sessionId}:${attempt}`}
+          sessionId={attach.sessionId}
+          onStatus={onTerminalStatus}
+          onPreviewPath={task.host === '' ? preview.open : undefined}
+        />
+      ) : (
+        <div className="td-input-blank">
+          {attach.phase === 'connecting' ? (
+            <>
+              <strong>Connecting to tmux {tmuxSession}…</strong>
+              <span>Keys are not sent until it connects.</span>
+            </>
+          ) : (
+            <strong>Not connected.</strong>
+          )}
+        </div>
+      )}
+    </div>
+  )
 
   return (
     <div className="td-input-layer" data-maximized={isMaximized} data-sheet={sheet}>
@@ -223,21 +255,15 @@ export const TaskInputPopup: React.FC<TaskInputPopupProps> = ({
           </div>
         )}
 
-        <div ref={bodyRef} className="td-input-body" data-input={chip === 'connected' ? 'on' : 'off'}>
-          {attach.phase === 'ready' ? (
-            <TaskTerminal key={`${attach.sessionId}:${attempt}`} sessionId={attach.sessionId} onStatus={onTerminalStatus} />
-          ) : (
-            <div className="td-input-blank">
-              {attach.phase === 'connecting' ? (
-                <>
-                  <strong>Connecting to tmux {tmuxSession}…</strong>
-                  <span>Keys are not sent until it connects.</span>
-                </>
-              ) : (
-                <strong>Not connected.</strong>
-              )}
-            </div>
-          )}
+        <div className="td-input-split">
+          <PreviewSplit
+            splitKey={taskSplitKey(task.id)}
+            view={preview.view}
+            terminal={terminalBody}
+            onChoose={preview.open}
+            onReload={preview.reload}
+            onClose={preview.close}
+          />
         </div>
 
         <footer className="td-input-foot">

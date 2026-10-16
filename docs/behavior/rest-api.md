@@ -205,6 +205,46 @@ A `409` is reported rather than worked around. An OAuth provider matches the reg
 `redirect_uri` exactly, so rewriting the callback to a different local port would break the login it
 is meant to complete.
 
+### `POST /api/sessions/{id}/preview`
+
+Accepts `{ "path": "<the path as the terminal showed it>" }`, resolves it from the session's working
+directory and its agent's worktrees, and registers the HTML or Markdown file it names for the
+[split preview](preview.md). Only `local` and `tmux` sessions resolve paths.
+
+- `400`: invalid JSON body; a path that is not `.html`, `.htm`, `.md` or `.markdown`; or a session
+  whose shell runs on another host
+- `403`: the file is outside the session's working directory and its agent's worktrees — an absolute
+  path elsewhere, a `../` that leaves them, or a symbolic link that leads out of them (the reason names
+  the directories allowed)
+- `404`: no session exists for `id`, or no file exists at the path (the reason names where it looked)
+- `413`: the file is larger than 10 MiB
+- `422`: the session's working directory and its agent's worktrees are all unknown
+- `200`: the preview to show, or the files to choose from
+
+Errors carry their reason as plain text, which the preview shows. A file to show:
+
+```json
+{ "status": "ready", "url": "/preview/<token>/mockups/index.html", "path": "/workspace/user/project/mockups/index.html", "host": "" }
+```
+
+Several files a relative path may name, absolute, in the order the directories were searched; the
+chosen one is sent back as `path`:
+
+```json
+{ "status": "choose", "candidates": ["/workspace/user/project/docs/design.md", "/workspace/user/project-wt/docs/design.md"], "host": "" }
+```
+
+`host` is `""` for the panemux host.
+
+### `GET /preview/{token}/*`
+
+Serves a registered preview and the files under the same root. It sits outside `/api` and its
+request guard, since the page it serves runs in an opaque origin and all of its own requests are
+cross-site; the token is what grants access. Missing tokens and files, directories, `..` and paths or
+symbolic links leading outside the root answer `404`; an HTML or Markdown file over 10 MiB answers
+`413`. Markdown is answered rendered as HTML. Headers and policies are in
+[security/preview.md](../security/preview.md).
+
 ### `GET /api/tasks`, `POST /api/tasks/hosts/{name}/reconnect`, `PUT /api/tasks/records`, `POST /api/tasks`, `POST /api/tasks/resume`, `POST /api/tasks/summary`, `POST /api/tasks/input-given` and `POST`/`DELETE /api/tasks/attach`
 
 The task dashboard's collection, its per-host reconnect, the done and label records (and the labels

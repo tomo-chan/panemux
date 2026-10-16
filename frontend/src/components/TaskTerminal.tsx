@@ -32,9 +32,11 @@ export function taskTerminalStatus({
 interface TaskTerminalProps {
   sessionId: string
   onStatus: (status: TaskTerminalStatus) => void
+  /** Opens a clicked HTML or Markdown path in the popup's preview (issue #385). */
+  onPreviewPath?: (path: string) => void
 }
 
-export const TaskTerminal: React.FC<TaskTerminalProps> = ({ sessionId, onStatus }) => {
+export const TaskTerminal: React.FC<TaskTerminalProps> = ({ sessionId, onStatus, onPreviewPath }) => {
   const [container, setContainer] = useState<HTMLDivElement | null>(null)
   const [everConnected, setEverConnected] = useState(false)
   const { connected, sessionState, reconnectFailed, handleResize } = useTerminal({
@@ -42,6 +44,7 @@ export const TaskTerminal: React.FC<TaskTerminalProps> = ({ sessionId, onStatus 
     container,
     // /api/sessions/{id}/restart knows only panes; the popup opens the attach again instead.
     recoverOnDisconnect: false,
+    onPreviewPath,
   })
 
   if (connected && !everConnected) setEverConnected(true)

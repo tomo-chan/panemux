@@ -303,6 +303,26 @@ export const OpenUrlResponseSchema = z.object({
 })
 
 export type OpenUrlResponse = z.infer<typeof OpenUrlResponseSchema>
+
+// Response from POST /api/sessions/{id}/preview (issue #385): the preview of
+// the HTML or Markdown file a clicked path names, or the files a relative
+// path may name when more than one working directory holds it. host is ""
+// for the panemux host.
+export const PreviewResponseSchema = z.discriminatedUnion('status', [
+  z.object({
+    status: z.literal('ready'),
+    url: z.string().startsWith('/preview/'),
+    path: z.string().min(1),
+    host: z.string(),
+  }),
+  z.object({
+    status: z.literal('choose'),
+    candidates: z.array(z.string().min(1)).min(2),
+    host: z.string(),
+  }),
+])
+
+export type PreviewResponse = z.infer<typeof PreviewResponseSchema>
 // Deliberately no .max() on any field, unlike most schemas in this file.
 // Every value here is free text an agent wrote about itself, and the Go side
 // (internal/board's ParseStatus) imposes no length limit of its own, so a

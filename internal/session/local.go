@@ -113,8 +113,18 @@ func (s *LocalSession) State() State {
 	return s.state
 }
 
+// Read reads the shell's output. Once the pty reports the terminal gone, the
+// session is exited: the read loop ends every subscription on that error, and
+// the WebSocket handler sends the state it then reads, which must not still
+// be "connected" because the process monitor has yet to record the exit.
 func (s *LocalSession) Read(p []byte) (int, error) {
-	return s.ptmx.Read(p)
+	n, err := s.ptmx.Read(p)
+	if err != nil {
+		s.mu.Lock()
+		s.state = StateExited
+		s.mu.Unlock()
+	}
+	return n, err
 }
 
 func (s *LocalSession) Write(p []byte) (int, error) {

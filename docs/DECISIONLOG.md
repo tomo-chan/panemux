@@ -1368,6 +1368,48 @@ navigation to protected APIs fail closed. Authority comparison preserves the exi
 termination contract and its documented scheme limitation; authentication and broader DNS
 rebinding protection remain separate work.
 
+## 2026-10-15: The split preview's isolation and bounds (#385)
+
+The #360 entry above anticipated isolated preview pages on another loopback port. #385 isolates them
+on the dashboard's own port instead: every preview response is sandboxed by Content-Security-Policy
+without `allow-same-origin`, so the page runs in an opaque origin, framed or in a tab, and its
+requests to `/api` and `/ws` reach the shared request guard as cross-site and are refused. A second
+listener would have been the same isolation with a port to choose, bind and close, and the remote
+relays of #386/#387 decide their own ports. The frame repeats `sandbox` so the isolation does not
+rest on the header alone.
+
+Previews are served under a random token rather than by path behind the request guard, because a
+sandboxed page's own stylesheets and images are cross-site requests the guard would refuse. Tokens
+are kept for the server's lifetime: #359's lifetime rule is that a tab opened on a preview outlives
+the pane, popup and session it came from, and no expiry was asked for.
+
+A file is served from the innermost working directory holding it, looked up through that
+directory's `os.Root` when it is opened and on every request, so "path and symlink escape" has one
+boundary that relative stylesheets can still use. #359 requires a size limit
+without a value; 10 MiB bounds the HTML or Markdown document — the file read whole for rendering —
+and not the files it loads. Markdown is rendered on the server by goldmark with raw HTML omitted, so
+the page needs no script.
+
+The first cut let an absolute path name any file on the host, served from its own directory, and
+checked symbolic links with `filepath.EvalSymlinks` and `os.Stat` on the clicked path. CodeQL flagged
+both as uncontrolled data in a path expression, and the operator chose to bound previews instead of
+dismissing the alerts: only files inside the session's working directory and its agent's worktrees
+open, and a file is found and checked only through `os.Root` for one of them. A path elsewhere is
+refused with the directories allowed, rather than opened, because an agent-printed path is the input
+and #359's "path and symlink escape" names the boundary. Using `os.Root` for lookup as well as
+serving also refuses symbolic links with an absolute target; the first cut registered such a link
+when it pointed inside the root and then answered `404` for it, since serving already went through
+`os.Root`.
+
+Comparing the clicked path with the working directories as strings then refused files that are
+inside them: a pane's working directory is reported resolved (`/private/tmp/...` on macOS), while
+the shell and its agents print the path they were given (`/tmp/...`), and a case-insensitive
+filesystem accepts another letter case. A path that is not inside a working directory as written is
+now compared by the identity of the directories above it, each resolved and looked up through an
+`os.Root` for `/`; the scope is unchanged, only how a path is recognized as inside it. Matching a
+resolved form of each working directory instead would have missed the logical form the shell prints,
+which cannot be derived from the resolved one.
+
 ## Agent registry
 
 ### One registry declares agents; capabilities are ports in their consumers (2026-10-12, issue #372)
