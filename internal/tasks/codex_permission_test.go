@@ -259,3 +259,62 @@ func TestService_DismissWaitRefusesAnEmptySignature(t *testing.T) {
 	defer svc.Close()
 	assert.ErrorIs(t, svc.DismissWait(""), ErrInvalidWait)
 }
+
+// finishedPermissionOutput is permissionOutput after turn A has completed:
+// the record is still on the host, as nothing removes it when a turn ends.
+func finishedPermissionOutput(at int64) []byte {
+	out := strings.Replace(string(permissionOutput(at)), "inProgress", "completed", 1)
+	return []byte(strings.Replace(out, "task_started", "task_complete", 1))
+}
+
+// An ssh_connections host reads its records with the same script, so its
+// codex waits on an approval request as a local one does. The host is part
+// of the wait's identity: "Input given" on the host's task leaves an
+// identical local request waiting, and the turn ending clears it.
+func TestService_SSHHostCodexPermissionWaitsAndClearsLikeLocal(t *testing.T) {
+	at := hostNow - 40
+	finished := false
+	output := func() []byte {
+		if finished {
+			return finishedPermissionOutput(at)
+		}
+		return permissionOutput(at)
+	}
+	conn := &fakeConn{output: output()}
+	svc := New(Options{
+		Hosts:    func() []string { return []string{"build-box"} },
+		Dial:     func(string) (Conn, error) { return conn, nil },
+		RunLocal: func(context.Context, string) ([]byte, error) { return permissionOutput(at), nil },
+		Now:      (&clock{now: collectedAt}).Now,
+	})
+	defer svc.Close()
+
+	snapshot := svc.CollectAttention(context.Background())
+	remote := findTask(t, snapshot.Tasks, "ssh:build-box:codex:"+codexSessionA)
+	local := findTask(t, snapshot.Tasks, "local:codex:"+codexSessionA)
+	require.Equal(t, StateWait, remote.State)
+	assert.Equal(t, codexWaitingForPermission, remote.WaitingFor)
+	assert.Equal(t, "build-box", remote.Host)
+	require.Equal(t, StateWait, local.State)
+	assert.NotEqual(t, local.WaitSignature, remote.WaitSignature, "the same record on another host is another wait")
+	assert.Equal(t, []string{"sh -s"}, conn.cmds, "the host runs the collection over its connection")
+	assert.Contains(t, conn.stdins[0], "codex-permission")
+
+	require.NoError(t, svc.DismissWait(remote.WaitSignature))
+	for _, snapshot := range []Snapshot{svc.CollectAttention(context.Background()), svc.Collect(context.Background())} {
+		assert.Equal(t, StateBusy, findTask(t, snapshot.Tasks, "ssh:build-box:codex:"+codexSessionA).State)
+		assert.Equal(t, StateWait, findTask(t, snapshot.Tasks, "local:codex:"+codexSessionA).State,
+			"Input given on the host's task is not the local task's")
+	}
+
+	at = hostNow - 5
+	conn.output = output()
+	again := findTask(t, svc.CollectAttention(context.Background()).Tasks, "ssh:build-box:codex:"+codexSessionA)
+	require.Equal(t, StateWait, again.State, "the host's next request in the same turn waits again")
+
+	finished = true
+	conn.output = output()
+	ended := findTask(t, svc.CollectAttention(context.Background()).Tasks, "ssh:build-box:codex:"+codexSessionA)
+	assert.Equal(t, StateIdle, ended.State, "the turn ending clears the host's wait")
+	assert.Empty(t, ended.WaitingFor)
+}

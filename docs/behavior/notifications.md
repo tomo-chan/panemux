@@ -8,8 +8,9 @@ panemux tells the operator when a coding agent starts waiting for them. The inpu
 [task event stream](task-events.md): the server observes the agents' own state on the panemux host
 and every `ssh_connections` host and publishes each change, and the browser decides what to show.
 Terminal output is not searched for prompts, so an agent waiting in a pane no browser has open is
-noticed as well, and a wait an agent does not record — codex asking to approve a command
-([issue #294](https://github.com/tomo-chan/panemux/issues/294)) — is not noticed at all.
+noticed as well. Codex records nothing when it asks to approve a command; that wait is noticed on
+each host where its permission hook is registered
+([Codex permission requests](tasks.md#codex-permission-requests)), and not at all elsewhere.
 
 When a task starts a wait ([Pane and workspace attention](task-events.md#pane-and-workspace-attention)):
 

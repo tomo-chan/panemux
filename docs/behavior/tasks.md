@@ -298,9 +298,9 @@ does write:
 
 A codex `PermissionRequest` command hook (`internal/tasks/codex_permission_hook.sh`, a POSIX `sh`
 script) records each approval request, so the session shows as `wait` and the
-[input-wait notification](task-events.md) fires. It is registered by hand, on the panemux host only
-for now: copy the script somewhere of the user's, make it executable, add it to `~/.codex/hooks.json`,
-and trust it in codex's `/hooks` review:
+[input-wait notification](task-events.md) fires. It is registered by hand on each host whose codex
+should be watched: copy the script somewhere of the user's, make it executable, add it to
+`~/.codex/hooks.json`, and trust it in codex's `/hooks` review:
 
 ```json
 {
@@ -312,6 +312,13 @@ and trust it in codex's `/hooks` review:
 }
 ```
 
+- **On an `ssh_connections` host.** Do the same on that host: copy the script there (for example
+  `scp codex_permission_hook.sh build-box:bin/`), make it executable, add it to that host's own
+  `~/.codex/hooks.json` with the path it has there, and trust it in `/hooks` of a codex started
+  there. The records stay on that host; the task collection, which runs there over the host's
+  connection, reads them as it does locally. The wait and its `Input given` are the host's task's:
+  the wait signature includes the host, so marking it answered leaves the same session ID's request on
+  another host waiting.
 - **What the hook writes.** It reads the hook's JSON on stdin and keeps only `session_id`, `turn_id`
   (hex digits and dashes) and the time, as `<session ID> <turn ID> <unix seconds>` in
   `~/.local/state/panemux/codex-permission/<session ID>` — one file per session, replaced by the next
