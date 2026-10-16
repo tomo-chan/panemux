@@ -208,6 +208,8 @@ func TestPostSessionPreview_RemoteRefusals(t *testing.T) {
 			http.StatusBadRequest},
 		{"a URL of an unreachable host", "pane-down", `{"url":"http://localhost:5173/"}`, "no route to host",
 			http.StatusBadGateway},
+		{"a URL of a connection no longer configured", "pane-gone", `{"url":"http://localhost:5173/"}`, "removed",
+			http.StatusBadGateway},
 		{"a URL nothing answers at", "pane-ssh", `{"url":"http://localhost:5173/"}`,
 			"alpha: connection refused: localhost:5173",
 			http.StatusBadGateway},

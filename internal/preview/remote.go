@@ -212,7 +212,7 @@ func realPath(files *sftp.Client, name string) (string, error) {
 			return "", fmt.Errorf("%s: %w", name, errRemoteLinkLoop)
 		}
 		target, err := files.ReadLink(next)
-		if err != nil {
+		if err != nil { //coverage:exempt Lstat has just reported the link; only its removal in between fails this
 			return "", fmt.Errorf("readlink %s: %w", next, err)
 		}
 		if path.IsAbs(target) {
@@ -276,7 +276,7 @@ func (r *Registry) OpenRemote(remote *Remote, root, file string) (string, error)
 		return "", fmt.Errorf("%w: %s", ErrEscapes, file)
 	}
 	info, err := files.Stat(resolved)
-	if err != nil {
+	if err != nil { //coverage:exempt realPath has just looked the file up; only a change on the host in between fails this
 		return "", remoteFileError(file, err)
 	}
 	if !info.Mode().IsRegular() {

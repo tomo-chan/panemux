@@ -129,7 +129,7 @@ func (h *Handler) previewRemoteFile(
 		return
 	}
 	url, err := h.previews.OpenRemote(remote, found[0].Root, found[0].File)
-	if err != nil {
+	if err != nil { //coverage:exempt ResolveRemote has just found the file in bounds; only a change on the host in between fails this
 		writePreviewError(w, err)
 		return
 	}
@@ -194,6 +194,7 @@ type previewHost struct {
 
 func newPreviewHosts() *previewHosts {
 	return &previewHosts{
+		//coverage:exempt a connection needs a reachable SSH server; internal/session tests DialPreviewConn against one
 		dial: func(cfg session.SSHConfig) (preview.RemoteConn, error) {
 			return session.DialPreviewConn(cfg)
 		},

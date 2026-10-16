@@ -329,3 +329,60 @@ func TestServeRemoteRefusesWhatLeavesTheRoot(t *testing.T) {
 	rec = serveRemote(t, r, url)
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
+
+func TestRemoteWithin(t *testing.T) {
+	for _, tc := range []struct {
+		dir, file string
+		want      bool
+	}{
+		{"/w", "/w/a.html", true},
+		{"/w", "/w", false},
+		{"/w", "/wx/a.html", false},
+		{"/", "/a.html", true},
+		{"/", "/", false},
+		{"/", "a.html", false},
+	} {
+		assert.Equal(t, tc.want, remoteWithin(tc.dir, tc.file), "%s in %s", tc.file, tc.dir)
+	}
+}
+
+func TestRemoteLookupsOverABrokenConnection(t *testing.T) {
+	// The SFTP client is gone but the connection has not reported its end:
+	// what fails is the connection, not the file, and is reported so.
+	f := newResolveFixture(t)
+	remote := newFakeRemote(t, nil)
+	_, err := ResolveRemote(remote.Remote, "mockups/index.html", []string{f.cwd})
+	require.NoError(t, err)
+	require.NoError(t, remote.conns[0].Close())
+
+	_, err = ResolveRemote(remote.Remote, "mockups/index.html", []string{f.cwd})
+	require.ErrorIs(t, err, ErrRemote)
+	_, err = NewRegistry().OpenRemote(remote.Remote, f.cwd, filepath.Join(f.cwd, "mockups", "index.html"))
+	require.ErrorIs(t, err, ErrRemote)
+	assert.NotErrorIs(t, err, ErrNotFound)
+}
+
+func TestRemoteFilesWithoutPermission(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("permissions do not bind root")
+	}
+	f := newResolveFixture(t)
+	locked := filepath.Join(f.cwd, "locked")
+	writeFile(t, filepath.Join(locked, "page.html"), "x")
+	unreadable := writeFile(t, filepath.Join(f.cwd, "unreadable.html"), "x")
+	remote := newFakeRemote(t, nil)
+	r := NewRegistry()
+	url, err := r.OpenRemote(remote.Remote, f.cwd, unreadable)
+	require.NoError(t, err)
+	require.NoError(t, os.Chmod(unreadable, 0))
+	require.NoError(t, os.Chmod(locked, 0))
+	t.Cleanup(func() {
+		_ = os.Chmod(locked, 0o755)
+		_ = os.Chmod(unreadable, 0o600)
+	})
+
+	_, err = r.OpenRemote(remote.Remote, f.cwd, filepath.Join(locked, "page.html"))
+	require.ErrorIs(t, err, ErrNotFound)
+	assert.Contains(t, err.Error(), "permission denied")
+	assert.Equal(t, http.StatusNotFound, serveRemote(t, r, url).Code)
+}
