@@ -1446,7 +1446,8 @@ const StateNote: React.FC<{ task: Task }> = ({ task }) => {
       break
     case 'busy':
       if (task.agent === 'codex') {
-        note = 'Codex does not record approval prompts: a command waiting for approval also shows as working.'
+        note =
+          "Unless codex's permission hook is registered on this host, a command waiting for approval also shows as working."
       }
       break
     case 'unknown':
