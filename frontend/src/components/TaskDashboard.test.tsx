@@ -408,7 +408,9 @@ describe('TaskDashboard', () => {
     expect(detail).toHaveTextContent("or running its session in codex's shared daemon")
     expect(detail).toHaveTextContent('Open the pane to see which.')
     fireEvent.click(screen.getByTestId('task-card-codex-busy'))
-    expect(detail).toHaveTextContent('Codex does not record approval prompts')
+    expect(detail).toHaveTextContent(
+      "Unless codex's permission hook is registered on this host, a command waiting for approval also shows as working.",
+    )
     fireEvent.click(screen.getByTestId('task-card-codex-unknown'))
     expect(detail).toHaveTextContent("Neither codex's thread history nor the end of its session log says")
     fireEvent.click(screen.getByTestId('task-card-unreadable'))

@@ -271,6 +271,8 @@ func finishedPermissionOutput(at int64) []byte {
 // codex waits on an approval request as a local one does. The host is part
 // of the wait's identity: "Input given" on the host's task leaves an
 // identical local request waiting, and the turn ending clears it.
+//
+//efficacy:exempt pins stage-1 behavior (#388) on SSH hosts; this branch changes no implementation
 func TestService_SSHHostCodexPermissionWaitsAndClearsLikeLocal(t *testing.T) {
 	at := hostNow - 40
 	finished := false

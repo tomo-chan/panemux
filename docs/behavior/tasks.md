@@ -312,10 +312,18 @@ should be watched: copy the script somewhere of the user's, make it executable, 
 }
 ```
 
-- **On an `ssh_connections` host.** Do the same on that host: copy the script there (for example
-  `scp codex_permission_hook.sh build-box:bin/`), make it executable, add it to that host's own
-  `~/.codex/hooks.json` with the path it has there, and trust it in `/hooks` of a codex started
-  there. The records stay on that host; the task collection, which runs there over the host's
+- **On an `ssh_connections` host.** Do the same on that host. With `build-box` standing for the
+  host's ssh destination (what `ssh` reaches it by, which need not be its panemux connection name),
+  from the repository's root:
+
+  ```sh
+  ssh build-box 'mkdir -p ~/.local/bin'
+  scp internal/tasks/codex_permission_hook.sh build-box:.local/bin/
+  ssh build-box 'chmod +x ~/.local/bin/codex_permission_hook.sh'
+  ```
+
+  Then add it to that host's own `~/.codex/hooks.json` with the path it has there, and trust it in
+  `/hooks` of a codex started there. The records stay on that host; the task collection, which runs there over the host's
   connection, reads them as it does locally. The wait and its `Input given` are the host's task's:
   the wait signature includes the host, so marking it answered leaves the same session ID's request on
   another host waiting.

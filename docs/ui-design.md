@@ -443,7 +443,7 @@ terminal that had focus cannot receive what is typed into the dashboard.
   held at a start-up screen, or running its session in codex's shared daemon, to be seen in the pane;
   a session the daemon runs shows "codex's shared daemon · cannot open in a pane" where a card says
   where it runs, and says why; a working one may be waiting for approval, which codex does not
-  record; an unknown one has no turn its history or log end reports); **Work**, the summary and the
+  record unless its permission hook is registered on that host; an unknown one has no turn its history or log end reports); **Work**, the summary and the
   remaining work as a numbered list ("No remaining work found." when there is none); links
   (repository, branch, pull request, then issues noted "closed by the pull request" and References
   noted "from the branch name or pull request title", each row only when there is something to
