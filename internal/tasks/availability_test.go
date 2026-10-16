@@ -194,11 +194,18 @@ func TestAvailability_AMissingCLIMakesLaunchAndResumeUnavailable(t *testing.T) {
 // A probe that fails leaves the collection as it was: the host is OK and
 // its tasks are listed. Launch and resume are unknown, with why.
 func TestAvailability_AFailedProbeDoesNotFailTheCollection(t *testing.T) {
-	for name, host := range map[string]*probeHost{
-		"an error":       {probeErr: errors.New("exit 1")},
-		"garbled output": {probe: []byte("hello\n")},
+	exitErr := exec.Command("sh", "-c", "exit 3").Run()
+	require.Error(t, exitErr)
+	for name, tc := range map[string]struct {
+		host   *probeHost
+		detail string
+	}{
+		"an error":       {&probeHost{probeErr: errors.New("broken pipe")}, "agent probe failed: broken pipe"},
+		"an exit status": {&probeHost{probeErr: exitErr}, "agent probe exited: exit status 3"},
+		"garbled output": {&probeHost{probe: []byte("hello\n")}, "agent probe output is incomplete"},
 	} {
 		t.Run(name, func(t *testing.T) {
+			host := tc.host
 			host.collection = minimalOutput("s")
 			svc := New(Options{RunLocal: host.run})
 			defer svc.Close()
@@ -210,7 +217,7 @@ func TestAvailability_AFailedProbeDoesNotFailTheCollection(t *testing.T) {
 			got := availabilityOf(svc.Availability(""), agent.Claude, agent.Launch)
 			assert.Equal(t, AvailabilityUnknown, got.Status)
 			assert.Equal(t, ReasonProbeFailed, got.Reason)
-			assert.NotEmpty(t, got.Detail)
+			assert.Equal(t, tc.detail, got.Detail)
 		})
 	}
 }
