@@ -110,10 +110,14 @@ export const TaskInputPopup: React.FC<TaskInputPopupProps> = ({
   const preview = usePreview(attach.phase === 'ready' ? attach.sessionId : '', chip === 'connected')
   // URLs open as in a pane (issue #386): a localhost URL of a task on the
   // panemux host beside the terminal. The attach is not a pane, so no
-  // forward is asked for it.
-  const urlOpen = usePaneUrlOpen(attach.phase === 'ready' ? attach.sessionId : '', {
+  // forward is asked for it, and the opener is keyed by the terminal itself
+  // — each Retry or Reconnect is a new one, even on the same attach — so a
+  // request raised by the terminal that was replaced is dropped with it.
+  const terminalKey = attach.phase === 'ready' ? `${attach.sessionId}:${attempt}` : ''
+  const urlOpen = usePaneUrlOpen(terminalKey, {
     forward: false,
-    previewUrl: task.host === '' ? preview.openUrl : undefined,
+    // Offered only while the preview can open.
+    previewUrl: task.host === '' && chip === 'connected' ? preview.openUrl : undefined,
   })
 
   useTerminalPopupKeyboard({
@@ -155,7 +159,7 @@ export const TaskInputPopup: React.FC<TaskInputPopupProps> = ({
     <div ref={bodyRef} className="td-input-body" data-input={chip === 'connected' ? 'on' : 'off'}>
       {attach.phase === 'ready' ? (
         <TaskTerminal
-          key={`${attach.sessionId}:${attempt}`}
+          key={terminalKey}
           sessionId={attach.sessionId}
           onStatus={onTerminalStatus}
           onPreviewPath={task.host === '' ? preview.open : undefined}
@@ -270,20 +274,25 @@ export const TaskInputPopup: React.FC<TaskInputPopupProps> = ({
           <PreviewSplit
             splitKey={taskSplitKey(task.id)}
             view={preview.view}
-            terminal={terminalBody}
+            terminal={
+              <>
+                {terminalBody}
+                {/* Over the terminal only, so an open preview's header stays in view. */}
+                <PaneUrlOpenNotice
+                  pendingUrl={urlOpen.pendingUrl}
+                  source={urlOpen.pendingSource}
+                  canPreview={urlOpen.canPreview}
+                  error={urlOpen.error}
+                  onPreview={urlOpen.previewPendingOpen}
+                  onConfirm={urlOpen.confirmPendingOpen}
+                  onDismiss={urlOpen.dismissPendingOpen}
+                  onDismissError={urlOpen.dismissError}
+                />
+              </>
+            }
             onChoose={preview.open}
             onReload={preview.reload}
             onClose={preview.close}
-          />
-          <PaneUrlOpenNotice
-            pendingUrl={urlOpen.pendingUrl}
-            source={urlOpen.pendingSource}
-            canPreview={urlOpen.canPreview}
-            error={urlOpen.error}
-            onPreview={urlOpen.previewPendingOpen}
-            onConfirm={urlOpen.confirmPendingOpen}
-            onDismiss={urlOpen.dismissPendingOpen}
-            onDismissError={urlOpen.dismissError}
           />
         </div>
 

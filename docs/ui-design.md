@@ -326,7 +326,9 @@ rules.
   either, so the note is always shown for a localhost page rather than guessed at.
 - The pane's URL strip adds `Preview` before `Open` and `Ignore` when the URL is a localhost page on
   the panemux host, and says `This link goes to` instead of `This pane wants to open` for a clicked
-  OSC 8 link. The Type in pane popup draws the same strip over the top of its body.
+  OSC 8 link. The strip covers the terminal side only — the whole body when no preview is open — so
+an open preview's header stays visible while another URL is asked about. The Type in pane popup
+draws the same strip over its terminal.
 
 ---
 

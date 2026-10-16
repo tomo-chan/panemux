@@ -266,6 +266,47 @@ describe('TaskDashboard Type in pane: localhost preview', () => {
     act(() => terminals.onBrowserOpenRequest!('http://localhost:5173/'))
     expect(within(dialog()).queryByRole('button', { name: 'Preview' })).toBeNull()
   })
+
+  // Not connected, the preview cannot open, so it is not offered; a request
+  // raised by the attach that ended is gone once Reconnect replaces it.
+  it('offers no Preview while disconnected, and drops a request when the attach is replaced', async () => {
+    const state = tasksState({
+      attach: vi.fn()
+        .mockResolvedValueOnce(attached('board-0000000000000001'))
+        .mockResolvedValueOnce(attached('board-0000000000000001')),
+    })
+    renderDashboard(state)
+    await openPopup()
+    setStatus('connected')
+
+    act(() => terminals.onBrowserOpenRequest!('http://localhost:5173/'))
+    expect(within(dialog()).getByRole('button', { name: 'Preview' })).toBeInTheDocument()
+    setStatus('disconnected')
+    expect(within(dialog()).queryByRole('button', { name: 'Preview' })).toBeNull()
+    expect(within(dialog()).getByRole('button', { name: 'Ignore' })).toBeInTheDocument()
+
+    await act(async () => {
+      fireEvent.click(within(dialog()).getByRole('button', { name: 'Reconnect' }))
+    })
+    setStatus('connected')
+    expect(within(dialog()).queryByRole('button', { name: 'Ignore' })).toBeNull()
+  })
+
+  // The strip asks about another URL while a preview is open: it stays over
+  // the terminal, so the preview's header and its controls stay in view.
+  it('keeps the approval strip on the terminal side while a preview is open', async () => {
+    renderDashboard()
+    await openPopup()
+    setStatus('connected')
+    act(() => terminals.onLinkActivate!('http://localhost:5173/first'))
+
+    act(() => terminals.onBrowserOpenRequest!('http://localhost:5173/second'))
+
+    const strip = dialog().querySelector('[data-pane-url-request="true"]') as HTMLElement
+    expect(strip).not.toBeNull()
+    expect(strip.closest('.pm-preview-terminal')).not.toBeNull()
+    expect(strip.closest('.pm-preview')).toBeNull()
+  })
 })
 
 describe('TaskDashboard Type in pane: entry', () => {

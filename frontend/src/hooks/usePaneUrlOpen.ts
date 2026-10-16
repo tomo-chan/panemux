@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   isLoopbackUrl,
   isOpenableUrl,
@@ -17,7 +17,8 @@ export type UrlOpenSource = 'program' | 'link'
 export interface UsePaneUrlOpenOptions {
   /**
    * Shows a localhost URL beside the terminal (issue #386). Given only for a
-   * terminal on the panemux host, where that URL names a server on this host.
+   * terminal on the panemux host, where that URL names a server on this host,
+   * and only while that terminal is connected, as the preview opens only then.
    */
   previewUrl?: (url: string) => void
   /**
@@ -63,6 +64,9 @@ interface PendingOpen {
  * dashboard, with the URL's loopback callback port published on the panemux
  * host so an OAuth redirect lands where the CLI is waiting, or, for a
  * localhost URL on the panemux host, in the split preview.
+ *
+ * sessionId names the terminal served: the pane whose forwards are asked for,
+ * or, with forwarding off, any key that changes when the terminal is replaced.
  */
 export function usePaneUrlOpen(sessionId: string, options: UsePaneUrlOpenOptions = {}): UsePaneUrlOpenResult {
   const { previewUrl, forward = true } = options
@@ -83,6 +87,13 @@ export function usePaneUrlOpen(sessionId: string, options: UsePaneUrlOpenOptions
     setPendingOpen(null)
     return taken
   }, [setPendingOpen])
+
+  // A request belongs to the terminal that raised it. When the session is
+  // replaced — the popup's Retry or Reconnect makes a new attach — approving
+  // it would answer a terminal that is gone.
+  useEffect(() => {
+    setPendingOpen(null)
+  }, [sessionId, setPendingOpen])
 
   const canPreviewUrl = useCallback(
     (url: string) => previewUrl !== undefined && isLoopbackUrl(url),

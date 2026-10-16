@@ -161,6 +161,20 @@ describe('usePaneUrlOpen (issue #386)', () => {
     expect(calls).toEqual(['http://localhost:8085/cb', 'https://example.com/'])
     expect(fetchMock).not.toHaveBeenCalled()
   })
+
+  // A request belongs to the terminal that raised it: once the session it
+  // came from is replaced, approving it would answer a terminal that is gone.
+  it('drops a pending request when the session changes', () => {
+    const { result, rerender } = renderHook(({ id }) => usePaneUrlOpen(id), { initialProps: { id: 'attach-1' } })
+
+    act(() => result.current.requestOpen('https://example.com/a'))
+    rerender({ id: '' })
+    expect(result.current.pendingUrl).toBeNull()
+
+    act(() => result.current.requestOpen('https://example.com/b'))
+    rerender({ id: 'attach-1' })
+    expect(result.current.pendingUrl).toBeNull()
+  })
 })
 
 describe('usePaneUrlOpen', () => {

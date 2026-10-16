@@ -118,6 +118,38 @@ describe('TerminalPane localhost preview', () => {
     rerender(<TerminalPane pane={{ id: 'p1', type: 'local' }} />)
     expect(queryByRole('region', { name: 'Preview' })).toBeNull()
   })
+
+  // A preview cannot open while the terminal is not connected, so it is not
+  // offered: Preview would only drop the request, and a click would do nothing.
+  it('offers no Preview while the terminal is not connected, and opens the link in a tab instead', () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    open.mockClear()
+    mockUseTerminal.mockReturnValue({ ...running, sessionState: 'exited' })
+    const { getByRole, queryByRole } = render(<TerminalPane pane={{ id: 'p1', type: 'local' }} />)
+
+    act(() => terminalOptions().onBrowserOpenRequest('http://localhost:5173/'))
+    expect(getByRole('button', { name: 'Open' })).toBeInTheDocument()
+    expect(queryByRole('button', { name: 'Preview' })).toBeNull()
+
+    act(() => terminalOptions().onLinkActivate('http://localhost:5173/'))
+    expect(open).toHaveBeenCalledWith('about:blank', '_blank')
+    expect(queryByRole('region', { name: 'Preview' })).toBeNull()
+  })
+
+  // The strip asks about another URL while a preview is open: it stays over
+  // the terminal, so the preview's header and its controls stay in view.
+  it('keeps the approval strip on the terminal side while a preview is open', async () => {
+    const { container, findByTitle } = render(<TerminalPane pane={{ id: 'p1', type: 'local' }} />)
+    act(() => terminalOptions().onLinkActivate('http://localhost:5173/first'))
+    await findByTitle('Preview of http://localhost:5173/first')
+
+    act(() => terminalOptions().onBrowserOpenRequest('http://localhost:5173/second'))
+
+    const strip = container.querySelector('[data-pane-url-request="true"]') as HTMLElement
+    expect(strip).not.toBeNull()
+    expect(strip.closest('.pm-preview-terminal')).not.toBeNull()
+    expect(strip.closest('.pm-preview')).toBeNull()
+  })
 })
 
 describe('TerminalPane drop zones', () => {

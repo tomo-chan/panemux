@@ -66,7 +66,15 @@ URL as a link while its request is showing removes the request. A request is a l
 arrives in replayed scrollback after a reconnect is not raised again.
 
 Any other URL — an external site, or a localhost URL in an `ssh` or `ssh_tmux` pane or a remote
-task, whose `localhost` is another host — opens in a tab as before, with no Preview.
+task, whose `localhost` is another host — opens in a tab as before, with no Preview. While the
+terminal is not connected (its WebSocket dropped, or its session ended) the preview cannot open, so
+Preview is not offered either: the strip keeps Open and Ignore, and a clicked localhost link opens in
+a tab.
+
+The strip is drawn over the terminal side of the split, so while a preview is open its header —
+the URL it shows, Reload, Open in new tab and Close — stays in view. In the Type in pane popup a
+request belongs to the attach that raised it: Retry or Reconnect replaces the terminal, and a request
+still waiting is dropped with it.
 
 The page is framed as its server serves it, in the server's own origin, with its scripts running,
 so a development server's modules, hot reload and storage work as they do in a tab. Under the
