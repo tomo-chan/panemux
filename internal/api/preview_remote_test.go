@@ -208,7 +208,8 @@ func TestPostSessionPreview_RemoteRefusals(t *testing.T) {
 			http.StatusBadRequest},
 		{"a URL of an unreachable host", "pane-down", `{"url":"http://localhost:5173/"}`, "no route to host",
 			http.StatusBadGateway},
-		{"a URL nothing answers at", "pane-ssh", `{"url":"http://localhost:5173/"}`, "alpha: connection refused: localhost:5173",
+		{"a URL nothing answers at", "pane-ssh", `{"url":"http://localhost:5173/"}`,
+			"alpha: connection refused: localhost:5173",
 			http.StatusBadGateway},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
