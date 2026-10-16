@@ -100,20 +100,20 @@ func (c *codexLaunchHost) run(_ context.Context, script string) ([]byte, error) 
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	lines := []string{"::panemux-tasks v1", "::now 1000", "::section ps"}
+	lines := []string{"::panemux-tasks v2", "::now 1000", "::section ps"}
 	if c.started {
 		lines = append(lines,
 			"40 1 -bash",
 			"41 40 /usr/local/bin/codex -c check_for_update_on_startup=false -- go",
 			"::section tmux",
 			"40 task-0f0e0d0c",
-			"::section codex-open",
+			"::section codex/open",
 			"41\t00:30",
 			"41\t00:30\t999 10\tcompleted 980\t\t\t\t\t/h/.codex/sessions/2026/09/27/"+
 				"rollout-2026-09-27T11-57-03-"+resumeCodexSessionID+".jsonl",
 		)
 	}
-	return []byte(strings.Join(append(lines, "::end"), "\n") + "\n"), nil
+	return withAllSections([]byte(strings.Join(append(lines, "::end"), "\n") + "\n")), nil
 }
 
 // The first GET /api/tasks that finds codex's session in the task's tmux

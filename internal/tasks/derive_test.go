@@ -54,11 +54,11 @@ func TestBuildTasks_LiveClaudeStatusMapsToState(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.status, func(t *testing.T) {
-			raw := rawSnapshot{
+			raw := fixtureRaw{
 				Now:        hostNow,
 				StateFiles: []stateFile{{Name: "121.json", Data: stateJSON(121, "sess-a", tc.status)}},
 				Processes:  []process{claudeProc(121, 1)},
-			}
+			}.snapshot()
 			tasks := buildTasks("", raw, collectedAt)
 			require.Len(t, tasks, 1)
 			task := tasks[0]
@@ -77,14 +77,14 @@ func TestBuildTasks_LiveClaudeStatusMapsToState(t *testing.T) {
 }
 
 func TestBuildTasks_WaitingForIsOnlyReportedWhileWaiting(t *testing.T) {
-	raw := rawSnapshot{
+	raw := fixtureRaw{
 		Now: hostNow,
 		StateFiles: []stateFile{
 			{Name: "1.json", Data: stateJSON(1, "waiting", "waiting")},
 			{Name: "2.json", Data: stateJSON(2, "busy", "busy")},
 		},
 		Processes: []process{claudeProc(1, 0), claudeProc(2, 0)},
-	}
+	}.snapshot()
 	tasks := buildTasks("", raw, collectedAt)
 	assert.Equal(t, "input needed", findTask(t, tasks, "local:claude:waiting").WaitingFor)
 	assert.Empty(t, findTask(t, tasks, "local:claude:busy").WaitingFor)
@@ -114,11 +114,11 @@ func TestBuildTasks_StateFileNeedsALiveClaudeProcess(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			raw := rawSnapshot{
+			raw := fixtureRaw{
 				Now:        hostNow,
 				StateFiles: []stateFile{{Name: "121.json", Data: stateJSON(121, "sess-a", "busy")}},
 				Processes:  tc.procs,
-			}
+			}.snapshot()
 			tasks := buildTasks("", raw, collectedAt)
 			if tc.live {
 				require.Len(t, tasks, 1)
@@ -147,13 +147,13 @@ func TestBuildTasks_UnreadableStateFileLeavesItsProcessAsAPidTask(t *testing.T) 
 	}
 	for name, data := range cases {
 		t.Run(name, func(t *testing.T) {
-			raw := rawSnapshot{
+			raw := fixtureRaw{
 				Now:         hostNow,
 				StateFiles:  []stateFile{{Name: "5.json", Data: data}},
 				Processes:   []process{claudeProc(5, 4), {PID: 4, PPID: 1, Command: "bash"}},
 				TmuxPanes:   []tmuxPane{{PanePID: 4, Session: "work"}},
 				ProcessCWDs: map[int]string{5: "/workspace/user/project"},
-			}
+			}.snapshot()
 			tasks := buildTasks("build-box", raw, collectedAt)
 			require.Len(t, tasks, 1)
 			task := tasks[0]
@@ -172,12 +172,12 @@ func TestBuildTasks_UnreadableStateFileLeavesItsProcessAsAPidTask(t *testing.T) 
 // read as absent rather than making the whole file unreadable. Only pid and
 // sessionId decide whether a file can be read (issue #313).
 func TestBuildTasks_AFieldOfAnUnexpectedTypeIsReadAsAbsent(t *testing.T) {
-	raw := rawSnapshot{
+	raw := fixtureRaw{
 		Now: hostNow,
 		StateFiles: []stateFile{{Name: "5.json", Data: []byte(
 			`{"pid":5,"sessionId":"sess-a","cwd":7,"status":["busy"],"waitingFor":{},"statusUpdatedAt":"x"}`)}},
 		Processes: []process{claudeProc(5, 1)},
-	}
+	}.snapshot()
 	tasks, unreadable := buildTasksWithDiagnostics("", raw, collectedAt)
 	assert.Empty(t, unreadable)
 	require.Len(t, tasks, 1)
@@ -219,11 +219,11 @@ func TestBuildTasks_UnreadableStateFilesAreReportedWithTheirReason(t *testing.T)
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			raw := rawSnapshot{
+			raw := fixtureRaw{
 				Now:        hostNow,
 				StateFiles: []stateFile{{Name: "5.json", Data: []byte(tc.data)}},
 				Processes:  []process{claudeProc(5, 1)},
-			}
+			}.snapshot()
 			_, unreadable := buildTasksWithDiagnostics("", raw, collectedAt)
 			require.Len(t, unreadable, 1)
 			assert.Equal(t, "5.json", unreadable[0].File)
@@ -238,7 +238,7 @@ func TestBuildTasks_UnreadableStateFilesAreReportedWithTheirReason(t *testing.T)
 // it runs, or nothing when the name carries no pid. A file whose pid is no
 // longer a claude process is a leftover, as before, and is not reported.
 func TestBuildTasks_UnreadableStateFileProcess(t *testing.T) {
-	raw := rawSnapshot{
+	raw := fixtureRaw{
 		Now: hostNow,
 		StateFiles: []stateFile{
 			{Name: "5.json", Data: []byte("{")},
@@ -254,7 +254,7 @@ func TestBuildTasks_UnreadableStateFileProcess(t *testing.T) {
 			{PID: 8, PPID: 1, Command: "vim"},
 		},
 		TmuxPanes: []tmuxPane{{PanePID: 4, Session: "work"}},
-	}
+	}.snapshot()
 	_, unreadable := buildTasksWithDiagnostics("gpu-1", raw, collectedAt)
 	tmux := Location{Kind: LocationTmux, TmuxSession: "work", Attachable: true}
 	outside := Location{Kind: LocationOutside}
@@ -275,14 +275,14 @@ func TestBuildTasks_UnreadableStateFileProcess(t *testing.T) {
 // A file name is a value from the host: it reaches the API and the log only
 // without control characters and within a bound.
 func TestBuildTasks_UnreadableStateFileNameIsBounded(t *testing.T) {
-	raw := rawSnapshot{
+	raw := fixtureRaw{
 		Now: hostNow,
 		StateFiles: []stateFile{
 			{Name: "a\x1b[31m\u202e.json", Data: []byte("{")},
 			{Name: strings.Repeat("b", 300) + ".json", Data: []byte("{")},
 			{Name: strings.Repeat("c", maxUnreadableFileName-len(".json")) + ".json", Data: []byte("{")},
 		},
-	}
+	}.snapshot()
 	_, unreadable := buildTasksWithDiagnostics("", raw, collectedAt)
 	require.Len(t, unreadable, 3)
 	assert.Equal(t, "a\ufffd[31m\ufffd.json", unreadable[0].File)
@@ -296,14 +296,14 @@ func TestBuildTasks_UnreadableStateFileNameIsBounded(t *testing.T) {
 // process that no state file names — even when the file is not named after
 // its pid.
 func TestBuildTasks_ALosingStateFileStillExplainsItsProcess(t *testing.T) {
-	raw := rawSnapshot{
+	raw := fixtureRaw{
 		Now: 2,
 		StateFiles: []stateFile{
 			{Name: "a.json", Data: []byte(`{"pid":10,"sessionId":"same","status":"idle","statusUpdatedAt":1000}`)},
 			{Name: "b.json", Data: []byte(`{"pid":11,"sessionId":"same","status":"busy","statusUpdatedAt":2000}`)},
 		},
 		Processes: []process{claudeProc(10, 1), claudeProc(11, 1)},
-	}
+	}.snapshot()
 	tasks := buildTasks("", raw, collectedAt)
 	require.Len(t, tasks, 1)
 	assert.Equal(t, "local:claude:same", tasks[0].ID)
@@ -312,7 +312,7 @@ func TestBuildTasks_ALosingStateFileStillExplainsItsProcess(t *testing.T) {
 func TestBuildTasks_UnreadableStateFileWithoutALiveProcess(t *testing.T) {
 	for _, name := range []string{"5.json", "odd.json", "0.json", "7.txt"} {
 		t.Run(name+" is not a task", func(t *testing.T) {
-			raw := rawSnapshot{Now: hostNow, StateFiles: []stateFile{{Name: name, Data: []byte("{")}}}
+			raw := fixtureRaw{Now: hostNow, StateFiles: []stateFile{{Name: name, Data: []byte("{")}}}.snapshot()
 			assert.Empty(t, buildTasks("", raw, collectedAt))
 		})
 	}
@@ -323,7 +323,7 @@ func TestBuildTasks_UnreadableStateFileWithoutALiveProcess(t *testing.T) {
 // as stopped, and the conversation log it is most likely writing (the
 // newest one in its directory) is not listed as a second, stopped card.
 func TestBuildTasks_ClaudeProcessWithoutAStateFileIsUnknownNotStopped(t *testing.T) {
-	raw := rawSnapshot{
+	raw := fixtureRaw{
 		Now: hostNow,
 		Processes: []process{
 			{PID: 6, PPID: 1, Command: "bash"},
@@ -337,7 +337,7 @@ func TestBuildTasks_ClaudeProcessWithoutAStateFileIsUnknownNotStopped(t *testing
 			{ModTime: hostNow - 3600, SessionID: "earlier", CWD: "/workspace/user/project"},
 			{ModTime: hostNow - 20, SessionID: "elsewhere", CWD: "/workspace/user/other"},
 		},
-	}
+	}.snapshot()
 	tasks := buildTasks("", raw, collectedAt)
 
 	ids := []string{}
@@ -359,13 +359,13 @@ func TestBuildTasks_ClaudeProcessWithoutAStateFileIsUnknownNotStopped(t *testing
 // The review's second case: a session whose state file is corrupt is one
 // card, not an unknown card plus a stopped one.
 func TestBuildTasks_UnreadableStateFileClaimsItsNewestLog(t *testing.T) {
-	raw := rawSnapshot{
+	raw := fixtureRaw{
 		Now:         hostNow,
 		StateFiles:  []stateFile{{Name: "7.json", Data: []byte("{")}},
 		Processes:   []process{claudeProc(7, 1)},
 		ProcessCWDs: map[int]string{7: "/workspace/user/project"},
 		Transcripts: []transcript{{ModTime: hostNow - 10, SessionID: "abc", CWD: "/workspace/user/project"}},
-	}
+	}.snapshot()
 	tasks := buildTasks("", raw, collectedAt)
 	require.Len(t, tasks, 1)
 	assert.Equal(t, "local:claude:pid-7", tasks[0].ID)
@@ -397,7 +397,7 @@ func TestIsClaudeProcess(t *testing.T) {
 // away from then has a log and no live file, so it is stopped; the resumed one
 // runs where the process runs.
 func TestBuildTasks_ResumeSwitchesTheTaskInPlace(t *testing.T) {
-	raw := rawSnapshot{
+	raw := fixtureRaw{
 		Now:        hostNow,
 		StateFiles: []stateFile{{Name: "48471.json", Data: stateJSON(48471, "resumed", "idle")}},
 		Processes:  []process{{PID: 48000, PPID: 1, Command: "-zsh"}, {PID: 48471, PPID: 48000, Command: "claude"}},
@@ -406,7 +406,7 @@ func TestBuildTasks_ResumeSwitchesTheTaskInPlace(t *testing.T) {
 			{ModTime: hostNow - 5, SessionID: "resumed", CWD: "/workspace/user/project"},
 			{ModTime: hostNow - 60, SessionID: "started-with", CWD: "/workspace/user/project"},
 		},
-	}
+	}.snapshot()
 	tasks := buildTasks("", raw, collectedAt)
 	require.Len(t, tasks, 2)
 
@@ -426,11 +426,11 @@ func TestBuildTasks_TwoLiveFilesForOneSessionKeepTheNewest(t *testing.T) {
 		"newer first": {{Name: "11.json", Data: newer}, {Name: "10.json", Data: older}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			raw := rawSnapshot{
+			raw := fixtureRaw{
 				Now:        2,
 				StateFiles: files,
 				Processes:  []process{claudeProc(10, 1), claudeProc(11, 1)},
-			}
+			}.snapshot()
 			tasks := buildTasks("", raw, collectedAt)
 			require.Len(t, tasks, 1)
 			assert.Equal(t, 11, tasks[0].PID)
@@ -444,11 +444,11 @@ func TestBuildTasks_TwoLiveFilesForOneSessionKeepTheNewest(t *testing.T) {
 func TestBuildTasks_ATieBetweenLiveFilesKeepsTheFirstListed(t *testing.T) {
 	first := []byte(`{"pid":10,"sessionId":"same","status":"idle","statusUpdatedAt":1000}`)
 	second := []byte(`{"pid":11,"sessionId":"same","status":"busy","statusUpdatedAt":1000}`)
-	raw := rawSnapshot{
+	raw := fixtureRaw{
 		Now:        2,
 		StateFiles: []stateFile{{Name: "10.json", Data: first}, {Name: "11.json", Data: second}},
 		Processes:  []process{claudeProc(10, 1), claudeProc(11, 1)},
-	}
+	}.snapshot()
 	tasks := buildTasks("", raw, collectedAt)
 	require.Len(t, tasks, 1)
 	assert.Equal(t, 10, tasks[0].PID)
@@ -482,11 +482,11 @@ func TestBuildTasks_StatusSinceFallsBackAndIsNeverInTheFuture(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			raw := rawSnapshot{
+			raw := fixtureRaw{
 				Now:        2, // host clock: 2000 ms
 				StateFiles: []stateFile{{Name: "1.json", Data: tc.data}},
 				Processes:  []process{claudeProc(1, 0)},
-			}
+			}.snapshot()
 			tasks := buildTasks("", raw, collectedAt)
 			require.Len(t, tasks, 1)
 			assert.Equal(t, tc.want, tasks[0].StatusSince)
@@ -533,12 +533,12 @@ func TestBuildTasks_LocationFollowsTheParentChainToATmuxPane(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			raw := rawSnapshot{
+			raw := fixtureRaw{
 				Now:        hostNow,
 				StateFiles: []stateFile{{Name: "50.json", Data: stateJSON(50, "sess", "busy")}},
 				Processes:  tc.procs,
 				TmuxPanes:  tc.panes,
-			}
+			}.snapshot()
 			tasks := buildTasks("", raw, collectedAt)
 			require.Len(t, tasks, 1)
 			assert.Equal(t, tc.want, tasks[0].Location)
@@ -552,7 +552,7 @@ func TestBuildTasks_LocationFollowsTheParentChainToATmuxPane(t *testing.T) {
 // the variable is ignored: tmux panes inherit the environment of whatever
 // started the tmux server, not of a panemux pane.
 func TestBuildTasks_LocationCarriesThePaneIDOfAnAgentOutsideTmux(t *testing.T) {
-	raw := rawSnapshot{
+	raw := fixtureRaw{
 		Now: hostNow,
 		StateFiles: []stateFile{
 			{Name: "50.json", Data: stateJSON(50, "outside", "busy")},
@@ -578,7 +578,7 @@ func TestBuildTasks_LocationCarriesThePaneIDOfAnAgentOutsideTmux(t *testing.T) {
 			70: "pane-b",
 			80: "pane-c",
 		},
-	}
+	}.snapshot()
 	tasks := buildTasks("", raw, collectedAt)
 
 	assert.Equal(t, Location{Kind: LocationOutside, PaneID: "pane-a"}, findTask(t, tasks, "local:claude:outside").Location)
@@ -601,12 +601,12 @@ func TestBuildTasks_LocationWalksAtMostMaxParentWalkProcesses(t *testing.T) {
 			procs = append(procs, process{PID: 1000 + i, PPID: 1001 + i, Command: "sh"})
 		}
 		procs = append(procs, process{PID: 1000 + depth, PPID: 1, Command: "bash"})
-		return rawSnapshot{
+		return fixtureRaw{
 			Now:        hostNow,
 			StateFiles: []stateFile{{Name: "1000.json", Data: stateJSON(1000, "deep", "busy")}},
 			Processes:  procs,
 			TmuxPanes:  []tmuxPane{{PanePID: 1000 + depth, Session: "far"}},
-		}
+		}.snapshot()
 	}
 
 	within := buildTasks("", chain(maxParentWalk-1), collectedAt)
@@ -650,7 +650,7 @@ func TestIsInteractiveCodex(t *testing.T) {
 }
 
 func TestBuildTasks_CodexProcessesAreRunningTasks(t *testing.T) {
-	raw := rawSnapshot{
+	raw := fixtureRaw{
 		Now: hostNow,
 		Processes: []process{
 			{PID: 30, PPID: 1, Command: "bash"},
@@ -660,7 +660,7 @@ func TestBuildTasks_CodexProcessesAreRunningTasks(t *testing.T) {
 		},
 		TmuxPanes:   []tmuxPane{{PanePID: 30, Session: "api"}},
 		ProcessCWDs: map[int]string{31: "/workspace/user/sample-api"},
-	}
+	}.snapshot()
 	tasks := buildTasks("", raw, collectedAt)
 	require.Len(t, tasks, 1, "codex exec is headless and vim is not codex")
 	task := tasks[0]
@@ -675,7 +675,7 @@ func TestBuildTasks_CodexProcessesAreRunningTasks(t *testing.T) {
 }
 
 func TestBuildTasks_TranscriptsWithoutALiveProcessAreStopped(t *testing.T) {
-	raw := rawSnapshot{
+	raw := fixtureRaw{
 		Now:        hostNow,
 		StateFiles: []stateFile{{Name: "1.json", Data: stateJSON(1, "live", "busy")}},
 		Processes:  []process{claudeProc(1, 0)},
@@ -683,7 +683,7 @@ func TestBuildTasks_TranscriptsWithoutALiveProcessAreStopped(t *testing.T) {
 			{ModTime: hostNow - 60, SessionID: "live", CWD: "/workspace/user/project"},
 			{ModTime: hostNow - 7200, SessionID: "stopped", CWD: "/workspace/user/other"},
 		},
-	}
+	}.snapshot()
 	tasks := buildTasks("gpu-box", raw, collectedAt)
 	require.Len(t, tasks, 2, "a live session is not listed twice")
 	assert.Equal(t, StateBusy, findTask(t, tasks, "ssh:gpu-box:claude:live").State)
@@ -705,7 +705,7 @@ func TestBuildTasks_StoppedTasksAreCappedNewestFirst(t *testing.T) {
 	for i := 0; i < maxStoppedTasks+10; i++ {
 		transcripts = append(transcripts, transcript{ModTime: int64(i), SessionID: fmt.Sprintf("s%03d", i)})
 	}
-	tasks := buildTasks("", rawSnapshot{Now: 1000, Transcripts: transcripts}, collectedAt)
+	tasks := buildTasks("", fixtureRaw{Now: 1000, Transcripts: transcripts}.snapshot(), collectedAt)
 	require.Len(t, tasks, maxStoppedTasks)
 	assert.Equal(t, fmt.Sprintf("s%03d", maxStoppedTasks+9), tasks[0].SessionID)
 	assert.Equal(t, "s010", tasks[len(tasks)-1].SessionID)
@@ -714,11 +714,11 @@ func TestBuildTasks_StoppedTasksAreCappedNewestFirst(t *testing.T) {
 // Stopped sessions with the same modification time keep the order the host
 // listed them in, so the column does not reshuffle between collections.
 func TestBuildTasks_StoppedTasksWithEqualTimesKeepTheHostsOrder(t *testing.T) {
-	raw := rawSnapshot{Now: 100, Transcripts: []transcript{
+	raw := fixtureRaw{Now: 100, Transcripts: []transcript{
 		{ModTime: 50, SessionID: "b"},
 		{ModTime: 50, SessionID: "a"},
 		{ModTime: 50, SessionID: "c"},
-	}}
+	}}.snapshot()
 	tasks := buildTasks("", raw, collectedAt)
 	ids := []string{}
 	for _, task := range tasks {
@@ -728,17 +728,17 @@ func TestBuildTasks_StoppedTasksWithEqualTimesKeepTheHostsOrder(t *testing.T) {
 }
 
 func TestBuildTasks_DuplicateTranscriptsAreListedOnce(t *testing.T) {
-	raw := rawSnapshot{Now: 100, Transcripts: []transcript{
+	raw := fixtureRaw{Now: 100, Transcripts: []transcript{
 		{ModTime: 90, SessionID: "dup", CWD: "/newer"},
 		{ModTime: 50, SessionID: "dup", CWD: "/older"},
-	}}
+	}}.snapshot()
 	tasks := buildTasks("", raw, collectedAt)
 	require.Len(t, tasks, 1)
 	assert.Equal(t, "/newer", tasks[0].CWD)
 }
 
 func TestBuildTasks_OrderIsLiveFirstThenStoppedNewestFirst(t *testing.T) {
-	raw := rawSnapshot{
+	raw := fixtureRaw{
 		Now: hostNow,
 		StateFiles: []stateFile{
 			{Name: "2.json", Data: stateJSON(2, "b-live", "idle")},
@@ -749,7 +749,7 @@ func TestBuildTasks_OrderIsLiveFirstThenStoppedNewestFirst(t *testing.T) {
 			{ModTime: hostNow - 10, SessionID: "newer-stop"},
 			{ModTime: hostNow - 20, SessionID: "older-stop"},
 		},
-	}
+	}.snapshot()
 	tasks := buildTasks("", raw, collectedAt)
 	ids := make([]string, 0, len(tasks))
 	for _, task := range tasks {
@@ -767,7 +767,7 @@ func TestBuildTasks_OrderIsLiveFirstThenStoppedNewestFirst(t *testing.T) {
 // Every claude task with a conversation log carries the log's version — its
 // modification time and size — which is what a cached summary is keyed on.
 func TestBuildTasks_ClaudeTasksCarryTheirLogVersion(t *testing.T) {
-	raw := rawSnapshot{
+	raw := fixtureRaw{
 		Now:        hostNow,
 		StateFiles: []stateFile{{Name: "1.json", Data: stateJSON(1, "live", "idle")}},
 		Processes:  []process{claudeProc(1, 0), {PID: 3, Command: "codex"}},
@@ -776,7 +776,7 @@ func TestBuildTasks_ClaudeTasksCarryTheirLogVersion(t *testing.T) {
 			{ModTime: hostNow - 7200, SessionID: "stopped", Size: 100},
 			{ModTime: hostNow - 9000, SessionID: "stopped", Size: 50},
 		},
-	}
+	}.snapshot()
 	tasks := buildTasks("", raw, collectedAt)
 
 	assert.Equal(t, &LogVersion{ModTime: hostNow - 60, Size: 4096}, findTask(t, tasks, "local:claude:live").Log)
@@ -788,11 +788,11 @@ func TestBuildTasks_ClaudeTasksCarryTheirLogVersion(t *testing.T) {
 // A running session whose log is not among the collected ones (older than 7
 // days, or beyond the newest 100) has no log version and so no summary.
 func TestBuildTasks_ALiveSessionWithoutACollectedLogHasNoLogVersion(t *testing.T) {
-	raw := rawSnapshot{
+	raw := fixtureRaw{
 		Now:        hostNow,
 		StateFiles: []stateFile{{Name: "1.json", Data: stateJSON(1, "live", "idle")}},
 		Processes:  []process{claudeProc(1, 0)},
-	}
+	}.snapshot()
 	tasks := buildTasks("", raw, collectedAt)
 	assert.Nil(t, findTask(t, tasks, "local:claude:live").Log)
 }
@@ -808,10 +808,10 @@ func TestTask_LogVersionIsNotSerialized(t *testing.T) {
 // Two logs of one session with the same modification time: the one the host
 // listed first is the version, as it is the one a stopped task is built from.
 func TestBuildTasks_LogVersionOfEqualTimesIsTheFirstListed(t *testing.T) {
-	raw := rawSnapshot{Now: hostNow, Transcripts: []transcript{
+	raw := fixtureRaw{Now: hostNow, Transcripts: []transcript{
 		{ModTime: hostNow - 60, SessionID: "dup", Size: 100, CWD: "/first"},
 		{ModTime: hostNow - 60, SessionID: "dup", Size: 200, CWD: "/second"},
-	}}
+	}}.snapshot()
 	task := findTask(t, buildTasks("", raw, collectedAt), "local:claude:dup")
 	assert.Equal(t, "/first", task.CWD)
 	assert.Equal(t, &LogVersion{ModTime: hostNow - 60, Size: 100}, task.Log)

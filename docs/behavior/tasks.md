@@ -100,8 +100,18 @@ reads only what the agents write themselves and what the host reports about its 
 The task event stream's collection ([Task events](task-events.md#lifecycle)) runs the same script
 without its two searches for stopped sessions: it reads every row above except the conversation logs
 under `~/.claude/projects` and the rollouts under `~/.codex/sessions`, and lists the running tasks
-only. The part both run is one shared constant, so a running task is found and its state decided the
-same way by both.
+only. Both are composed from the same sections, and a running task's state is decided from the live
+sections alone, so a running task is found and its state decided the same way by both; a state
+panemux cannot read is `unknown`, never a guessed wait.
+
+The script's output is a line protocol, `::panemux-tasks v2`. The sections every host has —
+`ps`, `tmux`, `cwd`, `env` — carry no namespace; each agent's own sections are named under its
+[registry](../agent-registry.md) ID: `claude/state` and `claude/transcripts`, `codex/open`,
+`codex/permission` ([Codex permission requests](#codex-permission-requests)) and `codex/rollouts`.
+A host without the permission hook still prints the `codex/permission` heading, with no rows. An
+agent's live sections run before `ps`, so a process that exits in between is
+not listed rather than listed without its session. A host whose output lacks any section its
+collection asks for fails that host's collection rather than being read as having none.
 
 Any probe that is missing on a host (no tmux, no `~/.claude`, no `~/.codex`, no `sqlite3`, BSD
 `stat`) prints nothing rather than failing the collection. Codex's files are read under `$HOME/.codex`;
@@ -332,7 +342,8 @@ should be watched: copy the script somewhere of the user's, make it executable, 
   `~/.local/state/panemux/codex-permission/<session ID>` — one file per session, replaced by the next
   request. Nothing of the command or the conversation is kept. It removes records older than 7 days as
   it writes. It prints nothing and exits 0, so codex decides as it would without it.
-- **What the collection reads.** The live collection reads every record with one `cat`. A session
+- **What the collection reads.** Codex's live section `codex/permission` reads every record with one
+  `cat`, in the full and the event stream's collection alike. A session
   waits when its newest turn is in progress, the record is of that turn, and it is not marked
   answered. The record is of the turn when the rollout's `task_started` for the turn carries the
   record's turn ID; when that line is out of the rollout's final MiB (a turn that has written more),

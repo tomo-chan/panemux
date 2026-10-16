@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"panemux/internal/agent"
 	"panemux/internal/homedir"
 )
 
@@ -104,20 +105,21 @@ func TestRunLocal_CollectScriptReadsCodexPermissionRecords(t *testing.T) {
 
 	out, err := runLocal(context.Background(), attentionScript)
 	require.NoError(t, err)
-	raw, err := parseCollectOutput(out)
+	raw, err := parseCollectOutput(out, collectPlan.live)
 	require.NoError(t, err)
 
-	require.Len(t, raw.CodexPermissions, 1, "%+v", raw.CodexPermissions)
-	record := raw.CodexPermissions[codexSessionA]
+	permissions := codexOf(raw).Permissions
+	require.Len(t, permissions, 1, "%+v", permissions)
+	record := permissions[codexSessionA]
 	assert.Equal(t, codexTurnA, record.TurnID)
 	assert.InDelta(t, time.Now().UnixMilli(), record.At, 10_000)
 }
 
 func TestParseCollectOutput_ReadsCodexPermissionRows(t *testing.T) {
-	raw, err := parseCollectOutput(joinLines(
-		"::panemux-tasks v1",
+	raw, err := parseCollectOutput(fullOutput(
+		"::panemux-tasks v2",
 		"::now 1000",
-		"::section codex-permission",
+		"::section codex/permission",
 		codexSessionA+" "+codexTurnA+" 1790510400",
 		codexSessionB+" "+codexTurnB,
 		codexSessionB+" not-a-turn 1790510400",
@@ -126,11 +128,11 @@ func TestParseCollectOutput_ReadsCodexPermissionRows(t *testing.T) {
 		codexSessionB+" "+codexTurnB+" 0",
 		"",
 		"::end",
-	))
+	), collectPlan.full)
 	require.NoError(t, err)
 	assert.Equal(t, map[string]codexPermission{
 		codexSessionA: {TurnID: codexTurnA, At: 1790510400000},
-	}, raw.CodexPermissions)
+	}, codexOf(raw).Permissions)
 }
 
 // The turn a task_started event starts is the turn a record names.
@@ -144,7 +146,7 @@ func TestParseCodexTurn_ReadsTheStartedTurnsID(t *testing.T) {
 
 func permissionRaw(turn codexTurn, records map[string]codexPermission) rawSnapshot {
 	raw := codexRaw(openRollout(31, codexSessionA, 30, turn))
-	raw.CodexPermissions = records
+	codexOf(raw).Permissions = records
 	return raw
 }
 
@@ -211,18 +213,18 @@ func TestBuildTasks_CodexWaitsOnAPermissionRequestOfItsTurn(t *testing.T) {
 // permissionOutput is a host with codex session A in turn A, and a record
 // for turn A made at the given time.
 func permissionOutput(at int64) []byte {
-	return joinLines(
-		"::panemux-tasks v1",
+	return fullOutput(
+		"::panemux-tasks v2",
 		"::now "+strconv.FormatInt(hostNow, 10),
 		"::section ps",
 		"31 1 codex",
-		"::section codex-open",
+		"::section codex/open",
 		"31\t10:00\t"+strconv.FormatInt(hostNow-30, 10)+" 100\tinProgress "+strconv.FormatInt(hostNow-120, 10)+"\t"+
 			`{"timestamp":"2026-09-27T11:58:30.057Z","type":"event_msg",`+
 			`"payload":{"type":"task_started","turn_id":"`+codexTurnA+`"}}`+
 			"\t\t\t\"originator\":\"codex-tui\"\t/remote/home/demo/.codex/sessions/2026/09/27/"+
 			rolloutName("2026-09-27T11-57-03", codexSessionA),
-		"::section codex-permission",
+		"::section codex/permission",
 		codexSessionA+" "+codexTurnA+" "+strconv.FormatInt(at, 10),
 		"::end",
 	)
@@ -300,7 +302,7 @@ func TestService_SSHHostCodexPermissionWaitsAndClearsLikeLocal(t *testing.T) {
 	require.Equal(t, StateWait, local.State)
 	assert.NotEqual(t, local.WaitSignature, remote.WaitSignature, "the same record on another host is another wait")
 	assert.Equal(t, []string{"sh -s"}, conn.cmds, "the host runs the collection over its connection")
-	assert.Contains(t, conn.stdins[0], "codex-permission")
+	assert.Contains(t, conn.stdins[0], "::section codex/permission")
 
 	require.NoError(t, svc.DismissWait(remote.WaitSignature))
 	for _, snapshot := range []Snapshot{svc.CollectAttention(context.Background()), svc.Collect(context.Background())} {
@@ -319,4 +321,15 @@ func TestService_SSHHostCodexPermissionWaitsAndClearsLikeLocal(t *testing.T) {
 	ended := findTask(t, svc.CollectAttention(context.Background()).Tasks, "ssh:build-box:codex:"+codexSessionA)
 	assert.Equal(t, StateIdle, ended.State, "the turn ending clears the host's wait")
 	assert.Empty(t, ended.WaitingFor)
+}
+
+// A collection without codex's part — codex not collected — has no approval
+// requests to drop, and dropping them does not fail.
+func TestService_DropDismissedPermissionsWithoutACodexPart(t *testing.T) {
+	svc := New(Options{})
+	defer svc.Close()
+	require.NoError(t, svc.DismissWait(codexPermissionSignature("h", codexSessionA, 1000)))
+	raw := rawSnapshot{Agents: map[agent.ID]agentCollected{agent.Claude: &claudeCollected{}}}
+	assert.NotPanics(t, func() { svc.dropDismissedPermissions("h", &raw) })
+	assert.Len(t, raw.Agents, 1)
 }

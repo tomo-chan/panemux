@@ -1400,6 +1400,45 @@ on.
   does with an unknown argument; versions are told from the data rather than by running
   `<agent> --version` on every host, which would add a command per collection.
 
+### Collection is composed from per-agent collect adapters (2026-10-16, issue #373)
+
+The collection script was one hand-written constant that read Claude Code's and codex's files in
+sections named `state`, `transcripts`, `codex-open` and `codex-rollouts`, and `derive.go` and
+`codex.go` read them in one builder. The first step of making collection per agent moves each
+agent's sections and their reading into a collect adapter, without changing what is listed.
+
+- **Composed at startup, from constants.** The adapters provide script fragments as Go constants,
+  and the script is joined once when panemux starts; nothing from a request, a config file or a host
+  enters it, as before. Generating it from configuration was rejected for the same reason the
+  registry is not configuration.
+- **Namespaces and the protocol version.** Common sections stay bare (`ps`, `tmux`, `cwd`, `env`);
+  an adapter's are `<agent ID>/<name>`, and `/` cannot occur in an ID. The protocol moved to
+  `::panemux-tasks v2` because the section names changed; the rule is to move it when the
+  directives' grammar or a common section's rows change, not when an adapter adds a section. Script
+  and parser ship in one binary, so the version only tells a mismatched output apart.
+- **A missing section fails the host.** The first protocol read a section that never appeared as
+  empty. A host whose output lacks a declared section now fails its collection, so a broken probe is
+  reported instead of silently listing no sessions. An output carrying a section its run did not
+  ask for — a stopped section in the attention collection's — is still read, as before.
+- **Live before common.** Each adapter's live sections run before `ps`, so a process that exits
+  between the two is not listed. The first script read Claude Code's state files before `ps` but
+  codex's open rollouts after it; both now take the order that drops a vanished process rather than
+  listing it without its session.
+- **One live normalization.** The full and the attention collection decide a running task from the
+  live sections alone; a test builds both from one output and requires the same running tasks.
+- **Ports in the consumer, registered by ID.** The adapter interface is `internal/tasks`'s, in its
+  own types, and `collectAdapters` lists each adapter under its registry ID; startup checks the list
+  against the registry's `collect` declarations. Sub-packages per agent were rejected: they would
+  need `internal/tasks`'s types exported and would import it back.
+- **The prefilter follows the adapters.** The `cwd`/`env` sections probe only processes whose first
+  two command fields contain an adapter's process hint (`claude|codex`). A test checks that every
+  sample command a Task rule lists passes it. The prefilter is case-sensitive while the Task rules
+  compare base names case-insensitively; matching the two is left to the change that merges the
+  rule sets (#375), since it changes which processes are probed.
+- **Codex's approval records are a codex section.** The records the PermissionRequest hook writes
+  (#384, below) are read as the codex adapter's live section `codex/permission`. It is an adapter
+  section added, so the protocol stays v2; a host without the hook prints the heading with no rows.
+
 ## 2026-10-15: Codex approval waits from a PermissionRequest hook (#294, #384)
 
 Codex's own files record nothing when it asks to run a command, so approval waits showed as `busy`.

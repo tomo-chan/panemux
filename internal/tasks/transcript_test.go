@@ -397,7 +397,7 @@ func TestRunLocal_TranscriptScriptReadsTheLogTheCollectionKeysOn(t *testing.T) {
 
 		out, err := runLocal(context.Background(), collectScript)
 		require.NoError(t, err)
-		raw, err := parseCollectOutput(out)
+		raw, err := parseCollectOutput(out, collectPlan.full)
 		require.NoError(t, err)
 		task := findTask(t, buildTasks("", raw, collectedAt), "local:claude:same")
 		require.NotNil(t, task.Log)

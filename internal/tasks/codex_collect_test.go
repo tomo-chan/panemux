@@ -33,10 +33,10 @@ func rolloutName(stamp, sessionID string) string {
 // the rollout's tail holds, the cwd of its session_meta, and its path.
 func TestParseCollectOutput_ReadsTheCodexSections(t *testing.T) {
 	openPath := "/remote/home/demo/.codex/sessions/2026/09/27/" + rolloutName("2026-09-27T11-57-03", codexSessionA)
-	out := joinLines(
-		"::panemux-tasks v1",
+	out := fullOutput(
+		"::panemux-tasks v2",
 		"::now 1790510500",
-		"::section codex-open",
+		"::section codex/open",
 		"899\t   02:05",
 		"901\t??",
 		"899\t   02:05\t1790510485 48396\tinProgress 1790510480\t"+
@@ -47,17 +47,17 @@ func TestParseCollectOutput_ReadsTheCodexSections(t *testing.T) {
 			`"cwd":"/tmp/sample-project"`+"\t"+`"originator":"codex-tui"`+"\t"+openPath,
 		"900\t1-02:03:04\t1790510000 10\t\t\t\t\t\t/remote/home/demo/.codex/sessions/2026/09/27/"+
 			rolloutName("2026-09-27T12-00-15", codexSessionB),
-		"::section codex-rollouts",
+		"::section codex/rollouts",
 		"1790510485\t48396\t"+rolloutName("2026-09-27T11-57-03", codexSessionA)+"\t"+
 			`"cwd":"/tmp/sample-project"`+"\t"+`"originator":"codex-tui"`,
 		"1790500000\t17\t"+rolloutName("2026-09-27T09-00-00", codexSessionB)+"\t\t",
 		"::end",
 	)
 
-	raw, err := parseCollectOutput(out)
+	raw, err := parseCollectOutput(out, collectPlan.full)
 	require.NoError(t, err)
 
-	assert.Equal(t, map[int]int64{899: 125}, raw.CodexAges, "a process whose etime ps could not give has no age")
+	assert.Equal(t, map[int]int64{899: 125}, codexOf(raw).Ages, "a process whose etime ps could not give has no age")
 	assert.Equal(t, []codexOpenRollout{
 		{
 			PID: 899, Elapsed: 125, File: rolloutName("2026-09-27T11-57-03", codexSessionA),
@@ -78,20 +78,20 @@ func TestParseCollectOutput_ReadsTheCodexSections(t *testing.T) {
 				SessionID: codexSessionB, ModTime: 1790510000, Size: 10,
 			},
 		},
-	}, raw.CodexOpen)
+	}, codexOf(raw).Open)
 	assert.Equal(t, []codexRollout{
 		{File: rolloutName("2026-09-27T11-57-03", codexSessionA),
 			SessionID: codexSessionA, CWD: "/tmp/sample-project", Originator: "codex-tui", ModTime: 1790510485, Size: 48396},
 		{File: rolloutName("2026-09-27T09-00-00", codexSessionB), SessionID: codexSessionB, ModTime: 1790500000, Size: 17},
-	}, raw.CodexRollouts)
+	}, codexOf(raw).Rollouts)
 }
 
 func TestParseCollectOutput_SkipsMalformedCodexRows(t *testing.T) {
 	good := rolloutName("2026-09-27T11-57-03", codexSessionA)
-	out := joinLines(
-		"::panemux-tasks v1",
+	out := fullOutput(
+		"::panemux-tasks v2",
 		"::now 5",
-		"::section codex-open",
+		"::section codex/open",
 		"x\t00:10",
 		"0\t00:10",
 		"899\t00:01\t1\t\t\t\t\t\t/x/"+good,
@@ -102,18 +102,18 @@ func TestParseCollectOutput_SkipsMalformedCodexRows(t *testing.T) {
 		"899\t00:01\tnope\t\t\t\t\t\t/x/"+good,
 		"899\t00:01\t1 1\t\t\t\t\t\t/x/rollout-2026-09-27T11-57-03-not-a-uuid.jsonl",
 		"899\t00:01\t1 1\t\t\t\t\t\t/x/other.jsonl",
-		"::section codex-rollouts",
+		"::section codex/rollouts",
 		"x\t1\t"+good+"\t\t",
 		"1\tx\t"+good+"\t\t",
 		"1\t1\trollout-2026-09-27T11-57-03-"+codexSessionA+"-extra.jsonl\t\t",
 		"1\t1",
 		"::end",
 	)
-	raw, err := parseCollectOutput(out)
+	raw, err := parseCollectOutput(out, collectPlan.full)
 	require.NoError(t, err)
-	assert.Empty(t, raw.CodexOpen)
-	assert.Empty(t, raw.CodexRollouts)
-	assert.Empty(t, raw.CodexAges)
+	assert.Empty(t, codexOf(raw).Open)
+	assert.Empty(t, codexOf(raw).Rollouts)
+	assert.Empty(t, codexOf(raw).Ages)
 }
 
 func TestJSONFragmentString(t *testing.T) {
@@ -126,35 +126,35 @@ func TestJSONFragmentString(t *testing.T) {
 // read) or after the cwd (no source in it).
 func TestParseCollectOutput_ShortCodexRolloutRows(t *testing.T) {
 	name := rolloutName("2026-09-27T11-57-03", codexSessionA)
-	raw, err := parseCollectOutput(joinLines(
-		"::panemux-tasks v1",
+	raw, err := parseCollectOutput(fullOutput(
+		"::panemux-tasks v2",
 		"::now 5",
-		"::section codex-rollouts",
+		"::section codex/rollouts",
 		"1\t2\t"+name,
 		"3\t4\t"+name+"\t"+`"cwd":"/workspace/user/api"`,
 		"::end",
-	))
+	), collectPlan.full)
 	require.NoError(t, err)
 	assert.Equal(t, []codexRollout{
 		{File: name, SessionID: codexSessionA, ModTime: 1, Size: 2},
 		{File: name, SessionID: codexSessionA, CWD: "/workspace/user/api", ModTime: 3, Size: 4},
-	}, raw.CodexRollouts)
+	}, codexOf(raw).Rollouts)
 }
 
 // A row whose etime ps could not give still names the rollout; the process's
 // age is then unknown (-1), and whatever else is missing reads as empty.
 func TestParseCollectOutput_CodexOpenRowWithOnlyTheRollout(t *testing.T) {
 	name := rolloutName("2026-09-27T11-57-03", codexSessionA)
-	raw, err := parseCollectOutput(joinLines(
-		"::panemux-tasks v1",
+	raw, err := parseCollectOutput(fullOutput(
+		"::panemux-tasks v2",
 		"::now 5",
-		"::section codex-open",
+		"::section codex/open",
 		"899\t\t1790510485 12\tgarbage\tnot json\t{\"type\":\"response_item\"}\t\t\t/x/"+name,
 		"::end",
-	))
+	), collectPlan.full)
 	require.NoError(t, err)
-	require.Len(t, raw.CodexOpen, 1)
-	got := raw.CodexOpen[0]
+	require.Len(t, codexOf(raw).Open, 1)
+	got := codexOf(raw).Open[0]
 	assert.Equal(t, int64(-1), got.Elapsed)
 	assert.Equal(t, codexTurn{}, got.Turn,
 		"a thread_turns row without a start time and fragments without the markers read as nothing")
@@ -348,13 +348,13 @@ func TestRunLocal_CollectScriptReadsCodexRollouts(t *testing.T) {
 	require.Eventually(t, func() bool {
 		out, err := runLocal(context.Background(), collectScript)
 		require.NoError(t, err)
-		raw, err = parseCollectOutput(out)
+		raw, err = parseCollectOutput(out, collectPlan.full)
 		require.NoError(t, err)
-		return len(raw.CodexOpen) > 0
+		return len(codexOf(raw).Open) > 0
 	}, 5*time.Second, 50*time.Millisecond, "the rollout the stand-in holds open is found")
 
 	var held codexOpenRollout
-	for _, o := range raw.CodexOpen {
+	for _, o := range codexOf(raw).Open {
 		if o.PID == pid {
 			held = o
 		}
@@ -363,7 +363,7 @@ func TestRunLocal_CollectScriptReadsCodexRollouts(t *testing.T) {
 	assert.Equal(t, live, held.File)
 	assert.Equal(t, "/workspace/user/web", held.Rollout.CWD, "the session_meta's own cwd, not one quoted inside it")
 	assert.GreaterOrEqual(t, held.Elapsed, int64(0))
-	assert.Contains(t, raw.CodexAges, pid)
+	assert.Contains(t, codexOf(raw).Ages, pid)
 	assert.Equal(t, "task_started", held.Turn.Event)
 	assert.Equal(t, "function_call", held.Turn.LastItem)
 	assert.Equal(t, "request_user_input", held.Turn.LastItemName, "the token_usage_record after the call is skipped")
@@ -373,10 +373,10 @@ func TestRunLocal_CollectScriptReadsCodexRollouts(t *testing.T) {
 	}
 
 	byID := map[string]codexRollout{}
-	for _, r := range raw.CodexRollouts {
+	for _, r := range codexOf(raw).Rollouts {
 		byID[r.SessionID] = r
 	}
-	assert.Len(t, byID, 2, "rollouts older than 7 days or at another depth are not listed: %+v", raw.CodexRollouts)
+	assert.Len(t, byID, 2, "rollouts older than 7 days or at another depth are not listed: %+v", codexOf(raw).Rollouts)
 	stopped := byID[codexSessionA]
 	assert.Equal(t, "/workspace/user/api", stopped.CWD)
 	assert.Equal(t, "codex-tui", stopped.Originator)
@@ -401,9 +401,9 @@ func TestRunLocal_CollectScriptListsTheTUIsRolloutsPastNewerOnes(t *testing.T) {
 
 	out, err := runLocal(context.Background(), collectScript)
 	require.NoError(t, err)
-	raw, err := parseCollectOutput(out)
+	raw, err := parseCollectOutput(out, collectPlan.full)
 	require.NoError(t, err)
 
-	require.Len(t, raw.CodexRollouts, 1, "only the TUI's rollouts are listed")
-	assert.Equal(t, codexSessionA, raw.CodexRollouts[0].SessionID)
+	require.Len(t, codexOf(raw).Rollouts, 1, "only the TUI's rollouts are listed")
+	assert.Equal(t, codexSessionA, codexOf(raw).Rollouts[0].SessionID)
 }

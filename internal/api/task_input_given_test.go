@@ -28,23 +28,23 @@ func inputGivenHandler(t *testing.T) *Handler {
 	h.taskGitLookup = func(context.Context, string, string, bool) *taskGitInfo { return nil }
 	useTaskRecords(t, h)
 	out := strings.Join([]string{
-		"::panemux-tasks v1",
+		"::panemux-tasks v2",
 		"::now 1790000000",
 		"::section ps",
 		"31 1 codex",
-		"::section codex-open",
+		"::section codex/open",
 		"31\t10:00\t1789999970 100\tinProgress 1789999880\t" +
 			`{"timestamp":"2026-09-27T11:58:30.057Z","type":"event_msg","payload":{"type":"task_started","turn_id":"` +
 			inputGivenTurn + `"}}` + "\t\t\t\"originator\":\"codex-tui\"\t" +
 			"/remote/home/demo/.codex/sessions/2026/09/27/rollout-2026-09-27T11-57-03-" + inputGivenSession + ".jsonl",
-		"::section codex-permission",
+		"::section codex/permission",
 		inputGivenSession + " " + inputGivenTurn + " 1789999960",
 		"::end",
 	}, "\n") + "\n"
 	h.SetTaskService(tasks.New(tasks.Options{
 		Hosts:    h.taskHostNames,
 		Dial:     func(string) (tasks.Conn, error) { return nil, errors.New("unreachable") },
-		RunLocal: func(context.Context, string) ([]byte, error) { return []byte(out), nil },
+		RunLocal: func(context.Context, string) ([]byte, error) { return withAllSections([]byte(out)), nil },
 	}))
 	t.Cleanup(h.Close)
 	return h
