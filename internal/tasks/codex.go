@@ -164,7 +164,8 @@ func (c *codexCollected) addRow(section, line string) {
 			// Not ps's "<pid>\t<etime>": a rollout row codex's files
 			// could not be read into.
 			c.addMalformed(section, line)
-			if pid, err := strconv.Atoi(line[:strings.IndexByte(line, '\t')]); err == nil && pid > 0 {
+			// Only a listed codex process's PID is ever looked up here.
+			if pid, err := strconv.Atoi(line[:strings.IndexByte(line, '\t')]); err == nil {
 				if c.unreadable == nil {
 					c.unreadable = map[int]bool{}
 				}
