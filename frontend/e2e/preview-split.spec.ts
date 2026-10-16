@@ -105,13 +105,19 @@ test.describe('a localhost page', () => {
     const pane = await openPane(page, 'preview-left')
 
     await writeToSession(page, 'preview-left', `clear && echo ${origin}/\n`)
-    await clickRow(page, pane, new RegExp(`^${origin.replace(/[.]/g, '\\.')}/\\s*$`))
+    await clickRow(page, pane, new RegExp(`^${escapeRegExp(`${origin}/`)}\\s*$`))
 
     await expectPage(pane, origin)
     await expect(pane.locator('[data-pane-url-request="true"]')).toHaveCount(0)
     await pane.getByRole('button', { name: 'Close preview' }).click()
   })
 })
+
+// Every character a regular expression gives a meaning to, so the row is
+// matched as the literal text it shows.
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
 
 async function openPane(page: Page, paneId: string): Promise<Locator> {
   await page.goto('/')
