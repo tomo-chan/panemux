@@ -71,11 +71,14 @@ Each opened file is registered with a **root**, the innermost of those directori
 - the clicked path is made absolute against each directory and must lie inside one of them; an
   absolute path elsewhere or a `../` that leaves them is refused (`403`). The working directories
   are reported resolved while a shell prints the path it was given, so a path that is not inside one
-  as written is compared by the identity of the directories above it: each is resolved through its
-  symbolic links, looked up through an `os.Root` for `/` by its path relative to `/`, and compared
-  with `os.SameFile`. A path whose prefix leads into a working directory through a symbolic link,
-  or in another letter case on a case-insensitive filesystem, is therefore inside it; only the
-  directory is decided this way, never the file;
+  as written is decided by identity: the deepest directory above the file that exists is resolved
+  through its symbolic links, and that resolved path — which holds no link left to follow — is
+  walked up, each directory looked up through an `os.Root` for `/` by its path relative to `/` and
+  compared with `os.SameFile`. A path whose prefix leads into a working directory through a
+  symbolic link — to the working directory, to one of its parents or to a directory below it — or
+  in another letter case on a case-insensitive filesystem, is therefore inside it. Only directories
+  are decided this way, never the file: the rest of the clicked path below that directory is
+  reached through the root's `os.Root`;
 - the file is then looked up, and at registration checked again, only through `os.Root` for its
   root, by the path relative to that root (`filepath.Rel`). No request-derived path is ever passed
   to `os.Stat` or `os.Open`; `os.Root` refuses a `..` or a symbolic link that leaves the root, and

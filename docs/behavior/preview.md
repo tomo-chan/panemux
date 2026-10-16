@@ -39,7 +39,7 @@ them, and a symbolic link that leads out of them do not open; the preview shows 
 outside them and names the directories allowed. A `../` that stays inside one of them, such as from
 a subdirectory of a worktree up to its root, opens. A path is inside a directory however it is
 spelled: through a symbolic link in its prefix (macOS's `/tmp` for the `/private/tmp` a working
-directory is reported as) or, on a case-insensitive filesystem, in another letter case. When the
+directory is reported as, or a link to a directory inside it) or, on a case-insensitive filesystem, in another letter case. When the
 working directory and the worktrees are all unknown, no path opens.
 
 ### What is shown

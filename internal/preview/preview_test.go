@@ -599,50 +599,75 @@ func TestRenderMarkdownDropsEncodedScriptLinks(t *testing.T) {
 // that leads into a working directory through a symbolic link in its prefix,
 // or in another letter case on a case-insensitive filesystem, names a file
 // inside it.
-func TestResolveThroughAnotherSpellingOfTheWorkingDirectory(t *testing.T) {
-	base := realDir(t)
-	cwd := filepath.Join(base, "real", "proj")
-	page := writeFile(t, filepath.Join(cwd, "index.html"), "<p>x</p>")
+// spellingFixture lays out a working directory at real/proj, with links in
+// front of it — to its parent, to a directory below it, with an absolute
+// target — and a directory outside it, reached by a link too.
+func spellingFixture(t *testing.T) (base, cwd string) {
+	t.Helper()
+	base = realDir(t)
+	cwd = filepath.Join(base, "real", "proj")
+	writeFile(t, filepath.Join(cwd, "index.html"), "<p>x</p>")
 	writeFile(t, filepath.Join(cwd, "docs", "deep", "notes.md"), "# deep")
-	outside := filepath.Join(base, "outside")
-	writeFile(t, filepath.Join(outside, "secret.html"), "<p>secret</p>")
+	writeFile(t, filepath.Join(base, "outside", "secret.html"), "<p>secret</p>")
 	require.NoError(t, os.Symlink("real", filepath.Join(base, "alias")))
 	require.NoError(t, os.Symlink("outside", filepath.Join(base, "away")))
 	require.NoError(t, os.Symlink(filepath.Join(base, "real"), filepath.Join(base, "absolute")))
-	aliased := filepath.Join(base, "alias", "proj", "index.html")
+	require.NoError(t, os.Symlink(filepath.Join("real", "proj", "docs"), filepath.Join(base, "docsalias")))
+	require.NoError(t, os.Symlink(filepath.Join("..", "..", "..", "outside"), filepath.Join(cwd, "docs", "out")))
+	return base, cwd
+}
 
-	got, err := Resolve(aliased, []string{cwd})
-	require.NoError(t, err, "a symbolic link in the path's prefix")
-	assert.Equal(t, []Found{{Root: cwd, File: aliased}}, got)
+// A pane's working directory is reported resolved (/private/tmp/...), while
+// the shell and its agents print the path they were given (/tmp/...). A path
+// that leads into a working directory through a symbolic link in its prefix
+// names a file inside it.
+func TestResolveThroughAnotherSpellingOfTheWorkingDirectory(t *testing.T) {
+	base, cwd := spellingFixture(t)
+	for name, tc := range map[string]struct{ path, workdir string }{
+		"a link in the prefix to the working directory's parent": {
+			filepath.Join(base, "alias", "proj", "index.html"), cwd},
+		"a link in the working directory's own path": {
+			filepath.Join(cwd, "index.html"), filepath.Join(base, "alias", "proj")},
+		"a working directory several levels above the file": {
+			filepath.Join(base, "alias", "proj", "docs", "deep", "notes.md"), cwd},
+		"a link in the prefix to a directory below the working directory": {
+			filepath.Join(base, "docsalias", "deep", "notes.md"), cwd},
+		"a link in the prefix with an absolute target": {
+			filepath.Join(base, "absolute", "proj", "index.html"), cwd},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := Resolve(tc.path, []string{tc.workdir})
+			require.NoError(t, err)
+			assert.Equal(t, []Found{{Root: tc.workdir, File: tc.path}}, got)
 
-	got, err = Resolve(page, []string{filepath.Join(base, "alias", "proj")})
-	require.NoError(t, err, "a symbolic link in the working directory's own path")
-	assert.Equal(t, []Found{{Root: filepath.Join(base, "alias", "proj"), File: page}}, got)
+			reg := NewRegistry()
+			url, err := reg.Open(got[0].Root, got[0].File)
+			require.NoError(t, err, "Open accepts what Resolve found")
+			assert.NotEmpty(t, serve(t, reg, url).body)
+		})
+	}
+}
 
-	reg := NewRegistry()
-	url, err := reg.Open(got[0].Root, got[0].File)
-	require.NoError(t, err)
-	assert.Equal(t, "<p>x</p>", serve(t, reg, url).body)
-	url, err = reg.Open(cwd, aliased)
-	require.NoError(t, err, "Open accepts what Resolve found")
-	assert.Equal(t, "<p>x</p>", serve(t, reg, url).body)
-
-	deep := filepath.Join(base, "alias", "proj", "docs", "deep", "notes.md")
-	got, err = Resolve(deep, []string{cwd})
-	require.NoError(t, err, "a working directory several levels above the file")
-	assert.Equal(t, []Found{{Root: cwd, File: deep}}, got)
-
-	viaAbsolute := filepath.Join(base, "absolute", "proj", "index.html")
-	got, err = Resolve(viaAbsolute, []string{cwd})
-	require.NoError(t, err, "a link in the prefix with an absolute target")
-	assert.Equal(t, []Found{{Root: cwd, File: viaAbsolute}}, got)
-
-	_, err = Resolve(filepath.Join(base, "away", "secret.html"), []string{cwd})
-	require.ErrorIs(t, err, ErrEscapes, "a link in the prefix that leads elsewhere")
-	_, err = Resolve(filepath.Join(base, "alias", "proj", "..", "..", "outside", "secret.html"), []string{cwd})
-	require.ErrorIs(t, err, ErrEscapes, "../ out of it after the link")
-	_, err = Resolve(filepath.Join(base, "alias", "missing", "index.html"), []string{cwd})
-	require.ErrorIs(t, err, ErrEscapes, "a prefix that names nothing is not inside")
+func TestResolveThroughAnotherSpellingRefuses(t *testing.T) {
+	base, cwd := spellingFixture(t)
+	for name, tc := range map[string]struct {
+		err  error
+		path string
+	}{
+		"a link in the prefix that leads elsewhere": {ErrEscapes, filepath.Join(base, "away", "secret.html")},
+		"../ out of it after the link": {
+			ErrEscapes, filepath.Join(base, "alias", "proj", "..", "..", "outside", "secret.html")},
+		"a prefix that names nothing is not inside": {
+			ErrEscapes, filepath.Join(base, "alias", "missing", "index.html")},
+		"a link out of it below a link into it": {ErrEscapes, filepath.Join(base, "docsalias", "out", "secret.html")},
+		"a missing directory inside it is not found, not outside": {
+			ErrNotFound, filepath.Join(base, "alias", "proj", "missing", "index.html")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := Resolve(tc.path, []string{cwd})
+			require.ErrorIs(t, err, tc.err)
+		})
+	}
 }
 
 func TestResolveInAnotherLetterCase(t *testing.T) {

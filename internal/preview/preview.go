@@ -162,13 +162,16 @@ func locate(file string, dirs []string) (root, rel string) {
 	return locateByIdentity(file, dirs)
 }
 
-// locateByIdentity walks up from file's directory and stops at the first
-// directory that is one of dirs. Each is resolved through its symbolic links
-// and looked up through an os.Root for the filesystem's root, by a path
-// relative to it, and compared by identity, which also matches another letter
-// case on a case-insensitive filesystem. Only the directory is compared; the
-// file itself is then reached only through its root's os.Root, which a link
-// out of it cannot leave.
+// locateByIdentity resolves the deepest directory above file that exists,
+// through its symbolic links, and walks up that resolved path — which holds
+// no link left to follow — to the first directory that is one of dirs. Each
+// is looked up through an os.Root for the filesystem's root, by a path
+// relative to it, and compared by identity, which also matches another
+// letter case on a case-insensitive filesystem. A link in the clicked path's
+// prefix to a working directory, to one of its parents or to a directory
+// below it is therefore inside. Only directories are matched this way; the
+// file is then reached only through its root's os.Root, by the rest of the
+// clicked path, so a link below that point cannot leave the root.
 func locateByIdentity(file string, dirs []string) (string, string) {
 	var known []string
 	var ids []fs.FileInfo
@@ -183,22 +186,26 @@ func locateByIdentity(file string, dirs []string) (string, string) {
 		return "", ""
 	}
 	defer func() { _ = host.Close() }()
-	for dir := filepath.Dir(file); ; dir = filepath.Dir(dir) {
-		// Resolved first, as os.Root follows no link with an absolute
-		// target, and the resolved path holds no link left to follow.
-		// A directory that does not resolve leaves resolved empty, which names
-		// nothing below the root.
-		resolved, _ := filepath.EvalSymlinks(dir)
-		fromRoot, _ := filepath.Rel(string(filepath.Separator), resolved)
+
+	// The filesystem's root always resolves, so this stops there at most.
+	dir := filepath.Dir(file)
+	resolved, err := filepath.EvalSymlinks(dir)
+	for err != nil {
+		dir = filepath.Dir(dir)
+		resolved, err = filepath.EvalSymlinks(dir)
+	}
+	rest, _ := filepath.Rel(dir, file)
+	for parent := resolved; ; parent = filepath.Dir(parent) {
+		fromRoot, _ := filepath.Rel(string(filepath.Separator), parent)
 		if info, err := host.Stat(fromRoot); err == nil {
 			for i, id := range ids {
 				if os.SameFile(info, id) {
-					rel, _ := filepath.Rel(dir, file)
-					return known[i], rel
+					below, _ := filepath.Rel(parent, resolved)
+					return known[i], filepath.Join(below, rest)
 				}
 			}
 		}
-		if dir == filepath.Dir(dir) {
+		if parent == filepath.Dir(parent) {
 			return "", ""
 		}
 	}
