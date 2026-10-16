@@ -39,14 +39,15 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
   const gitInfoEnabled = !ctx?.maximizedPaneId || ctx.maximizedPaneId === pane.id
 
   const { gitInfo, refreshIfStale, refreshNow } = useGitInfo(pane.id, gitInfoEnabled)
-  const urlOpen = usePaneUrlOpen(pane.id)
-
-  // Paths in a pane on the panemux host open in the split preview (issue
-  // #385). usePreview needs the terminal's connection, so the terminal is
-  // handed a stable callback that reaches it through a ref.
-  const previewOpenRef = useRef<((path: string) => void) | null>(null)
+  // Paths and localhost URLs in a pane on the panemux host open in the split
+  // preview (issues #385 and #386). usePreview needs the terminal's
+  // connection, so the terminal and the URL opener are handed stable
+  // callbacks that reach it through a ref.
+  const previewRef = useRef<{ open: (path: string) => void; openUrl: (url: string) => void } | null>(null)
   const previewable = pane.type === 'local' || pane.type === 'tmux'
-  const openPreviewPath = useCallback((path: string) => previewOpenRef.current?.(path), [])
+  const openPreviewPath = useCallback((path: string) => previewRef.current?.open(path), [])
+  const openPreviewUrl = useCallback((url: string) => previewRef.current?.openUrl(url), [])
+  const urlOpen = usePaneUrlOpen(pane.id, { previewUrl: previewable ? openPreviewUrl : undefined })
 
   const { handleResize, connected, dims, sessionState, reconnectFailed, restartSession } = useTerminal({
     sessionId: pane.id,
@@ -58,7 +59,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
     onPreviewPath: previewable ? openPreviewPath : undefined,
   })
   const preview = usePreview(pane.id, connected && sessionState === 'running')
-  previewOpenRef.current = preview.open
+  previewRef.current = preview
 
   // Observe resize events for this pane
   useEffect(() => {
@@ -223,7 +224,10 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
         />
         <PaneUrlOpenNotice
           pendingUrl={urlOpen.pendingUrl}
+          source={urlOpen.pendingSource}
+          canPreview={urlOpen.canPreview}
           error={urlOpen.error}
+          onPreview={urlOpen.previewPendingOpen}
           onConfirm={urlOpen.confirmPendingOpen}
           onDismiss={urlOpen.dismissPendingOpen}
           onDismissError={urlOpen.dismissError}

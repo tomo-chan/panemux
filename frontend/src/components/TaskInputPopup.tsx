@@ -10,7 +10,9 @@ import type { TaskPaneRef } from '../utils/taskBoard'
 import { TaskTerminal } from './TaskTerminal'
 import { useTerminalPopupKeyboard } from '../hooks/useTerminalPopupKeyboard'
 import { usePreview } from '../hooks/usePreview'
+import { usePaneUrlOpen } from '../hooks/usePaneUrlOpen'
 import { taskSplitKey } from '../utils/preview'
+import { PaneUrlOpenNotice } from './PaneUrlOpenNotice'
 import { PreviewSplit } from './PreviewSplit'
 import type { TaskTerminalStatus } from './TaskTerminal'
 
@@ -106,6 +108,13 @@ export const TaskInputPopup: React.FC<TaskInputPopupProps> = ({
   // Paths in a task on the panemux host open beside the terminal (issue
   // #385); the preview is hidden whenever the terminal is not connected.
   const preview = usePreview(attach.phase === 'ready' ? attach.sessionId : '', chip === 'connected')
+  // URLs open as in a pane (issue #386): a localhost URL of a task on the
+  // panemux host beside the terminal. The attach is not a pane, so no
+  // forward is asked for it.
+  const urlOpen = usePaneUrlOpen(attach.phase === 'ready' ? attach.sessionId : '', {
+    forward: false,
+    previewUrl: task.host === '' ? preview.openUrl : undefined,
+  })
 
   useTerminalPopupKeyboard({
     dialogRef,
@@ -150,6 +159,8 @@ export const TaskInputPopup: React.FC<TaskInputPopupProps> = ({
           sessionId={attach.sessionId}
           onStatus={onTerminalStatus}
           onPreviewPath={task.host === '' ? preview.open : undefined}
+          onLinkActivate={urlOpen.openUrl}
+          onBrowserOpenRequest={urlOpen.requestOpen}
         />
       ) : (
         <div className="td-input-blank">
@@ -263,6 +274,16 @@ export const TaskInputPopup: React.FC<TaskInputPopupProps> = ({
             onChoose={preview.open}
             onReload={preview.reload}
             onClose={preview.close}
+          />
+          <PaneUrlOpenNotice
+            pendingUrl={urlOpen.pendingUrl}
+            source={urlOpen.pendingSource}
+            canPreview={urlOpen.canPreview}
+            error={urlOpen.error}
+            onPreview={urlOpen.previewPendingOpen}
+            onConfirm={urlOpen.confirmPendingOpen}
+            onDismiss={urlOpen.dismissPendingOpen}
+            onDismissError={urlOpen.dismissError}
           />
         </div>
 

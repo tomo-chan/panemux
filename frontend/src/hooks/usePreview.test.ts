@@ -123,4 +123,68 @@ describe('usePreview', () => {
     expect(result.current.view).toBeNull()
     expect(fetchMock).not.toHaveBeenCalled()
   })
+
+  // Issue #386: a localhost URL on the panemux host is shown as it is served,
+  // with nothing to resolve on the server.
+  describe('a localhost page', () => {
+    it('shows the page itself, without asking the server', () => {
+      const fetchMock = vi.spyOn(globalThis, 'fetch')
+      const { result } = renderHook(() => usePreview('pane-1', true))
+
+      act(() => result.current.openUrl('http://localhost:5173/app?x=1'))
+
+      expect(result.current.view).toEqual({ kind: 'page', url: 'http://localhost:5173/app?x=1', generation: 0 })
+      expect(fetchMock).not.toHaveBeenCalled()
+    })
+
+    it('accepts every loopback spelling', () => {
+      const { result } = renderHook(() => usePreview('pane-1', true))
+      for (const url of ['http://127.0.0.1:3000/', 'https://[::1]:8443/', 'http://LOCALHOST:8080/']) {
+        act(() => result.current.openUrl(url))
+        expect(result.current.view).toMatchObject({ kind: 'page', url })
+      }
+    })
+
+    it('shows nothing for a URL that is not a loopback http(s) page', () => {
+      const { result } = renderHook(() => usePreview('pane-1', true))
+      for (const url of ['https://example.com/', 'file:///etc/passwd', 'javascript:alert(1)', 'not a url']) {
+        act(() => result.current.openUrl(url))
+        expect(result.current.view).toBeNull()
+      }
+    })
+
+    it('reloads the page', () => {
+      const { result } = renderHook(() => usePreview('pane-1', true))
+      act(() => result.current.openUrl('http://localhost:5173/'))
+
+      act(() => result.current.reload())
+      expect(result.current.view).toEqual({ kind: 'page', url: 'http://localhost:5173/', generation: 1 })
+    })
+
+    it('replaces a file still being resolved, whose answer is then dropped', async () => {
+      let resolve: (r: Response) => void = () => {}
+      vi.spyOn(globalThis, 'fetch').mockReturnValueOnce(new Promise((r) => { resolve = r }))
+      const { result } = renderHook(() => usePreview('pane-1', true))
+
+      act(() => result.current.open('./index.html'))
+      act(() => result.current.openUrl('http://localhost:5173/'))
+      await act(async () => resolve(new Response(JSON.stringify(ready))))
+
+      expect(result.current.view).toMatchObject({ kind: 'page', url: 'http://localhost:5173/' })
+    })
+
+    it('opens nothing while the terminal is disconnected, and is hidden when it disconnects', () => {
+      const { result, rerender } = renderHook(({ connected }) => usePreview('pane-1', connected), {
+        initialProps: { connected: false },
+      })
+      act(() => result.current.openUrl('http://localhost:5173/'))
+      expect(result.current.view).toBeNull()
+
+      rerender({ connected: true })
+      act(() => result.current.openUrl('http://localhost:5173/'))
+      expect(result.current.view?.kind).toBe('page')
+      rerender({ connected: false })
+      expect(result.current.view).toBeNull()
+    })
+  })
 })

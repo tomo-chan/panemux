@@ -7,7 +7,7 @@
 The split preview ([behavior](../behavior/preview.md)) shows HTML and Markdown from the panemux
 host's filesystem in the dashboard. An HTML mock is untrusted content: an agent wrote it, and its
 scripts run. Read this section before changing `internal/preview`, `PostSessionPreview` /
-`ServePreview` in `internal/api/preview.go`, or `PreviewSplit`.
+`ServePreview` in `internal/api/preview.go`, `PreviewSplit`, or `usePreview`.
 
 ### Isolation from the dashboard's origin
 
@@ -41,6 +41,28 @@ dashboard can frame them; `frame-ancestors 'self'` still refuses every other sit
 
 **Do not add `allow-same-origin` to either sandbox.** With it, the page's scripts would run in the
 dashboard's origin and could call every unauthenticated route, including those that start processes.
+
+### Localhost pages
+
+A localhost URL on the panemux host ([behavior](../behavior/preview.md#opening-a-localhost-url)) is
+not served by panemux: `PreviewSplit` frames the URL itself, and panemux makes no request to it.
+The page is the operator's own development server, the same page a tab would show, so it keeps its
+server's origin — its module scripts, hot reload socket and storage depend on it. The frame's
+`sandbox` is `allow-scripts allow-same-origin allow-forms allow-modals allow-popups`:
+
+- `allow-same-origin` here leaves the page in **its own** origin (`http://localhost:<port>`), never
+  the dashboard's. It is not the `allow-same-origin` forbidden above, which would apply to pages the
+  dashboard's origin serves. A URL naming the dashboard's own origin cannot be used to get there:
+  every dashboard response carries `X-Frame-Options: DENY`, and `/preview/` responses carry their own
+  `sandbox` policy, which the browser applies together with the frame's.
+- Another loopback port is another origin, and the
+  [shared browser request guard](auth.md#shared-browser-request-guard) refuses its requests to
+  `/api/*` and `/ws/*`, as it would from that page in a tab.
+- Without `allow-top-navigation` or `allow-popups-to-escape-sandbox` it cannot navigate the dashboard,
+  and a window it opens stays sandboxed.
+- Only loopback `http`/`https` URLs, and only in a terminal on the panemux host, are framed
+  (`usePreview.openUrl` checks again); a request from terminal output is framed only after the
+  operator presses Preview ([url-open.md](url-open.md#browser-open-interception)).
 
 ### Markdown rendering
 

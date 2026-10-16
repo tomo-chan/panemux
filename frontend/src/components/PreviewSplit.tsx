@@ -137,11 +137,13 @@ interface PreviewPanelProps {
 }
 
 const PreviewPanel: React.FC<PreviewPanelProps> = ({ view, minWidth, onChoose, onReload, onClose }) => {
-  const ready = view.kind === 'ready' ? view : null
+  const ready = view.kind === 'ready' || view.kind === 'page' ? view : null
   const frameRef = useRef<HTMLIFrameElement>(null)
   const pageFocused = usePageFocus(frameRef, view)
-  const target = view.kind === 'ready' ? view.path : view.request
-  const host = view.kind === 'ready' || view.kind === 'choose' ? previewHostLabel(view.host) : null
+  const target = view.kind === 'ready' ? view.path : view.kind === 'page' ? view.url : view.request
+  // A localhost page is on the panemux host, as a file is.
+  const host =
+    view.kind === 'ready' || view.kind === 'choose' ? previewHostLabel(view.host) : view.kind === 'page' ? previewHostLabel('') : null
 
   return (
     <section className="pm-preview" aria-label="Preview" style={{ minWidth }}>
@@ -178,6 +180,12 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ view, minWidth, onChoose, o
           </button>
         </div>
       </header>
+      {view.kind === 'page' && (
+        <p className="pm-preview-frame-note">
+          A page that refuses to be shown in a frame stays blank here, and hot reload, sign-in or storage can
+          behave differently than in a tab of its own. Use Open in new tab to see it as a normal page.
+        </p>
+      )}
       {pageFocused && (
         <p role="status" className="pm-preview-keys">
           Keys go to the page. Click the terminal to use panemux&apos;s shortcuts.
@@ -194,6 +202,22 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ view, minWidth, onChoose, o
             // The server's policy sandboxes the page too; this keeps it out of
             // the dashboard's origin even if that header were lost.
             sandbox="allow-scripts"
+            referrerPolicy="no-referrer"
+          />
+        )}
+        {view.kind === 'page' && (
+          <iframe
+            ref={frameRef}
+            key={view.generation}
+            className="pm-preview-frame"
+            src={view.url}
+            title={`Preview of ${view.url}`}
+            // A development server's page needs its own origin — its module
+            // scripts, hot reload socket and storage — so it keeps it. That
+            // origin is the server's, never the dashboard's (whose responses
+            // refuse framing, and whose previews are sandboxed by their own
+            // policy). It still cannot navigate the dashboard.
+            sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-popups"
             referrerPolicy="no-referrer"
           />
         )}

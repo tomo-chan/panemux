@@ -330,3 +330,49 @@ describe('PreviewSplit in a narrow split', () => {
     expect(divider).toHaveAttribute('aria-valuenow', '50')
   })
 })
+
+// Issue #386: a localhost URL on the panemux host, such as a development
+// server, is framed as it is served.
+describe('PreviewSplit with a localhost page', () => {
+  const page: PreviewView = { kind: 'page', url: 'http://localhost:5173/app', generation: 0 }
+
+  it('frames the page in its own origin, without letting it navigate the dashboard', () => {
+    renderSplit(page)
+
+    const frame = screen.getByTitle('Preview of http://localhost:5173/app') as HTMLIFrameElement
+    expect(frame.getAttribute('src')).toBe('http://localhost:5173/app')
+    const sandbox = (frame.getAttribute('sandbox') ?? '').split(' ')
+    expect(sandbox).toEqual(expect.arrayContaining(['allow-scripts', 'allow-same-origin', 'allow-forms']))
+    expect(sandbox).not.toContain('allow-top-navigation')
+    expect(sandbox).not.toContain('allow-top-navigation-by-user-activation')
+    expect(sandbox).not.toContain('allow-popups-to-escape-sandbox')
+    const region = screen.getByRole('region', { name: 'Preview' })
+    expect(region).toHaveTextContent('local')
+    expect(region).toHaveTextContent('http://localhost:5173/app')
+  })
+
+  it('explains what a frame cannot show, and opens the page in a new tab', () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    const { props } = renderSplit(page)
+
+    const note = screen.getByText(/refuses to be shown in a frame/)
+    expect(note).toHaveTextContent('hot reload')
+    expect(note).toHaveTextContent('Open in new tab')
+    fireEvent.click(screen.getByRole('button', { name: 'Open in new tab' }))
+    expect(open).toHaveBeenCalledWith('http://localhost:5173/app', '_blank', 'noopener,noreferrer')
+    fireEvent.click(screen.getByRole('button', { name: 'Reload preview' }))
+    expect(props.onReload).toHaveBeenCalled()
+  })
+
+  it('reloads the frame when the generation changes', () => {
+    const { rerender, props } = renderSplit(page)
+    const before = screen.getByTitle(/^Preview of/)
+    rerender(<PreviewSplit {...props} view={{ ...page, generation: 1 }} />)
+    expect(screen.getByTitle(/^Preview of/)).not.toBe(before)
+  })
+
+  it('does not explain framing for a file panemux serves', () => {
+    renderSplit(ready)
+    expect(screen.queryByText(/refuses to be shown in a frame/)).toBeNull()
+  })
+})

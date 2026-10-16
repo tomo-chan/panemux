@@ -1600,6 +1600,8 @@
 
 /* The popup's body: the terminal, and beside it the split preview (issue #385). */
 .td-input-split {
+  /* Holds the URL approval strip, drawn over the top as in a pane. */
+  position: relative;
   display: flex;
   flex: 1;
   min-height: 0;

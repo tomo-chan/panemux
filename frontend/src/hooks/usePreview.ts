@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { isLoopbackUrl, isOpenableUrl } from '../utils/paneUrlOpen'
 import { requestPreview } from '../utils/preview'
 
 /** What the preview side of a split shows. */
@@ -8,18 +9,25 @@ export type PreviewView =
   | { kind: 'error'; request: string; message: string }
   /** generation changes on each reload, so the frame loads the file again. */
   | { kind: 'ready'; url: string; path: string; host: string; generation: number }
+  /**
+   * A localhost URL on the panemux host (issue #386), framed as it is served:
+   * a development server, not a file panemux serves.
+   */
+  | { kind: 'page'; url: string; generation: number }
 
 export interface UsePreviewResult {
   /** null while no preview is shown, and the terminal takes the whole body. */
   view: PreviewView | null
   /** Opens a clicked path, or one of the candidates offered for it. */
   open: (path: string) => void
+  /** Shows a localhost URL on the panemux host. Any other URL is ignored. */
+  openUrl: (url: string) => void
   reload: () => void
   close: () => void
 }
 
 /**
- * Owns the preview of one terminal (issue #385). The preview is hidden when
+ * Owns the preview of one terminal (issues #385 and #386). The preview is hidden when
  * the terminal is not connected and stays hidden after it reconnects; a tab
  * opened on it is the browser's own and is not affected.
  */
@@ -46,8 +54,16 @@ export function usePreview(sessionId: string, connected: boolean): UsePreviewRes
       })
   }, [connected, sessionId])
 
+  const openUrl = useCallback((url: string) => {
+    if (!connected || !isOpenableUrl(url) || !isLoopbackUrl(url)) return
+    requestRef.current++
+    setView({ kind: 'page', url, generation: 0 })
+  }, [connected])
+
   const reload = useCallback(() => {
-    setView((current) => (current?.kind === 'ready' ? { ...current, generation: current.generation + 1 } : current))
+    setView((current) =>
+      current?.kind === 'ready' || current?.kind === 'page' ? { ...current, generation: current.generation + 1 } : current,
+    )
   }, [])
 
   const close = useCallback(() => {
@@ -59,5 +75,5 @@ export function usePreview(sessionId: string, connected: boolean): UsePreviewRes
     if (!connected) close()
   }, [connected, close])
 
-  return { view, open, reload, close }
+  return { view, open, openUrl, reload, close }
 }

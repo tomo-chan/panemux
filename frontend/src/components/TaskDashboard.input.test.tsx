@@ -16,17 +16,23 @@ const { terminals } = vi.hoisted(() => ({
     mounts: [] as string[],
     onStatus: null as ((status: TaskTerminalStatus) => void) | null,
     onPreviewPath: undefined as ((path: string) => void) | undefined,
+    onLinkActivate: undefined as ((url: string) => void) | undefined,
+    onBrowserOpenRequest: undefined as ((url: string, source?: 'program' | 'link') => void) | undefined,
   },
 }))
 
 vi.mock('./TaskTerminal', () => ({
-  TaskTerminal: ({ sessionId, onStatus, onPreviewPath }: {
+  TaskTerminal: ({ sessionId, onStatus, onPreviewPath, onLinkActivate, onBrowserOpenRequest }: {
     sessionId: string
     onStatus: (status: TaskTerminalStatus) => void
     onPreviewPath?: (path: string) => void
+    onLinkActivate?: (url: string) => void
+    onBrowserOpenRequest?: (url: string, source?: 'program' | 'link') => void
   }) => {
     terminals.onStatus = onStatus
     terminals.onPreviewPath = onPreviewPath
+    terminals.onLinkActivate = onLinkActivate
+    terminals.onBrowserOpenRequest = onBrowserOpenRequest
     useEffect(() => {
       terminals.mounts.push(sessionId)
     }, [sessionId])
@@ -760,5 +766,66 @@ describe('TaskDashboard Type in pane: preview', () => {
     const wrapped = key(last, { key: 'Tab' })
     expect(wrapped.defaultPrevented).toBe(true)
     expect(dialog().contains(document.activeElement)).toBe(true)
+  })
+})
+
+// Issue #386: the popup opens a localhost URL as a pane does — a clicked link
+// beside the terminal, a request or an OSC 8 link after Preview — and no
+// forward is asked for its attach.
+describe('TaskDashboard Type in pane: localhost preview', () => {
+  let open: ReturnType<typeof vi.spyOn>
+
+  beforeEach(() => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response('{}'))
+    open = vi.spyOn(window, 'open').mockReturnValue(null)
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('previews a clicked localhost link beside the terminal', async () => {
+    renderDashboard()
+    await openPopup()
+    setStatus('connected')
+
+    act(() => terminals.onLinkActivate!('http://localhost:5173/'))
+
+    const frame = within(dialog()).getByTitle('Preview of http://localhost:5173/')
+    expect(frame).toHaveAttribute('src', 'http://localhost:5173/')
+    expect(open).not.toHaveBeenCalled()
+    expect(globalThis.fetch).not.toHaveBeenCalledWith(expect.stringContaining('/open-url'), expect.anything())
+  })
+
+  it('asks before opening a requested localhost URL, with Preview, Open and Ignore', async () => {
+    renderDashboard()
+    await openPopup()
+    setStatus('connected')
+
+    act(() => terminals.onBrowserOpenRequest!('http://localhost:5173/'))
+    expect(within(dialog()).getByText('http://localhost:5173/')).toBeInTheDocument()
+    expect(within(dialog()).getByRole('button', { name: 'Ignore' })).toBeInTheDocument()
+    fireEvent.click(within(dialog()).getByRole('button', { name: 'Open' }))
+
+    expect(open).toHaveBeenCalledWith('http://localhost:5173/', '_blank', 'noopener,noreferrer')
+    expect(globalThis.fetch).not.toHaveBeenCalled()
+    expect(within(dialog()).queryByRole('button', { name: 'Ignore' })).toBeNull()
+
+    act(() => terminals.onBrowserOpenRequest!('http://localhost:5173/', 'link'))
+    fireEvent.click(within(dialog()).getByRole('button', { name: 'Preview' }))
+    expect(within(dialog()).getByTitle('Preview of http://localhost:5173/')).toBeInTheDocument()
+  })
+
+  it('opens a clicked localhost link in a tab for a task on another host', async () => {
+    renderDashboard()
+    await openPopup('idle-1')
+    setStatus('connected')
+
+    act(() => terminals.onLinkActivate!('http://localhost:5173/'))
+    expect(open).toHaveBeenCalledWith('http://localhost:5173/', '_blank', 'noopener,noreferrer')
+    expect(within(dialog()).queryByRole('region', { name: 'Preview' })).toBeNull()
+
+    act(() => terminals.onBrowserOpenRequest!('http://localhost:5173/'))
+    expect(within(dialog()).queryByRole('button', { name: 'Preview' })).toBeNull()
   })
 })
