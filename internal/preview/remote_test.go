@@ -333,8 +333,8 @@ func TestRegistryOpenRemoteRefuses(t *testing.T) {
 		{ErrTooLarge, "too large", f.cwd, filepath.Join(f.cwd, "large.html")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := r.OpenRemote(remote.Remote, tc.root, tc.file)
-			require.ErrorIs(t, err, tc.want)
+			_, openErr := r.OpenRemote(remote.Remote, tc.root, tc.file)
+			require.ErrorIs(t, openErr, tc.want)
 		})
 	}
 

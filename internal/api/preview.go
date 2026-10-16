@@ -129,7 +129,8 @@ func (h *Handler) previewRemoteFile(
 		return
 	}
 	url, err := h.previews.OpenRemote(remote, found[0].Root, found[0].File)
-	if err != nil { //coverage:exempt ResolveRemote has just found the file in bounds; only a change on the host in between fails this
+	//coverage:exempt ResolveRemote has just found the file in bounds; only a host change in between fails this
+	if err != nil {
 		writePreviewError(w, err)
 		return
 	}
