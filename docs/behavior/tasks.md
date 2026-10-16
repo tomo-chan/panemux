@@ -234,15 +234,22 @@ newest session recorded.
 `auth_missing` and `session_info_missing` are defined and reported by nothing yet.
 
 **The probe** is a fixed script of its own ([Task agent probe](../security/command-execution.md#task-agent-probe)),
-run over the host's collection connection (or locally) after a full collection of the host that
+started over the host's collection connection (or locally) after a full collection of the host that
 succeeded: the dashboard's `GET /api/tasks`, not the task event stream's collection, a resume's or
-a lookup's. It looks for each agent that declares `launch` or `resume` the way
+a lookup's. It runs beside the collection, which does not wait for it: `GET /api/tasks` answers as
+soon as its collection is done, and a collection that arrives while a host's probe runs does not
+start another. Until the probe answers, `launch` and `resume` keep the previous result of the same
+connection, or `not_probed` when there is none. It looks for each agent that declares `launch` or `resume` the way
 [Starting a task](#starting-a-task) does — `command -v`, then a login shell's — and keeps only an
 absolute path to an executable file. A host's result, a failure included, is used for 5 minutes,
 then the next full collection probes again; a new connection (a [reconnect](#post-apitaskshostsnamereconnect),
 or a redial after the connection dropped) probes at its first full collection. One probe has 5
-seconds of its own. A failed probe changes nothing about the host's collection or its tasks, and one
-cut short because the request was abandoned is not kept.
+seconds of its own, and the detail of one that ran out of it says so (`agent probe on build-box did
+not answer within 5s`). A failed probe changes nothing about the host's collection, its tasks or its
+connection: it neither checks nor drops the connection, which is the collection's to judge. The
+server log says so when a host's probe fails or its error changes, and when it answers again — not on
+every probe. A probe that answers after the service closed, the host's connection was replaced or the
+host left the configuration is not kept.
 
 **An unknown format** is what an agent wrote that this build cannot read:
 
@@ -254,7 +261,9 @@ cut short because the request was abandoned is not kept.
 - **A value outside the known set**: a Claude Code `status` other than `busy`, `waiting` and `idle`
   (a missing one is read as an older release's, not counted), a `thread_turns` status other than
   `inProgress`, `completed`, `interrupted` and `failed`, and a last turn event as above, each once
-  per live session.
+  per live session — a rollout open on two descriptors is one session, and a `codex/open` row
+  printed once per descriptor is counted once. A live codex process whose `codex/open` row cannot be
+  read is listed with its state `unknown`, not `run`.
 
 Such a session is still listed, with its state `unknown`: no state, wait or wait signature is guessed
 from it, so it notifies nothing. The agent's `collect` becomes `degraded` / `unknown_format`, with

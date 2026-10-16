@@ -354,7 +354,8 @@ ID only as a `[a-z0-9-]` word (the registry's own rule is narrower still), so th
 the word nor add a command. Nothing from a request, the config or a host reaches the script, and it
 runs exactly as the collection does: locally `exec.CommandContext(ctx, "sh", "-s")` with the script
 on stdin and `HOME` from `internal/homedir`, remotely the literal `sh -s` over the host's collection
-connection with the script on stdin, under a 5-second context of its own.
+connection with the script on stdin, under a 5-second context of its own that the service's close
+ends and the request's does not.
 
 The lookup is the one [Task launch and resume](#task-launch-and-resume) makes, with the same
 safety: `command -v "$1"`, and when that finds nothing `"${SHELL:-/bin/sh}" -lc "command -v $1"`
@@ -365,8 +366,10 @@ probe never runs that file: it prints only `cli <id> found` or `cli <id> missing
 (`parseProbeOutput`) skips text before its `::panemux-probe v1` header (a login shell's greeting),
 accepts only those two answers for an ID it asked about, once each, and fails the probe on
 anything else, on a missing answer and on output without `::end`. A probe that fails changes
-nothing about the host's collection; its error reaches only the internal availability detail and
-the log, made valid UTF-8 with control characters replaced and bounded (`boundedText`).
+nothing about the host's collection: it runs beside it, never dials, keepalives or drops the
+connection, and is not waited for. Its error reaches only the internal availability detail and
+the server log (when it changes), the detail made valid UTF-8 with control characters replaced and
+bounded (`boundedText`).
 
 What the collection reads in a format this build does not know is reported the same way: the
 examples and versions in an availability detail are host text, each bounded to 120 and 32

@@ -1452,8 +1452,17 @@ the collection from guessing past a format it does not know. Nothing reads the r
   or a resume's (which would wait on it before launching).
 - **Cached per host and connection for 5 minutes, failures too.** A host whose login shell is slow
   would otherwise cost up to 5 seconds on every 10-second poll. The entry remembers the connection it
-  ran over, so a reconnect or a redial probes again. A probe cut short because the request was
-  abandoned is not kept, so leaving the dashboard does not poison the cache.
+  ran over, so a reconnect or a redial probes again.
+- **Beside the collection, not inside it.** The first version ran the probe inside the host's
+  collection, so whenever the cache was cold (the first collection, every 5 minutes, a reconnect) a
+  login shell that blocked held `GET /api/tasks` for the whole 5 seconds, and each poll arriving
+  meanwhile started a probe of its own. It now runs in the background, one per host at a time, under
+  the service's context rather than the request's; while it runs, the previous result of the same
+  connection is reported (a cold host is `not_probed`) rather than flipping to unknown every 5 minutes.
+- **The probe leaves the connection alone.** Run through the collection's remote path, a probe out of
+  time pinged the connection under another 5 seconds and dropped it when the ping failed, and its
+  error named the collection's 15-second timeout. Whether a connection is still good is the
+  collection's to judge; the probe reports its own failure within its own budget, and nothing else.
 - **The probe never runs the CLI.** `<agent> --version` would put a CLI's own start-up (an update
   check, a first-run screen) on every host every 5 minutes; the version is read from what the agent
   writes instead, and recorded only.
