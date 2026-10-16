@@ -603,6 +603,7 @@ func TestResolveThroughAnotherSpellingOfTheWorkingDirectory(t *testing.T) {
 	base := realDir(t)
 	cwd := filepath.Join(base, "real", "proj")
 	page := writeFile(t, filepath.Join(cwd, "index.html"), "<p>x</p>")
+	writeFile(t, filepath.Join(cwd, "docs", "deep", "notes.md"), "# deep")
 	outside := filepath.Join(base, "outside")
 	writeFile(t, filepath.Join(outside, "secret.html"), "<p>secret</p>")
 	require.NoError(t, os.Symlink("real", filepath.Join(base, "alias")))
@@ -626,6 +627,11 @@ func TestResolveThroughAnotherSpellingOfTheWorkingDirectory(t *testing.T) {
 	require.NoError(t, err, "Open accepts what Resolve found")
 	assert.Equal(t, "<p>x</p>", serve(t, reg, url).body)
 
+	deep := filepath.Join(base, "alias", "proj", "docs", "deep", "notes.md")
+	got, err = Resolve(deep, []string{cwd})
+	require.NoError(t, err, "a working directory several levels above the file")
+	assert.Equal(t, []Found{{Root: cwd, File: deep}}, got)
+
 	viaAbsolute := filepath.Join(base, "absolute", "proj", "index.html")
 	got, err = Resolve(viaAbsolute, []string{cwd})
 	require.NoError(t, err, "a link in the prefix with an absolute target")
@@ -637,14 +643,20 @@ func TestResolveThroughAnotherSpellingOfTheWorkingDirectory(t *testing.T) {
 	require.ErrorIs(t, err, ErrEscapes, "../ out of it after the link")
 	_, err = Resolve(filepath.Join(base, "alias", "missing", "index.html"), []string{cwd})
 	require.ErrorIs(t, err, ErrEscapes, "a prefix that names nothing is not inside")
+}
+
+func TestResolveInAnotherLetterCase(t *testing.T) {
+	base := realDir(t)
+	cwd := filepath.Join(base, "real", "proj")
+	writeFile(t, filepath.Join(cwd, "index.html"), "<p>x</p>")
 
 	upper := filepath.Join(base, "real", "PROJ", "index.html")
 	if _, statErr := os.Stat(upper); statErr == nil {
-		got, err = Resolve(upper, []string{cwd})
+		got, err := Resolve(upper, []string{cwd})
 		require.NoError(t, err, "another letter case on a case-insensitive filesystem")
 		assert.Equal(t, []Found{{Root: cwd, File: upper}}, got)
 	} else {
-		_, err = Resolve(upper, []string{cwd})
+		_, err := Resolve(upper, []string{cwd})
 		require.ErrorIs(t, err, ErrEscapes, "another letter case names another directory here")
 	}
 }

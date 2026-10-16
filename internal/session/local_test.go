@@ -1866,6 +1866,15 @@ func TestNewLocal_ExitEndsTheSubscription(t *testing.T) {
 	require.True(t, ok)
 	defer unsubscribe()
 
+	_, err = sess.Write([]byte("echo pm385-ready\n"))
+	require.NoError(t, err)
+	select {
+	case <-updates:
+		assert.Equal(t, StateConnected, sess.State(), "output that is read leaves the session running")
+	case <-time.After(5 * time.Second):
+		t.Fatal("the shell printed nothing")
+	}
+
 	_, err = sess.Write([]byte("exit\n"))
 	require.NoError(t, err)
 
