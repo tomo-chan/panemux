@@ -910,6 +910,8 @@ func TestGetTasks_PRIsLookedUpOnlyForADirectoryARunningTaskUses(t *testing.T) {
 
 // A cached lookup made without a PR does not serve a running task that
 // needs one; a cached lookup with a PR serves a stopped task too.
+//
+//efficacy:exempt only its fake was made safe to read beside the background agent probe
 func TestGetTasks_ACachedLookupWithoutAPRIsNotEnoughForARunningTask(t *testing.T) {
 	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
 	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
