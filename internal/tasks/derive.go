@@ -117,10 +117,13 @@ var validPaneID = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,128}$`)
 // reads. Claude Code writes this file itself; it is not a published format
 // (see docs/DECISIONLOG.md), so every field is optional here.
 type claudeState struct {
-	SessionID       string `json:"sessionId"`
-	CWD             string `json:"cwd"`
-	Status          string `json:"status"`
-	WaitingFor      string `json:"waitingFor"`
+	SessionID  string `json:"sessionId"`
+	CWD        string `json:"cwd"`
+	Status     string `json:"status"`
+	WaitingFor string `json:"waitingFor"`
+	// Version is the Claude Code version that wrote the file. It is
+	// recorded, never checked.
+	Version         string `json:"version"`
 	PID             int    `json:"pid"`
 	StatusUpdatedAt int64  `json:"statusUpdatedAt"`
 	UpdatedAt       int64  `json:"updatedAt"`
@@ -169,23 +172,30 @@ type UnreadableStateFile struct {
 // every time a host reports is converted by its age against the host's own
 // clock (raw.Now), so a host whose clock is off does not shift the dashboard.
 func buildTasks(host string, raw rawSnapshot, collectedAt time.Time) []Task {
-	tasks, _ := buildTasksWithDiagnostics(host, raw, collectedAt)
+	tasks, _, _ := buildTasksWithDiagnostics(host, raw, collectedAt)
 	return tasks
 }
 
 // buildTasksWithDiagnostics is buildTasks with the host's unreadable state
-// files, ordered by file name.
-func buildTasksWithDiagnostics(host string, raw rawSnapshot, collectedAt time.Time) ([]Task, []UnreadableStateFile) {
+// files, ordered by file name, and what each agent wrote in a format this
+// build does not know.
+func buildTasksWithDiagnostics(
+	host string, raw rawSnapshot, collectedAt time.Time,
+) ([]Task, []UnreadableStateFile, map[agent.ID]formatReport) {
 	b := newTaskBuilder(host, raw, collectedAt)
 	live := b.liveTasks()
 	tasks := b.withLogVersions(append(live, b.stoppedTasks(live)...))
 	var unreadable []UnreadableStateFile
+	formats := map[agent.ID]formatReport{}
 	for _, a := range b.agents {
 		if d, ok := a.collected.(stateDiagnostics); ok {
 			unreadable = append(unreadable, d.unreadableStateFiles(b)...)
 		}
+		if f, ok := a.collected.(formatChecker); ok {
+			formats[a.id] = f.formats(b)
+		}
 	}
-	return tasks, unreadable
+	return tasks, unreadable, formats
 }
 
 // buildLiveTasks is buildTasks without the stopped sessions and the log

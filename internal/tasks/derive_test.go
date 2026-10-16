@@ -178,7 +178,7 @@ func TestBuildTasks_AFieldOfAnUnexpectedTypeIsReadAsAbsent(t *testing.T) {
 			`{"pid":5,"sessionId":"sess-a","cwd":7,"status":["busy"],"waitingFor":{},"statusUpdatedAt":"x"}`)}},
 		Processes: []process{claudeProc(5, 1)},
 	}.snapshot()
-	tasks, unreadable := buildTasksWithDiagnostics("", raw, collectedAt)
+	tasks, unreadable, _ := buildTasksWithDiagnostics("", raw, collectedAt)
 	assert.Empty(t, unreadable)
 	require.Len(t, tasks, 1)
 	assert.Equal(t, "local:claude:sess-a", tasks[0].ID)
@@ -224,7 +224,7 @@ func TestBuildTasks_UnreadableStateFilesAreReportedWithTheirReason(t *testing.T)
 				StateFiles: []stateFile{{Name: "5.json", Data: []byte(tc.data)}},
 				Processes:  []process{claudeProc(5, 1)},
 			}.snapshot()
-			_, unreadable := buildTasksWithDiagnostics("", raw, collectedAt)
+			_, unreadable, _ := buildTasksWithDiagnostics("", raw, collectedAt)
 			require.Len(t, unreadable, 1)
 			assert.Equal(t, "5.json", unreadable[0].File)
 			assert.Equal(t, tc.wantReason, unreadable[0].Reason)
@@ -255,7 +255,7 @@ func TestBuildTasks_UnreadableStateFileProcess(t *testing.T) {
 		},
 		TmuxPanes: []tmuxPane{{PanePID: 4, Session: "work"}},
 	}.snapshot()
-	_, unreadable := buildTasksWithDiagnostics("gpu-1", raw, collectedAt)
+	_, unreadable, _ := buildTasksWithDiagnostics("gpu-1", raw, collectedAt)
 	tmux := Location{Kind: LocationTmux, TmuxSession: "work", Attachable: true}
 	outside := Location{Kind: LocationOutside}
 	assert.Equal(t, []UnreadableStateFile{
@@ -283,7 +283,7 @@ func TestBuildTasks_UnreadableStateFileNameIsBounded(t *testing.T) {
 			{Name: strings.Repeat("c", maxUnreadableFileName-len(".json")) + ".json", Data: []byte("{")},
 		},
 	}.snapshot()
-	_, unreadable := buildTasksWithDiagnostics("", raw, collectedAt)
+	_, unreadable, _ := buildTasksWithDiagnostics("", raw, collectedAt)
 	require.Len(t, unreadable, 3)
 	assert.Equal(t, "a\ufffd[31m\ufffd.json", unreadable[0].File)
 	assert.Equal(t, strings.Repeat("b", maxUnreadableFileName-1)+"…", unreadable[1].File)

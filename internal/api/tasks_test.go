@@ -709,6 +709,18 @@ func taskRouteRequests() []*http.Request {
 	}
 }
 
+// countingCollections answers every script with a local collection and
+// counts the collections. The full collection also runs the agent probe, a
+// script of its own that is not counted.
+func countingCollections(n *int) func(context.Context, string) ([]byte, error) {
+	return func(_ context.Context, script string) ([]byte, error) {
+		if strings.Contains(script, "::panemux-tasks") {
+			*n++
+		}
+		return taskCollection("l", ""), nil
+	}
+}
+
 // GET /api/tasks makes panemux dial every host and run a script there, so a
 // page on another site must not be able to trigger it — an <img> pointing at
 // the route would otherwise collect whenever that page is open.
@@ -742,12 +754,9 @@ func TestTaskRoutes_RefuseCrossSiteRequests(t *testing.T) {
 			recordsPath := useTaskRecords(t, h)
 			collections := 0
 			h.SetTaskService(tasks.New(tasks.Options{
-				Hosts: h.taskHostNames,
-				Dial:  func(string) (tasks.Conn, error) { return nil, errors.New("unreachable") },
-				RunLocal: func(context.Context, string) ([]byte, error) {
-					collections++
-					return taskCollection("l", ""), nil
-				},
+				Hosts:    h.taskHostNames,
+				Dial:     func(string) (tasks.Conn, error) { return nil, errors.New("unreachable") },
+				RunLocal: countingCollections(&collections),
 			}))
 			r := setupRouterWithHandler(h)
 

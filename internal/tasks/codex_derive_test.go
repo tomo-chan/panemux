@@ -99,8 +99,20 @@ func TestBuildTasks_CodexStateFromTheRolloutWhenTheDatabaseHasNothing(t *testing
 		{name: "turn aborted", turn: codexTurn{Event: "turn_aborted", EventAt: startedAt}, want: StateIdle},
 		{name: "no turn event in the tail", turn: codexTurn{LastItem: "message"}, want: StateUnknown},
 		{
-			name: "a thread_turns status this build does not know falls back to the rollout",
+			// An unknown format is not guessed past (issue #373): the
+			// rollout's older event does not stand in for the database.
+			name: "a thread_turns status this build does not know is unknown",
 			turn: codexTurn{DBStatus: "paused", DBStartedAt: hostNow - 90, Event: "task_complete", EventAt: startedAt},
+			want: StateUnknown,
+		},
+		{
+			name: "a turn event this build does not know is unknown",
+			turn: codexTurn{UnknownEvent: "turn_started", EventAt: startedAt},
+			want: StateUnknown,
+		},
+		{
+			name: "a known thread_turns status still decides past an unknown event",
+			turn: codexTurn{DBStatus: "completed", UnknownEvent: "turn_started"},
 			want: StateIdle,
 		},
 		{name: "an unknown status and no event", turn: codexTurn{DBStatus: "paused"}, want: StateUnknown},

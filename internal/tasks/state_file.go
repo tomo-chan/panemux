@@ -51,6 +51,7 @@ func readStateFile(file stateFile) readState {
 		"statusUpdatedAt": &st.StatusUpdatedAt,
 		"updatedAt":       &st.UpdatedAt,
 		"startedAt":       &st.StartedAt,
+		"version":         &st.Version,
 	} {
 		if raw, ok := fields[name]; ok {
 			_ = json.Unmarshal(raw, dst) // a value of another type leaves the field empty

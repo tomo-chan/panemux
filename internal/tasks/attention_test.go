@@ -54,7 +54,7 @@ func TestCollectAttention_ListsLiveTasksWithTheSameSignature(t *testing.T) {
 	full := svc.Collect(context.Background())
 	attention := svc.CollectAttention(context.Background())
 
-	require.Equal(t, []string{collectScript, attentionScript}, scripts)
+	require.Equal(t, []string{collectScript, probeScript, attentionScript}, scripts, "only the full collection probes")
 	assert.Equal(t, full.Hosts, attention.Hosts)
 	require.Len(t, attention.Tasks, 1, "stopped sessions are not listed: %+v", attention.Tasks)
 	live := findTask(t, full.Tasks, "local:claude:live-sess")
