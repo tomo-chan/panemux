@@ -3,12 +3,11 @@ import type { PreviewView } from '../hooks/usePreview'
 import {
   PREVIEW_SIDE_MIN_PX,
   PREVIEW_SPLIT_DEFAULT,
-  PREVIEW_SPLIT_MAX,
-  PREVIEW_SPLIT_MIN,
   PREVIEW_SPLIT_STEP,
   clampPreviewSplit,
   loadPreviewSplit,
   previewHostLabel,
+  previewSplitBounds,
   savePreviewSplit,
 } from '../utils/preview'
 import { CloseIcon, OpenInNewTabIcon, ReloadIcon } from './PaneHeaderIcons'
@@ -33,23 +32,34 @@ export const PreviewSplit: React.FC<PreviewSplitProps> = ({ splitKey, view, term
   const splitRef = useRef<HTMLDivElement>(null)
   const [ratio, setRatio] = useState(() => loadPreviewSplit(splitKey))
   const [dragPointer, setDragPointer] = useState<number | null>(null)
-  const ratioRef = useRef(ratio)
-  ratioRef.current = ratio
+  const width = useSplitWidth(splitRef, view !== null)
+  // The ratios this split's width can show with both sides 160 px wide. What
+  // is drawn, announced, moved by the keys and the pointer, and saved stays
+  // within them; a stored ratio outside them is kept until the divider moves,
+  // so a wider split shows it again.
+  const bounds = previewSplitBounds(width)
+  const fit = useCallback(
+    (value: number) => Math.min(bounds.max, Math.max(bounds.min, clampPreviewSplit(value))),
+    [bounds.min, bounds.max],
+  )
+  const shown = fit(ratio)
+  const shownRef = useRef(shown)
+  shownRef.current = shown
 
   useEffect(() => {
     setRatio(loadPreviewSplit(splitKey))
   }, [splitKey])
 
   const commit = useCallback((value: number) => {
-    const next = clampPreviewSplit(value)
+    const next = fit(value)
     setRatio(next)
     savePreviewSplit(splitKey, next)
-  }, [splitKey])
+  }, [splitKey, fit])
 
   const ratioAt = (clientX: number): number | null => {
     const rect = splitRef.current?.getBoundingClientRect()
     if (!rect || rect.width <= 0) return null
-    return clampPreviewSplit(Math.round(((clientX - rect.left) / rect.width) * 100))
+    return fit(Math.round(((clientX - rect.left) / rect.width) * 100))
   }
 
   const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -70,14 +80,14 @@ export const PreviewSplit: React.FC<PreviewSplitProps> = ({ splitKey, view, term
     if (dragPointer !== event.pointerId) return
     setDragPointer(null)
     event.currentTarget.releasePointerCapture?.(event.pointerId)
-    savePreviewSplit(splitKey, ratioRef.current)
+    savePreviewSplit(splitKey, shownRef.current)
   }
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     const delta = event.key === 'ArrowLeft' ? -PREVIEW_SPLIT_STEP : event.key === 'ArrowRight' ? PREVIEW_SPLIT_STEP : 0
     if (delta === 0) return
     event.preventDefault()
-    commit(ratio + delta)
+    commit(shown + delta)
   }
 
   const minWidth = `${PREVIEW_SIDE_MIN_PX}px`
@@ -88,7 +98,7 @@ export const PreviewSplit: React.FC<PreviewSplitProps> = ({ splitKey, view, term
           preview keeps its 160 px when the ratio would leave it less. */}
       <div
         className="pm-preview-terminal"
-        style={view ? { flex: `0 1 ${ratio}%`, minWidth } : { flex: '1 1 100%' }}
+        style={view ? { flex: `0 1 ${shown}%`, minWidth } : { flex: '1 1 100%' }}
       >
         {terminal}
       </div>
@@ -98,9 +108,9 @@ export const PreviewSplit: React.FC<PreviewSplitProps> = ({ splitKey, view, term
             role="separator"
             aria-orientation="vertical"
             aria-label="Resize terminal and preview"
-            aria-valuemin={PREVIEW_SPLIT_MIN}
-            aria-valuemax={PREVIEW_SPLIT_MAX}
-            aria-valuenow={ratio}
+            aria-valuemin={bounds.min}
+            aria-valuemax={bounds.max}
+            aria-valuenow={shown}
             tabIndex={0}
             title="Drag, or use the arrow keys, to resize. Double-click for 50:50."
             className="pm-preview-divider"
@@ -230,4 +240,18 @@ function usePageFocus(frameRef: React.RefObject<HTMLIFrameElement | null>, view:
     }
   }, [frameRef, view])
   return focused
+}
+
+// The split's width in pixels, followed while a preview is shown; 0 where it
+// cannot be measured, which leaves the ratio's fixed range.
+function useSplitWidth(splitRef: React.RefObject<HTMLDivElement | null>, active: boolean): number {
+  const [width, setWidth] = useState(0)
+  useEffect(() => {
+    const split = splitRef.current
+    if (!active || !split || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(() => setWidth(split.getBoundingClientRect().width))
+    observer.observe(split)
+    return () => observer.disconnect()
+  }, [splitRef, active])
+  return width
 }

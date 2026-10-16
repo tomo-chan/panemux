@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PreviewSplit } from './PreviewSplit'
 import type { PreviewView } from '../hooks/usePreview'
 import { loadPreviewSplit, paneSplitKey, savePreviewSplit } from '../utils/preview'
@@ -254,5 +254,79 @@ describe('PreviewSplit keys in the page', () => {
       window.dispatchEvent(new Event('blur'))
     })
     expect(screen.queryByText(hint)).toBeNull()
+  })
+})
+
+describe('PreviewSplit in a narrow split', () => {
+  // The split's width as a ResizeObserver reports it. Without one (jsdom's
+  // default) the split cannot know its width and keeps the fixed 20-80 range.
+  let resized: (() => void) | null = null
+  beforeEach(() => {
+    resized = null
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback: () => void) { resized = callback }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    })
+  })
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  function narrow(container: HTMLElement, width: number) {
+    mockWidth(container, width)
+    act(() => resized?.())
+  }
+
+  it('shows, announces and moves within the ratios that leave both sides 160 px', () => {
+    savePreviewSplit(paneSplitKey('pane-1'), 80)
+    const { container } = renderSplit(ready)
+    narrow(container, 450)
+
+    const divider = screen.getByRole('separator')
+    expect(divider).toHaveAttribute('aria-valuenow', '63')
+    expect(divider).toHaveAttribute('aria-valuemin', '36')
+    expect(divider).toHaveAttribute('aria-valuemax', '63')
+    expect(terminalSide().style.flex).toBe('0 1 63%')
+    expect(loadPreviewSplit(paneSplitKey('pane-1'))).toBe(80)
+
+    fireEvent.keyDown(divider, { key: 'ArrowLeft' })
+    expect(divider).toHaveAttribute('aria-valuenow', '58')
+    expect(loadPreviewSplit(paneSplitKey('pane-1'))).toBe(58)
+
+    for (let i = 0; i < 3; i++) fireEvent.keyDown(divider, { key: 'ArrowRight' })
+    expect(divider).toHaveAttribute('aria-valuenow', '63')
+    for (let i = 0; i < 8; i++) fireEvent.keyDown(divider, { key: 'ArrowLeft' })
+    expect(divider).toHaveAttribute('aria-valuenow', '36')
+    expect(loadPreviewSplit(paneSplitKey('pane-1'))).toBe(36)
+  })
+
+  it('drags within the same ratios', () => {
+    const { container } = renderSplit(ready)
+    narrow(container, 450)
+    const divider = screen.getByRole('separator')
+    divider.setPointerCapture = vi.fn()
+
+    fireEvent.pointerDown(divider, { pointerId: 1, pointerType: 'mouse', button: 0, clientX: 325 })
+    fireEvent.pointerMove(divider, { pointerId: 1, pointerType: 'mouse', clientX: 540 })
+    expect(divider).toHaveAttribute('aria-valuenow', '63')
+    fireEvent.pointerUp(divider, { pointerId: 1, pointerType: 'mouse', clientX: 540 })
+    expect(loadPreviewSplit(paneSplitKey('pane-1'))).toBe(63)
+  })
+
+  it('returns to 50:50 on a double-click, and follows the split as it widens', () => {
+    savePreviewSplit(paneSplitKey('pane-1'), 80)
+    const { container } = renderSplit(ready)
+    narrow(container, 450)
+    const divider = screen.getByRole('separator')
+    expect(divider).toHaveAttribute('aria-valuenow', '63')
+
+    narrow(container, 1000)
+    expect(divider).toHaveAttribute('aria-valuenow', '80')
+    expect(divider).toHaveAttribute('aria-valuemax', '80')
+
+    fireEvent.doubleClick(divider)
+    expect(divider).toHaveAttribute('aria-valuenow', '50')
   })
 })

@@ -13,15 +13,25 @@ test('keeps both sides at least 160 px wide in a half-width pane', async ({ page
   const pane = await openPreview(page, 'preview-left', 'pm385-layout')
   const divider = pane.getByRole('separator', { name: 'Resize terminal and preview' })
 
-  // 80:20 leaves the preview less than 160 px of a 450 px pane.
+  // 80:20 would leave the preview less than 160 px of a 450 px pane, so the
+  // divider stops where both sides fit, and says so.
   await divider.focus()
   for (let i = 0; i < 8; i++) await page.keyboard.press('ArrowRight')
-  await expect(divider).toHaveAttribute('aria-valuenow', '80')
   await expectBothSidesFit(pane)
+  await expectAnnouncedShare(pane, divider)
+  const atEnd = await terminalWidth(pane)
+
+  // The first press back moves the terminal's edge.
+  await page.keyboard.press('ArrowLeft')
+  await expect.poll(() => terminalWidth(pane)).toBeLessThan(atEnd - 1)
+  await expectAnnouncedShare(pane, divider)
 
   for (let i = 0; i < 12; i++) await page.keyboard.press('ArrowLeft')
-  await expect(divider).toHaveAttribute('aria-valuenow', '20')
   await expectBothSidesFit(pane)
+  await expectAnnouncedShare(pane, divider)
+  const atStart = await terminalWidth(pane)
+  await page.keyboard.press('ArrowRight')
+  await expect.poll(() => terminalWidth(pane)).toBeGreaterThan(atStart + 1)
 
   await page.keyboard.press('ArrowRight')
   await divider.dblclick()
@@ -38,6 +48,18 @@ test('hides the preview when the shell in the pane exits', async ({ page }) => {
   await expect(pane.locator('.pm-preview')).toHaveCount(0)
   await expect(pane.locator('.pm-preview-terminal')).toBeVisible()
 })
+
+async function terminalWidth(pane: Locator): Promise<number> {
+  return (await pane.locator('.pm-preview-terminal').boundingBox())!.width
+}
+
+// The ratio the divider announces is the share the terminal is drawn at.
+async function expectAnnouncedShare(pane: Locator, divider: Locator) {
+  const split = (await pane.locator('.pm-preview-split').boundingBox())!
+  const share = ((await terminalWidth(pane)) / split.width) * 100
+  const announced = Number(await divider.getAttribute('aria-valuenow'))
+  expect(Math.abs(announced - share)).toBeLessThanOrEqual(1)
+}
 
 async function expectBothSidesFit(pane: Locator) {
   const split = (await pane.locator('.pm-preview-split').boundingBox())!

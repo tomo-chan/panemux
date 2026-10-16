@@ -30,6 +30,22 @@ export const PREVIEW_SPLIT_DEFAULT = 50
 export const PREVIEW_SPLIT_STEP = 5
 /** Neither side is drawn narrower than this, whatever the ratio. */
 export const PREVIEW_SIDE_MIN_PX = 160
+/** The divider's own width, as preview.css draws it. */
+export const PREVIEW_DIVIDER_PX = 6
+
+/**
+ * The ratios a split `width` pixels wide can show: within 20 to 80, and
+ * leaving the terminal and the preview (with the divider) 160 px each. Where
+ * both cannot fit, the split stays at 50:50. An unknown width (0) leaves the
+ * fixed range.
+ */
+export function previewSplitBounds(width: number): { min: number; max: number } {
+  if (!(width > 0)) return { min: PREVIEW_SPLIT_MIN, max: PREVIEW_SPLIT_MAX }
+  const min = Math.max(PREVIEW_SPLIT_MIN, Math.ceil((PREVIEW_SIDE_MIN_PX * 100) / width))
+  const max = Math.min(PREVIEW_SPLIT_MAX, Math.floor(((width - PREVIEW_DIVIDER_PX - PREVIEW_SIDE_MIN_PX) * 100) / width))
+  if (min > max) return { min: PREVIEW_SPLIT_DEFAULT, max: PREVIEW_SPLIT_DEFAULT }
+  return { min, max }
+}
 
 export function clampPreviewSplit(value: number): number {
   if (!Number.isFinite(value)) return PREVIEW_SPLIT_DEFAULT

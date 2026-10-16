@@ -8,6 +8,7 @@ import {
   loadPreviewSplit,
   paneSplitKey,
   previewHostLabel,
+  previewSplitBounds,
   requestPreview,
   savePreviewSplit,
   taskSplitKey,
@@ -69,6 +70,29 @@ describe('clampPreviewSplit', () => {
 
   it('bounds the split at 20:80 and 80:20, starting at 50:50', () => {
     expect([PREVIEW_SPLIT_MIN, PREVIEW_SPLIT_DEFAULT, PREVIEW_SPLIT_MAX]).toEqual([20, 50, 80])
+  })
+})
+
+describe('previewSplitBounds', () => {
+  it('is the fixed range while the width is unknown', () => {
+    expect(previewSplitBounds(0)).toEqual({ min: PREVIEW_SPLIT_MIN, max: PREVIEW_SPLIT_MAX })
+    expect(previewSplitBounds(Number.NaN)).toEqual({ min: PREVIEW_SPLIT_MIN, max: PREVIEW_SPLIT_MAX })
+  })
+
+  it('is the fixed range where both sides fit at either end', () => {
+    expect(previewSplitBounds(1000)).toEqual({ min: 20, max: 80 })
+    // 166 / 830 is exactly 20%: the preview keeps 160 px and the divider 6.
+    expect(previewSplitBounds(830)).toEqual({ min: 20, max: 80 })
+  })
+
+  it('narrows to the ratios that leave both sides 160 px', () => {
+    // 450 px: the terminal needs 36%, the preview and divider 37% (166 px).
+    expect(previewSplitBounds(450)).toEqual({ min: 36, max: 63 })
+    expect(previewSplitBounds(800)).toEqual({ min: 20, max: 79 })
+  })
+
+  it('settles on one ratio where both sides cannot fit', () => {
+    expect(previewSplitBounds(300)).toEqual({ min: 50, max: 50 })
   })
 })
 

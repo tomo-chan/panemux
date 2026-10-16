@@ -315,7 +315,8 @@ rules.
   status, not an alert, and goes as soon as focus leaves the page.
 - The divider is a 6 px bar with a centered grip. It highlights in the accent blue on hover, focus
   and while dragged; it is a focusable `separator` that the arrow keys move and a double-click
-  returns to 50:50. Neither side gets narrower than 160 px.
+  returns to 50:50. Neither side gets narrower than 160 px; in a narrow pane its range narrows to
+  match, so its announced value, its key steps and the drawn split agree.
 - Loading, the reason a path cannot be opened, and the choice between files a relative path names
   are shown in the preview's own area, so the terminal is never covered and keeps taking keys.
 - The preview's page is white like a browser page, framed by the dark panemux chrome.

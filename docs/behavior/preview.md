@@ -81,6 +81,13 @@ The split starts at 50:50. The divider between the terminal and the preview:
 - returns to 50:50 on a double-click;
 - keeps the terminal's share between 20% and 80%, and neither side narrower than 160 pixels.
 
+In a pane too narrow for both sides at 20% or 80%, the divider's range narrows to the shares that
+leave both sides 160 pixels (in a 450-pixel split, 36% to 63%), and the split stays at 50:50 where
+even that is impossible. The divider stops at the end of that range rather than moving past it
+unseen: the share it shows is the one it announces to assistive technology, the one the arrow keys
+step from, and the one kept once it is moved. A kept ratio outside a narrow pane's range shows at
+the range's end until the divider moves, and in full once the pane is wide enough again.
+
 The ratio is kept per pane (workspace panes) and per task (the Type in pane popup) in the browser's
 `localStorage`, so the next preview of that pane or task opens at it. A browser that refuses storage
 opens at 50:50.
