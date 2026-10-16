@@ -51,6 +51,8 @@ type fakeConn struct {
 	runErr  error
 	gitErr  error
 	pingErr error
+	// hangOn makes Run block, as hang below does, for that script only.
+	hangOn  string
 	output  []byte
 	cmds    []string
 	stdins  []string
@@ -68,11 +70,18 @@ func (c *fakeConn) Run(ctx context.Context, cmd string, stdin io.Reader) ([]byte
 		<-ctx.Done()
 		return nil, ctx.Err()
 	}
+	var data []byte
+	if stdin != nil {
+		data, _ = io.ReadAll(stdin)
+	}
+	if c.hangOn != "" && string(data) == c.hangOn {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.cmds = append(c.cmds, cmd)
 	if stdin != nil {
-		data, _ := io.ReadAll(stdin)
 		c.stdins = append(c.stdins, string(data))
 	}
 	return c.output, c.runErr
@@ -1014,7 +1023,7 @@ func TestCollect_ReportsAndLogsUnreadableStateFilesWhenTheyChange(t *testing.T) 
 	defer svc.Close()
 	collect := func(o []byte, err error) (HostResult, []string) {
 		out, runErr, logs = o, err, nil
-		return hostResult(t, svc.Collect(context.Background()), ""), logs
+		return hostResult(t, collectAndProbe(svc), ""), logs
 	}
 
 	host, logged := collect(stateOutput("5.json", "{", "odd\x1b.json", "{"), nil)
@@ -1067,7 +1076,7 @@ func TestCollect_LogsUnreadableStateFilesByTheirFullName(t *testing.T) {
 	defer svc.Close()
 	collect := func(o []byte) (HostResult, []string) {
 		out, logs = o, nil
-		return hostResult(t, svc.Collect(context.Background()), ""), logs
+		return hostResult(t, collectAndProbe(svc), ""), logs
 	}
 	long := strings.Repeat("a", 140)
 	both := stateOutput(long+"-one.json", "not json", long+"-two.json", `{"pid":0}`)

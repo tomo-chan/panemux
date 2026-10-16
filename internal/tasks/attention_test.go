@@ -51,7 +51,7 @@ func TestCollectAttention_ListsLiveTasksWithTheSameSignature(t *testing.T) {
 	})
 	defer svc.Close()
 
-	full := svc.Collect(context.Background())
+	full := collectAndProbe(svc)
 	attention := svc.CollectAttention(context.Background())
 
 	require.Equal(t, []string{collectScript, probeScript, attentionScript}, scripts, "only the full collection probes")

@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -913,10 +914,11 @@ func TestGetTasks_ACachedLookupWithoutAPRIsNotEnoughForARunningTask(t *testing.T
 	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
 	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
 	h.nowFn = func() time.Time { return now }
-	var local []byte
+	// The agent probe reads it too, beside the collection.
+	var local atomic.Pointer[[]byte]
 	h.tasks = tasks.New(tasks.Options{
 		Hosts:    h.taskHostNames,
-		RunLocal: func(context.Context, string) ([]byte, error) { return local, nil },
+		RunLocal: func(context.Context, string) ([]byte, error) { return *local.Load(), nil },
 	})
 	var lookups []bool
 	var mu sync.Mutex
@@ -932,20 +934,20 @@ func TestGetTasks_ACachedLookupWithoutAPRIsNotEnoughForARunningTask(t *testing.T
 	stoppedOnly := collectionOf(nil, map[string]string{"gone": "/workspace/user/project"})
 	running := collectionOf(map[string]string{"live": "/workspace/user/project"}, nil)
 
-	local = stoppedOnly
+	local.Store(&stoppedOnly)
 	getTasks(t, h)
 	assert.Equal(t, []bool{false}, lookups)
 
-	local = running
+	local.Store(&running)
 	resp := getTasks(t, h)
 	assert.Equal(t, []bool{false, true}, lookups, "looked up again, with the PR, within gitInfoCacheTTL")
 	live := findTaskResponse(t, resp, "local:claude:live")
 	require.NotNil(t, live.Git)
 	assert.Equal(t, 5, live.Git.PRNumber)
 
-	local = stoppedOnly
+	local.Store(&stoppedOnly)
 	getTasks(t, h)
-	local = running
+	local.Store(&running)
 	getTasks(t, h)
 	assert.Equal(t, []bool{false, true}, lookups, "the lookup with the PR serves both")
 }

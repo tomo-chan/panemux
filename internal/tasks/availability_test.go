@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -90,20 +91,50 @@ func TestRunLocal_ProbeFindsTheCLIOnPathOrThroughALoginShell(t *testing.T) {
 // probeHost answers the collection script with collection and the probe
 // with probe, counting each.
 type probeHost struct {
-	probeErr   error
+	probeErr error
+	// block, when set, holds each probe until it is closed or the probe's
+	// context ends, which fails the probe with probeErr.
+	block      chan struct{}
 	collection []byte
 	probe      []byte
+	mu         sync.Mutex
 	probes     int
 	collects   int
 }
 
-func (h *probeHost) run(_ context.Context, script string) ([]byte, error) {
-	if script == probeScript {
-		h.probes++
-		return h.probe, h.probeErr
+func (h *probeHost) run(ctx context.Context, script string) ([]byte, error) {
+	h.mu.Lock()
+	if script != probeScript {
+		h.collects++
+		defer h.mu.Unlock()
+		return h.collection, nil
 	}
-	h.collects++
-	return h.collection, nil
+	h.probes++
+	block := h.block
+	h.mu.Unlock()
+	if block != nil {
+		select {
+		case <-block:
+		case <-ctx.Done():
+			return nil, h.probeErr
+		}
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.probe, h.probeErr
+}
+
+func (h *probeHost) probeCount() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.probes
+}
+
+// collectAndProbe is Collect, then waiting for the probe it started.
+func collectAndProbe(svc *Service) Snapshot {
+	snap := svc.Collect(context.Background())
+	svc.probeRuns.Wait()
+	return snap
 }
 
 func probeAnswer(lines ...string) []byte {
@@ -143,7 +174,7 @@ func TestAvailability_AMissingCLIMakesLaunchAndResumeUnavailable(t *testing.T) {
 	svc := New(Options{RunLocal: host.run})
 	defer svc.Close()
 
-	snap := svc.Collect(context.Background())
+	snap := collectAndProbe(svc)
 	require.Equal(t, HostOK, hostResult(t, snap, "").Status)
 	list := svc.Availability("")
 
@@ -172,7 +203,7 @@ func TestAvailability_AFailedProbeDoesNotFailTheCollection(t *testing.T) {
 			svc := New(Options{RunLocal: host.run})
 			defer svc.Close()
 
-			snap := svc.Collect(context.Background())
+			snap := collectAndProbe(svc)
 			assert.Equal(t, HostOK, hostResult(t, snap, "").Status)
 			assert.Empty(t, hostResult(t, snap, "").Error)
 			assert.Len(t, snap.Tasks, 1)
@@ -197,17 +228,17 @@ func TestAvailability_TheProbeIsCachedPerHostForFiveMinutes(t *testing.T) {
 	assert.Zero(t, host.probes, "the attention collection does not probe")
 	assert.Equal(t, ReasonNotProbed, availabilityOf(svc.Availability(""), agent.Claude, agent.Launch).Reason)
 
-	svc.Collect(context.Background())
-	assert.Equal(t, 1, host.probes)
+	collectAndProbe(svc)
+	assert.Equal(t, 1, host.probeCount())
 	host.probe, host.probeErr = probeAnswer("cli claude found", "cli codex found"), nil
 	clk.advance(probeTTL - time.Second)
-	svc.Collect(context.Background())
+	collectAndProbe(svc)
 	assert.Equal(t, 1, host.probes, "a failure is cached too")
 	assert.Equal(t, ReasonProbeFailed, availabilityOf(svc.Availability(""), agent.Claude, agent.Launch).Reason)
 
 	clk.advance(time.Second)
-	svc.Collect(context.Background())
-	assert.Equal(t, 2, host.probes)
+	collectAndProbe(svc)
+	assert.Equal(t, 2, host.probeCount())
 	assert.Equal(t, Available, availabilityOf(svc.Availability(""), agent.Claude, agent.Launch).Status)
 }
 
@@ -216,8 +247,8 @@ func TestAvailability_AFailedCollectionIsNotProbed(t *testing.T) {
 	host := &probeHost{collection: []byte("garbage\n")}
 	svc := New(Options{RunLocal: host.run})
 	defer svc.Close()
-	svc.Collect(context.Background())
-	assert.Zero(t, host.probes)
+	collectAndProbe(svc)
+	assert.Zero(t, host.probeCount())
 }
 
 // A remote host is probed over its collection connection, with `sh -s` and
@@ -233,8 +264,8 @@ func TestAvailability_ARemoteHostIsProbedAgainAfterReconnecting(t *testing.T) {
 	})
 	defer svc.Close()
 
-	svc.Collect(context.Background())
-	svc.Collect(context.Background())
+	collectAndProbe(svc)
+	collectAndProbe(svc)
 	assert.Equal(t, []string{"sh -s", "sh -s", "sh -s"}, first.cmds)
 	assert.Equal(t, []string{collectScript, probeScript, collectScript}, first.stdins)
 	got := availabilityOf(svc.Availability("build-box"), agent.Codex, agent.Resume)
@@ -243,7 +274,7 @@ func TestAvailability_ARemoteHostIsProbedAgainAfterReconnecting(t *testing.T) {
 	require.NoError(t, svc.Reconnect("build-box"))
 	assert.Equal(t, ReasonNotProbed, availabilityOf(svc.Availability("build-box"), agent.Codex, agent.Resume).Reason,
 		"what the old connection found is not reported for the new one")
-	svc.Collect(context.Background())
+	collectAndProbe(svc)
 	assert.Equal(t, []string{collectScript, probeScript}, second.stdins)
 }
 
@@ -257,12 +288,12 @@ func TestAvailability_AHostRemovedFromTheConfigIsForgotten(t *testing.T) {
 		RunLocal: (&probeHost{collection: minimalOutput("l")}).run,
 	})
 	defer svc.Close()
-	svc.Collect(context.Background())
+	collectAndProbe(svc)
 	assert.Equal(t, ReasonProbeFailed, availabilityOf(svc.Availability("build-box"), agent.Claude, agent.Launch).Reason)
 	assert.Equal(t, Available, availabilityOf(svc.Availability("build-box"), agent.Claude, agent.Collect).Status)
 
 	hosts = nil
-	svc.Collect(context.Background())
+	collectAndProbe(svc)
 	for _, a := range svc.Availability("build-box") {
 		assert.Equal(t, ReasonNotProbed, a.Reason, "%+v", a)
 	}
@@ -289,7 +320,7 @@ func TestAvailability_AnUnknownFormatDegradesCollectAndIsLoggedOnChange(t *testi
 	}})
 	defer svc.Close()
 
-	snap := svc.Collect(context.Background())
+	snap := collectAndProbe(svc)
 	require.Len(t, snap.Tasks, 1)
 	assert.Equal(t, StateUnknown, snap.Tasks[0].State, "listed, its state not guessed")
 	got := availabilityOf(svc.Availability(""), agent.Claude, agent.Collect)
@@ -302,9 +333,9 @@ func TestAvailability_AnUnknownFormatDegradesCollectAndIsLoggedOnChange(t *testi
 		"an unknown format is collect's, not launch's")
 	assert.Equal(t, Available, availabilityOf(svc.Availability(""), agent.Codex, agent.Collect).Status)
 
-	svc.Collect(context.Background())
+	collectAndProbe(svc)
 	host.collection = minimalOutput("s")
-	svc.Collect(context.Background())
+	collectAndProbe(svc)
 	assert.Equal(t, Available, availabilityOf(svc.Availability(""), agent.Claude, agent.Collect).Status)
 	assert.Equal(t, []string{
 		`task collection on the panemux host: claude: collect degraded (unknown_format): ` +
@@ -344,21 +375,139 @@ func TestFormatReport_Detail(t *testing.T) {
 
 // A probe cut short because the caller gave up is not kept: the next full
 // collection probes again rather than reporting a failure for five minutes.
-func TestAvailability_AnAbandonedProbeIsNotCached(t *testing.T) {
+func TestAvailability_TheProbeOutlivesTheRequestThatStartedIt(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	host := &probeHost{collection: minimalOutput("s")}
-	svc := New(Options{RunLocal: func(c context.Context, script string) ([]byte, error) {
-		if script == probeScript {
-			cancel()
-			<-c.Done()
-			host.probes++
-			return nil, c.Err()
-		}
-		return host.run(c, script)
-	}})
+	host := &probeHost{
+		collection: minimalOutput("s"),
+		probe:      probeAnswer("cli claude found", "cli codex found"),
+		block:      make(chan struct{}),
+	}
+	svc := New(Options{RunLocal: host.run})
 	defer svc.Close()
 
 	svc.Collect(ctx)
-	assert.Equal(t, 1, host.probes)
+	cancel()
+	close(host.block)
+	svc.probeRuns.Wait()
+	assert.Equal(t, Available, availabilityOf(svc.Availability(""), agent.Claude, agent.Launch).Status)
+}
+
+// Closing the service ends a probe in flight and waits for it; what it was
+// cut short with is not kept.
+func TestAvailability_ClosingTheServiceAbandonsAProbe(t *testing.T) {
+	host := &probeHost{
+		collection: minimalOutput("s"),
+		probeErr:   errors.New("signal: killed"),
+		block:      make(chan struct{}),
+	}
+	svc := New(Options{RunLocal: host.run})
+	svc.Collect(context.Background())
+	svc.Close()
+	assert.Equal(t, 1, host.probeCount())
 	assert.Equal(t, ReasonNotProbed, availabilityOf(svc.Availability(""), agent.Claude, agent.Launch).Reason)
+}
+
+// The probe runs beside the collection, not inside it: the dashboard's
+// list does not wait for a slow login shell, and collections that arrive
+// while it runs do not start another. Until it answers nothing is probed.
+func TestAvailability_TheProbeDoesNotHoldUpTheCollection(t *testing.T) {
+	host := &probeHost{
+		collection: minimalOutput("s"),
+		probe:      probeAnswer("cli claude found", "cli codex found"),
+		block:      make(chan struct{}),
+	}
+	svc := New(Options{RunLocal: host.run})
+	defer svc.Close()
+
+	start := time.Now()
+	for range 3 {
+		snap := svc.Collect(context.Background())
+		require.Equal(t, HostOK, hostResult(t, snap, "").Status)
+	}
+	assert.Less(t, time.Since(start), probeTimeout, "the collection returned without the probe")
+	require.Eventually(t, func() bool { return host.probeCount() == 1 }, time.Second, time.Millisecond)
+	svc.Collect(context.Background())
+	assert.Equal(t, 1, host.probeCount(), "one probe in flight per host")
+	assert.Equal(t, ReasonNotProbed, availabilityOf(svc.Availability(""), agent.Claude, agent.Launch).Reason)
+
+	close(host.block)
+	svc.probeRuns.Wait()
+	assert.Equal(t, Available, availabilityOf(svc.Availability(""), agent.Claude, agent.Launch).Status)
+}
+
+// Once the TTL has passed, the previous result is reported while the next
+// probe runs, and replaced when it answers.
+func TestAvailability_AStaleResultIsReportedUntilTheNextProbeAnswers(t *testing.T) {
+	clk := &clock{now: collectedAt}
+	host := &probeHost{collection: minimalOutput("s"), probe: probeAnswer("cli claude found", "cli codex found")}
+	svc := New(Options{RunLocal: host.run, Now: clk.Now})
+	defer svc.Close()
+	collectAndProbe(svc)
+
+	host.mu.Lock()
+	host.probe, host.block = probeAnswer("cli claude missing", "cli codex found"), make(chan struct{})
+	host.mu.Unlock()
+	clk.advance(probeTTL)
+	svc.Collect(context.Background())
+	require.Eventually(t, func() bool { return host.probeCount() == 2 }, time.Second, time.Millisecond)
+	assert.Equal(t, Available, availabilityOf(svc.Availability(""), agent.Claude, agent.Launch).Status)
+
+	close(host.block)
+	svc.probeRuns.Wait()
+	assert.Equal(t, Unavailable, availabilityOf(svc.Availability(""), agent.Claude, agent.Launch).Status)
+}
+
+// A probe that runs out of its own time says so, with its own timeout, and
+// a remote one leaves the connection alone: no keepalive, no redial. Its
+// failure is logged once, and so is its recovery.
+func TestAvailability_AProbeOutOfTimeSaysSoAndKeepsTheConnection(t *testing.T) {
+	const budget = 50 * time.Millisecond
+	t.Run("local", func(t *testing.T) {
+		var logs []string
+		host := &probeHost{
+			collection: minimalOutput("s"),
+			probeErr:   errors.New("run task collection: signal: killed"),
+			block:      make(chan struct{}),
+		}
+		clk := &clock{now: collectedAt}
+		logf := func(f string, a ...any) { logs = append(logs, fmt.Sprintf(f, a...)) }
+		svc := New(Options{RunLocal: host.run, Now: clk.Now, Logf: logf})
+		defer svc.Close()
+		svc.probeTimeout = budget
+
+		collectAndProbe(svc)
+		got := availabilityOf(svc.Availability(""), agent.Claude, agent.Launch)
+		assert.Equal(t, ReasonProbeFailed, got.Reason)
+		assert.Equal(t, "agent probe did not answer within 50ms", got.Detail)
+		clk.advance(probeTTL)
+		collectAndProbe(svc)
+		assert.Equal(t, []string{"agent probe on the panemux host: failed: agent probe did not answer within 50ms"}, logs)
+
+		host.mu.Lock()
+		host.block, host.probe, host.probeErr = nil, probeAnswer("cli claude found", "cli codex found"), nil
+		host.mu.Unlock()
+		clk.advance(probeTTL)
+		collectAndProbe(svc)
+		assert.Equal(t, "agent probe on the panemux host: answered again", logs[len(logs)-1])
+	})
+	t.Run("remote", func(t *testing.T) {
+		conn := &fakeConn{output: minimalOutput("s"), hangOn: probeScript}
+		svc := New(Options{
+			Hosts:    func() []string { return []string{"build-box"} },
+			Dial:     (&fakeDialer{conns: []*fakeConn{conn}}).dial,
+			RunLocal: (&probeHost{collection: minimalOutput("l")}).run,
+			Logf:     func(string, ...any) {},
+		})
+		defer svc.Close()
+		svc.probeTimeout = budget
+
+		start := time.Now()
+		collectAndProbe(svc)
+		assert.Less(t, time.Since(start), pingTimeout, "nothing past the probe's budget")
+		got := availabilityOf(svc.Availability("build-box"), agent.Claude, agent.Launch)
+		assert.Equal(t, "agent probe on build-box did not answer within 50ms", got.Detail)
+		assert.Zero(t, conn.pingCount())
+		assert.Zero(t, conn.closeCount())
+		assert.Same(t, Conn(conn), svc.openConn("build-box"))
+	})
 }

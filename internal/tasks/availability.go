@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os/exec"
 	"sort"
 	"strings"
 	"time"
@@ -184,37 +185,89 @@ type probeEntry struct {
 	err   error
 }
 
-// probeHost probes a host after its full collection, unless the probe of
-// its current connection is younger than probeTTL. A failure is kept as
-// long as a result, so a slow login shell is not waited for every
-// collection; one cut short by the caller giving up is not kept.
-func (s *Service) probeHost(ctx context.Context, name string) {
+// startProbe starts probing a host after its full collection, unless the
+// probe of its current connection is younger than probeTTL or one is
+// already running. The probe runs beside the collection, which does not
+// wait for it: until it answers, the previous result of the same
+// connection is reported, or nothing. A failure is kept as long as a
+// result, so a slow login shell is not run every collection.
+func (s *Service) startProbe(name string) {
 	conn := s.currentConn(name)
 	now := s.opts.Now()
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	entry, ok := s.probes[name]
-	s.mu.Unlock()
-	if ok && entry.conn == conn && now.Sub(entry.at) < probeTTL {
+	if s.closed || s.probing[name] || name != "" && conn == nil ||
+		ok && entry.conn == conn && now.Sub(entry.at) < probeTTL {
+
 		return
 	}
+	s.probing[name] = true
+	s.probeRuns.Add(1)
+	go s.probeHost(name, conn, now)
+}
 
-	probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
+// probeHost runs the probe over conn and keeps what it found, unless the
+// service was closed or the host's connection replaced (or the host
+// forgotten) meanwhile.
+func (s *Service) probeHost(name string, conn Conn, at time.Time) {
+	defer s.probeRuns.Done()
+	ctx, cancel := context.WithTimeout(s.probeCtx, s.probeTimeout)
 	defer cancel()
-	entry = probeEntry{at: now, conn: conn}
-	out, err := s.runHostScript(probeCtx, name, probeScript, "agent probe")
+	entry := probeEntry{at: at, conn: conn}
+	out, err := s.runProbe(ctx, name, conn)
 	if err == nil {
 		entry.found, err = parseProbeOutput(out, probeAgents)
 	}
 	entry.err = err
-	if err != nil && ctx.Err() != nil {
+
+	s.mu.Lock()
+	delete(s.probing, name)
+	if s.probeCtx.Err() != nil || name != "" && (s.hosts[name] == nil || s.hosts[name].conn != conn) {
+		s.mu.Unlock()
 		return
 	}
-	s.mu.Lock()
+	previous, known := s.probes[name]
 	if s.probes == nil {
 		s.probes = map[string]probeEntry{}
 	}
 	s.probes[name] = entry
 	s.mu.Unlock()
+
+	where := hostName(name)
+	switch {
+	case err != nil && (!known || previous.err == nil || previous.err.Error() != err.Error()):
+		s.opts.Logf("agent probe on %s: failed: %v", where, err)
+	case err == nil && known && previous.err != nil:
+		s.opts.Logf("agent probe on %s: answered again", where)
+	}
+}
+
+// runProbe runs the probe script on a host: locally through RunLocal,
+// remotely over conn, the connection its collection just used. It never
+// dials, pings or drops a connection: whether a connection is still good is
+// for the collection to find out, and none of that is in the probe's time.
+func (s *Service) runProbe(ctx context.Context, name string, conn Conn) ([]byte, error) {
+	var out []byte
+	var err error
+	where := ""
+	if name == "" {
+		out, err = s.opts.RunLocal(ctx, probeScript)
+	} else {
+		where = " on " + name
+		out, err = conn.Run(ctx, "sh -s", strings.NewReader(probeScript))
+	}
+	var exitErr *exec.ExitError
+	switch {
+	case err == nil:
+		return out, nil
+	case ctx.Err() != nil:
+		return nil, fmt.Errorf("agent probe%s did not answer within %s", where, s.probeTimeout)
+	case errors.As(err, &exitErr):
+		return nil, fmt.Errorf("agent probe%s exited: %s", where, exitErr)
+	default:
+		return nil, fmt.Errorf("agent probe%s failed: %w", where, err)
+	}
 }
 
 // currentConn is a remote host's connection, nil for the panemux host or a

@@ -244,7 +244,7 @@ func TestService_DismissWaitClearsThatPermissionRequestOnly(t *testing.T) {
 	require.Equal(t, StateWait, waiting.State)
 	require.NoError(t, svc.DismissWait(waiting.WaitSignature))
 
-	for _, snapshot := range []Snapshot{svc.CollectAttention(context.Background()), svc.Collect(context.Background())} {
+	for _, snapshot := range []Snapshot{svc.CollectAttention(context.Background()), collectAndProbe(svc)} {
 		task := findTask(t, snapshot.Tasks, "local:codex:"+codexSessionA)
 		assert.Equal(t, StateBusy, task.State)
 		assert.Empty(t, task.WaitSignature)
