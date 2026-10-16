@@ -100,9 +100,15 @@ describe('PaneUrlOpenNotice', () => {
     expect(onConfirm).not.toHaveBeenCalled()
   })
 
-  it('offers no Preview when the URL cannot be previewed', () => {
-    render(<PaneUrlOpenNotice {...defaultProps} pendingUrl="https://example.com/" onPreview={vi.fn()} />)
+  it('offers Preview only for a URL that can be previewed', () => {
+    const { rerender } = render(
+      <PaneUrlOpenNotice {...defaultProps} pendingUrl="http://localhost:5173/" canPreview onPreview={vi.fn()} />,
+    )
+    expect(screen.getByRole('button', { name: 'Preview' })).toBeInTheDocument()
+
+    rerender(<PaneUrlOpenNotice {...defaultProps} pendingUrl="https://example.com/" onPreview={vi.fn()} />)
     expect(screen.queryByRole('button', { name: 'Preview' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Open' })).toBeInTheDocument()
   })
 
   it('says a clicked link asks, not the pane', () => {

@@ -68,6 +68,14 @@ const {
 
 vi.mock('@xterm/xterm', () => ({ Terminal: mockTerminalCtor }))
 vi.mock('@xterm/addon-fit', () => ({ FitAddon: vi.fn(function () { return mockFitAddon }) }))
+
+// The handler useTerminal gives xterm for OSC 8 hyperlinks (issue #386).
+type OscLinkHandler = { activate: (event: MouseEvent, uri: string) => void; allowNonHttpProtocols?: boolean }
+function osc8Handler(): OscLinkHandler {
+  const options = (mockTerminalCtor.mock.calls.at(-1) as unknown as [{ linkHandler?: OscLinkHandler }])[0]
+  expect(options.linkHandler).toBeDefined()
+  return options.linkHandler!
+}
 // Only the provider factory is stubbed: computePullRequestLinks uses this
 // module's real cell-mapping helpers, and a stub of those would make the
 // coordinate assertions below assert the stub.
@@ -1243,48 +1251,39 @@ describe('useTerminal URL opening', () => {
 
   // Issue #386: an OSC 8 hyperlink goes through the same approval as the
   // browser shim, since its target is not the text the operator clicked.
-  describe('OSC 8 hyperlinks', () => {
-    type LinkHandler = { activate: (event: MouseEvent, uri: string) => void; allowNonHttpProtocols?: boolean }
-    function osc8Handler(): LinkHandler {
-      const options = (mockTerminalCtor.mock.calls.at(-1) as unknown as [{ linkHandler?: LinkHandler }])[0]
-      expect(options.linkHandler).toBeDefined()
-      return options.linkHandler!
-    }
+  it('hands an activated OSC 8 link to the pane as a link request', () => {
+    const onBrowserOpenRequest = vi.fn()
+    window.open = vi.fn() as unknown as typeof window.open
+    mountTerminal('osc8-1', { onBrowserOpenRequest })
 
-    it('hands an activated OSC 8 link to the pane as a link request', () => {
-      const onBrowserOpenRequest = vi.fn()
-      window.open = vi.fn() as unknown as typeof window.open
-      mountTerminal('osc8-1', { onBrowserOpenRequest })
+    osc8Handler().activate(new MouseEvent('click'), 'http://localhost:5173/')
 
-      osc8Handler().activate(new MouseEvent('click'), 'http://localhost:5173/')
+    expect(onBrowserOpenRequest).toHaveBeenCalledTimes(1)
+    expect(onBrowserOpenRequest).toHaveBeenCalledWith('http://localhost:5173/', 'link')
+    expect(window.open).not.toHaveBeenCalled()
+  })
 
-      expect(onBrowserOpenRequest).toHaveBeenCalledTimes(1)
-      expect(onBrowserOpenRequest).toHaveBeenCalledWith('http://localhost:5173/', 'link')
-      expect(window.open).not.toHaveBeenCalled()
-    })
+  it('leaves other schemes unlinked and never hands them on', () => {
+    const onBrowserOpenRequest = vi.fn()
+    mountTerminal('osc8-2', { onBrowserOpenRequest })
 
-    it('leaves other schemes unlinked and never hands them on', () => {
-      const onBrowserOpenRequest = vi.fn()
-      mountTerminal('osc8-2', { onBrowserOpenRequest })
+    expect(osc8Handler().allowNonHttpProtocols).not.toBe(true)
+    osc8Handler().activate(new MouseEvent('click'), 'javascript:alert(1)')
 
-      expect(osc8Handler().allowNonHttpProtocols).not.toBe(true)
-      osc8Handler().activate(new MouseEvent('click'), 'javascript:alert(1)')
+    expect(onBrowserOpenRequest).not.toHaveBeenCalled()
+  })
 
-      expect(onBrowserOpenRequest).not.toHaveBeenCalled()
-    })
+  it('asks before opening a tab when the terminal has no pane to ask', () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true)
+    window.open = vi.fn() as unknown as typeof window.open
+    mountTerminal('osc8-3')
 
-    it('asks before opening a tab when the terminal has no pane to ask', () => {
-      const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true)
-      window.open = vi.fn() as unknown as typeof window.open
-      mountTerminal('osc8-3')
+    osc8Handler().activate(new MouseEvent('click'), 'https://example.com/')
+    expect(window.open).not.toHaveBeenCalled()
+    osc8Handler().activate(new MouseEvent('click'), 'https://example.com/')
 
-      osc8Handler().activate(new MouseEvent('click'), 'https://example.com/')
-      expect(window.open).not.toHaveBeenCalled()
-      osc8Handler().activate(new MouseEvent('click'), 'https://example.com/')
-
-      expect(confirm).toHaveBeenCalledTimes(2)
-      expect(window.open).toHaveBeenCalledWith('https://example.com/', '_blank', 'noopener,noreferrer')
-    })
+    expect(confirm).toHaveBeenCalledTimes(2)
+    expect(window.open).toHaveBeenCalledWith('https://example.com/', '_blank', 'noopener,noreferrer')
   })
 
   it('hands an activated path to the preview', () => {

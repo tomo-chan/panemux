@@ -31,6 +31,138 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
+describe('usePaneUrlOpen (issue #386)', () => {
+  // Issue #386: a localhost URL from a terminal on the panemux host can be
+  // shown beside it, whichever way it arrived.
+  describe('with a preview', () => {
+    it('previews a clicked localhost link instead of opening a tab', async () => {
+      const { calls } = mockWindowOpen()
+      const fetchMock = mockForwardResponse({ url: 'x', forwarded: false })
+      const previewUrl = vi.fn()
+      const { result } = renderHook(() => usePaneUrlOpen('pane1', { previewUrl }))
+
+      act(() => result.current.openUrl('http://localhost:5173/'))
+
+      expect(previewUrl).toHaveBeenCalledTimes(1)
+      expect(previewUrl).toHaveBeenCalledWith('http://localhost:5173/')
+      expect(calls).toEqual([])
+      expect(fetchMock).not.toHaveBeenCalled()
+
+      // An external link still opens in a tab, with its forward.
+      act(() => result.current.openUrl('https://example.com/'))
+      expect(previewUrl).toHaveBeenCalledTimes(1)
+      expect(calls).toEqual(['https://example.com/'])
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    })
+
+    it('offers Preview for a requested localhost URL, and previews it once', () => {
+      const { calls } = mockWindowOpen()
+      const previewUrl = vi.fn()
+      const { result } = renderHook(() => usePaneUrlOpen('pane1', { previewUrl }))
+
+      act(() => result.current.requestOpen('http://localhost:5173/'))
+      expect(result.current.canPreview).toBe(true)
+
+      act(() => {
+        result.current.previewPendingOpen()
+        result.current.previewPendingOpen()
+        result.current.confirmPendingOpen()
+      })
+
+      expect(previewUrl).toHaveBeenCalledTimes(1)
+      expect(calls).toEqual([])
+      expect(result.current.pendingUrl).toBeNull()
+    })
+
+    it('keeps Open for a requested localhost URL opening a tab and preparing the forward', async () => {
+      const { calls, opened } = mockWindowOpen()
+      const fetchMock = mockForwardResponse({ url: 'http://localhost:8085/cb', forwarded: false })
+      const previewUrl = vi.fn()
+      const { result } = renderHook(() => usePaneUrlOpen('pane1', { previewUrl }))
+
+      act(() => result.current.requestOpen('http://localhost:8085/cb'))
+      expect(result.current.canPreview).toBe(true)
+      act(() => result.current.confirmPendingOpen())
+
+      expect(previewUrl).not.toHaveBeenCalled()
+      expect(calls).toEqual(['about:blank'])
+      await waitFor(() => expect(opened[0].location.href).toBe('http://localhost:8085/cb'))
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    })
+
+    it('offers no Preview for an external URL, and previews nothing for it', () => {
+      mockWindowOpen()
+      const previewUrl = vi.fn()
+      const { result } = renderHook(() => usePaneUrlOpen('pane1', { previewUrl }))
+
+      act(() => result.current.requestOpen('https://example.com/auth'))
+      expect(result.current.canPreview).toBe(false)
+      act(() => result.current.previewPendingOpen())
+
+      expect(previewUrl).not.toHaveBeenCalled()
+      expect(result.current.pendingUrl).toBe('https://example.com/auth')
+    })
+
+    it('offers no Preview without a preview', () => {
+      const { result } = renderHook(() => usePaneUrlOpen('pane1'))
+      act(() => result.current.requestOpen('http://localhost:5173/'))
+      expect(result.current.canPreview).toBe(false)
+    })
+
+    it('drops a pending request for the URL a click has just opened', () => {
+      mockWindowOpen()
+      const previewUrl = vi.fn()
+      const { result } = renderHook(() => usePaneUrlOpen('pane1', { previewUrl }))
+
+      act(() => result.current.requestOpen('http://localhost:5173/'))
+      act(() => result.current.openUrl('http://localhost:5173/'))
+      expect(result.current.pendingUrl).toBeNull()
+      act(() => result.current.previewPendingOpen())
+
+      expect(previewUrl).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  it('opens a confirmed request once however often Open is pressed before it hides', async () => {
+    const { calls } = mockWindowOpen()
+    const fetchMock = mockForwardResponse({ url: 'https://example.com/auth', forwarded: true, port: 8085 })
+    const { result } = renderHook(() => usePaneUrlOpen('pane1'))
+
+    act(() => result.current.requestOpen('https://example.com/auth'))
+    act(() => {
+      result.current.confirmPendingOpen()
+      result.current.confirmPendingOpen()
+    })
+
+    expect(calls).toEqual(['https://example.com/auth'])
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+  })
+
+  it('records whether a program or a link asked', () => {
+    const { result } = renderHook(() => usePaneUrlOpen('pane1'))
+
+    act(() => result.current.requestOpen('https://example.com/a'))
+    expect(result.current.pendingSource).toBe('program')
+    act(() => result.current.requestOpen('https://example.com/b', 'link'))
+    expect(result.current.pendingSource).toBe('link')
+    act(() => result.current.dismissPendingOpen())
+    expect(result.current.pendingSource).toBeNull()
+  })
+
+  // The Type in pane popup's attach is not a pane: no forward is prepared for it.
+  it('opens a tab without asking for a forward when forwarding is off', () => {
+    const { calls } = mockWindowOpen()
+    const fetchMock = mockForwardResponse({ url: 'x', forwarded: false })
+    const { result } = renderHook(() => usePaneUrlOpen('attach-1', { forward: false }))
+
+    act(() => result.current.openUrl('http://localhost:8085/cb'))
+    act(() => result.current.openUrl('https://example.com/'))
+
+    expect(calls).toEqual(['http://localhost:8085/cb', 'https://example.com/'])
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+})
+
 describe('usePaneUrlOpen', () => {
   it('opens a remote URL immediately and asks the backend to forward its callback port', async () => {
     const { calls } = mockWindowOpen()
@@ -182,141 +314,5 @@ describe('usePaneUrlOpen', () => {
     mockForwardResponse({ url: 'https://example.com/auth', forwarded: true, port: 8085 })
     act(() => result.current.openUrl('https://example.com/auth'))
     await waitFor(() => expect(result.current.error).toBeNull())
-  })
-
-  // Issue #386: a localhost URL from a terminal on the panemux host can be
-  // shown beside it, whichever way it arrived.
-  describe('with a preview', () => {
-    it('previews a clicked localhost link instead of opening a tab', () => {
-      const { calls } = mockWindowOpen()
-      const fetchMock = mockForwardResponse({ url: 'x', forwarded: false })
-      const previewUrl = vi.fn()
-      const { result } = renderHook(() => usePaneUrlOpen('pane1', { previewUrl }))
-
-      act(() => result.current.openUrl('http://localhost:5173/'))
-
-      expect(previewUrl).toHaveBeenCalledTimes(1)
-      expect(previewUrl).toHaveBeenCalledWith('http://localhost:5173/')
-      expect(calls).toEqual([])
-      expect(fetchMock).not.toHaveBeenCalled()
-    })
-
-    it('still opens a clicked external link in a tab', async () => {
-      const { calls } = mockWindowOpen()
-      const fetchMock = mockForwardResponse({ url: 'https://example.com/', forwarded: false })
-      const previewUrl = vi.fn()
-      const { result } = renderHook(() => usePaneUrlOpen('pane1', { previewUrl }))
-
-      act(() => result.current.openUrl('https://example.com/'))
-
-      expect(previewUrl).not.toHaveBeenCalled()
-      expect(calls).toEqual(['https://example.com/'])
-      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
-    })
-
-    it('offers Preview for a requested localhost URL, and previews it once', () => {
-      const { calls } = mockWindowOpen()
-      const previewUrl = vi.fn()
-      const { result } = renderHook(() => usePaneUrlOpen('pane1', { previewUrl }))
-
-      act(() => result.current.requestOpen('http://localhost:5173/'))
-      expect(result.current.canPreview).toBe(true)
-
-      act(() => {
-        result.current.previewPendingOpen()
-        result.current.previewPendingOpen()
-        result.current.confirmPendingOpen()
-      })
-
-      expect(previewUrl).toHaveBeenCalledTimes(1)
-      expect(calls).toEqual([])
-      expect(result.current.pendingUrl).toBeNull()
-    })
-
-    it('keeps Open for a requested localhost URL opening a tab and preparing the forward', async () => {
-      const { calls, opened } = mockWindowOpen()
-      const fetchMock = mockForwardResponse({ url: 'http://localhost:8085/cb', forwarded: false })
-      const previewUrl = vi.fn()
-      const { result } = renderHook(() => usePaneUrlOpen('pane1', { previewUrl }))
-
-      act(() => result.current.requestOpen('http://localhost:8085/cb'))
-      act(() => result.current.confirmPendingOpen())
-
-      expect(previewUrl).not.toHaveBeenCalled()
-      expect(calls).toEqual(['about:blank'])
-      await waitFor(() => expect(opened[0].location.href).toBe('http://localhost:8085/cb'))
-      expect(fetchMock).toHaveBeenCalledTimes(1)
-    })
-
-    it('offers no Preview for an external URL, and previews nothing for it', () => {
-      mockWindowOpen()
-      const previewUrl = vi.fn()
-      const { result } = renderHook(() => usePaneUrlOpen('pane1', { previewUrl }))
-
-      act(() => result.current.requestOpen('https://example.com/auth'))
-      expect(result.current.canPreview).toBe(false)
-      act(() => result.current.previewPendingOpen())
-
-      expect(previewUrl).not.toHaveBeenCalled()
-      expect(result.current.pendingUrl).toBe('https://example.com/auth')
-    })
-
-    it('offers no Preview without a preview', () => {
-      const { result } = renderHook(() => usePaneUrlOpen('pane1'))
-      act(() => result.current.requestOpen('http://localhost:5173/'))
-      expect(result.current.canPreview).toBe(false)
-    })
-
-    it('drops a pending request for the URL a click has just opened', () => {
-      mockWindowOpen()
-      const previewUrl = vi.fn()
-      const { result } = renderHook(() => usePaneUrlOpen('pane1', { previewUrl }))
-
-      act(() => result.current.requestOpen('http://localhost:5173/'))
-      act(() => result.current.openUrl('http://localhost:5173/'))
-      expect(result.current.pendingUrl).toBeNull()
-      act(() => result.current.previewPendingOpen())
-
-      expect(previewUrl).toHaveBeenCalledTimes(1)
-    })
-  })
-
-  it('opens a confirmed request once however often Open is pressed before it hides', async () => {
-    const { calls } = mockWindowOpen()
-    const fetchMock = mockForwardResponse({ url: 'https://example.com/auth', forwarded: true, port: 8085 })
-    const { result } = renderHook(() => usePaneUrlOpen('pane1'))
-
-    act(() => result.current.requestOpen('https://example.com/auth'))
-    act(() => {
-      result.current.confirmPendingOpen()
-      result.current.confirmPendingOpen()
-    })
-
-    expect(calls).toEqual(['https://example.com/auth'])
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
-  })
-
-  it('records whether a program or a link asked', () => {
-    const { result } = renderHook(() => usePaneUrlOpen('pane1'))
-
-    act(() => result.current.requestOpen('https://example.com/a'))
-    expect(result.current.pendingSource).toBe('program')
-    act(() => result.current.requestOpen('https://example.com/b', 'link'))
-    expect(result.current.pendingSource).toBe('link')
-    act(() => result.current.dismissPendingOpen())
-    expect(result.current.pendingSource).toBeNull()
-  })
-
-  // The Type in pane popup's attach is not a pane: no forward is prepared for it.
-  it('opens a tab without asking for a forward when forwarding is off', () => {
-    const { calls } = mockWindowOpen()
-    const fetchMock = mockForwardResponse({ url: 'x', forwarded: false })
-    const { result } = renderHook(() => usePaneUrlOpen('attach-1', { forward: false }))
-
-    act(() => result.current.openUrl('http://localhost:8085/cb'))
-    act(() => result.current.openUrl('https://example.com/'))
-
-    expect(calls).toEqual(['http://localhost:8085/cb', 'https://example.com/'])
-    expect(fetchMock).not.toHaveBeenCalled()
   })
 })
