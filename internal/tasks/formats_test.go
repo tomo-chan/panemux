@@ -182,3 +182,30 @@ func TestRunLocal_CollectScriptReadsAnUnknownTurnEvent(t *testing.T) {
 	assert.Equal(t, "turn_paused", held.Turn.UnknownEvent)
 	assert.Empty(t, held.Turn.Event)
 }
+
+// A live codex process whose open rollout row cannot be read is listed with
+// its state unknown, not as one whose session has not started; the row,
+// held on two descriptors, is counted once.
+func TestFormats_CodexAnUnreadableOpenRowMakesItsProcessUnknown(t *testing.T) {
+	raw := codexRaw()
+	codex := raw.Agents[agent.Codex].(*codexCollected)
+	row := "31\t00:10\tnot a stamp\t\t\t\t\t\t/x/" + rolloutName("2026-09-27T11-57-03", codexSessionA)
+	codex.addRow(codexSectionOpen, row)
+	codex.addRow(codexSectionOpen, row)
+
+	tasks, _, formats := buildTasksWithDiagnostics("", raw, collectedAt)
+	require.Len(t, tasks, 1)
+	assert.Equal(t, StateUnknown, tasks[0].State)
+	assert.Equal(t, 31, tasks[0].PID)
+	assert.Equal(t, map[string]int{"malformed_row": 1}, formats[agent.Codex].counts)
+}
+
+// A rollout held open on two descriptors is one session: what it has in
+// an unknown format is counted once.
+func TestFormats_CodexARolloutOnTwoDescriptorsIsCountedOnce(t *testing.T) {
+	turn := codexTurn{DBStatus: "paused", UnknownEvent: "turn_started"}
+	raw := codexRaw(openRollout(31, codexSessionA, 30, turn), openRollout(31, codexSessionA, 30, turn))
+
+	got := formatsOf(t, raw)[agent.Codex]
+	assert.Equal(t, map[string]int{"unknown_status": 1, "unknown_event": 1}, got.counts)
+}

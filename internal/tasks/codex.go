@@ -137,12 +137,16 @@ type codexCollected struct {
 	// Permissions is each session's latest approval request (issue #384),
 	// by session ID.
 	Permissions map[string]codexPermission
+	// malformed counts the codex/open and codex/rollouts rows that could
+	// not be read, each distinct row (malformedRows) once: a rollout open
+	// on two descriptors is listed twice. unreadable are the processes one
+	// of whose codex/open rows could not be read.
+	malformedRows map[string]bool
+	unreadable    map[int]bool
 	// Open is every rollout a codex process holds open, and Rollouts the
 	// rollouts under ~/.codex/sessions.
-	Open     []codexOpenRollout
-	Rollouts []codexRollout
-	// malformed counts the codex/open and codex/rollouts rows that could
-	// not be read.
+	Open      []codexOpenRollout
+	Rollouts  []codexRollout
 	malformed formatReport
 }
 
@@ -159,7 +163,13 @@ func (c *codexCollected) addRow(section, line string) {
 		} else if strings.Count(line, "\t") > 1 {
 			// Not ps's "<pid>\t<etime>": a rollout row codex's files
 			// could not be read into.
-			c.malformed.add(formatMalformedRow, string(agent.Codex)+"/"+section+": "+line)
+			c.addMalformed(section, line)
+			if pid, err := strconv.Atoi(line[:strings.IndexByte(line, '\t')]); err == nil && pid > 0 {
+				if c.unreadable == nil {
+					c.unreadable = map[int]bool{}
+				}
+				c.unreadable[pid] = true
+			}
 		}
 	case codexSectionPermission:
 		if sessionID, record, ok := parseCodexPermissionRow(line); ok {
@@ -172,9 +182,21 @@ func (c *codexCollected) addRow(section, line string) {
 		if r, ok := parseCodexRolloutRow(line); ok {
 			c.Rollouts = append(c.Rollouts, r)
 		} else if strings.TrimSpace(line) != "" {
-			c.malformed.add(formatMalformedRow, string(agent.Codex)+"/"+section+": "+line)
+			c.addMalformed(section, line)
 		}
 	}
+}
+
+func (c *codexCollected) addMalformed(section, line string) {
+	key := section + "\n" + line
+	if c.malformedRows[key] {
+		return
+	}
+	if c.malformedRows == nil {
+		c.malformedRows = map[string]bool{}
+	}
+	c.malformedRows[key] = true
+	c.malformed.add(formatMalformedRow, string(agent.Codex)+"/"+section+": "+line)
 }
 
 // addFile is never called: no codex section declares files.
@@ -191,6 +213,7 @@ func (c *codexCollected) prepared() agentCollected {
 		Rollouts:    append([]codexRollout(nil), c.Rollouts...),
 		Permissions: c.Permissions,
 		malformed:   c.malformed,
+		unreadable:  c.unreadable,
 	}
 	sort.SliceStable(p.Rollouts, func(i, j int) bool { return newerCodexRollout(p.Rollouts[i], p.Rollouts[j]) })
 	for i := range p.Open {
@@ -638,8 +661,13 @@ func (c *codexCollected) tuiTasks(b *taskBuilder) []Task {
 			task.StartedAt = b.hostMillis((b.raw.Now - elapsed) * 1000)
 		}
 		if !ok {
+			// A process whose open rollout could not be read may well have
+			// a session: what state it is in is not known.
 			task.ID = b.id(AgentCodex, "pid-"+strconv.Itoa(p.PID))
 			task.State = StateRun
+			if c.unreadable[p.PID] {
+				task.State = StateUnknown
+			}
 			tasks = append(tasks, task)
 			continue
 		}
@@ -690,16 +718,19 @@ func (c *codexCollected) codexState(b *taskBuilder, task *Task, o codexOpenRollo
 }
 
 // formats are the codex rows that could not be read, and the thread_turns
-// statuses and turn events this build does not know, once per rollout a
-// live codex process holds open. The versions are the listed rollouts'.
+// statuses and turn events this build does not know, once per session a
+// live codex process holds open, on however many descriptors. The versions
+// are the listed rollouts'.
 func (c *codexCollected) formats(b *taskBuilder) formatReport {
 	r := c.malformed
 	r.counts = maps.Clone(r.counts)
 	r.examples = slices.Clone(r.examples)
+	sessions := map[string]bool{}
 	for _, o := range c.Open {
-		if proc, alive := b.procs[o.PID]; !alive || !isCodexProgram(proc.Command) {
+		if proc, alive := b.procs[o.PID]; !alive || !isCodexProgram(proc.Command) || sessions[o.Rollout.SessionID] {
 			continue
 		}
+		sessions[o.Rollout.SessionID] = true
 		if o.Turn.DBStatus != "" && !codexKnownStatuses[o.Turn.DBStatus] {
 			r.add(formatUnknownStatus, "status "+strconv.Quote(o.Turn.DBStatus))
 		}
