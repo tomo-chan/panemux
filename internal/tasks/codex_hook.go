@@ -83,6 +83,7 @@ const codexHookMaxRead = 1 << 20
 // hooks.json is written to a temporary file first and copied over only once
 // that succeeded, so a failed write leaves it as it was; it is copied in
 // place, so a hooks.json that is a link keeps being one, with its mode. A
+// hooks.json that cannot be written is an ordinary failure; a
 // copy that fails part way exits 3 and keeps the temporary file, the only
 // whole copy of the user's hooks, and says where it is.
 const codexHookWriteScript = `tmp="$HOME/.codex/.hooks.json.panemux-%[1]s"
@@ -96,6 +97,10 @@ const codexHookWriteScript = `tmp="$HOME/.codex/.hooks.json.panemux-%[1]s"
 		mkdir -p "$HOME/.codex"
 		(umask 077 && cat >"$tmp") <<'PANEMUX_HOOKS_%[1]s'
 %[4]sPANEMUX_HOOKS_%[1]s
+		if [ -e "$HOME/.codex/hooks.json" ] && [ ! -w "$HOME/.codex/hooks.json" ]; then
+			echo "~/.codex/hooks.json is not writable"
+			exit 1
+		fi
 		if ! cat "$tmp" >"$HOME/.codex/hooks.json"; then
 			echo "~/.codex/hooks.json was not fully written; its new content is kept in $tmp"
 			exit 3

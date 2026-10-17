@@ -639,3 +639,25 @@ func TestInstallCodexHookKeepsTheNewContentWhenTheCopyFails(t *testing.T) {
 	assert.Contains(t, string(kept), `"keep": "me"`)
 	assert.Contains(t, string(kept), "panemux-codex-permission-hook.sh")
 }
+
+// A hooks.json that cannot be opened for writing is a plain failure: the file
+// is untouched, so no temporary file is kept.
+func TestInstallCodexHookRefusesAReadOnlyHooksJSON(t *testing.T) {
+	const existing = `{"keep":"me"}`
+	home := codexHome(t, existing)
+	hooksJSON := filepath.Join(home, ".codex", "hooks.json")
+	require.NoError(t, os.Chmod(hooksJSON, 0o400))
+	homedir.SetForTest(t, home)
+	s := New(Options{Hosts: func() []string { return nil }})
+	defer s.Close()
+	_, err := s.InstallCodexHook(context.Background(), "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "~/.codex/hooks.json is not writable")
+	assert.NotContains(t, err.Error(), "not fully written")
+	after, readErr := os.ReadFile(hooksJSON)
+	require.NoError(t, readErr)
+	assert.Equal(t, existing, string(after))
+	left, dirErr := os.ReadDir(filepath.Join(home, ".codex"))
+	require.NoError(t, dirErr)
+	require.Len(t, left, 1, "no temporary file is left")
+}
