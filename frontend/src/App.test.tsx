@@ -214,12 +214,12 @@ describe('codex permission waits in a pane', () => {
     mockUseBoardSessionToken.mockReturnValue({ token: '', commandCenterEnabled: false, agentBoardEnabled: false })
     mockTerminalPane.mockImplementation(({ pane }: { pane: { id: string } }) => {
       const ctx = useContext(LayoutActionsContext)
-      const waits = ctx?.approvalWaits(pane.id) ?? []
+      const waits = ctx?.approval?.waits(pane.id) ?? []
       return (
         <div data-pane-id={pane.id} data-approval={waits.map((task) => task.id).join(',')}>
           <button onClick={() => ctx?.clearPaneAttention(pane.id)}>Clear {pane.id}</button>
-          <button onClick={() => void ctx?.onInputGiven(waits[0])}>Input given {pane.id}</button>
-          <button onClick={() => ctx?.onReviewTask(waits[0].id)}>Review {pane.id}</button>
+          <button onClick={() => void ctx?.approval?.inputGiven(waits[0])}>Input given {pane.id}</button>
+          <button onClick={() => ctx?.approval?.review(waits[0].id)}>Review {pane.id}</button>
         </div>
       )
     })

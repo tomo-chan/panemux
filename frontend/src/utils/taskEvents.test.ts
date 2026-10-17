@@ -51,6 +51,33 @@ function storeOf(frames: unknown[]): TaskEventStore {
   return store
 }
 
+// Issue #404: the codex permission requests a pane offers Input given for.
+describe('permissionWaitsFromStore', () => {
+  const PERMISSION = 'a permission request from codex'
+  const permission = (id: string, waitId: string, overrides: Partial<TaskEventTask> = {}) =>
+    waiting(id, waitId, { agent: 'codex', waiting_for: PERMISSION, ...overrides })
+
+  it('lists each codex task waiting on a recorded permission request, on a host that is ok', () => {
+    const store = storeOf([snapshot(1, [
+      permission('a', 'w1-a'),
+      permission('q', 'w1-q', { waiting_for: 'an answer to a question' }),
+      permission('c', 'w1-c', { agent: 'claude' }),
+      permission('e', 'e1-e0-1'),
+      permission('n', 'w1-n', { wait_id: undefined }),
+      permission('b', 'w1-b', { state: 'busy' }),
+      permission('g', 'w1-g', { host: 'gpu' }),
+    ], [{ name: '', status: 'ok' }, { name: 'gpu', status: 'error' }])])
+
+    expect(permissionWaitsFromStore(store, new Set()).map((task) => task.id)).toEqual(['a'])
+  })
+
+  it('leaves out a request this tab marked Input given', () => {
+    const store = storeOf([snapshot(1, [permission('a', 'w1-a'), permission('b', 'w1-b')])])
+
+    expect(permissionWaitsFromStore(store, new Set(['w1-a'])).map((task) => task.id)).toEqual(['b'])
+  })
+})
+
 describe('applyTaskEventFrame', () => {
   it('starts from a snapshot and applies each change after it in order', () => {
     const store = storeOf([
@@ -126,33 +153,6 @@ describe('taskWaitStarts', () => {
     const answered = applyTaskEventFrame(first.store, { type: 'host', epoch: EPOCH, seq: 2, op: 'changed', host: { name: 'gpu', status: 'ok' } })
     if (!answered.ok) throw new Error(answered.reason)
     expect(taskWaitStarts(first.store, answered.frame, answered.store)).toEqual([])
-  })
-})
-
-// Issue #404: the codex permission requests a pane offers Input given for.
-describe('permissionWaitsFromStore', () => {
-  const PERMISSION = 'a permission request from codex'
-  const permission = (id: string, waitId: string, overrides: Partial<TaskEventTask> = {}) =>
-    waiting(id, waitId, { agent: 'codex', waiting_for: PERMISSION, ...overrides })
-
-  it('lists each codex task waiting on a recorded permission request, on a host that is ok', () => {
-    const store = storeOf([snapshot(1, [
-      permission('a', 'w1-a'),
-      permission('q', 'w1-q', { waiting_for: 'an answer to a question' }),
-      permission('c', 'w1-c', { agent: 'claude' }),
-      permission('e', 'e1-e0-1'),
-      permission('n', 'w1-n', { wait_id: undefined }),
-      permission('b', 'w1-b', { state: 'busy' }),
-      permission('g', 'w1-g', { host: 'gpu' }),
-    ], [{ name: '', status: 'ok' }, { name: 'gpu', status: 'error' }])])
-
-    expect(permissionWaitsFromStore(store, new Set()).map((task) => task.id)).toEqual(['a'])
-  })
-
-  it('leaves out a request this tab marked Input given', () => {
-    const store = storeOf([snapshot(1, [permission('a', 'w1-a'), permission('b', 'w1-b')])])
-
-    expect(permissionWaitsFromStore(store, new Set(['w1-a'])).map((task) => task.id)).toEqual(['b'])
   })
 })
 

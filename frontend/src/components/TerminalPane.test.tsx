@@ -60,25 +60,29 @@ describe('TerminalPane codex permission wait', () => {
     }
   }
 
-  function renderPane(overrides: Partial<LayoutActionsContextValue>) {
-    const ctx = makeCtx(overrides)
+  function renderPane(waits: TaskEventTask[]) {
+    const approval = {
+      waits: vi.fn(() => waits),
+      inputGiven: vi.fn(async () => null),
+      review: vi.fn(),
+    }
     const utils = render(
-      <LayoutActionsContext.Provider value={ctx}>
+      <LayoutActionsContext.Provider value={makeCtx({ approval })}>
         <TerminalPane pane={{ id: 'pane-1', type: 'local', title: 'Pane 1' }} />
       </LayoutActionsContext.Provider>,
     )
-    return { ...utils, ctx }
+    return { ...utils, approval }
   }
 
   it('shows nothing while no task of the pane waits on one', () => {
-    const { ctx } = renderPane({})
-    expect(ctx.approvalWaits).toHaveBeenCalledWith('pane-1')
+    const { approval } = renderPane([])
+    expect(approval.waits).toHaveBeenCalledWith('pane-1')
     expect(screen.queryByRole('status', { name: 'Codex permission request' })).not.toBeInTheDocument()
   })
 
   it('offers Input given for its one task, below the header', async () => {
     const task = permissionTask('a')
-    const { ctx, container } = renderPane({ approvalWaits: vi.fn(() => [task]) })
+    const { approval, container } = renderPane([task])
 
     const notice = screen.getByRole('status', { name: 'Codex permission request' })
     expect(notice).toHaveTextContent('Waiting for input: a permission request from codex')
@@ -89,20 +93,17 @@ describe('TerminalPane codex permission wait', () => {
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Input given' }))
     })
-    expect(ctx.onInputGiven).toHaveBeenCalledWith(task)
+    expect(approval.inputGiven).toHaveBeenCalledWith(task)
   })
 
   it('offers Review in Tasks on the first of several tasks', () => {
-    const { ctx } = renderPane({ approvalWaits: vi.fn(() => [permissionTask('a'), permissionTask('b')]) })
+    const { approval } = renderPane([permissionTask('a'), permissionTask('b')])
 
     fireEvent.click(screen.getByRole('button', { name: 'Review in Tasks' }))
-    expect(ctx.onReviewTask).toHaveBeenCalledWith('a')
+    expect(approval.review).toHaveBeenCalledWith('a')
   })
 })
 
-// Issue #386: a localhost URL in a pane on the panemux host, whether a
-// clicked link, an OSC 8 link or a browser shim request, can open beside the
-// terminal.
 describe('TerminalPane localhost preview', () => {
   const running = {
     handleResize: vi.fn(),
@@ -381,9 +382,6 @@ function makeCtx(overrides: Partial<LayoutActionsContextValue> = {}): LayoutActi
     hasPaneAttention: vi.fn(() => false),
     activePaneId: null,
     setActivePaneId: vi.fn(),
-    approvalWaits: vi.fn(() => []),
-    onInputGiven: vi.fn(async () => null),
-    onReviewTask: vi.fn(),
     ...overrides,
   }
 }

@@ -663,9 +663,11 @@ export const App: React.FC = () => {
       displayConfig: displayConfig ?? DEFAULT_DISPLAY,
       clearPaneAttention,
       hasPaneAttention: (paneId: string) => attentionPaneIds.has(paneId),
-      approvalWaits: (paneId: string) => approvalWaitsByPane.get(paneId) ?? NO_APPROVAL_WAITS,
-      onInputGiven: markInputGiven,
-      onReviewTask: revealTask,
+      approval: {
+        waits: (paneId: string) => approvalWaitsByPane.get(paneId) ?? NO_APPROVAL_WAITS,
+        inputGiven: markInputGiven,
+        review: revealTask,
+      },
       activePaneId,
       setActivePaneId,
     }}>
