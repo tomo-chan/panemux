@@ -95,31 +95,42 @@ func (r *Remote) errClosed() error {
 // is never held while connecting, which can take as long as the SSH dial's
 // own retries: Close, and every other caller, would wait behind it.
 func (r *Remote) get() (RemoteConn, error) {
-	r.mu.Lock()
 	for {
-		if r.closed {
-			r.mu.Unlock()
-			return nil, r.errClosed()
+		conn, attempt, mine, err := r.next()
+		switch {
+		case conn != nil || err != nil:
+			return conn, err
+		case mine:
+			return r.dial(attempt)
 		}
-		if conn := r.liveLocked(); conn != nil {
-			r.mu.Unlock()
-			return conn, nil
-		}
-		attempt := r.dialing
-		if attempt == nil {
-			break
-		}
-		r.mu.Unlock()
 		<-attempt.done
 		if attempt.err != nil {
 			return nil, attempt.err
 		}
-		r.mu.Lock()
 	}
-	attempt := &dialAttempt{done: make(chan struct{})}
-	r.dialing = attempt
-	r.mu.Unlock()
+}
 
+// next is, under the lock, the host's live connection; or the attempt
+// being made to connect, to wait for; or, when there is neither, a new
+// attempt for the caller to make (mine).
+func (r *Remote) next() (RemoteConn, *dialAttempt, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed {
+		return nil, nil, false, r.errClosed()
+	}
+	if conn := r.liveLocked(); conn != nil {
+		return conn, nil, false, nil
+	}
+	if r.dialing != nil {
+		return nil, r.dialing, false, nil
+	}
+	r.dialing = &dialAttempt{done: make(chan struct{})}
+	return nil, r.dialing, true, nil
+}
+
+// dial makes attempt, outside the lock, and records what it made.
+func (r *Remote) dial(attempt *dialAttempt) (RemoteConn, error) {
 	conn, err := r.connect()
 	r.mu.Lock()
 	r.dialing = nil
