@@ -101,16 +101,9 @@ func (r *Remote) get() (RemoteConn, error) {
 			r.mu.Unlock()
 			return nil, r.errClosed()
 		}
-		if r.conn != nil {
-			select {
-			case <-r.conn.Done():
-				_ = r.conn.Close()
-				r.conn = nil
-			default:
-				conn := r.conn
-				r.mu.Unlock()
-				return conn, nil
-			}
+		if conn := r.liveLocked(); conn != nil {
+			r.mu.Unlock()
+			return conn, nil
 		}
 		attempt := r.dialing
 		if attempt == nil {
@@ -144,6 +137,22 @@ func (r *Remote) get() (RemoteConn, error) {
 	r.mu.Unlock()
 	close(attempt.done)
 	return attempt.conn, attempt.err
+}
+
+// liveLocked is the host's connection while it has not ended, or nil; an
+// ended one is closed and forgotten. r.mu must be held.
+func (r *Remote) liveLocked() RemoteConn {
+	if r.conn == nil {
+		return nil
+	}
+	select {
+	case <-r.conn.Done():
+		_ = r.conn.Close()
+		r.conn = nil
+		return nil
+	default:
+		return r.conn
+	}
 }
 
 // drop closes conn and, when it is still the host's connection, forgets it,
