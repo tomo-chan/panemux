@@ -72,9 +72,21 @@ implemented by a collect adapter per agent, which `internal/tasks` defines in it
 explicitly by ID in `collectAdapters` (`internal/tasks/collect_adapters.go`): each adapter declares
 its collection script sections, named `<agent ID>/<name>`, and turns their rows into tasks. When
 panemux starts, the adapters are checked against the registry — an agent that declares `collect`
-has exactly one adapter and no other agent has one — and an invalid set stops it. The other
-capabilities are still in `internal/tasks` and `internal/session`, which branch on the claude and
-codex IDs and read those IDs and their process rules from the registry.
+has exactly one adapter and no other agent has one — and an invalid set stops it.
+
+`launch` and `resume` are implemented the same way, by a launch and a resume adapter per agent listed
+in `launchAdapters` and `resumeAdapters` (`internal/tasks/launch_adapters.go`), checked against the
+registry when panemux starts. They are separate, so an agent can launch without resuming. A launch
+adapter names a new session — the session ID it is started with, or none when the agent picks its own
+once it runs, and its tmux session — and a resume adapter checks the session ID it is given and names
+the tmux session the resume runs in. Each supplies a fixed shell fragment that the one launch script
+composes under the case of its agent and mode; a fragment takes no request value, and refuses only
+with codes the script or its adapter declares. A launch that names no session ID has its labels held
+until a collection finds exactly one session of that agent in its tmux session
+([Starting a task](behavior/tasks.md#starting-a-task)). An agent that declares neither is refused,
+and so is one whose CLI the host's probe found missing ([agent availability](behavior/tasks.md#agent-availability)).
+The other capabilities are still in `internal/tasks` and `internal/session`, which branch on the
+claude and codex IDs and read those IDs and their process rules from the registry.
 
 A running task carries what a later capability needs to find its working directories without
 collecting again: its session key (`Task.Key`), its pid, its working directory and, for codex, the
