@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -709,9 +710,23 @@ func taskRouteRequests() []*http.Request {
 	}
 }
 
+// countingCollections answers every script with a local collection and
+// counts the collections. The full collection also runs the agent probe, a
+// script of its own that is not counted.
+func countingCollections(n *int) func(context.Context, string) ([]byte, error) {
+	return func(_ context.Context, script string) ([]byte, error) {
+		if strings.Contains(script, "::panemux-tasks") {
+			*n++
+		}
+		return taskCollection("l", ""), nil
+	}
+}
+
 // GET /api/tasks makes panemux dial every host and run a script there, so a
 // page on another site must not be able to trigger it — an <img> pointing at
 // the route would otherwise collect whenever that page is open.
+//
+//efficacy:exempt only its collection count changed, to leave out the agent probe this branch adds
 func TestTaskRoutes_RefuseCrossSiteRequests(t *testing.T) {
 	cases := []struct {
 		headers map[string]string
@@ -742,12 +757,9 @@ func TestTaskRoutes_RefuseCrossSiteRequests(t *testing.T) {
 			recordsPath := useTaskRecords(t, h)
 			collections := 0
 			h.SetTaskService(tasks.New(tasks.Options{
-				Hosts: h.taskHostNames,
-				Dial:  func(string) (tasks.Conn, error) { return nil, errors.New("unreachable") },
-				RunLocal: func(context.Context, string) ([]byte, error) {
-					collections++
-					return taskCollection("l", ""), nil
-				},
+				Hosts:    h.taskHostNames,
+				Dial:     func(string) (tasks.Conn, error) { return nil, errors.New("unreachable") },
+				RunLocal: countingCollections(&collections),
 			}))
 			r := setupRouterWithHandler(h)
 
@@ -898,14 +910,17 @@ func TestGetTasks_PRIsLookedUpOnlyForADirectoryARunningTaskUses(t *testing.T) {
 
 // A cached lookup made without a PR does not serve a running task that
 // needs one; a cached lookup with a PR serves a stopped task too.
+//
+//efficacy:exempt only its fake was made safe to read beside the background agent probe
 func TestGetTasks_ACachedLookupWithoutAPRIsNotEnoughForARunningTask(t *testing.T) {
 	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
 	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
 	h.nowFn = func() time.Time { return now }
-	var local []byte
+	// The agent probe reads it too, beside the collection.
+	var local atomic.Pointer[[]byte]
 	h.tasks = tasks.New(tasks.Options{
 		Hosts:    h.taskHostNames,
-		RunLocal: func(context.Context, string) ([]byte, error) { return local, nil },
+		RunLocal: func(context.Context, string) ([]byte, error) { return *local.Load(), nil },
 	})
 	var lookups []bool
 	var mu sync.Mutex
@@ -921,20 +936,20 @@ func TestGetTasks_ACachedLookupWithoutAPRIsNotEnoughForARunningTask(t *testing.T
 	stoppedOnly := collectionOf(nil, map[string]string{"gone": "/workspace/user/project"})
 	running := collectionOf(map[string]string{"live": "/workspace/user/project"}, nil)
 
-	local = stoppedOnly
+	local.Store(&stoppedOnly)
 	getTasks(t, h)
 	assert.Equal(t, []bool{false}, lookups)
 
-	local = running
+	local.Store(&running)
 	resp := getTasks(t, h)
 	assert.Equal(t, []bool{false, true}, lookups, "looked up again, with the PR, within gitInfoCacheTTL")
 	live := findTaskResponse(t, resp, "local:claude:live")
 	require.NotNil(t, live.Git)
 	assert.Equal(t, 5, live.Git.PRNumber)
 
-	local = stoppedOnly
+	local.Store(&stoppedOnly)
 	getTasks(t, h)
-	local = running
+	local.Store(&running)
 	getTasks(t, h)
 	assert.Equal(t, []bool{false, true}, lookups, "the lookup with the PR serves both")
 }

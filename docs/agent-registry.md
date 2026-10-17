@@ -51,7 +51,10 @@ Where a session is found is not part of what it is:
 ## Capabilities
 
 An agent declares any subset of these. A capability is a declaration of what panemux supports for
-the agent, not a statement that it works on a given host right now.
+the agent, not a statement that it works on a given host right now. Whether `collect`, `launch` and
+`resume` work on a host is found out per host and kept inside `internal/tasks` as
+[agent availability](behavior/tasks.md#agent-availability): a probe for the agent's CLI, and what the
+collection could not read.
 
 | Capability | Meaning | Rule the registry checks |
 |---|---|---|
@@ -90,6 +93,13 @@ Each detection rule records:
   release added. Every registered rule is `accept`: an unknown argument counts as a session, so a
   new headless subcommand is mistaken for one until the rule learns it. `reject` would instead miss
   a new interactive mode until the rule learns it.
+
+What an agent writes is not gated on a version either: a format change is noticed instead.
+The Claude Code state file's `version` and codex's `session_meta` `cli_version` are recorded and
+never compared. What the collection cannot read — structure it cannot parse, a status or turn event
+outside the set it knows — is listed with its state `unknown` rather than guessed, notifies nothing,
+and makes that agent's `collect` `degraded` / `unknown_format` on that host
+([Agent availability](behavior/tasks.md#agent-availability)). An unknown argument stays `accept`.
 
 ## Detection rules
 

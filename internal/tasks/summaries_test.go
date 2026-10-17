@@ -31,6 +31,9 @@ func (h *summaryHost) run(_ context.Context, script string) ([]byte, error) {
 	if script == collectScript {
 		return h.collect, nil
 	}
+	if script == probeScript {
+		return nil, errors.New("this host is not probed")
+	}
 	h.fetches = append(h.fetches, script)
 	return h.log, h.fetchErr
 }
@@ -441,6 +444,9 @@ type scriptedConn struct {
 
 func (c *scriptedConn) Run(ctx context.Context, cmd string, stdin io.Reader) ([]byte, error) {
 	data, _ := io.ReadAll(stdin)
+	if string(data) == probeScript {
+		return nil, errors.New("this host is not probed")
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.cmds = append(c.cmds, cmd)

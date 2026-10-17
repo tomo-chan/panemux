@@ -251,9 +251,9 @@ func TestCodexHookChecksNothingAfterACollectionWhenTurnedOff(t *testing.T) {
 		scripts = append(scripts, script)
 		return attentionOutput(), nil
 	})
-	s.Collect(context.Background())
+	collectAndProbe(s)
 	s.waitSummaries()
-	assert.Equal(t, []string{collectScript}, scripts)
+	assert.Equal(t, []string{collectScript, probeScript}, scripts, "the collection and the agent probe, no hook check")
 }
 
 func TestCodexHookAutoSettingErrors(t *testing.T) {
