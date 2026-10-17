@@ -159,16 +159,17 @@ func (s *Service) autoUpdateCodexHook(ctx context.Context, host string, got Code
 	s.mu.Unlock()
 
 	updated, err := s.installCodexHook(ctx, host)
-	s.mu.Lock()
-	auto = s.codexHookAuto[host]
-	auto.updated, auto.err = err == nil, ""
+	reason := ""
 	if err != nil {
-		auto.err = err.Error()
+		reason = err.Error()
 		s.opts.Logf("codex hook: updating it by itself on %s failed: %v", hostName(host), err)
 	} else {
 		got = updated
 		s.opts.Logf("codex hook: updated it by itself on %s", hostName(host))
 	}
+	s.mu.Lock()
+	auto = s.codexHookAuto[host]
+	auto.updated, auto.err = err == nil, reason
 	s.codexHookAuto[host] = auto
 	s.mu.Unlock()
 	return s.withCodexHookAuto(host, got)
