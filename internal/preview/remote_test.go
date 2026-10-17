@@ -624,9 +624,16 @@ func TestRemoteDoesNotWaitForAHostThatStopsAnswering(t *testing.T) {
 	require.NoError(t, err)
 	remote.conns()[0].stall()
 
-	start := time.Now()
-	rec := serveRemote(t, r, url)
-	assert.Less(t, time.Since(start), 5*time.Second, "a lookup is bounded")
+	// Waited for here with a bound of the test's own, so a lookup that is
+	// never given up fails the test rather than hanging it.
+	served := make(chan *httptest.ResponseRecorder, 1)
+	go func() { served <- serveRemote(t, r, url) }()
+	var rec *httptest.ResponseRecorder
+	select {
+	case rec = <-served:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a lookup on a host that sends nothing was not given up")
+	}
 	assert.Equal(t, http.StatusOK, rec.Code, "and answered over a new connection")
 	assert.True(t, remote.conns()[0].isClosed())
 	assert.Len(t, remote.conns(), 2)
