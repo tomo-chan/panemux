@@ -52,6 +52,12 @@ func (c *fakeRemoteConn) Close() error {
 	return nil
 }
 
+func (c *fakeRemoteConn) isClosed() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.closed
+}
+
 // end makes the connection look as a dropped SSH connection does.
 func (c *fakeRemoteConn) end() {
 	_ = c.Close()
@@ -73,26 +79,44 @@ func newFakeRemoteConn(t *testing.T, loopback map[string]string) *fakeRemoteConn
 }
 
 // fakeRemote is a Remote whose connections are fakeRemoteConns, counting
-// how many it made.
+// how many it made. Relays connect from their own goroutines, so its
+// fields are read through its methods.
 type fakeRemote struct {
 	fail error
 	*Remote
-	conns []*fakeRemoteConn
+	made []*fakeRemoteConn
+	mu   sync.Mutex
 }
 
 func newFakeRemote(t *testing.T, loopback map[string]string) *fakeRemote {
 	t.Helper()
 	f := &fakeRemote{}
 	f.Remote = NewRemote("devbox", func() (RemoteConn, error) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
 		if f.fail != nil {
 			return nil, f.fail
 		}
 		conn := newFakeRemoteConn(t, loopback)
-		f.conns = append(f.conns, conn)
+		f.made = append(f.made, conn)
 		return conn, nil
 	})
 	t.Cleanup(f.Close)
 	return f
+}
+
+// conns is every connection made so far.
+func (f *fakeRemote) conns() []*fakeRemoteConn {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]*fakeRemoteConn(nil), f.made...)
+}
+
+// failWith makes every later connection fail with err.
+func (f *fakeRemote) failWith(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.fail = err
 }
 
 func TestResolveRemote(t *testing.T) {
@@ -130,7 +154,7 @@ func TestResolveRemote(t *testing.T) {
 			assert.Equal(t, tc.want, got)
 		})
 	}
-	assert.Len(t, remote.conns, 1, "one connection serves every lookup")
+	assert.Len(t, remote.conns(), 1, "one connection serves every lookup")
 }
 
 func TestResolveRemoteRefuses(t *testing.T) {
@@ -178,7 +202,7 @@ func TestResolveRemoteThroughALinkedWorkingDirectory(t *testing.T) {
 
 func TestResolveRemoteReportsAnUnreachableHost(t *testing.T) {
 	remote := newFakeRemote(t, nil)
-	remote.fail = errors.New("connection refused")
+	remote.failWith(errors.New("connection refused"))
 
 	_, err := ResolveRemote(remote.Remote, "index.html", []string{"/workspace/user/project"})
 	require.ErrorIs(t, err, ErrRemote)
@@ -259,15 +283,15 @@ func TestRemoteReconnectsAfterTheConnectionEnds(t *testing.T) {
 
 	_, err := ResolveRemote(remote.Remote, "mockups/index.html", []string{f.cwd})
 	require.NoError(t, err)
-	remote.conns[0].end()
+	remote.conns()[0].end()
 	_, err = ResolveRemote(remote.Remote, "mockups/index.html", []string{f.cwd})
 	require.NoError(t, err)
-	assert.Len(t, remote.conns, 2)
+	assert.Len(t, remote.conns(), 2)
 
 	remote.Close()
 	_, err = ResolveRemote(remote.Remote, "mockups/index.html", []string{f.cwd})
 	require.ErrorIs(t, err, ErrRemote)
-	assert.True(t, remote.conns[1].closed)
+	assert.True(t, remote.conns()[1].isClosed())
 }
 
 func serveRemote(t *testing.T, r *Registry, url string) *httptest.ResponseRecorder {
@@ -338,7 +362,7 @@ func TestRegistryOpenRemoteRefuses(t *testing.T) {
 		})
 	}
 
-	remote.fail = errors.New("no route to host")
+	remote.failWith(errors.New("no route to host"))
 	remote.Close()
 	_, err = r.OpenRemote(remote.Remote, f.cwd, filepath.Join(f.cwd, "mockups", "index.html"))
 	require.ErrorIs(t, err, ErrRemote)
@@ -363,8 +387,8 @@ func TestServeRemoteRefusesWhatLeavesTheRoot(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 
 	// Once the host cannot be reached, nothing is served.
-	remote.fail = errors.New("no route to host")
-	remote.conns[0].end()
+	remote.failWith(errors.New("no route to host"))
+	remote.conns()[0].end()
 	rec = serveRemote(t, r, url)
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
@@ -392,7 +416,7 @@ func TestRemoteLookupsOverABrokenConnection(t *testing.T) {
 	remote := newFakeRemote(t, nil)
 	_, err := ResolveRemote(remote.Remote, "mockups/index.html", []string{f.cwd})
 	require.NoError(t, err)
-	require.NoError(t, remote.conns[0].Close())
+	require.NoError(t, remote.conns()[0].Close())
 
 	_, err = ResolveRemote(remote.Remote, "mockups/index.html", []string{f.cwd})
 	require.ErrorIs(t, err, ErrRemote)

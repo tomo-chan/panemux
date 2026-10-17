@@ -170,9 +170,9 @@ func TestRelayOutlivesAConnectionThatEnds(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "alpha /", get(t, relayed))
 
-	remote.conns[0].end()
+	remote.conns()[0].end()
 	assert.Equal(t, "alpha /", get(t, relayed))
-	assert.Len(t, remote.conns, 2, "the host is connected to again")
+	assert.Len(t, remote.conns(), 2, "the host is connected to again")
 }
 
 func TestRelayClosesABrowserConnectionTheHostRefuses(t *testing.T) {
@@ -210,7 +210,7 @@ func TestRelaysReportWhatDoesNotAnswer(t *testing.T) {
 	require.ErrorIs(t, err, ErrNoAnswer)
 	assert.Contains(t, err.Error(), "devbox: connection refused: localhost:5173")
 
-	remote.fail = errors.New("no route to host")
+	remote.failWith(errors.New("no route to host"))
 	remote.Close()
 	_, err = relays.Open(remote.Remote, "http://localhost:5173/")
 	require.ErrorIs(t, err, ErrRemote)

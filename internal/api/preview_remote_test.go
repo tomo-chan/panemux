@@ -147,6 +147,8 @@ func TestPostSessionPreview_ReadsAnSSHPanesFileFromItsHost(t *testing.T) {
 	assert.Regexp(t, `^/preview/[0-9a-f]{32}/mockups/index\.html$`, resp.URL)
 	assert.Equal(t, "<p>remote mock</p>", getPreview(t, h, resp.URL).Body.String())
 	assert.Equal(t, http.StatusOK, getPreview(t, h, resp.URL[:len(resp.URL)-len("index.html")]+"style.css").Code)
+	hosts.mu.Lock()
+	defer hosts.mu.Unlock()
 	assert.Equal(t, []string{"alpha.example.invalid"}, hosts.dialed)
 }
 
@@ -311,7 +313,10 @@ func TestHandlerCloseClosesThePreviewHosts(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 
 	h.Close()
-	assert.True(t, hosts.conns[0].isClosed())
+	hosts.mu.Lock()
+	first := hosts.conns[0]
+	hosts.mu.Unlock()
+	assert.True(t, first.isClosed())
 	rec = postPreview(t, h, "pane-a", `{"url":"http://localhost:5173/"}`)
 	assert.Equal(t, http.StatusBadGateway, rec.Code)
 	assert.Contains(t, rec.Body.String(), "closed")
