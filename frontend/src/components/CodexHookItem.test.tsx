@@ -67,6 +67,56 @@ describe('CodexHookItem updating by itself (issue #402)', () => {
     expect(screen.queryByText(/Could not update automatically/)).toBeNull()
   })
 
+  it('says the setting could not be read, rather than that an update failed, and cannot be changed', async () => {
+    await renderItem(props({ status: 'outdated', auto_settings_error: 'parsing codex hook settings file: unexpected end' }))
+    expect(screen.getByRole('alert')).toHaveTextContent('Could not read the setting: parsing codex hook settings file: unexpected end')
+    expect(screen.queryByText(/Could not update automatically/)).toBeNull()
+    expect(checkbox()).toBeDisabled()
+  })
+
+  it('checks the hook again once it is turned on while it shows Update', async () => {
+    const load = vi.fn()
+      .mockResolvedValueOnce({ ok: true, launched: { status: 'outdated', auto_update: false } })
+      .mockResolvedValueOnce({ ok: true, launched: { status: 'installed', auto_update: true, auto_updated: true } })
+    await renderItem(props({ status: 'outdated' }, { load }))
+
+    await act(async () => fireEvent.click(checkbox()))
+    expect(load).toHaveBeenCalledTimes(2)
+    expect(checkbox()).toBeChecked()
+    expect(screen.getByRole('status')).toHaveTextContent('Updated automatically.')
+  })
+
+  it.each([
+    ['installed', false],
+    ['outdated', true],
+  ] as const)('does not check again when a %s hook that was on=%s is changed', async (status, wasOn) => {
+    const p = props({ status, auto_update: wasOn }, {
+      setAuto: vi.fn().mockResolvedValue({ ok: true, launched: { auto_update: !wasOn } }),
+    })
+    await renderItem(p)
+    await act(async () => fireEvent.click(checkbox()))
+    expect(p.load).toHaveBeenCalledTimes(1)
+  })
+
+  it('cannot be changed while Update runs, nor Update pressed while it is saved', async () => {
+    let installed!: (value: TaskActionResult<CodexHook>) => void
+    let saved!: (value: TaskActionResult<{ auto_update: boolean }>) => void
+    const install = vi.fn(() => new Promise<TaskActionResult<CodexHook>>((r) => { installed = r }))
+    const setAuto = vi.fn(() => new Promise<TaskActionResult<{ auto_update: boolean }>>((r) => { saved = r }))
+    await renderItem(props({ status: 'outdated', auto_update: true }, { install, setAuto }))
+    const button = screen.getByRole('button', { name: 'Update Codex input notifications on gpu-box' })
+
+    fireEvent.click(button)
+    expect(checkbox()).toBeDisabled()
+    await act(async () => installed({ ok: false, error: 'exit status 1' }))
+    expect(checkbox()).toBeEnabled()
+
+    fireEvent.click(checkbox())
+    expect(button).toBeDisabled()
+    await act(async () => saved({ ok: true, launched: { auto_update: false } }))
+    expect(button).toBeEnabled()
+  })
+
   it('is offered only on a host whose hook can be installed', async () => {
     const offered: string[] = []
     for (const status of ['missing', 'outdated', 'installed', 'absent', 'unknown', 'invalid'] as const) {

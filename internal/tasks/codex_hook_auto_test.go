@@ -214,6 +214,35 @@ func TestCodexHookUpdatesByItselfAfterTheFirstCollection(t *testing.T) {
 	assert.Equal(t, 1, runs.count())
 }
 
+func TestCodexHookChecksOnceAfterStart(t *testing.T) {
+	homedir.SetForTest(t, codexHome(t, ""))
+	store := NewCodexHookAutoStore(filepath.Join(t.TempDir(), "codex-hook.json"))
+	require.NoError(t, store.Set("", true))
+	var mu sync.Mutex
+	checks := 0
+	s := autoService(t, store, func(ctx context.Context, script string) ([]byte, error) {
+		if script == collectScript || script == attentionScript {
+			return attentionOutput(), nil
+		}
+		if script == codexHookReadScript {
+			mu.Lock()
+			checks++
+			mu.Unlock()
+		}
+		return runLocal(ctx, script)
+	})
+
+	s.Collect(context.Background())
+	s.waitSummaries()
+	s.CollectAttention(context.Background())
+	s.waitSummaries()
+	s.Collect(context.Background())
+	s.waitSummaries()
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, 1, checks, "only the first collection is followed by a check")
+}
+
 func TestCodexHookChecksNothingAfterACollectionWhenTurnedOff(t *testing.T) {
 	outdatedCodexHome(t)
 	store := NewCodexHookAutoStore(filepath.Join(t.TempDir(), "codex-hook.json"))
@@ -241,7 +270,8 @@ func TestCodexHookAutoSettingErrors(t *testing.T) {
 	got := codexHookStatus(t, bad, "")
 	assert.Equal(t, CodexHookMissing, got.Status)
 	assert.False(t, got.AutoUpdate)
-	assert.Contains(t, got.AutoError, "codex hook settings file", "a settings file that cannot be read says so")
+	assert.Empty(t, got.AutoError, "no update was tried")
+	assert.Contains(t, got.AutoSettingsError, "codex hook settings file", "a settings file that cannot be read says so")
 }
 
 func TestCodexHookAutoStoreReportsAFileItCannotOpen(t *testing.T) {

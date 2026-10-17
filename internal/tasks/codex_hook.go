@@ -40,14 +40,15 @@ const (
 
 // CodexHook is a host's codex hook status, and why for Invalid and Unknown.
 // AutoUpdate is whether the host's hook is updated by itself (issue #402);
-// AutoUpdated that this process did so, and AutoError why that failed or
-// why the setting could not be read.
+// AutoUpdated that this process did so, AutoError why that failed, and
+// AutoSettingsError why the setting could not be read.
 type CodexHook struct {
-	Status      CodexHookStatus `json:"status"`
-	Error       string          `json:"error,omitempty"`
-	AutoError   string          `json:"auto_error,omitempty"`
-	AutoUpdate  bool            `json:"auto_update"`
-	AutoUpdated bool            `json:"auto_updated,omitempty"`
+	Status            CodexHookStatus `json:"status"`
+	Error             string          `json:"error,omitempty"`
+	AutoError         string          `json:"auto_error,omitempty"`
+	AutoSettingsError string          `json:"auto_settings_error,omitempty"`
+	AutoUpdate        bool            `json:"auto_update"`
+	AutoUpdated       bool            `json:"auto_updated,omitempty"`
 }
 
 // codexHookReadScript prints the host's HOME, the hook file and hooks.json,

@@ -425,6 +425,7 @@ const unexercisedOptionals: Record<string, string> = {
   // capture's hooks.json cannot be read, so there is nothing to update.
   'task-codex-hook.auto_updated': 'needs a hook updated by itself, and the captured hooks.json cannot be updated',
   'task-codex-hook.auto_error': 'needs an update by itself that fails, and the captured hooks.json cannot be updated',
+  'task-codex-hook.auto_settings_error': 'needs a codex hook settings file that cannot be read, and the capture has none',
   'task-launch.records_error': 'needs an unreadable task record file, and the capture records the labels instead',
   // A claude launch records its labels at once; the codex capture pins the
   // held ones (issue #264).

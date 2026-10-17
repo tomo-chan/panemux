@@ -663,13 +663,15 @@ export type HostSessionName = z.infer<typeof HostSessionNameSchema>
 // GET and POST /api/tasks/codex-hook (issue #396): whether a host's codex
 // has panemux's permission hook. `error` says why for invalid and unknown.
 // auto_update is whether the hook is updated by itself (issue #402),
-// auto_updated that panemux did so, and auto_error why that failed.
+// auto_updated that panemux did so, auto_error why that failed, and
+// auto_settings_error why the setting could not be read.
 export const CodexHookSchema = z.object({
   status: z.enum(['absent', 'missing', 'installed', 'outdated', 'invalid', 'unknown']),
   error: z.string().optional(),
   auto_update: z.boolean().optional(),
   auto_updated: z.boolean().optional(),
   auto_error: z.string().optional(),
+  auto_settings_error: z.string().optional(),
 })
 
 export type CodexHook = z.infer<typeof CodexHookSchema>

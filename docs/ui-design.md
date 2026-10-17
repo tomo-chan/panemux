@@ -396,8 +396,9 @@ terminal that had focus cannot receive what is typed into the dashboard.
   `hooks.json` panemux will not rewrite reads `Cannot install: …` in red, with no button. After an
   install, a muted line says to trust the hook in codex's `/hooks`. A host without codex shows no row.
   Under the status, an `Update automatically` checkbox, off until turned on; a muted line says the
-  hook was updated automatically and to trust it, and a red one why that failed or the setting was
-  not saved.
+  hook was updated automatically and to trust it, and a red one why that failed, the setting could
+  not be read (the checkbox is then disabled), or it was not saved. The checkbox and the
+  `Install`/`Update` button are each disabled while the other's request runs.
   The panemux host's chip is a button too, with no terminal icon: its menu holds this row and
   `Close` alone ([behavior](behavior/tasks.md#codex-permission-requests)).
 - **Unreadable state.** The warning is amber, one for every host together, and never beside a host

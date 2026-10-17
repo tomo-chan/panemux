@@ -63,14 +63,21 @@ export const CodexHookItem: React.FC<CodexHookItemProps> = ({ host, label = host
   const toggleAuto = (hook: CodexHook) => {
     setSaving(true)
     setSaveError(null)
-    void setAuto(host, !hook.auto_update).then((result) => {
+    void setAuto(host, !hook.auto_update).then(async (result) => {
       if (!mounted.current) return
-      setSaving(false)
-      if (result.ok) {
-        setState({ phase: 'ready', hook: { ...hook, auto_update: result.launched.auto_update } })
-      } else {
+      if (!result.ok) {
+        setSaving(false)
         setSaveError(result.error)
+        return
       }
+      setState({ phase: 'ready', hook: { ...hook, auto_update: result.launched.auto_update } })
+      // Turned on while it shows Update: check once, which updates it.
+      if (result.launched.auto_update && hook.status === 'outdated') {
+        const checked = await load(host)
+        if (!mounted.current) return
+        if (checked.ok) setState({ phase: 'ready', hook: checked.launched })
+      }
+      setSaving(false)
     })
   }
 
@@ -120,7 +127,7 @@ export const CodexHookItem: React.FC<CodexHookItemProps> = ({ host, label = host
             type="button"
             className="td-btn td-btn-sm"
             aria-label={`${action} Codex input notifications on ${label}`}
-            disabled={installing}
+            disabled={installing || saving}
             onClick={run}
           >
             {installing ? 'Installing…' : action}
@@ -133,7 +140,7 @@ export const CodexHookItem: React.FC<CodexHookItemProps> = ({ host, label = host
           <input
             type="checkbox"
             checked={hook.auto_update ?? false}
-            disabled={saving}
+            disabled={saving || installing || !!hook.auto_settings_error}
             onChange={() => toggleAuto(hook)}
           />
           Update automatically
@@ -147,6 +154,11 @@ export const CodexHookItem: React.FC<CodexHookItemProps> = ({ host, label = host
       {hook?.auto_error && (
         <div role="alert" data-tone="error">
           Could not update automatically: {hook.auto_error}
+        </div>
+      )}
+      {hook?.auto_settings_error && (
+        <div role="alert" data-tone="error">
+          Could not read the setting: {hook.auto_settings_error}
         </div>
       )}
       {saveError && (

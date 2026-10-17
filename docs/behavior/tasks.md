@@ -350,7 +350,10 @@ review there.
   installed`, `Update` or `Installed`, and off on every host until turned on there. The hosts it is
   on for are kept in `~/.config/panemux/codex-hook.json` (`{"version":1,"auto_update":["","gpu-box"]}`,
   mode 600, the panemux host as `""`), so the setting survives a restart; a file panemux cannot read
-  is reported (`Could not save:` and the reason, or under the status) and never written over. On such
+  is reported (`Could not read the setting:` and the reason under the status, with the checkbox
+  disabled until it can be read; `Could not save:` when it fails on saving) and never written over.
+  Changing the checkbox, and `Install` or `Update`, are each disabled while the other runs. Turning
+  it on on a host showing `Update` checks the hook again at once, which updates it. On such
   a host, a check that finds `Update` runs `Update` by itself: the check when the host's menu opens,
   and one more made in the background after panemux starts, on the host's first successful
   collection, so replacing panemux and restarting it updates the hook with nothing pressed. Nothing
@@ -1212,8 +1215,9 @@ POST /api/tasks/codex-hook   { "host": "gpu-box" }
   `hooks.json` panemux will not rewrite) or `unknown` (the check could not run). `POST` answers the
   status read back after writing, and writes nothing for a host already `installed`.
 - Both also carry `"auto_update"`, whether the host's hook is updated by itself, and, once this
-  panemux process did so, `"auto_updated": true` or `"auto_error"` with why it failed (or why the
-  setting could not be read). `GET` runs that update itself when it finds `outdated`
+  panemux process did so, `"auto_updated": true` or `"auto_error"` with why it failed. A setting that
+  could not be read gives `"auto_settings_error"` with why, and `"auto_update": false`. `GET` runs
+  that update itself when it finds `outdated`
   ([`Update automatically`](#codex-permission-requests)), and answers the status read back after it.
 - `404` for a host that is not in `ssh_connections`. `POST` answers `502` with the reason when the
   host has no codex, its `hooks.json` is `invalid`, or the check or the write failed, and `400` for a

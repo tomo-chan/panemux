@@ -131,7 +131,7 @@ func (s *Service) withCodexHookAuto(host string, got CodexHook) CodexHook {
 	}
 	on, err := s.opts.CodexHookAuto.Enabled(host)
 	if err != nil {
-		got.AutoError = err.Error()
+		got.AutoSettingsError = err.Error()
 		return got
 	}
 	s.mu.Lock()
