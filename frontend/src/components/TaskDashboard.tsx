@@ -416,6 +416,7 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
                 sessionName: tasksState.hostSessionName,
                 codexHook: tasksState.codexHook,
                 installCodexHook: tasksState.installCodexHook,
+                setCodexHookAuto: tasksState.setCodexHookAuto,
               }}
             />
           ))}
@@ -719,6 +720,7 @@ interface HostChipMenu {
   sessionName: TasksState['hostSessionName']
   codexHook: TasksState['codexHook']
   installCodexHook: TasksState['installCodexHook']
+  setCodexHookAuto: TasksState['setCodexHookAuto']
 }
 
 // A reachable host has a menu; one that is connecting or failing has
@@ -791,6 +793,7 @@ const HostChip: React.FC<HostChipProps> = ({ host, running, onReconnect, menu })
                 label={label}
                 load={menu.codexHook}
                 install={menu.installCodexHook}
+                setAuto={menu.setCodexHookAuto}
                 alone={!terminal}
               />
             }

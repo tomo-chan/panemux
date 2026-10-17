@@ -65,6 +65,7 @@ function tasksState(overrides: Partial<TasksState> = {}): TasksState {
     hostTerminal: vi.fn().mockResolvedValue({ ok: true, launched: { session_id: 'board-0000000000000001', tmux_session: '' } }),
     closeHostTerminal: vi.fn().mockResolvedValue(undefined),
     codexHook: vi.fn().mockResolvedValue({ ok: true, launched: { status: 'absent' } }),
+    setCodexHookAuto: vi.fn().mockResolvedValue({ ok: false, error: 'not stubbed' }),
     installCodexHook: vi.fn().mockResolvedValue({ ok: false, error: 'not stubbed' }),
     ...overrides,
   }

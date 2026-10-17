@@ -269,6 +269,11 @@ through `runHostScript`, exactly as the collection does: locally `sh -s`, remote
   host user's own value in the host user's own file, which codex runs as that user.
 - **A `hooks.json` panemux cannot read** as codex does is never written, and the hook is not written
   either. panemux never edits codex's trust of the hook; the person reviews it in `/hooks`.
+- **Updating by itself** (`codex_hook_auto.go`, issue #402) runs the same check and install, with
+  nothing from the browser but the host name: `POST /api/tasks/codex-hook/auto-update` only stores
+  that host name in `~/.config/panemux/codex-hook.json` through `fileops.AtomicWrite`. The install
+  then runs, at most once per host per process, only for a host listed there whose hook the check
+  found `outdated`, never one where it is `missing`.
 
 The script lists only the collecting user's processes (`ps -U "$(id -u)"`). On a shared host,
 another user's processes are neither shown as tasks nor accepted as the live process behind a

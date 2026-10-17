@@ -190,6 +190,7 @@ function tasksStateWith(tasks: unknown[]) {
     refresh: vi.fn(),
     reconnect: vi.fn(),
     codexHook: vi.fn().mockResolvedValue({ ok: true, launched: { status: 'absent' } }),
+    setCodexHookAuto: vi.fn().mockResolvedValue({ ok: false, error: 'not stubbed' }),
   }
 }
 

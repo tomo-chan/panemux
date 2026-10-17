@@ -403,6 +403,14 @@ var contractFixtures = map[string]contractFixture{
 		return rr.Body.Bytes(), nil
 	}},
 
+	// Updating a host's codex hook by itself turned on (issue #402).
+	"task-codex-hook-auto-update": {capture: func(t *testing.T) ([]byte, map[string]string) {
+		e := newAPIEnv(t)
+		rr := e.do(t, http.MethodPost, "/api/tasks/codex-hook/auto-update", `{"host":"","enabled":true}`)
+		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+		return rr.Body.Bytes(), nil
+	}},
+
 	// A host's tmux session name (issue #314). Its random suffix is stood in
 	// for.
 	"host-session-name": {capture: func(t *testing.T) ([]byte, map[string]string) {

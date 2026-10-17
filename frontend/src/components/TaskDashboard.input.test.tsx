@@ -134,6 +134,7 @@ function tasksState(overrides: Partial<TasksState> = {}, tasks: Task[] = ALL): T
     hostTerminal: vi.fn().mockResolvedValue({ ok: false, error: 'not stubbed' }),
     closeHostTerminal: vi.fn().mockResolvedValue(undefined),
     codexHook: vi.fn().mockResolvedValue({ ok: true, launched: { status: 'absent' } }),
+    setCodexHookAuto: vi.fn().mockResolvedValue({ ok: false, error: 'not stubbed' }),
     installCodexHook: vi.fn().mockResolvedValue({ ok: false, error: 'not stubbed' }),
     ...overrides,
   }

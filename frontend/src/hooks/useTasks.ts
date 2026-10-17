@@ -6,6 +6,8 @@ import {
   HostSessionName,
   HostSessionNameSchema,
   CodexHook,
+  CodexHookAuto,
+  CodexHookAutoSchema,
   CodexHookSchema,
   HostTerminal,
   HostTerminalSchema,
@@ -107,6 +109,8 @@ export interface TasksState {
   codexHook: (host: string) => Promise<TaskActionResult<CodexHook>>
   /** Installs or updates host's codex permission hook, answering the status read back. */
   installCodexHook: (host: string) => Promise<TaskActionResult<CodexHook>>
+  /** Turns updating host's codex permission hook by itself on or off (issue #402). */
+  setCodexHookAuto: (host: string, enabled: boolean) => Promise<TaskActionResult<CodexHookAuto>>
   /**
    * Ends a host terminal. An ssh terminal logs out; an ssh_tmux one ends only
    * its tmux client. A failure is not reported, as with detach.
@@ -349,6 +353,12 @@ export function useTasks(enabled: boolean): TasksState {
     [],
   )
 
+  const setCodexHookAuto = useCallback(
+    (host: string, enabled: boolean) =>
+      postTaskAction('/api/tasks/codex-hook/auto-update', { host, enabled }, CodexHookAutoSchema),
+    [],
+  )
+
   const closeHostTerminal = useCallback(async (sessionId: string) => {
     try {
       await fetch(`/api/hosts/terminal/${encodeURIComponent(sessionId)}`, { method: 'DELETE', keepalive: true })
@@ -392,5 +402,6 @@ export function useTasks(enabled: boolean): TasksState {
     closeHostTerminal,
     codexHook,
     installCodexHook,
+    setCodexHookAuto,
   }
 }
