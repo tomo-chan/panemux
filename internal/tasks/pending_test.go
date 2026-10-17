@@ -127,6 +127,21 @@ func TestNewPendingLabels_LogsNothingWithoutALogger(t *testing.T) {
 	assert.Equal(t, 0, p.Len(), "dropped as ambiguous")
 }
 
+// A session of the agent with an ID beside one still without an ID cannot
+// tell which one the labels were meant for yet: they wait for the other.
+func TestPendingLabels_WaitWhileASessionOfTheAgentHasNoIDYet(t *testing.T) {
+	c := &clock{now: time.Unix(1000, 0)}
+	p := NewPendingLabels(c.Now, nil)
+	p.Add("", AgentCodex, "task-0a1b2c3d", []string{"x"})
+	log := &putLog{}
+	starting := codexInTmux("", "task-0a1b2c3d", "")
+	starting.State = StateRun
+	c.advance(10 * time.Minute)
+	p.Apply(pendingSnapshot(okHosts, codexInTmux("", "task-0a1b2c3d", codexSessionA), starting), log.put)
+	assert.Empty(t, log.puts)
+	assert.Equal(t, 1, p.Len(), "kept while a session of the agent has no ID yet")
+}
+
 // The same session ID on another host is another session.
 func TestPendingLabels_TheSameSessionIDOnAnotherHostIsAnotherSession(t *testing.T) {
 	p := NewPendingLabels((&clock{now: time.Unix(1000, 0)}).Now, nil)

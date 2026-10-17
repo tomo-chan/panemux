@@ -20,7 +20,8 @@ const pendingLabelsGrace = time.Minute
 // session) and recorded by the first collection that finds exactly one
 // session of that agent with an ID in that tmux session:
 //
-//   - a task of the agent without an ID yet keeps them waiting;
+//   - a task of the agent without an ID yet keeps them waiting, even beside
+//     one with an ID: which of the two they were meant for is not known yet;
 //   - a task of another agent is not the session they were meant for: it
 //     neither claims them nor keeps them waiting;
 //   - two sessions of the agent cannot tell which one they were meant for,
@@ -101,37 +102,42 @@ func (p *PendingLabels) Apply(snap Snapshot, put func(Record) error) {
 		if status != HostOK {
 			continue
 		}
-		ids, occupied := sessionsIn(snap.Tasks, key)
+		ids, waiting := sessionsIn(snap.Tasks, key)
 		switch {
-		case len(ids) == 1:
-			if put(Record{Host: key.host, Agent: key.agent, SessionID: ids[0], Labels: entry.labels}) == nil {
-				delete(p.entries, key)
-			}
 		case len(ids) > 1:
 			p.logf("task labels for tmux session %s on %s dropped: %d %s sessions run there",
 				key.tmuxSession, hostName(key.host), len(ids), key.agent)
 			delete(p.entries, key)
-		case !occupied && now.Sub(entry.since) >= pendingLabelsGrace:
+		case waiting:
+		case len(ids) == 1:
+			if put(Record{Host: key.host, Agent: key.agent, SessionID: ids[0], Labels: entry.labels}) == nil {
+				delete(p.entries, key)
+			}
+		case now.Sub(entry.since) >= pendingLabelsGrace:
 			delete(p.entries, key)
 		}
 	}
 }
 
 // sessionsIn is the distinct session IDs of key's agent running in key's
-// tmux session, and whether any task of that agent runs there at all.
+// tmux session, and whether a task of that agent without an ID yet runs
+// there: until it has one, which session the labels were meant for is not
+// known.
 func sessionsIn(tasks []Task, key pendingLabelsKey) ([]string, bool) {
 	var ids []string
-	occupied := false
+	waiting := false
 	for _, task := range tasks {
 		if task.Host != key.host || task.Agent != key.agent ||
 			task.Location.Kind != LocationTmux || task.Location.TmuxSession != key.tmuxSession {
 
 			continue
 		}
-		occupied = true
-		if task.SessionID != "" && !slices.Contains(ids, task.SessionID) {
+		switch {
+		case task.SessionID == "":
+			waiting = true
+		case !slices.Contains(ids, task.SessionID):
 			ids = append(ids, task.SessionID)
 		}
 	}
-	return ids, occupied
+	return ids, waiting
 }

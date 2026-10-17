@@ -716,7 +716,8 @@ A **codex** task starts the same way, with these differences:
   starts, held in panemux's memory under the host, the agent and the tmux session, and recorded —
   added to any labels the session already has — by the first `GET /api/tasks` that finds exactly one
   codex session on that host in that tmux session. A codex there with no session yet keeps them
-  waiting; a task of another agent there neither claims them nor keeps them waiting. They are
+  waiting, even beside one with a session, since which of the two they were meant for is not known
+  yet; a task of another agent there neither claims them nor keeps them waiting. They are
   dropped when panemux restarts before then, when the host is removed from `ssh_connections`, when
   two codex sessions are found in that tmux session (which one they were meant for cannot be told;
   the server log says so), or when, a minute or more after the start, a collection of the host finds
