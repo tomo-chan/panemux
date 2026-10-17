@@ -593,3 +593,21 @@ func TestCodexHookWriteError(t *testing.T) {
 		})
 	}
 }
+
+func TestInstallCodexHookReportsAFailedRun(t *testing.T) {
+	calls := 0
+	s := New(Options{
+		Hosts: func() []string { return nil },
+		RunLocal: func(context.Context, string) ([]byte, error) {
+			calls++
+			if calls == 1 {
+				return codexHookOutput(nil, false, nil), nil
+			}
+			return nil, errors.New("connection lost")
+		},
+	})
+	defer s.Close()
+	_, err := s.InstallCodexHook(context.Background(), "")
+	require.ErrorContains(t, err, "connection lost")
+	assert.Equal(t, 2, calls)
+}
