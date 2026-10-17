@@ -645,3 +645,46 @@ func TestRemoteReportsAFailedConnectionToEveryoneWaiting(t *testing.T) {
 		assert.Contains(t, err.Error(), "connection refused")
 	}
 }
+
+func TestRemoteSharesTheConnectionBeingMade(t *testing.T) {
+	release := make(chan struct{})
+	var dials atomic.Int32
+	remote := NewRemote("devbox", func() (RemoteConn, error) {
+		dials.Add(1)
+		<-release
+		return newFakeRemoteConn(t, nil), nil
+	})
+	t.Cleanup(remote.Close)
+	results := make(chan *sftp.Client, 2)
+	for range 2 {
+		go func() {
+			files, err := remote.files()
+			assert.NoError(t, err)
+			results <- files
+		}()
+	}
+	require.Eventually(t, func() bool { return dials.Load() == 1 }, 5*time.Second, time.Millisecond)
+	time.Sleep(20 * time.Millisecond)
+	close(release)
+	first, second := <-results, <-results
+	assert.Same(t, first, second, "both callers got the one connection")
+	assert.Equal(t, int32(1), dials.Load())
+}
+
+func TestRemoteGivesUpAfterASecondBrokenConnection(t *testing.T) {
+	// Every connection the host gives has lost its SFTP subsystem: the
+	// lookup is tried on a new one once, then reported.
+	f := newResolveFixture(t)
+	var dials atomic.Int32
+	remote := NewRemote("devbox", func() (RemoteConn, error) {
+		dials.Add(1)
+		conn := newFakeRemoteConn(t, nil)
+		_ = conn.files.Close()
+		return conn, nil
+	})
+	t.Cleanup(remote.Close)
+
+	_, err := ResolveRemote(remote, "mockups/index.html", []string{f.cwd})
+	require.ErrorIs(t, err, ErrRemote)
+	assert.Equal(t, int32(2), dials.Load())
+}

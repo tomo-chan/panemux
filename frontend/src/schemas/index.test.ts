@@ -1564,6 +1564,7 @@ describe('PreviewResponseSchema', () => {
     expect(PreviewResponseSchema.safeParse({ ...relayed, url: 'https://localhost:63655/app' }).success).toBe(true)
   })
 
+  // efficacy:exempt pins what the earlier schema already refused, so widening it for https cannot over-widen
   it('names localhost only for an https relay', () => {
     expect(PreviewResponseSchema.safeParse({ ...relayed, url: 'http://localhost:63655/' }).success).toBe(false)
     expect(PreviewResponseSchema.safeParse({ ...relayed, url: 'https://localhost.example.com:63655/' }).success).toBe(false)

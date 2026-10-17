@@ -310,6 +310,7 @@ func findRemote(files *sftp.Client, dirs, paths []string) ([]Found, bool, error)
 	for _, file := range paths {
 		resolved, err := realPath(files, file)
 		if err != nil {
+			//coverage:exempt the working directories were just looked up over this connection; only its loss fails here
 			if !isFileError(err) {
 				return nil, false, err
 			}
@@ -321,6 +322,7 @@ func findRemote(files *sftp.Client, dirs, paths []string) ([]Found, bool, error)
 			continue
 		}
 		info, err := files.Stat(resolved)
+		//coverage:exempt realPath has just looked the file up over this connection; only its loss in between fails here
 		if err != nil && !isFileError(err) {
 			return nil, false, fmt.Errorf("stat %s: %w", resolved, err)
 		}
@@ -439,6 +441,7 @@ func (r *Registry) OpenRemote(remote *Remote, root, file string) (string, error)
 		if !remoteWithin(root, resolved) {
 			return nil
 		}
+		//coverage:exempt realPath has just looked the file up; only a change on the host in between fails this
 		if info, err = files.Stat(resolved); err != nil {
 			return fmt.Errorf("stat %s: %w", resolved, err)
 		}
@@ -497,6 +500,7 @@ func openRemote(e entry, rest string) (fileReader, fs.FileInfo, bool) {
 		if err != nil {
 			return fmt.Errorf("open %s: %w", resolved, err)
 		}
+		//coverage:exempt a file just opened is described by the same handle; only the connection's loss in between fails this
 		if info, err = opened.Stat(); err != nil {
 			_ = opened.Close()
 			return fmt.Errorf("stat %s: %w", resolved, err)
