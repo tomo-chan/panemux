@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { act, render, screen, fireEvent } from '@testing-library/react'
+import { act, cleanup, render, screen, fireEvent } from '@testing-library/react'
 import { CodexHookItem } from './CodexHookItem'
 import type { CodexHookItemProps } from './CodexHookItem'
 import type { CodexHook } from '../schemas'
@@ -20,6 +20,65 @@ async function renderItem(p: CodexHookItemProps, alone = false) {
     render(<CodexHookItem {...p} alone={alone} />)
   })
 }
+
+const checkbox = () => screen.getByRole('checkbox', { name: 'Update automatically' })
+
+describe('CodexHookItem updating by itself (issue #402)', () => {
+  it('turns it on and off, starting from what the host has', async () => {
+    const setAuto = vi.fn()
+      .mockResolvedValueOnce({ ok: true, launched: { auto_update: true } })
+      .mockResolvedValueOnce({ ok: true, launched: { auto_update: false } })
+    await renderItem(props({ status: 'installed', auto_update: false }, { setAuto }))
+    expect(checkbox()).not.toBeChecked()
+
+    await act(async () => fireEvent.click(checkbox()))
+    expect(setAuto).toHaveBeenLastCalledWith('gpu-box', true)
+    expect(checkbox()).toBeChecked()
+    await act(async () => fireEvent.click(checkbox()))
+    expect(setAuto).toHaveBeenLastCalledWith('gpu-box', false)
+    expect(checkbox()).not.toBeChecked()
+  })
+
+  it('says why the setting was not saved, and keeps it as it was', async () => {
+    let answer!: (value: TaskActionResult<{ auto_update: boolean }>) => void
+    const setAuto = vi.fn(() => new Promise<TaskActionResult<{ auto_update: boolean }>>((r) => { answer = r }))
+    await renderItem(props({ status: 'outdated', auto_update: false }, { setAuto }))
+
+    fireEvent.click(checkbox())
+    expect(checkbox()).toBeDisabled()
+    await act(async () => answer({ ok: false, error: 'parsing codex hook settings file: unexpected end' }))
+    expect(screen.getByRole('alert')).toHaveTextContent('Could not save: parsing codex hook settings file: unexpected end')
+    expect(checkbox()).not.toBeChecked()
+    expect(checkbox()).toBeEnabled()
+  })
+
+  it('says the hook was updated by itself, and to trust it', async () => {
+    await renderItem(props({ status: 'installed', auto_update: true, auto_updated: true }))
+    expect(checkbox()).toBeChecked()
+    expect(screen.getByRole('status')).toHaveTextContent("Updated automatically. Trust it in codex's /hooks")
+  })
+
+  it('says why updating by itself failed, keeps Update, and clears the reason once it is pressed', async () => {
+    await renderItem(props({ status: 'outdated', auto_update: true, auto_error: 'install the codex hook on gpu-box: Permission denied' }))
+    expect(screen.getByRole('alert')).toHaveTextContent('Could not update automatically: install the codex hook on gpu-box: Permission denied')
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Update Codex input notifications on gpu-box' }))
+    })
+    expect(screen.queryByText(/Could not update automatically/)).toBeNull()
+  })
+
+  it('is offered only on a host whose hook can be installed', async () => {
+    const offered: string[] = []
+    for (const status of ['missing', 'outdated', 'installed', 'absent', 'unknown', 'invalid'] as const) {
+      await act(async () => {
+        render(<CodexHookItem {...props({ status })} alone />)
+      })
+      if (screen.queryByRole('checkbox')) offered.push(status)
+      cleanup()
+    }
+    expect(offered).toEqual(['missing', 'outdated', 'installed'])
+  })
+})
 
 describe('CodexHookItem (issue #396)', () => {
   it.each([
@@ -92,60 +151,4 @@ describe('CodexHookItem (issue #396)', () => {
     expect(screen.queryByRole('status')).toBeNull()
   })
 
-  describe('updating by itself (issue #402)', () => {
-    const checkbox = () => screen.getByRole('checkbox', { name: 'Update automatically' })
-
-    it('turns it on and off, starting from what the host has', async () => {
-      const setAuto = vi.fn()
-        .mockResolvedValueOnce({ ok: true, launched: { auto_update: true } })
-        .mockResolvedValueOnce({ ok: true, launched: { auto_update: false } })
-      await renderItem(props({ status: 'installed', auto_update: false }, { setAuto }))
-      expect(checkbox()).not.toBeChecked()
-
-      await act(async () => fireEvent.click(checkbox()))
-      expect(setAuto).toHaveBeenLastCalledWith('gpu-box', true)
-      expect(checkbox()).toBeChecked()
-      await act(async () => fireEvent.click(checkbox()))
-      expect(setAuto).toHaveBeenLastCalledWith('gpu-box', false)
-      expect(checkbox()).not.toBeChecked()
-    })
-
-    it('says why the setting was not saved, and keeps it as it was', async () => {
-      let answer!: (value: TaskActionResult<{ auto_update: boolean }>) => void
-      const setAuto = vi.fn(() => new Promise<TaskActionResult<{ auto_update: boolean }>>((r) => { answer = r }))
-      await renderItem(props({ status: 'outdated', auto_update: false }, { setAuto }))
-
-      fireEvent.click(checkbox())
-      expect(checkbox()).toBeDisabled()
-      await act(async () => answer({ ok: false, error: 'parsing codex hook settings file: unexpected end' }))
-      expect(screen.getByRole('alert')).toHaveTextContent('Could not save: parsing codex hook settings file: unexpected end')
-      expect(checkbox()).not.toBeChecked()
-      expect(checkbox()).toBeEnabled()
-    })
-
-    it('says the hook was updated by itself, and to trust it', async () => {
-      await renderItem(props({ status: 'installed', auto_update: true, auto_updated: true }))
-      expect(checkbox()).toBeChecked()
-      expect(screen.getByRole('status')).toHaveTextContent("Updated automatically. Trust it in codex's /hooks")
-    })
-
-    it('says why updating by itself failed, and keeps Update', async () => {
-      await renderItem(props({ status: 'outdated', auto_update: true, auto_error: 'install the codex hook on gpu-box: Permission denied' }))
-      expect(screen.getByRole('alert')).toHaveTextContent('Could not update automatically: install the codex hook on gpu-box: Permission denied')
-      expect(screen.getByRole('button', { name: 'Update Codex input notifications on gpu-box' })).toBeEnabled()
-    })
-
-    it('a manual Update clears what came of updating by itself', async () => {
-      await renderItem(props({ status: 'outdated', auto_update: true, auto_error: 'exit status 1' }))
-      await act(async () => {
-        fireEvent.click(screen.getByRole('button', { name: 'Update Codex input notifications on gpu-box' }))
-      })
-      expect(screen.queryByText(/Could not update automatically/)).toBeNull()
-    })
-
-    it.each(['absent', 'unknown', 'invalid'] as const)('is not offered for a %s host', async (status) => {
-      await renderItem(props({ status }), true)
-      expect(screen.queryByRole('checkbox')).toBeNull()
-    })
-  })
 })
