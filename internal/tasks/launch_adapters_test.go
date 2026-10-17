@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -243,30 +244,52 @@ func TestLaunchAndResume_ACLIMissingOnTheHostIsRefusedBeforeAnythingRuns(t *test
 	require.NoError(t, err, "found once the host is probed again")
 }
 
-// What is not known is not a reason to refuse: before any probe, and when
-// the probe failed, the launch script finds out for itself.
-func TestLaunch_AnUnknownCLIIsLeftToTheLaunchScript(t *testing.T) {
+// What is not known to be missing is not a reason to refuse: before any
+// probe, when the probe failed, and when the collection of the agent is
+// degraded by an unknown format, a launch and a resume both run, and the
+// launch script finds out for itself.
+func TestLaunchAndResume_WhatIsNotKnownToBeMissingIsLeftToTheLaunchScript(t *testing.T) {
+	runningID := "11111111-2222-4333-8444-555555555555"
+	available := stoppedOutput(testSessionID, "/w", runningID)
+	degraded := []byte(strings.Replace(string(available), `"status":"busy"`, `"status":"paused"`, 1))
 	for _, tt := range []struct {
-		err     error
-		name    string
-		collect bool
+		probeErr      error
+		name          string
+		wantLaunch    AvailabilityReason
+		wantCollect   AvailabilityStatus
+		probe         []byte
+		collection    []byte
+		collectsFirst bool
 	}{
-		{name: "not probed"},
-		{name: "probe failed", collect: true, err: errors.New("exit 1")},
+		{name: "not probed", collection: available, wantLaunch: ReasonNotProbed},
+		{name: "probe failed", collection: available, probeErr: errors.New("exit 1"), collectsFirst: true,
+			wantLaunch: ReasonProbeFailed, wantCollect: Available},
+		{name: "probe failed, collect degraded", collection: degraded, probeErr: errors.New("exit 1"),
+			collectsFirst: true, wantLaunch: ReasonProbeFailed, wantCollect: Degraded},
+		{name: "CLI found, collect degraded", collection: degraded,
+			probe: probeAnswer("cli claude found", "cli codex found"), collectsFirst: true, wantCollect: Degraded},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			host := &probedLaunchHost{probeHost: probeHost{
-				collection: minimalOutput("s"), probeErr: tt.err,
+				collection: tt.collection, probe: tt.probe, probeErr: tt.probeErr,
 			}}
-			svc := New(Options{RunLocal: host.run})
+			svc := New(Options{Now: func() time.Time { return time.Unix(1000, 0) }, RunLocal: host.run})
 			defer svc.Close()
-			if tt.collect {
+			if tt.collectsFirst {
 				collectAndProbe(svc)
 			}
+			list := svc.Availability("")
+			assert.Equal(t, tt.wantLaunch, availabilityOf(list, agent.Claude, agent.Launch).Reason)
+			if tt.collectsFirst {
+				assert.Equal(t, tt.wantCollect, availabilityOf(list, agent.Claude, agent.Collect).Status)
+			}
+
 			_, err := svc.Launch(context.Background(), LaunchRequest{Agent: AgentClaude, CWD: "/w", Prompt: "go"})
 			require.NoError(t, err)
+			_, err = svc.Resume(context.Background(), "", AgentClaude, testSessionID)
+			require.NoError(t, err)
 			launches, _, _ := host.counts()
-			assert.Equal(t, 1, launches)
+			assert.Equal(t, 2, launches, "the launch and the resume both ran")
 		})
 	}
 }
