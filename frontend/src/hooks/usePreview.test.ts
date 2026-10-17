@@ -143,6 +143,7 @@ describe('usePreview', () => {
     })
   })
 
+  // efficacy:exempt pins #386's rule that nothing opens while disconnected, which the relay path keeps
   it('does not open a URL while the terminal is not connected', () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch')
     const { result } = renderHook(() => usePreview('pane-ssh', false, true))
