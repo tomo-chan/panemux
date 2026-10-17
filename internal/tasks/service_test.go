@@ -51,6 +51,8 @@ type fakeConn struct {
 	runErr  error
 	gitErr  error
 	pingErr error
+	// hangOn makes Run block, as hang below does, for that script only.
+	hangOn  string
 	output  []byte
 	cmds    []string
 	stdins  []string
@@ -68,11 +70,18 @@ func (c *fakeConn) Run(ctx context.Context, cmd string, stdin io.Reader) ([]byte
 		<-ctx.Done()
 		return nil, ctx.Err()
 	}
+	var data []byte
+	if stdin != nil {
+		data, _ = io.ReadAll(stdin)
+	}
+	if c.hangOn != "" && string(data) == c.hangOn {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.cmds = append(c.cmds, cmd)
 	if stdin != nil {
-		data, _ := io.ReadAll(stdin)
 		c.stdins = append(c.stdins, string(data))
 	}
 	return c.output, c.runErr
@@ -234,12 +243,13 @@ func TestCollect_ReusesOneConnectionAndSendsTheScriptOnStdin(t *testing.T) {
 	})
 	defer svc.Close()
 
-	svc.Collect(context.Background())
-	svc.Collect(context.Background())
+	collectAndProbe(svc)
+	collectAndProbe(svc)
 
 	assert.Equal(t, 1, dialer.callCount())
-	assert.Equal(t, []string{"sh -s", "sh -s"}, conn.cmds)
-	assert.Equal(t, []string{collectScript, collectScript}, conn.stdins)
+	assert.Equal(t, []string{"sh -s", "sh -s", "sh -s"}, conn.cmds)
+	assert.Equal(t, []string{collectScript, probeScript, collectScript}, conn.stdins,
+		"the probe runs once, after the first collection")
 	assert.Zero(t, conn.closeCount())
 }
 
@@ -989,6 +999,16 @@ func stateOutput(files ...string) []byte {
 // it appears, when its reason changes and when it can be read again — not on
 // every collection, which runs every few seconds while the dashboard is
 // shown (issue #313).
+// stateFileLogs keeps the log lines about state files, not the collect
+// availability lines the same files cause (see availability_test.go).
+func stateFileLogs(logs *[]string) func(format string, args ...any) {
+	return func(format string, args ...any) {
+		if line := fmt.Sprintf(format, args...); strings.Contains(line, ": state file ") {
+			*logs = append(*logs, line)
+		}
+	}
+}
+
 func TestCollect_ReportsAndLogsUnreadableStateFilesWhenTheyChange(t *testing.T) {
 	var (
 		out    []byte
@@ -998,12 +1018,12 @@ func TestCollect_ReportsAndLogsUnreadableStateFilesWhenTheyChange(t *testing.T) 
 	svc := New(Options{
 		RunLocal: func(context.Context, string) ([]byte, error) { return out, runErr },
 		Now:      (&clock{now: collectedAt}).Now,
-		Logf:     func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) },
+		Logf:     stateFileLogs(&logs),
 	})
 	defer svc.Close()
 	collect := func(o []byte, err error) (HostResult, []string) {
 		out, runErr, logs = o, err, nil
-		return hostResult(t, svc.Collect(context.Background()), ""), logs
+		return hostResult(t, collectAndProbe(svc), ""), logs
 	}
 
 	host, logged := collect(stateOutput("5.json", "{", "odd\x1b.json", "{"), nil)
@@ -1051,12 +1071,12 @@ func TestCollect_LogsUnreadableStateFilesByTheirFullName(t *testing.T) {
 	svc := New(Options{
 		RunLocal: func(context.Context, string) ([]byte, error) { return out, nil },
 		Now:      (&clock{now: collectedAt}).Now,
-		Logf:     func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) },
+		Logf:     stateFileLogs(&logs),
 	})
 	defer svc.Close()
 	collect := func(o []byte) (HostResult, []string) {
 		out, logs = o, nil
-		return hostResult(t, svc.Collect(context.Background()), ""), logs
+		return hostResult(t, collectAndProbe(svc), ""), logs
 	}
 	long := strings.Repeat("a", 140)
 	both := stateOutput(long+"-one.json", "not json", long+"-two.json", `{"pid":0}`)

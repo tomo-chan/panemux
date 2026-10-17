@@ -324,6 +324,33 @@ func parseTranscriptRow(line string) (transcript, bool) {
 	return tr, true
 }
 
+// formats are the live sessions' state files in a format this build does
+// not know: one that cannot be read (counted by its reason, unless it is a
+// leftover of a process that is gone), and one whose status is not one
+// claudeStatusState knows. A missing status is read as an older Claude
+// Code's, not a new format. The versions are the live sessions'.
+func (c *claudeCollected) formats(b *taskBuilder) formatReport {
+	var r formatReport
+	for _, state := range c.states {
+		if state.reason != "" {
+			if pid, ok := stateFilePID(state.name); ok && !b.isLiveClaude(pid) {
+				continue
+			}
+			r.add(string(state.reason), state.name+": "+state.detail)
+			continue
+		}
+		st := state.st
+		if !b.isLiveClaude(st.PID) {
+			continue
+		}
+		if st.Status != "" && claudeStatusState(st.Status) == StateUnknown {
+			r.add(formatUnknownStatus, "status "+strconv.Quote(st.Status))
+		}
+		r.observeVersion(st.Version, firstNonZero(st.StatusUpdatedAt, st.UpdatedAt, st.StartedAt))
+	}
+	return r
+}
+
 // The statuses a Claude Code state file reports.
 const (
 	claudeStatusBusy    = "busy"

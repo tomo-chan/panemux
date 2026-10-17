@@ -1,7 +1,9 @@
 package tasks
 
 import (
+	"maps"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -61,7 +63,8 @@ func (codexCollect) newCollected() agentCollected { return &codexCollected{} }
 // ~/.codex/thread_history_1.sqlite when sqlite3 can read one, and the two
 // lines are the first 512 bytes of the last turn event (task_started,
 // task_complete, turn_aborted) and the last response item in the rollout's
-// final MiB. Only a session ID made of hex digits and dashes — the shape of
+// final MiB — every task_* or turn_* event but turn_diff, so one this build
+// does not know is handed over rather than passed by. Only a session ID made of hex digits and dashes — the shape of
 // the UUID in the file name — is put into the query.
 const codexOpenScript = `db="$HOME/.codex/thread_history_1.sqlite"
 ps -U "$uid" -o pid=,etime=,command= 2>/dev/null |
@@ -86,7 +89,8 @@ while read -r pid et; do
 			st=$(sqlite3 -readonly "$db" "$q" </dev/null 2>/dev/null | head -n 1)
 		fi
 		marks=$(tail -c 1048576 "$p" 2>/dev/null | awk '
-			/"payload":[{]"type":"(task_started|task_complete|turn_aborted)"/ { ev = substr($0, 1, 512) }
+			/"payload":[{]"type":"(task|turn)_[a-z_]*"/ &&
+			!/"payload":[{]"type":"` + codexEventDiff + `"/ { ev = substr($0, 1, 512) }
 			/"type":"response_item"/ { ri = substr($0, 1, 512) }
 			END { printf "%s\t%s", ev, ri }')
 		l=$(head -n 1 "$p" 2>/dev/null)
@@ -107,8 +111,8 @@ const codexPermissionScript = `cat "$HOME"/.local/state/panemux/codex-permission
 `
 
 // codexRolloutsScript prints
-// "<mtime>\t<size>\t<file name>\t<"cwd":"...">\t<"originator":"...">" of
-// its first line for the rollouts (~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl)
+// "<mtime>\t<size>\t<file name>\t<"cwd":"...">\t<"originator":"...">\t<"cli_version":"...">"
+// of its first line for the rollouts (~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl)
 // modified in the last 7 days, newest first, counting only the TUI's
 // (originator "codex-tui"): the 100 are taken after that filter, so a host
 // where codex exec writes many rollouts does not push the TUI's sessions out.
@@ -121,7 +125,8 @@ done | sort -k1,1nr -k2,2nr -k3r | while read -r t s p; do
 	o=$(printf '%s\n' "$l" | grep -o '"originator":"[^"]*"' | head -n 1)
 	[ "$o" = '"originator":"codex-tui"' ] || continue
 	c=$(printf '%s\n' "$l" | grep -o '"cwd":"[^"]*"' | head -n 1)
-	printf '%s\t%s\t%s\t%s\t%s\n' "$t" "$s" "${p##*/}" "$c" "$o"
+	v=$(printf '%s\n' "$l" | grep -o '"cli_version":"[^"]*"' | head -n 1)
+	printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$t" "$s" "${p##*/}" "$c" "$o" "$v"
 done | head -n 100
 `
 
@@ -132,10 +137,17 @@ type codexCollected struct {
 	// Permissions is each session's latest approval request (issue #384),
 	// by session ID.
 	Permissions map[string]codexPermission
+	// malformed counts the codex/open and codex/rollouts rows that could
+	// not be read, each distinct row (malformedRows) once: a rollout open
+	// on two descriptors is listed twice. unreadable are the processes one
+	// of whose codex/open rows could not be read.
+	malformedRows map[string]bool
+	unreadable    map[int]bool
 	// Open is every rollout a codex process holds open, and Rollouts the
 	// rollouts under ~/.codex/sessions.
-	Open     []codexOpenRollout
-	Rollouts []codexRollout
+	Open      []codexOpenRollout
+	Rollouts  []codexRollout
+	malformed formatReport
 }
 
 func (c *codexCollected) addRow(section, line string) {
@@ -148,6 +160,17 @@ func (c *codexCollected) addRow(section, line string) {
 			c.Ages[pid] = age
 		} else if o, ok := parseCodexOpenRow(line); ok {
 			c.Open = append(c.Open, o)
+		} else if strings.Count(line, "\t") > 1 {
+			// Not ps's "<pid>\t<etime>": a rollout row codex's files
+			// could not be read into.
+			c.addMalformed(section, line)
+			// Only a listed codex process's PID is ever looked up here.
+			if pid, err := strconv.Atoi(line[:strings.IndexByte(line, '\t')]); err == nil {
+				if c.unreadable == nil {
+					c.unreadable = map[int]bool{}
+				}
+				c.unreadable[pid] = true
+			}
 		}
 	case codexSectionPermission:
 		if sessionID, record, ok := parseCodexPermissionRow(line); ok {
@@ -159,8 +182,22 @@ func (c *codexCollected) addRow(section, line string) {
 	case codexSectionRollouts:
 		if r, ok := parseCodexRolloutRow(line); ok {
 			c.Rollouts = append(c.Rollouts, r)
+		} else if strings.TrimSpace(line) != "" {
+			c.addMalformed(section, line)
 		}
 	}
+}
+
+func (c *codexCollected) addMalformed(section, line string) {
+	key := section + "\n" + line
+	if c.malformedRows[key] {
+		return
+	}
+	if c.malformedRows == nil {
+		c.malformedRows = map[string]bool{}
+	}
+	c.malformedRows[key] = true
+	c.malformed.add(formatMalformedRow, string(agent.Codex)+"/"+section+": "+line)
 }
 
 // addFile is never called: no codex section declares files.
@@ -176,6 +213,8 @@ func (c *codexCollected) prepared() agentCollected {
 		Open:        append([]codexOpenRollout(nil), c.Open...),
 		Rollouts:    append([]codexRollout(nil), c.Rollouts...),
 		Permissions: c.Permissions,
+		malformed:   c.malformed,
+		unreadable:  c.unreadable,
 	}
 	sort.SliceStable(p.Rollouts, func(i, j int) bool { return newerCodexRollout(p.Rollouts[i], p.Rollouts[j]) })
 	for i := range p.Open {
@@ -218,13 +257,15 @@ func (c *codexCollected) addLogVersion(task *Task) {
 }
 
 // codexRollout is one rollout the collection found: its session ID (from the
-// file name), the cwd and originator of its session_meta line, and the file's
-// modification time and size.
+// file name), the cwd, originator and cli_version of its session_meta line,
+// and the file's modification time and size. Version is recorded, never
+// checked.
 type codexRollout struct {
 	File       string
 	SessionID  string
 	CWD        string
 	Originator string
+	Version    string
 	ModTime    int64
 	Size       int64
 }
@@ -249,6 +290,10 @@ type codexTurn struct {
 	// Event is the last task_started, task_complete or turn_aborted in the
 	// rollout's tail, and EventAt its time (Unix milliseconds, 0 unknown).
 	Event string
+	// UnknownEvent is the last turn event of the tail instead, when it is
+	// one this build does not know (a task_* or turn_* event other than
+	// those and turn_diff).
+	UnknownEvent string
 	// LastItem is the payload type of the last response_item in the tail,
 	// and LastItemName the name it calls, for a call.
 	LastItem     string
@@ -279,13 +324,15 @@ const codexOriginatorTUI = "codex-tui"
 // What codex records about a turn: thread_turns statuses, rollout events,
 // and the response item and tool that ask the person a question.
 const (
-	codexTurnInProgress   = "inProgress"
-	codexTurnCompleted    = "completed"
-	codexTurnInterrupted  = "interrupted"
-	codexTurnFailed       = "failed"
-	codexEventStarted     = "task_started"
-	codexEventComplete    = "task_complete"
-	codexEventAborted     = "turn_aborted"
+	codexTurnInProgress  = "inProgress"
+	codexTurnCompleted   = "completed"
+	codexTurnInterrupted = "interrupted"
+	codexTurnFailed      = "failed"
+	codexEventStarted    = "task_started"
+	codexEventComplete   = "task_complete"
+	codexEventAborted    = "turn_aborted"
+	// codexEventDiff is a turn_* event that neither starts nor ends a turn.
+	codexEventDiff        = "turn_diff"
 	codexItemFunctionCall = "function_call"
 	codexToolAskUser      = "request_user_input"
 )
@@ -310,15 +357,26 @@ const codexLeftoverMargin = 2
 
 var (
 	rolloutFileName = regexp.MustCompile(`^rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-(.+)\.jsonl$`)
-	codexTurnEvent  = regexp.MustCompile(`"payload":\{"type":"(task_started|task_complete|turn_aborted)"`)
-	codexItemType   = regexp.MustCompile(`"payload":\{"type":"([a-z_]+)"`)
-	codexItemName   = regexp.MustCompile(`"name":"([A-Za-z0-9_.-]+)"`)
-	codexTurnID     = regexp.MustCompile(`"turn_id":"([^"]+)"`)
-	codexTimestamp  = regexp.MustCompile(`"timestamp":"([^"]+)"`)
+	// codexTurnEvent matches every turn event the script hands over;
+	// codexKnownEvents are the ones this build reads.
+	codexTurnEvent = regexp.MustCompile(`"payload":\{"type":"((?:task|turn)_[a-z_]*)"`)
+	codexItemType  = regexp.MustCompile(`"payload":\{"type":"([a-z_]+)"`)
+	codexItemName  = regexp.MustCompile(`"name":"([A-Za-z0-9_.-]+)"`)
+	codexTurnID    = regexp.MustCompile(`"turn_id":"([^"]+)"`)
+	codexTimestamp = regexp.MustCompile(`"timestamp":"([^"]+)"`)
 	// codexLineTime is the timestamp a rollout line starts with: its own,
 	// not one quoted further in.
 	codexLineTime = regexp.MustCompile(`^\{"timestamp":"([^"]+)"`)
 )
+
+var codexKnownEvents = map[string]bool{
+	codexEventStarted: true, codexEventComplete: true, codexEventAborted: true,
+}
+
+// codexKnownStatuses are the thread_turns statuses this build reads.
+var codexKnownStatuses = map[string]bool{
+	codexTurnInProgress: true, codexTurnCompleted: true, codexTurnInterrupted: true, codexTurnFailed: true,
+}
 
 // rolloutSessionID reads the session ID out of a rollout's file name. Only a
 // UUID is accepted: the ID is what `codex resume` is given.
@@ -430,7 +488,7 @@ func parseCodexPermissionRow(line string) (string, codexPermission, bool) {
 
 // parseCodexRolloutRow reads one codex/rollouts row (see codexRolloutsScript).
 func parseCodexRolloutRow(line string) (codexRollout, bool) {
-	parts := strings.SplitN(line, "\t", 5)
+	parts := strings.SplitN(line, "\t", 6)
 	if len(parts) < 3 {
 		return codexRollout{}, false
 	}
@@ -447,8 +505,11 @@ func parseCodexRolloutRow(line string) (codexRollout, bool) {
 	if len(parts) >= 4 {
 		r.CWD = transcriptCWD(parts[3])
 	}
-	if len(parts) == 5 {
+	if len(parts) >= 5 {
 		r.Originator = jsonFragmentString(parts[4], `"originator":`)
+	}
+	if len(parts) == 6 {
+		r.Version = jsonFragmentString(parts[5], `"cli_version":`)
 	}
 	return r, true
 }
@@ -479,7 +540,13 @@ func parseCodexTurn(db, event, item string) codexTurn {
 			turn.DBStartedAt = n
 		}
 	}
-	if m := codexTurnEvent.FindStringSubmatch(event); m != nil {
+	m := codexTurnEvent.FindStringSubmatch(event)
+	switch {
+	case m == nil || m[1] == codexEventDiff:
+	case !codexKnownEvents[m[1]]:
+		// Nothing more is read from an event this build does not know.
+		turn.UnknownEvent = m[1]
+	default:
 		turn.Event = m[1]
 		id := codexTurnID.FindStringSubmatch(event)
 		if id != nil && m[1] == codexEventStarted && validUUID.MatchString(id[1]) {
@@ -595,8 +662,13 @@ func (c *codexCollected) tuiTasks(b *taskBuilder) []Task {
 			task.StartedAt = b.hostMillis((b.raw.Now - elapsed) * 1000)
 		}
 		if !ok {
+			// A process whose open rollout could not be read may well have
+			// a session: what state it is in is not known.
 			task.ID = b.id(AgentCodex, "pid-"+strconv.Itoa(p.PID))
 			task.State = StateRun
+			if c.unreadable[p.PID] {
+				task.State = StateUnknown
+			}
 			tasks = append(tasks, task)
 			continue
 		}
@@ -646,6 +718,33 @@ func (c *codexCollected) codexState(b *taskBuilder, task *Task, o codexOpenRollo
 	}
 }
 
+// formats are the codex rows that could not be read, and the thread_turns
+// statuses and turn events this build does not know, once per session a
+// live codex process holds open, on however many descriptors. The versions
+// are the listed rollouts'.
+func (c *codexCollected) formats(b *taskBuilder) formatReport {
+	r := c.malformed
+	r.counts = maps.Clone(r.counts)
+	r.examples = slices.Clone(r.examples)
+	sessions := map[string]bool{}
+	for _, o := range c.Open {
+		if proc, alive := b.procs[o.PID]; !alive || !isCodexProgram(proc.Command) || sessions[o.Rollout.SessionID] {
+			continue
+		}
+		sessions[o.Rollout.SessionID] = true
+		if o.Turn.DBStatus != "" && !codexKnownStatuses[o.Turn.DBStatus] {
+			r.add(formatUnknownStatus, "status "+strconv.Quote(o.Turn.DBStatus))
+		}
+		if o.Turn.UnknownEvent != "" {
+			r.add(formatUnknownEvent, "event "+strconv.Quote(o.Turn.UnknownEvent))
+		}
+	}
+	for _, rollout := range c.Rollouts {
+		r.observeVersion(rollout.Version, rollout.ModTime)
+	}
+	return r
+}
+
 // codexPermissionOfTurn reports whether record is a request of the turn in
 // progress: by its ID, or, when the turn's task_started is out of the
 // rollout's tail and the ID unknown, by being made since the turn started.
@@ -672,6 +771,11 @@ func codexTurnStatus(turn codexTurn) (inProgress, finished bool, startedMillis i
 		return true, false, turn.DBStartedAt * 1000
 	case codexTurnCompleted, codexTurnInterrupted, codexTurnFailed:
 		return false, true, 0
+	case "":
+	default:
+		// A status this build does not know: the rollout's older event
+		// does not stand in for it (issue #373).
+		return false, false, 0
 	}
 	switch turn.Event {
 	case codexEventStarted:

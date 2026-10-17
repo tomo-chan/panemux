@@ -244,7 +244,7 @@ func TestService_DismissWaitClearsThatPermissionRequestOnly(t *testing.T) {
 	require.Equal(t, StateWait, waiting.State)
 	require.NoError(t, svc.DismissWait(waiting.WaitSignature))
 
-	for _, snapshot := range []Snapshot{svc.CollectAttention(context.Background()), svc.Collect(context.Background())} {
+	for _, snapshot := range []Snapshot{svc.CollectAttention(context.Background()), collectAndProbe(svc)} {
 		task := findTask(t, snapshot.Tasks, "local:codex:"+codexSessionA)
 		assert.Equal(t, StateBusy, task.State)
 		assert.Empty(t, task.WaitSignature)
@@ -305,7 +305,7 @@ func TestService_SSHHostCodexPermissionWaitsAndClearsLikeLocal(t *testing.T) {
 	assert.Contains(t, conn.stdins[0], "::section codex/permission")
 
 	require.NoError(t, svc.DismissWait(remote.WaitSignature))
-	for _, snapshot := range []Snapshot{svc.CollectAttention(context.Background()), svc.Collect(context.Background())} {
+	for _, snapshot := range []Snapshot{svc.CollectAttention(context.Background()), collectAndProbe(svc)} {
 		assert.Equal(t, StateBusy, findTask(t, snapshot.Tasks, "ssh:build-box:codex:"+codexSessionA).State)
 		assert.Equal(t, StateWait, findTask(t, snapshot.Tasks, "local:codex:"+codexSessionA).State,
 			"Input given on the host's task is not the local task's")

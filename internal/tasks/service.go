@@ -137,6 +137,18 @@ type Service struct {
 	// unreadableLogged is, per host, the unreadable state files last logged,
 	// keyed by their full name; guarded by mu.
 	unreadableLogged map[string]map[string]UnreadableStateFile
+	// probes are each host's last agent probe, and collectAvailability
+	// each host's collect availability from its last full collection, by
+	// agent (issue #373); both guarded by mu.
+	probes              map[string]probeEntry
+	collectAvailability map[string]map[agent.ID]Availability
+	// probing are the hosts whose probe is running, guarded by mu. The
+	// probes run beside the collections, under probeCtx, which ends when
+	// the service is closed; probeRuns counts them, and probeTimeout
+	// bounds each.
+	probing     map[string]bool
+	probeCtx    context.Context
+	probeCancel context.CancelFunc
 	// dismissedWaits are the wait signatures of the codex approval requests
 	// marked "Input given" (issue #384); guarded by mu. They live in memory
 	// only: after a restart a request whose turn has finished is not shown
@@ -164,6 +176,8 @@ type Service struct {
 	summaryCancel  context.CancelFunc
 	opts           Options
 	summaryWG      sync.WaitGroup
+	probeRuns      sync.WaitGroup
+	probeTimeout   time.Duration
 	mu             sync.Mutex
 	summaryMu      sync.Mutex
 	summaryGen     uint64
@@ -208,7 +222,12 @@ func New(opts Options) *Service {
 		opts.SummaryTimeout = defaultSummaryTimeout
 	}
 	summaryCtx, summaryCancel := context.WithCancel(context.Background())
+	probeCtx, probeCancel := context.WithCancel(context.Background())
 	return &Service{
+		probing:        map[string]bool{},
+		probeCtx:       probeCtx,
+		probeCancel:    probeCancel,
+		probeTimeout:   probeTimeout,
 		opts:           opts,
 		hosts:          map[string]*hostConn{},
 		resumeLocks:    map[string]*resumeLock{},
@@ -257,7 +276,7 @@ func (s *Service) Collect(ctx context.Context) Snapshot {
 	names := s.hostNames()
 	s.forgetHostsExcept(names)
 	s.forgetSummaryHostsExcept(names)
-	return s.collectHosts(ctx, names, s.collectHost)
+	return s.collectHosts(ctx, names, s.collectHostAndProbe)
 }
 
 // CollectAttention is Collect for the input-wait notifications (issue
@@ -328,10 +347,22 @@ func (s *Service) collectHost(ctx context.Context, name string) (HostResult, []T
 	if !ok {
 		return result, nil
 	}
-	tasks, unreadable := buildTasksWithDiagnostics(name, raw, collectedAt)
+	tasks, unreadable, formats := buildTasksWithDiagnostics(name, raw, collectedAt)
 	result.UnreadableStateFiles = unreadable
 	s.logUnreadableStateFiles(name, unreadable)
+	s.recordCollectAvailability(name, formats)
 	s.rememberSummaryTasks(name, tasks)
+	return result, tasks
+}
+
+// collectHostAndProbe is collectHost for the full collection the dashboard
+// runs, which also starts probing a collected host's agent CLIs, without
+// waiting for it; a resume's or a lookup's collection does not probe.
+func (s *Service) collectHostAndProbe(ctx context.Context, name string) (HostResult, []Task) {
+	result, tasks := s.collectHost(ctx, name)
+	if result.Status == HostOK {
+		s.startProbe(name)
+	}
 	return result, tasks
 }
 
@@ -546,6 +577,7 @@ func (s *Service) Reconnect(name string) error {
 // still in flight closes its own connection when it finishes.
 func (s *Service) Close() {
 	s.summaryCancel()
+	s.probeCancel()
 	s.mu.Lock()
 	s.closed = true
 	var conns []Conn
@@ -559,6 +591,7 @@ func (s *Service) Close() {
 	for _, conn := range conns {
 		_ = conn.Close()
 	}
+	s.probeRuns.Wait()
 }
 
 // conn returns the host's open connection, dialing one if there is none.
@@ -652,6 +685,16 @@ func (s *Service) forgetHostsExcept(names []string) {
 	for name := range s.unreadableLogged {
 		if name != "" && !keep[name] {
 			delete(s.unreadableLogged, name)
+		}
+	}
+	for name := range s.probes {
+		if name != "" && !keep[name] {
+			delete(s.probes, name)
+		}
+	}
+	for name := range s.collectAvailability {
+		if name != "" && !keep[name] {
+			delete(s.collectAvailability, name)
 		}
 	}
 	var stale []Conn
