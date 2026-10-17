@@ -45,7 +45,8 @@ type CodexHook struct {
 }
 
 // codexHookReadScript prints the host's HOME, the hook file and hooks.json,
-// each as `::file <bytes> <x or ->` and its content, or `::none`.
+// each as `::file <bytes> <x or ->` and its content, `::large <bytes>` for one
+// over codexHookMaxRead, or `::none`.
 const codexHookReadScript = `if [ ! -d "$HOME/.codex" ] && ! command -v codex >/dev/null 2>&1; then
 	echo '::codex none'
 	exit 0
@@ -55,9 +56,14 @@ for f in "$HOME/` + codexHookFile + `" "$HOME/.codex/hooks.json"; do
 	if [ -f "$f" ]; then
 		x=-
 		[ -x "$f" ] && x=x
-		printf '::file %s %s\n' "$(wc -c <"$f" | tr -d ' ')" "$x"
-		cat "$f"
-		echo
+		n=$(wc -c <"$f" | tr -d ' ')
+		if [ "$n" -gt 1048576 ]; then
+			printf '::large %s\n' "$n"
+		else
+			printf '::file %s %s\n' "$n" "$x"
+			cat "$f"
+			echo
+		fi
 	else
 		echo '::none'
 	fi
@@ -67,21 +73,36 @@ echo '` + codexHookEnd + `'
 
 const codexHookEnd = "::end"
 
+// codexHookMaxRead is the largest file the check prints; a larger one is
+// reported by its size alone. codexHookReadScript spells it out.
+const codexHookMaxRead = 1 << 20
+
 // codexHookWriteScript writes the hook, and hooks.json when %[2]s is "yes",
-// each from a heredoc whose quoted terminator carries the random tag %[1]s.
-// hooks.json is written in place, so a hooks.json that is a link keeps
-// being one.
-const codexHookWriteScript = `set -e
-mkdir -p "$HOME/.local/bin"
-cat >"$HOME/` + codexHookFile + `" <<'PANEMUX_HOOK_%[1]s'
+// each from a heredoc whose quoted terminator carries the random tag %[1]s,
+// and ends with `::status <exit status>` after any error the writes printed.
+// hooks.json is written to a temporary file first and copied over only once
+// that succeeded, so a failed write leaves it as it was; it is copied in
+// place, so a hooks.json that is a link keeps being one, with its mode.
+const codexHookWriteScript = `tmp="$HOME/.codex/.hooks.json.panemux-%[1]s"
+(
+	set -e
+	mkdir -p "$HOME/.local/bin"
+	cat >"$HOME/` + codexHookFile + `" <<'PANEMUX_HOOK_%[1]s'
 %[3]sPANEMUX_HOOK_%[1]s
-chmod 755 "$HOME/` + codexHookFile + `"
-if [ %[2]s = yes ]; then
-	mkdir -p "$HOME/.codex"
-	cat >"$HOME/.codex/hooks.json" <<'PANEMUX_HOOKS_%[1]s'
+	chmod 755 "$HOME/` + codexHookFile + `"
+	if [ %[2]s = yes ]; then
+		mkdir -p "$HOME/.codex"
+		(umask 077 && cat >"$tmp") <<'PANEMUX_HOOKS_%[1]s'
 %[4]sPANEMUX_HOOKS_%[1]s
-fi
+		cat "$tmp" >"$HOME/.codex/hooks.json"
+	fi
+) 2>&1
+status=$?
+rm -f "$tmp"
+echo "` + codexHookStatusLine + `$status"
 `
+
+const codexHookStatusLine = "::status "
 
 // codexHookState is what a host's files say, before deciding a status.
 type codexHookState struct {
@@ -138,10 +159,32 @@ func (s *Service) InstallCodexHook(ctx context.Context, host string) (CodexHook,
 	script := fmt.Sprintf(codexHookWriteScript, tag, writeJSON, codexPermissionHook, hooksJSON)
 	runCtx, cancel := context.WithTimeout(ctx, s.opts.HostTimeout)
 	defer cancel()
-	if _, err := s.runHostScript(runCtx, host, script, "codex hook install"); err != nil {
+	out, err := s.runHostScript(runCtx, host, script, "codex hook install")
+	if err != nil {
 		return CodexHook{}, err
 	}
+	if err := codexHookWriteError(out); err != nil {
+		return CodexHook{}, fmt.Errorf("install the codex hook on %s: %w", hostName(host), err)
+	}
 	return s.CodexHook(ctx, host)
+}
+
+// codexHookWriteError reads codexHookWriteScript's output: nil when it
+// exited 0, otherwise what the failed write printed.
+func codexHookWriteError(out []byte) error {
+	text := strings.TrimRight(string(out), "\n")
+	i := strings.LastIndex(text, codexHookStatusLine)
+	if i < 0 || (i > 0 && text[i-1] != '\n') {
+		return errors.New("its output ended early")
+	}
+	status := text[i+len(codexHookStatusLine):]
+	if status == "0" {
+		return nil
+	}
+	if reason := strings.TrimSpace(text[:i]); reason != "" {
+		return errors.New(reason)
+	}
+	return fmt.Errorf("exit status %s", status)
 }
 
 func (s *Service) readCodexHook(ctx context.Context, host string) codexHookState {
@@ -162,13 +205,16 @@ func (s *Service) readCodexHook(ctx context.Context, host string) codexHookState
 		return codexHookState{status: CodexHookAbsent}
 	}
 	hook, hooksJSON := files[0], files[1]
+	if hooksJSON.large {
+		return codexHookState{status: CodexHookInvalid, err: errors.New("~/.codex/hooks.json is larger than 1 MiB")}
+	}
 	merged, registered, err := registerCodexHook(hooksJSON.data, home+"/"+codexHookFile)
 	if err != nil {
 		return codexHookState{status: CodexHookInvalid, err: fmt.Errorf("~/.codex/hooks.json %w", err)}
 	}
 	state := codexHookState{merged: merged, registered: registered}
 	switch {
-	case hook.data == nil && !registered:
+	case hook.data == nil && !hook.large && !registered:
 		state.status = CodexHookMissing
 	case string(hook.data) == codexPermissionHook && hook.executable && registered:
 		state.status = CodexHookInstalled
@@ -179,10 +225,11 @@ func (s *Service) readCodexHook(ctx context.Context, host string) codexHookState
 }
 
 // codexHookFileContent is one file codexHookReadScript printed; data is nil
-// for a file that does not exist.
+// for a file that does not exist or is large.
 type codexHookFileContent struct {
 	data       []byte
 	executable bool
+	large      bool
 }
 
 var errCodexHookOutput = errors.New("codex hook check output ended early")
@@ -213,6 +260,10 @@ func parseCodexHookOutput(out []byte) (string, []codexHookFileContent, error) {
 		}
 		if string(line) == "::none" {
 			files = append(files, codexHookFileContent{})
+			continue
+		}
+		if bytes.HasPrefix(line, []byte("::large ")) {
+			files = append(files, codexHookFileContent{large: true})
 			continue
 		}
 		size, mode, _ := strings.Cut(strings.TrimPrefix(string(line), "::file "), " ")
@@ -280,12 +331,16 @@ func registerCodexHook(data []byte, command string) ([]byte, bool, error) {
 			topOut[key] = raw
 		}
 	}
-	merged, err := json.MarshalIndent(topOut, "", "  ")
+	// Encode, not MarshalIndent, so that a command's & < > stay as written.
+	var merged bytes.Buffer
+	enc := json.NewEncoder(&merged)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
 	//coverage:exempt every value is JSON that json.Unmarshal accepted, or strings and a number
-	if err != nil {
+	if err := enc.Encode(topOut); err != nil {
 		return nil, false, fmt.Errorf("encode hooks.json: %w", err)
 	}
-	return append(merged, '\n'), false, nil
+	return merged.Bytes(), false, nil
 }
 
 // codexHookRegistered reports whether a PermissionRequest group runs

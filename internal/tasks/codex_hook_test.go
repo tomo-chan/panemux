@@ -74,6 +74,14 @@ func TestRegisterCodexHook(t *testing.T) {
 	}
 }
 
+func TestRegisterCodexHookKeepsHTMLCharacters(t *testing.T) {
+	in := `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"a && b <x> c"}]}]}}`
+	merged, _, err := registerCodexHook([]byte(in), "/remote/home/a&b/<hook>")
+	require.NoError(t, err)
+	assert.Contains(t, string(merged), `"a && b <x> c"`)
+	assert.Contains(t, string(merged), `"/remote/home/a&b/<hook>"`)
+}
+
 func checkRegisterCodexHook(t *testing.T, tc registerCase) {
 	t.Helper()
 	var in []byte
@@ -181,7 +189,36 @@ func TestCodexHookStatus(t *testing.T) {
 			want: CodexHookInvalid, wantErr: "is not valid JSON",
 		},
 		{name: "host fails", runErr: errors.New("boom"), want: CodexHookUnknown, wantErr: "boom"},
+		{
+			name: "a hooks.json too large to read",
+			out:  []byte("::home /remote/home/demo\n::none\n::large 2000000\n::end\n"),
+			want: CodexHookInvalid, wantErr: "~/.codex/hooks.json is larger than 1 MiB",
+		},
+		{
+			name: "a hook file too large to read is not ours",
+			out:  []byte("::home /remote/home/demo\n::large 2000000\n::none\n::end\n"),
+			want: CodexHookOutdated,
+		},
 	})
+}
+
+func TestCodexHookCheckDoesNotReadALargeHooksJSON(t *testing.T) {
+	home := codexHome(t, `{"x":"`+strings.Repeat("a", codexHookMaxRead)+`"}`)
+	homedir.SetForTest(t, home)
+	var out []byte
+	s := New(Options{
+		Hosts: func() []string { return nil },
+		RunLocal: func(ctx context.Context, script string) ([]byte, error) {
+			var err error
+			out, err = runLocal(ctx, script)
+			return out, err
+		},
+	})
+	defer s.Close()
+	got := codexHookStatus(t, s, "")
+	assert.Equal(t, CodexHookInvalid, got.Status)
+	assert.Contains(t, got.Error, "larger than 1 MiB")
+	assert.Less(t, len(out), 4096, "the file is not printed")
 }
 
 func TestCodexHookStatusOfOutputCutShort(t *testing.T) {
@@ -346,22 +383,87 @@ func TestInstallCodexHookReportsAFailedWrite(t *testing.T) {
 	defer s.Close()
 	_, err := s.InstallCodexHook(context.Background(), "")
 	require.Error(t, err)
+	assert.Contains(t, err.Error(), "mkdir", "the shell's own reason is reported")
+	assert.Contains(t, err.Error(), ".local")
 	_, statErr := os.Stat(filepath.Join(home, ".codex", "hooks.json"))
 	assert.True(t, os.IsNotExist(statErr), "hooks.json is not written when the hook could not be")
+}
+
+func TestInstallCodexHookOverSSHReportsWhyItFailed(t *testing.T) {
+	home := codexHome(t, "")
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".local"), nil, 0o600))
+	conn := &shConn{home: home}
+	s := New(Options{
+		Hosts: func() []string { return []string{"build-box"} },
+		Dial:  func(string) (Conn, error) { return conn, nil },
+	})
+	defer s.Close()
+	_, err := s.InstallCodexHook(context.Background(), "build-box")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "mkdir", "stderr, which ssh does not return, is reported")
+}
+
+// A hooks.json write that fails part way leaves the file as it was.
+func TestInstallCodexHookKeepsHooksJSONWhenTheWriteFails(t *testing.T) {
+	existing := `{"keep":"` + strings.Repeat("a", 200_000) + `"}`
+	home := codexHome(t, existing)
+	// 40 blocks fit the hook script but not hooks.json, in 512- or
+	// 1024-byte blocks.
+	conn := &shConn{home: home, prefix: "ulimit -f 40\n"}
+	s := New(Options{
+		Hosts: func() []string { return []string{"build-box"} },
+		Dial:  func(string) (Conn, error) { return conn, nil },
+	})
+	defer s.Close()
+	_, err := s.InstallCodexHook(context.Background(), "build-box")
+	require.Error(t, err)
+	after, readErr := os.ReadFile(filepath.Join(home, ".codex", "hooks.json"))
+	require.NoError(t, readErr)
+	assert.Equal(t, existing, string(after))
+	left, dirErr := os.ReadDir(filepath.Join(home, ".codex"))
+	require.NoError(t, dirErr)
+	require.Len(t, left, 1, "no temporary file is left")
+	assert.Equal(t, "hooks.json", left[0].Name())
+}
+
+// A hooks.json that is a symbolic link stays one, and keeps its mode.
+//
+//efficacy:exempt guards the in-place write the temporary file must keep; it held before
+func TestInstallCodexHookWritesThroughALink(t *testing.T) {
+	home := codexHome(t, "")
+	target := filepath.Join(t.TempDir(), "hooks.json")
+	require.NoError(t, os.WriteFile(target, []byte(`{}`), 0o600))
+	require.NoError(t, os.Symlink(target, filepath.Join(home, ".codex", "hooks.json")))
+	homedir.SetForTest(t, home)
+	s := New(Options{Hosts: func() []string { return nil }})
+	defer s.Close()
+	_, err := s.InstallCodexHook(context.Background(), "")
+	require.NoError(t, err)
+	assertCodexHookInstalled(t, home)
+	info, err := os.Lstat(filepath.Join(home, ".codex", "hooks.json"))
+	require.NoError(t, err)
+	assert.Equal(t, os.ModeSymlink, info.Mode().Type())
+	info, err = os.Stat(target)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
 }
 
 // shConn is an ssh_connections host whose `sh -s` runs locally with HOME set
 // to home, so the remote path is exercised against real files.
 type shConn struct {
 	home string
-	cmds []string
+	// prefix runs before each script.
+	prefix string
+	cmds   []string
 }
 
 func (c *shConn) Run(ctx context.Context, cmd string, stdin io.Reader) ([]byte, error) {
 	c.cmds = append(c.cmds, cmd)
 	run := exec.CommandContext(ctx, "sh", "-s")
-	run.Stdin = stdin
+	run.Stdin = io.MultiReader(strings.NewReader(c.prefix), stdin)
 	run.Env = append(os.Environ(), "HOME="+c.home)
+	// ssh's Session.Output returns no stderr, so neither does this.
+	run.Stderr = io.Discard
 	return run.Output()
 }
 
@@ -462,4 +564,32 @@ func TestInstallCodexHookWithoutRandomness(t *testing.T) {
 	require.ErrorContains(t, err, "no entropy")
 	_, statErr := os.Stat(filepath.Join(home, ".local", "bin", "panemux-codex-permission-hook.sh"))
 	assert.True(t, os.IsNotExist(statErr))
+}
+
+func TestCodexHookWriteError(t *testing.T) {
+	cases := []struct {
+		name, out, want string
+	}{
+		{name: "success", out: "::status 0\n"},
+		{name: "success after other output", out: "note\n::status 0\n"},
+		{
+			name: "the shell's reason",
+			out:  "sh: cannot create x: Permission denied\n::status 2\n", want: "sh: cannot create x: Permission denied",
+		},
+		{name: "no reason printed", out: "::status 153\n", want: "exit status 153"},
+		{name: "no output", out: "", want: "ended early"},
+		{name: "no status line", out: "mkdir: x\n", want: "ended early"},
+		{name: "the marker not at a line start", out: "x::status 0\n", want: "ended early"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := codexHookWriteError([]byte(tc.out))
+			if tc.want == "" {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Equal(t, tc.want, strings.TrimPrefix(err.Error(), "its output "))
+		})
+	}
 }

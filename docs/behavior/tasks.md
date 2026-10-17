@@ -321,7 +321,7 @@ review there.
   | Neither the hook file nor its `hooks.json` entry | `Not installed` and `Install` |
   | The hook file as panemux embeds it, executable, and its entry in `hooks.json` | `Installed` |
   | Anything else: an older or edited hook file, one not executable, or only one of the two | `Update` |
-  | A `hooks.json` that is not JSON, not an object, or whose `hooks` or `hooks.PermissionRequest` is not an object or a list | `Cannot install:` and the reason; nothing is offered |
+  | A `hooks.json` that is not JSON, not an object, or whose `hooks` or `hooks.PermissionRequest` is not an object or a list, or one larger than 1 MiB (which the check does not read) | `Cannot install:` and the reason; nothing is offered |
   | The check could not run (the connection failed, the output ended early) | `Not checked:` and the reason, never taken for a host without codex |
 
 - **What `Install` and `Update` do.** They write the script panemux embeds to
@@ -333,9 +333,13 @@ review there.
   { "hooks": [{ "type": "command", "command": "/remote/home/demo/.local/bin/panemux-codex-permission-hook.sh", "timeout": 1 }] }
   ```
 
-  Every other key and hook in the file is kept; the file is rewritten with two-space indentation and
-  its top-level keys sorted. It is written in place, so a `hooks.json` that is a symbolic link stays
-  one. A `hooks.json` the check could not read as above is never written, and neither is the hook.
+  Every other key and hook in the file is kept, `&`, `<` and `>` as written; the file is rewritten
+  with two-space indentation and its top-level keys sorted. The new content is written to a
+  temporary file in `~/.codex` first and copied over `hooks.json` only once that succeeded, so a
+  write that fails (a full disk, a file-size limit) leaves `hooks.json` as it was. It is copied in
+  place, so a `hooks.json` that is a symbolic link stays one, and keeps its mode. A failed write
+  shows the shell's own reason, such as `Permission denied`, on the local host and on an SSH host
+  alike. A hook file larger than 1 MiB is not read either, and shows `Update`. A `hooks.json` the check could not read as above is never written, and neither is the hook.
   The menu then shows the status read back, and says to trust the hook in codex's `/hooks`: panemux
   neither trusts it nor checks whether it is trusted. Nothing is updated by itself; a hook that
   differs from this panemux's shows `Update` until it is pressed.
