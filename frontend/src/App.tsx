@@ -31,7 +31,6 @@ import {
   permissionWaitsFromStore,
   taskWaitNotification,
   taskWaitStarts,
-  type TaskEventStore,
 } from './utils/taskEvents'
 import { postInputGiven } from './utils/inputGiven'
 import {
@@ -133,20 +132,9 @@ export const App: React.FC = () => {
     }
     return paneIds
   }, [attentionTasks, workspaces?.items])
-  // The store as of the last frame, and the codex permission waits this tab
-  // marked Input given (issue #404): a pane shows each other permission wait
-  // of a task it runs until the wait ends.
-  const [taskStore, setTaskStore] = useState<TaskEventStore | null>(null)
+  // The codex permission waits a pane of this tab marked Input given (issue
+  // #404); with those the dashboard marked, see answeredWaits.
   const [givenWaits, setGivenWaits] = useState<ReadonlySet<string>>(() => new Set())
-  const approvalWaitsByPane = useMemo(() => {
-    const byPane = new Map<string, TaskEventTask[]>()
-    if (!taskStore) return byPane
-    for (const task of permissionWaitsFromStore(taskStore, givenWaits)) {
-      const pane = findTaskPane(task, workspaces?.items ?? [])
-      if (pane) byPane.set(pane.paneId, [...(byPane.get(pane.paneId) ?? []), task])
-    }
-    return byPane
-  }, [givenWaits, taskStore, workspaces?.items])
   const markInputGiven = useCallback(async (task: TaskEventTask) => {
     const signature = task.wait_id ?? ''
     const failure = await postInputGiven(signature)
@@ -356,7 +344,6 @@ export const App: React.FC = () => {
     attentionTasksRef.current = flags
     setAttentionTasks(flags)
     taskStoreRef.current = after
-    setTaskStore(after)
 
     const screen = screenRef.current
     // Until the workspaces are loaded nothing can tell whether a wait is on
@@ -388,14 +375,33 @@ export const App: React.FC = () => {
 
   const taskEvents = useTaskEvents(handleTaskEvent)
 
+  // The codex permission waits marked Input given in this tab, from a pane or
+  // from the dashboard, so neither offers or shows one the other answered.
+  const dashboardGivenWaits = tasksState.inputGivenWaits
+  const answeredWaits = useMemo<ReadonlySet<string>>(
+    () => new Set([...givenWaits, ...(dashboardGivenWaits ?? [])]),
+    [dashboardGivenWaits, givenWaits],
+  )
+  // A pane shows each other permission wait of a task it runs until the wait
+  // ends, and none while the stream is lost and no wait is known.
+  const approvalWaitsByPane = useMemo(() => {
+    const byPane = new Map<string, TaskEventTask[]>()
+    if (!taskEvents.store) return byPane
+    for (const task of permissionWaitsFromStore(taskEvents.store, answeredWaits)) {
+      const pane = findTaskPane(task, workspaces?.items ?? [])
+      if (pane) byPane.set(pane.paneId, [...(byPane.get(pane.paneId) ?? []), task])
+    }
+    return byPane
+  }, [answeredWaits, taskEvents.store, workspaces?.items])
+
   // The dashboard's state column comes from the stream for every task the
   // stream has, so a change shows as soon as it is published; the rest of a
   // task, and the stopped ones, come from the dashboard's own collection.
   const dashboardTasksState = useMemo(() => {
     const { store } = taskEvents
     if (taskEvents.status !== 'live' || !store || !tasksState.data) return tasksState
-    return { ...tasksState, data: { ...tasksState.data, tasks: overlayTaskEvents(tasksState.data.tasks, store.tasks, tasksState.inputGivenWaits) } }
-  }, [tasksState, taskEvents])
+    return { ...tasksState, data: { ...tasksState.data, tasks: overlayTaskEvents(tasksState.data.tasks, store.tasks, answeredWaits) } }
+  }, [answeredWaits, tasksState, taskEvents])
   const tasksWaiting = waitingCount(dashboardTasksState.data?.tasks ?? [])
   const handleListedTasksChange = useCallback((taskIds: ReadonlySet<string>) => {
     dashboardTaskIdsRef.current = taskIds

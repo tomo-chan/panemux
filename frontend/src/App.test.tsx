@@ -286,6 +286,37 @@ describe('codex permission waits in a pane', () => {
     expect(approval('main')).toBe('a')
   })
 
+  it('stops offering a wait the dashboard marked input given', () => {
+    mockUseTasks.mockReturnValue({ ...tasksStateWith([]), inputGivenWaits: new Set(['w1-a']) })
+    render(<App />)
+    emitTaskSnapshot([permissionTask('a', 'main', 'w1-a'), permissionTask('b', 'side', 'w1-b')])
+
+    expect(approval('main')).toBe('')
+    expect(approval('side')).toBe('b')
+  })
+
+  it('stops showing a wait in Tasks once a pane marked it input given', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 204 })))
+    mockUseTasks.mockReturnValue(tasksStateWith([paneTask('a', 'main', 'busy', { agent: 'codex' })]))
+    render(<App />)
+    emitTaskSnapshot([permissionTask('a', 'main', 'w1-a')])
+    expect(screen.getByRole('button', { name: /^Tasks, 1 waiting/ })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Input given main' }))
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Tasks' })).toBeInTheDocument())
+  })
+
+  it('goes while the event stream is lost', () => {
+    const { rerender } = render(<App />)
+    emitTaskSnapshot([permissionTask('a', 'main', 'w1-a')])
+    expect(approval('main')).toBe('a')
+
+    taskEventsMock.state = { store: null, status: 'offline' }
+    rerender(<App />)
+    expect(approval('main')).toBe('')
+  })
+
   it('opens the dashboard on the task for Review in Tasks', async () => {
     mockUseTasks.mockReturnValue(tasksStateWith([paneTask('a', 'main', 'busy', { agent: 'codex' })]))
     render(<App />)
