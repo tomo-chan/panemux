@@ -2,6 +2,7 @@ package tasks
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -166,4 +167,116 @@ func TestCanLaunch(t *testing.T) {
 	assert.False(t, CanLaunch(string(agent.Cursor)))
 	assert.False(t, CanLaunch(""))
 	assert.Equal(t, []string{AgentClaude, AgentCodex}, LaunchAgents())
+}
+
+// probedLaunchHost is a panemux host whose collection, probe and launch
+// script answer as set, counting the launches.
+type probedLaunchHost struct {
+	probeHost
+	launches int
+}
+
+func (h *probedLaunchHost) run(ctx context.Context, script string) ([]byte, error) {
+	if strings.Contains(script, "say() { printf '::panemux-launch") {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		h.launches++
+		return []byte("::panemux-launch ok\n"), nil
+	}
+	return h.probeHost.run(ctx, script)
+}
+
+func (h *probedLaunchHost) counts() (launches, collects, probes int) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.launches, h.collects, h.probes
+}
+
+// An agent whose CLI the host's probe did not find is refused before
+// anything runs, as the launch script would refuse it, and the host is
+// probed again at once, so a CLI installed since is found for the next try.
+func TestLaunchAndResume_ACLIMissingOnTheHostIsRefusedBeforeAnythingRuns(t *testing.T) {
+	host := &probedLaunchHost{probeHost: probeHost{
+		collection: minimalOutput("s"),
+		probe:      probeAnswer("cli claude missing", "cli codex found"),
+	}}
+	svc := New(Options{RunLocal: host.run})
+	defer svc.Close()
+	collectAndProbe(svc)
+
+	_, err := svc.Launch(context.Background(), LaunchRequest{Agent: AgentClaude, CWD: "/w", Prompt: "go"})
+	var refused *LaunchError
+	require.ErrorAs(t, err, &refused)
+	assert.Equal(t, RefusedNoClaude, refused.Code)
+	assert.EqualError(t, err, "claude was not found on the host")
+	svc.probeRuns.Wait()
+	launches, collects, probes := host.counts()
+	assert.Equal(t, 0, launches)
+	assert.Equal(t, 2, probes, "probed again, though the first probe is younger than its TTL")
+
+	_, err = svc.Resume(context.Background(), "", AgentClaude, testSessionID)
+	require.ErrorAs(t, err, &refused)
+	assert.Equal(t, RefusedNoClaude, refused.Code)
+	svc.probeRuns.Wait()
+	launches, collectsAfter, _ := host.counts()
+	assert.Equal(t, 0, launches)
+	assert.Equal(t, collects, collectsAfter, "refused before the host is collected for the resume")
+
+	_, err = svc.Launch(context.Background(), LaunchRequest{Agent: AgentCodex, CWD: "/w", Prompt: "go"})
+	require.NoError(t, err, "another agent's CLI is there")
+
+	host.mu.Lock()
+	host.probe = probeAnswer("cli claude found", "cli codex found")
+	host.mu.Unlock()
+	svc.reprobe("")
+	svc.probeRuns.Wait()
+	_, err = svc.Launch(context.Background(), LaunchRequest{Agent: AgentClaude, CWD: "/w", Prompt: "go"})
+	require.NoError(t, err, "found once the host is probed again")
+}
+
+// What is not known is not a reason to refuse: before any probe, and when
+// the probe failed, the launch script finds out for itself.
+func TestLaunch_AnUnknownCLIIsLeftToTheLaunchScript(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		collect bool
+		err     error
+	}{
+		{name: "not probed"},
+		{name: "probe failed", collect: true, err: errors.New("exit 1")},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			host := &probedLaunchHost{probeHost: probeHost{
+				collection: minimalOutput("s"), probeErr: tt.err,
+			}}
+			svc := New(Options{RunLocal: host.run})
+			defer svc.Close()
+			if tt.collect {
+				collectAndProbe(svc)
+			}
+			_, err := svc.Launch(context.Background(), LaunchRequest{Agent: AgentClaude, CWD: "/w", Prompt: "go"})
+			require.NoError(t, err)
+			launches, _, _ := host.counts()
+			assert.Equal(t, 1, launches)
+		})
+	}
+}
+
+// A remote host's probe counts only for the connection it ran over: one
+// from before a reconnect does not refuse a launch.
+func TestCLIMissing_OnlyForTheCurrentConnection(t *testing.T) {
+	svc := New(Options{})
+	defer svc.Close()
+	old := &fakeConn{}
+	svc.mu.Lock()
+	svc.probes = map[string]probeEntry{"build-box": {conn: old, found: map[agent.ID]bool{agent.Claude: false}}}
+	svc.hosts = map[string]*hostConn{"build-box": {conn: &fakeConn{}}}
+	svc.mu.Unlock()
+	assert.False(t, svc.cliMissing("build-box", agent.Claude))
+
+	svc.mu.Lock()
+	svc.hosts["build-box"].conn = old
+	svc.mu.Unlock()
+	assert.True(t, svc.cliMissing("build-box", agent.Claude))
+	assert.False(t, svc.cliMissing("build-box", agent.Codex), "an agent the probe did not answer for")
 }

@@ -404,6 +404,9 @@ func (s *Service) Launch(ctx context.Context, req LaunchRequest) (Launched, erro
 	if err := s.checkHost(req.Host); err != nil {
 		return Launched{}, err
 	}
+	if err := s.refuseMissingCLI(req.Host, agent.ID(id)); err != nil {
+		return Launched{}, err
+	}
 	p := launchParams{agent: id, mode: launchNew, cwd: req.CWD, prompt: normalizePrompt(req.Prompt)}
 	var err error
 	p.sessionID, p.tmuxSession, err = adapter.newSession(s.opts.Rand)
@@ -428,6 +431,9 @@ func (s *Service) Resume(ctx context.Context, host, agentName, sessionID string)
 		return Launched{}, fmt.Errorf("%w: session ID %q is not one %s resumes", ErrInvalidLaunch, sessionID, agentName)
 	}
 	if err := s.checkHost(host); err != nil {
+		return Launched{}, err
+	}
+	if err := s.refuseMissingCLI(host, agent.ID(agentName)); err != nil {
 		return Launched{}, err
 	}
 	// Whether the task's tmux session may be reused is decided from this
