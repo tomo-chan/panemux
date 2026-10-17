@@ -119,6 +119,14 @@ func TestPendingLabels_TwoSessionsOfTheAgentAreAmbiguous(t *testing.T) {
 	assert.Contains(t, logged[0], "2 codex sessions")
 }
 
+func TestNewPendingLabels_LogsNothingWithoutALogger(t *testing.T) {
+	p := NewPendingLabels(nil, nil)
+	p.Add("", AgentCodex, "task-a", []string{"x"})
+	p.Apply(pendingSnapshot(okHosts, codexInTmux("", "task-a", codexSessionA), codexInTmux("", "task-a", codexSessionB)),
+		(&putLog{}).put)
+	assert.Equal(t, 0, p.Len(), "dropped as ambiguous")
+}
+
 // The same session ID on another host is another session.
 func TestPendingLabels_TheSameSessionIDOnAnotherHostIsAnotherSession(t *testing.T) {
 	p := NewPendingLabels((&clock{now: time.Unix(1000, 0)}).Now, nil)

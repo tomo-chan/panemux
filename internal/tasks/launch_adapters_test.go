@@ -111,6 +111,8 @@ func TestValidateLaunchAdapters_RejectsAMismatchedRegistration(t *testing.T) {
 	}
 	g := validLaunchRegs()
 	require.NoError(t, validateLaunchAdapters(defs, g.l, g.r), "a launch without a resume is a valid registration")
+	_, err := composeLaunch(defs, g.l[:1], g.r)
+	require.EqualError(t, err, `agent "fourth" declares launch but has no launch adapter`, "nothing is composed")
 
 	for _, tt := range launchRegMismatches {
 		t.Run(tt.name, func(t *testing.T) {
