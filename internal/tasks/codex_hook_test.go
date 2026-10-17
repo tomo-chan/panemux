@@ -611,3 +611,31 @@ func TestInstallCodexHookReportsAFailedRun(t *testing.T) {
 	require.ErrorContains(t, err, "connection lost")
 	assert.Equal(t, 2, calls)
 }
+
+// A copy over hooks.json that fails part way keeps the temporary file, whose
+// content is the user's hooks with panemux's entry, and the error names it.
+func TestInstallCodexHookKeepsTheNewContentWhenTheCopyFails(t *testing.T) {
+	home := codexHome(t, `{"keep":"me"}`)
+	bin := t.TempDir()
+	// cat fails part way only when it copies the temporary file.
+	fakeCat := "#!/bin/sh\ncase \"$1\" in\n*/.hooks.json.panemux-*) head -c 5 \"$1\"; " +
+		"echo 'cat: write error: No space left on device' >&2; exit 1;;\nesac\nexec /bin/cat \"$@\"\n"
+	require.NoError(t, os.WriteFile(filepath.Join(bin, "cat"), []byte(fakeCat), 0o700)) //nolint:gosec // test fixture
+	conn := &shConn{home: home, prefix: "PATH='" + bin + "':$PATH\n"}
+	s := New(Options{
+		Hosts: func() []string { return []string{"build-box"} },
+		Dial:  func(string) (Conn, error) { return conn, nil },
+	})
+	defer s.Close()
+	_, err := s.InstallCodexHook(context.Background(), "build-box")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "No space left on device")
+	left, dirErr := filepath.Glob(filepath.Join(home, ".codex", ".hooks.json.panemux-*"))
+	require.NoError(t, dirErr)
+	require.Len(t, left, 1, "the temporary file is kept")
+	assert.Contains(t, err.Error(), left[0])
+	kept, readErr := os.ReadFile(left[0])
+	require.NoError(t, readErr)
+	assert.Contains(t, string(kept), `"keep": "me"`)
+	assert.Contains(t, string(kept), "panemux-codex-permission-hook.sh")
+}

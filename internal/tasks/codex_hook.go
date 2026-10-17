@@ -82,7 +82,9 @@ const codexHookMaxRead = 1 << 20
 // and ends with `::status <exit status>` after any error the writes printed.
 // hooks.json is written to a temporary file first and copied over only once
 // that succeeded, so a failed write leaves it as it was; it is copied in
-// place, so a hooks.json that is a link keeps being one, with its mode.
+// place, so a hooks.json that is a link keeps being one, with its mode. A
+// copy that fails part way exits 3 and keeps the temporary file, the only
+// whole copy of the user's hooks, and says where it is.
 const codexHookWriteScript = `tmp="$HOME/.codex/.hooks.json.panemux-%[1]s"
 (
 	set -e
@@ -94,11 +96,14 @@ const codexHookWriteScript = `tmp="$HOME/.codex/.hooks.json.panemux-%[1]s"
 		mkdir -p "$HOME/.codex"
 		(umask 077 && cat >"$tmp") <<'PANEMUX_HOOKS_%[1]s'
 %[4]sPANEMUX_HOOKS_%[1]s
-		cat "$tmp" >"$HOME/.codex/hooks.json"
+		if ! cat "$tmp" >"$HOME/.codex/hooks.json"; then
+			echo "~/.codex/hooks.json was not fully written; its new content is kept in $tmp"
+			exit 3
+		fi
 	fi
 ) 2>&1
 status=$?
-rm -f "$tmp"
+[ "$status" = 3 ] || rm -f "$tmp"
 echo "` + codexHookStatusLine + `$status"
 `
 

@@ -337,7 +337,9 @@ review there.
   with two-space indentation and its top-level keys sorted. The new content is written to a
   temporary file in `~/.codex` first and copied over `hooks.json` only once that succeeded, so a
   write that fails (a full disk, a file-size limit) leaves `hooks.json` as it was. It is copied in
-  place, so a `hooks.json` that is a symbolic link stays one, and keeps its mode. A failed write
+  place, so a `hooks.json` that is a symbolic link stays one, and keeps its mode. When that copy
+  fails part way (a link onto a full volume), the temporary file, which holds the user's hooks with
+  panemux's entry, is kept, and the reason shown says where it is. A failed write
   shows the shell's own reason, such as `Permission denied`, on the local host and on an SSH host
   alike. A hook file larger than 1 MiB is not read either, and shows `Update`. A `hooks.json` the check could not read as above is never written, and neither is the hook.
   The menu then shows the status read back, and says to trust the hook in codex's `/hooks`: panemux
