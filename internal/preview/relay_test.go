@@ -208,7 +208,7 @@ func TestRelaysReportWhatDoesNotAnswer(t *testing.T) {
 
 	_, err := relays.Open(remote.Remote, "http://localhost:5173/")
 	require.ErrorIs(t, err, ErrNoAnswer)
-	assert.Contains(t, err.Error(), "devbox: connection refused: localhost:5173")
+	assert.Contains(t, err.Error(), "devbox: ssh: rejected: connect failed (connection refused: localhost:5173)")
 
 	remote.failWith(errors.New("no route to host"))
 	remote.Close()

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -18,6 +19,7 @@ import (
 	"github.com/pkg/sftp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/ssh"
 )
 
 // fakeRemoteConn is an SSH host's connection as the preview uses it: SFTP
@@ -38,9 +40,16 @@ type fakeRemoteConn struct {
 }
 
 func (c *fakeRemoteConn) Dial(ctx context.Context, addr string) (net.Conn, error) {
+	c.mu.Lock()
+	broken := c.closed
+	c.mu.Unlock()
+	if broken {
+		return nil, io.EOF
+	}
 	target, ok := c.loopback[addr]
 	if !ok {
-		return nil, errors.New("connection refused: " + addr)
+		// What sshd answers when nothing listens at addr on the host.
+		return nil, &ssh.OpenChannelError{Reason: ssh.ConnectionFailed, Message: "connection refused: " + addr}
 	}
 	var d net.Dialer
 	return d.DialContext(ctx, "tcp", target)
@@ -687,4 +696,28 @@ func TestRemoteGivesUpAfterASecondBrokenConnection(t *testing.T) {
 	_, err := ResolveRemote(remote, "mockups/index.html", []string{f.cwd})
 	require.ErrorIs(t, err, ErrRemote)
 	assert.Equal(t, int32(2), dials.Load())
+}
+
+func TestRemoteDialKeepsAConnectionTheHostAnswersOn(t *testing.T) {
+	remote := newFakeRemote(t, nil)
+
+	// Nothing listens at the address: the host said so, so its connection
+	// is fine and stays.
+	_, err := remote.Dial(context.Background(), "localhost:5173")
+	var refused *ssh.OpenChannelError
+	require.ErrorAs(t, err, &refused)
+	assert.Contains(t, err.Error(), "devbox")
+	_, err = remote.Dial(context.Background(), "localhost:5173")
+	require.Error(t, err)
+	assert.Len(t, remote.conns(), 1)
+	assert.False(t, remote.conns()[0].isClosed())
+
+	// The connection itself fails: it is dropped, and the next dial makes
+	// a new one.
+	_ = remote.conns()[0].Close()
+	_, err = remote.Dial(context.Background(), "localhost:5173")
+	require.ErrorIs(t, err, io.EOF)
+	_, err = remote.Dial(context.Background(), "localhost:5173")
+	require.ErrorAs(t, err, &refused)
+	assert.Len(t, remote.conns(), 2)
 }
