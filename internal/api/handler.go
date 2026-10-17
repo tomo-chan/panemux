@@ -205,7 +205,7 @@ func NewHandler(
 	}
 	h.tasks = newTaskService(h)
 	h.taskRecords = tasks.NewRecordStore("")
-	h.pendingTaskLabels = tasks.NewPendingLabels(func() time.Time { return h.nowFn() })
+	h.pendingTaskLabels = tasks.NewPendingLabels(func() time.Time { return h.nowFn() }, log.Printf)
 	h.taskGitLookup = h.lookupTaskGit
 	h.createSession = session.CreateFromConfig
 	h.createTmuxAttach = session.CreateTmuxAttach
