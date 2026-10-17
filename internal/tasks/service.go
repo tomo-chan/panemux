@@ -96,6 +96,9 @@ type Options struct {
 	// SummaryStore keeps the summaries across restarts. Without one they
 	// are kept in memory only.
 	SummaryStore *SummaryStore
+	// CodexHookAuto keeps the hosts whose codex hook is updated by itself
+	// (issue #402). Without one no hook is.
+	CodexHookAuto *CodexHookAutoStore
 	// HostTimeout bounds one host's collection, including waiting for its
 	// connection to come up. A connection still coming up when it expires
 	// keeps dialing and serves the next collection.
@@ -139,8 +142,12 @@ type Service struct {
 	// only: after a restart a request whose turn has finished is not shown
 	// anyway.
 	dismissedWaits map[string]bool
+	// codexHookAuto is, per host, what was done to its codex hook by itself;
+	// guarded by mu.
+	codexHookAuto map[string]codexHookAuto
 	// The task summaries; see summaries.go. summaryMu guards summaries and
-	// summaryTasks. summaryCtx ends when the service is closed.
+	// summaryTasks. summaryCtx ends when the service is closed; summaryWG
+	// also counts the codex hook checks after start (codex_hook_auto.go).
 	summaries    map[summaryKey]*summaryEntry
 	summaryTasks map[string]map[summaryKey]summaryTask
 	// summaryHosts are the hosts configured at the last collection, nil
@@ -206,6 +213,7 @@ func New(opts Options) *Service {
 		hosts:          map[string]*hostConn{},
 		resumeLocks:    map[string]*resumeLock{},
 		dismissedWaits: map[string]bool{},
+		codexHookAuto:  map[string]codexHookAuto{},
 		summaries:      map[summaryKey]*summaryEntry{},
 		summaryTasks:   map[string]map[summaryKey]summaryTask{},
 		summarySlots:   make(chan struct{}, summaryConcurrency),
@@ -400,6 +408,7 @@ func (s *Service) collectRaw(
 		return result, rawSnapshot{}, time.Time{}, false
 	}
 	s.dropDismissedPermissions(name, &raw)
+	s.checkCodexHookAfterStart(name)
 	result.Status = HostOK
 	result.CollectedAt = &collectedAt
 	return result, raw, collectedAt, true

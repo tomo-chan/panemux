@@ -313,7 +313,7 @@ watched from the host's menu ([Opening a host](#opening-a-host)), and then trust
 review there.
 
 - **`Codex input notifications` in the host menu.** The menu checks the host when it opens
-  ([`GET /api/tasks/codex-hook`](#get-and-post-apitaskscodex-hook)) and shows one of:
+  ([`GET /api/tasks/codex-hook`](#get-and-post-apitaskscodex-hook-post-apitaskscodex-hookauto-update)) and shows one of:
 
   | Host | Shown |
   |---|---|
@@ -344,8 +344,25 @@ review there.
   shows the shell's own reason, such as `Permission denied`, on the local host and on an SSH host
   alike. A hook file larger than 1 MiB is not read either, and shows `Update`. A `hooks.json` the check could not read as above is never written, and neither is the hook.
   The menu then shows the status read back, and says to trust the hook in codex's `/hooks`: panemux
-  neither trusts it nor checks whether it is trusted. Nothing is updated by itself; a hook that
-  differs from this panemux's shows `Update` until it is pressed.
+  neither trusts it nor checks whether it is trusted. A hook that differs from this panemux's shows
+  `Update` until it is pressed, unless the host has `Update automatically` on (below).
+- **`Update automatically`.** A checkbox under the status, offered on a host showing `Not
+  installed`, `Update` or `Installed`, and off on every host until turned on there. The hosts it is
+  on for are kept in `~/.config/panemux/codex-hook.json` (`{"version":1,"auto_update":["","gpu-box"]}`,
+  mode 600, the panemux host as `""`), so the setting survives a restart; a file panemux cannot read
+  is reported (`Could not read the setting:` and the reason under the status, with the checkbox
+  disabled until it can be read; `Could not save:` when it fails on saving) and never written over.
+  Changing the checkbox, and `Install` or `Update`, are each disabled while the other runs. Turning
+  it on on a host showing `Update` checks the hook again at once, which updates it. On such
+  a host, a check that finds `Update` runs `Update` by itself: the check when the host's menu opens,
+  and one more made in the background after panemux starts, on the host's first successful
+  collection, so replacing panemux and restarting it updates the hook with nothing pressed. Nothing
+  is installed by itself on a host showing `Not installed`, and codex itself is never updated. Each
+  host is updated by itself at most once per panemux process, whatever came of it: the menu then says
+  `Updated automatically. Trust it in codex's /hooks before it runs.` (the new content may need
+  trusting again), or `Could not update automatically:` and the reason, which is not tried again until
+  panemux restarts. `Update` can still be pressed; once it succeeds, the message is cleared. Both
+  outcomes are also written to the server log.
 - **By hand.** Copy `internal/tasks/codex_permission_hook.sh` to a path of the user's on the host,
   make it executable, add an entry like the one above with that path to the host's
   `~/.codex/hooks.json`, and trust it in `/hooks`. The menu knows only its own path: a hook
@@ -1181,7 +1198,7 @@ requests](#codex-permission-requests)):
 - Answers `204`; `400` for a body that is not valid or an empty `wait_signature`; `403` for a
   cross-site request.
 
-### `GET` and `POST /api/tasks/codex-hook`
+### `GET` and `POST /api/tasks/codex-hook`, `POST /api/tasks/codex-hook/auto-update`
 
 Whether a host's codex has panemux's permission hook, and installing or updating it ([Codex
 permission requests](#codex-permission-requests)):
@@ -1197,9 +1214,19 @@ POST /api/tasks/codex-hook   { "host": "gpu-box" }
   `unknown`. The status is `absent` (no codex), `missing`, `installed`, `outdated`, `invalid` (a
   `hooks.json` panemux will not rewrite) or `unknown` (the check could not run). `POST` answers the
   status read back after writing, and writes nothing for a host already `installed`.
+- Both also carry `"auto_update"`, whether the host's hook is updated by itself, and, once this
+  panemux process did so, `"auto_updated": true` or `"auto_error"` with why it failed. A setting that
+  could not be read gives `"auto_settings_error"` with why, and `"auto_update": false`. `GET` runs
+  that update itself when it finds `outdated`
+  ([`Update automatically`](#codex-permission-requests)), and answers the status read back after it.
 - `404` for a host that is not in `ssh_connections`. `POST` answers `502` with the reason when the
   host has no codex, its `hooks.json` is `invalid`, or the check or the write failed, and `400` for a
   body it cannot decode strictly. Both answer `403` to a cross-site request.
+- `POST /api/tasks/codex-hook/auto-update` with `{ "host": "gpu-box", "enabled": true }` turns
+  `Update automatically` on or off for that host and answers `200` with `{ "auto_update": true }`.
+  It touches nothing on the host. `404` for a host not in `ssh_connections`, `400` for a body it
+  cannot decode strictly, `500` with the reason when the settings file cannot be read or written,
+  `403` for a cross-site request.
 
 ### `POST /api/hosts/session-name`
 

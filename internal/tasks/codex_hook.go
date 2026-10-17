@@ -39,9 +39,16 @@ const (
 )
 
 // CodexHook is a host's codex hook status, and why for Invalid and Unknown.
+// AutoUpdate is whether the host's hook is updated by itself (issue #402);
+// AutoUpdated that this process did so, AutoError why that failed, and
+// AutoSettingsError why the setting could not be read.
 type CodexHook struct {
-	Status CodexHookStatus `json:"status"`
-	Error  string          `json:"error,omitempty"`
+	Status            CodexHookStatus `json:"status"`
+	Error             string          `json:"error,omitempty"`
+	AutoError         string          `json:"auto_error,omitempty"`
+	AutoSettingsError string          `json:"auto_settings_error,omitempty"`
+	AutoUpdate        bool            `json:"auto_update"`
+	AutoUpdated       bool            `json:"auto_updated,omitempty"`
 }
 
 // codexHookReadScript prints the host's HOME, the hook file and hooks.json,
@@ -125,18 +132,23 @@ type codexHookState struct {
 	registered bool
 }
 
-// CodexHook reports whether the host's codex has the permission hook. The
-// only error is ErrUnknownHost; a host that cannot be checked is Unknown.
+// CodexHook reports whether the host's codex has the permission hook,
+// updating it first when it is to be updated by itself. The only error is
+// ErrUnknownHost; a host that cannot be checked is Unknown.
 func (s *Service) CodexHook(ctx context.Context, host string) (CodexHook, error) {
 	if err := s.checkHost(host); err != nil {
 		return CodexHook{}, err
 	}
+	return s.autoUpdateCodexHook(ctx, host, s.checkCodexHook(ctx, host)), nil
+}
+
+func (s *Service) checkCodexHook(ctx context.Context, host string) CodexHook {
 	state := s.readCodexHook(ctx, host)
 	got := CodexHook{Status: state.status}
 	if state.err != nil {
 		got.Error = state.err.Error()
 	}
-	return got, nil
+	return got
 }
 
 // InstallCodexHook installs or updates the host's permission hook and
@@ -146,6 +158,15 @@ func (s *Service) InstallCodexHook(ctx context.Context, host string) (CodexHook,
 	if err := s.checkHost(host); err != nil {
 		return CodexHook{}, err
 	}
+	got, err := s.installCodexHook(ctx, host)
+	if err != nil {
+		return CodexHook{}, err
+	}
+	s.forgetCodexHookAuto(host)
+	return s.withCodexHookAuto(host, got), nil
+}
+
+func (s *Service) installCodexHook(ctx context.Context, host string) (CodexHook, error) {
 	state := s.readCodexHook(ctx, host)
 	switch {
 	case state.err != nil:
@@ -176,7 +197,7 @@ func (s *Service) InstallCodexHook(ctx context.Context, host string) (CodexHook,
 	if err := codexHookWriteError(out); err != nil {
 		return CodexHook{}, fmt.Errorf("install the codex hook on %s: %w", hostName(host), err)
 	}
-	return s.CodexHook(ctx, host)
+	return s.checkCodexHook(ctx, host), nil
 }
 
 // codexHookWriteError reads codexHookWriteScript's output: nil when it

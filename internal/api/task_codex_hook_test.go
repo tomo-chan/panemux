@@ -48,11 +48,11 @@ func TestCodexHookRoutes(t *testing.T) {
 
 	rec := doCodexHook(h, http.MethodGet, "/api/tasks/codex-hook?host=", "")
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-	assert.JSONEq(t, `{"status":"missing"}`, rec.Body.String())
+	assert.JSONEq(t, `{"status":"missing","auto_update":false}`, rec.Body.String())
 
 	rec = doCodexHook(h, http.MethodPost, "/api/tasks/codex-hook", `{"host":""}`)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-	assert.JSONEq(t, `{"status":"installed"}`, rec.Body.String())
+	assert.JSONEq(t, `{"status":"installed","auto_update":false}`, rec.Body.String())
 
 	data, err := os.ReadFile(filepath.Join(home, ".codex", "hooks.json"))
 	require.NoError(t, err)
@@ -63,7 +63,7 @@ func TestCodexHookRoutes(t *testing.T) {
 
 	rec = doCodexHook(h, http.MethodGet, "/api/tasks/codex-hook", "")
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-	assert.JSONEq(t, `{"status":"installed"}`, rec.Body.String())
+	assert.JSONEq(t, `{"status":"installed","auto_update":false}`, rec.Body.String())
 }
 
 func TestCodexHookRoutesRefuse(t *testing.T) {
@@ -72,7 +72,8 @@ func TestCodexHookRoutesRefuse(t *testing.T) {
 	rec := doCodexHook(h, http.MethodGet, "/api/tasks/codex-hook?host=", "")
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	assert.JSONEq(t,
-		`{"status":"invalid","error":"~/.codex/hooks.json is not as codex reads it: \"hooks\" is not an object"}`,
+		`{"status":"invalid","auto_update":false,`+
+			`"error":"~/.codex/hooks.json is not as codex reads it: \"hooks\" is not an object"}`,
 		rec.Body.String())
 
 	rec = doCodexHook(h, http.MethodPost, "/api/tasks/codex-hook", `{"host":""}`)
@@ -93,4 +94,35 @@ func TestCodexHookRoutesRefuse(t *testing.T) {
 		rec = doCodexHook(h, http.MethodPost, "/api/tasks/codex-hook", body)
 		assert.Equal(t, http.StatusBadRequest, rec.Code, body)
 	}
+}
+
+func TestCodexHookAutoUpdateRoute(t *testing.T) {
+	h, home := codexHookHandler(t, "")
+
+	rec := doCodexHook(h, http.MethodPost, "/api/tasks/codex-hook/auto-update", `{"host":"build-box","enabled":true}`)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.JSONEq(t, `{"auto_update":true}`, rec.Body.String())
+	data, err := os.ReadFile(filepath.Join(home, ".config", "panemux", "codex-hook.json"))
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"version":1,"auto_update":["build-box"]}`, string(data))
+
+	rec = doCodexHook(h, http.MethodPost, "/api/tasks/codex-hook/auto-update", `{"host":"","enabled":true}`)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	rec = doCodexHook(h, http.MethodGet, "/api/tasks/codex-hook?host=", "")
+	assert.JSONEq(t, `{"status":"missing","auto_update":true}`, rec.Body.String())
+	rec = doCodexHook(h, http.MethodPost, "/api/tasks/codex-hook/auto-update", `{"host":"","enabled":false}`)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.JSONEq(t, `{"auto_update":false}`, rec.Body.String())
+
+	rec = doCodexHook(h, http.MethodPost, "/api/tasks/codex-hook/auto-update", `{"host":"elsewhere","enabled":true}`)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+	for _, body := range []string{`{"host":"","enabled":true,"path":"/etc"}`, `not json`} {
+		rec = doCodexHook(h, http.MethodPost, "/api/tasks/codex-hook/auto-update", body)
+		assert.Equal(t, http.StatusBadRequest, rec.Code, body)
+	}
+
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".config", "panemux", "codex-hook.json"), []byte("{"), 0o600))
+	rec = doCodexHook(h, http.MethodPost, "/api/tasks/codex-hook/auto-update", `{"host":"","enabled":true}`)
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.Contains(t, rec.Body.String(), "codex hook settings file")
 }

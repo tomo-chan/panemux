@@ -662,12 +662,26 @@ export type HostSessionName = z.infer<typeof HostSessionNameSchema>
 
 // GET and POST /api/tasks/codex-hook (issue #396): whether a host's codex
 // has panemux's permission hook. `error` says why for invalid and unknown.
+// auto_update is whether the hook is updated by itself (issue #402),
+// auto_updated that panemux did so, auto_error why that failed, and
+// auto_settings_error why the setting could not be read.
 export const CodexHookSchema = z.object({
   status: z.enum(['absent', 'missing', 'installed', 'outdated', 'invalid', 'unknown']),
   error: z.string().optional(),
+  auto_update: z.boolean().optional(),
+  auto_updated: z.boolean().optional(),
+  auto_error: z.string().optional(),
+  auto_settings_error: z.string().optional(),
 })
 
 export type CodexHook = z.infer<typeof CodexHookSchema>
+
+// POST /api/tasks/codex-hook/auto-update (issue #402): the setting stored.
+export const CodexHookAutoSchema = z.object({
+  auto_update: z.boolean(),
+})
+
+export type CodexHookAuto = z.infer<typeof CodexHookAutoSchema>
 
 // POST /api/hosts/terminal (issue #314): a host terminal the task dashboard
 // opens, served by `/ws/{session_id}` like a board attach. `tmux_session` is

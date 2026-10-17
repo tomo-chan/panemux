@@ -282,6 +282,13 @@
   color: var(--td-st-busy);
 }
 
+.td-host-menu-codex-auto {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
 .td-host-menu-codex [data-tone='error'] {
   color: #fca5a5;
 }

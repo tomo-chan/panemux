@@ -624,7 +624,7 @@ var apiCases = map[string]apiCase{
 
 		rr := e.do(t, http.MethodGet, "/api/tasks/codex-hook?host=", "")
 		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
-		assert.JSONEq(t, `{"status":"missing"}`, rr.Body.String())
+		assert.JSONEq(t, `{"status":"missing","auto_update":false}`, rr.Body.String())
 		rr = e.do(t, http.MethodGet, "/api/tasks/codex-hook?host=not-configured", "")
 		assert.Equal(t, http.StatusNotFound, rr.Code)
 	}},
@@ -634,10 +634,20 @@ var apiCases = map[string]apiCase{
 
 		rr := e.do(t, http.MethodPost, "/api/tasks/codex-hook", `{"host":""}`)
 		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
-		assert.JSONEq(t, `{"status":"installed"}`, rr.Body.String())
+		assert.JSONEq(t, `{"status":"installed","auto_update":false}`, rr.Body.String())
 		_, err := os.Stat(filepath.Join(e.home, ".local", "bin", "panemux-codex-permission-hook.sh"))
 		require.NoError(t, err)
 		rr = e.do(t, http.MethodPost, "/api/tasks/codex-hook", `{"host":"not-configured"}`)
+		assert.Equal(t, http.StatusNotFound, rr.Code)
+	}},
+
+	"POST /api/tasks/codex-hook/auto-update": {run: func(t *testing.T, e *apiEnv) {
+		rr := e.do(t, http.MethodPost, "/api/tasks/codex-hook/auto-update", `{"host":"","enabled":true}`)
+		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+		assert.JSONEq(t, `{"auto_update":true}`, rr.Body.String())
+		_, err := os.Stat(filepath.Join(e.home, ".config", "panemux", "codex-hook.json"))
+		require.NoError(t, err)
+		rr = e.do(t, http.MethodPost, "/api/tasks/codex-hook/auto-update", `{"host":"not-configured","enabled":true}`)
 		assert.Equal(t, http.StatusNotFound, rr.Code)
 	}},
 

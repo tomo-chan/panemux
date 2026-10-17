@@ -43,3 +43,33 @@ func (h *Handler) PostTaskCodexHook(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, got)
 	}
 }
+
+// taskCodexHookAutoRequest is the body of POST
+// /api/tasks/codex-hook/auto-update; the answer is the setting stored.
+type taskCodexHookAutoRequest struct {
+	Host    string `json:"host"`
+	Enabled bool   `json:"enabled"`
+}
+
+type taskCodexHookAutoResponse struct {
+	AutoUpdate bool `json:"auto_update"`
+}
+
+// PostTaskCodexHookAutoUpdate turns updating a host's permission hook by
+// itself on or off (issue #402). A settings file panemux cannot read or
+// write answers 500 with the reason.
+func (h *Handler) PostTaskCodexHookAutoUpdate(w http.ResponseWriter, r *http.Request) {
+	var req taskCodexHookAutoRequest
+	if !decodeStrict(w, r, taskRecordBodyLimit, &req) {
+		return
+	}
+	err := h.tasks.SetCodexHookAuto(req.Host, req.Enabled)
+	switch {
+	case errors.Is(err, tasks.ErrUnknownHost):
+		http.Error(w, err.Error(), http.StatusNotFound)
+	case err != nil:
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	default:
+		writeJSON(w, taskCodexHookAutoResponse{AutoUpdate: req.Enabled})
+	}
+}

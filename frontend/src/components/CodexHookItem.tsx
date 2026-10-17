@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react'
-import type { CodexHook } from '../schemas'
+import type { CodexHook, CodexHookAuto } from '../schemas'
 import type { TaskActionResult } from '../hooks/useTasks'
 
 // The Codex input notifications item of a host's menu (issue #396): whether
 // the host's codex has panemux's permission hook, and Install or Update. A
 // host without codex shows nothing; one that could not be checked says so
-// rather than being taken for a host without codex.
+// rather than being taken for a host without codex. Update automatically
+// (issue #402) has panemux run Update by itself when the hook differs.
 
 export interface CodexHookItemProps {
   host: string
@@ -13,6 +14,7 @@ export interface CodexHookItemProps {
   label?: string
   load: (host: string) => Promise<TaskActionResult<CodexHook>>
   install: (host: string) => Promise<TaskActionResult<CodexHook>>
+  setAuto: (host: string, enabled: boolean) => Promise<TaskActionResult<CodexHookAuto>>
   /** The item is all the menu has: a host without codex says so. */
   alone?: boolean
 }
@@ -22,11 +24,13 @@ type Phase =
   | { phase: 'ready'; hook: CodexHook }
   | { phase: 'failed'; error: string }
 
-export const CodexHookItem: React.FC<CodexHookItemProps> = ({ host, label = host, load, install, alone = false }) => {
+export const CodexHookItem: React.FC<CodexHookItemProps> = ({ host, label = host, load, install, setAuto, alone = false }) => {
   const [state, setState] = useState<Phase>({ phase: 'loading' })
   const [installing, setInstalling] = useState(false)
   const [installed, setInstalled] = useState(false)
   const [installError, setInstallError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   // An answer that arrives after the menu closed is dropped.
   const mounted = useRef(true)
 
@@ -53,6 +57,27 @@ export const CodexHookItem: React.FC<CodexHookItemProps> = ({ host, label = host
       } else {
         setInstallError(result.error)
       }
+    })
+  }
+
+  const toggleAuto = (hook: CodexHook) => {
+    setSaving(true)
+    setSaveError(null)
+    void setAuto(host, !hook.auto_update).then(async (result) => {
+      if (!mounted.current) return
+      if (!result.ok) {
+        setSaving(false)
+        setSaveError(result.error)
+        return
+      }
+      setState({ phase: 'ready', hook: { ...hook, auto_update: result.launched.auto_update } })
+      // Turned on while it shows Update: check once, which updates it.
+      if (result.launched.auto_update && hook.status === 'outdated') {
+        const checked = await load(host)
+        if (!mounted.current) return
+        if (checked.ok) setState({ phase: 'ready', hook: checked.launched })
+      }
+      setSaving(false)
     })
   }
 
@@ -102,7 +127,7 @@ export const CodexHookItem: React.FC<CodexHookItemProps> = ({ host, label = host
             type="button"
             className="td-btn td-btn-sm"
             aria-label={`${action} Codex input notifications on ${label}`}
-            disabled={installing}
+            disabled={installing || saving}
             onClick={run}
           >
             {installing ? 'Installing…' : action}
@@ -110,6 +135,37 @@ export const CodexHookItem: React.FC<CodexHookItemProps> = ({ host, label = host
         )}
       </div>
       <div className="td-host-menu-codex-detail">{detail}</div>
+      {hook && (hook.status === 'missing' || hook.status === 'outdated' || hook.status === 'installed') && (
+        <label className="td-host-menu-codex-auto">
+          <input
+            type="checkbox"
+            checked={hook.auto_update ?? false}
+            disabled={saving || installing || !!hook.auto_settings_error}
+            onChange={() => toggleAuto(hook)}
+          />
+          Update automatically
+        </label>
+      )}
+      {hook?.auto_updated && !installed && (
+        <div role="status" className="td-muted">
+          Updated automatically. Trust it in codex's /hooks before it runs.
+        </div>
+      )}
+      {hook?.auto_error && (
+        <div role="alert" data-tone="error">
+          Could not update automatically: {hook.auto_error}
+        </div>
+      )}
+      {hook?.auto_settings_error && (
+        <div role="alert" data-tone="error">
+          Could not read the setting: {hook.auto_settings_error}
+        </div>
+      )}
+      {saveError && (
+        <div role="alert" data-tone="error">
+          Could not save: {saveError}
+        </div>
+      )}
       {installed && (
         <div role="status" className="td-muted">
           Trust it in codex's /hooks before it runs.

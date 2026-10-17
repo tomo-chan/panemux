@@ -91,6 +91,7 @@ var expectedRoutes = []string{
 	"POST /api/tasks",
 	"POST /api/tasks/attach",
 	"POST /api/tasks/codex-hook",
+	"POST /api/tasks/codex-hook/auto-update",
 	"POST /api/tasks/hosts/{name}/reconnect",
 	"POST /api/tasks/input-given",
 	"POST /api/tasks/resume",
